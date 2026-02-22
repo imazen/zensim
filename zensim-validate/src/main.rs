@@ -70,11 +70,14 @@ fn main() {
             .unwrap(),
     );
 
+    // When training, compute all features (no skipping) so weights can be freely optimized
+    let compute_all = args.train;
+
     // Compute zensim scores + features in parallel
     let results: Vec<(f64, zensim::ZensimResult)> = pairs
         .par_iter()
         .map(|pair| {
-            let result = compute_pair_result(pair);
+            let result = compute_pair_result(pair, compute_all);
             pb.inc(1);
             (pair.human_score, result)
         })
@@ -115,7 +118,19 @@ fn main() {
     let min_m = metric_scores.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_m = metric_scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let mean_m: f64 = metric_scores.iter().sum::<f64>() / metric_scores.len() as f64;
-    println!("Metric score range: {:.2} to {:.2}, mean: {:.2}\n", min_m, max_m, mean_m);
+    println!("Metric score range: {:.2} to {:.2}, mean: {:.2}", min_m, max_m, mean_m);
+
+    let raw_dists: Vec<f64> = valid.iter().map(|(_, r)| r.raw_distance).collect();
+    let min_d = raw_dists.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_d = raw_dists.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let mean_d: f64 = raw_dists.iter().sum::<f64>() / raw_dists.len() as f64;
+    let mut sorted_d = raw_dists.clone();
+    sorted_d.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p10 = sorted_d[sorted_d.len() / 10];
+    let p50 = sorted_d[sorted_d.len() / 2];
+    let p90 = sorted_d[sorted_d.len() * 9 / 10];
+    println!("Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
+        min_d, p10, p50, p90, max_d, mean_d);
 
     // Train weights if requested
     if args.train {
@@ -158,7 +173,7 @@ fn main() {
     }
 }
 
-fn compute_pair_result(pair: &ImagePair) -> zensim::ZensimResult {
+fn compute_pair_result(pair: &ImagePair, compute_all_features: bool) -> zensim::ZensimResult {
     let nan_result = zensim::ZensimResult {
         score: f64::NAN,
         raw_distance: f64::NAN,
@@ -183,7 +198,11 @@ fn compute_pair_result(pair: &ImagePair) -> zensim::ZensimResult {
     let src_pixels: Vec<[u8; 3]> = src.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dst_pixels: Vec<[u8; 3]> = dst.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
-    match zensim::compute_zensim(&src_pixels, &dst_pixels, w as usize, h as usize) {
+    let config = zensim::ZensimConfig {
+        compute_all_features,
+        ..Default::default()
+    };
+    match zensim::compute_zensim_with_config(&src_pixels, &dst_pixels, w as usize, h as usize, config) {
         Ok(r) => r,
         Err(_) => nan_result,
     }
@@ -218,38 +237,56 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
     let mut best_weights = vec![1.0; n_features];
     let mut best_srocc = -1.0f64;
 
-    // Initialize with uniform weights
-    let initial: Vec<f64> = vec![1.0 / n_features as f64; n_features];
+    // Compute feature ranges for additive step sizing
+    let mut feat_max = vec![0.0f64; n_features];
+    for feats in features.iter() {
+        for (i, &f) in feats.iter().enumerate() {
+            feat_max[i] = feat_max[i].max(f.abs());
+        }
+    }
 
     // Try several random starting points
-    let n_restarts = 5;
+    let n_restarts = 10;
     let mut rng_state = 42u64;
+
+    let mut next_rand = || -> f64 {
+        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (rng_state >> 33) as f64 / (u32::MAX as f64)
+    };
 
     for restart in 0..n_restarts {
         let mut weights = if restart == 0 {
-            initial.clone()
+            // Start from current embedded weights (good initial point)
+            let embedded = zensim::FEATURES_PER_SCALE; // just for count
+            let _ = embedded;
+            vec![1.0 / n_features as f64; n_features]
         } else {
-            // Random initialization
+            // Sparse random: only activate ~30% of features
             (0..n_features)
                 .map(|_| {
-                    rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                    (rng_state >> 33) as f64 / (u32::MAX as f64) * 2.0
+                    if next_rand() < 0.3 {
+                        next_rand() * 10.0
+                    } else {
+                        0.0
+                    }
                 })
                 .collect()
         };
 
         // Coordinate descent: optimize one weight at a time
-        for _iter in 0..20 {
+        for iter in 0..50 {
             let mut improved = false;
+            let step_scale = if iter < 20 { 1.0 } else { 0.5 };
 
             for dim in 0..n_features {
                 let current_val = weights[dim];
                 let mut best_val = current_val;
                 let mut best_local_srocc = eval_srocc(human_scores, features, &weights);
 
-                // Try different values for this dimension
-                for &delta_mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0] {
-                    weights[dim] = current_val * delta_mult;
+                // Multiplicative steps
+                for &mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
+                    weights[dim] = current_val * mult * step_scale + current_val * (1.0 - step_scale);
+                    if weights[dim] < 0.0 { weights[dim] = 0.0; }
                     let srocc = eval_srocc(human_scores, features, &weights);
                     if srocc > best_local_srocc {
                         best_local_srocc = srocc;
@@ -257,12 +294,33 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
                         improved = true;
                     }
                 }
+
+                // Additive steps based on feature range
+                if feat_max[dim] > 0.0 {
+                    let target_contrib = 1.0; // target contribution ~1.0
+                    let base_step = target_contrib / feat_max[dim];
+                    for &mult in &[0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0] {
+                        weights[dim] = base_step * mult * step_scale;
+                        let srocc = eval_srocc(human_scores, features, &weights);
+                        if srocc > best_local_srocc {
+                            best_local_srocc = srocc;
+                            best_val = weights[dim];
+                            improved = true;
+                        }
+                    }
+                }
+
                 weights[dim] = best_val;
             }
 
             if !improved {
                 break;
             }
+        }
+
+        // Enforce non-negativity
+        for w in weights.iter_mut() {
+            *w = w.max(0.0);
         }
 
         let srocc = eval_srocc(human_scores, features, &weights);

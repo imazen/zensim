@@ -15,11 +15,17 @@ use crate::NUM_SCALES;
 pub struct ZensimConfig {
     /// Box blur radius at scale 0 (default: 2, giving 5-pixel kernel)
     pub blur_radius: usize,
+    /// Compute all features even if their weights are zero.
+    /// Enable this for weight training to avoid circular dependency.
+    pub compute_all_features: bool,
 }
 
 impl Default for ZensimConfig {
     fn default() -> Self {
-        Self { blur_radius: 2 }
+        Self {
+            blur_radius: 2,
+            compute_all_features: false,
+        }
     }
 }
 
@@ -32,9 +38,10 @@ pub fn distance_to_score(raw_distance: f64) -> f64 {
         // Calibrated for trained weights where d ∈ [0, ~10]:
         //   d=0.1 → ~97 (near-invisible distortion)
         //   d=0.5 → ~82 (subtle distortion)
-        //   d=1.0 → ~65 (moderate distortion)
-        //   d=3.0 → ~20 (severe distortion)
-        let scale = 35.0;
+        //   d=1.5 → ~60 (moderate distortion)
+        //   d=5.0 → ~20 (severe distortion)
+        //   d=10  → ~5  (heavy distortion)
+        let scale = 22.0;
         let gamma = 0.65;
         (100.0 - scale * raw_distance.powf(gamma)).max(0.0)
     }
@@ -127,7 +134,7 @@ pub fn compute_zensim_with_config(
 
     // Compute multi-scale statistics
     let scale_stats = compute_multiscale_stats(
-        &src_xyb, &dst_xyb, width, height, config.blur_radius,
+        &src_xyb, &dst_xyb, width, height, config.blur_radius, config.compute_all_features,
     );
 
     // Combine with weights to produce final score
@@ -142,6 +149,7 @@ fn compute_multiscale_stats(
     width: usize,
     height: usize,
     blur_radius: usize,
+    compute_all: bool,
 ) -> Vec<ScaleStats> {
     let mut stats = Vec::with_capacity(NUM_SCALES);
 
@@ -172,7 +180,7 @@ fn compute_multiscale_stats(
         bufs.resize(n);
 
         let scale_stat = compute_single_scale(
-            &src_planes, &dst_planes, w, h, blur_radius, &mut bufs, scale,
+            &src_planes, &dst_planes, w, h, blur_radius, &mut bufs, scale, compute_all,
         );
         stats.push(scale_stat);
 
@@ -210,6 +218,7 @@ fn compute_single_scale(
     blur_radius: usize,
     bufs: &mut ScaleBuffers,
     scale_idx: usize,
+    compute_all: bool,
 ) -> ScaleStats {
     let n = width * height;
     let one_over_n = 1.0 / n as f64;
@@ -226,8 +235,8 @@ fn compute_single_scale(
 
     for c in 0..3 {
         let base = scale_idx * FEATURES_PER_SCALE + c * 6;
-        let need_ssim = has_weight(base, 2);
-        let need_edge = has_weight(base + 2, 4);
+        let need_ssim = compute_all || has_weight(base, 2);
+        let need_edge = compute_all || has_weight(base + 2, 4);
 
         // Skip channel entirely if no weights are active
         if !need_ssim && !need_edge {
@@ -293,27 +302,27 @@ const WEIGHTS: [f64; 72] = [
     // Scale 0 Channel X
     0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 0 Channel Y
-    0.000000, 0.000000, 0.000000, 19.531250, 0.000000, 0.000000,
+    0.000000, 1.255125, 0.000000, 10.645667, 0.000000, 0.000000,
     // Scale 0 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 24.879610, 0.000000, 0.000000,
     // Scale 1 Channel X
     0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 1 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 52.083333, 0.000000,
+    11.228827, 10.367977, 0.000000, 0.000000, 95.014995, 0.000000,
     // Scale 1 Channel B
-    0.000000, 0.000000, 23.437500, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 2 Channel X
-    0.013021, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 2 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 86.805556, 43.402778,
+    0.000000, 4.648608, 0.000000, 0.000000, 429.911258, 0.000000,
     // Scale 2 Channel B
-    0.000000, 0.000000, 87.890625, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 237.902858, 0.000000,
     // Scale 3 Channel X
-    0.024414, 0.000000, 0.000000, 5.859375, 195.312500, 29.296875,
+    0.000000, 5.370131, 0.000000, 0.000000, 547.073252, 0.000000,
     // Scale 3 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 26.041667,
+    0.000000, 3.771915, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 3 Channel B
-    0.000000, 0.000000, 0.000000, 20.833333, 292.968750, 0.000000,
+    13.260158, 0.006120, 0.000000, 0.000000, 403.936001, 0.000000,
 ];
 
 fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
