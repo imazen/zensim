@@ -412,54 +412,73 @@ fn load_csiq_xlsx(xlsx_path: &Path, base: &Path) -> Vec<ImagePair> {
 
     let mut pairs = Vec::new();
 
-    // CSIQ DMOS xlsx has sheets per distortion type
-    let sheet_names: Vec<String> = workbook.sheet_names().to_vec();
+    // Use 'all_by_image' sheet which has all pairs
+    let range = workbook.worksheet_range("all_by_image")
+        .expect("Failed to read 'all_by_image' sheet");
 
-    // Distortion type mapping to directory names
-    let distortion_dirs: HashMap<&str, &str> = [
-        ("JPEG", "jpeg"),
-        ("jpeg", "jpeg"),
-        ("JPEG 2000", "jpeg2000"),
-        ("jpeg2000", "jpeg2000"),
-        ("AWGN", "awgn"),
-        ("awgn", "awgn"),
-        ("Gaussian Blur", "blur"),
-        ("blur", "blur"),
-        ("fnoise", "fnoise"),
-        ("contrast", "contrast"),
+    // Mapping from xlsx distortion type to (directory name, filename label)
+    let dist_map: HashMap<&str, (&str, &str)> = [
+        ("noise", ("awgn", "AWGN")),
+        ("blur", ("blur", "BLUR")),
+        ("contrast", ("contrast", "contrast")),
+        ("fnoise", ("fnoise", "fnoise")),
+        ("jpeg", ("jpeg", "JPEG")),
+        ("jpeg 2000", ("jpeg2000", "jpeg2000")),
     ].into_iter().collect();
 
-    for sheet_name in &sheet_names {
-        if let Ok(range) = workbook.worksheet_range(sheet_name) {
-            let dist_dir = distortion_dirs.get(sheet_name.as_str())
-                .copied()
-                .unwrap_or(sheet_name.as_str());
-
-            for row in range.rows().skip(1) { // Skip header
-                if row.len() < 2 {
-                    continue;
-                }
-                // Try to parse image name and DMOS
-                let img_name = match &row[0] {
-                    calamine::Data::String(s) => s.clone(),
-                    _ => continue,
-                };
-                let dmos = match &row[1] {
-                    calamine::Data::Float(f) => *f,
-                    _ => continue,
-                };
-
-                let ref_path = base.join("src_imgs").join(format!("{}.png", img_name));
-                let dist_path = base.join("dst_imgs").join(dist_dir).join(format!("{}.png", img_name));
-
-                // CSIQ DMOS: 0-1 scale (lower = better, higher = more distortion)
-                pairs.push(ImagePair {
-                    reference: ref_path,
-                    distorted: dist_path,
-                    human_score: 1.0 - dmos, // Invert so higher = better
-                });
-            }
+    // Calamine strips leading empty columns. Actual layout:
+    // [0]=image, [1]=dst_idx, [2]=dst_type, [3]=dst_lev, [4]=dmos_std, [5]=dmos
+    for row in range.rows() {
+        if row.len() < 6 {
+            continue;
         }
+
+        let img_name = match &row[0] {
+            calamine::Data::String(s) => s.clone(),
+            calamine::Data::Float(f) => format!("{}", *f as i64),
+            calamine::Data::Int(i) => format!("{}", i),
+            _ => continue,
+        };
+
+        // Skip header row
+        if img_name == "image" {
+            continue;
+        }
+
+        let dst_type = match &row[2] {
+            calamine::Data::String(s) => s.clone(),
+            _ => continue,
+        };
+
+        let dst_lev = match &row[3] {
+            calamine::Data::Float(f) => *f as i64,
+            calamine::Data::Int(i) => *i,
+            _ => continue,
+        };
+
+        let dmos = match &row[5] {
+            calamine::Data::Float(f) => *f,
+            _ => continue,
+        };
+
+        let (dir_name, file_label) = match dist_map.get(dst_type.as_str()) {
+            Some(v) => *v,
+            None => {
+                eprintln!("Unknown CSIQ distortion type: {}", dst_type);
+                continue;
+            }
+        };
+
+        let ref_path = base.join(format!("{}.png", img_name));
+        let dist_path = base.join(dir_name)
+            .join(format!("{}.{}.{}.png", img_name, file_label, dst_lev));
+
+        // CSIQ DMOS: 0-1 scale (lower = better quality, higher = more distortion)
+        pairs.push(ImagePair {
+            reference: ref_path,
+            distorted: dist_path,
+            human_score: 1.0 - dmos, // Invert so higher = better
+        });
     }
 
     pairs
