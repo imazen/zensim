@@ -8,6 +8,12 @@ struct Args {
     source: PathBuf,
     /// Distorted image to compare
     distorted: PathBuf,
+    /// Box blur passes (2 or 3, default: 2). 2 = triangular kernel, 33% fewer blur ops.
+    #[arg(long, default_value = "2")]
+    blur_passes: u8,
+    /// Box blur radius at scale 0 (default: 3, giving 7-pixel kernel)
+    #[arg(long, default_value = "3")]
+    blur_radius: usize,
 }
 
 fn main() {
@@ -39,12 +45,24 @@ fn main() {
     let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
+    let config = zensim::ZensimConfig {
+        blur_radius: args.blur_radius,
+        blur_passes: args.blur_passes,
+        ..Default::default()
+    };
+
     let start = std::time::Instant::now();
-    let result = zensim::compute_zensim(&src_pixels, &dst_pixels, w as usize, h as usize)
-        .unwrap_or_else(|e| {
-            eprintln!("Error computing zensim: {}", e);
-            std::process::exit(1);
-        });
+    let result = zensim::compute_zensim_with_config(
+        &src_pixels,
+        &dst_pixels,
+        w as usize,
+        h as usize,
+        config,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("Error computing zensim: {}", e);
+        std::process::exit(1);
+    });
     let elapsed = start.elapsed();
 
     println!(

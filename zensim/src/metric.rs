@@ -4,7 +4,7 @@
 //! with contrast sensitivity weighting per scale.
 
 use crate::NUM_SCALES;
-use crate::blur::{box_blur_3pass_into, downscale_2x};
+use crate::blur::{box_blur_2pass_into, box_blur_3pass_into, downscale_2x};
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
@@ -13,8 +13,11 @@ use crate::simd_ops::{edge_diff_channel, mul_into, ssim_channel};
 /// Configuration for zensim computation.
 #[derive(Debug, Clone, Copy)]
 pub struct ZensimConfig {
-    /// Box blur radius at scale 0 (default: 2, giving 5-pixel kernel)
+    /// Box blur radius at scale 0 (default: 3, giving 7-pixel kernel)
     pub blur_radius: usize,
+    /// Number of box blur passes (2 or 3, default: 2).
+    /// 3 passes = piecewise-quadratic ≈ Gaussian. 2 passes = triangular, 33% faster.
+    pub blur_passes: u8,
     /// Compute all features even if their weights are zero.
     /// Enable this for weight training to avoid circular dependency.
     pub compute_all_features: bool,
@@ -23,7 +26,8 @@ pub struct ZensimConfig {
 impl Default for ZensimConfig {
     fn default() -> Self {
         Self {
-            blur_radius: 2,
+            blur_radius: 3,
+            blur_passes: 2,
             compute_all_features: false,
         }
     }
@@ -128,13 +132,14 @@ pub fn compute_zensim_with_config(
     let src_xyb = srgb_to_positive_xyb_planar(source);
     let dst_xyb = srgb_to_positive_xyb_planar(distorted);
 
-    // Compute multi-scale statistics
+    // Compute multi-scale statistics (take ownership to avoid clone)
     let scale_stats = compute_multiscale_stats(
-        &src_xyb,
-        &dst_xyb,
+        src_xyb,
+        dst_xyb,
         width,
         height,
         config.blur_radius,
+        config.blur_passes,
         config.compute_all_features,
     );
 
@@ -145,20 +150,19 @@ pub fn compute_zensim_with_config(
 
 /// Compute per-scale SSIM and edge statistics.
 fn compute_multiscale_stats(
-    src_xyb: &[Vec<f32>; 3],
-    dst_xyb: &[Vec<f32>; 3],
+    src_xyb: [Vec<f32>; 3],
+    dst_xyb: [Vec<f32>; 3],
     width: usize,
     height: usize,
     blur_radius: usize,
+    blur_passes: u8,
     compute_all: bool,
 ) -> Vec<ScaleStats> {
     let mut stats = Vec::with_capacity(NUM_SCALES);
 
-    // Start with the original planes (avoid clone for scale 0 by using references first)
-    let mut src_planes: [Vec<f32>; 3] =
-        [src_xyb[0].clone(), src_xyb[1].clone(), src_xyb[2].clone()];
-    let mut dst_planes: [Vec<f32>; 3] =
-        [dst_xyb[0].clone(), dst_xyb[1].clone(), dst_xyb[2].clone()];
+    // Move ownership — no clone needed
+    let mut src_planes = src_xyb;
+    let mut dst_planes = dst_xyb;
     let mut w = width;
     let mut h = height;
 
@@ -180,6 +184,7 @@ fn compute_multiscale_stats(
             w,
             h,
             blur_radius,
+            blur_passes,
             &mut bufs,
             scale,
             compute_all,
@@ -219,6 +224,7 @@ fn compute_single_scale(
     width: usize,
     height: usize,
     blur_radius: usize,
+    blur_passes: u8,
     bufs: &mut ScaleBuffers,
     scale_idx: usize,
     compute_all: bool,
@@ -248,8 +254,16 @@ fn compute_single_scale(
         let src_c = &src[c];
         let dst_c = &dst[c];
 
+        // Dispatch blur based on passes config
+        #[allow(clippy::type_complexity)]
+        let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = if blur_passes >= 3 {
+            box_blur_3pass_into
+        } else {
+            box_blur_2pass_into
+        };
+
         // mu1 and mu2 are needed for both SSIM and edge features
-        box_blur_3pass_into(
+        blur_fn(
             src_c,
             &mut bufs.mu1,
             &mut bufs.temp_blur,
@@ -257,7 +271,7 @@ fn compute_single_scale(
             height,
             blur_radius,
         );
-        box_blur_3pass_into(
+        blur_fn(
             dst_c,
             &mut bufs.mu2,
             &mut bufs.temp_blur,
@@ -269,7 +283,7 @@ fn compute_single_scale(
         // Only compute variance/covariance if SSIM weight is nonzero
         if need_ssim {
             mul_into(src_c, src_c, &mut bufs.mul_buf);
-            box_blur_3pass_into(
+            blur_fn(
                 &bufs.mul_buf,
                 &mut bufs.sigma1_sq,
                 &mut bufs.temp_blur,
@@ -279,7 +293,7 @@ fn compute_single_scale(
             );
 
             mul_into(dst_c, dst_c, &mut bufs.mul_buf);
-            box_blur_3pass_into(
+            blur_fn(
                 &bufs.mul_buf,
                 &mut bufs.sigma2_sq,
                 &mut bufs.temp_blur,
@@ -289,7 +303,7 @@ fn compute_single_scale(
             );
 
             mul_into(src_c, dst_c, &mut bufs.mul_buf);
-            box_blur_3pass_into(
+            blur_fn(
                 &bufs.mul_buf,
                 &mut bufs.sigma12,
                 &mut bufs.temp_blur,

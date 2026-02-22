@@ -24,7 +24,7 @@ pub fn box_blur_3pass(plane: &mut [f32], width: usize, height: usize, radius: us
 }
 
 /// Blur into pre-allocated output buffer. Uses temp as scratch.
-/// temp2 is an additional scratch buffer for the vertical pass.
+/// 3-pass cascade approximates Gaussian (piecewise quadratic).
 pub fn box_blur_3pass_into(
     input: &[f32],
     output: &mut [f32],
@@ -41,6 +41,22 @@ pub fn box_blur_3pass_into(
     box_blur_h(output, temp, width, height, radius);
     box_blur_v_from_copy(temp, output, width, height, radius);
     // Pass 3: output →(h)→ temp →(v)→ output
+    box_blur_h(output, temp, width, height, radius);
+    box_blur_v_from_copy(temp, output, width, height, radius);
+}
+
+/// 2-pass blur: triangular kernel, 33% fewer operations.
+/// Use with radius+1 to approximate same effective width as 3-pass with radius.
+pub fn box_blur_2pass_into(
+    input: &[f32],
+    output: &mut [f32],
+    temp: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    box_blur_h(input, temp, width, height, radius);
+    box_blur_v_from_copy(temp, output, width, height, radius);
     box_blur_h(output, temp, width, height, radius);
     box_blur_v_from_copy(temp, output, width, height, radius);
 }

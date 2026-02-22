@@ -34,6 +34,14 @@ struct Args {
     /// Output features CSV for external analysis
     #[arg(long)]
     features_csv: Option<PathBuf>,
+
+    /// Box blur passes (2 or 3, default: 2). 2 = triangular kernel, 33% fewer blur ops.
+    #[arg(long, default_value = "2")]
+    blur_passes: u8,
+
+    /// Box blur radius at scale 0 (default: 3)
+    #[arg(long, default_value = "3")]
+    blur_radius: usize,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -79,12 +87,14 @@ fn main() {
 
     // When training, compute all features (no skipping) so weights can be freely optimized
     let compute_all = args.train;
+    let blur_passes = args.blur_passes;
+    let blur_radius = args.blur_radius;
 
     // Compute zensim scores + features in parallel
     let results: Vec<(f64, zensim::ZensimResult)> = pairs
         .par_iter()
         .map(|pair| {
-            let result = compute_pair_result(pair, compute_all);
+            let result = compute_pair_result(pair, compute_all, blur_passes, blur_radius);
             pb.inc(1);
             (pair.human_score, result)
         })
@@ -204,7 +214,7 @@ fn main() {
                 let extra_results: Vec<(f64, zensim::ZensimResult)> = extra_pairs
                     .par_iter()
                     .map(|pair| {
-                        let result = compute_pair_result(pair, true);
+                        let result = compute_pair_result(pair, true, blur_passes, blur_radius);
                         pb2.inc(1);
                         (pair.human_score, result)
                     })
@@ -260,7 +270,12 @@ fn main() {
     }
 }
 
-fn compute_pair_result(pair: &ImagePair, compute_all_features: bool) -> zensim::ZensimResult {
+fn compute_pair_result(
+    pair: &ImagePair,
+    compute_all_features: bool,
+    blur_passes: u8,
+    blur_radius: usize,
+) -> zensim::ZensimResult {
     let nan_result = zensim::ZensimResult {
         score: f64::NAN,
         raw_distance: f64::NAN,
@@ -287,7 +302,8 @@ fn compute_pair_result(pair: &ImagePair, compute_all_features: bool) -> zensim::
 
     let config = zensim::ZensimConfig {
         compute_all_features,
-        ..Default::default()
+        blur_passes,
+        blur_radius,
     };
     match zensim::compute_zensim_with_config(
         &src_pixels,
