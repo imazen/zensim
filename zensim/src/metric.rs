@@ -128,9 +128,13 @@ pub fn compute_zensim_with_config(
         return Err(ZensimError::DimensionMismatch);
     }
 
-    // Convert to planar positive XYB (fused conversion + positive shift)
-    let src_xyb = srgb_to_positive_xyb_planar(source);
-    let dst_xyb = srgb_to_positive_xyb_planar(distorted);
+    // Convert both images to planar positive XYB in parallel
+    let (src_xyb, dst_xyb) = std::thread::scope(|s| {
+        let src_handle = s.spawn(|| srgb_to_positive_xyb_planar(source));
+        let dst_xyb = srgb_to_positive_xyb_planar(distorted);
+        let src_xyb = src_handle.join().unwrap();
+        (src_xyb, dst_xyb)
+    });
 
     // Compute multi-scale statistics (take ownership to avoid clone)
     let scale_stats = compute_multiscale_stats(
@@ -166,9 +170,11 @@ fn compute_multiscale_stats(
     let mut w = width;
     let mut h = height;
 
-    // Pre-allocate buffers at max size, reuse across scales
+    // Pre-allocate two buffer sets: one for main thread, one for parallel thread.
+    // Both are allocated once at max size and reused across scales.
     let max_n = width * height;
     let mut bufs = ScaleBuffers::new(max_n);
+    let mut parallel_bufs = ScaleBuffers::new(max_n);
 
     for scale in 0..NUM_SCALES {
         if w < 8 || h < 8 {
@@ -177,6 +183,7 @@ fn compute_multiscale_stats(
 
         let n = w * h;
         bufs.resize(n);
+        parallel_bufs.resize(n);
 
         let scale_stat = compute_single_scale(
             &src_planes,
@@ -186,6 +193,7 @@ fn compute_multiscale_stats(
             blur_radius,
             blur_passes,
             &mut bufs,
+            &mut parallel_bufs,
             scale,
             compute_all,
         );
@@ -209,8 +217,114 @@ fn compute_multiscale_stats(
     stats
 }
 
+/// Per-channel result from compute_channel.
+struct ChannelResult {
+    ssim: [f64; 2], // [mean_d, root4_d]
+    edge: [f64; 4], // [art_mean, art_4th, det_mean, det_4th]
+}
+
+/// Compute SSIM and/or edge features for a single channel.
+/// Self-contained: allocates its own buffers to enable parallel execution.
+#[allow(clippy::too_many_arguments)]
+fn compute_channel(
+    src_c: &[f32],
+    dst_c: &[f32],
+    width: usize,
+    height: usize,
+    blur_radius: usize,
+    blur_passes: u8,
+    need_ssim: bool,
+    need_edge: bool,
+    bufs: &mut ScaleBuffers,
+) -> ChannelResult {
+    let n = width * height;
+    let one_over_n = 1.0 / n as f64;
+    let mut ssim = [0.0f64; 2];
+    let mut edge = [0.0f64; 4];
+
+    #[allow(clippy::type_complexity)]
+    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = if blur_passes >= 3 {
+        box_blur_3pass_into
+    } else {
+        box_blur_2pass_into
+    };
+
+    // mu1 and mu2 are needed for both SSIM and edge features
+    blur_fn(
+        src_c,
+        &mut bufs.mu1,
+        &mut bufs.temp_blur,
+        width,
+        height,
+        blur_radius,
+    );
+    blur_fn(
+        dst_c,
+        &mut bufs.mu2,
+        &mut bufs.temp_blur,
+        width,
+        height,
+        blur_radius,
+    );
+
+    if need_ssim {
+        mul_into(src_c, src_c, &mut bufs.mul_buf);
+        blur_fn(
+            &bufs.mul_buf,
+            &mut bufs.sigma1_sq,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            blur_radius,
+        );
+
+        mul_into(dst_c, dst_c, &mut bufs.mul_buf);
+        blur_fn(
+            &bufs.mul_buf,
+            &mut bufs.sigma2_sq,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            blur_radius,
+        );
+
+        mul_into(src_c, dst_c, &mut bufs.mul_buf);
+        blur_fn(
+            &bufs.mul_buf,
+            &mut bufs.sigma12,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            blur_radius,
+        );
+
+        let (sum_d, sum_d4) = ssim_channel(
+            &bufs.mu1,
+            &bufs.mu2,
+            &bufs.sigma1_sq,
+            &bufs.sigma2_sq,
+            &bufs.sigma12,
+        );
+        ssim[0] = sum_d * one_over_n;
+        ssim[1] = (sum_d4 * one_over_n).powf(0.25);
+    }
+
+    if need_edge {
+        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
+        edge[0] = art * one_over_n;
+        edge[1] = (art4 * one_over_n).powf(0.25);
+        edge[2] = det * one_over_n;
+        edge[3] = (det4 * one_over_n).powf(0.25);
+    }
+
+    ChannelResult { ssim, edge }
+}
+
+/// Minimum pixel count to justify spawning a parallel thread.
+const PARALLEL_THRESHOLD: usize = 100_000;
+
 /// Compute SSIM and edge statistics for a single scale.
-/// Only computes SSIM when needed (most trained weights are on edge features).
+/// Uses parallel channel processing for large scales.
 #[allow(clippy::too_many_arguments)]
 fn compute_single_scale(
     src: &[Vec<f32>; 3],
@@ -220,12 +334,10 @@ fn compute_single_scale(
     blur_radius: usize,
     blur_passes: u8,
     bufs: &mut ScaleBuffers,
+    parallel_bufs: &mut ScaleBuffers,
     scale_idx: usize,
     compute_all: bool,
 ) -> ScaleStats {
-    let n = width * height;
-    let one_over_n = 1.0 / n as f64;
-
     let mut ssim_vals = [0.0f64; 6];
     let mut edge_vals = [0.0f64; 12];
 
@@ -235,95 +347,97 @@ fn compute_single_scale(
             && (base_idx..base_idx + count).any(|i| WEIGHTS[i].abs() > 0.001)
     };
 
+    // Determine which channels need work
+    let mut active_channels: Vec<(usize, bool, bool)> = Vec::new();
     for c in 0..3 {
         let base = scale_idx * FEATURES_PER_SCALE + c * 6;
         let need_ssim = compute_all || has_weight(base, 2);
         let need_edge = compute_all || has_weight(base + 2, 4);
-
-        // Skip channel entirely if no weights are active
-        if !need_ssim && !need_edge {
-            continue;
+        if need_ssim || need_edge {
+            active_channels.push((c, need_ssim, need_edge));
         }
+    }
 
-        let src_c = &src[c];
-        let dst_c = &dst[c];
+    let n = width * height;
 
-        // Dispatch blur based on passes config
-        #[allow(clippy::type_complexity)]
-        let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = if blur_passes >= 3 {
-            box_blur_3pass_into
-        } else {
-            box_blur_2pass_into
-        };
+    if active_channels.len() >= 2 && n >= PARALLEL_THRESHOLD {
+        // Parallel: process first channel on a spawned thread, rest on current thread.
+        // Both use pre-allocated buffer sets (no per-call allocation).
+        let (first_c, first_ssim, first_edge) = active_channels[0];
+        let rest = &active_channels[1..];
 
-        // mu1 and mu2 are needed for both SSIM and edge features
-        blur_fn(
-            src_c,
-            &mut bufs.mu1,
-            &mut bufs.temp_blur,
-            width,
-            height,
-            blur_radius,
-        );
-        blur_fn(
-            dst_c,
-            &mut bufs.mu2,
-            &mut bufs.temp_blur,
-            width,
-            height,
-            blur_radius,
-        );
+        let first_result = std::thread::scope(|s| {
+            let handle = s.spawn(|| {
+                compute_channel(
+                    &src[first_c],
+                    &dst[first_c],
+                    width,
+                    height,
+                    blur_radius,
+                    blur_passes,
+                    first_ssim,
+                    first_edge,
+                    parallel_bufs,
+                )
+            });
 
-        // Only compute variance/covariance if SSIM weight is nonzero
-        if need_ssim {
-            mul_into(src_c, src_c, &mut bufs.mul_buf);
-            blur_fn(
-                &bufs.mul_buf,
-                &mut bufs.sigma1_sq,
-                &mut bufs.temp_blur,
-                width,
-                height,
-                blur_radius,
-            );
+            // Process remaining channels on the current thread
+            let mut rest_results: Vec<(usize, ChannelResult)> = Vec::new();
+            for &(c, need_ssim, need_edge) in rest {
+                let result = compute_channel(
+                    &src[c],
+                    &dst[c],
+                    width,
+                    height,
+                    blur_radius,
+                    blur_passes,
+                    need_ssim,
+                    need_edge,
+                    bufs,
+                );
+                rest_results.push((c, result));
+            }
 
-            mul_into(dst_c, dst_c, &mut bufs.mul_buf);
-            blur_fn(
-                &bufs.mul_buf,
-                &mut bufs.sigma2_sq,
-                &mut bufs.temp_blur,
-                width,
-                height,
-                blur_radius,
-            );
+            let first = handle.join().unwrap();
+            (first, rest_results)
+        });
 
-            mul_into(src_c, dst_c, &mut bufs.mul_buf);
-            blur_fn(
-                &bufs.mul_buf,
-                &mut bufs.sigma12,
-                &mut bufs.temp_blur,
-                width,
-                height,
-                blur_radius,
-            );
-
-            let (sum_d, sum_d4) = ssim_channel(
-                &bufs.mu1,
-                &bufs.mu2,
-                &bufs.sigma1_sq,
-                &bufs.sigma2_sq,
-                &bufs.sigma12,
-            );
-            ssim_vals[c * 2] = sum_d * one_over_n;
-            ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+        // Collect results
+        let (first, rest_results) = first_result;
+        ssim_vals[first_c * 2] = first.ssim[0];
+        ssim_vals[first_c * 2 + 1] = first.ssim[1];
+        edge_vals[first_c * 4] = first.edge[0];
+        edge_vals[first_c * 4 + 1] = first.edge[1];
+        edge_vals[first_c * 4 + 2] = first.edge[2];
+        edge_vals[first_c * 4 + 3] = first.edge[3];
+        for (c, result) in rest_results {
+            ssim_vals[c * 2] = result.ssim[0];
+            ssim_vals[c * 2 + 1] = result.ssim[1];
+            edge_vals[c * 4] = result.edge[0];
+            edge_vals[c * 4 + 1] = result.edge[1];
+            edge_vals[c * 4 + 2] = result.edge[2];
+            edge_vals[c * 4 + 3] = result.edge[3];
         }
-
-        // Edge features
-        if need_edge {
-            let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
-            edge_vals[c * 4] = art * one_over_n;
-            edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
-            edge_vals[c * 4 + 2] = det * one_over_n;
-            edge_vals[c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+    } else {
+        // Sequential: use shared buffers
+        for &(c, need_ssim, need_edge) in &active_channels {
+            let result = compute_channel(
+                &src[c],
+                &dst[c],
+                width,
+                height,
+                blur_radius,
+                blur_passes,
+                need_ssim,
+                need_edge,
+                bufs,
+            );
+            ssim_vals[c * 2] = result.ssim[0];
+            ssim_vals[c * 2 + 1] = result.ssim[1];
+            edge_vals[c * 4] = result.edge[0];
+            edge_vals[c * 4 + 1] = result.edge[1];
+            edge_vals[c * 4 + 2] = result.edge[2];
+            edge_vals[c * 4 + 3] = result.edge[3];
         }
     }
 

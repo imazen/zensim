@@ -2,7 +2,6 @@
 
 /// Pre-allocated buffers for metric computation, reused across scales.
 pub(crate) struct ScaleBuffers {
-    pub temp: Vec<f32>,
     pub mul_buf: Vec<f32>,
     pub mu1: Vec<f32>,
     pub mu2: Vec<f32>,
@@ -15,7 +14,6 @@ pub(crate) struct ScaleBuffers {
 impl ScaleBuffers {
     pub fn new(size: usize) -> Self {
         Self {
-            temp: vec![0.0; size],
             mul_buf: vec![0.0; size],
             mu1: vec![0.0; size],
             mu2: vec![0.0; size],
@@ -27,7 +25,6 @@ impl ScaleBuffers {
     }
 
     pub fn resize(&mut self, size: usize) {
-        self.temp.resize(size, 0.0);
         self.mul_buf.resize(size, 0.0);
         self.mu1.resize(size, 0.0);
         self.mu2.resize(size, 0.0);
