@@ -47,6 +47,11 @@ struct Args {
     /// Prevents activating new channels (which would add blur operations).
     #[arg(long, default_value = "false")]
     sparse: bool,
+
+    /// Force compute_all_features=true even without --train.
+    /// Useful for exporting full feature vectors for offline analysis.
+    #[arg(long, default_value = "false")]
+    compute_all: bool,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -91,7 +96,7 @@ fn main() {
     );
 
     // When training, compute all features (no skipping) so weights can be freely optimized
-    let compute_all = args.train;
+    let compute_all = args.train || args.compute_all;
     let blur_passes = args.blur_passes;
     let blur_radius = args.blur_radius;
 
