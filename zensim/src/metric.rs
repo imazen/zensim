@@ -401,6 +401,49 @@ fn store_channel_result(
     edge_vals[c * 4 + 3] = result.edge[3];
 }
 
+/// Compute SSIM (and optionally edge) for a single channel sequentially.
+/// Used for additional SSIM channels beyond the first in the phased path.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn compute_ssim_channel_sequential(
+    src_c: &[f32],
+    dst_c: &[f32],
+    width: usize,
+    height: usize,
+    blur_radius: usize,
+    blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize),
+    need_edge: bool,
+    one_over_n: f64,
+    mu1: &mut [f32],
+    mu2: &mut [f32],
+    scratch: &mut [f32],
+    sig_sq: &mut [f32],
+    sig12: &mut [f32],
+    temp: &mut [f32],
+    c: usize,
+    ssim_vals: &mut [f64; 6],
+    edge_vals: &mut [f64; 12],
+) {
+    // 4 sequential blurs for SSIM
+    blur_fn(src_c, mu1, temp, width, height, blur_radius);
+    blur_fn(dst_c, mu2, temp, width, height, blur_radius);
+    sq_sum_into(src_c, dst_c, scratch);
+    blur_fn(scratch, sig_sq, temp, width, height, blur_radius);
+    mul_into(src_c, dst_c, scratch);
+    blur_fn(scratch, sig12, temp, width, height, blur_radius);
+
+    let (sum_d, sum_d4) = ssim_channel(mu1, mu2, sig_sq, sig12);
+    ssim_vals[c * 2] = sum_d * one_over_n;
+    ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+
+    if need_edge {
+        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, mu1, mu2);
+        edge_vals[c * 4] = art * one_over_n;
+        edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
+        edge_vals[c * 4 + 2] = det * one_over_n;
+        edge_vals[c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+    }
+}
+
 /// Phased blur parallelism for large images.
 ///
 /// Instead of parallelizing by channel (Y on thread 1, B on thread 2 — imbalanced),
@@ -433,17 +476,19 @@ fn compute_single_scale_phased(
         _ => box_blur_3pass_into,
     };
 
-    // Find the SSIM channel (heaviest: 4 blurs) and edge-only channels (lighter: 2 blurs)
-    let mut ssim_ch: Option<(usize, bool)> = None; // (channel_idx, need_edge)
+    // Separate SSIM channels (heavy: 4 blurs) from edge-only (lighter: 2 blurs)
+    let mut ssim_chs: Vec<(usize, bool)> = Vec::new(); // (channel_idx, need_edge)
     let mut edge_only_chs: Vec<usize> = Vec::new();
 
     for &(c, need_ssim, need_edge) in active_channels {
         if need_ssim {
-            ssim_ch = Some((c, need_edge));
+            ssim_chs.push((c, need_edge));
         } else if need_edge {
             edge_only_chs.push(c);
         }
     }
+    // Take the first SSIM channel for phased parallelism
+    let ssim_ch = ssim_chs.first().copied();
 
     // Destructure bufs to allow split borrows across threads
     let ScaleBuffers {
@@ -524,6 +569,29 @@ fn compute_single_scale_phased(
                 edge_vals[edge_c2 * 4 + 2] = det * one_over_n;
                 edge_vals[edge_c2 * 4 + 3] = (det4 * one_over_n).powf(0.25);
             }
+
+            // Handle additional SSIM channels sequentially (reuse buffers)
+            for &(extra_c, extra_edge) in &ssim_chs[1..] {
+                compute_ssim_channel_sequential(
+                    &src[extra_c],
+                    &dst[extra_c],
+                    width,
+                    height,
+                    blur_radius,
+                    blur_fn,
+                    extra_edge,
+                    one_over_n,
+                    mu1_b,
+                    mu2_b,
+                    scratch1,
+                    sig_sq,
+                    sig12,
+                    temp1,
+                    extra_c,
+                    ssim_vals,
+                    edge_vals,
+                );
+            }
         } else {
             // No edge-only channels — just parallel sigma blurs
             std::thread::scope(|s| {
@@ -545,6 +613,29 @@ fn compute_single_scale_phased(
                 edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
                 edge_vals[sc * 4 + 2] = det * one_over_n;
                 edge_vals[sc * 4 + 3] = (det4 * one_over_n).powf(0.25);
+            }
+
+            // Handle additional SSIM channels sequentially
+            for &(extra_c, extra_edge) in &ssim_chs[1..] {
+                compute_ssim_channel_sequential(
+                    &src[extra_c],
+                    &dst[extra_c],
+                    width,
+                    height,
+                    blur_radius,
+                    blur_fn,
+                    extra_edge,
+                    one_over_n,
+                    mu1_a,
+                    mu2_a,
+                    scratch1,
+                    sig_sq,
+                    sig12,
+                    temp1,
+                    extra_c,
+                    ssim_vals,
+                    edge_vals,
+                );
             }
         }
     } else {
@@ -633,5 +724,74 @@ fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
         score,
         raw_distance,
         features,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify compute_all_features produces same score as default (weight-skipped) path.
+    /// This exercises the multi-SSIM channel code path where ssim_chs.len() > 1.
+    #[test]
+    fn compute_all_matches_default() {
+        // Generate a simple test pattern: gradient source, slightly different distorted
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = 128;
+                src[y * w + x] = [r, g, b];
+                // Slight distortion
+                dst[y * w + x] = [r.saturating_add(5), g, b.saturating_sub(3)];
+            }
+        }
+
+        let default_result = compute_zensim(&src, &dst, w, h).unwrap();
+        let all_result = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Same score (default weights skip zero-weight channels; compute_all computes them
+        // but zero weights still produce same weighted distance)
+        assert!(
+            (default_result.score - all_result.score).abs() < 0.01,
+            "default {} vs all_features {}",
+            default_result.score,
+            all_result.score,
+        );
+
+        // compute_all should have all features populated (nonzero for most)
+        assert_eq!(all_result.features.len(), default_result.features.len());
+        // With compute_all, previously-skipped channels should now have nonzero features
+        let all_nonzero = all_result
+            .features
+            .iter()
+            .filter(|f| f.abs() > 1e-12)
+            .count();
+        let default_nonzero = default_result
+            .features
+            .iter()
+            .filter(|f| f.abs() > 1e-12)
+            .count();
+        assert!(
+            all_nonzero >= default_nonzero,
+            "compute_all should have >= features: {} vs {}",
+            all_nonzero,
+            default_nonzero,
+        );
     }
 }
