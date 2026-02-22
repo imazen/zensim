@@ -1,0 +1,16 @@
+[package]
+name = "zensim-validate"
+version = "0.1.0"
+edition = "2024"
+description = "Validation harness: correlate zensim against human quality ratings"
+license = "MIT"
+
+[dependencies]
+zensim = { path = "../zensim" }
+image = { workspace = true }
+rayon = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+csv = "1"
+calamine = "0.26"
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"

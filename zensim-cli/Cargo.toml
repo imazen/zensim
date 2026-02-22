@@ -1,0 +1,11 @@
+[package]
+name = "zensim-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI for zensim psychovisual image similarity metric"
+license = "MIT"
+
+[dependencies]
+zensim = { path = "../zensim" }
+image = { workspace = true }
+clap = { version = "4", features = ["derive"] }

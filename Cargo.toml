@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["zensim", "zensim-cli", "zensim-validate"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[workspace.dependencies]
+zensim = { path = "zensim" }
+archmage = { version = "0.8.3", features = ["macros", "safe_unaligned_simd"] }
+magetypes = "0.8.3"
+thiserror = "2"
+image = "0.25"
+rayon = "1.10"

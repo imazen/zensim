@@ -1,0 +1,24 @@
+[package]
+name = "zensim"
+version = "0.1.0"
+edition = "2024"
+description = "Fast psychovisual image similarity metric"
+repository = "https://github.com/imazen/zensim"
+license = "MIT"
+rust-version = "1.85.0"
+
+[dependencies]
+archmage = { workspace = true }
+magetypes = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "bench_zensim"
+harness = false
+
+[lints.clippy]
+uninlined_format_args = "allow"
