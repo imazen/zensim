@@ -248,10 +248,16 @@ fn main() {
         }
 
         // Build frozen mask: if --sparse, only optimize already-nonzero weights
+        // MSE features (every 7th, starting at index 6) are never frozen
+        let features_per_ch = zensim::FEATURES_PER_SCALE / 3;
         let frozen: Vec<bool> = if args.sparse {
             zensim::WEIGHTS
                 .iter()
-                .map(|w| w.abs() < 0.001) // frozen if currently zero
+                .enumerate()
+                .map(|(i, w)| {
+                    let is_mse = i % features_per_ch == features_per_ch - 1;
+                    !is_mse && w.abs() < 0.001
+                })
                 .collect()
         } else {
             vec![false; n_features]
@@ -511,17 +517,18 @@ fn print_trained_results(human_scores: &[f64], feats: &[&[f64]], weights: &[f64]
 }
 
 fn print_weights(weights: &[f64]) {
+    let features_per_ch = zensim::FEATURES_PER_SCALE / 3;
     println!("\n// Trained weights ({} values):", weights.len());
     println!("const TRAINED_WEIGHTS: [f64; {}] = [", weights.len());
     for (i, w) in weights.iter().enumerate() {
-        if i % 6 == 0 {
-            let scale = i / 18;
-            let ch = (i % 18) / 6;
+        if i % features_per_ch == 0 {
+            let scale = i / zensim::FEATURES_PER_SCALE;
+            let ch = (i % zensim::FEATURES_PER_SCALE) / features_per_ch;
             let ch_name = ["X", "Y", "B"][ch];
             print!("    // Scale {} Channel {}\n    ", scale, ch_name);
         }
         print!("{:.6}, ", w);
-        if i % 6 == 5 {
+        if i % features_per_ch == features_per_ch - 1 {
             println!();
         }
     }
