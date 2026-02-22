@@ -166,14 +166,12 @@ fn compute_multiscale_stats(
 ) -> Vec<ScaleStats> {
     let mut stats = Vec::with_capacity(NUM_SCALES);
 
-    // Move ownership — no clone needed
     let mut src_planes = src_xyb;
     let mut dst_planes = dst_xyb;
     let mut w = width;
     let mut h = height;
 
     // Pre-allocate two buffer sets: one for main thread, one for parallel thread.
-    // Both are allocated once at max size and reused across scales.
     let max_n = width * height;
     let mut bufs = ScaleBuffers::new(max_n);
     let mut parallel_bufs = ScaleBuffers::new(max_n);
@@ -309,7 +307,7 @@ fn compute_channel(
 }
 
 /// Minimum pixel count to justify spawning a parallel thread.
-const PARALLEL_THRESHOLD: usize = 100_000;
+const PARALLEL_THRESHOLD: usize = 50_000;
 
 /// Compute SSIM and edge statistics for a single scale.
 /// Uses parallel channel processing for large scales.
