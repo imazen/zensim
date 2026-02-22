@@ -144,6 +144,94 @@ fn box_blur_v_copy_inner_scalar(
 
 /// Horizontal box blur using running sum. O(1) per pixel.
 fn box_blur_h(input: &[f32], output: &mut [f32], width: usize, height: usize, radius: usize) {
+    incant!(box_blur_h_inner(input, output, width, height, radius), [v3]);
+}
+
+/// SIMD horizontal blur: process 8 rows simultaneously.
+/// Each f32x8 lane holds the running sum for one row.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn box_blur_h_inner_v3(
+    token: archmage::X64V3Token,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let row_groups = height / 8;
+
+    for rg in 0..row_groups {
+        let row_base = rg * 8;
+
+        // Initialize running sums for 8 rows
+        let mut sum = f32x8::zero(token);
+        for i in 0..diam {
+            let idx = if i <= r { (r - i).min(width - 1) } else { (i - r).min(width - 1) };
+            let mut arr = [0.0f32; 8];
+            for ro in 0..8 {
+                arr[ro] = input[(row_base + ro) * width + idx];
+            }
+            sum = sum + f32x8::from_array(token, arr);
+        }
+
+        for x in 0..width {
+            let result = (sum * inv_v).to_array();
+            for ro in 0..8 {
+                output[(row_base + ro) * width + x] = result[ro];
+            }
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 { rem_i.unsigned_abs() } else { rem_i as usize };
+            let rem_idx = rem_idx.min(width - 1);
+
+            let mut add_arr = [0.0f32; 8];
+            let mut rem_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width;
+                add_arr[ro] = input[base + add_idx];
+                rem_arr[ro] = input[base + rem_idx];
+            }
+            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+        }
+    }
+
+    // Scalar remainder rows
+    let inv = 1.0 / diam as f32;
+    for row in (row_groups * 8)..height {
+        let row_off = row * width;
+        let inp = &input[row_off..row_off + width];
+        let out = &mut output[row_off..row_off + width];
+
+        let mut sum = 0.0f32;
+        for i in 0..diam {
+            let idx = if i <= r { (r - i).min(width - 1) } else { (i - r).min(width - 1) };
+            sum += inp[idx];
+        }
+
+        for x in 0..width {
+            out[x] = sum * inv;
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 { rem_i.unsigned_abs() } else { rem_i as usize };
+            let rem_idx = rem_idx.min(width - 1);
+            sum += inp[add_idx] - inp[rem_idx];
+        }
+    }
+}
+
+fn box_blur_h_inner_scalar(
+    _token: archmage::ScalarToken,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
     let diam = 2 * radius + 1;
     let inv = 1.0 / diam as f32;
     let r = radius;
@@ -153,39 +241,17 @@ fn box_blur_h(input: &[f32], output: &mut [f32], width: usize, height: usize, ra
         let inp = &input[row_off..row_off + width];
         let out = &mut output[row_off..row_off + width];
 
-        // Initialize running sum with mirrored padding
-        let mut sum = inp[0] * (r as f32 + 1.0);
-        for i in 1..=r.min(width - 1) {
-            sum += inp[i];
-        }
-        // Mirror the right side of the initial window
-        for i in 1..=r {
-            if i < width {
-                sum += inp[i];
-            } else {
-                sum += inp[width - 1];
-            }
-        }
-        // Actually, simpler mirror: left edge mirrors first pixel
-        // Reset and redo properly
-        sum = 0.0;
+        let mut sum = 0.0f32;
         for i in 0..diam {
-            let idx = if i <= r {
-                // Left mirror: clamp to 0
-                let mirror_i = r as isize - i as isize;
-                mirror_i.unsigned_abs().min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
+            let idx = if i <= r { (r - i).min(width - 1) } else { (i - r).min(width - 1) };
             sum += inp[idx];
         }
 
         for x in 0..width {
             out[x] = sum * inv;
-            // Add right pixel, remove left pixel
             let add_idx = (x + r + 1).min(width - 1);
             let rem_i = x as isize - r as isize;
-            let rem_idx = if rem_i < 0 { (-rem_i) as usize } else { rem_i as usize };
+            let rem_idx = if rem_i < 0 { rem_i.unsigned_abs() } else { rem_i as usize };
             let rem_idx = rem_idx.min(width - 1);
             sum += inp[add_idx] - inp[rem_idx];
         }
