@@ -13,12 +13,6 @@ pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(mul_into_inner(a, b, out), [v4, v3]);
 }
 
-/// Element-wise multiply-accumulate: accum[i] += a[i] * b[i]
-#[allow(dead_code)]
-pub fn mul_add_into(a: &[f32], b: &[f32], accum: &mut [f32]) {
-    incant!(mul_add_inner(a, b, accum), [v3]);
-}
-
 /// Element-wise: out[i] = a[i]*a[i] + b[i]*b[i] (sum of squares)
 pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(sq_sum_into_inner(a, b, out), [v4, v3]);
@@ -138,31 +132,6 @@ fn mul_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: &mu
 fn mul_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], out: &mut [f32]) {
     for i in 0..a.len() {
         out[i] = a[i] * b[i];
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn mul_add_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], accum: &mut [f32]) {
-    let n = a.len();
-    let chunks = n / 8;
-    for c in 0..chunks {
-        let base = c * 8;
-        let va = f32x8::from_array(token, a[base..][..8].try_into().unwrap());
-        let vb = f32x8::from_array(token, b[base..][..8].try_into().unwrap());
-        let vc = f32x8::from_array(token, accum[base..][..8].try_into().unwrap());
-        let result = va.mul_add(vb, vc);
-        accum[base..base + 8].copy_from_slice(&result.to_array());
-    }
-    for i in (chunks * 8)..n {
-        accum[i] = a[i].mul_add(b[i], accum[i]);
-    }
-}
-
-#[allow(dead_code)]
-fn mul_add_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], accum: &mut [f32]) {
-    for i in 0..a.len() {
-        accum[i] = a[i].mul_add(b[i], accum[i]);
     }
 }
 

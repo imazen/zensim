@@ -306,11 +306,12 @@ fn compute_channel(
     ChannelResult { ssim, edge }
 }
 
-/// Minimum pixel count to justify spawning a parallel thread.
-const PARALLEL_THRESHOLD: usize = 50_000;
+/// Minimum pixel count to justify phased parallel blur (3 sync points).
+/// Below this, sequential is faster due to thread overhead.
+const PARALLEL_THRESHOLD: usize = 100_000;
 
 /// Compute SSIM and edge statistics for a single scale.
-/// Uses parallel channel processing for large scales.
+/// Uses phased blur parallelism for large scales.
 #[allow(clippy::too_many_arguments)]
 fn compute_single_scale(
     src: &[Vec<f32>; 3],
@@ -346,66 +347,24 @@ fn compute_single_scale(
 
     let n = width * height;
 
-    if active_channels.len() >= 2 && n >= PARALLEL_THRESHOLD {
-        // Parallel: process first channel on a spawned thread, rest on current thread.
-        // Both use pre-allocated buffer sets (no per-call allocation).
-        let (first_c, first_ssim, first_edge) = active_channels[0];
-        let rest = &active_channels[1..];
-
-        let first_result = std::thread::scope(|s| {
-            let handle = s.spawn(|| {
-                compute_channel(
-                    &src[first_c],
-                    &dst[first_c],
-                    width,
-                    height,
-                    blur_radius,
-                    blur_passes,
-                    first_ssim,
-                    first_edge,
-                    parallel_bufs,
-                )
-            });
-
-            // Process remaining channels on the current thread
-            let mut rest_results: Vec<(usize, ChannelResult)> = Vec::new();
-            for &(c, need_ssim, need_edge) in rest {
-                let result = compute_channel(
-                    &src[c],
-                    &dst[c],
-                    width,
-                    height,
-                    blur_radius,
-                    blur_passes,
-                    need_ssim,
-                    need_edge,
-                    bufs,
-                );
-                rest_results.push((c, result));
-            }
-
-            let first = handle.join().unwrap();
-            (first, rest_results)
-        });
-
-        // Collect results
-        let (first, rest_results) = first_result;
-        ssim_vals[first_c * 2] = first.ssim[0];
-        ssim_vals[first_c * 2 + 1] = first.ssim[1];
-        edge_vals[first_c * 4] = first.edge[0];
-        edge_vals[first_c * 4 + 1] = first.edge[1];
-        edge_vals[first_c * 4 + 2] = first.edge[2];
-        edge_vals[first_c * 4 + 3] = first.edge[3];
-        for (c, result) in rest_results {
-            ssim_vals[c * 2] = result.ssim[0];
-            ssim_vals[c * 2 + 1] = result.ssim[1];
-            edge_vals[c * 4] = result.edge[0];
-            edge_vals[c * 4 + 1] = result.edge[1];
-            edge_vals[c * 4 + 2] = result.edge[2];
-            edge_vals[c * 4 + 3] = result.edge[3];
-        }
+    if n >= PARALLEL_THRESHOLD {
+        // Phased parallelism: parallelize blur operations for better load balance.
+        // Instead of 1 channel per thread (imbalanced), we pair independent blurs.
+        compute_single_scale_phased(
+            src,
+            dst,
+            width,
+            height,
+            blur_radius,
+            blur_passes,
+            bufs,
+            parallel_bufs,
+            &active_channels,
+            &mut ssim_vals,
+            &mut edge_vals,
+        );
     } else {
-        // Sequential: use shared buffers
+        // Sequential: use shared buffers for small images
         for &(c, need_ssim, need_edge) in &active_channels {
             let result = compute_channel(
                 &src[c],
@@ -418,18 +377,190 @@ fn compute_single_scale(
                 need_edge,
                 bufs,
             );
-            ssim_vals[c * 2] = result.ssim[0];
-            ssim_vals[c * 2 + 1] = result.ssim[1];
-            edge_vals[c * 4] = result.edge[0];
-            edge_vals[c * 4 + 1] = result.edge[1];
-            edge_vals[c * 4 + 2] = result.edge[2];
-            edge_vals[c * 4 + 3] = result.edge[3];
+            store_channel_result(c, &result, &mut ssim_vals, &mut edge_vals);
         }
     }
 
     ScaleStats {
         ssim: ssim_vals,
         edge: edge_vals,
+    }
+}
+
+fn store_channel_result(
+    c: usize,
+    result: &ChannelResult,
+    ssim_vals: &mut [f64; 6],
+    edge_vals: &mut [f64; 12],
+) {
+    ssim_vals[c * 2] = result.ssim[0];
+    ssim_vals[c * 2 + 1] = result.ssim[1];
+    edge_vals[c * 4] = result.edge[0];
+    edge_vals[c * 4 + 1] = result.edge[1];
+    edge_vals[c * 4 + 2] = result.edge[2];
+    edge_vals[c * 4 + 3] = result.edge[3];
+}
+
+/// Phased blur parallelism for large images.
+///
+/// Instead of parallelizing by channel (Y on thread 1, B on thread 2 — imbalanced),
+/// we parallelize pairs of independent blur operations:
+///
+/// Phase 1: blur(src_ch0) || blur(dst_ch0) — 2 mu blurs in parallel
+/// Phase 2: blur(sigma_sq) || blur(sigma12_or_ch1_src) — balanced work
+/// Phase 3: blur(ch1_dst_if_needed) + all reductions
+#[allow(clippy::too_many_arguments)]
+fn compute_single_scale_phased(
+    src: &[Vec<f32>; 3],
+    dst: &[Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    blur_radius: usize,
+    blur_passes: u8,
+    bufs: &mut ScaleBuffers,
+    parallel_bufs: &mut ScaleBuffers,
+    active_channels: &[(usize, bool, bool)],
+    ssim_vals: &mut [f64; 6],
+    edge_vals: &mut [f64; 12],
+) {
+    let n = width * height;
+    let one_over_n = 1.0 / n as f64;
+
+    #[allow(clippy::type_complexity)]
+    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match blur_passes {
+        1 => box_blur_1pass_into,
+        2 => box_blur_2pass_into,
+        _ => box_blur_3pass_into,
+    };
+
+    // Find the SSIM channel (heaviest: 4 blurs) and edge-only channels (lighter: 2 blurs)
+    let mut ssim_ch: Option<(usize, bool)> = None; // (channel_idx, need_edge)
+    let mut edge_only_chs: Vec<usize> = Vec::new();
+
+    for &(c, need_ssim, need_edge) in active_channels {
+        if need_ssim {
+            ssim_ch = Some((c, need_edge));
+        } else if need_edge {
+            edge_only_chs.push(c);
+        }
+    }
+
+    // Destructure bufs to allow split borrows across threads
+    let ScaleBuffers {
+        mul_buf: ref mut scratch1,
+        mu1: ref mut mu1_a,
+        mu2: ref mut mu2_a,
+        sigma1_sq: ref mut sig_sq,
+        sigma12: ref mut sig12,
+        temp_blur: ref mut temp1,
+    } = *bufs;
+    let ScaleBuffers {
+        mul_buf: ref mut scratch2,
+        mu1: ref mut mu1_b,
+        mu2: ref mut mu2_b,
+        sigma1_sq: _,
+        sigma12: _,
+        temp_blur: ref mut temp2,
+    } = *parallel_bufs;
+
+    if let Some((sc, sc_need_edge)) = ssim_ch {
+        // --- SSIM channel (4 blurs + reductions) ---
+
+        // Phase 1: parallel mu blurs for SSIM channel
+        std::thread::scope(|s| {
+            s.spawn(|| blur_fn(&src[sc], mu1_a, temp1, width, height, blur_radius));
+            blur_fn(&dst[sc], mu2_a, temp2, width, height, blur_radius);
+        });
+
+        if let Some(&edge_c) = edge_only_chs.first() {
+            // Phase 2: SSIM sigma blur || edge channel mu blur (balanced!)
+            // Thread 1: sq_sum + blur → sig_sq
+            // Thread 2: blur(edge_src) → mu1_b
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    sq_sum_into(&src[sc], &dst[sc], scratch1);
+                    blur_fn(scratch1, sig_sq, temp1, width, height, blur_radius);
+                });
+                blur_fn(&src[edge_c], mu1_b, temp2, width, height, blur_radius);
+            });
+
+            // Phase 3: SSIM sigma12 blur || edge channel mu2 blur (balanced!)
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    mul_into(&src[sc], &dst[sc], scratch1);
+                    blur_fn(scratch1, sig12, temp1, width, height, blur_radius);
+                });
+                blur_fn(&dst[edge_c], mu2_b, temp2, width, height, blur_radius);
+            });
+
+            // Phase 4: reductions (fast, sequential)
+            let (sum_d, sum_d4) = ssim_channel(mu1_a, mu2_a, sig_sq, sig12);
+            ssim_vals[sc * 2] = sum_d * one_over_n;
+            ssim_vals[sc * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+
+            if sc_need_edge {
+                let (art, art4, det, det4) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
+                edge_vals[sc * 4] = art * one_over_n;
+                edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
+                edge_vals[sc * 4 + 2] = det * one_over_n;
+                edge_vals[sc * 4 + 3] = (det4 * one_over_n).powf(0.25);
+            }
+
+            let (art, art4, det, det4) =
+                edge_diff_channel(&src[edge_c], &dst[edge_c], mu1_b, mu2_b);
+            edge_vals[edge_c * 4] = art * one_over_n;
+            edge_vals[edge_c * 4 + 1] = (art4 * one_over_n).powf(0.25);
+            edge_vals[edge_c * 4 + 2] = det * one_over_n;
+            edge_vals[edge_c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+
+            // Handle additional edge-only channels (rare — usually only 1)
+            for &edge_c2 in &edge_only_chs[1..] {
+                blur_fn(&src[edge_c2], mu1_b, temp1, width, height, blur_radius);
+                blur_fn(&dst[edge_c2], mu2_b, temp2, width, height, blur_radius);
+                let (art, art4, det, det4) =
+                    edge_diff_channel(&src[edge_c2], &dst[edge_c2], mu1_b, mu2_b);
+                edge_vals[edge_c2 * 4] = art * one_over_n;
+                edge_vals[edge_c2 * 4 + 1] = (art4 * one_over_n).powf(0.25);
+                edge_vals[edge_c2 * 4 + 2] = det * one_over_n;
+                edge_vals[edge_c2 * 4 + 3] = (det4 * one_over_n).powf(0.25);
+            }
+        } else {
+            // No edge-only channels — just parallel sigma blurs
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    sq_sum_into(&src[sc], &dst[sc], scratch1);
+                    blur_fn(scratch1, sig_sq, temp1, width, height, blur_radius);
+                });
+                mul_into(&src[sc], &dst[sc], scratch2);
+                blur_fn(scratch2, sig12, temp2, width, height, blur_radius);
+            });
+
+            let (sum_d, sum_d4) = ssim_channel(mu1_a, mu2_a, sig_sq, sig12);
+            ssim_vals[sc * 2] = sum_d * one_over_n;
+            ssim_vals[sc * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+
+            if sc_need_edge {
+                let (art, art4, det, det4) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
+                edge_vals[sc * 4] = art * one_over_n;
+                edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
+                edge_vals[sc * 4 + 2] = det * one_over_n;
+                edge_vals[sc * 4 + 3] = (det4 * one_over_n).powf(0.25);
+            }
+        }
+    } else {
+        // No SSIM channels — just edge-only (process sequentially, they're light)
+        for &edge_c in &edge_only_chs {
+            std::thread::scope(|s| {
+                s.spawn(|| blur_fn(&src[edge_c], mu1_a, temp1, width, height, blur_radius));
+                blur_fn(&dst[edge_c], mu2_a, temp2, width, height, blur_radius);
+            });
+            let (art, art4, det, det4) =
+                edge_diff_channel(&src[edge_c], &dst[edge_c], mu1_a, mu2_a);
+            edge_vals[edge_c * 4] = art * one_over_n;
+            edge_vals[edge_c * 4 + 1] = (art4 * one_over_n).powf(0.25);
+            edge_vals[edge_c * 4 + 2] = det * one_over_n;
+            edge_vals[edge_c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+        }
     }
 }
 
