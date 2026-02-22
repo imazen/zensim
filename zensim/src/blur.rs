@@ -724,6 +724,7 @@ fn box_blur_v_inner_scalar(
 }
 
 /// Downscale a plane by 2x in each dimension (average of 2x2 blocks).
+#[allow(dead_code)]
 pub fn downscale_2x(plane: &[f32], width: usize, height: usize) -> (Vec<f32>, usize, usize) {
     let new_w = width / 2;
     let new_h = height / 2;
@@ -735,6 +736,29 @@ pub fn downscale_2x(plane: &[f32], width: usize, height: usize) -> (Vec<f32>, us
     );
 
     (out, new_w, new_h)
+}
+
+/// Downscale in-place: writes to beginning of buffer, truncates.
+/// Safe because output index < source index for all elements.
+pub fn downscale_2x_inplace(plane: &mut Vec<f32>, width: usize, height: usize) -> (usize, usize) {
+    let new_w = width / 2;
+    let new_h = height / 2;
+
+    // In-place: output index y*new_w+x < source index (2y)*width+(2x) for all y,x.
+    // Proof: 2y*width + 2x = 2*(y*width + x) >= 2*(y*new_w + x) > y*new_w + x.
+    for y in 0..new_h {
+        let sy = y * 2;
+        for x in 0..new_w {
+            let sx = x * 2;
+            let a = plane[sy * width + sx];
+            let b = plane[sy * width + sx + 1];
+            let c = plane[(sy + 1) * width + sx];
+            let d = plane[(sy + 1) * width + sx + 1];
+            plane[y * new_w + x] = (a + b + c + d) * 0.25;
+        }
+    }
+    plane.truncate(new_w * new_h);
+    (new_w, new_h)
 }
 
 #[cfg(target_arch = "x86_64")]

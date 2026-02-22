@@ -4,7 +4,7 @@
 //! with contrast sensitivity weighting per scale.
 
 use crate::NUM_SCALES;
-use crate::blur::{box_blur_2pass_into, box_blur_3pass_into, downscale_2x};
+use crate::blur::{box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace};
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
@@ -191,22 +191,16 @@ fn compute_multiscale_stats(
         );
         stats.push(scale_stat);
 
-        // Downscale for next level
+        // Downscale for next level (in-place, no allocations)
         if scale < NUM_SCALES - 1 {
-            let mut new_src = [Vec::new(), Vec::new(), Vec::new()];
-            let mut new_dst = [Vec::new(), Vec::new(), Vec::new()];
             let mut nw = 0;
             let mut nh = 0;
             for c in 0..3 {
-                let (s, sw, sh) = downscale_2x(&src_planes[c], w, h);
-                let (d, _, _) = downscale_2x(&dst_planes[c], w, h);
-                new_src[c] = s;
-                new_dst[c] = d;
+                let (sw, sh) = downscale_2x_inplace(&mut src_planes[c], w, h);
+                let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
                 nw = sw;
                 nh = sh;
             }
-            src_planes = new_src;
-            dst_planes = new_dst;
             w = nw;
             h = nh;
         }

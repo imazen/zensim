@@ -47,21 +47,21 @@ pub fn srgb_u8_to_linear(v: u8) -> f32 {
     srgb_lut()[v as usize]
 }
 
-/// Fast cube root: bit manipulation + 2 Newton-Raphson iterations.
-/// ~4x faster than libm cbrtf, accurate to ~1 ULP.
+/// Fast cube root: bit manipulation + 2 Newton-Raphson iterations in f32.
+/// Accurate to ~20 bits (sufficient for image quality metrics).
 #[inline(always)]
 pub(crate) fn cbrtf_fast(x: f32) -> f32 {
     const B1: u32 = 709_958_130;
-    let mut ui = x.to_bits();
+    let ui = x.to_bits();
     let hx = (ui & 0x7FFF_FFFF) / 3 + B1;
-    ui = (ui & 0x8000_0000) | hx;
-    let mut t = f64::from(f32::from_bits(ui));
-    let xf64 = f64::from(x);
+    let ui_out = (ui & 0x8000_0000) | hx;
+    let mut t = f32::from_bits(ui_out);
+    // Halley's method in f32 (each step roughly triples correct bits: 5→15→45)
     let mut r = t * t * t;
-    t = t * (xf64 + xf64 + r) / (xf64 + r + r);
+    t = t * (x + x + r) / (x + r + r);
     r = t * t * t;
-    t = t * (xf64 + xf64 + r) / (xf64 + r + r);
-    t as f32
+    t = t * (x + x + r) / (x + r + r);
+    t
 }
 
 /// Convert interleaved sRGB u8 to planar positive XYB.
