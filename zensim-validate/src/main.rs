@@ -16,6 +16,10 @@ struct Args {
     #[arg(long, value_enum)]
     format: DatasetFormat,
 
+    /// Additional datasets for combined training (format: type:path,type:path)
+    #[arg(long)]
+    also: Option<String>,
+
     /// Max images to process (0 = all)
     #[arg(long, default_value = "0")]
     max_images: usize,
@@ -29,7 +33,7 @@ struct Args {
     features_csv: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum DatasetFormat {
     Tid2013,
     Kadid10k,
@@ -134,42 +138,93 @@ fn main() {
 
     // Train weights if requested
     if args.train {
-        let feature_vecs: Vec<&[f64]> = valid.iter().map(|(_, r)| r.features.as_slice()).collect();
+        // Collect datasets for multi-dataset training
+        let mut dataset_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = Vec::new();
+
+        // Primary dataset
+        let feature_vecs: Vec<Vec<f64>> = valid.iter().map(|(_, r)| r.features.clone()).collect();
         let n_features = feature_vecs[0].len();
-        println!("Training weights on {} pairs with {} features...", valid.len(), n_features);
+        dataset_groups.push((
+            format!("{:?}", args.format),
+            human_scores.clone(),
+            feature_vecs,
+        ));
 
-        let best_weights = train_weights(&human_scores, &feature_vecs, n_features);
+        // Additional datasets from --also flag
+        if let Some(ref also_str) = args.also {
+            for spec in also_str.split(',') {
+                let parts: Vec<&str> = spec.splitn(2, ':').collect();
+                if parts.len() != 2 {
+                    eprintln!("Invalid --also format: {}. Expected type:path", spec);
+                    continue;
+                }
+                let fmt = match parts[0] {
+                    "tid2013" => DatasetFormat::Tid2013,
+                    "kadid10k" => DatasetFormat::Kadid10k,
+                    "csiq" => DatasetFormat::Csiq,
+                    _ => { eprintln!("Unknown format: {}", parts[0]); continue; }
+                };
+                let path = PathBuf::from(parts[1]);
+                let extra_pairs = match fmt {
+                    DatasetFormat::Tid2013 => load_tid2013(&path),
+                    DatasetFormat::Kadid10k => load_kadid10k(&path),
+                    DatasetFormat::Csiq => load_csiq(&path),
+                };
+                println!("Loading additional dataset {:?}: {} pairs...", parts[0], extra_pairs.len());
 
-        // Evaluate with trained weights
-        let trained_scores: Vec<f64> = feature_vecs.iter()
-            .map(|f| zensim::score_from_features(f, &best_weights).0)
-            .collect();
+                let pb2 = ProgressBar::new(extra_pairs.len() as u64);
+                pb2.set_style(
+                    ProgressStyle::default_bar()
+                        .template("[{elapsed_precise}] {bar:40.green/blue} {pos}/{len} ({per_sec})")
+                        .unwrap(),
+                );
 
-        let srocc_t = spearman_correlation(&human_scores, &trained_scores);
-        let plcc_t = pearson_correlation(&human_scores, &trained_scores);
-        let krocc_t = kendall_correlation(&human_scores, &trained_scores);
+                let extra_results: Vec<(f64, zensim::ZensimResult)> = extra_pairs
+                    .par_iter()
+                    .map(|pair| {
+                        let result = compute_pair_result(pair, true);
+                        pb2.inc(1);
+                        (pair.human_score, result)
+                    })
+                    .collect();
+                pb2.finish();
 
-        println!("\n=== Correlation with Trained Weights ===");
-        println!("SROCC (Spearman):  {:.4}", srocc_t);
-        println!("PLCC  (Pearson):   {:.4}", plcc_t);
-        println!("KROCC (Kendall):   {:.4}", krocc_t);
+                let extra_valid: Vec<(f64, zensim::ZensimResult)> = extra_results
+                    .into_iter()
+                    .filter(|(_, r)| r.score.is_finite())
+                    .collect();
 
-        // Print weights for embedding in code
-        println!("\n// Trained weights ({} values):", best_weights.len());
-        println!("const TRAINED_WEIGHTS: [f64; {}] = [", best_weights.len());
-        for (i, w) in best_weights.iter().enumerate() {
-            if i % 6 == 0 {
-                let scale = i / 18;
-                let ch = (i % 18) / 6;
-                let ch_name = ["X", "Y", "B"][ch];
-                print!("    // Scale {} Channel {}\n    ", scale, ch_name);
-            }
-            print!("{:.6}, ", w);
-            if i % 6 == 5 {
-                println!();
+                println!("  {} valid pairs", extra_valid.len());
+
+                let h: Vec<f64> = extra_valid.iter().map(|(h, _)| *h).collect();
+                let f: Vec<Vec<f64>> = extra_valid.iter().map(|(_, r)| r.features.clone()).collect();
+                dataset_groups.push((parts[0].to_string(), h, f));
             }
         }
-        println!("];");
+
+        if dataset_groups.len() == 1 {
+            // Single-dataset training
+            let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
+            println!("Training weights on {} pairs with {} features...",
+                dataset_groups[0].1.len(), n_features);
+            let best_weights = train_weights(&dataset_groups[0].1, &feats, n_features);
+            print_trained_results(&dataset_groups[0].1, &feats, &best_weights);
+        } else {
+            // Multi-dataset training: maximize average SROCC
+            println!("\nMulti-dataset training on {} datasets...", dataset_groups.len());
+            let best_weights = train_weights_multi(&dataset_groups, n_features);
+
+            // Evaluate on each dataset
+            for (name, h, f) in &dataset_groups {
+                let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
+                let trained_scores: Vec<f64> = feats.iter()
+                    .map(|feat| zensim::score_from_features(feat, &best_weights).0)
+                    .collect();
+                let srocc = spearman_correlation(h, &trained_scores);
+                println!("  {}: SROCC = {:.4}", name, srocc);
+            }
+            print_weights(&best_weights);
+        }
     }
 }
 
@@ -332,6 +387,141 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
     }
 
     println!("Best training SROCC: {:.4}", best_srocc);
+    best_weights
+}
+
+fn print_trained_results(human_scores: &[f64], feats: &[&[f64]], weights: &[f64]) {
+    let trained_scores: Vec<f64> = feats.iter()
+        .map(|f| zensim::score_from_features(f, weights).0)
+        .collect();
+
+    let srocc = spearman_correlation(human_scores, &trained_scores);
+    let plcc = pearson_correlation(human_scores, &trained_scores);
+    let krocc = kendall_correlation(human_scores, &trained_scores);
+
+    println!("\n=== Correlation with Trained Weights ===");
+    println!("SROCC (Spearman):  {:.4}", srocc);
+    println!("PLCC  (Pearson):   {:.4}", plcc);
+    println!("KROCC (Kendall):   {:.4}", krocc);
+    print_weights(weights);
+}
+
+fn print_weights(weights: &[f64]) {
+    println!("\n// Trained weights ({} values):", weights.len());
+    println!("const TRAINED_WEIGHTS: [f64; {}] = [", weights.len());
+    for (i, w) in weights.iter().enumerate() {
+        if i % 6 == 0 {
+            let scale = i / 18;
+            let ch = (i % 18) / 6;
+            let ch_name = ["X", "Y", "B"][ch];
+            print!("    // Scale {} Channel {}\n    ", scale, ch_name);
+        }
+        print!("{:.6}, ", w);
+        if i % 6 == 5 {
+            println!();
+        }
+    }
+    println!("];");
+}
+
+/// Train weights on multiple datasets, maximizing average SROCC.
+fn train_weights_multi(
+    datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
+    n_features: usize,
+) -> Vec<f64> {
+    let mut best_weights = vec![1.0; n_features];
+    let mut best_avg_srocc = -1.0f64;
+
+    // Prepare feature slices for each dataset
+    let dataset_slices: Vec<(Vec<f64>, Vec<Vec<f64>>)> = datasets.iter()
+        .map(|(_, h, f)| (h.clone(), f.clone()))
+        .collect();
+
+    // Compute feature ranges across all datasets
+    let mut feat_max = vec![0.0f64; n_features];
+    for (_, feats) in &dataset_slices {
+        for f in feats {
+            for (i, &val) in f.iter().enumerate() {
+                feat_max[i] = feat_max[i].max(val.abs());
+            }
+        }
+    }
+
+    let eval_multi = |weights: &[f64]| -> f64 {
+        let mut sum_srocc = 0.0;
+        for (human, feats) in &dataset_slices {
+            let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
+            sum_srocc += eval_srocc(human, &feat_slices, weights);
+        }
+        sum_srocc / dataset_slices.len() as f64
+    };
+
+    let n_restarts = 10;
+    let mut rng_state = 42u64;
+    let mut next_rand = || -> f64 {
+        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (rng_state >> 33) as f64 / (u32::MAX as f64)
+    };
+
+    for restart in 0..n_restarts {
+        let mut weights = if restart == 0 {
+            vec![1.0 / n_features as f64; n_features]
+        } else {
+            (0..n_features)
+                .map(|_| if next_rand() < 0.3 { next_rand() * 10.0 } else { 0.0 })
+                .collect()
+        };
+
+        for iter in 0..50 {
+            let mut improved = false;
+            let step_scale = if iter < 20 { 1.0 } else { 0.5 };
+
+            for dim in 0..n_features {
+                let current_val = weights[dim];
+                let mut best_val = current_val;
+                let mut best_local = eval_multi(&weights);
+
+                for &mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
+                    weights[dim] = current_val * mult * step_scale + current_val * (1.0 - step_scale);
+                    if weights[dim] < 0.0 { weights[dim] = 0.0; }
+                    let score = eval_multi(&weights);
+                    if score > best_local {
+                        best_local = score;
+                        best_val = weights[dim];
+                        improved = true;
+                    }
+                }
+
+                if feat_max[dim] > 0.0 {
+                    let base_step = 1.0 / feat_max[dim];
+                    for &mult in &[0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0] {
+                        weights[dim] = base_step * mult * step_scale;
+                        let score = eval_multi(&weights);
+                        if score > best_local {
+                            best_local = score;
+                            best_val = weights[dim];
+                            improved = true;
+                        }
+                    }
+                }
+
+                weights[dim] = best_val;
+            }
+
+            if !improved { break; }
+        }
+
+        for w in weights.iter_mut() { *w = w.max(0.0); }
+
+        let avg = eval_multi(&weights);
+        if avg > best_avg_srocc {
+            best_avg_srocc = avg;
+            best_weights = weights;
+        }
+        println!("  Restart {}: avg SROCC = {:.4}", restart, avg);
+    }
+
+    println!("Best multi-dataset avg SROCC: {:.4}", best_avg_srocc);
     best_weights
 }
 
