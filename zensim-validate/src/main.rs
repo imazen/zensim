@@ -42,6 +42,11 @@ struct Args {
     /// Box blur radius at scale 0 (default: 5, giving 11-pixel kernel)
     #[arg(long, default_value = "5")]
     blur_radius: usize,
+
+    /// During training, only tune weights that are already nonzero in WEIGHTS.
+    /// Prevents activating new channels (which would add blur operations).
+    #[arg(long, default_value = "false")]
+    sparse: bool,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -237,6 +242,25 @@ fn main() {
             }
         }
 
+        // Build frozen mask: if --sparse, only optimize already-nonzero weights
+        let frozen: Vec<bool> = if args.sparse {
+            zensim::WEIGHTS
+                .iter()
+                .map(|w| w.abs() < 0.001) // frozen if currently zero
+                .collect()
+        } else {
+            vec![false; n_features]
+        };
+        if args.sparse {
+            let active = frozen.iter().filter(|f| !**f).count();
+            println!(
+                "Sparse mode: optimizing {} of {} weights (freezing {} at zero)",
+                active,
+                n_features,
+                n_features - active
+            );
+        }
+
         if dataset_groups.len() == 1 {
             // Single-dataset training
             let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
@@ -245,7 +269,8 @@ fn main() {
                 dataset_groups[0].1.len(),
                 n_features
             );
-            let best_weights = train_weights(&dataset_groups[0].1, &feats, n_features);
+            let best_weights =
+                train_weights(&dataset_groups[0].1, &feats, n_features, &frozen);
             print_trained_results(&dataset_groups[0].1, &feats, &best_weights);
         } else {
             // Multi-dataset training: maximize average SROCC
@@ -253,7 +278,7 @@ fn main() {
                 "\nMulti-dataset training on {} datasets...",
                 dataset_groups.len()
             );
-            let best_weights = train_weights_multi(&dataset_groups, n_features);
+            let best_weights = train_weights_multi(&dataset_groups, n_features, &frozen);
 
             // Evaluate on each dataset
             for (name, h, f) in &dataset_groups {
@@ -342,7 +367,12 @@ fn write_features_csv(path: &Path, data: &[(f64, zensim::ZensimResult)]) {
 
 /// Train weights using coordinate descent with random restarts.
 /// Maximizes SROCC between predicted scores and human scores.
-fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -> Vec<f64> {
+fn train_weights(
+    human_scores: &[f64],
+    features: &[&[f64]],
+    n_features: usize,
+    frozen: &[bool],
+) -> Vec<f64> {
     let mut best_weights = vec![1.0; n_features];
     let mut best_srocc = -1.0f64;
 
@@ -367,15 +397,20 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
 
     for restart in 0..n_restarts {
         let mut weights = if restart == 0 {
-            // Start from current embedded weights (good initial point)
-            let embedded = zensim::FEATURES_PER_SCALE; // just for count
-            let _ = embedded;
-            vec![1.0 / n_features as f64; n_features]
-        } else {
-            // Sparse random: only activate ~30% of features
+            // Start from current embedded weights (best known solution)
+            zensim::WEIGHTS.to_vec()
+        } else if restart == 1 {
+            // Start from uniform weights (respecting frozen mask)
             (0..n_features)
-                .map(|_| {
-                    if next_rand() < 0.3 {
+                .map(|i| if frozen[i] { 0.0 } else { 1.0 / n_features as f64 })
+                .collect()
+        } else {
+            // Sparse random: only activate ~30% of non-frozen features
+            (0..n_features)
+                .map(|i| {
+                    if frozen[i] {
+                        0.0
+                    } else if next_rand() < 0.3 {
                         next_rand() * 10.0
                     } else {
                         0.0
@@ -390,6 +425,10 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
             let step_scale = if iter < 20 { 1.0 } else { 0.5 };
 
             for dim in 0..n_features {
+                if frozen[dim] {
+                    weights[dim] = 0.0;
+                    continue;
+                }
                 let current_val = weights[dim];
                 let mut best_val = current_val;
                 let mut best_local_srocc = eval_srocc(human_scores, features, &weights);
@@ -488,6 +527,7 @@ fn print_weights(weights: &[f64]) {
 fn train_weights_multi(
     datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
     n_features: usize,
+    frozen: &[bool],
 ) -> Vec<f64> {
     let mut best_weights = vec![1.0; n_features];
     let mut best_avg_srocc = -1.0f64;
@@ -528,11 +568,17 @@ fn train_weights_multi(
 
     for restart in 0..n_restarts {
         let mut weights = if restart == 0 {
-            vec![1.0 / n_features as f64; n_features]
+            zensim::WEIGHTS.to_vec()
+        } else if restart == 1 {
+            (0..n_features)
+                .map(|i| if frozen[i] { 0.0 } else { 1.0 / n_features as f64 })
+                .collect()
         } else {
             (0..n_features)
-                .map(|_| {
-                    if next_rand() < 0.3 {
+                .map(|i| {
+                    if frozen[i] {
+                        0.0
+                    } else if next_rand() < 0.3 {
                         next_rand() * 10.0
                     } else {
                         0.0
@@ -546,6 +592,10 @@ fn train_weights_multi(
             let step_scale = if iter < 20 { 1.0 } else { 0.5 };
 
             for dim in 0..n_features {
+                if frozen[dim] {
+                    weights[dim] = 0.0;
+                    continue;
+                }
                 let current_val = weights[dim];
                 let mut best_val = current_val;
                 let mut best_local = eval_multi(&weights);
