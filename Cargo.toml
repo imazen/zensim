@@ -14,8 +14,8 @@ opt-level = 2
 
 [workspace.dependencies]
 zensim = { path = "zensim" }
-archmage = { version = "0.8.3", features = ["macros", "safe_unaligned_simd"] }
-magetypes = "0.8.3"
+archmage = { version = "0.8.3", features = ["macros", "safe_unaligned_simd", "avx512"] }
+magetypes = { version = "0.8.3", features = ["avx512"] }
 thiserror = "2"
 image = "0.25"
 rayon = "1.10"

@@ -36,28 +36,23 @@ fn main() {
     }
 
     // Convert to &[[u8; 3]]
-    let src_pixels: Vec<[u8; 3]> = src_img
-        .pixels()
-        .map(|p| [p.0[0], p.0[1], p.0[2]])
-        .collect();
-    let dst_pixels: Vec<[u8; 3]> = dst_img
-        .pixels()
-        .map(|p| [p.0[0], p.0[1], p.0[2]])
-        .collect();
+    let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+    let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
     let start = std::time::Instant::now();
-    let result = zensim::compute_zensim(
-        &src_pixels,
-        &dst_pixels,
-        w as usize,
-        h as usize,
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("Error computing zensim: {}", e);
-        std::process::exit(1);
-    });
+    let result = zensim::compute_zensim(&src_pixels, &dst_pixels, w as usize, h as usize)
+        .unwrap_or_else(|e| {
+            eprintln!("Error computing zensim: {}", e);
+            std::process::exit(1);
+        });
     let elapsed = start.elapsed();
 
-    println!("score: {:.4}  raw_distance: {:.6}  time: {:.3}ms  ({}x{})",
-        result.score, result.raw_distance, elapsed.as_secs_f64() * 1000.0, w, h);
+    println!(
+        "score: {:.4}  raw_distance: {:.6}  time: {:.3}ms  ({}x{})",
+        result.score,
+        result.raw_distance,
+        elapsed.as_secs_f64() * 1000.0,
+        w,
+        h
+    );
 }

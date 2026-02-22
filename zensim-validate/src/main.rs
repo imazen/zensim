@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "zensim-validate", about = "Validate zensim against human quality ratings")]
+#[command(
+    name = "zensim-validate",
+    about = "Validate zensim against human quality ratings"
+)]
 struct Args {
     /// Dataset directory (e.g., /mnt/v/dataset/tid2013)
     #[arg(long)]
@@ -95,7 +98,11 @@ fn main() {
         .filter(|(_, r)| r.score.is_finite())
         .collect();
 
-    println!("\nSuccessfully computed {}/{} pairs", valid.len(), pairs.len());
+    println!(
+        "\nSuccessfully computed {}/{} pairs",
+        valid.len(),
+        pairs.len()
+    );
 
     if valid.len() < 3 {
         println!("Too few valid results for correlation analysis");
@@ -120,9 +127,15 @@ fn main() {
     println!("KROCC (Kendall):   {:.4}", krocc);
 
     let min_m = metric_scores.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_m = metric_scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let max_m = metric_scores
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let mean_m: f64 = metric_scores.iter().sum::<f64>() / metric_scores.len() as f64;
-    println!("Metric score range: {:.2} to {:.2}, mean: {:.2}", min_m, max_m, mean_m);
+    println!(
+        "Metric score range: {:.2} to {:.2}, mean: {:.2}",
+        min_m, max_m, mean_m
+    );
 
     let raw_dists: Vec<f64> = valid.iter().map(|(_, r)| r.raw_distance).collect();
     let min_d = raw_dists.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -133,8 +146,10 @@ fn main() {
     let p10 = sorted_d[sorted_d.len() / 10];
     let p50 = sorted_d[sorted_d.len() / 2];
     let p90 = sorted_d[sorted_d.len() * 9 / 10];
-    println!("Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
-        min_d, p10, p50, p90, max_d, mean_d);
+    println!(
+        "Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
+        min_d, p10, p50, p90, max_d, mean_d
+    );
 
     // Train weights if requested
     if args.train {
@@ -162,7 +177,10 @@ fn main() {
                     "tid2013" => DatasetFormat::Tid2013,
                     "kadid10k" => DatasetFormat::Kadid10k,
                     "csiq" => DatasetFormat::Csiq,
-                    _ => { eprintln!("Unknown format: {}", parts[0]); continue; }
+                    _ => {
+                        eprintln!("Unknown format: {}", parts[0]);
+                        continue;
+                    }
                 };
                 let path = PathBuf::from(parts[1]);
                 let extra_pairs = match fmt {
@@ -170,7 +188,11 @@ fn main() {
                     DatasetFormat::Kadid10k => load_kadid10k(&path),
                     DatasetFormat::Csiq => load_csiq(&path),
                 };
-                println!("Loading additional dataset {:?}: {} pairs...", parts[0], extra_pairs.len());
+                println!(
+                    "Loading additional dataset {:?}: {} pairs...",
+                    parts[0],
+                    extra_pairs.len()
+                );
 
                 let pb2 = ProgressBar::new(extra_pairs.len() as u64);
                 pb2.set_style(
@@ -197,7 +219,10 @@ fn main() {
                 println!("  {} valid pairs", extra_valid.len());
 
                 let h: Vec<f64> = extra_valid.iter().map(|(h, _)| *h).collect();
-                let f: Vec<Vec<f64>> = extra_valid.iter().map(|(_, r)| r.features.clone()).collect();
+                let f: Vec<Vec<f64>> = extra_valid
+                    .iter()
+                    .map(|(_, r)| r.features.clone())
+                    .collect();
                 dataset_groups.push((parts[0].to_string(), h, f));
             }
         }
@@ -205,19 +230,26 @@ fn main() {
         if dataset_groups.len() == 1 {
             // Single-dataset training
             let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
-            println!("Training weights on {} pairs with {} features...",
-                dataset_groups[0].1.len(), n_features);
+            println!(
+                "Training weights on {} pairs with {} features...",
+                dataset_groups[0].1.len(),
+                n_features
+            );
             let best_weights = train_weights(&dataset_groups[0].1, &feats, n_features);
             print_trained_results(&dataset_groups[0].1, &feats, &best_weights);
         } else {
             // Multi-dataset training: maximize average SROCC
-            println!("\nMulti-dataset training on {} datasets...", dataset_groups.len());
+            println!(
+                "\nMulti-dataset training on {} datasets...",
+                dataset_groups.len()
+            );
             let best_weights = train_weights_multi(&dataset_groups, n_features);
 
             // Evaluate on each dataset
             for (name, h, f) in &dataset_groups {
                 let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
-                let trained_scores: Vec<f64> = feats.iter()
+                let trained_scores: Vec<f64> = feats
+                    .iter()
                     .map(|feat| zensim::score_from_features(feat, &best_weights).0)
                     .collect();
                 let srocc = spearman_correlation(h, &trained_scores);
@@ -257,7 +289,13 @@ fn compute_pair_result(pair: &ImagePair, compute_all_features: bool) -> zensim::
         compute_all_features,
         ..Default::default()
     };
-    match zensim::compute_zensim_with_config(&src_pixels, &dst_pixels, w as usize, h as usize, config) {
+    match zensim::compute_zensim_with_config(
+        &src_pixels,
+        &dst_pixels,
+        w as usize,
+        h as usize,
+        config,
+    ) {
         Ok(r) => r,
         Err(_) => nan_result,
     }
@@ -305,7 +343,9 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
     let mut rng_state = 42u64;
 
     let mut next_rand = || -> f64 {
-        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (rng_state >> 33) as f64 / (u32::MAX as f64)
     };
 
@@ -340,8 +380,11 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
 
                 // Multiplicative steps
                 for &mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
-                    weights[dim] = current_val * mult * step_scale + current_val * (1.0 - step_scale);
-                    if weights[dim] < 0.0 { weights[dim] = 0.0; }
+                    weights[dim] =
+                        current_val * mult * step_scale + current_val * (1.0 - step_scale);
+                    if weights[dim] < 0.0 {
+                        weights[dim] = 0.0;
+                    }
                     let srocc = eval_srocc(human_scores, features, &weights);
                     if srocc > best_local_srocc {
                         best_local_srocc = srocc;
@@ -391,7 +434,8 @@ fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -
 }
 
 fn print_trained_results(human_scores: &[f64], feats: &[&[f64]], weights: &[f64]) {
-    let trained_scores: Vec<f64> = feats.iter()
+    let trained_scores: Vec<f64> = feats
+        .iter()
         .map(|f| zensim::score_from_features(f, weights).0)
         .collect();
 
@@ -433,7 +477,8 @@ fn train_weights_multi(
     let mut best_avg_srocc = -1.0f64;
 
     // Prepare feature slices for each dataset
-    let dataset_slices: Vec<(Vec<f64>, Vec<Vec<f64>>)> = datasets.iter()
+    let dataset_slices: Vec<(Vec<f64>, Vec<Vec<f64>>)> = datasets
+        .iter()
         .map(|(_, h, f)| (h.clone(), f.clone()))
         .collect();
 
@@ -459,7 +504,9 @@ fn train_weights_multi(
     let n_restarts = 10;
     let mut rng_state = 42u64;
     let mut next_rand = || -> f64 {
-        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (rng_state >> 33) as f64 / (u32::MAX as f64)
     };
 
@@ -468,7 +515,13 @@ fn train_weights_multi(
             vec![1.0 / n_features as f64; n_features]
         } else {
             (0..n_features)
-                .map(|_| if next_rand() < 0.3 { next_rand() * 10.0 } else { 0.0 })
+                .map(|_| {
+                    if next_rand() < 0.3 {
+                        next_rand() * 10.0
+                    } else {
+                        0.0
+                    }
+                })
                 .collect()
         };
 
@@ -482,8 +535,11 @@ fn train_weights_multi(
                 let mut best_local = eval_multi(&weights);
 
                 for &mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
-                    weights[dim] = current_val * mult * step_scale + current_val * (1.0 - step_scale);
-                    if weights[dim] < 0.0 { weights[dim] = 0.0; }
+                    weights[dim] =
+                        current_val * mult * step_scale + current_val * (1.0 - step_scale);
+                    if weights[dim] < 0.0 {
+                        weights[dim] = 0.0;
+                    }
                     let score = eval_multi(&weights);
                     if score > best_local {
                         best_local = score;
@@ -508,10 +564,14 @@ fn train_weights_multi(
                 weights[dim] = best_val;
             }
 
-            if !improved { break; }
+            if !improved {
+                break;
+            }
         }
 
-        for w in weights.iter_mut() { *w = w.max(0.0); }
+        for w in weights.iter_mut() {
+            *w = w.max(0.0);
+        }
 
         let avg = eval_multi(&weights);
         if avg > best_avg_srocc {
@@ -526,7 +586,8 @@ fn train_weights_multi(
 }
 
 fn eval_srocc(human_scores: &[f64], features: &[&[f64]], weights: &[f64]) -> f64 {
-    let predicted: Vec<f64> = features.iter()
+    let predicted: Vec<f64> = features
+        .iter()
         .map(|f| zensim::score_from_features(f, weights).0)
         .collect();
     spearman_correlation(human_scores, &predicted)
@@ -572,7 +633,9 @@ fn load_tid2013_mos(mos_path: &Path, base: &Path) -> Vec<ImagePair> {
         // Extract reference image number: I01_01_1.bmp → reference_images/I01.BMP
         // Filenames have inconsistent case (I01 vs i01), references are uppercase
         let ref_num = filename[..3].to_uppercase();
-        let ref_path = base.join("reference_images").join(format!("{}.BMP", ref_num));
+        let ref_path = base
+            .join("reference_images")
+            .join(format!("{}.BMP", ref_num));
 
         // Distorted images also have inconsistent case
         let dist_path = base.join("distorted_images").join(filename);
@@ -655,13 +718,14 @@ fn load_csiq(base: &Path) -> Vec<ImagePair> {
 }
 
 fn load_csiq_xlsx(xlsx_path: &Path, base: &Path) -> Vec<ImagePair> {
-    let mut workbook: Xlsx<_> = calamine::open_workbook(xlsx_path)
-        .expect("Failed to open CSIQ DMOS xlsx");
+    let mut workbook: Xlsx<_> =
+        calamine::open_workbook(xlsx_path).expect("Failed to open CSIQ DMOS xlsx");
 
     let mut pairs = Vec::new();
 
     // Use 'all_by_image' sheet which has all pairs
-    let range = workbook.worksheet_range("all_by_image")
+    let range = workbook
+        .worksheet_range("all_by_image")
         .expect("Failed to read 'all_by_image' sheet");
 
     // Mapping from xlsx distortion type to (directory name, filename label)
@@ -672,7 +736,9 @@ fn load_csiq_xlsx(xlsx_path: &Path, base: &Path) -> Vec<ImagePair> {
         ("fnoise", ("fnoise", "fnoise")),
         ("jpeg", ("jpeg", "JPEG")),
         ("jpeg 2000", ("jpeg2000", "jpeg2000")),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     // Calamine strips leading empty columns. Actual layout:
     // [0]=image, [1]=dst_idx, [2]=dst_type, [3]=dst_lev, [4]=dmos_std, [5]=dmos
@@ -718,7 +784,8 @@ fn load_csiq_xlsx(xlsx_path: &Path, base: &Path) -> Vec<ImagePair> {
         };
 
         let ref_path = base.join(format!("{}.png", img_name));
-        let dist_path = base.join(dir_name)
+        let dist_path = base
+            .join(dir_name)
             .join(format!("{}.{}.{}.png", img_name, file_label, dst_lev));
 
         // CSIQ DMOS: 0-1 scale (lower = better quality, higher = more distortion)

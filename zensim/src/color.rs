@@ -64,10 +64,26 @@ pub(crate) fn cbrtf_fast(x: f32) -> f32 {
     t as f32
 }
 
-/// Convert interleaved sRGB u8 to planar XYB.
+/// Convert interleaved sRGB u8 to planar positive XYB.
 ///
 /// Input: `&[[u8; 3]]` (sRGB pixels)
-/// Output: 3 planes (X, Y, B) each of length `pixels.len()`
+/// Output: 3 planes (X, Y, B) each of length `pixels.len()`, already positive-shifted.
+pub fn srgb_to_positive_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
+    let n = pixels.len();
+    let mut x_plane = vec![0.0f32; n];
+    let mut y_plane = vec![0.0f32; n];
+    let mut b_plane = vec![0.0f32; n];
+
+    incant!(
+        srgb_to_positive_xyb_planar_inner(pixels, &mut x_plane, &mut y_plane, &mut b_plane),
+        [v3]
+    );
+
+    [x_plane, y_plane, b_plane]
+}
+
+/// Convert interleaved sRGB u8 to planar XYB (without positive shift).
+#[allow(dead_code)]
 pub fn srgb_to_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
     let n = pixels.len();
     let mut x_plane = vec![0.0f32; n];
@@ -83,6 +99,7 @@ pub fn srgb_to_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
 }
 
 /// Convert interleaved sRGB u8 to planar XYB, writing into pre-allocated buffers.
+#[allow(dead_code)]
 pub fn srgb_to_xyb_planar_into(
     pixels: &[[u8; 3]],
     x_plane: &mut [f32],
@@ -100,11 +117,155 @@ pub fn srgb_to_xyb_planar_into(
 /// Y: add 0.01
 /// B: B = B - Y + 0.55
 #[inline(always)]
+#[allow(dead_code)]
 pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
     incant!(make_positive_xyb_inner(x, y, b), [v3]);
 }
 
 // --- SIMD implementations ---
+
+/// Fused sRGB → XYB + make_positive in one pass.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn srgb_to_positive_xyb_planar_inner_v3(
+    token: archmage::X64V3Token,
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    let m00 = f32x8::splat(token, K_M00);
+    let m01 = f32x8::splat(token, K_M01);
+    let m02 = f32x8::splat(token, K_M02);
+    let m10 = f32x8::splat(token, K_M10);
+    let m11 = f32x8::splat(token, K_M11);
+    let m12 = f32x8::splat(token, K_M12);
+    let m20 = f32x8::splat(token, K_M20);
+    let m21 = f32x8::splat(token, K_M21);
+    let m22 = f32x8::splat(token, K_M22);
+    let bias = f32x8::splat(token, K_B0);
+    let zero = f32x8::zero(token);
+    let ab = f32x8::splat(token, absorbance_bias);
+    let half = f32x8::splat(token, 0.5);
+    // Positive-shift constants
+    let fourteen = f32x8::splat(token, 14.0);
+    let x_bias = f32x8::splat(token, 0.42);
+    let y_bias = f32x8::splat(token, 0.01);
+    let b_bias = f32x8::splat(token, 0.55);
+
+    let n = pixels.len();
+    let chunks = n / 8;
+
+    for chunk in 0..chunks {
+        let base = chunk * 8;
+
+        let mut r_arr = [0.0f32; 8];
+        let mut g_arr = [0.0f32; 8];
+        let mut b_arr = [0.0f32; 8];
+        for i in 0..8 {
+            let p = pixels[base + i];
+            r_arr[i] = srgb_u8_to_linear(p[0]);
+            g_arr[i] = srgb_u8_to_linear(p[1]);
+            b_arr[i] = srgb_u8_to_linear(p[2]);
+        }
+
+        let r = f32x8::from_array(token, r_arr);
+        let g = f32x8::from_array(token, g_arr);
+        let b = f32x8::from_array(token, b_arr);
+
+        let mixed0 = m00
+            .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
+            .max(zero);
+        let mixed1 = m10
+            .mul_add(r, m11.mul_add(g, m12.mul_add(b, bias)))
+            .max(zero);
+        let mixed2 = m20
+            .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
+            .max(zero);
+
+        let mut m0 = mixed0.to_array();
+        let mut m1 = mixed1.to_array();
+        let mut m2 = mixed2.to_array();
+        for i in 0..8 {
+            m0[i] = cbrtf_fast(m0[i]);
+            m1[i] = cbrtf_fast(m1[i]);
+            m2[i] = cbrtf_fast(m2[i]);
+        }
+
+        let c0 = f32x8::from_array(token, m0) + ab;
+        let c1 = f32x8::from_array(token, m1) + ab;
+        let c2 = f32x8::from_array(token, m2);
+
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+
+        // Fused make_positive: X*14+0.42, Y+0.01, (B-Y)+0.55
+        let x_pos = x.mul_add(fourteen, x_bias);
+        let y_pos = y + y_bias;
+        let b_pos = (c2 - y) + b_bias;
+
+        x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 8].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 8].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Scalar remainder
+    let absorbance_bias_neg = absorbance_bias;
+    for i in (chunks * 8)..n {
+        let p = pixels[i];
+        let r = srgb_u8_to_linear(p[0]);
+        let g = srgb_u8_to_linear(p[1]);
+        let b = srgb_u8_to_linear(p[2]);
+
+        let mixed0 = (K_M00 * r + K_M01 * g + K_M02 * b + K_B0).max(0.0);
+        let mixed1 = (K_M10 * r + K_M11 * g + K_M12 * b + K_B0).max(0.0);
+        let mixed2 = (K_M20 * r + K_M21 * g + K_M22 * b + K_B0).max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x * 14.0 + 0.42;
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
+fn srgb_to_positive_xyb_planar_inner_scalar(
+    _token: archmage::ScalarToken,
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    for (i, p) in pixels.iter().enumerate() {
+        let r = srgb_u8_to_linear(p[0]);
+        let g = srgb_u8_to_linear(p[1]);
+        let b = srgb_u8_to_linear(p[2]);
+
+        let mixed0 = (K_M00 * r + K_M01 * g + K_M02 * b + K_B0).max(0.0);
+        let mixed1 = (K_M10 * r + K_M11 * g + K_M12 * b + K_B0).max(0.0);
+        let mixed2 = (K_M20 * r + K_M21 * g + K_M22 * b + K_B0).max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x * 14.0 + 0.42;
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
 
 #[cfg(target_arch = "x86_64")]
 #[arcane]

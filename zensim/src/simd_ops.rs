@@ -5,13 +5,16 @@ use archmage::arcane;
 use archmage::incant;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
+#[cfg(target_arch = "x86_64")]
+use magetypes::simd::generic::f32x16;
 
 /// Element-wise multiply: out[i] = a[i] * b[i]
 pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(mul_into_inner(a, b, out), [v3]);
+    incant!(mul_into_inner(a, b, out), [v4, v3]);
 }
 
 /// Element-wise multiply-accumulate: accum[i] += a[i] * b[i]
+#[allow(dead_code)]
 pub fn mul_add_into(a: &[f32], b: &[f32], accum: &mut [f32]) {
     incant!(mul_add_inner(a, b, accum), [v3]);
 }
@@ -29,7 +32,10 @@ pub fn ssim_channel(
     sigma2_sq: &[f32],
     sigma12: &[f32],
 ) -> (f64, f64) {
-    incant!(ssim_channel_inner(mu1, mu2, sigma1_sq, sigma2_sq, sigma12), [v3])
+    incant!(
+        ssim_channel_inner(mu1, mu2, sigma1_sq, sigma2_sq, sigma12),
+        [v4, v3]
+    )
 }
 
 /// Compute edge difference features for a single channel.
@@ -40,7 +46,7 @@ pub fn edge_diff_channel(
     mu1: &[f32],
     mu2: &[f32],
 ) -> (f64, f64, f64, f64) {
-    incant!(edge_diff_inner(img1, img2, mu1, mu2), [v3])
+    incant!(edge_diff_inner(img1, img2, mu1, mu2), [v4, v3])
 }
 
 // --- SIMD implementations ---
@@ -49,12 +55,31 @@ const C2: f32 = 0.0009;
 
 #[cfg(target_arch = "x86_64")]
 #[arcane]
-fn mul_into_inner_v3(
-    token: archmage::X64V3Token,
-    a: &[f32],
-    b: &[f32],
-    out: &mut [f32],
-) {
+fn mul_into_inner_v4(token: archmage::X64V4Token, a: &[f32], b: &[f32], out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 16;
+    for c in 0..chunks {
+        let base = c * 16;
+        let va = f32x16::from_array(token, a[base..][..16].try_into().unwrap());
+        let vb = f32x16::from_array(token, b[base..][..16].try_into().unwrap());
+        out[base..base + 16].copy_from_slice(&(va * vb).to_array());
+    }
+    let v3 = token.v3();
+    let chunks8 = (n - chunks * 16) / 8;
+    for c in 0..chunks8 {
+        let base = chunks * 16 + c * 8;
+        let va = f32x8::from_array(v3, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(v3, b[base..][..8].try_into().unwrap());
+        out[base..base + 8].copy_from_slice(&(va * vb).to_array());
+    }
+    for i in (chunks * 16 + chunks8 * 8)..n {
+        out[i] = a[i] * b[i];
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn mul_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: &mut [f32]) {
     let n = a.len();
     let chunks = n / 8;
     for c in 0..chunks {
@@ -68,12 +93,7 @@ fn mul_into_inner_v3(
     }
 }
 
-fn mul_into_inner_scalar(
-    _token: archmage::ScalarToken,
-    a: &[f32],
-    b: &[f32],
-    out: &mut [f32],
-) {
+fn mul_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], out: &mut [f32]) {
     for i in 0..a.len() {
         out[i] = a[i] * b[i];
     }
@@ -81,12 +101,7 @@ fn mul_into_inner_scalar(
 
 #[cfg(target_arch = "x86_64")]
 #[arcane]
-fn mul_add_inner_v3(
-    token: archmage::X64V3Token,
-    a: &[f32],
-    b: &[f32],
-    accum: &mut [f32],
-) {
+fn mul_add_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], accum: &mut [f32]) {
     let n = a.len();
     let chunks = n / 8;
     for c in 0..chunks {
@@ -102,15 +117,66 @@ fn mul_add_inner_v3(
     }
 }
 
-fn mul_add_inner_scalar(
-    _token: archmage::ScalarToken,
-    a: &[f32],
-    b: &[f32],
-    accum: &mut [f32],
-) {
+#[allow(dead_code)]
+fn mul_add_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], accum: &mut [f32]) {
     for i in 0..a.len() {
         accum[i] = a[i].mul_add(b[i], accum[i]);
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn ssim_channel_inner_v4(
+    token: archmage::X64V4Token,
+    mu1: &[f32],
+    mu2: &[f32],
+    s11: &[f32],
+    s22: &[f32],
+    s12: &[f32],
+) -> (f64, f64) {
+    let c2v = f32x16::splat(token, C2);
+    let one = f32x16::splat(token, 1.0);
+    let two = f32x16::splat(token, 2.0);
+    let zero = f32x16::zero(token);
+
+    let n = mu1.len();
+    let chunks = n / 16;
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+
+    for c in 0..chunks {
+        let base = c * 16;
+        let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
+        let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
+        let s11v = f32x16::from_array(token, s11[base..][..16].try_into().unwrap());
+        let s22v = f32x16::from_array(token, s22[base..][..16].try_into().unwrap());
+        let s12v = f32x16::from_array(token, s12[base..][..16].try_into().unwrap());
+
+        let mu_diff = m1 - m2;
+        let num_m = mu_diff.mul_add(-mu_diff, one);
+        let num_s = two.mul_add(s12v - m1 * m2, c2v);
+        let denom_s = (s11v - m1 * m1) + (s22v - m2 * m2) + c2v;
+        let d = (one - (num_m * num_s) / denom_s).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+    }
+
+    for i in (chunks * 16)..n {
+        let md = f64::from(mu1[i] - mu2[i]);
+        let num_m = 1.0 - md * md;
+        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
+        let denom_s = f64::from(s11[i] - mu1[i] * mu1[i])
+            + f64::from(s22[i] - mu2[i] * mu2[i])
+            + f64::from(C2);
+        let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
+        sum_d += d;
+        sum_d4 += d * d * d * d;
+    }
+
+    (sum_d, sum_d4)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -193,6 +259,67 @@ fn ssim_channel_inner_scalar(
     }
 
     (sum_d, sum_d4)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn edge_diff_inner_v4(
+    token: archmage::X64V4Token,
+    img1: &[f32],
+    img2: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+) -> (f64, f64, f64, f64) {
+    let one = f32x16::splat(token, 1.0);
+    let zero = f32x16::zero(token);
+
+    let n = img1.len();
+    let chunks = n / 16;
+    let mut sum_art = 0.0f64;
+    let mut sum_art4 = 0.0f64;
+    let mut sum_det = 0.0f64;
+    let mut sum_det4 = 0.0f64;
+
+    for c in 0..chunks {
+        let base = c * 16;
+        let i1 = f32x16::from_array(token, img1[base..][..16].try_into().unwrap());
+        let i2 = f32x16::from_array(token, img2[base..][..16].try_into().unwrap());
+        let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
+        let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
+
+        let diff1 = (i1 - m1).abs();
+        let diff2 = (i2 - m2).abs();
+
+        let d1 = (one + diff2) / (one + diff1) - one;
+
+        let artifact = d1.max(zero);
+        let detail_lost = (-d1).max(zero);
+
+        let a2 = artifact * artifact;
+        let a4 = a2 * a2;
+        let dl2 = detail_lost * detail_lost;
+        let dl4 = dl2 * dl2;
+
+        sum_art += artifact.reduce_add() as f64;
+        sum_art4 += a4.reduce_add() as f64;
+        sum_det += detail_lost.reduce_add() as f64;
+        sum_det4 += dl4.reduce_add() as f64;
+    }
+
+    for i in (chunks * 16)..n {
+        let diff1 = (img1[i] - mu1[i]).abs();
+        let diff2 = (img2[i] - mu2[i]).abs();
+        let d1 = f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0;
+
+        let art = d1.max(0.0);
+        let det = (-d1).max(0.0);
+        sum_art += art;
+        sum_art4 += art.powi(4);
+        sum_det += det;
+        sum_det4 += det.powi(4);
+    }
+
+    (sum_art, sum_art4, sum_det, sum_det4)
 }
 
 #[cfg(target_arch = "x86_64")]

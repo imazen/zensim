@@ -3,12 +3,12 @@
 //! Multi-scale SSIM + edge features in XYB color space,
 //! with contrast sensitivity weighting per scale.
 
+use crate::NUM_SCALES;
 use crate::blur::{box_blur_3pass_into, downscale_2x};
-use crate::color::{make_positive_xyb, srgb_to_xyb_planar};
+use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{edge_diff_channel, mul_into, ssim_channel};
-use crate::NUM_SCALES;
 
 /// Configuration for zensim computation.
 #[derive(Debug, Clone, Copy)]
@@ -52,8 +52,14 @@ pub fn distance_to_score(raw_distance: f64) -> f64 {
 /// `weights`: one weight per feature (len must equal features.len())
 /// Returns (score, raw_distance)
 pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
-    assert_eq!(features.len(), weights.len(), "features and weights must have same length");
-    let raw_distance: f64 = features.iter().zip(weights.iter())
+    assert_eq!(
+        features.len(),
+        weights.len(),
+        "features and weights must have same length"
+    );
+    let raw_distance: f64 = features
+        .iter()
+        .zip(weights.iter())
         .map(|(&f, &w)| w * f)
         .sum();
     let raw_distance = raw_distance / (features.len() as f64 / FEATURES_PER_SCALE as f64).max(1.0);
@@ -118,23 +124,18 @@ pub fn compute_zensim_with_config(
         return Err(ZensimError::DimensionMismatch);
     }
 
-    // Convert to planar XYB
-    let mut src_xyb = srgb_to_xyb_planar(source);
-    let mut dst_xyb = srgb_to_xyb_planar(distorted);
-
-    // Make XYB positive
-    {
-        let [ref mut sx, ref mut sy, ref mut sb] = src_xyb;
-        make_positive_xyb(sx, sy, sb);
-    }
-    {
-        let [ref mut dx, ref mut dy, ref mut db] = dst_xyb;
-        make_positive_xyb(dx, dy, db);
-    }
+    // Convert to planar positive XYB (fused conversion + positive shift)
+    let src_xyb = srgb_to_positive_xyb_planar(source);
+    let dst_xyb = srgb_to_positive_xyb_planar(distorted);
 
     // Compute multi-scale statistics
     let scale_stats = compute_multiscale_stats(
-        &src_xyb, &dst_xyb, width, height, config.blur_radius, config.compute_all_features,
+        &src_xyb,
+        &dst_xyb,
+        width,
+        height,
+        config.blur_radius,
+        config.compute_all_features,
     );
 
     // Combine with weights to produce final score
@@ -154,16 +155,10 @@ fn compute_multiscale_stats(
     let mut stats = Vec::with_capacity(NUM_SCALES);
 
     // Start with the original planes (avoid clone for scale 0 by using references first)
-    let mut src_planes: [Vec<f32>; 3] = [
-        src_xyb[0].clone(),
-        src_xyb[1].clone(),
-        src_xyb[2].clone(),
-    ];
-    let mut dst_planes: [Vec<f32>; 3] = [
-        dst_xyb[0].clone(),
-        dst_xyb[1].clone(),
-        dst_xyb[2].clone(),
-    ];
+    let mut src_planes: [Vec<f32>; 3] =
+        [src_xyb[0].clone(), src_xyb[1].clone(), src_xyb[2].clone()];
+    let mut dst_planes: [Vec<f32>; 3] =
+        [dst_xyb[0].clone(), dst_xyb[1].clone(), dst_xyb[2].clone()];
     let mut w = width;
     let mut h = height;
 
@@ -180,7 +175,14 @@ fn compute_multiscale_stats(
         bufs.resize(n);
 
         let scale_stat = compute_single_scale(
-            &src_planes, &dst_planes, w, h, blur_radius, &mut bufs, scale, compute_all,
+            &src_planes,
+            &dst_planes,
+            w,
+            h,
+            blur_radius,
+            &mut bufs,
+            scale,
+            compute_all,
         );
         stats.push(scale_stat);
 
@@ -210,6 +212,7 @@ fn compute_multiscale_stats(
 
 /// Compute SSIM and edge statistics for a single scale.
 /// Only computes SSIM when needed (most trained weights are on edge features).
+#[allow(clippy::too_many_arguments)]
 fn compute_single_scale(
     src: &[Vec<f32>; 3],
     dst: &[Vec<f32>; 3],
@@ -228,8 +231,7 @@ fn compute_single_scale(
 
     // Check if any weight is nonzero for a given feature type at this scale+channel
     let has_weight = |base_idx: usize, count: usize| -> bool {
-        (base_idx..base_idx + count)
-            .all(|i| i < WEIGHTS.len())
+        (base_idx..base_idx + count).all(|i| i < WEIGHTS.len())
             && (base_idx..base_idx + count).any(|i| WEIGHTS[i].abs() > 0.001)
     };
 
@@ -247,21 +249,62 @@ fn compute_single_scale(
         let dst_c = &dst[c];
 
         // mu1 and mu2 are needed for both SSIM and edge features
-        box_blur_3pass_into(src_c, &mut bufs.mu1, &mut bufs.temp_blur, width, height, blur_radius);
-        box_blur_3pass_into(dst_c, &mut bufs.mu2, &mut bufs.temp_blur, width, height, blur_radius);
+        box_blur_3pass_into(
+            src_c,
+            &mut bufs.mu1,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            blur_radius,
+        );
+        box_blur_3pass_into(
+            dst_c,
+            &mut bufs.mu2,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            blur_radius,
+        );
 
         // Only compute variance/covariance if SSIM weight is nonzero
         if need_ssim {
             mul_into(src_c, src_c, &mut bufs.mul_buf);
-            box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma1_sq, &mut bufs.temp_blur, width, height, blur_radius);
+            box_blur_3pass_into(
+                &bufs.mul_buf,
+                &mut bufs.sigma1_sq,
+                &mut bufs.temp_blur,
+                width,
+                height,
+                blur_radius,
+            );
 
             mul_into(dst_c, dst_c, &mut bufs.mul_buf);
-            box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma2_sq, &mut bufs.temp_blur, width, height, blur_radius);
+            box_blur_3pass_into(
+                &bufs.mul_buf,
+                &mut bufs.sigma2_sq,
+                &mut bufs.temp_blur,
+                width,
+                height,
+                blur_radius,
+            );
 
             mul_into(src_c, dst_c, &mut bufs.mul_buf);
-            box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma12, &mut bufs.temp_blur, width, height, blur_radius);
+            box_blur_3pass_into(
+                &bufs.mul_buf,
+                &mut bufs.sigma12,
+                &mut bufs.temp_blur,
+                width,
+                height,
+                blur_radius,
+            );
 
-            let (sum_d, sum_d4) = ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma2_sq, &bufs.sigma12);
+            let (sum_d, sum_d4) = ssim_channel(
+                &bufs.mu1,
+                &bufs.mu2,
+                &bufs.sigma1_sq,
+                &bufs.sigma2_sq,
+                &bufs.sigma12,
+            );
             ssim_vals[c * 2] = sum_d * one_over_n;
             ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
         }
@@ -300,28 +343,20 @@ pub const FEATURES_PER_SCALE: usize = 18;
 #[allow(clippy::excessive_precision)]
 const WEIGHTS: [f64; 72] = [
     // Scale 0 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 0 Channel Y
-    0.117592, 8.367503, 0.000000, 0.000000, 25.587284, 0.000000,
-    // Scale 0 Channel B
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, // Scale 0 Channel Y
+    0.117592, 8.367503, 0.000000, 0.000000, 25.587284, 0.000000, // Scale 0 Channel B
     0.000000, 0.000000, 0.000000, 22.157398, 55.113319, 0.000000,
     // Scale 1 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 1 Channel Y
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, // Scale 1 Channel Y
     50.202655, 4.162088, 0.000000, 0.000000, 125.177307, 115.357675,
     // Scale 1 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 19.069615, 0.000000,
-    // Scale 2 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 15.958061, 0.000000,
-    // Scale 2 Channel Y
-    0.000000, 1.245107, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 2 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 3 Channel X
+    0.000000, 0.000000, 0.000000, 0.000000, 19.069615, 0.000000, // Scale 2 Channel X
+    0.000000, 0.000000, 0.000000, 0.000000, 15.958061, 0.000000, // Scale 2 Channel Y
+    0.000000, 1.245107, 0.000000, 0.000000, 0.000000, 0.000000, // Scale 2 Channel B
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, // Scale 3 Channel X
     24.891486, 8.001749, 0.000000, 0.000000, 374.130349, 0.000000,
     // Scale 3 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 3 Channel B
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, // Scale 3 Channel B
     21.750148, 7.333710, 0.000000, 0.000000, 214.128879, 0.000000,
 ];
 
@@ -332,10 +367,7 @@ fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
 
     for ss in scale_stats.iter() {
         for c in 0..3 {
-            let ssim_feats = [
-                ss.ssim[c * 2].abs(),
-                ss.ssim[c * 2 + 1].abs(),
-            ];
+            let ssim_feats = [ss.ssim[c * 2].abs(), ss.ssim[c * 2 + 1].abs()];
             let edge_feats = [
                 ss.edge[c * 4].abs(),
                 ss.edge[c * 4 + 1].abs(),

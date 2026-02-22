@@ -7,6 +7,10 @@ repository = "https://github.com/imazen/zensim"
 license = "MIT"
 rust-version = "1.85.0"
 
+[features]
+default = ["avx512"]
+avx512 = ["archmage/avx512", "magetypes/avx512"]
+
 [dependencies]
 archmage = { workspace = true }
 magetypes = { workspace = true }

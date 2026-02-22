@@ -24,8 +24,8 @@ mod simd_ops;
 
 pub use error::ZensimError;
 pub use metric::{
-    compute_zensim, compute_zensim_with_config, distance_to_score, score_from_features,
-    ZensimConfig, ZensimResult, FEATURES_PER_SCALE,
+    FEATURES_PER_SCALE, ZensimConfig, ZensimResult, compute_zensim, compute_zensim_with_config,
+    distance_to_score, score_from_features,
 };
 
 /// Number of downscale levels. Each level halves resolution.
