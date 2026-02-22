@@ -172,7 +172,7 @@ fn compute_multiscale_stats(
         bufs.resize(n);
 
         let scale_stat = compute_single_scale(
-            &src_planes, &dst_planes, w, h, blur_radius, &mut bufs,
+            &src_planes, &dst_planes, w, h, blur_radius, &mut bufs, scale,
         );
         stats.push(scale_stat);
 
@@ -201,6 +201,7 @@ fn compute_multiscale_stats(
 }
 
 /// Compute SSIM and edge statistics for a single scale.
+/// Only computes SSIM when needed (most trained weights are on edge features).
 fn compute_single_scale(
     src: &[Vec<f32>; 3],
     dst: &[Vec<f32>; 3],
@@ -208,6 +209,7 @@ fn compute_single_scale(
     height: usize,
     blur_radius: usize,
     bufs: &mut ScaleBuffers,
+    scale_idx: usize,
 ) -> ScaleStats {
     let n = width * height;
     let one_over_n = 1.0 / n as f64;
@@ -215,32 +217,40 @@ fn compute_single_scale(
     let mut ssim_vals = [0.0f64; 6];
     let mut edge_vals = [0.0f64; 12];
 
+    // Check which channels need SSIM (weights > 0.001)
+    // SSIM weights are only nonzero at scale 2-3 channel X, and very small
+    let need_ssim = |scale: usize, ch: usize| -> bool {
+        let base = scale * 18 + ch * 6;
+        // Check ssim_mean and ssim_4th weights
+        base + 1 < WEIGHTS.len()
+            && (WEIGHTS[base].abs() > 0.001 || WEIGHTS[base + 1].abs() > 0.001)
+    };
+
     for c in 0..3 {
         let src_c = &src[c];
         let dst_c = &dst[c];
 
-        // mu1 = blur(src), mu2 = blur(dst)
+        // mu1 and mu2 are needed for both SSIM and edge features
         box_blur_3pass_into(src_c, &mut bufs.mu1, &mut bufs.temp_blur, width, height, blur_radius);
         box_blur_3pass_into(dst_c, &mut bufs.mu2, &mut bufs.temp_blur, width, height, blur_radius);
 
-        // sigma1_sq = blur(src^2)
-        mul_into(src_c, src_c, &mut bufs.mul_buf);
-        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma1_sq, &mut bufs.temp_blur, width, height, blur_radius);
+        // Only compute variance/covariance if SSIM weight is nonzero
+        if need_ssim(scale_idx, c) {
+            mul_into(src_c, src_c, &mut bufs.mul_buf);
+            box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma1_sq, &mut bufs.temp_blur, width, height, blur_radius);
 
-        // sigma2_sq = blur(dst^2)
-        mul_into(dst_c, dst_c, &mut bufs.mul_buf);
-        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma2_sq, &mut bufs.temp_blur, width, height, blur_radius);
+            mul_into(dst_c, dst_c, &mut bufs.mul_buf);
+            box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma2_sq, &mut bufs.temp_blur, width, height, blur_radius);
 
-        // sigma12 = blur(src*dst)
-        mul_into(src_c, dst_c, &mut bufs.mul_buf);
-        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma12, &mut bufs.temp_blur, width, height, blur_radius);
+            mul_into(src_c, dst_c, &mut bufs.mul_buf);
+            box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma12, &mut bufs.temp_blur, width, height, blur_radius);
 
-        // SSIM statistics
-        let (sum_d, sum_d4) = ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma2_sq, &bufs.sigma12);
-        ssim_vals[c * 2] = sum_d * one_over_n;
-        ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+            let (sum_d, sum_d4) = ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma2_sq, &bufs.sigma12);
+            ssim_vals[c * 2] = sum_d * one_over_n;
+            ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+        }
 
-        // Edge difference statistics
+        // Edge features (always computed — they carry most weight)
         let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
         edge_vals[c * 4] = art * one_over_n;
         edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
@@ -266,38 +276,38 @@ fn compute_single_scale(
 /// Total number of features per scale (3 channels × (2 SSIM + 4 edge) = 18)
 pub const FEATURES_PER_SCALE: usize = 18;
 
-fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
-    // Trained weights from TID2013 optimization (3000 pairs).
-    // Layout: 4 scales × 3 channels (X,Y,B) × 6 features (ssim_mean, ssim_4th,
-    //         edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th)
-    #[allow(clippy::excessive_precision)]
-    const WEIGHTS: [f64; 72] = [
-        // Scale 0 Channel X
-        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-        // Scale 0 Channel Y
-        0.000000, 0.000000, 0.000000, 19.531250, 0.000000, 0.000000,
-        // Scale 0 Channel B
-        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-        // Scale 1 Channel X
-        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-        // Scale 1 Channel Y
-        0.000000, 0.000000, 0.000000, 0.000000, 52.083333, 0.000000,
-        // Scale 1 Channel B
-        0.000000, 0.000000, 23.437500, 0.000000, 0.000000, 0.000000,
-        // Scale 2 Channel X
-        0.013021, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-        // Scale 2 Channel Y
-        0.000000, 0.000000, 0.000000, 0.000000, 86.805556, 43.402778,
-        // Scale 2 Channel B
-        0.000000, 0.000000, 87.890625, 0.000000, 0.000000, 0.000000,
-        // Scale 3 Channel X
-        0.024414, 0.000000, 0.000000, 5.859375, 195.312500, 29.296875,
-        // Scale 3 Channel Y
-        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 26.041667,
-        // Scale 3 Channel B
-        0.000000, 0.000000, 0.000000, 20.833333, 292.968750, 0.000000,
-    ];
+/// Trained weights from TID2013 optimization (3000 pairs).
+/// Layout: 4 scales × 3 channels (X,Y,B) × 6 features (ssim_mean, ssim_4th,
+///         edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th)
+#[allow(clippy::excessive_precision)]
+const WEIGHTS: [f64; 72] = [
+    // Scale 0 Channel X
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    // Scale 0 Channel Y
+    0.000000, 0.000000, 0.000000, 19.531250, 0.000000, 0.000000,
+    // Scale 0 Channel B
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    // Scale 1 Channel X
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    // Scale 1 Channel Y
+    0.000000, 0.000000, 0.000000, 0.000000, 52.083333, 0.000000,
+    // Scale 1 Channel B
+    0.000000, 0.000000, 23.437500, 0.000000, 0.000000, 0.000000,
+    // Scale 2 Channel X
+    0.013021, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    // Scale 2 Channel Y
+    0.000000, 0.000000, 0.000000, 0.000000, 86.805556, 43.402778,
+    // Scale 2 Channel B
+    0.000000, 0.000000, 87.890625, 0.000000, 0.000000, 0.000000,
+    // Scale 3 Channel X
+    0.024414, 0.000000, 0.000000, 5.859375, 195.312500, 29.296875,
+    // Scale 3 Channel Y
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 26.041667,
+    // Scale 3 Channel B
+    0.000000, 0.000000, 0.000000, 20.833333, 292.968750, 0.000000,
+];
 
+fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
     // Collect raw features and compute weighted distance
     let mut features = Vec::with_capacity(scale_stats.len() * FEATURES_PER_SCALE);
     let mut raw_distance = 0.0f64;
