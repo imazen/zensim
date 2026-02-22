@@ -10,7 +10,7 @@ use crate::blur::{
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
-use crate::simd_ops::{edge_diff_channel, mul_into, ssim_channel};
+use crate::simd_ops::{edge_diff_channel, mul_into, sq_sum_into, ssim_channel};
 
 /// Configuration for zensim computation.
 #[derive(Debug, Clone, Copy)]
@@ -270,20 +270,11 @@ fn compute_channel(
     );
 
     if need_ssim {
-        mul_into(src_c, src_c, &mut bufs.mul_buf);
+        // Compute blur(src² + dst²) — combined saves one blur vs separate sigma1_sq, sigma2_sq
+        sq_sum_into(src_c, dst_c, &mut bufs.mul_buf);
         blur_fn(
             &bufs.mul_buf,
             &mut bufs.sigma1_sq,
-            &mut bufs.temp_blur,
-            width,
-            height,
-            blur_radius,
-        );
-
-        mul_into(dst_c, dst_c, &mut bufs.mul_buf);
-        blur_fn(
-            &bufs.mul_buf,
-            &mut bufs.sigma2_sq,
             &mut bufs.temp_blur,
             width,
             height,
@@ -300,13 +291,8 @@ fn compute_channel(
             blur_radius,
         );
 
-        let (sum_d, sum_d4) = ssim_channel(
-            &bufs.mu1,
-            &bufs.mu2,
-            &bufs.sigma1_sq,
-            &bufs.sigma2_sq,
-            &bufs.sigma12,
-        );
+        // sigma1_sq now holds blur(src² + dst²), ssim_channel uses combined formula
+        let (sum_d, sum_d4) = ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma12);
         ssim[0] = sum_d * one_over_n;
         ssim[1] = (sum_d4 * one_over_n).powf(0.25);
     }

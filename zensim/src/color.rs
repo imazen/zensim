@@ -9,6 +9,8 @@ use archmage::arcane;
 use archmage::incant;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
+#[cfg(target_arch = "x86_64")]
+use magetypes::simd::generic::f32x16;
 
 // Opsin absorbance matrix (from jpegli/ssimulacra2)
 const K_M02: f32 = 0.078;
@@ -51,17 +53,24 @@ pub fn srgb_u8_to_linear(v: u8) -> f32 {
 /// Accurate to ~20 bits (sufficient for image quality metrics).
 #[inline(always)]
 pub(crate) fn cbrtf_fast(x: f32) -> f32 {
-    const B1: u32 = 709_958_130;
-    let ui = x.to_bits();
-    let hx = (ui & 0x7FFF_FFFF) / 3 + B1;
-    let ui_out = (ui & 0x8000_0000) | hx;
-    let mut t = f32::from_bits(ui_out);
+    let mut t = cbrtf_initial(x);
     // Halley's method in f32 (each step roughly triples correct bits: 5→15→45)
     let mut r = t * t * t;
     t = t * (x + x + r) / (x + r + r);
     r = t * t * t;
     t = t * (x + x + r) / (x + r + r);
     t
+}
+
+/// Cube root initial estimate via bit manipulation (~5 bits accuracy).
+/// Cheap integer-only operation; use as seed for Halley's refinement.
+#[inline(always)]
+fn cbrtf_initial(x: f32) -> f32 {
+    const B1: u32 = 709_958_130;
+    let ui = x.to_bits();
+    let hx = (ui & 0x7FFF_FFFF) / 3 + B1;
+    let ui_out = (ui & 0x8000_0000) | hx;
+    f32::from_bits(ui_out)
 }
 
 /// Convert interleaved sRGB u8 to planar positive XYB.
@@ -76,7 +85,7 @@ pub fn srgb_to_positive_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
 
     incant!(
         srgb_to_positive_xyb_planar_inner(pixels, &mut x_plane, &mut y_plane, &mut b_plane),
-        [v3]
+        [v4, v3]
     );
 
     [x_plane, y_plane, b_plane]
@@ -124,7 +133,233 @@ pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
 
 // --- SIMD implementations ---
 
-/// Fused sRGB → XYB + make_positive in one pass.
+/// AVX-512 fused sRGB → XYB + make_positive: 16 pixels at a time.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn srgb_to_positive_xyb_planar_inner_v4(
+    token: archmage::X64V4Token,
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    let m00 = f32x16::splat(token, K_M00);
+    let m01 = f32x16::splat(token, K_M01);
+    let m02 = f32x16::splat(token, K_M02);
+    let m10 = f32x16::splat(token, K_M10);
+    let m11 = f32x16::splat(token, K_M11);
+    let m12 = f32x16::splat(token, K_M12);
+    let m20 = f32x16::splat(token, K_M20);
+    let m21 = f32x16::splat(token, K_M21);
+    let m22 = f32x16::splat(token, K_M22);
+    let bias = f32x16::splat(token, K_B0);
+    let zero = f32x16::zero(token);
+    let ab = f32x16::splat(token, absorbance_bias);
+    let half = f32x16::splat(token, 0.5);
+    let two = f32x16::splat(token, 2.0);
+    let fourteen = f32x16::splat(token, 14.0);
+    let x_bias = f32x16::splat(token, 0.42);
+    let y_bias = f32x16::splat(token, 0.01);
+    let b_bias = f32x16::splat(token, 0.55);
+
+    let n = pixels.len();
+    let chunks = n / 16;
+
+    for chunk in 0..chunks {
+        let base = chunk * 16;
+
+        let mut r_arr = [0.0f32; 16];
+        let mut g_arr = [0.0f32; 16];
+        let mut b_arr = [0.0f32; 16];
+        for i in 0..16 {
+            let p = pixels[base + i];
+            r_arr[i] = srgb_u8_to_linear(p[0]);
+            g_arr[i] = srgb_u8_to_linear(p[1]);
+            b_arr[i] = srgb_u8_to_linear(p[2]);
+        }
+
+        let r = f32x16::from_array(token, r_arr);
+        let g = f32x16::from_array(token, g_arr);
+        let b = f32x16::from_array(token, b_arr);
+
+        let mixed0 = m00
+            .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
+            .max(zero);
+        let mixed1 = m10
+            .mul_add(r, m11.mul_add(g, m12.mul_add(b, bias)))
+            .max(zero);
+        let mixed2 = m20
+            .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
+            .max(zero);
+
+        // Scalar initial estimates (integer bit manipulation)
+        let mut est0 = mixed0.to_array();
+        let mut est1 = mixed1.to_array();
+        let mut est2 = mixed2.to_array();
+        for i in 0..16 {
+            est0[i] = cbrtf_initial(est0[i]);
+            est1[i] = cbrtf_initial(est1[i]);
+            est2[i] = cbrtf_initial(est2[i]);
+        }
+
+        // Halley's iterations in SIMD (3 channels interleaved for ILP)
+        let x0 = mixed0;
+        let x1 = mixed1;
+        let x2 = mixed2;
+        let mut t0 = f32x16::from_array(token, est0);
+        let mut t1 = f32x16::from_array(token, est1);
+        let mut t2 = f32x16::from_array(token, est2);
+
+        // Iteration 1
+        let mut r0 = t0 * t0 * t0;
+        let mut r1 = t1 * t1 * t1;
+        let mut r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        // Iteration 2
+        r0 = t0 * t0 * t0;
+        r1 = t1 * t1 * t1;
+        r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        let c0 = t0 + ab;
+        let c1 = t1 + ab;
+
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+
+        let x_pos = x.mul_add(fourteen, x_bias);
+        let y_pos = y + y_bias;
+        let b_pos = (t2 - y) + b_bias;
+
+        x_out[base..base + 16].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 16].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 16].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Remainder with AVX2 (f32x8)
+    let v3 = token.v3();
+    let absorbance_bias_neg = absorbance_bias;
+    let ab8 = f32x8::splat(v3, absorbance_bias);
+    let half8 = f32x8::splat(v3, 0.5);
+    let two8 = f32x8::splat(v3, 2.0);
+    let zero8 = f32x8::zero(v3);
+    let m00_8 = f32x8::splat(v3, K_M00);
+    let m01_8 = f32x8::splat(v3, K_M01);
+    let m02_8 = f32x8::splat(v3, K_M02);
+    let m10_8 = f32x8::splat(v3, K_M10);
+    let m11_8 = f32x8::splat(v3, K_M11);
+    let m12_8 = f32x8::splat(v3, K_M12);
+    let m20_8 = f32x8::splat(v3, K_M20);
+    let m21_8 = f32x8::splat(v3, K_M21);
+    let m22_8 = f32x8::splat(v3, K_M22);
+    let bias8 = f32x8::splat(v3, K_B0);
+    let fourteen8 = f32x8::splat(v3, 14.0);
+    let x_bias8 = f32x8::splat(v3, 0.42);
+    let y_bias8 = f32x8::splat(v3, 0.01);
+    let b_bias8 = f32x8::splat(v3, 0.55);
+
+    let rem_start = chunks * 16;
+    let rem_chunks = (n - rem_start) / 8;
+    for chunk in 0..rem_chunks {
+        let base = rem_start + chunk * 8;
+        let mut r_arr = [0.0f32; 8];
+        let mut g_arr = [0.0f32; 8];
+        let mut b_arr = [0.0f32; 8];
+        for i in 0..8 {
+            let p = pixels[base + i];
+            r_arr[i] = srgb_u8_to_linear(p[0]);
+            g_arr[i] = srgb_u8_to_linear(p[1]);
+            b_arr[i] = srgb_u8_to_linear(p[2]);
+        }
+        let r = f32x8::from_array(v3, r_arr);
+        let g = f32x8::from_array(v3, g_arr);
+        let b = f32x8::from_array(v3, b_arr);
+
+        let mixed0 = m00_8
+            .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed1 = m10_8
+            .mul_add(r, m11_8.mul_add(g, m12_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed2 = m20_8
+            .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
+            .max(zero8);
+
+        let mut est0 = mixed0.to_array();
+        let mut est1 = mixed1.to_array();
+        let mut est2 = mixed2.to_array();
+        for i in 0..8 {
+            est0[i] = cbrtf_initial(est0[i]);
+            est1[i] = cbrtf_initial(est1[i]);
+            est2[i] = cbrtf_initial(est2[i]);
+        }
+
+        let x0 = mixed0;
+        let x1 = mixed1;
+        let x2 = mixed2;
+        let mut t0 = f32x8::from_array(v3, est0);
+        let mut t1 = f32x8::from_array(v3, est1);
+        let mut t2 = f32x8::from_array(v3, est2);
+
+        let mut r0 = t0 * t0 * t0;
+        let mut r1 = t1 * t1 * t1;
+        let mut r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+
+        r0 = t0 * t0 * t0;
+        r1 = t1 * t1 * t1;
+        r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+
+        let c0 = t0 + ab8;
+        let c1 = t1 + ab8;
+        let x = half8 * (c0 - c1);
+        let y = half8 * (c0 + c1);
+        let x_pos = x.mul_add(fourteen8, x_bias8);
+        let y_pos = y + y_bias8;
+        let b_pos = (t2 - y) + b_bias8;
+
+        x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 8].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 8].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Scalar remainder
+    for i in (rem_start + rem_chunks * 8)..n {
+        let p = pixels[i];
+        let r = srgb_u8_to_linear(p[0]);
+        let g = srgb_u8_to_linear(p[1]);
+        let b = srgb_u8_to_linear(p[2]);
+
+        let mixed0 = (K_M00 * r + K_M01 * g + K_M02 * b + K_B0).max(0.0);
+        let mixed1 = (K_M10 * r + K_M11 * g + K_M12 * b + K_B0).max(0.0);
+        let mixed2 = (K_M20 * r + K_M21 * g + K_M22 * b + K_B0).max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x * 14.0 + 0.42;
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
+/// Fused sRGB → XYB + make_positive in one pass with vectorized Halley iterations.
 #[cfg(target_arch = "x86_64")]
 #[arcane]
 fn srgb_to_positive_xyb_planar_inner_v3(
@@ -149,6 +384,7 @@ fn srgb_to_positive_xyb_planar_inner_v3(
     let zero = f32x8::zero(token);
     let ab = f32x8::splat(token, absorbance_bias);
     let half = f32x8::splat(token, 0.5);
+    let two = f32x8::splat(token, 2.0);
     // Positive-shift constants
     let fourteen = f32x8::splat(token, 14.0);
     let x_bias = f32x8::splat(token, 0.42);
@@ -185,18 +421,42 @@ fn srgb_to_positive_xyb_planar_inner_v3(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        let mut m0 = mixed0.to_array();
-        let mut m1 = mixed1.to_array();
-        let mut m2 = mixed2.to_array();
+        // Scalar initial estimates (integer bit manipulation)
+        let mut est0 = mixed0.to_array();
+        let mut est1 = mixed1.to_array();
+        let mut est2 = mixed2.to_array();
         for i in 0..8 {
-            m0[i] = cbrtf_fast(m0[i]);
-            m1[i] = cbrtf_fast(m1[i]);
-            m2[i] = cbrtf_fast(m2[i]);
+            est0[i] = cbrtf_initial(est0[i]);
+            est1[i] = cbrtf_initial(est1[i]);
+            est2[i] = cbrtf_initial(est2[i]);
         }
 
-        let c0 = f32x8::from_array(token, m0) + ab;
-        let c1 = f32x8::from_array(token, m1) + ab;
-        let c2 = f32x8::from_array(token, m2);
+        // Halley's iterations in SIMD (3 channels interleaved for ILP)
+        let x0 = mixed0;
+        let x1 = mixed1;
+        let x2 = mixed2;
+        let mut t0 = f32x8::from_array(token, est0);
+        let mut t1 = f32x8::from_array(token, est1);
+        let mut t2 = f32x8::from_array(token, est2);
+
+        // Iteration 1
+        let mut r0 = t0 * t0 * t0;
+        let mut r1 = t1 * t1 * t1;
+        let mut r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        // Iteration 2
+        r0 = t0 * t0 * t0;
+        r1 = t1 * t1 * t1;
+        r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        let c0 = t0 + ab;
+        let c1 = t1 + ab;
 
         let x = half * (c0 - c1);
         let y = half * (c0 + c1);
@@ -204,7 +464,7 @@ fn srgb_to_positive_xyb_planar_inner_v3(
         // Fused make_positive: X*14+0.42, Y+0.01, (B-Y)+0.55
         let x_pos = x.mul_add(fourteen, x_bias);
         let y_pos = y + y_bias;
-        let b_pos = (c2 - y) + b_bias;
+        let b_pos = (t2 - y) + b_bias;
 
         x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
         y_out[base..base + 8].copy_from_slice(&y_pos.to_array());

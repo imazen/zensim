@@ -19,23 +19,19 @@ pub fn mul_add_into(a: &[f32], b: &[f32], accum: &mut [f32]) {
     incant!(mul_add_inner(a, b, accum), [v3]);
 }
 
+/// Element-wise: out[i] = a[i]*a[i] + b[i]*b[i] (sum of squares)
+pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
+    incant!(sq_sum_into_inner(a, b, out), [v4, v3]);
+}
+
 /// Compute SSIM distance map and return (sum_d, sum_d4) for a single channel.
 /// d = max(0, 1 - (num_m * num_s) / denom_s)
 /// where:
 ///   num_m = 1 - (mu1 - mu2)^2
 ///   num_s = 2*sigma12 - 2*mu1*mu2 + C2
-///   denom_s = sigma1_sq + sigma2_sq - mu1^2 - mu2^2 + C2
-pub fn ssim_channel(
-    mu1: &[f32],
-    mu2: &[f32],
-    sigma1_sq: &[f32],
-    sigma2_sq: &[f32],
-    sigma12: &[f32],
-) -> (f64, f64) {
-    incant!(
-        ssim_channel_inner(mu1, mu2, sigma1_sq, sigma2_sq, sigma12),
-        [v4, v3]
-    )
+///   denom_s = sum_sq - mu1^2 - mu2^2 + C2  (sum_sq = blur(src^2 + dst^2))
+pub fn ssim_channel(mu1: &[f32], mu2: &[f32], sum_sq: &[f32], sigma12: &[f32]) -> (f64, f64) {
+    incant!(ssim_channel_inner(mu1, mu2, sum_sq, sigma12), [v4, v3])
 }
 
 /// Compute edge difference features for a single channel.
@@ -52,6 +48,52 @@ pub fn edge_diff_channel(
 // --- SIMD implementations ---
 
 const C2: f32 = 0.0009;
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn sq_sum_into_inner_v4(token: archmage::X64V4Token, a: &[f32], b: &[f32], out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 16;
+    for c in 0..chunks {
+        let base = c * 16;
+        let va = f32x16::from_array(token, a[base..][..16].try_into().unwrap());
+        let vb = f32x16::from_array(token, b[base..][..16].try_into().unwrap());
+        out[base..base + 16].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
+    }
+    let v3 = token.v3();
+    let chunks8 = (n - chunks * 16) / 8;
+    for c in 0..chunks8 {
+        let base = chunks * 16 + c * 8;
+        let va = f32x8::from_array(v3, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(v3, b[base..][..8].try_into().unwrap());
+        out[base..base + 8].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
+    }
+    for i in (chunks * 16 + chunks8 * 8)..n {
+        out[i] = a[i] * a[i] + b[i] * b[i];
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn sq_sum_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 8;
+    for c in 0..chunks {
+        let base = c * 8;
+        let va = f32x8::from_array(token, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(token, b[base..][..8].try_into().unwrap());
+        out[base..base + 8].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
+    }
+    for i in (chunks * 8)..n {
+        out[i] = a[i] * a[i] + b[i] * b[i];
+    }
+}
+
+fn sq_sum_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], out: &mut [f32]) {
+    for i in 0..a.len() {
+        out[i] = a[i] * a[i] + b[i] * b[i];
+    }
+}
 
 #[cfg(target_arch = "x86_64")]
 #[arcane]
@@ -130,8 +172,7 @@ fn ssim_channel_inner_v4(
     token: archmage::X64V4Token,
     mu1: &[f32],
     mu2: &[f32],
-    s11: &[f32],
-    s22: &[f32],
+    sum_sq: &[f32],
     s12: &[f32],
 ) -> (f64, f64) {
     let c2v = f32x16::splat(token, C2);
@@ -148,14 +189,13 @@ fn ssim_channel_inner_v4(
         let base = c * 16;
         let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
         let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
-        let s11v = f32x16::from_array(token, s11[base..][..16].try_into().unwrap());
-        let s22v = f32x16::from_array(token, s22[base..][..16].try_into().unwrap());
+        let ssq = f32x16::from_array(token, sum_sq[base..][..16].try_into().unwrap());
         let s12v = f32x16::from_array(token, s12[base..][..16].try_into().unwrap());
 
         let mu_diff = m1 - m2;
         let num_m = mu_diff.mul_add(-mu_diff, one);
         let num_s = two.mul_add(s12v - m1 * m2, c2v);
-        let denom_s = (s11v - m1 * m1) + (s22v - m2 * m2) + c2v;
+        let denom_s = ssq - m1 * m1 - m2 * m2 + c2v;
         let d = (one - (num_m * num_s) / denom_s).max(zero);
         let d2 = d * d;
         let d4 = d2 * d2;
@@ -168,9 +208,9 @@ fn ssim_channel_inner_v4(
         let md = f64::from(mu1[i] - mu2[i]);
         let num_m = 1.0 - md * md;
         let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s = f64::from(s11[i] - mu1[i] * mu1[i])
-            + f64::from(s22[i] - mu2[i] * mu2[i])
-            + f64::from(C2);
+        let denom_s =
+            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
+                + f64::from(C2);
         let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
         sum_d += d;
         sum_d4 += d * d * d * d;
@@ -185,8 +225,7 @@ fn ssim_channel_inner_v3(
     token: archmage::X64V3Token,
     mu1: &[f32],
     mu2: &[f32],
-    s11: &[f32],
-    s22: &[f32],
+    sum_sq: &[f32],
     s12: &[f32],
 ) -> (f64, f64) {
     let c2v = f32x8::splat(token, C2);
@@ -203,14 +242,13 @@ fn ssim_channel_inner_v3(
         let base = c * 8;
         let m1 = f32x8::from_array(token, mu1[base..][..8].try_into().unwrap());
         let m2 = f32x8::from_array(token, mu2[base..][..8].try_into().unwrap());
-        let s11v = f32x8::from_array(token, s11[base..][..8].try_into().unwrap());
-        let s22v = f32x8::from_array(token, s22[base..][..8].try_into().unwrap());
+        let ssq = f32x8::from_array(token, sum_sq[base..][..8].try_into().unwrap());
         let s12v = f32x8::from_array(token, s12[base..][..8].try_into().unwrap());
 
         let mu_diff = m1 - m2;
         let num_m = mu_diff.mul_add(-mu_diff, one);
         let num_s = two.mul_add(s12v - m1 * m2, c2v);
-        let denom_s = (s11v - m1 * m1) + (s22v - m2 * m2) + c2v;
+        let denom_s = ssq - m1 * m1 - m2 * m2 + c2v;
         let d = (one - (num_m * num_s) / denom_s).max(zero);
         let d2 = d * d;
         let d4 = d2 * d2;
@@ -223,9 +261,9 @@ fn ssim_channel_inner_v3(
         let md = f64::from(mu1[i] - mu2[i]);
         let num_m = 1.0 - md * md;
         let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s = f64::from(s11[i] - mu1[i] * mu1[i])
-            + f64::from(s22[i] - mu2[i] * mu2[i])
-            + f64::from(C2);
+        let denom_s =
+            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
+                + f64::from(C2);
         let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
         sum_d += d;
         sum_d4 += d * d * d * d;
@@ -238,8 +276,7 @@ fn ssim_channel_inner_scalar(
     _token: archmage::ScalarToken,
     mu1: &[f32],
     mu2: &[f32],
-    s11: &[f32],
-    s22: &[f32],
+    sum_sq: &[f32],
     s12: &[f32],
 ) -> (f64, f64) {
     let n = mu1.len();
@@ -250,9 +287,9 @@ fn ssim_channel_inner_scalar(
         let md = f64::from(mu1[i] - mu2[i]);
         let num_m = 1.0 - md * md;
         let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s = f64::from(s11[i] - mu1[i] * mu1[i])
-            + f64::from(s22[i] - mu2[i] * mu2[i])
-            + f64::from(C2);
+        let denom_s =
+            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
+                + f64::from(C2);
         let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
         sum_d += d;
         sum_d4 += d * d * d * d;

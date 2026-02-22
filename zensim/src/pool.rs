@@ -5,8 +5,8 @@ pub(crate) struct ScaleBuffers {
     pub mul_buf: Vec<f32>,
     pub mu1: Vec<f32>,
     pub mu2: Vec<f32>,
+    /// Holds blur(src² + dst²) for combined SSIM computation.
     pub sigma1_sq: Vec<f32>,
-    pub sigma2_sq: Vec<f32>,
     pub sigma12: Vec<f32>,
     pub temp_blur: Vec<f32>,
 }
@@ -18,7 +18,6 @@ impl ScaleBuffers {
             mu1: vec![0.0; size],
             mu2: vec![0.0; size],
             sigma1_sq: vec![0.0; size],
-            sigma2_sq: vec![0.0; size],
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
         }
@@ -29,7 +28,6 @@ impl ScaleBuffers {
         self.mu1.resize(size, 0.0);
         self.mu2.resize(size, 0.0);
         self.sigma1_sq.resize(size, 0.0);
-        self.sigma2_sq.resize(size, 0.0);
         self.sigma12.resize(size, 0.0);
         self.temp_blur.resize(size, 0.0);
     }
