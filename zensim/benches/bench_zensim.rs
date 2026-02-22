@@ -22,8 +22,8 @@ fn bench_zensim_512x512(c: &mut Criterion) {
     c.bench_function("zensim_512x512", |b| {
         b.iter(|| {
             zensim::compute_zensim(
-                criterion::black_box(&src),
-                criterion::black_box(&dst),
+                std::hint::black_box(&src),
+                std::hint::black_box(&dst),
                 width,
                 height,
             )
@@ -53,8 +53,8 @@ fn bench_zensim_256x256(c: &mut Criterion) {
     c.bench_function("zensim_256x256", |b| {
         b.iter(|| {
             zensim::compute_zensim(
-                criterion::black_box(&src),
-                criterion::black_box(&dst),
+                std::hint::black_box(&src),
+                std::hint::black_box(&dst),
                 width,
                 height,
             )
