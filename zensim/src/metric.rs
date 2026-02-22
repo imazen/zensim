@@ -23,6 +23,36 @@ impl Default for ZensimConfig {
     }
 }
 
+/// Map raw weighted distance to 0-100 quality score.
+pub fn distance_to_score(raw_distance: f64) -> f64 {
+    if raw_distance <= 0.0 {
+        100.0
+    } else {
+        // Power law mapping: score = 100 - scale * d^gamma
+        // Calibrated for trained weights where d ∈ [0, ~10]:
+        //   d=0.1 → ~97 (near-invisible distortion)
+        //   d=0.5 → ~82 (subtle distortion)
+        //   d=1.0 → ~65 (moderate distortion)
+        //   d=3.0 → ~20 (severe distortion)
+        let scale = 35.0;
+        let gamma = 0.65;
+        (100.0 - scale * raw_distance.powf(gamma)).max(0.0)
+    }
+}
+
+/// Compute score from raw features using custom weights.
+/// `features`: raw features from ZensimResult.features
+/// `weights`: one weight per feature (len must equal features.len())
+/// Returns (score, raw_distance)
+pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
+    assert_eq!(features.len(), weights.len(), "features and weights must have same length");
+    let raw_distance: f64 = features.iter().zip(weights.iter())
+        .map(|(&f, &w)| w * f)
+        .sum();
+    let raw_distance = raw_distance / (features.len() as f64 / FEATURES_PER_SCALE as f64).max(1.0);
+    (distance_to_score(raw_distance), raw_distance)
+}
+
 /// Per-scale statistics collected during computation.
 struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values
@@ -32,12 +62,19 @@ struct ScaleStats {
 }
 
 /// Result from zensim comparison.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ZensimResult {
     /// Score on 0-100 scale. 100 = identical, higher = better.
     pub score: f64,
     /// Raw weighted distance (before nonlinear mapping). Lower = more similar.
     pub raw_distance: f64,
+    /// Per-scale raw features for weight training. Layout:
+    /// For each scale: [ssim_x_mean, ssim_x_4th, ssim_y_mean, ssim_y_4th, ssim_b_mean, ssim_b_4th,
+    ///                  edge_x_art_mean, edge_x_art_4th, edge_x_det_mean, edge_x_det_4th,
+    ///                  edge_y_art_mean, edge_y_art_4th, edge_y_det_mean, edge_y_det_4th,
+    ///                  edge_b_art_mean, edge_b_art_4th, edge_b_det_mean, edge_b_det_4th]
+    /// = 18 features per scale × NUM_SCALES
+    pub features: Vec<f64>,
 }
 
 /// Compute zensim score between two sRGB u8 images.
@@ -225,98 +262,76 @@ fn compute_single_scale(
 /// - Mean vs 4th-power pooling
 ///
 /// These weights are initial values, to be optimized against human ratings.
+/// Total number of features per scale (3 channels × (2 SSIM + 4 edge) = 18)
+pub const FEATURES_PER_SCALE: usize = 18;
+
 fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
-    // Weight structure: for each scale, for each channel (X, Y, B):
-    //   [ssim_mean, ssim_4th, edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th]
-    // = 6 features per channel × 3 channels × NUM_SCALES = 72 weights
-    //
-    // Initial weights derived from ssimulacra2 with adjustments for:
-    // - Butteraugli's insight that luminance (Y) channel matters most
-    // - Higher weight on medium scales (where CSF peaks)
-    // - Edge features weighted more than in ssimulacra2 (butteraugli emphasis)
-
-    // Per-scale contrast sensitivity function weights.
-    // These approximate the human CSF at different spatial frequencies.
-    // Scale 0 = highest frequency, scale 3 = lowest frequency.
-    // CSF peaks at medium spatial frequencies (~4 cycles/degree).
-    let csf_weights: [f64; 4] = [0.7, 1.0, 0.85, 0.5];
-
-    // Per-channel weights: Y (luminance) > B (blue) > X (red-green)
-    // Based on butteraugli's psychovisual model + HVS research.
-    // Normalized so total weight per scale ≈ 1.0
-    let channel_weights: [f64; 3] = [
-        0.15,  // X (red-green opponent)
-        0.55,  // Y (luminance) — humans most sensitive here
-        0.30,  // B (blue)
+    // Trained weights from TID2013 optimization (3000 pairs).
+    // Layout: 4 scales × 3 channels (X,Y,B) × 6 features (ssim_mean, ssim_4th,
+    //         edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th)
+    #[allow(clippy::excessive_precision)]
+    const WEIGHTS: [f64; 72] = [
+        // Scale 0 Channel X
+        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        // Scale 0 Channel Y
+        0.000000, 0.000000, 0.000000, 19.531250, 0.000000, 0.000000,
+        // Scale 0 Channel B
+        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        // Scale 1 Channel X
+        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        // Scale 1 Channel Y
+        0.000000, 0.000000, 0.000000, 0.000000, 52.083333, 0.000000,
+        // Scale 1 Channel B
+        0.000000, 0.000000, 23.437500, 0.000000, 0.000000, 0.000000,
+        // Scale 2 Channel X
+        0.013021, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+        // Scale 2 Channel Y
+        0.000000, 0.000000, 0.000000, 0.000000, 86.805556, 43.402778,
+        // Scale 2 Channel B
+        0.000000, 0.000000, 87.890625, 0.000000, 0.000000, 0.000000,
+        // Scale 3 Channel X
+        0.024414, 0.000000, 0.000000, 5.859375, 195.312500, 29.296875,
+        // Scale 3 Channel Y
+        0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 26.041667,
+        // Scale 3 Channel B
+        0.000000, 0.000000, 0.000000, 20.833333, 292.968750, 0.000000,
     ];
 
-    // Feature type weights — SSIM mean is dominant
-    let ssim_mean_w = 1.0;
-    let ssim_4th_w = 0.3;
-    let edge_art_mean_w = 0.5;
-    let edge_art_4th_w = 0.15;
-    let edge_det_mean_w = 0.4;
-    let edge_det_4th_w = 0.15;
-
-    let feature_weights = [
-        ssim_mean_w, ssim_4th_w,
-        edge_art_mean_w, edge_art_4th_w,
-        edge_det_mean_w, edge_det_4th_w,
-    ];
-
+    // Collect raw features and compute weighted distance
+    let mut features = Vec::with_capacity(scale_stats.len() * FEATURES_PER_SCALE);
     let mut raw_distance = 0.0f64;
 
-    for (scale_idx, ss) in scale_stats.iter().enumerate() {
-        let csf_w = if scale_idx < csf_weights.len() {
-            csf_weights[scale_idx]
-        } else {
-            0.3
-        };
-
+    for ss in scale_stats.iter() {
         for c in 0..3 {
-            let ch_w = channel_weights[c];
-
-            // SSIM features
-            let ssim_features = [
+            let ssim_feats = [
                 ss.ssim[c * 2].abs(),
                 ss.ssim[c * 2 + 1].abs(),
             ];
-            // Edge features
-            let edge_features = [
+            let edge_feats = [
                 ss.edge[c * 4].abs(),
                 ss.edge[c * 4 + 1].abs(),
                 ss.edge[c * 4 + 2].abs(),
                 ss.edge[c * 4 + 3].abs(),
             ];
-
-            for (i, &feat) in ssim_features.iter().chain(edge_features.iter()).enumerate() {
-                raw_distance += csf_w * ch_w * feature_weights[i] * feat;
-            }
+            features.extend_from_slice(&ssim_feats);
+            features.extend_from_slice(&edge_feats);
         }
+    }
+
+    // Apply weights (features and weights have same layout)
+    for (i, (&feat, &weight)) in features.iter().zip(WEIGHTS.iter()).enumerate() {
+        let _ = i; // suppress warning
+        raw_distance += feat * weight;
     }
 
     // Normalize by number of scales
     raw_distance /= scale_stats.len().max(1) as f64;
 
-    // Nonlinear mapping to 0-100 scale.
-    // Modeled after ssimulacra2: score = 100 - 10 * distance^gamma
-    // Calibrated so that:
-    //   JPEG Q90 ≈ 80-90 (imperceptible)
-    //   JPEG Q50 ≈ 50-65 (noticeable)
-    //   JPEG Q10 ≈ 15-30 (significant)
-    let score = if raw_distance <= 0.0 {
-        100.0
-    } else {
-        // Use log mapping for better dynamic range:
-        // score = 100 / (1 + k * distance^gamma)
-        // This gives a smooth sigmoid-like curve that handles wide range.
-        let k = 0.06;
-        let gamma = 0.75;
-        100.0 / (1.0 + k * raw_distance.powf(gamma))
-    };
+    let score = distance_to_score(raw_distance);
 
     ZensimResult {
         score,
         raw_distance,
+        features,
     }
 }

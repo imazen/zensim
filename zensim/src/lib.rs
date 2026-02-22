@@ -23,7 +23,10 @@ mod pool;
 mod simd_ops;
 
 pub use error::ZensimError;
-pub use metric::{compute_zensim, ZensimConfig, ZensimResult};
+pub use metric::{
+    compute_zensim, compute_zensim_with_config, distance_to_score, score_from_features,
+    ZensimConfig, ZensimResult, FEATURES_PER_SCALE,
+};
 
 /// Number of downscale levels. Each level halves resolution.
 /// 4 scales covers 1x, 2x, 4x, 8x — sufficient for most perceptual effects.

@@ -19,6 +19,14 @@ struct Args {
     /// Max images to process (0 = all)
     #[arg(long, default_value = "0")]
     max_images: usize,
+
+    /// Train weights: run Nelder-Mead optimization to find best feature weights
+    #[arg(long, default_value = "false")]
+    train: bool,
+
+    /// Output features CSV for external analysis
+    #[arg(long)]
+    features_csv: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -62,22 +70,22 @@ fn main() {
             .unwrap(),
     );
 
-    // Compute zensim scores in parallel
-    let results: Vec<(f64, f64)> = pairs
+    // Compute zensim scores + features in parallel
+    let results: Vec<(f64, zensim::ZensimResult)> = pairs
         .par_iter()
         .map(|pair| {
-            let score = compute_pair_score(pair);
+            let result = compute_pair_result(pair);
             pb.inc(1);
-            (pair.human_score, score)
+            (pair.human_score, result)
         })
         .collect();
 
     pb.finish_with_message("done");
 
-    // Filter out failures
-    let valid: Vec<(f64, f64)> = results
+    // Filter out failures (NaN score)
+    let valid: Vec<(f64, zensim::ZensimResult)> = results
         .into_iter()
-        .filter(|&(_, s)| s.is_finite())
+        .filter(|(_, r)| r.score.is_finite())
         .collect();
 
     println!("\nSuccessfully computed {}/{} pairs", valid.len(), pairs.len());
@@ -87,60 +95,193 @@ fn main() {
         return;
     }
 
-    // Compute correlation metrics
-    let human_scores: Vec<f64> = valid.iter().map(|&(h, _)| h).collect();
-    let metric_scores: Vec<f64> = valid.iter().map(|&(_, m)| m).collect();
+    // Output features CSV if requested
+    if let Some(ref csv_path) = args.features_csv {
+        write_features_csv(csv_path, &valid);
+    }
+
+    let human_scores: Vec<f64> = valid.iter().map(|(h, _)| *h).collect();
+    let metric_scores: Vec<f64> = valid.iter().map(|(_, r)| r.score).collect();
 
     let srocc = spearman_correlation(&human_scores, &metric_scores);
     let plcc = pearson_correlation(&human_scores, &metric_scores);
     let krocc = kendall_correlation(&human_scores, &metric_scores);
 
-    println!("\n=== Correlation with Human Ratings ===");
+    println!("\n=== Correlation with Human Ratings (default weights) ===");
     println!("SROCC (Spearman):  {:.4}", srocc);
     println!("PLCC  (Pearson):   {:.4}", plcc);
     println!("KROCC (Kendall):   {:.4}", krocc);
-    println!();
 
-    // Show score range
     let min_m = metric_scores.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_m = metric_scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let mean_m: f64 = metric_scores.iter().sum::<f64>() / metric_scores.len() as f64;
-    println!("Metric score range: {:.2} to {:.2}, mean: {:.2}", min_m, max_m, mean_m);
+    println!("Metric score range: {:.2} to {:.2}, mean: {:.2}\n", min_m, max_m, mean_m);
+
+    // Train weights if requested
+    if args.train {
+        let feature_vecs: Vec<&[f64]> = valid.iter().map(|(_, r)| r.features.as_slice()).collect();
+        let n_features = feature_vecs[0].len();
+        println!("Training weights on {} pairs with {} features...", valid.len(), n_features);
+
+        let best_weights = train_weights(&human_scores, &feature_vecs, n_features);
+
+        // Evaluate with trained weights
+        let trained_scores: Vec<f64> = feature_vecs.iter()
+            .map(|f| zensim::score_from_features(f, &best_weights).0)
+            .collect();
+
+        let srocc_t = spearman_correlation(&human_scores, &trained_scores);
+        let plcc_t = pearson_correlation(&human_scores, &trained_scores);
+        let krocc_t = kendall_correlation(&human_scores, &trained_scores);
+
+        println!("\n=== Correlation with Trained Weights ===");
+        println!("SROCC (Spearman):  {:.4}", srocc_t);
+        println!("PLCC  (Pearson):   {:.4}", plcc_t);
+        println!("KROCC (Kendall):   {:.4}", krocc_t);
+
+        // Print weights for embedding in code
+        println!("\n// Trained weights ({} values):", best_weights.len());
+        println!("const TRAINED_WEIGHTS: [f64; {}] = [", best_weights.len());
+        for (i, w) in best_weights.iter().enumerate() {
+            if i % 6 == 0 {
+                let scale = i / 18;
+                let ch = (i % 18) / 6;
+                let ch_name = ["X", "Y", "B"][ch];
+                print!("    // Scale {} Channel {}\n    ", scale, ch_name);
+            }
+            print!("{:.6}, ", w);
+            if i % 6 == 5 {
+                println!();
+            }
+        }
+        println!("];");
+    }
 }
 
-fn compute_pair_score(pair: &ImagePair) -> f64 {
+fn compute_pair_result(pair: &ImagePair) -> zensim::ZensimResult {
+    let nan_result = zensim::ZensimResult {
+        score: f64::NAN,
+        raw_distance: f64::NAN,
+        features: vec![],
+    };
+
     let src = match image::open(&pair.reference) {
         Ok(img) => img.to_rgb8(),
-        Err(e) => {
-            eprintln!("Failed to open {:?}: {}", pair.reference, e);
-            return f64::NAN;
-        }
+        Err(_) => return nan_result,
     };
     let dst = match image::open(&pair.distorted) {
         Ok(img) => img.to_rgb8(),
-        Err(e) => {
-            eprintln!("Failed to open {:?}: {}", pair.distorted, e);
-            return f64::NAN;
-        }
+        Err(_) => return nan_result,
     };
 
     let (w, h) = src.dimensions();
     let (dw, dh) = dst.dimensions();
     if w != dw || h != dh {
-        eprintln!("Dimension mismatch: {:?}", pair.distorted);
-        return f64::NAN;
+        return nan_result;
     }
 
     let src_pixels: Vec<[u8; 3]> = src.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dst_pixels: Vec<[u8; 3]> = dst.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
     match zensim::compute_zensim(&src_pixels, &dst_pixels, w as usize, h as usize) {
-        Ok(r) => r.score,
-        Err(e) => {
-            eprintln!("Error on {:?}: {}", pair.distorted, e);
-            f64::NAN
-        }
+        Ok(r) => r,
+        Err(_) => nan_result,
     }
+}
+
+fn write_features_csv(path: &Path, data: &[(f64, zensim::ZensimResult)]) {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path).expect("Failed to create features CSV");
+
+    // Header
+    let n_features = data[0].1.features.len();
+    write!(f, "human_score,metric_score,raw_distance").unwrap();
+    for i in 0..n_features {
+        write!(f, ",f{}", i).unwrap();
+    }
+    writeln!(f).unwrap();
+
+    // Data
+    for (human, result) in data {
+        write!(f, "{},{},{}", human, result.score, result.raw_distance).unwrap();
+        for feat in &result.features {
+            write!(f, ",{}", feat).unwrap();
+        }
+        writeln!(f).unwrap();
+    }
+    println!("Wrote features to {:?}", path);
+}
+
+/// Train weights using coordinate descent with random restarts.
+/// Maximizes SROCC between predicted scores and human scores.
+fn train_weights(human_scores: &[f64], features: &[&[f64]], n_features: usize) -> Vec<f64> {
+    let mut best_weights = vec![1.0; n_features];
+    let mut best_srocc = -1.0f64;
+
+    // Initialize with uniform weights
+    let initial: Vec<f64> = vec![1.0 / n_features as f64; n_features];
+
+    // Try several random starting points
+    let n_restarts = 5;
+    let mut rng_state = 42u64;
+
+    for restart in 0..n_restarts {
+        let mut weights = if restart == 0 {
+            initial.clone()
+        } else {
+            // Random initialization
+            (0..n_features)
+                .map(|_| {
+                    rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    (rng_state >> 33) as f64 / (u32::MAX as f64) * 2.0
+                })
+                .collect()
+        };
+
+        // Coordinate descent: optimize one weight at a time
+        for _iter in 0..20 {
+            let mut improved = false;
+
+            for dim in 0..n_features {
+                let current_val = weights[dim];
+                let mut best_val = current_val;
+                let mut best_local_srocc = eval_srocc(human_scores, features, &weights);
+
+                // Try different values for this dimension
+                for &delta_mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0] {
+                    weights[dim] = current_val * delta_mult;
+                    let srocc = eval_srocc(human_scores, features, &weights);
+                    if srocc > best_local_srocc {
+                        best_local_srocc = srocc;
+                        best_val = weights[dim];
+                        improved = true;
+                    }
+                }
+                weights[dim] = best_val;
+            }
+
+            if !improved {
+                break;
+            }
+        }
+
+        let srocc = eval_srocc(human_scores, features, &weights);
+        if srocc > best_srocc {
+            best_srocc = srocc;
+            best_weights = weights;
+        }
+        println!("  Restart {}: SROCC = {:.4}", restart, srocc);
+    }
+
+    println!("Best training SROCC: {:.4}", best_srocc);
+    best_weights
+}
+
+fn eval_srocc(human_scores: &[f64], features: &[&[f64]], weights: &[f64]) -> f64 {
+    let predicted: Vec<f64> = features.iter()
+        .map(|f| zensim::score_from_features(f, weights).0)
+        .collect();
+    spearman_correlation(human_scores, &predicted)
 }
 
 // ===== Dataset loaders =====
@@ -180,24 +321,19 @@ fn load_tid2013_mos(mos_path: &Path, base: &Path) -> Vec<ImagePair> {
         };
         let filename = parts[1].trim();
 
-        // Extract reference image number: I01_01_1.bmp → reference_images/I01.bmp
-        let ref_num = &filename[..3]; // "I01"
+        // Extract reference image number: I01_01_1.bmp → reference_images/I01.BMP
+        // Filenames have inconsistent case (I01 vs i01), references are uppercase
+        let ref_num = filename[..3].to_uppercase();
         let ref_path = base.join("reference_images").join(format!("{}.BMP", ref_num));
-        let ref_path_lower = base.join("reference_images").join(format!("{}.bmp", ref_num));
-        let ref_path = if ref_path.exists() {
-            ref_path
-        } else if ref_path_lower.exists() {
-            ref_path_lower
-        } else {
-            // Try without subdirectory
-            base.join(format!("{}.BMP", ref_num))
-        };
 
+        // Distorted images also have inconsistent case
         let dist_path = base.join("distorted_images").join(filename);
         let dist_path = if dist_path.exists() {
             dist_path
         } else {
-            base.join(filename)
+            // Try case variations
+            let upper = base.join("distorted_images").join(filename.to_uppercase());
+            if upper.exists() { upper } else { dist_path }
         };
 
         // TID2013 MOS: 0-9 scale (higher = better)
