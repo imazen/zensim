@@ -217,16 +217,23 @@ fn compute_single_scale(
     let mut ssim_vals = [0.0f64; 6];
     let mut edge_vals = [0.0f64; 12];
 
-    // Check which channels need SSIM (weights > 0.001)
-    // SSIM weights are only nonzero at scale 2-3 channel X, and very small
-    let need_ssim = |scale: usize, ch: usize| -> bool {
-        let base = scale * 18 + ch * 6;
-        // Check ssim_mean and ssim_4th weights
-        base + 1 < WEIGHTS.len()
-            && (WEIGHTS[base].abs() > 0.001 || WEIGHTS[base + 1].abs() > 0.001)
+    // Check if any weight is nonzero for a given feature type at this scale+channel
+    let has_weight = |base_idx: usize, count: usize| -> bool {
+        (base_idx..base_idx + count)
+            .all(|i| i < WEIGHTS.len())
+            && (base_idx..base_idx + count).any(|i| WEIGHTS[i].abs() > 0.001)
     };
 
     for c in 0..3 {
+        let base = scale_idx * FEATURES_PER_SCALE + c * 6;
+        let need_ssim = has_weight(base, 2);
+        let need_edge = has_weight(base + 2, 4);
+
+        // Skip channel entirely if no weights are active
+        if !need_ssim && !need_edge {
+            continue;
+        }
+
         let src_c = &src[c];
         let dst_c = &dst[c];
 
@@ -235,7 +242,7 @@ fn compute_single_scale(
         box_blur_3pass_into(dst_c, &mut bufs.mu2, &mut bufs.temp_blur, width, height, blur_radius);
 
         // Only compute variance/covariance if SSIM weight is nonzero
-        if need_ssim(scale_idx, c) {
+        if need_ssim {
             mul_into(src_c, src_c, &mut bufs.mul_buf);
             box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma1_sq, &mut bufs.temp_blur, width, height, blur_radius);
 
@@ -250,12 +257,14 @@ fn compute_single_scale(
             ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
         }
 
-        // Edge features (always computed — they carry most weight)
-        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
-        edge_vals[c * 4] = art * one_over_n;
-        edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
-        edge_vals[c * 4 + 2] = det * one_over_n;
-        edge_vals[c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+        // Edge features
+        if need_edge {
+            let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
+            edge_vals[c * 4] = art * one_over_n;
+            edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
+            edge_vals[c * 4 + 2] = det * one_over_n;
+            edge_vals[c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+        }
     }
 
     ScaleStats {
