@@ -8,11 +8,11 @@ struct Args {
     source: PathBuf,
     /// Distorted image to compare
     distorted: PathBuf,
-    /// Box blur passes (2 or 3, default: 2). 2 = triangular kernel, 33% fewer blur ops.
-    #[arg(long, default_value = "2")]
+    /// Box blur passes (1, 2, or 3, default: 1). 1 = rectangular, 2 = triangular, 3 ≈ Gaussian.
+    #[arg(long, default_value = "1")]
     blur_passes: u8,
-    /// Box blur radius at scale 0 (default: 3, giving 7-pixel kernel)
-    #[arg(long, default_value = "3")]
+    /// Box blur radius at scale 0 (default: 5, giving 11-pixel kernel)
+    #[arg(long, default_value = "5")]
     blur_radius: usize,
 }
 

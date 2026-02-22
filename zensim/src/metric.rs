@@ -4,7 +4,9 @@
 //! with contrast sensitivity weighting per scale.
 
 use crate::NUM_SCALES;
-use crate::blur::{box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace};
+use crate::blur::{
+    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace,
+};
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
@@ -13,10 +15,10 @@ use crate::simd_ops::{edge_diff_channel, mul_into, ssim_channel};
 /// Configuration for zensim computation.
 #[derive(Debug, Clone, Copy)]
 pub struct ZensimConfig {
-    /// Box blur radius at scale 0 (default: 3, giving 7-pixel kernel)
+    /// Box blur radius at scale 0 (default: 5, giving 11-pixel kernel)
     pub blur_radius: usize,
-    /// Number of box blur passes (2 or 3, default: 2).
-    /// 3 passes = piecewise-quadratic ≈ Gaussian. 2 passes = triangular, 33% faster.
+    /// Number of box blur passes (1, 2, or 3, default: 1).
+    /// 1 pass = rectangular kernel, fastest. 2 = triangular. 3 = piecewise-quadratic ≈ Gaussian.
     pub blur_passes: u8,
     /// Compute all features even if their weights are zero.
     /// Enable this for weight training to avoid circular dependency.
@@ -26,8 +28,8 @@ pub struct ZensimConfig {
 impl Default for ZensimConfig {
     fn default() -> Self {
         Self {
-            blur_radius: 3,
-            blur_passes: 2,
+            blur_radius: 5,
+            blur_passes: 1,
             compute_all_features: false,
         }
     }
@@ -243,10 +245,10 @@ fn compute_channel(
     let mut edge = [0.0f64; 4];
 
     #[allow(clippy::type_complexity)]
-    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = if blur_passes >= 3 {
-        box_blur_3pass_into
-    } else {
-        box_blur_2pass_into
+    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match blur_passes {
+        1 => box_blur_1pass_into,
+        2 => box_blur_2pass_into,
+        _ => box_blur_3pass_into,
     };
 
     // mu1 and mu2 are needed for both SSIM and edge features

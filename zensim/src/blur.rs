@@ -45,7 +45,21 @@ pub fn box_blur_3pass_into(
     box_blur_v_from_copy(temp, output, width, height, radius);
 }
 
-/// 2-pass blur: triangular kernel, 33% fewer operations.
+/// 1-pass blur: rectangular kernel, 50% fewer operations than 2-pass.
+/// Use with larger radius to approximate same effective width.
+pub fn box_blur_1pass_into(
+    input: &[f32],
+    output: &mut [f32],
+    temp: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    box_blur_h(input, temp, width, height, radius);
+    box_blur_v_from_copy(temp, output, width, height, radius);
+}
+
+/// 2-pass blur: triangular kernel, 33% fewer operations than 3-pass.
 /// Use with radius+1 to approximate same effective width as 3-pass with radius.
 pub fn box_blur_2pass_into(
     input: &[f32],
