@@ -145,7 +145,7 @@ fn compute_multiscale_stats(
 ) -> Vec<ScaleStats> {
     let mut stats = Vec::with_capacity(NUM_SCALES);
 
-    // Current scale planes (owned, will be downscaled)
+    // Start with the original planes (avoid clone for scale 0 by using references first)
     let mut src_planes: [Vec<f32>; 3] = [
         src_xyb[0].clone(),
         src_xyb[1].clone(),
@@ -159,20 +159,25 @@ fn compute_multiscale_stats(
     let mut w = width;
     let mut h = height;
 
-    for _scale in 0..NUM_SCALES {
-        let n = w * h;
+    // Pre-allocate buffers at max size, reuse across scales
+    let max_n = width * height;
+    let mut bufs = ScaleBuffers::new(max_n);
+
+    for scale in 0..NUM_SCALES {
         if w < 8 || h < 8 {
             break;
         }
 
-        let mut bufs = ScaleBuffers::new(n);
+        let n = w * h;
+        bufs.resize(n);
+
         let scale_stat = compute_single_scale(
             &src_planes, &dst_planes, w, h, blur_radius, &mut bufs,
         );
         stats.push(scale_stat);
 
         // Downscale for next level
-        if _scale < NUM_SCALES - 1 {
+        if scale < NUM_SCALES - 1 {
             let mut new_src = [Vec::new(), Vec::new(), Vec::new()];
             let mut new_dst = [Vec::new(), Vec::new(), Vec::new()];
             let mut nw = 0;
@@ -215,32 +220,28 @@ fn compute_single_scale(
         let dst_c = &dst[c];
 
         // mu1 = blur(src), mu2 = blur(dst)
-        // Reuse bufs.mu2 for mu2, store mu1 in temp first
-        let mut mu1 = vec![0.0f32; n];
-        let mut temp_blur = vec![0.0f32; n];
-        box_blur_3pass_into(src_c, &mut mu1, &mut temp_blur, width, height, blur_radius);
-        box_blur_3pass_into(dst_c, &mut bufs.mu2, &mut temp_blur, width, height, blur_radius);
+        box_blur_3pass_into(src_c, &mut bufs.mu1, &mut bufs.temp_blur, width, height, blur_radius);
+        box_blur_3pass_into(dst_c, &mut bufs.mu2, &mut bufs.temp_blur, width, height, blur_radius);
 
         // sigma1_sq = blur(src^2)
         mul_into(src_c, src_c, &mut bufs.mul_buf);
-        let mut sigma1_sq = vec![0.0f32; n];
-        box_blur_3pass_into(&bufs.mul_buf, &mut sigma1_sq, &mut temp_blur, width, height, blur_radius);
+        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma1_sq, &mut bufs.temp_blur, width, height, blur_radius);
 
         // sigma2_sq = blur(dst^2)
         mul_into(dst_c, dst_c, &mut bufs.mul_buf);
-        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma2_sq, &mut temp_blur, width, height, blur_radius);
+        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma2_sq, &mut bufs.temp_blur, width, height, blur_radius);
 
         // sigma12 = blur(src*dst)
         mul_into(src_c, dst_c, &mut bufs.mul_buf);
-        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma12, &mut temp_blur, width, height, blur_radius);
+        box_blur_3pass_into(&bufs.mul_buf, &mut bufs.sigma12, &mut bufs.temp_blur, width, height, blur_radius);
 
         // SSIM statistics
-        let (sum_d, sum_d4) = ssim_channel(&mu1, &bufs.mu2, &sigma1_sq, &bufs.sigma2_sq, &bufs.sigma12);
+        let (sum_d, sum_d4) = ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma2_sq, &bufs.sigma12);
         ssim_vals[c * 2] = sum_d * one_over_n;
         ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
 
         // Edge difference statistics
-        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &mu1, &bufs.mu2);
+        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
         edge_vals[c * 4] = art * one_over_n;
         edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
         edge_vals[c * 4 + 2] = det * one_over_n;
