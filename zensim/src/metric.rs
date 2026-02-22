@@ -10,7 +10,7 @@ use crate::blur::{
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
-use crate::simd_ops::{edge_diff_channel, mul_into, sq_sum_into, ssim_channel};
+use crate::simd_ops::{edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel};
 
 /// Configuration for zensim computation.
 #[derive(Debug, Clone, Copy)]
@@ -78,6 +78,8 @@ struct ScaleStats {
     ssim: [f64; 6],
     /// Edge features: [art_mean, art_4th, det_mean, det_4th] per channel = 12 values
     edge: [f64; 12],
+    /// Per-channel MSE: mean((src - dst)²) for X, Y, B
+    mse: [f64; 3],
 }
 
 /// Result from zensim comparison.
@@ -87,12 +89,9 @@ pub struct ZensimResult {
     pub score: f64,
     /// Raw weighted distance (before nonlinear mapping). Lower = more similar.
     pub raw_distance: f64,
-    /// Per-scale raw features for weight training. Layout:
-    /// For each scale: [ssim_x_mean, ssim_x_4th, ssim_y_mean, ssim_y_4th, ssim_b_mean, ssim_b_4th,
-    ///                  edge_x_art_mean, edge_x_art_4th, edge_x_det_mean, edge_x_det_4th,
-    ///                  edge_y_art_mean, edge_y_art_4th, edge_y_det_mean, edge_y_det_4th,
-    ///                  edge_b_art_mean, edge_b_art_4th, edge_b_det_mean, edge_b_det_4th]
-    /// = 18 features per scale × NUM_SCALES
+    /// Per-scale raw features for weight training. Layout per channel (X, Y, B):
+    ///   ssim_mean, ssim_4th, edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th, mse
+    /// = 7 features per channel × 3 channels = 21 features per scale × NUM_SCALES
     pub features: Vec<f64>,
 }
 
@@ -327,6 +326,7 @@ fn compute_single_scale(
 ) -> ScaleStats {
     let mut ssim_vals = [0.0f64; 6];
     let mut edge_vals = [0.0f64; 12];
+    let mut mse_vals = [0.0f64; 3];
 
     // Check if any weight is nonzero for a given feature type at this scale+channel
     let has_weight = |base_idx: usize, count: usize| -> bool {
@@ -335,17 +335,24 @@ fn compute_single_scale(
     };
 
     // Determine which channels need work
+    // Feature layout per channel: 7 features (2 ssim + 4 edge + 1 mse)
     let mut active_channels: Vec<(usize, bool, bool)> = Vec::new();
     for c in 0..3 {
-        let base = scale_idx * FEATURES_PER_SCALE + c * 6;
+        let base = scale_idx * FEATURES_PER_SCALE + c * 7;
         let need_ssim = compute_all || has_weight(base, 2);
         let need_edge = compute_all || has_weight(base + 2, 4);
-        if need_ssim || need_edge {
+        let need_mse = compute_all || has_weight(base + 6, 1);
+        if need_ssim || need_edge || need_mse {
             active_channels.push((c, need_ssim, need_edge));
         }
     }
 
+    // Compute MSE for all active channels (no blur needed, just pixel differences)
     let n = width * height;
+    let one_over_n = 1.0 / n as f64;
+    for &(c, _, _) in &active_channels {
+        mse_vals[c] = sq_diff_sum(&src[c][..n], &dst[c][..n]) * one_over_n;
+    }
 
     if n >= PARALLEL_THRESHOLD {
         // Phased parallelism: parallelize blur operations for better load balance.
@@ -384,6 +391,7 @@ fn compute_single_scale(
     ScaleStats {
         ssim: ssim_vals,
         edge: edge_vals,
+        mse: mse_vals,
     }
 }
 
@@ -664,38 +672,38 @@ fn compute_single_scale_phased(
 /// - Mean vs 4th-power pooling
 ///
 /// These weights are initial values, to be optimized against human ratings.
-/// Total number of features per scale (3 channels × (2 SSIM + 4 edge) = 18)
-pub const FEATURES_PER_SCALE: usize = 18;
+/// Total number of features per scale (3 channels × (2 SSIM + 4 edge + 1 MSE) = 21)
+pub const FEATURES_PER_SCALE: usize = 21;
 
 /// Trained weights from TID2013 optimization (3000 pairs).
-/// Layout: 4 scales × 3 channels (X,Y,B) × 6 features (ssim_mean, ssim_4th,
-///         edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th)
+/// Layout: 4 scales × 3 channels (X,Y,B) × 7 features (ssim_mean, ssim_4th,
+///         edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th, mse)
 #[allow(clippy::excessive_precision)]
-pub const WEIGHTS: [f64; 72] = [
+pub const WEIGHTS: [f64; 84] = [
     // Scale 0 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 0 Channel Y
-    0.117592, 8.367503, 0.000000, 0.000000, 25.587284, 0.000000,
+    0.117592, 8.367503, 0.000000, 0.000000, 25.587284, 0.000000, 0.000000,
     // Scale 0 Channel B
-    0.000000, 0.000000, 0.000000, 22.157398, 55.113319, 0.000000,
+    0.000000, 0.000000, 0.000000, 22.157398, 55.113319, 0.000000, 0.000000,
     // Scale 1 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 1 Channel Y
-    50.202655, 4.162088, 0.000000, 0.000000, 125.177307, 115.357675,
+    50.202655, 4.162088, 0.000000, 0.000000, 125.177307, 115.357675, 0.000000,
     // Scale 1 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 19.069615, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 19.069615, 0.000000, 0.000000,
     // Scale 2 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 15.958061, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 15.958061, 0.000000, 0.000000,
     // Scale 2 Channel Y
-    0.000000, 1.245107, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 1.245107, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 2 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 3 Channel X
-    24.891486, 8.001749, 0.000000, 0.000000, 374.130349, 0.000000,
+    24.891486, 8.001749, 0.000000, 0.000000, 374.130349, 0.000000, 0.000000,
     // Scale 3 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
     // Scale 3 Channel B
-    21.750148, 7.333710, 0.000000, 0.000000, 214.128879, 0.000000,
+    21.750148, 7.333710, 0.000000, 0.000000, 214.128879, 0.000000, 0.000000,
 ];
 
 fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
@@ -714,6 +722,7 @@ fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
             ];
             features.extend_from_slice(&ssim_feats);
             features.extend_from_slice(&edge_feats);
+            features.push(ss.mse[c]);
         }
     }
 

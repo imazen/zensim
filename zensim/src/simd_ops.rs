@@ -28,6 +28,11 @@ pub fn ssim_channel(mu1: &[f32], mu2: &[f32], sum_sq: &[f32], sigma12: &[f32]) -
     incant!(ssim_channel_inner(mu1, mu2, sum_sq, sigma12), [v4, v3])
 }
 
+/// Compute sum of squared differences: sum((a[i] - b[i])²)
+pub fn sq_diff_sum(a: &[f32], b: &[f32]) -> f64 {
+    incant!(sq_diff_sum_inner(a, b), [v4, v3])
+}
+
 /// Compute edge difference features for a single channel.
 /// Returns (artifact_mean, artifact_4th, detail_lost_mean, detail_lost_4th).
 pub fn edge_diff_channel(
@@ -87,6 +92,64 @@ fn sq_sum_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32],
     for i in 0..a.len() {
         out[i] = a[i] * a[i] + b[i] * b[i];
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn sq_diff_sum_inner_v4(token: archmage::X64V4Token, a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let chunks = n / 16;
+    let mut sum = 0.0f64;
+    for c in 0..chunks {
+        let base = c * 16;
+        let va = f32x16::from_array(token, a[base..][..16].try_into().unwrap());
+        let vb = f32x16::from_array(token, b[base..][..16].try_into().unwrap());
+        let d = va - vb;
+        sum += (d * d).reduce_add() as f64;
+    }
+    let v3 = token.v3();
+    let chunks8 = (n - chunks * 16) / 8;
+    for c in 0..chunks8 {
+        let base = chunks * 16 + c * 8;
+        let va = f32x8::from_array(v3, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(v3, b[base..][..8].try_into().unwrap());
+        let d = va - vb;
+        sum += (d * d).reduce_add() as f64;
+    }
+    for i in (chunks * 16 + chunks8 * 8)..n {
+        let d = (a[i] - b[i]) as f64;
+        sum += d * d;
+    }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn sq_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let chunks = n / 8;
+    let mut sum = 0.0f64;
+    for c in 0..chunks {
+        let base = c * 8;
+        let va = f32x8::from_array(token, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(token, b[base..][..8].try_into().unwrap());
+        let d = va - vb;
+        sum += (d * d).reduce_add() as f64;
+    }
+    for i in (chunks * 8)..n {
+        let d = (a[i] - b[i]) as f64;
+        sum += d * d;
+    }
+    sum
+}
+
+fn sq_diff_sum_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32]) -> f64 {
+    let mut sum = 0.0f64;
+    for i in 0..a.len() {
+        let d = (a[i] - b[i]) as f64;
+        sum += d * d;
+    }
+    sum
 }
 
 #[cfg(target_arch = "x86_64")]
