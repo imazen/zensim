@@ -129,14 +129,16 @@ fn main() {
         primary.features[0].len()
     };
 
-    // Build frozen mask
-    let features_per_ch = zensim::FEATURES_PER_SCALE / 3;
+    // Build frozen mask (expanded to match feature count)
+    let embedded_w = expand_embedded_weights(n_features);
     let frozen: Vec<bool> = if args.sparse {
-        zensim::WEIGHTS
+        // Determine features_per_channel from n_features
+        let fpc = if n_features % (10 * 3) == 0 { 10 } else { 7 };
+        embedded_w
             .iter()
             .enumerate()
             .map(|(i, w)| {
-                let is_mse = i % features_per_ch == features_per_ch - 1;
+                let is_mse = i % fpc == fpc - 1;
                 !is_mse && w.abs() < 0.001
             })
             .collect()
@@ -340,12 +342,76 @@ fn load_and_compute(
     }
 }
 
+/// Expand embedded WEIGHTS (84 entries, 7 features/ch) to match a wider feature layout.
+/// When masking is enabled, features have 10/ch (inserts zeros for ssim_2nd, art_2nd, det_2nd).
+/// When extra scales are used, pads with zeros for extra scale features.
+fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
+    let embedded = &zensim::WEIGHTS;
+    if n_features == embedded.len() {
+        return embedded.to_vec();
+    }
+
+    let mut expanded = vec![0.0; n_features];
+
+    // Detect features_per_channel from the feature count
+    let n_channels = 3;
+    // Try masked (10/ch) first, then basic (7/ch)
+    let (fpc, n_scales) = if n_features.is_multiple_of(10 * n_channels) {
+        (10, n_features / (10 * n_channels))
+    } else if n_features.is_multiple_of(7 * n_channels) {
+        (7, n_features / (7 * n_channels))
+    } else {
+        // Fallback: just copy what fits
+        for (i, &w) in embedded.iter().enumerate() {
+            if i < n_features {
+                expanded[i] = w;
+            }
+        }
+        return expanded;
+    };
+
+    let emb_fpc = 7; // embedded always has 7 features per channel
+    let emb_scales = embedded.len() / (emb_fpc * n_channels);
+
+    // Map basic→masked layout for each scale/channel that exists in embedded
+    for s in 0..n_scales.min(emb_scales) {
+        for c in 0..n_channels {
+            let emb_base = s * (emb_fpc * n_channels) + c * emb_fpc;
+            let exp_base = s * (fpc * n_channels) + c * fpc;
+
+            if fpc == 10 {
+                // basic[0..2] → masked[0..2] (ssim_mean, ssim_4th)
+                expanded[exp_base] = embedded[emb_base];
+                expanded[exp_base + 1] = embedded[emb_base + 1];
+                // masked[2] = ssim_2nd → 0 (new)
+                // basic[2..4] → masked[3..5] (art_mean, art_4th)
+                expanded[exp_base + 3] = embedded[emb_base + 2];
+                expanded[exp_base + 4] = embedded[emb_base + 3];
+                // masked[5] = art_2nd → 0 (new)
+                // basic[4..6] → masked[6..8] (det_mean, det_4th)
+                expanded[exp_base + 6] = embedded[emb_base + 4];
+                expanded[exp_base + 7] = embedded[emb_base + 5];
+                // masked[8] = det_2nd → 0 (new)
+                // basic[6] → masked[9] (mse)
+                expanded[exp_base + 9] = embedded[emb_base + 6];
+            } else {
+                // Same layout, just copy
+                expanded[exp_base..exp_base + emb_fpc]
+                    .copy_from_slice(&embedded[emb_base..emb_base + emb_fpc]);
+            }
+        }
+    }
+
+    expanded
+}
+
 /// Report correlations using embedded WEIGHTS.
 fn report_embedded_correlations(ds: &DatasetWithFeatures) {
+    let ew = expand_embedded_weights(ds.features[0].len());
     let metric_scores: Vec<f64> = ds
         .features
         .iter()
-        .map(|f| zensim::score_from_features(f, &zensim::WEIGHTS).0)
+        .map(|f| zensim::score_from_features(f, &ew).0)
         .collect();
 
     let srocc = spearman_correlation(&ds.human_scores, &metric_scores);
@@ -374,7 +440,7 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures) {
     let raw_dists: Vec<f64> = ds
         .features
         .iter()
-        .map(|f| zensim::score_from_features(f, &zensim::WEIGHTS).1)
+        .map(|f| zensim::score_from_features(f, &ew).1)
         .collect();
     let min_d = raw_dists.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_d = raw_dists.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -443,6 +509,7 @@ fn run_kfold_cv(ds: &DatasetWithFeatures, k: usize, n_features: usize, frozen: &
         ds.human_scores.len()
     );
 
+    let embedded_w = expand_embedded_weights(n_features);
     let mut trained_sroccs = Vec::new();
     let mut embedded_sroccs = Vec::new();
 
@@ -476,7 +543,7 @@ fn run_kfold_cv(ds: &DatasetWithFeatures, k: usize, n_features: usize, frozen: &
         trained_sroccs.push(trained_srocc);
 
         // Evaluate embedded WEIGHTS on held-out fold (baseline)
-        let embedded_srocc = eval_srocc(&test_h, &test_slices, &zensim::WEIGHTS);
+        let embedded_srocc = eval_srocc(&test_h, &test_slices, &embedded_w);
         embedded_sroccs.push(embedded_srocc);
 
         println!(
@@ -500,6 +567,7 @@ fn run_leave_one_out(datasets: &[DatasetWithFeatures], n_features: usize, frozen
         datasets.len()
     );
 
+    let embedded_w = expand_embedded_weights(n_features);
     let mut trained_sroccs = Vec::new();
     let mut embedded_sroccs = Vec::new();
 
@@ -529,7 +597,7 @@ fn run_leave_one_out(datasets: &[DatasetWithFeatures], n_features: usize, frozen
         let trained_srocc = eval_srocc(&test.human_scores, &test_slices, &weights);
         trained_sroccs.push(trained_srocc);
 
-        let embedded_srocc = eval_srocc(&test.human_scores, &test_slices, &zensim::WEIGHTS);
+        let embedded_srocc = eval_srocc(&test.human_scores, &test_slices, &embedded_w);
         embedded_sroccs.push(embedded_srocc);
 
         let train_names: Vec<&str> = train_groups.iter().map(|(n, _, _)| n.as_str()).collect();
@@ -651,8 +719,9 @@ fn write_features_csv(path: &Path, human_scores: &[f64], features: &[Vec<f64>]) 
     }
     writeln!(f).unwrap();
 
+    let ew = expand_embedded_weights(n_features);
     for (human, feat) in human_scores.iter().zip(features) {
-        let (score, raw) = zensim::score_from_features(feat, &zensim::WEIGHTS);
+        let (score, raw) = zensim::score_from_features(feat, &ew);
         write!(f, "{},{},{}", human, score, raw).unwrap();
         for v in feat {
             write!(f, ",{}", v).unwrap();
@@ -695,7 +764,7 @@ fn train_weights(
     for restart in 0..n_restarts {
         let mut weights = if restart == 0 {
             // Start from current embedded weights (best known solution)
-            zensim::WEIGHTS.to_vec()
+            expand_embedded_weights(n_features)
         } else if restart == 1 {
             // Start from uniform weights (respecting frozen mask)
             (0..n_features)
@@ -873,7 +942,7 @@ fn train_weights_multi(
 
     for restart in 0..n_restarts {
         let mut weights = if restart == 0 {
-            zensim::WEIGHTS.to_vec()
+            expand_embedded_weights(n_features)
         } else if restart == 1 {
             (0..n_features)
                 .map(|i| {
