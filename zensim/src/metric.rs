@@ -3,14 +3,16 @@
 //! Multi-scale SSIM + edge features in XYB color space,
 //! with contrast sensitivity weighting per scale.
 
-use crate::NUM_SCALES;
 use crate::blur::{
     box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace,
 };
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
-use crate::simd_ops::{edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel};
+use crate::simd_ops::{
+    abs_diff_into, edge_diff_channel, edge_diff_channel_masked, mul_into, sq_diff_sum, sq_sum_into,
+    ssim_channel, ssim_channel_masked,
+};
 
 /// Configuration for zensim computation.
 #[derive(Debug, Clone, Copy)]
@@ -23,6 +25,14 @@ pub struct ZensimConfig {
     /// Compute all features even if their weights are zero.
     /// Enable this for weight training to avoid circular dependency.
     pub compute_all_features: bool,
+    /// Local contrast masking strength (default: 0.0 = disabled).
+    /// When > 0, computes local activity sigma and weights per-pixel distances by
+    /// 1 / (1 + masking_strength * sigma). Higher values mask textured regions more.
+    /// Typical range: 2.0-8.0.
+    pub masking_strength: f32,
+    /// Maximum number of downscale levels (default: 4).
+    /// More scales capture larger structures but add features. Range: 2-6.
+    pub num_scales: usize,
 }
 
 impl Default for ZensimConfig {
@@ -31,6 +41,8 @@ impl Default for ZensimConfig {
             blur_radius: 5,
             blur_passes: 1,
             compute_all_features: false,
+            masking_strength: 0.0,
+            num_scales: crate::NUM_SCALES,
         }
     }
 }
@@ -68,7 +80,14 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .zip(weights.iter())
         .map(|(&f, &w)| w * f)
         .sum();
-    let raw_distance = raw_distance / (features.len() as f64 / FEATURES_PER_SCALE as f64).max(1.0);
+    // Infer features_per_scale from total feature count: must be divisible by 3 channels
+    let n_features = features.len();
+    let features_per_scale = if n_features % (FEATURES_PER_CHANNEL_MASKED * 3) == 0 {
+        FEATURES_PER_CHANNEL_MASKED * 3
+    } else {
+        FEATURES_PER_CHANNEL_BASIC * 3
+    };
+    let raw_distance = raw_distance / (features.len() as f64 / features_per_scale as f64).max(1.0);
     (distance_to_score(raw_distance), raw_distance)
 }
 
@@ -80,6 +99,11 @@ struct ScaleStats {
     edge: [f64; 12],
     /// Per-channel MSE: mean((src - dst)²) for X, Y, B
     mse: [f64; 3],
+    /// 2nd-power pooled features (masking mode only):
+    /// SSIM: [root2_d] per channel = 3 values
+    ssim_2nd: [f64; 3],
+    /// Edge 2nd power: [art_2nd, det_2nd] per channel = 6 values
+    edge_2nd: [f64; 6],
 }
 
 /// Result from zensim comparison.
@@ -89,11 +113,21 @@ pub struct ZensimResult {
     pub score: f64,
     /// Raw weighted distance (before nonlinear mapping). Lower = more similar.
     pub raw_distance: f64,
-    /// Per-scale raw features for weight training. Layout per channel (X, Y, B):
+    /// Per-scale raw features for weight training.
+    ///
+    /// Without masking (7 features per channel × 3 channels = 21 per scale):
     ///   ssim_mean, ssim_4th, edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th, mse
-    /// = 7 features per channel × 3 channels = 21 features per scale × NUM_SCALES
+    ///
+    /// With masking (10 features per channel × 3 channels = 30 per scale):
+    ///   ssim_mean, ssim_4th, ssim_2nd, edge_art_mean, edge_art_4th, edge_art_2nd,
+    ///   edge_det_mean, edge_det_4th, edge_det_2nd, mse
     pub features: Vec<f64>,
 }
+
+/// Features per channel when masking is disabled.
+const FEATURES_PER_CHANNEL_BASIC: usize = 7;
+/// Features per channel when masking is enabled (adds 2nd-power pooled variants).
+const FEATURES_PER_CHANNEL_MASKED: usize = 10;
 
 /// Compute zensim score between two sRGB u8 images.
 ///
@@ -138,18 +172,11 @@ pub fn compute_zensim_with_config(
     });
 
     // Compute multi-scale statistics (take ownership to avoid clone)
-    let scale_stats = compute_multiscale_stats(
-        src_xyb,
-        dst_xyb,
-        width,
-        height,
-        config.blur_radius,
-        config.blur_passes,
-        config.compute_all_features,
-    );
+    let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, width, height, &config);
 
     // Combine with weights to produce final score
-    let result = combine_scores(&scale_stats);
+    let masked = config.masking_strength > 0.0;
+    let result = combine_scores(&scale_stats, masked);
     Ok(result)
 }
 
@@ -159,11 +186,10 @@ fn compute_multiscale_stats(
     dst_xyb: [Vec<f32>; 3],
     width: usize,
     height: usize,
-    blur_radius: usize,
-    blur_passes: u8,
-    compute_all: bool,
+    config: &ZensimConfig,
 ) -> Vec<ScaleStats> {
-    let mut stats = Vec::with_capacity(NUM_SCALES);
+    let num_scales = config.num_scales;
+    let mut stats = Vec::with_capacity(num_scales);
 
     let mut src_planes = src_xyb;
     let mut dst_planes = dst_xyb;
@@ -175,7 +201,7 @@ fn compute_multiscale_stats(
     let mut bufs = ScaleBuffers::new(max_n);
     let mut parallel_bufs = ScaleBuffers::new(max_n);
 
-    for scale in 0..NUM_SCALES {
+    for scale in 0..num_scales {
         if w < 8 || h < 8 {
             break;
         }
@@ -189,17 +215,15 @@ fn compute_multiscale_stats(
             &dst_planes,
             w,
             h,
-            blur_radius,
-            blur_passes,
+            config,
             &mut bufs,
             &mut parallel_bufs,
             scale,
-            compute_all,
         );
         stats.push(scale_stat);
 
         // Downscale for next level (in-place, no allocations)
-        if scale < NUM_SCALES - 1 {
+        if scale < num_scales - 1 {
             let mut nw = 0;
             let mut nh = 0;
             for c in 0..3 {
@@ -218,8 +242,10 @@ fn compute_multiscale_stats(
 
 /// Per-channel result from compute_channel.
 struct ChannelResult {
-    ssim: [f64; 2], // [mean_d, root4_d]
-    edge: [f64; 4], // [art_mean, art_4th, det_mean, det_4th]
+    ssim: [f64; 2],     // [mean_d, root4_d]
+    edge: [f64; 4],     // [art_mean, art_4th, det_mean, det_4th]
+    ssim_2nd: f64,      // root2 pooled SSIM (masking mode)
+    edge_2nd: [f64; 2], // [art_2nd, det_2nd] (masking mode)
 }
 
 /// Compute SSIM and/or edge features for a single channel.
@@ -230,8 +256,7 @@ fn compute_channel(
     dst_c: &[f32],
     width: usize,
     height: usize,
-    blur_radius: usize,
-    blur_passes: u8,
+    config: &ZensimConfig,
     need_ssim: bool,
     need_edge: bool,
     bufs: &mut ScaleBuffers,
@@ -240,9 +265,13 @@ fn compute_channel(
     let one_over_n = 1.0 / n as f64;
     let mut ssim = [0.0f64; 2];
     let mut edge = [0.0f64; 4];
+    let mut ssim_2nd = 0.0f64;
+    let mut edge_2nd = [0.0f64; 2];
+    let masked = config.masking_strength > 0.0;
 
     #[allow(clippy::type_complexity)]
-    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match blur_passes {
+    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match config.blur_passes
+    {
         1 => box_blur_1pass_into,
         2 => box_blur_2pass_into,
         _ => box_blur_3pass_into,
@@ -255,7 +284,7 @@ fn compute_channel(
         &mut bufs.temp_blur,
         width,
         height,
-        blur_radius,
+        config.blur_radius,
     );
     blur_fn(
         dst_c,
@@ -263,8 +292,27 @@ fn compute_channel(
         &mut bufs.temp_blur,
         width,
         height,
-        blur_radius,
+        config.blur_radius,
     );
+
+    // Compute masking weights if enabled
+    if masked {
+        // mask[i] = 1 / (1 + k * blur(|src - mu1|))
+        // Uses source-only activity to avoid biasing toward distorted image
+        abs_diff_into(src_c, &bufs.mu1, &mut bufs.mul_buf);
+        blur_fn(
+            &bufs.mul_buf,
+            &mut bufs.mask,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            config.blur_radius,
+        );
+        let k = config.masking_strength;
+        for i in 0..n {
+            bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
+        }
+    }
 
     if need_ssim {
         // Compute blur(src² + dst²) — combined saves one blur vs separate sigma1_sq, sigma2_sq
@@ -275,7 +323,7 @@ fn compute_channel(
             &mut bufs.temp_blur,
             width,
             height,
-            blur_radius,
+            config.blur_radius,
         );
 
         mul_into(src_c, dst_c, &mut bufs.mul_buf);
@@ -285,24 +333,53 @@ fn compute_channel(
             &mut bufs.temp_blur,
             width,
             height,
-            blur_radius,
+            config.blur_radius,
         );
 
-        // sigma1_sq now holds blur(src² + dst²), ssim_channel uses combined formula
-        let (sum_d, sum_d4) = ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma12);
-        ssim[0] = sum_d * one_over_n;
-        ssim[1] = (sum_d4 * one_over_n).powf(0.25);
+        if masked {
+            let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                &bufs.mu1,
+                &bufs.mu2,
+                &bufs.sigma1_sq,
+                &bufs.sigma12,
+                &bufs.mask,
+            );
+            ssim[0] = sum_d * one_over_n;
+            ssim[1] = (sum_d4 * one_over_n).powf(0.25);
+            ssim_2nd = (sum_d2 * one_over_n).sqrt();
+        } else {
+            let (sum_d, sum_d4) =
+                ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma12);
+            ssim[0] = sum_d * one_over_n;
+            ssim[1] = (sum_d4 * one_over_n).powf(0.25);
+        }
     }
 
     if need_edge {
-        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
-        edge[0] = art * one_over_n;
-        edge[1] = (art4 * one_over_n).powf(0.25);
-        edge[2] = det * one_over_n;
-        edge[3] = (det4 * one_over_n).powf(0.25);
+        if masked {
+            let (art, art4, det, det4, art2, det2) =
+                edge_diff_channel_masked(src_c, dst_c, &bufs.mu1, &bufs.mu2, &bufs.mask);
+            edge[0] = art * one_over_n;
+            edge[1] = (art4 * one_over_n).powf(0.25);
+            edge[2] = det * one_over_n;
+            edge[3] = (det4 * one_over_n).powf(0.25);
+            edge_2nd[0] = (art2 * one_over_n).sqrt();
+            edge_2nd[1] = (det2 * one_over_n).sqrt();
+        } else {
+            let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
+            edge[0] = art * one_over_n;
+            edge[1] = (art4 * one_over_n).powf(0.25);
+            edge[2] = det * one_over_n;
+            edge[3] = (det4 * one_over_n).powf(0.25);
+        }
     }
 
-    ChannelResult { ssim, edge }
+    ChannelResult {
+        ssim,
+        edge,
+        ssim_2nd,
+        edge_2nd,
+    }
 }
 
 /// Minimum pixel count to justify phased parallel blur (3 sync points).
@@ -310,23 +387,29 @@ fn compute_channel(
 const PARALLEL_THRESHOLD: usize = 100_000;
 
 /// Compute SSIM and edge statistics for a single scale.
-/// Uses phased blur parallelism for large scales.
+/// Uses phased blur parallelism for large scales (non-masking mode only).
 #[allow(clippy::too_many_arguments)]
 fn compute_single_scale(
     src: &[Vec<f32>; 3],
     dst: &[Vec<f32>; 3],
     width: usize,
     height: usize,
-    blur_radius: usize,
-    blur_passes: u8,
+    config: &ZensimConfig,
     bufs: &mut ScaleBuffers,
     parallel_bufs: &mut ScaleBuffers,
     scale_idx: usize,
-    compute_all: bool,
 ) -> ScaleStats {
     let mut ssim_vals = [0.0f64; 6];
     let mut edge_vals = [0.0f64; 12];
     let mut mse_vals = [0.0f64; 3];
+    let mut ssim_2nd_vals = [0.0f64; 3];
+    let mut edge_2nd_vals = [0.0f64; 6];
+
+    let compute_all = config.compute_all_features;
+    let masked = config.masking_strength > 0.0;
+
+    // For scales beyond WEIGHTS range, always compute all
+    let fpc_basic = FEATURES_PER_CHANNEL_BASIC;
 
     // Check if any weight is nonzero for a given feature type at this scale+channel
     let has_weight = |base_idx: usize, count: usize| -> bool {
@@ -335,15 +418,22 @@ fn compute_single_scale(
     };
 
     // Determine which channels need work
-    // Feature layout per channel: 7 features (2 ssim + 4 edge + 1 mse)
     let mut active_channels: Vec<(usize, bool, bool)> = Vec::new();
+    let beyond_basic = scale_idx * (fpc_basic * 3) >= WEIGHTS.len();
     for c in 0..3 {
-        let base = scale_idx * FEATURES_PER_SCALE + c * 7;
-        let need_ssim = compute_all || has_weight(base, 2);
-        let need_edge = compute_all || has_weight(base + 2, 4);
-        let need_mse = compute_all || has_weight(base + 6, 1);
-        if need_ssim || need_edge || need_mse {
-            active_channels.push((c, need_ssim, need_edge));
+        if beyond_basic {
+            // Extra scales: always compute everything
+            if compute_all {
+                active_channels.push((c, true, true));
+            }
+        } else {
+            let base = scale_idx * (fpc_basic * 3) + c * fpc_basic;
+            let need_ssim = compute_all || has_weight(base, 2);
+            let need_edge = compute_all || has_weight(base + 2, 4);
+            let need_mse = compute_all || has_weight(base + 6, 1);
+            if need_ssim || need_edge || need_mse {
+                active_channels.push((c, need_ssim, need_edge));
+            }
         }
     }
 
@@ -354,16 +444,15 @@ fn compute_single_scale(
         mse_vals[c] = sq_diff_sum(&src[c][..n], &dst[c][..n]) * one_over_n;
     }
 
-    if n >= PARALLEL_THRESHOLD {
-        // Phased parallelism: parallelize blur operations for better load balance.
-        // Instead of 1 channel per thread (imbalanced), we pair independent blurs.
+    // Use phased parallelism only for non-masking mode on large images
+    if n >= PARALLEL_THRESHOLD && !masked {
         compute_single_scale_phased(
             src,
             dst,
             width,
             height,
-            blur_radius,
-            blur_passes,
+            config.blur_radius,
+            config.blur_passes,
             bufs,
             parallel_bufs,
             &active_channels,
@@ -371,20 +460,17 @@ fn compute_single_scale(
             &mut edge_vals,
         );
     } else {
-        // Sequential: use shared buffers for small images
+        // Sequential path (also used for masking since mask computation needs mu1)
         for &(c, need_ssim, need_edge) in &active_channels {
             let result = compute_channel(
-                &src[c],
-                &dst[c],
-                width,
-                height,
-                blur_radius,
-                blur_passes,
-                need_ssim,
-                need_edge,
-                bufs,
+                &src[c], &dst[c], width, height, config, need_ssim, need_edge, bufs,
             );
             store_channel_result(c, &result, &mut ssim_vals, &mut edge_vals);
+            if masked {
+                ssim_2nd_vals[c] = result.ssim_2nd;
+                edge_2nd_vals[c * 2] = result.edge_2nd[0];
+                edge_2nd_vals[c * 2 + 1] = result.edge_2nd[1];
+            }
         }
     }
 
@@ -392,6 +478,8 @@ fn compute_single_scale(
         ssim: ssim_vals,
         edge: edge_vals,
         mse: mse_vals,
+        ssim_2nd: ssim_2nd_vals,
+        edge_2nd: edge_2nd_vals,
     }
 }
 
@@ -506,6 +594,7 @@ fn compute_single_scale_phased(
         sigma1_sq: ref mut sig_sq,
         sigma12: ref mut sig12,
         temp_blur: ref mut temp1,
+        mask: _,
     } = *bufs;
     let ScaleBuffers {
         mul_buf: ref mut scratch2,
@@ -514,6 +603,7 @@ fn compute_single_scale_phased(
         sigma1_sq: _,
         sigma12: _,
         temp_blur: ref mut temp2,
+        mask: _,
     } = *parallel_bufs;
 
     if let Some((sc, sc_need_edge)) = ssim_ch {
@@ -706,30 +796,50 @@ pub const WEIGHTS: [f64; 84] = [
     21.750148, 7.333710, 0.000000, 0.000000, 214.128879, 0.000000, 0.000000,
 ];
 
-fn combine_scores(scale_stats: &[ScaleStats]) -> ZensimResult {
-    // Collect raw features and compute weighted distance
-    let mut features = Vec::with_capacity(scale_stats.len() * FEATURES_PER_SCALE);
+fn combine_scores(scale_stats: &[ScaleStats], masked: bool) -> ZensimResult {
+    let features_per_ch = if masked {
+        FEATURES_PER_CHANNEL_MASKED
+    } else {
+        FEATURES_PER_CHANNEL_BASIC
+    };
+    let features_per_scale = features_per_ch * 3;
+
+    let mut features = Vec::with_capacity(scale_stats.len() * features_per_scale);
     let mut raw_distance = 0.0f64;
 
     for ss in scale_stats.iter() {
         for c in 0..3 {
-            let ssim_feats = [ss.ssim[c * 2].abs(), ss.ssim[c * 2 + 1].abs()];
-            let edge_feats = [
-                ss.edge[c * 4].abs(),
-                ss.edge[c * 4 + 1].abs(),
-                ss.edge[c * 4 + 2].abs(),
-                ss.edge[c * 4 + 3].abs(),
-            ];
-            features.extend_from_slice(&ssim_feats);
-            features.extend_from_slice(&edge_feats);
+            // Always emit: ssim_mean, ssim_4th
+            features.push(ss.ssim[c * 2].abs());
+            features.push(ss.ssim[c * 2 + 1].abs());
+            if masked {
+                // ssim_2nd
+                features.push(ss.ssim_2nd[c].abs());
+            }
+            // art_mean, art_4th
+            features.push(ss.edge[c * 4].abs());
+            features.push(ss.edge[c * 4 + 1].abs());
+            if masked {
+                // art_2nd
+                features.push(ss.edge_2nd[c * 2].abs());
+            }
+            // det_mean, det_4th
+            features.push(ss.edge[c * 4 + 2].abs());
+            features.push(ss.edge[c * 4 + 3].abs());
+            if masked {
+                // det_2nd
+                features.push(ss.edge_2nd[c * 2 + 1].abs());
+            }
+            // mse
             features.push(ss.mse[c]);
         }
     }
 
-    // Apply weights (features and weights have same layout)
-    for (i, (&feat, &weight)) in features.iter().zip(WEIGHTS.iter()).enumerate() {
-        let _ = i; // suppress warning
-        raw_distance += feat * weight;
+    // Apply weights — only up to WEIGHTS.len(), extra features get weight 0
+    for (i, &feat) in features.iter().enumerate() {
+        if i < WEIGHTS.len() {
+            raw_distance += feat * WEIGHTS[i];
+        }
     }
 
     // Normalize by number of scales

@@ -9,6 +9,8 @@ pub(crate) struct ScaleBuffers {
     pub sigma1_sq: Vec<f32>,
     pub sigma12: Vec<f32>,
     pub temp_blur: Vec<f32>,
+    /// Local contrast masking weights (when masking enabled).
+    pub mask: Vec<f32>,
 }
 
 impl ScaleBuffers {
@@ -20,6 +22,7 @@ impl ScaleBuffers {
             sigma1_sq: vec![0.0; size],
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
+            mask: vec![0.0; size],
         }
     }
 
@@ -30,5 +33,6 @@ impl ScaleBuffers {
         self.sigma1_sq.resize(size, 0.0);
         self.sigma12.resize(size, 0.0);
         self.temp_blur.resize(size, 0.0);
+        self.mask.resize(size, 0.0);
     }
 }

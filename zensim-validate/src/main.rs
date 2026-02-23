@@ -60,6 +60,14 @@ struct Args {
     /// Leave-one-dataset-out cross-validation (requires --also)
     #[arg(long, default_value = "false")]
     leave_one_out: bool,
+
+    /// Local contrast masking strength (0 = disabled, 2-8 typical)
+    #[arg(long, default_value = "0")]
+    masking: f32,
+
+    /// Number of downscale levels (default: 4, max: 6)
+    #[arg(long, default_value = "4")]
+    num_scales: usize,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -98,6 +106,8 @@ fn main() {
     let compute_all = args.train || args.compute_all || cv_mode;
     let blur_passes = args.blur_passes;
     let blur_radius = args.blur_radius;
+    let masking_strength = args.masking;
+    let num_scales = args.num_scales;
 
     // Load and compute primary dataset
     let primary = load_and_compute(
@@ -108,6 +118,8 @@ fn main() {
         compute_all,
         blur_passes,
         blur_radius,
+        masking_strength,
+        num_scales,
     );
 
     let n_features = if primary.features.is_empty() {
@@ -167,6 +179,8 @@ fn main() {
                 compute_all,
                 blur_passes,
                 blur_radius,
+                masking_strength,
+                num_scales,
             );
             all_datasets.push(ds);
         }
@@ -250,6 +264,7 @@ fn reference_key(pair: &ImagePair) -> String {
 }
 
 /// Load a dataset and compute all features in parallel.
+#[allow(clippy::too_many_arguments)]
 fn load_and_compute(
     name: &str,
     format: DatasetFormat,
@@ -258,6 +273,8 @@ fn load_and_compute(
     compute_all: bool,
     blur_passes: u8,
     blur_radius: usize,
+    masking_strength: f32,
+    num_scales: usize,
 ) -> DatasetWithFeatures {
     let pairs = match format {
         DatasetFormat::Tid2013 => load_tid2013(path),
@@ -284,7 +301,14 @@ fn load_and_compute(
         .par_iter()
         .map(|pair| {
             let key = reference_key(pair);
-            let result = compute_pair_result(pair, compute_all, blur_passes, blur_radius);
+            let result = compute_pair_result(
+                pair,
+                compute_all,
+                blur_passes,
+                blur_radius,
+                masking_strength,
+                num_scales,
+            );
             pb.inc(1);
             (key, pair.human_score, result)
         })
@@ -570,6 +594,8 @@ fn compute_pair_result(
     compute_all_features: bool,
     blur_passes: u8,
     blur_radius: usize,
+    masking_strength: f32,
+    num_scales: usize,
 ) -> zensim::ZensimResult {
     let nan_result = zensim::ZensimResult {
         score: f64::NAN,
@@ -599,6 +625,8 @@ fn compute_pair_result(
         compute_all_features,
         blur_passes,
         blur_radius,
+        masking_strength,
+        num_scales,
     };
     match zensim::compute_zensim_with_config(
         &src_pixels,

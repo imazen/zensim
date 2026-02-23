@@ -353,10 +353,7 @@ mod tests {
         // Roundtrip
         let q = zensim_to_zenjpeg_quality(85.0);
         let z = zenjpeg_quality_to_zensim(q);
-        assert!(
-            (z - 85.0).abs() < 1.0,
-            "roundtrip: 85 -> q={q} -> z={z}"
-        );
+        assert!((z - 85.0).abs() < 1.0, "roundtrip: 85 -> q={q} -> z={z}");
 
         // zenjpeg q0 should map to ~52.8 (not zero)
         let z0 = zenjpeg_quality_to_zensim(0.0);
