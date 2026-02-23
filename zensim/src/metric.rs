@@ -641,7 +641,7 @@ fn compute_single_scale_phased(
         mul_buf: ref mut scratch2,
         mu1: ref mut mu1_b,
         mu2: ref mut mu2_b,
-        sigma1_sq: _,
+        sigma1_sq: ref mut temp3,
         sigma12: _,
         temp_blur: ref mut temp2,
         mask: _,
@@ -650,31 +650,24 @@ fn compute_single_scale_phased(
     if let Some((sc, sc_need_edge)) = ssim_ch {
         // --- SSIM channel (4 blurs + reductions) ---
 
-        // Phase 1: parallel mu blurs for SSIM channel
-        std::thread::scope(|s| {
-            s.spawn(|| blur_fn(&src[sc], mu1_a, temp1, width, height, blur_radius));
-            blur_fn(&dst[sc], mu2_a, temp2, width, height, blur_radius);
-        });
-
         if let Some(&edge_c) = edge_only_chs.first() {
-            // Phase 2: SSIM sigma blur || edge channel mu blur (balanced!)
-            // Thread 1: sq_sum + blur → sig_sq
-            // Thread 2: blur(edge_src) → mu1_b
+            // 3-thread phased path: 2 phases instead of 3.
+            // Phase 1 (3 threads): blur(src_Y) || blur(dst_Y) || blur(src_edge)
+            std::thread::scope(|s| {
+                s.spawn(|| blur_fn(&src[sc], mu1_a, temp1, width, height, blur_radius));
+                s.spawn(|| blur_fn(&src[edge_c], mu1_b, temp3, width, height, blur_radius));
+                blur_fn(&dst[sc], mu2_a, temp2, width, height, blur_radius);
+            });
+
+            // Phase 2 (3 threads): sq_sum+blur(sig_sq) || mul+blur(sig12) || blur(dst_edge)
             std::thread::scope(|s| {
                 s.spawn(|| {
                     sq_sum_into(&src[sc], &dst[sc], scratch1);
                     blur_fn(scratch1, sig_sq, temp1, width, height, blur_radius);
                 });
-                blur_fn(&src[edge_c], mu1_b, temp2, width, height, blur_radius);
-            });
-
-            // Phase 3: SSIM sigma12 blur || edge channel mu2 blur (balanced!)
-            std::thread::scope(|s| {
-                s.spawn(|| {
-                    mul_into(&src[sc], &dst[sc], scratch1);
-                    blur_fn(scratch1, sig12, temp1, width, height, blur_radius);
-                });
-                blur_fn(&dst[edge_c], mu2_b, temp2, width, height, blur_radius);
+                s.spawn(|| blur_fn(&dst[edge_c], mu2_b, temp3, width, height, blur_radius));
+                mul_into(&src[sc], &dst[sc], scratch2);
+                blur_fn(scratch2, sig12, temp2, width, height, blur_radius);
             });
 
             // Phase 4: reductions (fast, sequential)
@@ -732,7 +725,12 @@ fn compute_single_scale_phased(
                 );
             }
         } else {
-            // No edge-only channels — just parallel sigma blurs
+            // No edge-only channels — parallel mu blurs then parallel sigma blurs
+            std::thread::scope(|s| {
+                s.spawn(|| blur_fn(&src[sc], mu1_a, temp1, width, height, blur_radius));
+                blur_fn(&dst[sc], mu2_a, temp2, width, height, blur_radius);
+            });
+
             std::thread::scope(|s| {
                 s.spawn(|| {
                     sq_sum_into(&src[sc], &dst[sc], scratch1);
