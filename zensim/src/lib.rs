@@ -18,6 +18,7 @@
 mod blur;
 mod color;
 mod error;
+pub mod mapping;
 mod metric;
 mod pool;
 mod simd_ops;
