@@ -52,6 +52,14 @@ struct Args {
     /// Useful for exporting full feature vectors for offline analysis.
     #[arg(long, default_value = "false")]
     compute_all: bool,
+
+    /// K-fold cross-validation by reference image (e.g., --cross-validate 5)
+    #[arg(long)]
+    cross_validate: Option<usize>,
+
+    /// Leave-one-dataset-out cross-validation (requires --also)
+    #[arg(long, default_value = "false")]
+    leave_one_out: bool,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -70,23 +78,200 @@ struct ImagePair {
     human_score: f64,
 }
 
+/// A dataset with precomputed features, ready for CV splitting.
+struct DatasetWithFeatures {
+    name: String,
+    human_scores: Vec<f64>,
+    features: Vec<Vec<f64>>,
+    ref_keys: Vec<String>,
+}
+
 fn main() {
     let args = Args::parse();
 
-    let pairs = match args.format {
-        DatasetFormat::Tid2013 => load_tid2013(&args.dataset),
-        DatasetFormat::Kadid10k => load_kadid10k(&args.dataset),
-        DatasetFormat::Csiq => load_csiq(&args.dataset),
+    if args.leave_one_out && args.also.is_none() {
+        eprintln!("--leave-one-out requires --also to specify additional datasets");
+        std::process::exit(1);
+    }
+
+    let cv_mode = args.cross_validate.is_some() || args.leave_one_out;
+    let compute_all = args.train || args.compute_all || cv_mode;
+    let blur_passes = args.blur_passes;
+    let blur_radius = args.blur_radius;
+
+    // Load and compute primary dataset
+    let primary = load_and_compute(
+        &format!("{:?}", args.format),
+        args.format,
+        &args.dataset,
+        args.max_images,
+        compute_all,
+        blur_passes,
+        blur_radius,
+    );
+
+    let n_features = if primary.features.is_empty() {
+        eprintln!("No valid results from primary dataset");
+        return;
+    } else {
+        primary.features[0].len()
     };
 
-    let pairs = if args.max_images > 0 && args.max_images < pairs.len() {
-        pairs[..args.max_images].to_vec()
+    // Build frozen mask
+    let features_per_ch = zensim::FEATURES_PER_SCALE / 3;
+    let frozen: Vec<bool> = if args.sparse {
+        zensim::WEIGHTS
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let is_mse = i % features_per_ch == features_per_ch - 1;
+                !is_mse && w.abs() < 0.001
+            })
+            .collect()
+    } else {
+        vec![false; n_features]
+    };
+    if args.sparse {
+        let active = frozen.iter().filter(|f| !**f).count();
+        println!(
+            "Sparse mode: optimizing {} of {} weights (freezing {} at zero)",
+            active,
+            n_features,
+            n_features - active
+        );
+    }
+
+    // Load additional datasets if specified
+    let mut all_datasets = vec![primary];
+    if let Some(ref also_str) = args.also {
+        for spec in also_str.split(',') {
+            let parts: Vec<&str> = spec.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                eprintln!("Invalid --also format: {}. Expected type:path", spec);
+                continue;
+            }
+            let fmt = match parts[0] {
+                "tid2013" => DatasetFormat::Tid2013,
+                "kadid10k" => DatasetFormat::Kadid10k,
+                "csiq" => DatasetFormat::Csiq,
+                _ => {
+                    eprintln!("Unknown format: {}", parts[0]);
+                    continue;
+                }
+            };
+            let ds = load_and_compute(
+                parts[0],
+                fmt,
+                Path::new(parts[1]),
+                0,
+                compute_all,
+                blur_passes,
+                blur_radius,
+            );
+            all_datasets.push(ds);
+        }
+    }
+
+    // Cross-validation modes
+    if let Some(k) = args.cross_validate {
+        if k < 2 {
+            eprintln!("--cross-validate requires K >= 2");
+            std::process::exit(1);
+        }
+        for ds in &all_datasets {
+            run_kfold_cv(ds, k, n_features, &frozen);
+        }
+        return;
+    }
+
+    if args.leave_one_out {
+        run_leave_one_out(&all_datasets, n_features, &frozen);
+        return;
+    }
+
+    // Normal mode: report correlations on primary dataset
+    let ds = &all_datasets[0];
+    report_embedded_correlations(ds);
+
+    // Output features CSV if requested
+    if let Some(ref csv_path) = args.features_csv {
+        write_features_csv(csv_path, &ds.human_scores, &ds.features);
+    }
+
+    // Train weights if requested
+    if args.train {
+        let dataset_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = all_datasets
+            .iter()
+            .map(|ds| {
+                (
+                    ds.name.clone(),
+                    ds.human_scores.clone(),
+                    ds.features.clone(),
+                )
+            })
+            .collect();
+
+        if dataset_groups.len() == 1 {
+            let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
+            println!(
+                "Training weights on {} pairs with {} features...",
+                dataset_groups[0].1.len(),
+                n_features
+            );
+            let best_weights = train_weights(&dataset_groups[0].1, &feats, n_features, &frozen);
+            print_trained_results(&dataset_groups[0].1, &feats, &best_weights);
+        } else {
+            println!(
+                "\nMulti-dataset training on {} datasets...",
+                dataset_groups.len()
+            );
+            let best_weights = train_weights_multi(&dataset_groups, n_features, &frozen);
+
+            for (name, h, f) in &dataset_groups {
+                let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
+                let trained_scores: Vec<f64> = feats
+                    .iter()
+                    .map(|feat| zensim::score_from_features(feat, &best_weights).0)
+                    .collect();
+                let srocc = spearman_correlation(h, &trained_scores);
+                println!("  {}: SROCC = {:.4}", name, srocc);
+            }
+            print_weights(&best_weights);
+        }
+    }
+}
+
+/// Extract reference image key from a pair's reference path (file stem).
+fn reference_key(pair: &ImagePair) -> String {
+    pair.reference
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+/// Load a dataset and compute all features in parallel.
+fn load_and_compute(
+    name: &str,
+    format: DatasetFormat,
+    path: &Path,
+    max_images: usize,
+    compute_all: bool,
+    blur_passes: u8,
+    blur_radius: usize,
+) -> DatasetWithFeatures {
+    let pairs = match format {
+        DatasetFormat::Tid2013 => load_tid2013(path),
+        DatasetFormat::Kadid10k => load_kadid10k(path),
+        DatasetFormat::Csiq => load_csiq(path),
+    };
+
+    let pairs = if max_images > 0 && max_images < pairs.len() {
+        pairs[..max_images].to_vec()
     } else {
         pairs
     };
 
-    println!("Loaded {} image pairs", pairs.len());
-    println!("Computing zensim scores...");
+    println!("Loading {}: {} image pairs...", name, pairs.len());
 
     let pb = ProgressBar::new(pairs.len() as u64);
     pb.set_style(
@@ -95,53 +280,58 @@ fn main() {
             .unwrap(),
     );
 
-    // When training, compute all features (no skipping) so weights can be freely optimized
-    let compute_all = args.train || args.compute_all;
-    let blur_passes = args.blur_passes;
-    let blur_radius = args.blur_radius;
-
-    // Compute zensim scores + features in parallel
-    let results: Vec<(f64, zensim::ZensimResult)> = pairs
+    let results: Vec<(String, f64, zensim::ZensimResult)> = pairs
         .par_iter()
         .map(|pair| {
+            let key = reference_key(pair);
             let result = compute_pair_result(pair, compute_all, blur_passes, blur_radius);
             pb.inc(1);
-            (pair.human_score, result)
+            (key, pair.human_score, result)
         })
         .collect();
 
     pb.finish_with_message("done");
 
-    // Filter out failures (NaN score)
-    let valid: Vec<(f64, zensim::ZensimResult)> = results
-        .into_iter()
-        .filter(|(_, r)| r.score.is_finite())
+    let mut human_scores = Vec::new();
+    let mut features = Vec::new();
+    let mut ref_keys = Vec::new();
+    let mut n_valid = 0;
+
+    for (key, hs, result) in results {
+        if result.score.is_finite() {
+            human_scores.push(hs);
+            features.push(result.features);
+            ref_keys.push(key);
+            n_valid += 1;
+        }
+    }
+
+    println!("  {} valid pairs from {}", n_valid, name);
+
+    DatasetWithFeatures {
+        name: name.to_string(),
+        human_scores,
+        features,
+        ref_keys,
+    }
+}
+
+/// Report correlations using embedded WEIGHTS.
+fn report_embedded_correlations(ds: &DatasetWithFeatures) {
+    let metric_scores: Vec<f64> = ds
+        .features
+        .iter()
+        .map(|f| zensim::score_from_features(f, &zensim::WEIGHTS).0)
         .collect();
 
+    let srocc = spearman_correlation(&ds.human_scores, &metric_scores);
+    let plcc = pearson_correlation(&ds.human_scores, &metric_scores);
+    let krocc = kendall_correlation(&ds.human_scores, &metric_scores);
+
     println!(
-        "\nSuccessfully computed {}/{} pairs",
-        valid.len(),
-        pairs.len()
+        "\n=== {} — Correlation with Human Ratings (embedded weights) ===",
+        ds.name
     );
-
-    if valid.len() < 3 {
-        println!("Too few valid results for correlation analysis");
-        return;
-    }
-
-    // Output features CSV if requested
-    if let Some(ref csv_path) = args.features_csv {
-        write_features_csv(csv_path, &valid);
-    }
-
-    let human_scores: Vec<f64> = valid.iter().map(|(h, _)| *h).collect();
-    let metric_scores: Vec<f64> = valid.iter().map(|(_, r)| r.score).collect();
-
-    let srocc = spearman_correlation(&human_scores, &metric_scores);
-    let plcc = pearson_correlation(&human_scores, &metric_scores);
-    let krocc = kendall_correlation(&human_scores, &metric_scores);
-
-    println!("\n=== Correlation with Human Ratings (default weights) ===");
     println!("SROCC (Spearman):  {:.4}", srocc);
     println!("PLCC  (Pearson):   {:.4}", plcc);
     println!("KROCC (Kendall):   {:.4}", krocc);
@@ -157,7 +347,11 @@ fn main() {
         min_m, max_m, mean_m
     );
 
-    let raw_dists: Vec<f64> = valid.iter().map(|(_, r)| r.raw_distance).collect();
+    let raw_dists: Vec<f64> = ds
+        .features
+        .iter()
+        .map(|f| zensim::score_from_features(f, &zensim::WEIGHTS).1)
+        .collect();
     let min_d = raw_dists.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_d = raw_dists.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let mean_d: f64 = raw_dists.iter().sum::<f64>() / raw_dists.len() as f64;
@@ -170,139 +364,204 @@ fn main() {
         "Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
         min_d, p10, p50, p90, max_d, mean_d
     );
+}
 
-    // Train weights if requested
-    if args.train {
-        // Collect datasets for multi-dataset training
-        let mut dataset_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = Vec::new();
+/// Deterministic shuffle + round-robin split of reference keys into K folds.
+fn make_folds(ref_keys: &[String], k: usize, seed: u64) -> Vec<Vec<String>> {
+    // Collect unique keys preserving discovery order for determinism
+    let mut seen = HashMap::new();
+    let mut unique_keys = Vec::new();
+    for key in ref_keys {
+        if seen.insert(key.clone(), ()).is_none() {
+            unique_keys.push(key.clone());
+        }
+    }
 
-        // Primary dataset
-        let feature_vecs: Vec<Vec<f64>> = valid.iter().map(|(_, r)| r.features.clone()).collect();
-        let n_features = feature_vecs[0].len();
-        dataset_groups.push((
-            format!("{:?}", args.format),
-            human_scores.clone(),
-            feature_vecs,
-        ));
+    // Fisher-Yates shuffle with LCG
+    let mut rng_state = seed;
+    let mut next_rand = |bound: usize| -> usize {
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((rng_state >> 33) as usize) % bound
+    };
 
-        // Additional datasets from --also flag
-        if let Some(ref also_str) = args.also {
-            for spec in also_str.split(',') {
-                let parts: Vec<&str> = spec.splitn(2, ':').collect();
-                if parts.len() != 2 {
-                    eprintln!("Invalid --also format: {}. Expected type:path", spec);
-                    continue;
-                }
-                let fmt = match parts[0] {
-                    "tid2013" => DatasetFormat::Tid2013,
-                    "kadid10k" => DatasetFormat::Kadid10k,
-                    "csiq" => DatasetFormat::Csiq,
-                    _ => {
-                        eprintln!("Unknown format: {}", parts[0]);
-                        continue;
-                    }
-                };
-                let path = PathBuf::from(parts[1]);
-                let extra_pairs = match fmt {
-                    DatasetFormat::Tid2013 => load_tid2013(&path),
-                    DatasetFormat::Kadid10k => load_kadid10k(&path),
-                    DatasetFormat::Csiq => load_csiq(&path),
-                };
-                println!(
-                    "Loading additional dataset {:?}: {} pairs...",
-                    parts[0],
-                    extra_pairs.len()
-                );
+    for i in (1..unique_keys.len()).rev() {
+        let j = next_rand(i + 1);
+        unique_keys.swap(i, j);
+    }
 
-                let pb2 = ProgressBar::new(extra_pairs.len() as u64);
-                pb2.set_style(
-                    ProgressStyle::default_bar()
-                        .template("[{elapsed_precise}] {bar:40.green/blue} {pos}/{len} ({per_sec})")
-                        .unwrap(),
-                );
+    // Round-robin into folds
+    let mut folds: Vec<Vec<String>> = (0..k).map(|_| Vec::new()).collect();
+    for (i, key) in unique_keys.into_iter().enumerate() {
+        folds[i % k].push(key);
+    }
 
-                let extra_results: Vec<(f64, zensim::ZensimResult)> = extra_pairs
-                    .par_iter()
-                    .map(|pair| {
-                        let result = compute_pair_result(pair, true, blur_passes, blur_radius);
-                        pb2.inc(1);
-                        (pair.human_score, result)
-                    })
-                    .collect();
-                pb2.finish();
+    folds
+}
 
-                let extra_valid: Vec<(f64, zensim::ZensimResult)> = extra_results
-                    .into_iter()
-                    .filter(|(_, r)| r.score.is_finite())
-                    .collect();
+/// Run K-fold cross-validation on a single dataset, splitting by reference image.
+fn run_kfold_cv(ds: &DatasetWithFeatures, k: usize, n_features: usize, frozen: &[bool]) {
+    let folds = make_folds(&ds.ref_keys, k, 42);
 
-                println!("  {} valid pairs", extra_valid.len());
+    // Build a lookup: ref_key → set of indices
+    let mut key_to_indices: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, key) in ds.ref_keys.iter().enumerate() {
+        key_to_indices.entry(key.as_str()).or_default().push(i);
+    }
 
-                let h: Vec<f64> = extra_valid.iter().map(|(h, _)| *h).collect();
-                let f: Vec<Vec<f64>> = extra_valid
-                    .iter()
-                    .map(|(_, r)| r.features.clone())
-                    .collect();
-                dataset_groups.push((parts[0].to_string(), h, f));
+    let n_refs: usize = folds.iter().map(|f| f.len()).sum();
+    println!(
+        "\n=== {}: {}-fold CV ({} reference images, {} pairs) ===",
+        ds.name,
+        k,
+        n_refs,
+        ds.human_scores.len()
+    );
+
+    let mut trained_sroccs = Vec::new();
+    let mut embedded_sroccs = Vec::new();
+
+    for (fold_idx, fold_keys) in folds.iter().enumerate() {
+        // Test set = this fold's ref keys
+        let test_keys: std::collections::HashSet<&str> =
+            fold_keys.iter().map(|s| s.as_str()).collect();
+
+        let mut train_h = Vec::new();
+        let mut train_f: Vec<Vec<f64>> = Vec::new();
+        let mut test_h = Vec::new();
+        let mut test_f: Vec<Vec<f64>> = Vec::new();
+
+        for (i, key) in ds.ref_keys.iter().enumerate() {
+            if test_keys.contains(key.as_str()) {
+                test_h.push(ds.human_scores[i]);
+                test_f.push(ds.features[i].clone());
+            } else {
+                train_h.push(ds.human_scores[i]);
+                train_f.push(ds.features[i].clone());
             }
         }
 
-        // Build frozen mask: if --sparse, only optimize already-nonzero weights
-        // MSE features (every 7th, starting at index 6) are never frozen
-        let features_per_ch = zensim::FEATURES_PER_SCALE / 3;
-        let frozen: Vec<bool> = if args.sparse {
-            zensim::WEIGHTS
-                .iter()
-                .enumerate()
-                .map(|(i, w)| {
-                    let is_mse = i % features_per_ch == features_per_ch - 1;
-                    !is_mse && w.abs() < 0.001
-                })
-                .collect()
+        // Train on K-1 folds
+        let train_slices: Vec<&[f64]> = train_f.iter().map(|v| v.as_slice()).collect();
+        let weights = train_weights(&train_h, &train_slices, n_features, frozen);
+
+        // Evaluate trained weights on held-out fold
+        let test_slices: Vec<&[f64]> = test_f.iter().map(|v| v.as_slice()).collect();
+        let trained_srocc = eval_srocc(&test_h, &test_slices, &weights);
+        trained_sroccs.push(trained_srocc);
+
+        // Evaluate embedded WEIGHTS on held-out fold (baseline)
+        let embedded_srocc = eval_srocc(&test_h, &test_slices, &zensim::WEIGHTS);
+        embedded_sroccs.push(embedded_srocc);
+
+        println!(
+            "  Fold {}/{}: train={} test={} | trained SROCC={:.4} | embedded SROCC={:.4}",
+            fold_idx + 1,
+            k,
+            train_h.len(),
+            test_h.len(),
+            trained_srocc,
+            embedded_srocc,
+        );
+    }
+
+    print_cv_summary(&ds.name, &trained_sroccs, &embedded_sroccs);
+}
+
+/// Leave-one-dataset-out cross-validation.
+fn run_leave_one_out(datasets: &[DatasetWithFeatures], n_features: usize, frozen: &[bool]) {
+    println!(
+        "\n=== Leave-one-dataset-out CV ({} datasets) ===",
+        datasets.len()
+    );
+
+    let mut trained_sroccs = Vec::new();
+    let mut embedded_sroccs = Vec::new();
+
+    for held_out_idx in 0..datasets.len() {
+        // Train on all except held-out
+        let mut train_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = Vec::new();
+        for (i, ds) in datasets.iter().enumerate() {
+            if i != held_out_idx {
+                train_groups.push((
+                    ds.name.clone(),
+                    ds.human_scores.clone(),
+                    ds.features.clone(),
+                ));
+            }
+        }
+
+        let weights = if train_groups.len() == 1 {
+            let feats: Vec<&[f64]> = train_groups[0].2.iter().map(|v| v.as_slice()).collect();
+            train_weights(&train_groups[0].1, &feats, n_features, frozen)
         } else {
-            vec![false; n_features]
+            train_weights_multi(&train_groups, n_features, frozen)
         };
-        if args.sparse {
-            let active = frozen.iter().filter(|f| !**f).count();
-            println!(
-                "Sparse mode: optimizing {} of {} weights (freezing {} at zero)",
-                active,
-                n_features,
-                n_features - active
-            );
-        }
 
-        if dataset_groups.len() == 1 {
-            // Single-dataset training
-            let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
-            println!(
-                "Training weights on {} pairs with {} features...",
-                dataset_groups[0].1.len(),
-                n_features
-            );
-            let best_weights =
-                train_weights(&dataset_groups[0].1, &feats, n_features, &frozen);
-            print_trained_results(&dataset_groups[0].1, &feats, &best_weights);
-        } else {
-            // Multi-dataset training: maximize average SROCC
-            println!(
-                "\nMulti-dataset training on {} datasets...",
-                dataset_groups.len()
-            );
-            let best_weights = train_weights_multi(&dataset_groups, n_features, &frozen);
+        // Evaluate on held-out dataset
+        let test = &datasets[held_out_idx];
+        let test_slices: Vec<&[f64]> = test.features.iter().map(|v| v.as_slice()).collect();
+        let trained_srocc = eval_srocc(&test.human_scores, &test_slices, &weights);
+        trained_sroccs.push(trained_srocc);
 
-            // Evaluate on each dataset
-            for (name, h, f) in &dataset_groups {
-                let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
-                let trained_scores: Vec<f64> = feats
-                    .iter()
-                    .map(|feat| zensim::score_from_features(feat, &best_weights).0)
-                    .collect();
-                let srocc = spearman_correlation(h, &trained_scores);
-                println!("  {}: SROCC = {:.4}", name, srocc);
+        let embedded_srocc = eval_srocc(&test.human_scores, &test_slices, &zensim::WEIGHTS);
+        embedded_sroccs.push(embedded_srocc);
+
+        let train_names: Vec<&str> = train_groups.iter().map(|(n, _, _)| n.as_str()).collect();
+        println!(
+            "  Held out {}: trained on [{}] → SROCC={:.4} | embedded SROCC={:.4}",
+            test.name,
+            train_names.join(", "),
+            trained_srocc,
+            embedded_srocc,
+        );
+    }
+
+    print_cv_summary("LODO", &trained_sroccs, &embedded_sroccs);
+}
+
+fn print_cv_summary(label: &str, trained_sroccs: &[f64], embedded_sroccs: &[f64]) {
+    let n = trained_sroccs.len() as f64;
+    let trained_mean = trained_sroccs.iter().sum::<f64>() / n;
+    let embedded_mean = embedded_sroccs.iter().sum::<f64>() / n;
+
+    let trained_std = (trained_sroccs
+        .iter()
+        .map(|x| (x - trained_mean).powi(2))
+        .sum::<f64>()
+        / n)
+        .sqrt();
+    let embedded_std = (embedded_sroccs
+        .iter()
+        .map(|x| (x - embedded_mean).powi(2))
+        .sum::<f64>()
+        / n)
+        .sqrt();
+
+    println!("\n  {} summary:", label);
+    println!(
+        "    Trained:  mean SROCC = {:.4} ± {:.4}",
+        trained_mean, trained_std
+    );
+    println!(
+        "    Embedded: mean SROCC = {:.4} ± {:.4}",
+        embedded_mean, embedded_std
+    );
+
+    let overfit_gap = trained_mean - embedded_mean;
+    if overfit_gap.abs() > 0.001 {
+        println!(
+            "    Gap (trained - embedded): {:+.4}  {}",
+            overfit_gap,
+            if overfit_gap > 0.01 {
+                "← trained weights generalize better on holdout"
+            } else if overfit_gap < -0.01 {
+                "← embedded weights generalize better on holdout"
+            } else {
+                ""
             }
-            print_weights(&best_weights);
-        }
+        );
     }
 }
 
@@ -353,23 +612,22 @@ fn compute_pair_result(
     }
 }
 
-fn write_features_csv(path: &Path, data: &[(f64, zensim::ZensimResult)]) {
+fn write_features_csv(path: &Path, human_scores: &[f64], features: &[Vec<f64>]) {
     use std::io::Write;
     let mut f = std::fs::File::create(path).expect("Failed to create features CSV");
 
-    // Header
-    let n_features = data[0].1.features.len();
+    let n_features = features[0].len();
     write!(f, "human_score,metric_score,raw_distance").unwrap();
     for i in 0..n_features {
         write!(f, ",f{}", i).unwrap();
     }
     writeln!(f).unwrap();
 
-    // Data
-    for (human, result) in data {
-        write!(f, "{},{},{}", human, result.score, result.raw_distance).unwrap();
-        for feat in &result.features {
-            write!(f, ",{}", feat).unwrap();
+    for (human, feat) in human_scores.iter().zip(features) {
+        let (score, raw) = zensim::score_from_features(feat, &zensim::WEIGHTS);
+        write!(f, "{},{},{}", human, score, raw).unwrap();
+        for v in feat {
+            write!(f, ",{}", v).unwrap();
         }
         writeln!(f).unwrap();
     }
@@ -413,7 +671,13 @@ fn train_weights(
         } else if restart == 1 {
             // Start from uniform weights (respecting frozen mask)
             (0..n_features)
-                .map(|i| if frozen[i] { 0.0 } else { 1.0 / n_features as f64 })
+                .map(|i| {
+                    if frozen[i] {
+                        0.0
+                    } else {
+                        1.0 / n_features as f64
+                    }
+                })
                 .collect()
         } else {
             // Sparse random: only activate ~30% of non-frozen features
@@ -536,6 +800,7 @@ fn print_weights(weights: &[f64]) {
 }
 
 /// Train weights on multiple datasets, maximizing average SROCC.
+#[allow(clippy::type_complexity)]
 fn train_weights_multi(
     datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
     n_features: usize,
@@ -583,7 +848,13 @@ fn train_weights_multi(
             zensim::WEIGHTS.to_vec()
         } else if restart == 1 {
             (0..n_features)
-                .map(|i| if frozen[i] { 0.0 } else { 1.0 / n_features as f64 })
+                .map(|i| {
+                    if frozen[i] {
+                        0.0
+                    } else {
+                        1.0 / n_features as f64
+                    }
+                })
                 .collect()
         } else {
             (0..n_features)
