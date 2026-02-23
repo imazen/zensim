@@ -242,9 +242,9 @@ fn compute_multiscale_stats(
                 nw = sw;
                 nh = sh;
             }
-            // Don't re-pad after downscale: padding at small scales creates
-            // asymmetric artifacts (padding is right-only). The SIMD cascade
-            // (v4→v3→scalar) handles arbitrary widths efficiently.
+            // Don't re-pad after downscale: padding is right-only, so padded
+            // pixels participate in metric reductions and break left-right symmetry.
+            // The SIMD cascade (v4→v3→scalar) handles arbitrary widths efficiently.
             w = nw;
             h = nh;
         }
