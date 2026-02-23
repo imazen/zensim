@@ -242,15 +242,9 @@ fn compute_multiscale_stats(
                 nw = sw;
                 nh = sh;
             }
-            // Re-pad to 16-alignment if downscale broke it
-            let padded_nw = (nw + 15) & !15;
-            if padded_nw != nw {
-                for c in 0..3 {
-                    pad_plane_width(&mut src_planes[c], nw, nh, padded_nw);
-                    pad_plane_width(&mut dst_planes[c], nw, nh, padded_nw);
-                }
-                nw = padded_nw;
-            }
+            // Don't re-pad after downscale: padding at small scales creates
+            // asymmetric artifacts (padding is right-only). The SIMD cascade
+            // (v4→v3→scalar) handles arbitrary widths efficiently.
             w = nw;
             h = nh;
         }

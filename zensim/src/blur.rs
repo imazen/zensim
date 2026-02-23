@@ -113,7 +113,13 @@ fn box_blur_v_copy_inner_v4(
             let base = y * width + col_base;
             dst[base..base + 16].copy_from_slice(&(sum * inv_v).to_array());
 
-            let add_idx = (y + r + 1).min(height - 1);
+            let add_raw = y + r + 1;
+            let add_idx = if add_raw < height {
+                add_raw
+            } else {
+                2 * (height - 1) - add_raw
+            };
+            let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -151,7 +157,13 @@ fn box_blur_v_copy_inner_v4(
         for y in 0..height {
             let base = y * width + col_base;
             dst[base..base + 8].copy_from_slice(&(sum * inv_v8).to_array());
-            let add_idx = (y + r + 1).min(height - 1);
+            let add_raw = y + r + 1;
+            let add_idx = if add_raw < height {
+                add_raw
+            } else {
+                2 * (height - 1) - add_raw
+            };
+            let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -180,7 +192,13 @@ fn box_blur_v_copy_inner_v4(
         }
         for y in 0..height {
             dst[y * width + x] = sum * inv;
-            let add_idx = (y + r + 1).min(height - 1);
+            let add_raw = y + r + 1;
+            let add_idx = if add_raw < height {
+                add_raw
+            } else {
+                2 * (height - 1) - add_raw
+            };
+            let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -229,7 +247,13 @@ fn box_blur_v_copy_inner_v3(
             let base = y * width + col_base;
             dst[base..base + 8].copy_from_slice(&(sum * inv_v).to_array());
 
-            let add_idx = (y + r + 1).min(height - 1);
+            let add_raw = y + r + 1;
+            let add_idx = if add_raw < height {
+                add_raw
+            } else {
+                2 * (height - 1) - add_raw
+            };
+            let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -261,7 +285,13 @@ fn box_blur_v_copy_inner_v3(
 
         for y in 0..height {
             dst[y * width + x] = sum * inv;
-            let add_idx = (y + r + 1).min(height - 1);
+            let add_raw = y + r + 1;
+            let add_idx = if add_raw < height {
+                add_raw
+            } else {
+                2 * (height - 1) - add_raw
+            };
+            let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -299,7 +329,13 @@ fn box_blur_v_copy_inner_scalar(
 
         for y in 0..height {
             dst[y * width + x] = sum * inv;
-            let add_idx = (y + r + 1).min(height - 1);
+            let add_raw = y + r + 1;
+            let add_idx = if add_raw < height {
+                add_raw
+            } else {
+                2 * (height - 1) - add_raw
+            };
+            let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -359,7 +395,13 @@ fn box_blur_h_inner_v4(
                 output[(row_base + ro) * width + x] = result[ro];
             }
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -405,7 +447,13 @@ fn box_blur_h_inner_v4(
             for ro in 0..8 {
                 output[(row_base + ro) * width + x] = result[ro];
             }
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -441,7 +489,13 @@ fn box_blur_h_inner_v4(
         }
         for x in 0..width {
             out[x] = sum * inv;
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -495,7 +549,13 @@ fn box_blur_h_inner_v3(
                 output[(row_base + ro) * width + x] = result[ro];
             }
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -534,7 +594,13 @@ fn box_blur_h_inner_v3(
 
         for x in 0..width {
             out[x] = sum * inv;
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -576,7 +642,13 @@ fn box_blur_h_inner_scalar(
 
         for x in 0..width {
             out[x] = sum * inv;
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -683,7 +755,13 @@ fn fused_blur_h_ssim_inner_v4(
                 out_sigma12[base] = prod_result[ro];
             }
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -761,7 +839,13 @@ fn fused_blur_h_ssim_inner_v4(
                 out_sigma12[base] = prod_result[ro];
             }
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -823,7 +907,13 @@ fn fused_blur_h_ssim_inner_v4(
             out_sigma_sq[row_off + x] = sum_sq * inv;
             out_sigma12[row_off + x] = sum_prod * inv;
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -905,7 +995,13 @@ fn fused_blur_h_ssim_inner_v3(
                 out_sigma12[base] = prod_result[ro];
             }
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -967,7 +1063,13 @@ fn fused_blur_h_ssim_inner_v3(
             out_sigma_sq[row_off + x] = sum_sq * inv;
             out_sigma12[row_off + x] = sum_prod * inv;
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1034,7 +1136,13 @@ fn fused_blur_h_ssim_inner_scalar(
             out_sigma_sq[row_off + x] = sum_sq * inv;
             out_sigma12[row_off + x] = sum_prod * inv;
 
-            let add_idx = (x + r + 1).min(width - 1);
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
             let rem_i = x as isize - r as isize;
             let rem_idx = if rem_i < 0 {
                 rem_i.unsigned_abs()
@@ -1188,8 +1296,11 @@ fn downscale_2x_inner_scalar(
     }
 }
 
-/// Pad plane width to `padded_width` by replicating the rightmost pixel value.
+/// Pad plane width to `padded_width` using mirror reflection.
 /// Operates in-place, processing rows bottom-to-top to avoid overwriting source data.
+///
+/// Mirror reflection at boundary: for index x >= width, reflects back into [0, width-1].
+/// Period is 2*(width-1), so index wraps via modular reflection.
 pub fn pad_plane_width(plane: &mut Vec<f32>, width: usize, height: usize, padded_width: usize) {
     if padded_width == width {
         return;
@@ -1197,22 +1308,411 @@ pub fn pad_plane_width(plane: &mut Vec<f32>, width: usize, height: usize, padded
     debug_assert!(padded_width > width);
     plane.resize(padded_width * height, 0.0);
 
+    // Precompute mirror indices for padding columns (same for every row).
+    let pad_count = padded_width - width;
+    let mut mirror_offsets = vec![0usize; pad_count];
+    let period = 2 * (width - 1);
+    for i in 0..pad_count {
+        let x = width + i;
+        let m = x % period;
+        mirror_offsets[i] = if m < width { m } else { period - m };
+    }
+
     // Process bottom-to-top so we never read a position that was already overwritten.
     for y in (0..height).rev() {
         let src_start = y * width;
         let dst_start = y * padded_width;
 
-        // Fill padding columns with rightmost pixel value
-        let edge_val = plane[src_start + width - 1];
-        for x in (width..padded_width).rev() {
-            plane[dst_start + x] = edge_val;
-        }
-
-        // Shift row data to padded position (right-to-left for overlap safety)
+        // Shift row data to padded position first (right-to-left for overlap safety)
         if dst_start != src_start {
             for x in (0..width).rev() {
                 plane[dst_start + x] = plane[src_start + x];
             }
         }
+
+        // Fill padding columns with mirror-reflected values
+        for (i, &mx) in mirror_offsets.iter().enumerate() {
+            plane[dst_start + width + i] = plane[dst_start + mx];
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: 1-pass box blur (H then V) on a plane.
+    fn blur_1pass(input: &[f32], width: usize, height: usize, radius: usize) -> Vec<f32> {
+        let n = width * height;
+        let mut temp = vec![0.0f32; n];
+        let mut output = vec![0.0f32; n];
+        box_blur_h(input, &mut temp, width, height, radius);
+        box_blur_v_from_copy(&temp, &mut output, width, height, radius);
+        output
+    }
+
+    /// Blur of a uniform plane must return the same uniform value everywhere,
+    /// including at edges. Any boundary handling that biases edges will fail.
+    #[test]
+    fn blur_uniform_plane_stays_uniform() {
+        for &(w, h) in &[(32, 32), (17, 13), (64, 48)] {
+            let val = 0.42f32;
+            let input = vec![val; w * h];
+            let output = blur_1pass(&input, w, h, 5);
+            for (i, &v) in output.iter().enumerate() {
+                let y = i / w;
+                let x = i % w;
+                assert!(
+                    (v - val).abs() < 1e-4,
+                    "uniform plane {w}x{h}: pixel ({x},{y}) = {v}, expected {val}"
+                );
+            }
+        }
+    }
+
+    /// Blur of a plane with a single impulse at each corner should produce
+    /// symmetric response for opposite corners (top-left vs bottom-right,
+    /// top-right vs bottom-left). Asymmetric boundary handling (mirror left,
+    /// clamp right) will make corners behave differently.
+    #[test]
+    fn blur_corner_impulse_symmetry() {
+        let w = 32;
+        let h = 32;
+        let r = 5;
+
+        let corners = [
+            (0, 0),         // top-left
+            (w - 1, 0),     // top-right
+            (0, h - 1),     // bottom-left
+            (w - 1, h - 1), // bottom-right
+        ];
+
+        let mut blurred = Vec::new();
+        for &(cx, cy) in &corners {
+            let mut input = vec![0.0f32; w * h];
+            input[cy * w + cx] = 1.0;
+            blurred.push(blur_1pass(&input, w, h, r));
+        }
+
+        // The blurred value AT the impulse corner should be the same for all 4 corners
+        // if boundary handling is symmetric. With clamp-right/mirror-left, the corner
+        // values will differ because clamping repeats the edge pixel more than mirroring.
+        let corner_vals: Vec<f32> = corners
+            .iter()
+            .zip(blurred.iter())
+            .map(|(&(cx, cy), b)| b[cy * w + cx])
+            .collect();
+
+        // Print for diagnostic visibility
+        eprintln!("Corner impulse blur values at impulse point:");
+        eprintln!("  top-left:     {:.6}", corner_vals[0]);
+        eprintln!("  top-right:    {:.6}", corner_vals[1]);
+        eprintln!("  bottom-left:  {:.6}", corner_vals[2]);
+        eprintln!("  bottom-right: {:.6}", corner_vals[3]);
+
+        // Diagonal pairs should match if boundary handling is fully symmetric.
+        // Currently they won't (asymmetric clamp vs mirror), but this test
+        // documents the actual asymmetry magnitude.
+        let tl_br_diff = (corner_vals[0] - corner_vals[3]).abs();
+        let tr_bl_diff = (corner_vals[1] - corner_vals[2]).abs();
+        eprintln!("  TL-BR asymmetry: {:.6}", tl_br_diff);
+        eprintln!("  TR-BL asymmetry: {:.6}", tr_bl_diff);
+
+        // All 4 corners must produce identical blur response (symmetric mirror boundaries).
+        assert!(
+            tl_br_diff < 1e-6,
+            "TL-BR corner asymmetry {tl_br_diff:.6} exceeds tolerance"
+        );
+        assert!(
+            tr_bl_diff < 1e-6,
+            "TR-BL corner asymmetry {tr_bl_diff:.6} exceeds tolerance"
+        );
+        for i in 1..4 {
+            let diff = (corner_vals[0] - corner_vals[i]).abs();
+            assert!(
+                diff < 1e-6,
+                "Corner {} differs from TL by {diff:.6}",
+                ["TL", "TR", "BL", "BR"][i]
+            );
+        }
+    }
+
+    /// Blur of horizontally-mirrored input should give horizontally-mirrored output
+    /// if boundary handling is symmetric. With clamp-right/mirror-left, the
+    /// relationship breaks near edges.
+    #[test]
+    fn blur_horizontal_mirror_symmetry() {
+        let w = 32;
+        let h = 16;
+        let r = 5;
+
+        // Create an asymmetric ramp: bright on left, dark on right
+        let mut input = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                input[y * w + x] = (w - 1 - x) as f32 / (w - 1) as f32;
+            }
+        }
+
+        // Create horizontally mirrored version
+        let mut mirrored = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                mirrored[y * w + x] = input[y * w + (w - 1 - x)];
+            }
+        }
+
+        let blurred = blur_1pass(&input, w, h, r);
+        let blurred_mirror = blur_1pass(&mirrored, w, h, r);
+
+        // If boundary handling is symmetric, blurred[y][x] == blurred_mirror[y][w-1-x]
+        let mut max_diff = 0.0f32;
+        let mut max_diff_pos = (0, 0);
+        for y in 0..h {
+            for x in 0..w {
+                let diff = (blurred[y * w + x] - blurred_mirror[y * w + (w - 1 - x)]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                    max_diff_pos = (x, y);
+                }
+            }
+        }
+
+        eprintln!(
+            "H-mirror symmetry: max diff = {max_diff:.6} at ({}, {})",
+            max_diff_pos.0, max_diff_pos.1
+        );
+        assert!(
+            max_diff < 1e-6,
+            "H-mirror blur asymmetry {max_diff:.6} at ({}, {}) exceeds tolerance",
+            max_diff_pos.0,
+            max_diff_pos.1
+        );
+    }
+
+    /// Same test but vertical: blur of vertically-mirrored input should give
+    /// vertically-mirrored output if boundary handling is symmetric.
+    #[test]
+    fn blur_vertical_mirror_symmetry() {
+        let w = 16;
+        let h = 32;
+        let r = 5;
+
+        let mut input = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                input[y * w + x] = (h - 1 - y) as f32 / (h - 1) as f32;
+            }
+        }
+
+        let mut mirrored = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                mirrored[y * w + x] = input[(h - 1 - y) * w + x];
+            }
+        }
+
+        let blurred = blur_1pass(&input, w, h, r);
+        let blurred_mirror = blur_1pass(&mirrored, w, h, r);
+
+        let mut max_diff = 0.0f32;
+        let mut max_diff_pos = (0, 0);
+        for y in 0..h {
+            for x in 0..w {
+                let diff = (blurred[y * w + x] - blurred_mirror[(h - 1 - y) * w + x]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                    max_diff_pos = (x, y);
+                }
+            }
+        }
+
+        eprintln!(
+            "V-mirror symmetry: max diff = {max_diff:.6} at ({}, {})",
+            max_diff_pos.0, max_diff_pos.1
+        );
+        assert!(
+            max_diff < 1e-6,
+            "V-mirror blur asymmetry {max_diff:.6} at ({}, {}) exceeds tolerance",
+            max_diff_pos.0,
+            max_diff_pos.1
+        );
+    }
+
+    /// Edge-concentrated distortion: compare metric sensitivity to distortions
+    /// at the right/bottom edges vs left/top edges. With symmetric handling,
+    /// the scores should be equal. Tests the full metric pipeline.
+    #[test]
+    fn edge_distortion_left_vs_right() {
+        let w = 64;
+        let h = 64;
+        let n = w * h;
+
+        // Uniform gray source
+        let src: Vec<[u8; 3]> = vec![[128, 128, 128]; n];
+
+        // Distortion on left 8 columns (within blur radius of edge)
+        let mut dst_left = src.clone();
+        for y in 0..h {
+            for x in 0..8 {
+                dst_left[y * w + x] = [180, 128, 128]; // +52 in red
+            }
+        }
+
+        // Same distortion on right 8 columns
+        let mut dst_right = src.clone();
+        for y in 0..h {
+            for x in (w - 8)..w {
+                dst_right[y * w + x] = [180, 128, 128];
+            }
+        }
+
+        let score_left = crate::compute_zensim(&src, &dst_left, w, h).unwrap();
+        let score_right = crate::compute_zensim(&src, &dst_right, w, h).unwrap();
+
+        eprintln!("Edge distortion sensitivity:");
+        eprintln!(
+            "  Left  8 cols distorted: score={:.4}, raw_dist={:.6}",
+            score_left.score, score_left.raw_distance
+        );
+        eprintln!(
+            "  Right 8 cols distorted: score={:.4}, raw_dist={:.6}",
+            score_right.score, score_right.raw_distance
+        );
+        let ratio = score_left.raw_distance / score_right.raw_distance;
+        eprintln!("  Left/Right raw_distance ratio: {ratio:.4} (1.0 = symmetric)");
+
+        // Left and right edge distortions must produce nearly identical scores
+        assert!(
+            (ratio - 1.0).abs() < 0.01,
+            "Left/Right edge distortion asymmetry: ratio {ratio:.4}, expected ~1.0"
+        );
+    }
+
+    /// Same as above but for top vs bottom edge distortion.
+    #[test]
+    fn edge_distortion_top_vs_bottom() {
+        let w = 64;
+        let h = 64;
+        let n = w * h;
+
+        let src: Vec<[u8; 3]> = vec![[128, 128, 128]; n];
+
+        // Distortion on top 8 rows
+        let mut dst_top = src.clone();
+        for y in 0..8 {
+            for x in 0..w {
+                dst_top[y * w + x] = [128, 180, 128];
+            }
+        }
+
+        // Same distortion on bottom 8 rows
+        let mut dst_bottom = src.clone();
+        for y in (h - 8)..h {
+            for x in 0..w {
+                dst_bottom[y * w + x] = [128, 180, 128];
+            }
+        }
+
+        let score_top = crate::compute_zensim(&src, &dst_top, w, h).unwrap();
+        let score_bottom = crate::compute_zensim(&src, &dst_bottom, w, h).unwrap();
+
+        eprintln!("Edge distortion sensitivity (vertical):");
+        eprintln!(
+            "  Top    8 rows distorted: score={:.4}, raw_dist={:.6}",
+            score_top.score, score_top.raw_distance
+        );
+        eprintln!(
+            "  Bottom 8 rows distorted: score={:.4}, raw_dist={:.6}",
+            score_bottom.score, score_bottom.raw_distance
+        );
+        let ratio = score_top.raw_distance / score_bottom.raw_distance;
+        eprintln!("  Top/Bottom raw_distance ratio: {ratio:.4} (1.0 = symmetric)");
+
+        // Top and bottom edge distortions must produce nearly identical scores
+        assert!(
+            (ratio - 1.0).abs() < 0.01,
+            "Top/Bottom edge distortion asymmetry: ratio {ratio:.4}, expected ~1.0"
+        );
+    }
+
+    /// Small image where boundary pixels are a large fraction.
+    /// At 16x16 with radius=5, the blur window (11 pixels) exceeds the dimension,
+    /// so boundary handling dominates every pixel.
+    #[test]
+    fn small_image_edge_dominance() {
+        let w = 16;
+        let h = 16;
+        let n = w * h;
+
+        // Gradient source: value increases left-to-right
+        let src: Vec<[u8; 3]> = (0..n)
+            .map(|i| {
+                let x = i % w;
+                let v = ((x * 255) / (w - 1)) as u8;
+                [v, v, v]
+            })
+            .collect();
+
+        // Horizontally mirrored: value increases right-to-left
+        let src_mirror: Vec<[u8; 3]> = (0..n)
+            .map(|i| {
+                let x = i % w;
+                let v = (((w - 1 - x) * 255) / (w - 1)) as u8;
+                [v, v, v]
+            })
+            .collect();
+
+        // Uniform distortion: +20 everywhere
+        let dst: Vec<[u8; 3]> = src
+            .iter()
+            .map(|&[r, g, b]| {
+                [
+                    r.saturating_add(20),
+                    g.saturating_add(20),
+                    b.saturating_add(20),
+                ]
+            })
+            .collect();
+        let dst_mirror: Vec<[u8; 3]> = src_mirror
+            .iter()
+            .map(|&[r, g, b]| {
+                [
+                    r.saturating_add(20),
+                    g.saturating_add(20),
+                    b.saturating_add(20),
+                ]
+            })
+            .collect();
+
+        // With 2 scales (avoid hitting minimum at scale 3 for 16x16)
+        let config = crate::ZensimConfig {
+            num_scales: 2,
+            ..Default::default()
+        };
+
+        let result = crate::compute_zensim_with_config(&src, &dst, w, h, config).unwrap();
+        let result_mirror =
+            crate::compute_zensim_with_config(&src_mirror, &dst_mirror, w, h, config).unwrap();
+
+        eprintln!("Small image (16x16) mirror symmetry:");
+        eprintln!(
+            "  Original:  score={:.4}, raw_dist={:.6}",
+            result.score, result.raw_distance
+        );
+        eprintln!(
+            "  H-mirrored: score={:.4}, raw_dist={:.6}",
+            result_mirror.score, result_mirror.raw_distance
+        );
+        let diff_pct = ((result.raw_distance - result_mirror.raw_distance) / result.raw_distance
+            * 100.0)
+            .abs();
+        eprintln!("  Score difference: {diff_pct:.2}%");
+
+        // Horizontally mirrored image+distortion must produce nearly identical scores
+        assert!(
+            diff_pct < 1.0,
+            "Small image H-mirror asymmetry: {diff_pct:.2}%, expected < 1%"
+        );
     }
 }
