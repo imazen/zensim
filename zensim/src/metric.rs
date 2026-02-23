@@ -423,7 +423,7 @@ fn compute_channel(
     }
 }
 
-/// Minimum pixel count to justify phased parallel blur (3 sync points).
+/// Minimum pixel count to justify phased parallel blur (2 sync points, 3 threads).
 /// Below this, sequential is faster due to thread overhead.
 const PARALLEL_THRESHOLD: usize = 100_000;
 
