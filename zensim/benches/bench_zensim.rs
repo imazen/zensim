@@ -156,6 +156,44 @@ fn bench_zensim_3840x2160(c: &mut Criterion) {
     });
 }
 
+fn bench_zensim_512x512_masked(c: &mut Criterion) {
+    let width = 512;
+    let height = 512;
+    let n = width * height;
+
+    let src: Vec<[u8; 3]> = (0..n)
+        .map(|i| {
+            let x = (i % width) as u8;
+            let y = (i / width) as u8;
+            [x, y, x.wrapping_add(y)]
+        })
+        .collect();
+
+    let dst: Vec<[u8; 3]> = src
+        .iter()
+        .map(|&[r, g, b]| [r.saturating_add(10), g.saturating_add(5), b])
+        .collect();
+
+    let config = zensim::ZensimConfig {
+        masking_strength: 4.0,
+        compute_all_features: true,
+        ..Default::default()
+    };
+
+    c.bench_function("zensim_512x512_masked", |b| {
+        b.iter(|| {
+            zensim::compute_zensim_with_config(
+                std::hint::black_box(&src),
+                std::hint::black_box(&dst),
+                width,
+                height,
+                config.clone(),
+            )
+            .unwrap()
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_zensim_512x512,
@@ -163,5 +201,6 @@ criterion_group!(
     bench_zensim_320x240,
     bench_zensim_1920x1080,
     bench_zensim_3840x2160,
+    bench_zensim_512x512_masked,
 );
 criterion_main!(benches);
