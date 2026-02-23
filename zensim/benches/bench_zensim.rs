@@ -156,6 +156,7 @@ fn bench_zensim_3840x2160(c: &mut Criterion) {
     });
 }
 
+#[cfg(feature = "training")]
 fn bench_zensim_512x512_masked(c: &mut Criterion) {
     let width = 512;
     let height = 512;
@@ -233,6 +234,12 @@ criterion_group!(
     bench_zensim_500x375,
     bench_zensim_1920x1080,
     bench_zensim_3840x2160,
-    bench_zensim_512x512_masked,
 );
+
+#[cfg(feature = "training")]
+criterion_group!(training_benches, bench_zensim_512x512_masked,);
+
+#[cfg(not(feature = "training"))]
 criterion_main!(benches);
+#[cfg(feature = "training")]
+criterion_main!(benches, training_benches);

@@ -6,7 +6,7 @@ description = "Validation harness: correlate zensim against human quality rating
 license = "MIT"
 
 [dependencies]
-zensim = { path = "../zensim" }
+zensim = { path = "../zensim", features = ["training"] }
 image = { workspace = true }
 rayon = { workspace = true }
 serde = { version = "1", features = ["derive"] }

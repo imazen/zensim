@@ -24,9 +24,17 @@ mod pool;
 mod simd_ops;
 
 pub use error::ZensimError;
+pub use metric::{ZensimResult, compute_zensim, distance_to_score};
+
+/// Training/research API — requires `features = ["training"]`.
+///
+/// These items expose metric internals (blur kernel shape, scale count,
+/// masking, weight vectors) that change metric behavior. Scores produced
+/// with non-default `ZensimConfig` are **not comparable** to the default
+/// trained weights or the 0-100 score scale.
+#[cfg(feature = "training")]
 pub use metric::{
-    FEATURES_PER_SCALE, WEIGHTS, ZensimConfig, ZensimResult, compute_zensim,
-    compute_zensim_with_config, distance_to_score, score_from_features,
+    FEATURES_PER_SCALE, WEIGHTS, ZensimConfig, compute_zensim_with_config, score_from_features,
 };
 
 /// Number of downscale levels. Each level halves resolution.

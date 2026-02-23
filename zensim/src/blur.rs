@@ -664,6 +664,7 @@ fn box_blur_h_inner_scalar(
 /// Fused horizontal blur for SSIM: computes blur(src), blur(dst), blur(src²+dst²), blur(src*dst)
 /// in a single pass. Reads each pixel of src/dst exactly once, eliminating 3 extra H-passes
 /// and 2 element-wise ops (sq_sum_into, mul_into).
+#[allow(clippy::too_many_arguments)]
 pub fn fused_blur_h_ssim(
     src: &[f32],
     dst: &[f32],
@@ -1686,14 +1687,16 @@ mod tests {
             .collect();
 
         // With 2 scales (avoid hitting minimum at scale 3 for 16x16)
-        let config = crate::ZensimConfig {
+        let config = crate::metric::ZensimConfig {
             num_scales: 2,
             ..Default::default()
         };
 
-        let result = crate::compute_zensim_with_config(&src, &dst, w, h, config).unwrap();
+        let result =
+            crate::metric::compute_zensim_with_config(&src, &dst, w, h, config).unwrap();
         let result_mirror =
-            crate::compute_zensim_with_config(&src_mirror, &dst_mirror, w, h, config).unwrap();
+            crate::metric::compute_zensim_with_config(&src_mirror, &dst_mirror, w, h, config)
+                .unwrap();
 
         eprintln!("Small image (16x16) mirror symmetry:");
         eprintln!(

@@ -10,6 +10,11 @@ rust-version = "1.85.0"
 [features]
 default = ["avx512"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
+## Exposes training/research API: ZensimConfig, compute_zensim_with_config,
+## score_from_features, WEIGHTS, FEATURES_PER_SCALE. These items control
+## metric internals (blur kernel, scale count, masking) whose outputs are
+## incomparable with the default trained weights.
+training = []
 
 [dependencies]
 archmage = { workspace = true }

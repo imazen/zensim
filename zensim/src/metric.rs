@@ -70,6 +70,7 @@ pub fn distance_to_score(raw_distance: f64) -> f64 {
 /// `features`: raw features from ZensimResult.features
 /// `weights`: one weight per feature (len must equal features.len())
 /// Returns (score, raw_distance)
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
     assert_eq!(
         features.len(),
@@ -837,6 +838,7 @@ fn compute_single_scale_phased(
 ///
 /// These weights are initial values, to be optimized against human ratings.
 /// Total number of features per scale (3 channels × (2 SSIM + 4 edge + 1 MSE) = 21)
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub const FEATURES_PER_SCALE: usize = 21;
 
 /// Trained weights from TID2013 optimization (3000 pairs).
