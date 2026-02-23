@@ -4,7 +4,8 @@
 //! with contrast sensitivity weighting per scale.
 
 use crate::blur::{
-    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace,
+    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, box_blur_v_from_copy,
+    downscale_2x_inplace, fused_blur_h_ssim,
 };
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
@@ -277,23 +278,60 @@ fn compute_channel(
         _ => box_blur_3pass_into,
     };
 
-    // mu1 and mu2 are needed for both SSIM and edge features
-    blur_fn(
-        src_c,
-        &mut bufs.mu1,
-        &mut bufs.temp_blur,
-        width,
-        height,
-        config.blur_radius,
-    );
-    blur_fn(
-        dst_c,
-        &mut bufs.mu2,
-        &mut bufs.temp_blur,
-        width,
-        height,
-        config.blur_radius,
-    );
+    // Fused path: for 1-pass SSIM channels, compute all 4 H-blurs in one pass
+    // then complete with 4 separate V-blurs. Saves 3 H-passes + 2 element-wise ops.
+    let use_fused = need_ssim && config.blur_passes == 1;
+
+    if use_fused {
+        // Fused horizontal blur: reads src_c and dst_c once, produces H-blurred
+        // mu1, mu2, sigma_sq, sigma12 in bufs.mu1/mu2/sigma1_sq/sigma12
+        // (using mul_buf as temporary to hold H-blur output for mu1 before V-blur)
+        //
+        // We need 4 H-blur outputs to feed into 4 V-blurs.
+        // Strategy: fused_blur_h writes to mu1, mu2, sigma1_sq, sigma12 (H-blur results)
+        // Then we V-blur each in-place via temp_blur.
+        // Fused H-blur outputs go to temp_blur, mul_buf, sigma1_sq, sigma12.
+        // Then V-blur: temp_blur→mu1, mul_buf→mu2, sigma1_sq↔temp_blur, sigma12↔mul_buf.
+        fused_blur_h_ssim(
+            src_c,
+            dst_c,
+            &mut bufs.temp_blur, // H-blurred src → will become mu1 after V-blur
+            &mut bufs.mul_buf,   // H-blurred dst → will become mu2 after V-blur
+            &mut bufs.sigma1_sq, // H-blurred sq_sum → V-blur in-place via swap
+            &mut bufs.sigma12,   // H-blurred product → V-blur in-place via swap
+            width,
+            height,
+            config.blur_radius,
+        );
+        // V-blur temp_blur(H-blurred src) → mu1
+        box_blur_v_from_copy(&bufs.temp_blur, &mut bufs.mu1, width, height, config.blur_radius);
+        // V-blur mul_buf(H-blurred dst) → mu2
+        box_blur_v_from_copy(&bufs.mul_buf, &mut bufs.mu2, width, height, config.blur_radius);
+        // V-blur sigma1_sq → temp_blur, then swap back
+        box_blur_v_from_copy(&bufs.sigma1_sq, &mut bufs.temp_blur, width, height, config.blur_radius);
+        std::mem::swap(&mut bufs.sigma1_sq, &mut bufs.temp_blur);
+        // V-blur sigma12 → mul_buf, then swap back
+        box_blur_v_from_copy(&bufs.sigma12, &mut bufs.mul_buf, width, height, config.blur_radius);
+        std::mem::swap(&mut bufs.sigma12, &mut bufs.mul_buf);
+    } else {
+        // Standard path: separate blur calls for mu1, mu2
+        blur_fn(
+            src_c,
+            &mut bufs.mu1,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            config.blur_radius,
+        );
+        blur_fn(
+            dst_c,
+            &mut bufs.mu2,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            config.blur_radius,
+        );
+    }
 
     // Compute masking weights if enabled
     if masked {
@@ -314,8 +352,8 @@ fn compute_channel(
         }
     }
 
-    if need_ssim {
-        // Compute blur(src² + dst²) — combined saves one blur vs separate sigma1_sq, sigma2_sq
+    if need_ssim && !use_fused {
+        // Standard SSIM path: separate element-wise ops + blur
         sq_sum_into(src_c, dst_c, &mut bufs.mul_buf);
         blur_fn(
             &bufs.mul_buf,
@@ -335,6 +373,9 @@ fn compute_channel(
             height,
             config.blur_radius,
         );
+    }
+
+    if need_ssim {
 
         if masked {
             let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(

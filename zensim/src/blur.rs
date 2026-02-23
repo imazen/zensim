@@ -66,7 +66,7 @@ pub fn box_blur_2pass_into(
 }
 
 /// Vertical box blur: read from `src`, write to `dst`.
-fn box_blur_v_from_copy(src: &[f32], dst: &mut [f32], width: usize, height: usize, radius: usize) {
+pub fn box_blur_v_from_copy(src: &[f32], dst: &mut [f32], width: usize, height: usize, radius: usize) {
     incant!(
         box_blur_v_copy_inner(src, dst, width, height, radius),
         [v4, v3]
@@ -579,6 +579,463 @@ fn box_blur_h_inner_scalar(
             };
             let rem_idx = rem_idx.min(width - 1);
             sum += inp[add_idx] - inp[rem_idx];
+        }
+    }
+}
+
+/// Fused horizontal blur for SSIM: computes blur(src), blur(dst), blur(src²+dst²), blur(src*dst)
+/// in a single pass. Reads each pixel of src/dst exactly once, eliminating 3 extra H-passes
+/// and 2 element-wise ops (sq_sum_into, mul_into).
+pub fn fused_blur_h_ssim(
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    incant!(
+        fused_blur_h_ssim_inner(
+            src, dst, out_mu1, out_mu2, out_sigma_sq, out_sigma12, width, height, radius
+        ),
+        [v4, v3]
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_inner_v4(
+    token: archmage::X64V4Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let row_groups = height / 16;
+
+    for rg in 0..row_groups {
+        let row_base = rg * 16;
+
+        let mut sum_s = f32x16::zero(token);
+        let mut sum_d = f32x16::zero(token);
+        let mut sum_sq = f32x16::zero(token);
+        let mut sum_prod = f32x16::zero(token);
+
+        // Initialize running sums
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut s_arr = [0.0f32; 16];
+            let mut d_arr = [0.0f32; 16];
+            for ro in 0..16 {
+                let base = (row_base + ro) * width + idx;
+                s_arr[ro] = src[base];
+                d_arr[ro] = dst[base];
+            }
+            let sv = f32x16::from_array(token, s_arr);
+            let dv = f32x16::from_array(token, d_arr);
+            sum_s = sum_s + sv;
+            sum_d = sum_d + dv;
+            sum_sq = sum_sq + sv * sv + dv * dv;
+            sum_prod = sum_prod + sv * dv;
+        }
+
+        // Slide window
+        for x in 0..width {
+            let mu1_result = (sum_s * inv_v).to_array();
+            let mu2_result = (sum_d * inv_v).to_array();
+            let sq_result = (sum_sq * inv_v).to_array();
+            let prod_result = (sum_prod * inv_v).to_array();
+            for ro in 0..16 {
+                let base = (row_base + ro) * width + x;
+                out_mu1[base] = mu1_result[ro];
+                out_mu2[base] = mu2_result[ro];
+                out_sigma_sq[base] = sq_result[ro];
+                out_sigma12[base] = prod_result[ro];
+            }
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+
+            let mut s_add = [0.0f32; 16];
+            let mut d_add = [0.0f32; 16];
+            let mut s_rem = [0.0f32; 16];
+            let mut d_rem = [0.0f32; 16];
+            for ro in 0..16 {
+                let base = (row_base + ro) * width;
+                s_add[ro] = src[base + add_idx];
+                d_add[ro] = dst[base + add_idx];
+                s_rem[ro] = src[base + rem_idx];
+                d_rem[ro] = dst[base + rem_idx];
+            }
+            let sa = f32x16::from_array(token, s_add);
+            let da = f32x16::from_array(token, d_add);
+            let sr = f32x16::from_array(token, s_rem);
+            let dr = f32x16::from_array(token, d_rem);
+            sum_s = sum_s + sa - sr;
+            sum_d = sum_d + da - dr;
+            sum_sq = sum_sq + sa * sa + da * da - sr * sr - dr * dr;
+            sum_prod = sum_prod + sa * da - sr * dr;
+        }
+    }
+
+    // Remainder with f32x8
+    let v3 = token.v3();
+    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let remaining_start = row_groups * 16;
+    let remaining_8groups = (height - remaining_start) / 8;
+
+    for rg in 0..remaining_8groups {
+        let row_base = remaining_start + rg * 8;
+        let mut sum_s = f32x8::zero(v3);
+        let mut sum_d = f32x8::zero(v3);
+        let mut sum_sq = f32x8::zero(v3);
+        let mut sum_prod = f32x8::zero(v3);
+
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut s_arr = [0.0f32; 8];
+            let mut d_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width + idx;
+                s_arr[ro] = src[base];
+                d_arr[ro] = dst[base];
+            }
+            let sv = f32x8::from_array(v3, s_arr);
+            let dv = f32x8::from_array(v3, d_arr);
+            sum_s = sum_s + sv;
+            sum_d = sum_d + dv;
+            sum_sq = sum_sq + sv * sv + dv * dv;
+            sum_prod = sum_prod + sv * dv;
+        }
+
+        for x in 0..width {
+            let mu1_result = (sum_s * inv_v8).to_array();
+            let mu2_result = (sum_d * inv_v8).to_array();
+            let sq_result = (sum_sq * inv_v8).to_array();
+            let prod_result = (sum_prod * inv_v8).to_array();
+            for ro in 0..8 {
+                let base = (row_base + ro) * width + x;
+                out_mu1[base] = mu1_result[ro];
+                out_mu2[base] = mu2_result[ro];
+                out_sigma_sq[base] = sq_result[ro];
+                out_sigma12[base] = prod_result[ro];
+            }
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+
+            let mut s_add = [0.0f32; 8];
+            let mut d_add = [0.0f32; 8];
+            let mut s_rem = [0.0f32; 8];
+            let mut d_rem = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width;
+                s_add[ro] = src[base + add_idx];
+                d_add[ro] = dst[base + add_idx];
+                s_rem[ro] = src[base + rem_idx];
+                d_rem[ro] = dst[base + rem_idx];
+            }
+            let sa = f32x8::from_array(v3, s_add);
+            let da = f32x8::from_array(v3, d_add);
+            let sr = f32x8::from_array(v3, s_rem);
+            let dr = f32x8::from_array(v3, d_rem);
+            sum_s = sum_s + sa - sr;
+            sum_d = sum_d + da - dr;
+            sum_sq = sum_sq + sa * sa + da * da - sr * sr - dr * dr;
+            sum_prod = sum_prod + sa * da - sr * dr;
+        }
+    }
+
+    // Scalar remainder rows
+    let inv = 1.0 / diam as f32;
+    for row in (remaining_start + remaining_8groups * 8)..height {
+        let row_off = row * width;
+        let s_row = &src[row_off..row_off + width];
+        let d_row = &dst[row_off..row_off + width];
+        let mut sum_s = 0.0f32;
+        let mut sum_d = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut sum_prod = 0.0f32;
+
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let s = s_row[idx];
+            let d = d_row[idx];
+            sum_s += s;
+            sum_d += d;
+            sum_sq += s * s + d * d;
+            sum_prod += s * d;
+        }
+
+        for x in 0..width {
+            out_mu1[row_off + x] = sum_s * inv;
+            out_mu2[row_off + x] = sum_d * inv;
+            out_sigma_sq[row_off + x] = sum_sq * inv;
+            out_sigma12[row_off + x] = sum_prod * inv;
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let sa = s_row[add_idx];
+            let da = d_row[add_idx];
+            let sr = s_row[rem_idx];
+            let dr = d_row[rem_idx];
+            sum_s += sa - sr;
+            sum_d += da - dr;
+            sum_sq += sa * sa + da * da - sr * sr - dr * dr;
+            sum_prod += sa * da - sr * dr;
+        }
+    }
+}
+
+/// AVX2 fallback for fused SSIM horizontal blur.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_inner_v3(
+    token: archmage::X64V3Token,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let row_groups = height / 8;
+
+    for rg in 0..row_groups {
+        let row_base = rg * 8;
+        let mut sum_s = f32x8::zero(token);
+        let mut sum_d = f32x8::zero(token);
+        let mut sum_sq = f32x8::zero(token);
+        let mut sum_prod = f32x8::zero(token);
+
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut s_arr = [0.0f32; 8];
+            let mut d_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width + idx;
+                s_arr[ro] = src[base];
+                d_arr[ro] = dst[base];
+            }
+            let sv = f32x8::from_array(token, s_arr);
+            let dv = f32x8::from_array(token, d_arr);
+            sum_s = sum_s + sv;
+            sum_d = sum_d + dv;
+            sum_sq = sum_sq + sv * sv + dv * dv;
+            sum_prod = sum_prod + sv * dv;
+        }
+
+        for x in 0..width {
+            let mu1_result = (sum_s * inv_v).to_array();
+            let mu2_result = (sum_d * inv_v).to_array();
+            let sq_result = (sum_sq * inv_v).to_array();
+            let prod_result = (sum_prod * inv_v).to_array();
+            for ro in 0..8 {
+                let base = (row_base + ro) * width + x;
+                out_mu1[base] = mu1_result[ro];
+                out_mu2[base] = mu2_result[ro];
+                out_sigma_sq[base] = sq_result[ro];
+                out_sigma12[base] = prod_result[ro];
+            }
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+
+            let mut s_add = [0.0f32; 8];
+            let mut d_add = [0.0f32; 8];
+            let mut s_rem = [0.0f32; 8];
+            let mut d_rem = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width;
+                s_add[ro] = src[base + add_idx];
+                d_add[ro] = dst[base + add_idx];
+                s_rem[ro] = src[base + rem_idx];
+                d_rem[ro] = dst[base + rem_idx];
+            }
+            let sa = f32x8::from_array(token, s_add);
+            let da = f32x8::from_array(token, d_add);
+            let sr = f32x8::from_array(token, s_rem);
+            let dr = f32x8::from_array(token, d_rem);
+            sum_s = sum_s + sa - sr;
+            sum_d = sum_d + da - dr;
+            sum_sq = sum_sq + sa * sa + da * da - sr * sr - dr * dr;
+            sum_prod = sum_prod + sa * da - sr * dr;
+        }
+    }
+
+    // Scalar remainder rows
+    let inv = 1.0 / diam as f32;
+    for row in (row_groups * 8)..height {
+        let row_off = row * width;
+        let s_row = &src[row_off..row_off + width];
+        let d_row = &dst[row_off..row_off + width];
+        let mut sum_s = 0.0f32;
+        let mut sum_d = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut sum_prod = 0.0f32;
+
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let s = s_row[idx];
+            let d = d_row[idx];
+            sum_s += s;
+            sum_d += d;
+            sum_sq += s * s + d * d;
+            sum_prod += s * d;
+        }
+
+        for x in 0..width {
+            out_mu1[row_off + x] = sum_s * inv;
+            out_mu2[row_off + x] = sum_d * inv;
+            out_sigma_sq[row_off + x] = sum_sq * inv;
+            out_sigma12[row_off + x] = sum_prod * inv;
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let sa = s_row[add_idx];
+            let da = d_row[add_idx];
+            let sr = s_row[rem_idx];
+            let dr = d_row[rem_idx];
+            sum_s += sa - sr;
+            sum_d += da - dr;
+            sum_sq += sa * sa + da * da - sr * sr - dr * dr;
+            sum_prod += sa * da - sr * dr;
+        }
+    }
+}
+
+/// Scalar fallback for fused SSIM horizontal blur.
+#[allow(clippy::too_many_arguments)]
+fn fused_blur_h_ssim_inner_scalar(
+    _token: archmage::ScalarToken,
+    src: &[f32],
+    dst: &[f32],
+    out_mu1: &mut [f32],
+    out_mu2: &mut [f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma12: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let diam = 2 * radius + 1;
+    let inv = 1.0 / diam as f32;
+    let r = radius;
+
+    for row in 0..height {
+        let row_off = row * width;
+        let s_row = &src[row_off..row_off + width];
+        let d_row = &dst[row_off..row_off + width];
+        let mut sum_s = 0.0f32;
+        let mut sum_d = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut sum_prod = 0.0f32;
+
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let s = s_row[idx];
+            let d = d_row[idx];
+            sum_s += s;
+            sum_d += d;
+            sum_sq += s * s + d * d;
+            sum_prod += s * d;
+        }
+
+        for x in 0..width {
+            out_mu1[row_off + x] = sum_s * inv;
+            out_mu2[row_off + x] = sum_d * inv;
+            out_sigma_sq[row_off + x] = sum_sq * inv;
+            out_sigma12[row_off + x] = sum_prod * inv;
+
+            let add_idx = (x + r + 1).min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let sa = s_row[add_idx];
+            let da = d_row[add_idx];
+            let sr = s_row[rem_idx];
+            let dr = d_row[rem_idx];
+            sum_s += sa - sr;
+            sum_d += da - dr;
+            sum_sq += sa * sa + da * da - sr * sr - dr * dr;
+            sum_prod += sa * da - sr * dr;
         }
     }
 }
