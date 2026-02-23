@@ -5,7 +5,7 @@
 
 use crate::blur::{
     box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, box_blur_v_from_copy,
-    downscale_2x_inplace, fused_blur_h_ssim,
+    downscale_2x_inplace, fused_blur_h_ssim, pad_plane_width,
 };
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
@@ -165,15 +165,24 @@ pub fn compute_zensim_with_config(
     }
 
     // Convert both images to planar positive XYB in parallel
-    let (src_xyb, dst_xyb) = std::thread::scope(|s| {
+    let (mut src_xyb, mut dst_xyb) = std::thread::scope(|s| {
         let src_handle = s.spawn(|| srgb_to_positive_xyb_planar(source));
         let dst_xyb = srgb_to_positive_xyb_planar(distorted);
         let src_xyb = src_handle.join().unwrap();
         (src_xyb, dst_xyb)
     });
 
+    // Pad plane widths to multiple of 16 for consistent SIMD utilization
+    let padded_width = (width + 15) & !15;
+    if padded_width != width {
+        for c in 0..3 {
+            pad_plane_width(&mut src_xyb[c], width, height, padded_width);
+            pad_plane_width(&mut dst_xyb[c], width, height, padded_width);
+        }
+    }
+
     // Compute multi-scale statistics (take ownership to avoid clone)
-    let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, width, height, &config);
+    let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, &config);
 
     // Combine with weights to produce final score
     let masked = config.masking_strength > 0.0;
@@ -232,6 +241,15 @@ fn compute_multiscale_stats(
                 let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
                 nw = sw;
                 nh = sh;
+            }
+            // Re-pad to 16-alignment if downscale broke it
+            let padded_nw = (nw + 15) & !15;
+            if padded_nw != nw {
+                for c in 0..3 {
+                    pad_plane_width(&mut src_planes[c], nw, nh, padded_nw);
+                    pad_plane_width(&mut dst_planes[c], nw, nh, padded_nw);
+                }
+                nw = padded_nw;
             }
             w = nw;
             h = nh;
@@ -304,14 +322,38 @@ fn compute_channel(
             config.blur_radius,
         );
         // V-blur temp_blur(H-blurred src) → mu1
-        box_blur_v_from_copy(&bufs.temp_blur, &mut bufs.mu1, width, height, config.blur_radius);
+        box_blur_v_from_copy(
+            &bufs.temp_blur,
+            &mut bufs.mu1,
+            width,
+            height,
+            config.blur_radius,
+        );
         // V-blur mul_buf(H-blurred dst) → mu2
-        box_blur_v_from_copy(&bufs.mul_buf, &mut bufs.mu2, width, height, config.blur_radius);
+        box_blur_v_from_copy(
+            &bufs.mul_buf,
+            &mut bufs.mu2,
+            width,
+            height,
+            config.blur_radius,
+        );
         // V-blur sigma1_sq → temp_blur, then swap back
-        box_blur_v_from_copy(&bufs.sigma1_sq, &mut bufs.temp_blur, width, height, config.blur_radius);
+        box_blur_v_from_copy(
+            &bufs.sigma1_sq,
+            &mut bufs.temp_blur,
+            width,
+            height,
+            config.blur_radius,
+        );
         std::mem::swap(&mut bufs.sigma1_sq, &mut bufs.temp_blur);
         // V-blur sigma12 → mul_buf, then swap back
-        box_blur_v_from_copy(&bufs.sigma12, &mut bufs.mul_buf, width, height, config.blur_radius);
+        box_blur_v_from_copy(
+            &bufs.sigma12,
+            &mut bufs.mul_buf,
+            width,
+            height,
+            config.blur_radius,
+        );
         std::mem::swap(&mut bufs.sigma12, &mut bufs.mul_buf);
     } else {
         // Standard path: separate blur calls for mu1, mu2
@@ -376,7 +418,6 @@ fn compute_channel(
     }
 
     if need_ssim {
-
         if masked {
             let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
                 &bufs.mu1,

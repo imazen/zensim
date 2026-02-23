@@ -66,7 +66,13 @@ pub fn box_blur_2pass_into(
 }
 
 /// Vertical box blur: read from `src`, write to `dst`.
-pub fn box_blur_v_from_copy(src: &[f32], dst: &mut [f32], width: usize, height: usize, radius: usize) {
+pub fn box_blur_v_from_copy(
+    src: &[f32],
+    dst: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
     incant!(
         box_blur_v_copy_inner(src, dst, width, height, radius),
         [v4, v3]
@@ -599,7 +605,15 @@ pub fn fused_blur_h_ssim(
 ) {
     incant!(
         fused_blur_h_ssim_inner(
-            src, dst, out_mu1, out_mu2, out_sigma_sq, out_sigma12, width, height, radius
+            src,
+            dst,
+            out_mu1,
+            out_mu2,
+            out_sigma_sq,
+            out_sigma12,
+            width,
+            height,
+            radius
         ),
         [v4, v3]
     );
@@ -1042,23 +1056,163 @@ fn fused_blur_h_ssim_inner_scalar(
 
 /// Downscale in-place: writes to beginning of buffer, truncates.
 /// Safe because output index < source index for all elements.
+///
+/// In-place proof: output index y*new_w+x < source index (2y)*width+(2x) for all y,x.
+/// Because 2y*width + 2x = 2*(y*width + x) >= 2*(y*new_w + x) > y*new_w + x.
 pub fn downscale_2x_inplace(plane: &mut Vec<f32>, width: usize, height: usize) -> (usize, usize) {
     let new_w = width / 2;
     let new_h = height / 2;
-
-    // In-place: output index y*new_w+x < source index (2y)*width+(2x) for all y,x.
-    // Proof: 2y*width + 2x = 2*(y*width + x) >= 2*(y*new_w + x) > y*new_w + x.
-    for y in 0..new_h {
-        let sy = y * 2;
-        for x in 0..new_w {
-            let sx = x * 2;
-            let a = plane[sy * width + sx];
-            let b = plane[sy * width + sx + 1];
-            let c = plane[(sy + 1) * width + sx];
-            let d = plane[(sy + 1) * width + sx + 1];
-            plane[y * new_w + x] = (a + b + c + d) * 0.25;
-        }
-    }
+    downscale_2x(plane, width, new_w, new_h);
     plane.truncate(new_w * new_h);
     (new_w, new_h)
+}
+
+fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
+    incant!(downscale_2x_inner(plane, width, new_w, new_h), [v4, v3]);
+}
+
+/// AVX-512 downscale: process 16 output pixels per iteration.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn downscale_2x_inner_v4(
+    token: archmage::X64V4Token,
+    plane: &mut [f32],
+    width: usize,
+    new_w: usize,
+    new_h: usize,
+) {
+    let quarter = f32x16::splat(token, 0.25);
+    let v3 = token.v3();
+    let quarter8 = f32x8::splat(v3, 0.25);
+
+    for y in 0..new_h {
+        let row0 = y * 2 * width;
+        let row1 = row0 + width;
+        let out_row = y * new_w;
+
+        let chunks16 = new_w / 16;
+        for chunk in 0..chunks16 {
+            let ox = chunk * 16;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 16];
+            for i in 0..16 {
+                let s = sx + i * 2;
+                arr[i] =
+                    plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
+            }
+            let result = f32x16::from_array(token, arr) * quarter;
+            plane[out_row + ox..][..16].copy_from_slice(&result.to_array());
+        }
+
+        let base8 = chunks16 * 16;
+        let chunks8 = (new_w - base8) / 8;
+        for chunk in 0..chunks8 {
+            let ox = base8 + chunk * 8;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
+                let s = sx + i * 2;
+                arr[i] =
+                    plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
+            }
+            let result = f32x8::from_array(v3, arr) * quarter8;
+            plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
+        }
+
+        for x in (base8 + chunks8 * 8)..new_w {
+            let sx = x * 2;
+            plane[out_row + x] =
+                (plane[row0 + sx] + plane[row0 + sx + 1] + plane[row1 + sx] + plane[row1 + sx + 1])
+                    * 0.25;
+        }
+    }
+}
+
+/// AVX2 downscale: process 8 output pixels per iteration.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn downscale_2x_inner_v3(
+    token: archmage::X64V3Token,
+    plane: &mut [f32],
+    width: usize,
+    new_w: usize,
+    new_h: usize,
+) {
+    let quarter = f32x8::splat(token, 0.25);
+
+    for y in 0..new_h {
+        let row0 = y * 2 * width;
+        let row1 = row0 + width;
+        let out_row = y * new_w;
+
+        let chunks8 = new_w / 8;
+        for chunk in 0..chunks8 {
+            let ox = chunk * 8;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
+                let s = sx + i * 2;
+                arr[i] =
+                    plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
+            }
+            let result = f32x8::from_array(token, arr) * quarter;
+            plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
+        }
+
+        for x in (chunks8 * 8)..new_w {
+            let sx = x * 2;
+            plane[out_row + x] =
+                (plane[row0 + sx] + plane[row0 + sx + 1] + plane[row1 + sx] + plane[row1 + sx + 1])
+                    * 0.25;
+        }
+    }
+}
+
+fn downscale_2x_inner_scalar(
+    _token: archmage::ScalarToken,
+    plane: &mut [f32],
+    width: usize,
+    new_w: usize,
+    new_h: usize,
+) {
+    for y in 0..new_h {
+        let row0 = y * 2 * width;
+        let row1 = row0 + width;
+        let out_row = y * new_w;
+        for x in 0..new_w {
+            let sx = x * 2;
+            plane[out_row + x] =
+                (plane[row0 + sx] + plane[row0 + sx + 1] + plane[row1 + sx] + plane[row1 + sx + 1])
+                    * 0.25;
+        }
+    }
+}
+
+/// Pad plane width to `padded_width` by replicating the rightmost pixel value.
+/// Operates in-place, processing rows bottom-to-top to avoid overwriting source data.
+pub fn pad_plane_width(plane: &mut Vec<f32>, width: usize, height: usize, padded_width: usize) {
+    if padded_width == width {
+        return;
+    }
+    debug_assert!(padded_width > width);
+    plane.resize(padded_width * height, 0.0);
+
+    // Process bottom-to-top so we never read a position that was already overwritten.
+    for y in (0..height).rev() {
+        let src_start = y * width;
+        let dst_start = y * padded_width;
+
+        // Fill padding columns with rightmost pixel value
+        let edge_val = plane[src_start + width - 1];
+        for x in (width..padded_width).rev() {
+            plane[dst_start + x] = edge_val;
+        }
+
+        // Shift row data to padded position (right-to-left for overlap safety)
+        if dst_start != src_start {
+            for x in (0..width).rev() {
+                plane[dst_start + x] = plane[src_start + x];
+            }
+        }
+    }
 }
