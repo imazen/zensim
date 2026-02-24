@@ -22,6 +22,7 @@ pub mod mapping;
 mod metric;
 mod pool;
 mod simd_ops;
+mod streaming;
 
 pub use error::ZensimError;
 pub use metric::{ZensimResult, compute_zensim, distance_to_score};

@@ -91,6 +91,21 @@ pub fn srgb_to_positive_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
     [x_plane, y_plane, b_plane]
 }
 
+/// Convert interleaved sRGB u8 to planar positive XYB, writing into pre-allocated buffers.
+/// Each output slice must be at least `pixels.len()` long.
+#[allow(dead_code)] // For future streaming optimization (avoids per-strip allocations)
+pub fn srgb_to_positive_xyb_planar_into(
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    incant!(
+        srgb_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
+        [v4, v3]
+    );
+}
+
 /// Convert interleaved sRGB u8 to planar XYB (without positive shift).
 #[allow(dead_code)]
 pub fn srgb_to_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {

@@ -94,22 +94,22 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
 }
 
 /// Per-scale statistics collected during computation.
-struct ScaleStats {
+pub(crate) struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values
-    ssim: [f64; 6],
+    pub(crate) ssim: [f64; 6],
     /// Edge features: [art_mean, art_4th, det_mean, det_4th] per channel = 12 values
-    edge: [f64; 12],
+    pub(crate) edge: [f64; 12],
     /// Per-channel MSE: mean((src - dst)²) for X, Y, B
-    mse: [f64; 3],
+    pub(crate) mse: [f64; 3],
     /// Variance loss (L2): max(0, 1 - var_dst / var_src) per channel
-    variance_loss: [f64; 3],
+    pub(crate) variance_loss: [f64; 3],
     /// Texture loss (L1): max(0, 1 - mad_dst / mad_src) per channel
-    texture_loss: [f64; 3],
+    pub(crate) texture_loss: [f64; 3],
     /// 2nd-power pooled features (masking mode only):
     /// SSIM: [root2_d] per channel = 3 values
-    ssim_2nd: [f64; 3],
+    pub(crate) ssim_2nd: [f64; 3],
     /// Edge 2nd power: [art_2nd, det_2nd] per channel = 6 values
-    edge_2nd: [f64; 6],
+    pub(crate) edge_2nd: [f64; 6],
 }
 
 /// Result from zensim comparison.
@@ -132,9 +132,9 @@ pub struct ZensimResult {
 }
 
 /// Features per channel when masking is disabled.
-const FEATURES_PER_CHANNEL_BASIC: usize = 9;
+pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 9;
 /// Features per channel when masking is enabled (adds 2nd-power pooled variants).
-const FEATURES_PER_CHANNEL_MASKED: usize = 12;
+pub(crate) const FEATURES_PER_CHANNEL_MASKED: usize = 12;
 
 /// Compute zensim score between two sRGB u8 images.
 ///
@@ -170,6 +170,14 @@ pub fn compute_zensim_with_config(
         return Err(ZensimError::DimensionMismatch);
     }
 
+    // Use streaming path for large non-masked images to reduce peak memory
+    let masked = config.masking_strength > 0.0;
+    if !masked && crate::streaming::should_use_streaming(width, height) {
+        let result = crate::streaming::compute_zensim_streaming(source, distorted, width, height, &config);
+        return Ok(result);
+    }
+
+    // Full-image path for small images or masking mode
     // Convert both images to planar positive XYB in parallel
     let (mut src_xyb, mut dst_xyb) = std::thread::scope(|s| {
         let src_handle = s.spawn(|| srgb_to_positive_xyb_planar(source));
@@ -191,7 +199,6 @@ pub fn compute_zensim_with_config(
     let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, &config);
 
     // Combine with weights to produce final score
-    let masked = config.masking_strength > 0.0;
     let result = combine_scores(&scale_stats, masked);
     Ok(result)
 }
@@ -493,7 +500,7 @@ const PARALLEL_THRESHOLD: usize = 100_000;
 /// Compute SSIM and edge statistics for a single scale.
 /// Uses phased blur parallelism for large scales (non-masking mode only).
 #[allow(clippy::too_many_arguments)]
-fn compute_single_scale(
+pub(crate) fn compute_single_scale(
     src: &[Vec<f32>; 3],
     dst: &[Vec<f32>; 3],
     width: usize,
@@ -1010,7 +1017,7 @@ pub const WEIGHTS: [f64; 108] = [
     21.750148, 7.333710, 0.000000, 0.000000, 214.128879, 0.000000, 0.000000, 0.000000, 0.000000,
 ];
 
-fn combine_scores(scale_stats: &[ScaleStats], masked: bool) -> ZensimResult {
+pub(crate) fn combine_scores(scale_stats: &[ScaleStats], masked: bool) -> ZensimResult {
     let features_per_ch = if masked {
         FEATURES_PER_CHANNEL_MASKED
     } else {
