@@ -1692,8 +1692,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result =
-            crate::metric::compute_zensim_with_config(&src, &dst, w, h, config).unwrap();
+        let result = crate::metric::compute_zensim_with_config(&src, &dst, w, h, config).unwrap();
         let result_mirror =
             crate::metric::compute_zensim_with_config(&src_mirror, &dst_mirror, w, h, config)
                 .unwrap();

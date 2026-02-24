@@ -133,13 +133,16 @@ fn main() {
     let embedded_w = expand_embedded_weights(n_features);
     let frozen: Vec<bool> = if args.sparse {
         // Determine features_per_channel from n_features
-        let fpc = if n_features % (10 * 3) == 0 { 10 } else { 7 };
+        let fpc = if n_features % (12 * 3) == 0 { 12 } else { 9 };
         embedded_w
             .iter()
             .enumerate()
             .map(|(i, w)| {
-                let is_mse = i % fpc == fpc - 1;
-                !is_mse && w.abs() < 0.001
+                let pos = i % fpc;
+                let is_mse = pos == fpc - 3; // mse is 3 from end (before variance_loss, texture_loss)
+                let is_new_blur_feature = pos == fpc - 2 || pos == fpc - 1; // variance_loss, texture_loss
+                // Keep mse and new blur features trainable even if weight is 0
+                !is_mse && !is_new_blur_feature && w.abs() < 0.001
             })
             .collect()
     } else {
@@ -342,8 +345,8 @@ fn load_and_compute(
     }
 }
 
-/// Expand embedded WEIGHTS (84 entries, 7 features/ch) to match a wider feature layout.
-/// When masking is enabled, features have 10/ch (inserts zeros for ssim_2nd, art_2nd, det_2nd).
+/// Expand embedded WEIGHTS (108 entries, 9 features/ch) to match a wider feature layout.
+/// When masking is enabled, features have 12/ch (inserts zeros for ssim_2nd, art_2nd, det_2nd).
 /// When extra scales are used, pads with zeros for extra scale features.
 fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
     let embedded = &zensim::WEIGHTS;
@@ -355,11 +358,11 @@ fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
 
     // Detect features_per_channel from the feature count
     let n_channels = 3;
-    // Try masked (10/ch) first, then basic (7/ch)
-    let (fpc, n_scales) = if n_features.is_multiple_of(10 * n_channels) {
-        (10, n_features / (10 * n_channels))
-    } else if n_features.is_multiple_of(7 * n_channels) {
-        (7, n_features / (7 * n_channels))
+    // Try masked (12/ch) first, then basic (9/ch)
+    let (fpc, n_scales) = if n_features.is_multiple_of(12 * n_channels) {
+        (12, n_features / (12 * n_channels))
+    } else if n_features.is_multiple_of(9 * n_channels) {
+        (9, n_features / (9 * n_channels))
     } else {
         // Fallback: just copy what fits
         for (i, &w) in embedded.iter().enumerate() {
@@ -370,7 +373,7 @@ fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
         return expanded;
     };
 
-    let emb_fpc = 7; // embedded always has 7 features per channel
+    let emb_fpc = 9; // embedded has 9 features per channel
     let emb_scales = embedded.len() / (emb_fpc * n_channels);
 
     // Map basic→masked layout for each scale/channel that exists in embedded
@@ -379,7 +382,7 @@ fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
             let emb_base = s * (emb_fpc * n_channels) + c * emb_fpc;
             let exp_base = s * (fpc * n_channels) + c * fpc;
 
-            if fpc == 10 {
+            if fpc == 12 {
                 // basic[0..2] → masked[0..2] (ssim_mean, ssim_4th)
                 expanded[exp_base] = embedded[emb_base];
                 expanded[exp_base + 1] = embedded[emb_base + 1];
@@ -392,8 +395,10 @@ fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
                 expanded[exp_base + 6] = embedded[emb_base + 4];
                 expanded[exp_base + 7] = embedded[emb_base + 5];
                 // masked[8] = det_2nd → 0 (new)
-                // basic[6] → masked[9] (mse)
+                // basic[6..9] → masked[9..12] (mse, variance_loss, texture_loss)
                 expanded[exp_base + 9] = embedded[emb_base + 6];
+                expanded[exp_base + 10] = embedded[emb_base + 7];
+                expanded[exp_base + 11] = embedded[emb_base + 8];
             } else {
                 // Same layout, just copy
                 expanded[exp_base..exp_base + emb_fpc]

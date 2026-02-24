@@ -33,6 +33,11 @@ pub fn sq_diff_sum(a: &[f32], b: &[f32]) -> f64 {
     incant!(sq_diff_sum_inner(a, b), [v4, v3])
 }
 
+/// Compute sum of absolute differences: sum(|a[i] - b[i]|)
+pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
+    incant!(abs_diff_sum_inner(a, b), [v4, v3])
+}
+
 /// Element-wise absolute difference: out[i] = |a[i] - b[i]|
 pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(abs_diff_into_inner(a, b, out), [v4, v3]);
@@ -180,6 +185,64 @@ fn sq_diff_sum_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32])
     for i in 0..a.len() {
         let d = (a[i] - b[i]) as f64;
         sum += d * d;
+    }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn abs_diff_sum_inner_v4(token: archmage::X64V4Token, a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let chunks = n / 16;
+    let mut sum = 0.0f64;
+    for c in 0..chunks {
+        let base = c * 16;
+        let va = f32x16::from_array(token, a[base..][..16].try_into().unwrap());
+        let vb = f32x16::from_array(token, b[base..][..16].try_into().unwrap());
+        let d = (va - vb).abs();
+        sum += d.reduce_add() as f64;
+    }
+    let v3 = token.v3();
+    let chunks8 = (n - chunks * 16) / 8;
+    for c in 0..chunks8 {
+        let base = chunks * 16 + c * 8;
+        let va = f32x8::from_array(v3, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(v3, b[base..][..8].try_into().unwrap());
+        let d = (va - vb).abs();
+        sum += d.reduce_add() as f64;
+    }
+    for i in (chunks * 16 + chunks8 * 8)..n {
+        let d = (a[i] - b[i]).abs() as f64;
+        sum += d;
+    }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn abs_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let chunks = n / 8;
+    let mut sum = 0.0f64;
+    for c in 0..chunks {
+        let base = c * 8;
+        let va = f32x8::from_array(token, a[base..][..8].try_into().unwrap());
+        let vb = f32x8::from_array(token, b[base..][..8].try_into().unwrap());
+        let d = (va - vb).abs();
+        sum += d.reduce_add() as f64;
+    }
+    for i in (chunks * 8)..n {
+        let d = (a[i] - b[i]).abs() as f64;
+        sum += d;
+    }
+    sum
+}
+
+fn abs_diff_sum_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32]) -> f64 {
+    let mut sum = 0.0f64;
+    for i in 0..a.len() {
+        let d = (a[i] - b[i]).abs() as f64;
+        sum += d;
     }
     sum
 }
