@@ -207,16 +207,26 @@ pub(crate) fn compute_multiscale_stats_streaming(
             );
             stats.push(scale_stat);
 
-            // Downscale planes in-place for next scale
+            // Downscale 6 planes in parallel for next scale
             if scale < num_scales - 1 {
-                let mut nw = 0;
-                let mut nh = 0;
-                for c in 0..3 {
-                    let (sw, sh) = downscale_2x_inplace(&mut src_planes[c], w, h);
-                    let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
-                    nw = sw;
-                    nh = sh;
-                }
+                let [ref mut s0, ref mut s1, ref mut s2] = src_planes;
+                let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
+                let (((nw, nh), _), _) = rayon::join(
+                    || rayon::join(
+                        || downscale_2x_inplace(s0, w, h),
+                        || rayon::join(
+                            || downscale_2x_inplace(s1, w, h),
+                            || downscale_2x_inplace(s2, w, h),
+                        ),
+                    ),
+                    || rayon::join(
+                        || downscale_2x_inplace(d0, w, h),
+                        || rayon::join(
+                            || downscale_2x_inplace(d1, w, h),
+                            || downscale_2x_inplace(d2, w, h),
+                        ),
+                    ),
+                );
                 w = nw;
                 h = nh;
             }
