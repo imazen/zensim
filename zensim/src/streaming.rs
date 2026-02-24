@@ -8,7 +8,7 @@
 
 use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, box_blur_h, downscale_2x_inplace,
-    fused_blur_h_ssim, pad_plane_width,
+    fused_blur_h_ssim, pad_plane_width, simd_padded_width,
 };
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
@@ -166,7 +166,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
-    let padded_width = (width + 15) & !15;
+    let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales;
 
     let mut stats = Vec::with_capacity(num_scales);

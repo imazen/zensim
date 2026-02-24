@@ -5,7 +5,7 @@
 
 use crate::blur::{
     box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, box_blur_v_from_copy,
-    downscale_2x_inplace, fused_blur_h_ssim, pad_plane_width,
+    downscale_2x_inplace, fused_blur_h_ssim, pad_plane_width, simd_padded_width,
 };
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
@@ -187,7 +187,7 @@ pub fn compute_zensim_with_config(
     });
 
     // Pad plane widths to multiple of 16 for consistent SIMD utilization
-    let padded_width = (width + 15) & !15;
+    let padded_width = simd_padded_width(width);
     if padded_width != width {
         for c in 0..3 {
             pad_plane_width(&mut src_xyb[c], width, height, padded_width);

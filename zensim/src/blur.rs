@@ -1297,6 +1297,27 @@ fn downscale_2x_inner_scalar(
     }
 }
 
+/// Compute SIMD-aligned width that also avoids L1d cache set aliasing.
+///
+/// The basic alignment rounds up to a multiple of 16 (SIMD lane count).
+/// But when `padded_width * 4` (stride in bytes) causes power-of-2 aliasing
+/// in the 32KB 8-way L1d cache (512 sets), rows 0 and 2 map to the same
+/// cache set, causing catastrophic conflict misses in H-blur (which writes
+/// to 4 output buffers × 16 rows simultaneously).
+///
+/// Fix: for widths >= 512 (where the H-blur working set exceeds L1),
+/// ensure `padded_width / 16` is odd so the cache-line stride between
+/// rows is odd, spreading all 16 rows across distinct cache sets.
+/// Below 512, the working set fits in L1 and aliasing doesn't matter.
+pub(crate) fn simd_padded_width(width: usize) -> usize {
+    let aligned = (width + 15) & !15;
+    if aligned >= 512 && (aligned / 16) % 2 == 0 {
+        aligned + 16
+    } else {
+        aligned
+    }
+}
+
 /// Pad plane width to `padded_width` using mirror reflection.
 /// Operates in-place, processing rows bottom-to-top to avoid overwriting source data.
 ///
