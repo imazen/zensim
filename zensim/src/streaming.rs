@@ -7,7 +7,7 @@
 //! Memory reduction: ~80 MB/MP → ~10 MB/MP for large images.
 
 use crate::blur::{
-    box_blur_2pass_into, box_blur_3pass_into, box_blur_h, downscale_2x_inplace,
+    box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
     fused_blur_h_ssim, pad_plane_width, simd_padded_width,
 };
 use crate::color::srgb_to_positive_xyb_planar;
@@ -379,9 +379,16 @@ fn process_strip_channel(
             accum.abs_src[c] += strip_acc.abs_src;
             accum.abs_dst[c] += strip_acc.abs_dst;
         } else {
-            // Edge-only: separate H-blur for mu1/mu2, then fused V-blur
-            box_blur_h(src_c, &mut bufs.mu1, width, strip_h, config.blur_radius);
-            box_blur_h(dst_c, &mut bufs.mu2, width, strip_h, config.blur_radius);
+            // Edge-only: fused H-blur for mu1/mu2, then fused V-blur
+            fused_blur_h_mu(
+                src_c,
+                dst_c,
+                &mut bufs.mu1,
+                &mut bufs.mu2,
+                width,
+                strip_h,
+                config.blur_radius,
+            );
 
             let strip_acc = fused_vblur_features_edge(
                 &bufs.mu1,
