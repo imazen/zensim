@@ -188,6 +188,21 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let max_strip_n = max_strip_h * padded_width;
     let mut bufs = ScaleBuffers::new(max_strip_n);
 
+    // Pre-allocate strip XYB buffers (reused across strips)
+    let max_strip_pixels = max_strip_h * width;
+    let mut src_xyb: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; max_strip_pixels]);
+    let mut dst_xyb: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; max_strip_pixels]);
+
+    // Cache for overlap rows between strips (already padded to padded_width stride).
+    // Adjacent strips share 2*overlap rows: the bottom overlap of strip N covers
+    // rows [inner_end - overlap, inner_end + overlap), which exactly matches the
+    // top 2*overlap rows of strip N+1. We cache these to avoid redundant sRGB→XYB.
+    let cache_rows = 2 * overlap;
+    let cache_size = cache_rows * padded_width;
+    let mut src_cache: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; cache_size]);
+    let mut dst_cache: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; cache_size]);
+    let mut cache_valid = false;
+
     let mut y = 0;
     while y < height {
         let inner_end = (y + STRIP_INNER).min(height);
@@ -199,22 +214,59 @@ pub(crate) fn compute_multiscale_stats_streaming(
         let strip_h = strip_bot - strip_top;
         let inner_start = y - strip_top; // offset of inner rows in strip
 
-        // Convert strip rows sRGB → positive XYB
-        let src_slice = &source[strip_top * width..strip_bot * width];
-        let dst_slice = &distorted[strip_top * width..strip_bot * width];
-        let mut src_xyb = srgb_to_positive_xyb_planar(src_slice);
-        let mut dst_xyb = srgb_to_positive_xyb_planar(dst_slice);
+        // Determine how many rows we can reuse from cache
+        let cached_rows = if cache_valid && strip_top > 0 { cache_rows.min(strip_h) } else { 0 };
+        let new_top = strip_top + cached_rows;
+        let new_h = strip_bot - new_top;
 
-        // Pad plane widths to SIMD alignment
+        // Convert only the NEW rows (skip cached overlap)
+        let new_src_slice = &source[new_top * width..strip_bot * width];
+        let new_dst_slice = &distorted[new_top * width..strip_bot * width];
+        let mut new_src_xyb = srgb_to_positive_xyb_planar(new_src_slice);
+        let mut new_dst_xyb = srgb_to_positive_xyb_planar(new_dst_slice);
+
+        // Pad newly converted rows to padded_width
         if padded_width != width {
             for c in 0..3 {
-                pad_plane_width(&mut src_xyb[c], width, strip_h, padded_width);
-                pad_plane_width(&mut dst_xyb[c], width, strip_h, padded_width);
+                pad_plane_width(&mut new_src_xyb[c], width, new_h, padded_width);
+                pad_plane_width(&mut new_dst_xyb[c], width, new_h, padded_width);
             }
+        }
+
+        // Build full strip: prepend cached rows + newly padded rows
+        if cached_rows > 0 {
+            let cached_elems = cached_rows * padded_width;
+            let new_elems = new_h * padded_width;
+            for c in 0..3 {
+                src_xyb[c].clear();
+                src_xyb[c].reserve(cached_elems + new_elems);
+                src_xyb[c].extend_from_slice(&src_cache[c][..cached_elems]);
+                src_xyb[c].extend_from_slice(&new_src_xyb[c][..new_elems]);
+
+                dst_xyb[c].clear();
+                dst_xyb[c].reserve(cached_elems + new_elems);
+                dst_xyb[c].extend_from_slice(&dst_cache[c][..cached_elems]);
+                dst_xyb[c].extend_from_slice(&new_dst_xyb[c][..new_elems]);
+            }
+        } else {
+            src_xyb = new_src_xyb;
+            dst_xyb = new_dst_xyb;
         }
 
         let strip_n = padded_width * strip_h;
         bufs.resize(strip_n);
+
+        // Save bottom 2*overlap rows for next strip's top overlap
+        if cache_rows > 0 {
+            let bot_rows = cache_rows.min(strip_h);
+            let bot_start = (strip_h - bot_rows) * padded_width;
+            let bot_elems = bot_rows * padded_width;
+            for c in 0..3 {
+                src_cache[c][..bot_elems].copy_from_slice(&src_xyb[c][bot_start..bot_start + bot_elems]);
+                dst_cache[c][..bot_elems].copy_from_slice(&dst_xyb[c][bot_start..bot_start + bot_elems]);
+            }
+            cache_valid = true;
+        }
 
         // Accumulate pixel count from inner rows (once, not per-channel)
         let inner_n = inner_h * padded_width;
