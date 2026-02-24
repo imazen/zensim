@@ -173,7 +173,8 @@ pub fn compute_zensim_with_config(
     // Use streaming path for large non-masked images to reduce peak memory
     let masked = config.masking_strength > 0.0;
     if !masked && crate::streaming::should_use_streaming(width, height) {
-        let result = crate::streaming::compute_zensim_streaming(source, distorted, width, height, &config);
+        let result =
+            crate::streaming::compute_zensim_streaming(source, distorted, width, height, &config);
         return Ok(result);
     }
 

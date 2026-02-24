@@ -12,8 +12,7 @@ use crate::blur::{
 use crate::color::srgb_to_positive_xyb_planar_into;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{
-    FEATURES_PER_CHANNEL_BASIC, ScaleStats, WEIGHTS, ZensimConfig, combine_scores,
-    compute_single_scale,
+    ScaleStats, ZensimConfig, FEATURES_PER_CHANNEL_BASIC, WEIGHTS, combine_scores, compute_single_scale,
 };
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
@@ -206,15 +205,32 @@ pub(crate) fn compute_multiscale_stats_streaming(
         }
 
         if w * h >= STREAMING_THRESHOLD {
-            // Parallel band processing with fused downscale
-            let need_ds = scale < num_scales - 1;
-            let (scale_stat, ds_data) =
-                process_scale_bands(&src_planes, &dst_planes, w, h, config, scale, need_ds);
+            // Parallel band processing: borrow slices from full planes
+            let scale_stat = process_scale_bands(
+                &src_planes, &dst_planes, w, h, config, scale,
+            );
             stats.push(scale_stat);
 
-            if let Some((new_src, new_dst, nw, nh)) = ds_data {
-                src_planes = new_src;
-                dst_planes = new_dst;
+            // Downscale 6 planes in parallel for next scale
+            if scale < num_scales - 1 {
+                let [ref mut s0, ref mut s1, ref mut s2] = src_planes;
+                let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
+                let (((nw, nh), _), _) = rayon::join(
+                    || rayon::join(
+                        || downscale_2x_inplace(s0, w, h),
+                        || rayon::join(
+                            || downscale_2x_inplace(s1, w, h),
+                            || downscale_2x_inplace(s2, w, h),
+                        ),
+                    ),
+                    || rayon::join(
+                        || downscale_2x_inplace(d0, w, h),
+                        || rayon::join(
+                            || downscale_2x_inplace(d1, w, h),
+                            || downscale_2x_inplace(d2, w, h),
+                        ),
+                    ),
+                );
                 w = nw;
                 h = nh;
             }
@@ -232,14 +248,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
                 parallel_bufs.resize(n);
 
                 let scale_stat = compute_single_scale(
-                    &src_planes,
-                    &dst_planes,
-                    w,
-                    h,
-                    config,
-                    &mut bufs,
-                    &mut parallel_bufs,
-                    s,
+                    &src_planes, &dst_planes, w, h, config, &mut bufs, &mut parallel_bufs, s,
                 );
                 stats.push(scale_stat);
 
@@ -543,11 +552,6 @@ fn process_strip_channel(
 ///
 /// Divides the image into horizontal bands, each processing sequential strips.
 /// Each band runs on a separate thread via rayon.
-///
-/// When `collect_downscale` is true, each band also performs 2×2 box-average
-/// downscale on its inner rows, and the results are concatenated into full
-/// next-scale planes (eliminating the separate serial downscale barrier).
-#[allow(clippy::type_complexity)]
 fn process_scale_bands(
     src_planes: &[Vec<f32>; 3],
     dst_planes: &[Vec<f32>; 3],
@@ -555,8 +559,7 @@ fn process_scale_bands(
     height: usize,
     config: &ZensimConfig,
     scale_idx: usize,
-    collect_downscale: bool,
-) -> (ScaleStats, Option<([Vec<f32>; 3], [Vec<f32>; 3], usize, usize)>) {
+) -> ScaleStats {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
@@ -568,16 +571,15 @@ fn process_scale_bands(
 
     let max_strip_h = STRIP_INNER + 2 * overlap;
     let max_strip_n = max_strip_h * width;
-    let ds_w = width / 2;
 
-    let band_results: Vec<_> = (0..num_bands)
+    let band_accums: Vec<_> = (0..num_bands)
         .into_par_iter()
         .map(|band_idx| {
             let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
             let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
 
             if band_first_y >= height {
-                return (ScaleAccumulators::new(), None);
+                return ScaleAccumulators::new();
             }
 
             let mut accum = ScaleAccumulators::new();
@@ -618,81 +620,16 @@ fn process_scale_bands(
                 y = inner_end;
             }
 
-            // Fused downscale: 2×2 box-average on this band's inner rows
-            let ds_data = if collect_downscale {
-                let ds_first_row = band_first_y / 2;
-                let ds_end_row = band_end_y / 2;
-                let ds_rows = ds_end_row - ds_first_row;
-
-                if ds_rows > 0 {
-                    let ds_n = ds_rows * ds_w;
-                    let mut ds_src: [Vec<f32>; 3] =
-                        std::array::from_fn(|_| vec![0.0f32; ds_n]);
-                    let mut ds_dst: [Vec<f32>; 3] =
-                        std::array::from_fn(|_| vec![0.0f32; ds_n]);
-
-                    for c in 0..3 {
-                        for dy in 0..ds_rows {
-                            let sy = band_first_y + dy * 2;
-                            let row0 = sy * width;
-                            let row1 = row0 + width;
-                            let out_off = dy * ds_w;
-                            for dx in 0..ds_w {
-                                let sx = dx * 2;
-                                ds_src[c][out_off + dx] = (src_planes[c][row0 + sx]
-                                    + src_planes[c][row0 + sx + 1]
-                                    + src_planes[c][row1 + sx]
-                                    + src_planes[c][row1 + sx + 1])
-                                    * 0.25;
-                                ds_dst[c][out_off + dx] = (dst_planes[c][row0 + sx]
-                                    + dst_planes[c][row0 + sx + 1]
-                                    + dst_planes[c][row1 + sx]
-                                    + dst_planes[c][row1 + sx + 1])
-                                    * 0.25;
-                            }
-                        }
-                    }
-                    Some((ds_src, ds_dst))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            (accum, ds_data)
+            accum
         })
         .collect();
 
-    // Merge band accumulators and concatenate downscaled planes
+    // Merge band accumulators
     let mut accum = ScaleAccumulators::new();
-
-    let ds_planes = if collect_downscale {
-        let ds_h = height / 2;
-        let ds_total = ds_w * ds_h;
-        let mut new_src: [Vec<f32>; 3] =
-            std::array::from_fn(|_| Vec::with_capacity(ds_total));
-        let mut new_dst: [Vec<f32>; 3] =
-            std::array::from_fn(|_| Vec::with_capacity(ds_total));
-
-        for (band_accum, ds_data) in band_results {
-            accum.merge(&band_accum);
-            if let Some((ds_src, ds_dst)) = ds_data {
-                for c in 0..3 {
-                    new_src[c].extend_from_slice(&ds_src[c]);
-                    new_dst[c].extend_from_slice(&ds_dst[c]);
-                }
-            }
-        }
-        Some((new_src, new_dst, ds_w, ds_h))
-    } else {
-        for (band_accum, _) in band_results {
-            accum.merge(&band_accum);
-        }
-        None
-    };
-
-    (accum.finalize(), ds_planes)
+    for band_accum in band_accums {
+        accum.merge(&band_accum);
+    }
+    accum.finalize()
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
@@ -770,15 +707,8 @@ mod tests {
 
         // Diagnostics: print all differing features
         let feature_names = [
-            "ssim_mean",
-            "ssim_4th",
-            "edge_art_mean",
-            "edge_art_4th",
-            "edge_det_mean",
-            "edge_det_4th",
-            "mse",
-            "var_loss",
-            "tex_loss",
+            "ssim_mean", "ssim_4th", "edge_art_mean", "edge_art_4th",
+            "edge_det_mean", "edge_det_4th", "mse", "var_loss", "tex_loss",
         ];
         let mut max_sig_rel = 0.0f64; // max relative diff for significant features
         let mut max_abs_diff = 0.0f64;
@@ -811,8 +741,8 @@ mod tests {
                 );
             }
         }
-        let score_rel =
-            (full_result.score - streaming_result.score).abs() / full_result.score.abs().max(1e-12);
+        let score_rel = (full_result.score - streaming_result.score).abs()
+            / full_result.score.abs().max(1e-12);
         let dist_rel = (full_result.raw_distance - streaming_result.raw_distance).abs()
             / full_result.raw_distance.abs().max(1e-12);
         eprintln!(
