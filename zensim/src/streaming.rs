@@ -1,17 +1,15 @@
-//! Strip-based streaming metric computation for memory-efficient large images.
+//! Parallel multi-scale metric computation with band-based strip processing.
 //!
-//! Instead of processing the full image at each scale (O(W×H) memory for ~20 buffers),
-//! processes images in horizontal strips of ~16 rows with blur overlap.
-//! Scale 0 converts sRGB→XYB per strip; scales 1+ borrow directly from downscaled planes.
-//! Small scales (below STREAMING_THRESHOLD) fall back to full-image processing.
-//!
-//! Memory reduction: ~80 MB/MP → ~10 MB/MP for large images.
+//! Phase 1: Convert sRGB→XYB for the entire image (parallel over row chunks).
+//! Phase 2: Process each pyramid scale with parallel band processing.
+//!   - Large scales use strip-based H-blur → fused V-blur+features (parallel bands via rayon).
+//!   - Small scales (below STREAMING_THRESHOLD) fall back to full-image processing.
 
 use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
-    fused_blur_h_ssim, pad_plane_width, simd_padded_width,
+    fused_blur_h_ssim, simd_padded_width,
 };
-use crate::color::srgb_to_positive_xyb_planar;
+use crate::color::srgb_to_positive_xyb_planar_into;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{
     ScaleStats, ZensimConfig, FEATURES_PER_CHANNEL_BASIC, WEIGHTS, combine_scores, compute_single_scale,
@@ -171,10 +169,12 @@ fn active_channels(scale_idx: usize, config: &ZensimConfig) -> Vec<(usize, bool,
     active
 }
 
-/// Streaming multi-scale stats: strip-based scale 0, full-image for scales 1+.
+/// Streaming multi-scale stats: parallel XYB conversion, then band-parallel blur/features.
 ///
-/// Produces identical results to the full-image path but uses O(W×strip_h) memory
-/// for scale 0 instead of O(W×H).
+/// Phase 1: Convert sRGB→XYB for the entire image (parallel over row chunks).
+/// Phase 2: Process each scale with parallel band processing over the XYB planes.
+///
+/// Produces identical results to the full-image path.
 pub(crate) fn compute_multiscale_stats_streaming(
     source: &[[u8; 3]],
     distorted: &[[u8; 3]],
@@ -182,262 +182,154 @@ pub(crate) fn compute_multiscale_stats_streaming(
     height: usize,
     config: &ZensimConfig,
 ) -> Vec<ScaleStats> {
-    let r = config.blur_radius;
-    let passes = config.blur_passes as usize;
-    let overlap = passes * r;
     let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales;
 
+    // Phase 1: Convert sRGB→XYB for entire image, parallel over row chunks.
+    let mut src_planes = convert_srgb_to_xyb_parallel(source, width, height, padded_width);
+    let mut dst_planes = convert_srgb_to_xyb_parallel(distorted, width, height, padded_width);
+
+    // Phase 2: Process all scales with parallel band processing.
+    // Each scale: compute features in parallel bands, then downscale planes for next scale.
     let mut stats = Vec::with_capacity(num_scales);
+    let mut w = padded_width;
+    let mut h = height;
 
-    // Active channels for scale 0
-    let scale0_active = active_channels(0, config);
-
-    // Scale 0: parallel band processing
-    let next_w = padded_width / 2;
-    let next_h = height / 2;
-    let max_strip_h = STRIP_INNER + 2 * overlap;
-    let max_strip_n = max_strip_h * padded_width;
-    let collect_downscale = num_scales > 1;
-    let cache_rows = 2 * overlap;
-
-    // Divide strips into bands across threads
-    let total_strips = height.div_ceil(STRIP_INNER);
-    let num_bands = rayon::current_num_threads().min(total_strips).max(1);
-    let strips_per_band = total_strips.div_ceil(num_bands);
-
-    let band_results: Vec<_> = (0..num_bands)
-        .into_par_iter()
-        .map(|band_idx| {
-            let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
-            let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
-
-            if band_first_y >= height {
-                return (
-                    ScaleAccumulators::new(),
-                    std::array::from_fn::<Vec<f32>, 3, _>(|_| Vec::new()),
-                    std::array::from_fn::<Vec<f32>, 3, _>(|_| Vec::new()),
-                );
-            }
-
-            let mut accum = ScaleAccumulators::new();
-            let mut bufs = ScaleBuffers::new(max_strip_n);
-            let mut src_xyb: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
-            let mut dst_xyb: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
-
-            let cache_size = cache_rows * padded_width;
-            let mut src_cache: [Vec<f32>; 3] =
-                std::array::from_fn(|_| vec![0.0f32; cache_size]);
-            let mut dst_cache: [Vec<f32>; 3] =
-                std::array::from_fn(|_| vec![0.0f32; cache_size]);
-            let mut cache_valid = false;
-
-            let band_inner = band_end_y - band_first_y;
-            let ds_cap = if collect_downscale {
-                next_w * (band_inner / 2 + 1)
-            } else {
-                0
-            };
-            let mut band_next_src: [Vec<f32>; 3] =
-                std::array::from_fn(|_| Vec::with_capacity(ds_cap));
-            let mut band_next_dst: [Vec<f32>; 3] =
-                std::array::from_fn(|_| Vec::with_capacity(ds_cap));
-
-            let mut y = band_first_y;
-            while y < band_end_y {
-                let inner_end = (y + STRIP_INNER).min(height);
-                let inner_h = inner_end - y;
-
-                let strip_top = y.saturating_sub(overlap);
-                let strip_bot = (inner_end + overlap).min(height);
-                let strip_h = strip_bot - strip_top;
-                let inner_start = y - strip_top;
-
-                let cached = if cache_valid && strip_top > 0 {
-                    cache_rows.min(strip_h)
-                } else {
-                    0
-                };
-                let new_top = strip_top + cached;
-                let new_h = strip_bot - new_top;
-
-                let new_src_slice = &source[new_top * width..strip_bot * width];
-                let new_dst_slice = &distorted[new_top * width..strip_bot * width];
-                let mut new_src_xyb = srgb_to_positive_xyb_planar(new_src_slice);
-                let mut new_dst_xyb = srgb_to_positive_xyb_planar(new_dst_slice);
-
-                if padded_width != width {
-                    for c in 0..3 {
-                        pad_plane_width(&mut new_src_xyb[c], width, new_h, padded_width);
-                        pad_plane_width(&mut new_dst_xyb[c], width, new_h, padded_width);
-                    }
-                }
-
-                if cached > 0 {
-                    let cached_elems = cached * padded_width;
-                    let new_elems = new_h * padded_width;
-                    for c in 0..3 {
-                        src_xyb[c].clear();
-                        src_xyb[c].reserve(cached_elems + new_elems);
-                        src_xyb[c].extend_from_slice(&src_cache[c][..cached_elems]);
-                        src_xyb[c].extend_from_slice(&new_src_xyb[c][..new_elems]);
-
-                        dst_xyb[c].clear();
-                        dst_xyb[c].reserve(cached_elems + new_elems);
-                        dst_xyb[c].extend_from_slice(&dst_cache[c][..cached_elems]);
-                        dst_xyb[c].extend_from_slice(&new_dst_xyb[c][..new_elems]);
-                    }
-                } else {
-                    src_xyb = new_src_xyb;
-                    dst_xyb = new_dst_xyb;
-                }
-
-                let strip_n = padded_width * strip_h;
-                bufs.resize(strip_n);
-
-                if cache_rows > 0 {
-                    let bot = cache_rows.min(strip_h);
-                    let bot_start = (strip_h - bot) * padded_width;
-                    let bot_elems = bot * padded_width;
-                    for c in 0..3 {
-                        src_cache[c][..bot_elems]
-                            .copy_from_slice(&src_xyb[c][bot_start..bot_start + bot_elems]);
-                        dst_cache[c][..bot_elems]
-                            .copy_from_slice(&dst_xyb[c][bot_start..bot_start + bot_elems]);
-                    }
-                    cache_valid = true;
-                }
-
-                accum.n += inner_h * padded_width;
-
-                for &(c, need_ssim, need_edge) in &scale0_active {
-                    process_strip_channel(
-                        &src_xyb[c],
-                        &dst_xyb[c],
-                        padded_width,
-                        strip_h,
-                        inner_start,
-                        inner_h,
-                        config,
-                        c,
-                        need_ssim,
-                        need_edge,
-                        &mut bufs,
-                        &mut accum,
-                    );
-                }
-
-                if collect_downscale {
-                    let inner_pairs = inner_h / 2;
-                    if inner_pairs > 0 {
-                        for c in 0..3 {
-                            downscale_inner_rows(
-                                &src_xyb[c],
-                                padded_width,
-                                inner_start,
-                                inner_pairs,
-                                &mut band_next_src[c],
-                                next_w,
-                            );
-                            downscale_inner_rows(
-                                &dst_xyb[c],
-                                padded_width,
-                                inner_start,
-                                inner_pairs,
-                                &mut band_next_dst[c],
-                                next_w,
-                            );
-                        }
-                    }
-                }
-
-                y = inner_end;
-            }
-
-            (accum, band_next_src, band_next_dst)
-        })
-        .collect();
-
-    // Merge band results
-    let mut accum = ScaleAccumulators::new();
-    let mut next_src: [Vec<f32>; 3] =
-        std::array::from_fn(|_| Vec::with_capacity(next_w * next_h));
-    let mut next_dst: [Vec<f32>; 3] =
-        std::array::from_fn(|_| Vec::with_capacity(next_w * next_h));
-
-    for (band_accum, band_src, band_dst) in band_results {
-        accum.merge(&band_accum);
-        for c in 0..3 {
-            next_src[c].extend_from_slice(&band_src[c]);
-            next_dst[c].extend_from_slice(&band_dst[c]);
+    for scale in 0..num_scales {
+        if w < 8 || h < 8 {
+            break;
         }
-    }
 
-    stats.push(accum.finalize());
+        if w * h >= STREAMING_THRESHOLD {
+            // Parallel band processing: borrow slices from full planes
+            let scale_stat = process_scale_bands(
+                &src_planes, &dst_planes, w, h, config, scale,
+            );
+            stats.push(scale_stat);
 
-    // Scales 1+: parallel band processing for large scales, full-image for small
-    if num_scales > 1 && next_w >= 8 && next_h >= 8 {
-        let mut w = next_w;
-        let mut h = next_h;
-        let mut cur_src = next_src;
-        let mut cur_dst = next_dst;
-
-        for scale in 1..num_scales {
-            if w < 8 || h < 8 {
-                break;
+            // Downscale planes in-place for next scale
+            if scale < num_scales - 1 {
+                let mut nw = 0;
+                let mut nh = 0;
+                for c in 0..3 {
+                    let (sw, sh) = downscale_2x_inplace(&mut src_planes[c], w, h);
+                    let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
+                    nw = sw;
+                    nh = sh;
+                }
+                w = nw;
+                h = nh;
             }
+        } else {
+            // Small scale: fall back to full-image processing for remaining scales
+            let mut bufs = ScaleBuffers::new(w * h);
+            let mut parallel_bufs = ScaleBuffers::new(w * h);
 
-            if w * h >= STREAMING_THRESHOLD {
-                // Parallel band processing for large scales
-                let collect_ds = scale < num_scales - 1;
-                let (scale_stat, ds_data) = process_scale_bands_xyb(
-                    &cur_src, &cur_dst, w, h, config, scale, collect_ds,
+            for s in scale..num_scales {
+                if w < 8 || h < 8 {
+                    break;
+                }
+                let n = w * h;
+                bufs.resize(n);
+                parallel_bufs.resize(n);
+
+                let scale_stat = compute_single_scale(
+                    &src_planes, &dst_planes, w, h, config, &mut bufs, &mut parallel_bufs, s,
                 );
                 stats.push(scale_stat);
 
-                if let Some((ns, nd, nw, nh)) = ds_data {
-                    cur_src = ns;
-                    cur_dst = nd;
+                if s < num_scales - 1 {
+                    let mut nw = 0;
+                    let mut nh = 0;
+                    for c in 0..3 {
+                        let (sw, sh) = downscale_2x_inplace(&mut src_planes[c], w, h);
+                        let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
+                        nw = sw;
+                        nh = sh;
+                    }
                     w = nw;
                     h = nh;
                 }
-            } else {
-                // Small scale: fall back to full-image processing for remaining scales
-                let mut bufs = ScaleBuffers::new(w * h);
-                let mut parallel_bufs = ScaleBuffers::new(w * h);
-
-                for s in scale..num_scales {
-                    if w < 8 || h < 8 {
-                        break;
-                    }
-                    let n = w * h;
-                    bufs.resize(n);
-                    parallel_bufs.resize(n);
-
-                    let scale_stat = compute_single_scale(
-                        &cur_src, &cur_dst, w, h, config, &mut bufs, &mut parallel_bufs, s,
-                    );
-                    stats.push(scale_stat);
-
-                    if s < num_scales - 1 {
-                        let mut nw = 0;
-                        let mut nh = 0;
-                        for c in 0..3 {
-                            let (sw, sh) = downscale_2x_inplace(&mut cur_src[c], w, h);
-                            let _ = downscale_2x_inplace(&mut cur_dst[c], w, h);
-                            nw = sw;
-                            nh = sh;
-                        }
-                        w = nw;
-                        h = nh;
-                    }
-                }
-                break; // All remaining scales handled in the inner loop
             }
+            break;
         }
     }
 
     stats
+}
+
+/// Convert sRGB pixels to planar XYB at padded width, parallelized over row chunks.
+fn convert_srgb_to_xyb_parallel(
+    pixels: &[[u8; 3]],
+    width: usize,
+    height: usize,
+    padded_width: usize,
+) -> [Vec<f32>; 3] {
+    let n = padded_width * height;
+    let mut planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+
+    let chunk_rows = 64;
+    let [ref mut p0, ref mut p1, ref mut p2] = planes;
+    let p0_chunks: Vec<&mut [f32]> = p0.chunks_mut(chunk_rows * padded_width).collect();
+    let p1_chunks: Vec<&mut [f32]> = p1.chunks_mut(chunk_rows * padded_width).collect();
+    let p2_chunks: Vec<&mut [f32]> = p2.chunks_mut(chunk_rows * padded_width).collect();
+
+    // Precompute mirror indices for padding columns (same for every row)
+    let pad_count = padded_width - width;
+    let mirror_offsets: Vec<usize> = if pad_count > 0 {
+        let period = 2 * (width - 1);
+        (0..pad_count)
+            .map(|i| {
+                let m = (width + i) % period;
+                if m < width { m } else { period - m }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    p0_chunks
+        .into_par_iter()
+        .zip(p1_chunks)
+        .zip(p2_chunks)
+        .enumerate()
+        .for_each(|(chunk_idx, ((c0, c1), c2))| {
+            let row_start = chunk_idx * chunk_rows;
+            let row_end = (row_start + chunk_rows).min(height);
+            let rows = row_end - row_start;
+            let pixel_slice = &pixels[row_start * width..row_end * width];
+
+            // Convert sRGB→XYB: output goes into first rows*width elements of each chunk
+            let raw_elems = rows * width;
+            srgb_to_positive_xyb_planar_into(
+                pixel_slice,
+                &mut c0[..raw_elems],
+                &mut c1[..raw_elems],
+                &mut c2[..raw_elems],
+            );
+
+            // Spread rows from logical width to padded width (bottom-to-top for overlap safety)
+            if pad_count > 0 {
+                for plane in [&mut *c0, &mut *c1, &mut *c2] {
+                    for y in (0..rows).rev() {
+                        let src_start = y * width;
+                        let dst_start = y * padded_width;
+                        // Shift row data to padded position (right-to-left for overlap safety)
+                        if dst_start != src_start {
+                            for x in (0..width).rev() {
+                                plane[dst_start + x] = plane[src_start + x];
+                            }
+                        }
+                        // Fill padding columns with mirror-reflected values
+                        for (i, &mx) in mirror_offsets.iter().enumerate() {
+                            plane[dst_start + width + i] = plane[dst_start + mx];
+                        }
+                    }
+                }
+            }
+        });
+
+    planes
 }
 
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
@@ -628,43 +520,18 @@ fn process_strip_channel(
     accum.abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
 }
 
-/// Downscale inner rows of a strip by 2×2 averaging, appending to output buffer.
-fn downscale_inner_rows(
-    strip: &[f32],
-    strip_width: usize,
-    inner_start: usize,
-    n_pairs: usize,
-    output: &mut Vec<f32>,
-    out_width: usize,
-) {
-    output.reserve(n_pairs * out_width);
-    for pair in 0..n_pairs {
-        let y0 = inner_start + pair * 2;
-        let row0 = y0 * strip_width;
-        let row1 = row0 + strip_width;
-        for x in 0..out_width {
-            let sx = x * 2;
-            let val = (strip[row0 + sx] + strip[row0 + sx + 1] + strip[row1 + sx] + strip[row1 + sx + 1])
-                * 0.25;
-            output.push(val);
-        }
-    }
-}
-
 /// Process a scale using parallel band processing over pre-existing XYB planes.
 ///
-/// Unlike scale 0, no sRGB conversion or overlap caching is needed — we borrow
-/// slices directly from the already-downscaled XYB planes.
-#[allow(clippy::type_complexity)]
-fn process_scale_bands_xyb(
+/// Divides the image into horizontal bands, each processing sequential strips.
+/// Each band runs on a separate thread via rayon.
+fn process_scale_bands(
     src_planes: &[Vec<f32>; 3],
     dst_planes: &[Vec<f32>; 3],
     width: usize,
     height: usize,
     config: &ZensimConfig,
     scale_idx: usize,
-    collect_downscale: bool,
-) -> (ScaleStats, Option<([Vec<f32>; 3], [Vec<f32>; 3], usize, usize)>) {
+) -> ScaleStats {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
@@ -676,35 +543,19 @@ fn process_scale_bands_xyb(
 
     let max_strip_h = STRIP_INNER + 2 * overlap;
     let max_strip_n = max_strip_h * width;
-    let next_w = width / 2;
 
-    let band_results: Vec<_> = (0..num_bands)
+    let band_accums: Vec<_> = (0..num_bands)
         .into_par_iter()
         .map(|band_idx| {
             let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
             let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
 
             if band_first_y >= height {
-                return (
-                    ScaleAccumulators::new(),
-                    std::array::from_fn::<Vec<f32>, 3, _>(|_| Vec::new()),
-                    std::array::from_fn::<Vec<f32>, 3, _>(|_| Vec::new()),
-                );
+                return ScaleAccumulators::new();
             }
 
             let mut accum = ScaleAccumulators::new();
             let mut bufs = ScaleBuffers::new(max_strip_n);
-
-            let band_inner = band_end_y - band_first_y;
-            let ds_cap = if collect_downscale {
-                next_w * (band_inner / 2 + 1)
-            } else {
-                0
-            };
-            let mut band_next_src: [Vec<f32>; 3] =
-                std::array::from_fn(|_| Vec::with_capacity(ds_cap));
-            let mut band_next_dst: [Vec<f32>; 3] =
-                std::array::from_fn(|_| Vec::with_capacity(ds_cap));
 
             let mut y = band_first_y;
             while y < band_end_y {
@@ -738,63 +589,19 @@ fn process_scale_bands_xyb(
                     );
                 }
 
-                if collect_downscale {
-                    let inner_pairs = inner_h / 2;
-                    if inner_pairs > 0 {
-                        for c in 0..3 {
-                            downscale_inner_rows(
-                                &src_planes[c][strip_top * width..strip_bot * width],
-                                width,
-                                inner_start,
-                                inner_pairs,
-                                &mut band_next_src[c],
-                                next_w,
-                            );
-                            downscale_inner_rows(
-                                &dst_planes[c][strip_top * width..strip_bot * width],
-                                width,
-                                inner_start,
-                                inner_pairs,
-                                &mut band_next_dst[c],
-                                next_w,
-                            );
-                        }
-                    }
-                }
-
                 y = inner_end;
             }
 
-            (accum, band_next_src, band_next_dst)
+            accum
         })
         .collect();
 
-    // Merge band results
+    // Merge band accumulators
     let mut accum = ScaleAccumulators::new();
-    let ds_data = if collect_downscale {
-        let next_h = height / 2;
-        let mut next_src: [Vec<f32>; 3] =
-            std::array::from_fn(|_| Vec::with_capacity(next_w * next_h));
-        let mut next_dst: [Vec<f32>; 3] =
-            std::array::from_fn(|_| Vec::with_capacity(next_w * next_h));
-
-        for (band_accum, band_src, band_dst) in band_results {
-            accum.merge(&band_accum);
-            for c in 0..3 {
-                next_src[c].extend_from_slice(&band_src[c]);
-                next_dst[c].extend_from_slice(&band_dst[c]);
-            }
-        }
-
-        Some((next_src, next_dst, next_w, next_h))
-    } else {
-        for (band_accum, _, _) in band_results {
-            accum.merge(&band_accum);
-        }
-        None
-    };
-
-    (accum.finalize(), ds_data)
+    for band_accum in band_accums {
+        accum.merge(&band_accum);
+    }
+    accum.finalize()
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
