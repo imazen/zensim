@@ -19,6 +19,7 @@ training = []
 [dependencies]
 archmage = { workspace = true }
 magetypes = { workspace = true }
+rayon = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
