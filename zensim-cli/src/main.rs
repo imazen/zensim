@@ -8,6 +8,9 @@ struct Args {
     source: PathBuf,
     /// Distorted image to compare
     distorted: PathBuf,
+    /// Print raw feature vector
+    #[arg(long, default_value = "false")]
+    features: bool,
 }
 
 fn main() {
@@ -38,12 +41,23 @@ fn main() {
     let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
+    let config = zensim::ZensimConfig {
+        compute_all_features: args.features,
+        ..Default::default()
+    };
+
     let start = std::time::Instant::now();
-    let result = zensim::compute_zensim(&src_pixels, &dst_pixels, w as usize, h as usize)
-        .unwrap_or_else(|e| {
-            eprintln!("Error computing zensim: {}", e);
-            std::process::exit(1);
-        });
+    let result = zensim::compute_zensim_with_config(
+        &src_pixels,
+        &dst_pixels,
+        w as usize,
+        h as usize,
+        config,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("Error computing zensim: {}", e);
+        std::process::exit(1);
+    });
     let elapsed = start.elapsed();
 
     println!(
@@ -54,4 +68,38 @@ fn main() {
         w,
         h
     );
+
+    if args.features {
+        let fpc = zensim::FEATURES_PER_SCALE / 3;
+        let ch_names = ["X", "Y", "B"];
+        let feat_names = [
+            "ssim_mean",
+            "ssim_4th",
+            "edge_art_mean",
+            "edge_art_4th",
+            "edge_det_mean",
+            "edge_det_4th",
+            "mse",
+            "variance_loss",
+            "texture_loss",
+        ];
+        let fpc_scale = fpc * 3;
+        for (si, chunk) in result.features.chunks(fpc_scale).enumerate() {
+            println!("Scale {}:", si);
+            for (ci, ch_feats) in chunk.chunks(fpc).enumerate() {
+                let nonzero: Vec<String> = ch_feats
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| v.abs() > 1e-12)
+                    .map(|(fi, v)| {
+                        let name = feat_names.get(fi).copied().unwrap_or("?");
+                        format!("{}={:.6}", name, v)
+                    })
+                    .collect();
+                if !nonzero.is_empty() {
+                    println!("  {}: {}", ch_names[ci], nonzero.join(", "));
+                }
+            }
+        }
+    }
 }

@@ -75,6 +75,7 @@ enum DatasetFormat {
     Tid2013,
     Kadid10k,
     Csiq,
+    Pipal,
 }
 
 /// A single reference-distorted pair with human score.
@@ -171,6 +172,7 @@ fn main() {
                 "tid2013" => DatasetFormat::Tid2013,
                 "kadid10k" => DatasetFormat::Kadid10k,
                 "csiq" => DatasetFormat::Csiq,
+                "pipal" => DatasetFormat::Pipal,
                 _ => {
                     eprintln!("Unknown format: {}", parts[0]);
                     continue;
@@ -285,6 +287,7 @@ fn load_and_compute(
         DatasetFormat::Tid2013 => load_tid2013(path),
         DatasetFormat::Kadid10k => load_kadid10k(path),
         DatasetFormat::Csiq => load_csiq(path),
+        DatasetFormat::Pipal => load_pipal(path),
     };
 
     let pairs = if max_images > 0 && max_images < pairs.len() {
@@ -1275,6 +1278,116 @@ fn load_csiq_csv(csv_path: &Path, base: &Path) -> Vec<ImagePair> {
             human_score: 1.0 - dmos,
         });
     }
+
+    pairs
+}
+
+fn load_pipal(base: &Path) -> Vec<ImagePair> {
+    let label_dir = base.join("Train_Label");
+    let ref_dir = base.join("Train_Ref");
+
+    if !label_dir.exists() {
+        eprintln!("Cannot find Train_Label/ in {:?}", base);
+        return vec![];
+    }
+    if !ref_dir.exists() {
+        eprintln!("Cannot find Train_Ref/ in {:?}", base);
+        return vec![];
+    }
+
+    // Distorted images are split across Distortion_1..4
+    let dist_dirs: Vec<PathBuf> = (1..=4)
+        .map(|i| base.join(format!("Distortion_{}", i)))
+        .filter(|d| d.exists())
+        .collect();
+
+    if dist_dirs.is_empty() {
+        eprintln!("Cannot find any Distortion_N/ directories in {:?}", base);
+        return vec![];
+    }
+
+    // Read MOS range to normalize: PIPAL uses Elo-like scores (~900-1850)
+    let mut all_scores: Vec<(PathBuf, PathBuf, f64, String)> = Vec::new();
+
+    let mut label_files: Vec<_> = std::fs::read_dir(&label_dir)
+        .expect("Failed to read Train_Label directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "txt"))
+        .collect();
+    label_files.sort_by_key(|e| e.file_name());
+
+    for entry in &label_files {
+        let label_path = entry.path();
+        let ref_stem = label_path.file_stem().unwrap().to_string_lossy();
+        let ref_path = ref_dir.join(format!("{}.bmp", ref_stem));
+
+        if !ref_path.exists() {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&label_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = line.splitn(2, ',').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+            let dist_name = parts[0].trim();
+            let mos: f64 = match parts[1].trim().parse() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            // Find the distorted image across distortion directories
+            let dist_path = dist_dirs
+                .iter()
+                .map(|d| d.join(dist_name))
+                .find(|p| p.exists());
+
+            if let Some(dist_path) = dist_path {
+                all_scores.push((ref_path.clone(), dist_path, mos, ref_stem.to_string()));
+            }
+        }
+    }
+
+    if all_scores.is_empty() {
+        eprintln!("No valid PIPAL pairs found");
+        return vec![];
+    }
+
+    // Normalize MOS to 0-1: PIPAL uses Elo scores where higher = better
+    let min_mos = all_scores
+        .iter()
+        .map(|(_, _, m, _)| *m)
+        .fold(f64::INFINITY, f64::min);
+    let max_mos = all_scores
+        .iter()
+        .map(|(_, _, m, _)| *m)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let range = (max_mos - min_mos).max(1.0);
+
+    let pairs: Vec<ImagePair> = all_scores
+        .into_iter()
+        .map(|(reference, distorted, mos, _)| ImagePair {
+            reference,
+            distorted,
+            human_score: (mos - min_mos) / range,
+        })
+        .collect();
+
+    println!(
+        "  PIPAL: {} pairs, MOS range {:.1}..{:.1}",
+        pairs.len(),
+        min_mos,
+        max_mos
+    );
 
     pairs
 }

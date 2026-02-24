@@ -6,6 +6,6 @@ description = "CLI for zensim psychovisual image similarity metric"
 license = "MIT"
 
 [dependencies]
-zensim = { path = "../zensim" }
+zensim = { path = "../zensim", features = ["training"] }
 image = { workspace = true }
 clap = { version = "4", features = ["derive"] }
