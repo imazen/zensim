@@ -11,6 +11,8 @@ use archmage::incant;
 use magetypes::simd::f32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
+#[cfg(target_arch = "x86_64")]
+use magetypes::simd::i32x8;
 
 // Opsin absorbance matrix (from jpegli/ssimulacra2)
 const K_M02: f32 = 0.078;
@@ -71,6 +73,32 @@ fn cbrtf_initial(x: f32) -> f32 {
     let hx = (ui & 0x7FFF_FFFF) / 3 + B1;
     let ui_out = (ui & 0x8000_0000) | hx;
     f32::from_bits(ui_out)
+}
+
+/// SIMD cube root initial estimate for 8 positive floats.
+/// Approximates division by 3 via shifts: (x>>2)+(x>>4)+(x>>6)+(x>>8) ≈ x*0.332
+/// Only valid for non-negative inputs (sign bit = 0).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn cbrtf_initial_simd_8(token: archmage::X64V3Token, x: f32x8) -> f32x8 {
+    const B1: i32 = 709_958_130;
+    let ui = x.bitcast_to_i32();
+    let div3 = ui.shr_logical::<2>()
+        + ui.shr_logical::<4>()
+        + ui.shr_logical::<6>()
+        + ui.shr_logical::<8>();
+    let result = div3 + i32x8::splat(token, B1);
+    f32x8::from_i32_bitcast(token, result)
+}
+
+/// SIMD cube root initial estimate for 16 positive floats (split into 2×f32x8).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+fn cbrtf_initial_simd_16(token: archmage::X64V3Token, arr: &mut [f32; 16]) {
+    let lo = cbrtf_initial_simd_8(token, f32x8::from_array(token, arr[..8].try_into().unwrap()));
+    let hi = cbrtf_initial_simd_8(token, f32x8::from_array(token, arr[8..].try_into().unwrap()));
+    arr[..8].copy_from_slice(&lo.to_array());
+    arr[8..].copy_from_slice(&hi.to_array());
 }
 
 /// Convert interleaved sRGB u8 to planar positive XYB.
@@ -209,15 +237,14 @@ fn srgb_to_positive_xyb_planar_inner_v4(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        // Scalar initial estimates (integer bit manipulation)
+        // SIMD initial estimates (split f32x16 → 2×f32x8 for bit manipulation)
+        let v3_tok = token.v3();
         let mut est0 = mixed0.to_array();
         let mut est1 = mixed1.to_array();
         let mut est2 = mixed2.to_array();
-        for i in 0..16 {
-            est0[i] = cbrtf_initial(est0[i]);
-            est1[i] = cbrtf_initial(est1[i]);
-            est2[i] = cbrtf_initial(est2[i]);
-        }
+        cbrtf_initial_simd_16(v3_tok, &mut est0);
+        cbrtf_initial_simd_16(v3_tok, &mut est1);
+        cbrtf_initial_simd_16(v3_tok, &mut est2);
 
         // Halley's iterations in SIMD (3 channels interleaved for ILP)
         let x0 = mixed0;
@@ -307,21 +334,12 @@ fn srgb_to_positive_xyb_planar_inner_v4(
             .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
             .max(zero8);
 
-        let mut est0 = mixed0.to_array();
-        let mut est1 = mixed1.to_array();
-        let mut est2 = mixed2.to_array();
-        for i in 0..8 {
-            est0[i] = cbrtf_initial(est0[i]);
-            est1[i] = cbrtf_initial(est1[i]);
-            est2[i] = cbrtf_initial(est2[i]);
-        }
-
         let x0 = mixed0;
         let x1 = mixed1;
         let x2 = mixed2;
-        let mut t0 = f32x8::from_array(v3, est0);
-        let mut t1 = f32x8::from_array(v3, est1);
-        let mut t2 = f32x8::from_array(v3, est2);
+        let mut t0 = cbrtf_initial_simd_8(v3, mixed0);
+        let mut t1 = cbrtf_initial_simd_8(v3, mixed1);
+        let mut t2 = cbrtf_initial_simd_8(v3, mixed2);
 
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
@@ -436,23 +454,13 @@ fn srgb_to_positive_xyb_planar_inner_v3(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        // Scalar initial estimates (integer bit manipulation)
-        let mut est0 = mixed0.to_array();
-        let mut est1 = mixed1.to_array();
-        let mut est2 = mixed2.to_array();
-        for i in 0..8 {
-            est0[i] = cbrtf_initial(est0[i]);
-            est1[i] = cbrtf_initial(est1[i]);
-            est2[i] = cbrtf_initial(est2[i]);
-        }
-
         // Halley's iterations in SIMD (3 channels interleaved for ILP)
         let x0 = mixed0;
         let x1 = mixed1;
         let x2 = mixed2;
-        let mut t0 = f32x8::from_array(token, est0);
-        let mut t1 = f32x8::from_array(token, est1);
-        let mut t2 = f32x8::from_array(token, est2);
+        let mut t0 = cbrtf_initial_simd_8(token, mixed0);
+        let mut t1 = cbrtf_initial_simd_8(token, mixed1);
+        let mut t2 = cbrtf_initial_simd_8(token, mixed2);
 
         // Iteration 1
         let mut r0 = t0 * t0 * t0;
