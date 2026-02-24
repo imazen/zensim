@@ -18,6 +18,7 @@
 mod blur;
 mod color;
 mod error;
+mod fused;
 pub mod mapping;
 mod metric;
 mod pool;

@@ -7,10 +7,11 @@
 //! Memory reduction: ~80 MB/MP → ~10 MB/MP for large images.
 
 use crate::blur::{
-    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace,
-    pad_plane_width,
+    box_blur_2pass_into, box_blur_3pass_into, box_blur_h, downscale_2x_inplace,
+    fused_blur_h_ssim, pad_plane_width,
 };
 use crate::color::srgb_to_positive_xyb_planar;
+use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{
     ScaleStats, ZensimConfig, FEATURES_PER_CHANNEL_BASIC, WEIGHTS, combine_scores, compute_single_scale,
 };
@@ -304,6 +305,12 @@ pub(crate) fn compute_multiscale_stats_streaming(
 }
 
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
+///
+/// Three paths based on what features the channel needs:
+/// 1. MSE only (no blur) — raw pixel differences
+/// 2. SSIM channel (1-pass blur): fused H-blur → fused V-blur + all features
+/// 3. Edge-only channel (1-pass blur): separate H-blur → fused V-blur + features
+/// 4. Multi-pass blur fallback: separate blur + reduce (unchanged from original)
 #[allow(clippy::too_many_arguments)]
 fn process_strip_channel(
     src_c: &[f32],
@@ -319,30 +326,92 @@ fn process_strip_channel(
     bufs: &mut ScaleBuffers,
     accum: &mut ScaleAccumulators,
 ) {
-    let inner_off = inner_start * width;
-    let inner_n = inner_h * width;
-    let inner_src = &src_c[inner_off..inner_off + inner_n];
-    let inner_dst = &dst_c[inner_off..inner_off + inner_n];
-
-    // MSE: raw pixel differences, no blur needed
-    accum.mse[c] += sq_diff_sum(inner_src, inner_dst);
-
-    // If no SSIM or edge features needed, we're done (no blur required)
+    // MSE-only path: no blur needed
     if !need_ssim && !need_edge {
+        let inner_off = inner_start * width;
+        let inner_n = inner_h * width;
+        let inner_src = &src_c[inner_off..inner_off + inner_n];
+        let inner_dst = &dst_c[inner_off..inner_off + inner_n];
+        accum.mse[c] += sq_diff_sum(inner_src, inner_dst);
         return;
     }
 
-    // --- Compute blurs on the full strip ---
-    // Note: we do NOT use the fused_blur_h_ssim path for strips. The fused path
-    // batches rows in SIMD groups of 16, so strips with non-16-aligned height get
-    // different scalar/SIMD treatment for overlap rows than the full-image path would.
-    // The resulting tiny sigma differences get amplified by SSIM's near-cancellation
-    // (computing 1-x where x≈1). The standard separate-blur path processes each row
-    // independently, avoiding this issue.
+    // Fused path: 1-pass blur only (the common case for scale 0)
+    if config.blur_passes == 1 {
+        if need_ssim {
+            // Fused H-blur: src,dst → 4 H-blurred planes in one pass
+            fused_blur_h_ssim(
+                src_c,
+                dst_c,
+                &mut bufs.mu1,
+                &mut bufs.mu2,
+                &mut bufs.sigma1_sq,
+                &mut bufs.sigma12,
+                width,
+                strip_h,
+                config.blur_radius,
+            );
+
+            // Fused V-blur + ALL feature extraction: no memory writes
+            let strip_acc = fused_vblur_features_ssim(
+                &bufs.mu1,
+                &bufs.mu2,
+                &bufs.sigma1_sq,
+                &bufs.sigma12,
+                src_c,
+                dst_c,
+                width,
+                strip_h,
+                inner_start,
+                inner_h,
+                config.blur_radius,
+            );
+
+            accum.ssim_d[c] += strip_acc.ssim_d;
+            accum.ssim_d4[c] += strip_acc.ssim_d4;
+            accum.edge_art[c] += strip_acc.edge_art;
+            accum.edge_art4[c] += strip_acc.edge_art4;
+            accum.edge_det[c] += strip_acc.edge_det;
+            accum.edge_det4[c] += strip_acc.edge_det4;
+            accum.mse[c] += strip_acc.mse;
+            accum.sq_src[c] += strip_acc.sq_src;
+            accum.sq_dst[c] += strip_acc.sq_dst;
+            accum.abs_src[c] += strip_acc.abs_src;
+            accum.abs_dst[c] += strip_acc.abs_dst;
+        } else {
+            // Edge-only: separate H-blur for mu1/mu2, then fused V-blur
+            box_blur_h(src_c, &mut bufs.mu1, width, strip_h, config.blur_radius);
+            box_blur_h(dst_c, &mut bufs.mu2, width, strip_h, config.blur_radius);
+
+            let strip_acc = fused_vblur_features_edge(
+                &bufs.mu1,
+                &bufs.mu2,
+                src_c,
+                dst_c,
+                width,
+                strip_h,
+                inner_start,
+                inner_h,
+                config.blur_radius,
+            );
+
+            accum.edge_art[c] += strip_acc.edge_art;
+            accum.edge_art4[c] += strip_acc.edge_art4;
+            accum.edge_det[c] += strip_acc.edge_det;
+            accum.edge_det4[c] += strip_acc.edge_det4;
+            accum.mse[c] += strip_acc.mse;
+            accum.sq_src[c] += strip_acc.sq_src;
+            accum.sq_dst[c] += strip_acc.sq_dst;
+            accum.abs_src[c] += strip_acc.abs_src;
+            accum.abs_dst[c] += strip_acc.abs_dst;
+        }
+        return;
+    }
+
+    // Multi-pass blur fallback: separate blur + reduce
     #[allow(clippy::type_complexity)]
     let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match config.blur_passes
     {
-        1 => box_blur_1pass_into,
         2 => box_blur_2pass_into,
         _ => box_blur_3pass_into,
     };
@@ -385,11 +454,15 @@ fn process_strip_channel(
         );
     }
 
-    // --- Extract inner portions and accumulate features ---
+    let inner_off = inner_start * width;
+    let inner_n = inner_h * width;
+    let inner_src = &src_c[inner_off..inner_off + inner_n];
+    let inner_dst = &dst_c[inner_off..inner_off + inner_n];
     let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
     let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
 
-    // SSIM features
+    accum.mse[c] += sq_diff_sum(inner_src, inner_dst);
+
     if need_ssim {
         let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
         let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
@@ -398,7 +471,6 @@ fn process_strip_channel(
         accum.ssim_d4[c] += sum_d4;
     }
 
-    // Edge features
     if need_edge {
         let (art, art4, det, det4) = edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
         accum.edge_art[c] += art;
@@ -407,11 +479,8 @@ fn process_strip_channel(
         accum.edge_det4[c] += det4;
     }
 
-    // Variance loss: accumulate sum((pixel - mu)^2)
     accum.sq_src[c] += sq_diff_sum(inner_src, inner_mu1);
     accum.sq_dst[c] += sq_diff_sum(inner_dst, inner_mu2);
-
-    // Texture loss: accumulate sum(|pixel - mu|)
     accum.abs_src[c] += abs_diff_sum(inner_src, inner_mu1);
     accum.abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
 }

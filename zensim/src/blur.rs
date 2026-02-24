@@ -349,7 +349,7 @@ fn box_blur_v_copy_inner_scalar(
 }
 
 /// Horizontal box blur using running sum. O(1) per pixel.
-fn box_blur_h(input: &[f32], output: &mut [f32], width: usize, height: usize, radius: usize) {
+pub(crate) fn box_blur_h(input: &[f32], output: &mut [f32], width: usize, height: usize, radius: usize) {
     incant!(
         box_blur_h_inner(input, output, width, height, radius),
         [v4, v3]
