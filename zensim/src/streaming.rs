@@ -19,9 +19,13 @@ use crate::simd_ops::{
     abs_diff_sum, edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
 };
 use rayon::prelude::*;
+use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
 const STRIP_INNER: usize = 16;
+
+/// Track background deallocation thread to prevent accumulation on repeated calls.
+static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 /// Minimum pixels to use streaming instead of full-image processing.
 /// Below this, the overhead of strip management isn't worth the memory savings.
@@ -263,6 +267,20 @@ pub(crate) fn compute_multiscale_stats_streaming(
             }
             break;
         }
+    }
+
+    // Background deallocation: move ~400MB of XYB planes to a background thread
+    // to avoid blocking on munmap syscalls (which take ~57ms on WSL for this volume).
+    // Track the thread to prevent accumulation on repeated calls.
+    {
+        let mut guard = DEALLOC_THREAD.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            let _ = prev.join();
+        }
+        *guard = Some(std::thread::spawn(move || {
+            drop(src_planes);
+            drop(dst_planes);
+        }));
     }
 
     stats
