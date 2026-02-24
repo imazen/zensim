@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true }
+archmage = { workspace = true, features = ["testable_dispatch"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
