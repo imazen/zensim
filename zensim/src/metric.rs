@@ -162,7 +162,7 @@ pub fn compute_zensim_with_config(
         return Err(ZensimError::DimensionMismatch);
     }
 
-    // Use streaming path for large non-masked images to reduce peak memory
+    // Use streaming path for non-masked images (faster at all sizes)
     let masked = config.masking_strength > 0.0;
     if !masked && crate::streaming::should_use_streaming(width, height) {
         let result =

@@ -2,8 +2,7 @@
 //!
 //! Phase 1: Convert sRGB→XYB for the entire image (parallel over row chunks).
 //! Phase 2: Process each pyramid scale with parallel band processing.
-//!   - Large scales use strip-based H-blur → fused V-blur+features (parallel bands via rayon).
-//!   - Small scales (below STREAMING_THRESHOLD) fall back to full-image processing.
+//!   Strip-based H-blur → fused V-blur+features (parallel bands via rayon).
 
 use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
@@ -12,7 +11,7 @@ use crate::blur::{
 use crate::color::srgb_to_positive_xyb_planar_into;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{
-    ScaleStats, ZensimConfig, FEATURES_PER_CHANNEL_BASIC, WEIGHTS, combine_scores, compute_single_scale,
+    ScaleStats, ZensimConfig, FEATURES_PER_CHANNEL_BASIC, WEIGHTS, combine_scores,
 };
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
@@ -27,13 +26,11 @@ const STRIP_INNER: usize = 16;
 /// Track background deallocation thread to prevent accumulation on repeated calls.
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
-/// Minimum pixels to use streaming instead of full-image processing.
-/// Below this, the overhead of strip management isn't worth the memory savings.
-const STREAMING_THRESHOLD: usize = 1_000_000;
-
 /// Should we use the streaming path for this image size?
-pub(crate) fn should_use_streaming(width: usize, height: usize) -> bool {
-    width * height >= STREAMING_THRESHOLD
+/// Benchmarking shows streaming band processing wins at all sizes (down to 98k pixels),
+/// so this always returns true for non-trivial images.
+pub(crate) fn should_use_streaming(_width: usize, _height: usize) -> bool {
+    true
 }
 
 /// Per-scale feature accumulators. Collects raw sums across strips,
@@ -228,68 +225,34 @@ pub(crate) fn compute_multiscale_stats_streaming(
             break;
         }
 
-        if w * h >= STREAMING_THRESHOLD {
-            // Parallel band processing: borrow slices from full planes
-            let scale_stat = process_scale_bands(
-                &src_planes, &dst_planes, w, h, config, scale,
+        // Parallel band processing: borrow slices from full planes
+        let scale_stat = process_scale_bands(
+            &src_planes, &dst_planes, w, h, config, scale,
+        );
+        stats.push(scale_stat);
+
+        // Downscale 6 planes in parallel for next scale
+        if scale < num_scales - 1 {
+            let [ref mut s0, ref mut s1, ref mut s2] = src_planes;
+            let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
+            let (((nw, nh), _), _) = rayon::join(
+                || rayon::join(
+                    || downscale_2x_inplace(s0, w, h),
+                    || rayon::join(
+                        || downscale_2x_inplace(s1, w, h),
+                        || downscale_2x_inplace(s2, w, h),
+                    ),
+                ),
+                || rayon::join(
+                    || downscale_2x_inplace(d0, w, h),
+                    || rayon::join(
+                        || downscale_2x_inplace(d1, w, h),
+                        || downscale_2x_inplace(d2, w, h),
+                    ),
+                ),
             );
-            stats.push(scale_stat);
-
-            // Downscale 6 planes in parallel for next scale
-            if scale < num_scales - 1 {
-                let [ref mut s0, ref mut s1, ref mut s2] = src_planes;
-                let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
-                let (((nw, nh), _), _) = rayon::join(
-                    || rayon::join(
-                        || downscale_2x_inplace(s0, w, h),
-                        || rayon::join(
-                            || downscale_2x_inplace(s1, w, h),
-                            || downscale_2x_inplace(s2, w, h),
-                        ),
-                    ),
-                    || rayon::join(
-                        || downscale_2x_inplace(d0, w, h),
-                        || rayon::join(
-                            || downscale_2x_inplace(d1, w, h),
-                            || downscale_2x_inplace(d2, w, h),
-                        ),
-                    ),
-                );
-                w = nw;
-                h = nh;
-            }
-        } else {
-            // Small scale: fall back to full-image processing for remaining scales
-            let mut bufs = ScaleBuffers::new(w * h);
-            let mut parallel_bufs = ScaleBuffers::new(w * h);
-
-            for s in scale..num_scales {
-                if w < 8 || h < 8 {
-                    break;
-                }
-                let n = w * h;
-                bufs.resize(n);
-                parallel_bufs.resize(n);
-
-                let scale_stat = compute_single_scale(
-                    &src_planes, &dst_planes, w, h, config, &mut bufs, &mut parallel_bufs, s,
-                );
-                stats.push(scale_stat);
-
-                if s < num_scales - 1 {
-                    let mut nw = 0;
-                    let mut nh = 0;
-                    for c in 0..3 {
-                        let (sw, sh) = downscale_2x_inplace(&mut src_planes[c], w, h);
-                        let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
-                        nw = sw;
-                        nh = sh;
-                    }
-                    w = nw;
-                    h = nh;
-                }
-            }
-            break;
+            w = nw;
+            h = nh;
         }
     }
 
