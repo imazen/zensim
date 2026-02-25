@@ -76,6 +76,7 @@ enum DatasetFormat {
     Kadid10k,
     Csiq,
     Pipal,
+    Cid22,
 }
 
 /// A single reference-distorted pair with human score.
@@ -133,17 +134,16 @@ fn main() {
     // Build frozen mask (expanded to match feature count)
     let embedded_w = expand_embedded_weights(n_features);
     let frozen: Vec<bool> = if args.sparse {
-        // Determine features_per_channel from n_features
-        let fpc = if n_features % (12 * 3) == 0 { 12 } else { 9 };
+        let fpc = 13;
         embedded_w
             .iter()
             .enumerate()
             .map(|(i, w)| {
                 let pos = i % fpc;
-                let is_mse = pos == fpc - 3; // mse is 3 from end (before variance_loss, texture_loss)
-                let is_new_blur_feature = pos == fpc - 2 || pos == fpc - 1; // variance_loss, texture_loss
-                // Keep mse and new blur features trainable even if weight is 0
-                !is_mse && !is_new_blur_feature && w.abs() < 0.001
+                // Keep new features (ssim_2nd=2, art_2nd=5, det_2nd=8, contrast_increase=12)
+                // and existing trainable features (mse=9, variance_loss=10, texture_loss=11) unfrozen
+                let is_new_or_trainable = matches!(pos, 2 | 5 | 8 | 9 | 10 | 11 | 12);
+                !is_new_or_trainable && w.abs() < 0.001
             })
             .collect()
     } else {
@@ -173,6 +173,7 @@ fn main() {
                 "kadid10k" => DatasetFormat::Kadid10k,
                 "csiq" => DatasetFormat::Csiq,
                 "pipal" => DatasetFormat::Pipal,
+                "cid22" => DatasetFormat::Cid22,
                 _ => {
                     eprintln!("Unknown format: {}", parts[0]);
                     continue;
@@ -288,6 +289,7 @@ fn load_and_compute(
         DatasetFormat::Kadid10k => load_kadid10k(path),
         DatasetFormat::Csiq => load_csiq(path),
         DatasetFormat::Pipal => load_pipal(path),
+        DatasetFormat::Cid22 => load_cid22(path),
     };
 
     let pairs = if max_images > 0 && max_images < pairs.len() {
@@ -348,8 +350,7 @@ fn load_and_compute(
     }
 }
 
-/// Expand embedded WEIGHTS (108 entries, 9 features/ch) to match a wider feature layout.
-/// When masking is enabled, features have 12/ch (inserts zeros for ssim_2nd, art_2nd, det_2nd).
+/// Expand embedded WEIGHTS (156 entries, 13 features/ch) to match a wider feature layout.
 /// When extra scales are used, pads with zeros for extra scale features.
 fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
     let embedded = &zensim::WEIGHTS;
@@ -359,56 +360,9 @@ fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
 
     let mut expanded = vec![0.0; n_features];
 
-    // Detect features_per_channel from the feature count
-    let n_channels = 3;
-    // Try masked (12/ch) first, then basic (9/ch)
-    let (fpc, n_scales) = if n_features.is_multiple_of(12 * n_channels) {
-        (12, n_features / (12 * n_channels))
-    } else if n_features.is_multiple_of(9 * n_channels) {
-        (9, n_features / (9 * n_channels))
-    } else {
-        // Fallback: just copy what fits
-        for (i, &w) in embedded.iter().enumerate() {
-            if i < n_features {
-                expanded[i] = w;
-            }
-        }
-        return expanded;
-    };
-
-    let emb_fpc = 9; // embedded has 9 features per channel
-    let emb_scales = embedded.len() / (emb_fpc * n_channels);
-
-    // Map basic→masked layout for each scale/channel that exists in embedded
-    for s in 0..n_scales.min(emb_scales) {
-        for c in 0..n_channels {
-            let emb_base = s * (emb_fpc * n_channels) + c * emb_fpc;
-            let exp_base = s * (fpc * n_channels) + c * fpc;
-
-            if fpc == 12 {
-                // basic[0..2] → masked[0..2] (ssim_mean, ssim_4th)
-                expanded[exp_base] = embedded[emb_base];
-                expanded[exp_base + 1] = embedded[emb_base + 1];
-                // masked[2] = ssim_2nd → 0 (new)
-                // basic[2..4] → masked[3..5] (art_mean, art_4th)
-                expanded[exp_base + 3] = embedded[emb_base + 2];
-                expanded[exp_base + 4] = embedded[emb_base + 3];
-                // masked[5] = art_2nd → 0 (new)
-                // basic[4..6] → masked[6..8] (det_mean, det_4th)
-                expanded[exp_base + 6] = embedded[emb_base + 4];
-                expanded[exp_base + 7] = embedded[emb_base + 5];
-                // masked[8] = det_2nd → 0 (new)
-                // basic[6..9] → masked[9..12] (mse, variance_loss, texture_loss)
-                expanded[exp_base + 9] = embedded[emb_base + 6];
-                expanded[exp_base + 10] = embedded[emb_base + 7];
-                expanded[exp_base + 11] = embedded[emb_base + 8];
-            } else {
-                // Same layout, just copy
-                expanded[exp_base..exp_base + emb_fpc]
-                    .copy_from_slice(&embedded[emb_base..emb_base + emb_fpc]);
-            }
-        }
-    }
+    // Copy what fits from embedded weights
+    let copy_len = n_features.min(embedded.len());
+    expanded[..copy_len].copy_from_slice(&embedded[..copy_len]);
 
     expanded
 }
@@ -1389,6 +1343,55 @@ fn load_pipal(base: &Path) -> Vec<ImagePair> {
         max_mos
     );
 
+    pairs
+}
+
+fn load_cid22(base: &Path) -> Vec<ImagePair> {
+    let csv_path = base.join("CID22_validation_set.csv");
+    if !csv_path.exists() {
+        eprintln!("Cannot find CID22_validation_set.csv in {:?}", base);
+        return vec![];
+    }
+
+    let mut rdr = csv::Reader::from_path(&csv_path).expect("Failed to open CID22_validation_set.csv");
+    let mut pairs = Vec::new();
+
+    for result in rdr.records() {
+        let record = match result {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        // CID22 CSV: reference_img, distorted_img, encoder, setting, bpp, MCOS, RMOS, Elo, nb_pc_opinions
+        if record.len() < 6 {
+            continue;
+        }
+
+        let ref_name = &record[0];
+        let dist_name = &record[1];
+        let encoder = &record[2];
+
+        // Skip self-reference rows
+        if encoder == "Reference" {
+            continue;
+        }
+
+        let mcos: f64 = match record[5].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let ref_path = base.join(ref_name);
+        let dist_path = base.join(dist_name);
+
+        // MCOS: 0-100 scale (higher = better quality)
+        pairs.push(ImagePair {
+            reference: ref_path,
+            distorted: dist_path,
+            human_score: mcos / 100.0,
+        });
+    }
+
+    println!("  CID22: {} pairs", pairs.len());
     pairs
 }
 
