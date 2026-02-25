@@ -634,6 +634,150 @@ fn process_scale_bands(
     accum.finalize()
 }
 
+/// Pre-computed reference image data for batch comparison against multiple distorted images.
+///
+/// Caches the reference image's XYB color-space planes and downscale pyramid so that
+/// sRGB→XYB conversion and pyramid construction happen once, not once per distorted image.
+/// At 4K this saves ~25% per comparison; at 8K, ~34%. Breaks even at 3-7 distorted
+/// images per reference depending on resolution.
+///
+/// # Memory
+///
+/// Holds 3 f32 planes at each pyramid scale (4 scales by default).
+/// Total ≈ `width × height × 4 bytes × 3 channels × 1.33` (geometric sum of pyramid).
+/// For a 3840×2160 image: ~133 MB. For 7680×4320: ~532 MB.
+///
+/// Created via [`precompute_reference`](crate::precompute_reference) (default 4 scales)
+/// or `precompute_reference_with_scales` (custom, requires `training` feature).
+pub struct PrecomputedReference {
+    pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
+}
+
+impl PrecomputedReference {
+    /// Build a precomputed reference from sRGB pixels.
+    ///
+    /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
+    pub(crate) fn new(
+        source: &[[u8; 3]],
+        width: usize,
+        height: usize,
+        num_scales: usize,
+    ) -> Self {
+        let padded_width = simd_padded_width(width);
+        let mut planes = convert_srgb_to_xyb_parallel(source, width, height, padded_width);
+
+        let mut scales = Vec::with_capacity(num_scales);
+        let mut w = padded_width;
+        let mut h = height;
+
+        for scale in 0..num_scales {
+            if w < 8 || h < 8 {
+                break;
+            }
+
+            // Clone and store planes at this scale
+            scales.push((planes.clone(), w, h));
+
+            // Downscale for next scale
+            if scale < num_scales - 1 {
+                let [ref mut s0, ref mut s1, ref mut s2] = planes;
+                let ((nw, nh), _) = rayon::join(
+                    || downscale_2x_inplace(s0, w, h),
+                    || {
+                        rayon::join(
+                            || downscale_2x_inplace(s1, w, h),
+                            || downscale_2x_inplace(s2, w, h),
+                        )
+                    },
+                );
+                w = nw;
+                h = nh;
+            }
+        }
+
+        Self { scales }
+    }
+}
+
+/// Streaming multi-scale stats using a precomputed reference.
+///
+/// Only converts the distorted image to XYB and downscales it between scales.
+/// Reference planes are borrowed from the precomputed data.
+pub(crate) fn compute_multiscale_stats_streaming_with_ref(
+    precomputed: &PrecomputedReference,
+    distorted: &[[u8; 3]],
+    width: usize,
+    height: usize,
+    config: &ZensimConfig,
+) -> Vec<ScaleStats> {
+    let padded_width = simd_padded_width(width);
+    let num_scales = config.num_scales.min(precomputed.scales.len());
+
+    // Only convert distorted to XYB
+    let mut dst_planes = convert_srgb_to_xyb_parallel(distorted, width, height, padded_width);
+
+    let mut stats = Vec::with_capacity(num_scales);
+    let mut w = padded_width;
+    let mut h = height;
+
+    for scale in 0..num_scales {
+        if w < 8 || h < 8 {
+            break;
+        }
+
+        let (ref src_planes, src_w, src_h) = precomputed.scales[scale];
+        debug_assert_eq!(w, src_w, "width mismatch at scale {scale}");
+        debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
+
+        let scale_stat = process_scale_bands(src_planes, &dst_planes, w, h, config, scale);
+        stats.push(scale_stat);
+
+        // Only downscale the 3 distorted planes for next scale
+        if scale < num_scales - 1 {
+            let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
+            let ((nw, nh), _) = rayon::join(
+                || downscale_2x_inplace(d0, w, h),
+                || {
+                    rayon::join(
+                        || downscale_2x_inplace(d1, w, h),
+                        || downscale_2x_inplace(d2, w, h),
+                    )
+                },
+            );
+            w = nw;
+            h = nh;
+        }
+    }
+
+    // Background deallocation for distorted planes
+    {
+        let mut guard = DEALLOC_THREAD.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            let _ = prev.join();
+        }
+        *guard = Some(std::thread::spawn(move || {
+            drop(dst_planes);
+        }));
+    }
+
+    stats
+}
+
+/// Entry point: compute zensim using streaming with precomputed reference.
+/// Produces identical results to the non-precomputed path.
+pub(crate) fn compute_zensim_streaming_with_ref(
+    precomputed: &PrecomputedReference,
+    distorted: &[[u8; 3]],
+    width: usize,
+    height: usize,
+    config: &ZensimConfig,
+) -> crate::metric::ZensimResult {
+    let scale_stats =
+        compute_multiscale_stats_streaming_with_ref(precomputed, distorted, width, height, config);
+    let masked = config.masking_strength > 0.0;
+    combine_scores(&scale_stats, masked)
+}
+
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
 /// Produces identical results to the full-image path.
 pub(crate) fn compute_zensim_streaming(
@@ -798,5 +942,51 @@ mod tests {
             "max absolute feature diff {:.2e} exceeds 1e-3",
             max_abs_diff,
         );
+    }
+
+    /// Verify precomputed reference produces bit-identical results to the streaming path.
+    #[test]
+    fn precomputed_ref_matches_streaming() {
+        let w = 256;
+        let h = 256;
+        let n = w * h;
+
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = ((x + y) * 127 / (w + h)) as u8;
+                src[y * w + x] = [r, g, b];
+                dst[y * w + x] = [
+                    r.saturating_add(3),
+                    g.saturating_sub(2),
+                    b.saturating_add(1),
+                ];
+            }
+        }
+
+        let config = ZensimConfig {
+            compute_all_features: true,
+            ..Default::default()
+        };
+
+        let streaming_result = compute_zensim_streaming(&src, &dst, w, h, &config);
+        let precomputed = PrecomputedReference::new(&src, w, h, config.num_scales);
+        let precomp_result =
+            compute_zensim_streaming_with_ref(&precomputed, &dst, w, h, &config);
+
+        assert_eq!(streaming_result.score, precomp_result.score);
+        assert_eq!(streaming_result.raw_distance, precomp_result.raw_distance);
+        assert_eq!(streaming_result.features.len(), precomp_result.features.len());
+        for (i, (s, p)) in streaming_result
+            .features
+            .iter()
+            .zip(precomp_result.features.iter())
+            .enumerate()
+        {
+            assert_eq!(s, p, "feature {i} mismatch: streaming={s} precomp={p}");
+        }
     }
 }

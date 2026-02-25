@@ -88,6 +88,110 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
     (distance_to_score(raw_distance), raw_distance)
 }
 
+/// Pre-compute reference image data for reuse across multiple distorted comparisons.
+///
+/// Converts sRGB pixels to XYB color space and builds the multi-scale downscale pyramid,
+/// caching both for reuse with [`compute_zensim_with_ref`]. Uses the default 4 pyramid
+/// scales.
+///
+/// # When to use
+///
+/// When comparing one reference against many distorted variants. Saves ~25% at 4K and
+/// ~34% at 8K per comparison after amortizing the precompute cost (break-even: 3-7
+/// distorted images per reference).
+///
+/// # Errors
+///
+/// Returns [`ZensimError::ImageTooSmall`] if width or height < 8, or
+/// [`ZensimError::InvalidDataLength`] if `source.len() != width * height`.
+pub fn precompute_reference(
+    source: &[[u8; 3]],
+    width: usize,
+    height: usize,
+) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+    if width < 8 || height < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    if source.len() != width * height {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    let config = ZensimConfig::default();
+    Ok(crate::streaming::PrecomputedReference::new(
+        source, width, height, config.num_scales,
+    ))
+}
+
+/// Pre-compute reference with a custom number of pyramid scales.
+///
+/// Use this when calling [`compute_zensim_with_ref_and_config`] with a non-default
+/// `num_scales`. The precomputed data must have at least as many scales as the config
+/// requests.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
+pub fn precompute_reference_with_scales(
+    source: &[[u8; 3]],
+    width: usize,
+    height: usize,
+    num_scales: usize,
+) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+    if width < 8 || height < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    if source.len() != width * height {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    Ok(crate::streaming::PrecomputedReference::new(
+        source, width, height, num_scales,
+    ))
+}
+
+/// Compute zensim score using a [`PrecomputedReference`](crate::PrecomputedReference).
+///
+/// Equivalent to [`compute_zensim`] but skips the reference image's XYB conversion
+/// and pyramid construction. The distorted image must have the same dimensions as
+/// the reference that was precomputed.
+///
+/// # Errors
+///
+/// Returns [`ZensimError::ImageTooSmall`] if width or height < 8, or
+/// [`ZensimError::InvalidDataLength`] if `distorted.len() != width * height`.
+pub fn compute_zensim_with_ref(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &[[u8; 3]],
+    width: usize,
+    height: usize,
+) -> Result<ZensimResult, ZensimError> {
+    compute_zensim_with_ref_and_config(
+        precomputed,
+        distorted,
+        width,
+        height,
+        ZensimConfig::default(),
+    )
+}
+
+/// Compute zensim with a precomputed reference and custom configuration.
+///
+/// Training/research variant of [`compute_zensim_with_ref`]. The `config.num_scales`
+/// must not exceed the number of scales in `precomputed`.
+pub fn compute_zensim_with_ref_and_config(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &[[u8; 3]],
+    width: usize,
+    height: usize,
+    config: ZensimConfig,
+) -> Result<ZensimResult, ZensimError> {
+    if width < 8 || height < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    if distorted.len() != width * height {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    let result = crate::streaming::compute_zensim_streaming_with_ref(
+        precomputed, distorted, width, height, &config,
+    );
+    Ok(result)
+}
+
 /// Per-scale statistics collected during computation.
 pub(crate) struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values

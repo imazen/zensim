@@ -307,31 +307,117 @@ fn load_and_compute(
             .unwrap(),
     );
 
-    let results: Vec<(String, f64, zensim::ZensimResult)> = pairs
+    // Group pairs by reference image path for precomputed-reference reuse
+    let mut by_ref: std::collections::BTreeMap<&Path, Vec<(usize, &ImagePair)>> =
+        std::collections::BTreeMap::new();
+    for (idx, pair) in pairs.iter().enumerate() {
+        by_ref
+            .entry(pair.reference.as_path())
+            .or_default()
+            .push((idx, pair));
+    }
+    let n_refs = by_ref.len();
+    println!(
+        "  {} unique references, {:.1} distorted/ref avg",
+        n_refs,
+        pairs.len() as f64 / n_refs as f64
+    );
+
+    let ref_groups: Vec<(&Path, Vec<(usize, &ImagePair)>)> = by_ref.into_iter().collect();
+
+    let nan_result = zensim::ZensimResult {
+        score: f64::NAN,
+        raw_distance: f64::NAN,
+        features: vec![],
+    };
+
+    let config = zensim::ZensimConfig {
+        compute_all_features: compute_all,
+        blur_passes,
+        blur_radius,
+        masking_strength,
+        num_scales,
+    };
+
+    // Process reference groups in parallel
+    let group_results: Vec<Vec<(usize, String, f64, zensim::ZensimResult)>> = ref_groups
         .par_iter()
-        .map(|pair| {
-            let key = reference_key(pair);
-            let result = compute_pair_result(
-                pair,
-                compute_all,
-                blur_passes,
-                blur_radius,
-                masking_strength,
+        .map(|(ref_path, group)| {
+            let fail = |grp: &[(usize, &ImagePair)]| -> Vec<_> {
+                pb.inc(grp.len() as u64);
+                grp.iter()
+                    .map(|(idx, pair)| {
+                        (*idx, reference_key(pair), pair.human_score, nan_result.clone())
+                    })
+                    .collect()
+            };
+
+            // Load reference image once
+            let src_img = match image::open(ref_path) {
+                Ok(img) => img.to_rgb8(),
+                Err(_) => return fail(group),
+            };
+            let (w, h) = src_img.dimensions();
+            let src_pixels: Vec<[u8; 3]> =
+                src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+
+            // Precompute reference XYB + downscale pyramid
+            let precomputed = match zensim::precompute_reference_with_scales(
+                &src_pixels,
+                w as usize,
+                h as usize,
                 num_scales,
-            );
-            pb.inc(1);
-            (key, pair.human_score, result)
+            ) {
+                Ok(p) => p,
+                Err(_) => return fail(group),
+            };
+
+            // Compare each distorted image against the precomputed reference
+            group
+                .iter()
+                .map(|(idx, pair)| {
+                    let key = reference_key(pair);
+                    let result = match image::open(&pair.distorted) {
+                        Ok(img) => {
+                            let dst = img.to_rgb8();
+                            let (dw, dh) = dst.dimensions();
+                            if dw != w || dh != h {
+                                nan_result.clone()
+                            } else {
+                                let dst_pixels: Vec<[u8; 3]> =
+                                    dst.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+                                zensim::compute_zensim_with_ref_and_config(
+                                    &precomputed,
+                                    &dst_pixels,
+                                    w as usize,
+                                    h as usize,
+                                    config,
+                                )
+                                .unwrap_or_else(|_| nan_result.clone())
+                            }
+                        }
+                        Err(_) => nan_result.clone(),
+                    };
+                    pb.inc(1);
+                    (*idx, key, pair.human_score, result)
+                })
+                .collect()
         })
         .collect();
 
     pb.finish_with_message("done");
+
+    // Flatten and sort back to original pair order
+    let mut results: Vec<(usize, String, f64, zensim::ZensimResult)> =
+        group_results.into_iter().flatten().collect();
+    results.sort_by_key(|(idx, _, _, _)| *idx);
 
     let mut human_scores = Vec::new();
     let mut features = Vec::new();
     let mut ref_keys = Vec::new();
     let mut n_valid = 0;
 
-    for (key, hs, result) in results {
+    for (_idx, key, hs, result) in results {
         if result.score.is_finite() {
             human_scores.push(hs);
             features.push(result.features);
@@ -616,57 +702,6 @@ fn print_cv_summary(label: &str, trained_sroccs: &[f64], embedded_sroccs: &[f64]
                 ""
             }
         );
-    }
-}
-
-fn compute_pair_result(
-    pair: &ImagePair,
-    compute_all_features: bool,
-    blur_passes: u8,
-    blur_radius: usize,
-    masking_strength: f32,
-    num_scales: usize,
-) -> zensim::ZensimResult {
-    let nan_result = zensim::ZensimResult {
-        score: f64::NAN,
-        raw_distance: f64::NAN,
-        features: vec![],
-    };
-
-    let src = match image::open(&pair.reference) {
-        Ok(img) => img.to_rgb8(),
-        Err(_) => return nan_result,
-    };
-    let dst = match image::open(&pair.distorted) {
-        Ok(img) => img.to_rgb8(),
-        Err(_) => return nan_result,
-    };
-
-    let (w, h) = src.dimensions();
-    let (dw, dh) = dst.dimensions();
-    if w != dw || h != dh {
-        return nan_result;
-    }
-
-    let src_pixels: Vec<[u8; 3]> = src.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-    let dst_pixels: Vec<[u8; 3]> = dst.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-
-    let config = zensim::ZensimConfig {
-        compute_all_features,
-        blur_passes,
-        blur_radius,
-        masking_strength,
-        num_scales,
-    };
-    match zensim::compute_zensim_with_config(
-        &src_pixels,
-        &dst_pixels,
-        w as usize,
-        h as usize,
-        config,
-    ) {
-        Ok(r) => r,
-        Err(_) => nan_result,
     }
 }
 
