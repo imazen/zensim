@@ -77,6 +77,7 @@ enum DatasetFormat {
     Csiq,
     Pipal,
     Cid22,
+    KonfigIqa,
 }
 
 /// A single reference-distorted pair with human score.
@@ -174,6 +175,7 @@ fn main() {
                 "csiq" => DatasetFormat::Csiq,
                 "pipal" => DatasetFormat::Pipal,
                 "cid22" => DatasetFormat::Cid22,
+                "konfig-iqa" | "konfig" => DatasetFormat::KonfigIqa,
                 _ => {
                     eprintln!("Unknown format: {}", parts[0]);
                     continue;
@@ -290,6 +292,7 @@ fn load_and_compute(
         DatasetFormat::Csiq => load_csiq(path),
         DatasetFormat::Pipal => load_pipal(path),
         DatasetFormat::Cid22 => load_cid22(path),
+        DatasetFormat::KonfigIqa => load_konfig_iqa(path),
     };
 
     let pairs = if max_images > 0 && max_images < pairs.len() {
@@ -1428,6 +1431,79 @@ fn load_cid22(base: &Path) -> Vec<ImagePair> {
     }
 
     println!("  CID22: {} pairs", pairs.len());
+    pairs
+}
+
+fn load_konfig_iqa(base: &Path) -> Vec<ImagePair> {
+    // KonFiG-IQA uses DCR (Degradation Category Rating) from EXP_III.
+    // Raw data: individual worker ratings per (source, distortion, level).
+    // We aggregate to mean DCR, then invert to quality (higher = better).
+    let csv_path = base.join("DATA/EXP_III/data3.csv");
+    if !csv_path.exists() {
+        eprintln!("Cannot find DATA/EXP_III/data3.csv in {:?}", base);
+        return vec![];
+    }
+
+    let mut rdr = csv::Reader::from_path(&csv_path).expect("Failed to open data3.csv");
+
+    // Aggregate raw ratings: mean DCR per (source, distortion_type, level)
+    let mut ratings: HashMap<(String, String, u32), Vec<u32>> = HashMap::new();
+    for result in rdr.records() {
+        let record = match result {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        // Columns: Source, Distortion Type, BoostType, Distortion Level, HIT id,
+        //          Assignment id, Worker id, Answer, Time
+        if record.len() < 8 {
+            continue;
+        }
+        let source = record[0].to_string();
+        let dist_type = record[1].to_string();
+        let level: u32 = match record[3].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let answer: u32 = match record[7].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        ratings
+            .entry((source, dist_type, level))
+            .or_default()
+            .push(answer);
+    }
+
+    let mut pairs = Vec::new();
+    for ((source, dist_type, level), vals) in &ratings {
+        let mean_dcr: f64 = vals.iter().map(|&v| v as f64).sum::<f64>() / vals.len() as f64;
+        // DCR: 0=imperceptible, 4=very annoying. Invert to quality 0-1.
+        let quality = (4.0 - mean_dcr) / 4.0;
+
+        // Image path: IMAGES/PartA/{source}/{distortion}/{source}_{distortion}_{level}.png
+        let dist_path = base
+            .join("IMAGES/PartA")
+            .join(source)
+            .join(dist_type)
+            .join(format!("{source}_{dist_type}_{level}.png"));
+        // Reference: IMAGES/reference_images/{source}_0.png
+        let ref_path = base
+            .join("IMAGES/reference_images")
+            .join(format!("{source}_0.png"));
+
+        if !dist_path.exists() {
+            continue;
+        }
+
+        pairs.push(ImagePair {
+            reference: ref_path,
+            distorted: dist_path,
+            human_score: quality,
+        });
+    }
+
+    pairs.sort_by(|a, b| a.distorted.cmp(&b.distorted));
+    println!("  KonFiG-IQA: {} pairs from {} ratings", pairs.len(), ratings.len());
     pairs
 }
 
