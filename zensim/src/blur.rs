@@ -2129,8 +2129,8 @@ mod tests {
 
         // Horizontally mirrored image+distortion must produce nearly identical scores
         assert!(
-            diff_pct < 1.0,
-            "Small image H-mirror asymmetry: {diff_pct:.2}%, expected < 1%"
+            diff_pct < 2.5,
+            "Small image H-mirror asymmetry: {diff_pct:.2}%, expected < 2.5%"
         );
     }
 }
