@@ -233,8 +233,8 @@ fn fused_vblur_ssim_inner_v4(
                 // === SSIM ===
                 let mu_diff = mu1 - mu2;
                 let num_m = mu_diff.mul_add(-mu_diff, one);
-                let num_s = two.mul_add(s12 - mu1 * mu2, c2v);
-                let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + c2v;
+                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
                 let sd = (one - (num_m * num_s) / denom_s).max(zero);
                 let sd2 = sd * sd;
                 let sd4 = sd2 * sd2;
@@ -331,8 +331,8 @@ fn fused_vblur_ssim_inner_v4(
                 // SSIM
                 let mu_diff = mu1 - mu2;
                 let num_m = mu_diff.mul_add(-mu_diff, one8);
-                let num_s = two8.mul_add(s12 - mu1 * mu2, c2v8);
-                let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + c2v8;
+                let num_s = two8.mul_add((-mu1).mul_add(mu2, s12), c2v8);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v8;
                 let sd = (one8 - (num_m * num_s) / denom_s).max(zero8);
                 let sd2 = sd * sd;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -401,54 +401,57 @@ fn fused_vblur_ssim_inner_v4(
 
         for y in 0..height {
             if y >= inner_start && y < inner_end {
-                let mu1 = (sum_m1 * inv) as f64;
-                let mu2 = (sum_m2 * inv) as f64;
-                let ssq = (sum_sq * inv) as f64;
-                let s12 = (sum_s12 * inv) as f64;
-                let sv = src[y * width + x] as f64;
-                let dv = dst[y * width + x] as f64;
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let ssq = sum_sq * inv;
+                let s12 = sum_s12 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
 
-                // SSIM
-                let md = mu1 - mu2;
-                let num_m = 1.0 - md * md;
-                let num_s = 2.0 * (s12 - mu1 * mu2) + C2 as f64;
-                let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + C2 as f64;
-                let sd = (1.0 - (num_m * num_s) / denom_s).max(0.0);
-                acc.ssim_d += sd;
-                acc.ssim_d4 += sd * sd * sd * sd;
+                // SSIM (f32 to match SIMD paths)
+                let mu_diff = mu1 - mu2;
+                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
+                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd2 = sd * sd;
+                acc.ssim_d += sd as f64;
+                acc.ssim_d4 += (sd2 * sd2) as f64;
 
-                // Edge
+                // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                let ed = (1.0 + diff2) / (1.0 + diff1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                acc.edge_art += art;
-                acc.edge_art4 += art * art * art * art;
-                acc.edge_det += det;
-                acc.edge_det4 += det * det * det * det;
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += (dl2 * dl2) as f64;
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += vs * vs;
-                acc.sq_dst += vd * vd;
+                acc.sq_src += (vs * vs) as f64;
+                acc.sq_dst += (vd * vd) as f64;
 
                 // Texture
-                acc.abs_src += diff1;
-                acc.abs_dst += diff2;
+                acc.abs_src += diff1 as f64;
+                acc.abs_dst += diff2 as f64;
 
                 // MSE
                 let pd = sv - dv;
-                acc.mse += pd * pd;
+                acc.mse += (pd * pd) as f64;
             }
 
             let add_idx = vblur_add_idx(y, r, height);
             let rem_idx = vblur_rem_idx(y, r, height);
-            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
-            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
-            sum_sq += h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
-            sum_s12 += h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
+            sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
         }
     }
 
@@ -518,8 +521,8 @@ fn fused_vblur_ssim_inner_v3(
                 // SSIM
                 let mu_diff = mu1 - mu2;
                 let num_m = mu_diff.mul_add(-mu_diff, one);
-                let num_s = two.mul_add(s12 - mu1 * mu2, c2v);
-                let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + c2v;
+                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
                 let sd = (one - (num_m * num_s) / denom_s).max(zero);
                 let sd2 = sd * sd;
                 acc.ssim_d += sd.reduce_add() as f64;
@@ -588,48 +591,57 @@ fn fused_vblur_ssim_inner_v3(
 
         for y in 0..height {
             if y >= inner_start && y < inner_end {
-                let mu1 = (sum_m1 * inv) as f64;
-                let mu2 = (sum_m2 * inv) as f64;
-                let ssq = (sum_sq * inv) as f64;
-                let s12 = (sum_s12 * inv) as f64;
-                let sv = src[y * width + x] as f64;
-                let dv = dst[y * width + x] as f64;
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let ssq = sum_sq * inv;
+                let s12 = sum_s12 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
 
-                let md = mu1 - mu2;
-                let num_m = 1.0 - md * md;
-                let num_s = 2.0 * (s12 - mu1 * mu2) + C2 as f64;
-                let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + C2 as f64;
-                let sd = (1.0 - (num_m * num_s) / denom_s).max(0.0);
-                acc.ssim_d += sd;
-                acc.ssim_d4 += sd * sd * sd * sd;
+                // SSIM (f32 to match SIMD paths)
+                let mu_diff = mu1 - mu2;
+                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
+                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd2 = sd * sd;
+                acc.ssim_d += sd as f64;
+                acc.ssim_d4 += (sd2 * sd2) as f64;
 
+                // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                let ed = (1.0 + diff2) / (1.0 + diff1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                acc.edge_art += art;
-                acc.edge_art4 += art * art * art * art;
-                acc.edge_det += det;
-                acc.edge_det4 += det * det * det * det;
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += (dl2 * dl2) as f64;
 
+                // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += vs * vs;
-                acc.sq_dst += vd * vd;
-                acc.abs_src += diff1;
-                acc.abs_dst += diff2;
+                acc.sq_src += (vs * vs) as f64;
+                acc.sq_dst += (vd * vd) as f64;
 
+                // Texture
+                acc.abs_src += diff1 as f64;
+                acc.abs_dst += diff2 as f64;
+
+                // MSE
                 let pd = sv - dv;
-                acc.mse += pd * pd;
+                acc.mse += (pd * pd) as f64;
             }
 
             let add_idx = vblur_add_idx(y, r, height);
             let rem_idx = vblur_rem_idx(y, r, height);
-            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
-            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
-            sum_sq += h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
-            sum_s12 += h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
+            sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
         }
     }
 
@@ -677,54 +689,57 @@ fn fused_vblur_ssim_inner_scalar(
 
         for y in 0..height {
             if y >= inner_start && y < inner_end {
-                let mu1 = (sum_m1 * inv) as f64;
-                let mu2 = (sum_m2 * inv) as f64;
-                let ssq = (sum_sq * inv) as f64;
-                let s12 = (sum_s12 * inv) as f64;
-                let sv = src[y * width + x] as f64;
-                let dv = dst[y * width + x] as f64;
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let ssq = sum_sq * inv;
+                let s12 = sum_s12 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
 
-                // SSIM
-                let md = mu1 - mu2;
-                let num_m = 1.0 - md * md;
-                let num_s = 2.0 * (s12 - mu1 * mu2) + C2 as f64;
-                let denom_s = ssq - mu1 * mu1 - mu2 * mu2 + C2 as f64;
-                let sd = (1.0 - (num_m * num_s) / denom_s).max(0.0);
-                acc.ssim_d += sd;
-                acc.ssim_d4 += sd * sd * sd * sd;
+                // SSIM (f32 to match SIMD paths)
+                let mu_diff = mu1 - mu2;
+                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
+                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd2 = sd * sd;
+                acc.ssim_d += sd as f64;
+                acc.ssim_d4 += (sd2 * sd2) as f64;
 
-                // Edge
+                // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                let ed = (1.0 + diff2) / (1.0 + diff1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                acc.edge_art += art;
-                acc.edge_art4 += art * art * art * art;
-                acc.edge_det += det;
-                acc.edge_det4 += det * det * det * det;
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += (dl2 * dl2) as f64;
 
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += vs * vs;
-                acc.sq_dst += vd * vd;
+                acc.sq_src += (vs * vs) as f64;
+                acc.sq_dst += (vd * vd) as f64;
 
                 // Texture
-                acc.abs_src += diff1;
-                acc.abs_dst += diff2;
+                acc.abs_src += diff1 as f64;
+                acc.abs_dst += diff2 as f64;
 
                 // MSE
                 let pd = sv - dv;
-                acc.mse += pd * pd;
+                acc.mse += (pd * pd) as f64;
             }
 
             let add_idx = vblur_add_idx(y, r, height);
             let rem_idx = vblur_rem_idx(y, r, height);
-            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
-            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
-            sum_sq += h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
-            sum_s12 += h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
+            sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
         }
     }
 
@@ -898,36 +913,39 @@ fn fused_vblur_edge_inner_v4(
 
         for y in 0..height {
             if y >= inner_start && y < inner_end {
-                let mu1 = (sum_m1 * inv) as f64;
-                let mu2 = (sum_m2 * inv) as f64;
-                let sv = src[y * width + x] as f64;
-                let dv = dst[y * width + x] as f64;
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
 
+                // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                let ed = (1.0 + diff2) / (1.0 + diff1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                acc.edge_art += art;
-                acc.edge_art4 += art * art * art * art;
-                acc.edge_det += det;
-                acc.edge_det4 += det * det * det * det;
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += (dl2 * dl2) as f64;
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += vs * vs;
-                acc.sq_dst += vd * vd;
-                acc.abs_src += diff1;
-                acc.abs_dst += diff2;
+                acc.sq_src += (vs * vs) as f64;
+                acc.sq_dst += (vd * vd) as f64;
+                acc.abs_src += diff1 as f64;
+                acc.abs_dst += diff2 as f64;
 
                 let pd = sv - dv;
-                acc.mse += pd * pd;
+                acc.mse += (pd * pd) as f64;
             }
 
             let add_idx = vblur_add_idx(y, r, height);
             let rem_idx = vblur_rem_idx(y, r, height);
-            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
-            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
         }
     }
 
@@ -1027,36 +1045,39 @@ fn fused_vblur_edge_inner_v3(
 
         for y in 0..height {
             if y >= inner_start && y < inner_end {
-                let mu1 = (sum_m1 * inv) as f64;
-                let mu2 = (sum_m2 * inv) as f64;
-                let sv = src[y * width + x] as f64;
-                let dv = dst[y * width + x] as f64;
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
 
+                // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                let ed = (1.0 + diff2) / (1.0 + diff1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                acc.edge_art += art;
-                acc.edge_art4 += art * art * art * art;
-                acc.edge_det += det;
-                acc.edge_det4 += det * det * det * det;
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += (dl2 * dl2) as f64;
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += vs * vs;
-                acc.sq_dst += vd * vd;
-                acc.abs_src += diff1;
-                acc.abs_dst += diff2;
+                acc.sq_src += (vs * vs) as f64;
+                acc.sq_dst += (vd * vd) as f64;
+                acc.abs_src += diff1 as f64;
+                acc.abs_dst += diff2 as f64;
 
                 let pd = sv - dv;
-                acc.mse += pd * pd;
+                acc.mse += (pd * pd) as f64;
             }
 
             let add_idx = vblur_add_idx(y, r, height);
             let rem_idx = vblur_rem_idx(y, r, height);
-            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
-            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
         }
     }
 
@@ -1094,36 +1115,39 @@ fn fused_vblur_edge_inner_scalar(
 
         for y in 0..height {
             if y >= inner_start && y < inner_end {
-                let mu1 = (sum_m1 * inv) as f64;
-                let mu2 = (sum_m2 * inv) as f64;
-                let sv = src[y * width + x] as f64;
-                let dv = dst[y * width + x] as f64;
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
 
+                // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
                 let diff2 = (dv - mu2).abs();
-                let ed = (1.0 + diff2) / (1.0 + diff1) - 1.0;
-                let art = ed.max(0.0);
-                let det = (-ed).max(0.0);
-                acc.edge_art += art;
-                acc.edge_art4 += art * art * art * art;
-                acc.edge_det += det;
-                acc.edge_det4 += det * det * det * det;
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += (dl2 * dl2) as f64;
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += vs * vs;
-                acc.sq_dst += vd * vd;
-                acc.abs_src += diff1;
-                acc.abs_dst += diff2;
+                acc.sq_src += (vs * vs) as f64;
+                acc.sq_dst += (vd * vd) as f64;
+                acc.abs_src += diff1 as f64;
+                acc.abs_dst += diff2 as f64;
 
                 let pd = sv - dv;
-                acc.mse += pd * pd;
+                acc.mse += (pd * pd) as f64;
             }
 
             let add_idx = vblur_add_idx(y, r, height);
             let rem_idx = vblur_rem_idx(y, r, height);
-            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
-            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
         }
     }
 

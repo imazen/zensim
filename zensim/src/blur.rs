@@ -206,7 +206,7 @@ fn box_blur_v_copy_inner_v4(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(height - 1);
-            sum += src[add_idx * width + x] - src[rem_idx * width + x];
+            sum = sum + src[add_idx * width + x] - src[rem_idx * width + x];
         }
     }
 }
@@ -299,7 +299,7 @@ fn box_blur_v_copy_inner_v3(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(height - 1);
-            sum += src[add_idx * width + x] - src[rem_idx * width + x];
+            sum = sum + src[add_idx * width + x] - src[rem_idx * width + x];
         }
     }
 }
@@ -343,7 +343,7 @@ fn box_blur_v_copy_inner_scalar(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(height - 1);
-            sum += src[add_idx * width + x] - src[rem_idx * width + x];
+            sum = sum + src[add_idx * width + x] - src[rem_idx * width + x];
         }
     }
 }
@@ -509,7 +509,7 @@ fn box_blur_h_inner_v4(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum += inp[add_idx] - inp[rem_idx];
+            sum = sum + inp[add_idx] - inp[rem_idx];
         }
     }
 }
@@ -614,7 +614,7 @@ fn box_blur_h_inner_v3(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum += inp[add_idx] - inp[rem_idx];
+            sum = sum + inp[add_idx] - inp[rem_idx];
         }
     }
 }
@@ -662,7 +662,7 @@ fn box_blur_h_inner_scalar(
                 rem_i as usize
             };
             let rem_idx = rem_idx.min(width - 1);
-            sum += inp[add_idx] - inp[rem_idx];
+            sum = sum + inp[add_idx] - inp[rem_idx];
         }
     }
 }
@@ -1133,8 +1133,8 @@ fn fused_blur_h_ssim_inner_v4(
             let dv = f32x16::from_array(token, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
-            sum_sq = sum_sq + sv * sv + dv * dv;
-            sum_prod = sum_prod + sv * dv;
+            sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
+            sum_prod = sv.mul_add(dv, sum_prod);
         }
 
         // Slide window
@@ -1183,8 +1183,8 @@ fn fused_blur_h_ssim_inner_v4(
             let dr = f32x16::from_array(token, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
-            sum_sq = sum_sq + sa * sa + da * da - sr * sr - dr * dr;
-            sum_prod = sum_prod + sa * da - sr * dr;
+            sum_sq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))));
+            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
     }
 
@@ -1218,8 +1218,8 @@ fn fused_blur_h_ssim_inner_v4(
             let dv = f32x8::from_array(v3, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
-            sum_sq = sum_sq + sv * sv + dv * dv;
-            sum_prod = sum_prod + sv * dv;
+            sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
+            sum_prod = sv.mul_add(dv, sum_prod);
         }
 
         for x in 0..width {
@@ -1267,8 +1267,8 @@ fn fused_blur_h_ssim_inner_v4(
             let dr = f32x8::from_array(v3, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
-            sum_sq = sum_sq + sa * sa + da * da - sr * sr - dr * dr;
-            sum_prod = sum_prod + sa * da - sr * dr;
+            sum_sq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))));
+            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
     }
 
@@ -1293,8 +1293,8 @@ fn fused_blur_h_ssim_inner_v4(
             let d = d_row[idx];
             sum_s += s;
             sum_d += d;
-            sum_sq += s * s + d * d;
-            sum_prod += s * d;
+            sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+            sum_prod = s.mul_add(d, sum_prod);
         }
 
         for x in 0..width {
@@ -1321,10 +1321,10 @@ fn fused_blur_h_ssim_inner_v4(
             let da = d_row[add_idx];
             let sr = s_row[rem_idx];
             let dr = d_row[rem_idx];
-            sum_s += sa - sr;
-            sum_d += da - dr;
-            sum_sq += sa * sa + da * da - sr * sr - dr * dr;
-            sum_prod += sa * da - sr * dr;
+            sum_s = sum_s + sa - sr;
+            sum_d = sum_d + da - dr;
+            sum_sq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))));
+            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
     }
 }
@@ -1374,8 +1374,8 @@ fn fused_blur_h_ssim_inner_v3(
             let dv = f32x8::from_array(token, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
-            sum_sq = sum_sq + sv * sv + dv * dv;
-            sum_prod = sum_prod + sv * dv;
+            sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
+            sum_prod = sv.mul_add(dv, sum_prod);
         }
 
         for x in 0..width {
@@ -1423,8 +1423,8 @@ fn fused_blur_h_ssim_inner_v3(
             let dr = f32x8::from_array(token, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
-            sum_sq = sum_sq + sa * sa + da * da - sr * sr - dr * dr;
-            sum_prod = sum_prod + sa * da - sr * dr;
+            sum_sq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))));
+            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
     }
 
@@ -1449,8 +1449,8 @@ fn fused_blur_h_ssim_inner_v3(
             let d = d_row[idx];
             sum_s += s;
             sum_d += d;
-            sum_sq += s * s + d * d;
-            sum_prod += s * d;
+            sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+            sum_prod = s.mul_add(d, sum_prod);
         }
 
         for x in 0..width {
@@ -1477,10 +1477,10 @@ fn fused_blur_h_ssim_inner_v3(
             let da = d_row[add_idx];
             let sr = s_row[rem_idx];
             let dr = d_row[rem_idx];
-            sum_s += sa - sr;
-            sum_d += da - dr;
-            sum_sq += sa * sa + da * da - sr * sr - dr * dr;
-            sum_prod += sa * da - sr * dr;
+            sum_s = sum_s + sa - sr;
+            sum_d = sum_d + da - dr;
+            sum_sq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))));
+            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
     }
 }
@@ -1522,8 +1522,8 @@ fn fused_blur_h_ssim_inner_scalar(
             let d = d_row[idx];
             sum_s += s;
             sum_d += d;
-            sum_sq += s * s + d * d;
-            sum_prod += s * d;
+            sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+            sum_prod = s.mul_add(d, sum_prod);
         }
 
         for x in 0..width {
@@ -1550,10 +1550,10 @@ fn fused_blur_h_ssim_inner_scalar(
             let da = d_row[add_idx];
             let sr = s_row[rem_idx];
             let dr = d_row[rem_idx];
-            sum_s += sa - sr;
-            sum_d += da - dr;
-            sum_sq += sa * sa + da * da - sr * sr - dr * dr;
-            sum_prod += sa * da - sr * dr;
+            sum_s = sum_s + sa - sr;
+            sum_d = sum_d + da - dr;
+            sum_sq = sa.mul_add(sa, da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))));
+            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
         }
     }
 }

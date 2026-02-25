@@ -105,7 +105,7 @@ fn sq_sum_into_inner_v4(token: archmage::X64V4Token, a: &[f32], b: &[f32], out: 
         out[base..base + 8].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
     }
     for i in (chunks * 16 + chunks8 * 8)..n {
-        out[i] = a[i] * a[i] + b[i] * b[i];
+        out[i] = a[i].mul_add(a[i], b[i] * b[i]);
     }
 }
 
@@ -121,13 +121,13 @@ fn sq_sum_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: 
         out[base..base + 8].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
     }
     for i in (chunks * 8)..n {
-        out[i] = a[i] * a[i] + b[i] * b[i];
+        out[i] = a[i].mul_add(a[i], b[i] * b[i]);
     }
 }
 
 fn sq_sum_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], out: &mut [f32]) {
     for i in 0..a.len() {
-        out[i] = a[i] * a[i] + b[i] * b[i];
+        out[i] = a[i].mul_add(a[i], b[i] * b[i]);
     }
 }
 
@@ -154,8 +154,8 @@ fn sq_diff_sum_inner_v4(token: archmage::X64V4Token, a: &[f32], b: &[f32]) -> f6
         sum += (d * d).reduce_add() as f64;
     }
     for i in (chunks * 16 + chunks8 * 8)..n {
-        let d = (a[i] - b[i]) as f64;
-        sum += d * d;
+        let d = a[i] - b[i];
+        sum += (d * d) as f64;
     }
     sum
 }
@@ -174,8 +174,8 @@ fn sq_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f6
         sum += (d * d).reduce_add() as f64;
     }
     for i in (chunks * 8)..n {
-        let d = (a[i] - b[i]) as f64;
-        sum += d * d;
+        let d = a[i] - b[i];
+        sum += (d * d) as f64;
     }
     sum
 }
@@ -183,8 +183,8 @@ fn sq_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f6
 fn sq_diff_sum_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32]) -> f64 {
     let mut sum = 0.0f64;
     for i in 0..a.len() {
-        let d = (a[i] - b[i]) as f64;
-        sum += d * d;
+        let d = a[i] - b[i];
+        sum += (d * d) as f64;
     }
     sum
 }
@@ -321,8 +321,8 @@ fn ssim_channel_inner_v4(
 
         let mu_diff = m1 - m2;
         let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add(s12v - m1 * m2, c2v);
-        let denom_s = ssq - m1 * m1 - m2 * m2 + c2v;
+        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
+        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
         let d = (one - (num_m * num_s) / denom_s).max(zero);
         let d2 = d * d;
         let d4 = d2 * d2;
@@ -332,15 +332,14 @@ fn ssim_channel_inner_v4(
     }
 
     for i in (chunks * 16)..n {
-        let md = f64::from(mu1[i] - mu2[i]);
-        let num_m = 1.0 - md * md;
-        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s =
-            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
-                + f64::from(C2);
-        let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
-        sum_d += d;
-        sum_d4 += d * d * d * d;
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d4 += (d2 * d2) as f64;
     }
 
     (sum_d, sum_d4)
@@ -374,8 +373,8 @@ fn ssim_channel_inner_v3(
 
         let mu_diff = m1 - m2;
         let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add(s12v - m1 * m2, c2v);
-        let denom_s = ssq - m1 * m1 - m2 * m2 + c2v;
+        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
+        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
         let d = (one - (num_m * num_s) / denom_s).max(zero);
         let d2 = d * d;
         let d4 = d2 * d2;
@@ -385,15 +384,14 @@ fn ssim_channel_inner_v3(
     }
 
     for i in (chunks * 8)..n {
-        let md = f64::from(mu1[i] - mu2[i]);
-        let num_m = 1.0 - md * md;
-        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s =
-            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
-                + f64::from(C2);
-        let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
-        sum_d += d;
-        sum_d4 += d * d * d * d;
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d4 += (d2 * d2) as f64;
     }
 
     (sum_d, sum_d4)
@@ -411,15 +409,14 @@ fn ssim_channel_inner_scalar(
     let mut sum_d4 = 0.0f64;
 
     for i in 0..n {
-        let md = f64::from(mu1[i] - mu2[i]);
-        let num_m = 1.0 - md * md;
-        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s =
-            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
-                + f64::from(C2);
-        let d = (1.0 - (num_m * num_s) / denom_s).max(0.0);
-        sum_d += d;
-        sum_d4 += d * d * d * d;
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d4 += (d2 * d2) as f64;
     }
 
     (sum_d, sum_d4)
@@ -473,14 +470,16 @@ fn edge_diff_inner_v4(
     for i in (chunks * 16)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        let d1 = f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0;
+        let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
 
-        let art = d1.max(0.0);
-        let det = (-d1).max(0.0);
-        sum_art += art;
-        sum_art4 += art.powi(4);
-        sum_det += det;
-        sum_det4 += det.powi(4);
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det4 += (dl2 * dl2) as f64;
     }
 
     (sum_art, sum_art4, sum_det, sum_det4)
@@ -535,14 +534,16 @@ fn edge_diff_inner_v3(
     for i in (chunks * 8)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        let d1 = f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0;
+        let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
 
-        let art = d1.max(0.0);
-        let det = (-d1).max(0.0);
-        sum_art += art;
-        sum_art4 += art.powi(4);
-        sum_det += det;
-        sum_det4 += det.powi(4);
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det4 += (dl2 * dl2) as f64;
     }
 
     (sum_art, sum_art4, sum_det, sum_det4)
@@ -564,14 +565,16 @@ fn edge_diff_inner_scalar(
     for i in 0..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        let d1 = f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0;
+        let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
 
-        let art = d1.max(0.0);
-        let det = (-d1).max(0.0);
-        sum_art += art;
-        sum_art4 += art.powi(4);
-        sum_det += det;
-        sum_det4 += det.powi(4);
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det4 += (dl2 * dl2) as f64;
     }
 
     (sum_art, sum_art4, sum_det, sum_det4)
@@ -663,8 +666,8 @@ fn ssim_channel_masked_inner_v4(
 
         let mu_diff = m1 - m2;
         let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add(s12v - m1 * m2, c2v);
-        let denom_s = ssq - m1 * m1 - m2 * m2 + c2v;
+        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
+        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
         let d = ((one - (num_m * num_s) / denom_s) * mv).max(zero);
         let d2 = d * d;
         let d4 = d2 * d2;
@@ -675,16 +678,15 @@ fn ssim_channel_masked_inner_v4(
     }
 
     for i in (chunks * 16)..n {
-        let md = f64::from(mu1[i] - mu2[i]);
-        let num_m = 1.0 - md * md;
-        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s =
-            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
-                + f64::from(C2);
-        let d = ((1.0 - (num_m * num_s) / denom_s) * f64::from(mask[i])).max(0.0);
-        sum_d += d;
-        sum_d2 += d * d;
-        sum_d4 += d * d * d * d;
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = ((1.0f32 - (num_m * num_s) / denom_s) * mask[i]).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
     }
 
     (sum_d, sum_d4, sum_d2)
@@ -721,8 +723,8 @@ fn ssim_channel_masked_inner_v3(
 
         let mu_diff = m1 - m2;
         let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add(s12v - m1 * m2, c2v);
-        let denom_s = ssq - m1 * m1 - m2 * m2 + c2v;
+        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
+        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
         let d = ((one - (num_m * num_s) / denom_s) * mv).max(zero);
         let d2 = d * d;
         let d4 = d2 * d2;
@@ -733,16 +735,15 @@ fn ssim_channel_masked_inner_v3(
     }
 
     for i in (chunks * 8)..n {
-        let md = f64::from(mu1[i] - mu2[i]);
-        let num_m = 1.0 - md * md;
-        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s =
-            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
-                + f64::from(C2);
-        let d = ((1.0 - (num_m * num_s) / denom_s) * f64::from(mask[i])).max(0.0);
-        sum_d += d;
-        sum_d2 += d * d;
-        sum_d4 += d * d * d * d;
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = ((1.0f32 - (num_m * num_s) / denom_s) * mask[i]).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
     }
 
     (sum_d, sum_d4, sum_d2)
@@ -762,16 +763,15 @@ fn ssim_channel_masked_inner_scalar(
     let mut sum_d2 = 0.0f64;
 
     for i in 0..n {
-        let md = f64::from(mu1[i] - mu2[i]);
-        let num_m = 1.0 - md * md;
-        let num_s = 2.0 * f64::from(s12[i] - mu1[i] * mu2[i]) + f64::from(C2);
-        let denom_s =
-            f64::from(sum_sq[i]) - f64::from(mu1[i] * mu1[i]) - f64::from(mu2[i] * mu2[i])
-                + f64::from(C2);
-        let d = ((1.0 - (num_m * num_s) / denom_s) * f64::from(mask[i])).max(0.0);
-        sum_d += d;
-        sum_d2 += d * d;
-        sum_d4 += d * d * d * d;
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = ((1.0f32 - (num_m * num_s) / denom_s) * mask[i]).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
     }
 
     (sum_d, sum_d4, sum_d2)
@@ -830,16 +830,18 @@ fn edge_diff_masked_inner_v4(
     for i in (chunks * 16)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        let d1 = (f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0) * f64::from(mask[i]);
+        let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[i];
 
-        let art = d1.max(0.0);
-        let det = (-d1).max(0.0);
-        sum_art += art;
-        sum_art2 += art * art;
-        sum_art4 += art.powi(4);
-        sum_det += det;
-        sum_det2 += det * det;
-        sum_det4 += det.powi(4);
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art2 += a2 as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det2 += dl2 as f64;
+        sum_det4 += (dl2 * dl2) as f64;
     }
 
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
@@ -896,16 +898,18 @@ fn edge_diff_masked_inner_v3(
     for i in (chunks * 8)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        let d1 = (f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0) * f64::from(mask[i]);
+        let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[i];
 
-        let art = d1.max(0.0);
-        let det = (-d1).max(0.0);
-        sum_art += art;
-        sum_art2 += art * art;
-        sum_art4 += art.powi(4);
-        sum_det += det;
-        sum_det2 += det * det;
-        sum_det4 += det.powi(4);
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art2 += a2 as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det2 += dl2 as f64;
+        sum_det4 += (dl2 * dl2) as f64;
     }
 
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
@@ -930,16 +934,18 @@ fn edge_diff_masked_inner_scalar(
     for i in 0..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
-        let d1 = (f64::from((1.0 + diff2) / (1.0 + diff1)) - 1.0) * f64::from(mask[i]);
+        let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[i];
 
-        let art = d1.max(0.0);
-        let det = (-d1).max(0.0);
-        sum_art += art;
-        sum_art2 += art * art;
-        sum_art4 += art.powi(4);
-        sum_det += det;
-        sum_det2 += det * det;
-        sum_det4 += det.powi(4);
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art2 += a2 as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det2 += dl2 as f64;
+        sum_det4 += (dl2 * dl2) as f64;
     }
 
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)

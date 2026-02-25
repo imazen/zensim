@@ -55,10 +55,11 @@ pub fn srgb_u8_to_linear(v: u8) -> f32 {
 pub(crate) fn cbrtf_fast(x: f32) -> f32 {
     let mut t = cbrtf_initial(x);
     // Halley's method in f32 (each step roughly triples correct bits: 5→15→45)
+    // Use mul_add to match SIMD Halley iterations: x.mul_add(2, r) and r.mul_add(2, x)
     let mut r = t * t * t;
-    t = t * (x + x + r) / (x + r + r);
+    t = t * x.mul_add(2.0, r) / r.mul_add(2.0, x);
     r = t * t * t;
-    t = t * (x + x + r) / (x + r + r);
+    t = t * x.mul_add(2.0, r) / r.mul_add(2.0, x);
     t
 }
 
@@ -357,9 +358,9 @@ fn srgb_to_positive_xyb_planar_inner_v4(
         let g = srgb_u8_to_linear(p[1]);
         let b = srgb_u8_to_linear(p[2]);
 
-        let mixed0 = (K_M00 * r + K_M01 * g + K_M02 * b + K_B0).max(0.0);
-        let mixed1 = (K_M10 * r + K_M11 * g + K_M12 * b + K_B0).max(0.0);
-        let mixed2 = (K_M20 * r + K_M21 * g + K_M22 * b + K_B0).max(0.0);
+        let mixed0 = K_M00.mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0))).max(0.0);
+        let mixed1 = K_M10.mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0))).max(0.0);
+        let mixed2 = K_M20.mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0))).max(0.0);
 
         let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
         let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
@@ -368,7 +369,7 @@ fn srgb_to_positive_xyb_planar_inner_v4(
         let x = 0.5 * (c0 - c1);
         let y = 0.5 * (c0 + c1);
 
-        x_out[i] = x * 14.0 + 0.42;
+        x_out[i] = x.mul_add(14.0, 0.42);
         y_out[i] = y + 0.01;
         b_out[i] = (c2 - y) + 0.55;
     }
@@ -494,9 +495,9 @@ fn srgb_to_positive_xyb_planar_inner_v3(
         let g = srgb_u8_to_linear(p[1]);
         let b = srgb_u8_to_linear(p[2]);
 
-        let mixed0 = (K_M00 * r + K_M01 * g + K_M02 * b + K_B0).max(0.0);
-        let mixed1 = (K_M10 * r + K_M11 * g + K_M12 * b + K_B0).max(0.0);
-        let mixed2 = (K_M20 * r + K_M21 * g + K_M22 * b + K_B0).max(0.0);
+        let mixed0 = K_M00.mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0))).max(0.0);
+        let mixed1 = K_M10.mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0))).max(0.0);
+        let mixed2 = K_M20.mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0))).max(0.0);
 
         let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
         let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
@@ -505,7 +506,7 @@ fn srgb_to_positive_xyb_planar_inner_v3(
         let x = 0.5 * (c0 - c1);
         let y = 0.5 * (c0 + c1);
 
-        x_out[i] = x * 14.0 + 0.42;
+        x_out[i] = x.mul_add(14.0, 0.42);
         y_out[i] = y + 0.01;
         b_out[i] = (c2 - y) + 0.55;
     }
@@ -525,9 +526,9 @@ fn srgb_to_positive_xyb_planar_inner_scalar(
         let g = srgb_u8_to_linear(p[1]);
         let b = srgb_u8_to_linear(p[2]);
 
-        let mixed0 = (K_M00 * r + K_M01 * g + K_M02 * b + K_B0).max(0.0);
-        let mixed1 = (K_M10 * r + K_M11 * g + K_M12 * b + K_B0).max(0.0);
-        let mixed2 = (K_M20 * r + K_M21 * g + K_M22 * b + K_B0).max(0.0);
+        let mixed0 = K_M00.mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0))).max(0.0);
+        let mixed1 = K_M10.mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0))).max(0.0);
+        let mixed2 = K_M20.mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0))).max(0.0);
 
         let c0 = cbrtf_fast(mixed0) + absorbance_bias;
         let c1 = cbrtf_fast(mixed1) + absorbance_bias;
@@ -536,7 +537,7 @@ fn srgb_to_positive_xyb_planar_inner_scalar(
         let x = 0.5 * (c0 - c1);
         let y = 0.5 * (c0 + c1);
 
-        x_out[i] = x * 14.0 + 0.42;
+        x_out[i] = x.mul_add(14.0, 0.42);
         y_out[i] = y + 0.01;
         b_out[i] = (c2 - y) + 0.55;
     }
@@ -631,9 +632,9 @@ fn srgb_to_xyb_planar_inner_v3(
         let g = srgb_u8_to_linear(p[1]);
         let b = srgb_u8_to_linear(p[2]);
 
-        let mut mixed0 = K_M00 * r + K_M01 * g + K_M02 * b + K_B0;
-        let mut mixed1 = K_M10 * r + K_M11 * g + K_M12 * b + K_B0;
-        let mut mixed2 = K_M20 * r + K_M21 * g + K_M22 * b + K_B0;
+        let mut mixed0 = K_M00.mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)));
+        let mut mixed1 = K_M10.mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)));
+        let mut mixed2 = K_M20.mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)));
 
         mixed0 = mixed0.max(0.0);
         mixed1 = mixed1.max(0.0);
@@ -664,9 +665,9 @@ fn srgb_to_xyb_planar_inner_scalar(
         let g = srgb_u8_to_linear(p[1]);
         let b = srgb_u8_to_linear(p[2]);
 
-        let mut mixed0 = K_M00 * r + K_M01 * g + K_M02 * b + K_B0;
-        let mut mixed1 = K_M10 * r + K_M11 * g + K_M12 * b + K_B0;
-        let mut mixed2 = K_M20 * r + K_M21 * g + K_M22 * b + K_B0;
+        let mut mixed0 = K_M00.mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)));
+        let mut mixed1 = K_M10.mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)));
+        let mut mixed2 = K_M20.mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)));
 
         mixed0 = mixed0.max(0.0);
         mixed1 = mixed1.max(0.0);
@@ -718,7 +719,7 @@ fn make_positive_xyb_inner_v3(
         let xv = x[i];
         let yv = y[i];
         let bv = b[i];
-        x[i] = xv * 14.0 + 0.42;
+        x[i] = xv.mul_add(14.0, 0.42);
         y[i] = yv + 0.01;
         b[i] = (bv - yv) + 0.55;
     }
@@ -734,7 +735,7 @@ fn make_positive_xyb_inner_scalar(
         let xv = x[i];
         let yv = y[i];
         let bv = b[i];
-        x[i] = xv * 14.0 + 0.42;
+        x[i] = xv.mul_add(14.0, 0.42);
         y[i] = yv + 0.01;
         b[i] = (bv - yv) + 0.55;
     }
