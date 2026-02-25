@@ -18,13 +18,13 @@ pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(sq_sum_into_inner(a, b, out), [v4, v3]);
 }
 
-/// Compute SSIM distance map and return (sum_d, sum_d4) for a single channel.
+/// Compute SSIM distance map and return (sum_d, sum_d4, sum_d2) for a single channel.
 /// d = max(0, 1 - (num_m * num_s) / denom_s)
 /// where:
 ///   num_m = 1 - (mu1 - mu2)^2
 ///   num_s = 2*sigma12 - 2*mu1*mu2 + C2
 ///   denom_s = sum_sq - mu1^2 - mu2^2 + C2  (sum_sq = blur(src^2 + dst^2))
-pub fn ssim_channel(mu1: &[f32], mu2: &[f32], sum_sq: &[f32], sigma12: &[f32]) -> (f64, f64) {
+pub fn ssim_channel(mu1: &[f32], mu2: &[f32], sum_sq: &[f32], sigma12: &[f32]) -> (f64, f64, f64) {
     incant!(ssim_channel_inner(mu1, mu2, sum_sq, sigma12), [v4, v3])
 }
 
@@ -71,13 +71,13 @@ pub fn edge_diff_channel_masked(
 }
 
 /// Compute edge difference features for a single channel.
-/// Returns (artifact_mean, artifact_4th, detail_lost_mean, detail_lost_4th).
+/// Returns (artifact_mean, artifact_4th, detail_lost_mean, detail_lost_4th, artifact_2nd, detail_lost_2nd).
 pub fn edge_diff_channel(
     img1: &[f32],
     img2: &[f32],
     mu1: &[f32],
     mu2: &[f32],
-) -> (f64, f64, f64, f64) {
+) -> (f64, f64, f64, f64, f64, f64) {
     incant!(edge_diff_inner(img1, img2, mu1, mu2), [v4, v3])
 }
 
@@ -301,7 +301,7 @@ fn ssim_channel_inner_v4(
     mu2: &[f32],
     sum_sq: &[f32],
     s12: &[f32],
-) -> (f64, f64) {
+) -> (f64, f64, f64) {
     let c2v = f32x16::splat(token, C2);
     let one = f32x16::splat(token, 1.0);
     let two = f32x16::splat(token, 2.0);
@@ -311,6 +311,7 @@ fn ssim_channel_inner_v4(
     let chunks = n / 16;
     let mut sum_d = 0.0f64;
     let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
 
     for c in 0..chunks {
         let base = c * 16;
@@ -329,6 +330,7 @@ fn ssim_channel_inner_v4(
 
         sum_d += d.reduce_add() as f64;
         sum_d4 += d4.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
     }
 
     for i in (chunks * 16)..n {
@@ -340,9 +342,10 @@ fn ssim_channel_inner_v4(
         let d2 = d * d;
         sum_d += d as f64;
         sum_d4 += (d2 * d2) as f64;
+        sum_d2 += d2 as f64;
     }
 
-    (sum_d, sum_d4)
+    (sum_d, sum_d4, sum_d2)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -353,7 +356,7 @@ fn ssim_channel_inner_v3(
     mu2: &[f32],
     sum_sq: &[f32],
     s12: &[f32],
-) -> (f64, f64) {
+) -> (f64, f64, f64) {
     let c2v = f32x8::splat(token, C2);
     let one = f32x8::splat(token, 1.0);
     let two = f32x8::splat(token, 2.0);
@@ -363,6 +366,7 @@ fn ssim_channel_inner_v3(
     let chunks = n / 8;
     let mut sum_d = 0.0f64;
     let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
 
     for c in 0..chunks {
         let base = c * 8;
@@ -381,6 +385,7 @@ fn ssim_channel_inner_v3(
 
         sum_d += d.reduce_add() as f64;
         sum_d4 += d4.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
     }
 
     for i in (chunks * 8)..n {
@@ -392,9 +397,10 @@ fn ssim_channel_inner_v3(
         let d2 = d * d;
         sum_d += d as f64;
         sum_d4 += (d2 * d2) as f64;
+        sum_d2 += d2 as f64;
     }
 
-    (sum_d, sum_d4)
+    (sum_d, sum_d4, sum_d2)
 }
 
 fn ssim_channel_inner_scalar(
@@ -403,10 +409,11 @@ fn ssim_channel_inner_scalar(
     mu2: &[f32],
     sum_sq: &[f32],
     s12: &[f32],
-) -> (f64, f64) {
+) -> (f64, f64, f64) {
     let n = mu1.len();
     let mut sum_d = 0.0f64;
     let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
 
     for i in 0..n {
         let mu_diff = mu1[i] - mu2[i];
@@ -417,9 +424,10 @@ fn ssim_channel_inner_scalar(
         let d2 = d * d;
         sum_d += d as f64;
         sum_d4 += (d2 * d2) as f64;
+        sum_d2 += d2 as f64;
     }
 
-    (sum_d, sum_d4)
+    (sum_d, sum_d4, sum_d2)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -430,7 +438,7 @@ fn edge_diff_inner_v4(
     img2: &[f32],
     mu1: &[f32],
     mu2: &[f32],
-) -> (f64, f64, f64, f64) {
+) -> (f64, f64, f64, f64, f64, f64) {
     let one = f32x16::splat(token, 1.0);
     let zero = f32x16::zero(token);
 
@@ -438,8 +446,10 @@ fn edge_diff_inner_v4(
     let chunks = n / 16;
     let mut sum_art = 0.0f64;
     let mut sum_art4 = 0.0f64;
+    let mut sum_art2 = 0.0f64;
     let mut sum_det = 0.0f64;
     let mut sum_det4 = 0.0f64;
+    let mut sum_det2 = 0.0f64;
 
     for c in 0..chunks {
         let base = c * 16;
@@ -463,8 +473,10 @@ fn edge_diff_inner_v4(
 
         sum_art += artifact.reduce_add() as f64;
         sum_art4 += a4.reduce_add() as f64;
+        sum_art2 += a2.reduce_add() as f64;
         sum_det += detail_lost.reduce_add() as f64;
         sum_det4 += dl4.reduce_add() as f64;
+        sum_det2 += dl2.reduce_add() as f64;
     }
 
     for i in (chunks * 16)..n {
@@ -478,11 +490,13 @@ fn edge_diff_inner_v4(
         let dl2 = detail_lost * detail_lost;
         sum_art += artifact as f64;
         sum_art4 += (a2 * a2) as f64;
+        sum_art2 += a2 as f64;
         sum_det += detail_lost as f64;
         sum_det4 += (dl2 * dl2) as f64;
+        sum_det2 += dl2 as f64;
     }
 
-    (sum_art, sum_art4, sum_det, sum_det4)
+    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -493,7 +507,7 @@ fn edge_diff_inner_v3(
     img2: &[f32],
     mu1: &[f32],
     mu2: &[f32],
-) -> (f64, f64, f64, f64) {
+) -> (f64, f64, f64, f64, f64, f64) {
     let one = f32x8::splat(token, 1.0);
     let zero = f32x8::zero(token);
 
@@ -501,8 +515,10 @@ fn edge_diff_inner_v3(
     let chunks = n / 8;
     let mut sum_art = 0.0f64;
     let mut sum_art4 = 0.0f64;
+    let mut sum_art2 = 0.0f64;
     let mut sum_det = 0.0f64;
     let mut sum_det4 = 0.0f64;
+    let mut sum_det2 = 0.0f64;
 
     for c in 0..chunks {
         let base = c * 8;
@@ -527,8 +543,10 @@ fn edge_diff_inner_v3(
 
         sum_art += artifact.reduce_add() as f64;
         sum_art4 += a4.reduce_add() as f64;
+        sum_art2 += a2.reduce_add() as f64;
         sum_det += detail_lost.reduce_add() as f64;
         sum_det4 += dl4.reduce_add() as f64;
+        sum_det2 += dl2.reduce_add() as f64;
     }
 
     for i in (chunks * 8)..n {
@@ -542,11 +560,13 @@ fn edge_diff_inner_v3(
         let dl2 = detail_lost * detail_lost;
         sum_art += artifact as f64;
         sum_art4 += (a2 * a2) as f64;
+        sum_art2 += a2 as f64;
         sum_det += detail_lost as f64;
         sum_det4 += (dl2 * dl2) as f64;
+        sum_det2 += dl2 as f64;
     }
 
-    (sum_art, sum_art4, sum_det, sum_det4)
+    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
 fn edge_diff_inner_scalar(
@@ -555,12 +575,14 @@ fn edge_diff_inner_scalar(
     img2: &[f32],
     mu1: &[f32],
     mu2: &[f32],
-) -> (f64, f64, f64, f64) {
+) -> (f64, f64, f64, f64, f64, f64) {
     let n = img1.len();
     let mut sum_art = 0.0f64;
     let mut sum_art4 = 0.0f64;
+    let mut sum_art2 = 0.0f64;
     let mut sum_det = 0.0f64;
     let mut sum_det4 = 0.0f64;
+    let mut sum_det2 = 0.0f64;
 
     for i in 0..n {
         let diff1 = (img1[i] - mu1[i]).abs();
@@ -573,11 +595,13 @@ fn edge_diff_inner_scalar(
         let dl2 = detail_lost * detail_lost;
         sum_art += artifact as f64;
         sum_art4 += (a2 * a2) as f64;
+        sum_art2 += a2 as f64;
         sum_det += detail_lost as f64;
         sum_det4 += (dl2 * dl2) as f64;
+        sum_det2 += dl2 as f64;
     }
 
-    (sum_art, sum_art4, sum_det, sum_det4)
+    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
 // === abs_diff_into ===

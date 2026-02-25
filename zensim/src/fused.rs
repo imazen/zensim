@@ -26,10 +26,13 @@ const C2: f32 = 0.0009;
 pub(crate) struct StripChannelAccum {
     pub ssim_d: f64,
     pub ssim_d4: f64,
+    pub ssim_d2: f64,
     pub edge_art: f64,
     pub edge_art4: f64,
+    pub edge_art2: f64,
     pub edge_det: f64,
     pub edge_det4: f64,
+    pub edge_det2: f64,
     pub mse: f64,
     pub sq_src: f64,
     pub sq_dst: f64,
@@ -42,10 +45,13 @@ impl StripChannelAccum {
         Self {
             ssim_d: 0.0,
             ssim_d4: 0.0,
+            ssim_d2: 0.0,
             edge_art: 0.0,
             edge_art4: 0.0,
+            edge_art2: 0.0,
             edge_det: 0.0,
             edge_det4: 0.0,
+            edge_det2: 0.0,
             mse: 0.0,
             sq_src: 0.0,
             sq_dst: 0.0,
@@ -240,6 +246,7 @@ fn fused_vblur_ssim_inner_v4(
                 let sd4 = sd2 * sd2;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
+                acc.ssim_d2 += sd2.reduce_add() as f64;
 
                 // === Edge ===
                 let diff1 = (s - mu1).abs();
@@ -251,8 +258,10 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact.reduce_add() as f64;
                 acc.edge_art4 += (a2 * a2).reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
 
                 // === Variance loss: (pixel - mu)² ===
                 let vs = s - mu1;
@@ -337,6 +346,7 @@ fn fused_vblur_ssim_inner_v4(
                 let sd2 = sd * sd;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += (sd2 * sd2).reduce_add() as f64;
+                acc.ssim_d2 += sd2.reduce_add() as f64;
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -348,8 +358,10 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact.reduce_add() as f64;
                 acc.edge_art4 += (a2 * a2).reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
 
                 // Variance
                 let vs = s - mu1;
@@ -417,6 +429,7 @@ fn fused_vblur_ssim_inner_v4(
                 let sd2 = sd * sd;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += (sd2 * sd2) as f64;
+                acc.ssim_d2 += sd2 as f64;
 
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
@@ -428,8 +441,10 @@ fn fused_vblur_ssim_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact as f64;
                 acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_art2 += a2 as f64;
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += (dl2 * dl2) as f64;
+                acc.edge_det2 += dl2 as f64;
 
                 // Variance
                 let vs = sv - mu1;
@@ -527,6 +542,7 @@ fn fused_vblur_ssim_inner_v3(
                 let sd2 = sd * sd;
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += (sd2 * sd2).reduce_add() as f64;
+                acc.ssim_d2 += sd2.reduce_add() as f64;
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -538,8 +554,10 @@ fn fused_vblur_ssim_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact.reduce_add() as f64;
                 acc.edge_art4 += (a2 * a2).reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
 
                 // Variance
                 let vs = s - mu1;
@@ -607,6 +625,7 @@ fn fused_vblur_ssim_inner_v3(
                 let sd2 = sd * sd;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += (sd2 * sd2) as f64;
+                acc.ssim_d2 += sd2 as f64;
 
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
@@ -618,8 +637,10 @@ fn fused_vblur_ssim_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact as f64;
                 acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_art2 += a2 as f64;
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += (dl2 * dl2) as f64;
+                acc.edge_det2 += dl2 as f64;
 
                 // Variance
                 let vs = sv - mu1;
@@ -705,6 +726,7 @@ fn fused_vblur_ssim_inner_scalar(
                 let sd2 = sd * sd;
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += (sd2 * sd2) as f64;
+                acc.ssim_d2 += sd2 as f64;
 
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
@@ -716,8 +738,10 @@ fn fused_vblur_ssim_inner_scalar(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact as f64;
                 acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_art2 += a2 as f64;
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += (dl2 * dl2) as f64;
+                acc.edge_det2 += dl2 as f64;
 
                 // Variance
                 let vs = sv - mu1;
@@ -805,8 +829,10 @@ fn fused_vblur_edge_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact.reduce_add() as f64;
                 acc.edge_art4 += (a2 * a2).reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
 
                 // Variance
                 let vs = s - mu1;
@@ -874,8 +900,10 @@ fn fused_vblur_edge_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact.reduce_add() as f64;
                 acc.edge_art4 += (a2 * a2).reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
 
                 let vs = s - mu1;
                 let vd = d - mu2;
@@ -928,8 +956,10 @@ fn fused_vblur_edge_inner_v4(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact as f64;
                 acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_art2 += a2 as f64;
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += (dl2 * dl2) as f64;
+                acc.edge_det2 += dl2 as f64;
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
@@ -1006,8 +1036,10 @@ fn fused_vblur_edge_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact.reduce_add() as f64;
                 acc.edge_art4 += (a2 * a2).reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
 
                 let vs = s - mu1;
                 let vd = d - mu2;
@@ -1060,8 +1092,10 @@ fn fused_vblur_edge_inner_v3(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact as f64;
                 acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_art2 += a2 as f64;
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += (dl2 * dl2) as f64;
+                acc.edge_det2 += dl2 as f64;
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
@@ -1130,8 +1164,10 @@ fn fused_vblur_edge_inner_scalar(
                 let dl2 = detail_lost * detail_lost;
                 acc.edge_art += artifact as f64;
                 acc.edge_art4 += (a2 * a2) as f64;
+                acc.edge_art2 += a2 as f64;
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += (dl2 * dl2) as f64;
+                acc.edge_det2 += dl2 as f64;
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;

@@ -39,14 +39,17 @@ pub(crate) fn should_use_streaming(width: usize, height: usize) -> bool {
 /// Per-scale feature accumulators. Collects raw sums across strips,
 /// finalized to ScaleStats at the end.
 struct ScaleAccumulators {
-    // SSIM: sum_d and sum_d^4 per channel
+    // SSIM: sum_d, sum_d^4, sum_d^2 per channel
     ssim_d: [f64; 3],
     ssim_d4: [f64; 3],
+    ssim_d2: [f64; 3],
     // Edge: artifact and detail_lost sums per channel
     edge_art: [f64; 3],
     edge_art4: [f64; 3],
+    edge_art2: [f64; 3],
     edge_det: [f64; 3],
     edge_det4: [f64; 3],
+    edge_det2: [f64; 3],
     // MSE: sum((src-dst)^2)
     mse: [f64; 3],
     // Variance loss components: sum((pixel-mu)^2) for src and dst
@@ -64,10 +67,13 @@ impl ScaleAccumulators {
         Self {
             ssim_d: [0.0; 3],
             ssim_d4: [0.0; 3],
+            ssim_d2: [0.0; 3],
             edge_art: [0.0; 3],
             edge_art4: [0.0; 3],
+            edge_art2: [0.0; 3],
             edge_det: [0.0; 3],
             edge_det4: [0.0; 3],
+            edge_det2: [0.0; 3],
             mse: [0.0; 3],
             sq_src: [0.0; 3],
             sq_dst: [0.0; 3],
@@ -81,10 +87,13 @@ impl ScaleAccumulators {
         for c in 0..3 {
             self.ssim_d[c] += other.ssim_d[c];
             self.ssim_d4[c] += other.ssim_d4[c];
+            self.ssim_d2[c] += other.ssim_d2[c];
             self.edge_art[c] += other.edge_art[c];
             self.edge_art4[c] += other.edge_art4[c];
+            self.edge_art2[c] += other.edge_art2[c];
             self.edge_det[c] += other.edge_det[c];
             self.edge_det4[c] += other.edge_det4[c];
+            self.edge_det2[c] += other.edge_det2[c];
             self.mse[c] += other.mse[c];
             self.sq_src[c] += other.sq_src[c];
             self.sq_dst[c] += other.sq_dst[c];
@@ -102,20 +111,31 @@ impl ScaleAccumulators {
         let mut mse = [0.0f64; 3];
         let mut variance_loss = [0.0f64; 3];
         let mut texture_loss = [0.0f64; 3];
+        let mut contrast_increase = [0.0f64; 3];
+        let mut ssim_2nd = [0.0f64; 3];
+        let mut edge_2nd = [0.0f64; 6];
 
         for c in 0..3 {
             ssim[c * 2] = self.ssim_d[c] * one_over_n;
             ssim[c * 2 + 1] = (self.ssim_d4[c] * one_over_n).powf(0.25);
+            ssim_2nd[c] = (self.ssim_d2[c] * one_over_n).sqrt();
             edge[c * 4] = self.edge_art[c] * one_over_n;
             edge[c * 4 + 1] = (self.edge_art4[c] * one_over_n).powf(0.25);
             edge[c * 4 + 2] = self.edge_det[c] * one_over_n;
             edge[c * 4 + 3] = (self.edge_det4[c] * one_over_n).powf(0.25);
+            edge_2nd[c * 2] = (self.edge_art2[c] * one_over_n).sqrt();
+            edge_2nd[c * 2 + 1] = (self.edge_det2[c] * one_over_n).sqrt();
             mse[c] = self.mse[c] * one_over_n;
 
             let var_src = self.sq_src[c] * one_over_n;
             let var_dst = self.sq_dst[c] * one_over_n;
             variance_loss[c] = if var_src > 1e-10 {
                 (1.0 - var_dst / var_src).max(0.0)
+            } else {
+                0.0
+            };
+            contrast_increase[c] = if var_src > 1e-10 {
+                (var_dst / var_src - 1.0).max(0.0)
             } else {
                 0.0
             };
@@ -135,8 +155,9 @@ impl ScaleAccumulators {
             mse,
             variance_loss,
             texture_loss,
-            ssim_2nd: [0.0; 3],
-            edge_2nd: [0.0; 6],
+            contrast_increase,
+            ssim_2nd,
+            edge_2nd,
         }
     }
 }
@@ -151,6 +172,9 @@ fn active_channels(scale_idx: usize, config: &ZensimConfig) -> Vec<(usize, bool,
             && (base..base + count).any(|i| WEIGHTS[i].abs() > 0.001)
     };
 
+    // Feature layout per channel (13): ssim_mean(0), ssim_4th(1), ssim_2nd(2),
+    //   art_mean(3), art_4th(4), art_2nd(5), det_mean(6), det_4th(7), det_2nd(8),
+    //   mse(9), variance_loss(10), texture_loss(11), contrast_increase(12)
     let mut active = Vec::new();
     let beyond = scale_idx * (fpc * 3) >= WEIGHTS.len();
     for c in 0..3 {
@@ -160,11 +184,11 @@ fn active_channels(scale_idx: usize, config: &ZensimConfig) -> Vec<(usize, bool,
             }
         } else {
             let base = scale_idx * (fpc * 3) + c * fpc;
-            let need_ssim = compute_all || has_weight(base, 2);
-            let need_blur = has_weight(base + 7, 2);
+            let need_ssim = compute_all || has_weight(base, 3); // positions 0-2
+            let need_blur = has_weight(base + 10, 3); // positions 10-12
             // Blur features need mu1/mu2 (same as edge), fold into need_edge
-            let need_edge = compute_all || has_weight(base + 2, 4) || need_blur;
-            let need_mse = compute_all || has_weight(base + 6, 1);
+            let need_edge = compute_all || has_weight(base + 3, 6) || need_blur; // positions 3-8
+            let need_mse = compute_all || has_weight(base + 9, 1); // position 9
             if need_ssim || need_edge || need_mse {
                 active.push((c, need_ssim, need_edge));
             }
@@ -425,10 +449,13 @@ fn process_strip_channel(
 
             accum.ssim_d[c] += strip_acc.ssim_d;
             accum.ssim_d4[c] += strip_acc.ssim_d4;
+            accum.ssim_d2[c] += strip_acc.ssim_d2;
             accum.edge_art[c] += strip_acc.edge_art;
             accum.edge_art4[c] += strip_acc.edge_art4;
+            accum.edge_art2[c] += strip_acc.edge_art2;
             accum.edge_det[c] += strip_acc.edge_det;
             accum.edge_det4[c] += strip_acc.edge_det4;
+            accum.edge_det2[c] += strip_acc.edge_det2;
             accum.mse[c] += strip_acc.mse;
             accum.sq_src[c] += strip_acc.sq_src;
             accum.sq_dst[c] += strip_acc.sq_dst;
@@ -460,8 +487,10 @@ fn process_strip_channel(
 
             accum.edge_art[c] += strip_acc.edge_art;
             accum.edge_art4[c] += strip_acc.edge_art4;
+            accum.edge_art2[c] += strip_acc.edge_art2;
             accum.edge_det[c] += strip_acc.edge_det;
             accum.edge_det4[c] += strip_acc.edge_det4;
+            accum.edge_det2[c] += strip_acc.edge_det2;
             accum.mse[c] += strip_acc.mse;
             accum.sq_src[c] += strip_acc.sq_src;
             accum.sq_dst[c] += strip_acc.sq_dst;
@@ -529,17 +558,20 @@ fn process_strip_channel(
     if need_ssim {
         let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
         let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
-        let (sum_d, sum_d4) = ssim_channel(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
+        let (sum_d, sum_d4, sum_d2) = ssim_channel(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
         accum.ssim_d[c] += sum_d;
         accum.ssim_d4[c] += sum_d4;
+        accum.ssim_d2[c] += sum_d2;
     }
 
     if need_edge {
-        let (art, art4, det, det4) = edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
+        let (art, art4, det, det4, art2, det2) = edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
         accum.edge_art[c] += art;
         accum.edge_art4[c] += art4;
+        accum.edge_art2[c] += art2;
         accum.edge_det[c] += det;
         accum.edge_det4[c] += det4;
+        accum.edge_det2[c] += det2;
     }
 
     accum.sq_src[c] += sq_diff_sum(inner_src, inner_mu1);
@@ -707,8 +739,10 @@ mod tests {
 
         // Diagnostics: print all differing features
         let feature_names = [
-            "ssim_mean", "ssim_4th", "edge_art_mean", "edge_art_4th",
-            "edge_det_mean", "edge_det_4th", "mse", "var_loss", "tex_loss",
+            "ssim_mean", "ssim_4th", "ssim_2nd",
+            "edge_art_mean", "edge_art_4th", "edge_art_2nd",
+            "edge_det_mean", "edge_det_4th", "edge_det_2nd",
+            "mse", "var_loss", "tex_loss", "contrast_inc",
         ];
         let mut max_sig_rel = 0.0f64; // max relative diff for significant features
         let mut max_abs_diff = 0.0f64;
@@ -730,10 +764,10 @@ mod tests {
                 }
             }
             if diff > 1e-8 {
-                let scale = i / 27;
-                let within = i % 27;
-                let ch = within / 9;
-                let fi = within % 9;
+                let scale = i / 39;
+                let within = i % 39;
+                let ch = within / 13;
+                let fi = within % 13;
                 let rel = diff / absmax.max(1e-12);
                 eprintln!(
                     "  feat {:3} (s{} c{} {:14}) full={:12.8} stream={:12.8} diff={:.2e} rel={:.2e}",

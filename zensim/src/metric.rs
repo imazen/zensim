@@ -82,13 +82,8 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .zip(weights.iter())
         .map(|(&f, &w)| w * f)
         .sum();
-    // Infer features_per_scale from total feature count: must be divisible by 3 channels
-    let n_features = features.len();
-    let features_per_scale = if n_features % (FEATURES_PER_CHANNEL_MASKED * 3) == 0 {
-        FEATURES_PER_CHANNEL_MASKED * 3
-    } else {
-        FEATURES_PER_CHANNEL_BASIC * 3
-    };
+    // Normalize by number of scales
+    let features_per_scale = FEATURES_PER_CHANNEL_BASIC * 3;
     let raw_distance = raw_distance / (features.len() as f64 / features_per_scale as f64).max(1.0);
     (distance_to_score(raw_distance), raw_distance)
 }
@@ -105,11 +100,12 @@ pub(crate) struct ScaleStats {
     pub(crate) variance_loss: [f64; 3],
     /// Texture loss (L1): max(0, 1 - mad_dst / mad_src) per channel
     pub(crate) texture_loss: [f64; 3],
-    /// 2nd-power pooled features (masking mode only):
-    /// SSIM: [root2_d] per channel = 3 values
+    /// 2nd-power pooled SSIM: [root2_d] per channel = 3 values
     pub(crate) ssim_2nd: [f64; 3],
     /// Edge 2nd power: [art_2nd, det_2nd] per channel = 6 values
     pub(crate) edge_2nd: [f64; 6],
+    /// Contrast increase: max(0, var_dst/var_src - 1) per channel
+    pub(crate) contrast_increase: [f64; 3],
 }
 
 /// Result from zensim comparison.
@@ -120,21 +116,17 @@ pub struct ZensimResult {
     /// Raw weighted distance (before nonlinear mapping). Lower = more similar.
     pub raw_distance: f64,
     /// Per-scale raw features for weight training.
-    ///
-    /// Without masking (9 features per channel × 3 channels = 27 per scale):
-    ///   ssim_mean, ssim_4th, edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th,
-    ///   mse, variance_loss, texture_loss
-    ///
-    /// With masking (12 features per channel × 3 channels = 36 per scale):
+    /// 13 features per channel × 3 channels = 39 per scale:
     ///   ssim_mean, ssim_4th, ssim_2nd, edge_art_mean, edge_art_4th, edge_art_2nd,
-    ///   edge_det_mean, edge_det_4th, edge_det_2nd, mse, variance_loss, texture_loss
+    ///   edge_det_mean, edge_det_4th, edge_det_2nd, mse, variance_loss, texture_loss,
+    ///   contrast_increase
     pub features: Vec<f64>,
 }
 
-/// Features per channel when masking is disabled.
-pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 9;
-/// Features per channel when masking is enabled (adds 2nd-power pooled variants).
-pub(crate) const FEATURES_PER_CHANNEL_MASKED: usize = 12;
+/// Features per channel: 13 features always emitted.
+/// ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
+/// det_mean, det_4th, det_2nd, mse, variance_loss, texture_loss, contrast_increase
+pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
 /// Compute zensim score between two sRGB u8 images.
 ///
@@ -269,12 +261,13 @@ fn compute_multiscale_stats(
 
 /// Per-channel result from compute_channel.
 struct ChannelResult {
-    ssim: [f64; 2],     // [mean_d, root4_d]
-    edge: [f64; 4],     // [art_mean, art_4th, det_mean, det_4th]
-    variance_loss: f64, // max(0, 1 - var_dst / var_src)
-    texture_loss: f64,  // max(0, 1 - mad_dst / mad_src)
-    ssim_2nd: f64,      // root2 pooled SSIM (masking mode)
-    edge_2nd: [f64; 2], // [art_2nd, det_2nd] (masking mode)
+    ssim: [f64; 2],        // [mean_d, root4_d]
+    edge: [f64; 4],        // [art_mean, art_4th, det_mean, det_4th]
+    variance_loss: f64,    // max(0, 1 - var_dst / var_src)
+    texture_loss: f64,     // max(0, 1 - mad_dst / mad_src)
+    contrast_increase: f64, // max(0, var_dst/var_src - 1)
+    ssim_2nd: f64,         // root2 pooled SSIM
+    edge_2nd: [f64; 2],   // [art_2nd, det_2nd]
 }
 
 /// Compute SSIM and/or edge features for a single channel.
@@ -440,10 +433,11 @@ fn compute_channel(
             ssim[1] = (sum_d4 * one_over_n).powf(0.25);
             ssim_2nd = (sum_d2 * one_over_n).sqrt();
         } else {
-            let (sum_d, sum_d4) =
+            let (sum_d, sum_d4, sum_d2) =
                 ssim_channel(&bufs.mu1, &bufs.mu2, &bufs.sigma1_sq, &bufs.sigma12);
             ssim[0] = sum_d * one_over_n;
             ssim[1] = (sum_d4 * one_over_n).powf(0.25);
+            ssim_2nd = (sum_d2 * one_over_n).sqrt();
         }
     }
 
@@ -458,11 +452,13 @@ fn compute_channel(
             edge_2nd[0] = (art2 * one_over_n).sqrt();
             edge_2nd[1] = (det2 * one_over_n).sqrt();
         } else {
-            let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
+            let (art, art4, det, det4, art2, det2) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
             edge[0] = art * one_over_n;
             edge[1] = (art4 * one_over_n).powf(0.25);
             edge[2] = det * one_over_n;
             edge[3] = (det4 * one_over_n).powf(0.25);
+            edge_2nd[0] = (art2 * one_over_n).sqrt();
+            edge_2nd[1] = (det2 * one_over_n).sqrt();
         }
     }
 
@@ -471,6 +467,13 @@ fn compute_channel(
     let var_dst = sq_diff_sum(&dst_c[..n], &bufs.mu2[..n]) * one_over_n;
     let variance_loss = if var_src > 1e-10 {
         (1.0 - var_dst / var_src).max(0.0)
+    } else {
+        0.0
+    };
+
+    // Contrast increase: max(0, var_dst/var_src - 1)
+    let contrast_increase = if var_src > 1e-10 {
+        (var_dst / var_src - 1.0).max(0.0)
     } else {
         0.0
     };
@@ -489,6 +492,7 @@ fn compute_channel(
         edge,
         variance_loss,
         texture_loss,
+        contrast_increase,
         ssim_2nd,
         edge_2nd,
     }
@@ -516,6 +520,7 @@ pub(crate) fn compute_single_scale(
     let mut mse_vals = [0.0f64; 3];
     let mut variance_loss_vals = [0.0f64; 3];
     let mut texture_loss_vals = [0.0f64; 3];
+    let mut contrast_increase_vals = [0.0f64; 3];
     let mut ssim_2nd_vals = [0.0f64; 3];
     let mut edge_2nd_vals = [0.0f64; 6];
 
@@ -532,21 +537,23 @@ pub(crate) fn compute_single_scale(
     };
 
     // Determine which channels need work
+    // Feature layout per channel (13): ssim_mean(0), ssim_4th(1), ssim_2nd(2),
+    //   art_mean(3), art_4th(4), art_2nd(5), det_mean(6), det_4th(7), det_2nd(8),
+    //   mse(9), variance_loss(10), texture_loss(11), contrast_increase(12)
     let mut active_channels: Vec<(usize, bool, bool)> = Vec::new();
     let beyond_basic = scale_idx * (fpc_basic * 3) >= WEIGHTS.len();
     for c in 0..3 {
         if beyond_basic {
-            // Extra scales: always compute everything
             if compute_all {
                 active_channels.push((c, true, true));
             }
         } else {
             let base = scale_idx * (fpc_basic * 3) + c * fpc_basic;
-            let need_ssim = compute_all || has_weight(base, 2);
-            let need_blur_features = has_weight(base + 7, 2);
-            // Blur features need mu1/mu2 (same as edge), so fold into need_edge
-            let need_edge = compute_all || has_weight(base + 2, 4) || need_blur_features;
-            let need_mse = compute_all || has_weight(base + 6, 1);
+            let need_ssim = compute_all || has_weight(base, 3); // positions 0-2
+            let need_blur_features = has_weight(base + 10, 3); // positions 10-12
+            // Blur features need mu1/mu2 (same as edge), fold into need_edge
+            let need_edge = compute_all || has_weight(base + 3, 6) || need_blur_features; // positions 3-8
+            let need_mse = compute_all || has_weight(base + 9, 1); // position 9
             if need_ssim || need_edge || need_mse {
                 active_channels.push((c, need_ssim, need_edge));
             }
@@ -576,6 +583,9 @@ pub(crate) fn compute_single_scale(
             &mut edge_vals,
             &mut variance_loss_vals,
             &mut texture_loss_vals,
+            &mut contrast_increase_vals,
+            &mut ssim_2nd_vals,
+            &mut edge_2nd_vals,
         );
     } else {
         // Sequential path (also used for masking since mask computation needs mu1)
@@ -586,11 +596,10 @@ pub(crate) fn compute_single_scale(
             store_channel_result(c, &result, &mut ssim_vals, &mut edge_vals);
             variance_loss_vals[c] = result.variance_loss;
             texture_loss_vals[c] = result.texture_loss;
-            if masked {
-                ssim_2nd_vals[c] = result.ssim_2nd;
-                edge_2nd_vals[c * 2] = result.edge_2nd[0];
-                edge_2nd_vals[c * 2 + 1] = result.edge_2nd[1];
-            }
+            contrast_increase_vals[c] = result.contrast_increase;
+            ssim_2nd_vals[c] = result.ssim_2nd;
+            edge_2nd_vals[c * 2] = result.edge_2nd[0];
+            edge_2nd_vals[c * 2 + 1] = result.edge_2nd[1];
         }
     }
 
@@ -600,6 +609,7 @@ pub(crate) fn compute_single_scale(
         mse: mse_vals,
         variance_loss: variance_loss_vals,
         texture_loss: texture_loss_vals,
+        contrast_increase: contrast_increase_vals,
         ssim_2nd: ssim_2nd_vals,
         edge_2nd: edge_2nd_vals,
     }
@@ -619,7 +629,7 @@ fn store_channel_result(
     edge_vals[c * 4 + 3] = result.edge[3];
 }
 
-/// Compute variance loss and texture loss for a single channel.
+/// Compute variance loss, texture loss, and contrast increase for a single channel.
 /// mu1/mu2 must already contain blurred src/dst for this channel.
 #[allow(clippy::too_many_arguments)]
 fn compute_blur_features(
@@ -631,12 +641,18 @@ fn compute_blur_features(
     c: usize,
     variance_loss_vals: &mut [f64; 3],
     texture_loss_vals: &mut [f64; 3],
+    contrast_increase_vals: &mut [f64; 3],
 ) {
     let n = (1.0 / one_over_n) as usize;
     let var_src = sq_diff_sum(&src_c[..n], &mu1[..n]) * one_over_n;
     let var_dst = sq_diff_sum(&dst_c[..n], &mu2[..n]) * one_over_n;
     variance_loss_vals[c] = if var_src > 1e-10 {
         (1.0 - var_dst / var_src).max(0.0)
+    } else {
+        0.0
+    };
+    contrast_increase_vals[c] = if var_src > 1e-10 {
+        (var_dst / var_src - 1.0).max(0.0)
     } else {
         0.0
     };
@@ -673,6 +689,9 @@ fn compute_ssim_channel_sequential(
     edge_vals: &mut [f64; 12],
     variance_loss_vals: &mut [f64; 3],
     texture_loss_vals: &mut [f64; 3],
+    contrast_increase_vals: &mut [f64; 3],
+    ssim_2nd_vals: &mut [f64; 3],
+    edge_2nd_vals: &mut [f64; 6],
 ) {
     // 4 sequential blurs for SSIM
     blur_fn(src_c, mu1, temp, width, height, blur_radius);
@@ -682,16 +701,19 @@ fn compute_ssim_channel_sequential(
     mul_into(src_c, dst_c, scratch);
     blur_fn(scratch, sig12, temp, width, height, blur_radius);
 
-    let (sum_d, sum_d4) = ssim_channel(mu1, mu2, sig_sq, sig12);
+    let (sum_d, sum_d4, sum_d2) = ssim_channel(mu1, mu2, sig_sq, sig12);
     ssim_vals[c * 2] = sum_d * one_over_n;
     ssim_vals[c * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+    ssim_2nd_vals[c] = (sum_d2 * one_over_n).sqrt();
 
     if need_edge {
-        let (art, art4, det, det4) = edge_diff_channel(src_c, dst_c, mu1, mu2);
+        let (art, art4, det, det4, art2, det2) = edge_diff_channel(src_c, dst_c, mu1, mu2);
         edge_vals[c * 4] = art * one_over_n;
         edge_vals[c * 4 + 1] = (art4 * one_over_n).powf(0.25);
         edge_vals[c * 4 + 2] = det * one_over_n;
         edge_vals[c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+        edge_2nd_vals[c * 2] = (art2 * one_over_n).sqrt();
+        edge_2nd_vals[c * 2 + 1] = (det2 * one_over_n).sqrt();
     }
 
     compute_blur_features(
@@ -703,6 +725,7 @@ fn compute_ssim_channel_sequential(
         c,
         variance_loss_vals,
         texture_loss_vals,
+        contrast_increase_vals,
     );
 }
 
@@ -729,6 +752,9 @@ fn compute_single_scale_phased(
     edge_vals: &mut [f64; 12],
     variance_loss_vals: &mut [f64; 3],
     texture_loss_vals: &mut [f64; 3],
+    contrast_increase_vals: &mut [f64; 3],
+    ssim_2nd_vals: &mut [f64; 3],
+    edge_2nd_vals: &mut [f64; 6],
 ) {
     let n = width * height;
     let one_over_n = 1.0 / n as f64;
@@ -798,16 +824,19 @@ fn compute_single_scale_phased(
             });
 
             // Phase 4: reductions (fast, sequential)
-            let (sum_d, sum_d4) = ssim_channel(mu1_a, mu2_a, sig_sq, sig12);
+            let (sum_d, sum_d4, sum_d2) = ssim_channel(mu1_a, mu2_a, sig_sq, sig12);
             ssim_vals[sc * 2] = sum_d * one_over_n;
             ssim_vals[sc * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+            ssim_2nd_vals[sc] = (sum_d2 * one_over_n).sqrt();
 
             if sc_need_edge {
-                let (art, art4, det, det4) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
+                let (art, art4, det, det4, art2, det2) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
                 edge_vals[sc * 4] = art * one_over_n;
                 edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
                 edge_vals[sc * 4 + 2] = det * one_over_n;
                 edge_vals[sc * 4 + 3] = (det4 * one_over_n).powf(0.25);
+                edge_2nd_vals[sc * 2] = (art2 * one_over_n).sqrt();
+                edge_2nd_vals[sc * 2 + 1] = (det2 * one_over_n).sqrt();
             }
             compute_blur_features(
                 &src[sc],
@@ -818,14 +847,17 @@ fn compute_single_scale_phased(
                 sc,
                 variance_loss_vals,
                 texture_loss_vals,
+                contrast_increase_vals,
             );
 
-            let (art, art4, det, det4) =
+            let (art, art4, det, det4, art2, det2) =
                 edge_diff_channel(&src[edge_c], &dst[edge_c], mu1_b, mu2_b);
             edge_vals[edge_c * 4] = art * one_over_n;
             edge_vals[edge_c * 4 + 1] = (art4 * one_over_n).powf(0.25);
             edge_vals[edge_c * 4 + 2] = det * one_over_n;
             edge_vals[edge_c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+            edge_2nd_vals[edge_c * 2] = (art2 * one_over_n).sqrt();
+            edge_2nd_vals[edge_c * 2 + 1] = (det2 * one_over_n).sqrt();
             compute_blur_features(
                 &src[edge_c],
                 &dst[edge_c],
@@ -835,18 +867,21 @@ fn compute_single_scale_phased(
                 edge_c,
                 variance_loss_vals,
                 texture_loss_vals,
+                contrast_increase_vals,
             );
 
             // Handle additional edge-only channels (rare — usually only 1)
             for &edge_c2 in &edge_only_chs[1..] {
                 blur_fn(&src[edge_c2], mu1_b, temp1, width, height, blur_radius);
                 blur_fn(&dst[edge_c2], mu2_b, temp2, width, height, blur_radius);
-                let (art, art4, det, det4) =
+                let (art, art4, det, det4, art2, det2) =
                     edge_diff_channel(&src[edge_c2], &dst[edge_c2], mu1_b, mu2_b);
                 edge_vals[edge_c2 * 4] = art * one_over_n;
                 edge_vals[edge_c2 * 4 + 1] = (art4 * one_over_n).powf(0.25);
                 edge_vals[edge_c2 * 4 + 2] = det * one_over_n;
                 edge_vals[edge_c2 * 4 + 3] = (det4 * one_over_n).powf(0.25);
+                edge_2nd_vals[edge_c2 * 2] = (art2 * one_over_n).sqrt();
+                edge_2nd_vals[edge_c2 * 2 + 1] = (det2 * one_over_n).sqrt();
                 compute_blur_features(
                     &src[edge_c2],
                     &dst[edge_c2],
@@ -856,6 +891,7 @@ fn compute_single_scale_phased(
                     edge_c2,
                     variance_loss_vals,
                     texture_loss_vals,
+                    contrast_increase_vals,
                 );
             }
 
@@ -881,6 +917,9 @@ fn compute_single_scale_phased(
                     edge_vals,
                     variance_loss_vals,
                     texture_loss_vals,
+                    contrast_increase_vals,
+                    ssim_2nd_vals,
+                    edge_2nd_vals,
                 );
             }
         } else {
@@ -899,16 +938,19 @@ fn compute_single_scale_phased(
                 blur_fn(scratch2, sig12, temp2, width, height, blur_radius);
             });
 
-            let (sum_d, sum_d4) = ssim_channel(mu1_a, mu2_a, sig_sq, sig12);
+            let (sum_d, sum_d4, sum_d2) = ssim_channel(mu1_a, mu2_a, sig_sq, sig12);
             ssim_vals[sc * 2] = sum_d * one_over_n;
             ssim_vals[sc * 2 + 1] = (sum_d4 * one_over_n).powf(0.25);
+            ssim_2nd_vals[sc] = (sum_d2 * one_over_n).sqrt();
 
             if sc_need_edge {
-                let (art, art4, det, det4) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
+                let (art, art4, det, det4, art2, det2) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
                 edge_vals[sc * 4] = art * one_over_n;
                 edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
                 edge_vals[sc * 4 + 2] = det * one_over_n;
                 edge_vals[sc * 4 + 3] = (det4 * one_over_n).powf(0.25);
+                edge_2nd_vals[sc * 2] = (art2 * one_over_n).sqrt();
+                edge_2nd_vals[sc * 2 + 1] = (det2 * one_over_n).sqrt();
             }
             compute_blur_features(
                 &src[sc],
@@ -919,6 +961,7 @@ fn compute_single_scale_phased(
                 sc,
                 variance_loss_vals,
                 texture_loss_vals,
+                contrast_increase_vals,
             );
 
             // Handle additional SSIM channels sequentially
@@ -943,6 +986,9 @@ fn compute_single_scale_phased(
                     edge_vals,
                     variance_loss_vals,
                     texture_loss_vals,
+                    contrast_increase_vals,
+                    ssim_2nd_vals,
+                    edge_2nd_vals,
                 );
             }
         }
@@ -953,12 +999,14 @@ fn compute_single_scale_phased(
                 s.spawn(|| blur_fn(&src[edge_c], mu1_a, temp1, width, height, blur_radius));
                 blur_fn(&dst[edge_c], mu2_a, temp2, width, height, blur_radius);
             });
-            let (art, art4, det, det4) =
+            let (art, art4, det, det4, art2, det2) =
                 edge_diff_channel(&src[edge_c], &dst[edge_c], mu1_a, mu2_a);
             edge_vals[edge_c * 4] = art * one_over_n;
             edge_vals[edge_c * 4 + 1] = (art4 * one_over_n).powf(0.25);
             edge_vals[edge_c * 4 + 2] = det * one_over_n;
             edge_vals[edge_c * 4 + 3] = (det4 * one_over_n).powf(0.25);
+            edge_2nd_vals[edge_c * 2] = (art2 * one_over_n).sqrt();
+            edge_2nd_vals[edge_c * 2 + 1] = (det2 * one_over_n).sqrt();
             compute_blur_features(
                 &src[edge_c],
                 &dst[edge_c],
@@ -968,6 +1016,7 @@ fn compute_single_scale_phased(
                 edge_c,
                 variance_loss_vals,
                 texture_loss_vals,
+                contrast_increase_vals,
             );
         }
     }
@@ -982,48 +1031,45 @@ fn compute_single_scale_phased(
 /// - Mean vs 4th-power pooling
 ///
 /// These weights are initial values, to be optimized against human ratings.
-/// Total number of features per scale (3 channels × (2 SSIM + 4 edge + 1 MSE + 2 blur) = 27)
+/// Total number of features per scale (3 channels × 13 features = 39)
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
-pub const FEATURES_PER_SCALE: usize = 27;
+pub const FEATURES_PER_SCALE: usize = 39;
 
 /// Trained weights from TID2013 optimization (3000 pairs).
-/// Layout: 4 scales × 3 channels (X,Y,B) × 9 features (ssim_mean, ssim_4th,
-///         edge_art_mean, edge_art_4th, edge_det_mean, edge_det_4th, mse,
-///         variance_loss, texture_loss)
+/// Layout: 4 scales × 3 channels (X,Y,B) × 13 features (ssim_mean, ssim_4th, ssim_2nd,
+///         edge_art_mean, edge_art_4th, edge_art_2nd, edge_det_mean, edge_det_4th, edge_det_2nd,
+///         mse, variance_loss, texture_loss, contrast_increase)
+/// New features (ssim_2nd, art_2nd, det_2nd, contrast_increase) start at zero weight.
 #[allow(clippy::excessive_precision)]
-pub const WEIGHTS: [f64; 108] = [
-    // Scale 0 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+pub const WEIGHTS: [f64; 156] = [
+    // Scale 0 Channel X (13 features)
+    0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 0 Channel Y
-    0.117592, 8.367503, 0.000000, 0.000000, 25.587284, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.117592, 8.367503, 0.0, 0.000000, 0.000000, 0.0, 25.587284, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 0 Channel B
-    0.000000, 0.000000, 0.000000, 22.157398, 55.113319, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.0, 0.000000, 22.157398, 0.0, 55.113319, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 1 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 1 Channel Y
-    50.202655, 4.162088, 0.000000, 0.000000, 125.177307, 115.357675, 0.000000, 0.000000, 0.000000,
+    50.202655, 4.162088, 0.0, 0.000000, 0.000000, 0.0, 125.177307, 115.357675, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 1 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 19.069615, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 19.069615, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 2 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 15.958061, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 15.958061, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 2 Channel Y
-    0.000000, 1.245107, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 1.245107, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 2 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 3 Channel X
-    24.891486, 8.001749, 0.000000, 0.000000, 374.130349, 0.000000, 0.000000, 0.000000, 0.000000,
+    24.891486, 8.001749, 0.0, 0.000000, 0.000000, 0.0, 374.130349, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 3 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
     // Scale 3 Channel B
-    21.750148, 7.333710, 0.000000, 0.000000, 214.128879, 0.000000, 0.000000, 0.000000, 0.000000,
+    21.750148, 7.333710, 0.0, 0.000000, 0.000000, 0.0, 214.128879, 0.000000, 0.0, 0.000000, 0.000000, 0.000000, 0.0,
 ];
 
-pub(crate) fn combine_scores(scale_stats: &[ScaleStats], masked: bool) -> ZensimResult {
-    let features_per_ch = if masked {
-        FEATURES_PER_CHANNEL_MASKED
-    } else {
-        FEATURES_PER_CHANNEL_BASIC
-    };
+pub(crate) fn combine_scores(scale_stats: &[ScaleStats], _masked: bool) -> ZensimResult {
+    let features_per_ch = FEATURES_PER_CHANNEL_BASIC;
     let features_per_scale = features_per_ch * 3;
 
     let mut features = Vec::with_capacity(scale_stats.len() * features_per_scale);
@@ -1031,32 +1077,23 @@ pub(crate) fn combine_scores(scale_stats: &[ScaleStats], masked: bool) -> Zensim
 
     for ss in scale_stats.iter() {
         for c in 0..3 {
-            // Always emit: ssim_mean, ssim_4th
+            // ssim_mean, ssim_4th, ssim_2nd
             features.push(ss.ssim[c * 2].abs());
             features.push(ss.ssim[c * 2 + 1].abs());
-            if masked {
-                // ssim_2nd
-                features.push(ss.ssim_2nd[c].abs());
-            }
-            // art_mean, art_4th
+            features.push(ss.ssim_2nd[c].abs());
+            // art_mean, art_4th, art_2nd
             features.push(ss.edge[c * 4].abs());
             features.push(ss.edge[c * 4 + 1].abs());
-            if masked {
-                // art_2nd
-                features.push(ss.edge_2nd[c * 2].abs());
-            }
-            // det_mean, det_4th
+            features.push(ss.edge_2nd[c * 2].abs());
+            // det_mean, det_4th, det_2nd
             features.push(ss.edge[c * 4 + 2].abs());
             features.push(ss.edge[c * 4 + 3].abs());
-            if masked {
-                // det_2nd
-                features.push(ss.edge_2nd[c * 2 + 1].abs());
-            }
-            // mse
+            features.push(ss.edge_2nd[c * 2 + 1].abs());
+            // mse, variance_loss, texture_loss, contrast_increase
             features.push(ss.mse[c]);
-            // variance_loss, texture_loss
             features.push(ss.variance_loss[c]);
             features.push(ss.texture_loss[c]);
+            features.push(ss.contrast_increase[c]);
         }
     }
 
