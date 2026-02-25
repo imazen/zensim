@@ -11,7 +11,7 @@ use crate::blur::{
 use crate::color::srgb_to_positive_xyb_planar_into;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{
-    ScaleStats, ZensimConfig, FEATURES_PER_CHANNEL_BASIC, WEIGHTS, combine_scores,
+    FEATURES_PER_CHANNEL_BASIC, ScaleStats, WEIGHTS, ZensimConfig, combine_scores,
 };
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
@@ -226,9 +226,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
         }
 
         // Parallel band processing: borrow slices from full planes
-        let scale_stat = process_scale_bands(
-            &src_planes, &dst_planes, w, h, config, scale,
-        );
+        let scale_stat = process_scale_bands(&src_planes, &dst_planes, w, h, config, scale);
         stats.push(scale_stat);
 
         // Downscale 6 planes in parallel for next scale
@@ -236,20 +234,28 @@ pub(crate) fn compute_multiscale_stats_streaming(
             let [ref mut s0, ref mut s1, ref mut s2] = src_planes;
             let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
             let (((nw, nh), _), _) = rayon::join(
-                || rayon::join(
-                    || downscale_2x_inplace(s0, w, h),
-                    || rayon::join(
-                        || downscale_2x_inplace(s1, w, h),
-                        || downscale_2x_inplace(s2, w, h),
-                    ),
-                ),
-                || rayon::join(
-                    || downscale_2x_inplace(d0, w, h),
-                    || rayon::join(
-                        || downscale_2x_inplace(d1, w, h),
-                        || downscale_2x_inplace(d2, w, h),
-                    ),
-                ),
+                || {
+                    rayon::join(
+                        || downscale_2x_inplace(s0, w, h),
+                        || {
+                            rayon::join(
+                                || downscale_2x_inplace(s1, w, h),
+                                || downscale_2x_inplace(s2, w, h),
+                            )
+                        },
+                    )
+                },
+                || {
+                    rayon::join(
+                        || downscale_2x_inplace(d0, w, h),
+                        || {
+                            rayon::join(
+                                || downscale_2x_inplace(d1, w, h),
+                                || downscale_2x_inplace(d2, w, h),
+                            )
+                        },
+                    )
+                },
             );
             w = nw;
             h = nh;
@@ -528,7 +534,8 @@ fn process_strip_channel(
     }
 
     if need_edge {
-        let (art, art4, det, det4, art2, det2) = edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
+        let (art, art4, det, det4, art2, det2) =
+            edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
         accum.edge_art[c] += art;
         accum.edge_art4[c] += art4;
         accum.edge_art2[c] += art2;
@@ -702,10 +709,19 @@ mod tests {
 
         // Diagnostics: print all differing features
         let feature_names = [
-            "ssim_mean", "ssim_4th", "ssim_2nd",
-            "edge_art_mean", "edge_art_4th", "edge_art_2nd",
-            "edge_det_mean", "edge_det_4th", "edge_det_2nd",
-            "mse", "var_loss", "tex_loss", "contrast_inc",
+            "ssim_mean",
+            "ssim_4th",
+            "ssim_2nd",
+            "edge_art_mean",
+            "edge_art_4th",
+            "edge_art_2nd",
+            "edge_det_mean",
+            "edge_det_4th",
+            "edge_det_2nd",
+            "mse",
+            "var_loss",
+            "tex_loss",
+            "contrast_inc",
         ];
         let mut max_sig_rel = 0.0f64; // max relative diff for significant features
         let mut max_abs_diff = 0.0f64;
@@ -738,8 +754,8 @@ mod tests {
                 );
             }
         }
-        let score_rel = (full_result.score - streaming_result.score).abs()
-            / full_result.score.abs().max(1e-12);
+        let score_rel =
+            (full_result.score - streaming_result.score).abs() / full_result.score.abs().max(1e-12);
         let dist_rel = (full_result.raw_distance - streaming_result.raw_distance).abs()
             / full_result.raw_distance.abs().max(1e-12);
         eprintln!(

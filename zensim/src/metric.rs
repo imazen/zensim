@@ -261,13 +261,13 @@ fn compute_multiscale_stats(
 
 /// Per-channel result from compute_channel.
 struct ChannelResult {
-    ssim: [f64; 2],        // [mean_d, root4_d]
-    edge: [f64; 4],        // [art_mean, art_4th, det_mean, det_4th]
-    variance_loss: f64,    // max(0, 1 - var_dst / var_src)
-    texture_loss: f64,     // max(0, 1 - mad_dst / mad_src)
+    ssim: [f64; 2],         // [mean_d, root4_d]
+    edge: [f64; 4],         // [art_mean, art_4th, det_mean, det_4th]
+    variance_loss: f64,     // max(0, 1 - var_dst / var_src)
+    texture_loss: f64,      // max(0, 1 - mad_dst / mad_src)
     contrast_increase: f64, // max(0, var_dst/var_src - 1)
-    ssim_2nd: f64,         // root2 pooled SSIM
-    edge_2nd: [f64; 2],   // [art_2nd, det_2nd]
+    ssim_2nd: f64,          // root2 pooled SSIM
+    edge_2nd: [f64; 2],     // [art_2nd, det_2nd]
 }
 
 /// Compute SSIM and/or edge features for a single channel.
@@ -452,7 +452,8 @@ fn compute_channel(
             edge_2nd[0] = (art2 * one_over_n).sqrt();
             edge_2nd[1] = (det2 * one_over_n).sqrt();
         } else {
-            let (art, art4, det, det4, art2, det2) = edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
+            let (art, art4, det, det4, art2, det2) =
+                edge_diff_channel(src_c, dst_c, &bufs.mu1, &bufs.mu2);
             edge[0] = art * one_over_n;
             edge[1] = (art4 * one_over_n).powf(0.25);
             edge[2] = det * one_over_n;
@@ -830,7 +831,8 @@ fn compute_single_scale_phased(
             ssim_2nd_vals[sc] = (sum_d2 * one_over_n).sqrt();
 
             if sc_need_edge {
-                let (art, art4, det, det4, art2, det2) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
+                let (art, art4, det, det4, art2, det2) =
+                    edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
                 edge_vals[sc * 4] = art * one_over_n;
                 edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
                 edge_vals[sc * 4 + 2] = det * one_over_n;
@@ -944,7 +946,8 @@ fn compute_single_scale_phased(
             ssim_2nd_vals[sc] = (sum_d2 * one_over_n).sqrt();
 
             if sc_need_edge {
-                let (art, art4, det, det4, art2, det2) = edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
+                let (art, art4, det, det4, art2, det2) =
+                    edge_diff_channel(&src[sc], &dst[sc], mu1_a, mu2_a);
                 edge_vals[sc * 4] = art * one_over_n;
                 edge_vals[sc * 4 + 1] = (art4 * one_over_n).powf(0.25);
                 edge_vals[sc * 4 + 2] = det * one_over_n;
@@ -1043,29 +1046,30 @@ pub const FEATURES_PER_SCALE: usize = 39;
 #[allow(clippy::excessive_precision)]
 pub const WEIGHTS: [f64; 156] = [
     // Scale 0 Channel X (13 features: ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd, det_mean, det_4th, det_2nd, mse, var_loss, tex_loss, contrast_inc)
-    0.000000, 0.000000, 0.000000, 0.000000, 7.401262, 0.000000, 0.016026, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 0 Channel Y
-    7.011122, 8.391644, 0.375298, 0.000000, 15.370380, 0.000000, 30.384206, 28.121342, 0.779064, 0.000000, 5.627197, 2.054596, 0.000000,
-    // Scale 0 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 21.938411, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
-    // Scale 1 Channel X
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.007212, 0.000000, 0.000000, 0.500001, 0.000000,
-    // Scale 1 Channel Y
-    22.740950, 15.800330, 3.894948, 5.885507, 0.000000, 9.946805, 0.000000, 18.979639, 11.218666, 0.000000, 0.500585, 0.000433, 0.000000,
-    // Scale 1 Channel B
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 1.488601, 0.000000, 0.000000, 0.000000, 1.000000, 2.000001, 0.000000,
-    // Scale 2 Channel X
-    0.981918, 0.000000, 0.451594, 0.000000, 0.000000, 0.000000, 103.157958, 0.003606, 0.000000, 88.528548, 2.000000, 0.000000, 0.000000,
-    // Scale 2 Channel Y
-    0.000000, 2.944499, 0.000000, 0.000000, 0.000000, 32.418322, 0.000000, 0.000000, 0.000000, 0.000000, 0.000601, 0.000000, 0.000000,
-    // Scale 2 Channel B
-    17.770518, 0.000000, 0.380406, 56.722823, 0.009615, 0.018029, 65.149301, 0.000000, 8.388175, 0.000000, 1.000000, 0.108173, 0.000000,
-    // Scale 3 Channel X
-    17.800292, 7.734777, 1.568173, 0.000000, 0.000000, 1.201923, 0.000000, 0.000000, 0.000000, 11.872030, 0.500000, 0.000000, 0.000000,
-    // Scale 3 Channel Y
-    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.001282, 0.000000, 0.005409, 0.000000, 0.000000, 0.000000,
-    // Scale 3 Channel B
-    7.391297, 3.614260, 0.182739, 158.737549, 0.000000, 28.485079, 0.000000, 0.000000, 0.000000, 0.004056, 0.192308, 0.000000, 0.004808,
+    0.000000, 0.000000, 0.000000, 0.000000, 7.401262, 0.000000, 0.016026, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, // Scale 0 Channel Y
+    7.011122, 8.391644, 0.375298, 0.000000, 15.370380, 0.000000, 30.384206, 28.121342, 0.779064,
+    0.000000, 5.627197, 2.054596, 0.000000, // Scale 0 Channel B
+    0.000000, 0.000000, 0.000000, 0.000000, 21.938411, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, // Scale 1 Channel X
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.007212,
+    0.000000, 0.000000, 0.500001, 0.000000, // Scale 1 Channel Y
+    22.740950, 15.800330, 3.894948, 5.885507, 0.000000, 9.946805, 0.000000, 18.979639, 11.218666,
+    0.000000, 0.500585, 0.000433, 0.000000, // Scale 1 Channel B
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 1.488601, 0.000000, 0.000000,
+    0.000000, 1.000000, 2.000001, 0.000000, // Scale 2 Channel X
+    0.981918, 0.000000, 0.451594, 0.000000, 0.000000, 0.000000, 103.157958, 0.003606, 0.000000,
+    88.528548, 2.000000, 0.000000, 0.000000, // Scale 2 Channel Y
+    0.000000, 2.944499, 0.000000, 0.000000, 0.000000, 32.418322, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000601, 0.000000, 0.000000, // Scale 2 Channel B
+    17.770518, 0.000000, 0.380406, 56.722823, 0.009615, 0.018029, 65.149301, 0.000000, 8.388175,
+    0.000000, 1.000000, 0.108173, 0.000000, // Scale 3 Channel X
+    17.800292, 7.734777, 1.568173, 0.000000, 0.000000, 1.201923, 0.000000, 0.000000, 0.000000,
+    11.872030, 0.500000, 0.000000, 0.000000, // Scale 3 Channel Y
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.001282, 0.000000,
+    0.005409, 0.000000, 0.000000, 0.000000, // Scale 3 Channel B
+    7.391297, 3.614260, 0.182739, 158.737549, 0.000000, 28.485079, 0.000000, 0.000000, 0.000000,
+    0.004056, 0.192308, 0.000000, 0.004808,
 ];
 
 pub(crate) fn combine_scores(scale_stats: &[ScaleStats], _masked: bool) -> ZensimResult {

@@ -1353,7 +1353,8 @@ fn load_cid22(base: &Path) -> Vec<ImagePair> {
         return vec![];
     }
 
-    let mut rdr = csv::Reader::from_path(&csv_path).expect("Failed to open CID22_validation_set.csv");
+    let mut rdr =
+        csv::Reader::from_path(&csv_path).expect("Failed to open CID22_validation_set.csv");
     let mut pairs = Vec::new();
 
     for result in rdr.records() {

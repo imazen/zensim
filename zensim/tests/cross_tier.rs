@@ -9,7 +9,7 @@
 //! Run with: `cargo test -p zensim --test cross_tier -- --test-threads=1`
 
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
-use zensim::{compute_zensim, ZensimResult};
+use zensim::{ZensimResult, compute_zensim};
 
 /// Generate deterministic test images: gradient source + small per-pixel distortion.
 fn generate_test_images(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
@@ -100,7 +100,10 @@ fn score_reproducibility_across_tiers() {
     for (label, disabled, result) in &results {
         let disabled_strs: Vec<&str> = disabled.iter().map(|s| s.as_str()).collect();
         let tier = classify_tier(label, &disabled_strs);
-        tier_results.entry(tier).or_default().push((label.clone(), result));
+        tier_results
+            .entry(tier)
+            .or_default()
+            .push((label.clone(), result));
     }
 
     eprintln!("\nResults by tier:");
@@ -195,7 +198,11 @@ fn score_reproducibility_across_tiers() {
                 }
             }
             feat_diffs.sort_by(|a, b| b.1.cmp(&a.1));
-            eprintln!("    features diverging: {}/{}", feat_diffs.len(), ref_feats.len());
+            eprintln!(
+                "    features diverging: {}/{}",
+                feat_diffs.len(),
+                ref_feats.len()
+            );
             eprintln!("    top 10 by ULP distance:");
             for &(i, u, rf, tf) in feat_diffs.iter().take(10) {
                 let scale = i / 27;
@@ -219,7 +226,10 @@ fn score_reproducibility_across_tiers() {
         for (tier, score, _, _) in &tier_scores[1..] {
             let rel = (ref_score - score).abs() / ref_score.abs().max(1e-12);
             let ulp = ulp_distance(*ref_score, *score).unwrap_or(u64::MAX);
-            eprintln!("  {} vs {}: score rel={:.2e}, ULP={}", tiers[0], tier, rel, ulp);
+            eprintln!(
+                "  {} vs {}: score rel={:.2e}, ULP={}",
+                tiers[0], tier, rel, ulp
+            );
         }
     }
 }
@@ -274,8 +284,10 @@ fn score_reproducibility_512x512() {
     }
 
     // Cross-tier: report
-    if let (Some(v4), Some(v3)) = (tier_results.get("AVX-512 (v4)"), tier_results.get("AVX2 (v3)"))
-    {
+    if let (Some(v4), Some(v3)) = (
+        tier_results.get("AVX-512 (v4)"),
+        tier_results.get("AVX2 (v3)"),
+    ) {
         let u = ulp_distance(v4[0].score, v3[0].score).unwrap_or(u64::MAX);
         let rel = (v4[0].score - v3[0].score).abs() / v4[0].score.abs().max(1e-12);
         eprintln!("  v4 vs v3: score ULP={u}, rel={rel:.2e}");
