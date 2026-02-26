@@ -68,6 +68,11 @@ struct Args {
     /// Number of downscale levels (default: 4, max: 6)
     #[arg(long, default_value = "4")]
     num_scales: usize,
+
+    /// Load custom weights from file (one weight per line, 156 values).
+    /// Evaluates these weights against the dataset(s) instead of the embedded weights.
+    #[arg(long)]
+    weights_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -217,6 +222,34 @@ fn main() {
     let ds = &all_datasets[0];
     report_embedded_correlations(ds);
 
+    // Evaluate custom weights if provided
+    if let Some(ref weights_path) = args.weights_file {
+        let custom_weights = load_weights_file(weights_path);
+        if custom_weights.len() != n_features {
+            eprintln!(
+                "Weights file has {} values, expected {}",
+                custom_weights.len(),
+                n_features
+            );
+            std::process::exit(1);
+        }
+        println!("\n=== Custom weights from {:?} ===", weights_path);
+        for ds in &all_datasets {
+            let feats: Vec<&[f64]> = ds.features.iter().map(|v| v.as_slice()).collect();
+            let custom_scores: Vec<f64> = feats
+                .iter()
+                .map(|f| zensim::score_from_features(f, &custom_weights).0)
+                .collect();
+            let srocc = spearman_correlation(&ds.human_scores, &custom_scores);
+            let plcc = pearson_correlation(&ds.human_scores, &custom_scores);
+            let krocc = kendall_correlation(&ds.human_scores, &custom_scores);
+            println!(
+                "  {}: SROCC={:.4}  PLCC={:.4}  KROCC={:.4}",
+                ds.name, srocc, plcc, krocc
+            );
+        }
+    }
+
     // Output features CSV if requested
     if let Some(ref csv_path) = args.features_csv {
         write_features_csv(csv_path, &ds.human_scores, &ds.features);
@@ -261,8 +294,25 @@ fn main() {
                 println!("  {}: SROCC = {:.4}", name, srocc);
             }
             print_weights(&best_weights);
+            save_weights_file(&best_weights, "/tmp/zensim_trained_weights.txt");
         }
     }
+}
+
+fn load_weights_file(path: &Path) -> Vec<f64> {
+    let content = std::fs::read_to_string(path).expect("Failed to read weights file");
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+                return None;
+            }
+            // Handle Rust array format: "0.123456, " or plain "0.123456"
+            let cleaned = trimmed.trim_end_matches(',').trim();
+            cleaned.parse::<f64>().ok()
+        })
+        .collect()
 }
 
 /// Extract reference image key from a pair's reference path (file stem).
@@ -875,6 +925,16 @@ fn print_trained_results(human_scores: &[f64], feats: &[&[f64]], weights: &[f64]
     println!("PLCC  (Pearson):   {:.4}", plcc);
     println!("KROCC (Kendall):   {:.4}", krocc);
     print_weights(weights);
+    save_weights_file(weights, "/tmp/zensim_trained_weights.txt");
+}
+
+fn save_weights_file(weights: &[f64], path: &str) {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path).expect("Failed to create weights file");
+    for w in weights {
+        writeln!(f, "{:.10}", w).unwrap();
+    }
+    println!("Saved weights to {}", path);
 }
 
 fn print_weights(weights: &[f64]) {
@@ -923,15 +983,20 @@ fn train_weights_multi(
     }
 
     let eval_multi = |weights: &[f64]| -> f64 {
+        let mut min_srocc = f64::INFINITY;
         let mut sum_srocc = 0.0;
         for (human, feats) in &dataset_slices {
             let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
-            sum_srocc += eval_srocc(human, &feat_slices, weights);
+            let s = eval_srocc(human, &feat_slices, weights);
+            sum_srocc += s;
+            min_srocc = min_srocc.min(s);
         }
-        sum_srocc / dataset_slices.len() as f64
+        let mean = sum_srocc / dataset_slices.len() as f64;
+        // Blend mean + min: encourages balanced performance, penalizes sacrificing any dataset
+        0.5 * mean + 0.5 * min_srocc
     };
 
-    let n_restarts = 10;
+    let n_restarts = 20;
     let mut rng_state = 42u64;
     let mut next_rand = || -> f64 {
         rng_state = rng_state
@@ -953,6 +1018,20 @@ fn train_weights_multi(
                     }
                 })
                 .collect()
+        } else if restart <= 5 {
+            // Perturbations of embedded weights (explore nearby)
+            let base = expand_embedded_weights(n_features);
+            base.iter()
+                .enumerate()
+                .map(|(i, &w)| {
+                    if frozen[i] {
+                        0.0
+                    } else {
+                        let pert = 1.0 + (next_rand() - 0.5) * 0.4;
+                        (w * pert).max(0.0)
+                    }
+                })
+                .collect()
         } else {
             (0..n_features)
                 .map(|i| {
@@ -967,9 +1046,15 @@ fn train_weights_multi(
                 .collect()
         };
 
-        for iter in 0..50 {
+        for iter in 0..80 {
             let mut improved = false;
-            let step_scale = if iter < 20 { 1.0 } else { 0.5 };
+            let step_scale = if iter < 30 {
+                1.0
+            } else if iter < 60 {
+                0.5
+            } else {
+                0.25
+            };
 
             for dim in 0..n_features {
                 if frozen[dim] {
@@ -980,7 +1065,7 @@ fn train_weights_multi(
                 let mut best_val = current_val;
                 let mut best_local = eval_multi(&weights);
 
-                for &mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
+                for &mult in &[0.0, 0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
                     weights[dim] =
                         current_val * mult * step_scale + current_val * (1.0 - step_scale);
                     if weights[dim] < 0.0 {
@@ -996,7 +1081,7 @@ fn train_weights_multi(
 
                 if feat_max[dim] > 0.0 {
                     let base_step = 1.0 / feat_max[dim];
-                    for &mult in &[0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0] {
+                    for &mult in &[0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 500.0] {
                         weights[dim] = base_step * mult * step_scale;
                         let score = eval_multi(&weights);
                         if score > best_local {
@@ -1019,15 +1104,34 @@ fn train_weights_multi(
             *w = w.max(0.0);
         }
 
-        let avg = eval_multi(&weights);
-        if avg > best_avg_srocc {
-            best_avg_srocc = avg;
+        let obj = eval_multi(&weights);
+        // Also compute pure average for reporting
+        let pure_avg: f64 = dataset_slices
+            .iter()
+            .map(|(h, f)| {
+                let fs: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
+                eval_srocc(h, &fs, &weights)
+            })
+            .sum::<f64>()
+            / dataset_slices.len() as f64;
+        if obj > best_avg_srocc {
+            best_avg_srocc = obj;
             best_weights = weights;
         }
-        println!("  Restart {}: avg SROCC = {:.4}", restart, avg);
+        println!(
+            "  Restart {}: obj={:.4}  avg SROCC={:.4}",
+            restart, obj, pure_avg
+        );
     }
 
-    println!("Best multi-dataset avg SROCC: {:.4}", best_avg_srocc);
+    // Report per-dataset SROCC for best weights
+    println!("Best multi-dataset objective: {:.4}", best_avg_srocc);
+    for (i, (h, f)) in dataset_slices.iter().enumerate() {
+        let fs: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
+        let s = eval_srocc(h, &fs, &best_weights);
+        let name = &datasets[i].0;
+        println!("  {}: SROCC = {:.4}", name, s);
+    }
     best_weights
 }
 
