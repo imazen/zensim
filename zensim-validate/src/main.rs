@@ -73,6 +73,16 @@ struct Args {
     /// Evaluates these weights against the dataset(s) instead of the embedded weights.
     #[arg(long)]
     weights_file: Option<PathBuf>,
+
+    /// Target metric for synthetic datasets (selects which column to use as ground truth)
+    #[arg(long, value_enum)]
+    target_metric: Option<TargetMetric>,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum TargetMetric {
+    Ssim2,
+    Butteraugli,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -83,6 +93,7 @@ enum DatasetFormat {
     Pipal,
     Cid22,
     KonfigIqa,
+    Synthetic,
 }
 
 /// A single reference-distorted pair with human score.
@@ -128,6 +139,7 @@ fn main() {
         blur_radius,
         masking_strength,
         num_scales,
+        args.target_metric,
     );
 
     let n_features = if primary.features.is_empty() {
@@ -181,6 +193,7 @@ fn main() {
                 "pipal" => DatasetFormat::Pipal,
                 "cid22" => DatasetFormat::Cid22,
                 "konfig-iqa" | "konfig" => DatasetFormat::KonfigIqa,
+                "synthetic" | "synth" => DatasetFormat::Synthetic,
                 _ => {
                     eprintln!("Unknown format: {}", parts[0]);
                     continue;
@@ -196,6 +209,7 @@ fn main() {
                 blur_radius,
                 masking_strength,
                 num_scales,
+                args.target_metric,
             );
             all_datasets.push(ds);
         }
@@ -335,6 +349,7 @@ fn load_and_compute(
     blur_radius: usize,
     masking_strength: f32,
     num_scales: usize,
+    target_metric: Option<TargetMetric>,
 ) -> DatasetWithFeatures {
     let pairs = match format {
         DatasetFormat::Tid2013 => load_tid2013(path),
@@ -343,6 +358,7 @@ fn load_and_compute(
         DatasetFormat::Pipal => load_pipal(path),
         DatasetFormat::Cid22 => load_cid22(path),
         DatasetFormat::KonfigIqa => load_konfig_iqa(path),
+        DatasetFormat::Synthetic => load_synthetic(path, target_metric),
     };
 
     let pairs = if max_images > 0 && max_images < pairs.len() {
@@ -400,7 +416,12 @@ fn load_and_compute(
                 pb.inc(grp.len() as u64);
                 grp.iter()
                     .map(|(idx, pair)| {
-                        (*idx, reference_key(pair), pair.human_score, nan_result.clone())
+                        (
+                            *idx,
+                            reference_key(pair),
+                            pair.human_score,
+                            nan_result.clone(),
+                        )
                     })
                     .collect()
             };
@@ -1607,7 +1628,99 @@ fn load_konfig_iqa(base: &Path) -> Vec<ImagePair> {
     }
 
     pairs.sort_by(|a, b| a.distorted.cmp(&b.distorted));
-    println!("  KonFiG-IQA: {} pairs from {} ratings", pairs.len(), ratings.len());
+    println!(
+        "  KonFiG-IQA: {} pairs from {} ratings",
+        pairs.len(),
+        ratings.len()
+    );
+    pairs
+}
+
+/// Load synthetic training CSV produced by generate_zensim_training.
+///
+/// CSV columns: source_path,decoded_path,codec,quality,width,height,ssimulacra2,butteraugli
+///
+/// The `target_metric` selects which column to use as the quality score.
+/// Scores are normalized to 0-1 (higher = better quality):
+/// - SSIM2: `((ssim2 + 50) / 150).clamp(0, 1)` — monotonic, preserves SROCC
+/// - Butteraugli: `1 / (1 + ba)` — monotonically decreasing, maps (0,inf) → (0,1]
+fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<ImagePair> {
+    let metric = target_metric.unwrap_or_else(|| {
+        eprintln!(
+            "Warning: --target-metric not specified for synthetic dataset, defaulting to ssim2"
+        );
+        TargetMetric::Ssim2
+    });
+
+    let mut rdr = csv::Reader::from_path(csv_path).unwrap_or_else(|e| {
+        eprintln!("Failed to open CSV {}: {}", csv_path.display(), e);
+        std::process::exit(1);
+    });
+
+    let mut pairs = Vec::new();
+    let mut skipped = 0usize;
+
+    for result in rdr.records() {
+        let record = match result {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("  CSV parse error: {}", e);
+                skipped += 1;
+                continue;
+            }
+        };
+
+        if record.len() < 8 {
+            skipped += 1;
+            continue;
+        }
+
+        let source_path = PathBuf::from(&record[0]);
+        let decoded_path = PathBuf::from(&record[1]);
+        // record[2] = codec, record[3] = quality, record[4] = width, record[5] = height
+        let ssim2: f64 = match record[6].parse() {
+            Ok(v) => v,
+            Err(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
+        let butteraugli: f64 = match record[7].parse() {
+            Ok(v) => v,
+            Err(_) => {
+                skipped += 1;
+                continue;
+            }
+        };
+
+        // Normalize to 0-1, higher = better
+        let score = match metric {
+            TargetMetric::Ssim2 => {
+                // SSIM2 range: roughly -50 to 100. Shift and scale to 0-1.
+                ((ssim2 + 50.0) / 150.0).clamp(0.0, 1.0)
+            }
+            TargetMetric::Butteraugli => {
+                // Butteraugli: 0 = identical, higher = worse. Invert monotonically.
+                1.0 / (1.0 + butteraugli)
+            }
+        };
+
+        if !score.is_finite() {
+            skipped += 1;
+            continue;
+        }
+
+        pairs.push(ImagePair {
+            reference: source_path,
+            distorted: decoded_path,
+            human_score: score,
+        });
+    }
+
+    if skipped > 0 {
+        eprintln!("  Synthetic: skipped {} invalid rows", skipped);
+    }
+    println!("  Synthetic: {} pairs, target={:?}", pairs.len(), metric,);
     pairs
 }
 
