@@ -81,8 +81,14 @@ struct Args {
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum TargetMetric {
-    Ssim2,
-    Butteraugli,
+    /// GPU SSIMULACRA2 (ssimulacra2-cuda)
+    GpuSsim2,
+    /// GPU Butteraugli (butteraugli-cuda)
+    GpuButteraugli,
+    /// CPU SSIMULACRA2 (fast-ssim2)
+    CpuSsim2,
+    /// CPU Butteraugli (butteraugli crate)
+    CpuButteraugli,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -1638,24 +1644,49 @@ fn load_konfig_iqa(base: &Path) -> Vec<ImagePair> {
 
 /// Load synthetic training CSV produced by generate_zensim_training.
 ///
-/// CSV columns: source_path,decoded_path,codec,quality,width,height,ssimulacra2,butteraugli
+/// Load synthetic training CSV with header-based column lookup.
 ///
-/// The `target_metric` selects which column to use as the quality score.
+/// Supports both old format (ssimulacra2, butteraugli columns) and new format
+/// (gpu_ssimulacra2, gpu_butteraugli, cpu_ssimulacra2, cpu_butteraugli columns).
+///
 /// Scores are normalized to 0-1 (higher = better quality):
 /// - SSIM2: `((ssim2 + 50) / 150).clamp(0, 1)` — monotonic, preserves SROCC
 /// - Butteraugli: `1 / (1 + ba)` — monotonically decreasing, maps (0,inf) → (0,1]
 fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<ImagePair> {
     let metric = target_metric.unwrap_or_else(|| {
         eprintln!(
-            "Warning: --target-metric not specified for synthetic dataset, defaulting to ssim2"
+            "Warning: --target-metric not specified for synthetic dataset, defaulting to gpu-ssim2"
         );
-        TargetMetric::Ssim2
+        TargetMetric::GpuSsim2
     });
 
     let mut rdr = csv::Reader::from_path(csv_path).unwrap_or_else(|e| {
         eprintln!("Failed to open CSV {}: {}", csv_path.display(), e);
         std::process::exit(1);
     });
+
+    // Header-based column lookup
+    let headers = rdr.headers().unwrap().clone();
+    let col = |name: &str| -> Option<usize> {
+        headers.iter().position(|h| h == name)
+    };
+    let source_col = col("source_path").expect("CSV missing source_path column");
+    let decoded_col = col("decoded_path").expect("CSV missing decoded_path column");
+
+    // Resolve the metric column name based on target + available headers
+    let metric_col = match metric {
+        TargetMetric::GpuSsim2 => col("gpu_ssimulacra2").or_else(|| col("ssimulacra2")),
+        TargetMetric::GpuButteraugli => col("gpu_butteraugli").or_else(|| col("butteraugli")),
+        TargetMetric::CpuSsim2 => col("cpu_ssimulacra2"),
+        TargetMetric::CpuButteraugli => col("cpu_butteraugli"),
+    }
+    .unwrap_or_else(|| {
+        eprintln!("CSV missing column for {:?}", metric);
+        eprintln!("Available columns: {:?}", headers.iter().collect::<Vec<_>>());
+        std::process::exit(1);
+    });
+
+    let is_ssim2 = matches!(metric, TargetMetric::GpuSsim2 | TargetMetric::CpuSsim2);
 
     let mut pairs = Vec::new();
     let mut skipped = 0usize;
@@ -1670,22 +1701,10 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
             }
         };
 
-        if record.len() < 8 {
-            skipped += 1;
-            continue;
-        }
+        let source_path = PathBuf::from(&record[source_col]);
+        let decoded_path = PathBuf::from(&record[decoded_col]);
 
-        let source_path = PathBuf::from(&record[0]);
-        let decoded_path = PathBuf::from(&record[1]);
-        // record[2] = codec, record[3] = quality, record[4] = width, record[5] = height
-        let ssim2: f64 = match record[6].parse() {
-            Ok(v) => v,
-            Err(_) => {
-                skipped += 1;
-                continue;
-            }
-        };
-        let butteraugli: f64 = match record[7].parse() {
+        let raw_score: f64 = match record[metric_col].parse() {
             Ok(v) => v,
             Err(_) => {
                 skipped += 1;
@@ -1694,15 +1713,10 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
         };
 
         // Normalize to 0-1, higher = better
-        let score = match metric {
-            TargetMetric::Ssim2 => {
-                // SSIM2 range: roughly -50 to 100. Shift and scale to 0-1.
-                ((ssim2 + 50.0) / 150.0).clamp(0.0, 1.0)
-            }
-            TargetMetric::Butteraugli => {
-                // Butteraugli: 0 = identical, higher = worse. Invert monotonically.
-                1.0 / (1.0 + butteraugli)
-            }
+        let score = if is_ssim2 {
+            ((raw_score + 50.0) / 150.0).clamp(0.0, 1.0)
+        } else {
+            1.0 / (1.0 + raw_score)
         };
 
         if !score.is_finite() {
