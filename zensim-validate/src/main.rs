@@ -452,9 +452,9 @@ fn load_and_compute(
                 Err(_) => return fail(group),
             };
 
-            // Compare each distorted image against the precomputed reference
+            // Compare each distorted image against the precomputed reference (parallel)
             group
-                .iter()
+                .par_iter()
                 .map(|(idx, pair)| {
                     let key = reference_key(pair);
                     let result = match image::open(&pair.distorted) {
@@ -816,21 +816,101 @@ fn train_weights(
     n_features: usize,
     frozen: &[bool],
 ) -> Vec<f64> {
-    let mut best_weights = vec![1.0; n_features];
-    let mut best_srocc = -1.0f64;
+    let n_train = human_scores.len();
+    let n_scales = (n_features as f64 / zensim::FEATURES_PER_SCALE as f64).max(1.0);
 
-    // Compute feature ranges for additive step sizing
-    let mut feat_max = vec![0.0f64; n_features];
-    for feats in features.iter() {
-        for (i, &f) in feats.iter().enumerate() {
-            feat_max[i] = feat_max[i].max(f.abs());
+    // --- Transpose features scaled by 1/n_scales for cache-friendly per-dim access ---
+    let mut features_t = vec![vec![0.0f64; n_train]; n_features];
+    for (pair_idx, feats) in features.iter().enumerate() {
+        for (dim, &val) in feats.iter().enumerate() {
+            features_t[dim][pair_idx] = val / n_scales;
         }
     }
 
-    // Try several random starting points
+    // Feature ranges for additive step sizing
+    let mut feat_max = vec![0.0f64; n_features];
+    for dim in 0..n_features {
+        for &f in &features_t[dim] {
+            feat_max[dim] = feat_max[dim].max(f.abs());
+        }
+    }
+
+    // --- O(1) Pearson infrastructure for pre-filtering ---
+    let mut sum_ft = vec![0.0f64; n_features];
+    let mut sum_fth = vec![0.0f64; n_features];
+    let mut sum_ft2 = vec![0.0f64; n_features];
+    for dim in 0..n_features {
+        for i in 0..n_train {
+            let f = features_t[dim][i];
+            let h = human_scores[i];
+            sum_ft[dim] += f;
+            sum_fth[dim] += f * h;
+            sum_ft2[dim] += f * f;
+        }
+    }
+    let n = n_train as f64;
+    let sum_h: f64 = human_scores.iter().sum();
+    let sum_h2: f64 = human_scores.iter().map(|h| h * h).sum();
+    let denom_h = n * sum_h2 - sum_h * sum_h;
+
+    let pearson_neg_dist = |s_d: f64, s_dh: f64, s_d2: f64| -> f64 {
+        let denom_d = n * s_d2 - s_d * s_d;
+        if denom_d <= 0.0 || denom_h <= 0.0 {
+            return -1.0;
+        }
+        -(n * s_dh - s_d * sum_h) / (denom_d * denom_h).sqrt()
+    };
+
+    // --- Spearman infrastructure for confirmation ---
+    let human_ranks = ranks(human_scores);
+    let mean_rank = (n + 1.0) / 2.0;
+    let var_hr: f64 = human_ranks.iter().map(|r| (r - mean_rank).powi(2)).sum();
+
+    let mut indexed: Vec<(usize, f64)> = Vec::with_capacity(n_train);
+    let mut dist_ranks = vec![0.0f64; n_train];
+    let mut trial_dist = vec![0.0f64; n_train];
+
+    let fast_srocc =
+        |distances: &[f64],
+         indexed: &mut Vec<(usize, f64)>,
+         dist_ranks: &mut [f64]|
+         -> f64 {
+            indexed.clear();
+            indexed.extend(distances.iter().copied().enumerate());
+            indexed.sort_unstable_by(|a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let mut i = 0;
+            while i < n_train {
+                let mut j = i + 1;
+                while j < n_train && indexed[j].1 == indexed[i].1 {
+                    j += 1;
+                }
+                let avg_rank = (i + j) as f64 / 2.0 + 0.5;
+                for k in i..j {
+                    dist_ranks[indexed[k].0] = avg_rank;
+                }
+                i = j;
+            }
+            let mut cov = 0.0f64;
+            let mut var_dr = 0.0f64;
+            for i in 0..n_train {
+                let ddr = dist_ranks[i] - mean_rank;
+                let dhr = human_ranks[i] - mean_rank;
+                cov += ddr * dhr;
+                var_dr += ddr * ddr;
+            }
+            if var_dr <= 0.0 || var_hr <= 0.0 {
+                return -1.0;
+            }
+            -(cov / (var_dr * var_hr).sqrt())
+        };
+
+    let mut best_weights = vec![1.0; n_features];
+    let mut best_srocc = -1.0f64;
+
     let n_restarts = 10;
     let mut rng_state = 42u64;
-
     let mut next_rand = || -> f64 {
         rng_state = rng_state
             .wrapping_mul(6364136223846793005)
@@ -838,37 +918,78 @@ fn train_weights(
         (rng_state >> 33) as f64 / (u32::MAX as f64)
     };
 
+    let start_time = std::time::Instant::now();
+
     for restart in 0..n_restarts {
-        let mut weights = if restart == 0 {
-            // Start from current embedded weights (best known solution)
-            expand_embedded_weights(n_features)
-        } else if restart == 1 {
-            // Start from uniform weights (respecting frozen mask)
-            (0..n_features)
-                .map(|i| {
-                    if frozen[i] {
-                        0.0
-                    } else {
-                        1.0 / n_features as f64
-                    }
-                })
-                .collect()
-        } else {
-            // Sparse random: only activate ~30% of non-frozen features
-            (0..n_features)
-                .map(|i| {
-                    if frozen[i] {
-                        0.0
-                    } else if next_rand() < 0.3 {
-                        next_rand() * 10.0
-                    } else {
-                        0.0
-                    }
-                })
-                .collect()
+        // Diverse starting points: embedded, uniform, perturbations of both, sparse random
+        let mut weights: Vec<f64> = match restart {
+            0 => expand_embedded_weights(n_features),
+            1 => (0..n_features)
+                .map(|i| if frozen[i] { 0.0 } else { 1.0 / n_features as f64 })
+                .collect(),
+            2..=4 => {
+                // Perturbations of embedded weights
+                let base = expand_embedded_weights(n_features);
+                base.iter()
+                    .enumerate()
+                    .map(|(i, &w)| {
+                        if frozen[i] {
+                            0.0
+                        } else {
+                            (w * (1.0 + (next_rand() - 0.5) * 0.6)).max(0.0)
+                        }
+                    })
+                    .collect()
+            }
+            5..=7 => {
+                // Perturbations of uniform weights
+                let base = 1.0 / n_features as f64;
+                (0..n_features)
+                    .map(|i| {
+                        if frozen[i] {
+                            0.0
+                        } else {
+                            (base * (1.0 + (next_rand() - 0.5) * 1.0)).max(0.0)
+                        }
+                    })
+                    .collect()
+            }
+            _ => {
+                // Sparse random (30% non-zero)
+                (0..n_features)
+                    .map(|i| {
+                        if frozen[i] {
+                            0.0
+                        } else if next_rand() < 0.3 {
+                            next_rand() * 10.0
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect()
+            }
         };
 
-        // Coordinate descent: optimize one weight at a time
+        // Compute initial distances = Σ_j weights[j] * features_t[j][i]
+        let mut distances = vec![0.0f64; n_train];
+        for dim in 0..n_features {
+            let w = weights[dim];
+            if w != 0.0 {
+                for i in 0..n_train {
+                    distances[i] += w * features_t[dim][i];
+                }
+            }
+        }
+
+        // Pearson running sums
+        let mut sum_d: f64 = distances.iter().sum();
+        let mut sum_dh: f64 = distances
+            .iter()
+            .zip(human_scores.iter())
+            .map(|(d, h)| d * h)
+            .sum();
+        let mut sum_d2: f64 = distances.iter().map(|d| d * d).sum();
+
         for iter in 0..50 {
             let mut improved = false;
             let step_scale = if iter < 20 { 1.0 } else { 0.5 };
@@ -878,41 +999,82 @@ fn train_weights(
                     weights[dim] = 0.0;
                     continue;
                 }
-                let current_val = weights[dim];
-                let mut best_val = current_val;
-                let mut best_local_srocc = eval_srocc(human_scores, features, &weights);
+                let old_w = weights[dim];
 
-                // Multiplicative steps
+                // O(n) once per dim: sum of distance * feature for this dim
+                let sum_dft: f64 = distances
+                    .iter()
+                    .zip(features_t[dim].iter())
+                    .map(|(d, f)| d * f)
+                    .sum();
+
+                // Generate all trial weights
+                let mut trials: Vec<f64> = Vec::with_capacity(20);
                 for &mult in &[0.0, 0.5, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
-                    weights[dim] =
-                        current_val * mult * step_scale + current_val * (1.0 - step_scale);
-                    if weights[dim] < 0.0 {
-                        weights[dim] = 0.0;
-                    }
-                    let srocc = eval_srocc(human_scores, features, &weights);
-                    if srocc > best_local_srocc {
-                        best_local_srocc = srocc;
-                        best_val = weights[dim];
-                        improved = true;
-                    }
+                    trials.push((old_w * mult * step_scale + old_w * (1.0 - step_scale)).max(0.0));
                 }
-
-                // Additive steps based on feature range
                 if feat_max[dim] > 0.0 {
-                    let target_contrib = 1.0; // target contribution ~1.0
-                    let base_step = target_contrib / feat_max[dim];
+                    let base_step = 1.0 / feat_max[dim];
                     for &mult in &[0.5, 1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0] {
-                        weights[dim] = base_step * mult * step_scale;
-                        let srocc = eval_srocc(human_scores, features, &weights);
-                        if srocc > best_local_srocc {
-                            best_local_srocc = srocc;
-                            best_val = weights[dim];
-                            improved = true;
-                        }
+                        trials.push(base_step * mult * step_scale);
                     }
                 }
 
-                weights[dim] = best_val;
+                // --- Phase 1: O(1) Pearson pre-filter to find top candidates ---
+                let current_pearson = pearson_neg_dist(sum_d, sum_dh, sum_d2);
+                let mut candidates: Vec<(f64, f64)> = Vec::with_capacity(4); // (pearson, weight)
+                candidates.push((current_pearson, old_w));
+
+                for &trial_w in &trials {
+                    let delta = trial_w - old_w;
+                    if delta == 0.0 {
+                        continue;
+                    }
+                    let s_d = sum_d + delta * sum_ft[dim];
+                    let s_dh = sum_dh + delta * sum_fth[dim];
+                    let s_d2 = sum_d2 + 2.0 * delta * sum_dft + delta * delta * sum_ft2[dim];
+                    let p = pearson_neg_dist(s_d, s_dh, s_d2);
+                    candidates.push((p, trial_w));
+                }
+
+                // Sort by Pearson descending, take top 4 unique weights
+                candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                candidates.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-12);
+                candidates.truncate(4);
+
+                // --- Phase 2: Spearman confirmation on top candidates ---
+                let current_srocc = fast_srocc(&distances, &mut indexed, &mut dist_ranks);
+                let mut best_local = current_srocc;
+                let mut best_w = old_w;
+
+                for &(_, trial_w) in &candidates {
+                    let delta = trial_w - old_w;
+                    if delta.abs() < 1e-15 {
+                        continue;
+                    }
+                    for i in 0..n_train {
+                        trial_dist[i] = distances[i] + delta * features_t[dim][i];
+                    }
+                    let s = fast_srocc(&trial_dist, &mut indexed, &mut dist_ranks);
+                    if s > best_local {
+                        best_local = s;
+                        best_w = trial_w;
+                    }
+                }
+
+                // Commit the best weight
+                if best_w != old_w {
+                    let delta = best_w - old_w;
+                    for i in 0..n_train {
+                        distances[i] += delta * features_t[dim][i];
+                    }
+                    // Update Pearson running sums
+                    sum_d += delta * sum_ft[dim];
+                    sum_dh += delta * sum_fth[dim];
+                    sum_d2 += 2.0 * delta * sum_dft + delta * delta * sum_ft2[dim];
+                    weights[dim] = best_w;
+                    improved = true;
+                }
             }
 
             if !improved {
@@ -920,20 +1082,55 @@ fn train_weights(
             }
         }
 
-        // Enforce non-negativity
         for w in weights.iter_mut() {
             *w = w.max(0.0);
         }
 
-        let srocc = eval_srocc(human_scores, features, &weights);
+        let srocc = fast_srocc(&distances, &mut indexed, &mut dist_ranks);
         if srocc > best_srocc {
             best_srocc = srocc;
             best_weights = weights;
         }
-        println!("  Restart {}: SROCC = {:.4}", restart, srocc);
+        println!(
+            "  Restart {}: SROCC = {:.4} [{:.1}s]",
+            restart,
+            srocc,
+            start_time.elapsed().as_secs_f64()
+        );
     }
 
-    println!("Best training SROCC: {:.4}", best_srocc);
+    // Normalize weights so distances are in a useful range for distance_to_score().
+    // Spearman is rank-invariant so uniform scaling preserves all correlation metrics.
+    // Target: median distance ≈ 1.7 (matching embedded weights' p50).
+    let mut dists: Vec<f64> = features
+        .iter()
+        .map(|f| {
+            let mut d = 0.0f64;
+            for (dim, &val) in f.iter().enumerate() {
+                d += best_weights[dim] * val;
+            }
+            d / n_scales
+        })
+        .collect();
+    dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p50 = dists[dists.len() / 2];
+    if p50 > 0.0 {
+        let target_p50 = 1.7;
+        let scale = target_p50 / p50;
+        for w in &mut best_weights {
+            *w *= scale;
+        }
+        println!(
+            "  Normalized weights: p50 distance {:.3} → {:.3} (scale={:.6})",
+            p50, target_p50, scale
+        );
+    }
+
+    println!(
+        "Best training SROCC: {:.4} ({:.1}s total)",
+        best_srocc,
+        start_time.elapsed().as_secs_f64()
+    );
     best_weights
 }
 
@@ -983,45 +1180,141 @@ fn print_weights(weights: &[f64]) {
     println!("];");
 }
 
-/// Train weights on multiple datasets, maximizing average SROCC.
+/// Train weights on multiple datasets, maximizing blended Spearman.
+/// Uses Spearman on subsampled datasets for training, validates on full data per restart.
 #[allow(clippy::type_complexity)]
 fn train_weights_multi(
     datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
     n_features: usize,
     frozen: &[bool],
 ) -> Vec<f64> {
-    let mut best_weights = vec![1.0; n_features];
-    let mut best_avg_srocc = -1.0f64;
+    let start_time = std::time::Instant::now();
+    let n_datasets = datasets.len();
+    let n_scales = (n_features as f64 / zensim::FEATURES_PER_SCALE as f64).max(1.0);
 
-    // Prepare feature slices for each dataset
-    let dataset_slices: Vec<(Vec<f64>, Vec<Vec<f64>>)> = datasets
-        .iter()
-        .map(|(_, h, f)| (h.clone(), f.clone()))
-        .collect();
-
-    // Compute feature ranges across all datasets
-    let mut feat_max = vec![0.0f64; n_features];
-    for (_, feats) in &dataset_slices {
-        for f in feats {
-            for (i, &val) in f.iter().enumerate() {
-                feat_max[i] = feat_max[i].max(val.abs());
-            }
-        }
+    // Per-dataset training state
+    struct DatasetState {
+        n_train: usize,
+        features_t: Vec<Vec<f64>>, // [dim][pair], scaled by 1/n_scales
+        human_ranks: Vec<f64>,
+        mean_rank: f64,
+        var_hr: f64,
     }
 
-    let eval_multi = |weights: &[f64]| -> f64 {
-        let mut min_srocc = f64::INFINITY;
-        let mut sum_srocc = 0.0;
-        for (human, feats) in &dataset_slices {
-            let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
-            let s = eval_srocc(human, &feat_slices, weights);
-            sum_srocc += s;
-            min_srocc = min_srocc.min(s);
+    let max_train = 15_000usize;
+    let mut ds_states: Vec<DatasetState> = Vec::with_capacity(n_datasets);
+    let mut feat_max = vec![0.0f64; n_features];
+
+    for (name, human_scores, feats) in datasets {
+        let n_full = human_scores.len();
+        let (train_human, train_features): (Vec<f64>, Vec<&[f64]>) = if n_full > max_train {
+            let mut rng = 12345u64;
+            let mut indices: Vec<usize> = (0..n_full).collect();
+            for i in 0..max_train {
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let j = i + (rng >> 33) as usize % (n_full - i);
+                indices.swap(i, j);
+            }
+            indices.truncate(max_train);
+            indices.sort_unstable();
+            let h: Vec<f64> = indices.iter().map(|&i| human_scores[i]).collect();
+            let f: Vec<&[f64]> = indices.iter().map(|&i| feats[i].as_slice()).collect();
+            println!("  {}: subsampled {}/{} pairs", name, max_train, n_full);
+            (h, f)
+        } else {
+            (
+                human_scores.clone(),
+                feats.iter().map(|v| v.as_slice()).collect(),
+            )
+        };
+        let n_train = train_human.len();
+
+        let mut features_t = vec![vec![0.0f64; n_train]; n_features];
+        for (pair_idx, f) in train_features.iter().enumerate() {
+            for (dim, &val) in f.iter().enumerate() {
+                let scaled = val / n_scales;
+                features_t[dim][pair_idx] = scaled;
+                feat_max[dim] = feat_max[dim].max(scaled.abs());
+            }
         }
-        let mean = sum_srocc / dataset_slices.len() as f64;
-        // Blend mean + min: encourages balanced performance, penalizes sacrificing any dataset
-        0.5 * mean + 0.5 * min_srocc
+
+        let human_ranks = ranks(&train_human);
+        let nf = n_train as f64;
+        let mean_rank = (nf + 1.0) / 2.0;
+        let var_hr: f64 = human_ranks.iter().map(|r| (r - mean_rank).powi(2)).sum();
+
+        ds_states.push(DatasetState {
+            n_train,
+            features_t,
+            human_ranks,
+            mean_rank,
+            var_hr,
+        });
+    }
+
+    // Reusable buffers (sized to max dataset)
+    let max_n = ds_states.iter().map(|ds| ds.n_train).max().unwrap_or(0);
+    let mut indexed: Vec<(usize, f64)> = Vec::with_capacity(max_n);
+    let mut dist_ranks = vec![0.0f64; max_n];
+    let mut trial_dist = vec![0.0f64; max_n];
+
+    // Spearman(scores, human) = -Spearman(distances, human) for a single dataset
+    let fast_srocc = |distances: &[f64],
+                      ds: &DatasetState,
+                      indexed: &mut Vec<(usize, f64)>,
+                      dist_ranks: &mut [f64]|
+     -> f64 {
+        let n = ds.n_train;
+        indexed.clear();
+        indexed.extend(distances[..n].iter().copied().enumerate());
+        indexed.sort_unstable_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut i = 0;
+        while i < n {
+            let mut j = i + 1;
+            while j < n && indexed[j].1 == indexed[i].1 {
+                j += 1;
+            }
+            let avg_rank = (i + j) as f64 / 2.0 + 0.5;
+            for k in i..j {
+                dist_ranks[indexed[k].0] = avg_rank;
+            }
+            i = j;
+        }
+        let mut cov = 0.0f64;
+        let mut var_dr = 0.0f64;
+        for i in 0..n {
+            let ddr = dist_ranks[i] - ds.mean_rank;
+            let dhr = ds.human_ranks[i] - ds.mean_rank;
+            cov += ddr * dhr;
+            var_dr += ddr * ddr;
+        }
+        if var_dr <= 0.0 || ds.var_hr <= 0.0 {
+            return -1.0;
+        }
+        -(cov / (var_dr * ds.var_hr).sqrt())
     };
+
+    // Blended objective across datasets
+    let eval_multi = |all_distances: &[Vec<f64>],
+                      indexed: &mut Vec<(usize, f64)>,
+                      dist_ranks: &mut [f64]|
+     -> f64 {
+        let mut min_s = f64::INFINITY;
+        let mut sum_s = 0.0;
+        for (k, ds) in ds_states.iter().enumerate() {
+            let s = fast_srocc(&all_distances[k], ds, indexed, dist_ranks);
+            sum_s += s;
+            min_s = min_s.min(s);
+        }
+        0.5 * sum_s / n_datasets as f64 + 0.5 * min_s
+    };
+
+    let mut best_weights = vec![1.0; n_features];
+    let mut best_avg_srocc = -1.0f64;
 
     let n_restarts = 20;
     let mut rng_state = 42u64;
@@ -1046,7 +1339,6 @@ fn train_weights_multi(
                 })
                 .collect()
         } else if restart <= 5 {
-            // Perturbations of embedded weights (explore nearby)
             let base = expand_embedded_weights(n_features);
             base.iter()
                 .enumerate()
@@ -1073,6 +1365,23 @@ fn train_weights_multi(
                 .collect()
         };
 
+        // Per-dataset distances
+        let mut all_distances: Vec<Vec<f64>> = ds_states
+            .iter()
+            .map(|ds| {
+                let mut d = vec![0.0f64; ds.n_train];
+                for dim in 0..n_features {
+                    let w = weights[dim];
+                    if w != 0.0 {
+                        for i in 0..ds.n_train {
+                            d[i] += w * ds.features_t[dim][i];
+                        }
+                    }
+                }
+                d
+            })
+            .collect();
+
         for iter in 0..80 {
             let mut improved = false;
             let step_scale = if iter < 30 {
@@ -1088,38 +1397,60 @@ fn train_weights_multi(
                     weights[dim] = 0.0;
                     continue;
                 }
-                let current_val = weights[dim];
-                let mut best_val = current_val;
-                let mut best_local = eval_multi(&weights);
+                let old_w = weights[dim];
+                let current_obj = eval_multi(&all_distances, &mut indexed, &mut dist_ranks);
+                let mut best_obj = current_obj;
+                let mut best_w = old_w;
 
+                // Generate trials
+                let mut trials: Vec<f64> = Vec::with_capacity(22);
                 for &mult in &[0.0, 0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
-                    weights[dim] =
-                        current_val * mult * step_scale + current_val * (1.0 - step_scale);
-                    if weights[dim] < 0.0 {
-                        weights[dim] = 0.0;
-                    }
-                    let score = eval_multi(&weights);
-                    if score > best_local {
-                        best_local = score;
-                        best_val = weights[dim];
-                        improved = true;
-                    }
+                    trials
+                        .push((old_w * mult * step_scale + old_w * (1.0 - step_scale)).max(0.0));
                 }
-
                 if feat_max[dim] > 0.0 {
                     let base_step = 1.0 / feat_max[dim];
                     for &mult in &[0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 500.0] {
-                        weights[dim] = base_step * mult * step_scale;
-                        let score = eval_multi(&weights);
-                        if score > best_local {
-                            best_local = score;
-                            best_val = weights[dim];
-                            improved = true;
-                        }
+                        trials.push(base_step * mult * step_scale);
                     }
                 }
 
-                weights[dim] = best_val;
+                for &trial_w in &trials {
+                    let delta = trial_w - old_w;
+                    if delta == 0.0 {
+                        continue;
+                    }
+
+                    // Evaluate blended Spearman with trial weight
+                    let mut min_s = f64::INFINITY;
+                    let mut sum_s = 0.0;
+                    for (k, ds) in ds_states.iter().enumerate() {
+                        // Compute trial distances for this dataset
+                        for i in 0..ds.n_train {
+                            trial_dist[i] =
+                                all_distances[k][i] + delta * ds.features_t[dim][i];
+                        }
+                        let s = fast_srocc(&trial_dist, ds, &mut indexed, &mut dist_ranks);
+                        sum_s += s;
+                        min_s = min_s.min(s);
+                    }
+                    let obj = 0.5 * sum_s / n_datasets as f64 + 0.5 * min_s;
+                    if obj > best_obj {
+                        best_obj = obj;
+                        best_w = trial_w;
+                    }
+                }
+
+                if best_w != old_w {
+                    let delta = best_w - old_w;
+                    for (k, ds) in ds_states.iter().enumerate() {
+                        for i in 0..ds.n_train {
+                            all_distances[k][i] += delta * ds.features_t[dim][i];
+                        }
+                    }
+                    weights[dim] = best_w;
+                    improved = true;
+                }
             }
 
             if !improved {
@@ -1131,32 +1462,39 @@ fn train_weights_multi(
             *w = w.max(0.0);
         }
 
-        let obj = eval_multi(&weights);
-        // Also compute pure average for reporting
-        let pure_avg: f64 = dataset_slices
-            .iter()
-            .map(|(h, f)| {
-                let fs: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
-                eval_srocc(h, &fs, &weights)
-            })
-            .sum::<f64>()
-            / dataset_slices.len() as f64;
+        // Validate with Spearman on full datasets
+        let mut min_srocc = f64::INFINITY;
+        let mut sum_srocc = 0.0;
+        for (_, human, feats) in datasets {
+            let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
+            let s = eval_srocc(human, &feat_slices, &weights);
+            sum_srocc += s;
+            min_srocc = min_srocc.min(s);
+        }
+        let obj = 0.5 * sum_srocc / n_datasets as f64 + 0.5 * min_srocc;
+        let avg = sum_srocc / n_datasets as f64;
+
         if obj > best_avg_srocc {
             best_avg_srocc = obj;
             best_weights = weights;
         }
         println!(
-            "  Restart {}: obj={:.4}  avg SROCC={:.4}",
-            restart, obj, pure_avg
+            "  Restart {}: obj={:.4}  avg SROCC={:.4} [{:.1}s]",
+            restart,
+            obj,
+            avg,
+            start_time.elapsed().as_secs_f64()
         );
     }
 
-    // Report per-dataset SROCC for best weights
-    println!("Best multi-dataset objective: {:.4}", best_avg_srocc);
-    for (i, (h, f)) in dataset_slices.iter().enumerate() {
-        let fs: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
-        let s = eval_srocc(h, &fs, &best_weights);
-        let name = &datasets[i].0;
+    println!(
+        "Best multi-dataset objective: {:.4} ({:.1}s total)",
+        best_avg_srocc,
+        start_time.elapsed().as_secs_f64()
+    );
+    for (name, human, feats) in datasets {
+        let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
+        let s = eval_srocc(human, &feat_slices, &best_weights);
         println!("  {}: SROCC = {:.4}", name, s);
     }
     best_weights
