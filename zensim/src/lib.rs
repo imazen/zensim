@@ -9,9 +9,17 @@
 //! ```no_run
 //! # let (src_pixels, dst_pixels) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
 //! # let (width, height) = (8, 8);
-//! // Single comparison
+//! // Single comparison (sRGB [u8; 3])
 //! let result = zensim::compute_zensim(&src_pixels, &dst_pixels, width, height)?;
 //! println!("score: {:.2}", result.score); // 0-100, higher = more similar
+//! # Ok::<(), zensim::ZensimError>(())
+//! ```
+//!
+//! ```no_run
+//! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
+//! # let (width, height) = (8, 8);
+//! // RGBA with alpha compositing
+//! let result = zensim::compute_zensim_rgba(&src_rgba, &dst_rgba, width, height)?;
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
 //!
@@ -32,6 +40,26 @@
 //! }
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
+//!
+//! ## Input requirements
+//!
+//! - **Color space:** sRGB. Future versions may accept additional color spaces
+//!   (linear RGB, Display P3, etc.).
+//! - **Pixel format:** `[R, G, B]` 8-bit sRGB, or `[R, G, B, A]` 8-bit sRGB
+//!   with straight (non-premultiplied) alpha. RGBA inputs are composited over
+//!   a checkerboard before comparison so alpha differences produce visible distortion.
+//! - **Dimensions:** Both images must be the same width × height, minimum 8×8.
+//!
+//! ## Score semantics
+//!
+//! Scores range 0–100, higher = more similar. `ZensimResult::raw_distance` is the
+//! weighted feature distance before nonlinear mapping (lower = more similar).
+//!
+//! ## Determinism
+//!
+//! Deterministic for the same input on the same architecture. Cross-architecture
+//! results (e.g. AVX2 vs scalar vs AVX-512) may differ by small ULP due to
+//! different FMA contraction behavior.
 //!
 //! ## Design
 //!

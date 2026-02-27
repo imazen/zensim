@@ -48,7 +48,10 @@ impl Default for ZensimConfig {
     }
 }
 
-/// Map raw weighted distance to 0-100 quality score.
+/// Map a raw weighted distance to the 0–100 quality score.
+///
+/// Uses a power-law mapping: `score = 100 - 18 * d^0.7`, clamped to \[0, 100\].
+/// Identical images (d = 0) score 100.
 pub fn distance_to_score(raw_distance: f64) -> f64 {
     if raw_distance <= 0.0 {
         100.0
@@ -212,18 +215,23 @@ pub(crate) struct ScaleStats {
     pub(crate) contrast_increase: [f64; 3],
 }
 
-/// Result from zensim comparison.
+/// Result from a zensim comparison.
+///
+/// Contains the final score, the raw distance used to derive it, and the
+/// full per-scale feature vector (useful for diagnostics or weight training).
 #[derive(Debug, Clone)]
 pub struct ZensimResult {
-    /// Score on 0-100 scale. 100 = identical, higher = better.
+    /// Quality score on a 0–100 scale. 100 = identical, 0 = maximally different.
+    /// Derived from `raw_distance` via a power-law mapping.
     pub score: f64,
-    /// Raw weighted distance (before nonlinear mapping). Lower = more similar.
+    /// Raw weighted feature distance before nonlinear mapping. Lower = more similar.
+    /// Not bounded to a fixed range; depends on image content and weights.
     pub raw_distance: f64,
-    /// Per-scale raw features for weight training.
-    /// 13 features per channel × 3 channels = 39 per scale:
-    ///   ssim_mean, ssim_4th, ssim_2nd, edge_art_mean, edge_art_4th, edge_art_2nd,
-    ///   edge_det_mean, edge_det_4th, edge_det_2nd, mse, variance_loss, texture_loss,
-    ///   contrast_increase
+    /// Per-scale raw features (156 values for the default 4-scale configuration).
+    ///
+    /// Layout: 4 scales × 3 channels (X, Y, B) × 13 features per channel:
+    /// `ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
+    ///  det_mean, det_4th, det_2nd, mse, var_loss, tex_loss, contrast_inc`
     pub features: Vec<f64>,
 }
 
