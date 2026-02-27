@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)] // Training loops index parallel arrays by shared index
+
 use calamine::{Reader, Xlsx};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -394,8 +396,12 @@ fn main() {
         match load_feature_cache(&cache_path, &cache_config) {
             Ok(Some(cached)) => {
                 // Reload pairs for fresh human_scores (target-metric-dependent)
-                let pairs =
-                    load_pairs(args.format, &args.dataset, args.max_images, args.target_metric);
+                let pairs = load_pairs(
+                    args.format,
+                    &args.dataset,
+                    args.max_images,
+                    args.target_metric,
+                );
                 let ds = build_dataset_from_cache(cached, &pairs);
                 println!(
                     "Loaded {} pairs ({} features) from cache {:?} ({:.1}s)",
@@ -423,8 +429,7 @@ fn main() {
                     num_scales,
                     args.target_metric,
                 );
-                if let Err(e) =
-                    save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
+                if let Err(e) = save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
                 {
                     eprintln!("Warning: failed to save feature cache: {}", e);
                 } else {
@@ -451,9 +456,7 @@ fn main() {
                 .feature_cache
                 .clone()
                 .unwrap_or_else(|| auto_cache_path(&args.dataset));
-            if let Err(e) =
-                save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
-            {
+            if let Err(e) = save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config) {
                 eprintln!("Warning: failed to save feature cache: {}", e);
             } else {
                 println!("Saved feature cache to {:?}", cache_path);
@@ -711,12 +714,9 @@ fn main() {
         };
 
         // Auto-save training log and weights
-        let log_dir = args.log_dir.unwrap_or_else(|| {
-            args.dataset
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("runs")
-        });
+        let log_dir = args
+            .log_dir
+            .unwrap_or_else(|| args.dataset.parent().unwrap_or(Path::new(".")).join("runs"));
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
             eprintln!("Warning: failed to create log dir {:?}: {}", log_dir, e);
         } else {
@@ -757,8 +757,7 @@ fn main() {
             }
 
             // Write weights file
-            let weights_path =
-                log_dir.join(format!("weights_{}{}.txt", timestamp, target_suffix));
+            let weights_path = log_dir.join(format!("weights_{}{}.txt", timestamp, target_suffix));
             {
                 use std::io::Write;
                 if let Ok(mut f) = std::fs::File::create(&weights_path) {
@@ -798,10 +797,7 @@ fn load_pairs(
 
 /// Build a DatasetWithFeatures from cached features + freshly loaded pairs.
 /// Uses valid_indices to look up human_scores from the original pairs list.
-fn build_dataset_from_cache(
-    cached: CachedFeatures,
-    pairs: &[ImagePair],
-) -> DatasetWithFeatures {
+fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> DatasetWithFeatures {
     let human_scores: Vec<f64> = cached
         .valid_indices
         .iter()
@@ -1174,8 +1170,7 @@ fn run_kfold_cv(ds: &DatasetWithFeatures, k: usize, n_features: usize, frozen: &
 
         // Train on K-1 folds
         let train_slices: Vec<&[f64]> = train_f.iter().map(|v| v.as_slice()).collect();
-        let weights =
-            train_weights(&train_h, &train_slices, n_features, frozen, &mut Vec::new());
+        let weights = train_weights(&train_h, &train_slices, n_features, frozen, &mut Vec::new());
 
         // Evaluate trained weights on held-out fold
         let test_slices: Vec<&[f64]> = test_f.iter().map(|v| v.as_slice()).collect();
@@ -1389,41 +1384,38 @@ fn train_weights(
     let mut dist_ranks = vec![0.0f64; n_train];
     let mut trial_dist = vec![0.0f64; n_train];
 
-    let fast_srocc =
-        |distances: &[f64],
-         indexed: &mut Vec<(usize, f64)>,
-         dist_ranks: &mut [f64]|
-         -> f64 {
-            indexed.clear();
-            indexed.extend(distances.iter().copied().enumerate());
-            indexed.sort_unstable_by(|a, b| {
-                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            let mut i = 0;
-            while i < n_train {
-                let mut j = i + 1;
-                while j < n_train && indexed[j].1 == indexed[i].1 {
-                    j += 1;
-                }
-                let avg_rank = (i + j) as f64 / 2.0 + 0.5;
-                for k in i..j {
-                    dist_ranks[indexed[k].0] = avg_rank;
-                }
-                i = j;
+    let fast_srocc = |distances: &[f64],
+                      indexed: &mut Vec<(usize, f64)>,
+                      dist_ranks: &mut [f64]|
+     -> f64 {
+        indexed.clear();
+        indexed.extend(distances.iter().copied().enumerate());
+        indexed.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut i = 0;
+        while i < n_train {
+            let mut j = i + 1;
+            while j < n_train && indexed[j].1 == indexed[i].1 {
+                j += 1;
             }
-            let mut cov = 0.0f64;
-            let mut var_dr = 0.0f64;
-            for i in 0..n_train {
-                let ddr = dist_ranks[i] - mean_rank;
-                let dhr = human_ranks[i] - mean_rank;
-                cov += ddr * dhr;
-                var_dr += ddr * ddr;
+            let avg_rank = (i + j) as f64 / 2.0 + 0.5;
+            for k in i..j {
+                dist_ranks[indexed[k].0] = avg_rank;
             }
-            if var_dr <= 0.0 || var_hr <= 0.0 {
-                return -1.0;
-            }
-            -(cov / (var_dr * var_hr).sqrt())
-        };
+            i = j;
+        }
+        let mut cov = 0.0f64;
+        let mut var_dr = 0.0f64;
+        for i in 0..n_train {
+            let ddr = dist_ranks[i] - mean_rank;
+            let dhr = human_ranks[i] - mean_rank;
+            cov += ddr * dhr;
+            var_dr += ddr * ddr;
+        }
+        if var_dr <= 0.0 || var_hr <= 0.0 {
+            return -1.0;
+        }
+        -(cov / (var_dr * var_hr).sqrt())
+    };
 
     let mut best_weights = vec![1.0; n_features];
     let mut best_srocc = -1.0f64;
@@ -1444,7 +1436,13 @@ fn train_weights(
         let mut weights: Vec<f64> = match restart {
             0 => expand_embedded_weights(n_features),
             1 => (0..n_features)
-                .map(|i| if frozen[i] { 0.0 } else { 1.0 / n_features as f64 })
+                .map(|i| {
+                    if frozen[i] {
+                        0.0
+                    } else {
+                        1.0 / n_features as f64
+                    }
+                })
                 .collect(),
             2..=4 => {
                 // Perturbations of embedded weights
@@ -1557,7 +1555,8 @@ fn train_weights(
                 }
 
                 // Sort by Pearson descending, take top 4 unique weights
-                candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                candidates
+                    .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
                 candidates.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-12);
                 candidates.truncate(4);
 
@@ -1830,9 +1829,7 @@ fn train_weights_multi(
         let n = ds.n_train;
         indexed.clear();
         indexed.extend(distances[..n].iter().copied().enumerate());
-        indexed.sort_unstable_by(|a, b| {
-            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        indexed.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         let mut i = 0;
         while i < n {
             let mut j = i + 1;
@@ -1966,8 +1963,7 @@ fn train_weights_multi(
                 // Generate trials
                 let mut trials: Vec<f64> = Vec::with_capacity(22);
                 for &mult in &[0.0, 0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 0.1, 5.0, 10.0] {
-                    trials
-                        .push((old_w * mult * step_scale + old_w * (1.0 - step_scale)).max(0.0));
+                    trials.push((old_w * mult * step_scale + old_w * (1.0 - step_scale)).max(0.0));
                 }
                 if feat_max[dim] > 0.0 {
                     let base_step = 1.0 / feat_max[dim];
@@ -1988,8 +1984,7 @@ fn train_weights_multi(
                     for (k, ds) in ds_states.iter().enumerate() {
                         // Compute trial distances for this dataset
                         for i in 0..ds.n_train {
-                            trial_dist[i] =
-                                all_distances[k][i] + delta * ds.features_t[dim][i];
+                            trial_dist[i] = all_distances[k][i] + delta * ds.features_t[dim][i];
                         }
                         let s = fast_srocc(&trial_dist, ds, &mut indexed, &mut dist_ranks);
                         sum_s += s;
@@ -2572,9 +2567,7 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
 
     // Header-based column lookup
     let headers = rdr.headers().unwrap().clone();
-    let col = |name: &str| -> Option<usize> {
-        headers.iter().position(|h| h == name)
-    };
+    let col = |name: &str| -> Option<usize> { headers.iter().position(|h| h == name) };
     let source_col = col("source_path").expect("CSV missing source_path column");
     let decoded_col = col("decoded_path").expect("CSV missing decoded_path column");
 
@@ -2587,7 +2580,10 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
     }
     .unwrap_or_else(|| {
         eprintln!("CSV missing column for {:?}", metric);
-        eprintln!("Available columns: {:?}", headers.iter().collect::<Vec<_>>());
+        eprintln!(
+            "Available columns: {:?}",
+            headers.iter().collect::<Vec<_>>()
+        );
         std::process::exit(1);
     });
 

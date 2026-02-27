@@ -657,12 +657,7 @@ impl PrecomputedReference {
     /// Build a precomputed reference from sRGB pixels.
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
-    pub(crate) fn new(
-        source: &[[u8; 3]],
-        width: usize,
-        height: usize,
-        num_scales: usize,
-    ) -> Self {
+    pub(crate) fn new(source: &[[u8; 3]], width: usize, height: usize, num_scales: usize) -> Self {
         let padded_width = simd_padded_width(width);
         let mut planes = convert_srgb_to_xyb_parallel(source, width, height, padded_width);
 
@@ -974,12 +969,14 @@ mod tests {
 
         let streaming_result = compute_zensim_streaming(&src, &dst, w, h, &config);
         let precomputed = PrecomputedReference::new(&src, w, h, config.num_scales);
-        let precomp_result =
-            compute_zensim_streaming_with_ref(&precomputed, &dst, w, h, &config);
+        let precomp_result = compute_zensim_streaming_with_ref(&precomputed, &dst, w, h, &config);
 
         assert_eq!(streaming_result.score, precomp_result.score);
         assert_eq!(streaming_result.raw_distance, precomp_result.raw_distance);
-        assert_eq!(streaming_result.features.len(), precomp_result.features.len());
+        assert_eq!(
+            streaming_result.features.len(),
+            precomp_result.features.len()
+        );
         for (i, (s, p)) in streaming_result
             .features
             .iter()

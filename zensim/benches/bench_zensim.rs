@@ -188,7 +188,7 @@ fn bench_zensim_512x512_masked(c: &mut Criterion) {
                 std::hint::black_box(&dst),
                 width,
                 height,
-                config.clone(),
+                config,
             )
             .unwrap()
         })
@@ -300,9 +300,7 @@ fn bench_precomputed_1920x1080(c: &mut Criterion) {
     let (src, dst) = make_test_images(1920, 1080);
 
     c.bench_function("precompute_ref_1920x1080", |b| {
-        b.iter(|| {
-            zensim::precompute_reference(std::hint::black_box(&src), 1920, 1080).unwrap()
-        })
+        b.iter(|| zensim::precompute_reference(std::hint::black_box(&src), 1920, 1080).unwrap())
     });
 
     let pre = zensim::precompute_reference(&src, 1920, 1080).unwrap();
@@ -323,9 +321,7 @@ fn bench_precomputed_3840x2160(c: &mut Criterion) {
     let (src, dst) = make_test_images(3840, 2160);
 
     c.bench_function("precompute_ref_3840x2160", |b| {
-        b.iter(|| {
-            zensim::precompute_reference(std::hint::black_box(&src), 3840, 2160).unwrap()
-        })
+        b.iter(|| zensim::precompute_reference(std::hint::black_box(&src), 3840, 2160).unwrap())
     });
 
     let pre = zensim::precompute_reference(&src, 3840, 2160).unwrap();
@@ -358,9 +354,7 @@ fn bench_precomputed_7680x4320(c: &mut Criterion) {
     });
 
     c.bench_function("precompute_ref_7680x4320", |b| {
-        b.iter(|| {
-            zensim::precompute_reference(std::hint::black_box(&src), 7680, 4320).unwrap()
-        })
+        b.iter(|| zensim::precompute_reference(std::hint::black_box(&src), 7680, 4320).unwrap())
     });
 
     let pre = zensim::precompute_reference(&src, 7680, 4320).unwrap();
