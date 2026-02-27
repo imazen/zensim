@@ -77,6 +77,18 @@ struct Args {
     /// Target metric for synthetic datasets (selects which column to use as ground truth)
     #[arg(long, value_enum)]
     target_metric: Option<TargetMetric>,
+
+    /// Feature cache file path. Auto-derived from dataset path if omitted.
+    #[arg(long)]
+    feature_cache: Option<PathBuf>,
+
+    /// Force recompute features, ignoring any existing cache.
+    #[arg(long, default_value = "false")]
+    recompute: bool,
+
+    /// Directory for training run logs. Defaults to directory containing the dataset.
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -119,6 +131,221 @@ struct DatasetWithFeatures {
     ref_keys: Vec<String>,
 }
 
+struct CacheConfig {
+    num_scales: u32,
+    blur_passes: u8,
+    blur_radius: u32,
+    masking_bits: u32,
+}
+
+fn save_feature_cache(
+    path: &Path,
+    ds: &DatasetWithFeatures,
+    config: &CacheConfig,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
+
+    // Magic + version
+    f.write_all(b"ZSFC")?;
+    f.write_all(&1u32.to_le_bytes())?;
+
+    // Validation fields
+    f.write_all(&config.num_scales.to_le_bytes())?;
+    f.write_all(&[config.blur_passes])?;
+    f.write_all(&config.blur_radius.to_le_bytes())?;
+    f.write_all(&config.masking_bits.to_le_bytes())?;
+
+    let n_pairs = ds.human_scores.len() as u64;
+    let n_features = if ds.features.is_empty() {
+        0u64
+    } else {
+        ds.features[0].len() as u64
+    };
+    f.write_all(&n_pairs.to_le_bytes())?;
+    f.write_all(&n_features.to_le_bytes())?;
+
+    // Dataset name
+    let name_bytes = ds.name.as_bytes();
+    f.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
+    f.write_all(name_bytes)?;
+
+    // Human scores
+    for &s in &ds.human_scores {
+        f.write_all(&s.to_le_bytes())?;
+    }
+
+    // Features (flat row-major)
+    for row in &ds.features {
+        for &v in row {
+            f.write_all(&v.to_le_bytes())?;
+        }
+    }
+
+    // Ref keys
+    for key in &ds.ref_keys {
+        let kb = key.as_bytes();
+        f.write_all(&(kb.len() as u32).to_le_bytes())?;
+        f.write_all(kb)?;
+    }
+
+    f.flush()?;
+    Ok(())
+}
+
+fn load_feature_cache(
+    path: &Path,
+    config: &CacheConfig,
+) -> std::io::Result<Option<DatasetWithFeatures>> {
+    let data = match std::fs::read(path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+
+    let mut pos = 0usize;
+
+    let read_bytes = |pos: &mut usize, n: usize| -> std::io::Result<&[u8]> {
+        if *pos + n > data.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "truncated cache file",
+            ));
+        }
+        let slice = &data[*pos..*pos + n];
+        *pos += n;
+        Ok(slice)
+    };
+
+    // Magic
+    let magic = read_bytes(&mut pos, 4)?;
+    if magic != b"ZSFC" {
+        eprintln!("Feature cache: invalid magic, recomputing");
+        return Ok(None);
+    }
+
+    // Version
+    let version = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
+    if version != 1 {
+        eprintln!(
+            "Feature cache: unknown version {}, recomputing",
+            version
+        );
+        return Ok(None);
+    }
+
+    // Validation fields
+    let num_scales = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
+    let blur_passes = read_bytes(&mut pos, 1)?[0];
+    let blur_radius = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
+    let masking_bits = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
+
+    if num_scales != config.num_scales {
+        eprintln!(
+            "Feature cache: num_scales mismatch (cache={}, current={}), recomputing",
+            num_scales, config.num_scales
+        );
+        return Ok(None);
+    }
+    if blur_passes != config.blur_passes {
+        eprintln!(
+            "Feature cache: blur_passes mismatch (cache={}, current={}), recomputing",
+            blur_passes, config.blur_passes
+        );
+        return Ok(None);
+    }
+    if blur_radius != config.blur_radius {
+        eprintln!(
+            "Feature cache: blur_radius mismatch (cache={}, current={}), recomputing",
+            blur_radius, config.blur_radius
+        );
+        return Ok(None);
+    }
+    if masking_bits != config.masking_bits {
+        eprintln!(
+            "Feature cache: masking mismatch (cache={}, current={}), recomputing",
+            f32::from_bits(masking_bits),
+            f32::from_bits(config.masking_bits)
+        );
+        return Ok(None);
+    }
+
+    let n_pairs = u64::from_le_bytes(read_bytes(&mut pos, 8)?.try_into().unwrap()) as usize;
+    let n_features = u64::from_le_bytes(read_bytes(&mut pos, 8)?.try_into().unwrap()) as usize;
+
+    // Name
+    let name_len = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize;
+    let name = String::from_utf8_lossy(read_bytes(&mut pos, name_len)?).to_string();
+
+    // Human scores
+    let mut human_scores = Vec::with_capacity(n_pairs);
+    for _ in 0..n_pairs {
+        human_scores.push(f64::from_le_bytes(
+            read_bytes(&mut pos, 8)?.try_into().unwrap(),
+        ));
+    }
+
+    // Features
+    let mut features = Vec::with_capacity(n_pairs);
+    for _ in 0..n_pairs {
+        let mut row = Vec::with_capacity(n_features);
+        for _ in 0..n_features {
+            row.push(f64::from_le_bytes(
+                read_bytes(&mut pos, 8)?.try_into().unwrap(),
+            ));
+        }
+        features.push(row);
+    }
+
+    // Ref keys
+    let mut ref_keys = Vec::with_capacity(n_pairs);
+    for _ in 0..n_pairs {
+        let klen = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize;
+        let key = String::from_utf8_lossy(read_bytes(&mut pos, klen)?).to_string();
+        ref_keys.push(key);
+    }
+
+    Ok(Some(DatasetWithFeatures {
+        name,
+        human_scores,
+        features,
+        ref_keys,
+    }))
+}
+
+fn git_describe() -> String {
+    std::process::Command::new("git")
+        .args(["describe", "--always", "--dirty"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+fn utc_timestamp() -> String {
+    std::process::Command::new("date")
+        .args(["-u", "+%Y%m%dT%H%M%S"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| {
+            format!(
+                "{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            )
+        })
+}
+
+fn log_line(msg: &str, log: &mut Vec<String>) {
+    println!("{}", msg);
+    log.push(msg.to_string());
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -134,19 +361,85 @@ fn main() {
     let masking_strength = args.masking;
     let num_scales = args.num_scales;
 
-    // Load and compute primary dataset
-    let primary = load_and_compute(
-        &format!("{:?}", args.format),
-        args.format,
-        &args.dataset,
-        args.max_images,
-        compute_all,
+    let cache_config = CacheConfig {
+        num_scales: num_scales as u32,
         blur_passes,
-        blur_radius,
-        masking_strength,
-        num_scales,
-        args.target_metric,
-    );
+        blur_radius: blur_radius as u32,
+        masking_bits: masking_strength.to_bits(),
+    };
+
+    // Load and compute primary dataset (with optional caching)
+    let primary = if compute_all && !args.recompute {
+        let cache_path = args.feature_cache.clone().unwrap_or_else(|| {
+            let mut p = args.dataset.as_os_str().to_owned();
+            p.push(".features.bin");
+            PathBuf::from(p)
+        });
+        let cache_start = std::time::Instant::now();
+        match load_feature_cache(&cache_path, &cache_config) {
+            Ok(Some(ds)) => {
+                println!(
+                    "Loaded {} pairs ({} features) from cache {:?} ({:.1}s)",
+                    ds.human_scores.len(),
+                    if ds.features.is_empty() {
+                        0
+                    } else {
+                        ds.features[0].len()
+                    },
+                    cache_path,
+                    cache_start.elapsed().as_secs_f64()
+                );
+                ds
+            }
+            _ => {
+                let ds = load_and_compute(
+                    &format!("{:?}", args.format),
+                    args.format,
+                    &args.dataset,
+                    args.max_images,
+                    compute_all,
+                    blur_passes,
+                    blur_radius,
+                    masking_strength,
+                    num_scales,
+                    args.target_metric,
+                );
+                if let Err(e) = save_feature_cache(&cache_path, &ds, &cache_config) {
+                    eprintln!("Warning: failed to save feature cache: {}", e);
+                } else {
+                    println!("Saved feature cache to {:?}", cache_path);
+                }
+                ds
+            }
+        }
+    } else {
+        let ds = load_and_compute(
+            &format!("{:?}", args.format),
+            args.format,
+            &args.dataset,
+            args.max_images,
+            compute_all,
+            blur_passes,
+            blur_radius,
+            masking_strength,
+            num_scales,
+            args.target_metric,
+        );
+        if compute_all {
+            // Save cache even on --recompute
+            let cache_path = args.feature_cache.clone().unwrap_or_else(|| {
+                let mut p = args.dataset.as_os_str().to_owned();
+                p.push(".features.bin");
+                PathBuf::from(p)
+            });
+            if let Err(e) = save_feature_cache(&cache_path, &ds, &cache_config) {
+                eprintln!("Warning: failed to save feature cache: {}", e);
+            } else {
+                println!("Saved feature cache to {:?}", cache_path);
+            }
+        }
+        ds
+    };
 
     let n_features = if primary.features.is_empty() {
         eprintln!("No valid results from primary dataset");
@@ -205,18 +498,72 @@ fn main() {
                     continue;
                 }
             };
-            let ds = load_and_compute(
-                parts[0],
-                fmt,
-                Path::new(parts[1]),
-                0,
-                compute_all,
-                blur_passes,
-                blur_radius,
-                masking_strength,
-                num_scales,
-                args.target_metric,
-            );
+            let also_path = Path::new(parts[1]);
+            let ds = if compute_all && !args.recompute {
+                let also_cache = {
+                    let mut p = also_path.as_os_str().to_owned();
+                    p.push(".features.bin");
+                    PathBuf::from(p)
+                };
+                let t = std::time::Instant::now();
+                match load_feature_cache(&also_cache, &cache_config) {
+                    Ok(Some(ds)) => {
+                        println!(
+                            "Loaded {} pairs from cache {:?} ({:.1}s)",
+                            ds.human_scores.len(),
+                            also_cache,
+                            t.elapsed().as_secs_f64()
+                        );
+                        ds
+                    }
+                    _ => {
+                        let ds = load_and_compute(
+                            parts[0],
+                            fmt,
+                            also_path,
+                            0,
+                            compute_all,
+                            blur_passes,
+                            blur_radius,
+                            masking_strength,
+                            num_scales,
+                            args.target_metric,
+                        );
+                        if let Err(e) = save_feature_cache(&also_cache, &ds, &cache_config) {
+                            eprintln!("Warning: failed to save feature cache: {}", e);
+                        } else {
+                            println!("Saved feature cache to {:?}", also_cache);
+                        }
+                        ds
+                    }
+                }
+            } else {
+                let ds = load_and_compute(
+                    parts[0],
+                    fmt,
+                    also_path,
+                    0,
+                    compute_all,
+                    blur_passes,
+                    blur_radius,
+                    masking_strength,
+                    num_scales,
+                    args.target_metric,
+                );
+                if compute_all {
+                    let also_cache = {
+                        let mut p = also_path.as_os_str().to_owned();
+                        p.push(".features.bin");
+                        PathBuf::from(p)
+                    };
+                    if let Err(e) = save_feature_cache(&also_cache, &ds, &cache_config) {
+                        eprintln!("Warning: failed to save feature cache: {}", e);
+                    } else {
+                        println!("Saved feature cache to {:?}", also_cache);
+                    }
+                }
+                ds
+            };
             all_datasets.push(ds);
         }
     }
@@ -240,7 +587,8 @@ fn main() {
 
     // Normal mode: report correlations on primary dataset
     let ds = &all_datasets[0];
-    report_embedded_correlations(ds);
+    let mut training_log: Vec<String> = Vec::new();
+    report_embedded_correlations(ds, &mut training_log);
 
     // Evaluate custom weights if provided
     if let Some(ref weights_path) = args.weights_file {
@@ -253,7 +601,8 @@ fn main() {
             );
             std::process::exit(1);
         }
-        println!("\n=== Custom weights from {:?} ===", weights_path);
+        let msg = format!("\n=== Custom weights from {:?} ===", weights_path);
+        log_line(&msg, &mut training_log);
         for ds in &all_datasets {
             let feats: Vec<&[f64]> = ds.features.iter().map(|v| v.as_slice()).collect();
             let custom_scores: Vec<f64> = feats
@@ -263,9 +612,12 @@ fn main() {
             let srocc = spearman_correlation(&ds.human_scores, &custom_scores);
             let plcc = pearson_correlation(&ds.human_scores, &custom_scores);
             let krocc = kendall_correlation(&ds.human_scores, &custom_scores);
-            println!(
-                "  {}: SROCC={:.4}  PLCC={:.4}  KROCC={:.4}",
-                ds.name, srocc, plcc, krocc
+            log_line(
+                &format!(
+                    "  {}: SROCC={:.4}  PLCC={:.4}  KROCC={:.4}",
+                    ds.name, srocc, plcc, krocc
+                ),
+                &mut training_log,
             );
         }
     }
@@ -288,21 +640,40 @@ fn main() {
             })
             .collect();
 
-        if dataset_groups.len() == 1 {
+        let best_weights = if dataset_groups.len() == 1 {
             let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
-            println!(
-                "Training weights on {} pairs with {} features...",
-                dataset_groups[0].1.len(),
-                n_features
+            log_line(
+                &format!(
+                    "Training weights on {} pairs with {} features...",
+                    dataset_groups[0].1.len(),
+                    n_features
+                ),
+                &mut training_log,
             );
-            let best_weights = train_weights(&dataset_groups[0].1, &feats, n_features, &frozen);
-            print_trained_results(&dataset_groups[0].1, &feats, &best_weights);
+            let best_weights = train_weights(
+                &dataset_groups[0].1,
+                &feats,
+                n_features,
+                &frozen,
+                &mut training_log,
+            );
+            print_trained_results(
+                &dataset_groups[0].1,
+                &feats,
+                &best_weights,
+                &mut training_log,
+            );
+            best_weights
         } else {
-            println!(
-                "\nMulti-dataset training on {} datasets...",
-                dataset_groups.len()
+            log_line(
+                &format!(
+                    "\nMulti-dataset training on {} datasets...",
+                    dataset_groups.len()
+                ),
+                &mut training_log,
             );
-            let best_weights = train_weights_multi(&dataset_groups, n_features, &frozen);
+            let best_weights =
+                train_weights_multi(&dataset_groups, n_features, &frozen, &mut training_log);
 
             for (name, h, f) in &dataset_groups {
                 let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
@@ -311,10 +682,74 @@ fn main() {
                     .map(|feat| zensim::score_from_features(feat, &best_weights).0)
                     .collect();
                 let srocc = spearman_correlation(h, &trained_scores);
-                println!("  {}: SROCC = {:.4}", name, srocc);
+                log_line(
+                    &format!("  {}: SROCC = {:.4}", name, srocc),
+                    &mut training_log,
+                );
             }
-            print_weights(&best_weights);
+            print_weights(&best_weights, &mut training_log);
             save_weights_file(&best_weights, "/tmp/zensim_trained_weights.txt");
+            best_weights
+        };
+
+        // Auto-save training log and weights
+        let log_dir = args.log_dir.unwrap_or_else(|| {
+            args.dataset
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join("runs")
+        });
+        if let Err(e) = std::fs::create_dir_all(&log_dir) {
+            eprintln!("Warning: failed to create log dir {:?}: {}", log_dir, e);
+        } else {
+            let timestamp = utc_timestamp();
+            let target_suffix = match args.target_metric {
+                Some(TargetMetric::GpuSsim2) => "_gpu_ssim2",
+                Some(TargetMetric::GpuButteraugli) => "_gpu_butteraugli",
+                Some(TargetMetric::CpuSsim2) => "_cpu_ssim2",
+                Some(TargetMetric::CpuButteraugli) => "_cpu_butteraugli",
+                None => "",
+            };
+
+            // Write log file
+            let log_path = log_dir.join(format!("train_{}{}.txt", timestamp, target_suffix));
+            {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::File::create(&log_path) {
+                    let _ = writeln!(f, "# Training run: {}", timestamp);
+                    let _ = writeln!(f, "# Git: {}", git_describe());
+                    let _ = writeln!(
+                        f,
+                        "# CLI: {}",
+                        std::env::args().collect::<Vec<_>>().join(" ")
+                    );
+                    let _ = writeln!(
+                        f,
+                        "# Dataset: {} ({} pairs, {} features)",
+                        ds.name,
+                        ds.human_scores.len(),
+                        n_features
+                    );
+                    let _ = writeln!(f);
+                    for line in &training_log {
+                        let _ = writeln!(f, "{}", line);
+                    }
+                    println!("Saved training log to {:?}", log_path);
+                }
+            }
+
+            // Write weights file
+            let weights_path =
+                log_dir.join(format!("weights_{}{}.txt", timestamp, target_suffix));
+            {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::File::create(&weights_path) {
+                    for w in &best_weights {
+                        let _ = writeln!(f, "{:.10}", w);
+                    }
+                    println!("Saved weights to {:?}", weights_path);
+                }
+            }
         }
     }
 }
@@ -534,7 +969,7 @@ fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
 }
 
 /// Report correlations using embedded WEIGHTS.
-fn report_embedded_correlations(ds: &DatasetWithFeatures) {
+fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>) {
     let ew = expand_embedded_weights(ds.features[0].len());
     let metric_scores: Vec<f64> = ds
         .features
@@ -546,13 +981,16 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures) {
     let plcc = pearson_correlation(&ds.human_scores, &metric_scores);
     let krocc = kendall_correlation(&ds.human_scores, &metric_scores);
 
-    println!(
-        "\n=== {} — Correlation with Human Ratings (embedded weights) ===",
-        ds.name
+    log_line(
+        &format!(
+            "\n=== {} — Correlation with Human Ratings (embedded weights) ===",
+            ds.name
+        ),
+        log,
     );
-    println!("SROCC (Spearman):  {:.4}", srocc);
-    println!("PLCC  (Pearson):   {:.4}", plcc);
-    println!("KROCC (Kendall):   {:.4}", krocc);
+    log_line(&format!("SROCC (Spearman):  {:.4}", srocc), log);
+    log_line(&format!("PLCC  (Pearson):   {:.4}", plcc), log);
+    log_line(&format!("KROCC (Kendall):   {:.4}", krocc), log);
 
     let min_m = metric_scores.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_m = metric_scores
@@ -560,9 +998,12 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures) {
         .cloned()
         .fold(f64::NEG_INFINITY, f64::max);
     let mean_m: f64 = metric_scores.iter().sum::<f64>() / metric_scores.len() as f64;
-    println!(
-        "Metric score range: {:.2} to {:.2}, mean: {:.2}",
-        min_m, max_m, mean_m
+    log_line(
+        &format!(
+            "Metric score range: {:.2} to {:.2}, mean: {:.2}",
+            min_m, max_m, mean_m
+        ),
+        log,
     );
 
     let raw_dists: Vec<f64> = ds
@@ -578,9 +1019,12 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures) {
     let p10 = sorted_d[sorted_d.len() / 10];
     let p50 = sorted_d[sorted_d.len() / 2];
     let p90 = sorted_d[sorted_d.len() * 9 / 10];
-    println!(
-        "Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
-        min_d, p10, p50, p90, max_d, mean_d
+    log_line(
+        &format!(
+            "Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
+            min_d, p10, p50, p90, max_d, mean_d
+        ),
+        log,
     );
 }
 
@@ -663,7 +1107,8 @@ fn run_kfold_cv(ds: &DatasetWithFeatures, k: usize, n_features: usize, frozen: &
 
         // Train on K-1 folds
         let train_slices: Vec<&[f64]> = train_f.iter().map(|v| v.as_slice()).collect();
-        let weights = train_weights(&train_h, &train_slices, n_features, frozen);
+        let weights =
+            train_weights(&train_h, &train_slices, n_features, frozen, &mut Vec::new());
 
         // Evaluate trained weights on held-out fold
         let test_slices: Vec<&[f64]> = test_f.iter().map(|v| v.as_slice()).collect();
@@ -714,9 +1159,15 @@ fn run_leave_one_out(datasets: &[DatasetWithFeatures], n_features: usize, frozen
 
         let weights = if train_groups.len() == 1 {
             let feats: Vec<&[f64]> = train_groups[0].2.iter().map(|v| v.as_slice()).collect();
-            train_weights(&train_groups[0].1, &feats, n_features, frozen)
+            train_weights(
+                &train_groups[0].1,
+                &feats,
+                n_features,
+                frozen,
+                &mut Vec::new(),
+            )
         } else {
-            train_weights_multi(&train_groups, n_features, frozen)
+            train_weights_multi(&train_groups, n_features, frozen, &mut Vec::new())
         };
 
         // Evaluate on held-out dataset
@@ -815,6 +1266,7 @@ fn train_weights(
     features: &[&[f64]],
     n_features: usize,
     frozen: &[bool],
+    log: &mut Vec<String>,
 ) -> Vec<f64> {
     let n_train = human_scores.len();
     let n_scales = (n_features as f64 / zensim::FEATURES_PER_SCALE as f64).max(1.0);
@@ -1091,11 +1543,14 @@ fn train_weights(
             best_srocc = srocc;
             best_weights = weights;
         }
-        println!(
-            "  Restart {}: SROCC = {:.4} [{:.1}s]",
-            restart,
-            srocc,
-            start_time.elapsed().as_secs_f64()
+        log_line(
+            &format!(
+                "  Restart {}: SROCC = {:.4} [{:.1}s]",
+                restart,
+                srocc,
+                start_time.elapsed().as_secs_f64()
+            ),
+            log,
         );
     }
 
@@ -1120,21 +1575,32 @@ fn train_weights(
         for w in &mut best_weights {
             *w *= scale;
         }
-        println!(
-            "  Normalized weights: p50 distance {:.3} → {:.3} (scale={:.6})",
-            p50, target_p50, scale
+        log_line(
+            &format!(
+                "  Normalized weights: p50 distance {:.3} → {:.3} (scale={:.6})",
+                p50, target_p50, scale
+            ),
+            log,
         );
     }
 
-    println!(
-        "Best training SROCC: {:.4} ({:.1}s total)",
-        best_srocc,
-        start_time.elapsed().as_secs_f64()
+    log_line(
+        &format!(
+            "Best training SROCC: {:.4} ({:.1}s total)",
+            best_srocc,
+            start_time.elapsed().as_secs_f64()
+        ),
+        log,
     );
     best_weights
 }
 
-fn print_trained_results(human_scores: &[f64], feats: &[&[f64]], weights: &[f64]) {
+fn print_trained_results(
+    human_scores: &[f64],
+    feats: &[&[f64]],
+    weights: &[f64],
+    log: &mut Vec<String>,
+) {
     let trained_scores: Vec<f64> = feats
         .iter()
         .map(|f| zensim::score_from_features(f, weights).0)
@@ -1144,11 +1610,11 @@ fn print_trained_results(human_scores: &[f64], feats: &[&[f64]], weights: &[f64]
     let plcc = pearson_correlation(human_scores, &trained_scores);
     let krocc = kendall_correlation(human_scores, &trained_scores);
 
-    println!("\n=== Correlation with Trained Weights ===");
-    println!("SROCC (Spearman):  {:.4}", srocc);
-    println!("PLCC  (Pearson):   {:.4}", plcc);
-    println!("KROCC (Kendall):   {:.4}", krocc);
-    print_weights(weights);
+    log_line("\n=== Correlation with Trained Weights ===", log);
+    log_line(&format!("SROCC (Spearman):  {:.4}", srocc), log);
+    log_line(&format!("PLCC  (Pearson):   {:.4}", plcc), log);
+    log_line(&format!("KROCC (Kendall):   {:.4}", krocc), log);
+    print_weights(weights, log);
     save_weights_file(weights, "/tmp/zensim_trained_weights.txt");
 }
 
@@ -1161,15 +1627,22 @@ fn save_weights_file(weights: &[f64], path: &str) {
     println!("Saved weights to {}", path);
 }
 
-fn print_weights(weights: &[f64]) {
+fn print_weights(weights: &[f64], log: &mut Vec<String>) {
     let features_per_ch = zensim::FEATURES_PER_SCALE / 3;
-    println!("\n// Trained weights ({} values):", weights.len());
-    println!("const TRAINED_WEIGHTS: [f64; {}] = [", weights.len());
+    log_line(
+        &format!("\n// Trained weights ({} values):", weights.len()),
+        log,
+    );
+    log_line(
+        &format!("const TRAINED_WEIGHTS: [f64; {}] = [", weights.len()),
+        log,
+    );
     for (i, w) in weights.iter().enumerate() {
         if i % features_per_ch == 0 {
             let scale = i / zensim::FEATURES_PER_SCALE;
             let ch = (i % zensim::FEATURES_PER_SCALE) / features_per_ch;
             let ch_name = ["X", "Y", "B"][ch];
+            // For weights, use print! for inline formatting but also capture to log
             print!("    // Scale {} Channel {}\n    ", scale, ch_name);
         }
         print!("{:.6}, ", w);
@@ -1178,6 +1651,23 @@ fn print_weights(weights: &[f64]) {
         }
     }
     println!("];");
+
+    // Also capture the full weight array as a single log block
+    let mut block = String::new();
+    for (i, w) in weights.iter().enumerate() {
+        if i % features_per_ch == 0 {
+            let scale = i / zensim::FEATURES_PER_SCALE;
+            let ch = (i % zensim::FEATURES_PER_SCALE) / features_per_ch;
+            let ch_name = ["X", "Y", "B"][ch];
+            block.push_str(&format!("    // Scale {} Channel {}\n    ", scale, ch_name));
+        }
+        block.push_str(&format!("{:.6}, ", w));
+        if i % features_per_ch == features_per_ch - 1 {
+            block.push('\n');
+        }
+    }
+    block.push_str("];");
+    log.push(block);
 }
 
 /// Train weights on multiple datasets, maximizing blended Spearman.
@@ -1187,6 +1677,7 @@ fn train_weights_multi(
     datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
     n_features: usize,
     frozen: &[bool],
+    log: &mut Vec<String>,
 ) -> Vec<f64> {
     let start_time = std::time::Instant::now();
     let n_datasets = datasets.len();
@@ -1221,7 +1712,10 @@ fn train_weights_multi(
             indices.sort_unstable();
             let h: Vec<f64> = indices.iter().map(|&i| human_scores[i]).collect();
             let f: Vec<&[f64]> = indices.iter().map(|&i| feats[i].as_slice()).collect();
-            println!("  {}: subsampled {}/{} pairs", name, max_train, n_full);
+            log_line(
+                &format!("  {}: subsampled {}/{} pairs", name, max_train, n_full),
+                log,
+            );
             (h, f)
         } else {
             (
@@ -1478,24 +1972,30 @@ fn train_weights_multi(
             best_avg_srocc = obj;
             best_weights = weights;
         }
-        println!(
-            "  Restart {}: obj={:.4}  avg SROCC={:.4} [{:.1}s]",
-            restart,
-            obj,
-            avg,
-            start_time.elapsed().as_secs_f64()
+        log_line(
+            &format!(
+                "  Restart {}: obj={:.4}  avg SROCC={:.4} [{:.1}s]",
+                restart,
+                obj,
+                avg,
+                start_time.elapsed().as_secs_f64()
+            ),
+            log,
         );
     }
 
-    println!(
-        "Best multi-dataset objective: {:.4} ({:.1}s total)",
-        best_avg_srocc,
-        start_time.elapsed().as_secs_f64()
+    log_line(
+        &format!(
+            "Best multi-dataset objective: {:.4} ({:.1}s total)",
+            best_avg_srocc,
+            start_time.elapsed().as_secs_f64()
+        ),
+        log,
     );
     for (name, human, feats) in datasets {
         let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
         let s = eval_srocc(human, &feat_slices, &best_weights);
-        println!("  {}: SROCC = {:.4}", name, s);
+        log_line(&format!("  {}: SROCC = {:.4}", name, s), log);
     }
     best_weights
 }
