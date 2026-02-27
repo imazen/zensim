@@ -287,7 +287,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
 /// Handles both RGB and RGBA sources row-by-row. RGBA is composited over checkerboard.
-fn convert_source_to_xyb_parallel(source: &impl ImageSource, padded_width: usize) -> [Vec<f32>; 3] {
+pub(crate) fn convert_source_to_xyb_parallel(
+    source: &impl ImageSource,
+    padded_width: usize,
+) -> [Vec<f32>; 3] {
     let width = source.width();
     let height = source.height();
     let n = padded_width * height;

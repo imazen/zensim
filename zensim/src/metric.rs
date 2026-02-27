@@ -16,29 +16,102 @@ use crate::simd_ops::{
 };
 
 /// Configuration for zensim computation.
+///
+/// # Performance paths
+///
+/// The metric has two internal computation strategies with different performance
+/// characteristics. Which path is taken depends on these settings:
+///
+/// ## Streaming path (default, fastest)
+///
+/// Processes scale 0 in horizontal strips with fused blur+feature extraction,
+/// minimizing memory traffic. Used when **all** of:
+/// - `masking_strength == 0.0` (no per-pixel masking)
+/// - `blur_passes == 1` (enables fused H-blur + V-blur+reduce kernels)
+///
+/// When `blur_passes != 1`, the streaming path still processes in strips but
+/// falls back to separate blur + reduce passes per channel (slower but still
+/// cache-friendly).
+///
+/// ## Full-image path (masking or legacy API)
+///
+/// Materializes full XYB planes in memory, then computes blur and features
+/// per-scale. Required when `masking_strength > 0.0` because masking needs
+/// the full blurred source plane to compute per-pixel activity weights.
+/// Uses phased blur parallelism for large images (>512×512) when not masking.
+///
+/// **Bottom line:** the defaults (`blur_passes=1`, `masking_strength=0.0`) give
+/// peak performance. Changing either has a measurable cost.
 #[derive(Debug, Clone, Copy)]
 pub struct ZensimConfig {
-    /// Box blur radius at scale 0 (default: 5, giving 11-pixel kernel)
+    /// Box blur radius at scale 0 (default: 5, giving an 11-pixel kernel).
+    ///
+    /// The blur kernel width is `2 * blur_radius + 1`. Larger radii capture
+    /// coarser structure but increase computation proportionally.
+    /// Both streaming and full-image paths are SIMD-optimized for any radius.
     pub blur_radius: usize,
-    /// Number of box blur passes (1, 2, or 3, default: 1).
-    /// 1 pass = rectangular kernel, fastest. 2 = triangular. 3 = piecewise-quadratic ≈ Gaussian.
+
+    /// Number of box blur passes (1, 2, or 3; default: 1).
+    ///
+    /// Controls the blur kernel shape:
+    /// - **1 pass** — rectangular kernel. Enables fused blur+feature SIMD kernels
+    ///   in the streaming path (fastest).
+    /// - **2 passes** — triangular kernel. Falls back to separate blur+reduce in
+    ///   the streaming path (~1.5× slower at scale 0).
+    /// - **3 passes** — piecewise-quadratic ≈ Gaussian. Same fallback (~2× slower).
+    ///
+    /// All three variants have full SIMD optimization (AVX-512 + AVX2 dispatch).
+    /// The performance difference comes from whether the fused streaming kernels
+    /// can be used, not from the blur itself.
     pub blur_passes: u8,
-    /// Compute all features even if their weights are zero.
-    /// Enable this for weight training to avoid circular dependency.
+
+    /// Compute all 156 features even when their weights are zero (default: false).
+    ///
+    /// When false, channels/features with zero weight are skipped entirely.
+    /// Enable for weight training to avoid circular dependency (need all features
+    /// to determine which weights should be nonzero).
     pub compute_all_features: bool,
+
     /// Local contrast masking strength (default: 0.0 = disabled).
-    /// When > 0, computes local activity sigma and weights per-pixel distances by
-    /// 1 / (1 + masking_strength * sigma). Higher values mask textured regions more.
-    /// Typical range: 2.0-8.0.
+    ///
+    /// When > 0, computes per-pixel activity from the source image:
+    /// `mask[i] = 1 / (1 + masking_strength * blur(|src - mu|))`,
+    /// then weights SSIM and edge distances by this mask. Textured/edge-heavy
+    /// regions get down-weighted, modeling the human visual system's reduced
+    /// sensitivity to distortion in busy areas.
+    ///
+    /// **Performance:** enabling masking forces the full-image path (no streaming)
+    /// and adds one extra blur per channel per scale for the activity computation.
+    /// Expect ~2× slower than the default streaming path.
+    ///
+    /// **Current profiles:** all ship with `masking_strength = 0.0` because the
+    /// unmasked weights already achieve SROCC ≥ 0.98 on synthetic data. This
+    /// parameter exists for training exploration — a future profile *could* use
+    /// masking if it improves correlation on specific content types.
+    ///
+    /// Typical training range: 2.0–8.0.
     pub masking_strength: f32,
+
     /// Maximum number of downscale levels (default: 4).
-    /// More scales capture larger structures but add features. Range: 2-6.
+    ///
+    /// Each level halves resolution. 4 scales covers 1×, 2×, 4×, 8× — sufficient
+    /// for most perceptual effects. The feature vector length scales linearly:
+    /// `num_scales × 3 channels × 13 features`.
+    ///
+    /// Both paths are SIMD-optimized for any scale count.
     pub num_scales: usize,
+
     /// Score mapping scale factor (default: 18.0).
-    /// Used in `score = 100 - a * d^b`.
+    ///
+    /// Used in the final score formula: `score = 100 - a × d^b`, where `d` is
+    /// the raw weighted distance. Larger values spread scores more aggressively.
     pub score_mapping_a: f64,
+
     /// Score mapping gamma exponent (default: 0.7).
-    /// Used in `score = 100 - a * d^b`.
+    ///
+    /// Used in the final score formula: `score = 100 - a × d^b`. Sub-linear
+    /// gamma (< 1.0) compresses high distances, giving more resolution in the
+    /// high-quality range.
     pub score_mapping_b: f64,
 }
 
@@ -307,8 +380,7 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let config = config_from_params(params);
-        let mut result =
-            crate::streaming::compute_zensim_streaming(source, distorted, &config, params.weights);
+        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
         result.profile = self.profile;
         Ok(result)
     }
@@ -369,8 +441,7 @@ impl Zensim {
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params);
         config.compute_all_features = true;
-        let mut result =
-            crate::streaming::compute_zensim_streaming(source, distorted, &config, params.weights);
+        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
         result.profile = self.profile;
         Ok(result)
     }
@@ -386,8 +457,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
         let config = config_from_params(params);
-        let result =
-            crate::streaming::compute_zensim_streaming(source, distorted, &config, params.weights);
+        let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result)
     }
 }
@@ -403,6 +473,47 @@ fn validate_pair(
         return Err(ZensimError::DimensionMismatch);
     }
     Ok(())
+}
+
+/// Core computation routing: streaming vs full-image based on config.
+///
+/// Streaming is used when masking is disabled (the common case).
+/// Full-image is forced when masking_strength > 0.0 because masking
+/// needs the full blurred source plane to compute per-pixel activity weights.
+fn compute_with_config_inner(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64; 156],
+) -> ZensimResult {
+    let masked = config.masking_strength > 0.0;
+    if !masked {
+        return crate::streaming::compute_zensim_streaming(source, distorted, config, weights);
+    }
+
+    // Full-image path: materialize XYB planes, pad, compute stats
+    let width = source.width();
+    let height = source.height();
+    let padded_width = simd_padded_width(width);
+
+    let (mut src_xyb, mut dst_xyb) = std::thread::scope(|s| {
+        let src_handle =
+            s.spawn(|| crate::streaming::convert_source_to_xyb_parallel(source, padded_width));
+        let dst_xyb = crate::streaming::convert_source_to_xyb_parallel(distorted, padded_width);
+        let src_xyb = src_handle.join().unwrap();
+        (src_xyb, dst_xyb)
+    });
+
+    // Pad if needed (convert_source_to_xyb_parallel already pads to padded_width)
+    if padded_width != width {
+        for c in 0..3 {
+            pad_plane_width(&mut src_xyb[c], width, height, padded_width);
+            pad_plane_width(&mut dst_xyb[c], width, height, padded_width);
+        }
+    }
+
+    let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, config);
+    combine_scores(&scale_stats, masked, weights, config)
 }
 
 fn config_from_params(params: &ProfileParams) -> ZensimConfig {
