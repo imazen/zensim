@@ -68,12 +68,17 @@
 //!
 //! ## Design
 //!
-//! - XYB perceptual color space (cube root LMS, same as ssimulacra2/butteraugli)
-//! - Multi-scale analysis (4 scales instead of ssimulacra2's 6)
-//! - O(1)-per-pixel box blur cascade (3-pass approximates Gaussian)
-//! - SSIM-based structural comparison with edge/texture features
-//! - Contrast sensitivity function weighting per scale
-//! - AVX2/AVX-512 SIMD throughout via archmage
+//! - **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli
+//! - **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator
+//!   (no C1), uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform spaces.
+//! - **13 features per channel per scale** — SSIM (3 pooling norms), edge artifact/detail
+//!   loss (3 norms each), MSE, and 3 high-frequency energy/magnitude features
+//! - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
+//! - **O(1)-per-pixel box blur** — 1-pass default, 2/3-pass option for triangular/Gaussian
+//! - **156 trained weights** — optimized on 149.5k synthetic pairs across 4 codecs
+//! - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage)
+//!
+//! See the `metric` module source for the full feature extraction math.
 
 #![forbid(unsafe_code)]
 

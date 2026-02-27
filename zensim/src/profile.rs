@@ -46,8 +46,8 @@ impl core::fmt::Display for ZensimProfile {
 
 /// Internal struct holding everything needed to compute scores for a profile.
 ///
-/// See [`ZensimConfig`](crate::metric::ZensimConfig) for detailed documentation
-/// of each parameter's effect on computation path and performance.
+/// Each parameter's effect on computation path and performance is documented
+/// on the corresponding field of `ZensimConfig` in `metric.rs`.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub struct ProfileParams {
     pub weights: &'static [f64; 156],
@@ -55,7 +55,7 @@ pub struct ProfileParams {
     pub blur_passes: u8,
     pub num_scales: usize,
     /// When > 0.0, forces the full-image path and adds per-pixel activity masking.
-    /// See [`ZensimConfig::masking_strength`](crate::metric::ZensimConfig::masking_strength).
+    /// See `ZensimConfig::masking_strength` in `metric.rs` for full details.
     pub masking_strength: f32,
     pub score_mapping_a: f64,
     pub score_mapping_b: f64,

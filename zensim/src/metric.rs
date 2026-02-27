@@ -1,7 +1,100 @@
 //! Core zensim metric computation.
 //!
-//! Multi-scale SSIM + edge features in XYB color space,
-//! with contrast sensitivity weighting per scale.
+//! Multi-scale SSIM + edge + high-frequency features in XYB color space,
+//! with trained weights per feature.
+//!
+//! # Feature extraction pipeline
+//!
+//! Both images are converted to the XYB perceptual color space (cube-root LMS,
+//! same as ssimulacra2 and butteraugli), then processed at multiple scales.
+//! Each scale halves resolution via 2× box downscale. At each scale, 13 features
+//! are extracted per XYB channel (X, Y, B), giving **156 features total**
+//! (4 scales × 3 channels × 13 features).
+//!
+//! ## SSIM features (3 per channel per scale)
+//!
+//! Uses the ssimulacra2 variant of SSIM, which differs from standard SSIM:
+//!
+//! ```text
+//! mu1 = blur(src), mu2 = blur(dst)
+//! sigma12 = blur(src * dst)
+//! sum_sq  = blur(src² + dst²)     // one blur instead of two
+//!
+//! num_m   = 1 - (mu1 - mu2)²      // luminance (no C1, no denominator)
+//! num_s   = 2·sigma12 - 2·mu1·mu2 + C2   // structure × contrast
+//! denom_s = sum_sq - mu1² - mu2² + C2     // = sigma1² + sigma2² + C2
+//!
+//! d = max(0, 1 - num_m · num_s / denom_s) // per-pixel SSIM error
+//! ```
+//!
+//! The luminance component drops the standard SSIM denominator
+//! `(mu1² + mu2² + C1)` — ssimulacra2's reasoning is that the denominator
+//! over-weights dark-region errors, which is wrong for perceptually uniform
+//! values (XYB is already gamma-like). There is no C1 constant; C2 = 0.0009.
+//!
+//! The `sum_sq` optimization computes `blur(src² + dst²)` with one blur
+//! instead of separate `blur(src²)` and `blur(dst²)`, because the SSIM
+//! formula only needs `sigma1² + sigma2²`, not each individually.
+//!
+//! Three pooling norms capture different aspects of the error distribution:
+//! - **ssim_mean** = `mean(d)` — average error
+//! - **ssim_4th**  = `(mean(d⁴))^(1/4)` — L4 norm, emphasizes worst-case errors
+//! - **ssim_2nd**  = `(mean(d²))^(1/2)` — L2 norm, intermediate sensitivity
+//!
+//! ## Edge features (6 per channel per scale)
+//!
+//! Edge detection compares local detail (pixel minus local mean) between
+//! source and distorted:
+//!
+//! ```text
+//! diff_src = |src - mu1|    // source edge magnitude
+//! diff_dst = |dst - mu2|    // distorted edge magnitude
+//!
+//! d = (1 + diff_dst) / (1 + diff_src) - 1   // per-pixel edge ratio
+//!
+//! artifact    = max(0,  d)   // distorted has MORE edge than source
+//! detail_lost = max(0, -d)   // distorted has LESS edge than source
+//! ```
+//!
+//! The `1 +` offsets prevent division by zero and dampen sensitivity in flat
+//! regions. The ratio formulation is scale-invariant. Splitting into artifact
+//! (ringing, banding, blockiness) vs detail_lost (blur, smoothing) lets the
+//! model weight them independently.
+//!
+//! Each is pooled with three norms (mean, L4, L2) = 6 features.
+//!
+//! ## MSE (1 per channel per scale)
+//!
+//! Plain mean squared error in XYB space: `mean((src - dst)²)`.
+//! No blur dependency, computed directly from pixels.
+//!
+//! ## High-frequency features (3 per channel per scale)
+//!
+//! These measure changes in local detail energy by comparing `pixel - blur(pixel)`
+//! (the high-frequency residual) between source and distorted. Despite their
+//! former names ("variance_loss", "texture_loss", "contrast_increase"), they
+//! do NOT measure image variance — they measure the ratio of high-pass energy.
+//!
+//! ```text
+//! hf_src_L2 = Σ(src - mu1)²    // source HF energy (L2)
+//! hf_dst_L2 = Σ(dst - mu2)²    // distorted HF energy (L2)
+//! hf_src_L1 = Σ|src - mu1|     // source HF magnitude (L1)
+//! hf_dst_L1 = Σ|dst - mu2|     // distorted HF magnitude (L1)
+//! ```
+//!
+//! - **hf_energy_loss** = `max(0, 1 - hf_dst_L2 / hf_src_L2)` — detail smoothed away
+//! - **hf_mag_loss**    = `max(0, 1 - hf_dst_L1 / hf_src_L1)` — same, L1 (robust to outliers)
+//! - **hf_energy_gain** = `max(0, hf_dst_L2 / hf_src_L2 - 1)` — detail added (ringing/sharpening)
+//!
+//! `hf_energy_loss` and `hf_energy_gain` are the positive and negative halves
+//! of the same signal, split by ReLU — this gives the linear model separate
+//! knobs for blur vs ringing without needing signed weights.
+//!
+//! ## Scoring
+//!
+//! The 156 features are multiplied by trained weights, summed, normalized by
+//! scale count, then mapped to a 0–100 score via:
+//! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
 use crate::blur::{
     box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, box_blur_v_from_copy,
@@ -531,9 +624,27 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
     }
 }
 
-/// Features per channel: 13 features always emitted.
-/// ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
-/// det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
+/// Features per channel per scale: 13 features always emitted.
+///
+/// ```text
+///  Index  Name             Pooling  Source
+///  ─────  ───────────────  ───────  ──────────────────
+///   0     ssim_mean        mean     SSIM error map
+///   1     ssim_4th         L4       SSIM error map
+///   2     ssim_2nd         L2       SSIM error map
+///   3     art_mean         mean     edge artifact (ringing)
+///   4     art_4th          L4       edge artifact
+///   5     art_2nd          L2       edge artifact
+///   6     det_mean         mean     edge detail lost (blur)
+///   7     det_4th          L4       edge detail lost
+///   8     det_2nd          L2       edge detail lost
+///   9     mse              mean     (src - dst)²
+///  10     hf_energy_loss   ratio    1 - Σ(dst-mu)²/Σ(src-mu)²
+///  11     hf_mag_loss      ratio    1 - Σ|dst-mu|/Σ|src-mu|
+///  12     hf_energy_gain   ratio    Σ(dst-mu)²/Σ(src-mu)² - 1
+/// ```
+///
+/// Total features = `num_scales × 3 channels × 13` = 156 at 4 scales.
 pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
 /// Compute zensim score between two sRGB u8 images.
@@ -1708,6 +1819,10 @@ pub(crate) fn combine_scores(
 
     for ss in scale_stats.iter() {
         for c in 0..3 {
+            // .abs() is defensive — all these values are non-negative by construction
+            // (SSIM errors are clamped ≥0, edge features use max(0,...), etc.)
+            // but abs ensures no -0.0 or floating-point edge cases affect training.
+
             // ssim_mean, ssim_4th, ssim_2nd
             features.push(ss.ssim[c * 2].abs());
             features.push(ss.ssim[c * 2 + 1].abs());
@@ -1720,7 +1835,7 @@ pub(crate) fn combine_scores(
             features.push(ss.edge[c * 4 + 2].abs());
             features.push(ss.edge[c * 4 + 3].abs());
             features.push(ss.edge_2nd[c * 2 + 1].abs());
-            // mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
+            // mse, hf_energy_loss, hf_mag_loss, hf_energy_gain (also non-negative)
             features.push(ss.mse[c]);
             features.push(ss.hf_energy_loss[c]);
             features.push(ss.hf_mag_loss[c]);

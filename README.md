@@ -6,19 +6,29 @@
 
 # zensim
 
-Fast psychovisual image similarity metric. Combines ideas from SSIMULACRA2 and butteraugli — multi-scale SSIM + edge/texture features in XYB color space, with trained weights and AVX2/AVX-512 SIMD throughout.
+Fast psychovisual image similarity metric. Combines ideas from SSIMULACRA2 and butteraugli — multi-scale SSIM + edge + high-frequency features in XYB color space, with trained weights and AVX2/AVX-512 SIMD throughout.
 
 ## Quick start
 
 ```rust
-// Compare two sRGB images
-let result = zensim::compute_zensim(&src_pixels, &dst_pixels, width, height)?;
-println!("score: {:.2}", result.score); // 0-100, higher = more similar
+use zensim::{Zensim, ZensimProfile, RgbSlice};
+
+let z = Zensim::new(ZensimProfile::latest());
+let source = RgbSlice::new(&src_pixels, width, height);
+let distorted = RgbSlice::new(&dst_pixels, width, height);
+let result = z.compute(&source, &distorted)?;
+println!("{}: {:.2}", result.profile, result.score); // 0-100, higher = more similar
 ```
 
+RGBA images are composited over a checkerboard before comparison, so alpha differences produce visible distortion:
+
 ```rust
-// Compare two RGBA images (composited over checkerboard)
-let result = zensim::compute_zensim_rgba(&src_rgba, &dst_rgba, width, height)?;
+use zensim::{Zensim, ZensimProfile, RgbaSlice};
+
+let z = Zensim::new(ZensimProfile::latest());
+let source = RgbaSlice::new(&src_rgba, width, height);
+let distorted = RgbaSlice::new(&dst_rgba, width, height);
+let result = z.compute(&source, &distorted)?;
 ```
 
 ## Batch comparison
@@ -26,28 +36,65 @@ let result = zensim::compute_zensim_rgba(&src_rgba, &dst_rgba, width, height)?;
 When comparing one reference against many distorted variants, precompute the reference to skip redundant XYB conversion and pyramid construction:
 
 ```rust
-let precomputed = zensim::precompute_reference(&ref_pixels, width, height)?;
-for dst in &distorted_images {
-    let result = zensim::compute_zensim_with_ref(&precomputed, dst, width, height)?;
+use zensim::{Zensim, ZensimProfile, RgbSlice};
+
+let z = Zensim::new(ZensimProfile::latest());
+let source = RgbSlice::new(&ref_pixels, width, height);
+let precomputed = z.precompute_reference(&source)?;
+for dst_pixels in &distorted_images {
+    let dst = RgbSlice::new(dst_pixels, width, height);
+    let result = z.compute_with_ref(&precomputed, &dst)?;
     println!("score: {:.2}", result.score);
 }
 ```
 
 Saves ~25% per comparison at 4K, ~34% at 8K (break-even at 3-7 distorted images per reference).
 
+## Profiles
+
+Each `ZensimProfile` variant bundles all parameters that affect score output — weights, blur config, and score mapping. Same profile name = same scores forever. The crate accumulates profiles; old ones never change or get removed.
+
+| Profile | Training data | SROCC |
+|---------|---------------|-------|
+| `GeneralV0_1` | 12k synthetic pairs | — |
+| `GeneralV0_2` | 163k synthetic pairs | 0.9857 |
+
+`ZensimProfile::latest()` returns the most recent general-purpose profile.
+
 ## Design
 
 - **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli
-- **4-scale pyramid** — 1×, 2×, 4×, 8× downscale covers most perceptual effects
-- **O(1)-per-pixel box blur** — cascade approximates Gaussian; no FFT needed
-- **13 features per channel per scale** — SSIM (mean, 4th-power, 2nd-power pooling), edge artifacts/detail loss, MSE, variance loss, texture loss, contrast increase
-- **Trained weights** — optimized on 149.5k synthetic image pairs across 4 codecs and 11 quality levels
-- **SIMD** — AVX2 and AVX-512 paths via [archmage](https://crates.io/crates/archmage), with safe scalar fallback
+- **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator, uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform values where dark/bright errors should weigh equally.
+- **13 features per channel per scale** — SSIM (3 pooling norms), edge artifact/detail loss (3 norms each), MSE, and 3 high-frequency energy features
+- **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
+- **O(1)-per-pixel box blur** — 1-pass default with fused SIMD kernels
+- **156 trained weights** — optimized on 149.5k synthetic pairs across 4 codecs and 11 quality levels
+- **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage), with safe scalar fallback
+
+### Feature layout (per channel per scale)
+
+| Index | Feature | Description |
+|-------|---------|-------------|
+| 0 | ssim_mean | Mean SSIM error |
+| 1 | ssim_4th | L4-pooled SSIM error (emphasizes worst-case) |
+| 2 | ssim_2nd | L2-pooled SSIM error |
+| 3 | art_mean | Mean edge artifact (ringing, banding) |
+| 4 | art_4th | L4-pooled edge artifact |
+| 5 | art_2nd | L2-pooled edge artifact |
+| 6 | det_mean | Mean detail lost (blur, smoothing) |
+| 7 | det_4th | L4-pooled detail lost |
+| 8 | det_2nd | L2-pooled detail lost |
+| 9 | mse | Mean squared error in XYB |
+| 10 | hf_energy_loss | High-frequency energy loss (L2 ratio) |
+| 11 | hf_mag_loss | High-frequency magnitude loss (L1 ratio) |
+| 12 | hf_energy_gain | High-frequency energy gain (ringing/sharpening) |
+
+Total: 4 scales × 3 channels × 13 features = 156 features, combined with trained weights into a single distance, then mapped to a 0–100 score.
 
 ## Input requirements
 
 - **Color space:** sRGB. Future versions may support additional input color spaces.
-- **Pixel format:** `[u8; 3]` (RGB) or `[u8; 4]` (RGBA with straight alpha). RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion.
+- **Pixel format:** `[u8; 3]` (RGB) or `[u8; 4]` (RGBA with straight alpha). RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Custom pixel layouts via `StridedBytes` or the `ImageSource` trait.
 - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 
 ## Score semantics

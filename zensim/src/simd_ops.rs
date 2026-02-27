@@ -83,6 +83,9 @@ pub fn edge_diff_channel(
 
 // --- SIMD implementations ---
 
+/// SSIM stability constant for the structure/contrast term.
+/// Same value as ssimulacra2. There is no C1 — the luminance term
+/// uses `1 - (mu1-mu2)²` without a denominator (see metric.rs docs).
 const C2: f32 = 0.0009;
 
 #[cfg(target_arch = "x86_64")]
