@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "CLI for zensim psychovisual image similarity metric"
 license = "MIT"
+publish = false
 
 [dependencies]
 zensim = { path = "../zensim", features = ["training"] }

@@ -6,6 +6,9 @@ description = "Fast psychovisual image similarity metric"
 repository = "https://github.com/imazen/zensim"
 license = "MIT"
 rust-version = "1.85.0"
+keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
+categories = ["multimedia::images", "computer-vision"]
+exclude = ["benches/", "tests/"]
 
 [features]
 default = ["avx512"]

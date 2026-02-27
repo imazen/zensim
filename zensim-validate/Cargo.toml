@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Validation harness: correlate zensim against human quality ratings"
 license = "MIT"
+publish = false
 
 [dependencies]
 zensim = { path = "../zensim", features = ["training"] }
