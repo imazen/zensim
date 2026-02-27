@@ -234,7 +234,16 @@ pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
 /// Compute zensim score between two sRGB u8 images.
 ///
+/// Both images must be the same dimensions (at least 8×8). Pixels are sRGB
+/// `[R, G, B]` with 8 bits per channel.
+///
 /// Returns a score on 0-100 scale where 100 = identical.
+///
+/// # Errors
+///
+/// Returns [`ZensimError::ImageTooSmall`] if width or height < 8,
+/// [`ZensimError::InvalidDataLength`] if pixel count != width × height,
+/// or [`ZensimError::DimensionMismatch`] if source and distorted differ in length.
 pub fn compute_zensim(
     source: &[[u8; 3]],
     distorted: &[[u8; 3]],
@@ -242,6 +251,67 @@ pub fn compute_zensim(
     height: usize,
 ) -> Result<ZensimResult, ZensimError> {
     compute_zensim_with_config(source, distorted, width, height, ZensimConfig::default())
+}
+
+/// Compute zensim score between two RGBA images with alpha compositing.
+///
+/// Both images are composited over the same 8×8 checkerboard (black/white)
+/// before comparison, so alpha differences produce visible perceptual
+/// distortion — fringing, incorrect transparency, and blending artifacts
+/// all produce measurable scores.
+///
+/// Pixels are sRGB `[R, G, B, A]` with straight (non-premultiplied) alpha.
+/// Fully opaque images (all alpha = 255) degrade to a simple channel strip
+/// with no blending overhead.
+///
+/// # Errors
+///
+/// Same as [`compute_zensim`].
+pub fn compute_zensim_rgba(
+    source: &[[u8; 4]],
+    distorted: &[[u8; 4]],
+    width: usize,
+    height: usize,
+) -> Result<ZensimResult, ZensimError> {
+    let src_rgb = crate::color::rgba_checkerboard_composite(source, width);
+    let dst_rgb = crate::color::rgba_checkerboard_composite(distorted, width);
+    compute_zensim(&src_rgb, &dst_rgb, width, height)
+}
+
+/// Pre-compute reference data from an RGBA image for batch comparisons.
+///
+/// RGBA variant of [`precompute_reference`]. The source is composited over
+/// a checkerboard before building the pyramid. Use with
+/// [`compute_zensim_with_ref_rgba`].
+///
+/// # Errors
+///
+/// Same as [`precompute_reference`].
+pub fn precompute_reference_rgba(
+    source: &[[u8; 4]],
+    width: usize,
+    height: usize,
+) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+    let src_rgb = crate::color::rgba_checkerboard_composite(source, width);
+    precompute_reference(&src_rgb, width, height)
+}
+
+/// Compute zensim score using a precomputed RGBA reference.
+///
+/// RGBA variant of [`compute_zensim_with_ref`]. The distorted image is
+/// composited over the same checkerboard used by [`precompute_reference_rgba`].
+///
+/// # Errors
+///
+/// Same as [`compute_zensim_with_ref`].
+pub fn compute_zensim_with_ref_rgba(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &[[u8; 4]],
+    width: usize,
+    height: usize,
+) -> Result<ZensimResult, ZensimError> {
+    let dst_rgb = crate::color::rgba_checkerboard_composite(distorted, width);
+    compute_zensim_with_ref(precomputed, &dst_rgb, width, height)
 }
 
 /// Compute zensim with custom configuration.

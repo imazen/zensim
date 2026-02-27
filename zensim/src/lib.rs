@@ -56,7 +56,9 @@ mod streaming;
 
 pub use error::ZensimError;
 pub use metric::{
-    ZensimResult, compute_zensim, compute_zensim_with_ref, distance_to_score, precompute_reference,
+    ZensimResult, compute_zensim, compute_zensim_rgba, compute_zensim_with_ref,
+    compute_zensim_with_ref_rgba, distance_to_score, precompute_reference,
+    precompute_reference_rgba,
 };
 pub use streaming::PrecomputedReference;
 

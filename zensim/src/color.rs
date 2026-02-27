@@ -758,3 +758,39 @@ fn make_positive_xyb_inner_scalar(
         b[i] = (bv - yv) + 0.55;
     }
 }
+
+/// Composite straight-alpha RGBA pixels over a checkerboard background into sRGB `[u8; 3]`.
+///
+/// The checkerboard uses 8×8 pixel blocks alternating black (0) and white (255).
+/// Full-contrast B/W maximizes sensitivity to alpha differences — dark foreground
+/// shows against white squares, light foreground against black.
+///
+/// Alpha blending is performed in sRGB space:
+/// `out = alpha * fg + (1 - alpha) * bg` per channel, where `alpha = a / 255`.
+pub fn rgba_checkerboard_composite(pixels: &[[u8; 4]], width: usize) -> Vec<[u8; 3]> {
+    let mut out = Vec::with_capacity(pixels.len());
+    for (i, &[r, g, b, a]) in pixels.iter().enumerate() {
+        let x = i % width;
+        let y = i / width;
+        // 8×8 checkerboard: ((x >> 3) ^ (y >> 3)) & 1
+        let bg = if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
+            0u8
+        } else {
+            255u8
+        };
+        if a == 255 {
+            out.push([r, g, b]);
+        } else if a == 0 {
+            out.push([bg, bg, bg]);
+        } else {
+            let alpha = a as f32 * (1.0 / 255.0);
+            let inv = 1.0 - alpha;
+            let bg_f = bg as f32;
+            let ro = (r as f32).mul_add(alpha, bg_f * inv) + 0.5;
+            let go = (g as f32).mul_add(alpha, bg_f * inv) + 0.5;
+            let bo = (b as f32).mul_add(alpha, bg_f * inv) + 0.5;
+            out.push([ro as u8, go as u8, bo as u8]);
+        }
+    }
+    out
+}
