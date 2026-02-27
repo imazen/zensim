@@ -804,7 +804,7 @@ pub(crate) fn compute_zensim_streaming_with_ref(
     let scale_stats =
         compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights);
     let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked, weights)
+    combine_scores(&scale_stats, masked, weights, config)
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
@@ -817,7 +817,7 @@ pub(crate) fn compute_zensim_streaming(
 ) -> crate::metric::ZensimResult {
     let scale_stats = compute_multiscale_stats_streaming(source, distorted, config, weights);
     let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked, weights)
+    combine_scores(&scale_stats, masked, weights, config)
 }
 
 #[cfg(test)]

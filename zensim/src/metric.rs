@@ -34,6 +34,12 @@ pub struct ZensimConfig {
     /// Maximum number of downscale levels (default: 4).
     /// More scales capture larger structures but add features. Range: 2-6.
     pub num_scales: usize,
+    /// Score mapping scale factor (default: 18.0).
+    /// Used in `score = 100 - a * d^b`.
+    pub score_mapping_a: f64,
+    /// Score mapping gamma exponent (default: 0.7).
+    /// Used in `score = 100 - a * d^b`.
+    pub score_mapping_b: f64,
 }
 
 impl Default for ZensimConfig {
@@ -44,28 +50,31 @@ impl Default for ZensimConfig {
             compute_all_features: false,
             masking_strength: 0.0,
             num_scales: crate::NUM_SCALES,
+            score_mapping_a: 18.0,
+            score_mapping_b: 0.7,
         }
     }
 }
 
 /// Map a raw weighted distance to the 0–100 quality score.
 ///
-/// Uses a power-law mapping: `score = 100 - 18 * d^0.7`, clamped to \[0, 100\].
+/// Uses the default power-law mapping: `score = 100 - 18 * d^0.7`, clamped to \[0, 100\].
 /// Identical images (d = 0) score 100.
+///
+/// For profile-specific mapping, use [`Zensim::compute`] which applies the profile's
+/// `score_mapping_a` and `score_mapping_b` automatically.
 pub fn distance_to_score(raw_distance: f64) -> f64 {
+    distance_to_score_mapped(raw_distance, 18.0, 0.7)
+}
+
+/// Map a raw weighted distance to the 0–100 quality score with custom parameters.
+///
+/// `score = 100 - a * d^b`, clamped to \[0, 100\].
+fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
     if raw_distance <= 0.0 {
         100.0
     } else {
-        // Power law mapping: score = 100 - scale * d^gamma
-        // Calibrated for trained weights where d ∈ [0, ~10]:
-        //   d=0.1 → ~97 (near-invisible distortion)
-        //   d=0.5 → ~82 (subtle distortion)
-        //   d=2.5 → ~52 (moderate distortion)
-        //   d=8.0 → ~18 (severe distortion)
-        //   d=16  → ~3  (heavy distortion)
-        let scale = 18.0;
-        let gamma = 0.7;
-        (100.0 - scale * raw_distance.powf(gamma)).max(0.0)
+        (100.0 - a * raw_distance.powf(b)).max(0.0)
     }
 }
 
@@ -187,6 +196,7 @@ pub fn compute_zensim_with_ref(
 ///
 /// Training/research variant of [`compute_zensim_with_ref`]. The `config.num_scales`
 /// must not exceed the number of scales in `precomputed`.
+#[cfg(feature = "training")]
 pub fn compute_zensim_with_ref_and_config(
     precomputed: &crate::streaming::PrecomputedReference,
     distorted: &[[u8; 3]],
@@ -402,6 +412,8 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
         compute_all_features: false,
         masking_strength: params.masking_strength,
         num_scales: params.num_scales,
+        score_mapping_a: params.score_mapping_a,
+        score_mapping_b: params.score_mapping_b,
     }
 }
 
@@ -552,7 +564,7 @@ pub fn compute_zensim_with_config(
     let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, &config);
 
     // Combine with weights to produce final score
-    let result = combine_scores(&scale_stats, masked, &WEIGHTS);
+    let result = combine_scores(&scale_stats, masked, &WEIGHTS, &config);
     Ok(result)
 }
 
@@ -1571,6 +1583,7 @@ pub(crate) fn combine_scores(
     scale_stats: &[ScaleStats],
     _masked: bool,
     weights: &[f64; 156],
+    config: &ZensimConfig,
 ) -> ZensimResult {
     let features_per_ch = FEATURES_PER_CHANNEL_BASIC;
     let features_per_scale = features_per_ch * 3;
@@ -1610,7 +1623,8 @@ pub(crate) fn combine_scores(
     // Normalize by number of scales
     raw_distance /= scale_stats.len().max(1) as f64;
 
-    let score = distance_to_score(raw_distance);
+    let score =
+        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
 
     ZensimResult {
         score,
