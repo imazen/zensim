@@ -576,12 +576,45 @@ fn validate_pair(
 /// Streaming is used when masking is disabled (the common case).
 /// Full-image is forced when masking_strength > 0.0 because masking
 /// needs the full blurred source plane to compute per-pixel activity weights.
+/// Check if source and distorted images have byte-identical pixel data.
+fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
+    let (w, h) = (source.width(), source.height());
+    if w != distorted.width() || h != distorted.height() {
+        return false;
+    }
+    if source.pixel_format() != distorted.pixel_format() {
+        return false;
+    }
+    let bpp = source.pixel_format().bytes_per_pixel();
+    let row_len = w * bpp;
+    for y in 0..h {
+        let src_row = source.row_bytes(y);
+        let dst_row = distorted.row_bytes(y);
+        if src_row[..row_len] != dst_row[..row_len] {
+            return false;
+        }
+    }
+    true
+}
+
 fn compute_with_config_inner(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64; 156],
 ) -> ZensimResult {
+    // Identical images must score exactly 100.0 — short-circuit before
+    // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
+    if images_byte_identical(source, distorted) {
+        let num_features = config.num_scales * 3 * FEATURES_PER_CHANNEL_BASIC;
+        return ZensimResult {
+            score: 100.0,
+            raw_distance: 0.0,
+            features: vec![0.0; num_features],
+            profile: ZensimProfile::latest(),
+        };
+    }
+
     let masked = config.masking_strength > 0.0;
     if !masked {
         return crate::streaming::compute_zensim_streaming(source, distorted, config, weights);
