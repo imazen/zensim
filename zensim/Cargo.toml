@@ -18,6 +18,10 @@ avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## metric internals (blur kernel, scale count, masking) whose outputs are
 ## incomparable with the default trained weights.
 training = []
+## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
+imgref = ["dep:imgref", "dep:rgb"]
+## Enable ImageSource impls for zencodec_types_api::PixelSlice and PixelBuffer.
+zencodec-types = ["dep:zencodec-types"]
 
 [dependencies]
 archmage = { workspace = true }
@@ -25,6 +29,9 @@ bytemuck = { workspace = true }
 magetypes = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }
+imgref = { workspace = true, optional = true }
+rgb = { workspace = true, optional = true }
+zencodec-types = { workspace = true, optional = true }
 
 [dev-dependencies]
 image = { workspace = true }

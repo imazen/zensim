@@ -8,14 +8,18 @@ use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
     fused_blur_h_ssim, simd_padded_width,
 };
-use crate::color::{composite_rgba_row, srgb_to_positive_xyb_planar_into};
+use crate::color::{
+    composite_linear_f32_bgra, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
+    composite_srgb8_rgba_to_linear, linear_to_positive_xyb_planar_into,
+    srgb_to_positive_xyb_planar_into,
+};
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
     abs_diff_sum, edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
 };
-use crate::source::{Channels, ImageSource};
+use crate::source::{ImageSource, PixelFormat};
 use rayon::prelude::*;
 use std::sync::Mutex;
 
@@ -316,7 +320,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
         Vec::new()
     };
 
-    let channels = source.channels();
+    let pixel_format = source.pixel_format();
 
     p0_chunks
         .into_par_iter()
@@ -328,8 +332,8 @@ pub(crate) fn convert_source_to_xyb_parallel(
             let row_end = (row_start + chunk_rows).min(height);
             let rows = row_end - row_start;
 
-            match channels {
-                Channels::Rgb8 => {
+            match pixel_format {
+                PixelFormat::Srgb8Rgb => {
                     // Collect all rows into a contiguous buffer, then convert in bulk
                     let raw_elems = rows * width;
                     let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
@@ -345,22 +349,93 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         &mut c2[..raw_elems],
                     );
                 }
-                Channels::Rgba8 => {
-                    // RGBA: composite each row over checkerboard, then convert
-                    let mut rgb_row = vec![[0u8; 3]; width];
+                PixelFormat::Srgb8Rgba => {
+                    // RGBA: linearize, composite in linear space, convert to XYB
+                    let mut linear_row = vec![[0.0f32; 3]; width];
                     for y in row_start..row_end {
                         let row_bytes = source.row_bytes(y);
                         let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                        composite_rgba_row(&rgba_row[..width], y, &mut rgb_row);
+                        composite_srgb8_rgba_to_linear(&rgba_row[..width], y, &mut linear_row);
                         let row_offset = (y - row_start) * width;
-                        srgb_to_positive_xyb_planar_into(
-                            &rgb_row,
+                        linear_to_positive_xyb_planar_into(
+                            &linear_row,
                             &mut c0[row_offset..row_offset + width],
                             &mut c1[row_offset..row_offset + width],
                             &mut c2[row_offset..row_offset + width],
                         );
                     }
                 }
+                PixelFormat::Srgb8Bgra => {
+                    // BGRA: swizzle B↔R, linearize, composite in linear space
+                    let mut linear_row = vec![[0.0f32; 3]; width];
+                    for y in row_start..row_end {
+                        let row_bytes = source.row_bytes(y);
+                        let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                        composite_srgb8_bgra_to_linear(&bgra_row[..width], y, &mut linear_row);
+                        let row_offset = (y - row_start) * width;
+                        linear_to_positive_xyb_planar_into(
+                            &linear_row,
+                            &mut c0[row_offset..row_offset + width],
+                            &mut c1[row_offset..row_offset + width],
+                            &mut c2[row_offset..row_offset + width],
+                        );
+                    }
+                }
+                PixelFormat::LinearF32Rgb => {
+                    // Linear f32 RGB: collect rows, convert directly
+                    let raw_elems = rows * width;
+                    let mut rgb_buf: Vec<[f32; 3]> = Vec::with_capacity(raw_elems);
+                    for y in row_start..row_end {
+                        let row_bytes = source.row_bytes(y);
+                        let row: &[[f32; 3]] = bytemuck::cast_slice(row_bytes);
+                        rgb_buf.extend_from_slice(&row[..width]);
+                    }
+                    linear_to_positive_xyb_planar_into(
+                        &rgb_buf,
+                        &mut c0[..raw_elems],
+                        &mut c1[..raw_elems],
+                        &mut c2[..raw_elems],
+                    );
+                }
+                PixelFormat::LinearF32Rgba => {
+                    // Linear f32 RGBA: composite in linear space, convert to XYB
+                    let mut linear_row = vec![[0.0f32; 3]; width];
+                    for y in row_start..row_end {
+                        let row_bytes = source.row_bytes(y);
+                        let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+                        composite_linear_f32_rgba(&rgba_row[..width], y, &mut linear_row);
+                        let row_offset = (y - row_start) * width;
+                        linear_to_positive_xyb_planar_into(
+                            &linear_row,
+                            &mut c0[row_offset..row_offset + width],
+                            &mut c1[row_offset..row_offset + width],
+                            &mut c2[row_offset..row_offset + width],
+                        );
+                    }
+                }
+                PixelFormat::LinearF32Bgra => {
+                    // Linear f32 BGRA: swizzle B↔R, composite, convert to XYB
+                    let mut linear_row = vec![[0.0f32; 3]; width];
+                    for y in row_start..row_end {
+                        let row_bytes = source.row_bytes(y);
+                        let bgra_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+                        composite_linear_f32_bgra(&bgra_row[..width], y, &mut linear_row);
+                        let row_offset = (y - row_start) * width;
+                        linear_to_positive_xyb_planar_into(
+                            &linear_row,
+                            &mut c0[row_offset..row_offset + width],
+                            &mut c1[row_offset..row_offset + width],
+                            &mut c2[row_offset..row_offset + width],
+                        );
+                    }
+                }
+                // PixelFormat is #[non_exhaustive] so downstream crates need this arm,
+                // but within this crate all variants are handled above.
+                #[allow(unreachable_patterns)]
+                other => panic!(
+                    "zensim: unsupported pixel format {:?} in XYB conversion",
+                    other
+                ),
             }
 
             // Spread rows from logical width to padded width (bottom-to-top for overlap safety)
@@ -977,6 +1052,192 @@ mod tests {
             max_abs_diff < 1e-3,
             "max absolute feature diff {:.2e} exceeds 1e-3",
             max_abs_diff,
+        );
+    }
+
+    /// Verify that linear f32 input produces equivalent results to sRGB u8 input.
+    ///
+    /// Given the same image content, the sRGB u8 and linear f32 paths should produce
+    /// the same XYB values (within floating-point tolerance due to the LUT quantization
+    /// in the sRGB u8 path vs direct float values in the linear path).
+    #[test]
+    fn linear_f32_matches_srgb_u8() {
+        let w = 256;
+        let h = 256;
+        let n = w * h;
+
+        let mut src_u8 = vec![[128u8, 128, 128]; n];
+        let mut dst_u8 = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = ((x + y) * 127 / (w + h)) as u8;
+                src_u8[y * w + x] = [r, g, b];
+                dst_u8[y * w + x] = [
+                    r.saturating_add(3),
+                    g.saturating_sub(2),
+                    b.saturating_add(1),
+                ];
+            }
+        }
+
+        // Convert u8 to linear f32 using the same LUT the sRGB path uses
+        let src_f32: Vec<[f32; 3]> = src_u8
+            .iter()
+            .map(|&[r, g, b]| {
+                [
+                    crate::color::srgb_u8_to_linear(r),
+                    crate::color::srgb_u8_to_linear(g),
+                    crate::color::srgb_u8_to_linear(b),
+                ]
+            })
+            .collect();
+        let dst_f32: Vec<[f32; 3]> = dst_u8
+            .iter()
+            .map(|&[r, g, b]| {
+                [
+                    crate::color::srgb_u8_to_linear(r),
+                    crate::color::srgb_u8_to_linear(g),
+                    crate::color::srgb_u8_to_linear(b),
+                ]
+            })
+            .collect();
+
+        let config = ZensimConfig {
+            compute_all_features: true,
+            ..Default::default()
+        };
+
+        // sRGB u8 path
+        let src_u8_img = RgbSlice::new(&src_u8, w, h);
+        let dst_u8_img = RgbSlice::new(&dst_u8, w, h);
+        let u8_result =
+            compute_zensim_streaming(&src_u8_img, &dst_u8_img, &config, &WEIGHTS_GENERAL_V0_2);
+
+        // Linear f32 path via StridedBytes
+        let src_f32_bytes: &[u8] = bytemuck::cast_slice(&src_f32);
+        let dst_f32_bytes: &[u8] = bytemuck::cast_slice(&dst_f32);
+        let src_f32_img = crate::source::StridedBytes::new(
+            src_f32_bytes,
+            w,
+            h,
+            w * 12,
+            crate::source::PixelFormat::LinearF32Rgb,
+        );
+        let dst_f32_img = crate::source::StridedBytes::new(
+            dst_f32_bytes,
+            w,
+            h,
+            w * 12,
+            crate::source::PixelFormat::LinearF32Rgb,
+        );
+        let f32_result =
+            compute_zensim_streaming(&src_f32_img, &dst_f32_img, &config, &WEIGHTS_GENERAL_V0_2);
+
+        // Score should match very closely (identical linear values → identical XYB → identical features)
+        let score_rel =
+            (u8_result.score - f32_result.score).abs() / u8_result.score.abs().max(1e-12);
+        let dist_rel = (u8_result.raw_distance - f32_result.raw_distance).abs()
+            / u8_result.raw_distance.abs().max(1e-12);
+
+        eprintln!(
+            "sRGB u8 score={:.10}  linear f32 score={:.10}  rel={:.2e}",
+            u8_result.score, f32_result.score, score_rel,
+        );
+        eprintln!(
+            "sRGB u8 dist={:.10}  linear f32 dist={:.10}  rel={:.2e}",
+            u8_result.raw_distance, f32_result.raw_distance, dist_rel,
+        );
+
+        // When linear f32 values come from the same LUT, the results should be
+        // very close (within FP rounding from different code paths).
+        assert!(
+            score_rel < 1e-6,
+            "score relative diff {:.2e} exceeds 1e-6 (sRGB={:.10} vs linear={:.10})",
+            score_rel,
+            u8_result.score,
+            f32_result.score,
+        );
+        assert!(
+            dist_rel < 1e-5,
+            "raw_distance relative diff {:.2e} exceeds 1e-5",
+            dist_rel,
+        );
+    }
+
+    /// Verify that BGRA u8 input produces equivalent results to RGB u8 (opaque).
+    #[test]
+    fn bgra_u8_matches_rgb_u8_opaque() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+
+        let mut src_rgb = vec![[128u8, 128, 128]; n];
+        let mut dst_rgb = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = ((x + y) * 127 / (w + h)) as u8;
+                src_rgb[y * w + x] = [r, g, b];
+                dst_rgb[y * w + x] = [
+                    r.saturating_add(5),
+                    g.saturating_sub(3),
+                    b.saturating_add(2),
+                ];
+            }
+        }
+
+        // Convert RGB to BGRA (opaque, alpha=255)
+        let src_bgra: Vec<[u8; 4]> = src_rgb.iter().map(|&[r, g, b]| [b, g, r, 255]).collect();
+        let dst_bgra: Vec<[u8; 4]> = dst_rgb.iter().map(|&[r, g, b]| [b, g, r, 255]).collect();
+
+        let config = ZensimConfig::default();
+
+        // RGB u8 path
+        let src_rgb_img = RgbSlice::new(&src_rgb, w, h);
+        let dst_rgb_img = RgbSlice::new(&dst_rgb, w, h);
+        let rgb_result =
+            compute_zensim_streaming(&src_rgb_img, &dst_rgb_img, &config, &WEIGHTS_GENERAL_V0_2);
+
+        // BGRA u8 path via StridedBytes
+        let src_bgra_bytes: &[u8] = bytemuck::cast_slice(&src_bgra);
+        let dst_bgra_bytes: &[u8] = bytemuck::cast_slice(&dst_bgra);
+        let src_bgra_img = crate::source::StridedBytes::new(
+            src_bgra_bytes,
+            w,
+            h,
+            w * 4,
+            crate::source::PixelFormat::Srgb8Bgra,
+        );
+        let dst_bgra_img = crate::source::StridedBytes::new(
+            dst_bgra_bytes,
+            w,
+            h,
+            w * 4,
+            crate::source::PixelFormat::Srgb8Bgra,
+        );
+        let bgra_result =
+            compute_zensim_streaming(&src_bgra_img, &dst_bgra_img, &config, &WEIGHTS_GENERAL_V0_2);
+
+        // Opaque BGRA compositing in linear space should match sRGB u8 RGB
+        // within a small tolerance (compositing detour adds FP rounding).
+        let score_rel =
+            (rgb_result.score - bgra_result.score).abs() / rgb_result.score.abs().max(1e-12);
+        eprintln!(
+            "RGB u8 score={:.10}  BGRA u8 score={:.10}  rel={:.2e}",
+            rgb_result.score, bgra_result.score, score_rel,
+        );
+
+        // Note: BGRA path composites over checkerboard in linear space even for
+        // opaque pixels (alpha=255 fast path skips blending but linearizes).
+        // sRGB u8 RGB path uses the fused sRGB→XYB SIMD. The difference comes
+        // from different code paths to the same opsin matrix. Should be very close.
+        assert!(
+            score_rel < 1e-4,
+            "score relative diff {:.2e} exceeds 1e-4",
+            score_rel,
         );
     }
 

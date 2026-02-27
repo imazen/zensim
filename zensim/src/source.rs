@@ -1,25 +1,56 @@
 //! Zero-copy image source abstraction for zensim.
 //!
 //! The [`ImageSource`] trait provides row-level access to pixel data with arbitrary
-//! stride, supporting RGB and RGBA formats without intermediate copies.
+//! stride, supporting multiple pixel formats without intermediate copies.
 
-/// Pixel channel layout.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Channels {
-    /// 3 bytes per pixel: R, G, B
-    Rgb8,
-    /// 4 bytes per pixel: R, G, B, A (straight alpha)
-    Rgba8,
+/// Pixel format describing the channel layout, bit depth, and transfer function.
+///
+/// All formats are converted to linear RGB internally before XYB color space conversion.
+/// Alpha-bearing formats are composited over a checkerboard in linear light space.
+///
+/// The choice of format affects only the conversion path to linear RGB — once in XYB,
+/// the metric computation is identical. Scores for the same image content should be
+/// equivalent regardless of input format (within floating-point precision).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PixelFormat {
+    /// sRGB 8-bit RGB. 3 bytes per pixel: `[R, G, B]`.
+    Srgb8Rgb,
+    /// sRGB 8-bit RGBA with straight alpha. 4 bytes per pixel: `[R, G, B, A]`.
+    Srgb8Rgba,
+    /// sRGB 8-bit BGRA with straight alpha. 4 bytes per pixel: `[B, G, R, A]`.
+    /// Common on Windows/DirectX surfaces.
+    Srgb8Bgra,
+    /// Linear light 32-bit float RGB. 12 bytes per pixel: `[R, G, B]` as `f32`.
+    /// Values in [0.0, 1.0] for standard dynamic range.
+    LinearF32Rgb,
+    /// Linear light 32-bit float RGBA with straight alpha. 16 bytes per pixel.
+    /// `[R, G, B, A]` as `f32`.
+    LinearF32Rgba,
+    /// Linear light 32-bit float BGRA with straight alpha. 16 bytes per pixel.
+    /// `[B, G, R, A]` as `f32`. Common in GPU pipelines.
+    LinearF32Bgra,
 }
 
-impl Channels {
-    /// Bytes per pixel for this channel layout.
+impl PixelFormat {
+    /// Bytes per pixel for this format.
     #[inline]
     pub fn bytes_per_pixel(self) -> usize {
         match self {
-            Self::Rgb8 => 3,
-            Self::Rgba8 => 4,
+            Self::Srgb8Rgb => 3,
+            Self::Srgb8Rgba | Self::Srgb8Bgra => 4,
+            Self::LinearF32Rgb => 12,
+            Self::LinearF32Rgba | Self::LinearF32Bgra => 16,
         }
+    }
+
+    /// Whether this format has an alpha channel.
+    #[inline]
+    pub fn has_alpha(self) -> bool {
+        matches!(
+            self,
+            Self::Srgb8Rgba | Self::Srgb8Bgra | Self::LinearF32Rgba | Self::LinearF32Bgra
+        )
     }
 }
 
@@ -32,9 +63,9 @@ pub trait ImageSource: Sync {
     fn width(&self) -> usize;
     /// Image height in pixels.
     fn height(&self) -> usize;
-    /// Pixel channel layout.
-    fn channels(&self) -> Channels;
-    /// Raw bytes for row `y`. Length must be at least `width() * channels().bytes_per_pixel()`.
+    /// Pixel format (layout, bit depth, transfer function).
+    fn pixel_format(&self) -> PixelFormat;
+    /// Raw bytes for row `y`. Length must be at least `width() * pixel_format().bytes_per_pixel()`.
     fn row_bytes(&self, y: usize) -> &[u8];
 }
 
@@ -77,8 +108,8 @@ impl ImageSource for RgbSlice<'_> {
         self.height
     }
     #[inline]
-    fn channels(&self) -> Channels {
-        Channels::Rgb8
+    fn pixel_format(&self) -> PixelFormat {
+        PixelFormat::Srgb8Rgb
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
@@ -128,8 +159,8 @@ impl ImageSource for RgbaSlice<'_> {
         self.height
     }
     #[inline]
-    fn channels(&self) -> Channels {
-        Channels::Rgba8
+    fn pixel_format(&self) -> PixelFormat {
+        PixelFormat::Srgb8Rgba
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
@@ -139,23 +170,24 @@ impl ImageSource for RgbaSlice<'_> {
     }
 }
 
-/// Wraps raw `&[u8]` bytes with explicit width, height, stride, and channel format.
+/// Wraps raw `&[u8]` bytes with explicit width, height, stride, and pixel format.
 ///
-/// Use this for images with non-contiguous row storage (stride > width * bpp).
+/// Use this for images with non-contiguous row storage (stride > width * bpp),
+/// or for pixel formats not covered by [`RgbSlice`] / [`RgbaSlice`].
 #[derive(Clone, Copy, Debug)]
 pub struct StridedBytes<'a> {
     data: &'a [u8],
     width: usize,
     height: usize,
     stride: usize,
-    channels: Channels,
+    pixel_format: PixelFormat,
 }
 
 impl<'a> StridedBytes<'a> {
     /// Create a new `StridedBytes` from raw byte data.
     ///
     /// `stride` is the byte distance between the start of consecutive rows.
-    /// Must be at least `width * channels.bytes_per_pixel()`.
+    /// Must be at least `width * pixel_format.bytes_per_pixel()`.
     ///
     /// # Panics
     ///
@@ -165,9 +197,9 @@ impl<'a> StridedBytes<'a> {
         width: usize,
         height: usize,
         stride: usize,
-        channels: Channels,
+        pixel_format: PixelFormat,
     ) -> Self {
-        let bpp = channels.bytes_per_pixel();
+        let bpp = pixel_format.bytes_per_pixel();
         let min_stride = width * bpp;
         assert!(
             stride >= min_stride,
@@ -189,7 +221,7 @@ impl<'a> StridedBytes<'a> {
             width,
             height,
             stride,
-            channels,
+            pixel_format,
         }
     }
 }
@@ -204,13 +236,138 @@ impl ImageSource for StridedBytes<'_> {
         self.height
     }
     #[inline]
-    fn channels(&self) -> Channels {
-        self.channels
+    fn pixel_format(&self) -> PixelFormat {
+        self.pixel_format
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
         let start = y * self.stride;
-        let bpp = self.channels.bytes_per_pixel();
+        let bpp = self.pixel_format.bytes_per_pixel();
         &self.data[start..start + self.width * bpp]
     }
 }
+
+// --- Feature-gated impls ---
+
+#[cfg(feature = "imgref")]
+mod imgref_impls {
+    use super::*;
+    use rgb::ComponentBytes;
+
+    impl ImageSource for imgref::ImgRef<'_, rgb::Rgb<u8>> {
+        #[inline]
+        fn width(&self) -> usize {
+            imgref::Img::width(self)
+        }
+        #[inline]
+        fn height(&self) -> usize {
+            imgref::Img::height(self)
+        }
+        #[inline]
+        fn pixel_format(&self) -> PixelFormat {
+            PixelFormat::Srgb8Rgb
+        }
+        #[inline]
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            let stride = imgref::Img::stride(self); // pixels
+            let buf = imgref::Img::buf(self);
+            let start = y * stride;
+            let w = imgref::Img::width(self);
+            buf[start..start + w].as_bytes()
+        }
+    }
+
+    impl ImageSource for imgref::ImgRef<'_, rgb::Rgba<u8>> {
+        #[inline]
+        fn width(&self) -> usize {
+            imgref::Img::width(self)
+        }
+        #[inline]
+        fn height(&self) -> usize {
+            imgref::Img::height(self)
+        }
+        #[inline]
+        fn pixel_format(&self) -> PixelFormat {
+            PixelFormat::Srgb8Rgba
+        }
+        #[inline]
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            let stride = imgref::Img::stride(self); // pixels
+            let buf = imgref::Img::buf(self);
+            let start = y * stride;
+            let w = imgref::Img::width(self);
+            buf[start..start + w].as_bytes()
+        }
+    }
+}
+
+#[cfg(feature = "zencodec-types")]
+mod zencodec_impls {
+    use super::*;
+    use zencodec_types::{ChannelLayout, ChannelType, PixelSlice, TransferFunction};
+
+    /// Convert a zencodec-types PixelDescriptor to a zensim PixelFormat.
+    ///
+    /// Returns `None` for unsupported formats (Gray, GrayAlpha, U16, PQ, HLG, etc.).
+    pub fn pixel_format_from_descriptor(
+        desc: zencodec_types::PixelDescriptor,
+    ) -> Option<PixelFormat> {
+        match (desc.channel_type, desc.layout, desc.transfer) {
+            (ChannelType::U8, ChannelLayout::Rgb, TransferFunction::Srgb) => {
+                Some(PixelFormat::Srgb8Rgb)
+            }
+            (ChannelType::U8, ChannelLayout::Rgba, TransferFunction::Srgb) => {
+                Some(PixelFormat::Srgb8Rgba)
+            }
+            (ChannelType::U8, ChannelLayout::Bgra, TransferFunction::Srgb) => {
+                Some(PixelFormat::Srgb8Bgra)
+            }
+            (ChannelType::F32, ChannelLayout::Rgb, TransferFunction::Linear) => {
+                Some(PixelFormat::LinearF32Rgb)
+            }
+            (ChannelType::F32, ChannelLayout::Rgba, TransferFunction::Linear) => {
+                Some(PixelFormat::LinearF32Rgba)
+            }
+            (ChannelType::F32, ChannelLayout::Bgra, TransferFunction::Linear) => {
+                Some(PixelFormat::LinearF32Bgra)
+            }
+            _ => None,
+        }
+    }
+
+    fn descriptor_to_pixel_format(desc: zencodec_types::PixelDescriptor) -> PixelFormat {
+        pixel_format_from_descriptor(desc).unwrap_or_else(|| {
+            panic!(
+                "zensim: unsupported pixel format {:?}/{:?}/{:?}. \
+                 Supported: sRGB u8 RGB/RGBA/BGRA, linear f32 RGB/RGBA/BGRA.",
+                desc.channel_type, desc.layout, desc.transfer,
+            )
+        })
+    }
+
+    impl ImageSource for PixelSlice<'_> {
+        #[inline]
+        fn width(&self) -> usize {
+            PixelSlice::width(self) as usize
+        }
+        #[inline]
+        fn height(&self) -> usize {
+            PixelSlice::rows(self) as usize
+        }
+        #[inline]
+        fn pixel_format(&self) -> PixelFormat {
+            descriptor_to_pixel_format(PixelSlice::descriptor(self))
+        }
+        #[inline]
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            PixelSlice::row(self, y as u32)
+        }
+    }
+
+    // PixelBuffer: use `buf.as_slice()` to get a `PixelSlice` which implements ImageSource.
+    // Direct impl is not possible because PixelBuffer::row() requires going through
+    // a temporary PixelSlice, and Rust can't return references to temporaries.
+}
+
+#[cfg(feature = "zencodec-types")]
+pub use zencodec_impls::pixel_format_from_descriptor;

@@ -1,8 +1,15 @@
-//! Color space conversion: sRGB → linear RGB → XYB
+//! Color space conversion: linear RGB / sRGB → XYB
 //!
 //! XYB is the perceptual color space used by both ssimulacra2 and butteraugli.
 //! X ≈ red-green opponent, Y ≈ luminance, B ≈ blue channel.
 //! The cube root (LMS cone response) is the key nonlinearity.
+//!
+//! Two entry points for XYB conversion:
+//! - [`srgb_to_positive_xyb_planar_into`]: sRGB u8 input (LUT-based linearization + SIMD)
+//! - [`linear_to_positive_xyb_planar_into`]: linear f32 input (SIMD, skips LUT)
+//!
+//! RGBA compositing helpers produce linear f32 RGB output for all input formats,
+//! ensuring identical XYB values regardless of input pixel format.
 
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
@@ -759,10 +766,552 @@ fn make_positive_xyb_inner_scalar(
     }
 }
 
-/// Composite a single row of RGBA pixels over a checkerboard background.
+// ---------------------------------------------------------------------------
+// Linear RGB → positive XYB conversion
+// ---------------------------------------------------------------------------
+
+/// Convert interleaved linear f32 RGB to planar positive XYB.
 ///
-/// `y` is the row index (used for checkerboard pattern).
-/// `out` must be at least `row.len()` long.
+/// Input: `&[[f32; 3]]` — linear-light RGB values (typically in [0.0, 1.0]).
+/// Output: 3 planes (X, Y, B) each of length `pixels.len()`, already positive-shifted.
+///
+/// This is the same opsin matrix + cube root + positive shift as the sRGB u8 path,
+/// but skips the sRGB LUT linearization step. Results are identical for the same
+/// linear RGB values (within floating-point precision).
+pub fn linear_to_positive_xyb_planar_into(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    incant!(
+        linear_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
+        [v4, v3]
+    );
+}
+
+/// AVX-512 path for linear f32 → positive XYB (16 pixels at a time).
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn linear_to_positive_xyb_planar_inner_v4(
+    token: archmage::X64V4Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    let m00 = f32x16::splat(token, K_M00);
+    let m01 = f32x16::splat(token, K_M01);
+    let m02 = f32x16::splat(token, K_M02);
+    let m10 = f32x16::splat(token, K_M10);
+    let m11 = f32x16::splat(token, K_M11);
+    let m12 = f32x16::splat(token, K_M12);
+    let m20 = f32x16::splat(token, K_M20);
+    let m21 = f32x16::splat(token, K_M21);
+    let m22 = f32x16::splat(token, K_M22);
+    let bias = f32x16::splat(token, K_B0);
+    let zero = f32x16::zero(token);
+    let ab = f32x16::splat(token, absorbance_bias);
+    let half = f32x16::splat(token, 0.5);
+    let two = f32x16::splat(token, 2.0);
+    let fourteen = f32x16::splat(token, 14.0);
+    let x_bias = f32x16::splat(token, 0.42);
+    let y_bias = f32x16::splat(token, 0.01);
+    let b_bias = f32x16::splat(token, 0.55);
+
+    let n = pixels.len();
+    let chunks = n / 16;
+
+    for chunk in 0..chunks {
+        let base = chunk * 16;
+
+        let mut r_arr = [0.0f32; 16];
+        let mut g_arr = [0.0f32; 16];
+        let mut b_arr = [0.0f32; 16];
+        for i in 0..16 {
+            let p = pixels[base + i];
+            r_arr[i] = p[0];
+            g_arr[i] = p[1];
+            b_arr[i] = p[2];
+        }
+
+        let r = f32x16::from_array(token, r_arr);
+        let g = f32x16::from_array(token, g_arr);
+        let b = f32x16::from_array(token, b_arr);
+
+        let mixed0 = m00
+            .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
+            .max(zero);
+        let mixed1 = m10
+            .mul_add(r, m11.mul_add(g, m12.mul_add(b, bias)))
+            .max(zero);
+        let mixed2 = m20
+            .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
+            .max(zero);
+
+        let mut est0 = mixed0.to_array();
+        let mut est1 = mixed1.to_array();
+        let mut est2 = mixed2.to_array();
+        for i in 0..16 {
+            est0[i] = cbrtf_initial(est0[i]);
+            est1[i] = cbrtf_initial(est1[i]);
+            est2[i] = cbrtf_initial(est2[i]);
+        }
+
+        let x0 = mixed0;
+        let x1 = mixed1;
+        let x2 = mixed2;
+        let mut t0 = f32x16::from_array(token, est0);
+        let mut t1 = f32x16::from_array(token, est1);
+        let mut t2 = f32x16::from_array(token, est2);
+
+        // Halley iteration 1
+        let mut r0 = t0 * t0 * t0;
+        let mut r1 = t1 * t1 * t1;
+        let mut r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        // Halley iteration 2
+        r0 = t0 * t0 * t0;
+        r1 = t1 * t1 * t1;
+        r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        let c0 = t0 + ab;
+        let c1 = t1 + ab;
+
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+
+        let x_pos = x.mul_add(fourteen, x_bias);
+        let y_pos = y + y_bias;
+        let b_pos = (t2 - y) + b_bias;
+
+        x_out[base..base + 16].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 16].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 16].copy_from_slice(&b_pos.to_array());
+    }
+
+    // AVX2 remainder
+    let v3 = token.v3();
+    let ab8 = f32x8::splat(v3, absorbance_bias);
+    let half8 = f32x8::splat(v3, 0.5);
+    let two8 = f32x8::splat(v3, 2.0);
+    let zero8 = f32x8::zero(v3);
+    let m00_8 = f32x8::splat(v3, K_M00);
+    let m01_8 = f32x8::splat(v3, K_M01);
+    let m02_8 = f32x8::splat(v3, K_M02);
+    let m10_8 = f32x8::splat(v3, K_M10);
+    let m11_8 = f32x8::splat(v3, K_M11);
+    let m12_8 = f32x8::splat(v3, K_M12);
+    let m20_8 = f32x8::splat(v3, K_M20);
+    let m21_8 = f32x8::splat(v3, K_M21);
+    let m22_8 = f32x8::splat(v3, K_M22);
+    let bias8 = f32x8::splat(v3, K_B0);
+    let fourteen8 = f32x8::splat(v3, 14.0);
+    let x_bias8 = f32x8::splat(v3, 0.42);
+    let y_bias8 = f32x8::splat(v3, 0.01);
+    let b_bias8 = f32x8::splat(v3, 0.55);
+
+    let rem_start = chunks * 16;
+    let rem_chunks = (n - rem_start) / 8;
+    for chunk in 0..rem_chunks {
+        let base = rem_start + chunk * 8;
+        let mut r_arr = [0.0f32; 8];
+        let mut g_arr = [0.0f32; 8];
+        let mut b_arr = [0.0f32; 8];
+        for i in 0..8 {
+            let p = pixels[base + i];
+            r_arr[i] = p[0];
+            g_arr[i] = p[1];
+            b_arr[i] = p[2];
+        }
+        let r = f32x8::from_array(v3, r_arr);
+        let g = f32x8::from_array(v3, g_arr);
+        let b = f32x8::from_array(v3, b_arr);
+
+        let mixed0 = m00_8
+            .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed1 = m10_8
+            .mul_add(r, m11_8.mul_add(g, m12_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed2 = m20_8
+            .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
+            .max(zero8);
+
+        let mut est0 = mixed0.to_array();
+        let mut est1 = mixed1.to_array();
+        let mut est2 = mixed2.to_array();
+        for i in 0..8 {
+            est0[i] = cbrtf_initial(est0[i]);
+            est1[i] = cbrtf_initial(est1[i]);
+            est2[i] = cbrtf_initial(est2[i]);
+        }
+
+        let x0 = mixed0;
+        let x1 = mixed1;
+        let x2 = mixed2;
+        let mut t0 = f32x8::from_array(v3, est0);
+        let mut t1 = f32x8::from_array(v3, est1);
+        let mut t2 = f32x8::from_array(v3, est2);
+
+        let mut r0 = t0 * t0 * t0;
+        let mut r1 = t1 * t1 * t1;
+        let mut r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+
+        r0 = t0 * t0 * t0;
+        r1 = t1 * t1 * t1;
+        r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+
+        let c0 = t0 + ab8;
+        let c1 = t1 + ab8;
+        let x = half8 * (c0 - c1);
+        let y = half8 * (c0 + c1);
+        let x_pos = x.mul_add(fourteen8, x_bias8);
+        let y_pos = y + y_bias8;
+        let b_pos = (t2 - y) + b_bias8;
+
+        x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 8].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 8].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Scalar remainder
+    let absorbance_bias_neg = absorbance_bias;
+    for i in (rem_start + rem_chunks * 8)..n {
+        let p = pixels[i];
+        let r = p[0];
+        let g = p[1];
+        let b = p[2];
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
+/// AVX2 path for linear f32 → positive XYB (8 pixels at a time).
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn linear_to_positive_xyb_planar_inner_v3(
+    token: archmage::X64V3Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    let m00 = f32x8::splat(token, K_M00);
+    let m01 = f32x8::splat(token, K_M01);
+    let m02 = f32x8::splat(token, K_M02);
+    let m10 = f32x8::splat(token, K_M10);
+    let m11 = f32x8::splat(token, K_M11);
+    let m12 = f32x8::splat(token, K_M12);
+    let m20 = f32x8::splat(token, K_M20);
+    let m21 = f32x8::splat(token, K_M21);
+    let m22 = f32x8::splat(token, K_M22);
+    let bias = f32x8::splat(token, K_B0);
+    let zero = f32x8::zero(token);
+    let ab = f32x8::splat(token, absorbance_bias);
+    let half = f32x8::splat(token, 0.5);
+    let two = f32x8::splat(token, 2.0);
+    let fourteen = f32x8::splat(token, 14.0);
+    let x_bias = f32x8::splat(token, 0.42);
+    let y_bias = f32x8::splat(token, 0.01);
+    let b_bias = f32x8::splat(token, 0.55);
+
+    let n = pixels.len();
+    let chunks = n / 8;
+
+    for chunk in 0..chunks {
+        let base = chunk * 8;
+
+        let mut r_arr = [0.0f32; 8];
+        let mut g_arr = [0.0f32; 8];
+        let mut b_arr = [0.0f32; 8];
+        for i in 0..8 {
+            let p = pixels[base + i];
+            r_arr[i] = p[0];
+            g_arr[i] = p[1];
+            b_arr[i] = p[2];
+        }
+
+        let r = f32x8::from_array(token, r_arr);
+        let g = f32x8::from_array(token, g_arr);
+        let b = f32x8::from_array(token, b_arr);
+
+        let mixed0 = m00
+            .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
+            .max(zero);
+        let mixed1 = m10
+            .mul_add(r, m11.mul_add(g, m12.mul_add(b, bias)))
+            .max(zero);
+        let mixed2 = m20
+            .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
+            .max(zero);
+
+        let mut est0 = mixed0.to_array();
+        let mut est1 = mixed1.to_array();
+        let mut est2 = mixed2.to_array();
+        for i in 0..8 {
+            est0[i] = cbrtf_initial(est0[i]);
+            est1[i] = cbrtf_initial(est1[i]);
+            est2[i] = cbrtf_initial(est2[i]);
+        }
+
+        let x0 = mixed0;
+        let x1 = mixed1;
+        let x2 = mixed2;
+        let mut t0 = f32x8::from_array(token, est0);
+        let mut t1 = f32x8::from_array(token, est1);
+        let mut t2 = f32x8::from_array(token, est2);
+
+        let mut r0 = t0 * t0 * t0;
+        let mut r1 = t1 * t1 * t1;
+        let mut r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        r0 = t0 * t0 * t0;
+        r1 = t1 * t1 * t1;
+        r2 = t2 * t2 * t2;
+        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+
+        let c0 = t0 + ab;
+        let c1 = t1 + ab;
+
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+
+        let x_pos = x.mul_add(fourteen, x_bias);
+        let y_pos = y + y_bias;
+        let b_pos = (t2 - y) + b_bias;
+
+        x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 8].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 8].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Scalar remainder
+    let absorbance_bias_neg = absorbance_bias;
+    for i in (chunks * 8)..n {
+        let p = pixels[i];
+        let r = p[0];
+        let g = p[1];
+        let b = p[2];
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
+/// Scalar fallback for linear f32 → positive XYB.
+fn linear_to_positive_xyb_planar_inner_scalar(
+    _token: archmage::ScalarToken,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    for (i, p) in pixels.iter().enumerate() {
+        let r = p[0];
+        let g = p[1];
+        let b = p[2];
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RGBA/BGRA compositing helpers — all produce linear f32 RGB output
+// ---------------------------------------------------------------------------
+
+/// Checkerboard background value in linear light for the given pixel position.
+#[inline(always)]
+fn checkerboard_linear(x: usize, y: usize) -> f32 {
+    if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
+        0.0
+    } else {
+        1.0
+    }
+}
+
+/// Composite sRGB u8 RGBA over a checkerboard, producing linear f32 RGB.
+///
+/// Linearizes both foreground and background, then alpha-blends in linear space.
+/// This ensures consistent XYB values regardless of whether the input was
+/// sRGB u8 or linear f32.
+pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
+    let lut = srgb_lut();
+    for (x, &[r, g, b, a]) in row.iter().enumerate() {
+        if a == 255 {
+            out[x] = [lut[r as usize], lut[g as usize], lut[b as usize]];
+        } else if a == 0 {
+            let bg = checkerboard_linear(x, y);
+            out[x] = [bg, bg, bg];
+        } else {
+            let alpha = a as f32 * (1.0 / 255.0);
+            let inv = 1.0 - alpha;
+            let bg = checkerboard_linear(x, y);
+            let rl = lut[r as usize];
+            let gl = lut[g as usize];
+            let bl = lut[b as usize];
+            out[x] = [
+                rl.mul_add(alpha, bg * inv),
+                gl.mul_add(alpha, bg * inv),
+                bl.mul_add(alpha, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Composite sRGB u8 BGRA over a checkerboard, producing linear f32 RGB.
+///
+/// Swizzles B↔R during linearization. Alpha blending in linear space.
+pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
+    let lut = srgb_lut();
+    for (x, &[b, g, r, a]) in row.iter().enumerate() {
+        if a == 255 {
+            out[x] = [lut[r as usize], lut[g as usize], lut[b as usize]];
+        } else if a == 0 {
+            let bg = checkerboard_linear(x, y);
+            out[x] = [bg, bg, bg];
+        } else {
+            let alpha = a as f32 * (1.0 / 255.0);
+            let inv = 1.0 - alpha;
+            let bg = checkerboard_linear(x, y);
+            let rl = lut[r as usize];
+            let gl = lut[g as usize];
+            let bl = lut[b as usize];
+            out[x] = [
+                rl.mul_add(alpha, bg * inv),
+                gl.mul_add(alpha, bg * inv),
+                bl.mul_add(alpha, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Composite linear f32 RGBA over a checkerboard, producing linear f32 RGB.
+pub(crate) fn composite_linear_f32_rgba(row: &[[f32; 4]], y: usize, out: &mut [[f32; 3]]) {
+    for (x, &[r, g, b, a]) in row.iter().enumerate() {
+        if a >= 1.0 {
+            out[x] = [r, g, b];
+        } else if a <= 0.0 {
+            let bg = checkerboard_linear(x, y);
+            out[x] = [bg, bg, bg];
+        } else {
+            let inv = 1.0 - a;
+            let bg = checkerboard_linear(x, y);
+            out[x] = [
+                r.mul_add(a, bg * inv),
+                g.mul_add(a, bg * inv),
+                b.mul_add(a, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Composite linear f32 BGRA over a checkerboard, producing linear f32 RGB.
+///
+/// Swizzles B↔R. Alpha blending in linear space.
+pub(crate) fn composite_linear_f32_bgra(row: &[[f32; 4]], y: usize, out: &mut [[f32; 3]]) {
+    for (x, &[b, g, r, a]) in row.iter().enumerate() {
+        if a >= 1.0 {
+            out[x] = [r, g, b];
+        } else if a <= 0.0 {
+            let bg = checkerboard_linear(x, y);
+            out[x] = [bg, bg, bg];
+        } else {
+            let inv = 1.0 - a;
+            let bg = checkerboard_linear(x, y);
+            out[x] = [
+                r.mul_add(a, bg * inv),
+                g.mul_add(a, bg * inv),
+                b.mul_add(a, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Legacy: composite sRGB u8 RGBA in sRGB space (for backward compatibility).
+///
+/// Prefer [`composite_srgb8_rgba_to_linear`] for new code — it composites in
+/// linear space for consistency across pixel formats.
+#[allow(dead_code)]
 pub(crate) fn composite_rgba_row(row: &[[u8; 4]], y: usize, out: &mut [[u8; 3]]) {
     for (x, &[r, g, b, a]) in row.iter().enumerate() {
         let bg = if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
@@ -788,18 +1337,12 @@ pub(crate) fn composite_rgba_row(row: &[[u8; 4]], y: usize, out: &mut [[u8; 3]])
 
 /// Composite straight-alpha RGBA pixels over a checkerboard background into sRGB `[u8; 3]`.
 ///
-/// The checkerboard uses 8×8 pixel blocks alternating black (0) and white (255).
-/// Full-contrast B/W maximizes sensitivity to alpha differences — dark foreground
-/// shows against white squares, light foreground against black.
-///
-/// Alpha blending is performed in sRGB space:
-/// `out = alpha * fg + (1 - alpha) * bg` per channel, where `alpha = a / 255`.
+/// Legacy function that composites in sRGB space. Kept for backward compatibility.
 pub fn rgba_checkerboard_composite(pixels: &[[u8; 4]], width: usize) -> Vec<[u8; 3]> {
     let mut out = Vec::with_capacity(pixels.len());
     for (i, &[r, g, b, a]) in pixels.iter().enumerate() {
         let x = i % width;
         let y = i / width;
-        // 8×8 checkerboard: ((x >> 3) ^ (y >> 3)) & 1
         let bg = if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
             0u8
         } else {

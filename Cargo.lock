@@ -549,6 +549,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "enough"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "177a59811828ea5dbc8927662d444ffee7b55a44696486f1b1a245ae9e652533"
+
+[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1240,6 +1246,9 @@ name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "rustversion"
@@ -1515,6 +1524,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
+name = "whereat"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ec598a1ade4224cfe3c5dace0d5d7deec9ed670503ff99d4946973c8c094534"
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,6 +1661,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
 
 [[package]]
+name = "zencodec-types"
+version = "0.1.0"
+dependencies = [
+ "enough",
+ "imgref",
+ "rgb",
+ "whereat",
+]
+
+[[package]]
 name = "zensim"
 version = "0.1.0"
 dependencies = [
@@ -1653,9 +1678,12 @@ dependencies = [
  "bytemuck",
  "criterion",
  "image",
+ "imgref",
  "magetypes",
  "rayon",
+ "rgb",
  "thiserror",
+ "zencodec-types",
 ]
 
 [[package]]
