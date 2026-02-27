@@ -163,13 +163,17 @@ fn score_reproducibility_across_tiers() {
     let feature_names = [
         "ssim_mean",
         "ssim_4th",
-        "edge_art_mean",
-        "edge_art_4th",
-        "edge_det_mean",
-        "edge_det_4th",
+        "ssim_2nd",
+        "art_mean",
+        "art_4th",
+        "art_2nd",
+        "det_mean",
+        "det_4th",
+        "det_2nd",
         "mse",
         "var_loss",
         "tex_loss",
+        "contrast_inc",
     ];
 
     if tier_scores.len() >= 2 {
@@ -205,10 +209,10 @@ fn score_reproducibility_across_tiers() {
             );
             eprintln!("    top 10 by ULP distance:");
             for &(i, u, rf, tf) in feat_diffs.iter().take(10) {
-                let scale = i / 27;
-                let within = i % 27;
-                let ch = within / 9;
-                let fi = within % 9;
+                let scale = i / 39;
+                let within = i % 39;
+                let ch = within / 13;
+                let fi = within % 13;
                 let rel = (rf - tf).abs() / rf.abs().max(1e-12);
                 eprintln!(
                     "      feat[{i:3}] s{scale} c{ch} {:14} = {u:>16} ULP  rel={rel:.2e}  ({rf:.8e} vs {tf:.8e})",

@@ -75,13 +75,17 @@ fn main() {
         let feat_names = [
             "ssim_mean",
             "ssim_4th",
-            "edge_art_mean",
-            "edge_art_4th",
-            "edge_det_mean",
-            "edge_det_4th",
+            "ssim_2nd",
+            "art_mean",
+            "art_4th",
+            "art_2nd",
+            "det_mean",
+            "det_4th",
+            "det_2nd",
             "mse",
-            "variance_loss",
-            "texture_loss",
+            "var_loss",
+            "tex_loss",
+            "contrast_inc",
         ];
         let fpc_scale = fpc * 3;
         for (si, chunk) in result.features.chunks(fpc_scale).enumerate() {
