@@ -118,11 +118,10 @@ pub fn precompute_reference(
     if source.len() != width * height {
         return Err(ZensimError::InvalidDataLength);
     }
+    let src_img = crate::source::RgbSlice::new(source, width, height);
     let config = ZensimConfig::default();
     Ok(crate::streaming::PrecomputedReference::new(
-        source,
-        width,
-        height,
+        &src_img,
         config.num_scales,
     ))
 }
@@ -145,8 +144,9 @@ pub fn precompute_reference_with_scales(
     if source.len() != width * height {
         return Err(ZensimError::InvalidDataLength);
     }
+    let src_img = crate::source::RgbSlice::new(source, width, height);
     Ok(crate::streaming::PrecomputedReference::new(
-        source, width, height, num_scales,
+        &src_img, num_scales,
     ))
 }
 
@@ -166,13 +166,21 @@ pub fn compute_zensim_with_ref(
     width: usize,
     height: usize,
 ) -> Result<ZensimResult, ZensimError> {
-    compute_zensim_with_ref_and_config(
+    if width < 8 || height < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    if distorted.len() != width * height {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    let dst_img = crate::source::RgbSlice::new(distorted, width, height);
+    let config = ZensimConfig::default();
+    let result = crate::streaming::compute_zensim_streaming_with_ref(
         precomputed,
-        distorted,
-        width,
-        height,
-        ZensimConfig::default(),
-    )
+        &dst_img,
+        &config,
+        &WEIGHTS,
+    );
+    Ok(result)
 }
 
 /// Compute zensim with a precomputed reference and custom configuration.
@@ -192,12 +200,12 @@ pub fn compute_zensim_with_ref_and_config(
     if distorted.len() != width * height {
         return Err(ZensimError::InvalidDataLength);
     }
+    let dst_img = crate::source::RgbSlice::new(distorted, width, height);
     let result = crate::streaming::compute_zensim_streaming_with_ref(
         precomputed,
-        distorted,
-        width,
-        height,
+        &dst_img,
         &config,
+        &WEIGHTS,
     );
     Ok(result)
 }
@@ -240,6 +248,161 @@ pub struct ZensimResult {
     /// `ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
     ///  det_mean, det_4th, det_2nd, mse, var_loss, tex_loss, contrast_inc`
     pub features: Vec<f64>,
+    /// Which profile produced this score.
+    pub profile: crate::profile::ZensimProfile,
+}
+
+// --- Zensim config struct (primary API) ---
+
+use crate::profile::{ProfileParams, ZensimProfile};
+use crate::source::ImageSource;
+
+/// Metric configuration. Methods on this struct are the primary API.
+///
+/// ```no_run
+/// use zensim::{Zensim, ZensimProfile, RgbSlice};
+/// # let (src, dst) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
+/// let z = Zensim::new(ZensimProfile::latest());
+/// let source = RgbSlice::new(&src, 8, 8);
+/// let distorted = RgbSlice::new(&dst, 8, 8);
+/// let result = z.compute(&source, &distorted).unwrap();
+/// println!("{}: {:.2}", result.profile, result.score);
+/// ```
+#[derive(Clone, Debug)]
+pub struct Zensim {
+    profile: ZensimProfile,
+}
+
+impl Zensim {
+    /// Create a new `Zensim` with the given profile.
+    pub fn new(profile: ZensimProfile) -> Self {
+        Self { profile }
+    }
+
+    /// Current profile.
+    pub fn profile(&self) -> ZensimProfile {
+        self.profile
+    }
+
+    /// Compare source and distorted images.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    pub fn compute(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        validate_pair(source, distorted)?;
+        let config = config_from_params(params);
+        let mut result =
+            crate::streaming::compute_zensim_streaming(source, distorted, &config, params.weights);
+        result.profile = self.profile;
+        Ok(result)
+    }
+
+    /// Pre-compute reference image data for batch comparison.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    pub fn precompute_reference(
+        &self,
+        source: &impl ImageSource,
+    ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+        let params = self.profile.params();
+        if source.width() < 8 || source.height() < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        Ok(crate::streaming::PrecomputedReference::new(
+            source,
+            params.num_scales,
+        ))
+    }
+
+    /// Compare a distorted image against a precomputed reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    pub fn compute_with_ref(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        if distorted.width() < 8 || distorted.height() < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        let config = config_from_params(params);
+        let mut result = crate::streaming::compute_zensim_streaming_with_ref(
+            precomputed,
+            distorted,
+            &config,
+            params.weights,
+        );
+        result.profile = self.profile;
+        Ok(result)
+    }
+
+    /// Like `compute`, but always computes all 156 features regardless of
+    /// zero weights. For training/research.
+    #[cfg(feature = "training")]
+    pub fn compute_all_features(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        validate_pair(source, distorted)?;
+        let mut config = config_from_params(params);
+        config.compute_all_features = true;
+        let mut result =
+            crate::streaming::compute_zensim_streaming(source, distorted, &config, params.weights);
+        result.profile = self.profile;
+        Ok(result)
+    }
+}
+
+#[cfg(feature = "training")]
+impl Zensim {
+    /// Compute with explicit custom params (for training).
+    pub fn compute_with_params(
+        params: &ProfileParams,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        validate_pair(source, distorted)?;
+        let config = config_from_params(params);
+        let result =
+            crate::streaming::compute_zensim_streaming(source, distorted, &config, params.weights);
+        Ok(result)
+    }
+}
+
+fn validate_pair(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
+    if source.width() < 8 || source.height() < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    if source.width() != distorted.width() || source.height() != distorted.height() {
+        return Err(ZensimError::DimensionMismatch);
+    }
+    Ok(())
+}
+
+fn config_from_params(params: &ProfileParams) -> ZensimConfig {
+    ZensimConfig {
+        blur_radius: params.blur_radius,
+        blur_passes: params.blur_passes,
+        compute_all_features: false,
+        masking_strength: params.masking_strength,
+        num_scales: params.num_scales,
+    }
 }
 
 /// Features per channel: 13 features always emitted.
@@ -248,6 +411,9 @@ pub struct ZensimResult {
 pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
 /// Compute zensim score between two sRGB u8 images.
+///
+/// Uses the latest general-purpose profile. For explicit profile selection, use
+/// [`Zensim::new`] with a [`ZensimProfile`].
 ///
 /// Both images must be the same dimensions (at least 8×8). Pixels are sRGB
 /// `[R, G, B]` with 8 bits per channel.
@@ -330,6 +496,8 @@ pub fn compute_zensim_with_ref_rgba(
 }
 
 /// Compute zensim with custom configuration.
+///
+/// Uses the v0.2 weights (latest general-purpose profile).
 pub fn compute_zensim_with_config(
     source: &[[u8; 3]],
     distorted: &[[u8; 3]],
@@ -351,11 +519,14 @@ pub fn compute_zensim_with_config(
         return Err(ZensimError::DimensionMismatch);
     }
 
+    let src_img = crate::source::RgbSlice::new(source, width, height);
+    let dst_img = crate::source::RgbSlice::new(distorted, width, height);
+
     // Use streaming path for non-masked images (faster at all sizes)
     let masked = config.masking_strength > 0.0;
     if !masked && crate::streaming::should_use_streaming(width, height) {
         let result =
-            crate::streaming::compute_zensim_streaming(source, distorted, width, height, &config);
+            crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS);
         return Ok(result);
     }
 
@@ -381,7 +552,7 @@ pub fn compute_zensim_with_config(
     let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, &config);
 
     // Combine with weights to produce final score
-    let result = combine_scores(&scale_stats, masked);
+    let result = combine_scores(&scale_stats, masked, &WEIGHTS);
     Ok(result)
 }
 
@@ -1396,7 +1567,11 @@ pub const WEIGHTS: [f64; 156] = [
     0.0124929133, // Scale 3 Channel B
 ];
 
-pub(crate) fn combine_scores(scale_stats: &[ScaleStats], _masked: bool) -> ZensimResult {
+pub(crate) fn combine_scores(
+    scale_stats: &[ScaleStats],
+    _masked: bool,
+    weights: &[f64; 156],
+) -> ZensimResult {
     let features_per_ch = FEATURES_PER_CHANNEL_BASIC;
     let features_per_scale = features_per_ch * 3;
 
@@ -1425,10 +1600,10 @@ pub(crate) fn combine_scores(scale_stats: &[ScaleStats], _masked: bool) -> Zensi
         }
     }
 
-    // Apply weights — only up to WEIGHTS.len(), extra features get weight 0
+    // Apply weights — only up to weights.len(), extra features get weight 0
     for (i, &feat) in features.iter().enumerate() {
-        if i < WEIGHTS.len() {
-            raw_distance += feat * WEIGHTS[i];
+        if i < weights.len() {
+            raw_distance += feat * weights[i];
         }
     }
 
@@ -1441,6 +1616,7 @@ pub(crate) fn combine_scores(scale_stats: &[ScaleStats], _masked: bool) -> Zensi
         score,
         raw_distance,
         features,
+        profile: ZensimProfile::GeneralV0_2,
     }
 }
 

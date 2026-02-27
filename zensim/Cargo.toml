@@ -21,6 +21,7 @@ training = []
 
 [dependencies]
 archmage = { workspace = true }
+bytemuck = { workspace = true }
 magetypes = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }

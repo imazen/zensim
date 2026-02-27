@@ -759,6 +759,33 @@ fn make_positive_xyb_inner_scalar(
     }
 }
 
+/// Composite a single row of RGBA pixels over a checkerboard background.
+///
+/// `y` is the row index (used for checkerboard pattern).
+/// `out` must be at least `row.len()` long.
+pub(crate) fn composite_rgba_row(row: &[[u8; 4]], y: usize, out: &mut [[u8; 3]]) {
+    for (x, &[r, g, b, a]) in row.iter().enumerate() {
+        let bg = if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
+            0u8
+        } else {
+            255u8
+        };
+        out[x] = if a == 255 {
+            [r, g, b]
+        } else if a == 0 {
+            [bg, bg, bg]
+        } else {
+            let alpha = a as f32 * (1.0 / 255.0);
+            let inv = 1.0 - alpha;
+            let bg_f = bg as f32;
+            let ro = (r as f32).mul_add(alpha, bg_f * inv) + 0.5;
+            let go = (g as f32).mul_add(alpha, bg_f * inv) + 0.5;
+            let bo = (b as f32).mul_add(alpha, bg_f * inv) + 0.5;
+            [ro as u8, go as u8, bo as u8]
+        };
+    }
+}
+
 /// Composite straight-alpha RGBA pixels over a checkerboard background into sRGB `[u8; 3]`.
 ///
 /// The checkerboard uses 8×8 pixel blocks alternating black (0) and white (255).

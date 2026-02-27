@@ -7,37 +7,42 @@
 //! ## Quick start
 //!
 //! ```no_run
+//! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (src_pixels, dst_pixels) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-//! # let (width, height) = (8, 8);
-//! // Single comparison (sRGB [u8; 3])
-//! let result = zensim::compute_zensim(&src_pixels, &dst_pixels, width, height)?;
-//! println!("score: {:.2}", result.score); // 0-100, higher = more similar
-//! # Ok::<(), zensim::ZensimError>(())
-//! ```
-//!
-//! ```no_run
-//! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
-//! # let (width, height) = (8, 8);
-//! // RGBA with alpha compositing
-//! let result = zensim::compute_zensim_rgba(&src_rgba, &dst_rgba, width, height)?;
+//! let z = Zensim::new(ZensimProfile::latest());
+//! let source = RgbSlice::new(&src_pixels, 8, 8);
+//! let distorted = RgbSlice::new(&dst_pixels, 8, 8);
+//! let result = z.compute(&source, &distorted)?;
+//! println!("{}: {:.2}", result.profile, result.score);
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
 //!
 //! ## Batch comparison (one reference, many distorted)
 //!
-//! When comparing one reference image against many distorted variants, use
-//! [`precompute_reference`] + [`compute_zensim_with_ref`] to avoid redundant
-//! XYB conversion and pyramid construction on the reference side.
-//! Saves ~25% at 4K and ~34% at 8K per comparison.
-//!
 //! ```no_run
+//! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (ref_pixels, width, height) = (vec![[0u8; 3]; 64], 8usize, 8usize);
 //! # let distorted_images: Vec<Vec<[u8; 3]>> = vec![];
-//! let precomputed = zensim::precompute_reference(&ref_pixels, width, height)?;
+//! let z = Zensim::new(ZensimProfile::latest());
+//! let source = RgbSlice::new(&ref_pixels, width, height);
+//! let precomputed = z.precompute_reference(&source)?;
 //! for dst_pixels in &distorted_images {
-//!     let result = zensim::compute_zensim_with_ref(&precomputed, dst_pixels, width, height)?;
+//!     let dst = RgbSlice::new(dst_pixels, width, height);
+//!     let result = z.compute_with_ref(&precomputed, &dst)?;
 //!     println!("score: {:.2}", result.score);
 //! }
+//! # Ok::<(), zensim::ZensimError>(())
+//! ```
+//!
+//! ## RGBA support
+//!
+//! ```no_run
+//! use zensim::{Zensim, ZensimProfile, RgbaSlice};
+//! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
+//! let z = Zensim::new(ZensimProfile::latest());
+//! let source = RgbaSlice::new(&src_rgba, 8, 8);
+//! let distorted = RgbaSlice::new(&dst_rgba, 8, 8);
+//! let result = z.compute(&source, &distorted)?;
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
 //!
@@ -79,16 +84,23 @@ mod fused;
 pub mod mapping;
 mod metric;
 mod pool;
+pub mod profile;
 mod simd_ops;
+pub mod source;
 mod streaming;
 
+// --- Primary API ---
 pub use error::ZensimError;
-pub use metric::{
-    ZensimResult, compute_zensim, compute_zensim_rgba, compute_zensim_with_ref,
-    compute_zensim_with_ref_rgba, distance_to_score, precompute_reference,
-    precompute_reference_rgba,
-};
+pub use metric::{Zensim, ZensimResult, distance_to_score};
+pub use profile::ZensimProfile;
+pub use source::{Channels, ImageSource, RgbSlice, RgbaSlice, StridedBytes};
 pub use streaming::PrecomputedReference;
+
+// --- Legacy free-function API (convenience wrappers) ---
+pub use metric::{
+    compute_zensim, compute_zensim_rgba, compute_zensim_with_ref, compute_zensim_with_ref_rgba,
+    precompute_reference, precompute_reference_rgba,
+};
 
 /// Training/research API — requires `features = ["training"]`.
 ///

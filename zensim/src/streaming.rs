@@ -8,15 +8,14 @@ use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
     fused_blur_h_ssim, simd_padded_width,
 };
-use crate::color::srgb_to_positive_xyb_planar_into;
+use crate::color::{composite_rgba_row, srgb_to_positive_xyb_planar_into};
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
-use crate::metric::{
-    FEATURES_PER_CHANNEL_BASIC, ScaleStats, WEIGHTS, ZensimConfig, combine_scores,
-};
+use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
     abs_diff_sum, edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
 };
+use crate::source::{Channels, ImageSource};
 use rayon::prelude::*;
 use std::sync::Mutex;
 
@@ -160,20 +159,24 @@ impl ScaleAccumulators {
 }
 
 /// Determine which channels need SSIM, edge, and/or MSE computation at a given scale.
-fn active_channels(scale_idx: usize, config: &ZensimConfig) -> Vec<(usize, bool, bool)> {
+fn active_channels(
+    scale_idx: usize,
+    config: &ZensimConfig,
+    weights: &[f64; 156],
+) -> Vec<(usize, bool, bool)> {
     let compute_all = config.compute_all_features;
     let fpc = FEATURES_PER_CHANNEL_BASIC;
 
     let has_weight = |base: usize, count: usize| -> bool {
-        (base..base + count).all(|i| i < WEIGHTS.len())
-            && (base..base + count).any(|i| WEIGHTS[i].abs() > 0.001)
+        (base..base + count).all(|i| i < weights.len())
+            && (base..base + count).any(|i| weights[i].abs() > 0.001)
     };
 
     // Feature layout per channel (13): ssim_mean(0), ssim_4th(1), ssim_2nd(2),
     //   art_mean(3), art_4th(4), art_2nd(5), det_mean(6), det_4th(7), det_2nd(8),
     //   mse(9), variance_loss(10), texture_loss(11), contrast_increase(12)
     let mut active = Vec::new();
-    let beyond = scale_idx * (fpc * 3) >= WEIGHTS.len();
+    let beyond = scale_idx * (fpc * 3) >= weights.len();
     for c in 0..3 {
         if beyond {
             if compute_all {
@@ -201,18 +204,19 @@ fn active_channels(scale_idx: usize, config: &ZensimConfig) -> Vec<(usize, bool,
 ///
 /// Produces identical results to the full-image path.
 pub(crate) fn compute_multiscale_stats_streaming(
-    source: &[[u8; 3]],
-    distorted: &[[u8; 3]],
-    width: usize,
-    height: usize,
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
     config: &ZensimConfig,
+    weights: &[f64; 156],
 ) -> Vec<ScaleStats> {
+    let width = source.width();
+    let height = source.height();
     let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales;
 
     // Phase 1: Convert sRGB→XYB for entire image, parallel over row chunks.
-    let mut src_planes = convert_srgb_to_xyb_parallel(source, width, height, padded_width);
-    let mut dst_planes = convert_srgb_to_xyb_parallel(distorted, width, height, padded_width);
+    let mut src_planes = convert_source_to_xyb_parallel(source, padded_width);
+    let mut dst_planes = convert_source_to_xyb_parallel(distorted, padded_width);
 
     // Phase 2: Process all scales with parallel band processing.
     // Each scale: compute features in parallel bands, then downscale planes for next scale.
@@ -226,7 +230,8 @@ pub(crate) fn compute_multiscale_stats_streaming(
         }
 
         // Parallel band processing: borrow slices from full planes
-        let scale_stat = process_scale_bands(&src_planes, &dst_planes, w, h, config, scale);
+        let scale_stat =
+            process_scale_bands(&src_planes, &dst_planes, w, h, config, scale, weights);
         stats.push(scale_stat);
 
         // Downscale 6 planes in parallel for next scale
@@ -279,13 +284,12 @@ pub(crate) fn compute_multiscale_stats_streaming(
     stats
 }
 
-/// Convert sRGB pixels to planar XYB at padded width, parallelized over row chunks.
-fn convert_srgb_to_xyb_parallel(
-    pixels: &[[u8; 3]],
-    width: usize,
-    height: usize,
-    padded_width: usize,
-) -> [Vec<f32>; 3] {
+/// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
+///
+/// Handles both RGB and RGBA sources row-by-row. RGBA is composited over checkerboard.
+fn convert_source_to_xyb_parallel(source: &impl ImageSource, padded_width: usize) -> [Vec<f32>; 3] {
+    let width = source.width();
+    let height = source.height();
     let n = padded_width * height;
     let mut planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
 
@@ -309,6 +313,8 @@ fn convert_srgb_to_xyb_parallel(
         Vec::new()
     };
 
+    let channels = source.channels();
+
     p0_chunks
         .into_par_iter()
         .zip(p1_chunks)
@@ -318,16 +324,41 @@ fn convert_srgb_to_xyb_parallel(
             let row_start = chunk_idx * chunk_rows;
             let row_end = (row_start + chunk_rows).min(height);
             let rows = row_end - row_start;
-            let pixel_slice = &pixels[row_start * width..row_end * width];
 
-            // Convert sRGB→XYB: output goes into first rows*width elements of each chunk
-            let raw_elems = rows * width;
-            srgb_to_positive_xyb_planar_into(
-                pixel_slice,
-                &mut c0[..raw_elems],
-                &mut c1[..raw_elems],
-                &mut c2[..raw_elems],
-            );
+            match channels {
+                Channels::Rgb8 => {
+                    // Collect all rows into a contiguous buffer, then convert in bulk
+                    let raw_elems = rows * width;
+                    let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
+                    for y in row_start..row_end {
+                        let row_bytes = source.row_bytes(y);
+                        let row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                        rgb_buf.extend_from_slice(&row[..width]);
+                    }
+                    srgb_to_positive_xyb_planar_into(
+                        &rgb_buf,
+                        &mut c0[..raw_elems],
+                        &mut c1[..raw_elems],
+                        &mut c2[..raw_elems],
+                    );
+                }
+                Channels::Rgba8 => {
+                    // RGBA: composite each row over checkerboard, then convert
+                    let mut rgb_row = vec![[0u8; 3]; width];
+                    for y in row_start..row_end {
+                        let row_bytes = source.row_bytes(y);
+                        let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                        composite_rgba_row(&rgba_row[..width], y, &mut rgb_row);
+                        let row_offset = (y - row_start) * width;
+                        srgb_to_positive_xyb_planar_into(
+                            &rgb_row,
+                            &mut c0[row_offset..row_offset + width],
+                            &mut c1[row_offset..row_offset + width],
+                            &mut c2[row_offset..row_offset + width],
+                        );
+                    }
+                }
+            }
 
             // Spread rows from logical width to padded width (bottom-to-top for overlap safety)
             if pad_count > 0 {
@@ -561,11 +592,12 @@ fn process_scale_bands(
     height: usize,
     config: &ZensimConfig,
     scale_idx: usize,
+    weights: &[f64; 156],
 ) -> ScaleStats {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
-    let scale_active = active_channels(scale_idx, config);
+    let scale_active = active_channels(scale_idx, config, weights);
 
     let total_strips = height.div_ceil(STRIP_INNER);
     let num_bands = rayon::current_num_threads().min(total_strips).max(1);
@@ -654,12 +686,14 @@ pub struct PrecomputedReference {
 }
 
 impl PrecomputedReference {
-    /// Build a precomputed reference from sRGB pixels.
+    /// Build a precomputed reference from an ImageSource.
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
-    pub(crate) fn new(source: &[[u8; 3]], width: usize, height: usize, num_scales: usize) -> Self {
+    pub(crate) fn new(source: &impl ImageSource, num_scales: usize) -> Self {
+        let width = source.width();
+        let height = source.height();
         let padded_width = simd_padded_width(width);
-        let mut planes = convert_srgb_to_xyb_parallel(source, width, height, padded_width);
+        let mut planes = convert_source_to_xyb_parallel(source, padded_width);
 
         let mut scales = Vec::with_capacity(num_scales);
         let mut w = padded_width;
@@ -700,16 +734,17 @@ impl PrecomputedReference {
 /// Reference planes are borrowed from the precomputed data.
 pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     precomputed: &PrecomputedReference,
-    distorted: &[[u8; 3]],
-    width: usize,
-    height: usize,
+    distorted: &impl ImageSource,
     config: &ZensimConfig,
+    weights: &[f64; 156],
 ) -> Vec<ScaleStats> {
+    let width = distorted.width();
+    let height = distorted.height();
     let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales.min(precomputed.scales.len());
 
     // Only convert distorted to XYB
-    let mut dst_planes = convert_srgb_to_xyb_parallel(distorted, width, height, padded_width);
+    let mut dst_planes = convert_source_to_xyb_parallel(distorted, padded_width);
 
     let mut stats = Vec::with_capacity(num_scales);
     let mut w = padded_width;
@@ -724,7 +759,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
         debug_assert_eq!(w, src_w, "width mismatch at scale {scale}");
         debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
 
-        let scale_stat = process_scale_bands(src_planes, &dst_planes, w, h, config, scale);
+        let scale_stat = process_scale_bands(src_planes, &dst_planes, w, h, config, scale, weights);
         stats.push(scale_stat);
 
         // Only downscale the 3 distorted planes for next scale
@@ -762,35 +797,35 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
 /// Produces identical results to the non-precomputed path.
 pub(crate) fn compute_zensim_streaming_with_ref(
     precomputed: &PrecomputedReference,
-    distorted: &[[u8; 3]],
-    width: usize,
-    height: usize,
+    distorted: &impl ImageSource,
     config: &ZensimConfig,
+    weights: &[f64; 156],
 ) -> crate::metric::ZensimResult {
     let scale_stats =
-        compute_multiscale_stats_streaming_with_ref(precomputed, distorted, width, height, config);
+        compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights);
     let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked)
+    combine_scores(&scale_stats, masked, weights)
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
 /// Produces identical results to the full-image path.
 pub(crate) fn compute_zensim_streaming(
-    source: &[[u8; 3]],
-    distorted: &[[u8; 3]],
-    width: usize,
-    height: usize,
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
     config: &ZensimConfig,
+    weights: &[f64; 156],
 ) -> crate::metric::ZensimResult {
-    let scale_stats = compute_multiscale_stats_streaming(source, distorted, width, height, config);
+    let scale_stats = compute_multiscale_stats_streaming(source, distorted, config, weights);
     let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked)
+    combine_scores(&scale_stats, masked, weights)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::metric::compute_zensim_with_config;
+    use crate::profile::WEIGHTS_GENERAL_V0_2;
+    use crate::source::RgbSlice;
 
     /// Verify streaming produces equivalent results to full-image processing.
     ///
@@ -838,7 +873,10 @@ mod tests {
         let full_result = compute_zensim_with_config(&src, &dst, w, h, config).unwrap();
 
         // Streaming path (forced via direct call)
-        let streaming_result = compute_zensim_streaming(&src, &dst, w, h, &config);
+        let src_img = RgbSlice::new(&src, w, h);
+        let dst_img = RgbSlice::new(&dst, w, h);
+        let streaming_result =
+            compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS_GENERAL_V0_2);
 
         assert_eq!(
             full_result.features.len(),
@@ -967,9 +1005,17 @@ mod tests {
             ..Default::default()
         };
 
-        let streaming_result = compute_zensim_streaming(&src, &dst, w, h, &config);
-        let precomputed = PrecomputedReference::new(&src, w, h, config.num_scales);
-        let precomp_result = compute_zensim_streaming_with_ref(&precomputed, &dst, w, h, &config);
+        let src_img = RgbSlice::new(&src, w, h);
+        let dst_img = RgbSlice::new(&dst, w, h);
+        let streaming_result =
+            compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS_GENERAL_V0_2);
+        let precomputed = PrecomputedReference::new(&src_img, config.num_scales);
+        let precomp_result = compute_zensim_streaming_with_ref(
+            &precomputed,
+            &dst_img,
+            &config,
+            &WEIGHTS_GENERAL_V0_2,
+        );
 
         assert_eq!(streaming_result.score, precomp_result.score);
         assert_eq!(streaming_result.raw_distance, precomp_result.raw_distance);
