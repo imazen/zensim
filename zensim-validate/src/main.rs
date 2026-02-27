@@ -906,6 +906,8 @@ fn load_and_compute(
         blur_radius,
         masking_strength,
         num_scales,
+        score_mapping_a: 18.0,
+        score_mapping_b: 0.7,
     };
 
     // Process reference groups in parallel

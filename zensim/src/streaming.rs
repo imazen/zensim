@@ -48,12 +48,12 @@ struct ScaleAccumulators {
     edge_det2: [f64; 3],
     // MSE: sum((src-dst)^2)
     mse: [f64; 3],
-    // Variance loss components: sum((pixel-mu)^2) for src and dst
-    sq_src: [f64; 3],
-    sq_dst: [f64; 3],
-    // Texture loss components: sum(|pixel-mu|) for src and dst
-    abs_src: [f64; 3],
-    abs_dst: [f64; 3],
+    // HF energy (L2) components: sum((pixel-mu)^2) for src and dst
+    hf_sq_src: [f64; 3],
+    hf_sq_dst: [f64; 3],
+    // HF magnitude (L1) components: sum(|pixel-mu|) for src and dst
+    hf_abs_src: [f64; 3],
+    hf_abs_dst: [f64; 3],
     // Total inner pixels processed
     n: usize,
 }
@@ -71,10 +71,10 @@ impl ScaleAccumulators {
             edge_det4: [0.0; 3],
             edge_det2: [0.0; 3],
             mse: [0.0; 3],
-            sq_src: [0.0; 3],
-            sq_dst: [0.0; 3],
-            abs_src: [0.0; 3],
-            abs_dst: [0.0; 3],
+            hf_sq_src: [0.0; 3],
+            hf_sq_dst: [0.0; 3],
+            hf_abs_src: [0.0; 3],
+            hf_abs_dst: [0.0; 3],
             n: 0,
         }
     }
@@ -91,10 +91,10 @@ impl ScaleAccumulators {
             self.edge_det4[c] += other.edge_det4[c];
             self.edge_det2[c] += other.edge_det2[c];
             self.mse[c] += other.mse[c];
-            self.sq_src[c] += other.sq_src[c];
-            self.sq_dst[c] += other.sq_dst[c];
-            self.abs_src[c] += other.abs_src[c];
-            self.abs_dst[c] += other.abs_dst[c];
+            self.hf_sq_src[c] += other.hf_sq_src[c];
+            self.hf_sq_dst[c] += other.hf_sq_dst[c];
+            self.hf_abs_src[c] += other.hf_abs_src[c];
+            self.hf_abs_dst[c] += other.hf_abs_dst[c];
         }
         self.n += other.n;
     }
@@ -105,9 +105,9 @@ impl ScaleAccumulators {
         let mut ssim = [0.0f64; 6];
         let mut edge = [0.0f64; 12];
         let mut mse = [0.0f64; 3];
-        let mut variance_loss = [0.0f64; 3];
-        let mut texture_loss = [0.0f64; 3];
-        let mut contrast_increase = [0.0f64; 3];
+        let mut hf_energy_loss = [0.0f64; 3];
+        let mut hf_mag_loss = [0.0f64; 3];
+        let mut hf_energy_gain = [0.0f64; 3];
         let mut ssim_2nd = [0.0f64; 3];
         let mut edge_2nd = [0.0f64; 6];
 
@@ -123,22 +123,22 @@ impl ScaleAccumulators {
             edge_2nd[c * 2 + 1] = (self.edge_det2[c] * one_over_n).sqrt();
             mse[c] = self.mse[c] * one_over_n;
 
-            let var_src = self.sq_src[c] * one_over_n;
-            let var_dst = self.sq_dst[c] * one_over_n;
-            variance_loss[c] = if var_src > 1e-10 {
+            let var_src = self.hf_sq_src[c] * one_over_n;
+            let var_dst = self.hf_sq_dst[c] * one_over_n;
+            hf_energy_loss[c] = if var_src > 1e-10 {
                 (1.0 - var_dst / var_src).max(0.0)
             } else {
                 0.0
             };
-            contrast_increase[c] = if var_src > 1e-10 {
+            hf_energy_gain[c] = if var_src > 1e-10 {
                 (var_dst / var_src - 1.0).max(0.0)
             } else {
                 0.0
             };
 
-            let mad_src = self.abs_src[c] * one_over_n;
-            let mad_dst = self.abs_dst[c] * one_over_n;
-            texture_loss[c] = if mad_src > 1e-10 {
+            let mad_src = self.hf_abs_src[c] * one_over_n;
+            let mad_dst = self.hf_abs_dst[c] * one_over_n;
+            hf_mag_loss[c] = if mad_src > 1e-10 {
                 (1.0 - mad_dst / mad_src).max(0.0)
             } else {
                 0.0
@@ -149,9 +149,9 @@ impl ScaleAccumulators {
             ssim,
             edge,
             mse,
-            variance_loss,
-            texture_loss,
-            contrast_increase,
+            hf_energy_loss,
+            hf_mag_loss,
+            hf_energy_gain,
             ssim_2nd,
             edge_2nd,
         }
@@ -174,7 +174,7 @@ fn active_channels(
 
     // Feature layout per channel (13): ssim_mean(0), ssim_4th(1), ssim_2nd(2),
     //   art_mean(3), art_4th(4), art_2nd(5), det_mean(6), det_4th(7), det_2nd(8),
-    //   mse(9), variance_loss(10), texture_loss(11), contrast_increase(12)
+    //   mse(9), hf_energy_loss(10), hf_mag_loss(11), hf_energy_gain(12)
     let mut active = Vec::new();
     let beyond = scale_idx * (fpc * 3) >= weights.len();
     for c in 0..3 {
@@ -185,9 +185,9 @@ fn active_channels(
         } else {
             let base = scale_idx * (fpc * 3) + c * fpc;
             let need_ssim = compute_all || has_weight(base, 3); // positions 0-2
-            let need_blur = has_weight(base + 10, 3); // positions 10-12
-            // Blur features need mu1/mu2 (same as edge), fold into need_edge
-            let need_edge = compute_all || has_weight(base + 3, 6) || need_blur; // positions 3-8
+            let need_hf = has_weight(base + 10, 3); // positions 10-12
+            // HF features need mu1/mu2 (same as edge), fold into need_edge
+            let need_edge = compute_all || has_weight(base + 3, 6) || need_hf; // positions 3-8
             let need_mse = compute_all || has_weight(base + 9, 1); // position 9
             if need_ssim || need_edge || need_mse {
                 active.push((c, need_ssim, need_edge));
@@ -460,10 +460,10 @@ fn process_strip_channel(
             accum.edge_det4[c] += strip_acc.edge_det4;
             accum.edge_det2[c] += strip_acc.edge_det2;
             accum.mse[c] += strip_acc.mse;
-            accum.sq_src[c] += strip_acc.sq_src;
-            accum.sq_dst[c] += strip_acc.sq_dst;
-            accum.abs_src[c] += strip_acc.abs_src;
-            accum.abs_dst[c] += strip_acc.abs_dst;
+            accum.hf_sq_src[c] += strip_acc.hf_sq_src;
+            accum.hf_sq_dst[c] += strip_acc.hf_sq_dst;
+            accum.hf_abs_src[c] += strip_acc.hf_abs_src;
+            accum.hf_abs_dst[c] += strip_acc.hf_abs_dst;
         } else {
             // Edge-only: fused H-blur for mu1/mu2, then fused V-blur
             fused_blur_h_mu(
@@ -495,10 +495,10 @@ fn process_strip_channel(
             accum.edge_det4[c] += strip_acc.edge_det4;
             accum.edge_det2[c] += strip_acc.edge_det2;
             accum.mse[c] += strip_acc.mse;
-            accum.sq_src[c] += strip_acc.sq_src;
-            accum.sq_dst[c] += strip_acc.sq_dst;
-            accum.abs_src[c] += strip_acc.abs_src;
-            accum.abs_dst[c] += strip_acc.abs_dst;
+            accum.hf_sq_src[c] += strip_acc.hf_sq_src;
+            accum.hf_sq_dst[c] += strip_acc.hf_sq_dst;
+            accum.hf_abs_src[c] += strip_acc.hf_abs_src;
+            accum.hf_abs_dst[c] += strip_acc.hf_abs_dst;
         }
         return;
     }
@@ -578,10 +578,10 @@ fn process_strip_channel(
         accum.edge_det2[c] += det2;
     }
 
-    accum.sq_src[c] += sq_diff_sum(inner_src, inner_mu1);
-    accum.sq_dst[c] += sq_diff_sum(inner_dst, inner_mu2);
-    accum.abs_src[c] += abs_diff_sum(inner_src, inner_mu1);
-    accum.abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
+    accum.hf_sq_src[c] += sq_diff_sum(inner_src, inner_mu1);
+    accum.hf_sq_dst[c] += sq_diff_sum(inner_dst, inner_mu2);
+    accum.hf_abs_src[c] += abs_diff_sum(inner_src, inner_mu1);
+    accum.hf_abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
 }
 
 /// Process a scale using parallel band processing over pre-existing XYB planes.
@@ -839,7 +839,7 @@ mod tests {
     ///
     /// For SSIM features in smooth image regions, catastrophic cancellation in
     /// sigma_sq = blur(src²) - mu² amplifies tiny blur differences by 10-100×.
-    /// Features with larger absolute values (edges, variance/texture loss) match
+    /// Features with larger absolute values (edges, hf energy/magnitude loss) match
     /// closely since they don't involve cancellation.
     ///
     /// We verify: (1) final score matches within 0.01%, (2) significant features

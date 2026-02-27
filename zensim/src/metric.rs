@@ -301,16 +301,19 @@ pub(crate) struct ScaleStats {
     pub(crate) edge: [f64; 12],
     /// Per-channel MSE: mean((src - dst)²) for X, Y, B
     pub(crate) mse: [f64; 3],
-    /// Variance loss (L2): max(0, 1 - var_dst / var_src) per channel
-    pub(crate) variance_loss: [f64; 3],
-    /// Texture loss (L1): max(0, 1 - mad_dst / mad_src) per channel
-    pub(crate) texture_loss: [f64; 3],
+    /// High-frequency energy loss (L2): max(0, 1 - Σ(dst-mu_dst)²/Σ(src-mu_src)²) per channel.
+    /// Measures loss of local detail energy relative to source. Sensitive to blur/smoothing.
+    pub(crate) hf_energy_loss: [f64; 3],
+    /// High-frequency magnitude loss (L1): max(0, 1 - Σ|dst-mu_dst|/Σ|src-mu_src|) per channel.
+    /// Like hf_energy_loss but with L1 norm — more robust to outliers.
+    pub(crate) hf_mag_loss: [f64; 3],
     /// 2nd-power pooled SSIM: [root2_d] per channel = 3 values
     pub(crate) ssim_2nd: [f64; 3],
     /// Edge 2nd power: [art_2nd, det_2nd] per channel = 6 values
     pub(crate) edge_2nd: [f64; 6],
-    /// Contrast increase: max(0, var_dst/var_src - 1) per channel
-    pub(crate) contrast_increase: [f64; 3],
+    /// High-frequency energy gain (L2): max(0, Σ(dst-mu_dst)²/Σ(src-mu_src)² - 1) per channel.
+    /// Measures added local detail energy (ringing, sharpening artifacts).
+    pub(crate) hf_energy_gain: [f64; 3],
 }
 
 /// Result from a zensim comparison.
@@ -530,7 +533,7 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
 
 /// Features per channel: 13 features always emitted.
 /// ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
-/// det_mean, det_4th, det_2nd, mse, variance_loss, texture_loss, contrast_increase
+/// det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
 pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
 /// Compute zensim score between two sRGB u8 images.
@@ -744,13 +747,13 @@ fn compute_multiscale_stats(
 
 /// Per-channel result from compute_channel.
 struct ChannelResult {
-    ssim: [f64; 2],         // [mean_d, root4_d]
-    edge: [f64; 4],         // [art_mean, art_4th, det_mean, det_4th]
-    variance_loss: f64,     // max(0, 1 - var_dst / var_src)
-    texture_loss: f64,      // max(0, 1 - mad_dst / mad_src)
-    contrast_increase: f64, // max(0, var_dst/var_src - 1)
-    ssim_2nd: f64,          // root2 pooled SSIM
-    edge_2nd: [f64; 2],     // [art_2nd, det_2nd]
+    ssim: [f64; 2],      // [mean_d, root4_d]
+    edge: [f64; 4],      // [art_mean, art_4th, det_mean, det_4th]
+    hf_energy_loss: f64, // max(0, 1 - hf_L2_dst / hf_L2_src)
+    hf_mag_loss: f64,    // max(0, 1 - hf_L1_dst / hf_L1_src)
+    hf_energy_gain: f64, // max(0, hf_L2_dst / hf_L2_src - 1)
+    ssim_2nd: f64,       // root2 pooled SSIM
+    edge_2nd: [f64; 2],  // [art_2nd, det_2nd]
 }
 
 /// Compute SSIM and/or edge features for a single channel.
@@ -946,26 +949,26 @@ fn compute_channel(
         }
     }
 
-    // Variance loss (L2): 1 - var_dst / var_src
+    // HF energy loss (L2): 1 - Σ(dst-mu)²_dst / Σ(src-mu)²_src
     let var_src = sq_diff_sum(&src_c[..n], &bufs.mu1[..n]) * one_over_n;
     let var_dst = sq_diff_sum(&dst_c[..n], &bufs.mu2[..n]) * one_over_n;
-    let variance_loss = if var_src > 1e-10 {
+    let hf_energy_loss = if var_src > 1e-10 {
         (1.0 - var_dst / var_src).max(0.0)
     } else {
         0.0
     };
 
-    // Contrast increase: max(0, var_dst/var_src - 1)
-    let contrast_increase = if var_src > 1e-10 {
+    // HF energy gain (L2): max(0, Σ(dst-mu)²_dst / Σ(src-mu)²_src - 1)
+    let hf_energy_gain = if var_src > 1e-10 {
         (var_dst / var_src - 1.0).max(0.0)
     } else {
         0.0
     };
 
-    // Texture loss (L1): 1 - mad_dst / mad_src
+    // HF magnitude loss (L1): 1 - Σ|dst-mu_dst| / Σ|src-mu_src|
     let mad_src = abs_diff_sum(&src_c[..n], &bufs.mu1[..n]) * one_over_n;
     let mad_dst = abs_diff_sum(&dst_c[..n], &bufs.mu2[..n]) * one_over_n;
-    let texture_loss = if mad_src > 1e-10 {
+    let hf_mag_loss = if mad_src > 1e-10 {
         (1.0 - mad_dst / mad_src).max(0.0)
     } else {
         0.0
@@ -974,9 +977,9 @@ fn compute_channel(
     ChannelResult {
         ssim,
         edge,
-        variance_loss,
-        texture_loss,
-        contrast_increase,
+        hf_energy_loss,
+        hf_mag_loss,
+        hf_energy_gain,
         ssim_2nd,
         edge_2nd,
     }
@@ -1002,9 +1005,9 @@ pub(crate) fn compute_single_scale(
     let mut ssim_vals = [0.0f64; 6];
     let mut edge_vals = [0.0f64; 12];
     let mut mse_vals = [0.0f64; 3];
-    let mut variance_loss_vals = [0.0f64; 3];
-    let mut texture_loss_vals = [0.0f64; 3];
-    let mut contrast_increase_vals = [0.0f64; 3];
+    let mut hf_energy_loss_vals = [0.0f64; 3];
+    let mut hf_mag_loss_vals = [0.0f64; 3];
+    let mut hf_energy_gain_vals = [0.0f64; 3];
     let mut ssim_2nd_vals = [0.0f64; 3];
     let mut edge_2nd_vals = [0.0f64; 6];
 
@@ -1023,7 +1026,7 @@ pub(crate) fn compute_single_scale(
     // Determine which channels need work
     // Feature layout per channel (13): ssim_mean(0), ssim_4th(1), ssim_2nd(2),
     //   art_mean(3), art_4th(4), art_2nd(5), det_mean(6), det_4th(7), det_2nd(8),
-    //   mse(9), variance_loss(10), texture_loss(11), contrast_increase(12)
+    //   mse(9), hf_energy_loss(10), hf_mag_loss(11), hf_energy_gain(12)
     let mut active_channels: Vec<(usize, bool, bool)> = Vec::new();
     let beyond_basic = scale_idx * (fpc_basic * 3) >= WEIGHTS.len();
     for c in 0..3 {
@@ -1034,9 +1037,9 @@ pub(crate) fn compute_single_scale(
         } else {
             let base = scale_idx * (fpc_basic * 3) + c * fpc_basic;
             let need_ssim = compute_all || has_weight(base, 3); // positions 0-2
-            let need_blur_features = has_weight(base + 10, 3); // positions 10-12
-            // Blur features need mu1/mu2 (same as edge), fold into need_edge
-            let need_edge = compute_all || has_weight(base + 3, 6) || need_blur_features; // positions 3-8
+            let need_hf = has_weight(base + 10, 3); // positions 10-12
+            // HF features need mu1/mu2 (same as edge), fold into need_edge
+            let need_edge = compute_all || has_weight(base + 3, 6) || need_hf; // positions 3-8
             let need_mse = compute_all || has_weight(base + 9, 1); // position 9
             if need_ssim || need_edge || need_mse {
                 active_channels.push((c, need_ssim, need_edge));
@@ -1065,9 +1068,9 @@ pub(crate) fn compute_single_scale(
             &active_channels,
             &mut ssim_vals,
             &mut edge_vals,
-            &mut variance_loss_vals,
-            &mut texture_loss_vals,
-            &mut contrast_increase_vals,
+            &mut hf_energy_loss_vals,
+            &mut hf_mag_loss_vals,
+            &mut hf_energy_gain_vals,
             &mut ssim_2nd_vals,
             &mut edge_2nd_vals,
         );
@@ -1078,9 +1081,9 @@ pub(crate) fn compute_single_scale(
                 &src[c], &dst[c], width, height, config, need_ssim, need_edge, bufs,
             );
             store_channel_result(c, &result, &mut ssim_vals, &mut edge_vals);
-            variance_loss_vals[c] = result.variance_loss;
-            texture_loss_vals[c] = result.texture_loss;
-            contrast_increase_vals[c] = result.contrast_increase;
+            hf_energy_loss_vals[c] = result.hf_energy_loss;
+            hf_mag_loss_vals[c] = result.hf_mag_loss;
+            hf_energy_gain_vals[c] = result.hf_energy_gain;
             ssim_2nd_vals[c] = result.ssim_2nd;
             edge_2nd_vals[c * 2] = result.edge_2nd[0];
             edge_2nd_vals[c * 2 + 1] = result.edge_2nd[1];
@@ -1091,9 +1094,9 @@ pub(crate) fn compute_single_scale(
         ssim: ssim_vals,
         edge: edge_vals,
         mse: mse_vals,
-        variance_loss: variance_loss_vals,
-        texture_loss: texture_loss_vals,
-        contrast_increase: contrast_increase_vals,
+        hf_energy_loss: hf_energy_loss_vals,
+        hf_mag_loss: hf_mag_loss_vals,
+        hf_energy_gain: hf_energy_gain_vals,
         ssim_2nd: ssim_2nd_vals,
         edge_2nd: edge_2nd_vals,
     }
@@ -1113,29 +1116,30 @@ fn store_channel_result(
     edge_vals[c * 4 + 3] = result.edge[3];
 }
 
-/// Compute variance loss, texture loss, and contrast increase for a single channel.
-/// mu1/mu2 must already contain blurred src/dst for this channel.
+/// Compute high-frequency energy/magnitude features for a single channel.
+/// Measures loss or gain of local detail by comparing (pixel - blur(pixel))
+/// between source and distorted. mu1/mu2 must already contain blurred src/dst.
 #[allow(clippy::too_many_arguments)]
-fn compute_blur_features(
+fn compute_hf_features(
     src_c: &[f32],
     dst_c: &[f32],
     mu1: &[f32],
     mu2: &[f32],
     one_over_n: f64,
     c: usize,
-    variance_loss_vals: &mut [f64; 3],
-    texture_loss_vals: &mut [f64; 3],
-    contrast_increase_vals: &mut [f64; 3],
+    hf_energy_loss_vals: &mut [f64; 3],
+    hf_mag_loss_vals: &mut [f64; 3],
+    hf_energy_gain_vals: &mut [f64; 3],
 ) {
     let n = (1.0 / one_over_n) as usize;
     let var_src = sq_diff_sum(&src_c[..n], &mu1[..n]) * one_over_n;
     let var_dst = sq_diff_sum(&dst_c[..n], &mu2[..n]) * one_over_n;
-    variance_loss_vals[c] = if var_src > 1e-10 {
+    hf_energy_loss_vals[c] = if var_src > 1e-10 {
         (1.0 - var_dst / var_src).max(0.0)
     } else {
         0.0
     };
-    contrast_increase_vals[c] = if var_src > 1e-10 {
+    hf_energy_gain_vals[c] = if var_src > 1e-10 {
         (var_dst / var_src - 1.0).max(0.0)
     } else {
         0.0
@@ -1143,7 +1147,7 @@ fn compute_blur_features(
 
     let mad_src = abs_diff_sum(&src_c[..n], &mu1[..n]) * one_over_n;
     let mad_dst = abs_diff_sum(&dst_c[..n], &mu2[..n]) * one_over_n;
-    texture_loss_vals[c] = if mad_src > 1e-10 {
+    hf_mag_loss_vals[c] = if mad_src > 1e-10 {
         (1.0 - mad_dst / mad_src).max(0.0)
     } else {
         0.0
@@ -1171,9 +1175,9 @@ fn compute_ssim_channel_sequential(
     c: usize,
     ssim_vals: &mut [f64; 6],
     edge_vals: &mut [f64; 12],
-    variance_loss_vals: &mut [f64; 3],
-    texture_loss_vals: &mut [f64; 3],
-    contrast_increase_vals: &mut [f64; 3],
+    hf_energy_loss_vals: &mut [f64; 3],
+    hf_mag_loss_vals: &mut [f64; 3],
+    hf_energy_gain_vals: &mut [f64; 3],
     ssim_2nd_vals: &mut [f64; 3],
     edge_2nd_vals: &mut [f64; 6],
 ) {
@@ -1200,16 +1204,16 @@ fn compute_ssim_channel_sequential(
         edge_2nd_vals[c * 2 + 1] = (det2 * one_over_n).sqrt();
     }
 
-    compute_blur_features(
+    compute_hf_features(
         src_c,
         dst_c,
         mu1,
         mu2,
         one_over_n,
         c,
-        variance_loss_vals,
-        texture_loss_vals,
-        contrast_increase_vals,
+        hf_energy_loss_vals,
+        hf_mag_loss_vals,
+        hf_energy_gain_vals,
     );
 }
 
@@ -1234,9 +1238,9 @@ fn compute_single_scale_phased(
     active_channels: &[(usize, bool, bool)],
     ssim_vals: &mut [f64; 6],
     edge_vals: &mut [f64; 12],
-    variance_loss_vals: &mut [f64; 3],
-    texture_loss_vals: &mut [f64; 3],
-    contrast_increase_vals: &mut [f64; 3],
+    hf_energy_loss_vals: &mut [f64; 3],
+    hf_mag_loss_vals: &mut [f64; 3],
+    hf_energy_gain_vals: &mut [f64; 3],
     ssim_2nd_vals: &mut [f64; 3],
     edge_2nd_vals: &mut [f64; 6],
 ) {
@@ -1323,16 +1327,16 @@ fn compute_single_scale_phased(
                 edge_2nd_vals[sc * 2] = (art2 * one_over_n).sqrt();
                 edge_2nd_vals[sc * 2 + 1] = (det2 * one_over_n).sqrt();
             }
-            compute_blur_features(
+            compute_hf_features(
                 &src[sc],
                 &dst[sc],
                 mu1_a,
                 mu2_a,
                 one_over_n,
                 sc,
-                variance_loss_vals,
-                texture_loss_vals,
-                contrast_increase_vals,
+                hf_energy_loss_vals,
+                hf_mag_loss_vals,
+                hf_energy_gain_vals,
             );
 
             let (art, art4, det, det4, art2, det2) =
@@ -1343,16 +1347,16 @@ fn compute_single_scale_phased(
             edge_vals[edge_c * 4 + 3] = (det4 * one_over_n).powf(0.25);
             edge_2nd_vals[edge_c * 2] = (art2 * one_over_n).sqrt();
             edge_2nd_vals[edge_c * 2 + 1] = (det2 * one_over_n).sqrt();
-            compute_blur_features(
+            compute_hf_features(
                 &src[edge_c],
                 &dst[edge_c],
                 mu1_b,
                 mu2_b,
                 one_over_n,
                 edge_c,
-                variance_loss_vals,
-                texture_loss_vals,
-                contrast_increase_vals,
+                hf_energy_loss_vals,
+                hf_mag_loss_vals,
+                hf_energy_gain_vals,
             );
 
             // Handle additional edge-only channels (rare — usually only 1)
@@ -1367,16 +1371,16 @@ fn compute_single_scale_phased(
                 edge_vals[edge_c2 * 4 + 3] = (det4 * one_over_n).powf(0.25);
                 edge_2nd_vals[edge_c2 * 2] = (art2 * one_over_n).sqrt();
                 edge_2nd_vals[edge_c2 * 2 + 1] = (det2 * one_over_n).sqrt();
-                compute_blur_features(
+                compute_hf_features(
                     &src[edge_c2],
                     &dst[edge_c2],
                     mu1_b,
                     mu2_b,
                     one_over_n,
                     edge_c2,
-                    variance_loss_vals,
-                    texture_loss_vals,
-                    contrast_increase_vals,
+                    hf_energy_loss_vals,
+                    hf_mag_loss_vals,
+                    hf_energy_gain_vals,
                 );
             }
 
@@ -1400,9 +1404,9 @@ fn compute_single_scale_phased(
                     extra_c,
                     ssim_vals,
                     edge_vals,
-                    variance_loss_vals,
-                    texture_loss_vals,
-                    contrast_increase_vals,
+                    hf_energy_loss_vals,
+                    hf_mag_loss_vals,
+                    hf_energy_gain_vals,
                     ssim_2nd_vals,
                     edge_2nd_vals,
                 );
@@ -1438,16 +1442,16 @@ fn compute_single_scale_phased(
                 edge_2nd_vals[sc * 2] = (art2 * one_over_n).sqrt();
                 edge_2nd_vals[sc * 2 + 1] = (det2 * one_over_n).sqrt();
             }
-            compute_blur_features(
+            compute_hf_features(
                 &src[sc],
                 &dst[sc],
                 mu1_a,
                 mu2_a,
                 one_over_n,
                 sc,
-                variance_loss_vals,
-                texture_loss_vals,
-                contrast_increase_vals,
+                hf_energy_loss_vals,
+                hf_mag_loss_vals,
+                hf_energy_gain_vals,
             );
 
             // Handle additional SSIM channels sequentially
@@ -1470,9 +1474,9 @@ fn compute_single_scale_phased(
                     extra_c,
                     ssim_vals,
                     edge_vals,
-                    variance_loss_vals,
-                    texture_loss_vals,
-                    contrast_increase_vals,
+                    hf_energy_loss_vals,
+                    hf_mag_loss_vals,
+                    hf_energy_gain_vals,
                     ssim_2nd_vals,
                     edge_2nd_vals,
                 );
@@ -1493,16 +1497,16 @@ fn compute_single_scale_phased(
             edge_vals[edge_c * 4 + 3] = (det4 * one_over_n).powf(0.25);
             edge_2nd_vals[edge_c * 2] = (art2 * one_over_n).sqrt();
             edge_2nd_vals[edge_c * 2 + 1] = (det2 * one_over_n).sqrt();
-            compute_blur_features(
+            compute_hf_features(
                 &src[edge_c],
                 &dst[edge_c],
                 mu1_a,
                 mu2_a,
                 one_over_n,
                 edge_c,
-                variance_loss_vals,
-                texture_loss_vals,
-                contrast_increase_vals,
+                hf_energy_loss_vals,
+                hf_mag_loss_vals,
+                hf_energy_gain_vals,
             );
         }
     }
@@ -1716,11 +1720,11 @@ pub(crate) fn combine_scores(
             features.push(ss.edge[c * 4 + 2].abs());
             features.push(ss.edge[c * 4 + 3].abs());
             features.push(ss.edge_2nd[c * 2 + 1].abs());
-            // mse, variance_loss, texture_loss, contrast_increase
+            // mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
             features.push(ss.mse[c]);
-            features.push(ss.variance_loss[c]);
-            features.push(ss.texture_loss[c]);
-            features.push(ss.contrast_increase[c]);
+            features.push(ss.hf_energy_loss[c]);
+            features.push(ss.hf_mag_loss[c]);
+            features.push(ss.hf_energy_gain[c]);
         }
     }
 

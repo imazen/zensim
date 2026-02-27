@@ -34,10 +34,10 @@ pub(crate) struct StripChannelAccum {
     pub edge_det4: f64,
     pub edge_det2: f64,
     pub mse: f64,
-    pub sq_src: f64,
-    pub sq_dst: f64,
-    pub abs_src: f64,
-    pub abs_dst: f64,
+    pub hf_sq_src: f64,
+    pub hf_sq_dst: f64,
+    pub hf_abs_src: f64,
+    pub hf_abs_dst: f64,
 }
 
 impl StripChannelAccum {
@@ -53,10 +53,10 @@ impl StripChannelAccum {
             edge_det4: 0.0,
             edge_det2: 0.0,
             mse: 0.0,
-            sq_src: 0.0,
-            sq_dst: 0.0,
-            abs_src: 0.0,
-            abs_dst: 0.0,
+            hf_sq_src: 0.0,
+            hf_sq_dst: 0.0,
+            hf_abs_src: 0.0,
+            hf_abs_dst: 0.0,
         }
     }
 }
@@ -263,16 +263,16 @@ fn fused_vblur_ssim_inner_v4(
                 acc.edge_det4 += (dl2 * dl2).reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
 
-                // === Variance loss: (pixel - mu)² ===
+                // === HF energy (L2): (pixel - mu)² ===
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.sq_src += (vs * vs).reduce_add() as f64;
-                acc.sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
 
-                // === Texture loss: |pixel - mu| ===
+                // === HF magnitude (L1): |pixel - mu| ===
                 // diff1/diff2 already computed above
-                acc.abs_src += diff1.reduce_add() as f64;
-                acc.abs_dst += diff2.reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
 
                 // === MSE: (src - dst)² ===
                 let pd = s - d;
@@ -366,12 +366,12 @@ fn fused_vblur_ssim_inner_v4(
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.sq_src += (vs * vs).reduce_add() as f64;
-                acc.sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
 
                 // Texture
-                acc.abs_src += diff1.reduce_add() as f64;
-                acc.abs_dst += diff2.reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
 
                 // MSE
                 let pd = s - d;
@@ -449,12 +449,12 @@ fn fused_vblur_ssim_inner_v4(
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += (vs * vs) as f64;
-                acc.sq_dst += (vd * vd) as f64;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
 
                 // Texture
-                acc.abs_src += diff1 as f64;
-                acc.abs_dst += diff2 as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
 
                 // MSE
                 let pd = sv - dv;
@@ -562,12 +562,12 @@ fn fused_vblur_ssim_inner_v3(
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.sq_src += (vs * vs).reduce_add() as f64;
-                acc.sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
 
                 // Texture
-                acc.abs_src += diff1.reduce_add() as f64;
-                acc.abs_dst += diff2.reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
 
                 // MSE
                 let pd = s - d;
@@ -645,12 +645,12 @@ fn fused_vblur_ssim_inner_v3(
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += (vs * vs) as f64;
-                acc.sq_dst += (vd * vd) as f64;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
 
                 // Texture
-                acc.abs_src += diff1 as f64;
-                acc.abs_dst += diff2 as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
 
                 // MSE
                 let pd = sv - dv;
@@ -746,12 +746,12 @@ fn fused_vblur_ssim_inner_scalar(
                 // Variance
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += (vs * vs) as f64;
-                acc.sq_dst += (vd * vd) as f64;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
 
                 // Texture
-                acc.abs_src += diff1 as f64;
-                acc.abs_dst += diff2 as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
 
                 // MSE
                 let pd = sv - dv;
@@ -837,12 +837,12 @@ fn fused_vblur_edge_inner_v4(
                 // Variance
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.sq_src += (vs * vs).reduce_add() as f64;
-                acc.sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
 
                 // Texture
-                acc.abs_src += diff1.reduce_add() as f64;
-                acc.abs_dst += diff2.reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
 
                 // MSE
                 let pd = s - d;
@@ -907,10 +907,10 @@ fn fused_vblur_edge_inner_v4(
 
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.sq_src += (vs * vs).reduce_add() as f64;
-                acc.sq_dst += (vd * vd).reduce_add() as f64;
-                acc.abs_src += diff1.reduce_add() as f64;
-                acc.abs_dst += diff2.reduce_add() as f64;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
 
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
@@ -963,10 +963,10 @@ fn fused_vblur_edge_inner_v4(
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += (vs * vs) as f64;
-                acc.sq_dst += (vd * vd) as f64;
-                acc.abs_src += diff1 as f64;
-                acc.abs_dst += diff2 as f64;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
 
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
@@ -1043,10 +1043,10 @@ fn fused_vblur_edge_inner_v3(
 
                 let vs = s - mu1;
                 let vd = d - mu2;
-                acc.sq_src += (vs * vs).reduce_add() as f64;
-                acc.sq_dst += (vd * vd).reduce_add() as f64;
-                acc.abs_src += diff1.reduce_add() as f64;
-                acc.abs_dst += diff2.reduce_add() as f64;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
 
                 let pd = s - d;
                 acc.mse += (pd * pd).reduce_add() as f64;
@@ -1099,10 +1099,10 @@ fn fused_vblur_edge_inner_v3(
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += (vs * vs) as f64;
-                acc.sq_dst += (vd * vd) as f64;
-                acc.abs_src += diff1 as f64;
-                acc.abs_dst += diff2 as f64;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
 
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
@@ -1171,10 +1171,10 @@ fn fused_vblur_edge_inner_scalar(
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
-                acc.sq_src += (vs * vs) as f64;
-                acc.sq_dst += (vd * vd) as f64;
-                acc.abs_src += diff1 as f64;
-                acc.abs_dst += diff2 as f64;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
 
                 let pd = sv - dv;
                 acc.mse += (pd * pd) as f64;
