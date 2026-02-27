@@ -22,4 +22,4 @@ image = "0.25"
 rayon = "1.10"
 imgref = "1.12"
 rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
-zencodec-types = { path = "../zencodec-types-api" }
+zencodec-types = { git = "https://github.com/imazen/zencodec-types.git" }
