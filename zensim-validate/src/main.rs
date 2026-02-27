@@ -138,17 +138,27 @@ struct CacheConfig {
     masking_bits: u32,
 }
 
+/// Cached features without human scores (which are target-metric-dependent).
+struct CachedFeatures {
+    name: String,
+    features: Vec<Vec<f64>>,
+    ref_keys: Vec<String>,
+    /// Original pair indices (which pairs from the dataset produced valid features).
+    valid_indices: Vec<u32>,
+}
+
 fn save_feature_cache(
     path: &Path,
     ds: &DatasetWithFeatures,
+    valid_indices: &[u32],
     config: &CacheConfig,
 ) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
 
-    // Magic + version
+    // Magic + version (v2: no human_scores, target-metric-independent)
     f.write_all(b"ZSFC")?;
-    f.write_all(&1u32.to_le_bytes())?;
+    f.write_all(&2u32.to_le_bytes())?;
 
     // Validation fields
     f.write_all(&config.num_scales.to_le_bytes())?;
@@ -156,7 +166,7 @@ fn save_feature_cache(
     f.write_all(&config.blur_radius.to_le_bytes())?;
     f.write_all(&config.masking_bits.to_le_bytes())?;
 
-    let n_pairs = ds.human_scores.len() as u64;
+    let n_pairs = ds.features.len() as u64;
     let n_features = if ds.features.is_empty() {
         0u64
     } else {
@@ -170,12 +180,12 @@ fn save_feature_cache(
     f.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
     f.write_all(name_bytes)?;
 
-    // Human scores
-    for &s in &ds.human_scores {
-        f.write_all(&s.to_le_bytes())?;
+    // Valid pair indices (which original pairs produced non-NaN features)
+    for &idx in valid_indices {
+        f.write_all(&idx.to_le_bytes())?;
     }
 
-    // Features (flat row-major)
+    // Features (flat row-major) — no human_scores, those are target-dependent
     for row in &ds.features {
         for &v in row {
             f.write_all(&v.to_le_bytes())?;
@@ -196,7 +206,7 @@ fn save_feature_cache(
 fn load_feature_cache(
     path: &Path,
     config: &CacheConfig,
-) -> std::io::Result<Option<DatasetWithFeatures>> {
+) -> std::io::Result<Option<CachedFeatures>> {
     let data = match std::fs::read(path) {
         Ok(d) => d,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -226,9 +236,9 @@ fn load_feature_cache(
 
     // Version
     let version = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
-    if version != 1 {
+    if version != 2 {
         eprintln!(
-            "Feature cache: unknown version {}, recomputing",
+            "Feature cache: version {} (expected 2), recomputing",
             version
         );
         return Ok(None);
@@ -277,15 +287,15 @@ fn load_feature_cache(
     let name_len = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize;
     let name = String::from_utf8_lossy(read_bytes(&mut pos, name_len)?).to_string();
 
-    // Human scores
-    let mut human_scores = Vec::with_capacity(n_pairs);
+    // Valid pair indices
+    let mut valid_indices = Vec::with_capacity(n_pairs);
     for _ in 0..n_pairs {
-        human_scores.push(f64::from_le_bytes(
-            read_bytes(&mut pos, 8)?.try_into().unwrap(),
+        valid_indices.push(u32::from_le_bytes(
+            read_bytes(&mut pos, 4)?.try_into().unwrap(),
         ));
     }
 
-    // Features
+    // Features (no human_scores in v2)
     let mut features = Vec::with_capacity(n_pairs);
     for _ in 0..n_pairs {
         let mut row = Vec::with_capacity(n_features);
@@ -305,11 +315,11 @@ fn load_feature_cache(
         ref_keys.push(key);
     }
 
-    Ok(Some(DatasetWithFeatures {
+    Ok(Some(CachedFeatures {
         name,
-        human_scores,
         features,
         ref_keys,
+        valid_indices,
     }))
 }
 
@@ -369,15 +379,24 @@ fn main() {
     };
 
     // Load and compute primary dataset (with optional caching)
+    let auto_cache_path = |dataset_path: &Path| -> PathBuf {
+        let mut p = dataset_path.as_os_str().to_owned();
+        p.push(".features.bin");
+        PathBuf::from(p)
+    };
+
     let primary = if compute_all && !args.recompute {
-        let cache_path = args.feature_cache.clone().unwrap_or_else(|| {
-            let mut p = args.dataset.as_os_str().to_owned();
-            p.push(".features.bin");
-            PathBuf::from(p)
-        });
+        let cache_path = args
+            .feature_cache
+            .clone()
+            .unwrap_or_else(|| auto_cache_path(&args.dataset));
         let cache_start = std::time::Instant::now();
         match load_feature_cache(&cache_path, &cache_config) {
-            Ok(Some(ds)) => {
+            Ok(Some(cached)) => {
+                // Reload pairs for fresh human_scores (target-metric-dependent)
+                let pairs =
+                    load_pairs(args.format, &args.dataset, args.max_images, args.target_metric);
+                let ds = build_dataset_from_cache(cached, &pairs);
                 println!(
                     "Loaded {} pairs ({} features) from cache {:?} ({:.1}s)",
                     ds.human_scores.len(),
@@ -392,7 +411,7 @@ fn main() {
                 ds
             }
             _ => {
-                let ds = load_and_compute(
+                let (ds, valid_indices) = load_and_compute(
                     &format!("{:?}", args.format),
                     args.format,
                     &args.dataset,
@@ -404,7 +423,9 @@ fn main() {
                     num_scales,
                     args.target_metric,
                 );
-                if let Err(e) = save_feature_cache(&cache_path, &ds, &cache_config) {
+                if let Err(e) =
+                    save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
+                {
                     eprintln!("Warning: failed to save feature cache: {}", e);
                 } else {
                     println!("Saved feature cache to {:?}", cache_path);
@@ -413,7 +434,7 @@ fn main() {
             }
         }
     } else {
-        let ds = load_and_compute(
+        let (ds, valid_indices) = load_and_compute(
             &format!("{:?}", args.format),
             args.format,
             &args.dataset,
@@ -426,13 +447,13 @@ fn main() {
             args.target_metric,
         );
         if compute_all {
-            // Save cache even on --recompute
-            let cache_path = args.feature_cache.clone().unwrap_or_else(|| {
-                let mut p = args.dataset.as_os_str().to_owned();
-                p.push(".features.bin");
-                PathBuf::from(p)
-            });
-            if let Err(e) = save_feature_cache(&cache_path, &ds, &cache_config) {
+            let cache_path = args
+                .feature_cache
+                .clone()
+                .unwrap_or_else(|| auto_cache_path(&args.dataset));
+            if let Err(e) =
+                save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
+            {
                 eprintln!("Warning: failed to save feature cache: {}", e);
             } else {
                 println!("Saved feature cache to {:?}", cache_path);
@@ -499,15 +520,13 @@ fn main() {
                 }
             };
             let also_path = Path::new(parts[1]);
+            let also_cache = auto_cache_path(also_path);
             let ds = if compute_all && !args.recompute {
-                let also_cache = {
-                    let mut p = also_path.as_os_str().to_owned();
-                    p.push(".features.bin");
-                    PathBuf::from(p)
-                };
                 let t = std::time::Instant::now();
                 match load_feature_cache(&also_cache, &cache_config) {
-                    Ok(Some(ds)) => {
+                    Ok(Some(cached)) => {
+                        let pairs = load_pairs(fmt, also_path, 0, args.target_metric);
+                        let ds = build_dataset_from_cache(cached, &pairs);
                         println!(
                             "Loaded {} pairs from cache {:?} ({:.1}s)",
                             ds.human_scores.len(),
@@ -517,7 +536,7 @@ fn main() {
                         ds
                     }
                     _ => {
-                        let ds = load_and_compute(
+                        let (ds, valid_indices) = load_and_compute(
                             parts[0],
                             fmt,
                             also_path,
@@ -529,7 +548,9 @@ fn main() {
                             num_scales,
                             args.target_metric,
                         );
-                        if let Err(e) = save_feature_cache(&also_cache, &ds, &cache_config) {
+                        if let Err(e) =
+                            save_feature_cache(&also_cache, &ds, &valid_indices, &cache_config)
+                        {
                             eprintln!("Warning: failed to save feature cache: {}", e);
                         } else {
                             println!("Saved feature cache to {:?}", also_cache);
@@ -538,7 +559,7 @@ fn main() {
                     }
                 }
             } else {
-                let ds = load_and_compute(
+                let (ds, valid_indices) = load_and_compute(
                     parts[0],
                     fmt,
                     also_path,
@@ -551,12 +572,9 @@ fn main() {
                     args.target_metric,
                 );
                 if compute_all {
-                    let also_cache = {
-                        let mut p = also_path.as_os_str().to_owned();
-                        p.push(".features.bin");
-                        PathBuf::from(p)
-                    };
-                    if let Err(e) = save_feature_cache(&also_cache, &ds, &cache_config) {
+                    if let Err(e) =
+                        save_feature_cache(&also_cache, &ds, &valid_indices, &cache_config)
+                    {
                         eprintln!("Warning: failed to save feature cache: {}", e);
                     } else {
                         println!("Saved feature cache to {:?}", also_cache);
@@ -754,6 +772,50 @@ fn main() {
     }
 }
 
+/// Load pairs from a dataset (for human_scores) without computing features.
+/// Used when features are loaded from cache but human_scores need fresh loading.
+fn load_pairs(
+    format: DatasetFormat,
+    path: &Path,
+    max_images: usize,
+    target_metric: Option<TargetMetric>,
+) -> Vec<ImagePair> {
+    let pairs = match format {
+        DatasetFormat::Tid2013 => load_tid2013(path),
+        DatasetFormat::Kadid10k => load_kadid10k(path),
+        DatasetFormat::Csiq => load_csiq(path),
+        DatasetFormat::Pipal => load_pipal(path),
+        DatasetFormat::Cid22 => load_cid22(path),
+        DatasetFormat::KonfigIqa => load_konfig_iqa(path),
+        DatasetFormat::Synthetic => load_synthetic(path, target_metric),
+    };
+    if max_images > 0 && max_images < pairs.len() {
+        pairs[..max_images].to_vec()
+    } else {
+        pairs
+    }
+}
+
+/// Build a DatasetWithFeatures from cached features + freshly loaded pairs.
+/// Uses valid_indices to look up human_scores from the original pairs list.
+fn build_dataset_from_cache(
+    cached: CachedFeatures,
+    pairs: &[ImagePair],
+) -> DatasetWithFeatures {
+    let human_scores: Vec<f64> = cached
+        .valid_indices
+        .iter()
+        .map(|&idx| pairs[idx as usize].human_score)
+        .collect();
+
+    DatasetWithFeatures {
+        name: cached.name,
+        human_scores,
+        features: cached.features,
+        ref_keys: cached.ref_keys,
+    }
+}
+
 fn load_weights_file(path: &Path) -> Vec<f64> {
     let content = std::fs::read_to_string(path).expect("Failed to read weights file");
     content
@@ -791,7 +853,7 @@ fn load_and_compute(
     masking_strength: f32,
     num_scales: usize,
     target_metric: Option<TargetMetric>,
-) -> DatasetWithFeatures {
+) -> (DatasetWithFeatures, Vec<u32>) {
     let pairs = match format {
         DatasetFormat::Tid2013 => load_tid2013(path),
         DatasetFormat::Kadid10k => load_kadid10k(path),
@@ -930,25 +992,30 @@ fn load_and_compute(
     let mut human_scores = Vec::new();
     let mut features = Vec::new();
     let mut ref_keys = Vec::new();
+    let mut valid_indices = Vec::new();
     let mut n_valid = 0;
 
-    for (_idx, key, hs, result) in results {
+    for (idx, key, hs, result) in results {
         if result.score.is_finite() {
             human_scores.push(hs);
             features.push(result.features);
             ref_keys.push(key);
+            valid_indices.push(idx as u32);
             n_valid += 1;
         }
     }
 
     println!("  {} valid pairs from {}", n_valid, name);
 
-    DatasetWithFeatures {
-        name: name.to_string(),
-        human_scores,
-        features,
-        ref_keys,
-    }
+    (
+        DatasetWithFeatures {
+            name: name.to_string(),
+            human_scores,
+            features,
+            ref_keys,
+        },
+        valid_indices,
+    )
 }
 
 /// Expand embedded WEIGHTS (156 entries, 13 features/ch) to match a wider feature layout.
