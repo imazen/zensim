@@ -148,12 +148,14 @@ fn mirror_idx(i: usize, r: usize, height: usize) -> usize {
 #[inline(always)]
 fn vblur_add_idx(y: usize, r: usize, height: usize) -> usize {
     let add_raw = y + r + 1;
-    let idx = if add_raw < height {
+    if add_raw < height {
         add_raw
     } else {
-        2 * (height - 1) - add_raw
-    };
-    idx.min(height - 1)
+        // Mirror-reflect: fold back from the boundary.
+        // Use signed math to avoid underflow when add_raw >> height.
+        let reflected = 2 * (height as isize - 1) - add_raw as isize;
+        reflected.unsigned_abs().min(height - 1)
+    }
 }
 
 #[inline(always)]
