@@ -22,8 +22,8 @@
 //! ```
 
 use crate::error::ZensimError;
-use crate::metric::{ErrorCategory, RoundingBias, Zensim};
-use crate::source::ImageSource;
+use crate::metric::{ClassifiedResult, ErrorCategory, RoundingBias, Zensim};
+use crate::source::{AlphaMode, ImageSource, PixelFormat};
 
 /// Tolerance for regression checking. All constraints must pass.
 ///
@@ -54,6 +54,7 @@ pub struct RegressionTolerance {
     max_differing_pixel_fraction: f64,
     min_identical_channel_fraction: f64,
     min_score: f64,
+    ignore_alpha: bool,
 }
 
 impl RegressionTolerance {
@@ -64,6 +65,7 @@ impl RegressionTolerance {
             max_differing_pixel_fraction: 0.0,
             min_identical_channel_fraction: 1.0,
             min_score: 100.0,
+            ignore_alpha: false,
         }
     }
 
@@ -75,6 +77,7 @@ impl RegressionTolerance {
             max_differing_pixel_fraction: 1.0,
             min_identical_channel_fraction: 0.0,
             min_score: 95.0,
+            ignore_alpha: false,
         }
     }
 
@@ -99,6 +102,19 @@ impl RegressionTolerance {
     /// Set the minimum acceptable zensim score (0–100).
     pub fn min_score(mut self, s: f64) -> Self {
         self.min_score = s;
+        self
+    }
+
+    /// Ignore the alpha channel when comparing RGBA images.
+    ///
+    /// When set, RGBA inputs are treated as opaque (RGBX) — the alpha byte
+    /// is ignored and no checkerboard compositing is performed. This is useful
+    /// when comparing images that differ only in alpha but should be considered
+    /// identical in their visible RGB content.
+    ///
+    /// Has no effect on RGB-only inputs.
+    pub fn ignore_alpha(mut self) -> Self {
+        self.ignore_alpha = true;
         self
     }
 }
@@ -283,6 +299,136 @@ impl std::fmt::Display for RegressionReport {
     }
 }
 
+// ─── Alpha override wrapper ─────────────────────────────────────────────
+
+/// Thin wrapper that forces `AlphaMode::Opaque` on any `ImageSource`.
+struct AlphaOverride<'a, S: ImageSource>(&'a S);
+
+impl<S: ImageSource> ImageSource for AlphaOverride<'_, S> {
+    #[inline]
+    fn width(&self) -> usize {
+        self.0.width()
+    }
+    #[inline]
+    fn height(&self) -> usize {
+        self.0.height()
+    }
+    #[inline]
+    fn pixel_format(&self) -> PixelFormat {
+        self.0.pixel_format()
+    }
+    #[inline]
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Opaque
+    }
+    #[inline]
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        self.0.row_bytes(y)
+    }
+}
+
+// ─── Report building ────────────────────────────────────────────────────
+
+fn build_report(
+    cr: ClassifiedResult,
+    tolerance: &RegressionTolerance,
+) -> RegressionReport {
+    let ds = &cr.delta_stats;
+
+    // Convert max_abs_delta from f64 (0-1 range) to u8 (0-255 units)
+    let max_channel_delta: [u8; 3] =
+        std::array::from_fn(|c| (ds.max_abs_delta[c] * 255.0).round().min(255.0) as u8);
+
+    // Compute identical_channel_fraction from signed_small_histogram
+    let identical_values: u64 = (0..3).map(|ch| ds.signed_small_histogram[ch][3]).sum();
+    let total_values = ds.pixel_count * 3;
+    let identical_channel_fraction = if total_values > 0 {
+        identical_values as f64 / total_values as f64
+    } else {
+        1.0
+    };
+
+    // Compute pixels_failing based on tolerance threshold
+    let pixels_failing = if tolerance.max_channel_delta == 0 {
+        ds.pixels_differing
+    } else if tolerance.max_channel_delta == 1 {
+        ds.pixels_differing_by_more_than_1
+    } else {
+        // For higher thresholds: conservative upper bound
+        let max_u8 = *max_channel_delta.iter().max().unwrap_or(&0);
+        if max_u8 <= tolerance.max_channel_delta {
+            0
+        } else {
+            ds.pixels_differing // conservative: all differing pixels
+        }
+    };
+
+    let differing_fraction = if ds.pixel_count > 0 {
+        ds.pixels_differing as f64 / ds.pixel_count as f64
+    } else {
+        0.0
+    };
+
+    // Evaluate constraints
+    let mut constraint_results = Vec::new();
+
+    // 1. Max channel delta
+    let max_delta_actual = *max_channel_delta.iter().max().unwrap_or(&0);
+    let delta_pass = max_delta_actual <= tolerance.max_channel_delta;
+    constraint_results.push(ConstraintResult {
+        name: "Max delta",
+        passed: delta_pass,
+        actual: format!(
+            "R={} G={} B={}",
+            max_channel_delta[0], max_channel_delta[1], max_channel_delta[2],
+        ),
+        limit: format!("{}/255", tolerance.max_channel_delta),
+    });
+
+    // 2. Score
+    let score_pass = cr.result.score >= tolerance.min_score;
+    constraint_results.push(ConstraintResult {
+        name: "Score",
+        passed: score_pass,
+        actual: format!("{:.1}", cr.result.score),
+        limit: format!(">={:.1}", tolerance.min_score),
+    });
+
+    // 3. Differing pixel fraction
+    let diff_pass = differing_fraction <= tolerance.max_differing_pixel_fraction;
+    constraint_results.push(ConstraintResult {
+        name: "Pixels differing",
+        passed: diff_pass,
+        actual: format!("{:.1}%", differing_fraction * 100.0),
+        limit: format!("<={:.1}%", tolerance.max_differing_pixel_fraction * 100.0),
+    });
+
+    // 4. Identical channel fraction
+    let ident_pass = identical_channel_fraction >= tolerance.min_identical_channel_fraction;
+    constraint_results.push(ConstraintResult {
+        name: "Identical channels",
+        passed: ident_pass,
+        actual: format!("{:.1}%", identical_channel_fraction * 100.0),
+        limit: format!(">={:.1}%", tolerance.min_identical_channel_fraction * 100.0),
+    });
+
+    let passed = delta_pass && score_pass && diff_pass && ident_pass;
+
+    RegressionReport {
+        passed,
+        score: cr.result.score,
+        category: cr.classification.dominant,
+        confidence: cr.classification.confidence,
+        max_channel_delta,
+        pixel_count: ds.pixel_count,
+        pixels_differing: ds.pixels_differing,
+        pixels_failing,
+        identical_channel_fraction,
+        rounding_bias: cr.classification.rounding_bias,
+        constraint_results,
+    }
+}
+
 // ─── Zensim::check_regression() ──────────────────────────────────────────
 
 impl Zensim {
@@ -318,100 +464,11 @@ impl Zensim {
         actual: &impl ImageSource,
         tolerance: &RegressionTolerance,
     ) -> Result<RegressionReport, ZensimError> {
-        let cr = self.classify(expected, actual)?;
-        let ds = &cr.delta_stats;
-
-        // Convert max_abs_delta from f64 (0-1 range) to u8 (0-255 units)
-        let max_channel_delta: [u8; 3] =
-            std::array::from_fn(|c| (ds.max_abs_delta[c] * 255.0).round().min(255.0) as u8);
-
-        // Compute identical_channel_fraction from signed_small_histogram
-        let identical_values: u64 = (0..3).map(|ch| ds.signed_small_histogram[ch][3]).sum();
-        let total_values = ds.pixel_count * 3;
-        let identical_channel_fraction = if total_values > 0 {
-            identical_values as f64 / total_values as f64
+        let cr = if tolerance.ignore_alpha {
+            self.classify(&AlphaOverride(expected), &AlphaOverride(actual))?
         } else {
-            1.0
+            self.classify(expected, actual)?
         };
-
-        // Compute pixels_failing based on tolerance threshold
-        let pixels_failing = if tolerance.max_channel_delta == 0 {
-            ds.pixels_differing
-        } else if tolerance.max_channel_delta == 1 {
-            ds.pixels_differing_by_more_than_1
-        } else {
-            // For higher thresholds: conservative upper bound
-            let max_u8 = *max_channel_delta.iter().max().unwrap_or(&0);
-            if max_u8 <= tolerance.max_channel_delta {
-                0
-            } else {
-                ds.pixels_differing // conservative: all differing pixels
-            }
-        };
-
-        let differing_fraction = if ds.pixel_count > 0 {
-            ds.pixels_differing as f64 / ds.pixel_count as f64
-        } else {
-            0.0
-        };
-
-        // Evaluate constraints
-        let mut constraint_results = Vec::new();
-
-        // 1. Max channel delta
-        let max_delta_actual = *max_channel_delta.iter().max().unwrap_or(&0);
-        let delta_pass = max_delta_actual <= tolerance.max_channel_delta;
-        constraint_results.push(ConstraintResult {
-            name: "Max delta",
-            passed: delta_pass,
-            actual: format!(
-                "R={} G={} B={}",
-                max_channel_delta[0], max_channel_delta[1], max_channel_delta[2],
-            ),
-            limit: format!("{}/255", tolerance.max_channel_delta),
-        });
-
-        // 2. Score
-        let score_pass = cr.result.score >= tolerance.min_score;
-        constraint_results.push(ConstraintResult {
-            name: "Score",
-            passed: score_pass,
-            actual: format!("{:.1}", cr.result.score),
-            limit: format!(">={:.1}", tolerance.min_score),
-        });
-
-        // 3. Differing pixel fraction
-        let diff_pass = differing_fraction <= tolerance.max_differing_pixel_fraction;
-        constraint_results.push(ConstraintResult {
-            name: "Pixels differing",
-            passed: diff_pass,
-            actual: format!("{:.1}%", differing_fraction * 100.0),
-            limit: format!("<={:.1}%", tolerance.max_differing_pixel_fraction * 100.0),
-        });
-
-        // 4. Identical channel fraction
-        let ident_pass = identical_channel_fraction >= tolerance.min_identical_channel_fraction;
-        constraint_results.push(ConstraintResult {
-            name: "Identical channels",
-            passed: ident_pass,
-            actual: format!("{:.1}%", identical_channel_fraction * 100.0),
-            limit: format!(">={:.1}%", tolerance.min_identical_channel_fraction * 100.0),
-        });
-
-        let passed = delta_pass && score_pass && diff_pass && ident_pass;
-
-        Ok(RegressionReport {
-            passed,
-            score: cr.result.score,
-            category: cr.classification.dominant,
-            confidence: cr.classification.confidence,
-            max_channel_delta,
-            pixel_count: ds.pixel_count,
-            pixels_differing: ds.pixels_differing,
-            pixels_failing,
-            identical_channel_fraction,
-            rounding_bias: cr.classification.rounding_bias,
-            constraint_results,
-        })
+        Ok(build_report(cr, tolerance))
     }
 }
