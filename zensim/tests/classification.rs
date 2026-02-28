@@ -93,41 +93,20 @@ fn print_delta_stats(name: &str, cr: &ClassifiedResult) {
         ds.max_abs_delta[0], ds.max_abs_delta[1], ds.max_abs_delta[2],
     );
     println!(
-        "    dark/mid/bright R: {:.6} / {:.6} / {:.6}",
-        ds.mean_delta_dark[0], ds.mean_delta_mid[0], ds.mean_delta_bright[0],
-    );
-    println!(
-        "    dark/mid/bright G: {:.6} / {:.6} / {:.6}",
-        ds.mean_delta_dark[1], ds.mean_delta_mid[1], ds.mean_delta_bright[1],
-    );
-    println!(
-        "    dark/mid/bright B: {:.6} / {:.6} / {:.6}",
-        ds.mean_delta_dark[2], ds.mean_delta_mid[2], ds.mean_delta_bright[2],
-    );
-    println!(
         "    pixels_differing: {} / {} ({:.1}%)",
         ds.pixels_differing,
         ds.pixel_count,
         ds.pixels_differing as f64 / ds.pixel_count as f64 * 100.0,
     );
     println!(
-        "    histogram[0..4] R: {:.4} {:.4} {:.4} {:.4}",
-        ds.delta_histogram[0][0],
-        ds.delta_histogram[0][1],
-        ds.delta_histogram[0][2],
-        ds.delta_histogram[0][3],
+        "    pixels_differing_by_more_than_1: {}",
+        ds.pixels_differing_by_more_than_1,
     );
     println!(
-        "    classification: TF={:.3} CSM={:.3} CS={:.3} Q={:.3} AC={:.3} PN={:.3} B={:.3} R={:.3} CShift={:.3}",
-        cr.classification.transfer_function,
-        cr.classification.color_space_matrix,
+        "    classification: RE={:.3} CS={:.3} AC={:.3}",
+        cr.classification.rounding_error,
         cr.classification.channel_swap,
-        cr.classification.quantization,
         cr.classification.alpha_compositing,
-        cr.classification.pixel_noise,
-        cr.classification.blur,
-        cr.classification.ringing,
-        cr.classification.color_shift,
     );
 }
 
@@ -177,90 +156,59 @@ fn identical_images_classified_as_identical() {
     println!("  identical: score=100, dominant=Identical");
 }
 
-// ─── Transfer function errors ──────────────────────────────────────────
+// ─── Transfer function errors (no longer detected — Unclassified) ──────
 
 #[test]
-fn gamma_22_detected_as_transfer_function() {
+fn gamma_22_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_gamma22.png");
     print_delta_stats("gradient → gamma22", &cr);
 
-    let ds = &cr.delta_stats;
-    // Gamma error: smooth nonlinearity, delta is function of src value
-    let nonlinearity = (0..3)
-        .map(|c| {
-            let avg = (ds.mean_delta_dark[c] + ds.mean_delta_bright[c]) / 2.0;
-            (ds.mean_delta_mid[c] - avg).abs()
-        })
-        .fold(0.0f64, f64::max);
-    assert!(
-        nonlinearity > 0.01,
-        "gamma error should show nonlinearity > 0.01, got {nonlinearity:.6}",
-    );
-    assert!(
-        cr.classification.transfer_function > 0.1,
-        "gamma error should have TF confidence > 0.1, got {:.3}",
-        cr.classification.transfer_function,
-    );
+    // Gamma errors produce nonlinear deltas but we no longer offer TF classification
+    // because real-world validation showed 0/5 correct (all false positives).
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::TransferFunction,
-        "gamma 2.2 dominant should be TransferFunction, got {:?}",
+        ErrorCategory::Unclassified,
+        "gamma 2.2 should be Unclassified (TF detector removed), got {:?}",
         cr.classification.dominant,
     );
 }
 
 #[test]
-fn gamma_18_detected_as_transfer_function() {
+fn gamma_18_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_gamma18.png");
     print_delta_stats("gradient → gamma18", &cr);
-    assert!(
-        cr.classification.transfer_function > 0.1,
-        "gamma 1.8 should detect TF, got {:.3}",
-        cr.classification.transfer_function,
-    );
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::TransferFunction,
-        "gamma 1.8 dominant should be TransferFunction, got {:?}",
+        ErrorCategory::Unclassified,
+        "gamma 1.8 should be Unclassified (TF detector removed), got {:?}",
         cr.classification.dominant,
     );
 }
 
 #[test]
-fn double_srgb_detected_as_transfer_function() {
+fn double_srgb_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_double_srgb.png");
     print_delta_stats("gradient → double_srgb", &cr);
-    assert!(
-        cr.classification.transfer_function > 0.1,
-        "double sRGB should detect TF, got {:.3}",
-        cr.classification.transfer_function,
-    );
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::TransferFunction,
-        "double sRGB dominant should be TransferFunction, got {:?}",
+        ErrorCategory::Unclassified,
+        "double sRGB should be Unclassified (TF detector removed), got {:?}",
         cr.classification.dominant,
     );
 }
 
 #[test]
-fn linear_as_srgb_detected_as_transfer_function() {
+fn linear_as_srgb_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_linear_as_srgb.png");
     print_delta_stats("gradient → linear_as_srgb", &cr);
-    // This is a strong gamma error (too dark)
     assert!(
         cr.delta_stats.max_abs_delta.iter().any(|d| *d > 0.1),
         "linear_as_srgb should have large max delta",
     );
-    assert!(
-        cr.classification.transfer_function > 0.1,
-        "linear_as_srgb should detect TF, got {:.3}",
-        cr.classification.transfer_function,
-    );
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::TransferFunction,
-        "linear_as_srgb dominant should be TransferFunction, got {:?}",
+        ErrorCategory::Unclassified,
+        "linear_as_srgb should be Unclassified (TF detector removed), got {:?}",
         cr.classification.dominant,
     );
 }
@@ -318,44 +266,41 @@ fn cbcr_swap_has_channel_asymmetry() {
 // ─── Bit depth / quantization ──────────────────────────────────────────
 
 #[test]
-fn truncate_lsb_detected_as_quantization() {
+fn truncate_lsb_detected_as_rounding_error() {
     let cr = classify_rgb("gradient.png", "gradient_truncate.png");
     print_delta_stats("gradient → truncate", &cr);
 
     let ds = &cr.delta_stats;
-    // ~50% of pixels should differ by exactly 1
-    let frac_1 = (0..3)
-        .map(|c| ds.delta_histogram[c][1])
-        .fold(0.0f64, f64::max);
-    assert!(
-        frac_1 > 0.3,
-        "truncation should have ~50% in bucket[1], max frac_1={frac_1:.4}",
-    );
     // Max delta should be <= 1/255
     let max_d = ds.max_abs_delta.iter().copied().fold(0.0f64, f64::max);
     assert!(
         max_d < 2.0 / 255.0,
         "truncation max delta should be ~1/255, got {max_d:.6}",
     );
-    assert!(
-        cr.classification.quantization > 0.3,
-        "truncation should be classified as quantization, got {:.3}",
-        cr.classification.quantization,
+    // No pixel differs by more than 1 — provably off-by-1
+    assert_eq!(
+        ds.pixels_differing_by_more_than_1, 0,
+        "truncation should have zero pixels differing by more than 1",
+    );
+    assert_eq!(
+        cr.classification.rounding_error, 1.0,
+        "truncation should have rounding_error confidence = 1.0, got {:.3}",
+        cr.classification.rounding_error,
     );
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::Quantization,
-        "truncation dominant should be Quantization, got {:?}",
+        ErrorCategory::RoundingError,
+        "truncation dominant should be RoundingError, got {:?}",
         cr.classification.dominant,
     );
 }
 
 #[test]
-fn depth4_shows_quantization_pattern() {
+fn depth4_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_depth4.png");
     print_delta_stats("gradient → depth4", &cr);
 
-    // 4-bit quantization: max delta up to 8/255
+    // 4-bit quantization: max delta up to 8/255, too large for RoundingError
     let max_d = cr
         .delta_stats
         .max_abs_delta
@@ -366,14 +311,20 @@ fn depth4_shows_quantization_pattern() {
         max_d > 0.01 && max_d < 0.1,
         "depth4 max delta should be moderate, got {max_d:.4}",
     );
+    assert_eq!(
+        cr.classification.dominant,
+        ErrorCategory::Unclassified,
+        "depth4 should be Unclassified (max_delta > 3/255), got {:?}",
+        cr.classification.dominant,
+    );
 }
 
 #[test]
-fn depth2_shows_heavy_quantization() {
+fn depth2_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_depth2.png");
     print_delta_stats("gradient → depth2", &cr);
 
-    // 2-bit quantization: very heavy posterization
+    // 2-bit quantization: very heavy posterization, well beyond rounding
     let max_d = cr
         .delta_stats
         .max_abs_delta
@@ -384,21 +335,42 @@ fn depth2_shows_heavy_quantization() {
         max_d > 0.05,
         "depth2 should have large max delta, got {max_d:.4}",
     );
+    assert_eq!(
+        cr.classification.dominant,
+        ErrorCategory::Unclassified,
+        "depth2 should be Unclassified (max_delta >> 3/255), got {:?}",
+        cr.classification.dominant,
+    );
 }
 
 #[test]
-fn expand256_shows_subtle_quantization() {
+fn expand256_classified_correctly() {
     let cr = classify_rgb("gradient.png", "gradient_expand256.png");
     print_delta_stats("gradient → expand256", &cr);
 
     // expand256: very subtle error, delta proportional to value
     let ds = &cr.delta_stats;
     let max_d = ds.max_abs_delta.iter().copied().fold(0.0f64, f64::max);
-    // Should be very small
     assert!(
         max_d < 5.0 / 255.0,
         "expand256 max delta should be small, got {max_d:.6}",
     );
+    // If max_delta ≤ 3/255, should be RoundingError; otherwise Unclassified
+    if max_d <= 3.0 / 255.0 {
+        assert_eq!(
+            cr.classification.dominant,
+            ErrorCategory::RoundingError,
+            "expand256 with max_delta ≤ 3/255 should be RoundingError, got {:?}",
+            cr.classification.dominant,
+        );
+    } else {
+        assert_eq!(
+            cr.classification.dominant,
+            ErrorCategory::Unclassified,
+            "expand256 with max_delta > 3/255 should be Unclassified, got {:?}",
+            cr.classification.dominant,
+        );
+    }
 }
 
 // ─── Color space / ICC matrix ──────────────────────────────────────────
@@ -531,55 +503,31 @@ fn wrong_bg_black_detected() {
     );
 }
 
-// ─── Negative controls (noise) ─────────────────────────────────────────
+// ─── Noise (no longer detected — Unclassified) ─────────────────────────
 
 #[test]
-fn low_noise_not_transfer_function() {
+fn low_noise_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_noise_low.png");
     print_delta_stats("gradient → noise_low", &cr);
 
-    // Noise should have low nonlinearity
-    let ds = &cr.delta_stats;
-    let nonlinearity = (0..3)
-        .map(|c| {
-            let avg = (ds.mean_delta_dark[c] + ds.mean_delta_bright[c]) / 2.0;
-            (ds.mean_delta_mid[c] - avg).abs()
-        })
-        .fold(0.0f64, f64::max);
-    println!("    nonlinearity: {nonlinearity:.6}");
-    // Noise should NOT be classified as transfer function
-    assert!(
-        cr.classification.transfer_function < cr.classification.pixel_noise
-            || cr.classification.transfer_function < 0.3,
-        "noise should not be classified as TF: TF={:.3}, PN={:.3}",
-        cr.classification.transfer_function,
-        cr.classification.pixel_noise,
-    );
+    // Noise detector removed — no defensible signature for random noise
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::PixelNoise,
-        "low noise dominant should be PixelNoise, got {:?}",
+        ErrorCategory::Unclassified,
+        "low noise should be Unclassified (noise detector removed), got {:?}",
         cr.classification.dominant,
     );
 }
 
 #[test]
-fn high_noise_classified_as_noise() {
+fn high_noise_is_unclassified() {
     let cr = classify_rgb("gradient.png", "gradient_noise_high.png");
     print_delta_stats("gradient → noise_high", &cr);
 
-    let ds = &cr.delta_stats;
-    // High stddev/max ratio suggests random noise
-    let max_d = ds.max_abs_delta.iter().copied().fold(0.0f64, f64::max);
-    let max_stddev = ds.stddev_delta.iter().copied().fold(0.0f64, f64::max);
-    if max_d > 0.01 {
-        let ratio = max_stddev / max_d;
-        println!("    stddev/max ratio: {ratio:.4}");
-    }
     assert_eq!(
         cr.classification.dominant,
-        ErrorCategory::PixelNoise,
-        "high noise dominant should be PixelNoise, got {:?}",
+        ErrorCategory::Unclassified,
+        "high noise should be Unclassified (noise detector removed), got {:?}",
         cr.classification.dominant,
     );
 }
@@ -652,11 +600,11 @@ fn flatten_over_black_vs_white() {
 // ─── Round half up ────────────────────────────────────────────────────
 
 #[test]
-fn round_half_up_is_subtle() {
+fn round_half_up_detected_as_rounding_error() {
     let cr = classify_rgb("gradient.png", "gradient_round_half_up.png");
     print_delta_stats("gradient → round_half_up", &cr);
 
-    // Should be very subtle quantization-like error
+    // Off-by-1 rounding: max delta ≤ 1/255, zero pixels > 1 delta
     let max_d = cr
         .delta_stats
         .max_abs_delta
@@ -666,6 +614,12 @@ fn round_half_up_is_subtle() {
     assert!(
         max_d <= 2.0 / 255.0,
         "round_half_up max delta should be tiny, got {max_d:.6}",
+    );
+    assert_eq!(
+        cr.classification.dominant,
+        ErrorCategory::RoundingError,
+        "round_half_up should be RoundingError, got {:?}",
+        cr.classification.dominant,
     );
 }
 

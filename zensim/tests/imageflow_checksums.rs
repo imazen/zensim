@@ -146,7 +146,7 @@ fn imageflow_checksum_analysis() {
     writeln!(
         tsv,
         "commit\tchange_type\ttest_name\tscore\traw_distance\tdominant_category\tconfidence\t\
-         tf\tcsm\tswap\tquant\talpha\tnoise\tblur\tringing\tcolor_shift\t\
+         rounding_error\tswap\talpha\t\
          max_abs_delta_r\tmax_abs_delta_g\tmax_abs_delta_b\t\
          frac_identical\tfrac_diff_gt1\t\
          mean_delta_r\tmean_delta_g\tmean_delta_b\t\
@@ -265,7 +265,7 @@ fn imageflow_checksum_analysis() {
             writeln!(
                 tsv,
                 "{}\t{}\t{}\t{:.2}\t{:.6}\t{:?}\t{:.3}\t\
-                 {:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t\
+                 {:.3}\t{:.3}\t{:.3}\t\
                  {:.4}\t{:.4}\t{:.4}\t\
                  {:.4}\t{:.4}\t\
                  {:.6}\t{:.6}\t{:.6}\t\
@@ -277,15 +277,9 @@ fn imageflow_checksum_analysis() {
                 result.result.raw_distance,
                 ec.dominant,
                 ec.confidence,
-                ec.transfer_function,
-                ec.color_space_matrix,
+                ec.rounding_error,
                 ec.channel_swap,
-                ec.quantization,
                 ec.alpha_compositing,
-                ec.pixel_noise,
-                ec.blur,
-                ec.ringing,
-                ec.color_shift,
                 ds.max_abs_delta[0],
                 ds.max_abs_delta[1],
                 ds.max_abs_delta[2],
