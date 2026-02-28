@@ -120,8 +120,8 @@ fn hardcoded_reference_scores() {
     );
 }
 
-/// All 6 PixelFormat variants produce equivalent scores.
-/// sRGB↔f32: ±0.15, same-encoding reorder: ±0.01.
+/// All PixelFormat variants produce equivalent scores.
+/// sRGB↔f32: ±0.15, same-encoding reorder: ±0.01, f16: ±0.5.
 #[test]
 fn pixel_format_equivalence() {
     const W: usize = 128;
@@ -165,52 +165,22 @@ fn pixel_format_equivalence() {
             tolerance: 0.01,
         },
         FormatTest {
-            name: "LinearF32Rgb",
-            format: PixelFormat::LinearF32Rgb,
-            converter: to_linear_f32_rgb,
-            tolerance: 0.15,
-        },
-        FormatTest {
-            name: "LinearF32Rgba",
-            format: PixelFormat::LinearF32Rgba,
-            converter: to_linear_f32_rgba,
-            tolerance: 0.15,
-        },
-        FormatTest {
-            name: "LinearF32Bgra",
-            format: PixelFormat::LinearF32Bgra,
-            converter: to_linear_f32_bgra,
-            tolerance: 0.15,
-        },
-        FormatTest {
-            name: "Srgb16Rgb",
-            format: PixelFormat::Srgb16Rgb,
-            converter: to_srgb16_rgb,
-            tolerance: 0.01,
-        },
-        FormatTest {
             name: "Srgb16Rgba",
             format: PixelFormat::Srgb16Rgba,
             converter: to_srgb16_rgba,
             tolerance: 0.01,
         },
         FormatTest {
-            name: "LinearF16Rgb",
-            format: PixelFormat::LinearF16Rgb,
-            converter: to_linear_f16_rgb,
+            name: "SrgbF16Rgba",
+            format: PixelFormat::SrgbF16Rgba,
+            converter: to_srgb_f16_rgba,
             tolerance: 0.5,
         },
         FormatTest {
-            name: "LinearF16Rgba",
-            format: PixelFormat::LinearF16Rgba,
-            converter: to_linear_f16_rgba,
-            tolerance: 0.5,
-        },
-        FormatTest {
-            name: "LinearF16Bgra",
-            format: PixelFormat::LinearF16Bgra,
-            converter: to_linear_f16_bgra,
-            tolerance: 0.5,
+            name: "LinearF32Rgba",
+            format: PixelFormat::LinearF32Rgba,
+            converter: to_linear_f32_rgba,
+            tolerance: 0.15,
         },
     ];
 

@@ -182,24 +182,6 @@ pub fn to_srgb8_bgra(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize)
     (buf, stride)
 }
 
-pub fn to_linear_f32_rgb(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
-    let stride = w * 12;
-    let mut buf = vec![0u8; h * stride];
-    for y in 0..h {
-        for x in 0..w {
-            let p = pixels[y * w + x];
-            let off = y * stride + x * 12;
-            let r = srgb_to_linear(p[0]);
-            let g = srgb_to_linear(p[1]);
-            let b = srgb_to_linear(p[2]);
-            buf[off..off + 4].copy_from_slice(&r.to_ne_bytes());
-            buf[off + 4..off + 8].copy_from_slice(&g.to_ne_bytes());
-            buf[off + 8..off + 12].copy_from_slice(&b.to_ne_bytes());
-        }
-    }
-    (buf, stride)
-}
-
 pub fn to_linear_f32_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
     let stride = w * 16;
     let mut buf = vec![0u8; h * stride];
@@ -215,45 +197,6 @@ pub fn to_linear_f32_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, u
             buf[off + 4..off + 8].copy_from_slice(&g.to_ne_bytes());
             buf[off + 8..off + 12].copy_from_slice(&b.to_ne_bytes());
             buf[off + 12..off + 16].copy_from_slice(&a.to_ne_bytes());
-        }
-    }
-    (buf, stride)
-}
-
-pub fn to_linear_f32_bgra(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
-    let stride = w * 16;
-    let mut buf = vec![0u8; h * stride];
-    for y in 0..h {
-        for x in 0..w {
-            let p = pixels[y * w + x];
-            let off = y * stride + x * 16;
-            let r = srgb_to_linear(p[0]);
-            let g = srgb_to_linear(p[1]);
-            let b = srgb_to_linear(p[2]);
-            let a: f32 = 1.0;
-            buf[off..off + 4].copy_from_slice(&b.to_ne_bytes()); // B
-            buf[off + 4..off + 8].copy_from_slice(&g.to_ne_bytes()); // G
-            buf[off + 8..off + 12].copy_from_slice(&r.to_ne_bytes()); // R
-            buf[off + 12..off + 16].copy_from_slice(&a.to_ne_bytes()); // A
-        }
-    }
-    (buf, stride)
-}
-
-pub fn to_srgb16_rgb(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
-    let stride = w * 6;
-    let mut buf = vec![0u8; h * stride];
-    for y in 0..h {
-        for x in 0..w {
-            let p = pixels[y * w + x];
-            let off = y * stride + x * 6;
-            // Expand u8 → u16: val * 257 (exact round-trip: 0→0, 128→32896, 255→65535)
-            let r = (p[0] as u16) * 257;
-            let g = (p[1] as u16) * 257;
-            let b = (p[2] as u16) * 257;
-            buf[off..off + 2].copy_from_slice(&r.to_ne_bytes());
-            buf[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes());
-            buf[off + 4..off + 6].copy_from_slice(&b.to_ne_bytes());
         }
     }
     (buf, stride)
@@ -279,59 +222,23 @@ pub fn to_srgb16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize
     (buf, stride)
 }
 
-pub fn to_linear_f16_rgb(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
-    let stride = w * 6;
-    let mut buf = vec![0u8; h * stride];
-    for y in 0..h {
-        for x in 0..w {
-            let p = pixels[y * w + x];
-            let off = y * stride + x * 6;
-            let r = half::f16::from_f32(srgb_to_linear(p[0]));
-            let g = half::f16::from_f32(srgb_to_linear(p[1]));
-            let b = half::f16::from_f32(srgb_to_linear(p[2]));
-            buf[off..off + 2].copy_from_slice(&r.to_ne_bytes());
-            buf[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes());
-            buf[off + 4..off + 6].copy_from_slice(&b.to_ne_bytes());
-        }
-    }
-    (buf, stride)
-}
-
-pub fn to_linear_f16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
+/// sRGB f16 RGBA: stores sRGB-space values as f16 (not linear).
+pub fn to_srgb_f16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
     let stride = w * 8;
     let mut buf = vec![0u8; h * stride];
     for y in 0..h {
         for x in 0..w {
             let p = pixels[y * w + x];
             let off = y * stride + x * 8;
-            let r = half::f16::from_f32(srgb_to_linear(p[0]));
-            let g = half::f16::from_f32(srgb_to_linear(p[1]));
-            let b = half::f16::from_f32(srgb_to_linear(p[2]));
+            // Store sRGB values (not linear) — SrgbF16Rgba does TRC decode internally
+            let r = half::f16::from_f32(p[0] as f32 / 255.0);
+            let g = half::f16::from_f32(p[1] as f32 / 255.0);
+            let b = half::f16::from_f32(p[2] as f32 / 255.0);
             let a = half::f16::from_f32(1.0);
             buf[off..off + 2].copy_from_slice(&r.to_ne_bytes());
             buf[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes());
             buf[off + 4..off + 6].copy_from_slice(&b.to_ne_bytes());
             buf[off + 6..off + 8].copy_from_slice(&a.to_ne_bytes());
-        }
-    }
-    (buf, stride)
-}
-
-pub fn to_linear_f16_bgra(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
-    let stride = w * 8;
-    let mut buf = vec![0u8; h * stride];
-    for y in 0..h {
-        for x in 0..w {
-            let p = pixels[y * w + x];
-            let off = y * stride + x * 8;
-            let r = half::f16::from_f32(srgb_to_linear(p[0]));
-            let g = half::f16::from_f32(srgb_to_linear(p[1]));
-            let b = half::f16::from_f32(srgb_to_linear(p[2]));
-            let a = half::f16::from_f32(1.0);
-            buf[off..off + 2].copy_from_slice(&b.to_ne_bytes()); // B
-            buf[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes()); // G
-            buf[off + 4..off + 6].copy_from_slice(&r.to_ne_bytes()); // R
-            buf[off + 6..off + 8].copy_from_slice(&a.to_ne_bytes()); // A
         }
     }
     (buf, stride)

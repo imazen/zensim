@@ -22,7 +22,7 @@ training = []
 imgref = ["dep:imgref", "dep:rgb"]
 ## Enable ImageSource impls for zencodec_types_api::PixelSlice and PixelBuffer.
 zencodec-types = ["dep:zencodec-types"]
-## Enable LinearF16 pixel formats (requires `half` crate for IEEE 754 half-precision).
+## Enable SrgbF16Rgba pixel format (requires `half` crate for IEEE 754 half-precision).
 f16 = ["dep:half"]
 
 [dependencies]

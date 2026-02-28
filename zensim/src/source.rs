@@ -6,7 +6,7 @@
 /// Pixel format describing the channel layout, bit depth, and transfer function.
 ///
 /// All formats are converted to linear RGB internally before XYB color space conversion.
-/// Alpha-bearing formats are composited over a checkerboard in linear light space.
+/// Alpha-bearing formats are composited according to their [`AlphaMode`].
 ///
 /// The choice of format affects only the conversion path to linear RGB — once in XYB,
 /// the metric computation is identical. Scores for the same image content should be
@@ -16,34 +16,22 @@
 pub enum PixelFormat {
     /// sRGB 8-bit RGB. 3 bytes per pixel: `[R, G, B]`.
     Srgb8Rgb,
-    /// sRGB 8-bit RGBA with straight alpha. 4 bytes per pixel: `[R, G, B, A]`.
+    /// sRGB 8-bit RGBA. 4 bytes per pixel: `[R, G, B, A]`.
+    /// Alpha interpretation is determined by [`AlphaMode`].
     Srgb8Rgba,
-    /// sRGB 8-bit BGRA with straight alpha. 4 bytes per pixel: `[B, G, R, A]`.
+    /// sRGB 8-bit BGRA. 4 bytes per pixel: `[B, G, R, A]`.
     /// Common on Windows/DirectX surfaces.
+    /// Alpha interpretation is determined by [`AlphaMode`].
     Srgb8Bgra,
-    /// Linear light 32-bit float RGB. 12 bytes per pixel: `[R, G, B]` as `f32`.
-    /// Values in [0.0, 1.0] for standard dynamic range.
-    LinearF32Rgb,
-    /// Linear light 32-bit float RGBA with straight alpha. 16 bytes per pixel.
+    /// sRGB 16-bit RGBA. 8 bytes per pixel: `[R, G, B, A]` as `u16` (0-65535).
+    /// Used by PNG 16-bit, TIFF, and scientific imaging pipelines.
+    Srgb16Rgba,
+    /// sRGB 16-bit float (IEEE 754 half-precision) RGBA. 8 bytes per pixel.
+    /// `[R, G, B, A]` as `f16` with sRGB transfer function. Requires the `f16` feature.
+    SrgbF16Rgba,
+    /// Linear light 32-bit float RGBA. 16 bytes per pixel.
     /// `[R, G, B, A]` as `f32`.
     LinearF32Rgba,
-    /// Linear light 32-bit float BGRA with straight alpha. 16 bytes per pixel.
-    /// `[B, G, R, A]` as `f32`. Common in GPU pipelines.
-    LinearF32Bgra,
-    /// sRGB 16-bit RGB. 6 bytes per pixel: `[R, G, B]` as `u16` (0-65535).
-    /// Used by PNG 16-bit, TIFF, and scientific imaging pipelines.
-    Srgb16Rgb,
-    /// sRGB 16-bit RGBA with straight alpha. 8 bytes per pixel: `[R, G, B, A]` as `u16`.
-    Srgb16Rgba,
-    /// Linear light 16-bit float (IEEE 754 half-precision) RGB. 6 bytes per pixel.
-    /// `[R, G, B]` as `f16`. Requires the `f16` feature.
-    LinearF16Rgb,
-    /// Linear light 16-bit float RGBA with straight alpha. 8 bytes per pixel.
-    /// `[R, G, B, A]` as `f16`. Requires the `f16` feature.
-    LinearF16Rgba,
-    /// Linear light 16-bit float BGRA with straight alpha. 8 bytes per pixel.
-    /// `[B, G, R, A]` as `f16`. Common in GPU pipelines. Requires the `f16` feature.
-    LinearF16Bgra,
 }
 
 impl PixelFormat {
@@ -53,26 +41,46 @@ impl PixelFormat {
         match self {
             Self::Srgb8Rgb => 3,
             Self::Srgb8Rgba | Self::Srgb8Bgra => 4,
-            Self::Srgb16Rgb | Self::LinearF16Rgb => 6,
-            Self::Srgb16Rgba | Self::LinearF16Rgba | Self::LinearF16Bgra => 8,
-            Self::LinearF32Rgb => 12,
-            Self::LinearF32Rgba | Self::LinearF32Bgra => 16,
+            Self::Srgb16Rgba | Self::SrgbF16Rgba => 8,
+            Self::LinearF32Rgba => 16,
         }
     }
 
     /// Whether this format has an alpha channel.
     #[inline]
     pub fn has_alpha(self) -> bool {
-        matches!(
-            self,
-            Self::Srgb8Rgba
-                | Self::Srgb8Bgra
-                | Self::Srgb16Rgba
-                | Self::LinearF32Rgba
-                | Self::LinearF32Bgra
-                | Self::LinearF16Rgba
-                | Self::LinearF16Bgra
-        )
+        !matches!(self, Self::Srgb8Rgb)
+    }
+}
+
+/// Alpha channel interpretation.
+///
+/// Controls how the alpha channel is handled during compositing.
+/// Formats without an alpha channel (e.g., `Srgb8Rgb`) ignore this setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AlphaMode {
+    /// Alpha channel is opaque (ignored). Equivalent to RGBX/BGRX.
+    /// No checkerboard compositing is performed.
+    Opaque,
+    /// Alpha interpretation unknown. Treated as [`Straight`](AlphaMode::Straight).
+    #[default]
+    Unknown,
+    /// Unassociated / straight alpha.
+    /// Compositing formula: `out = src * a + bg * (1-a)`
+    Straight,
+    /// Associated / premultiplied alpha.
+    /// Compositing formula: `out = src + bg * (1-a)` (src already has alpha baked in).
+    /// For sRGB inputs, R/G/B channels are linearized first, then the premul formula
+    /// is applied (alpha is always linear).
+    Premultiplied,
+}
+
+impl AlphaMode {
+    /// Whether this mode uses straight alpha compositing.
+    /// `Unknown` is treated as straight for backwards compatibility.
+    #[inline]
+    pub fn is_straight(self) -> bool {
+        matches!(self, Self::Unknown | Self::Straight)
     }
 }
 
@@ -87,6 +95,8 @@ pub trait ImageSource: Sync {
     fn height(&self) -> usize;
     /// Pixel format (layout, bit depth, transfer function).
     fn pixel_format(&self) -> PixelFormat;
+    /// Alpha channel interpretation.
+    fn alpha_mode(&self) -> AlphaMode;
     /// Raw bytes for row `y`. Length must be at least `width() * pixel_format().bytes_per_pixel()`.
     fn row_bytes(&self, y: usize) -> &[u8];
 }
@@ -134,6 +144,10 @@ impl ImageSource for RgbSlice<'_> {
         PixelFormat::Srgb8Rgb
     }
     #[inline]
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Opaque
+    }
+    #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
         let start = y * self.width;
         let row = &self.data[start..start + self.width];
@@ -148,10 +162,14 @@ pub struct RgbaSlice<'a> {
     data: &'a [[u8; 4]],
     width: usize,
     height: usize,
+    alpha_mode: AlphaMode,
 }
 
 impl<'a> RgbaSlice<'a> {
     /// Create a new `RgbaSlice` from contiguous `[R,G,B,A]` pixels.
+    ///
+    /// Defaults to [`AlphaMode::Straight`]. Use [`with_alpha_mode`](Self::with_alpha_mode)
+    /// for explicit control.
     ///
     /// # Panics
     ///
@@ -167,6 +185,32 @@ impl<'a> RgbaSlice<'a> {
             data,
             width,
             height,
+            alpha_mode: AlphaMode::Straight,
+        }
+    }
+
+    /// Create a new `RgbaSlice` with an explicit alpha mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len() < width * height`.
+    pub fn with_alpha_mode(
+        data: &'a [[u8; 4]],
+        width: usize,
+        height: usize,
+        alpha_mode: AlphaMode,
+    ) -> Self {
+        assert!(
+            data.len() >= width * height,
+            "RgbaSlice: data length {} < width*height {}",
+            data.len(),
+            width * height,
+        );
+        Self {
+            data,
+            width,
+            height,
+            alpha_mode,
         }
     }
 }
@@ -183,6 +227,10 @@ impl ImageSource for RgbaSlice<'_> {
     #[inline]
     fn pixel_format(&self) -> PixelFormat {
         PixelFormat::Srgb8Rgba
+    }
+    #[inline]
+    fn alpha_mode(&self) -> AlphaMode {
+        self.alpha_mode
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
@@ -203,6 +251,7 @@ pub struct StridedBytes<'a> {
     height: usize,
     stride: usize,
     pixel_format: PixelFormat,
+    alpha_mode: AlphaMode,
 }
 
 impl<'a> StridedBytes<'a> {
@@ -210,6 +259,9 @@ impl<'a> StridedBytes<'a> {
     ///
     /// `stride` is the byte distance between the start of consecutive rows.
     /// Must be at least `width * pixel_format.bytes_per_pixel()`.
+    ///
+    /// Defaults to [`AlphaMode::Unknown`]. Use [`with_alpha_mode`](Self::with_alpha_mode)
+    /// for explicit control.
     ///
     /// # Panics
     ///
@@ -220,6 +272,22 @@ impl<'a> StridedBytes<'a> {
         height: usize,
         stride: usize,
         pixel_format: PixelFormat,
+    ) -> Self {
+        Self::with_alpha_mode(data, width, height, stride, pixel_format, AlphaMode::Unknown)
+    }
+
+    /// Create a new `StridedBytes` with an explicit alpha mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics if stride is too small or data is too short.
+    pub fn with_alpha_mode(
+        data: &'a [u8],
+        width: usize,
+        height: usize,
+        stride: usize,
+        pixel_format: PixelFormat,
+        alpha_mode: AlphaMode,
     ) -> Self {
         let bpp = pixel_format.bytes_per_pixel();
         let min_stride = width * bpp;
@@ -244,6 +312,7 @@ impl<'a> StridedBytes<'a> {
             height,
             stride,
             pixel_format,
+            alpha_mode,
         }
     }
 }
@@ -260,6 +329,10 @@ impl ImageSource for StridedBytes<'_> {
     #[inline]
     fn pixel_format(&self) -> PixelFormat {
         self.pixel_format
+    }
+    #[inline]
+    fn alpha_mode(&self) -> AlphaMode {
+        self.alpha_mode
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
@@ -290,6 +363,10 @@ mod imgref_impls {
             PixelFormat::Srgb8Rgb
         }
         #[inline]
+        fn alpha_mode(&self) -> AlphaMode {
+            AlphaMode::Opaque
+        }
+        #[inline]
         fn row_bytes(&self, y: usize) -> &[u8] {
             let stride = imgref::Img::stride(self); // pixels
             let buf = imgref::Img::buf(self);
@@ -311,6 +388,10 @@ mod imgref_impls {
         #[inline]
         fn pixel_format(&self) -> PixelFormat {
             PixelFormat::Srgb8Rgba
+        }
+        #[inline]
+        fn alpha_mode(&self) -> AlphaMode {
+            AlphaMode::Unknown
         }
         #[inline]
         fn row_bytes(&self, y: usize) -> &[u8] {
@@ -344,14 +425,8 @@ mod zencodec_impls {
             (ChannelType::U8, ChannelLayout::Bgra, TransferFunction::Srgb) => {
                 Some(PixelFormat::Srgb8Bgra)
             }
-            (ChannelType::F32, ChannelLayout::Rgb, TransferFunction::Linear) => {
-                Some(PixelFormat::LinearF32Rgb)
-            }
             (ChannelType::F32, ChannelLayout::Rgba, TransferFunction::Linear) => {
                 Some(PixelFormat::LinearF32Rgba)
-            }
-            (ChannelType::F32, ChannelLayout::Bgra, TransferFunction::Linear) => {
-                Some(PixelFormat::LinearF32Bgra)
             }
             _ => None,
         }
@@ -361,7 +436,7 @@ mod zencodec_impls {
         pixel_format_from_descriptor(desc).unwrap_or_else(|| {
             panic!(
                 "zensim: unsupported pixel format {:?}/{:?}/{:?}. \
-                 Supported: sRGB u8 RGB/RGBA/BGRA, linear f32 RGB/RGBA/BGRA.",
+                 Supported: sRGB u8 RGB/RGBA/BGRA, sRGB u16 RGBA, linear f32 RGBA.",
                 desc.channel_type, desc.layout, desc.transfer,
             )
         })
@@ -379,6 +454,10 @@ mod zencodec_impls {
         #[inline]
         fn pixel_format(&self) -> PixelFormat {
             descriptor_to_pixel_format(PixelSlice::descriptor(self))
+        }
+        #[inline]
+        fn alpha_mode(&self) -> AlphaMode {
+            AlphaMode::Unknown
         }
         #[inline]
         fn row_bytes(&self, y: usize) -> &[u8] {

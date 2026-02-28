@@ -8,20 +8,22 @@ use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
     fused_blur_h_ssim, simd_padded_width,
 };
-#[cfg(feature = "f16")]
-use crate::color::{composite_linear_f16_bgra, composite_linear_f16_rgba};
 use crate::color::{
-    composite_linear_f32_bgra, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
-    composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
-    linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into, srgb_u16_to_linear,
+    composite_linear_f32_rgba, composite_linear_f32_rgba_premul,
+    composite_srgb8_bgra_premul_to_linear, composite_srgb8_bgra_to_linear,
+    composite_srgb8_rgba_premul_to_linear, composite_srgb8_rgba_to_linear,
+    composite_srgb16_rgba_premul_to_linear, composite_srgb16_rgba_to_linear,
+    linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
+#[cfg(feature = "f16")]
+use crate::color::{composite_srgb_f16_rgba_premul_to_linear, composite_srgb_f16_rgba_to_linear};
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
     abs_diff_sum, edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
 };
-use crate::source::{ImageSource, PixelFormat};
+use crate::source::{AlphaMode, ImageSource, PixelFormat};
 use rayon::prelude::*;
 use std::sync::Mutex;
 
@@ -356,6 +358,9 @@ pub(crate) fn convert_source_to_xyb_parallel(
     };
 
     let pixel_format = source.pixel_format();
+    let alpha_mode = source.alpha_mode();
+    let premul = matches!(alpha_mode, AlphaMode::Premultiplied);
+    let opaque = matches!(alpha_mode, AlphaMode::Opaque);
 
     p0_chunks
         .into_par_iter()
@@ -385,139 +390,130 @@ pub(crate) fn convert_source_to_xyb_parallel(
                     );
                 }
                 PixelFormat::Srgb8Rgba => {
-                    // RGBA: linearize, composite in linear space, convert to XYB
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                        composite_srgb8_rgba_to_linear(&rgba_row[..width], y, &mut linear_row);
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
+                    if opaque {
+                        // Opaque: ignore alpha byte, extract RGB directly
+                        let raw_elems = rows * width;
+                        let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                            for &[r, g, b, _a] in &rgba_row[..width] {
+                                rgb_buf.push([r, g, b]);
+                            }
+                        }
+                        srgb_to_positive_xyb_planar_into(
+                            &rgb_buf,
+                            &mut c0[..raw_elems],
+                            &mut c1[..raw_elems],
+                            &mut c2[..raw_elems],
                         );
+                    } else {
+                        let mut linear_row = vec![[0.0f32; 3]; width];
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                            if premul {
+                                composite_srgb8_rgba_premul_to_linear(
+                                    &rgba_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            } else {
+                                composite_srgb8_rgba_to_linear(
+                                    &rgba_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            }
+                            let row_offset = (y - row_start) * width;
+                            linear_to_positive_xyb_planar_into(
+                                &linear_row,
+                                &mut c0[row_offset..row_offset + width],
+                                &mut c1[row_offset..row_offset + width],
+                                &mut c2[row_offset..row_offset + width],
+                            );
+                        }
                     }
                 }
                 PixelFormat::Srgb8Bgra => {
-                    // BGRA: swizzle B↔R, linearize, composite in linear space
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                        composite_srgb8_bgra_to_linear(&bgra_row[..width], y, &mut linear_row);
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
-                        );
-                    }
-                }
-                PixelFormat::LinearF32Rgb => {
-                    // Linear f32 RGB: collect rows, convert directly
-                    let raw_elems = rows * width;
-                    let mut rgb_buf: Vec<[f32; 3]> = Vec::with_capacity(raw_elems);
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        let row: &[[f32; 3]] = bytemuck::cast_slice(row_bytes);
-                        rgb_buf.extend_from_slice(&row[..width]);
-                    }
-                    linear_to_positive_xyb_planar_into(
-                        &rgb_buf,
-                        &mut c0[..raw_elems],
-                        &mut c1[..raw_elems],
-                        &mut c2[..raw_elems],
-                    );
-                }
-                PixelFormat::LinearF32Rgba => {
-                    // Linear f32 RGBA: composite in linear space, convert to XYB
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
-                        composite_linear_f32_rgba(&rgba_row[..width], y, &mut linear_row);
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
-                        );
-                    }
-                }
-                PixelFormat::LinearF32Bgra => {
-                    // Linear f32 BGRA: swizzle B↔R, composite, convert to XYB
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        let bgra_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
-                        composite_linear_f32_bgra(&bgra_row[..width], y, &mut linear_row);
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
-                        );
-                    }
-                }
-                PixelFormat::Srgb16Rgb => {
-                    // sRGB u16 RGB: linearize per-pixel, convert to XYB
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                            let off = x * 6;
-                            let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                            let g = u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                            let b = u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
-                            *pixel = [
-                                srgb_u16_to_linear(r),
-                                srgb_u16_to_linear(g),
-                                srgb_u16_to_linear(b),
-                            ];
+                    if opaque {
+                        let raw_elems = rows * width;
+                        let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                            for &[b, g, r, _a] in &bgra_row[..width] {
+                                rgb_buf.push([r, g, b]);
+                            }
                         }
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
+                        srgb_to_positive_xyb_planar_into(
+                            &rgb_buf,
+                            &mut c0[..raw_elems],
+                            &mut c1[..raw_elems],
+                            &mut c2[..raw_elems],
                         );
+                    } else {
+                        let mut linear_row = vec![[0.0f32; 3]; width];
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
+                            if premul {
+                                composite_srgb8_bgra_premul_to_linear(
+                                    &bgra_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            } else {
+                                composite_srgb8_bgra_to_linear(
+                                    &bgra_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            }
+                            let row_offset = (y - row_start) * width;
+                            linear_to_positive_xyb_planar_into(
+                                &linear_row,
+                                &mut c0[row_offset..row_offset + width],
+                                &mut c1[row_offset..row_offset + width],
+                                &mut c2[row_offset..row_offset + width],
+                            );
+                        }
                     }
                 }
                 PixelFormat::Srgb16Rgba => {
-                    // sRGB u16 RGBA: linearize, composite in linear space
                     let mut linear_row = vec![[0.0f32; 3]; width];
                     for y in row_start..row_end {
                         let row_bytes = source.row_bytes(y);
-                        composite_srgb16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
-                        );
-                    }
-                }
-                #[cfg(feature = "f16")]
-                PixelFormat::LinearF16Rgb => {
-                    // Linear f16 RGB: convert to f32, then to XYB
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                            let off = x * 6;
-                            let r = half::f16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                            let g =
-                                half::f16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                            let b =
-                                half::f16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
-                            *pixel = [r.to_f32(), g.to_f32(), b.to_f32()];
+                        if opaque {
+                            // Opaque: linearize RGB, ignore alpha
+                            for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
+                                let off = x * 8;
+                                let r =
+                                    u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
+                                let g =
+                                    u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
+                                let b =
+                                    u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
+                                *pixel = [
+                                    crate::color::srgb_u16_to_linear(r),
+                                    crate::color::srgb_u16_to_linear(g),
+                                    crate::color::srgb_u16_to_linear(b),
+                                ];
+                            }
+                        } else if premul {
+                            composite_srgb16_rgba_premul_to_linear(
+                                row_bytes,
+                                width,
+                                y,
+                                &mut linear_row,
+                            );
+                        } else {
+                            composite_srgb16_rgba_to_linear(
+                                row_bytes,
+                                width,
+                                y,
+                                &mut linear_row,
+                            );
                         }
                         let row_offset = (y - row_start) * width;
                         linear_to_positive_xyb_planar_into(
@@ -529,12 +525,45 @@ pub(crate) fn convert_source_to_xyb_parallel(
                     }
                 }
                 #[cfg(feature = "f16")]
-                PixelFormat::LinearF16Rgba => {
-                    // Linear f16 RGBA: convert to f32, composite, convert to XYB
+                PixelFormat::SrgbF16Rgba => {
                     let mut linear_row = vec![[0.0f32; 3]; width];
                     for y in row_start..row_end {
                         let row_bytes = source.row_bytes(y);
-                        composite_linear_f16_rgba(row_bytes, width, y, &mut linear_row);
+                        if opaque {
+                            for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
+                                let off = x * 8;
+                                let r = crate::color::srgb_f16_to_linear(
+                                    half::f16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]),
+                                );
+                                let g = crate::color::srgb_f16_to_linear(
+                                    half::f16::from_ne_bytes([
+                                        row_bytes[off + 2],
+                                        row_bytes[off + 3],
+                                    ]),
+                                );
+                                let b = crate::color::srgb_f16_to_linear(
+                                    half::f16::from_ne_bytes([
+                                        row_bytes[off + 4],
+                                        row_bytes[off + 5],
+                                    ]),
+                                );
+                                *pixel = [r, g, b];
+                            }
+                        } else if premul {
+                            composite_srgb_f16_rgba_premul_to_linear(
+                                row_bytes,
+                                width,
+                                y,
+                                &mut linear_row,
+                            );
+                        } else {
+                            composite_srgb_f16_rgba_to_linear(
+                                row_bytes,
+                                width,
+                                y,
+                                &mut linear_row,
+                            );
+                        }
                         let row_offset = (y - row_start) * width;
                         linear_to_positive_xyb_planar_into(
                             &linear_row,
@@ -544,20 +573,50 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         );
                     }
                 }
-                #[cfg(feature = "f16")]
-                PixelFormat::LinearF16Bgra => {
-                    // Linear f16 BGRA: swizzle B↔R, composite, convert to XYB
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        composite_linear_f16_bgra(row_bytes, width, y, &mut linear_row);
-                        let row_offset = (y - row_start) * width;
+                PixelFormat::LinearF32Rgba => {
+                    if opaque {
+                        // Opaque: extract RGB from f32 RGBA, skip alpha
+                        let raw_elems = rows * width;
+                        let mut rgb_buf: Vec<[f32; 3]> = Vec::with_capacity(raw_elems);
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+                            for &[r, g, b, _a] in &rgba_row[..width] {
+                                rgb_buf.push([r, g, b]);
+                            }
+                        }
                         linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
+                            &rgb_buf,
+                            &mut c0[..raw_elems],
+                            &mut c1[..raw_elems],
+                            &mut c2[..raw_elems],
                         );
+                    } else {
+                        let mut linear_row = vec![[0.0f32; 3]; width];
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
+                            if premul {
+                                composite_linear_f32_rgba_premul(
+                                    &rgba_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            } else {
+                                composite_linear_f32_rgba(
+                                    &rgba_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            }
+                            let row_offset = (y - row_start) * width;
+                            linear_to_positive_xyb_planar_into(
+                                &linear_row,
+                                &mut c0[row_offset..row_offset + width],
+                                &mut c1[row_offset..row_offset + width],
+                                &mut c2[row_offset..row_offset + width],
+                            );
+                        }
                     }
                 }
                 // PixelFormat is #[non_exhaustive] so downstream crates need this arm,
@@ -1339,64 +1398,6 @@ fn extract_pixel_rgb_normalized(
             let a = src_bytes[off + 3] as f64 / 255.0;
             (s, d, Some(a))
         }
-        PixelFormat::LinearF32Rgb => {
-            let off = x * 12;
-            let s = [
-                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
-            ];
-            let d = [
-                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
-            ];
-            (s, d, None)
-        }
-        PixelFormat::LinearF32Rgba => {
-            let off = x * 16;
-            let s = [
-                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
-            ];
-            let d = [
-                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
-            ];
-            let a = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
-            (s, d, Some(a))
-        }
-        PixelFormat::LinearF32Bgra => {
-            let off = x * 16;
-            let s = [
-                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64, // R
-                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,  // G
-                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,      // B
-            ];
-            let d = [
-                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
-            ];
-            let a = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
-            (s, d, Some(a))
-        }
-        PixelFormat::Srgb16Rgb => {
-            let off = x * 6;
-            let s = [
-                u16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]) as f64 / 65535.0,
-                u16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]) as f64 / 65535.0,
-                u16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]) as f64 / 65535.0,
-            ];
-            let d = [
-                u16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]) as f64 / 65535.0,
-                u16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]) as f64 / 65535.0,
-                u16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]) as f64 / 65535.0,
-            ];
-            (s, d, None)
-        }
         PixelFormat::Srgb16Rgba => {
             let off = x * 8;
             let s = [
@@ -1412,85 +1413,38 @@ fn extract_pixel_rgb_normalized(
             let a = u16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]) as f64 / 65535.0;
             (s, d, Some(a))
         }
-        PixelFormat::LinearF16Rgb | PixelFormat::LinearF16Rgba | PixelFormat::LinearF16Bgra => {
-            #[cfg(feature = "f16")]
-            {
-                use half::f16;
-                match format {
-                    PixelFormat::LinearF16Rgb => {
-                        let off = x * 6;
-                        let s = [
-                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32()
-                                as f64,
-                        ];
-                        let d = [
-                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32()
-                                as f64,
-                        ];
-                        (s, d, None)
-                    }
-                    PixelFormat::LinearF16Rgba => {
-                        let off = x * 8;
-                        let s = [
-                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32()
-                                as f64,
-                        ];
-                        let d = [
-                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32()
-                                as f64,
-                        ];
-                        let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]])
-                            .to_f32() as f64;
-                        (s, d, Some(a))
-                    }
-                    PixelFormat::LinearF16Bgra => {
-                        let off = x * 8;
-                        let s = [
-                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32()
-                                as f64, // R
-                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32()
-                                as f64, // G
-                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32()
-                                as f64, // B
-                        ];
-                        let d = [
-                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32()
-                                as f64,
-                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32()
-                                as f64,
-                        ];
-                        let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]])
-                            .to_f32() as f64;
-                        (s, d, Some(a))
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            #[cfg(not(feature = "f16"))]
-            {
-                panic!(
-                    "f16 pixel format {:?} requires the 'f16' feature to be enabled",
-                    format
-                );
-            }
+        #[cfg(feature = "f16")]
+        PixelFormat::SrgbF16Rgba => {
+            use half::f16;
+            let off = x * 8;
+            let s = [
+                f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32() as f64,
+                f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32() as f64,
+                f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32() as f64,
+            ];
+            let d = [
+                f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32() as f64,
+                f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
+                f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
+            ];
+            let a =
+                f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
+            (s, d, Some(a))
+        }
+        PixelFormat::LinearF32Rgba => {
+            let off = x * 16;
+            let s = [
+                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            ];
+            let d = [
+                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            ];
+            let a = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
+            (s, d, Some(a))
         }
         #[allow(unreachable_patterns)]
         _ => panic!("unsupported pixel format for delta stats: {:?}", format),
@@ -1811,23 +1765,25 @@ mod tests {
         }
 
         // Convert u8 to linear f32 using the same LUT the sRGB path uses
-        let src_f32: Vec<[f32; 3]> = src_u8
+        let src_f32: Vec<[f32; 4]> = src_u8
             .iter()
             .map(|&[r, g, b]| {
                 [
                     crate::color::srgb_u8_to_linear(r),
                     crate::color::srgb_u8_to_linear(g),
                     crate::color::srgb_u8_to_linear(b),
+                    1.0,
                 ]
             })
             .collect();
-        let dst_f32: Vec<[f32; 3]> = dst_u8
+        let dst_f32: Vec<[f32; 4]> = dst_u8
             .iter()
             .map(|&[r, g, b]| {
                 [
                     crate::color::srgb_u8_to_linear(r),
                     crate::color::srgb_u8_to_linear(g),
                     crate::color::srgb_u8_to_linear(b),
+                    1.0,
                 ]
             })
             .collect();
@@ -1843,22 +1799,24 @@ mod tests {
         let u8_result =
             compute_zensim_streaming(&src_u8_img, &dst_u8_img, &config, &WEIGHTS_GENERAL_V0_2);
 
-        // Linear f32 path via StridedBytes
+        // Linear f32 RGBA path via StridedBytes (opaque: alpha=1.0 ignored)
         let src_f32_bytes: &[u8] = bytemuck::cast_slice(&src_f32);
         let dst_f32_bytes: &[u8] = bytemuck::cast_slice(&dst_f32);
-        let src_f32_img = crate::source::StridedBytes::new(
+        let src_f32_img = crate::source::StridedBytes::with_alpha_mode(
             src_f32_bytes,
             w,
             h,
-            w * 12,
-            crate::source::PixelFormat::LinearF32Rgb,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
         );
-        let dst_f32_img = crate::source::StridedBytes::new(
+        let dst_f32_img = crate::source::StridedBytes::with_alpha_mode(
             dst_f32_bytes,
             w,
             h,
-            w * 12,
-            crate::source::PixelFormat::LinearF32Rgb,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
         );
         let f32_result =
             compute_zensim_streaming(&src_f32_img, &dst_f32_img, &config, &WEIGHTS_GENERAL_V0_2);

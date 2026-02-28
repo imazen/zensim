@@ -101,7 +101,7 @@ pub use metric::{
     ZensimResult, distance_to_score,
 };
 pub use profile::ZensimProfile;
-pub use source::{ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};
+pub use source::{AlphaMode, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};
 
 #[cfg(feature = "zencodec-types")]
 pub use source::pixel_format_from_descriptor;
