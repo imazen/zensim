@@ -40,6 +40,7 @@ pub mod checksum_file;
 pub mod diff_image;
 pub mod display;
 pub mod error;
+pub mod fetch;
 pub mod hasher;
 pub mod manager;
 pub mod testing;

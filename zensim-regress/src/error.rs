@@ -44,6 +44,10 @@ pub enum RegressError {
     /// Zensim metric error during comparison.
     #[error("zensim error: {0}")]
     Zensim(#[from] zensim::ZensimError),
+
+    /// Failed to download a resource.
+    #[error("fetch failed for {url}: {message}")]
+    Fetch { url: String, message: String },
 }
 
 impl RegressError {
