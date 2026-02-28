@@ -537,6 +537,12 @@ pub struct DeltaStats {
     /// Pixels where alpha differs at all. 0 for RGB-only formats.
     pub alpha_pixels_differing: u64,
 
+    // --- Per-channel value histograms (256 bins, quantized to 8-bit) ---
+    /// Source image histogram. `[channel][value]`. R=0, G=1, B=2, A=3.
+    pub src_histogram: [[u64; 256]; 4],
+    /// Distorted image histogram. `[channel][value]`. R=0, G=1, B=2, A=3.
+    pub dst_histogram: [[u64; 256]; 4],
+
     // --- Alpha-stratified stats (only for RGBA/BGRA inputs) ---
     /// Delta stats for fully opaque pixels (A = max).
     pub opaque_stats: Option<AlphaStratifiedStats>,

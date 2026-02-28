@@ -145,6 +145,88 @@ struct ConstraintResult {
     limit: String,
 }
 
+// ─── Channel histograms ─────────────────────────────────────────────────
+
+/// Per-channel pixel value histograms (256 bins, quantized to 8-bit).
+///
+/// For 8-bit inputs, bins map exactly to pixel values 0–255.
+/// For higher bit-depths (16-bit, f32), values are quantized to the
+/// nearest 8-bit equivalent.
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct ChannelHistograms {
+    bins: [[u64; 256]; 4],
+    num_channels: usize,
+}
+
+impl ChannelHistograms {
+    /// Number of channels (3 for RGB, 4 for RGBA).
+    pub fn num_channels(&self) -> usize {
+        self.num_channels
+    }
+
+    /// Histogram bins for the given channel index (0=R, 1=G, 2=B, 3=A).
+    ///
+    /// Returns `None` if `ch` is out of range for this image's format.
+    pub fn channel(&self, ch: usize) -> Option<&[u64; 256]> {
+        if ch < self.num_channels {
+            Some(&self.bins[ch])
+        } else {
+            None
+        }
+    }
+
+    /// Histogram intersection with `other` for a single channel.
+    ///
+    /// Returns 1.0 for identical distributions, 0.0 for completely disjoint.
+    /// This is the standard histogram intersection metric:
+    /// `sum(min(h1[i], h2[i])) / max(sum(h1), sum(h2))`.
+    pub fn intersection(&self, other: &Self, ch: usize) -> f64 {
+        if ch >= self.num_channels || ch >= other.num_channels {
+            return 0.0;
+        }
+        let mut min_sum = 0u64;
+        let mut max_total = 0u64;
+        for i in 0..256 {
+            min_sum += self.bins[ch][i].min(other.bins[ch][i]);
+            max_total += self.bins[ch][i].max(other.bins[ch][i]);
+        }
+        if max_total == 0 {
+            1.0
+        } else {
+            min_sum as f64 / max_total as f64
+        }
+    }
+
+    /// Histogram intersection across all channels. Returns per-channel values.
+    ///
+    /// For RGB: `[R, G, B]`. For RGBA: `[R, G, B, A]`.
+    pub fn intersection_all(&self, other: &Self) -> Vec<f64> {
+        let n = self.num_channels.min(other.num_channels);
+        (0..n).map(|ch| self.intersection(other, ch)).collect()
+    }
+}
+
+impl std::fmt::Debug for ChannelHistograms {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Don't dump 1024 values — just show summary stats
+        let labels = ["R", "G", "B", "A"];
+        f.debug_struct("ChannelHistograms")
+            .field("num_channels", &self.num_channels)
+            .field(
+                "totals",
+                &(0..self.num_channels)
+                    .map(|ch| {
+                        let total: u64 = self.bins[ch].iter().sum();
+                        format!("{}={}", labels[ch], total)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+            .finish()
+    }
+}
+
 /// Result of comparing expected vs actual images against a tolerance.
 ///
 /// Use [`Zensim::check_regression()`] to produce this.
@@ -166,6 +248,8 @@ pub struct RegressionReport {
     identical_channel_fraction: f64,
     alpha_max_delta: u8,
     alpha_pixels_differing: u64,
+    expected_histogram: ChannelHistograms,
+    actual_histogram: ChannelHistograms,
     rounding_bias: Option<RoundingBias>,
     constraint_results: Vec<ConstraintResult>,
 }
@@ -226,6 +310,16 @@ impl RegressionReport {
         self.alpha_pixels_differing
     }
 
+    /// Per-channel value histograms for the expected (source) image.
+    pub fn expected_histogram(&self) -> &ChannelHistograms {
+        &self.expected_histogram
+    }
+
+    /// Per-channel value histograms for the actual (distorted) image.
+    pub fn actual_histogram(&self) -> &ChannelHistograms {
+        &self.actual_histogram
+    }
+
     /// Rounding bias (only when category is RoundingError).
     pub fn rounding_bias(&self) -> Option<&RoundingBias> {
         self.rounding_bias.as_ref()
@@ -249,6 +343,8 @@ impl std::fmt::Debug for RegressionReport {
             )
             .field("alpha_max_delta", &self.alpha_max_delta)
             .field("alpha_pixels_differing", &self.alpha_pixels_differing)
+            .field("expected_histogram", &self.expected_histogram)
+            .field("actual_histogram", &self.actual_histogram)
             .field("rounding_bias", &self.rounding_bias)
             .finish()
     }
@@ -301,6 +397,19 @@ impl std::fmt::Display for RegressionReport {
                 "  {mark} {}: {} (limit: {}).",
                 cr.name, cr.actual, cr.limit
             )?;
+        }
+
+        // Histogram comparison (only show when notable divergence)
+        let hist_match = self.expected_histogram.intersection_all(&self.actual_histogram);
+        let any_divergence = hist_match.iter().any(|&v| v < 0.999);
+        if any_divergence {
+            let labels = ["R", "G", "B", "A"];
+            let parts: Vec<String> = hist_match
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| format!("{}={:.1}%", labels[i], v * 100.0))
+                .collect();
+            writeln!(f, "  Histogram match: {}.", parts.join(" "))?;
         }
 
         // Rounding bias
@@ -466,6 +575,16 @@ fn build_report(
 
     let passed = delta_pass && score_pass && diff_pass && ident_pass && alpha_pass;
 
+    let num_channels = if ds.has_alpha { 4 } else { 3 };
+    let expected_histogram = ChannelHistograms {
+        bins: ds.src_histogram,
+        num_channels,
+    };
+    let actual_histogram = ChannelHistograms {
+        bins: ds.dst_histogram,
+        num_channels,
+    };
+
     RegressionReport {
         passed,
         score: cr.result.score,
@@ -478,6 +597,8 @@ fn build_report(
         identical_channel_fraction,
         alpha_max_delta: ds.alpha_max_delta,
         alpha_pixels_differing: ds.alpha_pixels_differing,
+        expected_histogram,
+        actual_histogram,
         rounding_bias: cr.classification.rounding_bias,
         constraint_results,
     }

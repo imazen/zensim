@@ -1105,6 +1105,10 @@ struct DeltaAccum {
     // Alpha channel delta tracking
     alpha_max_delta: u8,         // max |src_alpha - dst_alpha| in 0-255 units
     alpha_pixels_differing: u64, // pixels where alpha differs at all
+    // Per-channel value histograms (256 bins, 4 channels: R, G, B, A)
+    // Boxed to avoid 16KB on the stack per parallel chunk.
+    src_histogram: Box<[[u64; 256]; 4]>,
+    dst_histogram: Box<[[u64; 256]; 4]>,
     // For alpha-error correlation (Pearson)
     sum_delta_mag: f64,       // sum of per-pixel max(|delta[c]|)
     sum_one_minus_alpha: f64, // sum of (1 - alpha/255)
@@ -1132,6 +1136,8 @@ impl DeltaAccum {
             semi_max_abs: [0.0; 3],
             alpha_max_delta: 0,
             alpha_pixels_differing: 0,
+            src_histogram: Box::new([[0u64; 256]; 4]),
+            dst_histogram: Box::new([[0u64; 256]; 4]),
             sum_delta_mag: 0.0,
             sum_one_minus_alpha: 0.0,
             sum_delta_alpha: 0.0,
@@ -1161,6 +1167,12 @@ impl DeltaAccum {
         self.semi_count += other.semi_count;
         self.alpha_max_delta = self.alpha_max_delta.max(other.alpha_max_delta);
         self.alpha_pixels_differing += other.alpha_pixels_differing;
+        for c in 0..4 {
+            for b in 0..256 {
+                self.src_histogram[c][b] += other.src_histogram[c][b];
+                self.dst_histogram[c][b] += other.dst_histogram[c][b];
+            }
+        }
         self.sum_delta_mag += other.sum_delta_mag;
         self.sum_one_minus_alpha += other.sum_one_minus_alpha;
         self.sum_delta_alpha += other.sum_delta_alpha;
@@ -1234,6 +1246,20 @@ pub(crate) fn compute_delta_stats(
                         if abs_delta > pixel_max_abs_delta {
                             pixel_max_abs_delta = abs_delta;
                         }
+                    }
+
+                    // Per-channel value histograms (quantized to 0-255)
+                    for c in 0..3 {
+                        let sb = (src_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
+                        let db = (dst_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
+                        acc.src_histogram[c][sb] += 1;
+                        acc.dst_histogram[c][db] += 1;
+                    }
+                    if let Some((src_a, dst_a)) = alpha {
+                        let sb = (src_a * 255.0).round().clamp(0.0, 255.0) as usize;
+                        let db = (dst_a * 255.0).round().clamp(0.0, 255.0) as usize;
+                        acc.src_histogram[3][sb] += 1;
+                        acc.dst_histogram[3][db] += 1;
                     }
 
                     acc.pixel_count += 1;
@@ -1486,6 +1512,8 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
         has_alpha,
         alpha_max_delta: acc.alpha_max_delta,
         alpha_pixels_differing: acc.alpha_pixels_differing,
+        src_histogram: *acc.src_histogram,
+        dst_histogram: *acc.dst_histogram,
         opaque_stats,
         semitransparent_stats,
         alpha_error_correlation,
