@@ -1368,12 +1368,7 @@ pub(crate) fn composite_srgb16_rgba_to_linear(
 /// Reads 4 f16 values per pixel from raw bytes (8 bytes/pixel), converts to f32,
 /// then alpha-blends in linear space.
 #[cfg(feature = "f16")]
-pub(crate) fn composite_linear_f16_rgba(
-    row: &[u8],
-    width: usize,
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
+pub(crate) fn composite_linear_f16_rgba(row: &[u8], width: usize, y: usize, out: &mut [[f32; 3]]) {
     use half::f16;
     for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
         let off = x * 8;
@@ -1402,12 +1397,7 @@ pub(crate) fn composite_linear_f16_rgba(
 ///
 /// Swizzles B↔R. Reads 4 f16 values per pixel from raw bytes.
 #[cfg(feature = "f16")]
-pub(crate) fn composite_linear_f16_bgra(
-    row: &[u8],
-    width: usize,
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
+pub(crate) fn composite_linear_f16_bgra(row: &[u8], width: usize, y: usize, out: &mut [[f32; 3]]) {
     use half::f16;
     for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
         let off = x * 8;

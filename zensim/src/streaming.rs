@@ -8,13 +8,13 @@ use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
     fused_blur_h_ssim, simd_padded_width,
 };
+#[cfg(feature = "f16")]
+use crate::color::{composite_linear_f16_bgra, composite_linear_f16_rgba};
 use crate::color::{
     composite_linear_f32_bgra, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
     composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
     linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into, srgb_u16_to_linear,
 };
-#[cfg(feature = "f16")]
-use crate::color::{composite_linear_f16_bgra, composite_linear_f16_rgba};
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
@@ -513,8 +513,10 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                             let off = x * 6;
                             let r = half::f16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
-                            let g = half::f16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
-                            let b = half::f16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
+                            let g =
+                                half::f16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
+                            let b =
+                                half::f16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]);
                             *pixel = [r.to_f32(), g.to_f32(), b.to_f32()];
                         }
                         let row_offset = (y - row_start) * width;
@@ -1183,9 +1185,8 @@ pub(crate) fn compute_delta_stats(
 
                 for x in 0..width {
                     // Extract normalized [0,1] RGB values and optional alpha
-                    let (src_rgb, dst_rgb, alpha) = extract_pixel_rgb_normalized(
-                        src_bytes, dst_bytes, x, pixel_format,
-                    );
+                    let (src_rgb, dst_rgb, alpha) =
+                        extract_pixel_rgb_normalized(src_bytes, dst_bytes, x, pixel_format);
 
                     let mut any_diff = false;
                     let mut any_diff_gt1 = false;
@@ -1214,8 +1215,7 @@ pub(crate) fn compute_delta_stats(
                         }
 
                         // Histogram bucket (in u8 units)
-                        let abs_delta_u8 =
-                            (abs_delta * 255.0).round().min(255.0) as u8;
+                        let abs_delta_u8 = (abs_delta * 255.0).round().min(255.0) as u8;
                         acc.histogram[c][delta_to_bucket(abs_delta_u8)] += 1;
 
                         if abs_delta > 0.5 / 255.0 {
@@ -1268,8 +1268,7 @@ pub(crate) fn compute_delta_stats(
                             acc.sum_delta_mag += pixel_max_abs_delta;
                             acc.sum_one_minus_alpha += one_minus_a;
                             acc.sum_delta_alpha += pixel_max_abs_delta * one_minus_a;
-                            acc.sum_delta_mag_sq +=
-                                pixel_max_abs_delta * pixel_max_abs_delta;
+                            acc.sum_delta_mag_sq += pixel_max_abs_delta * pixel_max_abs_delta;
                             acc.sum_one_minus_alpha_sq += one_minus_a * one_minus_a;
                             acc.alpha_pixel_count += 1;
                         }
@@ -1421,45 +1420,65 @@ fn extract_pixel_rgb_normalized(
                     PixelFormat::LinearF16Rgb => {
                         let off = x * 6;
                         let s = [
-                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32() as f64,
-                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32() as f64,
-                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32() as f64,
+                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32()
+                                as f64,
                         ];
                         let d = [
-                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32() as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
+                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32()
+                                as f64,
                         ];
                         (s, d, None)
                     }
                     PixelFormat::LinearF16Rgba => {
                         let off = x * 8;
                         let s = [
-                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32() as f64,
-                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32() as f64,
-                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32() as f64,
+                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32()
+                                as f64,
                         ];
                         let d = [
-                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32() as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
+                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32()
+                                as f64,
                         ];
-                        let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
+                        let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]])
+                            .to_f32() as f64;
                         (s, d, Some(a))
                     }
                     PixelFormat::LinearF16Bgra => {
                         let off = x * 8;
                         let s = [
-                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32() as f64, // R
-                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32() as f64, // G
-                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32() as f64,     // B
+                            f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32()
+                                as f64, // R
+                            f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32()
+                                as f64, // G
+                            f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32()
+                                as f64, // B
                         ];
                         let d = [
-                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
-                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
-                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32() as f64,
+                            f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32()
+                                as f64,
+                            f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32()
+                                as f64,
                         ];
-                        let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
+                        let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]])
+                            .to_f32() as f64;
                         (s, d, Some(a))
                     }
                     _ => unreachable!(),

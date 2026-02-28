@@ -805,11 +805,7 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
 
     // Sum of buckets 2+ (deltas > 1/255) — measures histogram spread
     let frac_above_1 = (0..3)
-        .map(|ch| {
-            delta_stats.delta_histogram[ch][2..]
-                .iter()
-                .sum::<f64>()
-        })
+        .map(|ch| delta_stats.delta_histogram[ch][2..].iter().sum::<f64>())
         .fold(0.0f64, f64::max);
 
     // === Score each category (specific → general) ===
@@ -822,16 +818,8 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
     // 2. Alpha compositing: opaque/semitransparent stratification or alpha correlation
     if let Some(ref opaque) = delta_stats.opaque_stats {
         if let Some(ref semi) = delta_stats.semitransparent_stats {
-            let opaque_max = opaque
-                .mean_abs_delta
-                .iter()
-                .copied()
-                .fold(0.0f64, f64::max);
-            let semi_mean = semi
-                .mean_abs_delta
-                .iter()
-                .copied()
-                .fold(0.0f64, f64::max);
+            let opaque_max = opaque.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
+            let semi_mean = semi.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
             if opaque_max < 0.01 && semi_mean > 0.02 {
                 c.alpha_compositing = 0.9;
             }
@@ -867,9 +855,7 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
     // 4. Transfer function: nonlinear delta pattern
     // Suppress when channel swap or alpha compositing already explains the error,
     // since those can produce incidental nonlinearity.
-    if nonlinearity > 0.01 && max_delta > 0.03
-        && c.channel_swap < 0.5
-        && c.alpha_compositing < 0.5
+    if nonlinearity > 0.01 && max_delta > 0.03 && c.channel_swap < 0.5 && c.alpha_compositing < 0.5
     {
         c.transfer_function = (nonlinearity * 10.0).min(1.0);
     }

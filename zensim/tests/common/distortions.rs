@@ -4,7 +4,10 @@
 
 /// Truncation: floor(v / 2) * 2. ~50% of pixels off by 1, max delta = 1.
 pub fn truncate_lsb(pixels: &[[u8; 3]]) -> Vec<[u8; 3]> {
-    pixels.iter().map(|p| [p[0] & 0xFE, p[1] & 0xFE, p[2] & 0xFE]).collect()
+    pixels
+        .iter()
+        .map(|p| [p[0] & 0xFE, p[1] & 0xFE, p[2] & 0xFE])
+        .collect()
 }
 
 /// Wrong 8→16→8 expansion: val * 256 / 257 instead of val * 257 / 257.

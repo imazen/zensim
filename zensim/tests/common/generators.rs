@@ -439,8 +439,7 @@ pub fn distort_block_artifacts(src: &[[u8; 3]], w: usize, h: usize) -> Vec<[u8; 
             for y in y0..y1 {
                 for x in x0..x1 {
                     for c in 0..3 {
-                        dst[y * w + x][c] =
-                            ((src[y * w + x][c] as u16 + avg[c] as u16) / 2) as u8;
+                        dst[y * w + x][c] = ((src[y * w + x][c] as u16 + avg[c] as u16) / 2) as u8;
                     }
                 }
             }

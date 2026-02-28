@@ -12,9 +12,7 @@ mod common;
 
 use image::ImageReader;
 use std::path::Path;
-use zensim::{
-    ClassifiedResult, ErrorCategory, RgbSlice, RgbaSlice, Zensim, ZensimProfile,
-};
+use zensim::{ClassifiedResult, ErrorCategory, RgbSlice, RgbaSlice, Zensim, ZensimProfile};
 
 fn fixtures_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -46,26 +44,28 @@ fn load_rgba(name: &str) -> (Vec<[u8; 4]>, usize, usize) {
     (pixels, w, h)
 }
 
-fn classify_rgb(
-    src_name: &str,
-    dst_name: &str,
-) -> ClassifiedResult {
+fn classify_rgb(src_name: &str, dst_name: &str) -> ClassifiedResult {
     let (src, w, h) = load_rgb(src_name);
     let (dst, dw, dh) = load_rgb(dst_name);
-    assert_eq!((w, h), (dw, dh), "dimension mismatch: {src_name} vs {dst_name}");
+    assert_eq!(
+        (w, h),
+        (dw, dh),
+        "dimension mismatch: {src_name} vs {dst_name}"
+    );
     let z = Zensim::new(ZensimProfile::latest());
     let src_img = RgbSlice::new(&src, w, h);
     let dst_img = RgbSlice::new(&dst, w, h);
     z.classify(&src_img, &dst_img).expect("classify failed")
 }
 
-fn classify_rgba(
-    src_name: &str,
-    dst_name: &str,
-) -> ClassifiedResult {
+fn classify_rgba(src_name: &str, dst_name: &str) -> ClassifiedResult {
     let (src, w, h) = load_rgba(src_name);
     let (dst, dw, dh) = load_rgba(dst_name);
-    assert_eq!((w, h), (dw, dh), "dimension mismatch: {src_name} vs {dst_name}");
+    assert_eq!(
+        (w, h),
+        (dw, dh),
+        "dimension mismatch: {src_name} vs {dst_name}"
+    );
     let z = Zensim::new(ZensimProfile::latest());
     let src_img = RgbaSlice::new(&src, w, h);
     let dst_img = RgbaSlice::new(&dst, w, h);
@@ -426,10 +426,7 @@ fn adobe_as_srgb_detected() {
 
 #[test]
 fn premul_as_straight_detected() {
-    let cr = classify_rgba(
-        "alpha_patches.png",
-        "alpha_patches_premul_as_straight.png",
-    );
+    let cr = classify_rgba("alpha_patches.png", "alpha_patches_premul_as_straight.png");
     print_delta_stats("alpha_patches → premul_as_straight", &cr);
 
     // Opaque pixels should have zero delta
@@ -463,10 +460,7 @@ fn premul_as_straight_detected() {
 
 #[test]
 fn straight_as_premul_detected() {
-    let cr = classify_rgba(
-        "alpha_patches.png",
-        "alpha_patches_straight_as_premul.png",
-    );
+    let cr = classify_rgba("alpha_patches.png", "alpha_patches_straight_as_premul.png");
     print_delta_stats("alpha_patches → straight_as_premul", &cr);
 
     // Opaque should be unchanged
@@ -518,10 +512,7 @@ fn alpha_gradient_premul_error() {
 
 #[test]
 fn wrong_bg_black_detected() {
-    let cr = classify_rgba(
-        "alpha_gradient.png",
-        "alpha_gradient_wrong_bg_black.png",
-    );
+    let cr = classify_rgba("alpha_gradient.png", "alpha_gradient_wrong_bg_black.png");
     print_delta_stats("alpha_gradient → wrong_bg_black", &cr);
 
     // Error proportional to (1-alpha)
@@ -626,7 +617,10 @@ fn delta_stats_deterministic() {
         );
     }
     assert_eq!(r1.delta_stats.pixel_count, r2.delta_stats.pixel_count);
-    assert_eq!(r1.delta_stats.pixels_differing, r2.delta_stats.pixels_differing);
+    assert_eq!(
+        r1.delta_stats.pixels_differing,
+        r2.delta_stats.pixels_differing
+    );
     println!("  delta stats deterministic across 3 runs");
 }
 
