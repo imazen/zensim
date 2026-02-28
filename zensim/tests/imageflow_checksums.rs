@@ -1,63 +1,106 @@
 //! Imageflow visual regression checksum analysis.
 //!
-//! This integration test loads pairs of old/new checksum images from
-//! imageflow's visual regression test history and runs `classify()` on each pair.
+//! Downloads old/new image pairs from imageflow's S3 bucket and runs
+//! `classify()` on each pair. The manifest of pairs and ground truth
+//! analysis is committed at `tests/fixtures/imageflow_checksum_pairs.json`.
 //!
 //! Run with:
 //! ```bash
-//! CHECKSUM_MANIFEST=/tmp/checksum_manifest.json \
-//! IMAGE_CACHE=/tmp/imageflow-analysis/images \
-//!   cargo test -p zensim --all-features --test imageflow_checksums -- --ignored --nocapture
+//! cargo test -p zensim --all-features --test imageflow_checksums -- --ignored --nocapture
 //! ```
+//!
+//! Images are cached in `$IMAGEFLOW_CACHE` (default: `/tmp/imageflow-checksum-images/`).
 
 mod common;
 
-use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::panic;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use zensim::source::RgbaSlice;
 use zensim::{Zensim, ZensimProfile};
 
-/// Ground truth categories for commits where we know the root cause.
-fn ground_truth() -> HashMap<&'static str, &'static str> {
-    let mut m = HashMap::new();
-    m.insert("d6af6e13", "TransferFunction"); // linear-to-sRGB LUT improvement
-    m.insert("7db3e38d", "Mixed"); // dep update + Rust rendering
-    m.insert("39269e3d", "AlphaCompositing"); // matte compositing fix
-    m.insert("20d2fd4b", "TransferFunction"); // gAMA handling fix
-    m.insert("01f33a25", "Mixed"); // linux-arm / Rust graphics
-    m.insert("91acf694", "Geometric"); // FitPad fix
-    m.insert("29b8603c", "ColorSpaceMatrix"); // color parsing (rgba/argb issue)
-    m.insert("9d6b40c6", "Resampling"); // new transpose system for scaling
-    m.insert("3db8caa9", "Hashing"); // image hashing change (same images)
-    m.insert("11050483", "Hashing"); // hashing change (bitmaps identical)
-    m.insert("77fdb819", "Compression"); // lower file sizes
-    m.insert("3542b52d", "Rendering"); // rounded corners features
-    m.insert("d5f439c7", "AlphaCompositing"); // fix 24-bit PNG with zero alpha
-    m.insert("a9b8f5dc", "AlphaCompositing"); // matte support for encoders
-    m.insert("46115d2b", "Platform"); // platform-specific PNG difference
-    m.insert("fd3399c8", "Bugfix"); // WebPDecoder bug fix
-    m.insert("0859c3bf", "Bugfix"); // watermark layout bug fix
-    m.insert("3787d913", "API"); // JSON API cleanup
-    m.insert("079d0075", "Platform"); // visual test checksums for linux laptop
-    m.insert("2cd06cf4", "Platform"); // benchmark on new platform
-    m.insert("93c1e21f", "NewTests"); // add visual tests
-    m
+// ─── Image download ─────────────────────────────────────────────────────
+
+fn try_curl(url: &str, dest: &Path) -> Result<(), String> {
+    let status = Command::new("curl")
+        .args(["-fSL", "-o"])
+        .arg(dest)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err("curl failed".into()),
+    }
 }
 
+fn try_wget(url: &str, dest: &Path) -> Result<(), String> {
+    let status = Command::new("wget")
+        .args(["-q", "-O"])
+        .arg(dest)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err("wget failed".into()),
+    }
+}
+
+fn try_powershell(url: &str, dest: &Path) -> Result<(), String> {
+    let script = "param($u,$o) Invoke-WebRequest -Uri $u -OutFile $o";
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", script, url])
+        .arg(dest)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err("powershell failed".into()),
+    }
+}
+
+fn download(url: &str, dest: &Path) -> Result<(), String> {
+    try_curl(url, dest)
+        .or_else(|_| try_wget(url, dest))
+        .or_else(|_| try_powershell(url, dest))
+}
+
+/// Ensure an image file exists at `cache_dir/filename`, downloading from S3 if needed.
+fn ensure_image(s3_base: &str, checksum: &str, cache_dir: &Path) -> Option<PathBuf> {
+    let filename = checksum_to_filename(checksum);
+    let dest = cache_dir.join(&filename);
+
+    if dest.exists() {
+        return Some(dest);
+    }
+
+    let url = format!("{}/{}", s3_base, filename);
+    match download(&url, &dest) {
+        Ok(()) => Some(dest),
+        Err(e) => {
+            eprintln!("  DOWNLOAD FAILED: {} ({})", filename, e);
+            // Clean up partial download
+            let _ = fs::remove_file(&dest);
+            None
+        }
+    }
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────
 
 fn checksum_to_filename(checksum: &str) -> String {
     if checksum.contains('_') {
-        // Bitmap: append .png
         format!("{}.png", checksum)
     } else if checksum.contains('.') {
-        // Encoded: already has extension
         checksum.to_string()
     } else {
-        // Bare hash: append .png
         format!("{}.png", checksum)
     }
 }
@@ -70,82 +113,105 @@ fn load_image_rgba(path: &Path) -> Option<(Vec<[u8; 4]>, u32, u32)> {
     Some((pixels, w, h))
 }
 
+// ─── Test ───────────────────────────────────────────────────────────────
+
 #[test]
 #[ignore]
 fn imageflow_checksum_analysis() {
-    let manifest_path =
-        std::env::var("CHECKSUM_MANIFEST").unwrap_or("/tmp/checksum_manifest.json".to_string());
-    let image_cache =
-        std::env::var("IMAGE_CACHE").unwrap_or("/tmp/imageflow-analysis/images".to_string());
-    let output_path = std::env::var("ANALYSIS_OUTPUT")
-        .unwrap_or("/tmp/imageflow_checksum_analysis.tsv".to_string());
+    // Load manifest from committed fixture
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("imageflow_checksum_pairs.json");
 
     let manifest_str = fs::read_to_string(&manifest_path)
-        .unwrap_or_else(|e| panic!("Cannot read manifest at {}: {}", manifest_path, e));
-
+        .unwrap_or_else(|e| panic!("Cannot read manifest at {}: {}", manifest_path.display(), e));
     let manifest: serde_json::Value = serde_json::from_str(&manifest_str)
         .unwrap_or_else(|e| panic!("Cannot parse manifest JSON: {}", e));
 
-    let gt = ground_truth();
+    let s3_base = manifest["s3_base"].as_str().expect("s3_base");
+    let cache_dir = PathBuf::from(
+        std::env::var("IMAGEFLOW_CACHE")
+            .unwrap_or_else(|_| "/tmp/imageflow-checksum-images".to_string()),
+    );
+    fs::create_dir_all(&cache_dir).expect("create cache dir");
+
+    let output_path = std::env::var("ANALYSIS_OUTPUT")
+        .unwrap_or_else(|_| "/tmp/imageflow_checksum_analysis.tsv".to_string());
+
     let zensim = Zensim::new(ZensimProfile::latest());
-    let image_dir = PathBuf::from(&image_cache);
+    let commits = manifest["commits"].as_array().expect("commits array");
 
     let mut tsv = String::new();
     writeln!(
         tsv,
-        "commit\tcommit_msg\ttest_name\tscore\traw_distance\tdominant_category\tconfidence\t\
+        "commit\tchange_type\ttest_name\tscore\traw_distance\tdominant_category\tconfidence\t\
          tf\tcsm\tswap\tquant\talpha\tnoise\tblur\tringing\tcolor_shift\t\
          max_abs_delta_r\tmax_abs_delta_g\tmax_abs_delta_b\t\
          frac_identical\tfrac_diff_gt1\t\
          mean_delta_r\tmean_delta_g\tmean_delta_b\t\
-         ground_truth\tmatch"
+         expected_delta\tcommit_description"
     )
     .unwrap();
 
-    let entries = manifest["manifest"].as_array().expect("manifest array");
     let mut total_pairs = 0;
     let mut compared = 0;
-    let mut skipped_missing = 0;
+    let mut skipped_download = 0;
     let mut skipped_dim_mismatch = 0;
     let mut skipped_webp = 0;
-    let mut matches = 0;
-    let mut mismatches = 0;
-    let mut no_gt = 0;
+    let mut skipped_small = 0;
 
-    for entry in entries {
-        let commit = entry["commit_hash"].as_str().unwrap();
-        let msg = entry["commit_message"].as_str().unwrap();
-        let pairs = entry["changed_pairs"].as_array().unwrap();
+    for commit_entry in commits {
+        let commit = commit_entry["commit"].as_str().unwrap();
+        let change_type = commit_entry["change_type"].as_str().unwrap();
+        let description = commit_entry["description"].as_str().unwrap();
+        let expected_delta = commit_entry["expected_delta"].as_str().unwrap();
+        let pairs = commit_entry["pairs"].as_array().unwrap();
 
         for pair in pairs {
             total_pairs += 1;
-            let test_name = pair["test_name"].as_str().unwrap();
-            let old_cs = pair["old_checksum"].as_str().unwrap();
-            let new_cs = pair["new_checksum"].as_str().unwrap();
-
-            let old_file = image_dir.join(checksum_to_filename(old_cs));
-            let new_file = image_dir.join(checksum_to_filename(new_cs));
+            let arr = pair.as_array().unwrap();
+            let test_name = arr[0].as_str().unwrap();
+            let old_cs = arr[1].as_str().unwrap();
+            let new_cs = arr[2].as_str().unwrap();
 
             // Skip WebP
-            if old_file.extension().is_some_and(|e| e == "webp")
-                || new_file.extension().is_some_and(|e| e == "webp")
-            {
+            let old_fn = checksum_to_filename(old_cs);
+            let new_fn = checksum_to_filename(new_cs);
+            if old_fn.ends_with(".webp") || new_fn.ends_with(".webp") {
                 skipped_webp += 1;
                 continue;
             }
 
-            // Load images
-            let old_img = match load_image_rgba(&old_file) {
-                Some(img) => img,
+            // Download/load images
+            let old_path = match ensure_image(s3_base, old_cs, &cache_dir) {
+                Some(p) => p,
                 None => {
-                    skipped_missing += 1;
+                    skipped_download += 1;
                     continue;
                 }
             };
-            let new_img = match load_image_rgba(&new_file) {
+            let new_path = match ensure_image(s3_base, new_cs, &cache_dir) {
+                Some(p) => p,
+                None => {
+                    skipped_download += 1;
+                    continue;
+                }
+            };
+
+            let old_img = match load_image_rgba(&old_path) {
                 Some(img) => img,
                 None => {
-                    skipped_missing += 1;
+                    eprintln!("  DECODE FAILED: {} (old: {})", test_name, old_path.display());
+                    skipped_download += 1;
+                    continue;
+                }
+            };
+            let new_img = match load_image_rgba(&new_path) {
+                Some(img) => img,
+                None => {
+                    eprintln!("  DECODE FAILED: {} (new: {})", test_name, new_path.display());
+                    skipped_download += 1;
                     continue;
                 }
             };
@@ -153,19 +219,14 @@ fn imageflow_checksum_analysis() {
             // Check dimensions match
             if old_img.1 != new_img.1 || old_img.2 != new_img.2 {
                 skipped_dim_mismatch += 1;
-                eprintln!(
-                    "  DIM MISMATCH: {} [{}] {}x{} vs {}x{}",
-                    test_name, commit, old_img.1, old_img.2, new_img.1, new_img.2
-                );
                 continue;
             }
 
             let (w, h) = (old_img.1 as usize, old_img.2 as usize);
 
-            // Skip very small images that trigger blur kernel panics
+            // Skip very small images
             if w < 32 || h < 32 {
-                eprintln!("  TOO SMALL: {} [{}] {}x{}", test_name, commit, w, h);
-                skipped_dim_mismatch += 1;
+                skipped_small += 1;
                 continue;
             }
 
@@ -187,8 +248,6 @@ fn imageflow_checksum_analysis() {
             };
 
             compared += 1;
-            let dom_cat = result.classification.dominant;
-            let dom_conf = result.classification.confidence;
             let ec = &result.classification;
             let ds = &result.delta_stats;
 
@@ -203,33 +262,6 @@ fn imageflow_checksum_analysis() {
                 0.0
             };
 
-            let gt_label = gt.get(&commit[..8]).copied().unwrap_or("?");
-            let dom_str = format!("{:?}", dom_cat);
-            let is_match = if gt_label == "?" {
-                no_gt += 1;
-                "?"
-            } else if gt_label == "Mixed"
-                || gt_label == "Hashing"
-                || gt_label == "NewTests"
-                || gt_label == "Platform"
-                || gt_label == "Geometric"
-                || gt_label == "Resampling"
-                || gt_label == "Rendering"
-                || gt_label == "Compression"
-                || gt_label == "API"
-                || gt_label == "Bugfix"
-            {
-                // These categories aren't in our classifier — note but don't score
-                no_gt += 1;
-                "n/a"
-            } else if dom_str == gt_label {
-                matches += 1;
-                "Y"
-            } else {
-                mismatches += 1;
-                "N"
-            };
-
             writeln!(
                 tsv,
                 "{}\t{}\t{}\t{:.2}\t{:.6}\t{:?}\t{:.3}\t\
@@ -239,12 +271,12 @@ fn imageflow_checksum_analysis() {
                  {:.6}\t{:.6}\t{:.6}\t\
                  {}\t{}",
                 commit,
-                msg.chars().take(50).collect::<String>(),
+                change_type,
                 test_name,
                 result.result.score,
                 result.result.raw_distance,
-                dom_cat,
-                dom_conf,
+                ec.dominant,
+                ec.confidence,
                 ec.transfer_function,
                 ec.color_space_matrix,
                 ec.channel_swap,
@@ -262,8 +294,8 @@ fn imageflow_checksum_analysis() {
                 ds.mean_delta[0],
                 ds.mean_delta[1],
                 ds.mean_delta[2],
-                gt_label,
-                is_match,
+                expected_delta,
+                description.chars().take(80).collect::<String>(),
             )
             .unwrap();
         }
@@ -276,33 +308,30 @@ fn imageflow_checksum_analysis() {
     // Print summary
     println!("\n=== Imageflow Checksum Analysis Summary ===");
     println!("Total pairs in manifest: {}", total_pairs);
-    println!("Compared: {}", compared);
-    println!("Skipped (missing image): {}", skipped_missing);
-    println!("Skipped (dim mismatch): {}", skipped_dim_mismatch);
-    println!("Skipped (WebP): {}", skipped_webp);
-    println!();
-    println!("Ground truth matches: {}", matches);
-    println!("Ground truth mismatches: {}", mismatches);
-    println!("No ground truth: {}", no_gt);
-    println!();
-    println!("Output written to: {}", output_path);
+    println!("Compared:                {}", compared);
+    println!("Skipped (download/decode): {}", skipped_download);
+    println!("Skipped (dim mismatch):  {}", skipped_dim_mismatch);
+    println!("Skipped (too small):     {}", skipped_small);
+    println!("Skipped (WebP):          {}", skipped_webp);
 
-    // Print per-commit summary
+    // Per-commit summary
     println!("\n=== Per-Commit Breakdown ===");
-    for entry in entries {
-        let commit = entry["commit_hash"].as_str().unwrap();
-        let msg = entry["commit_message"].as_str().unwrap();
-        let pairs = entry["changed_pairs"].as_array().unwrap();
+    for entry in commits {
+        let commit = entry["commit"].as_str().unwrap();
+        let change_type = entry["change_type"].as_str().unwrap();
+        let msg = entry["message"].as_str().unwrap();
+        let pairs = entry["pairs"].as_array().unwrap();
         if pairs.is_empty() {
             continue;
         }
-        let gt_label = gt.get(&commit[..8]).copied().unwrap_or("?");
         println!(
-            "{} {} ({} pairs) [gt: {}]",
+            "  {} [{:20}] {:3} pairs  {}",
             &commit[..8],
-            &msg.chars().take(60).collect::<String>(),
+            change_type,
             pairs.len(),
-            gt_label
+            &msg.chars().take(60).collect::<String>(),
         );
     }
+
+    println!("\nOutput: {}", output_path);
 }
