@@ -19,7 +19,7 @@ use std::panic;
 use std::path::{Path, PathBuf};
 
 use zensim::source::RgbaSlice;
-use zensim::{ErrorCategory, ErrorClassification, Zensim, ZensimProfile};
+use zensim::{Zensim, ZensimProfile};
 
 /// Ground truth categories for commits where we know the root cause.
 fn ground_truth() -> HashMap<&'static str, &'static str> {
@@ -48,24 +48,6 @@ fn ground_truth() -> HashMap<&'static str, &'static str> {
     m
 }
 
-fn dominant_category(ec: &ErrorClassification) -> (ErrorCategory, f64) {
-    let categories = [
-        (ErrorCategory::TransferFunction, ec.transfer_function),
-        (ErrorCategory::ColorSpaceMatrix, ec.color_space_matrix),
-        (ErrorCategory::ChannelSwap, ec.channel_swap),
-        (ErrorCategory::Quantization, ec.quantization),
-        (ErrorCategory::AlphaCompositing, ec.alpha_compositing),
-        (ErrorCategory::PixelNoise, ec.pixel_noise),
-        (ErrorCategory::Blur, ec.blur),
-        (ErrorCategory::Ringing, ec.ringing),
-        (ErrorCategory::ColorShift, ec.color_shift),
-    ];
-
-    categories
-        .into_iter()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap_or((ErrorCategory::Identical, 0.0))
-}
 
 fn checksum_to_filename(checksum: &str) -> String {
     if checksum.contains('_') {
@@ -205,7 +187,8 @@ fn imageflow_checksum_analysis() {
             };
 
             compared += 1;
-            let (dom_cat, dom_conf) = dominant_category(&result.classification);
+            let dom_cat = result.classification.dominant;
+            let dom_conf = result.classification.confidence;
             let ec = &result.classification;
             let ds = &result.delta_stats;
 
