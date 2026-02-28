@@ -37,6 +37,8 @@
 
 pub mod arch;
 pub mod checksum_file;
+pub mod diff_image;
+pub mod display;
 pub mod error;
 pub mod hasher;
 
