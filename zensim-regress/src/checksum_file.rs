@@ -111,7 +111,7 @@ impl TestChecksumFile {
 
 /// Tolerance configuration stored in the TOML file.
 ///
-/// Maps to `zensim::testing::RegressionTolerance` at runtime, with optional
+/// Maps to `crate::testing::RegressionTolerance` at runtime, with optional
 /// per-architecture overrides.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToleranceSpec {
@@ -171,8 +171,8 @@ impl Default for ToleranceSpec {
 
 impl ToleranceSpec {
     /// Convert to a `RegressionTolerance`, applying overrides for the given arch tag.
-    pub fn to_regression_tolerance(&self, arch_tag: &str) -> zensim::testing::RegressionTolerance {
-        let mut t = zensim::testing::RegressionTolerance::exact()
+    pub fn to_regression_tolerance(&self, arch_tag: &str) -> crate::testing::RegressionTolerance {
+        let mut t = crate::testing::RegressionTolerance::exact()
             .max_channel_delta(self.max_channel_delta)
             .min_score(self.min_score)
             .max_differing_pixel_fraction(self.max_differing_pixel_fraction)
@@ -338,7 +338,7 @@ pub struct ChecksumDiff {
 
 impl ChecksumDiff {
     /// Create from a `RegressionReport` and the reference checksum ID.
-    pub fn from_report(report: &zensim::testing::RegressionReport, vs_id: &str) -> Self {
+    pub fn from_report(report: &crate::testing::RegressionReport, vs_id: &str) -> Self {
         let category = format!("{:?}", report.category());
 
         let pixels_differing_pct = if report.pixel_count() > 0 {

@@ -459,7 +459,6 @@ pub enum ErrorCategory {
 ///
 /// `dominant` is the category with the highest confidence (or `Identical`
 /// if the overall score is ≈ 100).
-#[doc(hidden)]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ErrorClassification {
@@ -500,7 +499,6 @@ pub struct RoundingBias {
 ///
 /// All deltas are `src - dst` (positive = distorted is darker/lower).
 /// Values normalized to [0.0, 1.0] regardless of input bit depth.
-#[doc(hidden)]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct DeltaStats {
@@ -554,7 +552,6 @@ pub struct DeltaStats {
 }
 
 /// Stats for a subset of pixels grouped by alpha.
-#[doc(hidden)]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct AlphaStratifiedStats {
@@ -567,7 +564,6 @@ pub struct AlphaStratifiedStats {
 }
 
 /// Result from `classify()`: the zensim score plus delta analysis and error classification.
-#[doc(hidden)]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ClassifiedResult {

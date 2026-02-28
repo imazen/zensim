@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
-use zensim::testing::RegressionTolerance;
+use zensim_regress::testing::{RegressionTolerance, check_regression};
 use zensim_regress::arch::{self, KNOWN_ARCH_TAGS};
 use zensim_regress::checksum_file::{
     ChecksumDiff, ChecksumEntry, ImageInfo, TestChecksumFile, ToleranceOverride, ToleranceSpec,
@@ -104,8 +104,7 @@ fn main() {
 
     // Variant A: should be off-by-one rounding
     let dst_a = RgbSlice::new(&variant_a_pixels, w, h);
-    let report_a = z
-        .check_regression(&src, &dst_a, &RegressionTolerance::off_by_one())
+    let report_a = check_regression(&z, &src, &dst_a, &RegressionTolerance::off_by_one())
         .expect("comparison should succeed");
 
     println!("  variant_a vs baseline:");
@@ -121,8 +120,7 @@ fn main() {
 
     // Variant B: should be a large difference
     let dst_b = RgbSlice::new(&variant_b_pixels, w, h);
-    let report_b = z
-        .check_regression(&src, &dst_b, &RegressionTolerance::off_by_one())
+    let report_b = check_regression(&z, &src, &dst_b, &RegressionTolerance::off_by_one())
         .expect("comparison should succeed");
 
     println!("  variant_b vs baseline:");
@@ -464,7 +462,7 @@ fn main() {
             let auth = parsed.authoritative();
             if let Some(auth) = auth {
                 println!("  authoritative reference: {}", auth.id);
-                println!("  would run: zensim.check_regression(auth_image, actual_image, tolerance)");
+                println!("  would run: check_regression(&z, auth_image, actual_image, tolerance)");
             } else {
                 println!("  no authoritative reference — first run?");
             }

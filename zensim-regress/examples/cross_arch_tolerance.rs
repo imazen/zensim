@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
-use zensim::testing::RegressionTolerance;
+use zensim_regress::testing::{RegressionTolerance, check_regression};
 use zensim_regress::arch::{self, KNOWN_ARCH_TAGS};
 use zensim_regress::checksum_file::{
     ChecksumDiff, ChecksumEntry, ImageInfo, TestChecksumFile, ToleranceOverride, ToleranceSpec,
@@ -100,15 +100,13 @@ fn main() {
     let src = RgbSlice::new(&baseline, w, h);
 
     let dst_arm = RgbSlice::new(&arm_variant, w, h);
-    let report_arm = z
-        .check_regression(&src, &dst_arm, &RegressionTolerance::off_by_one())
+    let report_arm = check_regression(&z, &src, &dst_arm, &RegressionTolerance::off_by_one())
         .unwrap();
     println!("  ARM vs baseline:");
     println!("    {report_arm}");
 
     let dst_avx512 = RgbSlice::new(&avx512_variant, w, h);
-    let report_avx512 = z
-        .check_regression(&src, &dst_avx512, &RegressionTolerance::off_by_one())
+    let report_avx512 = check_regression(&z, &src, &dst_avx512, &RegressionTolerance::off_by_one())
         .unwrap();
     println!("  AVX512 vs baseline:");
     println!("    {report_avx512}");

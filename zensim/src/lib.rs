@@ -93,13 +93,12 @@ pub mod profile;
 mod simd_ops;
 pub mod source;
 mod streaming;
-pub mod testing;
 
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{ErrorCategory, RoundingBias, Zensim, ZensimResult, distance_to_score};
 
-// --- Classification internals (pub for tests, #[doc(hidden)] in source) ---
+// --- Classification API (used by zensim-regress for regression testing) ---
 pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};
 pub use profile::ZensimProfile;
 pub use source::{AlphaMode, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};

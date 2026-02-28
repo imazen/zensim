@@ -1,4 +1,4 @@
-//! Visual regression testing utilities.
+//! Visual regression testing: tolerances, reports, and comparison.
 //!
 //! Compare expected vs actual images against configurable tolerances,
 //! producing structured pass/fail reports with human-readable output.
@@ -7,23 +7,24 @@
 //!
 //! ```no_run
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
-//! use zensim::testing::{RegressionTolerance, RegressionReport};
+//! use zensim_regress::testing::{RegressionTolerance, check_regression};
 //! # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
 //!
 //! let z = Zensim::new(ZensimProfile::latest());
 //! let expected = RgbSlice::new(&expected_px, 8, 8);
 //! let actual = RgbSlice::new(&actual_px, 8, 8);
 //!
-//! let report = z.check_regression(
-//!     &expected, &actual,
+//! let report = check_regression(
+//!     &z, &expected, &actual,
 //!     &RegressionTolerance::off_by_one(),
 //! ).unwrap();
 //! assert!(report.passed(), "{report}");
 //! ```
 
-use crate::error::ZensimError;
-use crate::metric::{ClassifiedResult, ErrorCategory, RoundingBias, Zensim};
-use crate::source::{AlphaMode, ImageSource, PixelFormat};
+use zensim::{
+    AlphaMode, ClassifiedResult, ErrorCategory, ImageSource, PixelFormat, RoundingBias, Zensim,
+    ZensimError,
+};
 
 /// Tolerance for regression checking. All constraints must pass.
 ///
@@ -33,7 +34,7 @@ use crate::source::{AlphaMode, ImageSource, PixelFormat};
 /// # Examples
 ///
 /// ```
-/// use zensim::testing::RegressionTolerance;
+/// use zensim_regress::testing::RegressionTolerance;
 ///
 /// // Pixel-identical — no differences allowed
 /// let t = RegressionTolerance::exact();
@@ -134,6 +135,12 @@ impl RegressionTolerance {
         self.ignore_alpha = true;
         self
     }
+
+    /// Whether this tolerance ignores alpha.
+    #[allow(dead_code)] // used by ChecksumManager in Phase 2
+    pub(crate) fn ignores_alpha(&self) -> bool {
+        self.ignore_alpha
+    }
 }
 
 /// Per-constraint pass/fail detail (drives Display output).
@@ -209,7 +216,6 @@ impl ChannelHistograms {
 
 impl std::fmt::Debug for ChannelHistograms {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Don't dump 1024 values — just show summary stats
         let labels = ["R", "G", "B", "A"];
         f.debug_struct("ChannelHistograms")
             .field("num_channels", &self.num_channels)
@@ -229,7 +235,7 @@ impl std::fmt::Debug for ChannelHistograms {
 
 /// Result of comparing expected vs actual images against a tolerance.
 ///
-/// Use [`Zensim::check_regression()`] to produce this.
+/// Use [`check_regression()`] to produce this.
 ///
 /// The [`Display`](std::fmt::Display) impl produces human-readable prose
 /// suitable for test output. The [`Debug`] impl shows structured key-value
@@ -380,7 +386,7 @@ impl std::fmt::Display for RegressionReport {
             ErrorCategory::AlphaCompositing => {
                 writeln!(f, "{status}: Alpha compositing error detected.")?;
             }
-            ErrorCategory::Unclassified => {
+            ErrorCategory::Unclassified | _ => {
                 if self.passed {
                     writeln!(f, "{status}: Images differ within tolerance.")?;
                 } else {
@@ -469,7 +475,7 @@ impl<S: ImageSource> ImageSource for AlphaOverride<'_, S> {
 
 // ─── Report building ────────────────────────────────────────────────────
 
-fn build_report(
+pub(crate) fn build_report(
     cr: ClassifiedResult,
     tolerance: &RegressionTolerance,
 ) -> RegressionReport {
@@ -604,46 +610,44 @@ fn build_report(
     }
 }
 
-// ─── Zensim::check_regression() ──────────────────────────────────────────
+// ─── check_regression() free function ────────────────────────────────────
 
-impl Zensim {
-    /// Compare expected vs actual images against a tolerance.
-    ///
-    /// Returns a [`RegressionReport`] with pass/fail, score, classification,
-    /// and per-constraint details. Use the report's [`Display`](std::fmt::Display)
-    /// impl for human-readable output in test assertions.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use zensim::{Zensim, ZensimProfile, RgbSlice};
-    /// use zensim::testing::RegressionTolerance;
-    /// # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-    /// let z = Zensim::new(ZensimProfile::latest());
-    /// let expected = RgbSlice::new(&expected_px, 8, 8);
-    /// let actual = RgbSlice::new(&actual_px, 8, 8);
-    ///
-    /// let report = z.check_regression(
-    ///     &expected, &actual,
-    ///     &RegressionTolerance::off_by_one(),
-    /// ).unwrap();
-    /// assert!(report.passed(), "{report}");
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
-    pub fn check_regression(
-        &self,
-        expected: &impl ImageSource,
-        actual: &impl ImageSource,
-        tolerance: &RegressionTolerance,
-    ) -> Result<RegressionReport, ZensimError> {
-        let cr = if tolerance.ignore_alpha {
-            self.classify(&AlphaOverride(expected), &AlphaOverride(actual))?
-        } else {
-            self.classify(expected, actual)?
-        };
-        Ok(build_report(cr, tolerance))
-    }
+/// Compare expected vs actual images against a tolerance.
+///
+/// Returns a [`RegressionReport`] with pass/fail, score, classification,
+/// and per-constraint details. Use the report's [`Display`](std::fmt::Display)
+/// impl for human-readable output in test assertions.
+///
+/// # Examples
+///
+/// ```no_run
+/// use zensim::{Zensim, ZensimProfile, RgbSlice};
+/// use zensim_regress::testing::{RegressionTolerance, check_regression};
+/// # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
+/// let z = Zensim::new(ZensimProfile::latest());
+/// let expected = RgbSlice::new(&expected_px, 8, 8);
+/// let actual = RgbSlice::new(&actual_px, 8, 8);
+///
+/// let report = check_regression(
+///     &z, &expected, &actual,
+///     &RegressionTolerance::off_by_one(),
+/// ).unwrap();
+/// assert!(report.passed(), "{report}");
+/// ```
+///
+/// # Errors
+///
+/// Returns [`ZensimError`](zensim::ZensimError) if dimensions are mismatched or too small.
+pub fn check_regression(
+    zensim: &Zensim,
+    expected: &impl ImageSource,
+    actual: &impl ImageSource,
+    tolerance: &RegressionTolerance,
+) -> Result<RegressionReport, ZensimError> {
+    let cr = if tolerance.ignore_alpha {
+        zensim.classify(&AlphaOverride(expected), &AlphaOverride(actual))?
+    } else {
+        zensim.classify(expected, actual)?
+    };
+    Ok(build_report(cr, tolerance))
 }
