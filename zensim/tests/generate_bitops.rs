@@ -1,8 +1,8 @@
-/// One-shot test to generate Rust-only distortion fixtures.
-/// Run: cargo test -p zensim --test generate_bitops -- --ignored --nocapture
-///
-/// Loads source PNGs from tests/fixtures/, applies bit-manipulation
-/// distortions, saves output PNGs alongside them.
+// One-shot test to generate Rust-only distortion fixtures.
+// Run: cargo test -p zensim --test generate_bitops -- --ignored --nocapture
+//
+// Loads source PNGs from tests/fixtures/, applies bit-manipulation
+// distortions, saves output PNGs alongside them.
 
 mod common;
 

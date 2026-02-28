@@ -437,22 +437,32 @@ pub struct ZensimResult {
 }
 
 /// What kind of perceptual difference dominates between source and distorted.
+///
+/// Categories are grounded in real pipeline/codec error sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCategory {
     /// Images are perceptually identical (score ≈ 100).
     Identical,
-    /// Global color/luminance shift (CMS, white balance).
-    ColorShift,
-    /// Per-pixel noise (dithering, sensor noise, quantization).
+    /// Gamma/sRGB transfer function errors (double-encode, wrong TF).
+    TransferFunction,
+    /// ICC/YCbCr color space matrix errors.
+    ColorSpaceMatrix,
+    /// Channel reordering (RGB↔BGR, Cb↔Cr swap).
+    ChannelSwap,
+    /// Truncation, bit depth reduction, off-by-N rounding.
+    Quantization,
+    /// Premultiplied/straight alpha confusion, wrong background compositing.
+    AlphaCompositing,
+    /// Random noise, dithering, sensor noise.
     PixelNoise,
-    /// Block artifacts (JPEG blocking, tiling).
-    Blocking,
     /// Loss of detail (low-pass filtering, downscale artifacts).
     Blur,
     /// Edge overshoot/ringing (sharpening, Gibbs phenomenon).
     Ringing,
-    /// Texture replacement (detail synthesis, hallucination).
-    TextureChange,
+    /// Uniform color/luminance offset.
+    ColorShift,
+    /// Multiple error types or unclassifiable.
+    Mixed,
 }
 
 /// Decomposed error classification for a source/distorted pair.
@@ -462,26 +472,103 @@ pub enum ErrorCategory {
 /// if the overall score is ≈ 100).
 #[derive(Debug, Clone)]
 pub struct ErrorClassification {
-    /// Global color/luminance shift strength.
-    pub color_shift: f64,
-    /// Per-pixel noise strength.
+    /// Gamma/sRGB transfer function error confidence.
+    pub transfer_function: f64,
+    /// ICC/YCbCr matrix error confidence.
+    pub color_space_matrix: f64,
+    /// Channel swap confidence.
+    pub channel_swap: f64,
+    /// Quantization/truncation confidence.
+    pub quantization: f64,
+    /// Alpha compositing error confidence.
+    pub alpha_compositing: f64,
+    /// Random noise confidence.
     pub pixel_noise: f64,
-    /// Block artifact strength.
-    pub blocking: f64,
-    /// Blur / detail loss strength.
+    /// Blur / detail loss confidence.
     pub blur: f64,
-    /// Ringing / edge overshoot strength.
+    /// Ringing / edge overshoot confidence.
     pub ringing: f64,
-    /// Texture replacement strength.
-    pub texture_change: f64,
+    /// Uniform color shift confidence.
+    pub color_shift: f64,
     /// Per-channel XYB mean offset: `[X, Y, B]`, signed.
     pub mean_offset: [f64; 3],
-    /// Maximum absolute per-pixel channel delta (sRGB 0–255), if computed.
-    pub max_channel_delta: Option<u8>,
     /// Overall confidence in the classification (0.0–1.0).
     pub confidence: f64,
     /// The dominant error category.
     pub dominant: ErrorCategory,
+}
+
+/// Pixel-level delta analysis for error classification.
+///
+/// All deltas are `src - dst` (positive = distorted is darker/lower).
+/// Values normalized to [0.0, 1.0] regardless of input bit depth.
+#[derive(Debug, Clone)]
+pub struct DeltaStats {
+    // --- Per-channel [R, G, B] summary stats ---
+    /// Mean delta (signed). Positive = dst darker.
+    pub mean_delta: [f64; 3],
+    /// Standard deviation of delta.
+    pub stddev_delta: [f64; 3],
+    /// Maximum |delta|.
+    pub max_abs_delta: [f64; 3],
+
+    // --- Three-bin means for gamma/TF detection ---
+    /// Mean delta where src < 1/3 of range (dark).
+    pub mean_delta_dark: [f64; 3],
+    /// Mean delta where 1/3 <= src < 2/3 (midtone).
+    pub mean_delta_mid: [f64; 3],
+    /// Mean delta where src >= 2/3 (bright).
+    pub mean_delta_bright: [f64; 3],
+
+    // --- Delta magnitude histogram (binned) ---
+    /// Count of pixels per |delta| bucket per channel.
+    /// Buckets: \[0\]=identical, \[1\]=1/255, \[2\]=2/255, \[3\]=3/255,
+    ///          \[4\]=4-7, \[5\]=8-15, \[6\]=16-31, \[7\]=32-63, \[8\]=64-127, \[9\]=128+
+    /// Values are fractions of total pixel count.
+    pub delta_histogram: [[f64; 10]; 3],
+
+    // --- Percentiles (approximate, from histogram) ---
+    /// p50, p95, p99, p100 of |delta| per channel.
+    pub percentiles: [[f64; 4]; 3],
+
+    // --- Pixel counts ---
+    /// Total pixels compared.
+    pub pixel_count: u64,
+    /// Pixels where any channel differs.
+    pub pixels_differing: u64,
+    /// Pixels where any channel |delta| > 1/255.
+    pub pixels_differing_by_more_than_1: u64,
+
+    // --- Alpha-stratified stats (only for RGBA/BGRA inputs) ---
+    /// Delta stats for fully opaque pixels (A = max).
+    pub opaque_stats: Option<AlphaStratifiedStats>,
+    /// Delta stats for semitransparent pixels (0 < A < max).
+    pub semitransparent_stats: Option<AlphaStratifiedStats>,
+    /// Pearson correlation between |delta| and (1 - alpha).
+    /// High (> 0.8) = compositing/premul error. None if no alpha.
+    pub alpha_error_correlation: Option<f64>,
+}
+
+/// Stats for a subset of pixels grouped by alpha.
+#[derive(Debug, Clone)]
+pub struct AlphaStratifiedStats {
+    /// Number of pixels in this stratum.
+    pub pixel_count: u64,
+    /// Mean |delta| per channel in this alpha stratum.
+    pub mean_abs_delta: [f64; 3],
+    /// Max |delta| per channel.
+    pub max_abs_delta: [f64; 3],
+}
+
+/// Result from `classify()`: the zensim score plus delta analysis and error classification.
+#[derive(Debug, Clone)]
+pub struct ClassifiedResult {
+    /// The standard zensim result (score, features, etc.).
+    pub result: ZensimResult,
+    /// Error classification with per-category confidence scores.
+    pub classification: ErrorClassification,
+    /// Pixel-level delta statistics.
+    pub delta_stats: DeltaStats,
 }
 
 // --- Zensim config struct (primary API) ---
@@ -594,6 +681,40 @@ impl Zensim {
         result.profile = self.profile;
         Ok(result)
     }
+
+    /// Compare source and distorted images with full error classification.
+    ///
+    /// Returns a [`ClassifiedResult`] containing the standard zensim score,
+    /// pixel-level delta statistics, and error type classification.
+    ///
+    /// The `result.score` is identical to what `compute()` returns — classification
+    /// is a separate analysis pass that doesn't affect the score.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    pub fn classify(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<ClassifiedResult, ZensimError> {
+        validate_pair(source, distorted)?;
+
+        // Compute delta stats (pixel-level analysis in sRGB space)
+        let delta_stats = crate::streaming::compute_delta_stats(source, distorted);
+
+        // Compute the standard zensim score
+        let result = self.compute(source, distorted)?;
+
+        // Derive classification from delta stats and zensim features
+        let classification = derive_classification(&delta_stats, &result);
+
+        Ok(ClassifiedResult {
+            result,
+            classification,
+            delta_stats,
+        })
+    }
 }
 
 #[cfg(feature = "training")]
@@ -609,6 +730,172 @@ impl Zensim {
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result)
     }
+}
+
+/// Derive error classification from pixel-level delta statistics.
+///
+/// Uses heuristic thresholds calibrated against the test fixture corpus.
+fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> ErrorClassification {
+    let mut c = ErrorClassification {
+        transfer_function: 0.0,
+        color_space_matrix: 0.0,
+        channel_swap: 0.0,
+        quantization: 0.0,
+        alpha_compositing: 0.0,
+        pixel_noise: 0.0,
+        blur: 0.0,
+        ringing: 0.0,
+        color_shift: 0.0,
+        mean_offset: result.mean_offset,
+        confidence: 0.0,
+        dominant: ErrorCategory::Identical,
+    };
+
+    // If images are identical (or nearly), short circuit
+    if delta_stats.pixels_differing == 0 {
+        c.confidence = 1.0;
+        return c;
+    }
+
+    let max_delta = delta_stats
+        .max_abs_delta
+        .iter()
+        .copied()
+        .fold(0.0f64, f64::max);
+
+    // --- Channel swap detection ---
+    // If one channel has ~zero delta while others have large delta
+    let mut zero_channels = 0;
+    let mut hot_channels = 0;
+    for ch in 0..3 {
+        if delta_stats.max_abs_delta[ch] < 1.0 / 255.0 {
+            zero_channels += 1;
+        }
+        if delta_stats.max_abs_delta[ch] > 0.1 {
+            hot_channels += 1;
+        }
+    }
+    if zero_channels == 1 && hot_channels >= 1 && max_delta > 0.05 {
+        c.channel_swap = 0.8;
+    }
+
+    // --- Quantization/truncation detection ---
+    // High fraction of exactly-1 deltas, low max
+    let frac_1 = (0..3)
+        .map(|ch| delta_stats.delta_histogram[ch][1])
+        .fold(0.0f64, f64::max);
+    if frac_1 > 0.3 && max_delta < 5.0 / 255.0 {
+        c.quantization = (frac_1 * 1.5).min(1.0);
+    }
+
+    // --- Transfer function detection ---
+    // Nonlinearity: |mean_mid - avg(mean_dark, mean_bright)| across channels
+    let mut nonlinearity = 0.0f64;
+    for ch in 0..3 {
+        let avg_endpoints =
+            (delta_stats.mean_delta_dark[ch] + delta_stats.mean_delta_bright[ch]) / 2.0;
+        let nl = (delta_stats.mean_delta_mid[ch] - avg_endpoints).abs();
+        nonlinearity = nonlinearity.max(nl);
+    }
+    if nonlinearity > 0.01 && max_delta > 0.03 {
+        c.transfer_function = (nonlinearity * 10.0).min(1.0);
+    }
+
+    // --- Alpha compositing detection ---
+    if let Some(ref opaque) = delta_stats.opaque_stats {
+        if let Some(ref semi) = delta_stats.semitransparent_stats {
+            let opaque_max = opaque
+                .mean_abs_delta
+                .iter()
+                .copied()
+                .fold(0.0f64, f64::max);
+            let semi_mean = semi
+                .mean_abs_delta
+                .iter()
+                .copied()
+                .fold(0.0f64, f64::max);
+            if opaque_max < 0.01 && semi_mean > 0.02 {
+                c.alpha_compositing = 0.9;
+            }
+        }
+    }
+    if let Some(corr) = delta_stats.alpha_error_correlation {
+        if corr > 0.8 {
+            c.alpha_compositing = c.alpha_compositing.max(corr);
+        }
+    }
+
+    // --- Color shift detection ---
+    // Uniform offset: high mean delta, low stddev relative to mean
+    let mean_abs = delta_stats
+        .mean_delta
+        .iter()
+        .map(|d| d.abs())
+        .fold(0.0f64, f64::max);
+    let max_stddev = delta_stats
+        .stddev_delta
+        .iter()
+        .copied()
+        .fold(0.0f64, f64::max);
+    if mean_abs > 0.02 && max_stddev < mean_abs * 0.5 {
+        c.color_shift = (mean_abs * 5.0).min(1.0);
+    }
+
+    // --- Color space matrix detection ---
+    // Delta proportional to chrominance (saturated colors affected, grays not)
+    // This is currently a weak heuristic; spatial features would improve it
+    if max_delta > 0.05 && c.channel_swap < 0.3 && c.transfer_function < 0.3 {
+        // Check if deltas are channel-asymmetric
+        let delta_range = max_delta
+            - delta_stats
+                .max_abs_delta
+                .iter()
+                .copied()
+                .fold(f64::MAX, f64::min);
+        if delta_range > 0.03 {
+            c.color_space_matrix = (delta_range * 5.0).min(0.7);
+        }
+    }
+
+    // --- Noise detection ---
+    // High stddev/max ratio suggests random noise
+    if max_delta > 0.01 {
+        let stddev_max_ratio = max_stddev / max_delta;
+        if stddev_max_ratio > 0.2 && nonlinearity < 0.01 {
+            c.pixel_noise = (stddev_max_ratio * 1.5).min(1.0);
+        }
+    }
+
+    // --- Determine dominant ---
+    let scores = [
+        (ErrorCategory::TransferFunction, c.transfer_function),
+        (ErrorCategory::ColorSpaceMatrix, c.color_space_matrix),
+        (ErrorCategory::ChannelSwap, c.channel_swap),
+        (ErrorCategory::Quantization, c.quantization),
+        (ErrorCategory::AlphaCompositing, c.alpha_compositing),
+        (ErrorCategory::PixelNoise, c.pixel_noise),
+        (ErrorCategory::Blur, c.blur),
+        (ErrorCategory::Ringing, c.ringing),
+        (ErrorCategory::ColorShift, c.color_shift),
+    ];
+
+    let (best_cat, best_score) = scores
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .unwrap();
+
+    if *best_score > 0.1 {
+        c.dominant = *best_cat;
+        c.confidence = *best_score;
+    } else if delta_stats.pixels_differing == 0 {
+        c.dominant = ErrorCategory::Identical;
+        c.confidence = 1.0;
+    } else {
+        c.dominant = ErrorCategory::Mixed;
+        c.confidence = 0.1;
+    }
+
+    c
 }
 
 fn validate_pair(

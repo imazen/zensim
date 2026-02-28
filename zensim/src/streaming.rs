@@ -937,6 +937,491 @@ pub(crate) fn compute_zensim_streaming(
     combine_scores(&scale_stats, masked, weights, config, mean_offset)
 }
 
+// ─── Delta stats computation ─────────────────────────────────────────────
+
+use crate::metric::{AlphaStratifiedStats, DeltaStats};
+
+/// Map |delta| (in 0..=255 integer units) to histogram bucket index.
+fn delta_to_bucket(abs_delta_u8: u8) -> usize {
+    match abs_delta_u8 {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4..=7 => 4,
+        8..=15 => 5,
+        16..=31 => 6,
+        32..=63 => 7,
+        64..=127 => 8,
+        128..=255 => 9,
+    }
+}
+
+/// Per-chunk accumulator for delta stats (merged across parallel chunks).
+struct DeltaAccum {
+    // Per-channel accumulators
+    sum_delta: [f64; 3],
+    sum_delta_sq: [f64; 3],
+    max_abs_delta: [f64; 3],
+    // Three-bin means (dark/mid/bright based on src value)
+    sum_delta_dark: [f64; 3],
+    count_dark: [u64; 3],
+    sum_delta_mid: [f64; 3],
+    count_mid: [u64; 3],
+    sum_delta_bright: [f64; 3],
+    count_bright: [u64; 3],
+    // Histogram buckets
+    histogram: [[u64; 10]; 3],
+    // Pixel counts
+    pixel_count: u64,
+    pixels_differing: u64,
+    pixels_differing_by_more_than_1: u64,
+    // Alpha-stratified (RGBA only)
+    opaque_count: u64,
+    opaque_sum_abs: [f64; 3],
+    opaque_max_abs: [f64; 3],
+    semi_count: u64,
+    semi_sum_abs: [f64; 3],
+    semi_max_abs: [f64; 3],
+    // For alpha-error correlation (Pearson)
+    sum_delta_mag: f64,       // sum of per-pixel max(|delta[c]|)
+    sum_one_minus_alpha: f64, // sum of (1 - alpha/255)
+    sum_delta_alpha: f64,     // sum of max(|delta|) * (1 - alpha/255)
+    sum_delta_mag_sq: f64,
+    sum_one_minus_alpha_sq: f64,
+    alpha_pixel_count: u64,
+}
+
+impl DeltaAccum {
+    fn new() -> Self {
+        Self {
+            sum_delta: [0.0; 3],
+            sum_delta_sq: [0.0; 3],
+            max_abs_delta: [0.0; 3],
+            sum_delta_dark: [0.0; 3],
+            count_dark: [0; 3],
+            sum_delta_mid: [0.0; 3],
+            count_mid: [0; 3],
+            sum_delta_bright: [0.0; 3],
+            count_bright: [0; 3],
+            histogram: [[0u64; 10]; 3],
+            pixel_count: 0,
+            pixels_differing: 0,
+            pixels_differing_by_more_than_1: 0,
+            opaque_count: 0,
+            opaque_sum_abs: [0.0; 3],
+            opaque_max_abs: [0.0; 3],
+            semi_count: 0,
+            semi_sum_abs: [0.0; 3],
+            semi_max_abs: [0.0; 3],
+            sum_delta_mag: 0.0,
+            sum_one_minus_alpha: 0.0,
+            sum_delta_alpha: 0.0,
+            sum_delta_mag_sq: 0.0,
+            sum_one_minus_alpha_sq: 0.0,
+            alpha_pixel_count: 0,
+        }
+    }
+
+    fn merge(&mut self, other: &Self) {
+        for c in 0..3 {
+            self.sum_delta[c] += other.sum_delta[c];
+            self.sum_delta_sq[c] += other.sum_delta_sq[c];
+            self.max_abs_delta[c] = self.max_abs_delta[c].max(other.max_abs_delta[c]);
+            self.sum_delta_dark[c] += other.sum_delta_dark[c];
+            self.count_dark[c] += other.count_dark[c];
+            self.sum_delta_mid[c] += other.sum_delta_mid[c];
+            self.count_mid[c] += other.count_mid[c];
+            self.sum_delta_bright[c] += other.sum_delta_bright[c];
+            self.count_bright[c] += other.count_bright[c];
+            for b in 0..10 {
+                self.histogram[c][b] += other.histogram[c][b];
+            }
+            self.opaque_sum_abs[c] += other.opaque_sum_abs[c];
+            self.opaque_max_abs[c] = self.opaque_max_abs[c].max(other.opaque_max_abs[c]);
+            self.semi_sum_abs[c] += other.semi_sum_abs[c];
+            self.semi_max_abs[c] = self.semi_max_abs[c].max(other.semi_max_abs[c]);
+        }
+        self.pixel_count += other.pixel_count;
+        self.pixels_differing += other.pixels_differing;
+        self.pixels_differing_by_more_than_1 += other.pixels_differing_by_more_than_1;
+        self.opaque_count += other.opaque_count;
+        self.semi_count += other.semi_count;
+        self.sum_delta_mag += other.sum_delta_mag;
+        self.sum_one_minus_alpha += other.sum_one_minus_alpha;
+        self.sum_delta_alpha += other.sum_delta_alpha;
+        self.sum_delta_mag_sq += other.sum_delta_mag_sq;
+        self.sum_one_minus_alpha_sq += other.sum_one_minus_alpha_sq;
+        self.alpha_pixel_count += other.alpha_pixel_count;
+    }
+}
+
+/// Compute pixel-level delta statistics between two images.
+///
+/// Single parallel pass over both images. Operates in sRGB u8 space
+/// (values normalized to [0, 1]) for all sRGB formats. Linear formats
+/// are compared in linear space.
+pub(crate) fn compute_delta_stats(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> DeltaStats {
+    let width = source.width();
+    let height = source.height();
+    let has_alpha = source.pixel_format().has_alpha();
+    let pixel_format = source.pixel_format();
+
+    let chunk_rows = 64usize;
+    let num_chunks = height.div_ceil(chunk_rows);
+
+    // Parallel accumulation over row chunks
+    let accum = (0..num_chunks)
+        .into_par_iter()
+        .map(|chunk_idx| {
+            let mut acc = DeltaAccum::new();
+            let row_start = chunk_idx * chunk_rows;
+            let row_end = (row_start + chunk_rows).min(height);
+
+            for y in row_start..row_end {
+                let src_bytes = source.row_bytes(y);
+                let dst_bytes = distorted.row_bytes(y);
+
+                for x in 0..width {
+                    // Extract normalized [0,1] RGB values and optional alpha
+                    let (src_rgb, dst_rgb, alpha) = extract_pixel_rgb_normalized(
+                        src_bytes, dst_bytes, x, pixel_format,
+                    );
+
+                    let mut any_diff = false;
+                    let mut any_diff_gt1 = false;
+                    let mut pixel_max_abs_delta = 0.0f64;
+
+                    for c in 0..3 {
+                        let delta = src_rgb[c] - dst_rgb[c];
+                        let abs_delta = delta.abs();
+
+                        acc.sum_delta[c] += delta;
+                        acc.sum_delta_sq[c] += delta * delta;
+                        if abs_delta > acc.max_abs_delta[c] {
+                            acc.max_abs_delta[c] = abs_delta;
+                        }
+
+                        // Three-bin classification based on src value
+                        if src_rgb[c] < 1.0 / 3.0 {
+                            acc.sum_delta_dark[c] += delta;
+                            acc.count_dark[c] += 1;
+                        } else if src_rgb[c] < 2.0 / 3.0 {
+                            acc.sum_delta_mid[c] += delta;
+                            acc.count_mid[c] += 1;
+                        } else {
+                            acc.sum_delta_bright[c] += delta;
+                            acc.count_bright[c] += 1;
+                        }
+
+                        // Histogram bucket (in u8 units)
+                        let abs_delta_u8 =
+                            (abs_delta * 255.0).round().min(255.0) as u8;
+                        acc.histogram[c][delta_to_bucket(abs_delta_u8)] += 1;
+
+                        if abs_delta > 0.5 / 255.0 {
+                            any_diff = true;
+                        }
+                        if abs_delta > 1.5 / 255.0 {
+                            any_diff_gt1 = true;
+                        }
+
+                        if abs_delta > pixel_max_abs_delta {
+                            pixel_max_abs_delta = abs_delta;
+                        }
+                    }
+
+                    acc.pixel_count += 1;
+                    if any_diff {
+                        acc.pixels_differing += 1;
+                    }
+                    if any_diff_gt1 {
+                        acc.pixels_differing_by_more_than_1 += 1;
+                    }
+
+                    // Alpha stratification
+                    if has_alpha {
+                        if let Some(a) = alpha {
+                            let one_minus_a = 1.0 - a;
+                            if a >= 1.0 - 0.5 / 255.0 {
+                                // Opaque
+                                acc.opaque_count += 1;
+                                for c in 0..3 {
+                                    let ad = (src_rgb[c] - dst_rgb[c]).abs();
+                                    acc.opaque_sum_abs[c] += ad;
+                                    if ad > acc.opaque_max_abs[c] {
+                                        acc.opaque_max_abs[c] = ad;
+                                    }
+                                }
+                            } else if a > 0.5 / 255.0 {
+                                // Semitransparent
+                                acc.semi_count += 1;
+                                for c in 0..3 {
+                                    let ad = (src_rgb[c] - dst_rgb[c]).abs();
+                                    acc.semi_sum_abs[c] += ad;
+                                    if ad > acc.semi_max_abs[c] {
+                                        acc.semi_max_abs[c] = ad;
+                                    }
+                                }
+                            }
+
+                            // Pearson correlation accumulators
+                            acc.sum_delta_mag += pixel_max_abs_delta;
+                            acc.sum_one_minus_alpha += one_minus_a;
+                            acc.sum_delta_alpha += pixel_max_abs_delta * one_minus_a;
+                            acc.sum_delta_mag_sq +=
+                                pixel_max_abs_delta * pixel_max_abs_delta;
+                            acc.sum_one_minus_alpha_sq += one_minus_a * one_minus_a;
+                            acc.alpha_pixel_count += 1;
+                        }
+                    }
+                }
+            }
+            acc
+        })
+        .reduce(DeltaAccum::new, |mut a, b| {
+            a.merge(&b);
+            a
+        });
+
+    finalize_delta_stats(accum, has_alpha)
+}
+
+/// Extract normalized [0,1] RGB values from a pixel at position x in a row.
+/// Returns (src_rgb, dst_rgb, optional_alpha_normalized).
+#[inline]
+fn extract_pixel_rgb_normalized(
+    src_bytes: &[u8],
+    dst_bytes: &[u8],
+    x: usize,
+    format: PixelFormat,
+) -> ([f64; 3], [f64; 3], Option<f64>) {
+    match format {
+        PixelFormat::Srgb8Rgb => {
+            let off = x * 3;
+            let s = [
+                src_bytes[off] as f64 / 255.0,
+                src_bytes[off + 1] as f64 / 255.0,
+                src_bytes[off + 2] as f64 / 255.0,
+            ];
+            let d = [
+                dst_bytes[off] as f64 / 255.0,
+                dst_bytes[off + 1] as f64 / 255.0,
+                dst_bytes[off + 2] as f64 / 255.0,
+            ];
+            (s, d, None)
+        }
+        PixelFormat::Srgb8Rgba => {
+            let off = x * 4;
+            let s = [
+                src_bytes[off] as f64 / 255.0,
+                src_bytes[off + 1] as f64 / 255.0,
+                src_bytes[off + 2] as f64 / 255.0,
+            ];
+            let d = [
+                dst_bytes[off] as f64 / 255.0,
+                dst_bytes[off + 1] as f64 / 255.0,
+                dst_bytes[off + 2] as f64 / 255.0,
+            ];
+            let a = src_bytes[off + 3] as f64 / 255.0;
+            (s, d, Some(a))
+        }
+        PixelFormat::Srgb8Bgra => {
+            let off = x * 4;
+            let s = [
+                src_bytes[off + 2] as f64 / 255.0, // R
+                src_bytes[off + 1] as f64 / 255.0, // G
+                src_bytes[off] as f64 / 255.0,     // B
+            ];
+            let d = [
+                dst_bytes[off + 2] as f64 / 255.0,
+                dst_bytes[off + 1] as f64 / 255.0,
+                dst_bytes[off] as f64 / 255.0,
+            ];
+            let a = src_bytes[off + 3] as f64 / 255.0;
+            (s, d, Some(a))
+        }
+        PixelFormat::LinearF32Rgb => {
+            let off = x * 12;
+            let s = [
+                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            ];
+            let d = [
+                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            ];
+            (s, d, None)
+        }
+        PixelFormat::LinearF32Rgba => {
+            let off = x * 16;
+            let s = [
+                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            ];
+            let d = [
+                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            ];
+            let a = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
+            (s, d, Some(a))
+        }
+        PixelFormat::LinearF32Bgra => {
+            let off = x * 16;
+            let s = [
+                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64, // R
+                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,  // G
+                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,      // B
+            ];
+            let d = [
+                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
+            ];
+            let a = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
+            (s, d, Some(a))
+        }
+        #[allow(unreachable_patterns)]
+        _ => panic!("unsupported pixel format for delta stats: {:?}", format),
+    }
+}
+
+/// Convert accumulated delta stats to the final DeltaStats struct.
+fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
+    let n = acc.pixel_count as f64;
+    let inv_n = if n > 0.0 { 1.0 / n } else { 0.0 };
+
+    let mut mean_delta = [0.0; 3];
+    let mut stddev_delta = [0.0; 3];
+    let mut mean_delta_dark = [0.0; 3];
+    let mut mean_delta_mid = [0.0; 3];
+    let mut mean_delta_bright = [0.0; 3];
+    let mut delta_histogram = [[0.0f64; 10]; 3];
+    let mut percentiles = [[0.0f64; 4]; 3];
+
+    // Midpoints of histogram buckets in [0,1] range
+    let bucket_midpoints: [f64; 10] = [
+        0.0,
+        1.0 / 255.0,
+        2.0 / 255.0,
+        3.0 / 255.0,
+        5.5 / 255.0,
+        11.5 / 255.0,
+        23.5 / 255.0,
+        47.5 / 255.0,
+        95.5 / 255.0,
+        191.5 / 255.0,
+    ];
+
+    for c in 0..3 {
+        mean_delta[c] = acc.sum_delta[c] * inv_n;
+        let variance = (acc.sum_delta_sq[c] * inv_n) - (mean_delta[c] * mean_delta[c]);
+        stddev_delta[c] = variance.max(0.0).sqrt();
+
+        if acc.count_dark[c] > 0 {
+            mean_delta_dark[c] = acc.sum_delta_dark[c] / acc.count_dark[c] as f64;
+        }
+        if acc.count_mid[c] > 0 {
+            mean_delta_mid[c] = acc.sum_delta_mid[c] / acc.count_mid[c] as f64;
+        }
+        if acc.count_bright[c] > 0 {
+            mean_delta_bright[c] = acc.sum_delta_bright[c] / acc.count_bright[c] as f64;
+        }
+
+        // Normalize histogram to fractions
+        for (b, hist_frac) in delta_histogram[c].iter_mut().enumerate() {
+            *hist_frac = acc.histogram[c][b] as f64 * inv_n;
+        }
+
+        // Approximate percentiles from histogram
+        let pct_targets = [0.5, 0.95, 0.99, 1.0];
+        let mut cumulative = 0.0;
+        let mut pct_idx = 0;
+        for (b, &frac) in delta_histogram[c].iter().enumerate() {
+            cumulative += frac;
+            while pct_idx < 4 && cumulative >= pct_targets[pct_idx] {
+                percentiles[c][pct_idx] = bucket_midpoints[b];
+                pct_idx += 1;
+            }
+        }
+        // p100 is always the actual max
+        percentiles[c][3] = acc.max_abs_delta[c];
+    }
+
+    // Alpha-stratified stats
+    let opaque_stats = if has_alpha && acc.opaque_count > 0 {
+        let oc = acc.opaque_count as f64;
+        Some(AlphaStratifiedStats {
+            pixel_count: acc.opaque_count,
+            mean_abs_delta: [
+                acc.opaque_sum_abs[0] / oc,
+                acc.opaque_sum_abs[1] / oc,
+                acc.opaque_sum_abs[2] / oc,
+            ],
+            max_abs_delta: acc.opaque_max_abs,
+        })
+    } else {
+        None
+    };
+
+    let semitransparent_stats = if has_alpha && acc.semi_count > 0 {
+        let sc = acc.semi_count as f64;
+        Some(AlphaStratifiedStats {
+            pixel_count: acc.semi_count,
+            mean_abs_delta: [
+                acc.semi_sum_abs[0] / sc,
+                acc.semi_sum_abs[1] / sc,
+                acc.semi_sum_abs[2] / sc,
+            ],
+            max_abs_delta: acc.semi_max_abs,
+        })
+    } else {
+        None
+    };
+
+    // Pearson correlation between |delta| and (1 - alpha)
+    let alpha_error_correlation = if has_alpha && acc.alpha_pixel_count > 1 {
+        let n = acc.alpha_pixel_count as f64;
+        let mean_d = acc.sum_delta_mag / n;
+        let mean_a = acc.sum_one_minus_alpha / n;
+        let cov = acc.sum_delta_alpha / n - mean_d * mean_a;
+        let var_d = (acc.sum_delta_mag_sq / n - mean_d * mean_d).max(0.0);
+        let var_a = (acc.sum_one_minus_alpha_sq / n - mean_a * mean_a).max(0.0);
+        let denom = (var_d * var_a).sqrt();
+        if denom > 1e-10 {
+            Some((cov / denom).clamp(-1.0, 1.0))
+        } else {
+            Some(0.0)
+        }
+    } else {
+        None
+    };
+
+    DeltaStats {
+        mean_delta,
+        stddev_delta,
+        max_abs_delta: acc.max_abs_delta,
+        mean_delta_dark,
+        mean_delta_mid,
+        mean_delta_bright,
+        delta_histogram,
+        percentiles,
+        pixel_count: acc.pixel_count,
+        pixels_differing: acc.pixels_differing,
+        pixels_differing_by_more_than_1: acc.pixels_differing_by_more_than_1,
+        opaque_stats,
+        semitransparent_stats,
+        alpha_error_correlation,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,6 @@
-/// Bit-manipulation distortion functions for testing error classification.
-/// These produce errors that ImageMagick can't express: truncation, premul math, rounding.
+#![allow(dead_code)]
+// Bit-manipulation distortion functions for testing error classification.
+// These produce errors that ImageMagick can't express: truncation, premul math, rounding.
 
 /// Truncation: floor(v / 2) * 2. ~50% of pixels off by 1, max delta = 1.
 pub fn truncate_lsb(pixels: &[[u8; 3]]) -> Vec<[u8; 3]> {

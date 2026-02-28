@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Multi-frequency checkerboard. Strong multi-scale edges.
 pub fn gen_checkerboard(w: usize, h: usize, freq: usize) -> Vec<[u8; 3]> {
     let mut pixels = vec![[0u8; 3]; w * h];

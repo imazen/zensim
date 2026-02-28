@@ -96,7 +96,10 @@ mod streaming;
 
 // --- Primary API ---
 pub use error::ZensimError;
-pub use metric::{ErrorCategory, ErrorClassification, Zensim, ZensimResult, distance_to_score};
+pub use metric::{
+    AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorCategory, ErrorClassification, Zensim,
+    ZensimResult, distance_to_score,
+};
 pub use profile::ZensimProfile;
 pub use source::{ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};
 
