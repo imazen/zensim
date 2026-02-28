@@ -41,6 +41,7 @@ pub mod diff_image;
 pub mod display;
 pub mod error;
 pub mod hasher;
+pub mod manager;
 pub mod testing;
 
 // Re-export key types at crate root for convenience
