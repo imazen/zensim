@@ -40,6 +40,7 @@ half = { workspace = true, optional = true }
 image = { workspace = true }
 half = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
+serde_json = "1"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]

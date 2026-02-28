@@ -1683,6 +1683,7 @@ dependencies = [
  "magetypes",
  "rayon",
  "rgb",
+ "serde_json",
  "thiserror",
  "zencodec-types",
 ]
