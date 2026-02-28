@@ -30,6 +30,20 @@ pub enum PixelFormat {
     /// Linear light 32-bit float BGRA with straight alpha. 16 bytes per pixel.
     /// `[B, G, R, A]` as `f32`. Common in GPU pipelines.
     LinearF32Bgra,
+    /// sRGB 16-bit RGB. 6 bytes per pixel: `[R, G, B]` as `u16` (0-65535).
+    /// Used by PNG 16-bit, TIFF, and scientific imaging pipelines.
+    Srgb16Rgb,
+    /// sRGB 16-bit RGBA with straight alpha. 8 bytes per pixel: `[R, G, B, A]` as `u16`.
+    Srgb16Rgba,
+    /// Linear light 16-bit float (IEEE 754 half-precision) RGB. 6 bytes per pixel.
+    /// `[R, G, B]` as `f16`. Requires the `f16` feature.
+    LinearF16Rgb,
+    /// Linear light 16-bit float RGBA with straight alpha. 8 bytes per pixel.
+    /// `[R, G, B, A]` as `f16`. Requires the `f16` feature.
+    LinearF16Rgba,
+    /// Linear light 16-bit float BGRA with straight alpha. 8 bytes per pixel.
+    /// `[B, G, R, A]` as `f16`. Common in GPU pipelines. Requires the `f16` feature.
+    LinearF16Bgra,
 }
 
 impl PixelFormat {
@@ -39,6 +53,8 @@ impl PixelFormat {
         match self {
             Self::Srgb8Rgb => 3,
             Self::Srgb8Rgba | Self::Srgb8Bgra => 4,
+            Self::Srgb16Rgb | Self::LinearF16Rgb => 6,
+            Self::Srgb16Rgba | Self::LinearF16Rgba | Self::LinearF16Bgra => 8,
             Self::LinearF32Rgb => 12,
             Self::LinearF32Rgba | Self::LinearF32Bgra => 16,
         }
@@ -49,7 +65,13 @@ impl PixelFormat {
     pub fn has_alpha(self) -> bool {
         matches!(
             self,
-            Self::Srgb8Rgba | Self::Srgb8Bgra | Self::LinearF32Rgba | Self::LinearF32Bgra
+            Self::Srgb8Rgba
+                | Self::Srgb8Bgra
+                | Self::Srgb16Rgba
+                | Self::LinearF32Rgba
+                | Self::LinearF32Bgra
+                | Self::LinearF16Rgba
+                | Self::LinearF16Bgra
         )
     }
 }

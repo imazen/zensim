@@ -182,6 +182,36 @@ fn pixel_format_equivalence() {
             converter: to_linear_f32_bgra,
             tolerance: 0.15,
         },
+        FormatTest {
+            name: "Srgb16Rgb",
+            format: PixelFormat::Srgb16Rgb,
+            converter: to_srgb16_rgb,
+            tolerance: 0.01,
+        },
+        FormatTest {
+            name: "Srgb16Rgba",
+            format: PixelFormat::Srgb16Rgba,
+            converter: to_srgb16_rgba,
+            tolerance: 0.01,
+        },
+        FormatTest {
+            name: "LinearF16Rgb",
+            format: PixelFormat::LinearF16Rgb,
+            converter: to_linear_f16_rgb,
+            tolerance: 0.5,
+        },
+        FormatTest {
+            name: "LinearF16Rgba",
+            format: PixelFormat::LinearF16Rgba,
+            converter: to_linear_f16_rgba,
+            tolerance: 0.5,
+        },
+        FormatTest {
+            name: "LinearF16Bgra",
+            format: PixelFormat::LinearF16Bgra,
+            converter: to_linear_f16_bgra,
+            tolerance: 0.5,
+        },
     ];
 
     println!("  Reference (RgbSlice): score={:.6}", ref_result.score);

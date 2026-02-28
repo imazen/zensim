@@ -56,6 +56,21 @@ pub fn srgb_u8_to_linear(v: u8) -> f32 {
     srgb_lut()[v as usize]
 }
 
+/// Convert sRGB u16 (0-65535) to linear f32 via the sRGB transfer function.
+///
+/// Uses f64 intermediate precision then truncates to f32. No LUT — the 65536-entry
+/// table would be 256KB, too large for L1 cache.
+#[inline]
+pub(crate) fn srgb_u16_to_linear(v: u16) -> f32 {
+    let s = v as f64 / 65535.0;
+    let linear = if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    };
+    linear as f32
+}
+
 /// Fast cube root: bit manipulation + 2 Newton-Raphson iterations in f32.
 /// Accurate to ~20 bits (sufficient for image quality metrics).
 #[inline(always)]
@@ -1299,6 +1314,116 @@ pub(crate) fn composite_linear_f32_bgra(row: &[[f32; 4]], y: usize, out: &mut [[
             let inv = 1.0 - a;
             let bg = checkerboard_linear(x, y);
             out[x] = [
+                r.mul_add(a, bg * inv),
+                g.mul_add(a, bg * inv),
+                b.mul_add(a, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Composite sRGB u16 RGBA over a checkerboard, producing linear f32 RGB.
+///
+/// u16 values 0-65535 are linearized via `srgb_u16_to_linear()`, then alpha-blended
+/// in linear space against the checkerboard background.
+pub(crate) fn composite_srgb16_rgba_to_linear(
+    row: &[u8],
+    width: usize,
+    y: usize,
+    out: &mut [[f32; 3]],
+) {
+    for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
+        let off = x * 8; // 4 channels × 2 bytes
+        let r = u16::from_ne_bytes([row[off], row[off + 1]]);
+        let g = u16::from_ne_bytes([row[off + 2], row[off + 3]]);
+        let b = u16::from_ne_bytes([row[off + 4], row[off + 5]]);
+        let a = u16::from_ne_bytes([row[off + 6], row[off + 7]]);
+        if a == 65535 {
+            *out_pixel = [
+                srgb_u16_to_linear(r),
+                srgb_u16_to_linear(g),
+                srgb_u16_to_linear(b),
+            ];
+        } else if a == 0 {
+            let bg = checkerboard_linear(x, y);
+            *out_pixel = [bg, bg, bg];
+        } else {
+            let alpha = a as f32 / 65535.0;
+            let inv = 1.0 - alpha;
+            let bg = checkerboard_linear(x, y);
+            let rl = srgb_u16_to_linear(r);
+            let gl = srgb_u16_to_linear(g);
+            let bl = srgb_u16_to_linear(b);
+            *out_pixel = [
+                rl.mul_add(alpha, bg * inv),
+                gl.mul_add(alpha, bg * inv),
+                bl.mul_add(alpha, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Composite linear f16 RGBA over a checkerboard, producing linear f32 RGB.
+///
+/// Reads 4 f16 values per pixel from raw bytes (8 bytes/pixel), converts to f32,
+/// then alpha-blends in linear space.
+#[cfg(feature = "f16")]
+pub(crate) fn composite_linear_f16_rgba(
+    row: &[u8],
+    width: usize,
+    y: usize,
+    out: &mut [[f32; 3]],
+) {
+    use half::f16;
+    for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
+        let off = x * 8;
+        let r = f16::from_ne_bytes([row[off], row[off + 1]]).to_f32();
+        let g = f16::from_ne_bytes([row[off + 2], row[off + 3]]).to_f32();
+        let b = f16::from_ne_bytes([row[off + 4], row[off + 5]]).to_f32();
+        let a = f16::from_ne_bytes([row[off + 6], row[off + 7]]).to_f32();
+        if a >= 1.0 {
+            *out_pixel = [r, g, b];
+        } else if a <= 0.0 {
+            let bg = checkerboard_linear(x, y);
+            *out_pixel = [bg, bg, bg];
+        } else {
+            let inv = 1.0 - a;
+            let bg = checkerboard_linear(x, y);
+            *out_pixel = [
+                r.mul_add(a, bg * inv),
+                g.mul_add(a, bg * inv),
+                b.mul_add(a, bg * inv),
+            ];
+        }
+    }
+}
+
+/// Composite linear f16 BGRA over a checkerboard, producing linear f32 RGB.
+///
+/// Swizzles B↔R. Reads 4 f16 values per pixel from raw bytes.
+#[cfg(feature = "f16")]
+pub(crate) fn composite_linear_f16_bgra(
+    row: &[u8],
+    width: usize,
+    y: usize,
+    out: &mut [[f32; 3]],
+) {
+    use half::f16;
+    for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
+        let off = x * 8;
+        let b = f16::from_ne_bytes([row[off], row[off + 1]]).to_f32();
+        let g = f16::from_ne_bytes([row[off + 2], row[off + 3]]).to_f32();
+        let r = f16::from_ne_bytes([row[off + 4], row[off + 5]]).to_f32();
+        let a = f16::from_ne_bytes([row[off + 6], row[off + 7]]).to_f32();
+        if a >= 1.0 {
+            *out_pixel = [r, g, b];
+        } else if a <= 0.0 {
+            let bg = checkerboard_linear(x, y);
+            *out_pixel = [bg, bg, bg];
+        } else {
+            let inv = 1.0 - a;
+            let bg = checkerboard_linear(x, y);
+            *out_pixel = [
                 r.mul_add(a, bg * inv),
                 g.mul_add(a, bg * inv),
                 b.mul_add(a, bg * inv),

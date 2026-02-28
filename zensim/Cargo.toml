@@ -22,6 +22,8 @@ training = []
 imgref = ["dep:imgref", "dep:rgb"]
 ## Enable ImageSource impls for zencodec_types_api::PixelSlice and PixelBuffer.
 zencodec-types = ["dep:zencodec-types"]
+## Enable LinearF16 pixel formats (requires `half` crate for IEEE 754 half-precision).
+f16 = ["dep:half"]
 
 [dependencies]
 archmage = { workspace = true }
@@ -32,9 +34,11 @@ thiserror = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
 zencodec-types = { workspace = true, optional = true }
+half = { workspace = true, optional = true }
 
 [dev-dependencies]
 image = { workspace = true }
+half = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
