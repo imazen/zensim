@@ -1102,6 +1102,9 @@ struct DeltaAccum {
     semi_count: u64,
     semi_sum_abs: [f64; 3],
     semi_max_abs: [f64; 3],
+    // Alpha channel delta tracking
+    alpha_max_delta: u8,         // max |src_alpha - dst_alpha| in 0-255 units
+    alpha_pixels_differing: u64, // pixels where alpha differs at all
     // For alpha-error correlation (Pearson)
     sum_delta_mag: f64,       // sum of per-pixel max(|delta[c]|)
     sum_one_minus_alpha: f64, // sum of (1 - alpha/255)
@@ -1127,6 +1130,8 @@ impl DeltaAccum {
             semi_count: 0,
             semi_sum_abs: [0.0; 3],
             semi_max_abs: [0.0; 3],
+            alpha_max_delta: 0,
+            alpha_pixels_differing: 0,
             sum_delta_mag: 0.0,
             sum_one_minus_alpha: 0.0,
             sum_delta_alpha: 0.0,
@@ -1154,6 +1159,8 @@ impl DeltaAccum {
         self.pixels_differing_by_more_than_1 += other.pixels_differing_by_more_than_1;
         self.opaque_count += other.opaque_count;
         self.semi_count += other.semi_count;
+        self.alpha_max_delta = self.alpha_max_delta.max(other.alpha_max_delta);
+        self.alpha_pixels_differing += other.alpha_pixels_differing;
         self.sum_delta_mag += other.sum_delta_mag;
         self.sum_one_minus_alpha += other.sum_one_minus_alpha;
         self.sum_delta_alpha += other.sum_delta_alpha;
@@ -1237,9 +1244,19 @@ pub(crate) fn compute_delta_stats(
                         acc.pixels_differing_by_more_than_1 += 1;
                     }
 
-                    // Alpha stratification
+                    // Alpha stratification and alpha delta tracking
                     if has_alpha {
-                        if let Some(a) = alpha {
+                        if let Some((src_a, dst_a)) = alpha {
+                            // Track alpha channel delta (quantized to 0-255)
+                            let alpha_delta = ((src_a - dst_a).abs() * 255.0).round() as u8;
+                            if alpha_delta > acc.alpha_max_delta {
+                                acc.alpha_max_delta = alpha_delta;
+                            }
+                            if alpha_delta > 0 {
+                                acc.alpha_pixels_differing += 1;
+                            }
+
+                            let a = src_a;
                             let one_minus_a = 1.0 - a;
                             if a >= 1.0 - 0.5 / 255.0 {
                                 // Opaque
@@ -1285,14 +1302,14 @@ pub(crate) fn compute_delta_stats(
 }
 
 /// Extract normalized [0,1] RGB values from a pixel at position x in a row.
-/// Returns (src_rgb, dst_rgb, optional_alpha_normalized).
+/// Returns (src_rgb, dst_rgb, optional (src_alpha, dst_alpha) normalized).
 #[inline]
 fn extract_pixel_rgb_normalized(
     src_bytes: &[u8],
     dst_bytes: &[u8],
     x: usize,
     format: PixelFormat,
-) -> ([f64; 3], [f64; 3], Option<f64>) {
+) -> ([f64; 3], [f64; 3], Option<(f64, f64)>) {
     match format {
         PixelFormat::Srgb8Rgb => {
             let off = x * 3;
@@ -1320,8 +1337,9 @@ fn extract_pixel_rgb_normalized(
                 dst_bytes[off + 1] as f64 / 255.0,
                 dst_bytes[off + 2] as f64 / 255.0,
             ];
-            let a = src_bytes[off + 3] as f64 / 255.0;
-            (s, d, Some(a))
+            let sa = src_bytes[off + 3] as f64 / 255.0;
+            let da = dst_bytes[off + 3] as f64 / 255.0;
+            (s, d, Some((sa, da)))
         }
         PixelFormat::Srgb8Bgra => {
             let off = x * 4;
@@ -1335,8 +1353,9 @@ fn extract_pixel_rgb_normalized(
                 dst_bytes[off + 1] as f64 / 255.0,
                 dst_bytes[off] as f64 / 255.0,
             ];
-            let a = src_bytes[off + 3] as f64 / 255.0;
-            (s, d, Some(a))
+            let sa = src_bytes[off + 3] as f64 / 255.0;
+            let da = dst_bytes[off + 3] as f64 / 255.0;
+            (s, d, Some((sa, da)))
         }
         PixelFormat::Srgb16Rgba => {
             let off = x * 8;
@@ -1350,8 +1369,9 @@ fn extract_pixel_rgb_normalized(
                 u16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]) as f64 / 65535.0,
                 u16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]) as f64 / 65535.0,
             ];
-            let a = u16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]) as f64 / 65535.0;
-            (s, d, Some(a))
+            let sa = u16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]) as f64 / 65535.0;
+            let da = u16::from_ne_bytes([dst_bytes[off + 6], dst_bytes[off + 7]]) as f64 / 65535.0;
+            (s, d, Some((sa, da)))
         }
         #[cfg(feature = "f16")]
         PixelFormat::SrgbF16Rgba => {
@@ -1367,8 +1387,9 @@ fn extract_pixel_rgb_normalized(
                 f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
                 f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
             ];
-            let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
-            (s, d, Some(a))
+            let sa = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
+            let da = f16::from_ne_bytes([dst_bytes[off + 6], dst_bytes[off + 7]]).to_f32() as f64;
+            (s, d, Some((sa, da)))
         }
         PixelFormat::LinearF32Rgba => {
             let off = x * 16;
@@ -1382,8 +1403,9 @@ fn extract_pixel_rgb_normalized(
                 f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
                 f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
             ];
-            let a = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
-            (s, d, Some(a))
+            let sa = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
+            let da = f32::from_ne_bytes(dst_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
+            (s, d, Some((sa, da)))
         }
         #[allow(unreachable_patterns)]
         _ => panic!("unsupported pixel format for delta stats: {:?}", format),
@@ -1461,6 +1483,9 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
         pixel_count: acc.pixel_count,
         pixels_differing: acc.pixels_differing,
         pixels_differing_by_more_than_1: acc.pixels_differing_by_more_than_1,
+        has_alpha,
+        alpha_max_delta: acc.alpha_max_delta,
+        alpha_pixels_differing: acc.alpha_pixels_differing,
         opaque_stats,
         semitransparent_stats,
         alpha_error_correlation,

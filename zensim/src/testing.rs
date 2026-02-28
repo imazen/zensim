@@ -54,6 +54,7 @@ pub struct RegressionTolerance {
     max_differing_pixel_fraction: f64,
     min_identical_channel_fraction: f64,
     min_score: f64,
+    max_alpha_delta: u8,
     ignore_alpha: bool,
 }
 
@@ -65,18 +66,24 @@ impl RegressionTolerance {
             max_differing_pixel_fraction: 0.0,
             min_identical_channel_fraction: 1.0,
             min_score: 100.0,
+            max_alpha_delta: 0,
             ignore_alpha: false,
         }
     }
 
     /// Allow off-by-1 rounding. Max delta 1/255, score >= 95.
     /// Any fraction of pixels may be affected.
+    ///
+    /// Alpha channel has zero tolerance by default — alpha divergence is
+    /// a structural bug, not a rounding artifact. Use [`max_alpha_delta`](Self::max_alpha_delta)
+    /// to relax this if needed.
     pub fn off_by_one() -> Self {
         Self {
             max_channel_delta: 1,
             max_differing_pixel_fraction: 1.0,
             min_identical_channel_fraction: 0.0,
             min_score: 95.0,
+            max_alpha_delta: 0,
             ignore_alpha: false,
         }
     }
@@ -105,12 +112,22 @@ impl RegressionTolerance {
         self
     }
 
-    /// Ignore the alpha channel when comparing RGBA images.
+    /// Set the maximum alpha channel delta (in 1/255 units).
+    ///
+    /// Defaults to 0 (zero tolerance) because alpha divergence between
+    /// two processing pipelines is typically a structural bug, not numerical
+    /// rounding. See `docs/alpha-channel-diffing.md` for the rationale.
+    pub fn max_alpha_delta(mut self, n: u8) -> Self {
+        self.max_alpha_delta = n;
+        self
+    }
+
+    /// Ignore the alpha channel entirely when comparing RGBA images.
     ///
     /// When set, RGBA inputs are treated as opaque (RGBX) — the alpha byte
-    /// is ignored and no checkerboard compositing is performed. This is useful
-    /// when comparing images that differ only in alpha but should be considered
-    /// identical in their visible RGB content.
+    /// is ignored for scoring (no checkerboard compositing) and the alpha
+    /// constraint does not affect pass/fail. Alpha stats are still tracked
+    /// in the report for informational purposes.
     ///
     /// Has no effect on RGB-only inputs.
     pub fn ignore_alpha(mut self) -> Self {
@@ -147,6 +164,8 @@ pub struct RegressionReport {
     pixels_differing: u64,
     pixels_failing: u64,
     identical_channel_fraction: f64,
+    alpha_max_delta: u8,
+    alpha_pixels_differing: u64,
     rounding_bias: Option<RoundingBias>,
     constraint_results: Vec<ConstraintResult>,
 }
@@ -197,6 +216,16 @@ impl RegressionReport {
         self.identical_channel_fraction
     }
 
+    /// Max alpha channel delta in 1/255 units. 0 for RGB-only inputs.
+    pub fn alpha_max_delta(&self) -> u8 {
+        self.alpha_max_delta
+    }
+
+    /// Pixels where alpha channel differs. 0 for RGB-only inputs.
+    pub fn alpha_pixels_differing(&self) -> u64 {
+        self.alpha_pixels_differing
+    }
+
     /// Rounding bias (only when category is RoundingError).
     pub fn rounding_bias(&self) -> Option<&RoundingBias> {
         self.rounding_bias.as_ref()
@@ -218,6 +247,8 @@ impl std::fmt::Debug for RegressionReport {
                 "identical_channel_fraction",
                 &self.identical_channel_fraction,
             )
+            .field("alpha_max_delta", &self.alpha_max_delta)
+            .field("alpha_pixels_differing", &self.alpha_pixels_differing)
             .field("rounding_bias", &self.rounding_bias)
             .finish()
     }
@@ -412,7 +443,28 @@ fn build_report(
         limit: format!(">={:.1}%", tolerance.min_identical_channel_fraction * 100.0),
     });
 
-    let passed = delta_pass && score_pass && diff_pass && ident_pass;
+    // 5. Alpha channel constraint (only for RGBA/BGRA inputs, skipped when ignore_alpha)
+    let alpha_pass = if ds.has_alpha && !tolerance.ignore_alpha {
+        let pass = ds.alpha_max_delta <= tolerance.max_alpha_delta;
+        constraint_results.push(ConstraintResult {
+            name: "Alpha delta",
+            passed: pass,
+            actual: if ds.alpha_pixels_differing > 0 {
+                format!(
+                    "max={}, {}/{} pixels differ",
+                    ds.alpha_max_delta, ds.alpha_pixels_differing, ds.pixel_count,
+                )
+            } else {
+                "identical".to_string()
+            },
+            limit: format!("{}/255", tolerance.max_alpha_delta),
+        });
+        pass
+    } else {
+        true // RGB-only or ignore_alpha: no alpha constraint
+    };
+
+    let passed = delta_pass && score_pass && diff_pass && ident_pass && alpha_pass;
 
     RegressionReport {
         passed,
@@ -424,6 +476,8 @@ fn build_report(
         pixels_differing: ds.pixels_differing,
         pixels_failing,
         identical_channel_fraction,
+        alpha_max_delta: ds.alpha_max_delta,
+        alpha_pixels_differing: ds.alpha_pixels_differing,
         rounding_bias: cr.classification.rounding_bias,
         constraint_results,
     }

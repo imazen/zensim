@@ -529,6 +529,14 @@ pub struct DeltaStats {
     /// Pixels where any channel |delta| > 1/255.
     pub pixels_differing_by_more_than_1: u64,
 
+    // --- Alpha channel ---
+    /// Whether the input format has an alpha channel.
+    pub has_alpha: bool,
+    /// Max |src_alpha - dst_alpha| in 0-255 units. 0 for RGB-only formats.
+    pub alpha_max_delta: u8,
+    /// Pixels where alpha differs at all. 0 for RGB-only formats.
+    pub alpha_pixels_differing: u64,
+
     // --- Alpha-stratified stats (only for RGBA/BGRA inputs) ---
     /// Delta stats for fully opaque pixels (A = max).
     pub opaque_stats: Option<AlphaStratifiedStats>,
