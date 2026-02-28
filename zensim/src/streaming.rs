@@ -1083,37 +1083,12 @@ pub(crate) fn compute_zensim_streaming(
 
 use crate::metric::{AlphaStratifiedStats, DeltaStats};
 
-/// Map |delta| (in 0..=255 integer units) to histogram bucket index.
-fn delta_to_bucket(abs_delta_u8: u8) -> usize {
-    match abs_delta_u8 {
-        0 => 0,
-        1 => 1,
-        2 => 2,
-        3 => 3,
-        4..=7 => 4,
-        8..=15 => 5,
-        16..=31 => 6,
-        32..=63 => 7,
-        64..=127 => 8,
-        128..=255 => 9,
-    }
-}
-
 /// Per-chunk accumulator for delta stats (merged across parallel chunks).
 struct DeltaAccum {
     // Per-channel accumulators
     sum_delta: [f64; 3],
     sum_delta_sq: [f64; 3],
     max_abs_delta: [f64; 3],
-    // Three-bin means (dark/mid/bright based on src value)
-    sum_delta_dark: [f64; 3],
-    count_dark: [u64; 3],
-    sum_delta_mid: [f64; 3],
-    count_mid: [u64; 3],
-    sum_delta_bright: [f64; 3],
-    count_bright: [u64; 3],
-    // Histogram buckets
-    histogram: [[u64; 10]; 3],
     // Signed small-delta histogram: bins -3..+3, index = delta + 3
     signed_small: [[u64; 7]; 3],
     // Pixel counts
@@ -1142,13 +1117,6 @@ impl DeltaAccum {
             sum_delta: [0.0; 3],
             sum_delta_sq: [0.0; 3],
             max_abs_delta: [0.0; 3],
-            sum_delta_dark: [0.0; 3],
-            count_dark: [0; 3],
-            sum_delta_mid: [0.0; 3],
-            count_mid: [0; 3],
-            sum_delta_bright: [0.0; 3],
-            count_bright: [0; 3],
-            histogram: [[0u64; 10]; 3],
             signed_small: [[0u64; 7]; 3],
             pixel_count: 0,
             pixels_differing: 0,
@@ -1173,15 +1141,6 @@ impl DeltaAccum {
             self.sum_delta[c] += other.sum_delta[c];
             self.sum_delta_sq[c] += other.sum_delta_sq[c];
             self.max_abs_delta[c] = self.max_abs_delta[c].max(other.max_abs_delta[c]);
-            self.sum_delta_dark[c] += other.sum_delta_dark[c];
-            self.count_dark[c] += other.count_dark[c];
-            self.sum_delta_mid[c] += other.sum_delta_mid[c];
-            self.count_mid[c] += other.count_mid[c];
-            self.sum_delta_bright[c] += other.sum_delta_bright[c];
-            self.count_bright[c] += other.count_bright[c];
-            for b in 0..10 {
-                self.histogram[c][b] += other.histogram[c][b];
-            }
             for b in 0..7 {
                 self.signed_small[c][b] += other.signed_small[c][b];
             }
@@ -1251,22 +1210,6 @@ pub(crate) fn compute_delta_stats(
                         if abs_delta > acc.max_abs_delta[c] {
                             acc.max_abs_delta[c] = abs_delta;
                         }
-
-                        // Three-bin classification based on src value
-                        if src_rgb[c] < 1.0 / 3.0 {
-                            acc.sum_delta_dark[c] += delta;
-                            acc.count_dark[c] += 1;
-                        } else if src_rgb[c] < 2.0 / 3.0 {
-                            acc.sum_delta_mid[c] += delta;
-                            acc.count_mid[c] += 1;
-                        } else {
-                            acc.sum_delta_bright[c] += delta;
-                            acc.count_bright[c] += 1;
-                        }
-
-                        // Histogram bucket (in u8 units)
-                        let abs_delta_u8 = (abs_delta * 255.0).round().min(255.0) as u8;
-                        acc.histogram[c][delta_to_bucket(abs_delta_u8)] += 1;
 
                         // Signed small-delta histogram: bins -3..+3
                         let signed_delta = (delta * 255.0).round() as i32;
@@ -1454,59 +1397,11 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
 
     let mut mean_delta = [0.0; 3];
     let mut stddev_delta = [0.0; 3];
-    let mut mean_delta_dark = [0.0; 3];
-    let mut mean_delta_mid = [0.0; 3];
-    let mut mean_delta_bright = [0.0; 3];
-    let mut delta_histogram = [[0.0f64; 10]; 3];
-    let mut percentiles = [[0.0f64; 4]; 3];
-
-    // Midpoints of histogram buckets in [0,1] range
-    let bucket_midpoints: [f64; 10] = [
-        0.0,
-        1.0 / 255.0,
-        2.0 / 255.0,
-        3.0 / 255.0,
-        5.5 / 255.0,
-        11.5 / 255.0,
-        23.5 / 255.0,
-        47.5 / 255.0,
-        95.5 / 255.0,
-        191.5 / 255.0,
-    ];
 
     for c in 0..3 {
         mean_delta[c] = acc.sum_delta[c] * inv_n;
         let variance = (acc.sum_delta_sq[c] * inv_n) - (mean_delta[c] * mean_delta[c]);
         stddev_delta[c] = variance.max(0.0).sqrt();
-
-        if acc.count_dark[c] > 0 {
-            mean_delta_dark[c] = acc.sum_delta_dark[c] / acc.count_dark[c] as f64;
-        }
-        if acc.count_mid[c] > 0 {
-            mean_delta_mid[c] = acc.sum_delta_mid[c] / acc.count_mid[c] as f64;
-        }
-        if acc.count_bright[c] > 0 {
-            mean_delta_bright[c] = acc.sum_delta_bright[c] / acc.count_bright[c] as f64;
-        }
-
-        // Normalize histogram to fractions
-        for (b, hist_frac) in delta_histogram[c].iter_mut().enumerate() {
-            *hist_frac = acc.histogram[c][b] as f64 * inv_n;
-        }
-
-        // Approximate percentiles from histogram
-        let pct_targets = [0.5, 0.95, 0.99, 1.0];
-        let mut cumulative = 0.0;
-        let mut pct_idx = 0;
-        for (b, &frac) in delta_histogram[c].iter().enumerate() {
-            cumulative += frac;
-            while pct_idx < 4 && cumulative >= pct_targets[pct_idx] {
-                percentiles[c][pct_idx] = bucket_midpoints[b];
-                pct_idx += 1;
-            }
-        }
-        // p100 is always the actual max
-        percentiles[c][3] = acc.max_abs_delta[c];
     }
 
     // Alpha-stratified stats
@@ -1562,11 +1457,6 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
         mean_delta,
         stddev_delta,
         max_abs_delta: acc.max_abs_delta,
-        mean_delta_dark,
-        mean_delta_mid,
-        mean_delta_bright,
-        delta_histogram,
-        percentiles,
         signed_small_histogram: acc.signed_small,
         pixel_count: acc.pixel_count,
         pixels_differing: acc.pixels_differing,

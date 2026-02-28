@@ -97,9 +97,12 @@ mod streaming;
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{
-    AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorCategory, ErrorClassification,
-    RoundingBias, Zensim, ZensimResult, distance_to_score,
+    ErrorCategory, RegressionReport, RegressionTolerance, RoundingBias, Zensim, ZensimResult,
+    distance_to_score,
 };
+
+// --- Classification internals (pub for tests, #[doc(hidden)] in source) ---
+pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};
 pub use profile::ZensimProfile;
 pub use source::{AlphaMode, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};
 

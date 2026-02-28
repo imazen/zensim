@@ -115,10 +115,8 @@ fn print_delta_stats(name: &str, cr: &ClassifiedResult) {
         println!("    signed_small[{ch_name}]: {}", parts.join("  "));
     }
     println!(
-        "    classification: RE={:.3} CS={:.3} AC={:.3}",
-        cr.classification.rounding_error,
-        cr.classification.channel_swap,
-        cr.classification.alpha_compositing,
+        "    classification: {:?} (confidence={:.3})",
+        cr.classification.dominant, cr.classification.confidence,
     );
     if let Some(ref bias) = cr.classification.rounding_bias {
         println!(
@@ -254,9 +252,9 @@ fn rgb_bgr_detected_as_channel_swap() {
         cr.delta_stats.max_abs_delta[0],
     );
     assert!(
-        cr.classification.channel_swap > 0.3,
-        "RGB↔BGR should be classified as channel swap, got {:.3}",
-        cr.classification.channel_swap,
+        cr.classification.confidence > 0.3,
+        "RGB↔BGR should have high confidence, got {:.3}",
+        cr.classification.confidence,
     );
     assert_eq!(
         cr.classification.dominant,
@@ -304,9 +302,9 @@ fn truncate_lsb_detected_as_rounding_error() {
         "truncation should have zero pixels differing by more than 1",
     );
     assert_eq!(
-        cr.classification.rounding_error, 1.0,
-        "truncation should have rounding_error confidence = 1.0, got {:.3}",
-        cr.classification.rounding_error,
+        cr.classification.confidence, 1.0,
+        "truncation should have confidence = 1.0, got {:.3}",
+        cr.classification.confidence,
     );
     assert_eq!(
         cr.classification.dominant,
@@ -458,9 +456,9 @@ fn premul_as_straight_detected() {
         );
     }
     assert!(
-        cr.classification.alpha_compositing > 0.3,
-        "premul_as_straight should classify as alpha compositing, got {:.3}",
-        cr.classification.alpha_compositing,
+        cr.classification.confidence > 0.3,
+        "premul_as_straight should have high confidence, got {:.3}",
+        cr.classification.confidence,
     );
     assert_eq!(
         cr.classification.dominant,
@@ -484,9 +482,9 @@ fn straight_as_premul_detected() {
         );
     }
     assert!(
-        cr.classification.alpha_compositing > 0.3,
-        "straight_as_premul should classify as alpha compositing, got {:.3}",
-        cr.classification.alpha_compositing,
+        cr.classification.confidence > 0.3,
+        "straight_as_premul should have high confidence, got {:.3}",
+        cr.classification.confidence,
     );
     assert_eq!(
         cr.classification.dominant,

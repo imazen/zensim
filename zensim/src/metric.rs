@@ -440,6 +440,7 @@ pub struct ZensimResult {
 ///
 /// Only categories with provably defensible statistical signatures are offered.
 /// If no category can be identified with high confidence, `Unclassified` is returned.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCategory {
     /// Images are perceptually identical (score ≈ 100).
@@ -456,23 +457,16 @@ pub enum ErrorCategory {
 
 /// Decomposed error classification for a source/distorted pair.
 ///
-/// Each field is a confidence score (0.0–1.0) for that error category.
 /// `dominant` is the category with the highest confidence (or `Identical`
 /// if the overall score is ≈ 100).
+#[doc(hidden)]
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ErrorClassification {
     /// The dominant error category.
     pub dominant: ErrorCategory,
     /// Overall confidence in the classification (0.0–1.0).
     pub confidence: f64,
-    /// Rounding error confidence (off-by-N, LUT precision, truncation).
-    pub rounding_error: f64,
-    /// Channel swap confidence.
-    pub channel_swap: f64,
-    /// Alpha compositing error confidence.
-    pub alpha_compositing: f64,
-    /// Per-channel XYB mean offset: `[X, Y, B]`, signed.
-    pub mean_offset: [f64; 3],
     /// Rounding bias analysis (only populated when `dominant == RoundingError`).
     ///
     /// Measures how balanced the rounding errors are across positive and negative
@@ -486,6 +480,7 @@ pub struct ErrorClassification {
 /// rounding mode differences — nothing to worry about. A heavily skewed
 /// distribution (mostly one direction) suggests systematic truncation or
 /// a floor/ceil bias that may indicate a pipeline bug.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct RoundingBias {
     /// Per-channel ratio of positive-to-total differing pixels.
@@ -501,10 +496,289 @@ pub struct RoundingBias {
     pub balanced: bool,
 }
 
+// ─── Regression checking API ─────────────────────────────────────────────
+
+/// Tolerance for regression checking. All constraints must pass.
+///
+/// Use presets ([`exact()`](Self::exact), [`off_by_one()`](Self::off_by_one))
+/// or build custom tolerances with the builder methods.
+///
+/// # Examples
+///
+/// ```
+/// use zensim::RegressionTolerance;
+///
+/// // Pixel-identical — no differences allowed
+/// let t = RegressionTolerance::exact();
+///
+/// // Off-by-1, but at most 5% of pixels may differ
+/// let t = RegressionTolerance::off_by_one()
+///     .max_differing_pixel_fraction(0.05);
+///
+/// // Allow up to 3/255 delta, score must be >= 90
+/// let t = RegressionTolerance::off_by_one()
+///     .max_channel_delta(3)
+///     .min_score(90.0);
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct RegressionTolerance {
+    /// Max per-channel delta for any pixel (1/255 units). Default: 0.
+    max_channel_delta: u8,
+    /// Max fraction of pixels where any channel differs. Default: 0.0.
+    max_differing_pixel_fraction: f64,
+    /// Min fraction of (pixel, channel) values that are byte-identical.
+    /// Out of pixel_count * 3 total values. Default: 1.0.
+    min_identical_channel_fraction: f64,
+    /// Min acceptable zensim score (0–100). Default: 100.0.
+    min_score: f64,
+}
+
+impl RegressionTolerance {
+    /// Pixel-identical. No differences allowed.
+    pub fn exact() -> Self {
+        Self {
+            max_channel_delta: 0,
+            max_differing_pixel_fraction: 0.0,
+            min_identical_channel_fraction: 1.0,
+            min_score: 100.0,
+        }
+    }
+
+    /// Allow off-by-1 rounding. Max delta 1/255, score >= 95.
+    /// Any fraction of pixels may be affected.
+    pub fn off_by_one() -> Self {
+        Self {
+            max_channel_delta: 1,
+            max_differing_pixel_fraction: 1.0,
+            min_identical_channel_fraction: 0.0,
+            min_score: 95.0,
+        }
+    }
+
+    /// Set the maximum per-channel delta (in 1/255 units).
+    pub fn max_channel_delta(mut self, n: u8) -> Self {
+        self.max_channel_delta = n;
+        self
+    }
+
+    /// Set the maximum fraction of pixels where any channel differs.
+    pub fn max_differing_pixel_fraction(mut self, f: f64) -> Self {
+        self.max_differing_pixel_fraction = f;
+        self
+    }
+
+    /// Set the minimum fraction of (pixel, channel) values that must be byte-identical.
+    pub fn min_identical_channel_fraction(mut self, f: f64) -> Self {
+        self.min_identical_channel_fraction = f;
+        self
+    }
+
+    /// Set the minimum acceptable zensim score (0–100).
+    pub fn min_score(mut self, s: f64) -> Self {
+        self.min_score = s;
+        self
+    }
+}
+
+/// Per-constraint pass/fail detail (drives Display output).
+#[derive(Clone)]
+struct ConstraintResult {
+    name: &'static str,
+    passed: bool,
+    actual: String,
+    limit: String,
+}
+
+/// Result of comparing expected vs actual images against a tolerance.
+///
+/// Use [`Zensim::check_regression()`] to produce this.
+///
+/// The [`Display`](std::fmt::Display) impl produces human-readable prose
+/// suitable for test output. The [`Debug`] impl shows structured key-value
+/// data suitable for CI parsing.
+#[non_exhaustive]
+#[derive(Clone)]
+pub struct RegressionReport {
+    /// Whether all constraints passed.
+    passed: bool,
+    /// Zensim similarity score (0–100).
+    score: f64,
+    /// Detected error category.
+    category: ErrorCategory,
+    /// Confidence in the category (0.0–1.0).
+    confidence: f64,
+    /// Max per-channel delta in 1/255 units.
+    max_channel_delta: [u8; 3],
+    /// Total pixels compared.
+    pixel_count: u64,
+    /// Pixels where any channel differs.
+    pixels_differing: u64,
+    /// Pixels exceeding tolerance's max_channel_delta.
+    pixels_failing: u64,
+    /// Fraction of (pixel, channel) values that are byte-identical.
+    identical_channel_fraction: f64,
+    /// Rounding bias (only when category is RoundingError).
+    rounding_bias: Option<RoundingBias>,
+    /// Per-constraint pass/fail details (for Display).
+    constraint_results: Vec<ConstraintResult>,
+}
+
+impl RegressionReport {
+    /// Whether all constraints passed.
+    pub fn passed(&self) -> bool {
+        self.passed
+    }
+
+    /// Zensim similarity score (0–100).
+    pub fn score(&self) -> f64 {
+        self.score
+    }
+
+    /// Detected error category.
+    pub fn category(&self) -> ErrorCategory {
+        self.category
+    }
+
+    /// Confidence in the category (0.0–1.0).
+    pub fn confidence(&self) -> f64 {
+        self.confidence
+    }
+
+    /// Max per-channel delta in 1/255 units `[R, G, B]`.
+    pub fn max_channel_delta(&self) -> [u8; 3] {
+        self.max_channel_delta
+    }
+
+    /// Total pixels compared.
+    pub fn pixel_count(&self) -> u64 {
+        self.pixel_count
+    }
+
+    /// Pixels where any channel differs.
+    pub fn pixels_differing(&self) -> u64 {
+        self.pixels_differing
+    }
+
+    /// Pixels exceeding tolerance's max_channel_delta.
+    pub fn pixels_failing(&self) -> u64 {
+        self.pixels_failing
+    }
+
+    /// Fraction of (pixel, channel) values that are byte-identical.
+    pub fn identical_channel_fraction(&self) -> f64 {
+        self.identical_channel_fraction
+    }
+
+    /// Rounding bias (only when category is RoundingError).
+    pub fn rounding_bias(&self) -> Option<&RoundingBias> {
+        self.rounding_bias.as_ref()
+    }
+}
+
+impl std::fmt::Debug for RegressionReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegressionReport")
+            .field("passed", &self.passed)
+            .field("score", &self.score)
+            .field("category", &self.category)
+            .field("confidence", &self.confidence)
+            .field("max_channel_delta", &self.max_channel_delta)
+            .field("pixel_count", &self.pixel_count)
+            .field("pixels_differing", &self.pixels_differing)
+            .field("pixels_failing", &self.pixels_failing)
+            .field(
+                "identical_channel_fraction",
+                &self.identical_channel_fraction,
+            )
+            .field("rounding_bias", &self.rounding_bias)
+            .finish()
+    }
+}
+
+impl std::fmt::Display for RegressionReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status = if self.passed { "PASS" } else { "FAIL" };
+
+        // Special case: pixel-identical
+        if self.pixels_differing == 0 && self.passed {
+            return write!(f, "PASS: Images are pixel-identical. Score: 100.0.");
+        }
+
+        // Header line
+        match self.category {
+            ErrorCategory::Identical => {
+                writeln!(f, "{status}: Images are pixel-identical. Score: 100.0.")?;
+            }
+            ErrorCategory::RoundingError => {
+                writeln!(
+                    f,
+                    "{status}: Off-by-{} rounding, {}/{} pixels ({:.1}%).",
+                    self.max_channel_delta.iter().max().unwrap_or(&0),
+                    self.pixels_differing,
+                    self.pixel_count,
+                    self.pixels_differing as f64 / self.pixel_count.max(1) as f64 * 100.0,
+                )?;
+            }
+            ErrorCategory::ChannelSwap => {
+                writeln!(f, "{status}: Channel swap detected (RGB/BGR).")?;
+            }
+            ErrorCategory::AlphaCompositing => {
+                writeln!(f, "{status}: Alpha compositing error detected.")?;
+            }
+            ErrorCategory::Unclassified => {
+                if self.passed {
+                    writeln!(f, "{status}: Images differ within tolerance.")?;
+                } else {
+                    writeln!(f, "{status}: Large differences detected.")?;
+                }
+            }
+        }
+
+        // Constraint details
+        for cr in &self.constraint_results {
+            let mark = if cr.passed { " " } else { "x" };
+            writeln!(
+                f,
+                "  {mark} {}: {} (limit: {}).",
+                cr.name, cr.actual, cr.limit
+            )?;
+        }
+
+        // Rounding bias
+        if let Some(ref bias) = self.rounding_bias {
+            if bias.balanced {
+                writeln!(f, "  Direction: balanced rounding.")?;
+            } else {
+                // Determine dominant direction
+                let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
+                let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
+                if all_pos {
+                    write!(f, "  Direction: all positive — systematic truncation.")?;
+                } else if all_neg {
+                    write!(f, "  Direction: all negative — systematic ceiling.")?;
+                } else {
+                    write!(
+                        f,
+                        "  Direction: biased (R={:.0}%+ G={:.0}%+ B={:.0}%+).",
+                        bias.positive_fraction[0] * 100.0,
+                        bias.positive_fraction[1] * 100.0,
+                        bias.positive_fraction[2] * 100.0,
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Pixel-level delta analysis for error classification.
 ///
 /// All deltas are `src - dst` (positive = distorted is darker/lower).
 /// Values normalized to [0.0, 1.0] regardless of input bit depth.
+#[doc(hidden)]
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct DeltaStats {
     // --- Per-channel [R, G, B] summary stats ---
@@ -515,32 +789,13 @@ pub struct DeltaStats {
     /// Maximum |delta|.
     pub max_abs_delta: [f64; 3],
 
-    // --- Three-bin means for gamma/TF detection ---
-    /// Mean delta where src < 1/3 of range (dark).
-    pub mean_delta_dark: [f64; 3],
-    /// Mean delta where 1/3 <= src < 2/3 (midtone).
-    pub mean_delta_mid: [f64; 3],
-    /// Mean delta where src >= 2/3 (bright).
-    pub mean_delta_bright: [f64; 3],
-
-    // --- Delta magnitude histogram (binned) ---
-    /// Count of pixels per |delta| bucket per channel.
-    /// Buckets: \[0\]=identical, \[1\]=1/255, \[2\]=2/255, \[3\]=3/255,
-    ///          \[4\]=4-7, \[5\]=8-15, \[6\]=16-31, \[7\]=32-63, \[8\]=64-127, \[9\]=128+
-    /// Values are fractions of total pixel count.
-    pub delta_histogram: [[f64; 10]; 3],
-
-    // --- Percentiles (approximate, from histogram) ---
-    /// p50, p95, p99, p100 of |delta| per channel.
-    pub percentiles: [[f64; 4]; 3],
-
     // --- Signed small-delta histogram ---
     /// Per-channel pixel counts for signed deltas -3 to +3 (in 1/255 units).
     ///
     /// Index mapping: `[0]`=−3, `[1]`=−2, `[2]`=−1, `[3]`=0, `[4]`=+1, `[5]`=+2, `[6]`=+3.
     /// Delta convention: `src - dst`, so +1 means dst is 1/255 lower than src.
     /// Only counts pixels whose per-channel delta falls in \[−3, +3\]; pixels
-    /// outside this range are not tracked here (use `delta_histogram` for those).
+    /// outside this range are not tracked here.
     pub signed_small_histogram: [[u64; 7]; 3],
 
     // --- Pixel counts ---
@@ -562,6 +817,8 @@ pub struct DeltaStats {
 }
 
 /// Stats for a subset of pixels grouped by alpha.
+#[doc(hidden)]
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct AlphaStratifiedStats {
     /// Number of pixels in this stratum.
@@ -573,6 +830,8 @@ pub struct AlphaStratifiedStats {
 }
 
 /// Result from `classify()`: the zensim score plus delta analysis and error classification.
+#[doc(hidden)]
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ClassifiedResult {
     /// The standard zensim result (score, features, etc.).
@@ -727,6 +986,134 @@ impl Zensim {
             delta_stats,
         })
     }
+
+    /// Compare expected vs actual images against a tolerance.
+    ///
+    /// Returns a [`RegressionReport`] with pass/fail, score, classification,
+    /// and per-constraint details. Use the report's [`Display`](std::fmt::Display)
+    /// impl for human-readable output in test assertions.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use zensim::{Zensim, ZensimProfile, RgbSlice, RegressionTolerance};
+    /// # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
+    /// let z = Zensim::new(ZensimProfile::latest());
+    /// let expected = RgbSlice::new(&expected_px, 8, 8);
+    /// let actual = RgbSlice::new(&actual_px, 8, 8);
+    ///
+    /// let report = z.check_regression(
+    ///     &expected, &actual,
+    ///     &RegressionTolerance::off_by_one(),
+    /// ).unwrap();
+    /// assert!(report.passed(), "{report}");
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    pub fn check_regression(
+        &self,
+        expected: &impl ImageSource,
+        actual: &impl ImageSource,
+        tolerance: &RegressionTolerance,
+    ) -> Result<RegressionReport, ZensimError> {
+        let cr = self.classify(expected, actual)?;
+        let ds = &cr.delta_stats;
+
+        // Convert max_abs_delta from f64 (0-1 range) to u8 (0-255 units)
+        let max_channel_delta: [u8; 3] =
+            std::array::from_fn(|c| (ds.max_abs_delta[c] * 255.0).round().min(255.0) as u8);
+
+        // Compute identical_channel_fraction from signed_small_histogram
+        let identical_values: u64 = (0..3).map(|ch| ds.signed_small_histogram[ch][3]).sum();
+        let total_values = ds.pixel_count * 3;
+        let identical_channel_fraction = if total_values > 0 {
+            identical_values as f64 / total_values as f64
+        } else {
+            1.0
+        };
+
+        // Compute pixels_failing based on tolerance threshold
+        let pixels_failing = if tolerance.max_channel_delta == 0 {
+            ds.pixels_differing
+        } else if tolerance.max_channel_delta == 1 {
+            ds.pixels_differing_by_more_than_1
+        } else {
+            // For higher thresholds: conservative upper bound
+            let max_u8 = *max_channel_delta.iter().max().unwrap_or(&0);
+            if max_u8 <= tolerance.max_channel_delta {
+                0
+            } else {
+                ds.pixels_differing // conservative: all differing pixels
+            }
+        };
+
+        let differing_fraction = if ds.pixel_count > 0 {
+            ds.pixels_differing as f64 / ds.pixel_count as f64
+        } else {
+            0.0
+        };
+
+        // Evaluate constraints
+        let mut constraint_results = Vec::new();
+
+        // 1. Max channel delta
+        let max_delta_actual = *max_channel_delta.iter().max().unwrap_or(&0);
+        let delta_pass = max_delta_actual <= tolerance.max_channel_delta;
+        constraint_results.push(ConstraintResult {
+            name: "Max delta",
+            passed: delta_pass,
+            actual: format!(
+                "R={} G={} B={}",
+                max_channel_delta[0], max_channel_delta[1], max_channel_delta[2],
+            ),
+            limit: format!("{}/255", tolerance.max_channel_delta),
+        });
+
+        // 2. Score
+        let score_pass = cr.result.score >= tolerance.min_score;
+        constraint_results.push(ConstraintResult {
+            name: "Score",
+            passed: score_pass,
+            actual: format!("{:.1}", cr.result.score),
+            limit: format!(">={:.1}", tolerance.min_score),
+        });
+
+        // 3. Differing pixel fraction
+        let diff_pass = differing_fraction <= tolerance.max_differing_pixel_fraction;
+        constraint_results.push(ConstraintResult {
+            name: "Pixels differing",
+            passed: diff_pass,
+            actual: format!("{:.1}%", differing_fraction * 100.0),
+            limit: format!("<={:.1}%", tolerance.max_differing_pixel_fraction * 100.0),
+        });
+
+        // 4. Identical channel fraction
+        let ident_pass = identical_channel_fraction >= tolerance.min_identical_channel_fraction;
+        constraint_results.push(ConstraintResult {
+            name: "Identical channels",
+            passed: ident_pass,
+            actual: format!("{:.1}%", identical_channel_fraction * 100.0),
+            limit: format!(">={:.1}%", tolerance.min_identical_channel_fraction * 100.0),
+        });
+
+        let passed = delta_pass && score_pass && diff_pass && ident_pass;
+
+        Ok(RegressionReport {
+            passed,
+            score: cr.result.score,
+            category: cr.classification.dominant,
+            confidence: cr.classification.confidence,
+            max_channel_delta,
+            pixel_count: ds.pixel_count,
+            pixels_differing: ds.pixels_differing,
+            pixels_failing,
+            identical_channel_fraction,
+            rounding_bias: cr.classification.rounding_bias,
+            constraint_results,
+        })
+    }
 }
 
 #[cfg(feature = "training")]
@@ -752,21 +1139,21 @@ impl Zensim {
 /// 3. **AlphaCompositing** — opaque unchanged, semitransparent changed (tightened)
 ///
 /// No `Mixed` category — highest score wins, or `Unclassified`.
-fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> ErrorClassification {
-    let mut c = ErrorClassification {
-        dominant: ErrorCategory::Identical,
-        confidence: 0.0,
-        rounding_error: 0.0,
-        channel_swap: 0.0,
-        alpha_compositing: 0.0,
-        mean_offset: result.mean_offset,
-        rounding_bias: None,
-    };
+fn derive_classification(delta_stats: &DeltaStats, _result: &ZensimResult) -> ErrorClassification {
+    let mut rounding_bias: Option<RoundingBias> = None;
+
+    // Track per-detector scores internally
+    let mut score_rounding = 0.0f64;
+    let mut score_swap = 0.0f64;
+    let mut score_alpha = 0.0f64;
 
     // If images are identical, short circuit
     if delta_stats.pixels_differing == 0 {
-        c.confidence = 1.0;
-        return c;
+        return ErrorClassification {
+            dominant: ErrorCategory::Identical,
+            confidence: 1.0,
+            rounding_bias: None,
+        };
     }
 
     let max_delta = delta_stats
@@ -781,11 +1168,11 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
     // The only operations that produce max_delta ≤ 3/255 are: integer rounding
     // mode differences, sRGB LUT precision, float→int truncation.
     if delta_stats.pixels_differing_by_more_than_1 == 0 {
-        c.rounding_error = 1.0;
+        score_rounding = 1.0;
     } else if max_delta <= 2.0 / 255.0 {
-        c.rounding_error = 0.95;
+        score_rounding = 0.95;
     } else if max_delta <= 3.0 / 255.0 {
-        c.rounding_error = 0.9;
+        score_rounding = 0.9;
     }
 
     // === 2. Channel swap: one zero-delta channel, others large ===
@@ -803,7 +1190,7 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         }
     }
     if zero_channels == 1 && hot_channels >= 1 && max_delta > 0.05 {
-        c.channel_swap = 0.9;
+        score_swap = 0.9;
     }
 
     // === 3. Alpha compositing: tightened thresholds ===
@@ -815,22 +1202,22 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
             let opaque_max = opaque.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
             let semi_mean = semi.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
             if opaque_max < 0.005 && semi_mean > 0.02 && semi.pixel_count > 100 {
-                c.alpha_compositing = 0.9;
+                score_alpha = 0.9;
             }
         }
     }
     if let Some(corr) = delta_stats.alpha_error_correlation {
         if corr > 0.8 {
-            c.alpha_compositing = c.alpha_compositing.max(corr);
+            score_alpha = score_alpha.max(corr);
         }
     }
 
     // === Determine dominant category ===
     // Highest score wins. No Mixed category.
     let scores = [
-        (ErrorCategory::RoundingError, c.rounding_error),
-        (ErrorCategory::ChannelSwap, c.channel_swap),
-        (ErrorCategory::AlphaCompositing, c.alpha_compositing),
+        (ErrorCategory::RoundingError, score_rounding),
+        (ErrorCategory::ChannelSwap, score_swap),
+        (ErrorCategory::AlphaCompositing, score_alpha),
     ];
 
     let (best_cat, best_score) = scores
@@ -839,22 +1226,24 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
         .unwrap();
 
-    if best_score > 0.0 {
-        c.dominant = best_cat;
-        c.confidence = best_score;
+    let (dominant, confidence) = if best_score > 0.0 {
+        (best_cat, best_score)
     } else {
-        c.dominant = ErrorCategory::Unclassified;
-        c.confidence = 0.0;
-    }
+        (ErrorCategory::Unclassified, 0.0)
+    };
 
     // === Rounding bias analysis ===
     // When RoundingError is detected, analyze the signed small-delta histogram
     // to determine if errors are balanced (+/-) or systematic (one direction).
-    if c.dominant == ErrorCategory::RoundingError {
-        c.rounding_bias = Some(compute_rounding_bias(delta_stats));
+    if dominant == ErrorCategory::RoundingError {
+        rounding_bias = Some(compute_rounding_bias(delta_stats));
     }
 
-    c
+    ErrorClassification {
+        dominant,
+        confidence,
+        rounding_bias,
+    }
 }
 
 /// Compute rounding bias from the signed small-delta histogram.
