@@ -898,6 +898,7 @@ fn load_and_compute(
         raw_distance: f64::NAN,
         features: vec![],
         profile: zensim::ZensimProfile::GeneralV0_2,
+        mean_offset: [f64::NAN; 3],
     };
 
     let config = zensim::ZensimConfig {

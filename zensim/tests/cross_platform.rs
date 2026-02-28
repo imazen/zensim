@@ -759,6 +759,22 @@ fn determinism_same_platform() {
             pair.name,
         );
 
+        // mean_offset must be bit-exact
+        for c in 0..3 {
+            assert_eq!(
+                r1.mean_offset[c].to_bits(),
+                r2.mean_offset[c].to_bits(),
+                "{}: mean_offset[{c}] not deterministic (run 1 vs 2)",
+                pair.name,
+            );
+            assert_eq!(
+                r1.mean_offset[c].to_bits(),
+                r3.mean_offset[c].to_bits(),
+                "{}: mean_offset[{c}] not deterministic (run 1 vs 3)",
+                pair.name,
+            );
+        }
+
         // All features must be bit-exact
         for (i, ((f1, f2), f3)) in r1
             .features
@@ -830,5 +846,75 @@ fn identical_images_score_100() {
             result.features.iter().all(|&f| f == 0.0),
             "{name}: identical images must have all-zero features",
         );
+        assert_eq!(
+            result.mean_offset,
+            [0.0, 0.0, 0.0],
+            "{name}: identical images must have zero mean_offset",
+        );
     }
+}
+
+/// mean_offset must reflect XYB channel shifts for color-shifted images.
+/// Identical images must have exactly [0, 0, 0].
+#[test]
+fn mean_offset_color_shift() {
+    const W: usize = 128;
+    const H: usize = 128;
+    let z = Zensim::new(ZensimProfile::latest());
+    let source = gen_mandelbrot(W, H);
+    let shifted = distort_color_shift(&source, W, H);
+
+    let src = RgbSlice::new(&source, W, H);
+    let dst = RgbSlice::new(&shifted, W, H);
+    let result = z.compute(&src, &dst).expect("compute failed");
+
+    println!(
+        "  mean_offset: X={:.6}, Y={:.6}, B={:.6}",
+        result.mean_offset[0], result.mean_offset[1], result.mean_offset[2],
+    );
+
+    // Color shift adds R+20, subtracts G-15, adds B+30.
+    // In XYB space, Y channel (luminance) should show a non-trivial offset.
+    // All three channels should have non-zero offsets.
+    for (c, name) in result.mean_offset.iter().zip(["X", "Y", "B"]) {
+        assert!(
+            c.abs() > 1e-4,
+            "mean_offset {name} should be non-trivial for color-shifted images, got {c:.6e}",
+        );
+    }
+}
+
+/// mean_offset via precomputed reference must match direct computation.
+#[test]
+fn mean_offset_precomputed_ref() {
+    const W: usize = 128;
+    const H: usize = 128;
+    let z = Zensim::new(ZensimProfile::latest());
+    let source = gen_mandelbrot(W, H);
+    let shifted = distort_color_shift(&source, W, H);
+
+    let src = RgbSlice::new(&source, W, H);
+    let dst = RgbSlice::new(&shifted, W, H);
+
+    let direct = z.compute(&src, &dst).expect("direct compute failed");
+    let precomputed = z.precompute_reference(&src).expect("precompute failed");
+    let with_ref = z
+        .compute_with_ref(&precomputed, &dst)
+        .expect("compute_with_ref failed");
+
+    for c in 0..3 {
+        let diff = (direct.mean_offset[c] - with_ref.mean_offset[c]).abs();
+        assert!(
+            diff < 1e-10,
+            "mean_offset[{c}] mismatch: direct={:.10}, with_ref={:.10}, diff={diff:.2e}",
+            direct.mean_offset[c],
+            with_ref.mean_offset[c],
+        );
+    }
+    println!(
+        "  direct vs precomputed: max diff = {:.2e}",
+        (0..3)
+            .map(|c| (direct.mean_offset[c] - with_ref.mean_offset[c]).abs())
+            .fold(0.0f64, f64::max),
+    );
 }

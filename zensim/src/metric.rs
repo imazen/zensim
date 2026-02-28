@@ -429,6 +429,59 @@ pub struct ZensimResult {
     pub features: Vec<f64>,
     /// Which profile produced this score.
     pub profile: crate::profile::ZensimProfile,
+    /// Per-channel XYB mean offset: `mean(src_xyb[c]) - mean(dst_xyb[c])`.
+    ///
+    /// Captures global color/luminance shifts (CMS errors, white balance changes).
+    /// Channels: `[X, Y, B]`, signed. Positive = distorted is darker/less saturated.
+    pub mean_offset: [f64; 3],
+}
+
+/// What kind of perceptual difference dominates between source and distorted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorCategory {
+    /// Images are perceptually identical (score ≈ 100).
+    Identical,
+    /// Global color/luminance shift (CMS, white balance).
+    ColorShift,
+    /// Per-pixel noise (dithering, sensor noise, quantization).
+    PixelNoise,
+    /// Block artifacts (JPEG blocking, tiling).
+    Blocking,
+    /// Loss of detail (low-pass filtering, downscale artifacts).
+    Blur,
+    /// Edge overshoot/ringing (sharpening, Gibbs phenomenon).
+    Ringing,
+    /// Texture replacement (detail synthesis, hallucination).
+    TextureChange,
+}
+
+/// Decomposed error classification for a source/distorted pair.
+///
+/// Each field is a confidence score (0.0–1.0) for that error category.
+/// `dominant` is the category with the highest confidence (or `Identical`
+/// if the overall score is ≈ 100).
+#[derive(Debug, Clone)]
+pub struct ErrorClassification {
+    /// Global color/luminance shift strength.
+    pub color_shift: f64,
+    /// Per-pixel noise strength.
+    pub pixel_noise: f64,
+    /// Block artifact strength.
+    pub blocking: f64,
+    /// Blur / detail loss strength.
+    pub blur: f64,
+    /// Ringing / edge overshoot strength.
+    pub ringing: f64,
+    /// Texture replacement strength.
+    pub texture_change: f64,
+    /// Per-channel XYB mean offset: `[X, Y, B]`, signed.
+    pub mean_offset: [f64; 3],
+    /// Maximum absolute per-pixel channel delta (sRGB 0–255), if computed.
+    pub max_channel_delta: Option<u8>,
+    /// Overall confidence in the classification (0.0–1.0).
+    pub confidence: f64,
+    /// The dominant error category.
+    pub dominant: ErrorCategory,
 }
 
 // --- Zensim config struct (primary API) ---
@@ -612,6 +665,7 @@ fn compute_with_config_inner(
             raw_distance: 0.0,
             features: vec![0.0; num_features],
             profile: ZensimProfile::latest(),
+            mean_offset: [0.0; 3],
         };
     }
 
@@ -641,8 +695,12 @@ fn compute_with_config_inner(
         }
     }
 
+    // Compute mean_offset while XYB planes are cache-hot (before compute_multiscale_stats takes ownership)
+    let mean_offset =
+        crate::streaming::compute_xyb_mean_offset(&src_xyb, &dst_xyb, width, height, padded_width);
+
     let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, config);
-    combine_scores(&scale_stats, masked, weights, config)
+    combine_scores(&scale_stats, masked, weights, config, mean_offset)
 }
 
 fn config_from_params(params: &ProfileParams) -> ZensimConfig {
@@ -818,11 +876,15 @@ pub fn compute_zensim_with_config(
         }
     }
 
+    // Compute mean_offset while XYB planes are cache-hot
+    let mean_offset =
+        crate::streaming::compute_xyb_mean_offset(&src_xyb, &dst_xyb, width, height, padded_width);
+
     // Compute multi-scale statistics (take ownership to avoid clone)
     let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, &config);
 
     // Combine with weights to produce final score
-    let result = combine_scores(&scale_stats, masked, &WEIGHTS, &config);
+    let result = combine_scores(&scale_stats, masked, &WEIGHTS, &config, mean_offset);
     Ok(result)
 }
 
@@ -1843,6 +1905,7 @@ pub(crate) fn combine_scores(
     _masked: bool,
     weights: &[f64; 156],
     config: &ZensimConfig,
+    mean_offset: [f64; 3],
 ) -> ZensimResult {
     let features_per_ch = FEATURES_PER_CHANNEL_BASIC;
     let features_per_scale = features_per_ch * 3;
@@ -1894,6 +1957,7 @@ pub(crate) fn combine_scores(
         raw_distance,
         features,
         profile: ZensimProfile::GeneralV0_2,
+        mean_offset,
     }
 }
 

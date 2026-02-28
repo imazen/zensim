@@ -201,6 +201,35 @@ fn active_channels(
     active
 }
 
+/// Compute per-channel XYB mean offset: `mean(src) - mean(dst)`.
+///
+/// Called after XYB conversion completes (planes are cache-hot).
+/// Only iterates `width` pixels per row (skipping padding), so the count
+/// is exactly `width * height`.
+pub(crate) fn compute_xyb_mean_offset(
+    src_planes: &[Vec<f32>; 3],
+    dst_planes: &[Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    padded_width: usize,
+) -> [f64; 3] {
+    let mut offset = [0.0f64; 3];
+    let n = (width * height) as f64;
+    for c in 0..3 {
+        let mut src_sum = 0.0f64;
+        let mut dst_sum = 0.0f64;
+        for y in 0..height {
+            let row_start = y * padded_width;
+            for x in 0..width {
+                src_sum += src_planes[c][row_start + x] as f64;
+                dst_sum += dst_planes[c][row_start + x] as f64;
+            }
+        }
+        offset[c] = (src_sum - dst_sum) / n;
+    }
+    offset
+}
+
 /// Streaming multi-scale stats: parallel XYB conversion, then band-parallel blur/features.
 ///
 /// Phase 1: Convert sRGB→XYB for the entire image (parallel over row chunks).
@@ -212,7 +241,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64; 156],
-) -> Vec<ScaleStats> {
+) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = source.width();
     let height = source.height();
     let padded_width = simd_padded_width(width);
@@ -221,6 +250,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
     // Phase 1: Convert sRGB→XYB for entire image, parallel over row chunks.
     let mut src_planes = convert_source_to_xyb_parallel(source, padded_width);
     let mut dst_planes = convert_source_to_xyb_parallel(distorted, padded_width);
+
+    // Compute mean_offset while XYB planes are cache-hot
+    let mean_offset =
+        compute_xyb_mean_offset(&src_planes, &dst_planes, width, height, padded_width);
 
     // Phase 2: Process all scales with parallel band processing.
     // Each scale: compute features in parallel bands, then downscale planes for next scale.
@@ -285,7 +318,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
         }));
     }
 
-    stats
+    (stats, mean_offset)
 }
 
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
@@ -815,7 +848,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64; 156],
-) -> Vec<ScaleStats> {
+) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = simd_padded_width(width);
@@ -823,6 +856,11 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
 
     // Only convert distorted to XYB
     let mut dst_planes = convert_source_to_xyb_parallel(distorted, padded_width);
+
+    // Compute mean_offset using scale-0 reference planes and fresh distorted planes
+    let (ref src_planes_s0, _, _) = precomputed.scales[0];
+    let mean_offset =
+        compute_xyb_mean_offset(src_planes_s0, &dst_planes, width, height, padded_width);
 
     let mut stats = Vec::with_capacity(num_scales);
     let mut w = padded_width;
@@ -868,7 +906,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
         }));
     }
 
-    stats
+    (stats, mean_offset)
 }
 
 /// Entry point: compute zensim using streaming with precomputed reference.
@@ -879,10 +917,10 @@ pub(crate) fn compute_zensim_streaming_with_ref(
     config: &ZensimConfig,
     weights: &[f64; 156],
 ) -> crate::metric::ZensimResult {
-    let scale_stats =
+    let (scale_stats, mean_offset) =
         compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights);
     let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked, weights, config)
+    combine_scores(&scale_stats, masked, weights, config, mean_offset)
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
@@ -893,9 +931,10 @@ pub(crate) fn compute_zensim_streaming(
     config: &ZensimConfig,
     weights: &[f64; 156],
 ) -> crate::metric::ZensimResult {
-    let scale_stats = compute_multiscale_stats_streaming(source, distorted, config, weights);
+    let (scale_stats, mean_offset) =
+        compute_multiscale_stats_streaming(source, distorted, config, weights);
     let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked, weights, config)
+    combine_scores(&scale_stats, masked, weights, config, mean_offset)
 }
 
 #[cfg(test)]
