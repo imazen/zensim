@@ -93,13 +93,11 @@ pub mod profile;
 mod simd_ops;
 pub mod source;
 mod streaming;
+pub mod testing;
 
 // --- Primary API ---
 pub use error::ZensimError;
-pub use metric::{
-    ErrorCategory, RegressionReport, RegressionTolerance, RoundingBias, Zensim, ZensimResult,
-    distance_to_score,
-};
+pub use metric::{ErrorCategory, RoundingBias, Zensim, ZensimResult, distance_to_score};
 
 // --- Classification internals (pub for tests, #[doc(hidden)] in source) ---
 pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};
