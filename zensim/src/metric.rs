@@ -461,8 +461,10 @@ pub enum ErrorCategory {
     Ringing,
     /// Uniform color/luminance offset.
     ColorShift,
-    /// Multiple error types or unclassifiable.
+    /// Multiple error types present with similar confidence.
     Mixed,
+    /// Images differ but no category reached sufficient confidence.
+    Unclassified,
 }
 
 /// Decomposed error classification for a source/distorted pair.
@@ -860,8 +862,8 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         c.transfer_function = (nonlinearity * 10.0).min(1.0);
     }
 
-    // 5. Color space matrix: channel-asymmetric deltas, not explained by swap
-    if max_delta > 0.05 && c.channel_swap < 0.3 {
+    // 5. Color space matrix: channel-asymmetric deltas, not explained by swap or alpha
+    if max_delta > 0.05 && c.channel_swap < 0.3 && c.alpha_compositing < 0.5 {
         let min_max = delta_stats
             .max_abs_delta
             .iter()
@@ -914,17 +916,29 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         (ErrorCategory::ColorShift, c.color_shift),
     ];
 
-    let (best_cat, best_score) = scores
-        .iter()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap();
+    // Sort descending by confidence
+    let mut sorted = scores;
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    let (best_cat, best_score) = sorted[0];
+    let (_second_cat, second_score) = sorted[1];
 
-    if *best_score > 0.1 {
-        c.dominant = *best_cat;
-        c.confidence = *best_score;
-    } else {
+    // Minimum confidence threshold for offering a classification.
+    // Below this, we don't claim to know the error type.
+    const MIN_CONFIDENCE: f64 = 0.25;
+
+    // If the top two categories are close in confidence (within 60%),
+    // call it Mixed rather than picking one unreliably.
+    const MIXED_RATIO: f64 = 0.6;
+
+    if best_score < MIN_CONFIDENCE {
+        c.dominant = ErrorCategory::Unclassified;
+        c.confidence = 0.0;
+    } else if second_score > best_score * MIXED_RATIO {
         c.dominant = ErrorCategory::Mixed;
-        c.confidence = 0.1;
+        c.confidence = best_score;
+    } else {
+        c.dominant = best_cat;
+        c.confidence = best_score;
     }
 
     c
