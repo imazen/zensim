@@ -273,7 +273,14 @@ impl<'a> StridedBytes<'a> {
         stride: usize,
         pixel_format: PixelFormat,
     ) -> Self {
-        Self::with_alpha_mode(data, width, height, stride, pixel_format, AlphaMode::Unknown)
+        Self::with_alpha_mode(
+            data,
+            width,
+            height,
+            stride,
+            pixel_format,
+            AlphaMode::Unknown,
+        )
     }
 
     /// Create a new `StridedBytes` with an explicit alpha mode.

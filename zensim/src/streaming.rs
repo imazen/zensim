@@ -488,8 +488,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                             // Opaque: linearize RGB, ignore alpha
                             for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                 let off = x * 8;
-                                let r =
-                                    u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
+                                let r = u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]);
                                 let g =
                                     u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]);
                                 let b =
@@ -508,12 +507,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                                 &mut linear_row,
                             );
                         } else {
-                            composite_srgb16_rgba_to_linear(
-                                row_bytes,
-                                width,
-                                y,
-                                &mut linear_row,
-                            );
+                            composite_srgb16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
                         }
                         let row_offset = (y - row_start) * width;
                         linear_to_positive_xyb_planar_into(
@@ -532,21 +526,21 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         if opaque {
                             for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                 let off = x * 8;
-                                let r = crate::color::srgb_f16_to_linear(
-                                    half::f16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]),
-                                );
-                                let g = crate::color::srgb_f16_to_linear(
-                                    half::f16::from_ne_bytes([
+                                let r =
+                                    crate::color::srgb_f16_to_linear(half::f16::from_ne_bytes([
+                                        row_bytes[off],
+                                        row_bytes[off + 1],
+                                    ]));
+                                let g =
+                                    crate::color::srgb_f16_to_linear(half::f16::from_ne_bytes([
                                         row_bytes[off + 2],
                                         row_bytes[off + 3],
-                                    ]),
-                                );
-                                let b = crate::color::srgb_f16_to_linear(
-                                    half::f16::from_ne_bytes([
+                                    ]));
+                                let b =
+                                    crate::color::srgb_f16_to_linear(half::f16::from_ne_bytes([
                                         row_bytes[off + 4],
                                         row_bytes[off + 5],
-                                    ]),
-                                );
+                                    ]));
                                 *pixel = [r, g, b];
                             }
                         } else if premul {
@@ -557,12 +551,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                                 &mut linear_row,
                             );
                         } else {
-                            composite_srgb_f16_rgba_to_linear(
-                                row_bytes,
-                                width,
-                                y,
-                                &mut linear_row,
-                            );
+                            composite_srgb_f16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
                         }
                         let row_offset = (y - row_start) * width;
                         linear_to_positive_xyb_planar_into(
@@ -603,11 +592,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                                     &mut linear_row,
                                 );
                             } else {
-                                composite_linear_f32_rgba(
-                                    &rgba_row[..width],
-                                    y,
-                                    &mut linear_row,
-                                );
+                                composite_linear_f32_rgba(&rgba_row[..width], y, &mut linear_row);
                             }
                             let row_offset = (y - row_start) * width;
                             linear_to_positive_xyb_planar_into(
@@ -1439,8 +1424,7 @@ fn extract_pixel_rgb_normalized(
                 f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
                 f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
             ];
-            let a =
-                f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
+            let a = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
             (s, d, Some(a))
         }
         PixelFormat::LinearF32Rgba => {

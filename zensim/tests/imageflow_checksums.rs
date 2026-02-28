@@ -109,7 +109,10 @@ fn load_image_rgba(path: &Path) -> Option<(Vec<[u8; 4]>, u32, u32)> {
     let img = image::open(path).ok()?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    let pixels: Vec<[u8; 4]> = rgba.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    let pixels: Vec<[u8; 4]> = rgba
+        .chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect();
     Some((pixels, w, h))
 }
 
@@ -202,7 +205,11 @@ fn imageflow_checksum_analysis() {
             let old_img = match load_image_rgba(&old_path) {
                 Some(img) => img,
                 None => {
-                    eprintln!("  DECODE FAILED: {} (old: {})", test_name, old_path.display());
+                    eprintln!(
+                        "  DECODE FAILED: {} (old: {})",
+                        test_name,
+                        old_path.display()
+                    );
                     skipped_download += 1;
                     continue;
                 }
@@ -210,7 +217,11 @@ fn imageflow_checksum_analysis() {
             let new_img = match load_image_rgba(&new_path) {
                 Some(img) => img,
                 None => {
-                    eprintln!("  DECODE FAILED: {} (new: {})", test_name, new_path.display());
+                    eprintln!(
+                        "  DECODE FAILED: {} (new: {})",
+                        test_name,
+                        new_path.display()
+                    );
                     skipped_download += 1;
                     continue;
                 }
