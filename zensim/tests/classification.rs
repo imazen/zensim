@@ -102,12 +102,33 @@ fn print_delta_stats(name: &str, cr: &ClassifiedResult) {
         "    pixels_differing_by_more_than_1: {}",
         ds.pixels_differing_by_more_than_1,
     );
+    // Signed small-delta histogram per channel
+    let labels = ["-3", "-2", "-1", " 0", "+1", "+2", "+3"];
+    for ch_name in ["R", "G", "B"] {
+        let ch = match ch_name {
+            "R" => 0,
+            "G" => 1,
+            _ => 2,
+        };
+        let h = &ds.signed_small_histogram[ch];
+        let parts: Vec<String> = (0..7).map(|i| format!("{}:{}", labels[i], h[i])).collect();
+        println!("    signed_small[{ch_name}]: {}", parts.join("  "));
+    }
     println!(
         "    classification: RE={:.3} CS={:.3} AC={:.3}",
         cr.classification.rounding_error,
         cr.classification.channel_swap,
         cr.classification.alpha_compositing,
     );
+    if let Some(ref bias) = cr.classification.rounding_bias {
+        println!(
+            "    rounding_bias: pos_frac=[{:.3}, {:.3}, {:.3}] balanced={}",
+            bias.positive_fraction[0],
+            bias.positive_fraction[1],
+            bias.positive_fraction[2],
+            bias.balanced,
+        );
+    }
 }
 
 // ─── classify() score identity ─────────────────────────────────────────
@@ -292,6 +313,25 @@ fn truncate_lsb_detected_as_rounding_error() {
         ErrorCategory::RoundingError,
         "truncation dominant should be RoundingError, got {:?}",
         cr.classification.dominant,
+    );
+    // Rounding bias should be present
+    let bias = cr
+        .classification
+        .rounding_bias
+        .as_ref()
+        .expect("rounding_bias should be populated for RoundingError");
+    // LSB truncation is unidirectional — all errors should be in one direction
+    // (positive, since truncation rounds toward zero = dst is lower)
+    for ch in 0..3 {
+        assert!(
+            bias.positive_fraction[ch] > 0.9 || bias.positive_fraction[ch] < 0.1,
+            "truncation should be heavily skewed, ch={ch} pos_frac={:.3}",
+            bias.positive_fraction[ch],
+        );
+    }
+    assert!(
+        !bias.balanced,
+        "truncation should NOT be balanced (it's systematic)",
     );
 }
 
@@ -621,6 +661,21 @@ fn round_half_up_detected_as_rounding_error() {
         "round_half_up should be RoundingError, got {:?}",
         cr.classification.dominant,
     );
+    // Rounding bias should be present
+    let bias = cr
+        .classification
+        .rounding_bias
+        .as_ref()
+        .expect("rounding_bias should be populated for RoundingError");
+    // round_half_up vs default rounding: errors should be unidirectional
+    // (all negative, since round_half_up rounds UP = dst is higher)
+    for ch in 0..3 {
+        assert!(
+            bias.positive_fraction[ch] > 0.9 || bias.positive_fraction[ch] < 0.1,
+            "round_half_up should be heavily skewed, ch={ch} pos_frac={:.3}",
+            bias.positive_fraction[ch],
+        );
+    }
 }
 
 // ─── Gray ramp as source ───────────────────────────────────────────────

@@ -1129,6 +1129,8 @@ struct DeltaAccum {
     count_bright: [u64; 3],
     // Histogram buckets
     histogram: [[u64; 10]; 3],
+    // Signed small-delta histogram: bins -3..+3, index = delta + 3
+    signed_small: [[u64; 7]; 3],
     // Pixel counts
     pixel_count: u64,
     pixels_differing: u64,
@@ -1162,6 +1164,7 @@ impl DeltaAccum {
             sum_delta_bright: [0.0; 3],
             count_bright: [0; 3],
             histogram: [[0u64; 10]; 3],
+            signed_small: [[0u64; 7]; 3],
             pixel_count: 0,
             pixels_differing: 0,
             pixels_differing_by_more_than_1: 0,
@@ -1193,6 +1196,9 @@ impl DeltaAccum {
             self.count_bright[c] += other.count_bright[c];
             for b in 0..10 {
                 self.histogram[c][b] += other.histogram[c][b];
+            }
+            for b in 0..7 {
+                self.signed_small[c][b] += other.signed_small[c][b];
             }
             self.opaque_sum_abs[c] += other.opaque_sum_abs[c];
             self.opaque_max_abs[c] = self.opaque_max_abs[c].max(other.opaque_max_abs[c]);
@@ -1276,6 +1282,12 @@ pub(crate) fn compute_delta_stats(
                         // Histogram bucket (in u8 units)
                         let abs_delta_u8 = (abs_delta * 255.0).round().min(255.0) as u8;
                         acc.histogram[c][delta_to_bucket(abs_delta_u8)] += 1;
+
+                        // Signed small-delta histogram: bins -3..+3
+                        let signed_delta = (delta * 255.0).round() as i32;
+                        if (-3..=3).contains(&signed_delta) {
+                            acc.signed_small[c][(signed_delta + 3) as usize] += 1;
+                        }
 
                         if abs_delta > 0.5 / 255.0 {
                             any_diff = true;
@@ -1571,6 +1583,7 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
         mean_delta_bright,
         delta_histogram,
         percentiles,
+        signed_small_histogram: acc.signed_small,
         pixel_count: acc.pixel_count,
         pixels_differing: acc.pixels_differing,
         pixels_differing_by_more_than_1: acc.pixels_differing_by_more_than_1,

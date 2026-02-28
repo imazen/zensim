@@ -473,6 +473,32 @@ pub struct ErrorClassification {
     pub alpha_compositing: f64,
     /// Per-channel XYB mean offset: `[X, Y, B]`, signed.
     pub mean_offset: [f64; 3],
+    /// Rounding bias analysis (only populated when `dominant == RoundingError`).
+    ///
+    /// Measures how balanced the rounding errors are across positive and negative
+    /// directions. `None` when not a rounding error or insufficient data.
+    pub rounding_bias: Option<RoundingBias>,
+}
+
+/// Analysis of whether rounding errors are balanced (+/-) or systematic.
+///
+/// A balanced distribution (roughly equal +1 and -1 counts) indicates normal
+/// rounding mode differences — nothing to worry about. A heavily skewed
+/// distribution (mostly one direction) suggests systematic truncation or
+/// a floor/ceil bias that may indicate a pipeline bug.
+#[derive(Debug, Clone)]
+pub struct RoundingBias {
+    /// Per-channel ratio of positive-to-total differing pixels.
+    ///
+    /// 0.5 = perfectly balanced, 0.0 = all negative, 1.0 = all positive.
+    /// Channels: `[R, G, B]`.
+    pub positive_fraction: [f64; 3],
+    /// Whether the rounding appears balanced (within statistical norms).
+    ///
+    /// `true` means the +/- distribution is consistent with unbiased rounding
+    /// and is likely nothing to worry about. `false` means systematic bias
+    /// was detected (e.g., all errors in one direction = truncation).
+    pub balanced: bool,
 }
 
 /// Pixel-level delta analysis for error classification.
@@ -507,6 +533,15 @@ pub struct DeltaStats {
     // --- Percentiles (approximate, from histogram) ---
     /// p50, p95, p99, p100 of |delta| per channel.
     pub percentiles: [[f64; 4]; 3],
+
+    // --- Signed small-delta histogram ---
+    /// Per-channel pixel counts for signed deltas -3 to +3 (in 1/255 units).
+    ///
+    /// Index mapping: `[0]`=−3, `[1]`=−2, `[2]`=−1, `[3]`=0, `[4]`=+1, `[5]`=+2, `[6]`=+3.
+    /// Delta convention: `src - dst`, so +1 means dst is 1/255 lower than src.
+    /// Only counts pixels whose per-channel delta falls in \[−3, +3\]; pixels
+    /// outside this range are not tracked here (use `delta_histogram` for those).
+    pub signed_small_histogram: [[u64; 7]; 3],
 
     // --- Pixel counts ---
     /// Total pixels compared.
@@ -725,6 +760,7 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         channel_swap: 0.0,
         alpha_compositing: 0.0,
         mean_offset: result.mean_offset,
+        rounding_bias: None,
     };
 
     // If images are identical, short circuit
@@ -811,7 +847,57 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         c.confidence = 0.0;
     }
 
+    // === Rounding bias analysis ===
+    // When RoundingError is detected, analyze the signed small-delta histogram
+    // to determine if errors are balanced (+/-) or systematic (one direction).
+    if c.dominant == ErrorCategory::RoundingError {
+        c.rounding_bias = Some(compute_rounding_bias(delta_stats));
+    }
+
     c
+}
+
+/// Compute rounding bias from the signed small-delta histogram.
+///
+/// Examines the +1/-1, +2/-2, +3/-3 bins per channel to determine whether
+/// errors are balanced (unbiased rounding) or systematic (truncation/floor).
+fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
+    let h = &delta_stats.signed_small_histogram;
+    let mut positive_fraction = [0.5f64; 3];
+    let mut all_balanced = true;
+
+    for ch in 0..3 {
+        // Count positive deltas (+1, +2, +3) and negative deltas (-1, -2, -3)
+        let neg = h[ch][0] + h[ch][1] + h[ch][2]; // bins -3, -2, -1
+        let pos = h[ch][4] + h[ch][5] + h[ch][6]; // bins +1, +2, +3
+        let total_nonzero = neg + pos;
+
+        if total_nonzero == 0 {
+            // No differing pixels in this channel — perfectly balanced
+            positive_fraction[ch] = 0.5;
+            continue;
+        }
+
+        positive_fraction[ch] = pos as f64 / total_nonzero as f64;
+
+        // Statistical test: for balanced rounding, we'd expect ~50% positive.
+        // With N trials and p=0.5, the standard deviation is sqrt(N)/2.
+        // Use a 3-sigma threshold: if |pos_frac - 0.5| > 3 * 0.5 / sqrt(N),
+        // consider it unbalanced. But also require a minimum absolute skew
+        // (at least 60/40 split) to avoid flagging trivially small deviations
+        // in large samples.
+        let n = total_nonzero as f64;
+        let expected_std = 0.5 / n.sqrt();
+        let deviation = (positive_fraction[ch] - 0.5).abs();
+        if deviation > 3.0 * expected_std && deviation > 0.1 {
+            all_balanced = false;
+        }
+    }
+
+    RoundingBias {
+        positive_fraction,
+        balanced: all_balanced,
+    }
 }
 
 fn validate_pair(
