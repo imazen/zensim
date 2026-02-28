@@ -751,11 +751,13 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         dominant: ErrorCategory::Identical,
     };
 
-    // If images are identical (or nearly), short circuit
+    // If images are identical, short circuit
     if delta_stats.pixels_differing == 0 {
         c.confidence = 1.0;
         return c;
     }
+
+    // === Compute raw features ===
 
     let max_delta = delta_stats
         .max_abs_delta
@@ -763,10 +765,30 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         .copied()
         .fold(0.0f64, f64::max);
 
-    // --- Channel swap detection ---
-    // If one channel has ~zero delta while others have large delta
-    let mut zero_channels = 0;
-    let mut hot_channels = 0;
+    // Three-bin nonlinearity: |mean_mid - avg(mean_dark, mean_bright)|
+    let mut nonlinearity = 0.0f64;
+    for ch in 0..3 {
+        let avg_endpoints =
+            (delta_stats.mean_delta_dark[ch] + delta_stats.mean_delta_bright[ch]) / 2.0;
+        let nl = (delta_stats.mean_delta_mid[ch] - avg_endpoints).abs();
+        nonlinearity = nonlinearity.max(nl);
+    }
+
+    let max_stddev = delta_stats
+        .stddev_delta
+        .iter()
+        .copied()
+        .fold(0.0f64, f64::max);
+
+    let mean_abs = delta_stats
+        .mean_delta
+        .iter()
+        .map(|d| d.abs())
+        .fold(0.0f64, f64::max);
+
+    // Channel profile
+    let mut zero_channels = 0u32;
+    let mut hot_channels = 0u32;
     for ch in 0..3 {
         if delta_stats.max_abs_delta[ch] < 1.0 / 255.0 {
             zero_channels += 1;
@@ -775,33 +797,29 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
             hot_channels += 1;
         }
     }
-    if zero_channels == 1 && hot_channels >= 1 && max_delta > 0.05 {
-        c.channel_swap = 0.8;
-    }
 
-    // --- Quantization/truncation detection ---
-    // High fraction of exactly-1 deltas, low max
+    // Histogram features
     let frac_1 = (0..3)
         .map(|ch| delta_stats.delta_histogram[ch][1])
         .fold(0.0f64, f64::max);
-    if frac_1 > 0.3 && max_delta < 5.0 / 255.0 {
-        c.quantization = (frac_1 * 1.5).min(1.0);
+
+    // Sum of buckets 2+ (deltas > 1/255) — measures histogram spread
+    let frac_above_1 = (0..3)
+        .map(|ch| {
+            delta_stats.delta_histogram[ch][2..]
+                .iter()
+                .sum::<f64>()
+        })
+        .fold(0.0f64, f64::max);
+
+    // === Score each category (specific → general) ===
+
+    // 1. Channel swap: one zero-delta channel, others large
+    if zero_channels == 1 && hot_channels >= 1 && max_delta > 0.05 {
+        c.channel_swap = 0.9;
     }
 
-    // --- Transfer function detection ---
-    // Nonlinearity: |mean_mid - avg(mean_dark, mean_bright)| across channels
-    let mut nonlinearity = 0.0f64;
-    for ch in 0..3 {
-        let avg_endpoints =
-            (delta_stats.mean_delta_dark[ch] + delta_stats.mean_delta_bright[ch]) / 2.0;
-        let nl = (delta_stats.mean_delta_mid[ch] - avg_endpoints).abs();
-        nonlinearity = nonlinearity.max(nl);
-    }
-    if nonlinearity > 0.01 && max_delta > 0.03 {
-        c.transfer_function = (nonlinearity * 10.0).min(1.0);
-    }
-
-    // --- Alpha compositing detection ---
+    // 2. Alpha compositing: opaque/semitransparent stratification or alpha correlation
     if let Some(ref opaque) = delta_stats.opaque_stats {
         if let Some(ref semi) = delta_stats.semitransparent_stats {
             let opaque_max = opaque
@@ -820,53 +838,84 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
         }
     }
     if let Some(corr) = delta_stats.alpha_error_correlation {
-        if corr > 0.8 {
+        if corr > 0.7 {
             c.alpha_compositing = c.alpha_compositing.max(corr);
         }
     }
 
-    // --- Color shift detection ---
-    // Uniform offset: high mean delta, low stddev relative to mean
-    let mean_abs = delta_stats
-        .mean_delta
-        .iter()
-        .map(|d| d.abs())
-        .fold(0.0f64, f64::max);
-    let max_stddev = delta_stats
-        .stddev_delta
-        .iter()
-        .copied()
-        .fold(0.0f64, f64::max);
-    if mean_abs > 0.02 && max_stddev < mean_abs * 0.5 {
+    // 3. Quantization: concentrated histogram in bucket[1], low max delta
+    // Require high bucket[1] concentration (>0.6) to exclude noise which also
+    // produces off-by-1 values but with a decaying distribution.
+    if frac_1 > 0.6 && max_delta < 5.0 / 255.0 {
+        c.quantization = (frac_1 * 1.2).min(1.0);
+    }
+    // Broader quantization (posterization): moderate max delta, low nonlinearity,
+    // histogram concentrated in low buckets. Distinguishes from noise by checking
+    // "bias" — quantization errors are consistently one-directional (mean/max > 0.3),
+    // while noise is symmetric (mean/max ≈ 0).
+    if c.quantization < 0.1 && max_delta > 0.01 && max_delta < 0.15 && nonlinearity < 0.005 {
+        let frac_low = (0..3)
+            .map(|ch| delta_stats.delta_histogram[ch][..6].iter().sum::<f64>())
+            .fold(0.0f64, f64::max);
+        let diff_frac = delta_stats.pixels_differing as f64 / delta_stats.pixel_count as f64;
+        let bias = mean_abs / max_delta;
+        if frac_low > 0.9 && diff_frac > 0.9 && bias > 0.3 {
+            c.quantization = 0.6;
+        }
+    }
+
+    // 4. Transfer function: nonlinear delta pattern
+    // Suppress when channel swap or alpha compositing already explains the error,
+    // since those can produce incidental nonlinearity.
+    if nonlinearity > 0.01 && max_delta > 0.03
+        && c.channel_swap < 0.5
+        && c.alpha_compositing < 0.5
+    {
+        c.transfer_function = (nonlinearity * 10.0).min(1.0);
+    }
+
+    // 5. Color space matrix: channel-asymmetric deltas, not explained by swap
+    if max_delta > 0.05 && c.channel_swap < 0.3 {
+        let min_max = delta_stats
+            .max_abs_delta
+            .iter()
+            .copied()
+            .fold(f64::MAX, f64::min);
+        let delta_range = max_delta - min_max;
+        // Also check stddev asymmetry across channels
+        let min_stddev = delta_stats
+            .stddev_delta
+            .iter()
+            .copied()
+            .fold(f64::MAX, f64::min);
+        let stddev_range = max_stddev - min_stddev;
+        if delta_range > 0.03 || stddev_range > 0.1 {
+            c.color_space_matrix = ((delta_range + stddev_range) * 3.0).min(0.8);
+        }
+    }
+
+    // 6. Color shift: uniform offset with LOW nonlinearity
+    // A true color shift has nearly constant delta (low stddev/mean ratio)
+    // and does not vary with source luminance (low nonlinearity).
+    // Gamma/TF errors have high nonlinearity so they should NOT match here.
+    if mean_abs > 0.02 && max_stddev < mean_abs * 0.5 && nonlinearity < 0.02 {
         c.color_shift = (mean_abs * 5.0).min(1.0);
     }
 
-    // --- Color space matrix detection ---
-    // Delta proportional to chrominance (saturated colors affected, grays not)
-    // This is currently a weak heuristic; spatial features would improve it
-    if max_delta > 0.05 && c.channel_swap < 0.3 && c.transfer_function < 0.3 {
-        // Check if deltas are channel-asymmetric
-        let delta_range = max_delta
-            - delta_stats
-                .max_abs_delta
-                .iter()
-                .copied()
-                .fold(f64::MAX, f64::min);
-        if delta_range > 0.03 {
-            c.color_space_matrix = (delta_range * 5.0).min(0.7);
-        }
-    }
-
-    // --- Noise detection ---
-    // High stddev/max ratio suggests random noise
-    if max_delta > 0.01 {
+    // 7. Noise: random pattern — high stddev/max, low nonlinearity
+    // Exclude cases already captured by quantization.
+    if max_delta > 0.01 && c.quantization < 0.3 {
         let stddev_max_ratio = max_stddev / max_delta;
-        if stddev_max_ratio > 0.2 && nonlinearity < 0.01 {
-            c.pixel_noise = (stddev_max_ratio * 1.5).min(1.0);
+        if stddev_max_ratio > 0.2 && nonlinearity < 0.005 {
+            // Additional check: noise has significant spread beyond bucket[1]
+            // (unlike pure truncation/rounding which concentrates in bucket[1]).
+            if frac_above_1 > 0.05 || frac_1 < 0.6 {
+                c.pixel_noise = (stddev_max_ratio * 1.5).min(1.0);
+            }
         }
     }
 
-    // --- Determine dominant ---
+    // === Determine dominant category ===
     let scores = [
         (ErrorCategory::TransferFunction, c.transfer_function),
         (ErrorCategory::ColorSpaceMatrix, c.color_space_matrix),
@@ -887,9 +936,6 @@ fn derive_classification(delta_stats: &DeltaStats, result: &ZensimResult) -> Err
     if *best_score > 0.1 {
         c.dominant = *best_cat;
         c.confidence = *best_score;
-    } else if delta_stats.pixels_differing == 0 {
-        c.dominant = ErrorCategory::Identical;
-        c.confidence = 1.0;
     } else {
         c.dominant = ErrorCategory::Mixed;
         c.confidence = 0.1;

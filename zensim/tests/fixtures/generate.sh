@@ -17,29 +17,13 @@ convert -size 64x64 xc: \
 echo "  gradient.png"
 
 # blocks.png: 4x4 grid of 16 saturated colors
-# Using -fx to map grid cells to predefined colors
-convert -size 64x64 xc: \
-    -fx "
-    bx = floor(i*4/w);
-    by = floor(j*4/h);
-    idx = by*4 + bx;
-    idx == 0  ? rgb(255,0,0)/255 :
-    idx == 1  ? rgb(0,255,0)/255 :
-    idx == 2  ? rgb(0,0,255)/255 :
-    idx == 3  ? rgb(255,255,0)/255 :
-    idx == 4  ? rgb(255,0,255)/255 :
-    idx == 5  ? rgb(0,255,255)/255 :
-    idx == 6  ? rgb(255,128,0)/255 :
-    idx == 7  ? rgb(128,0,255)/255 :
-    idx == 8  ? rgb(0,128,255)/255 :
-    idx == 9  ? rgb(255,0,128)/255 :
-    idx == 10 ? rgb(128,255,0)/255 :
-    idx == 11 ? rgb(0,255,128)/255 :
-    idx == 12 ? rgb(64,0,128)/255 :
-    idx == 13 ? rgb(128,64,0)/255 :
-    idx == 14 ? rgb(0,128,64)/255 :
-    rgb(192,192,64)/255
-    " -depth 8 blocks.png
+# Build as 4x4 image then scale up to 64x64 with nearest-neighbor
+convert -size 1x1 \
+    xc:"#FF0000" xc:"#00FF00" xc:"#0000FF" xc:"#FFFF00" +append \
+    \( xc:"#FF00FF" xc:"#00FFFF" xc:"#FF8000" xc:"#8000FF" +append \) \
+    \( xc:"#0080FF" xc:"#FF0080" xc:"#80FF00" xc:"#00FF80" +append \) \
+    \( xc:"#400080" xc:"#804000" xc:"#008040" xc:"#C0C040" +append \) \
+    -append -filter point -resize 64x64 -depth 8 blocks.png
 echo "  blocks.png"
 
 # gray_ramp.png: 8 gray levels as horizontal bands
@@ -56,6 +40,7 @@ convert \
 echo "  gray_ramp.png"
 
 # alpha_patches.png: RGBA, constant color (200,100,50) at 5 alpha levels
+# Use -page to set canvas size so -flatten works correctly later
 convert \
     \( -size 64x12 xc:"srgba(200,100,50,1.0)" \) \
     \( -size 64x13 xc:"srgba(200,100,50,0.749)" \) \
@@ -127,12 +112,12 @@ echo "  blocks_adobe_as_srgb.png"
 echo ""
 echo "=== Alpha / compositing ==="
 
-# Flatten RGBA over black
-convert alpha_patches.png -background black -flatten -depth 8 alpha_patches_over_black.png
+# Composite RGBA over black background (64x64)
+convert \( -size 64x64 xc:black \) alpha_patches.png -composite -depth 8 alpha_patches_over_black.png
 echo "  alpha_patches_over_black.png"
 
-# Flatten RGBA over white
-convert alpha_patches.png -background white -flatten -depth 8 alpha_patches_over_white.png
+# Composite RGBA over white background (64x64)
+convert \( -size 64x64 xc:white \) alpha_patches.png -composite -depth 8 alpha_patches_over_white.png
 echo "  alpha_patches_over_white.png"
 
 echo ""
