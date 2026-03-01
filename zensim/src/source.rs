@@ -567,7 +567,9 @@ mod zenpixels_impls {
 
     /// Pick the best target PixelFormat for a source descriptor, or return an error
     /// explaining why the descriptor is unsupported.
-    fn choose_target(desc: PixelDescriptor) -> Result<(PixelDescriptor, PixelFormat), ZenpixelsSourceError> {
+    fn choose_target(
+        desc: PixelDescriptor,
+    ) -> Result<(PixelDescriptor, PixelFormat), ZenpixelsSourceError> {
         // Reject outright unsupported formats
         match desc.channel_type {
             ChannelType::I16 => {
@@ -610,14 +612,23 @@ mod zenpixels_impls {
         // Choose target based on source depth + transfer + alpha
         let has_alpha = desc.layout.has_alpha();
         let target = match (desc.channel_type, desc.transfer) {
-            (ChannelType::U8, TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown) => {
+            (
+                ChannelType::U8,
+                TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown,
+            ) => {
                 if has_alpha {
-                    (PixelDescriptor::RGBA8_SRGB.with_alpha(desc.alpha), PixelFormat::Srgb8Rgba)
+                    (
+                        PixelDescriptor::RGBA8_SRGB.with_alpha(desc.alpha),
+                        PixelFormat::Srgb8Rgba,
+                    )
                 } else {
                     (PixelDescriptor::RGB8_SRGB, PixelFormat::Srgb8Rgb)
                 }
             }
-            (ChannelType::U16, TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown) => {
+            (
+                ChannelType::U16,
+                TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown,
+            ) => {
                 let target_desc = if has_alpha {
                     PixelDescriptor::RGBA16_SRGB.with_alpha(desc.alpha)
                 } else {

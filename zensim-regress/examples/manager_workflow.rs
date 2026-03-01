@@ -85,9 +85,7 @@ fn main() {
     let variant_hash = SeaHasher.hash_pixels(&variant, w, h);
     println!("  variant hash: {variant_hash}");
 
-    let r = mgr
-        .check_pixels("gradient_test", &variant, w, h)
-        .unwrap();
+    let r = mgr.check_pixels("gradient_test", &variant, w, h).unwrap();
     match &r {
         CheckResult::WithinTolerance {
             report,
@@ -183,9 +181,7 @@ fn main() {
         .with_update_mode_update()
         .with_arch_tag("x86_64-avx2");
 
-    let _ = mgr_x86
-        .check_pixels("multi_arch", &base, w, h)
-        .unwrap();
+    let _ = mgr_x86.check_pixels("multi_arch", &base, w, h).unwrap();
     mgr_x86
         .save_reference_image("multi_arch", &base, w, h)
         .unwrap();

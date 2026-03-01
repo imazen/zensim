@@ -181,7 +181,12 @@ pub fn gradient(w: u32, h: u32) -> Vec<u8> {
 /// round-trip verification.
 pub fn solid(w: u32, h: u32, r: u8, g: u8, b: u8, a: u8) -> Vec<u8> {
     let pixel = [r, g, b, a];
-    pixel.iter().copied().cycle().take((w * h * 4) as usize).collect()
+    pixel
+        .iter()
+        .copied()
+        .cycle()
+        .take((w * h * 4) as usize)
+        .collect()
 }
 
 /// Apply an off-by-N delta to every Nth pixel's red channel.
@@ -189,7 +194,10 @@ pub fn solid(w: u32, h: u32, r: u8, g: u8, b: u8, a: u8) -> Vec<u8> {
 /// Produces a controlled, deterministic perturbation for testing
 /// tolerance thresholds.
 pub fn off_by_n(rgba: &[u8], delta: u8, every_nth: usize) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks(4)
         .enumerate()
         .flat_map(|(i, px)| {
@@ -222,8 +230,9 @@ pub fn generate_in_format(
     );
 
     let source = zenpixels::PixelDescriptor::RGBA8_SRGB;
-    let converter = zenpixels::RowConverter::new(source, target)
-        .unwrap_or_else(|e| panic!("generate_in_format: cannot convert RGBA8_SRGB → {target:?}: {e}"));
+    let converter = zenpixels::RowConverter::new(source, target).unwrap_or_else(|e| {
+        panic!("generate_in_format: cannot convert RGBA8_SRGB → {target:?}: {e}")
+    });
 
     if converter.is_identity() {
         return rgba8_data.to_vec();
@@ -338,7 +347,11 @@ mod tests {
             unique.insert((px[0], px[1], px[2]));
         }
         // Should have at least 16 distinct colors.
-        assert!(unique.len() >= 16, "expected >=16 unique colors, got {}", unique.len());
+        assert!(
+            unique.len() >= 16,
+            "expected >=16 unique colors, got {}",
+            unique.len()
+        );
     }
 
     #[test]

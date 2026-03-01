@@ -10,13 +10,13 @@
 use std::collections::BTreeMap;
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
-use zensim_regress::testing::{RegressionTolerance, check_regression};
 use zensim_regress::arch::{self, KNOWN_ARCH_TAGS};
 use zensim_regress::checksum_file::{
     ChecksumDiff, ChecksumEntry, ImageInfo, TestChecksumFile, ToleranceOverride, ToleranceSpec,
     sanitize_name,
 };
 use zensim_regress::hasher::{ChecksumHasher, SeaHasher};
+use zensim_regress::testing::{RegressionTolerance, check_regression};
 
 /// Create a synthetic 32x32 gradient image.
 fn make_baseline(w: usize, h: usize) -> Vec<[u8; 3]> {
@@ -100,14 +100,14 @@ fn main() {
     let src = RgbSlice::new(&baseline, w, h);
 
     let dst_arm = RgbSlice::new(&arm_variant, w, h);
-    let report_arm = check_regression(&z, &src, &dst_arm, &RegressionTolerance::off_by_one())
-        .unwrap();
+    let report_arm =
+        check_regression(&z, &src, &dst_arm, &RegressionTolerance::off_by_one()).unwrap();
     println!("  ARM vs baseline:");
     println!("    {report_arm}");
 
     let dst_avx512 = RgbSlice::new(&avx512_variant, w, h);
-    let report_avx512 = check_regression(&z, &src, &dst_avx512, &RegressionTolerance::off_by_one())
-        .unwrap();
+    let report_avx512 =
+        check_regression(&z, &src, &dst_avx512, &RegressionTolerance::off_by_one()).unwrap();
     println!("  AVX512 vs baseline:");
     println!("    {report_avx512}");
 
@@ -217,12 +217,14 @@ fn main() {
         if let Some(entry) = matched {
             println!(
                 "    direct match: confidence={}, reason={:?}",
-                entry.confidence,
-                entry.reason
+                entry.confidence, entry.reason
             );
 
             // Check arch affinity
-            let has_arch = entry.arch.iter().any(|a| arch::arch_matches(a, simulated_arch));
+            let has_arch = entry
+                .arch
+                .iter()
+                .any(|a| arch::arch_matches(a, simulated_arch));
             if has_arch {
                 println!("    arch affinity: matches recorded arch");
             } else {

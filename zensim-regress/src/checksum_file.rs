@@ -69,8 +69,7 @@ impl TestChecksumFile {
     /// The authoritative checksum: active entry with highest confidence.
     /// If tied, the last one added wins (later in the Vec).
     pub fn authoritative(&self) -> Option<&ChecksumEntry> {
-        self.active_checksums()
-            .max_by_key(|e| e.confidence)
+        self.active_checksums().max_by_key(|e| e.confidence)
     }
 
     /// Find a checksum entry by its ID.
@@ -85,10 +84,8 @@ impl TestChecksumFile {
 
     /// Read a checksum file from a path.
     pub fn read_from(path: &Path) -> Result<Self, RegressError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| RegressError::io(path, e))?;
-        let file: Self = toml::from_str(&content)
-            .map_err(|e| RegressError::toml_parse(path, e))?;
+        let content = std::fs::read_to_string(path).map_err(|e| RegressError::io(path, e))?;
+        let file: Self = toml::from_str(&content).map_err(|e| RegressError::toml_parse(path, e))?;
         Ok(file)
     }
 
@@ -97,12 +94,10 @@ impl TestChecksumFile {
     /// Creates parent directories if needed.
     pub fn write_to(&self, path: &Path) -> Result<(), RegressError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| RegressError::io(parent, e))?;
+            std::fs::create_dir_all(parent).map_err(|e| RegressError::io(parent, e))?;
         }
         let content = toml::to_string_pretty(self)?;
-        std::fs::write(path, content)
-            .map_err(|e| RegressError::io(path, e))?;
+        std::fs::write(path, content).map_err(|e| RegressError::io(path, e))?;
         Ok(())
     }
 }
@@ -141,7 +136,11 @@ pub struct ToleranceSpec {
 
     /// Per-architecture tolerance overrides.
     /// Key is an architecture tag (e.g., `"aarch64"`, `"x86_64-avx2"`).
-    #[serde(default, rename = "override", skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        rename = "override",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub overrides: BTreeMap<String, ToleranceOverride>,
 }
 
@@ -217,9 +216,7 @@ impl ToleranceSpec {
         // Prefix match: find the longest matching key
         self.overrides
             .iter()
-            .filter(|(key, _)| {
-                crate::arch::arch_matches(key, arch_tag)
-            })
+            .filter(|(key, _)| crate::arch::arch_matches(key, arch_tag))
             .max_by_key(|(key, _)| key.len())
             .map(|(_, ov)| ov)
     }
@@ -434,7 +431,10 @@ mod tests {
 
     #[test]
     fn sanitize_basic() {
-        assert_eq!(sanitize_name("resize_bicubic_200x200"), "resize_bicubic_200x200");
+        assert_eq!(
+            sanitize_name("resize_bicubic_200x200"),
+            "resize_bicubic_200x200"
+        );
     }
 
     #[test]
@@ -657,7 +657,10 @@ mod tests {
     fn checksum_path_basic() {
         let dir = std::path::Path::new("/tmp/checksums");
         let path = checksum_path(dir, "resize::bicubic::200");
-        assert_eq!(path, std::path::PathBuf::from("/tmp/checksums/resize_bicubic_200.toml"));
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/tmp/checksums/resize_bicubic_200.toml")
+        );
     }
 
     #[test]

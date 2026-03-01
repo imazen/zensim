@@ -75,8 +75,9 @@ pub fn hash_pixels_described(
     height: u32,
 ) -> String {
     let target = zenpixels::PixelDescriptor::RGBA8_SRGB;
-    let converter = zenpixels::RowConverter::new(descriptor, target)
-        .unwrap_or_else(|e| panic!("hash_pixels_described: cannot convert {descriptor:?} → RGBA8: {e}"));
+    let converter = zenpixels::RowConverter::new(descriptor, target).unwrap_or_else(|e| {
+        panic!("hash_pixels_described: cannot convert {descriptor:?} → RGBA8: {e}")
+    });
 
     if converter.is_identity() {
         return hasher.hash_pixels(data, width, height);
@@ -128,7 +129,10 @@ mod tests {
         let pixels = vec![0u8; 4 * 16]; // 16 pixels worth of data
         let h1 = SeaHasher.hash_pixels(&pixels, 4, 4);
         let h2 = SeaHasher.hash_pixels(&pixels, 8, 2);
-        assert_ne!(h1, h2, "different dimensions should produce different hashes");
+        assert_ne!(
+            h1, h2,
+            "different dimensions should produce different hashes"
+        );
     }
 
     #[test]

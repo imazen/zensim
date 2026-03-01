@@ -207,10 +207,7 @@ impl ChecksumManager {
     }
 
     /// Get the effective tolerance for a test on the current architecture.
-    pub fn tolerance_for_test(
-        &self,
-        test_name: &str,
-    ) -> Result<RegressionTolerance, RegressError> {
+    pub fn tolerance_for_test(&self, test_name: &str) -> Result<RegressionTolerance, RegressError> {
         match self.load_file(test_name)? {
             Some(file) => Ok(file.tolerance.to_regression_tolerance(&self.arch_tag)),
             None => Ok(RegressionTolerance::exact()),
@@ -370,11 +367,9 @@ impl ChecksumManager {
         // Load reference image for comparison
         let ref_path = self.find_reference_image(test_name);
         let ref_img = match ref_path {
-            Some(p) => {
-                image::open(&p)
-                    .map_err(|e| RegressError::image(&p, e))?
-                    .to_rgba8()
-            }
+            Some(p) => image::open(&p)
+                .map_err(|e| RegressError::image(&p, e))?
+                .to_rgba8(),
             None => {
                 // No reference image file — can't do pixel comparison
                 if self.update_mode == UpdateMode::Update {
@@ -615,8 +610,7 @@ impl ChecksumManager {
         height: u32,
     ) -> Result<PathBuf, RegressError> {
         let images_dir = self.checksum_dir.join("images");
-        std::fs::create_dir_all(&images_dir)
-            .map_err(|e| RegressError::io(&images_dir, e))?;
+        std::fs::create_dir_all(&images_dir).map_err(|e| RegressError::io(&images_dir, e))?;
 
         let sanitized = crate::checksum_file::sanitize_name(test_name);
         let path = images_dir.join(format!("{sanitized}.png"));
@@ -633,8 +627,7 @@ impl ChecksumManager {
                 ),
             }
         })?;
-        img.save(&path)
-            .map_err(|e| RegressError::image(&path, e))?;
+        img.save(&path).map_err(|e| RegressError::image(&path, e))?;
 
         Ok(path)
     }
@@ -780,13 +773,7 @@ mod tests {
         file.write_to(&mgr.test_path("test_match")).unwrap();
 
         let result = mgr.check_pixels("test_match", &px, 16, 16).unwrap();
-        assert!(matches!(
-            result,
-            CheckResult::Match {
-                confidence: 10,
-                ..
-            }
-        ));
+        assert!(matches!(result, CheckResult::Match { confidence: 10, .. }));
         assert!(result.passed());
     }
 
@@ -804,15 +791,10 @@ mod tests {
         file.checksum.push(ChecksumEntry::new(hash.clone()));
         file.write_to(&mgr.test_path("test_arch_update")).unwrap();
 
-        let _ = mgr
-            .check_pixels("test_arch_update", &px, 16, 16)
-            .unwrap();
+        let _ = mgr.check_pixels("test_arch_update", &px, 16, 16).unwrap();
 
-        let updated =
-            TestChecksumFile::read_from(&mgr.test_path("test_arch_update")).unwrap();
-        assert!(updated.checksum[0]
-            .arch
-            .contains(&"test-arch".to_string()));
+        let updated = TestChecksumFile::read_from(&mgr.test_path("test_arch_update")).unwrap();
+        assert!(updated.checksum[0].arch.contains(&"test-arch".to_string()));
     }
 
     // ─── Retired entry not matched ──────────────────────────────────
@@ -890,13 +872,8 @@ mod tests {
         let file = TestChecksumFile::read_from(&mgr.test_path("test_accept")).unwrap();
         assert_eq!(file.checksum.len(), 1);
         assert_eq!(file.checksum[0].id, "sea:1234567890abcdef");
-        assert_eq!(
-            file.checksum[0].reason.as_deref(),
-            Some("manual accept")
-        );
-        assert!(file.checksum[0]
-            .arch
-            .contains(&"test-arch".to_string()));
+        assert_eq!(file.checksum[0].reason.as_deref(), Some("manual accept"));
+        assert!(file.checksum[0].arch.contains(&"test-arch".to_string()));
     }
 
     #[test]
@@ -939,14 +916,10 @@ mod tests {
         )
         .unwrap();
 
-        let updated =
-            TestChecksumFile::read_from(&mgr.test_path("test_reactivate")).unwrap();
+        let updated = TestChecksumFile::read_from(&mgr.test_path("test_reactivate")).unwrap();
         assert_eq!(updated.checksum[0].confidence, 10);
         assert!(updated.checksum[0].status.is_none());
-        assert_eq!(
-            updated.checksum[0].reason.as_deref(),
-            Some("reactivated")
-        );
+        assert_eq!(updated.checksum[0].reason.as_deref(), Some("reactivated"));
     }
 
     #[test]
@@ -992,14 +965,11 @@ mod tests {
 
         let px = make_test_pixels(16, 16, 99);
         let new_hash = mgr.hasher.hash_pixels(&px, 16, 16);
-        let result = mgr
-            .check_pixels("test_replace", &px, 16, 16)
-            .unwrap();
+        let result = mgr.check_pixels("test_replace", &px, 16, 16).unwrap();
 
         assert!(result.passed());
 
-        let file =
-            TestChecksumFile::read_from(&mgr.test_path("test_replace")).unwrap();
+        let file = TestChecksumFile::read_from(&mgr.test_path("test_replace")).unwrap();
         let old = file.find_by_id("sea:old0000000000000").unwrap();
         assert_eq!(old.confidence, 0);
         assert_eq!(old.status.as_deref(), Some("replaced"));
@@ -1120,14 +1090,10 @@ mod tests {
             }
         ));
 
-        let updated =
-            TestChecksumFile::read_from(&mgr.test_path("test_auto_accept")).unwrap();
+        let updated = TestChecksumFile::read_from(&mgr.test_path("test_auto_accept")).unwrap();
         assert!(updated.find_by_id(&variant_hash).is_some());
         let new_entry = updated.find_by_id(&variant_hash).unwrap();
-        assert!(
-            new_entry.diff.is_some(),
-            "should have chain-of-trust diff"
-        );
+        assert!(new_entry.diff.is_some(), "should have chain-of-trust diff");
     }
 
     // ─── Reference image save/load ───────────────────────────────────
@@ -1138,9 +1104,7 @@ mod tests {
         let mgr = ChecksumManager::new(dir.path()).with_update_mode_normal();
 
         let px = make_test_pixels(8, 8, 0);
-        let path = mgr
-            .save_reference_image("test_ref", &px, 8, 8)
-            .unwrap();
+        let path = mgr.save_reference_image("test_ref", &px, 8, 8).unwrap();
 
         assert!(path.exists());
         let img = image::open(&path).unwrap().to_rgba8();

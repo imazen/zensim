@@ -54,8 +54,7 @@ pub fn arch_matches(entry_tag: &str, current_tag: &str) -> bool {
         return true;
     }
     // entry_tag is a prefix match: "x86_64" matches "x86_64-avx2"
-    current_tag.starts_with(entry_tag)
-        && current_tag.as_bytes().get(entry_tag.len()) == Some(&b'-')
+    current_tag.starts_with(entry_tag) && current_tag.as_bytes().get(entry_tag.len()) == Some(&b'-')
 }
 
 /// All known architecture tags, for validation.

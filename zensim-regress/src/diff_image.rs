@@ -3,7 +3,7 @@
 //! Creates amplified difference images and side-by-side comparison montages
 //! for visual regression analysis.
 
-use image::{RgbaImage, Rgba, imageops};
+use image::{Rgba, RgbaImage, imageops};
 
 /// Generate an amplified diff image showing per-channel absolute differences.
 ///

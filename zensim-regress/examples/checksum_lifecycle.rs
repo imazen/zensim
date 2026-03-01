@@ -17,13 +17,13 @@
 use std::collections::BTreeMap;
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
-use zensim_regress::testing::{RegressionTolerance, check_regression};
 use zensim_regress::arch::{self, KNOWN_ARCH_TAGS};
 use zensim_regress::checksum_file::{
     ChecksumDiff, ChecksumEntry, ImageInfo, TestChecksumFile, ToleranceOverride, ToleranceSpec,
     checksum_path, sanitize_name,
 };
 use zensim_regress::hasher::{ChecksumHasher, SeaHasher};
+use zensim_regress::testing::{RegressionTolerance, check_regression};
 
 fn main() {
     println!("=== zensim-regress: full lifecycle demo ===\n");
@@ -65,11 +65,8 @@ fn main() {
     let hasher = SeaHasher;
 
     // SeaHasher expects RGBA bytes, convert RGB→RGBA
-    let to_rgba = |rgb: &[[u8; 3]]| -> Vec<u8> {
-        rgb.iter()
-            .flat_map(|&[r, g, b]| [r, g, b, 255])
-            .collect()
-    };
+    let to_rgba =
+        |rgb: &[[u8; 3]]| -> Vec<u8> { rgb.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect() };
 
     let baseline_rgba = to_rgba(&baseline_pixels);
     let variant_a_rgba = to_rgba(&variant_a_pixels);
@@ -92,7 +89,10 @@ fn main() {
 
     // Verify dimension sensitivity
     let hash_diff_dims = hasher.hash_pixels(&baseline_rgba, 64, 16);
-    assert_ne!(hash_baseline, hash_diff_dims, "different dims = different hash");
+    assert_ne!(
+        hash_baseline, hash_diff_dims,
+        "different dims = different hash"
+    );
     println!("  determinism: verified");
     println!("  dimension sensitivity: verified\n");
 
@@ -138,7 +138,10 @@ fn main() {
     println!("    score:    {:.1}", diff_a.zensim_score);
     println!("    category: {}", diff_a.category);
     println!("    max_delta: {:?}", diff_a.max_channel_delta);
-    println!("    pixels_differing_pct: {:.1}%", diff_a.pixels_differing_pct.unwrap_or(0.0));
+    println!(
+        "    pixels_differing_pct: {:.1}%",
+        diff_a.pixels_differing_pct.unwrap_or(0.0)
+    );
     println!("    rounding_balanced: {:?}", diff_a.rounding_bias_balanced);
 
     let diff_b = ChecksumDiff::from_report(&report_b, &hash_baseline);
@@ -212,13 +215,12 @@ fn main() {
 
     println!("  name: {}", file.name);
     println!("  entries: {} total", file.checksum.len());
-    println!(
-        "  active:  {} entries",
-        file.active_checksums().count()
-    );
+    println!("  active:  {} entries", file.active_checksums().count());
     println!(
         "  authoritative: {}",
-        file.authoritative().map(|e| e.id.as_str()).unwrap_or("none")
+        file.authoritative()
+            .map(|e| e.id.as_str())
+            .unwrap_or("none")
     );
     println!();
 
@@ -254,7 +256,10 @@ fn main() {
     let active: Vec<_> = parsed.active_checksums().collect();
     println!("  active checksums: {}", active.len());
     for e in &active {
-        println!("    {} (confidence={}, arch={:?})", e.id, e.confidence, e.arch);
+        println!(
+            "    {} (confidence={}, arch={:?})",
+            e.id, e.confidence, e.arch
+        );
     }
 
     // authoritative
@@ -312,7 +317,11 @@ fn main() {
 
     for (input, expected) in &test_cases {
         let result = sanitize_name(input);
-        let status = if result == *expected { "ok" } else { "MISMATCH" };
+        let status = if result == *expected {
+            "ok"
+        } else {
+            "MISMATCH"
+        };
         println!("  {status}: {input:30} -> {result}");
         assert_eq!(&result, expected, "sanitize({input:?})");
     }
@@ -408,12 +417,7 @@ fn main() {
 
     // Save a test image to disk, then hash it
     let img = image::RgbaImage::from_fn(w as u32, h as u32, |x, y| {
-        image::Rgba([
-            (x * 8) as u8,
-            (y * 8) as u8,
-            ((x + y) * 4) as u8,
-            255,
-        ])
+        image::Rgba([(x * 8) as u8, (y * 8) as u8, ((x + y) * 4) as u8, 255])
     });
     let img_path = dir.path().join("test_gradient.png");
     img.save(&img_path).expect("save test image");
@@ -449,9 +453,7 @@ fn main() {
     println!("  actual output hash: {actual_hash}");
 
     // Check: does any active checksum match?
-    let matched = parsed
-        .active_checksums()
-        .find(|e| e.id == *actual_hash);
+    let matched = parsed.active_checksums().find(|e| e.id == *actual_hash);
 
     match matched {
         Some(entry) => {
@@ -472,9 +474,7 @@ fn main() {
     // Simulate a mismatch
     let unknown_hash = "sea:ffffffffffffffff";
     println!("\n  unknown output hash: {unknown_hash}");
-    let matched = parsed
-        .active_checksums()
-        .find(|e| e.id == unknown_hash);
+    let matched = parsed.active_checksums().find(|e| e.id == unknown_hash);
     assert!(matched.is_none());
     println!("  NO MATCH — would trigger comparison");
 

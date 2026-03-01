@@ -149,8 +149,7 @@ pub fn print_comparison(
     amplification: u8,
     max_width: Option<u32>,
 ) {
-    let montage =
-        crate::diff_image::create_comparison_montage(expected, actual, amplification, 2);
+    let montage = crate::diff_image::create_comparison_montage(expected, actual, amplification, 2);
 
     // Print text labels above the panels
     let panel_w = expected.width() as usize;
@@ -393,7 +392,10 @@ mod tests {
         let bytes = sixel_encode(&img, None);
         let s = String::from_utf8_lossy(&bytes);
         // Should use RLE for the uniform run
-        assert!(s.contains("!100"), "should use RLE for 100 identical columns");
+        assert!(
+            s.contains("!100"),
+            "should use RLE for 100 identical columns"
+        );
     }
 
     #[test]
@@ -403,7 +405,10 @@ mod tests {
         let bytes = sixel_encode(&img, None);
         let s = String::from_utf8_lossy(&bytes);
         // Should contain a band separator
-        assert!(s.contains('-'), "should have band separator for 12-row image");
+        assert!(
+            s.contains('-'),
+            "should have band separator for 12-row image"
+        );
     }
 
     #[test]

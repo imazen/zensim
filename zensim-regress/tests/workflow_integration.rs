@@ -109,10 +109,7 @@ fn first_run_update_mode_creates_baseline() {
     assert_eq!(file.checksum[0].id, hash);
     assert_eq!(file.checksum[0].confidence, 10);
     assert_eq!(file.checksum[0].arch, vec!["x86_64-avx2"]);
-    assert_eq!(
-        file.checksum[0].reason.as_deref(),
-        Some("initial baseline")
-    );
+    assert_eq!(file.checksum[0].reason.as_deref(), Some("initial baseline"));
     assert!(file.checksum[0].diff.is_none()); // no prior reference to diff against
 }
 
@@ -122,9 +119,7 @@ fn first_run_replace_mode_creates_baseline() {
     let mgr = ChecksumManager::new(dir.path()).with_update_mode_replace();
 
     let px = gradient_rgba(16, 16);
-    let result = mgr
-        .check_pixels("first_run_replace", &px, 16, 16)
-        .unwrap();
+    let result = mgr.check_pixels("first_run_replace", &px, 16, 16).unwrap();
 
     assert!(result.passed());
     assert!(mgr.test_path("first_run_replace").exists());
@@ -200,9 +195,11 @@ fn exact_match_adds_arch_tag() {
     // Arch tag should now include aarch64
     let updated = TestChecksumFile::read_from(&mgr.test_path("arch_add")).unwrap();
     assert!(updated.checksum[0].arch.contains(&"aarch64".to_string()));
-    assert!(updated.checksum[0]
-        .arch
-        .contains(&"x86_64-avx2".to_string()));
+    assert!(
+        updated.checksum[0]
+            .arch
+            .contains(&"x86_64-avx2".to_string())
+    );
 }
 
 #[test]
@@ -469,9 +466,7 @@ fn accept_creates_new_file() {
         file.checksum[0].reason.as_deref(),
         Some("establishing baseline")
     );
-    assert!(file.checksum[0]
-        .arch
-        .contains(&"x86_64-avx2".to_string()));
+    assert!(file.checksum[0].arch.contains(&"x86_64-avx2".to_string()));
 }
 
 #[test]
@@ -502,10 +497,7 @@ fn accept_does_not_duplicate_existing_id() {
 
     let file = TestChecksumFile::read_from(&mgr.test_path("nodup_test")).unwrap();
     assert_eq!(file.checksum.len(), 1);
-    assert_eq!(
-        file.checksum[0].reason.as_deref(),
-        Some("updated reason")
-    );
+    assert_eq!(file.checksum[0].reason.as_deref(), Some("updated reason"));
 }
 
 #[test]
@@ -564,10 +556,7 @@ fn reject_retires_entry() {
     let entry = file.find_by_id(hash).unwrap();
     assert_eq!(entry.confidence, 0);
     assert_eq!(entry.status.as_deref(), Some("wrong"));
-    assert_eq!(
-        entry.reason.as_deref(),
-        Some("regression from CICP fix")
-    );
+    assert_eq!(entry.reason.as_deref(), Some("regression from CICP fix"));
     assert!(!entry.is_active());
 }
 
@@ -606,9 +595,7 @@ fn rejected_entry_not_matched_on_check() {
         .unwrap();
     mgr.reject("rejected_check", &hash, "broken").unwrap();
 
-    let result = mgr
-        .check_pixels("rejected_check", &px, 16, 16)
-        .unwrap();
+    let result = mgr.check_pixels("rejected_check", &px, 16, 16).unwrap();
     // Should NOT match — entry is retired. Falls through to no-active-entries path.
     assert!(!result.passed());
 }
@@ -649,9 +636,7 @@ fn replace_mode_retires_old_adds_new() {
     let px = gradient_rgba(16, 16);
     let new_hash = SeaHasher.hash_pixels(&px, 16, 16);
 
-    let result = mgr
-        .check_pixels("replace_test", &px, 16, 16)
-        .unwrap();
+    let result = mgr.check_pixels("replace_test", &px, 16, 16).unwrap();
     assert!(result.passed());
 
     let updated = TestChecksumFile::read_from(&mgr.test_path("replace_test")).unwrap();
@@ -767,14 +752,11 @@ fn tolerance_prefix_match() {
         .with_update_mode_normal()
         .with_arch_tag("x86_64-avx2");
 
-    mgr.save_reference_image("tol_prefix", &base, w, h)
-        .unwrap();
+    mgr.save_reference_image("tol_prefix", &base, w, h).unwrap();
     file.write_to(&mgr.test_path("tol_prefix")).unwrap();
 
     let variant = off_by_n(&base, 1, 3);
-    let result = mgr
-        .check_pixels("tol_prefix", &variant, w, h)
-        .unwrap();
+    let result = mgr.check_pixels("tol_prefix", &variant, w, h).unwrap();
     assert!(
         result.passed(),
         "x86_64 prefix override should match x86_64-avx2"
@@ -805,12 +787,11 @@ fn hash_only_mismatch() {
     let mgr = ChecksumManager::new(dir.path()).with_update_mode_normal();
 
     let mut file = TestChecksumFile::new("hash_miss");
-    file.checksum.push(ChecksumEntry::new("sea:aaaa000000000000"));
+    file.checksum
+        .push(ChecksumEntry::new("sea:aaaa000000000000"));
     file.write_to(&mgr.test_path("hash_miss")).unwrap();
 
-    let result = mgr
-        .check_hash("hash_miss", "sea:bbbb000000000000")
-        .unwrap();
+    let result = mgr.check_hash("hash_miss", "sea:bbbb000000000000").unwrap();
     match &result {
         CheckResult::Failed {
             report,
@@ -818,10 +799,7 @@ fn hash_only_mismatch() {
             actual_hash,
         } => {
             assert!(report.is_none(), "no pixels = no report");
-            assert_eq!(
-                authoritative_id.as_deref(),
-                Some("sea:aaaa000000000000")
-            );
+            assert_eq!(authoritative_id.as_deref(), Some("sea:aaaa000000000000"));
             assert_eq!(actual_hash, "sea:bbbb000000000000");
         }
         _ => panic!("expected Failed, got {result:?}"),
@@ -862,25 +840,13 @@ fn multi_entry_matches_any_active() {
     let r1 = mgr
         .check_hash("multi_entry", "sea:aaaa000000000000")
         .unwrap();
-    assert!(matches!(
-        r1,
-        CheckResult::Match {
-            confidence: 10,
-            ..
-        }
-    ));
+    assert!(matches!(r1, CheckResult::Match { confidence: 10, .. }));
 
     // Match second entry
     let r2 = mgr
         .check_hash("multi_entry", "sea:bbbb000000000000")
         .unwrap();
-    assert!(matches!(
-        r2,
-        CheckResult::Match {
-            confidence: 8,
-            ..
-        }
-    ));
+    assert!(matches!(r2, CheckResult::Match { confidence: 8, .. }));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -893,9 +859,7 @@ fn save_and_load_reference_image() {
     let mgr = ChecksumManager::new(dir.path()).with_update_mode_normal();
 
     let px = gradient_rgba(24, 24);
-    let path = mgr
-        .save_reference_image("ref_save", &px, 24, 24)
-        .unwrap();
+    let path = mgr.save_reference_image("ref_save", &px, 24, 24).unwrap();
 
     assert!(path.exists());
     assert!(path.to_str().unwrap().ends_with("ref_save.png"));
@@ -928,9 +892,7 @@ fn reference_image_enables_comparison() {
     file.write_to(&mgr.test_path("ref_enables")).unwrap();
 
     let variant = off_by_n(&base, 1, 2);
-    let result_no_ref = mgr
-        .check_pixels("ref_enables", &variant, w, h)
-        .unwrap();
+    let result_no_ref = mgr.check_pixels("ref_enables", &variant, w, h).unwrap();
     assert!(
         matches!(result_no_ref, CheckResult::Failed { report: None, .. }),
         "without reference, should fail with no report: {result_no_ref:?}"
@@ -939,14 +901,9 @@ fn reference_image_enables_comparison() {
     // Save reference image, now comparison should work
     mgr.save_reference_image("ref_enables", &base, w, h)
         .unwrap();
-    let result_with_ref = mgr
-        .check_pixels("ref_enables", &variant, w, h)
-        .unwrap();
+    let result_with_ref = mgr.check_pixels("ref_enables", &variant, w, h).unwrap();
     assert!(
-        matches!(
-            result_with_ref,
-            CheckResult::WithinTolerance { .. }
-        ),
+        matches!(result_with_ref, CheckResult::WithinTolerance { .. }),
         "with reference, should pass tolerance: {result_with_ref:?}"
     );
 }
@@ -977,8 +934,7 @@ fn full_lifecycle() {
     ));
 
     // Save reference image for future comparisons
-    mgr.save_reference_image("lifecycle", &base, w, h)
-        .unwrap();
+    mgr.save_reference_image("lifecycle", &base, w, h).unwrap();
 
     // Step 2: Same pixels again → direct match
     let r2 = mgr.check_pixels("lifecycle", &base, w, h).unwrap();
@@ -1050,7 +1006,13 @@ fn full_lifecycle() {
     // It should be WithinTolerance (not Match, since entry was rejected)
     // but it passes because comparison with reference is still within tolerance
     assert!(r5.passed());
-    assert!(matches!(r5, CheckResult::WithinTolerance { auto_accepted: false, .. }));
+    assert!(matches!(
+        r5,
+        CheckResult::WithinTolerance {
+            auto_accepted: false,
+            ..
+        }
+    ));
 
     // Step 9: Verify final state
     let final_file = TestChecksumFile::read_from(&path).unwrap();
@@ -1106,7 +1068,11 @@ fn test_name_sanitization() {
 
     // The file should exist with a sanitized name
     let path = mgr.test_path("module::test::resize (200x200)");
-    assert!(path.exists(), "sanitized path should exist: {}", path.display());
+    assert!(
+        path.exists(),
+        "sanitized path should exist: {}",
+        path.display()
+    );
     assert!(
         path.to_str().unwrap().contains("module_test_resize"),
         "path should be sanitized: {}",

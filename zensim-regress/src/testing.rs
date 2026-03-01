@@ -406,7 +406,9 @@ impl std::fmt::Display for RegressionReport {
         }
 
         // Histogram comparison (only show when notable divergence)
-        let hist_match = self.expected_histogram.intersection_all(&self.actual_histogram);
+        let hist_match = self
+            .expected_histogram
+            .intersection_all(&self.actual_histogram);
         let any_divergence = hist_match.iter().any(|&v| v < 0.999);
         if any_divergence {
             let labels = ["R", "G", "B", "A"];

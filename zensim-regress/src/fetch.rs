@@ -77,11 +77,7 @@ impl ShellFetcher {
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!(
-                "curl exit {}: {}",
-                output.status,
-                stderr.trim()
-            ))
+            Err(format!("curl exit {}: {}", output.status, stderr.trim()))
         }
     }
 
@@ -99,11 +95,7 @@ impl ShellFetcher {
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!(
-                "wget exit {}: {}",
-                output.status,
-                stderr.trim()
-            ))
+            Err(format!("wget exit {}: {}", output.status, stderr.trim()))
         }
     }
 
@@ -230,11 +222,7 @@ impl<F: ResourceFetcher> CachedFetcher<F> {
         base_url: &str,
         filename: &str,
     ) -> Result<PathBuf, RegressError> {
-        let url = format!(
-            "{}/{}",
-            base_url.trim_end_matches('/'),
-            filename
-        );
+        let url = format!("{}/{}", base_url.trim_end_matches('/'), filename);
         self.ensure(&url, filename)
     }
 
@@ -289,30 +277,30 @@ mod tests {
     #[test]
     fn cached_fetcher_downloads_once() {
         let dir = tempfile::tempdir().unwrap();
-        let fetcher = CachedFetcher::with_fetcher(
-            MockFetcher::new(b"hello world"),
-            dir.path(),
-        );
+        let fetcher = CachedFetcher::with_fetcher(MockFetcher::new(b"hello world"), dir.path());
 
-        let path = fetcher.ensure("https://example.com/test.txt", "test.txt").unwrap();
+        let path = fetcher
+            .ensure("https://example.com/test.txt", "test.txt")
+            .unwrap();
         assert!(path.exists());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello world");
 
         // Second call should not re-download (mock would write same content anyway,
         // but we verify the path is returned immediately).
-        let path2 = fetcher.ensure("https://example.com/test.txt", "test.txt").unwrap();
+        let path2 = fetcher
+            .ensure("https://example.com/test.txt", "test.txt")
+            .unwrap();
         assert_eq!(path, path2);
     }
 
     #[test]
     fn cached_fetcher_ensure_from_base() {
         let dir = tempfile::tempdir().unwrap();
-        let fetcher = CachedFetcher::with_fetcher(
-            MockFetcher::new(b"image data"),
-            dir.path(),
-        );
+        let fetcher = CachedFetcher::with_fetcher(MockFetcher::new(b"image data"), dir.path());
 
-        let path = fetcher.ensure_from_base("https://s3.example.com/images", "ref.png").unwrap();
+        let path = fetcher
+            .ensure_from_base("https://s3.example.com/images", "ref.png")
+            .unwrap();
         assert_eq!(path, dir.path().join("ref.png"));
         assert_eq!(std::fs::read(&path).unwrap(), b"image data");
     }
@@ -320,25 +308,23 @@ mod tests {
     #[test]
     fn cached_fetcher_base_url_trailing_slash() {
         let dir = tempfile::tempdir().unwrap();
-        let fetcher = CachedFetcher::with_fetcher(
-            MockFetcher::new(b"data"),
-            dir.path(),
-        );
+        let fetcher = CachedFetcher::with_fetcher(MockFetcher::new(b"data"), dir.path());
 
         // Trailing slash should be handled.
-        let path = fetcher.ensure_from_base("https://s3.example.com/images/", "ref.png").unwrap();
+        let path = fetcher
+            .ensure_from_base("https://s3.example.com/images/", "ref.png")
+            .unwrap();
         assert!(path.exists());
     }
 
     #[test]
     fn cached_fetcher_remove() {
         let dir = tempfile::tempdir().unwrap();
-        let fetcher = CachedFetcher::with_fetcher(
-            MockFetcher::new(b"temp"),
-            dir.path(),
-        );
+        let fetcher = CachedFetcher::with_fetcher(MockFetcher::new(b"temp"), dir.path());
 
-        let path = fetcher.ensure("https://example.com/temp.txt", "temp.txt").unwrap();
+        let path = fetcher
+            .ensure("https://example.com/temp.txt", "temp.txt")
+            .unwrap();
         assert!(path.exists());
 
         fetcher.remove("temp.txt").unwrap();

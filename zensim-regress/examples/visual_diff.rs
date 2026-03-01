@@ -36,12 +36,7 @@ fn main() {
 
     // Baseline: colorful gradient
     let expected = RgbaImage::from_fn(w, h, |x, y| {
-        Rgba([
-            (x * 4) as u8,
-            (y * 4) as u8,
-            ((x + y) * 2) as u8,
-            255,
-        ])
+        Rgba([(x * 4) as u8, (y * 4) as u8, ((x + y) * 2) as u8, 255])
     });
 
     // Variant 1: off-by-one rounding in R channel

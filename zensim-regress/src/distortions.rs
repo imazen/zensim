@@ -25,7 +25,10 @@
 ///
 /// ~50% of pixels change by 1. Produces `RoundingError` classification.
 pub fn truncate_lsb(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks_exact(4)
         .flat_map(|px| [px[0] & 0xFE, px[1] & 0xFE, px[2] & 0xFE, px[3]])
         .collect()
@@ -36,7 +39,10 @@ pub fn truncate_lsb(rgba: &[u8]) -> Vec<u8> {
 /// Delta is proportional to value (max ~0.5 at value 128).
 /// Common in incorrect bit-depth conversion code.
 pub fn expand_256(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks_exact(4)
         .flat_map(|px| {
             [
@@ -54,7 +60,10 @@ pub fn expand_256(rgba: &[u8]) -> Vec<u8> {
 /// Adds 1 to odd values below 255. Only differs at exact .5 boundaries,
 /// producing subtle systematic bias.
 pub fn round_half_up(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     let adjust = |v: u8| -> u8 {
         if v % 2 == 1 && v < 255 {
             v.wrapping_add(1)
@@ -72,7 +81,10 @@ pub fn round_half_up(rgba: &[u8]) -> Vec<u8> {
 /// Darkens semitransparent pixels: `R_out = R * A / 255`.
 /// Opaque and transparent pixels are unchanged.
 pub fn premul_as_straight(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks_exact(4)
         .flat_map(|px| {
             let a = px[3] as u16;
@@ -91,7 +103,10 @@ pub fn premul_as_straight(rgba: &[u8]) -> Vec<u8> {
 /// Brightens semitransparent pixels: `R_out = R * 255 / A`.
 /// Transparent pixels (A=0) are unchanged. Can produce dramatic differences.
 pub fn straight_as_premul(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks_exact(4)
         .flat_map(|px| {
             if px[3] == 0 {
@@ -113,7 +128,10 @@ pub fn straight_as_premul(rgba: &[u8]) -> Vec<u8> {
 ///
 /// Produces `ChannelSwap` classification for most images.
 pub fn channel_swap_rb(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks_exact(4)
         .flat_map(|px| [px[2], px[1], px[0], px[3]])
         .collect()
@@ -123,7 +141,10 @@ pub fn channel_swap_rb(rgba: &[u8]) -> Vec<u8> {
 ///
 /// `R_out = 255 - R`. Produces large deltas for non-midtone images.
 pub fn invert(rgba: &[u8]) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
     rgba.chunks_exact(4)
         .flat_map(|px| [255 - px[0], 255 - px[1], 255 - px[2], px[3]])
         .collect()
@@ -134,10 +155,11 @@ pub fn invert(rgba: &[u8]) -> Vec<u8> {
 /// `R_out = R.saturating_add(delta)` for all channels.
 /// Useful for testing score sensitivity to uniform shifts.
 pub fn uniform_shift(rgba: &[u8], delta: i16) -> Vec<u8> {
-    assert!(rgba.len() % 4 == 0, "RGBA byte length must be a multiple of 4");
-    let apply = |v: u8| -> u8 {
-        (v as i16 + delta).clamp(0, 255) as u8
-    };
+    assert!(
+        rgba.len() % 4 == 0,
+        "RGBA byte length must be a multiple of 4"
+    );
+    let apply = |v: u8| -> u8 { (v as i16 + delta).clamp(0, 255) as u8 };
     rgba.chunks_exact(4)
         .flat_map(|px| [apply(px[0]), apply(px[1]), apply(px[2]), px[3]])
         .collect()
@@ -214,8 +236,8 @@ mod tests {
         vec![
             100, 150, 200, 255, // opaque
             50, 100, 150, 128, // semitransparent
-            0, 0, 0, 255,     // black opaque
-            255, 255, 255, 0,  // white transparent
+            0, 0, 0, 255, // black opaque
+            255, 255, 255, 0, // white transparent
         ]
     }
 
