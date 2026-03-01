@@ -24,6 +24,8 @@ imgref = ["dep:imgref", "dep:rgb"]
 zencodec-types = ["dep:zencodec-types"]
 ## Enable SrgbF16Rgba pixel format (requires `half` crate for IEEE 754 half-precision).
 f16 = ["dep:half"]
+## Enable ZenpixelsSource for accepting any interleaved pixel format via zenpixels conversion.
+zenpixels = ["dep:zenpixels"]
 
 [dependencies]
 archmage = { workspace = true }
@@ -35,6 +37,7 @@ imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
 zencodec-types = { workspace = true, optional = true }
 half = { workspace = true, optional = true }
+zenpixels = { workspace = true, optional = true }
 
 [dev-dependencies]
 image = { workspace = true }

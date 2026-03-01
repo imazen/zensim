@@ -24,3 +24,4 @@ imgref = "1.12"
 rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
 half = { version = "2", default-features = false }
 zencodec-types = { git = "https://github.com/imazen/zencodec-types.git" }
+zenpixels = { path = "../zenpixels", default-features = false, features = ["std"] }

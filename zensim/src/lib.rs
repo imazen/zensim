@@ -105,6 +105,8 @@ pub use source::{AlphaMode, ImageSource, PixelFormat, RgbSlice, RgbaSlice, Strid
 
 #[cfg(feature = "zencodec-types")]
 pub use source::pixel_format_from_descriptor;
+#[cfg(feature = "zenpixels")]
+pub use source::{ZenpixelsSource, ZenpixelsSourceError};
 pub use streaming::PrecomputedReference;
 
 // --- Legacy free-function API (convenience wrappers) ---

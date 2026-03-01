@@ -143,6 +143,68 @@ pub fn uniform_shift(rgba: &[u8], delta: i16) -> Vec<u8> {
         .collect()
 }
 
+/// Apply a distortion function to pixel data in any interleaved format.
+///
+/// Converts to RGBA8 sRGB, applies `distortion_fn`, then converts back to the
+/// original format. This lets all existing distortion functions work on any
+/// pixel format without modification.
+///
+/// Panics if format conversion fails (should not happen for formats
+/// returned by [`crate::generators::supported_formats`]).
+#[cfg(feature = "zenpixels")]
+pub fn apply_distortion_in_format(
+    data: &[u8],
+    descriptor: zenpixels::PixelDescriptor,
+    width: u32,
+    height: u32,
+    distortion_fn: impl Fn(&[u8]) -> Vec<u8>,
+) -> Vec<u8> {
+    let rgba8 = zenpixels::PixelDescriptor::RGBA8_SRGB;
+
+    // Convert source → RGBA8
+    let to_rgba = zenpixels::RowConverter::new(descriptor, rgba8)
+        .unwrap_or_else(|e| panic!("apply_distortion_in_format: {descriptor:?} → RGBA8: {e}"));
+    let from_rgba = zenpixels::RowConverter::new(rgba8, descriptor)
+        .unwrap_or_else(|e| panic!("apply_distortion_in_format: RGBA8 → {descriptor:?}: {e}"));
+
+    let src_bpp = descriptor.bytes_per_pixel();
+    let src_stride = width as usize * src_bpp;
+    let rgba_stride = width as usize * 4;
+
+    let rgba_data = if to_rgba.is_identity() {
+        data.to_vec()
+    } else {
+        let mut buf = vec![0u8; height as usize * rgba_stride];
+        for y in 0..height as usize {
+            let src_row = &data[y * src_stride..y * src_stride + src_stride];
+            let dst_row = &mut buf[y * rgba_stride..y * rgba_stride + rgba_stride];
+            to_rgba.convert_row(src_row, dst_row, width);
+        }
+        buf
+    };
+
+    // Apply distortion in RGBA8 space
+    let distorted_rgba = distortion_fn(&rgba_data);
+    assert_eq!(
+        distorted_rgba.len(),
+        rgba_data.len(),
+        "distortion function changed buffer size"
+    );
+
+    // Convert back to original format
+    if from_rgba.is_identity() {
+        distorted_rgba
+    } else {
+        let mut result = vec![0u8; height as usize * src_stride];
+        for y in 0..height as usize {
+            let src_row = &distorted_rgba[y * rgba_stride..y * rgba_stride + rgba_stride];
+            let dst_row = &mut result[y * src_stride..y * src_stride + src_stride];
+            from_rgba.convert_row(src_row, dst_row, width);
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

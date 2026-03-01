@@ -479,3 +479,301 @@ mod zencodec_impls {
 
 #[cfg(feature = "zencodec-types")]
 pub use zencodec_impls::pixel_format_from_descriptor;
+
+#[cfg(feature = "zenpixels")]
+mod zenpixels_impls {
+    use super::*;
+    use zenpixels::{
+        AlphaMode as ZpAlphaMode, ChannelLayout, ChannelType, ColorPrimaries, PixelDescriptor,
+        RowConverter, SignalRange, TransferFunction,
+    };
+
+    /// Error constructing a [`ZenpixelsSource`].
+    #[derive(Debug, thiserror::Error)]
+    pub enum ZenpixelsSourceError {
+        /// The pixel format cannot be converted to any zensim-supported format.
+        #[error("unsupported pixel descriptor: {0}")]
+        UnsupportedDescriptor(String),
+
+        /// Row conversion failed.
+        #[error("zenpixels conversion error: {0}")]
+        Convert(#[from] zenpixels::ConvertError),
+    }
+
+    /// An [`ImageSource`] constructed from any interleaved pixel format
+    /// that zenpixels can describe and convert.
+    ///
+    /// For native formats (sRGB U8 RGB/RGBA/BGRA, sRGB U16 RGBA, Linear F32 RGBA),
+    /// the source data is borrowed directly. For other supported formats, all rows
+    /// are pre-converted into an owned buffer at construction time.
+    pub struct ZenpixelsSource<'a> {
+        /// Borrowed data for direct-passthrough, or owned converted buffer.
+        data: ZpData<'a>,
+        width: usize,
+        height: usize,
+        stride: usize,
+        pixel_format: PixelFormat,
+        alpha_mode: AlphaMode,
+    }
+
+    enum ZpData<'a> {
+        Borrowed(&'a [u8]),
+        Owned(Vec<u8>),
+    }
+
+    impl ZpData<'_> {
+        fn as_bytes(&self) -> &[u8] {
+            match self {
+                ZpData::Borrowed(b) => b,
+                ZpData::Owned(v) => v,
+            }
+        }
+    }
+
+    /// Map a zenpixels `AlphaMode` to zensim's `AlphaMode`.
+    fn map_alpha_mode(zp: ZpAlphaMode) -> AlphaMode {
+        match zp {
+            ZpAlphaMode::None | ZpAlphaMode::Undefined | ZpAlphaMode::Opaque => AlphaMode::Opaque,
+            ZpAlphaMode::Straight => AlphaMode::Straight,
+            ZpAlphaMode::Premultiplied => AlphaMode::Premultiplied,
+            _ => AlphaMode::Unknown,
+        }
+    }
+
+    /// Check if a descriptor is directly passthrough (no conversion needed).
+    fn direct_passthrough(desc: PixelDescriptor) -> Option<(PixelFormat, AlphaMode)> {
+        if desc.primaries != ColorPrimaries::Bt709 || desc.signal_range != SignalRange::Full {
+            return None;
+        }
+        match (desc.channel_type, desc.layout, desc.transfer) {
+            (ChannelType::U8, ChannelLayout::Rgb, TransferFunction::Srgb) => {
+                Some((PixelFormat::Srgb8Rgb, AlphaMode::Opaque))
+            }
+            (ChannelType::U8, ChannelLayout::Rgba, TransferFunction::Srgb) => {
+                Some((PixelFormat::Srgb8Rgba, map_alpha_mode(desc.alpha)))
+            }
+            (ChannelType::U8, ChannelLayout::Bgra, TransferFunction::Srgb) => {
+                Some((PixelFormat::Srgb8Bgra, map_alpha_mode(desc.alpha)))
+            }
+            (ChannelType::U16, ChannelLayout::Rgba, TransferFunction::Srgb) => {
+                Some((PixelFormat::Srgb16Rgba, map_alpha_mode(desc.alpha)))
+            }
+            (ChannelType::F32, ChannelLayout::Rgba, TransferFunction::Linear) => {
+                Some((PixelFormat::LinearF32Rgba, map_alpha_mode(desc.alpha)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Pick the best target PixelFormat for a source descriptor, or return an error
+    /// explaining why the descriptor is unsupported.
+    fn choose_target(desc: PixelDescriptor) -> Result<(PixelDescriptor, PixelFormat), ZenpixelsSourceError> {
+        // Reject outright unsupported formats
+        match desc.channel_type {
+            ChannelType::I16 => {
+                return Err(ZenpixelsSourceError::UnsupportedDescriptor(
+                    "I16 channel type has no zenpixels conversion kernels".into(),
+                ));
+            }
+            ChannelType::F16 => {
+                return Err(ZenpixelsSourceError::UnsupportedDescriptor(
+                    "F16 channel type has no zenpixels conversion kernels; \
+                     use zensim's native f16 feature with StridedBytes instead"
+                        .into(),
+                ));
+            }
+            _ => {}
+        }
+        match desc.transfer {
+            TransferFunction::Pq | TransferFunction::Hlg => {
+                return Err(ZenpixelsSourceError::UnsupportedDescriptor(format!(
+                    "{:?} transfer function requires tone mapping (not supported)",
+                    desc.transfer
+                )));
+            }
+            _ => {}
+        }
+        if desc.primaries != ColorPrimaries::Bt709 && desc.primaries != ColorPrimaries::Unknown {
+            // BT.709 is fine, Unknown we treat as BT.709.
+            // Others require gamut mapping.
+            return Err(ZenpixelsSourceError::UnsupportedDescriptor(format!(
+                "{:?} primaries require gamut mapping (not supported)",
+                desc.primaries
+            )));
+        }
+        if desc.signal_range == SignalRange::Narrow {
+            return Err(ZenpixelsSourceError::UnsupportedDescriptor(
+                "narrow signal range requires range expansion (not supported)".into(),
+            ));
+        }
+
+        // Choose target based on source depth + transfer + alpha
+        let has_alpha = desc.layout.has_alpha();
+        let target = match (desc.channel_type, desc.transfer) {
+            (ChannelType::U8, TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown) => {
+                if has_alpha {
+                    (PixelDescriptor::RGBA8_SRGB.with_alpha(desc.alpha), PixelFormat::Srgb8Rgba)
+                } else {
+                    (PixelDescriptor::RGB8_SRGB, PixelFormat::Srgb8Rgb)
+                }
+            }
+            (ChannelType::U16, TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown) => {
+                let target_desc = if has_alpha {
+                    PixelDescriptor::RGBA16_SRGB.with_alpha(desc.alpha)
+                } else {
+                    // No alpha → add opaque alpha for RGBA16
+                    PixelDescriptor::RGBA16_SRGB.with_alpha(ZpAlphaMode::Opaque)
+                };
+                (target_desc, PixelFormat::Srgb16Rgba)
+            }
+            (ChannelType::F32, TransferFunction::Linear) => {
+                let target_desc = if has_alpha {
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(desc.alpha)
+                } else {
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(ZpAlphaMode::Opaque)
+                };
+                (target_desc, PixelFormat::LinearF32Rgba)
+            }
+            // Fallback: convert to linear f32 RGBA
+            _ => {
+                let target_desc = if has_alpha {
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(desc.alpha)
+                } else {
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(ZpAlphaMode::Opaque)
+                };
+                (target_desc, PixelFormat::LinearF32Rgba)
+            }
+        };
+        Ok(target)
+    }
+
+    impl<'a> ZenpixelsSource<'a> {
+        /// Create from contiguous pixel data (stride = width * bytes_per_pixel).
+        ///
+        /// Returns an error if the descriptor is unsupported or conversion fails.
+        pub fn new(
+            data: &'a [u8],
+            descriptor: PixelDescriptor,
+            width: usize,
+            height: usize,
+        ) -> Result<Self, ZenpixelsSourceError> {
+            let bpp = descriptor.bytes_per_pixel();
+            Self::with_stride(data, descriptor, width, height, width * bpp)
+        }
+
+        /// Create from strided pixel data.
+        ///
+        /// `stride` is the byte distance between the start of consecutive rows.
+        /// Returns an error if the descriptor is unsupported or conversion fails.
+        pub fn with_stride(
+            data: &'a [u8],
+            descriptor: PixelDescriptor,
+            width: usize,
+            height: usize,
+            stride: usize,
+        ) -> Result<Self, ZenpixelsSourceError> {
+            let bpp = descriptor.bytes_per_pixel();
+            assert!(
+                stride >= width * bpp,
+                "ZenpixelsSource: stride {stride} < width*bpp {}",
+                width * bpp,
+            );
+            if height > 0 {
+                let required = (height - 1) * stride + width * bpp;
+                assert!(
+                    data.len() >= required,
+                    "ZenpixelsSource: data length {} < required {required}",
+                    data.len(),
+                );
+            }
+
+            // Check for direct passthrough first
+            let contiguous_stride = width * bpp;
+            if stride == contiguous_stride {
+                if let Some((pf, am)) = direct_passthrough(descriptor) {
+                    return Ok(Self {
+                        data: ZpData::Borrowed(data),
+                        width,
+                        height,
+                        stride,
+                        pixel_format: pf,
+                        alpha_mode: am,
+                    });
+                }
+            }
+
+            // Need conversion — pick target and convert
+            let (target_desc, target_pf) = choose_target(descriptor)?;
+            let alpha_mode = map_alpha_mode(target_desc.alpha);
+
+            let converter = RowConverter::new(descriptor, target_desc)?;
+
+            if converter.is_identity() && stride == contiguous_stride {
+                // Identity conversion with contiguous data — just borrow
+                return Ok(Self {
+                    data: ZpData::Borrowed(data),
+                    width,
+                    height,
+                    stride,
+                    pixel_format: target_pf,
+                    alpha_mode,
+                });
+            }
+
+            // Pre-convert all rows into an owned buffer
+            let target_bpp = target_pf.bytes_per_pixel();
+            let target_stride = width * target_bpp;
+            let mut buf = vec![0u8; height * target_stride];
+
+            for y in 0..height {
+                let src_start = y * stride;
+                let src_row = &data[src_start..src_start + width * bpp];
+                let dst_start = y * target_stride;
+                let dst_row = &mut buf[dst_start..dst_start + target_stride];
+                converter.convert_row(src_row, dst_row, width as u32);
+            }
+
+            Ok(Self {
+                data: ZpData::Owned(buf),
+                width,
+                height,
+                stride: target_stride,
+                pixel_format: target_pf,
+                alpha_mode,
+            })
+        }
+
+        /// The original descriptor's target pixel format after conversion.
+        pub fn pixel_format(&self) -> PixelFormat {
+            self.pixel_format
+        }
+    }
+
+    impl ImageSource for ZenpixelsSource<'_> {
+        #[inline]
+        fn width(&self) -> usize {
+            self.width
+        }
+        #[inline]
+        fn height(&self) -> usize {
+            self.height
+        }
+        #[inline]
+        fn pixel_format(&self) -> PixelFormat {
+            self.pixel_format
+        }
+        #[inline]
+        fn alpha_mode(&self) -> AlphaMode {
+            self.alpha_mode
+        }
+        #[inline]
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            let start = y * self.stride;
+            let bpp = self.pixel_format.bytes_per_pixel();
+            &self.data.as_bytes()[start..start + self.width * bpp]
+        }
+    }
+}
+
+#[cfg(feature = "zenpixels")]
+pub use zenpixels_impls::{ZenpixelsSource, ZenpixelsSourceError};

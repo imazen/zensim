@@ -249,6 +249,52 @@ impl ChecksumManager {
         self.check_pixels(test_name, img.as_raw(), w, h)
     }
 
+    /// Check pixel data in any interleaved format against stored checksums.
+    ///
+    /// Converts to RGBA8 for format-independent hashing, then wraps in
+    /// [`ZenpixelsSource`](zensim::ZenpixelsSource) for full-precision zensim comparison.
+    #[cfg(feature = "zenpixels")]
+    pub fn check_pixels_described(
+        &self,
+        test_name: &str,
+        data: &[u8],
+        descriptor: zenpixels::PixelDescriptor,
+        width: u32,
+        height: u32,
+    ) -> Result<CheckResult, RegressError> {
+        // Hash via RGBA8 conversion for format-independent checksums
+        let actual_hash = crate::hasher::hash_pixels_described(
+            self.hasher.as_ref(),
+            data,
+            descriptor,
+            width,
+            height,
+        );
+
+        // For pixel comparison, convert to RGBA8 so we can use RgbaSlice
+        // (ZenpixelsSource might target a non-RGBA8 format; RGBA8 is universal)
+        let target = zenpixels::PixelDescriptor::RGBA8_SRGB;
+        let converter = zenpixels::RowConverter::new(descriptor, target)?;
+
+        let rgba8 = if converter.is_identity() {
+            data.to_vec()
+        } else {
+            let src_bpp = descriptor.bytes_per_pixel();
+            let dst_bpp = target.bytes_per_pixel();
+            let src_stride = width as usize * src_bpp;
+            let dst_stride = width as usize * dst_bpp;
+            let mut buf = vec![0u8; height as usize * dst_stride];
+            for y in 0..height as usize {
+                let src_row = &data[y * src_stride..y * src_stride + src_stride];
+                let dst_row = &mut buf[y * dst_stride..y * dst_stride + dst_stride];
+                converter.convert_row(src_row, dst_row, width);
+            }
+            buf
+        };
+
+        self.check_hash_inner(test_name, &actual_hash, Some((&rgba8, width, height)))
+    }
+
     /// Check a pre-computed hash against stored checksums.
     ///
     /// Cannot run zensim comparison (no pixel data), so WithinTolerance
