@@ -183,6 +183,7 @@ fn main() {
             height: Some(h as u32),
             format: Some("RGB".to_string()),
         }),
+        meta: BTreeMap::new(),
     };
 
     // Show the file

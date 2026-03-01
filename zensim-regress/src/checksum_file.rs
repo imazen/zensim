@@ -19,6 +19,10 @@
 //! commit = "1540445a"
 //! arch = ["x86_64-avx2"]
 //! reason = "initial baseline"
+//!
+//! [meta]
+//! pixel_format = "Bgra32"
+//! s3_url = "https://s3-us-west-2.amazonaws.com/..."
 //! ```
 
 use std::collections::BTreeMap;
@@ -48,6 +52,21 @@ pub struct TestChecksumFile {
     /// Optional image metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<ImageInfo>,
+
+    /// Arbitrary consumer-specific metadata.
+    ///
+    /// Consumers (e.g., imageflow) can store any extra key-value pairs here
+    /// without modifying the core schema. Omitted from TOML when empty.
+    ///
+    /// ```toml
+    /// [meta]
+    /// similarity_mode = "AllowOffByOneBytesCount"
+    /// similarity_param = 500
+    /// s3_url = "https://s3-us-west-2.amazonaws.com/..."
+    /// pixel_format = "Bgra32"
+    /// ```
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub meta: BTreeMap<String, toml::Value>,
 }
 
 impl TestChecksumFile {
@@ -58,6 +77,7 @@ impl TestChecksumFile {
             tolerance: ToleranceSpec::default(),
             checksum: Vec::new(),
             info: None,
+            meta: BTreeMap::new(),
         }
     }
 
@@ -557,6 +577,16 @@ mod tests {
                 height: Some(200),
                 format: None,
             }),
+            meta: BTreeMap::from([
+                (
+                    "pixel_format".to_string(),
+                    toml::Value::String("Bgra32".to_string()),
+                ),
+                (
+                    "similarity_param".to_string(),
+                    toml::Value::Integer(500),
+                ),
+            ]),
         };
 
         let toml_str = toml::to_string_pretty(&file).unwrap();
@@ -597,6 +627,14 @@ mod tests {
         let info = parsed.info.as_ref().unwrap();
         assert_eq!(info.width, Some(200));
         assert_eq!(info.height, Some(200));
+
+        // Meta
+        assert_eq!(parsed.meta.len(), 2);
+        assert_eq!(
+            parsed.meta["pixel_format"],
+            toml::Value::String("Bgra32".to_string())
+        );
+        assert_eq!(parsed.meta["similarity_param"], toml::Value::Integer(500));
     }
 
     #[test]
@@ -609,6 +647,7 @@ mod tests {
             tolerance: ToleranceSpec::default(),
             checksum: vec![ChecksumEntry::new("sea:1234567890abcdef")],
             info: None,
+            meta: BTreeMap::new(),
         };
 
         file.write_to(&path).unwrap();
@@ -683,6 +722,7 @@ mod tests {
                 diff: None,
             }],
             info: None,
+            meta: BTreeMap::new(),
         };
 
         let toml_str = toml::to_string_pretty(&file).unwrap();
@@ -691,5 +731,48 @@ mod tests {
         assert!(toml_str.contains("[tolerance]"), "missing [tolerance]");
         assert!(toml_str.contains("[[checksum]]"), "missing [[checksum]]");
         assert!(toml_str.contains("sea:a1b2c3d4e5f6789a"), "missing hash");
+        // Empty meta should be omitted
+        assert!(!toml_str.contains("[meta]"), "empty meta should be omitted");
+    }
+
+    #[test]
+    fn meta_roundtrip() {
+        let mut file = TestChecksumFile::new("meta_test");
+        file.meta.insert(
+            "s3_url".to_string(),
+            toml::Value::String("https://s3.example.com/ref.png".to_string()),
+        );
+        file.meta.insert(
+            "similarity_param".to_string(),
+            toml::Value::Integer(500),
+        );
+        file.meta.insert(
+            "allow_off_by_one".to_string(),
+            toml::Value::Boolean(true),
+        );
+
+        let toml_str = toml::to_string_pretty(&file).unwrap();
+        assert!(toml_str.contains("[meta]"), "meta section should be present");
+
+        let parsed: TestChecksumFile = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.meta.len(), 3);
+        assert_eq!(
+            parsed.meta["s3_url"],
+            toml::Value::String("https://s3.example.com/ref.png".to_string())
+        );
+        assert_eq!(parsed.meta["similarity_param"], toml::Value::Integer(500));
+        assert_eq!(parsed.meta["allow_off_by_one"], toml::Value::Boolean(true));
+    }
+
+    #[test]
+    fn meta_absent_parses_as_empty() {
+        let toml_str = r#"
+name = "no_meta"
+
+[tolerance]
+max_channel_delta = 0
+"#;
+        let parsed: TestChecksumFile = toml::from_str(toml_str).unwrap();
+        assert!(parsed.meta.is_empty());
     }
 }
