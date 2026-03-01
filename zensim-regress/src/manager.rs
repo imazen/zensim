@@ -43,6 +43,7 @@ use crate::arch::detect_arch_tag;
 use crate::checksum_file::{ChecksumDiff, ChecksumEntry, TestChecksumFile, checksum_path};
 use crate::error::RegressError;
 use crate::hasher::{ChecksumHasher, SeaHasher};
+use crate::remote::ReferenceStorage;
 use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
 
 /// How to handle new checksums via environment variables.
@@ -136,6 +137,7 @@ pub struct ChecksumManager {
     zensim: Zensim,
     update_mode: UpdateMode,
     arch_tag: String,
+    remote: Option<ReferenceStorage>,
 }
 
 impl ChecksumManager {
@@ -149,6 +151,7 @@ impl ChecksumManager {
             zensim: Zensim::new(ZensimProfile::latest()),
             update_mode: UpdateMode::from_env(),
             arch_tag: detect_arch_tag().to_string(),
+            remote: None,
         }
     }
 
@@ -179,6 +182,23 @@ impl ChecksumManager {
     /// Override the architecture tag (for testing).
     pub fn with_arch_tag(mut self, tag: impl Into<String>) -> Self {
         self.arch_tag = tag.into();
+        self
+    }
+
+    /// Set remote storage for reference image upload/download.
+    pub fn with_remote_storage(mut self, remote: ReferenceStorage) -> Self {
+        self.remote = Some(remote);
+        self
+    }
+
+    /// Configure remote storage from environment variables.
+    ///
+    /// Reads `REGRESS_REFERENCE_URL`, `REGRESS_UPLOAD_PREFIX`, and
+    /// `UPLOAD_REFERENCES`. No-op if `REGRESS_REFERENCE_URL` is not set.
+    /// Downloads are cached in `{checksum_dir}/.remote-cache`.
+    pub fn with_remote_storage_from_env(mut self) -> Self {
+        let cache_dir = self.checksum_dir.join(".remote-cache");
+        self.remote = ReferenceStorage::from_env(cache_dir);
         self
     }
 
@@ -244,6 +264,29 @@ impl ChecksumManager {
             .to_rgba8();
         let (w, h) = img.dimensions();
         self.check_pixels(test_name, img.as_raw(), w, h)
+    }
+
+    /// Check an encoded image file using opaque (file-level) hashing.
+    ///
+    /// Unlike [`check_file`](Self::check_file) which decodes to RGBA first,
+    /// this hashes the raw file bytes — so different encoders producing
+    /// identical pixels will have different checksums. Use this for encoder
+    /// regression testing where you want to detect any output change.
+    ///
+    /// Tolerance comparison still works via pixel decode on mismatch.
+    pub fn check_file_opaque(
+        &self,
+        test_name: &str,
+        actual_path: impl AsRef<Path>,
+    ) -> Result<CheckResult, RegressError> {
+        let actual_path = actual_path.as_ref();
+        let actual_hash = self.hasher.hash_file_bytes(actual_path)?;
+        // Decode to pixels for tolerance comparison (only used on mismatch)
+        let img = image::open(actual_path)
+            .map_err(|e| RegressError::image(actual_path, e))?
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        self.check_hash_inner(test_name, &actual_hash, Some((img.as_raw(), w, h)))
     }
 
     /// Check pixel data in any interleaved format against stored checksums.
@@ -365,11 +408,9 @@ impl ChecksumManager {
         };
 
         // Load reference image for comparison
-        let ref_path = self.find_reference_image(test_name);
-        let ref_img = match ref_path {
-            Some(p) => image::open(&p)
-                .map_err(|e| RegressError::image(&p, e))?
-                .to_rgba8(),
+        let ref_path = self.find_reference_image(test_name, Some(&authoritative.id));
+        let (ref_rgba, rw, rh) = match ref_path {
+            Some(p) => decode_reference_png(&p)?,
             None => {
                 // No reference image file — can't do pixel comparison
                 if self.update_mode == UpdateMode::Update {
@@ -395,9 +436,8 @@ impl ChecksumManager {
 
         // Run zensim comparison
         let tolerance = file.tolerance.to_regression_tolerance(&self.arch_tag);
-        let (rw, rh) = ref_img.dimensions();
 
-        let ref_pixels = rgba_bytes_to_pixels(ref_img.as_raw());
+        let ref_pixels = rgba_bytes_to_pixels(&ref_rgba);
         let actual_pixels = rgba_bytes_to_pixels(rgba);
         let ref_source = RgbaSlice::new(&ref_pixels, rw as usize, rh as usize);
         let actual_source = RgbaSlice::new(&actual_pixels, w as usize, h as usize);
@@ -493,7 +533,17 @@ impl ChecksumManager {
         };
 
         file.checksum.push(entry);
-        file.write_to(path)
+        file.write_to(path)?;
+
+        // Upload reference image to remote if we have one locally
+        let sanitized = crate::checksum_file::sanitize_name(&file.name);
+        let images_dir = path.parent().unwrap_or(Path::new(".")).join("images");
+        let ref_path = images_dir.join(format!("{sanitized}.png"));
+        if ref_path.exists() {
+            self.upload_reference_image(actual_hash, &ref_path);
+        }
+
+        Ok(())
     }
 
     /// Reject a checksum: set confidence to 0 and mark as wrong.
@@ -587,16 +637,35 @@ impl ChecksumManager {
 
     /// Try to find a reference image for a given test name.
     ///
-    /// Looks for `{checksum_dir}/images/{sanitized_test_name}.png`.
-    fn find_reference_image(&self, test_name: &str) -> Option<PathBuf> {
+    /// 1. Looks locally at `{checksum_dir}/images/{sanitized_test_name}.png`
+    /// 2. If remote storage is configured, tries downloading by `authoritative_id`
+    fn find_reference_image(
+        &self,
+        test_name: &str,
+        authoritative_id: Option<&str>,
+    ) -> Option<PathBuf> {
         let images_dir = self.checksum_dir.join("images");
         let sanitized = crate::checksum_file::sanitize_name(test_name);
-        let test_path = images_dir.join(format!("{sanitized}.png"));
-        if test_path.exists() {
-            Some(test_path)
-        } else {
-            None
+        let local_path = images_dir.join(format!("{sanitized}.png"));
+        if local_path.exists() {
+            return Some(local_path);
         }
+
+        // Try remote download by authoritative checksum ID
+        if let (Some(remote), Some(auth_id)) = (&self.remote, authoritative_id) {
+            match remote.download_reference(auth_id) {
+                Ok(Some(cached_path)) => {
+                    // Copy to local images dir for future use
+                    let _ = std::fs::create_dir_all(&images_dir);
+                    let _ = std::fs::copy(&cached_path, &local_path);
+                    return Some(local_path);
+                }
+                Ok(None) => {} // not available remotely
+                Err(e) => eprintln!("Warning: remote download failed: {e}"),
+            }
+        }
+
+        None
     }
 
     /// Save a reference image for future comparisons.
@@ -631,6 +700,29 @@ impl ChecksumManager {
 
         Ok(path)
     }
+
+    /// Upload a reference image to remote storage (if configured).
+    ///
+    /// Best-effort: logs warning on failure, does not return error.
+    pub fn upload_reference_image(&self, checksum_id: &str, local_path: &Path) {
+        if let Some(remote) = &self.remote {
+            if let Err(e) = remote.upload_reference(local_path, checksum_id) {
+                eprintln!("Warning: failed to upload reference {checksum_id}: {e}");
+            }
+        }
+    }
+}
+
+/// Decode a PNG reference image to RGBA8 pixels.
+///
+/// Currently uses the `image` crate. The `zenpng` feature flag is reserved
+/// for future faster decode once zencodec-types path collision is resolved.
+fn decode_reference_png(path: &Path) -> Result<(Vec<u8>, u32, u32), RegressError> {
+    let img = image::open(path)
+        .map_err(|e| RegressError::image(path, e))?
+        .to_rgba8();
+    let (w, h) = img.dimensions();
+    Ok((img.into_raw(), w, h))
 }
 
 /// Collect `&[u8]` into a `Vec<[u8; 4]>` (RGBA pixels).
@@ -670,7 +762,7 @@ mod tests {
     fn make_test_pixels(w: u32, h: u32, seed: u8) -> Vec<u8> {
         (0..w * h)
             .flat_map(|i| {
-                let v = ((i as u8).wrapping_mul(17).wrapping_add(seed)) as u8;
+                let v = (i as u8).wrapping_mul(17).wrapping_add(seed);
                 [v, v.wrapping_add(30), v.wrapping_add(60), 255u8]
             })
             .collect()
@@ -1110,5 +1202,111 @@ mod tests {
         let img = image::open(&path).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), (8, 8));
         assert_eq!(img.as_raw(), &px);
+    }
+
+    // ─── check_file_opaque ─────────────────────────────────────────
+
+    #[test]
+    fn check_file_opaque_different_hash_than_check_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManager::new(dir.path()).with_update_mode_update();
+
+        let px = make_test_pixels(8, 8, 77);
+        let img_path = dir.path().join("test_output.png");
+        let img = image::RgbaImage::from_raw(8, 8, px.clone()).unwrap();
+        img.save(&img_path).unwrap();
+
+        // check_file hashes decoded pixels, check_file_opaque hashes raw bytes
+        let result_file = mgr.check_file("opaque_test_file", &img_path).unwrap();
+        let result_opaque = mgr
+            .check_file_opaque("opaque_test_opaque", &img_path)
+            .unwrap();
+
+        // Both should produce NoBaseline in update mode
+        let hash_file = match &result_file {
+            CheckResult::NoBaseline { actual_hash, .. } => actual_hash.clone(),
+            other => panic!("expected NoBaseline, got {other:?}"),
+        };
+        let hash_opaque = match &result_opaque {
+            CheckResult::NoBaseline { actual_hash, .. } => actual_hash.clone(),
+            other => panic!("expected NoBaseline, got {other:?}"),
+        };
+
+        assert_ne!(
+            hash_file, hash_opaque,
+            "file-level hash should differ from pixel hash"
+        );
+    }
+
+    #[test]
+    fn check_file_opaque_matches_stored_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManager::new(dir.path()).with_update_mode_normal();
+
+        let px = make_test_pixels(8, 8, 88);
+        let img_path = dir.path().join("test_opaque_match.png");
+        let img = image::RgbaImage::from_raw(8, 8, px).unwrap();
+        img.save(&img_path).unwrap();
+
+        // Compute the opaque hash and store it
+        let opaque_hash = mgr.hasher.hash_file_bytes(&img_path).unwrap();
+        let mut file = TestChecksumFile::new("opaque_match");
+        file.checksum.push(ChecksumEntry::new(opaque_hash.clone()));
+        file.write_to(&mgr.test_path("opaque_match")).unwrap();
+
+        let result = mgr.check_file_opaque("opaque_match", &img_path).unwrap();
+        assert!(
+            matches!(result, CheckResult::Match { .. }),
+            "should match stored opaque hash"
+        );
+    }
+
+    // ─── Remote storage builder ─────────────────────────────────────
+
+    #[test]
+    fn with_remote_storage_sets_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let remote = crate::remote::ReferenceStorage::new(
+            "https://example.com/refs",
+            None,
+            false,
+            dir.path().join("cache"),
+        );
+        let mgr = ChecksumManager::new(dir.path()).with_remote_storage(remote);
+        // Just verify it doesn't panic; the remote field is private
+        assert_eq!(mgr.checksum_dir(), dir.path());
+    }
+
+    #[test]
+    fn with_remote_storage_from_env_builder() {
+        // from_env is inherently env-dependent; just test the builder chain works.
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManager::new(dir.path()).with_remote_storage_from_env();
+        assert_eq!(mgr.checksum_dir(), dir.path());
+    }
+
+    // ─── decode_reference_png ───────────────────────────────────────
+
+    #[test]
+    fn decode_reference_png_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let px = make_test_pixels(8, 8, 33);
+        let path = dir.path().join("test.png");
+        let img = image::RgbaImage::from_raw(8, 8, px.clone()).unwrap();
+        img.save(&path).unwrap();
+
+        let (decoded, w, h) = decode_reference_png(&path).unwrap();
+        assert_eq!((w, h), (8, 8));
+        assert_eq!(decoded, px);
+    }
+
+    // ─── Upload integration ─────────────────────────────────────────
+
+    #[test]
+    fn upload_reference_image_noop_without_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManager::new(dir.path()).with_update_mode_normal();
+        // Should not panic when no remote is configured
+        mgr.upload_reference_image("sea:test123", Path::new("/nonexistent"));
     }
 }

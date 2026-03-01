@@ -45,7 +45,9 @@ pub mod fetch;
 pub mod generators;
 pub mod hasher;
 pub mod manager;
+pub mod remote;
 pub mod testing;
+pub mod upload;
 
 // Re-export key types at crate root for convenience
 pub use error::RegressError;

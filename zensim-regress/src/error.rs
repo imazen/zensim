@@ -49,6 +49,10 @@ pub enum RegressError {
     #[error("fetch failed for {url}: {message}")]
     Fetch { url: String, message: String },
 
+    /// Failed to upload a resource.
+    #[error("upload failed to {dest}: {message}")]
+    Upload { dest: String, message: String },
+
     /// Pixel format conversion error (zenpixels).
     #[cfg(feature = "zenpixels")]
     #[error("pixel format conversion error: {0}")]

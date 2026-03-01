@@ -22,6 +22,13 @@ pub trait ChecksumHasher: Send + Sync {
 
     /// Load an image file, decode to RGBA, and hash the pixels.
     fn hash_file(&self, path: &Path) -> Result<String, RegressError>;
+
+    /// Hash raw file bytes directly (opaque/format-dependent hashing).
+    ///
+    /// Unlike [`hash_file`](Self::hash_file) which decodes to RGBA first, this
+    /// hashes the encoded bytes as-is. Different encoders producing identical
+    /// pixels will have different checksums.
+    fn hash_file_bytes(&self, path: &Path) -> Result<String, RegressError>;
 }
 
 /// SeaHash-based checksum hasher (default).
@@ -59,6 +66,12 @@ impl ChecksumHasher for SeaHasher {
             .to_rgba8();
         let (w, h) = img.dimensions();
         Ok(self.hash_pixels(img.as_raw(), w, h))
+    }
+
+    fn hash_file_bytes(&self, path: &Path) -> Result<String, RegressError> {
+        let data = std::fs::read(path).map_err(|e| RegressError::io(path, e))?;
+        let h = seahash::hash(&data);
+        Ok(format!("sea:{h:016x}"))
     }
 }
 
@@ -143,5 +156,33 @@ mod tests {
         let h1 = SeaHasher.hash_pixels(&p1, 4, 4);
         let h2 = SeaHasher.hash_pixels(&p2, 4, 4);
         assert_ne!(h1, h2, "different content should produce different hashes");
+    }
+
+    #[test]
+    fn seahash_file_bytes_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        std::fs::write(&path, b"hello world").unwrap();
+
+        let h1 = SeaHasher.hash_file_bytes(&path).unwrap();
+        let h2 = SeaHasher.hash_file_bytes(&path).unwrap();
+        assert_eq!(h1, h2);
+        assert!(h1.starts_with("sea:"));
+    }
+
+    #[test]
+    fn seahash_file_bytes_differs_from_pixel_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let pixels = vec![128u8; 4 * 4 * 4]; // 4x4 gray RGBA
+        let path = dir.path().join("test.png");
+        let img = image::RgbaImage::from_raw(4, 4, pixels.clone()).unwrap();
+        img.save(&path).unwrap();
+
+        let pixel_hash = SeaHasher.hash_file(&path).unwrap();
+        let bytes_hash = SeaHasher.hash_file_bytes(&path).unwrap();
+        assert_ne!(
+            pixel_hash, bytes_hash,
+            "file-bytes hash should differ from decoded-pixel hash"
+        );
     }
 }
