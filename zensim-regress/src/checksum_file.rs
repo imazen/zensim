@@ -582,10 +582,7 @@ mod tests {
                     "pixel_format".to_string(),
                     toml::Value::String("Bgra32".to_string()),
                 ),
-                (
-                    "similarity_param".to_string(),
-                    toml::Value::Integer(500),
-                ),
+                ("similarity_param".to_string(), toml::Value::Integer(500)),
             ]),
         };
 
@@ -742,17 +739,16 @@ mod tests {
             "s3_url".to_string(),
             toml::Value::String("https://s3.example.com/ref.png".to_string()),
         );
-        file.meta.insert(
-            "similarity_param".to_string(),
-            toml::Value::Integer(500),
-        );
-        file.meta.insert(
-            "allow_off_by_one".to_string(),
-            toml::Value::Boolean(true),
-        );
+        file.meta
+            .insert("similarity_param".to_string(), toml::Value::Integer(500));
+        file.meta
+            .insert("allow_off_by_one".to_string(), toml::Value::Boolean(true));
 
         let toml_str = toml::to_string_pretty(&file).unwrap();
-        assert!(toml_str.contains("[meta]"), "meta section should be present");
+        assert!(
+            toml_str.contains("[meta]"),
+            "meta section should be present"
+        );
 
         let parsed: TestChecksumFile = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.meta.len(), 3);
