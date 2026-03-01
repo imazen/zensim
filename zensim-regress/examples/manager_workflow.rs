@@ -12,45 +12,16 @@
 //!
 //! Run with: cargo run -p zensim-regress --example manager_workflow
 
+use zensim_regress::generators;
 use zensim_regress::hasher::{ChecksumHasher, SeaHasher};
 use zensim_regress::manager::{CheckResult, ChecksumManager};
-
-/// Gradient image.
-fn gradient_rgba(w: u32, h: u32) -> Vec<u8> {
-    (0..w * h)
-        .flat_map(|i| {
-            let x = (i % w) as u8;
-            let y = (i / w) as u8;
-            [
-                x.wrapping_mul(7),
-                y.wrapping_mul(11),
-                x.wrapping_add(y).wrapping_mul(5),
-                255,
-            ]
-        })
-        .collect()
-}
-
-/// Off-by-N variant.
-fn off_by_n(base: &[u8], delta: u8) -> Vec<u8> {
-    base.chunks(4)
-        .enumerate()
-        .flat_map(|(i, px)| {
-            if i % 3 == 0 {
-                [px[0].saturating_add(delta), px[1], px[2], px[3]]
-            } else {
-                [px[0], px[1], px[2], px[3]]
-            }
-        })
-        .collect()
-}
 
 fn main() {
     println!("=== ChecksumManager Workflow Demo ===\n");
 
     let dir = tempfile::tempdir().unwrap();
     let (w, h) = (32u32, 32u32);
-    let base = gradient_rgba(w, h);
+    let base = generators::gradient(w, h);
     let base_hash = SeaHasher.hash_pixels(&base, w, h);
 
     // ─── 1. First run in UPDATE mode ─────────────────────────────────────
@@ -110,7 +81,7 @@ fn main() {
     file.write_to(&path).unwrap();
     println!("  tolerance set: delta<=1, score>=90");
 
-    let variant = off_by_n(&base, 1);
+    let variant = generators::off_by_n(&base, 1, 3);
     let variant_hash = SeaHasher.hash_pixels(&variant, w, h);
     println!("  variant hash: {variant_hash}");
 
@@ -184,7 +155,7 @@ fn main() {
         .with_update_mode_replace()
         .with_arch_tag("x86_64-avx2");
 
-    let new_base = gradient_rgba(w, h); // same pixels, but REPLACE mode retires everything
+    let new_base = generators::gradient(w, h); // same pixels, but REPLACE mode retires everything
     let r = mgr_replace
         .check_pixels("gradient_test", &new_base, w, h)
         .unwrap();
@@ -238,7 +209,7 @@ fn main() {
         .with_update_mode_update()
         .with_arch_tag("aarch64");
 
-    let arm_variant = off_by_n(&base, 1);
+    let arm_variant = generators::off_by_n(&base, 1, 3);
     let arm_hash = SeaHasher.hash_pixels(&arm_variant, w, h);
 
     let r = mgr_arm
