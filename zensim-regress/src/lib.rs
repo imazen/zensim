@@ -51,7 +51,7 @@ pub mod upload;
 
 // Re-export key types at crate root for convenience
 pub use error::RegressError;
-pub use testing::{RegressionReport, RegressionTolerance, check_regression};
+pub use testing::{RegressionReport, RegressionTolerance, check_regression, shrink_tolerance};
 
 // Re-export toml so consumers can use `toml::Value` for the `meta` field
 // without adding a separate `toml` dependency.

@@ -14,10 +14,9 @@
 //! let expected = RgbSlice::new(&expected_px, 8, 8);
 //! let actual = RgbSlice::new(&actual_px, 8, 8);
 //!
-//! let report = check_regression(
-//!     &z, &expected, &actual,
-//!     &RegressionTolerance::off_by_one(),
-//! ).unwrap();
+//! let tolerance = RegressionTolerance::off_by_one()
+//!     .with_max_pixels_different(0.05);
+//! let report = check_regression(&z, &expected, &actual, &tolerance).unwrap();
 //! assert!(report.passed(), "{report}");
 //! ```
 
@@ -41,20 +40,19 @@ use zensim::{
 ///
 /// // Off-by-1, but at most 5% of pixels may differ
 /// let t = RegressionTolerance::off_by_one()
-///     .max_differing_pixel_fraction(0.05);
+///     .with_max_pixels_different(0.05);
 ///
 /// // Allow up to 3/255 delta, score must be >= 90
 /// let t = RegressionTolerance::off_by_one()
-///     .max_channel_delta(3)
-///     .min_score(90.0);
+///     .with_max_delta(3)
+///     .with_min_similarity(90.0);
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct RegressionTolerance {
-    max_channel_delta: u8,
-    max_differing_pixel_fraction: f64,
-    min_identical_channel_fraction: f64,
-    min_score: f64,
+    max_delta: u8,
+    max_pixels_different: f64,
+    min_similarity: f64,
     max_alpha_delta: u8,
     ignore_alpha: bool,
 }
@@ -63,10 +61,9 @@ impl RegressionTolerance {
     /// Pixel-identical. No differences allowed.
     pub fn exact() -> Self {
         Self {
-            max_channel_delta: 0,
-            max_differing_pixel_fraction: 0.0,
-            min_identical_channel_fraction: 1.0,
-            min_score: 100.0,
+            max_delta: 0,
+            max_pixels_different: 0.0,
+            min_similarity: 100.0,
             max_alpha_delta: 0,
             ignore_alpha: false,
         }
@@ -80,36 +77,58 @@ impl RegressionTolerance {
     /// to relax this if needed.
     pub fn off_by_one() -> Self {
         Self {
-            max_channel_delta: 1,
-            max_differing_pixel_fraction: 1.0,
-            min_identical_channel_fraction: 0.0,
-            min_score: 95.0,
+            max_delta: 1,
+            max_pixels_different: 1.0,
+            min_similarity: 95.0,
             max_alpha_delta: 0,
             ignore_alpha: false,
         }
     }
 
+    // ─── Getters ─────────────────────────────────────────────────────
+
+    /// Maximum per-channel delta (in 1/255 units).
+    pub fn max_delta(&self) -> u8 {
+        self.max_delta
+    }
+
+    /// Minimum acceptable zensim score (0–100).
+    pub fn min_similarity(&self) -> f64 {
+        self.min_similarity
+    }
+
+    /// Maximum fraction of pixels where any channel differs.
+    pub fn max_pixels_different(&self) -> f64 {
+        self.max_pixels_different
+    }
+
+    /// Maximum alpha channel delta (in 1/255 units).
+    pub fn max_alpha_delta(&self) -> u8 {
+        self.max_alpha_delta
+    }
+
+    /// Whether alpha channel is ignored.
+    pub fn is_ignore_alpha(&self) -> bool {
+        self.ignore_alpha
+    }
+
+    // ─── Builder methods ─────────────────────────────────────────────
+
     /// Set the maximum per-channel delta (in 1/255 units).
-    pub fn max_channel_delta(mut self, n: u8) -> Self {
-        self.max_channel_delta = n;
+    pub fn with_max_delta(mut self, n: u8) -> Self {
+        self.max_delta = n;
         self
     }
 
     /// Set the maximum fraction of pixels where any channel differs.
-    pub fn max_differing_pixel_fraction(mut self, f: f64) -> Self {
-        self.max_differing_pixel_fraction = f;
-        self
-    }
-
-    /// Set the minimum fraction of (pixel, channel) values that must be byte-identical.
-    pub fn min_identical_channel_fraction(mut self, f: f64) -> Self {
-        self.min_identical_channel_fraction = f;
+    pub fn with_max_pixels_different(mut self, f: f64) -> Self {
+        self.max_pixels_different = f;
         self
     }
 
     /// Set the minimum acceptable zensim score (0–100).
-    pub fn min_score(mut self, s: f64) -> Self {
-        self.min_score = s;
+    pub fn with_min_similarity(mut self, s: f64) -> Self {
+        self.min_similarity = s;
         self
     }
 
@@ -118,7 +137,7 @@ impl RegressionTolerance {
     /// Defaults to 0 (zero tolerance) because alpha divergence between
     /// two processing pipelines is typically a structural bug, not numerical
     /// rounding. See `docs/alpha-channel-diffing.md` for the rationale.
-    pub fn max_alpha_delta(mut self, n: u8) -> Self {
+    pub fn with_max_alpha_delta(mut self, n: u8) -> Self {
         self.max_alpha_delta = n;
         self
     }
@@ -491,14 +510,14 @@ pub(crate) fn build_report(
     };
 
     // Compute pixels_failing based on tolerance threshold
-    let pixels_failing = if tolerance.max_channel_delta == 0 {
+    let pixels_failing = if tolerance.max_delta == 0 {
         ds.pixels_differing
-    } else if tolerance.max_channel_delta == 1 {
+    } else if tolerance.max_delta == 1 {
         ds.pixels_differing_by_more_than_1
     } else {
         // For higher thresholds: conservative upper bound
         let max_u8 = *max_channel_delta.iter().max().unwrap_or(&0);
-        if max_u8 <= tolerance.max_channel_delta {
+        if max_u8 <= tolerance.max_delta {
             0
         } else {
             ds.pixels_differing // conservative: all differing pixels
@@ -516,7 +535,7 @@ pub(crate) fn build_report(
 
     // 1. Max channel delta
     let max_delta_actual = *max_channel_delta.iter().max().unwrap_or(&0);
-    let delta_pass = max_delta_actual <= tolerance.max_channel_delta;
+    let delta_pass = max_delta_actual <= tolerance.max_delta;
     constraint_results.push(ConstraintResult {
         name: "Max delta",
         passed: delta_pass,
@@ -524,37 +543,28 @@ pub(crate) fn build_report(
             "R={} G={} B={}",
             max_channel_delta[0], max_channel_delta[1], max_channel_delta[2],
         ),
-        limit: format!("{}/255", tolerance.max_channel_delta),
+        limit: format!("{}/255", tolerance.max_delta),
     });
 
     // 2. Score
-    let score_pass = cr.result.score >= tolerance.min_score;
+    let score_pass = cr.result.score >= tolerance.min_similarity;
     constraint_results.push(ConstraintResult {
-        name: "Score",
+        name: "Similarity",
         passed: score_pass,
         actual: format!("{:.1}", cr.result.score),
-        limit: format!(">={:.1}", tolerance.min_score),
+        limit: format!(">={:.1}", tolerance.min_similarity),
     });
 
     // 3. Differing pixel fraction
-    let diff_pass = differing_fraction <= tolerance.max_differing_pixel_fraction;
+    let diff_pass = differing_fraction <= tolerance.max_pixels_different;
     constraint_results.push(ConstraintResult {
         name: "Pixels differing",
         passed: diff_pass,
         actual: format!("{:.1}%", differing_fraction * 100.0),
-        limit: format!("<={:.1}%", tolerance.max_differing_pixel_fraction * 100.0),
+        limit: format!("<={:.1}%", tolerance.max_pixels_different * 100.0),
     });
 
-    // 4. Identical channel fraction
-    let ident_pass = identical_channel_fraction >= tolerance.min_identical_channel_fraction;
-    constraint_results.push(ConstraintResult {
-        name: "Identical channels",
-        passed: ident_pass,
-        actual: format!("{:.1}%", identical_channel_fraction * 100.0),
-        limit: format!(">={:.1}%", tolerance.min_identical_channel_fraction * 100.0),
-    });
-
-    // 5. Alpha channel constraint (only for RGBA/BGRA inputs, skipped when ignore_alpha)
+    // 4. Alpha channel constraint (only for RGBA/BGRA inputs, skipped when ignore_alpha)
     let alpha_pass = if ds.has_alpha && !tolerance.ignore_alpha {
         let pass = ds.alpha_max_delta <= tolerance.max_alpha_delta;
         constraint_results.push(ConstraintResult {
@@ -575,7 +585,7 @@ pub(crate) fn build_report(
         true // RGB-only or ignore_alpha: no alpha constraint
     };
 
-    let passed = delta_pass && score_pass && diff_pass && ident_pass && alpha_pass;
+    let passed = delta_pass && score_pass && diff_pass && alpha_pass;
 
     let num_channels = if ds.has_alpha { 4 } else { 3 };
     let expected_histogram = ChannelHistograms {
@@ -646,4 +656,60 @@ pub fn check_regression(
         zensim.classify(expected, actual)?
     };
     Ok(build_report(cr, tolerance))
+}
+
+// ─── shrink_tolerance() ──────────────────────────────────────────────────
+
+/// Shrink a tolerance toward measured values, without going below a floor.
+///
+/// For each field, the new value is clamped between `floor` and `current`:
+/// - **max_delta**: `clamp(measured_max + 1, floor, current)`
+/// - **max_pixels_different**: `clamp(measured_fraction * 1.1, floor, current)`
+/// - **min_similarity**: `clamp(measured_score - 0.5, floor, current)` — note: *lowering* floor, *raising* toward current
+/// - **max_alpha_delta**: `clamp(measured_max + 1, floor, current)`
+///
+/// `ignore_alpha` is preserved from `current`.
+pub fn shrink_tolerance(
+    current: &RegressionTolerance,
+    report: &RegressionReport,
+    floor: &RegressionTolerance,
+) -> RegressionTolerance {
+    // max_delta: tighten toward measured + 1
+    let measured_max_delta = *report.max_channel_delta().iter().max().unwrap_or(&0);
+    let shrunk_max_delta = measured_max_delta.saturating_add(1);
+    let new_max_delta = shrunk_max_delta.clamp(floor.max_delta, current.max_delta);
+
+    // max_pixels_different: tighten toward measured * 1.1
+    let measured_fraction = if report.pixel_count() > 0 {
+        report.pixels_differing() as f64 / report.pixel_count() as f64
+    } else {
+        0.0
+    };
+    let shrunk_fraction = measured_fraction * 1.1;
+    let new_max_pixels_different =
+        shrunk_fraction.clamp(floor.max_pixels_different, current.max_pixels_different);
+
+    // min_similarity: tighten *upward* toward measured - 0.5
+    // (higher min_similarity is tighter, so we want max(floor, measured - 0.5) clamped to current)
+    let shrunk_score = report.score() - 0.5;
+    let new_min_similarity = if shrunk_score > current.min_similarity {
+        // Can't tighten beyond current
+        current.min_similarity
+    } else if shrunk_score < floor.min_similarity {
+        floor.min_similarity
+    } else {
+        shrunk_score
+    };
+
+    // max_alpha_delta: tighten toward measured + 1
+    let shrunk_alpha = report.alpha_max_delta().saturating_add(1);
+    let new_max_alpha_delta = shrunk_alpha.clamp(floor.max_alpha_delta, current.max_alpha_delta);
+
+    RegressionTolerance {
+        max_delta: new_max_delta,
+        max_pixels_different: new_max_pixels_different,
+        min_similarity: new_min_similarity,
+        max_alpha_delta: new_max_alpha_delta,
+        ignore_alpha: current.ignore_alpha,
+    }
 }

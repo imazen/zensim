@@ -159,17 +159,16 @@ fn main() {
     let mut file = TestChecksumFile {
         name: "gradient_32x32".to_string(),
         tolerance: ToleranceSpec {
-            max_channel_delta: 1,
-            min_score: 95.0,
-            max_differing_pixel_fraction: 1.0,
-            min_identical_channel_fraction: 0.0,
+            max_delta: 1,
+            min_similarity: 95.0,
+            max_pixels_different: 1.0,
             max_alpha_delta: 0,
             ignore_alpha: false,
             overrides: BTreeMap::from([(
                 "aarch64".to_string(),
                 ToleranceOverride {
-                    max_channel_delta: Some(2),
-                    min_score: Some(90.0),
+                    max_delta: Some(2),
+                    min_similarity: Some(90.0),
                     ..Default::default()
                 },
             )]),
@@ -246,8 +245,8 @@ fn main() {
     let parsed = TestChecksumFile::read_from(&toml_path).expect("read TOML");
     assert_eq!(parsed.name, file.name);
     assert_eq!(parsed.checksum.len(), file.checksum.len());
-    assert_eq!(parsed.tolerance.max_channel_delta, 1);
-    assert_eq!(parsed.tolerance.min_score, 95.0);
+    assert_eq!(parsed.tolerance.max_delta, 1);
+    assert_eq!(parsed.tolerance.min_similarity, 95.0);
     println!("  round-trip verified: name, entries, tolerance all match\n");
 
     // ─── 7. Query methods ───────────────────────────────────────────────

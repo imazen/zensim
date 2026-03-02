@@ -72,10 +72,9 @@ fn main() {
     let path = mgr.test_path("gradient_test");
     let mut file = zensim_regress::checksum_file::TestChecksumFile::read_from(&path).unwrap();
     file.tolerance = zensim_regress::checksum_file::ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 90.0,
-        max_differing_pixel_fraction: 1.0,
-        min_identical_channel_fraction: 0.0,
+        max_delta: 1,
+        min_similarity: 90.0,
+        max_pixels_different: 1.0,
         ..Default::default()
     };
     file.write_to(&path).unwrap();
@@ -190,10 +189,9 @@ fn main() {
     let path2 = mgr_x86.test_path("multi_arch");
     let mut file = zensim_regress::checksum_file::TestChecksumFile::read_from(&path2).unwrap();
     file.tolerance = zensim_regress::checksum_file::ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 90.0,
-        max_differing_pixel_fraction: 1.0,
-        min_identical_channel_fraction: 0.0,
+        max_delta: 1,
+        min_similarity: 90.0,
+        max_pixels_different: 1.0,
         ..Default::default()
     };
     file.write_to(&path2).unwrap();

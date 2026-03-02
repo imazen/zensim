@@ -9,8 +9,8 @@
 //! name = "resize_bicubic_200x200"
 //!
 //! [tolerance]
-//! max_channel_delta = 1
-//! min_score = 95.0
+//! max_delta = 1
+//! min_similarity = 95.0
 //! max_alpha_delta = 0
 //!
 //! [[checksum]]
@@ -131,23 +131,31 @@ impl TestChecksumFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToleranceSpec {
     /// Maximum per-channel delta (in 1/255 units). Default: 0.
-    #[serde(default)]
-    pub max_channel_delta: u8,
+    #[serde(
+        default,
+        alias = "max_channel_delta",
+        skip_serializing_if = "is_zero_u8"
+    )]
+    pub max_delta: u8,
 
     /// Minimum acceptable zensim score. Default: 100.0.
-    #[serde(default = "default_score")]
-    pub min_score: f64,
+    #[serde(
+        default = "default_score",
+        alias = "min_score",
+        skip_serializing_if = "is_default_score"
+    )]
+    pub min_similarity: f64,
 
     /// Maximum fraction of pixels where any channel differs. Default: 0.0.
-    #[serde(default)]
-    pub max_differing_pixel_fraction: f64,
-
-    /// Minimum fraction of (pixel, channel) values that must be identical. Default: 1.0.
-    #[serde(default = "default_one")]
-    pub min_identical_channel_fraction: f64,
+    #[serde(
+        default,
+        alias = "max_differing_pixel_fraction",
+        skip_serializing_if = "is_zero_f64"
+    )]
+    pub max_pixels_different: f64,
 
     /// Maximum alpha channel delta (in 1/255 units). Default: 0.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub max_alpha_delta: u8,
 
     /// Whether to ignore alpha channel entirely. Default: false.
@@ -167,8 +175,14 @@ pub struct ToleranceSpec {
 fn default_score() -> f64 {
     100.0
 }
-fn default_one() -> f64 {
-    1.0
+fn is_default_score(v: &f64) -> bool {
+    *v == 100.0
+}
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
 }
 fn is_false(v: &bool) -> bool {
     !*v
@@ -177,10 +191,9 @@ fn is_false(v: &bool) -> bool {
 impl Default for ToleranceSpec {
     fn default() -> Self {
         Self {
-            max_channel_delta: 0,
-            min_score: 100.0,
-            max_differing_pixel_fraction: 0.0,
-            min_identical_channel_fraction: 1.0,
+            max_delta: 0,
+            min_similarity: 100.0,
+            max_pixels_different: 0.0,
             max_alpha_delta: 0,
             ignore_alpha: false,
             overrides: BTreeMap::new(),
@@ -192,11 +205,10 @@ impl ToleranceSpec {
     /// Convert to a `RegressionTolerance`, applying overrides for the given arch tag.
     pub fn to_regression_tolerance(&self, arch_tag: &str) -> crate::testing::RegressionTolerance {
         let mut t = crate::testing::RegressionTolerance::exact()
-            .max_channel_delta(self.max_channel_delta)
-            .min_score(self.min_score)
-            .max_differing_pixel_fraction(self.max_differing_pixel_fraction)
-            .min_identical_channel_fraction(self.min_identical_channel_fraction)
-            .max_alpha_delta(self.max_alpha_delta);
+            .with_max_delta(self.max_delta)
+            .with_min_similarity(self.min_similarity)
+            .with_max_pixels_different(self.max_pixels_different)
+            .with_max_alpha_delta(self.max_alpha_delta);
 
         if self.ignore_alpha {
             t = t.ignore_alpha();
@@ -204,24 +216,33 @@ impl ToleranceSpec {
 
         // Apply the most specific matching override
         if let Some(ov) = self.best_override_for(arch_tag) {
-            if let Some(v) = ov.max_channel_delta {
-                t = t.max_channel_delta(v);
+            if let Some(v) = ov.max_delta {
+                t = t.with_max_delta(v);
             }
-            if let Some(v) = ov.min_score {
-                t = t.min_score(v);
+            if let Some(v) = ov.min_similarity {
+                t = t.with_min_similarity(v);
             }
-            if let Some(v) = ov.max_differing_pixel_fraction {
-                t = t.max_differing_pixel_fraction(v);
-            }
-            if let Some(v) = ov.min_identical_channel_fraction {
-                t = t.min_identical_channel_fraction(v);
+            if let Some(v) = ov.max_pixels_different {
+                t = t.with_max_pixels_different(v);
             }
             if let Some(v) = ov.max_alpha_delta {
-                t = t.max_alpha_delta(v);
+                t = t.with_max_alpha_delta(v);
             }
         }
 
         t
+    }
+
+    /// Create a `ToleranceSpec` from a `RegressionTolerance`.
+    pub fn from_tolerance(t: &crate::testing::RegressionTolerance) -> Self {
+        Self {
+            max_delta: t.max_delta(),
+            min_similarity: t.min_similarity(),
+            max_pixels_different: t.max_pixels_different(),
+            max_alpha_delta: t.max_alpha_delta(),
+            ignore_alpha: t.is_ignore_alpha(),
+            overrides: BTreeMap::new(),
+        }
     }
 
     /// Find the best (most specific) override for a given arch tag.
@@ -247,14 +268,20 @@ impl ToleranceSpec {
 /// Only fields that are `Some` override the base tolerance.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ToleranceOverride {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_channel_delta: Option<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_score: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_differing_pixel_fraction: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min_identical_channel_fraction: Option<f64>,
+    #[serde(
+        default,
+        alias = "max_channel_delta",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_delta: Option<u8>,
+    #[serde(default, alias = "min_score", skip_serializing_if = "Option::is_none")]
+    pub min_similarity: Option<f64>,
+    #[serde(
+        default,
+        alias = "max_differing_pixel_fraction",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_pixels_different: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_alpha_delta: Option<u8>,
 }
@@ -517,13 +544,13 @@ mod tests {
         let file = TestChecksumFile {
             name: "resize_bicubic_200x200".to_string(),
             tolerance: ToleranceSpec {
-                max_channel_delta: 1,
-                min_score: 95.0,
+                max_delta: 1,
+                min_similarity: 95.0,
                 max_alpha_delta: 0,
                 overrides: BTreeMap::from([(
                     "aarch64".to_string(),
                     ToleranceOverride {
-                        max_channel_delta: Some(2),
+                        max_delta: Some(2),
                         ..Default::default()
                     },
                 )]),
@@ -590,8 +617,8 @@ mod tests {
         let parsed: TestChecksumFile = toml::from_str(&toml_str).unwrap();
 
         assert_eq!(parsed.name, file.name);
-        assert_eq!(parsed.tolerance.max_channel_delta, 1);
-        assert_eq!(parsed.tolerance.min_score, 95.0);
+        assert_eq!(parsed.tolerance.max_delta, 1);
+        assert_eq!(parsed.tolerance.min_similarity, 95.0);
         assert_eq!(parsed.checksum.len(), 3);
 
         // Active checksums
@@ -618,7 +645,7 @@ mod tests {
         // Override
         assert!(parsed.tolerance.overrides.contains_key("aarch64"));
         let ov = &parsed.tolerance.overrides["aarch64"];
-        assert_eq!(ov.max_channel_delta, Some(2));
+        assert_eq!(ov.max_delta, Some(2));
 
         // Image info
         let info = parsed.info.as_ref().unwrap();
@@ -658,8 +685,8 @@ mod tests {
     #[test]
     fn tolerance_to_regression_tolerance() {
         let spec = ToleranceSpec {
-            max_channel_delta: 2,
-            min_score: 90.0,
+            max_delta: 2,
+            min_similarity: 90.0,
             ..Default::default()
         };
         // Basic conversion works (we can't inspect private fields, but we
@@ -670,13 +697,13 @@ mod tests {
     #[test]
     fn tolerance_override_applied() {
         let spec = ToleranceSpec {
-            max_channel_delta: 1,
-            min_score: 95.0,
+            max_delta: 1,
+            min_similarity: 95.0,
             overrides: BTreeMap::from([(
                 "aarch64".to_string(),
                 ToleranceOverride {
-                    max_channel_delta: Some(3),
-                    min_score: Some(90.0),
+                    max_delta: Some(3),
+                    min_similarity: Some(90.0),
                     ..Default::default()
                 },
             )]),
@@ -705,8 +732,8 @@ mod tests {
         let file = TestChecksumFile {
             name: "example".to_string(),
             tolerance: ToleranceSpec {
-                max_channel_delta: 1,
-                min_score: 95.0,
+                max_delta: 1,
+                min_similarity: 95.0,
                 ..Default::default()
             },
             checksum: vec![ChecksumEntry {

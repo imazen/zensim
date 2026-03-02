@@ -286,10 +286,9 @@ fn within_tolerance_off_by_one() {
     // Set tolerance to allow off-by-1
     let mut file = TestChecksumFile::new("within_tol");
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 90.0,
-        max_differing_pixel_fraction: 1.0,
-        min_identical_channel_fraction: 0.0,
+        max_delta: 1,
+        min_similarity: 90.0,
+        max_pixels_different: 1.0,
         ..Default::default()
     };
     file.checksum.push(ChecksumEntry::new(base_hash));
@@ -329,10 +328,9 @@ fn within_tolerance_auto_accept_update_mode() {
 
     let mut file = TestChecksumFile::new("auto_accept");
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 90.0,
-        max_differing_pixel_fraction: 1.0,
-        min_identical_channel_fraction: 0.0,
+        max_delta: 1,
+        min_similarity: 90.0,
+        max_pixels_different: 1.0,
         ..Default::default()
     };
     file.checksum.push(ChecksumEntry::new(base_hash.clone()));
@@ -428,8 +426,8 @@ fn fails_tolerance_large_diff() {
 
     let mut file = TestChecksumFile::new("fails_large");
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 95.0,
+        max_delta: 1,
+        min_similarity: 95.0,
         ..Default::default()
     };
     file.checksum.push(ChecksumEntry::new(base_hash));
@@ -672,17 +670,15 @@ fn tolerance_override_applied_to_correct_arch() {
     // Strict base tolerance, relaxed for aarch64
     let mut file = TestChecksumFile::new("tol_override");
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 0,
-        min_score: 100.0,
-        max_differing_pixel_fraction: 0.0,
-        min_identical_channel_fraction: 1.0,
+        max_delta: 0,
+        min_similarity: 100.0,
+        max_pixels_different: 0.0,
         overrides: BTreeMap::from([(
             "aarch64".to_string(),
             ToleranceOverride {
-                max_channel_delta: Some(1),
-                min_score: Some(90.0),
-                max_differing_pixel_fraction: Some(1.0),
-                min_identical_channel_fraction: Some(0.0),
+                max_delta: Some(1),
+                min_similarity: Some(90.0),
+                max_pixels_different: Some(1.0),
                 ..Default::default()
             },
         )]),
@@ -732,15 +728,14 @@ fn tolerance_prefix_match() {
     // Override for "x86_64" (prefix) should match "x86_64-avx2"
     let mut file = TestChecksumFile::new("tol_prefix");
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 0,
-        min_score: 100.0,
+        max_delta: 0,
+        min_similarity: 100.0,
         overrides: BTreeMap::from([(
             "x86_64".to_string(),
             ToleranceOverride {
-                max_channel_delta: Some(1),
-                min_score: Some(90.0),
-                max_differing_pixel_fraction: Some(1.0),
-                min_identical_channel_fraction: Some(0.0),
+                max_delta: Some(1),
+                min_similarity: Some(90.0),
+                max_pixels_different: Some(1.0),
                 ..Default::default()
             },
         )]),
@@ -882,10 +877,9 @@ fn reference_image_enables_comparison() {
     // Without reference image: mismatch returns Failed with no report
     let mut file = TestChecksumFile::new("ref_enables");
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 90.0,
-        max_differing_pixel_fraction: 1.0,
-        min_identical_channel_fraction: 0.0,
+        max_delta: 1,
+        min_similarity: 90.0,
+        max_pixels_different: 1.0,
         ..Default::default()
     };
     file.checksum.push(ChecksumEntry::new(base_hash.clone()));
@@ -944,10 +938,9 @@ fn full_lifecycle() {
     let path = mgr.test_path("lifecycle");
     let mut file = TestChecksumFile::read_from(&path).unwrap();
     file.tolerance = ToleranceSpec {
-        max_channel_delta: 1,
-        min_score: 90.0,
-        max_differing_pixel_fraction: 1.0,
-        min_identical_channel_fraction: 0.0,
+        max_delta: 1,
+        min_similarity: 90.0,
+        max_pixels_different: 1.0,
         ..Default::default()
     };
     file.write_to(&path).unwrap();

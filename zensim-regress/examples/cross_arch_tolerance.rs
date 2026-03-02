@@ -120,30 +120,27 @@ fn main() {
     let file = TestChecksumFile {
         name: "gradient_cross_arch".to_string(),
         tolerance: ToleranceSpec {
-            max_channel_delta: 0,
-            min_score: 100.0,
-            max_differing_pixel_fraction: 0.0,
-            min_identical_channel_fraction: 1.0,
+            max_delta: 0,
+            min_similarity: 100.0,
+            max_pixels_different: 0.0,
             max_alpha_delta: 0,
             ignore_alpha: false,
             overrides: BTreeMap::from([
                 (
                     "aarch64".to_string(),
                     ToleranceOverride {
-                        max_channel_delta: Some(1),
-                        min_score: Some(95.0),
-                        max_differing_pixel_fraction: Some(0.5),
-                        min_identical_channel_fraction: Some(0.0),
+                        max_delta: Some(1),
+                        min_similarity: Some(95.0),
+                        max_pixels_different: Some(0.5),
                         ..Default::default()
                     },
                 ),
                 (
                     "x86_64-avx512".to_string(),
                     ToleranceOverride {
-                        max_channel_delta: Some(1),
-                        min_score: Some(95.0),
-                        max_differing_pixel_fraction: Some(0.5),
-                        min_identical_channel_fraction: Some(0.0),
+                        max_delta: Some(1),
+                        min_similarity: Some(95.0),
+                        max_pixels_different: Some(0.5),
                         ..Default::default()
                     },
                 ),
@@ -255,20 +252,20 @@ fn main() {
 
     // "x86_64" override should match "x86_64-avx2" too (prefix rule)
     let spec_with_x86_override = ToleranceSpec {
-        max_channel_delta: 0,
-        min_score: 100.0,
+        max_delta: 0,
+        min_similarity: 100.0,
         overrides: BTreeMap::from([
             (
                 "x86_64".to_string(),
                 ToleranceOverride {
-                    max_channel_delta: Some(1),
+                    max_delta: Some(1),
                     ..Default::default()
                 },
             ),
             (
                 "x86_64-avx2".to_string(),
                 ToleranceOverride {
-                    max_channel_delta: Some(2),
+                    max_delta: Some(2),
                     ..Default::default()
                 },
             ),

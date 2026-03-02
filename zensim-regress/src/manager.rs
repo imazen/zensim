@@ -1242,10 +1242,9 @@ mod tests {
 
         let mut file = TestChecksumFile::new("test_tolerance");
         file.tolerance = crate::checksum_file::ToleranceSpec {
-            max_channel_delta: 1,
-            min_score: 90.0,
-            max_differing_pixel_fraction: 1.0,
-            min_identical_channel_fraction: 0.0,
+            max_delta: 1,
+            min_similarity: 90.0,
+            max_pixels_different: 1.0,
             ..Default::default()
         };
         file.checksum.push(ChecksumEntry::new(base_hash.clone()));
@@ -1305,10 +1304,9 @@ mod tests {
 
         let mut file = TestChecksumFile::new("test_auto_accept");
         file.tolerance = crate::checksum_file::ToleranceSpec {
-            max_channel_delta: 1,
-            min_score: 90.0,
-            max_differing_pixel_fraction: 1.0,
-            min_identical_channel_fraction: 0.0,
+            max_delta: 1,
+            min_similarity: 90.0,
+            max_pixels_different: 1.0,
             ..Default::default()
         };
         file.checksum.push(ChecksumEntry::new(base_hash.clone()));

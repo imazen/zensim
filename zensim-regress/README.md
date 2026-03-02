@@ -54,11 +54,11 @@ Different CPUs produce different rounding for the same floating-point operations
 
 ```toml
 [tolerance]
-max_channel_delta = 1
-min_score = 99.0
+max_delta = 1
+min_similarity = 99.0
 
 [tolerance.overrides.aarch64]
-max_channel_delta = 2
+max_delta = 2
 ```
 
 The manager detects the current architecture tag (e.g., `x86_64-avx2`, `aarch64`) and applies matching overrides. Each checksum entry records which architectures produced it, so you can track platform-specific outputs without false failures.
@@ -73,8 +73,8 @@ Each test gets a `.toml` file in the checksum directory:
 name = "resize_bicubic_200x200"
 
 [tolerance]
-max_channel_delta = 1
-min_score = 95.0
+max_delta = 1
+min_similarity = 95.0
 max_alpha_delta = 0
 
 [[checksum]]
