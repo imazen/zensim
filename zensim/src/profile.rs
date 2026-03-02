@@ -1,11 +1,12 @@
-//! Named metric profiles with permanently stable scoring.
+//! Named metric profiles.
 //!
-//! Each [`ZensimProfile`] variant bundles all parameters that affect score output:
-//! weights, structural params, and score mapping. Same profile name = same scores
-//! forever. The crate accumulates profiles; old ones never change or get removed.
+//! Each [`ZensimProfile`] variant bundles weights and parameters that affect
+//! score output. A given profile should produce approximately the same scores
+//! across versions, but profiles may be removed in future major versions as
+//! the algorithm evolves.
 
-/// Named metric profile. Each variant is permanently stable — same name produces
-/// identical scores across all crate versions. The list only grows.
+/// Named metric profile. Scores for a given profile should be approximately
+/// stable across crate versions. Profiles may be removed in future versions.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZensimProfile {

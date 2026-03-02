@@ -52,7 +52,7 @@ Saves ~25% per comparison at 4K, ~34% at 8K (break-even at 3-7 distorted images 
 
 ## Profiles
 
-Each `ZensimProfile` variant bundles all parameters that affect score output — weights, blur config, and score mapping. Same profile name = same scores forever. The crate accumulates profiles; old ones never change or get removed.
+Each `ZensimProfile` variant bundles weights and parameters that affect score output. A given profile should produce approximately the same scores across versions, but profiles may be removed in future major versions as the algorithm evolves.
 
 | Profile | Training data | SROCC |
 |---------|---------------|-------|
