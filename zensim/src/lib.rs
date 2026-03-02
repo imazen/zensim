@@ -51,8 +51,8 @@
 //! - **Color space:** sRGB. Future versions may accept additional color spaces
 //!   (linear RGB, Display P3, etc.).
 //! - **Pixel format:** `[R, G, B]` 8-bit sRGB, or `[R, G, B, A]` 8-bit sRGB
-//!   with straight (non-premultiplied) alpha. RGBA inputs are composited over
-//!   a checkerboard before comparison so alpha differences produce visible distortion.
+//!   with straight alpha. RGBA inputs are composited over a checkerboard before
+//!   comparison so alpha differences produce visible distortion.
 //! - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 //!
 //! ## Score semantics

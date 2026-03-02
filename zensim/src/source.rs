@@ -68,11 +68,6 @@ pub enum AlphaMode {
     /// Unassociated / straight alpha.
     /// Compositing formula: `out = src * a + bg * (1-a)`
     Straight,
-    /// Associated / premultiplied alpha.
-    /// Compositing formula: `out = src + bg * (1-a)` (src already has alpha baked in).
-    /// For sRGB inputs, R/G/B channels are linearized first, then the premul formula
-    /// is applied (alpha is always linear).
-    Premultiplied,
 }
 
 impl AlphaMode {
@@ -567,7 +562,6 @@ mod zenpixels_impls {
         match zp {
             None | Some(ZpAlphaMode::Undefined | ZpAlphaMode::Opaque) => AlphaMode::Opaque,
             Some(ZpAlphaMode::Straight) => AlphaMode::Straight,
-            Some(ZpAlphaMode::Premultiplied) => AlphaMode::Premultiplied,
             _ => AlphaMode::Unknown,
         }
     }

@@ -1271,36 +1271,6 @@ pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mu
     }
 }
 
-/// Composite sRGB u8 RGBA with premultiplied alpha over a checkerboard.
-///
-/// Linearizes R,G,B channels, reads alpha separately. Formula: `out = src_linear + bg * (1-a)`.
-/// The src values are already premultiplied in sRGB space, so we linearize
-/// the premultiplied values directly (they represent src_color * alpha in sRGB).
-pub(crate) fn composite_srgb8_rgba_premul_to_linear(
-    row: &[[u8; 4]],
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
-    let lut = srgb_lut();
-    for (x, &[r, g, b, a]) in row.iter().enumerate() {
-        if a == 255 {
-            out[x] = [lut[r as usize], lut[g as usize], lut[b as usize]];
-        } else if a == 0 {
-            let bg = checkerboard_linear(x, y);
-            out[x] = [bg, bg, bg];
-        } else {
-            let alpha = a as f32 * (1.0 / 255.0);
-            let inv = 1.0 - alpha;
-            let bg = checkerboard_linear(x, y);
-            // src is premultiplied in sRGB space — linearize the premul values
-            let rl = lut[r as usize];
-            let gl = lut[g as usize];
-            let bl = lut[b as usize];
-            out[x] = [rl + bg * inv, gl + bg * inv, bl + bg * inv];
-        }
-    }
-}
-
 /// Composite sRGB u8 BGRA over a checkerboard, producing linear f32 RGB.
 ///
 /// Swizzles B↔R during linearization. Alpha blending in linear space.
@@ -1328,31 +1298,6 @@ pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mu
     }
 }
 
-/// Composite sRGB u8 BGRA with premultiplied alpha over a checkerboard.
-pub(crate) fn composite_srgb8_bgra_premul_to_linear(
-    row: &[[u8; 4]],
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
-    let lut = srgb_lut();
-    for (x, &[b, g, r, a]) in row.iter().enumerate() {
-        if a == 255 {
-            out[x] = [lut[r as usize], lut[g as usize], lut[b as usize]];
-        } else if a == 0 {
-            let bg = checkerboard_linear(x, y);
-            out[x] = [bg, bg, bg];
-        } else {
-            let alpha = a as f32 * (1.0 / 255.0);
-            let inv = 1.0 - alpha;
-            let bg = checkerboard_linear(x, y);
-            let rl = lut[r as usize];
-            let gl = lut[g as usize];
-            let bl = lut[b as usize];
-            out[x] = [rl + bg * inv, gl + bg * inv, bl + bg * inv];
-        }
-    }
-}
-
 /// Composite linear f32 RGBA over a checkerboard, producing linear f32 RGB.
 pub(crate) fn composite_linear_f32_rgba(row: &[[f32; 4]], y: usize, out: &mut [[f32; 3]]) {
     for (x, &[r, g, b, a]) in row.iter().enumerate() {
@@ -1369,22 +1314,6 @@ pub(crate) fn composite_linear_f32_rgba(row: &[[f32; 4]], y: usize, out: &mut [[
                 g.mul_add(a, bg * inv),
                 b.mul_add(a, bg * inv),
             ];
-        }
-    }
-}
-
-/// Composite linear f32 RGBA with premultiplied alpha over a checkerboard.
-pub(crate) fn composite_linear_f32_rgba_premul(row: &[[f32; 4]], y: usize, out: &mut [[f32; 3]]) {
-    for (x, &[r, g, b, a]) in row.iter().enumerate() {
-        if a >= 1.0 {
-            out[x] = [r, g, b];
-        } else if a <= 0.0 {
-            let bg = checkerboard_linear(x, y);
-            out[x] = [bg, bg, bg];
-        } else {
-            let inv = 1.0 - a;
-            let bg = checkerboard_linear(x, y);
-            out[x] = [r + bg * inv, g + bg * inv, b + bg * inv];
         }
     }
 }
@@ -1430,40 +1359,6 @@ pub(crate) fn composite_srgb16_rgba_to_linear(
     }
 }
 
-/// Composite sRGB u16 RGBA with premultiplied alpha over a checkerboard.
-pub(crate) fn composite_srgb16_rgba_premul_to_linear(
-    row: &[u8],
-    width: usize,
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
-    for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
-        let off = x * 8;
-        let r = u16::from_ne_bytes([row[off], row[off + 1]]);
-        let g = u16::from_ne_bytes([row[off + 2], row[off + 3]]);
-        let b = u16::from_ne_bytes([row[off + 4], row[off + 5]]);
-        let a = u16::from_ne_bytes([row[off + 6], row[off + 7]]);
-        if a == 65535 {
-            *out_pixel = [
-                srgb_u16_to_linear(r),
-                srgb_u16_to_linear(g),
-                srgb_u16_to_linear(b),
-            ];
-        } else if a == 0 {
-            let bg = checkerboard_linear(x, y);
-            *out_pixel = [bg, bg, bg];
-        } else {
-            let alpha = a as f32 / 65535.0;
-            let inv = 1.0 - alpha;
-            let bg = checkerboard_linear(x, y);
-            let rl = srgb_u16_to_linear(r);
-            let gl = srgb_u16_to_linear(g);
-            let bl = srgb_u16_to_linear(b);
-            *out_pixel = [rl + bg * inv, gl + bg * inv, bl + bg * inv];
-        }
-    }
-}
-
 /// Composite sRGB f16 RGBA over a checkerboard, producing linear f32 RGB.
 ///
 /// Reads 4 f16 values per pixel from raw bytes (8 bytes/pixel), applies sRGB TRC
@@ -1499,30 +1394,3 @@ pub(crate) fn composite_srgb_f16_rgba_to_linear(
     }
 }
 
-/// Composite sRGB f16 RGBA with premultiplied alpha over a checkerboard.
-#[cfg(feature = "f16")]
-pub(crate) fn composite_srgb_f16_rgba_premul_to_linear(
-    row: &[u8],
-    width: usize,
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
-    use half::f16;
-    for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
-        let off = x * 8;
-        let r = srgb_f16_to_linear(f16::from_ne_bytes([row[off], row[off + 1]]));
-        let g = srgb_f16_to_linear(f16::from_ne_bytes([row[off + 2], row[off + 3]]));
-        let b = srgb_f16_to_linear(f16::from_ne_bytes([row[off + 4], row[off + 5]]));
-        let a = f16::from_ne_bytes([row[off + 6], row[off + 7]]).to_f32();
-        if a >= 1.0 {
-            *out_pixel = [r, g, b];
-        } else if a <= 0.0 {
-            let bg = checkerboard_linear(x, y);
-            *out_pixel = [bg, bg, bg];
-        } else {
-            let inv = 1.0 - a;
-            let bg = checkerboard_linear(x, y);
-            *out_pixel = [r + bg * inv, g + bg * inv, b + bg * inv];
-        }
-    }
-}
