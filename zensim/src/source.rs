@@ -112,21 +112,29 @@ pub struct RgbSlice<'a> {
 impl<'a> RgbSlice<'a> {
     /// Create a new `RgbSlice` from contiguous `[R,G,B]` pixels.
     ///
+    /// Returns [`ZensimError::InvalidDataLength`] if `data.len() < width * height`.
+    pub fn try_new(
+        data: &'a [[u8; 3]],
+        width: usize,
+        height: usize,
+    ) -> Result<Self, crate::ZensimError> {
+        if data.len() < width * height {
+            return Err(crate::ZensimError::InvalidDataLength);
+        }
+        Ok(Self {
+            data,
+            width,
+            height,
+        })
+    }
+
+    /// Create a new `RgbSlice` from contiguous `[R,G,B]` pixels.
+    ///
     /// # Panics
     ///
     /// Panics if `data.len() < width * height`.
     pub fn new(data: &'a [[u8; 3]], width: usize, height: usize) -> Self {
-        assert!(
-            data.len() >= width * height,
-            "RgbSlice: data length {} < width*height {}",
-            data.len(),
-            width * height,
-        );
-        Self {
-            data,
-            width,
-            height,
-        }
+        Self::try_new(data, width, height).expect("RgbSlice: data length < width*height")
     }
 }
 
@@ -168,6 +176,20 @@ pub struct RgbaSlice<'a> {
 impl<'a> RgbaSlice<'a> {
     /// Create a new `RgbaSlice` from contiguous `[R,G,B,A]` pixels.
     ///
+    /// Defaults to [`AlphaMode::Straight`]. Use [`try_with_alpha_mode`](Self::try_with_alpha_mode)
+    /// or [`with_alpha_mode`](Self::with_alpha_mode) for explicit control.
+    ///
+    /// Returns [`ZensimError::InvalidDataLength`] if `data.len() < width * height`.
+    pub fn try_new(
+        data: &'a [[u8; 4]],
+        width: usize,
+        height: usize,
+    ) -> Result<Self, crate::ZensimError> {
+        Self::try_with_alpha_mode(data, width, height, AlphaMode::Straight)
+    }
+
+    /// Create a new `RgbaSlice` from contiguous `[R,G,B,A]` pixels.
+    ///
     /// Defaults to [`AlphaMode::Straight`]. Use [`with_alpha_mode`](Self::with_alpha_mode)
     /// for explicit control.
     ///
@@ -175,18 +197,27 @@ impl<'a> RgbaSlice<'a> {
     ///
     /// Panics if `data.len() < width * height`.
     pub fn new(data: &'a [[u8; 4]], width: usize, height: usize) -> Self {
-        assert!(
-            data.len() >= width * height,
-            "RgbaSlice: data length {} < width*height {}",
-            data.len(),
-            width * height,
-        );
-        Self {
+        Self::try_new(data, width, height).expect("RgbaSlice: data length < width*height")
+    }
+
+    /// Create a new `RgbaSlice` with an explicit alpha mode.
+    ///
+    /// Returns [`ZensimError::InvalidDataLength`] if `data.len() < width * height`.
+    pub fn try_with_alpha_mode(
+        data: &'a [[u8; 4]],
+        width: usize,
+        height: usize,
+        alpha_mode: AlphaMode,
+    ) -> Result<Self, crate::ZensimError> {
+        if data.len() < width * height {
+            return Err(crate::ZensimError::InvalidDataLength);
+        }
+        Ok(Self {
             data,
             width,
             height,
-            alpha_mode: AlphaMode::Straight,
-        }
+            alpha_mode,
+        })
     }
 
     /// Create a new `RgbaSlice` with an explicit alpha mode.
@@ -200,18 +231,8 @@ impl<'a> RgbaSlice<'a> {
         height: usize,
         alpha_mode: AlphaMode,
     ) -> Self {
-        assert!(
-            data.len() >= width * height,
-            "RgbaSlice: data length {} < width*height {}",
-            data.len(),
-            width * height,
-        );
-        Self {
-            data,
-            width,
-            height,
-            alpha_mode,
-        }
+        Self::try_with_alpha_mode(data, width, height, alpha_mode)
+            .expect("RgbaSlice: data length < width*height")
     }
 }
 
@@ -260,6 +281,33 @@ impl<'a> StridedBytes<'a> {
     /// `stride` is the byte distance between the start of consecutive rows.
     /// Must be at least `width * pixel_format.bytes_per_pixel()`.
     ///
+    /// Defaults to [`AlphaMode::Unknown`]. Use [`try_with_alpha_mode`](Self::try_with_alpha_mode)
+    /// or [`with_alpha_mode`](Self::with_alpha_mode) for explicit control.
+    ///
+    /// Returns [`ZensimError::InvalidStride`] if stride is too small,
+    /// or [`ZensimError::InvalidDataLength`] if data is too short.
+    pub fn try_new(
+        data: &'a [u8],
+        width: usize,
+        height: usize,
+        stride: usize,
+        pixel_format: PixelFormat,
+    ) -> Result<Self, crate::ZensimError> {
+        Self::try_with_alpha_mode(
+            data,
+            width,
+            height,
+            stride,
+            pixel_format,
+            AlphaMode::Unknown,
+        )
+    }
+
+    /// Create a new `StridedBytes` from raw byte data.
+    ///
+    /// `stride` is the byte distance between the start of consecutive rows.
+    /// Must be at least `width * pixel_format.bytes_per_pixel()`.
+    ///
     /// Defaults to [`AlphaMode::Unknown`]. Use [`with_alpha_mode`](Self::with_alpha_mode)
     /// for explicit control.
     ///
@@ -273,14 +321,41 @@ impl<'a> StridedBytes<'a> {
         stride: usize,
         pixel_format: PixelFormat,
     ) -> Self {
-        Self::with_alpha_mode(
+        Self::try_new(data, width, height, stride, pixel_format)
+            .expect("StridedBytes: invalid stride or data length")
+    }
+
+    /// Create a new `StridedBytes` with an explicit alpha mode.
+    ///
+    /// Returns [`ZensimError::InvalidStride`] if stride is too small,
+    /// or [`ZensimError::InvalidDataLength`] if data is too short.
+    pub fn try_with_alpha_mode(
+        data: &'a [u8],
+        width: usize,
+        height: usize,
+        stride: usize,
+        pixel_format: PixelFormat,
+        alpha_mode: AlphaMode,
+    ) -> Result<Self, crate::ZensimError> {
+        let bpp = pixel_format.bytes_per_pixel();
+        let min_stride = width * bpp;
+        if stride < min_stride {
+            return Err(crate::ZensimError::InvalidStride);
+        }
+        if height > 0 {
+            let required = (height - 1) * stride + min_stride;
+            if data.len() < required {
+                return Err(crate::ZensimError::InvalidDataLength);
+            }
+        }
+        Ok(Self {
             data,
             width,
             height,
             stride,
             pixel_format,
-            AlphaMode::Unknown,
-        )
+            alpha_mode,
+        })
     }
 
     /// Create a new `StridedBytes` with an explicit alpha mode.
@@ -296,31 +371,8 @@ impl<'a> StridedBytes<'a> {
         pixel_format: PixelFormat,
         alpha_mode: AlphaMode,
     ) -> Self {
-        let bpp = pixel_format.bytes_per_pixel();
-        let min_stride = width * bpp;
-        assert!(
-            stride >= min_stride,
-            "StridedBytes: stride {} < width*bpp {}",
-            stride,
-            min_stride,
-        );
-        if height > 0 {
-            let required = (height - 1) * stride + min_stride;
-            assert!(
-                data.len() >= required,
-                "StridedBytes: data length {} < required {}",
-                data.len(),
-                required,
-            );
-        }
-        Self {
-            data,
-            width,
-            height,
-            stride,
-            pixel_format,
-            alpha_mode,
-        }
+        Self::try_with_alpha_mode(data, width, height, stride, pixel_format, alpha_mode)
+            .expect("StridedBytes: invalid stride or data length")
     }
 }
 

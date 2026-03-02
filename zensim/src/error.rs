@@ -13,4 +13,8 @@ pub enum ZensimError {
     /// `pixels.len()` does not equal `width * height`.
     #[error("Image data length does not match width * height")]
     InvalidDataLength,
+
+    /// Row stride is smaller than `width * bytes_per_pixel`.
+    #[error("Row stride is smaller than width * bytes_per_pixel")]
+    InvalidStride,
 }
