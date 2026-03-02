@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::path::PathBuf;
+use zensim::{RgbSlice, Zensim, ZensimProfile};
 
 #[derive(Parser)]
 #[command(name = "zensim", about = "Fast psychovisual image similarity metric")]
@@ -41,19 +42,16 @@ fn main() {
     let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
     let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
-    let config = zensim::ZensimConfig {
-        compute_all_features: args.features,
-        ..Default::default()
-    };
+    let z = Zensim::new(ZensimProfile::latest());
+    let src = RgbSlice::new(&src_pixels, w as usize, h as usize);
+    let dst = RgbSlice::new(&dst_pixels, w as usize, h as usize);
 
     let start = std::time::Instant::now();
-    let result = zensim::compute_zensim_with_config(
-        &src_pixels,
-        &dst_pixels,
-        w as usize,
-        h as usize,
-        config,
-    )
+    let result = if args.features {
+        z.compute_all_features(&src, &dst)
+    } else {
+        z.compute(&src, &dst)
+    }
     .unwrap_or_else(|e| {
         eprintln!("Error computing zensim: {}", e);
         std::process::exit(1);
@@ -70,7 +68,7 @@ fn main() {
     );
 
     if args.features {
-        let fpc = zensim::FEATURES_PER_SCALE / 3;
+        let fpc = 13;
         let ch_names = ["X", "Y", "B"];
         let feat_names = [
             "ssim_mean",
@@ -83,9 +81,9 @@ fn main() {
             "det_4th",
             "det_2nd",
             "mse",
-            "var_loss",
-            "tex_loss",
-            "contrast_inc",
+            "hf_energy_loss",
+            "hf_mag_loss",
+            "hf_energy_gain",
         ];
         let fpc_scale = fpc * 3;
         for (si, chunk) in result.features.chunks(fpc_scale).enumerate() {

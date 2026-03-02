@@ -36,6 +36,7 @@ static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(N
 /// Should we use the streaming path for this image size?
 /// Benchmarking shows streaming band processing wins at all sizes (down to 98k pixels),
 /// so this always returns true for non-trivial images.
+#[cfg(any(feature = "training", test))]
 pub(crate) fn should_use_streaming(_width: usize, _height: usize) -> bool {
     true
 }
@@ -932,8 +933,7 @@ fn process_scale_bands(
 /// Total ≈ `width × height × 4 bytes × 3 channels × 1.33` (geometric sum of pyramid).
 /// For a 3840×2160 image: ~133 MB. For 7680×4320: ~532 MB.
 ///
-/// Created via [`precompute_reference`](crate::precompute_reference) (default 4 scales)
-/// or `precompute_reference_with_scales` (custom, requires `training` feature).
+/// Created via [`Zensim::precompute_reference`](crate::Zensim::precompute_reference).
 pub struct PrecomputedReference {
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
 }
@@ -1327,7 +1327,7 @@ pub(crate) fn compute_delta_stats(
     finalize_delta_stats(accum, has_alpha)
 }
 
-/// Extract normalized [0,1] RGB values from a pixel at position x in a row.
+/// Extract normalized \[0,1\] RGB values from a pixel at position x in a row.
 /// Returns (src_rgb, dst_rgb, optional (src_alpha, dst_alpha) normalized).
 #[inline]
 fn extract_pixel_rgb_normalized(

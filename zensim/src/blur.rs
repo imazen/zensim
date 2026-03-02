@@ -2002,8 +2002,22 @@ mod tests {
             }
         }
 
-        let score_left = crate::compute_zensim(&src, &dst_left, w, h).unwrap();
-        let score_right = crate::compute_zensim(&src, &dst_right, w, h).unwrap();
+        let score_left = crate::metric::compute_zensim_with_config(
+            &src,
+            &dst_left,
+            w,
+            h,
+            crate::metric::ZensimConfig::default(),
+        )
+        .unwrap();
+        let score_right = crate::metric::compute_zensim_with_config(
+            &src,
+            &dst_right,
+            w,
+            h,
+            crate::metric::ZensimConfig::default(),
+        )
+        .unwrap();
 
         eprintln!("Edge distortion sensitivity:");
         eprintln!(
@@ -2049,8 +2063,22 @@ mod tests {
             }
         }
 
-        let score_top = crate::compute_zensim(&src, &dst_top, w, h).unwrap();
-        let score_bottom = crate::compute_zensim(&src, &dst_bottom, w, h).unwrap();
+        let score_top = crate::metric::compute_zensim_with_config(
+            &src,
+            &dst_top,
+            w,
+            h,
+            crate::metric::ZensimConfig::default(),
+        )
+        .unwrap();
+        let score_bottom = crate::metric::compute_zensim_with_config(
+            &src,
+            &dst_bottom,
+            w,
+            h,
+            crate::metric::ZensimConfig::default(),
+        )
+        .unwrap();
 
         eprintln!("Edge distortion sensitivity (vertical):");
         eprintln!(

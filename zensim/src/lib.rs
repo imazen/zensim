@@ -96,24 +96,16 @@ mod streaming;
 
 // --- Primary API ---
 pub use error::ZensimError;
-pub use metric::{ErrorCategory, RoundingBias, Zensim, ZensimResult, distance_to_score};
+pub use metric::{ErrorCategory, RoundingBias, Zensim, ZensimResult};
 
 // --- Classification API (used by zensim-regress for regression testing) ---
 pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};
 pub use profile::ZensimProfile;
 pub use source::{AlphaMode, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};
 
-#[cfg(feature = "zencodec-types")]
-pub use source::pixel_format_from_descriptor;
 #[cfg(feature = "zenpixels")]
-pub use source::{ZenpixelsSource, ZenpixelsSourceError};
+pub use source::{ZenpixelsSource, ZenpixelsSourceError, pixel_format_from_descriptor};
 pub use streaming::PrecomputedReference;
-
-// --- Legacy free-function API (convenience wrappers) ---
-pub use metric::{
-    compute_zensim, compute_zensim_rgba, compute_zensim_with_ref, compute_zensim_with_ref_rgba,
-    precompute_reference, precompute_reference_rgba,
-};
 
 /// Training/research API — requires `features = ["training"]`.
 ///

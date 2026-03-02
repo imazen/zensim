@@ -93,8 +93,9 @@ Total: 4 scales × 3 channels × 13 features = 156 features, combined with train
 
 ## Input requirements
 
-- **Color space:** sRGB. Future versions may support additional input color spaces.
-- **Pixel format:** `[u8; 3]` (RGB) or `[u8; 4]` (RGBA with straight alpha). RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Custom pixel layouts via `StridedBytes` or the `ImageSource` trait.
+- **Color space:** sRGB (8-bit, 16-bit, f16) or linear f32.
+- **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `SrgbF16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
+- **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight`, `Premultiplied`, and `Opaque` alpha modes.
 - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 
 ## Score semantics
@@ -109,6 +110,9 @@ Results are deterministic for the same input on the same architecture. Cross-arc
 |------|---------|-------------|
 | `avx512` | yes | Enable AVX-512 SIMD paths |
 | `training` | no | Expose metric internals for weight training/research |
+| `imgref` | no | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
+| `f16` | no | Enable `SrgbF16Rgba` pixel format (IEEE 754 half-precision via `half` crate) |
+| `zenpixels` | no | `ZenpixelsSource` for any interleaved format via `zenpixels` conversion |
 
 ## MSRV
 

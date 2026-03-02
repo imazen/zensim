@@ -145,7 +145,7 @@ fn pixel_format_equivalence() {
         tolerance: f64,
     }
 
-    let formats = [
+    let mut formats = vec![
         FormatTest {
             name: "Srgb8Rgb",
             format: PixelFormat::Srgb8Rgb,
@@ -170,19 +170,20 @@ fn pixel_format_equivalence() {
             converter: to_srgb16_rgba,
             tolerance: 0.01,
         },
-        FormatTest {
-            name: "SrgbF16Rgba",
-            format: PixelFormat::SrgbF16Rgba,
-            converter: to_srgb_f16_rgba,
-            tolerance: 0.5,
-        },
-        FormatTest {
-            name: "LinearF32Rgba",
-            format: PixelFormat::LinearF32Rgba,
-            converter: to_linear_f32_rgba,
-            tolerance: 0.15,
-        },
     ];
+    #[cfg(feature = "f16")]
+    formats.push(FormatTest {
+        name: "SrgbF16Rgba",
+        format: PixelFormat::SrgbF16Rgba,
+        converter: to_srgb_f16_rgba,
+        tolerance: 0.5,
+    });
+    formats.push(FormatTest {
+        name: "LinearF32Rgba",
+        format: PixelFormat::LinearF32Rgba,
+        converter: to_linear_f32_rgba,
+        tolerance: 0.15,
+    });
 
     println!("  Reference (RgbSlice): score={:.6}", ref_result.score);
 

@@ -1,6 +1,6 @@
 [package]
 name = "zensim"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 description = "Fast psychovisual image similarity metric"
 repository = "https://github.com/imazen/zensim"
@@ -13,15 +13,13 @@ exclude = ["benches/", "tests/"]
 [features]
 default = ["avx512"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
-## Exposes training/research API: ZensimConfig, compute_zensim_with_config,
-## score_from_features, WEIGHTS, FEATURES_PER_SCALE. These items control
-## metric internals (blur kernel, scale count, masking) whose outputs are
-## incomparable with the default trained weights.
+## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
+## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
+## scale count, masking) whose outputs are incomparable with the default
+## trained weights.
 training = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
-## Enable ImageSource impls for zencodec_types_api::PixelSlice and PixelBuffer.
-zencodec-types = ["dep:zencodec-types"]
 ## Enable SrgbF16Rgba pixel format (requires `half` crate for IEEE 754 half-precision).
 f16 = ["dep:half"]
 ## Enable ZenpixelsSource for accepting any interleaved pixel format via zenpixels conversion.
@@ -35,7 +33,6 @@ rayon = { workspace = true }
 thiserror = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-zencodec-types = { workspace = true, optional = true }
 half = { workspace = true, optional = true }
 zenpixels = { workspace = true, optional = true }
 

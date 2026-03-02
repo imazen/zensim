@@ -9,7 +9,7 @@
 //! Run with: `cargo test -p zensim --test cross_tier -- --test-threads=1`
 
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
-use zensim::{ZensimResult, compute_zensim};
+use zensim::{RgbSlice, Zensim, ZensimProfile, ZensimResult};
 
 /// Generate deterministic test images: gradient source + small per-pixel distortion.
 fn generate_test_images(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
@@ -78,7 +78,10 @@ fn score_reproducibility_across_tiers() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let result = compute_zensim(&src, &dst, w, h).expect("compute_zensim failed");
+        let z = Zensim::new(ZensimProfile::latest());
+        let s = RgbSlice::new(&src, w, h);
+        let d = RgbSlice::new(&dst, w, h);
+        let result = z.compute(&s, &d).expect("compute failed");
         let disabled: Vec<String> = perm.disabled.iter().map(|s| s.to_string()).collect();
         results.push((perm.label.clone(), disabled, result));
     });
@@ -248,7 +251,10 @@ fn score_reproducibility_512x512() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let result = compute_zensim(&src, &dst, w, h).expect("compute_zensim failed");
+        let z = Zensim::new(ZensimProfile::latest());
+        let s = RgbSlice::new(&src, w, h);
+        let d = RgbSlice::new(&dst, w, h);
+        let result = z.compute(&s, &d).expect("compute failed");
         let disabled: Vec<String> = perm.disabled.iter().map(|s| s.to_string()).collect();
         results.push((perm.label.clone(), disabled, result));
     });

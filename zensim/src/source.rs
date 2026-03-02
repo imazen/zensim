@@ -112,7 +112,7 @@ pub struct RgbSlice<'a> {
 impl<'a> RgbSlice<'a> {
     /// Create a new `RgbSlice` from contiguous `[R,G,B]` pixels.
     ///
-    /// Returns [`ZensimError::InvalidDataLength`] if `data.len() < width * height`.
+    /// Returns [`ZensimError::InvalidDataLength`](crate::ZensimError::InvalidDataLength) if `data.len() < width * height`.
     pub fn try_new(
         data: &'a [[u8; 3]],
         width: usize,
@@ -179,7 +179,7 @@ impl<'a> RgbaSlice<'a> {
     /// Defaults to [`AlphaMode::Straight`]. Use [`try_with_alpha_mode`](Self::try_with_alpha_mode)
     /// or [`with_alpha_mode`](Self::with_alpha_mode) for explicit control.
     ///
-    /// Returns [`ZensimError::InvalidDataLength`] if `data.len() < width * height`.
+    /// Returns [`ZensimError::InvalidDataLength`](crate::ZensimError::InvalidDataLength) if `data.len() < width * height`.
     pub fn try_new(
         data: &'a [[u8; 4]],
         width: usize,
@@ -202,7 +202,7 @@ impl<'a> RgbaSlice<'a> {
 
     /// Create a new `RgbaSlice` with an explicit alpha mode.
     ///
-    /// Returns [`ZensimError::InvalidDataLength`] if `data.len() < width * height`.
+    /// Returns [`ZensimError::InvalidDataLength`](crate::ZensimError::InvalidDataLength) if `data.len() < width * height`.
     pub fn try_with_alpha_mode(
         data: &'a [[u8; 4]],
         width: usize,
@@ -284,8 +284,8 @@ impl<'a> StridedBytes<'a> {
     /// Defaults to [`AlphaMode::Unknown`]. Use [`try_with_alpha_mode`](Self::try_with_alpha_mode)
     /// or [`with_alpha_mode`](Self::with_alpha_mode) for explicit control.
     ///
-    /// Returns [`ZensimError::InvalidStride`] if stride is too small,
-    /// or [`ZensimError::InvalidDataLength`] if data is too short.
+    /// Returns [`ZensimError::InvalidStride`](crate::ZensimError::InvalidStride) if stride is too small,
+    /// or [`ZensimError::InvalidDataLength`](crate::ZensimError::InvalidDataLength) if data is too short.
     pub fn try_new(
         data: &'a [u8],
         width: usize,
@@ -327,8 +327,8 @@ impl<'a> StridedBytes<'a> {
 
     /// Create a new `StridedBytes` with an explicit alpha mode.
     ///
-    /// Returns [`ZensimError::InvalidStride`] if stride is too small,
-    /// or [`ZensimError::InvalidDataLength`] if data is too short.
+    /// Returns [`ZensimError::InvalidStride`](crate::ZensimError::InvalidStride) if stride is too small,
+    /// or [`ZensimError::InvalidDataLength`](crate::ZensimError::InvalidDataLength) if data is too short.
     pub fn try_with_alpha_mode(
         data: &'a [u8],
         width: usize,
@@ -463,18 +463,26 @@ mod imgref_impls {
     }
 }
 
-#[cfg(feature = "zencodec-types")]
-mod zencodec_impls {
+#[cfg(feature = "zenpixels")]
+mod zenpixels_impls {
     use super::*;
-    use zencodec_types::{ChannelLayout, ChannelType, PixelSlice, TransferFunction};
+    use zenpixels::{
+        AlphaMode as ZpAlphaMode, ChannelLayout, ChannelType, ColorPrimaries, PixelDescriptor,
+        RowConverter, SignalRange, TransferFunction,
+    };
 
-    /// Convert a zencodec-types PixelDescriptor to a zensim PixelFormat.
+    /// Convert a zenpixels `PixelDescriptor` to a zensim `PixelFormat`.
     ///
-    /// Returns `None` for unsupported formats (Gray, GrayAlpha, U16, PQ, HLG, etc.).
-    pub fn pixel_format_from_descriptor(
-        desc: zencodec_types::PixelDescriptor,
-    ) -> Option<PixelFormat> {
-        match (desc.channel_type, desc.layout, desc.transfer) {
+    /// Returns `None` for unsupported formats (Gray, GrayAlpha, PQ, HLG,
+    /// narrow range, non-BT.709 primaries, F16, etc.).
+    pub fn pixel_format_from_descriptor(desc: PixelDescriptor) -> Option<PixelFormat> {
+        if desc.primaries != ColorPrimaries::Bt709 && desc.primaries != ColorPrimaries::Unknown {
+            return None;
+        }
+        if desc.signal_range == SignalRange::Narrow {
+            return None;
+        }
+        match (desc.channel_type(), desc.layout(), desc.transfer()) {
             (ChannelType::U8, ChannelLayout::Rgb, TransferFunction::Srgb) => {
                 Some(PixelFormat::Srgb8Rgb)
             }
@@ -484,61 +492,15 @@ mod zencodec_impls {
             (ChannelType::U8, ChannelLayout::Bgra, TransferFunction::Srgb) => {
                 Some(PixelFormat::Srgb8Bgra)
             }
+            (ChannelType::U16, ChannelLayout::Rgba, TransferFunction::Srgb) => {
+                Some(PixelFormat::Srgb16Rgba)
+            }
             (ChannelType::F32, ChannelLayout::Rgba, TransferFunction::Linear) => {
                 Some(PixelFormat::LinearF32Rgba)
             }
             _ => None,
         }
     }
-
-    fn descriptor_to_pixel_format(desc: zencodec_types::PixelDescriptor) -> PixelFormat {
-        pixel_format_from_descriptor(desc).unwrap_or_else(|| {
-            panic!(
-                "zensim: unsupported pixel format {:?}/{:?}/{:?}. \
-                 Supported: sRGB u8 RGB/RGBA/BGRA, sRGB u16 RGBA, linear f32 RGBA.",
-                desc.channel_type, desc.layout, desc.transfer,
-            )
-        })
-    }
-
-    impl ImageSource for PixelSlice<'_> {
-        #[inline]
-        fn width(&self) -> usize {
-            PixelSlice::width(self) as usize
-        }
-        #[inline]
-        fn height(&self) -> usize {
-            PixelSlice::rows(self) as usize
-        }
-        #[inline]
-        fn pixel_format(&self) -> PixelFormat {
-            descriptor_to_pixel_format(PixelSlice::descriptor(self))
-        }
-        #[inline]
-        fn alpha_mode(&self) -> AlphaMode {
-            AlphaMode::Unknown
-        }
-        #[inline]
-        fn row_bytes(&self, y: usize) -> &[u8] {
-            PixelSlice::row(self, y as u32)
-        }
-    }
-
-    // PixelBuffer: use `buf.as_slice()` to get a `PixelSlice` which implements ImageSource.
-    // Direct impl is not possible because PixelBuffer::row() requires going through
-    // a temporary PixelSlice, and Rust can't return references to temporaries.
-}
-
-#[cfg(feature = "zencodec-types")]
-pub use zencodec_impls::pixel_format_from_descriptor;
-
-#[cfg(feature = "zenpixels")]
-mod zenpixels_impls {
-    use super::*;
-    use zenpixels::{
-        AlphaMode as ZpAlphaMode, ChannelLayout, ChannelType, ColorPrimaries, PixelDescriptor,
-        RowConverter, SignalRange, TransferFunction,
-    };
 
     /// Error constructing a [`ZenpixelsSource`].
     #[derive(Debug, thiserror::Error)]
@@ -550,6 +512,24 @@ mod zenpixels_impls {
         /// Row conversion failed.
         #[error("zenpixels conversion error: {0}")]
         Convert(#[from] zenpixels::ConvertError),
+
+        /// Stride is too small for the given width and pixel format.
+        #[error("stride {stride} < width*bpp {min_stride}")]
+        InvalidStride {
+            /// The stride that was provided.
+            stride: usize,
+            /// The minimum required stride (width * bytes_per_pixel).
+            min_stride: usize,
+        },
+
+        /// Data buffer is too short for the given dimensions and stride.
+        #[error("data length {actual} < required {required}")]
+        InvalidDataLength {
+            /// The actual data length.
+            actual: usize,
+            /// The minimum required data length.
+            required: usize,
+        },
     }
 
     /// An [`ImageSource`] constructed from any interleaved pixel format
@@ -582,12 +562,12 @@ mod zenpixels_impls {
         }
     }
 
-    /// Map a zenpixels `AlphaMode` to zensim's `AlphaMode`.
-    fn map_alpha_mode(zp: ZpAlphaMode) -> AlphaMode {
+    /// Map a zenpixels `Option<AlphaMode>` to zensim's `AlphaMode`.
+    fn map_alpha_mode(zp: Option<ZpAlphaMode>) -> AlphaMode {
         match zp {
-            ZpAlphaMode::None | ZpAlphaMode::Undefined | ZpAlphaMode::Opaque => AlphaMode::Opaque,
-            ZpAlphaMode::Straight => AlphaMode::Straight,
-            ZpAlphaMode::Premultiplied => AlphaMode::Premultiplied,
+            None | Some(ZpAlphaMode::Undefined | ZpAlphaMode::Opaque) => AlphaMode::Opaque,
+            Some(ZpAlphaMode::Straight) => AlphaMode::Straight,
+            Some(ZpAlphaMode::Premultiplied) => AlphaMode::Premultiplied,
             _ => AlphaMode::Unknown,
         }
     }
@@ -597,21 +577,21 @@ mod zenpixels_impls {
         if desc.primaries != ColorPrimaries::Bt709 || desc.signal_range != SignalRange::Full {
             return None;
         }
-        match (desc.channel_type, desc.layout, desc.transfer) {
+        match (desc.channel_type(), desc.layout(), desc.transfer()) {
             (ChannelType::U8, ChannelLayout::Rgb, TransferFunction::Srgb) => {
                 Some((PixelFormat::Srgb8Rgb, AlphaMode::Opaque))
             }
             (ChannelType::U8, ChannelLayout::Rgba, TransferFunction::Srgb) => {
-                Some((PixelFormat::Srgb8Rgba, map_alpha_mode(desc.alpha)))
+                Some((PixelFormat::Srgb8Rgba, map_alpha_mode(desc.alpha())))
             }
             (ChannelType::U8, ChannelLayout::Bgra, TransferFunction::Srgb) => {
-                Some((PixelFormat::Srgb8Bgra, map_alpha_mode(desc.alpha)))
+                Some((PixelFormat::Srgb8Bgra, map_alpha_mode(desc.alpha())))
             }
             (ChannelType::U16, ChannelLayout::Rgba, TransferFunction::Srgb) => {
-                Some((PixelFormat::Srgb16Rgba, map_alpha_mode(desc.alpha)))
+                Some((PixelFormat::Srgb16Rgba, map_alpha_mode(desc.alpha())))
             }
             (ChannelType::F32, ChannelLayout::Rgba, TransferFunction::Linear) => {
-                Some((PixelFormat::LinearF32Rgba, map_alpha_mode(desc.alpha)))
+                Some((PixelFormat::LinearF32Rgba, map_alpha_mode(desc.alpha())))
             }
             _ => None,
         }
@@ -623,33 +603,23 @@ mod zenpixels_impls {
         desc: PixelDescriptor,
     ) -> Result<(PixelDescriptor, PixelFormat), ZenpixelsSourceError> {
         // Reject outright unsupported formats
-        match desc.channel_type {
-            ChannelType::I16 => {
-                return Err(ZenpixelsSourceError::UnsupportedDescriptor(
-                    "I16 channel type has no zenpixels conversion kernels".into(),
-                ));
-            }
-            ChannelType::F16 => {
-                return Err(ZenpixelsSourceError::UnsupportedDescriptor(
-                    "F16 channel type has no zenpixels conversion kernels; \
-                     use zensim's native f16 feature with StridedBytes instead"
-                        .into(),
-                ));
-            }
-            _ => {}
+        if desc.channel_type() == ChannelType::F16 {
+            return Err(ZenpixelsSourceError::UnsupportedDescriptor(
+                "F16 channel type has no zenpixels conversion kernels; \
+                 use zensim's native f16 feature with StridedBytes instead"
+                    .into(),
+            ));
         }
-        match desc.transfer {
+        match desc.transfer() {
             TransferFunction::Pq | TransferFunction::Hlg => {
                 return Err(ZenpixelsSourceError::UnsupportedDescriptor(format!(
                     "{:?} transfer function requires tone mapping (not supported)",
-                    desc.transfer
+                    desc.transfer()
                 )));
             }
             _ => {}
         }
         if desc.primaries != ColorPrimaries::Bt709 && desc.primaries != ColorPrimaries::Unknown {
-            // BT.709 is fine, Unknown we treat as BT.709.
-            // Others require gamut mapping.
             return Err(ZenpixelsSourceError::UnsupportedDescriptor(format!(
                 "{:?} primaries require gamut mapping (not supported)",
                 desc.primaries
@@ -662,15 +632,15 @@ mod zenpixels_impls {
         }
 
         // Choose target based on source depth + transfer + alpha
-        let has_alpha = desc.layout.has_alpha();
-        let target = match (desc.channel_type, desc.transfer) {
+        let has_alpha = desc.layout().has_alpha();
+        let target = match (desc.channel_type(), desc.transfer()) {
             (
                 ChannelType::U8,
                 TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown,
             ) => {
                 if has_alpha {
                     (
-                        PixelDescriptor::RGBA8_SRGB.with_alpha(desc.alpha),
+                        PixelDescriptor::RGBA8_SRGB.with_alpha(desc.alpha()),
                         PixelFormat::Srgb8Rgba,
                     )
                 } else {
@@ -682,27 +652,26 @@ mod zenpixels_impls {
                 TransferFunction::Srgb | TransferFunction::Bt709 | TransferFunction::Unknown,
             ) => {
                 let target_desc = if has_alpha {
-                    PixelDescriptor::RGBA16_SRGB.with_alpha(desc.alpha)
+                    PixelDescriptor::RGBA16_SRGB.with_alpha(desc.alpha())
                 } else {
-                    // No alpha → add opaque alpha for RGBA16
-                    PixelDescriptor::RGBA16_SRGB.with_alpha(ZpAlphaMode::Opaque)
+                    PixelDescriptor::RGBA16_SRGB.with_alpha(Some(ZpAlphaMode::Opaque))
                 };
                 (target_desc, PixelFormat::Srgb16Rgba)
             }
             (ChannelType::F32, TransferFunction::Linear) => {
                 let target_desc = if has_alpha {
-                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(desc.alpha)
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(desc.alpha())
                 } else {
-                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(ZpAlphaMode::Opaque)
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(Some(ZpAlphaMode::Opaque))
                 };
                 (target_desc, PixelFormat::LinearF32Rgba)
             }
             // Fallback: convert to linear f32 RGBA
             _ => {
                 let target_desc = if has_alpha {
-                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(desc.alpha)
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(desc.alpha())
                 } else {
-                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(ZpAlphaMode::Opaque)
+                    PixelDescriptor::RGBAF32_LINEAR.with_alpha(Some(ZpAlphaMode::Opaque))
                 };
                 (target_desc, PixelFormat::LinearF32Rgba)
             }
@@ -736,18 +705,18 @@ mod zenpixels_impls {
             stride: usize,
         ) -> Result<Self, ZenpixelsSourceError> {
             let bpp = descriptor.bytes_per_pixel();
-            assert!(
-                stride >= width * bpp,
-                "ZenpixelsSource: stride {stride} < width*bpp {}",
-                width * bpp,
-            );
+            let min_stride = width * bpp;
+            if stride < min_stride {
+                return Err(ZenpixelsSourceError::InvalidStride { stride, min_stride });
+            }
             if height > 0 {
-                let required = (height - 1) * stride + width * bpp;
-                assert!(
-                    data.len() >= required,
-                    "ZenpixelsSource: data length {} < required {required}",
-                    data.len(),
-                );
+                let required = (height - 1) * stride + min_stride;
+                if data.len() < required {
+                    return Err(ZenpixelsSourceError::InvalidDataLength {
+                        actual: data.len(),
+                        required,
+                    });
+                }
             }
 
             // Check for direct passthrough first
@@ -767,7 +736,7 @@ mod zenpixels_impls {
 
             // Need conversion — pick target and convert
             let (target_desc, target_pf) = choose_target(descriptor)?;
-            let alpha_mode = map_alpha_mode(target_desc.alpha);
+            let alpha_mode = map_alpha_mode(target_desc.alpha());
 
             let converter = RowConverter::new(descriptor, target_desc)?;
 
@@ -839,4 +808,4 @@ mod zenpixels_impls {
 }
 
 #[cfg(feature = "zenpixels")]
-pub use zenpixels_impls::{ZenpixelsSource, ZenpixelsSourceError};
+pub use zenpixels_impls::{ZenpixelsSource, ZenpixelsSourceError, pixel_format_from_descriptor};

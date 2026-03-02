@@ -117,9 +117,9 @@ dependencies = [
 
 [[package]]
 name = "archmage"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6a8d07d03baac9aeaa060763129e3dccb82d7f5033f155f342e48fbd6eecb46"
+checksum = "c0fb818f2e02ca08cc6416725044fadc84bcf5a96e2eb7ab103c966123667d86"
 dependencies = [
  "archmage-macros",
  "safe_unaligned_simd",
@@ -127,9 +127,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d809ec8d42ebc519018e480ecc1c6ce4565a58d977f898e587a49773bd43040"
+checksum = "1886761e37995842cfbaf8c24d483e62d9b8c174254d29146f596d4d87efff2d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -563,12 +563,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enough"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "177a59811828ea5dbc8927662d444ffee7b55a44696486f1b1a245ae9e652533"
-
-[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -943,9 +937,9 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "833860bd7b8fd3a9311fef4f68c9c99820a4b005380213cd4eca722a015e0ef9"
+checksum = "9233ec8c05f4844b1b4d92b5fd55ae179e8f7d1c09415ec45ceeda294237c42c"
 dependencies = [
  "archmage",
 ]
@@ -1773,12 +1767,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
-name = "whereat"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ec598a1ade4224cfe3c5dace0d5d7deec9ed670503ff99d4946973c8c094534"
-
-[[package]]
 name = "wide"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2011,16 +1999,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
 
 [[package]]
-name = "zencodec-types"
-version = "0.1.0"
-dependencies = [
- "enough",
- "imgref",
- "rgb",
- "whereat",
-]
-
-[[package]]
 name = "zenpixels"
 version = "0.1.0"
 dependencies = [
@@ -2030,7 +2008,7 @@ dependencies = [
 
 [[package]]
 name = "zensim"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2043,7 +2021,6 @@ dependencies = [
  "rgb",
  "serde_json",
  "thiserror",
- "zencodec-types",
  "zenpixels",
 ]
 

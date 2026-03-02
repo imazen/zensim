@@ -716,7 +716,7 @@ impl ChecksumManager {
 /// Decode a PNG reference image to RGBA8 pixels.
 ///
 /// Currently uses the `image` crate. The `zenpng` feature flag is reserved
-/// for future faster decode once zencodec-types path collision is resolved.
+/// for future faster decode via zenpng.
 fn decode_reference_png(path: &Path) -> Result<(Vec<u8>, u32, u32), RegressError> {
     let img = image::open(path)
         .map_err(|e| RegressError::image(path, e))?

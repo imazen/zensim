@@ -100,6 +100,7 @@ fn cbrtf_initial(x: f32) -> f32 {
 ///
 /// Input: `&[[u8; 3]]` (sRGB pixels)
 /// Output: 3 planes (X, Y, B) each of length `pixels.len()`, already positive-shifted.
+#[cfg(any(feature = "training", test))]
 pub fn srgb_to_positive_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
     let n = pixels.len();
     let mut x_plane = vec![0.0f32; n];
@@ -1524,34 +1525,4 @@ pub(crate) fn composite_srgb_f16_rgba_premul_to_linear(
             *out_pixel = [r + bg * inv, g + bg * inv, b + bg * inv];
         }
     }
-}
-
-/// Composite straight-alpha RGBA pixels over a checkerboard background into sRGB `[u8; 3]`.
-///
-/// Legacy function that composites in sRGB space. Kept for backward compatibility.
-pub fn rgba_checkerboard_composite(pixels: &[[u8; 4]], width: usize) -> Vec<[u8; 3]> {
-    let mut out = Vec::with_capacity(pixels.len());
-    for (i, &[r, g, b, a]) in pixels.iter().enumerate() {
-        let x = i % width;
-        let y = i / width;
-        let bg = if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
-            0u8
-        } else {
-            255u8
-        };
-        if a == 255 {
-            out.push([r, g, b]);
-        } else if a == 0 {
-            out.push([bg, bg, bg]);
-        } else {
-            let alpha = a as f32 * (1.0 / 255.0);
-            let inv = 1.0 - alpha;
-            let bg_f = bg as f32;
-            let ro = (r as f32).mul_add(alpha, bg_f * inv) + 0.5;
-            let go = (g as f32).mul_add(alpha, bg_f * inv) + 0.5;
-            let bo = (b as f32).mul_add(alpha, bg_f * inv) + 0.5;
-            out.push([ro as u8, go as u8, bo as u8]);
-        }
-    }
-    out
 }

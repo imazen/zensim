@@ -100,6 +100,7 @@ use crate::blur::{
     box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, box_blur_v_from_copy,
     downscale_2x_inplace, fused_blur_h_ssim, pad_plane_width, simd_padded_width,
 };
+#[cfg(any(feature = "training", test))]
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
 use crate::pool::ScaleBuffers;
@@ -229,7 +230,7 @@ impl Default for ZensimConfig {
 ///
 /// For profile-specific mapping, use [`Zensim::compute`] which applies the profile's
 /// `score_mapping_a` and `score_mapping_b` automatically.
-pub fn distance_to_score(raw_distance: f64) -> f64 {
+pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
     distance_to_score_mapped(raw_distance, 18.0, 0.7)
 }
 
@@ -266,41 +267,6 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
     (distance_to_score(raw_distance), raw_distance)
 }
 
-/// Pre-compute reference image data for reuse across multiple distorted comparisons.
-///
-/// Converts sRGB pixels to XYB color space and builds the multi-scale downscale pyramid,
-/// caching both for reuse with [`compute_zensim_with_ref`]. Uses the default 4 pyramid
-/// scales.
-///
-/// # When to use
-///
-/// When comparing one reference against many distorted variants. Saves ~25% at 4K and
-/// ~34% at 8K per comparison after amortizing the precompute cost (break-even: 3-7
-/// distorted images per reference).
-///
-/// # Errors
-///
-/// Returns [`ZensimError::ImageTooSmall`] if width or height < 8, or
-/// [`ZensimError::InvalidDataLength`] if `source.len() != width * height`.
-pub fn precompute_reference(
-    source: &[[u8; 3]],
-    width: usize,
-    height: usize,
-) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
-    if width < 8 || height < 8 {
-        return Err(ZensimError::ImageTooSmall);
-    }
-    if source.len() != width * height {
-        return Err(ZensimError::InvalidDataLength);
-    }
-    let src_img = crate::source::RgbSlice::new(source, width, height);
-    let config = ZensimConfig::default();
-    Ok(crate::streaming::PrecomputedReference::new(
-        &src_img,
-        config.num_scales,
-    ))
-}
-
 /// Pre-compute reference with a custom number of pyramid scales.
 ///
 /// Use this when calling [`compute_zensim_with_ref_and_config`] with a non-default
@@ -325,42 +291,9 @@ pub fn precompute_reference_with_scales(
     ))
 }
 
-/// Compute zensim score using a [`PrecomputedReference`](crate::PrecomputedReference).
-///
-/// Equivalent to [`compute_zensim`] but skips the reference image's XYB conversion
-/// and pyramid construction. The distorted image must have the same dimensions as
-/// the reference that was precomputed.
-///
-/// # Errors
-///
-/// Returns [`ZensimError::ImageTooSmall`] if width or height < 8, or
-/// [`ZensimError::InvalidDataLength`] if `distorted.len() != width * height`.
-pub fn compute_zensim_with_ref(
-    precomputed: &crate::streaming::PrecomputedReference,
-    distorted: &[[u8; 3]],
-    width: usize,
-    height: usize,
-) -> Result<ZensimResult, ZensimError> {
-    if width < 8 || height < 8 {
-        return Err(ZensimError::ImageTooSmall);
-    }
-    if distorted.len() != width * height {
-        return Err(ZensimError::InvalidDataLength);
-    }
-    let dst_img = crate::source::RgbSlice::new(distorted, width, height);
-    let config = ZensimConfig::default();
-    let result = crate::streaming::compute_zensim_streaming_with_ref(
-        precomputed,
-        &dst_img,
-        &config,
-        &WEIGHTS,
-    );
-    Ok(result)
-}
-
 /// Compute zensim with a precomputed reference and custom configuration.
 ///
-/// Training/research variant of [`compute_zensim_with_ref`]. The `config.num_scales`
+/// Training/research variant. The `config.num_scales`
 /// must not exceed the number of scales in `precomputed`.
 #[cfg(feature = "training")]
 pub fn compute_zensim_with_ref_and_config(
@@ -425,7 +358,8 @@ pub struct ZensimResult {
     ///
     /// Layout: 4 scales × 3 channels (X, Y, B) × 13 features per channel:
     /// `ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
-    ///  det_mean, det_4th, det_2nd, mse, var_loss, tex_loss, contrast_inc`
+    ///  det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain`
+    #[cfg_attr(not(feature = "training"), doc(hidden))]
     pub features: Vec<f64>,
     /// Which profile produced this score.
     pub profile: crate::profile::ZensimProfile,
@@ -1021,94 +955,10 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
 /// Total features = `num_scales × 3 channels × 13` = 156 at 4 scales.
 pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
-/// Compute zensim score between two sRGB u8 images.
-///
-/// Uses the latest general-purpose profile. For explicit profile selection, use
-/// [`Zensim::new`] with a [`ZensimProfile`].
-///
-/// Both images must be the same dimensions (at least 8×8). Pixels are sRGB
-/// `[R, G, B]` with 8 bits per channel.
-///
-/// Returns a score on 0-100 scale where 100 = identical.
-///
-/// # Errors
-///
-/// Returns [`ZensimError::ImageTooSmall`] if width or height < 8,
-/// [`ZensimError::InvalidDataLength`] if pixel count != width × height,
-/// or [`ZensimError::DimensionMismatch`] if source and distorted differ in length.
-pub fn compute_zensim(
-    source: &[[u8; 3]],
-    distorted: &[[u8; 3]],
-    width: usize,
-    height: usize,
-) -> Result<ZensimResult, ZensimError> {
-    compute_zensim_with_config(source, distorted, width, height, ZensimConfig::default())
-}
-
-/// Compute zensim score between two RGBA images with alpha compositing.
-///
-/// Both images are composited over the same 8×8 checkerboard (black/white)
-/// before comparison, so alpha differences produce visible perceptual
-/// distortion — fringing, incorrect transparency, and blending artifacts
-/// all produce measurable scores.
-///
-/// Pixels are sRGB `[R, G, B, A]` with straight (non-premultiplied) alpha.
-/// Fully opaque images (all alpha = 255) degrade to a simple channel strip
-/// with no blending overhead.
-///
-/// # Errors
-///
-/// Same as [`compute_zensim`].
-pub fn compute_zensim_rgba(
-    source: &[[u8; 4]],
-    distorted: &[[u8; 4]],
-    width: usize,
-    height: usize,
-) -> Result<ZensimResult, ZensimError> {
-    let src_rgb = crate::color::rgba_checkerboard_composite(source, width);
-    let dst_rgb = crate::color::rgba_checkerboard_composite(distorted, width);
-    compute_zensim(&src_rgb, &dst_rgb, width, height)
-}
-
-/// Pre-compute reference data from an RGBA image for batch comparisons.
-///
-/// RGBA variant of [`precompute_reference`]. The source is composited over
-/// a checkerboard before building the pyramid. Use with
-/// [`compute_zensim_with_ref_rgba`].
-///
-/// # Errors
-///
-/// Same as [`precompute_reference`].
-pub fn precompute_reference_rgba(
-    source: &[[u8; 4]],
-    width: usize,
-    height: usize,
-) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
-    let src_rgb = crate::color::rgba_checkerboard_composite(source, width);
-    precompute_reference(&src_rgb, width, height)
-}
-
-/// Compute zensim score using a precomputed RGBA reference.
-///
-/// RGBA variant of [`compute_zensim_with_ref`]. The distorted image is
-/// composited over the same checkerboard used by [`precompute_reference_rgba`].
-///
-/// # Errors
-///
-/// Same as [`compute_zensim_with_ref`].
-pub fn compute_zensim_with_ref_rgba(
-    precomputed: &crate::streaming::PrecomputedReference,
-    distorted: &[[u8; 4]],
-    width: usize,
-    height: usize,
-) -> Result<ZensimResult, ZensimError> {
-    let dst_rgb = crate::color::rgba_checkerboard_composite(distorted, width);
-    compute_zensim_with_ref(precomputed, &dst_rgb, width, height)
-}
-
-/// Compute zensim with custom configuration.
+/// Compute zensim with custom configuration (training API).
 ///
 /// Uses the v0.2 weights (latest general-purpose profile).
+#[cfg(any(feature = "training", test))]
 pub fn compute_zensim_with_config(
     source: &[[u8; 3]],
     distorted: &[[u8; 3]],
@@ -2022,7 +1872,7 @@ pub const FEATURES_PER_SCALE: usize = 39;
 ///
 /// Layout: 4 scales × 3 channels (X,Y,B) × 13 features:
 ///   ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
-///   det_mean, det_4th, det_2nd, mse, var_loss, tex_loss, contrast_inc
+///   det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
 #[allow(clippy::excessive_precision)]
 pub const WEIGHTS: [f64; 156] = [
     0.0000000000,
@@ -2269,7 +2119,8 @@ mod tests {
             }
         }
 
-        let default_result = compute_zensim(&src, &dst, w, h).unwrap();
+        let default_result =
+            compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
         let all_result = compute_zensim_with_config(
             &src,
             &dst,
