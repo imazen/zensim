@@ -112,7 +112,7 @@ Results are deterministic for the same input on the same architecture. Cross-arc
 | `training` | no | Expose metric internals for weight training/research |
 | `imgref` | no | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
 | `f16` | no | Enable `SrgbF16Rgba` pixel format (IEEE 754 half-precision via `half` crate) |
-| `zenpixels` | no | `ZenpixelsSource` for any interleaved format via `zenpixels` conversion |
+| `zenpixels` | no | `ZenpixelsSource` for any interleaved format via `zenpixels` conversion (coming soon) |
 
 ## MSRV
 
