@@ -56,10 +56,9 @@ Each `ZensimProfile` variant bundles all parameters that affect score output —
 
 | Profile | Training data | SROCC |
 |---------|---------------|-------|
-| `GeneralV0_1` | 12k synthetic pairs | — |
-| `GeneralV0_2` | 163k synthetic pairs | 0.9857 |
+| `PreviewV0_1` | 163k synthetic pairs | 0.9857 |
 
-`ZensimProfile::latest()` returns the most recent general-purpose profile.
+`ZensimProfile::latest()` returns the most recent profile.
 
 ## Design
 
