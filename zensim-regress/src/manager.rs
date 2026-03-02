@@ -41,6 +41,7 @@ use zensim::{RgbaSlice, Zensim, ZensimProfile};
 
 use crate::arch::detect_arch_tag;
 use crate::checksum_file::{ChecksumDiff, ChecksumEntry, TestChecksumFile, checksum_path};
+use crate::diff_image::create_comparison_montage_raw;
 use crate::error::RegressError;
 use crate::hasher::{ChecksumHasher, SeaHasher};
 use crate::remote::ReferenceStorage;
@@ -127,6 +128,69 @@ impl CheckResult {
     }
 }
 
+impl std::fmt::Display for CheckResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Match {
+                entry_id,
+                confidence,
+            } => write!(f, "PASS (exact match, confidence={confidence}, {entry_id})"),
+
+            Self::WithinTolerance {
+                report,
+                authoritative_id,
+                auto_accepted,
+                ..
+            } => {
+                let delta = report.max_channel_delta();
+                write!(
+                    f,
+                    "PASS (within tolerance, score={:.1}, max_delta=[{},{},{}], vs {authoritative_id}{})",
+                    report.score(),
+                    delta[0],
+                    delta[1],
+                    delta[2],
+                    if *auto_accepted {
+                        ", auto-accepted"
+                    } else {
+                        ""
+                    },
+                )
+            }
+
+            Self::Failed {
+                report,
+                authoritative_id,
+                ..
+            } => match (report, authoritative_id) {
+                (Some(r), Some(auth_id)) => {
+                    let delta = r.max_channel_delta();
+                    write!(
+                        f,
+                        "FAIL (score={:.1}, max_delta=[{},{},{}], vs {auth_id})",
+                        r.score(),
+                        delta[0],
+                        delta[1],
+                        delta[2],
+                    )
+                }
+                (None, Some(auth_id)) => {
+                    write!(f, "FAIL (no reference image, vs {auth_id})")
+                }
+                _ => write!(f, "FAIL (no reference image)"),
+            },
+
+            Self::NoBaseline { auto_accepted, .. } => {
+                if *auto_accepted {
+                    write!(f, "NO BASELINE (auto-accepted)")
+                } else {
+                    write!(f, "NO BASELINE (run with UPDATE_CHECKSUMS=1)")
+                }
+            }
+        }
+    }
+}
+
 /// Manager for visual regression test checksums.
 ///
 /// Owns the checksum directory path, hasher, and zensim instance.
@@ -138,6 +202,7 @@ pub struct ChecksumManager {
     update_mode: UpdateMode,
     arch_tag: String,
     remote: Option<ReferenceStorage>,
+    diff_dir: Option<PathBuf>,
 }
 
 impl ChecksumManager {
@@ -152,6 +217,7 @@ impl ChecksumManager {
             update_mode: UpdateMode::from_env(),
             arch_tag: detect_arch_tag().to_string(),
             remote: None,
+            diff_dir: None,
         }
     }
 
@@ -199,6 +265,16 @@ impl ChecksumManager {
     pub fn with_remote_storage_from_env(mut self) -> Self {
         let cache_dir = self.checksum_dir.join(".remote-cache");
         self.remote = ReferenceStorage::from_env(cache_dir);
+        self
+    }
+
+    /// Set a directory for saving comparison montages on mismatch.
+    ///
+    /// When set, each `WithinTolerance` or `Failed` result (where pixel
+    /// comparison was possible) saves an `Expected | Actual | Diff` montage
+    /// PNG to `{dir}/{test_name}.png`. Useful as a CI artifact.
+    pub fn with_diff_output(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.diff_dir = Some(dir.into());
         self
     }
 
@@ -359,7 +435,7 @@ impl ChecksumManager {
         // Load or handle missing file
         let mut file = match self.load_file(test_name)? {
             Some(f) => f,
-            None => return self.handle_no_baseline(test_name, actual_hash, &path),
+            None => return self.handle_no_baseline(test_name, actual_hash, &path, pixels),
         };
 
         // REPLACE mode: wipe and write new baseline
@@ -403,7 +479,7 @@ impl ChecksumManager {
             Some(e) => e.clone(),
             None => {
                 // No active entries → treat as no baseline
-                return self.handle_no_baseline(test_name, actual_hash, &path);
+                return self.handle_no_baseline(test_name, actual_hash, &path, Some((rgba, w, h)));
             }
         };
 
@@ -443,6 +519,9 @@ impl ChecksumManager {
         let actual_source = RgbaSlice::new(&actual_pixels, w as usize, h as usize);
 
         let report = check_regression(&self.zensim, &ref_source, &actual_source, &tolerance)?;
+
+        // Save diff montage if diff_dir is set
+        self.save_diff_montage(test_name, &ref_rgba, rw, rh, rgba, w, h);
 
         if report.passed() {
             let auto_accepted = self.update_mode == UpdateMode::Update;
@@ -580,6 +659,7 @@ impl ChecksumManager {
         test_name: &str,
         actual_hash: &str,
         path: &Path,
+        pixels: Option<(&[u8], u32, u32)>,
     ) -> Result<CheckResult, RegressError> {
         let auto_accepted = self.update_mode != UpdateMode::Normal;
         if auto_accepted {
@@ -595,6 +675,11 @@ impl ChecksumManager {
                 diff: None,
             });
             file.write_to(path)?;
+
+            // Save reference image so the next run can do zensim comparison
+            if let Some((rgba, w, h)) = pixels {
+                let _ = self.save_reference_image(test_name, rgba, w, h);
+            }
         }
         Ok(CheckResult::NoBaseline {
             actual_hash: actual_hash.to_string(),
@@ -711,6 +796,68 @@ impl ChecksumManager {
             }
         }
     }
+
+    /// Save a comparison montage (Expected | Actual | Diff) as a PNG.
+    ///
+    /// The images must have the same dimensions.
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_diff_image(
+        &self,
+        test_name: &str,
+        expected: &[u8],
+        expected_w: u32,
+        expected_h: u32,
+        actual: &[u8],
+        actual_w: u32,
+        actual_h: u32,
+        output_dir: &Path,
+    ) -> Result<PathBuf, RegressError> {
+        std::fs::create_dir_all(output_dir).map_err(|e| RegressError::io(output_dir, e))?;
+        let sanitized = crate::checksum_file::sanitize_name(test_name);
+        let out_path = output_dir.join(format!("{sanitized}.png"));
+
+        // If dimensions differ, just save actual as-is (can't diff)
+        if expected_w != actual_w || expected_h != actual_h {
+            let img = image::RgbaImage::from_raw(actual_w, actual_h, actual.to_vec()).ok_or_else(
+                || RegressError::Io {
+                    path: out_path.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid dimensions for pixel data",
+                    ),
+                },
+            )?;
+            img.save(&out_path)
+                .map_err(|e| RegressError::image(&out_path, e))?;
+            return Ok(out_path);
+        }
+
+        let montage =
+            create_comparison_montage_raw(expected, actual, expected_w, expected_h, 10, 2);
+        montage
+            .save(&out_path)
+            .map_err(|e| RegressError::image(&out_path, e))?;
+        Ok(out_path)
+    }
+
+    /// Internal: save diff montage if diff_dir is configured.
+    #[allow(clippy::too_many_arguments)]
+    fn save_diff_montage(
+        &self,
+        test_name: &str,
+        ref_rgba: &[u8],
+        rw: u32,
+        rh: u32,
+        actual_rgba: &[u8],
+        aw: u32,
+        ah: u32,
+    ) {
+        let Some(dir) = &self.diff_dir else { return };
+        if let Err(e) = self.save_diff_image(test_name, ref_rgba, rw, rh, actual_rgba, aw, ah, dir)
+        {
+            eprintln!("Warning: failed to save diff image for {test_name}: {e}");
+        }
+    }
 }
 
 /// Decode a PNG reference image to RGBA8 pixels.
@@ -730,7 +877,7 @@ fn decode_reference_png(path: &Path) -> Result<(Vec<u8>, u32, u32), RegressError
 /// Panics if the length is not a multiple of 4.
 fn rgba_bytes_to_pixels(bytes: &[u8]) -> Vec<[u8; 4]> {
     assert!(
-        bytes.len() % 4 == 0,
+        bytes.len().is_multiple_of(4),
         "RGBA byte slice length {} is not a multiple of 4",
         bytes.len()
     );

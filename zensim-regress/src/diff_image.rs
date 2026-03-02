@@ -95,6 +95,52 @@ pub fn create_comparison_montage(
     create_montage(&[expected, actual, &diff], gap)
 }
 
+/// Generate an amplified diff image from raw RGBA byte slices.
+///
+/// Convenience wrapper around [`generate_diff_image`] for callers working
+/// with `&[u8]` pixel buffers instead of `RgbaImage`.
+///
+/// # Panics
+///
+/// Panics if either slice length doesn't match `width * height * 4`,
+/// or if expected and actual have different dimensions.
+pub fn generate_diff_image_raw(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+) -> RgbaImage {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions for pixel data");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions for pixel data");
+    generate_diff_image(&exp_img, &act_img, amplification)
+}
+
+/// Create a 3-panel comparison montage from raw RGBA byte slices.
+///
+/// Convenience wrapper around [`create_comparison_montage`] for callers
+/// working with `&[u8]` pixel buffers instead of `RgbaImage`.
+///
+/// # Panics
+///
+/// Panics if either slice length doesn't match `width * height * 4`.
+pub fn create_comparison_montage_raw(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+    gap: u32,
+) -> RgbaImage {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions for pixel data");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions for pixel data");
+    create_comparison_montage(&exp_img, &act_img, amplification, gap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +209,25 @@ mod tests {
         let montage = create_comparison_montage(&expected, &actual, 10, 2);
         assert_eq!(montage.width(), 28); // 8+2+8+2+8
         assert_eq!(montage.height(), 8);
+    }
+
+    #[test]
+    fn diff_raw_matches_typed() {
+        let exp = RgbaImage::from_pixel(4, 4, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(4, 4, Rgba([105, 100, 95, 255]));
+
+        let typed = generate_diff_image(&exp, &act, 10);
+        let raw = generate_diff_image_raw(exp.as_raw(), act.as_raw(), 4, 4, 10);
+        assert_eq!(typed, raw);
+    }
+
+    #[test]
+    fn comparison_montage_raw_matches_typed() {
+        let exp = RgbaImage::from_pixel(4, 4, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(4, 4, Rgba([105, 100, 95, 255]));
+
+        let typed = create_comparison_montage(&exp, &act, 10, 2);
+        let raw = create_comparison_montage_raw(exp.as_raw(), act.as_raw(), 4, 4, 10, 2);
+        assert_eq!(typed, raw);
     }
 }

@@ -135,12 +135,6 @@ impl RegressionTolerance {
         self.ignore_alpha = true;
         self
     }
-
-    /// Whether this tolerance ignores alpha.
-    #[allow(dead_code)] // used by ChecksumManager in Phase 2
-    pub(crate) fn ignores_alpha(&self) -> bool {
-        self.ignore_alpha
-    }
 }
 
 /// Per-constraint pass/fail detail (drives Display output).
