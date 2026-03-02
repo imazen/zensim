@@ -1965,15 +1965,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zensim-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "image",
- "zensim",
-]
-
-[[package]]
 name = "zensim-regress"
 version = "0.1.0"
 dependencies = [
