@@ -95,7 +95,7 @@ Total: 4 scales × 3 channels × 13 features = 156 features, combined with train
 
 - **Color space:** sRGB (8-bit, 16-bit, f16) or linear f32.
 - **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `SrgbF16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
-- **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight`, `Premultiplied`, and `Opaque` alpha modes.
+- **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight` and `Opaque` alpha modes.
 - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 
 ## Score semantics
@@ -116,7 +116,7 @@ Results are deterministic for the same input on the same architecture. Cross-arc
 
 ## MSRV
 
-Rust 1.85.0 (2024 edition).
+Rust 1.89.0 (2024 edition).
 
 ## License
 

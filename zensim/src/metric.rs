@@ -383,7 +383,7 @@ pub enum ErrorCategory {
     RoundingError,
     /// One channel zero-delta, others large — RGB↔BGR swap.
     ChannelSwap,
-    /// Premultiplied/straight alpha confusion, wrong background compositing.
+    /// Alpha compositing error (e.g. straight/premul confusion, wrong background).
     AlphaCompositing,
     /// Images differ but no category reached sufficient confidence.
     Unclassified,
