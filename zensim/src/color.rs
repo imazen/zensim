@@ -1393,4 +1393,3 @@ pub(crate) fn composite_srgb_f16_rgba_to_linear(
         }
     }
 }
-

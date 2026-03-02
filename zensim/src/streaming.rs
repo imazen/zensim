@@ -8,13 +8,13 @@ use crate::blur::{
     box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
     fused_blur_h_ssim, simd_padded_width,
 };
+#[cfg(feature = "f16")]
+use crate::color::composite_srgb_f16_rgba_to_linear;
 use crate::color::{
     composite_linear_f32_rgba, composite_srgb8_bgra_to_linear, composite_srgb8_rgba_to_linear,
     composite_srgb16_rgba_to_linear, linear_to_positive_xyb_planar_into,
     srgb_to_positive_xyb_planar_into,
 };
-#[cfg(feature = "f16")]
-use crate::color::composite_srgb_f16_rgba_to_linear;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
@@ -409,11 +409,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         for y in row_start..row_end {
                             let row_bytes = source.row_bytes(y);
                             let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                            composite_srgb8_rgba_to_linear(
-                                &rgba_row[..width],
-                                y,
-                                &mut linear_row,
-                            );
+                            composite_srgb8_rgba_to_linear(&rgba_row[..width], y, &mut linear_row);
                             let row_offset = (y - row_start) * width;
                             linear_to_positive_xyb_planar_into(
                                 &linear_row,
@@ -446,11 +442,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         for y in row_start..row_end {
                             let row_bytes = source.row_bytes(y);
                             let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                            composite_srgb8_bgra_to_linear(
-                                &bgra_row[..width],
-                                y,
-                                &mut linear_row,
-                            );
+                            composite_srgb8_bgra_to_linear(&bgra_row[..width], y, &mut linear_row);
                             let row_offset = (y - row_start) * width;
                             linear_to_positive_xyb_planar_into(
                                 &linear_row,
