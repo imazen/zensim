@@ -2089,7 +2089,7 @@ pub(crate) fn combine_scores(
         score,
         raw_distance,
         features,
-        profile: ZensimProfile::GeneralV0_2,
+        profile: ZensimProfile::PreviewV0_1,
         mean_offset,
     }
 }

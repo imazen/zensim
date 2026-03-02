@@ -9,27 +9,27 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZensimProfile {
-    /// General-purpose v0.2. Trained on 163k synthetic pairs, SROCC=0.9857.
-    GeneralV0_2,
+    /// Preview v0.1. Trained on 163k synthetic pairs, SROCC=0.9857.
+    PreviewV0_1,
 }
 
 impl ZensimProfile {
     /// Latest recommended general-purpose profile.
     pub fn latest() -> Self {
-        Self::GeneralV0_2
+        Self::PreviewV0_1
     }
 
-    /// Canonical name string, e.g. `"zensim-general-v0.2"`.
+    /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::GeneralV0_2 => "zensim-general-v0.2",
+            Self::PreviewV0_1 => "zensim-preview-v0.1",
         }
     }
 
     /// Internal parameters for this profile.
     pub(crate) fn params(&self) -> &'static ProfileParams {
         match self {
-            Self::GeneralV0_2 => &PROFILE_GENERAL_V0_2,
+            Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
         }
     }
 }
@@ -83,8 +83,8 @@ impl ProfileParams {
 
 // --- Profile definitions ---
 
-static PROFILE_GENERAL_V0_2: ProfileParams = ProfileParams {
-    weights: &WEIGHTS_GENERAL_V0_2,
+static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_1,
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
@@ -95,10 +95,10 @@ static PROFILE_GENERAL_V0_2: ProfileParams = ProfileParams {
 
 // --- Weight arrays ---
 
-/// Weights from gpu_ssim2_v2_163k.txt (163k synthetic pairs, 149.5k valid).
+/// Preview v0.1 weights (from gpu_ssim2_v2_163k.txt, 163k synthetic pairs, 149.5k valid).
 /// SROCC = 0.9857 on training set.
 #[allow(clippy::excessive_precision)]
-pub static WEIGHTS_GENERAL_V0_2: [f64; 156] = [
+pub static WEIGHTS_PREVIEW_V0_1: [f64; 156] = [
     0.0000000000,
     0.3054918030,
     0.0000000000,

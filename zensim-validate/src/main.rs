@@ -897,7 +897,7 @@ fn load_and_compute(
         score: f64::NAN,
         raw_distance: f64::NAN,
         features: vec![],
-        profile: zensim::ZensimProfile::GeneralV0_2,
+        profile: zensim::ZensimProfile::PreviewV0_1,
         mean_offset: [f64::NAN; 3],
     };
 
