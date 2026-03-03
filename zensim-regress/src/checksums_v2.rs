@@ -1028,7 +1028,13 @@ impl ChecksumManagerV2 {
 /// Convert a raw hash ID to a memorable name, stripping any file extension.
 ///
 /// `"sea:a4839401fabae99c.png"` → `"sunny-crab-a4839:sea"`
+///
+/// If the input is already a petname (contains dashes), returns it as-is.
 fn hash_to_memorable(hash_id: &str) -> String {
+    // Already a petname (e.g., "brave-panda-26d92981fc:sea")
+    if hash_id.contains('-') {
+        return hash_id.to_string();
+    }
     // Strip file extension if present (e.g., ".png", ".jpg")
     let bare = strip_hash_extension(hash_id);
     crate::petname::memorable_name(bare)
