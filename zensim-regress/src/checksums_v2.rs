@@ -152,6 +152,13 @@ impl ChecksumsFile {
             file.sections.push(section);
         }
 
+        // Strip trailing blank lines from header comments to prevent
+        // accumulation on read-modify-write cycles (format() adds its own
+        // blank line between header and first section).
+        while file.header_comments.last().is_some_and(|l| l.trim().is_empty()) {
+            file.header_comments.pop();
+        }
+
         file
     }
 
@@ -1095,8 +1102,8 @@ tolerance d:0 s:100
 ";
 
         let file = ChecksumsFile::parse(content);
-        // Header comment + blank line before first section
-        assert_eq!(file.header_comments.len(), 2);
+        // Header comment only (trailing blank lines stripped to prevent accumulation)
+        assert_eq!(file.header_comments.len(), 1);
         assert_eq!(file.sections.len(), 1);
 
         let section = &file.sections[0];
