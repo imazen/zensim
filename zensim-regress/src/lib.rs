@@ -1,16 +1,15 @@
 //! Visual regression testing persistence and workflow for zensim.
 //!
-//! This crate provides TOML-based checksum file management, architecture-aware
+//! This crate provides checksum file management, architecture-aware
 //! tolerance handling, and pixel hashing for visual regression testing. It
 //! builds on `zensim`'s `RegressionReport` and `ErrorCategory` to create a
 //! complete chain-of-trust system for tracking expected test outputs.
 //!
-//! # Overview
+//! # Formats
 //!
-//! Each visual test gets a `.toml` file containing:
-//! - **Tolerance**: how much difference is acceptable (with per-arch overrides)
-//! - **Checksums**: hash IDs of known-good outputs (active + retired)
-//! - **Diffs**: forensic evidence of how alternate checksums differ from the reference
+//! - **TOML** (v0): Per-test `.toml` files via [`checksum_file`]. Original format.
+//! - **`.checksums`** (v1): Line-oriented log files via [`checksums_v2`]. Compact,
+//!   append-friendly, one file per test module with human-readable memorable names.
 //!
 //! # Quick start
 //!
@@ -37,7 +36,9 @@
 
 pub mod arch;
 pub mod checksum_file;
+pub mod checksums_v2;
 pub mod diff_image;
+pub mod diff_summary;
 pub mod display;
 pub mod distortions;
 pub mod error;
@@ -45,6 +46,7 @@ pub mod fetch;
 pub mod generators;
 pub mod hasher;
 pub mod manager;
+pub mod petname;
 pub mod remote;
 pub mod testing;
 pub mod upload;
