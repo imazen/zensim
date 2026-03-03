@@ -18,7 +18,7 @@
 //! See the plan document for full format specification.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::RegressError;
 
@@ -673,6 +673,309 @@ fn split_test_detail(full_name: &str) -> (String, String) {
     }
 }
 
+// ─── Manager ─────────────────────────────────────────────────────────
+
+/// Result of checking a hash against a `.checksums` file.
+#[derive(Debug, Clone)]
+pub enum CheckResultV2 {
+    /// Actual hash matches an active entry.
+    Match {
+        /// Memorable name of the matched entry.
+        entry_name: String,
+    },
+    /// No baseline exists for this test/detail. May have been auto-accepted.
+    NoBaseline {
+        /// Memorable name of the actual hash.
+        actual_name: String,
+        /// Whether the entry was automatically accepted (REPLACE or UPDATE mode).
+        auto_accepted: bool,
+    },
+    /// Baseline exists but actual hash does not match any active entry.
+    Failed {
+        /// Memorable name of the authoritative baseline.
+        authoritative_name: String,
+        /// Memorable name of the actual (non-matching) hash.
+        actual_name: String,
+    },
+}
+
+/// Manager for `.checksums` v1 files.
+///
+/// Provides the main workflow for v1 checksum validation:
+/// 1. Load the module's `.checksums` file
+/// 2. Find the section for the test function + detail
+/// 3. Compare the actual hash against active entries
+/// 4. In UPDATE/REPLACE mode, auto-accept new hashes
+///
+/// # Environment variables
+///
+/// - `UPDATE_CHECKSUMS=1` — auto-accept new checksums as `AutoAccepted`
+/// - `REPLACE_CHECKSUMS=1` — accept new checksums as `HumanVerified` (replaces baseline)
+pub struct ChecksumManagerV2 {
+    checksums_dir: PathBuf,
+    update_mode: bool,
+    replace_mode: bool,
+}
+
+impl ChecksumManagerV2 {
+    /// Create a new manager pointing at a directory of `.checksums` files.
+    ///
+    /// Reads `UPDATE_CHECKSUMS` and `REPLACE_CHECKSUMS` from the environment.
+    pub fn new(checksums_dir: &Path) -> Self {
+        let update_mode =
+            std::env::var("UPDATE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
+        let replace_mode =
+            std::env::var("REPLACE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
+        Self {
+            checksums_dir: checksums_dir.to_path_buf(),
+            update_mode,
+            replace_mode,
+        }
+    }
+
+    /// Create a manager with explicit mode flags (for testing).
+    pub fn with_modes(checksums_dir: &Path, update_mode: bool, replace_mode: bool) -> Self {
+        Self {
+            checksums_dir: checksums_dir.to_path_buf(),
+            update_mode,
+            replace_mode,
+        }
+    }
+
+    /// Path to the `.checksums` file for a given module.
+    pub fn module_path(&self, module: &str) -> PathBuf {
+        self.checksums_dir.join(format!("{module}.checksums"))
+    }
+
+    /// Check whether a `.checksums` file exists for the given module.
+    pub fn has_module(&self, module: &str) -> bool {
+        self.module_path(module).exists()
+    }
+
+    /// Check a hash against the `.checksums` file for a given module/test/detail.
+    ///
+    /// The `actual_hash` should be the raw hash ID (e.g., `"sea:a4839401fabae99c.png"`).
+    /// File extensions are stripped before petname lookup but preserved in the entry.
+    pub fn check_hash(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual_hash: &str,
+    ) -> Result<CheckResultV2, RegressError> {
+        let path = self.module_path(module);
+        let actual_name = hash_to_memorable(actual_hash);
+        let arch = crate::arch::detect_arch_tag().to_string();
+        let commit = current_commit_short().unwrap_or_default();
+
+        // Load or create the file
+        let mut file = if path.exists() {
+            ChecksumsFile::read_from(&path)?
+        } else {
+            ChecksumsFile::new(module)
+        };
+
+        // Find or create the section
+        let section = file.find_section(test_name, detail_name);
+
+        // Check if actual matches any active entry
+        if let Some(section) = section {
+            let active: Vec<&ChecksumEntry2> = section.active_entries().collect();
+            for entry in &active {
+                if names_match(&entry.name_hash, &actual_name) {
+                    return Ok(CheckResultV2::Match {
+                        entry_name: entry.name_hash.clone(),
+                    });
+                }
+            }
+
+            // No match — check if there's an anchor to report as the authoritative baseline
+            let anchor_name: Option<String> = section
+                .anchor()
+                .map(|a| a.name_hash.clone())
+                .or_else(|| active.first().map(|e| e.name_hash.clone()));
+
+            if let Some(ref authoritative) = anchor_name {
+                // Mismatch with existing baseline
+                if self.replace_mode {
+                    // REPLACE: accept as new human-verified anchor
+                    let section = file.get_or_create_section(test_name, detail_name);
+                    section.retire_anchor();
+                    section.entries.push(ChecksumEntry2::human_verified(
+                        actual_name.clone(),
+                        arch,
+                        commit,
+                    ));
+                    file.write_to(&path)?;
+                    return Ok(CheckResultV2::NoBaseline {
+                        actual_name,
+                        auto_accepted: true,
+                    });
+                }
+
+                if self.update_mode {
+                    // UPDATE: auto-accept within tolerance (caller should verify tolerance)
+                    let section = file.get_or_create_section(test_name, detail_name);
+                    section.prune_auto_accepted(&arch);
+                    section.entries.push(ChecksumEntry2 {
+                        kind: EntryKind::AutoAccepted,
+                        name_hash: actual_name.clone(),
+                        arch: arch.clone(),
+                        commit,
+                        reason: "auto-accepted".to_string(),
+                        tolerance_note: None,
+                        vs_ref: Some(authoritative.clone()),
+                        diff_summary: None,
+                    });
+                    file.write_to(&path)?;
+                    return Ok(CheckResultV2::NoBaseline {
+                        actual_name,
+                        auto_accepted: true,
+                    });
+                }
+
+                return Ok(CheckResultV2::Failed {
+                    authoritative_name: authoritative.clone(),
+                    actual_name,
+                });
+            }
+        }
+
+        // No section or no active entries — treat as no baseline
+        if self.replace_mode || self.update_mode {
+            let section = file.get_or_create_section(test_name, detail_name);
+            let kind = if self.replace_mode {
+                EntryKind::HumanVerified
+            } else {
+                EntryKind::AutoAccepted
+            };
+            section.entries.push(ChecksumEntry2 {
+                kind,
+                name_hash: actual_name.clone(),
+                arch,
+                commit,
+                reason: if self.replace_mode {
+                    "new-baseline".to_string()
+                } else {
+                    "auto-accepted".to_string()
+                },
+                tolerance_note: None,
+                vs_ref: None,
+                diff_summary: None,
+            });
+            file.write_to(&path)?;
+            return Ok(CheckResultV2::NoBaseline {
+                actual_name,
+                auto_accepted: true,
+            });
+        }
+
+        Ok(CheckResultV2::NoBaseline {
+            actual_name,
+            auto_accepted: false,
+        })
+    }
+
+    /// Accept a new checksum entry with diff evidence.
+    ///
+    /// Used by callers who have already performed pixel comparison and
+    /// want to record the result with chain-of-trust evidence.
+    pub fn accept(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual_hash: &str,
+        vs_ref_hash: Option<&str>,
+        tolerance_note: Option<&str>,
+        diff_summary: Option<&str>,
+        reason: &str,
+    ) -> Result<(), RegressError> {
+        let path = self.module_path(module);
+        let actual_name = hash_to_memorable(actual_hash);
+        let arch = crate::arch::detect_arch_tag().to_string();
+        let commit = current_commit_short().unwrap_or_default();
+
+        let mut file = if path.exists() {
+            ChecksumsFile::read_from(&path)?
+        } else {
+            ChecksumsFile::new(module)
+        };
+
+        let section = file.get_or_create_section(test_name, detail_name);
+        section.prune_auto_accepted(&arch);
+
+        let vs_ref = vs_ref_hash.map(hash_to_memorable);
+
+        section.entries.push(ChecksumEntry2 {
+            kind: EntryKind::AutoAccepted,
+            name_hash: actual_name,
+            arch,
+            commit,
+            reason: reason.to_string(),
+            tolerance_note: tolerance_note.map(|s| s.to_string()),
+            vs_ref,
+            diff_summary: diff_summary.map(|s| s.to_string()),
+        });
+
+        file.write_to(&path)
+    }
+}
+
+/// Convert a raw hash ID to a memorable name, stripping any file extension.
+///
+/// `"sea:a4839401fabae99c.png"` → `"sunny-crab-a4839:sea"`
+fn hash_to_memorable(hash_id: &str) -> String {
+    // Strip file extension if present (e.g., ".png", ".jpg")
+    let bare = strip_hash_extension(hash_id);
+    crate::petname::memorable_name(bare)
+}
+
+/// Strip the file extension from a hash ID.
+///
+/// `"sea:a4839401fabae99c.png"` → `"sea:a4839401fabae99c"`
+fn strip_hash_extension(hash_id: &str) -> &str {
+    // Only strip known image extensions at the end
+    for ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".unknown"] {
+        if let Some(stripped) = hash_id.strip_suffix(ext) {
+            return stripped;
+        }
+    }
+    hash_id
+}
+
+/// Compare two memorable names by their hex5 prefix (ignoring words).
+///
+/// This handles the case where the same hash might have been stored with
+/// a different word pair (shouldn't happen in practice, but defensive).
+fn names_match(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    // Extract hex5:algo from both and compare
+    let a_parts = crate::petname::parse_memorable_name(a);
+    let b_parts = crate::petname::parse_memorable_name(b);
+    match (a_parts, b_parts) {
+        (Some(a), Some(b)) => a.hex5 == b.hex5 && a.algo == b.algo,
+        _ => false,
+    }
+}
+
+/// Try to get the current git commit hash (short form).
+fn current_commit_short() -> Option<String> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -939,5 +1242,292 @@ tolerance d:1 s:95
         let (t, d) = split_test_detail("test_simple");
         assert_eq!(t, "test_simple");
         assert_eq!(d, "");
+    }
+
+    // ─── Hash helpers ───────────────────────────────────────────────────
+
+    #[test]
+    fn strip_hash_extension_png() {
+        assert_eq!(
+            strip_hash_extension("sea:a4839401fabae99c.png"),
+            "sea:a4839401fabae99c"
+        );
+    }
+
+    #[test]
+    fn strip_hash_extension_none() {
+        assert_eq!(
+            strip_hash_extension("sea:a4839401fabae99c"),
+            "sea:a4839401fabae99c"
+        );
+    }
+
+    #[test]
+    fn strip_hash_extension_jpg() {
+        assert_eq!(
+            strip_hash_extension("sea:a4839401fabae99c.jpg"),
+            "sea:a4839401fabae99c"
+        );
+    }
+
+    #[test]
+    fn hash_to_memorable_with_extension() {
+        let name = hash_to_memorable("sea:a4839401fabae99c.png");
+        // Should produce same name as without extension
+        let name2 = hash_to_memorable("sea:a4839401fabae99c");
+        assert_eq!(name, name2);
+        assert!(name.ends_with(":sea"), "name={name}");
+    }
+
+    #[test]
+    fn names_match_identical() {
+        assert!(names_match("sunny-crab-a4839:sea", "sunny-crab-a4839:sea"));
+    }
+
+    #[test]
+    fn names_match_different() {
+        assert!(!names_match("sunny-crab-a4839:sea", "tidy-frog-b2c3d:sea"));
+    }
+
+    // ─── ChecksumManagerV2 ─────────────────────────────────────────────
+
+    #[test]
+    fn manager_no_baseline_no_auto() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c")
+            .unwrap();
+        match result {
+            CheckResultV2::NoBaseline {
+                auto_accepted: false,
+                ..
+            } => {}
+            other => panic!("expected NoBaseline(auto_accepted=false), got {other:?}"),
+        }
+
+        // No file should be created
+        assert!(!mgr.module_path("trim").exists());
+    }
+
+    #[test]
+    fn manager_no_baseline_update_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
+
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c")
+            .unwrap();
+        match result {
+            CheckResultV2::NoBaseline {
+                auto_accepted: true,
+                ..
+            } => {}
+            other => panic!("expected NoBaseline(auto_accepted=true), got {other:?}"),
+        }
+
+        // File should be created with the entry
+        assert!(mgr.module_path("trim").exists());
+        let file = ChecksumsFile::read_from(&mgr.module_path("trim")).unwrap();
+        assert_eq!(file.sections.len(), 1);
+        assert_eq!(file.sections[0].entries.len(), 1);
+        assert_eq!(file.sections[0].entries[0].kind, EntryKind::AutoAccepted);
+    }
+
+    #[test]
+    fn manager_no_baseline_replace_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, true);
+
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c")
+            .unwrap();
+        match result {
+            CheckResultV2::NoBaseline {
+                auto_accepted: true,
+                ..
+            } => {}
+            other => panic!("expected NoBaseline(auto_accepted=true), got {other:?}"),
+        }
+
+        let file = ChecksumsFile::read_from(&mgr.module_path("trim")).unwrap();
+        assert_eq!(file.sections[0].entries[0].kind, EntryKind::HumanVerified);
+    }
+
+    #[test]
+    fn manager_match_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let hash = "sea:a4839401fabae99c";
+        let name = hash_to_memorable(hash);
+
+        // Pre-populate a checksums file
+        let mut file = ChecksumsFile::new("trim");
+        let section = file.get_or_create_section("test_trim", "transparent");
+        section.entries.push(ChecksumEntry2::human_verified(
+            name.clone(),
+            "x86_64-avx2".to_string(),
+            "abc1234".to_string(),
+        ));
+        file.write_to(&dir.path().join("trim.checksums")).unwrap();
+
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", hash)
+            .unwrap();
+
+        match result {
+            CheckResultV2::Match { entry_name } => {
+                assert_eq!(entry_name, name);
+            }
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manager_match_with_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare_hash = "sea:a4839401fabae99c";
+        let ext_hash = "sea:a4839401fabae99c.png";
+        let name = hash_to_memorable(bare_hash);
+
+        let mut file = ChecksumsFile::new("trim");
+        let section = file.get_or_create_section("test_trim", "transparent");
+        section.entries.push(ChecksumEntry2::human_verified(
+            name.clone(),
+            "x86_64-avx2".to_string(),
+            "abc1234".to_string(),
+        ));
+        file.write_to(&dir.path().join("trim.checksums")).unwrap();
+
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        // Check with extension — should still match
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", ext_hash)
+            .unwrap();
+
+        match result {
+            CheckResultV2::Match { .. } => {}
+            other => panic!("expected Match for hash with extension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manager_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let stored_hash = "sea:a4839401fabae99c";
+        let actual_hash = "sea:1111111111111111";
+        let stored_name = hash_to_memorable(stored_hash);
+
+        let mut file = ChecksumsFile::new("trim");
+        let section = file.get_or_create_section("test_trim", "transparent");
+        section.entries.push(ChecksumEntry2::human_verified(
+            stored_name.clone(),
+            "x86_64-avx2".to_string(),
+            "abc1234".to_string(),
+        ));
+        file.write_to(&dir.path().join("trim.checksums")).unwrap();
+
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", actual_hash)
+            .unwrap();
+
+        match result {
+            CheckResultV2::Failed {
+                authoritative_name,
+                actual_name,
+            } => {
+                assert_eq!(authoritative_name, stored_name);
+                assert_ne!(actual_name, stored_name);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manager_mismatch_update_mode_auto_accepts() {
+        let dir = tempfile::tempdir().unwrap();
+        let stored_hash = "sea:a4839401fabae99c";
+        let actual_hash = "sea:1111111111111111";
+        let stored_name = hash_to_memorable(stored_hash);
+
+        let mut file = ChecksumsFile::new("trim");
+        let section = file.get_or_create_section("test_trim", "transparent");
+        section.entries.push(ChecksumEntry2::human_verified(
+            stored_name.clone(),
+            "x86_64-avx2".to_string(),
+            "abc1234".to_string(),
+        ));
+        file.write_to(&dir.path().join("trim.checksums")).unwrap();
+
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
+        let result = mgr
+            .check_hash("trim", "test_trim", "transparent", actual_hash)
+            .unwrap();
+
+        match result {
+            CheckResultV2::NoBaseline {
+                auto_accepted: true,
+                ..
+            } => {}
+            other => panic!("expected NoBaseline(auto_accepted=true), got {other:?}"),
+        }
+
+        // Verify the entry was written
+        let file = ChecksumsFile::read_from(&dir.path().join("trim.checksums")).unwrap();
+        let section = file.find_section("test_trim", "transparent").unwrap();
+        assert_eq!(section.entries.len(), 2); // original + auto-accepted
+        assert_eq!(section.entries[1].kind, EntryKind::AutoAccepted);
+        assert_eq!(
+            section.entries[1].vs_ref.as_deref(),
+            Some(stored_name.as_str())
+        );
+    }
+
+    #[test]
+    fn manager_accept_with_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let stored_hash = "sea:a4839401fabae99c";
+        let actual_hash = "sea:1111111111111111";
+        let stored_name = hash_to_memorable(stored_hash);
+
+        let mut file = ChecksumsFile::new("trim");
+        let section = file.get_or_create_section("test_trim", "transparent");
+        section.entries.push(ChecksumEntry2::human_verified(
+            stored_name.clone(),
+            "x86_64-avx2".to_string(),
+            "abc1234".to_string(),
+        ));
+        file.write_to(&dir.path().join("trim.checksums")).unwrap();
+
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        mgr.accept(
+            "trim",
+            "test_trim",
+            "transparent",
+            actual_hash,
+            Some(stored_hash),
+            Some("within d:1 s:99.5"),
+            Some("(zs:99.87, cat:rounding)"),
+            "auto-accepted within tolerance",
+        )
+        .unwrap();
+
+        let file = ChecksumsFile::read_from(&dir.path().join("trim.checksums")).unwrap();
+        let section = file.find_section("test_trim", "transparent").unwrap();
+        assert_eq!(section.entries.len(), 2);
+
+        let entry = &section.entries[1];
+        assert_eq!(entry.kind, EntryKind::AutoAccepted);
+        assert_eq!(
+            entry.tolerance_note.as_deref(),
+            Some("within d:1 s:99.5")
+        );
+        assert_eq!(
+            entry.diff_summary.as_deref(),
+            Some("(zs:99.87, cat:rounding)")
+        );
+        assert_eq!(entry.vs_ref.as_deref(), Some(stored_name.as_str()));
     }
 }
