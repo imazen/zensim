@@ -131,11 +131,14 @@ pub fn sixel_encode(img: &RgbaImage, max_width: Option<u32>) -> Vec<u8> {
 /// Print an image to stdout as sixels, then flush.
 ///
 /// If `max_width` is set, the image is downscaled to fit.
+/// Writes newlines before and after the sixel data, under a single stdout lock.
 pub fn print_image(img: &RgbaImage, max_width: Option<u32>) {
     let bytes = sixel_encode(img, max_width);
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
+    let _ = handle.write_all(b"\n");
     let _ = handle.write_all(&bytes);
+    let _ = handle.write_all(b"\n");
     let _ = handle.flush();
 }
 
@@ -143,6 +146,10 @@ pub fn print_image(img: &RgbaImage, max_width: Option<u32>) {
 ///
 /// Labels are printed as text before the sixel image.
 /// The diff uses the given amplification factor (default: 10).
+///
+/// All output is written to stdout under a single lock with newlines
+/// before and after, so it passes through cleanly when interleaved with
+/// stderr (e.g. test framework output).
 pub fn print_comparison(
     expected: &RgbaImage,
     actual: &RgbaImage,
@@ -150,8 +157,9 @@ pub fn print_comparison(
     max_width: Option<u32>,
 ) {
     let montage = crate::diff_image::create_comparison_montage(expected, actual, amplification, 2);
+    let sixel_bytes = sixel_encode(&montage, max_width);
 
-    // Print text labels above the panels
+    // Build text labels above the panels
     let panel_w = expected.width() as usize;
     let gap = 2;
     let label_expected = "Expected";
@@ -164,7 +172,7 @@ pub fn print_comparison(
     let pad_a = panel_w.saturating_sub(label_actual.len()) / 2;
     let pad_d = panel_w.saturating_sub(label_diff.len()) / 2;
 
-    println!(
+    let label_line = format!(
         "{:>pad_e$}{}{:>gap$}{:>pad_a$}{}{:>gap$}{:>pad_d$}{}",
         "",
         label_expected,
@@ -180,8 +188,15 @@ pub fn print_comparison(
         gap = gap,
     );
 
-    print_image(&montage, max_width);
-    println!();
+    // Write everything under a single stdout lock with newlines before/after
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    let _ = handle.write_all(b"\n");
+    let _ = handle.write_all(label_line.as_bytes());
+    let _ = handle.write_all(b"\n");
+    let _ = handle.write_all(&sixel_bytes);
+    let _ = handle.write_all(b"\n");
+    let _ = handle.flush();
 }
 
 /// Print a 3-panel comparison from raw RGBA byte slices.
