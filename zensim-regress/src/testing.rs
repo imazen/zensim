@@ -261,6 +261,8 @@ pub struct RegressionReport {
     category: ErrorCategory,
     confidence: f64,
     max_channel_delta: [u8; 3],
+    max_channel_delta_f64: [f64; 3],
+    native_max: f64,
     pixel_count: u64,
     pixels_differing: u64,
     pixels_failing: u64,
@@ -297,6 +299,19 @@ impl RegressionReport {
     /// Max per-channel delta in 1/255 units `[R, G, B]`.
     pub fn max_channel_delta(&self) -> [u8; 3] {
         self.max_channel_delta
+    }
+
+    /// Max per-channel delta as f64, at native precision.
+    ///
+    /// These are the raw `max_abs_delta` values from [`DeltaStats`](zensim::DeltaStats),
+    /// not quantized to u8. For u8 formats this is in 0.0–1.0 (value/255).
+    pub fn max_channel_delta_f64(&self) -> [f64; 3] {
+        self.max_channel_delta_f64
+    }
+
+    /// Native maximum value for the pixel format (255.0, 65535.0, or 1.0).
+    pub fn native_max(&self) -> f64 {
+        self.native_max
     }
 
     /// Total pixels compared.
@@ -353,6 +368,8 @@ impl std::fmt::Debug for RegressionReport {
             .field("category", &self.category)
             .field("confidence", &self.confidence)
             .field("max_channel_delta", &self.max_channel_delta)
+            .field("max_channel_delta_f64", &self.max_channel_delta_f64)
+            .field("native_max", &self.native_max)
             .field("pixel_count", &self.pixel_count)
             .field("pixels_differing", &self.pixels_differing)
             .field("pixels_failing", &self.pixels_failing)
@@ -495,10 +512,12 @@ pub(crate) fn build_report(
     tolerance: &RegressionTolerance,
 ) -> RegressionReport {
     let ds = &cr.delta_stats;
+    let native_max = ds.native_max;
 
     // Convert max_abs_delta from f64 (0-1 range) to u8 (0-255 units)
     let max_channel_delta: [u8; 3] =
         std::array::from_fn(|c| (ds.max_abs_delta[c] * 255.0).round().min(255.0) as u8);
+    let max_channel_delta_f64 = ds.max_abs_delta;
 
     // Compute identical_channel_fraction from signed_small_histogram
     let identical_values: u64 = (0..3).map(|ch| ds.signed_small_histogram[ch][3]).sum();
@@ -603,6 +622,8 @@ pub(crate) fn build_report(
         category: cr.classification.dominant,
         confidence: cr.classification.confidence,
         max_channel_delta,
+        max_channel_delta_f64,
+        native_max,
         pixel_count: ds.pixel_count,
         pixels_differing: ds.pixels_differing,
         pixels_failing,

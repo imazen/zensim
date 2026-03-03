@@ -60,25 +60,44 @@ pub fn format_diff_summary(report: &RegressionReport) -> String {
 
     // Pixels differing by ±N tiers (from RegressionReport pixel stats)
     let pixel_count = report.pixel_count();
+    let native_max = report.native_max();
     if pixel_count > 0 {
         let differing = report.pixels_differing();
         if differing > 0 {
             let pct = differing as f64 / pixel_count as f64 * 100.0;
-            let max_delta = *report.max_channel_delta().iter().max().unwrap_or(&0);
-            if pct < 0.01 {
-                parts.push(format!("{pct:.3}% px \u{00b1}{max_delta}"));
+            let pct_str = if pct < 0.01 {
+                format!("{pct:.3}%")
             } else if pct < 1.0 {
-                parts.push(format!("{pct:.2}% px \u{00b1}{max_delta}"));
+                format!("{pct:.2}%")
             } else {
-                parts.push(format!("{pct:.1}% px \u{00b1}{max_delta}"));
+                format!("{pct:.1}%")
+            };
+            if native_max != 255.0 {
+                parts.push(format!("{pct_str} px \u{00b1}1 LSB"));
+            } else {
+                let max_delta = *report.max_channel_delta().iter().max().unwrap_or(&0);
+                parts.push(format!("{pct_str} px \u{00b1}{max_delta}"));
             }
         }
     }
 
     // Max channel deltas [R,G,B] (only if non-zero)
-    let mcd = report.max_channel_delta();
-    if mcd != [0, 0, 0] {
-        parts.push(format!("max\u{0394}:[{},{},{}]", mcd[0], mcd[1], mcd[2]));
+    if native_max != 255.0 {
+        // Show native-precision deltas
+        let mcd = report.max_channel_delta_f64();
+        let any_nonzero = mcd.iter().any(|&d| d > 0.0);
+        if any_nonzero {
+            let nm = native_max;
+            let r = (mcd[0] * nm).round() as u64;
+            let g = (mcd[1] * nm).round() as u64;
+            let b = (mcd[2] * nm).round() as u64;
+            parts.push(format!("max\u{0394}:[{r},{g},{b}]/{}", nm as u64));
+        }
+    } else {
+        let mcd = report.max_channel_delta();
+        if mcd != [0, 0, 0] {
+            parts.push(format!("max\u{0394}:[{},{},{}]", mcd[0], mcd[1], mcd[2]));
+        }
     }
 
     // Error category (always present when not Identical)

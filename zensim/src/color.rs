@@ -31,6 +31,57 @@ const K_M21: f32 = 0.204_767_45;
 const K_M22: f32 = 1.0 - K_M20 - K_M21;
 const K_B0: f32 = 0.003_793_073_4;
 
+// ─── Gamut conversion matrices (linear light, row-major) ─────────────────
+//
+// Convert from wide-gamut linear RGB to sRGB linear RGB.
+// Computed as: sRGB_from_XYZ × XYZ_from_<source>.
+// All share the D65 whitepoint, so no chromatic adaptation is needed.
+
+/// Display P3 linear → sRGB linear (3×3, row-major).
+///
+/// P3 and sRGB share D65 whitepoint; P3 has wider red/green primaries.
+/// Matrix = M_srgb_from_xyz × M_xyz_from_p3.
+#[rustfmt::skip]
+const P3_TO_SRGB: [[f32; 3]; 3] = [
+    [ 1.224_940_2, -0.224_940_2,  0.0        ],
+    [-0.042_056_955, 1.042_056_9,  0.0        ],
+    [-0.019_637_555, -0.078_636_04, 1.098_273_6],
+];
+
+/// BT.2020 linear → sRGB linear (3×3, row-major).
+///
+/// BT.2020 covers a much wider gamut than sRGB. Out-of-gamut colors
+/// (negative sRGB values) are clamped to [0, 1].
+/// Matrix = M_srgb_from_xyz × M_xyz_from_bt2020.
+#[rustfmt::skip]
+const BT2020_TO_SRGB: [[f32; 3]; 3] = [
+    [ 1.660_491_0, -0.587_641_1, -0.072_849_9],
+    [-0.124_550_5,  1.132_899_9, -0.008_349_4],
+    [-0.018_151_0, -0.100_578_6,  1.118_729_6],
+];
+
+use crate::source::ColorPrimaries;
+
+/// Apply a gamut conversion matrix to a linear RGB pixel.
+///
+/// Converts from the source color primaries to sRGB linear light.
+/// For [`ColorPrimaries::Srgb`] this is a no-op. Results are clamped
+/// to \[0, 1\] — out-of-gamut colors are clipped (acceptable for SDR).
+#[inline]
+pub(crate) fn apply_gamut_matrix(rgb: &mut [f32; 3], primaries: ColorPrimaries) {
+    #[allow(unreachable_patterns)]
+    let m = match primaries {
+        ColorPrimaries::Srgb => return,
+        ColorPrimaries::DisplayP3 => &P3_TO_SRGB,
+        ColorPrimaries::Bt2020 => &BT2020_TO_SRGB,
+        _ => return, // future variants: pass through unchanged
+    };
+    let [r, g, b] = *rgb;
+    rgb[0] = (m[0][0] * r + m[0][1] * g + m[0][2] * b).clamp(0.0, 1.0);
+    rgb[1] = (m[1][0] * r + m[1][1] * g + m[1][2] * b).clamp(0.0, 1.0);
+    rgb[2] = (m[2][0] * r + m[2][1] * g + m[2][2] * b).clamp(0.0, 1.0);
+}
+
 /// sRGB u8 → linear f32 lookup table (256 entries)
 pub(crate) fn srgb_lut() -> &'static [f32; 256] {
     use std::sync::OnceLock;
@@ -1390,6 +1441,99 @@ pub(crate) fn composite_srgb_f16_rgba_to_linear(
                 g.mul_add(a, bg * inv),
                 b.mul_add(a, bg * inv),
             ];
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::ColorPrimaries;
+
+    /// Verify P3→sRGB matrix: sRGB white (1,1,1) should stay (1,1,1).
+    #[test]
+    fn p3_to_srgb_preserves_white() {
+        let mut rgb = [1.0f32, 1.0, 1.0];
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
+        for c in 0..3 {
+            assert!(
+                (rgb[c] - 1.0).abs() < 1e-4,
+                "P3 white channel {c}: expected 1.0, got {}",
+                rgb[c]
+            );
+        }
+    }
+
+    /// Verify BT.2020→sRGB matrix: sRGB white (1,1,1) should stay (1,1,1).
+    #[test]
+    fn bt2020_to_srgb_preserves_white() {
+        let mut rgb = [1.0f32, 1.0, 1.0];
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
+        for c in 0..3 {
+            assert!(
+                (rgb[c] - 1.0).abs() < 1e-4,
+                "BT.2020 white channel {c}: expected 1.0, got {}",
+                rgb[c]
+            );
+        }
+    }
+
+    /// P3 red primary (1,0,0) in linear P3 → sRGB linear should clamp:
+    /// R > 1.0 → clamped to 1.0, G/B negative → clamped to 0.0.
+    #[test]
+    fn p3_red_clamps_to_srgb_gamut() {
+        let mut rgb = [1.0f32, 0.0, 0.0];
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
+        assert_eq!(rgb[0], 1.0, "R should be clamped to 1.0");
+        assert_eq!(rgb[1], 0.0, "G should be clamped to 0.0");
+        assert_eq!(rgb[2], 0.0, "B should be clamped to 0.0");
+    }
+
+    /// Srgb primaries should be a no-op.
+    #[test]
+    fn srgb_is_noop() {
+        let mut rgb = [0.5f32, 0.3, 0.8];
+        let original = rgb;
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Srgb);
+        assert_eq!(rgb, original);
+    }
+
+    /// P3 grey (0.5, 0.5, 0.5) should stay approximately (0.5, 0.5, 0.5)
+    /// since the matrices share D65 whitepoint.
+    #[test]
+    fn p3_grey_stays_grey() {
+        let mut rgb = [0.5f32, 0.5, 0.5];
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
+        for c in 0..3 {
+            assert!(
+                (rgb[c] - 0.5).abs() < 1e-3,
+                "P3 grey channel {c}: expected ~0.5, got {}",
+                rgb[c]
+            );
+        }
+    }
+
+    /// BT.2020 red (1,0,0) should clamp more aggressively than P3 red.
+    #[test]
+    fn bt2020_red_clamps_to_srgb_gamut() {
+        let mut rgb = [1.0f32, 0.0, 0.0];
+        apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
+        assert_eq!(rgb[0], 1.0, "R should be clamped to 1.0");
+        assert_eq!(rgb[1], 0.0, "G should be clamped to 0.0");
+        assert_eq!(rgb[2], 0.0, "B should be clamped to 0.0");
+    }
+
+    /// Verify matrix rows sum to ~1.0 (whitepoint preservation).
+    #[test]
+    fn matrix_rows_sum_to_one() {
+        for (name, m) in [("P3", P3_TO_SRGB), ("BT.2020", BT2020_TO_SRGB)] {
+            for (row_idx, row) in m.iter().enumerate() {
+                let sum: f32 = row.iter().sum();
+                assert!(
+                    (sum - 1.0).abs() < 1e-4,
+                    "{name} row {row_idx} sum: {sum} (expected ~1.0)"
+                );
+            }
         }
     }
 }

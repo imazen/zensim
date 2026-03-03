@@ -101,7 +101,9 @@ pub use metric::{ErrorCategory, RoundingBias, Zensim, ZensimResult};
 // --- Classification API (used by zensim-regress for regression testing) ---
 pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};
 pub use profile::ZensimProfile;
-pub use source::{AlphaMode, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes};
+pub use source::{
+    AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
+};
 
 #[cfg(feature = "zenpixels")]
 pub use source::{ZenpixelsSource, ZenpixelsSourceError, pixel_format_from_descriptor};

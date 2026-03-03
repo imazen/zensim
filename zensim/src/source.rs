@@ -3,6 +3,26 @@
 //! The [`ImageSource`] trait provides row-level access to pixel data with arbitrary
 //! stride, supporting multiple pixel formats without intermediate copies.
 
+/// Color primaries describing the RGB gamut of the image data.
+///
+/// Non-sRGB primaries are converted to sRGB linear light via a 3×3 matrix
+/// before entering the XYB pipeline. The conversion happens at the linearization
+/// stage — the opsin matrix and SIMD kernels remain untouched.
+///
+/// **No HDR:** All primaries assume SDR (values in \[0, 1\]). PQ/HLG transfer
+/// functions are not supported.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ColorPrimaries {
+    /// ITU-R BT.709 / sRGB primaries (default).
+    #[default]
+    Srgb,
+    /// Display P3 (DCI-P3 primaries with D65 whitepoint).
+    DisplayP3,
+    /// ITU-R BT.2020 / Rec. 2020 primaries.
+    Bt2020,
+}
+
 /// Pixel format describing the channel layout, bit depth, and transfer function.
 ///
 /// All formats are converted to linear RGB internally before XYB color space conversion.
@@ -92,6 +112,12 @@ pub trait ImageSource: Sync {
     fn pixel_format(&self) -> PixelFormat;
     /// Alpha channel interpretation.
     fn alpha_mode(&self) -> AlphaMode;
+    /// Color primaries (gamut) of the image data.
+    ///
+    /// Defaults to [`ColorPrimaries::Srgb`]. Override for Display P3 or BT.2020 content.
+    fn color_primaries(&self) -> ColorPrimaries {
+        ColorPrimaries::Srgb
+    }
     /// Raw bytes for row `y`. Length must be at least `width() * pixel_format().bytes_per_pixel()`.
     fn row_bytes(&self, y: usize) -> &[u8];
 }
@@ -268,6 +294,7 @@ pub struct StridedBytes<'a> {
     stride: usize,
     pixel_format: PixelFormat,
     alpha_mode: AlphaMode,
+    color_primaries: ColorPrimaries,
 }
 
 impl<'a> StridedBytes<'a> {
@@ -350,6 +377,7 @@ impl<'a> StridedBytes<'a> {
             stride,
             pixel_format,
             alpha_mode,
+            color_primaries: ColorPrimaries::Srgb,
         })
     }
 
@@ -369,6 +397,15 @@ impl<'a> StridedBytes<'a> {
         Self::try_with_alpha_mode(data, width, height, stride, pixel_format, alpha_mode)
             .expect("StridedBytes: invalid stride or data length")
     }
+
+    /// Set the color primaries (gamut) for this image.
+    ///
+    /// Non-sRGB primaries are converted to sRGB linear light via a 3×3 matrix
+    /// before XYB conversion. Defaults to [`ColorPrimaries::Srgb`].
+    pub fn with_color_primaries(mut self, primaries: ColorPrimaries) -> Self {
+        self.color_primaries = primaries;
+        self
+    }
 }
 
 impl ImageSource for StridedBytes<'_> {
@@ -387,6 +424,10 @@ impl ImageSource for StridedBytes<'_> {
     #[inline]
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
+    }
+    #[inline]
+    fn color_primaries(&self) -> ColorPrimaries {
+        self.color_primaries
     }
     #[inline]
     fn row_bytes(&self, y: usize) -> &[u8] {
@@ -462,17 +503,22 @@ mod imgref_impls {
 mod zenpixels_impls {
     use super::*;
     use zenpixels::{
-        AlphaMode as ZpAlphaMode, ChannelLayout, ChannelType, ColorPrimaries, PixelDescriptor,
-        RowConverter, SignalRange, TransferFunction,
+        AlphaMode as ZpAlphaMode, ChannelLayout, ChannelType, ColorPrimaries as ZpColorPrimaries,
+        PixelDescriptor, RowConverter, SignalRange, TransferFunction,
     };
 
     /// Convert a zenpixels `PixelDescriptor` to a zensim `PixelFormat`.
     ///
     /// Returns `None` for unsupported formats (Gray, GrayAlpha, PQ, HLG,
-    /// narrow range, non-BT.709 primaries, F16, etc.).
+    /// narrow range, unsupported primaries, F16, etc.).
     pub fn pixel_format_from_descriptor(desc: PixelDescriptor) -> Option<PixelFormat> {
-        if desc.primaries != ColorPrimaries::Bt709 && desc.primaries != ColorPrimaries::Unknown {
-            return None;
+        // Accept BT.709/sRGB, Display P3, BT.2020, and Unknown
+        match desc.primaries {
+            ZpColorPrimaries::Bt709
+            | ZpColorPrimaries::Unknown
+            | ZpColorPrimaries::DisplayP3
+            | ZpColorPrimaries::Bt2020 => {}
+            _ => return None,
         }
         if desc.signal_range == SignalRange::Narrow {
             return None;
@@ -541,6 +587,7 @@ mod zenpixels_impls {
         stride: usize,
         pixel_format: PixelFormat,
         alpha_mode: AlphaMode,
+        color_primaries: ColorPrimaries,
     }
 
     enum ZpData<'a> {
@@ -557,6 +604,16 @@ mod zenpixels_impls {
         }
     }
 
+    /// Map zenpixels `ColorPrimaries` to zensim's `ColorPrimaries`.
+    fn map_color_primaries(zp: ZpColorPrimaries) -> ColorPrimaries {
+        match zp {
+            ZpColorPrimaries::Bt709 | ZpColorPrimaries::Unknown => ColorPrimaries::Srgb,
+            ZpColorPrimaries::DisplayP3 => ColorPrimaries::DisplayP3,
+            ZpColorPrimaries::Bt2020 => ColorPrimaries::Bt2020,
+            _ => ColorPrimaries::Srgb,
+        }
+    }
+
     /// Map a zenpixels `Option<AlphaMode>` to zensim's `AlphaMode`.
     fn map_alpha_mode(zp: Option<ZpAlphaMode>) -> AlphaMode {
         match zp {
@@ -567,9 +624,20 @@ mod zenpixels_impls {
     }
 
     /// Check if a descriptor is directly passthrough (no conversion needed).
+    ///
+    /// Non-BT.709 primaries are still passthrough-eligible — the gamut
+    /// conversion happens later in the XYB pipeline, not at the source level.
     fn direct_passthrough(desc: PixelDescriptor) -> Option<(PixelFormat, AlphaMode)> {
-        if desc.primaries != ColorPrimaries::Bt709 || desc.signal_range != SignalRange::Full {
+        if desc.signal_range != SignalRange::Full {
             return None;
+        }
+        // Accept BT.709/Unknown/DisplayP3/BT.2020 for passthrough
+        match desc.primaries {
+            ZpColorPrimaries::Bt709
+            | ZpColorPrimaries::Unknown
+            | ZpColorPrimaries::DisplayP3
+            | ZpColorPrimaries::Bt2020 => {}
+            _ => return None,
         }
         match (desc.channel_type(), desc.layout(), desc.transfer()) {
             (ChannelType::U8, ChannelLayout::Rgb, TransferFunction::Srgb) => {
@@ -613,11 +681,17 @@ mod zenpixels_impls {
             }
             _ => {}
         }
-        if desc.primaries != ColorPrimaries::Bt709 && desc.primaries != ColorPrimaries::Unknown {
-            return Err(ZenpixelsSourceError::UnsupportedDescriptor(format!(
-                "{:?} primaries require gamut mapping (not supported)",
-                desc.primaries
-            )));
+        match desc.primaries {
+            ZpColorPrimaries::Bt709
+            | ZpColorPrimaries::Unknown
+            | ZpColorPrimaries::DisplayP3
+            | ZpColorPrimaries::Bt2020 => {}
+            _ => {
+                return Err(ZenpixelsSourceError::UnsupportedDescriptor(format!(
+                    "{:?} primaries are not supported",
+                    desc.primaries
+                )));
+            }
         }
         if desc.signal_range == SignalRange::Narrow {
             return Err(ZenpixelsSourceError::UnsupportedDescriptor(
@@ -713,6 +787,8 @@ mod zenpixels_impls {
                 }
             }
 
+            let color_primaries = map_color_primaries(descriptor.primaries);
+
             // Check for direct passthrough first
             let contiguous_stride = width * bpp;
             if stride == contiguous_stride {
@@ -724,6 +800,7 @@ mod zenpixels_impls {
                         stride,
                         pixel_format: pf,
                         alpha_mode: am,
+                        color_primaries,
                     });
                 }
             }
@@ -743,6 +820,7 @@ mod zenpixels_impls {
                     stride,
                     pixel_format: target_pf,
                     alpha_mode,
+                    color_primaries,
                 });
             }
 
@@ -766,6 +844,7 @@ mod zenpixels_impls {
                 stride: target_stride,
                 pixel_format: target_pf,
                 alpha_mode,
+                color_primaries,
             })
         }
 
@@ -791,6 +870,10 @@ mod zenpixels_impls {
         #[inline]
         fn alpha_mode(&self) -> AlphaMode {
             self.alpha_mode
+        }
+        #[inline]
+        fn color_primaries(&self) -> ColorPrimaries {
+            self.color_primaries
         }
         #[inline]
         fn row_bytes(&self, y: usize) -> &[u8] {

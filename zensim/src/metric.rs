@@ -445,13 +445,19 @@ pub struct DeltaStats {
     pub max_abs_delta: [f64; 3],
 
     // --- Signed small-delta histogram ---
-    /// Per-channel pixel counts for signed deltas -3 to +3 (in 1/255 units).
+    /// Per-channel pixel counts for signed deltas -3 to +3 (in 1/native_max units).
     ///
     /// Index mapping: `[0]`=−3, `[1]`=−2, `[2]`=−1, `[3]`=0, `[4]`=+1, `[5]`=+2, `[6]`=+3.
-    /// Delta convention: `src - dst`, so +1 means dst is 1/255 lower than src.
+    /// Delta convention: `src - dst`, so +1 means dst is 1 LSB lower than src.
     /// Only counts pixels whose per-channel delta falls in \[−3, +3\]; pixels
     /// outside this range are not tracked here.
     pub signed_small_histogram: [[u64; 7]; 3],
+
+    /// Maximum representable value for the native pixel format.
+    ///
+    /// 255.0 for u8 formats, 65535.0 for u16, 1.0 for f32/f16.
+    /// Used to interpret delta magnitudes at native precision.
+    pub native_max: f64,
 
     // --- Pixel counts ---
     /// Total pixels compared.

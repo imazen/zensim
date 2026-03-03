@@ -11,9 +11,9 @@ use crate::blur::{
 #[cfg(feature = "f16")]
 use crate::color::composite_srgb_f16_rgba_to_linear;
 use crate::color::{
-    composite_linear_f32_rgba, composite_srgb8_bgra_to_linear, composite_srgb8_rgba_to_linear,
-    composite_srgb16_rgba_to_linear, linear_to_positive_xyb_planar_into,
-    srgb_to_positive_xyb_planar_into,
+    apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
+    composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
+    linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
@@ -21,7 +21,7 @@ use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
     abs_diff_sum, edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
 };
-use crate::source::{AlphaMode, ImageSource, PixelFormat};
+use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use rayon::prelude::*;
 use std::sync::Mutex;
 
@@ -358,6 +358,8 @@ pub(crate) fn convert_source_to_xyb_parallel(
 
     let pixel_format = source.pixel_format();
     let opaque = matches!(source.alpha_mode(), AlphaMode::Opaque);
+    let primaries = source.color_primaries();
+    let need_gamut = primaries != ColorPrimaries::Srgb;
 
     p0_chunks
         .into_par_iter()
@@ -369,26 +371,56 @@ pub(crate) fn convert_source_to_xyb_parallel(
             let row_end = (row_start + chunk_rows).min(height);
             let rows = row_end - row_start;
 
+            // Helper: apply gamut matrix to every pixel in a linear row buffer.
+            #[inline]
+            fn gamut_convert_row(row: &mut [[f32; 3]], primaries: ColorPrimaries) {
+                for px in row.iter_mut() {
+                    apply_gamut_matrix(px, primaries);
+                }
+            }
+
             match pixel_format {
                 PixelFormat::Srgb8Rgb => {
-                    // Collect all rows into a contiguous buffer, then convert in bulk
-                    let raw_elems = rows * width;
-                    let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        let row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
-                        rgb_buf.extend_from_slice(&row[..width]);
+                    if need_gamut {
+                        // Non-sRGB: linearize via LUT, apply gamut matrix, then XYB
+                        let lut = crate::color::srgb_lut();
+                        let mut linear_row = vec![[0.0f32; 3]; width];
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                            for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
+                                let [r, g, b] = rgb_row[x];
+                                *pixel = [lut[r as usize], lut[g as usize], lut[b as usize]];
+                            }
+                            gamut_convert_row(&mut linear_row[..width], primaries);
+                            let row_offset = (y - row_start) * width;
+                            linear_to_positive_xyb_planar_into(
+                                &linear_row[..width],
+                                &mut c0[row_offset..row_offset + width],
+                                &mut c1[row_offset..row_offset + width],
+                                &mut c2[row_offset..row_offset + width],
+                            );
+                        }
+                    } else {
+                        // sRGB fast path: bulk SIMD conversion
+                        let raw_elems = rows * width;
+                        let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
+                        for y in row_start..row_end {
+                            let row_bytes = source.row_bytes(y);
+                            let row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
+                            rgb_buf.extend_from_slice(&row[..width]);
+                        }
+                        srgb_to_positive_xyb_planar_into(
+                            &rgb_buf,
+                            &mut c0[..raw_elems],
+                            &mut c1[..raw_elems],
+                            &mut c2[..raw_elems],
+                        );
                     }
-                    srgb_to_positive_xyb_planar_into(
-                        &rgb_buf,
-                        &mut c0[..raw_elems],
-                        &mut c1[..raw_elems],
-                        &mut c2[..raw_elems],
-                    );
                 }
                 PixelFormat::Srgb8Rgba => {
-                    if opaque {
-                        // Opaque: ignore alpha byte, extract RGB directly
+                    if opaque && !need_gamut {
+                        // Opaque sRGB: ignore alpha byte, extract RGB directly
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
@@ -409,10 +441,26 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         for y in row_start..row_end {
                             let row_bytes = source.row_bytes(y);
                             let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                            composite_srgb8_rgba_to_linear(&rgba_row[..width], y, &mut linear_row);
+                            if opaque {
+                                // Opaque non-sRGB: linearize + gamut
+                                let lut = crate::color::srgb_lut();
+                                for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
+                                    let [r, g, b, _a] = rgba_row[x];
+                                    *pixel = [lut[r as usize], lut[g as usize], lut[b as usize]];
+                                }
+                            } else {
+                                composite_srgb8_rgba_to_linear(
+                                    &rgba_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            }
+                            if need_gamut {
+                                gamut_convert_row(&mut linear_row[..width], primaries);
+                            }
                             let row_offset = (y - row_start) * width;
                             linear_to_positive_xyb_planar_into(
-                                &linear_row,
+                                &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
                                 &mut c2[row_offset..row_offset + width],
@@ -421,7 +469,7 @@ pub(crate) fn convert_source_to_xyb_parallel(
                     }
                 }
                 PixelFormat::Srgb8Bgra => {
-                    if opaque {
+                    if opaque && !need_gamut {
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[u8; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
@@ -442,10 +490,26 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         for y in row_start..row_end {
                             let row_bytes = source.row_bytes(y);
                             let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
-                            composite_srgb8_bgra_to_linear(&bgra_row[..width], y, &mut linear_row);
+                            if opaque {
+                                // Opaque non-sRGB: linearize + gamut
+                                let lut = crate::color::srgb_lut();
+                                for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
+                                    let [b, g, r, _a] = bgra_row[x];
+                                    *pixel = [lut[r as usize], lut[g as usize], lut[b as usize]];
+                                }
+                            } else {
+                                composite_srgb8_bgra_to_linear(
+                                    &bgra_row[..width],
+                                    y,
+                                    &mut linear_row,
+                                );
+                            }
+                            if need_gamut {
+                                gamut_convert_row(&mut linear_row[..width], primaries);
+                            }
                             let row_offset = (y - row_start) * width;
                             linear_to_positive_xyb_planar_into(
-                                &linear_row,
+                                &linear_row[..width],
                                 &mut c0[row_offset..row_offset + width],
                                 &mut c1[row_offset..row_offset + width],
                                 &mut c2[row_offset..row_offset + width],
@@ -474,6 +538,9 @@ pub(crate) fn convert_source_to_xyb_parallel(
                             }
                         } else {
                             composite_srgb16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
+                        }
+                        if need_gamut {
+                            gamut_convert_row(&mut linear_row[..width], primaries);
                         }
                         let row_offset = (y - row_start) * width;
                         linear_to_positive_xyb_planar_into(
@@ -512,6 +579,9 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         } else {
                             composite_srgb_f16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
                         }
+                        if need_gamut {
+                            gamut_convert_row(&mut linear_row[..width], primaries);
+                        }
                         let row_offset = (y - row_start) * width;
                         linear_to_positive_xyb_planar_into(
                             &linear_row,
@@ -522,8 +592,8 @@ pub(crate) fn convert_source_to_xyb_parallel(
                     }
                 }
                 PixelFormat::LinearF32Rgba => {
-                    if opaque {
-                        // Opaque: extract RGB from f32 RGBA, skip alpha
+                    if opaque && !need_gamut {
+                        // Opaque sRGB: extract RGB from f32 RGBA, skip alpha
                         let raw_elems = rows * width;
                         let mut rgb_buf: Vec<[f32; 3]> = Vec::with_capacity(raw_elems);
                         for y in row_start..row_end {
@@ -544,7 +614,18 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         for y in row_start..row_end {
                             let row_bytes = source.row_bytes(y);
                             let rgba_row: &[[f32; 4]] = bytemuck::cast_slice(row_bytes);
-                            composite_linear_f32_rgba(&rgba_row[..width], y, &mut linear_row);
+                            if opaque {
+                                // Opaque non-sRGB: extract RGB + gamut
+                                for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
+                                    let [r, g, b, _a] = rgba_row[x];
+                                    *pixel = [r, g, b];
+                                }
+                            } else {
+                                composite_linear_f32_rgba(&rgba_row[..width], y, &mut linear_row);
+                            }
+                            if need_gamut {
+                                gamut_convert_row(&mut linear_row[..width], primaries);
+                            }
                             let row_offset = (y - row_start) * width;
                             linear_to_positive_xyb_planar_into(
                                 &linear_row,
@@ -1137,6 +1218,19 @@ impl DeltaAccum {
 /// Single parallel pass over both images. Operates in sRGB u8 space
 /// (values normalized to [0, 1]) for all sRGB formats. Linear formats
 /// are compared in linear space.
+/// Derive the native maximum value for a pixel format.
+///
+/// 255.0 for u8 formats, 65535.0 for u16, 1.0 for f32/f16.
+fn native_max_for_format(format: PixelFormat) -> f64 {
+    match format {
+        PixelFormat::Srgb8Rgb | PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => 255.0,
+        PixelFormat::Srgb16Rgba => 65535.0,
+        PixelFormat::SrgbF16Rgba | PixelFormat::LinearF32Rgba => 1.0,
+        #[allow(unreachable_patterns)]
+        _ => 255.0,
+    }
+}
+
 pub(crate) fn compute_delta_stats(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -1145,6 +1239,7 @@ pub(crate) fn compute_delta_stats(
     let height = source.height();
     let has_alpha = source.pixel_format().has_alpha();
     let pixel_format = source.pixel_format();
+    let native_max = native_max_for_format(pixel_format);
 
     let chunk_rows = 64usize;
     let num_chunks = height.div_ceil(chunk_rows);
@@ -1180,16 +1275,16 @@ pub(crate) fn compute_delta_stats(
                             acc.max_abs_delta[c] = abs_delta;
                         }
 
-                        // Signed small-delta histogram: bins -3..+3
-                        let signed_delta = (delta * 255.0).round() as i32;
+                        // Signed small-delta histogram: bins -3..+3 in 1/native_max units
+                        let signed_delta = (delta * native_max).round() as i32;
                         if (-3..=3).contains(&signed_delta) {
                             acc.signed_small[c][(signed_delta + 3) as usize] += 1;
                         }
 
-                        if abs_delta > 0.5 / 255.0 {
+                        if abs_delta > 0.5 / native_max {
                             any_diff = true;
                         }
-                        if abs_delta > 1.5 / 255.0 {
+                        if abs_delta > 1.5 / native_max {
                             any_diff_gt1 = true;
                         }
 
@@ -1198,7 +1293,7 @@ pub(crate) fn compute_delta_stats(
                         }
                     }
 
-                    // Per-channel value histograms (quantized to 0-255)
+                    // Per-channel value histograms (always 256 bins)
                     for c in 0..3 {
                         let sb = (src_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
                         let db = (dst_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
@@ -1223,8 +1318,8 @@ pub(crate) fn compute_delta_stats(
                     // Alpha stratification and alpha delta tracking
                     if has_alpha {
                         if let Some((src_a, dst_a)) = alpha {
-                            // Track alpha channel delta (quantized to 0-255)
-                            let alpha_delta = ((src_a - dst_a).abs() * 255.0).round() as u8;
+                            // Track alpha channel delta at native precision
+                            let alpha_delta = ((src_a - dst_a).abs() * native_max).round() as u8;
                             if alpha_delta > acc.alpha_max_delta {
                                 acc.alpha_max_delta = alpha_delta;
                             }
@@ -1234,7 +1329,7 @@ pub(crate) fn compute_delta_stats(
 
                             let a = src_a;
                             let one_minus_a = 1.0 - a;
-                            if a >= 1.0 - 0.5 / 255.0 {
+                            if a >= 1.0 - 0.5 / native_max {
                                 // Opaque
                                 acc.opaque_count += 1;
                                 for c in 0..3 {
@@ -1244,7 +1339,7 @@ pub(crate) fn compute_delta_stats(
                                         acc.opaque_max_abs[c] = ad;
                                     }
                                 }
-                            } else if a > 0.5 / 255.0 {
+                            } else if a > 0.5 / native_max {
                                 // Semitransparent
                                 acc.semi_count += 1;
                                 for c in 0..3 {
@@ -1274,7 +1369,7 @@ pub(crate) fn compute_delta_stats(
             a
         });
 
-    finalize_delta_stats(accum, has_alpha)
+    finalize_delta_stats(accum, has_alpha, native_max)
 }
 
 /// Extract normalized \[0,1\] RGB values from a pixel at position x in a row.
@@ -1389,7 +1484,7 @@ fn extract_pixel_rgb_normalized(
 }
 
 /// Convert accumulated delta stats to the final DeltaStats struct.
-fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
+fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool, native_max: f64) -> DeltaStats {
     let n = acc.pixel_count as f64;
     let inv_n = if n > 0.0 { 1.0 / n } else { 0.0 };
 
@@ -1456,6 +1551,7 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool) -> DeltaStats {
         stddev_delta,
         max_abs_delta: acc.max_abs_delta,
         signed_small_histogram: acc.signed_small,
+        native_max,
         pixel_count: acc.pixel_count,
         pixels_differing: acc.pixels_differing,
         pixels_differing_by_more_than_1: acc.pixels_differing_by_more_than_1,
@@ -1871,5 +1967,265 @@ mod tests {
         {
             assert_eq!(s, p, "feature {i} mismatch: streaming={s} precomp={p}");
         }
+    }
+
+    /// Identical P3 images through the streaming path should score very close to 100.
+    ///
+    /// Note: `compute_zensim_streaming` does not shortcircuit on byte-identical
+    /// inputs (the public `Zensim::compute` API does). At small sizes like 64x64,
+    /// the SSIM blur kernel covers most of the 8x8 scale-3 image, causing tiny
+    /// numerical noise. We verify the score is ≥ 99.5.
+    #[test]
+    fn identical_p3_images_high_score() {
+        let w = 64;
+        let h = 64;
+        let n = w * h;
+
+        let mut pixels = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 200) / w + 30) as u8;
+                let g = ((y * 200) / h + 30) as u8;
+                let b = 128u8;
+                pixels[y * w + x] = [r, g, b];
+            }
+        }
+
+        let rgb_bytes: &[u8] = bytemuck::cast_slice(&pixels);
+        let src = crate::source::StridedBytes::new(
+            rgb_bytes,
+            w,
+            h,
+            w * 3,
+            crate::source::PixelFormat::Srgb8Rgb,
+        )
+        .with_color_primaries(crate::source::ColorPrimaries::DisplayP3);
+
+        let dst = crate::source::StridedBytes::new(
+            rgb_bytes,
+            w,
+            h,
+            w * 3,
+            crate::source::PixelFormat::Srgb8Rgb,
+        )
+        .with_color_primaries(crate::source::ColorPrimaries::DisplayP3);
+
+        let config = ZensimConfig::default();
+        let p3_result = compute_zensim_streaming(&src, &dst, &config, &WEIGHTS_PREVIEW_V0_1);
+
+        // Also run sRGB-identical to verify the gamut path gives similar behavior
+        let src_srgb = RgbSlice::new(&pixels, w, h);
+        let dst_srgb = RgbSlice::new(&pixels, w, h);
+        let srgb_result =
+            compute_zensim_streaming(&src_srgb, &dst_srgb, &config, &WEIGHTS_PREVIEW_V0_1);
+
+        eprintln!(
+            "P3 identical score: {:.6}, sRGB identical score: {:.6}",
+            p3_result.score, srgb_result.score,
+        );
+
+        // Both should be very close to 100 (numerical noise at small sizes)
+        assert!(
+            p3_result.score >= 99.5,
+            "P3 identical score should be >= 99.5, got {}",
+            p3_result.score,
+        );
+        assert!(
+            srgb_result.score >= 99.5,
+            "sRGB identical score should be >= 99.5, got {}",
+            srgb_result.score,
+        );
+    }
+
+    /// P3 vs sRGB with same pixel values should produce different scores
+    /// because gamut conversion changes the XYB values.
+    #[test]
+    fn p3_vs_srgb_same_pixels_differ() {
+        let w = 64;
+        let h = 64;
+        let n = w * h;
+
+        // Create a colorful gradient
+        let mut pixels = vec![0u8; n * 16];
+        for y in 0..h {
+            for x in 0..w {
+                let off = (y * w + x) * 16;
+                let r = x as f32 / w as f32;
+                let g = y as f32 / h as f32;
+                let b = 0.5f32;
+                let a = 1.0f32;
+                pixels[off..off + 4].copy_from_slice(&r.to_ne_bytes());
+                pixels[off + 4..off + 8].copy_from_slice(&g.to_ne_bytes());
+                pixels[off + 8..off + 12].copy_from_slice(&b.to_ne_bytes());
+                pixels[off + 12..off + 16].copy_from_slice(&a.to_ne_bytes());
+            }
+        }
+
+        let src_p3 = crate::source::StridedBytes::with_alpha_mode(
+            &pixels,
+            w,
+            h,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        )
+        .with_color_primaries(crate::source::ColorPrimaries::DisplayP3);
+
+        let dst_srgb = crate::source::StridedBytes::with_alpha_mode(
+            &pixels,
+            w,
+            h,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        );
+        // dst_srgb uses default Srgb primaries
+
+        let config = ZensimConfig::default();
+        let result = compute_zensim_streaming(&src_p3, &dst_srgb, &config, &WEIGHTS_PREVIEW_V0_1);
+
+        assert!(
+            result.score < 100.0,
+            "P3 vs sRGB with same pixel values should score < 100, got {}",
+            result.score,
+        );
+        eprintln!(
+            "P3 vs sRGB same-pixels score: {:.4} (expected < 100)",
+            result.score,
+        );
+    }
+
+    /// u16 delta stats: 1-step difference should be detected with native precision.
+    #[test]
+    fn u16_delta_stats_native_precision() {
+        let w = 16;
+        let h = 16;
+        let n = w * h;
+
+        // Create two u16 RGBA images differing by 1 in the R channel
+        let mut src_bytes = vec![0u8; n * 8];
+        let mut dst_bytes = vec![0u8; n * 8];
+
+        for i in 0..n {
+            let off = i * 8;
+            let r: u16 = 32768;
+            let g: u16 = 32768;
+            let b: u16 = 32768;
+            let a: u16 = 65535;
+
+            src_bytes[off..off + 2].copy_from_slice(&r.to_ne_bytes());
+            src_bytes[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes());
+            src_bytes[off + 4..off + 6].copy_from_slice(&b.to_ne_bytes());
+            src_bytes[off + 6..off + 8].copy_from_slice(&a.to_ne_bytes());
+
+            let r_dst: u16 = 32769; // 1 step higher
+            dst_bytes[off..off + 2].copy_from_slice(&r_dst.to_ne_bytes());
+            dst_bytes[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes());
+            dst_bytes[off + 4..off + 6].copy_from_slice(&b.to_ne_bytes());
+            dst_bytes[off + 6..off + 8].copy_from_slice(&a.to_ne_bytes());
+        }
+
+        let src = crate::source::StridedBytes::with_alpha_mode(
+            &src_bytes,
+            w,
+            h,
+            w * 8,
+            crate::source::PixelFormat::Srgb16Rgba,
+            crate::source::AlphaMode::Opaque,
+        );
+        let dst = crate::source::StridedBytes::with_alpha_mode(
+            &dst_bytes,
+            w,
+            h,
+            w * 8,
+            crate::source::PixelFormat::Srgb16Rgba,
+            crate::source::AlphaMode::Opaque,
+        );
+
+        let ds = compute_delta_stats(&src, &dst);
+
+        assert_eq!(
+            ds.native_max, 65535.0,
+            "native_max should be 65535.0 for u16"
+        );
+        assert_eq!(
+            ds.pixels_differing, n as u64,
+            "all {n} pixels should differ by 1 step at native precision"
+        );
+        assert_eq!(
+            ds.pixels_differing_by_more_than_1, 0,
+            "no pixels should differ by more than 1 step"
+        );
+        // signed_small_histogram: R channel delta = src - dst = -1/65535, so signed_delta = -1
+        // Index mapping: -3→0, -2→1, -1→2, 0→3, +1→4, +2→5, +3→6
+        assert_eq!(
+            ds.signed_small_histogram[0][2], n as u64,
+            "R channel should have all pixels at signed delta -1 (index 2)"
+        );
+        eprintln!(
+            "u16 1-step delta: max_abs_delta={:?}, native_max={}",
+            ds.max_abs_delta, ds.native_max,
+        );
+    }
+
+    /// f32 delta stats should have native_max == 1.0.
+    #[test]
+    fn f32_delta_stats_native_max() {
+        let w = 16;
+        let h = 16;
+        let n = w * h;
+
+        let mut src_bytes = vec![0u8; n * 16];
+        let mut dst_bytes = vec![0u8; n * 16];
+
+        for i in 0..n {
+            let off = i * 16;
+            let r = 0.5f32;
+            let g = 0.5f32;
+            let b = 0.5f32;
+            let a = 1.0f32;
+
+            src_bytes[off..off + 4].copy_from_slice(&r.to_ne_bytes());
+            src_bytes[off + 4..off + 8].copy_from_slice(&g.to_ne_bytes());
+            src_bytes[off + 8..off + 12].copy_from_slice(&b.to_ne_bytes());
+            src_bytes[off + 12..off + 16].copy_from_slice(&a.to_ne_bytes());
+
+            let r_dst = 0.501f32; // small difference
+            dst_bytes[off..off + 4].copy_from_slice(&r_dst.to_ne_bytes());
+            dst_bytes[off + 4..off + 8].copy_from_slice(&g.to_ne_bytes());
+            dst_bytes[off + 8..off + 12].copy_from_slice(&b.to_ne_bytes());
+            dst_bytes[off + 12..off + 16].copy_from_slice(&a.to_ne_bytes());
+        }
+
+        let src = crate::source::StridedBytes::with_alpha_mode(
+            &src_bytes,
+            w,
+            h,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        );
+        let dst = crate::source::StridedBytes::with_alpha_mode(
+            &dst_bytes,
+            w,
+            h,
+            w * 16,
+            crate::source::PixelFormat::LinearF32Rgba,
+            crate::source::AlphaMode::Opaque,
+        );
+
+        let ds = compute_delta_stats(&src, &dst);
+
+        assert_eq!(ds.native_max, 1.0, "native_max should be 1.0 for f32");
+        // With native_max=1.0, a delta of 0.001 is 0.001/1.0 = 0.001
+        // The threshold is 0.5/1.0 = 0.5, so 0.001 < 0.5 means no pixels differ
+        assert_eq!(
+            ds.pixels_differing, 0,
+            "delta of 0.001 should not exceed 0.5/1.0 threshold"
+        );
+        eprintln!(
+            "f32 delta stats: max_abs_delta={:?}, native_max={}, pixels_differing={}",
+            ds.max_abs_delta, ds.native_max, ds.pixels_differing,
+        );
     }
 }
