@@ -1245,7 +1245,7 @@ mod tests {
             max_delta: 1,
             min_similarity: 90.0,
             max_pixels_different: 1.0,
-            ..Default::default()
+            ..crate::checksum_file::ToleranceSpec::exact()
         };
         file.checksum.push(ChecksumEntry::new(base_hash.clone()));
         file.write_to(&mgr.test_path("test_tolerance")).unwrap();
@@ -1307,7 +1307,7 @@ mod tests {
             max_delta: 1,
             min_similarity: 90.0,
             max_pixels_different: 1.0,
-            ..Default::default()
+            ..crate::checksum_file::ToleranceSpec::exact()
         };
         file.checksum.push(ChecksumEntry::new(base_hash.clone()));
         file.write_to(&mgr.test_path("test_auto_accept")).unwrap();

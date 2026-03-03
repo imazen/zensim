@@ -70,11 +70,11 @@ pub struct TestChecksumFile {
 }
 
 impl TestChecksumFile {
-    /// Create a new file with just a name (empty checksums, default tolerance).
+    /// Create a new file with just a name (empty checksums, exact tolerance).
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            tolerance: ToleranceSpec::default(),
+            tolerance: ToleranceSpec::exact(),
             checksum: Vec::new(),
             info: None,
             meta: BTreeMap::new(),
@@ -188,8 +188,9 @@ fn is_false(v: &bool) -> bool {
     !*v
 }
 
-impl Default for ToleranceSpec {
-    fn default() -> Self {
+impl ToleranceSpec {
+    /// Pixel-identical: no differences allowed (d:0 s:100).
+    pub fn exact() -> Self {
         Self {
             max_delta: 0,
             min_similarity: 100.0,
@@ -199,9 +200,18 @@ impl Default for ToleranceSpec {
             overrides: BTreeMap::new(),
         }
     }
-}
 
-impl ToleranceSpec {
+    /// Off-by-one rounding: max delta 1/255, min similarity 100 (d:1 s:100).
+    ///
+    /// Any fraction of pixels may be affected. Use struct update syntax
+    /// to customize further fields.
+    pub fn off_by_one() -> Self {
+        Self {
+            max_delta: 1,
+            ..Self::exact()
+        }
+    }
+
     /// Convert to a `RegressionTolerance`, applying overrides for the given arch tag.
     pub fn to_regression_tolerance(&self, arch_tag: &str) -> crate::testing::RegressionTolerance {
         let mut t = crate::testing::RegressionTolerance::exact()
@@ -284,6 +294,12 @@ pub struct ToleranceOverride {
     pub max_pixels_different: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_alpha_delta: Option<u8>,
+}
+
+impl Default for ToleranceSpec {
+    fn default() -> Self {
+        Self::exact()
+    }
 }
 
 // ─── Checksum entry ──────────────────────────────────────────────────────
@@ -554,7 +570,7 @@ mod tests {
                         ..Default::default()
                     },
                 )]),
-                ..Default::default()
+                ..ToleranceSpec::exact()
             },
             checksum: vec![
                 ChecksumEntry {
@@ -668,7 +684,7 @@ mod tests {
 
         let file = TestChecksumFile {
             name: "io_test".to_string(),
-            tolerance: ToleranceSpec::default(),
+            tolerance: ToleranceSpec::exact(),
             checksum: vec![ChecksumEntry::new("sea:1234567890abcdef")],
             info: None,
             meta: BTreeMap::new(),
@@ -687,7 +703,7 @@ mod tests {
         let spec = ToleranceSpec {
             max_delta: 2,
             min_similarity: 90.0,
-            ..Default::default()
+            ..ToleranceSpec::exact()
         };
         // Basic conversion works (we can't inspect private fields, but we
         // verify it doesn't panic)
@@ -707,7 +723,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            ..Default::default()
+            ..ToleranceSpec::exact()
         };
 
         // For x86_64, no override should apply
@@ -734,7 +750,7 @@ mod tests {
             tolerance: ToleranceSpec {
                 max_delta: 1,
                 min_similarity: 95.0,
-                ..Default::default()
+                ..ToleranceSpec::exact()
             },
             checksum: vec![ChecksumEntry {
                 id: "sea:a1b2c3d4e5f6789a".to_string(),

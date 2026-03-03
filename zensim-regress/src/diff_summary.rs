@@ -214,7 +214,7 @@ pub fn parse_tolerance_shorthand(s: &str) -> crate::checksum_file::ToleranceSpec
     use crate::checksum_file::{ToleranceOverride, ToleranceSpec};
     use std::collections::BTreeMap;
 
-    let mut spec = ToleranceSpec::default();
+    let mut spec = ToleranceSpec::exact();
     let mut overrides: BTreeMap<String, ToleranceOverride> = BTreeMap::new();
 
     // Collect the non-bracket portion and extract bracketed overrides
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_roundtrip_exact() {
-        let spec = crate::checksum_file::ToleranceSpec::default();
+        let spec = crate::checksum_file::ToleranceSpec::exact();
         let s = format_tolerance_shorthand(&spec);
         assert_eq!(s, "d:0 s:100");
         let parsed = parse_tolerance_shorthand(&s);
@@ -369,7 +369,7 @@ mod tests {
 
         let spec = ToleranceSpec {
             ignore_alpha: true,
-            ..Default::default()
+            ..ToleranceSpec::exact()
         };
         let s = format_tolerance_shorthand(&spec);
         assert!(s.contains("ia"), "s={s}");

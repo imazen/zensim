@@ -1168,7 +1168,7 @@ tolerance d:1 s:95
     fn roundtrip_format() {
         let mut file = ChecksumsFile::new("test");
         let section = file.get_or_create_section("test_foo", "bar_baz");
-        section.tolerance = Some(crate::checksum_file::ToleranceSpec::default());
+        section.tolerance = Some(crate::checksum_file::ToleranceSpec::exact());
         section.entries.push(ChecksumEntry2::human_verified(
             "sunny-crab-a4839:sea".to_string(),
             "x86_64-avx512".to_string(),
