@@ -52,6 +52,7 @@ pub mod testing;
 pub mod upload;
 
 // Re-export key types at crate root for convenience
+pub use checksum_file::ToleranceSpec as Tolerance;
 pub use error::RegressError;
 pub use testing::{RegressionReport, RegressionTolerance, check_regression, shrink_tolerance};
 
