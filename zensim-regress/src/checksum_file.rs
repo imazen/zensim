@@ -128,7 +128,7 @@ impl TestChecksumFile {
 ///
 /// Maps to `crate::testing::RegressionTolerance` at runtime, with optional
 /// per-architecture overrides.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToleranceSpec {
     /// Maximum per-channel delta (in 1/255 units). Default: 0.
     #[serde(
@@ -266,7 +266,7 @@ impl ToleranceSpec {
 /// Per-architecture tolerance override.
 ///
 /// Only fields that are `Some` override the base tolerance.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ToleranceOverride {
     #[serde(
         default,

@@ -776,14 +776,45 @@ impl ChecksumManagerV2 {
     ///
     /// The `actual_hash` should be the raw hash ID (e.g., `"sea:a4839401fabae99c.png"`).
     /// File extensions are stripped before petname lookup but preserved in the entry.
+    ///
+    /// Uses advisory file locking to prevent races when tests run in parallel.
     pub fn check_hash(
         &self,
         module: &str,
         test_name: &str,
         detail_name: &str,
         actual_hash: &str,
+        tolerance: Option<&crate::checksum_file::ToleranceSpec>,
     ) -> Result<CheckResultV2, RegressError> {
         let path = self.module_path(module);
+
+        // Acquire advisory file lock for the checksums file.
+        let lock_path = path.with_extension("checksums.lock");
+        let lock_file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| RegressError::io(&lock_path, e))?;
+        use fs2::FileExt;
+        lock_file
+            .lock_exclusive()
+            .map_err(|e| RegressError::io(&lock_path, e))?;
+        let result = self.check_hash_locked(module, &path, test_name, detail_name, actual_hash, tolerance);
+        let _ = lock_file.unlock();
+        result
+    }
+
+    /// Inner implementation of `check_hash`, called while holding the file lock.
+    fn check_hash_locked(
+        &self,
+        module: &str,
+        path: &Path,
+        test_name: &str,
+        detail_name: &str,
+        actual_hash: &str,
+        tolerance: Option<&crate::checksum_file::ToleranceSpec>,
+    ) -> Result<CheckResultV2, RegressError> {
         let actual_name = hash_to_memorable(actual_hash);
         let arch = crate::arch::detect_arch_tag().to_string();
         let commit = current_commit_short().unwrap_or_default();
@@ -801,31 +832,40 @@ impl ChecksumManagerV2 {
         // Check if actual matches any active entry
         // In replace mode, require exact match so old petnames get replaced.
         if let Some(section) = section {
-            let active: Vec<&ChecksumEntry2> = section.active_entries().collect();
-            for entry in &active {
+            let matched_name = section.active_entries().find_map(|entry| {
                 let is_match = if self.replace_mode {
                     entry.name_hash == actual_name
                 } else {
                     names_match(&entry.name_hash, &actual_name)
                 };
-                if is_match {
-                    return Ok(CheckResultV2::Match {
-                        entry_name: entry.name_hash.clone(),
-                    });
+                is_match.then(|| entry.name_hash.clone())
+            });
+            if let Some(entry_name) = matched_name {
+                // Update tolerance if provided and different
+                if let Some(tol) = tolerance {
+                    let section = file.find_section_mut(test_name, detail_name).unwrap();
+                    if section.tolerance.as_ref() != Some(tol) {
+                        section.tolerance = Some(tol.clone());
+                        file.write_to(&path)?;
+                    }
                 }
+                return Ok(CheckResultV2::Match { entry_name });
             }
 
             // No match — check if there's an anchor to report as the authoritative baseline
             let anchor_name: Option<String> = section
                 .anchor()
-                .map(|a| a.name_hash.clone())
-                .or_else(|| active.first().map(|e| e.name_hash.clone()));
+                .or_else(|| section.active_entries().next())
+                .map(|e| e.name_hash.clone());
 
             if let Some(ref authoritative) = anchor_name {
                 // Mismatch with existing baseline
                 if self.replace_mode {
                     // REPLACE: accept as new human-verified anchor
                     let section = file.get_or_create_section(test_name, detail_name);
+                    if let Some(tol) = tolerance {
+                        section.tolerance = Some(tol.clone());
+                    }
                     section.retire_anchor();
                     section.entries.push(ChecksumEntry2::human_verified(
                         actual_name.clone(),
@@ -842,6 +882,9 @@ impl ChecksumManagerV2 {
                 if self.update_mode {
                     // UPDATE: auto-accept within tolerance (caller should verify tolerance)
                     let section = file.get_or_create_section(test_name, detail_name);
+                    if let Some(tol) = tolerance {
+                        section.tolerance = Some(tol.clone());
+                    }
                     section.prune_auto_accepted(&arch);
                     section.entries.push(ChecksumEntry2 {
                         kind: EntryKind::AutoAccepted,
@@ -870,6 +913,9 @@ impl ChecksumManagerV2 {
         // No section or no active entries — treat as no baseline
         if self.replace_mode || self.update_mode {
             let section = file.get_or_create_section(test_name, detail_name);
+            if let Some(tol) = tolerance {
+                section.tolerance = Some(tol.clone());
+            }
             let kind = if self.replace_mode {
                 EntryKind::HumanVerified
             } else {
@@ -918,6 +964,20 @@ impl ChecksumManagerV2 {
         reason: &str,
     ) -> Result<(), RegressError> {
         let path = self.module_path(module);
+
+        // Acquire advisory file lock
+        let lock_path = path.with_extension("checksums.lock");
+        let lock_file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| RegressError::io(&lock_path, e))?;
+        use fs2::FileExt;
+        lock_file
+            .lock_exclusive()
+            .map_err(|e| RegressError::io(&lock_path, e))?;
+
         let actual_name = hash_to_memorable(actual_hash);
         let arch = crate::arch::detect_arch_tag().to_string();
         let commit = current_commit_short().unwrap_or_default();
@@ -944,7 +1004,9 @@ impl ChecksumManagerV2 {
             diff_summary: diff_summary.map(|s| s.to_string()),
         });
 
-        file.write_to(&path)
+        let result = file.write_to(&path);
+        let _ = lock_file.unlock();
+        result
     }
 }
 
@@ -1329,7 +1391,7 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
 
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c")
+            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c", None)
             .unwrap();
         match result {
             CheckResultV2::NoBaseline {
@@ -1349,7 +1411,7 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
 
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c")
+            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c", None)
             .unwrap();
         match result {
             CheckResultV2::NoBaseline {
@@ -1373,7 +1435,7 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, true);
 
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c")
+            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c", None)
             .unwrap();
         match result {
             CheckResultV2::NoBaseline {
@@ -1405,7 +1467,7 @@ tolerance d:1 s:95
 
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", hash)
+            .check_hash("trim", "test_trim", "transparent", hash, None)
             .unwrap();
 
         match result {
@@ -1435,7 +1497,7 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
         // Check with extension — should still match
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", ext_hash)
+            .check_hash("trim", "test_trim", "transparent", ext_hash, None)
             .unwrap();
 
         match result {
@@ -1462,7 +1524,7 @@ tolerance d:1 s:95
 
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", actual_hash)
+            .check_hash("trim", "test_trim", "transparent", actual_hash, None)
             .unwrap();
 
         match result {
@@ -1495,7 +1557,7 @@ tolerance d:1 s:95
 
         let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", actual_hash)
+            .check_hash("trim", "test_trim", "transparent", actual_hash, None)
             .unwrap();
 
         match result {

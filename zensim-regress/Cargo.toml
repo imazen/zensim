@@ -26,6 +26,7 @@ toml = "0.8"
 seahash = "4"
 image = { workspace = true }
 thiserror = { workspace = true }
+fs2 = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3"
