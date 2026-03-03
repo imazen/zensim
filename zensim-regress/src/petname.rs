@@ -1,40 +1,40 @@
 //! Deterministic memorable names for hash IDs.
 //!
 //! Converts a hash ID like `"sea:a4839401fabae99c"` into a human-friendly name
-//! like `"sunny-crab-a4839:sea"`. The name is deterministic — same hash always
-//! produces the same memorable name.
+//! like `"sunny-crab-a4839401fa:sea"`. The name is deterministic — same hash
+//! always produces the same memorable name.
 //!
 //! # Format
 //!
-//! `{adjective}-{noun}-{hex5}:{algo}`
+//! `{adjective}-{noun}-{hex10}:{algo}`
 //!
 //! - `adjective`: from 256-word list, indexed by raw hash byte 5
 //! - `noun`: from 256-word list, indexed by raw hash byte 6
-//! - `hex5`: first 5 hex characters of the hash value
+//! - `hex10`: first 10 hex characters of the hash value (40 bits)
 //! - `algo`: hash algorithm tag (e.g., `"sea"`)
 //!
 //! Using bytes 5-6 for word indices avoids overlap with the displayed hex prefix
-//! (bytes 0-2), so different hex prefixes don't correlate with different words
+//! (bytes 0-4), so different hex prefixes don't correlate with different words
 //! and vice versa.
 
 /// Generate a memorable name from a hash ID.
 ///
 /// Input format: `"{algo}:{hex}"` (e.g., `"sea:a4839401fabae99c"`).
 ///
-/// Returns `"{adj}-{noun}-{hex5}:{algo}"` (e.g., `"sunny-crab-a4839:sea"`).
+/// Returns `"{adj}-{noun}-{hex10}:{algo}"` (e.g., `"sunny-crab-a4839401fa:sea"`).
 ///
 /// # Panics
 ///
 /// Panics if the hash ID doesn't contain a `:` separator or if the hex
-/// portion is shorter than 12 characters (need bytes 5-6 for word indices).
+/// portion is shorter than 14 characters (need bytes 5-6 for word indices).
 pub fn memorable_name(hash_id: &str) -> String {
     let (algo, hex) = hash_id
         .split_once(':')
         .expect("hash ID must contain ':' separator");
 
     assert!(
-        hex.len() >= 12,
-        "hash hex must be at least 12 chars (need bytes 5-6), got {}",
+        hex.len() >= 14,
+        "hash hex must be at least 14 chars (need bytes 5-6 at positions 10-13), got {}",
         hex.len()
     );
 
@@ -44,28 +44,30 @@ pub fn memorable_name(hash_id: &str) -> String {
 
     let adj = ADJECTIVES[adj_byte as usize];
     let noun = NOUNS[noun_byte as usize];
-    let hex5 = &hex[..5];
+    let hex10 = &hex[..10];
 
-    format!("{adj}-{noun}-{hex5}:{algo}")
+    format!("{adj}-{noun}-{hex10}:{algo}")
 }
 
 /// Extract the original hash ID from a memorable name.
 ///
-/// This is a partial inverse — it recovers the `{algo}:{hex5}` prefix,
+/// This is a partial inverse — it recovers the `{algo}:{hex}` prefix,
 /// but the full hash is not recoverable from the memorable name alone.
 /// Returns `None` if the format doesn't match.
+///
+/// Handles both old 5-char hex and new 10-char hex petnames.
 pub fn parse_memorable_name(name: &str) -> Option<MemorableNameParts> {
-    // Format: adj-noun-hex5:algo
-    // Find the last ':' — that separates hex5 from algo
+    // Format: adj-noun-hex:algo
+    // Find the last ':' — that separates hex from algo
     let colon_pos = name.rfind(':')?;
     let algo = &name[colon_pos + 1..];
 
-    // Everything before the colon: "adj-noun-hex5"
+    // Everything before the colon: "adj-noun-hex"
     let before_colon = &name[..colon_pos];
 
-    // Find the last '-' before the colon — separates noun from hex5
+    // Find the last '-' before the colon — separates noun from hex
     let last_dash = before_colon.rfind('-')?;
-    let hex5 = &before_colon[last_dash + 1..];
+    let hex = &before_colon[last_dash + 1..];
 
     // Find the second-to-last '-' — separates adj from noun
     let adj_noun = &before_colon[..last_dash];
@@ -76,7 +78,7 @@ pub fn parse_memorable_name(name: &str) -> Option<MemorableNameParts> {
     Some(MemorableNameParts {
         adjective: adj.to_string(),
         noun: noun.to_string(),
-        hex5: hex5.to_string(),
+        hex: hex.to_string(),
         algo: algo.to_string(),
     })
 }
@@ -86,7 +88,8 @@ pub fn parse_memorable_name(name: &str) -> Option<MemorableNameParts> {
 pub struct MemorableNameParts {
     pub adjective: String,
     pub noun: String,
-    pub hex5: String,
+    /// Hex prefix (5 chars for legacy, 10 chars for new petnames).
+    pub hex: String,
     pub algo: String,
 }
 
@@ -183,10 +186,10 @@ mod tests {
     fn memorable_name_format() {
         let hash = "sea:a4839401fabae99c";
         let name = memorable_name(hash);
-        // Should be adj-noun-hex5:algo
+        // Should be adj-noun-hex10:algo
         assert!(name.ends_with(":sea"), "name={name}");
         let parts = parse_memorable_name(&name).unwrap();
-        assert_eq!(parts.hex5, "a4839");
+        assert_eq!(parts.hex, "a4839401fa");
         assert_eq!(parts.algo, "sea");
         // Verify word indices: byte 5 = 0xba = 186, byte 6 = 0xe9 = 233
         assert_eq!(parts.adjective, ADJECTIVES[0xba_usize]);
@@ -205,7 +208,7 @@ mod tests {
         let hash = "sea:1234567890abcdef";
         let name = memorable_name(hash);
         let parts = parse_memorable_name(&name).unwrap();
-        assert_eq!(parts.hex5, "12345");
+        assert_eq!(parts.hex, "1234567890");
         assert_eq!(parts.algo, "sea");
     }
 

@@ -964,19 +964,25 @@ fn strip_hash_extension(hash_id: &str) -> &str {
     hash_id
 }
 
-/// Compare two memorable names by their hex5 prefix (ignoring words).
+/// Compare two memorable names by their hex prefix (ignoring words).
 ///
-/// This handles the case where the same hash might have been stored with
-/// a different word pair (shouldn't happen in practice, but defensive).
+/// Handles both old 5-char and new 10-char hex petnames by comparing
+/// the shorter prefix length. This allows old `.checksums` entries to
+/// match new petnames during the transition.
 fn names_match(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
-    // Extract hex5:algo from both and compare
     let a_parts = crate::petname::parse_memorable_name(a);
     let b_parts = crate::petname::parse_memorable_name(b);
     match (a_parts, b_parts) {
-        (Some(a), Some(b)) => a.hex5 == b.hex5 && a.algo == b.algo,
+        (Some(a), Some(b)) => {
+            if a.algo != b.algo {
+                return false;
+            }
+            let min_len = a.hex.len().min(b.hex.len());
+            a.hex[..min_len] == b.hex[..min_len]
+        }
         _ => false,
     }
 }
