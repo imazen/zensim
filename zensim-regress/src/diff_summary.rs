@@ -127,8 +127,32 @@ pub fn format_diff_summary(report: &RegressionReport) -> String {
 
 /// Format the tolerance that was active when an entry was accepted.
 ///
-/// Output: `"within d:1 s:99.5"` or similar.
+/// Output: `"within identical"`, `"within off-by-one"`, or `"within d:1 s:99.5"`.
 pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) -> String {
+    use crate::testing::RegressionTolerance;
+
+    let exact = RegressionTolerance::exact();
+    let obo = RegressionTolerance::off_by_one();
+
+    // s:100 + px:0 is effectively identical regardless of max_delta
+    let is_exact = tolerance.min_similarity() == exact.min_similarity()
+        && tolerance.max_pixels_different() == exact.max_pixels_different()
+        && tolerance.max_alpha_delta() == exact.max_alpha_delta()
+        && !tolerance.is_ignore_alpha();
+
+    let is_obo = tolerance.max_delta() == obo.max_delta()
+        && tolerance.min_similarity() == obo.min_similarity()
+        && tolerance.max_pixels_different() == obo.max_pixels_different()
+        && tolerance.max_alpha_delta() == obo.max_alpha_delta()
+        && !tolerance.is_ignore_alpha();
+
+    if is_exact {
+        return "within identical".to_string();
+    }
+    if is_obo {
+        return "within off-by-one".to_string();
+    }
+
     let mut parts = Vec::new();
     parts.push(format!("d:{}", tolerance.max_delta()));
     if tolerance.min_similarity() < 100.0 {
@@ -150,37 +174,67 @@ pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) ->
 
 /// Format a tolerance as the shorthand used in `.checksums` files.
 ///
+/// Recognizes named presets for readability:
+/// - `identical` — pixel-identical (d:0 s:100)
+/// - `off-by-one` — rounding tolerance (d:1 s:95 px:100.0%)
+///
+/// Falls back to explicit tokens for non-preset values:
 /// ```text
-/// d:0 s:100
 /// d:2 s:95.0 px:1.0%
 /// d:1 s:99.0 a:0 [aarch64 d:3 s:90.0]
 /// ```
 pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpec) -> String {
+    use crate::checksum_file::ToleranceSpec;
+
+    // Check for named presets (base fields only; overrides appended after).
+    //
+    // "identical" matches any spec where s:100 + px:0 — the max_delta value
+    // is irrelevant because a perfect score already implies zero pixel deltas.
+    let base_matches_exact = tolerance.min_similarity == 100.0
+        && tolerance.max_pixels_different == 0.0
+        && tolerance.max_alpha_delta == 0
+        && !tolerance.ignore_alpha;
+
+    let base_matches_obo = {
+        let obo = ToleranceSpec::off_by_one();
+        tolerance.max_delta == obo.max_delta
+            && tolerance.min_similarity == obo.min_similarity
+            && tolerance.max_pixels_different == obo.max_pixels_different
+            && tolerance.max_alpha_delta == obo.max_alpha_delta
+            && !tolerance.ignore_alpha
+    };
+
     let mut parts = Vec::new();
 
-    parts.push(format!("d:{}", tolerance.max_delta));
-
-    let s = tolerance.min_similarity;
-    if s == s.floor() {
-        parts.push(format!("s:{s:.0}"));
+    if base_matches_exact {
+        parts.push("identical".to_string());
+    } else if base_matches_obo {
+        parts.push("off-by-one".to_string());
     } else {
-        parts.push(format!("s:{s}"));
+        parts.push(format!("d:{}", tolerance.max_delta));
+
+        let s = tolerance.min_similarity;
+        if s == s.floor() {
+            parts.push(format!("s:{s:.0}"));
+        } else {
+            parts.push(format!("s:{s}"));
+        }
+
+        if tolerance.max_pixels_different > 0.0 {
+            let px = tolerance.max_pixels_different * 100.0;
+            parts.push(format!("px:{px:.1}%"));
+        }
+
+        if tolerance.max_alpha_delta > 0 {
+            parts.push(format!("a:{}", tolerance.max_alpha_delta));
+        }
+
+        if tolerance.ignore_alpha {
+            parts.push("ia".to_string());
+        }
     }
 
-    if tolerance.max_pixels_different > 0.0 {
-        let px = tolerance.max_pixels_different * 100.0;
-        parts.push(format!("px:{px:.1}%"));
-    }
-
-    if tolerance.max_alpha_delta > 0 {
-        parts.push(format!("a:{}", tolerance.max_alpha_delta));
-    }
-
-    if tolerance.ignore_alpha {
-        parts.push("ia".to_string());
-    }
-
-    // Per-arch overrides
+    // Per-arch overrides (always explicit tokens)
     for (arch, ov) in &tolerance.overrides {
         let mut ov_parts = Vec::new();
         if let Some(d) = ov.max_delta {
@@ -209,24 +263,37 @@ pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpe
 
 /// Parse a tolerance shorthand string back into a [`ToleranceSpec`].
 ///
-/// Handles the format produced by [`format_tolerance_shorthand`].
+/// Handles the format produced by [`format_tolerance_shorthand`], including
+/// named presets:
+/// - `"identical"` → `ToleranceSpec::exact()`
+/// - `"off-by-one"` → `ToleranceSpec::off_by_one()`
+///
+/// Named presets can have per-arch overrides appended:
+/// `"off-by-one [aarch64 d:3]"`
 pub fn parse_tolerance_shorthand(s: &str) -> crate::checksum_file::ToleranceSpec {
     use crate::checksum_file::{ToleranceOverride, ToleranceSpec};
     use std::collections::BTreeMap;
 
-    let mut spec = ToleranceSpec::exact();
-    let mut overrides: BTreeMap<String, ToleranceOverride> = BTreeMap::new();
-
-    // Collect the non-bracket portion and extract bracketed overrides
     let input = s.trim();
-    let mut main_parts = String::new();
-    let mut pos = 0;
 
+    // Check for named presets (before any bracket)
+    let before_bracket = input.split('[').next().unwrap_or(input).trim();
+    let mut spec = match before_bracket {
+        "identical" => ToleranceSpec::exact(),
+        "off-by-one" => ToleranceSpec::off_by_one(),
+        _ => {
+            let mut spec = ToleranceSpec::exact();
+            parse_main_tolerance_tokens(before_bracket, &mut spec);
+            spec
+        }
+    };
+
+    // Extract bracketed per-arch overrides
+    let mut overrides: BTreeMap<String, ToleranceOverride> = BTreeMap::new();
+    let mut pos = 0;
     while pos < input.len() {
         if let Some(bracket_start) = input[pos..].find('[') {
             let abs_start = pos + bracket_start;
-            main_parts.push_str(&input[pos..abs_start]);
-
             let bracket_end = input[abs_start..]
                 .find(']')
                 .map(|i| abs_start + i)
@@ -244,12 +311,10 @@ pub fn parse_tolerance_shorthand(s: &str) -> crate::checksum_file::ToleranceSpec
 
             pos = (bracket_end + 1).min(input.len());
         } else {
-            main_parts.push_str(&input[pos..]);
             break;
         }
     }
 
-    parse_main_tolerance_tokens(&main_parts, &mut spec);
     spec.overrides = overrides;
     spec
 }
@@ -320,10 +385,73 @@ mod tests {
     fn tolerance_shorthand_roundtrip_exact() {
         let spec = crate::checksum_file::ToleranceSpec::exact();
         let s = format_tolerance_shorthand(&spec);
-        assert_eq!(s, "d:0 s:100");
+        assert_eq!(s, "identical");
         let parsed = parse_tolerance_shorthand(&s);
         assert_eq!(parsed.max_delta, 0);
         assert_eq!(parsed.min_similarity, 100.0);
+        assert_eq!(parsed.max_pixels_different, 0.0);
+    }
+
+    #[test]
+    fn tolerance_shorthand_roundtrip_off_by_one() {
+        let spec = crate::checksum_file::ToleranceSpec::off_by_one();
+        let s = format_tolerance_shorthand(&spec);
+        assert_eq!(s, "off-by-one");
+        let parsed = parse_tolerance_shorthand(&s);
+        assert_eq!(parsed.max_delta, 1);
+        assert_eq!(parsed.min_similarity, 95.0);
+        assert_eq!(parsed.max_pixels_different, 1.0);
+    }
+
+    #[test]
+    fn tolerance_shorthand_parse_legacy_exact() {
+        // Old format still parses correctly
+        let parsed = parse_tolerance_shorthand("d:0 s:100");
+        assert_eq!(parsed.max_delta, 0);
+        assert_eq!(parsed.min_similarity, 100.0);
+    }
+
+    #[test]
+    fn tolerance_shorthand_d1_s100_is_identical() {
+        // d:1 s:100 is effectively identical — s:100 makes delta irrelevant
+        use crate::checksum_file::ToleranceSpec;
+        let spec = ToleranceSpec {
+            max_delta: 1,
+            ..ToleranceSpec::exact()
+        };
+        let s = format_tolerance_shorthand(&spec);
+        assert_eq!(s, "identical");
+        // Roundtrip normalizes to d:0
+        let parsed = parse_tolerance_shorthand(&s);
+        assert_eq!(parsed.max_delta, 0);
+        assert_eq!(parsed.min_similarity, 100.0);
+    }
+
+    #[test]
+    fn tolerance_shorthand_preset_with_overrides() {
+        use crate::checksum_file::{ToleranceOverride, ToleranceSpec};
+        use std::collections::BTreeMap;
+
+        let spec = ToleranceSpec {
+            overrides: BTreeMap::from([(
+                "aarch64".to_string(),
+                ToleranceOverride {
+                    max_delta: Some(3),
+                    ..Default::default()
+                },
+            )]),
+            ..ToleranceSpec::off_by_one()
+        };
+
+        let s = format_tolerance_shorthand(&spec);
+        assert_eq!(s, "off-by-one [aarch64 d:3]");
+
+        let parsed = parse_tolerance_shorthand(&s);
+        assert_eq!(parsed.max_delta, 1);
+        assert_eq!(parsed.min_similarity, 95.0);
+        assert_eq!(parsed.max_pixels_different, 1.0);
+        let ov = &parsed.overrides["aarch64"];
+        assert_eq!(ov.max_delta, Some(3));
     }
 
     #[test]
@@ -367,12 +495,14 @@ mod tests {
     fn tolerance_shorthand_ignore_alpha() {
         use crate::checksum_file::ToleranceSpec;
 
+        // ignore_alpha prevents preset matching, falls back to explicit tokens
         let spec = ToleranceSpec {
             ignore_alpha: true,
             ..ToleranceSpec::exact()
         };
         let s = format_tolerance_shorthand(&spec);
         assert!(s.contains("ia"), "s={s}");
+        assert!(s.contains("d:0"), "s={s}");
 
         let parsed = parse_tolerance_shorthand(&s);
         assert!(parsed.ignore_alpha);

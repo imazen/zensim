@@ -201,13 +201,14 @@ impl ToleranceSpec {
         }
     }
 
-    /// Off-by-one rounding: max delta 1/255, min similarity 100 (d:1 s:100).
+    /// Off-by-one rounding: max delta 1/255, any fraction of pixels, score >= 95.
     ///
-    /// Any fraction of pixels may be affected. Use struct update syntax
-    /// to customize further fields.
+    /// Use struct update syntax to customize further fields.
     pub fn off_by_one() -> Self {
         Self {
             max_delta: 1,
+            min_similarity: 95.0,
+            max_pixels_different: 1.0,
             ..Self::exact()
         }
     }

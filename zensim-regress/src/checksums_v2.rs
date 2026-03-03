@@ -10,9 +10,9 @@
 //! # trim.checksums — v1
 //!
 //! ## test_trim_whitespace transparent_shirt
-//! tolerance d:0 s:100
+//! tolerance identical
 //! = sunny-crab-a4839:sea  x86_64-avx512  @773c807  human-verified
-//! ~ tidy-frog-b2c3d:sea   aarch64        @773c807  auto-accepted (within d:1 s:99.5) vs sunny-crab-a4839:sea (zs:99.87, ...)
+//! ~ tidy-frog-b2c3d:sea   aarch64        @773c807  auto-accepted (within off-by-one) vs sunny-crab-a4839:sea (zs:99.87, ...)
 //! ```
 //!
 //! See the plan document for full format specification.
@@ -742,8 +742,7 @@ impl ChecksumManagerV2 {
     ///
     /// Reads `UPDATE_CHECKSUMS` and `REPLACE_CHECKSUMS` from the environment.
     pub fn new(checksums_dir: &Path) -> Self {
-        let update_mode =
-            std::env::var("UPDATE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
+        let update_mode = std::env::var("UPDATE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
         let replace_mode =
             std::env::var("REPLACE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
         Self {
@@ -800,8 +799,16 @@ impl ChecksumManagerV2 {
         lock_file
             .lock_exclusive()
             .map_err(|e| RegressError::io(&lock_path, e))?;
-        let result = self.check_hash_locked(module, &path, test_name, detail_name, actual_hash, tolerance);
+        let result = self.check_hash_locked(
+            module,
+            &path,
+            test_name,
+            detail_name,
+            actual_hash,
+            tolerance,
+        );
         let _ = lock_file.unlock();
+        let _ = std::fs::remove_file(&lock_path);
         result
     }
 
@@ -1006,6 +1013,7 @@ impl ChecksumManagerV2 {
 
         let result = file.write_to(&path);
         let _ = lock_file.unlock();
+        let _ = std::fs::remove_file(&lock_path);
         result
     }
 }
@@ -1391,7 +1399,13 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
 
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c", None)
+            .check_hash(
+                "trim",
+                "test_trim",
+                "transparent",
+                "sea:a4839401fabae99c",
+                None,
+            )
             .unwrap();
         match result {
             CheckResultV2::NoBaseline {
@@ -1411,7 +1425,13 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
 
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c", None)
+            .check_hash(
+                "trim",
+                "test_trim",
+                "transparent",
+                "sea:a4839401fabae99c",
+                None,
+            )
             .unwrap();
         match result {
             CheckResultV2::NoBaseline {
@@ -1435,7 +1455,13 @@ tolerance d:1 s:95
         let mgr = ChecksumManagerV2::with_modes(dir.path(), false, true);
 
         let result = mgr
-            .check_hash("trim", "test_trim", "transparent", "sea:a4839401fabae99c", None)
+            .check_hash(
+                "trim",
+                "test_trim",
+                "transparent",
+                "sea:a4839401fabae99c",
+                None,
+            )
             .unwrap();
         match result {
             CheckResultV2::NoBaseline {
@@ -1614,10 +1640,7 @@ tolerance d:1 s:95
 
         let entry = &section.entries[1];
         assert_eq!(entry.kind, EntryKind::AutoAccepted);
-        assert_eq!(
-            entry.tolerance_note.as_deref(),
-            Some("within d:1 s:99.5")
-        );
+        assert_eq!(entry.tolerance_note.as_deref(), Some("within d:1 s:99.5"));
         assert_eq!(
             entry.diff_summary.as_deref(),
             Some("(zs:99.87, cat:rounding)")
