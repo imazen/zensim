@@ -776,6 +776,48 @@ impl CheckResultV2 {
                 }
         )
     }
+
+    /// For a `Failed` or `NoBaseline` result, format the `.checksums` line
+    /// that would accept this hash. Returns `None` for `Match`/`WithinTolerance`.
+    pub fn suggest_accept_line(&self) -> Option<String> {
+        let arch = crate::arch::detect_arch_tag();
+        let commit = current_commit_short().unwrap_or_default();
+        match self {
+            Self::Failed {
+                report,
+                authoritative_name,
+                actual_name,
+                ..
+            } => {
+                let diff_summary = report.as_ref().map(|r| {
+                    let delta = r.max_channel_delta();
+                    format!(
+                        "score={:.1} maxΔ=[{},{},{}]",
+                        r.score(),
+                        delta[0],
+                        delta[1],
+                        delta[2],
+                    )
+                });
+                let mut line = format!(
+                    "~ {actual_name}  {arch}  @{commit}  auto-accepted vs {authoritative_name}"
+                );
+                if let Some(ref ds) = diff_summary {
+                    line.push(' ');
+                    line.push_str(ds);
+                }
+                Some(line)
+            }
+            Self::NoBaseline {
+                actual_name,
+                auto_accepted: false,
+                ..
+            } => Some(format!(
+                "= {actual_name}  {arch}  @{commit}  new-baseline"
+            )),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for CheckResultV2 {
@@ -806,26 +848,57 @@ impl std::fmt::Display for CheckResultV2 {
             Self::Failed {
                 report,
                 authoritative_name,
+                actual_name,
                 ..
-            } => match report {
-                Some(r) => {
+            } => {
+                match report {
+                    Some(r) => {
+                        let delta = r.max_channel_delta();
+                        write!(
+                            f,
+                            "FAIL (score={:.1}, maxΔ=[{},{},{}], vs {authoritative_name})",
+                            r.score(),
+                            delta[0],
+                            delta[1],
+                            delta[2],
+                        )?;
+                    }
+                    None => write!(f, "FAIL (no reference image, vs {authoritative_name})")?,
+                }
+                // Suggest the line to add to the .checksums file
+                let arch = crate::arch::detect_arch_tag();
+                let commit = current_commit_short().unwrap_or_default();
+                write!(
+                    f,
+                    "\n  To accept, add this line to the .checksums file:\n  ~ {actual_name}  {arch}  @{commit}  auto-accepted vs {authoritative_name}"
+                )?;
+                if let Some(r) = report {
                     let delta = r.max_channel_delta();
                     write!(
                         f,
-                        "FAIL (score={:.1}, maxΔ=[{},{},{}], vs {authoritative_name})",
+                        " score={:.1} maxΔ=[{},{},{}]",
                         r.score(),
                         delta[0],
                         delta[1],
                         delta[2],
-                    )
+                    )?;
                 }
-                None => write!(f, "FAIL (no reference image, vs {authoritative_name})"),
-            },
-            Self::NoBaseline { auto_accepted, .. } => {
+                Ok(())
+            }
+            Self::NoBaseline {
+                actual_name,
+                auto_accepted,
+                ..
+            } => {
                 if *auto_accepted {
                     write!(f, "NO BASELINE (auto-accepted)")
                 } else {
-                    write!(f, "NO BASELINE (run with UPDATE_CHECKSUMS=1)")
+                    let arch = crate::arch::detect_arch_tag();
+                    let commit = current_commit_short().unwrap_or_default();
+                    write!(
+                        f,
+                        "NO BASELINE\n  To add baseline, add this line to the .checksums file:\n  = {actual_name}  {arch}  @{commit}  new-baseline"
+                    )
                 }
             }
         }
