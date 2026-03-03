@@ -37,7 +37,6 @@ match &result {
 |----------|--------|
 | *(none)* | **Normal mode** — fail on mismatch |
 | `UPDATE_CHECKSUMS=1` | Auto-accept results within tolerance, create baselines on first run |
-| `REPLACE_CHECKSUMS=1` | Wipe all entries, set current output as new baseline |
 
 Typical workflow:
 
@@ -46,7 +45,7 @@ Typical workflow:
 3. CI runs in normal mode. Exact hash matches pass instantly. Mismatches trigger zensim comparison against the reference image.
 4. When you intentionally change output, run with `UPDATE_CHECKSUMS=1` again to accept the new checksums.
 
-You can also force modes programmatically with `.with_update_mode_update()` or `.with_update_mode_replace()`.
+You can also force update mode programmatically with `.with_update_mode_update()`.
 
 ## Architecture handling
 

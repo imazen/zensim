@@ -10,7 +10,6 @@
 //! # Environment variables
 //!
 //! - `UPDATE_CHECKSUMS=1` — auto-accept checksums within tolerance (CI use)
-//! - `REPLACE_CHECKSUMS=1` — replace all checksums with the new output (reset baseline)
 //!
 //! # Example
 //!
@@ -56,15 +55,11 @@ enum UpdateMode {
     Normal,
     /// Auto-accept checksums that pass tolerance.
     Update,
-    /// Replace all entries with the new output.
-    Replace,
 }
 
 impl UpdateMode {
     fn from_env() -> Self {
-        if std::env::var("REPLACE_CHECKSUMS").is_ok_and(|v| v == "1") {
-            Self::Replace
-        } else if std::env::var("UPDATE_CHECKSUMS").is_ok_and(|v| v == "1") {
+        if std::env::var("UPDATE_CHECKSUMS").is_ok_and(|v| v == "1") {
             Self::Update
         } else {
             Self::Normal
@@ -211,7 +206,7 @@ pub struct ChecksumManager {
 impl ChecksumManager {
     /// Create a new manager with default settings.
     ///
-    /// Reads `UPDATE_CHECKSUMS` and `REPLACE_CHECKSUMS` environment variables.
+    /// Reads `UPDATE_CHECKSUMS` environment variable.
     pub fn new(checksum_dir: impl Into<PathBuf>) -> Self {
         Self {
             checksum_dir: checksum_dir.into(),
@@ -240,12 +235,6 @@ impl ChecksumManager {
     /// Force UPDATE mode (auto-accept within tolerance).
     pub fn with_update_mode_update(mut self) -> Self {
         self.update_mode = UpdateMode::Update;
-        self
-    }
-
-    /// Force REPLACE mode (replace all entries).
-    pub fn with_update_mode_replace(mut self) -> Self {
-        self.update_mode = UpdateMode::Replace;
         self
     }
 
@@ -475,11 +464,6 @@ impl ChecksumManager {
             Some(f) => f,
             None => return self.handle_no_baseline(test_name, actual_hash, &path, pixels),
         };
-
-        // REPLACE mode: wipe and write new baseline
-        if self.update_mode == UpdateMode::Replace {
-            return self.replace_baseline(&mut file, actual_hash, &path);
-        }
 
         // Check for direct hash match
         if let Some(entry) = file.find_by_id(actual_hash)
@@ -721,39 +705,6 @@ impl ChecksumManager {
         Ok(CheckResult::NoBaseline {
             actual_hash: actual_hash.to_string(),
             auto_accepted,
-        })
-    }
-
-    fn replace_baseline(
-        &self,
-        file: &mut TestChecksumFile,
-        actual_hash: &str,
-        path: &Path,
-    ) -> Result<CheckResult, RegressError> {
-        // Retire all existing entries
-        for entry in &mut file.checksum {
-            if entry.is_active() {
-                entry.confidence = 0;
-                entry.status = Some("replaced".to_string());
-            }
-        }
-
-        // Add new entry
-        let commit = current_commit_short();
-        file.checksum.push(ChecksumEntry {
-            id: actual_hash.to_string(),
-            confidence: 10,
-            commit,
-            arch: vec![self.arch_tag.clone()],
-            reason: Some("replaced baseline".to_string()),
-            status: None,
-            diff: None,
-        });
-        file.write_to(path)?;
-
-        Ok(CheckResult::Match {
-            entry_id: actual_hash.to_string(),
-            confidence: 10,
         })
     }
 
@@ -1060,26 +1011,6 @@ mod tests {
         assert_eq!(file.checksum[0].arch, vec![mgr.arch_tag()]);
     }
 
-    #[test]
-    fn check_no_baseline_replace_mode() {
-        let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManager::new(dir.path()).with_update_mode_replace();
-
-        let px = make_test_pixels(16, 16, 0);
-        let result = mgr
-            .check_pixels("test_replace_baseline", &px, 16, 16)
-            .unwrap();
-
-        assert!(matches!(
-            result,
-            CheckResult::NoBaseline {
-                auto_accepted: true,
-                ..
-            }
-        ));
-        assert!(result.passed());
-    }
-
     // ─── Direct match ────────────────────────────────────────────────
 
     #[test]
@@ -1280,32 +1211,6 @@ mod tests {
             .reject("nonexistent", "sea:0000000000000000", "reason")
             .unwrap();
         assert!(!result);
-    }
-
-    // ─── Replace mode ────────────────────────────────────────────────
-
-    #[test]
-    fn replace_retires_old_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManager::new(dir.path()).with_update_mode_replace();
-
-        let mut file = TestChecksumFile::new("test_replace");
-        file.checksum
-            .push(ChecksumEntry::new("sea:old0000000000000"));
-        file.write_to(&mgr.test_path("test_replace")).unwrap();
-
-        let px = make_test_pixels(16, 16, 99);
-        let new_hash = mgr.hasher.hash_pixels(&px, 16, 16);
-        let result = mgr.check_pixels("test_replace", &px, 16, 16).unwrap();
-
-        assert!(result.passed());
-
-        let file = TestChecksumFile::read_from(&mgr.test_path("test_replace")).unwrap();
-        let old = file.find_by_id("sea:old0000000000000").unwrap();
-        assert_eq!(old.confidence, 0);
-        assert_eq!(old.status.as_deref(), Some("replaced"));
-        let new = file.find_by_id(&new_hash).unwrap();
-        assert!(new.is_active());
     }
 
     // ─── Tolerance resolution ────────────────────────────────────────

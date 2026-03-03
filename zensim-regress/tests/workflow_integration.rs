@@ -113,18 +113,6 @@ fn first_run_update_mode_creates_baseline() {
     assert!(file.checksum[0].diff.is_none()); // no prior reference to diff against
 }
 
-#[test]
-fn first_run_replace_mode_creates_baseline() {
-    let dir = tempfile::tempdir().unwrap();
-    let mgr = ChecksumManager::new(dir.path()).with_update_mode_replace();
-
-    let px = gradient_rgba(16, 16);
-    let result = mgr.check_pixels("first_run_replace", &px, 16, 16).unwrap();
-
-    assert!(result.passed());
-    assert!(mgr.test_path("first_run_replace").exists());
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. Exact hash match
 // ═══════════════════════════════════════════════════════════════════════════
@@ -599,64 +587,7 @@ fn rejected_entry_not_matched_on_check() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 8. REPLACE_CHECKSUMS mode
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn replace_mode_retires_old_adds_new() {
-    let dir = tempfile::tempdir().unwrap();
-    let mgr = ChecksumManager::new(dir.path())
-        .with_update_mode_replace()
-        .with_arch_tag("x86_64-avx2");
-
-    // Set up existing entries
-    let mut file = TestChecksumFile::new("replace_test");
-    file.checksum.push(ChecksumEntry {
-        id: "sea:old1111111111111".to_string(),
-        confidence: 10,
-        commit: None,
-        arch: vec!["x86_64-avx2".to_string()],
-        reason: Some("old baseline".to_string()),
-        status: None,
-        diff: None,
-    });
-    file.checksum.push(ChecksumEntry {
-        id: "sea:old2222222222222".to_string(),
-        confidence: 8,
-        commit: None,
-        arch: vec!["aarch64".to_string()],
-        reason: Some("arm variant".to_string()),
-        status: None,
-        diff: None,
-    });
-    file.write_to(&mgr.test_path("replace_test")).unwrap();
-
-    let px = gradient_rgba(16, 16);
-    let new_hash = SeaHasher.hash_pixels(&px, 16, 16);
-
-    let result = mgr.check_pixels("replace_test", &px, 16, 16).unwrap();
-    assert!(result.passed());
-
-    let updated = TestChecksumFile::read_from(&mgr.test_path("replace_test")).unwrap();
-
-    // Old entries retired
-    let old1 = updated.find_by_id("sea:old1111111111111").unwrap();
-    assert_eq!(old1.confidence, 0);
-    assert_eq!(old1.status.as_deref(), Some("replaced"));
-
-    let old2 = updated.find_by_id("sea:old2222222222222").unwrap();
-    assert_eq!(old2.confidence, 0);
-    assert_eq!(old2.status.as_deref(), Some("replaced"));
-
-    // New entry active
-    let new = updated.find_by_id(&new_hash).unwrap();
-    assert!(new.is_active());
-    assert!(new.arch.contains(&"x86_64-avx2".to_string()));
-    assert_eq!(new.reason.as_deref(), Some("replaced baseline"));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 9. Tolerance overrides (per-architecture)
+// 8. Tolerance overrides (per-architecture)
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]

@@ -7,7 +7,7 @@
 //! 3. Off-by-1 variant: different hash → zensim comparison → within tolerance
 //! 4. Accept: record new checksum with chain-of-trust diff
 //! 5. Reject: retire a broken checksum
-//! 6. Replace mode: wipe all entries and set new baseline
+//! 6. Re-check with update mode
 //! 7. Multi-arch: simulate x86_64 and aarch64 producing different outputs
 //!
 //! Run with: cargo run -p zensim-regress --example manager_workflow
@@ -146,14 +146,14 @@ fn main() {
     );
     println!();
 
-    // ─── 6. Replace mode ─────────────────────────────────────────────────
-    println!("--- 6. Replace mode (new baseline) ---");
-    let mgr_replace = ChecksumManager::new(dir.path())
-        .with_update_mode_replace()
+    // ─── 6. Verify re-check with update mode ────────────────────────────
+    println!("--- 6. Re-check with update mode ---");
+    let mgr_update2 = ChecksumManager::new(dir.path())
+        .with_update_mode_update()
         .with_arch_tag("x86_64-avx2");
 
-    let new_base = generators::gradient(w, h); // same pixels, but REPLACE mode retires everything
-    let r = mgr_replace
+    let new_base = generators::gradient(w, h);
+    let r = mgr_update2
         .check_pixels("gradient_test", &new_base, w, h)
         .unwrap();
     println!("  passed: {}", r.passed());
@@ -242,7 +242,7 @@ fn main() {
     // ─── Summary ─────────────────────────────────────────────────────────
     println!("--- Summary ---");
     println!("  Demonstrated: first run, exact match, within tolerance,");
-    println!("  accept, reject, replace, multi-arch auto-accept.");
+    println!("  accept, reject, multi-arch auto-accept.");
     println!("  All workflows use ChecksumManager — the developer-facing API.");
     println!("\n=== done ===");
 }

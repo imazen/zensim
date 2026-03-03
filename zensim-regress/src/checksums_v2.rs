@@ -838,16 +838,14 @@ impl std::fmt::Display for CheckResultV2 {
 /// 1. Load the module's `.checksums` file
 /// 2. Find the section for the test function + detail
 /// 3. Compare the actual hash against active entries
-/// 4. In UPDATE/REPLACE mode, auto-accept new hashes
+/// 4. In UPDATE mode, auto-accept new hashes
 ///
 /// # Environment variables
 ///
 /// - `UPDATE_CHECKSUMS=1` — auto-accept new checksums as `AutoAccepted`
-/// - `REPLACE_CHECKSUMS=1` — accept new checksums as `HumanVerified` (replaces baseline)
 pub struct ChecksumManagerV2 {
     checksums_dir: PathBuf,
     update_mode: bool,
-    replace_mode: bool,
     hasher: Box<dyn ChecksumHasher>,
     zensim: Zensim,
     remote: Option<ReferenceStorage>,
@@ -858,15 +856,12 @@ pub struct ChecksumManagerV2 {
 impl ChecksumManagerV2 {
     /// Create a new manager pointing at a directory of `.checksums` files.
     ///
-    /// Reads `UPDATE_CHECKSUMS` and `REPLACE_CHECKSUMS` from the environment.
+    /// Reads `UPDATE_CHECKSUMS` from the environment.
     pub fn new(checksums_dir: &Path) -> Self {
         let update_mode = std::env::var("UPDATE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
-        let replace_mode =
-            std::env::var("REPLACE_CHECKSUMS").is_ok_and(|v| v == "1" || v == "true");
         Self {
             checksums_dir: checksums_dir.to_path_buf(),
             update_mode,
-            replace_mode,
             hasher: Box::new(SeaHasher),
             zensim: Zensim::new(ZensimProfile::latest()),
             remote: None,
@@ -876,11 +871,10 @@ impl ChecksumManagerV2 {
     }
 
     /// Create a manager with explicit mode flags (for testing).
-    pub fn with_modes(checksums_dir: &Path, update_mode: bool, replace_mode: bool) -> Self {
+    pub fn with_modes(checksums_dir: &Path, update_mode: bool) -> Self {
         Self {
             checksums_dir: checksums_dir.to_path_buf(),
             update_mode,
-            replace_mode,
             hasher: Box::new(SeaHasher),
             zensim: Zensim::new(ZensimProfile::latest()),
             remote: None,
@@ -1000,15 +994,10 @@ impl ChecksumManagerV2 {
         let section = file.find_section(test_name, detail_name);
 
         // Check if actual matches any active entry
-        // In replace mode, require exact match so old petnames get replaced.
         if let Some(section) = section {
             let matched_name = section.active_entries().find_map(|entry| {
-                let is_match = if self.replace_mode {
-                    entry.name_hash == actual_name
-                } else {
-                    names_match(&entry.name_hash, &actual_name)
-                };
-                is_match.then(|| entry.name_hash.clone())
+                names_match(&entry.name_hash, &actual_name)
+                    .then(|| entry.name_hash.clone())
             });
             if let Some(entry_name) = matched_name {
                 // Update tolerance if provided and different
@@ -1029,27 +1018,6 @@ impl ChecksumManagerV2 {
                 .map(|e| e.name_hash.clone());
 
             if let Some(ref authoritative) = anchor_name {
-                // Mismatch with existing baseline
-                if self.replace_mode {
-                    // REPLACE: accept as new human-verified anchor
-                    let section = file.get_or_create_section(test_name, detail_name);
-                    if let Some(tol) = tolerance {
-                        section.tolerance = Some(tol.clone());
-                    }
-                    section.retire_anchor();
-                    section.entries.push(ChecksumEntry2::human_verified(
-                        actual_name.clone(),
-                        arch,
-                        commit,
-                    ));
-                    file.write_to(path)?;
-                    return Ok(CheckResultV2::NoBaseline {
-                        actual_name,
-                        actual_hash: actual_hash.to_string(),
-                        auto_accepted: true,
-                    });
-                }
-
                 if self.update_mode {
                     // UPDATE: auto-accept within tolerance (caller should verify tolerance)
                     let section = file.get_or_create_section(test_name, detail_name);
@@ -1085,26 +1053,17 @@ impl ChecksumManagerV2 {
         }
 
         // No section or no active entries — treat as no baseline
-        if self.replace_mode || self.update_mode {
+        if self.update_mode {
             let section = file.get_or_create_section(test_name, detail_name);
             if let Some(tol) = tolerance {
                 section.tolerance = Some(tol.clone());
             }
-            let kind = if self.replace_mode {
-                EntryKind::HumanVerified
-            } else {
-                EntryKind::AutoAccepted
-            };
             section.entries.push(ChecksumEntry2 {
-                kind,
+                kind: EntryKind::AutoAccepted,
                 name_hash: actual_name.clone(),
                 arch,
                 commit,
-                reason: if self.replace_mode {
-                    "new-baseline".to_string()
-                } else {
-                    "auto-accepted".to_string()
-                },
+                reason: "auto-accepted".to_string(),
                 tolerance_note: None,
                 vs_ref: None,
                 diff_summary: None,
@@ -1272,12 +1231,8 @@ impl ChecksumManagerV2 {
         // Check for hash match
         if let Some(section) = section {
             let matched_name = section.active_entries().find_map(|entry| {
-                let is_match = if self.replace_mode {
-                    entry.name_hash == actual_name
-                } else {
-                    names_match(&entry.name_hash, &actual_name)
-                };
-                is_match.then(|| entry.name_hash.clone())
+                names_match(&entry.name_hash, &actual_name)
+                    .then(|| entry.name_hash.clone())
             });
 
             if let Some(entry_name) = matched_name {
@@ -1299,33 +1254,6 @@ impl ChecksumManagerV2 {
                 .map(|e| e.name_hash.clone());
 
             if let Some(ref authoritative) = anchor_name {
-                // REPLACE mode: accept as new baseline (no comparison needed)
-                if self.replace_mode {
-                    let section = file.get_or_create_section(test_name, detail_name);
-                    if let Some(tol) = tolerance {
-                        section.tolerance = Some(tol.clone());
-                    }
-                    section.retire_anchor();
-                    section.entries.push(ChecksumEntry2::human_verified(
-                        actual_name.clone(),
-                        arch,
-                        commit,
-                    ));
-                    file.write_to(&path)?;
-
-                    // Save reference image for future comparisons
-                    if let Some((rgba, w, h)) = pixels {
-                        let _ =
-                            self.save_reference_image(module, test_name, detail_name, rgba, w, h);
-                    }
-
-                    return Ok(CheckResultV2::NoBaseline {
-                        actual_name,
-                        actual_hash: actual_hash.to_string(),
-                        auto_accepted: true,
-                    });
-                }
-
                 // Hash mismatch — try pixel comparison
                 let Some((rgba, w, h)) = pixels else {
                     // Hash-only: can't compare pixels
@@ -1446,26 +1374,17 @@ impl ChecksumManagerV2 {
         }
 
         // No section or no active entries — no baseline
-        if self.replace_mode || self.update_mode {
+        if self.update_mode {
             let section = file.get_or_create_section(test_name, detail_name);
             if let Some(tol) = tolerance {
                 section.tolerance = Some(tol.clone());
             }
-            let kind = if self.replace_mode {
-                EntryKind::HumanVerified
-            } else {
-                EntryKind::AutoAccepted
-            };
             section.entries.push(ChecksumEntry2 {
-                kind,
+                kind: EntryKind::AutoAccepted,
                 name_hash: actual_name.clone(),
                 arch,
                 commit,
-                reason: if self.replace_mode {
-                    "new-baseline".to_string()
-                } else {
-                    "auto-accepted".to_string()
-                },
+                reason: "auto-accepted".to_string(),
                 tolerance_note: None,
                 vs_ref: None,
                 diff_summary: None,
@@ -2078,7 +1997,7 @@ tolerance d:1 s:95
     #[test]
     fn manager_no_baseline_no_auto() {
         let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
 
         let result = mgr
             .check_hash(
@@ -2104,7 +2023,7 @@ tolerance d:1 s:95
     #[test]
     fn manager_no_baseline_update_mode() {
         let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), true);
 
         let result = mgr
             .check_hash(
@@ -2132,32 +2051,6 @@ tolerance d:1 s:95
     }
 
     #[test]
-    fn manager_no_baseline_replace_mode() {
-        let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, true);
-
-        let result = mgr
-            .check_hash(
-                "trim",
-                "test_trim",
-                "transparent",
-                "sea:a4839401fabae99c",
-                None,
-            )
-            .unwrap();
-        match result {
-            CheckResultV2::NoBaseline {
-                auto_accepted: true,
-                ..
-            } => {}
-            other => panic!("expected NoBaseline(auto_accepted=true), got {other:?}"),
-        }
-
-        let file = ChecksumsFile::read_from(&mgr.module_path("trim")).unwrap();
-        assert_eq!(file.sections[0].entries[0].kind, EntryKind::HumanVerified);
-    }
-
-    #[test]
     fn manager_match_existing() {
         let dir = tempfile::tempdir().unwrap();
         let hash = "sea:a4839401fabae99c";
@@ -2173,7 +2066,7 @@ tolerance d:1 s:95
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", hash, None)
             .unwrap();
@@ -2202,7 +2095,7 @@ tolerance d:1 s:95
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
         // Check with extension — should still match
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", ext_hash, None)
@@ -2230,7 +2123,7 @@ tolerance d:1 s:95
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", actual_hash, None)
             .unwrap();
@@ -2264,7 +2157,7 @@ tolerance d:1 s:95
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), true, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), true);
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", actual_hash, None)
             .unwrap();
@@ -2304,7 +2197,7 @@ tolerance d:1 s:95
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false, false);
+        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
         mgr.accept(
             "trim",
             "test_trim",
