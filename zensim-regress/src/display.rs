@@ -184,6 +184,24 @@ pub fn print_comparison(
     println!();
 }
 
+/// Print a 3-panel comparison from raw RGBA byte slices.
+///
+/// Convenience wrapper for callers that don't use the `image` crate directly.
+pub fn print_comparison_raw(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+    max_width: Option<u32>,
+) {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions for pixel data");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions for pixel data");
+    print_comparison(&exp_img, &act_img, amplification, max_width);
+}
+
 // ─── Palette ─────────────────────────────────────────────────────────────
 
 /// Build a 240-color palette: 216-color 6×6×6 RGB cube + 24 grayscale levels.
