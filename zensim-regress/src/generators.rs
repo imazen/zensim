@@ -195,7 +195,7 @@ pub fn solid(w: u32, h: u32, r: u8, g: u8, b: u8, a: u8) -> Vec<u8> {
 /// tolerance thresholds.
 pub fn off_by_n(rgba: &[u8], delta: u8, every_nth: usize) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks(4)

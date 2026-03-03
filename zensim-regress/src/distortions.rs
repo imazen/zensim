@@ -26,7 +26,7 @@
 /// ~50% of pixels change by 1. Produces `RoundingError` classification.
 pub fn truncate_lsb(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks_exact(4)
@@ -40,7 +40,7 @@ pub fn truncate_lsb(rgba: &[u8]) -> Vec<u8> {
 /// Common in incorrect bit-depth conversion code.
 pub fn expand_256(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks_exact(4)
@@ -61,7 +61,7 @@ pub fn expand_256(rgba: &[u8]) -> Vec<u8> {
 /// producing subtle systematic bias.
 pub fn round_half_up(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     let adjust = |v: u8| -> u8 {
@@ -82,7 +82,7 @@ pub fn round_half_up(rgba: &[u8]) -> Vec<u8> {
 /// Opaque and transparent pixels are unchanged.
 pub fn premul_as_straight(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks_exact(4)
@@ -104,7 +104,7 @@ pub fn premul_as_straight(rgba: &[u8]) -> Vec<u8> {
 /// Transparent pixels (A=0) are unchanged. Can produce dramatic differences.
 pub fn straight_as_premul(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks_exact(4)
@@ -129,7 +129,7 @@ pub fn straight_as_premul(rgba: &[u8]) -> Vec<u8> {
 /// Produces `ChannelSwap` classification for most images.
 pub fn channel_swap_rb(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks_exact(4)
@@ -142,7 +142,7 @@ pub fn channel_swap_rb(rgba: &[u8]) -> Vec<u8> {
 /// `R_out = 255 - R`. Produces large deltas for non-midtone images.
 pub fn invert(rgba: &[u8]) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     rgba.chunks_exact(4)
@@ -156,7 +156,7 @@ pub fn invert(rgba: &[u8]) -> Vec<u8> {
 /// Useful for testing score sensitivity to uniform shifts.
 pub fn uniform_shift(rgba: &[u8], delta: i16) -> Vec<u8> {
     assert!(
-        rgba.len() % 4 == 0,
+        rgba.len().is_multiple_of(4),
         "RGBA byte length must be a multiple of 4"
     );
     let apply = |v: u8| -> u8 { (v as i16 + delta).clamp(0, 255) as u8 };

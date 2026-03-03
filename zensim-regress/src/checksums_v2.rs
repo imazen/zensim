@@ -19,8 +19,18 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use zensim::{RgbaSlice, Zensim, ZensimProfile};
+
+use crate::checksum_file::ToleranceSpec;
+use crate::diff_image::create_comparison_montage_raw;
+use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
 use crate::error::RegressError;
+use crate::hasher::{ChecksumHasher, SeaHasher};
+use crate::manifest::{ManifestEntry, ManifestStatus, ManifestWriter};
+use crate::remote::ReferenceStorage;
+use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
 
 // ─── Top-level file ──────────────────────────────────────────────────────
 
@@ -155,7 +165,11 @@ impl ChecksumsFile {
         // Strip trailing blank lines from header comments to prevent
         // accumulation on read-modify-write cycles (format() adds its own
         // blank line between header and first section).
-        while file.header_comments.last().is_some_and(|l| l.trim().is_empty()) {
+        while file
+            .header_comments
+            .last()
+            .is_some_and(|l| l.trim().is_empty())
+        {
             file.header_comments.pop();
         }
 
@@ -710,20 +724,112 @@ pub enum CheckResultV2 {
         /// Memorable name of the matched entry.
         entry_name: String,
     },
+    /// Hash mismatch, but zensim comparison passes tolerance.
+    ///
+    /// Only returned by [`ChecksumManagerV2::check_pixels`] and
+    /// [`ChecksumManagerV2::check_file`] — hash-only [`check_hash`] cannot
+    /// produce this variant because it has no pixel data to compare.
+    WithinTolerance {
+        /// Zensim regression report.
+        report: RegressionReport,
+        /// Memorable name of the authoritative baseline.
+        authoritative_name: String,
+        /// Memorable name of the actual hash.
+        actual_name: String,
+        /// Raw hash of the actual output.
+        actual_hash: String,
+        /// Whether the new hash was auto-accepted (UPDATE mode).
+        auto_accepted: bool,
+    },
     /// No baseline exists for this test/detail. May have been auto-accepted.
     NoBaseline {
         /// Memorable name of the actual hash.
         actual_name: String,
+        /// Raw hash of the actual output.
+        actual_hash: String,
         /// Whether the entry was automatically accepted (REPLACE or UPDATE mode).
         auto_accepted: bool,
     },
     /// Baseline exists but actual hash does not match any active entry.
     Failed {
+        /// Zensim regression report, if pixel comparison was possible.
+        report: Option<RegressionReport>,
         /// Memorable name of the authoritative baseline.
         authoritative_name: String,
         /// Memorable name of the actual (non-matching) hash.
         actual_name: String,
+        /// Raw hash of the actual output.
+        actual_hash: String,
     },
+}
+
+impl CheckResultV2 {
+    /// Whether this result is a pass (Match, WithinTolerance, or auto-accepted NoBaseline).
+    pub fn passed(&self) -> bool {
+        matches!(
+            self,
+            Self::Match { .. }
+                | Self::WithinTolerance { .. }
+                | Self::NoBaseline {
+                    auto_accepted: true,
+                    ..
+                }
+        )
+    }
+}
+
+impl std::fmt::Display for CheckResultV2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Match { entry_name } => write!(f, "PASS (exact match, {entry_name})"),
+            Self::WithinTolerance {
+                report,
+                authoritative_name,
+                auto_accepted,
+                ..
+            } => {
+                let delta = report.max_channel_delta();
+                write!(
+                    f,
+                    "PASS (within tolerance, score={:.1}, maxΔ=[{},{},{}], vs {authoritative_name}{})",
+                    report.score(),
+                    delta[0],
+                    delta[1],
+                    delta[2],
+                    if *auto_accepted {
+                        ", auto-accepted"
+                    } else {
+                        ""
+                    },
+                )
+            }
+            Self::Failed {
+                report,
+                authoritative_name,
+                ..
+            } => match report {
+                Some(r) => {
+                    let delta = r.max_channel_delta();
+                    write!(
+                        f,
+                        "FAIL (score={:.1}, maxΔ=[{},{},{}], vs {authoritative_name})",
+                        r.score(),
+                        delta[0],
+                        delta[1],
+                        delta[2],
+                    )
+                }
+                None => write!(f, "FAIL (no reference image, vs {authoritative_name})"),
+            },
+            Self::NoBaseline { auto_accepted, .. } => {
+                if *auto_accepted {
+                    write!(f, "NO BASELINE (auto-accepted)")
+                } else {
+                    write!(f, "NO BASELINE (run with UPDATE_CHECKSUMS=1)")
+                }
+            }
+        }
+    }
 }
 
 /// Manager for `.checksums` v1 files.
@@ -742,6 +848,11 @@ pub struct ChecksumManagerV2 {
     checksums_dir: PathBuf,
     update_mode: bool,
     replace_mode: bool,
+    hasher: Box<dyn ChecksumHasher>,
+    zensim: Zensim,
+    remote: Option<ReferenceStorage>,
+    diff_dir: Option<PathBuf>,
+    manifest: Option<Arc<ManifestWriter>>,
 }
 
 impl ChecksumManagerV2 {
@@ -756,6 +867,11 @@ impl ChecksumManagerV2 {
             checksums_dir: checksums_dir.to_path_buf(),
             update_mode,
             replace_mode,
+            hasher: Box::new(SeaHasher),
+            zensim: Zensim::new(ZensimProfile::latest()),
+            remote: None,
+            diff_dir: None,
+            manifest: None,
         }
     }
 
@@ -765,7 +881,59 @@ impl ChecksumManagerV2 {
             checksums_dir: checksums_dir.to_path_buf(),
             update_mode,
             replace_mode,
+            hasher: Box::new(SeaHasher),
+            zensim: Zensim::new(ZensimProfile::latest()),
+            remote: None,
+            diff_dir: None,
+            manifest: None,
         }
+    }
+
+    /// Override the hasher.
+    pub fn with_hasher(mut self, hasher: impl ChecksumHasher + 'static) -> Self {
+        self.hasher = Box::new(hasher);
+        self
+    }
+
+    /// Set remote storage for reference image upload/download.
+    pub fn with_remote_storage(mut self, remote: ReferenceStorage) -> Self {
+        self.remote = Some(remote);
+        self
+    }
+
+    /// Configure remote storage from environment variables.
+    ///
+    /// Reads `REGRESS_REFERENCE_URL`, `REGRESS_UPLOAD_PREFIX`, and
+    /// `UPLOAD_REFERENCES`. No-op if `REGRESS_REFERENCE_URL` is not set.
+    /// Downloads are cached in `{checksums_dir}/.remote-cache`.
+    pub fn with_remote_storage_from_env(mut self) -> Self {
+        let cache_dir = self.checksums_dir.join(".remote-cache");
+        self.remote = ReferenceStorage::from_env(cache_dir);
+        self
+    }
+
+    /// Set a directory for saving comparison montages on mismatch.
+    pub fn with_diff_output(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.diff_dir = Some(dir.into());
+        self
+    }
+
+    /// Set a shared manifest writer for recording test results as TSV.
+    pub fn with_manifest(mut self, writer: Arc<ManifestWriter>) -> Self {
+        self.manifest = Some(writer);
+        self
+    }
+
+    /// Enable manifest writing from the `REGRESS_MANIFEST_PATH` environment
+    /// variable. No-op if the variable is unset or empty.
+    pub fn with_manifest_from_env(mut self) -> Self {
+        use std::sync::OnceLock;
+        static GLOBAL: OnceLock<Option<Arc<ManifestWriter>>> = OnceLock::new();
+        let writer = GLOBAL.get_or_init(|| ManifestWriter::from_env().map(Arc::new));
+        if let Some(w) = writer {
+            self.manifest = Some(Arc::clone(w));
+        }
+        self
     }
 
     /// Path to the `.checksums` file for a given module.
@@ -796,27 +964,15 @@ impl ChecksumManagerV2 {
 
         // Acquire advisory file lock for the checksums file.
         let lock_path = path.with_extension("checksums.lock");
-        let lock_file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .map_err(|e| RegressError::io(&lock_path, e))?;
-        use fs2::FileExt;
-        lock_file
-            .lock_exclusive()
-            .map_err(|e| RegressError::io(&lock_path, e))?;
-        let result = self.check_hash_locked(
+        let _guard = crate::lock::FileLockGuard::acquire_and_cleanup(&lock_path)?;
+        self.check_hash_locked(
             module,
             &path,
             test_name,
             detail_name,
             actual_hash,
             tolerance,
-        );
-        let _ = lock_file.unlock();
-        let _ = std::fs::remove_file(&lock_path);
-        result
+        )
     }
 
     /// Inner implementation of `check_hash`, called while holding the file lock.
@@ -835,7 +991,7 @@ impl ChecksumManagerV2 {
 
         // Load or create the file
         let mut file = if path.exists() {
-            ChecksumsFile::read_from(&path)?
+            ChecksumsFile::read_from(path)?
         } else {
             ChecksumsFile::new(module)
         };
@@ -860,7 +1016,7 @@ impl ChecksumManagerV2 {
                     let section = file.find_section_mut(test_name, detail_name).unwrap();
                     if section.tolerance.as_ref() != Some(tol) {
                         section.tolerance = Some(tol.clone());
-                        file.write_to(&path)?;
+                        file.write_to(path)?;
                     }
                 }
                 return Ok(CheckResultV2::Match { entry_name });
@@ -886,9 +1042,10 @@ impl ChecksumManagerV2 {
                         arch,
                         commit,
                     ));
-                    file.write_to(&path)?;
+                    file.write_to(path)?;
                     return Ok(CheckResultV2::NoBaseline {
                         actual_name,
+                        actual_hash: actual_hash.to_string(),
                         auto_accepted: true,
                     });
                 }
@@ -910,16 +1067,19 @@ impl ChecksumManagerV2 {
                         vs_ref: Some(authoritative.clone()),
                         diff_summary: None,
                     });
-                    file.write_to(&path)?;
+                    file.write_to(path)?;
                     return Ok(CheckResultV2::NoBaseline {
                         actual_name,
+                        actual_hash: actual_hash.to_string(),
                         auto_accepted: true,
                     });
                 }
 
                 return Ok(CheckResultV2::Failed {
+                    report: None,
                     authoritative_name: authoritative.clone(),
                     actual_name,
+                    actual_hash: actual_hash.to_string(),
                 });
             }
         }
@@ -949,15 +1109,17 @@ impl ChecksumManagerV2 {
                 vs_ref: None,
                 diff_summary: None,
             });
-            file.write_to(&path)?;
+            file.write_to(path)?;
             return Ok(CheckResultV2::NoBaseline {
                 actual_name,
+                actual_hash: actual_hash.to_string(),
                 auto_accepted: true,
             });
         }
 
         Ok(CheckResultV2::NoBaseline {
             actual_name,
+            actual_hash: actual_hash.to_string(),
             auto_accepted: false,
         })
     }
@@ -966,6 +1128,7 @@ impl ChecksumManagerV2 {
     ///
     /// Used by callers who have already performed pixel comparison and
     /// want to record the result with chain-of-trust evidence.
+    #[allow(clippy::too_many_arguments)]
     pub fn accept(
         &self,
         module: &str,
@@ -981,16 +1144,7 @@ impl ChecksumManagerV2 {
 
         // Acquire advisory file lock
         let lock_path = path.with_extension("checksums.lock");
-        let lock_file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-            .map_err(|e| RegressError::io(&lock_path, e))?;
-        use fs2::FileExt;
-        lock_file
-            .lock_exclusive()
-            .map_err(|e| RegressError::io(&lock_path, e))?;
+        let _guard = crate::lock::FileLockGuard::acquire_and_cleanup(&lock_path)?;
 
         let actual_name = hash_to_memorable(actual_hash);
         let arch = crate::arch::detect_arch_tag().to_string();
@@ -1018,39 +1172,554 @@ impl ChecksumManagerV2 {
             diff_summary: diff_summary.map(|s| s.to_string()),
         });
 
-        let result = file.write_to(&path);
-        let _ = lock_file.unlock();
-        let _ = std::fs::remove_file(&lock_path);
-        result
+        file.write_to(&path)
     }
+
+    // ─── Full comparison workflow ────────────────────────────────────────
+
+    /// Check actual RGBA pixels against stored checksums with full comparison.
+    ///
+    /// This is the high-level entry point that does the complete workflow:
+    /// 1. Hash actual pixels
+    /// 2. Check hash against `.checksums` file
+    /// 3. On mismatch, load reference image and run zensim comparison
+    /// 4. Auto-accept within tolerance (in UPDATE mode)
+    /// 5. Save diff montage (if configured)
+    /// 6. Write manifest entry (if configured)
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_pixels(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual_rgba: &[u8],
+        width: u32,
+        height: u32,
+        tolerance: Option<&ToleranceSpec>,
+    ) -> Result<CheckResultV2, RegressError> {
+        let actual_hash = self.hasher.hash_pixels(actual_rgba, width, height);
+        let result = self.check_with_pixels_impl(
+            module,
+            test_name,
+            detail_name,
+            &actual_hash,
+            Some((actual_rgba, width, height)),
+            tolerance,
+        )?;
+        self.write_manifest_for_result(module, test_name, detail_name, &result);
+        Ok(result)
+    }
+
+    /// Check an image file against stored checksums with full comparison.
+    ///
+    /// Decodes the file to RGBA for hashing and comparison.
+    pub fn check_file(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual_path: impl AsRef<Path>,
+        tolerance: Option<&ToleranceSpec>,
+    ) -> Result<CheckResultV2, RegressError> {
+        let actual_path = actual_path.as_ref();
+        let img = image::open(actual_path)
+            .map_err(|e| RegressError::image(actual_path, e))?
+            .to_rgba8();
+        let (w, h) = img.dimensions();
+        self.check_pixels(
+            module,
+            test_name,
+            detail_name,
+            img.as_raw(),
+            w,
+            h,
+            tolerance,
+        )
+    }
+
+    /// Core implementation for check_pixels/check_file.
+    ///
+    /// Unlike `check_hash_locked`, this method only auto-accepts after
+    /// pixel comparison passes tolerance (not blindly on hash mismatch).
+    fn check_with_pixels_impl(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual_hash: &str,
+        pixels: Option<(&[u8], u32, u32)>,
+        tolerance: Option<&ToleranceSpec>,
+    ) -> Result<CheckResultV2, RegressError> {
+        let path = self.module_path(module);
+
+        // Acquire advisory file lock
+        let lock_path = path.with_extension("checksums.lock");
+        let _guard = crate::lock::FileLockGuard::acquire_and_cleanup(&lock_path)?;
+
+        let actual_name = hash_to_memorable(actual_hash);
+        let arch = crate::arch::detect_arch_tag().to_string();
+        let commit = current_commit_short().unwrap_or_default();
+
+        // Load or create the file
+        let mut file = if path.exists() {
+            ChecksumsFile::read_from(&path)?
+        } else {
+            ChecksumsFile::new(module)
+        };
+
+        let section = file.find_section(test_name, detail_name);
+
+        // Check for hash match
+        if let Some(section) = section {
+            let matched_name = section.active_entries().find_map(|entry| {
+                let is_match = if self.replace_mode {
+                    entry.name_hash == actual_name
+                } else {
+                    names_match(&entry.name_hash, &actual_name)
+                };
+                is_match.then(|| entry.name_hash.clone())
+            });
+
+            if let Some(entry_name) = matched_name {
+                // Update tolerance if provided and different
+                if let Some(tol) = tolerance {
+                    let section = file.find_section_mut(test_name, detail_name).unwrap();
+                    if section.tolerance.as_ref() != Some(tol) {
+                        section.tolerance = Some(tol.clone());
+                        file.write_to(&path)?;
+                    }
+                }
+                return Ok(CheckResultV2::Match { entry_name });
+            }
+
+            // No match — get authoritative baseline
+            let anchor_name = section
+                .anchor()
+                .or_else(|| section.active_entries().next())
+                .map(|e| e.name_hash.clone());
+
+            if let Some(ref authoritative) = anchor_name {
+                // REPLACE mode: accept as new baseline (no comparison needed)
+                if self.replace_mode {
+                    let section = file.get_or_create_section(test_name, detail_name);
+                    if let Some(tol) = tolerance {
+                        section.tolerance = Some(tol.clone());
+                    }
+                    section.retire_anchor();
+                    section.entries.push(ChecksumEntry2::human_verified(
+                        actual_name.clone(),
+                        arch,
+                        commit,
+                    ));
+                    file.write_to(&path)?;
+
+                    // Save reference image for future comparisons
+                    if let Some((rgba, w, h)) = pixels {
+                        let _ =
+                            self.save_reference_image(module, test_name, detail_name, rgba, w, h);
+                    }
+
+                    return Ok(CheckResultV2::NoBaseline {
+                        actual_name,
+                        actual_hash: actual_hash.to_string(),
+                        auto_accepted: true,
+                    });
+                }
+
+                // Hash mismatch — try pixel comparison
+                let Some((rgba, w, h)) = pixels else {
+                    // Hash-only: can't compare pixels
+                    return Ok(CheckResultV2::Failed {
+                        report: None,
+                        authoritative_name: authoritative.clone(),
+                        actual_name,
+                        actual_hash: actual_hash.to_string(),
+                    });
+                };
+
+                // Load reference image
+                let ref_path =
+                    self.find_reference_image(module, test_name, detail_name, Some(authoritative));
+                let (ref_rgba, rw, rh) = match ref_path {
+                    Some(p) => decode_reference_png(&p)?,
+                    None => {
+                        // No reference image — can't do pixel comparison
+                        if self.update_mode {
+                            let section = file.get_or_create_section(test_name, detail_name);
+                            if let Some(tol) = tolerance {
+                                section.tolerance = Some(tol.clone());
+                            }
+                            section.prune_auto_accepted(&arch);
+                            section.entries.push(ChecksumEntry2 {
+                                kind: EntryKind::AutoAccepted,
+                                name_hash: actual_name.clone(),
+                                arch,
+                                commit,
+                                reason: "auto-accepted (no reference image)".to_string(),
+                                tolerance_note: None,
+                                vs_ref: Some(authoritative.clone()),
+                                diff_summary: None,
+                            });
+                            file.write_to(&path)?;
+                            return Ok(CheckResultV2::NoBaseline {
+                                actual_name,
+                                actual_hash: actual_hash.to_string(),
+                                auto_accepted: true,
+                            });
+                        }
+                        return Ok(CheckResultV2::Failed {
+                            report: None,
+                            authoritative_name: authoritative.clone(),
+                            actual_name,
+                            actual_hash: actual_hash.to_string(),
+                        });
+                    }
+                };
+
+                // Run zensim comparison
+                let reg_tolerance = tolerance
+                    .map(|t| t.to_regression_tolerance(&arch))
+                    .unwrap_or_else(RegressionTolerance::exact);
+
+                let ref_pixels = rgba_bytes_to_pixels(&ref_rgba);
+                let actual_pixels = rgba_bytes_to_pixels(rgba);
+                let ref_source = RgbaSlice::new(&ref_pixels, rw as usize, rh as usize);
+                let actual_source = RgbaSlice::new(&actual_pixels, w as usize, h as usize);
+
+                let report =
+                    check_regression(&self.zensim, &ref_source, &actual_source, &reg_tolerance)?;
+
+                // Save diff montage
+                self.save_diff_montage(
+                    module,
+                    test_name,
+                    detail_name,
+                    &ref_rgba,
+                    rw,
+                    rh,
+                    rgba,
+                    w,
+                    h,
+                );
+
+                if report.passed() {
+                    let auto_accepted = self.update_mode;
+                    if auto_accepted {
+                        let tol_note =
+                            tolerance.map(|t| format!("within {}", format_tolerance_shorthand(t)));
+                        let diff_summary_str = format_diff_summary(&report);
+
+                        let section = file.get_or_create_section(test_name, detail_name);
+                        if let Some(tol) = tolerance {
+                            section.tolerance = Some(tol.clone());
+                        }
+                        section.prune_auto_accepted(&arch);
+                        section.entries.push(ChecksumEntry2 {
+                            kind: EntryKind::AutoAccepted,
+                            name_hash: actual_name.clone(),
+                            arch,
+                            commit,
+                            reason: "auto-accepted within tolerance".to_string(),
+                            tolerance_note: tol_note,
+                            vs_ref: Some(authoritative.clone()),
+                            diff_summary: Some(diff_summary_str),
+                        });
+                        file.write_to(&path)?;
+                    }
+
+                    return Ok(CheckResultV2::WithinTolerance {
+                        report,
+                        authoritative_name: authoritative.clone(),
+                        actual_name,
+                        actual_hash: actual_hash.to_string(),
+                        auto_accepted,
+                    });
+                }
+
+                return Ok(CheckResultV2::Failed {
+                    report: Some(report),
+                    authoritative_name: authoritative.clone(),
+                    actual_name,
+                    actual_hash: actual_hash.to_string(),
+                });
+            }
+        }
+
+        // No section or no active entries — no baseline
+        if self.replace_mode || self.update_mode {
+            let section = file.get_or_create_section(test_name, detail_name);
+            if let Some(tol) = tolerance {
+                section.tolerance = Some(tol.clone());
+            }
+            let kind = if self.replace_mode {
+                EntryKind::HumanVerified
+            } else {
+                EntryKind::AutoAccepted
+            };
+            section.entries.push(ChecksumEntry2 {
+                kind,
+                name_hash: actual_name.clone(),
+                arch,
+                commit,
+                reason: if self.replace_mode {
+                    "new-baseline".to_string()
+                } else {
+                    "auto-accepted".to_string()
+                },
+                tolerance_note: None,
+                vs_ref: None,
+                diff_summary: None,
+            });
+            file.write_to(&path)?;
+
+            // Save reference image
+            if let Some((rgba, w, h)) = pixels {
+                let _ = self.save_reference_image(module, test_name, detail_name, rgba, w, h);
+            }
+
+            return Ok(CheckResultV2::NoBaseline {
+                actual_name,
+                actual_hash: actual_hash.to_string(),
+                auto_accepted: true,
+            });
+        }
+
+        Ok(CheckResultV2::NoBaseline {
+            actual_name,
+            actual_hash: actual_hash.to_string(),
+            auto_accepted: false,
+        })
+    }
+
+    // ─── Reference image helpers ────────────────────────────────────────
+
+    /// Try to find a reference image for a test.
+    ///
+    /// 1. Looks locally at `{checksums_dir}/images/{module}/{test}_{detail}.png`
+    /// 2. If remote storage is configured, tries downloading by authoritative petname
+    fn find_reference_image(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        authoritative_name: Option<&str>,
+    ) -> Option<PathBuf> {
+        let images_dir = self.checksums_dir.join("images").join(module);
+        let flat_name = flat_test_name(test_name, detail_name);
+        let local_path = images_dir.join(format!("{flat_name}.png"));
+        if local_path.exists() {
+            return Some(local_path);
+        }
+
+        // Try remote download by authoritative petname
+        if let (Some(remote), Some(auth_name)) = (&self.remote, authoritative_name) {
+            match remote.download_reference(auth_name) {
+                Ok(Some(cached_path)) => {
+                    let _ = std::fs::create_dir_all(&images_dir);
+                    let _ = std::fs::copy(&cached_path, &local_path);
+                    return Some(local_path);
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("Warning: remote download failed: {e}"),
+            }
+        }
+
+        None
+    }
+
+    /// Save a reference image for future comparisons.
+    pub fn save_reference_image(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<PathBuf, RegressError> {
+        let images_dir = self.checksums_dir.join("images").join(module);
+        std::fs::create_dir_all(&images_dir).map_err(|e| RegressError::io(&images_dir, e))?;
+
+        let flat_name = flat_test_name(test_name, detail_name);
+        let path = images_dir.join(format!("{flat_name}.png"));
+
+        let img = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(|| {
+            RegressError::Io {
+                path: path.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "invalid dimensions {width}x{height} for {} bytes",
+                        rgba.len()
+                    ),
+                ),
+            }
+        })?;
+        img.save(&path).map_err(|e| RegressError::image(&path, e))?;
+        Ok(path)
+    }
+
+    /// Upload a reference image to remote storage (if configured).
+    pub fn upload_reference_image(&self, checksum_name: &str, local_path: &Path) {
+        if let Some(remote) = &self.remote
+            && let Err(e) = remote.upload_reference(local_path, checksum_name)
+        {
+            eprintln!("Warning: failed to upload reference {checksum_name}: {e}");
+        }
+    }
+
+    // ─── Diff montage ───────────────────────────────────────────────────
+
+    /// Save comparison montage if diff_dir is configured.
+    #[allow(clippy::too_many_arguments)]
+    fn save_diff_montage(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        ref_rgba: &[u8],
+        rw: u32,
+        rh: u32,
+        actual_rgba: &[u8],
+        aw: u32,
+        ah: u32,
+    ) {
+        let Some(dir) = &self.diff_dir else { return };
+        let diff_dir = dir.join(module);
+        if let Err(e) = std::fs::create_dir_all(&diff_dir) {
+            eprintln!(
+                "Warning: failed to create diff dir {}: {e}",
+                diff_dir.display()
+            );
+            return;
+        }
+        let flat_name = flat_test_name(test_name, detail_name);
+        let out_path = diff_dir.join(format!("{flat_name}.png"));
+
+        if rw != aw || rh != ah {
+            // Dimensions differ — save actual as-is
+            if let Some(img) = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec()) {
+                let _ = img.save(&out_path);
+            }
+            return;
+        }
+
+        let montage = create_comparison_montage_raw(ref_rgba, actual_rgba, rw, rh, 10, 2);
+        if let Err(e) = montage.save(&out_path) {
+            eprintln!("Warning: failed to save diff image for {flat_name}: {e}");
+        }
+    }
+
+    // ─── Manifest ───────────────────────────────────────────────────────
+
+    /// Write a manifest entry for a check result (if manifest is configured).
+    fn write_manifest_for_result(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        result: &CheckResultV2,
+    ) {
+        let Some(manifest) = &self.manifest else {
+            return;
+        };
+
+        let flat_name = flat_test_name(test_name, detail_name);
+
+        let (status, actual_hash, baseline_hash, diff_summary) = match result {
+            CheckResultV2::Match { entry_name } => (
+                ManifestStatus::Match,
+                entry_name.as_str(),
+                Some(entry_name.as_str()),
+                None,
+            ),
+            CheckResultV2::WithinTolerance {
+                report,
+                authoritative_name,
+                actual_hash,
+                ..
+            } => {
+                let summary = format!("score:{:.1}", report.score());
+                (
+                    ManifestStatus::Accepted,
+                    actual_hash.as_str(),
+                    Some(authoritative_name.as_str()),
+                    Some(summary),
+                )
+            }
+            CheckResultV2::Failed {
+                actual_hash,
+                authoritative_name,
+                report,
+                ..
+            } => {
+                let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
+                (
+                    ManifestStatus::Failed,
+                    actual_hash.as_str(),
+                    Some(authoritative_name.as_str()),
+                    summary,
+                )
+            }
+            CheckResultV2::NoBaseline { actual_hash, .. } => {
+                (ManifestStatus::Novel, actual_hash.as_str(), None, None)
+            }
+        };
+
+        manifest.write_entry(&ManifestEntry {
+            test_name: &format!("{module}/{flat_name}"),
+            status,
+            actual_hash,
+            baseline_hash,
+            diff_summary: diff_summary.as_deref(),
+        });
+    }
+}
+
+/// Flatten test_name + detail_name into a single identifier.
+fn flat_test_name(test_name: &str, detail_name: &str) -> String {
+    if detail_name.is_empty() {
+        test_name.to_string()
+    } else {
+        format!("{test_name}_{detail_name}")
+    }
+}
+
+/// Decode a PNG reference image to RGBA8 pixels.
+fn decode_reference_png(path: &Path) -> Result<(Vec<u8>, u32, u32), RegressError> {
+    let img = image::open(path)
+        .map_err(|e| RegressError::image(path, e))?
+        .to_rgba8();
+    let (w, h) = img.dimensions();
+    Ok((img.into_raw(), w, h))
+}
+
+/// Convert `&[u8]` to `Vec<[u8; 4]>` (RGBA pixels).
+fn rgba_bytes_to_pixels(bytes: &[u8]) -> Vec<[u8; 4]> {
+    assert!(
+        bytes.len().is_multiple_of(4),
+        "RGBA byte slice length {} is not a multiple of 4",
+        bytes.len()
+    );
+    bytes
+        .chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect()
 }
 
 /// Convert a raw hash ID to a memorable name, stripping any file extension.
 ///
-/// `"sea:a4839401fabae99c.png"` → `"sunny-crab-a4839:sea"`
-///
-/// If the input is already a petname (contains dashes), returns it as-is.
+/// Delegates to [`crate::petname::try_memorable_name`].
 fn hash_to_memorable(hash_id: &str) -> String {
-    // Already a petname (e.g., "brave-panda-26d92981fc:sea")
-    if hash_id.contains('-') {
-        return hash_id.to_string();
-    }
-    // Strip file extension if present (e.g., ".png", ".jpg")
-    let bare = strip_hash_extension(hash_id);
-    crate::petname::memorable_name(bare)
+    crate::petname::try_memorable_name(hash_id)
 }
 
 /// Strip the file extension from a hash ID.
 ///
-/// `"sea:a4839401fabae99c.png"` → `"sea:a4839401fabae99c"`
+/// Delegates to [`crate::petname::strip_hash_extension`].
+#[cfg(test)]
 fn strip_hash_extension(hash_id: &str) -> &str {
-    // Only strip known image extensions at the end
-    for ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".unknown"] {
-        if let Some(stripped) = hash_id.strip_suffix(ext) {
-            return stripped;
-        }
-    }
-    hash_id
+    crate::petname::strip_hash_extension(hash_id)
 }
 
 /// Compare two memorable names by their hex prefix (ignoring words).
@@ -1570,6 +2239,7 @@ tolerance d:1 s:95
             CheckResultV2::Failed {
                 authoritative_name,
                 actual_name,
+                ..
             } => {
                 assert_eq!(authoritative_name, stored_name);
                 assert_ne!(actual_name, stored_name);

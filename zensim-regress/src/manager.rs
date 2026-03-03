@@ -36,6 +36,7 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use zensim::{RgbaSlice, Zensim, ZensimProfile};
 
@@ -44,6 +45,7 @@ use crate::checksum_file::{ChecksumDiff, ChecksumEntry, TestChecksumFile, checks
 use crate::diff_image::create_comparison_montage_raw;
 use crate::error::RegressError;
 use crate::hasher::{ChecksumHasher, SeaHasher};
+use crate::manifest::{ManifestEntry, ManifestStatus, ManifestWriter};
 use crate::remote::ReferenceStorage;
 use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
 
@@ -203,6 +205,7 @@ pub struct ChecksumManager {
     arch_tag: String,
     remote: Option<ReferenceStorage>,
     diff_dir: Option<PathBuf>,
+    manifest: Option<Arc<ManifestWriter>>,
 }
 
 impl ChecksumManager {
@@ -218,6 +221,7 @@ impl ChecksumManager {
             arch_tag: detect_arch_tag().to_string(),
             remote: None,
             diff_dir: None,
+            manifest: None,
         }
     }
 
@@ -275,6 +279,28 @@ impl ChecksumManager {
     /// PNG to `{dir}/{test_name}.png`. Useful as a CI artifact.
     pub fn with_diff_output(mut self, dir: impl Into<PathBuf>) -> Self {
         self.diff_dir = Some(dir.into());
+        self
+    }
+
+    /// Set a shared manifest writer for recording test results as TSV.
+    ///
+    /// Use `Arc<ManifestWriter>` to share a single manifest across multiple
+    /// `ChecksumManager` instances (common in parallel test suites).
+    pub fn with_manifest(mut self, writer: Arc<ManifestWriter>) -> Self {
+        self.manifest = Some(writer);
+        self
+    }
+
+    /// Enable manifest writing from the `REGRESS_MANIFEST_PATH` environment
+    /// variable. No-op if the variable is unset or empty.
+    pub fn with_manifest_from_env(mut self) -> Self {
+        use std::sync::OnceLock;
+        // Process-global: all managers in the same test process share one writer.
+        static GLOBAL: OnceLock<Option<Arc<ManifestWriter>>> = OnceLock::new();
+        let writer = GLOBAL.get_or_init(|| ManifestWriter::from_env().map(Arc::new));
+        if let Some(w) = writer {
+            self.manifest = Some(Arc::clone(w));
+        }
         self
     }
 
@@ -423,8 +449,20 @@ impl ChecksumManager {
         self.check_hash_inner(test_name, actual_hash, None)
     }
 
-    /// Core check logic.
+    /// Core check logic: delegates to impl, then writes manifest entry.
     fn check_hash_inner(
+        &self,
+        test_name: &str,
+        actual_hash: &str,
+        pixels: Option<(&[u8], u32, u32)>,
+    ) -> Result<CheckResult, RegressError> {
+        let result = self.check_hash_impl(test_name, actual_hash, pixels)?;
+        self.write_manifest_for_result(test_name, &result);
+        Ok(result)
+    }
+
+    /// Core check logic (no manifest writing — caller handles that).
+    fn check_hash_impl(
         &self,
         test_name: &str,
         actual_hash: &str,
@@ -444,24 +482,23 @@ impl ChecksumManager {
         }
 
         // Check for direct hash match
-        if let Some(entry) = file.find_by_id(actual_hash) {
-            if entry.is_active() {
-                let confidence = entry.confidence;
+        if let Some(entry) = file.find_by_id(actual_hash)
+            && entry.is_active()
+        {
+            let confidence = entry.confidence;
 
-                // Update arch list if this arch isn't recorded yet
-                if let Some(entry_mut) = file.find_by_id_mut(actual_hash) {
-                    if !entry_mut.arch.iter().any(|a| a == &self.arch_tag) {
-                        entry_mut.arch.push(self.arch_tag.clone());
-                        file.write_to(&path)?;
-                    }
-                }
-
-                return Ok(CheckResult::Match {
-                    entry_id: actual_hash.to_string(),
-                    confidence,
-                });
+            // Update arch list if this arch isn't recorded yet
+            if let Some(entry_mut) = file.find_by_id_mut(actual_hash)
+                && !entry_mut.arch.iter().any(|a| a == &self.arch_tag)
+            {
+                entry_mut.arch.push(self.arch_tag.clone());
+                file.write_to(&path)?;
             }
-            // Matched a retired entry — still a mismatch, fall through to comparison
+
+            return Ok(CheckResult::Match {
+                entry_id: actual_hash.to_string(),
+                confidence,
+            });
         }
 
         // No direct match — try zensim comparison if we have pixels
@@ -790,10 +827,10 @@ impl ChecksumManager {
     ///
     /// Best-effort: logs warning on failure, does not return error.
     pub fn upload_reference_image(&self, checksum_id: &str, local_path: &Path) {
-        if let Some(remote) = &self.remote {
-            if let Err(e) = remote.upload_reference(local_path, checksum_id) {
-                eprintln!("Warning: failed to upload reference {checksum_id}: {e}");
-            }
+        if let Some(remote) = &self.remote
+            && let Err(e) = remote.upload_reference(local_path, checksum_id)
+        {
+            eprintln!("Warning: failed to upload reference {checksum_id}: {e}");
         }
     }
 
@@ -838,6 +875,61 @@ impl ChecksumManager {
             .save(&out_path)
             .map_err(|e| RegressError::image(&out_path, e))?;
         Ok(out_path)
+    }
+
+    /// Write a manifest entry for a check result (if manifest is configured).
+    fn write_manifest_for_result(&self, test_name: &str, result: &CheckResult) {
+        let Some(manifest) = &self.manifest else {
+            return;
+        };
+
+        let (status, actual_hash, baseline_hash, diff_summary) = match result {
+            CheckResult::Match { entry_id, .. } => (
+                ManifestStatus::Match,
+                entry_id.as_str(),
+                Some(entry_id.as_str()),
+                None,
+            ),
+            CheckResult::WithinTolerance {
+                report,
+                authoritative_id,
+                actual_hash,
+                ..
+            } => {
+                let summary = format!("score:{:.1}", report.score());
+                (
+                    ManifestStatus::Accepted,
+                    actual_hash.as_str(),
+                    Some(authoritative_id.as_str()),
+                    Some(summary),
+                )
+            }
+            CheckResult::Failed {
+                actual_hash,
+                authoritative_id,
+                report,
+                ..
+            } => {
+                let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
+                (
+                    ManifestStatus::Failed,
+                    actual_hash.as_str(),
+                    authoritative_id.as_deref(),
+                    summary,
+                )
+            }
+            CheckResult::NoBaseline { actual_hash, .. } => {
+                (ManifestStatus::Novel, actual_hash.as_str(), None, None)
+            }
+        };
+
+        manifest.write_entry(&ManifestEntry {
+            test_name,
+            status,
+            actual_hash,
+            baseline_hash,
+            diff_summary: diff_summary.as_deref(),
+        });
     }
 
     /// Internal: save diff montage if diff_dir is configured.
@@ -1453,5 +1545,115 @@ mod tests {
         let mgr = ChecksumManager::new(dir.path()).with_update_mode_normal();
         // Should not panic when no remote is configured
         mgr.upload_reference_image("sea:test123", Path::new("/nonexistent"));
+    }
+
+    // ─── Manifest integration ───────────────────────────────────────
+
+    #[test]
+    fn manifest_records_match_and_novel() {
+        use crate::manifest::ManifestWriter;
+
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("test-manifest.tsv");
+        let manifest = std::sync::Arc::new(ManifestWriter::create(&manifest_path).unwrap());
+
+        let mgr = ChecksumManager::new(dir.path())
+            .with_update_mode_update()
+            .with_manifest(manifest.clone());
+
+        let px = make_test_pixels(16, 16, 42);
+
+        // First check: no baseline → novel
+        let result = mgr.check_pixels("my_test", &px, 16, 16).unwrap();
+        assert!(matches!(
+            result,
+            CheckResult::NoBaseline {
+                auto_accepted: true,
+                ..
+            }
+        ));
+
+        // Second check: exact match
+        let result = mgr.check_pixels("my_test", &px, 16, 16).unwrap();
+        assert!(matches!(result, CheckResult::Match { .. }));
+
+        drop(manifest);
+        let content = std::fs::read_to_string(&manifest_path).unwrap();
+        let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(data_lines.len(), 2, "manifest content:\n{content}");
+
+        // First line: novel
+        let fields: Vec<&str> = data_lines[0].split('\t').collect();
+        assert_eq!(fields[0], "my_test");
+        assert_eq!(fields[1], "novel");
+
+        // Second line: match
+        let fields: Vec<&str> = data_lines[1].split('\t').collect();
+        assert_eq!(fields[0], "my_test");
+        assert_eq!(fields[1], "match");
+    }
+
+    #[test]
+    fn manifest_records_accepted_and_failed() {
+        use crate::manifest::ManifestWriter;
+
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("test-manifest.tsv");
+        let manifest = std::sync::Arc::new(ManifestWriter::create(&manifest_path).unwrap());
+
+        // Create manager with exact tolerance (default) and no update mode
+        let mgr = ChecksumManager::new(dir.path())
+            .with_update_mode_normal()
+            .with_manifest(manifest.clone());
+
+        let px = make_test_pixels(16, 16, 42);
+        let hash = mgr.hasher.hash_pixels(&px, 16, 16);
+
+        // Create baseline with a reference image
+        let mut file = TestChecksumFile::new("tolerance_test");
+        file.checksum.push(ChecksumEntry {
+            id: hash.clone(),
+            confidence: 10,
+            commit: None,
+            arch: vec![],
+            reason: Some("baseline".to_string()),
+            status: None,
+            diff: None,
+        });
+        file.write_to(&mgr.test_path("tolerance_test")).unwrap();
+
+        // Save reference image
+        mgr.save_reference_image("tolerance_test", &px, 16, 16)
+            .unwrap();
+
+        // Check with slightly different pixels — should fail (exact tolerance)
+        let variant = make_variant_pixels(&px, 5);
+        let result = mgr
+            .check_pixels("tolerance_test", &variant, 16, 16)
+            .unwrap();
+        assert!(matches!(
+            result,
+            CheckResult::Failed {
+                report: Some(_),
+                ..
+            }
+        ));
+
+        drop(manifest);
+        let content = std::fs::read_to_string(&manifest_path).unwrap();
+        let data_lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(data_lines.len(), 1, "manifest content:\n{content}");
+
+        let fields: Vec<&str> = data_lines[0].split('\t').collect();
+        assert_eq!(fields[0], "tolerance_test");
+        assert_eq!(fields[1], "failed");
+        // Should have a score in diff_summary
+        assert!(
+            fields[8].starts_with("score:"),
+            "diff_summary: {}",
+            fields[8]
+        );
+        // Baseline hash should be present
+        assert_eq!(fields[5], hash);
     }
 }

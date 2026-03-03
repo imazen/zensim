@@ -93,6 +93,48 @@ pub struct MemorableNameParts {
     pub algo: String,
 }
 
+// ─── Defensive conversion helpers ────────────────────────────────────────
+
+/// Convert a hash ID (or petname) to a memorable name, handling all edge cases.
+///
+/// Safe to call with any of:
+/// - Raw hash: `"sea:a4839401fabae99c"` → `"sunny-crab-a4839401fa:sea"`
+/// - Hash with extension: `"sea:a4839401fabae99c.png"` → `"sunny-crab-a4839401fa:sea"`
+/// - Already a petname: `"sunny-crab-a4839401fa:sea"` → returned as-is
+/// - Short/malformed hash: `"sea:abc"` → returned as-is
+///
+/// This is the recommended entry point for converting arbitrary hash strings
+/// to memorable names. Unlike [`memorable_name`], this function never panics.
+pub fn try_memorable_name(hash_id: &str) -> String {
+    // Already a petname (contains dashes from adj-noun format)
+    if hash_id.contains('-') {
+        return hash_id.to_string();
+    }
+    // Strip file extension if present
+    let bare = strip_hash_extension(hash_id);
+    // Check if the hex portion is long enough for word generation
+    let hex_len = bare.split_once(':').map(|(_, hex)| hex.len()).unwrap_or(0);
+    if hex_len >= 14 {
+        memorable_name(bare)
+    } else {
+        bare.to_string()
+    }
+}
+
+/// Strip known image file extensions from a hash ID.
+///
+/// `"sea:a4839401fabae99c.png"` → `"sea:a4839401fabae99c"`
+///
+/// Returns the input unchanged if no known extension is found.
+pub fn strip_hash_extension(hash_id: &str) -> &str {
+    for ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".unknown"] {
+        if let Some(stripped) = hash_id.strip_suffix(ext) {
+            return stripped;
+        }
+    }
+    hash_id
+}
+
 // ─── Word lists ──────────────────────────────────────────────────────────
 //
 // 256 adjectives and 256 nouns, each 3-6 characters.
@@ -259,5 +301,61 @@ mod tests {
                 let _ = memorable_name(&hex);
             }
         }
+    }
+
+    // ─── try_memorable_name tests ───────────────────────────────────
+
+    #[test]
+    fn try_memorable_name_normal_hash() {
+        let result = try_memorable_name("sea:a4839401fabae99c");
+        assert!(result.contains("-"), "expected petname, got: {result}");
+        assert!(result.ends_with(":sea"));
+    }
+
+    #[test]
+    fn try_memorable_name_with_extension() {
+        let without = try_memorable_name("sea:a4839401fabae99c");
+        let with_png = try_memorable_name("sea:a4839401fabae99c.png");
+        let with_jpg = try_memorable_name("sea:a4839401fabae99c.jpg");
+        assert_eq!(without, with_png);
+        assert_eq!(without, with_jpg);
+    }
+
+    #[test]
+    fn try_memorable_name_already_petname() {
+        let petname = "sunny-crab-a4839401fa:sea";
+        assert_eq!(try_memorable_name(petname), petname);
+    }
+
+    #[test]
+    fn try_memorable_name_short_hash() {
+        assert_eq!(try_memorable_name("sea:abc"), "sea:abc");
+    }
+
+    #[test]
+    fn try_memorable_name_no_colon() {
+        assert_eq!(try_memorable_name("deadbeef"), "deadbeef");
+    }
+
+    // ─── strip_hash_extension tests ─────────────────────────────────
+
+    #[test]
+    fn strip_extension_png() {
+        assert_eq!(strip_hash_extension("sea:abc123.png"), "sea:abc123");
+    }
+
+    #[test]
+    fn strip_extension_none() {
+        assert_eq!(strip_hash_extension("sea:abc123"), "sea:abc123");
+    }
+
+    #[test]
+    fn strip_extension_unknown() {
+        assert_eq!(strip_hash_extension("sea:abc123.unknown"), "sea:abc123");
+    }
+
+    #[test]
+    fn strip_extension_webp() {
+        assert_eq!(strip_hash_extension("sea:abc123.webp"), "sea:abc123");
     }
 }
