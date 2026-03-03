@@ -199,6 +199,27 @@ pub fn print_comparison(
     let _ = handle.flush();
 }
 
+/// Save a 3-panel comparison (Expected | Actual | Diff) as a PNG file.
+///
+/// Like [`print_comparison_raw`] but writes to disk instead of stdout.
+pub fn save_comparison_png(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+    max_width: Option<u32>,
+    path: &std::path::Path,
+) {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions for pixel data");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions for pixel data");
+    let montage = crate::diff_image::create_comparison_montage(&exp_img, &act_img, amplification, 2);
+    let montage = maybe_resize(&montage, max_width);
+    montage.save(path).expect("failed to save comparison PNG");
+}
+
 /// Print a 3-panel comparison from raw RGBA byte slices.
 ///
 /// Convenience wrapper for callers that don't use the `image` crate directly.
