@@ -799,10 +799,16 @@ impl ChecksumManagerV2 {
         let section = file.find_section(test_name, detail_name);
 
         // Check if actual matches any active entry
+        // In replace mode, require exact match so old petnames get replaced.
         if let Some(section) = section {
             let active: Vec<&ChecksumEntry2> = section.active_entries().collect();
             for entry in &active {
-                if names_match(&entry.name_hash, &actual_name) {
+                let is_match = if self.replace_mode {
+                    entry.name_hash == actual_name
+                } else {
+                    names_match(&entry.name_hash, &actual_name)
+                };
+                if is_match {
                     return Ok(CheckResultV2::Match {
                         entry_name: entry.name_hash.clone(),
                     });
