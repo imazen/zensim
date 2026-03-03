@@ -592,7 +592,18 @@ pub fn migrate_toml_dir(
 
         // Convert checksum entries
         for cs in &toml_file.checksum {
-            let name_hash = memorable_name(&cs.id);
+            // Legacy hashes are raw hex without algo prefix (no ':' separator).
+            // Modern hashes are "algo:hex" format (e.g., "sea:a4839401fabae99c").
+            let name_hash = if cs.id.contains(':') {
+                memorable_name(&cs.id)
+            } else {
+                // Legacy: use truncated hex as the name_hash directly
+                if cs.id.len() > 10 {
+                    format!("legacy-{}", &cs.id[..10].to_lowercase())
+                } else {
+                    format!("legacy-{}", cs.id.to_lowercase())
+                }
+            };
 
             let kind = if cs.confidence > 0 && cs.status.as_deref() != Some("wrong") {
                 EntryKind::HumanVerified
@@ -619,7 +630,13 @@ pub fn migrate_toml_dir(
 
             // Convert diff evidence
             if let Some(ref diff) = cs.diff {
-                entry.vs_ref = Some(memorable_name(&diff.vs));
+                entry.vs_ref = Some(if diff.vs.contains(':') {
+                    memorable_name(&diff.vs)
+                } else if diff.vs.len() > 10 {
+                    format!("legacy-{}", &diff.vs[..10].to_lowercase())
+                } else {
+                    format!("legacy-{}", diff.vs.to_lowercase())
+                });
                 // Build a simple diff summary from the stored data
                 let mut parts = Vec::new();
                 parts.push(format!("zs:{:.2}", diff.zensim_score));
@@ -663,10 +680,13 @@ pub fn migrate_toml_dir(
 
 /// Split a test name into (test_name, detail_name) using a simple heuristic.
 ///
-/// If the name contains a space, split on the first space.
+/// First tries space separator (most common): `"test_name detail_name"`.
+/// Then tries slash separator (loop tests): `"test_name/Variant"`.
 /// Otherwise, treat the whole string as the test name with empty detail.
 fn split_test_detail(full_name: &str) -> (String, String) {
     if let Some((test, detail)) = full_name.split_once(' ') {
+        (test.to_string(), detail.to_string())
+    } else if let Some((test, detail)) = full_name.split_once('/') {
         (test.to_string(), detail.to_string())
     } else {
         (full_name.to_string(), String::new())
