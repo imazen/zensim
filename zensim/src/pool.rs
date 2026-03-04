@@ -11,6 +11,12 @@ pub(crate) struct ScaleBuffers {
     pub temp_blur: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
+    /// Per-pixel SSIM error map (for extended percentile features).
+    pub ssim_map: Vec<f32>,
+    /// Per-pixel edge artifact map (for extended percentile features).
+    pub art_map: Vec<f32>,
+    /// Per-pixel edge detail_lost map (for extended percentile features).
+    pub det_map: Vec<f32>,
 }
 
 impl ScaleBuffers {
@@ -23,6 +29,9 @@ impl ScaleBuffers {
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
             mask: vec![0.0; size],
+            ssim_map: Vec::new(),
+            art_map: Vec::new(),
+            det_map: Vec::new(),
         }
     }
 
@@ -34,5 +43,13 @@ impl ScaleBuffers {
         self.sigma12.resize(size, 0.0);
         self.temp_blur.resize(size, 0.0);
         self.mask.resize(size, 0.0);
+        // ssim_map/art_map/det_map are only allocated on demand by extended features
+    }
+
+    /// Ensure extended per-pixel map buffers are allocated.
+    pub fn ensure_extended_maps(&mut self, size: usize) {
+        self.ssim_map.resize(size, 0.0);
+        self.art_map.resize(size, 0.0);
+        self.det_map.resize(size, 0.0);
     }
 }

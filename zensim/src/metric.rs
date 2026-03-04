@@ -186,6 +186,29 @@ pub struct ZensimConfig {
     /// Typical training range: 2.0–8.0.
     pub masking_strength: f32,
 
+    /// Compute extended features (25 per channel instead of 13; default: false).
+    ///
+    /// When true, adds 12 extra features per channel per scale:
+    /// - 6 masked features (SSIM/edge/MSE weighted by source flatness)
+    /// - 6 percentile/max features (worst-case SSIM/edge errors)
+    ///
+    /// **Performance:** forces the full-image path (no streaming) and adds ~25%
+    /// overhead per scale. Intended for training exploration only — production
+    /// scoring uses the standard 13-feature path.
+    ///
+    /// The masking strength for extended features is controlled by
+    /// `extended_masking_strength` (separate from `masking_strength`).
+    pub extended_features: bool,
+
+    /// Masking strength for extended masked features (default: 4.0).
+    ///
+    /// Only used when `extended_features` is true. Controls the flatness mask:
+    /// `mask[i] = 1 / (1 + k * blur(|src - mu|))`.
+    ///
+    /// Higher values = more aggressive masking of textured regions.
+    /// Typical range: 2.0–8.0.
+    pub extended_masking_strength: f32,
+
     /// Maximum number of downscale levels (default: 4).
     ///
     /// Each level halves resolution. 4 scales covers 1×, 2×, 4×, 8× — sufficient
@@ -215,6 +238,8 @@ impl Default for ZensimConfig {
             blur_radius: 5,
             blur_passes: 1,
             compute_all_features: false,
+            extended_features: false,
+            extended_masking_strength: 4.0,
             masking_strength: 0.0,
             num_scales: crate::NUM_SCALES,
             score_mapping_a: 18.0,
@@ -320,6 +345,7 @@ pub fn compute_zensim_with_ref_and_config(
 }
 
 /// Per-scale statistics collected during computation.
+#[derive(Default)]
 pub(crate) struct ScaleStats {
     /// SSIM statistics: [mean_d, root4_d] per channel = 6 values
     pub(crate) ssim: [f64; 6],
@@ -340,6 +366,27 @@ pub(crate) struct ScaleStats {
     /// High-frequency energy gain (L2): max(0, Σ(dst-mu_dst)²/Σ(src-mu_src)² - 1) per channel.
     /// Measures added local detail energy (ringing, sharpening artifacts).
     pub(crate) hf_energy_gain: [f64; 3],
+    // --- Extended features (only populated when extended_features=true) ---
+    /// Masked SSIM: [mean, 4th, 2nd] per channel = 9 values
+    pub(crate) masked_ssim: [f64; 9],
+    /// Masked edge artifact L4 per channel = 3 values
+    pub(crate) masked_art_4th: [f64; 3],
+    /// Masked edge detail_lost L4 per channel = 3 values
+    pub(crate) masked_det_4th: [f64; 3],
+    /// Masked MSE per channel = 3 values
+    pub(crate) masked_mse: [f64; 3],
+    /// Max SSIM error per channel = 3 values
+    pub(crate) ssim_max: [f64; 3],
+    /// Max edge artifact per channel = 3 values
+    pub(crate) art_max: [f64; 3],
+    /// Max edge detail_lost per channel = 3 values
+    pub(crate) det_max: [f64; 3],
+    /// 95th percentile SSIM error per channel = 3 values
+    pub(crate) ssim_p95: [f64; 3],
+    /// 95th percentile edge artifact per channel = 3 values
+    pub(crate) art_p95: [f64; 3],
+    /// 95th percentile edge detail_lost per channel = 3 values
+    pub(crate) det_p95: [f64; 3],
 }
 
 /// Result from a zensim comparison.
@@ -923,7 +970,12 @@ fn compute_with_config_inner(
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
-        let num_features = config.num_scales * 3 * FEATURES_PER_CHANNEL_BASIC;
+        let fpc = if config.extended_features {
+            FEATURES_PER_CHANNEL_EXTENDED
+        } else {
+            FEATURES_PER_CHANNEL_BASIC
+        };
+        let num_features = config.num_scales * 3 * fpc;
         return ZensimResult {
             score: 100.0,
             raw_distance: 0.0,
@@ -934,7 +986,8 @@ fn compute_with_config_inner(
     }
 
     let masked = config.masking_strength > 0.0;
-    if !masked {
+    // Extended features require the full-image path (per-pixel maps needed)
+    if !masked && !config.extended_features {
         return crate::streaming::compute_zensim_streaming(source, distorted, config, weights);
     }
 
@@ -972,6 +1025,8 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
         compute_all_features: false,
+        extended_features: false,
+        extended_masking_strength: 4.0,
         masking_strength: params.masking_strength,
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
@@ -1001,6 +1056,29 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
 ///
 /// Total features = `num_scales × 3 channels × 13` = 156 at 4 scales.
 pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
+
+/// Extended features per channel per scale: 25 features (13 basic + 12 extended).
+///
+/// ```text
+///  Index  Name               Pooling  Source
+///  ─────  ─────────────────  ───────  ──────────────────
+///  0–12   (same as basic)
+///  13     masked_ssim_mean   mean     SSIM × flatness mask
+///  14     masked_ssim_4th    L4       SSIM × flatness mask
+///  15     masked_ssim_2nd    L2       SSIM × flatness mask
+///  16     masked_art_4th     L4       edge artifact × flatness mask
+///  17     masked_det_4th     L4       edge detail_lost × flatness mask
+///  18     masked_mse         mean     (src-dst)² × flatness mask
+///  19     ssim_max           max      per-pixel SSIM error
+///  20     art_max            max      per-pixel edge artifact
+///  21     det_max            max      per-pixel edge detail_lost
+///  22     ssim_p95           p95      per-pixel SSIM error
+///  23     art_p95            p95      per-pixel edge artifact
+///  24     det_p95            p95      per-pixel edge detail_lost
+/// ```
+///
+/// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
+pub const FEATURES_PER_CHANNEL_EXTENDED: usize = 25;
 
 /// Compute zensim with custom configuration (training API).
 ///
@@ -1140,6 +1218,17 @@ struct ChannelResult {
     hf_energy_gain: f64, // max(0, hf_L2_dst / hf_L2_src - 1)
     ssim_2nd: f64,       // root2 pooled SSIM
     edge_2nd: [f64; 2],  // [art_2nd, det_2nd]
+    // Extended features (only populated when extended_features=true):
+    masked_ssim: [f64; 3],  // [mean, 4th, 2nd] weighted by flatness mask
+    masked_art_4th: f64,    // L4 edge artifact weighted by flatness mask
+    masked_det_4th: f64,    // L4 edge detail_lost weighted by flatness mask
+    masked_mse: f64,        // MSE weighted by flatness mask
+    ssim_max: f64,          // max per-pixel SSIM error
+    art_max: f64,           // max per-pixel edge artifact
+    det_max: f64,           // max per-pixel edge detail_lost
+    ssim_p95: f64,          // 95th percentile SSIM error
+    art_p95: f64,           // 95th percentile edge artifact
+    det_p95: f64,           // 95th percentile edge detail_lost
 }
 
 /// Compute SSIM and/or edge features for a single channel.
@@ -1368,6 +1457,16 @@ fn compute_channel(
         hf_energy_gain,
         ssim_2nd,
         edge_2nd,
+        masked_ssim: [0.0; 3],
+        masked_art_4th: 0.0,
+        masked_det_4th: 0.0,
+        masked_mse: 0.0,
+        ssim_max: 0.0,
+        art_max: 0.0,
+        det_max: 0.0,
+        ssim_p95: 0.0,
+        art_p95: 0.0,
+        det_p95: 0.0,
     }
 }
 
@@ -1485,6 +1584,7 @@ pub(crate) fn compute_single_scale(
         hf_energy_gain: hf_energy_gain_vals,
         ssim_2nd: ssim_2nd_vals,
         edge_2nd: edge_2nd_vals,
+        ..Default::default()
     }
 }
 
@@ -1663,6 +1763,7 @@ fn compute_single_scale_phased(
         sigma12: ref mut sig12,
         temp_blur: ref mut temp1,
         mask: _,
+        ..
     } = *bufs;
     let ScaleBuffers {
         mul_buf: ref mut scratch2,
@@ -1672,6 +1773,7 @@ fn compute_single_scale_phased(
         sigma12: _,
         temp_blur: ref mut temp2,
         mask: _,
+        ..
     } = *parallel_bufs;
 
     if let Some((sc, sc_need_edge)) = ssim_ch {

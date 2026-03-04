@@ -161,6 +161,7 @@ impl ScaleAccumulators {
             hf_energy_gain,
             ssim_2nd,
             edge_2nd,
+            ..Default::default()
         }
     }
 }
