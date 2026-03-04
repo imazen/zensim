@@ -103,6 +103,8 @@ enum TargetMetric {
     CpuSsim2,
     /// CPU Butteraugli (butteraugli crate)
     CpuButteraugli,
+    /// DSSIM (structural dissimilarity)
+    Dssim,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -402,19 +404,217 @@ fn main() {
                     args.max_images,
                     args.target_metric,
                 );
-                let ds = build_dataset_from_cache(cached, &pairs);
-                println!(
-                    "Loaded {} pairs ({} features) from cache {:?} ({:.1}s)",
-                    ds.human_scores.len(),
-                    if ds.features.is_empty() {
-                        0
+
+                // Check if cache covers all pairs — if not, extract missing ones
+                let max_cached_idx =
+                    cached.valid_indices.iter().copied().max().unwrap_or(0) as usize;
+                let cached_count = cached.valid_indices.len();
+
+                if max_cached_idx < pairs.len().saturating_sub(1) && pairs.len() > cached_count {
+                    // Incremental: cache is from a smaller dataset, extract new pairs
+                    let cached_set: std::collections::HashSet<u32> =
+                        cached.valid_indices.iter().copied().collect();
+                    let new_pairs: Vec<(usize, ImagePair)> = pairs
+                        .iter()
+                        .enumerate()
+                        .filter(|(idx, p)| {
+                            !cached_set.contains(&(*idx as u32)) && !p.human_score.is_nan()
+                        })
+                        .map(|(idx, p)| (idx, p.clone()))
+                        .collect();
+                    let n_new = new_pairs.len();
+
+                    println!(
+                        "Cache has {} pairs, dataset has {} — extracting {} new pairs",
+                        cached_count,
+                        pairs.len(),
+                        n_new
+                    );
+
+                    let ds = build_dataset_from_cache(cached, &pairs);
+                    if n_new == 0 {
+                        ds
                     } else {
-                        ds.features[0].len()
-                    },
-                    cache_path,
-                    cache_start.elapsed().as_secs_f64()
-                );
-                ds
+                        // Extract features for new pairs using same logic as load_and_compute
+                        let config = zensim::ZensimConfig {
+                            compute_all_features: compute_all,
+                            blur_passes,
+                            blur_radius,
+                            masking_strength,
+                            num_scales,
+                            score_mapping_a: 18.0,
+                            score_mapping_b: 0.7,
+                        };
+                        let nan_result = zensim::ZensimResult {
+                            score: f64::NAN,
+                            raw_distance: f64::NAN,
+                            features: vec![],
+                            profile: zensim::ZensimProfile::PreviewV0_1,
+                            mean_offset: [f64::NAN; 3],
+                        };
+
+                        // Group new pairs by reference
+                        let mut by_ref: std::collections::BTreeMap<
+                            PathBuf,
+                            Vec<(usize, ImagePair)>,
+                        > = std::collections::BTreeMap::new();
+                        for (idx, pair) in new_pairs {
+                            by_ref
+                                .entry(pair.reference.clone())
+                                .or_default()
+                                .push((idx, pair));
+                        }
+
+                        let pb = ProgressBar::new(n_new as u64);
+                        pb.set_style(
+                            ProgressStyle::default_bar()
+                                .template(
+                                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({per_sec}) {msg}",
+                                )
+                                .unwrap(),
+                        );
+
+                        let ref_groups: Vec<(PathBuf, Vec<(usize, ImagePair)>)> =
+                            by_ref.into_iter().collect();
+
+                        let group_results: Vec<
+                            Vec<(usize, String, f64, zensim::ZensimResult)>,
+                        > = ref_groups
+                            .par_iter()
+                            .map(|(ref_path, group)| {
+                                let fail = |grp: &[(usize, ImagePair)]| -> Vec<_> {
+                                    pb.inc(grp.len() as u64);
+                                    grp.iter()
+                                        .map(|(idx, pair)| {
+                                            (
+                                                *idx,
+                                                reference_key(pair),
+                                                pair.human_score,
+                                                nan_result.clone(),
+                                            )
+                                        })
+                                        .collect()
+                                };
+
+                                let src_img = match image::open(ref_path) {
+                                    Ok(img) => img.to_rgb8(),
+                                    Err(_) => return fail(group),
+                                };
+                                let (w, h) = src_img.dimensions();
+                                let src_pixels: Vec<[u8; 3]> = src_img
+                                    .pixels()
+                                    .map(|p| [p.0[0], p.0[1], p.0[2]])
+                                    .collect();
+
+                                let precomputed =
+                                    match zensim::precompute_reference_with_scales(
+                                        &src_pixels,
+                                        w as usize,
+                                        h as usize,
+                                        num_scales,
+                                    ) {
+                                        Ok(p) => p,
+                                        Err(_) => return fail(group),
+                                    };
+
+                                group
+                                    .par_iter()
+                                    .map(|(idx, pair)| {
+                                        let key = reference_key(pair);
+                                        let result = match image::open(&pair.distorted) {
+                                            Ok(img) => {
+                                                let dst = img.to_rgb8();
+                                                let (dw, dh) = dst.dimensions();
+                                                if dw != w || dh != h {
+                                                    nan_result.clone()
+                                                } else {
+                                                    let dst_pixels: Vec<[u8; 3]> = dst
+                                                        .pixels()
+                                                        .map(|p| [p.0[0], p.0[1], p.0[2]])
+                                                        .collect();
+                                                    zensim::compute_zensim_with_ref_and_config(
+                                                        &precomputed,
+                                                        &dst_pixels,
+                                                        w as usize,
+                                                        h as usize,
+                                                        config,
+                                                    )
+                                                    .unwrap_or_else(|_| nan_result.clone())
+                                                }
+                                            }
+                                            Err(_) => nan_result.clone(),
+                                        };
+                                        pb.inc(1);
+                                        (*idx, key, pair.human_score, result)
+                                    })
+                                    .collect()
+                            })
+                            .collect();
+
+                        pb.finish_with_message("done");
+
+                        // Merge cached + new features
+                        let mut all_human_scores = ds.human_scores;
+                        let mut all_features = ds.features;
+                        let mut all_ref_keys = ds.ref_keys;
+                        let mut all_valid_indices: Vec<u32> = cached_set.into_iter().collect();
+
+                        let mut new_results: Vec<_> = group_results.into_iter().flatten().collect();
+                        new_results.sort_by_key(|(idx, _, _, _)| *idx);
+
+                        let mut n_new_valid = 0usize;
+                        for (idx, key, hs, result) in new_results {
+                            if result.score.is_finite() {
+                                all_human_scores.push(hs);
+                                all_features.push(result.features);
+                                all_ref_keys.push(key);
+                                all_valid_indices.push(idx as u32);
+                                n_new_valid += 1;
+                            }
+                        }
+                        all_valid_indices.sort();
+
+                        println!(
+                            "  Incremental: {} new valid pairs (total {})",
+                            n_new_valid,
+                            all_features.len()
+                        );
+
+                        let merged = DatasetWithFeatures {
+                            name: ds.name,
+                            human_scores: all_human_scores,
+                            features: all_features,
+                            ref_keys: all_ref_keys,
+                        };
+
+                        // Save updated cache
+                        if let Err(e) = save_feature_cache(
+                            &cache_path,
+                            &merged,
+                            &all_valid_indices,
+                            &cache_config,
+                        ) {
+                            eprintln!("Warning: failed to save updated cache: {}", e);
+                        } else {
+                            println!("Saved updated feature cache to {:?}", cache_path);
+                        }
+                        merged
+                    }
+                } else {
+                    let ds = build_dataset_from_cache(cached, &pairs);
+                    println!(
+                        "Loaded {} pairs ({} features) from cache {:?} ({:.1}s)",
+                        ds.human_scores.len(),
+                        if ds.features.is_empty() {
+                            0
+                        } else {
+                            ds.features[0].len()
+                        },
+                        cache_path,
+                        cache_start.elapsed().as_secs_f64()
+                    );
+                    ds
+                }
             }
             _ => {
                 let (ds, valid_indices) = load_and_compute(
@@ -726,6 +926,7 @@ fn main() {
                 Some(TargetMetric::GpuButteraugli) => "_gpu_butteraugli",
                 Some(TargetMetric::CpuSsim2) => "_cpu_ssim2",
                 Some(TargetMetric::CpuButteraugli) => "_cpu_butteraugli",
+                Some(TargetMetric::Dssim) => "_dssim",
                 None => "",
             };
 
@@ -797,18 +998,40 @@ fn load_pairs(
 
 /// Build a DatasetWithFeatures from cached features + freshly loaded pairs.
 /// Uses valid_indices to look up human_scores from the original pairs list.
+/// Filters out any cached entries whose indices exceed the pairs list
+/// (can happen when the cache was built from a larger CSV than the current
+/// target metric supports, e.g., DSSIM skips rows without dssim scores).
 fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> DatasetWithFeatures {
-    let human_scores: Vec<f64> = cached
-        .valid_indices
-        .iter()
-        .map(|&idx| pairs[idx as usize].human_score)
-        .collect();
+    let n_pairs = pairs.len();
+    let mut human_scores = Vec::with_capacity(cached.valid_indices.len());
+    let mut features = Vec::with_capacity(cached.valid_indices.len());
+    let mut ref_keys = Vec::with_capacity(cached.valid_indices.len());
+
+    let mut nan_skipped = 0usize;
+    for (i, &idx) in cached.valid_indices.iter().enumerate() {
+        if (idx as usize) < n_pairs {
+            let score = pairs[idx as usize].human_score;
+            // Skip NaN placeholder pairs (rows without target metric, e.g. missing dssim)
+            if score.is_nan() {
+                nan_skipped += 1;
+                continue;
+            }
+            human_scores.push(score);
+            features.push(cached.features[i].clone());
+            ref_keys.push(cached.ref_keys[i].clone());
+        }
+    }
+    if nan_skipped > 0 {
+        eprintln!(
+            "  Skipped {nan_skipped} cached entries with NaN human_score (missing target metric)"
+        );
+    }
 
     DatasetWithFeatures {
         name: cached.name,
         human_scores,
-        features: cached.features,
-        ref_keys: cached.ref_keys,
+        features,
+        ref_keys,
     }
 }
 
@@ -2581,6 +2804,7 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
         TargetMetric::GpuButteraugli => col("gpu_butteraugli").or_else(|| col("butteraugli")),
         TargetMetric::CpuSsim2 => col("cpu_ssimulacra2"),
         TargetMetric::CpuButteraugli => col("cpu_butteraugli"),
+        TargetMetric::Dssim => col("dssim"),
     }
     .unwrap_or_else(|| {
         eprintln!("CSV missing column for {:?}", metric);
@@ -2592,6 +2816,7 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
     });
 
     let is_ssim2 = matches!(metric, TargetMetric::GpuSsim2 | TargetMetric::CpuSsim2);
+    let is_dssim = matches!(metric, TargetMetric::Dssim);
 
     let mut pairs = Vec::new();
     let mut skipped = 0usize;
@@ -2612,6 +2837,12 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
         let raw_score: f64 = match record[metric_col].parse() {
             Ok(v) => v,
             Err(_) => {
+                // Insert NaN placeholder to preserve row indices for cache alignment
+                pairs.push(ImagePair {
+                    reference: source_path,
+                    distorted: decoded_path,
+                    human_score: f64::NAN,
+                });
                 skipped += 1;
                 continue;
             }
@@ -2620,11 +2851,20 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
         // Normalize to 0-1, higher = better
         let score = if is_ssim2 {
             ((raw_score + 50.0) / 150.0).clamp(0.0, 1.0)
+        } else if is_dssim {
+            // DSSIM: 0 = identical, ~0.1 = poor. Scale by 100 for better spread.
+            1.0 / (1.0 + 100.0 * raw_score)
         } else {
             1.0 / (1.0 + raw_score)
         };
 
         if !score.is_finite() {
+            // Insert NaN placeholder to preserve row indices for cache alignment
+            pairs.push(ImagePair {
+                reference: source_path,
+                distorted: decoded_path,
+                human_score: f64::NAN,
+            });
             skipped += 1;
             continue;
         }

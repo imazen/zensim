@@ -1,90 +1,87 @@
 //! Approximate mappings between zensim scores and other image quality metrics.
 //!
-//! These mappings are empirically fitted from JPEG compression at various
-//! quality levels across photo corpora (CID22 + CLIC2025, 71 images,
-//! libjpeg-turbo q5-q98). They represent median behavior on natural images;
-//! individual images can deviate significantly.
+//! Power-law fits calibrated on ~158k synthetic pairs across 4 codecs
+//! (mozjpeg, jpegli, jpegli-xyb, zenwebp), quality levels q5–q100, and
+//! ~3400 source images (CID22 + CLIC2025 + Kodak + gb82-sc).
+//! Individual images can deviate significantly from these medians.
 //!
 //! All functions use power-law fits and support the full useful range.
 //! Extrapolation beyond the calibration range is clamped.
 
 /// Approximate SSIMULACRA2 score from a zensim score.
 ///
-/// Fitted from: `(100-zensim) = 0.6737 * (100-ssim2)^0.9043`
-/// Inverted: `ssim2 = 100 - ((100-zensim) / 0.6737)^(1/0.9043)`
-///
-/// Accurate to ~1-2 points for zensim > 60 (JPEG q >= 15).
-/// Less reliable at extreme low quality where ssim2 goes negative.
+/// Fitted from: `(100-zensim) = 0.7357 * (100-ssim2)^0.9511`
+/// Calibrated on 152k synthetic pairs (4 codecs, q5–q100).
+/// Median absolute error: ~1.7 zensim points.
 pub fn zensim_to_ssim2(zensim: f64) -> f64 {
     if zensim >= 100.0 {
         return 100.0;
     }
     let zd = (100.0 - zensim).max(0.0);
-    let sd = (zd / 0.6737).powf(1.0 / 0.9043);
+    let sd = (zd / 0.7357).powf(1.0 / 0.9511);
     100.0 - sd
 }
 
 /// Approximate zensim score from an SSIMULACRA2 score.
 ///
-/// Fitted from: `(100-zensim) = 0.6737 * (100-ssim2)^0.9043`
-///
-/// Accurate to ~1-2 points for ssim2 > 15.
+/// Fitted from: `(100-zensim) = 0.7357 * (100-ssim2)^0.9511`
+/// Calibrated on 152k synthetic pairs (4 codecs, q5–q100).
 pub fn ssim2_to_zensim(ssim2: f64) -> f64 {
     if ssim2 >= 100.0 {
         return 100.0;
     }
     let sd = (100.0 - ssim2).max(0.0);
-    let zd = 0.6737 * sd.powf(0.9043);
+    let zd = 0.7357 * sd.powf(0.9511);
     (100.0 - zd).max(0.0)
 }
 
 /// Approximate butteraugli distance from a zensim score.
 ///
-/// Fitted from: `zensim = 100 - 4.4721 * BA^0.8854`
-/// Inverted: `BA = ((100-zensim) / 4.4721)^(1/0.8854)`
-///
-/// Accurate to ~0.5 BA for zensim > 70 (BA < ~7).
-/// Less reliable at extreme low quality (BA > 10).
+/// Fitted from: `zensim = 100 - 12.1734 * BA^0.5178`
+/// Calibrated on 157k synthetic pairs (4 codecs, q5–q100).
+/// Note: butteraugli correlates poorly with zensim (SROCC 0.79),
+/// so this mapping has high error (MAE ~8 zensim points).
 pub fn zensim_to_butteraugli(zensim: f64) -> f64 {
     if zensim >= 100.0 {
         return 0.0;
     }
     let zd = (100.0 - zensim).max(0.0);
-    (zd / 4.4721).powf(1.0 / 0.8854)
+    (zd / 12.1734).powf(1.0 / 0.5178)
 }
 
 /// Approximate zensim score from a butteraugli distance.
 ///
-/// Fitted from: `zensim = 100 - 4.4721 * BA^0.8854`
-///
-/// Accurate to ~2 points for BA < 7 (zensim > 70).
+/// Fitted from: `zensim = 100 - 12.1734 * BA^0.5178`
+/// Calibrated on 157k synthetic pairs. High variance (MAE ~8 points).
 pub fn butteraugli_to_zensim(ba: f64) -> f64 {
     if ba <= 0.0 {
         return 100.0;
     }
-    (100.0 - 4.4721 * ba.powf(0.8854)).max(0.0)
+    (100.0 - 12.1734 * ba.powf(0.5178)).max(0.0)
 }
 
 /// Approximate DSSIM value from a zensim score.
 ///
-/// Fitted from: `zensim = 100 - 214.337 * dssim^0.4317`
-/// Inverted: `dssim = ((100-zensim) / 214.337)^(1/0.4317)`
+/// Fitted from: `zensim = 100 - 372.248 * dssim^0.4974`
+/// Calibrated on 157k synthetic pairs (4 codecs, q5–q100).
+/// Median absolute error: ~1.9 zensim points.
 pub fn zensim_to_dssim(zensim: f64) -> f64 {
     if zensim >= 100.0 {
         return 0.0;
     }
     let zd = (100.0 - zensim).max(0.0);
-    (zd / 214.337).powf(1.0 / 0.4317)
+    (zd / 372.248).powf(1.0 / 0.4974)
 }
 
 /// Approximate zensim score from a DSSIM value.
 ///
-/// Fitted from: `zensim = 100 - 214.337 * dssim^0.4317`
+/// Fitted from: `zensim = 100 - 372.248 * dssim^0.4974`
+/// Calibrated on 157k synthetic pairs (4 codecs, q5–q100).
 pub fn dssim_to_zensim(dssim: f64) -> f64 {
     if dssim <= 0.0 {
         return 100.0;
     }
-    (100.0 - 214.337 * dssim.powf(0.4317)).max(0.0)
+    (100.0 - 372.248 * dssim.powf(0.4974)).max(0.0)
 }
 
 /// Approximate libjpeg-turbo quality from a zensim score (natural images).
@@ -313,25 +310,23 @@ mod tests {
 
     #[test]
     fn known_calibration_points() {
-        // From empirical medians: JPEG q=50 on photos
-        // zensim=82.0, ssim2=63.5, BA=4.82, dssim=0.003312
-
+        // From 158k synthetic pairs: at zensim=82 (typical JPEG q50)
         let s = zensim_to_ssim2(82.0);
         assert!(
-            (s - 63.5).abs() < 3.0,
-            "at zensim=82: expected ssim2~63.5, got {s}"
+            (s - 71.2).abs() < 3.0,
+            "at zensim=82: expected ssim2~71.2, got {s}"
         );
 
         let b = zensim_to_butteraugli(82.0);
         assert!(
-            (b - 4.82).abs() < 1.5,
-            "at zensim=82: expected BA~4.82, got {b}"
+            (b - 2.13).abs() < 1.5,
+            "at zensim=82: expected BA~2.13, got {b}"
         );
 
         let d = zensim_to_dssim(82.0);
         assert!(
-            (d - 0.003312).abs() < 0.002,
-            "at zensim=82: expected dssim~0.003, got {d}"
+            (d - 0.00227).abs() < 0.002,
+            "at zensim=82: expected dssim~0.00227, got {d}"
         );
     }
 
