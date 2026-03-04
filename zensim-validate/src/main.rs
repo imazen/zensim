@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
     about = "Validate zensim against human quality ratings"
 )]
 struct Args {
-    /// Dataset directory (e.g., /mnt/v/dataset/tid2013)
+    /// Dataset directory (e.g., ./datasets/tid2013)
     #[arg(long)]
     dataset: PathBuf,
 

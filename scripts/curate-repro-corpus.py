@@ -11,7 +11,11 @@ import os
 import shutil
 import sys
 
-MANIFEST = "/mnt/v/output/corpus-builder/repro-images/manifest.jsonl"
+MANIFEST = os.environ.get(
+    "REPRO_MANIFEST",
+    "/mnt/v/output/corpus-builder/repro-images/manifest.jsonl",
+)
+assert os.path.isfile(MANIFEST), f"Manifest not found: {MANIFEST}. Set REPRO_MANIFEST."
 STAGING_DIR = "/tmp/repro-icc-staging"
 TSV_OUT = "/tmp/repro-icc-manifest.tsv"
 
