@@ -169,7 +169,7 @@ impl ScaleAccumulators {
 fn active_channels(
     scale_idx: usize,
     config: &ZensimConfig,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> Vec<(usize, bool, bool)> {
     let compute_all = config.compute_all_features;
     let fpc = FEATURES_PER_CHANNEL_BASIC;
@@ -243,7 +243,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = source.width();
     let height = source.height();
@@ -877,7 +877,7 @@ fn process_scale_bands(
     height: usize,
     config: &ZensimConfig,
     scale_idx: usize,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> ScaleStats {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
@@ -1020,7 +1020,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let width = distorted.width();
     let height = distorted.height();
@@ -1088,7 +1088,7 @@ pub(crate) fn compute_zensim_streaming_with_ref(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> crate::metric::ZensimResult {
     let (scale_stats, mean_offset) =
         compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights);
@@ -1102,7 +1102,7 @@ pub(crate) fn compute_zensim_streaming(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> crate::metric::ZensimResult {
     let (scale_stats, mean_offset) =
         compute_multiscale_stats_streaming(source, distorted, config, weights);

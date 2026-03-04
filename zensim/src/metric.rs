@@ -918,7 +918,7 @@ fn compute_with_config_inner(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
-    weights: &[f64; 156],
+    weights: &[f64],
 ) -> ZensimResult {
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
@@ -2083,7 +2083,7 @@ pub const WEIGHTS: [f64; 156] = [
 pub(crate) fn combine_scores(
     scale_stats: &[ScaleStats],
     _masked: bool,
-    weights: &[f64; 156],
+    weights: &[f64],
     config: &ZensimConfig,
     mean_offset: [f64; 3],
 ) -> ZensimResult {

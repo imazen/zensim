@@ -47,7 +47,7 @@ impl core::fmt::Display for ZensimProfile {
 /// on the corresponding field of `ZensimConfig` in `metric.rs`.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub struct ProfileParams {
-    pub weights: &'static [f64; 156],
+    pub weights: &'static [f64],
     pub blur_radius: usize,
     pub blur_passes: u8,
     pub num_scales: usize,
@@ -62,7 +62,7 @@ pub struct ProfileParams {
 impl ProfileParams {
     /// Create custom params for weight training/exploration.
     pub fn custom(
-        weights: &'static [f64; 156],
+        weights: &'static [f64],
         blur_radius: usize,
         blur_passes: u8,
         num_scales: usize,
