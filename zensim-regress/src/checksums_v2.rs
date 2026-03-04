@@ -12,7 +12,7 @@
 //! ## test_trim_whitespace transparent_shirt
 //! tolerance identical
 //! = sunny-crab-a4839:sea  x86_64-avx512  @773c807  human-verified
-//! ~ tidy-frog-b2c3d:sea   aarch64        @773c807  auto-accepted (within off-by-one) vs sunny-crab-a4839:sea (score:99.87, ...)
+//! ~ tidy-frog-b2c3d:sea   aarch64        @773c807  auto-accepted (within off-by-one) vs sunny-crab-a4839:sea (zensim:0.0013, ...)
 //! ```
 //!
 //! See the plan document for full format specification.

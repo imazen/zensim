@@ -3,11 +3,11 @@
 //! Produces the parenthesized diff string that appears after `vs` in auto-accepted entries:
 //!
 //! ```text
-//! (score:99.87, dissimilarity:0.0013, 2.1% pixels ±1, max-delta:[1,1,0], category:rounding, balanced)
+//! (zensim:0.0013, 2.1% pixels ±1, max-delta:[1,1,0], category:rounding, balanced)
 //! ```
 //!
-//! Also provides the **zdsim-0.1** metric: a DSSIM-style dissimilarity number where
-//! 0 = identical and higher = worse. Simple linear conversion from the zensim score.
+//! The `zensim:` value is a dissimilarity number where 0 = identical and higher = worse.
+//! Simple linear conversion from the zensim score: `(100 - score) / 100`.
 
 use crate::testing::RegressionReport;
 
@@ -35,27 +35,23 @@ pub fn zdsim(zensim_score: f64) -> f64 {
 ///
 /// Output is a parenthesized string suitable for `.checksums` `vs` clauses:
 /// ```text
-/// (score:99.87, dissimilarity:0.0013, 2.1% pixels ±1, max-delta:[1,1,0], category:rounding, balanced)
+/// (zensim:0.0013, 2.1% pixels ±1, max-delta:[1,1,0], category:rounding, balanced)
 /// ```
 ///
 /// Only includes fields when they carry information (omits trivially obvious values).
 pub fn format_diff_summary(report: &RegressionReport) -> String {
     let mut parts = Vec::new();
 
-    // Zensim score (always present)
-    let score = report.score();
-    parts.push(format!("score:{score:.2}"));
-
-    // Dissimilarity (always present)
-    let zd = zdsim(score);
+    // Zensim dissimilarity (always present, 0 = identical, higher = worse)
+    let zd = zdsim(report.score());
     if zd == 0.0 {
-        parts.push("dissimilarity:0".to_string());
+        parts.push("zensim:0".to_string());
     } else if zd < 0.0001 {
-        parts.push(format!("dissimilarity:{zd:.6}"));
+        parts.push(format!("zensim:{zd:.6}"));
     } else if zd < 0.01 {
-        parts.push(format!("dissimilarity:{zd:.4}"));
+        parts.push(format!("zensim:{zd:.4}"));
     } else {
-        parts.push(format!("dissimilarity:{zd:.3}"));
+        parts.push(format!("zensim:{zd:.3}"));
     }
 
     // Pixels differing by ±N tiers (from RegressionReport pixel stats)
@@ -127,15 +123,14 @@ pub fn format_diff_summary(report: &RegressionReport) -> String {
 
 /// Format the tolerance that was active when an entry was accepted.
 ///
-/// Output: `"within identical"`, `"within off-by-one"`, `"within dissimilarity:0.01"`,
-/// or `"within max-delta:1 similarity:99.5 pixels-changed:1.0%"`.
+/// Output: `"within identical"`, `"within off-by-one"`, `"within zensim:0.01"`,
+/// or `"within max-delta:1 zensim:0.005 pixels-changed:1.0%"`.
 pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) -> String {
     use crate::testing::RegressionTolerance;
 
     let exact = RegressionTolerance::exact();
     let obo = RegressionTolerance::off_by_one();
 
-    // similarity:100 + pixels-changed:0 is effectively identical regardless of max-delta
     let is_exact = tolerance.min_similarity() == exact.min_similarity()
         && tolerance.max_pixels_different() == exact.max_pixels_different()
         && tolerance.max_alpha_delta() == exact.max_alpha_delta()
@@ -147,7 +142,7 @@ pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) ->
         && tolerance.max_alpha_delta() == obo.max_alpha_delta()
         && !tolerance.is_ignore_alpha();
 
-    // Perceptual-only: max-delta:255 pixels-changed:>=100% means only similarity matters
+    // Perceptual-only: max-delta:255 pixels-changed:>=100% means only zensim matters
     let is_perceptual_only = tolerance.max_delta() == 255
         && tolerance.max_pixels_different() >= 1.0
         && tolerance.max_alpha_delta() == 0
@@ -162,18 +157,14 @@ pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) ->
     }
     if is_perceptual_only {
         let zd = zdsim(tolerance.min_similarity());
-        return format!("within {}", format_dissimilarity_token(zd));
+        return format!("within {}", format_zensim_token(zd));
     }
 
     let mut parts = Vec::new();
     parts.push(format!("max-delta:{}", tolerance.max_delta()));
     if tolerance.min_similarity() < 100.0 {
-        let s = tolerance.min_similarity();
-        if s == s.floor() {
-            parts.push(format!("similarity:{s:.0}"));
-        } else {
-            parts.push(format!("similarity:{s}"));
-        }
+        let zd = zdsim(tolerance.min_similarity());
+        parts.push(format_zensim_token(zd));
     }
     if tolerance.max_pixels_different() > 0.0 {
         let px = tolerance.max_pixels_different() * 100.0;
@@ -188,25 +179,25 @@ pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) ->
 ///
 /// Recognizes named presets for readability:
 /// - `identical` — pixel-identical
-/// - `off-by-one` — rounding tolerance (max-delta:1 similarity:95 pixels-changed:100%)
+/// - `off-by-one` — rounding tolerance (max-delta:1 zensim:0.05 pixels-changed:100%)
 ///
-/// Perceptual-only tolerances use `dissimilarity:X` format:
+/// Perceptual-only tolerances use standalone `zensim:X`:
 /// ```text
-/// dissimilarity:0.01
-/// dissimilarity:0.05 [aarch64 dissimilarity:0.1]
+/// zensim:0.01
+/// zensim:0.05 [aarch64 zensim:0.1]
 /// ```
 ///
-/// Per-pixel tolerances use explicit tokens:
+/// Per-pixel tolerances use compound tokens:
 /// ```text
-/// max-delta:2 similarity:95.0 pixels-changed:1.0%
-/// max-delta:1 similarity:99.0 alpha-delta:0 [aarch64 max-delta:3 similarity:90.0]
+/// max-delta:2 zensim:0.05 pixels-changed:1.0%
+/// max-delta:1 zensim:0.01 alpha-delta:0 [aarch64 max-delta:3 zensim:0.1]
 /// ```
 pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpec) -> String {
     use crate::checksum_file::ToleranceSpec;
 
     // Check for named presets (base fields only; overrides appended after).
     //
-    // "identical" matches any spec where similarity:100 + pixels-changed:0 — the
+    // "identical" matches any spec where zensim:0 + pixels-changed:0 — the
     // max-delta value is irrelevant because a perfect score already implies zero pixel deltas.
     let base_matches_exact = tolerance.min_similarity == 100.0
         && tolerance.max_pixels_different == 0.0
@@ -222,7 +213,7 @@ pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpe
             && !tolerance.ignore_alpha
     };
 
-    // Perceptual-only: max-delta:255 pixels-changed:100% means only similarity matters.
+    // Perceptual-only: max-delta:255 pixels-changed:100% means only zensim matters.
     let is_perceptual_only = tolerance.max_delta == 255
         && tolerance.max_pixels_different >= 1.0
         && tolerance.max_alpha_delta == 0
@@ -237,15 +228,13 @@ pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpe
         parts.push("off-by-one".to_string());
     } else if is_perceptual_only {
         let zd = zdsim(tolerance.min_similarity);
-        parts.push(format_dissimilarity_token(zd));
+        parts.push(format_zensim_token(zd));
     } else {
         parts.push(format!("max-delta:{}", tolerance.max_delta));
 
-        let s = tolerance.min_similarity;
-        if s == s.floor() {
-            parts.push(format!("similarity:{s:.0}"));
-        } else {
-            parts.push(format!("similarity:{s}"));
+        if tolerance.min_similarity < 100.0 {
+            let zd = zdsim(tolerance.min_similarity);
+            parts.push(format_zensim_token(zd));
         }
 
         if tolerance.max_pixels_different > 0.0 {
@@ -265,31 +254,17 @@ pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpe
     // Per-arch overrides
     for (arch, ov) in &tolerance.overrides {
         let mut ov_parts = Vec::new();
-        // If the override only has min_similarity, use dissimilarity token
-        let ov_is_perceptual_only = ov.max_delta.is_none()
-            && ov.max_pixels_different.is_none()
-            && ov.max_alpha_delta.is_none()
-            && ov.min_similarity.is_some();
-        if ov_is_perceptual_only {
-            let s = ov.min_similarity.unwrap();
-            ov_parts.push(format_dissimilarity_token(zdsim(s)));
-        } else {
-            if let Some(d) = ov.max_delta {
-                ov_parts.push(format!("max-delta:{d}"));
-            }
-            if let Some(s) = ov.min_similarity {
-                if s == s.floor() {
-                    ov_parts.push(format!("similarity:{s:.0}"));
-                } else {
-                    ov_parts.push(format!("similarity:{s}"));
-                }
-            }
-            if let Some(px) = ov.max_pixels_different {
-                ov_parts.push(format!("pixels-changed:{:.1}%", px * 100.0));
-            }
-            if let Some(a) = ov.max_alpha_delta {
-                ov_parts.push(format!("alpha-delta:{a}"));
-            }
+        if let Some(d) = ov.max_delta {
+            ov_parts.push(format!("max-delta:{d}"));
+        }
+        if let Some(s) = ov.min_similarity {
+            ov_parts.push(format_zensim_token(zdsim(s)));
+        }
+        if let Some(px) = ov.max_pixels_different {
+            ov_parts.push(format!("pixels-changed:{:.1}%", px * 100.0));
+        }
+        if let Some(a) = ov.max_alpha_delta {
+            ov_parts.push(format!("alpha-delta:{a}"));
         }
         if !ov_parts.is_empty() {
             parts.push(format!("[{} {}]", arch, ov_parts.join(" ")));
@@ -299,19 +274,22 @@ pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpe
     parts.join(" ")
 }
 
-/// Format a dissimilarity value as a shorthand token with appropriate precision.
-fn format_dissimilarity_token(zd: f64) -> String {
+/// Format a zensim dissimilarity value as a shorthand token with appropriate precision.
+///
+/// The `zensim:` prefix is used everywhere — standalone perceptual tolerance,
+/// compound tolerance, diff summaries, and recommendations.
+fn format_zensim_token(zd: f64) -> String {
     if zd == 0.0 {
-        "dissimilarity:0".to_string()
+        "zensim:0".to_string()
     } else if zd < 0.001 {
-        format!("dissimilarity:{zd:.4}")
+        format!("zensim:{zd:.4}")
     } else if zd < 0.01 {
-        format!("dissimilarity:{zd:.3}")
+        format!("zensim:{zd:.3}")
     } else if zd == (zd * 100.0).round() / 100.0 {
         // Clean two-decimal value like 0.01, 0.05
-        format!("dissimilarity:{zd:.2}")
+        format!("zensim:{zd:.2}")
     } else {
-        format!("dissimilarity:{zd:.4}")
+        format!("zensim:{zd:.4}")
     }
 }
 
@@ -373,27 +351,36 @@ pub fn parse_tolerance_shorthand(s: &str) -> crate::checksum_file::ToleranceSpec
     spec
 }
 
+/// Parse a dissimilarity value from a token with any of the supported prefixes.
+///
+/// Accepts: `zensim:X`, `dissimilarity:X`, `zdsim:X` (all mean the same thing).
+fn strip_dissimilarity_prefix(token: &str) -> Option<&str> {
+    token
+        .strip_prefix("zensim:")
+        .or_else(|| token.strip_prefix("dissimilarity:"))
+        .or_else(|| token.strip_prefix("zdsim:"))
+}
+
 fn parse_main_tolerance_tokens(s: &str, spec: &mut crate::checksum_file::ToleranceSpec) {
+    let mut has_explicit_delta = false;
+    let mut has_explicit_pixels = false;
+
     for token in s.split_whitespace() {
-        // Accept both new ("dissimilarity:") and legacy ("zdsim:") prefixes
-        if let Some(v) = token
-            .strip_prefix("dissimilarity:")
-            .or_else(|| token.strip_prefix("zdsim:"))
-        {
-            // Perceptual-only: dissimilarity:0.01 → min_similarity=99, max-delta:255, pixels-changed:100%
+        // Accept zensim:, dissimilarity:, zdsim: — all set min_similarity from dissimilarity
+        if let Some(v) = strip_dissimilarity_prefix(token) {
             let zd: f64 = v.parse().unwrap_or(0.0);
             spec.min_similarity = (100.0 * (1.0 - zd)).max(0.0);
-            spec.max_delta = 255;
-            spec.max_pixels_different = 1.0;
         } else if let Some(v) = token
             .strip_prefix("max-delta:")
             .or_else(|| token.strip_prefix("d:"))
         {
             spec.max_delta = v.parse().unwrap_or(0);
+            has_explicit_delta = true;
         } else if let Some(v) = token
             .strip_prefix("similarity:")
             .or_else(|| token.strip_prefix("s:"))
         {
+            // Legacy: score-based similarity (0-100) → convert internally
             spec.min_similarity = v.parse().unwrap_or(100.0);
         } else if let Some(v) = token
             .strip_prefix("pixels-changed:")
@@ -401,6 +388,7 @@ fn parse_main_tolerance_tokens(s: &str, spec: &mut crate::checksum_file::Toleran
         {
             let v = v.trim_end_matches('%');
             spec.max_pixels_different = v.parse::<f64>().unwrap_or(0.0) / 100.0;
+            has_explicit_pixels = true;
         } else if let Some(v) = token
             .strip_prefix("alpha-delta:")
             .or_else(|| token.strip_prefix("a:"))
@@ -410,13 +398,17 @@ fn parse_main_tolerance_tokens(s: &str, spec: &mut crate::checksum_file::Toleran
             spec.ignore_alpha = true;
         }
     }
+
+    // If zensim: was the only constraint (no explicit delta or pixel tokens),
+    // default to perceptual-only mode: allow any pixel-level differences.
+    if spec.min_similarity < 100.0 && !has_explicit_delta && !has_explicit_pixels {
+        spec.max_delta = 255;
+        spec.max_pixels_different = 1.0;
+    }
 }
 
 fn parse_tolerance_token(token: &str, ov: &mut crate::checksum_file::ToleranceOverride) {
-    if let Some(v) = token
-        .strip_prefix("dissimilarity:")
-        .or_else(|| token.strip_prefix("zdsim:"))
-    {
+    if let Some(v) = strip_dissimilarity_prefix(token) {
         let zd: f64 = v.parse().unwrap_or(0.0);
         ov.min_similarity = Some((100.0 * (1.0 - zd)).max(0.0));
     } else if let Some(v) = token
@@ -428,6 +420,7 @@ fn parse_tolerance_token(token: &str, ov: &mut crate::checksum_file::ToleranceOv
         .strip_prefix("similarity:")
         .or_else(|| token.strip_prefix("s:"))
     {
+        // Legacy: score-based similarity (0-100)
         ov.min_similarity = v.parse().ok();
     } else if let Some(v) = token
         .strip_prefix("pixels-changed:")
@@ -593,9 +586,9 @@ mod tests {
 
         let s = format_tolerance_shorthand(&spec);
         assert!(s.contains("max-delta:2"), "s={s}");
-        assert!(s.contains("similarity:95"), "s={s}");
+        assert!(s.contains("zensim:0.05"), "s={s}");
         assert!(s.contains("pixels-changed:1.0%"), "s={s}");
-        assert!(s.contains("[aarch64 max-delta:3 similarity:90]"), "s={s}");
+        assert!(s.contains("[aarch64 max-delta:3 zensim:0.10]"), "s={s}");
 
         let parsed = parse_tolerance_shorthand(&s);
         assert_eq!(parsed.max_delta, 2);
@@ -608,10 +601,10 @@ mod tests {
     }
 
     #[test]
-    fn tolerance_shorthand_dissimilarity_only() {
+    fn tolerance_shorthand_zensim_only() {
         use crate::checksum_file::ToleranceSpec;
 
-        // Perceptual-only: max-delta:255 pixels-changed:100% means only similarity matters
+        // Perceptual-only: max-delta:255 pixels-changed:100% means only zensim matters
         let spec = ToleranceSpec {
             max_delta: 255,
             min_similarity: 99.0,
@@ -619,7 +612,7 @@ mod tests {
             ..ToleranceSpec::exact()
         };
         let s = format_tolerance_shorthand(&spec);
-        assert_eq!(s, "dissimilarity:0.01", "s={s}");
+        assert_eq!(s, "zensim:0.01", "s={s}");
 
         let parsed = parse_tolerance_shorthand(&s);
         assert_eq!(parsed.max_delta, 255);
@@ -628,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn tolerance_shorthand_dissimilarity_roundtrip_loose() {
+    fn tolerance_shorthand_zensim_roundtrip_loose() {
         use crate::checksum_file::ToleranceSpec;
 
         let spec = ToleranceSpec {
@@ -638,11 +631,20 @@ mod tests {
             ..ToleranceSpec::exact()
         };
         let s = format_tolerance_shorthand(&spec);
-        assert_eq!(s, "dissimilarity:0.05", "s={s}");
+        assert_eq!(s, "zensim:0.05", "s={s}");
 
         let parsed = parse_tolerance_shorthand(&s);
         assert_eq!(parsed.max_delta, 255);
         assert!((parsed.min_similarity - 95.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn tolerance_shorthand_compound_zensim() {
+        // Compound: max-delta + zensim + pixels-changed
+        let parsed = parse_tolerance_shorthand("max-delta:2 zensim:0.05 pixels-changed:1.0%");
+        assert_eq!(parsed.max_delta, 2);
+        assert!((parsed.min_similarity - 95.0).abs() < 0.01);
+        assert!((parsed.max_pixels_different - 0.01).abs() < 1e-6);
     }
 
     #[test]

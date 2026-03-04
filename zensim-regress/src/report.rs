@@ -3,7 +3,7 @@
 //! Reads the manifest TSV written during test execution and generates
 //! a standalone HTML file showing:
 //!
-//! - Per-test status (match/novel/accepted/failed) with dissimilarity scores
+//! - Per-test status (match/novel/accepted/failed) with zensim dissimilarity scores
 //! - Recommended tolerance for ratcheting down
 //! - Diff images (embedded as base64 data URIs)
 //! - Cross-platform merged view when multiple manifests are provided
@@ -150,7 +150,7 @@ fn ceil_sig2(v: f64) -> f64 {
 
 /// Format a recommended `.checksums` tolerance line.
 pub fn format_recommended_line(zdsim: f64) -> String {
-    format!("dissimilarity:{}", format_dissimilarity(zdsim))
+    format!("zensim:{}", format_dissimilarity(zdsim))
 }
 
 /// Format a dissimilarity value with appropriate precision.
@@ -237,7 +237,7 @@ pub fn generate_html_report(
     let _ = writeln!(
         html,
         "<p class=\"hint\">Tests that differed from baseline. \
-         Sorted by status (failed first), then by dissimilarity (highest first).</p>"
+         Sorted by status (failed first), then by zensim (highest first).</p>"
     );
 
     let mut non_match: Vec<(&str, &BTreeMap<String, &ParsedEntry>)> = merged
@@ -524,7 +524,7 @@ fn write_test_entry(
             if let Some(zdsim) = entry.actual_zdsim {
                 let _ = writeln!(
                     html,
-                    "<div class=\"metric\"><div class=\"label\">dissimilarity</div>{}</div>",
+                    "<div class=\"metric\"><div class=\"label\">zensim</div>{}</div>",
                     format_dissimilarity(zdsim)
                 );
             }
@@ -603,7 +603,7 @@ fn write_recommended_tolerances(
             && let Some(rec) = recommend_tolerance(max_zdsim) {
                 let _ = writeln!(
                     html,
-                    "# {test_name}: observed dissimilarity={} → tolerance {}",
+                    "# {test_name}: observed zensim={} → tolerance {}",
                     format_dissimilarity(max_zdsim),
                     format_recommended_line(rec),
                 );
@@ -809,7 +809,7 @@ mod tests {
         assert!(html.contains("tolerance_test"));
         assert!(html.contains("broken_test"));
         assert!(html.contains("Recommended Tolerances"));
-        assert!(html.contains("dissimilarity:"));
+        assert!(html.contains("zensim:"));
         // Failed should appear before accepted
         let failed_pos = html.find("broken_test").unwrap();
         let accepted_pos = html.find("tolerance_test").unwrap();
