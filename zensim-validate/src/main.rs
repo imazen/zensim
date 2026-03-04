@@ -63,6 +63,16 @@ struct Args {
     #[arg(long, default_value = "false")]
     leave_one_out: bool,
 
+    /// Compute extended features (25 per channel instead of 13).
+    /// Adds masked SSIM/edge/MSE + max/p95 percentile features.
+    #[arg(long, default_value = "false")]
+    extended_features: bool,
+
+    /// Masking strength for extended features (default: 4.0).
+    /// Only used when --extended-features is set.
+    #[arg(long, default_value = "4.0")]
+    extended_masking_strength: f32,
+
     /// Local contrast masking strength (0 = disabled, 2-8 typical)
     #[arg(long, default_value = "0")]
     masking: f32,
@@ -374,6 +384,8 @@ fn main() {
     let blur_radius = args.blur_radius;
     let masking_strength = args.masking;
     let num_scales = args.num_scales;
+    let extended_features = args.extended_features;
+    let extended_masking_strength = args.extended_masking_strength;
 
     let cache_config = CacheConfig {
         num_scales: num_scales as u32,
@@ -438,12 +450,15 @@ fn main() {
                         // Extract features for new pairs using same logic as load_and_compute
                         let config = zensim::ZensimConfig {
                             compute_all_features: compute_all,
+                            extended_features,
+                            extended_masking_strength,
                             blur_passes,
                             blur_radius,
                             masking_strength,
                             num_scales,
                             score_mapping_a: 18.0,
                             score_mapping_b: 0.7,
+                            ..Default::default()
                         };
                         let nan_result = zensim::ZensimResult {
                             score: f64::NAN,
@@ -628,6 +643,8 @@ fn main() {
                     masking_strength,
                     num_scales,
                     args.target_metric,
+                    extended_features,
+                    extended_masking_strength,
                 );
                 if let Err(e) = save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
                 {
@@ -650,6 +667,8 @@ fn main() {
             masking_strength,
             num_scales,
             args.target_metric,
+            extended_features,
+            extended_masking_strength,
         );
         if compute_all {
             let cache_path = args
@@ -750,6 +769,8 @@ fn main() {
                             masking_strength,
                             num_scales,
                             args.target_metric,
+                            extended_features,
+                            extended_masking_strength,
                         );
                         if let Err(e) =
                             save_feature_cache(&also_cache, &ds, &valid_indices, &cache_config)
@@ -773,6 +794,8 @@ fn main() {
                     masking_strength,
                     num_scales,
                     args.target_metric,
+                    extended_features,
+                    extended_masking_strength,
                 );
                 if compute_all {
                     if let Err(e) =
@@ -1072,6 +1095,8 @@ fn load_and_compute(
     masking_strength: f32,
     num_scales: usize,
     target_metric: Option<TargetMetric>,
+    extended_features: bool,
+    extended_masking_strength: f32,
 ) -> (DatasetWithFeatures, Vec<u32>) {
     let pairs = match format {
         DatasetFormat::Tid2013 => load_tid2013(path),
@@ -1126,12 +1151,15 @@ fn load_and_compute(
 
     let config = zensim::ZensimConfig {
         compute_all_features: compute_all,
+        extended_features,
+        extended_masking_strength,
         blur_passes,
         blur_radius,
         masking_strength,
         num_scales,
         score_mapping_a: 18.0,
         score_mapping_b: 0.7,
+        ..Default::default()
     };
 
     // Process reference groups in parallel
