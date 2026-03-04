@@ -1270,7 +1270,11 @@ impl ChecksumManager {
                     }
                 };
 
-                // Run zensim comparison — use ImageSource directly (no format conversion)
+                // Convert actual to packed RGBA for both comparison and diff montage.
+                // zensim::classify assumes both images share the same pixel format,
+                // so we must normalize to RGBA (matching the reference PNG).
+                let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
+
                 let reg_tolerance = tolerance
                     .map(|t| t.to_regression_tolerance(&arch))
                     .unwrap_or_else(RegressionTolerance::exact);
@@ -1278,10 +1282,10 @@ impl ChecksumManager {
                 let ref_pixels = rgba_bytes_to_pixels(&ref_rgba);
                 let ref_source = RgbaSlice::new(&ref_pixels, rw as usize, rh as usize);
 
-                let report = check_regression(&self.zensim, &ref_source, actual, &reg_tolerance)?;
+                let actual_pixels = rgba_bytes_to_pixels(&actual_rgba);
+                let actual_source = RgbaSlice::new(&actual_pixels, aw as usize, ah as usize);
 
-                // Save diff montage (needs packed RGBA)
-                let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
+                let report = check_regression(&self.zensim, &ref_source, &actual_source, &reg_tolerance)?;
                 self.save_diff_montage(
                     module,
                     test_name,
