@@ -1237,9 +1237,10 @@ pub(crate) fn compute_delta_stats(
 ) -> DeltaStats {
     let width = source.width();
     let height = source.height();
-    let has_alpha = source.pixel_format().has_alpha();
-    let pixel_format = source.pixel_format();
-    let native_max = native_max_for_format(pixel_format);
+    let src_format = source.pixel_format();
+    let dst_format = distorted.pixel_format();
+    let has_alpha = src_format.has_alpha() && dst_format.has_alpha();
+    let native_max = native_max_for_format(src_format).max(native_max_for_format(dst_format));
 
     let chunk_rows = 64usize;
     let num_chunks = height.div_ceil(chunk_rows);
@@ -1257,9 +1258,15 @@ pub(crate) fn compute_delta_stats(
                 let dst_bytes = distorted.row_bytes(y);
 
                 for x in 0..width {
-                    // Extract normalized [0,1] RGB values and optional alpha
-                    let (src_rgb, dst_rgb, alpha) =
-                        extract_pixel_rgb_normalized(src_bytes, dst_bytes, x, pixel_format);
+                    // Extract normalized [0,1] RGB values per image format
+                    let (src_rgb, src_alpha) = extract_pixel_normalized(src_bytes, x, src_format);
+                    let (dst_rgb, dst_alpha) = extract_pixel_normalized(dst_bytes, x, dst_format);
+                    let alpha = if has_alpha {
+                        // Both formats have alpha — zip them
+                        Some((src_alpha.unwrap_or(1.0), dst_alpha.unwrap_or(1.0)))
+                    } else {
+                        None
+                    };
 
                     let mut any_diff = false;
                     let mut any_diff_gt1 = false;
@@ -1370,111 +1377,75 @@ pub(crate) fn compute_delta_stats(
     finalize_delta_stats(accum, has_alpha, native_max)
 }
 
-/// Extract normalized \[0,1\] RGB values from a pixel at position x in a row.
-/// Returns (src_rgb, dst_rgb, optional (src_alpha, dst_alpha) normalized).
+/// Extract normalized \[0,1\] RGB values and optional alpha from a single pixel
+/// at position `x` in `row_bytes`, interpreting bytes according to `format`.
 #[inline]
-fn extract_pixel_rgb_normalized(
-    src_bytes: &[u8],
-    dst_bytes: &[u8],
+fn extract_pixel_normalized(
+    row_bytes: &[u8],
     x: usize,
     format: PixelFormat,
-) -> ([f64; 3], [f64; 3], Option<(f64, f64)>) {
+) -> ([f64; 3], Option<f64>) {
     match format {
         PixelFormat::Srgb8Rgb => {
             let off = x * 3;
-            let s = [
-                src_bytes[off] as f64 / 255.0,
-                src_bytes[off + 1] as f64 / 255.0,
-                src_bytes[off + 2] as f64 / 255.0,
+            let rgb = [
+                row_bytes[off] as f64 / 255.0,
+                row_bytes[off + 1] as f64 / 255.0,
+                row_bytes[off + 2] as f64 / 255.0,
             ];
-            let d = [
-                dst_bytes[off] as f64 / 255.0,
-                dst_bytes[off + 1] as f64 / 255.0,
-                dst_bytes[off + 2] as f64 / 255.0,
-            ];
-            (s, d, None)
+            (rgb, None)
         }
         PixelFormat::Srgb8Rgba => {
             let off = x * 4;
-            let s = [
-                src_bytes[off] as f64 / 255.0,
-                src_bytes[off + 1] as f64 / 255.0,
-                src_bytes[off + 2] as f64 / 255.0,
+            let rgb = [
+                row_bytes[off] as f64 / 255.0,
+                row_bytes[off + 1] as f64 / 255.0,
+                row_bytes[off + 2] as f64 / 255.0,
             ];
-            let d = [
-                dst_bytes[off] as f64 / 255.0,
-                dst_bytes[off + 1] as f64 / 255.0,
-                dst_bytes[off + 2] as f64 / 255.0,
-            ];
-            let sa = src_bytes[off + 3] as f64 / 255.0;
-            let da = dst_bytes[off + 3] as f64 / 255.0;
-            (s, d, Some((sa, da)))
+            let a = row_bytes[off + 3] as f64 / 255.0;
+            (rgb, Some(a))
         }
         PixelFormat::Srgb8Bgra => {
             let off = x * 4;
-            let s = [
-                src_bytes[off + 2] as f64 / 255.0, // R
-                src_bytes[off + 1] as f64 / 255.0, // G
-                src_bytes[off] as f64 / 255.0,     // B
+            let rgb = [
+                row_bytes[off + 2] as f64 / 255.0, // R
+                row_bytes[off + 1] as f64 / 255.0, // G
+                row_bytes[off] as f64 / 255.0,     // B
             ];
-            let d = [
-                dst_bytes[off + 2] as f64 / 255.0,
-                dst_bytes[off + 1] as f64 / 255.0,
-                dst_bytes[off] as f64 / 255.0,
-            ];
-            let sa = src_bytes[off + 3] as f64 / 255.0;
-            let da = dst_bytes[off + 3] as f64 / 255.0;
-            (s, d, Some((sa, da)))
+            let a = row_bytes[off + 3] as f64 / 255.0;
+            (rgb, Some(a))
         }
         PixelFormat::Srgb16Rgba => {
             let off = x * 8;
-            let s = [
-                u16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]) as f64 / 65535.0,
-                u16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]) as f64 / 65535.0,
-                u16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]) as f64 / 65535.0,
+            let rgb = [
+                u16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]) as f64 / 65535.0,
+                u16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]) as f64 / 65535.0,
+                u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]) as f64 / 65535.0,
             ];
-            let d = [
-                u16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]) as f64 / 65535.0,
-                u16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]) as f64 / 65535.0,
-                u16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]) as f64 / 65535.0,
-            ];
-            let sa = u16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]) as f64 / 65535.0;
-            let da = u16::from_ne_bytes([dst_bytes[off + 6], dst_bytes[off + 7]]) as f64 / 65535.0;
-            (s, d, Some((sa, da)))
+            let a = u16::from_ne_bytes([row_bytes[off + 6], row_bytes[off + 7]]) as f64 / 65535.0;
+            (rgb, Some(a))
         }
         #[cfg(feature = "f16")]
         PixelFormat::SrgbF16Rgba => {
             use half::f16;
             let off = x * 8;
-            let s = [
-                f16::from_ne_bytes([src_bytes[off], src_bytes[off + 1]]).to_f32() as f64,
-                f16::from_ne_bytes([src_bytes[off + 2], src_bytes[off + 3]]).to_f32() as f64,
-                f16::from_ne_bytes([src_bytes[off + 4], src_bytes[off + 5]]).to_f32() as f64,
+            let rgb = [
+                f16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]).to_f32() as f64,
+                f16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]).to_f32() as f64,
+                f16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]).to_f32() as f64,
             ];
-            let d = [
-                f16::from_ne_bytes([dst_bytes[off], dst_bytes[off + 1]]).to_f32() as f64,
-                f16::from_ne_bytes([dst_bytes[off + 2], dst_bytes[off + 3]]).to_f32() as f64,
-                f16::from_ne_bytes([dst_bytes[off + 4], dst_bytes[off + 5]]).to_f32() as f64,
-            ];
-            let sa = f16::from_ne_bytes([src_bytes[off + 6], src_bytes[off + 7]]).to_f32() as f64;
-            let da = f16::from_ne_bytes([dst_bytes[off + 6], dst_bytes[off + 7]]).to_f32() as f64;
-            (s, d, Some((sa, da)))
+            let a = f16::from_ne_bytes([row_bytes[off + 6], row_bytes[off + 7]]).to_f32() as f64;
+            (rgb, Some(a))
         }
         PixelFormat::LinearF32Rgba => {
             let off = x * 16;
-            let s = [
-                f32::from_ne_bytes(src_bytes[off..off + 4].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(src_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(src_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
+            let rgb = [
+                f32::from_ne_bytes(row_bytes[off..off + 4].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(row_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
+                f32::from_ne_bytes(row_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
             ];
-            let d = [
-                f32::from_ne_bytes(dst_bytes[off..off + 4].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 4..off + 8].try_into().unwrap()) as f64,
-                f32::from_ne_bytes(dst_bytes[off + 8..off + 12].try_into().unwrap()) as f64,
-            ];
-            let sa = f32::from_ne_bytes(src_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
-            let da = f32::from_ne_bytes(dst_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
-            (s, d, Some((sa, da)))
+            let a = f32::from_ne_bytes(row_bytes[off + 12..off + 16].try_into().unwrap()) as f64;
+            (rgb, Some(a))
         }
         #[allow(unreachable_patterns)]
         _ => panic!("unsupported pixel format for delta stats: {:?}", format),
