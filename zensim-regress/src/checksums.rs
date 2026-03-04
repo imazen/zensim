@@ -7,7 +7,7 @@
 //! # Format overview
 //!
 //! ```text
-//! # trim.checksums — v1
+//! # trim.checksums
 //!
 //! ## test_trim_whitespace transparent_shirt
 //! tolerance identical
@@ -749,9 +749,9 @@ impl std::fmt::Display for CheckResult {
     }
 }
 
-/// Manager for `.checksums` v1 files.
+/// Manager for `.checksums` files.
 ///
-/// Provides the main workflow for v1 checksum validation:
+/// Provides the main workflow for checksum validation:
 /// 1. Load the module's `.checksums` file
 /// 2. Find the section for the test function + detail
 /// 3. Compare the actual hash against active entries
@@ -1527,7 +1527,7 @@ impl ChecksumManager {
                 actual_hash,
                 ..
             } => {
-                let zd = crate::diff_summary::zdsim(report.score());
+                let zd = zensim::score_to_dissimilarity(report.score());
                 let summary = format!("score:{:.1}", report.score());
                 (
                     ManifestStatus::Accepted,
@@ -1545,7 +1545,7 @@ impl ChecksumManager {
             } => {
                 let zd = report
                     .as_ref()
-                    .map(|r| crate::diff_summary::zdsim(r.score()));
+                    .map(|r| zensim::score_to_dissimilarity(r.score()));
                 let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
                 (
                     ManifestStatus::Failed,

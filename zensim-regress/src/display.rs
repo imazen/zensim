@@ -277,7 +277,6 @@ fn quantize_pixel(r: u8, g: u8, b: u8, palette: &[[u8; 3]]) -> u8 {
 
     // Check if a grayscale entry is closer (important for near-gray pixels)
     if is_near_gray(r, g, b) {
-        let avg = ((r as u16 + g as u16 + b as u16) / 3) as u8;
         // Find closest grayscale entry
         let mut best_idx = cube_idx;
         let mut best_dist = cube_dist;
@@ -289,7 +288,6 @@ fn quantize_pixel(r: u8, g: u8, b: u8, palette: &[[u8; 3]]) -> u8 {
                 best_idx = i;
             }
         }
-        let _ = avg;
         best_idx as u8
     } else {
         cube_idx as u8

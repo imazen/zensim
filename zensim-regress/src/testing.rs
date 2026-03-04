@@ -416,7 +416,7 @@ impl std::fmt::Display for RegressionReport {
             ErrorCategory::AlphaCompositing => {
                 writeln!(f, "{status}: Alpha compositing error detected.")?;
             }
-            ErrorCategory::Unclassified | _ => {
+            _ => {
                 if self.passed {
                     writeln!(f, "{status}: Images differ within tolerance.")?;
                 } else {

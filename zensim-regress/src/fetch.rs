@@ -1,7 +1,7 @@
 //! Resource fetching with local caching.
 //!
 //! Provides URL → local file download with configurable backends and
-//! disk caching. Used by [`ChecksumManager`](crate::manager::ChecksumManager)
+//! disk caching. Used by [`ChecksumManager`](crate::checksums::ChecksumManager)
 //! for reference image download, and available to any test harness that
 //! needs to fetch remote fixtures.
 //!

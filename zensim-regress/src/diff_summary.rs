@@ -15,14 +15,6 @@ use crate::testing::RegressionReport;
 // Re-export the canonical conversions from the zensim crate
 pub use zensim::{dissimilarity_to_score, score_to_dissimilarity};
 
-// Keep the old name as a thin wrapper for any external callers
-/// Convert a zensim score to a dissimilarity value.
-///
-/// Deprecated: prefer [`zensim::score_to_dissimilarity`] directly.
-pub fn zdsim(zensim_score: f64) -> f64 {
-    score_to_dissimilarity(zensim_score)
-}
-
 // ─── Diff summary formatting ─────────────────────────────────────────────
 
 /// Format a human-readable diff summary from a [`RegressionReport`].
