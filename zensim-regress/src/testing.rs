@@ -398,7 +398,15 @@ impl std::fmt::Display for RegressionReport {
         // Header line
         match self.category {
             ErrorCategory::Identical => {
-                writeln!(f, "{status}: Images are pixel-identical. Score: 100.0.")?;
+                if self.alpha_pixels_differing > 0 {
+                    writeln!(
+                        f,
+                        "{status}: RGB channels identical, alpha differs (max delta {}, {}/{} pixels).",
+                        self.alpha_max_delta, self.alpha_pixels_differing, self.pixel_count,
+                    )?;
+                } else {
+                    writeln!(f, "{status}: Images are pixel-identical. Score: 100.0.")?;
+                }
             }
             ErrorCategory::RoundingError => {
                 writeln!(
