@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use zensim::{RgbaSlice, Zensim, ZensimProfile};
+use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
 
 use crate::checksum_file::ToleranceSpec;
 use crate::diff_image::create_comparison_montage_raw;
@@ -1227,12 +1227,14 @@ impl ChecksumManagerV2 {
         tolerance: Option<&ToleranceSpec>,
     ) -> Result<CheckResultV2, RegressError> {
         let actual_hash = self.hasher.hash_pixels(actual_rgba, width, height);
-        let result = self.check_with_pixels_impl(
+        let actual_pixels = rgba_bytes_to_pixels(actual_rgba);
+        let actual_source = RgbaSlice::new(&actual_pixels, width as usize, height as usize);
+        let result = self.check_with_source_impl(
             module,
             test_name,
             detail_name,
             &actual_hash,
-            Some((actual_rgba, width, height)),
+            &actual_source,
             tolerance,
         )?;
         self.write_manifest_for_result(module, test_name, detail_name, &result);
@@ -1266,17 +1268,77 @@ impl ChecksumManagerV2 {
         )
     }
 
-    /// Core implementation for check_pixels/check_file.
+    /// Check an [`ImageSource`] against stored checksums with full comparison.
     ///
-    /// Unlike `check_hash_locked`, this method only auto-accepts after
-    /// pixel comparison passes tolerance (not blindly on hash mismatch).
-    fn check_with_pixels_impl(
+    /// This is the format-aware entry point that works with any pixel layout
+    /// (strided BGRA, packed RGBA, etc.). The image is hashed by converting to
+    /// packed RGBA internally, but comparison uses the original `ImageSource`
+    /// directly — no unnecessary copies for BGRA or strided data.
+    pub fn check_image(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual: &impl ImageSource,
+        tolerance: Option<&ToleranceSpec>,
+    ) -> Result<CheckResultV2, RegressError> {
+        // Convert to packed RGBA for hashing (format-independent hashes)
+        let (rgba, w, h) = image_source_to_packed_rgba(actual);
+        let actual_hash = self.hasher.hash_pixels(&rgba, w, h);
+        let result = self.check_with_source_impl(
+            module,
+            test_name,
+            detail_name,
+            &actual_hash,
+            actual,
+            tolerance,
+        )?;
+        self.write_manifest_for_result(module, test_name, detail_name, &result);
+        Ok(result)
+    }
+
+    /// Check a pre-hashed [`ImageSource`] against stored checksums.
+    ///
+    /// Use this when the hash is computed externally (e.g., from legacy BGRA
+    /// scanlines) but comparison should use the original image data.
+    /// The `ImageSource` is used directly for zensim comparison — no
+    /// BGRA→RGBA conversion needed for the comparison step.
+    pub fn check_hash_with_image(
         &self,
         module: &str,
         test_name: &str,
         detail_name: &str,
         actual_hash: &str,
-        pixels: Option<(&[u8], u32, u32)>,
+        actual: &impl ImageSource,
+        tolerance: Option<&ToleranceSpec>,
+    ) -> Result<CheckResultV2, RegressError> {
+        let result = self.check_with_source_impl(
+            module,
+            test_name,
+            detail_name,
+            actual_hash,
+            actual,
+            tolerance,
+        )?;
+        self.write_manifest_for_result(module, test_name, detail_name, &result);
+        Ok(result)
+    }
+
+    /// Core implementation for check_pixels/check_file/check_image/check_hash_with_image.
+    ///
+    /// Unlike `check_hash_locked`, this method only auto-accepts after
+    /// pixel comparison passes tolerance (not blindly on hash mismatch).
+    ///
+    /// The `ImageSource` is used directly for zensim comparison (preserving
+    /// stride/format), and converted to packed RGBA only for diff montage
+    /// and reference image saving.
+    fn check_with_source_impl(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual_hash: &str,
+        actual: &impl ImageSource,
         tolerance: Option<&ToleranceSpec>,
     ) -> Result<CheckResultV2, RegressError> {
         let path = self.module_path(module);
@@ -1323,18 +1385,7 @@ impl ChecksumManagerV2 {
                 .map(|e| e.name_hash.clone());
 
             if let Some(ref authoritative) = anchor_name {
-                // Hash mismatch — try pixel comparison
-                let Some((rgba, w, h)) = pixels else {
-                    // Hash-only: can't compare pixels
-                    return Ok(CheckResultV2::Failed {
-                        report: None,
-                        authoritative_name: authoritative.clone(),
-                        actual_name,
-                        actual_hash: actual_hash.to_string(),
-                    });
-                };
-
-                // Load reference image
+                // Hash mismatch — load reference and compare
                 let ref_path =
                     self.find_reference_image(module, test_name, detail_name, Some(authoritative));
                 let (ref_rgba, rw, rh) = match ref_path {
@@ -1373,20 +1424,18 @@ impl ChecksumManagerV2 {
                     }
                 };
 
-                // Run zensim comparison
+                // Run zensim comparison — use ImageSource directly (no format conversion)
                 let reg_tolerance = tolerance
                     .map(|t| t.to_regression_tolerance(&arch))
                     .unwrap_or_else(RegressionTolerance::exact);
 
                 let ref_pixels = rgba_bytes_to_pixels(&ref_rgba);
-                let actual_pixels = rgba_bytes_to_pixels(rgba);
                 let ref_source = RgbaSlice::new(&ref_pixels, rw as usize, rh as usize);
-                let actual_source = RgbaSlice::new(&actual_pixels, w as usize, h as usize);
 
-                let report =
-                    check_regression(&self.zensim, &ref_source, &actual_source, &reg_tolerance)?;
+                let report = check_regression(&self.zensim, &ref_source, actual, &reg_tolerance)?;
 
-                // Save diff montage
+                // Save diff montage (needs packed RGBA)
+                let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
                 self.save_diff_montage(
                     module,
                     test_name,
@@ -1394,9 +1443,9 @@ impl ChecksumManagerV2 {
                     &ref_rgba,
                     rw,
                     rh,
-                    rgba,
-                    w,
-                    h,
+                    &actual_rgba,
+                    aw,
+                    ah,
                 );
 
                 if report.passed() {
@@ -1460,10 +1509,9 @@ impl ChecksumManagerV2 {
             });
             file.write_to(&path)?;
 
-            // Save reference image
-            if let Some((rgba, w, h)) = pixels {
-                let _ = self.save_reference_image(module, test_name, detail_name, rgba, w, h);
-            }
+            // Save reference image (needs packed RGBA)
+            let (rgba, w, h) = image_source_to_packed_rgba(actual);
+            let _ = self.save_reference_image(module, test_name, detail_name, &rgba, w, h);
 
             return Ok(CheckResultV2::NoBaseline {
                 actual_name,
@@ -1706,6 +1754,38 @@ fn rgba_bytes_to_pixels(bytes: &[u8]) -> Vec<[u8; 4]> {
         .chunks_exact(4)
         .map(|c| [c[0], c[1], c[2], c[3]])
         .collect()
+}
+
+/// Convert any [`ImageSource`] to packed RGBA8 bytes.
+///
+/// Handles stride (non-contiguous rows) and BGRA→RGBA channel swapping.
+/// Used for diff montage saving and reference image saving, which require
+/// flat packed RGBA.
+fn image_source_to_packed_rgba(src: &dyn ImageSource) -> (Vec<u8>, u32, u32) {
+    let w = src.width();
+    let h = src.height();
+    let mut rgba = Vec::with_capacity(w * h * 4);
+
+    for y in 0..h {
+        let row = src.row_bytes(y);
+        match src.pixel_format() {
+            PixelFormat::Srgb8Rgba => {
+                rgba.extend_from_slice(&row[..w * 4]);
+            }
+            PixelFormat::Srgb8Bgra => {
+                for pixel in row[..w * 4].chunks_exact(4) {
+                    rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+                }
+            }
+            PixelFormat::Srgb8Rgb => {
+                for pixel in row[..w * 3].chunks_exact(3) {
+                    rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+                }
+            }
+            other => panic!("image_source_to_packed_rgba: unsupported pixel format {other:?}"),
+        }
+    }
+    (rgba, w as u32, h as u32)
 }
 
 /// Convert a raw hash ID to a memorable name, stripping any file extension.
