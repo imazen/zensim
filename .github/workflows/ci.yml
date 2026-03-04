@@ -68,6 +68,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features -- --nocapture
 
+  corpus-tests:
+    name: Corpus ICC tests
+    runs-on: ubuntu-latest
+    env:
+      REGRESS_REFERENCE_URL: https://imageflow-resources.s3.amazonaws.com/test_inputs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p zensim --test corpus_icc -- --ignored --nocapture
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
