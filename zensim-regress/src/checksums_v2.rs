@@ -23,7 +23,6 @@ use std::sync::Arc;
 
 use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
 
-use crate::checksum_file::ToleranceSpec;
 use crate::diff_image::create_comparison_montage_raw;
 use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
 use crate::error::RegressError;
@@ -31,6 +30,7 @@ use crate::hasher::{ChecksumHasher, SeaHasher};
 use crate::manifest::{ManifestEntry, ManifestStatus, ManifestWriter};
 use crate::remote::ReferenceStorage;
 use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
+use crate::tolerance::ToleranceSpec;
 
 // ─── Top-level file ──────────────────────────────────────────────────────
 
@@ -241,7 +241,7 @@ pub struct TestSection {
     /// Detail/variant name (e.g., `"eeccff_hermite_400x400"`).
     pub detail_name: String,
     /// Tolerance in effect for this test (informational).
-    pub tolerance: Option<crate::checksum_file::ToleranceSpec>,
+    pub tolerance: Option<crate::tolerance::ToleranceSpec>,
     /// Checksum entries in file order.
     pub entries: Vec<ChecksumEntry2>,
 }
@@ -608,8 +608,30 @@ pub fn migrate_toml_dir(
 
         let section = checksums_file.get_or_create_section(&test_name, &detail_name);
 
-        // Set tolerance
-        section.tolerance = Some(toml_file.tolerance.clone());
+        // Set tolerance (convert from checksum_file::ToleranceSpec to tolerance::ToleranceSpec)
+        section.tolerance = Some(ToleranceSpec {
+            max_delta: toml_file.tolerance.max_delta,
+            min_similarity: toml_file.tolerance.min_similarity,
+            max_pixels_different: toml_file.tolerance.max_pixels_different,
+            max_alpha_delta: toml_file.tolerance.max_alpha_delta,
+            ignore_alpha: toml_file.tolerance.ignore_alpha,
+            overrides: toml_file
+                .tolerance
+                .overrides
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        crate::tolerance::ToleranceOverride {
+                            max_delta: v.max_delta,
+                            min_similarity: v.min_similarity,
+                            max_pixels_different: v.max_pixels_different,
+                            max_alpha_delta: v.max_alpha_delta,
+                        },
+                    )
+                })
+                .collect(),
+        });
 
         // Convert checksum entries
         for cs in &toml_file.checksum {
@@ -1023,7 +1045,7 @@ impl ChecksumManagerV2 {
         test_name: &str,
         detail_name: &str,
         actual_hash: &str,
-        tolerance: Option<&crate::checksum_file::ToleranceSpec>,
+        tolerance: Option<&crate::tolerance::ToleranceSpec>,
     ) -> Result<CheckResultV2, RegressError> {
         let path = self.module_path(module);
 
@@ -1048,7 +1070,7 @@ impl ChecksumManagerV2 {
         test_name: &str,
         detail_name: &str,
         actual_hash: &str,
-        tolerance: Option<&crate::checksum_file::ToleranceSpec>,
+        tolerance: Option<&crate::tolerance::ToleranceSpec>,
     ) -> Result<CheckResultV2, RegressError> {
         let actual_name = hash_to_memorable(actual_hash);
         let arch = crate::arch::detect_arch_tag().to_string();
@@ -1939,7 +1961,7 @@ tolerance d:1 s:95
     fn roundtrip_format() {
         let mut file = ChecksumsFile::new("test");
         let section = file.get_or_create_section("test_foo", "bar_baz");
-        section.tolerance = Some(crate::checksum_file::ToleranceSpec::exact());
+        section.tolerance = Some(crate::tolerance::ToleranceSpec::exact());
         section.entries.push(ChecksumEntry2::human_verified(
             "sunny-crab-a4839:sea".to_string(),
             "x86_64-avx512".to_string(),

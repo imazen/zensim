@@ -175,8 +175,8 @@ pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) ->
 /// max-delta:2 zensim:95 (dissim 0.05) pixels-changed:1.0%
 /// max-delta:1 zensim:99 (dissim 0.01) alpha-delta:0 [aarch64 max-delta:3 zensim:90 (dissim 0.1)]
 /// ```
-pub fn format_tolerance_shorthand(tolerance: &crate::checksum_file::ToleranceSpec) -> String {
-    use crate::checksum_file::ToleranceSpec;
+pub fn format_tolerance_shorthand(tolerance: &crate::tolerance::ToleranceSpec) -> String {
+    use crate::tolerance::ToleranceSpec;
 
     // Check for named presets (base fields only; overrides appended after).
     //
@@ -330,8 +330,8 @@ fn format_dissim(d: f64) -> String {
 ///
 /// Named presets can have per-arch overrides appended:
 /// `"off-by-one [aarch64 max-delta:3]"`
-pub fn parse_tolerance_shorthand(s: &str) -> crate::checksum_file::ToleranceSpec {
-    use crate::checksum_file::{ToleranceOverride, ToleranceSpec};
+pub fn parse_tolerance_shorthand(s: &str) -> crate::tolerance::ToleranceSpec {
+    use crate::tolerance::{ToleranceOverride, ToleranceSpec};
     use std::collections::BTreeMap;
 
     let input = s.trim();
@@ -430,7 +430,7 @@ fn parse_zensim_value(v: &str) -> f64 {
     }
 }
 
-fn parse_main_tolerance_tokens(s: &str, spec: &mut crate::checksum_file::ToleranceSpec) {
+fn parse_main_tolerance_tokens(s: &str, spec: &mut crate::tolerance::ToleranceSpec) {
     let mut has_explicit_delta = false;
     let mut has_explicit_pixels = false;
 
@@ -482,7 +482,7 @@ fn parse_main_tolerance_tokens(s: &str, spec: &mut crate::checksum_file::Toleran
     }
 }
 
-fn parse_tolerance_token(token: &str, ov: &mut crate::checksum_file::ToleranceOverride) {
+fn parse_tolerance_token(token: &str, ov: &mut crate::tolerance::ToleranceOverride) {
     if let Some(v) = token.strip_prefix("zensim:") {
         ov.min_similarity = Some(parse_zensim_value(v));
     } else if let Some(v) = token
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_roundtrip_exact() {
-        let spec = crate::checksum_file::ToleranceSpec::exact();
+        let spec = crate::tolerance::ToleranceSpec::exact();
         let s = format_tolerance_shorthand(&spec);
         assert_eq!(s, "identical");
         let parsed = parse_tolerance_shorthand(&s);
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_roundtrip_off_by_one() {
-        let spec = crate::checksum_file::ToleranceSpec::off_by_one();
+        let spec = crate::tolerance::ToleranceSpec::off_by_one();
         let s = format_tolerance_shorthand(&spec);
         assert_eq!(s, "off-by-one");
         let parsed = parse_tolerance_shorthand(&s);
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn tolerance_shorthand_d1_s100_is_identical() {
         // max-delta:1 similarity:100 is effectively identical — similarity:100 makes delta irrelevant
-        use crate::checksum_file::ToleranceSpec;
+        use crate::tolerance::ToleranceSpec;
         let spec = ToleranceSpec {
             max_delta: 1,
             ..ToleranceSpec::exact()
@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_preset_with_overrides() {
-        use crate::checksum_file::{ToleranceOverride, ToleranceSpec};
+        use crate::tolerance::{ToleranceOverride, ToleranceSpec};
         use std::collections::BTreeMap;
 
         let spec = ToleranceSpec {
@@ -725,7 +725,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_roundtrip_complex() {
-        use crate::checksum_file::{ToleranceOverride, ToleranceSpec};
+        use crate::tolerance::{ToleranceOverride, ToleranceSpec};
         use std::collections::BTreeMap;
 
         let spec = ToleranceSpec {
@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_zensim_only() {
-        use crate::checksum_file::ToleranceSpec;
+        use crate::tolerance::ToleranceSpec;
 
         // Perceptual-only: max-delta:255 pixels-changed:100% means only zensim matters
         let spec = ToleranceSpec {
@@ -785,7 +785,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_zensim_roundtrip_loose() {
-        use crate::checksum_file::ToleranceSpec;
+        use crate::tolerance::ToleranceSpec;
 
         let spec = ToleranceSpec {
             max_delta: 255,
@@ -819,7 +819,7 @@ mod tests {
 
     #[test]
     fn tolerance_shorthand_ignore_alpha() {
-        use crate::checksum_file::ToleranceSpec;
+        use crate::tolerance::ToleranceSpec;
 
         // ignore-alpha prevents preset matching, falls back to explicit tokens
         let spec = ToleranceSpec {
