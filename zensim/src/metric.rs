@@ -286,8 +286,13 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .zip(weights.iter())
         .map(|(&f, &w)| w * f)
         .sum();
-    // Normalize by number of scales
-    let features_per_scale = FEATURES_PER_CHANNEL_BASIC * 3;
+    // Normalize by number of scales — infer features_per_scale from the vector length.
+    // With 3 channels: basic=39 (13×3), extended=75 (25×3).
+    let features_per_scale = if features.len() % (FEATURES_PER_CHANNEL_EXTENDED * 3) == 0 {
+        FEATURES_PER_CHANNEL_EXTENDED * 3
+    } else {
+        FEATURES_PER_CHANNEL_BASIC * 3
+    };
     let raw_distance = raw_distance / (features.len() as f64 / features_per_scale as f64).max(1.0);
     (distance_to_score(raw_distance), raw_distance)
 }
@@ -1682,8 +1687,20 @@ pub(crate) fn compute_single_scale(
         mse_vals[c] = sq_diff_sum(&src[c][..n], &dst[c][..n]) * one_over_n;
     }
 
-    // Use phased parallelism only for non-masking mode on large images
-    if n >= PARALLEL_THRESHOLD && !masked {
+    // Extended feature arrays
+    let mut masked_ssim_vals = [0.0f64; 9];
+    let mut masked_art_4th_vals = [0.0f64; 3];
+    let mut masked_det_4th_vals = [0.0f64; 3];
+    let mut masked_mse_vals = [0.0f64; 3];
+    let mut ssim_max_vals = [0.0f64; 3];
+    let mut art_max_vals = [0.0f64; 3];
+    let mut det_max_vals = [0.0f64; 3];
+    let mut ssim_p95_vals = [0.0f64; 3];
+    let mut art_p95_vals = [0.0f64; 3];
+    let mut det_p95_vals = [0.0f64; 3];
+
+    // Use phased parallelism only for non-masking, non-extended mode on large images
+    if n >= PARALLEL_THRESHOLD && !masked && !config.extended_features {
         compute_single_scale_phased(
             src,
             dst,
@@ -1703,7 +1720,7 @@ pub(crate) fn compute_single_scale(
             &mut edge_2nd_vals,
         );
     } else {
-        // Sequential path (also used for masking since mask computation needs mu1)
+        // Sequential path (also used for masking/extended since those need per-pixel state)
         for &(c, need_ssim, need_edge) in &active_channels {
             let result = compute_channel(
                 &src[c], &dst[c], width, height, config, need_ssim, need_edge, bufs,
@@ -1715,6 +1732,19 @@ pub(crate) fn compute_single_scale(
             ssim_2nd_vals[c] = result.ssim_2nd;
             edge_2nd_vals[c * 2] = result.edge_2nd[0];
             edge_2nd_vals[c * 2 + 1] = result.edge_2nd[1];
+            // Extended features
+            masked_ssim_vals[c * 3] = result.masked_ssim[0];
+            masked_ssim_vals[c * 3 + 1] = result.masked_ssim[1];
+            masked_ssim_vals[c * 3 + 2] = result.masked_ssim[2];
+            masked_art_4th_vals[c] = result.masked_art_4th;
+            masked_det_4th_vals[c] = result.masked_det_4th;
+            masked_mse_vals[c] = result.masked_mse;
+            ssim_max_vals[c] = result.ssim_max;
+            art_max_vals[c] = result.art_max;
+            det_max_vals[c] = result.det_max;
+            ssim_p95_vals[c] = result.ssim_p95;
+            art_p95_vals[c] = result.art_p95;
+            det_p95_vals[c] = result.det_p95;
         }
     }
 
@@ -1727,7 +1757,16 @@ pub(crate) fn compute_single_scale(
         hf_energy_gain: hf_energy_gain_vals,
         ssim_2nd: ssim_2nd_vals,
         edge_2nd: edge_2nd_vals,
-        ..Default::default()
+        masked_ssim: masked_ssim_vals,
+        masked_art_4th: masked_art_4th_vals,
+        masked_det_4th: masked_det_4th_vals,
+        masked_mse: masked_mse_vals,
+        ssim_max: ssim_max_vals,
+        art_max: art_max_vals,
+        det_max: det_max_vals,
+        ssim_p95: ssim_p95_vals,
+        art_p95: art_p95_vals,
+        det_p95: det_p95_vals,
     }
 }
 
@@ -2332,7 +2371,12 @@ pub(crate) fn combine_scores(
     config: &ZensimConfig,
     mean_offset: [f64; 3],
 ) -> ZensimResult {
-    let features_per_ch = FEATURES_PER_CHANNEL_BASIC;
+    let extended = config.extended_features;
+    let features_per_ch = if extended {
+        FEATURES_PER_CHANNEL_EXTENDED
+    } else {
+        FEATURES_PER_CHANNEL_BASIC
+    };
     let features_per_scale = features_per_ch * 3;
 
     let mut features = Vec::with_capacity(scale_stats.len() * features_per_scale);
@@ -2344,23 +2388,44 @@ pub(crate) fn combine_scores(
             // (SSIM errors are clamped ≥0, edge features use max(0,...), etc.)
             // but abs ensures no -0.0 or floating-point edge cases affect training.
 
-            // ssim_mean, ssim_4th, ssim_2nd
+            // 0-2: ssim_mean, ssim_4th, ssim_2nd
             features.push(ss.ssim[c * 2].abs());
             features.push(ss.ssim[c * 2 + 1].abs());
             features.push(ss.ssim_2nd[c].abs());
-            // art_mean, art_4th, art_2nd
+            // 3-5: art_mean, art_4th, art_2nd
             features.push(ss.edge[c * 4].abs());
             features.push(ss.edge[c * 4 + 1].abs());
             features.push(ss.edge_2nd[c * 2].abs());
-            // det_mean, det_4th, det_2nd
+            // 6-8: det_mean, det_4th, det_2nd
             features.push(ss.edge[c * 4 + 2].abs());
             features.push(ss.edge[c * 4 + 3].abs());
             features.push(ss.edge_2nd[c * 2 + 1].abs());
-            // mse, hf_energy_loss, hf_mag_loss, hf_energy_gain (also non-negative)
+            // 9-12: mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
             features.push(ss.mse[c]);
             features.push(ss.hf_energy_loss[c]);
             features.push(ss.hf_mag_loss[c]);
             features.push(ss.hf_energy_gain[c]);
+
+            if extended {
+                // 13-15: masked_ssim_mean, masked_ssim_4th, masked_ssim_2nd
+                features.push(ss.masked_ssim[c * 3].abs());
+                features.push(ss.masked_ssim[c * 3 + 1].abs());
+                features.push(ss.masked_ssim[c * 3 + 2].abs());
+                // 16: masked_art_4th
+                features.push(ss.masked_art_4th[c].abs());
+                // 17: masked_det_4th
+                features.push(ss.masked_det_4th[c].abs());
+                // 18: masked_mse
+                features.push(ss.masked_mse[c]);
+                // 19-21: ssim_max, art_max, det_max
+                features.push(ss.ssim_max[c]);
+                features.push(ss.art_max[c]);
+                features.push(ss.det_max[c]);
+                // 22-24: ssim_p95, art_p95, det_p95
+                features.push(ss.ssim_p95[c]);
+                features.push(ss.art_p95[c]);
+                features.push(ss.det_p95[c]);
+            }
         }
     }
 
