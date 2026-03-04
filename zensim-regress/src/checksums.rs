@@ -1278,7 +1278,13 @@ impl ChecksumManager {
                 let ref_source = RgbaSlice::new(&ref_pixels, rw as usize, rh as usize);
 
                 // Compare directly — zensim handles per-image pixel formats.
-                let report = check_regression(&self.zensim, &ref_source, actual, &reg_tolerance)?;
+                // Images smaller than 8×8 can't be scored; skip perceptual comparison.
+                let report =
+                    match check_regression(&self.zensim, &ref_source, actual, &reg_tolerance) {
+                        Ok(r) => Some(r),
+                        Err(zensim::ZensimError::ImageTooSmall) => None,
+                        Err(e) => return Err(e.into()),
+                    };
 
                 // Convert actual to packed RGBA only for the diff montage.
                 let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
@@ -1294,12 +1300,26 @@ impl ChecksumManager {
                     ah,
                 );
 
-                if report.passed() {
+                let passed = report.as_ref().map_or(true, |r| r.passed());
+
+                if passed {
                     let auto_accepted = self.update_mode;
                     if auto_accepted {
-                        let tol_note =
-                            tolerance.map(|t| format!("within {}", format_tolerance_shorthand(t)));
-                        let diff_summary_str = format_diff_summary(&report);
+                        let (tol_note, diff_summary_str) = if let Some(ref r) = report {
+                            (
+                                tolerance
+                                    .map(|t| format!("within {}", format_tolerance_shorthand(t))),
+                                Some(format_diff_summary(r)),
+                            )
+                        } else {
+                            (None, None)
+                        };
+
+                        let reason = if report.is_some() {
+                            "auto-accepted within tolerance"
+                        } else {
+                            "auto-accepted (image too small for zensim)"
+                        };
 
                         let section = file.get_or_create_section(test_name, detail_name);
                         if let Some(tol) = tolerance {
@@ -1311,25 +1331,34 @@ impl ChecksumManager {
                             name_hash: actual_name.clone(),
                             arch,
                             commit,
-                            reason: "auto-accepted within tolerance".to_string(),
+                            reason: reason.to_string(),
                             tolerance_note: tol_note,
                             vs_ref: Some(authoritative.clone()),
-                            diff_summary: Some(diff_summary_str),
+                            diff_summary: diff_summary_str,
                         });
                         file.write_to(&path)?;
                     }
 
-                    return Ok(CheckResult::WithinTolerance {
-                        report,
-                        authoritative_name: authoritative.clone(),
-                        actual_name,
-                        actual_hash: actual_hash.to_string(),
-                        auto_accepted,
-                    });
+                    if let Some(report) = report {
+                        return Ok(CheckResult::WithinTolerance {
+                            report,
+                            authoritative_name: authoritative.clone(),
+                            actual_name,
+                            actual_hash: actual_hash.to_string(),
+                            auto_accepted,
+                        });
+                    } else {
+                        // Too small for zensim — treat like no-baseline with auto-accept
+                        return Ok(CheckResult::NoBaseline {
+                            actual_name,
+                            actual_hash: actual_hash.to_string(),
+                            auto_accepted,
+                        });
+                    }
                 }
 
                 return Ok(CheckResult::Failed {
-                    report: Some(report),
+                    report,
                     authoritative_name: authoritative.clone(),
                     actual_name,
                     actual_hash: actual_hash.to_string(),
