@@ -159,12 +159,23 @@ impl Default for BlurKernel {
 ///
 /// Controls how each pyramid level is produced from the previous one.
 /// The default `Box2x2` averages 2×2 pixel blocks, halving resolution.
+/// Enable the `zenresize` feature for `Mitchell` and `Lanczos` variants.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DownscaleFilter {
     /// 2×2 box averaging (fastest, current default).
     #[default]
     Box2x2,
+    /// Mitchell-Netravali bicubic (B=1/3, C=1/3). Good balance of sharpness
+    /// and ringing. Requires the `zenresize` feature.
+    #[cfg(feature = "zenresize")]
+    #[allow(dead_code)]
+    Mitchell,
+    /// Lanczos-3 windowed sinc. Sharper than Mitchell but may ring on edges.
+    /// Requires the `zenresize` feature.
+    #[cfg(feature = "zenresize")]
+    #[allow(dead_code)]
+    Lanczos,
 }
 
 /// **Bottom line:** the defaults (`blur_passes=1`, `masking_strength=0.0`) give
@@ -200,9 +211,8 @@ pub struct ZensimConfig {
 
     /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
     ///
-    /// Controls how each pyramid level is produced. Currently only `Box2x2`
-    /// (2×2 averaging) is implemented.
-    #[allow(dead_code)]
+    /// Controls how each pyramid level is produced. Enable the `zenresize`
+    /// feature for `Mitchell` and `Lanczos` variants.
     pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
@@ -1225,6 +1235,54 @@ pub fn compute_zensim_with_config(
     Ok(result)
 }
 
+/// Downscale all 6 planes (3 src + 3 dst) by 2× using the specified filter.
+fn downscale_planes(
+    src: &mut [Vec<f32>; 3],
+    dst: &mut [Vec<f32>; 3],
+    w: usize,
+    h: usize,
+    filter: DownscaleFilter,
+) -> (usize, usize) {
+    match filter {
+        DownscaleFilter::Box2x2 => {
+            let mut nw = 0;
+            let mut nh = 0;
+            for c in 0..3 {
+                let (sw, sh) = downscale_2x_inplace(&mut src[c], w, h);
+                let _ = downscale_2x_inplace(&mut dst[c], w, h);
+                nw = sw;
+                nh = sh;
+            }
+            (nw, nh)
+        }
+        #[cfg(feature = "zenresize")]
+        DownscaleFilter::Mitchell | DownscaleFilter::Lanczos => {
+            let nw = w / 2;
+            let nh = h / 2;
+            if nw == 0 || nh == 0 {
+                return (nw.max(1), nh.max(1));
+            }
+            let zr_filter = match filter {
+                DownscaleFilter::Mitchell => zenresize::Filter::Mitchell,
+                DownscaleFilter::Lanczos => zenresize::Filter::Lanczos,
+                _ => unreachable!(),
+            };
+            let config = zenresize::ResizeConfig::builder(w as u32, h as u32, nw as u32, nh as u32)
+                .filter(zr_filter)
+                .format(zenresize::PixelDescriptor::GRAYF32_LINEAR)
+                .build();
+            let mut resizer = zenresize::Resizer::new(&config);
+            let mut temp = vec![0.0f32; nw * nh];
+            for plane in src.iter_mut().chain(dst.iter_mut()) {
+                resizer.resize_f32_into(&plane[..w * h], &mut temp);
+                plane.truncate(nw * nh);
+                plane[..nw * nh].copy_from_slice(&temp);
+            }
+            (nw, nh)
+        }
+    }
+}
+
 /// Compute per-scale SSIM and edge statistics.
 fn compute_multiscale_stats(
     src_xyb: [Vec<f32>; 3],
@@ -1267,16 +1325,15 @@ fn compute_multiscale_stats(
         );
         stats.push(scale_stat);
 
-        // Downscale for next level (in-place, no allocations)
+        // Downscale for next level
         if scale < num_scales - 1 {
-            let mut nw = 0;
-            let mut nh = 0;
-            for c in 0..3 {
-                let (sw, sh) = downscale_2x_inplace(&mut src_planes[c], w, h);
-                let _ = downscale_2x_inplace(&mut dst_planes[c], w, h);
-                nw = sw;
-                nh = sh;
-            }
+            let (nw, nh) = downscale_planes(
+                &mut src_planes,
+                &mut dst_planes,
+                w,
+                h,
+                config.downscale_filter,
+            );
             // Don't re-pad after downscale: padding is right-only, so padded
             // pixels participate in metric reductions and break left-right symmetry.
             // The SIMD cascade (v4→v3→scalar) handles arbitrary widths efficiently.

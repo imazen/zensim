@@ -23,6 +23,7 @@ rayon = "1.10"
 imgref = "1.12"
 rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
 half = { version = "2", default-features = false }
+zenresize = { path = "../zenresize", default-features = false, features = ["std"] }
 # zenpixels: re-enable once published to crates.io
 # zenpixels = { version = "...", default-features = false, features = ["std"] }
 # zenpng = { path = "../zenpng", default-features = false }

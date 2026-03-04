@@ -141,45 +141,6 @@ fn bench_zensim_3840x2160(c: &mut Criterion) {
     });
 }
 
-#[cfg(feature = "training")]
-fn bench_zensim_512x512_masked(c: &mut Criterion) {
-    let width = 512;
-    let height = 512;
-    let n = width * height;
-
-    let src: Vec<[u8; 3]> = (0..n)
-        .map(|i| {
-            let x = (i % width) as u8;
-            let y = (i / width) as u8;
-            [x, y, x.wrapping_add(y)]
-        })
-        .collect();
-
-    let dst: Vec<[u8; 3]> = src
-        .iter()
-        .map(|&[r, g, b]| [r.saturating_add(10), g.saturating_add(5), b])
-        .collect();
-
-    let config = zensim::ZensimConfig {
-        masking_strength: 4.0,
-        compute_all_features: true,
-        ..Default::default()
-    };
-
-    c.bench_function("zensim_512x512_masked", |b| {
-        b.iter(|| {
-            zensim::compute_zensim_with_config(
-                std::hint::black_box(&src),
-                std::hint::black_box(&dst),
-                width,
-                height,
-                config,
-            )
-            .unwrap()
-        })
-    });
-}
-
 fn bench_zensim_500x375(c: &mut Criterion) {
     let width = 500;
     let height = 375;
@@ -358,9 +319,88 @@ criterion_group!(
 );
 
 #[cfg(feature = "training")]
+fn bench_zensim_512x512_masked(c: &mut Criterion) {
+    let width = 512;
+    let height = 512;
+    let n = width * height;
+
+    let src: Vec<[u8; 3]> = (0..n)
+        .map(|i| {
+            let x = (i % width) as u8;
+            let y = (i / width) as u8;
+            [x, y, x.wrapping_add(y)]
+        })
+        .collect();
+
+    let dst: Vec<[u8; 3]> = src
+        .iter()
+        .map(|&[r, g, b]| [r.saturating_add(10), g.saturating_add(5), b])
+        .collect();
+
+    let config = zensim::ZensimConfig {
+        masking_strength: 4.0,
+        compute_all_features: true,
+        ..Default::default()
+    };
+
+    c.bench_function("zensim_512x512_masked", |b| {
+        b.iter(|| {
+            zensim::compute_zensim_with_config(
+                std::hint::black_box(&src),
+                std::hint::black_box(&dst),
+                width,
+                height,
+                config,
+            )
+            .unwrap()
+        })
+    });
+}
+
+#[cfg(feature = "zenresize")]
+fn bench_downscale_filters(c: &mut Criterion) {
+    use zensim::{DownscaleFilter, ZensimConfig};
+
+    for &(label, w, h) in &[("512x512", 512, 512), ("1920x1080", 1920, 1080)] {
+        let (src, dst) = make_test_images(w, h);
+
+        for &(filter_name, filter) in &[
+            ("box", DownscaleFilter::Box2x2),
+            ("mitchell", DownscaleFilter::Mitchell),
+            ("lanczos", DownscaleFilter::Lanczos),
+        ] {
+            let config = ZensimConfig {
+                downscale_filter: filter,
+                compute_all_features: true,
+                ..Default::default()
+            };
+            c.bench_function(&format!("zensim_{label}_{filter_name}"), |b| {
+                b.iter(|| {
+                    zensim::compute_zensim_with_config(
+                        std::hint::black_box(&src),
+                        std::hint::black_box(&dst),
+                        w,
+                        h,
+                        config,
+                    )
+                    .unwrap()
+                })
+            });
+        }
+    }
+}
+
+#[cfg(feature = "training")]
 criterion_group!(training_benches, bench_zensim_512x512_masked,);
 
-#[cfg(not(feature = "training"))]
+#[cfg(feature = "zenresize")]
+criterion_group!(zenresize_benches, bench_downscale_filters,);
+
+#[cfg(all(not(feature = "training"), not(feature = "zenresize")))]
 criterion_main!(benches);
-#[cfg(feature = "training")]
+#[cfg(all(feature = "training", not(feature = "zenresize")))]
 criterion_main!(benches, training_benches);
+#[cfg(all(not(feature = "training"), feature = "zenresize"))]
+criterion_main!(benches, zenresize_benches);
+#[cfg(all(feature = "training", feature = "zenresize"))]
+criterion_main!(benches, training_benches, zenresize_benches);
