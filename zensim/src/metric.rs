@@ -161,7 +161,7 @@ impl Default for BlurKernel {
 /// The default `Box2x2` averages 2×2 pixel blocks, halving resolution.
 /// Enable the `zenresize` feature for `Mitchell` and `Lanczos` variants.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum DownscaleFilter {
     /// 2×2 box averaging (fastest, current default).
     #[default]
@@ -176,6 +176,13 @@ pub enum DownscaleFilter {
     #[cfg(feature = "zenresize")]
     #[allow(dead_code)]
     Lanczos,
+    /// Mitchell-Netravali bicubic followed by a Gaussian blur with the given
+    /// sigma. This anti-aliases the pyramid more aggressively than plain
+    /// Mitchell, which may help metrics that are sensitive to high-frequency
+    /// ringing. Requires the `zenresize` feature.
+    #[cfg(feature = "zenresize")]
+    #[allow(dead_code)]
+    MitchellBlur(f32),
 }
 
 /// **Bottom line:** the defaults (`blur_passes=1`, `masking_strength=0.0`) give
@@ -1256,21 +1263,32 @@ fn downscale_planes(
             (nw, nh)
         }
         #[cfg(feature = "zenresize")]
-        DownscaleFilter::Mitchell | DownscaleFilter::Lanczos => {
+        DownscaleFilter::Mitchell
+        | DownscaleFilter::Lanczos
+        | DownscaleFilter::MitchellBlur(_) => {
             let nw = w / 2;
             let nh = h / 2;
             if nw == 0 || nh == 0 {
                 return (nw.max(1), nh.max(1));
             }
-            let zr_filter = match filter {
-                DownscaleFilter::Mitchell => zenresize::Filter::Mitchell,
-                DownscaleFilter::Lanczos => zenresize::Filter::Lanczos,
+            let (zr_filter, blur_sigma) = match filter {
+                DownscaleFilter::Mitchell => (zenresize::Filter::Mitchell, 0.0),
+                DownscaleFilter::Lanczos => (zenresize::Filter::Lanczos, 0.0),
+                DownscaleFilter::MitchellBlur(sigma) => (zenresize::Filter::Mitchell, sigma),
                 _ => unreachable!(),
             };
-            let config = zenresize::ResizeConfig::builder(w as u32, h as u32, nw as u32, nh as u32)
-                .filter(zr_filter)
-                .format(zenresize::PixelDescriptor::GRAYF32_LINEAR)
-                .build();
+            let mut builder = zenresize::ResizeConfig::builder(
+                w as u32,
+                h as u32,
+                nw as u32,
+                nh as u32,
+            )
+            .filter(zr_filter)
+            .format(zenresize::PixelDescriptor::GRAYF32_LINEAR);
+            if blur_sigma > 0.0 {
+                builder = builder.post_blur(blur_sigma);
+            }
+            let config = builder.build();
             let mut resizer = zenresize::Resizer::new(&config);
             let mut temp = vec![0.0f32; nw * nh];
             for plane in src.iter_mut().chain(dst.iter_mut()) {

@@ -396,9 +396,18 @@ fn main() {
         "mitchell" => zensim::DownscaleFilter::Mitchell,
         #[cfg(feature = "zenresize")]
         "lanczos" => zensim::DownscaleFilter::Lanczos,
+        #[cfg(feature = "zenresize")]
+        s if s.starts_with("mitchell-blur") => {
+            let sigma = s
+                .strip_prefix("mitchell-blur")
+                .and_then(|rest| rest.strip_prefix(':'))
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.5);
+            zensim::DownscaleFilter::MitchellBlur(sigma)
+        }
         other => {
             eprintln!(
-                "Unknown downscale filter: {other}. Options: box, mitchell, lanczos (requires zenresize feature)"
+                "Unknown downscale filter: {other}. Options: box, mitchell, lanczos, mitchell-blur[:sigma] (requires zenresize feature)"
             );
             std::process::exit(1);
         }
