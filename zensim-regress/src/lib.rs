@@ -50,6 +50,7 @@ pub mod manager;
 pub mod manifest;
 pub mod petname;
 pub mod remote;
+pub mod report;
 pub mod testing;
 pub mod upload;
 

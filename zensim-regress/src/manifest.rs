@@ -218,14 +218,14 @@ impl ManifestWriter {
         let diff = entry.diff_summary.unwrap_or("-");
 
         let actual_zdsim = match entry.actual_zdsim {
-            Some(z) if z == 0.0 => "0".to_string(),
+            Some(0.0) => "0".to_string(),
             Some(z) if z < 0.001 => format!("{z:.6}"),
             Some(z) if z < 0.01 => format!("{z:.4}"),
             Some(z) => format!("{z:.4}"),
             None => "-".to_string(),
         };
         let tolerance_zdsim = match entry.tolerance_zdsim {
-            Some(z) if z == 0.0 => "0".to_string(),
+            Some(0.0) => "0".to_string(),
             Some(z) => format!("{z:.4}"),
             None => "-".to_string(),
         };
