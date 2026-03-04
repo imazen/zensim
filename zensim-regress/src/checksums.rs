@@ -1083,7 +1083,7 @@ impl ChecksumManager {
             &actual_source,
             tolerance,
         )?;
-        self.write_manifest_for_result(module, test_name, detail_name, &result);
+        self.write_manifest_for_result(module, test_name, detail_name, &result, tolerance);
         Ok(result)
     }
 
@@ -1139,7 +1139,7 @@ impl ChecksumManager {
             actual,
             tolerance,
         )?;
-        self.write_manifest_for_result(module, test_name, detail_name, &result);
+        self.write_manifest_for_result(module, test_name, detail_name, &result, tolerance);
         Ok(result)
     }
 
@@ -1166,7 +1166,7 @@ impl ChecksumManager {
             actual,
             tolerance,
         )?;
-        self.write_manifest_for_result(module, test_name, detail_name, &result);
+        self.write_manifest_for_result(module, test_name, detail_name, &result, tolerance);
         Ok(result)
     }
 
@@ -1278,8 +1278,7 @@ impl ChecksumManager {
                 let ref_source = RgbaSlice::new(&ref_pixels, rw as usize, rh as usize);
 
                 // Compare directly — zensim handles per-image pixel formats.
-                let report =
-                    check_regression(&self.zensim, &ref_source, actual, &reg_tolerance)?;
+                let report = check_regression(&self.zensim, &ref_source, actual, &reg_tolerance)?;
 
                 // Convert actual to packed RGBA only for the diff montage.
                 let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
@@ -1502,6 +1501,7 @@ impl ChecksumManager {
         test_name: &str,
         detail_name: &str,
         result: &CheckResult,
+        tolerance: Option<&ToleranceSpec>,
     ) {
         let Some(manifest) = &self.manifest else {
             return;
@@ -1566,7 +1566,7 @@ impl ChecksumManager {
             actual_hash,
             baseline_hash,
             actual_zdsim,
-            tolerance_zdsim: None, // TODO: extract from section tolerance
+            tolerance_zdsim: tolerance.map(|t| zensim::score_to_dissimilarity(t.min_similarity)),
             diff_summary: diff_summary.as_deref(),
         });
     }
