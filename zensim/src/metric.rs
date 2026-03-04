@@ -888,13 +888,18 @@ fn validate_pair(
 /// Streaming is used when masking is disabled (the common case).
 /// Full-image is forced when masking_strength > 0.0 because masking
 /// needs the full blurred source plane to compute per-pixel activity weights.
-/// Check if source and distorted images have byte-identical pixel data.
+/// Check if source and distorted images have byte-identical pixel data
+/// and matching color interpretation (format + primaries).
 fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
     let (w, h) = (source.width(), source.height());
     if w != distorted.width() || h != distorted.height() {
         return false;
     }
     if source.pixel_format() != distorted.pixel_format() {
+        return false;
+    }
+    // Different primaries mean different perceptual colors even with identical bytes.
+    if source.color_primaries() != distorted.color_primaries() {
         return false;
     }
     let bpp = source.pixel_format().bytes_per_pixel();
