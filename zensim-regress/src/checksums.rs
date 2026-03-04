@@ -1285,7 +1285,8 @@ impl ChecksumManager {
                 let actual_pixels = rgba_bytes_to_pixels(&actual_rgba);
                 let actual_source = RgbaSlice::new(&actual_pixels, aw as usize, ah as usize);
 
-                let report = check_regression(&self.zensim, &ref_source, &actual_source, &reg_tolerance)?;
+                let report =
+                    check_regression(&self.zensim, &ref_source, &actual_source, &reg_tolerance)?;
                 self.save_diff_montage(
                     module,
                     test_name,
