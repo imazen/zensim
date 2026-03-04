@@ -47,7 +47,7 @@ use crate::remote::ReferenceStorage;
 pub const MANIFEST_ENV_VAR: &str = "REGRESS_MANIFEST_PATH";
 
 /// TSV header line (with trailing newline).
-const HEADER: &str = "# test_name\tstatus\tactual_hash\tactual_petname\tactual_file\tbaseline_hash\tbaseline_petname\tbaseline_file\tdiff_summary\n";
+const HEADER: &str = "# test_name\tstatus\tactual_zdsim\ttolerance_zdsim\tactual_hash\tactual_petname\tactual_file\tbaseline_hash\tbaseline_petname\tbaseline_file\tdiff_summary\n";
 
 /// Status recorded in the manifest for each test check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +77,10 @@ impl ManifestStatus {
 pub struct ManifestEntry<'a> {
     pub test_name: &'a str,
     pub status: ManifestStatus,
+    /// Measured zdsim (0.0 = identical, higher = worse). `None` if not computed.
+    pub actual_zdsim: Option<f64>,
+    /// Tolerance zdsim threshold. `None` if not applicable.
+    pub tolerance_zdsim: Option<f64>,
     pub actual_hash: &'a str,
     pub baseline_hash: Option<&'a str>,
     pub diff_summary: Option<&'a str>,
@@ -213,11 +217,26 @@ impl ManifestWriter {
 
         let diff = entry.diff_summary.unwrap_or("-");
 
+        let actual_zdsim = match entry.actual_zdsim {
+            Some(z) if z == 0.0 => "0".to_string(),
+            Some(z) if z < 0.001 => format!("{z:.6}"),
+            Some(z) if z < 0.01 => format!("{z:.4}"),
+            Some(z) => format!("{z:.4}"),
+            None => "-".to_string(),
+        };
+        let tolerance_zdsim = match entry.tolerance_zdsim {
+            Some(z) if z == 0.0 => "0".to_string(),
+            Some(z) => format!("{z:.4}"),
+            None => "-".to_string(),
+        };
+
         // Format the complete line in memory before taking any locks.
         let line = format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             entry.test_name,
             entry.status.as_str(),
+            actual_zdsim,
+            tolerance_zdsim,
             entry.actual_hash,
             actual_petname,
             actual_file,
@@ -271,6 +290,8 @@ mod tests {
             status: ManifestStatus::Match,
             actual_hash: "sea:a4839401fabae99c",
             baseline_hash: Some("sea:a4839401fabae99c"),
+            actual_zdsim: Some(0.0),
+            tolerance_zdsim: Some(0.01),
             diff_summary: None,
         });
 
@@ -279,6 +300,8 @@ mod tests {
             status: ManifestStatus::Accepted,
             actual_hash: "sea:1234567890abcdef",
             baseline_hash: Some("sea:fedcba0987654321"),
+            actual_zdsim: Some(0.036),
+            tolerance_zdsim: Some(0.05),
             diff_summary: Some("score:96.4"),
         });
 
@@ -287,6 +310,8 @@ mod tests {
             status: ManifestStatus::Novel,
             actual_hash: "sea:0000111122223333",
             baseline_hash: None,
+            actual_zdsim: None,
+            tolerance_zdsim: None,
             diff_summary: None,
         });
 
@@ -299,25 +324,29 @@ mod tests {
         assert_eq!(lines.len(), 4, "content:\n{content}");
         assert!(lines[0].starts_with("# test_name\t"));
 
-        // Check first data line
+        // Check first data line (fields shifted by 2 for zdsim columns)
         let fields: Vec<&str> = lines[1].split('\t').collect();
         assert_eq!(fields[0], "resize_bicubic");
         assert_eq!(fields[1], "match");
-        assert_eq!(fields[2], "sea:a4839401fabae99c");
+        assert_eq!(fields[2], "0"); // actual_zdsim
+        assert_eq!(fields[3], "0.0100"); // tolerance_zdsim
+        assert_eq!(fields[4], "sea:a4839401fabae99c");
         // petname should be deterministic
-        assert!(fields[3].contains(":sea"), "petname: {}", fields[3]);
-        assert_eq!(fields[4], "sea_a4839401fabae99c.png");
+        assert!(fields[5].contains(":sea"), "petname: {}", fields[5]);
+        assert_eq!(fields[6], "sea_a4839401fabae99c.png");
         // baseline same as actual for match
-        assert_eq!(fields[5], "sea:a4839401fabae99c");
-        assert_eq!(fields[8], "-"); // no diff summary
+        assert_eq!(fields[7], "sea:a4839401fabae99c");
+        assert_eq!(fields[10], "-"); // no diff summary
 
         // Check novel line has "-" for baseline
         let novel_fields: Vec<&str> = lines[3].split('\t').collect();
         assert_eq!(novel_fields[0], "first_run_test");
         assert_eq!(novel_fields[1], "novel");
-        assert_eq!(novel_fields[5], "-");
-        assert_eq!(novel_fields[6], "-");
-        assert_eq!(novel_fields[7], "-");
+        assert_eq!(novel_fields[2], "-"); // no zdsim
+        assert_eq!(novel_fields[3], "-"); // no tolerance
+        assert_eq!(novel_fields[7], "-"); // baseline hash
+        assert_eq!(novel_fields[8], "-");
+        assert_eq!(novel_fields[9], "-");
     }
 
     #[test]
@@ -336,6 +365,8 @@ mod tests {
                             status: ManifestStatus::Match,
                             actual_hash: "sea:a4839401fabae99c",
                             baseline_hash: Some("sea:a4839401fabae99c"),
+                            actual_zdsim: Some(0.0),
+                            tolerance_zdsim: None,
                             diff_summary: None,
                         });
                     }
@@ -368,6 +399,8 @@ mod tests {
             status: ManifestStatus::Match,
             actual_hash: "sea:a4839401fabae99c",
             baseline_hash: Some("sea:a4839401fabae99c"),
+            actual_zdsim: Some(0.0),
+            tolerance_zdsim: None,
             diff_summary: None,
         });
         w2.write_entry(&ManifestEntry {
@@ -375,6 +408,8 @@ mod tests {
             status: ManifestStatus::Novel,
             actual_hash: "sea:1111222233334444",
             baseline_hash: None,
+            actual_zdsim: None,
+            tolerance_zdsim: None,
             diff_summary: None,
         });
         w3.write_entry(&ManifestEntry {
@@ -382,6 +417,8 @@ mod tests {
             status: ManifestStatus::Failed,
             actual_hash: "sea:aaaabbbbccccdddd",
             baseline_hash: Some("sea:eeeeffff00001111"),
+            actual_zdsim: Some(0.58),
+            tolerance_zdsim: Some(0.05),
             diff_summary: Some("score:42.0"),
         });
 
@@ -425,6 +462,8 @@ mod tests {
                             status: ManifestStatus::Match,
                             actual_hash: "sea:a4839401fabae99c",
                             baseline_hash: Some("sea:a4839401fabae99c"),
+                            actual_zdsim: Some(0.0),
+                            tolerance_zdsim: None,
                             diff_summary: None,
                         });
                     }
@@ -446,15 +485,15 @@ mod tests {
         let data_count = content.lines().filter(|l| !l.starts_with('#')).count();
         assert_eq!(data_count, 80, "data lines:\n{content}");
 
-        // Every line has exactly 9 tab-separated fields
+        // Every line has exactly 11 tab-separated fields
         for (i, line) in content.lines().enumerate() {
             if line.starts_with('#') {
                 continue;
             }
             let field_count = line.split('\t').count();
             assert_eq!(
-                field_count, 9,
-                "line {i} has {field_count} fields (expected 9): {line}"
+                field_count, 11,
+                "line {i} has {field_count} fields (expected 11): {line}"
             );
         }
     }

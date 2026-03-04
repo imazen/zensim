@@ -1618,11 +1618,12 @@ impl ChecksumManagerV2 {
 
         let flat_name = flat_test_name(test_name, detail_name);
 
-        let (status, actual_hash, baseline_hash, diff_summary) = match result {
+        let (status, actual_hash, baseline_hash, actual_zdsim, diff_summary) = match result {
             CheckResultV2::Match { entry_name } => (
                 ManifestStatus::Match,
                 entry_name.as_str(),
                 Some(entry_name.as_str()),
+                Some(0.0),
                 None,
             ),
             CheckResultV2::WithinTolerance {
@@ -1631,11 +1632,13 @@ impl ChecksumManagerV2 {
                 actual_hash,
                 ..
             } => {
+                let zd = crate::diff_summary::zdsim(report.score());
                 let summary = format!("score:{:.1}", report.score());
                 (
                     ManifestStatus::Accepted,
                     actual_hash.as_str(),
                     Some(authoritative_name.as_str()),
+                    Some(zd),
                     Some(summary),
                 )
             }
@@ -1645,16 +1648,18 @@ impl ChecksumManagerV2 {
                 report,
                 ..
             } => {
+                let zd = report.as_ref().map(|r| crate::diff_summary::zdsim(r.score()));
                 let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
                 (
                     ManifestStatus::Failed,
                     actual_hash.as_str(),
                     Some(authoritative_name.as_str()),
+                    zd,
                     summary,
                 )
             }
             CheckResultV2::NoBaseline { actual_hash, .. } => {
-                (ManifestStatus::Novel, actual_hash.as_str(), None, None)
+                (ManifestStatus::Novel, actual_hash.as_str(), None, None, None)
             }
         };
 
@@ -1663,6 +1668,8 @@ impl ChecksumManagerV2 {
             status,
             actual_hash,
             baseline_hash,
+            actual_zdsim,
+            tolerance_zdsim: None, // TODO: extract from section tolerance
             diff_summary: diff_summary.as_deref(),
         });
     }

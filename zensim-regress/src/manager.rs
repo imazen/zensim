@@ -834,11 +834,12 @@ impl ChecksumManager {
             return;
         };
 
-        let (status, actual_hash, baseline_hash, diff_summary) = match result {
+        let (status, actual_hash, baseline_hash, actual_zdsim, diff_summary) = match result {
             CheckResult::Match { entry_id, .. } => (
                 ManifestStatus::Match,
                 entry_id.as_str(),
                 Some(entry_id.as_str()),
+                Some(0.0),
                 None,
             ),
             CheckResult::WithinTolerance {
@@ -847,11 +848,13 @@ impl ChecksumManager {
                 actual_hash,
                 ..
             } => {
+                let zd = crate::diff_summary::zdsim(report.score());
                 let summary = format!("score:{:.1}", report.score());
                 (
                     ManifestStatus::Accepted,
                     actual_hash.as_str(),
                     Some(authoritative_id.as_str()),
+                    Some(zd),
                     Some(summary),
                 )
             }
@@ -861,16 +864,18 @@ impl ChecksumManager {
                 report,
                 ..
             } => {
+                let zd = report.as_ref().map(|r| crate::diff_summary::zdsim(r.score()));
                 let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
                 (
                     ManifestStatus::Failed,
                     actual_hash.as_str(),
                     authoritative_id.as_deref(),
+                    zd,
                     summary,
                 )
             }
             CheckResult::NoBaseline { actual_hash, .. } => {
-                (ManifestStatus::Novel, actual_hash.as_str(), None, None)
+                (ManifestStatus::Novel, actual_hash.as_str(), None, None, None)
             }
         };
 
@@ -879,6 +884,8 @@ impl ChecksumManager {
             status,
             actual_hash,
             baseline_hash,
+            actual_zdsim,
+            tolerance_zdsim: None, // v1 manager: tolerance varies per-test
             diff_summary: diff_summary.as_deref(),
         });
     }
@@ -1552,13 +1559,15 @@ mod tests {
         let fields: Vec<&str> = data_lines[0].split('\t').collect();
         assert_eq!(fields[0], "tolerance_test");
         assert_eq!(fields[1], "failed");
-        // Should have a score in diff_summary
+        // actual_zdsim should be present (not "-")
+        assert_ne!(fields[2], "-", "actual_zdsim should be present");
+        // Should have a score in diff_summary (field 10 after zdsim columns)
         assert!(
-            fields[8].starts_with("score:"),
+            fields[10].starts_with("score:"),
             "diff_summary: {}",
-            fields[8]
+            fields[10]
         );
-        // Baseline hash should be present
-        assert_eq!(fields[5], hash);
+        // Baseline hash should be present (field 7 after zdsim columns)
+        assert_eq!(fields[7], hash);
     }
 }
