@@ -134,6 +134,44 @@ use crate::simd_ops::{
 /// the full blurred source plane to compute per-pixel activity weights.
 /// Uses phased blur parallelism for large images (>512×512) when not masking.
 ///
+/// Blur kernel shape for local-mean computation.
+///
+/// Controls how `blur(src)` and `blur(dst)` are computed at each scale.
+/// The default `Box` kernel uses iterated box blur, which is O(1) per pixel
+/// regardless of radius and has full SIMD optimization.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlurKernel {
+    /// Iterated box blur. `passes` controls the kernel shape:
+    /// - 1 = rectangular (fastest, enables fused streaming kernels)
+    /// - 2 = triangular (~1.5× slower at scale 0)
+    /// - 3 = piecewise-quadratic ≈ Gaussian (~2× slower)
+    Box { passes: u8 },
+}
+
+impl Default for BlurKernel {
+    fn default() -> Self {
+        Self::Box { passes: 1 }
+    }
+}
+
+/// Downscale filter for pyramid construction.
+///
+/// Controls how each pyramid level is produced from the previous one.
+/// The default `Box2x2` averages 2×2 pixel blocks, halving resolution.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownscaleFilter {
+    /// 2×2 box averaging (fastest, current default).
+    Box2x2,
+}
+
+impl Default for DownscaleFilter {
+    fn default() -> Self {
+        Self::Box2x2
+    }
+}
+
 /// **Bottom line:** the defaults (`blur_passes=1`, `masking_strength=0.0`) give
 /// peak performance. Changing either has a measurable cost.
 #[derive(Debug, Clone, Copy)]
@@ -158,6 +196,18 @@ pub struct ZensimConfig {
     /// The performance difference comes from whether the fused streaming kernels
     /// can be used, not from the blur itself.
     pub blur_passes: u8,
+
+    /// Blur kernel shape (default: `BlurKernel::Box { passes: 1 }`).
+    ///
+    /// Overrides `blur_passes` when set. The `blur_radius` field still controls
+    /// the kernel width. Currently only the `Box` variant is implemented.
+    pub blur_kernel: BlurKernel,
+
+    /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
+    ///
+    /// Controls how each pyramid level is produced. Currently only `Box2x2`
+    /// (2×2 averaging) is implemented.
+    pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
     ///
@@ -237,6 +287,8 @@ impl Default for ZensimConfig {
         Self {
             blur_radius: 5,
             blur_passes: 1,
+            blur_kernel: BlurKernel::default(),
+            downscale_filter: DownscaleFilter::default(),
             compute_all_features: false,
             extended_features: false,
             extended_masking_strength: 4.0,
@@ -1029,6 +1081,10 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
     ZensimConfig {
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
+        blur_kernel: BlurKernel::Box {
+            passes: params.blur_passes,
+        },
+        downscale_filter: DownscaleFilter::default(),
         compute_all_features: false,
         extended_features: false,
         extended_masking_strength: 4.0,
@@ -1257,9 +1313,11 @@ fn compute_channel(
     let mut edge_2nd = [0.0f64; 2];
     let masked = config.masking_strength > 0.0;
 
+    let effective_passes = match config.blur_kernel {
+        BlurKernel::Box { passes } => passes,
+    };
     #[allow(clippy::type_complexity)]
-    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match config.blur_passes
-    {
+    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match effective_passes {
         1 => box_blur_1pass_into,
         2 => box_blur_2pass_into,
         _ => box_blur_3pass_into,
@@ -1267,7 +1325,7 @@ fn compute_channel(
 
     // Fused path: for 1-pass SSIM channels, compute all 4 H-blurs in one pass
     // then complete with 4 separate V-blurs. Saves 3 H-passes + 2 element-wise ops.
-    let use_fused = need_ssim && config.blur_passes == 1;
+    let use_fused = need_ssim && effective_passes == 1;
 
     if use_fused {
         // Fused horizontal blur: reads src_c and dst_c once, produces H-blurred
