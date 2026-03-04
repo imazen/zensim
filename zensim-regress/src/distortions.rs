@@ -7,7 +7,7 @@
 //!
 //! All functions operate on flat RGBA byte slices (`&[u8]` with length
 //! divisible by 4), matching the format used by
-//! [`ChecksumManagerV2::check_pixels()`](crate::checksums_v2::ChecksumManagerV2::check_pixels).
+//! [`ChecksumManager::check_pixels()`](crate::checksums::ChecksumManager::check_pixels).
 //!
 //! # Categories
 //!

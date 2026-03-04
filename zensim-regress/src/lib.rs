@@ -7,13 +7,13 @@
 //!
 //! # Format
 //!
-//! `.checksums` — line-oriented log files via [`checksums_v2`]. Compact,
+//! `.checksums` — line-oriented log files via [`checksums`]. Compact,
 //! append-friendly, one file per test module with human-readable memorable names.
 //!
 //! # Quick start
 //!
 //! ```no_run
-//! use zensim_regress::checksums_v2::ChecksumManagerV2;
+//! use zensim_regress::checksums::ChecksumManager;
 //! use zensim_regress::hasher::SeaHasher;
 //! use zensim_regress::hasher::ChecksumHasher;
 //! use zensim_regress::arch::detect_arch_tag;
@@ -28,7 +28,7 @@
 #![forbid(unsafe_code)]
 
 pub mod arch;
-pub mod checksums_v2;
+pub mod checksums;
 pub mod diff_image;
 pub mod diff_summary;
 pub mod display;

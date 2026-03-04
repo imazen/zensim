@@ -2,10 +2,10 @@
 //!
 //! Provides [`FileLockGuard`] which acquires an exclusive advisory lock on
 //! creation and releases it on drop, preventing lock leaks on early returns
-//! or panics. Used internally by [`checksums_v2`] and [`manifest`] for
+//! or panics. Used internally by [`checksums`] and [`manifest`] for
 //! multi-process safety.
 //!
-//! [`checksums_v2`]: crate::checksums_v2
+//! [`checksums`]: crate::checksums
 //! [`manifest`]: crate::manifest
 
 use std::path::{Path, PathBuf};

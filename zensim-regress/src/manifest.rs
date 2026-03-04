@@ -22,7 +22,7 @@
 //! REGRESS_MANIFEST_PATH=test-manifest.tsv cargo test
 //! ```
 //!
-//! Or configure programmatically via [`ChecksumManagerV2::with_manifest`](crate::checksums_v2::ChecksumManagerV2::with_manifest).
+//! Or configure programmatically via [`ChecksumManager::with_manifest`](crate::checksums::ChecksumManager::with_manifest).
 //!
 //! # Format
 //!
@@ -33,7 +33,7 @@
 //! # test_name\tstatus\tactual_hash\tactual_petname\tactual_file\tbaseline_hash\tbaseline_petname\tbaseline_file\tdiff_summary
 //! ```
 //!
-//! [`ChecksumManagerV2::with_manifest`]: crate::checksums_v2::ChecksumManagerV2::with_manifest
+//! [`ChecksumManager::with_manifest`]: crate::checksums::ChecksumManager::with_manifest
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

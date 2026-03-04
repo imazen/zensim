@@ -1,4 +1,4 @@
-//! `.checksums` v1 format: line-oriented checksum log files.
+//! `.checksums` format: line-oriented checksum log files.
 //!
 //! Each test source file gets a sibling `.checksums` file containing sections
 //! for each test function. Entries track human-verified baselines, auto-accepted
@@ -242,24 +242,24 @@ pub struct TestSection {
     /// Tolerance in effect for this test (informational).
     pub tolerance: Option<crate::tolerance::ToleranceSpec>,
     /// Checksum entries in file order.
-    pub entries: Vec<ChecksumEntry2>,
+    pub entries: Vec<ChecksumEntry>,
 }
 
 impl TestSection {
     /// The human-verified anchor entry (first `=` entry, or most recent).
-    pub fn anchor(&self) -> Option<&ChecksumEntry2> {
+    pub fn anchor(&self) -> Option<&ChecksumEntry> {
         self.entries
             .iter()
             .find(|e| e.kind == EntryKind::HumanVerified)
     }
 
     /// All active entries (human-verified + auto-accepted, not retired).
-    pub fn active_entries(&self) -> impl Iterator<Item = &ChecksumEntry2> {
+    pub fn active_entries(&self) -> impl Iterator<Item = &ChecksumEntry> {
         self.entries.iter().filter(|e| e.kind != EntryKind::Retired)
     }
 
     /// Find an entry by its memorable name+hash.
-    pub fn find_by_name_hash(&self, name_hash: &str) -> Option<&ChecksumEntry2> {
+    pub fn find_by_name_hash(&self, name_hash: &str) -> Option<&ChecksumEntry> {
         self.entries.iter().find(|e| e.name_hash == name_hash)
     }
 
@@ -354,7 +354,7 @@ impl EntryKind {
 
 /// A single checksum entry in a `.checksums` section.
 #[derive(Debug, Clone)]
-pub struct ChecksumEntry2 {
+pub struct ChecksumEntry {
     /// Entry kind: `=` human-verified, `~` auto-accepted, `x` retired.
     pub kind: EntryKind,
     /// Memorable name with hash (e.g., `"sunny-crab-a4839:sea"`).
@@ -373,7 +373,7 @@ pub struct ChecksumEntry2 {
     pub diff_summary: Option<String>,
 }
 
-impl ChecksumEntry2 {
+impl ChecksumEntry {
     /// Create a new human-verified entry.
     pub fn human_verified(name_hash: String, arch: String, commit: String) -> Self {
         Self {
@@ -420,7 +420,7 @@ fn split_section_header(header: &str) -> (String, String) {
 }
 
 /// Parse a single entry line (starting with `=`, `~`, or `x`).
-fn parse_entry_line(line: &str) -> Option<ChecksumEntry2> {
+fn parse_entry_line(line: &str) -> Option<ChecksumEntry> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
@@ -449,7 +449,7 @@ fn parse_entry_line(line: &str) -> Option<ChecksumEntry2> {
 
     let (reason, tolerance_note, vs_ref, diff_summary) = parse_reason_and_vs(remaining);
 
-    Some(ChecksumEntry2 {
+    Some(ChecksumEntry {
         kind,
         name_hash,
         arch,
@@ -539,7 +539,7 @@ impl<'a> Tokenizer<'a> {
 // ─── Formatting ──────────────────────────────────────────────────────────
 
 /// Format a single entry line.
-fn format_entry_line(entry: &ChecksumEntry2) -> String {
+fn format_entry_line(entry: &ChecksumEntry) -> String {
     let prefix = entry.kind.prefix_char();
     let mut line = format!(
         "{} {}  {}  @{}  {}",
@@ -564,7 +564,7 @@ fn format_entry_line(entry: &ChecksumEntry2) -> String {
 
 /// Result of checking a hash against a `.checksums` file.
 #[derive(Debug, Clone)]
-pub enum CheckResultV2 {
+pub enum CheckResult {
     /// Actual hash matches an active entry.
     Match {
         /// Memorable name of the matched entry.
@@ -572,8 +572,8 @@ pub enum CheckResultV2 {
     },
     /// Hash mismatch, but zensim comparison passes tolerance.
     ///
-    /// Only returned by [`ChecksumManagerV2::check_pixels`] and
-    /// [`ChecksumManagerV2::check_file`] — hash-only [`check_hash`] cannot
+    /// Only returned by [`ChecksumManager::check_pixels`] and
+    /// [`ChecksumManager::check_file`] — hash-only [`check_hash`] cannot
     /// produce this variant because it has no pixel data to compare.
     WithinTolerance {
         /// Zensim regression report.
@@ -609,7 +609,7 @@ pub enum CheckResultV2 {
     },
 }
 
-impl CheckResultV2 {
+impl CheckResult {
     /// Whether this result is a pass (Match, WithinTolerance, or auto-accepted NoBaseline).
     pub fn passed(&self) -> bool {
         matches!(
@@ -664,7 +664,7 @@ impl CheckResultV2 {
     }
 }
 
-impl std::fmt::Display for CheckResultV2 {
+impl std::fmt::Display for CheckResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Match { entry_name } => write!(f, "PASS (exact match, {entry_name})"),
@@ -760,7 +760,7 @@ impl std::fmt::Display for CheckResultV2 {
 /// # Environment variables
 ///
 /// - `UPDATE_CHECKSUMS=1` — auto-accept new checksums as `AutoAccepted`
-pub struct ChecksumManagerV2 {
+pub struct ChecksumManager {
     checksums_dir: PathBuf,
     update_mode: bool,
     hasher: Box<dyn ChecksumHasher>,
@@ -770,7 +770,7 @@ pub struct ChecksumManagerV2 {
     manifest: Option<Arc<ManifestWriter>>,
 }
 
-impl ChecksumManagerV2 {
+impl ChecksumManager {
     /// Create a new manager pointing at a directory of `.checksums` files.
     ///
     /// Reads `UPDATE_CHECKSUMS` from the environment.
@@ -870,7 +870,7 @@ impl ChecksumManagerV2 {
         detail_name: &str,
         actual_hash: &str,
         tolerance: Option<&crate::tolerance::ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         let path = self.module_path(module);
 
         // Acquire advisory file lock for the checksums file.
@@ -895,7 +895,7 @@ impl ChecksumManagerV2 {
         detail_name: &str,
         actual_hash: &str,
         tolerance: Option<&crate::tolerance::ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         let actual_name = hash_to_memorable(actual_hash);
         let arch = crate::arch::detect_arch_tag().to_string();
         let commit = current_commit_short().unwrap_or_default();
@@ -924,7 +924,7 @@ impl ChecksumManagerV2 {
                         file.write_to(path)?;
                     }
                 }
-                return Ok(CheckResultV2::Match { entry_name });
+                return Ok(CheckResult::Match { entry_name });
             }
 
             // No match — check if there's an anchor to report as the authoritative baseline
@@ -941,7 +941,7 @@ impl ChecksumManagerV2 {
                         section.tolerance = Some(tol.clone());
                     }
                     section.prune_auto_accepted(&arch);
-                    section.entries.push(ChecksumEntry2 {
+                    section.entries.push(ChecksumEntry {
                         kind: EntryKind::AutoAccepted,
                         name_hash: actual_name.clone(),
                         arch: arch.clone(),
@@ -952,14 +952,14 @@ impl ChecksumManagerV2 {
                         diff_summary: None,
                     });
                     file.write_to(path)?;
-                    return Ok(CheckResultV2::NoBaseline {
+                    return Ok(CheckResult::NoBaseline {
                         actual_name,
                         actual_hash: actual_hash.to_string(),
                         auto_accepted: true,
                     });
                 }
 
-                return Ok(CheckResultV2::Failed {
+                return Ok(CheckResult::Failed {
                     report: None,
                     authoritative_name: authoritative.clone(),
                     actual_name,
@@ -974,7 +974,7 @@ impl ChecksumManagerV2 {
             if let Some(tol) = tolerance {
                 section.tolerance = Some(tol.clone());
             }
-            section.entries.push(ChecksumEntry2 {
+            section.entries.push(ChecksumEntry {
                 kind: EntryKind::AutoAccepted,
                 name_hash: actual_name.clone(),
                 arch,
@@ -985,14 +985,14 @@ impl ChecksumManagerV2 {
                 diff_summary: None,
             });
             file.write_to(path)?;
-            return Ok(CheckResultV2::NoBaseline {
+            return Ok(CheckResult::NoBaseline {
                 actual_name,
                 actual_hash: actual_hash.to_string(),
                 auto_accepted: true,
             });
         }
 
-        Ok(CheckResultV2::NoBaseline {
+        Ok(CheckResult::NoBaseline {
             actual_name,
             actual_hash: actual_hash.to_string(),
             auto_accepted: false,
@@ -1036,7 +1036,7 @@ impl ChecksumManagerV2 {
 
         let vs_ref = vs_ref_hash.map(hash_to_memorable);
 
-        section.entries.push(ChecksumEntry2 {
+        section.entries.push(ChecksumEntry {
             kind: EntryKind::AutoAccepted,
             name_hash: actual_name,
             arch,
@@ -1071,7 +1071,7 @@ impl ChecksumManagerV2 {
         width: u32,
         height: u32,
         tolerance: Option<&ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         let actual_hash = self.hasher.hash_pixels(actual_rgba, width, height);
         let actual_pixels = rgba_bytes_to_pixels(actual_rgba);
         let actual_source = RgbaSlice::new(&actual_pixels, width as usize, height as usize);
@@ -1097,7 +1097,7 @@ impl ChecksumManagerV2 {
         detail_name: &str,
         actual_path: impl AsRef<Path>,
         tolerance: Option<&ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         let actual_path = actual_path.as_ref();
         let img = image::open(actual_path)
             .map_err(|e| RegressError::image(actual_path, e))?
@@ -1127,7 +1127,7 @@ impl ChecksumManagerV2 {
         detail_name: &str,
         actual: &impl ImageSource,
         tolerance: Option<&ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         // Convert to packed RGBA for hashing (format-independent hashes)
         let (rgba, w, h) = image_source_to_packed_rgba(actual);
         let actual_hash = self.hasher.hash_pixels(&rgba, w, h);
@@ -1157,7 +1157,7 @@ impl ChecksumManagerV2 {
         actual_hash: &str,
         actual: &impl ImageSource,
         tolerance: Option<&ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         let result = self.check_with_source_impl(
             module,
             test_name,
@@ -1186,7 +1186,7 @@ impl ChecksumManagerV2 {
         actual_hash: &str,
         actual: &impl ImageSource,
         tolerance: Option<&ToleranceSpec>,
-    ) -> Result<CheckResultV2, RegressError> {
+    ) -> Result<CheckResult, RegressError> {
         let path = self.module_path(module);
 
         // Acquire advisory file lock
@@ -1221,7 +1221,7 @@ impl ChecksumManagerV2 {
                         file.write_to(&path)?;
                     }
                 }
-                return Ok(CheckResultV2::Match { entry_name });
+                return Ok(CheckResult::Match { entry_name });
             }
 
             // No match — get authoritative baseline
@@ -1244,7 +1244,7 @@ impl ChecksumManagerV2 {
                                 section.tolerance = Some(tol.clone());
                             }
                             section.prune_auto_accepted(&arch);
-                            section.entries.push(ChecksumEntry2 {
+                            section.entries.push(ChecksumEntry {
                                 kind: EntryKind::AutoAccepted,
                                 name_hash: actual_name.clone(),
                                 arch,
@@ -1255,13 +1255,13 @@ impl ChecksumManagerV2 {
                                 diff_summary: None,
                             });
                             file.write_to(&path)?;
-                            return Ok(CheckResultV2::NoBaseline {
+                            return Ok(CheckResult::NoBaseline {
                                 actual_name,
                                 actual_hash: actual_hash.to_string(),
                                 auto_accepted: true,
                             });
                         }
-                        return Ok(CheckResultV2::Failed {
+                        return Ok(CheckResult::Failed {
                             report: None,
                             authoritative_name: authoritative.clone(),
                             actual_name,
@@ -1306,7 +1306,7 @@ impl ChecksumManagerV2 {
                             section.tolerance = Some(tol.clone());
                         }
                         section.prune_auto_accepted(&arch);
-                        section.entries.push(ChecksumEntry2 {
+                        section.entries.push(ChecksumEntry {
                             kind: EntryKind::AutoAccepted,
                             name_hash: actual_name.clone(),
                             arch,
@@ -1319,7 +1319,7 @@ impl ChecksumManagerV2 {
                         file.write_to(&path)?;
                     }
 
-                    return Ok(CheckResultV2::WithinTolerance {
+                    return Ok(CheckResult::WithinTolerance {
                         report,
                         authoritative_name: authoritative.clone(),
                         actual_name,
@@ -1328,7 +1328,7 @@ impl ChecksumManagerV2 {
                     });
                 }
 
-                return Ok(CheckResultV2::Failed {
+                return Ok(CheckResult::Failed {
                     report: Some(report),
                     authoritative_name: authoritative.clone(),
                     actual_name,
@@ -1343,7 +1343,7 @@ impl ChecksumManagerV2 {
             if let Some(tol) = tolerance {
                 section.tolerance = Some(tol.clone());
             }
-            section.entries.push(ChecksumEntry2 {
+            section.entries.push(ChecksumEntry {
                 kind: EntryKind::AutoAccepted,
                 name_hash: actual_name.clone(),
                 arch,
@@ -1359,14 +1359,14 @@ impl ChecksumManagerV2 {
             let (rgba, w, h) = image_source_to_packed_rgba(actual);
             let _ = self.save_reference_image(module, test_name, detail_name, &rgba, w, h);
 
-            return Ok(CheckResultV2::NoBaseline {
+            return Ok(CheckResult::NoBaseline {
                 actual_name,
                 actual_hash: actual_hash.to_string(),
                 auto_accepted: true,
             });
         }
 
-        Ok(CheckResultV2::NoBaseline {
+        Ok(CheckResult::NoBaseline {
             actual_name,
             actual_hash: actual_hash.to_string(),
             auto_accepted: false,
@@ -1500,7 +1500,7 @@ impl ChecksumManagerV2 {
         module: &str,
         test_name: &str,
         detail_name: &str,
-        result: &CheckResultV2,
+        result: &CheckResult,
     ) {
         let Some(manifest) = &self.manifest else {
             return;
@@ -1509,14 +1509,14 @@ impl ChecksumManagerV2 {
         let flat_name = flat_test_name(test_name, detail_name);
 
         let (status, actual_hash, baseline_hash, actual_zdsim, diff_summary) = match result {
-            CheckResultV2::Match { entry_name } => (
+            CheckResult::Match { entry_name } => (
                 ManifestStatus::Match,
                 entry_name.as_str(),
                 Some(entry_name.as_str()),
                 Some(0.0),
                 None,
             ),
-            CheckResultV2::WithinTolerance {
+            CheckResult::WithinTolerance {
                 report,
                 authoritative_name,
                 actual_hash,
@@ -1532,7 +1532,7 @@ impl ChecksumManagerV2 {
                     Some(summary),
                 )
             }
-            CheckResultV2::Failed {
+            CheckResult::Failed {
                 actual_hash,
                 authoritative_name,
                 report,
@@ -1550,7 +1550,7 @@ impl ChecksumManagerV2 {
                     summary,
                 )
             }
-            CheckResultV2::NoBaseline { actual_hash, .. } => (
+            CheckResult::NoBaseline { actual_hash, .. } => (
                 ManifestStatus::Novel,
                 actual_hash.as_str(),
                 None,
@@ -1786,12 +1786,12 @@ tolerance d:1 s:95
         let mut file = ChecksumsFile::new("test");
         let section = file.get_or_create_section("test_foo", "bar_baz");
         section.tolerance = Some(crate::tolerance::ToleranceSpec::exact());
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             "sunny-crab-a4839:sea".to_string(),
             "x86_64-avx512".to_string(),
             "abc1234".to_string(),
         ));
-        section.entries.push(ChecksumEntry2::auto_accepted(
+        section.entries.push(ChecksumEntry::auto_accepted(
             "tidy-frog-b2c3d:sea".to_string(),
             "aarch64".to_string(),
             "abc1234".to_string(),
@@ -1821,7 +1821,7 @@ tolerance d:1 s:95
 
         let mut file = ChecksumsFile::new("test");
         let section = file.get_or_create_section("test_io", "roundtrip");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             "able-ace-00000:sea".to_string(),
             "x86_64-avx2".to_string(),
             "deadbeef".to_string(),
@@ -1854,12 +1854,12 @@ tolerance d:1 s:95
     fn prune_auto_accepted() {
         let mut file = ChecksumsFile::new("test");
         let section = file.get_or_create_section("test_a", "v1");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             "anchor-00000:sea".to_string(),
             "x86_64".to_string(),
             "aaa".to_string(),
         ));
-        section.entries.push(ChecksumEntry2::auto_accepted(
+        section.entries.push(ChecksumEntry::auto_accepted(
             "old-auto-11111:sea".to_string(),
             "aarch64".to_string(),
             "bbb".to_string(),
@@ -1867,7 +1867,7 @@ tolerance d:1 s:95
             "anchor-00000:sea".to_string(),
             "(zs:99.5)".to_string(),
         ));
-        section.entries.push(ChecksumEntry2::auto_accepted(
+        section.entries.push(ChecksumEntry::auto_accepted(
             "new-auto-22222:sea".to_string(),
             "aarch64".to_string(),
             "ccc".to_string(),
@@ -1893,12 +1893,12 @@ tolerance d:1 s:95
     fn retire_anchor() {
         let mut file = ChecksumsFile::new("test");
         let section = file.get_or_create_section("test_a", "v1");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             "old-anchor-00000:sea".to_string(),
             "x86_64".to_string(),
             "aaa".to_string(),
         ));
-        section.entries.push(ChecksumEntry2::auto_accepted(
+        section.entries.push(ChecksumEntry::auto_accepted(
             "auto-11111:sea".to_string(),
             "aarch64".to_string(),
             "bbb".to_string(),
@@ -1986,12 +1986,12 @@ tolerance d:1 s:95
         assert!(!names_match("sunny-crab-a4839:sea", "tidy-frog-b2c3d:sea"));
     }
 
-    // ─── ChecksumManagerV2 ─────────────────────────────────────────────
+    // ─── ChecksumManager ─────────────────────────────────────────────
 
     #[test]
     fn manager_no_baseline_no_auto() {
         let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
+        let mgr = ChecksumManager::with_modes(dir.path(), false);
 
         let result = mgr
             .check_hash(
@@ -2003,7 +2003,7 @@ tolerance d:1 s:95
             )
             .unwrap();
         match result {
-            CheckResultV2::NoBaseline {
+            CheckResult::NoBaseline {
                 auto_accepted: false,
                 ..
             } => {}
@@ -2017,7 +2017,7 @@ tolerance d:1 s:95
     #[test]
     fn manager_no_baseline_update_mode() {
         let dir = tempfile::tempdir().unwrap();
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), true);
+        let mgr = ChecksumManager::with_modes(dir.path(), true);
 
         let result = mgr
             .check_hash(
@@ -2029,7 +2029,7 @@ tolerance d:1 s:95
             )
             .unwrap();
         match result {
-            CheckResultV2::NoBaseline {
+            CheckResult::NoBaseline {
                 auto_accepted: true,
                 ..
             } => {}
@@ -2053,20 +2053,20 @@ tolerance d:1 s:95
         // Pre-populate a checksums file
         let mut file = ChecksumsFile::new("trim");
         let section = file.get_or_create_section("test_trim", "transparent");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             name.clone(),
             "x86_64-avx2".to_string(),
             "abc1234".to_string(),
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
+        let mgr = ChecksumManager::with_modes(dir.path(), false);
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", hash, None)
             .unwrap();
 
         match result {
-            CheckResultV2::Match { entry_name } => {
+            CheckResult::Match { entry_name } => {
                 assert_eq!(entry_name, name);
             }
             other => panic!("expected Match, got {other:?}"),
@@ -2082,21 +2082,21 @@ tolerance d:1 s:95
 
         let mut file = ChecksumsFile::new("trim");
         let section = file.get_or_create_section("test_trim", "transparent");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             name.clone(),
             "x86_64-avx2".to_string(),
             "abc1234".to_string(),
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
+        let mgr = ChecksumManager::with_modes(dir.path(), false);
         // Check with extension — should still match
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", ext_hash, None)
             .unwrap();
 
         match result {
-            CheckResultV2::Match { .. } => {}
+            CheckResult::Match { .. } => {}
             other => panic!("expected Match for hash with extension, got {other:?}"),
         }
     }
@@ -2110,20 +2110,20 @@ tolerance d:1 s:95
 
         let mut file = ChecksumsFile::new("trim");
         let section = file.get_or_create_section("test_trim", "transparent");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             stored_name.clone(),
             "x86_64-avx2".to_string(),
             "abc1234".to_string(),
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
+        let mgr = ChecksumManager::with_modes(dir.path(), false);
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", actual_hash, None)
             .unwrap();
 
         match result {
-            CheckResultV2::Failed {
+            CheckResult::Failed {
                 authoritative_name,
                 actual_name,
                 ..
@@ -2144,20 +2144,20 @@ tolerance d:1 s:95
 
         let mut file = ChecksumsFile::new("trim");
         let section = file.get_or_create_section("test_trim", "transparent");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             stored_name.clone(),
             "x86_64-avx2".to_string(),
             "abc1234".to_string(),
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), true);
+        let mgr = ChecksumManager::with_modes(dir.path(), true);
         let result = mgr
             .check_hash("trim", "test_trim", "transparent", actual_hash, None)
             .unwrap();
 
         match result {
-            CheckResultV2::NoBaseline {
+            CheckResult::NoBaseline {
                 auto_accepted: true,
                 ..
             } => {}
@@ -2184,14 +2184,14 @@ tolerance d:1 s:95
 
         let mut file = ChecksumsFile::new("trim");
         let section = file.get_or_create_section("test_trim", "transparent");
-        section.entries.push(ChecksumEntry2::human_verified(
+        section.entries.push(ChecksumEntry::human_verified(
             stored_name.clone(),
             "x86_64-avx2".to_string(),
             "abc1234".to_string(),
         ));
         file.write_to(&dir.path().join("trim.checksums")).unwrap();
 
-        let mgr = ChecksumManagerV2::with_modes(dir.path(), false);
+        let mgr = ChecksumManager::with_modes(dir.path(), false);
         mgr.accept(
             "trim",
             "test_trim",
