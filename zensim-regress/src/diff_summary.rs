@@ -266,7 +266,7 @@ fn format_zensim_token(score: f64) -> String {
 }
 
 /// Format a score value with appropriate precision, stripping trailing zeros.
-fn format_score(score: f64) -> String {
+pub fn format_score(score: f64) -> String {
     if score == score.round() {
         // Integer score like 99.0, 95.0
         format!("{}", score as i64)
@@ -280,7 +280,7 @@ fn format_score(score: f64) -> String {
 }
 
 /// Format a dissimilarity value with appropriate precision.
-fn format_dissim(d: f64) -> String {
+pub fn format_dissim(d: f64) -> String {
     if d == 0.0 {
         "0".to_string()
     } else if d < 0.0001 {

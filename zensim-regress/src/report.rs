@@ -28,6 +28,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
+use crate::diff_summary::{format_dissim as format_dissimilarity, format_score};
+
 // ─── Manifest parsing ──────────────────────────────────────────────────
 
 /// A parsed manifest entry from the TSV file.
@@ -162,46 +164,10 @@ fn format_recommended_from_score(score: f64) -> String {
     if score >= 100.0 {
         return "zensim:100".to_string();
     }
-    let score_str = format_score_for_recommendation(score);
+    let score_str = format_score(score);
     let dissim = zensim::score_to_dissimilarity(score);
     let dissim_str = format_dissimilarity(dissim);
     format!("zensim:{score_str} (dissim {dissim_str})")
-}
-
-/// Format a score for the recommendation line (clean rounding).
-fn format_score_for_recommendation(score: f64) -> String {
-    if score == score.round() {
-        format!("{}", score as i64)
-    } else if (score * 10.0).round() == score * 10.0 {
-        format!("{score:.1}")
-    } else {
-        format!("{score:.2}")
-    }
-}
-
-/// Format a dissimilarity value with appropriate precision.
-fn format_dissimilarity(z: f64) -> String {
-    if z == 0.0 {
-        "0".to_string()
-    } else if z < 0.0001 {
-        format!("{z:.6}")
-    } else if z < 0.001 {
-        format!("{z:.4}")
-    } else if z < 0.01 {
-        if (z * 1000.0).round() == z * 1000.0 {
-            format!("{z:.3}")
-        } else {
-            format!("{z:.4}")
-        }
-    } else if z < 0.1 {
-        if (z * 100.0).round() == z * 100.0 {
-            format!("{z:.2}")
-        } else {
-            format!("{z:.3}")
-        }
-    } else {
-        format!("{z:.2}")
-    }
 }
 
 // ─── Diff image amplification ──────────────────────────────────────────
