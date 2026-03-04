@@ -133,9 +133,13 @@ impl Default for ToleranceSpec {
 /// Only fields that are `Some` override the base tolerance.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ToleranceOverride {
+    /// Override maximum per-channel delta (1/255 units).
     pub max_delta: Option<u8>,
+    /// Override minimum acceptable zensim score.
     pub min_similarity: Option<f64>,
+    /// Override maximum fraction of differing pixels.
     pub max_pixels_different: Option<f64>,
+    /// Override maximum alpha channel delta (1/255 units).
     pub max_alpha_delta: Option<u8>,
 }
 
