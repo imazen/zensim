@@ -3,7 +3,7 @@
 //! Reads the manifest TSV written during test execution and generates
 //! a standalone HTML file showing:
 //!
-//! - Per-test status (match/novel/accepted/failed) with zdsim scores
+//! - Per-test status (match/novel/accepted/failed) with dissimilarity scores
 //! - Recommended tolerance for ratcheting down
 //! - Diff images (embedded as base64 data URIs)
 //! - Cross-platform merged view when multiple manifests are provided
@@ -150,11 +150,11 @@ fn ceil_sig2(v: f64) -> f64 {
 
 /// Format a recommended `.checksums` tolerance line.
 pub fn format_recommended_line(zdsim: f64) -> String {
-    format!("zdsim:{}", format_zdsim(zdsim))
+    format!("dissimilarity:{}", format_dissimilarity(zdsim))
 }
 
-/// Format zdsim with appropriate precision.
-fn format_zdsim(z: f64) -> String {
+/// Format a dissimilarity value with appropriate precision.
+fn format_dissimilarity(z: f64) -> String {
     if z == 0.0 {
         "0".to_string()
     } else if z < 0.001 {
@@ -237,7 +237,7 @@ pub fn generate_html_report(
     let _ = writeln!(
         html,
         "<p class=\"hint\">Tests that differed from baseline. \
-         Sorted by status (failed first), then by zdsim (highest first).</p>"
+         Sorted by status (failed first), then by dissimilarity (highest first).</p>"
     );
 
     let mut non_match: Vec<(&str, &BTreeMap<String, &ParsedEntry>)> = merged
@@ -524,15 +524,15 @@ fn write_test_entry(
             if let Some(zdsim) = entry.actual_zdsim {
                 let _ = writeln!(
                     html,
-                    "<div class=\"metric\"><div class=\"label\">measured zdsim</div>{}</div>",
-                    format_zdsim(zdsim)
+                    "<div class=\"metric\"><div class=\"label\">dissimilarity</div>{}</div>",
+                    format_dissimilarity(zdsim)
                 );
             }
             if let Some(tol) = entry.tolerance_zdsim {
                 let _ = writeln!(
                     html,
                     "<div class=\"metric\"><div class=\"label\">tolerance</div>{}</div>",
-                    format_zdsim(tol)
+                    format_dissimilarity(tol)
                 );
             }
             // Recommendation
@@ -603,8 +603,8 @@ fn write_recommended_tolerances(
             && let Some(rec) = recommend_tolerance(max_zdsim) {
                 let _ = writeln!(
                     html,
-                    "# {test_name}: observed zdsim={} → tolerance {}",
-                    format_zdsim(max_zdsim),
+                    "# {test_name}: observed dissimilarity={} → tolerance {}",
+                    format_dissimilarity(max_zdsim),
                     format_recommended_line(rec),
                 );
             }
@@ -676,13 +676,13 @@ mod tests {
 
     #[test]
     fn ceil_sig2_values() {
-        // Use format_zdsim to compare — it rounds away float noise
-        assert_eq!(format_zdsim(ceil_sig2(0.0036)), "0.0036");
-        assert_eq!(format_zdsim(ceil_sig2(0.0153)), "0.016");
-        assert_eq!(format_zdsim(ceil_sig2(0.0999)), "0.10");
-        assert_eq!(format_zdsim(ceil_sig2(0.1)), "0.10");
-        assert_eq!(format_zdsim(ceil_sig2(0.123)), "0.13");
-        assert_eq!(format_zdsim(ceil_sig2(0.0012)), "0.0012");
+        // Use format_dissimilarity to compare — it rounds away float noise
+        assert_eq!(format_dissimilarity(ceil_sig2(0.0036)), "0.0036");
+        assert_eq!(format_dissimilarity(ceil_sig2(0.0153)), "0.016");
+        assert_eq!(format_dissimilarity(ceil_sig2(0.0999)), "0.10");
+        assert_eq!(format_dissimilarity(ceil_sig2(0.1)), "0.10");
+        assert_eq!(format_dissimilarity(ceil_sig2(0.123)), "0.13");
+        assert_eq!(format_dissimilarity(ceil_sig2(0.0012)), "0.0012");
     }
 
     #[test]
@@ -721,12 +721,12 @@ mod tests {
     }
 
     #[test]
-    fn format_zdsim_precision() {
-        assert_eq!(format_zdsim(0.0), "0");
-        assert_eq!(format_zdsim(0.000123), "0.000123");
-        assert_eq!(format_zdsim(0.0056), "0.0056");
-        assert_eq!(format_zdsim(0.056), "0.056");
-        assert_eq!(format_zdsim(0.56), "0.56");
+    fn format_dissimilarity_precision() {
+        assert_eq!(format_dissimilarity(0.0), "0");
+        assert_eq!(format_dissimilarity(0.000123), "0.000123");
+        assert_eq!(format_dissimilarity(0.0056), "0.0056");
+        assert_eq!(format_dissimilarity(0.056), "0.056");
+        assert_eq!(format_dissimilarity(0.56), "0.56");
     }
 
     #[test]
@@ -809,7 +809,7 @@ mod tests {
         assert!(html.contains("tolerance_test"));
         assert!(html.contains("broken_test"));
         assert!(html.contains("Recommended Tolerances"));
-        assert!(html.contains("zdsim:"));
+        assert!(html.contains("dissimilarity:"));
         // Failed should appear before accepted
         let failed_pos = html.find("broken_test").unwrap();
         let accepted_pos = html.find("tolerance_test").unwrap();

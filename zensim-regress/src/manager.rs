@@ -142,7 +142,7 @@ impl std::fmt::Display for CheckResult {
                 let delta = report.max_channel_delta();
                 write!(
                     f,
-                    "PASS (within tolerance, score={:.1}, max_delta=[{},{},{}], vs {authoritative_id}{})",
+                    "PASS (within tolerance, score={:.1}, max-delta=[{},{},{}], vs {authoritative_id}{})",
                     report.score(),
                     delta[0],
                     delta[1],
