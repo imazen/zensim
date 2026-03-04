@@ -19,7 +19,8 @@
 //!     diffs_dir: Some(".image-cache/diffs".into()),
 //! };
 //! let entries = parse_manifest(&platform.manifest_path).unwrap();
-//! let html = generate_html_report(&[("linux-x64", &entries)], None);
+//! let diffs_dirs = std::collections::BTreeMap::new();
+//! let html = generate_html_report(&[("linux-x64", &entries)], &diffs_dirs);
 //! std::fs::write("report.html", html).unwrap();
 //! ```
 
@@ -237,13 +238,13 @@ pub struct Platform {
 /// Generate a standalone HTML report from one or more platform manifests.
 ///
 /// `platforms` is a slice of `(platform_name, entries)` pairs.
-/// `diffs_base` is the optional base path for resolving diff images.
+/// `diffs_dirs` maps platform names to their diff image directories.
 ///
 /// The HTML is self-contained (no external CSS/JS dependencies) with
 /// diff images embedded as base64 data URIs.
 pub fn generate_html_report(
     platforms: &[(&str, &[ParsedEntry])],
-    diffs_base: Option<&Path>,
+    diffs_dirs: &BTreeMap<String, PathBuf>,
 ) -> String {
     // Merge by test name across platforms
     let mut merged: BTreeMap<String, BTreeMap<String, &ParsedEntry>> = BTreeMap::new();
@@ -310,7 +311,7 @@ pub fn generate_html_report(
                 plats,
                 &platform_names,
                 multi_platform,
-                diffs_base,
+                diffs_dirs,
             );
         }
     }
@@ -531,7 +532,7 @@ fn write_test_entry(
     platforms: &BTreeMap<String, &ParsedEntry>,
     platform_names: &[&str],
     multi_platform: bool,
-    diffs_base: Option<&Path>,
+    diffs_dirs: &BTreeMap<String, PathBuf>,
 ) {
     // Determine worst status across platforms
     let worst_status = if platforms.values().any(|e| e.status == "failed") {
@@ -600,9 +601,9 @@ fn write_test_entry(
                 );
             }
 
-            // Diff image (try to embed from diffs directory)
+            // Diff image (try to embed from this platform's diffs directory)
             if (entry.status == "accepted" || entry.status == "failed")
-                && let Some(base) = diffs_base
+                && let Some(base) = diffs_dirs.get(platform_name)
             {
                 try_embed_diff_image(html, base, test_name);
             }
@@ -712,10 +713,13 @@ pub fn generate_merged_report(platforms: &[Platform]) -> Result<String, std::io:
         .map(|(name, entries)| (name.as_str(), entries.as_slice()))
         .collect();
 
-    // Use the first platform's diffs_dir as the base (single-platform common case)
-    let diffs_base = platforms.first().and_then(|p| p.diffs_dir.as_deref());
+    // Build per-platform diffs_dir map
+    let diffs_dirs: BTreeMap<String, PathBuf> = platforms
+        .iter()
+        .filter_map(|p| p.diffs_dir.as_ref().map(|d| (p.name.clone(), d.clone())))
+        .collect();
 
-    Ok(generate_html_report(&refs, diffs_base))
+    Ok(generate_html_report(&refs, &diffs_dirs))
 }
 
 #[cfg(test)]
@@ -851,7 +855,7 @@ mod tests {
             },
         ];
 
-        let html = generate_html_report(&[("linux-x64", &entries)], None);
+        let html = generate_html_report(&[("linux-x64", &entries)], &BTreeMap::new());
 
         // Basic structure checks
         assert!(html.contains("<!DOCTYPE html>"));
