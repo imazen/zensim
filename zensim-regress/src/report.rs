@@ -50,6 +50,37 @@ pub struct ParsedEntry {
 /// Skips the header line (starts with `#`). Returns entries in file order.
 pub fn parse_manifest(path: &Path) -> Result<Vec<ParsedEntry>, std::io::Error> {
     let content = std::fs::read_to_string(path)?;
+    Ok(parse_manifest_content(&content))
+}
+
+/// Parse a manifest directory (from [`ManifestDir`]) into structured entries.
+///
+/// Reads all `*.tsv` files in the directory, sorted by filename (timestamp order).
+/// Deduplicates by test name — latest timestamp wins.
+///
+/// [`ManifestDir`]: crate::manifest::ManifestDir
+pub fn parse_manifest_dir(dir: &Path) -> Result<Vec<ParsedEntry>, std::io::Error> {
+    use std::collections::BTreeMap;
+
+    let mut files: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "tsv"))
+        .collect();
+    files.sort_by_key(|e| e.file_name());
+
+    let mut by_name: BTreeMap<String, ParsedEntry> = BTreeMap::new();
+    for file in &files {
+        let content = std::fs::read_to_string(file.path())?;
+        for entry in parse_manifest_content(&content) {
+            by_name.insert(entry.test_name.clone(), entry);
+        }
+    }
+
+    Ok(by_name.into_values().collect())
+}
+
+/// Parse manifest TSV content (string) into entries.
+fn parse_manifest_content(content: &str) -> Vec<ParsedEntry> {
     let mut entries = Vec::new();
 
     for line in content.lines() {
@@ -76,7 +107,7 @@ pub fn parse_manifest(path: &Path) -> Result<Vec<ParsedEntry>, std::io::Error> {
         });
     }
 
-    Ok(entries)
+    entries
 }
 
 fn parse_opt_f64(s: &str) -> Option<f64> {
@@ -159,6 +190,10 @@ pub fn ideal_amplification(max_channel_delta: u8) -> u8 {
 /// A platform's test results for the merged report.
 pub struct Platform {
     pub name: String,
+    /// Path to a combined manifest TSV file, OR a directory of per-process
+    /// manifest files (from [`ManifestDir`]). Both are auto-detected.
+    ///
+    /// [`ManifestDir`]: crate::manifest::ManifestDir
     pub manifest_path: PathBuf,
     /// Directory containing diff PNGs (e.g., `.image-cache/diffs/`).
     pub diffs_dir: Option<PathBuf>,
@@ -607,13 +642,20 @@ fn html_escape(s: &str) -> String {
 
 /// Load manifests from multiple platforms and generate a merged HTML report.
 ///
-/// Each `Platform` specifies a manifest TSV path and optional diffs directory.
-/// The report merges entries by test name across platforms.
+/// Each `Platform` specifies a manifest path (file or directory) and optional
+/// diffs directory. Auto-detects whether the path is a single TSV file or a
+/// directory of per-process files (from [`ManifestDir`]).
+///
+/// [`ManifestDir`]: crate::manifest::ManifestDir
 pub fn generate_merged_report(platforms: &[Platform]) -> Result<String, std::io::Error> {
     let mut all_entries: Vec<(String, Vec<ParsedEntry>)> = Vec::new();
 
     for p in platforms {
-        let entries = parse_manifest(&p.manifest_path)?;
+        let entries = if p.manifest_path.is_dir() {
+            parse_manifest_dir(&p.manifest_path)?
+        } else {
+            parse_manifest(&p.manifest_path)?
+        };
         all_entries.push((p.name.clone(), entries));
     }
 
