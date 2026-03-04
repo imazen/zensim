@@ -9,7 +9,7 @@ rust-version = "1.89.0"
 publish = false
 
 [features]
-## Enable format-aware generators, hashing, and ChecksumManager workflows via zenpixels.
+## Enable format-aware generators, hashing, and regression workflows via zenpixels.
 # zenpixels = ["dep:zenpixels", "zensim/zenpixels"]
 ## Use zenpng for faster PNG decode/encode of reference images (instead of `image` crate).
 ## To activate: uncomment zenpng/enough deps below and in workspace Cargo.toml,
@@ -21,8 +21,6 @@ zensim = { workspace = true }
 # zenpixels = { workspace = true, optional = true }
 # zenpng = { workspace = true, optional = true }
 # enough = { workspace = true, optional = true }
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"
 seahash = "4"
 image = { workspace = true }
 thiserror = { workspace = true }
