@@ -6,6 +6,22 @@
 //! (CID22 + CLIC2025 + Kodak + gb82-sc).
 //! Individual images can deviate significantly from these medians.
 //!
+//! # Training results (344,336 pairs, 156 features, 10 restarts × 50 iters)
+//!
+//! | Target         | Embedded SROCC | Trained SROCC | PLCC   | KROCC  |
+//! |----------------|----------------|---------------|--------|--------|
+//! | GPU SSIM2      | 0.9925         | 0.9931        | 0.9878 | 0.9296 |
+//! | DSSIM          | 0.9897         | 0.9923        | 0.9790 | 0.9291 |
+//! | GPU Butteraugli| 0.8886         | 0.9360        | 0.7802 | 0.8014 |
+//!
+//! # Mapping fit accuracy (power-law residuals in zensim points)
+//!
+//! | Metric      | Points | MAE  | RMSE  | p50  | p90   | p99   |
+//! |-------------|--------|------|-------|------|-------|-------|
+//! | SSIM2       | 330k   | 1.48 | 2.23  | 0.98 | 3.33  | 8.16  |
+//! | DSSIM       | 342k   | 1.75 | 2.69  | 1.10 | 4.02  | 10.04 |
+//! | Butteraugli | 342k   | 7.03 | 10.22 | 4.78 | 15.97 | 37.30 |
+//!
 //! All functions use power-law fits and support the full useful range.
 //! Extrapolation beyond the calibration range is clamped.
 
