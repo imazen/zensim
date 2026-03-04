@@ -23,14 +23,18 @@ struct PlatformBuilder {
     name: String,
     manifest_path: Option<PathBuf>,
     diffs_dir: Option<PathBuf>,
+    /// Whether this builder was created by an explicit `--platform` flag
+    /// (vs auto-created by `current_builder` when args precede `--platform`).
+    explicit: bool,
 }
 
 impl PlatformBuilder {
-    fn new(name: String) -> Self {
+    fn new(name: String, explicit: bool) -> Self {
         Self {
             name,
             manifest_path: None,
             diffs_dir: None,
+            explicit,
         }
     }
 
@@ -65,7 +69,20 @@ fn main() -> ExitCode {
                     eprintln!("Error: --platform requires a value");
                     return ExitCode::FAILURE;
                 }
-                builders.push(PlatformBuilder::new(args[i].clone()));
+                // If the last builder was auto-created (args came before --platform),
+                // rename it instead of pushing a new one. This supports both:
+                //   --manifest-dir dir --platform name  (single platform, backward compat)
+                //   --platform a --manifest-dir dir_a --platform b --manifest-dir dir_b
+                if let Some(last) = builders.last_mut() {
+                    if !last.explicit {
+                        last.name = args[i].clone();
+                        last.explicit = true;
+                    } else {
+                        builders.push(PlatformBuilder::new(args[i].clone(), true));
+                    }
+                } else {
+                    builders.push(PlatformBuilder::new(args[i].clone(), true));
+                }
             }
             "--manifest-dir" => {
                 i += 1;
@@ -125,7 +142,7 @@ fn main() -> ExitCode {
 
     // If no explicit --platform was given, try env vars as fallback
     if builders.is_empty() {
-        let mut fallback = PlatformBuilder::new("local".to_string());
+        let mut fallback = PlatformBuilder::new("local".to_string(), false);
         if let Ok(dir) = std::env::var("REGRESS_MANIFEST_DIR") {
             fallback.manifest_path = Some(PathBuf::from(dir));
         } else if let Ok(file) = std::env::var("REGRESS_MANIFEST_PATH") {
@@ -222,7 +239,7 @@ fn main() -> ExitCode {
 /// Get the current platform builder, creating a default "local" one if none exists.
 fn current_builder(builders: &mut Vec<PlatformBuilder>) -> &mut PlatformBuilder {
     if builders.is_empty() {
-        builders.push(PlatformBuilder::new("local".to_string()));
+        builders.push(PlatformBuilder::new("local".to_string(), false));
     }
     builders.last_mut().unwrap()
 }
