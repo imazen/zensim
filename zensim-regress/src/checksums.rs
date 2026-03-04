@@ -1470,6 +1470,27 @@ impl ChecksumManager {
         Ok(path)
     }
 
+    /// Save a reference image only if one doesn't already exist on disk.
+    ///
+    /// Useful for ensuring reference images are populated even when the hash
+    /// matches an existing baseline (the normal code path skips saving in that case).
+    pub fn save_reference_if_missing(
+        &self,
+        module: &str,
+        test_name: &str,
+        detail_name: &str,
+        actual: &impl ImageSource,
+    ) {
+        let images_dir = self.checksums_dir.join("images").join(module);
+        let flat_name = flat_test_name(test_name, detail_name);
+        let path = images_dir.join(format!("{flat_name}.png"));
+        if path.exists() {
+            return;
+        }
+        let (rgba, w, h) = image_source_to_packed_rgba(actual);
+        let _ = self.save_reference_image(module, test_name, detail_name, &rgba, w, h);
+    }
+
     /// Upload a reference image to remote storage (if configured).
     pub fn upload_reference_image(&self, checksum_name: &str, local_path: &Path) {
         if let Some(remote) = &self.remote
