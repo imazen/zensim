@@ -1449,6 +1449,149 @@ fn compute_channel(
         0.0
     };
 
+    // Extended features: masked + percentile/max
+    let mut masked_ssim = [0.0f64; 3];
+    let mut masked_art_4th = 0.0f64;
+    let mut masked_det_4th = 0.0f64;
+    let mut masked_mse = 0.0f64;
+    let mut ssim_max_val = 0.0f64;
+    let mut art_max_val = 0.0f64;
+    let mut det_max_val = 0.0f64;
+    let mut ssim_p95 = 0.0f64;
+    let mut art_p95 = 0.0f64;
+    let mut det_p95 = 0.0f64;
+
+    if config.extended_features {
+        // Compute extended masking weights (separate from basic masking)
+        // mask[i] = 1 / (1 + k * blur(|src - mu1|))
+        if !masked {
+            // Need to compute the mask — basic masking wasn't enabled
+            abs_diff_into(src_c, &bufs.mu1, &mut bufs.mul_buf);
+            blur_fn(
+                &bufs.mul_buf,
+                &mut bufs.mask,
+                &mut bufs.temp_blur,
+                width,
+                height,
+                config.blur_radius,
+            );
+            let k = config.extended_masking_strength;
+            for i in 0..n {
+                bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
+            }
+        } else if (config.masking_strength - config.extended_masking_strength).abs() > 1e-6 {
+            // Basic masking used a different strength — recompute
+            abs_diff_into(src_c, &bufs.mu1, &mut bufs.mul_buf);
+            blur_fn(
+                &bufs.mul_buf,
+                &mut bufs.mask,
+                &mut bufs.temp_blur,
+                width,
+                height,
+                config.blur_radius,
+            );
+            let k = config.extended_masking_strength;
+            for i in 0..n {
+                bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
+            }
+        }
+        // else: basic masking used the same strength — mask already in bufs.mask
+
+        // Masked SSIM (3 values)
+        if need_ssim {
+            let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                &bufs.mu1,
+                &bufs.mu2,
+                &bufs.sigma1_sq,
+                &bufs.sigma12,
+                &bufs.mask,
+            );
+            masked_ssim[0] = sum_d * one_over_n;
+            masked_ssim[1] = (sum_d4 * one_over_n).powf(0.25);
+            masked_ssim[2] = (sum_d2 * one_over_n).sqrt();
+        }
+
+        // Masked edge (art_4th, det_4th)
+        if need_edge {
+            let (_art, art4, _det, det4, _art2, _det2) =
+                edge_diff_channel_masked(src_c, dst_c, &bufs.mu1, &bufs.mu2, &bufs.mask);
+            masked_art_4th = (art4 * one_over_n).powf(0.25);
+            masked_det_4th = (det4 * one_over_n).powf(0.25);
+        }
+
+        // Masked MSE: Σ(src-dst)² × mask / N
+        {
+            let mut sum = 0.0f64;
+            for i in 0..n {
+                let d = src_c[i] - dst_c[i];
+                sum += (d * d * bufs.mask[i]) as f64;
+            }
+            masked_mse = sum * one_over_n;
+        }
+
+        // Per-pixel error maps for max and p95
+        bufs.ensure_extended_maps(n);
+
+        // Write SSIM per-pixel error map + track max
+        if need_ssim {
+            let c2 = 0.0009f32;
+            let mut max_d = 0.0f32;
+            for i in 0..n {
+                let mu_diff = bufs.mu1[i] - bufs.mu2[i];
+                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+                let num_s =
+                    2.0f32.mul_add((-bufs.mu1[i]).mul_add(bufs.mu2[i], bufs.sigma12[i]), c2);
+                let denom_s = (-bufs.mu2[i])
+                    .mul_add(bufs.mu2[i], (-bufs.mu1[i]).mul_add(bufs.mu1[i], bufs.sigma1_sq[i]))
+                    + c2;
+                let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                bufs.ssim_map[i] = d;
+                max_d = max_d.max(d);
+            }
+            ssim_max_val = max_d as f64;
+        }
+
+        // Write edge per-pixel maps + track max
+        if need_edge {
+            let mut max_art = 0.0f32;
+            let mut max_det = 0.0f32;
+            for i in 0..n {
+                let diff1 = (src_c[i] - bufs.mu1[i]).abs();
+                let diff2 = (dst_c[i] - bufs.mu2[i]).abs();
+                let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = d1.max(0.0f32);
+                let detail_lost = (-d1).max(0.0f32);
+                bufs.art_map[i] = artifact;
+                bufs.det_map[i] = detail_lost;
+                max_art = max_art.max(artifact);
+                max_det = max_det.max(detail_lost);
+            }
+            art_max_val = max_art as f64;
+            det_max_val = max_det as f64;
+        }
+
+        // p95 via select_nth_unstable (O(n) expected)
+        if n > 0 {
+            let p95_idx = (n as f64 * 0.95).ceil() as usize;
+            let p95_idx = p95_idx.min(n - 1);
+
+            if need_ssim {
+                let map = &mut bufs.ssim_map[..n];
+                map.select_nth_unstable_by(p95_idx, |a, b| a.partial_cmp(b).unwrap());
+                ssim_p95 = map[p95_idx] as f64;
+            }
+            if need_edge {
+                let map = &mut bufs.art_map[..n];
+                map.select_nth_unstable_by(p95_idx, |a, b| a.partial_cmp(b).unwrap());
+                art_p95 = map[p95_idx] as f64;
+
+                let map = &mut bufs.det_map[..n];
+                map.select_nth_unstable_by(p95_idx, |a, b| a.partial_cmp(b).unwrap());
+                det_p95 = map[p95_idx] as f64;
+            }
+        }
+    }
+
     ChannelResult {
         ssim,
         edge,
@@ -1457,16 +1600,16 @@ fn compute_channel(
         hf_energy_gain,
         ssim_2nd,
         edge_2nd,
-        masked_ssim: [0.0; 3],
-        masked_art_4th: 0.0,
-        masked_det_4th: 0.0,
-        masked_mse: 0.0,
-        ssim_max: 0.0,
-        art_max: 0.0,
-        det_max: 0.0,
-        ssim_p95: 0.0,
-        art_p95: 0.0,
-        det_p95: 0.0,
+        masked_ssim,
+        masked_art_4th,
+        masked_det_4th,
+        masked_mse,
+        ssim_max: ssim_max_val,
+        art_max: art_max_val,
+        det_max: det_max_val,
+        ssim_p95,
+        art_p95,
+        det_p95,
     }
 }
 
