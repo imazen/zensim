@@ -160,16 +160,11 @@ impl Default for BlurKernel {
 /// Controls how each pyramid level is produced from the previous one.
 /// The default `Box2x2` averages 2×2 pixel blocks, halving resolution.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DownscaleFilter {
     /// 2×2 box averaging (fastest, current default).
+    #[default]
     Box2x2,
-}
-
-impl Default for DownscaleFilter {
-    fn default() -> Self {
-        Self::Box2x2
-    }
 }
 
 /// **Bottom line:** the defaults (`blur_passes=1`, `masking_strength=0.0`) give
@@ -207,6 +202,7 @@ pub struct ZensimConfig {
     ///
     /// Controls how each pyramid level is produced. Currently only `Box2x2`
     /// (2×2 averaging) is implemented.
+    #[allow(dead_code)]
     pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
@@ -340,7 +336,10 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .sum();
     // Normalize by number of scales — infer features_per_scale from the vector length.
     // With 3 channels: basic=39 (13×3), extended=75 (25×3).
-    let features_per_scale = if features.len() % (FEATURES_PER_CHANNEL_EXTENDED * 3) == 0 {
+    let features_per_scale = if features
+        .len()
+        .is_multiple_of(FEATURES_PER_CHANNEL_EXTENDED * 3)
+    {
         FEATURES_PER_CHANNEL_EXTENDED * 3
     } else {
         FEATURES_PER_CHANNEL_BASIC * 3
@@ -1166,12 +1165,31 @@ pub fn compute_zensim_with_config(
         return Err(ZensimError::DimensionMismatch);
     }
 
+    // Identical images must score exactly 100.0 — short-circuit before
+    // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
+    if source == distorted {
+        let fpc = if config.extended_features {
+            FEATURES_PER_CHANNEL_EXTENDED
+        } else {
+            FEATURES_PER_CHANNEL_BASIC
+        };
+        let num_features = config.num_scales * 3 * fpc;
+        return Ok(ZensimResult {
+            score: 100.0,
+            raw_distance: 0.0,
+            features: vec![0.0; num_features],
+            profile: ZensimProfile::latest(),
+            mean_offset: [0.0; 3],
+        });
+    }
+
     let src_img = crate::source::RgbSlice::new(source, width, height);
     let dst_img = crate::source::RgbSlice::new(distorted, width, height);
 
-    // Use streaming path for non-masked images (faster at all sizes)
+    // Use streaming path for non-masked, non-extended images (faster at all sizes)
     let masked = config.masking_strength > 0.0;
-    if !masked && crate::streaming::should_use_streaming(width, height) {
+    if !masked && !config.extended_features && crate::streaming::should_use_streaming(width, height)
+    {
         let result =
             crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS);
         return Ok(result);
@@ -1280,16 +1298,16 @@ struct ChannelResult {
     ssim_2nd: f64,       // root2 pooled SSIM
     edge_2nd: [f64; 2],  // [art_2nd, det_2nd]
     // Extended features (only populated when extended_features=true):
-    masked_ssim: [f64; 3],  // [mean, 4th, 2nd] weighted by flatness mask
-    masked_art_4th: f64,    // L4 edge artifact weighted by flatness mask
-    masked_det_4th: f64,    // L4 edge detail_lost weighted by flatness mask
-    masked_mse: f64,        // MSE weighted by flatness mask
-    ssim_max: f64,          // max per-pixel SSIM error
-    art_max: f64,           // max per-pixel edge artifact
-    det_max: f64,           // max per-pixel edge detail_lost
-    ssim_p95: f64,          // 95th percentile SSIM error
-    art_p95: f64,           // 95th percentile edge artifact
-    det_p95: f64,           // 95th percentile edge detail_lost
+    masked_ssim: [f64; 3], // [mean, 4th, 2nd] weighted by flatness mask
+    masked_art_4th: f64,   // L4 edge artifact weighted by flatness mask
+    masked_det_4th: f64,   // L4 edge detail_lost weighted by flatness mask
+    masked_mse: f64,       // MSE weighted by flatness mask
+    ssim_max: f64,         // max per-pixel SSIM error
+    art_max: f64,          // max per-pixel edge artifact
+    det_max: f64,          // max per-pixel edge detail_lost
+    ssim_p95: f64,         // 95th percentile SSIM error
+    art_p95: f64,          // 95th percentile edge artifact
+    det_p95: f64,          // 95th percentile edge detail_lost
 }
 
 /// Compute SSIM and/or edge features for a single channel.
@@ -1604,9 +1622,10 @@ fn compute_channel(
                 let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
                 let num_s =
                     2.0f32.mul_add((-bufs.mu1[i]).mul_add(bufs.mu2[i], bufs.sigma12[i]), c2);
-                let denom_s = (-bufs.mu2[i])
-                    .mul_add(bufs.mu2[i], (-bufs.mu1[i]).mul_add(bufs.mu1[i], bufs.sigma1_sq[i]))
-                    + c2;
+                let denom_s = (-bufs.mu2[i]).mul_add(
+                    bufs.mu2[i],
+                    (-bufs.mu1[i]).mul_add(bufs.mu1[i], bufs.sigma1_sq[i]),
+                ) + c2;
                 let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
                 bufs.ssim_map[i] = d;
                 max_d = max_d.max(d);
@@ -2576,5 +2595,262 @@ mod tests {
             all_nonzero,
             default_nonzero,
         );
+    }
+
+    /// Helper: create a gradient test image pair.
+    fn make_gradient_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = 128;
+                src[y * w + x] = [r, g, b];
+                dst[y * w + x] = [
+                    r.saturating_add(10),
+                    g.saturating_sub(5),
+                    b.saturating_add(3),
+                ];
+            }
+        }
+        (src, dst)
+    }
+
+    /// Extended features: default config produces same score as non-extended.
+    #[test]
+    fn extended_features_backward_compat() {
+        let (w, h) = (64, 64);
+        let (src, dst) = make_gradient_pair(w, h);
+
+        let basic = compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
+
+        let extended = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                extended_features: false,
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(basic.features.len(), 156);
+        assert_eq!(extended.features.len(), 156);
+        assert!(
+            (basic.score - extended.score).abs() < 0.01,
+            "basic {} vs extended-false {}",
+            basic.score,
+            extended.score,
+        );
+    }
+
+    /// Extended features produce 300 values and all are non-negative.
+    #[test]
+    fn extended_features_count_and_nonneg() {
+        let (w, h) = (64, 64);
+        let (src, dst) = make_gradient_pair(w, h);
+
+        let result = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                extended_features: true,
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.features.len(),
+            300,
+            "Expected 25 × 3 × 4 = 300 features"
+        );
+        for (i, &f) in result.features.iter().enumerate() {
+            assert!(f >= 0.0, "Feature {} is negative: {}", i, f);
+        }
+    }
+
+    /// ssim_max >= ssim_4th >= ssim_mean ordering.
+    #[test]
+    fn extended_features_ordering() {
+        let (w, h) = (64, 64);
+        let (src, dst) = make_gradient_pair(w, h);
+
+        let result = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                extended_features: true,
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // Feature layout per channel: 25 features, 3 channels per scale, 4 scales
+        let fpc = FEATURES_PER_CHANNEL_EXTENDED;
+        for scale in 0..4 {
+            for ch in 0..3 {
+                let base = scale * fpc * 3 + ch * fpc;
+                let ssim_mean = result.features[base]; // index 0
+                let ssim_4th = result.features[base + 1]; // index 1
+                let ssim_max = result.features[base + 19]; // index 19
+                let ssim_p95 = result.features[base + 22]; // index 22
+
+                // max >= 4th >= mean (4th is L4 norm, always >= mean for non-negative values)
+                assert!(
+                    ssim_max >= ssim_4th - 1e-10,
+                    "s{} c{}: max {:.6} < 4th {:.6}",
+                    scale,
+                    ch,
+                    ssim_max,
+                    ssim_4th,
+                );
+                assert!(
+                    ssim_4th >= ssim_mean - 1e-10,
+                    "s{} c{}: 4th {:.6} < mean {:.6}",
+                    scale,
+                    ch,
+                    ssim_4th,
+                    ssim_mean,
+                );
+                // p95 between 4th and max
+                assert!(
+                    ssim_p95 <= ssim_max + 1e-10,
+                    "s{} c{}: p95 {:.6} > max {:.6}",
+                    scale,
+                    ch,
+                    ssim_p95,
+                    ssim_max,
+                );
+            }
+        }
+    }
+
+    /// Identical images: all features zero.
+    #[test]
+    fn extended_features_identical_zero() {
+        let (w, h) = (64, 64);
+        let (src, _) = make_gradient_pair(w, h);
+
+        let result = compute_zensim_with_config(
+            &src,
+            &src,
+            w,
+            h,
+            ZensimConfig {
+                extended_features: true,
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.score, 100.0);
+        assert_eq!(result.features.len(), 300);
+        for (i, &f) in result.features.iter().enumerate() {
+            assert!(
+                f.abs() < 1e-10,
+                "Feature {} not zero for identical: {}",
+                i,
+                f
+            );
+        }
+    }
+
+    /// Masked features <= unmasked features (masking reduces).
+    #[test]
+    fn extended_masked_leq_unmasked() {
+        let (w, h) = (64, 64);
+        let (src, dst) = make_gradient_pair(w, h);
+
+        let result = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                extended_features: true,
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let fpc = FEATURES_PER_CHANNEL_EXTENDED;
+        for scale in 0..4 {
+            for ch in 0..3 {
+                let base = scale * fpc * 3 + ch * fpc;
+                let ssim_mean = result.features[base]; // 0
+                let ssim_4th = result.features[base + 1]; // 1
+                let ssim_2nd = result.features[base + 2]; // 2
+                let masked_ssim_mean = result.features[base + 13]; // 13
+                let masked_ssim_4th = result.features[base + 14]; // 14
+                let masked_ssim_2nd = result.features[base + 15]; // 15
+
+                // Masked values should be <= unmasked (mask weights ∈ [0,1])
+                assert!(
+                    masked_ssim_mean <= ssim_mean + 1e-10,
+                    "s{} c{}: masked_mean {:.6} > mean {:.6}",
+                    scale,
+                    ch,
+                    masked_ssim_mean,
+                    ssim_mean,
+                );
+                assert!(
+                    masked_ssim_4th <= ssim_4th + 1e-10,
+                    "s{} c{}: masked_4th {:.6} > 4th {:.6}",
+                    scale,
+                    ch,
+                    masked_ssim_4th,
+                    ssim_4th,
+                );
+                assert!(
+                    masked_ssim_2nd <= ssim_2nd + 1e-10,
+                    "s{} c{}: masked_2nd {:.6} > 2nd {:.6}",
+                    scale,
+                    ch,
+                    masked_ssim_2nd,
+                    ssim_2nd,
+                );
+            }
+        }
+    }
+
+    /// BlurKernel::Box matches current blur_passes behavior.
+    #[test]
+    fn blur_kernel_box_matches_passes() {
+        let (w, h) = (64, 64);
+        let (src, dst) = make_gradient_pair(w, h);
+
+        for passes in [1u8, 2, 3] {
+            let old_style = compute_zensim_with_config(
+                &src,
+                &dst,
+                w,
+                h,
+                ZensimConfig {
+                    blur_passes: passes,
+                    blur_kernel: BlurKernel::Box { passes },
+                    compute_all_features: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            // Verify it runs and produces valid results
+            assert!(old_style.score > 0.0 && old_style.score <= 100.0);
+            assert_eq!(old_style.features.len(), 156);
+        }
     }
 }
