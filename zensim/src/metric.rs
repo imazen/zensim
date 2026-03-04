@@ -370,6 +370,42 @@ pub struct ZensimResult {
     pub mean_offset: [f64; 3],
 }
 
+impl ZensimResult {
+    /// Convert the score to a dissimilarity value.
+    ///
+    /// Dissimilarity is `(100 - score) / 100`: 0 = identical, higher = worse.
+    /// This is the inverse of the 0–100 score scale, normalized to 0–1.
+    ///
+    /// See also [`score_to_dissimilarity`] for the standalone conversion.
+    pub fn dissimilarity(&self) -> f64 {
+        score_to_dissimilarity(self.score)
+    }
+}
+
+/// Convert a zensim score (0–100, 100 = identical) to a dissimilarity value
+/// (0 = identical, higher = worse).
+///
+/// Linear conversion: `(100 - score) / 100`.
+///
+/// | score | dissimilarity |
+/// |-------|---------------|
+/// | 100.0 | 0.0           |
+/// | 99.5  | 0.005         |
+/// | 95.0  | 0.05          |
+/// | 50.0  | 0.5           |
+/// | 0.0   | 1.0           |
+pub fn score_to_dissimilarity(score: f64) -> f64 {
+    ((100.0 - score) / 100.0).max(0.0)
+}
+
+/// Convert a dissimilarity value (0 = identical, higher = worse) back to a
+/// zensim score (0–100, 100 = identical).
+///
+/// Inverse of [`score_to_dissimilarity`]: `score = 100 * (1 - dissimilarity)`.
+pub fn dissimilarity_to_score(dissimilarity: f64) -> f64 {
+    (100.0 * (1.0 - dissimilarity)).clamp(0.0, 100.0)
+}
+
 /// What kind of perceptual difference dominates between source and distorted.
 ///
 /// Only categories with provably defensible statistical signatures are offered.

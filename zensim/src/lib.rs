@@ -96,7 +96,10 @@ mod streaming;
 
 // --- Primary API ---
 pub use error::ZensimError;
-pub use metric::{ErrorCategory, RoundingBias, Zensim, ZensimResult};
+pub use metric::{
+    ErrorCategory, RoundingBias, Zensim, ZensimResult, dissimilarity_to_score,
+    score_to_dissimilarity,
+};
 
 // --- Classification API (used by zensim-regress for regression testing) ---
 pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};

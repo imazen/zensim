@@ -148,21 +148,56 @@ fn ceil_sig2(v: f64) -> f64 {
     scaled * factor
 }
 
-/// Format a recommended `.checksums` tolerance line.
+/// Format a recommended `.checksums` tolerance line using the dual-value format.
+///
+/// Takes a dissimilarity value and formats as `zensim:SCORE (dissim VALUE)`.
 pub fn format_recommended_line(zdsim: f64) -> String {
-    format!("zensim:{}", format_dissimilarity(zdsim))
+    let score = zensim::dissimilarity_to_score(zdsim);
+    format_recommended_from_score(score)
+}
+
+/// Format a recommended tolerance from a score value.
+fn format_recommended_from_score(score: f64) -> String {
+    if score >= 100.0 {
+        return "zensim:100".to_string();
+    }
+    let score_str = format_score_for_recommendation(score);
+    let dissim = zensim::score_to_dissimilarity(score);
+    let dissim_str = format_dissimilarity(dissim);
+    format!("zensim:{score_str} (dissim {dissim_str})")
+}
+
+/// Format a score for the recommendation line (clean rounding).
+fn format_score_for_recommendation(score: f64) -> String {
+    if score == score.round() {
+        format!("{}", score as i64)
+    } else if (score * 10.0).round() == score * 10.0 {
+        format!("{score:.1}")
+    } else {
+        format!("{score:.2}")
+    }
 }
 
 /// Format a dissimilarity value with appropriate precision.
 fn format_dissimilarity(z: f64) -> String {
     if z == 0.0 {
         "0".to_string()
-    } else if z < 0.001 {
+    } else if z < 0.0001 {
         format!("{z:.6}")
-    } else if z < 0.01 {
+    } else if z < 0.001 {
         format!("{z:.4}")
+    } else if z < 0.01 {
+        if (z * 1000.0).round() == z * 1000.0 {
+            format!("{z:.3}")
+        } else {
+            format!("{z:.4}")
+        }
     } else if z < 0.1 {
-        format!("{z:.3}")
+        if (z * 100.0).round() == z * 100.0 {
+            format!("{z:.2}")
+        } else {
+            format!("{z:.3}")
+        }
     } else {
         format!("{z:.2}")
     }
@@ -522,16 +557,20 @@ fn write_test_entry(
             // Metrics row
             let _ = writeln!(html, "<div class=\"metrics\">");
             if let Some(zdsim) = entry.actual_zdsim {
+                let score = zensim::dissimilarity_to_score(zdsim);
                 let _ = writeln!(
                     html,
-                    "<div class=\"metric\"><div class=\"label\">zensim</div>{}</div>",
+                    "<div class=\"metric\"><div class=\"label\">zensim score</div>{:.2} <span style=\"color:#888\">(dissim {})</span></div>",
+                    score,
                     format_dissimilarity(zdsim)
                 );
             }
             if let Some(tol) = entry.tolerance_zdsim {
+                let tol_score = zensim::dissimilarity_to_score(tol);
                 let _ = writeln!(
                     html,
-                    "<div class=\"metric\"><div class=\"label\">tolerance</div>{}</div>",
+                    "<div class=\"metric\"><div class=\"label\">tolerance</div>{:.1} <span style=\"color:#888\">(dissim {})</span></div>",
+                    tol_score,
                     format_dissimilarity(tol)
                 );
             }
@@ -601,9 +640,11 @@ fn write_recommended_tolerances(
 
         if max_zdsim > 0.0
             && let Some(rec) = recommend_tolerance(max_zdsim) {
+                let observed_score = zensim::dissimilarity_to_score(max_zdsim);
                 let _ = writeln!(
                     html,
-                    "# {test_name}: observed zensim={} → tolerance {}",
+                    "# {test_name}: observed zensim:{:.2} (dissim {}) → tolerance {}",
+                    observed_score,
                     format_dissimilarity(max_zdsim),
                     format_recommended_line(rec),
                 );
@@ -723,10 +764,13 @@ mod tests {
     #[test]
     fn format_dissimilarity_precision() {
         assert_eq!(format_dissimilarity(0.0), "0");
-        assert_eq!(format_dissimilarity(0.000123), "0.000123");
-        assert_eq!(format_dissimilarity(0.0056), "0.0056");
-        assert_eq!(format_dissimilarity(0.056), "0.056");
-        assert_eq!(format_dissimilarity(0.56), "0.56");
+        assert_eq!(format_dissimilarity(0.000012), "0.000012"); // < 0.0001
+        assert_eq!(format_dissimilarity(0.0001), "0.0001"); // < 0.001
+        assert_eq!(format_dissimilarity(0.005), "0.005"); // clean 3-decimal
+        assert_eq!(format_dissimilarity(0.0056), "0.0056"); // < 0.01
+        assert_eq!(format_dissimilarity(0.05), "0.05"); // clean 2-decimal
+        assert_eq!(format_dissimilarity(0.056), "0.056"); // < 0.1
+        assert_eq!(format_dissimilarity(0.56), "0.56"); // >= 0.1
     }
 
     #[test]
