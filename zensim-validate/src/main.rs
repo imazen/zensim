@@ -515,6 +515,9 @@ fn main() {
                                 )
                                 .unwrap(),
                         );
+                        let progress_ctr = std::sync::atomic::AtomicU64::new(0);
+                        let start_t = std::time::Instant::now();
+                        let log_int = (n_new / 20).max(1000) as u64;
 
                         let ref_groups: Vec<(PathBuf, Vec<(usize, ImagePair)>)> =
                             by_ref.into_iter().collect();
@@ -525,6 +528,7 @@ fn main() {
                             .par_iter()
                             .map(|(ref_path, group)| {
                                 let fail = |grp: &[(usize, ImagePair)]| -> Vec<_> {
+                                    progress_ctr.fetch_add(grp.len() as u64, std::sync::atomic::Ordering::Relaxed);
                                     pb.inc(grp.len() as u64);
                                     grp.iter()
                                         .map(|(idx, pair)| {
@@ -586,7 +590,15 @@ fn main() {
                                             }
                                             Err(_) => nan_result.clone(),
                                         };
+                                        let prev = progress_ctr.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                         pb.inc(1);
+                                        let cur = prev + 1;
+                                        if prev / log_int != cur / log_int {
+                                            let el = start_t.elapsed().as_secs_f64();
+                                            let rate = cur as f64 / el;
+                                            let eta = (n_new as f64 - cur as f64) / rate;
+                                            eprintln!("  [{:.0}s] {}/{} new pairs ({:.1}%), {:.0}/s, ETA {:.0}s", el, cur, n_new, cur as f64 / n_new as f64 * 100.0, rate, eta);
+                                        }
                                         (*idx, key, pair.human_score, result)
                                     })
                                     .collect()
@@ -594,6 +606,7 @@ fn main() {
                             .collect();
 
                         pb.finish_with_message("done");
+                        eprintln!("  New pairs extracted: {} in {:.1}s", n_new, start_t.elapsed().as_secs_f64());
 
                         // Merge cached + new features
                         let mut all_human_scores = ds.human_scores;
@@ -1146,9 +1159,10 @@ fn load_and_compute(
         pairs
     };
 
-    println!("Loading {}: {} image pairs...", name, pairs.len());
+    let total_pairs = pairs.len();
+    println!("Loading {}: {} image pairs...", name, total_pairs);
 
-    let pb = ProgressBar::new(pairs.len() as u64);
+    let pb = ProgressBar::new(total_pairs as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({per_sec}) {msg}")
@@ -1196,11 +1210,34 @@ fn load_and_compute(
     };
 
     // Process reference groups in parallel
+    let progress_counter = std::sync::atomic::AtomicU64::new(0);
+    let start_time = std::time::Instant::now();
+    let log_interval = (total_pairs / 20).max(1000) as u64; // ~5% increments
+
     let group_results: Vec<Vec<(usize, String, f64, zensim::ZensimResult)>> = ref_groups
         .par_iter()
         .map(|(ref_path, group)| {
             let fail = |grp: &[(usize, &ImagePair)]| -> Vec<_> {
+                let prev = progress_counter.fetch_add(
+                    grp.len() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 pb.inc(grp.len() as u64);
+                let new = prev + grp.len() as u64;
+                if prev / log_interval != new / log_interval {
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let rate = new as f64 / elapsed;
+                    let eta = (total_pairs as f64 - new as f64) / rate;
+                    eprintln!(
+                        "  [{:.0}s] {}/{} pairs ({:.1}%), {:.0}/s, ETA {:.0}s",
+                        elapsed,
+                        new,
+                        total_pairs,
+                        new as f64 / total_pairs as f64 * 100.0,
+                        rate,
+                        eta,
+                    );
+                }
                 grp.iter()
                     .map(|(idx, pair)| {
                         (
@@ -1259,14 +1296,36 @@ fn load_and_compute(
                         }
                         Err(_) => nan_result.clone(),
                     };
+                    let prev =
+                        progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     pb.inc(1);
+                    let new = prev + 1;
+                    if prev / log_interval != new / log_interval {
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        let rate = new as f64 / elapsed;
+                        let eta = (total_pairs as f64 - new as f64) / rate;
+                        eprintln!(
+                            "  [{:.0}s] {}/{} pairs ({:.1}%), {:.0}/s, ETA {:.0}s",
+                            elapsed,
+                            new,
+                            total_pairs,
+                            new as f64 / total_pairs as f64 * 100.0,
+                            rate,
+                            eta,
+                        );
+                    }
                     (*idx, key, pair.human_score, result)
                 })
                 .collect()
         })
         .collect();
 
+    let total_elapsed = start_time.elapsed().as_secs_f64();
     pb.finish_with_message("done");
+    eprintln!(
+        "  Feature extraction: {} pairs in {:.1}s ({:.0}/s)",
+        total_pairs, total_elapsed, total_pairs as f64 / total_elapsed,
+    );
 
     // Flatten and sort back to original pair order
     let mut results: Vec<(usize, String, f64, zensim::ZensimResult)> =
