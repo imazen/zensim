@@ -864,7 +864,9 @@ impl ChecksumManager {
                 report,
                 ..
             } => {
-                let zd = report.as_ref().map(|r| crate::diff_summary::zdsim(r.score()));
+                let zd = report
+                    .as_ref()
+                    .map(|r| crate::diff_summary::zdsim(r.score()));
                 let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
                 (
                     ManifestStatus::Failed,
@@ -874,9 +876,13 @@ impl ChecksumManager {
                     summary,
                 )
             }
-            CheckResult::NoBaseline { actual_hash, .. } => {
-                (ManifestStatus::Novel, actual_hash.as_str(), None, None, None)
-            }
+            CheckResult::NoBaseline { actual_hash, .. } => (
+                ManifestStatus::Novel,
+                actual_hash.as_str(),
+                None,
+                None,
+                None,
+            ),
         };
 
         manifest.write_entry(&ManifestEntry {

@@ -1316,49 +1316,47 @@ pub(crate) fn compute_delta_stats(
                     }
 
                     // Alpha stratification and alpha delta tracking
-                    if has_alpha {
-                        if let Some((src_a, dst_a)) = alpha {
-                            // Track alpha channel delta at native precision
-                            let alpha_delta = ((src_a - dst_a).abs() * native_max).round() as u8;
-                            if alpha_delta > acc.alpha_max_delta {
-                                acc.alpha_max_delta = alpha_delta;
-                            }
-                            if alpha_delta > 0 {
-                                acc.alpha_pixels_differing += 1;
-                            }
-
-                            let a = src_a;
-                            let one_minus_a = 1.0 - a;
-                            if a >= 1.0 - 0.5 / native_max {
-                                // Opaque
-                                acc.opaque_count += 1;
-                                for c in 0..3 {
-                                    let ad = (src_rgb[c] - dst_rgb[c]).abs();
-                                    acc.opaque_sum_abs[c] += ad;
-                                    if ad > acc.opaque_max_abs[c] {
-                                        acc.opaque_max_abs[c] = ad;
-                                    }
-                                }
-                            } else if a > 0.5 / native_max {
-                                // Semitransparent
-                                acc.semi_count += 1;
-                                for c in 0..3 {
-                                    let ad = (src_rgb[c] - dst_rgb[c]).abs();
-                                    acc.semi_sum_abs[c] += ad;
-                                    if ad > acc.semi_max_abs[c] {
-                                        acc.semi_max_abs[c] = ad;
-                                    }
-                                }
-                            }
-
-                            // Pearson correlation accumulators
-                            acc.sum_delta_mag += pixel_max_abs_delta;
-                            acc.sum_one_minus_alpha += one_minus_a;
-                            acc.sum_delta_alpha += pixel_max_abs_delta * one_minus_a;
-                            acc.sum_delta_mag_sq += pixel_max_abs_delta * pixel_max_abs_delta;
-                            acc.sum_one_minus_alpha_sq += one_minus_a * one_minus_a;
-                            acc.alpha_pixel_count += 1;
+                    if has_alpha && let Some((src_a, dst_a)) = alpha {
+                        // Track alpha channel delta at native precision
+                        let alpha_delta = ((src_a - dst_a).abs() * native_max).round() as u8;
+                        if alpha_delta > acc.alpha_max_delta {
+                            acc.alpha_max_delta = alpha_delta;
                         }
+                        if alpha_delta > 0 {
+                            acc.alpha_pixels_differing += 1;
+                        }
+
+                        let a = src_a;
+                        let one_minus_a = 1.0 - a;
+                        if a >= 1.0 - 0.5 / native_max {
+                            // Opaque
+                            acc.opaque_count += 1;
+                            for c in 0..3 {
+                                let ad = (src_rgb[c] - dst_rgb[c]).abs();
+                                acc.opaque_sum_abs[c] += ad;
+                                if ad > acc.opaque_max_abs[c] {
+                                    acc.opaque_max_abs[c] = ad;
+                                }
+                            }
+                        } else if a > 0.5 / native_max {
+                            // Semitransparent
+                            acc.semi_count += 1;
+                            for c in 0..3 {
+                                let ad = (src_rgb[c] - dst_rgb[c]).abs();
+                                acc.semi_sum_abs[c] += ad;
+                                if ad > acc.semi_max_abs[c] {
+                                    acc.semi_max_abs[c] = ad;
+                                }
+                            }
+                        }
+
+                        // Pearson correlation accumulators
+                        acc.sum_delta_mag += pixel_max_abs_delta;
+                        acc.sum_one_minus_alpha += one_minus_a;
+                        acc.sum_delta_alpha += pixel_max_abs_delta * one_minus_a;
+                        acc.sum_delta_mag_sq += pixel_max_abs_delta * pixel_max_abs_delta;
+                        acc.sum_one_minus_alpha_sq += one_minus_a * one_minus_a;
+                        acc.alpha_pixel_count += 1;
                     }
                 }
             }

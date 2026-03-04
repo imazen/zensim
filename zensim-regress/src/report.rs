@@ -285,11 +285,19 @@ pub fn generate_html_report(
     non_match.sort_by(|a, b| {
         let a_failed = a.1.values().any(|e| e.status == "failed");
         let b_failed = b.1.values().any(|e| e.status == "failed");
-        let a_zdsim = a.1.values().filter_map(|e| e.actual_zdsim).fold(0.0_f64, f64::max);
-        let b_zdsim = b.1.values().filter_map(|e| e.actual_zdsim).fold(0.0_f64, f64::max);
-        b_failed
-            .cmp(&a_failed)
-            .then(b_zdsim.partial_cmp(&a_zdsim).unwrap_or(std::cmp::Ordering::Equal))
+        let a_zdsim =
+            a.1.values()
+                .filter_map(|e| e.actual_zdsim)
+                .fold(0.0_f64, f64::max);
+        let b_zdsim =
+            b.1.values()
+                .filter_map(|e| e.actual_zdsim)
+                .fold(0.0_f64, f64::max);
+        b_failed.cmp(&a_failed).then(
+            b_zdsim
+                .partial_cmp(&a_zdsim)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        )
     });
 
     if non_match.is_empty() {
@@ -548,10 +556,7 @@ fn write_test_entry(
     for &platform_name in platform_names {
         if let Some(entry) = platforms.get(platform_name) {
             if multi_platform {
-                let _ = writeln!(
-                    html,
-                    "<span class=\"platform-tag\">{platform_name}</span>"
-                );
+                let _ = writeln!(html, "<span class=\"platform-tag\">{platform_name}</span>");
             }
 
             // Metrics row
@@ -576,13 +581,14 @@ fn write_test_entry(
             }
             // Recommendation
             if let Some(zdsim) = entry.actual_zdsim
-                && let Some(rec) = recommend_tolerance(zdsim) {
-                    let _ = writeln!(
-                        html,
-                        "<div class=\"metric\"><div class=\"label\">recommended</div>{}</div>",
-                        format_recommended_line(rec)
-                    );
-                }
+                && let Some(rec) = recommend_tolerance(zdsim)
+            {
+                let _ = writeln!(
+                    html,
+                    "<div class=\"metric\"><div class=\"label\">recommended</div>{}</div>",
+                    format_recommended_line(rec)
+                );
+            }
             let _ = writeln!(html, "</div>");
 
             // Diff summary
@@ -596,9 +602,10 @@ fn write_test_entry(
 
             // Diff image (try to embed from diffs directory)
             if (entry.status == "accepted" || entry.status == "failed")
-                && let Some(base) = diffs_base {
-                    try_embed_diff_image(html, base, test_name);
-                }
+                && let Some(base) = diffs_base
+            {
+                try_embed_diff_image(html, base, test_name);
+            }
         }
     }
 
@@ -639,16 +646,17 @@ fn write_recommended_tolerances(
             .fold(0.0_f64, f64::max);
 
         if max_zdsim > 0.0
-            && let Some(rec) = recommend_tolerance(max_zdsim) {
-                let observed_score = zensim::dissimilarity_to_score(max_zdsim);
-                let _ = writeln!(
-                    html,
-                    "# {test_name}: observed zensim:{:.2} (dissim {}) → tolerance {}",
-                    observed_score,
-                    format_dissimilarity(max_zdsim),
-                    format_recommended_line(rec),
-                );
-            }
+            && let Some(rec) = recommend_tolerance(max_zdsim)
+        {
+            let observed_score = zensim::dissimilarity_to_score(max_zdsim);
+            let _ = writeln!(
+                html,
+                "# {test_name}: observed zensim:{:.2} (dissim {}) → tolerance {}",
+                observed_score,
+                format_dissimilarity(max_zdsim),
+                format_recommended_line(rec),
+            );
+        }
     }
     let _ = writeln!(html, "</pre>");
 }
@@ -656,8 +664,7 @@ fn write_recommended_tolerances(
 /// Try to find and embed a diff image as a base64 data URI.
 fn try_embed_diff_image(html: &mut String, diffs_dir: &Path, test_name: &str) {
     // The diff image filename is the sanitized test name + .png
-    let sanitized =
-        test_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+    let sanitized = test_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
     let path = diffs_dir.join(format!("{sanitized}.png"));
 
     if let Ok(data) = std::fs::read(&path) {

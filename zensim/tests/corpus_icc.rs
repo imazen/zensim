@@ -95,7 +95,7 @@ fn primaries_from_folder(folder: &str) -> Option<ColorPrimaries> {
     match folder {
         "display-p3" => Some(ColorPrimaries::DisplayP3),
         "rec-2020-pq" => Some(ColorPrimaries::Bt2020),
-        "adobe-rgb" => None, // Adobe RGB not directly supported by zensim
+        "adobe-rgb" => None,    // Adobe RGB not directly supported by zensim
         "prophoto-rgb" => None, // ProPhoto not supported
         "srgb-reference" => Some(ColorPrimaries::Srgb),
         _ => None,
@@ -115,22 +115,58 @@ fn zensim() -> Zensim {
 /// Wide-gamut images with known ICC profiles. Self-comparison must be 100.0.
 const WIDE_GAMUT_SAMPLES: &[(&str, &str)] = &[
     // Display P3 samples
-    ("wide-gamut/display-p3/flickr_1b94e1228c32cb98.jpg", "display-p3"),
-    ("wide-gamut/display-p3/flickr_2fc1b8c45f922b8e.jpg", "display-p3"),
-    ("wide-gamut/display-p3/flickr_3ac029fc145a8e32.jpg", "display-p3"),
-    ("wide-gamut/display-p3/flickr_403aa5efb8efe6e8.jpg", "display-p3"),
-    ("wide-gamut/display-p3/flickr_47b2cd2c048f29b3.jpg", "display-p3"),
+    (
+        "wide-gamut/display-p3/flickr_1b94e1228c32cb98.jpg",
+        "display-p3",
+    ),
+    (
+        "wide-gamut/display-p3/flickr_2fc1b8c45f922b8e.jpg",
+        "display-p3",
+    ),
+    (
+        "wide-gamut/display-p3/flickr_3ac029fc145a8e32.jpg",
+        "display-p3",
+    ),
+    (
+        "wide-gamut/display-p3/flickr_403aa5efb8efe6e8.jpg",
+        "display-p3",
+    ),
+    (
+        "wide-gamut/display-p3/flickr_47b2cd2c048f29b3.jpg",
+        "display-p3",
+    ),
     // Rec.2020 samples
-    ("wide-gamut/rec-2020-pq/flickr_2a68670c58131566.jpg", "rec-2020-pq"),
-    ("wide-gamut/rec-2020-pq/flickr_c2d8824d6ffb6e60.jpg", "rec-2020-pq"),
+    (
+        "wide-gamut/rec-2020-pq/flickr_2a68670c58131566.jpg",
+        "rec-2020-pq",
+    ),
+    (
+        "wide-gamut/rec-2020-pq/flickr_c2d8824d6ffb6e60.jpg",
+        "rec-2020-pq",
+    ),
     // sRGB reference (camera samples)
-    ("wide-gamut/srgb-reference/canon_eos_5d_mark_iv/wmc_81b268fc64ea796c.jpg", "srgb-reference"),
-    ("wide-gamut/srgb-reference/sony-a7r-v/irsample_a141d146726a8314.jpg", "srgb-reference"),
+    (
+        "wide-gamut/srgb-reference/canon_eos_5d_mark_iv/wmc_81b268fc64ea796c.jpg",
+        "srgb-reference",
+    ),
+    (
+        "wide-gamut/srgb-reference/sony-a7r-v/irsample_a141d146726a8314.jpg",
+        "srgb-reference",
+    ),
     // Adobe RGB (treated as sRGB for decode, just verify no crash)
-    ("wide-gamut/adobe-rgb/flickr_0119a8378404ece9.jpg", "adobe-rgb"),
-    ("wide-gamut/adobe-rgb/flickr_070040b3922aab8a.jpg", "adobe-rgb"),
+    (
+        "wide-gamut/adobe-rgb/flickr_0119a8378404ece9.jpg",
+        "adobe-rgb",
+    ),
+    (
+        "wide-gamut/adobe-rgb/flickr_070040b3922aab8a.jpg",
+        "adobe-rgb",
+    ),
     // ProPhoto (just verify no crash)
-    ("wide-gamut/prophoto-rgb/flickr_0d2d634cf46df137.jpg", "prophoto-rgb"),
+    (
+        "wide-gamut/prophoto-rgb/flickr_0d2d634cf46df137.jpg",
+        "prophoto-rgb",
+    ),
 ];
 
 #[test]
@@ -150,16 +186,25 @@ fn corpus_wide_gamut_self_comparison() {
         // Determine primaries — for unsupported profiles, just use sRGB
         let primaries = primaries_from_folder(folder).unwrap_or(ColorPrimaries::Srgb);
 
-        let src = StridedBytes::new(&rgba, w as usize, h as usize, w as usize * 4, PixelFormat::Srgb8Rgba)
-            .with_color_primaries(primaries);
-        let dst = StridedBytes::new(&rgba, w as usize, h as usize, w as usize * 4, PixelFormat::Srgb8Rgba)
-            .with_color_primaries(primaries);
+        let src = StridedBytes::new(
+            &rgba,
+            w as usize,
+            h as usize,
+            w as usize * 4,
+            PixelFormat::Srgb8Rgba,
+        )
+        .with_color_primaries(primaries);
+        let dst = StridedBytes::new(
+            &rgba,
+            w as usize,
+            h as usize,
+            w as usize * 4,
+            PixelFormat::Srgb8Rgba,
+        )
+        .with_color_primaries(primaries);
 
         let result = z.compute(&src, &dst).unwrap();
-        println!(
-            "  {s3_key:70} {primaries:?} score={:.4}",
-            result.score
-        );
+        println!("  {s3_key:70} {primaries:?} score={:.4}", result.score);
 
         if result.score != 100.0 {
             failures.push(format!("{s3_key}: expected 100.0, got {}", result.score));
@@ -211,9 +256,7 @@ fn corpus_wide_gamut_wrong_primaries_differs() {
     }
 
     // Test with Rec.2020 images
-    let bt2020_samples = &[
-        "wide-gamut/rec-2020-pq/flickr_2a68670c58131566.jpg",
-    ];
+    let bt2020_samples = &["wide-gamut/rec-2020-pq/flickr_2a68670c58131566.jpg"];
 
     for s3_key in bt2020_samples {
         let path = fetch_cached(s3_key);

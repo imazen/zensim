@@ -1724,7 +1724,7 @@ fn downscale_2x_inner_scalar(
 /// Below 512, the working set fits in L1 and aliasing doesn't matter.
 pub(crate) fn simd_padded_width(width: usize) -> usize {
     let aligned = (width + 15) & !15;
-    if aligned >= 512 && (aligned / 16) % 2 == 0 {
+    if aligned >= 512 && (aligned / 16).is_multiple_of(2) {
         aligned + 16
     } else {
         aligned

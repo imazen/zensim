@@ -778,19 +778,19 @@ fn derive_classification(delta_stats: &DeltaStats, _result: &ZensimResult) -> Er
     //
     // Stratification: opaque pixels unchanged, semitransparent changed.
     // Tightened from 0.01→0.005 opaque threshold, 0.7→0.8 correlation threshold.
-    if let Some(ref opaque) = delta_stats.opaque_stats {
-        if let Some(ref semi) = delta_stats.semitransparent_stats {
-            let opaque_max = opaque.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
-            let semi_mean = semi.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
-            if opaque_max < 0.005 && semi_mean > 0.02 && semi.pixel_count > 100 {
-                score_alpha = 0.9;
-            }
+    if let Some(ref opaque) = delta_stats.opaque_stats
+        && let Some(ref semi) = delta_stats.semitransparent_stats
+    {
+        let opaque_max = opaque.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
+        let semi_mean = semi.mean_abs_delta.iter().copied().fold(0.0f64, f64::max);
+        if opaque_max < 0.005 && semi_mean > 0.02 && semi.pixel_count > 100 {
+            score_alpha = 0.9;
         }
     }
-    if let Some(corr) = delta_stats.alpha_error_correlation {
-        if corr > 0.8 {
-            score_alpha = score_alpha.max(corr);
-        }
+    if let Some(corr) = delta_stats.alpha_error_correlation
+        && corr > 0.8
+    {
+        score_alpha = score_alpha.max(corr);
     }
 
     // === Determine dominant category ===

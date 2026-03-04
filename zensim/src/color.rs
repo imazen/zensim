@@ -55,7 +55,7 @@ const P3_TO_SRGB: [[f32; 3]; 3] = [
 /// Matrix = M_srgb_from_xyz × M_xyz_from_bt2020.
 #[rustfmt::skip]
 const BT2020_TO_SRGB: [[f32; 3]; 3] = [
-    [ 1.660_491_0, -0.587_641_1, -0.072_849_9],
+    [ 1.660_491, -0.587_641_1, -0.072_849_9],
     [-0.124_550_5,  1.132_899_9, -0.008_349_4],
     [-0.018_151_0, -0.100_578_6,  1.118_729_6],
 ];
@@ -1455,11 +1455,10 @@ mod tests {
     fn p3_to_srgb_preserves_white() {
         let mut rgb = [1.0f32, 1.0, 1.0];
         apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
-        for c in 0..3 {
+        for (c, &val) in rgb.iter().enumerate() {
             assert!(
-                (rgb[c] - 1.0).abs() < 1e-4,
-                "P3 white channel {c}: expected 1.0, got {}",
-                rgb[c]
+                (val - 1.0).abs() < 1e-4,
+                "P3 white channel {c}: expected 1.0, got {val}",
             );
         }
     }
@@ -1469,11 +1468,10 @@ mod tests {
     fn bt2020_to_srgb_preserves_white() {
         let mut rgb = [1.0f32, 1.0, 1.0];
         apply_gamut_matrix(&mut rgb, ColorPrimaries::Bt2020);
-        for c in 0..3 {
+        for (c, &val) in rgb.iter().enumerate() {
             assert!(
-                (rgb[c] - 1.0).abs() < 1e-4,
-                "BT.2020 white channel {c}: expected 1.0, got {}",
-                rgb[c]
+                (val - 1.0).abs() < 1e-4,
+                "BT.2020 white channel {c}: expected 1.0, got {val}",
             );
         }
     }
@@ -1504,11 +1502,10 @@ mod tests {
     fn p3_grey_stays_grey() {
         let mut rgb = [0.5f32, 0.5, 0.5];
         apply_gamut_matrix(&mut rgb, ColorPrimaries::DisplayP3);
-        for c in 0..3 {
+        for (c, &val) in rgb.iter().enumerate() {
             assert!(
-                (rgb[c] - 0.5).abs() < 1e-3,
-                "P3 grey channel {c}: expected ~0.5, got {}",
-                rgb[c]
+                (val - 0.5).abs() < 1e-3,
+                "P3 grey channel {c}: expected ~0.5, got {val}",
             );
         }
     }

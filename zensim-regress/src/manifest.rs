@@ -390,11 +390,7 @@ pub fn combine_manifest_dir(dir: &Path, output: &Path) -> std::io::Result<usize>
     // Read all .tsv files, sorted by name (timestamp order)
     let mut files: Vec<_> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "tsv")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "tsv"))
         .collect();
     files.sort_by_key(|e| e.file_name());
 
@@ -797,7 +793,11 @@ mod tests {
         let data: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
         assert_eq!(data.len(), 1);
         // Latest wins → "accepted"
-        assert!(data[0].contains("accepted"), "latest should win: {}", data[0]);
+        assert!(
+            data[0].contains("accepted"),
+            "latest should win: {}",
+            data[0]
+        );
     }
 
     #[test]

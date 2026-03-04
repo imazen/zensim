@@ -466,10 +466,7 @@ fn large_image_bt2020_parallel_rows() {
         "BT.2020 256x256 noise+blocks should be between 0 and 100, got {}",
         result.score
     );
-    println!(
-        "  BT.2020 256x256 noise+blocks score: {:.4}",
-        result.score
-    );
+    println!("  BT.2020 256x256 noise+blocks score: {:.4}", result.score);
 }
 
 #[test]

@@ -812,9 +812,7 @@ impl CheckResultV2 {
                 actual_name,
                 auto_accepted: false,
                 ..
-            } => Some(format!(
-                "= {actual_name}  {arch}  @{commit}  new-baseline"
-            )),
+            } => Some(format!("= {actual_name}  {arch}  @{commit}  new-baseline")),
             _ => None,
         }
     }
@@ -1069,8 +1067,7 @@ impl ChecksumManagerV2 {
         // Check if actual matches any active entry
         if let Some(section) = section {
             let matched_name = section.active_entries().find_map(|entry| {
-                names_match(&entry.name_hash, &actual_name)
-                    .then(|| entry.name_hash.clone())
+                names_match(&entry.name_hash, &actual_name).then(|| entry.name_hash.clone())
             });
             if let Some(entry_name) = matched_name {
                 // Update tolerance if provided and different
@@ -1304,8 +1301,7 @@ impl ChecksumManagerV2 {
         // Check for hash match
         if let Some(section) = section {
             let matched_name = section.active_entries().find_map(|entry| {
-                names_match(&entry.name_hash, &actual_name)
-                    .then(|| entry.name_hash.clone())
+                names_match(&entry.name_hash, &actual_name).then(|| entry.name_hash.clone())
             });
 
             if let Some(entry_name) = matched_name {
@@ -1648,7 +1644,9 @@ impl ChecksumManagerV2 {
                 report,
                 ..
             } => {
-                let zd = report.as_ref().map(|r| crate::diff_summary::zdsim(r.score()));
+                let zd = report
+                    .as_ref()
+                    .map(|r| crate::diff_summary::zdsim(r.score()));
                 let summary = report.as_ref().map(|r| format!("score:{:.1}", r.score()));
                 (
                     ManifestStatus::Failed,
@@ -1658,9 +1656,13 @@ impl ChecksumManagerV2 {
                     summary,
                 )
             }
-            CheckResultV2::NoBaseline { actual_hash, .. } => {
-                (ManifestStatus::Novel, actual_hash.as_str(), None, None, None)
-            }
+            CheckResultV2::NoBaseline { actual_hash, .. } => (
+                ManifestStatus::Novel,
+                actual_hash.as_str(),
+                None,
+                None,
+                None,
+            ),
         };
 
         manifest.write_entry(&ManifestEntry {

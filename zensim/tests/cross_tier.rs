@@ -198,10 +198,10 @@ fn score_reproducibility_across_tiers() {
             // Show features with largest divergence
             let mut feat_diffs: Vec<(usize, u64, f64, f64)> = Vec::new();
             for (i, (rf, tf)) in ref_feats.iter().zip(feats.iter()).enumerate() {
-                if let Some(u) = ulp_distance(*rf, *tf) {
-                    if u > 0 {
-                        feat_diffs.push((i, u, *rf, *tf));
-                    }
+                if let Some(u) = ulp_distance(*rf, *tf)
+                    && u > 0
+                {
+                    feat_diffs.push((i, u, *rf, *tf));
                 }
             }
             feat_diffs.sort_by(|a, b| b.1.cmp(&a.1));

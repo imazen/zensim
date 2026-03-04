@@ -76,7 +76,10 @@ fn main() -> ExitCode {
     // Determine manifest source
     let manifest_path = if let Some(dir) = &manifest_dir {
         if !dir.is_dir() {
-            eprintln!("Error: manifest directory does not exist: {}", dir.display());
+            eprintln!(
+                "Error: manifest directory does not exist: {}",
+                dir.display()
+            );
             return ExitCode::FAILURE;
         }
 
@@ -105,7 +108,10 @@ fn main() -> ExitCode {
             if dir.is_dir() {
                 dir
             } else {
-                eprintln!("Error: REGRESS_MANIFEST_DIR does not exist: {}", dir.display());
+                eprintln!(
+                    "Error: REGRESS_MANIFEST_DIR does not exist: {}",
+                    dir.display()
+                );
                 return ExitCode::FAILURE;
             }
         } else if let Ok(file) = std::env::var("REGRESS_MANIFEST_PATH") {

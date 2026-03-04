@@ -562,10 +562,7 @@ mod tests {
         assert_eq!(format_zensim_token(99.5), "zensim:99.5 (dissim 0.005)");
 
         // Score 99.87 → zensim:99.87 (dissim 0.0013)
-        assert_eq!(
-            format_zensim_token(99.87),
-            "zensim:99.87 (dissim 0.0013)"
-        );
+        assert_eq!(format_zensim_token(99.87), "zensim:99.87 (dissim 0.0013)");
 
         // Score 90 → zensim:90 (dissim 0.10)
         assert_eq!(format_zensim_token(90.0), "zensim:90 (dissim 0.10)");
@@ -582,9 +579,7 @@ mod tests {
             "max-delta:2 zensim:95 pixels-changed:1.0%"
         );
         assert_eq!(
-            strip_dissim_annotations(
-                "zensim:99 (dissim 0.01) [aarch64 zensim:95 (dissim 0.05)]"
-            ),
+            strip_dissim_annotations("zensim:99 (dissim 0.01) [aarch64 zensim:95 (dissim 0.05)]"),
             "zensim:99 [aarch64 zensim:95 ]"
         );
         // No annotation → unchanged
@@ -809,9 +804,8 @@ mod tests {
     #[test]
     fn tolerance_shorthand_compound_zensim() {
         // New format: compound with score value
-        let parsed = parse_tolerance_shorthand(
-            "max-delta:2 zensim:95 (dissim 0.05) pixels-changed:1.0%",
-        );
+        let parsed =
+            parse_tolerance_shorthand("max-delta:2 zensim:95 (dissim 0.05) pixels-changed:1.0%");
         assert_eq!(parsed.max_delta, 2);
         assert!((parsed.min_similarity - 95.0).abs() < 0.01);
         assert!((parsed.max_pixels_different - 0.01).abs() < 1e-6);
