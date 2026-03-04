@@ -12,20 +12,6 @@ pub enum RegressError {
         source: std::io::Error,
     },
 
-    /// Failed to parse a TOML checksum file.
-    #[error("TOML parse error in {path}: {source}")]
-    TomlParse {
-        path: PathBuf,
-        source: toml::de::Error,
-    },
-
-    /// Failed to serialize to TOML.
-    #[error("TOML serialize error: {source}")]
-    TomlSerialize {
-        #[from]
-        source: toml::ser::Error,
-    },
-
     /// Image decoding error.
     #[error("image error at {path}: {source}")]
     Image {
@@ -62,13 +48,6 @@ pub enum RegressError {
 impl RegressError {
     pub(crate) fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
-            path: path.into(),
-            source,
-        }
-    }
-
-    pub(crate) fn toml_parse(path: impl Into<PathBuf>, source: toml::de::Error) -> Self {
-        Self::TomlParse {
             path: path.into(),
             source,
         }

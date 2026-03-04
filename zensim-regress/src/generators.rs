@@ -1,7 +1,7 @@
 //! Procedural test image generators for visual regression testing.
 //!
 //! These generators produce deterministic RGBA pixel buffers suitable for
-//! use with [`ChecksumManager::check_pixels()`](crate::manager::ChecksumManager::check_pixels)
+//! use with [`ChecksumManagerV2::check_pixels()`](crate::checksums_v2::ChecksumManagerV2::check_pixels)
 //! and other regression testing APIs.
 //!
 //! Each generator targets specific image characteristics:

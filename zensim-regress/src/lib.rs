@@ -5,16 +5,15 @@
 //! builds on `zensim`'s `RegressionReport` and `ErrorCategory` to create a
 //! complete chain-of-trust system for tracking expected test outputs.
 //!
-//! # Formats
+//! # Format
 //!
-//! - **TOML** (v0): Per-test `.toml` files via [`checksum_file`]. Original format.
-//! - **`.checksums`** (v1): Line-oriented log files via [`checksums_v2`]. Compact,
-//!   append-friendly, one file per test module with human-readable memorable names.
+//! `.checksums` — line-oriented log files via [`checksums_v2`]. Compact,
+//! append-friendly, one file per test module with human-readable memorable names.
 //!
 //! # Quick start
 //!
 //! ```no_run
-//! use zensim_regress::checksum_file::{TestChecksumFile, ChecksumEntry};
+//! use zensim_regress::checksums_v2::ChecksumManagerV2;
 //! use zensim_regress::hasher::SeaHasher;
 //! use zensim_regress::hasher::ChecksumHasher;
 //! use zensim_regress::arch::detect_arch_tag;
@@ -23,19 +22,12 @@
 //! let hasher = SeaHasher;
 //! let hash = hasher.hash_file(std::path::Path::new("test_output.png")).unwrap();
 //!
-//! // Check against stored checksums
-//! let file = TestChecksumFile::read_from(
-//!     std::path::Path::new("checksums/my_test.toml"),
-//! ).unwrap();
-//!
-//! let matched = file.active_checksums().any(|e| e.id == hash);
-//! println!("arch: {}, match: {}", detect_arch_tag(), matched);
+//! println!("arch: {}, hash: {}", detect_arch_tag(), hash);
 //! ```
 
 #![forbid(unsafe_code)]
 
 pub mod arch;
-pub mod checksum_file;
 pub mod checksums_v2;
 pub mod diff_image;
 pub mod diff_summary;
@@ -46,7 +38,6 @@ pub mod fetch;
 pub mod generators;
 pub mod hasher;
 pub mod lock;
-pub mod manager;
 pub mod manifest;
 pub mod petname;
 pub mod remote;
@@ -59,7 +50,3 @@ pub mod upload;
 pub use error::RegressError;
 pub use testing::{RegressionReport, RegressionTolerance, check_regression, shrink_tolerance};
 pub use tolerance::ToleranceSpec as Tolerance;
-
-// Re-export toml so consumers can use `toml::Value` for the `meta` field
-// without adding a separate `toml` dependency.
-pub use toml;
