@@ -73,6 +73,10 @@ struct Args {
     #[arg(long, default_value = "4.0")]
     extended_masking_strength: f32,
 
+    /// Downscale filter for pyramid construction: box, mitchell, lanczos
+    #[arg(long, default_value = "box")]
+    downscale_filter: String,
+
     /// Local contrast masking strength (0 = disabled, 2-8 typical)
     #[arg(long, default_value = "0")]
     masking: f32,
@@ -386,6 +390,19 @@ fn main() {
     let num_scales = args.num_scales;
     let extended_features = args.extended_features;
     let extended_masking_strength = args.extended_masking_strength;
+    let downscale_filter = match args.downscale_filter.as_str() {
+        "box" => zensim::DownscaleFilter::Box2x2,
+        #[cfg(feature = "zenresize")]
+        "mitchell" => zensim::DownscaleFilter::Mitchell,
+        #[cfg(feature = "zenresize")]
+        "lanczos" => zensim::DownscaleFilter::Lanczos,
+        other => {
+            eprintln!(
+                "Unknown downscale filter: {other}. Options: box, mitchell, lanczos (requires zenresize feature)"
+            );
+            std::process::exit(1);
+        }
+    };
 
     let cache_config = CacheConfig {
         num_scales: num_scales as u32,
@@ -456,6 +473,7 @@ fn main() {
                             blur_radius,
                             masking_strength,
                             num_scales,
+                            downscale_filter,
                             score_mapping_a: 18.0,
                             score_mapping_b: 0.7,
                             ..Default::default()
@@ -645,6 +663,7 @@ fn main() {
                     args.target_metric,
                     extended_features,
                     extended_masking_strength,
+                    downscale_filter,
                 );
                 if let Err(e) = save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
                 {
@@ -669,6 +688,7 @@ fn main() {
             args.target_metric,
             extended_features,
             extended_masking_strength,
+            downscale_filter,
         );
         if compute_all {
             let cache_path = args
@@ -771,6 +791,7 @@ fn main() {
                             args.target_metric,
                             extended_features,
                             extended_masking_strength,
+                            downscale_filter,
                         );
                         if let Err(e) =
                             save_feature_cache(&also_cache, &ds, &valid_indices, &cache_config)
@@ -796,6 +817,7 @@ fn main() {
                     args.target_metric,
                     extended_features,
                     extended_masking_strength,
+                    downscale_filter,
                 );
                 if compute_all {
                     if let Err(e) =
@@ -1097,6 +1119,7 @@ fn load_and_compute(
     target_metric: Option<TargetMetric>,
     extended_features: bool,
     extended_masking_strength: f32,
+    downscale_filter: zensim::DownscaleFilter,
 ) -> (DatasetWithFeatures, Vec<u32>) {
     let pairs = match format {
         DatasetFormat::Tid2013 => load_tid2013(path),
@@ -1157,6 +1180,7 @@ fn load_and_compute(
         blur_radius,
         masking_strength,
         num_scales,
+        downscale_filter,
         score_mapping_a: 18.0,
         score_mapping_b: 0.7,
         ..Default::default()
