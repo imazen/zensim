@@ -421,20 +421,63 @@ fn main() {
     };
 
     // Load and compute primary dataset (with optional caching)
-    let auto_cache_path = |dataset_path: &Path| -> PathBuf {
+    // Timestamped cache: saves produce `dataset.csv.features.YYYYMMDD_HHMMSS.bin`,
+    // loads glob for `dataset.csv.features.*.bin` and pick the newest.
+    let auto_cache_save_path = |dataset_path: &Path| -> PathBuf {
+        let now = chrono::Local::now();
+        let mut p = dataset_path.as_os_str().to_owned();
+        p.push(format!(".features.{}.bin", now.format("%Y%m%d_%H%M%S")));
+        PathBuf::from(p)
+    };
+    let find_latest_cache = |dataset_path: &Path| -> Option<PathBuf> {
+        let mut pattern = dataset_path.as_os_str().to_owned();
+        pattern.push(".features.*.bin");
+        let pattern_str = pattern.to_string_lossy();
+        let mut matches: Vec<PathBuf> = glob::glob(&pattern_str)
+            .ok()?
+            .filter_map(|r| r.ok())
+            .collect();
+        // Sort by filename descending — ISO timestamps sort lexicographically
+        matches.sort();
+        matches.pop()
+    };
+    // Also support legacy non-timestamped cache files
+    let auto_cache_legacy_path = |dataset_path: &Path| -> PathBuf {
         let mut p = dataset_path.as_os_str().to_owned();
         p.push(".features.bin");
         PathBuf::from(p)
     };
+    let find_cache_to_load = |dataset_path: &Path| -> Option<PathBuf> {
+        // Prefer newest timestamped cache, fall back to legacy non-timestamped
+        if let Some(p) = find_latest_cache(dataset_path) {
+            return Some(p);
+        }
+        let legacy = auto_cache_legacy_path(dataset_path);
+        if legacy.exists() { Some(legacy) } else { None }
+    };
 
     let primary = if compute_all && !args.recompute {
-        let cache_path = args
-            .feature_cache
+        let explicit_cache = args.feature_cache.clone();
+        let load_path = explicit_cache
             .clone()
-            .unwrap_or_else(|| auto_cache_path(&args.dataset));
+            .or_else(|| find_cache_to_load(&args.dataset));
         let cache_start = std::time::Instant::now();
-        match load_feature_cache(&cache_path, &cache_config) {
-            Ok(Some(cached)) => {
+        let cached_result =
+            load_path
+                .as_ref()
+                .and_then(|p| match load_feature_cache(p, &cache_config) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("Warning: failed to read cache {:?}: {}", p, e);
+                        None
+                    }
+                });
+        // Save path: explicit if given, otherwise timestamped
+        let save_path = explicit_cache
+            .clone()
+            .unwrap_or_else(|| auto_cache_save_path(&args.dataset));
+        match cached_result {
+            Some(cached) => {
                 // Reload pairs for fresh human_scores (target-metric-dependent)
                 let pairs = load_pairs(
                     args.format,
@@ -661,16 +704,16 @@ fn main() {
                             ref_keys: all_ref_keys,
                         };
 
-                        // Save updated cache
+                        // Save updated cache (new timestamped file)
                         if let Err(e) = save_feature_cache(
-                            &cache_path,
+                            &save_path,
                             &merged,
                             &all_valid_indices,
                             &cache_config,
                         ) {
                             eprintln!("Warning: failed to save updated cache: {}", e);
                         } else {
-                            println!("Saved updated feature cache to {:?}", cache_path);
+                            println!("Saved updated feature cache to {:?}", save_path);
                         }
                         merged
                     }
@@ -684,13 +727,13 @@ fn main() {
                         } else {
                             ds.features[0].len()
                         },
-                        cache_path,
+                        load_path.as_deref().unwrap_or(Path::new("?")),
                         cache_start.elapsed().as_secs_f64()
                     );
                     ds
                 }
             }
-            _ => {
+            None => {
                 let (ds, valid_indices) = load_and_compute(
                     &format!("{:?}", args.format),
                     args.format,
@@ -706,11 +749,10 @@ fn main() {
                     extended_masking_strength,
                     downscale_filter,
                 );
-                if let Err(e) = save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config)
-                {
+                if let Err(e) = save_feature_cache(&save_path, &ds, &valid_indices, &cache_config) {
                     eprintln!("Warning: failed to save feature cache: {}", e);
                 } else {
-                    println!("Saved feature cache to {:?}", cache_path);
+                    println!("Saved feature cache to {:?}", save_path);
                 }
                 ds
             }
@@ -732,14 +774,14 @@ fn main() {
             downscale_filter,
         );
         if compute_all {
-            let cache_path = args
+            let save_path = args
                 .feature_cache
                 .clone()
-                .unwrap_or_else(|| auto_cache_path(&args.dataset));
-            if let Err(e) = save_feature_cache(&cache_path, &ds, &valid_indices, &cache_config) {
+                .unwrap_or_else(|| auto_cache_save_path(&args.dataset));
+            if let Err(e) = save_feature_cache(&save_path, &ds, &valid_indices, &cache_config) {
                 eprintln!("Warning: failed to save feature cache: {}", e);
             } else {
-                println!("Saved feature cache to {:?}", cache_path);
+                println!("Saved feature cache to {:?}", save_path);
             }
         }
         ds
@@ -803,22 +845,33 @@ fn main() {
                 }
             };
             let also_path = Path::new(parts[1]);
-            let also_cache = auto_cache_path(also_path);
+            let also_load = find_cache_to_load(also_path);
+            let also_save = auto_cache_save_path(also_path);
             let ds = if compute_all && !args.recompute {
                 let t = std::time::Instant::now();
-                match load_feature_cache(&also_cache, &cache_config) {
-                    Ok(Some(cached)) => {
+                let also_cached =
+                    also_load
+                        .as_ref()
+                        .and_then(|p| match load_feature_cache(p, &cache_config) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!("Warning: failed to read cache {:?}: {}", p, e);
+                                None
+                            }
+                        });
+                match also_cached {
+                    Some(cached) => {
                         let pairs = load_pairs(fmt, also_path, 0, args.target_metric);
                         let ds = build_dataset_from_cache(cached, &pairs);
                         println!(
                             "Loaded {} pairs from cache {:?} ({:.1}s)",
                             ds.human_scores.len(),
-                            also_cache,
+                            also_load.as_deref().unwrap_or(Path::new("?")),
                             t.elapsed().as_secs_f64()
                         );
                         ds
                     }
-                    _ => {
+                    None => {
                         let (ds, valid_indices) = load_and_compute(
                             parts[0],
                             fmt,
@@ -835,11 +888,11 @@ fn main() {
                             downscale_filter,
                         );
                         if let Err(e) =
-                            save_feature_cache(&also_cache, &ds, &valid_indices, &cache_config)
+                            save_feature_cache(&also_save, &ds, &valid_indices, &cache_config)
                         {
                             eprintln!("Warning: failed to save feature cache: {}", e);
                         } else {
-                            println!("Saved feature cache to {:?}", also_cache);
+                            println!("Saved feature cache to {:?}", also_save);
                         }
                         ds
                     }
@@ -862,11 +915,11 @@ fn main() {
                 );
                 if compute_all {
                     if let Err(e) =
-                        save_feature_cache(&also_cache, &ds, &valid_indices, &cache_config)
+                        save_feature_cache(&also_save, &ds, &valid_indices, &cache_config)
                     {
                         eprintln!("Warning: failed to save feature cache: {}", e);
                     } else {
-                        println!("Saved feature cache to {:?}", also_cache);
+                        println!("Saved feature cache to {:?}", also_save);
                     }
                 }
                 ds
