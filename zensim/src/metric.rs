@@ -184,12 +184,14 @@ pub struct ZensimConfig {
     ///
     /// Overrides `blur_passes` when set. The `blur_radius` field still controls
     /// the kernel width. Currently only the `Box` variant is implemented.
+    #[allow(dead_code)] // planned: not yet wired into blur dispatch
     pub blur_kernel: BlurKernel,
 
     /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
     ///
     /// Controls how each pyramid level is produced. Enable the `zenresize`
     /// feature for `Mitchell` and `Lanczos` variants.
+    #[allow(dead_code)] // planned: not yet wired into pyramid construction
     pub downscale_filter: DownscaleFilter,
 
     /// Compute all 156 features even when their weights are zero (default: false).
@@ -1102,8 +1104,11 @@ pub struct FeatureView<'a> {
 }
 
 /// XYB channel index constants for readability.
+#[cfg(feature = "training")]
 pub const CH_X: usize = 0;
+#[cfg(feature = "training")]
 pub const CH_Y: usize = 1;
+#[cfg(feature = "training")]
 pub const CH_B: usize = 2;
 
 impl<'a> FeatureView<'a> {
@@ -1374,6 +1379,7 @@ pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_BASIC * 3;
 /// Layout: 4 scales × 3 channels (X,Y,B) × 13 features:
 ///   ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
 ///   det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
+#[cfg(any(feature = "training", test))]
 #[allow(clippy::excessive_precision)]
 pub const WEIGHTS: [f64; 156] = [
     0.0000000000,
