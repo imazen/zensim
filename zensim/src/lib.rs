@@ -97,7 +97,7 @@ mod streaming;
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{
-    ErrorCategory, RoundingBias, Zensim, ZensimResult, dissimilarity_to_score,
+    ErrorCategory, FeatureView, RoundingBias, Zensim, ZensimResult, dissimilarity_to_score,
     score_to_dissimilarity,
 };
 
@@ -120,9 +120,9 @@ pub use streaming::PrecomputedReference;
 /// trained weights or the 0-100 score scale.
 #[cfg(feature = "training")]
 pub use metric::{
-    BlurKernel, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC, FEATURES_PER_CHANNEL_EXTENDED,
-    FEATURES_PER_CHANNEL_WITH_PEAKS, FEATURES_PER_SCALE, WEIGHTS, ZensimConfig,
-    compute_zensim_with_config, compute_zensim_with_ref_and_config,
+    BlurKernel, CH_B, CH_X, CH_Y, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC,
+    FEATURES_PER_CHANNEL_EXTENDED, FEATURES_PER_CHANNEL_WITH_PEAKS, FEATURES_PER_SCALE, WEIGHTS,
+    ZensimConfig, compute_zensim_with_config, compute_zensim_with_ref_and_config,
     precompute_reference_with_scales, score_from_features,
 };
 

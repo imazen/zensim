@@ -174,9 +174,9 @@ fn save_feature_cache(
     use std::io::Write;
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
 
-    // Magic + version (v2: no human_scores, target-metric-independent)
+    // Magic + version (v3: f32 features for 2× smaller files)
     f.write_all(b"ZSFC")?;
-    f.write_all(&2u32.to_le_bytes())?;
+    f.write_all(&3u32.to_le_bytes())?;
 
     // Validation fields
     f.write_all(&config.num_scales.to_le_bytes())?;
@@ -184,18 +184,18 @@ fn save_feature_cache(
     f.write_all(&config.blur_radius.to_le_bytes())?;
     f.write_all(&config.masking_bits.to_le_bytes())?;
 
-    let n_pairs = ds.features.len() as u64;
+    let n_pairs = ds.features.len() as u32;
     let n_features = if ds.features.is_empty() {
-        0u64
+        0u16
     } else {
-        ds.features[0].len() as u64
+        ds.features[0].len() as u16
     };
     f.write_all(&n_pairs.to_le_bytes())?;
     f.write_all(&n_features.to_le_bytes())?;
 
     // Dataset name
     let name_bytes = ds.name.as_bytes();
-    f.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
+    f.write_all(&(name_bytes.len() as u16).to_le_bytes())?;
     f.write_all(name_bytes)?;
 
     // Valid pair indices (which original pairs produced non-NaN features)
@@ -203,17 +203,17 @@ fn save_feature_cache(
         f.write_all(&idx.to_le_bytes())?;
     }
 
-    // Features (flat row-major) — no human_scores, those are target-dependent
+    // Features as f32 (flat row-major) — halves storage vs f64
     for row in &ds.features {
         for &v in row {
-            f.write_all(&v.to_le_bytes())?;
+            f.write_all(&(v as f32).to_le_bytes())?;
         }
     }
 
     // Ref keys
     for key in &ds.ref_keys {
         let kb = key.as_bytes();
-        f.write_all(&(kb.len() as u32).to_le_bytes())?;
+        f.write_all(&(kb.len() as u16).to_le_bytes())?;
         f.write_all(kb)?;
     }
 
@@ -254,15 +254,15 @@ fn load_feature_cache(
 
     // Version
     let version = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
-    if version != 2 {
+    if version != 2 && version != 3 {
         eprintln!(
-            "Feature cache: version {} (expected 2), recomputing",
+            "Feature cache: version {} (expected 2 or 3), recomputing",
             version
         );
         return Ok(None);
     }
 
-    // Validation fields
+    // Validation fields (same layout for v2 and v3)
     let num_scales = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
     let blur_passes = read_bytes(&mut pos, 1)?[0];
     let blur_radius = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
@@ -298,11 +298,23 @@ fn load_feature_cache(
         return Ok(None);
     }
 
-    let n_pairs = u64::from_le_bytes(read_bytes(&mut pos, 8)?.try_into().unwrap()) as usize;
-    let n_features = u64::from_le_bytes(read_bytes(&mut pos, 8)?.try_into().unwrap()) as usize;
+    // Pair/feature counts — v2 uses u64, v3 uses u32/u16
+    let (n_pairs, n_features) = if version == 2 {
+        let np = u64::from_le_bytes(read_bytes(&mut pos, 8)?.try_into().unwrap()) as usize;
+        let nf = u64::from_le_bytes(read_bytes(&mut pos, 8)?.try_into().unwrap()) as usize;
+        (np, nf)
+    } else {
+        let np = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize;
+        let nf = u16::from_le_bytes(read_bytes(&mut pos, 2)?.try_into().unwrap()) as usize;
+        (np, nf)
+    };
 
-    // Name
-    let name_len = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize;
+    // Name — v2 uses u32 len, v3 uses u16 len
+    let name_len = if version == 2 {
+        u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize
+    } else {
+        u16::from_le_bytes(read_bytes(&mut pos, 2)?.try_into().unwrap()) as usize
+    };
     let name = String::from_utf8_lossy(read_bytes(&mut pos, name_len)?).to_string();
 
     // Valid pair indices
@@ -313,22 +325,36 @@ fn load_feature_cache(
         ));
     }
 
-    // Features (no human_scores in v2)
+    // Features — v2 stores f64, v3 stores f32 (promoted to f64 on load)
     let mut features = Vec::with_capacity(n_pairs);
-    for _ in 0..n_pairs {
-        let mut row = Vec::with_capacity(n_features);
-        for _ in 0..n_features {
-            row.push(f64::from_le_bytes(
-                read_bytes(&mut pos, 8)?.try_into().unwrap(),
-            ));
+    if version == 2 {
+        for _ in 0..n_pairs {
+            let mut row = Vec::with_capacity(n_features);
+            for _ in 0..n_features {
+                row.push(f64::from_le_bytes(
+                    read_bytes(&mut pos, 8)?.try_into().unwrap(),
+                ));
+            }
+            features.push(row);
         }
-        features.push(row);
+    } else {
+        for _ in 0..n_pairs {
+            let mut row = Vec::with_capacity(n_features);
+            for _ in 0..n_features {
+                row.push(f32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as f64);
+            }
+            features.push(row);
+        }
     }
 
-    // Ref keys
+    // Ref keys — v2 uses u32 len, v3 uses u16 len
     let mut ref_keys = Vec::with_capacity(n_pairs);
     for _ in 0..n_pairs {
-        let klen = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize;
+        let klen = if version == 2 {
+            u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as usize
+        } else {
+            u16::from_le_bytes(read_bytes(&mut pos, 2)?.try_into().unwrap()) as usize
+        };
         let key = String::from_utf8_lossy(read_bytes(&mut pos, klen)?).to_string();
         ref_keys.push(key);
     }

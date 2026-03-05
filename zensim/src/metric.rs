@@ -1174,6 +1174,226 @@ pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize = 19;
 /// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
 pub const FEATURES_PER_CHANNEL_EXTENDED: usize = 25;
 
+/// Named view over a flat feature vector.
+///
+/// Provides ergonomic access to features by name, scale, and channel
+/// without changing the underlying storage format.
+///
+/// ```ignore
+/// let result = z.compute_all_features(&src, &dst)?;
+/// let view = FeatureView::new(&result.features, 4)?;
+/// let ssim_mean_s0_y = view.ssim_mean(0, 1);
+/// let ssim_max_s2_x = view.ssim_max(0, 2).unwrap();
+/// ```
+#[derive(Debug, Clone)]
+pub struct FeatureView<'a> {
+    features: &'a [f64],
+    n_scales: usize,
+    /// Number of features in the scored block
+    scored_total: usize,
+    /// Number of features in the peaks block (0 if not present)
+    peaks_total: usize,
+}
+
+/// XYB channel index constants for readability.
+pub const CH_X: usize = 0;
+pub const CH_Y: usize = 1;
+pub const CH_B: usize = 2;
+
+impl<'a> FeatureView<'a> {
+    /// Create a view over a feature vector.
+    ///
+    /// Automatically detects the tier (basic/peaks/extended) from length.
+    /// Returns `None` if the length doesn't match any valid layout.
+    pub fn new(features: &'a [f64], n_scales: usize) -> Option<Self> {
+        let scored_total = n_scales * 3 * FEATURES_PER_CHANNEL_BASIC;
+        let peaks_total = n_scales * 3 * 6;
+        let masked_total = n_scales * 3 * 6;
+
+        let (peaks_total, _masked_total) = if features.len() == scored_total {
+            (0, 0)
+        } else if features.len() == scored_total + peaks_total {
+            (peaks_total, 0)
+        } else if features.len() == scored_total + peaks_total + masked_total {
+            (peaks_total, masked_total)
+        } else {
+            return None;
+        };
+
+        Some(Self {
+            features,
+            n_scales,
+            scored_total,
+            peaks_total,
+        })
+    }
+
+    /// Number of scales in this feature vector.
+    pub fn n_scales(&self) -> usize {
+        self.n_scales
+    }
+
+    /// Whether peak features (max/L8) are present.
+    pub fn has_peaks(&self) -> bool {
+        self.peaks_total > 0
+    }
+
+    /// Whether masked features are present.
+    pub fn has_masked(&self) -> bool {
+        self.features.len() > self.scored_total + self.peaks_total
+    }
+
+    // --- Scored features (always present) ---
+
+    fn scored_idx(&self, scale: usize, ch: usize, offset: usize) -> usize {
+        scale * 3 * FEATURES_PER_CHANNEL_BASIC + ch * FEATURES_PER_CHANNEL_BASIC + offset
+    }
+
+    /// SSIM error, mean pooling.
+    pub fn ssim_mean(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 0)]
+    }
+    /// SSIM error, L4 norm.
+    pub fn ssim_4th(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 1)]
+    }
+    /// SSIM error, L2 norm.
+    pub fn ssim_2nd(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 2)]
+    }
+    /// Edge artifact (ringing), mean pooling.
+    pub fn art_mean(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 3)]
+    }
+    /// Edge artifact, L4 norm.
+    pub fn art_4th(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 4)]
+    }
+    /// Edge artifact, L2 norm.
+    pub fn art_2nd(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 5)]
+    }
+    /// Edge detail lost (blur), mean pooling.
+    pub fn det_mean(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 6)]
+    }
+    /// Edge detail lost, L4 norm.
+    pub fn det_4th(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 7)]
+    }
+    /// Edge detail lost, L2 norm.
+    pub fn det_2nd(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 8)]
+    }
+    /// Mean squared error.
+    pub fn mse(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 9)]
+    }
+    /// High-frequency energy loss ratio.
+    pub fn hf_energy_loss(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 10)]
+    }
+    /// High-frequency magnitude loss ratio.
+    pub fn hf_mag_loss(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 11)]
+    }
+    /// High-frequency energy gain ratio.
+    pub fn hf_energy_gain(&self, scale: usize, ch: usize) -> f64 {
+        self.features[self.scored_idx(scale, ch, 12)]
+    }
+
+    // --- Peak features (require compute_all_features or extended) ---
+
+    fn peak_idx(&self, scale: usize, ch: usize, offset: usize) -> Option<usize> {
+        if self.peaks_total == 0 {
+            return None;
+        }
+        Some(self.scored_total + scale * 3 * 6 + ch * 6 + offset)
+    }
+
+    /// SSIM error, pixel-wise max.
+    pub fn ssim_max(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.peak_idx(scale, ch, 0).map(|i| self.features[i])
+    }
+    /// Edge artifact, pixel-wise max.
+    pub fn art_max(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.peak_idx(scale, ch, 1).map(|i| self.features[i])
+    }
+    /// Edge detail lost, pixel-wise max.
+    pub fn det_max(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.peak_idx(scale, ch, 2).map(|i| self.features[i])
+    }
+    /// SSIM error, L8 norm `(Σd⁸/N)^(1/8)`.
+    pub fn ssim_l8(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.peak_idx(scale, ch, 3).map(|i| self.features[i])
+    }
+    /// Edge artifact, L8 norm.
+    pub fn art_l8(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.peak_idx(scale, ch, 4).map(|i| self.features[i])
+    }
+    /// Edge detail lost, L8 norm.
+    pub fn det_l8(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.peak_idx(scale, ch, 5).map(|i| self.features[i])
+    }
+
+    // --- Masked features (require extended_features) ---
+
+    fn masked_idx(&self, scale: usize, ch: usize, offset: usize) -> Option<usize> {
+        if !self.has_masked() {
+            return None;
+        }
+        Some(self.scored_total + self.peaks_total + scale * 3 * 6 + ch * 6 + offset)
+    }
+
+    /// Masked SSIM error, mean pooling.
+    pub fn masked_ssim_mean(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.masked_idx(scale, ch, 0).map(|i| self.features[i])
+    }
+    /// Masked SSIM error, L4 norm.
+    pub fn masked_ssim_4th(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.masked_idx(scale, ch, 1).map(|i| self.features[i])
+    }
+    /// Masked SSIM error, L2 norm.
+    pub fn masked_ssim_2nd(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.masked_idx(scale, ch, 2).map(|i| self.features[i])
+    }
+    /// Masked edge artifact, L4 norm.
+    pub fn masked_art_4th(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.masked_idx(scale, ch, 3).map(|i| self.features[i])
+    }
+    /// Masked edge detail lost, L4 norm.
+    pub fn masked_det_4th(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.masked_idx(scale, ch, 4).map(|i| self.features[i])
+    }
+    /// Masked MSE.
+    pub fn masked_mse(&self, scale: usize, ch: usize) -> Option<f64> {
+        self.masked_idx(scale, ch, 5).map(|i| self.features[i])
+    }
+
+    /// Get the scored features slice (first N features, WEIGHTS-compatible).
+    pub fn scored_features(&self) -> &[f64] {
+        &self.features[..self.scored_total]
+    }
+
+    /// Get the peak features slice, if present.
+    pub fn peak_features(&self) -> Option<&[f64]> {
+        if self.peaks_total == 0 {
+            None
+        } else {
+            Some(&self.features[self.scored_total..self.scored_total + self.peaks_total])
+        }
+    }
+
+    /// Get the masked features slice, if present.
+    pub fn masked_features(&self) -> Option<&[f64]> {
+        if !self.has_masked() {
+            None
+        } else {
+            Some(&self.features[self.scored_total + self.peaks_total..])
+        }
+    }
+}
+
 /// Compute zensim with custom configuration (training API).
 ///
 /// Uses the v0.2 weights (latest general-purpose profile).
