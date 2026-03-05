@@ -2,7 +2,6 @@
 
 use calamine::{Reader, Xlsx};
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +54,16 @@ struct Args {
     #[arg(long, default_value = "false")]
     compute_all: bool,
 
+    /// Extract features and save cache, then exit. No evaluation or training.
+    /// Always extracts extended (300) features. Use with --dataset and --format.
+    #[arg(long, default_value = "false")]
+    extract_only: bool,
+
+    /// Train from an existing feature cache only. Errors if no cache is found.
+    /// Equivalent to --train but refuses to extract features from scratch.
+    #[arg(long, default_value = "false")]
+    train_only: bool,
+
     /// K-fold cross-validation by reference image (e.g., --cross-validate 5)
     #[arg(long)]
     cross_validate: Option<usize>,
@@ -98,9 +107,39 @@ struct Args {
     #[arg(long, default_value = "false")]
     recompute: bool,
 
+    /// Feature tier for training: basic (156), peaks (228), or extended (300).
+    /// Extraction always computes the full extended set; this controls which
+    /// features are used for training. Default: extended.
+    #[arg(long, value_enum, default_value = "extended")]
+    feature_tier: FeatureTier,
+
     /// Directory for training run logs. Defaults to directory containing the dataset.
     #[arg(long)]
     log_dir: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum FeatureTier {
+    /// 13 features/channel (156 total) — basic scored features only
+    Basic,
+    /// 19 features/channel (228 total) — basic + peak (max/p95)
+    Peaks,
+    /// 25 features/channel (300 total) — basic + peak + masked
+    Extended,
+}
+
+impl FeatureTier {
+    fn features_per_channel(self) -> usize {
+        match self {
+            FeatureTier::Basic => zensim::FEATURES_PER_CHANNEL_BASIC,
+            FeatureTier::Peaks => zensim::FEATURES_PER_CHANNEL_WITH_PEAKS,
+            FeatureTier::Extended => zensim::FEATURES_PER_CHANNEL_EXTENDED,
+        }
+    }
+
+    fn total_features(self, num_scales: usize) -> usize {
+        num_scales * 3 * self.features_per_channel()
+    }
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -396,12 +435,19 @@ fn main() {
         std::process::exit(1);
     }
 
+    if args.extract_only && args.train_only {
+        eprintln!("--extract-only and --train-only are mutually exclusive");
+        std::process::exit(1);
+    }
+    let train = args.train || args.train_only;
     let cv_mode = args.cross_validate.is_some() || args.leave_one_out;
-    let compute_all = args.train || args.compute_all || cv_mode;
+    let compute_all = train || args.compute_all || args.extract_only || cv_mode;
     let blur_passes = args.blur_passes;
     let blur_radius = args.blur_radius;
     let num_scales = args.num_scales;
-    let extended_features = args.extended_features;
+    // When training or extracting, always extract extended features (the superset).
+    // The --feature-tier flag controls which features are used for training.
+    let extended_features = args.extended_features || train || args.extract_only;
     let extended_masking_strength = args.extended_masking_strength;
     let downscale_filter = match args.downscale_filter.as_str() {
         "box" => zensim::DownscaleFilter::Box2x2,
@@ -468,7 +514,7 @@ fn main() {
         if legacy.exists() { Some(legacy) } else { None }
     };
 
-    let primary = if compute_all && !args.recompute {
+    let mut primary = if compute_all && !args.recompute {
         let explicit_cache = args.feature_cache.clone();
         let load_path = explicit_cache
             .clone()
@@ -562,14 +608,6 @@ fn main() {
                                 .push((idx, pair));
                         }
 
-                        let pb = ProgressBar::new(n_new as u64);
-                        pb.set_style(
-                            ProgressStyle::default_bar()
-                                .template(
-                                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({per_sec}) {msg}",
-                                )
-                                .unwrap(),
-                        );
                         let progress_ctr = std::sync::atomic::AtomicU64::new(0);
                         let start_t = std::time::Instant::now();
                         let log_int = (n_new / 20).max(1000) as u64;
@@ -584,7 +622,6 @@ fn main() {
                             .map(|(ref_path, group)| {
                                 let fail = |grp: &[(usize, ImagePair)]| -> Vec<_> {
                                     progress_ctr.fetch_add(grp.len() as u64, std::sync::atomic::Ordering::Relaxed);
-                                    pb.inc(grp.len() as u64);
                                     grp.iter()
                                         .map(|(idx, pair)| {
                                             (
@@ -645,7 +682,6 @@ fn main() {
                                             Err(_) => nan_result.clone(),
                                         };
                                         let prev = progress_ctr.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                        pb.inc(1);
                                         let cur = prev + 1;
                                         if prev / log_int != cur / log_int {
                                             let el = start_t.elapsed().as_secs_f64();
@@ -659,7 +695,6 @@ fn main() {
                             })
                             .collect();
 
-                        pb.finish_with_message("done");
                         eprintln!(
                             "  New pairs extracted: {} in {:.1}s",
                             n_new,
@@ -730,6 +765,14 @@ fn main() {
                 }
             }
             None => {
+                if args.train_only {
+                    eprintln!(
+                        "--train-only requires an existing feature cache, but none was found for {:?}",
+                        args.dataset
+                    );
+                    eprintln!("Run --extract-only first to create one.");
+                    std::process::exit(1);
+                }
                 let (ds, valid_indices) = load_and_compute(
                     &format!("{:?}", args.format),
                     args.format,
@@ -781,11 +824,35 @@ fn main() {
         ds
     };
 
-    let n_features = if primary.features.is_empty() {
+    let n_features_extracted = if primary.features.is_empty() {
         eprintln!("No valid results from primary dataset");
         return;
     } else {
         primary.features[0].len()
+    };
+
+    if args.extract_only {
+        println!(
+            "Extraction complete: {} pairs, {} features/pair",
+            primary.features.len(),
+            n_features_extracted
+        );
+        return;
+    }
+
+    // Truncate features to the requested tier (extraction always produces the superset)
+    let tier_features = args.feature_tier.total_features(num_scales);
+    let n_features = if tier_features < n_features_extracted {
+        println!(
+            "Truncating features from {} to {} (tier: {:?})",
+            n_features_extracted, tier_features, args.feature_tier
+        );
+        for row in &mut primary.features {
+            row.truncate(tier_features);
+        }
+        tier_features
+    } else {
+        n_features_extracted
     };
 
     // Build frozen mask (expanded to match feature count)
@@ -916,6 +983,13 @@ fn main() {
                 }
                 ds
             };
+            let mut ds = ds;
+            // Truncate to requested tier
+            if tier_features < n_features_extracted {
+                for row in &mut ds.features {
+                    row.truncate(tier_features);
+                }
+            }
             all_datasets.push(ds);
         }
     }
@@ -980,7 +1054,7 @@ fn main() {
     }
 
     // Train weights if requested
-    if args.train {
+    if train {
         let dataset_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = all_datasets
             .iter()
             .map(|ds| {
@@ -1225,13 +1299,6 @@ fn load_and_compute(
     let total_pairs = pairs.len();
     println!("Loading {}: {} image pairs...", name, total_pairs);
 
-    let pb = ProgressBar::new(total_pairs as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({per_sec}) {msg}")
-            .unwrap(),
-    );
-
     // Group pairs by reference image path for precomputed-reference reuse
     let mut by_ref: std::collections::BTreeMap<&Path, Vec<(usize, &ImagePair)>> =
         std::collections::BTreeMap::new();
@@ -1303,7 +1370,6 @@ fn load_and_compute(
             let fail = |grp: &[(usize, &ImagePair)]| -> Vec<_> {
                 let prev = progress_counter
                     .fetch_add(grp.len() as u64, std::sync::atomic::Ordering::Relaxed);
-                pb.inc(grp.len() as u64);
                 let new = prev + grp.len() as u64;
                 if prev / log_interval != new / log_interval {
                     let elapsed = start_time.elapsed().as_secs_f64();
@@ -1378,7 +1444,6 @@ fn load_and_compute(
                         Err(_) => nan_result.clone(),
                     };
                     let prev = progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    pb.inc(1);
                     let new = prev + 1;
                     if prev / log_interval != new / log_interval {
                         let elapsed = start_time.elapsed().as_secs_f64();
@@ -1401,7 +1466,6 @@ fn load_and_compute(
         .collect();
 
     let total_elapsed = start_time.elapsed().as_secs_f64();
-    pb.finish_with_message("done");
     eprintln!(
         "  Feature extraction: {} pairs in {:.1}s ({:.0}/s)",
         total_pairs,

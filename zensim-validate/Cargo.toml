@@ -17,7 +17,6 @@ rayon = { workspace = true }
 csv = "1"
 calamine = "0.26"
 clap = { version = "4", features = ["derive"] }
-indicatif = "0.17"
 chrono = "0.4"
 glob = "0.3"
 
