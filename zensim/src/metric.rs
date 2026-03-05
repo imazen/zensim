@@ -454,11 +454,11 @@ pub(crate) struct ScaleStats {
     pub(crate) art_max: [f64; 3],
     /// Max edge detail_lost per channel = 3 values
     pub(crate) det_max: [f64; 3],
-    /// 95th percentile SSIM error per channel = 3 values
+    /// L8 power pool SSIM error per channel = 3 values: (Σd⁸/N)^(1/8)
     pub(crate) ssim_p95: [f64; 3],
-    /// 95th percentile edge artifact per channel = 3 values
+    /// L8 power pool edge artifact per channel = 3 values: (Σd⁸/N)^(1/8)
     pub(crate) art_p95: [f64; 3],
-    /// 95th percentile edge detail_lost per channel = 3 values
+    /// L8 power pool edge detail_lost per channel = 3 values: (Σd⁸/N)^(1/8)
     pub(crate) det_p95: [f64; 3],
 }
 
@@ -1059,8 +1059,7 @@ fn compute_with_config_inner(
     }
 
     let masked = config.masking_strength > 0.0;
-    // Extended features require the full-image path (per-pixel maps needed)
-    if !masked && !config.extended_features {
+    if !masked {
         return crate::streaming::compute_zensim_streaming(source, distorted, config, weights);
     }
 
@@ -1149,9 +1148,9 @@ pub const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 ///  19     ssim_max           max      per-pixel SSIM error
 ///  20     art_max            max      per-pixel edge artifact
 ///  21     det_max            max      per-pixel edge detail_lost
-///  22     ssim_p95           p95      per-pixel SSIM error
-///  23     art_p95            p95      per-pixel edge artifact
-///  24     det_p95            p95      per-pixel edge detail_lost
+///  22     ssim_l8            L8       (Σd⁸/N)^(1/8) SSIM error
+///  23     art_l8             L8       (Σd⁸/N)^(1/8) edge artifact
+///  24     det_l8             L8       (Σd⁸/N)^(1/8) edge detail_lost
 /// ```
 ///
 /// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
@@ -1203,10 +1202,9 @@ pub fn compute_zensim_with_config(
     let src_img = crate::source::RgbSlice::new(source, width, height);
     let dst_img = crate::source::RgbSlice::new(distorted, width, height);
 
-    // Use streaming path for non-masked, non-extended images (faster at all sizes)
+    // Use streaming path for non-masked images (faster at all sizes)
     let masked = config.masking_strength > 0.0;
-    if !masked && !config.extended_features && crate::streaming::should_use_streaming(width, height)
-    {
+    if !masked && crate::streaming::should_use_streaming(width, height) {
         let result =
             crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS);
         return Ok(result);
@@ -1263,9 +1261,7 @@ fn downscale_planes(
             (nw, nh)
         }
         #[cfg(feature = "zenresize")]
-        DownscaleFilter::Mitchell
-        | DownscaleFilter::Lanczos
-        | DownscaleFilter::MitchellBlur(_) => {
+        DownscaleFilter::Mitchell | DownscaleFilter::Lanczos | DownscaleFilter::MitchellBlur(_) => {
             let nw = w / 2;
             let nh = h / 2;
             if nw == 0 || nh == 0 {
@@ -1277,14 +1273,10 @@ fn downscale_planes(
                 DownscaleFilter::MitchellBlur(sigma) => (zenresize::Filter::Mitchell, sigma),
                 _ => unreachable!(),
             };
-            let mut builder = zenresize::ResizeConfig::builder(
-                w as u32,
-                h as u32,
-                nw as u32,
-                nh as u32,
-            )
-            .filter(zr_filter)
-            .format(zenresize::PixelDescriptor::GRAYF32_LINEAR);
+            let mut builder =
+                zenresize::ResizeConfig::builder(w as u32, h as u32, nw as u32, nh as u32)
+                    .filter(zr_filter)
+                    .format(zenresize::PixelDescriptor::GRAYF32_LINEAR);
             if blur_sigma > 0.0 {
                 builder = builder.post_blur(blur_sigma);
             }
@@ -1727,24 +1719,33 @@ fn compute_channel(
             det_max_val = max_det as f64;
         }
 
-        // p95 via select_nth_unstable (O(n) expected)
+        // L8 power pool: (Σd^8/N)^(1/8), computed from per-pixel maps
         if n > 0 {
-            let p95_idx = (n as f64 * 0.95).ceil() as usize;
-            let p95_idx = p95_idx.min(n - 1);
-
+            let one_over_n_f = 1.0 / n as f64;
             if need_ssim {
-                let map = &mut bufs.ssim_map[..n];
-                map.select_nth_unstable_by(p95_idx, |a, b| a.partial_cmp(b).unwrap());
-                ssim_p95 = map[p95_idx] as f64;
+                let mut sum_d8 = 0.0f64;
+                for &d in &bufs.ssim_map[..n] {
+                    let d2 = d * d;
+                    let d4 = d2 * d2;
+                    sum_d8 += (d4 * d4) as f64;
+                }
+                ssim_p95 = (sum_d8 * one_over_n_f).powf(0.125);
             }
             if need_edge {
-                let map = &mut bufs.art_map[..n];
-                map.select_nth_unstable_by(p95_idx, |a, b| a.partial_cmp(b).unwrap());
-                art_p95 = map[p95_idx] as f64;
-
-                let map = &mut bufs.det_map[..n];
-                map.select_nth_unstable_by(p95_idx, |a, b| a.partial_cmp(b).unwrap());
-                det_p95 = map[p95_idx] as f64;
+                let mut sum_art8 = 0.0f64;
+                let mut sum_det8 = 0.0f64;
+                for &d in &bufs.art_map[..n] {
+                    let d2 = d * d;
+                    let d4 = d2 * d2;
+                    sum_art8 += (d4 * d4) as f64;
+                }
+                for &d in &bufs.det_map[..n] {
+                    let d2 = d * d;
+                    let d4 = d2 * d2;
+                    sum_det8 += (d4 * d4) as f64;
+                }
+                art_p95 = (sum_art8 * one_over_n_f).powf(0.125);
+                det_p95 = (sum_det8 * one_over_n_f).powf(0.125);
             }
         }
     }

@@ -5,8 +5,8 @@
 //!   Strip-based H-blur → fused V-blur+features (parallel bands via rayon).
 
 use crate::blur::{
-    box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace, fused_blur_h_mu,
-    fused_blur_h_ssim, simd_padded_width,
+    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace,
+    fused_blur_h_mu, fused_blur_h_ssim, simd_padded_width,
 };
 #[cfg(feature = "f16")]
 use crate::color::composite_srgb_f16_rgba_to_linear;
@@ -16,10 +16,14 @@ use crate::color::{
     linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
-use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
+use crate::metric::{
+    FEATURES_PER_CHANNEL_BASIC, FEATURES_PER_CHANNEL_EXTENDED, ScaleStats, ZensimConfig,
+    combine_scores,
+};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
-    abs_diff_sum, edge_diff_channel, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
+    abs_diff_sum, edge_diff_channel, edge_diff_channel_extended, mul_into, sq_diff_sum,
+    sq_sum_into, ssim_channel, ssim_channel_extended,
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use rayon::prelude::*;
@@ -61,6 +65,22 @@ struct ScaleAccumulators {
     // HF magnitude (L1) components: sum(|pixel-mu|) for src and dst
     hf_abs_src: [f64; 3],
     hf_abs_dst: [f64; 3],
+    // Extended: L8 power pool (sum_d^8) for SSIM and edge
+    ssim_d8: [f64; 3],
+    edge_art8: [f64; 3],
+    edge_det8: [f64; 3],
+    // Extended: per-channel max values
+    ssim_max: [f32; 3],
+    edge_art_max: [f32; 3],
+    edge_det_max: [f32; 3],
+    // Extended: masked features
+    masked_ssim_d: [f64; 3],
+    masked_ssim_d4: [f64; 3],
+    masked_ssim_d2: [f64; 3],
+    masked_art4: [f64; 3],
+    masked_det4: [f64; 3],
+    masked_mse: [f64; 3],
+    mask_weight_sum: [f64; 3],
     // Total inner pixels processed
     n: usize,
 }
@@ -82,6 +102,19 @@ impl ScaleAccumulators {
             hf_sq_dst: [0.0; 3],
             hf_abs_src: [0.0; 3],
             hf_abs_dst: [0.0; 3],
+            ssim_d8: [0.0; 3],
+            edge_art8: [0.0; 3],
+            edge_det8: [0.0; 3],
+            ssim_max: [0.0; 3],
+            edge_art_max: [0.0; 3],
+            edge_det_max: [0.0; 3],
+            masked_ssim_d: [0.0; 3],
+            masked_ssim_d4: [0.0; 3],
+            masked_ssim_d2: [0.0; 3],
+            masked_art4: [0.0; 3],
+            masked_det4: [0.0; 3],
+            masked_mse: [0.0; 3],
+            mask_weight_sum: [0.0; 3],
             n: 0,
         }
     }
@@ -102,6 +135,20 @@ impl ScaleAccumulators {
             self.hf_sq_dst[c] += other.hf_sq_dst[c];
             self.hf_abs_src[c] += other.hf_abs_src[c];
             self.hf_abs_dst[c] += other.hf_abs_dst[c];
+            // Extended
+            self.ssim_d8[c] += other.ssim_d8[c];
+            self.edge_art8[c] += other.edge_art8[c];
+            self.edge_det8[c] += other.edge_det8[c];
+            self.ssim_max[c] = self.ssim_max[c].max(other.ssim_max[c]);
+            self.edge_art_max[c] = self.edge_art_max[c].max(other.edge_art_max[c]);
+            self.edge_det_max[c] = self.edge_det_max[c].max(other.edge_det_max[c]);
+            self.masked_ssim_d[c] += other.masked_ssim_d[c];
+            self.masked_ssim_d4[c] += other.masked_ssim_d4[c];
+            self.masked_ssim_d2[c] += other.masked_ssim_d2[c];
+            self.masked_art4[c] += other.masked_art4[c];
+            self.masked_det4[c] += other.masked_det4[c];
+            self.masked_mse[c] += other.masked_mse[c];
+            self.mask_weight_sum[c] += other.mask_weight_sum[c];
         }
         self.n += other.n;
     }
@@ -117,6 +164,16 @@ impl ScaleAccumulators {
         let mut hf_energy_gain = [0.0f64; 3];
         let mut ssim_2nd = [0.0f64; 3];
         let mut edge_2nd = [0.0f64; 6];
+        let mut ssim_max = [0.0f64; 3];
+        let mut art_max = [0.0f64; 3];
+        let mut det_max = [0.0f64; 3];
+        let mut ssim_l8 = [0.0f64; 3];
+        let mut art_l8 = [0.0f64; 3];
+        let mut det_l8 = [0.0f64; 3];
+        let mut masked_ssim = [0.0f64; 9];
+        let mut masked_art_4th = [0.0f64; 3];
+        let mut masked_det_4th = [0.0f64; 3];
+        let mut masked_mse = [0.0f64; 3];
 
         for c in 0..3 {
             ssim[c * 2] = self.ssim_d[c] * one_over_n;
@@ -150,6 +207,26 @@ impl ScaleAccumulators {
             } else {
                 0.0
             };
+
+            // Extended: max and L8
+            ssim_max[c] = self.ssim_max[c] as f64;
+            art_max[c] = self.edge_art_max[c] as f64;
+            det_max[c] = self.edge_det_max[c] as f64;
+            ssim_l8[c] = (self.ssim_d8[c] * one_over_n).powf(0.125);
+            art_l8[c] = (self.edge_art8[c] * one_over_n).powf(0.125);
+            det_l8[c] = (self.edge_det8[c] * one_over_n).powf(0.125);
+
+            // Extended: masked features
+            let mask_n = self.mask_weight_sum[c];
+            if mask_n > 1e-10 {
+                let one_over_mask = 1.0 / mask_n;
+                masked_ssim[c * 3] = self.masked_ssim_d[c] * one_over_mask;
+                masked_ssim[c * 3 + 1] = (self.masked_ssim_d4[c] * one_over_mask).powf(0.25);
+                masked_ssim[c * 3 + 2] = (self.masked_ssim_d2[c] * one_over_mask).sqrt();
+                masked_art_4th[c] = (self.masked_art4[c] * one_over_mask).powf(0.25);
+                masked_det_4th[c] = (self.masked_det4[c] * one_over_mask).powf(0.25);
+                masked_mse[c] = self.masked_mse[c] * one_over_mask;
+            }
         }
 
         ScaleStats {
@@ -161,6 +238,16 @@ impl ScaleAccumulators {
             hf_energy_gain,
             ssim_2nd,
             edge_2nd,
+            ssim_max,
+            art_max,
+            det_max,
+            ssim_p95: ssim_l8,
+            art_p95: art_l8,
+            det_p95: det_l8,
+            masked_ssim,
+            masked_art_4th,
+            masked_det_4th,
+            masked_mse,
             ..Default::default()
         }
     }
@@ -173,30 +260,37 @@ fn active_channels(
     weights: &[f64],
 ) -> Vec<(usize, bool, bool)> {
     let compute_all = config.compute_all_features;
-    let fpc = FEATURES_PER_CHANNEL_BASIC;
+    let extended = config.extended_features;
+    let fpc = if extended {
+        FEATURES_PER_CHANNEL_EXTENDED
+    } else {
+        FEATURES_PER_CHANNEL_BASIC
+    };
 
     let has_weight = |base: usize, count: usize| -> bool {
         (base..base + count).all(|i| i < weights.len())
             && (base..base + count).any(|i| weights[i].abs() > 0.001)
     };
 
-    // Feature layout per channel (13): ssim_mean(0), ssim_4th(1), ssim_2nd(2),
-    //   art_mean(3), art_4th(4), art_2nd(5), det_mean(6), det_4th(7), det_2nd(8),
-    //   mse(9), hf_energy_loss(10), hf_mag_loss(11), hf_energy_gain(12)
+    // Feature layout per channel (13 basic, 25 extended):
+    //   0-2: ssim_mean, ssim_4th, ssim_2nd
+    //   3-8: art_mean, art_4th, art_2nd, det_mean, det_4th, det_2nd
+    //   9: mse, 10-12: hf_energy_loss, hf_mag_loss, hf_energy_gain
+    //   13-15: masked_ssim_mean/4th/2nd, 16-17: masked_art_4th/det_4th, 18: masked_mse
+    //   19-21: ssim_max/art_max/det_max, 22-24: ssim_l8/art_l8/det_l8
     let mut active = Vec::new();
     let beyond = scale_idx * (fpc * 3) >= weights.len();
     for c in 0..3 {
         if beyond {
-            if compute_all {
+            if compute_all || extended {
                 active.push((c, true, true));
             }
         } else {
             let base = scale_idx * (fpc * 3) + c * fpc;
-            let need_ssim = compute_all || has_weight(base, 3); // positions 0-2
-            let need_hf = has_weight(base + 10, 3); // positions 10-12
-            // HF features need mu1/mu2 (same as edge), fold into need_edge
-            let need_edge = compute_all || has_weight(base + 3, 6) || need_hf; // positions 3-8
-            let need_mse = compute_all || has_weight(base + 9, 1); // position 9
+            let need_ssim = compute_all || extended || has_weight(base, 3);
+            let need_hf = has_weight(base + 10, 3);
+            let need_edge = compute_all || extended || has_weight(base + 3, 6) || need_hf;
+            let need_mse = compute_all || extended || has_weight(base + 9, 1);
             if need_ssim || need_edge || need_mse {
                 active.push((c, need_ssim, need_edge));
             }
@@ -702,8 +796,9 @@ fn process_strip_channel(
         return;
     }
 
-    // Fused path: 1-pass blur only (the common case for scale 0)
-    if config.blur_passes == 1 {
+    // Fused path: 1-pass blur only (the common case for scale 0).
+    // Extended features need separate reduce calls for d8/max, so skip the fused path.
+    if config.blur_passes == 1 && !config.extended_features {
         if need_ssim {
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
             fused_blur_h_ssim(
@@ -786,10 +881,11 @@ fn process_strip_channel(
         return;
     }
 
-    // Multi-pass blur fallback: separate blur + reduce
+    // Separate blur + reduce fallback (multi-pass or extended features)
     #[allow(clippy::type_complexity)]
     let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match config.blur_passes
     {
+        1 => box_blur_1pass_into,
         2 => box_blur_2pass_into,
         _ => box_blur_3pass_into,
     };
@@ -844,21 +940,47 @@ fn process_strip_channel(
     if need_ssim {
         let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
         let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
-        let (sum_d, sum_d4, sum_d2) = ssim_channel(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
-        accum.ssim_d[c] += sum_d;
-        accum.ssim_d4[c] += sum_d4;
-        accum.ssim_d2[c] += sum_d2;
+        if config.extended_features {
+            let (sum_d, sum_d4, sum_d2, sum_d8, max_d) =
+                ssim_channel_extended(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
+            accum.ssim_d[c] += sum_d;
+            accum.ssim_d4[c] += sum_d4;
+            accum.ssim_d2[c] += sum_d2;
+            accum.ssim_d8[c] += sum_d8;
+            accum.ssim_max[c] = accum.ssim_max[c].max(max_d);
+        } else {
+            let (sum_d, sum_d4, sum_d2) =
+                ssim_channel(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
+            accum.ssim_d[c] += sum_d;
+            accum.ssim_d4[c] += sum_d4;
+            accum.ssim_d2[c] += sum_d2;
+        }
     }
 
     if need_edge {
-        let (art, art4, det, det4, art2, det2) =
-            edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
-        accum.edge_art[c] += art;
-        accum.edge_art4[c] += art4;
-        accum.edge_art2[c] += art2;
-        accum.edge_det[c] += det;
-        accum.edge_det4[c] += det4;
-        accum.edge_det2[c] += det2;
+        if config.extended_features {
+            let (art, art4, det, det4, art2, det2, art8, det8, max_art, max_det) =
+                edge_diff_channel_extended(inner_src, inner_dst, inner_mu1, inner_mu2);
+            accum.edge_art[c] += art;
+            accum.edge_art4[c] += art4;
+            accum.edge_art2[c] += art2;
+            accum.edge_art8[c] += art8;
+            accum.edge_det[c] += det;
+            accum.edge_det4[c] += det4;
+            accum.edge_det2[c] += det2;
+            accum.edge_det8[c] += det8;
+            accum.edge_art_max[c] = accum.edge_art_max[c].max(max_art);
+            accum.edge_det_max[c] = accum.edge_det_max[c].max(max_det);
+        } else {
+            let (art, art4, det, det4, art2, det2) =
+                edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
+            accum.edge_art[c] += art;
+            accum.edge_art4[c] += art4;
+            accum.edge_art2[c] += art2;
+            accum.edge_det[c] += det;
+            accum.edge_det4[c] += det4;
+            accum.edge_det2[c] += det2;
+        }
     }
 
     accum.hf_sq_src[c] += sq_diff_sum(inner_src, inner_mu1);

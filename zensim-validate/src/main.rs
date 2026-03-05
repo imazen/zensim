@@ -622,7 +622,11 @@ fn main() {
                             .collect();
 
                         pb.finish_with_message("done");
-                        eprintln!("  New pairs extracted: {} in {:.1}s", n_new, start_t.elapsed().as_secs_f64());
+                        eprintln!(
+                            "  New pairs extracted: {} in {:.1}s",
+                            n_new,
+                            start_t.elapsed().as_secs_f64()
+                        );
 
                         // Merge cached + new features
                         let mut all_human_scores = ds.human_scores;
@@ -1240,7 +1244,10 @@ fn load_and_compute(
         fpc, num_scales, total_features,
     );
     if config.extended_features {
-        eprintln!("  Extended: masked_strength={:.1}, path=full-image (no streaming precompute)", extended_masking_strength);
+        eprintln!(
+            "  Extended: masked_strength={:.1}, path=full-image (no streaming precompute)",
+            extended_masking_strength
+        );
     }
 
     // Process reference groups in parallel
@@ -1252,10 +1259,8 @@ fn load_and_compute(
         .par_iter()
         .map(|(ref_path, group)| {
             let fail = |grp: &[(usize, &ImagePair)]| -> Vec<_> {
-                let prev = progress_counter.fetch_add(
-                    grp.len() as u64,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                let prev = progress_counter
+                    .fetch_add(grp.len() as u64, std::sync::atomic::Ordering::Relaxed);
                 pb.inc(grp.len() as u64);
                 let new = prev + grp.len() as u64;
                 if prev / log_interval != new / log_interval {
@@ -1295,8 +1300,7 @@ fn load_and_compute(
 
             // Extended features and masking require the full-image path;
             // the streaming precomputed-reference path doesn't support them.
-            let needs_full_path =
-                config.extended_features || config.masking_strength > 0.0;
+            let needs_full_path = config.extended_features || config.masking_strength > 0.0;
 
             // Precompute reference XYB + downscale pyramid (only used on fast path)
             let precomputed = if !needs_full_path {
@@ -1350,8 +1354,7 @@ fn load_and_compute(
                         }
                         Err(_) => nan_result.clone(),
                     };
-                    let prev =
-                        progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let prev = progress_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     pb.inc(1);
                     let new = prev + 1;
                     if prev / log_interval != new / log_interval {
@@ -1378,7 +1381,9 @@ fn load_and_compute(
     pb.finish_with_message("done");
     eprintln!(
         "  Feature extraction: {} pairs in {:.1}s ({:.0}/s)",
-        total_pairs, total_elapsed, total_pairs as f64 / total_elapsed,
+        total_pairs,
+        total_elapsed,
+        total_pairs as f64 / total_elapsed,
     );
 
     // Flatten and sort back to original pair order
