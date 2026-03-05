@@ -1981,6 +1981,7 @@ dependencies = [
  "archmage",
  "imgref",
  "linear-srgb",
+ "magetypes",
  "rgb",
  "safe_unaligned_simd",
  "wide",

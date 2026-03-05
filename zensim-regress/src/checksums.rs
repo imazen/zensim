@@ -1234,8 +1234,12 @@ impl ChecksumManager {
                 // Hash mismatch — load reference and compare
                 let ref_path =
                     self.find_reference_image(module, test_name, detail_name, Some(authoritative));
-                let (ref_rgba, rw, rh) = match ref_path {
-                    Some(p) => decode_reference_png(&p)?,
+                let (ref_rgba, rw, rh) = match ref_path.and_then(|p| {
+                    decode_reference_png(&p)
+                        .map_err(|e| eprintln!("Warning: failed to decode reference image: {e}"))
+                        .ok()
+                }) {
+                    Some(decoded) => decoded,
                     None => {
                         // No reference image — can't do pixel comparison
                         if self.update_mode {
