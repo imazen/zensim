@@ -307,7 +307,7 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
     let features_per_scale = per_scale_candidates
         .iter()
         .copied()
-        .find(|&ps| ps > 0 && features.len() % ps == 0)
+        .find(|&ps| ps > 0 && features.len().is_multiple_of(ps))
         .unwrap_or(FEATURES_PER_CHANNEL_BASIC * 3);
     let n_scales = features.len() / features_per_scale;
     let raw_distance = raw_distance / n_scales.max(1) as f64;
@@ -1352,7 +1352,6 @@ pub fn compute_zensim_with_config(
     Ok(result)
 }
 
-
 /// Combine per-scale statistics into a final score.
 ///
 /// Uses learned weights that balance:
@@ -1946,5 +1945,4 @@ mod tests {
             }
         }
     }
-
 }

@@ -1304,7 +1304,7 @@ impl ChecksumManager {
                     ah,
                 );
 
-                let passed = report.as_ref().map_or(true, |r| r.passed());
+                let passed = report.as_ref().is_none_or(|r| r.passed());
 
                 if passed {
                     let auto_accepted = self.update_mode;

@@ -562,8 +562,14 @@ fn error_image_too_small() {
     let small = vec![[128u8; 3]; 4 * 4];
     let src = RgbSlice::new(&small, 4, 4);
     let dst = RgbSlice::new(&small, 4, 4);
-    assert_eq!(z.compute(&src, &dst).unwrap_err(), ZensimError::ImageTooSmall);
-    assert!(matches!(z.precompute_reference(&src), Err(ZensimError::ImageTooSmall)));
+    assert_eq!(
+        z.compute(&src, &dst).unwrap_err(),
+        ZensimError::ImageTooSmall
+    );
+    assert!(matches!(
+        z.precompute_reference(&src),
+        Err(ZensimError::ImageTooSmall)
+    ));
 }
 
 #[test]
@@ -573,7 +579,10 @@ fn error_dimension_mismatch() {
     let b = vec![[128u8; 3]; 32 * 8];
     let src = RgbSlice::new(&a, 16, 16);
     let dst = RgbSlice::new(&b, 32, 8);
-    assert_eq!(z.compute(&src, &dst).unwrap_err(), ZensimError::DimensionMismatch);
+    assert_eq!(
+        z.compute(&src, &dst).unwrap_err(),
+        ZensimError::DimensionMismatch
+    );
 }
 
 #[test]

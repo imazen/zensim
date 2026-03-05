@@ -35,5 +35,4 @@ impl ScaleBuffers {
         self.temp_blur.resize(size, 0.0);
         self.mask.resize(size, 0.0);
     }
-
 }

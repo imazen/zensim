@@ -231,7 +231,6 @@ impl ScaleAccumulators {
             masked_art_4th,
             masked_det_4th,
             masked_mse,
-            ..Default::default()
         }
     }
 }

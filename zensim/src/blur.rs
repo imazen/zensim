@@ -2,7 +2,11 @@
 //!
 //! Unlike recursive Gaussian IIR (used in ssimulacra2, ~60-70% of runtime),
 //! box blur is O(1) per pixel regardless of radius.
-#![allow(clippy::assign_op_pattern, clippy::needless_range_loop)]
+#![allow(
+    clippy::assign_op_pattern,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments
+)]
 
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;

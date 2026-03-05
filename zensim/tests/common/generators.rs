@@ -222,7 +222,6 @@ pub fn to_srgb16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize
     (buf, stride)
 }
 
-
 // ─── Distortion functions ──────────────────────────────────────────────
 
 /// Separable box blur with given radius.
