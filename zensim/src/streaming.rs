@@ -22,8 +22,9 @@ use crate::metric::{
 };
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
-    abs_diff_sum, edge_diff_channel, edge_diff_channel_extended, mul_into, sq_diff_sum,
-    sq_sum_into, ssim_channel, ssim_channel_extended,
+    abs_diff_into, abs_diff_sum, edge_diff_channel, edge_diff_channel_extended,
+    edge_diff_channel_masked, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
+    ssim_channel_extended, ssim_channel_masked,
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use rayon::prelude::*;
@@ -80,7 +81,6 @@ struct ScaleAccumulators {
     masked_art4: [f64; 3],
     masked_det4: [f64; 3],
     masked_mse: [f64; 3],
-    mask_weight_sum: [f64; 3],
     // Total inner pixels processed
     n: usize,
 }
@@ -114,7 +114,6 @@ impl ScaleAccumulators {
             masked_art4: [0.0; 3],
             masked_det4: [0.0; 3],
             masked_mse: [0.0; 3],
-            mask_weight_sum: [0.0; 3],
             n: 0,
         }
     }
@@ -148,7 +147,6 @@ impl ScaleAccumulators {
             self.masked_art4[c] += other.masked_art4[c];
             self.masked_det4[c] += other.masked_det4[c];
             self.masked_mse[c] += other.masked_mse[c];
-            self.mask_weight_sum[c] += other.mask_weight_sum[c];
         }
         self.n += other.n;
     }
@@ -216,17 +214,13 @@ impl ScaleAccumulators {
             art_l8[c] = (self.edge_art8[c] * one_over_n).powf(0.125);
             det_l8[c] = (self.edge_det8[c] * one_over_n).powf(0.125);
 
-            // Extended: masked features
-            let mask_n = self.mask_weight_sum[c];
-            if mask_n > 1e-10 {
-                let one_over_mask = 1.0 / mask_n;
-                masked_ssim[c * 3] = self.masked_ssim_d[c] * one_over_mask;
-                masked_ssim[c * 3 + 1] = (self.masked_ssim_d4[c] * one_over_mask).powf(0.25);
-                masked_ssim[c * 3 + 2] = (self.masked_ssim_d2[c] * one_over_mask).sqrt();
-                masked_art_4th[c] = (self.masked_art4[c] * one_over_mask).powf(0.25);
-                masked_det_4th[c] = (self.masked_det4[c] * one_over_mask).powf(0.25);
-                masked_mse[c] = self.masked_mse[c] * one_over_mask;
-            }
+            // Extended: masked features (normalize by N, matching full-image path)
+            masked_ssim[c * 3] = self.masked_ssim_d[c] * one_over_n;
+            masked_ssim[c * 3 + 1] = (self.masked_ssim_d4[c] * one_over_n).powf(0.25);
+            masked_ssim[c * 3 + 2] = (self.masked_ssim_d2[c] * one_over_n).sqrt();
+            masked_art_4th[c] = (self.masked_art4[c] * one_over_n).powf(0.25);
+            masked_det_4th[c] = (self.masked_det4[c] * one_over_n).powf(0.25);
+            masked_mse[c] = self.masked_mse[c] * one_over_n;
         }
 
         ScaleStats {
@@ -987,6 +981,66 @@ fn process_strip_channel(
     accum.hf_sq_dst[c] += sq_diff_sum(inner_dst, inner_mu2);
     accum.hf_abs_src[c] += abs_diff_sum(inner_src, inner_mu1);
     accum.hf_abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
+
+    // Extended: masked features
+    // Compute mask over the full strip (needs blur context), then use inner region.
+    // Step 1: |src - mu| → mask buffer (full strip)
+    // Step 2: blur(mask) → mul_buf (via temp_blur)
+    // Step 3: mask[i] = 1/(1+k*blurred[i]) for inner region
+    // Step 4: call masked SSIM/edge/MSE with inner mask
+    if config.extended_features {
+        let strip_n = strip_h * width;
+        let k = config.extended_masking_strength;
+
+        // Step 1: |src - mu| → mask (full strip for blur context)
+        abs_diff_into(&src_c[..strip_n], &bufs.mu1[..strip_n], &mut bufs.mask[..strip_n]);
+
+        // Step 2: blur the activity map → mul_buf
+        blur_fn(
+            &bufs.mask[..strip_n],
+            &mut bufs.mul_buf[..strip_n],
+            &mut bufs.temp_blur[..strip_n],
+            width,
+            strip_h,
+            config.blur_radius,
+        );
+
+        // Step 3: compute mask = 1/(1+k*blurred) for inner region, store in mask buffer
+        for i in 0..inner_n {
+            bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+        }
+        // Step 4: masked SSIM
+        if need_ssim {
+            let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+            let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
+            let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
+            let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
+            let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
+            let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_mask,
+            );
+            accum.masked_ssim_d[c] += sum_d;
+            accum.masked_ssim_d4[c] += sum_d4;
+            accum.masked_ssim_d2[c] += sum_d2;
+        }
+
+        // Masked edge (art_4th, det_4th)
+        if need_edge {
+            let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+            let (_art, art4, _det, det4, _art2, _det2) =
+                edge_diff_channel_masked(inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask);
+            accum.masked_art4[c] += art4;
+            accum.masked_det4[c] += det4;
+        }
+
+        // Masked MSE: Σ(src-dst)² × mask
+        let mut masked_mse_sum = 0.0f64;
+        for i in 0..inner_n {
+            let d = inner_src[i] - inner_dst[i];
+            masked_mse_sum += (d * d * bufs.mask[inner_off + i]) as f64;
+        }
+        accum.masked_mse[c] += masked_mse_sum;
+    }
 }
 
 /// Process a scale using parallel band processing over pre-existing XYB planes.
