@@ -552,16 +552,21 @@ fn main() {
                                     .map(|p| [p.0[0], p.0[1], p.0[2]])
                                     .collect();
 
-                                let precomputed =
+                                let needs_full = config.extended_features
+                                    || config.masking_strength > 0.0;
+                                let precomputed = if !needs_full {
                                     match zensim::precompute_reference_with_scales(
                                         &src_pixels,
                                         w as usize,
                                         h as usize,
                                         num_scales,
                                     ) {
-                                        Ok(p) => p,
+                                        Ok(p) => Some(p),
                                         Err(_) => return fail(group),
-                                    };
+                                    }
+                                } else {
+                                    None
+                                };
 
                                 group
                                     .par_iter()
@@ -578,14 +583,25 @@ fn main() {
                                                         .pixels()
                                                         .map(|p| [p.0[0], p.0[1], p.0[2]])
                                                         .collect();
-                                                    zensim::compute_zensim_with_ref_and_config(
-                                                        &precomputed,
-                                                        &dst_pixels,
-                                                        w as usize,
-                                                        h as usize,
-                                                        config,
-                                                    )
-                                                    .unwrap_or_else(|_| nan_result.clone())
+                                                    if let Some(ref pre) = precomputed {
+                                                        zensim::compute_zensim_with_ref_and_config(
+                                                            pre,
+                                                            &dst_pixels,
+                                                            w as usize,
+                                                            h as usize,
+                                                            config,
+                                                        )
+                                                        .unwrap_or_else(|_| nan_result.clone())
+                                                    } else {
+                                                        zensim::compute_zensim_with_config(
+                                                            &src_pixels,
+                                                            &dst_pixels,
+                                                            w as usize,
+                                                            h as usize,
+                                                            config,
+                                                        )
+                                                        .unwrap_or_else(|_| nan_result.clone())
+                                                    }
                                                 }
                                             }
                                             Err(_) => nan_result.clone(),
@@ -1209,6 +1225,24 @@ fn load_and_compute(
         ..Default::default()
     };
 
+    let fpc = if config.extended_features {
+        zensim::FEATURES_PER_CHANNEL_EXTENDED
+    } else {
+        zensim::FEATURES_PER_CHANNEL_BASIC
+    };
+    let total_features = num_scales * 3 * fpc;
+    eprintln!(
+        "  Config: scales={}, blur_passes={}, blur_radius={}, extended={}, masking={:.1}, downscale={:?}",
+        num_scales, blur_passes, blur_radius, extended_features, masking_strength, downscale_filter,
+    );
+    eprintln!(
+        "  Features: {} per channel × 3 channels × {} scales = {} total",
+        fpc, num_scales, total_features,
+    );
+    if config.extended_features {
+        eprintln!("  Extended: masked_strength={:.1}, path=full-image (no streaming precompute)", extended_masking_strength);
+    }
+
     // Process reference groups in parallel
     let progress_counter = std::sync::atomic::AtomicU64::new(0);
     let start_time = std::time::Instant::now();
@@ -1259,18 +1293,27 @@ fn load_and_compute(
             let src_pixels: Vec<[u8; 3]> =
                 src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
-            // Precompute reference XYB + downscale pyramid
-            let precomputed = match zensim::precompute_reference_with_scales(
-                &src_pixels,
-                w as usize,
-                h as usize,
-                num_scales,
-            ) {
-                Ok(p) => p,
-                Err(_) => return fail(group),
+            // Extended features and masking require the full-image path;
+            // the streaming precomputed-reference path doesn't support them.
+            let needs_full_path =
+                config.extended_features || config.masking_strength > 0.0;
+
+            // Precompute reference XYB + downscale pyramid (only used on fast path)
+            let precomputed = if !needs_full_path {
+                match zensim::precompute_reference_with_scales(
+                    &src_pixels,
+                    w as usize,
+                    h as usize,
+                    num_scales,
+                ) {
+                    Ok(p) => Some(p),
+                    Err(_) => return fail(group),
+                }
+            } else {
+                None
             };
 
-            // Compare each distorted image against the precomputed reference (parallel)
+            // Compare each distorted image against the reference (parallel)
             group
                 .par_iter()
                 .map(|(idx, pair)| {
@@ -1284,14 +1327,25 @@ fn load_and_compute(
                             } else {
                                 let dst_pixels: Vec<[u8; 3]> =
                                     dst.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-                                zensim::compute_zensim_with_ref_and_config(
-                                    &precomputed,
-                                    &dst_pixels,
-                                    w as usize,
-                                    h as usize,
-                                    config,
-                                )
-                                .unwrap_or_else(|_| nan_result.clone())
+                                if let Some(ref pre) = precomputed {
+                                    zensim::compute_zensim_with_ref_and_config(
+                                        pre,
+                                        &dst_pixels,
+                                        w as usize,
+                                        h as usize,
+                                        config,
+                                    )
+                                    .unwrap_or_else(|_| nan_result.clone())
+                                } else {
+                                    zensim::compute_zensim_with_config(
+                                        &src_pixels,
+                                        &dst_pixels,
+                                        w as usize,
+                                        h as usize,
+                                        config,
+                                    )
+                                    .unwrap_or_else(|_| nan_result.clone())
+                                }
                             }
                         }
                         Err(_) => nan_result.clone(),

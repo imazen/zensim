@@ -120,7 +120,8 @@ pub use streaming::PrecomputedReference;
 /// trained weights or the 0-100 score scale.
 #[cfg(feature = "training")]
 pub use metric::{
-    BlurKernel, DownscaleFilter, FEATURES_PER_CHANNEL_EXTENDED, FEATURES_PER_SCALE, WEIGHTS,
+    BlurKernel, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC, FEATURES_PER_CHANNEL_EXTENDED,
+    FEATURES_PER_SCALE, WEIGHTS,
     ZensimConfig, compute_zensim_with_config, compute_zensim_with_ref_and_config,
     precompute_reference_with_scales, score_from_features,
 };

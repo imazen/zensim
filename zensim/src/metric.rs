@@ -1132,7 +1132,7 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
 /// ```
 ///
 /// Total features = `num_scales × 3 channels × 13` = 156 at 4 scales.
-pub(crate) const FEATURES_PER_CHANNEL_BASIC: usize = 13;
+pub const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
 /// Extended features per channel per scale: 25 features (13 basic + 12 extended).
 ///
