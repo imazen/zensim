@@ -391,7 +391,55 @@ fn bench_downscale_filters(c: &mut Criterion) {
 }
 
 #[cfg(feature = "training")]
-criterion_group!(training_benches, bench_zensim_512x512_masked,);
+fn bench_zensim_extended(c: &mut Criterion) {
+    use zensim::ZensimConfig;
+
+    for &(label, w, h) in &[("512x512", 512, 512), ("1920x1080", 1920, 1080)] {
+        let (src, dst) = make_test_images(w, h);
+
+        let config_basic = ZensimConfig {
+            compute_all_features: true,
+            ..Default::default()
+        };
+        c.bench_function(&format!("basic_{label}"), |b| {
+            b.iter(|| {
+                zensim::compute_zensim_with_config(
+                    std::hint::black_box(&src),
+                    std::hint::black_box(&dst),
+                    w,
+                    h,
+                    config_basic,
+                )
+                .unwrap()
+            })
+        });
+
+        let config_ext = ZensimConfig {
+            compute_all_features: true,
+            extended_features: true,
+            ..Default::default()
+        };
+        c.bench_function(&format!("extended_{label}"), |b| {
+            b.iter(|| {
+                zensim::compute_zensim_with_config(
+                    std::hint::black_box(&src),
+                    std::hint::black_box(&dst),
+                    w,
+                    h,
+                    config_ext,
+                )
+                .unwrap()
+            })
+        });
+    }
+}
+
+#[cfg(feature = "training")]
+criterion_group!(
+    training_benches,
+    bench_zensim_512x512_masked,
+    bench_zensim_extended,
+);
 
 #[cfg(feature = "zenresize")]
 criterion_group!(zenresize_benches, bench_downscale_filters,);

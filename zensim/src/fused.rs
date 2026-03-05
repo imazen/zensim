@@ -96,6 +96,7 @@ pub(crate) fn fused_vblur_features_ssim(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     incant!(
         fused_vblur_ssim_inner(
@@ -111,7 +112,8 @@ pub(crate) fn fused_vblur_features_ssim(
             inner_h,
             radius,
             mu1_out,
-            mu2_out
+            mu2_out,
+            extended
         ),
         [v4, v3]
     )
@@ -134,6 +136,7 @@ pub(crate) fn fused_vblur_features_edge(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     incant!(
         fused_vblur_edge_inner(
@@ -147,7 +150,8 @@ pub(crate) fn fused_vblur_features_edge(
             inner_h,
             radius,
             mu1_out,
-            mu2_out
+            mu2_out,
+            extended
         ),
         [v4, v3]
     )
@@ -211,6 +215,7 @@ fn fused_vblur_ssim_inner_v4(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -272,12 +277,12 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
-
-                // Store V-blurred mu1/mu2 for masked features
-                mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
-                mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
+                if extended {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                    mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
+                }
 
                 // === Edge ===
                 let diff1 = (s - mu1).abs();
@@ -295,10 +300,12 @@ fn fused_vblur_ssim_inner_v4(
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += dl4.reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if extended {
+                    acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                    acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                }
 
                 // === HF energy (L2): (pixel - mu)² ===
                 let vs = s - mu1;
@@ -385,12 +392,12 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
-
-                // Store V-blurred mu1/mu2
-                mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
-                mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                if extended {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                    mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                }
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -408,10 +415,12 @@ fn fused_vblur_ssim_inner_v4(
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += dl4.reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if extended {
+                    acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                    acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                }
 
                 // Variance
                 let vs = s - mu1;
@@ -481,12 +490,12 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
-
-                // Store V-blurred mu1/mu2
-                mu1_out[y * width + x] = mu1;
-                mu2_out[y * width + x] = mu2;
+                if extended {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
 
                 // Edge (f32 to match SIMD paths)
                 let diff1 = (sv - mu1).abs();
@@ -504,10 +513,12 @@ fn fused_vblur_ssim_inner_v4(
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += dl4 as f64;
                 acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if extended {
+                    acc.edge_art8 += (a4 * a4) as f64;
+                    acc.edge_det8 += (dl4 * dl4) as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact);
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                }
 
                 // Variance
                 let vs = sv - mu1;
@@ -557,6 +568,7 @@ fn fused_vblur_ssim_inner_v3(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -609,12 +621,12 @@ fn fused_vblur_ssim_inner_v3(
                 acc.ssim_d += sd.reduce_add() as f64;
                 acc.ssim_d4 += sd4.reduce_add() as f64;
                 acc.ssim_d2 += sd2.reduce_add() as f64;
-                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
-                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
-
-                // Store V-blurred mu1/mu2
-                mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
-                mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                if extended {
+                    acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                    mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                }
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -632,10 +644,12 @@ fn fused_vblur_ssim_inner_v3(
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += dl4.reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if extended {
+                    acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                    acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                }
 
                 // Variance
                 let vs = s - mu1;
@@ -705,12 +719,12 @@ fn fused_vblur_ssim_inner_v3(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
-
-                // Store V-blurred mu1/mu2
-                mu1_out[y * width + x] = mu1;
-                mu2_out[y * width + x] = mu2;
+                if extended {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
 
                 // Edge
                 let diff1 = (sv - mu1).abs();
@@ -728,10 +742,12 @@ fn fused_vblur_ssim_inner_v3(
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += dl4 as f64;
                 acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if extended {
+                    acc.edge_art8 += (a4 * a4) as f64;
+                    acc.edge_det8 += (dl4 * dl4) as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact);
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                }
 
                 // Variance
                 let vs = sv - mu1;
@@ -779,6 +795,7 @@ fn fused_vblur_ssim_inner_scalar(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv = 1.0 / diam as f32;
@@ -821,12 +838,12 @@ fn fused_vblur_ssim_inner_scalar(
                 acc.ssim_d += sd as f64;
                 acc.ssim_d4 += sd4 as f64;
                 acc.ssim_d2 += sd2 as f64;
-                acc.ssim_d8 += (sd4 * sd4) as f64;
-                acc.ssim_max = acc.ssim_max.max(sd);
-
-                // Store V-blurred mu1/mu2
-                mu1_out[y * width + x] = mu1;
-                mu2_out[y * width + x] = mu2;
+                if extended {
+                    acc.ssim_d8 += (sd4 * sd4) as f64;
+                    acc.ssim_max = acc.ssim_max.max(sd);
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
 
                 // Edge
                 let diff1 = (sv - mu1).abs();
@@ -844,10 +861,12 @@ fn fused_vblur_ssim_inner_scalar(
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += dl4 as f64;
                 acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if extended {
+                    acc.edge_art8 += (a4 * a4) as f64;
+                    acc.edge_det8 += (dl4 * dl4) as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact);
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                }
 
                 // Variance
                 let vs = sv - mu1;
@@ -895,6 +914,7 @@ fn fused_vblur_edge_inner_v4(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -927,9 +947,10 @@ fn fused_vblur_edge_inner_v4(
                 let s = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
                 let d = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
 
-                // Store V-blurred mu1/mu2
-                mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
-                mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
+                if extended {
+                    mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
+                }
 
                 // Edge
                 let diff1 = (s - mu1).abs();
@@ -947,10 +968,12 @@ fn fused_vblur_edge_inner_v4(
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += dl4.reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if extended {
+                    acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                    acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                }
 
                 // Variance
                 let vs = s - mu1;
@@ -1009,9 +1032,10 @@ fn fused_vblur_edge_inner_v4(
                 let s = f32x8::from_array(v3, src[base..][..8].try_into().unwrap());
                 let d = f32x8::from_array(v3, dst[base..][..8].try_into().unwrap());
 
-                // Store V-blurred mu1/mu2
-                mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
-                mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                if extended {
+                    mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                }
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
@@ -1028,10 +1052,12 @@ fn fused_vblur_edge_inner_v4(
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += dl4.reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if extended {
+                    acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                    acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                }
 
                 let vs = s - mu1;
                 let vd = d - mu2;
@@ -1074,9 +1100,10 @@ fn fused_vblur_edge_inner_v4(
                 let sv = src[y * width + x];
                 let dv = dst[y * width + x];
 
-                // Store V-blurred mu1/mu2
-                mu1_out[y * width + x] = mu1;
-                mu2_out[y * width + x] = mu2;
+                if extended {
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
 
                 // Edge
                 let diff1 = (sv - mu1).abs();
@@ -1094,10 +1121,12 @@ fn fused_vblur_edge_inner_v4(
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += dl4 as f64;
                 acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if extended {
+                    acc.edge_art8 += (a4 * a4) as f64;
+                    acc.edge_det8 += (dl4 * dl4) as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact);
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                }
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
@@ -1135,6 +1164,7 @@ fn fused_vblur_edge_inner_v3(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -1167,9 +1197,10 @@ fn fused_vblur_edge_inner_v3(
                 let s = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
                 let d = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
 
-                // Store V-blurred mu1/mu2
-                mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
-                mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                if extended {
+                    mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
+                }
 
                 let diff1 = (s - mu1).abs();
                 let diff2 = (d - mu2).abs();
@@ -1186,10 +1217,12 @@ fn fused_vblur_edge_inner_v3(
                 acc.edge_det += detail_lost.reduce_add() as f64;
                 acc.edge_det4 += dl4.reduce_add() as f64;
                 acc.edge_det2 += dl2.reduce_add() as f64;
-                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
-                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                if extended {
+                    acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                    acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+                }
 
                 let vs = s - mu1;
                 let vd = d - mu2;
@@ -1232,9 +1265,10 @@ fn fused_vblur_edge_inner_v3(
                 let sv = src[y * width + x];
                 let dv = dst[y * width + x];
 
-                // Store V-blurred mu1/mu2
-                mu1_out[y * width + x] = mu1;
-                mu2_out[y * width + x] = mu2;
+                if extended {
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
 
                 // Edge
                 let diff1 = (sv - mu1).abs();
@@ -1252,10 +1286,12 @@ fn fused_vblur_edge_inner_v3(
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += dl4 as f64;
                 acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if extended {
+                    acc.edge_art8 += (a4 * a4) as f64;
+                    acc.edge_det8 += (dl4 * dl4) as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact);
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                }
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;
@@ -1291,6 +1327,7 @@ fn fused_vblur_edge_inner_scalar(
     radius: usize,
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
+    extended: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv = 1.0 / diam as f32;
@@ -1316,9 +1353,10 @@ fn fused_vblur_edge_inner_scalar(
                 let sv = src[y * width + x];
                 let dv = dst[y * width + x];
 
-                // Store V-blurred mu1/mu2
-                mu1_out[y * width + x] = mu1;
-                mu2_out[y * width + x] = mu2;
+                if extended {
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
 
                 // Edge
                 let diff1 = (sv - mu1).abs();
@@ -1336,10 +1374,12 @@ fn fused_vblur_edge_inner_scalar(
                 acc.edge_det += detail_lost as f64;
                 acc.edge_det4 += dl4 as f64;
                 acc.edge_det2 += dl2 as f64;
-                acc.edge_art8 += (a4 * a4) as f64;
-                acc.edge_det8 += (dl4 * dl4) as f64;
-                acc.edge_art_max = acc.edge_art_max.max(artifact);
-                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                if extended {
+                    acc.edge_art8 += (a4 * a4) as f64;
+                    acc.edge_det8 += (dl4 * dl4) as f64;
+                    acc.edge_art_max = acc.edge_art_max.max(artifact);
+                    acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+                }
 
                 let vs = sv - mu1;
                 let vd = dv - mu2;

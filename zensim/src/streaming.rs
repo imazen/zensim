@@ -827,6 +827,7 @@ fn process_strip_channel(
                 config.blur_radius,
                 &mut bufs.mask,
                 &mut bufs.mul_buf,
+                config.extended_features,
             );
 
             accum.ssim_d[c] += strip_acc.ssim_d;
@@ -856,12 +857,15 @@ fn process_strip_channel(
                 config.blur_radius,
                 &mut bufs.mask,
                 &mut bufs.mul_buf,
+                config.extended_features,
             );
         }
 
         // Swap: mu1/mu2 now hold V-blurred values, mask/mul_buf hold H-blurred garbage
-        std::mem::swap(&mut bufs.mu1, &mut bufs.mask);
-        std::mem::swap(&mut bufs.mu2, &mut bufs.mul_buf);
+        if config.extended_features {
+            std::mem::swap(&mut bufs.mu1, &mut bufs.mask);
+            std::mem::swap(&mut bufs.mu2, &mut bufs.mul_buf);
+        }
 
         // Accumulate basic features
         accum.edge_art[c] += strip_acc.edge_art;
