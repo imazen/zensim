@@ -121,28 +121,10 @@ use crate::simd_ops::{
 
 /// Configuration for zensim computation.
 ///
-/// # Performance paths
-///
-/// The metric has two internal computation strategies with different performance
-/// characteristics. Which path is taken depends on these settings:
-///
-/// ## Streaming path (default, fastest)
-///
-/// Processes scale 0 in horizontal strips with fused blur+feature extraction,
-/// minimizing memory traffic. Used when **all** of:
-/// - `masking_strength == 0.0` (no per-pixel masking)
-/// - `blur_passes == 1` (enables fused H-blur + V-blur+reduce kernels)
-///
-/// When `blur_passes != 1`, the streaming path still processes in strips but
-/// falls back to separate blur + reduce passes per channel (slower but still
-/// cache-friendly).
-///
-/// ## Full-image path (masking or legacy API)
-///
-/// Materializes full XYB planes in memory, then computes blur and features
-/// per-scale. Required when `masking_strength > 0.0` because masking needs
-/// the full blurred source plane to compute per-pixel activity weights.
-/// Uses phased blur parallelism for large images (>512×512) when not masking.
+/// All computation uses the streaming path, which processes scale 0 in
+/// horizontal strips with fused blur+feature extraction for minimal memory
+/// traffic. When `blur_passes == 1` (the default), fused H-blur + V-blur+reduce
+/// SIMD kernels are used for peak performance.
 ///
 /// Blur kernel shape for local-mean computation.
 ///
@@ -195,8 +177,7 @@ pub enum DownscaleFilter {
     MitchellBlur(f32),
 }
 
-/// **Bottom line:** the defaults (`blur_passes=1`, `masking_strength=0.0`) give
-/// peak performance. Changing either has a measurable cost.
+/// **Bottom line:** the defaults (`blur_passes=1`) give peak performance.
 #[derive(Debug, Clone, Copy)]
 pub struct ZensimConfig {
     /// Box blur radius at scale 0 (default: 5, giving an 11-pixel kernel).
@@ -239,38 +220,14 @@ pub struct ZensimConfig {
     /// to determine which weights should be nonzero).
     pub compute_all_features: bool,
 
-    /// Local contrast masking strength (default: 0.0 = disabled).
-    ///
-    /// When > 0, computes per-pixel activity from the source image:
-    /// `mask[i] = 1 / (1 + masking_strength * blur(|src - mu|))`,
-    /// then weights SSIM and edge distances by this mask. Textured/edge-heavy
-    /// regions get down-weighted, modeling the human visual system's reduced
-    /// sensitivity to distortion in busy areas.
-    ///
-    /// **Performance:** enabling masking forces the full-image path (no streaming)
-    /// and adds one extra blur per channel per scale for the activity computation.
-    /// Expect ~2× slower than the default streaming path.
-    ///
-    /// **Current profiles:** all ship with `masking_strength = 0.0` because the
-    /// unmasked weights already achieve SROCC ≥ 0.98 on synthetic data. This
-    /// parameter exists for training exploration — a future profile *could* use
-    /// masking if it improves correlation on specific content types.
-    ///
-    /// Typical training range: 2.0–8.0.
-    pub masking_strength: f32,
-
     /// Compute extended features (25 per channel instead of 13; default: false).
     ///
     /// When true, adds 12 extra features per channel per scale:
     /// - 6 masked features (SSIM/edge/MSE weighted by source flatness)
     /// - 6 percentile/max features (worst-case SSIM/edge errors)
     ///
-    /// **Performance:** forces the full-image path (no streaming) and adds ~25%
-    /// overhead per scale. Intended for training exploration only — production
-    /// scoring uses the standard 13-feature path.
-    ///
     /// The masking strength for extended features is controlled by
-    /// `extended_masking_strength` (separate from `masking_strength`).
+    /// `extended_masking_strength`.
     pub extended_features: bool,
 
     /// Masking strength for extended masked features (default: 4.0).
@@ -315,7 +272,6 @@ impl Default for ZensimConfig {
             compute_all_features: false,
             extended_features: false,
             extended_masking_strength: 4.0,
-            masking_strength: 0.0,
             num_scales: crate::NUM_SCALES,
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
@@ -1017,11 +973,6 @@ fn validate_pair(
     Ok(())
 }
 
-/// Core computation routing: streaming vs full-image based on config.
-///
-/// Streaming is used when masking is disabled (the common case).
-/// Full-image is forced when masking_strength > 0.0 because masking
-/// needs the full blurred source plane to compute per-pixel activity weights.
 /// Check if source and distorted images have byte-identical pixel data
 /// and matching color interpretation (format + primaries).
 fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
@@ -1088,7 +1039,6 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
         compute_all_features: false,
         extended_features: false,
         extended_masking_strength: 4.0,
-        masking_strength: params.masking_strength,
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
@@ -1591,7 +1541,8 @@ fn compute_channel(
     let mut edge = [0.0f64; 4];
     let mut ssim_2nd = 0.0f64;
     let mut edge_2nd = [0.0f64; 2];
-    let masked = config.masking_strength > 0.0;
+    let masked =
+        0.0f32 /* masking_strength removed — full_image path preserved for recovery */ > 0.0;
 
     let effective_passes = match config.blur_kernel {
         BlurKernel::Box { passes } => passes,
@@ -1705,7 +1656,7 @@ fn compute_channel(
             height,
             config.blur_radius,
         );
-        let k = config.masking_strength;
+        let k = 0.0f32 /* masking_strength removed — full_image path preserved for recovery */;
         for i in 0..n {
             bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
         }
@@ -1831,7 +1782,7 @@ fn compute_channel(
             for i in 0..n {
                 bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
             }
-        } else if (config.masking_strength - config.extended_masking_strength).abs() > 1e-6 {
+        } else if (0.0f32 /* masking_strength removed — full_image path preserved for recovery */ - config.extended_masking_strength).abs() > 1e-6 {
             abs_diff_into(src_c, &bufs.mu1, &mut bufs.mul_buf);
             blur_fn(
                 &bufs.mul_buf,
@@ -2001,7 +1952,8 @@ pub(crate) fn compute_single_scale(
     let mut edge_2nd_vals = [0.0f64; 6];
 
     let compute_all = config.compute_all_features;
-    let masked = config.masking_strength > 0.0;
+    let masked =
+        0.0f32 /* masking_strength removed — full_image path preserved for recovery */ > 0.0;
 
     // For scales beyond WEIGHTS range, always compute all
     let fpc_basic = FEATURES_PER_CHANNEL_BASIC;
@@ -2740,7 +2692,6 @@ pub const WEIGHTS: [f64; 156] = [
 
 pub(crate) fn combine_scores(
     scale_stats: &[ScaleStats],
-    _masked: bool,
     weights: &[f64],
     config: &ZensimConfig,
     mean_offset: [f64; 3],

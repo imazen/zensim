@@ -51,9 +51,6 @@ pub struct ProfileParams {
     pub blur_radius: usize,
     pub blur_passes: u8,
     pub num_scales: usize,
-    /// When > 0.0, forces the full-image path and adds per-pixel activity masking.
-    /// See `ZensimConfig::masking_strength` in `metric.rs` for full details.
-    pub masking_strength: f32,
     pub score_mapping_a: f64,
     pub score_mapping_b: f64,
 }
@@ -66,7 +63,6 @@ impl ProfileParams {
         blur_radius: usize,
         blur_passes: u8,
         num_scales: usize,
-        masking_strength: f32,
         score_mapping_a: f64,
         score_mapping_b: f64,
     ) -> Self {
@@ -75,7 +71,6 @@ impl ProfileParams {
             blur_radius,
             blur_passes,
             num_scales,
-            masking_strength,
             score_mapping_a,
             score_mapping_b,
         }
@@ -89,7 +84,6 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    masking_strength: 0.0,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
 };

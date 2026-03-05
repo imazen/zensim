@@ -1359,8 +1359,7 @@ pub(crate) fn compute_zensim_streaming_with_ref(
 ) -> crate::metric::ZensimResult {
     let (scale_stats, mean_offset) =
         compute_multiscale_stats_streaming_with_ref(precomputed, distorted, config, weights);
-    let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked, weights, config, mean_offset)
+    combine_scores(&scale_stats, weights, config, mean_offset)
 }
 
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
@@ -1373,8 +1372,7 @@ pub(crate) fn compute_zensim_streaming(
 ) -> crate::metric::ZensimResult {
     let (scale_stats, mean_offset) =
         compute_multiscale_stats_streaming(source, distorted, config, weights);
-    let masked = config.masking_strength > 0.0;
-    combine_scores(&scale_stats, masked, weights, config, mean_offset)
+    combine_scores(&scale_stats, weights, config, mean_offset)
 }
 
 // ─── Delta stats computation ─────────────────────────────────────────────

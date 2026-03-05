@@ -338,7 +338,6 @@ fn bench_zensim_512x512_masked(c: &mut Criterion) {
         .collect();
 
     let config = zensim::ZensimConfig {
-        masking_strength: 4.0,
         compute_all_features: true,
         ..Default::default()
     };

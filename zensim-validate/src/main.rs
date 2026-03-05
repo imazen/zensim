@@ -77,10 +77,6 @@ struct Args {
     #[arg(long, default_value = "box")]
     downscale_filter: String,
 
-    /// Local contrast masking strength (0 = disabled, 2-8 typical)
-    #[arg(long, default_value = "0")]
-    masking: f32,
-
     /// Number of downscale levels (default: 4, max: 6)
     #[arg(long, default_value = "4")]
     num_scales: usize,
@@ -153,7 +149,6 @@ struct CacheConfig {
     num_scales: u32,
     blur_passes: u8,
     blur_radius: u32,
-    masking_bits: u32,
 }
 
 /// Cached features without human scores (which are target-metric-dependent).
@@ -182,7 +177,7 @@ fn save_feature_cache(
     f.write_all(&config.num_scales.to_le_bytes())?;
     f.write_all(&[config.blur_passes])?;
     f.write_all(&config.blur_radius.to_le_bytes())?;
-    f.write_all(&config.masking_bits.to_le_bytes())?;
+    f.write_all(&0u32.to_le_bytes())?; // reserved (was masking_bits)
 
     let n_pairs = ds.features.len() as u32;
     let n_features = if ds.features.is_empty() {
@@ -266,7 +261,7 @@ fn load_feature_cache(
     let num_scales = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
     let blur_passes = read_bytes(&mut pos, 1)?[0];
     let blur_radius = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
-    let masking_bits = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
+    let _reserved = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
 
     if num_scales != config.num_scales {
         eprintln!(
@@ -289,14 +284,7 @@ fn load_feature_cache(
         );
         return Ok(None);
     }
-    if masking_bits != config.masking_bits {
-        eprintln!(
-            "Feature cache: masking mismatch (cache={}, current={}), recomputing",
-            f32::from_bits(masking_bits),
-            f32::from_bits(config.masking_bits)
-        );
-        return Ok(None);
-    }
+    // _reserved (was masking_bits) — no longer validated
 
     // Pair/feature counts — v2 uses u64, v3 uses u32/u16
     let (n_pairs, n_features) = if version == 2 {
@@ -412,7 +400,6 @@ fn main() {
     let compute_all = args.train || args.compute_all || cv_mode;
     let blur_passes = args.blur_passes;
     let blur_radius = args.blur_radius;
-    let masking_strength = args.masking;
     let num_scales = args.num_scales;
     let extended_features = args.extended_features;
     let extended_masking_strength = args.extended_masking_strength;
@@ -443,7 +430,6 @@ fn main() {
         num_scales: num_scales as u32,
         blur_passes,
         blur_radius: blur_radius as u32,
-        masking_bits: masking_strength.to_bits(),
     };
 
     // Load and compute primary dataset (with optional caching)
@@ -549,7 +535,7 @@ fn main() {
                             extended_masking_strength,
                             blur_passes,
                             blur_radius,
-                            masking_strength,
+
                             num_scales,
                             downscale_filter,
                             score_mapping_a: 18.0,
@@ -621,19 +607,14 @@ fn main() {
                                     .map(|p| [p.0[0], p.0[1], p.0[2]])
                                     .collect();
 
-                                let needs_full = config.masking_strength > 0.0;
-                                let precomputed = if !needs_full {
-                                    match zensim::precompute_reference_with_scales(
-                                        &src_pixels,
-                                        w as usize,
-                                        h as usize,
-                                        num_scales,
-                                    ) {
-                                        Ok(p) => Some(p),
-                                        Err(_) => return fail(group),
-                                    }
-                                } else {
-                                    None
+                                let precomputed = match zensim::precompute_reference_with_scales(
+                                    &src_pixels,
+                                    w as usize,
+                                    h as usize,
+                                    num_scales,
+                                ) {
+                                    Ok(p) => p,
+                                    Err(_) => return fail(group),
                                 };
 
                                 group
@@ -651,25 +632,14 @@ fn main() {
                                                         .pixels()
                                                         .map(|p| [p.0[0], p.0[1], p.0[2]])
                                                         .collect();
-                                                    if let Some(ref pre) = precomputed {
-                                                        zensim::compute_zensim_with_ref_and_config(
-                                                            pre,
-                                                            &dst_pixels,
-                                                            w as usize,
-                                                            h as usize,
-                                                            config,
-                                                        )
-                                                        .unwrap_or_else(|_| nan_result.clone())
-                                                    } else {
-                                                        zensim::compute_zensim_with_config(
-                                                            &src_pixels,
-                                                            &dst_pixels,
-                                                            w as usize,
-                                                            h as usize,
-                                                            config,
-                                                        )
-                                                        .unwrap_or_else(|_| nan_result.clone())
-                                                    }
+                                                    zensim::compute_zensim_with_ref_and_config(
+                                                        &precomputed,
+                                                        &dst_pixels,
+                                                        w as usize,
+                                                        h as usize,
+                                                        config,
+                                                    )
+                                                    .unwrap_or_else(|_| nan_result.clone())
                                                 }
                                             }
                                             Err(_) => nan_result.clone(),
@@ -768,7 +738,6 @@ fn main() {
                     compute_all,
                     blur_passes,
                     blur_radius,
-                    masking_strength,
                     num_scales,
                     args.target_metric,
                     extended_features,
@@ -792,7 +761,6 @@ fn main() {
             compute_all,
             blur_passes,
             blur_radius,
-            masking_strength,
             num_scales,
             args.target_metric,
             extended_features,
@@ -906,7 +874,6 @@ fn main() {
                             compute_all,
                             blur_passes,
                             blur_radius,
-                            masking_strength,
                             num_scales,
                             args.target_metric,
                             extended_features,
@@ -932,7 +899,6 @@ fn main() {
                     compute_all,
                     blur_passes,
                     blur_radius,
-                    masking_strength,
                     num_scales,
                     args.target_metric,
                     extended_features,
@@ -1234,7 +1200,6 @@ fn load_and_compute(
     compute_all: bool,
     blur_passes: u8,
     blur_radius: usize,
-    masking_strength: f32,
     num_scales: usize,
     target_metric: Option<TargetMetric>,
     extended_features: bool,
@@ -1299,7 +1264,6 @@ fn load_and_compute(
         extended_masking_strength,
         blur_passes,
         blur_radius,
-        masking_strength,
         num_scales,
         downscale_filter,
         score_mapping_a: 18.0,
@@ -1314,8 +1278,8 @@ fn load_and_compute(
     };
     let total_features = num_scales * 3 * fpc;
     eprintln!(
-        "  Config: scales={}, blur_passes={}, blur_radius={}, extended={}, masking={:.1}, downscale={:?}",
-        num_scales, blur_passes, blur_radius, extended_features, masking_strength, downscale_filter,
+        "  Config: scales={}, blur_passes={}, blur_radius={}, extended={}, downscale={:?}",
+        num_scales, blur_passes, blur_radius, extended_features, downscale_filter,
     );
     eprintln!(
         "  Features: {} per channel × 3 channels × {} scales = {} total",
@@ -1376,23 +1340,15 @@ fn load_and_compute(
             let src_pixels: Vec<[u8; 3]> =
                 src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
-            // Masking requires the full-image path;
-            // extended features are handled by the streaming path.
-            let needs_full_path = config.masking_strength > 0.0;
-
-            // Precompute reference XYB + downscale pyramid (only used on fast path)
-            let precomputed = if !needs_full_path {
-                match zensim::precompute_reference_with_scales(
-                    &src_pixels,
-                    w as usize,
-                    h as usize,
-                    num_scales,
-                ) {
-                    Ok(p) => Some(p),
-                    Err(_) => return fail(group),
-                }
-            } else {
-                None
+            // Precompute reference XYB + downscale pyramid
+            let precomputed = match zensim::precompute_reference_with_scales(
+                &src_pixels,
+                w as usize,
+                h as usize,
+                num_scales,
+            ) {
+                Ok(p) => p,
+                Err(_) => return fail(group),
             };
 
             // Compare each distorted image against the reference (parallel)
@@ -1409,25 +1365,14 @@ fn load_and_compute(
                             } else {
                                 let dst_pixels: Vec<[u8; 3]> =
                                     dst.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-                                if let Some(ref pre) = precomputed {
-                                    zensim::compute_zensim_with_ref_and_config(
-                                        pre,
-                                        &dst_pixels,
-                                        w as usize,
-                                        h as usize,
-                                        config,
-                                    )
-                                    .unwrap_or_else(|_| nan_result.clone())
-                                } else {
-                                    zensim::compute_zensim_with_config(
-                                        &src_pixels,
-                                        &dst_pixels,
-                                        w as usize,
-                                        h as usize,
-                                        config,
-                                    )
-                                    .unwrap_or_else(|_| nan_result.clone())
-                                }
+                                zensim::compute_zensim_with_ref_and_config(
+                                    &precomputed,
+                                    &dst_pixels,
+                                    w as usize,
+                                    h as usize,
+                                    config,
+                                )
+                                .unwrap_or_else(|_| nan_result.clone())
                             }
                         }
                         Err(_) => nan_result.clone(),
