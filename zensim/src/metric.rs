@@ -97,9 +97,11 @@
 //! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
 use crate::blur::{
-    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, box_blur_v_from_copy,
-    downscale_2x_inplace, fused_blur_h_ssim, pad_plane_width, simd_padded_width,
+    box_blur_1pass_into, box_blur_v_from_copy, downscale_2x_inplace, fused_blur_h_ssim,
+    pad_plane_width, simd_padded_width,
 };
+#[cfg(feature = "multiblur")]
+use crate::blur::{box_blur_2pass_into, box_blur_3pass_into};
 #[cfg(any(feature = "training", test))]
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
@@ -1404,8 +1406,18 @@ fn compute_channel(
     #[allow(clippy::type_complexity)]
     let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match effective_passes {
         1 => box_blur_1pass_into,
+        #[cfg(feature = "multiblur")]
         2 => box_blur_2pass_into,
+        #[cfg(feature = "multiblur")]
         _ => box_blur_3pass_into,
+        #[cfg(not(feature = "multiblur"))]
+        _ => {
+            debug_assert_eq!(
+                effective_passes, 1,
+                "blur_passes > 1 requires 'multiblur' feature"
+            );
+            box_blur_1pass_into
+        }
     };
 
     // Fused path: for 1-pass SSIM channels, compute all 4 H-blurs in one pass
@@ -2071,8 +2083,18 @@ fn compute_single_scale_phased(
     #[allow(clippy::type_complexity)]
     let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match blur_passes {
         1 => box_blur_1pass_into,
+        #[cfg(feature = "multiblur")]
         2 => box_blur_2pass_into,
+        #[cfg(feature = "multiblur")]
         _ => box_blur_3pass_into,
+        #[cfg(not(feature = "multiblur"))]
+        _ => {
+            debug_assert_eq!(
+                blur_passes, 1,
+                "blur_passes > 1 requires 'multiblur' feature"
+            );
+            box_blur_1pass_into
+        }
     };
 
     // Separate SSIM channels (heavy: 4 blurs) from edge-only (lighter: 2 blurs)
@@ -2905,6 +2927,7 @@ mod tests {
 
     /// BlurKernel::Box matches current blur_passes behavior.
     #[test]
+    #[cfg(feature = "multiblur")]
     fn blur_kernel_box_matches_passes() {
         let (w, h) = (64, 64);
         let (src, dst) = make_gradient_pair(w, h);

@@ -5,9 +5,11 @@
 //!   Strip-based H-blur → fused V-blur+features (parallel bands via rayon).
 
 use crate::blur::{
-    box_blur_1pass_into, box_blur_2pass_into, box_blur_3pass_into, downscale_2x_inplace,
-    fused_blur_h_mu, fused_blur_h_ssim, simd_padded_width,
+    box_blur_1pass_into, downscale_2x_inplace, fused_blur_h_mu, fused_blur_h_ssim,
+    simd_padded_width,
 };
+#[cfg(feature = "multiblur")]
+use crate::blur::{box_blur_2pass_into, box_blur_3pass_into};
 #[cfg(feature = "f16")]
 use crate::color::composite_srgb_f16_rgba_to_linear;
 use crate::color::{
@@ -790,9 +792,11 @@ fn process_strip_channel(
         return;
     }
 
-    // Fused path: 1-pass blur only (the common case for scale 0).
-    // Extended features need separate reduce calls for d8/max, so skip the fused path.
-    if config.blur_passes == 1 && !config.extended_features {
+    // Fused path: 1-pass blur (the common case for scale 0).
+    // d8/max and mu1/mu2 are now computed inline by the fused kernels.
+    if config.blur_passes == 1 {
+        let strip_acc;
+
         if need_ssim {
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
             fused_blur_h_ssim(
@@ -807,8 +811,9 @@ fn process_strip_channel(
                 config.blur_radius,
             );
 
-            // Fused V-blur + ALL feature extraction: no memory writes
-            let strip_acc = fused_vblur_features_ssim(
+            // Fused V-blur + ALL feature extraction
+            // mu1/mu2 outputs go to mask/mul_buf (mu1/mu2 still hold H-blurred values)
+            strip_acc = fused_vblur_features_ssim(
                 &bufs.mu1,
                 &bufs.mu2,
                 &bufs.sigma1_sq,
@@ -820,22 +825,13 @@ fn process_strip_channel(
                 inner_start,
                 inner_h,
                 config.blur_radius,
+                &mut bufs.mask,
+                &mut bufs.mul_buf,
             );
 
             accum.ssim_d[c] += strip_acc.ssim_d;
             accum.ssim_d4[c] += strip_acc.ssim_d4;
             accum.ssim_d2[c] += strip_acc.ssim_d2;
-            accum.edge_art[c] += strip_acc.edge_art;
-            accum.edge_art4[c] += strip_acc.edge_art4;
-            accum.edge_art2[c] += strip_acc.edge_art2;
-            accum.edge_det[c] += strip_acc.edge_det;
-            accum.edge_det4[c] += strip_acc.edge_det4;
-            accum.edge_det2[c] += strip_acc.edge_det2;
-            accum.mse[c] += strip_acc.mse;
-            accum.hf_sq_src[c] += strip_acc.hf_sq_src;
-            accum.hf_sq_dst[c] += strip_acc.hf_sq_dst;
-            accum.hf_abs_src[c] += strip_acc.hf_abs_src;
-            accum.hf_abs_dst[c] += strip_acc.hf_abs_dst;
         } else {
             // Edge-only: fused H-blur for mu1/mu2, then fused V-blur
             fused_blur_h_mu(
@@ -848,7 +844,7 @@ fn process_strip_channel(
                 config.blur_radius,
             );
 
-            let strip_acc = fused_vblur_features_edge(
+            strip_acc = fused_vblur_features_edge(
                 &bufs.mu1,
                 &bufs.mu2,
                 src_c,
@@ -858,30 +854,146 @@ fn process_strip_channel(
                 inner_start,
                 inner_h,
                 config.blur_radius,
+                &mut bufs.mask,
+                &mut bufs.mul_buf,
+            );
+        }
+
+        // Swap: mu1/mu2 now hold V-blurred values, mask/mul_buf hold H-blurred garbage
+        std::mem::swap(&mut bufs.mu1, &mut bufs.mask);
+        std::mem::swap(&mut bufs.mu2, &mut bufs.mul_buf);
+
+        // Accumulate basic features
+        accum.edge_art[c] += strip_acc.edge_art;
+        accum.edge_art4[c] += strip_acc.edge_art4;
+        accum.edge_art2[c] += strip_acc.edge_art2;
+        accum.edge_det[c] += strip_acc.edge_det;
+        accum.edge_det4[c] += strip_acc.edge_det4;
+        accum.edge_det2[c] += strip_acc.edge_det2;
+        accum.mse[c] += strip_acc.mse;
+        accum.hf_sq_src[c] += strip_acc.hf_sq_src;
+        accum.hf_sq_dst[c] += strip_acc.hf_sq_dst;
+        accum.hf_abs_src[c] += strip_acc.hf_abs_src;
+        accum.hf_abs_dst[c] += strip_acc.hf_abs_dst;
+
+        // Extended: d8/max from fused kernel
+        accum.ssim_d8[c] += strip_acc.ssim_d8;
+        accum.ssim_max[c] = accum.ssim_max[c].max(strip_acc.ssim_max);
+        accum.edge_art8[c] += strip_acc.edge_art8;
+        accum.edge_art_max[c] = accum.edge_art_max[c].max(strip_acc.edge_art_max);
+        accum.edge_det8[c] += strip_acc.edge_det8;
+        accum.edge_det_max[c] = accum.edge_det_max[c].max(strip_acc.edge_det_max);
+
+        // Extended: masked features using stored V-blurred mu1/mu2
+        if config.extended_features {
+            let inner_off = inner_start * width;
+            let inner_n = inner_h * width;
+            let strip_n = strip_h * width;
+            let k = config.extended_masking_strength;
+            let inner_src = &src_c[inner_off..inner_off + inner_n];
+            let inner_dst = &dst_c[inner_off..inner_off + inner_n];
+
+            // Step 1: |src - mu1| → mask (full strip for blur context)
+            abs_diff_into(
+                &src_c[..strip_n],
+                &bufs.mu1[..strip_n],
+                &mut bufs.mask[..strip_n],
             );
 
-            accum.edge_art[c] += strip_acc.edge_art;
-            accum.edge_art4[c] += strip_acc.edge_art4;
-            accum.edge_art2[c] += strip_acc.edge_art2;
-            accum.edge_det[c] += strip_acc.edge_det;
-            accum.edge_det4[c] += strip_acc.edge_det4;
-            accum.edge_det2[c] += strip_acc.edge_det2;
-            accum.mse[c] += strip_acc.mse;
-            accum.hf_sq_src[c] += strip_acc.hf_sq_src;
-            accum.hf_sq_dst[c] += strip_acc.hf_sq_dst;
-            accum.hf_abs_src[c] += strip_acc.hf_abs_src;
-            accum.hf_abs_dst[c] += strip_acc.hf_abs_dst;
+            // Step 2: blur the activity map → mul_buf
+            box_blur_1pass_into(
+                &bufs.mask[..strip_n],
+                &mut bufs.mul_buf[..strip_n],
+                &mut bufs.temp_blur[..strip_n],
+                width,
+                strip_h,
+                config.blur_radius,
+            );
+
+            // Step 3: mask = 1/(1+k*blurred) for inner region
+            for i in 0..inner_n {
+                bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+            }
+
+            // Step 4: masked SSIM (needs sigma_sq and sigma12 — recompute from fused H-blur)
+            if need_ssim {
+                // sigma_sq and sigma12 are NOT stored from fused pass — recompute
+                sq_sum_into(src_c, dst_c, &mut bufs.mul_buf);
+                box_blur_1pass_into(
+                    &bufs.mul_buf,
+                    &mut bufs.sigma1_sq,
+                    &mut bufs.temp_blur,
+                    width,
+                    strip_h,
+                    config.blur_radius,
+                );
+                mul_into(src_c, dst_c, &mut bufs.mul_buf);
+                box_blur_1pass_into(
+                    &bufs.mul_buf,
+                    &mut bufs.sigma12,
+                    &mut bufs.temp_blur,
+                    width,
+                    strip_h,
+                    config.blur_radius,
+                );
+
+                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+                let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
+                let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
+                let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
+                let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
+                let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                    inner_mu1,
+                    inner_mu2,
+                    inner_sig_sq,
+                    inner_sig12,
+                    inner_mask,
+                );
+                accum.masked_ssim_d[c] += sum_d;
+                accum.masked_ssim_d4[c] += sum_d4;
+                accum.masked_ssim_d2[c] += sum_d2;
+            }
+
+            // Masked edge (art_4th, det_4th)
+            if need_edge {
+                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+                let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
+                let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
+                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
+                    inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask,
+                );
+                accum.masked_art4[c] += art4;
+                accum.masked_det4[c] += det4;
+            }
+
+            // Masked MSE: Σ(src-dst)² × mask
+            let mut masked_mse_sum = 0.0f64;
+            for i in 0..inner_n {
+                let d = inner_src[i] - inner_dst[i];
+                masked_mse_sum += (d * d * bufs.mask[inner_off + i]) as f64;
+            }
+            accum.masked_mse[c] += masked_mse_sum;
         }
         return;
     }
 
-    // Separate blur + reduce fallback (multi-pass or extended features)
+    // Separate blur + reduce fallback (multi-pass only, requires 'multiblur' feature)
     #[allow(clippy::type_complexity)]
     let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match config.blur_passes
     {
         1 => box_blur_1pass_into,
+        #[cfg(feature = "multiblur")]
         2 => box_blur_2pass_into,
+        #[cfg(feature = "multiblur")]
         _ => box_blur_3pass_into,
+        #[cfg(not(feature = "multiblur"))]
+        _ => {
+            debug_assert_eq!(
+                config.blur_passes, 1,
+                "blur_passes > 1 requires 'multiblur' feature"
+            );
+            box_blur_1pass_into
+        }
     };
 
     blur_fn(
@@ -983,19 +1095,16 @@ fn process_strip_channel(
     accum.hf_abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
 
     // Extended: masked features
-    // Compute mask over the full strip (needs blur context), then use inner region.
-    // Step 1: |src - mu| → mask buffer (full strip)
-    // Step 2: blur(mask) → mul_buf (via temp_blur)
-    // Step 3: mask[i] = 1/(1+k*blurred[i]) for inner region
-    // Step 4: call masked SSIM/edge/MSE with inner mask
     if config.extended_features {
         let strip_n = strip_h * width;
         let k = config.extended_masking_strength;
 
-        // Step 1: |src - mu| → mask (full strip for blur context)
-        abs_diff_into(&src_c[..strip_n], &bufs.mu1[..strip_n], &mut bufs.mask[..strip_n]);
+        abs_diff_into(
+            &src_c[..strip_n],
+            &bufs.mu1[..strip_n],
+            &mut bufs.mask[..strip_n],
+        );
 
-        // Step 2: blur the activity map → mul_buf
         blur_fn(
             &bufs.mask[..strip_n],
             &mut bufs.mul_buf[..strip_n],
@@ -1005,26 +1114,23 @@ fn process_strip_channel(
             config.blur_radius,
         );
 
-        // Step 3: compute mask = 1/(1+k*blurred) for inner region, store in mask buffer
         for i in 0..inner_n {
             bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
         }
-        // Step 4: masked SSIM
+
         if need_ssim {
             let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
             let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
             let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
             let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
             let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
-            let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
-                inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_mask,
-            );
+            let (sum_d, sum_d4, sum_d2) =
+                ssim_channel_masked(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_mask);
             accum.masked_ssim_d[c] += sum_d;
             accum.masked_ssim_d4[c] += sum_d4;
             accum.masked_ssim_d2[c] += sum_d2;
         }
 
-        // Masked edge (art_4th, det_4th)
         if need_edge {
             let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
             let (_art, art4, _det, det4, _art2, _det2) =
@@ -1033,7 +1139,6 @@ fn process_strip_channel(
             accum.masked_det4[c] += det4;
         }
 
-        // Masked MSE: Σ(src-dst)² × mask
         let mut masked_mse_sum = 0.0f64;
         for i in 0..inner_n {
             let d = inner_src[i] - inner_dst[i];

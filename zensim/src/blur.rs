@@ -15,6 +15,7 @@ use magetypes::simd::generic::f32x16;
 
 /// Blur into pre-allocated output buffer. Uses temp as scratch.
 /// 3-pass cascade approximates Gaussian (piecewise quadratic).
+#[cfg(feature = "multiblur")]
 pub fn box_blur_3pass_into(
     input: &[f32],
     output: &mut [f32],
@@ -51,6 +52,7 @@ pub fn box_blur_1pass_into(
 
 /// 2-pass blur: triangular kernel, 33% fewer operations than 3-pass.
 /// Use with radius+1 to approximate same effective width as 3-pass with radius.
+#[cfg(feature = "multiblur")]
 pub fn box_blur_2pass_into(
     input: &[f32],
     output: &mut [f32],

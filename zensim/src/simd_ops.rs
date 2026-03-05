@@ -52,7 +52,10 @@ pub fn ssim_channel_extended(
     sum_sq: &[f32],
     sigma12: &[f32],
 ) -> (f64, f64, f64, f64, f32) {
-    incant!(ssim_channel_extended_inner(mu1, mu2, sum_sq, sigma12), [v4, v3])
+    incant!(
+        ssim_channel_extended_inner(mu1, mu2, sum_sq, sigma12),
+        [v4, v3]
+    )
 }
 
 /// Like edge_diff_channel but also computes 8th-power pool and max for artifact/detail.
@@ -1249,7 +1252,10 @@ fn edge_diff_extended_inner_v4(
         max_det = max_det.max(detail_lost);
     }
 
-    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art, max_det)
+    (
+        sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art,
+        max_det,
+    )
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -1336,7 +1342,10 @@ fn edge_diff_extended_inner_v3(
         max_det = max_det.max(detail_lost);
     }
 
-    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art, max_det)
+    (
+        sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art,
+        max_det,
+    )
 }
 
 fn edge_diff_extended_inner_scalar(
@@ -1381,5 +1390,8 @@ fn edge_diff_extended_inner_scalar(
         max_det = max_det.max(detail_lost);
     }
 
-    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art, max_det)
+    (
+        sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art,
+        max_det,
+    )
 }

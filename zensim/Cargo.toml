@@ -22,6 +22,10 @@ training = []
 imgref = ["dep:imgref", "dep:rgb"]
 ## Enable SrgbF16Rgba pixel format (requires `half` crate for IEEE 754 half-precision).
 f16 = ["dep:half"]
+## Enable multi-pass blur dispatch (2-pass triangular, 3-pass Gaussian).
+## Default 1-pass blur uses fused streaming kernels; multi-pass is dead code
+## retained for research/comparison.
+multiblur = []
 ## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
 ## Uses zenresize for resampling — training/research feature.
 zenresize = ["dep:zenresize"]
@@ -57,4 +61,4 @@ uninlined_format_args = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenpixels", "zenresize"))']
+check-cfg = ['cfg(feature, values("zenpixels", "zenresize", "multiblur"))']
