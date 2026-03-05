@@ -24,9 +24,8 @@ use crate::metric::{
 };
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
-    abs_diff_into, abs_diff_sum, edge_diff_channel, edge_diff_channel_extended,
-    edge_diff_channel_masked, mul_into, sq_diff_sum, sq_sum_into, ssim_channel,
-    ssim_channel_extended, ssim_channel_masked,
+    abs_diff_into, abs_diff_sum, edge_diff_channel_extended, edge_diff_channel_masked, mul_into,
+    sq_diff_sum, sq_sum_into, ssim_channel_extended, ssim_channel_masked,
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use rayon::prelude::*;
@@ -1050,47 +1049,28 @@ fn process_strip_channel(
     if need_ssim {
         let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
         let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
-        if config.extended_features {
-            let (sum_d, sum_d4, sum_d2, sum_d8, max_d) =
-                ssim_channel_extended(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
-            accum.ssim_d[c] += sum_d;
-            accum.ssim_d4[c] += sum_d4;
-            accum.ssim_d2[c] += sum_d2;
-            accum.ssim_d8[c] += sum_d8;
-            accum.ssim_max[c] = accum.ssim_max[c].max(max_d);
-        } else {
-            let (sum_d, sum_d4, sum_d2) =
-                ssim_channel(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
-            accum.ssim_d[c] += sum_d;
-            accum.ssim_d4[c] += sum_d4;
-            accum.ssim_d2[c] += sum_d2;
-        }
+        let (sum_d, sum_d4, sum_d2, sum_d8, max_d) =
+            ssim_channel_extended(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12);
+        accum.ssim_d[c] += sum_d;
+        accum.ssim_d4[c] += sum_d4;
+        accum.ssim_d2[c] += sum_d2;
+        accum.ssim_d8[c] += sum_d8;
+        accum.ssim_max[c] = accum.ssim_max[c].max(max_d);
     }
 
     if need_edge {
-        if config.extended_features {
-            let (art, art4, det, det4, art2, det2, art8, det8, max_art, max_det) =
-                edge_diff_channel_extended(inner_src, inner_dst, inner_mu1, inner_mu2);
-            accum.edge_art[c] += art;
-            accum.edge_art4[c] += art4;
-            accum.edge_art2[c] += art2;
-            accum.edge_art8[c] += art8;
-            accum.edge_det[c] += det;
-            accum.edge_det4[c] += det4;
-            accum.edge_det2[c] += det2;
-            accum.edge_det8[c] += det8;
-            accum.edge_art_max[c] = accum.edge_art_max[c].max(max_art);
-            accum.edge_det_max[c] = accum.edge_det_max[c].max(max_det);
-        } else {
-            let (art, art4, det, det4, art2, det2) =
-                edge_diff_channel(inner_src, inner_dst, inner_mu1, inner_mu2);
-            accum.edge_art[c] += art;
-            accum.edge_art4[c] += art4;
-            accum.edge_art2[c] += art2;
-            accum.edge_det[c] += det;
-            accum.edge_det4[c] += det4;
-            accum.edge_det2[c] += det2;
-        }
+        let (art, art4, det, det4, art2, det2, art8, det8, max_art, max_det) =
+            edge_diff_channel_extended(inner_src, inner_dst, inner_mu1, inner_mu2);
+        accum.edge_art[c] += art;
+        accum.edge_art4[c] += art4;
+        accum.edge_art2[c] += art2;
+        accum.edge_art8[c] += art8;
+        accum.edge_det[c] += det;
+        accum.edge_det4[c] += det4;
+        accum.edge_det2[c] += det2;
+        accum.edge_det8[c] += det8;
+        accum.edge_art_max[c] = accum.edge_art_max[c].max(max_art);
+        accum.edge_det_max[c] = accum.edge_det_max[c].max(max_det);
     }
 
     accum.hf_sq_src[c] += sq_diff_sum(inner_src, inner_mu1);

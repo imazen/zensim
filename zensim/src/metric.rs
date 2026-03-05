@@ -353,17 +353,21 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .zip(weights.iter())
         .map(|(&f, &w)| w * f)
         .sum();
-    // Normalize by number of scales — infer features_per_scale from the vector length.
-    // With 3 channels: basic=39 (13×3), extended=75 (25×3).
-    let features_per_scale = if features
-        .len()
-        .is_multiple_of(FEATURES_PER_CHANNEL_EXTENDED * 3)
-    {
-        FEATURES_PER_CHANNEL_EXTENDED * 3
-    } else {
-        FEATURES_PER_CHANNEL_BASIC * 3
-    };
-    let raw_distance = raw_distance / (features.len() as f64 / features_per_scale as f64).max(1.0);
+    // Normalize by number of scales.
+    // Layout: [scored × N_scales] [peaks × N_scales] [masked × N_scales]
+    // 156 = 39×4, 228 = 57×4, 300 = 75×4 — all divide by 4 scales.
+    let per_scale_candidates = [
+        FEATURES_PER_CHANNEL_EXTENDED * 3,   // 75
+        FEATURES_PER_CHANNEL_WITH_PEAKS * 3, // 57
+        FEATURES_PER_CHANNEL_BASIC * 3,      // 39
+    ];
+    let features_per_scale = per_scale_candidates
+        .iter()
+        .copied()
+        .find(|&ps| ps > 0 && features.len() % ps == 0)
+        .unwrap_or(FEATURES_PER_CHANNEL_BASIC * 3);
+    let n_scales = features.len() / features_per_scale;
+    let raw_distance = raw_distance / n_scales.max(1) as f64;
     (distance_to_score(raw_distance), raw_distance)
 }
 
@@ -1047,6 +1051,8 @@ fn compute_with_config_inner(
     if images_byte_identical(source, distorted) {
         let fpc = if config.extended_features {
             FEATURES_PER_CHANNEL_EXTENDED
+        } else if config.compute_all_features {
+            FEATURES_PER_CHANNEL_WITH_PEAKS
         } else {
             FEATURES_PER_CHANNEL_BASIC
         };
@@ -1112,7 +1118,7 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
     }
 }
 
-/// Features per channel per scale: 13 features always emitted.
+/// Features per channel per scale: 19 features always emitted.
 ///
 /// ```text
 ///  Index  Name             Pooling  Source
@@ -1130,29 +1136,39 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
 ///  10     hf_energy_loss   ratio    1 - Σ(dst-mu)²/Σ(src-mu)²
 ///  11     hf_mag_loss      ratio    1 - Σ|dst-mu|/Σ|src-mu|
 ///  12     hf_energy_gain   ratio    Σ(dst-mu)²/Σ(src-mu)² - 1
+///  13     ssim_max         max      per-pixel SSIM error
+///  14     art_max          max      per-pixel edge artifact
+///  15     det_max          max      per-pixel edge detail_lost
+///  16     ssim_l8          L8       (Σd⁸/N)^(1/8) SSIM error
+///  17     art_l8           L8       (Σd⁸/N)^(1/8) edge artifact
+///  18     det_l8           L8       (Σd⁸/N)^(1/8) edge detail_lost
 /// ```
 ///
 /// Total features = `num_scales × 3 channels × 13` = 156 at 4 scales.
+///
+/// Note: 6 additional "peak" features (max/l8) are always computed
+/// but only included when `compute_all_features` is true. This keeps
+/// the default feature vector compatible with existing profiles.
 pub const FEATURES_PER_CHANNEL_BASIC: usize = 13;
 
-/// Extended features per channel per scale: 25 features (13 basic + 12 extended).
+/// Features per channel when `compute_all_features` is true: 19 features
+/// (13 basic + 6 peak/l8). Peak features are always computed (near-zero cost)
+/// but excluded from the default feature vector for profile compatibility.
+pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize = 19;
+
+/// Extended features per channel per scale: 25 features (19 with peaks + 6 masked).
 ///
 /// ```text
 ///  Index  Name               Pooling  Source
 ///  ─────  ─────────────────  ───────  ──────────────────
-///  0–12   (same as basic)
-///  13     masked_ssim_mean   mean     SSIM × flatness mask
-///  14     masked_ssim_4th    L4       SSIM × flatness mask
-///  15     masked_ssim_2nd    L2       SSIM × flatness mask
-///  16     masked_art_4th     L4       edge artifact × flatness mask
-///  17     masked_det_4th     L4       edge detail_lost × flatness mask
-///  18     masked_mse         mean     (src-dst)² × flatness mask
-///  19     ssim_max           max      per-pixel SSIM error
-///  20     art_max            max      per-pixel edge artifact
-///  21     det_max            max      per-pixel edge detail_lost
-///  22     ssim_l8            L8       (Σd⁸/N)^(1/8) SSIM error
-///  23     art_l8             L8       (Σd⁸/N)^(1/8) edge artifact
-///  24     det_l8             L8       (Σd⁸/N)^(1/8) edge detail_lost
+///  0–12   (same as basic 13)
+///  13–18  (same as peak features: max/l8)
+///  19     masked_ssim_mean   mean     SSIM × flatness mask
+///  20     masked_ssim_4th    L4       SSIM × flatness mask
+///  21     masked_ssim_2nd    L2       SSIM × flatness mask
+///  22     masked_art_4th     L4       edge artifact × flatness mask
+///  23     masked_det_4th     L4       edge detail_lost × flatness mask
+///  24     masked_mse         mean     (src-dst)² × flatness mask
 /// ```
 ///
 /// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
@@ -1188,6 +1204,8 @@ pub fn compute_zensim_with_config(
     if source == distorted {
         let fpc = if config.extended_features {
             FEATURES_PER_CHANNEL_EXTENDED
+        } else if config.compute_all_features {
+            FEATURES_PER_CHANNEL_WITH_PEAKS
         } else {
             FEATURES_PER_CHANNEL_BASIC
         };
@@ -1625,7 +1643,6 @@ fn compute_channel(
         // Compute extended masking weights (separate from basic masking)
         // mask[i] = 1 / (1 + k * blur(|src - mu1|))
         if !masked {
-            // Need to compute the mask — basic masking wasn't enabled
             abs_diff_into(src_c, &bufs.mu1, &mut bufs.mul_buf);
             blur_fn(
                 &bufs.mul_buf,
@@ -1640,7 +1657,6 @@ fn compute_channel(
                 bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
             }
         } else if (config.masking_strength - config.extended_masking_strength).abs() > 1e-6 {
-            // Basic masking used a different strength — recompute
             abs_diff_into(src_c, &bufs.mu1, &mut bufs.mul_buf);
             blur_fn(
                 &bufs.mul_buf,
@@ -1655,9 +1671,8 @@ fn compute_channel(
                 bufs.mask[i] = 1.0 / (1.0 + k * bufs.mask[i]);
             }
         }
-        // else: basic masking used the same strength — mask already in bufs.mask
 
-        // Masked SSIM (3 values)
+        // Masked SSIM
         if need_ssim {
             let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
                 &bufs.mu1,
@@ -1671,7 +1686,7 @@ fn compute_channel(
             masked_ssim[2] = (sum_d2 * one_over_n).sqrt();
         }
 
-        // Masked edge (art_4th, det_4th)
+        // Masked edge
         if need_edge {
             let (_art, art4, _det, det4, _art2, _det2) =
                 edge_diff_channel_masked(src_c, dst_c, &bufs.mu1, &bufs.mu2, &bufs.mask);
@@ -1679,7 +1694,7 @@ fn compute_channel(
             masked_det_4th = (det4 * one_over_n).powf(0.25);
         }
 
-        // Masked MSE: Σ(src-dst)² × mask / N
+        // Masked MSE
         {
             let mut sum = 0.0f64;
             for i in 0..n {
@@ -1688,77 +1703,74 @@ fn compute_channel(
             }
             masked_mse = sum * one_over_n;
         }
+    }
 
-        // Per-pixel error maps for max and p95
-        bufs.ensure_extended_maps(n);
+    // Peak features (max + L8): always computed, near-zero cost in streaming
+    // path (fused inline). Full-image path uses per-pixel error maps.
+    bufs.ensure_extended_maps(n);
 
-        // Write SSIM per-pixel error map + track max
+    if need_ssim {
+        let c2 = 0.0009f32;
+        let mut max_d = 0.0f32;
+        for i in 0..n {
+            let mu_diff = bufs.mu1[i] - bufs.mu2[i];
+            let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+            let num_s = 2.0f32.mul_add((-bufs.mu1[i]).mul_add(bufs.mu2[i], bufs.sigma12[i]), c2);
+            let denom_s = (-bufs.mu2[i]).mul_add(
+                bufs.mu2[i],
+                (-bufs.mu1[i]).mul_add(bufs.mu1[i], bufs.sigma1_sq[i]),
+            ) + c2;
+            let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+            bufs.ssim_map[i] = d;
+            max_d = max_d.max(d);
+        }
+        ssim_max_val = max_d as f64;
+    }
+
+    if need_edge {
+        let mut max_art = 0.0f32;
+        let mut max_det = 0.0f32;
+        for i in 0..n {
+            let diff1 = (src_c[i] - bufs.mu1[i]).abs();
+            let diff2 = (dst_c[i] - bufs.mu2[i]).abs();
+            let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+            let artifact = d1.max(0.0f32);
+            let detail_lost = (-d1).max(0.0f32);
+            bufs.art_map[i] = artifact;
+            bufs.det_map[i] = detail_lost;
+            max_art = max_art.max(artifact);
+            max_det = max_det.max(detail_lost);
+        }
+        art_max_val = max_art as f64;
+        det_max_val = max_det as f64;
+    }
+
+    if n > 0 {
+        let one_over_n_f = 1.0 / n as f64;
         if need_ssim {
-            let c2 = 0.0009f32;
-            let mut max_d = 0.0f32;
-            for i in 0..n {
-                let mu_diff = bufs.mu1[i] - bufs.mu2[i];
-                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-                let num_s =
-                    2.0f32.mul_add((-bufs.mu1[i]).mul_add(bufs.mu2[i], bufs.sigma12[i]), c2);
-                let denom_s = (-bufs.mu2[i]).mul_add(
-                    bufs.mu2[i],
-                    (-bufs.mu1[i]).mul_add(bufs.mu1[i], bufs.sigma1_sq[i]),
-                ) + c2;
-                let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
-                bufs.ssim_map[i] = d;
-                max_d = max_d.max(d);
+            let mut sum_d8 = 0.0f64;
+            for &d in &bufs.ssim_map[..n] {
+                let d2 = d * d;
+                let d4 = d2 * d2;
+                sum_d8 += (d4 * d4) as f64;
             }
-            ssim_max_val = max_d as f64;
+            ssim_p95 = (sum_d8 * one_over_n_f).powf(0.125);
         }
-
-        // Write edge per-pixel maps + track max
         if need_edge {
-            let mut max_art = 0.0f32;
-            let mut max_det = 0.0f32;
-            for i in 0..n {
-                let diff1 = (src_c[i] - bufs.mu1[i]).abs();
-                let diff2 = (dst_c[i] - bufs.mu2[i]).abs();
-                let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-                let artifact = d1.max(0.0f32);
-                let detail_lost = (-d1).max(0.0f32);
-                bufs.art_map[i] = artifact;
-                bufs.det_map[i] = detail_lost;
-                max_art = max_art.max(artifact);
-                max_det = max_det.max(detail_lost);
+            let mut sum_art8 = 0.0f64;
+            let mut sum_det8 = 0.0f64;
+            for &d in &bufs.art_map[..n] {
+                let d2 = d * d;
+                let d4 = d2 * d2;
+                sum_art8 += (d4 * d4) as f64;
             }
-            art_max_val = max_art as f64;
-            det_max_val = max_det as f64;
-        }
-
-        // L8 power pool: (Σd^8/N)^(1/8), computed from per-pixel maps
-        if n > 0 {
-            let one_over_n_f = 1.0 / n as f64;
-            if need_ssim {
-                let mut sum_d8 = 0.0f64;
-                for &d in &bufs.ssim_map[..n] {
-                    let d2 = d * d;
-                    let d4 = d2 * d2;
-                    sum_d8 += (d4 * d4) as f64;
-                }
-                ssim_p95 = (sum_d8 * one_over_n_f).powf(0.125);
+            for &d in &bufs.det_map[..n] {
+                let d2 = d * d;
+                let d4 = d2 * d2;
+                sum_det8 += (d4 * d4) as f64;
             }
-            if need_edge {
-                let mut sum_art8 = 0.0f64;
-                let mut sum_det8 = 0.0f64;
-                for &d in &bufs.art_map[..n] {
-                    let d2 = d * d;
-                    let d4 = d2 * d2;
-                    sum_art8 += (d4 * d4) as f64;
-                }
-                for &d in &bufs.det_map[..n] {
-                    let d2 = d * d;
-                    let d4 = d2 * d2;
-                    sum_det8 += (d4 * d4) as f64;
-                }
-                art_p95 = (sum_art8 * one_over_n_f).powf(0.125);
-                det_p95 = (sum_det8 * one_over_n_f).powf(0.125);
-            }
+            art_p95 = (sum_art8 * one_over_n_f).powf(0.125);
+            det_p95 = (sum_det8 * one_over_n_f).powf(0.125);
         }
     }
 
@@ -2366,9 +2378,9 @@ fn compute_single_scale_phased(
 /// - Mean vs 4th-power pooling
 ///
 /// Weights are trained against synthetic quality scores (see `weights/` directory).
-/// Total number of features per scale (3 channels × 13 features = 39)
+/// Features per scale for the default scoring profile (3 channels × 13 features = 39).
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
-pub const FEATURES_PER_SCALE: usize = 39;
+pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_BASIC * 3;
 
 /// Trained weights from v2 synthetic dataset (163k image pairs, 149.5k valid).
 ///
@@ -2547,56 +2559,53 @@ pub(crate) fn combine_scores(
     mean_offset: [f64; 3],
 ) -> ZensimResult {
     let extended = config.extended_features;
-    let features_per_ch = if extended {
-        FEATURES_PER_CHANNEL_EXTENDED
-    } else {
-        FEATURES_PER_CHANNEL_BASIC
-    };
-    let features_per_scale = features_per_ch * 3;
+    let compute_all = config.compute_all_features;
+    let include_peaks = compute_all || extended;
 
-    let mut features = Vec::with_capacity(scale_stats.len() * features_per_scale);
+    // Feature vector layout:
+    //   [0..N_scored)       — 13/ch × 3ch × n_scales, same order as WEIGHTS
+    //   [N_scored..N_peaks) — 6/ch × 3ch × n_scales peak features (if compute_all/extended)
+    //   [N_peaks..N_all)    — 6/ch × 3ch × n_scales masked features (if extended)
+    //
+    // Scored features are always at the front in WEIGHTS-compatible layout.
+    // Extra features are appended at the end. This means features[0..WEIGHTS.len()]
+    // always produces the same dot product as the old 13/ch layout.
+    let n_scales = scale_stats.len();
+    let scored_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
+    let scored_total = n_scales * scored_per_ch * 3;
+    let peak_total = if include_peaks { n_scales * 6 * 3 } else { 0 };
+    let masked_total = if extended { n_scales * 6 * 3 } else { 0 };
+    let total = scored_total + peak_total + masked_total;
+
+    let mut features = Vec::with_capacity(total);
     let mut raw_distance = 0.0f64;
 
+    // Pass 1: scored features (13/ch, weight-compatible order)
     for ss in scale_stats.iter() {
         for c in 0..3 {
-            // .abs() is defensive — all these values are non-negative by construction
-            // (SSIM errors are clamped ≥0, edge features use max(0,...), etc.)
-            // but abs ensures no -0.0 or floating-point edge cases affect training.
-
-            // 0-2: ssim_mean, ssim_4th, ssim_2nd
             features.push(ss.ssim[c * 2].abs());
             features.push(ss.ssim[c * 2 + 1].abs());
             features.push(ss.ssim_2nd[c].abs());
-            // 3-5: art_mean, art_4th, art_2nd
             features.push(ss.edge[c * 4].abs());
             features.push(ss.edge[c * 4 + 1].abs());
             features.push(ss.edge_2nd[c * 2].abs());
-            // 6-8: det_mean, det_4th, det_2nd
             features.push(ss.edge[c * 4 + 2].abs());
             features.push(ss.edge[c * 4 + 3].abs());
             features.push(ss.edge_2nd[c * 2 + 1].abs());
-            // 9-12: mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
             features.push(ss.mse[c]);
             features.push(ss.hf_energy_loss[c]);
             features.push(ss.hf_mag_loss[c]);
             features.push(ss.hf_energy_gain[c]);
+        }
+    }
 
-            if extended {
-                // 13-15: masked_ssim_mean, masked_ssim_4th, masked_ssim_2nd
-                features.push(ss.masked_ssim[c * 3].abs());
-                features.push(ss.masked_ssim[c * 3 + 1].abs());
-                features.push(ss.masked_ssim[c * 3 + 2].abs());
-                // 16: masked_art_4th
-                features.push(ss.masked_art_4th[c].abs());
-                // 17: masked_det_4th
-                features.push(ss.masked_det_4th[c].abs());
-                // 18: masked_mse
-                features.push(ss.masked_mse[c]);
-                // 19-21: ssim_max, art_max, det_max
+    // Pass 2: peak features (6/ch — max + L8, always computed at near-zero cost)
+    if include_peaks {
+        for ss in scale_stats.iter() {
+            for c in 0..3 {
                 features.push(ss.ssim_max[c]);
                 features.push(ss.art_max[c]);
                 features.push(ss.det_max[c]);
-                // 22-24: ssim_p95, art_p95, det_p95
                 features.push(ss.ssim_p95[c]);
                 features.push(ss.art_p95[c]);
                 features.push(ss.det_p95[c]);
@@ -2604,8 +2613,22 @@ pub(crate) fn combine_scores(
         }
     }
 
-    // Apply weights — only up to weights.len(), extra features get weight 0
-    for (i, &feat) in features.iter().enumerate() {
+    // Pass 3: masked features (6/ch — expensive, training only)
+    if extended {
+        for ss in scale_stats.iter() {
+            for c in 0..3 {
+                features.push(ss.masked_ssim[c * 3].abs());
+                features.push(ss.masked_ssim[c * 3 + 1].abs());
+                features.push(ss.masked_ssim[c * 3 + 2].abs());
+                features.push(ss.masked_art_4th[c].abs());
+                features.push(ss.masked_det_4th[c].abs());
+                features.push(ss.masked_mse[c]);
+            }
+        }
+    }
+
+    // Apply weights — first N_scored features match WEIGHTS layout exactly
+    for (i, &feat) in features[..scored_total].iter().enumerate() {
         if i < weights.len() {
             raw_distance += feat * weights[i];
         }
@@ -2674,8 +2697,9 @@ mod tests {
             all_result.score,
         );
 
-        // compute_all should have all features populated (nonzero for most)
-        assert_eq!(all_result.features.len(), default_result.features.len());
+        // compute_all includes peak features: 228 vs default 156
+        assert_eq!(all_result.features.len(), 228);
+        assert_eq!(default_result.features.len(), 156);
         // With compute_all, previously-skipped channels should now have nonzero features
         let all_nonzero = all_result
             .features
@@ -2738,10 +2762,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(basic.features.len(), 156);
-        assert_eq!(extended.features.len(), 156);
+        // compute_all_features includes peak features → 156 + 72 = 228
+        assert_eq!(extended.features.len(), 228);
+        // Score should be the same — peak features have zero weight
         assert!(
             (basic.score - extended.score).abs() < 0.01,
-            "basic {} vs extended-false {}",
+            "basic {} vs compute_all {}",
             basic.score,
             extended.score,
         );
@@ -2795,15 +2821,21 @@ mod tests {
         )
         .unwrap();
 
-        // Feature layout per channel: 25 features, 3 channels per scale, 4 scales
-        let fpc = FEATURES_PER_CHANNEL_EXTENDED;
+        // Feature layout (block-separated):
+        //   [0..156)   scored: 13/ch × 3ch × 4 scales
+        //   [156..228)  peaks: 6/ch × 3ch × 4 scales
+        //   [228..300) masked: 6/ch × 3ch × 4 scales
+        let scored_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
+        let peaks_offset = 4 * scored_per_ch * 3; // 156
+        let peaks_per_ch = 6;
         for scale in 0..4 {
             for ch in 0..3 {
-                let base = scale * fpc * 3 + ch * fpc;
-                let ssim_mean = result.features[base]; // index 0
-                let ssim_4th = result.features[base + 1]; // index 1
-                let ssim_max = result.features[base + 19]; // index 19
-                let ssim_p95 = result.features[base + 22]; // index 22
+                let scored_base = scale * scored_per_ch * 3 + ch * scored_per_ch;
+                let peaks_base = peaks_offset + scale * peaks_per_ch * 3 + ch * peaks_per_ch;
+                let ssim_mean = result.features[scored_base]; // scored[0]
+                let ssim_4th = result.features[scored_base + 1]; // scored[1]
+                let ssim_max = result.features[peaks_base]; // peaks[0]
+                let ssim_p95 = result.features[peaks_base + 3]; // peaks[3]
 
                 // max >= 4th >= mean (4th is L4 norm, always >= mean for non-negative values)
                 assert!(
@@ -2885,16 +2917,23 @@ mod tests {
         )
         .unwrap();
 
-        let fpc = FEATURES_PER_CHANNEL_EXTENDED;
+        // Feature layout (block-separated):
+        //   [0..156)   scored: 13/ch × 3ch × 4 scales
+        //   [156..228)  peaks: 6/ch × 3ch × 4 scales
+        //   [228..300) masked: 6/ch × 3ch × 4 scales
+        let scored_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
+        let masked_offset = 4 * scored_per_ch * 3 + 4 * 6 * 3; // 156 + 72 = 228
+        let masked_per_ch = 6;
         for scale in 0..4 {
             for ch in 0..3 {
-                let base = scale * fpc * 3 + ch * fpc;
-                let ssim_mean = result.features[base]; // 0
-                let ssim_4th = result.features[base + 1]; // 1
-                let ssim_2nd = result.features[base + 2]; // 2
-                let masked_ssim_mean = result.features[base + 13]; // 13
-                let masked_ssim_4th = result.features[base + 14]; // 14
-                let masked_ssim_2nd = result.features[base + 15]; // 15
+                let scored_base = scale * scored_per_ch * 3 + ch * scored_per_ch;
+                let masked_base = masked_offset + scale * masked_per_ch * 3 + ch * masked_per_ch;
+                let ssim_mean = result.features[scored_base]; // scored[0]
+                let ssim_4th = result.features[scored_base + 1]; // scored[1]
+                let ssim_2nd = result.features[scored_base + 2]; // scored[2]
+                let masked_ssim_mean = result.features[masked_base]; // masked[0]
+                let masked_ssim_4th = result.features[masked_base + 1]; // masked[1]
+                let masked_ssim_2nd = result.features[masked_base + 2]; // masked[2]
 
                 // Masked values should be <= unmasked (mask weights ∈ [0,1])
                 assert!(

@@ -210,13 +210,16 @@ fn pixel_format_equivalence() {
     }
 }
 
-/// All 156 features must be non-trivial (max > 1e-6 across all 8 test pairs).
+/// All features must be non-trivial (max > 1e-6 across all 8 test pairs).
+/// Layout: [0..156) scored (13/ch × 3ch × 4), [156..228) peaks (6/ch × 3ch × 4)
 #[cfg(feature = "training")]
 #[test]
 fn feature_coverage() {
     const W: usize = 128;
     const H: usize = 128;
-    const NUM_FEATURES: usize = 156;
+    const NUM_SCORED: usize = 156; // 13 × 3 × 4
+    const NUM_PEAKS: usize = 72; // 6 × 3 × 4
+    const NUM_FEATURES: usize = NUM_SCORED + NUM_PEAKS; // 228
     let z = Zensim::new(ZensimProfile::latest());
     let pairs = generate_test_pairs(W, H);
 
@@ -241,7 +244,7 @@ fn feature_coverage() {
         }
     }
 
-    let feature_names = [
+    let scored_names = [
         "ssim_mean",
         "ssim_4th",
         "ssim_2nd",
@@ -256,15 +259,26 @@ fn feature_coverage() {
         "hf_mag_loss",
         "hf_energy_gain",
     ];
+    let peak_names = [
+        "ssim_max", "art_max", "det_max", "ssim_p95", "art_p95", "det_p95",
+    ];
 
     let mut dead_features = Vec::new();
     for (i, &max_val) in max_per_feature.iter().enumerate() {
-        let scale = i / 39;
-        let within = i % 39;
-        let ch = within / 13;
-        let fi = within % 13;
-        let ch_name = ["X", "Y", "B"][ch];
-        let f_name = feature_names[fi];
+        let (scale, ch_name, f_name) = if i < NUM_SCORED {
+            let scale = i / 39;
+            let within = i % 39;
+            let ch = within / 13;
+            let fi = within % 13;
+            (scale, ["X", "Y", "B"][ch], scored_names[fi])
+        } else {
+            let pi = i - NUM_SCORED;
+            let scale = pi / 18;
+            let within = pi % 18;
+            let ch = within / 6;
+            let fi = within % 6;
+            (scale, ["X", "Y", "B"][ch], peak_names[fi])
+        };
 
         if max_val <= 1e-6 {
             dead_features.push(format!(
