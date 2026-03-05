@@ -552,8 +552,7 @@ fn main() {
                                     .map(|p| [p.0[0], p.0[1], p.0[2]])
                                     .collect();
 
-                                let needs_full = config.extended_features
-                                    || config.masking_strength > 0.0;
+                                let needs_full = config.masking_strength > 0.0;
                                 let precomputed = if !needs_full {
                                     match zensim::precompute_reference_with_scales(
                                         &src_pixels,
@@ -1245,7 +1244,7 @@ fn load_and_compute(
     );
     if config.extended_features {
         eprintln!(
-            "  Extended: masked_strength={:.1}, path=full-image (no streaming precompute)",
+            "  Extended: masked_strength={:.1}, path=streaming",
             extended_masking_strength
         );
     }
@@ -1298,9 +1297,9 @@ fn load_and_compute(
             let src_pixels: Vec<[u8; 3]> =
                 src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
 
-            // Extended features and masking require the full-image path;
-            // the streaming precomputed-reference path doesn't support them.
-            let needs_full_path = config.extended_features || config.masking_strength > 0.0;
+            // Masking requires the full-image path;
+            // extended features are handled by the streaming path.
+            let needs_full_path = config.masking_strength > 0.0;
 
             // Precompute reference XYB + downscale pyramid (only used on fast path)
             let precomputed = if !needs_full_path {
