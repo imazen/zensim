@@ -24,6 +24,7 @@ pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
 ///   num_m = 1 - (mu1 - mu2)^2
 ///   num_s = 2*sigma12 - 2*mu1*mu2 + C2
 ///   denom_s = sum_sq - mu1^2 - mu2^2 + C2  (sum_sq = blur(src^2 + dst^2))
+#[cfg(feature = "full_image")]
 pub fn ssim_channel(mu1: &[f32], mu2: &[f32], sum_sq: &[f32], sigma12: &[f32]) -> (f64, f64, f64) {
     incant!(ssim_channel_inner(mu1, mu2, sum_sq, sigma12), [v4, v3])
 }
@@ -98,6 +99,7 @@ pub fn edge_diff_channel_masked(
 
 /// Compute edge difference features for a single channel.
 /// Returns (artifact_mean, artifact_4th, detail_lost_mean, detail_lost_4th, artifact_2nd, detail_lost_2nd).
+#[cfg(feature = "full_image")]
 pub fn edge_diff_channel(
     img1: &[f32],
     img2: &[f32],
@@ -322,7 +324,7 @@ fn mul_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], ou
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "full_image"))]
 #[arcane]
 fn ssim_channel_inner_v4(
     token: archmage::X64V4Token,
@@ -377,7 +379,7 @@ fn ssim_channel_inner_v4(
     (sum_d, sum_d4, sum_d2)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "full_image"))]
 #[arcane]
 fn ssim_channel_inner_v3(
     token: archmage::X64V3Token,
@@ -432,6 +434,7 @@ fn ssim_channel_inner_v3(
     (sum_d, sum_d4, sum_d2)
 }
 
+#[cfg(feature = "full_image")]
 fn ssim_channel_inner_scalar(
     _token: archmage::ScalarToken,
     mu1: &[f32],
@@ -459,7 +462,7 @@ fn ssim_channel_inner_scalar(
     (sum_d, sum_d4, sum_d2)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "full_image"))]
 #[arcane]
 fn edge_diff_inner_v4(
     token: archmage::X64V4Token,
@@ -528,7 +531,7 @@ fn edge_diff_inner_v4(
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", feature = "full_image"))]
 #[arcane]
 fn edge_diff_inner_v3(
     token: archmage::X64V3Token,
@@ -598,6 +601,7 @@ fn edge_diff_inner_v3(
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
+#[cfg(feature = "full_image")]
 fn edge_diff_inner_scalar(
     _token: archmage::ScalarToken,
     img1: &[f32],

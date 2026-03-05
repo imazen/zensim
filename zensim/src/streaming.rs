@@ -40,7 +40,8 @@ static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(N
 /// Should we use the streaming path for this image size?
 /// Benchmarking shows streaming band processing wins at all sizes (down to 98k pixels),
 /// so this always returns true for non-trivial images.
-#[cfg(any(feature = "training", test))]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 pub(crate) fn should_use_streaming(_width: usize, _height: usize) -> bool {
     true
 }

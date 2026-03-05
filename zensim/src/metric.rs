@@ -96,16 +96,24 @@
 //! scale count, then mapped to a 0–100 score via:
 //! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
+#[cfg(feature = "full_image")]
+#[allow(unused_imports)]
 use crate::blur::{
     box_blur_1pass_into, box_blur_v_from_copy, downscale_2x_inplace, fused_blur_h_ssim,
     pad_plane_width, simd_padded_width,
 };
-#[cfg(feature = "multiblur")]
+#[cfg(all(feature = "full_image", feature = "multiblur"))]
+#[allow(unused_imports)]
 use crate::blur::{box_blur_2pass_into, box_blur_3pass_into};
-#[cfg(any(feature = "training", test))]
+#[cfg(feature = "full_image")]
+#[allow(unused_imports)]
 use crate::color::srgb_to_positive_xyb_planar;
 use crate::error::ZensimError;
+#[cfg(feature = "full_image")]
+#[allow(unused_imports)]
 use crate::pool::ScaleBuffers;
+#[cfg(feature = "full_image")]
+#[allow(unused_imports)]
 use crate::simd_ops::{
     abs_diff_into, abs_diff_sum, edge_diff_channel, edge_diff_channel_masked, mul_into,
     sq_diff_sum, sq_sum_into, ssim_channel, ssim_channel_masked,
@@ -1066,38 +1074,7 @@ fn compute_with_config_inner(
         };
     }
 
-    let masked = config.masking_strength > 0.0;
-    if !masked {
-        return crate::streaming::compute_zensim_streaming(source, distorted, config, weights);
-    }
-
-    // Full-image path: materialize XYB planes, pad, compute stats
-    let width = source.width();
-    let height = source.height();
-    let padded_width = simd_padded_width(width);
-
-    let (mut src_xyb, mut dst_xyb) = std::thread::scope(|s| {
-        let src_handle =
-            s.spawn(|| crate::streaming::convert_source_to_xyb_parallel(source, padded_width));
-        let dst_xyb = crate::streaming::convert_source_to_xyb_parallel(distorted, padded_width);
-        let src_xyb = src_handle.join().unwrap();
-        (src_xyb, dst_xyb)
-    });
-
-    // Pad if needed (convert_source_to_xyb_parallel already pads to padded_width)
-    if padded_width != width {
-        for c in 0..3 {
-            pad_plane_width(&mut src_xyb[c], width, height, padded_width);
-            pad_plane_width(&mut dst_xyb[c], width, height, padded_width);
-        }
-    }
-
-    // Compute mean_offset while XYB planes are cache-hot (before compute_multiscale_stats takes ownership)
-    let mean_offset =
-        crate::streaming::compute_xyb_mean_offset(&src_xyb, &dst_xyb, width, height, padded_width);
-
-    let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, config);
-    combine_scores(&scale_stats, masked, weights, config, mean_offset)
+    crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
 }
 
 fn config_from_params(params: &ProfileParams) -> ZensimConfig {
@@ -1442,45 +1419,17 @@ pub fn compute_zensim_with_config(
     let src_img = crate::source::RgbSlice::new(source, width, height);
     let dst_img = crate::source::RgbSlice::new(distorted, width, height);
 
-    // Use streaming path for non-masked images (faster at all sizes)
-    let masked = config.masking_strength > 0.0;
-    if !masked && crate::streaming::should_use_streaming(width, height) {
-        let result =
-            crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS);
-        return Ok(result);
-    }
-
-    // Full-image path for small images or masking mode
-    // Convert both images to planar positive XYB in parallel
-    let (mut src_xyb, mut dst_xyb) = std::thread::scope(|s| {
-        let src_handle = s.spawn(|| srgb_to_positive_xyb_planar(source));
-        let dst_xyb = srgb_to_positive_xyb_planar(distorted);
-        let src_xyb = src_handle.join().unwrap();
-        (src_xyb, dst_xyb)
-    });
-
-    // Pad plane widths to multiple of 16 for consistent SIMD utilization
-    let padded_width = simd_padded_width(width);
-    if padded_width != width {
-        for c in 0..3 {
-            pad_plane_width(&mut src_xyb[c], width, height, padded_width);
-            pad_plane_width(&mut dst_xyb[c], width, height, padded_width);
-        }
-    }
-
-    // Compute mean_offset while XYB planes are cache-hot
-    let mean_offset =
-        crate::streaming::compute_xyb_mean_offset(&src_xyb, &dst_xyb, width, height, padded_width);
-
-    // Compute multi-scale statistics (take ownership to avoid clone)
-    let scale_stats = compute_multiscale_stats(src_xyb, dst_xyb, padded_width, height, &config);
-
-    // Combine with weights to produce final score
-    let result = combine_scores(&scale_stats, masked, &WEIGHTS, &config, mean_offset);
+    let result = crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS);
     Ok(result)
 }
 
+// --- Full-image path (gated behind `full_image` feature) ---
+// Materializes entire XYB planes in memory. The streaming path is faster at all sizes
+// and handles all public API calls. This code is retained for research with masking_strength > 0.
+
 /// Downscale all 6 planes (3 src + 3 dst) by 2× using the specified filter.
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn downscale_planes(
     src: &mut [Vec<f32>; 3],
     dst: &mut [Vec<f32>; 3],
@@ -1534,6 +1483,8 @@ fn downscale_planes(
 }
 
 /// Compute per-scale SSIM and edge statistics.
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn compute_multiscale_stats(
     src_xyb: [Vec<f32>; 3],
     dst_xyb: [Vec<f32>; 3],
@@ -1596,6 +1547,8 @@ fn compute_multiscale_stats(
 }
 
 /// Per-channel result from compute_channel.
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 struct ChannelResult {
     ssim: [f64; 2],      // [mean_d, root4_d]
     edge: [f64; 4],      // [art_mean, art_4th, det_mean, det_4th]
@@ -1620,6 +1573,8 @@ struct ChannelResult {
 /// Compute SSIM and/or edge features for a single channel.
 /// Self-contained: allocates its own buffers to enable parallel execution.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn compute_channel(
     src_c: &[f32],
     dst_c: &[f32],
@@ -2017,11 +1972,15 @@ fn compute_channel(
 
 /// Minimum pixel count to justify phased parallel blur (2 sync points, 3 threads).
 /// Below this, sequential is faster due to thread overhead.
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 const PARALLEL_THRESHOLD: usize = 100_000;
 
 /// Compute SSIM and edge statistics for a single scale.
 /// Uses phased blur parallelism for large scales (non-masking mode only).
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 pub(crate) fn compute_single_scale(
     src: &[Vec<f32>; 3],
     dst: &[Vec<f32>; 3],
@@ -2167,6 +2126,8 @@ pub(crate) fn compute_single_scale(
     }
 }
 
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn store_channel_result(
     c: usize,
     result: &ChannelResult,
@@ -2185,6 +2146,8 @@ fn store_channel_result(
 /// Measures loss or gain of local detail by comparing (pixel - blur(pixel))
 /// between source and distorted. mu1/mu2 must already contain blurred src/dst.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn compute_hf_features(
     src_c: &[f32],
     dst_c: &[f32],
@@ -2222,6 +2185,8 @@ fn compute_hf_features(
 /// Compute SSIM (and optionally edge) for a single channel sequentially.
 /// Used for additional SSIM channels beyond the first in the phased path.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn compute_ssim_channel_sequential(
     src_c: &[f32],
     dst_c: &[f32],
@@ -2291,6 +2256,8 @@ fn compute_ssim_channel_sequential(
 /// Phase 2: blur(sigma_sq) || blur(sigma12_or_ch1_src) — balanced work
 /// Phase 3: blur(ch1_dst_if_needed) + all reductions
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 fn compute_single_scale_phased(
     src: &[Vec<f32>; 3],
     dst: &[Vec<f32>; 3],

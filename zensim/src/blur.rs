@@ -1738,6 +1738,8 @@ pub(crate) fn simd_padded_width(width: usize) -> usize {
 ///
 /// Mirror reflection at boundary: for index x >= width, reflects back into [0, width-1].
 /// Period is 2*(width-1), so index wraps via modular reflection.
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 pub fn pad_plane_width(plane: &mut Vec<f32>, width: usize, height: usize, padded_width: usize) {
     if padded_width == width {
         return;

@@ -151,7 +151,8 @@ fn cbrtf_initial(x: f32) -> f32 {
 ///
 /// Input: `&[[u8; 3]]` (sRGB pixels)
 /// Output: 3 planes (X, Y, B) each of length `pixels.len()`, already positive-shifted.
-#[cfg(any(feature = "training", test))]
+#[cfg(feature = "full_image")]
+#[allow(dead_code)]
 pub fn srgb_to_positive_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
     let n = pixels.len();
     let mut x_plane = vec![0.0f32; n];
