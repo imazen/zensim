@@ -1,7 +1,7 @@
 //! Cross-platform score consistency tests for zensim.
 //!
 //! Validates that hardcoded reference scores match across all 7 CI platforms,
-//! that all 6 PixelFormat variants produce equivalent scores, that all 156
+//! that all 6 PixelFormat variants produce equivalent scores, that all 228
 //! features activate on synthetic test images, and that results are deterministic.
 //!
 //! Run with: `cargo test -p zensim --all-features --test cross_platform`
@@ -81,17 +81,17 @@ fn hardcoded_reference_scores() {
     let z = Zensim::new(ZensimProfile::latest());
     let pairs = generate_test_pairs(W, H);
 
-    // Midpoints between x86-64 and ARM CI scores (max half-range: 1.8e-7).
+    // Reference scores with peaks-tier weights (228 weights, 344k training pairs).
     #[allow(clippy::excessive_precision)]
     let expected: &[(&str, f64)] = &[
         ("checkerboard+blur", 0.0),
-        ("checkerboard+sharpen", 36.594_580_282_021_894),
-        ("mandelbrot+blur", 25.908_168_435_115_862),
-        ("mandelbrot+color_shift", 52.156_362_712_514_31),
-        ("noise+blur", 68.196_356_880_808_14),
-        ("noise+block_artifacts", 62.534_969_411_414_69),
-        ("color_blocks+color_shift", 38.519_226_827_523_10),
-        ("color_blocks+sharpen", 18.263_318_750_293_17),
+        ("checkerboard+sharpen", 32.283_841_287_891_121),
+        ("mandelbrot+blur", 0.0),
+        ("mandelbrot+color_shift", 35.093_114_663_733_616),
+        ("noise+blur", 52.738_384_693_430_497),
+        ("noise+block_artifacts", 43.349_042_568_412_557),
+        ("color_blocks+color_shift", 17.283_354_669_709_453),
+        ("color_blocks+sharpen", 0.0),
     ];
 
     let mut failures = Vec::new();

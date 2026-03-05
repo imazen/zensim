@@ -14,10 +14,7 @@ use crate::color::{
     linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
-use crate::metric::{
-    FEATURES_PER_CHANNEL_BASIC, FEATURES_PER_CHANNEL_EXTENDED, ScaleStats, ZensimConfig,
-    combine_scores,
-};
+use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
     abs_diff_into, abs_diff_sum, edge_diff_channel_extended, edge_diff_channel_masked, mul_into,
@@ -238,41 +235,49 @@ impl ScaleAccumulators {
 /// Determine which channels need SSIM, edge, and/or MSE computation at a given scale.
 fn active_channels(
     scale_idx: usize,
+    n_scales: usize,
     config: &ZensimConfig,
     weights: &[f64],
 ) -> Vec<(usize, bool, bool)> {
     let compute_all = config.compute_all_features;
     let extended = config.extended_features;
-    let fpc = if extended {
-        FEATURES_PER_CHANNEL_EXTENDED
-    } else {
-        FEATURES_PER_CHANNEL_BASIC
-    };
+    let basic_fpc = FEATURES_PER_CHANNEL_BASIC; // 13
 
     let has_weight = |base: usize, count: usize| -> bool {
         (base..base + count).all(|i| i < weights.len())
             && (base..base + count).any(|i| weights[i].abs() > 0.001)
     };
 
-    // Feature layout per channel (13 basic, 25 extended):
-    //   0-2: ssim_mean, ssim_4th, ssim_2nd
-    //   3-8: art_mean, art_4th, art_2nd, det_mean, det_4th, det_2nd
-    //   9: mse, 10-12: hf_energy_loss, hf_mag_loss, hf_energy_gain
-    //   13-15: masked_ssim_mean/4th/2nd, 16-17: masked_art_4th/det_4th, 18: masked_mse
-    //   19-21: ssim_max/art_max/det_max, 22-24: ssim_l8/art_l8/det_l8
+    // Feature layout in weights array:
+    //   Basic block [0..N_basic): 13/ch × 3ch × n_scales
+    //     0-2: ssim_mean, ssim_4th, ssim_2nd
+    //     3-8: art_mean, art_4th, art_2nd, det_mean, det_4th, det_2nd
+    //     9: mse, 10-12: hf_energy_loss, hf_mag_loss, hf_energy_gain
+    //   Peak block [N_basic..N_basic+N_peak): 6/ch × 3ch × n_scales
+    //     0-2: ssim_max, art_max, det_max
+    //     3-5: ssim_p95, art_p95, det_p95
+    let basic_total = n_scales * basic_fpc * 3;
     let mut active = Vec::new();
-    let beyond = scale_idx * (fpc * 3) >= weights.len();
+    let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
     for c in 0..3 {
         if beyond {
             if compute_all || extended {
                 active.push((c, true, true));
             }
         } else {
-            let base = scale_idx * (fpc * 3) + c * fpc;
-            let need_ssim = compute_all || extended || has_weight(base, 3);
+            let base = scale_idx * (basic_fpc * 3) + c * basic_fpc;
+            let mut need_ssim = compute_all || extended || has_weight(base, 3);
             let need_hf = has_weight(base + 10, 3);
-            let need_edge = compute_all || extended || has_weight(base + 3, 6) || need_hf;
+            let mut need_edge = compute_all || extended || has_weight(base + 3, 6) || need_hf;
             let need_mse = compute_all || extended || has_weight(base + 9, 1);
+            // Also check peak weights (ssim_max/p95 need SSIM, art/det need edges)
+            let peak_base = basic_total + scale_idx * 18 + c * 6;
+            if has_weight(peak_base, 1) || has_weight(peak_base + 3, 1) {
+                need_ssim = true; // ssim_max or ssim_p95
+            }
+            if has_weight(peak_base + 1, 2) || has_weight(peak_base + 4, 2) {
+                need_edge = true; // art_max/det_max or art_p95/det_p95
+            }
             if need_ssim || need_edge || need_mse {
                 active.push((c, need_ssim, need_edge));
             }
@@ -1079,7 +1084,7 @@ fn process_scale_bands(
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
-    let scale_active = active_channels(scale_idx, config, weights);
+    let scale_active = active_channels(scale_idx, config.num_scales, config, weights);
 
     let total_strips = height.div_ceil(STRIP_INNER);
     let num_bands = rayon::current_num_threads().min(total_strips).max(1);

@@ -90,7 +90,7 @@ struct Args {
     #[arg(long, default_value = "4")]
     num_scales: usize,
 
-    /// Load custom weights from file (one weight per line, 156 values).
+    /// Load custom weights from file (one weight per line).
     /// Evaluates these weights against the dataset(s) instead of the embedded weights.
     #[arg(long)]
     weights_file: Option<PathBuf>,
@@ -1341,7 +1341,7 @@ fn load_and_compute(
     let fpc = if config.extended_features {
         zensim::FEATURES_PER_CHANNEL_EXTENDED
     } else {
-        zensim::FEATURES_PER_CHANNEL_BASIC
+        zensim::FEATURES_PER_CHANNEL_WITH_PEAKS
     };
     let total_features = num_scales * 3 * fpc;
     eprintln!(
@@ -1507,7 +1507,7 @@ fn load_and_compute(
     )
 }
 
-/// Expand embedded WEIGHTS (156 entries, 13 features/ch) to match a wider feature layout.
+/// Expand embedded WEIGHTS (228 entries) to match a wider feature layout.
 /// When extra scales are used, pads with zeros for extra scale features.
 fn expand_embedded_weights(n_features: usize) -> Vec<f64> {
     let embedded = &zensim::WEIGHTS;

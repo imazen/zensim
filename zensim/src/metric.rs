@@ -716,8 +716,8 @@ impl Zensim {
         Ok(result)
     }
 
-    /// Like `compute`, but always computes all 156 features regardless of
-    /// zero weights. For training/research.
+    /// Like `compute`, but always computes all features regardless of
+    /// zero weights (forces every channel active). For training/research.
     #[cfg(feature = "training")]
     pub fn compute_all_features(
         &self,
@@ -991,10 +991,8 @@ fn compute_with_config_inner(
     if images_byte_identical(source, distorted) {
         let fpc = if config.extended_features {
             FEATURES_PER_CHANNEL_EXTENDED
-        } else if config.compute_all_features {
-            FEATURES_PER_CHANNEL_WITH_PEAKS
         } else {
-            FEATURES_PER_CHANNEL_BASIC
+            FEATURES_PER_CHANNEL_WITH_PEAKS
         };
         let num_features = config.num_scales * 3 * fpc;
         return ZensimResult {
@@ -1114,19 +1112,21 @@ pub const CH_B: usize = 2;
 impl<'a> FeatureView<'a> {
     /// Create a view over a feature vector.
     ///
-    /// Automatically detects the tier (basic/peaks/extended) from length.
+    /// Automatically detects the tier (peaks/extended) from length.
     /// Returns `None` if the length doesn't match any valid layout.
+    /// Peaks are always present (basic-only 156-element vectors are no longer generated).
     pub fn new(features: &'a [f64], n_scales: usize) -> Option<Self> {
-        let scored_total = n_scales * 3 * FEATURES_PER_CHANNEL_BASIC;
+        let basic_total = n_scales * 3 * FEATURES_PER_CHANNEL_BASIC;
         let peaks_total = n_scales * 3 * 6;
         let masked_total = n_scales * 3 * 6;
 
-        let (peaks_total, _masked_total) = if features.len() == scored_total {
-            (0, 0)
-        } else if features.len() == scored_total + peaks_total {
-            (peaks_total, 0)
-        } else if features.len() == scored_total + peaks_total + masked_total {
-            (peaks_total, masked_total)
+        let (scored_total, peaks_total) = if features.len() == basic_total {
+            // Legacy basic-only layout (backward compat)
+            (basic_total, 0)
+        } else if features.len() == basic_total + peaks_total
+            || features.len() == basic_total + peaks_total + masked_total
+        {
+            (basic_total, peaks_total)
         } else {
             return None;
         };
@@ -1213,7 +1213,7 @@ impl<'a> FeatureView<'a> {
         self.features[self.scored_idx(scale, ch, 12)]
     }
 
-    // --- Peak features (require compute_all_features or extended) ---
+    // --- Peak features (always present) ---
 
     fn peak_idx(&self, scale: usize, ch: usize, offset: usize) -> Option<usize> {
         if self.peaks_total == 0 {
@@ -1335,10 +1335,8 @@ pub fn compute_zensim_with_config(
     if source == distorted {
         let fpc = if config.extended_features {
             FEATURES_PER_CHANNEL_EXTENDED
-        } else if config.compute_all_features {
-            FEATURES_PER_CHANNEL_WITH_PEAKS
         } else {
-            FEATURES_PER_CHANNEL_BASIC
+            FEATURES_PER_CHANNEL_WITH_PEAKS
         };
         let num_features = config.num_scales * 3 * fpc;
         return Ok(ZensimResult {
@@ -1368,176 +1366,252 @@ pub fn compute_zensim_with_config(
 /// Weights are trained against synthetic quality scores (see `weights/` directory).
 /// Features per scale for the default scoring profile (3 channels × 13 features = 39).
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
-pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_BASIC * 3;
+pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 
-/// Trained weights from v2 synthetic dataset (163k image pairs, 149.5k valid).
+/// Trained weights from v2 synthetic dataset (344k pairs, 5-fold CV SROCC=0.9936).
 ///
 /// Optimized against GPU-accelerated SSIM2 scores on a diverse synthetic dataset
 /// (4 codecs × 11 quality levels × 6 aspect ratios × 276 source images).
-/// SROCC = 0.9857 on the training set.
+/// SROCC = 0.9941 on the full training set.
 ///
-/// Layout: 4 scales × 3 channels (X,Y,B) × 13 features:
-///   ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
-///   det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
+/// Layout: 4 scales × 3 channels (X,Y,B) × 13 basic features, then
+///         4 scales × 3 channels × 6 peak features:
+///   Basic: ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
+///          det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain
+///   Peaks: ssim_max, art_max, det_max, ssim_p95, art_p95, det_p95
 #[cfg(any(feature = "training", test))]
 #[allow(clippy::excessive_precision)]
-pub const WEIGHTS: [f64; 156] = [
+pub const WEIGHTS: [f64; 228] = [
+    // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
     0.0000000000,
-    0.3054918030,
+    0.1391674808,
     0.0000000000,
-    0.0120060829,
-    0.0000000000,
-    0.0000000000,
-    0.0000000000,
-    0.0025082274,
-    0.0158347215,
-    1.0232620956,
-    0.0232095092,
-    0.0157660229,
-    0.0112574353, // Scale 0 Channel X
-    2.6230901445,
-    5.0412606075,
-    0.0223917844,
-    0.0098804550,
-    0.0000000000,
-    0.0038950338,
-    0.0156205026,
-    4.1215632793,
-    0.0165163863,
-    0.0000000000,
-    0.6505034669,
-    1.0661232328,
-    0.2024220909, // Scale 0 Channel Y
-    0.0000000000,
-    0.0224667817,
-    0.0214887709,
-    8.6744486523,
-    0.0212844299,
-    0.0139801711,
-    0.0000000000,
-    0.0000000000,
-    0.0167307326,
-    1.0988427328,
-    0.0000000000,
-    0.0000000000,
-    0.0147283435, // Scale 0 Channel B
-    0.0056672813,
-    0.3216560111,
-    0.0000000000,
-    0.0000000000,
-    0.0013174343,
-    0.0009618480,
-    0.0235250311,
-    0.0000000000,
-    0.0233925065,
-    51.1749644772,
-    0.0240114888,
-    0.0000000000,
-    0.0000002541, // Scale 1 Channel X
-    56.0466844974,
-    13.7089560010,
-    0.9639517783,
-    11.6058052403,
-    21.6136075666,
-    0.0066979598,
-    0.0000000000,
-    1.8412885819,
-    0.0000000000,
-    0.0000000000,
-    1.1198246434,
-    0.0233930872,
-    0.0010262427, // Scale 1 Channel Y
-    1.7751266787,
-    1.3741364948,
-    0.0000000000,
-    51.6748592180,
-    1.9402960207,
+    0.0055172171,
     0.0000000000,
     0.0000000000,
     0.0000000000,
-    0.0105201745,
-    276.1886791157,
+    0.0010650645,
+    0.0071194723,
+    69.6110793540,
+    0.0106660235,
+    0.0076379521,
+    0.0051069220, // Scale 0 Channel X
+    17.8445125125,
+    1.9157888513,
+    0.0109886875,
+    0.0048996910,
+    0.0000000000,
+    0.0018418193,
+    0.0000000000,
+    1.5940983560,
+    0.0072914879,
+    0.0000000000,
+    0.2695940535,
+    0.5232582347,
+    0.1101639205, // Scale 0 Channel Y
+    0.0000000000,
+    0.0097680540,
+    0.0075408094,
+    4.2314204599,
+    0.0082993863,
+    0.0060063585,
     0.0000000000,
     0.0000000000,
-    0.0230782705, // Scale 1 Channel B
-    0.5138116129,
-    2.9679983985,
-    0.0168215442,
-    0.0000000000,
-    9.4726552791,
-    0.0227755446,
-    0.0251548240,
-    0.0231763042,
-    0.0250751373,
-    256.0304873419,
-    0.0251168295,
-    0.0000000000,
-    0.0075593685, // Scale 2 Channel X
-    17.1521567314,
-    13.6143902459,
-    15.2230380318,
-    281.6839646804,
-    67.7830673948,
-    0.0224871201,
-    0.0005901792,
-    19.7594335859,
+    0.0076442067,
+    0.4127212154,
     0.0000000000,
     0.0000000000,
-    2.4182112031,
-    2.1322464656,
-    0.0007368699, // Scale 2 Channel Y
-    1.4831017806,
+    0.0061137647, // Scale 0 Channel B
+    0.0027028659,
+    0.1421516497,
     0.0000000000,
     0.0000000000,
-    38.8427093881,
-    8.5955250320,
-    2.7105025533,
+    0.0006394302,
+    0.0004174259,
+    0.0084670378,
+    0.0000000000,
+    0.0102579245,
+    0.0000000000,
+    0.0097535151,
+    0.0000000000,
+    0.0000000091, // Scale 1 Channel X
+    22.0713261440,
+    52.8548074123,
+    87.4350424152,
+    5.5343470971,
+    8.5458130239,
+    0.0026243365,
+    0.0000000000,
+    0.6444438326,
+    0.0000000000,
+    0.0000000000,
+    0.4690274655,
+    0.0111775837,
+    0.0000000000, // Scale 1 Channel Y
+    0.7853068895,
+    0.5804301701,
+    0.0000000000,
+    241.7223774962,
+    0.0852474584,
     0.0000000000,
     0.0000000000,
     0.0000000000,
-    0.0223146216,
+    0.0046043128,
     0.0000000000,
-    0.0098977948,
-    0.0000317606, // Scale 2 Channel B
-    4.1642190683,
-    13.5967841625,
     0.0000000000,
-    0.0075158970,
-    14.7858065617,
-    0.0102946185,
-    0.0047139742,
-    0.0057291302,
     0.0000000000,
-    1.0257943538,
-    0.0146241140,
-    0.3198369698,
-    0.0000000000, // Scale 3 Channel X
-    0.0582460099,
-    0.0195498754,
-    0.0114503725,
-    869.4011573597,
-    0.0001269371,
-    0.3471799558,
-    415.8779165902,
-    82.2604764730,
-    28.2928124905,
-    0.2216564412,
-    8.4103544255,
-    0.0109363789,
-    0.0151401628, // Scale 3 Channel Y
-    8.2615006567,
-    0.0069805260,
-    0.0507613523,
-    374.9053338534,
-    69.6581630071,
-    0.0150326812,
-    0.0201076132,
-    0.0246660472,
-    0.0083943755,
-    1.1493739991,
-    0.0154112867,
-    0.1279347879,
-    0.0124929133, // Scale 3 Channel B
+    0.0092126667, // Scale 1 Channel B
+    0.1907664071,
+    1.1388072940,
+    0.0069950673,
+    0.0000000000,
+    3.2949756637,
+    0.0097480604,
+    0.0114461871,
+    0.0101092121,
+    0.0120198795,
+    0.0000000000,
+    0.0102984460,
+    0.0000000000,
+    0.0003411392, // Scale 2 Channel X
+    77.8638757528,
+    4.9774136371,
+    5.7998312546,
+    0.0000000000,
+    32.6107435348,
+    0.0000000000,
+    0.0000000000,
+    7.3147158634,
+    0.0000000000,
+    112.3320506295,
+    6.5803001760,
+    0.9144713387,
+    0.0800661074, // Scale 2 Channel Y
+    0.6380873029,
+    3.4344996615,
+    0.0000000000,
+    7.9969790535,
+    4.0547889928,
+    1.2673476404,
+    7.9809497222,
+    8.8252344733,
+    0.0000000000,
+    190.1707930678,
+    0.0000000000,
+    0.0042434316,
+    0.0000117426, // Scale 2 Channel B
+    42.4928921475,
+    1.8499402382,
+    18.0908263404,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0022710707,
+    0.0000000000,
+    0.0000000000,
+    0.0068807271,
+    0.1494089476,
+    0.0001752242, // Scale 3 Channel X
+    396.2394144642,
+    33.6112684912,
+    0.0053195470,
+    331.9368790619,
+    437.6418006190,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    15.5115983050,
+    0.0052803584,
+    0.0703659816, // Scale 3 Channel Y
+    112.4036508580,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0073096632,
+    0.0000000000,
+    0.0091600012,
+    0.0000000000,
+    0.0000000000,
+    0.0072861510,
+    0.0493312705,
+    0.0049937361, // Scale 3 Channel B
+    // --- Peak features (6/ch × 3ch × 4 scales = 72) ---
+    1.6405231709,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    1.8173590152,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    28.5681479205,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 0
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    1.7833707251,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    17.5252532711,
+    0.0000000000, // Scale 1
+    0.0000000000,
+    31.1123311855,
+    0.0000000000,
+    0.0000000000,
+    3.4969161675,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    3.4593661665,
+    0.0000000000,
+    56.7768222287,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    5.3758924006,
+    0.0000000000, // Scale 2
+    0.0000000000,
+    1.6125342576,
+    47.2133536610,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 3
 ];
 
 pub(crate) fn combine_scores(
@@ -1547,23 +1621,20 @@ pub(crate) fn combine_scores(
     mean_offset: [f64; 3],
 ) -> ZensimResult {
     let extended = config.extended_features;
-    let compute_all = config.compute_all_features;
-    let include_peaks = compute_all || extended;
 
     // Feature vector layout:
-    //   [0..N_scored)       — 13/ch × 3ch × n_scales, same order as WEIGHTS
-    //   [N_scored..N_peaks) — 6/ch × 3ch × n_scales peak features (if compute_all/extended)
+    //   [0..N_basic)        — 13/ch × 3ch × n_scales (basic features)
+    //   [N_basic..N_peaks)  — 6/ch × 3ch × n_scales peak features (always included)
     //   [N_peaks..N_all)    — 6/ch × 3ch × n_scales masked features (if extended)
     //
-    // Scored features are always at the front in WEIGHTS-compatible layout.
-    // Extra features are appended at the end. This means features[0..WEIGHTS.len()]
-    // always produces the same dot product as the old 13/ch layout.
+    // Both basic and peak features are scored: features[0..WEIGHTS.len()]
+    // produces the dot product used for the final score.
     let n_scales = scale_stats.len();
-    let scored_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
-    let scored_total = n_scales * scored_per_ch * 3;
-    let peak_total = if include_peaks { n_scales * 6 * 3 } else { 0 };
+    let basic_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
+    let basic_total = n_scales * basic_per_ch * 3;
+    let peak_total = n_scales * 6 * 3;
     let masked_total = if extended { n_scales * 6 * 3 } else { 0 };
-    let total = scored_total + peak_total + masked_total;
+    let total = basic_total + peak_total + masked_total;
 
     let mut features = Vec::with_capacity(total);
     let mut raw_distance = 0.0f64;
@@ -1588,16 +1659,14 @@ pub(crate) fn combine_scores(
     }
 
     // Pass 2: peak features (6/ch — max + L8, always computed at near-zero cost)
-    if include_peaks {
-        for ss in scale_stats.iter() {
-            for c in 0..3 {
-                features.push(ss.ssim_max[c]);
-                features.push(ss.art_max[c]);
-                features.push(ss.det_max[c]);
-                features.push(ss.ssim_p95[c]);
-                features.push(ss.art_p95[c]);
-                features.push(ss.det_p95[c]);
-            }
+    for ss in scale_stats.iter() {
+        for c in 0..3 {
+            features.push(ss.ssim_max[c]);
+            features.push(ss.art_max[c]);
+            features.push(ss.det_max[c]);
+            features.push(ss.ssim_p95[c]);
+            features.push(ss.art_p95[c]);
+            features.push(ss.det_p95[c]);
         }
     }
 
@@ -1615,11 +1684,11 @@ pub(crate) fn combine_scores(
         }
     }
 
-    // Apply weights — first N_scored features match WEIGHTS layout exactly
-    for (i, &feat) in features[..scored_total].iter().enumerate() {
-        if i < weights.len() {
-            raw_distance += feat * weights[i];
-        }
+    // Apply weights — basic + peak features are scored
+    let scored_total = basic_total + peak_total;
+    let n_score = scored_total.min(weights.len());
+    for (i, &feat) in features[..n_score].iter().enumerate() {
+        raw_distance += feat * weights[i];
     }
 
     // Normalize by number of scales
@@ -1685,9 +1754,9 @@ mod tests {
             all_result.score,
         );
 
-        // compute_all includes peak features: 228 vs default 156
+        // Both default and compute_all now include peak features (228)
         assert_eq!(all_result.features.len(), 228);
-        assert_eq!(default_result.features.len(), 156);
+        assert_eq!(default_result.features.len(), 228);
         // With compute_all, previously-skipped channels should now have nonzero features
         let all_nonzero = all_result
             .features
@@ -1749,10 +1818,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(basic.features.len(), 156);
-        // compute_all_features includes peak features → 156 + 72 = 228
+        // Both produce 228 features now (peaks always included)
+        assert_eq!(basic.features.len(), 228);
         assert_eq!(extended.features.len(), 228);
-        // Score should be the same — peak features have zero weight
+        // Score should be the same — compute_all forces all channels active but result is same
         assert!(
             (basic.score - extended.score).abs() < 0.01,
             "basic {} vs compute_all {}",

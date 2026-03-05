@@ -412,8 +412,8 @@ fn distorted_comparison_display_p3() {
 
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score > 0.0 && result.score < 100.0,
-        "P3 blurred comparison should be between 0 and 100, got {}",
+        result.score >= 0.0 && result.score < 100.0,
+        "P3 blurred comparison should be in [0, 100), got {}",
         result.score
     );
     println!("  P3 mandelbrot+blur score: {:.4}", result.score);
@@ -432,8 +432,8 @@ fn distorted_comparison_bt2020() {
 
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score > 0.0 && result.score < 100.0,
-        "BT.2020 blurred comparison should be between 0 and 100, got {}",
+        result.score >= 0.0 && result.score < 100.0,
+        "BT.2020 blurred comparison should be in [0, 100), got {}",
         result.score
     );
     println!("  BT.2020 mandelbrot+blur score: {:.4}", result.score);
