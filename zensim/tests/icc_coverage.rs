@@ -204,12 +204,6 @@ fn format_scores_with_primaries(primaries: ColorPrimaries) -> Vec<(String, f64)>
             converter: to_linear_f32_rgba,
         },
     ];
-    #[cfg(feature = "f16")]
-    formats.push(FmtEntry {
-        name: "SrgbF16Rgba",
-        format: PixelFormat::SrgbF16Rgba,
-        converter: to_srgb_f16_rgba,
-    });
 
     let mut results = Vec::new();
     for fmt in &formats {
@@ -234,10 +228,9 @@ fn pixel_format_equivalence_display_p3() {
     for (name, score) in &scores {
         let diff = (score - reference).abs();
         println!("    {name:20} score={score:.6}  diff={diff:.6}");
-        // Same tolerances as cross_platform.rs: sRGB→f32 ±0.15, f16 ±0.5, same-8bit ±0.01
+        // Same tolerances as cross_platform.rs: sRGB→f32 ±0.15, same-8bit ±0.01
         let tol = match name.as_str() {
             "LinearF32Rgba" => 0.15,
-            "SrgbF16Rgba" => 0.5,
             _ => 0.01,
         };
         assert!(
@@ -258,7 +251,6 @@ fn pixel_format_equivalence_bt2020() {
         println!("    {name:20} score={score:.6}  diff={diff:.6}");
         let tol = match name.as_str() {
             "LinearF32Rgba" => 0.15,
-            "SrgbF16Rgba" => 0.5,
             _ => 0.01,
         };
         assert!(

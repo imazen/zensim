@@ -147,26 +147,6 @@ fn cbrtf_initial(x: f32) -> f32 {
     f32::from_bits(ui_out)
 }
 
-/// Convert interleaved sRGB u8 to planar positive XYB.
-///
-/// Input: `&[[u8; 3]]` (sRGB pixels)
-/// Output: 3 planes (X, Y, B) each of length `pixels.len()`, already positive-shifted.
-#[cfg(feature = "full_image")]
-#[allow(dead_code)]
-pub fn srgb_to_positive_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
-    let n = pixels.len();
-    let mut x_plane = vec![0.0f32; n];
-    let mut y_plane = vec![0.0f32; n];
-    let mut b_plane = vec![0.0f32; n];
-
-    incant!(
-        srgb_to_positive_xyb_planar_inner(pixels, &mut x_plane, &mut y_plane, &mut b_plane),
-        [v4, v3]
-    );
-
-    [x_plane, y_plane, b_plane]
-}
-
 /// Convert interleaved sRGB u8 to planar positive XYB, writing into pre-allocated buffers.
 /// Each output slice must be at least `pixels.len()` long.
 #[allow(dead_code)] // For future streaming optimization (avoids per-strip allocations)
@@ -1277,21 +1257,6 @@ fn checkerboard_linear(x: usize, y: usize) -> f32 {
     }
 }
 
-/// Convert sRGB f16 to linear f32: decode f16 → f32, then apply sRGB TRC.
-///
-/// Used for [`PixelFormat::SrgbF16Rgba`] inputs where the f16 values are in sRGB space.
-#[cfg(feature = "f16")]
-#[inline]
-pub(crate) fn srgb_f16_to_linear(v: half::f16) -> f32 {
-    let s = v.to_f32();
-    // Same sRGB TRC as srgb_u8_to_linear, but from f32 input
-    if s <= 0.04045 {
-        s / 12.92
-    } else {
-        ((s + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 /// Composite sRGB u8 RGBA over a checkerboard, producing linear f32 RGB.
 ///
 /// Linearizes both foreground and background, then alpha-blends in linear space.
@@ -1406,41 +1371,6 @@ pub(crate) fn composite_srgb16_rgba_to_linear(
                 rl.mul_add(alpha, bg * inv),
                 gl.mul_add(alpha, bg * inv),
                 bl.mul_add(alpha, bg * inv),
-            ];
-        }
-    }
-}
-
-/// Composite sRGB f16 RGBA over a checkerboard, producing linear f32 RGB.
-///
-/// Reads 4 f16 values per pixel from raw bytes (8 bytes/pixel), applies sRGB TRC
-/// to get linear, then alpha-blends in linear space.
-#[cfg(feature = "f16")]
-pub(crate) fn composite_srgb_f16_rgba_to_linear(
-    row: &[u8],
-    width: usize,
-    y: usize,
-    out: &mut [[f32; 3]],
-) {
-    use half::f16;
-    for (x, out_pixel) in out.iter_mut().enumerate().take(width) {
-        let off = x * 8;
-        let r = srgb_f16_to_linear(f16::from_ne_bytes([row[off], row[off + 1]]));
-        let g = srgb_f16_to_linear(f16::from_ne_bytes([row[off + 2], row[off + 3]]));
-        let b = srgb_f16_to_linear(f16::from_ne_bytes([row[off + 4], row[off + 5]]));
-        let a = f16::from_ne_bytes([row[off + 6], row[off + 7]]).to_f32();
-        if a >= 1.0 {
-            *out_pixel = [r, g, b];
-        } else if a <= 0.0 {
-            let bg = checkerboard_linear(x, y);
-            *out_pixel = [bg, bg, bg];
-        } else {
-            let inv = 1.0 - a;
-            let bg = checkerboard_linear(x, y);
-            *out_pixel = [
-                r.mul_add(a, bg * inv),
-                g.mul_add(a, bg * inv),
-                b.mul_add(a, bg * inv),
             ];
         }
     }

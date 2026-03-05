@@ -121,7 +121,7 @@ fn hardcoded_reference_scores() {
 }
 
 /// All PixelFormat variants produce equivalent scores.
-/// sRGB↔f32: ±0.15, same-encoding reorder: ±0.01, f16: ±0.5.
+/// sRGB↔f32: ±0.15, same-encoding reorder: ±0.01.
 #[test]
 fn pixel_format_equivalence() {
     const W: usize = 128;
@@ -171,13 +171,6 @@ fn pixel_format_equivalence() {
             tolerance: 0.01,
         },
     ];
-    #[cfg(feature = "f16")]
-    formats.push(FormatTest {
-        name: "SrgbF16Rgba",
-        format: PixelFormat::SrgbF16Rgba,
-        converter: to_srgb_f16_rgba,
-        tolerance: 0.5,
-    });
     formats.push(FormatTest {
         name: "LinearF32Rgba",
         format: PixelFormat::LinearF32Rgba,

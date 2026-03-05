@@ -222,27 +222,6 @@ pub fn to_srgb16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize
     (buf, stride)
 }
 
-/// sRGB f16 RGBA: stores sRGB-space values as f16 (not linear).
-pub fn to_srgb_f16_rgba(pixels: &[[u8; 3]], w: usize, h: usize) -> (Vec<u8>, usize) {
-    let stride = w * 8;
-    let mut buf = vec![0u8; h * stride];
-    for y in 0..h {
-        for x in 0..w {
-            let p = pixels[y * w + x];
-            let off = y * stride + x * 8;
-            // Store sRGB values (not linear) — SrgbF16Rgba does TRC decode internally
-            let r = half::f16::from_f32(p[0] as f32 / 255.0);
-            let g = half::f16::from_f32(p[1] as f32 / 255.0);
-            let b = half::f16::from_f32(p[2] as f32 / 255.0);
-            let a = half::f16::from_f32(1.0);
-            buf[off..off + 2].copy_from_slice(&r.to_ne_bytes());
-            buf[off + 2..off + 4].copy_from_slice(&g.to_ne_bytes());
-            buf[off + 4..off + 6].copy_from_slice(&b.to_ne_bytes());
-            buf[off + 6..off + 8].copy_from_slice(&a.to_ne_bytes());
-        }
-    }
-    (buf, stride)
-}
 
 // ─── Distortion functions ──────────────────────────────────────────────
 

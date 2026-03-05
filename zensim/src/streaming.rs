@@ -8,10 +8,6 @@ use crate::blur::{
     box_blur_1pass_into, downscale_2x_inplace, fused_blur_h_mu, fused_blur_h_ssim,
     simd_padded_width,
 };
-#[cfg(feature = "multiblur")]
-use crate::blur::{box_blur_2pass_into, box_blur_3pass_into};
-#[cfg(feature = "f16")]
-use crate::color::composite_srgb_f16_rgba_to_linear;
 use crate::color::{
     apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
     composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
@@ -36,15 +32,6 @@ const STRIP_INNER: usize = 16;
 
 /// Track background deallocation thread to prevent accumulation on repeated calls.
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
-
-/// Should we use the streaming path for this image size?
-/// Benchmarking shows streaming band processing wins at all sizes (down to 98k pixels),
-/// so this always returns true for non-trivial images.
-#[cfg(feature = "full_image")]
-#[allow(dead_code)]
-pub(crate) fn should_use_streaming(_width: usize, _height: usize) -> bool {
-    true
-}
 
 /// Per-scale feature accumulators. Collects raw sums across strips,
 /// finalized to ScaleStats at the end.
@@ -642,46 +629,6 @@ pub(crate) fn convert_source_to_xyb_parallel(
                         );
                     }
                 }
-                #[cfg(feature = "f16")]
-                PixelFormat::SrgbF16Rgba => {
-                    let mut linear_row = vec![[0.0f32; 3]; width];
-                    for y in row_start..row_end {
-                        let row_bytes = source.row_bytes(y);
-                        if opaque {
-                            for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
-                                let off = x * 8;
-                                let r =
-                                    crate::color::srgb_f16_to_linear(half::f16::from_ne_bytes([
-                                        row_bytes[off],
-                                        row_bytes[off + 1],
-                                    ]));
-                                let g =
-                                    crate::color::srgb_f16_to_linear(half::f16::from_ne_bytes([
-                                        row_bytes[off + 2],
-                                        row_bytes[off + 3],
-                                    ]));
-                                let b =
-                                    crate::color::srgb_f16_to_linear(half::f16::from_ne_bytes([
-                                        row_bytes[off + 4],
-                                        row_bytes[off + 5],
-                                    ]));
-                                *pixel = [r, g, b];
-                            }
-                        } else {
-                            composite_srgb_f16_rgba_to_linear(row_bytes, width, y, &mut linear_row);
-                        }
-                        if need_gamut {
-                            gamut_convert_row(&mut linear_row[..width], primaries);
-                        }
-                        let row_offset = (y - row_start) * width;
-                        linear_to_positive_xyb_planar_into(
-                            &linear_row,
-                            &mut c0[row_offset..row_offset + width],
-                            &mut c1[row_offset..row_offset + width],
-                            &mut c2[row_offset..row_offset + width],
-                        );
-                    }
-                }
                 PixelFormat::LinearF32Rgba => {
                     if opaque && !need_gamut {
                         // Opaque sRGB: extract RGB from f32 RGBA, skip alpha
@@ -981,24 +928,8 @@ fn process_strip_channel(
         return;
     }
 
-    // Separate blur + reduce fallback (multi-pass only, requires 'multiblur' feature)
-    #[allow(clippy::type_complexity)]
-    let blur_fn: fn(&[f32], &mut [f32], &mut [f32], usize, usize, usize) = match config.blur_passes
-    {
-        1 => box_blur_1pass_into,
-        #[cfg(feature = "multiblur")]
-        2 => box_blur_2pass_into,
-        #[cfg(feature = "multiblur")]
-        _ => box_blur_3pass_into,
-        #[cfg(not(feature = "multiblur"))]
-        _ => {
-            debug_assert_eq!(
-                config.blur_passes, 1,
-                "blur_passes > 1 requires 'multiblur' feature"
-            );
-            box_blur_1pass_into
-        }
-    };
+    // Separate blur + reduce fallback
+    let blur_fn = box_blur_1pass_into;
 
     blur_fn(
         src_c,
@@ -1490,7 +1421,7 @@ fn native_max_for_format(format: PixelFormat) -> f64 {
     match format {
         PixelFormat::Srgb8Rgb | PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => 255.0,
         PixelFormat::Srgb16Rgba => 65535.0,
-        PixelFormat::SrgbF16Rgba | PixelFormat::LinearF32Rgba => 1.0,
+        PixelFormat::LinearF32Rgba => 1.0,
         #[allow(unreachable_patterns)]
         _ => 255.0,
     }
@@ -1688,18 +1619,6 @@ fn extract_pixel_normalized(
                 u16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]) as f64 / 65535.0,
             ];
             let a = u16::from_ne_bytes([row_bytes[off + 6], row_bytes[off + 7]]) as f64 / 65535.0;
-            (rgb, Some(a))
-        }
-        #[cfg(feature = "f16")]
-        PixelFormat::SrgbF16Rgba => {
-            use half::f16;
-            let off = x * 8;
-            let rgb = [
-                f16::from_ne_bytes([row_bytes[off], row_bytes[off + 1]]).to_f32() as f64,
-                f16::from_ne_bytes([row_bytes[off + 2], row_bytes[off + 3]]).to_f32() as f64,
-                f16::from_ne_bytes([row_bytes[off + 4], row_bytes[off + 5]]).to_f32() as f64,
-            ];
-            let a = f16::from_ne_bytes([row_bytes[off + 6], row_bytes[off + 7]]).to_f32() as f64;
             (rgb, Some(a))
         }
         PixelFormat::LinearF32Rgba => {

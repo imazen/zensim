@@ -15,27 +15,13 @@ default = ["avx512"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
 ## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
-## scale count, masking) whose outputs are incomparable with the default
-## trained weights.
+## scale count) whose outputs are incomparable with the default trained weights.
 training = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
-## Enable SrgbF16Rgba pixel format (requires `half` crate for IEEE 754 half-precision).
-f16 = ["dep:half"]
-## Enable multi-pass blur dispatch (2-pass triangular, 3-pass Gaussian).
-## Default 1-pass blur uses fused streaming kernels; multi-pass is dead code
-## retained for research/comparison.
-multiblur = []
-## Enable full-image computation path (materializes entire XYB planes).
-## Only needed for research with masking_strength > 0. Default streaming path
-## is faster at all sizes and used by the public API.
-full_image = []
 ## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
 ## Uses zenresize for resampling — training/research feature.
 zenresize = ["dep:zenresize"]
-## Enable ZenpixelsSource for accepting any interleaved pixel format via zenpixels conversion.
-## Requires zenpixels to be published to crates.io first.
-# zenpixels = ["dep:zenpixels"]
 
 [dependencies]
 archmage = { version = "0.9", workspace = true }
@@ -45,13 +31,10 @@ rayon = { workspace = true }
 thiserror = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-half = { workspace = true, optional = true }
 zenresize = { workspace = true, optional = true }
-# zenpixels = { workspace = true, optional = true }
 
 [dev-dependencies]
 image = { workspace = true }
-half = { workspace = true }
 archmage = { version = "0.9", workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -65,4 +48,4 @@ uninlined_format_args = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenpixels", "zenresize", "multiblur", "full_image"))']
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref"))']

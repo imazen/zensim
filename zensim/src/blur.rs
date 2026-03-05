@@ -1,8 +1,7 @@
-//! Fast box blur cascade: 3-pass box filter approximates Gaussian blur.
+//! O(1)-per-pixel box blur using running sums.
 //!
 //! Unlike recursive Gaussian IIR (used in ssimulacra2, ~60-70% of runtime),
-//! box blur is O(1) per pixel using running sums, regardless of radius.
-//! Three passes of box blur converge to Gaussian (central limit theorem).
+//! box blur is O(1) per pixel regardless of radius.
 #![allow(clippy::assign_op_pattern, clippy::needless_range_loop)]
 
 #[cfg(target_arch = "x86_64")]
@@ -13,30 +12,7 @@ use magetypes::simd::f32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
 
-/// Blur into pre-allocated output buffer. Uses temp as scratch.
-/// 3-pass cascade approximates Gaussian (piecewise quadratic).
-#[cfg(feature = "multiblur")]
-pub fn box_blur_3pass_into(
-    input: &[f32],
-    output: &mut [f32],
-    temp: &mut [f32],
-    width: usize,
-    height: usize,
-    radius: usize,
-) {
-    // Each pass: horizontal into one buffer, vertical into another.
-    // Pass 1: input →(h)→ temp →(v)→ output
-    box_blur_h(input, temp, width, height, radius);
-    box_blur_v_from_copy(temp, output, width, height, radius);
-    // Pass 2: output →(h)→ temp →(v)→ output
-    box_blur_h(output, temp, width, height, radius);
-    box_blur_v_from_copy(temp, output, width, height, radius);
-    // Pass 3: output →(h)→ temp →(v)→ output
-    box_blur_h(output, temp, width, height, radius);
-    box_blur_v_from_copy(temp, output, width, height, radius);
-}
-
-/// 1-pass blur: rectangular kernel, 50% fewer operations than 2-pass.
+/// 1-pass blur: rectangular kernel.
 /// Use with larger radius to approximate same effective width.
 pub fn box_blur_1pass_into(
     input: &[f32],
@@ -47,23 +23,6 @@ pub fn box_blur_1pass_into(
     radius: usize,
 ) {
     box_blur_h(input, temp, width, height, radius);
-    box_blur_v_from_copy(temp, output, width, height, radius);
-}
-
-/// 2-pass blur: triangular kernel, 33% fewer operations than 3-pass.
-/// Use with radius+1 to approximate same effective width as 3-pass with radius.
-#[cfg(feature = "multiblur")]
-pub fn box_blur_2pass_into(
-    input: &[f32],
-    output: &mut [f32],
-    temp: &mut [f32],
-    width: usize,
-    height: usize,
-    radius: usize,
-) {
-    box_blur_h(input, temp, width, height, radius);
-    box_blur_v_from_copy(temp, output, width, height, radius);
-    box_blur_h(output, temp, width, height, radius);
     box_blur_v_from_copy(temp, output, width, height, radius);
 }
 
@@ -1730,49 +1689,6 @@ pub(crate) fn simd_padded_width(width: usize) -> usize {
         aligned + 16
     } else {
         aligned
-    }
-}
-
-/// Pad plane width to `padded_width` using mirror reflection.
-/// Operates in-place, processing rows bottom-to-top to avoid overwriting source data.
-///
-/// Mirror reflection at boundary: for index x >= width, reflects back into [0, width-1].
-/// Period is 2*(width-1), so index wraps via modular reflection.
-#[cfg(feature = "full_image")]
-#[allow(dead_code)]
-pub fn pad_plane_width(plane: &mut Vec<f32>, width: usize, height: usize, padded_width: usize) {
-    if padded_width == width {
-        return;
-    }
-    debug_assert!(padded_width > width);
-    plane.resize(padded_width * height, 0.0);
-
-    // Precompute mirror indices for padding columns (same for every row).
-    let pad_count = padded_width - width;
-    let mut mirror_offsets = vec![0usize; pad_count];
-    let period = 2 * (width - 1);
-    for i in 0..pad_count {
-        let x = width + i;
-        let m = x % period;
-        mirror_offsets[i] = if m < width { m } else { period - m };
-    }
-
-    // Process bottom-to-top so we never read a position that was already overwritten.
-    for y in (0..height).rev() {
-        let src_start = y * width;
-        let dst_start = y * padded_width;
-
-        // Shift row data to padded position first (right-to-left for overlap safety)
-        if dst_start != src_start {
-            for x in (0..width).rev() {
-                plane[dst_start + x] = plane[src_start + x];
-            }
-        }
-
-        // Fill padding columns with mirror-reflected values
-        for (i, &mx) in mirror_offsets.iter().enumerate() {
-            plane[dst_start + width + i] = plane[dst_start + mx];
-        }
     }
 }
 

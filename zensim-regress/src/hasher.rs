@@ -75,42 +75,6 @@ impl ChecksumHasher for SeaHasher {
     }
 }
 
-/// Hash pixel data described by a [`zenpixels::PixelDescriptor`], converting
-/// to RGBA8 sRGB first for format-independent hashing.
-///
-/// Same visual content in different pixel formats produces the same hash.
-#[cfg(feature = "zenpixels")]
-pub fn hash_pixels_described(
-    hasher: &dyn ChecksumHasher,
-    data: &[u8],
-    descriptor: zenpixels::PixelDescriptor,
-    width: u32,
-    height: u32,
-) -> String {
-    let target = zenpixels::PixelDescriptor::RGBA8_SRGB;
-    let converter = zenpixels::RowConverter::new(descriptor, target).unwrap_or_else(|e| {
-        panic!("hash_pixels_described: cannot convert {descriptor:?} → RGBA8: {e}")
-    });
-
-    if converter.is_identity() {
-        return hasher.hash_pixels(data, width, height);
-    }
-
-    let src_bpp = descriptor.bytes_per_pixel();
-    let dst_bpp = target.bytes_per_pixel();
-    let src_stride = width as usize * src_bpp;
-    let dst_stride = width as usize * dst_bpp;
-    let mut rgba8 = vec![0u8; height as usize * dst_stride];
-
-    for y in 0..height as usize {
-        let src_row = &data[y * src_stride..y * src_stride + src_stride];
-        let dst_row = &mut rgba8[y * dst_stride..y * dst_stride + dst_stride];
-        converter.convert_row(src_row, dst_row, width);
-    }
-
-    hasher.hash_pixels(&rgba8, width, height)
-}
-
 /// Default hasher instance (SeaHash).
 pub fn default_hasher() -> SeaHasher {
     SeaHasher

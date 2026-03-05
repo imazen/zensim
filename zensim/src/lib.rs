@@ -74,7 +74,7 @@
 //! - **13 features per channel per scale** — SSIM (3 pooling norms), edge artifact/detail
 //!   loss (3 norms each), MSE, and 3 high-frequency energy/magnitude features
 //! - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
-//! - **O(1)-per-pixel box blur** — 1-pass default, 2/3-pass option for triangular/Gaussian
+//! - **O(1)-per-pixel box blur** — single-pass with fused SIMD kernel
 //! - **156 trained weights** — optimized on 149.5k synthetic pairs across 4 codecs
 //! - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage)
 //!
@@ -108,8 +108,6 @@ pub use source::{
     AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
 };
 
-#[cfg(feature = "zenpixels")]
-pub use source::{ZenpixelsSource, ZenpixelsSourceError, pixel_format_from_descriptor};
 pub use streaming::PrecomputedReference;
 
 /// Training/research API — requires `features = ["training"]`.

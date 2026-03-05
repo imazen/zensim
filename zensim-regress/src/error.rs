@@ -38,11 +38,6 @@ pub enum RegressError {
     /// Failed to upload a resource.
     #[error("upload failed to {dest}: {message}")]
     Upload { dest: String, message: String },
-
-    /// Pixel format conversion error (zenpixels).
-    #[cfg(feature = "zenpixels")]
-    #[error("pixel format conversion error: {0}")]
-    PixelConvert(#[from] zenpixels::ConvertError),
 }
 
 impl RegressError {
