@@ -29,7 +29,7 @@ fn base_url() -> Option<&'static str> {
 }
 
 fn cache_dir() -> PathBuf {
-    let dir = PathBuf::from("/tmp/zensim-corpus-cache");
+    let dir = std::env::temp_dir().join("zensim-corpus-cache");
     std::fs::create_dir_all(&dir).expect("create cache dir");
     dir
 }

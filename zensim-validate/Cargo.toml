@@ -14,7 +14,6 @@ zenresize = ["zensim/zenresize"]
 zensim = { path = "../zensim", features = ["training"] }
 image = { workspace = true }
 rayon = { workspace = true }
-serde = { version = "1", features = ["derive"] }
 csv = "1"
 calamine = "0.26"
 clap = { version = "4", features = ["derive"] }

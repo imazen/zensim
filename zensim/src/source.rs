@@ -439,8 +439,6 @@ impl ImageSource for StridedBytes<'_> {
 #[cfg(feature = "imgref")]
 mod imgref_impls {
     use super::*;
-    use rgb::ComponentBytes;
-
     impl ImageSource for imgref::ImgRef<'_, rgb::Rgb<u8>> {
         #[inline]
         fn width(&self) -> usize {
@@ -464,7 +462,7 @@ mod imgref_impls {
             let buf = imgref::Img::buf(self);
             let start = y * stride;
             let w = imgref::Img::width(self);
-            buf[start..start + w].as_bytes()
+            bytemuck::cast_slice(&buf[start..start + w])
         }
     }
 
@@ -491,7 +489,7 @@ mod imgref_impls {
             let buf = imgref::Img::buf(self);
             let start = y * stride;
             let w = imgref::Img::width(self);
-            buf[start..start + w].as_bytes()
+            bytemuck::cast_slice(&buf[start..start + w])
         }
     }
 }

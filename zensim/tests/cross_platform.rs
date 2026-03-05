@@ -9,7 +9,7 @@
 mod common;
 
 use common::generators::*;
-use zensim::{PixelFormat, RgbSlice, StridedBytes, Zensim, ZensimProfile};
+use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
 
 // ─── Test pair generation ──────────────────────────────────────────────────
 
@@ -551,4 +551,58 @@ fn mean_offset_precomputed_ref() {
             .map(|c| (direct.mean_offset[c] - with_ref.mean_offset[c]).abs())
             .fold(0.0f64, f64::max),
     );
+}
+
+// ─── Error condition tests ───────────────────────────────────────────────────
+
+#[test]
+fn error_image_too_small() {
+    let z = Zensim::new(ZensimProfile::latest());
+    // 4×4 is below 8×8 minimum
+    let small = vec![[128u8; 3]; 4 * 4];
+    let src = RgbSlice::new(&small, 4, 4);
+    let dst = RgbSlice::new(&small, 4, 4);
+    assert_eq!(z.compute(&src, &dst).unwrap_err(), ZensimError::ImageTooSmall);
+    assert!(matches!(z.precompute_reference(&src), Err(ZensimError::ImageTooSmall)));
+}
+
+#[test]
+fn error_dimension_mismatch() {
+    let z = Zensim::new(ZensimProfile::latest());
+    let a = vec![[128u8; 3]; 16 * 16];
+    let b = vec![[128u8; 3]; 32 * 8];
+    let src = RgbSlice::new(&a, 16, 16);
+    let dst = RgbSlice::new(&b, 32, 8);
+    assert_eq!(z.compute(&src, &dst).unwrap_err(), ZensimError::DimensionMismatch);
+}
+
+#[test]
+fn error_invalid_data_length_rgb() {
+    // 15 pixels for a 4×4 image (should be 16)
+    let short = vec![[128u8; 3]; 15];
+    let result = RgbSlice::try_new(&short, 4, 4);
+    assert_eq!(result.unwrap_err(), ZensimError::InvalidDataLength);
+}
+
+#[test]
+fn error_invalid_data_length_rgba() {
+    let short = vec![[128u8; 4]; 15];
+    let result = RgbaSlice::try_new(&short, 4, 4);
+    assert_eq!(result.unwrap_err(), ZensimError::InvalidDataLength);
+}
+
+#[test]
+fn error_invalid_stride() {
+    // stride of 10 bytes for 4-pixel-wide RGB (needs 12)
+    let data = vec![0u8; 100];
+    let result = StridedBytes::try_new(&data, 4, 4, 10, PixelFormat::Srgb8Rgb);
+    assert_eq!(result.unwrap_err(), ZensimError::InvalidStride);
+}
+
+#[test]
+fn error_invalid_data_length_strided() {
+    // stride 24, 4 rows = 96 bytes needed, only 80 provided
+    let data = vec![0u8; 80];
+    let result = StridedBytes::try_new(&data, 4, 4, 24, PixelFormat::Srgb8Rgb);
+    assert_eq!(result.unwrap_err(), ZensimError::InvalidDataLength);
 }

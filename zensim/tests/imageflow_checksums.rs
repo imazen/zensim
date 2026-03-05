@@ -9,7 +9,7 @@
 //! cargo test -p zensim --all-features --test imageflow_checksums -- --ignored --nocapture
 //! ```
 //!
-//! Images are cached in `$IMAGEFLOW_CACHE` (default: `/tmp/imageflow-checksum-images/`).
+//! Images are cached in `$IMAGEFLOW_CACHE` (default: `{temp_dir}/imageflow-checksum-images/`).
 
 mod common;
 
@@ -135,12 +135,12 @@ fn imageflow_checksum_analysis() {
     let s3_base = manifest["s3_base"].as_str().expect("s3_base");
     let cache_dir = PathBuf::from(
         std::env::var("IMAGEFLOW_CACHE")
-            .unwrap_or_else(|_| "/tmp/imageflow-checksum-images".to_string()),
+            .unwrap_or_else(|_| std::env::temp_dir().join("imageflow-checksum-images").to_string_lossy().into_owned()),
     );
     fs::create_dir_all(&cache_dir).expect("create cache dir");
 
     let output_path = std::env::var("ANALYSIS_OUTPUT")
-        .unwrap_or_else(|_| "/tmp/imageflow_checksum_analysis.tsv".to_string());
+        .unwrap_or_else(|_| std::env::temp_dir().join("imageflow_checksum_analysis.tsv").to_string_lossy().into_owned());
 
     let zensim = Zensim::new(ZensimProfile::latest());
     let commits = manifest["commits"].as_array().expect("commits array");

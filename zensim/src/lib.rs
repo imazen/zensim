@@ -6,7 +6,7 @@
 //!
 //! ## Quick start
 //!
-//! ```no_run
+//! ```
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (src_pixels, dst_pixels) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
 //! let z = Zensim::new(ZensimProfile::latest());
@@ -19,7 +19,7 @@
 //!
 //! ## Batch comparison (one reference, many distorted)
 //!
-//! ```no_run
+//! ```
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (ref_pixels, width, height) = (vec![[0u8; 3]; 64], 8usize, 8usize);
 //! # let distorted_images: Vec<Vec<[u8; 3]>> = vec![];
@@ -36,7 +36,7 @@
 //!
 //! ## RGBA support
 //!
-//! ```no_run
+//! ```
 //! use zensim::{Zensim, ZensimProfile, RgbaSlice};
 //! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
 //! let z = Zensim::new(ZensimProfile::latest());

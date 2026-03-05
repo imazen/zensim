@@ -24,7 +24,7 @@ imgref = ["dep:imgref", "dep:rgb"]
 zenresize = ["dep:zenresize"]
 
 [dependencies]
-archmage = { version = "0.9", workspace = true }
+archmage = { workspace = true }
 bytemuck = { workspace = true }
 magetypes = { workspace = true }
 rayon = { workspace = true }
@@ -35,7 +35,7 @@ zenresize = { workspace = true, optional = true }
 
 [dev-dependencies]
 image = { workspace = true }
-archmage = { version = "0.9", workspace = true, features = ["testable_dispatch"] }
+archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 

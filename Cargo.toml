@@ -21,5 +21,5 @@ thiserror = "2"
 image = "0.25"
 rayon = "1.10"
 imgref = "1.12"
-rgb = { version = "0.8", default-features = false, features = ["as-bytes"] }
+rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 zenresize = { path = "../zenresize", default-features = false, features = ["std"] }
