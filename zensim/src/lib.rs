@@ -97,12 +97,18 @@ mod streaming;
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{
-    ErrorCategory, FeatureView, RoundingBias, Zensim, ZensimResult, dissimilarity_to_score,
-    score_to_dissimilarity,
+    FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };
 
-// --- Classification API (used by zensim-regress for regression testing) ---
-pub use metric::{AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorClassification};
+/// Classification API — requires `features = ["classification"]`.
+///
+/// Exposes `classify()`, error categorization, and per-pixel delta statistics
+/// for regression testing workflows.
+#[cfg(feature = "classification")]
+pub use metric::{
+    AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorCategory, ErrorClassification,
+    RoundingBias,
+};
 pub use profile::ZensimProfile;
 pub use source::{
     AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,

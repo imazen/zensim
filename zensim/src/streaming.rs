@@ -1310,10 +1310,12 @@ pub(crate) fn compute_zensim_streaming(
     combine_scores(&scale_stats, weights, config, mean_offset)
 }
 
-// ─── Delta stats computation ─────────────────────────────────────────────
+// ─── Delta stats computation (classification feature) ────────────────────
 
+#[cfg(feature = "classification")]
 use crate::metric::{AlphaStratifiedStats, DeltaStats};
 
+#[cfg(feature = "classification")]
 /// Per-chunk accumulator for delta stats (merged across parallel chunks).
 struct DeltaAccum {
     // Per-channel accumulators
@@ -1349,6 +1351,7 @@ struct DeltaAccum {
     alpha_pixel_count: u64,
 }
 
+#[cfg(feature = "classification")]
 impl DeltaAccum {
     fn new() -> Self {
         Self {
@@ -1421,6 +1424,7 @@ impl DeltaAccum {
 /// Derive the native maximum value for a pixel format.
 ///
 /// 255.0 for u8 formats, 65535.0 for u16, 1.0 for f32/f16.
+#[cfg(feature = "classification")]
 fn native_max_for_format(format: PixelFormat) -> f64 {
     match format {
         PixelFormat::Srgb8Rgb | PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => 255.0,
@@ -1431,6 +1435,7 @@ fn native_max_for_format(format: PixelFormat) -> f64 {
     }
 }
 
+#[cfg(feature = "classification")]
 pub(crate) fn compute_delta_stats(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -1577,6 +1582,7 @@ pub(crate) fn compute_delta_stats(
     finalize_delta_stats(accum, has_alpha, native_max)
 }
 
+#[cfg(feature = "classification")]
 /// Extract normalized \[0,1\] RGB values and optional alpha from a single pixel
 /// at position `x` in `row_bytes`, interpreting bytes according to `format`.
 #[inline]
@@ -1640,6 +1646,7 @@ fn extract_pixel_normalized(
     }
 }
 
+#[cfg(feature = "classification")]
 /// Convert accumulated delta stats to the final DeltaStats struct.
 fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool, native_max: f64) -> DeltaStats {
     let n = acc.pixel_count as f64;
@@ -2254,6 +2261,7 @@ mod tests {
 
     /// u16 delta stats: 1-step difference should be detected with native precision.
     #[test]
+    #[cfg(feature = "classification")]
     fn u16_delta_stats_native_precision() {
         let w = 16;
         let h = 16;
@@ -2327,6 +2335,7 @@ mod tests {
 
     /// f32 delta stats should have native_max == 1.0.
     #[test]
+    #[cfg(feature = "classification")]
     fn f32_delta_stats_native_max() {
         let w = 16;
         let h = 16;

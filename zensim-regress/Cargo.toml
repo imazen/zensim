@@ -15,7 +15,7 @@ publish = false
 zenpng = []
 
 [dependencies]
-zensim = { workspace = true }
+zensim = { workspace = true, features = ["classification"] }
 # zenpng = { workspace = true, optional = true }
 # enough = { workspace = true, optional = true }
 seahash = "4"

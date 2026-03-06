@@ -1,3 +1,4 @@
+#![cfg(feature = "classification")]
 //! Error classification tests against PNG fixture corpus.
 //!
 //! Validates that:

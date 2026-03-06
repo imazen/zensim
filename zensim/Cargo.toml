@@ -17,6 +17,9 @@ avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
 ## scale count) whose outputs are incomparable with the default trained weights.
 training = []
+## Exposes classification API: classify(), ClassifiedResult, ErrorClassification,
+## DeltaStats, AlphaStratifiedStats. Used by zensim-regress for regression testing.
+classification = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
 ## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
@@ -49,4 +52,4 @@ uninlined_format_args = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification"))']  # zenresize kept in check-cfg for gated code

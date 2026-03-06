@@ -1,3 +1,4 @@
+#![cfg(feature = "classification")]
 //! Imageflow visual regression checksum analysis.
 //!
 //! Downloads old/new image pairs from imageflow's S3 bucket and runs

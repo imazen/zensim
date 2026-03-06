@@ -575,6 +575,7 @@ pub fn dissimilarity_to_score(dissimilarity: f64) -> f64 {
 ///
 /// Only categories with provably defensible statistical signatures are offered.
 /// If no category can be identified with high confidence, `Unclassified` is returned.
+#[cfg(feature = "classification")]
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCategory {
@@ -594,6 +595,7 @@ pub enum ErrorCategory {
 ///
 /// `dominant` is the category with the highest confidence (or `Identical`
 /// if the overall score is ≈ 100).
+#[cfg(feature = "classification")]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ErrorClassification {
@@ -614,6 +616,7 @@ pub struct ErrorClassification {
 /// rounding mode differences — nothing to worry about. A heavily skewed
 /// distribution (mostly one direction) suggests systematic truncation or
 /// a floor/ceil bias that may indicate a pipeline bug.
+#[cfg(feature = "classification")]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct RoundingBias {
@@ -634,6 +637,7 @@ pub struct RoundingBias {
 ///
 /// All deltas are `src - dst` (positive = distorted is darker/lower).
 /// Values normalized to [0.0, 1.0] regardless of input bit depth.
+#[cfg(feature = "classification")]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct DeltaStats {
@@ -693,6 +697,7 @@ pub struct DeltaStats {
 }
 
 /// Stats for a subset of pixels grouped by alpha.
+#[cfg(feature = "classification")]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct AlphaStratifiedStats {
@@ -705,6 +710,7 @@ pub struct AlphaStratifiedStats {
 }
 
 /// Result from `classify()`: the zensim score plus delta analysis and error classification.
+#[cfg(feature = "classification")]
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ClassifiedResult {
@@ -824,6 +830,10 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+}
+
+#[cfg(feature = "classification")]
+impl Zensim {
     /// Compare source and distorted images with full error classification.
     ///
     /// Returns a [`ClassifiedResult`] containing the standard zensim score,
@@ -882,6 +892,7 @@ impl Zensim {
 /// 3. **AlphaCompositing** — opaque unchanged, semitransparent changed (tightened)
 ///
 /// No `Mixed` category — highest score wins, or `Unclassified`.
+#[cfg(feature = "classification")]
 fn derive_classification(delta_stats: &DeltaStats, _result: &ZensimResult) -> ErrorClassification {
     let mut rounding_bias: Option<RoundingBias> = None;
 
@@ -993,6 +1004,7 @@ fn derive_classification(delta_stats: &DeltaStats, _result: &ZensimResult) -> Er
 ///
 /// Examines the +1/-1, +2/-2, +3/-3 bins per channel to determine whether
 /// errors are balanced (unbiased rounding) or systematic (truncation/floor).
+#[cfg(feature = "classification")]
 fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
     let h = &delta_stats.signed_small_histogram;
     let mut positive_fraction = [0.5f64; 3];
