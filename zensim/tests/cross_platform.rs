@@ -190,7 +190,9 @@ fn pixel_format_equivalence() {
         let diff = (result.score() - ref_result.score()).abs();
         println!(
             "  {:20} score={:.6}  diff={diff:.6}  (tol={:.2})",
-            fmt.name, result.score(), fmt.tolerance,
+            fmt.name,
+            result.score(),
+            fmt.tolerance,
         );
         assert!(
             diff <= fmt.tolerance,
@@ -304,12 +306,15 @@ fn score_sanity_checks() {
     let identical = z.compute(&src, &src).expect("compute failed");
     println!(
         "  identical: score={:.15} raw_dist={:.15e}",
-        identical.score(), identical.raw_distance(),
+        identical.score(),
+        identical.raw_distance(),
     );
     assert_eq!(
-        identical.score(), 100.0,
+        identical.score(),
+        100.0,
         "Identical images must score exactly 100.0, got {:.15} (raw_dist={:.15e})",
-        identical.score(), identical.raw_distance(),
+        identical.score(),
+        identical.raw_distance(),
     );
 
     // Light blur → < 100
@@ -467,12 +472,14 @@ fn identical_images_score_100() {
                 .fold(0.0f64, f64::max),
         );
         assert_eq!(
-            result.score(), 100.0,
+            result.score(),
+            100.0,
             "{name}: identical images must score exactly 100.0, got {:.15}",
             result.score(),
         );
         assert_eq!(
-            result.raw_distance(), 0.0,
+            result.raw_distance(),
+            0.0,
             "{name}: identical images must have raw_distance=0.0, got {:.2e}",
             result.raw_distance(),
         );
@@ -504,7 +511,9 @@ fn mean_offset_color_shift() {
 
     println!(
         "  mean_offset: X={:.6}, Y={:.6}, B={:.6}",
-        result.mean_offset()[0], result.mean_offset()[1], result.mean_offset()[2],
+        result.mean_offset()[0],
+        result.mean_offset()[1],
+        result.mean_offset()[2],
     );
 
     // Color shift adds R+20, subtracts G-15, adds B+30.

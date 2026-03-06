@@ -1946,11 +1946,13 @@ mod tests {
         eprintln!("Edge distortion sensitivity:");
         eprintln!(
             "  Left  8 cols distorted: score={:.4}, raw_dist={:.6}",
-            score_left.score(), score_left.raw_distance()
+            score_left.score(),
+            score_left.raw_distance()
         );
         eprintln!(
             "  Right 8 cols distorted: score={:.4}, raw_dist={:.6}",
-            score_right.score(), score_right.raw_distance()
+            score_right.score(),
+            score_right.raw_distance()
         );
         let ratio = score_left.raw_distance() / score_right.raw_distance();
         eprintln!("  Left/Right raw_distance ratio: {ratio:.4} (1.0 = symmetric)");
@@ -2007,11 +2009,13 @@ mod tests {
         eprintln!("Edge distortion sensitivity (vertical):");
         eprintln!(
             "  Top    8 rows distorted: score={:.4}, raw_dist={:.6}",
-            score_top.score(), score_top.raw_distance()
+            score_top.score(),
+            score_top.raw_distance()
         );
         eprintln!(
             "  Bottom 8 rows distorted: score={:.4}, raw_dist={:.6}",
-            score_bottom.score(), score_bottom.raw_distance()
+            score_bottom.score(),
+            score_bottom.raw_distance()
         );
         let ratio = score_top.raw_distance() / score_bottom.raw_distance();
         eprintln!("  Top/Bottom raw_distance ratio: {ratio:.4} (1.0 = symmetric)");
@@ -2086,13 +2090,16 @@ mod tests {
         eprintln!("Small image (16x16) mirror symmetry:");
         eprintln!(
             "  Original:  score={:.4}, raw_dist={:.6}",
-            result.score(), result.raw_distance()
+            result.score(),
+            result.raw_distance()
         );
         eprintln!(
             "  H-mirrored: score={:.4}, raw_dist={:.6}",
-            result_mirror.score(), result_mirror.raw_distance()
+            result_mirror.score(),
+            result_mirror.raw_distance()
         );
-        let diff_pct = ((result.raw_distance() - result_mirror.raw_distance()) / result.raw_distance()
+        let diff_pct = ((result.raw_distance() - result_mirror.raw_distance())
+            / result.raw_distance()
             * 100.0)
             .abs();
         eprintln!("  Score difference: {diff_pct:.2}%");

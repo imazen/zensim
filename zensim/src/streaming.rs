@@ -1841,17 +1841,21 @@ mod tests {
                 );
             }
         }
-        let score_rel =
-            (full_result.score() - streaming_result.score()).abs() / full_result.score().abs().max(1e-12);
+        let score_rel = (full_result.score() - streaming_result.score()).abs()
+            / full_result.score().abs().max(1e-12);
         let dist_rel = (full_result.raw_distance() - streaming_result.raw_distance()).abs()
             / full_result.raw_distance().abs().max(1e-12);
         eprintln!(
             "score: full={:.6} stream={:.6} (rel={:.2e})",
-            full_result.score(), streaming_result.score(), score_rel,
+            full_result.score(),
+            streaming_result.score(),
+            score_rel,
         );
         eprintln!(
             "raw_distance: full={:.8} stream={:.8} (rel={:.2e})",
-            full_result.raw_distance(), streaming_result.raw_distance(), dist_rel,
+            full_result.raw_distance(),
+            streaming_result.raw_distance(),
+            dist_rel,
         );
         eprintln!(
             "max abs diff: {:.2e}, max sig rel diff: {:.2e}",
@@ -1979,11 +1983,15 @@ mod tests {
 
         eprintln!(
             "sRGB u8 score={:.10}  linear f32 score={:.10}  rel={:.2e}",
-            u8_result.score(), f32_result.score(), score_rel,
+            u8_result.score(),
+            f32_result.score(),
+            score_rel,
         );
         eprintln!(
             "sRGB u8 dist={:.10}  linear f32 dist={:.10}  rel={:.2e}",
-            u8_result.raw_distance(), f32_result.raw_distance(), dist_rel,
+            u8_result.raw_distance(),
+            f32_result.raw_distance(),
+            dist_rel,
         );
 
         // When linear f32 values come from the same LUT, the results should be
@@ -2063,7 +2071,9 @@ mod tests {
             (rgb_result.score() - bgra_result.score()).abs() / rgb_result.score().abs().max(1e-12);
         eprintln!(
             "RGB u8 score={:.10}  BGRA u8 score={:.10}  rel={:.2e}",
-            rgb_result.score(), bgra_result.score(), score_rel,
+            rgb_result.score(),
+            bgra_result.score(),
+            score_rel,
         );
 
         // Note: BGRA path composites over checkerboard in linear space even for
@@ -2118,7 +2128,10 @@ mod tests {
         );
 
         assert_eq!(streaming_result.score(), precomp_result.score());
-        assert_eq!(streaming_result.raw_distance(), precomp_result.raw_distance());
+        assert_eq!(
+            streaming_result.raw_distance(),
+            precomp_result.raw_distance()
+        );
         assert_eq!(
             streaming_result.features().len(),
             precomp_result.features().len()
@@ -2185,7 +2198,8 @@ mod tests {
 
         eprintln!(
             "P3 identical score: {:.6}, sRGB identical score: {:.6}",
-            p3_result.score(), srgb_result.score(),
+            p3_result.score(),
+            srgb_result.score(),
         );
 
         // Both should be very close to 100 (numerical noise at small sizes)

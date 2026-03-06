@@ -114,7 +114,9 @@ fn score_reproducibility_across_tiers() {
         for (label, r) in entries {
             eprintln!(
                 "  [{tier:14}] {:50} score={:.10}  raw_dist={:.12}",
-                label, r.score(), r.raw_distance(),
+                label,
+                r.score(),
+                r.raw_distance(),
             );
         }
     }

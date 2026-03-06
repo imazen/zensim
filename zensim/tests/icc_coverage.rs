@@ -38,7 +38,8 @@ fn self_comparison_srgb() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Srgb);
     let result = zensim().compute(&src, &dst).unwrap();
     assert_eq!(
-        result.score(), 100.0,
+        result.score(),
+        100.0,
         "sRGB self-comparison should be exactly 100.0, got {}",
         result.score()
     );
@@ -53,7 +54,8 @@ fn self_comparison_display_p3() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::DisplayP3);
     let result = zensim().compute(&src, &dst).unwrap();
     assert_eq!(
-        result.score(), 100.0,
+        result.score(),
+        100.0,
         "Display P3 self-comparison should be exactly 100.0, got {}",
         result.score()
     );
@@ -68,7 +70,8 @@ fn self_comparison_bt2020() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Bt2020);
     let result = zensim().compute(&src, &dst).unwrap();
     assert_eq!(
-        result.score(), 100.0,
+        result.score(),
+        100.0,
         "BT.2020 self-comparison should be exactly 100.0, got {}",
         result.score()
     );
@@ -458,7 +461,10 @@ fn large_image_bt2020_parallel_rows() {
         "BT.2020 256x256 noise+blocks should be between 0 and 100, got {}",
         result.score()
     );
-    println!("  BT.2020 256x256 noise+blocks score: {:.4}", result.score());
+    println!(
+        "  BT.2020 256x256 noise+blocks score: {:.4}",
+        result.score()
+    );
 }
 
 #[test]
