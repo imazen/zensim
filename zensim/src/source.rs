@@ -18,8 +18,16 @@ pub enum ColorPrimaries {
     #[default]
     Srgb,
     /// Display P3 (DCI-P3 primaries with D65 whitepoint).
+    ///
+    /// Display P3 uses the sRGB transfer function, so `Srgb8*` pixel formats
+    /// linearize correctly without any extra steps.
     DisplayP3,
     /// ITU-R BT.2020 / Rec. 2020 primaries.
+    ///
+    /// **Transfer function caveat:** `Srgb8*` formats apply the sRGB transfer
+    /// function for linearization. SDR BT.2020 content technically uses BT.1886
+    /// (approximately gamma 2.4), which differs from sRGB by ~2% in mid-tones.
+    /// For exact results, linearize externally and use `LinearF32Rgba`.
     Bt2020,
 }
 
