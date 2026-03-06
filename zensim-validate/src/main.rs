@@ -588,13 +588,7 @@ fn main() {
                             score_mapping_b: 0.7,
                             ..Default::default()
                         };
-                        let nan_result = zensim::ZensimResult {
-                            score: f64::NAN,
-                            raw_distance: f64::NAN,
-                            features: vec![],
-                            profile: zensim::ZensimProfile::PreviewV0_1,
-                            mean_offset: [f64::NAN; 3],
-                        };
+                        let nan_result = zensim::ZensimResult::nan();
 
                         // Group new pairs by reference
                         let mut by_ref: std::collections::BTreeMap<
@@ -712,9 +706,9 @@ fn main() {
 
                         let mut n_new_valid = 0usize;
                         for (idx, key, hs, result) in new_results {
-                            if result.score.is_finite() {
+                            if result.score().is_finite() {
                                 all_human_scores.push(hs);
-                                all_features.push(result.features);
+                                all_features.push(result.into_features());
                                 all_ref_keys.push(key);
                                 all_valid_indices.push(idx as u32);
                                 n_new_valid += 1;
@@ -1317,13 +1311,7 @@ fn load_and_compute(
 
     let ref_groups: Vec<(&Path, Vec<(usize, &ImagePair)>)> = by_ref.into_iter().collect();
 
-    let nan_result = zensim::ZensimResult {
-        score: f64::NAN,
-        raw_distance: f64::NAN,
-        features: vec![],
-        profile: zensim::ZensimProfile::PreviewV0_1,
-        mean_offset: [f64::NAN; 3],
-    };
+    let nan_result = zensim::ZensimResult::nan();
 
     let config = zensim::ZensimConfig {
         compute_all_features: compute_all,
@@ -1485,9 +1473,9 @@ fn load_and_compute(
     let mut n_valid = 0;
 
     for (idx, key, hs, result) in results {
-        if result.score.is_finite() {
+        if result.score().is_finite() {
             human_scores.push(hs);
-            features.push(result.features);
+            features.push(result.into_features());
             ref_keys.push(key);
             valid_indices.push(idx as u32);
             n_valid += 1;

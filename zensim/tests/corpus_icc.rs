@@ -204,10 +204,10 @@ fn corpus_wide_gamut_self_comparison() {
         .with_color_primaries(primaries);
 
         let result = z.compute(&src, &dst).unwrap();
-        println!("  {s3_key:70} {primaries:?} score={:.4}", result.score);
+        println!("  {s3_key:70} {primaries:?} score={:.4}", result.score());
 
-        if result.score != 100.0 {
-            failures.push(format!("{s3_key}: expected 100.0, got {}", result.score));
+        if result.score() != 100.0 {
+            failures.push(format!("{s3_key}: expected 100.0, got {}", result.score()));
         }
     }
 
@@ -246,12 +246,12 @@ fn corpus_wide_gamut_wrong_primaries_differs() {
             .with_color_primaries(ColorPrimaries::Srgb);
 
         let result = z.compute(&src, &dst).unwrap();
-        println!("  {s3_key:70} P3-vs-sRGB score={:.4}", result.score);
+        println!("  {s3_key:70} P3-vs-sRGB score={:.4}", result.score());
 
         assert!(
-            result.score < 100.0,
+            result.score() < 100.0,
             "P3 image {s3_key} labeled as sRGB should differ: got {}",
-            result.score
+            result.score()
         );
     }
 
@@ -269,12 +269,12 @@ fn corpus_wide_gamut_wrong_primaries_differs() {
             .with_color_primaries(ColorPrimaries::Srgb);
 
         let result = z.compute(&src, &dst).unwrap();
-        println!("  {s3_key:70} BT.2020-vs-sRGB score={:.4}", result.score);
+        println!("  {s3_key:70} BT.2020-vs-sRGB score={:.4}", result.score());
 
         assert!(
-            result.score < 100.0,
+            result.score() < 100.0,
             "BT.2020 image {s3_key} labeled as sRGB should differ: got {}",
-            result.score
+            result.score()
         );
     }
 }
@@ -331,14 +331,14 @@ fn corpus_repro_icc_decodable() {
 
         match z.compute(&src, &dst) {
             Ok(result) => {
-                if result.score != 100.0 {
+                if result.score() != 100.0 {
                     failed.push(format!(
                         "{s3_key}: self-comparison score {}, expected 100.0",
-                        result.score
+                        result.score()
                     ));
                 }
                 decoded += 1;
-                println!("  {s3_key:70} score={:.4}", result.score);
+                println!("  {s3_key:70} score={:.4}", result.score());
             }
             Err(e) => {
                 failed.push(format!("{s3_key}: compute error: {e}"));
@@ -408,11 +408,11 @@ fn corpus_wide_gamut_display_p3_scan() {
             .with_color_primaries(ColorPrimaries::DisplayP3);
 
         let result = z.compute(&src, &dst).unwrap();
-        if result.score != 100.0 {
-            failures.push(format!("{s3_key}: score {}", result.score));
+        if result.score() != 100.0 {
+            failures.push(format!("{s3_key}: score {}", result.score()));
         }
         tested += 1;
-        println!("  [{tested:3}] {s3_key:70} score={:.4}", result.score);
+        println!("  [{tested:3}] {s3_key:70} score={:.4}", result.score());
     }
 
     println!("  Display P3 scan: {tested} images tested");

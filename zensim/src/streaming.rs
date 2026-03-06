@@ -1782,8 +1782,8 @@ mod tests {
             compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS_PREVIEW_V0_1);
 
         assert_eq!(
-            full_result.features.len(),
-            streaming_result.features.len(),
+            full_result.features().len(),
+            streaming_result.features().len(),
             "feature count mismatch"
         );
 
@@ -1806,9 +1806,9 @@ mod tests {
         let mut max_sig_rel = 0.0f64; // max relative diff for significant features
         let mut max_abs_diff = 0.0f64;
         for (i, (f, s)) in full_result
-            .features
+            .features()
             .iter()
-            .zip(streaming_result.features.iter())
+            .zip(streaming_result.features().iter())
             .enumerate()
         {
             let diff = (f - s).abs();
@@ -1835,16 +1835,16 @@ mod tests {
             }
         }
         let score_rel =
-            (full_result.score - streaming_result.score).abs() / full_result.score.abs().max(1e-12);
-        let dist_rel = (full_result.raw_distance - streaming_result.raw_distance).abs()
-            / full_result.raw_distance.abs().max(1e-12);
+            (full_result.score() - streaming_result.score()).abs() / full_result.score().abs().max(1e-12);
+        let dist_rel = (full_result.raw_distance() - streaming_result.raw_distance()).abs()
+            / full_result.raw_distance().abs().max(1e-12);
         eprintln!(
             "score: full={:.6} stream={:.6} (rel={:.2e})",
-            full_result.score, streaming_result.score, score_rel,
+            full_result.score(), streaming_result.score(), score_rel,
         );
         eprintln!(
             "raw_distance: full={:.8} stream={:.8} (rel={:.2e})",
-            full_result.raw_distance, streaming_result.raw_distance, dist_rel,
+            full_result.raw_distance(), streaming_result.raw_distance(), dist_rel,
         );
         eprintln!(
             "max abs diff: {:.2e}, max sig rel diff: {:.2e}",
@@ -1966,17 +1966,17 @@ mod tests {
 
         // Score should match very closely (identical linear values → identical XYB → identical features)
         let score_rel =
-            (u8_result.score - f32_result.score).abs() / u8_result.score.abs().max(1e-12);
-        let dist_rel = (u8_result.raw_distance - f32_result.raw_distance).abs()
-            / u8_result.raw_distance.abs().max(1e-12);
+            (u8_result.score() - f32_result.score()).abs() / u8_result.score().abs().max(1e-12);
+        let dist_rel = (u8_result.raw_distance() - f32_result.raw_distance()).abs()
+            / u8_result.raw_distance().abs().max(1e-12);
 
         eprintln!(
             "sRGB u8 score={:.10}  linear f32 score={:.10}  rel={:.2e}",
-            u8_result.score, f32_result.score, score_rel,
+            u8_result.score(), f32_result.score(), score_rel,
         );
         eprintln!(
             "sRGB u8 dist={:.10}  linear f32 dist={:.10}  rel={:.2e}",
-            u8_result.raw_distance, f32_result.raw_distance, dist_rel,
+            u8_result.raw_distance(), f32_result.raw_distance(), dist_rel,
         );
 
         // When linear f32 values come from the same LUT, the results should be
@@ -1985,8 +1985,8 @@ mod tests {
             score_rel < 1e-6,
             "score relative diff {:.2e} exceeds 1e-6 (sRGB={:.10} vs linear={:.10})",
             score_rel,
-            u8_result.score,
-            f32_result.score,
+            u8_result.score(),
+            f32_result.score(),
         );
         assert!(
             dist_rel < 1e-5,
@@ -2053,10 +2053,10 @@ mod tests {
         // Opaque BGRA compositing in linear space should match sRGB u8 RGB
         // within a small tolerance (compositing detour adds FP rounding).
         let score_rel =
-            (rgb_result.score - bgra_result.score).abs() / rgb_result.score.abs().max(1e-12);
+            (rgb_result.score() - bgra_result.score()).abs() / rgb_result.score().abs().max(1e-12);
         eprintln!(
             "RGB u8 score={:.10}  BGRA u8 score={:.10}  rel={:.2e}",
-            rgb_result.score, bgra_result.score, score_rel,
+            rgb_result.score(), bgra_result.score(), score_rel,
         );
 
         // Note: BGRA path composites over checkerboard in linear space even for
@@ -2110,16 +2110,16 @@ mod tests {
             &WEIGHTS_PREVIEW_V0_1,
         );
 
-        assert_eq!(streaming_result.score, precomp_result.score);
-        assert_eq!(streaming_result.raw_distance, precomp_result.raw_distance);
+        assert_eq!(streaming_result.score(), precomp_result.score());
+        assert_eq!(streaming_result.raw_distance(), precomp_result.raw_distance());
         assert_eq!(
-            streaming_result.features.len(),
-            precomp_result.features.len()
+            streaming_result.features().len(),
+            precomp_result.features().len()
         );
         for (i, (s, p)) in streaming_result
-            .features
+            .features()
             .iter()
-            .zip(precomp_result.features.iter())
+            .zip(precomp_result.features().iter())
             .enumerate()
         {
             assert_eq!(s, p, "feature {i} mismatch: streaming={s} precomp={p}");
@@ -2178,19 +2178,19 @@ mod tests {
 
         eprintln!(
             "P3 identical score: {:.6}, sRGB identical score: {:.6}",
-            p3_result.score, srgb_result.score,
+            p3_result.score(), srgb_result.score(),
         );
 
         // Both should be very close to 100 (numerical noise at small sizes)
         assert!(
-            p3_result.score >= 99.5,
+            p3_result.score() >= 99.5,
             "P3 identical score should be >= 99.5, got {}",
-            p3_result.score,
+            p3_result.score(),
         );
         assert!(
-            srgb_result.score >= 99.5,
+            srgb_result.score() >= 99.5,
             "sRGB identical score should be >= 99.5, got {}",
-            srgb_result.score,
+            srgb_result.score(),
         );
     }
 
@@ -2242,13 +2242,13 @@ mod tests {
         let result = compute_zensim_streaming(&src_p3, &dst_srgb, &config, &WEIGHTS_PREVIEW_V0_1);
 
         assert!(
-            result.score < 100.0,
+            result.score() < 100.0,
             "P3 vs sRGB with same pixel values should score < 100, got {}",
-            result.score,
+            result.score(),
         );
         eprintln!(
             "P3 vs sRGB same-pixels score: {:.4} (expected < 100)",
-            result.score,
+            result.score(),
         );
     }
 

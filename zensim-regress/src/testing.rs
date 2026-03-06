@@ -574,11 +574,11 @@ pub(crate) fn build_report(
     });
 
     // 2. Score
-    let score_pass = cr.result.score >= tolerance.min_similarity;
+    let score_pass = cr.result.score() >= tolerance.min_similarity;
     constraint_results.push(ConstraintResult {
         name: "Similarity",
         passed: score_pass,
-        actual: format!("{:.1}", cr.result.score),
+        actual: format!("{:.1}", cr.result.score()),
         limit: format!(">={:.1}", tolerance.min_similarity),
     });
 
@@ -626,7 +626,7 @@ pub(crate) fn build_report(
 
     RegressionReport {
         passed,
-        score: cr.result.score,
+        score: cr.result.score(),
         category: cr.classification.dominant,
         confidence: cr.classification.confidence,
         max_channel_delta,

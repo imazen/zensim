@@ -114,7 +114,7 @@ fn score_reproducibility_across_tiers() {
         for (label, r) in entries {
             eprintln!(
                 "  [{tier:14}] {:50} score={:.10}  raw_dist={:.12}",
-                label, r.score, r.raw_distance,
+                label, r.score(), r.raw_distance(),
             );
         }
     }
@@ -129,10 +129,10 @@ fn score_reproducibility_across_tiers() {
         let mut max_score_ulp: u64 = 0;
         let mut max_feat_ulp: u64 = 0;
         for (_label, r) in &entries[1..] {
-            if let Some(u) = ulp_distance(ref_r.score, r.score) {
+            if let Some(u) = ulp_distance(ref_r.score(), r.score()) {
                 max_score_ulp = max_score_ulp.max(u);
             }
-            for (rf, tf) in ref_r.features.iter().zip(r.features.iter()) {
+            for (rf, tf) in ref_r.features().iter().zip(r.features().iter()) {
                 if let Some(u) = ulp_distance(*rf, *tf) {
                     max_feat_ulp = max_feat_ulp.max(u);
                 }
@@ -155,11 +155,11 @@ fn score_reproducibility_across_tiers() {
     // Cross-tier divergence: compare each tier against the highest tier
     eprintln!("\n--- Cross-tier divergence ---");
     let tier_order = ["AVX-512 (v4)", "AVX2 (v3)", "scalar/SSE2"];
-    let mut tier_scores: Vec<(&str, f64, f64, &Vec<f64>)> = Vec::new();
+    let mut tier_scores: Vec<(&str, f64, f64, &[f64])> = Vec::new();
     for tier in &tier_order {
         if let Some(entries) = tier_results.get(tier) {
             let (_, r) = &entries[0];
-            tier_scores.push((tier, r.score, r.raw_distance, &r.features));
+            tier_scores.push((tier, r.score(), r.raw_distance(), r.features()));
         }
     }
 
@@ -276,7 +276,7 @@ fn score_reproducibility_512x512() {
         if let Some(entries) = tier_results.get(tier) {
             eprintln!(
                 "  {tier:14}: score={:.10}  ({} permutations)",
-                entries[0].score,
+                entries[0].score(),
                 entries.len(),
             );
         }
@@ -288,7 +288,7 @@ fn score_reproducibility_512x512() {
             continue;
         }
         for r in &entries[1..] {
-            let u = ulp_distance(entries[0].score, r.score).unwrap_or(u64::MAX);
+            let u = ulp_distance(entries[0].score(), r.score()).unwrap_or(u64::MAX);
             assert_eq!(u, 0, "Within-tier {tier}: score diverges by {u} ULP");
         }
     }
@@ -298,16 +298,16 @@ fn score_reproducibility_512x512() {
         tier_results.get("AVX-512 (v4)"),
         tier_results.get("AVX2 (v3)"),
     ) {
-        let u = ulp_distance(v4[0].score, v3[0].score).unwrap_or(u64::MAX);
-        let rel = (v4[0].score - v3[0].score).abs() / v4[0].score.abs().max(1e-12);
+        let u = ulp_distance(v4[0].score(), v3[0].score()).unwrap_or(u64::MAX);
+        let rel = (v4[0].score() - v3[0].score()).abs() / v4[0].score().abs().max(1e-12);
         eprintln!("  v4 vs v3: score ULP={u}, rel={rel:.2e}");
     }
     if let (Some(v4), Some(sc)) = (
         tier_results.get("AVX-512 (v4)"),
         tier_results.get("scalar/SSE2"),
     ) {
-        let u = ulp_distance(v4[0].score, sc[0].score).unwrap_or(u64::MAX);
-        let rel = (v4[0].score - sc[0].score).abs() / v4[0].score.abs().max(1e-12);
+        let u = ulp_distance(v4[0].score(), sc[0].score()).unwrap_or(u64::MAX);
+        let rel = (v4[0].score() - sc[0].score()).abs() / v4[0].score().abs().max(1e-12);
         eprintln!("  v4 vs scalar: score ULP={u}, rel={rel:.2e}");
     }
 }

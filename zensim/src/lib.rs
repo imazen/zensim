@@ -13,7 +13,7 @@
 //! let source = RgbSlice::new(&src_pixels, 8, 8);
 //! let distorted = RgbSlice::new(&dst_pixels, 8, 8);
 //! let result = z.compute(&source, &distorted)?;
-//! println!("{}: {:.2}", result.profile, result.score);
+//! println!("{}: {:.2}", result.profile(), result.score());
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
 //!
@@ -29,7 +29,7 @@
 //! for dst_pixels in &distorted_images {
 //!     let dst = RgbSlice::new(dst_pixels, width, height);
 //!     let result = z.compute_with_ref(&precomputed, &dst)?;
-//!     println!("score: {:.2}", result.score);
+//!     println!("score: {:.2}", result.score());
 //! }
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```

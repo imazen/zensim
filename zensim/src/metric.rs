@@ -419,29 +419,80 @@ pub(crate) struct ScaleStats {
 /// full per-scale feature vector (useful for diagnostics or weight training).
 #[derive(Debug, Clone)]
 pub struct ZensimResult {
+    score: f64,
+    raw_distance: f64,
+    features: Vec<f64>,
+    profile: crate::profile::ZensimProfile,
+    mean_offset: [f64; 3],
+}
+
+impl ZensimResult {
+    /// Create a result from computed values. Internal use only.
+    pub(crate) fn new(
+        score: f64,
+        raw_distance: f64,
+        features: Vec<f64>,
+        profile: crate::profile::ZensimProfile,
+        mean_offset: [f64; 3],
+    ) -> Self {
+        Self { score, raw_distance, features, profile, mean_offset }
+    }
+
+    /// Set the profile on this result (builder pattern). Internal use only.
+    pub(crate) fn with_profile(mut self, profile: crate::profile::ZensimProfile) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// Create a NaN sentinel result (for error/placeholder paths).
+    pub fn nan() -> Self {
+        Self {
+            score: f64::NAN,
+            raw_distance: f64::NAN,
+            features: vec![],
+            profile: crate::profile::ZensimProfile::PreviewV0_1,
+            mean_offset: [f64::NAN; 3],
+        }
+    }
+
     /// Quality score on a 0–100 scale. 100 = identical, 0 = maximally different.
     /// Derived from `raw_distance` via a power-law mapping.
-    pub score: f64,
+    pub fn score(&self) -> f64 {
+        self.score
+    }
+
     /// Raw weighted feature distance before nonlinear mapping. Lower = more similar.
     /// Not bounded to a fixed range; depends on image content and weights.
-    pub raw_distance: f64,
-    /// Per-scale raw features (156 values for the default 4-scale configuration).
+    pub fn raw_distance(&self) -> f64 {
+        self.raw_distance
+    }
+
+    /// Per-scale raw features as a slice.
     ///
-    /// Layout: 4 scales × 3 channels (X, Y, B) × 13 features per channel:
-    /// `ssim_mean, ssim_4th, ssim_2nd, art_mean, art_4th, art_2nd,
-    ///  det_mean, det_4th, det_2nd, mse, hf_energy_loss, hf_mag_loss, hf_energy_gain`
-    #[cfg_attr(not(feature = "training"), doc(hidden))]
-    pub features: Vec<f64>,
+    /// Layout: 4 scales × 3 channels (X, Y, B) × 19 features per channel = 228.
+    /// See [`FeatureView`] for named access.
+    pub fn features(&self) -> &[f64] {
+        &self.features
+    }
+
+    /// Consume the result and return the owned feature vector.
+    pub fn into_features(self) -> Vec<f64> {
+        self.features
+    }
+
     /// Which profile produced this score.
-    pub profile: crate::profile::ZensimProfile,
+    pub fn profile(&self) -> crate::profile::ZensimProfile {
+        self.profile
+    }
+
     /// Per-channel XYB mean offset: `mean(src_xyb[c]) - mean(dst_xyb[c])`.
     ///
     /// Captures global color/luminance shifts (CMS errors, white balance changes).
     /// Channels: `[X, Y, B]`, signed. Positive = distorted is darker/less saturated.
-    pub mean_offset: [f64; 3],
-}
+    pub fn mean_offset(&self) -> [f64; 3] {
+        self.mean_offset
+    }
 
-impl ZensimResult {
     /// Convert the score to a dissimilarity value.
     ///
     /// Dissimilarity is `(100 - score) / 100`: 0 = identical, higher = worse.
@@ -679,7 +730,7 @@ use crate::source::ImageSource;
 /// let source = RgbSlice::new(&src, 8, 8);
 /// let distorted = RgbSlice::new(&dst, 8, 8);
 /// let result = z.compute(&source, &distorted).unwrap();
-/// println!("{}: {:.2}", result.profile, result.score);
+/// println!("{}: {:.2}", result.profile(), result.score());
 /// ```
 #[derive(Clone, Debug)]
 pub struct Zensim {
@@ -710,9 +761,8 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let config = config_from_params(params);
-        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
-        result.profile = self.profile;
-        Ok(result)
+        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        Ok(result.with_profile(self.profile))
     }
 
     /// Pre-compute reference image data for batch comparison.
@@ -749,14 +799,13 @@ impl Zensim {
             return Err(ZensimError::ImageTooSmall);
         }
         let config = config_from_params(params);
-        let mut result = crate::streaming::compute_zensim_streaming_with_ref(
+        let result = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
             &config,
             params.weights,
         );
-        result.profile = self.profile;
-        Ok(result)
+        Ok(result.with_profile(self.profile))
     }
 
     /// Like `compute`, but always computes all features regardless of
@@ -771,9 +820,8 @@ impl Zensim {
         validate_pair(source, distorted)?;
         let mut config = config_from_params(params);
         config.compute_all_features = true;
-        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
-        result.profile = self.profile;
-        Ok(result)
+        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        Ok(result.with_profile(self.profile))
     }
 
     /// Compare source and distorted images with full error classification.
@@ -781,7 +829,7 @@ impl Zensim {
     /// Returns a [`ClassifiedResult`] containing the standard zensim score,
     /// pixel-level delta statistics, and error type classification.
     ///
-    /// The `result.score` is identical to what `compute()` returns — classification
+    /// The `result.score()` is identical to what `compute()` returns — classification
     /// is a separate analysis pass that doesn't affect the score.
     ///
     /// # Errors
@@ -1038,13 +1086,7 @@ fn compute_with_config_inner(
             FEATURES_PER_CHANNEL_WITH_PEAKS
         };
         let num_features = config.num_scales * 3 * fpc;
-        return ZensimResult {
-            score: 100.0,
-            raw_distance: 0.0,
-            features: vec![0.0; num_features],
-            profile: ZensimProfile::latest(),
-            mean_offset: [0.0; 3],
-        };
+        return ZensimResult::new(100.0, 0.0, vec![0.0; num_features], ZensimProfile::latest(), [0.0; 3]);
     }
 
     crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
@@ -1130,7 +1172,7 @@ pub const FEATURES_PER_CHANNEL_EXTENDED: usize = 25;
 ///
 /// ```ignore
 /// let result = z.compute_all_features(&src, &dst)?;
-/// let view = FeatureView::new(&result.features, 4)?;
+/// let view = FeatureView::new(result.features(), 4)?;
 /// let ssim_mean_s0_y = view.ssim_mean(0, 1);
 /// let ssim_max_s2_x = view.ssim_max(0, 2).unwrap();
 /// ```
@@ -1382,13 +1424,7 @@ pub fn compute_zensim_with_config(
             FEATURES_PER_CHANNEL_WITH_PEAKS
         };
         let num_features = config.num_scales * 3 * fpc;
-        return Ok(ZensimResult {
-            score: 100.0,
-            raw_distance: 0.0,
-            features: vec![0.0; num_features],
-            profile: ZensimProfile::latest(),
-            mean_offset: [0.0; 3],
-        });
+        return Ok(ZensimResult::new(100.0, 0.0, vec![0.0; num_features], ZensimProfile::latest(), [0.0; 3]));
     }
 
     let src_img = crate::source::RgbSlice::new(source, width, height);
@@ -1740,13 +1776,7 @@ pub(crate) fn combine_scores(
     let score =
         distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
 
-    ZensimResult {
-        score,
-        raw_distance,
-        features,
-        profile: ZensimProfile::PreviewV0_1,
-        mean_offset,
-    }
+    ZensimResult::new(score, raw_distance, features, ZensimProfile::PreviewV0_1, mean_offset)
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 //! 1. DeltaStats features match expected patterns for each distortion type
 //! 2. Classification assigns correct ErrorCategory
 //! 3. Negative controls (noise) don't false-positive
-//! 4. classify().result.score matches compute().score
+//! 4. classify().result.score() matches compute().score()
 //!
 //! Run with: `cargo test -p zensim --all-features --test classification -- --nocapture`
 
@@ -75,7 +75,7 @@ fn classify_rgba(src_name: &str, dst_name: &str) -> ClassifiedResult {
 fn print_delta_stats(name: &str, cr: &ClassifiedResult) {
     let ds = &cr.delta_stats;
     println!("  {name}:");
-    println!("    score: {:.4}", cr.result.score);
+    println!("    score: {:.4}", cr.result.score());
     println!(
         "    dominant: {:?} (confidence: {:.3})",
         cr.classification.dominant, cr.classification.confidence,
@@ -131,7 +131,7 @@ fn print_delta_stats(name: &str, cr: &ClassifiedResult) {
 
 // ─── classify() score identity ─────────────────────────────────────────
 
-/// classify().result.score must be bit-identical to compute().score.
+/// classify().result.score() must be bit-identical to compute().score().
 #[test]
 fn classify_score_matches_compute() {
     let z = Zensim::new(ZensimProfile::latest());
@@ -144,18 +144,18 @@ fn classify_score_matches_compute() {
     let classify_result = z.classify(&src_img, &dst_img).expect("classify failed");
 
     assert_eq!(
-        compute_result.score.to_bits(),
-        classify_result.result.score.to_bits(),
+        compute_result.score().to_bits(),
+        classify_result.result.score().to_bits(),
         "classify score must be bit-identical to compute score: {} vs {}",
-        compute_result.score,
-        classify_result.result.score,
+        compute_result.score(),
+        classify_result.result.score(),
     );
     assert_eq!(
-        compute_result.raw_distance.to_bits(),
-        classify_result.result.raw_distance.to_bits(),
+        compute_result.raw_distance().to_bits(),
+        classify_result.result.raw_distance().to_bits(),
         "classify raw_distance must be bit-identical",
     );
-    println!("  score identity verified: {:.6}", compute_result.score);
+    println!("  score identity verified: {:.6}", compute_result.score());
 }
 
 // ─── Identical images ──────────────────────────────────────────────────
@@ -171,7 +171,7 @@ fn identical_images_classified_as_identical() {
 
     assert_eq!(cr.classification.dominant, ErrorCategory::Identical);
     assert_eq!(cr.delta_stats.pixels_differing, 0);
-    assert_eq!(cr.result.score, 100.0);
+    assert_eq!(cr.result.score(), 100.0);
     println!("  identical: score=100, dominant=Identical");
 }
 

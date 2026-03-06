@@ -101,15 +101,15 @@ fn hardcoded_reference_scores() {
         let dst = RgbSlice::new(&pair.distorted, W, H);
         let result = z.compute(&src, &dst).expect("compute failed");
 
-        let diff = (result.score - expected_score).abs();
+        let diff = (result.score() - expected_score).abs();
         println!(
             "  {name:30} score={:.15}  expected={expected_score:.15}  diff={diff:.2e}",
-            result.score,
+            result.score(),
         );
         if diff > TOLERANCE {
             failures.push(format!(
                 "{name}: score {:.15} differs from expected {expected_score:.15} by {diff:.2e} (>{TOLERANCE})",
-                result.score,
+                result.score(),
             ));
         }
     }
@@ -178,7 +178,7 @@ fn pixel_format_equivalence() {
         tolerance: 0.15,
     });
 
-    println!("  Reference (RgbSlice): score={:.6}", ref_result.score);
+    println!("  Reference (RgbSlice): score={:.6}", ref_result.score());
 
     for fmt in &formats {
         let (src_buf, src_stride) = (fmt.converter)(&src_pixels, W, H);
@@ -187,17 +187,17 @@ fn pixel_format_equivalence() {
         let dst = StridedBytes::new(&dst_buf, W, H, dst_stride, fmt.format);
         let result = z.compute(&src, &dst).expect("compute failed");
 
-        let diff = (result.score - ref_result.score).abs();
+        let diff = (result.score() - ref_result.score()).abs();
         println!(
             "  {:20} score={:.6}  diff={diff:.6}  (tol={:.2})",
-            fmt.name, result.score, fmt.tolerance,
+            fmt.name, result.score(), fmt.tolerance,
         );
         assert!(
             diff <= fmt.tolerance,
             "{}: score {:.6} differs from reference {:.6} by {diff:.6} (>{:.2})",
             fmt.name,
-            result.score,
-            ref_result.score,
+            result.score(),
+            ref_result.score(),
             fmt.tolerance,
         );
     }
@@ -226,13 +226,13 @@ fn feature_coverage() {
             .expect("compute_all_features failed");
 
         assert_eq!(
-            result.features.len(),
+            result.features().len(),
             NUM_FEATURES,
             "Expected {NUM_FEATURES} features, got {}",
-            result.features.len(),
+            result.features().len(),
         );
 
-        for (i, &f) in result.features.iter().enumerate() {
+        for (i, &f) in result.features().iter().enumerate() {
             max_per_feature[i] = max_per_feature[i].max(f.abs());
         }
     }
@@ -304,12 +304,12 @@ fn score_sanity_checks() {
     let identical = z.compute(&src, &src).expect("compute failed");
     println!(
         "  identical: score={:.15} raw_dist={:.15e}",
-        identical.score, identical.raw_distance,
+        identical.score(), identical.raw_distance(),
     );
     assert_eq!(
-        identical.score, 100.0,
+        identical.score(), 100.0,
         "Identical images must score exactly 100.0, got {:.15} (raw_dist={:.15e})",
-        identical.score, identical.raw_distance,
+        identical.score(), identical.raw_distance(),
     );
 
     // Light blur → < 100
@@ -317,23 +317,23 @@ fn score_sanity_checks() {
     let dst = RgbSlice::new(&light_blur, W, H);
     let light_result = z.compute(&src, &dst).expect("compute failed");
     assert!(
-        light_result.score < 100.0,
+        light_result.score() < 100.0,
         "Light blur should score < 100, got {}",
-        light_result.score,
+        light_result.score(),
     );
-    println!("  light blur (r=1): {:.6}", light_result.score);
+    println!("  light blur (r=1): {:.6}", light_result.score());
 
     // Heavy blur → lower than light blur
     let heavy_blur = distort_blur(&source, W, H, 5);
     let dst = RgbSlice::new(&heavy_blur, W, H);
     let heavy_result = z.compute(&src, &dst).expect("compute failed");
     assert!(
-        heavy_result.score < light_result.score,
+        heavy_result.score() < light_result.score(),
         "Heavy blur ({:.4}) should be lower than light blur ({:.4})",
-        heavy_result.score,
-        light_result.score,
+        heavy_result.score(),
+        light_result.score(),
     );
-    println!("  heavy blur (r=5): {:.6}", heavy_result.score);
+    println!("  heavy blur (r=5): {:.6}", heavy_result.score());
 
     // All scores in [0, 100]
     let pairs = generate_test_pairs(W, H);
@@ -342,10 +342,10 @@ fn score_sanity_checks() {
         let dst = RgbSlice::new(&pair.distorted, W, H);
         let result = z.compute(&src, &dst).expect("compute failed");
         assert!(
-            (0.0..=100.0).contains(&result.score),
+            (0.0..=100.0).contains(&result.score()),
             "{}: score {:.4} outside [0, 100]",
             pair.name,
-            result.score,
+            result.score(),
         );
     }
     println!("  All scores in [0, 100] range");
@@ -369,26 +369,26 @@ fn determinism_same_platform() {
 
         // Scores must be bit-exact
         assert_eq!(
-            r1.score.to_bits(),
-            r2.score.to_bits(),
+            r1.score().to_bits(),
+            r2.score().to_bits(),
             "{}: score not deterministic (run 1 vs 2): {} vs {}",
             pair.name,
-            r1.score,
-            r2.score,
+            r1.score(),
+            r2.score(),
         );
         assert_eq!(
-            r1.score.to_bits(),
-            r3.score.to_bits(),
+            r1.score().to_bits(),
+            r3.score().to_bits(),
             "{}: score not deterministic (run 1 vs 3): {} vs {}",
             pair.name,
-            r1.score,
-            r3.score,
+            r1.score(),
+            r3.score(),
         );
 
         // raw_distance must be bit-exact
         assert_eq!(
-            r1.raw_distance.to_bits(),
-            r2.raw_distance.to_bits(),
+            r1.raw_distance().to_bits(),
+            r2.raw_distance().to_bits(),
             "{}: raw_distance not deterministic",
             pair.name,
         );
@@ -396,14 +396,14 @@ fn determinism_same_platform() {
         // mean_offset must be bit-exact
         for c in 0..3 {
             assert_eq!(
-                r1.mean_offset[c].to_bits(),
-                r2.mean_offset[c].to_bits(),
+                r1.mean_offset()[c].to_bits(),
+                r2.mean_offset()[c].to_bits(),
                 "{}: mean_offset[{c}] not deterministic (run 1 vs 2)",
                 pair.name,
             );
             assert_eq!(
-                r1.mean_offset[c].to_bits(),
-                r3.mean_offset[c].to_bits(),
+                r1.mean_offset()[c].to_bits(),
+                r3.mean_offset()[c].to_bits(),
                 "{}: mean_offset[{c}] not deterministic (run 1 vs 3)",
                 pair.name,
             );
@@ -411,10 +411,10 @@ fn determinism_same_platform() {
 
         // All features must be bit-exact
         for (i, ((f1, f2), f3)) in r1
-            .features
+            .features()
             .iter()
-            .zip(r2.features.iter())
-            .zip(r3.features.iter())
+            .zip(r2.features().iter())
+            .zip(r3.features().iter())
             .enumerate()
         {
             assert_eq!(
@@ -458,30 +458,30 @@ fn identical_images_score_100() {
 
         println!(
             "  {name:20} score={:.15}  raw_dist={:.2e}  max_feat={:.2e}",
-            result.score,
-            result.raw_distance,
+            result.score(),
+            result.raw_distance(),
             result
-                .features
+                .features()
                 .iter()
                 .map(|f| f.abs())
                 .fold(0.0f64, f64::max),
         );
         assert_eq!(
-            result.score, 100.0,
+            result.score(), 100.0,
             "{name}: identical images must score exactly 100.0, got {:.15}",
-            result.score,
+            result.score(),
         );
         assert_eq!(
-            result.raw_distance, 0.0,
+            result.raw_distance(), 0.0,
             "{name}: identical images must have raw_distance=0.0, got {:.2e}",
-            result.raw_distance,
+            result.raw_distance(),
         );
         assert!(
-            result.features.iter().all(|&f| f == 0.0),
+            result.features().iter().all(|&f| f == 0.0),
             "{name}: identical images must have all-zero features",
         );
         assert_eq!(
-            result.mean_offset,
+            result.mean_offset(),
             [0.0, 0.0, 0.0],
             "{name}: identical images must have zero mean_offset",
         );
@@ -504,13 +504,13 @@ fn mean_offset_color_shift() {
 
     println!(
         "  mean_offset: X={:.6}, Y={:.6}, B={:.6}",
-        result.mean_offset[0], result.mean_offset[1], result.mean_offset[2],
+        result.mean_offset()[0], result.mean_offset()[1], result.mean_offset()[2],
     );
 
     // Color shift adds R+20, subtracts G-15, adds B+30.
     // In XYB space, Y channel (luminance) should show a non-trivial offset.
     // All three channels should have non-zero offsets.
-    for (c, name) in result.mean_offset.iter().zip(["X", "Y", "B"]) {
+    for (c, name) in result.mean_offset().iter().zip(["X", "Y", "B"]) {
         assert!(
             c.abs() > 1e-4,
             "mean_offset {name} should be non-trivial for color-shifted images, got {c:.6e}",
@@ -537,18 +537,18 @@ fn mean_offset_precomputed_ref() {
         .expect("compute_with_ref failed");
 
     for c in 0..3 {
-        let diff = (direct.mean_offset[c] - with_ref.mean_offset[c]).abs();
+        let diff = (direct.mean_offset()[c] - with_ref.mean_offset()[c]).abs();
         assert!(
             diff < 1e-10,
             "mean_offset[{c}] mismatch: direct={:.10}, with_ref={:.10}, diff={diff:.2e}",
-            direct.mean_offset[c],
-            with_ref.mean_offset[c],
+            direct.mean_offset()[c],
+            with_ref.mean_offset()[c],
         );
     }
     println!(
         "  direct vs precomputed: max diff = {:.2e}",
         (0..3)
-            .map(|c| (direct.mean_offset[c] - with_ref.mean_offset[c]).abs())
+            .map(|c| (direct.mean_offset()[c] - with_ref.mean_offset()[c]).abs())
             .fold(0.0f64, f64::max),
     );
 }

@@ -38,9 +38,9 @@ fn self_comparison_srgb() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Srgb);
     let result = zensim().compute(&src, &dst).unwrap();
     assert_eq!(
-        result.score, 100.0,
+        result.score(), 100.0,
         "sRGB self-comparison should be exactly 100.0, got {}",
-        result.score
+        result.score()
     );
 }
 
@@ -53,9 +53,9 @@ fn self_comparison_display_p3() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::DisplayP3);
     let result = zensim().compute(&src, &dst).unwrap();
     assert_eq!(
-        result.score, 100.0,
+        result.score(), 100.0,
         "Display P3 self-comparison should be exactly 100.0, got {}",
-        result.score
+        result.score()
     );
 }
 
@@ -68,9 +68,9 @@ fn self_comparison_bt2020() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Bt2020);
     let result = zensim().compute(&src, &dst).unwrap();
     assert_eq!(
-        result.score, 100.0,
+        result.score(), 100.0,
         "BT.2020 self-comparison should be exactly 100.0, got {}",
-        result.score
+        result.score()
     );
 }
 
@@ -85,13 +85,13 @@ fn p3_vs_srgb_interpretation_differs() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Srgb);
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score < 100.0,
+        result.score() < 100.0,
         "P3 vs sRGB same pixels should differ, got {}",
-        result.score
+        result.score()
     );
     println!(
         "  P3 vs sRGB same-pixels score: {:.4} (expected < 100)",
-        result.score
+        result.score()
     );
 }
 
@@ -104,14 +104,14 @@ fn bt2020_vs_srgb_interpretation_differs() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Srgb);
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score < 100.0,
+        result.score() < 100.0,
         "BT.2020 vs sRGB same pixels should differ, got {}",
-        result.score
+        result.score()
     );
     // BT.2020 has a wider gamut than P3, so the difference should be larger
     println!(
         "  BT.2020 vs sRGB same-pixels score: {:.4} (expected < 100)",
-        result.score
+        result.score()
     );
 }
 
@@ -124,13 +124,13 @@ fn bt2020_vs_p3_interpretation_differs() {
     let dst = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::DisplayP3);
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score < 100.0,
+        result.score() < 100.0,
         "BT.2020 vs P3 same pixels should differ, got {}",
-        result.score
+        result.score()
     );
     println!(
         "  BT.2020 vs P3 same-pixels score: {:.4} (expected < 100)",
-        result.score
+        result.score()
     );
 }
 
@@ -143,12 +143,12 @@ fn wider_gamut_produces_larger_difference() {
     // P3 vs sRGB
     let src_p3 = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::DisplayP3);
     let dst_srgb = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Srgb);
-    let p3_vs_srgb = zensim().compute(&src_p3, &dst_srgb).unwrap().score;
+    let p3_vs_srgb = zensim().compute(&src_p3, &dst_srgb).unwrap().score();
 
     // BT.2020 vs sRGB
     let src_bt = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Bt2020);
     let dst_srgb2 = rgb_source_with_primaries(&buf, w, h, ColorPrimaries::Srgb);
-    let bt_vs_srgb = zensim().compute(&src_bt, &dst_srgb2).unwrap().score;
+    let bt_vs_srgb = zensim().compute(&src_bt, &dst_srgb2).unwrap().score();
 
     println!("  P3 vs sRGB: {p3_vs_srgb:.4}, BT.2020 vs sRGB: {bt_vs_srgb:.4}");
     // BT.2020→sRGB has more extreme matrix entries, so more distortion, lower score
@@ -214,7 +214,7 @@ fn format_scores_with_primaries(primaries: ColorPrimaries) -> Vec<(String, f64)>
         let dst = StridedBytes::new(&dst_buf, w, h, dst_stride, fmt.format)
             .with_color_primaries(primaries);
         let result = z.compute(&src, &dst).unwrap();
-        results.push((fmt.name.to_string(), result.score));
+        results.push((fmt.name.to_string(), result.score()));
     }
     results
 }
@@ -275,7 +275,7 @@ fn determinism_display_p3() {
     for _ in 0..5 {
         let src = rgb_source_with_primaries(&src_buf, w, h, ColorPrimaries::DisplayP3);
         let dst = rgb_source_with_primaries(&dst_buf, w, h, ColorPrimaries::DisplayP3);
-        scores.push(z.compute(&src, &dst).unwrap().score);
+        scores.push(z.compute(&src, &dst).unwrap().score());
     }
 
     for (i, s) in scores.iter().enumerate() {
@@ -300,7 +300,7 @@ fn determinism_bt2020() {
     for _ in 0..5 {
         let src = rgb_source_with_primaries(&src_buf, w, h, ColorPrimaries::Bt2020);
         let dst = rgb_source_with_primaries(&dst_buf, w, h, ColorPrimaries::Bt2020);
-        scores.push(z.compute(&src, &dst).unwrap().score);
+        scores.push(z.compute(&src, &dst).unwrap().score());
     }
 
     for (i, s) in scores.iter().enumerate() {
@@ -321,7 +321,7 @@ fn solid_color_self_score(r: u8, g: u8, b: u8, primaries: ColorPrimaries) -> f64
     let bytes: Vec<u8> = buf.iter().flat_map(|p| p.iter().copied()).collect();
     let src = rgb_source_with_primaries(&bytes, w, h, primaries);
     let dst = rgb_source_with_primaries(&bytes, w, h, primaries);
-    zensim().compute(&src, &dst).unwrap().score
+    zensim().compute(&src, &dst).unwrap().score()
 }
 
 #[test]
@@ -365,13 +365,13 @@ fn bt2020_saturated_colors_differ_from_srgb() {
     let result = zensim().compute(&src, &dst).unwrap();
 
     assert!(
-        result.score < 100.0,
+        result.score() < 100.0,
         "BT.2020 red vs sRGB red should differ, got {:.4}",
-        result.score
+        result.score()
     );
     println!(
         "  BT.2020 red vs sRGB red: {:.4} (expected < 100)",
-        result.score
+        result.score()
     );
 }
 
@@ -387,13 +387,13 @@ fn p3_green_outside_srgb_gamut_differs() {
     let result = zensim().compute(&src, &dst).unwrap();
 
     assert!(
-        result.score < 100.0,
+        result.score() < 100.0,
         "P3 green vs sRGB green should differ, got {:.4}",
-        result.score
+        result.score()
     );
     println!(
         "  P3 green vs sRGB green: {:.4} (expected < 100)",
-        result.score
+        result.score()
     );
 }
 
@@ -412,11 +412,11 @@ fn distorted_comparison_display_p3() {
 
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score >= 0.0 && result.score < 100.0,
+        result.score() >= 0.0 && result.score() < 100.0,
         "P3 blurred comparison should be in [0, 100), got {}",
-        result.score
+        result.score()
     );
-    println!("  P3 mandelbrot+blur score: {:.4}", result.score);
+    println!("  P3 mandelbrot+blur score: {:.4}", result.score());
 }
 
 #[test]
@@ -432,11 +432,11 @@ fn distorted_comparison_bt2020() {
 
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score >= 0.0 && result.score < 100.0,
+        result.score() >= 0.0 && result.score() < 100.0,
         "BT.2020 blurred comparison should be in [0, 100), got {}",
-        result.score
+        result.score()
     );
-    println!("  BT.2020 mandelbrot+blur score: {:.4}", result.score);
+    println!("  BT.2020 mandelbrot+blur score: {:.4}", result.score());
 }
 
 // ─── Large image to exercise parallel row processing ─────────────────
@@ -454,11 +454,11 @@ fn large_image_bt2020_parallel_rows() {
 
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score > 0.0 && result.score < 100.0,
+        result.score() > 0.0 && result.score() < 100.0,
         "BT.2020 256x256 noise+blocks should be between 0 and 100, got {}",
-        result.score
+        result.score()
     );
-    println!("  BT.2020 256x256 noise+blocks score: {:.4}", result.score);
+    println!("  BT.2020 256x256 noise+blocks score: {:.4}", result.score());
 }
 
 #[test]
@@ -474,9 +474,9 @@ fn large_image_display_p3_parallel_rows() {
 
     let result = zensim().compute(&src, &dst).unwrap();
     assert!(
-        result.score > 0.0 && result.score < 100.0,
+        result.score() > 0.0 && result.score() < 100.0,
         "P3 256x256 noise+blocks should be between 0 and 100, got {}",
-        result.score
+        result.score()
     );
-    println!("  P3 256x256 noise+blocks score: {:.4}", result.score);
+    println!("  P3 256x256 noise+blocks score: {:.4}", result.score());
 }
