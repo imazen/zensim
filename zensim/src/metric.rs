@@ -451,6 +451,49 @@ impl ZensimResult {
     pub fn dissimilarity(&self) -> f64 {
         score_to_dissimilarity(self.score)
     }
+
+    /// Approximate SSIMULACRA2 score from the raw distance.
+    ///
+    /// Direct power-law fit: `100 - 19.04 × d^0.598`, calibrated on 344k
+    /// synthetic pairs. MAE: 4.4 SSIM2 points, Pearson r = 0.974.
+    ///
+    /// More accurate than `mapping::zensim_to_ssim2(score)` (MAE 4.9, r = 0.932)
+    /// because it skips the intermediate score mapping.
+    pub fn approx_ssim2(&self) -> f64 {
+        if self.raw_distance <= 0.0 {
+            return 100.0;
+        }
+        (100.0 - 19.0379 * self.raw_distance.powf(0.5979)).max(-100.0)
+    }
+
+    /// Approximate DSSIM value from the raw distance.
+    ///
+    /// Direct power-law fit: `0.000922 × d^1.224`, calibrated on 344k
+    /// synthetic pairs. MAE: 0.00129, Pearson r = 0.952.
+    ///
+    /// Significantly more accurate than `mapping::zensim_to_dssim(score)`
+    /// (MAE 0.00213, r = 0.719) because DSSIM's natural exponent (1.22)
+    /// differs from the score mapping exponent (0.70).
+    pub fn approx_dssim(&self) -> f64 {
+        if self.raw_distance <= 0.0 {
+            return 0.0;
+        }
+        0.000922 * self.raw_distance.powf(1.2244)
+    }
+
+    /// Approximate butteraugli distance from the raw distance.
+    ///
+    /// Direct power-law fit: `2.365 × d^0.613`, calibrated on 344k
+    /// synthetic pairs. MAE: 1.65 distance units, Pearson r = 0.713.
+    ///
+    /// Butteraugli's weak correlation with our features (r = 0.71) limits
+    /// approximation accuracy regardless of mapping choice.
+    pub fn approx_butteraugli(&self) -> f64 {
+        if self.raw_distance <= 0.0 {
+            return 0.0;
+        }
+        2.365353 * self.raw_distance.powf(0.6130)
+    }
 }
 
 /// Convert a zensim score (0–100, 100 = identical) to a dissimilarity value
