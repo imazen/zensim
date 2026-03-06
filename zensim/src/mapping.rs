@@ -319,56 +319,56 @@ pub fn zendissim_to_zensim(zendissim: f64) -> f64 {
     dssim_to_zensim(zendissim)
 }
 
-/// Approximate libjpeg-turbo quality from a zensim score (natural images).
+/// Approximate mozjpeg/libjpeg quality from a zensim score (natural images).
 ///
-/// This is a rough inverse of the empirical median mapping from JPEG quality
-/// to zensim score on CID22+CLIC2025. Individual images vary widely.
+/// Median mapping from 57k mozjpeg-encoded pairs (3587 source tiles × 16
+/// quality levels). Individual images vary widely (IQR ~15–20 zensim points
+/// per quality level); accuracy is ±7 quality units MAE.
 ///
-/// Returns a value in 0-100 range. Accuracy: ±5 quality units.
+/// Returns a value in 5–100 range.
 pub fn zensim_to_libjpeg_quality(zensim: f64) -> f64 {
-    // Piecewise linear interpolation of the empirical median table
     const TABLE: [(f64, f64); 16] = [
-        (30.9, 5.0),
-        (52.9, 10.0),
-        (64.2, 15.0),
-        (70.0, 20.0),
-        (73.4, 25.0),
-        (76.3, 30.0),
-        (79.7, 40.0),
-        (82.0, 50.0),
-        (83.8, 60.0),
-        (86.0, 70.0),
-        (87.1, 75.0),
-        (88.5, 80.0),
-        (89.9, 85.0),
-        (91.6, 90.0),
-        (93.7, 95.0),
-        (95.4, 98.0),
+        (-33.6, 5.0),
+        (33.7, 10.0),
+        (58.1, 15.0),
+        (68.8, 20.0),
+        (75.7, 25.0),
+        (79.6, 30.0),
+        (84.9, 40.0),
+        (87.9, 50.0),
+        (89.9, 60.0),
+        (92.3, 70.0),
+        (93.8, 75.0),
+        (94.9, 80.0),
+        (96.4, 87.0),
+        (97.1, 90.0),
+        (98.0, 95.0),
+        (98.8, 100.0),
     ];
     interp(&TABLE, zensim)
 }
 
-/// Approximate zensim score from a libjpeg-turbo quality (natural images).
+/// Approximate zensim score from a mozjpeg/libjpeg quality (natural images).
 ///
-/// Median zensim score across CID22+CLIC2025.
+/// Median zensim score from 57k mozjpeg-encoded pairs.
 pub fn libjpeg_quality_to_zensim(quality: f64) -> f64 {
     const TABLE: [(f64, f64); 16] = [
-        (5.0, 30.9),
-        (10.0, 52.9),
-        (15.0, 64.2),
-        (20.0, 70.0),
-        (25.0, 73.4),
-        (30.0, 76.3),
-        (40.0, 79.7),
-        (50.0, 82.0),
-        (60.0, 83.8),
-        (70.0, 86.0),
-        (75.0, 87.1),
-        (80.0, 88.5),
-        (85.0, 89.9),
-        (90.0, 91.6),
-        (95.0, 93.7),
-        (98.0, 95.4),
+        (5.0, -33.6),
+        (10.0, 33.7),
+        (15.0, 58.1),
+        (20.0, 68.8),
+        (25.0, 75.7),
+        (30.0, 79.6),
+        (40.0, 84.9),
+        (50.0, 87.9),
+        (60.0, 89.9),
+        (70.0, 92.3),
+        (75.0, 93.8),
+        (80.0, 94.9),
+        (87.0, 96.4),
+        (90.0, 97.1),
+        (95.0, 98.0),
+        (100.0, 98.8),
     ];
     interp(&TABLE, quality)
 }
@@ -377,63 +377,53 @@ pub fn libjpeg_quality_to_zensim(quality: f64) -> f64 {
 ///
 /// zenjpeg uses adaptive quantization + trellis, so its quality scale differs
 /// from libjpeg-turbo. At low quality, zenjpeg produces much better results
-/// per quality unit. At q40+, they converge within ~1 zensim point.
+/// per quality unit.
 ///
-/// Calibrated with zenjpeg 0.6.1, YCbCr 4:2:0, auto_optimize=true.
+/// Calibrated on 57k pairs from zenjpeg 0.3.1, YCbCr 4:2:0.
+/// Accuracy: ±11 quality units MAE.
 pub fn zensim_to_zenjpeg_quality(zensim: f64) -> f64 {
-    const TABLE: [(f64, f64); 21] = [
-        (52.8, 0.0),
-        (59.0, 5.0),
-        (64.8, 10.0),
-        (69.7, 15.0),
-        (73.2, 20.0),
-        (75.6, 25.0),
-        (77.3, 30.0),
-        (78.2, 35.0),
-        (78.9, 40.0),
-        (79.6, 45.0),
-        (81.6, 50.0),
-        (82.4, 55.0),
-        (83.3, 60.0),
-        (84.4, 65.0),
-        (85.5, 70.0),
-        (86.5, 75.0),
-        (87.9, 80.0),
-        (89.4, 85.0),
-        (91.2, 90.0),
-        (93.3, 95.0),
-        (95.0, 100.0),
+    const TABLE: [(f64, f64); 16] = [
+        (60.3, 5.0),
+        (69.9, 10.0),
+        (77.2, 15.0),
+        (82.1, 20.0),
+        (85.2, 25.0),
+        (86.7, 30.0),
+        (88.2, 40.0),
+        (89.6, 50.0),
+        (91.2, 60.0),
+        (93.0, 70.0),
+        (93.7, 75.0),
+        (94.7, 80.0),
+        (96.1, 87.0),
+        (97.0, 90.0),
+        (98.3, 95.0),
+        (99.2, 100.0),
     ];
     interp(&TABLE, zensim)
 }
 
 /// Approximate zensim score from a zenjpeg quality (0-100, natural images).
 ///
-/// Median across CID22+CLIC2025 (71 images).
-/// Calibrated with zenjpeg 0.6.1, YCbCr 4:2:0, auto_optimize=true.
+/// Median from 57k zenjpeg-encoded pairs (zenjpeg 0.3.1, YCbCr 4:2:0).
 pub fn zenjpeg_quality_to_zensim(quality: f64) -> f64 {
-    const TABLE: [(f64, f64); 21] = [
-        (0.0, 52.8),
-        (5.0, 59.0),
-        (10.0, 64.8),
-        (15.0, 69.7),
-        (20.0, 73.2),
-        (25.0, 75.6),
-        (30.0, 77.3),
-        (35.0, 78.2),
-        (40.0, 78.9),
-        (45.0, 79.6),
-        (50.0, 81.6),
-        (55.0, 82.4),
-        (60.0, 83.3),
-        (65.0, 84.4),
-        (70.0, 85.5),
-        (75.0, 86.5),
-        (80.0, 87.9),
-        (85.0, 89.4),
-        (90.0, 91.2),
-        (95.0, 93.3),
-        (100.0, 95.0),
+    const TABLE: [(f64, f64); 16] = [
+        (5.0, 60.3),
+        (10.0, 69.9),
+        (15.0, 77.2),
+        (20.0, 82.1),
+        (25.0, 85.2),
+        (30.0, 86.7),
+        (40.0, 88.2),
+        (50.0, 89.6),
+        (60.0, 91.2),
+        (70.0, 93.0),
+        (75.0, 93.7),
+        (80.0, 94.7),
+        (87.0, 96.1),
+        (90.0, 97.0),
+        (95.0, 98.3),
+        (100.0, 99.2),
     ];
     interp(&TABLE, quality)
 }
@@ -578,58 +568,57 @@ mod tests {
 
     #[test]
     fn libjpeg_quality_mapping() {
-        // Spot checks from empirical data
+        // Spot checks from 57k mozjpeg-encoded pairs
         let z50 = libjpeg_quality_to_zensim(50.0);
-        assert!((z50 - 82.0).abs() < 1.0, "q50 should give ~82, got {z50}");
+        assert!((z50 - 87.9).abs() < 1.0, "q50 should give ~87.9, got {z50}");
 
         let z90 = libjpeg_quality_to_zensim(90.0);
-        assert!((z90 - 91.6).abs() < 1.0, "q90 should give ~91.6, got {z90}");
+        assert!((z90 - 97.1).abs() < 1.0, "q90 should give ~97.1, got {z90}");
 
         // Roundtrip
-        let q = zensim_to_libjpeg_quality(85.0);
+        let q = zensim_to_libjpeg_quality(92.0);
         let z = libjpeg_quality_to_zensim(q);
-        assert!((z - 85.0).abs() < 1.0, "roundtrip: 85 -> q={q} -> z={z}");
+        assert!((z - 92.0).abs() < 1.0, "roundtrip: 92 -> q={q} -> z={z}");
     }
 
     #[test]
     fn zenjpeg_quality_mapping() {
-        // Spot checks from empirical medians
+        // Spot checks from 57k zenjpeg-encoded pairs
         let z50 = zenjpeg_quality_to_zensim(50.0);
         assert!(
-            (z50 - 81.6).abs() < 1.0,
-            "zenjpeg q50 should give ~81.6, got {z50}"
+            (z50 - 89.6).abs() < 1.0,
+            "zenjpeg q50 should give ~89.6, got {z50}"
         );
 
         let z90 = zenjpeg_quality_to_zensim(90.0);
         assert!(
-            (z90 - 91.2).abs() < 1.0,
-            "zenjpeg q90 should give ~91.2, got {z90}"
+            (z90 - 97.0).abs() < 1.0,
+            "zenjpeg q90 should give ~97.0, got {z90}"
         );
 
         // Roundtrip
-        let q = zensim_to_zenjpeg_quality(85.0);
+        let q = zensim_to_zenjpeg_quality(92.0);
         let z = zenjpeg_quality_to_zensim(q);
-        assert!((z - 85.0).abs() < 1.0, "roundtrip: 85 -> q={q} -> z={z}");
+        assert!((z - 92.0).abs() < 1.0, "roundtrip: 92 -> q={q} -> z={z}");
 
-        // zenjpeg q0 should map to ~52.8 (not zero)
-        let z0 = zenjpeg_quality_to_zensim(0.0);
+        // zenjpeg q5 should map to ~60.3
+        let z5 = zenjpeg_quality_to_zensim(5.0);
         assert!(
-            (z0 - 52.8).abs() < 0.1,
-            "zenjpeg q0 should give ~52.8, got {z0}"
+            (z5 - 60.3).abs() < 0.1,
+            "zenjpeg q5 should give ~60.3, got {z5}"
         );
 
-        // zenjpeg q100 should map to ~95.0
+        // zenjpeg q100 should map to ~99.2
         let z100 = zenjpeg_quality_to_zensim(100.0);
         assert!(
-            (z100 - 95.0).abs() < 0.1,
-            "zenjpeg q100 should give ~95.0, got {z100}"
+            (z100 - 99.2).abs() < 0.1,
+            "zenjpeg q100 should give ~99.2, got {z100}"
         );
     }
 
     #[test]
     fn zenjpeg_vs_libjpeg_convergence() {
         // At high quality, zenjpeg and libjpeg converge to similar zensim scores.
-        // At q90+, they should be within ~2 zensim points of each other.
         let lj90 = libjpeg_quality_to_zensim(90.0);
         let zj90 = zenjpeg_quality_to_zensim(90.0);
         assert!(
@@ -641,8 +630,8 @@ mod tests {
         let lj10 = libjpeg_quality_to_zensim(10.0);
         let zj10 = zenjpeg_quality_to_zensim(10.0);
         assert!(
-            zj10 > lj10 + 5.0,
-            "at q10, zenjpeg ({zj10}) should beat libjpeg ({lj10}) by >5 pts"
+            zj10 > lj10 + 30.0,
+            "at q10, zenjpeg ({zj10}) should beat libjpeg ({lj10}) by >30 pts"
         );
     }
 }
