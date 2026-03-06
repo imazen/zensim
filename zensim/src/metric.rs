@@ -7,9 +7,9 @@
 //!
 //! Both images are converted to the XYB perceptual color space (cube-root LMS,
 //! same as ssimulacra2 and butteraugli), then processed at multiple scales.
-//! Each scale halves resolution via 2× box downscale. At each scale, 13 features
-//! are extracted per XYB channel (X, Y, B), giving **156 features total**
-//! (4 scales × 3 channels × 13 features).
+//! Each scale halves resolution via 2× box downscale. At each scale, 19 features
+//! are extracted per XYB channel (X, Y, B): 13 basic + 6 peak/diagnostic,
+//! giving **228 features total** (4 scales × 3 channels × 19 features).
 //!
 //! ## SSIM features (3 per channel per scale)
 //!
@@ -90,9 +90,17 @@
 //! of the same signal, split by ReLU — this gives the linear model separate
 //! knobs for blur vs ringing without needing signed weights.
 //!
+//! ## Peak features (6 per channel per scale)
+//!
+//! Computed during the fused V-blur kernel at no extra cost:
+//! - **ssim_max**, **art_max**, **det_max** — per-pixel maximum of each error type
+//! - **ssim_l8**, **art_l8**, **det_l8** — L8-pooled (near-worst-case) values
+//!
+//! These capture outlier sensitivity that mean/L2/L4 pooling may miss.
+//!
 //! ## Scoring
 //!
-//! The 156 features are multiplied by trained weights, summed, normalized by
+//! All 228 features are multiplied by trained weights, summed, normalized by
 //! scale count, then mapped to a 0–100 score via:
 //! `score = 100 - a · distance^b` (default a=18.0, b=0.7).
 
@@ -435,7 +443,13 @@ impl ZensimResult {
         profile: crate::profile::ZensimProfile,
         mean_offset: [f64; 3],
     ) -> Self {
-        Self { score, raw_distance, features, profile, mean_offset }
+        Self {
+            score,
+            raw_distance,
+            features,
+            profile,
+            mean_offset,
+        }
     }
 
     /// Set the profile on this result (builder pattern). Internal use only.
@@ -829,7 +843,6 @@ impl Zensim {
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result.with_profile(self.profile))
     }
-
 }
 
 #[cfg(feature = "classification")]
@@ -1098,7 +1111,13 @@ fn compute_with_config_inner(
             FEATURES_PER_CHANNEL_WITH_PEAKS
         };
         let num_features = config.num_scales * 3 * fpc;
-        return ZensimResult::new(100.0, 0.0, vec![0.0; num_features], ZensimProfile::latest(), [0.0; 3]);
+        return ZensimResult::new(
+            100.0,
+            0.0,
+            vec![0.0; num_features],
+            ZensimProfile::latest(),
+            [0.0; 3],
+        );
     }
 
     crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
@@ -1436,7 +1455,13 @@ pub fn compute_zensim_with_config(
             FEATURES_PER_CHANNEL_WITH_PEAKS
         };
         let num_features = config.num_scales * 3 * fpc;
-        return Ok(ZensimResult::new(100.0, 0.0, vec![0.0; num_features], ZensimProfile::latest(), [0.0; 3]));
+        return Ok(ZensimResult::new(
+            100.0,
+            0.0,
+            vec![0.0; num_features],
+            ZensimProfile::latest(),
+            [0.0; 3],
+        ));
     }
 
     let src_img = crate::source::RgbSlice::new(source, width, height);
@@ -1788,7 +1813,13 @@ pub(crate) fn combine_scores(
     let score =
         distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
 
-    ZensimResult::new(score, raw_distance, features, ZensimProfile::PreviewV0_1, mean_offset)
+    ZensimResult::new(
+        score,
+        raw_distance,
+        features,
+        ZensimProfile::PreviewV0_1,
+        mean_offset,
+    )
 }
 
 #[cfg(test)]

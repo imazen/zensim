@@ -17,7 +17,7 @@ let z = Zensim::new(ZensimProfile::latest());
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
 let result = z.compute(&source, &distorted)?;
-println!("{}: {:.2}", result.profile, result.score); // 0-100, higher = more similar
+println!("{}: {:.2}", result.profile(), result.score()); // 0-100, higher = more similar
 ```
 
 RGBA images are composited over a checkerboard before comparison, so alpha differences produce visible distortion:
@@ -44,33 +44,64 @@ let precomputed = z.precompute_reference(&source)?;
 for dst_pixels in &distorted_images {
     let dst = RgbSlice::new(dst_pixels, width, height);
     let result = z.compute_with_ref(&precomputed, &dst)?;
-    println!("score: {:.2}", result.score);
+    println!("score: {:.2}", result.score());
 }
 ```
 
 Saves ~25% per comparison at 4K, ~34% at 8K (break-even at 3-7 distorted images per reference).
 
+## Score semantics
+
+Scores range 0–100. 100 = identical. Score mapping: `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance (compressive — spreads high-quality differences for more resolution where it matters).
+
+`ZensimResult` provides:
+
+| Method | Description |
+|--------|-------------|
+| `score()` | 0–100, higher = more similar |
+| `raw_distance()` | Weighted feature distance before nonlinear mapping (lower = better) |
+| `dissimilarity()` | `(100 - score) / 100` — 0 = identical, 1 = maximum difference |
+| `approx_ssim2()` | Approximate SSIMULACRA2 score (MAE 4.4 pts, r = 0.974) |
+| `approx_dssim()` | Approximate DSSIM value (MAE 0.0013, r = 0.952) |
+| `approx_butteraugli()` | Approximate butteraugli distance (MAE 1.65, r = 0.713) |
+| `features()` | Raw feature vector for diagnostics |
+| `mean_offset()` | Per-channel XYB mean shift `[X, Y, B]` |
+
+The `mapping` module provides bidirectional interpolation tables between zensim scores and SSIM2, DSSIM, butteraugli, libjpeg quality, and zenjpeg quality — calibrated on 344k synthetic pairs across 6 codecs.
+
+Results are deterministic for the same input on the same architecture. Cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+
 ## Profiles
 
-Each `ZensimProfile` variant bundles weights and parameters that affect score output. A given profile should produce approximately the same scores across versions, but profiles may be removed in future major versions as the algorithm evolves.
+Each `ZensimProfile` variant bundles weights and parameters that affect score output. A given profile produces approximately the same scores across versions, but profiles may be removed in future major versions as the algorithm evolves.
 
-| Profile | Training data | SROCC |
-|---------|---------------|-------|
-| `PreviewV0_1` | 163k synthetic pairs | 0.9857 |
+| Profile | Weights | Training data | 5-fold CV SROCC |
+|---------|---------|---------------|-----------------|
+| `PreviewV0_1` | 228 | 344k synthetic pairs (6 codecs, q5–q100) | 0.9936 |
 
 `ZensimProfile::latest()` returns the most recent profile.
+
+## Input requirements
+
+- **Color space:** sRGB (8-bit, 16-bit), linear f32, Display P3, BT.2020. Wide-gamut inputs are converted to sRGB internally via `ColorPrimaries`.
+- **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
+- **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight` and `Opaque` alpha modes.
+- **Dimensions:** Both images must be the same width × height, minimum 8×8.
 
 ## Design
 
 - **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli
 - **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator, uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform values where dark/bright errors should weigh equally.
-- **13 features per channel per scale** — SSIM (3 pooling norms), edge artifact/detail loss (3 norms each), MSE, and 3 high-frequency energy features
 - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
 - **O(1)-per-pixel box blur** — 1-pass default with fused SIMD kernels
-- **156 trained weights** — optimized on 149.5k synthetic pairs across 4 codecs and 11 quality levels
+- **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs (mozjpeg, zenjpeg, jpegli, zenwebp, zenavif, zenjxl)
 - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage), with safe scalar fallback
 
 ### Feature layout (per channel per scale)
+
+19 features per channel per scale across 3 tiers:
+
+**Basic features (13, scored):**
 
 | Index | Feature | Description |
 |-------|---------|-------------|
@@ -88,20 +119,18 @@ Each `ZensimProfile` variant bundles weights and parameters that affect score ou
 | 11 | hf_mag_loss | High-frequency magnitude loss (L1 ratio) |
 | 12 | hf_energy_gain | High-frequency energy gain (ringing/sharpening) |
 
-Total: 4 scales × 3 channels × 13 features = 156 features, combined with trained weights into a single distance, then mapped to a 0–100 score.
+**Peak features (6, diagnostic):**
 
-## Input requirements
+| Index | Feature | Description |
+|-------|---------|-------------|
+| 13 | ssim_max | Maximum SSIM error |
+| 14 | art_max | Maximum edge artifact |
+| 15 | det_max | Maximum detail lost |
+| 16 | ssim_l8 | L8-pooled SSIM error (near-worst-case) |
+| 17 | art_l8 | L8-pooled edge artifact |
+| 18 | det_l8 | L8-pooled detail lost |
 
-- **Color space:** sRGB (8-bit, 16-bit, f16) or linear f32.
-- **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `SrgbF16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
-- **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight` and `Opaque` alpha modes.
-- **Dimensions:** Both images must be the same width × height, minimum 8×8.
-
-## Score semantics
-
-Scores range 0–100. 100 = identical. `ZensimResult::raw_distance` gives the weighted feature distance before nonlinear mapping (lower = more similar).
-
-Results are deterministic for the same input on the same architecture. Cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+Total: 4 scales × 3 channels × 19 features = 228 weights. The first 156 (basic) are used for scoring; peak features are available for diagnostics and future training. `FeatureView` provides named access to all features.
 
 ## Feature flags
 
@@ -109,9 +138,16 @@ Results are deterministic for the same input on the same architecture. Cross-arc
 |------|---------|-------------|
 | `avx512` | yes | Enable AVX-512 SIMD paths |
 | `training` | no | Expose metric internals for weight training/research |
+| `classification` | no | Error classification API (`classify()`, `DeltaStats`, `ErrorCategory`) |
 | `imgref` | no | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
-| `f16` | no | Enable `SrgbF16Rgba` pixel format (IEEE 754 half-precision via `half` crate) |
-| `zenpixels` | no | `ZenpixelsSource` for any interleaved format via `zenpixels` conversion (coming soon) |
+
+## Workspace crates
+
+| Crate | Description |
+|-------|-------------|
+| `zensim` | Core metric library |
+| `zensim-regress` | Visual regression testing with checksum management, tolerance specs, and remote reference storage. See [zensim-regress/README.md](zensim-regress/README.md). |
+| `zensim-validate` | Training and validation CLI for weight optimization |
 
 ## MSRV
 

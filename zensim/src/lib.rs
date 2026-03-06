@@ -1,8 +1,8 @@
 //! # zensim
 //!
 //! Fast psychovisual image similarity metric combining ideas from
-//! SSIMULACRA2 and butteraugli. Targets 10x faster than butteraugli
-//! while maintaining strong correlation with human quality ratings.
+//! SSIMULACRA2 and butteraugli. Multi-scale SSIM + edge + high-frequency
+//! features in XYB color space, with trained weights and AVX2/AVX-512 SIMD.
 //!
 //! ## Quick start
 //!
@@ -48,17 +48,26 @@
 //!
 //! ## Input requirements
 //!
-//! - **Color space:** sRGB. Future versions may accept additional color spaces
-//!   (linear RGB, Display P3, etc.).
-//! - **Pixel format:** `[R, G, B]` 8-bit sRGB, or `[R, G, B, A]` 8-bit sRGB
-//!   with straight alpha. RGBA inputs are composited over a checkerboard before
-//!   comparison so alpha differences produce visible distortion.
+//! - **Color space:** sRGB (u8, u16), linear f32, Display P3, BT.2020.
+//!   Wide-gamut inputs are converted to sRGB internally via [`ColorPrimaries`].
+//! - **Pixel formats:** [`RgbSlice`] (sRGB u8), [`RgbaSlice`] (sRGB u8 + alpha),
+//!   [`StridedBytes`] (any of `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`,
+//!   `Srgb16Rgba`, `LinearF32Rgba`), or implement [`ImageSource`] directly.
+//! - **Alpha:** RGBA inputs are composited over a checkerboard so alpha
+//!   differences produce visible distortion. Supports `Straight` and `Opaque`
+//!   alpha modes.
 //! - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 //!
 //! ## Score semantics
 //!
-//! Scores range 0–100, higher = more similar. `ZensimResult::raw_distance` is the
-//! weighted feature distance before nonlinear mapping (lower = more similar).
+//! Scores range 0–100, higher = more similar. Score mapping:
+//! `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance.
+//!
+//! [`ZensimResult`] also provides [`approx_ssim2()`](ZensimResult::approx_ssim2),
+//! [`approx_dssim()`](ZensimResult::approx_dssim), and
+//! [`approx_butteraugli()`](ZensimResult::approx_butteraugli) for direct
+//! metric approximations. The [`mapping`] module has bidirectional interpolation
+//! tables for score-level conversions.
 //!
 //! ## Determinism
 //!
@@ -71,14 +80,14 @@
 //! - **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli
 //! - **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator
 //!   (no C1), uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform spaces.
-//! - **13 features per channel per scale** — SSIM (3 pooling norms), edge artifact/detail
-//!   loss (3 norms each), MSE, and 3 high-frequency energy/magnitude features
+//! - **19 features per channel per scale** — 13 basic (SSIM, edge artifact/detail
+//!   loss, MSE, high-frequency) + 6 peak/diagnostic features
 //! - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
 //! - **O(1)-per-pixel box blur** — single-pass with fused SIMD kernel
-//! - **156 trained weights** — optimized on 149.5k synthetic pairs across 4 codecs
+//! - **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs
 //! - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage)
 //!
-//! See the `metric` module source for the full feature extraction math.
+//! See the [`metric`](crate::metric) module source for the full feature extraction math.
 
 #![forbid(unsafe_code)]
 
