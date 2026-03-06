@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "tools-v*"
+      - "regress-v*"
   workflow_dispatch:
 
 permissions:
