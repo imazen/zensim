@@ -48,9 +48,14 @@
 //!
 //! ## Input requirements
 //!
-//! - **Color space:** sRGB (u8, u16), linear f32, Display P3, BT.2020.
-//!   Wide-gamut inputs are converted to sRGB internally via [`ColorPrimaries`].
+//! - **Color space:** All inputs must be **sRGB-encoded** (gamma ~2.2) — the
+//!   standard output of JPEG, PNG, and WebP decoders. For linear-light data,
+//!   use `PixelFormat::LinearF32Rgba` via [`StridedBytes`].
+//! - **Wide gamut:** Display P3 and BT.2020 primaries are accepted via
+//!   [`ColorPrimaries`] on [`StridedBytes`] — gamut-mapped to sRGB internally.
+//!   Passing wide-gamut data as sRGB will produce incorrect scores.
 //! - **Pixel formats:** [`RgbSlice`] (sRGB u8), [`RgbaSlice`] (sRGB u8 + alpha),
+//!   `imgref::ImgRef` (sRGB u8, stride-aware, default feature),
 //!   [`StridedBytes`] (any of `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`,
 //!   `Srgb16Rgba`, `LinearF32Rgba`), or implement [`ImageSource`] directly.
 //! - **Alpha:** RGBA inputs are composited over a checkerboard so alpha
@@ -60,8 +65,10 @@
 //!
 //! ## Score semantics
 //!
-//! Scores range 0–100, higher = more similar. Score mapping:
+//! 100 = identical, higher = more similar. Score mapping:
 //! `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance.
+//! Calibrated from 0–100 on 344k training pairs; extreme distortions can
+//! score below 0 (uncalibrated outside the training range).
 //!
 //! [`ZensimResult`] also provides [`approx_ssim2()`](ZensimResult::approx_ssim2),
 //! [`approx_dssim()`](ZensimResult::approx_dssim), and
@@ -81,7 +88,7 @@
 //! - **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator
 //!   (no C1), uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform spaces.
 //! - **19 features per channel per scale** — 13 basic (SSIM, edge artifact/detail
-//!   loss, MSE, high-frequency) + 6 peak/diagnostic features
+//!   loss, MSE, high-frequency) + 6 peak features, all scored
 //! - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
 //! - **O(1)-per-pixel box blur** — single-pass with fused SIMD kernel
 //! - **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs

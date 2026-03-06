@@ -17,8 +17,23 @@ let z = Zensim::new(ZensimProfile::latest());
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
 let result = z.compute(&source, &distorted)?;
-println!("{}: {:.2}", result.profile(), result.score()); // 0-100, higher = more similar
+println!("{}: {:.2}", result.profile(), result.score()); // higher = more similar
 ```
+
+### With imgref (default feature, supports stride)
+
+```rust
+use zensim::{Zensim, ZensimProfile};
+
+let source: imgref::ImgRef<rgb::Rgb<u8>> = imgref::Img::new(&src_pixels, width, height);
+let distorted: imgref::ImgRef<rgb::Rgb<u8>> = imgref::Img::new(&dst_pixels, width, height);
+let z = Zensim::new(ZensimProfile::latest());
+let result = z.compute(&source, &distorted)?;
+```
+
+`imgref::ImgRef` carries width, height, and stride in one type — no separate dimension arguments, and stride-padded buffers work automatically.
+
+### RGBA
 
 RGBA images are composited over a checkerboard before comparison, so alpha differences produce visible distortion:
 
@@ -52,15 +67,17 @@ Saves ~25% per comparison at 4K, ~34% at 8K (break-even at 3-7 distorted images 
 
 ## Score semantics
 
-Scores range 0–100. 100 = identical. Score mapping: `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance (compressive — spreads high-quality differences for more resolution where it matters).
+100 = identical. Higher = more similar. Score mapping: `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance (compressive — more resolution at the high-quality end where it matters most).
+
+Scores are calibrated from 0 to 100 on our training data (344k synthetic pairs, q5–q100 across 6 codecs). Extreme distortions can produce scores below 0; the mapping is uncalibrated outside the training range.
 
 `ZensimResult` provides:
 
 | Method | Description |
 |--------|-------------|
-| `score()` | 0–100, higher = more similar |
+| `score()` | Similarity score (higher = more similar, typically 0–100) |
 | `raw_distance()` | Weighted feature distance before nonlinear mapping (lower = better) |
-| `dissimilarity()` | `(100 - score) / 100` — 0 = identical, 1 = maximum difference |
+| `dissimilarity()` | `(100 - score) / 100` — 0 = identical |
 | `approx_ssim2()` | Approximate SSIMULACRA2 score (MAE 4.4 pts, r = 0.974) |
 | `approx_dssim()` | Approximate DSSIM value (MAE 0.0013, r = 0.952) |
 | `approx_butteraugli()` | Approximate butteraugli distance (MAE 1.65, r = 0.713) |
@@ -83,8 +100,9 @@ Each `ZensimProfile` variant bundles weights and parameters that affect score ou
 
 ## Input requirements
 
-- **Color space:** sRGB (8-bit, 16-bit), linear f32, Display P3, BT.2020. Wide-gamut inputs are converted to sRGB internally via `ColorPrimaries`.
-- **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
+- **Color space:** All inputs must be **sRGB-encoded** (gamma ~2.2). This is what you get from standard JPEG, PNG, and WebP decoders. If your pixels are linear-light (gamma 1.0), use `PixelFormat::LinearF32Rgba` via `StridedBytes` — zensim will apply the correct transfer function internally.
+- **Wide gamut:** Display P3 and BT.2020 inputs are accepted via `ColorPrimaries` on `StridedBytes` — gamut-mapped to sRGB internally. Passing wide-gamut data as sRGB will produce incorrect scores (the metric sees the wrong colors).
+- **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `imgref::ImgRef` (sRGB u8, with stride), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
 - **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight` and `Opaque` alpha modes.
 - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 
@@ -99,9 +117,9 @@ Each `ZensimProfile` variant bundles weights and parameters that affect score ou
 
 ### Feature layout (per channel per scale)
 
-19 features per channel per scale across 3 tiers:
+19 features per channel per scale, all scored:
 
-**Basic features (13, scored):**
+**Basic features (13):**
 
 | Index | Feature | Description |
 |-------|---------|-------------|
@@ -119,7 +137,7 @@ Each `ZensimProfile` variant bundles weights and parameters that affect score ou
 | 11 | hf_mag_loss | High-frequency magnitude loss (L1 ratio) |
 | 12 | hf_energy_gain | High-frequency energy gain (ringing/sharpening) |
 
-**Peak features (6, diagnostic):**
+**Peak features (6):**
 
 | Index | Feature | Description |
 |-------|---------|-------------|
@@ -130,16 +148,16 @@ Each `ZensimProfile` variant bundles weights and parameters that affect score ou
 | 17 | art_l8 | L8-pooled edge artifact |
 | 18 | det_l8 | L8-pooled detail lost |
 
-Total: 4 scales × 3 channels × 19 features = 228 weights. The first 156 (basic) are used for scoring; peak features are available for diagnostics and future training. `FeatureView` provides named access to all features.
+Total: 4 scales × 3 channels × 19 features = 228 weights. `FeatureView` provides named access to all features.
 
 ## Feature flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `avx512` | yes | Enable AVX-512 SIMD paths |
+| `imgref` | yes | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` (stride-aware) |
 | `training` | no | Expose metric internals for weight training/research |
 | `classification` | no | Error classification API (`classify()`, `DeltaStats`, `ErrorCategory`) |
-| `imgref` | no | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
 
 ## Workspace crates
 

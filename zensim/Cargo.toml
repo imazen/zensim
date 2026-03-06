@@ -11,7 +11,7 @@ categories = ["multimedia::images", "computer-vision"]
 exclude = ["benches/", "tests/"]
 
 [features]
-default = ["avx512"]
+default = ["avx512", "imgref"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
 ## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
