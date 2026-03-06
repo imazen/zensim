@@ -1239,7 +1239,11 @@ fn checkerboard_linear(x: usize, y: usize) -> f32 {
 pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
     for (x, &[r, g, b, a]) in row.iter().enumerate() {
         if a == 255 {
-            out[x] = [srgb_u8_to_linear(r), srgb_u8_to_linear(g), srgb_u8_to_linear(b)];
+            out[x] = [
+                srgb_u8_to_linear(r),
+                srgb_u8_to_linear(g),
+                srgb_u8_to_linear(b),
+            ];
         } else if a == 0 {
             let bg = checkerboard_linear(x, y);
             out[x] = [bg, bg, bg];
@@ -1265,7 +1269,11 @@ pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mu
 pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
     for (x, &[b, g, r, a]) in row.iter().enumerate() {
         if a == 255 {
-            out[x] = [srgb_u8_to_linear(r), srgb_u8_to_linear(g), srgb_u8_to_linear(b)];
+            out[x] = [
+                srgb_u8_to_linear(r),
+                srgb_u8_to_linear(g),
+                srgb_u8_to_linear(b),
+            ];
         } else if a == 0 {
             let bg = checkerboard_linear(x, y);
             out[x] = [bg, bg, bg];

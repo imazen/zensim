@@ -471,7 +471,11 @@ pub(crate) fn convert_source_to_xyb_parallel(
                             let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
                             for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                 let [r, g, b] = rgb_row[x];
-                                *pixel = [crate::color::srgb_u8_to_linear(r), crate::color::srgb_u8_to_linear(g), crate::color::srgb_u8_to_linear(b)];
+                                *pixel = [
+                                    crate::color::srgb_u8_to_linear(r),
+                                    crate::color::srgb_u8_to_linear(g),
+                                    crate::color::srgb_u8_to_linear(b),
+                                ];
                             }
                             gamut_convert_row(&mut linear_row[..width], primaries);
                             let row_offset = (y - row_start) * width;
@@ -526,7 +530,11 @@ pub(crate) fn convert_source_to_xyb_parallel(
                                 // Opaque non-sRGB: linearize + gamut
                                 for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                     let [r, g, b, _a] = rgba_row[x];
-                                    *pixel = [crate::color::srgb_u8_to_linear(r), crate::color::srgb_u8_to_linear(g), crate::color::srgb_u8_to_linear(b)];
+                                    *pixel = [
+                                        crate::color::srgb_u8_to_linear(r),
+                                        crate::color::srgb_u8_to_linear(g),
+                                        crate::color::srgb_u8_to_linear(b),
+                                    ];
                                 }
                             } else {
                                 composite_srgb8_rgba_to_linear(
@@ -574,7 +582,11 @@ pub(crate) fn convert_source_to_xyb_parallel(
                                 // Opaque non-sRGB: linearize + gamut
                                 for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                     let [b, g, r, _a] = bgra_row[x];
-                                    *pixel = [crate::color::srgb_u8_to_linear(r), crate::color::srgb_u8_to_linear(g), crate::color::srgb_u8_to_linear(b)];
+                                    *pixel = [
+                                        crate::color::srgb_u8_to_linear(r),
+                                        crate::color::srgb_u8_to_linear(g),
+                                        crate::color::srgb_u8_to_linear(b),
+                                    ];
                                 }
                             } else {
                                 composite_srgb8_bgra_to_linear(
