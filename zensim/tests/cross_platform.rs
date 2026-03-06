@@ -82,15 +82,16 @@ fn hardcoded_reference_scores() {
     let pairs = generate_test_pairs(W, H);
 
     // Reference scores with peaks-tier weights (228 weights, 344k training pairs).
+    // Uses linear-srgb crate (C0-continuous constants) for sRGB linearization.
     #[allow(clippy::excessive_precision)]
     let expected: &[(&str, f64)] = &[
         ("checkerboard+blur", 0.0),
-        ("checkerboard+sharpen", 32.283_841_287_891_121),
+        ("checkerboard+sharpen", 32.262_565_799_622_223),
         ("mandelbrot+blur", 0.0),
-        ("mandelbrot+color_shift", 35.093_114_663_733_616),
-        ("noise+blur", 52.738_384_693_430_497),
-        ("noise+block_artifacts", 43.349_042_568_412_557),
-        ("color_blocks+color_shift", 17.283_354_669_709_453),
+        ("mandelbrot+color_shift", 35.089_273_349_171_421),
+        ("noise+blur", 52.737_709_198_054_972),
+        ("noise+block_artifacts", 43.344_783_403_817_118),
+        ("color_blocks+color_shift", 17.273_419_547_681_044),
         ("color_blocks+sharpen", 0.0),
     ];
 

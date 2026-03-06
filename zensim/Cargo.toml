@@ -33,6 +33,7 @@ bytemuck = { workspace = true }
 magetypes = { workspace = true }
 rayon = { workspace = true }
 thiserror = { workspace = true }
+linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
 # zenresize = { workspace = true, optional = true }  # re-enable when published

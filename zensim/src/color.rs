@@ -82,44 +82,16 @@ pub(crate) fn apply_gamut_matrix(rgb: &mut [f32; 3], primaries: ColorPrimaries) 
     rgb[2] = (m[2][0] * r + m[2][1] * g + m[2][2] * b).clamp(0.0, 1.0);
 }
 
-/// sRGB u8 → linear f32 lookup table (256 entries)
-pub(crate) fn srgb_lut() -> &'static [f32; 256] {
-    use std::sync::OnceLock;
-    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
-    LUT.get_or_init(|| {
-        let mut lut = [0.0f32; 256];
-        for i in 0..256u16 {
-            let s = i as f64 / 255.0;
-            let linear = if s <= 0.04045 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055).powf(2.4)
-            };
-            lut[i as usize] = linear as f32;
-        }
-        lut
-    })
-}
-
 /// Convert sRGB u8 to linear f32 via lookup table.
 #[inline(always)]
-pub fn srgb_u8_to_linear(v: u8) -> f32 {
-    srgb_lut()[v as usize]
+pub(crate) fn srgb_u8_to_linear(v: u8) -> f32 {
+    linear_srgb::default::srgb_u8_to_linear(v)
 }
 
-/// Convert sRGB u16 (0-65535) to linear f32 via the sRGB transfer function.
-///
-/// Uses f64 intermediate precision then truncates to f32. No LUT — the 65536-entry
-/// table would be 256KB, too large for L1 cache.
+/// Convert sRGB u16 (0-65535) to linear f32.
 #[inline]
 pub(crate) fn srgb_u16_to_linear(v: u16) -> f32 {
-    let s = v as f64 / 65535.0;
-    let linear = if s <= 0.04045 {
-        s / 12.92
-    } else {
-        ((s + 0.055) / 1.055).powf(2.4)
-    };
-    linear as f32
+    linear_srgb::default::srgb_u16_to_linear(v)
 }
 
 /// Fast cube root: bit manipulation + 2 Newton-Raphson iterations in f32.
@@ -1265,10 +1237,9 @@ fn checkerboard_linear(x: usize, y: usize) -> f32 {
 ///
 /// Uses straight alpha: `out = src * a + bg * (1-a)`.
 pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
-    let lut = srgb_lut();
     for (x, &[r, g, b, a]) in row.iter().enumerate() {
         if a == 255 {
-            out[x] = [lut[r as usize], lut[g as usize], lut[b as usize]];
+            out[x] = [srgb_u8_to_linear(r), srgb_u8_to_linear(g), srgb_u8_to_linear(b)];
         } else if a == 0 {
             let bg = checkerboard_linear(x, y);
             out[x] = [bg, bg, bg];
@@ -1276,9 +1247,9 @@ pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mu
             let alpha = a as f32 * (1.0 / 255.0);
             let inv = 1.0 - alpha;
             let bg = checkerboard_linear(x, y);
-            let rl = lut[r as usize];
-            let gl = lut[g as usize];
-            let bl = lut[b as usize];
+            let rl = srgb_u8_to_linear(r);
+            let gl = srgb_u8_to_linear(g);
+            let bl = srgb_u8_to_linear(b);
             out[x] = [
                 rl.mul_add(alpha, bg * inv),
                 gl.mul_add(alpha, bg * inv),
@@ -1292,10 +1263,9 @@ pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mu
 ///
 /// Swizzles B↔R during linearization. Alpha blending in linear space.
 pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
-    let lut = srgb_lut();
     for (x, &[b, g, r, a]) in row.iter().enumerate() {
         if a == 255 {
-            out[x] = [lut[r as usize], lut[g as usize], lut[b as usize]];
+            out[x] = [srgb_u8_to_linear(r), srgb_u8_to_linear(g), srgb_u8_to_linear(b)];
         } else if a == 0 {
             let bg = checkerboard_linear(x, y);
             out[x] = [bg, bg, bg];
@@ -1303,9 +1273,9 @@ pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mu
             let alpha = a as f32 * (1.0 / 255.0);
             let inv = 1.0 - alpha;
             let bg = checkerboard_linear(x, y);
-            let rl = lut[r as usize];
-            let gl = lut[g as usize];
-            let bl = lut[b as usize];
+            let rl = srgb_u8_to_linear(r);
+            let gl = srgb_u8_to_linear(g);
+            let bl = srgb_u8_to_linear(b);
             out[x] = [
                 rl.mul_add(alpha, bg * inv),
                 gl.mul_add(alpha, bg * inv),

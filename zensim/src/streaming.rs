@@ -464,15 +464,14 @@ pub(crate) fn convert_source_to_xyb_parallel(
             match pixel_format {
                 PixelFormat::Srgb8Rgb => {
                     if need_gamut {
-                        // Non-sRGB: linearize via LUT, apply gamut matrix, then XYB
-                        let lut = crate::color::srgb_lut();
+                        // Non-sRGB: linearize, apply gamut matrix, then XYB
                         let mut linear_row = vec![[0.0f32; 3]; width];
                         for y in row_start..row_end {
                             let row_bytes = source.row_bytes(y);
                             let rgb_row: &[[u8; 3]] = bytemuck::cast_slice(row_bytes);
                             for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                 let [r, g, b] = rgb_row[x];
-                                *pixel = [lut[r as usize], lut[g as usize], lut[b as usize]];
+                                *pixel = [crate::color::srgb_u8_to_linear(r), crate::color::srgb_u8_to_linear(g), crate::color::srgb_u8_to_linear(b)];
                             }
                             gamut_convert_row(&mut linear_row[..width], primaries);
                             let row_offset = (y - row_start) * width;
@@ -525,10 +524,9 @@ pub(crate) fn convert_source_to_xyb_parallel(
                             let rgba_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
                             if opaque {
                                 // Opaque non-sRGB: linearize + gamut
-                                let lut = crate::color::srgb_lut();
                                 for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                     let [r, g, b, _a] = rgba_row[x];
-                                    *pixel = [lut[r as usize], lut[g as usize], lut[b as usize]];
+                                    *pixel = [crate::color::srgb_u8_to_linear(r), crate::color::srgb_u8_to_linear(g), crate::color::srgb_u8_to_linear(b)];
                                 }
                             } else {
                                 composite_srgb8_rgba_to_linear(
@@ -574,10 +572,9 @@ pub(crate) fn convert_source_to_xyb_parallel(
                             let bgra_row: &[[u8; 4]] = bytemuck::cast_slice(row_bytes);
                             if opaque {
                                 // Opaque non-sRGB: linearize + gamut
-                                let lut = crate::color::srgb_lut();
                                 for (x, pixel) in linear_row.iter_mut().enumerate().take(width) {
                                     let [b, g, r, _a] = bgra_row[x];
-                                    *pixel = [lut[r as usize], lut[g as usize], lut[b as usize]];
+                                    *pixel = [crate::color::srgb_u8_to_linear(r), crate::color::srgb_u8_to_linear(g), crate::color::srgb_u8_to_linear(b)];
                                 }
                             } else {
                                 composite_srgb8_bgra_to_linear(
