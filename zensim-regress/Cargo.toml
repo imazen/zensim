@@ -6,13 +6,9 @@ description = "Visual regression testing persistence and workflow for zensim"
 repository = "https://github.com/imazen/zensim"
 license = "MIT"
 rust-version = "1.89.0"
-publish = false
-
-[features]
-## Use zenpng for faster PNG decode/encode of reference images (instead of `image` crate).
-## To activate: uncomment zenpng/enough deps below and in workspace Cargo.toml,
-## then change this to: zenpng = ["dep:zenpng", "dep:enough"]
-zenpng = []
+keywords = ["visual", "regression", "testing", "image", "checksum"]
+categories = ["development-tools::testing", "multimedia::images"]
+exclude = ["examples/*.png", "tests/fixtures/"]
 
 [dependencies]
 zensim = { workspace = true, features = ["classification"] }
@@ -26,4 +22,3 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
-
