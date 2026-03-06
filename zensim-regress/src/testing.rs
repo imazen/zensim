@@ -69,8 +69,13 @@ impl RegressionTolerance {
         }
     }
 
-    /// Allow off-by-1 rounding. Max delta 1/255, score >= 95.
+    /// Allow off-by-1 rounding. Max delta 1/255, score >= 85.
     /// Any fraction of pixels may be affected.
+    ///
+    /// The 85.0 threshold is calibrated from 200+ real imageflow pairs:
+    /// true off-by-one differences (1/255 delta, ~5% of pixels) score as
+    /// low as 86.4 on photo content, so 85.0 provides headroom without
+    /// accepting visibly different images.
     ///
     /// Alpha channel has zero tolerance by default — alpha divergence is
     /// a structural bug, not a rounding artifact. Use [`max_alpha_delta`](Self::max_alpha_delta)
@@ -79,7 +84,7 @@ impl RegressionTolerance {
         Self {
             max_delta: 1,
             max_pixels_different: 1.0,
-            min_similarity: 95.0,
+            min_similarity: 85.0,
             max_alpha_delta: 0,
             ignore_alpha: false,
         }

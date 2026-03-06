@@ -73,7 +73,7 @@ name = "resize_bicubic_200x200"
 
 [tolerance]
 max_delta = 1
-min_similarity = 95.0
+min_similarity = 85.0
 max_alpha_delta = 0
 
 [[checksum]]

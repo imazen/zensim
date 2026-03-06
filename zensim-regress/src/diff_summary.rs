@@ -154,7 +154,7 @@ pub fn format_tolerance_note(tolerance: &crate::testing::RegressionTolerance) ->
 ///
 /// Recognizes named presets for readability:
 /// - `identical` — pixel-identical
-/// - `off-by-one` — rounding tolerance (max-delta:1 zensim:95 pixels-changed:100%)
+/// - `off-by-one` — rounding tolerance (max-delta:1 zensim:85 pixels-changed:100%)
 ///
 /// Perceptual-only tolerances use standalone `zensim:SCORE (dissim VALUE)`:
 /// ```text
@@ -610,7 +610,7 @@ mod tests {
         assert_eq!(s, "off-by-one");
         let parsed = parse_tolerance_shorthand(&s);
         assert_eq!(parsed.max_delta, 1);
-        assert_eq!(parsed.min_similarity, 95.0);
+        assert_eq!(parsed.min_similarity, 85.0);
         assert_eq!(parsed.max_pixels_different, 1.0);
     }
 
@@ -709,7 +709,7 @@ mod tests {
 
         let parsed = parse_tolerance_shorthand(&s);
         assert_eq!(parsed.max_delta, 1);
-        assert_eq!(parsed.min_similarity, 95.0);
+        assert_eq!(parsed.min_similarity, 85.0);
         assert_eq!(parsed.max_pixels_different, 1.0);
         let ov = &parsed.overrides["aarch64"];
         assert_eq!(ov.max_delta, Some(3));
