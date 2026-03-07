@@ -68,6 +68,7 @@ fn make_f32_srgb(pixels: &[[u8; 3]]) -> Vec<[f32; 3]> {
 }
 
 /// Convert packed sRGB u8 to 3 planar linear-light f32 buffers.
+#[cfg(has_cpp_butteraugli)]
 fn srgb_to_linear_planes(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
     let n = pixels.len();
     let mut p0 = Vec::with_capacity(n);

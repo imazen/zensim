@@ -68,6 +68,50 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features -- --nocapture
 
+  feature-matrix:
+    name: Feature permutations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check all feature permutations
+        run: |
+          set -e
+          features_list=(
+            ""
+            "avx512"
+            "imgref"
+            "training"
+            "classification"
+            "avx512,imgref"
+            "avx512,training"
+            "avx512,classification"
+            "imgref,training"
+            "imgref,classification"
+            "training,classification"
+            "avx512,imgref,training"
+            "avx512,imgref,classification"
+            "avx512,training,classification"
+            "imgref,training,classification"
+            "avx512,imgref,training,classification"
+          )
+          for features in "${features_list[@]}"; do
+            if [ -z "$features" ]; then
+              label="none"
+              flags="--no-default-features"
+            else
+              label="$features"
+              flags="--no-default-features --features $features"
+            fi
+            echo "::group::Clippy + test: $label"
+            cargo clippy -p zensim $flags --lib -- -D warnings
+            cargo test -p zensim $flags --lib -- --nocapture
+            echo "::endgroup::"
+          done
+
   corpus-tests:
     name: Corpus ICC tests
     runs-on: ubuntu-latest
