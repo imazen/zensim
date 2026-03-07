@@ -17,6 +17,7 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.7", features = ["imgref"] }
 butteraugli = "0.8"
+linear-srgb = { workspace = true }
 imgref = { workspace = true }
 rgb = { workspace = true }
 zenpnm = "0.1"

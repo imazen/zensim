@@ -24,9 +24,13 @@ unsafe extern "C" {
 
 #[cfg(has_cpp_butteraugli)]
 unsafe extern "C" {
-    fn butteraugli_from_srgb(
-        src_rgb: *const u8,
-        dst_rgb: *const u8,
+    fn butteraugli_from_linear_planes(
+        src0: *const f32,
+        src1: *const f32,
+        src2: *const f32,
+        dst0: *const f32,
+        dst1: *const f32,
+        dst2: *const f32,
         width: usize,
         height: usize,
     ) -> f64;
@@ -61,6 +65,20 @@ fn make_f32_srgb(pixels: &[[u8; 3]]) -> Vec<[f32; 3]> {
         .iter()
         .map(|&[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
         .collect()
+}
+
+/// Convert packed sRGB u8 to 3 planar linear-light f32 buffers.
+fn srgb_to_linear_planes(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
+    let n = pixels.len();
+    let mut p0 = Vec::with_capacity(n);
+    let mut p1 = Vec::with_capacity(n);
+    let mut p2 = Vec::with_capacity(n);
+    for &[r, g, b] in pixels {
+        p0.push(linear_srgb::default::srgb_u8_to_linear(r));
+        p1.push(linear_srgb::default::srgb_u8_to_linear(g));
+        p2.push(linear_srgb::default::srgb_u8_to_linear(b));
+    }
+    [p0, p1, p2]
 }
 
 /// Pure computation benchmarks — no I/O, no process spawning.
@@ -154,14 +172,18 @@ fn bench_compute(c: &mut Criterion) {
         // C++ butteraugli via FFI (libjxl, the reference implementation)
         #[cfg(has_cpp_butteraugli)]
         {
-            let src_flat: &[u8] = bytemuck::cast_slice(&src);
-            let dst_flat: &[u8] = bytemuck::cast_slice(&dst);
+            let src_lin = srgb_to_linear_planes(&src);
+            let dst_lin = srgb_to_linear_planes(&dst);
             group.bench_function(format!("cpp_butteraugli/{label}"), |b| {
                 b.iter(|| {
                     let score = unsafe {
-                        butteraugli_from_srgb(
-                            std::hint::black_box(src_flat.as_ptr()),
-                            std::hint::black_box(dst_flat.as_ptr()),
+                        butteraugli_from_linear_planes(
+                            std::hint::black_box(src_lin[0].as_ptr()),
+                            std::hint::black_box(src_lin[1].as_ptr()),
+                            std::hint::black_box(src_lin[2].as_ptr()),
+                            std::hint::black_box(dst_lin[0].as_ptr()),
+                            std::hint::black_box(dst_lin[1].as_ptr()),
+                            std::hint::black_box(dst_lin[2].as_ptr()),
                             w,
                             h,
                         )

@@ -2087,6 +2087,7 @@ dependencies = [
  "criterion",
  "fast-ssim2",
  "imgref",
+ "linear-srgb",
  "rgb",
  "ssimulacra2",
  "which",
