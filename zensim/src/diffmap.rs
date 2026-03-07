@@ -582,6 +582,92 @@ impl crate::metric::Zensim {
         })
     }
 
+    /// Compare planar linear RGB f32 against a precomputed reference, producing
+    /// both a score and a per-pixel error map.
+    ///
+    /// `planes` are `[R, G, B]`, each with at least `stride * height` elements.
+    /// `stride` is the number of f32 elements per row (≥ `width`).
+    ///
+    /// This avoids the interleave-to-RGBA overhead when the caller already has
+    /// separate channel buffers in linear light (e.g., from an encoder's
+    /// reconstruction pipeline).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    pub fn compute_with_ref_and_diffmap_linear_planar(
+        &self,
+        precomputed: &PrecomputedReference,
+        planes: [&[f32]; 3],
+        width: usize,
+        height: usize,
+        stride: usize,
+        options: impl Into<DiffmapOptions>,
+    ) -> Result<DiffmapResult, ZensimError> {
+        let options = options.into();
+        let params = self.profile().params();
+        if width < 8 || height < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+
+        let config = config_from_params(params, self.parallel());
+        let (per_scale_ch, scale_blend) = options.weighting.resolve_multiscale(
+            params.weights,
+            config.num_scales,
+            options.include_edge_mse,
+        );
+
+        let padded_width = crate::blur::simd_padded_width(width);
+        let (result, diffmap_padded, _) =
+            crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
+                precomputed,
+                planes,
+                width,
+                height,
+                stride,
+                &config,
+                params.weights,
+                &per_scale_ch,
+                &scale_blend,
+            );
+        let result = result.with_profile(self.profile());
+
+        // Trim padded-width diffmap to actual width
+        let mut diffmap = if padded_width == width {
+            diffmap_padded
+        } else {
+            let mut out = Vec::with_capacity(width * height);
+            for y in 0..height {
+                out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
+            }
+            out
+        };
+
+        // Post-processing: contrast masking
+        if let Some(strength) = options.masking_strength {
+            apply_contrast_masking(
+                &mut diffmap,
+                precomputed,
+                width,
+                height,
+                padded_width,
+                strength,
+            );
+        }
+
+        // Post-processing: sqrt for distance-like calibration
+        if options.sqrt {
+            sqrt_inplace(&mut diffmap);
+        }
+
+        Ok(DiffmapResult {
+            result,
+            diffmap,
+            width,
+            height,
+        })
+    }
+
     /// Compare two images and return both score and per-pixel error map.
     ///
     /// Convenience method that handles precomputation internally.

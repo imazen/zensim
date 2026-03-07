@@ -1421,6 +1421,105 @@ impl PrecomputedReference {
 
         Self { scales }
     }
+
+    /// Build a precomputed reference from planar linear RGB f32 data.
+    ///
+    /// `planes` are `[R, G, B]`, each with `stride * height` elements (or more).
+    /// `stride` is the number of f32 elements per row (may be larger than `width`
+    /// for padded buffers). Converts to positive XYB internally.
+    pub(crate) fn from_linear_planar(
+        planes: [&[f32]; 3],
+        width: usize,
+        height: usize,
+        stride: usize,
+        num_scales: usize,
+        parallel: bool,
+    ) -> Self {
+        let padded_width = simd_padded_width(width);
+        let mut xyb = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
+
+        let mut scales = Vec::with_capacity(num_scales);
+        let mut w = padded_width;
+        let mut h = height;
+
+        for scale in 0..num_scales {
+            if w < 8 || h < 8 {
+                break;
+            }
+
+            scales.push((xyb.clone(), w, h));
+
+            if scale < num_scales - 1 {
+                let (nw, nh) = downscale_3_planes(&mut xyb, w, h, parallel);
+                w = nw;
+                h = nh;
+            }
+        }
+
+        Self { scales }
+    }
+}
+
+/// Convert planar linear RGB f32 to padded positive-XYB planes.
+///
+/// `planes` are `[R, G, B]` with `stride` elements per row.
+/// Output is `[Vec<f32>; 3]` with `padded_width` elements per row,
+/// mirror-padded for SIMD alignment.
+pub(crate) fn convert_linear_planar_to_xyb(
+    planes: [&[f32]; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+    padded_width: usize,
+) -> [Vec<f32>; 3] {
+    use crate::color::linear_to_positive_xyb_planar_into;
+
+    let n = padded_width * height;
+    let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+
+    // Pack planar → interleaved [f32; 3] per row, then convert to XYB.
+    // The per-row buffer fits in L1 cache (~12KB for 1024px).
+    let mut rgb_row: Vec<[f32; 3]> = vec![[0.0; 3]; width];
+
+    // Destructure for independent mutable borrows
+    let [ref mut o0, ref mut o1, ref mut o2] = out;
+
+    for y in 0..height {
+        let row_off = y * stride;
+        for x in 0..width {
+            rgb_row[x] = [planes[0][row_off + x], planes[1][row_off + x], planes[2][row_off + x]];
+        }
+        let out_off = y * padded_width;
+        linear_to_positive_xyb_planar_into(
+            &rgb_row[..width],
+            &mut o0[out_off..out_off + width],
+            &mut o1[out_off..out_off + width],
+            &mut o2[out_off..out_off + width],
+        );
+    }
+
+    // Mirror-pad columns
+    let pad_count = padded_width - width;
+    if pad_count > 0 {
+        let period = 2 * (width - 1).max(1);
+        let mirror_offsets: Vec<usize> = (0..pad_count)
+            .map(|i| {
+                let m = (width + i) % period;
+                if m < width { m } else { period - m }
+            })
+            .collect();
+
+        for y in 0..height {
+            let row_off = y * padded_width;
+            for (i, &src_x) in mirror_offsets.iter().enumerate() {
+                o0[row_off + width + i] = o0[row_off + src_x];
+                o1[row_off + width + i] = o1[row_off + src_x];
+                o2[row_off + width + i] = o2[row_off + src_x];
+            }
+        }
+    }
+
+    out
 }
 
 /// Streaming multi-scale stats using a precomputed reference.
@@ -1519,10 +1618,51 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = simd_padded_width(width);
-    let num_scales = config.num_scales.min(precomputed.scales.len());
+    let dst_planes = convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
 
+    compute_diffmap_from_xyb(
+        precomputed, dst_planes, width, height, padded_width, config, weights,
+        per_scale_channel_weights, scale_blend_weights,
+    )
+}
+
+/// Like `compute_zensim_streaming_with_ref_and_diffmap`, but takes planar linear
+/// RGB f32 input instead of `ImageSource`. Eliminates interleaving overhead.
+pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
+    precomputed: &PrecomputedReference,
+    planes: [&[f32]; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+    config: &ZensimConfig,
+    weights: &[f64],
+    per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
+    scale_blend_weights: &[f32],
+) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+    let padded_width = simd_padded_width(width);
+    let dst_planes = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
+
+    compute_diffmap_from_xyb(
+        precomputed, dst_planes, width, height, padded_width, config, weights,
+        per_scale_channel_weights, scale_blend_weights,
+    )
+}
+
+/// Core diffmap pipeline: takes pre-converted XYB planes, runs multi-scale
+/// processing, and fuses per-scale diffmaps into a single full-resolution map.
+fn compute_diffmap_from_xyb(
+    precomputed: &PrecomputedReference,
+    mut dst_planes: [Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    padded_width: usize,
+    config: &ZensimConfig,
+    weights: &[f64],
+    per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
+    scale_blend_weights: &[f32],
+) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+    let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
-    let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
 
     let (ref src_planes_s0, _, _) = precomputed.scales[0];
     let mean_offset =

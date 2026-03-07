@@ -849,6 +849,39 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+    /// Precompute reference from planar linear RGB f32 data.
+    ///
+    /// `planes` are `[R, G, B]`, each with at least `stride * height` elements.
+    /// `stride` is the number of f32 elements per row (≥ `width`; may be larger
+    /// for padded buffers like the encoder's `padded_width`).
+    ///
+    /// This avoids the interleave-to-RGBA overhead when the caller already has
+    /// separate channel buffers in linear light.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    pub fn precompute_reference_linear_planar(
+        &self,
+        planes: [&[f32]; 3],
+        width: usize,
+        height: usize,
+        stride: usize,
+    ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
+        let params = self.profile.params();
+        if width < 8 || height < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        Ok(crate::streaming::PrecomputedReference::from_linear_planar(
+            planes,
+            width,
+            height,
+            stride,
+            params.num_scales,
+            self.parallel,
+        ))
+    }
+
     /// Like `compute`, but always computes all features regardless of
     /// zero weights (forces every channel active). For training/research.
     #[cfg(feature = "training")]
