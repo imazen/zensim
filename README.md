@@ -106,6 +106,38 @@ Each `ZensimProfile` variant bundles weights and parameters that affect score ou
 - **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight` and `Opaque` alpha modes.
 - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 
+## Performance
+
+Pure-computation benchmarks (no I/O), synthetic gradient images, AMD Ryzen 9 7950X 16C/32T (WSL2). All implementations receive pre-allocated pixel buffers.
+
+### SSIMULACRA2
+
+Threading: zensim and ssimulacra2-rs use rayon (all cores). C++ libjxl and fast-ssim2 are single-threaded. `zensim_st` is zensim with `.with_parallel(false)` for a fair single-threaded comparison.
+
+| Resolution | zensim | zensim_st | C++ libjxl (FFI) | fast-ssim2 | ssimulacra2-rs |
+|------------|-------:|----------:|-----------------:|-----------:|---------------:|
+| 512x512 | **8 ms** | 11 ms | 45 ms | 39 ms | 251 ms |
+| 1280x720 | **14 ms** | 40 ms | 163 ms | 150 ms | 529 ms |
+| 1920x1080 | **23 ms** | 90 ms | 389 ms | 338 ms | 997 ms |
+| 2560x1440 | **37 ms** | 161 ms | 683 ms | 604 ms | 2,358 ms |
+| 3840x2160 | **171 ms** | 499 ms | 2,033 ms | 1,390 ms | 3,763 ms |
+
+Even single-threaded, zensim is **3–4x faster** than fast-ssim2 and **4x faster** than C++ libjxl. Multi-threaded zensim is **12x faster** than C++ libjxl at 4K.
+
+### Butteraugli
+
+Both butteraugli implementations are single-threaded. butteraugli-rs is the imazen pure-Rust port of libjxl's butteraugli.
+
+| Resolution | C++ libjxl (FFI) | butteraugli-rs |
+|------------|----------------:|---------------:|
+| 512x512 | 72 ms | 60 ms |
+| 1280x720 | 304 ms | 253 ms |
+| 1920x1080 | 705 ms | 581 ms |
+| 2560x1440 | 1,219 ms | 1,027 ms |
+| 3840x2160 | 2,446 ms | 2,584 ms |
+
+Benchmarks are in `zensim-bench/` — run with `cargo bench -p zensim-bench --bench bench_compare`.
+
 ## Design
 
 - **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli

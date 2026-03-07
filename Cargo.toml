@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["zensim", "zensim-validate", "zensim-regress"]
+members = ["zensim", "zensim-validate", "zensim-regress", "zensim-bench"]
 
 [profile.release]
 lto = "thin"
