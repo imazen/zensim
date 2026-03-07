@@ -1487,10 +1487,15 @@ pub(crate) fn convert_linear_planar_to_xyb(
     for y in 0..height {
         let row_off = y * stride;
         for x in 0..width {
+            // Clamp to [0, 1]: lossy reconstruction can produce out-of-range
+            // linear RGB (negative from quantization error near black, >1 from
+            // gaborish overshoot). A display clamps to its gamut, so the clamped
+            // values are what the viewer actually sees — measuring error on
+            // unclamped values would report differences that aren't perceptible.
             rgb_row[x] = [
-                planes[0][row_off + x],
-                planes[1][row_off + x],
-                planes[2][row_off + x],
+                planes[0][row_off + x].clamp(0.0, 1.0),
+                planes[1][row_off + x].clamp(0.0, 1.0),
+                planes[2][row_off + x].clamp(0.0, 1.0),
             ];
         }
         let out_off = y * padded_width;

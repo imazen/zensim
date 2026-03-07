@@ -848,6 +848,8 @@ fn linear_to_positive_xyb_planar_inner_v4(
     let y_bias = f32x16::splat(token, 0.01);
     let b_bias = f32x16::splat(token, 0.55);
 
+    let one = f32x16::splat(token, 1.0);
+
     let n = pixels.len();
     let chunks = n / 16;
 
@@ -864,9 +866,10 @@ fn linear_to_positive_xyb_planar_inner_v4(
             b_arr[i] = p[2];
         }
 
-        let r = f32x16::from_array(token, r_arr);
-        let g = f32x16::from_array(token, g_arr);
-        let b = f32x16::from_array(token, b_arr);
+        // Clamp to display gamut [0, 1]
+        let r = f32x16::from_array(token, r_arr).max(zero).min(one);
+        let g = f32x16::from_array(token, g_arr).max(zero).min(one);
+        let b = f32x16::from_array(token, b_arr).max(zero).min(one);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -946,6 +949,8 @@ fn linear_to_positive_xyb_planar_inner_v4(
     let y_bias8 = f32x8::splat(v3, 0.01);
     let b_bias8 = f32x8::splat(v3, 0.55);
 
+    let one8 = f32x8::splat(v3, 1.0);
+
     let rem_start = chunks * 16;
     let rem_chunks = (n - rem_start) / 8;
     for chunk in 0..rem_chunks {
@@ -959,9 +964,10 @@ fn linear_to_positive_xyb_planar_inner_v4(
             g_arr[i] = p[1];
             b_arr[i] = p[2];
         }
-        let r = f32x8::from_array(v3, r_arr);
-        let g = f32x8::from_array(v3, g_arr);
-        let b = f32x8::from_array(v3, b_arr);
+        // Clamp to display gamut [0, 1]
+        let r = f32x8::from_array(v3, r_arr).max(zero8).min(one8);
+        let g = f32x8::from_array(v3, g_arr).max(zero8).min(one8);
+        let b = f32x8::from_array(v3, b_arr).max(zero8).min(one8);
 
         let mixed0 = m00_8
             .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
@@ -1020,9 +1026,9 @@ fn linear_to_positive_xyb_planar_inner_v4(
     let absorbance_bias_neg = absorbance_bias;
     for i in (rem_start + rem_chunks * 8)..n {
         let p = pixels[i];
-        let r = p[0];
-        let g = p[1];
-        let b = p[2];
+        let r = p[0].clamp(0.0, 1.0);
+        let g = p[1].clamp(0.0, 1.0);
+        let b = p[2].clamp(0.0, 1.0);
 
         let mixed0 = K_M00
             .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
@@ -1070,6 +1076,7 @@ fn linear_to_positive_xyb_planar_inner_v3(
     let m22 = f32x8::splat(token, K_M22);
     let bias = f32x8::splat(token, K_B0);
     let zero = f32x8::zero(token);
+    let one = f32x8::splat(token, 1.0);
     let ab = f32x8::splat(token, absorbance_bias);
     let half = f32x8::splat(token, 0.5);
     let two = f32x8::splat(token, 2.0);
@@ -1094,9 +1101,11 @@ fn linear_to_positive_xyb_planar_inner_v3(
             b_arr[i] = p[2];
         }
 
-        let r = f32x8::from_array(token, r_arr);
-        let g = f32x8::from_array(token, g_arr);
-        let b = f32x8::from_array(token, b_arr);
+        // Clamp to display gamut: out-of-range values from lossy reconstruction
+        // aren't visible on a real display, so measuring them would overcount error.
+        let r = f32x8::from_array(token, r_arr).max(zero).min(one);
+        let g = f32x8::from_array(token, g_arr).max(zero).min(one);
+        let b = f32x8::from_array(token, b_arr).max(zero).min(one);
 
         let mixed0 = m00
             .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
@@ -1157,9 +1166,9 @@ fn linear_to_positive_xyb_planar_inner_v3(
     let absorbance_bias_neg = absorbance_bias;
     for i in (chunks * 8)..n {
         let p = pixels[i];
-        let r = p[0];
-        let g = p[1];
-        let b = p[2];
+        let r = p[0].clamp(0.0, 1.0);
+        let g = p[1].clamp(0.0, 1.0);
+        let b = p[2].clamp(0.0, 1.0);
 
         let mixed0 = K_M00
             .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
@@ -1195,9 +1204,11 @@ fn linear_to_positive_xyb_planar_inner_scalar(
     let absorbance_bias = -cbrtf_fast(K_B0);
 
     for (i, p) in pixels.iter().enumerate() {
-        let r = p[0];
-        let g = p[1];
-        let b = p[2];
+        // Clamp to display gamut: out-of-range values from lossy reconstruction
+        // aren't visible on a real display, so measuring them would overcount error.
+        let r = p[0].clamp(0.0, 1.0);
+        let g = p[1].clamp(0.0, 1.0);
+        let b = p[2].clamp(0.0, 1.0);
 
         let mixed0 = K_M00
             .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
