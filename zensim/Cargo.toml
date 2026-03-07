@@ -46,6 +46,7 @@ serde_json = "1"
 
 [lints.clippy]
 uninlined_format_args = "allow"
+too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

@@ -22,6 +22,9 @@ use crate::simd_ops::{
     sq_diff_sum, sq_sum_into, ssim_channel_extended, ssim_channel_masked,
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
+#[allow(unused_imports)]
+use archmage::SimdToken;
+use archmage::autoversion;
 use rayon::prelude::*;
 use std::sync::Mutex;
 
@@ -99,22 +102,80 @@ fn upsample_2x_add(
     weight: f32,
 ) {
     for sy in 0..src_h {
+        let src_row = &src[sy * src_w..(sy + 1) * src_w];
         let dy0 = sy * 2;
-        let dy1 = (dy0 + 1).min(dst_h - 1);
-        for sx in 0..src_w {
-            let dx0 = sx * 2;
-            let dx1 = (dx0 + 1).min(dst_w - 1);
-            let val = src[sy * src_w + sx] * weight;
-            dst[dy0 * dst_w + dx0] += val;
-            if dx1 < dst_w {
-                dst[dy0 * dst_w + dx1] += val;
-            }
-            if dy1 < dst_h {
-                dst[dy1 * dst_w + dx0] += val;
-                if dx1 < dst_w {
-                    dst[dy1 * dst_w + dx1] += val;
-                }
-            }
+        // Write to even row
+        if dy0 < dst_h {
+            upsample_row_2x(src_row, &mut dst[dy0 * dst_w..(dy0 + 1) * dst_w], weight);
+        }
+        // Write same values to odd row (nearest-neighbor vertical duplication)
+        let dy1 = dy0 + 1;
+        if dy1 < dst_h {
+            upsample_row_2x(src_row, &mut dst[dy1 * dst_w..(dy1 + 1) * dst_w], weight);
+        }
+    }
+}
+
+/// Weighted add: `dst[i] += src[i] * weight`. Auto-vectorized across architectures.
+#[autoversion]
+fn weighted_add(_t: SimdToken, dst: &mut [f32], src: &[f32], weight: f32) {
+    let n = dst.len().min(src.len());
+    for i in 0..n {
+        dst[i] += src[i] * weight;
+    }
+}
+
+/// Diffmap accumulation: SSIM-only path. `dm[i] += weight * ssim[off + i]`.
+#[autoversion]
+fn diffmap_accum_ssim(_t: SimdToken, dm: &mut [f32], ssim: &[f32], off: usize, weight: f32) {
+    for i in 0..dm.len() {
+        dm[i] += weight * ssim[off + i];
+    }
+}
+
+/// Diffmap accumulation: edge artifact + detail loss + MSE path.
+///
+/// Weights are packed as `[ssim_w, art_w, det_w, mse_w]` to stay within the
+/// 7-argument limit for clippy and autoversion-generated variants.
+#[autoversion]
+fn diffmap_accum_edge_mse(
+    _t: SimdToken,
+    dm: &mut [f32],
+    ssim: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    weights: [f32; 4],
+) {
+    let [ssim_w, art_w, det_w, mse_w] = weights;
+    for i in 0..dm.len() {
+        let mut val = ssim_w * ssim[i];
+        let res_src = src[i] - mu1[i];
+        let res_dst = dst[i] - mu2[i];
+        let edge_diff = res_dst * res_dst - res_src * res_src;
+        // max(0, edge_diff) and max(0, -edge_diff) — branchless via f32 ops
+        val += art_w * edge_diff.max(0.0);
+        val += det_w * (-edge_diff).max(0.0);
+        let d = src[i] - dst[i];
+        val += mse_w * d * d;
+        dm[i] += val;
+    }
+}
+
+/// Upsample one source row to two destination rows (nearest-neighbor 2×).
+/// Each source pixel duplicates to a 1×2 horizontal pair in the destination row.
+#[autoversion]
+fn upsample_row_2x(_t: SimdToken, src_row: &[f32], dst_row: &mut [f32], weight: f32) {
+    let dst_len = dst_row.len();
+    for (i, &s) in src_row.iter().enumerate() {
+        let v = s * weight;
+        let dx = i * 2;
+        if dx < dst_len {
+            dst_row[dx] += v;
+        }
+        if dx + 1 < dst_len {
+            dst_row[dx + 1] += v;
         }
     }
 }
@@ -887,25 +948,19 @@ fn process_strip_channel(
             if let Some((ref mut dm, pw)) = diffmap {
                 let inner_off = inner_start * width;
                 let inner_n = inner_h * width;
+                let dm = &mut dm[..inner_n];
                 if dm_needs_edge {
-                    for i in 0..inner_n {
-                        let idx = inner_off + i;
-                        let mut val = pw.ssim * bufs.temp_blur[idx];
-                        // Edge features from mu1/mu2 (in mask/mul_buf before swap)
-                        let res_src = src_c[idx] - bufs.mask[idx];
-                        let res_dst = dst_c[idx] - bufs.mul_buf[idx];
-                        let edge_diff = res_dst * res_dst - res_src * res_src;
-                        val += pw.art * edge_diff.max(0.0);
-                        val += pw.det * (-edge_diff).max(0.0);
-                        // MSE
-                        let d = src_c[idx] - dst_c[idx];
-                        val += pw.mse * d * d;
-                        dm[i] += val;
-                    }
+                    diffmap_accum_edge_mse(
+                        dm,
+                        &bufs.temp_blur[inner_off..inner_off + inner_n],
+                        &src_c[inner_off..inner_off + inner_n],
+                        &dst_c[inner_off..inner_off + inner_n],
+                        &bufs.mask[inner_off..inner_off + inner_n],
+                        &bufs.mul_buf[inner_off..inner_off + inner_n],
+                        [pw.ssim, pw.art, pw.det, pw.mse],
+                    );
                 } else {
-                    for i in 0..inner_n {
-                        dm[i] += pw.ssim * bufs.temp_blur[inner_off + i];
-                    }
+                    diffmap_accum_ssim(dm, &bufs.temp_blur, inner_off, pw.ssim);
                 }
             }
 
@@ -1542,9 +1597,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
         }
         if scale == 0 {
             // Scale 0 is already at full resolution — just add weighted
-            for (d, &s) in fused.iter_mut().zip(dm.iter()) {
-                *d += s * blend;
-            }
+            weighted_add(&mut fused, dm, blend);
         } else {
             // Upsample coarser scale back to full resolution
             // Each scale level is 2x smaller, so upsample `scale` times
@@ -1563,9 +1616,18 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
             // Add to fused (dimensions should match or be close)
             let copy_w = cw.min(full_w);
             let copy_h = ch.min(full_h);
-            for y in 0..copy_h {
-                for x in 0..copy_w {
-                    fused[y * full_w + x] += current[y * cw + x] * blend;
+            if cw == full_w {
+                // Same stride — single contiguous weighted_add
+                let n = copy_h * copy_w;
+                weighted_add(&mut fused[..n], &current[..n], blend);
+            } else {
+                // Different strides — row-by-row weighted_add
+                for y in 0..copy_h {
+                    weighted_add(
+                        &mut fused[y * full_w..y * full_w + copy_w],
+                        &current[y * cw..y * cw + copy_w],
+                        blend,
+                    );
                 }
             }
         }

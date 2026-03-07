@@ -9,6 +9,10 @@
 //! Designed for encoder quantization loops: the global zensim score tracks
 //! convergence, while the diffmap tells the encoder WHERE to adjust quality.
 
+#[allow(unused_imports)]
+use archmage::SimdToken;
+use archmage::autoversion;
+
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, config_from_params, validate_pair};
 use crate::source::ImageSource;
 use crate::streaming::PrecomputedReference;
@@ -299,7 +303,7 @@ fn trained_multiscale_weights(
 ///
 /// Divides each diffmap value by `1 + strength * local_variance(Y_src)`,
 /// where local_variance is computed from the Y plane of the precomputed
-/// reference at scale 0, using a box-blur approximation.
+/// reference at scale 0, using integral images for O(1) per-pixel variance.
 fn apply_contrast_masking(
     diffmap: &mut [f32],
     precomputed: &PrecomputedReference,
@@ -313,31 +317,87 @@ fn apply_contrast_masking(
     debug_assert_eq!(ph, height);
     let y_plane = &planes[1]; // Y channel = luminance
 
-    // Compute local variance as mean(Y²) - mean(Y)² using a simple box average.
-    // Use a 5-pixel radius (11×11 window) matching the SSIM blur.
+    // Use a 5-pixel radius (11x11 window) matching the SSIM blur.
     let r = 5usize;
-    for dy in 0..height {
-        for dx in 0..width {
-            let y0 = dy.saturating_sub(r);
-            let y1 = (dy + r + 1).min(height);
-            let x0 = dx.saturating_sub(r);
-            let x1 = (dx + r + 1).min(width);
-            let mut sum = 0.0f32;
-            let mut sum_sq = 0.0f32;
-            let mut count = 0.0f32;
-            for yy in y0..y1 {
-                for xx in x0..x1 {
-                    let v = y_plane[yy * padded_width + xx];
-                    sum += v;
-                    sum_sq += v * v;
-                    count += 1.0;
-                }
-            }
-            let mean = sum / count;
-            let variance = (sum_sq / count - mean * mean).max(0.0);
-            let mask = 1.0 + strength * variance;
-            diffmap[dy * width + dx] /= mask;
+
+    // Build integral images for sum(Y) and sum(Y^2).
+    // Layout: (width+1) x (height+1), with zero-padded top row and left column.
+    let iw = width + 1;
+    let ih = height + 1;
+    let mut int_sum = vec![0.0f64; iw * ih];
+    let mut int_sq = vec![0.0f64; iw * ih];
+
+    for y in 0..height {
+        let mut row_sum = 0.0f64;
+        let mut row_sq = 0.0f64;
+        for x in 0..width {
+            let v = y_plane[y * padded_width + x] as f64;
+            row_sum += v;
+            row_sq += v * v;
+            let idx = (y + 1) * iw + (x + 1);
+            int_sum[idx] = row_sum + int_sum[idx - iw];
+            int_sq[idx] = row_sq + int_sq[idx - iw];
         }
+    }
+
+    // Apply masking using integral image lookups for O(1) variance per pixel.
+    let dims = [width, iw, r];
+    for dy in 0..height {
+        apply_masking_row(
+            &mut diffmap[dy * width..(dy + 1) * width],
+            &int_sum,
+            &int_sq,
+            dy,
+            dims,
+            height,
+            strength,
+        );
+    }
+}
+
+/// Apply contrast masking for one row using precomputed integral images.
+///
+/// `dims` is packed as `[width, iw, r]` to keep param count low for autoversion.
+#[autoversion]
+fn apply_masking_row(
+    _t: SimdToken,
+    dm_row: &mut [f32],
+    int_sum: &[f64],
+    int_sq: &[f64],
+    dy: usize,
+    dims: [usize; 3],
+    height: usize,
+    strength: f32,
+) {
+    let [width, iw, r] = dims;
+    let y0 = dy.saturating_sub(r);
+    let y1 = (dy + r + 1).min(height);
+    for (dx, dm_val) in dm_row[..width].iter_mut().enumerate() {
+        let x0 = dx.saturating_sub(r);
+        let x1 = (dx + r + 1).min(width);
+
+        // Integral image box query: sum over [y0..y1, x0..x1]
+        let tl = y0 * iw + x0;
+        let tr = y0 * iw + x1;
+        let bl = y1 * iw + x0;
+        let br = y1 * iw + x1;
+
+        let sum = int_sum[br] - int_sum[tr] - int_sum[bl] + int_sum[tl];
+        let sq = int_sq[br] - int_sq[tr] - int_sq[bl] + int_sq[tl];
+        let count = ((y1 - y0) * (x1 - x0)) as f64;
+
+        let mean = sum / count;
+        let variance = (sq / count - mean * mean).max(0.0) as f32;
+        let mask = 1.0 + strength * variance;
+        *dm_val /= mask;
+    }
+}
+
+/// Element-wise sqrt, auto-vectorized.
+#[autoversion]
+fn sqrt_inplace(_t: SimdToken, data: &mut [f32]) {
+    for v in data.iter_mut() {
+        *v = v.sqrt();
     }
 }
 
@@ -511,9 +571,7 @@ impl crate::metric::Zensim {
 
         // Post-processing: sqrt for distance-like calibration
         if options.sqrt {
-            for v in diffmap.iter_mut() {
-                *v = v.sqrt();
-            }
+            sqrt_inplace(&mut diffmap);
         }
 
         Ok(DiffmapResult {
