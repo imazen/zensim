@@ -250,10 +250,7 @@ pub struct ZensimConfig {
     /// high-quality range.
     pub score_mapping_b: f64,
 
-    /// Whether to use rayon parallelism (default: true).
-    ///
-    /// When false, all computation runs on the current thread — useful for
-    /// benchmarking single-threaded performance or embedding in async contexts.
+    /// Enable multi-threaded computation via rayon (default: true).
     pub allow_multithreading: bool,
 }
 
@@ -766,7 +763,7 @@ pub struct Zensim {
 }
 
 impl Zensim {
-    /// Create a new `Zensim` with the given profile.
+    /// Create a new `Zensim` with the given profile. Parallel by default.
     pub fn new(profile: ZensimProfile) -> Self {
         Self {
             profile,
@@ -774,23 +771,21 @@ impl Zensim {
         }
     }
 
-    /// Enable or disable rayon parallelism (default: enabled).
-    ///
-    /// When disabled, all computation runs on the current thread.
-    #[must_use]
+    /// Enable or disable multi-threaded computation (rayon).
+    /// Default: `true`.
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self
     }
 
-    /// Whether rayon parallelism is enabled.
-    pub fn parallel(&self) -> bool {
-        self.parallel
-    }
-
     /// Current profile.
     pub fn profile(&self) -> ZensimProfile {
         self.profile
+    }
+
+    /// Whether multi-threaded computation is enabled.
+    pub fn parallel(&self) -> bool {
+        self.parallel
     }
 
     /// Compare source and distorted images.
@@ -1083,7 +1078,7 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
     }
 }
 
-fn validate_pair(
+pub(crate) fn validate_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
