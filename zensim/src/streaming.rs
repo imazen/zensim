@@ -27,6 +27,62 @@ use std::sync::Mutex;
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
 const STRIP_INNER: usize = 16;
 
+/// Run two closures in parallel (rayon) or sequentially, depending on `parallel`.
+#[inline]
+fn maybe_join<A, B, RA, RB>(parallel: bool, a: A, b: B) -> (RA, RB)
+where
+    A: FnOnce() -> RA + Send,
+    B: FnOnce() -> RB + Send,
+    RA: Send,
+    RB: Send,
+{
+    if parallel {
+        rayon::join(a, b)
+    } else {
+        let ra = a();
+        let rb = b();
+        (ra, rb)
+    }
+}
+
+/// Downscale 3 planes in-place, parallel or sequential.
+fn downscale_3_planes(
+    planes: &mut [Vec<f32>; 3],
+    w: usize,
+    h: usize,
+    parallel: bool,
+) -> (usize, usize) {
+    let [p0, p1, p2] = planes;
+    let (nw_nh, _) = maybe_join(
+        parallel,
+        || downscale_2x_inplace(p0, w, h),
+        || {
+            maybe_join(
+                parallel,
+                || downscale_2x_inplace(p1, w, h),
+                || downscale_2x_inplace(p2, w, h),
+            )
+        },
+    );
+    nw_nh
+}
+
+/// Downscale 6 planes (src + dst) in-place, parallel or sequential.
+fn downscale_6_planes(
+    src: &mut [Vec<f32>; 3],
+    dst: &mut [Vec<f32>; 3],
+    w: usize,
+    h: usize,
+    parallel: bool,
+) -> (usize, usize) {
+    let (nw_nh, _) = maybe_join(
+        parallel,
+        || downscale_3_planes(src, w, h, parallel),
+        || downscale_3_planes(dst, w, h, parallel),
+    );
+    nw_nh
+}
+
 /// Track background deallocation thread to prevent accumulation on repeated calls.
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
@@ -331,10 +387,11 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let height = source.height();
     let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales;
+    let parallel = config.allow_multithreading;
 
     // Phase 1: Convert sRGB→XYB for entire image, parallel over row chunks.
-    let mut src_planes = convert_source_to_xyb_parallel(source, padded_width);
-    let mut dst_planes = convert_source_to_xyb_parallel(distorted, padded_width);
+    let mut src_planes = convert_source_to_xyb(source, padded_width, parallel);
+    let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
 
     // Compute mean_offset while XYB planes are cache-hot
     let mean_offset =
@@ -356,34 +413,9 @@ pub(crate) fn compute_multiscale_stats_streaming(
             process_scale_bands(&src_planes, &dst_planes, w, h, config, scale, weights);
         stats.push(scale_stat);
 
-        // Downscale 6 planes in parallel for next scale
+        // Downscale 6 planes for next scale
         if scale < num_scales - 1 {
-            let [ref mut s0, ref mut s1, ref mut s2] = src_planes;
-            let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
-            let (((nw, nh), _), _) = rayon::join(
-                || {
-                    rayon::join(
-                        || downscale_2x_inplace(s0, w, h),
-                        || {
-                            rayon::join(
-                                || downscale_2x_inplace(s1, w, h),
-                                || downscale_2x_inplace(s2, w, h),
-                            )
-                        },
-                    )
-                },
-                || {
-                    rayon::join(
-                        || downscale_2x_inplace(d0, w, h),
-                        || {
-                            rayon::join(
-                                || downscale_2x_inplace(d1, w, h),
-                                || downscale_2x_inplace(d2, w, h),
-                            )
-                        },
-                    )
-                },
-            );
+            let (nw, nh) = downscale_6_planes(&mut src_planes, &mut dst_planes, w, h, parallel);
             w = nw;
             h = nh;
         }
@@ -409,9 +441,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
 /// Handles both RGB and RGBA sources row-by-row. RGBA is composited over checkerboard.
-pub(crate) fn convert_source_to_xyb_parallel(
+pub(crate) fn convert_source_to_xyb(
     source: &impl ImageSource,
     padded_width: usize,
+    parallel: bool,
 ) -> [Vec<f32>; 3] {
     let width = source.width();
     let height = source.height();
@@ -443,12 +476,9 @@ pub(crate) fn convert_source_to_xyb_parallel(
     let primaries = source.color_primaries();
     let need_gamut = primaries != ColorPrimaries::Srgb;
 
-    p0_chunks
-        .into_par_iter()
-        .zip(p1_chunks)
-        .zip(p2_chunks)
-        .enumerate()
-        .for_each(|(chunk_idx, ((c0, c1), c2))| {
+    #[allow(clippy::type_complexity)]
+    let process_chunk =
+        |(chunk_idx, ((c0, c1), c2)): (usize, ((&mut [f32], &mut [f32]), &mut [f32]))| {
             let row_start = chunk_idx * chunk_rows;
             let row_end = (row_start + chunk_rows).min(height);
             let rows = row_end - row_start;
@@ -715,7 +745,24 @@ pub(crate) fn convert_source_to_xyb_parallel(
                     }
                 }
             }
-        });
+        };
+
+    #[allow(clippy::redundant_closure)]
+    if parallel {
+        p0_chunks
+            .into_par_iter()
+            .zip(p1_chunks)
+            .zip(p2_chunks)
+            .enumerate()
+            .for_each(|args| process_chunk(args));
+    } else {
+        p0_chunks
+            .into_iter()
+            .zip(p1_chunks)
+            .zip(p2_chunks)
+            .enumerate()
+            .for_each(|args| process_chunk(args));
+    }
 
     planes
 }
@@ -1095,64 +1142,72 @@ fn process_scale_bands(
     let overlap = passes * r;
     let scale_active = active_channels(scale_idx, config.num_scales, config, weights);
 
+    let parallel = config.allow_multithreading;
     let total_strips = height.div_ceil(STRIP_INNER);
-    let num_bands = rayon::current_num_threads().min(total_strips).max(1);
+    let num_bands = if parallel {
+        rayon::current_num_threads().min(total_strips).max(1)
+    } else {
+        1
+    };
     let strips_per_band = total_strips.div_ceil(num_bands);
 
     let max_strip_h = STRIP_INNER + 2 * overlap;
     let max_strip_n = max_strip_h * width;
 
-    let band_accums: Vec<_> = (0..num_bands)
-        .into_par_iter()
-        .map(|band_idx| {
-            let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
-            let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
+    let band_work = |band_idx: usize| {
+        let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
+        let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
 
-            if band_first_y >= height {
-                return ScaleAccumulators::new();
+        if band_first_y >= height {
+            return ScaleAccumulators::new();
+        }
+
+        let mut accum = ScaleAccumulators::new();
+        let mut bufs = ScaleBuffers::new(max_strip_n);
+
+        let mut y = band_first_y;
+        while y < band_end_y {
+            let inner_end = (y + STRIP_INNER).min(height);
+            let inner_h = inner_end - y;
+
+            let strip_top = y.saturating_sub(overlap);
+            let strip_bot = (inner_end + overlap).min(height);
+            let strip_h = strip_bot - strip_top;
+            let inner_start = y - strip_top;
+
+            let strip_n = width * strip_h;
+            bufs.resize(strip_n);
+
+            accum.n += inner_h * width;
+
+            for &(c, need_ssim, need_edge) in &scale_active {
+                process_strip_channel(
+                    &src_planes[c][strip_top * width..strip_bot * width],
+                    &dst_planes[c][strip_top * width..strip_bot * width],
+                    width,
+                    strip_h,
+                    inner_start,
+                    inner_h,
+                    config,
+                    c,
+                    need_ssim,
+                    need_edge,
+                    &mut bufs,
+                    &mut accum,
+                );
             }
 
-            let mut accum = ScaleAccumulators::new();
-            let mut bufs = ScaleBuffers::new(max_strip_n);
+            y = inner_end;
+        }
 
-            let mut y = band_first_y;
-            while y < band_end_y {
-                let inner_end = (y + STRIP_INNER).min(height);
-                let inner_h = inner_end - y;
+        accum
+    };
 
-                let strip_top = y.saturating_sub(overlap);
-                let strip_bot = (inner_end + overlap).min(height);
-                let strip_h = strip_bot - strip_top;
-                let inner_start = y - strip_top;
-
-                let strip_n = width * strip_h;
-                bufs.resize(strip_n);
-
-                accum.n += inner_h * width;
-
-                for &(c, need_ssim, need_edge) in &scale_active {
-                    process_strip_channel(
-                        &src_planes[c][strip_top * width..strip_bot * width],
-                        &dst_planes[c][strip_top * width..strip_bot * width],
-                        width,
-                        strip_h,
-                        inner_start,
-                        inner_h,
-                        config,
-                        c,
-                        need_ssim,
-                        need_edge,
-                        &mut bufs,
-                        &mut accum,
-                    );
-                }
-
-                y = inner_end;
-            }
-
-            accum
-        })
-        .collect();
+    let band_accums: Vec<_> = if parallel {
+        (0..num_bands).into_par_iter().map(band_work).collect()
+    } else {
+        (0..num_bands).map(band_work).collect()
+    };
 
     // Merge band accumulators
     let mut accum = ScaleAccumulators::new();
@@ -1184,11 +1239,11 @@ impl PrecomputedReference {
     /// Build a precomputed reference from an ImageSource.
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
-    pub(crate) fn new(source: &impl ImageSource, num_scales: usize) -> Self {
+    pub(crate) fn new(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
         let width = source.width();
         let height = source.height();
         let padded_width = simd_padded_width(width);
-        let mut planes = convert_source_to_xyb_parallel(source, padded_width);
+        let mut planes = convert_source_to_xyb(source, padded_width, parallel);
 
         let mut scales = Vec::with_capacity(num_scales);
         let mut w = padded_width;
@@ -1204,16 +1259,7 @@ impl PrecomputedReference {
 
             // Downscale for next scale
             if scale < num_scales - 1 {
-                let [ref mut s0, ref mut s1, ref mut s2] = planes;
-                let ((nw, nh), _) = rayon::join(
-                    || downscale_2x_inplace(s0, w, h),
-                    || {
-                        rayon::join(
-                            || downscale_2x_inplace(s1, w, h),
-                            || downscale_2x_inplace(s2, w, h),
-                        )
-                    },
-                );
+                let (nw, nh) = downscale_3_planes(&mut planes, w, h, parallel);
                 w = nw;
                 h = nh;
             }
@@ -1238,8 +1284,10 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales.min(precomputed.scales.len());
 
+    let parallel = config.allow_multithreading;
+
     // Only convert distorted to XYB
-    let mut dst_planes = convert_source_to_xyb_parallel(distorted, padded_width);
+    let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
 
     // Compute mean_offset using scale-0 reference planes and fresh distorted planes
     let (ref src_planes_s0, _, _) = precomputed.scales[0];
@@ -1264,16 +1312,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
 
         // Only downscale the 3 distorted planes for next scale
         if scale < num_scales - 1 {
-            let [ref mut d0, ref mut d1, ref mut d2] = dst_planes;
-            let ((nw, nh), _) = rayon::join(
-                || downscale_2x_inplace(d0, w, h),
-                || {
-                    rayon::join(
-                        || downscale_2x_inplace(d1, w, h),
-                        || downscale_2x_inplace(d2, w, h),
-                    )
-                },
-            );
+            let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
             w = nw;
             h = nh;
         }
@@ -2128,7 +2167,7 @@ mod tests {
         let dst_img = RgbSlice::new(&dst, w, h);
         let streaming_result =
             compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS_PREVIEW_V0_1);
-        let precomputed = PrecomputedReference::new(&src_img, config.num_scales);
+        let precomputed = PrecomputedReference::new(&src_img, config.num_scales, true);
         let precomp_result = compute_zensim_streaming_with_ref(
             &precomputed,
             &dst_img,

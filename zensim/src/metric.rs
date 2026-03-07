@@ -249,6 +249,12 @@ pub struct ZensimConfig {
     /// gamma (< 1.0) compresses high distances, giving more resolution in the
     /// high-quality range.
     pub score_mapping_b: f64,
+
+    /// Whether to use rayon parallelism (default: true).
+    ///
+    /// When false, all computation runs on the current thread — useful for
+    /// benchmarking single-threaded performance or embedding in async contexts.
+    pub allow_multithreading: bool,
 }
 
 impl Default for ZensimConfig {
@@ -264,6 +270,7 @@ impl Default for ZensimConfig {
             num_scales: crate::NUM_SCALES,
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
+            allow_multithreading: true,
         }
     }
 }
@@ -344,7 +351,7 @@ pub fn precompute_reference_with_scales(
     }
     let src_img = crate::source::RgbSlice::new(source, width, height);
     Ok(crate::streaming::PrecomputedReference::new(
-        &src_img, num_scales,
+        &src_img, num_scales, true,
     ))
 }
 
@@ -755,12 +762,30 @@ use crate::source::ImageSource;
 #[derive(Clone, Debug)]
 pub struct Zensim {
     profile: ZensimProfile,
+    parallel: bool,
 }
 
 impl Zensim {
     /// Create a new `Zensim` with the given profile.
     pub fn new(profile: ZensimProfile) -> Self {
-        Self { profile }
+        Self {
+            profile,
+            parallel: true,
+        }
+    }
+
+    /// Enable or disable rayon parallelism (default: enabled).
+    ///
+    /// When disabled, all computation runs on the current thread.
+    #[must_use]
+    pub fn with_parallel(mut self, parallel: bool) -> Self {
+        self.parallel = parallel;
+        self
+    }
+
+    /// Whether rayon parallelism is enabled.
+    pub fn parallel(&self) -> bool {
+        self.parallel
     }
 
     /// Current profile.
@@ -780,7 +805,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
-        let config = config_from_params(params);
+        let config = config_from_params(params, self.parallel);
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result.with_profile(self.profile))
     }
@@ -801,6 +826,7 @@ impl Zensim {
         Ok(crate::streaming::PrecomputedReference::new(
             source,
             params.num_scales,
+            self.parallel,
         ))
     }
 
@@ -818,7 +844,7 @@ impl Zensim {
         if distorted.width() < 8 || distorted.height() < 8 {
             return Err(ZensimError::ImageTooSmall);
         }
-        let config = config_from_params(params);
+        let config = config_from_params(params, self.parallel);
         let result = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
@@ -838,7 +864,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
-        let mut config = config_from_params(params);
+        let mut config = config_from_params(params, self.parallel);
         config.compute_all_features = true;
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result.with_profile(self.profile))
@@ -891,7 +917,7 @@ impl Zensim {
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
         validate_pair(source, distorted)?;
-        let config = config_from_params(params);
+        let config = config_from_params(params, true);
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result)
     }
@@ -1123,7 +1149,7 @@ fn compute_with_config_inner(
     crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
 }
 
-fn config_from_params(params: &ProfileParams) -> ZensimConfig {
+pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
     ZensimConfig {
         blur_radius: params.blur_radius,
         blur_passes: params.blur_passes,
@@ -1137,6 +1163,7 @@ fn config_from_params(params: &ProfileParams) -> ZensimConfig {
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
+        allow_multithreading: parallel,
     }
 }
 
