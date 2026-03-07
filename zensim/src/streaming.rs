@@ -1487,7 +1487,11 @@ pub(crate) fn convert_linear_planar_to_xyb(
     for y in 0..height {
         let row_off = y * stride;
         for x in 0..width {
-            rgb_row[x] = [planes[0][row_off + x], planes[1][row_off + x], planes[2][row_off + x]];
+            rgb_row[x] = [
+                planes[0][row_off + x],
+                planes[1][row_off + x],
+                planes[2][row_off + x],
+            ];
         }
         let out_off = y * padded_width;
         linear_to_positive_xyb_planar_into(
@@ -1621,8 +1625,15 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
     let dst_planes = convert_source_to_xyb(distorted, padded_width, config.allow_multithreading);
 
     compute_diffmap_from_xyb(
-        precomputed, dst_planes, width, height, padded_width, config, weights,
-        per_scale_channel_weights, scale_blend_weights,
+        precomputed,
+        dst_planes,
+        width,
+        height,
+        padded_width,
+        config,
+        weights,
+        per_scale_channel_weights,
+        scale_blend_weights,
     )
 }
 
@@ -1643,8 +1654,15 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
     let dst_planes = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
 
     compute_diffmap_from_xyb(
-        precomputed, dst_planes, width, height, padded_width, config, weights,
-        per_scale_channel_weights, scale_blend_weights,
+        precomputed,
+        dst_planes,
+        width,
+        height,
+        padded_width,
+        config,
+        weights,
+        per_scale_channel_weights,
+        scale_blend_weights,
     )
 }
 
