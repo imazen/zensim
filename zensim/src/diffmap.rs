@@ -1008,4 +1008,128 @@ mod tests {
             regular.score()
         );
     }
+
+    /// Stress-test diffmap for NaN/Inf with adversarial inputs at realistic sizes.
+    #[test]
+    fn test_diffmap_no_nan() {
+        let z = crate::Zensim::new(ZensimProfile::latest());
+        let weightings = [
+            DiffmapWeighting::Trained,
+            DiffmapWeighting::Balanced,
+            DiffmapWeighting::Custom([1.0, 0.0, 0.0]),
+        ];
+        let options_list = [
+            super::DiffmapOptions::default(),
+            super::DiffmapOptions {
+                weighting: DiffmapWeighting::Trained,
+                masking_strength: Some(4.0),
+                sqrt: true,
+                include_edge_mse: true,
+            },
+        ];
+        // Adversarial patterns: uniform, solid black, solid white, random-ish,
+        // extreme contrast, near-identical
+        #[allow(clippy::type_complexity)]
+        let cases: Vec<(&str, usize, usize, Vec<[u8; 3]>, Vec<[u8; 3]>)> = vec![
+            {
+                let w = 64;
+                let h = 64;
+                let src = vec![[128, 128, 128]; w * h];
+                let dst = vec![[128, 128, 128]; w * h];
+                ("uniform_identical", w, h, src, dst)
+            },
+            {
+                let w = 64;
+                let h = 64;
+                let src = vec![[0, 0, 0]; w * h];
+                let dst = vec![[0, 0, 0]; w * h];
+                ("black_identical", w, h, src, dst)
+            },
+            {
+                let w = 64;
+                let h = 64;
+                let src = vec![[255, 255, 255]; w * h];
+                let dst = vec![[255, 255, 255]; w * h];
+                ("white_identical", w, h, src, dst)
+            },
+            {
+                let w = 64;
+                let h = 64;
+                let src = vec![[0, 0, 0]; w * h];
+                let dst = vec![[255, 255, 255]; w * h];
+                ("black_vs_white", w, h, src, dst)
+            },
+            {
+                let w = 128;
+                let h = 128;
+                let src: Vec<[u8; 3]> = (0..w * h)
+                    .map(|i| {
+                        let v = (i % 256) as u8;
+                        [v, v, v]
+                    })
+                    .collect();
+                let dst = src
+                    .iter()
+                    .map(|p| [p[0].wrapping_add(1), p[1], p[2]])
+                    .collect();
+                ("near_identical_128", w, h, src, dst)
+            },
+            {
+                // Checkerboard: maximally adversarial for variance computation
+                let w = 64;
+                let h = 64;
+                let src: Vec<[u8; 3]> = (0..w * h)
+                    .map(|i| {
+                        let x = i % w;
+                        let y = i / w;
+                        if (x + y) % 2 == 0 {
+                            [0, 0, 0]
+                        } else {
+                            [255, 255, 255]
+                        }
+                    })
+                    .collect();
+                let dst = src
+                    .iter()
+                    .map(|p| {
+                        [
+                            p[0].saturating_add(10),
+                            p[1].saturating_add(10),
+                            p[2].saturating_add(10),
+                        ]
+                    })
+                    .collect();
+                ("checkerboard", w, h, src, dst)
+            },
+        ];
+
+        for (label, w, h, src, dst) in &cases {
+            let src_img = RgbSlice::new(src, *w, *h);
+            let dst_img = RgbSlice::new(dst, *w, *h);
+            for weighting in &weightings {
+                let result = z
+                    .compute_with_diffmap(&src_img, &dst_img, *weighting)
+                    .unwrap();
+                let nan_count = result.diffmap().iter().filter(|v| v.is_nan()).count();
+                let inf_count = result.diffmap().iter().filter(|v| v.is_infinite()).count();
+                assert!(
+                    nan_count == 0 && inf_count == 0,
+                    "{label}: {nan_count} NaN, {inf_count} Inf in diffmap (len={})",
+                    result.diffmap().len()
+                );
+            }
+            for options in &options_list {
+                let result = z
+                    .compute_with_diffmap(&src_img, &dst_img, *options)
+                    .unwrap();
+                let nan_count = result.diffmap().iter().filter(|v| v.is_nan()).count();
+                let inf_count = result.diffmap().iter().filter(|v| v.is_infinite()).count();
+                assert!(
+                    nan_count == 0 && inf_count == 0,
+                    "{label} (options): {nan_count} NaN, {inf_count} Inf in diffmap (len={})",
+                    result.diffmap().len()
+                );
+            }
+        }
+    }
 }

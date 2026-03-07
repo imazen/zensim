@@ -98,13 +98,20 @@ pub(crate) fn srgb_u16_to_linear(v: u16) -> f32 {
 /// Accurate to ~20 bits (sufficient for image quality metrics).
 #[inline(always)]
 pub(crate) fn cbrtf_fast(x: f32) -> f32 {
+    // cbrt(0) = 0; the Halley iteration below would produce NaN for x=0
+    // because t*numerator underflows below f32 min subnormal, yielding 0/0
+    // in the second iteration.
+    if x == 0.0 {
+        return 0.0;
+    }
     let mut t = cbrtf_initial(x);
     // Halley's method in f32 (each step roughly triples correct bits: 5→15→45)
     // Use mul_add to match SIMD Halley iterations: x.mul_add(2, r) and r.mul_add(2, x)
+    // Division-first form t*(num/den) avoids underflow in t*num for tiny x.
     let mut r = t * t * t;
-    t = t * x.mul_add(2.0, r) / r.mul_add(2.0, x);
+    t *= x.mul_add(2.0, r) / r.mul_add(2.0, x);
     r = t * t * t;
-    t = t * x.mul_add(2.0, r) / r.mul_add(2.0, x);
+    t *= x.mul_add(2.0, r) / r.mul_add(2.0, x);
     t
 }
 
@@ -259,17 +266,17 @@ fn srgb_to_positive_xyb_planar_inner_v4(
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
         let mut r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         // Iteration 2
         r0 = t0 * t0 * t0;
         r1 = t1 * t1 * t1;
         r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -354,16 +361,16 @@ fn srgb_to_positive_xyb_planar_inner_v4(
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
         let mut r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
-        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
-        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+        t0 *= (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 *= (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 *= (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
 
         r0 = t0 * t0 * t0;
         r1 = t1 * t1 * t1;
         r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
-        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
-        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+        t0 *= (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 *= (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 *= (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
 
         let c0 = t0 + ab8;
         let c1 = t1 + ab8;
@@ -492,17 +499,17 @@ fn srgb_to_positive_xyb_planar_inner_v3(
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
         let mut r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         // Iteration 2
         r0 = t0 * t0 * t0;
         r1 = t1 * t1 * t1;
         r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -891,17 +898,17 @@ fn linear_to_positive_xyb_planar_inner_v4(
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
         let mut r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         // Halley iteration 2
         r0 = t0 * t0 * t0;
         r1 = t1 * t1 * t1;
         r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -985,16 +992,16 @@ fn linear_to_positive_xyb_planar_inner_v4(
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
         let mut r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
-        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
-        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+        t0 *= (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 *= (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 *= (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
 
         r0 = t0 * t0 * t0;
         r1 = t1 * t1 * t1;
         r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
-        t1 = t1 * (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
-        t2 = t2 * (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
+        t0 *= (x0.mul_add(two8, r0)) / (x0 + r0.mul_add(two8, zero8));
+        t1 *= (x1.mul_add(two8, r1)) / (x1 + r1.mul_add(two8, zero8));
+        t2 *= (x2.mul_add(two8, r2)) / (x2 + r2.mul_add(two8, zero8));
 
         let c0 = t0 + ab8;
         let c1 = t1 + ab8;
@@ -1120,16 +1127,16 @@ fn linear_to_positive_xyb_planar_inner_v3(
         let mut r0 = t0 * t0 * t0;
         let mut r1 = t1 * t1 * t1;
         let mut r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         r0 = t0 * t0 * t0;
         r1 = t1 * t1 * t1;
         r2 = t2 * t2 * t2;
-        t0 = t0 * (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
-        t1 = t1 * (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
-        t2 = t2 * (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
+        t0 *= (x0.mul_add(two, r0)) / (x0 + r0.mul_add(two, zero));
+        t1 *= (x1.mul_add(two, r1)) / (x1 + r1.mul_add(two, zero));
+        t2 *= (x2.mul_add(two, r2)) / (x2 + r2.mul_add(two, zero));
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
