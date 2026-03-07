@@ -97,6 +97,8 @@ pub(crate) fn fused_vblur_features_ssim(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
 ) -> StripChannelAccum {
     incant!(
         fused_vblur_ssim_inner(
@@ -113,7 +115,9 @@ pub(crate) fn fused_vblur_features_ssim(
             radius,
             mu1_out,
             mu2_out,
-            store_mu
+            store_mu,
+            sd_out,
+            store_sd
         ),
         [v4, v3]
     )
@@ -216,6 +220,8 @@ fn fused_vblur_ssim_inner_v4(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x16::splat(token, 1.0 / diam as f32);
@@ -279,6 +285,9 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d2 += sd2.reduce_add() as f64;
                 acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
                 acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if store_sd {
+                    sd_out[base..base + 16].copy_from_slice(&sd.to_array());
+                }
                 if store_mu {
                     mu1_out[base..base + 16].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 16].copy_from_slice(&mu2.to_array());
@@ -392,6 +401,9 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d2 += sd2.reduce_add() as f64;
                 acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
                 acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if store_sd {
+                    sd_out[base..base + 8].copy_from_slice(&sd.to_array());
+                }
                 if store_mu {
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
@@ -488,6 +500,9 @@ fn fused_vblur_ssim_inner_v4(
                 acc.ssim_d2 += sd2 as f64;
                 acc.ssim_d8 += (sd4 * sd4) as f64;
                 acc.ssim_max = acc.ssim_max.max(sd);
+                if store_sd {
+                    sd_out[y * width + x] = sd;
+                }
                 if store_mu {
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;
@@ -563,6 +578,8 @@ fn fused_vblur_ssim_inner_v3(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv_v = f32x8::splat(token, 1.0 / diam as f32);
@@ -617,6 +634,9 @@ fn fused_vblur_ssim_inner_v3(
                 acc.ssim_d2 += sd2.reduce_add() as f64;
                 acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
                 acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if store_sd {
+                    sd_out[base..base + 8].copy_from_slice(&sd.to_array());
+                }
                 if store_mu {
                     mu1_out[base..base + 8].copy_from_slice(&mu1.to_array());
                     mu2_out[base..base + 8].copy_from_slice(&mu2.to_array());
@@ -713,6 +733,9 @@ fn fused_vblur_ssim_inner_v3(
                 acc.ssim_d2 += sd2 as f64;
                 acc.ssim_d8 += (sd4 * sd4) as f64;
                 acc.ssim_max = acc.ssim_max.max(sd);
+                if store_sd {
+                    sd_out[y * width + x] = sd;
+                }
                 if store_mu {
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;
@@ -786,6 +809,8 @@ fn fused_vblur_ssim_inner_scalar(
     mu1_out: &mut [f32],
     mu2_out: &mut [f32],
     store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
 ) -> StripChannelAccum {
     let diam = 2 * radius + 1;
     let inv = 1.0 / diam as f32;
@@ -830,6 +855,9 @@ fn fused_vblur_ssim_inner_scalar(
                 acc.ssim_d2 += sd2 as f64;
                 acc.ssim_d8 += (sd4 * sd4) as f64;
                 acc.ssim_max = acc.ssim_max.max(sd);
+                if store_sd {
+                    sd_out[y * width + x] = sd;
+                }
                 if store_mu {
                     mu1_out[y * width + x] = mu1;
                     mu2_out[y * width + x] = mu2;

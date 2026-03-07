@@ -13,6 +13,7 @@ use crate::color::{
     composite_srgb8_rgba_to_linear, composite_srgb16_rgba_to_linear,
     linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
+use crate::diffmap::PixelFeatureWeights;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
@@ -52,7 +53,7 @@ fn downscale_3_planes(
     h: usize,
     parallel: bool,
 ) -> (usize, usize) {
-    let [p0, p1, p2] = planes;
+    let [ref mut p0, ref mut p1, ref mut p2] = *planes;
     let (nw_nh, _) = maybe_join(
         parallel,
         || downscale_2x_inplace(p0, w, h),
@@ -81,6 +82,41 @@ fn downscale_6_planes(
         || downscale_3_planes(dst, w, h, parallel),
     );
     nw_nh
+}
+
+/// Upsample a 2D buffer by 2x (nearest-neighbor) and add to `dst` with a weight.
+///
+/// `src` is `src_w × src_h` elements (row-major), `dst` is `dst_w × dst_h` elements.
+/// Each source pixel maps to a 2×2 block in the destination.
+/// Handles edge cases where `dst` dimensions are odd (2*src_w-1 or 2*src_h-1).
+fn upsample_2x_add(
+    src: &[f32],
+    src_w: usize,
+    src_h: usize,
+    dst: &mut [f32],
+    dst_w: usize,
+    dst_h: usize,
+    weight: f32,
+) {
+    for sy in 0..src_h {
+        let dy0 = sy * 2;
+        let dy1 = (dy0 + 1).min(dst_h - 1);
+        for sx in 0..src_w {
+            let dx0 = sx * 2;
+            let dx1 = (dx0 + 1).min(dst_w - 1);
+            let val = src[sy * src_w + sx] * weight;
+            dst[dy0 * dst_w + dx0] += val;
+            if dx1 < dst_w {
+                dst[dy0 * dst_w + dx1] += val;
+            }
+            if dy1 < dst_h {
+                dst[dy1 * dst_w + dx0] += val;
+                if dx1 < dst_w {
+                    dst[dy1 * dst_w + dx1] += val;
+                }
+            }
+        }
+    }
 }
 
 /// Track background deallocation thread to prevent accumulation on repeated calls.
@@ -389,7 +425,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let num_scales = config.num_scales;
     let parallel = config.allow_multithreading;
 
-    // Phase 1: Convert sRGB→XYB for entire image, parallel over row chunks.
+    // Phase 1: Convert sRGB→XYB for entire image.
     let mut src_planes = convert_source_to_xyb(source, padded_width, parallel);
     let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
 
@@ -397,8 +433,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let mean_offset =
         compute_xyb_mean_offset(&src_planes, &dst_planes, width, height, padded_width);
 
-    // Phase 2: Process all scales with parallel band processing.
-    // Each scale: compute features in parallel bands, then downscale planes for next scale.
+    // Phase 2: Process all scales with band processing.
     let mut stats = Vec::with_capacity(num_scales);
     let mut w = padded_width;
     let mut h = height;
@@ -408,12 +443,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
             break;
         }
 
-        // Parallel band processing: borrow slices from full planes
-        let scale_stat =
-            process_scale_bands(&src_planes, &dst_planes, w, h, config, scale, weights);
+        let (scale_stat, _) =
+            process_scale_bands(&src_planes, &dst_planes, w, h, config, scale, weights, None);
         stats.push(scale_stat);
 
-        // Downscale 6 planes for next scale
         if scale < num_scales - 1 {
             let (nw, nh) = downscale_6_planes(&mut src_planes, &mut dst_planes, w, h, parallel);
             w = nw;
@@ -421,9 +454,8 @@ pub(crate) fn compute_multiscale_stats_streaming(
         }
     }
 
-    // Background deallocation: move ~400MB of XYB planes to a background thread
-    // to avoid blocking on munmap syscalls (which take ~57ms on WSL for this volume).
-    // Track the thread to prevent accumulation on repeated calls.
+    // Background deallocation: move XYB planes to a background thread
+    // to avoid blocking on munmap syscalls.
     {
         let mut guard = DEALLOC_THREAD.lock().unwrap();
         if let Some(prev) = guard.take() {
@@ -788,6 +820,7 @@ fn process_strip_channel(
     need_edge: bool,
     bufs: &mut ScaleBuffers,
     accum: &mut ScaleAccumulators,
+    mut diffmap: Option<(&mut [f32], PixelFeatureWeights)>,
 ) {
     // MSE-only path: no blur needed
     if !need_ssim && !need_edge {
@@ -804,6 +837,10 @@ fn process_strip_channel(
     if config.blur_passes == 1 {
         let strip_acc;
 
+        let dm_needs_edge = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_edge_mse());
+        let store_sd = diffmap.is_some() && need_ssim;
+        // Force mu1/mu2 storage when diffmap needs edge/MSE features
+        let store_mu = config.extended_features || dm_needs_edge;
         if need_ssim {
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
             fused_blur_h_ssim(
@@ -820,6 +857,8 @@ fn process_strip_channel(
 
             // Fused V-blur + ALL feature extraction
             // mu1/mu2 outputs go to mask/mul_buf (mu1/mu2 still hold H-blurred values)
+            // sd_out goes to temp_blur (only used when store_sd=true, extracted before
+            // extended features which also need temp_blur for blurs)
             strip_acc = fused_vblur_features_ssim(
                 &bufs.mu1,
                 &bufs.mu2,
@@ -834,8 +873,41 @@ fn process_strip_channel(
                 config.blur_radius,
                 &mut bufs.mask,
                 &mut bufs.mul_buf,
-                config.extended_features,
+                store_mu,
+                &mut bufs.temp_blur,
+                store_sd,
             );
+
+            // Accumulate weighted features into diffmap before extended features
+            // overwrites temp_blur. Inner rows are at inner_start..inner_start+inner_h
+            // in strip-local coordinates.
+            //
+            // When edge/MSE is enabled, mu1 is in bufs.mask and mu2 is in bufs.mul_buf
+            // (written by fused kernel when store_mu=true, not yet swapped).
+            if let Some((ref mut dm, pw)) = diffmap {
+                let inner_off = inner_start * width;
+                let inner_n = inner_h * width;
+                if dm_needs_edge {
+                    for i in 0..inner_n {
+                        let idx = inner_off + i;
+                        let mut val = pw.ssim * bufs.temp_blur[idx];
+                        // Edge features from mu1/mu2 (in mask/mul_buf before swap)
+                        let res_src = src_c[idx] - bufs.mask[idx];
+                        let res_dst = dst_c[idx] - bufs.mul_buf[idx];
+                        let edge_diff = res_dst * res_dst - res_src * res_src;
+                        val += pw.art * edge_diff.max(0.0);
+                        val += pw.det * (-edge_diff).max(0.0);
+                        // MSE
+                        let d = src_c[idx] - dst_c[idx];
+                        val += pw.mse * d * d;
+                        dm[i] += val;
+                    }
+                } else {
+                    for i in 0..inner_n {
+                        dm[i] += pw.ssim * bufs.temp_blur[inner_off + i];
+                    }
+                }
+            }
 
             accum.ssim_d[c] += strip_acc.ssim_d;
             accum.ssim_d4[c] += strip_acc.ssim_d4;
@@ -1128,6 +1200,7 @@ fn process_strip_channel(
 ///
 /// Divides the image into horizontal bands, each processing sequential strips.
 /// Each band runs on a separate thread via rayon.
+#[allow(clippy::too_many_arguments)]
 fn process_scale_bands(
     src_planes: &[Vec<f32>; 3],
     dst_planes: &[Vec<f32>; 3],
@@ -1136,7 +1209,8 @@ fn process_scale_bands(
     config: &ZensimConfig,
     scale_idx: usize,
     weights: &[f64],
-) -> ScaleStats {
+    diffmap_weights: Option<[PixelFeatureWeights; 3]>,
+) -> (ScaleStats, Option<Vec<f32>>) {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
@@ -1154,13 +1228,16 @@ fn process_scale_bands(
     let max_strip_h = STRIP_INNER + 2 * overlap;
     let max_strip_n = max_strip_h * width;
 
-    let band_work = |band_idx: usize| {
+    let process_band = |band_idx: usize| {
         let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
         let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
 
         if band_first_y >= height {
-            return ScaleAccumulators::new();
+            return (ScaleAccumulators::new(), None);
         }
+
+        let band_rows = band_end_y - band_first_y;
+        let mut band_dm = diffmap_weights.map(|_| vec![0.0f32; band_rows * width]);
 
         let mut accum = ScaleAccumulators::new();
         let mut bufs = ScaleBuffers::new(max_strip_n);
@@ -1180,7 +1257,18 @@ fn process_scale_bands(
 
             accum.n += inner_h * width;
 
+            // Diffmap slice for this strip's inner rows (band-local offset)
+            let dm_start = (y - band_first_y) * width;
+            let dm_n = inner_h * width;
+
             for &(c, need_ssim, need_edge) in &scale_active {
+                let dm_info = match band_dm.as_mut() {
+                    Some(dm) if need_ssim => {
+                        let dm_w = diffmap_weights.unwrap();
+                        Some((&mut dm[dm_start..dm_start + dm_n], dm_w[c]))
+                    }
+                    _ => None,
+                };
                 process_strip_channel(
                     &src_planes[c][strip_top * width..strip_bot * width],
                     &dst_planes[c][strip_top * width..strip_bot * width],
@@ -1194,27 +1282,40 @@ fn process_scale_bands(
                     need_edge,
                     &mut bufs,
                     &mut accum,
+                    dm_info,
                 );
             }
 
             y = inner_end;
         }
 
-        accum
+        (accum, band_dm)
     };
 
-    let band_accums: Vec<_> = if parallel {
-        (0..num_bands).into_par_iter().map(band_work).collect()
+    #[allow(clippy::redundant_closure)]
+    let band_results: Vec<_> = if parallel {
+        (0..num_bands)
+            .into_par_iter()
+            .map(|i| process_band(i))
+            .collect()
     } else {
-        (0..num_bands).map(band_work).collect()
+        (0..num_bands).map(|i| process_band(i)).collect()
     };
 
-    // Merge band accumulators
+    // Merge band accumulators and concatenate diffmaps
     let mut accum = ScaleAccumulators::new();
-    for band_accum in band_accums {
+    let mut diffmap = if diffmap_weights.is_some() {
+        Some(Vec::with_capacity(width * height))
+    } else {
+        None
+    };
+    for (band_accum, band_dm) in band_results {
         accum.merge(&band_accum);
+        if let (Some(dm), Some(bdm)) = (&mut diffmap, band_dm) {
+            dm.extend_from_slice(&bdm);
+        }
     }
-    accum.finalize()
+    (accum.finalize(), diffmap)
 }
 
 /// Pre-computed reference image data for batch comparison against multiple distorted images.
@@ -1254,10 +1355,8 @@ impl PrecomputedReference {
                 break;
             }
 
-            // Clone and store planes at this scale
             scales.push((planes.clone(), w, h));
 
-            // Downscale for next scale
             if scale < num_scales - 1 {
                 let (nw, nh) = downscale_3_planes(&mut planes, w, h, parallel);
                 w = nw;
@@ -1307,10 +1406,10 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
         debug_assert_eq!(w, src_w, "width mismatch at scale {scale}");
         debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
 
-        let scale_stat = process_scale_bands(src_planes, &dst_planes, w, h, config, scale, weights);
+        let (scale_stat, _) =
+            process_scale_bands(src_planes, &dst_planes, w, h, config, scale, weights, None);
         stats.push(scale_stat);
 
-        // Only downscale the 3 distorted planes for next scale
         if scale < num_scales - 1 {
             let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
             w = nw;
@@ -1345,6 +1444,136 @@ pub(crate) fn compute_zensim_streaming_with_ref(
     combine_scores(&scale_stats, weights, config, mean_offset)
 }
 
+/// Like `compute_zensim_streaming_with_ref`, but also produces a per-pixel error
+/// diffmap fused from all pyramid scales.
+///
+/// Each scale's SSIM error map is weighted by per-scale channel weights, then
+/// coarser scales are upsampled 2× (nearest-neighbor) back to full resolution
+/// and blended according to `scale_blend_weights`.
+///
+/// Returns `(ZensimResult, diffmap_padded, padded_width)` where `diffmap_padded`
+/// has `padded_width × height` elements in padded-width row layout.
+pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap(
+    precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    per_scale_channel_weights: &[[PixelFeatureWeights; 3]],
+    scale_blend_weights: &[f32],
+) -> (crate::metric::ZensimResult, Vec<f32>, usize) {
+    let width = distorted.width();
+    let height = distorted.height();
+    let padded_width = simd_padded_width(width);
+    let num_scales = config.num_scales.min(precomputed.scales.len());
+
+    let parallel = config.allow_multithreading;
+    let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
+
+    let (ref src_planes_s0, _, _) = precomputed.scales[0];
+    let mean_offset =
+        compute_xyb_mean_offset(src_planes_s0, &dst_planes, width, height, padded_width);
+
+    let mut stats = Vec::with_capacity(num_scales);
+    // Collect per-scale diffmaps with their dimensions
+    let mut scale_diffmaps: Vec<(Vec<f32>, usize, usize)> = Vec::with_capacity(num_scales);
+    let mut w = padded_width;
+    let mut h = height;
+
+    for scale in 0..num_scales {
+        if w < 8 || h < 8 {
+            break;
+        }
+
+        let (ref src_planes, src_w, src_h) = precomputed.scales[scale];
+        debug_assert_eq!(w, src_w, "width mismatch at scale {scale}");
+        debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
+
+        // Request diffmap at every scale
+        let eq = PixelFeatureWeights {
+            ssim: 1.0 / 3.0,
+            ..PixelFeatureWeights::default()
+        };
+        let ch_weights = per_scale_channel_weights
+            .get(scale)
+            .copied()
+            .unwrap_or([eq; 3]);
+        let (scale_stat, dm) = process_scale_bands(
+            src_planes,
+            &dst_planes,
+            w,
+            h,
+            config,
+            scale,
+            weights,
+            Some(ch_weights),
+        );
+        stats.push(scale_stat);
+
+        if let Some(dm) = dm {
+            scale_diffmaps.push((dm, w, h));
+        }
+
+        if scale < num_scales - 1 {
+            let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
+            w = nw;
+            h = nh;
+        }
+    }
+
+    {
+        let mut guard = DEALLOC_THREAD.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            let _ = prev.join();
+        }
+        *guard = Some(std::thread::spawn(move || {
+            drop(dst_planes);
+        }));
+    }
+
+    // Fuse multi-scale diffmaps: scale 0 at full weight, coarser scales upsampled and blended
+    let full_w = padded_width;
+    let full_h = height;
+    let mut fused = vec![0.0f32; full_w * full_h];
+
+    for (scale, (dm, dm_w, dm_h)) in scale_diffmaps.iter().enumerate() {
+        let blend = scale_blend_weights.get(scale).copied().unwrap_or(0.0);
+        if blend <= 0.0 {
+            continue;
+        }
+        if scale == 0 {
+            // Scale 0 is already at full resolution — just add weighted
+            for (d, &s) in fused.iter_mut().zip(dm.iter()) {
+                *d += s * blend;
+            }
+        } else {
+            // Upsample coarser scale back to full resolution
+            // Each scale level is 2x smaller, so upsample `scale` times
+            let mut current = dm.clone();
+            let mut cw = *dm_w;
+            let mut ch = *dm_h;
+            for _ in 0..scale {
+                let tw = (cw * 2).min(full_w);
+                let th = (ch * 2).min(full_h);
+                let mut upsampled = vec![0.0f32; tw * th];
+                upsample_2x_add(&current, cw, ch, &mut upsampled, tw, th, 1.0);
+                current = upsampled;
+                cw = tw;
+                ch = th;
+            }
+            // Add to fused (dimensions should match or be close)
+            let copy_w = cw.min(full_w);
+            let copy_h = ch.min(full_h);
+            for y in 0..copy_h {
+                for x in 0..copy_w {
+                    fused[y * full_w + x] += current[y * cw + x] * blend;
+                }
+            }
+        }
+    }
+
+    let result = combine_scores(&stats, weights, config, mean_offset);
+    (result, fused, padded_width)
+}
 /// Entry point: compute zensim using streaming for scale 0, full-image for the rest.
 /// Produces identical results to the full-image path.
 pub(crate) fn compute_zensim_streaming(

@@ -100,6 +100,7 @@
 
 mod blur;
 mod color;
+mod diffmap;
 mod error;
 mod fused;
 pub mod mapping;
@@ -130,6 +131,7 @@ pub use source::{
     AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
 };
 
+pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::PrecomputedReference;
 
 /// Training/research API — requires `features = ["training"]`.
