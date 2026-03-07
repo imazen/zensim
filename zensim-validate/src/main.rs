@@ -116,6 +116,18 @@ struct Args {
     /// Directory for training run logs. Defaults to directory containing the dataset.
     #[arg(long)]
     log_dir: Option<PathBuf>,
+
+    /// Training algorithm: coord (coordinate descent), cmaes, pairwise (RankNet SGD)
+    #[arg(long, value_enum, default_value = "coord")]
+    algorithm: TrainAlgorithm,
+
+    /// Training objective: srocc, krocc, or blended (mean of both)
+    #[arg(long, value_enum, default_value = "srocc")]
+    objective: TrainObjective,
+
+    /// L1 regularization strength for sparsity (0 = none). Applies to cmaes and pairwise.
+    #[arg(long, default_value = "0.0")]
+    l1_lambda: f64,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -165,6 +177,26 @@ enum DatasetFormat {
     Cid22,
     KonfigIqa,
     Synthetic,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum TrainAlgorithm {
+    /// Coordinate descent with random restarts (existing)
+    Coord,
+    /// CMA-ES black-box optimizer (better for high-dimensional spaces)
+    Cmaes,
+    /// RankNet pairwise ranking loss with SGD (directly targets Kendall)
+    Pairwise,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum TrainObjective {
+    /// Spearman rank correlation (SROCC)
+    Srocc,
+    /// Kendall rank correlation (KROCC)
+    Krocc,
+    /// Mean of SROCC and KROCC
+    Blended,
 }
 
 /// A single reference-distorted pair with human score.
@@ -1064,19 +1096,41 @@ fn main() {
             let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
             log_line(
                 &format!(
-                    "Training weights on {} pairs with {} features...",
+                    "Training weights on {} pairs with {} features (algorithm={:?}, objective={:?})...",
                     dataset_groups[0].1.len(),
-                    n_features
+                    n_features,
+                    args.algorithm,
+                    args.objective,
                 ),
                 &mut training_log,
             );
-            let best_weights = train_weights(
-                &dataset_groups[0].1,
-                &feats,
-                n_features,
-                &frozen,
-                &mut training_log,
-            );
+            let best_weights = match args.algorithm {
+                TrainAlgorithm::Coord => train_weights(
+                    &dataset_groups[0].1,
+                    &feats,
+                    n_features,
+                    &frozen,
+                    &mut training_log,
+                ),
+                TrainAlgorithm::Cmaes => train_cmaes(
+                    &dataset_groups[0].1,
+                    &feats,
+                    n_features,
+                    &frozen,
+                    args.objective,
+                    args.l1_lambda,
+                    &mut training_log,
+                ),
+                TrainAlgorithm::Pairwise => train_pairwise(
+                    &dataset_groups[0].1,
+                    &feats,
+                    n_features,
+                    &frozen,
+                    args.objective,
+                    args.l1_lambda,
+                    &mut training_log,
+                ),
+            };
             print_trained_results(
                 &dataset_groups[0].1,
                 &feats,
@@ -2140,6 +2194,585 @@ fn train_weights(
         log,
     );
     best_weights
+}
+
+/// Normalize weights so median distance ≈ 1.7 (matching embedded weights' p50).
+/// Spearman/Kendall are rank-invariant so uniform scaling preserves all correlation metrics.
+fn normalize_weights(
+    weights: &mut [f64],
+    features: &[&[f64]],
+    n_scales: f64,
+    log: &mut Vec<String>,
+) {
+    let mut dists: Vec<f64> = features
+        .iter()
+        .map(|f| {
+            let mut d = 0.0f64;
+            for (dim, &val) in f.iter().enumerate() {
+                d += weights[dim] * val;
+            }
+            d / n_scales
+        })
+        .collect();
+    dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p50 = dists[dists.len() / 2];
+    if p50 > 0.0 {
+        let target_p50 = 1.7;
+        let scale = target_p50 / p50;
+        for w in weights.iter_mut() {
+            *w *= scale;
+        }
+        log_line(
+            &format!(
+                "  Normalized weights: p50 distance {:.3} → {:.3} (scale={:.6})",
+                p50, target_p50, scale
+            ),
+            log,
+        );
+    }
+}
+
+/// O(n log n) Kendall tau-b using merge sort counting.
+fn fast_kendall(x: &[f64], y: &[f64]) -> f64 {
+    let n = x.len();
+    if n < 2 {
+        return 0.0;
+    }
+
+    // Sort by x, then count inversions in y using merge sort
+    let mut pairs: Vec<(f64, f64)> = x.iter().copied().zip(y.iter().copied()).collect();
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Count ties in x and y
+    let mut x_ties = 0i64;
+    let mut y_ties = 0i64;
+    let mut xy_ties = 0i64;
+    {
+        let mut i = 0;
+        while i < n {
+            let mut j = i + 1;
+            while j < n && pairs[j].0 == pairs[i].0 {
+                j += 1;
+            }
+            let t = (j - i) as i64;
+            x_ties += t * (t - 1) / 2;
+            i = j;
+        }
+    }
+    {
+        let mut sorted_y: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+        sorted_y.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mut i = 0;
+        while i < n {
+            let mut j = i + 1;
+            while j < n && sorted_y[j] == sorted_y[i] {
+                j += 1;
+            }
+            let t = (j - i) as i64;
+            y_ties += t * (t - 1) / 2;
+            i = j;
+        }
+    }
+    // Count joint ties
+    {
+        let mut i = 0;
+        while i < n {
+            let mut j = i + 1;
+            while j < n && pairs[j].0 == pairs[i].0 && pairs[j].1 == pairs[i].1 {
+                j += 1;
+            }
+            let t = (j - i) as i64;
+            xy_ties += t * (t - 1) / 2;
+            // Need to also check other groups with same x but different y
+            i = j;
+        }
+    }
+
+    // Merge sort on y values counts inversions (discordant pairs, excluding x-ties)
+    let mut y_vals: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+    let swaps = merge_sort_count(&mut y_vals) as i64;
+
+    let n_pairs = (n as i64) * (n as i64 - 1) / 2;
+    // S = concordant - discordant = (non-tied pairs) - 2 * discordant
+    let s = n_pairs - x_ties - y_ties + xy_ties - 2 * swaps;
+
+    // Kendall tau-b: normalize by geometric mean of (pairs - x_ties) and (pairs - y_ties)
+    let denom = ((n_pairs - x_ties) as f64 * (n_pairs - y_ties) as f64).sqrt();
+    if denom == 0.0 {
+        return 0.0;
+    }
+
+    s as f64 / denom
+}
+
+/// Merge sort that counts inversions (for Kendall tau computation).
+fn merge_sort_count(arr: &mut [f64]) -> usize {
+    let n = arr.len();
+    if n <= 1 {
+        return 0;
+    }
+    let mid = n / 2;
+    let mut left = arr[..mid].to_vec();
+    let mut right = arr[mid..].to_vec();
+    let mut count = merge_sort_count(&mut left) + merge_sort_count(&mut right);
+
+    let mut i = 0;
+    let mut j = 0;
+    let mut k = 0;
+    while i < left.len() && j < right.len() {
+        if left[i] <= right[j] {
+            arr[k] = left[i];
+            i += 1;
+        } else {
+            arr[k] = right[j];
+            count += left.len() - i; // all remaining left elements are inversions
+            j += 1;
+        }
+        k += 1;
+    }
+    while i < left.len() {
+        arr[k] = left[i];
+        i += 1;
+        k += 1;
+    }
+    while j < right.len() {
+        arr[k] = right[j];
+        j += 1;
+        k += 1;
+    }
+    count
+}
+
+/// Evaluate objective (SROCC, KROCC, or blended) from distances and human scores.
+/// Returns a value where higher = better.
+fn eval_objective(distances: &[f64], human_scores: &[f64], objective: TrainObjective) -> f64 {
+    // Distances are negatively correlated with quality, so negate for correlation
+    let neg_dist: Vec<f64> = distances.iter().map(|d| -d).collect();
+    match objective {
+        TrainObjective::Srocc => spearman_correlation(&neg_dist, human_scores),
+        TrainObjective::Krocc => fast_kendall(&neg_dist, human_scores),
+        TrainObjective::Blended => {
+            let s = spearman_correlation(&neg_dist, human_scores);
+            let k = fast_kendall(&neg_dist, human_scores);
+            0.5 * s + 0.5 * k
+        }
+    }
+}
+
+/// Train weights using CMA-ES (Covariance Matrix Adaptation Evolution Strategy).
+/// Better than coordinate descent for high-dimensional, non-convex optimization.
+fn train_cmaes(
+    human_scores: &[f64],
+    features: &[&[f64]],
+    n_features: usize,
+    frozen: &[bool],
+    objective: TrainObjective,
+    l1_lambda: f64,
+    log: &mut Vec<String>,
+) -> Vec<f64> {
+    use cmaes::{CMAESOptions, DVector};
+
+    let n_train = human_scores.len();
+    let n_scales = (n_features as f64 / zensim::FEATURES_PER_SCALE as f64).max(1.0);
+
+    // Transpose features for cache-friendly per-dim access
+    let mut features_t = vec![vec![0.0f64; n_train]; n_features];
+    for (pair_idx, feats) in features.iter().enumerate() {
+        for (dim, &val) in feats.iter().enumerate() {
+            features_t[dim][pair_idx] = val / n_scales;
+        }
+    }
+
+    // Active (non-frozen) dimensions
+    let active_dims: Vec<usize> = (0..n_features).filter(|&i| !frozen[i]).collect();
+    let n_active = active_dims.len();
+    log_line(
+        &format!(
+            "CMA-ES: {} active dims, {} pairs, objective={:?}, l1={:.4}",
+            n_active, n_train, objective, l1_lambda
+        ),
+        log,
+    );
+
+    // Initial mean from embedded weights
+    let embedded = expand_embedded_weights(n_features);
+    let initial_mean: Vec<f64> = active_dims.iter().map(|&i| embedded[i].max(0.01)).collect();
+
+    let start_time = std::time::Instant::now();
+
+    // Subsample for faster CMA-ES if dataset is large
+    let subsample_size = n_train.min(50_000);
+    let subsample_indices: Vec<usize> = if subsample_size < n_train {
+        // Deterministic subsample
+        let step = n_train as f64 / subsample_size as f64;
+        (0..subsample_size)
+            .map(|i| ((i as f64 * step) as usize).min(n_train - 1))
+            .collect()
+    } else {
+        (0..n_train).collect()
+    };
+
+    let sub_human: Vec<f64> = subsample_indices.iter().map(|&i| human_scores[i]).collect();
+    let sub_features_t: Vec<Vec<f64>> = (0..n_features)
+        .map(|dim| {
+            subsample_indices
+                .iter()
+                .map(|&i| features_t[dim][i])
+                .collect()
+        })
+        .collect();
+    let sub_n = sub_human.len();
+
+    let eval_count = std::sync::atomic::AtomicU64::new(0);
+
+    let objective_fn = |x: &DVector<f64>| -> f64 {
+        eval_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // Map CMA-ES vector to full weights (clamped non-negative)
+        let mut distances = vec![0.0f64; sub_n];
+        let mut l1_penalty = 0.0f64;
+        for (k, &dim) in active_dims.iter().enumerate() {
+            let w = x[k].max(0.0);
+            if w > 0.0 {
+                for i in 0..sub_n {
+                    distances[i] += w * sub_features_t[dim][i];
+                }
+                if l1_lambda > 0.0 {
+                    l1_penalty += w;
+                }
+            }
+        }
+
+        let obj = eval_objective(&distances, &sub_human, objective);
+        // CMA-ES minimizes, we want to maximize correlation
+        -obj + l1_lambda * l1_penalty
+    };
+
+    let mut cmaes_state = CMAESOptions::new(initial_mean, 0.5)
+        .max_generations(5000)
+        .fun_target(-0.9999)
+        .enable_printing(500)
+        .build(objective_fn)
+        .unwrap();
+
+    let result = cmaes_state.run();
+
+    let evals = eval_count.load(std::sync::atomic::Ordering::Relaxed);
+    let elapsed = start_time.elapsed().as_secs_f64();
+    log_line(
+        &format!(
+            "  CMA-ES: {} evaluations in {:.1}s ({:.0}/s)",
+            evals,
+            elapsed,
+            evals as f64 / elapsed
+        ),
+        log,
+    );
+
+    // Extract best weights
+    let mut best_weights = vec![0.0f64; n_features];
+    if let Some(solution) = result.overall_best {
+        for (k, &dim) in active_dims.iter().enumerate() {
+            best_weights[dim] = solution.point[k].max(0.0);
+        }
+    } else {
+        log_line("  CMA-ES: no solution found, falling back to embedded", log);
+        best_weights = embedded;
+    }
+
+    // Evaluate on full dataset
+    let mut full_distances = vec![0.0f64; n_train];
+    for dim in 0..n_features {
+        let w = best_weights[dim];
+        if w != 0.0 {
+            for i in 0..n_train {
+                full_distances[i] += w * features_t[dim][i];
+            }
+        }
+    }
+    let full_obj = eval_objective(&full_distances, human_scores, objective);
+    log_line(
+        &format!(
+            "  Full-dataset objective ({:?}): {:.4}",
+            objective, full_obj
+        ),
+        log,
+    );
+
+    // Normalize
+    normalize_weights(&mut best_weights, features, n_scales, log);
+
+    log_line(
+        &format!(
+            "CMA-ES training complete ({:.1}s total)",
+            start_time.elapsed().as_secs_f64()
+        ),
+        log,
+    );
+    best_weights
+}
+
+/// Train weights using RankNet-style pairwise ranking loss with Adam optimizer.
+/// Directly optimizes pairwise ordering accuracy (targets Kendall's tau).
+fn train_pairwise(
+    human_scores: &[f64],
+    features: &[&[f64]],
+    n_features: usize,
+    frozen: &[bool],
+    objective: TrainObjective,
+    l1_lambda: f64,
+    log: &mut Vec<String>,
+) -> Vec<f64> {
+    let n_train = human_scores.len();
+    let n_scales = (n_features as f64 / zensim::FEATURES_PER_SCALE as f64).max(1.0);
+
+    // Transpose features
+    let mut features_t = vec![vec![0.0f64; n_train]; n_features];
+    for (pair_idx, feats) in features.iter().enumerate() {
+        for (dim, &val) in feats.iter().enumerate() {
+            features_t[dim][pair_idx] = val / n_scales;
+        }
+    }
+
+    // Compute feature scale for adaptive learning rate
+    let mut feat_scale = vec![1.0f64; n_features];
+    for dim in 0..n_features {
+        let max_abs = features_t[dim]
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0f64, f64::max);
+        if max_abs > 0.0 {
+            feat_scale[dim] = max_abs;
+        }
+    }
+
+    log_line(
+        &format!(
+            "Pairwise RankNet: {} features, {} pairs, objective={:?}, l1={:.4}",
+            n_features, n_train, objective, l1_lambda
+        ),
+        log,
+    );
+
+    let start_time = std::time::Instant::now();
+
+    // Multiple restarts with different initializations
+    let n_restarts = 5;
+    let pairs_per_batch = 200_000usize;
+    let n_epochs = 300;
+
+    let mut overall_best_weights = expand_embedded_weights(n_features);
+    let mut overall_best_obj = f64::NEG_INFINITY;
+    let mut rng_state = 12345u64;
+
+    let next_rand = |state: &mut u64| -> usize {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (*state >> 33) as usize
+    };
+    let next_rand_f64 = |state: &mut u64| -> f64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (*state >> 33) as f64 / u32::MAX as f64
+    };
+
+    for restart in 0..n_restarts {
+        // Diverse starting points
+        let mut weights: Vec<f64> = match restart {
+            0 => expand_embedded_weights(n_features),
+            1 => vec![1.0 / n_features as f64; n_features],
+            _ => {
+                let base = expand_embedded_weights(n_features);
+                base.iter()
+                    .map(|&w| (w * (0.5 + next_rand_f64(&mut rng_state))).max(0.0))
+                    .collect()
+            }
+        };
+        for (i, w) in weights.iter_mut().enumerate() {
+            if frozen[i] {
+                *w = 0.0;
+            }
+        }
+
+        // Adam optimizer state
+        let mut m = vec![0.0f64; n_features]; // first moment
+        let mut v = vec![0.0f64; n_features]; // second moment
+        let beta1 = 0.9;
+        let beta2 = 0.999;
+        let eps = 1e-8;
+        let initial_lr = 0.001;
+
+        let mut best_weights = weights.clone();
+        let mut best_obj = f64::NEG_INFINITY;
+        let mut stale_epochs = 0;
+
+        // Compute initial distances
+        let mut distances = vec![0.0f64; n_train];
+        for dim in 0..n_features {
+            let w = weights[dim];
+            if w != 0.0 {
+                for i in 0..n_train {
+                    distances[i] += w * features_t[dim][i];
+                }
+            }
+        }
+
+        for epoch in 0..n_epochs {
+            let t = (epoch + 1) as f64;
+            // Warm restart cosine annealing
+            let lr = initial_lr
+                * 0.5
+                * (1.0 + (std::f64::consts::PI * (epoch % 100) as f64 / 100.0).cos());
+
+            let mut gradient = vec![0.0f64; n_features];
+            let mut total_loss = 0.0f64;
+            let mut n_sampled = 0u64;
+
+            for _ in 0..pairs_per_batch {
+                let idx_a = next_rand(&mut rng_state) % n_train;
+                let idx_b = next_rand(&mut rng_state) % n_train;
+                if idx_a == idx_b {
+                    continue;
+                }
+
+                let (better, worse) = if human_scores[idx_a] > human_scores[idx_b] {
+                    (idx_a, idx_b)
+                } else if human_scores[idx_b] > human_scores[idx_a] {
+                    (idx_b, idx_a)
+                } else {
+                    continue;
+                };
+
+                let diff = distances[better] - distances[worse];
+                let sig = if diff > 20.0 {
+                    1.0
+                } else if diff < -20.0 {
+                    0.0
+                } else {
+                    1.0 / (1.0 + (-diff).exp())
+                };
+
+                total_loss += if diff > 20.0 {
+                    diff
+                } else if diff < -20.0 {
+                    0.0
+                } else {
+                    (1.0 + diff.exp()).ln()
+                };
+
+                for dim in 0..n_features {
+                    if !frozen[dim] {
+                        gradient[dim] += sig * (features_t[dim][better] - features_t[dim][worse]);
+                    }
+                }
+                n_sampled += 1;
+            }
+
+            if n_sampled == 0 {
+                continue;
+            }
+
+            let inv_n = 1.0 / n_sampled as f64;
+
+            // Adam update
+            for dim in 0..n_features {
+                if frozen[dim] {
+                    continue;
+                }
+
+                let g = gradient[dim] * inv_n;
+                m[dim] = beta1 * m[dim] + (1.0 - beta1) * g;
+                v[dim] = beta2 * v[dim] + (1.0 - beta2) * g * g;
+                let m_hat = m[dim] / (1.0 - beta1.powf(t));
+                let v_hat = v[dim] / (1.0 - beta2.powf(t));
+
+                let old_w = weights[dim];
+                let mut new_w = old_w - lr * m_hat / (v_hat.sqrt() + eps);
+
+                // L1 proximal step
+                if l1_lambda > 0.0 {
+                    let threshold = lr * l1_lambda;
+                    new_w = if new_w > threshold {
+                        new_w - threshold
+                    } else {
+                        0.0
+                    };
+                }
+
+                // Non-negativity
+                new_w = new_w.max(0.0);
+                let delta = new_w - old_w;
+
+                if delta != 0.0 {
+                    for i in 0..n_train {
+                        distances[i] += delta * features_t[dim][i];
+                    }
+                }
+                weights[dim] = new_w;
+            }
+
+            // Evaluate every 25 epochs
+            if epoch % 25 == 0 || epoch == n_epochs - 1 {
+                let obj = eval_objective(&distances, human_scores, objective);
+                let avg_loss = total_loss / n_sampled as f64;
+
+                if obj > best_obj {
+                    best_obj = obj;
+                    best_weights = weights.clone();
+                    stale_epochs = 0;
+                } else {
+                    stale_epochs += 25;
+                }
+
+                if epoch % 50 == 0 {
+                    let active = weights.iter().filter(|&&w| w > 1e-10).count();
+                    log_line(
+                        &format!(
+                            "  R{} E{:>3}: loss={:.4}  {:?}={:.4}  best={:.4}  lr={:.6}  active={}",
+                            restart, epoch, avg_loss, objective, obj, best_obj, lr, active
+                        ),
+                        log,
+                    );
+                }
+
+                // Early stop if no improvement for 100 epochs
+                if stale_epochs >= 100 {
+                    break;
+                }
+            }
+        }
+
+        if best_obj > overall_best_obj {
+            overall_best_obj = best_obj;
+            overall_best_weights = best_weights;
+        }
+        log_line(
+            &format!(
+                "  Restart {}: best {:?}={:.4} [{:.1}s]",
+                restart,
+                objective,
+                best_obj,
+                start_time.elapsed().as_secs_f64()
+            ),
+            log,
+        );
+    }
+
+    // Normalize
+    normalize_weights(&mut overall_best_weights, features, n_scales, log);
+
+    log_line(
+        &format!(
+            "Pairwise training complete: best {:?}={:.4} ({:.1}s)",
+            objective,
+            overall_best_obj,
+            start_time.elapsed().as_secs_f64()
+        ),
+        log,
+    );
+    overall_best_weights
 }
 
 fn print_trained_results(
