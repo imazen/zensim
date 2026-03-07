@@ -125,9 +125,15 @@ struct Args {
     #[arg(long, value_enum, default_value = "srocc")]
     objective: TrainObjective,
 
-    /// L1 regularization strength for sparsity (0 = none). Applies to cmaes and pairwise.
+    /// L1 regularization strength for sparsity (0 = none). Applies to cmaes, pairwise, proximal.
     #[arg(long, default_value = "0.0")]
     l1_lambda: f64,
+
+    /// Per-dataset weights for multi-dataset training (format: name:weight,name:weight).
+    /// Names are matched case-insensitively against dataset directory basenames.
+    /// Unspecified datasets default to weight 1.0.
+    #[arg(long)]
+    dataset_weights: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -187,6 +193,8 @@ enum TrainAlgorithm {
     Cmaes,
     /// RankNet pairwise ranking loss with SGD (directly targets Kendall)
     Pairwise,
+    /// L1-regularized FISTA: maximizes Pearson(distances, human_ranks) as differentiable Spearman proxy
+    Proximal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -457,6 +465,44 @@ fn utc_timestamp() -> String {
 fn log_line(msg: &str, log: &mut Vec<String>) {
     println!("{}", msg);
     log.push(msg.to_string());
+}
+
+/// Parse dataset weight specification like "synthetic:3.0,tid2013:1.0".
+fn parse_dataset_weights(spec: &str) -> HashMap<String, f64> {
+    let mut map = HashMap::new();
+    for part in spec.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some((name, weight_str)) = part.split_once(':') {
+            if let Ok(w) = weight_str.parse::<f64>() {
+                map.insert(name.trim().to_lowercase(), w);
+            } else {
+                eprintln!("Warning: invalid dataset weight '{}' (bad number)", part);
+            }
+        } else {
+            eprintln!(
+                "Warning: invalid dataset weight '{}' (expected name:weight)",
+                part
+            );
+        }
+    }
+    map
+}
+
+/// Look up the weight for a dataset name, defaulting to 1.0.
+fn dataset_weight_for(name: &str, weights: &HashMap<String, f64>) -> f64 {
+    let lower = name.to_lowercase();
+    if let Some(&w) = weights.get(&lower) {
+        return w;
+    }
+    if let Some(basename) = Path::new(name).file_name()
+        && let Some(&w) = weights.get(basename.to_string_lossy().to_lowercase().as_str())
+    {
+        return w;
+    }
+    1.0
 }
 
 fn main() {
@@ -1092,7 +1138,55 @@ fn main() {
             })
             .collect();
 
-        let best_weights = if dataset_groups.len() == 1 {
+        // Parse per-dataset weights if specified
+        let ds_weight_map = args
+            .dataset_weights
+            .as_deref()
+            .map(parse_dataset_weights)
+            .unwrap_or_default();
+
+        let best_weights = if matches!(args.algorithm, TrainAlgorithm::Proximal) {
+            // Proximal handles single and multi-dataset natively
+            let ds_weights: Vec<f64> = dataset_groups
+                .iter()
+                .map(|(name, _, _)| dataset_weight_for(name, &ds_weight_map))
+                .collect();
+            for (i, (name, _, _)) in dataset_groups.iter().enumerate() {
+                log_line(
+                    &format!("  Dataset '{}': weight = {:.2}", name, ds_weights[i]),
+                    &mut training_log,
+                );
+            }
+            log_line(
+                &format!(
+                    "Proximal training (FISTA) on {} dataset(s), {} features, L1 lambda = {}...",
+                    dataset_groups.len(),
+                    n_features,
+                    args.l1_lambda,
+                ),
+                &mut training_log,
+            );
+            let best_weights = train_proximal(
+                &dataset_groups,
+                n_features,
+                &frozen,
+                args.l1_lambda,
+                &ds_weights,
+                &mut training_log,
+            );
+            for (name, h, f) in &dataset_groups {
+                let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
+                print_trained_results(h, &feats, &best_weights, &mut training_log);
+                let srocc = eval_srocc(h, &feats, &best_weights);
+                log_line(
+                    &format!("  {}: SROCC = {:.4}", name, srocc),
+                    &mut training_log,
+                );
+            }
+            print_weights(&best_weights, &mut training_log);
+            save_weights_file(&best_weights, "/tmp/zensim_trained_weights.txt");
+            best_weights
+        } else if dataset_groups.len() == 1 {
             let feats: Vec<&[f64]> = dataset_groups[0].2.iter().map(|v| v.as_slice()).collect();
             log_line(
                 &format!(
@@ -1130,6 +1224,7 @@ fn main() {
                     args.l1_lambda,
                     &mut training_log,
                 ),
+                TrainAlgorithm::Proximal => unreachable!(),
             };
             print_trained_results(
                 &dataset_groups[0].1,
@@ -2773,6 +2868,393 @@ fn train_pairwise(
         log,
     );
     overall_best_weights
+}
+
+// =============================================================================
+// L1-regularized FISTA optimizer (differentiable Spearman proxy)
+// =============================================================================
+//
+// Maximizes: Σ_k α_k * Pearson(F_k * w, rank(h_k)) - λ * Σ_j w_j
+//
+// Pearson(distances, human_ranks) is a fully differentiable proxy for Spearman:
+// since Spearman(x,y) = Pearson(rank(x), rank(y)), and human ranks are fixed,
+// maximizing Pearson(d, rank(h)) makes d approximately linearly related to
+// rank(h) → monotonically related to h → high Spearman.
+//
+// The L1 penalty encourages sparsity. Combined with non-negativity (w ≥ 0),
+// the proximal operator simplifies to max(w - η*λ, 0).
+//
+// Uses FISTA (Fast Iterative Shrinkage-Thresholding) for O(1/k²) convergence.
+
+struct ProximalDatasetState {
+    n_train: usize,
+    /// Centered feature matrix: features_c[dim][pair] = f - mean(f over pairs)
+    features_c: Vec<Vec<f64>>,
+    /// Cross-correlation: c[dim] = Σ_i features_c[dim][i] * ranks_c[i]
+    cross_corr: Vec<f64>,
+    /// ||ranks_c|| (norm of centered human ranks)
+    ranks_c_norm: f64,
+}
+
+/// Compute Pearson correlation value and accumulate gradient for one dataset.
+///
+/// P = (c^T w) / (||F_c w|| * ||r_c||)
+/// ∂P/∂w = (1/(||d_c||*||r_c||)) * (c - P * F_c^T d_c / ||d_c||)
+fn pearson_value_and_gradient(
+    ds: &ProximalDatasetState,
+    weights: &[f64],
+    grad: &mut [f64],
+    ds_weight: f64,
+) -> f64 {
+    let p = weights.len();
+
+    // d_c = F_c * w (centered predicted distances)
+    let mut d_c = vec![0.0f64; ds.n_train];
+    for dim in 0..p {
+        let w = weights[dim];
+        if w != 0.0 {
+            for i in 0..ds.n_train {
+                d_c[i] += w * ds.features_c[dim][i];
+            }
+        }
+    }
+
+    let d_c_norm_sq: f64 = d_c.iter().map(|x| x * x).sum();
+    let d_c_norm = d_c_norm_sq.sqrt();
+
+    if d_c_norm < 1e-30 || ds.ranks_c_norm < 1e-30 {
+        // Degenerate: use cross-correlation direction
+        for dim in 0..p {
+            grad[dim] += ds_weight * ds.cross_corr[dim];
+        }
+        return 0.0;
+    }
+
+    let numerator: f64 = (0..p).map(|dim| ds.cross_corr[dim] * weights[dim]).sum();
+    let pearson = numerator / (d_c_norm * ds.ranks_c_norm);
+
+    // F_c^T d_c (backprop through centered features)
+    let mut ft_dc = vec![0.0f64; p];
+    for dim in 0..p {
+        let mut s = 0.0f64;
+        for i in 0..ds.n_train {
+            s += ds.features_c[dim][i] * d_c[i];
+        }
+        ft_dc[dim] = s;
+    }
+
+    let inv_dc_rc = 1.0 / (d_c_norm * ds.ranks_c_norm);
+    let p_over_dc = pearson / d_c_norm;
+    for dim in 0..p {
+        grad[dim] += ds_weight * inv_dc_rc * (ds.cross_corr[dim] - p_over_dc * ft_dc[dim]);
+    }
+
+    pearson
+}
+
+/// Evaluate smooth objective: weighted-average Pearson across datasets.
+fn eval_proximal_objective(
+    datasets: &[ProximalDatasetState],
+    weights: &[f64],
+    ds_weights: &[f64],
+) -> f64 {
+    let total_weight: f64 = ds_weights.iter().sum();
+    let mut total = 0.0;
+    for (k, ds) in datasets.iter().enumerate() {
+        let p = weights.len();
+        let mut d_c = vec![0.0f64; ds.n_train];
+        for dim in 0..p {
+            let w = weights[dim];
+            if w != 0.0 {
+                for i in 0..ds.n_train {
+                    d_c[i] += w * ds.features_c[dim][i];
+                }
+            }
+        }
+        let d_c_norm = d_c.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if d_c_norm < 1e-30 || ds.ranks_c_norm < 1e-30 {
+            continue;
+        }
+        let numerator: f64 = (0..p).map(|dim| ds.cross_corr[dim] * weights[dim]).sum();
+        total += ds_weights[k] * numerator / (d_c_norm * ds.ranks_c_norm);
+    }
+    total / total_weight
+}
+
+/// Train weights using L1-regularized FISTA (proximal gradient ascent).
+/// Handles single or multi-dataset with per-dataset weights.
+fn train_proximal(
+    datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
+    n_features: usize,
+    frozen: &[bool],
+    l1_lambda: f64,
+    ds_weights: &[f64],
+    log: &mut Vec<String>,
+) -> Vec<f64> {
+    let start_time = std::time::Instant::now();
+    let n_scales = (n_features as f64 / zensim::FEATURES_PER_SCALE as f64).max(1.0);
+    let total_ds_weight: f64 = ds_weights.iter().sum();
+
+    // Build per-dataset state: center features, compute cross-correlations
+    let mut ds_states: Vec<ProximalDatasetState> = Vec::with_capacity(datasets.len());
+    for (_, human_scores, feats) in datasets {
+        let n_train = human_scores.len();
+        let nf = n_train as f64;
+
+        // Transpose + scale by 1/n_scales
+        let mut features_t = vec![vec![0.0f64; n_train]; n_features];
+        for (pair_idx, f) in feats.iter().enumerate() {
+            for (dim, &val) in f.iter().enumerate() {
+                features_t[dim][pair_idx] = val / n_scales;
+            }
+        }
+
+        // Center features
+        let mut features_c = vec![vec![0.0f64; n_train]; n_features];
+        for dim in 0..n_features {
+            let mean: f64 = features_t[dim].iter().sum::<f64>() / nf;
+            for i in 0..n_train {
+                features_c[dim][i] = features_t[dim][i] - mean;
+            }
+        }
+
+        // Centered human ranks
+        let human_ranks = ranks(human_scores);
+        let mean_rank = (nf + 1.0) / 2.0;
+        let ranks_c: Vec<f64> = human_ranks.iter().map(|r| r - mean_rank).collect();
+        let ranks_c_norm = ranks_c.iter().map(|x| x * x).sum::<f64>().sqrt();
+
+        // Cross-correlation: c[dim] = Σ_i features_c[dim][i] * ranks_c[i]
+        let mut cross_corr = vec![0.0f64; n_features];
+        for dim in 0..n_features {
+            for i in 0..n_train {
+                cross_corr[dim] += features_c[dim][i] * ranks_c[i];
+            }
+        }
+
+        ds_states.push(ProximalDatasetState {
+            n_train,
+            features_c,
+            cross_corr,
+            ranks_c_norm,
+        });
+    }
+
+    // --- Multiple restarts ---
+    let mut best_weights = vec![0.0; n_features];
+    let mut best_objective = f64::NEG_INFINITY;
+    let n_restarts = 5;
+    let mut rng_state = 42u64;
+    let mut next_rand = || -> f64 {
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (rng_state >> 33) as f64 / (u32::MAX as f64)
+    };
+
+    for restart in 0..n_restarts {
+        let mut w: Vec<f64> = match restart {
+            0 => expand_embedded_weights(n_features),
+            1 => vec![1.0 / n_features as f64; n_features],
+            2..=3 => {
+                let base = expand_embedded_weights(n_features);
+                base.iter()
+                    .map(|&v| (v * (1.0 + (next_rand() - 0.5) * 0.6)).max(0.0))
+                    .collect()
+            }
+            _ => (0..n_features)
+                .map(|_| {
+                    if next_rand() < 0.3 {
+                        next_rand() * 10.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect(),
+        };
+        for dim in 0..n_features {
+            if frozen[dim] {
+                w[dim] = 0.0;
+            }
+        }
+
+        // FISTA state
+        let mut w_prev = w.clone();
+        let mut t_fista = 1.0f64;
+        let mut y = w.clone(); // extrapolated point
+
+        let mut step_size = 0.1f64;
+        let max_iter = 2000;
+        let mut grad = vec![0.0f64; n_features];
+        let mut prev_grad = vec![0.0f64; n_features];
+        let mut stalled_count = 0usize;
+
+        for iter in 0..max_iter {
+            // Gradient of smooth objective at y
+            for g in grad.iter_mut() {
+                *g = 0.0;
+            }
+            for (k, ds) in ds_states.iter().enumerate() {
+                pearson_value_and_gradient(ds, &y, &mut grad, ds_weights[k]);
+            }
+            for g in grad.iter_mut() {
+                *g /= total_ds_weight;
+            }
+            for dim in 0..n_features {
+                if frozen[dim] {
+                    grad[dim] = 0.0;
+                }
+            }
+
+            // Barzilai-Borwein step size (after first iteration)
+            if iter > 0 {
+                let mut s_dot_s = 0.0f64;
+                let mut s_dot_yg = 0.0f64;
+                for dim in 0..n_features {
+                    let s = y[dim] - w_prev[dim];
+                    let yg = grad[dim] - prev_grad[dim];
+                    s_dot_s += s * s;
+                    s_dot_yg += s * yg;
+                }
+                if s_dot_yg.abs() > 1e-30 {
+                    step_size = (s_dot_s / s_dot_yg).abs().clamp(1e-8, 10.0);
+                }
+            }
+            prev_grad.copy_from_slice(&grad);
+
+            // Backtracking line search
+            let f_y = eval_proximal_objective(&ds_states, &y, ds_weights);
+            let mut eta = step_size;
+            let mut w_new = vec![0.0f64; n_features];
+            loop {
+                for dim in 0..n_features {
+                    if frozen[dim] {
+                        w_new[dim] = 0.0;
+                    } else {
+                        // Gradient ascent + proximal (L1 + non-negativity)
+                        w_new[dim] = (y[dim] + eta * grad[dim] - eta * l1_lambda).max(0.0);
+                    }
+                }
+
+                let f_new = eval_proximal_objective(&ds_states, &w_new, ds_weights);
+                let mut gen_grad_dot = 0.0f64;
+                for dim in 0..n_features {
+                    let g = (y[dim] - w_new[dim]) / eta;
+                    gen_grad_dot += g * (y[dim] - w_new[dim]);
+                }
+                if f_new >= f_y - 0.5 * gen_grad_dot || eta < 1e-12 {
+                    break;
+                }
+                eta *= 0.5;
+            }
+
+            // FISTA momentum
+            let t_new = (1.0 + (1.0 + 4.0 * t_fista * t_fista).sqrt()) / 2.0;
+            let momentum = (t_fista - 1.0) / t_new;
+
+            w_prev.copy_from_slice(&w);
+            w.copy_from_slice(&w_new);
+
+            for dim in 0..n_features {
+                y[dim] = (w[dim] + momentum * (w[dim] - w_prev[dim])).max(0.0);
+            }
+            t_fista = t_new;
+
+            // Convergence check
+            let max_change: f64 = w
+                .iter()
+                .zip(w_prev.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
+            if max_change < 1e-10 {
+                stalled_count += 1;
+                if stalled_count >= 5 {
+                    log_line(
+                        &format!(
+                            "  Restart {}: converged at iter {} (max_change={:.2e})",
+                            restart, iter, max_change
+                        ),
+                        log,
+                    );
+                    break;
+                }
+            } else {
+                stalled_count = 0;
+            }
+
+            if (iter + 1) % 500 == 0 {
+                let obj = eval_proximal_objective(&ds_states, &w, ds_weights);
+                let l1: f64 = w.iter().sum();
+                let active = w.iter().filter(|&&v| v > 1e-12).count();
+                log_line(
+                    &format!(
+                        "  Restart {} iter {}: Pearson_proxy={:.6}, L1={:.2}, active={}/{}",
+                        restart,
+                        iter + 1,
+                        obj,
+                        l1,
+                        active,
+                        n_features
+                    ),
+                    log,
+                );
+            }
+        }
+
+        for v in w.iter_mut() {
+            *v = v.max(0.0);
+        }
+
+        // Evaluate: smooth objective minus L1 penalty
+        let smooth_obj = eval_proximal_objective(&ds_states, &w, ds_weights);
+        let l1_penalty: f64 = w.iter().sum::<f64>() * l1_lambda;
+        let total_obj = smooth_obj - l1_penalty;
+        let active = w.iter().filter(|&&v| v > 1e-12).count();
+
+        // Actual Spearman for reporting
+        let mut sum_srocc = 0.0;
+        for (_, human, feats) in datasets {
+            let feat_slices: Vec<&[f64]> = feats.iter().map(|v| v.as_slice()).collect();
+            let s = eval_srocc(human, &feat_slices, &w);
+            sum_srocc += s;
+        }
+        let avg_srocc = sum_srocc / datasets.len() as f64;
+
+        log_line(
+            &format!(
+                "  Restart {}: obj={:.6} (smooth={:.6} - L1={:.6}), avg SROCC={:.4}, active={}/{} [{:.1}s]",
+                restart, total_obj, smooth_obj, l1_penalty, avg_srocc, active, n_features,
+                start_time.elapsed().as_secs_f64()
+            ),
+            log,
+        );
+
+        if total_obj > best_objective {
+            best_objective = total_obj;
+            best_weights = w;
+        }
+    }
+
+    // Normalize weights so p50 distance ≈ 1.7
+    let all_feats: Vec<&[f64]> = datasets
+        .iter()
+        .flat_map(|(_, _, feats)| feats.iter().map(|v| v.as_slice()))
+        .collect();
+    normalize_weights(&mut best_weights, &all_feats, n_scales, log);
+
+    let active = best_weights.iter().filter(|&&v| v > 1e-12).count();
+    log_line(
+        &format!(
+            "Best proximal objective: {:.6}, active weights: {}/{} ({:.1}s total)",
+            best_objective,
+            active,
+            n_features,
+            start_time.elapsed().as_secs_f64()
+        ),
+        log,
+    );
+
+    best_weights
 }
 
 fn print_trained_results(
