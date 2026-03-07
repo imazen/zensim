@@ -43,6 +43,7 @@ rgb = { workspace = true, optional = true }
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
+
 [lints.clippy]
 uninlined_format_args = "allow"
 
