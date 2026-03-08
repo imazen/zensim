@@ -54,25 +54,32 @@ ebf65c0  feat: add Δss2 column to quality_compare report
 | e8-zen2 | bfly 2 iters + zensim 2 iters | -0.6% | -5.3% | +0.42 |
 | e8-zen4 | bfly 2 iters + zensim 4 iters | +0.3% | -0.1% | +0.66 |
 
-#### 2026-03-08: HF features + tuning (20 images: 10 CLIC + 10 CID22)
+#### 2026-03-08: Definitive stacking benchmark (20 images: 10 CLIC + 10 CID22)
 
-Config: `include_hf=true`, `include_edge_mse=true`, `masking_strength=4.0`, `sqrt=true`, no strategy splitting, L2 norm, adaptive K_ALPHA (base 0.20, scaled by CV).
+Config: `include_hf=true`, `include_edge_mse=true`, `masking_strength=4.0`, `sqrt=true`, no strategy splitting, L2 norm, adaptive K_ALPHA (base 0.20, scaled by CV), factor clamp ±15%.
 
 | Mode | Description | Δ Size | Δ Butteraugli | Δ SSIM2 |
 |------|-------------|--------|---------------|---------|
 | e7 | baseline (no loop) | — | — | — |
 | e8-bfly | butteraugli loop, 2 iters | -4.2% | -4.5% | -0.56 |
-| e7-zen2 | zensim loop, 2 iters | +2.9% | -2.3% | +0.91 |
-| e8-zen2 | bfly 2 + zensim 2 iters | -4.2% | -3.5% | -0.25 |
-| **e8-zen4** | **bfly 2 + zensim 4 iters** | **-2.9%** | — | **+0.51** |
+| e7-zen4 | zensim loop, 4 iters | +2.9% | -2.4% | **+1.10** |
+| **e8-zen4** | **bfly 2 + zensim 4 iters** | **-4.0%** | -1.5% | **-0.05** |
+
+Stacking value (e8-zen4 vs e8-bfly):
+
+| Dataset | e8-bfly SSIM2 | e8-zen4 SSIM2 | Net improvement |
+|---------|---------------|---------------|-----------------|
+| CLIC (1024×1024) | -0.13 | **+0.31** | +0.43 |
+| CID22 (512×512) | -0.99 | -0.41 | +0.59 |
+| ALL | -0.56 | -0.05 | **+0.51** |
 
 **Key observations:**
-- **e8-zen4 is Pareto-superior to e8-bfly**: saves size AND improves SSIM2.
-- 4 zensim iterations converge better than 2 — less size inflation on hard images.
-- HF features contribute ~1% of diffmap weight mass (trained weights are small).
-- Contrast masking + sqrt + no strategy splitting reduced e7-zen2 inflation from +7% to +2.9%.
-- Per-image variance is large: uniform images get nearly free SSIM2 gains, non-uniform images inflate 10-15%.
-- Stacking (bfly→zensim) works because butteraugli optimizes rate and zensim redistributes for SSIM2.
+- **e8-zen4 preserves +0.51 SSIM2 that butteraugli sacrifices** for only 0.21pp less size savings.
+- On CLIC images, e8-zen4 is **Pareto-superior** to e8-bfly: saves size AND improves SSIM2.
+- 4 zensim iterations converge better than 2 — less size inflation on non-uniform images.
+- HF features contribute ~1% of diffmap weight mass (trained weights are small); the bigger improvements came from contrast masking, sqrt, and redistribution tuning.
+- Larger images (1024×1024) benefit more than smaller ones (512×512) from spatial redistribution.
+- Per-image variance is significant: 5/10 CLIC images improve SSIM2, 4/10 lose (especially at d=3.0).
 
 ## Encoder Architecture (jxl-encoder-rs)
 
