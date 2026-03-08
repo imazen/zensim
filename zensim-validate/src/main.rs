@@ -1127,25 +1127,15 @@ fn main() {
             // Count clamped-to-zero scores
             let n_clamped = custom_scores.iter().filter(|&&s| s <= 0.0).count();
             let pct_clamped = 100.0 * n_clamped as f64 / custom_scores.len() as f64;
-            if ds.human_scores.len() <= 50_000 {
-                let krocc = kendall_correlation(&ds.human_scores, &custom_scores);
-                let dist_krocc = fast_kendall(&ds.human_scores, &neg_dists);
-                log_line(
-                    &format!(
-                        "  {}: SROCC={:.4}  KROCC={:.4}  PLCC={:.4}  | raw dist: SROCC={:.4} KROCC={:.4} | clamped: {}/{} ({:.1}%)",
-                        ds.name, srocc, krocc, plcc, dist_srocc, dist_krocc, n_clamped, custom_scores.len(), pct_clamped
-                    ),
-                    &mut training_log,
-                );
-            } else {
-                log_line(
-                    &format!(
-                        "  {}: SROCC={:.4}  PLCC={:.4}  | raw dist: SROCC={:.4} | clamped: {}/{} ({:.1}%) (KROCC skipped, n={})",
-                        ds.name, srocc, plcc, dist_srocc, n_clamped, custom_scores.len(), pct_clamped, ds.human_scores.len()
-                    ),
-                    &mut training_log,
-                );
-            }
+            let krocc = fast_kendall(&ds.human_scores, &custom_scores);
+            let dist_krocc = fast_kendall(&ds.human_scores, &neg_dists);
+            log_line(
+                &format!(
+                    "  {}: SROCC={:.4}  KROCC={:.4}  PLCC={:.4}  | raw dist: SROCC={:.4} KROCC={:.4} | clamped: {}/{} ({:.1}%)",
+                    ds.name, srocc, krocc, plcc, dist_srocc, dist_krocc, n_clamped, custom_scores.len(), pct_clamped
+                ),
+                &mut training_log,
+            );
         }
     }
 
@@ -1709,12 +1699,10 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
         ),
         log,
     );
+    let krocc = fast_kendall(&ds.human_scores, &metric_scores);
     log_line(&format!("SROCC (Spearman):  {:.4}", srocc), log);
     log_line(&format!("PLCC  (Pearson):   {:.4}", plcc), log);
-    if ds.human_scores.len() <= 50_000 {
-        let krocc = kendall_correlation(&ds.human_scores, &metric_scores);
-        log_line(&format!("KROCC (Kendall):   {:.4}", krocc), log);
-    }
+    log_line(&format!("KROCC (Kendall):   {:.4}", krocc), log);
 
     let min_m = metric_scores.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_m = metric_scores
@@ -1755,24 +1743,14 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
     let dist_srocc = spearman_correlation(&ds.human_scores, &neg_dists);
     let n_clamped = metric_scores.iter().filter(|&&s| s <= 0.0).count();
     let pct_clamped = 100.0 * n_clamped as f64 / metric_scores.len() as f64;
-    if ds.human_scores.len() <= 50_000 {
-        let dist_krocc = fast_kendall(&ds.human_scores, &neg_dists);
-        log_line(
-            &format!(
-                "Raw dist corr: SROCC={:.4}  KROCC={:.4} | clamped scores: {}/{} ({:.1}%)\n",
-                dist_srocc, dist_krocc, n_clamped, metric_scores.len(), pct_clamped
-            ),
-            log,
-        );
-    } else {
-        log_line(
-            &format!(
-                "Raw dist corr: SROCC={:.4} | clamped scores: {}/{} ({:.1}%)\n",
-                dist_srocc, n_clamped, metric_scores.len(), pct_clamped
-            ),
-            log,
-        );
-    }
+    let dist_krocc = fast_kendall(&ds.human_scores, &neg_dists);
+    log_line(
+        &format!(
+            "Raw dist corr: SROCC={:.4}  KROCC={:.4} | clamped scores: {}/{} ({:.1}%)\n",
+            dist_srocc, dist_krocc, n_clamped, metric_scores.len(), pct_clamped
+        ),
+        log,
+    );
 }
 
 /// Deterministic shuffle + round-robin split of reference keys into K folds.
@@ -3326,7 +3304,7 @@ fn print_trained_results(
 
     let srocc = spearman_correlation(human_scores, &trained_scores);
     let plcc = pearson_correlation(human_scores, &trained_scores);
-    let krocc = kendall_correlation(human_scores, &trained_scores);
+    let krocc = fast_kendall(human_scores, &trained_scores);
 
     log_line("\n=== Correlation with Trained Weights ===", log);
     log_line(&format!("SROCC (Spearman):  {:.4}", srocc), log);
@@ -4338,32 +4316,6 @@ fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
     }
 
     cov / (var_x.sqrt() * var_y.sqrt())
-}
-
-fn kendall_correlation(x: &[f64], y: &[f64]) -> f64 {
-    let n = x.len();
-    let mut concordant: i64 = 0;
-    let mut discordant: i64 = 0;
-
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let x_diff = x[i] - x[j];
-            let y_diff = y[i] - y[j];
-            let product = x_diff * y_diff;
-            if product > 0.0 {
-                concordant += 1;
-            } else if product < 0.0 {
-                discordant += 1;
-            }
-        }
-    }
-
-    let total = concordant + discordant;
-    if total == 0 {
-        return 0.0;
-    }
-
-    (concordant - discordant) as f64 / total as f64
 }
 
 fn ranks(data: &[f64]) -> Vec<f64> {
