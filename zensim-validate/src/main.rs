@@ -1109,14 +1109,27 @@ fn main() {
                 .collect();
             let srocc = spearman_correlation(&ds.human_scores, &custom_scores);
             let plcc = pearson_correlation(&ds.human_scores, &custom_scores);
-            let krocc = kendall_correlation(&ds.human_scores, &custom_scores);
-            log_line(
-                &format!(
-                    "  {}: SROCC={:.4}  PLCC={:.4}  KROCC={:.4}",
-                    ds.name, srocc, plcc, krocc
-                ),
-                &mut training_log,
-            );
+            if ds.human_scores.len() <= 50_000 {
+                let krocc = kendall_correlation(&ds.human_scores, &custom_scores);
+                log_line(
+                    &format!(
+                        "  {}: SROCC={:.4}  PLCC={:.4}  KROCC={:.4}",
+                        ds.name, srocc, plcc, krocc
+                    ),
+                    &mut training_log,
+                );
+            } else {
+                log_line(
+                    &format!(
+                        "  {}: SROCC={:.4}  PLCC={:.4}  (KROCC skipped, n={})",
+                        ds.name,
+                        srocc,
+                        plcc,
+                        ds.human_scores.len()
+                    ),
+                    &mut training_log,
+                );
+            }
         }
     }
 
@@ -1672,7 +1685,6 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
 
     let srocc = spearman_correlation(&ds.human_scores, &metric_scores);
     let plcc = pearson_correlation(&ds.human_scores, &metric_scores);
-    let krocc = kendall_correlation(&ds.human_scores, &metric_scores);
 
     log_line(
         &format!(
@@ -1683,7 +1695,10 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
     );
     log_line(&format!("SROCC (Spearman):  {:.4}", srocc), log);
     log_line(&format!("PLCC  (Pearson):   {:.4}", plcc), log);
-    log_line(&format!("KROCC (Kendall):   {:.4}", krocc), log);
+    if ds.human_scores.len() <= 50_000 {
+        let krocc = kendall_correlation(&ds.human_scores, &metric_scores);
+        log_line(&format!("KROCC (Kendall):   {:.4}", krocc), log);
+    }
 
     let min_m = metric_scores.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_m = metric_scores
