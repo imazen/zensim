@@ -1099,33 +1099,46 @@ fn main() {
             );
             std::process::exit(1);
         }
+
         let msg = format!("\n=== Custom weights from {:?} ===", weights_path);
         log_line(&msg, &mut training_log);
         for ds in &all_datasets {
             let feats: Vec<&[f64]> = ds.features.iter().map(|v| v.as_slice()).collect();
-            let custom_scores: Vec<f64> = feats
+            // Truncate weights to match feature count if needed
+            let w = if custom_weights.len() > feats[0].len() {
+                &custom_weights[..feats[0].len()]
+            } else {
+                &custom_weights
+            };
+            let scores_and_dists: Vec<(f64, f64)> = feats
                 .iter()
-                .map(|f| zensim::score_from_features(f, &custom_weights).0)
+                .map(|f| zensim::score_from_features(f, w))
                 .collect();
+            let custom_scores: Vec<f64> = scores_and_dists.iter().map(|&(s, _)| s).collect();
+            let raw_dists: Vec<f64> = scores_and_dists.iter().map(|&(_, d)| d).collect();
             let srocc = spearman_correlation(&ds.human_scores, &custom_scores);
             let plcc = pearson_correlation(&ds.human_scores, &custom_scores);
+            // Raw distance correlations (negate distances since higher quality = lower distance)
+            let neg_dists: Vec<f64> = raw_dists.iter().map(|d| -d).collect();
+            let dist_srocc = spearman_correlation(&ds.human_scores, &neg_dists);
+            // Count clamped-to-zero scores
+            let n_clamped = custom_scores.iter().filter(|&&s| s <= 0.0).count();
+            let pct_clamped = 100.0 * n_clamped as f64 / custom_scores.len() as f64;
             if ds.human_scores.len() <= 50_000 {
                 let krocc = kendall_correlation(&ds.human_scores, &custom_scores);
+                let dist_krocc = fast_kendall(&ds.human_scores, &neg_dists);
                 log_line(
                     &format!(
-                        "  {}: SROCC={:.4}  PLCC={:.4}  KROCC={:.4}",
-                        ds.name, srocc, plcc, krocc
+                        "  {}: SROCC={:.4}  KROCC={:.4}  PLCC={:.4}  | raw dist: SROCC={:.4} KROCC={:.4} | clamped: {}/{} ({:.1}%)",
+                        ds.name, srocc, krocc, plcc, dist_srocc, dist_krocc, n_clamped, custom_scores.len(), pct_clamped
                     ),
                     &mut training_log,
                 );
             } else {
                 log_line(
                     &format!(
-                        "  {}: SROCC={:.4}  PLCC={:.4}  (KROCC skipped, n={})",
-                        ds.name,
-                        srocc,
-                        plcc,
-                        ds.human_scores.len()
+                        "  {}: SROCC={:.4}  PLCC={:.4}  | raw dist: SROCC={:.4} | clamped: {}/{} ({:.1}%) (KROCC skipped, n={})",
+                        ds.name, srocc, plcc, dist_srocc, n_clamped, custom_scores.len(), pct_clamped, ds.human_scores.len()
                     ),
                     &mut training_log,
                 );
@@ -1729,11 +1742,34 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
     let p90 = sorted_d[sorted_d.len() * 9 / 10];
     log_line(
         &format!(
-            "Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}\n",
+            "Raw distance: min={:.3}, p10={:.3}, p50={:.3}, p90={:.3}, max={:.3}, mean={:.3}",
             min_d, p10, p50, p90, max_d, mean_d
         ),
         log,
     );
+    // Raw distance correlations (negate distances since higher quality = lower distance)
+    let neg_dists: Vec<f64> = raw_dists.iter().map(|d| -d).collect();
+    let dist_srocc = spearman_correlation(&ds.human_scores, &neg_dists);
+    let n_clamped = metric_scores.iter().filter(|&&s| s <= 0.0).count();
+    let pct_clamped = 100.0 * n_clamped as f64 / metric_scores.len() as f64;
+    if ds.human_scores.len() <= 50_000 {
+        let dist_krocc = fast_kendall(&ds.human_scores, &neg_dists);
+        log_line(
+            &format!(
+                "Raw dist corr: SROCC={:.4}  KROCC={:.4} | clamped scores: {}/{} ({:.1}%)\n",
+                dist_srocc, dist_krocc, n_clamped, metric_scores.len(), pct_clamped
+            ),
+            log,
+        );
+    } else {
+        log_line(
+            &format!(
+                "Raw dist corr: SROCC={:.4} | clamped scores: {}/{} ({:.1}%)\n",
+                dist_srocc, n_clamped, metric_scores.len(), pct_clamped
+            ),
+            log,
+        );
+    }
 }
 
 /// Deterministic shuffle + round-robin split of reference keys into K folds.
