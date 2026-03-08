@@ -2874,12 +2874,12 @@ fn train_pairwise(
 // L1-regularized FISTA optimizer (differentiable Spearman proxy)
 // =============================================================================
 //
-// Maximizes: Σ_k α_k * Pearson(F_k * w, rank(h_k)) - λ * Σ_j w_j
+// Maximizes: Σ_k α_k * Pearson(F_k * w, -rank(h_k)) - λ * Σ_j w_j
 //
-// Pearson(distances, human_ranks) is a fully differentiable proxy for Spearman:
-// since Spearman(x,y) = Pearson(rank(x), rank(y)), and human ranks are fixed,
-// maximizing Pearson(d, rank(h)) makes d approximately linearly related to
-// rank(h) → monotonically related to h → high Spearman.
+// Since distances are anti-correlated with quality (higher distance = worse),
+// we negate the human ranks so that Pearson(d, -rank(h)) is positive when
+// the metric correctly ranks quality. This is a differentiable proxy for
+// |Spearman|, since Spearman(x,y) = Pearson(rank(x), rank(y)).
 //
 // The L1 penalty encourages sparsity. Combined with non-negativity (w ≥ 0),
 // the proximal operator simplifies to max(w - η*λ, 0).
@@ -3018,10 +3018,12 @@ fn train_proximal(
             }
         }
 
-        // Centered human ranks
+        // Centered human ranks, NEGATED: distances are anti-correlated with quality
+        // (higher distance = worse quality = lower human_score).
+        // Negating makes Pearson(distances, -ranks) positive for a correct metric.
         let human_ranks = ranks(human_scores);
         let mean_rank = (nf + 1.0) / 2.0;
-        let ranks_c: Vec<f64> = human_ranks.iter().map(|r| r - mean_rank).collect();
+        let ranks_c: Vec<f64> = human_ranks.iter().map(|r| -(r - mean_rank)).collect();
         let ranks_c_norm = ranks_c.iter().map(|x| x * x).sum::<f64>().sqrt();
 
         // Cross-correlation: c[dim] = Σ_i features_c[dim][i] * ranks_c[i]
