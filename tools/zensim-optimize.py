@@ -142,7 +142,8 @@ class EvalResult:
 class Evaluator:
     """Drives encoder + decoder + ssimulacra2 to evaluate parameter sets."""
 
-    def __init__(self, images, distances, cjxl, djxl, ss2, outdir, iters=4):
+    def __init__(self, images, distances, cjxl, djxl, ss2, outdir, iters=4,
+                 size_threshold=0.0):
         self.images = images
         self.distances = distances
         self.cjxl = cjxl
@@ -150,6 +151,7 @@ class Evaluator:
         self.ss2 = ss2
         self.outdir = Path(outdir)
         self.iters = iters
+        self.size_threshold = size_threshold
         self.outdir.mkdir(parents=True, exist_ok=True)
 
         # Prepare stripped references
@@ -295,7 +297,9 @@ class Evaluator:
         avg_dsz = total_dsz / n
 
         # Score: quality gain, penalize positive size inflation
-        score = avg_ds2 - size_penalty * max(0, avg_dsz)
+        # Only penalize size inflation above threshold (e.g., 1.5% is acceptable)
+        excess_size = max(0, avg_dsz - getattr(self, 'size_threshold', 0.0))
+        score = avg_ds2 - size_penalty * excess_size
 
         return EvalResult(
             params=param_values.tolist(),
@@ -540,6 +544,8 @@ def main():
                         help="Steps per dimension in coord descent (default: 7)")
     parser.add_argument("--size-penalty", type=float, default=0.5,
                         help="Weight for size inflation penalty (default: 0.5)")
+    parser.add_argument("--size-threshold", type=float, default=0.0,
+                        help="Size inflation %% allowed before penalty kicks in (default: 0)")
     parser.add_argument("--resume", help="Resume from previous log file")
     parser.add_argument("--outdir", default="/tmp/zensim_optimize",
                         help="Working directory")
@@ -573,7 +579,8 @@ def main():
 
     # Set up evaluator and state
     logfile = args.log or f"/tmp/zensim_optimize_{time.strftime('%Y%m%d_%H%M%S')}.json"
-    evaluator = Evaluator(images, args.dists, cjxl, djxl, ss2, args.outdir)
+    evaluator = Evaluator(images, args.dists, cjxl, djxl, ss2, args.outdir,
+                          size_threshold=args.size_threshold)
     state = OptimizerState(logfile)
 
     if args.resume:
