@@ -81,18 +81,17 @@ fn hardcoded_reference_scores() {
     let z = Zensim::new(ZensimProfile::latest());
     let pairs = generate_test_pairs(W, H);
 
-    // Reference scores with peaks-tier weights (228 weights, 344k training pairs).
+    // Reference scores with concordant-trained weights (228 weights, SROCC=0.9942).
     // Uses linear-srgb crate (C0-continuous constants) for sRGB linearization.
-    // Updated after Halley iteration reorder (division-first to avoid NaN on cbrt(0)).
     #[allow(clippy::excessive_precision)]
     let expected: &[(&str, f64)] = &[
         ("checkerboard+blur", 0.0),
-        ("checkerboard+sharpen", 32.259_295_328_733_998),
-        ("mandelbrot+blur", 0.0),
-        ("mandelbrot+color_shift", 35.081_714_946_035_930),
-        ("noise+blur", 52.742_386_331_300_956),
-        ("noise+block_artifacts", 43.348_929_434_760_976),
-        ("color_blocks+color_shift", 17.282_802_122_682_057),
+        ("checkerboard+sharpen", 29.587_543_251_423_142),
+        ("mandelbrot+blur", 8.478_409_174_126_597),
+        ("mandelbrot+color_shift", 48.138_848_249_261_251),
+        ("noise+blur", 60.015_600_223_264_798),
+        ("noise+block_artifacts", 52.799_117_798_200_086),
+        ("color_blocks+color_shift", 30.398_914_843_637_783),
         ("color_blocks+sharpen", 0.0),
     ];
 
