@@ -1132,7 +1132,15 @@ fn main() {
             log_line(
                 &format!(
                     "  {}: SROCC={:.4}  KROCC={:.4}  PLCC={:.4}  | raw dist: SROCC={:.4} KROCC={:.4} | clamped: {}/{} ({:.1}%)",
-                    ds.name, srocc, krocc, plcc, dist_srocc, dist_krocc, n_clamped, custom_scores.len(), pct_clamped
+                    ds.name,
+                    srocc,
+                    krocc,
+                    plcc,
+                    dist_srocc,
+                    dist_krocc,
+                    n_clamped,
+                    custom_scores.len(),
+                    pct_clamped
                 ),
                 &mut training_log,
             );
@@ -1747,7 +1755,11 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
     log_line(
         &format!(
             "Raw dist corr: SROCC={:.4}  KROCC={:.4} | clamped scores: {}/{} ({:.1}%)\n",
-            dist_srocc, dist_krocc, n_clamped, metric_scores.len(), pct_clamped
+            dist_srocc,
+            dist_krocc,
+            n_clamped,
+            metric_scores.len(),
+            pct_clamped
         ),
         log,
     );
@@ -3257,7 +3269,13 @@ fn train_proximal(
         log_line(
             &format!(
                 "  Restart {}: obj={:.6} (smooth={:.6} - L1={:.6}), avg SROCC={:.4}, active={}/{} [{:.1}s]",
-                restart, total_obj, smooth_obj, l1_penalty, avg_srocc, active, n_features,
+                restart,
+                total_obj,
+                smooth_obj,
+                l1_penalty,
+                avg_srocc,
+                active,
+                n_features,
                 start_time.elapsed().as_secs_f64()
             ),
             log,
