@@ -216,6 +216,9 @@ struct ImagePair {
     human_score: f64,
 }
 
+/// (name, human_scores, features) tuple for training functions.
+type DatasetGroup = (String, Vec<f64>, Vec<Vec<f64>>);
+
 /// A dataset with precomputed features, ready for CV splitting.
 struct DatasetWithFeatures {
     name: String,
@@ -1153,7 +1156,7 @@ fn main() {
 
     // Train weights if requested
     if train {
-        let dataset_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = all_datasets
+        let dataset_groups: Vec<DatasetGroup> = all_datasets
             .iter()
             .map(|ds| {
                 (
@@ -1889,7 +1892,7 @@ fn run_leave_one_out(datasets: &[DatasetWithFeatures], n_features: usize, frozen
 
     for held_out_idx in 0..datasets.len() {
         // Train on all except held-out
-        let mut train_groups: Vec<(String, Vec<f64>, Vec<Vec<f64>>)> = Vec::new();
+        let mut train_groups: Vec<DatasetGroup> = Vec::new();
         for (i, ds) in datasets.iter().enumerate() {
             if i != held_out_idx {
                 train_groups.push((
@@ -3035,7 +3038,7 @@ fn eval_proximal_objective(
 /// Train weights using L1-regularized FISTA (proximal gradient ascent).
 /// Handles single or multi-dataset with per-dataset weights.
 fn train_proximal(
-    datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
+    datasets: &[DatasetGroup],
     n_features: usize,
     frozen: &[bool],
     l1_lambda: f64,
@@ -3389,7 +3392,7 @@ fn print_weights(weights: &[f64], log: &mut Vec<String>) {
 /// Uses Spearman on subsampled datasets for training, validates on full data per restart.
 #[allow(clippy::type_complexity)]
 fn train_weights_multi(
-    datasets: &[(String, Vec<f64>, Vec<Vec<f64>>)],
+    datasets: &[DatasetGroup],
     n_features: usize,
     frozen: &[bool],
     log: &mut Vec<String>,
