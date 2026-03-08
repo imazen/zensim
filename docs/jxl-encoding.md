@@ -183,6 +183,7 @@ let dm_result = zensim.compute_with_ref_and_diffmap_linear_planar(
         masking_strength: Some(4.0),
         sqrt: true,
         include_edge_mse: true,
+        include_hf: true,
     },
 )?;
 
@@ -220,6 +221,7 @@ pub struct DiffmapOptions {
     pub masking_strength: Option<f32>,   // contrast masking: 2.0-8.0 typical
     pub sqrt: bool,                       // compress dynamic range
     pub include_edge_mse: bool,          // add edge artifact/detail loss/MSE features
+    pub include_hf: bool,                // add HF energy/magnitude loss/gain features
 }
 
 pub enum DiffmapWeighting {

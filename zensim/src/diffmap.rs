@@ -114,6 +114,23 @@ pub struct DiffmapOptions {
     /// each feature type and channel. This makes the diffmap a more complete
     /// representation of the metric's per-pixel view.
     pub include_edge_mse: bool,
+
+    /// Include high-frequency energy features in the diffmap.
+    ///
+    /// When `true`, each pixel also accumulates HF texture loss/gain signals:
+    /// - **HF energy loss**: `max(0, (src−μ)² − (dst−μ)²)` — texture energy
+    ///   removed by distortion (smoothing, quantization).
+    /// - **HF magnitude loss**: `max(0, |src−μ| − |dst−μ|)` — texture magnitude
+    ///   removed (L1 variant, more robust to outliers).
+    /// - **HF energy gain**: `max(0, (dst−μ)² − (src−μ)²)` — texture energy
+    ///   added by distortion (ringing, noise).
+    ///
+    /// These correspond to trained features 10–12 and help encoder quantization
+    /// loops (especially JXL AC coefficient tuning) see where HF texture is
+    /// being lost or gained. Requires mu1/mu2 storage (same as `include_edge_mse`).
+    ///
+    /// Default: `false`.
+    pub include_hf: bool,
 }
 
 impl From<DiffmapWeighting> for DiffmapOptions {
@@ -128,18 +145,27 @@ impl From<DiffmapWeighting> for DiffmapOptions {
 /// Per-pixel feature weights for a single channel in the diffmap.
 ///
 /// When `art`, `det`, `mse` are all zero, only SSIM contributes (backward compatible).
+/// HF features (`hf_loss`, `hf_mag`, `hf_gain`) add high-frequency texture sensitivity.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct PixelFeatureWeights {
     pub ssim: f32,
     pub art: f32,
     pub det: f32,
     pub mse: f32,
+    pub hf_loss: f32,
+    pub hf_mag: f32,
+    pub hf_gain: f32,
 }
 
 impl PixelFeatureWeights {
     /// Whether any edge/MSE features are active (need mu1/mu2 storage).
     pub fn needs_edge_mse(&self) -> bool {
         self.art != 0.0 || self.det != 0.0 || self.mse != 0.0
+    }
+
+    /// Whether any HF features are active (need mu1/mu2 storage).
+    pub fn needs_hf(&self) -> bool {
+        self.hf_loss != 0.0 || self.hf_mag != 0.0 || self.hf_gain != 0.0
     }
 }
 
@@ -153,10 +179,11 @@ impl DiffmapWeighting {
         profile_weights: &[f64],
         num_scales: usize,
         include_edge_mse: bool,
+        include_hf: bool,
     ) -> (Vec<[PixelFeatureWeights; 3]>, Vec<f32>) {
         match self {
             Self::Trained => {
-                trained_multiscale_weights(profile_weights, num_scales, include_edge_mse)
+                trained_multiscale_weights(profile_weights, num_scales, include_edge_mse, include_hf)
             }
             Self::Balanced => {
                 let pw = PixelFeatureWeights {
@@ -168,46 +195,36 @@ impl DiffmapWeighting {
                     PixelFeatureWeights { ssim: 0.70, ..pw },
                     PixelFeatureWeights { ssim: 0.15, ..pw },
                 ];
-                // For Balanced+edge_mse, distribute equally among features
-                let ch = if include_edge_mse {
-                    ch.map(|c| PixelFeatureWeights {
-                        ssim: c.ssim * 0.4,
-                        art: c.ssim * 0.2,
-                        det: c.ssim * 0.2,
-                        mse: c.ssim * 0.2,
-                    })
-                } else {
-                    ch
-                };
+                // For Balanced+edge_mse+hf, distribute equally among active feature groups
+                let n_groups = 1 + include_edge_mse as usize * 3 + include_hf as usize * 3;
+                let per_group = 1.0 / n_groups as f32;
+                let ch = ch.map(|c| PixelFeatureWeights {
+                    ssim: c.ssim * per_group,
+                    art: if include_edge_mse { c.ssim * per_group } else { 0.0 },
+                    det: if include_edge_mse { c.ssim * per_group } else { 0.0 },
+                    mse: if include_edge_mse { c.ssim * per_group } else { 0.0 },
+                    hf_loss: if include_hf { c.ssim * per_group } else { 0.0 },
+                    hf_mag: if include_hf { c.ssim * per_group } else { 0.0 },
+                    hf_gain: if include_hf { c.ssim * per_group } else { 0.0 },
+                });
                 let blend = 1.0 / num_scales as f32;
                 (vec![ch; num_scales], vec![blend; num_scales])
             }
             Self::Custom(w) => {
                 let nw = normalize_weights(w);
-                let ch = [
+                let ch = [nw[0], nw[1], nw[2]].map(|s| {
+                    let n_groups = 1 + include_edge_mse as usize * 3 + include_hf as usize * 3;
+                    let per_group = 1.0 / n_groups as f32;
                     PixelFeatureWeights {
-                        ssim: nw[0],
-                        ..Default::default()
-                    },
-                    PixelFeatureWeights {
-                        ssim: nw[1],
-                        ..Default::default()
-                    },
-                    PixelFeatureWeights {
-                        ssim: nw[2],
-                        ..Default::default()
-                    },
-                ];
-                let ch = if include_edge_mse {
-                    ch.map(|c| PixelFeatureWeights {
-                        ssim: c.ssim * 0.4,
-                        art: c.ssim * 0.2,
-                        det: c.ssim * 0.2,
-                        mse: c.ssim * 0.2,
-                    })
-                } else {
-                    ch
-                };
+                        ssim: s * per_group,
+                        art: if include_edge_mse { s * per_group } else { 0.0 },
+                        det: if include_edge_mse { s * per_group } else { 0.0 },
+                        mse: if include_edge_mse { s * per_group } else { 0.0 },
+                        hf_loss: if include_hf { s * per_group } else { 0.0 },
+                        hf_mag: if include_hf { s * per_group } else { 0.0 },
+                        hf_gain: if include_hf { s * per_group } else { 0.0 },
+                    }
+                });
                 let blend = 1.0 / num_scales as f32;
                 (vec![ch; num_scales], vec![blend; num_scales])
             }
@@ -218,14 +235,15 @@ impl DiffmapWeighting {
 /// Derive per-scale per-feature channel weights and scale blend weights.
 ///
 /// For each scale and channel, computes weights for SSIM, edge artifact,
-/// edge detail loss, and MSE features from the trained weight array.
+/// edge detail loss, MSE, and HF features from the trained weight array.
 ///
-/// When `include_edge_mse` is false, only SSIM features contribute
-/// (art/det/mse weights are 0).
+/// When `include_edge_mse` is false, edge/MSE weights are 0.
+/// When `include_hf` is false, HF weights are 0.
 fn trained_multiscale_weights(
     weights: &[f64],
     num_scales: usize,
     include_edge_mse: bool,
+    include_hf: bool,
 ) -> (Vec<[PixelFeatureWeights; 3]>, Vec<f32>) {
     const FPC: usize = FEATURES_PER_CHANNEL_BASIC;
     const FPS: usize = FPC * 3; // features per scale (basic only)
@@ -240,6 +258,9 @@ fn trained_multiscale_weights(
         let mut art_w = [0.0f64; 3];
         let mut det_w = [0.0f64; 3];
         let mut mse_w = [0.0f64; 3];
+        let mut hf_loss_w = [0.0f64; 3];
+        let mut hf_mag_w = [0.0f64; 3];
+        let mut hf_gain_w = [0.0f64; 3];
         let mut scale_total = 0.0f64;
 
         for c in 0..3 {
@@ -254,6 +275,11 @@ fn trained_multiscale_weights(
                     weights[base + 6].abs() + weights[base + 7].abs() + weights[base + 8].abs();
                 mse_w[c] = weights[base + 9].abs();
             }
+            if include_hf && base + 12 < weights.len() {
+                hf_loss_w[c] = weights[base + 10].abs();
+                hf_mag_w[c] = weights[base + 11].abs();
+                hf_gain_w[c] = weights[base + 12].abs();
+            }
             // Sum ALL features at this scale for blend weight
             for f in 0..FPC {
                 if base + f < weights.len() {
@@ -266,7 +292,10 @@ fn trained_multiscale_weights(
         let feat_total: f64 = ssim_w.iter().sum::<f64>()
             + art_w.iter().sum::<f64>()
             + det_w.iter().sum::<f64>()
-            + mse_w.iter().sum::<f64>();
+            + mse_w.iter().sum::<f64>()
+            + hf_loss_w.iter().sum::<f64>()
+            + hf_mag_w.iter().sum::<f64>()
+            + hf_gain_w.iter().sum::<f64>();
 
         let ch_weights = if feat_total > 0.0 {
             core::array::from_fn(|c| PixelFeatureWeights {
@@ -274,6 +303,9 @@ fn trained_multiscale_weights(
                 art: (art_w[c] / feat_total) as f32,
                 det: (det_w[c] / feat_total) as f32,
                 mse: (mse_w[c] / feat_total) as f32,
+                hf_loss: (hf_loss_w[c] / feat_total) as f32,
+                hf_mag: (hf_mag_w[c] / feat_total) as f32,
+                hf_gain: (hf_gain_w[c] / feat_total) as f32,
             })
         } else {
             let eq = 1.0 / 3.0;
@@ -530,6 +562,7 @@ impl crate::metric::Zensim {
             params.weights,
             config.num_scales,
             options.include_edge_mse,
+            options.include_hf,
         );
 
         // Fused: compute the full zensim score AND the multi-scale diffmap in a
@@ -615,6 +648,7 @@ impl crate::metric::Zensim {
             params.weights,
             config.num_scales,
             options.include_edge_mse,
+            options.include_hf,
         );
 
         let padded_width = crate::blur::simd_padded_width(width);
@@ -804,6 +838,7 @@ mod tests {
                     masking_strength: Some(4.0),
                     sqrt: false,
                     include_edge_mse: false,
+                    include_hf: false,
                 },
             )
             .unwrap();
@@ -851,6 +886,7 @@ mod tests {
                     masking_strength: None,
                     sqrt: true,
                     include_edge_mse: false,
+                    include_hf: false,
                 },
             )
             .unwrap();
@@ -911,6 +947,7 @@ mod tests {
                     masking_strength: None,
                     sqrt: false,
                     include_edge_mse: true,
+                    include_hf: false,
                 },
             )
             .unwrap();
@@ -964,6 +1001,7 @@ mod tests {
                     masking_strength: None,
                     sqrt: false,
                     include_edge_mse: true,
+                    include_hf: false,
                 },
             )
             .unwrap();
@@ -1025,6 +1063,21 @@ mod tests {
                 masking_strength: Some(4.0),
                 sqrt: true,
                 include_edge_mse: true,
+                include_hf: false,
+            },
+            super::DiffmapOptions {
+                weighting: DiffmapWeighting::Trained,
+                masking_strength: None,
+                sqrt: false,
+                include_edge_mse: false,
+                include_hf: true,
+            },
+            super::DiffmapOptions {
+                weighting: DiffmapWeighting::Trained,
+                masking_strength: Some(4.0),
+                sqrt: true,
+                include_edge_mse: true,
+                include_hf: true,
             },
         ];
         // Adversarial patterns: uniform, solid black, solid white, random-ish,

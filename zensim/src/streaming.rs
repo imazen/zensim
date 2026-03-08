@@ -163,6 +163,36 @@ fn diffmap_accum_edge_mse(
     }
 }
 
+/// Diffmap accumulation: HF energy/magnitude loss and gain.
+///
+/// Per-pixel HF features using the same residuals as edge features but with
+/// different semantics: these capture texture energy changes (L2) and magnitude
+/// changes (L1), weighted by trained feature weights 10-12.
+///
+/// Weights are packed as `[hf_loss_w, hf_mag_w, hf_gain_w]`.
+#[autoversion]
+fn diffmap_accum_hf(
+    _t: SimdToken,
+    dm: &mut [f32],
+    src: &[f32],
+    dst: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    weights: [f32; 3],
+) {
+    let [hf_loss_w, hf_mag_w, hf_gain_w] = weights;
+    for i in 0..dm.len() {
+        let res_src = src[i] - mu1[i];
+        let res_dst = dst[i] - mu2[i];
+        let sq_src = res_src * res_src;
+        let sq_dst = res_dst * res_dst;
+        let hf_loss = (sq_src - sq_dst).max(0.0);
+        let hf_gain = (sq_dst - sq_src).max(0.0);
+        let mag_loss = (res_src.abs() - res_dst.abs()).max(0.0);
+        dm[i] += hf_loss_w * hf_loss + hf_mag_w * mag_loss + hf_gain_w * hf_gain;
+    }
+}
+
 /// Upsample one source row to two destination rows (nearest-neighbor 2×).
 /// Each source pixel duplicates to a 1×2 horizontal pair in the destination row.
 #[autoversion]
@@ -899,9 +929,10 @@ fn process_strip_channel(
         let strip_acc;
 
         let dm_needs_edge = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_edge_mse());
+        let dm_needs_hf = diffmap.as_ref().is_some_and(|(_, pw)| pw.needs_hf());
         let store_sd = diffmap.is_some() && need_ssim;
-        // Force mu1/mu2 storage when diffmap needs edge/MSE features
-        let store_mu = config.extended_features || dm_needs_edge;
+        // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
+        let store_mu = config.extended_features || dm_needs_edge || dm_needs_hf;
         if need_ssim {
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
             fused_blur_h_ssim(
@@ -961,6 +992,18 @@ fn process_strip_channel(
                     );
                 } else {
                     diffmap_accum_ssim(dm, &bufs.temp_blur, inner_off, pw.ssim);
+                }
+                // HF features: mu1 is in bufs.mask, mu2 is in bufs.mul_buf
+                // (stored by fused kernel when store_mu=true)
+                if dm_needs_hf {
+                    diffmap_accum_hf(
+                        dm,
+                        &src_c[inner_off..inner_off + inner_n],
+                        &dst_c[inner_off..inner_off + inner_n],
+                        &bufs.mask[inner_off..inner_off + inner_n],
+                        &bufs.mul_buf[inner_off..inner_off + inner_n],
+                        [pw.hf_loss, pw.hf_mag, pw.hf_gain],
+                    );
                 }
             }
 
