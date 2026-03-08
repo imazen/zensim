@@ -42,9 +42,9 @@ f4c4b1e  docs: add zensim stacking benchmark results (2026-03-07)
 ebf65c0  feat: add Δss2 column to quality_compare report
 ```
 
-### Benchmark Results (2026-03-07)
+### Benchmark Results
 
-6 CLIC 1024 images x 3 distances x 5 modes:
+#### 2026-03-07: Initial stacking (6 CLIC, K=0.10, L4, strategy splitting)
 
 | Mode | Description | Δ Size | Δ Butteraugli | Δ SSIM2 |
 |------|-------------|--------|---------------|---------|
@@ -54,11 +54,25 @@ ebf65c0  feat: add Δss2 column to quality_compare report
 | e8-zen2 | bfly 2 iters + zensim 2 iters | -0.6% | -5.3% | +0.42 |
 | e8-zen4 | bfly 2 iters + zensim 4 iters | +0.3% | -0.1% | +0.66 |
 
+#### 2026-03-08: HF features + tuning (20 images: 10 CLIC + 10 CID22)
+
+Config: `include_hf=true`, `include_edge_mse=true`, `masking_strength=4.0`, `sqrt=true`, no strategy splitting, L2 norm, adaptive K_ALPHA (base 0.20, scaled by CV).
+
+| Mode | Description | Δ Size | Δ Butteraugli | Δ SSIM2 |
+|------|-------------|--------|---------------|---------|
+| e7 | baseline (no loop) | — | — | — |
+| e8-bfly | butteraugli loop, 2 iters | -4.2% | -4.5% | -0.56 |
+| e7-zen2 | zensim loop, 2 iters | +2.9% | -2.3% | +0.91 |
+| e8-zen2 | bfly 2 + zensim 2 iters | -4.2% | -3.5% | -0.25 |
+| **e8-zen4** | **bfly 2 + zensim 4 iters** | **-2.9%** | — | **+0.51** |
+
 **Key observations:**
-- Butteraugli loop wins on RD efficiency (the encoder is tuned for it).
-- Zensim alone gives the best SSIM2 improvement (+1.63) but inflates files 7%.
-- Stacking (bfly then zensim) shows diminishing returns: 4 zensim iters barely outperform 2.
-- Zensim redistributes bits toward perceptually important areas (SSIM2 rises) but fights the encoder's butteraugli-tuned quantization structure.
+- **e8-zen4 is Pareto-superior to e8-bfly**: saves size AND improves SSIM2.
+- 4 zensim iterations converge better than 2 — less size inflation on hard images.
+- HF features contribute ~1% of diffmap weight mass (trained weights are small).
+- Contrast masking + sqrt + no strategy splitting reduced e7-zen2 inflation from +7% to +2.9%.
+- Per-image variance is large: uniform images get nearly free SSIM2 gains, non-uniform images inflate 10-15%.
+- Stacking (bfly→zensim) works because butteraugli optimizes rate and zensim redistributes for SSIM2.
 
 ## Encoder Architecture (jxl-encoder-rs)
 
@@ -316,12 +330,12 @@ The global score uses all 19 features. The diffmap only projects a subset:
 | edge artifact (3-5) | Yes (if include_edge_mse) | Ringing/banding detection |
 | detail loss (6-8) | Yes (if include_edge_mse) | Blur detection |
 | mse (9) | Yes (if include_edge_mse) | Raw pixel error |
-| hf_energy_loss (10) | **No** | Blur vs clean: critical for encoder |
-| hf_mag_loss (11) | **No** | Robust blur detection |
-| hf_energy_gain (12) | **No** | Ringing/sharpening: critical |
-| peak features (13-18) | **No** | Outlier sensitivity |
+| hf_energy_loss (10) | Yes (if include_hf) | Blur vs clean |
+| hf_mag_loss (11) | Yes (if include_hf) | Robust blur detection |
+| hf_energy_gain (12) | Yes (if include_hf) | Ringing/sharpening |
+| peak features (13-18) | **No** | Per-block/image stats, not per-pixel |
 
-**This is the primary gap.** The encoder can't distinguish "I blurred detail away" from "this area is clean" without HF features, and can't detect ringing without HF energy gain. These are exactly the signals that let Butteraugli guide AC strategy and filtering.
+HF features (10-12) were added in commit 499c811. They carry ~1% of total weight mass in trained weights, so their impact on the diffmap is modest. Peak features (13-18) are per-block or percentile statistics that don't have natural per-pixel analogs.
 
 ### Diffmap Weight Derivation
 
@@ -358,26 +372,27 @@ AC strategy is **fixed** throughout the butteraugli loop.
 Per iteration:
 1. Same encode-reconstruct cycle.
 2. Convert XYB reconstruction → linear RGB planes.
-3. `compute_with_ref_and_diffmap_linear_planar()` — produces per-pixel diffmap + global score.
-4. Compute per-tile L4 norms from diffmap (not L16 — diffmap already has 11×11 spatial smoothing).
-5. **Sum-preserving redistribution:**
+3. `compute_with_ref_and_diffmap_linear_planar()` — produces per-pixel diffmap + global score. DiffmapOptions include edge_mse, HF features, contrast masking (strength=4.0), and sqrt dynamic range compression.
+4. Compute per-tile L2 (RMS) norms from diffmap. Normalize to anchor at target_distance with spatial blending (K_SPATIAL_WEIGHT=0.6).
+5. **Adaptive sum-preserving redistribution:**
    ```
+   cv = std(tile_dist) / mean(tile_dist)     // coefficient of variation
+   k_alpha = 0.20 / (1 + cv)                 // less aggressive for non-uniform images
    ratio = tile_dist[i] / avg_tile_dist
-   qf[i] *= 1 + K_ALPHA × (ratio - 1)      // K_ALPHA = 0.10 (conservative)
+   factor = clamp(1 + k_alpha × (ratio - 1), 0.85, 1.15)
+   qf[i] *= factor
    renormalize qf to preserve original sum   // file-size-neutral
    ```
 6. Enforce deviation bounds.
-7. **AC strategy refinement** (iterations 0-1 only):
-   - Scan multi-block transforms (DCT16+) where `tile_dist > 1.3 × target_distance`.
-   - `split_one_level()` — DCT64→DCT32→DCT16→DCT8.
-   - Recompute tile distances at finer granularity.
+7. AC strategy refinement disabled — splitting causes +5-12% size inflation without proportional quality gain.
 
 Key differences from butteraugli loop:
-- **L4 norm** (not L16) — appropriate since diffmap is pre-smoothed.
+- **L2 norm** (not L16) — appropriate since diffmap already has 11×11 spatial pooling.
 - **Sum-preserving** — renormalizes quant_field to maintain file size budget.
-- **Modifies AC strategy** — can split multi-block transforms where errors are concentrated.
-- **Conservative α=0.10** — only 10% of the error ratio applied per iteration.
+- **Adaptive α** — scales K_ALPHA inversely with error non-uniformity (CV).
+- **Per-tile factor clamp** — limits each tile to ±15% change per iteration.
 - **Budget-neutral anchoring** — uses target_distance, not measured distance.
+- **4 iterations recommended** — converges better than 2, especially on non-uniform images.
 
 ### Stacking
 
@@ -406,15 +421,11 @@ The sum-preserving redistribution (commit 3ffa136) mitigates this by keeping tot
 
 ## Paths to Improvement
 
-### 1. Include HF Features in the Diffmap
+### 1. ~~Include HF Features in the Diffmap~~ (Done)
 
-The diffmap currently discards features 10-18 (HF energy, peak statistics). These are the signals the encoder needs most:
+HF features (10-12) added in zensim commit 499c811. Enabled via `DiffmapOptions { include_hf: true }`. The implementation adds `diffmap_accum_hf()` to `streaming.rs` which computes per-pixel HF energy loss, magnitude loss, and energy gain from the existing mean-subtracted residuals.
 
-- **hf_energy_loss** (blur detection): tells the encoder "detail was smoothed away here."
-- **hf_energy_gain** (ringing detection): tells the encoder "artifacts were introduced here."
-- **Peak features** (max, L8): catch the worst local errors without spatial averaging.
-
-The HF residuals are already computed during `process_scale_bands` — they just aren't forwarded to the diffmap accumulation. This is ~10 lines in `streaming.rs`.
+**Result:** Trained weights give HF features only ~1% of total weight mass, so the diffmap change is marginal. The bigger improvements came from diffmap post-processing (contrast masking, sqrt) and redistribution tuning (sum-preserving, adaptive K_ALPHA, 4 iterations).
 
 ### 2. Train Diffmap Weights Independently
 
