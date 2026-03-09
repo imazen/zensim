@@ -1,12 +1,59 @@
 [![CI](https://github.com/imazen/zensim/actions/workflows/ci.yml/badge.svg?style=for-the-badge)](https://github.com/imazen/zensim/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/zensim.svg?style=for-the-badge)](https://crates.io/crates/zensim)
 [![docs.rs](https://img.shields.io/docsrs/zensim?style=for-the-badge)](https://docs.rs/zensim)
-[![codecov](https://codecov.io/gh/imazen/zensim/branch/main/graph/badge.svg?style=for-the-badge)](https://codecov.io/gh/imazen/zensim)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=for-the-badge)](LICENSE-MIT)
 
 # zensim
 
-Fast psychovisual image similarity metric. Combines ideas from SSIMULACRA2 and butteraugli — multi-scale SSIM + edge + high-frequency features in XYB color space, with trained weights and AVX2/AVX-512 SIMD throughout.
+Perceptual image similarity in 23 ms at 1080p. 12x faster than C++ SSIMULACRA2 at 4K.
+
+Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
+
+## Speed
+
+AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O. zensim and ssimulacra2-rs use rayon (all cores); C++ libjxl and fast-ssim2 are single-threaded.
+
+| Resolution | zensim | zensim (1 thread) | C++ libjxl | fast-ssim2 | ssimulacra2-rs |
+|------------|-------:|-----------:|-----------:|-----------:|---------------:|
+| 1280x720 | **14 ms** | 40 ms | 163 ms | 150 ms | 529 ms |
+| 1920x1080 | **23 ms** | 90 ms | 389 ms | 338 ms | 997 ms |
+| 3840x2160 | **171 ms** | 499 ms | 2,033 ms | 1,390 ms | 3,763 ms |
+
+Single-threaded, zensim is 3-4x faster than C++ libjxl. Multi-threaded at 4K: 12x.
+
+Reproduce: `cargo bench -p zensim-bench --bench bench_compare`
+
+## Correlation with human perception
+
+Spearman rank-order correlation (SROCC) on raw perceptual distance against three independent human-rated image quality databases. Higher is better; 1.0 = perfect agreement with human rankings. None of these datasets were used for training.
+
+| Dataset | Pairs | SROCC | KROCC |
+|---------|------:|------:|------:|
+| [CID22](https://cloudinary.com/labs/cid22) (codec compression) | 4,292 | 0.8676 | 0.6786 |
+| [TID2013](https://www.ponomarenko.info/tid2013.htm) (24 distortion types) | 3,000 | 0.8427 | 0.6657 |
+| [KADID-10k](https://database.mmsp-kn.de/kadid-10k-database.html) (25 distortion types) | 10,125 | 0.8192 | 0.6139 |
+
+Weights trained on 218k concordance-filtered synthetic pairs (6 codecs, q5-q100, Nelder-Mead optimization). Training-set SROCC: 0.9960. See `zensim/src/profile.rs` for weights.
+
+<details>
+<summary>Reproduce these numbers</summary>
+
+Download the datasets ([instructions below](#downloading-evaluation-datasets)), then:
+
+```bash
+# CID22 — expects CID22_validation_set.csv + original/ and compressed/ dirs
+cargo run --release -p zensim-validate -- --dataset ./datasets/cid22 --format cid22
+
+# TID2013 — expects mos_with_names.txt + reference_images/ and distorted_images/
+cargo run --release -p zensim-validate -- --dataset ./datasets/tid2013 --format tid2013
+
+# KADID-10k — expects dmos.csv + images/
+cargo run --release -p zensim-validate -- --dataset ./datasets/kadid10k --format kadid10k
+```
+
+Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SROCC reported above. The `SROCC (Spearman)` line uses mapped scores, which are lower for KADID and TID due to score clamping at 0 (35% of KADID scores clamp).
+
+</details>
 
 ## Quick start
 
@@ -17,208 +64,126 @@ let z = Zensim::new(ZensimProfile::latest());
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
 let result = z.compute(&source, &distorted)?;
-println!("{}: {:.2}", result.profile(), result.score()); // higher = more similar
+println!("score: {:.2}", result.score()); // 100 = identical, higher = better
 ```
 
-### With imgref (default feature, supports stride)
+Also accepts `RgbaSlice` (composited over checkerboard), `imgref::ImgRef` (with stride), and `StridedBytes` for BGRA, 16-bit, linear float, and wide gamut (Display P3, BT.2020) inputs. See [docs.rs](https://docs.rs/zensim) for the full `ImageSource` trait.
+
+## What the score means
+
+100 = identical. Higher = more similar. The score is a compressive mapping (`100 - 18 × d^0.7`), giving more resolution at the high-quality end where it matters most.
+
+Each `ZensimResult` also provides approximate translations to other metrics:
+
+| Method | What it returns |
+|--------|-----------------|
+| `score()` | Zensim similarity (0-100) |
+| `raw_distance()` | Feature distance before mapping (lower = better) |
+| `approx_ssim2()` | SSIMULACRA2 estimate (MAE 4.4 pts, Pearson r = 0.974) |
+| `approx_dssim()` | DSSIM estimate (MAE 0.00129, Pearson r = 0.952) |
+| `approx_butteraugli()` | Butteraugli estimate (MAE 1.65, Pearson r = 0.713) |
+
+The `mapping` module has bidirectional interpolation tables — including JPEG quality. These are median values from 344k synthetic pairs across 6 codecs (source: `zensim/src/mapping.rs`):
+
+| Zensim | ≈ SSIM2 | ≈ DSSIM | ≈ JPEG quality |
+|-------:|--------:|--------:|:---------------|
+| 98 | 96.50 | 0.000017 | ~q95 |
+| 90 | 89.41 | 0.000278 | ~q60 |
+| 80 | 80.51 | 0.001119 | ~q30 |
+| 70 | 71.40 | 0.002356 | — |
+
+JPEG quality mapping accuracy is ±7 quality units MAE — individual images vary widely.
+
+## Regression testing
+
+[**zensim-regress**](zensim-regress/README.md) tracks pixel output across platforms and dependency updates. Hash-based checksums for fast exact matches; perceptual comparison with forensic evidence when hashes diverge. Amplified diff images, error classification, architecture-specific tolerances, CI manifests, and HTML reports.
 
 ```rust
-use zensim::{Zensim, ZensimProfile};
+use zensim_regress::checksums::{ChecksumManager, CheckResult};
 
-let source: imgref::ImgRef<rgb::Rgb<u8>> = imgref::Img::new(&src_pixels, width, height);
-let distorted: imgref::ImgRef<rgb::Rgb<u8>> = imgref::Img::new(&dst_pixels, width, height);
-let z = Zensim::new(ZensimProfile::latest());
-let result = z.compute(&source, &distorted)?;
+let mgr = ChecksumManager::new("tests/checksums".as_ref());
+let result = mgr.check_pixels("resize", "bicubic", "200x200",
+    &pixels, width, height, None).unwrap();
+assert!(result.passed(), "{result}");
 ```
 
-`imgref::ImgRef` carries width, height, and stride in one type — no separate dimension arguments, and stride-padded buffers work automatically.
-
-### RGBA
-
-RGBA images are composited over a checkerboard before comparison, so alpha differences produce visible distortion:
-
-```rust
-use zensim::{Zensim, ZensimProfile, RgbaSlice};
-
-let z = Zensim::new(ZensimProfile::latest());
-let source = RgbaSlice::new(&src_rgba, width, height);
-let distorted = RgbaSlice::new(&dst_rgba, width, height);
-let result = z.compute(&source, &distorted)?;
-```
+Run with `UPDATE_CHECKSUMS=1` to create baselines. See the [zensim-regress guide](zensim-regress/README.md) for the full workflow.
 
 ## Batch comparison
 
-When comparing one reference against many distorted variants, precompute the reference to skip redundant XYB conversion and pyramid construction:
+Compare one reference against many distorted variants. Precomputing the reference skips redundant XYB conversion and pyramid construction — saves ~25% per comparison at 4K.
 
 ```rust
-use zensim::{Zensim, ZensimProfile, RgbSlice};
-
-let z = Zensim::new(ZensimProfile::latest());
-let source = RgbSlice::new(&ref_pixels, width, height);
 let precomputed = z.precompute_reference(&source)?;
 for dst_pixels in &distorted_images {
     let dst = RgbSlice::new(dst_pixels, width, height);
     let result = z.compute_with_ref(&precomputed, &dst)?;
-    println!("score: {:.2}", result.score());
 }
 ```
 
-Saves ~25% per comparison at 4K, ~34% at 8K (break-even at 3-7 distorted images per reference).
+## How it works
 
-## Score semantics
+228 features — 19 per channel (X, Y, B) per scale (1x, 2x, 4x, 8x) — scored by trained weights:
 
-100 = identical. Higher = more similar. Score mapping: `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance (compressive — more resolution at the high-quality end where it matters most).
+- **SSIM** (mean, L2, L4 pooling) — structural similarity in XYB, using ssimulacra2's modified formula (no luminance denominator)
+- **Edge artifacts** (mean, L2, L4) — ringing, banding, blockiness
+- **Detail loss** (mean, L2, L4) — blur, smoothing, texture destruction
+- **MSE** in XYB color space
+- **High-frequency features** — energy loss, magnitude loss, energy gain
+- **Peak features** — per-feature max and L8-pooled (near-worst-case)
 
-Scores are calibrated from 0 to 100 on our training data (344k synthetic pairs, q5–q100 across 6 codecs). Extreme distortions can produce scores below 0; the mapping is uncalibrated outside the training range.
-
-`ZensimResult` provides:
-
-| Method | Description |
-|--------|-------------|
-| `score()` | Similarity score (higher = more similar, typically 0–100) |
-| `raw_distance()` | Weighted feature distance before nonlinear mapping (lower = better) |
-| `dissimilarity()` | `(100 - score) / 100` — 0 = identical |
-| `approx_ssim2()` | Approximate SSIMULACRA2 score (MAE 4.4 pts, r = 0.974) |
-| `approx_dssim()` | Approximate DSSIM value (MAE 0.00129, r = 0.952) |
-| `approx_butteraugli()` | Approximate butteraugli distance (MAE 1.65, r = 0.713) |
-| `features()` | Raw feature vector for diagnostics |
-| `mean_offset()` | Per-channel XYB mean shift `[X, Y, B]` |
-
-The `mapping` module provides bidirectional interpolation tables between zensim scores and SSIM2, DSSIM, butteraugli, libjpeg quality, and zenjpeg quality — calibrated on 344k synthetic pairs across 6 codecs.
-
-Results are deterministic for the same input on the same architecture. Cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-512 SIMD kernels via [archmage](https://crates.io/crates/archmage). Safe scalar fallback on all platforms.
 
 ## Profiles
 
-Each `ZensimProfile` variant bundles weights and parameters that affect score output. A given profile produces approximately the same scores across versions, but profiles may be removed in future major versions as the algorithm evolves.
+Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a given profile stay stable across crate versions.
 
-| Profile | Weights | Training data | SROCC |
-|---------|---------|---------------|-------|
-| `PreviewV0_1` | 228 | 344k synthetic pairs (6 codecs, q5–q100) | 0.9936 (5-fold CV) |
-| `PreviewV0_2` | 228 | 218k concordance-filtered pairs (Nelder-Mead) | 0.9960 |
+| Profile | Training | SROCC |
+|---------|----------|------:|
+| `PreviewV0_1` | 344k synthetic, 5-fold CV | 0.9936 |
+| `PreviewV0_2` | 218k concordance-filtered, Nelder-Mead | 0.9960 |
 
-`ZensimProfile::latest()` returns `PreviewV0_2`.
-
-## Input requirements
-
-- **Color space:** All inputs must be **sRGB-encoded** (gamma ~2.2). This is what you get from standard JPEG, PNG, and WebP decoders. If your pixels are linear-light (gamma 1.0), use `PixelFormat::LinearF32Rgba` via `StridedBytes` — zensim will apply the correct transfer function internally.
-- **Wide gamut:** Display P3 and BT.2020 inputs are accepted via `ColorPrimaries` on `StridedBytes` — gamut-mapped to sRGB internally. Passing wide-gamut data as sRGB will produce incorrect scores (the metric sees the wrong colors).
-- **Pixel formats:** `RgbSlice` (sRGB u8), `RgbaSlice` (sRGB u8 + alpha), `imgref::ImgRef` (sRGB u8, with stride), `StridedBytes` (any of: `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`, `Srgb16Rgba`, `LinearF32Rgba`), or implement the `ImageSource` trait directly.
-- **Alpha:** RGBA inputs are composited over a checkerboard so alpha differences produce visible distortion. Supports `Straight` and `Opaque` alpha modes.
-- **Dimensions:** Both images must be the same width × height, minimum 8×8.
-
-## Performance
-
-Pure-computation benchmarks (no I/O), synthetic gradient images, AMD Ryzen 9 7950X 16C/32T (WSL2). All implementations receive pre-allocated pixel buffers.
-
-### SSIMULACRA2
-
-Threading: zensim and ssimulacra2-rs use rayon (all cores). C++ libjxl and fast-ssim2 are single-threaded. `zensim_st` is zensim with `.with_parallel(false)` for a fair single-threaded comparison.
-
-| Resolution | zensim | zensim_st | C++ libjxl (FFI) | fast-ssim2 | ssimulacra2-rs |
-|------------|-------:|----------:|-----------------:|-----------:|---------------:|
-| 512x512 | **8 ms** | 11 ms | 45 ms | 39 ms | 251 ms |
-| 1280x720 | **14 ms** | 40 ms | 163 ms | 150 ms | 529 ms |
-| 1920x1080 | **23 ms** | 90 ms | 389 ms | 338 ms | 997 ms |
-| 2560x1440 | **37 ms** | 161 ms | 683 ms | 604 ms | 2,358 ms |
-| 3840x2160 | **171 ms** | 499 ms | 2,033 ms | 1,390 ms | 3,763 ms |
-
-Even single-threaded, zensim is **3–4x faster** than fast-ssim2 and **4x faster** than C++ libjxl. Multi-threaded zensim is **12x faster** than C++ libjxl at 4K.
-
-### Butteraugli
-
-Both butteraugli implementations are single-threaded. butteraugli-rs is the imazen pure-Rust port of libjxl's butteraugli.
-
-| Resolution | C++ libjxl (FFI) | butteraugli-rs |
-|------------|----------------:|---------------:|
-| 512x512 | 72 ms | 60 ms |
-| 1280x720 | 304 ms | 253 ms |
-| 1920x1080 | 705 ms | 581 ms |
-| 2560x1440 | 1,219 ms | 1,027 ms |
-| 3840x2160 | 2,446 ms | 2,584 ms |
-
-Benchmarks are in `zensim-bench/` — run with `cargo bench -p zensim-bench --bench bench_compare`.
-
-## Design
-
-- **XYB color space** — cube root LMS, same perceptual space as ssimulacra2/butteraugli
-- **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator, uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform values where dark/bright errors should weigh equally.
-- **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
-- **O(1)-per-pixel box blur** — 1-pass default with fused SIMD kernels
-- **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs (mozjpeg, zenjpeg, zenjpeg-xyb, zenwebp, zenavif, zenjxl)
-- **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage), with safe scalar fallback
-
-### Feature layout (per channel per scale)
-
-19 features per channel per scale, all scored:
-
-**Basic features (13):**
-
-| Index | Feature | Description |
-|-------|---------|-------------|
-| 0 | ssim_mean | Mean SSIM error |
-| 1 | ssim_4th | L4-pooled SSIM error (emphasizes worst-case) |
-| 2 | ssim_2nd | L2-pooled SSIM error |
-| 3 | art_mean | Mean edge artifact (ringing, banding) |
-| 4 | art_4th | L4-pooled edge artifact |
-| 5 | art_2nd | L2-pooled edge artifact |
-| 6 | det_mean | Mean detail lost (blur, smoothing) |
-| 7 | det_4th | L4-pooled detail lost |
-| 8 | det_2nd | L2-pooled detail lost |
-| 9 | mse | Mean squared error in XYB |
-| 10 | hf_energy_loss | High-frequency energy loss (L2 ratio) |
-| 11 | hf_mag_loss | High-frequency magnitude loss (L1 ratio) |
-| 12 | hf_energy_gain | High-frequency energy gain (ringing/sharpening) |
-
-**Peak features (6):**
-
-| Index | Feature | Description |
-|-------|---------|-------------|
-| 13 | ssim_max | Maximum SSIM error |
-| 14 | art_max | Maximum edge artifact |
-| 15 | det_max | Maximum detail lost |
-| 16 | ssim_l8 | L8-pooled SSIM error (near-worst-case) |
-| 17 | art_l8 | L8-pooled edge artifact |
-| 18 | det_l8 | L8-pooled detail lost |
-
-Total: 4 scales × 3 channels × 19 features = 228 weights. `FeatureView` provides named access to all features.
+`ZensimProfile::latest()` returns `PreviewV0_2`. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
 ## Feature flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `avx512` | yes | Enable AVX-512 SIMD paths |
-| `imgref` | yes | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` (stride-aware) |
-| `training` | no | Expose metric internals for weight training/research |
+| `avx512` | yes | AVX-512 SIMD paths |
+| `imgref` | yes | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
+| `training` | no | Expose metric internals for weight training |
 | `classification` | no | Error classification API (`classify()`, `DeltaStats`, `ErrorCategory`) |
 
-## Workspace crates
+## Downloading evaluation datasets
+
+To reproduce the SROCC numbers above, you need the three human-rated datasets. All are freely available for research use.
+
+**TID2013** — [ponomarenko.info/tid2013.htm](https://www.ponomarenko.info/tid2013.htm)
+
+25 reference images, 3,000 distorted (24 distortion types × 5 levels). Download the RAR archive, extract so you have `mos_with_names.txt`, `reference_images/`, and `distorted_images/` in the same directory.
+
+*N. Ponomarenko et al., "Image database TID2013: Peculiarities, results and perspectives," Signal Processing: Image Communication, 2015. [DOI: 10.1016/j.image.2014.10.009](https://doi.org/10.1016/j.image.2014.10.009)*
+
+**KADID-10k** — [database.mmsp-kn.de/kadid-10k-database.html](https://database.mmsp-kn.de/kadid-10k-database.html)
+
+81 reference images, 10,125 distorted (25 distortion types × 5 levels). Download from [OSF](https://osf.io/xkqjh/). Expected structure: `dmos.csv` and `images/` directory in the same parent.
+
+*H. Lin, V. Hosu, D. Saupe, "KADID-10k: A Large-scale Artificially Distorted IQA Database," QoMEX 2019. [DOI: 10.1109/QoMEX.2019.8743252](https://doi.org/10.1109/QoMEX.2019.8743252)*
+
+**CID22** — [cloudinary.com/labs/cid22](https://cloudinary.com/labs/cid22)
+
+49 validation reference images, 4,292 distorted (6 codecs, medium-to-lossless quality). Download the validation set. Expected structure: `CID22_validation_set.csv`, `original/`, and `compressed/` in the same directory. CC BY-SA 4.0.
+
+*Jon Sneyers et al., "CID22: A Large-Scale Subjective Quality Assessment for Lossy Image Compression," 2024.*
+
+## Workspace
 
 | Crate | Description |
 |-------|-------------|
-| `zensim` | Core metric library |
-| `zensim-regress` | Visual regression testing — checksum management, tolerance specs, remote reference storage, amplified diff images, side-by-side montages, and sixel terminal display. See [zensim-regress/README.md](zensim-regress/README.md). |
-| `zensim-validate` | Training and validation CLI for weight optimization |
-| `zensim-bench` | Performance benchmarks (vs C++ libjxl, fast-ssim2, ssimulacra2-rs, butteraugli) |
-
-### Visual diff images (zensim-regress)
-
-`zensim-regress` generates amplified difference images and comparison montages for debugging visual regressions:
-
-```rust
-use zensim_regress::diff_image::*;
-
-// Amplified diff: abs(expected - actual) * amplification_factor
-let diff = generate_diff_image(&expected, &actual, 10);
-
-// Side-by-side montage: expected | diff | actual (with border)
-let montage = create_comparison_montage(&expected, &actual, 10, 2);
-
-// Raw RGBA byte variants also available
-let diff = generate_diff_image_raw(&exp_bytes, &act_bytes, w, h, 10);
-```
-
-Auto-save montages on checksum mismatch with `.with_diff_output()`, or display directly in sixel-capable terminals (foot, WezTerm, mintty). See [zensim-regress/README.md](zensim-regress/README.md) for full API docs.
+| [`zensim`](https://crates.io/crates/zensim) | Metric library |
+| [`zensim-regress`](https://crates.io/crates/zensim-regress) | Visual regression testing ([guide](zensim-regress/README.md)) |
+| `zensim-bench` | Comparative benchmarks |
+| `zensim-validate` | Evaluation and training CLI (internal) |
 
 ## MSRV
 

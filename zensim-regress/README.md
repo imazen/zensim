@@ -10,7 +10,7 @@ Add the dependency:
 
 ```toml
 [dev-dependencies]
-zensim-regress = "0.1"
+zensim-regress = "0.2"
 ```
 
 Write a test that checks pixel output against a known-good baseline:
