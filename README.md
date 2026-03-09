@@ -196,8 +196,27 @@ Total: 4 scales × 3 channels × 19 features = 228 weights. `FeatureView` provid
 | Crate | Description |
 |-------|-------------|
 | `zensim` | Core metric library |
-| `zensim-regress` | Visual regression testing with checksum management, tolerance specs, and remote reference storage. See [zensim-regress/README.md](zensim-regress/README.md). |
+| `zensim-regress` | Visual regression testing — checksum management, tolerance specs, remote reference storage, amplified diff images, side-by-side montages, and sixel terminal display. See [zensim-regress/README.md](zensim-regress/README.md). |
 | `zensim-validate` | Training and validation CLI for weight optimization |
+
+### Visual diff images (zensim-regress)
+
+`zensim-regress` generates amplified difference images and comparison montages for debugging visual regressions:
+
+```rust
+use zensim_regress::diff_image::*;
+
+// Amplified diff: abs(expected - actual) * amplification_factor
+let diff = generate_diff_image(&expected, &actual, 10);
+
+// Side-by-side montage: expected | diff | actual (with border)
+let montage = create_comparison_montage(&expected, &actual, 10, 2);
+
+// Raw RGBA byte variants also available
+let diff = generate_diff_image_raw(&exp_bytes, &act_bytes, w, h, 10);
+```
+
+Auto-save montages on checksum mismatch with `.with_diff_output()`, or display directly in sixel-capable terminals (foot, WezTerm, mintty). See [zensim-regress/README.md](zensim-regress/README.md) for full API docs.
 
 ## MSRV
 
