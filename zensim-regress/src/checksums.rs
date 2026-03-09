@@ -564,8 +564,10 @@ fn format_entry_line(entry: &ChecksumEntry) -> String {
 
 /// Result of checking a hash against a `.checksums` file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum CheckResult {
     /// Actual hash matches an active entry.
+    #[non_exhaustive]
     Match {
         /// Memorable name of the matched entry.
         entry_name: String,
@@ -576,6 +578,7 @@ pub enum CheckResult {
     /// [`ChecksumManager::check_file`] — hash-only
     /// [`ChecksumManager::check_hash`] cannot produce this variant
     /// because it has no pixel data to compare.
+    #[non_exhaustive]
     WithinTolerance {
         /// Zensim regression report.
         report: RegressionReport,
@@ -589,6 +592,7 @@ pub enum CheckResult {
         auto_accepted: bool,
     },
     /// No baseline exists for this test/detail. May have been auto-accepted.
+    #[non_exhaustive]
     NoBaseline {
         /// Memorable name of the actual hash.
         actual_name: String,
@@ -598,6 +602,7 @@ pub enum CheckResult {
         auto_accepted: bool,
     },
     /// Baseline exists but actual hash does not match any active entry.
+    #[non_exhaustive]
     Failed {
         /// Zensim regression report, if pixel comparison was possible.
         report: Option<RegressionReport>,
