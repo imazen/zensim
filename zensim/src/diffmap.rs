@@ -182,9 +182,12 @@ impl DiffmapWeighting {
         include_hf: bool,
     ) -> (Vec<[PixelFeatureWeights; 3]>, Vec<f32>) {
         match self {
-            Self::Trained => {
-                trained_multiscale_weights(profile_weights, num_scales, include_edge_mse, include_hf)
-            }
+            Self::Trained => trained_multiscale_weights(
+                profile_weights,
+                num_scales,
+                include_edge_mse,
+                include_hf,
+            ),
             Self::Balanced => {
                 let pw = PixelFeatureWeights {
                     ssim: 1.0,
@@ -200,9 +203,21 @@ impl DiffmapWeighting {
                 let per_group = 1.0 / n_groups as f32;
                 let ch = ch.map(|c| PixelFeatureWeights {
                     ssim: c.ssim * per_group,
-                    art: if include_edge_mse { c.ssim * per_group } else { 0.0 },
-                    det: if include_edge_mse { c.ssim * per_group } else { 0.0 },
-                    mse: if include_edge_mse { c.ssim * per_group } else { 0.0 },
+                    art: if include_edge_mse {
+                        c.ssim * per_group
+                    } else {
+                        0.0
+                    },
+                    det: if include_edge_mse {
+                        c.ssim * per_group
+                    } else {
+                        0.0
+                    },
+                    mse: if include_edge_mse {
+                        c.ssim * per_group
+                    } else {
+                        0.0
+                    },
                     hf_loss: if include_hf { c.ssim * per_group } else { 0.0 },
                     hf_mag: if include_hf { c.ssim * per_group } else { 0.0 },
                     hf_gain: if include_hf { c.ssim * per_group } else { 0.0 },
