@@ -1,3 +1,5 @@
+//! Error types for zensim image comparison.
+
 /// Errors from zensim computation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ZensimError {

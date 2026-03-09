@@ -86,10 +86,13 @@ pub fn parse_memorable_name(name: &str) -> Option<MemorableNameParts> {
 /// Parsed components of a memorable name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorableNameParts {
+    /// Adjective component (e.g., `"sunny"`).
     pub adjective: String,
+    /// Noun component (e.g., `"crab"`).
     pub noun: String,
     /// Hex prefix (5 chars for legacy, 10 chars for new petnames).
     pub hex: String,
+    /// Hash algorithm identifier (e.g., `"sea"`).
     pub algo: String,
 }
 

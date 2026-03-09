@@ -1,6 +1,6 @@
 //! Checksum hashing for pixel data and image files.
 //!
-//! Pluggable via the [`ChecksumHasher`] trait. The default [`SeaHasher`]
+//! Pluggable via the `ChecksumHasher` trait. The default `SeaHasher`
 //! is fast and non-cryptographic — fine for regression checksum comparison.
 
 use std::path::Path;

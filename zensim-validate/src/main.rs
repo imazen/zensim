@@ -2923,9 +2923,9 @@ fn train_pairwise(
 
 struct ProximalDatasetState {
     n_train: usize,
-    /// Centered feature matrix: features_c[dim][pair] = f - mean(f over pairs)
+    /// Centered feature matrix: `features_c[dim][pair] = f - mean(f over pairs)`
     features_c: Vec<Vec<f64>>,
-    /// Cross-correlation: c[dim] = Σ_i features_c[dim][i] * ranks_c[i]
+    /// Cross-correlation: `c[dim] = Σ_i features_c[dim][i] * ranks_c[i]`
     cross_corr: Vec<f64>,
     /// ||ranks_c|| (norm of centered human ranks)
     ranks_c_norm: f64,

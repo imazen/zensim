@@ -21,10 +21,12 @@ pub struct ShellUploader {
 }
 
 impl ShellUploader {
+    /// Create a new uploader with default 300-second timeout.
     pub fn new() -> Self {
         Self { timeout_secs: 300 }
     }
 
+    /// Set the upload timeout in seconds (0 = no limit).
     pub fn with_timeout(mut self, secs: u32) -> Self {
         self.timeout_secs = secs;
         self

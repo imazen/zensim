@@ -27,23 +27,41 @@
 
 #![forbid(unsafe_code)]
 
+/// CPU architecture detection and tag matching.
 pub mod arch;
+/// Checksum file management, hash comparison, and the primary `ChecksumManager` API.
 pub mod checksums;
+/// Amplified difference images and side-by-side comparison montages.
 pub mod diff_image;
+/// Human-readable diff formatting and tolerance shorthand parsing.
 pub mod diff_summary;
+/// Sixel terminal image rendering.
 pub mod display;
+/// Deterministic pixel distortions for testing tolerance boundaries.
 pub mod distortions;
+/// Error types.
 pub mod error;
+/// HTTP fetcher for downloading remote reference images.
 pub mod fetch;
+/// Deterministic synthetic test image generators.
 pub mod generators;
+/// Pixel and file hashing (`ChecksumHasher` trait, `SeaHasher`).
 pub mod hasher;
+/// Advisory file locking for parallel test safety.
 pub mod lock;
+/// TSV manifest writer for CI result aggregation across platforms.
 pub mod manifest;
+/// Memorable names from hashes (e.g., `sea:a1b2...` → `sunny-crab`).
 pub mod petname;
+/// S3/R2 remote reference image storage configuration.
 pub mod remote;
+/// HTML report generation from manifest data.
 pub mod report;
+/// Tolerance-based image comparison, reporting, and the `check_regression` function.
 pub mod testing;
+/// Tolerance specification with per-architecture overrides.
 pub mod tolerance;
+/// Shell-based file uploader for remote storage.
 pub mod upload;
 
 // Re-export key types at crate root for convenience

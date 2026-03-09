@@ -1,6 +1,6 @@
 //! RAII advisory file lock guard.
 //!
-//! Provides [`FileLockGuard`] which acquires an exclusive advisory lock on
+//! Provides `FileLockGuard` which acquires an exclusive advisory lock on
 //! creation and releases it on drop, preventing lock leaks on early returns
 //! or panics. Used internally by [`checksums`] and [`manifest`] for
 //! multi-process safety.

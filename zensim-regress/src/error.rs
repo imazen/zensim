@@ -8,24 +8,36 @@ pub enum RegressError {
     /// IO error reading/writing checksum files or images.
     #[error("IO error at {path}: {source}")]
     Io {
+        /// File path that caused the error.
         path: PathBuf,
+        /// Underlying IO error.
         source: std::io::Error,
     },
 
     /// Image decoding error.
     #[error("image error at {path}: {source}")]
     Image {
+        /// File path that caused the error.
         path: PathBuf,
+        /// Underlying image error.
         source: image::ImageError,
     },
 
     /// No checksum file found for this test.
     #[error("no checksum file for test {test_name:?} (expected at {path})")]
-    NoChecksumFile { test_name: String, path: PathBuf },
+    NoChecksumFile {
+        /// Test module name.
+        test_name: String,
+        /// Expected file path.
+        path: PathBuf,
+    },
 
     /// No active checksums in the file (all have confidence=0).
     #[error("no active checksums for test {test_name:?}")]
-    NoActiveChecksums { test_name: String },
+    NoActiveChecksums {
+        /// Test module name.
+        test_name: String,
+    },
 
     /// Zensim metric error during comparison.
     #[error("zensim error: {0}")]
@@ -33,11 +45,21 @@ pub enum RegressError {
 
     /// Failed to download a resource.
     #[error("fetch failed for {url}: {message}")]
-    Fetch { url: String, message: String },
+    Fetch {
+        /// URL that failed.
+        url: String,
+        /// Error description.
+        message: String,
+    },
 
     /// Failed to upload a resource.
     #[error("upload failed to {dest}: {message}")]
-    Upload { dest: String, message: String },
+    Upload {
+        /// Upload destination.
+        dest: String,
+        /// Error description.
+        message: String,
+    },
 }
 
 impl RegressError {

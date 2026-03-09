@@ -13,13 +13,13 @@
 //!
 //! | Function | Max delta | Affected pixels | Error type |
 //! |----------|-----------|-----------------|------------|
-//! | [`truncate_lsb`] | 1 | ~50% | Rounding/truncation |
-//! | [`expand_256`] | ~1 | varies | Bit-depth conversion |
-//! | [`round_half_up`] | 1 | ~50% odd values | Rounding mode |
-//! | [`premul_as_straight`] | proportional to alpha | semitransparent | Alpha handling |
-//! | [`straight_as_premul`] | proportional to alpha | semitransparent | Alpha handling |
-//! | [`channel_swap_rb`] | varies | all | Channel order |
-//! | [`invert`] | varies | all | Total inversion |
+//! | `truncate_lsb` | 1 | ~50% | Rounding/truncation |
+//! | `expand_256` | ~1 | varies | Bit-depth conversion |
+//! | `round_half_up` | 1 | ~50% odd values | Rounding mode |
+//! | `premul_as_straight` | proportional to alpha | semitransparent | Alpha handling |
+//! | `straight_as_premul` | proportional to alpha | semitransparent | Alpha handling |
+//! | `channel_swap_rb` | varies | all | Channel order |
+//! | `invert` | varies | all | Total inversion |
 
 /// Truncate least significant bit: `floor(v / 2) * 2`.
 ///

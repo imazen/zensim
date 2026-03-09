@@ -125,7 +125,10 @@ pub enum BlurKernel {
     /// - 1 = rectangular (fastest, enables fused streaming kernels)
     /// - 2 = triangular (~1.5× slower at scale 0)
     /// - 3 = piecewise-quadratic ≈ Gaussian (~2× slower)
-    Box { passes: u8 },
+    Box {
+        /// Number of passes (1 = rectangular, 2 = triangular, 3 ≈ Gaussian).
+        passes: u8,
+    },
 }
 
 impl Default for BlurKernel {
@@ -164,7 +167,11 @@ pub enum DownscaleFilter {
     MitchellBlur(f32),
 }
 
-/// **Bottom line:** the defaults (`blur_passes=1`) give peak performance.
+/// Configuration for the zensim metric computation pipeline.
+///
+/// Controls blur kernel, pyramid construction, and feature extraction.
+/// The defaults match the trained profile and give peak performance;
+/// only change these for training or research.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ZensimConfig {
@@ -1273,11 +1280,13 @@ pub struct FeatureView<'a> {
     peaks_total: usize,
 }
 
-/// XYB channel index constants for readability.
+/// XYB channel index: X (red-green chrominance).
 #[cfg(feature = "training")]
 pub const CH_X: usize = 0;
+/// XYB channel index: Y (luminance).
 #[cfg(feature = "training")]
 pub const CH_Y: usize = 1;
+/// XYB channel index: B (blue-yellow chrominance).
 #[cfg(feature = "training")]
 pub const CH_B: usize = 2;
 

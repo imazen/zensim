@@ -51,11 +51,17 @@ impl core::fmt::Display for ZensimProfile {
 /// on the corresponding field of `ZensimConfig` in `metric.rs`.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub struct ProfileParams {
+    /// Scoring weights (one per feature, length = `FEATURES_PER_SCALE * num_scales`).
     pub weights: &'static [f64],
+    /// Box blur radius at scale 0 (kernel width = `2 * radius + 1`).
     pub blur_radius: usize,
+    /// Number of iterated box blur passes (1 = rectangular, 3 ≈ Gaussian).
     pub blur_passes: u8,
+    /// Number of pyramid scales (typically 4).
     pub num_scales: usize,
+    /// Score mapping coefficient A in `100 - A × d^B`.
     pub score_mapping_a: f64,
+    /// Score mapping exponent B in `100 - A × d^B`.
     pub score_mapping_b: f64,
 }
 

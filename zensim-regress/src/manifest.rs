@@ -82,14 +82,19 @@ impl ManifestStatus {
 
 /// One row in the test manifest.
 pub struct ManifestEntry<'a> {
+    /// Fully qualified test name (e.g., `"resize::bicubic::200x200"`).
     pub test_name: &'a str,
+    /// Check result status.
     pub status: ManifestStatus,
     /// Measured zdsim (0.0 = identical, higher = worse). `None` if not computed.
     pub actual_zdsim: Option<f64>,
     /// Tolerance zdsim threshold. `None` if not applicable.
     pub tolerance_zdsim: Option<f64>,
+    /// Hash of the actual output (e.g., `"sea:a4839401fabae99c"`).
     pub actual_hash: &'a str,
+    /// Hash of the baseline reference. `None` for first-run results.
     pub baseline_hash: Option<&'a str>,
+    /// Human-readable diff summary. `None` if not applicable.
     pub diff_summary: Option<&'a str>,
 }
 

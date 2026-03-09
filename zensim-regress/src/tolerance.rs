@@ -1,8 +1,8 @@
 //! Tolerance specification types for visual regression testing.
 //!
-//! [`ToleranceSpec`] defines the acceptable pixel-level and perceptual
+//! `ToleranceSpec` defines the acceptable pixel-level and perceptual
 //! differences between actual output and a baseline reference.
-//! [`ToleranceOverride`] allows per-architecture tolerance adjustments.
+//! `ToleranceOverride` allows per-architecture tolerance adjustments.
 
 use std::collections::BTreeMap;
 

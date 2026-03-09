@@ -5,12 +5,12 @@
 //! and other regression testing APIs.
 //!
 //! Each generator targets specific image characteristics:
-//! - [`checkerboard`] — multi-frequency edges, good for edge detection and scaling tests
-//! - [`mandelbrot`] — fractal structure with features at every scale
-//! - [`value_noise`] — multi-octave noise texture, organic gradients
-//! - [`color_blocks`] — 16 saturated colors in a 4x4 grid, tests color space handling
-//! - [`gradient`] — smooth per-channel gradients, good for banding/quantization tests
-//! - [`solid`] — uniform color, useful as a baseline or for format round-trip tests
+//! - `checkerboard` — multi-frequency edges, good for edge detection and scaling tests
+//! - `mandelbrot` — fractal structure with features at every scale
+//! - `value_noise` — multi-octave noise texture, organic gradients
+//! - `color_blocks` — 16 saturated colors in a 4x4 grid, tests color space handling
+//! - `gradient` — smooth per-channel gradients, good for banding/quantization tests
+//! - `solid` — uniform color, useful as a baseline or for format round-trip tests
 
 /// Multi-frequency checkerboard with slight color variation.
 ///

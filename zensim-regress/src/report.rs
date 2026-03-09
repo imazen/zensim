@@ -35,16 +35,27 @@ use crate::diff_summary::{format_dissim as format_dissimilarity, format_score};
 /// A parsed manifest entry from the TSV file.
 #[derive(Debug, Clone)]
 pub struct ParsedEntry {
+    /// Fully qualified test name.
     pub test_name: String,
+    /// Status string: `"match"`, `"novel"`, `"accepted"`, or `"failed"`.
     pub status: String,
+    /// Measured dissimilarity (0.0 = identical).
     pub actual_zdsim: Option<f64>,
+    /// Tolerance dissimilarity threshold.
     pub tolerance_zdsim: Option<f64>,
+    /// Raw hash of actual output.
     pub actual_hash: String,
+    /// Memorable name for the actual hash.
     pub actual_petname: String,
+    /// File path for actual output image.
     pub actual_file: String,
+    /// Raw hash of the baseline reference.
     pub baseline_hash: String,
+    /// Memorable name for the baseline hash.
     pub baseline_petname: String,
+    /// File path for the baseline reference image.
     pub baseline_file: String,
+    /// Human-readable diff summary.
     pub diff_summary: String,
 }
 
@@ -191,6 +202,7 @@ pub fn ideal_amplification(max_channel_delta: u8) -> u8 {
 
 /// A platform's test results for the merged report.
 pub struct Platform {
+    /// Platform identifier (e.g., `"ubuntu-latest"`, `"windows-11-arm"`).
     pub name: String,
     /// Path to a combined manifest TSV file, OR a directory of per-process
     /// manifest files (from [`ManifestDir`]). Both are auto-detected.

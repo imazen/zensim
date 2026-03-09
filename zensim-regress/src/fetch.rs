@@ -7,13 +7,13 @@
 //!
 //! # Backends
 //!
-//! - [`ShellFetcher`] — cross-platform, uses `curl`, `wget`, or PowerShell
+//! - `ShellFetcher` — cross-platform, uses `curl`, `wget`, or PowerShell
 //!   (whichever is available). No extra dependencies.
-//! - Implement [`ResourceFetcher`] for custom backends (e.g., `ureq`, signed URLs).
+//! - Implement `ResourceFetcher` for custom backends (e.g., `ureq`, signed URLs).
 //!
 //! # Caching
 //!
-//! [`CachedFetcher`] wraps any fetcher with a local cache directory.
+//! `CachedFetcher` wraps any fetcher with a local cache directory.
 //! Files are stored by a caller-chosen filename. If the file already exists
 //! on disk, no download occurs.
 //!
@@ -54,10 +54,12 @@ pub struct ShellFetcher {
 }
 
 impl ShellFetcher {
+    /// Create a new fetcher with default 120-second timeout.
     pub fn new() -> Self {
         Self { timeout_secs: 120 }
     }
 
+    /// Set the download timeout in seconds (0 = no limit).
     pub fn with_timeout(mut self, secs: u32) -> Self {
         self.timeout_secs = secs;
         self
