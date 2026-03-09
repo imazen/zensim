@@ -166,6 +166,7 @@ pub enum DownscaleFilter {
 
 /// **Bottom line:** the defaults (`blur_passes=1`) give peak performance.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct ZensimConfig {
     /// Box blur radius at scale 0 (default: 5, giving an 11-pixel kernel).
     ///

@@ -656,19 +656,14 @@ fn main() {
                         ds
                     } else {
                         // Extract features for new pairs using same logic as load_and_compute
-                        let config = zensim::ZensimConfig {
-                            compute_all_features: compute_all,
-                            extended_features,
-                            extended_masking_strength,
-                            blur_passes,
-                            blur_radius,
-
-                            num_scales,
-                            downscale_filter,
-                            score_mapping_a: 18.0,
-                            score_mapping_b: 0.7,
-                            ..Default::default()
-                        };
+                        let mut config = zensim::ZensimConfig::default();
+                        config.compute_all_features = compute_all;
+                        config.extended_features = extended_features;
+                        config.extended_masking_strength = extended_masking_strength;
+                        config.blur_passes = blur_passes;
+                        config.blur_radius = blur_radius;
+                        config.num_scales = num_scales;
+                        config.downscale_filter = downscale_filter;
                         let nan_result = zensim::ZensimResult::nan();
 
                         // Group new pairs by reference
@@ -1489,18 +1484,14 @@ fn load_and_compute(
 
     let nan_result = zensim::ZensimResult::nan();
 
-    let config = zensim::ZensimConfig {
-        compute_all_features: compute_all,
-        extended_features,
-        extended_masking_strength,
-        blur_passes,
-        blur_radius,
-        num_scales,
-        downscale_filter,
-        score_mapping_a: 18.0,
-        score_mapping_b: 0.7,
-        ..Default::default()
-    };
+    let mut config = zensim::ZensimConfig::default();
+    config.compute_all_features = compute_all;
+    config.extended_features = extended_features;
+    config.extended_masking_strength = extended_masking_strength;
+    config.blur_passes = blur_passes;
+    config.blur_radius = blur_radius;
+    config.num_scales = num_scales;
+    config.downscale_filter = downscale_filter;
 
     let fpc = if config.extended_features {
         zensim::FEATURES_PER_CHANNEL_EXTENDED
