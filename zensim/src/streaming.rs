@@ -2279,7 +2279,7 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool, native_max: f64) -> De
 mod tests {
     use super::*;
     use crate::metric::compute_zensim_with_config;
-    use crate::profile::WEIGHTS_PREVIEW_V0_1;
+    use crate::metric::WEIGHTS;
     use crate::source::RgbSlice;
 
     /// Verify streaming produces equivalent results to full-image processing.
@@ -2331,7 +2331,7 @@ mod tests {
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
         let streaming_result =
-            compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
 
         assert_eq!(
             full_result.features().len(),
@@ -2496,7 +2496,7 @@ mod tests {
         let src_u8_img = RgbSlice::new(&src_u8, w, h);
         let dst_u8_img = RgbSlice::new(&dst_u8, w, h);
         let u8_result =
-            compute_zensim_streaming(&src_u8_img, &dst_u8_img, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_u8_img, &dst_u8_img, &config, WEIGHTS);
 
         // Linear f32 RGBA path via StridedBytes (opaque: alpha=1.0 ignored)
         let src_f32_bytes: &[u8] = bytemuck::cast_slice(&src_f32);
@@ -2518,7 +2518,7 @@ mod tests {
             crate::source::AlphaMode::Opaque,
         );
         let f32_result =
-            compute_zensim_streaming(&src_f32_img, &dst_f32_img, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_f32_img, &dst_f32_img, &config, WEIGHTS);
 
         // Score should match very closely (identical linear values → identical XYB → identical features)
         let score_rel =
@@ -2588,7 +2588,7 @@ mod tests {
         let src_rgb_img = RgbSlice::new(&src_rgb, w, h);
         let dst_rgb_img = RgbSlice::new(&dst_rgb, w, h);
         let rgb_result =
-            compute_zensim_streaming(&src_rgb_img, &dst_rgb_img, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_rgb_img, &dst_rgb_img, &config, WEIGHTS);
 
         // BGRA u8 path via StridedBytes
         let src_bgra_bytes: &[u8] = bytemuck::cast_slice(&src_bgra);
@@ -2608,7 +2608,7 @@ mod tests {
             crate::source::PixelFormat::Srgb8Bgra,
         );
         let bgra_result =
-            compute_zensim_streaming(&src_bgra_img, &dst_bgra_img, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_bgra_img, &dst_bgra_img, &config, WEIGHTS);
 
         // Opaque BGRA compositing in linear space should match sRGB u8 RGB
         // within a small tolerance (compositing detour adds FP rounding).
@@ -2663,13 +2663,13 @@ mod tests {
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
         let streaming_result =
-            compute_zensim_streaming(&src_img, &dst_img, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
         let precomputed = PrecomputedReference::new(&src_img, config.num_scales, true);
         let precomp_result = compute_zensim_streaming_with_ref(
             &precomputed,
             &dst_img,
             &config,
-            &WEIGHTS_PREVIEW_V0_1,
+            WEIGHTS,
         );
 
         assert_eq!(streaming_result.score(), precomp_result.score());
@@ -2733,13 +2733,13 @@ mod tests {
         .with_color_primaries(crate::source::ColorPrimaries::DisplayP3);
 
         let config = ZensimConfig::default();
-        let p3_result = compute_zensim_streaming(&src, &dst, &config, &WEIGHTS_PREVIEW_V0_1);
+        let p3_result = compute_zensim_streaming(&src, &dst, &config, WEIGHTS);
 
         // Also run sRGB-identical to verify the gamut path gives similar behavior
         let src_srgb = RgbSlice::new(&pixels, w, h);
         let dst_srgb = RgbSlice::new(&pixels, w, h);
         let srgb_result =
-            compute_zensim_streaming(&src_srgb, &dst_srgb, &config, &WEIGHTS_PREVIEW_V0_1);
+            compute_zensim_streaming(&src_srgb, &dst_srgb, &config, WEIGHTS);
 
         eprintln!(
             "P3 identical score: {:.6}, sRGB identical score: {:.6}",
@@ -2805,7 +2805,7 @@ mod tests {
         // dst_srgb uses default Srgb primaries
 
         let config = ZensimConfig::default();
-        let result = compute_zensim_streaming(&src_p3, &dst_srgb, &config, &WEIGHTS_PREVIEW_V0_1);
+        let result = compute_zensim_streaming(&src_p3, &dst_srgb, &config, WEIGHTS);
 
         assert!(
             result.score() < 100.0,
