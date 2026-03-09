@@ -573,8 +573,9 @@ pub enum CheckResult {
     /// Hash mismatch, but zensim comparison passes tolerance.
     ///
     /// Only returned by [`ChecksumManager::check_pixels`] and
-    /// [`ChecksumManager::check_file`] — hash-only [`check_hash`] cannot
-    /// produce this variant because it has no pixel data to compare.
+    /// [`ChecksumManager::check_file`] — hash-only
+    /// [`ChecksumManager::check_hash`] cannot produce this variant
+    /// because it has no pixel data to compare.
     WithinTolerance {
         /// Zensim regression report.
         report: RegressionReport,
@@ -606,6 +607,8 @@ pub enum CheckResult {
         actual_name: String,
         /// Raw hash of the actual output.
         actual_hash: String,
+        /// Path to the diff montage image, if one was generated.
+        montage_path: Option<std::path::PathBuf>,
     },
 }
 
@@ -693,6 +696,7 @@ impl std::fmt::Display for CheckResult {
                 report,
                 authoritative_name,
                 actual_name,
+                montage_path,
                 ..
             } => {
                 match report {
@@ -708,6 +712,9 @@ impl std::fmt::Display for CheckResult {
                         )?;
                     }
                     None => write!(f, "FAIL (no reference image, vs {authoritative_name})")?,
+                }
+                if let Some(path) = montage_path {
+                    write!(f, "\n  Montage: {}", path.display())?;
                 }
                 // Suggest the line to add to the .checksums file
                 let arch = crate::arch::detect_arch_tag();
@@ -964,6 +971,7 @@ impl ChecksumManager {
                     authoritative_name: authoritative.clone(),
                     actual_name,
                     actual_hash: actual_hash.to_string(),
+                    montage_path: None,
                 });
             }
         }
@@ -1270,6 +1278,7 @@ impl ChecksumManager {
                             authoritative_name: authoritative.clone(),
                             actual_name,
                             actual_hash: actual_hash.to_string(),
+                            montage_path: None,
                         });
                     }
                 };
@@ -1292,7 +1301,7 @@ impl ChecksumManager {
 
                 // Convert actual to packed RGBA only for the diff montage.
                 let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
-                self.save_diff_montage(
+                let montage_path = self.save_diff_montage(
                     module,
                     test_name,
                     detail_name,
@@ -1366,6 +1375,7 @@ impl ChecksumManager {
                     authoritative_name: authoritative.clone(),
                     actual_name,
                     actual_hash: actual_hash.to_string(),
+                    montage_path,
                 });
             }
         }
@@ -1507,6 +1517,7 @@ impl ChecksumManager {
     // ─── Diff montage ───────────────────────────────────────────────────
 
     /// Save comparison montage if diff_dir is configured.
+    /// Returns the path to the saved montage, if successful.
     #[allow(clippy::too_many_arguments)]
     fn save_diff_montage(
         &self,
@@ -1519,30 +1530,36 @@ impl ChecksumManager {
         actual_rgba: &[u8],
         aw: u32,
         ah: u32,
-    ) {
-        let Some(dir) = &self.diff_dir else { return };
+    ) -> Option<std::path::PathBuf> {
+        let dir = self.diff_dir.as_ref()?;
         let diff_dir = dir.join(module);
         if let Err(e) = std::fs::create_dir_all(&diff_dir) {
             eprintln!(
                 "Warning: failed to create diff dir {}: {e}",
                 diff_dir.display()
             );
-            return;
+            return None;
         }
         let flat_name = flat_test_name(test_name, detail_name);
         let out_path = diff_dir.join(format!("{flat_name}.png"));
 
         if rw != aw || rh != ah {
             // Dimensions differ — save actual as-is
-            if let Some(img) = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec()) {
-                let _ = img.save(&out_path);
+            if let Some(img) = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+                && img.save(&out_path).is_ok()
+            {
+                return Some(out_path);
             }
-            return;
+            return None;
         }
 
         let montage = create_comparison_montage_raw(ref_rgba, actual_rgba, rw, rh, 10, 2);
-        if let Err(e) = montage.save(&out_path) {
-            eprintln!("Warning: failed to save diff image for {flat_name}: {e}");
+        match montage.save(&out_path) {
+            Ok(()) => Some(out_path),
+            Err(e) => {
+                eprintln!("Warning: failed to save diff image for {flat_name}: {e}");
+                None
+            }
         }
     }
 
