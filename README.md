@@ -11,7 +11,7 @@ Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — mu
 
 ## Speed
 
-AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O, pre-allocated buffers. Only zensim uses multi-threading (rayon, all cores); everything else is single-threaded. Median of 100 samples via criterion.
+AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O, pre-allocated buffers. zensim and ssimulacra2-rs use rayon (all cores); C++ libjxl, fast-ssim2, and butteraugli-rs are single-threaded. Enabling rayon for fast-ssim2 and butteraugli-rs made them slower at small sizes due to thread-pool overhead, so they're benchmarked single-threaded. Median of 100 samples via criterion.
 
 ### SSIMULACRA2 implementations
 
