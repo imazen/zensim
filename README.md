@@ -79,7 +79,7 @@ Scores are calibrated from 0 to 100 on our training data (344k synthetic pairs, 
 | `raw_distance()` | Weighted feature distance before nonlinear mapping (lower = better) |
 | `dissimilarity()` | `(100 - score) / 100` — 0 = identical |
 | `approx_ssim2()` | Approximate SSIMULACRA2 score (MAE 4.4 pts, r = 0.974) |
-| `approx_dssim()` | Approximate DSSIM value (MAE 0.0013, r = 0.952) |
+| `approx_dssim()` | Approximate DSSIM value (MAE 0.00129, r = 0.952) |
 | `approx_butteraugli()` | Approximate butteraugli distance (MAE 1.65, r = 0.713) |
 | `features()` | Raw feature vector for diagnostics |
 | `mean_offset()` | Per-channel XYB mean shift `[X, Y, B]` |
@@ -92,11 +92,12 @@ Results are deterministic for the same input on the same architecture. Cross-arc
 
 Each `ZensimProfile` variant bundles weights and parameters that affect score output. A given profile produces approximately the same scores across versions, but profiles may be removed in future major versions as the algorithm evolves.
 
-| Profile | Weights | Training data | 5-fold CV SROCC |
-|---------|---------|---------------|-----------------|
-| `PreviewV0_1` | 228 | 344k synthetic pairs (6 codecs, q5–q100) | 0.9936 |
+| Profile | Weights | Training data | SROCC |
+|---------|---------|---------------|-------|
+| `PreviewV0_1` | 228 | 344k synthetic pairs (6 codecs, q5–q100) | 0.9936 (5-fold CV) |
+| `PreviewV0_2` | 228 | 218k concordance-filtered pairs (Nelder-Mead) | 0.9960 |
 
-`ZensimProfile::latest()` returns the most recent profile.
+`ZensimProfile::latest()` returns `PreviewV0_2`.
 
 ## Input requirements
 
@@ -144,7 +145,7 @@ Benchmarks are in `zensim-bench/` — run with `cargo bench -p zensim-bench --be
 - **Modified SSIM** — ssimulacra2's variant: drops the luminance denominator, uses `1 - (mu1-mu2)²` directly. Correct for perceptually-uniform values where dark/bright errors should weigh equally.
 - **4-scale pyramid** — 1×, 2×, 4×, 8× via box downscale (ssimulacra2 uses 6)
 - **O(1)-per-pixel box blur** — 1-pass default with fused SIMD kernels
-- **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs (mozjpeg, zenjpeg, jpegli, zenwebp, zenavif, zenjxl)
+- **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs (mozjpeg, zenjpeg, zenjpeg-xyb, zenwebp, zenavif, zenjxl)
 - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage), with safe scalar fallback
 
 ### Feature layout (per channel per scale)
@@ -198,6 +199,7 @@ Total: 4 scales × 3 channels × 19 features = 228 weights. `FeatureView` provid
 | `zensim` | Core metric library |
 | `zensim-regress` | Visual regression testing — checksum management, tolerance specs, remote reference storage, amplified diff images, side-by-side montages, and sixel terminal display. See [zensim-regress/README.md](zensim-regress/README.md). |
 | `zensim-validate` | Training and validation CLI for weight optimization |
+| `zensim-bench` | Performance benchmarks (vs C++ libjxl, fast-ssim2, ssimulacra2-rs, butteraugli) |
 
 ### Visual diff images (zensim-regress)
 
