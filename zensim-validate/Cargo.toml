@@ -15,7 +15,7 @@ zensim = { path = "../zensim", features = ["training"] }
 image = { workspace = true }
 rayon = { workspace = true }
 csv = "1"
-calamine = "0.26"
+calamine = "0.34"
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 glob = "0.3"

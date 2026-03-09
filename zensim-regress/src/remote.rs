@@ -22,7 +22,7 @@ use crate::upload::{ResourceUploader, ShellUploader};
 
 /// Configuration for remote reference image storage.
 pub struct ReferenceStorage {
-    /// Base URL for downloading (e.g., "https://s3-us-west-2.amazonaws.com/bucket/images")
+    /// Base URL for downloading (e.g., `https://s3-us-west-2.amazonaws.com/bucket/images`)
     download_base_url: String,
     /// Remote destination prefix for uploads (e.g., "s3://bucket/images" or "r2:bucket/images")
     upload_prefix: Option<String>,

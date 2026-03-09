@@ -18,7 +18,7 @@
 //! | [`round_half_up`] | 1 | ~50% odd values | Rounding mode |
 //! | [`premul_as_straight`] | proportional to alpha | semitransparent | Alpha handling |
 //! | [`straight_as_premul`] | proportional to alpha | semitransparent | Alpha handling |
-//! | [`channel_swap`] | varies | all | Channel order |
+//! | [`channel_swap_rb`] | varies | all | Channel order |
 //! | [`invert`] | varies | all | Total inversion |
 
 /// Truncate least significant bit: `floor(v / 2) * 2`.

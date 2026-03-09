@@ -677,7 +677,7 @@ pub(crate) fn build_report(
 ///
 /// # Errors
 ///
-/// Returns [`ZensimError`](zensim::ZensimError) if dimensions are mismatched or too small.
+/// Returns [`ZensimError`] if dimensions are mismatched or too small.
 pub fn check_regression(
     zensim: &Zensim,
     expected: &impl ImageSource,

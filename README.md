@@ -1,8 +1,8 @@
-[![CI](https://github.com/imazen/zensim/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/zensim/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/zensim.svg)](https://crates.io/crates/zensim)
-[![docs.rs](https://docs.rs/zensim/badge.svg)](https://docs.rs/zensim)
-[![codecov](https://codecov.io/gh/imazen/zensim/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/zensim)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/imazen/zensim/actions/workflows/ci.yml/badge.svg?style=for-the-badge)](https://github.com/imazen/zensim/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/zensim.svg?style=for-the-badge)](https://crates.io/crates/zensim)
+[![docs.rs](https://img.shields.io/docsrs/zensim?style=for-the-badge)](https://docs.rs/zensim)
+[![codecov](https://codecov.io/gh/imazen/zensim/branch/main/graph/badge.svg?style=for-the-badge)](https://codecov.io/gh/imazen/zensim)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=for-the-badge)](LICENSE-MIT)
 
 # zensim
 
@@ -224,7 +224,7 @@ Rust 1.89.0 (2024 edition).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE)
 
 ## AI-Generated Code Notice
 

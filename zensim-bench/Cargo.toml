@@ -16,13 +16,13 @@ zensim = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.7", features = ["imgref"] }
-butteraugli = "0.8"
+butteraugli = "0.9"
 linear-srgb = { workspace = true }
 imgref = { workspace = true }
 rgb = { workspace = true }
 zenpnm = "0.1"
 bytemuck = { workspace = true }
-which = "7"
+which = "8"
 
 [[bench]]
 name = "bench_compare"

@@ -307,7 +307,7 @@ pub fn format_dissim(d: f64) -> String {
 
 // ─── Parsing ─────────────────────────────────────────────────────────────
 
-/// Parse a tolerance shorthand string back into a [`ToleranceSpec`].
+/// Parse a tolerance shorthand string back into a [`crate::Tolerance`].
 ///
 /// Handles the format produced by [`format_tolerance_shorthand`], including
 /// named presets:

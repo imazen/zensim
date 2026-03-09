@@ -47,7 +47,7 @@ pub enum DiffmapWeighting {
     /// channel weights are Y-dominant (~99.3% luminance). At coarser scales,
     /// color channels gain more influence.
     ///
-    /// Automatically tracks the profile passed to [`Zensim::new`].
+    /// Automatically tracks the profile passed to [`crate::Zensim::new`].
     Trained,
 
     /// Moderate Y-dominant weights with visible color contribution:

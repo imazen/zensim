@@ -2278,8 +2278,8 @@ fn finalize_delta_stats(acc: DeltaAccum, has_alpha: bool, native_max: f64) -> De
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metric::compute_zensim_with_config;
     use crate::metric::WEIGHTS;
+    use crate::metric::compute_zensim_with_config;
     use crate::source::RgbSlice;
 
     /// Verify streaming produces equivalent results to full-image processing.
@@ -2330,8 +2330,7 @@ mod tests {
         // Streaming path (forced via direct call)
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
-        let streaming_result =
-            compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
+        let streaming_result = compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
 
         assert_eq!(
             full_result.features().len(),
@@ -2495,8 +2494,7 @@ mod tests {
         // sRGB u8 path
         let src_u8_img = RgbSlice::new(&src_u8, w, h);
         let dst_u8_img = RgbSlice::new(&dst_u8, w, h);
-        let u8_result =
-            compute_zensim_streaming(&src_u8_img, &dst_u8_img, &config, WEIGHTS);
+        let u8_result = compute_zensim_streaming(&src_u8_img, &dst_u8_img, &config, WEIGHTS);
 
         // Linear f32 RGBA path via StridedBytes (opaque: alpha=1.0 ignored)
         let src_f32_bytes: &[u8] = bytemuck::cast_slice(&src_f32);
@@ -2517,8 +2515,7 @@ mod tests {
             crate::source::PixelFormat::LinearF32Rgba,
             crate::source::AlphaMode::Opaque,
         );
-        let f32_result =
-            compute_zensim_streaming(&src_f32_img, &dst_f32_img, &config, WEIGHTS);
+        let f32_result = compute_zensim_streaming(&src_f32_img, &dst_f32_img, &config, WEIGHTS);
 
         // Score should match very closely (identical linear values → identical XYB → identical features)
         let score_rel =
@@ -2587,8 +2584,7 @@ mod tests {
         // RGB u8 path
         let src_rgb_img = RgbSlice::new(&src_rgb, w, h);
         let dst_rgb_img = RgbSlice::new(&dst_rgb, w, h);
-        let rgb_result =
-            compute_zensim_streaming(&src_rgb_img, &dst_rgb_img, &config, WEIGHTS);
+        let rgb_result = compute_zensim_streaming(&src_rgb_img, &dst_rgb_img, &config, WEIGHTS);
 
         // BGRA u8 path via StridedBytes
         let src_bgra_bytes: &[u8] = bytemuck::cast_slice(&src_bgra);
@@ -2607,8 +2603,7 @@ mod tests {
             w * 4,
             crate::source::PixelFormat::Srgb8Bgra,
         );
-        let bgra_result =
-            compute_zensim_streaming(&src_bgra_img, &dst_bgra_img, &config, WEIGHTS);
+        let bgra_result = compute_zensim_streaming(&src_bgra_img, &dst_bgra_img, &config, WEIGHTS);
 
         // Opaque BGRA compositing in linear space should match sRGB u8 RGB
         // within a small tolerance (compositing detour adds FP rounding).
@@ -2662,15 +2657,10 @@ mod tests {
 
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
-        let streaming_result =
-            compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
+        let streaming_result = compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
         let precomputed = PrecomputedReference::new(&src_img, config.num_scales, true);
-        let precomp_result = compute_zensim_streaming_with_ref(
-            &precomputed,
-            &dst_img,
-            &config,
-            WEIGHTS,
-        );
+        let precomp_result =
+            compute_zensim_streaming_with_ref(&precomputed, &dst_img, &config, WEIGHTS);
 
         assert_eq!(streaming_result.score(), precomp_result.score());
         assert_eq!(
@@ -2738,8 +2728,7 @@ mod tests {
         // Also run sRGB-identical to verify the gamut path gives similar behavior
         let src_srgb = RgbSlice::new(&pixels, w, h);
         let dst_srgb = RgbSlice::new(&pixels, w, h);
-        let srgb_result =
-            compute_zensim_streaming(&src_srgb, &dst_srgb, &config, WEIGHTS);
+        let srgb_result = compute_zensim_streaming(&src_srgb, &dst_srgb, &config, WEIGHTS);
 
         eprintln!(
             "P3 identical score: {:.6}, sRGB identical score: {:.6}",

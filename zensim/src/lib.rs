@@ -94,7 +94,7 @@
 //! - **228 trained weights** — optimized on 344k synthetic pairs across 6 codecs
 //! - **AVX2/AVX-512 SIMD** throughout via [archmage](https://crates.io/crates/archmage)
 //!
-//! See the [`metric`](crate::metric) module source for the full feature extraction math.
+//! See the `metric` module source for the full feature extraction math.
 
 #![forbid(unsafe_code)]
 
