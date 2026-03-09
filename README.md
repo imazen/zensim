@@ -5,23 +5,33 @@
 
 # zensim
 
-Perceptual image similarity in 23 ms at 1080p. 12x faster than C++ SSIMULACRA2 at 4K.
+Perceptual image similarity in 22 ms at 1080p. 18x faster than C++ SSIMULACRA2 at 4K.
 
 Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
 
 ## Speed
 
-AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O. zensim and ssimulacra2-rs use rayon (all cores); C++ libjxl and fast-ssim2 are single-threaded.
+AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O, pre-allocated buffers. zensim and ssimulacra2-rs use rayon (all cores); all others are single-threaded. Median of 100 samples via criterion.
 
-| Resolution | zensim | zensim (1 thread) | C++ libjxl | fast-ssim2 | ssimulacra2-rs |
-|------------|-------:|-----------:|-----------:|-----------:|---------------:|
-| 1280x720 | **14 ms** | 40 ms | 163 ms | 150 ms | 529 ms |
-| 1920x1080 | **23 ms** | 90 ms | 389 ms | 338 ms | 997 ms |
-| 3840x2160 | **171 ms** | 499 ms | 2,033 ms | 1,390 ms | 3,763 ms |
+### SSIMULACRA2 implementations
 
-Single-threaded, zensim is 3-4x faster than C++ libjxl. Multi-threaded at 4K: 12x.
+| Resolution | zensim | zensim (1 thread) | C++ libjxl (FFI) | fast-ssim2 | ssimulacra2-rs |
+|------------|-------:|------------------:|-----------------:|-----------:|---------------:|
+| 1280x720 | **14 ms** | 39 ms | 249 ms | 111 ms | 545 ms |
+| 1920x1080 | **22 ms** | 89 ms | 377 ms | 350 ms | 1,056 ms |
+| 3840x2160 | **91 ms** | 366 ms | 1,674 ms | 1,364 ms | 3,980 ms |
 
-Reproduce: `cargo bench -p zensim-bench --bench bench_compare`
+### Butteraugli implementations (single-threaded)
+
+| Resolution | C++ libjxl (FFI) | butteraugli-rs |
+|------------|----------------:|---------------:|
+| 1280x720 | 269 ms | 83 ms |
+| 1920x1080 | 647 ms | 154 ms |
+| 3840x2160 | 2,688 ms | 906 ms |
+
+Single-threaded zensim is 4x faster than C++ libjxl SSIMULACRA2. Multi-threaded at 4K: 18x.
+
+Reproduce: `cargo bench -p zensim-bench --bench bench_compare` (C++ libjxl FFI requires a local libjxl build; set `LIBJXL_DIR` or let the build script auto-clone it)
 
 ## Correlation with human perception
 
