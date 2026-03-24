@@ -123,6 +123,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p zensim --test corpus_icc -- --ignored --nocapture
 
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+      - name: Check MSRV
+        run: cargo hack check --rust-version --workspace
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
