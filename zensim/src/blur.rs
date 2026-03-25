@@ -1555,7 +1555,10 @@ pub fn downscale_2x_inplace(plane: &mut Vec<f32>, width: usize, height: usize) -
 }
 
 fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
-    incant!(downscale_2x_inner(plane, width, new_w, new_h), [v4, v3, scalar]);
+    incant!(
+        downscale_2x_inner(plane, width, new_w, new_h),
+        [v4, v3, scalar]
+    );
 }
 
 /// AVX-512 downscale: process 16 output pixels per iteration.

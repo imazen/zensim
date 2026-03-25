@@ -56,7 +56,10 @@ pub fn edge_diff_channel_extended(
     mu1: &[f32],
     mu2: &[f32],
 ) -> (f64, f64, f64, f64, f64, f64, f64, f64, f32, f32) {
-    incant!(edge_diff_extended_inner(img1, img2, mu1, mu2), [v4, v3, scalar])
+    incant!(
+        edge_diff_extended_inner(img1, img2, mu1, mu2),
+        [v4, v3, scalar]
+    )
 }
 
 /// Like ssim_channel but weights each pixel distance by mask[i] before accumulation.
@@ -83,7 +86,10 @@ pub fn edge_diff_channel_masked(
     mu2: &[f32],
     mask: &[f32],
 ) -> (f64, f64, f64, f64, f64, f64) {
-    incant!(edge_diff_masked_inner(img1, img2, mu1, mu2, mask), [v4, v3, scalar])
+    incant!(
+        edge_diff_masked_inner(img1, img2, mu1, mu2, mask),
+        [v4, v3, scalar]
+    )
 }
 
 // --- SIMD implementations ---
