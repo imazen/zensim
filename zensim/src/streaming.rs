@@ -22,8 +22,6 @@ use crate::simd_ops::{
     sq_diff_sum, sq_sum_into, ssim_channel_extended, ssim_channel_masked,
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
-#[allow(unused_imports)]
-use archmage::SimdToken;
 use archmage::autoversion;
 use rayon::prelude::*;
 use std::sync::Mutex;
@@ -118,7 +116,7 @@ fn upsample_2x_add(
 
 /// Weighted add: `dst[i] += src[i] * weight`. Auto-vectorized across architectures.
 #[autoversion]
-fn weighted_add(_t: SimdToken, dst: &mut [f32], src: &[f32], weight: f32) {
+fn weighted_add(dst: &mut [f32], src: &[f32], weight: f32) {
     let n = dst.len().min(src.len());
     for i in 0..n {
         dst[i] += src[i] * weight;
@@ -127,7 +125,7 @@ fn weighted_add(_t: SimdToken, dst: &mut [f32], src: &[f32], weight: f32) {
 
 /// Diffmap accumulation: SSIM-only path. `dm[i] += weight * ssim[off + i]`.
 #[autoversion]
-fn diffmap_accum_ssim(_t: SimdToken, dm: &mut [f32], ssim: &[f32], off: usize, weight: f32) {
+fn diffmap_accum_ssim(dm: &mut [f32], ssim: &[f32], off: usize, weight: f32) {
     for i in 0..dm.len() {
         dm[i] += weight * ssim[off + i];
     }
@@ -139,7 +137,6 @@ fn diffmap_accum_ssim(_t: SimdToken, dm: &mut [f32], ssim: &[f32], off: usize, w
 /// 7-argument limit for clippy and autoversion-generated variants.
 #[autoversion]
 fn diffmap_accum_edge_mse(
-    _t: SimdToken,
     dm: &mut [f32],
     ssim: &[f32],
     src: &[f32],
@@ -172,7 +169,6 @@ fn diffmap_accum_edge_mse(
 /// Weights are packed as `[hf_loss_w, hf_mag_w, hf_gain_w]`.
 #[autoversion]
 fn diffmap_accum_hf(
-    _t: SimdToken,
     dm: &mut [f32],
     src: &[f32],
     dst: &[f32],
@@ -196,7 +192,7 @@ fn diffmap_accum_hf(
 /// Upsample one source row to two destination rows (nearest-neighbor 2×).
 /// Each source pixel duplicates to a 1×2 horizontal pair in the destination row.
 #[autoversion]
-fn upsample_row_2x(_t: SimdToken, src_row: &[f32], dst_row: &mut [f32], weight: f32) {
+fn upsample_row_2x(src_row: &[f32], dst_row: &mut [f32], weight: f32) {
     let dst_len = dst_row.len();
     for (i, &s) in src_row.iter().enumerate() {
         let v = s * weight;

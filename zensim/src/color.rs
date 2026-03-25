@@ -137,7 +137,7 @@ pub fn srgb_to_positive_xyb_planar_into(
 ) {
     incant!(
         srgb_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
-        [v4, v3]
+        [v4, v3, scalar]
     );
 }
 
@@ -151,7 +151,7 @@ pub fn srgb_to_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
 
     incant!(
         srgb_to_xyb_planar_inner(pixels, &mut x_plane, &mut y_plane, &mut b_plane),
-        [v3]
+        [v3, scalar]
     );
 
     [x_plane, y_plane, b_plane]
@@ -167,7 +167,7 @@ pub fn srgb_to_xyb_planar_into(
 ) {
     incant!(
         srgb_to_xyb_planar_inner(pixels, x_plane, y_plane, b_plane),
-        [v3]
+        [v3, scalar]
     );
 }
 
@@ -178,7 +178,7 @@ pub fn srgb_to_xyb_planar_into(
 #[inline(always)]
 #[allow(dead_code)]
 pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
-    incant!(make_positive_xyb_inner(x, y, b), [v3]);
+    incant!(make_positive_xyb_inner(x, y, b), [v3, scalar]);
 }
 
 // --- SIMD implementations ---
@@ -813,7 +813,7 @@ pub fn linear_to_positive_xyb_planar_into(
 ) {
     incant!(
         linear_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
-        [v4, v3]
+        [v4, v3, scalar]
     );
 }
 

@@ -9,8 +9,6 @@
 //! Designed for encoder quantization loops: the global zensim score tracks
 //! convergence, while the diffmap tells the encoder WHERE to adjust quality.
 
-#[allow(unused_imports)]
-use archmage::SimdToken;
 use archmage::autoversion;
 
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, config_from_params, validate_pair};
@@ -407,7 +405,6 @@ fn apply_contrast_masking(
 /// `dims` is packed as `[width, iw, r]` to keep param count low for autoversion.
 #[autoversion]
 fn apply_masking_row(
-    _t: SimdToken,
     dm_row: &mut [f32],
     int_sum: &[f64],
     int_sq: &[f64],
@@ -442,7 +439,7 @@ fn apply_masking_row(
 
 /// Element-wise sqrt, auto-vectorized.
 #[autoversion]
-fn sqrt_inplace(_t: SimdToken, data: &mut [f32]) {
+fn sqrt_inplace(data: &mut [f32]) {
     for v in data.iter_mut() {
         *v = v.sqrt();
     }

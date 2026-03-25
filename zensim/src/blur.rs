@@ -40,7 +40,7 @@ pub fn box_blur_v_from_copy(
 ) {
     incant!(
         box_blur_v_copy_inner(src, dst, width, height, radius),
-        [v4, v3]
+        [v4, v3, scalar]
     );
 }
 
@@ -323,7 +323,7 @@ pub(crate) fn box_blur_h(
 ) {
     incant!(
         box_blur_h_inner(input, output, width, height, radius),
-        [v4, v3]
+        [v4, v3, scalar]
     );
 }
 
@@ -647,7 +647,7 @@ pub(crate) fn fused_blur_h_mu(
 ) {
     incant!(
         fused_blur_h_mu_inner(src, dst, out_mu1, out_mu2, width, height, radius),
-        [v4, v3]
+        [v4, v3, scalar]
     );
 }
 
@@ -1048,7 +1048,7 @@ pub fn fused_blur_h_ssim(
             height,
             radius
         ),
-        [v4, v3]
+        [v4, v3, scalar]
     );
 }
 
@@ -1555,7 +1555,7 @@ pub fn downscale_2x_inplace(plane: &mut Vec<f32>, width: usize, height: usize) -
 }
 
 fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
-    incant!(downscale_2x_inner(plane, width, new_w, new_h), [v4, v3]);
+    incant!(downscale_2x_inner(plane, width, new_w, new_h), [v4, v3, scalar]);
 }
 
 /// AVX-512 downscale: process 16 output pixels per iteration.

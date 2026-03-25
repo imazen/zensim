@@ -10,27 +10,27 @@ use magetypes::simd::generic::f32x16;
 
 /// Element-wise multiply: out[i] = a[i] * b[i]
 pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(mul_into_inner(a, b, out), [v4, v3]);
+    incant!(mul_into_inner(a, b, out), [v4, v3, scalar]);
 }
 
 /// Element-wise: out[i] = a[i]*a[i] + b[i]*b[i] (sum of squares)
 pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(sq_sum_into_inner(a, b, out), [v4, v3]);
+    incant!(sq_sum_into_inner(a, b, out), [v4, v3, scalar]);
 }
 
 /// Compute sum of squared differences: sum((a[i] - b[i])²)
 pub fn sq_diff_sum(a: &[f32], b: &[f32]) -> f64 {
-    incant!(sq_diff_sum_inner(a, b), [v4, v3])
+    incant!(sq_diff_sum_inner(a, b), [v4, v3, scalar])
 }
 
 /// Compute sum of absolute differences: sum(|a[i] - b[i]|)
 pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
-    incant!(abs_diff_sum_inner(a, b), [v4, v3])
+    incant!(abs_diff_sum_inner(a, b), [v4, v3, scalar])
 }
 
 /// Element-wise absolute difference: out[i] = |a[i] - b[i]|
 pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(abs_diff_into_inner(a, b, out), [v4, v3]);
+    incant!(abs_diff_into_inner(a, b, out), [v4, v3, scalar]);
 }
 
 /// Like ssim_channel but also computes 8th-power pool and max.
@@ -44,7 +44,7 @@ pub fn ssim_channel_extended(
 ) -> (f64, f64, f64, f64, f32) {
     incant!(
         ssim_channel_extended_inner(mu1, mu2, sum_sq, sigma12),
-        [v4, v3]
+        [v4, v3, scalar]
     )
 }
 
@@ -56,7 +56,7 @@ pub fn edge_diff_channel_extended(
     mu1: &[f32],
     mu2: &[f32],
 ) -> (f64, f64, f64, f64, f64, f64, f64, f64, f32, f32) {
-    incant!(edge_diff_extended_inner(img1, img2, mu1, mu2), [v4, v3])
+    incant!(edge_diff_extended_inner(img1, img2, mu1, mu2), [v4, v3, scalar])
 }
 
 /// Like ssim_channel but weights each pixel distance by mask[i] before accumulation.
@@ -70,7 +70,7 @@ pub fn ssim_channel_masked(
 ) -> (f64, f64, f64) {
     incant!(
         ssim_channel_masked_inner(mu1, mu2, sum_sq, sigma12, mask),
-        [v4, v3]
+        [v4, v3, scalar]
     )
 }
 
@@ -83,7 +83,7 @@ pub fn edge_diff_channel_masked(
     mu2: &[f32],
     mask: &[f32],
 ) -> (f64, f64, f64, f64, f64, f64) {
-    incant!(edge_diff_masked_inner(img1, img2, mu1, mu2, mask), [v4, v3])
+    incant!(edge_diff_masked_inner(img1, img2, mu1, mu2, mask), [v4, v3, scalar])
 }
 
 // --- SIMD implementations ---

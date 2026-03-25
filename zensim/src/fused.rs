@@ -119,7 +119,7 @@ pub(crate) fn fused_vblur_features_ssim(
             sd_out,
             store_sd
         ),
-        [v4, v3]
+        [v4, v3, scalar]
     )
 }
 
@@ -157,7 +157,7 @@ pub(crate) fn fused_vblur_features_edge(
             mu2_out,
             store_mu
         ),
-        [v4, v3]
+        [v4, v3, scalar]
     )
 }
 
