@@ -13,16 +13,16 @@ Butteraugli isn't just a metric bolted onto libjxl — it's co-evolved with the 
 
 Any replacement metric fights the encoder's DNA. The zensim loop's +7% file size at effort 7 isn't a metric problem — it's a mismatch between what zensim asks for and what the encoder can efficiently deliver.
 
-### Known Butteraugli Failures (from libjxl issue tracker)
+### Known Butteraugli Limitations (from libjxl issue tracker)
 
-Despite co-evolution, Butteraugli-driven optimization causes documented problems:
+The Butteraugli co-evolution creates documented tradeoffs:
 
-- **Blurring regression (#3530, #3754).** PR #2836 changed AC strategy selection to use pixel-space Butteraugli feedback, causing excessive smoothing. Alakuijala admitted: "The blurring degradations are likely due to optimized use of the filtering strength — now it is L2 + butteraugli tuned instead of tuning by the human eye."
-- **Color shifts (#414).** Blue-channel detail loss from aggressive S-cone spatial frequency exploitation. Butteraugli's model says high-frequency blue is invisible; human viewers disagree for saturated blues.
-- **Non-photographic content.** libjxl 0.8.2 produces better visual quality than 0.10.2 for artwork, screenshots, and graphics — a regression caused by Butteraugli-metric-chasing.
-- **Alakuijala's own admission:** "I always make the quality-related decisions only by my eyes and more or less ignore the metrics."
+- **Blurring at higher effort (#3530, #3754).** PR #2836 added pixel-space Butteraugli feedback to AC strategy selection, which can cause excessive smoothing. As noted in the issue: "The blurring degradations are likely due to optimized use of the filtering strength — now it is L2 + butteraugli tuned instead of tuning by the human eye."
+- **Color shifts (#414).** Blue-channel detail loss from the metric's spatial frequency model for S-cones. Butteraugli says high-frequency blue is invisible; human viewers disagree for saturated blues.
+- **Non-photographic content.** libjxl 0.10.2 regressed on artwork and screenshots compared to 0.8.2.
+- **Metric vs. perceptual alignment.** The libjxl team has noted that final quality decisions are often made by eye rather than by metric, reflecting the known gap between automated metrics and human perception.
 
-These are opportunities. A better optimization signal could fix these regressions.
+These are areas where a different optimization signal could produce different tradeoffs.
 
 ## Current State
 
