@@ -337,10 +337,8 @@ fn bench_zensim_512x512_masked(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(10), g.saturating_add(5), b])
         .collect();
 
-    let config = zensim::ZensimConfig {
-        compute_all_features: true,
-        ..Default::default()
-    };
+    let mut config = zensim::ZensimConfig::default();
+    config.compute_all_features = true;
 
     c.bench_function("zensim_512x512_masked", |b| {
         b.iter(|| {
@@ -368,11 +366,9 @@ fn bench_downscale_filters(c: &mut Criterion) {
             ("mitchell", DownscaleFilter::Mitchell),
             ("lanczos", DownscaleFilter::Lanczos),
         ] {
-            let config = ZensimConfig {
-                downscale_filter: filter,
-                compute_all_features: true,
-                ..Default::default()
-            };
+            let mut config = ZensimConfig::default();
+            config.downscale_filter = filter;
+            config.compute_all_features = true;
             c.bench_function(&format!("zensim_{label}_{filter_name}"), |b| {
                 b.iter(|| {
                     zensim::compute_zensim_with_config(
@@ -396,10 +392,8 @@ fn bench_zensim_extended(c: &mut Criterion) {
     for &(label, w, h) in &[("512x512", 512, 512), ("1920x1080", 1920, 1080)] {
         let (src, dst) = make_test_images(w, h);
 
-        let config_basic = ZensimConfig {
-            compute_all_features: true,
-            ..Default::default()
-        };
+        let mut config_basic = ZensimConfig::default();
+        config_basic.compute_all_features = true;
         c.bench_function(&format!("basic_{label}"), |b| {
             b.iter(|| {
                 zensim::compute_zensim_with_config(
@@ -413,11 +407,9 @@ fn bench_zensim_extended(c: &mut Criterion) {
             })
         });
 
-        let config_ext = ZensimConfig {
-            compute_all_features: true,
-            extended_features: true,
-            ..Default::default()
-        };
+        let mut config_ext = ZensimConfig::default();
+        config_ext.compute_all_features = true;
+        config_ext.extended_features = true;
         c.bench_function(&format!("extended_{label}"), |b| {
             b.iter(|| {
                 zensim::compute_zensim_with_config(
