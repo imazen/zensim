@@ -51,10 +51,15 @@ pub mod hasher;
 pub mod lock;
 /// TSV manifest writer for CI result aggregation across platforms.
 pub mod manifest;
+/// Pixel oracle testing: compare image operations against scalar references.
+pub mod oracle;
 /// Memorable names from hashes (e.g., `sea:a1b2...` → `sunny-crab`).
 pub mod petname;
 /// S3/R2 remote reference image storage configuration.
 pub mod remote;
+/// SIMD consistency testing via archmage token permutations.
+#[cfg(feature = "archmage")]
+pub mod simd;
 /// HTML report generation from manifest data.
 pub mod report;
 /// Tolerance-based image comparison, reporting, and the `check_regression` function.

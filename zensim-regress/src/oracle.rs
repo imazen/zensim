@@ -1,0 +1,622 @@
+//! Pixel oracle testing: compare whole-image operations against scalar references.
+//!
+//! The oracle pattern (inspired by libvips) catches vectorization bugs, stride
+//! errors, and accumulator divergence without golden files: apply the operation
+//! to the full image, then apply a scalar reference to individual pixels, and
+//! compare results at known coordinates.
+//!
+//! Two layers of verification are available:
+//!
+//! 1. **Standalone oracle** (`oracle_check_u8`, `oracle_check_f32`) —
+//!    pure numeric comparison at sampled coordinates. No baselines, no
+//!    reference images, no external state.
+//!
+//! 2. **Tracked oracle** (`oracle_check_tracked`) — scalar correctness
+//!    *plus* full-image checksum tracking via
+//!    [`ChecksumManager`](crate::checksums::ChecksumManager). The image
+//!    output is checked against baselines and remote reference images, with
+//!    diff montage generation on mismatch. This catches regressions in edge
+//!    handling, padding, and multi-pixel dependencies that scalar sampling
+//!    alone would miss.
+//!
+//! # Which zen crates should use this?
+//!
+//! Any crate with per-pixel operations: zenresize, zenfilters, zenpixels-convert,
+//! linear-srgb, zenblend. If the operation has a scalar definition, oracle
+//! testing is the right tool.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use zensim_regress::oracle::*;
+//! use zensim_regress::generators;
+//!
+//! let input = generators::gradient(256, 256); // RGBA u8
+//! let gamma = 2.2;
+//!
+//! let report = oracle_check_u8(
+//!     &input, 256, 256, 4,
+//!     |buf, w, h| apply_gamma(buf, w, h, gamma),
+//!     |px| px.iter().map(|&v| v.powf(gamma)).collect(),
+//!     &default_test_coords(256, 256),
+//!     OracleTolerance::AbsEpsilon(1.0 / 255.0),
+//! );
+//! assert!(report.passed, "{report}");
+//! ```
+
+use std::fmt;
+
+use crate::checksums::{CheckResult, ChecksumManager};
+use crate::error::RegressError;
+use crate::tolerance::ToleranceSpec;
+
+// ─── Tolerance ──────────────────────────────────────────────────────────
+
+/// Tolerance for per-pixel oracle comparisons.
+///
+/// Determines how closely the image operation output must match the scalar
+/// reference at each sampled coordinate.
+#[derive(Debug, Clone, Copy)]
+pub enum OracleTolerance {
+    /// Exact match. Values must be identical after normalization.
+    ///
+    /// For u8: byte-exact. For f32: bitwise-equal.
+    Exact,
+
+    /// Absolute epsilon per component.
+    ///
+    /// For u8 images (normalized to 0.0–1.0), `1.0 / 255.0` allows ±1 LSB.
+    /// For f32 images, use the appropriate epsilon for your math (e.g., `1e-5`).
+    AbsEpsilon(f64),
+
+    /// ULP (units in the last place) comparison for float operations.
+    ///
+    /// Two values match if they differ by at most `n` representable floats.
+    /// Only meaningful for f32 oracle checks.
+    Ulps(u32),
+}
+
+// ─── Report types ───────────────────────────────────────────────────────
+
+/// A single oracle mismatch at a specific coordinate and channel.
+#[derive(Debug, Clone)]
+pub struct OracleMismatch {
+    /// X coordinate where the mismatch occurred.
+    pub x: u32,
+    /// Y coordinate where the mismatch occurred.
+    pub y: u32,
+    /// Channel index (0=R, 1=G, 2=B, 3=A).
+    pub channel: usize,
+    /// Value from the scalar reference (f64 precision).
+    pub expected: f64,
+    /// Value from the image operation output.
+    pub actual: f64,
+    /// Absolute difference.
+    pub delta: f64,
+}
+
+impl fmt::Display for OracleMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ch_name = ["R", "G", "B", "A"];
+        let label = ch_name.get(self.channel).unwrap_or(&"?");
+        write!(
+            f,
+            "({},{}) ch={}: expected={:.6}, actual={:.6}, delta={:.6}",
+            self.x, self.y, label, self.expected, self.actual, self.delta,
+        )
+    }
+}
+
+/// Result of an oracle check across sampled coordinates.
+///
+/// Passed if all sampled pixels match the scalar reference within tolerance
+/// AND (for tracked checks) the checksum baseline is satisfied.
+#[derive(Debug, Clone)]
+pub struct OracleReport {
+    /// Whether all checks passed (scalar oracle + optional checksum).
+    pub passed: bool,
+    /// Number of (x,y) coordinates tested.
+    pub coordinates_tested: usize,
+    /// Total number of scalar comparisons (coordinates × channels).
+    pub comparisons: usize,
+    /// Per-channel mismatches that exceeded the oracle tolerance.
+    pub mismatches: Vec<OracleMismatch>,
+    /// Result from ChecksumManager, if [`oracle_check_tracked`] was used.
+    pub checksum_result: Option<CheckResult>,
+}
+
+impl fmt::Display for OracleReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status = if self.passed { "PASS" } else { "FAIL" };
+
+        if self.mismatches.is_empty() {
+            write!(
+                f,
+                "{status}: Oracle check passed ({} coords, {} comparisons).",
+                self.coordinates_tested, self.comparisons,
+            )?;
+        } else {
+            writeln!(
+                f,
+                "{status}: {}/{} oracle mismatches ({} coords).",
+                self.mismatches.len(),
+                self.comparisons,
+                self.coordinates_tested,
+            )?;
+            // Show first 10 mismatches
+            for (i, m) in self.mismatches.iter().take(10).enumerate() {
+                writeln!(f, "  [{i}] {m}")?;
+            }
+            if self.mismatches.len() > 10 {
+                writeln!(
+                    f,
+                    "  ... and {} more.",
+                    self.mismatches.len() - 10,
+                )?;
+            }
+        }
+
+        if let Some(ref cr) = self.checksum_result
+            && !cr.passed()
+        {
+            write!(f, "\n  Checksum: {cr}")?;
+        }
+
+        Ok(())
+    }
+}
+
+// ─── Default coordinates ────────────────────────────────────────────────
+
+/// Standard test coordinates for oracle checks.
+///
+/// Returns ~8 coordinates chosen to catch common bugs:
+/// - (0, 0): origin — catches off-by-one in buffer start
+/// - (1, 0), (0, 1): adjacent to origin — catches stride bugs
+/// - (w/2, h/2): center — typical processing path
+/// - (w-1, h-1): last pixel — catches bounds/padding bugs
+/// - (w-1, 0), (0, h-1): opposite corners
+/// - Odd-alignment position — catches SIMD lane alignment bugs
+///
+/// Returns an empty vec if the image is 0×0.
+pub fn default_test_coords(w: u32, h: u32) -> Vec<(u32, u32)> {
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+
+    let mut coords = vec![(0, 0)];
+
+    if w > 1 {
+        coords.push((1, 0));
+    }
+    if h > 1 {
+        coords.push((0, 1));
+    }
+    if w > 2 && h > 2 {
+        coords.push((w / 2, h / 2));
+    }
+    if w > 1 || h > 1 {
+        coords.push((w - 1, h - 1));
+    }
+    if w > 1 && h > 1 {
+        coords.push((w - 1, 0));
+        coords.push((0, h - 1));
+    }
+    // Odd-alignment: 7 is a common SIMD misalignment trigger
+    if w > 7 && h > 7 {
+        coords.push((7, 3));
+    }
+    // Near SIMD boundary: 31 catches AVX2 (32-byte) alignment issues
+    if w > 31 && h > 5 {
+        coords.push((31, 5));
+    }
+
+    coords
+}
+
+// ─── Core oracle logic ──────────────────────────────────────────────────
+
+fn check_tolerance(expected: f64, actual: f64, tolerance: OracleTolerance) -> bool {
+    match tolerance {
+        OracleTolerance::Exact => expected == actual,
+        OracleTolerance::AbsEpsilon(eps) => (expected - actual).abs() <= eps,
+        OracleTolerance::Ulps(max_ulps) => {
+            if expected == actual {
+                return true;
+            }
+            if expected.is_nan() || actual.is_nan() {
+                return false;
+            }
+            let a = (expected as f32).to_bits() as i32;
+            let b = (actual as f32).to_bits() as i32;
+            (a - b).unsigned_abs() <= max_ulps
+        }
+    }
+}
+
+fn read_pixel_u8(buf: &[u8], x: u32, y: u32, w: u32, channels: usize) -> Vec<f64> {
+    let offset = (y as usize * w as usize + x as usize) * channels;
+    buf[offset..offset + channels]
+        .iter()
+        .map(|&v| v as f64 / 255.0)
+        .collect()
+}
+
+fn read_pixel_f32(buf: &[f32], x: u32, y: u32, w: u32, channels: usize) -> Vec<f64> {
+    let offset = (y as usize * w as usize + x as usize) * channels;
+    buf[offset..offset + channels]
+        .iter()
+        .map(|&v| v as f64)
+        .collect()
+}
+
+fn run_oracle_comparisons(
+    input_reader: impl Fn(u32, u32) -> Vec<f64>,
+    output_reader: impl Fn(u32, u32) -> Vec<f64>,
+    scalar_op: &dyn Fn(&[f64]) -> Vec<f64>,
+    coords: &[(u32, u32)],
+    channels: usize,
+    tolerance: OracleTolerance,
+) -> OracleReport {
+    let mut mismatches = Vec::new();
+    let mut total_comparisons = 0;
+
+    for &(x, y) in coords {
+        let input_pixel = input_reader(x, y);
+        let expected = scalar_op(&input_pixel);
+
+        let actual = output_reader(x, y);
+
+        for ch in 0..channels.min(expected.len()).min(actual.len()) {
+            total_comparisons += 1;
+            if !check_tolerance(expected[ch], actual[ch], tolerance) {
+                mismatches.push(OracleMismatch {
+                    x,
+                    y,
+                    channel: ch,
+                    expected: expected[ch],
+                    actual: actual[ch],
+                    delta: (expected[ch] - actual[ch]).abs(),
+                });
+            }
+        }
+    }
+
+    OracleReport {
+        passed: mismatches.is_empty(),
+        coordinates_tested: coords.len(),
+        comparisons: total_comparisons,
+        mismatches,
+        checksum_result: None,
+    }
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────
+
+/// Check a u8 image operation against a scalar oracle.
+///
+/// The image operation processes the full buffer; the scalar operation
+/// processes individual pixels. Results are compared at each coordinate.
+///
+/// # Arguments
+///
+/// * `input` — Input pixel buffer (RGBA or RGB, `w × h × channels` bytes)
+/// * `width`, `height` — Image dimensions
+/// * `channels` — Channels per pixel (3 for RGB, 4 for RGBA)
+/// * `image_op` — Applies the operation to the full image, returns output buffer
+/// * `scalar_op` — Applies the operation to one pixel (f64 normalized 0.0–1.0)
+/// * `coords` — Pixel coordinates to compare (use [`default_test_coords`])
+/// * `tolerance` — How closely scalar and image results must match
+#[allow(clippy::too_many_arguments)]
+pub fn oracle_check_u8(
+    input: &[u8],
+    width: u32,
+    height: u32,
+    channels: usize,
+    image_op: impl FnOnce(&[u8], u32, u32) -> Vec<u8>,
+    scalar_op: impl Fn(&[f64]) -> Vec<f64>,
+    coords: &[(u32, u32)],
+    tolerance: OracleTolerance,
+) -> OracleReport {
+    assert!(
+        channels == 3 || channels == 4,
+        "channels must be 3 (RGB) or 4 (RGBA), got {channels}"
+    );
+    let expected_len = width as usize * height as usize * channels;
+    assert!(
+        input.len() >= expected_len,
+        "input buffer too small: {} < {}",
+        input.len(),
+        expected_len,
+    );
+
+    let output = image_op(input, width, height);
+    assert!(
+        output.len() >= expected_len,
+        "image_op output too small: {} < {}",
+        output.len(),
+        expected_len,
+    );
+
+    run_oracle_comparisons(
+        |x, y| read_pixel_u8(input, x, y, width, channels),
+        |x, y| read_pixel_u8(&output, x, y, width, channels),
+        &scalar_op,
+        coords,
+        channels,
+        tolerance,
+    )
+}
+
+/// Check an f32 image operation against a scalar oracle.
+///
+/// Same as [`oracle_check_u8`] but for float pixel data. The scalar
+/// operation receives raw f32 values (not normalized).
+#[allow(clippy::too_many_arguments)]
+pub fn oracle_check_f32(
+    input: &[f32],
+    width: u32,
+    height: u32,
+    channels: usize,
+    image_op: impl FnOnce(&[f32], u32, u32) -> Vec<f32>,
+    scalar_op: impl Fn(&[f64]) -> Vec<f64>,
+    coords: &[(u32, u32)],
+    tolerance: OracleTolerance,
+) -> OracleReport {
+    assert!(
+        (1..=4).contains(&channels),
+        "channels must be 1–4, got {channels}"
+    );
+    let expected_len = width as usize * height as usize * channels;
+    assert!(
+        input.len() >= expected_len,
+        "input buffer too small: {} < {}",
+        input.len(),
+        expected_len,
+    );
+
+    let output = image_op(input, width, height);
+    assert!(
+        output.len() >= expected_len,
+        "image_op output too small: {} < {}",
+        output.len(),
+        expected_len,
+    );
+
+    run_oracle_comparisons(
+        |x, y| read_pixel_f32(input, x, y, width, channels),
+        |x, y| read_pixel_f32(&output, x, y, width, channels),
+        &scalar_op,
+        coords,
+        channels,
+        tolerance,
+    )
+}
+
+/// Oracle check with [`ChecksumManager`] baseline tracking.
+///
+/// Performs two layers of verification:
+///
+/// 1. **Scalar oracle** — compares the image operation output against the
+///    scalar reference at sampled coordinates (same as [`oracle_check_u8`]).
+///
+/// 2. **Checksum baseline** — passes the full output image through
+///    [`ChecksumManager::check_pixels()`][crate::checksums::ChecksumManager::check_pixels]
+///    for hash comparison, reference downloads, diff montage generation,
+///    manifest writing, and `UPDATE_CHECKSUMS` auto-accept.
+///
+/// Fails if **either** check fails. The oracle scalar check gates first —
+/// if pixels are wrong at sampled coordinates, the checksum check still
+/// runs (for forensic output) but the overall result is a failure.
+///
+/// # Arguments
+///
+/// * `mgr` — [`ChecksumManager`] configured with checksums dir, diff output, etc.
+/// * `module`, `test_name`, `detail_name` — Identify this check in `.checksums` files
+/// * `input` — Input RGBA pixel buffer (`w × h × 4` bytes, must be RGBA for checksum tracking)
+/// * `width`, `height` — Image dimensions
+/// * `image_op` — Applies the operation to the full image, returns RGBA output buffer
+/// * `scalar_op` — Applies the operation to one pixel (f64 normalized 0.0–1.0)
+/// * `coords` — Pixel coordinates to compare (use [`default_test_coords`])
+/// * `oracle_tolerance` — How closely scalar and image results must match
+/// * `checksum_tolerance` — Tolerance for checksum baseline comparison (None = exact)
+#[allow(clippy::too_many_arguments)]
+pub fn oracle_check_tracked(
+    mgr: &ChecksumManager,
+    module: &str,
+    test_name: &str,
+    detail_name: &str,
+    input: &[u8],
+    width: u32,
+    height: u32,
+    image_op: impl FnOnce(&[u8], u32, u32) -> Vec<u8>,
+    scalar_op: impl Fn(&[f64]) -> Vec<f64>,
+    coords: &[(u32, u32)],
+    oracle_tolerance: OracleTolerance,
+    checksum_tolerance: Option<&ToleranceSpec>,
+) -> Result<OracleReport, RegressError> {
+    let channels = 4; // tracked mode always uses RGBA for ChecksumManager
+    let expected_len = width as usize * height as usize * channels;
+    assert!(
+        input.len() >= expected_len,
+        "input buffer too small: {} < {} (tracked oracle requires RGBA)",
+        input.len(),
+        expected_len,
+    );
+
+    // Run the image operation
+    let output = image_op(input, width, height);
+    assert!(
+        output.len() >= expected_len,
+        "image_op output too small: {} < {}",
+        output.len(),
+        expected_len,
+    );
+
+    // Layer 1: scalar oracle check
+    let mut report = run_oracle_comparisons(
+        |x, y| read_pixel_u8(input, x, y, width, channels),
+        |x, y| read_pixel_u8(&output, x, y, width, channels),
+        &scalar_op,
+        coords,
+        channels,
+        oracle_tolerance,
+    );
+
+    let oracle_passed = report.mismatches.is_empty();
+
+    // Layer 2: checksum baseline check (always runs, even if oracle failed,
+    // so we get forensic output)
+    let check_result = mgr.check_pixels(
+        module,
+        test_name,
+        detail_name,
+        &output,
+        width,
+        height,
+        checksum_tolerance,
+    )?;
+
+    let checksum_passed = check_result.passed();
+    report.checksum_result = Some(check_result);
+    report.passed = oracle_passed && checksum_passed;
+
+    Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generators;
+
+    #[test]
+    fn default_coords_basic() {
+        let coords = default_test_coords(256, 256);
+        assert!(coords.len() >= 6, "expected >=6 coords, got {}", coords.len());
+        assert!(coords.contains(&(0, 0)));
+        assert!(coords.contains(&(255, 255)));
+        assert!(coords.contains(&(128, 128)));
+    }
+
+    #[test]
+    fn default_coords_tiny() {
+        assert_eq!(default_test_coords(0, 0), Vec::<(u32, u32)>::new());
+        assert_eq!(default_test_coords(1, 1), vec![(0, 0)]);
+    }
+
+    #[test]
+    fn oracle_identity_exact() {
+        let input = generators::gradient(64, 64);
+        let report = oracle_check_u8(
+            &input,
+            64,
+            64,
+            4,
+            |buf, _w, _h| buf.to_vec(), // identity
+            |px| px.to_vec(),            // identity
+            &default_test_coords(64, 64),
+            OracleTolerance::Exact,
+        );
+        assert!(report.passed, "{report}");
+        assert!(report.mismatches.is_empty());
+    }
+
+    #[test]
+    fn oracle_invert_u8() {
+        let input = generators::gradient(64, 64);
+        let report = oracle_check_u8(
+            &input,
+            64,
+            64,
+            4,
+            |buf, _w, _h| {
+                buf.chunks(4)
+                    .flat_map(|px| [255 - px[0], 255 - px[1], 255 - px[2], px[3]])
+                    .collect()
+            },
+            |px| {
+                let mut out: Vec<f64> = px.iter().map(|&v| 1.0 - v).collect();
+                // Alpha unchanged
+                if out.len() == 4 {
+                    out[3] = px[3];
+                }
+                out
+            },
+            &default_test_coords(64, 64),
+            OracleTolerance::AbsEpsilon(1.0 / 255.0 + 1e-9),
+        );
+        assert!(report.passed, "{report}");
+    }
+
+    #[test]
+    fn oracle_detects_mismatch() {
+        let input = generators::solid(64, 64, 128, 128, 128, 255);
+        let report = oracle_check_u8(
+            &input,
+            64,
+            64,
+            4,
+            |buf, _w, _h| {
+                // Deliberately wrong: add 10 instead of 5
+                buf.chunks(4)
+                    .flat_map(|px| [px[0].saturating_add(10), px[1], px[2], px[3]])
+                    .collect()
+            },
+            |px| {
+                // Scalar says add 5
+                let mut out = px.to_vec();
+                out[0] = (px[0] + 5.0 / 255.0).min(1.0);
+                out
+            },
+            &default_test_coords(64, 64),
+            OracleTolerance::AbsEpsilon(1.0 / 255.0),
+        );
+        assert!(!report.passed);
+        assert!(!report.mismatches.is_empty());
+        // All mismatches should be on channel 0 (R)
+        assert!(report.mismatches.iter().all(|m| m.channel == 0));
+    }
+
+    #[test]
+    fn oracle_f32_identity() {
+        let w = 32u32;
+        let h = 32u32;
+        let channels = 3;
+        let input: Vec<f32> = (0..w * h * channels as u32)
+            .map(|i| (i as f32) / (w * h * channels as u32) as f32)
+            .collect();
+
+        let report = oracle_check_f32(
+            &input,
+            w,
+            h,
+            channels,
+            |buf, _w, _h| buf.to_vec(),
+            |px| px.to_vec(),
+            &default_test_coords(w, h),
+            OracleTolerance::Exact,
+        );
+        assert!(report.passed, "{report}");
+    }
+
+    #[test]
+    fn oracle_report_display() {
+        let report = OracleReport {
+            passed: false,
+            coordinates_tested: 8,
+            comparisons: 32,
+            mismatches: vec![OracleMismatch {
+                x: 10,
+                y: 20,
+                channel: 0,
+                expected: 0.5,
+                actual: 0.6,
+                delta: 0.1,
+            }],
+            checksum_result: None,
+        };
+        let s = format!("{report}");
+        assert!(s.contains("FAIL"));
+        assert!(s.contains("1/32"));
+    }
+}

@@ -52,6 +52,112 @@ UPDATE_CHECKSUMS=1 cargo test test_resize_output
 
 This creates `tests/checksums/resize.checksums` with the hash entry. Commit that file. From now on, the test passes instantly when the hash matches.
 
+## Oracle testing (recommended for per-pixel operations)
+
+For operations with a scalar definition (gamma, blend, color convert, resize kernel), oracle testing verifies correctness without golden files: apply the operation to the full image, then apply a scalar reference to individual pixels, and compare results at sampled coordinates.
+
+Two layers are available:
+
+1. **Standalone** — pure numeric comparison, no baselines needed:
+
+```rust
+use zensim_regress::oracle::*;
+use zensim_regress::generators;
+
+#[test]
+fn test_gamma_oracle() {
+    let input = generators::gradient(256, 256);
+    let gamma = 2.2;
+
+    let report = oracle_check_u8(
+        &input, 256, 256, 4,
+        |buf, w, h| apply_gamma(buf, w, h, gamma),       // image operation
+        |px| px.iter().map(|&v| v.powf(gamma)).collect(), // scalar reference
+        &default_test_coords(256, 256),
+        OracleTolerance::AbsEpsilon(1.0 / 255.0),
+    );
+    assert!(report.passed, "{report}");
+}
+```
+
+2. **Tracked** — scalar oracle *plus* full-image checksum tracking, diff generation, and remote reference storage via `ChecksumManager`:
+
+```rust
+use zensim_regress::oracle::*;
+use zensim_regress::checksums::ChecksumManager;
+use zensim_regress::tolerance::ToleranceSpec;
+
+#[test]
+fn test_gamma_tracked() {
+    let mgr = ChecksumManager::new("tests/checksums".as_ref())
+        .with_diff_output("test-artifacts/diffs")
+        .with_manifest_from_env();
+
+    let input = generators::gradient(256, 256);
+
+    let report = oracle_check_tracked(
+        &mgr, "color", "gamma", "2.2_gradient",
+        &input, 256, 256,
+        |buf, w, h| apply_gamma(buf, w, h, 2.2),
+        |px| px.iter().map(|&v| v.powf(2.2)).collect(),
+        &default_test_coords(256, 256),
+        OracleTolerance::AbsEpsilon(1.0 / 255.0),
+        Some(&ToleranceSpec::off_by_one()),
+    ).unwrap();
+    assert!(report.passed, "{report}");
+}
+```
+
+The tracked variant catches regressions in edge handling, padding, and multi-pixel dependencies that scalar sampling alone would miss — the full output image is compared against stored baselines and remote references.
+
+**Use oracle testing in:** zenresize, zenfilters, zenpixels-convert, linear-srgb, zenblend — any crate with per-pixel operations that have a scalar definition.
+
+## SIMD consistency testing (recommended for archmage users)
+
+For crates using archmage (`#[arcane]`, `#[autoversion]`, `#[rite]`), SIMD consistency testing runs the same operation under every available SIMD tier and verifies all produce equivalent output.
+
+```toml
+[dev-dependencies]
+zensim-regress = { version = "0.2", features = ["archmage"] }
+```
+
+```rust
+use zensim_regress::simd::*;
+use zensim_regress::RegressionTolerance;
+use archmage::testing::CompileTimePolicy;
+
+#[test]
+fn resize_simd_consistency() {
+    let input = load_test_image();
+
+    let report = check_simd_consistency(
+        || {
+            let output = resize(&input, 256, 256, Filter::Lanczos3);
+            (output.to_rgba8(), 256, 256)
+        },
+        &RegressionTolerance::off_by_one(),
+        CompileTimePolicy::Warn,
+    ).unwrap();
+
+    assert!(report.all_passed, "{report}");
+}
+```
+
+This wraps `archmage::testing::for_each_token_permutation()` — it disables SIMD tokens in every valid combination (respecting the cascade hierarchy), runs your operation each time, and compares outputs against the highest-tier result using zensim-regress tolerances.
+
+Catches: vectorization bugs, accumulator ordering differences, NaN handling divergence, and any case where the SIMD path produces different results from scalar.
+
+**CI integration:** For full permutation coverage, compile with `testable_dispatch` on archmage and use `CompileTimePolicy::Fail`:
+
+```toml
+[dev-dependencies]
+archmage = { version = "0.9", features = ["testable_dispatch"] }
+```
+
+Without `testable_dispatch`, tokens compiled with `-Ctarget-cpu=native` can't be disabled — you'll get warnings and reduced coverage. In CI (without `-Ctarget-cpu`), all tokens are testable by default.
+
+**Use SIMD consistency testing in:** any crate using archmage for SIMD dispatch — zenresize, zenfilters, zenpixels-convert, linear-srgb, zenjpeg, zenwebp, zenpng, zenjxl-decoder, fast-ssim2, zensim.
+
 ## What happens on mismatch
 
 When the output changes — different platform, updated dependency, code change — the manager compares the new output against the reference image using zensim (a perceptual similarity metric). There are four outcomes:
@@ -344,6 +450,8 @@ Deterministic pixel-level distortions for testing tolerance boundaries:
 
 | Module | Description |
 |--------|-------------|
+| `oracle` | Pixel oracle testing: scalar reference vs whole-image comparison |
+| `simd` | SIMD consistency testing via archmage token permutations (feature: `archmage`) |
 | `checksums` | `ChecksumManager`, `ChecksumsFile`, `ChecksumEntry`, `CheckResult` |
 | `testing` | `RegressionTolerance`, `RegressionReport`, `check_regression` |
 | `tolerance` | `ToleranceSpec`, `ToleranceOverride` for config-driven tolerances |

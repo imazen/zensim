@@ -10,8 +10,13 @@ keywords = ["visual", "regression", "testing", "image", "checksum"]
 categories = ["development-tools::testing", "multimedia::images"]
 exclude = ["examples/*.png", "tests/fixtures/"]
 
+[features]
+default = []
+archmage = ["dep:archmage"]
+
 [dependencies]
 zensim = { workspace = true, features = ["classification"] }
+archmage = { workspace = true, features = ["testable_dispatch"], optional = true }
 # zenpng = { workspace = true, optional = true }
 # enough = { workspace = true, optional = true }
 seahash = "4"
@@ -22,3 +27,4 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
+archmage = { workspace = true, features = ["testable_dispatch"] }

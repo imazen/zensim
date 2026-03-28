@@ -2273,6 +2273,7 @@ dependencies = [
 name = "zensim-regress"
 version = "0.2.0"
 dependencies = [
+ "archmage 0.9.12",
  "base64",
  "fs2",
  "image",
