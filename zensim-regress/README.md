@@ -110,6 +110,37 @@ fn test_gamma_tracked() {
 
 The tracked variant catches regressions in edge handling, padding, and multi-pixel dependencies that scalar sampling alone would miss — the full output image is compared against stored baselines and remote references.
 
+### Writing the scalar reference
+
+The `scalar_op` is your **ground truth** — pure f64 math implementing the operation's definition. It must NOT be a `_scalar` variant from `#[autoversion]` (that's still compiled code subject to FP reassociation). Use textbook math:
+
+```rust
+// GOOD: true mathematical reference in f64
+|px| vec![px[0].powf(1.0 / 2.2), px[1].powf(1.0 / 2.2), px[2].powf(1.0 / 2.2), px[3]]
+
+// BAD: calling the autoversion scalar variant — this IS the code under test
+|px| { let v = linear_to_srgb_scalar(ScalarToken, px[0] as f32); vec![v as f64, ...] }
+```
+
+### The image_op calls your dispatcher
+
+When your code uses archmage, the `image_op` should call the public dispatcher (the function without a token parameter or tier suffix). This tests the real code path:
+
+```rust
+// Your library has: #[autoversion] pub fn apply_curve(data: &mut [f32]) { ... }
+// Generated: apply_curve_v3, apply_curve_neon, apply_curve_scalar, plus dispatcher
+
+oracle_check_f32(
+    &input, w, h, 3,
+    |buf, w, h| { let mut out = buf.to_vec(); apply_curve(&mut out); out },
+    |px| reference_curve_f64(px),  // pure f64 math
+    &default_test_coords(w, h),
+    OracleTolerance::AbsEpsilon(1e-5),
+);
+```
+
+If the function takes an explicit token parameter (inner `#[arcane]` functions), summon the token in the closure or wrap it in a dispatcher. See the `oracle` module docs for details.
+
 **Use oracle testing in:** zenresize, zenfilters, zenpixels-convert, linear-srgb, zenblend — any crate with per-pixel operations that have a scalar definition.
 
 ## SIMD consistency testing (recommended for archmage users)
@@ -146,6 +177,26 @@ fn resize_simd_consistency() {
 This wraps `archmage::testing::for_each_token_permutation()` — it disables SIMD tokens in every valid combination (respecting the cascade hierarchy), runs your operation each time, and compares outputs against the highest-tier result using zensim-regress tolerances.
 
 Catches: vectorization bugs, accumulator ordering differences, NaN handling divergence, and any case where the SIMD path produces different results from scalar.
+
+### Call the dispatcher, not the tier variant
+
+The operation closure must call your **public dispatcher** — the function that dispatches internally via `incant!` or `#[autoversion]`. Do not call a specific tier variant:
+
+```rust
+// GOOD: dispatcher falls back as tokens are disabled
+|| { let out = my_resize(&input, 256, 256); (out.to_rgba8(), 256, 256) }
+
+// BAD: always calls V3 regardless of which tokens are disabled
+|| { let t = X64V3Token::summon().unwrap(); (my_resize_v3(t, &input, 256, 256), 256, 256) }
+```
+
+`for_each_token_permutation` disables tokens at the process level — `summon()` returns `None` for disabled tokens, so dispatchers naturally fall back to lower tiers.
+
+For functions that take an explicit token (`#[arcane]` inner functions), use `incant!` in the closure to dispatch, or summon the best available token. See the `simd` module docs for patterns with `incant!`, `#[autoversion]`, and explicit token parameters.
+
+### Combining with oracle testing
+
+Oracle and SIMD consistency are complementary — oracle verifies *correctness* (matches the math), SIMD consistency verifies *equivalence* (all tiers match each other). A bug where all tiers produce the same wrong answer passes SIMD consistency but fails oracle. Use both.
 
 **CI integration:** For full permutation coverage, compile with `testable_dispatch` on archmage and use `CompileTimePolicy::Fail`:
 
