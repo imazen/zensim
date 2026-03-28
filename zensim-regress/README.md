@@ -258,14 +258,30 @@ let result = mgr.check_pixels(
 ).unwrap();
 ```
 
-`off_by_one()` allows: per-channel delta up to 1, any number of pixels affected, zensim score >= 85 (very permissive on perceptual similarity since off-by-one is imperceptible).
+`off_by_one()` allows: per-channel delta up to 1, any number of pixels affected, zensim dissimilarity up to 0.15 (very permissive since off-by-one is imperceptible).
+
+### Thinking in dissimilarity (zdsim)
+
+Prefer **dissimilarity** (`zdsim`) over **score** when reasoning about thresholds. Dissimilarity is 0 for identical images and increases with difference — a natural scale for "how much error is acceptable." Score (0–100, 100 = identical) is an inverted scale that can go negative for extreme distortions, making mental math harder.
+
+| zdsim | score | What it means |
+|-------|-------|---------------|
+| 0.00 | 100.0 | Identical |
+| 0.01 | 99.0 | Off-by-one rounding, imperceptible |
+| 0.05 | 95.0 | Mild codec artifacts |
+| 0.15 | 85.0 | `off_by_one()` threshold |
+| 0.50 | 50.0 | Visually different |
+| 1.00 | 0.0 | Completely different |
+| >1.0 | <0 | Extreme (e.g., inverted image) |
+
+In `.checksums` files and `Display` output, both forms appear together: `zensim:95 (dissim 0.05)`. The `(dissim ...)` annotation is the one to read.
 
 For custom tolerances, build a `ToleranceSpec` directly:
 
 ```rust
 let tol = ToleranceSpec {
     max_delta: 2,              // max per-channel difference (0-255)
-    min_similarity: 95.0,      // minimum zensim score (0-100, 100 = identical)
+    min_similarity: 95.0,      // zdsim <= 0.05 (score >= 95)
     max_pixels_different: 0.5, // fraction of pixels that may differ (0.0-1.0)
     max_alpha_delta: 0,        // alpha channel tolerance
     ignore_alpha: false,
@@ -424,7 +440,7 @@ FAIL: zensim 87.23 (dissim 0.1277), max-delta:[12,8,3], 34.2% pixels differ
 
 2. **Check the category.** `rounding` and `balanced` are usually benign platform differences. `perceptual` or `color_shift` with high confidence means something visually changed.
 
-3. **Check the score.** Scores above 95 are typically acceptable platform variance. Below 90, something probably broke. Below 80, something definitely broke.
+3. **Check the dissimilarity.** zdsim below 0.05 is typically acceptable platform variance. Above 0.1, something probably broke. Above 0.2, something definitely broke.
 
 4. **Decide:**
    - **Accept it** — run with `UPDATE_CHECKSUMS=1`, or paste the suggested line into the `.checksums` file.
