@@ -85,14 +85,14 @@ fn hardcoded_reference_scores() {
     // Uses linear-srgb crate (C0-continuous constants) for sRGB linearization.
     #[allow(clippy::excessive_precision)]
     let expected: &[(&str, f64)] = &[
-        ("checkerboard+blur", 0.0),
+        ("checkerboard+blur", -79.872_537_867_843_306),
         ("checkerboard+sharpen", 29.587_543_251_423_142),
         ("mandelbrot+blur", 8.478_409_174_126_597),
         ("mandelbrot+color_shift", 48.138_848_249_261_251),
         ("noise+blur", 60.015_600_223_264_798),
         ("noise+block_artifacts", 52.799_117_798_200_086),
         ("color_blocks+color_shift", 30.398_914_843_637_783),
-        ("color_blocks+sharpen", 0.0),
+        ("color_blocks+sharpen", -5.656_076_020_014_737),
     ];
 
     let mut failures = Vec::new();
@@ -341,20 +341,20 @@ fn score_sanity_checks() {
     );
     println!("  heavy blur (r=5): {:.6}", heavy_result.score());
 
-    // All scores in [0, 100]
+    // All scores <= 100, can go negative for extreme distortions
     let pairs = generate_test_pairs(W, H);
     for pair in &pairs {
         let src = RgbSlice::new(&pair.source, W, H);
         let dst = RgbSlice::new(&pair.distorted, W, H);
         let result = z.compute(&src, &dst).expect("compute failed");
         assert!(
-            (0.0..=100.0).contains(&result.score()),
-            "{}: score {:.4} outside [0, 100]",
+            result.score() <= 100.0,
+            "{}: score {:.4} above 100",
             pair.name,
             result.score(),
         );
     }
-    println!("  All scores in [0, 100] range");
+    println!("  All scores <= 100 (sub-zero allowed for extreme distortions)");
 }
 
 /// Same computation 3x → bit-exact score, raw_distance, and features.

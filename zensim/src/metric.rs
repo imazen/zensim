@@ -291,14 +291,16 @@ pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
     distance_to_score_mapped(raw_distance, 18.0, 0.7)
 }
 
-/// Map a raw weighted distance to the 0–100 quality score with custom parameters.
+/// Map a raw weighted distance to the quality score with custom parameters.
 ///
-/// `score = 100 - a * d^b`, clamped to \[0, 100\].
+/// `score = 100 - a * d^b`. Nominally 0–100 but can go negative for
+/// extreme distortions (the magnitude below zero is informative —
+/// it distinguishes "slightly wrong" from "completely wrong").
 fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
     if raw_distance <= 0.0 {
         100.0
     } else {
-        (100.0 - a * raw_distance.powf(b)).max(0.0)
+        100.0 - a * raw_distance.powf(b)
     }
 }
 
@@ -586,7 +588,7 @@ impl ZensimResult {
 /// | 50.0  | 0.5           |
 /// | 0.0   | 1.0           |
 pub fn score_to_dissimilarity(score: f64) -> f64 {
-    ((100.0 - score) / 100.0).max(0.0)
+    (100.0 - score) / 100.0
 }
 
 /// Convert a dissimilarity value (0 = identical, higher = worse) back to a

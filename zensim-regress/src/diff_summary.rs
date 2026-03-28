@@ -535,8 +535,10 @@ mod tests {
     }
 
     #[test]
-    fn dissimilarity_conversion_never_negative() {
-        assert_eq!(score_to_dissimilarity(100.5), 0.0);
+    fn dissimilarity_above_100_goes_negative() {
+        // score > 100 → negative dissimilarity (unclamped)
+        assert!(score_to_dissimilarity(100.5) < 0.0);
+        assert!((score_to_dissimilarity(100.5) - (-0.005)).abs() < 1e-10);
     }
 
     #[test]
