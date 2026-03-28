@@ -112,15 +112,17 @@ The tracked variant catches regressions in edge handling, padding, and multi-pix
 
 ### Writing the scalar reference
 
-The `scalar_op` is your **ground truth** — pure f64 math implementing the operation's definition. It must NOT be a `_scalar` variant from `#[autoversion]` (that's still compiled code subject to FP reassociation). Use textbook math:
+The `scalar_op` is your **ground truth** — an independent implementation of the operation's definition. It must NOT be a `_scalar` variant from `#[autoversion]` (that's the code under test, subject to compiler auto-vectorization and FP reassociation). Write a separate reference, ideally in f64 for maximum precision:
 
 ```rust
-// GOOD: true mathematical reference in f64
+// GOOD: independent reference
 |px| vec![px[0].powf(1.0 / 2.2), px[1].powf(1.0 / 2.2), px[2].powf(1.0 / 2.2), px[3]]
 
 // BAD: calling the autoversion scalar variant — this IS the code under test
 |px| { let v = linear_to_srgb_scalar(ScalarToken, px[0] as f32); vec![v as f64, ...] }
 ```
+
+f64 is not mandatory — what matters is independence from the code under test. But f64 avoids ambiguity: if the image op works in f32 and the reference in f64, any delta is the image code's rounding, not the reference's.
 
 ### The image_op calls your dispatcher
 
@@ -192,7 +194,24 @@ The operation closure must call your **public dispatcher** — the function that
 
 `for_each_token_permutation` disables tokens at the process level — `summon()` returns `None` for disabled tokens, so dispatchers naturally fall back to lower tiers.
 
-For functions that take an explicit token (`#[arcane]` inner functions), use `incant!` in the closure to dispatch, or summon the best available token. See the `simd` module docs for patterns with `incant!`, `#[autoversion]`, and explicit token parameters.
+For functions that take an explicit token (`#[arcane]` inner functions), tokens are `Copy` — summon outside and capture, or use `incant!` in the closure. See the `simd` module docs for patterns.
+
+### Skipping crypto permutations
+
+On x86, crypto tokens (PCLMUL, AES) are independent from compute tiers. Image processing code doesn't use them, so toggling them combinatorially just multiplies test count. Use `CryptoGrouping::Skip`:
+
+```rust
+use zensim_regress::simd::{check_simd_consistency_opts, CryptoGrouping};
+
+let report = check_simd_consistency_opts(
+    || { /* ... */ },
+    &RegressionTolerance::off_by_one(),
+    CompileTimePolicy::Warn,
+    CryptoGrouping::Skip,  // only permute compute tiers
+).unwrap();
+```
+
+`Skip` excludes crypto from permutations. `Clump` tests crypto as a single on/off group, separate from compute tiers. `Include` (default) is the full combinatorial set.
 
 ### Combining with oracle testing
 

@@ -78,9 +78,8 @@
 //!
 //! ## Functions with token parameters
 //!
-//! If the function you want to test takes an explicit token (common for inner
-//! `#[arcane]` functions), wrap it in a dispatcher or use `incant!` in the
-//! closure:
+//! If the function takes an explicit token (`#[arcane]` inner functions),
+//! tokens are `Copy` — summon outside and capture, or use `incant!`:
 //!
 //! ```rust,ignore
 //! use archmage::incant;
@@ -96,11 +95,32 @@
 //! );
 //! ```
 //!
-//! The suffixed variants (`process_row_v3`, `process_row_neon`,
-//! `process_row_scalar`) each take their respective token type as the first
-//! parameter. `incant!` handles summoning and passing the right token.
+//! `incant!` handles summoning and passing the right token type.
 //! As `for_each_token_permutation` disables tokens, `incant!` falls back
 //! to lower tiers automatically.
+//!
+//! ## Skipping crypto permutations
+//!
+//! On x86, crypto tokens (PCLMUL, AES) are independent from compute tiers
+//! (AVX2, FMA). Image processing code never uses crypto instructions, so
+//! toggling them just multiplies permutations without testing anything new.
+//!
+//! Pass `CryptoGrouping::Skip` to exclude crypto tokens from permutations:
+//!
+//! ```rust,ignore
+//! check_simd_consistency_opts(
+//!     || { ... },
+//!     &RegressionTolerance::off_by_one(),
+//!     CompileTimePolicy::Warn,
+//!     CryptoGrouping::Skip,
+//! );
+//! ```
+//!
+//! | Grouping | On AVX2+AES machine | Permutations |
+//! |----------|---------------------|-------------|
+//! | `Include` (default) | V1, V2, Crypto, V3, V3Crypto | ~16 (combinatorial) |
+//! | `Skip` | V1, V2, V3 only | ~4 (linear cascade) |
+//! | `Clump` | Crypto on/off as a group, crossed with compute | ~8 (2 × cascade) |
 //!
 //! ## `#[autoversion]` functions
 //!
@@ -158,13 +178,54 @@
 
 use std::fmt;
 
-use archmage::testing::{CompileTimePolicy, PermutationReport, for_each_token_permutation};
+use archmage::testing::{
+    CompileTimePolicy, PermutationReport, for_each_token_permutation,
+    lock_token_testing,
+};
 use zensim::{RgbaSlice, Zensim, ZensimProfile};
 
 use crate::error::RegressError;
 use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
 
-// ─── Report types ──────────────���────────────────────────────────────────
+// ─── Crypto grouping ────────────────────────────────────────────────────
+
+/// Controls how crypto tokens (PCLMUL, AES, SHA) participate in SIMD
+/// permutation testing.
+///
+/// On x86, crypto tokens are independent from compute tiers (AVX2, FMA).
+/// Image processing code rarely uses crypto instructions, so toggling them
+/// combinatorially with compute tiers multiplies test count without finding
+/// real bugs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CryptoGrouping {
+    /// Include crypto tokens in permutations (default). Produces the full
+    /// combinatorial set — can be 2-4x more permutations than necessary
+    /// for non-crypto code.
+    #[default]
+    Include,
+    /// Exclude crypto tokens entirely. They stay at their natural state
+    /// (enabled if the CPU has them) and don't participate in permutations.
+    /// Best for image processing code that never uses PCLMUL/AES/SHA.
+    Skip,
+    /// Crypto tokens move as a single group: all enabled or all disabled,
+    /// tested as a separate series from compute tiers. Produces
+    /// `compute_perms + 1` instead of `compute_perms × crypto_perms`.
+    Clump,
+}
+
+/// Token names that are crypto-only (not compute).
+const CRYPTO_TOKEN_NAMES: &[&str] = &[
+    "x86-64-crypto",    // X64CryptoToken (PCLMUL + AES)
+    "x86-64-v3-crypto", // X64V3CryptoToken
+    "aarch64-aes",      // NeonAesToken
+    "aarch64-sha3",     // NeonSha3Token
+];
+
+fn is_crypto_token(name: &str) -> bool {
+    CRYPTO_TOKEN_NAMES.contains(&name)
+}
+
+// ─── Report types ──────────────────────────────────────────────────────
 
 /// Comparison of one SIMD tier against the reference (highest-tier) output.
 #[derive(Debug, Clone)]
@@ -237,6 +298,22 @@ impl fmt::Display for SimdConsistencyReport {
 
 /// Run `operation` under every SIMD token permutation and compare outputs.
 ///
+/// Convenience wrapper for [`check_simd_consistency_opts`] with
+/// `CryptoGrouping::Include` (all tokens permuted).
+///
+/// For image processing code that doesn't use crypto instructions,
+/// prefer [`check_simd_consistency_opts`] with [`CryptoGrouping::Skip`]
+/// to avoid unnecessary permutations.
+pub fn check_simd_consistency(
+    operation: impl Fn() -> (Vec<u8>, u32, u32),
+    tolerance: &RegressionTolerance,
+    policy: CompileTimePolicy,
+) -> Result<SimdConsistencyReport, RegressError> {
+    check_simd_consistency_opts(operation, tolerance, policy, CryptoGrouping::Include)
+}
+
+/// Run `operation` under SIMD token permutations with crypto grouping control.
+///
 /// The operation closure is called once per permutation. It must return
 /// `(rgba_pixels, width, height)` — RGBA u8 format.
 ///
@@ -245,33 +322,148 @@ impl fmt::Display for SimdConsistencyReport {
 ///
 /// # Arguments
 ///
-/// * `operation` — Closure that performs the image operation and returns
-///   `(Vec<u8>, u32, u32)` — RGBA pixels, width, height.
+/// * `operation` — Closure returning `(Vec<u8>, u32, u32)` — RGBA pixels, width, height.
 /// * `tolerance` — How closely non-reference tiers must match the reference.
-///   [`RegressionTolerance::off_by_one()`] is a good default for rounding
-///   differences across SIMD implementations.
-/// * `policy` — What to do when tokens can't be disabled (compile-time
-///   guaranteed). Use `Warn` locally, `Fail` in CI with `testable_dispatch`.
+///   [`RegressionTolerance::off_by_one()`] is a good default.
+/// * `policy` — What to do when tokens can't be disabled. Use `Warn` locally,
+///   `Fail` in CI with `testable_dispatch`.
+/// * `crypto` — How to handle crypto tokens. [`CryptoGrouping::Skip`] is
+///   recommended for image processing code.
 ///
 /// # Errors
 ///
 /// Returns [`RegressError`] if zensim comparison fails (dimension mismatch).
-pub fn check_simd_consistency(
+pub fn check_simd_consistency_opts(
     operation: impl Fn() -> (Vec<u8>, u32, u32),
     tolerance: &RegressionTolerance,
     policy: CompileTimePolicy,
+    crypto: CryptoGrouping,
 ) -> Result<SimdConsistencyReport, RegressError> {
-    let zensim = Zensim::new(ZensimProfile::latest());
     let mut outputs: Vec<(String, Vec<u8>, u32, u32)> = Vec::new();
 
-    let perm_report = for_each_token_permutation(policy, |perm| {
-        let (pixels, w, h) = operation();
-        outputs.push((perm.label.clone(), pixels, w, h));
-    });
+    let perm_report = match crypto {
+        CryptoGrouping::Include => {
+            // Full combinatorial — existing behavior
+            for_each_token_permutation(policy, |perm| {
+                let (pixels, w, h) = operation();
+                outputs.push((perm.label.clone(), pixels, w, h));
+            })
+        }
+        CryptoGrouping::Skip => {
+            // Filter: run all permutations but only collect when the disabled
+            // set contains no crypto tokens (or is identical to a crypto-only
+            // difference we already collected).
+            let mut seen_compute_states: Vec<Vec<String>> = Vec::new();
+            for_each_token_permutation(policy, |perm| {
+                // Extract the compute-only disabled set
+                let compute_disabled: Vec<String> = perm
+                    .disabled
+                    .iter()
+                    .filter(|name| !is_crypto_token(name))
+                    .map(|&s| s.to_string())
+                    .collect();
 
+                // Skip if we've already seen this compute state
+                if seen_compute_states.contains(&compute_disabled) {
+                    return;
+                }
+                seen_compute_states.push(compute_disabled);
+
+                let (pixels, w, h) = operation();
+                let label = if perm.disabled.is_empty() {
+                    perm.label.clone()
+                } else {
+                    // Relabel to show only compute tokens
+                    let compute_names: Vec<&str> = perm
+                        .disabled
+                        .iter()
+                        .filter(|name| !is_crypto_token(name))
+                        .copied()
+                        .collect();
+                    if compute_names.is_empty() {
+                        "all enabled".to_string()
+                    } else {
+                        format!("{} disabled", compute_names.join(", "))
+                    }
+                };
+                outputs.push((label, pixels, w, h));
+            })
+        }
+        CryptoGrouping::Clump => {
+            // Two series: (1) compute permutations with crypto at natural state,
+            // (2) one extra run with all crypto disabled (if any crypto is available).
+            // Series 1: same as Skip — get compute permutations
+            let mut seen_compute_states: Vec<Vec<String>> = Vec::new();
+            let mut has_crypto = false;
+            let report = for_each_token_permutation(policy, |perm| {
+                if perm.disabled.iter().any(|name| is_crypto_token(name)) {
+                    has_crypto = true;
+                }
+
+                let compute_disabled: Vec<String> = perm
+                    .disabled
+                    .iter()
+                    .filter(|name| !is_crypto_token(name))
+                    .map(|&s| s.to_string())
+                    .collect();
+
+                if seen_compute_states.contains(&compute_disabled) {
+                    return;
+                }
+                seen_compute_states.push(compute_disabled);
+
+                let (pixels, w, h) = operation();
+                let label = if perm.disabled.is_empty() {
+                    perm.label.clone()
+                } else {
+                    let compute_names: Vec<&str> = perm
+                        .disabled
+                        .iter()
+                        .filter(|name| !is_crypto_token(name))
+                        .copied()
+                        .collect();
+                    if compute_names.is_empty() {
+                        "all enabled".to_string()
+                    } else {
+                        format!("{} disabled", compute_names.join(", "))
+                    }
+                };
+                outputs.push((label, pixels, w, h));
+            });
+
+            // Series 2: if crypto tokens exist, run once with all crypto disabled
+            // (compute at highest tier). This is inside the permutation lock,
+            // but for_each_token_permutation already ran and cleaned up.
+            if has_crypto {
+                // We need to manually disable crypto tokens for one run.
+                // Acquire the lock (for_each_token_permutation released it).
+                let _lock = lock_token_testing();
+                disable_crypto_tokens(true);
+
+                let (pixels, w, h) = operation();
+                outputs.push(("all crypto disabled".to_string(), pixels, w, h));
+
+                disable_crypto_tokens(false);
+            }
+
+            report
+        }
+    };
+
+    compare_outputs(outputs, perm_report, tolerance)
+}
+
+/// Compare collected outputs against the reference (first entry).
+fn compare_outputs(
+    outputs: Vec<(String, Vec<u8>, u32, u32)>,
+    perm_report: PermutationReport,
+    tolerance: &RegressionTolerance,
+) -> Result<SimdConsistencyReport, RegressError> {
     if outputs.len() < 2 {
         return Ok(SimdConsistencyReport::single_tier(perm_report));
     }
+
+    let zensim = Zensim::new(ZensimProfile::latest());
 
     let ref_label = outputs[0].0.clone();
     let ref_w = outputs[0].2 as usize;
@@ -315,6 +507,21 @@ pub fn check_simd_consistency(
         all_passed,
         permutation_report: perm_report,
     })
+}
+
+/// Disable or re-enable all crypto tokens. Best-effort — ignores errors
+/// from compile-time-guaranteed tokens.
+fn disable_crypto_tokens(disabled: bool) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    {
+        let _ = archmage::X64CryptoToken::dangerously_disable_token_process_wide(disabled);
+        let _ = archmage::X64V3CryptoToken::dangerously_disable_token_process_wide(disabled);
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        let _ = archmage::NeonAesToken::dangerously_disable_token_process_wide(disabled);
+        let _ = archmage::NeonSha3Token::dangerously_disable_token_process_wide(disabled);
+    }
 }
 
 /// Run `operation` under every SIMD token permutation (f32 variant).
