@@ -41,6 +41,8 @@ pub mod display;
 pub mod distortions;
 /// Error types.
 pub mod error;
+/// Minimal bitmap font for annotating diff images.
+pub mod font;
 /// HTTP fetcher for downloading remote reference images.
 pub mod fetch;
 /// Deterministic synthetic test image generators.
