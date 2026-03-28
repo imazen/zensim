@@ -141,6 +141,218 @@ pub fn create_comparison_montage_raw(
     create_comparison_montage(&exp_img, &act_img, amplification, gap)
 }
 
+// ─── Structural diff (high-pass residual) ───────────────────────────────
+
+/// Generate a structural diff image showing where structure exists in one
+/// image but not the other.
+///
+/// Uses high-pass residuals (pixel minus box-blurred local mean) to extract
+/// structural features, then diffs the residual magnitudes. This is the same
+/// approach zensim uses internally for edge artifact/detail features, but
+/// applied here as a standalone visualization with no zensim dependency.
+///
+/// Output coloring:
+/// - **Cyan**: structure present in expected but absent in actual (missing feature)
+/// - **Orange**: structure present in actual but absent in expected (added feature)
+/// - **Dark gray**: no structural difference
+///
+/// `blur_radius` controls the high-pass cutoff (2–3 is good for watermarks
+/// and overlays, 1 for fine texture, 5+ for large shapes).
+///
+/// # Panics
+///
+/// Panics if expected and actual have different dimensions.
+pub fn generate_structural_diff(
+    expected: &RgbaImage,
+    actual: &RgbaImage,
+    blur_radius: u32,
+    amplification: u8,
+) -> RgbaImage {
+    let (w, h) = expected.dimensions();
+    assert_eq!(
+        (w, h),
+        actual.dimensions(),
+        "dimension mismatch: expected {}x{}, actual {}x{}",
+        w,
+        h,
+        actual.width(),
+        actual.height(),
+    );
+
+    let amp = amplification.max(1) as f32;
+
+    // Convert to grayscale f32
+    let to_gray = |img: &RgbaImage| -> Vec<f32> {
+        img.pixels()
+            .map(|px| 0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32)
+            .collect()
+    };
+
+    let gray_exp = to_gray(expected);
+    let gray_act = to_gray(actual);
+
+    // Box blur for local mean (running-sum, O(1) per pixel regardless of radius)
+    let blurred_exp = box_blur_gray(&gray_exp, w, h, blur_radius);
+    let blurred_act = box_blur_gray(&gray_act, w, h, blur_radius);
+
+    // High-pass residuals: |pixel - local_mean|
+    let mut diff = RgbaImage::new(w, h);
+
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) as usize;
+            let res_exp = (gray_exp[i] - blurred_exp[i]).abs();
+            let res_act = (gray_act[i] - blurred_act[i]).abs();
+
+            // Structural diff: positive = expected has more structure
+            let delta = (res_exp - res_act) * amp;
+
+            if delta.abs() < 1.0 {
+                diff.put_pixel(x, y, Rgba([24, 24, 24, 255]));
+            } else if delta > 0.0 {
+                // Expected has structure, actual doesn't → cyan (missing)
+                let v = delta.min(255.0) as u8;
+                diff.put_pixel(x, y, Rgba([0, v, v, 255]));
+            } else {
+                // Actual has structure, expected doesn't → orange (added)
+                let v = (-delta).min(255.0) as u8;
+                diff.put_pixel(x, y, Rgba([v, (v as f32 * 0.6) as u8, 0, 255]));
+            }
+        }
+    }
+
+    diff
+}
+
+/// Generate structural diff from raw RGBA byte slices.
+pub fn generate_structural_diff_raw(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    blur_radius: u32,
+    amplification: u8,
+) -> RgbaImage {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions");
+    generate_structural_diff(&exp_img, &act_img, blur_radius, amplification)
+}
+
+/// Box blur on a grayscale f32 buffer. O(1) per pixel via running sums.
+fn box_blur_gray(src: &[f32], w: u32, h: u32, radius: u32) -> Vec<f32> {
+    if radius == 0 {
+        return src.to_vec();
+    }
+
+    let w = w as usize;
+    let h = h as usize;
+    let r = radius as usize;
+    let mut tmp = vec![0.0f32; w * h];
+    let mut out = vec![0.0f32; w * h];
+
+    // Horizontal pass
+    for y in 0..h {
+        let row = y * w;
+        let mut sum = 0.0f32;
+        let mut count = 0u32;
+
+        // Initialize window
+        for x in 0..=r.min(w - 1) {
+            sum += src[row + x];
+            count += 1;
+        }
+        tmp[row] = sum / count as f32;
+
+        for x in 1..w {
+            // Add right edge
+            let right = x + r;
+            if right < w {
+                sum += src[row + right];
+                count += 1;
+            }
+            // Remove left edge
+            if x > r + 1 {
+                // This shouldn't happen since left = x - r - 1
+            }
+            let left_remove = x.wrapping_sub(r + 1);
+            if x > r {
+                sum -= src[row + left_remove];
+                count -= 1;
+            }
+            tmp[row + x] = sum / count as f32;
+        }
+    }
+
+    // Vertical pass
+    for x in 0..w {
+        let mut sum = 0.0f32;
+        let mut count = 0u32;
+
+        for y in 0..=r.min(h - 1) {
+            sum += tmp[y * w + x];
+            count += 1;
+        }
+        out[x] = sum / count as f32;
+
+        for y in 1..h {
+            let bottom = y + r;
+            if bottom < h {
+                sum += tmp[bottom * w + x];
+                count += 1;
+            }
+            if y > r {
+                sum -= tmp[(y - r - 1) * w + x];
+                count -= 1;
+            }
+            out[y * w + x] = sum / count as f32;
+        }
+    }
+
+    out
+}
+
+/// Create a 4-panel comparison montage: Expected | Actual | Pixel Diff | Structural Diff.
+///
+/// The pixel diff panel shows amplified per-channel absolute differences.
+/// The structural diff panel shows high-pass residual differences —
+/// cyan for structure missing in actual, orange for structure added.
+///
+/// # Panics
+///
+/// Panics if expected and actual have different dimensions.
+pub fn create_structural_montage(
+    expected: &RgbaImage,
+    actual: &RgbaImage,
+    amplification: u8,
+    gap: u32,
+    blur_radius: u32,
+) -> RgbaImage {
+    let pixel_diff = generate_diff_image(expected, actual, amplification);
+    let struct_diff = generate_structural_diff(expected, actual, blur_radius, amplification);
+    create_montage(&[expected, actual, &pixel_diff, &struct_diff], gap)
+}
+
+/// Create a 4-panel structural montage from raw RGBA byte slices.
+pub fn create_structural_montage_raw(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+    gap: u32,
+    blur_radius: u32,
+) -> RgbaImage {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions");
+    create_structural_montage(&exp_img, &act_img, amplification, gap, blur_radius)
+}
+
+// ─── Spatial analysis ───────────────────────────────────────────────────
+
 /// Stats for one region of the diff (used by spatial analysis).
 #[derive(Debug, Clone)]
 pub struct RegionStats {
@@ -327,8 +539,12 @@ pub fn spatial_analysis(
 
 /// Create a comparison montage with stats text burned into a canvas below.
 ///
-/// Returns a 3-panel montage (expected | actual | amplified diff) with
-/// a text strip below showing the provided annotation lines.
+/// Returns a 4-panel montage (expected | actual | pixel diff | structural diff)
+/// with a text strip below showing the provided annotation lines.
+///
+/// The structural diff panel uses high-pass residuals with `blur_radius` 3
+/// (good for watermarks and overlays). Pass `None` for `annotation` or `""`
+/// to skip the text strip.
 ///
 /// # Panics
 ///
@@ -342,7 +558,7 @@ pub fn create_annotated_montage(
 ) -> RgbaImage {
     use crate::font;
 
-    let montage = create_comparison_montage(expected, actual, amplification, gap);
+    let montage = create_structural_montage(expected, actual, amplification, gap, 3);
 
     if annotation.is_empty() {
         return montage;
@@ -527,8 +743,8 @@ mod tests {
         let exp = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let montage = create_annotated_montage(&exp, &act, 10, 2, "");
-        // Should be same as non-annotated
-        let plain = create_comparison_montage(&exp, &act, 10, 2);
+        // Should be same as the 4-panel structural montage (no text strip added)
+        let plain = create_structural_montage(&exp, &act, 10, 2, 3);
         assert_eq!(montage.dimensions(), plain.dimensions());
     }
 
@@ -580,5 +796,69 @@ mod tests {
         let text = format!("{analysis}");
         assert!(text.contains("Spatial diff"));
         assert!(text.contains("TL"));
+    }
+
+    #[test]
+    fn structural_diff_identical_is_dark() {
+        let img = RgbaImage::from_fn(32, 32, |x, y| {
+            Rgba([(x * 8) as u8, (y * 8) as u8, 128, 255])
+        });
+        let diff = generate_structural_diff(&img, &img, 3, 10);
+        // All pixels should be dark gray (no structural difference)
+        for px in diff.pixels() {
+            assert_eq!(*px, Rgba([24, 24, 24, 255]));
+        }
+    }
+
+    #[test]
+    fn structural_diff_detects_added_edge() {
+        // Uniform expected, expected+edge actual
+        let exp = RgbaImage::from_pixel(64, 64, Rgba([128, 128, 128, 255]));
+        let mut act = exp.clone();
+        // Add a bright horizontal line (simulates a watermark edge)
+        for x in 10..54 {
+            act.put_pixel(x, 32, Rgba([255, 255, 255, 255]));
+        }
+        let diff = generate_structural_diff(&exp, &act, 2, 10);
+        // Should have non-dark pixels around y=32 (orange = added structure)
+        let non_dark: usize = diff
+            .pixels()
+            .filter(|px| px[0] > 24 || px[1] > 24 || px[2] > 24)
+            .count();
+        assert!(non_dark > 10, "should detect added edge, got {non_dark} non-dark pixels");
+    }
+
+    #[test]
+    fn structural_diff_detects_missing_edge() {
+        // Expected has edge, actual is uniform
+        let mut exp = RgbaImage::from_pixel(64, 64, Rgba([128, 128, 128, 255]));
+        for x in 10..54 {
+            exp.put_pixel(x, 32, Rgba([255, 255, 255, 255]));
+        }
+        let act = RgbaImage::from_pixel(64, 64, Rgba([128, 128, 128, 255]));
+        let diff = generate_structural_diff(&exp, &act, 2, 10);
+        // Should have cyan pixels around y=32 (missing structure)
+        let cyan_pixels: usize = diff
+            .pixels()
+            .filter(|px| px[1] > 50 && px[2] > 50 && px[0] < 10)
+            .count();
+        assert!(cyan_pixels > 5, "should show missing structure as cyan, got {cyan_pixels}");
+    }
+
+    #[test]
+    fn structural_montage_has_4_panels() {
+        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
+        let montage = create_structural_montage(&exp, &act, 10, 2, 3);
+        // 4 panels of 32px + 3 gaps of 2px = 134
+        assert_eq!(montage.width(), 32 * 4 + 2 * 3);
+        assert_eq!(montage.height(), 32);
+    }
+
+    #[test]
+    fn box_blur_identity_radius_zero() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0];
+        let result = box_blur_gray(&data, 2, 2, 0);
+        assert_eq!(result, data);
     }
 }
