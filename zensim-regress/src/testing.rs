@@ -583,7 +583,8 @@ pub(crate) fn build_report(
     // can produce sub-100 scores on small/uniform images due to floating-point
     // precision loss in the pyramid decomposition. The delta_stats are authoritative
     // for identical pixel detection.
-    let effective_score = if ds.pixels_differing == 0 && (!ds.has_alpha || ds.alpha_max_delta == 0) {
+    let effective_score = if ds.pixels_differing == 0 && (!ds.has_alpha || ds.alpha_max_delta == 0)
+    {
         100.0
     } else {
         cr.result.score()

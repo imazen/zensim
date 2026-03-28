@@ -2021,10 +2021,15 @@ pub(crate) fn compute_delta_stats(
                     // Skip RGB comparison when both pixels are fully transparent.
                     // RGB values are undefined at alpha=0 — different encoders produce
                     // different values (white vs black) but the pixels are visually identical.
-                    let both_transparent = alpha.is_some_and(|(sa, da)| sa < 0.5 / native_max && da < 0.5 / native_max);
+                    let both_transparent = alpha
+                        .is_some_and(|(sa, da)| sa < 0.5 / native_max && da < 0.5 / native_max);
 
                     for c in 0..3 {
-                        let delta = if both_transparent { 0.0 } else { src_rgb[c] - dst_rgb[c] };
+                        let delta = if both_transparent {
+                            0.0
+                        } else {
+                            src_rgb[c] - dst_rgb[c]
+                        };
                         let abs_delta = delta.abs();
 
                         acc.sum_delta[c] += delta;
