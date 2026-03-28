@@ -118,9 +118,9 @@
 //!
 //! | Grouping | On AVX2+AES machine | Permutations |
 //! |----------|---------------------|-------------|
-//! | `Include` (default) | V1, V2, Crypto, V3, V3Crypto | ~16 (combinatorial) |
-//! | `Skip` | V1, V2, V3 only | ~4 (linear cascade) |
-//! | `Clump` | Crypto on/off as a group, crossed with compute | ~8 (2 × cascade) |
+//! | `Clump` (default) | Compute permutations + one crypto-all-off run | ~5 |
+//! | `Skip` | V1, V2, V3 only, crypto untouched | ~4 |
+//! | `Combinatorial` | Full cross-product of all tokens | ~16 |
 //!
 //! ## `#[autoversion]` functions
 //!
@@ -198,11 +198,10 @@ use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
 /// real bugs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CryptoGrouping {
-    /// Include crypto tokens in permutations (default). Produces the full
-    /// combinatorial set — can be 2-4x more permutations than necessary
-    /// for non-crypto code.
-    #[default]
-    Include,
+    /// Full combinatorial permutations of all tokens including crypto.
+    /// Can be 2-4x more permutations than necessary for non-crypto code.
+    /// Use when your code actually uses PCLMUL/AES/SHA instructions.
+    Combinatorial,
     /// Exclude crypto tokens entirely. They stay at their natural state
     /// (enabled if the CPU has them) and don't participate in permutations.
     /// Best for image processing code that never uses PCLMUL/AES/SHA.
@@ -210,6 +209,8 @@ pub enum CryptoGrouping {
     /// Crypto tokens move as a single group: all enabled or all disabled,
     /// tested as a separate series from compute tiers. Produces
     /// `compute_perms + 1` instead of `compute_perms × crypto_perms`.
+    /// Default — covers crypto without combinatorial explosion.
+    #[default]
     Clump,
 }
 
@@ -299,17 +300,14 @@ impl fmt::Display for SimdConsistencyReport {
 /// Run `operation` under every SIMD token permutation and compare outputs.
 ///
 /// Convenience wrapper for [`check_simd_consistency_opts`] with
-/// `CryptoGrouping::Include` (all tokens permuted).
-///
-/// For image processing code that doesn't use crypto instructions,
-/// prefer [`check_simd_consistency_opts`] with [`CryptoGrouping::Skip`]
-/// to avoid unnecessary permutations.
+/// [`CryptoGrouping::Clump`] (default — crypto tested as a group,
+/// not combinatorially with compute tiers).
 pub fn check_simd_consistency(
     operation: impl Fn() -> (Vec<u8>, u32, u32),
     tolerance: &RegressionTolerance,
     policy: CompileTimePolicy,
 ) -> Result<SimdConsistencyReport, RegressError> {
-    check_simd_consistency_opts(operation, tolerance, policy, CryptoGrouping::Include)
+    check_simd_consistency_opts(operation, tolerance, policy, CryptoGrouping::default())
 }
 
 /// Run `operation` under SIMD token permutations with crypto grouping control.
@@ -342,7 +340,7 @@ pub fn check_simd_consistency_opts(
     let mut outputs: Vec<(String, Vec<u8>, u32, u32)> = Vec::new();
 
     let perm_report = match crypto {
-        CryptoGrouping::Include => {
+        CryptoGrouping::Combinatorial => {
             // Full combinatorial — existing behavior
             for_each_token_permutation(policy, |perm| {
                 let (pixels, w, h) = operation();

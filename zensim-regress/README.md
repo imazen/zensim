@@ -211,7 +211,7 @@ let report = check_simd_consistency_opts(
 ).unwrap();
 ```
 
-`Skip` excludes crypto from permutations. `Clump` tests crypto as a single on/off group, separate from compute tiers. `Include` (default) is the full combinatorial set.
+`Clump` (default) tests crypto as a single on/off group, separate from compute tiers. `Skip` excludes crypto from permutations entirely. `Combinatorial` is the full cross-product (use when your code actually uses crypto instructions).
 
 ### Combining with oracle testing
 
