@@ -576,7 +576,6 @@ pub fn create_annotated_montage(
     let bg = Rgba([18, 18, 18, 255]);
     let label_fg = [220, 220, 220, 255];
     let label_bg = [40, 40, 40, 255];
-    let label_scale = 3u32;
 
     let panels: [(&str, &RgbaImage); 4] = [
         ("EXPECTED", expected),
@@ -585,15 +584,25 @@ pub fn create_annotated_montage(
         ("STRUCTURE", &struct_diff),
     ];
 
-    // Render label bars at 3x scale
-    let label_images: Vec<(Vec<u8>, u32, u32)> = panels
-        .iter()
-        .map(|(label, _)| font::render_text_scaled(label, label_fg, label_bg, label_scale))
-        .collect();
-
-    let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4; // +4 padding
     let panel_w = expected.width();
     let panel_h = expected.height();
+
+    // Auto-scale labels to fit panel width with ~10% margin
+    let longest_label = panels.iter().map(|(l, _)| l.len()).max().unwrap_or(1) as u32;
+    let available_w = panel_w.saturating_sub(pad * 2); // margin inside label bar
+    let label_char_h = ((available_w as f32 / longest_label as f32)
+        * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
+        .floor() as u32;
+    // Clamp: at least base height, at most 3x
+    let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
+
+    let label_images: Vec<(Vec<u8>, u32, u32)> = panels
+        .iter()
+        .map(|(label, _)| font::render_text_height(label, label_fg, label_bg, label_char_h))
+        .collect();
+
+    let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
+    let text_pad = pad / 2; // tighter pad inside label bar
 
     // 2x2 grid dimensions
     let cell_w = panel_w;
@@ -601,15 +610,42 @@ pub fn create_annotated_montage(
     let grid_w = pad + cell_w + pad + cell_w + pad;
     let grid_h = pad + cell_h + pad + cell_h + pad;
 
-    // Text strip
+    // Text strip — auto-scale to fit grid width
     let text_h = if annotation.is_empty() {
         0
     } else {
-        let (_, _, th) = font::render_text_scaled(annotation, label_fg, label_bg, 2);
-        th + pad * 2
+        let longest_text_line = annotation.lines().map(|l| l.len()).max().unwrap_or(1) as u32;
+        let text_avail = grid_w.saturating_sub(pad * 2);
+        let text_char_h = ((text_avail as f32 / longest_text_line as f32)
+            * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
+            .floor() as u32;
+        let text_char_h = text_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 2);
+        let line_count = annotation.lines().count() as u32;
+        text_char_h * line_count + pad * 2
+    };
+    let _ = text_pad;
+
+    // Pre-render text to measure actual width
+    let text_rendered = if !annotation.is_empty() {
+        let longest_text_line = annotation.lines().map(|l| l.len()).max().unwrap_or(1) as u32;
+        let text_avail = grid_w.saturating_sub(pad * 2);
+        let text_char_h = ((text_avail as f32 / longest_text_line as f32)
+            * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
+            .floor() as u32;
+        let text_char_h = text_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 2);
+        let rendered = font::render_text_height(
+            annotation,
+            [200, 200, 200, 255],
+            [30, 30, 30, 255],
+            text_char_h,
+        );
+        Some(rendered)
+    } else {
+        None
     };
 
-    let total_w = grid_w;
+    let text_strip_w = text_rendered.as_ref().map_or(0, |(_, tw, _)| *tw + pad * 2);
+    let total_w = grid_w.max(text_strip_w);
     let total_h = grid_h + text_h;
 
     let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
@@ -652,27 +688,24 @@ pub fn create_annotated_montage(
         );
     }
 
-    // Text strip at bottom
-    if !annotation.is_empty() {
-        let text_fg = [200, 200, 200, 255];
-        let text_bg = [30, 30, 30, 255];
-        let (tbuf, tw, th) = font::render_text_scaled(annotation, text_fg, text_bg, 2);
-        if tw > 0 && th > 0 {
-            // Background strip
-            let strip_y = grid_h;
-            for sy in 0..text_h {
-                for sx in 0..total_w {
-                    output.put_pixel(sx, strip_y + sy, Rgba([30, 30, 30, 255]));
-                }
+    // Text strip at bottom — use pre-rendered text
+    if let Some((tbuf, tw, th)) = text_rendered
+        && tw > 0
+        && th > 0
+    {
+        let strip_y = grid_h;
+        for sy in 0..text_h {
+            for sx in 0..total_w {
+                output.put_pixel(sx, strip_y + sy, Rgba([30, 30, 30, 255]));
             }
-            if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-                imageops::overlay(
-                    &mut output,
-                    &text_img,
-                    pad as i64,
-                    (strip_y + pad) as i64,
-                );
-            }
+        }
+        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+            imageops::overlay(
+                &mut output,
+                &text_img,
+                pad as i64,
+                (strip_y + pad) as i64,
+            );
         }
     }
 
@@ -830,8 +863,8 @@ mod tests {
         let no_text = create_annotated_montage(&exp, &act, 10, 6, "");
         // Without text, should be shorter (no text strip)
         assert!(no_text.height() < with_text.height());
-        // Same width regardless of text
-        assert_eq!(no_text.width(), with_text.width());
+        // With text, may be wider to fit the annotation
+        assert!(with_text.width() >= no_text.width());
     }
 
     #[test]
