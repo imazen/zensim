@@ -583,7 +583,9 @@ pub fn create_annotated_montage(
     let pixel_diff = generate_diff_image(expected, actual, amplification);
     let struct_diff = generate_structural_diff(expected, actual, 3, amplification);
 
-    let pad = gap.max(6);
+    // Minimum padding: 30% of a base char width, at least 8px
+    let min_pad = (font::GLYPH_W * 3 / 10).max(8);
+    let pad = gap.max(min_pad);
     let bg = Rgba([18, 18, 18, 255]);
     let label_fg = [220, 220, 220, 255];
     let label_bg = [40, 40, 40, 255];
@@ -749,11 +751,11 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
 
     let cols = spatial.cols;
     let rows = spatial.rows;
-    let cell_gap = 2u32;
+    let cell_gap = 3u32;
 
     let inner_w = total_w.saturating_sub(pad * 2);
     let cell_w = (inner_w.saturating_sub(cell_gap * (cols - 1))) / cols;
-    let cell_h = cell_w * 2 / 3; // shorter than wide
+    let cell_h = cell_w * 3 / 4; // slightly taller to fit 3 lines
     let grid_px_w = cell_w * cols + cell_gap * (cols - 1);
     let grid_px_h = cell_h * rows + cell_gap * (rows - 1);
     let img_w = grid_px_w + pad * 2;
@@ -783,8 +785,10 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
         fill_rect(&mut img, cx, cy, cell_w, cell_h, cell_bg);
 
         // Cell text — 3 lines for hot cells, "ok" for clean
+        // 30% char-width padding on each side (60% usable)
         let pct = r.pixels_differing * 100.0;
-        let cell_text_w = cell_w.saturating_sub(4);
+        let cell_pad = cell_w * 3 / 20; // ~15% each side ≈ 30% total
+        let cell_text_w = cell_w.saturating_sub(cell_pad * 2);
 
         if pct < 0.05 {
             // Clean cell: small green "ok"
@@ -925,12 +929,6 @@ pub fn format_annotation_spatial(
 
     // ── Primary: colored constraint lines ──
     let mut lines: Vec<(String, [u8; 4])> = Vec::new();
-
-    let passed = report.passed();
-    lines.push((
-        if passed { "PASS".into() } else { "FAIL".into() },
-        if passed { COLOR_OK } else { COLOR_FAIL },
-    ));
 
     // zdsim
     let zdsim = score_to_dissimilarity(report.score());

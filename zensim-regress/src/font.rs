@@ -271,8 +271,11 @@ pub fn render_lines_fitted(
 
     for (line_idx, (text, fg)) in lines.iter().enumerate() {
         let y_base = line_idx as u32 * char_h;
+        // Center each line within the output width
+        let line_w = text.len() as u32 * char_w;
+        let x_offset = (out_w.saturating_sub(line_w)) / 2;
         for (col, ch) in text.chars().enumerate() {
-            let x_base = col as u32 * char_w;
+            let x_base = x_offset + col as u32 * char_w;
             let glyph_idx = char_index(ch);
             let src_x = glyph_idx * char_w;
 
