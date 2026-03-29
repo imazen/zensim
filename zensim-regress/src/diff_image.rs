@@ -85,9 +85,17 @@ pub fn generate_diff_image(
             let e = expected.get_pixel(x, y);
             let a = actual.get_pixel(x, y);
 
-            let dr = ((e[0] as i16 - a[0] as i16).abs() * amp).min(255) as u8;
-            let dg = ((e[1] as i16 - a[1] as i16).abs() * amp).min(255) as u8;
-            let db = ((e[2] as i16 - a[2] as i16).abs() * amp).min(255) as u8;
+            // Compare premultiplied values so transparent pixels diff to zero
+            // regardless of their RGB garbage values.
+            let ea = e[3] as i32;
+            let aa = a[3] as i32;
+            let amp32 = amp as i32;
+            let dr =
+                ((e[0] as i32 * ea / 255 - a[0] as i32 * aa / 255).abs() * amp32).min(255) as u8;
+            let dg =
+                ((e[1] as i32 * ea / 255 - a[1] as i32 * aa / 255).abs() * amp32).min(255) as u8;
+            let db =
+                ((e[2] as i32 * ea / 255 - a[2] as i32 * aa / 255).abs() * amp32).min(255) as u8;
 
             if dr == 0 && dg == 0 && db == 0 {
                 diff.put_pixel(x, y, Rgba([24, 24, 24, 255]));
@@ -239,10 +247,14 @@ pub fn generate_structural_diff(
 
     let amp = amplification.max(1) as f32;
 
-    // Convert to grayscale f32
+    // Convert to grayscale f32, premultiplied by alpha so transparent
+    // pixels contribute zero regardless of their RGB values.
     let to_gray = |img: &RgbaImage| -> Vec<f32> {
         img.pixels()
-            .map(|px| 0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32)
+            .map(|px| {
+                let a = px[3] as f32 / 255.0;
+                (0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32) * a
+            })
             .collect()
     };
 
@@ -561,10 +573,14 @@ pub fn spatial_analysis(
                     let off = ((y * width + x) * 4) as usize;
                     pixel_count += 1;
 
+                    // Premultiply by alpha so transparent pixels contribute zero.
+                    let ea = expected[off + 3] as i32;
+                    let aa = actual[off + 3] as i32;
+
                     let mut any_diff = false;
                     for c in 0..3 {
-                        let e = expected[off + c] as i16;
-                        let a = actual[off + c] as i16;
+                        let e = (expected[off + c] as i32 * ea / 255) as i16;
+                        let a = (actual[off + c] as i32 * aa / 255) as i16;
                         let d = (e - a).unsigned_abs() as u8;
                         if d > 0 {
                             any_diff = true;
@@ -1304,6 +1320,32 @@ mod tests {
     }
 
     #[test]
+    fn diff_transparent_pixels_are_zero() {
+        // Different RGB but both fully transparent — should show no diff
+        let a = RgbaImage::from_pixel(4, 4, Rgba([255, 0, 0, 0]));
+        let b = RgbaImage::from_pixel(4, 4, Rgba([0, 255, 0, 0]));
+        let diff = generate_diff_image(&a, &b, 10);
+        for pixel in diff.pixels() {
+            assert_eq!(
+                *pixel,
+                Rgba([24, 24, 24, 255]),
+                "transparent pixels should diff to zero"
+            );
+        }
+    }
+
+    #[test]
+    fn diff_semitransparent_scales_by_alpha() {
+        // Same RGB, different alpha — diff should reflect the visual difference
+        let a = RgbaImage::from_pixel(4, 4, Rgba([200, 200, 200, 128]));
+        let b = RgbaImage::from_pixel(4, 4, Rgba([200, 200, 200, 0]));
+        let diff = generate_diff_image(&a, &b, 1);
+        let p = diff.get_pixel(0, 0);
+        // a premul: 200*128/255 ≈ 100, b premul: 0. delta ≈ 100 per channel.
+        assert!(p[0] > 90 && p[0] < 110, "expected ~100, got {}", p[0]);
+    }
+
+    #[test]
     fn diff_clamps_to_255() {
         let a = RgbaImage::from_pixel(2, 2, Rgba([0, 0, 0, 255]));
         let b = RgbaImage::from_pixel(2, 2, Rgba([200, 200, 200, 255]));
@@ -1475,7 +1517,8 @@ mod tests {
     fn spatial_concentrated_diff() {
         let w = 64u32;
         let h = 64;
-        let exp: Vec<u8> = vec![128; (w * h * 4) as usize];
+        // Opaque pixels: R=128, G=128, B=128, A=255
+        let exp: Vec<u8> = (0..w * h).flat_map(|_| [128u8, 128, 128, 255]).collect();
         let mut act = exp.clone();
         // Modify only bottom-right quadrant (x>=32, y>=32)
         for y in 32..64 {
