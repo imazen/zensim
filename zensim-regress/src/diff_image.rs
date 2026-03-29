@@ -537,7 +537,7 @@ pub fn spatial_analysis(
     }
 }
 
-/// Create a labeled 2x2 grid montage with stats text below.
+/// Create a labeled 2x2 grid montage with two text strips below.
 ///
 /// Layout (portrait-friendly, survives LLM image downscaling):
 /// ```text
@@ -548,14 +548,18 @@ pub fn spatial_analysis(
 /// │  PIXEL DIFF  │  STRUCTURE   │
 /// │  (image)     │  (image)     │
 /// ├──────────────┴──────────────┤
-/// │  zdsim:0.13  delta:[12,8,3] │
-/// │  34.2% differ  perceptual   │
+/// │  FAIL                       │  ← primary (large font)
+/// │  zdsim: 0.13 > 0.01 FAIL   │
+/// │  delta: [12,8,3] > 1 FAIL  │
+/// ├─────────────────────────────┤
+/// │  category: perceptual       │  ← details (70% size)
+/// │  top-right: 22% -- MISSING  │
+/// │  cyan=missing orange=added  │
 /// └─────────────────────────────┘
 /// ```
 ///
-/// Each panel gets a **big** label bar (3x scaled font) above it.
-/// Panels are separated by wide padding. The text strip at the bottom
-/// uses 2x font for readability after downscaling.
+/// Use [`format_annotation`] or [`format_annotation_spatial`] to produce
+/// the [`AnnotationText`].
 ///
 /// # Panics
 ///
@@ -565,14 +569,14 @@ pub fn create_annotated_montage(
     actual: &RgbaImage,
     amplification: u8,
     gap: u32,
-    annotation: &str,
+    annotation: &AnnotationText,
 ) -> RgbaImage {
     use crate::font;
 
     let pixel_diff = generate_diff_image(expected, actual, amplification);
     let struct_diff = generate_structural_diff(expected, actual, 3, amplification);
 
-    let pad = gap.max(6); // minimum 6px padding for visual separation
+    let pad = gap.max(6);
     let bg = Rgba([18, 18, 18, 255]);
     let label_fg = [220, 220, 220, 255];
     let label_bg = [40, 40, 40, 255];
@@ -587,13 +591,12 @@ pub fn create_annotated_montage(
     let panel_w = expected.width();
     let panel_h = expected.height();
 
-    // Auto-scale labels to fit panel width with ~10% margin
+    // Auto-scale labels to fit panel width
     let longest_label = panels.iter().map(|(l, _)| l.len()).max().unwrap_or(1) as u32;
-    let available_w = panel_w.saturating_sub(pad * 2); // margin inside label bar
+    let available_w = panel_w.saturating_sub(pad * 2);
     let label_char_h = ((available_w as f32 / longest_label as f32)
         * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
         .floor() as u32;
-    // Clamp: at least base height, at most 3x
     let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
     let label_images: Vec<(Vec<u8>, u32, u32)> = panels
@@ -609,29 +612,46 @@ pub fn create_annotated_montage(
     let grid_w = pad + cell_w + pad + cell_w + pad;
     let grid_h = pad + cell_h + pad + cell_h + pad;
 
-    // Text strip — word-wrap to fit grid width, use readable font size
-    // Target: text readable even at thumbnail sizes. Use panel-height-relative
-    // sizing — at least 1/8 of a panel, at most 1/4.
-    let text_rendered = if !annotation.is_empty() {
-        let text_avail = grid_w.saturating_sub(pad * 2);
-        let text_char_h = (panel_h / 6).clamp(font::GLYPH_H / 3, font::GLYPH_H);
-        let rendered = font::render_text_wrapped(
-            annotation,
-            [200, 200, 200, 255],
+    // Primary text (large) — verdict + constraints
+    let text_avail = grid_w.saturating_sub(pad * 2);
+    let primary_char_h = (panel_h / 6).clamp(font::GLYPH_H / 3, font::GLYPH_H);
+    let primary_rendered = if !annotation.primary.is_empty() {
+        let r = font::render_text_wrapped(
+            &annotation.primary,
+            [230, 230, 230, 255],
             [30, 30, 30, 255],
-            text_char_h,
+            primary_char_h,
             text_avail,
         );
-        Some(rendered)
+        Some(r)
     } else {
         None
     };
 
-    let text_h = text_rendered
+    // Details text (30% smaller) — spatial, category, legend
+    let detail_char_h = (primary_char_h * 7 / 10).max(font::GLYPH_H / 4);
+    let detail_rendered = if !annotation.details.is_empty() {
+        let r = font::render_text_wrapped(
+            &annotation.details,
+            [170, 170, 170, 255], // dimmer than primary
+            [25, 25, 25, 255],
+            detail_char_h,
+            text_avail,
+        );
+        Some(r)
+    } else {
+        None
+    };
+
+    let primary_h = primary_rendered
         .as_ref()
-        .map_or(0, |(_, _, th)| *th + pad * 2);
+        .map_or(0, |(_, _, h)| *h + pad * 2);
+    let detail_h = detail_rendered
+        .as_ref()
+        .map_or(0, |(_, _, h)| *h + pad * 2);
+
     let total_w = grid_w;
-    let total_h = grid_h + text_h;
+    let total_h = grid_h + primary_h + detail_h;
 
     let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
 
@@ -664,42 +684,49 @@ pub fn create_annotated_montage(
             }
         }
 
-        // Panel image below label
-        imageops::overlay(
-            &mut output,
-            *panel,
-            x0 as i64,
-            (y0 + label_h) as i64,
-        );
+        imageops::overlay(&mut output, *panel, x0 as i64, (y0 + label_h) as i64);
     }
 
-    // Text strip at bottom — use pre-rendered text
-    if let Some((tbuf, tw, th)) = text_rendered
+    // Primary text strip
+    let mut y_cursor = grid_h;
+    if let Some((tbuf, tw, th)) = primary_rendered
         && tw > 0
         && th > 0
     {
-        let strip_y = grid_h;
-        for sy in 0..text_h {
-            for sx in 0..total_w {
-                output.put_pixel(sx, strip_y + sy, Rgba([30, 30, 30, 255]));
-            }
-        }
+        fill_rect(&mut output, 0, y_cursor, total_w, primary_h, [30, 30, 30, 255]);
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            imageops::overlay(
-                &mut output,
-                &text_img,
-                pad as i64,
-                (strip_y + pad) as i64,
-            );
+            imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
+        }
+        y_cursor += primary_h;
+    }
+
+    // Details text strip (dimmer background)
+    if let Some((tbuf, tw, th)) = detail_rendered
+        && tw > 0
+        && th > 0
+    {
+        fill_rect(&mut output, 0, y_cursor, total_w, detail_h, [25, 25, 25, 255]);
+        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+            imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
         }
     }
 
     output
 }
 
+/// Fill a rectangle with a solid color.
+fn fill_rect(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 4]) {
+    let px = Rgba(color);
+    let img_w = img.width();
+    let img_h = img.height();
+    for y in y0..y0.saturating_add(h).min(img_h) {
+        for x in x0..x0.saturating_add(w).min(img_w) {
+            img.put_pixel(x, y, px);
+        }
+    }
+}
+
 /// Create an annotated montage from raw RGBA byte slices.
-///
-/// Convenience wrapper for callers working with `&[u8]` pixel buffers.
 pub fn create_annotated_montage_raw(
     expected: &[u8],
     actual: &[u8],
@@ -707,7 +734,7 @@ pub fn create_annotated_montage_raw(
     height: u32,
     amplification: u8,
     gap: u32,
-    annotation: &str,
+    annotation: &AnnotationText,
 ) -> RgbaImage {
     let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
@@ -716,46 +743,106 @@ pub fn create_annotated_montage_raw(
     create_annotated_montage(&exp_img, &act_img, amplification, gap, annotation)
 }
 
-/// Format a [`RegressionReport`](crate::testing::RegressionReport) as annotation text.
+/// Two text blocks for the annotated montage: primary (large) and details (smaller).
 ///
-/// Includes pass/fail, dissimilarity, per-channel delta, pixel stats,
-/// error category, rounding bias, and alpha info when relevant.
-/// Word-wraps naturally with the montage's `render_text_wrapped`.
-pub fn format_annotation(report: &crate::testing::RegressionReport) -> String {
+/// The primary block shows the verdict and constraint comparisons.
+/// The details block shows spatial breakdown and secondary info.
+pub struct AnnotationText {
+    /// Large text: verdict + constraints with pass/fail.
+    pub primary: String,
+    /// Smaller text: spatial breakdown, bias, legend.
+    pub details: String,
+}
+
+/// Format a regression report as annotation text with constraint comparisons.
+///
+/// Shows each constraint as `actual > limit FAIL` or `actual <= limit ok`,
+/// making it immediately obvious what passed and what didn't.
+pub fn format_annotation(
+    report: &crate::testing::RegressionReport,
+    tolerance: &crate::testing::RegressionTolerance,
+) -> AnnotationText {
+    format_annotation_spatial(report, tolerance, None)
+}
+
+/// Format annotation with spatial analysis included.
+///
+/// Primary block: verdict + constraint comparisons (large font).
+/// Details block: spatial breakdown + bias + legend (smaller font).
+pub fn format_annotation_spatial(
+    report: &crate::testing::RegressionReport,
+    tolerance: &crate::testing::RegressionTolerance,
+    spatial: Option<&SpatialAnalysis>,
+) -> AnnotationText {
     use zensim::score_to_dissimilarity;
 
-    let mut parts = Vec::new();
+    // ── Primary block: verdict + constraints ──
+    let mut primary = Vec::new();
 
-    // Line 1: verdict + dissimilarity + delta
     let status = if report.passed() { "PASS" } else { "FAIL" };
-    let zdsim = score_to_dissimilarity(report.score());
-    let [dr, dg, db] = report.max_channel_delta();
-    parts.push(format!("{status} zdsim:{:.4} delta:[{},{},{}]", zdsim, dr, dg, db));
+    primary.push(status.to_string());
 
-    // Line 2: pixel stats + category
+    // Constraint: zdsim
+    let zdsim = score_to_dissimilarity(report.score());
+    let zdsim_limit = score_to_dissimilarity(tolerance.min_similarity());
+    let zdsim_pass = zdsim <= zdsim_limit;
+    primary.push(format!(
+        "zdsim: {:.4} {} {:.4} {}",
+        zdsim,
+        if zdsim_pass { "<=" } else { ">" },
+        zdsim_limit,
+        if zdsim_pass { "ok" } else { "FAIL" },
+    ));
+
+    // Constraint: delta
+    let [dr, dg, db] = report.max_channel_delta();
+    let max_d = dr.max(dg).max(db);
+    let delta_pass = max_d <= tolerance.max_delta();
+    primary.push(format!(
+        "delta: [{},{},{}] {} {} {}",
+        dr,
+        dg,
+        db,
+        if delta_pass { "<=" } else { ">" },
+        tolerance.max_delta(),
+        if delta_pass { "ok" } else { "FAIL" },
+    ));
+
+    // Constraint: pixels differing
     let pct = if report.pixel_count() > 0 {
-        report.pixels_differing() as f64 / report.pixel_count() as f64 * 100.0
+        report.pixels_differing() as f64 / report.pixel_count() as f64
     } else {
         0.0
     };
-    let category = format!("{:?}", report.category());
-    let category = category.to_lowercase();
-    let mut line2 = format!("{:.1}% pixels differ ({}) ", pct, category);
+    let pct_limit = tolerance.max_pixels_different();
+    let pct_pass = pct <= pct_limit;
+    primary.push(format!(
+        "differ: {:.1}% {} {:.1}% {}",
+        pct * 100.0,
+        if pct_pass { "<=" } else { ">" },
+        pct_limit * 100.0,
+        if pct_pass { "ok" } else { "FAIL" },
+    ));
 
-    // Rounding bias
+    // ── Details block: category, bias, alpha, spatial, legend ──
+    let mut details = Vec::new();
+
+    // Category + bias
+    let category = format!("{:?}", report.category()).to_lowercase();
+    let mut cat_line = format!("category: {}", category);
     if let Some(bias) = report.rounding_bias() {
         if bias.balanced {
-            line2.push_str("[balanced]");
+            cat_line.push_str(" (balanced)");
         } else {
             let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
             let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
             if all_pos {
-                line2.push_str("[truncation bias]");
+                cat_line.push_str(" (truncation bias)");
             } else if all_neg {
-                line2.push_str("[ceiling bias]");
+                cat_line.push_str(" (ceiling bias)");
             } else {
-                line2.push_str(&format!(
-                    "[bias R:{:.0}%+ G:{:.0}%+ B:{:.0}%+]",
+                cat_line.push_str(&format!(
+                    " (bias R:{:.0}%+ G:{:.0}%+ B:{:.0}%+)",
                     bias.positive_fraction[0] * 100.0,
                     bias.positive_fraction[1] * 100.0,
                     bias.positive_fraction[2] * 100.0,
@@ -763,63 +850,57 @@ pub fn format_annotation(report: &crate::testing::RegressionReport) -> String {
             }
         }
     }
-    parts.push(line2);
+    details.push(cat_line);
 
-    // Alpha (only if non-trivial)
+    // Alpha
     if report.alpha_max_delta() > 0 {
-        parts.push(format!(
+        details.push(format!(
             "alpha: max delta {} ({} pixels differ)",
             report.alpha_max_delta(),
             report.alpha_pixels_differing(),
         ));
     }
 
-    // Legend for structural diff panel
-    parts.push("cyan=missing orange=added".to_string());
+    // Spatial breakdown
+    if let Some(spatial) = spatial {
+        for r in &spatial.regions {
+            if r.pixels_differing > 0.001 {
+                let label = if spatial.cols == 2 && spatial.rows == 2 {
+                    let labels = ["top-left", "top-right", "bottom-left", "bottom-right"];
+                    let idx = (r.row * spatial.cols + r.col) as usize;
+                    labels.get(idx).unwrap_or(&"??").to_string()
+                } else {
+                    format!("({},{})", r.col, r.row)
+                };
 
-    parts.join("\n")
-}
+                let mut line = format!(
+                    "{}: {:.1}% differ, max delta {}",
+                    label,
+                    r.pixels_differing * 100.0,
+                    r.max_delta,
+                );
 
-/// Format annotation with spatial analysis included.
-///
-/// Appends quadrant/region breakdown showing where differences
-/// are concentrated.
-pub fn format_annotation_spatial(
-    report: &crate::testing::RegressionReport,
-    spatial: &SpatialAnalysis,
-) -> String {
-    let mut text = format_annotation(report);
-
-    // Compact spatial summary (one line per region with differences)
-    for r in &spatial.regions {
-        if r.pixels_differing > 0.001 {
-            let label = if spatial.cols == 2 && spatial.rows == 2 {
-                let labels = ["TL", "TR", "BL", "BR"];
-                let idx = (r.row * spatial.cols + r.col) as usize;
-                labels.get(idx).unwrap_or(&"??").to_string()
-            } else {
-                format!("({},{})", r.col, r.row)
-            };
-            text.push_str(&format!(
-                "\n{}: {:.1}% delta:{} ",
-                label,
-                r.pixels_differing * 100.0,
-                r.max_delta,
-            ));
-
-            let exp_has = r.expected_variance > 10.0;
-            let act_has = r.actual_variance > 10.0;
-            if !exp_has && act_has {
-                text.push_str("(added)");
-            } else if exp_has && !act_has {
-                text.push_str("(missing!)");
-            } else if exp_has && act_has && r.avg_delta > 10.0 {
-                text.push_str("(different)");
+                let exp_has = r.expected_variance > 10.0;
+                let act_has = r.actual_variance > 10.0;
+                if !exp_has && act_has {
+                    line.push_str(" -- ADDED");
+                } else if exp_has && !act_has {
+                    line.push_str(" -- MISSING");
+                } else if exp_has && act_has && r.avg_delta > 10.0 {
+                    line.push_str(" -- different rendering");
+                }
+                details.push(line);
             }
         }
     }
 
-    text
+    // Legend
+    details.push("cyan = structure missing, orange = structure added".to_string());
+
+    AnnotationText {
+        primary: primary.join("\n"),
+        details: details.join("\n"),
+    }
 }
 
 #[cfg(test)]
@@ -913,14 +994,18 @@ mod tests {
     }
 
     #[test]
-    fn annotated_montage_adds_text_strip() {
+    fn annotated_montage_adds_text_strips() {
         let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
         let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
-        let montage = create_annotated_montage(&exp, &act, 10, 6, "score:87.2");
+        let ann = AnnotationText {
+            primary: "FAIL\nzdsim: 0.13 > 0.01 FAIL".to_string(),
+            details: "category: perceptual".to_string(),
+        };
+        let montage = create_annotated_montage(&exp, &act, 10, 6, &ann);
 
-        // 2x2 grid: width = pad + panel + pad + panel + pad = 6 + 32 + 6 + 32 + 6 = 82
+        // 2x2 grid: width = pad + panel + pad + panel + pad
         assert!(montage.width() >= 32 * 2 + 6 * 3);
-        // Height should include label bars + panels + text strip
+        // Height should include label bars + panels + two text strips
         assert!(montage.height() > 32 * 2);
     }
 
@@ -928,12 +1013,17 @@ mod tests {
     fn annotated_montage_empty_text_no_text_strip() {
         let exp = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
-        let with_text = create_annotated_montage(&exp, &act, 10, 6, "hello");
-        let no_text = create_annotated_montage(&exp, &act, 10, 6, "");
-        // Without text, should be shorter (no text strip)
-        assert!(no_text.height() < with_text.height());
-        // With text, may be wider to fit the annotation
-        assert!(with_text.width() >= no_text.width());
+        let with_text = AnnotationText {
+            primary: "hello".to_string(),
+            details: "world".to_string(),
+        };
+        let no_text = AnnotationText {
+            primary: String::new(),
+            details: String::new(),
+        };
+        let with = create_annotated_montage(&exp, &act, 10, 6, &with_text);
+        let without = create_annotated_montage(&exp, &act, 10, 6, &no_text);
+        assert!(without.height() < with.height());
     }
 
     #[test]
