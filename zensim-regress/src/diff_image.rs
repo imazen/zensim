@@ -590,28 +590,65 @@ pub fn create_annotated_montage(
     let label_fg = [220, 220, 220, 255];
     let label_bg = [40, 40, 40, 255];
 
-    let panels: [(&str, &RgbaImage); 4] = [
-        ("EXPECTED", expected),
-        ("ACTUAL", actual),
-        ("PIXEL DIFF", &pixel_diff),
-        ("ADD/REMOVE", &struct_diff),
-    ];
+    let panel_images: [&RgbaImage; 4] = [expected, actual, &pixel_diff, &struct_diff];
 
     let panel_w = expected.width();
     let panel_h = expected.height();
 
-    // Auto-scale labels to fit panel width
-    let longest_label = panels.iter().map(|(l, _)| l.len()).max().unwrap_or(1) as u32;
-    let available_w = panel_w.saturating_sub(pad * 2);
+    // Auto-scale labels to fit panel width (with padding on each side)
+    let label_pad = pad;
+    let available_w = panel_w.saturating_sub(label_pad * 2);
+    // "ADD / REMOVE" is the longest at 12 chars
+    let longest_label = 12u32;
     let label_char_h = ((available_w as f32 / longest_label as f32)
         * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
         .floor() as u32;
     let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
-    let label_images: Vec<(Vec<u8>, u32, u32)> = panels
+    // Render each label — ADD/REMOVE gets color-coded via render_lines_fitted
+    // (each "part" becomes a line; we render parts side-by-side manually for color)
+    let plain_labels = ["EXPECTED", "ACTUAL", "PIXEL DIFF"];
+    let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
         .iter()
-        .map(|(label, _)| font::render_text_height(label, label_fg, label_bg, label_char_h))
+        .map(|label| font::render_text_height(label, label_fg, label_bg, label_char_h))
         .collect();
+
+    // ADD / REMOVE: render parts separately, composite
+    let add_img = font::render_text_height("ADD", [255, 180, 80, 255], label_bg, label_char_h);
+    let sep_img = font::render_text_height(" / ", label_fg, label_bg, label_char_h);
+    let rem_img = font::render_text_height("REMOVE", [80, 220, 220, 255], label_bg, label_char_h);
+    let ar_w = add_img.1 + sep_img.1 + rem_img.1;
+    let ar_h = label_char_h;
+    let mut ar_buf = vec![0u8; (ar_w * ar_h * 4) as usize];
+    for px in ar_buf.chunks_exact_mut(4) {
+        px.copy_from_slice(&label_bg);
+    }
+    // Blit parts side by side
+    for (part_buf, part_w, _) in [&add_img, &sep_img, &rem_img] {
+        // This is simpler if we track x offset
+        let _ = (part_buf, part_w);
+    }
+    // Actually, composite via RgbaImage overlay
+    let mut ar_rgba = RgbaImage::from_pixel(ar_w, ar_h, Rgba(label_bg));
+    let mut x_off = 0i64;
+    for (buf, w, h) in [&add_img, &sep_img, &rem_img] {
+        if *w > 0
+            && *h > 0
+            && let Some(img) = RgbaImage::from_raw(*w, *h, buf.clone())
+        {
+            imageops::overlay(&mut ar_rgba, &img, x_off, 0);
+        }
+        x_off += *w as i64;
+    }
+    let ar_raw = ar_rgba.into_raw();
+
+    // Collect all 4 label images
+    let label_images: Vec<(Vec<u8>, u32, u32)> = vec![
+        plain_images[0].clone(),
+        plain_images[1].clone(),
+        plain_images[2].clone(),
+        (ar_raw, ar_w, ar_h),
+    ];
 
     let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
 
@@ -674,21 +711,17 @@ pub fn create_annotated_montage(
 
     let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
 
-    // Place 4 panels in 2x2 grid
-    for (i, (_, panel)) in panels.iter().enumerate() {
+    // Place 4 panels in 2x2 grid — clip panels to cell bounds
+    for (i, panel) in panel_images.iter().enumerate() {
         let col = (i % 2) as u32;
         let row = (i / 2) as u32;
         let x0 = pad + col * (cell_w + pad);
         let y0 = pad + row * (cell_h + pad);
 
         // Label bar background
-        for ly in 0..label_h {
-            for lx in 0..cell_w {
-                output.put_pixel(x0 + lx, y0 + ly, Rgba([40, 40, 40, 255]));
-            }
-        }
+        fill_rect(&mut output, x0, y0, cell_w, label_h, label_bg);
 
-        // Render label text centered in bar
+        // Label text centered in bar
         let (ref lbuf, lw, lh) = label_images[i];
         if lw > 0 && lh > 0 {
             let lx_off = (cell_w.saturating_sub(lw)) / 2;
@@ -703,7 +736,11 @@ pub fn create_annotated_montage(
             }
         }
 
-        imageops::overlay(&mut output, *panel, x0 as i64, (y0 + label_h) as i64);
+        // Panel image — crop to cell_w × panel_h if it overflows
+        let pw = panel.width().min(cell_w);
+        let ph = panel.height().min(panel_h);
+        let cropped = imageops::crop_imm(*panel, 0, 0, pw, ph).to_image();
+        imageops::overlay(&mut output, &cropped, x0 as i64, (y0 + label_h) as i64);
     }
 
     // Primary text strip — center the first line (PASS/FAIL)
@@ -785,10 +822,11 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
         fill_rect(&mut img, cx, cy, cell_w, cell_h, cell_bg);
 
         // Cell text — 3 lines for hot cells, "ok" for clean
-        // 30% char-width padding on each side (60% usable)
+        // Padding: 30% of one character width on each side
         let pct = r.pixels_differing * 100.0;
-        let cell_pad = cell_w * 3 / 20; // ~15% each side ≈ 30% total
-        let cell_text_w = cell_w.saturating_sub(cell_pad * 2);
+        let one_char_w = font::GLYPH_W; // base char width before scaling
+        let cell_inset = one_char_w * 3 / 10; // 30% of one char
+        let cell_text_w = cell_w.saturating_sub(cell_inset * 2);
 
         if pct < 0.05 {
             // Clean cell: small green "ok"
