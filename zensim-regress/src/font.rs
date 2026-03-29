@@ -221,6 +221,91 @@ fn char_index(ch: char) -> u32 {
     }
 }
 
+/// Render multiple lines, each with its own color, at a char height that
+/// makes the longest line fit within `max_width_px`.
+///
+/// Returns `(pixels, width, height)`. No word-wrapping — each line is
+/// rendered as-is. The font size is computed from the longest line.
+pub fn render_lines_fitted(
+    lines: &[(&str, [u8; 4])],
+    bg: [u8; 4],
+    max_width_px: u32,
+) -> (Vec<u8>, u32, u32) {
+    if lines.is_empty() || max_width_px == 0 {
+        return (vec![], 0, 0);
+    }
+
+    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(1) as u32;
+    // Compute char height that fits the longest line
+    let char_h = (max_width_px as f32 / longest as f32
+        * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
+        .floor() as u32;
+    let char_h = char_h.clamp(BASE_CHAR_H / 4, BASE_CHAR_H);
+    let char_w = char_width_for_height(char_h);
+
+    let out_w = longest * char_w;
+    let out_h = lines.len() as u32 * char_h;
+
+    if out_w == 0 || out_h == 0 {
+        return (vec![], 0, 0);
+    }
+
+    // Scale strip once
+    let strip = font_strip();
+    let scaled_strip_w = char_w * CHAR_COUNT;
+    let scaled_strip = imageops::resize(
+        strip,
+        scaled_strip_w,
+        char_h,
+        imageops::FilterType::Lanczos3,
+    );
+
+    let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
+    for pixel in buf.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&bg);
+    }
+
+    for (line_idx, (text, fg)) in lines.iter().enumerate() {
+        let y_base = line_idx as u32 * char_h;
+        for (col, ch) in text.chars().enumerate() {
+            let x_base = col as u32 * char_w;
+            let glyph_idx = char_index(ch);
+            let src_x = glyph_idx * char_w;
+
+            for gy in 0..char_h {
+                for gx in 0..char_w {
+                    let sx = src_x + gx;
+                    if sx >= scaled_strip.width() {
+                        continue;
+                    }
+                    let alpha = scaled_strip.get_pixel(sx, gy)[0];
+                    if alpha == 0 {
+                        continue;
+                    }
+                    let px = x_base + gx;
+                    let py = y_base + gy;
+                    if px >= out_w || py >= out_h {
+                        continue;
+                    }
+                    let off = ((py * out_w + px) * 4) as usize;
+                    if alpha == 255 {
+                        buf[off..off + 4].copy_from_slice(fg);
+                    } else {
+                        let a = alpha as u16;
+                        let inv_a = 255 - a;
+                        buf[off] = ((fg[0] as u16 * a + bg[0] as u16 * inv_a) / 255) as u8;
+                        buf[off + 1] = ((fg[1] as u16 * a + bg[1] as u16 * inv_a) / 255) as u8;
+                        buf[off + 2] = ((fg[2] as u16 * a + bg[2] as u16 * inv_a) / 255) as u8;
+                        buf[off + 3] = ((fg[3] as u16 * a + bg[3] as u16 * inv_a) / 255) as u8;
+                    }
+                }
+            }
+        }
+    }
+
+    (buf, out_w, out_h)
+}
+
 /// Base character width in pixels (before scaling).
 pub const GLYPH_W: u32 = BASE_CHAR_W;
 /// Base character height in pixels (before scaling).

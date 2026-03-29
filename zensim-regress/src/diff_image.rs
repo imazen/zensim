@@ -612,28 +612,32 @@ pub fn create_annotated_montage(
     let grid_w = pad + cell_w + pad + cell_w + pad;
     let grid_h = pad + cell_h + pad + cell_h + pad;
 
-    // Primary text (large) — verdict + constraints
+    // Primary text — colored per-line, fitted to grid width (no wrapping)
     let text_avail = grid_w.saturating_sub(pad * 2);
-    let primary_char_h = (panel_h / 6).clamp(font::GLYPH_H / 3, font::GLYPH_H);
-    let primary_rendered = if !annotation.primary.is_empty() {
-        let r = font::render_text_wrapped(
-            &annotation.primary,
-            [230, 230, 230, 255],
-            [30, 30, 30, 255],
-            primary_char_h,
-            text_avail,
-        );
+    let primary_rendered = if !annotation.primary_lines.is_empty() {
+        let line_refs: Vec<(&str, [u8; 4])> = annotation
+            .primary_lines
+            .iter()
+            .map(|(s, c)| (s.as_str(), *c))
+            .collect();
+        let r = font::render_lines_fitted(&line_refs, [30, 30, 30, 255], text_avail);
         Some(r)
     } else {
         None
     };
 
-    // Details text (30% smaller) — spatial, category, legend
-    let detail_char_h = (primary_char_h * 7 / 10).max(font::GLYPH_H / 4);
+    // Details text (30% smaller than primary) — word-wrapped
+    let primary_line_h = primary_rendered
+        .as_ref()
+        .map_or(font::GLYPH_H, |(_, _, h)| {
+            let n = annotation.primary_lines.len().max(1) as u32;
+            *h / n
+        });
+    let detail_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
     let detail_rendered = if !annotation.details.is_empty() {
         let r = font::render_text_wrapped(
             &annotation.details,
-            [170, 170, 170, 255], // dimmer than primary
+            COLOR_DETAIL,
             [25, 25, 25, 255],
             detail_char_h,
             text_avail,
@@ -745,19 +749,25 @@ pub fn create_annotated_montage_raw(
 
 /// Two text blocks for the annotated montage: primary (large) and details (smaller).
 ///
-/// The primary block shows the verdict and constraint comparisons.
-/// The details block shows spatial breakdown and secondary info.
+/// The primary block shows the verdict and constraint comparisons with
+/// per-line colors (red for FAIL, green for ok). The details block shows
+/// spatial breakdown and secondary info in a dimmer, smaller font.
 pub struct AnnotationText {
-    /// Large text: verdict + constraints with pass/fail.
-    pub primary: String,
+    /// Large text: colored lines, each `(text, rgba_color)`.
+    /// Red for failing constraints, green for passing.
+    pub primary_lines: Vec<(String, [u8; 4])>,
     /// Smaller text: spatial breakdown, bias, legend.
     pub details: String,
 }
 
+const COLOR_FAIL: [u8; 4] = [255, 80, 80, 255]; // red
+const COLOR_OK: [u8; 4] = [80, 220, 80, 255]; // green
+const COLOR_DETAIL: [u8; 4] = [170, 170, 170, 255]; // dim gray
+
 /// Format a regression report as annotation text with constraint comparisons.
 ///
-/// Shows each constraint as `actual > limit FAIL` or `actual <= limit ok`,
-/// making it immediately obvious what passed and what didn't.
+/// Shows each constraint as `actual > limit FAIL` (red) or `actual <= limit ok`
+/// (green), making it immediately obvious what passed and what didn't.
 pub fn format_annotation(
     report: &crate::testing::RegressionReport,
     tolerance: &crate::testing::RegressionTolerance,
@@ -767,8 +777,8 @@ pub fn format_annotation(
 
 /// Format annotation with spatial analysis included.
 ///
-/// Primary block: verdict + constraint comparisons (large font).
-/// Details block: spatial breakdown + bias + legend (smaller font).
+/// Primary block: colored lines — verdict + constraint comparisons.
+/// Details block: spatial breakdown first (most actionable), then category/legend.
 pub fn format_annotation_spatial(
     report: &crate::testing::RegressionReport,
     tolerance: &crate::testing::RegressionTolerance,
@@ -776,92 +786,69 @@ pub fn format_annotation_spatial(
 ) -> AnnotationText {
     use zensim::score_to_dissimilarity;
 
-    // ── Primary block: verdict + constraints ──
-    let mut primary = Vec::new();
+    // ── Primary: colored constraint lines ──
+    let mut lines: Vec<(String, [u8; 4])> = Vec::new();
 
-    let status = if report.passed() { "PASS" } else { "FAIL" };
-    primary.push(status.to_string());
+    let passed = report.passed();
+    lines.push((
+        if passed { "PASS".into() } else { "FAIL".into() },
+        if passed { COLOR_OK } else { COLOR_FAIL },
+    ));
 
-    // Constraint: zdsim
+    // zdsim
     let zdsim = score_to_dissimilarity(report.score());
     let zdsim_limit = score_to_dissimilarity(tolerance.min_similarity());
-    let zdsim_pass = zdsim <= zdsim_limit;
-    primary.push(format!(
-        "zdsim: {:.4} {} {:.4} {}",
-        zdsim,
-        if zdsim_pass { "<=" } else { ">" },
-        zdsim_limit,
-        if zdsim_pass { "ok" } else { "FAIL" },
+    let zdsim_ok = zdsim <= zdsim_limit;
+    lines.push((
+        format!(
+            "  zdsim: {:.4} {} {:.4} {}",
+            zdsim,
+            if zdsim_ok { "<=" } else { ">" },
+            zdsim_limit,
+            if zdsim_ok { "ok" } else { "FAIL" },
+        ),
+        if zdsim_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
-    // Constraint: delta
+    // delta
     let [dr, dg, db] = report.max_channel_delta();
     let max_d = dr.max(dg).max(db);
-    let delta_pass = max_d <= tolerance.max_delta();
-    primary.push(format!(
-        "delta: [{},{},{}] {} {} {}",
-        dr,
-        dg,
-        db,
-        if delta_pass { "<=" } else { ">" },
-        tolerance.max_delta(),
-        if delta_pass { "ok" } else { "FAIL" },
+    let delta_ok = max_d <= tolerance.max_delta();
+    lines.push((
+        format!(
+            "  delta: [{},{},{}] {} {} {}",
+            dr, dg, db,
+            if delta_ok { "<=" } else { ">" },
+            tolerance.max_delta(),
+            if delta_ok { "ok" } else { "FAIL" },
+        ),
+        if delta_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
-    // Constraint: pixels differing
+    // pixels differing
     let pct = if report.pixel_count() > 0 {
         report.pixels_differing() as f64 / report.pixel_count() as f64
     } else {
         0.0
     };
     let pct_limit = tolerance.max_pixels_different();
-    let pct_pass = pct <= pct_limit;
-    primary.push(format!(
-        "differ: {:.1}% {} {:.1}% {}",
-        pct * 100.0,
-        if pct_pass { "<=" } else { ">" },
-        pct_limit * 100.0,
-        if pct_pass { "ok" } else { "FAIL" },
+    let pct_ok = pct <= pct_limit;
+    lines.push((
+        format!(
+            "  differ: {:.1}% {} {:.1}% {}",
+            pct * 100.0,
+            if pct_ok { "<=" } else { ">" },
+            pct_limit * 100.0,
+            if pct_ok { "ok" } else { "FAIL" },
+        ),
+        if pct_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
-    // ── Details block: category, bias, alpha, spatial, legend ──
+    // ── Details: spatial first (most actionable), then secondary info ──
     let mut details = Vec::new();
 
-    // Category + bias
-    let category = format!("{:?}", report.category()).to_lowercase();
-    let mut cat_line = format!("category: {}", category);
-    if let Some(bias) = report.rounding_bias() {
-        if bias.balanced {
-            cat_line.push_str(" (balanced)");
-        } else {
-            let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
-            let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
-            if all_pos {
-                cat_line.push_str(" (truncation bias)");
-            } else if all_neg {
-                cat_line.push_str(" (ceiling bias)");
-            } else {
-                cat_line.push_str(&format!(
-                    " (bias R:{:.0}%+ G:{:.0}%+ B:{:.0}%+)",
-                    bias.positive_fraction[0] * 100.0,
-                    bias.positive_fraction[1] * 100.0,
-                    bias.positive_fraction[2] * 100.0,
-                ));
-            }
-        }
-    }
-    details.push(cat_line);
-
-    // Alpha
-    if report.alpha_max_delta() > 0 {
-        details.push(format!(
-            "alpha: max delta {} ({} pixels differ)",
-            report.alpha_max_delta(),
-            report.alpha_pixels_differing(),
-        ));
-    }
-
-    // Spatial breakdown
+    // Spatial breakdown — the most important diagnostic info
+    let mut has_structural = false;
     if let Some(spatial) = spatial {
         for r in &spatial.regions {
             if r.pixels_differing > 0.001 {
@@ -873,6 +860,9 @@ pub fn format_annotation_spatial(
                     format!("({},{})", r.col, r.row)
                 };
 
+                let exp_has = r.expected_variance > 10.0;
+                let act_has = r.actual_variance > 10.0;
+
                 let mut line = format!(
                     "{}: {:.1}% differ, max delta {}",
                     label,
@@ -880,12 +870,12 @@ pub fn format_annotation_spatial(
                     r.max_delta,
                 );
 
-                let exp_has = r.expected_variance > 10.0;
-                let act_has = r.actual_variance > 10.0;
                 if !exp_has && act_has {
                     line.push_str(" -- ADDED");
+                    has_structural = true;
                 } else if exp_has && !act_has {
                     line.push_str(" -- MISSING");
+                    has_structural = true;
                 } else if exp_has && act_has && r.avg_delta > 10.0 {
                     line.push_str(" -- different rendering");
                 }
@@ -894,11 +884,47 @@ pub fn format_annotation_spatial(
         }
     }
 
+    // Category + bias (skip if structural changes already explain it)
+    let category = format!("{:?}", report.category()).to_lowercase();
+    if !has_structural {
+        let mut cat_line = format!("category: {}", category);
+        if let Some(bias) = report.rounding_bias() {
+            if bias.balanced {
+                cat_line.push_str(" (balanced)");
+            } else {
+                let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
+                let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
+                if all_pos {
+                    cat_line.push_str(" (truncation bias)");
+                } else if all_neg {
+                    cat_line.push_str(" (ceiling bias)");
+                } else {
+                    cat_line.push_str(&format!(
+                        " (bias R:{:.0}%+ G:{:.0}%+ B:{:.0}%+)",
+                        bias.positive_fraction[0] * 100.0,
+                        bias.positive_fraction[1] * 100.0,
+                        bias.positive_fraction[2] * 100.0,
+                    ));
+                }
+            }
+        }
+        details.push(cat_line);
+    }
+
+    // Alpha
+    if report.alpha_max_delta() > 0 {
+        details.push(format!(
+            "alpha: max delta {} ({} pixels differ)",
+            report.alpha_max_delta(),
+            report.alpha_pixels_differing(),
+        ));
+    }
+
     // Legend
-    details.push("cyan = structure missing, orange = structure added".to_string());
+    details.push("cyan = missing structure, orange = added structure".to_string());
 
     AnnotationText {
-        primary: primary.join("\n"),
+        primary_lines: lines,
         details: details.join("\n"),
     }
 }
@@ -998,14 +1024,15 @@ mod tests {
         let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
         let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
         let ann = AnnotationText {
-            primary: "FAIL\nzdsim: 0.13 > 0.01 FAIL".to_string(),
+            primary_lines: vec![
+                ("FAIL".into(), COLOR_FAIL),
+                ("  zdsim: 0.13 > 0.01 FAIL".into(), COLOR_FAIL),
+            ],
             details: "category: perceptual".to_string(),
         };
         let montage = create_annotated_montage(&exp, &act, 10, 6, &ann);
 
-        // 2x2 grid: width = pad + panel + pad + panel + pad
         assert!(montage.width() >= 32 * 2 + 6 * 3);
-        // Height should include label bars + panels + two text strips
         assert!(montage.height() > 32 * 2);
     }
 
@@ -1014,11 +1041,11 @@ mod tests {
         let exp = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let with_text = AnnotationText {
-            primary: "hello".to_string(),
+            primary_lines: vec![("hello".into(), [255; 4])],
             details: "world".to_string(),
         };
         let no_text = AnnotationText {
-            primary: String::new(),
+            primary_lines: vec![],
             details: String::new(),
         };
         let with = create_annotated_montage(&exp, &act, 10, 6, &with_text);
