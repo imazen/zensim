@@ -1237,35 +1237,38 @@ fn linear_to_positive_xyb_planar_inner_scalar(
 // RGBA/BGRA compositing helpers — all produce linear f32 RGB output
 // ---------------------------------------------------------------------------
 
-/// Precomputed deterministic noise row in linear light, reused for every
-/// scanline. 256 values in \[0.2, 0.8\], indexed by `x % 256`.
+/// Precomputed deterministic noise table in linear light. 4096 values in
+/// \[0.2, 0.8\], indexed by `(x ^ hash(y)) % 4096`.
 ///
-/// Generated from integer-only hashing (wrapping multiply + xor) for
+/// Generated from integer-only hashing (wrapping multiply + xorshift) for
 /// bit-identical results across all platforms. The final normalization
 /// (u16 → f32 multiply + add) is exact in f32.
 ///
-/// 256 entries avoids any visible periodicity at typical image widths
-/// while keeping the table in L1 cache (1 KiB).
-const ALPHA_BG_ROW: [f32; 256] = {
-    let mut table = [0.0f32; 256];
-    let mut x = 0u32;
-    while x < 256 {
-        let h = (x ^ x.wrapping_mul(2654435761)).wrapping_mul(0x45d9f3b);
-        // Map high 16 bits to [0.2, 0.8]
-        table[x as usize] = 0.2 + ((h >> 16) & 0xFFFF) as f32 * (0.6 / 65535.0);
-        x += 1;
+/// 4096 entries (16 KiB) fits in L1 cache and produces visually uniform
+/// noise with no banding or diagonal artifacts.
+const ALPHA_BG_TABLE: [f32; 4096] = {
+    let mut table = [0.0f32; 4096];
+    let mut i = 0u32;
+    while i < 4096 {
+        let mut h = i.wrapping_mul(2654435761);
+        h ^= h >> 16;
+        h = h.wrapping_mul(0x45d9f3b);
+        h ^= h >> 16;
+        table[i as usize] = 0.2 + (h & 0xFFFF) as f32 * (0.6 / 65535.0);
+        i += 1;
     }
     table
 };
 
 /// Deterministic noise background value in linear light for the given pixel.
 ///
-/// Indexes into [`ALPHA_BG_ROW`] by `(x + y*97) % 256`. The `y*97` term
-/// rotates the pattern per-scanline to prevent horizontal banding. Cost is
-/// one multiply, one add, one table lookup (always in L1).
+/// XORs the x coordinate with a hashed y to break row correlation, then
+/// indexes into [`ALPHA_BG_TABLE`]. Cost: one wrapping multiply, one XOR,
+/// one table lookup (always in L1).
 #[inline(always)]
 fn alpha_background_linear(x: usize, y: usize) -> f32 {
-    ALPHA_BG_ROW[(x.wrapping_add(y.wrapping_mul(97))) & 0xFF]
+    let yh = (y as u32).wrapping_mul(2654435761);
+    ALPHA_BG_TABLE[((x as u32) ^ yh) as usize & 0xFFF]
 }
 
 /// Composite sRGB u8 RGBA over a deterministic noise background, producing
