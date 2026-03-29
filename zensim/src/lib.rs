@@ -58,9 +58,9 @@
 //!   `imgref::ImgRef` (sRGB u8, stride-aware, default feature),
 //!   [`StridedBytes`] (any of `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`,
 //!   `Srgb16Rgba`, `LinearF32Rgba`), or implement [`ImageSource`] directly.
-//! - **Alpha:** RGBA inputs are composited over a checkerboard so alpha
-//!   differences produce visible distortion. Supports `Straight` and `Opaque`
-//!   alpha modes.
+//! - **Alpha:** RGBA inputs are composited over a deterministic noise
+//!   background so alpha differences are detected without the structured-pattern
+//!   amplification of a checkerboard. Supports `Straight` and `Opaque` alpha modes.
 //! - **Dimensions:** Both images must be the same width × height, minimum 8×8.
 //!
 //! ## Score semantics

@@ -559,7 +559,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
 
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
-/// Handles both RGB and RGBA sources row-by-row. RGBA is composited over checkerboard.
+/// Handles both RGB and RGBA sources row-by-row. RGBA is composited over a noise background.
 pub(crate) fn convert_source_to_xyb(
     source: &impl ImageSource,
     padded_width: usize,
@@ -2622,7 +2622,7 @@ mod tests {
             score_rel,
         );
 
-        // Note: BGRA path composites over checkerboard in linear space even for
+        // Note: BGRA path composites over noise background in linear space even for
         // opaque pixels (alpha=255 fast path skips blending but linearizes).
         // sRGB u8 RGB path uses the fused sRGB→XYB SIMD. The difference comes
         // from different code paths to the same opsin matrix. Should be very close.

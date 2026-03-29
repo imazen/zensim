@@ -85,7 +85,7 @@ impl PixelFormat {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum AlphaMode {
     /// Alpha channel is opaque (ignored). Equivalent to RGBX/BGRX.
-    /// No checkerboard compositing is performed.
+    /// No alpha compositing is performed.
     Opaque,
     /// Alpha interpretation unknown. Treated as [`Straight`](AlphaMode::Straight).
     #[default]

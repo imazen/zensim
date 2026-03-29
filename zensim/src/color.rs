@@ -1237,21 +1237,36 @@ fn linear_to_positive_xyb_planar_inner_scalar(
 // RGBA/BGRA compositing helpers — all produce linear f32 RGB output
 // ---------------------------------------------------------------------------
 
-/// Checkerboard background value in linear light for the given pixel position.
+/// Deterministic noise background value in linear light for the given pixel.
+///
+/// Returns a value in [0.2, 0.8] — a mid-range band that avoids pure
+/// black/white extremes while still distinguishing transparency from any
+/// plausible opaque pixel color.
+///
+/// Uses integer-only arithmetic (wrapping multiply + xorshift) for
+/// bit-identical results across all platforms — no floating-point in the
+/// hash, only in the final normalization.
 #[inline(always)]
-fn checkerboard_linear(x: usize, y: usize) -> f32 {
-    if ((x >> 3) ^ (y >> 3)) & 1 == 0 {
-        0.0
-    } else {
-        1.0
-    }
+fn alpha_background_linear(x: usize, y: usize) -> f32 {
+    // Combine coordinates into a single u32 seed.
+    // The multipliers are odd primes; wrapping_mul is well-defined.
+    let mut h = (x as u32)
+        .wrapping_mul(2654435761)
+        .wrapping_add((y as u32).wrapping_mul(2246822519));
+    // xorshift-style mix for avalanche
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x45d9f3b);
+    h ^= h >> 16;
+    // Map to [0.2, 0.8] — 0.6 range, centered on 0.5
+    0.2 + (h & 0xFFFF) as f32 * (0.6 / 65535.0)
 }
 
-/// Composite sRGB u8 RGBA over a checkerboard, producing linear f32 RGB.
+/// Composite sRGB u8 RGBA over a deterministic noise background, producing
+/// linear f32 RGB.
 ///
 /// Linearizes both foreground and background, then alpha-blends in linear space.
-/// This ensures consistent XYB values regardless of whether the input was
-/// sRGB u8 or linear f32.
+/// The noise background avoids the structured-pattern amplification that a
+/// checkerboard causes in the multi-scale SSIM metric.
 ///
 /// Uses straight alpha: `out = src * a + bg * (1-a)`.
 pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
@@ -1263,12 +1278,12 @@ pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mu
                 srgb_u8_to_linear(b),
             ];
         } else if a == 0 {
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             out[x] = [bg, bg, bg];
         } else {
             let alpha = a as f32 * (1.0 / 255.0);
             let inv = 1.0 - alpha;
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             let rl = srgb_u8_to_linear(r);
             let gl = srgb_u8_to_linear(g);
             let bl = srgb_u8_to_linear(b);
@@ -1281,7 +1296,8 @@ pub(crate) fn composite_srgb8_rgba_to_linear(row: &[[u8; 4]], y: usize, out: &mu
     }
 }
 
-/// Composite sRGB u8 BGRA over a checkerboard, producing linear f32 RGB.
+/// Composite sRGB u8 BGRA over a deterministic noise background, producing
+/// linear f32 RGB.
 ///
 /// Swizzles B↔R during linearization. Alpha blending in linear space.
 pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mut [[f32; 3]]) {
@@ -1293,12 +1309,12 @@ pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mu
                 srgb_u8_to_linear(b),
             ];
         } else if a == 0 {
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             out[x] = [bg, bg, bg];
         } else {
             let alpha = a as f32 * (1.0 / 255.0);
             let inv = 1.0 - alpha;
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             let rl = srgb_u8_to_linear(r);
             let gl = srgb_u8_to_linear(g);
             let bl = srgb_u8_to_linear(b);
@@ -1311,17 +1327,17 @@ pub(crate) fn composite_srgb8_bgra_to_linear(row: &[[u8; 4]], y: usize, out: &mu
     }
 }
 
-/// Composite linear f32 RGBA over a checkerboard, producing linear f32 RGB.
+/// Composite linear f32 RGBA over a noise background, producing linear f32 RGB.
 pub(crate) fn composite_linear_f32_rgba(row: &[[f32; 4]], y: usize, out: &mut [[f32; 3]]) {
     for (x, &[r, g, b, a]) in row.iter().enumerate() {
         if a >= 1.0 {
             out[x] = [r, g, b];
         } else if a <= 0.0 {
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             out[x] = [bg, bg, bg];
         } else {
             let inv = 1.0 - a;
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             out[x] = [
                 r.mul_add(a, bg * inv),
                 g.mul_add(a, bg * inv),
@@ -1331,10 +1347,10 @@ pub(crate) fn composite_linear_f32_rgba(row: &[[f32; 4]], y: usize, out: &mut [[
     }
 }
 
-/// Composite sRGB u16 RGBA over a checkerboard, producing linear f32 RGB.
+/// Composite sRGB u16 RGBA over a noise background, producing linear f32 RGB.
 ///
 /// u16 values 0-65535 are linearized via `srgb_u16_to_linear()`, then alpha-blended
-/// in linear space against the checkerboard background.
+/// in linear space against the noise background.
 pub(crate) fn composite_srgb16_rgba_to_linear(
     row: &[u8],
     width: usize,
@@ -1354,12 +1370,12 @@ pub(crate) fn composite_srgb16_rgba_to_linear(
                 srgb_u16_to_linear(b),
             ];
         } else if a == 0 {
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             *out_pixel = [bg, bg, bg];
         } else {
             let alpha = a as f32 / 65535.0;
             let inv = 1.0 - alpha;
-            let bg = checkerboard_linear(x, y);
+            let bg = alpha_background_linear(x, y);
             let rl = srgb_u16_to_linear(r);
             let gl = srgb_u16_to_linear(g);
             let bl = srgb_u16_to_linear(b);
