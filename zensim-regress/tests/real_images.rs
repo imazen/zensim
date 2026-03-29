@@ -187,7 +187,7 @@ fn real_image_watermark_added() {
     let ann = format_annotation_spatial(&report, &tolerance, Some(&spatial));
 
     eprintln!("  watermark: zdsim={:.4}", zensim::score_to_dissimilarity(report.score()));
-    eprintln!("  spatial:\n{}", ann.details);
+    eprintln!("  spatial:\n{}", ann.extra);
 
     let montage = create_annotated_montage(&img, &watermarked, 10, 8, &ann);
     save_montage("watermark", &montage);
@@ -230,12 +230,15 @@ fn real_image_missing_region() {
     let ann = format_annotation_spatial(&report, &tolerance, Some(&spatial));
 
     eprintln!("  missing: zdsim={:.4}", zensim::score_to_dissimilarity(report.score()));
-    eprintln!("  spatial:\n{}", ann.details);
+    eprintln!("  spatial:\n{}", ann.extra);
 
     let montage = create_annotated_montage(&img, &blanked, 10, 8, &ann);
     save_montage("missing_region", &montage);
 
-    // Bottom-right should show as MISSING (had content, now uniform)
-    assert!(ann.details.contains("MISSING") || ann.details.contains("different"),
-        "should detect missing content in bottom-right");
+    // Bottom-right region (idx 8 in 3x3) should have high diff
+    let br = &spatial.regions[8];
+    assert!(br.pixels_differing > 0.9, "bot-right should be mostly different: {:.1}%", br.pixels_differing * 100.0);
+    // Expected had content (high variance), actual is uniform (low variance)
+    assert!(br.expected_variance > 10.0, "expected should have content in bot-right");
+    assert!(br.actual_variance < 1.0, "actual should be uniform (black) in bot-right");
 }

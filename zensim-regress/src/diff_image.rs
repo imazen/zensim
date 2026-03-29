@@ -633,20 +633,25 @@ pub fn create_annotated_montage(
         None
     };
 
-    // Details text (30% smaller than primary) — word-wrapped
+    // Heatmap grid (replaces text-based spatial details)
+    let heatmap = annotation.spatial.as_ref().map(|s| {
+        render_heatmap_grid(s, grid_w, pad)
+    });
+
+    // Extra text (alpha info etc) — small, word-wrapped
     let primary_line_h = primary_rendered
         .as_ref()
         .map_or(font::GLYPH_H, |(_, _, h)| {
             let n = annotation.primary_lines.len().max(1) as u32;
             *h / n
         });
-    let detail_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
-    let detail_rendered = if !annotation.details.is_empty() {
+    let extra_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
+    let extra_rendered = if !annotation.extra.is_empty() {
         let r = font::render_text_wrapped(
-            &annotation.details,
+            &annotation.extra,
             COLOR_DETAIL,
             [25, 25, 25, 255],
-            detail_char_h,
+            extra_char_h,
             text_avail,
         );
         Some(r)
@@ -657,12 +662,13 @@ pub fn create_annotated_montage(
     let primary_h = primary_rendered
         .as_ref()
         .map_or(0, |(_, _, h)| *h + pad * 2);
-    let detail_h = detail_rendered
+    let heatmap_h = heatmap.as_ref().map_or(0, |img| img.height());
+    let extra_h = extra_rendered
         .as_ref()
         .map_or(0, |(_, _, h)| *h + pad * 2);
 
     let total_w = grid_w;
-    let total_h = grid_h + primary_h + detail_h;
+    let total_h = grid_h + primary_h + heatmap_h + extra_h;
 
     let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
 
@@ -698,7 +704,7 @@ pub fn create_annotated_montage(
         imageops::overlay(&mut output, *panel, x0 as i64, (y0 + label_h) as i64);
     }
 
-    // Primary text strip
+    // Primary text strip — center the first line (PASS/FAIL)
     let mut y_cursor = grid_h;
     if let Some((tbuf, tw, th)) = primary_rendered
         && tw > 0
@@ -706,23 +712,125 @@ pub fn create_annotated_montage(
     {
         fill_rect(&mut output, 0, y_cursor, total_w, primary_h, [30, 30, 30, 255]);
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
+            // Center horizontally
+            let tx = (total_w.saturating_sub(tw)) / 2;
+            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
         }
         y_cursor += primary_h;
     }
 
-    // Details text strip (dimmer background)
-    if let Some((tbuf, tw, th)) = detail_rendered
+    // Heatmap grid
+    if let Some(ref heatmap_img) = heatmap {
+        imageops::overlay(&mut output, heatmap_img, 0, y_cursor as i64);
+        y_cursor += heatmap_h;
+    }
+
+    // Extra text strip
+    if let Some((tbuf, tw, th)) = extra_rendered
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, detail_h, [25, 25, 25, 255]);
+        fill_rect(&mut output, 0, y_cursor, total_w, extra_h, [25, 25, 25, 255]);
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
         }
     }
 
     output
+}
+
+/// Render a 3x3 spatial heatmap grid image.
+///
+/// Each cell's background is tinted red proportional to its severity
+/// relative to the worst cell. Cell text shows `d:N` (max delta) and
+/// `P%` (percent differing). ADDED/MISSING tags shown when applicable.
+fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> RgbaImage {
+    use crate::font;
+
+    let cols = spatial.cols;
+    let rows = spatial.rows;
+    let cell_gap = 2u32;
+
+    let inner_w = total_w.saturating_sub(pad * 2);
+    let cell_w = (inner_w.saturating_sub(cell_gap * (cols - 1))) / cols;
+    let cell_h = cell_w * 2 / 3; // shorter than wide
+    let grid_px_w = cell_w * cols + cell_gap * (cols - 1);
+    let grid_px_h = cell_h * rows + cell_gap * (rows - 1);
+    let img_w = grid_px_w + pad * 2;
+    let img_h = grid_px_h + pad * 2;
+
+    let mut img = RgbaImage::from_pixel(img_w, img_h, Rgba([18, 18, 18, 255]));
+
+    // Find worst cell for relative coloring
+    let max_severity = spatial
+        .regions
+        .iter()
+        .map(|r| r.max_delta as f32 * r.pixels_differing as f32)
+        .fold(0.0f32, f32::max)
+        .max(0.001); // avoid div by zero
+
+    for r in &spatial.regions {
+        let cx = pad + r.col * (cell_w + cell_gap);
+        let cy = pad + r.row * (cell_h + cell_gap);
+
+        // Background: red intensity by relative severity
+        let severity = r.max_delta as f32 * r.pixels_differing as f32;
+        let ratio = (severity / max_severity).clamp(0.0, 1.0);
+        let bg_r = (30.0 + ratio * 120.0) as u8; // 30..150
+        let bg_g = (30.0 - ratio * 20.0).max(10.0) as u8; // 30..10
+        let bg_b = bg_g;
+        let cell_bg = [bg_r, bg_g, bg_b, 255];
+        fill_rect(&mut img, cx, cy, cell_w, cell_h, cell_bg);
+
+        // Text content for this cell
+        let pct = r.pixels_differing * 100.0;
+        let line1 = if pct < 0.05 {
+            "ok".to_string()
+        } else {
+            format!("{:.0}% d:{}", pct, r.max_delta)
+        };
+
+        let exp_has = r.expected_variance > 10.0;
+        let act_has = r.actual_variance > 10.0;
+        let line2 = if !exp_has && act_has {
+            "ADDED"
+        } else if exp_has && !act_has {
+            "MISSING"
+        } else if exp_has && act_has && r.avg_delta > 10.0 {
+            "changed"
+        } else {
+            ""
+        };
+
+        let text = if line2.is_empty() {
+            line1
+        } else {
+            format!("{line1}\n{line2}")
+        };
+
+        // Render text fitted to cell
+        let text_fg = if ratio > 0.5 {
+            [255, 255, 255, 255]
+        } else {
+            [200, 200, 200, 255]
+        };
+        let text_lines: Vec<(&str, [u8; 4])> =
+            text.lines().map(|l| (l, text_fg)).collect();
+        let cell_text_w = cell_w.saturating_sub(4);
+        if cell_text_w > 0 && !text_lines.is_empty() {
+            let (tbuf, tw, th) =
+                font::render_lines_fitted(&text_lines, cell_bg, cell_text_w);
+            if tw > 0 && th > 0 {
+                let tx = cx + (cell_w.saturating_sub(tw)) / 2;
+                let ty = cy + (cell_h.saturating_sub(th)) / 2;
+                if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+                    imageops::overlay(&mut img, &text_img, tx as i64, ty as i64);
+                }
+            }
+        }
+    }
+
+    img
 }
 
 /// Fill a rectangle with a solid color.
@@ -754,17 +862,15 @@ pub fn create_annotated_montage_raw(
     create_annotated_montage(&exp_img, &act_img, amplification, gap, annotation)
 }
 
-/// Two text blocks for the annotated montage: primary (large) and details (smaller).
-///
-/// The primary block shows the verdict and constraint comparisons with
-/// per-line colors (red for FAIL, green for ok). The details block shows
-/// spatial breakdown and secondary info in a dimmer, smaller font.
+/// Annotation data for the montage: verdict, constraints, and optional spatial heatmap.
 pub struct AnnotationText {
-    /// Large text: colored lines, each `(text, rgba_color)`.
-    /// Red for failing constraints, green for passing.
+    /// Colored lines for the primary text block.
+    /// Red for failing constraints, green for passing, gray for info.
     pub primary_lines: Vec<(String, [u8; 4])>,
-    /// Smaller text: spatial breakdown, bias, legend.
-    pub details: String,
+    /// Optional spatial analysis — rendered as a 9-cell heatmap grid.
+    pub spatial: Option<SpatialAnalysis>,
+    /// Extra text lines (alpha info, etc). Shown below heatmap if present.
+    pub extra: String,
 }
 
 const COLOR_FAIL: [u8; 4] = [255, 80, 80, 255]; // red
@@ -808,7 +914,7 @@ pub fn format_annotation_spatial(
     let zdsim_ok = zdsim <= zdsim_limit;
     lines.push((
         format!(
-            "  zdsim: {:.4} {} {:.4} {}",
+            "zdsim: {:.4} {} {:.4} {}",
             zdsim,
             if zdsim_ok { "<=" } else { ">" },
             zdsim_limit,
@@ -823,7 +929,7 @@ pub fn format_annotation_spatial(
     let delta_ok = max_d <= tolerance.max_delta();
     lines.push((
         format!(
-            "  delta: [{},{},{}] {} {} {}",
+            "delta: [{},{},{}] {} {} {}",
             dr, dg, db,
             if delta_ok { "<=" } else { ">" },
             tolerance.max_delta(),
@@ -842,7 +948,7 @@ pub fn format_annotation_spatial(
     let pct_ok = pct <= pct_limit;
     lines.push((
         format!(
-            "  differ: {:.1}% {} {:.1}% {}",
+            "differ: {:.1}% {} {:.1}% {}",
             pct * 100.0,
             if pct_ok { "<=" } else { ">" },
             pct_limit * 100.0,
@@ -851,9 +957,9 @@ pub fn format_annotation_spatial(
         if pct_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
-    // Category → in primary block as last line
+    // Error type
     let category = format!("{:?}", report.category()).to_lowercase();
-    let mut cat_text = format!("  error type: {}", category);
+    let mut cat_text = format!("error type: {}", category);
     if let Some(bias) = report.rounding_bias() {
         if bias.balanced {
             cat_text.push_str(" (balanced)");
@@ -869,89 +975,23 @@ pub fn format_annotation_spatial(
     }
     lines.push((cat_text, COLOR_DETAIL));
 
-    // ── Details: spatial (only when regions meaningfully differ) ──
-    let mut details = Vec::new();
+    // Spatial → heatmap (rendered visually)
+    let spatial_data = spatial.cloned();
 
-    if let Some(spatial) = spatial {
-        // Check if spatial breakdown is worth showing: is there significant
-        // variance between regions? (skip if all regions are similar)
-        let max_pct = spatial
-            .regions
-            .iter()
-            .map(|r| r.pixels_differing)
-            .fold(0.0f64, f64::max);
-        let min_pct = spatial
-            .regions
-            .iter()
-            .map(|r| r.pixels_differing)
-            .fold(1.0f64, f64::min);
-        let has_variance = max_pct > 0.001 && (max_pct - min_pct) > 0.05;
-
-        if has_variance {
-            let region_labels_3x3 = [
-                "top-left",
-                "top-center",
-                "top-right",
-                "mid-left",
-                "center",
-                "mid-right",
-                "bot-left",
-                "bot-center",
-                "bot-right",
-            ];
-
-            for r in &spatial.regions {
-                if r.pixels_differing > 0.001 {
-                    let label = if spatial.cols == 3 && spatial.rows == 3 {
-                        let idx = (r.row * spatial.cols + r.col) as usize;
-                        region_labels_3x3
-                            .get(idx)
-                            .unwrap_or(&"??")
-                            .to_string()
-                    } else if spatial.cols == 2 && spatial.rows == 2 {
-                        let labels =
-                            ["top-left", "top-right", "bot-left", "bot-right"];
-                        let idx = (r.row * spatial.cols + r.col) as usize;
-                        labels.get(idx).unwrap_or(&"??").to_string()
-                    } else {
-                        format!("({},{})", r.col, r.row)
-                    };
-
-                    let exp_has = r.expected_variance > 10.0;
-                    let act_has = r.actual_variance > 10.0;
-
-                    let mut line = format!(
-                        "{}: {:.1}% differ, max delta {}",
-                        label,
-                        r.pixels_differing * 100.0,
-                        r.max_delta,
-                    );
-
-                    if !exp_has && act_has {
-                        line.push_str(" -- ADDED");
-                    } else if exp_has && !act_has {
-                        line.push_str(" -- MISSING");
-                    } else if exp_has && act_has && r.avg_delta > 10.0 {
-                        line.push_str(" -- changed");
-                    }
-                    details.push(line);
-                }
-            }
-        }
-    }
-
-    // Alpha
+    // Extra: alpha info
+    let mut extra = String::new();
     if report.alpha_max_delta() > 0 {
-        details.push(format!(
+        extra = format!(
             "alpha: max delta {} ({} pixels differ)",
             report.alpha_max_delta(),
             report.alpha_pixels_differing(),
-        ));
+        );
     }
 
     AnnotationText {
         primary_lines: lines,
-        details: details.join("\n"),
+        spatial: spatial_data,
+        extra,
     }
 }
 
@@ -1052,9 +1092,10 @@ mod tests {
         let ann = AnnotationText {
             primary_lines: vec![
                 ("FAIL".into(), COLOR_FAIL),
-                ("  zdsim: 0.13 > 0.01 FAIL".into(), COLOR_FAIL),
+                ("zdsim: 0.13 > 0.01 FAIL".into(), COLOR_FAIL),
             ],
-            details: "category: perceptual".to_string(),
+            spatial: None,
+            extra: String::new(),
         };
         let montage = create_annotated_montage(&exp, &act, 10, 6, &ann);
 
@@ -1068,11 +1109,13 @@ mod tests {
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let with_text = AnnotationText {
             primary_lines: vec![("hello".into(), [255; 4])],
-            details: "world".to_string(),
+            spatial: None,
+            extra: String::new(),
         };
         let no_text = AnnotationText {
             primary_lines: vec![],
-            details: String::new(),
+            spatial: None,
+            extra: String::new(),
         };
         let with = create_annotated_montage(&exp, &act, 10, 6, &with_text);
         let without = create_annotated_montage(&exp, &act, 10, 6, &no_text);
