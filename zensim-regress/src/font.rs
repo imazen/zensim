@@ -15,8 +15,8 @@ use image::{GrayImage, imageops};
 const BASE_CHAR_W: u32 = 26;
 /// Base glyph height in the embedded strip (before scaling).
 const BASE_CHAR_H: u32 = 54;
-/// Number of printable ASCII characters (0x20..=0x7E).
-const CHAR_COUNT: u32 = 95;
+/// Total characters in the strip: ASCII 32-126 (95) + extras (Δ).
+const CHAR_COUNT: u32 = 96;
 /// First printable ASCII codepoint.
 const FIRST_CHAR: u32 = 0x20;
 
@@ -211,13 +211,17 @@ fn char_width_for_height(target_char_h: u32) -> u32 {
     (BASE_CHAR_W * target_char_h + BASE_CHAR_H / 2) / BASE_CHAR_H
 }
 
-/// Map a character to its index in the font strip (0–94).
+/// Map a character to its index in the font strip.
+/// ASCII 32-126 at indices 0-94, then extras: Δ at 95.
 fn char_index(ch: char) -> u32 {
     let code = ch as u32;
-    if (FIRST_CHAR..FIRST_CHAR + CHAR_COUNT).contains(&code) {
+    if (FIRST_CHAR..FIRST_CHAR + 95).contains(&code) {
         code - FIRST_CHAR
     } else {
-        0 // space
+        match ch {
+            '\u{0394}' => 95, // Δ (Greek capital delta)
+            _ => 0,           // space for unknown
+        }
     }
 }
 

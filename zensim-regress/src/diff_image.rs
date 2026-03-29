@@ -782,49 +782,73 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
         let cell_bg = [bg_r, bg_g, bg_b, 255];
         fill_rect(&mut img, cx, cy, cell_w, cell_h, cell_bg);
 
-        // Text content for this cell
+        // Cell text — 3 lines for hot cells, "ok" for clean
         let pct = r.pixels_differing * 100.0;
-        let line1 = if pct < 0.05 {
-            "ok".to_string()
-        } else {
-            format!("{:.0}% d:{}", pct, r.max_delta)
-        };
-
-        let exp_has = r.expected_variance > 10.0;
-        let act_has = r.actual_variance > 10.0;
-        let line2 = if !exp_has && act_has {
-            "ADDED"
-        } else if exp_has && !act_has {
-            "MISSING"
-        } else if exp_has && act_has && r.avg_delta > 10.0 {
-            "changed"
-        } else {
-            ""
-        };
-
-        let text = if line2.is_empty() {
-            line1
-        } else {
-            format!("{line1}\n{line2}")
-        };
-
-        // Render text fitted to cell
-        let text_fg = if ratio > 0.5 {
-            [255, 255, 255, 255]
-        } else {
-            [200, 200, 200, 255]
-        };
-        let text_lines: Vec<(&str, [u8; 4])> =
-            text.lines().map(|l| (l, text_fg)).collect();
         let cell_text_w = cell_w.saturating_sub(4);
-        if cell_text_w > 0 && !text_lines.is_empty() {
-            let (tbuf, tw, th) =
-                font::render_lines_fitted(&text_lines, cell_bg, cell_text_w);
-            if tw > 0 && th > 0 {
-                let tx = cx + (cell_w.saturating_sub(tw)) / 2;
-                let ty = cy + (cell_h.saturating_sub(th)) / 2;
-                if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-                    imageops::overlay(&mut img, &text_img, tx as i64, ty as i64);
+
+        if pct < 0.05 {
+            // Clean cell: small green "ok"
+            let ok_lines: Vec<(&str, [u8; 4])> = vec![("ok", COLOR_OK)];
+            if cell_text_w > 0 {
+                let (tbuf, tw, th) =
+                    font::render_lines_fitted(&ok_lines, cell_bg, cell_text_w);
+                if tw > 0 && th > 0 {
+                    let tx = cx + (cell_w.saturating_sub(tw)) / 2;
+                    let ty = cy + (cell_h.saturating_sub(th)) / 2;
+                    if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+                        imageops::overlay(&mut img, &text_img, tx as i64, ty as i64);
+                    }
+                }
+            }
+        } else {
+            // Hot cell: 3 lines
+            // Line 1: "25% \u{0394}255"
+            let line1 = format!("{:.0}% \u{0394}{}", pct, r.max_delta);
+            // Line 2: zdsim value for this cell (per-pixel severity)
+            let cell_zdsim = r.avg_delta / 255.0; // normalized
+            let line2 = format!("zdsim:{:.3}", cell_zdsim);
+            // Line 3: structural tag
+            let exp_has = r.expected_variance > 10.0;
+            let act_has = r.actual_variance > 10.0;
+            let line3 = if !exp_has && act_has {
+                "ADDED"
+            } else if exp_has && !act_has {
+                "MISSING"
+            } else if exp_has && act_has && r.avg_delta > 10.0 {
+                "changed"
+            } else {
+                ""
+            };
+
+            let text_fg = if ratio > 0.5 {
+                [255, 255, 255, 255]
+            } else {
+                [220, 220, 220, 255]
+            };
+            let mut cell_lines: Vec<(&str, [u8; 4])> = vec![
+                (&line1, text_fg),
+                (&line2, [170, 170, 170, 255]),
+            ];
+            if !line3.is_empty() {
+                let tag_color = if line3 == "MISSING" {
+                    [255, 120, 120, 255] // red-ish
+                } else if line3 == "ADDED" {
+                    [255, 180, 80, 255] // orange
+                } else {
+                    [200, 200, 120, 255] // yellow
+                };
+                cell_lines.push((line3, tag_color));
+            }
+
+            if cell_text_w > 0 {
+                let (tbuf, tw, th) =
+                    font::render_lines_fitted(&cell_lines, cell_bg, cell_text_w);
+                if tw > 0 && th > 0 {
+                    let tx = cx + (cell_w.saturating_sub(tw)) / 2;
+                    let ty = cy + (cell_h.saturating_sub(th)) / 2;
+                    if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+                        imageops::overlay(&mut img, &text_img, tx as i64, ty as i64);
+                    }
                 }
             }
         }
@@ -913,13 +937,11 @@ pub fn format_annotation_spatial(
     let zdsim_limit = score_to_dissimilarity(tolerance.min_similarity());
     let zdsim_ok = zdsim <= zdsim_limit;
     lines.push((
-        format!(
-            "zdsim: {:.4} {} {:.4} {}",
-            zdsim,
-            if zdsim_ok { "<=" } else { ">" },
-            zdsim_limit,
-            if zdsim_ok { "ok" } else { "FAIL" },
-        ),
+        if zdsim_ok {
+            format!("ok: zdsim {:.4} <= {:.4}", zdsim, zdsim_limit)
+        } else {
+            format!("FAIL: zdsim {:.4} > {:.4}", zdsim, zdsim_limit)
+        },
         if zdsim_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
@@ -928,13 +950,11 @@ pub fn format_annotation_spatial(
     let max_d = dr.max(dg).max(db);
     let delta_ok = max_d <= tolerance.max_delta();
     lines.push((
-        format!(
-            "delta: [{},{},{}] {} {} {}",
-            dr, dg, db,
-            if delta_ok { "<=" } else { ">" },
-            tolerance.max_delta(),
-            if delta_ok { "ok" } else { "FAIL" },
-        ),
+        if delta_ok {
+            format!("ok: \u{0394}[{},{},{}] <= {}", dr, dg, db, tolerance.max_delta())
+        } else {
+            format!("FAIL: \u{0394}[{},{},{}] > {}", dr, dg, db, tolerance.max_delta())
+        },
         if delta_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
@@ -947,13 +967,11 @@ pub fn format_annotation_spatial(
     let pct_limit = tolerance.max_pixels_different();
     let pct_ok = pct <= pct_limit;
     lines.push((
-        format!(
-            "differ: {:.1}% {} {:.1}% {}",
-            pct * 100.0,
-            if pct_ok { "<=" } else { ">" },
-            pct_limit * 100.0,
-            if pct_ok { "ok" } else { "FAIL" },
-        ),
+        if pct_ok {
+            format!("ok: {:.1}% differ <= {:.1}%", pct * 100.0, pct_limit * 100.0)
+        } else {
+            format!("FAIL: {:.1}% differ > {:.1}%", pct * 100.0, pct_limit * 100.0)
+        },
         if pct_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
