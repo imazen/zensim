@@ -604,11 +604,14 @@ pub fn create_annotated_montage(
         .floor() as u32;
     let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
-    // Plain labels: centered
+    // Plain labels: rendered centered within panel_w via render_lines_fitted
     let plain_labels = ["EXPECTED", "ACTUAL", "PIXEL DIFF"];
     let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
         .iter()
-        .map(|label| font::render_text_height(label, label_fg, label_bg, label_char_h))
+        .map(|label| {
+            let lines: Vec<(&str, [u8; 4])> = vec![(label, label_fg)];
+            font::render_lines_fitted(&lines, label_bg, label_area_w)
+        })
         .collect();
 
     // ADD  REMOVE: left-aligned and right-aligned within the cell
