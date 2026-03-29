@@ -10,12 +10,12 @@
 //! or mintty). On unsupported terminals you'll see escape garbage.
 //! Save to file instead with: --save-to /tmp/diff.png
 
-#![allow(deprecated)] // TODO: migrate to create_annotated_montage
-
 use std::env;
 
 use image::{Rgba, RgbaImage};
-use zensim_regress::diff_image::{create_comparison_montage, create_montage, generate_diff_image};
+use zensim_regress::diff_image::{
+    AnnotationText, MontageOptions, create_annotated_montage, create_montage, generate_diff_image,
+};
 use zensim_regress::display;
 
 fn main() {
@@ -73,8 +73,13 @@ fn main() {
     println!("--- 1. Off-by-one rounding (x50 amplification) ---");
     println!("  Uniform +1 in R channel. Diff should glow red.\n");
 
+    let ann = AnnotationText::empty();
     if let Some(ref path) = save_path {
-        let montage = create_comparison_montage(&expected, &rounding, 50, 2);
+        let opts = MontageOptions {
+            amplification: 50,
+            ..Default::default()
+        };
+        let montage = create_annotated_montage(&expected, &rounding, &ann, &opts);
         let save = format!("{}_rounding.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
         println!("  Saved: {save}");
@@ -88,7 +93,11 @@ fn main() {
     println!("  +30 green, -20 blue in center 32x32 region.\n");
 
     if let Some(ref path) = save_path {
-        let montage = create_comparison_montage(&expected, &color_shift, 5, 2);
+        let opts = MontageOptions {
+            amplification: 5,
+            ..Default::default()
+        };
+        let montage = create_annotated_montage(&expected, &color_shift, &ann, &opts);
         let save = format!("{}_colorshift.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
         println!("  Saved: {save}");
@@ -102,7 +111,11 @@ fn main() {
     println!("  RGB/BGR swap — large difference everywhere.\n");
 
     if let Some(ref path) = save_path {
-        let montage = create_comparison_montage(&expected, &channel_swap, 1, 2);
+        let opts = MontageOptions {
+            amplification: 1,
+            ..Default::default()
+        };
+        let montage = create_annotated_montage(&expected, &channel_swap, &ann, &opts);
         let save = format!("{}_channelswap.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
         println!("  Saved: {save}");

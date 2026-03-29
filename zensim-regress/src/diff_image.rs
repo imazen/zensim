@@ -614,7 +614,7 @@ pub fn spatial_analysis(
     }
 }
 
-/// Create a labeled 2x2 grid montage with two text strips below.
+/// Create a labeled 2×2 grid montage with annotation text and spatial heatmap.
 ///
 /// Layout (portrait-friendly, survives LLM image downscaling):
 /// ```text
@@ -629,14 +629,14 @@ pub fn spatial_analysis(
 /// │  zdsim: 0.13 > 0.01 FAIL   │
 /// │  delta: [12,8,3] > 1 FAIL  │
 /// ├─────────────────────────────┤
-/// │  category: perceptual       │  ← details (70% size)
-/// │  top-right: 22% -- MISSING  │
-/// │  cyan=missing orange=added  │
+/// │  [3×3 spatial heatmap]      │  ← auto-computed from pixels
+/// ├─────────────────────────────┤
+/// │  alpha: max delta 2 ...     │  ← extra text
 /// └─────────────────────────────┘
 /// ```
 ///
-/// Use [`format_annotation`] or [`format_annotation_spatial`] to produce
-/// the [`AnnotationText`].
+/// Spatial heatmap is computed automatically from the pixel data when there
+/// are differences. Tiny images are pixelate-upscaled per `options.min_panel_size`.
 ///
 /// # Panics
 ///
@@ -644,61 +644,44 @@ pub fn spatial_analysis(
 pub fn create_annotated_montage(
     expected: &RgbaImage,
     actual: &RgbaImage,
-    amplification: u8,
-    gap: u32,
     annotation: &AnnotationText,
-) -> RgbaImage {
-    create_annotated_montage_opts(
-        expected,
-        actual,
-        amplification,
-        gap,
-        annotation,
-        DEFAULT_MIN_PANEL_SIZE,
-    )
-}
-
-/// Like [`create_annotated_montage`] but with an explicit minimum panel size.
-///
-/// When either dimension of the source images is smaller than `min_panel_size`,
-/// all four panels are pixelate-upscaled (nearest-neighbor integer scaling) so
-/// that tiny test images produce readable montages. Pass `0` to disable.
-#[allow(clippy::too_many_arguments)]
-pub fn create_annotated_montage_opts(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
-    amplification: u8,
-    gap: u32,
-    annotation: &AnnotationText,
-    min_panel_size: u32,
+    options: &MontageOptions,
 ) -> RgbaImage {
     use crate::font;
+
+    let amplification = options.amplification;
 
     // Generate diffs at original resolution (before upscale) so pixel-level
     // differences are computed on real pixels, not replicated blocks.
     let pixel_diff = generate_diff_image(expected, actual, amplification);
     let struct_diff = generate_structural_diff(expected, actual, 3, amplification);
 
+    // Compute spatial analysis from original pixels (before upscale).
+    let (w, h) = expected.dimensions();
+    let (sg_cols, sg_rows) = options.spatial_grid;
+    let spatial = spatial_analysis(expected.as_raw(), actual.as_raw(), w, h, sg_cols, sg_rows);
+    let has_differences = spatial.regions.iter().any(|r| r.pixels_differing > 0.0);
+
     // Pixelate-upscale all four panels if the source is tiny.
+    let min_panel_size = options.min_panel_size;
     let up_expected;
     let up_actual;
     let up_pixel_diff;
     let up_struct_diff;
-    let (expected, actual, pixel_diff, struct_diff) = if min_panel_size > 0
-        && (expected.width() < min_panel_size || expected.height() < min_panel_size)
-    {
-        up_expected = pixelate_upscale(expected, min_panel_size);
-        up_actual = pixelate_upscale(actual, min_panel_size);
-        up_pixel_diff = pixelate_upscale(&pixel_diff, min_panel_size);
-        up_struct_diff = pixelate_upscale(&struct_diff, min_panel_size);
-        (&up_expected, &up_actual, &up_pixel_diff, &up_struct_diff)
-    } else {
-        (expected, actual, &pixel_diff, &struct_diff)
-    };
+    let (expected, actual, pixel_diff, struct_diff) =
+        if min_panel_size > 0 && (w < min_panel_size || h < min_panel_size) {
+            up_expected = pixelate_upscale(expected, min_panel_size);
+            up_actual = pixelate_upscale(actual, min_panel_size);
+            up_pixel_diff = pixelate_upscale(&pixel_diff, min_panel_size);
+            up_struct_diff = pixelate_upscale(&struct_diff, min_panel_size);
+            (&up_expected, &up_actual, &up_pixel_diff, &up_struct_diff)
+        } else {
+            (expected, actual, &pixel_diff, &struct_diff)
+        };
 
     // Minimum padding: 30% of a base char width, at least 8px
     let min_pad = (font::GLYPH_W * 3 / 10).max(8);
-    let pad = gap.max(min_pad);
+    let pad = options.gap.max(min_pad);
     let bg = Rgba([18, 18, 18, 255]);
     let label_fg = [220, 220, 220, 255];
     let label_bg = [40, 40, 40, 255];
@@ -778,11 +761,12 @@ pub fn create_annotated_montage_opts(
         None
     };
 
-    // Heatmap grid (replaces text-based spatial details)
-    let heatmap = annotation
-        .spatial
-        .as_ref()
-        .map(|s| render_heatmap_grid(s, grid_w, pad));
+    // Heatmap grid — only shown when there are actual differences
+    let heatmap = if has_differences {
+        Some(render_heatmap_grid(&spatial, grid_w, pad))
+    } else {
+        None
+    };
 
     // Extra text (alpha info etc) — small, word-wrapped
     let primary_line_h = primary_rendered
@@ -1026,62 +1010,46 @@ fn fill_rect(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 
     }
 }
 
-/// Create an annotated montage from raw RGBA byte slices.
-pub fn create_annotated_montage_raw(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    amplification: u8,
-    gap: u32,
-    annotation: &AnnotationText,
-) -> RgbaImage {
-    create_annotated_montage_raw_opts(
-        expected,
-        actual,
-        width,
-        height,
-        amplification,
-        gap,
-        annotation,
-        DEFAULT_MIN_PANEL_SIZE,
-    )
+/// Rendering options for annotated montages.
+///
+/// Use `Default` for the common case — all fields have sensible defaults.
+///
+/// ```
+/// # use zensim_regress::diff_image::MontageOptions;
+/// let opts = MontageOptions::default();
+/// let custom = MontageOptions { amplification: 50, ..Default::default() };
+/// ```
+pub struct MontageOptions {
+    /// Diff amplification factor (default: 10).
+    pub amplification: u8,
+    /// Gap between panels in pixels (default: 2, clamped up to min font padding).
+    pub gap: u32,
+    /// Minimum panel dimension — pixelate-upscale tiny images to at least this
+    /// size. Set to 0 to disable. Default: 256.
+    pub min_panel_size: u32,
+    /// Spatial heatmap grid dimensions (cols, rows). Default: (3, 3).
+    pub spatial_grid: (u32, u32),
 }
 
-/// Create an annotated montage from raw RGBA byte slices with explicit
-/// minimum panel size. Pass `0` to disable upscaling.
-#[allow(clippy::too_many_arguments)]
-pub fn create_annotated_montage_raw_opts(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    amplification: u8,
-    gap: u32,
-    annotation: &AnnotationText,
-    min_panel_size: u32,
-) -> RgbaImage {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
-        .expect("expected: invalid dimensions for pixel data");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
-        .expect("actual: invalid dimensions for pixel data");
-    create_annotated_montage_opts(
-        &exp_img,
-        &act_img,
-        amplification,
-        gap,
-        annotation,
-        min_panel_size,
-    )
+impl Default for MontageOptions {
+    fn default() -> Self {
+        Self {
+            amplification: 10,
+            gap: 2,
+            min_panel_size: DEFAULT_MIN_PANEL_SIZE,
+            spatial_grid: (3, 3),
+        }
+    }
 }
 
-/// Annotation data for the montage: verdict, constraints, and optional spatial heatmap.
+/// Annotation data for the montage: verdict lines and optional extra text.
+///
+/// Use [`from_report`](Self::from_report) when you have a regression report,
+/// or [`empty`](Self::empty) for a bare montage with no annotations.
 pub struct AnnotationText {
     /// Colored lines for the primary text block.
     /// Red for failing constraints, green for passing, gray for info.
     pub primary_lines: Vec<(String, [u8; 4])>,
-    /// Optional spatial analysis — rendered as a 9-cell heatmap grid.
-    pub spatial: Option<SpatialAnalysis>,
     /// Extra text lines (alpha info, etc). Shown below heatmap if present.
     pub extra: String,
 }
@@ -1090,129 +1058,123 @@ const COLOR_FAIL: [u8; 4] = [255, 80, 80, 255]; // red
 const COLOR_OK: [u8; 4] = [80, 220, 80, 255]; // green
 const COLOR_DETAIL: [u8; 4] = [170, 170, 170, 255]; // dim gray
 
-/// Format a regression report as annotation text with constraint comparisons.
-///
-/// Shows each constraint as `actual > limit FAIL` (red) or `actual <= limit ok`
-/// (green), making it immediately obvious what passed and what didn't.
-pub fn format_annotation(
-    report: &crate::testing::RegressionReport,
-    tolerance: &crate::testing::RegressionTolerance,
-) -> AnnotationText {
-    format_annotation_spatial(report, tolerance, None)
-}
-
-/// Format annotation with spatial analysis included.
-///
-/// Primary block: colored lines — verdict + constraint comparisons.
-/// Details block: spatial breakdown first (most actionable), then category/legend.
-pub fn format_annotation_spatial(
-    report: &crate::testing::RegressionReport,
-    tolerance: &crate::testing::RegressionTolerance,
-    spatial: Option<&SpatialAnalysis>,
-) -> AnnotationText {
-    use zensim::score_to_dissimilarity;
-
-    // ── Primary: colored constraint lines ──
-    let mut lines: Vec<(String, [u8; 4])> = Vec::new();
-
-    // zdsim
-    let zdsim = score_to_dissimilarity(report.score());
-    let zdsim_limit = score_to_dissimilarity(tolerance.min_similarity());
-    let zdsim_ok = zdsim <= zdsim_limit;
-    lines.push((
-        if zdsim_ok {
-            format!("ok: zdsim {:.4} <= {:.4}", zdsim, zdsim_limit)
-        } else {
-            format!("FAIL: zdsim {:.4} > {:.4}", zdsim, zdsim_limit)
-        },
-        if zdsim_ok { COLOR_OK } else { COLOR_FAIL },
-    ));
-
-    // delta
-    let [dr, dg, db] = report.max_channel_delta();
-    let max_d = dr.max(dg).max(db);
-    let delta_ok = max_d <= tolerance.max_delta();
-    lines.push((
-        if delta_ok {
-            format!(
-                "ok: \u{0394}[{},{},{}] <= {}",
-                dr,
-                dg,
-                db,
-                tolerance.max_delta()
-            )
-        } else {
-            format!(
-                "FAIL: \u{0394}[{},{},{}] > {}",
-                dr,
-                dg,
-                db,
-                tolerance.max_delta()
-            )
-        },
-        if delta_ok { COLOR_OK } else { COLOR_FAIL },
-    ));
-
-    // pixels differing
-    let pct = if report.pixel_count() > 0 {
-        report.pixels_differing() as f64 / report.pixel_count() as f64
-    } else {
-        0.0
-    };
-    let pct_limit = tolerance.max_pixels_different();
-    let pct_ok = pct <= pct_limit;
-    lines.push((
-        if pct_ok {
-            format!(
-                "ok: {:.1}% differ <= {:.1}%",
-                pct * 100.0,
-                pct_limit * 100.0
-            )
-        } else {
-            format!(
-                "FAIL: {:.1}% differ > {:.1}%",
-                pct * 100.0,
-                pct_limit * 100.0
-            )
-        },
-        if pct_ok { COLOR_OK } else { COLOR_FAIL },
-    ));
-
-    // Error type
-    let category = format!("{:?}", report.category()).to_lowercase();
-    let mut cat_text = format!("error type: {}", category);
-    if let Some(bias) = report.rounding_bias() {
-        if bias.balanced {
-            cat_text.push_str(" (balanced)");
-        } else {
-            let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
-            let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
-            if all_pos {
-                cat_text.push_str(" (truncation)");
-            } else if all_neg {
-                cat_text.push_str(" (ceiling)");
-            }
+impl AnnotationText {
+    /// No annotation — produces a bare montage with no text or heatmap.
+    pub fn empty() -> Self {
+        Self {
+            primary_lines: vec![],
+            extra: String::new(),
         }
     }
-    lines.push((cat_text, COLOR_DETAIL));
 
-    // Spatial → heatmap (rendered visually)
-    let spatial_data = spatial.cloned();
+    /// Build annotation from a regression report.
+    ///
+    /// Shows each constraint as `actual > limit FAIL` (red) or
+    /// `actual <= limit ok` (green). Spatial heatmap is computed
+    /// by the montage function from the actual pixels.
+    pub fn from_report(
+        report: &crate::testing::RegressionReport,
+        tolerance: &crate::testing::RegressionTolerance,
+    ) -> Self {
+        use zensim::score_to_dissimilarity;
 
-    // Extra: alpha info
-    let mut extra = String::new();
-    if report.alpha_max_delta() > 0 {
-        extra = format!(
-            "alpha: max delta {} ({} pixels differ)",
-            report.alpha_max_delta(),
-            report.alpha_pixels_differing(),
-        );
-    }
+        let mut lines: Vec<(String, [u8; 4])> = Vec::new();
 
-    AnnotationText {
-        primary_lines: lines,
-        spatial: spatial_data,
-        extra,
+        // zdsim
+        let zdsim = score_to_dissimilarity(report.score());
+        let zdsim_limit = score_to_dissimilarity(tolerance.min_similarity());
+        let zdsim_ok = zdsim <= zdsim_limit;
+        lines.push((
+            if zdsim_ok {
+                format!("ok: zdsim {:.4} <= {:.4}", zdsim, zdsim_limit)
+            } else {
+                format!("FAIL: zdsim {:.4} > {:.4}", zdsim, zdsim_limit)
+            },
+            if zdsim_ok { COLOR_OK } else { COLOR_FAIL },
+        ));
+
+        // delta
+        let [dr, dg, db] = report.max_channel_delta();
+        let max_d = dr.max(dg).max(db);
+        let delta_ok = max_d <= tolerance.max_delta();
+        lines.push((
+            if delta_ok {
+                format!(
+                    "ok: \u{0394}[{},{},{}] <= {}",
+                    dr,
+                    dg,
+                    db,
+                    tolerance.max_delta()
+                )
+            } else {
+                format!(
+                    "FAIL: \u{0394}[{},{},{}] > {}",
+                    dr,
+                    dg,
+                    db,
+                    tolerance.max_delta()
+                )
+            },
+            if delta_ok { COLOR_OK } else { COLOR_FAIL },
+        ));
+
+        // pixels differing
+        let pct = if report.pixel_count() > 0 {
+            report.pixels_differing() as f64 / report.pixel_count() as f64
+        } else {
+            0.0
+        };
+        let pct_limit = tolerance.max_pixels_different();
+        let pct_ok = pct <= pct_limit;
+        lines.push((
+            if pct_ok {
+                format!(
+                    "ok: {:.1}% differ <= {:.1}%",
+                    pct * 100.0,
+                    pct_limit * 100.0
+                )
+            } else {
+                format!(
+                    "FAIL: {:.1}% differ > {:.1}%",
+                    pct * 100.0,
+                    pct_limit * 100.0
+                )
+            },
+            if pct_ok { COLOR_OK } else { COLOR_FAIL },
+        ));
+
+        // Error type
+        let category = format!("{:?}", report.category()).to_lowercase();
+        let mut cat_text = format!("error type: {}", category);
+        if let Some(bias) = report.rounding_bias() {
+            if bias.balanced {
+                cat_text.push_str(" (balanced)");
+            } else {
+                let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
+                let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
+                if all_pos {
+                    cat_text.push_str(" (truncation)");
+                } else if all_neg {
+                    cat_text.push_str(" (ceiling)");
+                }
+            }
+        }
+        lines.push((cat_text, COLOR_DETAIL));
+
+        // Extra: alpha info
+        let mut extra = String::new();
+        if report.alpha_max_delta() > 0 {
+            extra = format!(
+                "alpha: max delta {} ({} pixels differ)",
+                report.alpha_max_delta(),
+                report.alpha_pixels_differing(),
+            );
+        }
+
+        Self {
+            primary_lines: lines,
+            extra,
+        }
     }
 }
 
@@ -1356,11 +1318,14 @@ mod tests {
                 ("FAIL".into(), COLOR_FAIL),
                 ("zdsim: 0.13 > 0.01 FAIL".into(), COLOR_FAIL),
             ],
-            spatial: None,
             extra: String::new(),
         };
-        // Disable upscale to test layout at native 32×32
-        let montage = create_annotated_montage_opts(&exp, &act, 10, 6, &ann, 0);
+        let opts = MontageOptions {
+            gap: 6,
+            min_panel_size: 0, // disable upscale to test at native 32×32
+            ..Default::default()
+        };
+        let montage = create_annotated_montage(&exp, &act, &ann, &opts);
 
         assert!(montage.width() >= 32 * 2 + 6 * 3);
         assert!(montage.height() > 32 * 2);
@@ -1372,17 +1337,16 @@ mod tests {
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let with_text = AnnotationText {
             primary_lines: vec![("hello".into(), [255; 4])],
-            spatial: None,
             extra: String::new(),
         };
-        let no_text = AnnotationText {
-            primary_lines: vec![],
-            spatial: None,
-            extra: String::new(),
+        let no_text = AnnotationText::empty();
+        let opts = MontageOptions {
+            gap: 6,
+            min_panel_size: 0, // disable upscale
+            ..Default::default()
         };
-        // Disable upscale so we test text strip presence, not upscale
-        let with = create_annotated_montage_opts(&exp, &act, 10, 6, &with_text, 0);
-        let without = create_annotated_montage_opts(&exp, &act, 10, 6, &no_text, 0);
+        let with = create_annotated_montage(&exp, &act, &with_text, &opts);
+        let without = create_annotated_montage(&exp, &act, &no_text, &opts);
         assert!(without.height() < with.height());
     }
 
@@ -1390,13 +1354,9 @@ mod tests {
     fn annotated_montage_upscales_tiny_images() {
         let exp = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
         let act = RgbaImage::from_pixel(8, 8, Rgba([110, 100, 90, 255]));
-        let ann = AnnotationText {
-            primary_lines: vec![],
-            spatial: None,
-            extra: String::new(),
-        };
-        // Default upscale to 256
-        let montage = create_annotated_montage(&exp, &act, 10, 6, &ann);
+        // Default options — upscale to 256
+        let montage =
+            create_annotated_montage(&exp, &act, &AnnotationText::empty(), &Default::default());
         // Panels should be 256×256 (8×32), so montage width >= 2*256
         assert!(
             montage.width() >= 512,

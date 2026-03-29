@@ -142,67 +142,34 @@ pub fn print_image(img: &RgbaImage, max_width: Option<u32>) {
     let _ = handle.flush();
 }
 
-/// Print a 3-panel comparison (Expected | Actual | Diff) as sixels.
+/// Print an annotated comparison montage as sixels.
 ///
-/// Labels are printed as text before the sixel image.
-/// The diff uses the given amplification factor (default: 10).
-///
-/// All output is written to stdout under a single lock with newlines
-/// before and after, so it passes through cleanly when interleaved with
-/// stderr (e.g. test framework output).
+/// Produces a 2×2 grid (Expected | Actual | Pixel Diff | Structural Diff)
+/// with spatial heatmap. All output is written under a single stdout lock.
 pub fn print_comparison(
     expected: &RgbaImage,
     actual: &RgbaImage,
     amplification: u8,
     max_width: Option<u32>,
 ) {
-    #[allow(deprecated)] // TODO: migrate to create_annotated_montage
-    let montage = crate::diff_image::create_comparison_montage(expected, actual, amplification, 2);
+    use crate::diff_image::{AnnotationText, MontageOptions, create_annotated_montage};
+
+    let opts = MontageOptions {
+        amplification,
+        ..Default::default()
+    };
+    let montage = create_annotated_montage(expected, actual, &AnnotationText::empty(), &opts);
     let sixel_bytes = sixel_encode(&montage, max_width);
 
-    // Build text labels above the panels
-    let panel_w = expected.width() as usize;
-    let gap = 2;
-    let label_expected = "Expected";
-    let label_actual = "Actual";
-    let label_diff = format!("Diff x{amplification}");
-
-    // Center labels in their panels (approximate: terminal chars ≠ pixels,
-    // but reasonable when image is close to terminal scale)
-    let pad_e = panel_w.saturating_sub(label_expected.len()) / 2;
-    let pad_a = panel_w.saturating_sub(label_actual.len()) / 2;
-    let pad_d = panel_w.saturating_sub(label_diff.len()) / 2;
-
-    let label_line = format!(
-        "{:>pad_e$}{}{:>gap$}{:>pad_a$}{}{:>gap$}{:>pad_d$}{}",
-        "",
-        label_expected,
-        "",
-        "",
-        label_actual,
-        "",
-        "",
-        label_diff,
-        pad_e = pad_e,
-        pad_a = pad_a,
-        pad_d = pad_d,
-        gap = gap,
-    );
-
-    // Write everything under a single stdout lock with newlines before/after
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
-    let _ = handle.write_all(b"\n");
-    let _ = handle.write_all(label_line.as_bytes());
     let _ = handle.write_all(b"\n");
     let _ = handle.write_all(&sixel_bytes);
     let _ = handle.write_all(b"\n");
     let _ = handle.flush();
 }
 
-/// Save a 3-panel comparison (Expected | Actual | Diff) as a PNG file.
-///
-/// Like [`print_comparison_raw`] but writes to disk instead of stdout.
+/// Save an annotated comparison montage as a PNG file.
 pub fn save_comparison_png(
     expected: &[u8],
     actual: &[u8],
@@ -212,13 +179,17 @@ pub fn save_comparison_png(
     max_width: Option<u32>,
     path: &std::path::Path,
 ) {
+    use crate::diff_image::{AnnotationText, MontageOptions, create_annotated_montage};
+
     let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
     let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
-    #[allow(deprecated)] // TODO: migrate to create_annotated_montage
-    let montage =
-        crate::diff_image::create_comparison_montage(&exp_img, &act_img, amplification, 2);
+    let opts = MontageOptions {
+        amplification,
+        ..Default::default()
+    };
+    let montage = create_annotated_montage(&exp_img, &act_img, &AnnotationText::empty(), &opts);
     let montage = maybe_resize(&montage, max_width);
     montage.save(path).expect("failed to save comparison PNG");
 }

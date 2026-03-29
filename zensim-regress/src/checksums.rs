@@ -22,9 +22,7 @@ use std::sync::Arc;
 
 use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
 
-use crate::diff_image::{
-    AnnotationText, create_annotated_montage_raw, format_annotation_spatial, spatial_analysis,
-};
+use crate::diff_image::{AnnotationText, MontageOptions, create_annotated_montage};
 use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
 use crate::error::RegressError;
 use crate::hasher::{ChecksumHasher, SeaHasher};
@@ -1569,20 +1567,17 @@ impl ChecksumManager {
             return None;
         }
 
-        let annotation = if let Some(report) = report {
-            let spatial = spatial_analysis(ref_rgba, actual_rgba, rw, rh, 3, 3);
-            format_annotation_spatial(report, tolerance, Some(&spatial))
-        } else {
-            // No report (e.g. image too small for zensim) — minimal annotation
-            AnnotationText {
-                primary_lines: vec![],
-                spatial: None,
-                extra: String::new(),
-            }
+        let annotation = match report {
+            Some(r) => AnnotationText::from_report(r, tolerance),
+            None => AnnotationText::empty(),
         };
 
+        let ref_img =
+            image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec()).expect("ref: invalid dimensions");
+        let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+            .expect("actual: invalid dimensions");
         let montage =
-            create_annotated_montage_raw(ref_rgba, actual_rgba, rw, rh, 10, 2, &annotation);
+            create_annotated_montage(&ref_img, &act_img, &annotation, &MontageOptions::default());
         match montage.save(&out_path) {
             Ok(()) => Some(out_path),
             Err(e) => {
