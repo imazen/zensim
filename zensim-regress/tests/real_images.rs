@@ -96,7 +96,7 @@ fn real_image_blur_distortion() {
     )
     .unwrap();
 
-    let spatial = spatial_analysis(img.as_raw(), blurred.as_raw(), w, h, 2, 2);
+    let spatial = spatial_analysis(img.as_raw(), blurred.as_raw(), w, h, 3, 3);
     let ann = format_annotation_spatial(&report, &tolerance, Some(&spatial));
 
     eprintln!("  blur: zdsim={:.4}", zensim::score_to_dissimilarity(report.score()));
@@ -141,7 +141,7 @@ fn real_image_brightness_shift() {
     )
     .unwrap();
 
-    let spatial = spatial_analysis(img.as_raw(), bright.as_raw(), w, h, 2, 2);
+    let spatial = spatial_analysis(img.as_raw(), bright.as_raw(), w, h, 3, 3);
     let ann = format_annotation_spatial(&report, &tolerance, Some(&spatial));
 
     eprintln!("  bright: zdsim={:.4}", zensim::score_to_dissimilarity(report.score()));
@@ -183,7 +183,7 @@ fn real_image_watermark_added() {
     )
     .unwrap();
 
-    let spatial = spatial_analysis(img.as_raw(), watermarked.as_raw(), w, h, 2, 2);
+    let spatial = spatial_analysis(img.as_raw(), watermarked.as_raw(), w, h, 3, 3);
     let ann = format_annotation_spatial(&report, &tolerance, Some(&spatial));
 
     eprintln!("  watermark: zdsim={:.4}", zensim::score_to_dissimilarity(report.score()));
@@ -194,8 +194,8 @@ fn real_image_watermark_added() {
 
     // Spatial should show bottom-right as the affected quadrant
     assert!(
-        spatial.regions[3].pixels_differing > spatial.regions[0].pixels_differing,
-        "bottom-right should have more differences than top-left"
+        spatial.regions[8].pixels_differing > spatial.regions[0].pixels_differing,
+        "bot-right (idx 8) should have more differences than top-left (idx 0)"
     );
 }
 
@@ -226,7 +226,7 @@ fn real_image_missing_region() {
     )
     .unwrap();
 
-    let spatial = spatial_analysis(img.as_raw(), blanked.as_raw(), w, h, 2, 2);
+    let spatial = spatial_analysis(img.as_raw(), blanked.as_raw(), w, h, 3, 3);
     let ann = format_annotation_spatial(&report, &tolerance, Some(&spatial));
 
     eprintln!("  missing: zdsim={:.4}", zensim::score_to_dissimilarity(report.score()));

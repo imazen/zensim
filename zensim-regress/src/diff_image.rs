@@ -390,7 +390,12 @@ pub struct SpatialAnalysis {
 
 impl std::fmt::Display for SpatialAnalysis {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let labels = ["TL", "TR", "BL", "BR", "L", "R", "T", "B", "C"];
+        let labels_2x2 = ["top-left", "top-right", "bot-left", "bot-right"];
+        let labels_3x3 = [
+            "top-left", "top-center", "top-right",
+            "mid-left", "center", "mid-right",
+            "bot-left", "bot-center", "bot-right",
+        ];
         let max_delta_idx = self
             .regions
             .iter()
@@ -401,8 +406,10 @@ impl std::fmt::Display for SpatialAnalysis {
         writeln!(f, "Spatial diff ({}x{} grid):", self.cols, self.rows)?;
 
         for (i, r) in self.regions.iter().enumerate() {
-            let label = if self.cols == 2 && self.rows == 2 {
-                labels[i].to_string()
+            let label = if self.cols == 3 && self.rows == 3 {
+                labels_3x3.get(i).unwrap_or(&"??").to_string()
+            } else if self.cols == 2 && self.rows == 2 {
+                labels_2x2.get(i).unwrap_or(&"??").to_string()
             } else {
                 format!("({},{})", r.col, r.row)
             };
@@ -585,7 +592,7 @@ pub fn create_annotated_montage(
         ("EXPECTED", expected),
         ("ACTUAL", actual),
         ("PIXEL DIFF", &pixel_diff),
-        ("STRUCTURE", &struct_diff),
+        ("ADD/REMOVE", &struct_diff),
     ];
 
     let panel_w = expected.width();
@@ -844,71 +851,93 @@ pub fn format_annotation_spatial(
         if pct_ok { COLOR_OK } else { COLOR_FAIL },
     ));
 
-    // ── Details: spatial first (most actionable), then secondary info ──
-    let mut details = Vec::new();
-
-    // Spatial breakdown — the most important diagnostic info
-    let mut has_structural = false;
-    if let Some(spatial) = spatial {
-        for r in &spatial.regions {
-            if r.pixels_differing > 0.001 {
-                let label = if spatial.cols == 2 && spatial.rows == 2 {
-                    let labels = ["top-left", "top-right", "bottom-left", "bottom-right"];
-                    let idx = (r.row * spatial.cols + r.col) as usize;
-                    labels.get(idx).unwrap_or(&"??").to_string()
-                } else {
-                    format!("({},{})", r.col, r.row)
-                };
-
-                let exp_has = r.expected_variance > 10.0;
-                let act_has = r.actual_variance > 10.0;
-
-                let mut line = format!(
-                    "{}: {:.1}% differ, max delta {}",
-                    label,
-                    r.pixels_differing * 100.0,
-                    r.max_delta,
-                );
-
-                if !exp_has && act_has {
-                    line.push_str(" -- ADDED");
-                    has_structural = true;
-                } else if exp_has && !act_has {
-                    line.push_str(" -- MISSING");
-                    has_structural = true;
-                } else if exp_has && act_has && r.avg_delta > 10.0 {
-                    line.push_str(" -- different rendering");
-                }
-                details.push(line);
+    // Category → in primary block as last line
+    let category = format!("{:?}", report.category()).to_lowercase();
+    let mut cat_text = format!("  error type: {}", category);
+    if let Some(bias) = report.rounding_bias() {
+        if bias.balanced {
+            cat_text.push_str(" (balanced)");
+        } else {
+            let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
+            let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
+            if all_pos {
+                cat_text.push_str(" (truncation)");
+            } else if all_neg {
+                cat_text.push_str(" (ceiling)");
             }
         }
     }
+    lines.push((cat_text, COLOR_DETAIL));
 
-    // Category + bias (skip if structural changes already explain it)
-    let category = format!("{:?}", report.category()).to_lowercase();
-    if !has_structural {
-        let mut cat_line = format!("category: {}", category);
-        if let Some(bias) = report.rounding_bias() {
-            if bias.balanced {
-                cat_line.push_str(" (balanced)");
-            } else {
-                let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
-                let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
-                if all_pos {
-                    cat_line.push_str(" (truncation bias)");
-                } else if all_neg {
-                    cat_line.push_str(" (ceiling bias)");
-                } else {
-                    cat_line.push_str(&format!(
-                        " (bias R:{:.0}%+ G:{:.0}%+ B:{:.0}%+)",
-                        bias.positive_fraction[0] * 100.0,
-                        bias.positive_fraction[1] * 100.0,
-                        bias.positive_fraction[2] * 100.0,
-                    ));
+    // ── Details: spatial (only when regions meaningfully differ) ──
+    let mut details = Vec::new();
+
+    if let Some(spatial) = spatial {
+        // Check if spatial breakdown is worth showing: is there significant
+        // variance between regions? (skip if all regions are similar)
+        let max_pct = spatial
+            .regions
+            .iter()
+            .map(|r| r.pixels_differing)
+            .fold(0.0f64, f64::max);
+        let min_pct = spatial
+            .regions
+            .iter()
+            .map(|r| r.pixels_differing)
+            .fold(1.0f64, f64::min);
+        let has_variance = max_pct > 0.001 && (max_pct - min_pct) > 0.05;
+
+        if has_variance {
+            let region_labels_3x3 = [
+                "top-left",
+                "top-center",
+                "top-right",
+                "mid-left",
+                "center",
+                "mid-right",
+                "bot-left",
+                "bot-center",
+                "bot-right",
+            ];
+
+            for r in &spatial.regions {
+                if r.pixels_differing > 0.001 {
+                    let label = if spatial.cols == 3 && spatial.rows == 3 {
+                        let idx = (r.row * spatial.cols + r.col) as usize;
+                        region_labels_3x3
+                            .get(idx)
+                            .unwrap_or(&"??")
+                            .to_string()
+                    } else if spatial.cols == 2 && spatial.rows == 2 {
+                        let labels =
+                            ["top-left", "top-right", "bot-left", "bot-right"];
+                        let idx = (r.row * spatial.cols + r.col) as usize;
+                        labels.get(idx).unwrap_or(&"??").to_string()
+                    } else {
+                        format!("({},{})", r.col, r.row)
+                    };
+
+                    let exp_has = r.expected_variance > 10.0;
+                    let act_has = r.actual_variance > 10.0;
+
+                    let mut line = format!(
+                        "{}: {:.1}% differ, max delta {}",
+                        label,
+                        r.pixels_differing * 100.0,
+                        r.max_delta,
+                    );
+
+                    if !exp_has && act_has {
+                        line.push_str(" -- ADDED");
+                    } else if exp_has && !act_has {
+                        line.push_str(" -- MISSING");
+                    } else if exp_has && act_has && r.avg_delta > 10.0 {
+                        line.push_str(" -- changed");
+                    }
+                    details.push(line);
                 }
             }
         }
-        details.push(cat_line);
     }
 
     // Alpha
@@ -919,9 +948,6 @@ pub fn format_annotation_spatial(
             report.alpha_pixels_differing(),
         ));
     }
-
-    // Legend
-    details.push("cyan = missing structure, orange = added structure".to_string());
 
     AnnotationText {
         primary_lines: lines,
@@ -1100,7 +1126,7 @@ mod tests {
         let analysis = spatial_analysis(&exp, &act, w, h, 2, 2);
         let text = format!("{analysis}");
         assert!(text.contains("Spatial diff"));
-        assert!(text.contains("TL"));
+        assert!(text.contains("top-left"));
     }
 
     #[test]
