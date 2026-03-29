@@ -595,59 +595,49 @@ pub fn create_annotated_montage(
     let panel_w = expected.width();
     let panel_h = expected.height();
 
-    // Auto-scale labels to fit panel width (with padding on each side)
-    let label_pad = pad;
-    let available_w = panel_w.saturating_sub(label_pad * 2);
-    // "ADD / REMOVE" is the longest at 12 chars
-    let longest_label = 12u32;
-    let label_char_h = ((available_w as f32 / longest_label as f32)
+    // Label sizing: fit "PIXEL DIFF" (10 chars) within cell_w minus padding
+    let label_inset = pad;
+    let label_area_w = panel_w.saturating_sub(label_inset * 2);
+    let longest_label = 10u32; // "PIXEL DIFF"
+    let label_char_h = ((label_area_w as f32 / longest_label as f32)
         * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
         .floor() as u32;
     let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
-    // Render each label — ADD/REMOVE gets color-coded via render_lines_fitted
-    // (each "part" becomes a line; we render parts side-by-side manually for color)
+    // Plain labels: centered
     let plain_labels = ["EXPECTED", "ACTUAL", "PIXEL DIFF"];
     let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
         .iter()
         .map(|label| font::render_text_height(label, label_fg, label_bg, label_char_h))
         .collect();
 
-    // ADD / REMOVE: render parts separately, composite
+    // ADD  REMOVE: left-aligned and right-aligned within the cell
     let add_img = font::render_text_height("ADD", [255, 180, 80, 255], label_bg, label_char_h);
-    let sep_img = font::render_text_height(" / ", label_fg, label_bg, label_char_h);
     let rem_img = font::render_text_height("REMOVE", [80, 220, 220, 255], label_bg, label_char_h);
-    let ar_w = add_img.1 + sep_img.1 + rem_img.1;
     let ar_h = label_char_h;
-    let mut ar_buf = vec![0u8; (ar_w * ar_h * 4) as usize];
-    for px in ar_buf.chunks_exact_mut(4) {
-        px.copy_from_slice(&label_bg);
+    let mut ar_rgba = RgbaImage::from_pixel(panel_w, ar_h, Rgba(label_bg));
+    // ADD left-aligned with inset
+    if add_img.1 > 0
+        && add_img.2 > 0
+        && let Some(img) = RgbaImage::from_raw(add_img.1, add_img.2, add_img.0.clone())
+    {
+        imageops::overlay(&mut ar_rgba, &img, label_inset as i64, 0);
     }
-    // Blit parts side by side
-    for (part_buf, part_w, _) in [&add_img, &sep_img, &rem_img] {
-        // This is simpler if we track x offset
-        let _ = (part_buf, part_w);
-    }
-    // Actually, composite via RgbaImage overlay
-    let mut ar_rgba = RgbaImage::from_pixel(ar_w, ar_h, Rgba(label_bg));
-    let mut x_off = 0i64;
-    for (buf, w, h) in [&add_img, &sep_img, &rem_img] {
-        if *w > 0
-            && *h > 0
-            && let Some(img) = RgbaImage::from_raw(*w, *h, buf.clone())
-        {
-            imageops::overlay(&mut ar_rgba, &img, x_off, 0);
-        }
-        x_off += *w as i64;
+    // REMOVE right-aligned with inset
+    if rem_img.1 > 0
+        && rem_img.2 > 0
+        && let Some(img) = RgbaImage::from_raw(rem_img.1, rem_img.2, rem_img.0.clone())
+    {
+        let rx = panel_w.saturating_sub(rem_img.1 + label_inset);
+        imageops::overlay(&mut ar_rgba, &img, rx as i64, 0);
     }
     let ar_raw = ar_rgba.into_raw();
 
-    // Collect all 4 label images
     let label_images: Vec<(Vec<u8>, u32, u32)> = vec![
         plain_images[0].clone(),
         plain_images[1].clone(),
         plain_images[2].clone(),
-        (ar_raw, ar_w, ar_h),
+        (ar_raw, panel_w, ar_h),
     ];
 
     let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
