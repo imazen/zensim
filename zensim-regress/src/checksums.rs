@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
 
+#[allow(deprecated)] // TODO: migrate to create_annotated_montage_raw
 use crate::diff_image::create_comparison_montage_raw;
 use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
 use crate::error::RegressError;
@@ -1558,6 +1559,7 @@ impl ChecksumManager {
             return None;
         }
 
+        #[allow(deprecated)]
         let montage = create_comparison_montage_raw(ref_rgba, actual_rgba, rw, rh, 10, 2);
         match montage.save(&out_path) {
             Ok(()) => Some(out_path),

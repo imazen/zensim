@@ -79,12 +79,15 @@ pub fn create_montage(panels: &[&RgbaImage], gap: u32) -> RgbaImage {
 
 /// Create a 3-panel comparison montage: Expected | Actual | Diff.
 ///
-/// The diff panel uses amplified absolute differences (default 10x).
-/// Returns the composite image ready for display.
+/// **Prefer [`create_annotated_montage`]** — it produces a labeled 2×2 grid
+/// with structural diff, colored constraint text, and a 9-cell spatial
+/// heatmap. This function produces a bare strip with no labels or stats.
 ///
 /// # Panics
 ///
 /// Panics if expected and actual have different dimensions.
+#[deprecated(since = "0.2.2", note = "use create_annotated_montage for labeled panels, \
+    structural diff, and spatial heatmap")]
 pub fn create_comparison_montage(
     expected: &RgbaImage,
     actual: &RgbaImage,
@@ -120,12 +123,13 @@ pub fn generate_diff_image_raw(
 
 /// Create a 3-panel comparison montage from raw RGBA byte slices.
 ///
-/// Convenience wrapper around [`create_comparison_montage`] for callers
-/// working with `&[u8]` pixel buffers instead of `RgbaImage`.
+/// Convenience wrapper around [`create_comparison_montage`].
 ///
-/// # Panics
-///
-/// Panics if either slice length doesn't match `width * height * 4`.
+/// **Prefer [`create_annotated_montage_raw`]** for labeled output with
+/// structural diff and spatial heatmap.
+#[deprecated(since = "0.2.2", note = "use create_annotated_montage_raw for labeled panels, \
+    structural diff, and spatial heatmap")]
+#[allow(deprecated)]
 pub fn create_comparison_montage_raw(
     expected: &[u8],
     actual: &[u8],
@@ -1104,6 +1108,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn comparison_montage_works() {
         let expected = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
         let actual = RgbaImage::from_pixel(8, 8, Rgba([101, 99, 100, 255]));
@@ -1123,6 +1128,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn comparison_montage_raw_matches_typed() {
         let exp = RgbaImage::from_pixel(4, 4, Rgba([100, 100, 100, 255]));
         let act = RgbaImage::from_pixel(4, 4, Rgba([105, 100, 95, 255]));

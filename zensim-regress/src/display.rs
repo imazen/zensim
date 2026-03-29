@@ -156,6 +156,7 @@ pub fn print_comparison(
     amplification: u8,
     max_width: Option<u32>,
 ) {
+    #[allow(deprecated)] // TODO: migrate to create_annotated_montage
     let montage = crate::diff_image::create_comparison_montage(expected, actual, amplification, 2);
     let sixel_bytes = sixel_encode(&montage, max_width);
 
@@ -215,6 +216,7 @@ pub fn save_comparison_png(
         .expect("expected: invalid dimensions for pixel data");
     let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
+    #[allow(deprecated)] // TODO: migrate to create_annotated_montage
     let montage =
         crate::diff_image::create_comparison_montage(&exp_img, &act_img, amplification, 2);
     let montage = maybe_resize(&montage, max_width);
