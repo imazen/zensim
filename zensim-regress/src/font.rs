@@ -60,6 +60,70 @@ pub fn render_text(text: &str, fg: [u8; 4], bg: [u8; 4]) -> (Vec<u8>, u32, u32) 
     (buf, w, h)
 }
 
+/// Render a string at an integer scale (each pixel becomes scale×scale).
+///
+/// `scale` of 2 doubles the size (12×20 per glyph), 3 triples (18×30), etc.
+/// Scale 1 is identical to [`render_text`].
+pub fn render_text_scaled(
+    text: &str,
+    fg: [u8; 4],
+    bg: [u8; 4],
+    scale: u32,
+) -> (Vec<u8>, u32, u32) {
+    let scale = scale.max(1);
+    if scale == 1 {
+        return render_text(text, fg, bg);
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    let max_cols = lines.iter().map(|l| l.len()).max().unwrap_or(0) as u32;
+    let num_lines = lines.len() as u32;
+
+    let gw = GLYPH_W * scale;
+    let gh = GLYPH_H * scale;
+    let w = max_cols * gw;
+    let h = num_lines * gh;
+
+    if w == 0 || h == 0 {
+        return (vec![], 0, 0);
+    }
+
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+
+    for pixel in buf.chunks_exact_mut(4) {
+        pixel.copy_from_slice(&bg);
+    }
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        let y_base = line_idx as u32 * gh;
+        for (col, ch) in line.chars().enumerate() {
+            let x_base = col as u32 * gw;
+            let glyph = glyph_data(ch);
+
+            for gy in 0..GLYPH_H {
+                let row_bits = glyph[gy as usize];
+                for gx in 0..GLYPH_W {
+                    if row_bits & (0x80 >> gx) != 0 {
+                        // Fill a scale×scale block
+                        for sy in 0..scale {
+                            for sx in 0..scale {
+                                let px = x_base + gx * scale + sx;
+                                let py = y_base + gy * scale + sy;
+                                if px < w && py < h {
+                                    let off = ((py * w + px) * 4) as usize;
+                                    buf[off..off + 4].copy_from_slice(&fg);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (buf, w, h)
+}
+
 /// Get the 10-byte glyph bitmap for a character. Unknown chars → solid block.
 fn glyph_data(ch: char) -> &'static [u8; 10] {
     let idx = ch as usize;

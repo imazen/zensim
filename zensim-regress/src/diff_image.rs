@@ -537,14 +537,25 @@ pub fn spatial_analysis(
     }
 }
 
-/// Create a comparison montage with stats text burned into a canvas below.
+/// Create a labeled 2x2 grid montage with stats text below.
 ///
-/// Returns a 4-panel montage (expected | actual | pixel diff | structural diff)
-/// with a text strip below showing the provided annotation lines.
+/// Layout (portrait-friendly, survives LLM image downscaling):
+/// ```text
+/// ┌──────────────┬──────────────┐
+/// │  EXPECTED    │  ACTUAL      │
+/// │  (image)     │  (image)     │
+/// ├──────────────┼──────────────┤
+/// │  PIXEL DIFF  │  STRUCTURE   │
+/// │  (image)     │  (image)     │
+/// ├──────────────┴──────────────┤
+/// │  zdsim:0.13  delta:[12,8,3] │
+/// │  34.2% differ  perceptual   │
+/// └─────────────────────────────┘
+/// ```
 ///
-/// The structural diff panel uses high-pass residuals with `blur_radius` 3
-/// (good for watermarks and overlays). Pass `None` for `annotation` or `""`
-/// to skip the text strip.
+/// Each panel gets a **big** label bar (3x scaled font) above it.
+/// Panels are separated by wide padding. The text strip at the bottom
+/// uses 2x font for readability after downscaling.
 ///
 /// # Panics
 ///
@@ -558,39 +569,112 @@ pub fn create_annotated_montage(
 ) -> RgbaImage {
     use crate::font;
 
-    let montage = create_structural_montage(expected, actual, amplification, gap, 3);
+    let pixel_diff = generate_diff_image(expected, actual, amplification);
+    let struct_diff = generate_structural_diff(expected, actual, 3, amplification);
 
-    if annotation.is_empty() {
-        return montage;
+    let pad = gap.max(6); // minimum 6px padding for visual separation
+    let bg = Rgba([18, 18, 18, 255]);
+    let label_fg = [220, 220, 220, 255];
+    let label_bg = [40, 40, 40, 255];
+    let label_scale = 3u32;
+
+    let panels: [(&str, &RgbaImage); 4] = [
+        ("EXPECTED", expected),
+        ("ACTUAL", actual),
+        ("PIXEL DIFF", &pixel_diff),
+        ("STRUCTURE", &struct_diff),
+    ];
+
+    // Render label bars at 3x scale
+    let label_images: Vec<(Vec<u8>, u32, u32)> = panels
+        .iter()
+        .map(|(label, _)| font::render_text_scaled(label, label_fg, label_bg, label_scale))
+        .collect();
+
+    let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4; // +4 padding
+    let panel_w = expected.width();
+    let panel_h = expected.height();
+
+    // 2x2 grid dimensions
+    let cell_w = panel_w;
+    let cell_h = label_h + panel_h;
+    let grid_w = pad + cell_w + pad + cell_w + pad;
+    let grid_h = pad + cell_h + pad + cell_h + pad;
+
+    // Text strip
+    let text_h = if annotation.is_empty() {
+        0
+    } else {
+        let (_, _, th) = font::render_text_scaled(annotation, label_fg, label_bg, 2);
+        th + pad * 2
+    };
+
+    let total_w = grid_w;
+    let total_h = grid_h + text_h;
+
+    let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
+
+    // Place 4 panels in 2x2 grid
+    for (i, (_, panel)) in panels.iter().enumerate() {
+        let col = (i % 2) as u32;
+        let row = (i / 2) as u32;
+        let x0 = pad + col * (cell_w + pad);
+        let y0 = pad + row * (cell_h + pad);
+
+        // Label bar background
+        for ly in 0..label_h {
+            for lx in 0..cell_w {
+                output.put_pixel(x0 + lx, y0 + ly, Rgba([40, 40, 40, 255]));
+            }
+        }
+
+        // Render label text centered in bar
+        let (ref lbuf, lw, lh) = label_images[i];
+        if lw > 0 && lh > 0 {
+            let lx_off = (cell_w.saturating_sub(lw)) / 2;
+            let ly_off = (label_h.saturating_sub(lh)) / 2;
+            if let Some(label_img) = RgbaImage::from_raw(lw, lh, lbuf.clone()) {
+                imageops::overlay(
+                    &mut output,
+                    &label_img,
+                    (x0 + lx_off) as i64,
+                    (y0 + ly_off) as i64,
+                );
+            }
+        }
+
+        // Panel image below label
+        imageops::overlay(
+            &mut output,
+            *panel,
+            x0 as i64,
+            (y0 + label_h) as i64,
+        );
     }
 
-    let fg = [220, 220, 220, 255]; // light gray text
-    let bg = [24, 24, 24, 255]; // dark background
-    let (text_buf, text_w, text_h) = font::render_text(annotation, fg, bg);
-
-    if text_w == 0 || text_h == 0 {
-        return montage;
+    // Text strip at bottom
+    if !annotation.is_empty() {
+        let text_fg = [200, 200, 200, 255];
+        let text_bg = [30, 30, 30, 255];
+        let (tbuf, tw, th) = font::render_text_scaled(annotation, text_fg, text_bg, 2);
+        if tw > 0 && th > 0 {
+            // Background strip
+            let strip_y = grid_h;
+            for sy in 0..text_h {
+                for sx in 0..total_w {
+                    output.put_pixel(sx, strip_y + sy, Rgba([30, 30, 30, 255]));
+                }
+            }
+            if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+                imageops::overlay(
+                    &mut output,
+                    &text_img,
+                    pad as i64,
+                    (strip_y + pad) as i64,
+                );
+            }
+        }
     }
-
-    let padding = 4u32;
-    let canvas_h = text_h + padding * 2;
-    let total_w = montage.width().max(text_w + padding * 2);
-    let total_h = montage.height() + canvas_h;
-
-    let mut output = RgbaImage::from_pixel(total_w, total_h, Rgba([24, 24, 24, 255]));
-
-    // Copy montage at top
-    imageops::overlay(&mut output, &montage, 0, 0);
-
-    // Stamp text into canvas area below
-    let text_img = RgbaImage::from_raw(text_w, text_h, text_buf)
-        .expect("text render dimensions mismatch");
-    imageops::overlay(
-        &mut output,
-        &text_img,
-        padding as i64,
-        (montage.height() + padding) as i64,
-    );
 
     output
 }
@@ -730,22 +814,24 @@ mod tests {
     fn annotated_montage_adds_text_strip() {
         let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
         let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
-        let montage = create_annotated_montage(&exp, &act, 10, 2, "score:87.2 delta:[10,0,10]");
+        let montage = create_annotated_montage(&exp, &act, 10, 6, "score:87.2");
 
-        // Width should be at least the 3-panel montage width
-        assert!(montage.width() >= 32 * 3 + 4);
-        // Height should be montage + text strip
-        assert!(montage.height() > 32);
+        // 2x2 grid: width = pad + panel + pad + panel + pad = 6 + 32 + 6 + 32 + 6 = 82
+        assert!(montage.width() >= 32 * 2 + 6 * 3);
+        // Height should include label bars + panels + text strip
+        assert!(montage.height() > 32 * 2);
     }
 
     #[test]
-    fn annotated_montage_empty_text_no_strip() {
+    fn annotated_montage_empty_text_no_text_strip() {
         let exp = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
-        let montage = create_annotated_montage(&exp, &act, 10, 2, "");
-        // Should be same as the 4-panel structural montage (no text strip added)
-        let plain = create_structural_montage(&exp, &act, 10, 2, 3);
-        assert_eq!(montage.dimensions(), plain.dimensions());
+        let with_text = create_annotated_montage(&exp, &act, 10, 6, "hello");
+        let no_text = create_annotated_montage(&exp, &act, 10, 6, "");
+        // Without text, should be shorter (no text strip)
+        assert!(no_text.height() < with_text.height());
+        // Same width regardless of text
+        assert_eq!(no_text.width(), with_text.width());
     }
 
     #[test]
