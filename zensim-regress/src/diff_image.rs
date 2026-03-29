@@ -602,7 +602,6 @@ pub fn create_annotated_montage(
         .collect();
 
     let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
-    let text_pad = pad / 2; // tighter pad inside label bar
 
     // 2x2 grid dimensions
     let cell_w = panel_w;
@@ -610,42 +609,28 @@ pub fn create_annotated_montage(
     let grid_w = pad + cell_w + pad + cell_w + pad;
     let grid_h = pad + cell_h + pad + cell_h + pad;
 
-    // Text strip — auto-scale to fit grid width
-    let text_h = if annotation.is_empty() {
-        0
-    } else {
-        let longest_text_line = annotation.lines().map(|l| l.len()).max().unwrap_or(1) as u32;
-        let text_avail = grid_w.saturating_sub(pad * 2);
-        let text_char_h = ((text_avail as f32 / longest_text_line as f32)
-            * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
-            .floor() as u32;
-        let text_char_h = text_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 2);
-        let line_count = annotation.lines().count() as u32;
-        text_char_h * line_count + pad * 2
-    };
-    let _ = text_pad;
-
-    // Pre-render text to measure actual width
+    // Text strip — word-wrap to fit grid width, use readable font size
+    // Target: text readable even at thumbnail sizes. Use panel-height-relative
+    // sizing — at least 1/8 of a panel, at most 1/4.
     let text_rendered = if !annotation.is_empty() {
-        let longest_text_line = annotation.lines().map(|l| l.len()).max().unwrap_or(1) as u32;
         let text_avail = grid_w.saturating_sub(pad * 2);
-        let text_char_h = ((text_avail as f32 / longest_text_line as f32)
-            * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
-            .floor() as u32;
-        let text_char_h = text_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 2);
-        let rendered = font::render_text_height(
+        let text_char_h = (panel_h / 6).clamp(font::GLYPH_H / 3, font::GLYPH_H);
+        let rendered = font::render_text_wrapped(
             annotation,
             [200, 200, 200, 255],
             [30, 30, 30, 255],
             text_char_h,
+            text_avail,
         );
         Some(rendered)
     } else {
         None
     };
 
-    let text_strip_w = text_rendered.as_ref().map_or(0, |(_, tw, _)| *tw + pad * 2);
-    let total_w = grid_w.max(text_strip_w);
+    let text_h = text_rendered
+        .as_ref()
+        .map_or(0, |(_, _, th)| *th + pad * 2);
+    let total_w = grid_w;
     let total_h = grid_h + text_h;
 
     let mut output = RgbaImage::from_pixel(total_w, total_h, bg);

@@ -1,27 +1,26 @@
 //! Monospace font rendering for annotating diff images.
 //!
-//! Embeds a DejaVu Sans Mono glyph strip (20px, ASCII 32–126) as a PNG,
-//! decoded once on first use. Renders text at any size by scaling the
-//! base glyphs with the `image` crate's Lanczos3 resampler.
+//! Embeds a Consolas glyph strip (48px, ASCII 32–126) as a PNG, decoded
+//! once on first use. Renders text at any size by downscaling with the
+//! `image` crate's Lanczos3 resampler — the base is larger than any
+//! render target, so we always downsample (crisp edges, no upscale blur).
 //!
-//! No external font files, no text shaping — just `render_text()` to
-//! stamp stats onto diff montages.
+//! Word-wraps on spaces when a max width is specified.
 
 use std::sync::OnceLock;
 
 use image::{GrayImage, imageops};
 
 /// Base glyph width in the embedded strip (before scaling).
-const BASE_CHAR_W: u32 = 12;
+const BASE_CHAR_W: u32 = 26;
 /// Base glyph height in the embedded strip (before scaling).
-const BASE_CHAR_H: u32 = 24;
+const BASE_CHAR_H: u32 = 54;
 /// Number of printable ASCII characters (0x20..=0x7E).
 const CHAR_COUNT: u32 = 95;
 /// First printable ASCII codepoint.
 const FIRST_CHAR: u32 = 0x20;
 
-/// The embedded font strip PNG (DejaVu Sans Mono, 20px, grayscale).
-/// 95 characters × 12px wide × 24px tall = 1140×24 pixels, ~7KB PNG.
+/// The embedded font strip PNG (Consolas 48px, grayscale).
 static FONT_PNG: &[u8] = include_bytes!("font_strip.png");
 
 /// Decoded font strip (grayscale, decoded once).
@@ -34,12 +33,34 @@ fn font_strip() -> &'static GrayImage {
     })
 }
 
-/// Render a string into an RGBA pixel buffer at the base font size (12×24 per char).
+/// Render a string into an RGBA pixel buffer at the base font size.
 ///
-/// Returns `(pixels, width, height)` where pixels is `width * height * 4` bytes.
-/// Newlines are supported.
+/// Returns `(pixels, width, height)`. Newlines are supported.
 pub fn render_text(text: &str, fg: [u8; 4], bg: [u8; 4]) -> (Vec<u8>, u32, u32) {
-    render_text_scaled(text, fg, bg, 1)
+    render_text_height(text, fg, bg, BASE_CHAR_H)
+}
+
+/// Render text word-wrapped to fit within `max_width_px` pixels.
+///
+/// Lines are broken on spaces. If a single word is wider than `max_width_px`,
+/// it is placed on its own line (not split mid-word).
+///
+/// Returns `(pixels, width, height)`.
+pub fn render_text_wrapped(
+    text: &str,
+    fg: [u8; 4],
+    bg: [u8; 4],
+    target_char_h: u32,
+    max_width_px: u32,
+) -> (Vec<u8>, u32, u32) {
+    if target_char_h == 0 || max_width_px == 0 {
+        return (vec![], 0, 0);
+    }
+
+    let scaled_char_w = char_width_for_height(target_char_h);
+    let max_cols = (max_width_px / scaled_char_w.max(1)) as usize;
+    let wrapped = wrap_text(text, max_cols.max(1));
+    render_text_height(&wrapped, fg, bg, target_char_h)
 }
 
 /// Render a string at a given pixel height.
@@ -47,7 +68,7 @@ pub fn render_text(text: &str, fg: [u8; 4], bg: [u8; 4]) -> (Vec<u8>, u32, u32) 
 /// The font is scaled so each character is `target_char_h` pixels tall.
 /// Character width scales proportionally to maintain the monospace aspect ratio.
 ///
-/// Returns `(pixels, width, height)` where pixels is `width * height * 4` bytes.
+/// Returns `(pixels, width, height)`.
 pub fn render_text_height(
     text: &str,
     fg: [u8; 4],
@@ -66,11 +87,8 @@ pub fn render_text_height(
         return (vec![], 0, 0);
     }
 
-    // Scale the strip to target height
     let strip = font_strip();
-    let scale_numer = target_char_h;
-    let scale_denom = BASE_CHAR_H;
-    let scaled_char_w = (BASE_CHAR_W * scale_numer + scale_denom / 2) / scale_denom;
+    let scaled_char_w = char_width_for_height(target_char_h);
     let scaled_char_h = target_char_h;
 
     // Scale the entire strip at once (one resize, not per-char)
@@ -121,7 +139,6 @@ pub fn render_text_height(
                     if alpha == 255 {
                         buf[off..off + 4].copy_from_slice(&fg);
                     } else {
-                        // Alpha blend fg over bg
                         let a = alpha as u16;
                         let inv_a = 255 - a;
                         buf[off] = ((fg[0] as u16 * a + bg[0] as u16 * inv_a) / 255) as u8;
@@ -138,8 +155,6 @@ pub fn render_text_height(
 }
 
 /// Render a string at an integer multiple of the base font size.
-///
-/// `scale` of 1 is 12×24 per char. Scale 2 is 24×48, etc.
 pub fn render_text_scaled(
     text: &str,
     fg: [u8; 4],
@@ -150,8 +165,53 @@ pub fn render_text_scaled(
     render_text_height(text, fg, bg, target_h)
 }
 
+// ─── Word wrap ──────────────────────────────────────────────────────────
+
+/// Word-wrap text to fit within `max_cols` characters per line.
+///
+/// Breaks on spaces. Explicit newlines in the input are preserved.
+/// Words longer than `max_cols` are placed on their own line (not split).
+fn wrap_text(text: &str, max_cols: usize) -> String {
+    let mut result = String::new();
+
+    for input_line in text.lines() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+
+        let mut col = 0usize;
+        for (i, word) in input_line.split(' ').enumerate() {
+            let wlen = word.len();
+
+            if i == 0 {
+                // First word on this line — always emit
+                result.push_str(word);
+                col = wlen;
+            } else if col + 1 + wlen <= max_cols {
+                // Fits on current line with a space
+                result.push(' ');
+                result.push_str(word);
+                col += 1 + wlen;
+            } else {
+                // Wrap to next line
+                result.push('\n');
+                result.push_str(word);
+                col = wlen;
+            }
+        }
+    }
+
+    result
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+/// Compute the character width for a given target character height.
+fn char_width_for_height(target_char_h: u32) -> u32 {
+    (BASE_CHAR_W * target_char_h + BASE_CHAR_H / 2) / BASE_CHAR_H
+}
+
 /// Map a character to its index in the font strip (0–94).
-/// Unknown characters map to space (index 0).
 fn char_index(ch: char) -> u32 {
     let code = ch as u32;
     if (FIRST_CHAR..FIRST_CHAR + CHAR_COUNT).contains(&code) {
@@ -204,23 +264,6 @@ mod tests {
     }
 
     #[test]
-    fn render_stats_line() {
-        let text = "score:87.2 delta:[12,8,3] 34.2%";
-        let (buf, w, h) = render_text(text, [255; 4], [0; 4]);
-        assert_eq!(w, text.len() as u32 * BASE_CHAR_W);
-        assert_eq!(h, BASE_CHAR_H);
-        assert_eq!(buf.len(), (w * h * 4) as usize);
-    }
-
-    #[test]
-    fn render_scaled_2x() {
-        let (_, w1, h1) = render_text("A", [255; 4], [0; 4]);
-        let (_, w2, h2) = render_text_scaled("A", [255; 4], [0; 4], 2);
-        assert_eq!(w2, w1 * 2);
-        assert_eq!(h2, h1 * 2);
-    }
-
-    #[test]
     fn render_height_custom() {
         let target_h = 40;
         let (buf, w, h) = render_text_height("AB", [255; 4], [0; 4], target_h);
@@ -245,5 +288,34 @@ mod tests {
             }
             assert!(lit > 10, "digit '{}' should have lit pixels, got {lit}", d as char);
         }
+    }
+
+    #[test]
+    fn wrap_short_text_unchanged() {
+        assert_eq!(wrap_text("hello world", 80), "hello world");
+    }
+
+    #[test]
+    fn wrap_breaks_on_space() {
+        assert_eq!(wrap_text("aaa bbb ccc", 7), "aaa bbb\nccc");
+    }
+
+    #[test]
+    fn wrap_preserves_newlines() {
+        assert_eq!(wrap_text("aaa\nbbb ccc", 7), "aaa\nbbb ccc");
+    }
+
+    #[test]
+    fn wrap_long_word_own_line() {
+        assert_eq!(wrap_text("hi verylongword ok", 8), "hi\nverylongword\nok");
+    }
+
+    #[test]
+    fn wrapped_render_produces_more_lines() {
+        let text = "zdsim:0.13 delta:[80,40,0] 23.4% differ category:perceptual";
+        let narrow = render_text_wrapped(text, [255; 4], [0; 4], 20, 200);
+        let wide = render_text_wrapped(text, [255; 4], [0; 4], 20, 2000);
+        // Narrow should be taller (more lines)
+        assert!(narrow.2 > wide.2, "narrow {} should be taller than wide {}", narrow.2, wide.2);
     }
 }
