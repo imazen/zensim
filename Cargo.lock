@@ -142,11 +142,11 @@ dependencies = [
 
 [[package]]
 name = "archmage"
-version = "0.9.12"
+version = "0.9.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b31252c47e70c7056709e9f98842aef4f709056c2b3a4f666c584f8cc37f7ca0"
+checksum = "2c62208fadf5c29826211a799472057dd164956fe3ae3ce63f62c267ca7cd123"
 dependencies = [
- "archmage-macros 0.9.12",
+ "archmage-macros 0.9.14",
  "safe_unaligned_simd",
 ]
 
@@ -163,9 +163,9 @@ dependencies = [
 
 [[package]]
 name = "archmage-macros"
-version = "0.9.12"
+version = "0.9.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a97189db9dffc2e13364c6f56461085d65743ff4d17890d6b80744203aae92b"
+checksum = "2673bdcd233efb45ba8f8bd8e915acdb2fa413140a01a18296e4b198ff6eae1f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -314,9 +314,9 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c28a6704cdf610e0dfe761e2f289a3cac568db9128db12393f9463b4bf4fc76"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "imgref",
- "magetypes 0.9.12",
+ "magetypes 0.9.14",
  "rayon",
  "rgb",
 ]
@@ -1049,9 +1049,9 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4b75067bc1e8c2c28413cab5777c0fe8473499e55f2e09076b9076f344ce9d5"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "bytemuck",
- "magetypes 0.9.12",
+ "magetypes 0.9.14",
  "num-traits",
 ]
 
@@ -1087,11 +1087,11 @@ dependencies = [
 
 [[package]]
 name = "magetypes"
-version = "0.9.12"
+version = "0.9.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c805c315148e092279cd19d011ce4b22ff9d3cc593cca089364f6501d12087b1"
+checksum = "3b54a7a335556356f4dfccf45cbd29f66385a8ee35d5d6f3f084ed9ad6793608"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
 ]
 
 [[package]]
@@ -2239,12 +2239,12 @@ dependencies = [
 name = "zensim"
 version = "0.2.1"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "bytemuck",
  "image",
  "imgref",
  "linear-srgb",
- "magetypes 0.9.12",
+ "magetypes 0.9.14",
  "rayon",
  "rgb",
  "serde_json",
@@ -2273,7 +2273,7 @@ dependencies = [
 name = "zensim-regress"
 version = "0.2.0"
 dependencies = [
- "archmage 0.9.12",
+ "archmage 0.9.14",
  "base64",
  "fs2",
  "image",

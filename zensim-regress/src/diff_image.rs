@@ -718,24 +718,108 @@ pub fn create_annotated_montage_raw(
 
 /// Format a [`RegressionReport`](crate::testing::RegressionReport) as annotation text.
 ///
-/// Produces 2-3 lines suitable for [`create_annotated_montage`],
-/// e.g. `score:87.2  delta:[12,8,3]  34.2% differ  category:perceptual`.
+/// Includes pass/fail, dissimilarity, per-channel delta, pixel stats,
+/// error category, rounding bias, and alpha info when relevant.
+/// Word-wraps naturally with the montage's `render_text_wrapped`.
 pub fn format_annotation(report: &crate::testing::RegressionReport) -> String {
+    use zensim::score_to_dissimilarity;
+
+    let mut parts = Vec::new();
+
+    // Line 1: verdict + dissimilarity + delta
+    let status = if report.passed() { "PASS" } else { "FAIL" };
+    let zdsim = score_to_dissimilarity(report.score());
     let [dr, dg, db] = report.max_channel_delta();
+    parts.push(format!("{status} zdsim:{:.4} delta:[{},{},{}]", zdsim, dr, dg, db));
+
+    // Line 2: pixel stats + category
     let pct = if report.pixel_count() > 0 {
         report.pixels_differing() as f64 / report.pixel_count() as f64 * 100.0
     } else {
         0.0
     };
-    format!(
-        "score:{:.1}  delta:[{},{},{}]  {:.1}% differ  {:?}",
-        report.score(),
-        dr,
-        dg,
-        db,
-        pct,
-        report.category(),
-    )
+    let category = format!("{:?}", report.category());
+    let category = category.to_lowercase();
+    let mut line2 = format!("{:.1}% pixels differ ({}) ", pct, category);
+
+    // Rounding bias
+    if let Some(bias) = report.rounding_bias() {
+        if bias.balanced {
+            line2.push_str("[balanced]");
+        } else {
+            let all_pos = bias.positive_fraction.iter().all(|&f| f > 0.8);
+            let all_neg = bias.positive_fraction.iter().all(|&f| f < 0.2);
+            if all_pos {
+                line2.push_str("[truncation bias]");
+            } else if all_neg {
+                line2.push_str("[ceiling bias]");
+            } else {
+                line2.push_str(&format!(
+                    "[bias R:{:.0}%+ G:{:.0}%+ B:{:.0}%+]",
+                    bias.positive_fraction[0] * 100.0,
+                    bias.positive_fraction[1] * 100.0,
+                    bias.positive_fraction[2] * 100.0,
+                ));
+            }
+        }
+    }
+    parts.push(line2);
+
+    // Alpha (only if non-trivial)
+    if report.alpha_max_delta() > 0 {
+        parts.push(format!(
+            "alpha: max delta {} ({} pixels differ)",
+            report.alpha_max_delta(),
+            report.alpha_pixels_differing(),
+        ));
+    }
+
+    // Legend for structural diff panel
+    parts.push("cyan=missing orange=added".to_string());
+
+    parts.join("\n")
+}
+
+/// Format annotation with spatial analysis included.
+///
+/// Appends quadrant/region breakdown showing where differences
+/// are concentrated.
+pub fn format_annotation_spatial(
+    report: &crate::testing::RegressionReport,
+    spatial: &SpatialAnalysis,
+) -> String {
+    let mut text = format_annotation(report);
+
+    // Compact spatial summary (one line per region with differences)
+    for r in &spatial.regions {
+        if r.pixels_differing > 0.001 {
+            let label = if spatial.cols == 2 && spatial.rows == 2 {
+                let labels = ["TL", "TR", "BL", "BR"];
+                let idx = (r.row * spatial.cols + r.col) as usize;
+                labels.get(idx).unwrap_or(&"??").to_string()
+            } else {
+                format!("({},{})", r.col, r.row)
+            };
+            text.push_str(&format!(
+                "\n{}: {:.1}% delta:{} ",
+                label,
+                r.pixels_differing * 100.0,
+                r.max_delta,
+            ));
+
+            let exp_has = r.expected_variance > 10.0;
+            let act_has = r.actual_variance > 10.0;
+            if !exp_has && act_has {
+                text.push_str("(added)");
+            } else if exp_has && !act_has {
+                text.push_str("(missing!)");
+            } else if exp_has && act_has && r.avg_delta > 10.0 {
+                text.push_str("(different)");
+            }
+        }
+    }
+
+    text
 }
 
 #[cfg(test)]
