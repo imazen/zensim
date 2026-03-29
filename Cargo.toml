@@ -13,7 +13,7 @@ opt-level = 2
 opt-level = 2
 
 [workspace.dependencies]
-zensim = { version = "0.2.0", path = "zensim" }
+zensim = { version = "0.2.3", path = "zensim" }
 archmage = { version = "0.9.14", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.14", features = ["avx512"] }
 bytemuck = { version = "1.25", default-features = false }

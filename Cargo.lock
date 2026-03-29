@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "zensim"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "archmage 0.9.14",
  "bytemuck",
