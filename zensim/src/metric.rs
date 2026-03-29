@@ -1137,6 +1137,8 @@ pub(crate) fn validate_pair(
 /// Check if source and distorted images have byte-identical pixel data
 /// and matching color interpretation (format + primaries).
 fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource) -> bool {
+    use crate::source::{AlphaMode, PixelFormat};
+
     let (w, h) = (source.width(), source.height());
     if w != distorted.width() || h != distorted.height() {
         return false;
@@ -1148,13 +1150,66 @@ fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource
     if source.color_primaries() != distorted.color_primaries() {
         return false;
     }
-    let bpp = source.pixel_format().bytes_per_pixel();
+    let fmt = source.pixel_format();
+    let bpp = fmt.bytes_per_pixel();
     let row_len = w * bpp;
+
+    // For RGBA formats with non-opaque alpha: pixels where both have A=0
+    // composite to the same background, so they're visually identical
+    // regardless of their RGB values.
+    let alpha_aware = fmt.has_alpha()
+        && !matches!(source.alpha_mode(), AlphaMode::Opaque)
+        && !matches!(distorted.alpha_mode(), AlphaMode::Opaque);
+
     for y in 0..h {
-        let src_row = source.row_bytes(y);
-        let dst_row = distorted.row_bytes(y);
-        if src_row[..row_len] != dst_row[..row_len] {
+        let sr = source.row_bytes(y);
+        let dr = distorted.row_bytes(y);
+        if sr[..row_len] == dr[..row_len] {
+            continue; // fast path: row is byte-identical
+        }
+        if !alpha_aware {
             return false;
+        }
+        // Slow path: check pixel-by-pixel, skipping A=0 pairs
+        match fmt {
+            PixelFormat::Srgb8Rgba | PixelFormat::Srgb8Bgra => {
+                for x in 0..w {
+                    let o = x * 4;
+                    if sr[o + 3] == 0 && dr[o + 3] == 0 {
+                        continue;
+                    }
+                    if sr[o..o + 4] != dr[o..o + 4] {
+                        return false;
+                    }
+                }
+            }
+            PixelFormat::Srgb16Rgba => {
+                for x in 0..w {
+                    let o = x * 8;
+                    let sa = u16::from_ne_bytes([sr[o + 6], sr[o + 7]]);
+                    let da = u16::from_ne_bytes([dr[o + 6], dr[o + 7]]);
+                    if sa == 0 && da == 0 {
+                        continue;
+                    }
+                    if sr[o..o + 8] != dr[o..o + 8] {
+                        return false;
+                    }
+                }
+            }
+            PixelFormat::LinearF32Rgba => {
+                for x in 0..w {
+                    let o = x * 16;
+                    let sa = f32::from_ne_bytes([sr[o + 12], sr[o + 13], sr[o + 14], sr[o + 15]]);
+                    let da = f32::from_ne_bytes([dr[o + 12], dr[o + 13], dr[o + 14], dr[o + 15]]);
+                    if sa <= 0.0 && da <= 0.0 {
+                        continue;
+                    }
+                    if sr[o..o + 16] != dr[o..o + 16] {
+                        return false;
+                    }
+                }
+            }
+            _ => return false,
         }
     }
     true
