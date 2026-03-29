@@ -351,21 +351,27 @@ let mgr = ChecksumManager::new("tests/checksums".as_ref())
     .with_diff_output("test-artifacts/diffs");
 ```
 
-On `Failed` results, the manager saves a side-by-side montage to `test-artifacts/diffs/{module}/{test}_{detail}.png`: expected | amplified diff | actual, with a 2px border. Amplification is 10x by default — `min(10, 255 / max_delta)` — so off-by-one errors become visible.
+On `Failed` results, the manager saves an annotated 2×2 montage (Expected | Actual | Pixel Diff | Structural Diff) with colored constraint text and a spatial heatmap. Images smaller than 256px are pixelate-upscaled so individual pixels remain visible at inspection size.
 
 `CheckResult::Failed` includes a `montage_path` field pointing to the saved image.
 
-You can also generate diff images directly:
+You can generate montages directly with `MontageOptions::render`:
 
 ```rust
-use zensim_regress::diff_image::*;
+use zensim_regress::diff_image::{AnnotationText, MontageOptions};
 
-let diff = generate_diff_image(&expected, &actual, 10);
-let montage = create_comparison_montage(&expected, &actual, 10, 2);
+// Bare comparison — default settings
+let montage = MontageOptions::default()
+    .render(&expected, &actual, &AnnotationText::empty());
 
-// Raw RGBA byte variants
-let diff = generate_diff_image_raw(&exp_bytes, &act_bytes, w, h, 10);
-let montage = create_comparison_montage_raw(&exp_bytes, &act_bytes, w, h, 10, 2);
+// With a regression report (adds constraint pass/fail text)
+let annotation = AnnotationText::from_report(&report, &tolerance);
+let montage = MontageOptions::default()
+    .render(&expected, &actual, &annotation);
+
+// Custom amplification for subtle differences
+let montage = MontageOptions { amplification: 50, ..Default::default() }
+    .render(&expected, &actual, &AnnotationText::empty());
 ```
 
 For sixel-capable terminals (foot, WezTerm, mintty), the `display` module renders images inline.
@@ -542,7 +548,7 @@ Deterministic pixel-level distortions for testing tolerance boundaries:
 | `testing` | `RegressionTolerance`, `RegressionReport`, `check_regression` |
 | `tolerance` | `ToleranceSpec`, `ToleranceOverride` for config-driven tolerances |
 | `diff_summary` | Tolerance shorthand formatting and parsing |
-| `diff_image` | Amplified diff images and comparison montages |
+| `diff_image` | `MontageOptions`, `AnnotationText`, annotated 2×2 diff montages with spatial heatmaps |
 | `display` | Sixel terminal rendering |
 | `generators` | Synthetic test image generators |
 | `distortions` | Deterministic pixel distortions |

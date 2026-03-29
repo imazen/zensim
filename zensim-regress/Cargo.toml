@@ -1,6 +1,6 @@
 [package]
 name = "zensim-regress"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 description = "Visual regression testing persistence and workflow for zensim"
 repository = "https://github.com/imazen/zensim"
