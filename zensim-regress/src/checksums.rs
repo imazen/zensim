@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
 
-use crate::diff_image::{AnnotationText, MontageOptions, create_annotated_montage};
+use crate::diff_image::{AnnotationText, MontageOptions};
 use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
 use crate::error::RegressError;
 use crate::hasher::{ChecksumHasher, SeaHasher};
@@ -1576,8 +1576,7 @@ impl ChecksumManager {
             image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec()).expect("ref: invalid dimensions");
         let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
             .expect("actual: invalid dimensions");
-        let montage =
-            create_annotated_montage(&ref_img, &act_img, &annotation, &MontageOptions::default());
+        let montage = MontageOptions::default().render(&ref_img, &act_img, &annotation);
         match montage.save(&out_path) {
             Ok(()) => Some(out_path),
             Err(e) => {

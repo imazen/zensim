@@ -152,13 +152,13 @@ pub fn print_comparison(
     amplification: u8,
     max_width: Option<u32>,
 ) {
-    use crate::diff_image::{AnnotationText, MontageOptions, create_annotated_montage};
+    use crate::diff_image::{AnnotationText, MontageOptions};
 
     let opts = MontageOptions {
         amplification,
         ..Default::default()
     };
-    let montage = create_annotated_montage(expected, actual, &AnnotationText::empty(), &opts);
+    let montage = opts.render(expected, actual, &AnnotationText::empty());
     let sixel_bytes = sixel_encode(&montage, max_width);
 
     let stdout = std::io::stdout();
@@ -179,7 +179,7 @@ pub fn save_comparison_png(
     max_width: Option<u32>,
     path: &std::path::Path,
 ) {
-    use crate::diff_image::{AnnotationText, MontageOptions, create_annotated_montage};
+    use crate::diff_image::{AnnotationText, MontageOptions};
 
     let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
@@ -189,7 +189,7 @@ pub fn save_comparison_png(
         amplification,
         ..Default::default()
     };
-    let montage = create_annotated_montage(&exp_img, &act_img, &AnnotationText::empty(), &opts);
+    let montage = opts.render(&exp_img, &act_img, &AnnotationText::empty());
     let montage = maybe_resize(&montage, max_width);
     montage.save(path).expect("failed to save comparison PNG");
 }

@@ -14,7 +14,7 @@ use std::env;
 
 use image::{Rgba, RgbaImage};
 use zensim_regress::diff_image::{
-    AnnotationText, MontageOptions, create_annotated_montage, create_montage, generate_diff_image,
+    AnnotationText, MontageOptions, create_montage, generate_diff_image,
 };
 use zensim_regress::display;
 
@@ -79,7 +79,7 @@ fn main() {
             amplification: 50,
             ..Default::default()
         };
-        let montage = create_annotated_montage(&expected, &rounding, &ann, &opts);
+        let montage = opts.render(&expected, &rounding, &ann);
         let save = format!("{}_rounding.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
         println!("  Saved: {save}");
@@ -97,7 +97,7 @@ fn main() {
             amplification: 5,
             ..Default::default()
         };
-        let montage = create_annotated_montage(&expected, &color_shift, &ann, &opts);
+        let montage = opts.render(&expected, &color_shift, &ann);
         let save = format!("{}_colorshift.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
         println!("  Saved: {save}");
@@ -115,7 +115,7 @@ fn main() {
             amplification: 1,
             ..Default::default()
         };
-        let montage = create_annotated_montage(&expected, &channel_swap, &ann, &opts);
+        let montage = opts.render(&expected, &channel_swap, &ann);
         let save = format!("{}_channelswap.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
         println!("  Saved: {save}");

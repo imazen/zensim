@@ -614,38 +614,81 @@ pub fn spatial_analysis(
     }
 }
 
-/// Create a labeled 2×2 grid montage with annotation text and spatial heatmap.
+/// Create a labeled 2×2 grid montage.
 ///
-/// Layout (portrait-friendly, survives LLM image downscaling):
-/// ```text
-/// ┌──────────────┬──────────────┐
-/// │  EXPECTED    │  ACTUAL      │
-/// │  (image)     │  (image)     │
-/// ├──────────────┼──────────────┤
-/// │  PIXEL DIFF  │  STRUCTURE   │
-/// │  (image)     │  (image)     │
-/// ├──────────────┴──────────────┤
-/// │  FAIL                       │  ← primary (large font)
-/// │  zdsim: 0.13 > 0.01 FAIL   │
-/// │  delta: [12,8,3] > 1 FAIL  │
-/// ├─────────────────────────────┤
-/// │  [3×3 spatial heatmap]      │  ← auto-computed from pixels
-/// ├─────────────────────────────┤
-/// │  alpha: max delta 2 ...     │  ← extra text
-/// └─────────────────────────────┘
+/// **Deprecated** — use [`MontageOptions::render`] instead:
+/// ```ignore
+/// MontageOptions::default().render(&expected, &actual, &AnnotationText::empty())
 /// ```
-///
-/// Spatial heatmap is computed automatically from the pixel data when there
-/// are differences. Tiny images are pixelate-upscaled per `options.min_panel_size`.
-///
-/// # Panics
-///
-/// Panics if expected and actual have different dimensions.
+#[deprecated(since = "0.2.3", note = "use MontageOptions::render() instead")]
 pub fn create_annotated_montage(
     expected: &RgbaImage,
     actual: &RgbaImage,
+    amplification: u8,
+    gap: u32,
     annotation: &AnnotationText,
+) -> RgbaImage {
+    MontageOptions {
+        amplification,
+        gap,
+        ..Default::default()
+    }
+    .render(expected, actual, annotation)
+}
+
+/// Create a labeled 2×2 grid montage from raw RGBA byte slices.
+///
+/// **Deprecated** — use [`MontageOptions::render`] instead.
+#[deprecated(since = "0.2.3", note = "use MontageOptions::render() instead")]
+pub fn create_annotated_montage_raw(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+    gap: u32,
+    annotation: &AnnotationText,
+) -> RgbaImage {
+    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+        .expect("expected: invalid dimensions for pixel data");
+    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+        .expect("actual: invalid dimensions for pixel data");
+    #[allow(deprecated)]
+    create_annotated_montage(&exp_img, &act_img, amplification, gap, annotation)
+}
+
+/// Format a regression report as annotation text.
+///
+/// **Deprecated** — use [`AnnotationText::from_report`] instead.
+#[deprecated(since = "0.2.3", note = "use AnnotationText::from_report() instead")]
+pub fn format_annotation(
+    report: &crate::testing::RegressionReport,
+    tolerance: &crate::testing::RegressionTolerance,
+) -> AnnotationText {
+    AnnotationText::from_report(report, tolerance)
+}
+
+/// Format annotation with spatial analysis included.
+///
+/// **Deprecated** — use [`AnnotationText::from_report`] instead.
+/// Spatial heatmap is now computed automatically by [`MontageOptions::render`].
+#[deprecated(
+    since = "0.2.3",
+    note = "use AnnotationText::from_report(); spatial is now computed by MontageOptions::render()"
+)]
+pub fn format_annotation_spatial(
+    report: &crate::testing::RegressionReport,
+    tolerance: &crate::testing::RegressionTolerance,
+    _spatial: Option<&SpatialAnalysis>,
+) -> AnnotationText {
+    AnnotationText::from_report(report, tolerance)
+}
+
+fn render_montage_impl(
     options: &MontageOptions,
+    expected: &RgbaImage,
+    actual: &RgbaImage,
+    annotation: &AnnotationText,
 ) -> RgbaImage {
     use crate::font;
 
@@ -1042,6 +1085,44 @@ impl Default for MontageOptions {
     }
 }
 
+impl MontageOptions {
+    /// Render a labeled 2×2 grid montage with annotation text and spatial heatmap.
+    ///
+    /// Layout (portrait-friendly, survives LLM image downscaling):
+    /// ```text
+    /// ┌──────────────┬──────────────┐
+    /// │  EXPECTED    │  ACTUAL      │
+    /// │  (image)     │  (image)     │
+    /// ├──────────────┼──────────────┤
+    /// │  PIXEL DIFF  │  STRUCTURE   │
+    /// │  (image)     │  (image)     │
+    /// ├──────────────┴──────────────┤
+    /// │  FAIL                       │  ← primary (large font)
+    /// │  zdsim: 0.13 > 0.01 FAIL   │
+    /// │  delta: [12,8,3] > 1 FAIL  │
+    /// ├─────────────────────────────┤
+    /// │  [3×3 spatial heatmap]      │  ← auto-computed from pixels
+    /// ├─────────────────────────────┤
+    /// │  alpha: max delta 2 ...     │  ← extra text
+    /// └─────────────────────────────┘
+    /// ```
+    ///
+    /// Spatial heatmap is computed automatically from the pixel data when there
+    /// are differences. Tiny images are pixelate-upscaled per `min_panel_size`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if expected and actual have different dimensions.
+    pub fn render(
+        &self,
+        expected: &RgbaImage,
+        actual: &RgbaImage,
+        annotation: &AnnotationText,
+    ) -> RgbaImage {
+        render_montage_impl(self, expected, actual, annotation)
+    }
+}
+
 /// Annotation data for the montage: verdict lines and optional extra text.
 ///
 /// Use [`from_report`](Self::from_report) when you have a regression report,
@@ -1050,6 +1131,13 @@ pub struct AnnotationText {
     /// Colored lines for the primary text block.
     /// Red for failing constraints, green for passing, gray for info.
     pub primary_lines: Vec<(String, [u8; 4])>,
+    /// Spatial analysis — ignored by [`MontageOptions::render`] which computes
+    /// its own from the pixel data. Retained for backward compatibility.
+    #[deprecated(
+        since = "0.2.3",
+        note = "spatial is now computed automatically by MontageOptions::render()"
+    )]
+    pub spatial: Option<SpatialAnalysis>,
     /// Extra text lines (alpha info, etc). Shown below heatmap if present.
     pub extra: String,
 }
@@ -1060,9 +1148,11 @@ const COLOR_DETAIL: [u8; 4] = [170, 170, 170, 255]; // dim gray
 
 impl AnnotationText {
     /// No annotation — produces a bare montage with no text or heatmap.
+    #[allow(deprecated)]
     pub fn empty() -> Self {
         Self {
             primary_lines: vec![],
+            spatial: None,
             extra: String::new(),
         }
     }
@@ -1171,8 +1261,10 @@ impl AnnotationText {
             );
         }
 
+        #[allow(deprecated)]
         Self {
             primary_lines: lines,
+            spatial: None,
             extra,
         }
     }
@@ -1318,14 +1410,14 @@ mod tests {
                 ("FAIL".into(), COLOR_FAIL),
                 ("zdsim: 0.13 > 0.01 FAIL".into(), COLOR_FAIL),
             ],
-            extra: String::new(),
+            ..AnnotationText::empty()
         };
         let opts = MontageOptions {
             gap: 6,
             min_panel_size: 0, // disable upscale to test at native 32×32
             ..Default::default()
         };
-        let montage = create_annotated_montage(&exp, &act, &ann, &opts);
+        let montage = opts.render(&exp, &act, &ann);
 
         assert!(montage.width() >= 32 * 2 + 6 * 3);
         assert!(montage.height() > 32 * 2);
@@ -1337,7 +1429,7 @@ mod tests {
         let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
         let with_text = AnnotationText {
             primary_lines: vec![("hello".into(), [255; 4])],
-            extra: String::new(),
+            ..AnnotationText::empty()
         };
         let no_text = AnnotationText::empty();
         let opts = MontageOptions {
@@ -1345,8 +1437,8 @@ mod tests {
             min_panel_size: 0, // disable upscale
             ..Default::default()
         };
-        let with = create_annotated_montage(&exp, &act, &with_text, &opts);
-        let without = create_annotated_montage(&exp, &act, &no_text, &opts);
+        let with = opts.render(&exp, &act, &with_text);
+        let without = opts.render(&exp, &act, &no_text);
         assert!(without.height() < with.height());
     }
 
@@ -1355,8 +1447,7 @@ mod tests {
         let exp = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
         let act = RgbaImage::from_pixel(8, 8, Rgba([110, 100, 90, 255]));
         // Default options — upscale to 256
-        let montage =
-            create_annotated_montage(&exp, &act, &AnnotationText::empty(), &Default::default());
+        let montage = MontageOptions::default().render(&exp, &act, &AnnotationText::empty());
         // Panels should be 256×256 (8×32), so montage width >= 2*256
         assert!(
             montage.width() >= 512,
