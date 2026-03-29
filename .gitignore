@@ -35,6 +35,18 @@ rust_out
 # Node
 node_modules/
 
+# Images (test artifacts, screenshots, montages)
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.avif
+*.jxl
+*.gif
+*.bmp
+*.tiff
+*.tif
+
 # OS
 .DS_Store
 Thumbs.db
