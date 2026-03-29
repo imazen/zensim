@@ -41,10 +41,10 @@ pub mod display;
 pub mod distortions;
 /// Error types.
 pub mod error;
-/// Minimal bitmap font for annotating diff images.
-pub mod font;
 /// HTTP fetcher for downloading remote reference images.
 pub mod fetch;
+/// Minimal bitmap font for annotating diff images.
+pub mod font;
 /// Deterministic synthetic test image generators.
 pub mod generators;
 /// Pixel and file hashing (`ChecksumHasher` trait, `SeaHasher`).
@@ -59,11 +59,11 @@ pub mod oracle;
 pub mod petname;
 /// S3/R2 remote reference image storage configuration.
 pub mod remote;
+/// HTML report generation from manifest data.
+pub mod report;
 /// SIMD consistency testing via archmage token permutations.
 #[cfg(feature = "archmage")]
 pub mod simd;
-/// HTML report generation from manifest data.
-pub mod report;
 /// Tolerance-based image comparison, reporting, and the `check_regression` function.
 pub mod testing;
 /// Tolerance specification with per-architecture overrides.

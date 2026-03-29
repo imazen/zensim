@@ -86,8 +86,11 @@ pub fn create_montage(panels: &[&RgbaImage], gap: u32) -> RgbaImage {
 /// # Panics
 ///
 /// Panics if expected and actual have different dimensions.
-#[deprecated(since = "0.2.2", note = "use create_annotated_montage for labeled panels, \
-    structural diff, and spatial heatmap")]
+#[deprecated(
+    since = "0.2.2",
+    note = "use create_annotated_montage for labeled panels, \
+    structural diff, and spatial heatmap"
+)]
 pub fn create_comparison_montage(
     expected: &RgbaImage,
     actual: &RgbaImage,
@@ -127,8 +130,11 @@ pub fn generate_diff_image_raw(
 ///
 /// **Prefer [`create_annotated_montage_raw`]** for labeled output with
 /// structural diff and spatial heatmap.
-#[deprecated(since = "0.2.2", note = "use create_annotated_montage_raw for labeled panels, \
-    structural diff, and spatial heatmap")]
+#[deprecated(
+    since = "0.2.2",
+    note = "use create_annotated_montage_raw for labeled panels, \
+    structural diff, and spatial heatmap"
+)]
 #[allow(deprecated)]
 pub fn create_comparison_montage_raw(
     expected: &[u8],
@@ -239,8 +245,8 @@ pub fn generate_structural_diff_raw(
 ) -> RgbaImage {
     let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
-        .expect("actual: invalid dimensions");
+    let act_img =
+        RgbaImage::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
     generate_structural_diff(&exp_img, &act_img, blur_radius, amplification)
 }
 
@@ -350,8 +356,8 @@ pub fn create_structural_montage_raw(
 ) -> RgbaImage {
     let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
-        .expect("actual: invalid dimensions");
+    let act_img =
+        RgbaImage::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
     create_structural_montage(&exp_img, &act_img, amplification, gap, blur_radius)
 }
 
@@ -396,9 +402,15 @@ impl std::fmt::Display for SpatialAnalysis {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let labels_2x2 = ["top-left", "top-right", "bot-left", "bot-right"];
         let labels_3x3 = [
-            "top-left", "top-center", "top-right",
-            "mid-left", "center", "mid-right",
-            "bot-left", "bot-center", "bot-right",
+            "top-left",
+            "top-center",
+            "top-right",
+            "mid-left",
+            "center",
+            "mid-right",
+            "bot-left",
+            "bot-center",
+            "bot-right",
         ];
         let max_delta_idx = self
             .regions
@@ -437,9 +449,15 @@ impl std::fmt::Display for SpatialAnalysis {
                 let exp_has_content = r.expected_variance > 10.0;
                 let act_has_content = r.actual_variance > 10.0;
                 if !exp_has_content && act_has_content {
-                    writeln!(f, "         expected: uniform, actual: has content (added feature?)")?;
+                    writeln!(
+                        f,
+                        "         expected: uniform, actual: has content (added feature?)"
+                    )?;
                 } else if exp_has_content && !act_has_content {
-                    writeln!(f, "         expected: has content, actual: uniform (missing feature?)")?;
+                    writeln!(
+                        f,
+                        "         expected: has content, actual: uniform (missing feature?)"
+                    )?;
                 } else if exp_has_content && act_has_content && r.avg_delta > 10.0 {
                     writeln!(f, "         both have content -- different rendering")?;
                 }
@@ -670,9 +688,10 @@ pub fn create_annotated_montage(
     };
 
     // Heatmap grid (replaces text-based spatial details)
-    let heatmap = annotation.spatial.as_ref().map(|s| {
-        render_heatmap_grid(s, grid_w, pad)
-    });
+    let heatmap = annotation
+        .spatial
+        .as_ref()
+        .map(|s| render_heatmap_grid(s, grid_w, pad));
 
     // Extra text (alpha info etc) — small, word-wrapped
     let primary_line_h = primary_rendered
@@ -699,9 +718,7 @@ pub fn create_annotated_montage(
         .as_ref()
         .map_or(0, |(_, _, h)| *h + pad * 2);
     let heatmap_h = heatmap.as_ref().map_or(0, |img| img.height());
-    let extra_h = extra_rendered
-        .as_ref()
-        .map_or(0, |(_, _, h)| *h + pad * 2);
+    let extra_h = extra_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
 
     let total_w = grid_w;
     let total_h = grid_h + primary_h + heatmap_h + extra_h;
@@ -746,7 +763,14 @@ pub fn create_annotated_montage(
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, primary_h, [30, 30, 30, 255]);
+        fill_rect(
+            &mut output,
+            0,
+            y_cursor,
+            total_w,
+            primary_h,
+            [30, 30, 30, 255],
+        );
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             // Center horizontally
             let tx = (total_w.saturating_sub(tw)) / 2;
@@ -766,7 +790,14 @@ pub fn create_annotated_montage(
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, extra_h, [25, 25, 25, 255]);
+        fill_rect(
+            &mut output,
+            0,
+            y_cursor,
+            total_w,
+            extra_h,
+            [25, 25, 25, 255],
+        );
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
         }
@@ -829,8 +860,7 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
             // Clean cell: small green "ok"
             let ok_lines: Vec<(&str, [u8; 4])> = vec![("ok", COLOR_OK)];
             if cell_text_w > 0 {
-                let (tbuf, tw, th) =
-                    font::render_lines_fitted(&ok_lines, cell_bg, cell_text_w);
+                let (tbuf, tw, th) = font::render_lines_fitted(&ok_lines, cell_bg, cell_text_w);
                 if tw > 0 && th > 0 {
                     let tx = cx + (cell_w.saturating_sub(tw)) / 2;
                     let ty = cy + (cell_h.saturating_sub(th)) / 2;
@@ -864,10 +894,8 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
             } else {
                 [220, 220, 220, 255]
             };
-            let mut cell_lines: Vec<(&str, [u8; 4])> = vec![
-                (&line1, text_fg),
-                (&line2, [170, 170, 170, 255]),
-            ];
+            let mut cell_lines: Vec<(&str, [u8; 4])> =
+                vec![(&line1, text_fg), (&line2, [170, 170, 170, 255])];
             if !line3.is_empty() {
                 let tag_color = if line3 == "MISSING" {
                     [255, 120, 120, 255] // red-ish
@@ -880,8 +908,7 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
             }
 
             if cell_text_w > 0 {
-                let (tbuf, tw, th) =
-                    font::render_lines_fitted(&cell_lines, cell_bg, cell_text_w);
+                let (tbuf, tw, th) = font::render_lines_fitted(&cell_lines, cell_bg, cell_text_w);
                 if tw > 0 && th > 0 {
                     let tx = cx + (cell_w.saturating_sub(tw)) / 2;
                     let ty = cy + (cell_h.saturating_sub(th)) / 2;
@@ -984,9 +1011,21 @@ pub fn format_annotation_spatial(
     let delta_ok = max_d <= tolerance.max_delta();
     lines.push((
         if delta_ok {
-            format!("ok: \u{0394}[{},{},{}] <= {}", dr, dg, db, tolerance.max_delta())
+            format!(
+                "ok: \u{0394}[{},{},{}] <= {}",
+                dr,
+                dg,
+                db,
+                tolerance.max_delta()
+            )
         } else {
-            format!("FAIL: \u{0394}[{},{},{}] > {}", dr, dg, db, tolerance.max_delta())
+            format!(
+                "FAIL: \u{0394}[{},{},{}] > {}",
+                dr,
+                dg,
+                db,
+                tolerance.max_delta()
+            )
         },
         if delta_ok { COLOR_OK } else { COLOR_FAIL },
     ));
@@ -1001,9 +1040,17 @@ pub fn format_annotation_spatial(
     let pct_ok = pct <= pct_limit;
     lines.push((
         if pct_ok {
-            format!("ok: {:.1}% differ <= {:.1}%", pct * 100.0, pct_limit * 100.0)
+            format!(
+                "ok: {:.1}% differ <= {:.1}%",
+                pct * 100.0,
+                pct_limit * 100.0
+            )
         } else {
-            format!("FAIL: {:.1}% differ > {:.1}%", pct * 100.0, pct_limit * 100.0)
+            format!(
+                "FAIL: {:.1}% differ > {:.1}%",
+                pct * 100.0,
+                pct_limit * 100.0
+            )
         },
         if pct_ok { COLOR_OK } else { COLOR_FAIL },
     ));
@@ -1179,7 +1226,9 @@ mod tests {
     fn spatial_identical_images() {
         let w = 64u32;
         let h = 64;
-        let px: Vec<u8> = (0..w * h).flat_map(|i| [(i % 255) as u8, 128, 64, 255]).collect();
+        let px: Vec<u8> = (0..w * h)
+            .flat_map(|i| [(i % 255) as u8, 128, 64, 255])
+            .collect();
         let analysis = spatial_analysis(&px, &px, w, h, 2, 2);
         assert_eq!(analysis.regions.len(), 4);
         for r in &analysis.regions {
@@ -1252,7 +1301,10 @@ mod tests {
             .pixels()
             .filter(|px| px[0] > 24 || px[1] > 24 || px[2] > 24)
             .count();
-        assert!(non_dark > 10, "should detect added edge, got {non_dark} non-dark pixels");
+        assert!(
+            non_dark > 10,
+            "should detect added edge, got {non_dark} non-dark pixels"
+        );
     }
 
     #[test]
@@ -1269,7 +1321,10 @@ mod tests {
             .pixels()
             .filter(|px| px[1] > 50 && px[2] > 50 && px[0] < 10)
             .count();
-        assert!(cyan_pixels > 5, "should show missing structure as cyan, got {cyan_pixels}");
+        assert!(
+            cyan_pixels > 5,
+            "should show missing structure as cyan, got {cyan_pixels}"
+        );
     }
 
     #[test]

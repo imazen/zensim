@@ -155,12 +155,7 @@ pub fn render_text_height(
 }
 
 /// Render a string at an integer multiple of the base font size.
-pub fn render_text_scaled(
-    text: &str,
-    fg: [u8; 4],
-    bg: [u8; 4],
-    scale: u32,
-) -> (Vec<u8>, u32, u32) {
+pub fn render_text_scaled(text: &str, fg: [u8; 4], bg: [u8; 4], scale: u32) -> (Vec<u8>, u32, u32) {
     let target_h = BASE_CHAR_H * scale.max(1);
     render_text_height(text, fg, bg, target_h)
 }
@@ -241,8 +236,7 @@ pub fn render_lines_fitted(
 
     let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(1) as u32;
     // Compute char height that fits the longest line
-    let char_h = (max_width_px as f32 / longest as f32
-        * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
+    let char_h = (max_width_px as f32 / longest as f32 * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
         .floor() as u32;
     let char_h = char_h.clamp(BASE_CHAR_H / 4, BASE_CHAR_H);
     let char_w = char_width_for_height(char_h);
@@ -344,7 +338,10 @@ mod tests {
         assert_eq!(h, BASE_CHAR_H);
         assert_eq!(buf.len(), (w * h * 4) as usize);
         let white_count = buf.chunks(4).filter(|px| px[0] > 128).count();
-        assert!(white_count > 10, "A glyph should have lit pixels, got {white_count}");
+        assert!(
+            white_count > 10,
+            "A glyph should have lit pixels, got {white_count}"
+        );
     }
 
     #[test]
@@ -378,7 +375,11 @@ mod tests {
                     }
                 }
             }
-            assert!(lit > 10, "digit '{}' should have lit pixels, got {lit}", d as char);
+            assert!(
+                lit > 10,
+                "digit '{}' should have lit pixels, got {lit}",
+                d as char
+            );
         }
     }
 
@@ -408,6 +409,11 @@ mod tests {
         let narrow = render_text_wrapped(text, [255; 4], [0; 4], 20, 200);
         let wide = render_text_wrapped(text, [255; 4], [0; 4], 20, 2000);
         // Narrow should be taller (more lines)
-        assert!(narrow.2 > wide.2, "narrow {} should be taller than wide {}", narrow.2, wide.2);
+        assert!(
+            narrow.2 > wide.2,
+            "narrow {} should be taller than wide {}",
+            narrow.2,
+            wide.2
+        );
     }
 }

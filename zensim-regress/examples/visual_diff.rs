@@ -10,6 +10,8 @@
 //! or mintty). On unsupported terminals you'll see escape garbage.
 //! Save to file instead with: --save-to /tmp/diff.png
 
+#![allow(deprecated)] // TODO: migrate to create_annotated_montage
+
 use std::env;
 
 use image::{Rgba, RgbaImage};

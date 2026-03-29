@@ -251,11 +251,7 @@ impl fmt::Display for OracleReport {
                 writeln!(f, "  [{i}] {m}")?;
             }
             if self.mismatches.len() > 10 {
-                writeln!(
-                    f,
-                    "  ... and {} more.",
-                    self.mismatches.len() - 10,
-                )?;
+                writeln!(f, "  ... and {} more.", self.mismatches.len() - 10,)?;
             }
         }
 
@@ -595,7 +591,11 @@ mod tests {
     #[test]
     fn default_coords_basic() {
         let coords = default_test_coords(256, 256);
-        assert!(coords.len() >= 6, "expected >=6 coords, got {}", coords.len());
+        assert!(
+            coords.len() >= 6,
+            "expected >=6 coords, got {}",
+            coords.len()
+        );
         assert!(coords.contains(&(0, 0)));
         assert!(coords.contains(&(255, 255)));
         assert!(coords.contains(&(128, 128)));
@@ -616,7 +616,7 @@ mod tests {
             64,
             4,
             |buf, _w, _h| buf.to_vec(), // identity
-            |px| px.to_vec(),            // identity
+            |px| px.to_vec(),           // identity
             &default_test_coords(64, 64),
             OracleTolerance::Exact,
         );

@@ -179,8 +179,7 @@
 use std::fmt;
 
 use archmage::testing::{
-    CompileTimePolicy, PermutationReport, for_each_token_permutation,
-    lock_token_testing,
+    CompileTimePolicy, PermutationReport, for_each_token_permutation, lock_token_testing,
 };
 use zensim::{RgbaSlice, Zensim, ZensimProfile};
 
@@ -483,11 +482,12 @@ fn compare_outputs(
             .collect();
         let actual_img = RgbaSlice::new(&actual_pixels, *w as usize, *h as usize);
 
-        let report = check_regression(&zensim, &ref_img, &actual_img, tolerance)
-            .map_err(|e| RegressError::Io {
+        let report = check_regression(&zensim, &ref_img, &actual_img, tolerance).map_err(|e| {
+            RegressError::Io {
                 path: std::path::PathBuf::from("<simd-comparison>"),
                 source: std::io::Error::other(e.to_string()),
-            })?;
+            }
+        })?;
 
         if !report.passed() {
             all_passed = false;
