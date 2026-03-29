@@ -5,6 +5,54 @@
 
 use image::{Rgba, RgbaImage, imageops};
 
+/// Default minimum panel dimension (in pixels) for montage upscaling.
+///
+/// When either dimension of the input images is smaller than this, each pixel
+/// is replicated N×N (nearest-neighbor integer scaling) so the montage panels
+/// are large enough to inspect visually.
+pub const DEFAULT_MIN_PANEL_SIZE: u32 = 256;
+
+/// Upscale a small image using pixelated (nearest-neighbor) integer scaling.
+///
+/// Finds the smallest integer `N ≥ 1` such that both `width * N >= min_dim`
+/// and `height * N >= min_dim`, then replicates each pixel into an N×N block.
+/// If both dimensions already meet the threshold, the image is returned as-is.
+///
+/// This preserves sharp pixel boundaries — no interpolation, no blurring.
+pub fn pixelate_upscale(img: &RgbaImage, min_dim: u32) -> RgbaImage {
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 || (w >= min_dim && h >= min_dim) {
+        return img.clone();
+    }
+
+    // Smallest integer N such that w*N >= min_dim AND h*N >= min_dim
+    let n_w = min_dim.div_ceil(w);
+    let n_h = min_dim.div_ceil(h);
+    let n = n_w.max(n_h);
+    if n <= 1 {
+        return img.clone();
+    }
+
+    let new_w = w * n;
+    let new_h = h * n;
+    let mut out = RgbaImage::new(new_w, new_h);
+
+    for y in 0..h {
+        for x in 0..w {
+            let px = *img.get_pixel(x, y);
+            let bx = x * n;
+            let by = y * n;
+            for dy in 0..n {
+                for dx in 0..n {
+                    out.put_pixel(bx + dx, by + dy, px);
+                }
+            }
+        }
+    }
+
+    out
+}
+
 /// Generate an amplified diff image showing per-channel absolute differences.
 ///
 /// Unchanged pixels are dark gray. Differences glow in the color of the
@@ -600,10 +648,53 @@ pub fn create_annotated_montage(
     gap: u32,
     annotation: &AnnotationText,
 ) -> RgbaImage {
+    create_annotated_montage_opts(
+        expected,
+        actual,
+        amplification,
+        gap,
+        annotation,
+        DEFAULT_MIN_PANEL_SIZE,
+    )
+}
+
+/// Like [`create_annotated_montage`] but with an explicit minimum panel size.
+///
+/// When either dimension of the source images is smaller than `min_panel_size`,
+/// all four panels are pixelate-upscaled (nearest-neighbor integer scaling) so
+/// that tiny test images produce readable montages. Pass `0` to disable.
+#[allow(clippy::too_many_arguments)]
+pub fn create_annotated_montage_opts(
+    expected: &RgbaImage,
+    actual: &RgbaImage,
+    amplification: u8,
+    gap: u32,
+    annotation: &AnnotationText,
+    min_panel_size: u32,
+) -> RgbaImage {
     use crate::font;
 
+    // Generate diffs at original resolution (before upscale) so pixel-level
+    // differences are computed on real pixels, not replicated blocks.
     let pixel_diff = generate_diff_image(expected, actual, amplification);
     let struct_diff = generate_structural_diff(expected, actual, 3, amplification);
+
+    // Pixelate-upscale all four panels if the source is tiny.
+    let up_expected;
+    let up_actual;
+    let up_pixel_diff;
+    let up_struct_diff;
+    let (expected, actual, pixel_diff, struct_diff) = if min_panel_size > 0
+        && (expected.width() < min_panel_size || expected.height() < min_panel_size)
+    {
+        up_expected = pixelate_upscale(expected, min_panel_size);
+        up_actual = pixelate_upscale(actual, min_panel_size);
+        up_pixel_diff = pixelate_upscale(&pixel_diff, min_panel_size);
+        up_struct_diff = pixelate_upscale(&struct_diff, min_panel_size);
+        (&up_expected, &up_actual, &up_pixel_diff, &up_struct_diff)
+    } else {
+        (expected, actual, &pixel_diff, &struct_diff)
+    };
 
     // Minimum padding: 30% of a base char width, at least 8px
     let min_pad = (font::GLYPH_W * 3 / 10).max(8);
@@ -612,7 +703,7 @@ pub fn create_annotated_montage(
     let label_fg = [220, 220, 220, 255];
     let label_bg = [40, 40, 40, 255];
 
-    let panel_images: [&RgbaImage; 4] = [expected, actual, &pixel_diff, &struct_diff];
+    let panel_images: [&RgbaImage; 4] = [expected, actual, pixel_diff, struct_diff];
 
     let panel_w = expected.width();
     let panel_h = expected.height();
@@ -945,11 +1036,43 @@ pub fn create_annotated_montage_raw(
     gap: u32,
     annotation: &AnnotationText,
 ) -> RgbaImage {
+    create_annotated_montage_raw_opts(
+        expected,
+        actual,
+        width,
+        height,
+        amplification,
+        gap,
+        annotation,
+        DEFAULT_MIN_PANEL_SIZE,
+    )
+}
+
+/// Create an annotated montage from raw RGBA byte slices with explicit
+/// minimum panel size. Pass `0` to disable upscaling.
+#[allow(clippy::too_many_arguments)]
+pub fn create_annotated_montage_raw_opts(
+    expected: &[u8],
+    actual: &[u8],
+    width: u32,
+    height: u32,
+    amplification: u8,
+    gap: u32,
+    annotation: &AnnotationText,
+    min_panel_size: u32,
+) -> RgbaImage {
     let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
     let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
-    create_annotated_montage(&exp_img, &act_img, amplification, gap, annotation)
+    create_annotated_montage_opts(
+        &exp_img,
+        &act_img,
+        amplification,
+        gap,
+        annotation,
+        min_panel_size,
+    )
 }
 
 /// Annotation data for the montage: verdict, constraints, and optional spatial heatmap.
@@ -1155,6 +1278,45 @@ mod tests {
     }
 
     #[test]
+    fn pixelate_noop_when_large_enough() {
+        let img = RgbaImage::from_pixel(300, 300, Rgba([100, 100, 100, 255]));
+        let up = pixelate_upscale(&img, 256);
+        assert_eq!(up.dimensions(), (300, 300));
+    }
+
+    #[test]
+    fn pixelate_scales_8x8_to_at_least_256() {
+        let img = RgbaImage::from_fn(8, 8, |x, y| {
+            Rgba([(x * 32) as u8, (y * 32) as u8, 128, 255])
+        });
+        let up = pixelate_upscale(&img, 256);
+        // 256/8 = 32, so N=32, output = 256×256
+        assert_eq!(up.dimensions(), (256, 256));
+        // Each original pixel should be a 32×32 block
+        let orig = *img.get_pixel(1, 2);
+        for dy in 0..32 {
+            for dx in 0..32 {
+                assert_eq!(*up.get_pixel(32 + dx, 2 * 32 + dy), orig);
+            }
+        }
+    }
+
+    #[test]
+    fn pixelate_rectangular() {
+        let img = RgbaImage::from_pixel(4, 16, Rgba([50, 100, 150, 255]));
+        let up = pixelate_upscale(&img, 256);
+        // N = max(ceil(256/4), ceil(256/16)) = max(64, 16) = 64
+        assert_eq!(up.dimensions(), (256, 1024));
+    }
+
+    #[test]
+    fn pixelate_disabled_with_zero() {
+        let img = RgbaImage::from_pixel(4, 4, Rgba([100; 4]));
+        let up = pixelate_upscale(&img, 0);
+        assert_eq!(up.dimensions(), (4, 4));
+    }
+
+    #[test]
     #[allow(deprecated)]
     fn comparison_montage_works() {
         let expected = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
@@ -1197,7 +1359,8 @@ mod tests {
             spatial: None,
             extra: String::new(),
         };
-        let montage = create_annotated_montage(&exp, &act, 10, 6, &ann);
+        // Disable upscale to test layout at native 32×32
+        let montage = create_annotated_montage_opts(&exp, &act, 10, 6, &ann, 0);
 
         assert!(montage.width() >= 32 * 2 + 6 * 3);
         assert!(montage.height() > 32 * 2);
@@ -1217,9 +1380,29 @@ mod tests {
             spatial: None,
             extra: String::new(),
         };
-        let with = create_annotated_montage(&exp, &act, 10, 6, &with_text);
-        let without = create_annotated_montage(&exp, &act, 10, 6, &no_text);
+        // Disable upscale so we test text strip presence, not upscale
+        let with = create_annotated_montage_opts(&exp, &act, 10, 6, &with_text, 0);
+        let without = create_annotated_montage_opts(&exp, &act, 10, 6, &no_text, 0);
         assert!(without.height() < with.height());
+    }
+
+    #[test]
+    fn annotated_montage_upscales_tiny_images() {
+        let exp = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(8, 8, Rgba([110, 100, 90, 255]));
+        let ann = AnnotationText {
+            primary_lines: vec![],
+            spatial: None,
+            extra: String::new(),
+        };
+        // Default upscale to 256
+        let montage = create_annotated_montage(&exp, &act, 10, 6, &ann);
+        // Panels should be 256×256 (8×32), so montage width >= 2*256
+        assert!(
+            montage.width() >= 512,
+            "montage width {} should be >= 512 after upscaling 8×8 panels",
+            montage.width()
+        );
     }
 
     #[test]

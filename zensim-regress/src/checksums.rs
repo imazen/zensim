@@ -22,8 +22,9 @@ use std::sync::Arc;
 
 use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
 
-#[allow(deprecated)] // TODO: migrate to create_annotated_montage_raw
-use crate::diff_image::create_comparison_montage_raw;
+use crate::diff_image::{
+    AnnotationText, create_annotated_montage_raw, format_annotation_spatial, spatial_analysis,
+};
 use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
 use crate::error::RegressError;
 use crate::hasher::{ChecksumHasher, SeaHasher};
@@ -1317,6 +1318,8 @@ impl ChecksumManager {
                     &actual_rgba,
                     aw,
                     ah,
+                    report.as_ref(),
+                    &reg_tolerance,
                 );
 
                 let passed = report.as_ref().is_none_or(|r| r.passed());
@@ -1522,7 +1525,12 @@ impl ChecksumManager {
 
     // ─── Diff montage ───────────────────────────────────────────────────
 
-    /// Save comparison montage if diff_dir is configured.
+    /// Save annotated comparison montage if diff_dir is configured.
+    ///
+    /// Produces a 2×2 grid (Expected | Actual | Pixel Diff | Structural Diff)
+    /// with colored constraint text and spatial heatmap. Tiny images are
+    /// pixelate-upscaled so panels are always large enough to inspect.
+    ///
     /// Returns the path to the saved montage, if successful.
     #[allow(clippy::too_many_arguments)]
     fn save_diff_montage(
@@ -1536,6 +1544,8 @@ impl ChecksumManager {
         actual_rgba: &[u8],
         aw: u32,
         ah: u32,
+        report: Option<&RegressionReport>,
+        tolerance: &RegressionTolerance,
     ) -> Option<std::path::PathBuf> {
         let dir = self.diff_dir.as_ref()?;
         let diff_dir = dir.join(module);
@@ -1559,8 +1569,20 @@ impl ChecksumManager {
             return None;
         }
 
-        #[allow(deprecated)]
-        let montage = create_comparison_montage_raw(ref_rgba, actual_rgba, rw, rh, 10, 2);
+        let annotation = if let Some(report) = report {
+            let spatial = spatial_analysis(ref_rgba, actual_rgba, rw, rh, 3, 3);
+            format_annotation_spatial(report, tolerance, Some(&spatial))
+        } else {
+            // No report (e.g. image too small for zensim) — minimal annotation
+            AnnotationText {
+                primary_lines: vec![],
+                spatial: None,
+                extra: String::new(),
+            }
+        };
+
+        let montage =
+            create_annotated_montage_raw(ref_rgba, actual_rgba, rw, rh, 10, 2, &annotation);
         match montage.save(&out_path) {
             Ok(()) => Some(out_path),
             Err(e) => {
