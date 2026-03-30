@@ -1333,10 +1333,11 @@ impl AnnotationText {
         }
     }
 
-    /// Build annotation from a report computed on resized images.
+    /// Build annotation from a report computed on dimension-mismatched images.
     ///
     /// Shows the same constraint lines as [`from_report`](Self::from_report),
-    /// plus prominent amber-colored dimension-mismatch warning lines.
+    /// plus prominent amber-colored dimension-mismatch warning lines showing
+    /// the category and comparison method.
     pub fn from_resized_report(
         report: &crate::testing::RegressionReport,
         tolerance: &crate::testing::RegressionTolerance,
@@ -1347,10 +1348,11 @@ impl AnnotationText {
             const COLOR_WARN: [u8; 4] = [255, 200, 60, 255];
 
             let dim_line = format!("DIMENSIONS: {}", dim_info.description());
-            let (ew, eh) = dim_info.expected_dims;
-            let resized_line =
-                format!("Actual resized to {ew}\u{00d7}{eh} for comparison (approximate)");
-            ann.primary_lines.insert(0, (resized_line, COLOR_WARN));
+            let method_line = format!(
+                "Actual {} for comparison (approximate)",
+                dim_info.method(),
+            );
+            ann.primary_lines.insert(0, (method_line, COLOR_WARN));
             ann.primary_lines.insert(0, (dim_line, COLOR_WARN));
         }
 

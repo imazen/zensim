@@ -371,31 +371,140 @@ impl RegressionReport {
     }
 }
 
+/// Classification of a dimension mismatch between expected and actual images.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DimensionMismatchKind {
+    /// Width and height are swapped (e.g., 480x640 vs 640x480).
+    /// Only detected when both dimensions are non-square.
+    OrientationSwap,
+    /// Dimensions differ by at most 2px in each axis (rounding artifact).
+    OffByOne,
+    /// Small dimension change (< 5% in each axis), likely a crop/trim.
+    CropDifference,
+    /// Large dimension difference that doesn't fit other categories.
+    LargeDifference,
+}
+
+impl std::fmt::Display for DimensionMismatchKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OrientationSwap => write!(f, "orientation swap"),
+            Self::OffByOne => write!(f, "off-by-one rounding"),
+            Self::CropDifference => write!(f, "crop/trim"),
+            Self::LargeDifference => write!(f, "different dimensions"),
+        }
+    }
+}
+
+/// How the dimension-mismatched images were aligned for comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonMethod {
+    /// Actual was Lanczos3-resized to match expected dimensions.
+    Resized,
+    /// Both images center-cropped to the overlap region (no resize).
+    CenterCropped,
+    /// Actual was rotated 90° CW to match expected dimensions.
+    Rotated90,
+    /// Actual was rotated 270° CW (90° CCW) to match expected dimensions.
+    Rotated270,
+    /// Actual was flipped horizontally.
+    FlipHorizontal,
+    /// Actual was flipped vertically.
+    FlipVertical,
+    /// Actual was rotated 180° (equivalent to both flips).
+    Rotated180,
+}
+
+impl std::fmt::Display for ComparisonMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Resized => write!(f, "resized"),
+            Self::CenterCropped => write!(f, "center-cropped"),
+            Self::Rotated90 => write!(f, "rotated 90\u{00b0} CW"),
+            Self::Rotated270 => write!(f, "rotated 270\u{00b0} CW"),
+            Self::FlipHorizontal => write!(f, "flipped horizontally"),
+            Self::FlipVertical => write!(f, "flipped vertically"),
+            Self::Rotated180 => write!(f, "rotated 180\u{00b0}"),
+        }
+    }
+}
+
 /// Metadata about a dimension-mismatch comparison.
 ///
-/// When expected and actual images have different dimensions, the actual image
-/// is resized to match the expected before comparison. This struct records
-/// the original dimensions so downstream consumers can annotate the result
-/// as approximate.
+/// When expected and actual images have different dimensions, the scoring path
+/// categorizes the mismatch and chooses the cheapest comparison method.
+/// This struct records the original dimensions, category, and method used
+/// so downstream consumers (montages, reports) can annotate the result.
 #[derive(Debug, Clone)]
 pub struct DimensionInfo {
     /// Original expected image dimensions (width, height).
     pub expected_dims: (u32, u32),
     /// Original actual image dimensions (width, height).
     pub actual_dims: (u32, u32),
+    /// Classification of the mismatch.
+    pub kind: DimensionMismatchKind,
+    /// How the images were aligned for comparison.
+    pub method: ComparisonMethod,
+}
+
+/// Classify a dimension mismatch from raw dimensions.
+pub fn classify_dimension_mismatch(ew: u32, eh: u32, aw: u32, ah: u32) -> DimensionMismatchKind {
+    // Orientation swap: width↔height swapped, non-square
+    if ew == ah && eh == aw && ew != eh {
+        return DimensionMismatchKind::OrientationSwap;
+    }
+
+    let dw = (ew as i64 - aw as i64).unsigned_abs();
+    let dh = (eh as i64 - ah as i64).unsigned_abs();
+
+    // Off-by-one: both axes differ by at most 2px
+    if dw <= 2 && dh <= 2 {
+        return DimensionMismatchKind::OffByOne;
+    }
+
+    // Crop/trim: each axis differs by less than 5%
+    let pct_w = dw as f64 / ew.max(1) as f64;
+    let pct_h = dh as f64 / eh.max(1) as f64;
+    if pct_w < 0.05 && pct_h < 0.05 {
+        return DimensionMismatchKind::CropDifference;
+    }
+
+    DimensionMismatchKind::LargeDifference
 }
 
 impl DimensionInfo {
+    /// Classify the dimension mismatch.
+    pub fn kind(&self) -> DimensionMismatchKind {
+        self.kind
+    }
+
+    /// How the images were aligned for comparison.
+    pub fn method(&self) -> ComparisonMethod {
+        self.method
+    }
+
     /// Human-readable description of the dimension difference.
     pub fn description(&self) -> String {
         let (ew, eh) = self.expected_dims;
         let (aw, ah) = self.actual_dims;
-        if ew == ah && eh == aw {
-            format!("{ew}\u{00d7}{eh} vs {aw}\u{00d7}{ah} (rotated?)")
-        } else {
-            let dw = aw as i64 - ew as i64;
-            let dh = ah as i64 - eh as i64;
-            format!("{ew}\u{00d7}{eh} vs {aw}\u{00d7}{ah} ({dw:+}w, {dh:+}h)")
+        let dw = aw as i64 - ew as i64;
+        let dh = ah as i64 - eh as i64;
+        format!(
+            "{ew}\u{00d7}{eh} vs {aw}\u{00d7}{ah} ({}, {dw:+}w {dh:+}h)",
+            self.kind,
+        )
+    }
+
+    /// Short label suffix for the pixel diff panel (e.g., "(RESIZED)", "(CROPPED)").
+    pub fn panel_label(&self) -> &'static str {
+        match self.method {
+            ComparisonMethod::Resized => "RESIZED",
+            ComparisonMethod::CenterCropped => "CROPPED",
+            ComparisonMethod::Rotated90 => "ROT 90\u{00b0}",
+            ComparisonMethod::Rotated270 => "ROT 270\u{00b0}",
+            ComparisonMethod::FlipHorizontal => "FLIP H",
+            ComparisonMethod::FlipVertical => "FLIP V",
+            ComparisonMethod::Rotated180 => "ROT 180\u{00b0}",
         }
     }
 }
@@ -433,8 +542,9 @@ impl std::fmt::Display for RegressionReport {
         if let Some(ref dim_info) = self.dimension_info {
             writeln!(
                 f,
-                "NOTE: Dimensions differ ({}) \u{2014} score is approximate (actual resized to match expected).",
+                "NOTE: Dimensions differ ({}) \u{2014} score is approximate (actual {} to compare).",
                 dim_info.description(),
+                dim_info.method,
             )?;
         }
 
@@ -750,20 +860,18 @@ pub fn check_regression(
 
 /// Compare expected vs actual images that have different dimensions.
 ///
-/// Resizes the actual image to match the expected's dimensions using Lanczos3,
-/// then runs zensim comparison. The resulting report is annotated with
-/// [`DimensionInfo`] to indicate the comparison is approximate.
+/// Categorizes the mismatch and chooses the cheapest comparison method:
+/// - **Orientation swap**: tries rotate90 + rotate270, picks best score
+/// - **Off-by-one**: center-crops larger to match smaller (lossless)
+/// - **Crop/trim**: center-crop first, resize fallback if score < 70
+/// - **Large difference**: Lanczos resize only
 ///
-/// The expected image is never resized — it is the ground truth. Only the
-/// actual is scaled to match.
-///
-/// The resized score is useful for distinguishing "same image, different crop"
-/// (score ~90+) from "completely wrong image" (score < 50), but should not be
-/// treated as authoritative for tight tolerance checking.
+/// The resulting report is annotated with [`DimensionInfo`] including the
+/// [`DimensionMismatchKind`] and [`ComparisonMethod`] used.
 ///
 /// # Errors
 ///
-/// Returns [`ZensimError::ImageTooSmall`] if the expected dimensions are < 8×8.
+/// Returns [`ZensimError::ImageTooSmall`] if both images are < 8×8.
 #[allow(clippy::too_many_arguments)]
 pub fn check_regression_resized(
     zensim: &Zensim,
@@ -775,6 +883,113 @@ pub fn check_regression_resized(
     ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<RegressionReport, ZensimError> {
+    let kind = classify_dimension_mismatch(ew, eh, aw, ah);
+
+    let (report, method) = match kind {
+        DimensionMismatchKind::OrientationSwap => {
+            compare_orientation_swap(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?
+        }
+        DimensionMismatchKind::OffByOne => {
+            let r = compare_center_crop(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+            (r, ComparisonMethod::CenterCropped)
+        }
+        DimensionMismatchKind::CropDifference => {
+            let r = compare_center_crop(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+            if r.score() >= 70.0 {
+                (r, ComparisonMethod::CenterCropped)
+            } else {
+                // Center-crop scored poorly — fall back to resize
+                let r2 = compare_resized(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+                if r2.score() > r.score() {
+                    (r2, ComparisonMethod::Resized)
+                } else {
+                    (r, ComparisonMethod::CenterCropped)
+                }
+            }
+        }
+        DimensionMismatchKind::LargeDifference => {
+            let r = compare_resized(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+            (r, ComparisonMethod::Resized)
+        }
+    };
+
+    let mut report = report;
+    report.dimension_info = Some(DimensionInfo {
+        expected_dims: (ew, eh),
+        actual_dims: (aw, ah),
+        kind,
+        method,
+    });
+    Ok(report)
+}
+
+// ─── Dimension-mismatch comparison helpers ──────────────────────────────
+
+/// Classify a pair of RGBA byte slices into `[u8; 4]` pixels and run zensim.
+#[allow(clippy::too_many_arguments)]
+fn classify_rgba_pair(
+    zensim: &Zensim,
+    a: &[u8],
+    aw: u32,
+    ah: u32,
+    b: &[u8],
+    bw: u32,
+    bh: u32,
+    tolerance: &RegressionTolerance,
+) -> Result<RegressionReport, ZensimError> {
+    let a_px: Vec<[u8; 4]> = a.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    let b_px: Vec<[u8; 4]> = b.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    let a_src = zensim::RgbaSlice::new(&a_px, aw as usize, ah as usize);
+    let b_src = zensim::RgbaSlice::new(&b_px, bw as usize, bh as usize);
+    let cr = if tolerance.ignore_alpha {
+        zensim.classify(&AlphaOverride(&a_src), &AlphaOverride(&b_src))?
+    } else {
+        zensim.classify(&a_src, &b_src)?
+    };
+    Ok(build_report(cr, tolerance))
+}
+
+/// Center-crop an RGBA image to `(tw, th)`.
+fn center_crop_rgba(rgba: &[u8], w: u32, h: u32, tw: u32, th: u32) -> Vec<u8> {
+    let x0 = (w.saturating_sub(tw)) / 2;
+    let y0 = (h.saturating_sub(th)) / 2;
+    let tw = tw.min(w);
+    let th = th.min(h);
+    let mut out = Vec::with_capacity((tw * th * 4) as usize);
+    for y in y0..y0 + th {
+        let row_start = (y * w + x0) as usize * 4;
+        let row_end = row_start + (tw as usize * 4);
+        out.extend_from_slice(&rgba[row_start..row_end]);
+    }
+    out
+}
+
+/// Compare by center-cropping both images to the overlap region.
+#[allow(clippy::too_many_arguments)]
+fn compare_center_crop(
+    zensim: &Zensim,
+    exp: &[u8], ew: u32, eh: u32,
+    act: &[u8], aw: u32, ah: u32,
+    tolerance: &RegressionTolerance,
+) -> Result<RegressionReport, ZensimError> {
+    let tw = ew.min(aw);
+    let th = eh.min(ah);
+    if tw < 8 || th < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+    let exp_crop = center_crop_rgba(exp, ew, eh, tw, th);
+    let act_crop = center_crop_rgba(act, aw, ah, tw, th);
+    classify_rgba_pair(zensim, &exp_crop, tw, th, &act_crop, tw, th, tolerance)
+}
+
+/// Compare by Lanczos3-resizing actual to match expected dimensions.
+#[allow(clippy::too_many_arguments)]
+fn compare_resized(
+    zensim: &Zensim,
+    exp: &[u8], ew: u32, eh: u32,
+    act: &[u8], aw: u32, ah: u32,
+    tolerance: &RegressionTolerance,
+) -> Result<RegressionReport, ZensimError> {
     use image::imageops::{self, FilterType};
     use image::RgbaImage;
 
@@ -782,41 +997,69 @@ pub fn check_regression_resized(
         return Err(ZensimError::ImageTooSmall);
     }
 
-    // Resize actual to match expected dimensions.
-    let act_img = RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+    let act_img = RgbaImage::from_raw(aw, ah, act.to_vec())
         .expect("actual: data length does not match dimensions");
-    let act_resized = if aw == ew && ah == eh {
-        act_img
-    } else {
-        imageops::resize(&act_img, ew, eh, FilterType::Lanczos3)
-    };
+    let act_resized = imageops::resize(&act_img, ew, eh, FilterType::Lanczos3);
 
-    // Build pixel slices for zensim.
-    let ref_pixels: Vec<[u8; 4]> = expected_rgba
-        .chunks_exact(4)
-        .map(|c| [c[0], c[1], c[2], c[3]])
-        .collect();
-    let act_pixels: Vec<[u8; 4]> = act_resized
-        .as_raw()
-        .chunks_exact(4)
-        .map(|c| [c[0], c[1], c[2], c[3]])
-        .collect();
+    classify_rgba_pair(zensim, exp, ew, eh, act_resized.as_raw(), ew, eh, tolerance)
+}
 
-    let ref_source = zensim::RgbaSlice::new(&ref_pixels, ew as usize, eh as usize);
-    let act_source = zensim::RgbaSlice::new(&act_pixels, ew as usize, eh as usize);
+/// Try all orientation transforms (rotations, flips) and pick the best score.
+///
+/// For orientation swaps (w↔h), tries rotate90 and rotate270.
+/// Also tries flip_horizontal, flip_vertical, and rotate180 — these preserve
+/// dimensions, so they're compared after resizing if needed.
+///
+/// This covers all 8 EXIF orientation values.
+#[allow(clippy::too_many_arguments)]
+fn compare_orientation_swap(
+    zensim: &Zensim,
+    exp: &[u8], ew: u32, eh: u32,
+    act: &[u8], aw: u32, ah: u32,
+    tolerance: &RegressionTolerance,
+) -> Result<(RegressionReport, ComparisonMethod), ZensimError> {
+    use image::imageops;
+    use image::RgbaImage;
 
-    let cr = if tolerance.ignore_alpha {
-        zensim.classify(&AlphaOverride(&ref_source), &AlphaOverride(&act_source))?
-    } else {
-        zensim.classify(&ref_source, &act_source)?
-    };
+    if ew < 8 || eh < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
 
-    let mut report = build_report(cr, tolerance);
-    report.dimension_info = Some(DimensionInfo {
-        expected_dims: (ew, eh),
-        actual_dims: (aw, ah),
-    });
-    Ok(report)
+    let act_img = RgbaImage::from_raw(aw, ah, act.to_vec())
+        .expect("actual: data length does not match dimensions");
+
+    // Candidate transforms: (transformed image, method label)
+    let candidates: Vec<(RgbaImage, ComparisonMethod)> = vec![
+        (imageops::rotate90(&act_img), ComparisonMethod::Rotated90),
+        (imageops::rotate270(&act_img), ComparisonMethod::Rotated270),
+        (imageops::rotate180(&act_img), ComparisonMethod::Rotated180),
+        (imageops::flip_horizontal(&act_img), ComparisonMethod::FlipHorizontal),
+        (imageops::flip_vertical(&act_img), ComparisonMethod::FlipVertical),
+    ];
+
+    let mut best: Option<(RegressionReport, ComparisonMethod)> = None;
+
+    for (transformed, method) in &candidates {
+        let (tw, th) = transformed.dimensions();
+
+        let report = if tw == ew && th == eh {
+            // Exact dimension match after transform — compare directly
+            classify_rgba_pair(zensim, exp, ew, eh, transformed.as_raw(), tw, th, tolerance)?
+        } else if tw >= 8 && th >= 8 && ew >= 8 && eh >= 8 {
+            // Resize transformed to match expected
+            let resized = imageops::resize(transformed, ew, eh, imageops::FilterType::Lanczos3);
+            classify_rgba_pair(zensim, exp, ew, eh, resized.as_raw(), ew, eh, tolerance)?
+        } else {
+            continue;
+        };
+
+        let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
+        if dominated {
+            best = Some((report, *method));
+        }
+    }
+
+    best.ok_or(ZensimError::ImageTooSmall)
 }
 
 // ─── shrink_tolerance() ──────────────────────────────────────────────────
@@ -891,30 +1134,21 @@ mod tests {
             }
         }
 
-        // Upscale to 32x32 via Lanczos3
+        // Upscale to 32x32 — classified as LargeDifference (100% size change)
         let img = image::RgbaImage::from_raw(16, 16, small_rgba.clone()).unwrap();
-        let big = image::imageops::resize(
-            &img,
-            32,
-            32,
-            image::imageops::FilterType::Lanczos3,
-        );
+        let big = image::imageops::resize(&img, 32, 32, image::imageops::FilterType::Lanczos3);
         let big_rgba = big.into_raw();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(50.0);
         let report =
             check_regression_resized(&z, &small_rgba, 16, 16, &big_rgba, 32, 32, &tol).unwrap();
 
-        // Same image content should score high even after resize
-        assert!(
-            report.score() > 70.0,
-            "score {} should be > 70",
-            report.score()
-        );
-        assert!(report.dimension_info().is_some());
+        assert!(report.score() > 70.0, "score {} should be > 70", report.score());
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.expected_dims, (16, 16));
         assert_eq!(dim.actual_dims, (32, 32));
+        assert_eq!(dim.kind, DimensionMismatchKind::LargeDifference);
+        assert_eq!(dim.method, ComparisonMethod::Resized);
     }
 
     #[test]
@@ -929,12 +1163,93 @@ mod tests {
     }
 
     #[test]
-    fn dimension_info_description_rotated() {
+    fn off_by_one_uses_center_crop() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+
+        // Create a 16x16 image and a 17x15 variant (off by 1 in each axis)
+        let mut rgba16 = Vec::with_capacity(16 * 16 * 4);
+        for y in 0..16u8 {
+            for x in 0..16u8 {
+                rgba16.extend_from_slice(&[x * 16, y * 16, 128, 255]);
+            }
+        }
+        // 17x15 image — just enough variation
+        let mut rgba17 = Vec::with_capacity(17 * 15 * 4);
+        for y in 0..15u8 {
+            for x in 0..17u8 {
+                rgba17.extend_from_slice(&[x * 15, y * 17, 128, 255]);
+            }
+        }
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let report =
+            check_regression_resized(&z, &rgba16, 16, 16, &rgba17, 17, 15, &tol).unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.kind, DimensionMismatchKind::OffByOne);
+        assert_eq!(dim.method, ComparisonMethod::CenterCropped);
+    }
+
+    // ─── Categorization tests ───────────────────────────────────────────
+
+    #[test]
+    fn classify_orientation_swap() {
+        assert_eq!(
+            classify_dimension_mismatch(480, 640, 640, 480),
+            DimensionMismatchKind::OrientationSwap,
+        );
+    }
+
+    #[test]
+    fn classify_off_by_one() {
+        assert_eq!(
+            classify_dimension_mismatch(300, 200, 299, 199),
+            DimensionMismatchKind::OffByOne,
+        );
+        // ±2px still off-by-one
+        assert_eq!(
+            classify_dimension_mismatch(300, 200, 298, 198),
+            DimensionMismatchKind::OffByOne,
+        );
+    }
+
+    #[test]
+    fn classify_crop_difference() {
+        assert_eq!(
+            classify_dimension_mismatch(200, 150, 195, 148),
+            DimensionMismatchKind::CropDifference,
+        );
+    }
+
+    #[test]
+    fn classify_large_difference() {
+        assert_eq!(
+            classify_dimension_mismatch(100, 100, 200, 300),
+            DimensionMismatchKind::LargeDifference,
+        );
+    }
+
+    #[test]
+    fn classify_square_not_swap() {
+        // Square images can't be orientation swaps
+        assert_ne!(
+            classify_dimension_mismatch(100, 100, 100, 100),
+            DimensionMismatchKind::OrientationSwap,
+        );
+    }
+
+    // ─── Description tests ──────────────────────────────────────────────
+
+    #[test]
+    fn dimension_info_description_orientation_swap() {
         let info = DimensionInfo {
             expected_dims: (480, 640),
             actual_dims: (640, 480),
+            kind: DimensionMismatchKind::OrientationSwap,
+            method: ComparisonMethod::Rotated90,
         };
-        assert!(info.description().contains("rotated"));
+        let desc = info.description();
+        assert!(desc.contains("orientation swap"), "expected 'orientation swap' in: {desc}");
     }
 
     #[test]
@@ -942,6 +1257,8 @@ mod tests {
         let info = DimensionInfo {
             expected_dims: (200, 150),
             actual_dims: (195, 148),
+            kind: DimensionMismatchKind::CropDifference,
+            method: ComparisonMethod::CenterCropped,
         };
         let desc = info.description();
         assert!(desc.contains("-5w"), "expected -5w in: {desc}");
@@ -953,6 +1270,8 @@ mod tests {
         let info = DimensionInfo {
             expected_dims: (100, 100),
             actual_dims: (110, 105),
+            kind: DimensionMismatchKind::CropDifference,
+            method: ComparisonMethod::CenterCropped,
         };
         let desc = info.description();
         assert!(desc.contains("+10w"), "expected +10w in: {desc}");
