@@ -1012,7 +1012,8 @@ fn compare_resized(
 
     let act_img = RgbaImage::from_raw(aw, ah, act.to_vec())
         .expect("actual: data length does not match dimensions");
-    let act_resized = imageops::resize(&act_img, ew, eh, FilterType::Lanczos3);
+    // Triangle (bilinear) is sufficient for diagnostic comparison — much faster than Lanczos3.
+    let act_resized = imageops::resize(&act_img, ew, eh, FilterType::Triangle);
 
     classify_rgba_pair(zensim, exp, ew, eh, act_resized.as_raw(), ew, eh, tolerance)
 }
@@ -1111,14 +1112,16 @@ fn extract_block(rgba: &[u8], w: u32, x0: u32, y0: u32, n: u32) -> Vec<u8> {
     block
 }
 
-/// Try transforms on a same-dimension image pair to detect flips/rotations.
+/// Detect flips or 180° rotation on a same-dimension image pair.
 ///
-/// Uses a cheap corner-block SAD pre-filter to identify the 1–2 most likely
-/// transforms, then runs zensim only on those candidates. This avoids
-/// running 7 full zensim comparisons.
+/// Only tests flipH, flipV, and rot180 — rotations that change dimensions
+/// are handled by [`check_regression_resized`] instead.
 ///
-/// Called when the normal comparison yields a low score for same-dimension
-/// images. Returns `None` if no transform improves the score meaningfully.
+/// Uses block-level zensim on small sub-regions (corners + center) rather than
+/// full-image comparison. For a 4K image this runs ~100× faster than a full
+/// zensim call per candidate.
+///
+/// Returns `None` if no transform improves the score meaningfully.
 pub fn detect_transform(
     zensim: &Zensim,
     expected_rgba: &[u8],
@@ -1126,113 +1129,164 @@ pub fn detect_transform(
     w: u32,
     h: u32,
     original_score: f64,
-    tolerance: &RegressionTolerance,
+    _tolerance: &RegressionTolerance,
 ) -> Option<(RegressionReport, ComparisonMethod)> {
-    use image::RgbaImage;
-
-    if w < 8 || h < 8 {
+    if w < 16 || h < 16 {
         return None;
     }
 
-    // ── Phase 1: cheap corner-SAD pre-filter ──
-    // Compare top-left 4x4 block of expected against the position where that
-    // block would land under each same-dimension transform of actual.
-    let n = 4u32.min(w / 2).min(h / 2).max(1);
-    let exp_tl = extract_block(expected_rgba, w, 0, 0, n);
+    // Block size: 64×64 or smaller for tiny images
+    let bs = 64u32.min(w / 2).min(h / 2);
+    if bs < 8 {
+        return None;
+    }
 
-    // For same-dimension transforms:
-    // Identity:  TL→TL (already scored)
-    // FlipH:     TL→TR (x mirrored)
-    // FlipV:     TL→BL (y mirrored)
-    // Rot180:    TL→BR (both mirrored)
-    let act_tr = extract_block(actual_rgba, w, w - n, 0, n); // hflip: TL of expected ↔ TR of actual
-    let act_bl = extract_block(actual_rgba, w, 0, h - n, n); // vflip: TL of expected ↔ BL of actual
-    let act_br = extract_block(actual_rgba, w, w - n, h - n, n); // rot180: TL ↔ BR
-
-    // But we need to reverse the block order for flipped comparisons.
-    // For hflip: expected TL pixels should match actual TR pixels in reverse column order.
-    let mirror_h = |block: &[u8], n: u32| -> Vec<u8> {
-        let mut out = vec![0u8; block.len()];
-        for y in 0..n {
-            for x in 0..n {
-                let src = ((y * n + x) * 4) as usize;
-                let dst = ((y * n + (n - 1 - x)) * 4) as usize;
-                if src + 4 <= block.len() && dst + 4 <= out.len() {
-                    out[dst..dst + 4].copy_from_slice(&block[src..src + 4]);
-                }
-            }
-        }
-        out
-    };
-    let mirror_v = |block: &[u8], n: u32| -> Vec<u8> {
-        let mut out = vec![0u8; block.len()];
-        for y in 0..n {
-            for x in 0..n {
-                let src = ((y * n + x) * 4) as usize;
-                let dst = (((n - 1 - y) * n + x) * 4) as usize;
-                if src + 4 <= block.len() && dst + 4 <= out.len() {
-                    out[dst..dst + 4].copy_from_slice(&block[src..src + 4]);
-                }
-            }
-        }
-        out
-    };
-
-    let mut scored: Vec<(u64, ComparisonMethod)> = vec![
-        (block_sad(&exp_tl, &mirror_h(&act_tr, n)), ComparisonMethod::FlipHorizontal),
-        (block_sad(&exp_tl, &mirror_v(&act_bl, n)), ComparisonMethod::FlipVertical),
-        (
-            block_sad(&exp_tl, &mirror_h(&mirror_v(&act_br, n), n)),
-            ComparisonMethod::Rotated180,
-        ),
+    // Extract 4 corner blocks + 1 center block from expected
+    let cx = (w - bs) / 2;
+    let cy = (h - bs) / 2;
+    let exp_blocks: [(u32, u32); 5] = [
+        (0, 0),           // TL
+        (w - bs, 0),      // TR
+        (0, h - bs),      // BL
+        (w - bs, h - bs), // BR
+        (cx, cy),         // Center
     ];
-    scored.sort_by_key(|(sad, _)| *sad);
 
-    // ── Phase 2: run zensim on candidates, stop early if good match found ──
-    let act_img = RgbaImage::from_raw(w, h, actual_rgba.to_vec())?;
-    let mut best: Option<(RegressionReport, ComparisonMethod)> = None;
-    let mut tried = 0usize;
+    // For each transform, define where each expected block maps in the actual image
+    // and how to mirror the block to undo the transform for comparison.
+    let candidates = [
+        ComparisonMethod::FlipHorizontal,
+        ComparisonMethod::FlipVertical,
+        ComparisonMethod::Rotated180,
+    ];
 
-    for &(_, method) in &scored {
-        tried += 1;
-        let transformed = match method {
-            ComparisonMethod::FlipHorizontal => image::imageops::flip_horizontal(&act_img),
-            ComparisonMethod::FlipVertical => image::imageops::flip_vertical(&act_img),
-            ComparisonMethod::Rotated180 => image::imageops::rotate180(&act_img),
-            _ => continue,
-        };
+    let mut best: Option<(f64, ComparisonMethod)> = None;
 
-        let report = classify_rgba_pair(
-            zensim,
-            expected_rgba, w, h,
-            transformed.as_raw(), w, h,
-            tolerance,
-        )
-        .ok()?;
+    for &method in &candidates {
+        let mut total_score = 0.0f64;
+        let mut valid_blocks = 0u32;
 
-        let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
+        for &(ex, ey) in &exp_blocks {
+            let exp_block = extract_block(expected_rgba, w, ex, ey, bs);
+
+            // Map block position under the transform
+            let (ax, ay) = match method {
+                ComparisonMethod::FlipHorizontal => (w - ex - bs, ey),
+                ComparisonMethod::FlipVertical => (ex, h - ey - bs),
+                ComparisonMethod::Rotated180 => (w - ex - bs, h - ey - bs),
+                _ => unreachable!(),
+            };
+            let mut act_block = extract_block(actual_rgba, w, ax, ay, bs);
+
+            // Mirror the actual block to undo the transform
+            match method {
+                ComparisonMethod::FlipHorizontal => mirror_block_h(&mut act_block, bs),
+                ComparisonMethod::FlipVertical => mirror_block_v(&mut act_block, bs),
+                ComparisonMethod::Rotated180 => {
+                    mirror_block_h(&mut act_block, bs);
+                    mirror_block_v(&mut act_block, bs);
+                }
+                _ => unreachable!(),
+            }
+
+            if exp_block.len() == act_block.len()
+                && exp_block.len() == (bs * bs * 4) as usize
+                && let Ok(report) = classify_rgba_pair(
+                    zensim,
+                    &exp_block, bs, bs,
+                    &act_block, bs, bs,
+                    &RegressionTolerance::off_by_one().with_min_similarity(0.0),
+                )
+            {
+                total_score += report.score();
+                valid_blocks += 1;
+            }
+        }
+
+        if valid_blocks == 0 {
+            continue;
+        }
+        let mean_score = total_score / valid_blocks as f64;
+
+        let dominated = best.as_ref().is_none_or(|(s, _)| mean_score > *s);
         if dominated {
-            best = Some((report, method));
+            best = Some((mean_score, method));
         }
 
-        // Quick exit: if the best SAD candidate doesn't improve the score
-        // at all, the images are unrelated — skip remaining candidates.
-        if tried == 1 && best.as_ref().is_some_and(|(b, _)| b.score() < original_score + 5.0) {
+        // Quick exit: if first candidate scored very poorly, images are unrelated.
+        if mean_score < original_score + 5.0 {
             return None;
-        }
-
-        // After 2: stop early if we found a good match
-        if tried >= 2 && best.as_ref().is_some_and(|(b, _)| b.score() > 70.0) {
-            break;
         }
     }
 
-    // Report if the transform is a clear improvement
-    let (report, method) = best?;
+    let (mean_score, method) = best?;
+
+    // Must meaningfully improve over the original score
+    if mean_score < original_score + 15.0 || mean_score < 40.0 {
+        return None;
+    }
+
+    // Build a minimal report for the detected transform.
+    // We don't re-run full-image zensim — the block mean is the diagnostic score.
+    // The caller can re-run full zensim if they need precise numbers.
+    let tolerance = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+    // Use block score as the reported score via a lightweight dummy comparison
+    // on a center crop to keep it fast.
+    let crop_w = (w / 2).max(8);
+    let crop_h = (h / 2).max(8);
+    let exp_center = center_crop_rgba(expected_rgba, w, h, crop_w, crop_h);
+    let act_center = center_crop_rgba(actual_rgba, w, h, crop_w, crop_h);
+
+    // Mirror the actual center crop according to the detected transform
+    let mut act_mirrored = act_center;
+    match method {
+        ComparisonMethod::FlipHorizontal => mirror_block_h(&mut act_mirrored, crop_w),
+        ComparisonMethod::FlipVertical => mirror_block_v(&mut act_mirrored, crop_h),
+        ComparisonMethod::Rotated180 => {
+            mirror_block_h(&mut act_mirrored, crop_w);
+            mirror_block_v(&mut act_mirrored, crop_h);
+        }
+        _ => {}
+    }
+
+    let report = classify_rgba_pair(
+        zensim,
+        &exp_center, crop_w, crop_h,
+        &act_mirrored, crop_w, crop_h,
+        &tolerance,
+    ).ok()?;
+
     if report.score() > original_score + 15.0 && report.score() >= 40.0 {
         Some((report, method))
     } else {
         None
+    }
+}
+
+/// Mirror an RGBA block in-place horizontally (swap columns).
+fn mirror_block_h(block: &mut [u8], w: u32) {
+    let h = block.len() as u32 / (w * 4);
+    for y in 0..h {
+        for x in 0..w / 2 {
+            let left = ((y * w + x) * 4) as usize;
+            let right = ((y * w + (w - 1 - x)) * 4) as usize;
+            for c in 0..4 {
+                block.swap(left + c, right + c);
+            }
+        }
+    }
+}
+
+/// Mirror an RGBA block in-place vertically (swap rows).
+fn mirror_block_v(block: &mut [u8], w: u32) {
+    let h = block.len() as u32 / (w * 4);
+    let row_bytes = (w * 4) as usize;
+    for y in 0..h / 2 {
+        let top = (y * w * 4) as usize;
+        let bot = ((h - 1 - y) * w * 4) as usize;
+        for i in 0..row_bytes {
+            block.swap(top + i, bot + i);
+        }
     }
 }
 

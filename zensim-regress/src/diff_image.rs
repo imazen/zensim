@@ -1028,7 +1028,8 @@ fn render_mismatched_montage(
     draw_rect_border(&mut panel_actual, ax_off_x, ax_off_y, aw, ah, border_color);
 
     // Panel 2: PIXEL DIFF — resize actual to expected dims, compute diff
-    let act_resized = imageops::resize(actual, ew, eh, imageops::FilterType::Lanczos3);
+    // Triangle (bilinear) — fast enough for diagnostic montage, Lanczos3 is overkill.
+    let act_resized = imageops::resize(actual, ew, eh, imageops::FilterType::Triangle);
     let pixel_diff_raw = generate_diff_image(expected, &act_resized, amplification);
     let mut panel_pixel_diff = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
     imageops::overlay(
