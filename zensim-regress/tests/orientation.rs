@@ -1,18 +1,19 @@
 //! Integration tests for EXIF orientation handling using codec-corpus
 //! Landscape and Portrait JPEG test images (orientations 1–8).
 //!
-//! These images contain the same visual scene but were independently JPEG-encoded
-//! per orientation, resulting in significant pixel differences (mean abs diff ~14,
-//! PSNR ~22 dB) even after applying the correct transform. Because of this,
-//! zensim scores are negative for all orientation pairs.
+//! Each image contains a different number (1–8) rendered in the center,
+//! matching its EXIF orientation flag. The images are designed for visual
+//! verification ("does the number appear upright after applying the EXIF
+//! transform?"), not for pixel-level comparison between orientations.
+//! Comparing Landscape_1 to Landscape_2 is comparing two different images.
 //!
 //! These tests verify:
-//! - Correct dimension detection (same-dim for 1-4, swapped for 5-8)
+//! - Correct dimension detection (same-dim for 1–4, swapped for 5–8)
 //! - Correct DimensionMismatchKind categorization
 //! - The scoring pipeline doesn't panic on real JPEG images
 //!
-//! For transform detection correctness with pixel-identical content,
-//! see the unit tests in testing.rs (synthetic gradient images).
+//! For transform detection correctness (pixel-identical content with
+//! applied transforms), see the unit tests in testing.rs.
 
 use image::RgbaImage;
 use zensim::{Zensim, ZensimProfile};
