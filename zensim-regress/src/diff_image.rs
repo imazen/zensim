@@ -913,6 +913,8 @@ fn render_montage_impl(
             imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
         }
         y_cursor += title_h;
+        // Horizontal separator line
+        fill_rect(&mut output, pad, y_cursor.saturating_sub(1), total_w - pad * 2, 1, [60, 60, 60, 255]);
     }
 
     // Primary text strip — center the first line (PASS/FAIL)
