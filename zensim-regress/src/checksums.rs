@@ -1572,13 +1572,26 @@ impl ChecksumManager {
                 .expect("ref: invalid dimensions");
             let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
                 .expect("actual: invalid dimensions");
-            let ref_resized = image::imageops::resize(&ref_img, target_w, target_h, image::imageops::FilterType::Lanczos3);
-            let act_resized = image::imageops::resize(&act_img, target_w, target_h, image::imageops::FilterType::Lanczos3);
+            let ref_resized = image::imageops::resize(
+                &ref_img,
+                target_w,
+                target_h,
+                image::imageops::FilterType::Lanczos3,
+            );
+            let act_resized = image::imageops::resize(
+                &act_img,
+                target_w,
+                target_h,
+                image::imageops::FilterType::Lanczos3,
+            );
 
-            let dim_title = format!("{} {} (ref {}x{}, actual {}x{})",
-                test_name, detail_name, rw, rh, aw, ah);
+            let dim_title = format!(
+                "{} {} (ref {}x{}, actual {}x{})",
+                test_name, detail_name, rw, rh, aw, ah
+            );
             let dim_annotation = AnnotationText::empty().with_title(dim_title);
-            let montage = MontageOptions::default().render(&ref_resized, &act_resized, &dim_annotation);
+            let montage =
+                MontageOptions::default().render(&ref_resized, &act_resized, &dim_annotation);
             let _ = montage.save(&out_path);
             return Some(out_path);
         }

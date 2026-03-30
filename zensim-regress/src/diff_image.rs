@@ -809,9 +809,15 @@ fn render_montage_impl(
     // Title text — white, fitted to grid width
     let text_avail = grid_w.saturating_sub(pad * 2);
     let title_rendered = annotation.title.as_ref().and_then(|t| {
-        if t.is_empty() { return None; }
+        if t.is_empty() {
+            return None;
+        }
         let lines: Vec<(&str, [u8; 4])> = vec![(t.as_str(), [255, 255, 255, 255])];
-        Some(font::render_lines_fitted(&lines, [25, 25, 25, 255], text_avail))
+        Some(font::render_lines_fitted(
+            &lines,
+            [25, 25, 25, 255],
+            text_avail,
+        ))
     });
 
     // Primary text — colored per-line, fitted to grid width (no wrapping)
@@ -855,9 +861,7 @@ fn render_montage_impl(
         None
     };
 
-    let title_h = title_rendered
-        .as_ref()
-        .map_or(0, |(_, _, h)| *h + pad * 2);
+    let title_h = title_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
     let primary_h = primary_rendered
         .as_ref()
         .map_or(0, |(_, _, h)| *h + pad * 2);
@@ -907,14 +911,28 @@ fn render_montage_impl(
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, title_h, [25, 25, 25, 255]);
+        fill_rect(
+            &mut output,
+            0,
+            y_cursor,
+            total_w,
+            title_h,
+            [25, 25, 25, 255],
+        );
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             let tx = (total_w.saturating_sub(tw)) / 2;
             imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
         }
         y_cursor += title_h;
         // Horizontal separator line
-        fill_rect(&mut output, pad, y_cursor.saturating_sub(1), total_w - pad * 2, 1, [60, 60, 60, 255]);
+        fill_rect(
+            &mut output,
+            pad,
+            y_cursor.saturating_sub(1),
+            total_w - pad * 2,
+            1,
+            [60, 60, 60, 255],
+        );
     }
 
     // Primary text strip — center the first line (PASS/FAIL)
