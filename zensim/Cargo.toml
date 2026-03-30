@@ -23,6 +23,11 @@ training = []
 classification = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
+## Enable ImageSource adapter for zenpixels PixelSlice/PixelBuffer types.
+## Automatically maps PixelDescriptor to correct format, alpha mode, and
+## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
+## alpha (un-premultiplied on the fly).
+zenpixels = ["dep:zenpixels"]
 ## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
 ## Uses zenresize for resampling — training/research feature.
 ## Commented out: zenresize not yet published to crates.io.
@@ -37,6 +42,7 @@ thiserror = { workspace = true }
 linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
+zenpixels = { version = "0.2.1", optional = true, default-features = false }
 # zenresize = { workspace = true, optional = true }  # re-enable when published
 
 [dev-dependencies]

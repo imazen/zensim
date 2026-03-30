@@ -148,6 +148,13 @@ pub use metric::{
     precompute_reference_with_scales, score_from_features,
 };
 
+#[cfg(feature = "zenpixels")]
+mod zenpixels_compat;
+#[cfg(feature = "zenpixels")]
+pub use error::UnsupportedFormat;
+#[cfg(feature = "zenpixels")]
+pub use zenpixels_compat::ZenpixelsSource;
+
 /// Number of downscale levels. Each level halves resolution.
 /// 4 scales covers 1x, 2x, 4x, 8x — sufficient for most perceptual effects.
 pub(crate) const NUM_SCALES: usize = 4;

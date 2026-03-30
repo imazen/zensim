@@ -20,3 +20,9 @@ pub enum ZensimError {
     #[error("Row stride is smaller than width * bytes_per_pixel")]
     InvalidStride,
 }
+
+/// Pixel format conversion error from the zenpixels adapter.
+#[cfg(feature = "zenpixels")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("Unsupported pixel format: {0}")]
+pub struct UnsupportedFormat(pub &'static str);
