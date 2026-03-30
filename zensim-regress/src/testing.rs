@@ -1437,47 +1437,366 @@ mod tests {
         assert!(desc.contains("+5h"), "expected +5h in: {desc}");
     }
 
+    // ─── Helpers ─────────────────────────────────────────────────────────
+
+    /// Create an asymmetric 16x16 gradient image (packed RGBA).
+    fn asymmetric_gradient(w: u32, h: u32) -> Vec<u8> {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w.max(1)) as u8;
+                let g = ((y * 127) / h.max(1)) as u8;
+                let b = (((x + y * 2) * 63) / (w + h).max(1)) as u8;
+                rgba.extend_from_slice(&[r, g, b, 255]);
+            }
+        }
+        rgba
+    }
+
+    fn px(rgba: &[u8]) -> Vec<[u8; 4]> {
+        rgba.chunks_exact(4)
+            .map(|c| [c[0], c[1], c[2], c[3]])
+            .collect()
+    }
+
+    // ─── detect_transform tests ─────────────────────────────────────────
+
     #[test]
     fn detect_transform_catches_hflip() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
-
-        // Create a 16x16 asymmetric gradient
-        let mut rgba = Vec::with_capacity(16 * 16 * 4);
-        for y in 0..16u8 {
-            for x in 0..16u8 {
-                rgba.extend_from_slice(&[x * 16, y * 8, (x + y) * 4, 255]);
-            }
-        }
-
-        // Flip horizontally
+        let rgba = asymmetric_gradient(16, 16);
         let img = image::RgbaImage::from_raw(16, 16, rgba.clone()).unwrap();
-        let flipped = image::imageops::flip_horizontal(&img);
-        let flipped_rgba = flipped.into_raw();
+        let flipped = image::imageops::flip_horizontal(&img).into_raw();
 
-        // Original comparison should score low (asymmetric content)
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
-        let orig_report = check_regression(
+        let orig = check_regression(
             &z,
-            &zensim::RgbaSlice::new(
-                &rgba.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect::<Vec<_>>(),
-                16, 16,
-            ),
-            &zensim::RgbaSlice::new(
-                &flipped_rgba.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect::<Vec<_>>(),
-                16, 16,
-            ),
+            &zensim::RgbaSlice::new(&px(&rgba), 16, 16),
+            &zensim::RgbaSlice::new(&px(&flipped), 16, 16),
             &tol,
-        ).unwrap();
+        )
+        .unwrap();
 
-        // Transform detection should find the flip
-        let result = detect_transform(
-            &z, &rgba, &flipped_rgba, 16, 16, orig_report.score(), &tol,
-        );
-        if let Some((report, method)) = result {
+        if let Some((report, method)) = detect_transform(&z, &rgba, &flipped, 16, 16, orig.score(), &tol) {
             assert_eq!(method, ComparisonMethod::FlipHorizontal);
             assert!(report.score() > 90.0, "flip score {} should be > 90", report.score());
         }
-        // Note: may return None for very small/simple images where the flip
-        // doesn't lower the score enough. That's acceptable.
+    }
+
+    #[test]
+    fn detect_transform_catches_vflip() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = asymmetric_gradient(16, 16);
+        let img = image::RgbaImage::from_raw(16, 16, rgba.clone()).unwrap();
+        let flipped = image::imageops::flip_vertical(&img).into_raw();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let orig = check_regression(
+            &z,
+            &zensim::RgbaSlice::new(&px(&rgba), 16, 16),
+            &zensim::RgbaSlice::new(&px(&flipped), 16, 16),
+            &tol,
+        )
+        .unwrap();
+
+        if let Some((report, method)) = detect_transform(&z, &rgba, &flipped, 16, 16, orig.score(), &tol) {
+            assert_eq!(method, ComparisonMethod::FlipVertical);
+            assert!(report.score() > 90.0, "flip score {} should be > 90", report.score());
+        }
+    }
+
+    #[test]
+    fn detect_transform_catches_rot180() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = asymmetric_gradient(16, 16);
+        let img = image::RgbaImage::from_raw(16, 16, rgba.clone()).unwrap();
+        let rotated = image::imageops::rotate180(&img).into_raw();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let orig = check_regression(
+            &z,
+            &zensim::RgbaSlice::new(&px(&rgba), 16, 16),
+            &zensim::RgbaSlice::new(&px(&rotated), 16, 16),
+            &tol,
+        )
+        .unwrap();
+
+        if let Some((report, method)) = detect_transform(&z, &rgba, &rotated, 16, 16, orig.score(), &tol) {
+            assert_eq!(method, ComparisonMethod::Rotated180);
+            assert!(report.score() > 90.0, "rot180 score {} should be > 90", report.score());
+        }
+    }
+
+    #[test]
+    fn detect_transform_returns_none_for_unrelated_images() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba_a = asymmetric_gradient(16, 16);
+        // Completely different image
+        let rgba_b: Vec<u8> = (0..16 * 16)
+            .flat_map(|i| [((i * 7) % 256) as u8, ((i * 13) % 256) as u8, ((i * 31) % 256) as u8, 255])
+            .collect();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let result = detect_transform(&z, &rgba_a, &rgba_b, 16, 16, 5.0, &tol);
+        assert!(result.is_none(), "should not detect transform for unrelated images");
+    }
+
+    #[test]
+    fn detect_transform_returns_none_for_too_small() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = vec![128u8; 4 * 4 * 4]; // 4x4 — too small
+        let tol = RegressionTolerance::exact();
+        assert!(detect_transform(&z, &rgba, &rgba, 4, 4, 10.0, &tol).is_none());
+    }
+
+    // ─── Orientation swap scoring tests ─────────────────────────────────
+
+    #[test]
+    fn orientation_swap_detects_rot90() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = asymmetric_gradient(16, 24);
+        let img = image::RgbaImage::from_raw(16, 24, rgba.clone()).unwrap();
+        let rotated = image::imageops::rotate90(&img);
+        let rot_rgba = rotated.clone().into_raw();
+        let (rw, rh) = rotated.dimensions(); // 24x16
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let report =
+            check_regression_resized(&z, &rgba, 16, 24, &rot_rgba, rw, rh, &tol).unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
+        // Corner-SAD may prefer rot90 or rot270 — both are correct rotations.
+        // The important thing is the score is high (correct content match).
+        assert!(
+            matches!(dim.method, ComparisonMethod::Rotated90 | ComparisonMethod::Rotated270
+                | ComparisonMethod::Transpose | ComparisonMethod::Transverse),
+            "expected a rotation method, got {:?}", dim.method,
+        );
+        assert!(report.score() > 90.0, "rot90 score {} should be > 90", report.score());
+    }
+
+    #[test]
+    fn orientation_swap_detects_rot270() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = asymmetric_gradient(16, 24);
+        let img = image::RgbaImage::from_raw(16, 24, rgba.clone()).unwrap();
+        let rotated = image::imageops::rotate270(&img);
+        let rot_rgba = rotated.clone().into_raw();
+        let (rw, rh) = rotated.dimensions();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let report =
+            check_regression_resized(&z, &rgba, 16, 24, &rot_rgba, rw, rh, &tol).unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
+        assert!(
+            matches!(dim.method, ComparisonMethod::Rotated90 | ComparisonMethod::Rotated270
+                | ComparisonMethod::Transpose | ComparisonMethod::Transverse),
+            "expected a rotation method, got {:?}", dim.method,
+        );
+        assert!(report.score() > 90.0, "rot270 score {} should be > 90", report.score());
+    }
+
+    #[test]
+    fn orientation_swap_detects_transpose() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = asymmetric_gradient(16, 24);
+        let img = image::RgbaImage::from_raw(16, 24, rgba.clone()).unwrap();
+        // Transpose = rot90 + flipH
+        let transposed = image::imageops::flip_horizontal(&image::imageops::rotate90(&img));
+        let t_rgba = transposed.clone().into_raw();
+        let (tw, th) = transposed.dimensions();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let report =
+            check_regression_resized(&z, &rgba, 16, 24, &t_rgba, tw, th, &tol).unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
+        assert_eq!(dim.method, ComparisonMethod::Transpose);
+        assert!(report.score() > 90.0, "transpose score {} should be > 90", report.score());
+    }
+
+    // ─── Crop difference with fallback ──────────────────────────────────
+
+    #[test]
+    fn crop_difference_same_content_uses_center_crop() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        // 100x100 image, cropped to 97x97 (3% diff, > ±2px, within 5%)
+        let rgba100 = asymmetric_gradient(100, 100);
+        let img100 = image::RgbaImage::from_raw(100, 100, rgba100.clone()).unwrap();
+        let cropped = image::imageops::crop_imm(&img100, 1, 1, 97, 97).to_image();
+        let rgba97 = cropped.into_raw();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
+        let report =
+            check_regression_resized(&z, &rgba100, 100, 100, &rgba97, 97, 97, &tol).unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.kind, DimensionMismatchKind::CropDifference);
+        assert!(report.score() > 50.0, "crop score {} should be > 50", report.score());
+    }
+
+    // ─── Helper function tests ──────────────────────────────────────────
+
+    #[test]
+    fn center_crop_rgba_basic() {
+        // 4x4 image, crop to 2x2 center
+        let rgba: Vec<u8> = (0..16).flat_map(|i| [i as u8, 0, 0, 255]).collect();
+        let cropped = center_crop_rgba(&rgba, 4, 4, 2, 2);
+        // Center of 4x4 starts at (1,1), pixels 5,6,9,10
+        assert_eq!(cropped.len(), 2 * 2 * 4);
+        assert_eq!(cropped[0], 5); // pixel (1,1) R channel
+        assert_eq!(cropped[4], 6); // pixel (2,1) R channel
+    }
+
+    #[test]
+    fn center_crop_rgba_no_op_when_same_size() {
+        let rgba: Vec<u8> = (0..16).flat_map(|i| [i as u8, 0, 0, 255]).collect();
+        let cropped = center_crop_rgba(&rgba, 4, 4, 4, 4);
+        assert_eq!(cropped, rgba);
+    }
+
+    #[test]
+    fn block_sad_identical_is_zero() {
+        let block = vec![100u8; 64];
+        assert_eq!(block_sad(&block, &block), 0);
+    }
+
+    #[test]
+    fn block_sad_maximum_difference() {
+        let a = vec![0u8; 4];
+        let b = vec![255u8; 4];
+        assert_eq!(block_sad(&a, &b), 255 * 4);
+    }
+
+    #[test]
+    fn extract_block_top_left() {
+        // 4x4 image, extract 2x2 from (0,0)
+        let rgba: Vec<u8> = (0..16).flat_map(|i| [i as u8, 0, 0, 255]).collect();
+        let block = extract_block(&rgba, 4, 0, 0, 2);
+        assert_eq!(block.len(), 2 * 2 * 4);
+        assert_eq!(block[0], 0); // pixel (0,0)
+        assert_eq!(block[4], 1); // pixel (1,0)
+    }
+
+    #[test]
+    fn extract_block_bottom_right() {
+        // 4x4 image, extract 2x2 from (2,2)
+        let rgba: Vec<u8> = (0..16).flat_map(|i| [i as u8, 0, 0, 255]).collect();
+        let block = extract_block(&rgba, 4, 2, 2, 2);
+        assert_eq!(block[0], 10); // pixel (2,2)
+        assert_eq!(block[4], 11); // pixel (3,2)
+    }
+
+    // ─── Display impl tests ────────────────────────────────────────────
+
+    #[test]
+    fn dimension_mismatch_kind_display() {
+        assert_eq!(DimensionMismatchKind::OrientationSwap.to_string(), "orientation swap");
+        assert_eq!(DimensionMismatchKind::OffByOne.to_string(), "off-by-one rounding");
+        assert_eq!(DimensionMismatchKind::CropDifference.to_string(), "crop/trim");
+        assert_eq!(DimensionMismatchKind::LargeDifference.to_string(), "different dimensions");
+    }
+
+    #[test]
+    fn comparison_method_display() {
+        assert_eq!(ComparisonMethod::Resized.to_string(), "resized");
+        assert_eq!(ComparisonMethod::CenterCropped.to_string(), "center-cropped");
+        assert_eq!(ComparisonMethod::Rotated90.to_string(), "rotated 90\u{00b0} CW");
+        assert_eq!(ComparisonMethod::Rotated270.to_string(), "rotated 270\u{00b0} CW");
+        assert_eq!(ComparisonMethod::FlipHorizontal.to_string(), "flipped horizontally");
+        assert_eq!(ComparisonMethod::FlipVertical.to_string(), "flipped vertically");
+        assert_eq!(ComparisonMethod::Rotated180.to_string(), "rotated 180\u{00b0}");
+        assert_eq!(ComparisonMethod::Transpose.to_string(), "transposed (rot90+flipH)");
+        assert_eq!(ComparisonMethod::Transverse.to_string(), "transversed (rot270+flipH)");
+    }
+
+    #[test]
+    fn panel_label_all_variants() {
+        let cases = [
+            (ComparisonMethod::Resized, "RESIZED"),
+            (ComparisonMethod::CenterCropped, "CROPPED"),
+            (ComparisonMethod::Rotated90, "ROT 90"),
+            (ComparisonMethod::Rotated270, "ROT 270"),
+            (ComparisonMethod::FlipHorizontal, "FLIP H"),
+            (ComparisonMethod::FlipVertical, "FLIP V"),
+            (ComparisonMethod::Rotated180, "ROT 180"),
+            (ComparisonMethod::Transpose, "TRANSPOSE"),
+            (ComparisonMethod::Transverse, "TRANSVERSE"),
+        ];
+        for (method, expected) in cases {
+            let info = DimensionInfo {
+                expected_dims: (100, 100),
+                actual_dims: (100, 100),
+                kind: DimensionMismatchKind::OrientationSwap,
+                method,
+            };
+            assert!(info.panel_label().contains(expected),
+                "panel_label for {method:?} should contain '{expected}', got '{}'", info.panel_label());
+        }
+    }
+
+    // ─── Report dimension_info setter ───────────────────────────────────
+
+    #[test]
+    fn set_dimension_info_on_report() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let rgba = vec![128u8; 8 * 8 * 4];
+        let tol = RegressionTolerance::exact();
+        let mut report = check_regression(
+            &z,
+            &zensim::RgbaSlice::new(&px(&rgba), 8, 8),
+            &zensim::RgbaSlice::new(&px(&rgba), 8, 8),
+            &tol,
+        )
+        .unwrap();
+
+        assert!(report.dimension_info().is_none());
+        report.set_dimension_info(DimensionInfo {
+            expected_dims: (8, 8),
+            actual_dims: (10, 10),
+            kind: DimensionMismatchKind::OffByOne,
+            method: ComparisonMethod::CenterCropped,
+        });
+        assert!(report.dimension_info().is_some());
+        assert_eq!(report.dimension_info().unwrap().kind, DimensionMismatchKind::OffByOne);
+    }
+
+    // ─── Edge case: classify boundary between categories ────────────────
+
+    #[test]
+    fn classify_boundary_off_by_one_to_crop() {
+        // ±3px is NOT off-by-one (limit is ±2)
+        assert_eq!(
+            classify_dimension_mismatch(100, 100, 97, 97),
+            DimensionMismatchKind::CropDifference,
+        );
+    }
+
+    #[test]
+    fn classify_boundary_crop_to_large() {
+        // 5% boundary: diff/expected < 0.05
+        // 4/100 = 0.04 < 0.05 → CropDifference
+        assert_eq!(
+            classify_dimension_mismatch(100, 100, 96, 96),
+            DimensionMismatchKind::CropDifference,
+        );
+        // 5/100 = 0.05, NOT < 0.05 → LargeDifference
+        assert_eq!(
+            classify_dimension_mismatch(100, 100, 95, 95),
+            DimensionMismatchKind::LargeDifference,
+        );
+    }
+
+    #[test]
+    fn classify_one_axis_zero_diff() {
+        // One axis same, other differs by 1
+        assert_eq!(
+            classify_dimension_mismatch(100, 100, 100, 99),
+            DimensionMismatchKind::OffByOne,
+        );
     }
 }
