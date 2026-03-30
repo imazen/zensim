@@ -278,6 +278,7 @@ pub struct RegressionReport {
     actual_histogram: ChannelHistograms,
     rounding_bias: Option<RoundingBias>,
     constraint_results: Vec<ConstraintResult>,
+    dimension_info: Option<DimensionInfo>,
 }
 
 impl RegressionReport {
@@ -363,6 +364,40 @@ impl RegressionReport {
     pub fn rounding_bias(&self) -> Option<&RoundingBias> {
         self.rounding_bias.as_ref()
     }
+
+    /// Dimension mismatch metadata, if the comparison used resized images.
+    pub fn dimension_info(&self) -> Option<&DimensionInfo> {
+        self.dimension_info.as_ref()
+    }
+}
+
+/// Metadata about a dimension-mismatch comparison.
+///
+/// When expected and actual images have different dimensions, the actual image
+/// is resized to match the expected before comparison. This struct records
+/// the original dimensions so downstream consumers can annotate the result
+/// as approximate.
+#[derive(Debug, Clone)]
+pub struct DimensionInfo {
+    /// Original expected image dimensions (width, height).
+    pub expected_dims: (u32, u32),
+    /// Original actual image dimensions (width, height).
+    pub actual_dims: (u32, u32),
+}
+
+impl DimensionInfo {
+    /// Human-readable description of the dimension difference.
+    pub fn description(&self) -> String {
+        let (ew, eh) = self.expected_dims;
+        let (aw, ah) = self.actual_dims;
+        if ew == ah && eh == aw {
+            format!("{ew}\u{00d7}{eh} vs {aw}\u{00d7}{ah} (rotated?)")
+        } else {
+            let dw = aw as i64 - ew as i64;
+            let dh = ah as i64 - eh as i64;
+            format!("{ew}\u{00d7}{eh} vs {aw}\u{00d7}{ah} ({dw:+}w, {dh:+}h)")
+        }
+    }
 }
 
 impl std::fmt::Debug for RegressionReport {
@@ -387,12 +422,22 @@ impl std::fmt::Debug for RegressionReport {
             .field("expected_histogram", &self.expected_histogram)
             .field("actual_histogram", &self.actual_histogram)
             .field("rounding_bias", &self.rounding_bias)
+            .field("dimension_info", &self.dimension_info)
             .finish()
     }
 }
 
 impl std::fmt::Display for RegressionReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Dimension mismatch notice
+        if let Some(ref dim_info) = self.dimension_info {
+            writeln!(
+                f,
+                "NOTE: Dimensions differ ({}) \u{2014} score is approximate (actual resized to match expected).",
+                dim_info.description(),
+            )?;
+        }
+
         let status = if self.passed { "PASS" } else { "FAIL" };
 
         // Special case: pixel-identical
@@ -657,6 +702,7 @@ pub(crate) fn build_report(
         actual_histogram,
         rounding_bias: cr.classification.rounding_bias,
         constraint_results,
+        dimension_info: None,
     }
 }
 
@@ -700,6 +746,77 @@ pub fn check_regression(
         zensim.classify(expected, actual)?
     };
     Ok(build_report(cr, tolerance))
+}
+
+/// Compare expected vs actual images that have different dimensions.
+///
+/// Resizes the actual image to match the expected's dimensions using Lanczos3,
+/// then runs zensim comparison. The resulting report is annotated with
+/// [`DimensionInfo`] to indicate the comparison is approximate.
+///
+/// The expected image is never resized — it is the ground truth. Only the
+/// actual is scaled to match.
+///
+/// The resized score is useful for distinguishing "same image, different crop"
+/// (score ~90+) from "completely wrong image" (score < 50), but should not be
+/// treated as authoritative for tight tolerance checking.
+///
+/// # Errors
+///
+/// Returns [`ZensimError::ImageTooSmall`] if the expected dimensions are < 8×8.
+#[allow(clippy::too_many_arguments)]
+pub fn check_regression_resized(
+    zensim: &Zensim,
+    expected_rgba: &[u8],
+    ew: u32,
+    eh: u32,
+    actual_rgba: &[u8],
+    aw: u32,
+    ah: u32,
+    tolerance: &RegressionTolerance,
+) -> Result<RegressionReport, ZensimError> {
+    use image::imageops::{self, FilterType};
+    use image::RgbaImage;
+
+    if ew < 8 || eh < 8 {
+        return Err(ZensimError::ImageTooSmall);
+    }
+
+    // Resize actual to match expected dimensions.
+    let act_img = RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+        .expect("actual: data length does not match dimensions");
+    let act_resized = if aw == ew && ah == eh {
+        act_img
+    } else {
+        imageops::resize(&act_img, ew, eh, FilterType::Lanczos3)
+    };
+
+    // Build pixel slices for zensim.
+    let ref_pixels: Vec<[u8; 4]> = expected_rgba
+        .chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect();
+    let act_pixels: Vec<[u8; 4]> = act_resized
+        .as_raw()
+        .chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect();
+
+    let ref_source = zensim::RgbaSlice::new(&ref_pixels, ew as usize, eh as usize);
+    let act_source = zensim::RgbaSlice::new(&act_pixels, ew as usize, eh as usize);
+
+    let cr = if tolerance.ignore_alpha {
+        zensim.classify(&AlphaOverride(&ref_source), &AlphaOverride(&act_source))?
+    } else {
+        zensim.classify(&ref_source, &act_source)?
+    };
+
+    let mut report = build_report(cr, tolerance);
+    report.dimension_info = Some(DimensionInfo {
+        expected_dims: (ew, eh),
+        actual_dims: (aw, ah),
+    });
+    Ok(report)
 }
 
 // ─── shrink_tolerance() ──────────────────────────────────────────────────
@@ -755,5 +872,90 @@ pub fn shrink_tolerance(
         min_similarity: new_min_similarity,
         max_alpha_delta: new_max_alpha_delta,
         ignore_alpha: current.ignore_alpha,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resized_comparison_same_image_different_size() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+
+        // Create a 16x16 gradient image
+        let mut small_rgba = Vec::with_capacity(16 * 16 * 4);
+        for y in 0..16u8 {
+            for x in 0..16u8 {
+                small_rgba.extend_from_slice(&[x * 16, y * 16, 128, 255]);
+            }
+        }
+
+        // Upscale to 32x32 via Lanczos3
+        let img = image::RgbaImage::from_raw(16, 16, small_rgba.clone()).unwrap();
+        let big = image::imageops::resize(
+            &img,
+            32,
+            32,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let big_rgba = big.into_raw();
+
+        let tol = RegressionTolerance::off_by_one().with_min_similarity(50.0);
+        let report =
+            check_regression_resized(&z, &small_rgba, 16, 16, &big_rgba, 32, 32, &tol).unwrap();
+
+        // Same image content should score high even after resize
+        assert!(
+            report.score() > 70.0,
+            "score {} should be > 70",
+            report.score()
+        );
+        assert!(report.dimension_info().is_some());
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.expected_dims, (16, 16));
+        assert_eq!(dim.actual_dims, (32, 32));
+    }
+
+    #[test]
+    fn resized_comparison_too_small_returns_error() {
+        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let small = vec![0u8; 4 * 4 * 4]; // 4x4 RGBA
+        let big = vec![0u8; 16 * 16 * 4];
+        let tol = RegressionTolerance::exact();
+
+        let result = check_regression_resized(&z, &small, 4, 4, &big, 16, 16, &tol);
+        assert_eq!(result.unwrap_err(), ZensimError::ImageTooSmall);
+    }
+
+    #[test]
+    fn dimension_info_description_rotated() {
+        let info = DimensionInfo {
+            expected_dims: (480, 640),
+            actual_dims: (640, 480),
+        };
+        assert!(info.description().contains("rotated"));
+    }
+
+    #[test]
+    fn dimension_info_description_offset() {
+        let info = DimensionInfo {
+            expected_dims: (200, 150),
+            actual_dims: (195, 148),
+        };
+        let desc = info.description();
+        assert!(desc.contains("-5w"), "expected -5w in: {desc}");
+        assert!(desc.contains("-2h"), "expected -2h in: {desc}");
+    }
+
+    #[test]
+    fn dimension_info_description_larger() {
+        let info = DimensionInfo {
+            expected_dims: (100, 100),
+            actual_dims: (110, 105),
+        };
+        let desc = info.description();
+        assert!(desc.contains("+10w"), "expected +10w in: {desc}");
+        assert!(desc.contains("+5h"), "expected +5h in: {desc}");
     }
 }

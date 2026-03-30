@@ -1333,6 +1333,30 @@ impl AnnotationText {
         }
     }
 
+    /// Build annotation from a report computed on resized images.
+    ///
+    /// Shows the same constraint lines as [`from_report`](Self::from_report),
+    /// plus prominent amber-colored dimension-mismatch warning lines.
+    pub fn from_resized_report(
+        report: &crate::testing::RegressionReport,
+        tolerance: &crate::testing::RegressionTolerance,
+    ) -> Self {
+        let mut ann = Self::from_report(report, tolerance);
+
+        if let Some(dim_info) = report.dimension_info() {
+            const COLOR_WARN: [u8; 4] = [255, 200, 60, 255];
+
+            let dim_line = format!("DIMENSIONS: {}", dim_info.description());
+            let (ew, eh) = dim_info.expected_dims;
+            let resized_line =
+                format!("Actual resized to {ew}\u{00d7}{eh} for comparison (approximate)");
+            ann.primary_lines.insert(0, (resized_line, COLOR_WARN));
+            ann.primary_lines.insert(0, (dim_line, COLOR_WARN));
+        }
+
+        ann
+    }
+
     /// Set the title (builder pattern).
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());

@@ -95,6 +95,13 @@ pub fn format_diff_summary(report: &RegressionReport) -> String {
         });
     }
 
+    // Dimension mismatch indicator
+    if let Some(dim_info) = report.dimension_info() {
+        let (aw, ah) = dim_info.actual_dims;
+        let (ew, eh) = dim_info.expected_dims;
+        parts.push(format!("resized:{aw}x{ah}->{ew}x{eh}"));
+    }
+
     format!("({})", parts.join(", "))
 }
 

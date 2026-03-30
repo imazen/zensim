@@ -1300,17 +1300,44 @@ impl ChecksumManager {
                 // Convert actual to packed RGBA for montage (needed regardless of comparison outcome).
                 let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
 
-                let (report, comparison_error) =
+                let (report, dimension_mismatch) =
                     match check_regression(&self.zensim, &ref_source, actual, &reg_tolerance) {
                         Ok(r) => (Some(r), false),
                         Err(zensim::ZensimError::ImageTooSmall) => (None, false),
+                        Err(zensim::ZensimError::DimensionMismatch) => {
+                            // Dimensions differ — resize actual to match expected for
+                            // an approximate diagnostic score.
+                            eprintln!(
+                                "[checksum] dimension mismatch for {test_name}/{detail_name}: \
+                                 reference {rw}x{rh}, actual {aw}x{ah} \
+                                 \u{2014} running resized comparison",
+                            );
+                            match crate::testing::check_regression_resized(
+                                &self.zensim,
+                                &ref_rgba,
+                                rw,
+                                rh,
+                                &actual_rgba,
+                                aw,
+                                ah,
+                                &reg_tolerance,
+                            ) {
+                                Ok(r) => (Some(r), true),
+                                Err(e) => {
+                                    eprintln!(
+                                        "[checksum] resized comparison also failed for \
+                                         {test_name}/{detail_name}: {e}",
+                                    );
+                                    (None, true)
+                                }
+                            }
+                        }
                         Err(e) => {
-                            // Print dimensions on any zensim error (especially dimension mismatch).
                             eprintln!(
                                 "[checksum] zensim error for {test_name}/{detail_name}: {e}\n  \
                                  reference: {rw}x{rh}, actual: {aw}x{ah}",
                             );
-                            (None, true) // comparison failed — don't auto-accept
+                            (None, true)
                         }
                     };
                 let montage_path = self.save_diff_montage(
@@ -1327,7 +1354,8 @@ impl ChecksumManager {
                     &reg_tolerance,
                 );
 
-                let passed = !comparison_error && report.as_ref().is_none_or(|r| r.passed());
+                // Dimension mismatches never pass — the resized score is approximate.
+                let passed = !dimension_mismatch && report.as_ref().is_none_or(|r| r.passed());
 
                 if passed {
                     let auto_accepted = self.update_mode;
@@ -1565,33 +1593,33 @@ impl ChecksumManager {
         let out_path = diff_dir.join(format!("{flat_name}.png"));
 
         if rw != aw || rh != ah {
-            // Dimensions differ — resize smaller to match larger for visual comparison.
-            let target_w = rw.max(aw);
-            let target_h = rh.max(ah);
+            // Dimensions differ — resize actual to match expected for visual comparison.
             let ref_img = image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec())
                 .expect("ref: invalid dimensions");
             let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
                 .expect("actual: invalid dimensions");
-            let ref_resized = image::imageops::resize(
-                &ref_img,
-                target_w,
-                target_h,
-                image::imageops::FilterType::Lanczos3,
-            );
             let act_resized = image::imageops::resize(
                 &act_img,
-                target_w,
-                target_h,
+                rw,
+                rh,
                 image::imageops::FilterType::Lanczos3,
             );
 
-            let dim_title = format!(
-                "{} {} (ref {}x{}, actual {}x{})",
-                test_name, detail_name, rw, rh, aw, ah
-            );
-            let dim_annotation = AnnotationText::empty().with_title(dim_title);
-            let montage =
-                MontageOptions::default().render(&ref_resized, &act_resized, &dim_annotation);
+            let title = format!("{} {}", test_name, detail_name).trim().to_string();
+            let annotation = match report {
+                Some(r) if r.dimension_info().is_some() => {
+                    AnnotationText::from_resized_report(r, tolerance).with_title(title)
+                }
+                Some(r) => AnnotationText::from_report(r, tolerance).with_title(title),
+                None => {
+                    let dim_title = format!(
+                        "{title} (ref {rw}\u{00d7}{rh}, actual {aw}\u{00d7}{ah})",
+                    );
+                    AnnotationText::empty().with_title(dim_title)
+                }
+            };
+
+            let montage = MontageOptions::default().render(&ref_img, &act_resized, &annotation);
             let _ = montage.save(&out_path);
             return Some(out_path);
         }
