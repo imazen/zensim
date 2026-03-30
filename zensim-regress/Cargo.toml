@@ -29,5 +29,10 @@ base64 = "0.22"
 tempfile = "3"
 archmage = { workspace = true, features = ["testable_dispatch"] }
 codec-corpus = { workspace = true }
+zenbench = { workspace = true }
 # codec-corpus-fetch is local-only; uncomment for real_images tests
 # codec-corpus-fetch = { path = "/home/lilith/work/codec-corpus-fetch" }
+
+[[bench]]
+name = "bench_mismatch"
+harness = false

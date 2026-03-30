@@ -1215,6 +1215,12 @@ pub fn detect_transform(
             best = Some((report, method));
         }
 
+        // Quick exit: if the best SAD candidate doesn't improve the score
+        // at all, the images are unrelated — skip remaining candidates.
+        if tried == 1 && best.as_ref().is_some_and(|(b, _)| b.score() < original_score + 5.0) {
+            return None;
+        }
+
         // After 2: stop early if we found a good match
         if tried >= 2 && best.as_ref().is_some_and(|(b, _)| b.score() > 70.0) {
             break;
