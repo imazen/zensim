@@ -1065,10 +1065,12 @@ fn compare_orientation_swap(
         .collect();
     scored.sort_by_key(|(sad, _)| *sad);
 
-    // Run zensim on top 2 candidates
+    // Run zensim on top 2 candidates; if both score poorly, try the rest.
     let mut best: Option<(RegressionReport, ComparisonMethod)> = None;
+    let mut tried = 0usize;
 
-    for &(_, idx) in scored.iter().take(2) {
+    for &(_, idx) in &scored {
+        tried += 1;
         let (ref transformed, method) = candidates[idx];
         let report =
             classify_rgba_pair(zensim, exp, ew, eh, transformed.as_raw(), ew, eh, tolerance)?;
@@ -1076,6 +1078,12 @@ fn compare_orientation_swap(
         let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
         if dominated {
             best = Some((report, method));
+        }
+
+        // After 2 candidates: stop early if we found a good match (>70),
+        // otherwise keep going through all candidates.
+        if tried >= 2 && best.as_ref().is_some_and(|(b, _)| b.score() > 70.0) {
+            break;
         }
     }
 
@@ -1180,17 +1188,13 @@ pub fn detect_transform(
     ];
     scored.sort_by_key(|(sad, _)| *sad);
 
-    // Quick exit: if the best SAD is very high, no transform will help
-    let max_sad = (n * n * 4 * 255) as u64;
-    if scored[0].0 > max_sad / 2 {
-        return None;
-    }
-
-    // ── Phase 2: run zensim on top 2 candidates ──
+    // ── Phase 2: run zensim on candidates, stop early if good match found ──
     let act_img = RgbaImage::from_raw(w, h, actual_rgba.to_vec())?;
     let mut best: Option<(RegressionReport, ComparisonMethod)> = None;
+    let mut tried = 0usize;
 
-    for &(_, method) in scored.iter().take(2) {
+    for &(_, method) in &scored {
+        tried += 1;
         let transformed = match method {
             ComparisonMethod::FlipHorizontal => image::imageops::flip_horizontal(&act_img),
             ComparisonMethod::FlipVertical => image::imageops::flip_vertical(&act_img),
@@ -1209,6 +1213,11 @@ pub fn detect_transform(
         let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
         if dominated {
             best = Some((report, method));
+        }
+
+        // After 2: stop early if we found a good match
+        if tried >= 2 && best.as_ref().is_some_and(|(b, _)| b.score() > 70.0) {
+            break;
         }
     }
 

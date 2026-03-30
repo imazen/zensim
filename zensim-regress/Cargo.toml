@@ -28,5 +28,6 @@ base64 = "0.22"
 [dev-dependencies]
 tempfile = "3"
 archmage = { workspace = true, features = ["testable_dispatch"] }
+codec-corpus = { workspace = true }
 # codec-corpus-fetch is local-only; uncomment for real_images tests
 # codec-corpus-fetch = { path = "/home/lilith/work/codec-corpus-fetch" }
