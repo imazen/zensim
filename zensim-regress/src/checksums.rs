@@ -1567,9 +1567,10 @@ impl ChecksumManager {
             return None;
         }
 
+        let title = format!("{} {}", test_name, detail_name).trim().to_string();
         let annotation = match report {
-            Some(r) => AnnotationText::from_report(r, tolerance),
-            None => AnnotationText::empty(),
+            Some(r) => AnnotationText::from_report(r, tolerance).with_title(title),
+            None => AnnotationText::empty().with_title(title),
         };
 
         let ref_img =

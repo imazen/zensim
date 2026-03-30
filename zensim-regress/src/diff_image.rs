@@ -806,8 +806,15 @@ fn render_montage_impl(
     let grid_w = pad + cell_w + pad + cell_w + pad;
     let grid_h = pad + cell_h + pad + cell_h + pad;
 
-    // Primary text — colored per-line, fitted to grid width (no wrapping)
+    // Title text — white, fitted to grid width
     let text_avail = grid_w.saturating_sub(pad * 2);
+    let title_rendered = annotation.title.as_ref().and_then(|t| {
+        if t.is_empty() { return None; }
+        let lines: Vec<(&str, [u8; 4])> = vec![(t.as_str(), [255, 255, 255, 255])];
+        Some(font::render_lines_fitted(&lines, [25, 25, 25, 255], text_avail))
+    });
+
+    // Primary text — colored per-line, fitted to grid width (no wrapping)
     let primary_rendered = if !annotation.primary_lines.is_empty() {
         let line_refs: Vec<(&str, [u8; 4])> = annotation
             .primary_lines
@@ -848,6 +855,9 @@ fn render_montage_impl(
         None
     };
 
+    let title_h = title_rendered
+        .as_ref()
+        .map_or(0, |(_, _, h)| *h + pad * 2);
     let primary_h = primary_rendered
         .as_ref()
         .map_or(0, |(_, _, h)| *h + pad * 2);
@@ -855,7 +865,7 @@ fn render_montage_impl(
     let extra_h = extra_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
 
     let total_w = grid_w;
-    let total_h = grid_h + primary_h + heatmap_h + extra_h;
+    let total_h = grid_h + title_h + primary_h + heatmap_h + extra_h;
 
     let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
 
@@ -891,8 +901,21 @@ fn render_montage_impl(
         imageops::overlay(&mut output, &cropped, x0 as i64, (y0 + label_h) as i64);
     }
 
-    // Primary text strip — center the first line (PASS/FAIL)
+    // Title strip
     let mut y_cursor = grid_h;
+    if let Some((tbuf, tw, th)) = title_rendered
+        && tw > 0
+        && th > 0
+    {
+        fill_rect(&mut output, 0, y_cursor, total_w, title_h, [25, 25, 25, 255]);
+        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+            let tx = (total_w.saturating_sub(tw)) / 2;
+            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
+        }
+        y_cursor += title_h;
+    }
+
+    // Primary text strip — center the first line (PASS/FAIL)
     if let Some((tbuf, tw, th)) = primary_rendered
         && tw > 0
         && th > 0
@@ -1144,6 +1167,9 @@ impl MontageOptions {
 /// Use [`from_report`](Self::from_report) when you have a regression report,
 /// or [`empty`](Self::empty) for a bare montage with no annotations.
 pub struct AnnotationText {
+    /// Title shown above the constraint lines (e.g., test name + detail).
+    /// Rendered in white on the dark background strip. None = no title.
+    pub title: Option<String>,
     /// Colored lines for the primary text block.
     /// Red for failing constraints, green for passing, gray for info.
     pub primary_lines: Vec<(String, [u8; 4])>,
@@ -1167,6 +1193,7 @@ impl AnnotationText {
     #[allow(deprecated)]
     pub fn empty() -> Self {
         Self {
+            title: None,
             primary_lines: vec![],
             spatial: None,
             extra: String::new(),
@@ -1279,10 +1306,17 @@ impl AnnotationText {
 
         #[allow(deprecated)]
         Self {
+            title: None,
             primary_lines: lines,
             spatial: None,
             extra,
         }
+    }
+
+    /// Set the title (builder pattern).
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
     }
 }
 
