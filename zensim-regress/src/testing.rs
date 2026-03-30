@@ -1017,13 +1017,11 @@ fn compare_resized(
     classify_rgba_pair(zensim, exp, ew, eh, act_resized.as_raw(), ew, eh, tolerance)
 }
 
-/// Try all orientation transforms (rotations, flips) and pick the best score.
+/// Try orientation transforms for w↔h swaps, using corner-SAD pre-filter.
 ///
-/// Tries all 7 non-identity EXIF orientations: rot90, rot270, rot180,
-/// flipH, flipV, transpose (rot90+flipH), transverse (rot270+flipH).
-///
-/// For transforms that produce matching dimensions, compares directly.
-/// For transforms that produce different dimensions, resizes to match expected.
+/// For a true orientation swap, rot90 and rot270 produce exact dimension
+/// matches. Transpose and transverse also match. We use a corner block
+/// comparison to rank candidates, then run zensim on only the best 2.
 #[allow(clippy::too_many_arguments)]
 fn compare_orientation_swap(
     zensim: &Zensim,
@@ -1031,6 +1029,7 @@ fn compare_orientation_swap(
     act: &[u8], aw: u32, ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<(RegressionReport, ComparisonMethod), ZensimError> {
+    use image::imageops;
     use image::RgbaImage;
 
     if ew < 8 || eh < 8 {
@@ -1040,60 +1039,78 @@ fn compare_orientation_swap(
     let act_img = RgbaImage::from_raw(aw, ah, act.to_vec())
         .expect("actual: data length does not match dimensions");
 
-    let candidates = build_transform_candidates(&act_img);
+    // Build only transforms that produce matching dimensions (ew×eh).
+    // For w↔h swap: rot90, rot270, transpose, transverse all produce (ah, aw) = (ew, eh).
+    let rot90 = imageops::rotate90(&act_img);
+    let rot270 = imageops::rotate270(&act_img);
+    let candidates: Vec<(RgbaImage, ComparisonMethod)> = vec![
+        (rot90.clone(), ComparisonMethod::Rotated90),
+        (rot270.clone(), ComparisonMethod::Rotated270),
+        (imageops::flip_horizontal(&rot90), ComparisonMethod::Transpose),
+        (imageops::flip_horizontal(&rot270), ComparisonMethod::Transverse),
+    ];
 
+    // Pre-filter: compare top-left corner block of expected against each candidate
+    let n = 4u32.min(ew / 2).min(eh / 2).max(1);
+    let exp_tl = extract_block(exp, ew, 0, 0, n);
+
+    let mut scored: Vec<(u64, usize)> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, (img, _))| img.dimensions() == (ew, eh))
+        .map(|(i, (img, _))| {
+            let cand_tl = extract_block(img.as_raw(), ew, 0, 0, n);
+            (block_sad(&exp_tl, &cand_tl), i)
+        })
+        .collect();
+    scored.sort_by_key(|(sad, _)| *sad);
+
+    // Run zensim on top 2 candidates
     let mut best: Option<(RegressionReport, ComparisonMethod)> = None;
 
-    for (transformed, method) in &candidates {
-        let (tw, th) = transformed.dimensions();
-
-        let report = if tw == ew && th == eh {
-            classify_rgba_pair(zensim, exp, ew, eh, transformed.as_raw(), tw, th, tolerance)?
-        } else if tw >= 8 && th >= 8 && ew >= 8 && eh >= 8 {
-            let resized =
-                image::imageops::resize(transformed, ew, eh, image::imageops::FilterType::Lanczos3);
-            classify_rgba_pair(zensim, exp, ew, eh, resized.as_raw(), ew, eh, tolerance)?
-        } else {
-            continue;
-        };
+    for &(_, idx) in scored.iter().take(2) {
+        let (ref transformed, method) = candidates[idx];
+        let report =
+            classify_rgba_pair(zensim, exp, ew, eh, transformed.as_raw(), ew, eh, tolerance)?;
 
         let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
         if dominated {
-            best = Some((report, *method));
+            best = Some((report, method));
         }
     }
 
     best.ok_or(ZensimError::ImageTooSmall)
 }
 
-/// Build all 7 non-identity transform candidates for an image.
-fn build_transform_candidates(img: &image::RgbaImage) -> Vec<(image::RgbaImage, ComparisonMethod)> {
-    use image::imageops;
-
-    let rot90 = imageops::rotate90(img);
-    let rot270 = imageops::rotate270(img);
-
-    vec![
-        (imageops::rotate90(img), ComparisonMethod::Rotated90),
-        (imageops::rotate270(img), ComparisonMethod::Rotated270),
-        (imageops::rotate180(img), ComparisonMethod::Rotated180),
-        (imageops::flip_horizontal(img), ComparisonMethod::FlipHorizontal),
-        (imageops::flip_vertical(img), ComparisonMethod::FlipVertical),
-        // Transpose = rot90 then flipH (EXIF orientation 5)
-        (imageops::flip_horizontal(&rot90), ComparisonMethod::Transpose),
-        // Transverse = rot270 then flipH (EXIF orientation 7)
-        (imageops::flip_horizontal(&rot270), ComparisonMethod::Transverse),
-    ]
+/// Compute sum-of-absolute-differences between two RGBA blocks.
+fn block_sad(a: &[u8], b: &[u8]) -> u64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| (x as i16 - y as i16).unsigned_abs() as u64)
+        .sum()
 }
 
-/// Try all transforms on a same-dimension image pair to detect flips/rotations.
+/// Extract an NxN corner block from packed RGBA at (x0, y0).
+fn extract_block(rgba: &[u8], w: u32, x0: u32, y0: u32, n: u32) -> Vec<u8> {
+    let mut block = Vec::with_capacity((n * n * 4) as usize);
+    for y in y0..y0 + n {
+        let start = ((y * w + x0) * 4) as usize;
+        let end = start + (n * 4) as usize;
+        if end <= rgba.len() {
+            block.extend_from_slice(&rgba[start..end]);
+        }
+    }
+    block
+}
+
+/// Try transforms on a same-dimension image pair to detect flips/rotations.
+///
+/// Uses a cheap corner-block SAD pre-filter to identify the 1–2 most likely
+/// transforms, then runs zensim only on those candidates. This avoids
+/// running 7 full zensim comparisons.
 ///
 /// Called when the normal comparison yields a low score for same-dimension
-/// images. If any transform scores significantly better than the original,
-/// returns the best transform report annotated with [`DimensionInfo`].
-///
-/// Returns `None` if no transform improves the score by at least 20 points,
-/// or if the best transform score is below 50.
+/// images. Returns `None` if no transform improves the score meaningfully.
 pub fn detect_transform(
     zensim: &Zensim,
     expected_rgba: &[u8],
@@ -1109,34 +1126,95 @@ pub fn detect_transform(
         return None;
     }
 
-    let act_img = RgbaImage::from_raw(w, h, actual_rgba.to_vec())?;
-    let candidates = build_transform_candidates(&act_img);
+    // ── Phase 1: cheap corner-SAD pre-filter ──
+    // Compare top-left 4x4 block of expected against the position where that
+    // block would land under each same-dimension transform of actual.
+    let n = 4u32.min(w / 2).min(h / 2).max(1);
+    let exp_tl = extract_block(expected_rgba, w, 0, 0, n);
 
+    // For same-dimension transforms:
+    // Identity:  TL→TL (already scored)
+    // FlipH:     TL→TR (x mirrored)
+    // FlipV:     TL→BL (y mirrored)
+    // Rot180:    TL→BR (both mirrored)
+    let act_tr = extract_block(actual_rgba, w, w - n, 0, n); // hflip: TL of expected ↔ TR of actual
+    let act_bl = extract_block(actual_rgba, w, 0, h - n, n); // vflip: TL of expected ↔ BL of actual
+    let act_br = extract_block(actual_rgba, w, w - n, h - n, n); // rot180: TL ↔ BR
+
+    // But we need to reverse the block order for flipped comparisons.
+    // For hflip: expected TL pixels should match actual TR pixels in reverse column order.
+    let mirror_h = |block: &[u8], n: u32| -> Vec<u8> {
+        let mut out = vec![0u8; block.len()];
+        for y in 0..n {
+            for x in 0..n {
+                let src = ((y * n + x) * 4) as usize;
+                let dst = ((y * n + (n - 1 - x)) * 4) as usize;
+                if src + 4 <= block.len() && dst + 4 <= out.len() {
+                    out[dst..dst + 4].copy_from_slice(&block[src..src + 4]);
+                }
+            }
+        }
+        out
+    };
+    let mirror_v = |block: &[u8], n: u32| -> Vec<u8> {
+        let mut out = vec![0u8; block.len()];
+        for y in 0..n {
+            for x in 0..n {
+                let src = ((y * n + x) * 4) as usize;
+                let dst = (((n - 1 - y) * n + x) * 4) as usize;
+                if src + 4 <= block.len() && dst + 4 <= out.len() {
+                    out[dst..dst + 4].copy_from_slice(&block[src..src + 4]);
+                }
+            }
+        }
+        out
+    };
+
+    let mut scored: Vec<(u64, ComparisonMethod)> = vec![
+        (block_sad(&exp_tl, &mirror_h(&act_tr, n)), ComparisonMethod::FlipHorizontal),
+        (block_sad(&exp_tl, &mirror_v(&act_bl, n)), ComparisonMethod::FlipVertical),
+        (
+            block_sad(&exp_tl, &mirror_h(&mirror_v(&act_br, n), n)),
+            ComparisonMethod::Rotated180,
+        ),
+    ];
+    scored.sort_by_key(|(sad, _)| *sad);
+
+    // Quick exit: if the best SAD is very high, no transform will help
+    let max_sad = (n * n * 4 * 255) as u64;
+    if scored[0].0 > max_sad / 2 {
+        return None;
+    }
+
+    // ── Phase 2: run zensim on top 2 candidates ──
+    let act_img = RgbaImage::from_raw(w, h, actual_rgba.to_vec())?;
     let mut best: Option<(RegressionReport, ComparisonMethod)> = None;
 
-    for (transformed, method) in &candidates {
-        let (tw, th) = transformed.dimensions();
-        if tw != w || th != h {
-            continue; // Skip transforms that change dimensions
-        }
+    for &(_, method) in scored.iter().take(2) {
+        let transformed = match method {
+            ComparisonMethod::FlipHorizontal => image::imageops::flip_horizontal(&act_img),
+            ComparisonMethod::FlipVertical => image::imageops::flip_vertical(&act_img),
+            ComparisonMethod::Rotated180 => image::imageops::rotate180(&act_img),
+            _ => continue,
+        };
 
         let report = classify_rgba_pair(
             zensim,
             expected_rgba, w, h,
-            transformed.as_raw(), tw, th,
+            transformed.as_raw(), w, h,
             tolerance,
         )
         .ok()?;
 
         let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
         if dominated {
-            best = Some((report, *method));
+            best = Some((report, method));
         }
     }
 
-    // Only report if the transform is a clear improvement
+    // Report if the transform is a clear improvement
     let (report, method) = best?;
-    if report.score() >= 50.0 && report.score() > original_score + 20.0 {
+    if report.score() > original_score + 15.0 && report.score() >= 40.0 {
         Some((report, method))
     } else {
         None
