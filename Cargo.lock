@@ -2484,6 +2484,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenblend"
+version = "0.1.1"
+dependencies = [
+ "archmage",
+ "magetypes",
+ "safe_unaligned_simd",
+]
+
+[[package]]
+name = "zenlayout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad06dbff2936f03a0c9838bb7c1d96962b252598e9a70befd4c6f9b4bd1aa848"
+dependencies = [
+ "whereat",
+]
+
+[[package]]
 name = "zenpixels"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2501,6 +2519,23 @@ checksum = "f8f87f95ed6ef62eebc777f85d2fcd9c06b5bdda87544df84accfc17b865784e"
 dependencies = [
  "enough",
  "thiserror",
+]
+
+[[package]]
+name = "zenresize"
+version = "0.2.0"
+dependencies = [
+ "archmage",
+ "imgref",
+ "libm",
+ "linear-srgb",
+ "magetypes",
+ "rgb",
+ "safe_unaligned_simd",
+ "whereat",
+ "zenblend",
+ "zenlayout",
+ "zenpixels",
 ]
 
 [[package]]
@@ -2551,6 +2586,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "zenbench",
+ "zenresize",
  "zensim",
 ]
 

@@ -13,10 +13,12 @@ exclude = ["examples/*.png", "tests/fixtures/"]
 [features]
 default = []
 archmage = ["dep:archmage"]
+zenresize = ["dep:zenresize"]
 
 [dependencies]
 zensim = { workspace = true, features = ["classification"] }
 archmage = { workspace = true, features = ["testable_dispatch"], optional = true }
+zenresize = { workspace = true, optional = true }
 # zenpng = { workspace = true, optional = true }
 # enough = { workspace = true, optional = true }
 seahash = "4"

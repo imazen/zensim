@@ -938,7 +938,7 @@ pub fn check_regression_resized(
 
 // ─── Dimension-mismatch comparison helpers ──────────────────────────────
 
-/// Classify a pair of RGBA byte slices into `[u8; 4]` pixels and run zensim.
+/// Compare two packed-RGBA byte slices using zensim. Zero-copy via `StridedBytes`.
 #[allow(clippy::too_many_arguments)]
 fn classify_rgba_pair(
     zensim: &Zensim,
@@ -950,10 +950,20 @@ fn classify_rgba_pair(
     bh: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<RegressionReport, ZensimError> {
-    let a_px: Vec<[u8; 4]> = a.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
-    let b_px: Vec<[u8; 4]> = b.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
-    let a_src = zensim::RgbaSlice::new(&a_px, aw as usize, ah as usize);
-    let b_src = zensim::RgbaSlice::new(&b_px, bw as usize, bh as usize);
+    let a_src = zensim::StridedBytes::new(
+        a,
+        aw as usize,
+        ah as usize,
+        aw as usize * 4,
+        zensim::PixelFormat::Srgb8Rgba,
+    );
+    let b_src = zensim::StridedBytes::new(
+        b,
+        bw as usize,
+        bh as usize,
+        bw as usize * 4,
+        zensim::PixelFormat::Srgb8Rgba,
+    );
     let cr = if tolerance.ignore_alpha {
         zensim.classify(&AlphaOverride(&a_src), &AlphaOverride(&b_src))?
     } else {
@@ -962,7 +972,56 @@ fn classify_rgba_pair(
     Ok(build_report(cr, tolerance))
 }
 
-/// Center-crop an RGBA image to `(tw, th)`.
+/// Compare via `StridedBytes` with a strided center-crop view. Zero-copy.
+#[allow(clippy::too_many_arguments)]
+fn classify_strided_crop(
+    zensim: &Zensim,
+    a: &[u8],
+    aw: u32,
+    ax0: u32,
+    ay0: u32,
+    b: &[u8],
+    bw: u32,
+    bx0: u32,
+    by0: u32,
+    tw: u32,
+    th: u32,
+    tolerance: &RegressionTolerance,
+) -> Result<RegressionReport, ZensimError> {
+    let a_stride = aw as usize * 4;
+    let a_offset = (ay0 as usize * a_stride) + (ax0 as usize * 4);
+    let a_end = a_offset + (th.saturating_sub(1) as usize * a_stride) + (tw as usize * 4);
+    let a_slice = &a[a_offset..a_end.min(a.len())];
+
+    let b_stride = bw as usize * 4;
+    let b_offset = (by0 as usize * b_stride) + (bx0 as usize * 4);
+    let b_end = b_offset + (th.saturating_sub(1) as usize * b_stride) + (tw as usize * 4);
+    let b_slice = &b[b_offset..b_end.min(b.len())];
+
+    let a_src = zensim::StridedBytes::new(
+        a_slice,
+        tw as usize,
+        th as usize,
+        a_stride,
+        zensim::PixelFormat::Srgb8Rgba,
+    );
+    let b_src = zensim::StridedBytes::new(
+        b_slice,
+        tw as usize,
+        th as usize,
+        b_stride,
+        zensim::PixelFormat::Srgb8Rgba,
+    );
+    let cr = if tolerance.ignore_alpha {
+        zensim.classify(&AlphaOverride(&a_src), &AlphaOverride(&b_src))?
+    } else {
+        zensim.classify(&a_src, &b_src)?
+    };
+    Ok(build_report(cr, tolerance))
+}
+
+/// Center-crop an RGBA image to `(tw, th)`. Only used when strided view isn't possible
+/// (e.g., the data needs to be mirrored before comparison).
 fn center_crop_rgba(rgba: &[u8], w: u32, h: u32, tw: u32, th: u32) -> Vec<u8> {
     let x0 = (w.saturating_sub(tw)) / 2;
     let y0 = (h.saturating_sub(th)) / 2;
@@ -977,7 +1036,7 @@ fn center_crop_rgba(rgba: &[u8], w: u32, h: u32, tw: u32, th: u32) -> Vec<u8> {
     out
 }
 
-/// Compare by center-cropping both images to the overlap region.
+/// Compare by center-cropping both images to the overlap region. Zero-copy via strided view.
 #[allow(clippy::too_many_arguments)]
 fn compare_center_crop(
     zensim: &Zensim,
@@ -990,12 +1049,14 @@ fn compare_center_crop(
     if tw < 8 || th < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    let exp_crop = center_crop_rgba(exp, ew, eh, tw, th);
-    let act_crop = center_crop_rgba(act, aw, ah, tw, th);
-    classify_rgba_pair(zensim, &exp_crop, tw, th, &act_crop, tw, th, tolerance)
+    let ex0 = (ew - tw) / 2;
+    let ey0 = (eh - th) / 2;
+    let ax0 = (aw - tw) / 2;
+    let ay0 = (ah - th) / 2;
+    classify_strided_crop(zensim, exp, ew, ex0, ey0, act, aw, ax0, ay0, tw, th, tolerance)
 }
 
-/// Compare by Lanczos3-resizing actual to match expected dimensions.
+/// Resize actual to match expected dimensions using the best available resizer.
 #[allow(clippy::too_many_arguments)]
 fn compare_resized(
     zensim: &Zensim,
@@ -1003,19 +1064,30 @@ fn compare_resized(
     act: &[u8], aw: u32, ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<RegressionReport, ZensimError> {
-    use image::imageops::{self, FilterType};
-    use image::RgbaImage;
-
     if ew < 8 || eh < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
 
-    let act_img = RgbaImage::from_raw(aw, ah, act.to_vec())
-        .expect("actual: data length does not match dimensions");
-    // Triangle (bilinear) is sufficient for diagnostic comparison — much faster than Lanczos3.
-    let act_resized = imageops::resize(&act_img, ew, eh, FilterType::Triangle);
+    let act_resized = resize_rgba(act, aw, ah, ew, eh);
+    classify_rgba_pair(zensim, exp, ew, eh, &act_resized, ew, eh, tolerance)
+}
 
-    classify_rgba_pair(zensim, exp, ew, eh, act_resized.as_raw(), ew, eh, tolerance)
+/// Resize packed RGBA bytes. Uses zenresize when available, falls back to image crate.
+fn resize_rgba(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
+    #[cfg(feature = "zenresize")]
+    {
+        let config = zenresize::ResizeConfig::builder(sw, sh, dw, dh)
+            .filter(zenresize::Filter::Triangle)
+            .format(zenresize::PixelDescriptor::RGBA8_SRGB)
+            .build();
+        zenresize::Resizer::new(&config).resize(src)
+    }
+    #[cfg(not(feature = "zenresize"))]
+    {
+        let img = image::RgbaImage::from_raw(sw, sh, src.to_vec())
+            .expect("resize: data length does not match dimensions");
+        image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle).into_raw()
+    }
 }
 
 /// Try orientation transforms for w↔h swaps, using corner-SAD pre-filter.
