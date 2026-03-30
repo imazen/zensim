@@ -72,7 +72,26 @@ let result = z.compute(&source, &distorted)?;
 println!("score: {:.2}", result.score()); // 100 = identical, higher = better
 ```
 
-Also accepts `RgbaSlice` (composited over checkerboard), `imgref::ImgRef` (with stride), and `StridedBytes` for BGRA, 16-bit, linear float, and wide gamut (Display P3, BT.2020) inputs. See [docs.rs](https://docs.rs/zensim) for the full `ImageSource` trait.
+Also accepts `RgbaSlice` (composited over noise background), `imgref::ImgRef` (with stride), `ZenpixelsSource` (with `zenpixels` feature), and `StridedBytes` for BGRA, 16-bit, linear float, and wide gamut (Display P3, BT.2020) inputs. See [docs.rs](https://docs.rs/zensim) for the full `ImageSource` trait.
+
+### zenpixels integration
+
+With the `zenpixels` feature, pass any `PixelSlice` or `PixelBuffer` directly:
+
+```toml
+[dependencies]
+zensim = { version = "0.2", features = ["zenpixels"] }
+```
+
+```rust
+use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
+
+let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
+let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
+let result = Zensim::new(ZensimProfile::latest()).compute(&source, &distorted)?;
+```
+
+Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un-premultiplied, color primaries are forwarded. HDR (PQ, HLG) and grayscale are rejected with `UnsupportedFormat`.
 
 ## What the score means
 
@@ -158,6 +177,7 @@ Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a
 | `imgref` | yes | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
 | `training` | no | Expose metric internals for weight training |
 | `classification` | no | Error classification API (`classify()`, `DeltaStats`, `ErrorCategory`) |
+| `zenpixels` | no | `ImageSource` adapter for zenpixels `PixelSlice`/`PixelBuffer` |
 
 ## Downloading evaluation datasets
 
