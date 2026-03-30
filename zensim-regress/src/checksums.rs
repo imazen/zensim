@@ -1297,15 +1297,22 @@ impl ChecksumManager {
 
                 // Compare directly — zensim handles per-image pixel formats.
                 // Images smaller than 8×8 can't be scored; skip perceptual comparison.
-                let report =
-                    match check_regression(&self.zensim, &ref_source, actual, &reg_tolerance) {
-                        Ok(r) => Some(r),
-                        Err(zensim::ZensimError::ImageTooSmall) => None,
-                        Err(e) => return Err(e.into()),
-                    };
-
-                // Convert actual to packed RGBA only for the diff montage.
+                // Convert actual to packed RGBA for montage (needed regardless of comparison outcome).
                 let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
+
+                let (report, comparison_error) =
+                    match check_regression(&self.zensim, &ref_source, actual, &reg_tolerance) {
+                        Ok(r) => (Some(r), false),
+                        Err(zensim::ZensimError::ImageTooSmall) => (None, false),
+                        Err(e) => {
+                            // Print dimensions on any zensim error (especially dimension mismatch).
+                            eprintln!(
+                                "[checksum] zensim error for {test_name}/{detail_name}: {e}\n  \
+                                 reference: {rw}x{rh}, actual: {aw}x{ah}",
+                            );
+                            (None, true) // comparison failed — don't auto-accept
+                        }
+                    };
                 let montage_path = self.save_diff_montage(
                     module,
                     test_name,
@@ -1320,7 +1327,7 @@ impl ChecksumManager {
                     &reg_tolerance,
                 );
 
-                let passed = report.as_ref().is_none_or(|r| r.passed());
+                let passed = !comparison_error && report.as_ref().is_none_or(|r| r.passed());
 
                 if passed {
                     let auto_accepted = self.update_mode;
@@ -1558,13 +1565,22 @@ impl ChecksumManager {
         let out_path = diff_dir.join(format!("{flat_name}.png"));
 
         if rw != aw || rh != ah {
-            // Dimensions differ — save actual as-is
-            if let Some(img) = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
-                && img.save(&out_path).is_ok()
-            {
-                return Some(out_path);
-            }
-            return None;
+            // Dimensions differ — resize smaller to match larger for visual comparison.
+            let target_w = rw.max(aw);
+            let target_h = rh.max(ah);
+            let ref_img = image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec())
+                .expect("ref: invalid dimensions");
+            let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+                .expect("actual: invalid dimensions");
+            let ref_resized = image::imageops::resize(&ref_img, target_w, target_h, image::imageops::FilterType::Lanczos3);
+            let act_resized = image::imageops::resize(&act_img, target_w, target_h, image::imageops::FilterType::Lanczos3);
+
+            let dim_title = format!("{} {} (ref {}x{}, actual {}x{})",
+                test_name, detail_name, rw, rh, aw, ah);
+            let dim_annotation = AnnotationText::empty().with_title(dim_title);
+            let montage = MontageOptions::default().render(&ref_resized, &act_resized, &dim_annotation);
+            let _ = montage.save(&out_path);
+            return Some(out_path);
         }
 
         let title = format!("{} {}", test_name, detail_name).trim().to_string();
