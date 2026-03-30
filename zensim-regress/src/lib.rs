@@ -75,6 +75,7 @@ pub mod upload;
 pub use error::RegressError;
 pub use testing::{
     ComparisonMethod, DimensionInfo, DimensionMismatchKind, RegressionReport,
-    RegressionTolerance, check_regression, check_regression_resized, shrink_tolerance,
+    RegressionTolerance, check_regression, check_regression_resized, detect_transform,
+    shrink_tolerance,
 };
 pub use tolerance::ToleranceSpec as Tolerance;
