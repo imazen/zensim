@@ -983,6 +983,326 @@ fn render_montage_impl(
     output
 }
 
+/// Render a montage for images with different dimensions.
+///
+/// Each panel uses a shared canvas sized to `max(ew,aw) × max(eh,ah)`.
+/// Images are centered at their original size with blue borders showing bounds.
+///
+/// - Panel 0 (EXPECTED): Expected at original size, blue border
+/// - Panel 1 (ACTUAL): Actual at original size, blue border
+/// - Panel 2 (PIXEL DIFF): Diff of actual-resized-to-expected, blue border at expected bounds
+/// - Panel 3 (ADD/REMOVE): Structural diff on shared canvas, blue borders for both
+fn render_mismatched_montage(
+    options: &MontageOptions,
+    expected: &RgbaImage,
+    actual: &RgbaImage,
+    annotation: &AnnotationText,
+) -> RgbaImage {
+    use crate::font;
+
+    let (ew, eh) = expected.dimensions();
+    let (aw, ah) = actual.dimensions();
+    let amplification = options.amplification;
+    let border_color: [u8; 4] = [80, 140, 255, 255]; // blue
+
+    // Shared canvas = bounding box of both images
+    let canvas_w = ew.max(aw);
+    let canvas_h = eh.max(ah);
+
+    // Centering offsets
+    let ex_off_x = (canvas_w - ew) / 2;
+    let ex_off_y = (canvas_h - eh) / 2;
+    let ax_off_x = (canvas_w - aw) / 2;
+    let ax_off_y = (canvas_h - ah) / 2;
+
+    let panel_bg = Rgba([32, 32, 32, 255]);
+
+    // Panel 0: EXPECTED on canvas
+    let mut panel_expected = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
+    imageops::overlay(&mut panel_expected, expected, ex_off_x as i64, ex_off_y as i64);
+    draw_rect_border(&mut panel_expected, ex_off_x, ex_off_y, ew, eh, border_color);
+
+    // Panel 1: ACTUAL on canvas
+    let mut panel_actual = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
+    imageops::overlay(&mut panel_actual, actual, ax_off_x as i64, ax_off_y as i64);
+    draw_rect_border(&mut panel_actual, ax_off_x, ax_off_y, aw, ah, border_color);
+
+    // Panel 2: PIXEL DIFF — resize actual to expected dims, compute diff
+    let act_resized = imageops::resize(actual, ew, eh, imageops::FilterType::Lanczos3);
+    let pixel_diff_raw = generate_diff_image(expected, &act_resized, amplification);
+    let mut panel_pixel_diff = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
+    imageops::overlay(
+        &mut panel_pixel_diff,
+        &pixel_diff_raw,
+        ex_off_x as i64,
+        ex_off_y as i64,
+    );
+    draw_rect_border(&mut panel_pixel_diff, ex_off_x, ex_off_y, ew, eh, border_color);
+
+    // Panel 3: STRUCTURAL ADD/REMOVE on shared canvas with transparent bg
+    let transparent = Rgba([0, 0, 0, 0]);
+    let mut exp_on_canvas = RgbaImage::from_pixel(canvas_w, canvas_h, transparent);
+    imageops::overlay(&mut exp_on_canvas, expected, ex_off_x as i64, ex_off_y as i64);
+    let mut act_on_canvas = RgbaImage::from_pixel(canvas_w, canvas_h, transparent);
+    imageops::overlay(&mut act_on_canvas, actual, ax_off_x as i64, ax_off_y as i64);
+    let mut panel_structural =
+        generate_structural_diff(&exp_on_canvas, &act_on_canvas, 3, amplification);
+    // Blue borders for both image bounds on the structural panel
+    draw_rect_border(&mut panel_structural, ex_off_x, ex_off_y, ew, eh, border_color);
+    draw_rect_border(&mut panel_structural, ax_off_x, ax_off_y, aw, ah, border_color);
+
+    // Spatial analysis on the resized pair (for heatmap)
+    let (sg_cols, sg_rows) = options.spatial_grid;
+    let spatial = spatial_analysis(
+        expected.as_raw(),
+        act_resized.as_raw(),
+        ew,
+        eh,
+        sg_cols,
+        sg_rows,
+    );
+    let has_differences = spatial.regions.iter().any(|r| r.pixels_differing > 0.0);
+
+    // Pixelate-upscale all four panels if tiny
+    let min_panel_size = options.min_panel_size;
+    let up0;
+    let up1;
+    let up2;
+    let up3;
+    let panels: [&RgbaImage; 4] =
+        if min_panel_size > 0 && (canvas_w < min_panel_size || canvas_h < min_panel_size) {
+            up0 = pixelate_upscale(&panel_expected, min_panel_size);
+            up1 = pixelate_upscale(&panel_actual, min_panel_size);
+            up2 = pixelate_upscale(&panel_pixel_diff, min_panel_size);
+            up3 = pixelate_upscale(&panel_structural, min_panel_size);
+            [&up0, &up1, &up2, &up3]
+        } else {
+            [
+                &panel_expected,
+                &panel_actual,
+                &panel_pixel_diff,
+                &panel_structural,
+            ]
+        };
+
+    // ── From here: same 2x2 grid layout as render_montage_impl ──
+
+    let min_pad = (font::GLYPH_W * 3 / 10).max(8);
+    let pad = options.gap.max(min_pad);
+    let bg = Rgba([18, 18, 18, 255]);
+    let label_fg = [220, 220, 220, 255];
+    let label_bg = [40, 40, 40, 255];
+
+    let panel_w = panels[0].width();
+    let panel_h = panels[0].height();
+
+    // Label sizing: fit longest label within cell_w minus padding
+    // "PIXEL DIFF (RESIZED)" is 20 chars — use that as longest
+    let label_inset = pad;
+    let label_area_w = panel_w.saturating_sub(label_inset * 2);
+    let longest_label = 20u32;
+    let label_char_h = ((label_area_w as f32 / longest_label as f32)
+        * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
+        .floor() as u32;
+    let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
+
+    let plain_labels = ["EXPECTED", "ACTUAL", "PIXEL DIFF"];
+    let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
+        .iter()
+        .map(|label| {
+            let lines: Vec<(&str, [u8; 4])> = vec![(label, label_fg)];
+            font::render_lines_fitted(&lines, label_bg, label_area_w)
+        })
+        .collect();
+
+    // ADD / REMOVE label for panel 3
+    let add_img = font::render_text_height("ADD", [255, 180, 80, 255], label_bg, label_char_h);
+    let rem_img = font::render_text_height("REMOVE", [80, 220, 220, 255], label_bg, label_char_h);
+    let ar_h = label_char_h;
+    let mut ar_rgba = RgbaImage::from_pixel(panel_w, ar_h, Rgba(label_bg));
+    if add_img.1 > 0
+        && add_img.2 > 0
+        && let Some(img) = RgbaImage::from_raw(add_img.1, add_img.2, add_img.0.clone())
+    {
+        imageops::overlay(&mut ar_rgba, &img, label_inset as i64, 0);
+    }
+    if rem_img.1 > 0
+        && rem_img.2 > 0
+        && let Some(img) = RgbaImage::from_raw(rem_img.1, rem_img.2, rem_img.0.clone())
+    {
+        let rx = panel_w.saturating_sub(rem_img.1 + label_inset);
+        imageops::overlay(&mut ar_rgba, &img, rx as i64, 0);
+    }
+    let ar_raw = ar_rgba.into_raw();
+
+    let label_images: Vec<(Vec<u8>, u32, u32)> = vec![
+        plain_images[0].clone(),
+        plain_images[1].clone(),
+        plain_images[2].clone(),
+        (ar_raw, panel_w, ar_h),
+    ];
+
+    let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
+
+    // 2x2 grid
+    let cell_w = panel_w;
+    let cell_h = label_h + panel_h;
+    let grid_w = pad + cell_w + pad + cell_w + pad;
+    let grid_h = pad + cell_h + pad + cell_h + pad;
+
+    // Title text
+    let text_avail = grid_w.saturating_sub(pad * 2);
+    let title_rendered = annotation.title.as_ref().and_then(|t| {
+        if t.is_empty() {
+            return None;
+        }
+        let lines: Vec<(&str, [u8; 4])> = vec![(t.as_str(), [255, 255, 255, 255])];
+        Some(font::render_lines_fitted(
+            &lines,
+            [25, 25, 25, 255],
+            text_avail,
+        ))
+    });
+
+    // Primary text
+    let primary_rendered = if !annotation.primary_lines.is_empty() {
+        let line_refs: Vec<(&str, [u8; 4])> = annotation
+            .primary_lines
+            .iter()
+            .map(|(s, c)| (s.as_str(), *c))
+            .collect();
+        Some(font::render_lines_fitted(
+            &line_refs,
+            [30, 30, 30, 255],
+            text_avail,
+        ))
+    } else {
+        None
+    };
+
+    // Heatmap
+    let heatmap = if has_differences {
+        Some(render_heatmap_grid(&spatial, grid_w, pad))
+    } else {
+        None
+    };
+
+    // Extra text
+    let primary_line_h = primary_rendered
+        .as_ref()
+        .map_or(font::GLYPH_H, |(_, _, h)| {
+            let n = annotation.primary_lines.len().max(1) as u32;
+            *h / n
+        });
+    let extra_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
+    let extra_rendered = if !annotation.extra.is_empty() {
+        Some(font::render_text_wrapped(
+            &annotation.extra,
+            COLOR_DETAIL,
+            [25, 25, 25, 255],
+            extra_char_h,
+            text_avail,
+        ))
+    } else {
+        None
+    };
+
+    let title_h = title_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
+    let primary_h = primary_rendered
+        .as_ref()
+        .map_or(0, |(_, _, h)| *h + pad * 2);
+    let heatmap_h = heatmap.as_ref().map_or(0, |img| img.height());
+    let extra_h = extra_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
+
+    let total_w = grid_w;
+    let total_h = grid_h + title_h + primary_h + heatmap_h + extra_h;
+
+    let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
+
+    // Place 4 panels in 2x2 grid
+    for (i, panel) in panels.iter().enumerate() {
+        let col = (i % 2) as u32;
+        let row = (i / 2) as u32;
+        let x0 = pad + col * (cell_w + pad);
+        let y0 = pad + row * (cell_h + pad);
+
+        fill_rect(&mut output, x0, y0, cell_w, label_h, label_bg);
+
+        let (ref lbuf, lw, lh) = label_images[i];
+        if lw > 0 && lh > 0 {
+            let lx_off = (cell_w.saturating_sub(lw)) / 2;
+            let ly_off = (label_h.saturating_sub(lh)) / 2;
+            if let Some(label_img) = RgbaImage::from_raw(lw, lh, lbuf.clone()) {
+                imageops::overlay(
+                    &mut output,
+                    &label_img,
+                    (x0 + lx_off) as i64,
+                    (y0 + ly_off) as i64,
+                );
+            }
+        }
+
+        let pw = panel.width().min(cell_w);
+        let ph = panel.height().min(panel_h);
+        let cropped = imageops::crop_imm(*panel, 0, 0, pw, ph).to_image();
+        imageops::overlay(&mut output, &cropped, x0 as i64, (y0 + label_h) as i64);
+    }
+
+    // Title strip
+    let mut y_cursor = grid_h;
+    if let Some((tbuf, tw, th)) = title_rendered
+        && tw > 0
+        && th > 0
+    {
+        fill_rect(&mut output, 0, y_cursor, total_w, title_h, [25, 25, 25, 255]);
+        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+            let tx = (total_w.saturating_sub(tw)) / 2;
+            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
+        }
+        y_cursor += title_h;
+        fill_rect(
+            &mut output,
+            pad,
+            y_cursor.saturating_sub(1),
+            total_w - pad * 2,
+            1,
+            [60, 60, 60, 255],
+        );
+    }
+
+    // Primary text strip
+    if let Some((tbuf, tw, th)) = primary_rendered
+        && tw > 0
+        && th > 0
+    {
+        fill_rect(&mut output, 0, y_cursor, total_w, primary_h, [30, 30, 30, 255]);
+        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+            let tx = (total_w.saturating_sub(tw)) / 2;
+            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
+        }
+        y_cursor += primary_h;
+    }
+
+    // Heatmap
+    if let Some(ref heatmap_img) = heatmap {
+        imageops::overlay(&mut output, heatmap_img, 0, y_cursor as i64);
+        y_cursor += heatmap_h;
+    }
+
+    // Extra text
+    if let Some((tbuf, tw, th)) = extra_rendered
+        && tw > 0
+        && th > 0
+    {
+        fill_rect(&mut output, 0, y_cursor, total_w, extra_h, [25, 25, 25, 255]);
+        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
+            imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
+        }
+    }
+
+    output
+}
+
 /// Render a 3x3 spatial heatmap grid image.
 ///
 /// Each cell's background is tinted red proportional to its severity
@@ -1112,6 +1432,40 @@ fn fill_rect(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 
     }
 }
 
+/// Draw a 1px rectangular outline.
+///
+/// Used to show image bounds in mismatched-dimension montage panels.
+fn draw_rect_border(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 4]) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    let px = Rgba(color);
+    let img_w = img.width();
+    let img_h = img.height();
+    let x_end = x0.saturating_add(w).min(img_w);
+    let y_end = y0.saturating_add(h).min(img_h);
+    // Top and bottom edges
+    for x in x0..x_end {
+        if y0 < img_h {
+            img.put_pixel(x, y0, px);
+        }
+        let bot = y_end.saturating_sub(1);
+        if bot < img_h && bot > y0 {
+            img.put_pixel(x, bot, px);
+        }
+    }
+    // Left and right edges
+    for y in y0..y_end {
+        if x0 < img_w {
+            img.put_pixel(x0, y, px);
+        }
+        let right = x_end.saturating_sub(1);
+        if right < img_w && right > x0 {
+            img.put_pixel(right, y, px);
+        }
+    }
+}
+
 /// Rendering options for annotated montages.
 ///
 /// Use `Default` for the common case — all fields have sensible defaults.
@@ -1169,16 +1523,20 @@ impl MontageOptions {
     /// Spatial heatmap is computed automatically from the pixel data when there
     /// are differences. Tiny images are pixelate-upscaled per `min_panel_size`.
     ///
-    /// # Panics
-    ///
-    /// Panics if expected and actual have different dimensions.
+    /// When expected and actual have different dimensions, a shared-canvas
+    /// montage is rendered instead, with blue borders showing each image's
+    /// bounds and the pixel diff computed on center-cropped or resized copies.
     pub fn render(
         &self,
         expected: &RgbaImage,
         actual: &RgbaImage,
         annotation: &AnnotationText,
     ) -> RgbaImage {
-        render_montage_impl(self, expected, actual, annotation)
+        if expected.dimensions() != actual.dimensions() {
+            render_mismatched_montage(self, expected, actual, annotation)
+        } else {
+            render_montage_impl(self, expected, actual, annotation)
+        }
     }
 }
 
@@ -1699,5 +2057,74 @@ mod tests {
         let data = vec![1.0f32, 2.0, 3.0, 4.0];
         let result = box_blur_gray(&data, 2, 2, 0);
         assert_eq!(result, data);
+    }
+
+    #[test]
+    fn mismatched_montage_renders_without_panic() {
+        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(48, 24, Rgba([110, 100, 90, 255]));
+        let opts = MontageOptions {
+            min_panel_size: 0,
+            ..Default::default()
+        };
+        let montage = opts.render(&exp, &act, &AnnotationText::empty());
+        // Canvas is 48x32 per panel; 2 panels wide + gaps
+        assert!(montage.width() > 48 * 2);
+        assert!(montage.height() > 32 * 2);
+    }
+
+    #[test]
+    fn mismatched_montage_orientation_swap() {
+        let exp = RgbaImage::from_fn(64, 48, |x, y| {
+            Rgba([(x * 4) as u8, (y * 5) as u8, 128, 255])
+        });
+        let act = RgbaImage::from_fn(48, 64, |x, y| {
+            Rgba([(x * 5) as u8, (y * 4) as u8, 128, 255])
+        });
+        let opts = MontageOptions {
+            min_panel_size: 0,
+            ..Default::default()
+        };
+        let montage = opts.render(&exp, &act, &AnnotationText::empty());
+        // Canvas is 64x64 per panel
+        assert!(montage.width() >= 64 * 2);
+    }
+
+    #[test]
+    fn mismatched_montage_with_annotation() {
+        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(40, 30, Rgba([110, 100, 90, 255]));
+        let ann = AnnotationText {
+            primary_lines: vec![("FAIL: dimensions differ".into(), [255, 80, 80, 255])],
+            ..AnnotationText::empty()
+        };
+        let opts = MontageOptions {
+            min_panel_size: 0,
+            ..Default::default()
+        };
+        let montage = opts.render(&exp, &act, &ann);
+        // Text strip makes it taller
+        assert!(montage.height() > 32 * 2 + 20);
+    }
+
+    #[test]
+    fn same_dimension_still_uses_normal_path() {
+        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
+        let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
+        // Should not crash — uses render_montage_impl
+        let montage = MontageOptions::default().render(&exp, &act, &AnnotationText::empty());
+        assert!(montage.width() >= 32 * 2);
+    }
+
+    #[test]
+    fn draw_rect_border_on_small_image() {
+        let mut img = RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255]));
+        draw_rect_border(&mut img, 2, 2, 6, 6, [255, 255, 255, 255]);
+        // Top-left corner of border
+        assert_eq!(img.get_pixel(2, 2).0, [255, 255, 255, 255]);
+        // Bottom-right corner of border
+        assert_eq!(img.get_pixel(7, 7).0, [255, 255, 255, 255]);
+        // Inside border (not on edge)
+        assert_eq!(img.get_pixel(4, 4).0, [0, 0, 0, 255]);
     }
 }

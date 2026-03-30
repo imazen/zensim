@@ -1593,17 +1593,11 @@ impl ChecksumManager {
         let out_path = diff_dir.join(format!("{flat_name}.png"));
 
         if rw != aw || rh != ah {
-            // Dimensions differ — resize actual to match expected for visual comparison.
+            // Dimensions differ — render() dispatches to the shared-canvas montage.
             let ref_img = image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec())
                 .expect("ref: invalid dimensions");
             let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
                 .expect("actual: invalid dimensions");
-            let act_resized = image::imageops::resize(
-                &act_img,
-                rw,
-                rh,
-                image::imageops::FilterType::Lanczos3,
-            );
 
             let title = format!("{} {}", test_name, detail_name).trim().to_string();
             let annotation = match report {
@@ -1619,7 +1613,7 @@ impl ChecksumManager {
                 }
             };
 
-            let montage = MontageOptions::default().render(&ref_img, &act_resized, &annotation);
+            let montage = MontageOptions::default().render(&ref_img, &act_img, &annotation);
             let _ = montage.save(&out_path);
             return Some(out_path);
         }
