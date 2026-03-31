@@ -1329,79 +1329,82 @@ impl ChecksumManager {
                 // Convert actual to packed RGBA for montage (needed regardless of comparison outcome).
                 let (actual_rgba, aw, ah) = image_source_to_packed_rgba(actual);
 
-                let (report, dimension_mismatch) =
-                    match check_regression(&self.zensim, &ref_source, actual, &reg_tolerance) {
-                        Ok(r) => {
-                            // Same dimensions — if score is low, try transform detection
-                            // to identify flips/rotations (cheap: only for scores < 50).
-                            if r.score() < 50.0 && rw >= 8 && rh >= 8 {
-                                if let Some((mut tr, method)) =
-                                    crate::testing::detect_transform(
-                                        &self.zensim,
-                                        &ref_rgba,
-                                        &actual_rgba,
-                                        rw,
-                                        rh,
-                                        r.score(),
-                                        &reg_tolerance,
-                                    )
-                                {
-                                    eprintln!(
-                                        "[checksum] transform detected for {test_name}/{detail_name}: \
+                let (report, dimension_mismatch) = match check_regression(
+                    &self.zensim,
+                    &ref_source,
+                    actual,
+                    &reg_tolerance,
+                ) {
+                    Ok(r) => {
+                        // Same dimensions — if score is low, try transform detection
+                        // to identify flips/rotations (cheap: only for scores < 50).
+                        if r.score() < 50.0 && rw >= 8 && rh >= 8 {
+                            if let Some((mut tr, method)) = crate::testing::detect_transform(
+                                &self.zensim,
+                                &ref_rgba,
+                                &actual_rgba,
+                                rw,
+                                rh,
+                                r.score(),
+                                &reg_tolerance,
+                            ) {
+                                eprintln!(
+                                    "[checksum] transform detected for {test_name}/{detail_name}: \
                                          {method} (score {:.1} vs original {:.1})",
-                                        tr.score(), r.score(),
-                                    );
-                                    tr.set_dimension_info(crate::testing::DimensionInfo {
-                                        expected_dims: (rw, rh),
-                                        actual_dims: (aw, ah),
-                                        kind: crate::testing::DimensionMismatchKind::OrientationSwap,
-                                        method,
-                                    });
-                                    (Some(tr), false)
-                                } else {
-                                    (Some(r), false)
-                                }
+                                    tr.score(),
+                                    r.score(),
+                                );
+                                tr.set_dimension_info(crate::testing::DimensionInfo {
+                                    expected_dims: (rw, rh),
+                                    actual_dims: (aw, ah),
+                                    kind: crate::testing::DimensionMismatchKind::OrientationSwap,
+                                    method,
+                                });
+                                (Some(tr), false)
                             } else {
                                 (Some(r), false)
                             }
+                        } else {
+                            (Some(r), false)
                         }
-                        Err(zensim::ZensimError::ImageTooSmall) => (None, false),
-                        Err(zensim::ZensimError::DimensionMismatch) => {
-                            // Dimensions differ — resize actual to match expected for
-                            // an approximate diagnostic score.
-                            eprintln!(
-                                "[checksum] dimension mismatch for {test_name}/{detail_name}: \
+                    }
+                    Err(zensim::ZensimError::ImageTooSmall) => (None, false),
+                    Err(zensim::ZensimError::DimensionMismatch) => {
+                        // Dimensions differ — resize actual to match expected for
+                        // an approximate diagnostic score.
+                        eprintln!(
+                            "[checksum] dimension mismatch for {test_name}/{detail_name}: \
                                  reference {rw}x{rh}, actual {aw}x{ah} \
                                  \u{2014} running resized comparison",
-                            );
-                            match crate::testing::check_regression_resized(
-                                &self.zensim,
-                                &ref_rgba,
-                                rw,
-                                rh,
-                                &actual_rgba,
-                                aw,
-                                ah,
-                                &reg_tolerance,
-                            ) {
-                                Ok(r) => (Some(r), true),
-                                Err(e) => {
-                                    eprintln!(
-                                        "[checksum] resized comparison also failed for \
+                        );
+                        match crate::testing::check_regression_resized(
+                            &self.zensim,
+                            &ref_rgba,
+                            rw,
+                            rh,
+                            &actual_rgba,
+                            aw,
+                            ah,
+                            &reg_tolerance,
+                        ) {
+                            Ok(r) => (Some(r), true),
+                            Err(e) => {
+                                eprintln!(
+                                    "[checksum] resized comparison also failed for \
                                          {test_name}/{detail_name}: {e}",
-                                    );
-                                    (None, true)
-                                }
+                                );
+                                (None, true)
                             }
                         }
-                        Err(e) => {
-                            eprintln!(
-                                "[checksum] zensim error for {test_name}/{detail_name}: {e}\n  \
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[checksum] zensim error for {test_name}/{detail_name}: {e}\n  \
                                  reference: {rw}x{rh}, actual: {aw}x{ah}",
-                            );
-                            (None, true)
-                        }
-                    };
+                        );
+                        (None, true)
+                    }
+                };
                 let montage_path = self.save_diff_montage(
                     module,
                     test_name,
@@ -1668,9 +1671,8 @@ impl ChecksumManager {
                 }
                 Some(r) => AnnotationText::from_report(r, tolerance).with_title(title),
                 None => {
-                    let dim_title = format!(
-                        "{title} (ref {rw}\u{00d7}{rh}, actual {aw}\u{00d7}{ah})",
-                    );
+                    let dim_title =
+                        format!("{title} (ref {rw}\u{00d7}{rh}, actual {aw}\u{00d7}{ah})",);
                     AnnotationText::empty().with_title(dim_title)
                 }
             };

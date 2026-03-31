@@ -30,8 +30,8 @@ fn orientation_dir() -> std::path::PathBuf {
 }
 
 fn load_rgba(path: &std::path::Path) -> (Vec<u8>, u32, u32) {
-    let img = image::open(path)
-        .unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
+    let img =
+        image::open(path).unwrap_or_else(|e| panic!("failed to open {}: {e}", path.display()));
     let rgba: RgbaImage = img.into_rgba8();
     let (w, h) = rgba.dimensions();
     (rgba.into_raw(), w, h)
@@ -70,7 +70,8 @@ fn same_dim_orientations_have_matching_dimensions() {
     for orient in [2, 3, 4] {
         let (_, aw, ah) = load_rgba(&dir.join(format!("Landscape_{orient}.jpg")));
         assert_eq!(
-            (rw, rh), (aw, ah),
+            (rw, rh),
+            (aw, ah),
             "Landscape_{orient} should have same dims as Landscape_1",
         );
     }
@@ -84,7 +85,8 @@ fn swapped_dim_orientations_have_swapped_dimensions() {
     for orient in [5, 6, 7, 8] {
         let (_, aw, ah) = load_rgba(&dir.join(format!("Landscape_{orient}.jpg")));
         assert_eq!(
-            (rw, rh), (ah, aw),
+            (rw, rh),
+            (ah, aw),
             "Landscape_{orient} should have swapped dims vs Landscape_1 \
              (expected {rh}x{rw}, got {aw}x{ah})",
         );
@@ -163,10 +165,9 @@ fn all_orientation_pairs_produce_reports_without_panic() {
                 .unwrap();
             } else {
                 // Different dimensions — resized comparison
-                let _report = check_regression_resized(
-                    &z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol,
-                )
-                .unwrap();
+                let _report =
+                    check_regression_resized(&z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol)
+                        .unwrap();
             }
         }
     }
@@ -184,12 +185,8 @@ fn apply_transform(img: &RgbaImage, method: ComparisonMethod) -> RgbaImage {
         ComparisonMethod::Rotated180 => imageops::rotate180(img),
         ComparisonMethod::Rotated90 => imageops::rotate90(img),
         ComparisonMethod::Rotated270 => imageops::rotate270(img),
-        ComparisonMethod::Transpose => {
-            imageops::flip_horizontal(&imageops::rotate90(img))
-        }
-        ComparisonMethod::Transverse => {
-            imageops::flip_horizontal(&imageops::rotate270(img))
-        }
+        ComparisonMethod::Transpose => imageops::flip_horizontal(&imageops::rotate90(img)),
+        ComparisonMethod::Transverse => imageops::flip_horizontal(&imageops::rotate270(img)),
         _ => img.clone(),
     }
 }
@@ -229,15 +226,19 @@ fn exact_same_dim_transforms_detected() {
         );
 
         // detect_transform must find the exact method
-        let result = detect_transform(
-            &z, &ref_rgba, &act_rgba, rw, rh, orig.score(), &tol,
-        );
+        let result = detect_transform(&z, &ref_rgba, &act_rgba, rw, rh, orig.score(), &tol);
 
         let (report, detected) = result.unwrap_or_else(|| {
-            panic!("{method}: detection returned None (direct score {:.1})", orig.score())
+            panic!(
+                "{method}: detection returned None (direct score {:.1})",
+                orig.score()
+            )
         });
 
-        assert_eq!(detected, method, "{method}: detected wrong method {detected}");
+        assert_eq!(
+            detected, method,
+            "{method}: detected wrong method {detected}"
+        );
         assert!(
             report.score() > 95.0,
             "{method}: corrected score {:.1} should be > 95",
@@ -269,15 +270,10 @@ fn exact_swapped_dim_transforms_detected() {
         let act_rgba = transformed.into_raw();
 
         // Dimensions must differ (swapped)
-        assert_ne!(
-            (rw, rh), (aw, ah),
-            "{method}: expected swapped dimensions",
-        );
+        assert_ne!((rw, rh), (aw, ah), "{method}: expected swapped dimensions",);
 
-        let report = check_regression_resized(
-            &z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol,
-        )
-        .unwrap();
+        let report =
+            check_regression_resized(&z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol).unwrap();
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(
@@ -325,17 +321,24 @@ fn exact_same_dim_transforms_portrait() {
         )
         .unwrap();
 
-        let result = detect_transform(
-            &z, &ref_rgba, &act_rgba, rw, rh, orig.score(), &tol,
-        );
+        let result = detect_transform(&z, &ref_rgba, &act_rgba, rw, rh, orig.score(), &tol);
 
         let (report, detected) = result.unwrap_or_else(|| {
-            panic!("portrait {method}: detection returned None (direct score {:.1})", orig.score())
+            panic!(
+                "portrait {method}: detection returned None (direct score {:.1})",
+                orig.score()
+            )
         });
 
-        assert_eq!(detected, method, "portrait {method}: wrong method {detected}");
-        assert!(report.score() > 95.0,
-            "portrait {method}: corrected score {:.1} should be > 95", report.score());
+        assert_eq!(
+            detected, method,
+            "portrait {method}: wrong method {detected}"
+        );
+        assert!(
+            report.score() > 95.0,
+            "portrait {method}: corrected score {:.1} should be > 95",
+            report.score()
+        );
     }
 }
 
@@ -359,15 +362,17 @@ fn exact_swapped_dim_transforms_portrait() {
         let (aw, ah) = transformed.dimensions();
         let act_rgba = transformed.into_raw();
 
-        let report = check_regression_resized(
-            &z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol,
-        )
-        .unwrap();
+        let report =
+            check_regression_resized(&z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol).unwrap();
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
-        assert_eq!(report.score(), 100.0,
+        assert_eq!(
+            report.score(),
+            100.0,
             "portrait {method}: exact transform should score 100, got {:.1} (detected {})",
-            report.score(), dim.method);
+            report.score(),
+            dim.method
+        );
     }
 }

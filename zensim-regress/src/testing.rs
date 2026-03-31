@@ -899,20 +899,54 @@ pub fn check_regression_resized(
     let kind = classify_dimension_mismatch(ew, eh, aw, ah);
 
     let (report, method) = match kind {
-        DimensionMismatchKind::OrientationSwap => {
-            compare_orientation_swap(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?
-        }
+        DimensionMismatchKind::OrientationSwap => compare_orientation_swap(
+            zensim,
+            expected_rgba,
+            ew,
+            eh,
+            actual_rgba,
+            aw,
+            ah,
+            tolerance,
+        )?,
         DimensionMismatchKind::OffByOne => {
-            let r = compare_center_crop(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+            let r = compare_center_crop(
+                zensim,
+                expected_rgba,
+                ew,
+                eh,
+                actual_rgba,
+                aw,
+                ah,
+                tolerance,
+            )?;
             (r, ComparisonMethod::CenterCropped)
         }
         DimensionMismatchKind::CropDifference => {
-            let r = compare_center_crop(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+            let r = compare_center_crop(
+                zensim,
+                expected_rgba,
+                ew,
+                eh,
+                actual_rgba,
+                aw,
+                ah,
+                tolerance,
+            )?;
             if r.score() >= 70.0 {
                 (r, ComparisonMethod::CenterCropped)
             } else {
                 // Center-crop scored poorly — fall back to resize
-                let r2 = compare_resized(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+                let r2 = compare_resized(
+                    zensim,
+                    expected_rgba,
+                    ew,
+                    eh,
+                    actual_rgba,
+                    aw,
+                    ah,
+                    tolerance,
+                )?;
                 if r2.score() > r.score() {
                     (r2, ComparisonMethod::Resized)
                 } else {
@@ -921,7 +955,16 @@ pub fn check_regression_resized(
             }
         }
         DimensionMismatchKind::LargeDifference => {
-            let r = compare_resized(zensim, expected_rgba, ew, eh, actual_rgba, aw, ah, tolerance)?;
+            let r = compare_resized(
+                zensim,
+                expected_rgba,
+                ew,
+                eh,
+                actual_rgba,
+                aw,
+                ah,
+                tolerance,
+            )?;
             (r, ComparisonMethod::Resized)
         }
     };
@@ -1040,8 +1083,12 @@ fn center_crop_rgba(rgba: &[u8], w: u32, h: u32, tw: u32, th: u32) -> Vec<u8> {
 #[allow(clippy::too_many_arguments)]
 fn compare_center_crop(
     zensim: &Zensim,
-    exp: &[u8], ew: u32, eh: u32,
-    act: &[u8], aw: u32, ah: u32,
+    exp: &[u8],
+    ew: u32,
+    eh: u32,
+    act: &[u8],
+    aw: u32,
+    ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<RegressionReport, ZensimError> {
     let tw = ew.min(aw);
@@ -1053,15 +1100,21 @@ fn compare_center_crop(
     let ey0 = (eh - th) / 2;
     let ax0 = (aw - tw) / 2;
     let ay0 = (ah - th) / 2;
-    classify_strided_crop(zensim, exp, ew, ex0, ey0, act, aw, ax0, ay0, tw, th, tolerance)
+    classify_strided_crop(
+        zensim, exp, ew, ex0, ey0, act, aw, ax0, ay0, tw, th, tolerance,
+    )
 }
 
 /// Resize actual to match expected dimensions using the best available resizer.
 #[allow(clippy::too_many_arguments)]
 fn compare_resized(
     zensim: &Zensim,
-    exp: &[u8], ew: u32, eh: u32,
-    act: &[u8], aw: u32, ah: u32,
+    exp: &[u8],
+    ew: u32,
+    eh: u32,
+    act: &[u8],
+    aw: u32,
+    ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<RegressionReport, ZensimError> {
     if ew < 8 || eh < 8 {
@@ -1098,12 +1151,16 @@ fn resize_rgba(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
 #[allow(clippy::too_many_arguments)]
 fn compare_orientation_swap(
     zensim: &Zensim,
-    exp: &[u8], ew: u32, eh: u32,
-    act: &[u8], aw: u32, ah: u32,
+    exp: &[u8],
+    ew: u32,
+    eh: u32,
+    act: &[u8],
+    aw: u32,
+    ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<(RegressionReport, ComparisonMethod), ZensimError> {
-    use image::imageops;
     use image::RgbaImage;
+    use image::imageops;
 
     if ew < 8 || eh < 8 {
         return Err(ZensimError::ImageTooSmall);
@@ -1119,8 +1176,14 @@ fn compare_orientation_swap(
     let candidates: Vec<(RgbaImage, ComparisonMethod)> = vec![
         (rot90.clone(), ComparisonMethod::Rotated90),
         (rot270.clone(), ComparisonMethod::Rotated270),
-        (imageops::flip_horizontal(&rot90), ComparisonMethod::Transpose),
-        (imageops::flip_horizontal(&rot270), ComparisonMethod::Transverse),
+        (
+            imageops::flip_horizontal(&rot90),
+            ComparisonMethod::Transpose,
+        ),
+        (
+            imageops::flip_horizontal(&rot270),
+            ComparisonMethod::Transverse,
+        ),
     ];
 
     // Pre-filter: compare top-left corner block of expected against each candidate
@@ -1148,7 +1211,9 @@ fn compare_orientation_swap(
         let report =
             classify_rgba_pair(zensim, exp, ew, eh, transformed.as_raw(), ew, eh, tolerance)?;
 
-        let dominated = best.as_ref().is_none_or(|(b, _)| report.score() > b.score());
+        let dominated = best
+            .as_ref()
+            .is_none_or(|(b, _)| report.score() > b.score());
         if dominated {
             best = Some((report, method));
         }
@@ -1265,8 +1330,12 @@ pub fn detect_transform(
                 && exp_block.len() == (bs * bs * 4) as usize
                 && let Ok(report) = classify_rgba_pair(
                     zensim,
-                    &exp_block, bs, bs,
-                    &act_block, bs, bs,
+                    &exp_block,
+                    bs,
+                    bs,
+                    &act_block,
+                    bs,
+                    bs,
                     &RegressionTolerance::off_by_one().with_min_similarity(0.0),
                 )
             {
@@ -1320,10 +1389,15 @@ pub fn detect_transform(
 
     let report = classify_rgba_pair(
         zensim,
-        &exp_center, crop_w, crop_h,
-        &act_mirrored, crop_w, crop_h,
+        &exp_center,
+        crop_w,
+        crop_h,
+        &act_mirrored,
+        crop_w,
+        crop_h,
         &tolerance,
-    ).ok()?;
+    )
+    .ok()?;
 
     if report.score() > original_score + 15.0 && report.score() >= 40.0 {
         Some((report, method))
@@ -1440,7 +1514,11 @@ mod tests {
         let report =
             check_regression_resized(&z, &small_rgba, 16, 16, &big_rgba, 32, 32, &tol).unwrap();
 
-        assert!(report.score() > 70.0, "score {} should be > 70", report.score());
+        assert!(
+            report.score() > 70.0,
+            "score {} should be > 70",
+            report.score()
+        );
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.expected_dims, (16, 16));
         assert_eq!(dim.actual_dims, (32, 32));
@@ -1479,8 +1557,7 @@ mod tests {
         }
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
-        let report =
-            check_regression_resized(&z, &rgba16, 16, 16, &rgba17, 17, 15, &tol).unwrap();
+        let report = check_regression_resized(&z, &rgba16, 16, 16, &rgba17, 17, 15, &tol).unwrap();
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.kind, DimensionMismatchKind::OffByOne);
@@ -1546,7 +1623,10 @@ mod tests {
             method: ComparisonMethod::Rotated90,
         };
         let desc = info.description();
-        assert!(desc.contains("orientation swap"), "expected 'orientation swap' in: {desc}");
+        assert!(
+            desc.contains("orientation swap"),
+            "expected 'orientation swap' in: {desc}"
+        );
     }
 
     #[test]
@@ -1615,9 +1695,15 @@ mod tests {
         )
         .unwrap();
 
-        if let Some((report, method)) = detect_transform(&z, &rgba, &flipped, 16, 16, orig.score(), &tol) {
+        if let Some((report, method)) =
+            detect_transform(&z, &rgba, &flipped, 16, 16, orig.score(), &tol)
+        {
             assert_eq!(method, ComparisonMethod::FlipHorizontal);
-            assert!(report.score() > 90.0, "flip score {} should be > 90", report.score());
+            assert!(
+                report.score() > 90.0,
+                "flip score {} should be > 90",
+                report.score()
+            );
         }
     }
 
@@ -1637,9 +1723,15 @@ mod tests {
         )
         .unwrap();
 
-        if let Some((report, method)) = detect_transform(&z, &rgba, &flipped, 16, 16, orig.score(), &tol) {
+        if let Some((report, method)) =
+            detect_transform(&z, &rgba, &flipped, 16, 16, orig.score(), &tol)
+        {
             assert_eq!(method, ComparisonMethod::FlipVertical);
-            assert!(report.score() > 90.0, "flip score {} should be > 90", report.score());
+            assert!(
+                report.score() > 90.0,
+                "flip score {} should be > 90",
+                report.score()
+            );
         }
     }
 
@@ -1659,9 +1751,15 @@ mod tests {
         )
         .unwrap();
 
-        if let Some((report, method)) = detect_transform(&z, &rgba, &rotated, 16, 16, orig.score(), &tol) {
+        if let Some((report, method)) =
+            detect_transform(&z, &rgba, &rotated, 16, 16, orig.score(), &tol)
+        {
             assert_eq!(method, ComparisonMethod::Rotated180);
-            assert!(report.score() > 90.0, "rot180 score {} should be > 90", report.score());
+            assert!(
+                report.score() > 90.0,
+                "rot180 score {} should be > 90",
+                report.score()
+            );
         }
     }
 
@@ -1671,12 +1769,22 @@ mod tests {
         let rgba_a = asymmetric_gradient(16, 16);
         // Completely different image
         let rgba_b: Vec<u8> = (0..16 * 16)
-            .flat_map(|i| [((i * 7) % 256) as u8, ((i * 13) % 256) as u8, ((i * 31) % 256) as u8, 255])
+            .flat_map(|i| {
+                [
+                    ((i * 7) % 256) as u8,
+                    ((i * 13) % 256) as u8,
+                    ((i * 31) % 256) as u8,
+                    255,
+                ]
+            })
             .collect();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
         let result = detect_transform(&z, &rgba_a, &rgba_b, 16, 16, 5.0, &tol);
-        assert!(result.is_none(), "should not detect transform for unrelated images");
+        assert!(
+            result.is_none(),
+            "should not detect transform for unrelated images"
+        );
     }
 
     #[test]
@@ -1699,19 +1807,28 @@ mod tests {
         let (rw, rh) = rotated.dimensions(); // 24x16
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
-        let report =
-            check_regression_resized(&z, &rgba, 16, 24, &rot_rgba, rw, rh, &tol).unwrap();
+        let report = check_regression_resized(&z, &rgba, 16, 24, &rot_rgba, rw, rh, &tol).unwrap();
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
         // Corner-SAD may prefer rot90 or rot270 — both are correct rotations.
         // The important thing is the score is high (correct content match).
         assert!(
-            matches!(dim.method, ComparisonMethod::Rotated90 | ComparisonMethod::Rotated270
-                | ComparisonMethod::Transpose | ComparisonMethod::Transverse),
-            "expected a rotation method, got {:?}", dim.method,
+            matches!(
+                dim.method,
+                ComparisonMethod::Rotated90
+                    | ComparisonMethod::Rotated270
+                    | ComparisonMethod::Transpose
+                    | ComparisonMethod::Transverse
+            ),
+            "expected a rotation method, got {:?}",
+            dim.method,
         );
-        assert!(report.score() > 90.0, "rot90 score {} should be > 90", report.score());
+        assert!(
+            report.score() > 90.0,
+            "rot90 score {} should be > 90",
+            report.score()
+        );
     }
 
     #[test]
@@ -1724,17 +1841,26 @@ mod tests {
         let (rw, rh) = rotated.dimensions();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
-        let report =
-            check_regression_resized(&z, &rgba, 16, 24, &rot_rgba, rw, rh, &tol).unwrap();
+        let report = check_regression_resized(&z, &rgba, 16, 24, &rot_rgba, rw, rh, &tol).unwrap();
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
         assert!(
-            matches!(dim.method, ComparisonMethod::Rotated90 | ComparisonMethod::Rotated270
-                | ComparisonMethod::Transpose | ComparisonMethod::Transverse),
-            "expected a rotation method, got {:?}", dim.method,
+            matches!(
+                dim.method,
+                ComparisonMethod::Rotated90
+                    | ComparisonMethod::Rotated270
+                    | ComparisonMethod::Transpose
+                    | ComparisonMethod::Transverse
+            ),
+            "expected a rotation method, got {:?}",
+            dim.method,
         );
-        assert!(report.score() > 90.0, "rot270 score {} should be > 90", report.score());
+        assert!(
+            report.score() > 90.0,
+            "rot270 score {} should be > 90",
+            report.score()
+        );
     }
 
     #[test]
@@ -1748,13 +1874,16 @@ mod tests {
         let (tw, th) = transposed.dimensions();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
-        let report =
-            check_regression_resized(&z, &rgba, 16, 24, &t_rgba, tw, th, &tol).unwrap();
+        let report = check_regression_resized(&z, &rgba, 16, 24, &t_rgba, tw, th, &tol).unwrap();
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
         assert_eq!(dim.method, ComparisonMethod::Transpose);
-        assert!(report.score() > 90.0, "transpose score {} should be > 90", report.score());
+        assert!(
+            report.score() > 90.0,
+            "transpose score {} should be > 90",
+            report.score()
+        );
     }
 
     // ─── Crop difference with fallback ──────────────────────────────────
@@ -1774,7 +1903,11 @@ mod tests {
 
         let dim = report.dimension_info().unwrap();
         assert_eq!(dim.kind, DimensionMismatchKind::CropDifference);
-        assert!(report.score() > 50.0, "crop score {} should be > 50", report.score());
+        assert!(
+            report.score() > 50.0,
+            "crop score {} should be > 50",
+            report.score()
+        );
     }
 
     // ─── Helper function tests ──────────────────────────────────────────
@@ -1833,23 +1966,59 @@ mod tests {
 
     #[test]
     fn dimension_mismatch_kind_display() {
-        assert_eq!(DimensionMismatchKind::OrientationSwap.to_string(), "orientation swap");
-        assert_eq!(DimensionMismatchKind::OffByOne.to_string(), "off-by-one rounding");
-        assert_eq!(DimensionMismatchKind::CropDifference.to_string(), "crop/trim");
-        assert_eq!(DimensionMismatchKind::LargeDifference.to_string(), "different dimensions");
+        assert_eq!(
+            DimensionMismatchKind::OrientationSwap.to_string(),
+            "orientation swap"
+        );
+        assert_eq!(
+            DimensionMismatchKind::OffByOne.to_string(),
+            "off-by-one rounding"
+        );
+        assert_eq!(
+            DimensionMismatchKind::CropDifference.to_string(),
+            "crop/trim"
+        );
+        assert_eq!(
+            DimensionMismatchKind::LargeDifference.to_string(),
+            "different dimensions"
+        );
     }
 
     #[test]
     fn comparison_method_display() {
         assert_eq!(ComparisonMethod::Resized.to_string(), "resized");
-        assert_eq!(ComparisonMethod::CenterCropped.to_string(), "center-cropped");
-        assert_eq!(ComparisonMethod::Rotated90.to_string(), "rotated 90\u{00b0} CW");
-        assert_eq!(ComparisonMethod::Rotated270.to_string(), "rotated 270\u{00b0} CW");
-        assert_eq!(ComparisonMethod::FlipHorizontal.to_string(), "flipped horizontally");
-        assert_eq!(ComparisonMethod::FlipVertical.to_string(), "flipped vertically");
-        assert_eq!(ComparisonMethod::Rotated180.to_string(), "rotated 180\u{00b0}");
-        assert_eq!(ComparisonMethod::Transpose.to_string(), "transposed (rot90+flipH)");
-        assert_eq!(ComparisonMethod::Transverse.to_string(), "transversed (rot270+flipH)");
+        assert_eq!(
+            ComparisonMethod::CenterCropped.to_string(),
+            "center-cropped"
+        );
+        assert_eq!(
+            ComparisonMethod::Rotated90.to_string(),
+            "rotated 90\u{00b0} CW"
+        );
+        assert_eq!(
+            ComparisonMethod::Rotated270.to_string(),
+            "rotated 270\u{00b0} CW"
+        );
+        assert_eq!(
+            ComparisonMethod::FlipHorizontal.to_string(),
+            "flipped horizontally"
+        );
+        assert_eq!(
+            ComparisonMethod::FlipVertical.to_string(),
+            "flipped vertically"
+        );
+        assert_eq!(
+            ComparisonMethod::Rotated180.to_string(),
+            "rotated 180\u{00b0}"
+        );
+        assert_eq!(
+            ComparisonMethod::Transpose.to_string(),
+            "transposed (rot90+flipH)"
+        );
+        assert_eq!(
+            ComparisonMethod::Transverse.to_string(),
+            "transversed (rot270+flipH)"
+        );
     }
 
     #[test]
@@ -1872,8 +2041,11 @@ mod tests {
                 kind: DimensionMismatchKind::OrientationSwap,
                 method,
             };
-            assert!(info.panel_label().contains(expected),
-                "panel_label for {method:?} should contain '{expected}', got '{}'", info.panel_label());
+            assert!(
+                info.panel_label().contains(expected),
+                "panel_label for {method:?} should contain '{expected}', got '{}'",
+                info.panel_label()
+            );
         }
     }
 
@@ -1900,7 +2072,10 @@ mod tests {
             method: ComparisonMethod::CenterCropped,
         });
         assert!(report.dimension_info().is_some());
-        assert_eq!(report.dimension_info().unwrap().kind, DimensionMismatchKind::OffByOne);
+        assert_eq!(
+            report.dimension_info().unwrap().kind,
+            DimensionMismatchKind::OffByOne
+        );
     }
 
     // ─── Edge case: classify boundary between categories ────────────────

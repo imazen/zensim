@@ -74,8 +74,7 @@ pub mod upload;
 // Re-export key types at crate root for convenience
 pub use error::RegressError;
 pub use testing::{
-    ComparisonMethod, DimensionInfo, DimensionMismatchKind, RegressionReport,
-    RegressionTolerance, check_regression, check_regression_resized, detect_transform,
-    shrink_tolerance,
+    ComparisonMethod, DimensionInfo, DimensionMismatchKind, RegressionReport, RegressionTolerance,
+    check_regression, check_regression_resized, detect_transform, shrink_tolerance,
 };
 pub use tolerance::ToleranceSpec as Tolerance;

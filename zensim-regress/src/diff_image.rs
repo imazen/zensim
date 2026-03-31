@@ -1019,8 +1019,20 @@ fn render_mismatched_montage(
 
     // Panel 0: EXPECTED on canvas
     let mut panel_expected = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
-    imageops::overlay(&mut panel_expected, expected, ex_off_x as i64, ex_off_y as i64);
-    draw_rect_border(&mut panel_expected, ex_off_x, ex_off_y, ew, eh, border_color);
+    imageops::overlay(
+        &mut panel_expected,
+        expected,
+        ex_off_x as i64,
+        ex_off_y as i64,
+    );
+    draw_rect_border(
+        &mut panel_expected,
+        ex_off_x,
+        ex_off_y,
+        ew,
+        eh,
+        border_color,
+    );
 
     // Panel 1: ACTUAL on canvas
     let mut panel_actual = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
@@ -1038,19 +1050,45 @@ fn render_mismatched_montage(
         ex_off_x as i64,
         ex_off_y as i64,
     );
-    draw_rect_border(&mut panel_pixel_diff, ex_off_x, ex_off_y, ew, eh, border_color);
+    draw_rect_border(
+        &mut panel_pixel_diff,
+        ex_off_x,
+        ex_off_y,
+        ew,
+        eh,
+        border_color,
+    );
 
     // Panel 3: STRUCTURAL ADD/REMOVE on shared canvas with transparent bg
     let transparent = Rgba([0, 0, 0, 0]);
     let mut exp_on_canvas = RgbaImage::from_pixel(canvas_w, canvas_h, transparent);
-    imageops::overlay(&mut exp_on_canvas, expected, ex_off_x as i64, ex_off_y as i64);
+    imageops::overlay(
+        &mut exp_on_canvas,
+        expected,
+        ex_off_x as i64,
+        ex_off_y as i64,
+    );
     let mut act_on_canvas = RgbaImage::from_pixel(canvas_w, canvas_h, transparent);
     imageops::overlay(&mut act_on_canvas, actual, ax_off_x as i64, ax_off_y as i64);
     let mut panel_structural =
         generate_structural_diff(&exp_on_canvas, &act_on_canvas, 3, amplification);
     // Blue borders for both image bounds on the structural panel
-    draw_rect_border(&mut panel_structural, ex_off_x, ex_off_y, ew, eh, border_color);
-    draw_rect_border(&mut panel_structural, ax_off_x, ax_off_y, aw, ah, border_color);
+    draw_rect_border(
+        &mut panel_structural,
+        ex_off_x,
+        ex_off_y,
+        ew,
+        eh,
+        border_color,
+    );
+    draw_rect_border(
+        &mut panel_structural,
+        ax_off_x,
+        ax_off_y,
+        aw,
+        ah,
+        border_color,
+    );
 
     // Spatial analysis on the resized pair (for heatmap)
     let (sg_cols, sg_rows) = options.spatial_grid;
@@ -1255,7 +1293,14 @@ fn render_mismatched_montage(
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, title_h, [25, 25, 25, 255]);
+        fill_rect(
+            &mut output,
+            0,
+            y_cursor,
+            total_w,
+            title_h,
+            [25, 25, 25, 255],
+        );
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             let tx = (total_w.saturating_sub(tw)) / 2;
             imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
@@ -1276,7 +1321,14 @@ fn render_mismatched_montage(
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, primary_h, [30, 30, 30, 255]);
+        fill_rect(
+            &mut output,
+            0,
+            y_cursor,
+            total_w,
+            primary_h,
+            [30, 30, 30, 255],
+        );
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             let tx = (total_w.saturating_sub(tw)) / 2;
             imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
@@ -1295,7 +1347,14 @@ fn render_mismatched_montage(
         && tw > 0
         && th > 0
     {
-        fill_rect(&mut output, 0, y_cursor, total_w, extra_h, [25, 25, 25, 255]);
+        fill_rect(
+            &mut output,
+            0,
+            y_cursor,
+            total_w,
+            extra_h,
+            [25, 25, 25, 255],
+        );
         if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
             imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
         }
@@ -1708,10 +1767,7 @@ impl AnnotationText {
             const COLOR_WARN: [u8; 4] = [255, 200, 60, 255];
 
             let dim_line = format!("DIMENSIONS: {}", dim_info.description());
-            let method_line = format!(
-                "Actual {} for comparison (approximate)",
-                dim_info.method(),
-            );
+            let method_line = format!("Actual {} for comparison (approximate)", dim_info.method(),);
             ann.primary_lines.insert(0, (method_line, COLOR_WARN));
             ann.primary_lines.insert(0, (dim_line, COLOR_WARN));
         }

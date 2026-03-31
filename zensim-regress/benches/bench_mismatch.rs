@@ -81,7 +81,10 @@ fn bench_detect_unrelated(suite: &mut zenbench::Suite) {
                         &z,
                         std::hint::black_box(&exp),
                         std::hint::black_box(&act),
-                        w, h, -100.0, &tol,
+                        w,
+                        h,
+                        -100.0,
+                        &tol,
                     )
                 })
             });
@@ -107,7 +110,10 @@ fn bench_detect_flipped(suite: &mut zenbench::Suite) {
                         &z,
                         std::hint::black_box(&exp),
                         std::hint::black_box(&flipped),
-                        w, h, -100.0, &tol,
+                        w,
+                        h,
+                        -100.0,
+                        &tol,
                     )
                 })
             });
@@ -117,7 +123,11 @@ fn bench_detect_flipped(suite: &mut zenbench::Suite) {
 
 fn bench_resized_orientation(suite: &mut zenbench::Suite) {
     suite.group("resized_orientation_swap", |group| {
-        for &(label, w, h) in &[("256x384", 256u32, 384u32), ("600x450", 600, 450), ("2160x3840", 2160, 3840)] {
+        for &(label, w, h) in &[
+            ("256x384", 256u32, 384u32),
+            ("600x450", 600, 450),
+            ("2160x3840", 2160, 3840),
+        ] {
             let z = Zensim::new(ZensimProfile::latest());
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(w, h);
@@ -129,10 +139,15 @@ fn bench_resized_orientation(suite: &mut zenbench::Suite) {
                 b.iter(|| {
                     check_regression_resized(
                         &z,
-                        std::hint::black_box(&exp), w, h,
-                        std::hint::black_box(&rot_rgba), rw, rh,
+                        std::hint::black_box(&exp),
+                        w,
+                        h,
+                        std::hint::black_box(&rot_rgba),
+                        rw,
+                        rh,
                         &tol,
-                    ).unwrap()
+                    )
+                    .unwrap()
                 })
             });
         }
@@ -141,7 +156,11 @@ fn bench_resized_orientation(suite: &mut zenbench::Suite) {
 
 fn bench_resized_off_by_one(suite: &mut zenbench::Suite) {
     suite.group("resized_off_by_one", |group| {
-        for &(label, w, h) in &[("256x256", 256u32, 256u32), ("600x450", 600, 450), ("3840x2160", 3840, 2160)] {
+        for &(label, w, h) in &[
+            ("256x256", 256u32, 256u32),
+            ("600x450", 600, 450),
+            ("3840x2160", 3840, 2160),
+        ] {
             let z = Zensim::new(ZensimProfile::latest());
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(w, h);
@@ -150,10 +169,15 @@ fn bench_resized_off_by_one(suite: &mut zenbench::Suite) {
                 b.iter(|| {
                     check_regression_resized(
                         &z,
-                        std::hint::black_box(&exp), w, h,
-                        std::hint::black_box(&act), w + 1, h - 1,
+                        std::hint::black_box(&exp),
+                        w,
+                        h,
+                        std::hint::black_box(&act),
+                        w + 1,
+                        h - 1,
                         &tol,
-                    ).unwrap()
+                    )
+                    .unwrap()
                 })
             });
         }
@@ -174,10 +198,15 @@ fn bench_resized_large(suite: &mut zenbench::Suite) {
                 b.iter(|| {
                     check_regression_resized(
                         &z,
-                        std::hint::black_box(&exp), ew, eh,
-                        std::hint::black_box(&act), aw, ah,
+                        std::hint::black_box(&exp),
+                        ew,
+                        eh,
+                        std::hint::black_box(&act),
+                        aw,
+                        ah,
                         &tol,
-                    ).unwrap()
+                    )
+                    .unwrap()
                 })
             });
         }
