@@ -1284,11 +1284,6 @@ pub fn detect_transform(
         if dominated {
             best = Some((mean_score, method));
         }
-
-        // Quick exit: if first candidate scored very poorly, images are unrelated.
-        if mean_score < original_score + 5.0 {
-            return None;
-        }
     }
 
     let (mean_score, method) = best?;
@@ -1304,19 +1299,21 @@ pub fn detect_transform(
     let tolerance = RegressionTolerance::off_by_one().with_min_similarity(0.0);
     // Use block score as the reported score via a lightweight dummy comparison
     // on a center crop to keep it fast.
-    let crop_w = (w / 2).max(8);
-    let crop_h = (h / 2).max(8);
+    // Crop must be symmetrically placed for mirror to work — force even dimensions.
+    let crop_w = ((w / 2) & !1).max(8);
+    let crop_h = ((h / 2) & !1).max(8);
     let exp_center = center_crop_rgba(expected_rgba, w, h, crop_w, crop_h);
     let act_center = center_crop_rgba(actual_rgba, w, h, crop_w, crop_h);
 
-    // Mirror the actual center crop according to the detected transform
+    // Mirror the actual center crop according to the detected transform.
+    // mirror_block_h/v both take width as the parameter (to compute row stride).
     let mut act_mirrored = act_center;
     match method {
         ComparisonMethod::FlipHorizontal => mirror_block_h(&mut act_mirrored, crop_w),
-        ComparisonMethod::FlipVertical => mirror_block_v(&mut act_mirrored, crop_h),
+        ComparisonMethod::FlipVertical => mirror_block_v(&mut act_mirrored, crop_w),
         ComparisonMethod::Rotated180 => {
             mirror_block_h(&mut act_mirrored, crop_w);
-            mirror_block_v(&mut act_mirrored, crop_h);
+            mirror_block_v(&mut act_mirrored, crop_w);
         }
         _ => {}
     }

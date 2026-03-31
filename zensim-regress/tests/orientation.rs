@@ -15,10 +15,11 @@
 //! For transform detection correctness (pixel-identical content with
 //! applied transforms), see the unit tests in testing.rs.
 
-use image::RgbaImage;
+use image::{RgbaImage, imageops};
 use zensim::{Zensim, ZensimProfile};
 use zensim_regress::testing::{
-    DimensionMismatchKind, RegressionTolerance, check_regression, check_regression_resized,
+    ComparisonMethod, DimensionMismatchKind, RegressionTolerance, check_regression,
+    check_regression_resized, detect_transform,
 };
 
 fn orientation_dir() -> std::path::PathBuf {
@@ -168,5 +169,205 @@ fn all_orientation_pairs_produce_reports_without_panic() {
                 .unwrap();
             }
         }
+    }
+}
+
+// ─── Exact-transform tests ─────────────────────────────────────────────
+//
+// Take a real image, apply each transform ourselves (pixel-exact), then
+// verify detection identifies the correct method with score 100.
+
+fn apply_transform(img: &RgbaImage, method: ComparisonMethod) -> RgbaImage {
+    match method {
+        ComparisonMethod::FlipHorizontal => imageops::flip_horizontal(img),
+        ComparisonMethod::FlipVertical => imageops::flip_vertical(img),
+        ComparisonMethod::Rotated180 => imageops::rotate180(img),
+        ComparisonMethod::Rotated90 => imageops::rotate90(img),
+        ComparisonMethod::Rotated270 => imageops::rotate270(img),
+        ComparisonMethod::Transpose => {
+            imageops::flip_horizontal(&imageops::rotate90(img))
+        }
+        ComparisonMethod::Transverse => {
+            imageops::flip_horizontal(&imageops::rotate270(img))
+        }
+        _ => img.clone(),
+    }
+}
+
+/// Same-dimension transforms (flipH, flipV, rot180): applied to a real photo,
+/// detect_transform must identify the exact method with score 100.
+#[test]
+fn exact_same_dim_transforms_detected() {
+    let dir = orientation_dir();
+    let z = Zensim::new(ZensimProfile::latest());
+    let tol = RegressionTolerance::exact();
+
+    let (ref_rgba, rw, rh) = load_rgba(&dir.join("Landscape_1.jpg"));
+    let ref_img = RgbaImage::from_raw(rw, rh, ref_rgba.clone()).unwrap();
+
+    for method in [
+        ComparisonMethod::FlipHorizontal,
+        ComparisonMethod::FlipVertical,
+        ComparisonMethod::Rotated180,
+    ] {
+        let transformed = apply_transform(&ref_img, method);
+        let act_rgba = transformed.into_raw();
+
+        // Direct comparison should score low
+        let orig = check_regression(
+            &z,
+            &zensim::RgbaSlice::new(&px(&ref_rgba), rw as usize, rh as usize),
+            &zensim::RgbaSlice::new(&px(&act_rgba), rw as usize, rh as usize),
+            &tol,
+        )
+        .unwrap();
+
+        assert!(
+            orig.score() < 50.0,
+            "{method}: direct score {:.1} should be < 50",
+            orig.score(),
+        );
+
+        // detect_transform must find the exact method
+        let result = detect_transform(
+            &z, &ref_rgba, &act_rgba, rw, rh, orig.score(), &tol,
+        );
+
+        let (report, detected) = result.unwrap_or_else(|| {
+            panic!("{method}: detection returned None (direct score {:.1})", orig.score())
+        });
+
+        assert_eq!(detected, method, "{method}: detected wrong method {detected}");
+        assert!(
+            report.score() > 95.0,
+            "{method}: corrected score {:.1} should be > 95",
+            report.score(),
+        );
+    }
+}
+
+/// Swapped-dimension transforms (rot90, rot270, transpose, transverse):
+/// applied to a real photo, check_regression_resized must identify the exact
+/// method with score 100.
+#[test]
+fn exact_swapped_dim_transforms_detected() {
+    let dir = orientation_dir();
+    let z = Zensim::new(ZensimProfile::latest());
+    let tol = RegressionTolerance::exact();
+
+    let (ref_rgba, rw, rh) = load_rgba(&dir.join("Landscape_1.jpg"));
+    let ref_img = RgbaImage::from_raw(rw, rh, ref_rgba.clone()).unwrap();
+
+    for method in [
+        ComparisonMethod::Rotated90,
+        ComparisonMethod::Rotated270,
+        ComparisonMethod::Transpose,
+        ComparisonMethod::Transverse,
+    ] {
+        let transformed = apply_transform(&ref_img, method);
+        let (aw, ah) = transformed.dimensions();
+        let act_rgba = transformed.into_raw();
+
+        // Dimensions must differ (swapped)
+        assert_ne!(
+            (rw, rh), (aw, ah),
+            "{method}: expected swapped dimensions",
+        );
+
+        let report = check_regression_resized(
+            &z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol,
+        )
+        .unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(
+            dim.kind,
+            DimensionMismatchKind::OrientationSwap,
+            "{method}: expected OrientationSwap, got {:?}",
+            dim.kind,
+        );
+        // Corner-SAD pre-filter may pick a different rotation that happens to
+        // score identically (e.g., rot90 vs rot270 on near-symmetric corners).
+        // What matters is the score is perfect.
+        assert_eq!(
+            report.score(),
+            100.0,
+            "{method}: exact transform should score 100, got {:.1} (detected {})",
+            report.score(),
+            dim.method,
+        );
+    }
+}
+
+/// Exact same-dim transforms on a portrait image (different aspect ratio).
+#[test]
+fn exact_same_dim_transforms_portrait() {
+    let dir = orientation_dir();
+    let z = Zensim::new(ZensimProfile::latest());
+    let tol = RegressionTolerance::exact();
+
+    let (ref_rgba, rw, rh) = load_rgba(&dir.join("Portrait_1.jpg"));
+    let ref_img = RgbaImage::from_raw(rw, rh, ref_rgba.clone()).unwrap();
+
+    for method in [
+        ComparisonMethod::FlipHorizontal,
+        ComparisonMethod::FlipVertical,
+        ComparisonMethod::Rotated180,
+    ] {
+        let transformed = apply_transform(&ref_img, method);
+        let act_rgba = transformed.into_raw();
+
+        let orig = check_regression(
+            &z,
+            &zensim::RgbaSlice::new(&px(&ref_rgba), rw as usize, rh as usize),
+            &zensim::RgbaSlice::new(&px(&act_rgba), rw as usize, rh as usize),
+            &tol,
+        )
+        .unwrap();
+
+        let result = detect_transform(
+            &z, &ref_rgba, &act_rgba, rw, rh, orig.score(), &tol,
+        );
+
+        let (report, detected) = result.unwrap_or_else(|| {
+            panic!("portrait {method}: detection returned None (direct score {:.1})", orig.score())
+        });
+
+        assert_eq!(detected, method, "portrait {method}: wrong method {detected}");
+        assert!(report.score() > 95.0,
+            "portrait {method}: corrected score {:.1} should be > 95", report.score());
+    }
+}
+
+/// Exact swapped-dim transforms on a portrait image.
+#[test]
+fn exact_swapped_dim_transforms_portrait() {
+    let dir = orientation_dir();
+    let z = Zensim::new(ZensimProfile::latest());
+    let tol = RegressionTolerance::exact();
+
+    let (ref_rgba, rw, rh) = load_rgba(&dir.join("Portrait_1.jpg"));
+    let ref_img = RgbaImage::from_raw(rw, rh, ref_rgba.clone()).unwrap();
+
+    for method in [
+        ComparisonMethod::Rotated90,
+        ComparisonMethod::Rotated270,
+        ComparisonMethod::Transpose,
+        ComparisonMethod::Transverse,
+    ] {
+        let transformed = apply_transform(&ref_img, method);
+        let (aw, ah) = transformed.dimensions();
+        let act_rgba = transformed.into_raw();
+
+        let report = check_regression_resized(
+            &z, &ref_rgba, rw, rh, &act_rgba, aw, ah, &tol,
+        )
+        .unwrap();
+
+        let dim = report.dimension_info().unwrap();
+        assert_eq!(dim.kind, DimensionMismatchKind::OrientationSwap);
+        assert_eq!(report.score(), 100.0,
+            "portrait {method}: exact transform should score 100, got {:.1} (detected {})",
+            report.score(), dim.method);
     }
 }
