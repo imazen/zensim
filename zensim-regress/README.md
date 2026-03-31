@@ -10,7 +10,7 @@ Add the dependency:
 
 ```toml
 [dev-dependencies]
-zensim-regress = "0.2"
+zensim-regress = "0.3"
 ```
 
 Write a test that checks pixel output against a known-good baseline:
@@ -151,7 +151,7 @@ For crates using archmage (`#[arcane]`, `#[autoversion]`, `#[rite]`), SIMD consi
 
 ```toml
 [dev-dependencies]
-zensim-regress = { version = "0.2", features = ["archmage"] }
+zensim-regress = { version = "0.3", features = ["archmage"] }
 ```
 
 ```rust
@@ -338,7 +338,7 @@ tolerance off-by-one
 - `~` — auto-accepted within tolerance, with forensic diff evidence and a `vs` link to the baseline it was compared against (chain of trust)
 - `x` — retired entry (superseded or known-wrong, kept as history)
 
-**Section headers** (`## test_name detail_name`) group entries. The `tolerance` line beneath sets the default tolerance for that section.
+**Section headers** (`## test_name detail_name`) group entries. The `tolerance` line beneath is **informational only** — it records what tolerance was in effect when entries were accepted. Tolerances are controlled by code (`ToleranceSpec`), not by the `.checksums` file.
 
 **Memorable names** like `sunny-crab-a4839401fa:sea` are deterministic — derived from the hash bytes. Easier to reference in conversation than raw hex. The `:sea` suffix indicates the hash algorithm (SeaHash, 64-bit non-cryptographic).
 
@@ -373,6 +373,25 @@ let montage = MontageOptions::default()
 let montage = MontageOptions { amplification: 50, ..Default::default() }
     .render(&expected, &actual, &AnnotationText::empty());
 ```
+
+When expected and actual images have different dimensions, the montage automatically uses a shared-canvas layout with blue borders showing each image's original bounds. The pixel diff is computed on a resized copy, and the structural diff panel shows ADD/REMOVE regions where one image extends beyond the other.
+
+### Dimension mismatch detection
+
+When images have different dimensions, the comparison automatically categorizes the mismatch and chooses the cheapest scoring strategy:
+
+| Category | Detection | Strategy |
+|----------|-----------|----------|
+| **Orientation swap** (w↔h) | `ew == ah && eh == aw` | Try rot90, rot270, transpose, transverse; pick best |
+| **Off-by-one** (±1-2px) | Both axes differ by ≤2 | Center-crop to overlap (zero-copy, no resize) |
+| **Crop/trim** (<5%) | Small axis differences | Center-crop, resize fallback if score < 70 |
+| **Large difference** | Everything else | Bilinear resize only |
+
+### Flip and rotation detection
+
+For same-dimension images that score poorly (< 50), automatic transform detection checks for horizontal flip, vertical flip, and 180° rotation using block-level zensim on 5 strategic sub-regions (4 corners + center). This runs in constant time regardless of image size (~8ms even at 4K).
+
+All 8 EXIF orientations are covered between the dimension-mismatch path (rotations 5-8) and the same-dimension path (flips 2-4).
 
 For sixel-capable terminals (foot, WezTerm, mintty), the `display` module renders images inline.
 

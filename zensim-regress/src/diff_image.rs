@@ -1545,6 +1545,7 @@ impl MontageOptions {
 ///
 /// Use [`from_report`](Self::from_report) when you have a regression report,
 /// or [`empty`](Self::empty) for a bare montage with no annotations.
+#[non_exhaustive]
 pub struct AnnotationText {
     /// Title shown above the constraint lines (e.g., test name + detail).
     /// Rendered in white on the dark background strip. None = no title.

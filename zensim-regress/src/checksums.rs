@@ -2061,7 +2061,7 @@ tolerance d:1 s:95
         ));
         file.write_to(&path).unwrap();
 
-        let initial_content = std::fs::read_to_string(&path).unwrap();
+        let _initial_content = std::fs::read_to_string(&path).unwrap();
         let initial_comment_count = file.header_comments.len();
 
         // Round-trip 5 times: load → add entry → write
