@@ -4,18 +4,35 @@
 //! for each test function. Entries track human-verified baselines, auto-accepted
 //! variants, and retired superseded hashes.
 //!
+//! # What this file controls
+//!
+//! - **`=` lines**: Baselines — the known-good hashes. A matching hash means PASS.
+//! - **`~` lines**: Auto-accepted variants — hashes that were within tolerance on
+//!   a specific architecture. Informational record of what was accepted and why.
+//! - **`-` lines**: Retired entries — superseded hashes kept for history.
+//!
+//! # What this file does NOT control
+//!
+//! **Tolerances are set in code** (via [`ToleranceSpec`] in test source), not in
+//! the `.checksums` file. The `tolerance` line that appears below each section
+//! header is **informational only** — it records what tolerance was in effect when
+//! entries were accepted, but editing it has no effect on test behavior.
+//!
+//! To change tolerances, modify the `Tolerance::...` call in the test source code.
+//!
 //! # Format overview
 //!
 //! ```text
-//! # trim.checksums
+//! # trim.checksums — v1
+//! # Tolerances are controlled by code (ToleranceSpec), not by this file.
+//! # This file tracks baselines (= lines) and auto-accepted variants (~ lines).
+//! # The 'tolerance' line below each section header is informational only.
 //!
 //! ## test_trim_whitespace transparent_shirt
 //! tolerance identical
 //! = sunny-crab-a4839:sea  x86_64-avx512  @773c807  human-verified
 //! ~ tidy-frog-b2c3d:sea   aarch64        @773c807  auto-accepted (within off-by-one) vs sunny-crab-a4839:sea (zensim:0.0013, ...)
 //! ```
-//!
-//! See the plan document for full format specification.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,10 +60,21 @@ pub struct ChecksumsFile {
 }
 
 impl ChecksumsFile {
-    /// Create an empty file with a version header comment.
+    /// Create an empty file with a version header and usage comment.
     pub fn new(filename_stem: &str) -> Self {
         Self {
-            header_comments: vec![format!("# {filename_stem}.checksums \u{2014} v1")],
+            header_comments: vec![
+                format!("# {filename_stem}.checksums \u{2014} v1"),
+                String::from(
+                    "# Tolerances are controlled by code (ToleranceSpec), not by this file.",
+                ),
+                String::from(
+                    "# This file tracks baselines (= lines) and auto-accepted variants (~ lines).",
+                ),
+                String::from(
+                    "# The 'tolerance' line below each section header is informational only.",
+                ),
+            ],
             sections: Vec::new(),
         }
     }
@@ -239,7 +267,8 @@ pub struct TestSection {
     pub test_name: String,
     /// Detail/variant name (e.g., `"eeccff_hermite_400x400"`).
     pub detail_name: String,
-    /// Tolerance in effect for this test (informational).
+    /// Tolerance that was in effect when entries were accepted (informational only).
+    /// Editing this in the `.checksums` file has no effect — tolerances are set in code.
     pub tolerance: Option<crate::tolerance::ToleranceSpec>,
     /// Checksum entries in file order.
     pub entries: Vec<ChecksumEntry>,
