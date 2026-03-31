@@ -2046,6 +2046,88 @@ tolerance d:1 s:95
         );
     }
 
+    #[test]
+    fn header_comments_stable_across_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stable.checksums");
+
+        // Create initial file
+        let mut file = ChecksumsFile::new("stable");
+        let section = file.get_or_create_section("test_a", "v1");
+        section.entries.push(ChecksumEntry::human_verified(
+            "able-ace-00000:sea".to_string(),
+            "x86_64-avx2".to_string(),
+            "aaa".to_string(),
+        ));
+        file.write_to(&path).unwrap();
+
+        let initial_content = std::fs::read_to_string(&path).unwrap();
+        let initial_comment_count = file.header_comments.len();
+
+        // Round-trip 5 times: load → add entry → write
+        for i in 0..5 {
+            let mut loaded = ChecksumsFile::read_from(&path).unwrap();
+            assert_eq!(
+                loaded.header_comments.len(),
+                initial_comment_count,
+                "roundtrip {i}: header comment count changed from {initial_comment_count} to {}",
+                loaded.header_comments.len(),
+            );
+
+            let section = loaded.get_or_create_section("test_a", "v1");
+            section.entries.push(ChecksumEntry::auto_accepted(
+                format!("name-{i}:sea"),
+                "x86_64-avx2".to_string(),
+                "bbb".to_string(),
+                "auto-accepted".to_string(),
+                "able-ace-00000:sea".to_string(),
+                format!("(zensim:99.{i})"),
+            ));
+            loaded.write_to(&path).unwrap();
+        }
+
+        // Final content should have same header line count
+        let final_file = ChecksumsFile::read_from(&path).unwrap();
+        assert_eq!(
+            final_file.header_comments.len(),
+            initial_comment_count,
+            "after 5 roundtrips: header comments grew from {initial_comment_count} to {}",
+            final_file.header_comments.len(),
+        );
+
+        // Verify the text itself is byte-stable after one more roundtrip
+        let penultimate = std::fs::read_to_string(&path).unwrap();
+        let reparsed = ChecksumsFile::parse(&penultimate);
+        let reformatted = reparsed.format();
+        assert_eq!(
+            penultimate, reformatted,
+            "parse→format roundtrip should be byte-identical",
+        );
+    }
+
+    #[test]
+    fn old_file_without_new_header_comments_preserved() {
+        // Simulate an old file with just 1 header comment (pre-existing format)
+        let content = "\
+# test.checksums — v1
+
+## test_fill_rect blue
+tolerance d:0 s:100
+= jolly-pike-a4839:sea  x86_64-avx512  @773c807  human-verified
+";
+        let file = ChecksumsFile::parse(content);
+        assert_eq!(file.header_comments.len(), 1);
+
+        // Roundtrip: old header comment should be preserved, not replaced
+        let formatted = file.format();
+        let reparsed = ChecksumsFile::parse(&formatted);
+        assert_eq!(reparsed.header_comments.len(), 1);
+        assert!(
+            reparsed.header_comments[0].contains("test.checksums"),
+            "original header comment should be preserved",
+        );
+    }
+
     // ─── Section operations ─────────────────────────────────────────────
 
     #[test]
