@@ -13,7 +13,7 @@
 //!
 //! # What this file does NOT control
 //!
-//! **Tolerances are set in code** (via [`ToleranceSpec`] in test source), not in
+//! **Tolerances are set in code** (via [`ToleranceSpec`](crate::tolerance::ToleranceSpec) in test source), not in
 //! the `.checksums` file. The `tolerance` line that appears below each section
 //! header is **informational only** — it records what tolerance was in effect when
 //! entries were accepted, but editing it has no effect on test behavior.

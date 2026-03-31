@@ -113,7 +113,7 @@
 //! ```
 //!
 //! Oracle testing verifies the **output** is correct regardless of which
-//! SIMD tier ran — use [SIMD consistency testing](crate::simd) to verify
+//! SIMD tier ran — use SIMD consistency testing (`simd` module, requires `archmage` feature) to verify
 //! **cross-tier equivalence** separately.
 //!
 //! ## Combining oracle + SIMD consistency
