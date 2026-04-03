@@ -23,7 +23,9 @@ use crate::simd_ops::{
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use archmage::autoversion;
+#[cfg(feature = "threads")]
 use rayon::prelude::*;
+#[cfg(feature = "threads")]
 use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
@@ -38,13 +40,14 @@ where
     RA: Send,
     RB: Send,
 {
+    #[cfg(feature = "threads")]
     if parallel {
-        rayon::join(a, b)
-    } else {
-        let ra = a();
-        let rb = b();
-        (ra, rb)
+        return rayon::join(a, b);
     }
+    let _ = parallel;
+    let ra = a();
+    let rb = b();
+    (ra, rb)
 }
 
 /// Downscale 3 planes in-place, parallel or sequential.
@@ -207,6 +210,7 @@ fn upsample_row_2x(src_row: &[f32], dst_row: &mut [f32], weight: f32) {
 }
 
 /// Track background deallocation thread to prevent accumulation on repeated calls.
+#[cfg(feature = "threads")]
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
 /// Per-scale feature accumulators. Collects raw sums across strips,
@@ -543,6 +547,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
 
     // Background deallocation: move XYB planes to a background thread
     // to avoid blocking on munmap syscalls.
+    #[cfg(feature = "threads")]
     {
         let mut guard = DEALLOC_THREAD.lock().unwrap();
         if let Some(prev) = guard.take() {
@@ -552,6 +557,11 @@ pub(crate) fn compute_multiscale_stats_streaming(
             drop(src_planes);
             drop(dst_planes);
         }));
+    }
+    #[cfg(not(feature = "threads"))]
+    {
+        drop(src_planes);
+        drop(dst_planes);
     }
 
     (stats, mean_offset)
@@ -563,7 +573,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
 pub(crate) fn convert_source_to_xyb(
     source: &impl ImageSource,
     padded_width: usize,
-    parallel: bool,
+    #[allow(unused_variables)] parallel: bool,
 ) -> [Vec<f32>; 3] {
     let width = source.width();
     let height = source.height();
@@ -867,14 +877,24 @@ pub(crate) fn convert_source_to_xyb(
         };
 
     #[allow(clippy::redundant_closure)]
-    if parallel {
-        p0_chunks
-            .into_par_iter()
-            .zip(p1_chunks)
-            .zip(p2_chunks)
-            .enumerate()
-            .for_each(|args| process_chunk(args));
-    } else {
+    {
+        #[cfg(feature = "threads")]
+        if parallel {
+            p0_chunks
+                .into_par_iter()
+                .zip(p1_chunks)
+                .zip(p2_chunks)
+                .enumerate()
+                .for_each(|args| process_chunk(args));
+        } else {
+            p0_chunks
+                .into_iter()
+                .zip(p1_chunks)
+                .zip(p2_chunks)
+                .enumerate()
+                .for_each(|args| process_chunk(args));
+        }
+        #[cfg(not(feature = "threads"))]
         p0_chunks
             .into_iter()
             .zip(p1_chunks)
@@ -1310,10 +1330,13 @@ fn process_scale_bands(
     let overlap = passes * r;
     let scale_active = active_channels(scale_idx, config.num_scales, config, weights);
 
-    let parallel = config.allow_multithreading;
+    let parallel = config.allow_multithreading && cfg!(feature = "threads");
     let total_strips = height.div_ceil(STRIP_INNER);
     let num_bands = if parallel {
-        rayon::current_num_threads().min(total_strips).max(1)
+        #[cfg(feature = "threads")]
+        { rayon::current_num_threads().min(total_strips).max(1) }
+        #[cfg(not(feature = "threads"))]
+        { 1 }
     } else {
         1
     };
@@ -1387,13 +1410,20 @@ fn process_scale_bands(
     };
 
     #[allow(clippy::redundant_closure)]
-    let band_results: Vec<_> = if parallel {
-        (0..num_bands)
-            .into_par_iter()
-            .map(|i| process_band(i))
-            .collect()
-    } else {
-        (0..num_bands).map(|i| process_band(i)).collect()
+    let band_results: Vec<_> = {
+        #[cfg(feature = "threads")]
+        if parallel {
+            (0..num_bands)
+                .into_par_iter()
+                .map(|i| process_band(i))
+                .collect()
+        } else {
+            (0..num_bands).map(|i| process_band(i)).collect()
+        }
+        #[cfg(not(feature = "threads"))]
+        {
+            (0..num_bands).map(|i| process_band(i)).collect()
+        }
     };
 
     // Merge band accumulators and concatenate diffmaps
@@ -1620,6 +1650,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     }
 
     // Background deallocation for distorted planes
+    #[cfg(feature = "threads")]
     {
         let mut guard = DEALLOC_THREAD.lock().unwrap();
         if let Some(prev) = guard.take() {
@@ -1629,6 +1660,8 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
             drop(dst_planes);
         }));
     }
+    #[cfg(not(feature = "threads"))]
+    drop(dst_planes);
 
     (stats, mean_offset)
 }
@@ -1777,6 +1810,7 @@ fn compute_diffmap_from_xyb(
         }
     }
 
+    #[cfg(feature = "threads")]
     {
         let mut guard = DEALLOC_THREAD.lock().unwrap();
         if let Some(prev) = guard.take() {
@@ -1786,6 +1820,8 @@ fn compute_diffmap_from_xyb(
             drop(dst_planes);
         }));
     }
+    #[cfg(not(feature = "threads"))]
+    drop(dst_planes);
 
     // Fuse multi-scale diffmaps: scale 0 at full weight, coarser scales upsampled and blended
     let full_w = padded_width;
@@ -1991,10 +2027,8 @@ pub(crate) fn compute_delta_stats(
     let chunk_rows = 64usize;
     let num_chunks = height.div_ceil(chunk_rows);
 
-    // Parallel accumulation over row chunks
-    let accum = (0..num_chunks)
-        .into_par_iter()
-        .map(|chunk_idx| {
+    // Accumulation over row chunks (parallel when threads feature enabled)
+    let process_chunk = |chunk_idx: usize| -> DeltaAccum {
             let mut acc = DeltaAccum::new();
             let row_start = chunk_idx * chunk_rows;
             let row_end = (row_start + chunk_rows).min(height);
@@ -2124,8 +2158,19 @@ pub(crate) fn compute_delta_stats(
                 }
             }
             acc
-        })
+    };
+    #[cfg(feature = "threads")]
+    let accum = (0..num_chunks)
+        .into_par_iter()
+        .map(|i| process_chunk(i))
         .reduce(DeltaAccum::new, |mut a, b| {
+            a.merge(&b);
+            a
+        });
+    #[cfg(not(feature = "threads"))]
+    let accum = (0..num_chunks)
+        .map(|i| process_chunk(i))
+        .fold(DeltaAccum::new(), |mut a, b| {
             a.merge(&b);
             a
         });
