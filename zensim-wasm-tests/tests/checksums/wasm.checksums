@@ -1,0 +1,23 @@
+# wasm.checksums — v1
+# Tolerances are controlled by code (ToleranceSpec), not by this file.
+# This file tracks baselines (= lines) and auto-accepted variants (~ lines).
+# The 'tolerance' line below each section header is informational only.
+
+## checkerboard 64x64_f8
+~ quick-bat-b8a2a59c66:sea  x86_64-avx512  @6be2202  auto-accepted
+
+## color_blocks 64x64
+~ dim-fire-07719bcb02:sea  x86_64-avx512  @6be2202  auto-accepted
+
+## gradient 64x64
+~ bulk-duck-c3eb7f8ba2:sea  x86_64-avx512  @6be2202  auto-accepted
+
+## truncate_lsb gradient_64x64
+tolerance off-by-one
+~ red-moose-1489b8ba7d:sea  x86_64-avx512  @6be2202  auto-accepted
+
+## value_noise 64x64_s42
+~ gold-ray-bcb512e140:sea  x86_64-avx512  @6be2202  auto-accepted
+
+## mandelbrot 64x64
+~ rude-bell-7a7f95cd97:sea  x86_64-avx512  @6be2202  auto-accepted

@@ -2610,6 +2610,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zensim-wasm-tests"
+version = "0.0.0"
+dependencies = [
+ "zensim",
+ "zensim-regress",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"

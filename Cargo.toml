@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["zensim", "zensim-validate", "zensim-regress", "zensim-bench"]
+members = ["zensim", "zensim-validate", "zensim-regress", "zensim-bench", "zensim-wasm-tests"]
 
 [profile.release]
 lto = "thin"
@@ -14,6 +14,7 @@ opt-level = 2
 
 [workspace.dependencies]
 zensim = { version = "0.2.4", path = "zensim", default-features = false }
+zensim-regress = { version = "0.3.0", path = "zensim-regress", default-features = false }
 archmage = { version = "0.9.15", features = ["macros", "avx512"] }
 magetypes = { version = "0.9.15", features = ["avx512"] }
 bytemuck = { version = "1.25", default-features = false }
