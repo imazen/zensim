@@ -10,15 +10,13 @@
 
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
-#[cfg(target_arch = "wasm32")]
-use archmage::arcane;
 use archmage::incant;
+use archmage::magetypes;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
+use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
-#[cfg(target_arch = "wasm32")]
-use magetypes::simd::wasm128::f32x4;
 
 /// 1-pass blur: rectangular kernel.
 /// Use with larger radius to approximate same effective width.
@@ -273,27 +271,27 @@ fn box_blur_v_copy_inner_v3(
     }
 }
 
-/// WASM SIMD vertical blur: process 4 columns at a time.
-#[cfg(target_arch = "wasm32")]
-#[arcane]
-fn box_blur_v_copy_inner_wasm128(
-    token: archmage::Wasm128Token,
+#[magetypes(wasm128, scalar)]
+fn box_blur_v_copy_inner(
+    token: Token,
     src: &[f32],
     dst: &mut [f32],
     width: usize,
     height: usize,
     radius: usize,
 ) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x4::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
-    let col_groups = width / 4;
+    let col_groups = width / 8;
 
     for cg in 0..col_groups {
-        let col_base = cg * 4;
+        let col_base = cg * 8;
 
-        // Initialize running sums for 4 columns
-        let mut sum = f32x4::zero(token);
+        // Initialize running sums for 8 columns
+        let mut sum = f32x8::zero(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(height - 1)
@@ -301,12 +299,12 @@ fn box_blur_v_copy_inner_wasm128(
                 (i - r).min(height - 1)
             };
             let base = idx * width + col_base;
-            sum = sum + f32x4::from_array(token, src[base..][..4].try_into().unwrap());
+            sum = sum + f32x8::from_array(token, src[base..][..8].try_into().unwrap());
         }
 
         for y in 0..height {
             let base = y * width + col_base;
-            dst[base..base + 4].copy_from_slice(&(sum * inv_v).to_array());
+            dst[base..base + 8].copy_from_slice(&(sum * inv_v).to_array());
 
             let add_raw = y + r + 1;
             let add_idx = if add_raw < height {
@@ -325,59 +323,15 @@ fn box_blur_v_copy_inner_wasm128(
 
             let add_base = add_idx * width + col_base;
             let rem_base = rem_idx * width + col_base;
-            let add_v = f32x4::from_array(token, src[add_base..][..4].try_into().unwrap());
-            let rem_v = f32x4::from_array(token, src[rem_base..][..4].try_into().unwrap());
+            let add_v = f32x8::from_array(token, src[add_base..][..8].try_into().unwrap());
+            let rem_v = f32x8::from_array(token, src[rem_base..][..8].try_into().unwrap());
             sum = sum + add_v - rem_v;
         }
     }
 
     // Scalar remainder columns
     let inv = 1.0 / diam as f32;
-    for x in (col_groups * 4)..width {
-        let mut sum = 0.0f32;
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(height - 1)
-            } else {
-                (i - r).min(height - 1)
-            };
-            sum += src[idx * width + x];
-        }
-
-        for y in 0..height {
-            dst[y * width + x] = sum * inv;
-            let add_raw = y + r + 1;
-            let add_idx = if add_raw < height {
-                add_raw
-            } else {
-                2 * (height - 1) - add_raw
-            };
-            let add_idx = add_idx.min(height - 1);
-            let rem_i = y as isize - r as isize;
-            let rem_idx = if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            };
-            let rem_idx = rem_idx.min(height - 1);
-            sum = sum + src[add_idx * width + x] - src[rem_idx * width + x];
-        }
-    }
-}
-
-fn box_blur_v_copy_inner_scalar(
-    _token: archmage::ScalarToken,
-    src: &[f32],
-    dst: &mut [f32],
-    width: usize,
-    height: usize,
-    radius: usize,
-) {
-    let diam = 2 * radius + 1;
-    let inv = 1.0 / diam as f32;
-    let r = radius;
-
-    for x in 0..width {
+    for x in (col_groups * 8)..width {
         let mut sum = 0.0f32;
         for i in 0..diam {
             let idx = if i <= r {
@@ -680,44 +634,43 @@ fn box_blur_h_inner_v3(
     }
 }
 
-/// WASM SIMD horizontal blur: process 4 rows simultaneously.
-/// Each f32x4 lane holds the running sum for one row.
-#[cfg(target_arch = "wasm32")]
-#[arcane]
-fn box_blur_h_inner_wasm128(
-    token: archmage::Wasm128Token,
+#[magetypes(wasm128, scalar)]
+fn box_blur_h_inner(
+    token: Token,
     input: &[f32],
     output: &mut [f32],
     width: usize,
     height: usize,
     radius: usize,
 ) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x4::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
-    let row_groups = height / 4;
+    let row_groups = height / 8;
 
     for rg in 0..row_groups {
-        let row_base = rg * 4;
+        let row_base = rg * 8;
 
-        // Initialize running sums for 4 rows
-        let mut sum = f32x4::zero(token);
+        // Initialize running sums for 8 rows
+        let mut sum = f32x8::zero(token);
         for i in 0..diam {
             let idx = if i <= r {
                 (r - i).min(width - 1)
             } else {
                 (i - r).min(width - 1)
             };
-            let mut arr = [0.0f32; 4];
-            for ro in 0..4 {
+            let mut arr = [0.0f32; 8];
+            for ro in 0..8 {
                 arr[ro] = input[(row_base + ro) * width + idx];
             }
-            sum = sum + f32x4::from_array(token, arr);
+            sum = sum + f32x8::from_array(token, arr);
         }
 
         for x in 0..width {
             let result = (sum * inv_v).to_array();
-            for ro in 0..4 {
+            for ro in 0..8 {
                 output[(row_base + ro) * width + x] = result[ro];
             }
 
@@ -736,68 +689,20 @@ fn box_blur_h_inner_wasm128(
             };
             let rem_idx = rem_idx.min(width - 1);
 
-            let mut add_arr = [0.0f32; 4];
-            let mut rem_arr = [0.0f32; 4];
-            for ro in 0..4 {
+            let mut add_arr = [0.0f32; 8];
+            let mut rem_arr = [0.0f32; 8];
+            for ro in 0..8 {
                 let base = (row_base + ro) * width;
                 add_arr[ro] = input[base + add_idx];
                 rem_arr[ro] = input[base + rem_idx];
             }
-            sum = sum + f32x4::from_array(token, add_arr) - f32x4::from_array(token, rem_arr);
+            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
         }
     }
 
     // Scalar remainder rows
     let inv = 1.0 / diam as f32;
-    for row in (row_groups * 4)..height {
-        let row_off = row * width;
-        let inp = &input[row_off..row_off + width];
-        let out = &mut output[row_off..row_off + width];
-
-        let mut sum = 0.0f32;
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
-            sum += inp[idx];
-        }
-
-        for x in 0..width {
-            out[x] = sum * inv;
-            let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
-            let rem_i = x as isize - r as isize;
-            let rem_idx = if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            };
-            let rem_idx = rem_idx.min(width - 1);
-            sum = sum + inp[add_idx] - inp[rem_idx];
-        }
-    }
-}
-
-fn box_blur_h_inner_scalar(
-    _token: archmage::ScalarToken,
-    input: &[f32],
-    output: &mut [f32],
-    width: usize,
-    height: usize,
-    radius: usize,
-) {
-    let diam = 2 * radius + 1;
-    let inv = 1.0 / diam as f32;
-    let r = radius;
-
-    for row in 0..height {
+    for row in (row_groups * 8)..height {
         let row_off = row * width;
         let inp = &input[row_off..row_off + width];
         let out = &mut output[row_off..row_off + width];
@@ -1166,11 +1071,10 @@ fn fused_blur_h_mu_inner_v3(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[arcane]
+#[magetypes(wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
-fn fused_blur_h_mu_inner_wasm128(
-    token: archmage::Wasm128Token,
+fn fused_blur_h_mu_inner(
+    token: Token,
     src: &[f32],
     dst: &[f32],
     out_mu1: &mut [f32],
@@ -1179,15 +1083,17 @@ fn fused_blur_h_mu_inner_wasm128(
     height: usize,
     radius: usize,
 ) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x4::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
-    let row_groups = height / 4;
+    let row_groups = height / 8;
 
     for rg in 0..row_groups {
-        let row_base = rg * 4;
-        let mut sum_s = f32x4::zero(token);
-        let mut sum_d = f32x4::zero(token);
+        let row_base = rg * 8;
+        let mut sum_s = f32x8::zero(token);
+        let mut sum_d = f32x8::zero(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -1195,21 +1101,21 @@ fn fused_blur_h_mu_inner_wasm128(
             } else {
                 (i - r).min(width - 1)
             };
-            let mut s_arr = [0.0f32; 4];
-            let mut d_arr = [0.0f32; 4];
-            for ro in 0..4 {
+            let mut s_arr = [0.0f32; 8];
+            let mut d_arr = [0.0f32; 8];
+            for ro in 0..8 {
                 let base = (row_base + ro) * width + idx;
                 s_arr[ro] = src[base];
                 d_arr[ro] = dst[base];
             }
-            sum_s = sum_s + f32x4::from_array(token, s_arr);
-            sum_d = sum_d + f32x4::from_array(token, d_arr);
+            sum_s = sum_s + f32x8::from_array(token, s_arr);
+            sum_d = sum_d + f32x8::from_array(token, d_arr);
         }
 
         for x in 0..width {
             let mu1_result = (sum_s * inv_v).to_array();
             let mu2_result = (sum_d * inv_v).to_array();
-            for ro in 0..4 {
+            for ro in 0..8 {
                 let base = (row_base + ro) * width + x;
                 out_mu1[base] = mu1_result[ro];
                 out_mu2[base] = mu2_result[ro];
@@ -1230,81 +1136,25 @@ fn fused_blur_h_mu_inner_wasm128(
             };
             let rem_idx = rem_idx.min(width - 1);
 
-            let mut s_add = [0.0f32; 4];
-            let mut d_add = [0.0f32; 4];
-            let mut s_rem = [0.0f32; 4];
-            let mut d_rem = [0.0f32; 4];
-            for ro in 0..4 {
+            let mut s_add = [0.0f32; 8];
+            let mut d_add = [0.0f32; 8];
+            let mut s_rem = [0.0f32; 8];
+            let mut d_rem = [0.0f32; 8];
+            for ro in 0..8 {
                 let base = (row_base + ro) * width;
                 s_add[ro] = src[base + add_idx];
                 d_add[ro] = dst[base + add_idx];
                 s_rem[ro] = src[base + rem_idx];
                 d_rem[ro] = dst[base + rem_idx];
             }
-            sum_s = sum_s + f32x4::from_array(token, s_add) - f32x4::from_array(token, s_rem);
-            sum_d = sum_d + f32x4::from_array(token, d_add) - f32x4::from_array(token, d_rem);
+            sum_s = sum_s + f32x8::from_array(token, s_add) - f32x8::from_array(token, s_rem);
+            sum_d = sum_d + f32x8::from_array(token, d_add) - f32x8::from_array(token, d_rem);
         }
     }
 
     // Scalar remainder rows
     let inv = 1.0 / diam as f32;
-    for row in (row_groups * 4)..height {
-        let row_off = row * width;
-        let s_row = &src[row_off..row_off + width];
-        let d_row = &dst[row_off..row_off + width];
-        let mut sum_s = 0.0f32;
-        let mut sum_d = 0.0f32;
-
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
-            sum_s += s_row[idx];
-            sum_d += d_row[idx];
-        }
-
-        for x in 0..width {
-            out_mu1[row_off + x] = sum_s * inv;
-            out_mu2[row_off + x] = sum_d * inv;
-
-            let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
-            let rem_i = x as isize - r as isize;
-            let rem_idx = if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            };
-            let rem_idx = rem_idx.min(width - 1);
-            sum_s += s_row[add_idx] - s_row[rem_idx];
-            sum_d += d_row[add_idx] - d_row[rem_idx];
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fused_blur_h_mu_inner_scalar(
-    _token: archmage::ScalarToken,
-    src: &[f32],
-    dst: &[f32],
-    out_mu1: &mut [f32],
-    out_mu2: &mut [f32],
-    width: usize,
-    height: usize,
-    radius: usize,
-) {
-    let diam = 2 * radius + 1;
-    let inv = 1.0 / diam as f32;
-    let r = radius;
-
-    for row in 0..height {
+    for row in (row_groups * 8)..height {
         let row_off = row * width;
         let s_row = &src[row_off..row_off + width];
         let d_row = &dst[row_off..row_off + width];
@@ -1789,12 +1639,10 @@ fn fused_blur_h_ssim_inner_v3(
     }
 }
 
-/// WASM SIMD fallback for fused SSIM horizontal blur.
-#[cfg(target_arch = "wasm32")]
-#[arcane]
+#[magetypes(wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
-fn fused_blur_h_ssim_inner_wasm128(
-    token: archmage::Wasm128Token,
+fn fused_blur_h_ssim_inner(
+    token: Token,
     src: &[f32],
     dst: &[f32],
     out_mu1: &mut [f32],
@@ -1805,17 +1653,19 @@ fn fused_blur_h_ssim_inner_wasm128(
     height: usize,
     radius: usize,
 ) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
     let diam = 2 * radius + 1;
-    let inv_v = f32x4::splat(token, 1.0 / diam as f32);
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
     let r = radius;
-    let row_groups = height / 4;
+    let row_groups = height / 8;
 
     for rg in 0..row_groups {
-        let row_base = rg * 4;
-        let mut sum_s = f32x4::zero(token);
-        let mut sum_d = f32x4::zero(token);
-        let mut sum_sq = f32x4::zero(token);
-        let mut sum_prod = f32x4::zero(token);
+        let row_base = rg * 8;
+        let mut sum_s = f32x8::zero(token);
+        let mut sum_d = f32x8::zero(token);
+        let mut sum_sq = f32x8::zero(token);
+        let mut sum_prod = f32x8::zero(token);
 
         for i in 0..diam {
             let idx = if i <= r {
@@ -1823,15 +1673,15 @@ fn fused_blur_h_ssim_inner_wasm128(
             } else {
                 (i - r).min(width - 1)
             };
-            let mut s_arr = [0.0f32; 4];
-            let mut d_arr = [0.0f32; 4];
-            for ro in 0..4 {
+            let mut s_arr = [0.0f32; 8];
+            let mut d_arr = [0.0f32; 8];
+            for ro in 0..8 {
                 let base = (row_base + ro) * width + idx;
                 s_arr[ro] = src[base];
                 d_arr[ro] = dst[base];
             }
-            let sv = f32x4::from_array(token, s_arr);
-            let dv = f32x4::from_array(token, d_arr);
+            let sv = f32x8::from_array(token, s_arr);
+            let dv = f32x8::from_array(token, d_arr);
             sum_s = sum_s + sv;
             sum_d = sum_d + dv;
             sum_sq = sv.mul_add(sv, dv.mul_add(dv, sum_sq));
@@ -1843,7 +1693,7 @@ fn fused_blur_h_ssim_inner_wasm128(
             let mu2_result = (sum_d * inv_v).to_array();
             let sq_result = (sum_sq * inv_v).to_array();
             let prod_result = (sum_prod * inv_v).to_array();
-            for ro in 0..4 {
+            for ro in 0..8 {
                 let base = (row_base + ro) * width + x;
                 out_mu1[base] = mu1_result[ro];
                 out_mu2[base] = mu2_result[ro];
@@ -1866,21 +1716,21 @@ fn fused_blur_h_ssim_inner_wasm128(
             };
             let rem_idx = rem_idx.min(width - 1);
 
-            let mut s_add = [0.0f32; 4];
-            let mut d_add = [0.0f32; 4];
-            let mut s_rem = [0.0f32; 4];
-            let mut d_rem = [0.0f32; 4];
-            for ro in 0..4 {
+            let mut s_add = [0.0f32; 8];
+            let mut d_add = [0.0f32; 8];
+            let mut s_rem = [0.0f32; 8];
+            let mut d_rem = [0.0f32; 8];
+            for ro in 0..8 {
                 let base = (row_base + ro) * width;
                 s_add[ro] = src[base + add_idx];
                 d_add[ro] = dst[base + add_idx];
                 s_rem[ro] = src[base + rem_idx];
                 d_rem[ro] = dst[base + rem_idx];
             }
-            let sa = f32x4::from_array(token, s_add);
-            let da = f32x4::from_array(token, d_add);
-            let sr = f32x4::from_array(token, s_rem);
-            let dr = f32x4::from_array(token, d_rem);
+            let sa = f32x8::from_array(token, s_add);
+            let da = f32x8::from_array(token, d_add);
+            let sr = f32x8::from_array(token, s_rem);
+            let dr = f32x8::from_array(token, d_rem);
             sum_s = sum_s + sa - sr;
             sum_d = sum_d + da - dr;
             sum_sq = sa.mul_add(
@@ -1893,83 +1743,7 @@ fn fused_blur_h_ssim_inner_wasm128(
 
     // Scalar remainder rows
     let inv = 1.0 / diam as f32;
-    for row in (row_groups * 4)..height {
-        let row_off = row * width;
-        let s_row = &src[row_off..row_off + width];
-        let d_row = &dst[row_off..row_off + width];
-        let mut sum_s = 0.0f32;
-        let mut sum_d = 0.0f32;
-        let mut sum_sq = 0.0f32;
-        let mut sum_prod = 0.0f32;
-
-        for i in 0..diam {
-            let idx = if i <= r {
-                (r - i).min(width - 1)
-            } else {
-                (i - r).min(width - 1)
-            };
-            let s = s_row[idx];
-            let d = d_row[idx];
-            sum_s += s;
-            sum_d += d;
-            sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
-            sum_prod = s.mul_add(d, sum_prod);
-        }
-
-        for x in 0..width {
-            out_mu1[row_off + x] = sum_s * inv;
-            out_mu2[row_off + x] = sum_d * inv;
-            out_sigma_sq[row_off + x] = sum_sq * inv;
-            out_sigma12[row_off + x] = sum_prod * inv;
-
-            let add_raw = x + r + 1;
-            let add_idx = if add_raw < width {
-                add_raw
-            } else {
-                2 * (width - 1) - add_raw
-            };
-            let add_idx = add_idx.min(width - 1);
-            let rem_i = x as isize - r as isize;
-            let rem_idx = if rem_i < 0 {
-                rem_i.unsigned_abs()
-            } else {
-                rem_i as usize
-            };
-            let rem_idx = rem_idx.min(width - 1);
-            let sa = s_row[add_idx];
-            let da = d_row[add_idx];
-            let sr = s_row[rem_idx];
-            let dr = d_row[rem_idx];
-            sum_s = sum_s + sa - sr;
-            sum_d = sum_d + da - dr;
-            sum_sq = sa.mul_add(
-                sa,
-                da.mul_add(da, (-sr).mul_add(sr, (-dr).mul_add(dr, sum_sq))),
-            );
-            sum_prod = sa.mul_add(da, (-sr).mul_add(dr, sum_prod));
-        }
-    }
-}
-
-/// Scalar fallback for fused SSIM horizontal blur.
-#[allow(clippy::too_many_arguments)]
-fn fused_blur_h_ssim_inner_scalar(
-    _token: archmage::ScalarToken,
-    src: &[f32],
-    dst: &[f32],
-    out_mu1: &mut [f32],
-    out_mu2: &mut [f32],
-    out_sigma_sq: &mut [f32],
-    out_sigma12: &mut [f32],
-    width: usize,
-    height: usize,
-    radius: usize,
-) {
-    let diam = 2 * radius + 1;
-    let inv = 1.0 / diam as f32;
-    let r = radius;
-
-    for row in 0..height {
+    for row in (row_groups * 8)..height {
         let row_off = row * width;
         let s_row = &src[row_off..row_off + width];
         let d_row = &dst[row_off..row_off + width];
@@ -2144,58 +1918,32 @@ fn downscale_2x_inner_v3(
     }
 }
 
-/// WASM SIMD downscale: process 4 output pixels per iteration.
-#[cfg(target_arch = "wasm32")]
-#[arcane]
-fn downscale_2x_inner_wasm128(
-    token: archmage::Wasm128Token,
-    plane: &mut [f32],
-    width: usize,
-    new_w: usize,
-    new_h: usize,
-) {
-    let quarter = f32x4::splat(token, 0.25);
+#[magetypes(wasm128, scalar)]
+fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
+    let quarter = f32x8::splat(token, 0.25);
 
     for y in 0..new_h {
         let row0 = y * 2 * width;
         let row1 = row0 + width;
         let out_row = y * new_w;
 
-        let chunks4 = new_w / 4;
-        for chunk in 0..chunks4 {
-            let ox = chunk * 4;
+        let chunks8 = new_w / 8;
+        for chunk in 0..chunks8 {
+            let ox = chunk * 8;
             let sx = ox * 2;
-            let mut arr = [0.0f32; 4];
-            for i in 0..4 {
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
                 let s = sx + i * 2;
                 arr[i] =
                     plane[row0 + s] + plane[row0 + s + 1] + plane[row1 + s] + plane[row1 + s + 1];
             }
-            let result = f32x4::from_array(token, arr) * quarter;
-            plane[out_row + ox..][..4].copy_from_slice(&result.to_array());
+            let result = f32x8::from_array(token, arr) * quarter;
+            plane[out_row + ox..][..8].copy_from_slice(&result.to_array());
         }
 
-        for x in (chunks4 * 4)..new_w {
-            let sx = x * 2;
-            plane[out_row + x] =
-                (plane[row0 + sx] + plane[row0 + sx + 1] + plane[row1 + sx] + plane[row1 + sx + 1])
-                    * 0.25;
-        }
-    }
-}
-
-fn downscale_2x_inner_scalar(
-    _token: archmage::ScalarToken,
-    plane: &mut [f32],
-    width: usize,
-    new_w: usize,
-    new_h: usize,
-) {
-    for y in 0..new_h {
-        let row0 = y * 2 * width;
-        let row1 = row0 + width;
-        let out_row = y * new_w;
-        for x in 0..new_w {
+        for x in (chunks8 * 8)..new_w {
             let sx = x * 2;
             plane[out_row + x] =
                 (plane[row0 + sx] + plane[row0 + sx + 1] + plane[row1 + sx] + plane[row1 + sx + 1])
