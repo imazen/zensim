@@ -6,9 +6,9 @@ use archmage::incant;
 use archmage::magetypes;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
+use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
-use magetypes::simd::generic::f32x8 as GenericF32x8;
 
 /// Element-wise multiply: out[i] = a[i] * b[i]
 pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
@@ -153,7 +153,11 @@ fn sq_sum_into_inner(token: Token, a: &[f32], b: &[f32], out: &mut [f32]) {
         let vb = f32x8::from_array(token, *bc);
         va.mul_add(va, vb * vb).store(oc);
     }
-    for ((&a, &b), o) in a_tail.iter().zip(b.iter().skip(a_chunks.len() * 8)).zip(out_tail) {
+    for ((&a, &b), o) in a_tail
+        .iter()
+        .zip(b.iter().skip(a_chunks.len() * 8))
+        .zip(out_tail)
+    {
         *o = a.mul_add(a, b * b);
     }
 }
@@ -348,7 +352,11 @@ fn mul_into_inner(token: Token, a: &[f32], b: &[f32], out: &mut [f32]) {
         let vb = f32x8::from_array(token, *bc);
         (va * vb).store(oc);
     }
-    for ((&a, &b), o) in a_tail.iter().zip(b.iter().skip(a_chunks.len() * 8)).zip(out_tail) {
+    for ((&a, &b), o) in a_tail
+        .iter()
+        .zip(b.iter().skip(a_chunks.len() * 8))
+        .zip(out_tail)
+    {
         *o = a * b;
     }
 }
@@ -407,7 +415,11 @@ fn abs_diff_into_inner(token: Token, a: &[f32], b: &[f32], out: &mut [f32]) {
         let vb = f32x8::from_array(token, *bc);
         (va - vb).abs().store(oc);
     }
-    for ((&a, &b), o) in a_tail.iter().zip(b.iter().skip(a_chunks.len() * 8)).zip(out_tail) {
+    for ((&a, &b), o) in a_tail
+        .iter()
+        .zip(b.iter().skip(a_chunks.len() * 8))
+        .zip(out_tail)
+    {
         *o = (a - b).abs();
     }
 }

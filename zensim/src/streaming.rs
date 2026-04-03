@@ -1334,9 +1334,13 @@ fn process_scale_bands(
     let total_strips = height.div_ceil(STRIP_INNER);
     let num_bands = if parallel {
         #[cfg(feature = "threads")]
-        { rayon::current_num_threads().min(total_strips).max(1) }
+        {
+            rayon::current_num_threads().min(total_strips).max(1)
+        }
         #[cfg(not(feature = "threads"))]
-        { 1 }
+        {
+            1
+        }
     } else {
         1
     };
@@ -2029,144 +2033,145 @@ pub(crate) fn compute_delta_stats(
 
     // Accumulation over row chunks (parallel when threads feature enabled)
     let process_chunk = |chunk_idx: usize| -> DeltaAccum {
-            let mut acc = DeltaAccum::new();
-            let row_start = chunk_idx * chunk_rows;
-            let row_end = (row_start + chunk_rows).min(height);
+        let mut acc = DeltaAccum::new();
+        let row_start = chunk_idx * chunk_rows;
+        let row_end = (row_start + chunk_rows).min(height);
 
-            for y in row_start..row_end {
-                let src_bytes = source.row_bytes(y);
-                let dst_bytes = distorted.row_bytes(y);
+        for y in row_start..row_end {
+            let src_bytes = source.row_bytes(y);
+            let dst_bytes = distorted.row_bytes(y);
 
-                for x in 0..width {
-                    // Extract normalized [0,1] RGB values per image format
-                    let (src_rgb, src_alpha) = extract_pixel_normalized(src_bytes, x, src_format);
-                    let (dst_rgb, dst_alpha) = extract_pixel_normalized(dst_bytes, x, dst_format);
-                    let alpha = if has_alpha {
-                        // Both formats have alpha — zip them
-                        Some((src_alpha.unwrap_or(1.0), dst_alpha.unwrap_or(1.0)))
+            for x in 0..width {
+                // Extract normalized [0,1] RGB values per image format
+                let (src_rgb, src_alpha) = extract_pixel_normalized(src_bytes, x, src_format);
+                let (dst_rgb, dst_alpha) = extract_pixel_normalized(dst_bytes, x, dst_format);
+                let alpha = if has_alpha {
+                    // Both formats have alpha — zip them
+                    Some((src_alpha.unwrap_or(1.0), dst_alpha.unwrap_or(1.0)))
+                } else {
+                    None
+                };
+
+                let mut any_diff = false;
+                let mut any_diff_gt1 = false;
+                let mut pixel_max_abs_delta = 0.0f64;
+
+                // Skip RGB comparison when both pixels are fully transparent.
+                // RGB values are undefined at alpha=0 — different encoders produce
+                // different values (white vs black) but the pixels are visually identical.
+                let both_transparent =
+                    alpha.is_some_and(|(sa, da)| sa < 0.5 / native_max && da < 0.5 / native_max);
+
+                for c in 0..3 {
+                    let delta = if both_transparent {
+                        0.0
                     } else {
-                        None
+                        src_rgb[c] - dst_rgb[c]
                     };
+                    let abs_delta = delta.abs();
 
-                    let mut any_diff = false;
-                    let mut any_diff_gt1 = false;
-                    let mut pixel_max_abs_delta = 0.0f64;
-
-                    // Skip RGB comparison when both pixels are fully transparent.
-                    // RGB values are undefined at alpha=0 — different encoders produce
-                    // different values (white vs black) but the pixels are visually identical.
-                    let both_transparent = alpha
-                        .is_some_and(|(sa, da)| sa < 0.5 / native_max && da < 0.5 / native_max);
-
-                    for c in 0..3 {
-                        let delta = if both_transparent {
-                            0.0
-                        } else {
-                            src_rgb[c] - dst_rgb[c]
-                        };
-                        let abs_delta = delta.abs();
-
-                        acc.sum_delta[c] += delta;
-                        acc.sum_delta_sq[c] += delta * delta;
-                        if abs_delta > acc.max_abs_delta[c] {
-                            acc.max_abs_delta[c] = abs_delta;
-                        }
-
-                        // Signed small-delta histogram: bins -3..+3 in 1/native_max units
-                        let signed_delta = (delta * native_max).round() as i32;
-                        if (-3..=3).contains(&signed_delta) {
-                            acc.signed_small[c][(signed_delta + 3) as usize] += 1;
-                        }
-
-                        if abs_delta > 0.5 / native_max {
-                            any_diff = true;
-                        }
-                        if abs_delta > 1.5 / native_max {
-                            any_diff_gt1 = true;
-                        }
-
-                        if abs_delta > pixel_max_abs_delta {
-                            pixel_max_abs_delta = abs_delta;
-                        }
+                    acc.sum_delta[c] += delta;
+                    acc.sum_delta_sq[c] += delta * delta;
+                    if abs_delta > acc.max_abs_delta[c] {
+                        acc.max_abs_delta[c] = abs_delta;
                     }
 
-                    // Per-channel value histograms (always 256 bins)
-                    for c in 0..3 {
-                        let sb = (src_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
-                        let db = (dst_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
-                        acc.src_histogram[c][sb] += 1;
-                        acc.dst_histogram[c][db] += 1;
-                    }
-                    if let Some((src_a, dst_a)) = alpha {
-                        let sb = (src_a * 255.0).round().clamp(0.0, 255.0) as usize;
-                        let db = (dst_a * 255.0).round().clamp(0.0, 255.0) as usize;
-                        acc.src_histogram[3][sb] += 1;
-                        acc.dst_histogram[3][db] += 1;
+                    // Signed small-delta histogram: bins -3..+3 in 1/native_max units
+                    let signed_delta = (delta * native_max).round() as i32;
+                    if (-3..=3).contains(&signed_delta) {
+                        acc.signed_small[c][(signed_delta + 3) as usize] += 1;
                     }
 
-                    acc.pixel_count += 1;
-                    if any_diff {
-                        acc.pixels_differing += 1;
+                    if abs_delta > 0.5 / native_max {
+                        any_diff = true;
                     }
-                    if any_diff_gt1 {
-                        acc.pixels_differing_by_more_than_1 += 1;
+                    if abs_delta > 1.5 / native_max {
+                        any_diff_gt1 = true;
                     }
 
-                    // Alpha stratification and alpha delta tracking
-                    if has_alpha && let Some((src_a, dst_a)) = alpha {
-                        // Track alpha channel delta at native precision
-                        let alpha_delta = ((src_a - dst_a).abs() * native_max).round() as u8;
-                        if alpha_delta > acc.alpha_max_delta {
-                            acc.alpha_max_delta = alpha_delta;
-                        }
-                        if alpha_delta > 0 {
-                            acc.alpha_pixels_differing += 1;
-                        }
-
-                        let a = src_a;
-                        let one_minus_a = 1.0 - a;
-                        if a >= 1.0 - 0.5 / native_max {
-                            // Opaque
-                            acc.opaque_count += 1;
-                            for c in 0..3 {
-                                let ad = (src_rgb[c] - dst_rgb[c]).abs();
-                                acc.opaque_sum_abs[c] += ad;
-                                if ad > acc.opaque_max_abs[c] {
-                                    acc.opaque_max_abs[c] = ad;
-                                }
-                            }
-                        } else if a > 0.5 / native_max {
-                            // Semitransparent
-                            acc.semi_count += 1;
-                            for c in 0..3 {
-                                let ad = (src_rgb[c] - dst_rgb[c]).abs();
-                                acc.semi_sum_abs[c] += ad;
-                                if ad > acc.semi_max_abs[c] {
-                                    acc.semi_max_abs[c] = ad;
-                                }
-                            }
-                        }
-
-                        // Pearson correlation accumulators
-                        acc.sum_delta_mag += pixel_max_abs_delta;
-                        acc.sum_one_minus_alpha += one_minus_a;
-                        acc.sum_delta_alpha += pixel_max_abs_delta * one_minus_a;
-                        acc.sum_delta_mag_sq += pixel_max_abs_delta * pixel_max_abs_delta;
-                        acc.sum_one_minus_alpha_sq += one_minus_a * one_minus_a;
-                        acc.alpha_pixel_count += 1;
+                    if abs_delta > pixel_max_abs_delta {
+                        pixel_max_abs_delta = abs_delta;
                     }
                 }
+
+                // Per-channel value histograms (always 256 bins)
+                for c in 0..3 {
+                    let sb = (src_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
+                    let db = (dst_rgb[c] * 255.0).round().clamp(0.0, 255.0) as usize;
+                    acc.src_histogram[c][sb] += 1;
+                    acc.dst_histogram[c][db] += 1;
+                }
+                if let Some((src_a, dst_a)) = alpha {
+                    let sb = (src_a * 255.0).round().clamp(0.0, 255.0) as usize;
+                    let db = (dst_a * 255.0).round().clamp(0.0, 255.0) as usize;
+                    acc.src_histogram[3][sb] += 1;
+                    acc.dst_histogram[3][db] += 1;
+                }
+
+                acc.pixel_count += 1;
+                if any_diff {
+                    acc.pixels_differing += 1;
+                }
+                if any_diff_gt1 {
+                    acc.pixels_differing_by_more_than_1 += 1;
+                }
+
+                // Alpha stratification and alpha delta tracking
+                if has_alpha && let Some((src_a, dst_a)) = alpha {
+                    // Track alpha channel delta at native precision
+                    let alpha_delta = ((src_a - dst_a).abs() * native_max).round() as u8;
+                    if alpha_delta > acc.alpha_max_delta {
+                        acc.alpha_max_delta = alpha_delta;
+                    }
+                    if alpha_delta > 0 {
+                        acc.alpha_pixels_differing += 1;
+                    }
+
+                    let a = src_a;
+                    let one_minus_a = 1.0 - a;
+                    if a >= 1.0 - 0.5 / native_max {
+                        // Opaque
+                        acc.opaque_count += 1;
+                        for c in 0..3 {
+                            let ad = (src_rgb[c] - dst_rgb[c]).abs();
+                            acc.opaque_sum_abs[c] += ad;
+                            if ad > acc.opaque_max_abs[c] {
+                                acc.opaque_max_abs[c] = ad;
+                            }
+                        }
+                    } else if a > 0.5 / native_max {
+                        // Semitransparent
+                        acc.semi_count += 1;
+                        for c in 0..3 {
+                            let ad = (src_rgb[c] - dst_rgb[c]).abs();
+                            acc.semi_sum_abs[c] += ad;
+                            if ad > acc.semi_max_abs[c] {
+                                acc.semi_max_abs[c] = ad;
+                            }
+                        }
+                    }
+
+                    // Pearson correlation accumulators
+                    acc.sum_delta_mag += pixel_max_abs_delta;
+                    acc.sum_one_minus_alpha += one_minus_a;
+                    acc.sum_delta_alpha += pixel_max_abs_delta * one_minus_a;
+                    acc.sum_delta_mag_sq += pixel_max_abs_delta * pixel_max_abs_delta;
+                    acc.sum_one_minus_alpha_sq += one_minus_a * one_minus_a;
+                    acc.alpha_pixel_count += 1;
+                }
             }
-            acc
+        }
+        acc
     };
     #[cfg(feature = "threads")]
-    let accum = (0..num_chunks)
-        .into_par_iter()
-        .map(process_chunk)
-        .reduce(DeltaAccum::new, |mut a, b| {
-            a.merge(&b);
-            a
-        });
+    let accum =
+        (0..num_chunks)
+            .into_par_iter()
+            .map(process_chunk)
+            .reduce(DeltaAccum::new, |mut a, b| {
+                a.merge(&b);
+                a
+            });
     #[cfg(not(feature = "threads"))]
     let accum = (0..num_chunks)
         .map(process_chunk)
