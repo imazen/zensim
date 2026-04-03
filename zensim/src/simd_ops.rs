@@ -12,27 +12,27 @@ use magetypes::simd::generic::f32x16;
 
 /// Element-wise multiply: out[i] = a[i] * b[i]
 pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(mul_into_inner(a, b, out), [v4, v3, wasm128, scalar]);
+    incant!(mul_into_inner(a, b, out), [v4, v3, neon, wasm128, scalar]);
 }
 
 /// Element-wise: out[i] = a[i]*a[i] + b[i]*b[i] (sum of squares)
 pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(sq_sum_into_inner(a, b, out), [v4, v3, wasm128, scalar]);
+    incant!(sq_sum_into_inner(a, b, out), [v4, v3, neon, wasm128, scalar]);
 }
 
 /// Compute sum of squared differences: sum((a[i] - b[i])²)
 pub fn sq_diff_sum(a: &[f32], b: &[f32]) -> f64 {
-    incant!(sq_diff_sum_inner(a, b), [v4, v3, wasm128, scalar])
+    incant!(sq_diff_sum_inner(a, b), [v4, v3, neon, wasm128, scalar])
 }
 
 /// Compute sum of absolute differences: sum(|a[i] - b[i]|)
 pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
-    incant!(abs_diff_sum_inner(a, b), [v4, v3, wasm128, scalar])
+    incant!(abs_diff_sum_inner(a, b), [v4, v3, neon, wasm128, scalar])
 }
 
 /// Element-wise absolute difference: out[i] = |a[i] - b[i]|
 pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(abs_diff_into_inner(a, b, out), [v4, v3, wasm128, scalar]);
+    incant!(abs_diff_into_inner(a, b, out), [v4, v3, neon, wasm128, scalar]);
 }
 
 /// Like ssim_channel but also computes 8th-power pool and max.
@@ -46,7 +46,7 @@ pub fn ssim_channel_extended(
 ) -> (f64, f64, f64, f64, f32) {
     incant!(
         ssim_channel_extended_inner(mu1, mu2, sum_sq, sigma12),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -60,7 +60,7 @@ pub fn edge_diff_channel_extended(
 ) -> (f64, f64, f64, f64, f64, f64, f64, f64, f32, f32) {
     incant!(
         edge_diff_extended_inner(img1, img2, mu1, mu2),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -75,7 +75,7 @@ pub fn ssim_channel_masked(
 ) -> (f64, f64, f64) {
     incant!(
         ssim_channel_masked_inner(mu1, mu2, sum_sq, sigma12, mask),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -90,7 +90,7 @@ pub fn edge_diff_channel_masked(
 ) -> (f64, f64, f64, f64, f64, f64) {
     incant!(
         edge_diff_masked_inner(img1, img2, mu1, mu2, mask),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -141,7 +141,7 @@ fn sq_sum_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: 
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn sq_sum_into_inner(token: Token, a: &[f32], b: &[f32], out: &mut [f32]) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -211,7 +211,7 @@ fn sq_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f6
     sum
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn sq_diff_sum_inner(token: Token, a: &[f32], b: &[f32]) -> f64 {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -280,7 +280,7 @@ fn abs_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f
     sum
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn abs_diff_sum_inner(token: Token, a: &[f32], b: &[f32]) -> f64 {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -340,7 +340,7 @@ fn mul_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: &mu
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn mul_into_inner(token: Token, a: &[f32], b: &[f32], out: &mut [f32]) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -403,7 +403,7 @@ fn abs_diff_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn abs_diff_into_inner(token: Token, a: &[f32], b: &[f32], out: &mut [f32]) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -540,7 +540,7 @@ fn ssim_channel_masked_inner_v3(
     (sum_d, sum_d4, sum_d2)
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn ssim_channel_masked_inner(
     token: Token,
     mu1: &[f32],
@@ -747,7 +747,7 @@ fn edge_diff_masked_inner_v3(
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn edge_diff_masked_inner(
     token: Token,
     img1: &[f32],
@@ -957,7 +957,7 @@ fn ssim_channel_extended_inner_v3(
     (sum_d, sum_d4, sum_d2, sum_d8, max_d)
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn ssim_channel_extended_inner(
     token: Token,
     mu1: &[f32],
@@ -1213,7 +1213,7 @@ fn edge_diff_extended_inner_v3(
     )
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn edge_diff_extended_inner(
     token: Token,
     img1: &[f32],

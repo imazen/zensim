@@ -139,7 +139,7 @@ pub fn srgb_to_positive_xyb_planar_into(
 ) {
     incant!(
         srgb_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -153,7 +153,7 @@ pub fn srgb_to_xyb_planar(pixels: &[[u8; 3]]) -> [Vec<f32>; 3] {
 
     incant!(
         srgb_to_xyb_planar_inner(pixels, &mut x_plane, &mut y_plane, &mut b_plane),
-        [v3, wasm128, scalar]
+        [v3, neon, wasm128, scalar]
     );
 
     [x_plane, y_plane, b_plane]
@@ -169,7 +169,7 @@ pub fn srgb_to_xyb_planar_into(
 ) {
     incant!(
         srgb_to_xyb_planar_inner(pixels, x_plane, y_plane, b_plane),
-        [v3, wasm128, scalar]
+        [v3, neon, wasm128, scalar]
     );
 }
 
@@ -180,7 +180,7 @@ pub fn srgb_to_xyb_planar_into(
 #[inline(always)]
 #[allow(dead_code)]
 pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
-    incant!(make_positive_xyb_inner(x, y, b), [v3, wasm128, scalar]);
+    incant!(make_positive_xyb_inner(x, y, b), [v3, neon, wasm128, scalar]);
 }
 
 // --- SIMD implementations ---
@@ -561,7 +561,7 @@ fn srgb_to_positive_xyb_planar_inner_v3(
 }
 
 /// Generic fused sRGB → XYB + make_positive with vectorized Halley iterations.
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn srgb_to_positive_xyb_planar_inner(
     token: Token,
     pixels: &[[u8; 3]],
@@ -812,7 +812,7 @@ fn srgb_to_xyb_planar_inner_v3(
 }
 
 /// Generic sRGB → XYB (without positive shift) with scalar cube root.
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn srgb_to_xyb_planar_inner(
     token: Token,
     pixels: &[[u8; 3]],
@@ -961,7 +961,7 @@ fn make_positive_xyb_inner_v3(
 }
 
 /// Generic make_positive_xyb: positive shift of XYB planes.
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn make_positive_xyb_inner(token: Token, x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -1020,7 +1020,7 @@ pub fn linear_to_positive_xyb_planar_into(
 ) {
     incant!(
         linear_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -1401,7 +1401,7 @@ fn linear_to_positive_xyb_planar_inner_v3(
 }
 
 /// Generic linear f32 to positive XYB with gamut clamping and Halley iterations.
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn linear_to_positive_xyb_planar_inner(
     token: Token,
     pixels: &[[f32; 3]],

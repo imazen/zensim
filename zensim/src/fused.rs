@@ -121,7 +121,7 @@ pub(crate) fn fused_vblur_features_ssim(
             sd_out,
             store_sd
         ),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -159,7 +159,7 @@ pub(crate) fn fused_vblur_features_edge(
             mu2_out,
             store_mu
         ),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     )
 }
 
@@ -795,7 +795,7 @@ fn fused_vblur_ssim_inner_v3(
 // Generic WASM128 + Scalar SSIM implementation (via magetypes)
 // ============================================================
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn fused_vblur_ssim_inner(
     token: Token,
     h_mu1: &[f32],
@@ -1458,7 +1458,7 @@ fn fused_vblur_edge_inner_v3(
     acc
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn fused_vblur_edge_inner(
     token: Token,
     h_mu1: &[f32],

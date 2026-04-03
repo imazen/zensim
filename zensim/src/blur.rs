@@ -42,7 +42,7 @@ pub fn box_blur_v_from_copy(
 ) {
     incant!(
         box_blur_v_copy_inner(src, dst, width, height, radius),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -271,7 +271,7 @@ fn box_blur_v_copy_inner_v3(
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn box_blur_v_copy_inner(
     token: Token,
     src: &[f32],
@@ -373,7 +373,7 @@ pub(crate) fn box_blur_h(
 ) {
     incant!(
         box_blur_h_inner(input, output, width, height, radius),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -634,7 +634,7 @@ fn box_blur_h_inner_v3(
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn box_blur_h_inner(
     token: Token,
     input: &[f32],
@@ -753,7 +753,7 @@ pub(crate) fn fused_blur_h_mu(
 ) {
     incant!(
         fused_blur_h_mu_inner(src, dst, out_mu1, out_mu2, width, height, radius),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -1071,7 +1071,7 @@ fn fused_blur_h_mu_inner_v3(
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_blur_h_mu_inner(
     token: Token,
@@ -1222,7 +1222,7 @@ pub fn fused_blur_h_ssim(
             height,
             radius
         ),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -1639,7 +1639,7 @@ fn fused_blur_h_ssim_inner_v3(
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 #[allow(clippy::too_many_arguments)]
 fn fused_blur_h_ssim_inner(
     token: Token,
@@ -1817,7 +1817,7 @@ pub fn downscale_2x_inplace(plane: &mut Vec<f32>, width: usize, height: usize) -
 fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
     incant!(
         downscale_2x_inner(plane, width, new_w, new_h),
-        [v4, v3, wasm128, scalar]
+        [v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -1918,7 +1918,7 @@ fn downscale_2x_inner_v3(
     }
 }
 
-#[magetypes(wasm128, scalar)]
+#[magetypes(neon, wasm128, scalar)]
 fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
