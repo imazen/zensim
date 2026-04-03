@@ -11,12 +11,14 @@ categories = ["development-tools::testing", "multimedia::images"]
 exclude = ["examples/*.png", "tests/fixtures/"]
 
 [features]
-default = []
+default = ["threads"]
+## Forward threading to zensim. Disable for wasm32 or single-threaded use.
+threads = ["zensim/threads"]
 archmage = ["dep:archmage"]
 zenresize = ["dep:zenresize"]
 
 [dependencies]
-zensim = { workspace = true, features = ["classification"] }
+zensim = { workspace = true, default-features = false, features = ["classification"] }
 archmage = { workspace = true, features = ["testable_dispatch"], optional = true , path = "../../../archmage" }
 zenresize = { workspace = true, optional = true , path = "../../zenresize" }
 # zenpng = { workspace = true, optional = true }

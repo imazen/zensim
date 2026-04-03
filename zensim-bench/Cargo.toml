@@ -12,12 +12,12 @@ training = ["zensim/training"]
 cc = "1"
 
 [dependencies]
-zensim = { workspace = true }
+zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.7", features = ["imgref"] }
 butteraugli = "0.9"
-linear-srgb = { workspace = true }
+linear-srgb = { workspace = true , path = "../../linear-srgb" }
 imgref = { workspace = true }
 rgb = { workspace = true }
 zenpnm = "0.1"
