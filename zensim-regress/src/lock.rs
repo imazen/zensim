@@ -5,6 +5,8 @@
 //! or panics. Used internally by [`checksums`] and [`manifest`] for
 //! multi-process safety.
 //!
+//! On `wasm32` targets, locking is a no-op (single-threaded environment).
+//!
 //! [`checksums`]: crate::checksums
 //! [`manifest`]: crate::manifest
 
@@ -14,8 +16,10 @@ use crate::error::RegressError;
 
 /// RAII guard for an exclusive advisory file lock.
 ///
-/// Acquires `fs2::FileExt::lock_exclusive` on construction; releases
-/// (and optionally deletes the lock file) on drop.
+/// Acquires an exclusive lock on construction (via `fs2` on native targets);
+/// releases (and optionally deletes the lock file) on drop.
+///
+/// On `wasm32` targets, locking is a no-op — the file is opened but not locked.
 ///
 /// # Example
 ///
@@ -44,6 +48,7 @@ impl FileLockGuard {
             .write(true)
             .open(&path)
             .map_err(|e| RegressError::io(&path, e))?;
+        #[cfg(not(target_arch = "wasm32"))]
         fs2::FileExt::lock_exclusive(&file).map_err(|e| RegressError::io(&path, e))?;
         Ok(Self {
             file,
@@ -74,6 +79,7 @@ impl FileLockGuard {
             .write(true)
             .open(&path)
             .ok()?;
+        #[cfg(not(target_arch = "wasm32"))]
         fs2::FileExt::lock_exclusive(&file).ok()?;
         Some(Self {
             file,
@@ -95,7 +101,10 @@ impl FileLockGuard {
 
 impl Drop for FileLockGuard {
     fn drop(&mut self) {
-        let _ = fs2::FileExt::unlock(&self.file);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = fs2::FileExt::unlock(&self.file);
+        }
         if self.remove_on_drop {
             let _ = std::fs::remove_file(&self.path);
         }
