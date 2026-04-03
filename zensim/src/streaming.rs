@@ -2162,14 +2162,14 @@ pub(crate) fn compute_delta_stats(
     #[cfg(feature = "threads")]
     let accum = (0..num_chunks)
         .into_par_iter()
-        .map(|i| process_chunk(i))
+        .map(process_chunk)
         .reduce(DeltaAccum::new, |mut a, b| {
             a.merge(&b);
             a
         });
     #[cfg(not(feature = "threads"))]
     let accum = (0..num_chunks)
-        .map(|i| process_chunk(i))
+        .map(process_chunk)
         .fold(DeltaAccum::new(), |mut a, b| {
             a.merge(&b);
             a
