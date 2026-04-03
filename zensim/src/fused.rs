@@ -13,11 +13,15 @@
 
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
+#[cfg(target_arch = "wasm32")]
+use archmage::arcane;
 use archmage::incant;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
+#[cfg(target_arch = "wasm32")]
+use magetypes::simd::wasm128::f32x4;
 
 const C2: f32 = 0.0009;
 
@@ -119,7 +123,7 @@ pub(crate) fn fused_vblur_features_ssim(
             sd_out,
             store_sd
         ),
-        [v4, v3, scalar]
+        [v4, v3, wasm128, scalar]
     )
 }
 
@@ -157,7 +161,7 @@ pub(crate) fn fused_vblur_features_edge(
             mu2_out,
             store_mu
         ),
-        [v4, v3, scalar]
+        [v4, v3, wasm128, scalar]
     )
 }
 
@@ -790,6 +794,239 @@ fn fused_vblur_ssim_inner_v3(
 }
 
 // ============================================================
+// WASM SIMD128 implementations
+// ============================================================
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn fused_vblur_ssim_inner_wasm128(
+    token: archmage::Wasm128Token,
+    h_mu1: &[f32],
+    h_mu2: &[f32],
+    h_sigma_sq: &[f32],
+    h_sigma12: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    inner_start: usize,
+    inner_h: usize,
+    radius: usize,
+    mu1_out: &mut [f32],
+    mu2_out: &mut [f32],
+    store_mu: bool,
+    sd_out: &mut [f32],
+    store_sd: bool,
+) -> StripChannelAccum {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x4::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let col_groups = width / 4;
+
+    let c2v = f32x4::splat(token, C2);
+    let one = f32x4::splat(token, 1.0);
+    let two = f32x4::splat(token, 2.0);
+    let zero = f32x4::zero(token);
+
+    let mut acc = StripChannelAccum::zero();
+    let inner_end = inner_start + inner_h;
+
+    for cg in 0..col_groups {
+        let col_base = cg * 4;
+        let mut sum_m1 = f32x4::zero(token);
+        let mut sum_m2 = f32x4::zero(token);
+        let mut sum_sq = f32x4::zero(token);
+        let mut sum_s12 = f32x4::zero(token);
+
+        for i in 0..diam {
+            let idx = mirror_idx(i, r, height);
+            let base = idx * width + col_base;
+            sum_m1 = sum_m1 + f32x4::from_array(token, h_mu1[base..][..4].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x4::from_array(token, h_mu2[base..][..4].try_into().unwrap());
+            sum_sq = sum_sq + f32x4::from_array(token, h_sigma_sq[base..][..4].try_into().unwrap());
+            sum_s12 =
+                sum_s12 + f32x4::from_array(token, h_sigma12[base..][..4].try_into().unwrap());
+        }
+
+        for y in 0..height {
+            if y >= inner_start && y < inner_end {
+                let base = y * width + col_base;
+                let mu1 = sum_m1 * inv_v;
+                let mu2 = sum_m2 * inv_v;
+                let ssq = sum_sq * inv_v;
+                let s12 = sum_s12 * inv_v;
+                let s = f32x4::from_array(token, src[base..][..4].try_into().unwrap());
+                let d = f32x4::from_array(token, dst[base..][..4].try_into().unwrap());
+
+                // SSIM
+                let mu_diff = mu1 - mu2;
+                let num_m = mu_diff.mul_add(-mu_diff, one);
+                let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + c2v;
+                let sd = (one - (num_m * num_s) / denom_s).max(zero);
+                let sd2 = sd * sd;
+                let sd4 = sd2 * sd2;
+                acc.ssim_d += sd.reduce_add() as f64;
+                acc.ssim_d4 += sd4.reduce_add() as f64;
+                acc.ssim_d2 += sd2.reduce_add() as f64;
+                acc.ssim_d8 += (sd4 * sd4).reduce_add() as f64;
+                acc.ssim_max = acc.ssim_max.max(sd.reduce_max());
+                if store_sd {
+                    sd_out[base..base + 4].copy_from_slice(&sd.to_array());
+                }
+                if store_mu {
+                    mu1_out[base..base + 4].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 4].copy_from_slice(&mu2.to_array());
+                }
+
+                // Edge
+                let diff1 = (s - mu1).abs();
+                let diff2 = (d - mu2).abs();
+                let ed = (one + diff2) / (one + diff1) - one;
+                let artifact = ed.max(zero);
+                let detail_lost = (-ed).max(zero);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                let a4 = a2 * a2;
+                let dl4 = dl2 * dl2;
+                acc.edge_art += artifact.reduce_add() as f64;
+                acc.edge_art4 += a4.reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
+                acc.edge_det += detail_lost.reduce_add() as f64;
+                acc.edge_det4 += dl4.reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
+                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+
+                // Variance
+                let vs = s - mu1;
+                let vd = d - mu2;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+
+                // Texture
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
+
+                // MSE
+                let pd = s - d;
+                acc.mse += (pd * pd).reduce_add() as f64;
+            }
+
+            let add_idx = vblur_add_idx(y, r, height);
+            let rem_idx = vblur_rem_idx(y, r, height);
+            let add_base = add_idx * width + col_base;
+            let rem_base = rem_idx * width + col_base;
+            sum_m1 = sum_m1 + f32x4::from_array(token, h_mu1[add_base..][..4].try_into().unwrap())
+                - f32x4::from_array(token, h_mu1[rem_base..][..4].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x4::from_array(token, h_mu2[add_base..][..4].try_into().unwrap())
+                - f32x4::from_array(token, h_mu2[rem_base..][..4].try_into().unwrap());
+            sum_sq = sum_sq
+                + f32x4::from_array(token, h_sigma_sq[add_base..][..4].try_into().unwrap())
+                - f32x4::from_array(token, h_sigma_sq[rem_base..][..4].try_into().unwrap());
+            sum_s12 = sum_s12
+                + f32x4::from_array(token, h_sigma12[add_base..][..4].try_into().unwrap())
+                - f32x4::from_array(token, h_sigma12[rem_base..][..4].try_into().unwrap());
+        }
+    }
+
+    // Scalar remainder
+    let inv = 1.0 / diam as f32;
+    for x in (col_groups * 4)..width {
+        let mut sum_m1 = 0.0f32;
+        let mut sum_m2 = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut sum_s12 = 0.0f32;
+
+        for i in 0..diam {
+            let idx = mirror_idx(i, r, height);
+            sum_m1 += h_mu1[idx * width + x];
+            sum_m2 += h_mu2[idx * width + x];
+            sum_sq += h_sigma_sq[idx * width + x];
+            sum_s12 += h_sigma12[idx * width + x];
+        }
+
+        for y in 0..height {
+            if y >= inner_start && y < inner_end {
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let ssq = sum_sq * inv;
+                let s12 = sum_s12 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
+
+                // SSIM
+                let mu_diff = mu1 - mu2;
+                let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+                let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
+                let denom_s = (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
+                let sd = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+                let sd2 = sd * sd;
+                let sd4 = sd2 * sd2;
+                acc.ssim_d += sd as f64;
+                acc.ssim_d4 += sd4 as f64;
+                acc.ssim_d2 += sd2 as f64;
+                acc.ssim_d8 += (sd4 * sd4) as f64;
+                acc.ssim_max = acc.ssim_max.max(sd);
+                if store_sd {
+                    sd_out[y * width + x] = sd;
+                }
+                if store_mu {
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
+
+                // Edge
+                let diff1 = (sv - mu1).abs();
+                let diff2 = (dv - mu2).abs();
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                let a4 = a2 * a2;
+                let dl4 = dl2 * dl2;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += a4 as f64;
+                acc.edge_art2 += a2 as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += dl4 as f64;
+                acc.edge_det2 += dl2 as f64;
+                acc.edge_art8 += (a4 * a4) as f64;
+                acc.edge_det8 += (dl4 * dl4) as f64;
+                acc.edge_art_max = acc.edge_art_max.max(artifact);
+                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+
+                // Variance
+                let vs = sv - mu1;
+                let vd = dv - mu2;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
+
+                // Texture
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
+
+                // MSE
+                let pd = sv - dv;
+                acc.mse += (pd * pd) as f64;
+            }
+
+            let add_idx = vblur_add_idx(y, r, height);
+            let rem_idx = vblur_rem_idx(y, r, height);
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            sum_sq = sum_sq + h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
+            sum_s12 = sum_s12 + h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+        }
+    }
+
+    acc
+}
+
+// ============================================================
 // Scalar implementations
 // ============================================================
 
@@ -1257,6 +1494,167 @@ fn fused_vblur_edge_inner_v3(
     // Scalar remainder
     let inv = 1.0 / diam as f32;
     for x in (col_groups * 8)..width {
+        let mut sum_m1 = 0.0f32;
+        let mut sum_m2 = 0.0f32;
+
+        for i in 0..diam {
+            let idx = mirror_idx(i, r, height);
+            sum_m1 += h_mu1[idx * width + x];
+            sum_m2 += h_mu2[idx * width + x];
+        }
+
+        for y in 0..height {
+            if y >= inner_start && y < inner_end {
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let sv = src[y * width + x];
+                let dv = dst[y * width + x];
+
+                if store_mu {
+                    mu1_out[y * width + x] = mu1;
+                    mu2_out[y * width + x] = mu2;
+                }
+
+                // Edge
+                let diff1 = (sv - mu1).abs();
+                let diff2 = (dv - mu2).abs();
+                let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                let artifact = ed.max(0.0f32);
+                let detail_lost = (-ed).max(0.0f32);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                let a4 = a2 * a2;
+                let dl4 = dl2 * dl2;
+                acc.edge_art += artifact as f64;
+                acc.edge_art4 += a4 as f64;
+                acc.edge_art2 += a2 as f64;
+                acc.edge_det += detail_lost as f64;
+                acc.edge_det4 += dl4 as f64;
+                acc.edge_det2 += dl2 as f64;
+                acc.edge_art8 += (a4 * a4) as f64;
+                acc.edge_det8 += (dl4 * dl4) as f64;
+                acc.edge_art_max = acc.edge_art_max.max(artifact);
+                acc.edge_det_max = acc.edge_det_max.max(detail_lost);
+
+                let vs = sv - mu1;
+                let vd = dv - mu2;
+                acc.hf_sq_src += (vs * vs) as f64;
+                acc.hf_sq_dst += (vd * vd) as f64;
+                acc.hf_abs_src += diff1 as f64;
+                acc.hf_abs_dst += diff2 as f64;
+
+                let pd = sv - dv;
+                acc.mse += (pd * pd) as f64;
+            }
+
+            let add_idx = vblur_add_idx(y, r, height);
+            let rem_idx = vblur_rem_idx(y, r, height);
+            sum_m1 = sum_m1 + h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 = sum_m2 + h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+        }
+    }
+
+    acc
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn fused_vblur_edge_inner_wasm128(
+    token: archmage::Wasm128Token,
+    h_mu1: &[f32],
+    h_mu2: &[f32],
+    src: &[f32],
+    dst: &[f32],
+    width: usize,
+    height: usize,
+    inner_start: usize,
+    inner_h: usize,
+    radius: usize,
+    mu1_out: &mut [f32],
+    mu2_out: &mut [f32],
+    store_mu: bool,
+) -> StripChannelAccum {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x4::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let col_groups = width / 4;
+
+    let one = f32x4::splat(token, 1.0);
+    let zero = f32x4::zero(token);
+
+    let mut acc = StripChannelAccum::zero();
+    let inner_end = inner_start + inner_h;
+
+    for cg in 0..col_groups {
+        let col_base = cg * 4;
+        let mut sum_m1 = f32x4::zero(token);
+        let mut sum_m2 = f32x4::zero(token);
+
+        for i in 0..diam {
+            let idx = mirror_idx(i, r, height);
+            let base = idx * width + col_base;
+            sum_m1 = sum_m1 + f32x4::from_array(token, h_mu1[base..][..4].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x4::from_array(token, h_mu2[base..][..4].try_into().unwrap());
+        }
+
+        for y in 0..height {
+            if y >= inner_start && y < inner_end {
+                let base = y * width + col_base;
+                let mu1 = sum_m1 * inv_v;
+                let mu2 = sum_m2 * inv_v;
+                let s = f32x4::from_array(token, src[base..][..4].try_into().unwrap());
+                let d = f32x4::from_array(token, dst[base..][..4].try_into().unwrap());
+
+                if store_mu {
+                    mu1_out[base..base + 4].copy_from_slice(&mu1.to_array());
+                    mu2_out[base..base + 4].copy_from_slice(&mu2.to_array());
+                }
+
+                let diff1 = (s - mu1).abs();
+                let diff2 = (d - mu2).abs();
+                let ed = (one + diff2) / (one + diff1) - one;
+                let artifact = ed.max(zero);
+                let detail_lost = (-ed).max(zero);
+                let a2 = artifact * artifact;
+                let dl2 = detail_lost * detail_lost;
+                let a4 = a2 * a2;
+                let dl4 = dl2 * dl2;
+                acc.edge_art += artifact.reduce_add() as f64;
+                acc.edge_art4 += a4.reduce_add() as f64;
+                acc.edge_art2 += a2.reduce_add() as f64;
+                acc.edge_det += detail_lost.reduce_add() as f64;
+                acc.edge_det4 += dl4.reduce_add() as f64;
+                acc.edge_det2 += dl2.reduce_add() as f64;
+                acc.edge_art8 += (a4 * a4).reduce_add() as f64;
+                acc.edge_det8 += (dl4 * dl4).reduce_add() as f64;
+                acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
+                acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
+
+                let vs = s - mu1;
+                let vd = d - mu2;
+                acc.hf_sq_src += (vs * vs).reduce_add() as f64;
+                acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
+                acc.hf_abs_src += diff1.reduce_add() as f64;
+                acc.hf_abs_dst += diff2.reduce_add() as f64;
+
+                let pd = s - d;
+                acc.mse += (pd * pd).reduce_add() as f64;
+            }
+
+            let add_idx = vblur_add_idx(y, r, height);
+            let rem_idx = vblur_rem_idx(y, r, height);
+            let add_base = add_idx * width + col_base;
+            let rem_base = rem_idx * width + col_base;
+            sum_m1 = sum_m1 + f32x4::from_array(token, h_mu1[add_base..][..4].try_into().unwrap())
+                - f32x4::from_array(token, h_mu1[rem_base..][..4].try_into().unwrap());
+            sum_m2 = sum_m2 + f32x4::from_array(token, h_mu2[add_base..][..4].try_into().unwrap())
+                - f32x4::from_array(token, h_mu2[rem_base..][..4].try_into().unwrap());
+        }
+    }
+
+    // Scalar remainder
+    let inv = 1.0 / diam as f32;
+    for x in (col_groups * 4)..width {
         let mut sum_m1 = 0.0f32;
         let mut sum_m2 = 0.0f32;
 

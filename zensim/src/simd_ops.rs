@@ -2,35 +2,39 @@
 
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
+#[cfg(target_arch = "wasm32")]
+use archmage::arcane;
 use archmage::incant;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
+#[cfg(target_arch = "wasm32")]
+use magetypes::simd::wasm128::f32x4;
 
 /// Element-wise multiply: out[i] = a[i] * b[i]
 pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(mul_into_inner(a, b, out), [v4, v3, scalar]);
+    incant!(mul_into_inner(a, b, out), [v4, v3, wasm128, scalar]);
 }
 
 /// Element-wise: out[i] = a[i]*a[i] + b[i]*b[i] (sum of squares)
 pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(sq_sum_into_inner(a, b, out), [v4, v3, scalar]);
+    incant!(sq_sum_into_inner(a, b, out), [v4, v3, wasm128, scalar]);
 }
 
 /// Compute sum of squared differences: sum((a[i] - b[i])²)
 pub fn sq_diff_sum(a: &[f32], b: &[f32]) -> f64 {
-    incant!(sq_diff_sum_inner(a, b), [v4, v3, scalar])
+    incant!(sq_diff_sum_inner(a, b), [v4, v3, wasm128, scalar])
 }
 
 /// Compute sum of absolute differences: sum(|a[i] - b[i]|)
 pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
-    incant!(abs_diff_sum_inner(a, b), [v4, v3, scalar])
+    incant!(abs_diff_sum_inner(a, b), [v4, v3, wasm128, scalar])
 }
 
 /// Element-wise absolute difference: out[i] = |a[i] - b[i]|
 pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(abs_diff_into_inner(a, b, out), [v4, v3, scalar]);
+    incant!(abs_diff_into_inner(a, b, out), [v4, v3, wasm128, scalar]);
 }
 
 /// Like ssim_channel but also computes 8th-power pool and max.
@@ -44,7 +48,7 @@ pub fn ssim_channel_extended(
 ) -> (f64, f64, f64, f64, f32) {
     incant!(
         ssim_channel_extended_inner(mu1, mu2, sum_sq, sigma12),
-        [v4, v3, scalar]
+        [v4, v3, wasm128, scalar]
     )
 }
 
@@ -58,7 +62,7 @@ pub fn edge_diff_channel_extended(
 ) -> (f64, f64, f64, f64, f64, f64, f64, f64, f32, f32) {
     incant!(
         edge_diff_extended_inner(img1, img2, mu1, mu2),
-        [v4, v3, scalar]
+        [v4, v3, wasm128, scalar]
     )
 }
 
@@ -73,7 +77,7 @@ pub fn ssim_channel_masked(
 ) -> (f64, f64, f64) {
     incant!(
         ssim_channel_masked_inner(mu1, mu2, sum_sq, sigma12, mask),
-        [v4, v3, scalar]
+        [v4, v3, wasm128, scalar]
     )
 }
 
@@ -88,7 +92,7 @@ pub fn edge_diff_channel_masked(
 ) -> (f64, f64, f64, f64, f64, f64) {
     incant!(
         edge_diff_masked_inner(img1, img2, mu1, mu2, mask),
-        [v4, v3, scalar]
+        [v4, v3, wasm128, scalar]
     )
 }
 
@@ -135,6 +139,22 @@ fn sq_sum_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: 
         out[base..base + 8].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
     }
     for i in (chunks * 8)..n {
+        out[i] = a[i].mul_add(a[i], b[i] * b[i]);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn sq_sum_into_inner_wasm128(token: archmage::Wasm128Token, a: &[f32], b: &[f32], out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 4;
+    for c in 0..chunks {
+        let base = c * 4;
+        let va = f32x4::from_array(token, a[base..][..4].try_into().unwrap());
+        let vb = f32x4::from_array(token, b[base..][..4].try_into().unwrap());
+        out[base..base + 4].copy_from_slice(&va.mul_add(va, vb * vb).to_array());
+    }
+    for i in (chunks * 4)..n {
         out[i] = a[i].mul_add(a[i], b[i] * b[i]);
     }
 }
@@ -188,6 +208,26 @@ fn sq_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f6
         sum += (d * d).reduce_add() as f64;
     }
     for i in (chunks * 8)..n {
+        let d = a[i] - b[i];
+        sum += (d * d) as f64;
+    }
+    sum
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn sq_diff_sum_inner_wasm128(token: archmage::Wasm128Token, a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let chunks = n / 4;
+    let mut sum = 0.0f64;
+    for c in 0..chunks {
+        let base = c * 4;
+        let va = f32x4::from_array(token, a[base..][..4].try_into().unwrap());
+        let vb = f32x4::from_array(token, b[base..][..4].try_into().unwrap());
+        let d = va - vb;
+        sum += (d * d).reduce_add() as f64;
+    }
+    for i in (chunks * 4)..n {
         let d = a[i] - b[i];
         sum += (d * d) as f64;
     }
@@ -252,6 +292,26 @@ fn abs_diff_sum_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32]) -> f
     sum
 }
 
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn abs_diff_sum_inner_wasm128(token: archmage::Wasm128Token, a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let chunks = n / 4;
+    let mut sum = 0.0f64;
+    for c in 0..chunks {
+        let base = c * 4;
+        let va = f32x4::from_array(token, a[base..][..4].try_into().unwrap());
+        let vb = f32x4::from_array(token, b[base..][..4].try_into().unwrap());
+        let d = (va - vb).abs();
+        sum += d.reduce_add() as f64;
+    }
+    for i in (chunks * 4)..n {
+        let d = (a[i] - b[i]).abs() as f64;
+        sum += d;
+    }
+    sum
+}
+
 fn abs_diff_sum_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32]) -> f64 {
     let mut sum = 0.0f64;
     for i in 0..a.len() {
@@ -301,6 +361,22 @@ fn mul_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out: &mu
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn mul_into_inner_wasm128(token: archmage::Wasm128Token, a: &[f32], b: &[f32], out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 4;
+    for c in 0..chunks {
+        let base = c * 4;
+        let va = f32x4::from_array(token, a[base..][..4].try_into().unwrap());
+        let vb = f32x4::from_array(token, b[base..][..4].try_into().unwrap());
+        out[base..base + 4].copy_from_slice(&(va * vb).to_array());
+    }
+    for i in (chunks * 4)..n {
+        out[i] = a[i] * b[i];
+    }
+}
+
 fn mul_into_inner_scalar(_token: archmage::ScalarToken, a: &[f32], b: &[f32], out: &mut [f32]) {
     for i in 0..a.len() {
         out[i] = a[i] * b[i];
@@ -345,6 +421,27 @@ fn abs_diff_into_inner_v3(token: archmage::X64V3Token, a: &[f32], b: &[f32], out
         out[base..base + 8].copy_from_slice(&(va - vb).abs().to_array());
     }
     for i in (chunks * 8)..n {
+        out[i] = (a[i] - b[i]).abs();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn abs_diff_into_inner_wasm128(
+    token: archmage::Wasm128Token,
+    a: &[f32],
+    b: &[f32],
+    out: &mut [f32],
+) {
+    let n = a.len();
+    let chunks = n / 4;
+    for c in 0..chunks {
+        let base = c * 4;
+        let va = f32x4::from_array(token, a[base..][..4].try_into().unwrap());
+        let vb = f32x4::from_array(token, b[base..][..4].try_into().unwrap());
+        out[base..base + 4].copy_from_slice(&(va - vb).abs().to_array());
+    }
+    for i in (chunks * 4)..n {
         out[i] = (a[i] - b[i]).abs();
     }
 }
@@ -462,6 +559,63 @@ fn ssim_channel_masked_inner_v3(
     }
 
     for i in (chunks * 8)..n {
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = ((1.0f32 - (num_m * num_s) / denom_s) * mask[i]).max(0.0f32);
+        let d2 = d * d;
+        sum_d += d as f64;
+        sum_d2 += d2 as f64;
+        sum_d4 += (d2 * d2) as f64;
+    }
+
+    (sum_d, sum_d4, sum_d2)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn ssim_channel_masked_inner_wasm128(
+    token: archmage::Wasm128Token,
+    mu1: &[f32],
+    mu2: &[f32],
+    sum_sq: &[f32],
+    s12: &[f32],
+    mask: &[f32],
+) -> (f64, f64, f64) {
+    let c2v = f32x4::splat(token, C2);
+    let one = f32x4::splat(token, 1.0);
+    let two = f32x4::splat(token, 2.0);
+    let zero = f32x4::zero(token);
+
+    let n = mu1.len();
+    let chunks = n / 4;
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
+
+    for c in 0..chunks {
+        let base = c * 4;
+        let m1 = f32x4::from_array(token, mu1[base..][..4].try_into().unwrap());
+        let m2 = f32x4::from_array(token, mu2[base..][..4].try_into().unwrap());
+        let ssq = f32x4::from_array(token, sum_sq[base..][..4].try_into().unwrap());
+        let s12v = f32x4::from_array(token, s12[base..][..4].try_into().unwrap());
+        let mv = f32x4::from_array(token, mask[base..][..4].try_into().unwrap());
+
+        let mu_diff = m1 - m2;
+        let num_m = mu_diff.mul_add(-mu_diff, one);
+        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
+        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
+        let d = ((one - (num_m * num_s) / denom_s) * mv).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+    }
+
+    for i in (chunks * 4)..n {
         let mu_diff = mu1[i] - mu2[i];
         let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
         let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
@@ -642,6 +796,74 @@ fn edge_diff_masked_inner_v3(
     (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
 }
 
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn edge_diff_masked_inner_wasm128(
+    token: archmage::Wasm128Token,
+    img1: &[f32],
+    img2: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+    mask: &[f32],
+) -> (f64, f64, f64, f64, f64, f64) {
+    let one = f32x4::splat(token, 1.0);
+    let zero = f32x4::zero(token);
+
+    let n = img1.len();
+    let chunks = n / 4;
+    let mut sum_art = 0.0f64;
+    let mut sum_art4 = 0.0f64;
+    let mut sum_art2 = 0.0f64;
+    let mut sum_det = 0.0f64;
+    let mut sum_det4 = 0.0f64;
+    let mut sum_det2 = 0.0f64;
+
+    for c in 0..chunks {
+        let base = c * 4;
+        let i1 = f32x4::from_array(token, img1[base..][..4].try_into().unwrap());
+        let i2 = f32x4::from_array(token, img2[base..][..4].try_into().unwrap());
+        let m1 = f32x4::from_array(token, mu1[base..][..4].try_into().unwrap());
+        let m2 = f32x4::from_array(token, mu2[base..][..4].try_into().unwrap());
+        let mv = f32x4::from_array(token, mask[base..][..4].try_into().unwrap());
+
+        let diff1 = (i1 - m1).abs();
+        let diff2 = (i2 - m2).abs();
+        let d1 = ((one + diff2) / (one + diff1) - one) * mv;
+
+        let artifact = d1.max(zero);
+        let detail_lost = (-d1).max(zero);
+
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+
+        sum_art += artifact.reduce_add() as f64;
+        sum_art2 += a2.reduce_add() as f64;
+        sum_art4 += (a2 * a2).reduce_add() as f64;
+        sum_det += detail_lost.reduce_add() as f64;
+        sum_det2 += dl2.reduce_add() as f64;
+        sum_det4 += (dl2 * dl2).reduce_add() as f64;
+    }
+
+    for i in (chunks * 4)..n {
+        let diff1 = (img1[i] - mu1[i]).abs();
+        let diff2 = (img2[i] - mu2[i]).abs();
+        let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * mask[i];
+
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let dl2 = detail_lost * detail_lost;
+        sum_art += artifact as f64;
+        sum_art2 += a2 as f64;
+        sum_art4 += (a2 * a2) as f64;
+        sum_det += detail_lost as f64;
+        sum_det2 += dl2 as f64;
+        sum_det4 += (dl2 * dl2) as f64;
+    }
+
+    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
+}
+
 fn edge_diff_masked_inner_scalar(
     _token: archmage::ScalarToken,
     img1: &[f32],
@@ -791,6 +1013,70 @@ fn ssim_channel_extended_inner_v3(
 
     let mut max_d = max_d_vec.reduce_max();
     for i in (chunks * 8)..n {
+        let mu_diff = mu1[i] - mu2[i];
+        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
+        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
+        let d = (1.0f32 - (num_m * num_s) / denom_s).max(0.0f32);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+        sum_d += d as f64;
+        sum_d4 += d4 as f64;
+        sum_d2 += d2 as f64;
+        sum_d8 += (d4 * d4) as f64;
+        max_d = max_d.max(d);
+    }
+
+    (sum_d, sum_d4, sum_d2, sum_d8, max_d)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn ssim_channel_extended_inner_wasm128(
+    token: archmage::Wasm128Token,
+    mu1: &[f32],
+    mu2: &[f32],
+    sum_sq: &[f32],
+    s12: &[f32],
+) -> (f64, f64, f64, f64, f32) {
+    let c2v = f32x4::splat(token, C2);
+    let one = f32x4::splat(token, 1.0);
+    let two = f32x4::splat(token, 2.0);
+    let zero = f32x4::zero(token);
+
+    let n = mu1.len();
+    let chunks = n / 4;
+    let mut sum_d = 0.0f64;
+    let mut sum_d4 = 0.0f64;
+    let mut sum_d2 = 0.0f64;
+    let mut sum_d8 = 0.0f64;
+    let mut max_d_vec = zero;
+
+    for c in 0..chunks {
+        let base = c * 4;
+        let m1 = f32x4::from_array(token, mu1[base..][..4].try_into().unwrap());
+        let m2 = f32x4::from_array(token, mu2[base..][..4].try_into().unwrap());
+        let ssq = f32x4::from_array(token, sum_sq[base..][..4].try_into().unwrap());
+        let s12v = f32x4::from_array(token, s12[base..][..4].try_into().unwrap());
+
+        let mu_diff = m1 - m2;
+        let num_m = mu_diff.mul_add(-mu_diff, one);
+        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
+        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
+        let d = (one - (num_m * num_s) / denom_s).max(zero);
+        let d2 = d * d;
+        let d4 = d2 * d2;
+        let d8 = d4 * d4;
+
+        sum_d += d.reduce_add() as f64;
+        sum_d4 += d4.reduce_add() as f64;
+        sum_d2 += d2.reduce_add() as f64;
+        sum_d8 += d8.reduce_add() as f64;
+        max_d_vec = max_d_vec.max(d);
+    }
+
+    let mut max_d = max_d_vec.reduce_max();
+    for i in (chunks * 4)..n {
         let mu_diff = mu1[i] - mu2[i];
         let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
         let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
@@ -994,6 +1280,96 @@ fn edge_diff_extended_inner_v3(
     let mut max_det = max_det_vec.reduce_max();
 
     for i in (chunks * 8)..n {
+        let diff1 = (img1[i] - mu1[i]).abs();
+        let diff2 = (img2[i] - mu2[i]).abs();
+        let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+
+        let artifact = d1.max(0.0f32);
+        let detail_lost = (-d1).max(0.0f32);
+        let a2 = artifact * artifact;
+        let a4 = a2 * a2;
+        let dl2 = detail_lost * detail_lost;
+        let dl4 = dl2 * dl2;
+        sum_art += artifact as f64;
+        sum_art4 += a4 as f64;
+        sum_art2 += a2 as f64;
+        sum_art8 += (a4 * a4) as f64;
+        sum_det += detail_lost as f64;
+        sum_det4 += dl4 as f64;
+        sum_det2 += dl2 as f64;
+        sum_det8 += (dl4 * dl4) as f64;
+        max_art = max_art.max(artifact);
+        max_det = max_det.max(detail_lost);
+    }
+
+    (
+        sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2, sum_art8, sum_det8, max_art,
+        max_det,
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+#[arcane]
+fn edge_diff_extended_inner_wasm128(
+    token: archmage::Wasm128Token,
+    img1: &[f32],
+    img2: &[f32],
+    mu1: &[f32],
+    mu2: &[f32],
+) -> (f64, f64, f64, f64, f64, f64, f64, f64, f32, f32) {
+    let one = f32x4::splat(token, 1.0);
+    let zero = f32x4::zero(token);
+
+    let n = img1.len();
+    let chunks = n / 4;
+    let mut sum_art = 0.0f64;
+    let mut sum_art4 = 0.0f64;
+    let mut sum_art2 = 0.0f64;
+    let mut sum_art8 = 0.0f64;
+    let mut sum_det = 0.0f64;
+    let mut sum_det4 = 0.0f64;
+    let mut sum_det2 = 0.0f64;
+    let mut sum_det8 = 0.0f64;
+    let mut max_art_vec = zero;
+    let mut max_det_vec = zero;
+
+    for c in 0..chunks {
+        let base = c * 4;
+        let i1 = f32x4::from_array(token, img1[base..][..4].try_into().unwrap());
+        let i2 = f32x4::from_array(token, img2[base..][..4].try_into().unwrap());
+        let m1 = f32x4::from_array(token, mu1[base..][..4].try_into().unwrap());
+        let m2 = f32x4::from_array(token, mu2[base..][..4].try_into().unwrap());
+
+        let diff1 = (i1 - m1).abs();
+        let diff2 = (i2 - m2).abs();
+        let d1 = (one + diff2) / (one + diff1) - one;
+
+        let artifact = d1.max(zero);
+        let detail_lost = (-d1).max(zero);
+
+        let a2 = artifact * artifact;
+        let a4 = a2 * a2;
+        let a8 = a4 * a4;
+        let dl2 = detail_lost * detail_lost;
+        let dl4 = dl2 * dl2;
+        let dl8 = dl4 * dl4;
+
+        sum_art += artifact.reduce_add() as f64;
+        sum_art4 += a4.reduce_add() as f64;
+        sum_art2 += a2.reduce_add() as f64;
+        sum_art8 += a8.reduce_add() as f64;
+        sum_det += detail_lost.reduce_add() as f64;
+        sum_det4 += dl4.reduce_add() as f64;
+        sum_det2 += dl2.reduce_add() as f64;
+        sum_det8 += dl8.reduce_add() as f64;
+        max_art_vec = max_art_vec.max(artifact);
+        max_det_vec = max_det_vec.max(detail_lost);
+    }
+
+    let mut max_art = max_art_vec.reduce_max();
+    let mut max_det = max_det_vec.reduce_max();
+
+    for i in (chunks * 4)..n {
         let diff1 = (img1[i] - mu1[i]).abs();
         let diff2 = (img2[i] - mu2[i]).abs();
         let d1 = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
