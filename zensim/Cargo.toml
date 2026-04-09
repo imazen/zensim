@@ -9,7 +9,7 @@ readme = "../README.md"
 rust-version = "1.89.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
-exclude = ["benches/", "tests/"]
+exclude = ["benches/", "tests/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
 
 [features]
 default = ["avx512", "imgref", "threads"]

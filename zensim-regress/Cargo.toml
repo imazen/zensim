@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.89.0"
 keywords = ["visual", "regression", "testing", "image", "checksum"]
 categories = ["development-tools::testing", "multimedia::images"]
-exclude = ["examples/*.png", "tests/fixtures/"]
+exclude = ["examples/*.png", "tests/fixtures/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
 
 [features]
 default = ["threads"]
