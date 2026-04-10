@@ -115,7 +115,11 @@ fn identical_images_score_100() {
     let pixels = px(&rgba);
     let src = RgbaSlice::new(&pixels, W as usize, H as usize);
     let result = z.compute(&src, &src).unwrap();
-    assert_eq!(result.score(), 100.0, "identical images must score exactly 100");
+    assert_eq!(
+        result.score(),
+        100.0,
+        "identical images must score exactly 100"
+    );
 }
 
 #[test]
@@ -213,7 +217,10 @@ fn regression_off_by_one_passes() {
     let src = RgbaSlice::new(&base_px, 128, 128);
     let dst = RgbaSlice::new(&dist_px, 128, 128);
     let report = check_regression(&z, &src, &dst, &tol).unwrap();
-    assert!(report.passed(), "off-by-1 should pass off_by_one tolerance: {report}");
+    assert!(
+        report.passed(),
+        "off-by-1 should pass off_by_one tolerance: {report}"
+    );
 }
 
 #[test]
@@ -227,7 +234,10 @@ fn regression_large_delta_fails_exact() {
     let src = RgbaSlice::new(&base_px, 64, 64);
     let dst = RgbaSlice::new(&dist_px, 64, 64);
     let report = check_regression(&z, &src, &dst, &tol).unwrap();
-    assert!(!report.passed(), "uniform_shift(10) should fail exact tolerance");
+    assert!(
+        !report.passed(),
+        "uniform_shift(10) should fail exact tolerance"
+    );
 }
 
 // ---- Multi-scale / larger image tests ----

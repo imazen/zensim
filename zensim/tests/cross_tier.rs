@@ -50,20 +50,57 @@ fn ulp_distance(a: f64, b: f64) -> Option<u64> {
 }
 
 /// Classify a token permutation label into a tier name for grouping.
-fn classify_tier(label: &str, disabled: &[&str]) -> &'static str {
-    // Check what's disabled to determine effective ISA level
-    let v3_disabled = disabled.contains(&"x86-64-v3");
-    let v4_disabled = disabled.contains(&"AVX-512");
-    let v2_disabled = disabled.contains(&"x86-64-v2");
+///
+/// Works across architectures: x86 (SSE2/AVX2/AVX-512), AArch64 (NEON/scalar),
+/// and WASM (SIMD128/scalar).
+fn classify_tier(_label: &str, disabled: &[&str]) -> &'static str {
+    // Detect architecture from token names present in the disabled list.
+    // The cfg! checks handle the common compile-time case; the runtime token
+    // checks are a fallback for unusual cross-compilation scenarios.
+    let has_arm_tokens = disabled
+        .iter()
+        .any(|t| t.contains("NEON") || t.contains("Arm64"));
+    let has_wasm_tokens = disabled.iter().any(|t| t.contains("WASM"));
 
-    if v3_disabled || v2_disabled {
-        "scalar/SSE2"
-    } else if v4_disabled {
-        "AVX2 (v3)"
-    } else if label.contains("all enabled") || (!v4_disabled && !v3_disabled) {
-        "AVX-512 (v4)"
+    if cfg!(target_arch = "aarch64") || has_arm_tokens {
+        // AArch64: the key token is "NEON" (the base NEON token).
+        // Sub-tokens like NEON+AES, NEON+SHA3, NEON+CRC, Arm64-v2 don't affect
+        // the SIMD dispatch tier for zensim (which uses `neon` tier).
+        let neon_disabled = disabled.contains(&"NEON");
+        if neon_disabled { "scalar" } else { "NEON" }
+    } else if cfg!(target_arch = "wasm32") || has_wasm_tokens {
+        let wasm128_disabled = disabled.contains(&"WASM128");
+        if wasm128_disabled {
+            "scalar"
+        } else {
+            "WASM128"
+        }
     } else {
-        "unknown"
+        // x86/x86_64
+        let v3_disabled = disabled.contains(&"x86-64-v3");
+        let v4_disabled = disabled.contains(&"AVX-512");
+        let v2_disabled = disabled.contains(&"x86-64-v2");
+
+        if v3_disabled || v2_disabled {
+            "scalar/SSE2"
+        } else if v4_disabled {
+            "AVX2 (v3)"
+        } else {
+            "AVX-512 (v4)"
+        }
+    }
+}
+
+/// Returns tier names in priority order (highest SIMD tier first) for the
+/// current target architecture.
+fn platform_tier_order() -> Vec<&'static str> {
+    if cfg!(target_arch = "aarch64") {
+        vec!["NEON", "scalar"]
+    } else if cfg!(target_arch = "wasm32") {
+        vec!["WASM128", "scalar"]
+    } else {
+        // x86 / x86_64
+        vec!["AVX-512 (v4)", "AVX2 (v3)", "scalar/SSE2"]
     }
 }
 
@@ -156,7 +193,7 @@ fn score_reproducibility_across_tiers() {
 
     // Cross-tier divergence: compare each tier against the highest tier
     eprintln!("\n--- Cross-tier divergence ---");
-    let tier_order = ["AVX-512 (v4)", "AVX2 (v3)", "scalar/SSE2"];
+    let tier_order = platform_tier_order();
     let mut tier_scores: Vec<(&str, f64, f64, &[f64])> = Vec::new();
     for tier in &tier_order {
         if let Some(entries) = tier_results.get(tier) {
@@ -273,7 +310,7 @@ fn score_reproducibility_512x512() {
     }
 
     eprintln!("\n=== 512x512 cross-tier test ===");
-    let tier_order = ["AVX-512 (v4)", "AVX2 (v3)", "scalar/SSE2"];
+    let tier_order = platform_tier_order();
     for tier in &tier_order {
         if let Some(entries) = tier_results.get(tier) {
             eprintln!(
@@ -295,21 +332,19 @@ fn score_reproducibility_512x512() {
         }
     }
 
-    // Cross-tier: report
-    if let (Some(v4), Some(v3)) = (
-        tier_results.get("AVX-512 (v4)"),
-        tier_results.get("AVX2 (v3)"),
-    ) {
-        let u = ulp_distance(v4[0].score(), v3[0].score()).unwrap_or(u64::MAX);
-        let rel = (v4[0].score() - v3[0].score()).abs() / v4[0].score().abs().max(1e-12);
-        eprintln!("  v4 vs v3: score ULP={u}, rel={rel:.2e}");
-    }
-    if let (Some(v4), Some(sc)) = (
-        tier_results.get("AVX-512 (v4)"),
-        tier_results.get("scalar/SSE2"),
-    ) {
-        let u = ulp_distance(v4[0].score(), sc[0].score()).unwrap_or(u64::MAX);
-        let rel = (v4[0].score() - sc[0].score()).abs() / v4[0].score().abs().max(1e-12);
-        eprintln!("  v4 vs scalar: score ULP={u}, rel={rel:.2e}");
+    // Cross-tier: report divergence between the highest tier and all lower tiers
+    let order = platform_tier_order();
+    let mut first_found: Option<(&str, &ZensimResult)> = None;
+    for tier in &order {
+        if let Some(entries) = tier_results.get(tier) {
+            if let Some((ref_tier, ref_r)) = &first_found {
+                let u = ulp_distance(ref_r.score(), entries[0].score()).unwrap_or(u64::MAX);
+                let rel =
+                    (ref_r.score() - entries[0].score()).abs() / ref_r.score().abs().max(1e-12);
+                eprintln!("  {ref_tier} vs {tier}: score ULP={u}, rel={rel:.2e}");
+            } else {
+                first_found = Some((tier, entries[0]));
+            }
+        }
     }
 }

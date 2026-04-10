@@ -180,7 +180,10 @@ pub fn srgb_to_xyb_planar_into(
 #[inline(always)]
 #[allow(dead_code)]
 pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
-    incant!(make_positive_xyb_inner(x, y, b), [v3, neon, wasm128, scalar]);
+    incant!(
+        make_positive_xyb_inner(x, y, b),
+        [v3, neon, wasm128, scalar]
+    );
 }
 
 // --- SIMD implementations ---

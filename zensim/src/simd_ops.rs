@@ -17,7 +17,10 @@ pub fn mul_into(a: &[f32], b: &[f32], out: &mut [f32]) {
 
 /// Element-wise: out[i] = a[i]*a[i] + b[i]*b[i] (sum of squares)
 pub fn sq_sum_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(sq_sum_into_inner(a, b, out), [v4, v3, neon, wasm128, scalar]);
+    incant!(
+        sq_sum_into_inner(a, b, out),
+        [v4, v3, neon, wasm128, scalar]
+    );
 }
 
 /// Compute sum of squared differences: sum((a[i] - b[i])²)
@@ -32,7 +35,10 @@ pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
 
 /// Element-wise absolute difference: out[i] = |a[i] - b[i]|
 pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
-    incant!(abs_diff_into_inner(a, b, out), [v4, v3, neon, wasm128, scalar]);
+    incant!(
+        abs_diff_into_inner(a, b, out),
+        [v4, v3, neon, wasm128, scalar]
+    );
 }
 
 /// Like ssim_channel but also computes 8th-power pool and max.

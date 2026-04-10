@@ -850,8 +850,7 @@ fn fused_vblur_ssim_inner(
                 sm1 = sm1 + f32x8::from_array(token, h_mu1[base..][..8].try_into().unwrap());
                 sm2 = sm2 + f32x8::from_array(token, h_mu2[base..][..8].try_into().unwrap());
                 ssq = ssq + f32x8::from_array(token, h_sigma_sq[base..][..8].try_into().unwrap());
-                ss12 =
-                    ss12 + f32x8::from_array(token, h_sigma12[base..][..8].try_into().unwrap());
+                ss12 = ss12 + f32x8::from_array(token, h_sigma12[base..][..8].try_into().unwrap());
             }
             sm1.store(&mut sum_m1_a);
             sm2.store(&mut sum_m2_a);
