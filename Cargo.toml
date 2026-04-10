@@ -13,10 +13,10 @@ opt-level = 2
 opt-level = 2
 
 [workspace.dependencies]
-zensim = { version = "0.2.4", path = "zensim", default-features = false }
+zensim = { version = "0.2.5", path = "zensim", default-features = false }
 zensim-regress = { version = "0.3.0", path = "zensim-regress", default-features = false }
-archmage = { version = "0.9.15", features = ["macros", "avx512"] }
-magetypes = { version = "0.9.15", features = ["avx512"] }
+archmage = { version = "0.9.17", features = ["macros", "avx512"] }
+magetypes = { version = "0.9.17", features = ["avx512"] }
 bytemuck = { version = "1.25", default-features = false }
 thiserror = "2"
 image = "0.25"
@@ -26,4 +26,4 @@ rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
 codec-corpus = "1.0.3"
 zenbench = "0.1.2"
-zenresize = { version = "0.2.0", default-features = false, features = ["std"] }
+zenresize = { version = "0.2.1", default-features = false, features = ["std"] }

@@ -19,8 +19,8 @@ zenresize = ["dep:zenresize"]
 
 [dependencies]
 zensim = { workspace = true, default-features = false, features = ["classification"] }
-archmage = { workspace = true, features = ["testable_dispatch"], optional = true , path = "../../../archmage" }
-zenresize = { workspace = true, optional = true , path = "../../zenresize" }
+archmage = { workspace = true, features = ["testable_dispatch"], optional = true }
+zenresize = { workspace = true, optional = true }
 # zenpng = { workspace = true, optional = true }
 # enough = { workspace = true, optional = true }
 seahash = "4.1.0"
@@ -33,9 +33,9 @@ fs2 = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3.27.0"
-archmage = { workspace = true, features = ["testable_dispatch"] , path = "../../../archmage" }
+archmage = { workspace = true, features = ["testable_dispatch"] }
 codec-corpus = { workspace = true }
-zenbench = { workspace = true , path = "../../zenbench" }
+zenbench = { workspace = true }
 # codec-corpus-fetch is local-only; uncomment for real_images tests
 # codec-corpus-fetch = { path = "/home/lilith/work/codec-corpus-fetch" }
 
