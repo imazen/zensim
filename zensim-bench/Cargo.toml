@@ -15,7 +15,7 @@ cc = "1"
 zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
-fast-ssim2 = { version = "0.7", features = ["imgref"] }
+fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
 butteraugli = "0.9"
 linear-srgb = { workspace = true , path = "../../linear-srgb" }
 imgref = { workspace = true }
