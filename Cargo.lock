@@ -2684,6 +2684,7 @@ dependencies = [
 name = "zensim-validate"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "calamine",
  "chrono",
  "clap",

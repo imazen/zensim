@@ -1,5 +1,7 @@
 #![allow(clippy::needless_range_loop)] // Training loops index parallel arrays by shared index
 
+mod scale_invariance;
+
 use calamine::{Reader, Xlsx};
 use clap::Parser;
 use rayon::prelude::*;
@@ -13,12 +15,26 @@ use std::path::{Path, PathBuf};
 )]
 struct Args {
     /// Dataset directory (e.g., ./datasets/tid2013)
+    /// Not required when --scale-invariance is set.
     #[arg(long)]
-    dataset: PathBuf,
+    dataset: Option<PathBuf>,
 
     /// Dataset type
+    /// Not required when --scale-invariance is set.
     #[arg(long, value_enum)]
-    format: DatasetFormat,
+    format: Option<DatasetFormat>,
+
+    /// Scale-invariance mode: ingest a pyramid CSV produced by
+    /// `coefficient/examples/generate_scale_pyramid`, compute zensim per row,
+    /// and emit per-(source × codec × quality × distortion) slope fits of
+    /// `score = α + β · log2(pixel_count)` for zensim, ssim2, butteraugli, dssim.
+    /// Bypasses dataset loading and training.
+    #[arg(long)]
+    scale_invariance: Option<PathBuf>,
+
+    /// Output directory for scale-invariance reports (default: alongside the input CSV).
+    #[arg(long)]
+    scale_invariance_out: Option<PathBuf>,
 
     /// Additional datasets for combined training (format: type:path,type:path)
     #[arg(long)]
@@ -511,6 +527,34 @@ fn dataset_weight_for(name: &str, weights: &HashMap<String, f64>) -> f64 {
 fn main() {
     let args = Args::parse();
 
+    // Scale-invariance mode: ingest a pyramid CSV and emit slope analysis.
+    // Bypasses dataset loading entirely.
+    if let Some(csv_path) = args.scale_invariance.as_deref() {
+        let weights: Vec<f64> = if let Some(wf) = args.weights_file.as_deref() {
+            load_weights_file(wf)
+        } else {
+            zensim::WEIGHTS.to_vec()
+        };
+        if let Err(e) = scale_invariance::run(
+            csv_path,
+            args.scale_invariance_out.as_deref(),
+            &weights,
+        ) {
+            eprintln!("scale-invariance: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    let args_dataset: PathBuf = args.dataset.clone().unwrap_or_else(|| {
+        eprintln!("--dataset is required (or pass --scale-invariance for pyramid analysis)");
+        std::process::exit(1);
+    });
+    let args_format: DatasetFormat = args.format.unwrap_or_else(|| {
+        eprintln!("--format is required (or pass --scale-invariance for pyramid analysis)");
+        std::process::exit(1);
+    });
+
     if args.leave_one_out && args.also.is_none() {
         eprintln!("--leave-one-out requires --also to specify additional datasets");
         std::process::exit(1);
@@ -599,7 +643,7 @@ fn main() {
         let explicit_cache = args.feature_cache.clone();
         let load_path = explicit_cache
             .clone()
-            .or_else(|| find_cache_to_load(&args.dataset));
+            .or_else(|| find_cache_to_load(&args_dataset));
         let cache_start = std::time::Instant::now();
         let cached_result =
             load_path
@@ -614,13 +658,13 @@ fn main() {
         // Save path: explicit if given, otherwise timestamped
         let save_path = explicit_cache
             .clone()
-            .unwrap_or_else(|| auto_cache_save_path(&args.dataset));
+            .unwrap_or_else(|| auto_cache_save_path(&args_dataset));
         match cached_result {
             Some(cached) => {
                 // Reload pairs for fresh human_scores (target-metric-dependent)
                 let pairs = load_pairs(
-                    args.format,
-                    &args.dataset,
+                    args_format,
+                    &args_dataset,
                     args.max_images,
                     args.target_metric,
                 );
@@ -838,15 +882,15 @@ fn main() {
                 if args.train_only {
                     eprintln!(
                         "--train-only requires an existing feature cache, but none was found for {:?}",
-                        args.dataset
+                        args_dataset
                     );
                     eprintln!("Run --extract-only first to create one.");
                     std::process::exit(1);
                 }
                 let (ds, valid_indices) = load_and_compute(
-                    &format!("{:?}", args.format),
-                    args.format,
-                    &args.dataset,
+                    &format!("{:?}", args_format),
+                    args_format,
+                    &args_dataset,
                     args.max_images,
                     compute_all,
                     blur_passes,
@@ -867,9 +911,9 @@ fn main() {
         }
     } else {
         let (ds, valid_indices) = load_and_compute(
-            &format!("{:?}", args.format),
-            args.format,
-            &args.dataset,
+            &format!("{:?}", args_format),
+            args_format,
+            &args_dataset,
             args.max_images,
             compute_all,
             blur_passes,
@@ -884,7 +928,7 @@ fn main() {
             let save_path = args
                 .feature_cache
                 .clone()
-                .unwrap_or_else(|| auto_cache_save_path(&args.dataset));
+                .unwrap_or_else(|| auto_cache_save_path(&args_dataset));
             if let Err(e) = save_feature_cache(&save_path, &ds, &valid_indices, &cache_config) {
                 eprintln!("Warning: failed to save feature cache: {}", e);
             } else {
@@ -1286,7 +1330,7 @@ fn main() {
         // Auto-save training log and weights
         let log_dir = args
             .log_dir
-            .unwrap_or_else(|| args.dataset.parent().unwrap_or(Path::new(".")).join("runs"));
+            .unwrap_or_else(|| args_dataset.parent().unwrap_or(Path::new(".")).join("runs"));
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
             eprintln!("Warning: failed to create log dir {:?}: {}", log_dir, e);
         } else {
