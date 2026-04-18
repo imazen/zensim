@@ -157,24 +157,95 @@ Outputs:
 
 To use a different aspect or pyramid: `--levels 1920x1280,960x640,480x320,240x160`.
 
+## Follow-up A: text and UI content
+
+The original 30 sources were all natural photographs. To check whether the
+findings hold on rendered content, we generated 30 synthetic sources at
+2048×1366 covering five subdomains:
+
+- 8 articles (body text on white/cream/cool-white themes, 22–36 pt)
+- 6 source-code panels (monospaced, syntax-coloured, dark theme)
+- 6 dashboard / flat-UI mockups (header bar, sidebar, content cards)
+- 6 spreadsheet-like tables (grid + numeric content)
+- 4 terminal screenshots (dark BG, monospaced output)
+
+Same matrix (4 levels × 3 codecs × 4 qualities + 6 controls = 18 distortions
+per level), 2160 pairs, 73 s.
+
+Results
+([benchmarks/scale_invariance_text-ui_2026-04-17.csv](../benchmarks/scale_invariance_text-ui_2026-04-17.csv),
+[…html](../benchmarks/scale_invariance_text-ui_2026-04-17.html)):
+
+| Distortion | Metric | Photos med \|β\| | **Text/UI med \|β\|** | Photos med R² | Text/UI med R² |
+|---|---|---:|---:|---:|---:|
+| codec | DSSIM | 0.0001 | 0.0003 | 0.85 | 0.95 |
+| codec | butteraugli | 0.081 | 0.103 | 0.61 | 0.59 |
+| codec | zensim | 0.458 | **0.711** | 0.84 | 0.84 |
+| codec | SSIMULACRA2 | 0.690 | **0.563** | 0.84 | **0.34** |
+| gaussian_blur | DSSIM | 0.001 | 0.001 | 0.96 | 0.32 |
+| gaussian_blur | butteraugli | 0.142 | **0.567** | 0.58 | 0.71 |
+| gaussian_blur | SSIMULACRA2 | 1.861 | 1.115 | 0.92 | 0.21 |
+| gaussian_blur | zensim | 1.881 | 1.351 | 0.95 | 0.56 |
+| gaussian_noise | SSIMULACRA2 | 1.380 | **0.690** | 1.00 | 0.96 |
+| gaussian_noise | zensim | 0.890 | **0.341** | 1.00 | 0.94 |
+
+The two clearest content-dependent findings:
+
+1. **zensim's codec scale bias is ~55% worse on text/UI than on photos**
+   (0.71 vs 0.46 |β|/oct, mean signed +0.78 vs −0.10 — text scores rise with
+   resolution, suggesting low-res text artifacts are penalized more heavily).
+2. **SSIMULACRA2's relationship to log₂(pixel_count) on text codec runs is
+   not even linear** (R² drops from 0.84 to 0.34) — slopes are noisy and the
+   median is misleading. Treat ssim2 cross-resolution comparisons on text
+   content with extra suspicion regardless of |β|.
+
+Butteraugli's blur drift quadruples on text (0.14 → 0.57 |β|) — fixed-pixel
+blur destroys text aggressively on small renders, and butteraugli weights
+that more than the codec/photo case suggested.
+
+## Follow-up B: filter sensitivity (spike)
+
+To check whether the choice of downsampling filter biases the result, we
+re-ran the same matrix on an 8-source photo subset with three filters:
+Lanczos-3 (default), Catmull-Rom (a Mitchell-Netravali variant), and Triangle
+(linear). Same 8 sources for all three runs; everything else unchanged.
+
+Codec block, median |β|/oct
+([benchmarks/scale_invariance_filter-spike_2026-04-17.csv](../benchmarks/scale_invariance_filter-spike_2026-04-17.csv)):
+
+| Filter | DSSIM | butteraugli | zensim | SSIMULACRA2 |
+|---|---:|---:|---:|---:|
+| lanczos3 | 0.0001 | 0.095 | 0.497 | 0.767 |
+| mitchell | 0.0001 | 0.106 | 0.488 | 0.747 |
+| triangle | 0.0001 | 0.109 | 0.440 | 0.765 |
+
+**Filter choice barely matters.** Differences across filters are ≤0.06 in
+|β| — comfortably within IQR of an 8-source sample. The 30-source main
+result with Lanczos-3 is not sensitive to that choice. (Note: an extreme
+filter like `nearest` would likely move things; the filters tested are all
+reasonable-quality kernels.)
+
 ## Caveats
 
-1. **30 sources is small.** Per-codec slope distributions have IQRs of ~0.4–0.9
-   for ssim2/zensim under codec; with more sources we'd narrow those bounds.
-2. **Single content domain** (natural photographs from CLIC + FiveK). Text,
-   UI screenshots, and synthetic content likely behave differently — the
-   issue notes this as a follow-up.
-3. **Single downsampling filter** (Lanczos-3). Box or Mitchell would change
-   the absolute values but probably not the ordering of metrics.
-4. **No effort tuning.** Codecs ran at default effort. A higher-effort encode
-   of the same quality has a different artifact profile and may show different
-   |β|.
-5. **Embedded weights only.** If you train new zensim weights against
-   resolution-balanced data, scale-invariance may improve.
+1. **30 sources per content domain is small.** Per-codec slope distributions
+   have IQRs of ~0.4–0.9 for ssim2/zensim under codec; with more sources
+   we'd narrow those bounds.
+2. **Two content domains tested** (natural photographs + synthetic text/UI).
+   Mixed-content sources, animations, and rendered 3D scenes are not
+   covered.
+3. **Filter sensitivity tested across reasonable kernels only** (Lanczos /
+   Mitchell / Triangle). A blocky / nearest-neighbour pyramid would behave
+   differently.
+4. **No effort tuning.** Codecs ran at default effort. A higher-effort
+   encode of the same quality has a different artifact profile and may show
+   different |β|.
+5. **Embedded weights only.** Whether weight refits with explicit
+   resolution balancing improve zensim's scale invariance is the next
+   question and is its own follow-up.
 
-## Follow-ups (open in #12)
+## Follow-ups
 
-- Re-run with text/UI sources to characterize content-dependent bias.
-- Sensitivity check on downsampling filter (Lanczos vs Mitchell vs Box).
+- ~~Re-run with text/UI sources~~ ✅ done above
+- ~~Sensitivity check on downsampling filter~~ ✅ done above
 - Decide whether to add `log₂(pixel_count)` as a training signal so future
   weight refits explicitly target scale invariance.
