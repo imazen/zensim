@@ -44,7 +44,7 @@ thiserror = { workspace = true }
 linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-zenpixels = { version = "0.2.2", optional = true, default-features = false }
+zenpixels = { version = "0.2.10", optional = true, default-features = false }
 # zenresize = { workspace = true, optional = true }  # re-enable when published
 
 [dev-dependencies]
