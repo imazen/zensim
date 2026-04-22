@@ -535,11 +535,9 @@ fn main() {
         } else {
             zensim::WEIGHTS.to_vec()
         };
-        if let Err(e) = scale_invariance::run(
-            csv_path,
-            args.scale_invariance_out.as_deref(),
-            &weights,
-        ) {
+        if let Err(e) =
+            scale_invariance::run(csv_path, args.scale_invariance_out.as_deref(), &weights)
+        {
             eprintln!("scale-invariance: {}", e);
             std::process::exit(1);
         }
