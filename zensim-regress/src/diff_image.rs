@@ -840,8 +840,9 @@ fn render_montage_impl(
         None
     };
 
-    // Heatmap grid — only shown when there are actual differences
-    let heatmap = if has_differences {
+    // Heatmap grid — only shown when there are actual differences AND
+    // the caller hasn't opted out via `show_spatial_heatmap = false`.
+    let heatmap = if has_differences && options.show_spatial_heatmap {
         Some(render_heatmap_grid(&spatial, grid_w, pad))
     } else {
         None
@@ -1229,7 +1230,7 @@ fn render_mismatched_montage(
     };
 
     // Heatmap
-    let heatmap = if has_differences {
+    let heatmap = if has_differences && options.show_spatial_heatmap {
         Some(render_heatmap_grid(&spatial, grid_w, pad))
     } else {
         None
@@ -1563,6 +1564,13 @@ pub struct MontageOptions {
     pub expected_label: Option<String>,
     /// Label for the top-right panel. `None` uses the default `"ACTUAL"`.
     pub actual_label: Option<String>,
+    /// Whether to render the 3×3 (or `spatial_grid`) heatmap strip below
+    /// the annotation text. Default `true` — matches the zensim-regress
+    /// CI regression-report look. Set to `false` for A/B comparisons
+    /// where every region has full-magnitude differences (lossy
+    /// encoding outputs) and the heatmap just shows a uniformly-red
+    /// grid that adds no information.
+    pub show_spatial_heatmap: bool,
 }
 
 impl Default for MontageOptions {
@@ -1574,6 +1582,7 @@ impl Default for MontageOptions {
             spatial_grid: (3, 3),
             expected_label: None,
             actual_label: None,
+            show_spatial_heatmap: true,
         }
     }
 }
