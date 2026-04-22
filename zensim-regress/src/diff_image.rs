@@ -750,21 +750,28 @@ fn render_montage_impl(
     let panel_w = expected.width();
     let panel_h = expected.height();
 
-    // Label sizing: fit "PIXEL DIFF" (10 chars) within cell_w minus padding
+    // Label sizing: fit the longest of ("PIXEL DIFF" + caller-supplied
+    // labels) within cell_w minus padding. When callers override, the
+    // column widths auto-shrink so long labels still fit.
     let label_inset = pad;
     let label_area_w = panel_w.saturating_sub(label_inset * 2);
-    let longest_label = 10u32; // "PIXEL DIFF"
+    let expected_text: &str = options.expected_label.as_deref().unwrap_or("EXPECTED");
+    let actual_text: &str = options.actual_label.as_deref().unwrap_or("ACTUAL");
+    let longest_label = expected_text
+        .len()
+        .max(actual_text.len())
+        .max("PIXEL DIFF".len()) as u32;
     let label_char_h = ((label_area_w as f32 / longest_label as f32)
         * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
         .floor() as u32;
     let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
     // Plain labels: rendered centered within panel_w via render_lines_fitted
-    let plain_labels = ["EXPECTED", "ACTUAL", "PIXEL DIFF"];
+    let plain_labels: [&str; 3] = [expected_text, actual_text, "PIXEL DIFF"];
     let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
         .iter()
         .map(|label| {
-            let lines: Vec<(&str, [u8; 4])> = vec![(label, label_fg)];
+            let lines: Vec<(&str, [u8; 4])> = vec![(*label, label_fg)];
             font::render_lines_fitted(&lines, label_bg, label_area_w)
         })
         .collect();
@@ -1136,20 +1143,22 @@ fn render_mismatched_montage(
     let panel_h = panels[0].height();
 
     // Label sizing: fit longest label within cell_w minus padding
-    // "PIXEL DIFF (RESIZED)" is 20 chars — use that as longest
+    // "PIXEL DIFF (RESIZED)" is 20 chars — use that as a floor
     let label_inset = pad;
     let label_area_w = panel_w.saturating_sub(label_inset * 2);
-    let longest_label = 20u32;
+    let expected_text: &str = options.expected_label.as_deref().unwrap_or("EXPECTED");
+    let actual_text: &str = options.actual_label.as_deref().unwrap_or("ACTUAL");
+    let longest_label = expected_text.len().max(actual_text.len()).max(20) as u32;
     let label_char_h = ((label_area_w as f32 / longest_label as f32)
         * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
         .floor() as u32;
     let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
-    let plain_labels = ["EXPECTED", "ACTUAL", "PIXEL DIFF"];
+    let plain_labels: [&str; 3] = [expected_text, actual_text, "PIXEL DIFF"];
     let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
         .iter()
         .map(|label| {
-            let lines: Vec<(&str, [u8; 4])> = vec![(label, label_fg)];
+            let lines: Vec<(&str, [u8; 4])> = vec![(*label, label_fg)];
             font::render_lines_fitted(&lines, label_bg, label_area_w)
         })
         .collect();
@@ -1535,6 +1544,7 @@ fn draw_rect_border(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color
 /// let opts = MontageOptions::default();
 /// let custom = MontageOptions { amplification: 50, ..Default::default() };
 /// ```
+#[derive(Debug, Clone)]
 pub struct MontageOptions {
     /// Diff amplification factor (default: 10).
     pub amplification: u8,
@@ -1545,6 +1555,14 @@ pub struct MontageOptions {
     pub min_panel_size: u32,
     /// Spatial heatmap grid dimensions (cols, rows). Default: (3, 3).
     pub spatial_grid: (u32, u32),
+    /// Label for the top-left panel. `None` uses the default `"EXPECTED"`.
+    ///
+    /// Useful for A/B comparisons where "expected/actual" framing doesn't
+    /// fit: set both labels explicitly (e.g., `"ORIG"` / `"DEFAULT"`). Longer
+    /// labels than `"PIXEL DIFF"` (10 chars) are auto-sized down.
+    pub expected_label: Option<String>,
+    /// Label for the top-right panel. `None` uses the default `"ACTUAL"`.
+    pub actual_label: Option<String>,
 }
 
 impl Default for MontageOptions {
@@ -1554,6 +1572,8 @@ impl Default for MontageOptions {
             gap: 2,
             min_panel_size: DEFAULT_MIN_PANEL_SIZE,
             spatial_grid: (3, 3),
+            expected_label: None,
+            actual_label: None,
         }
     }
 }
