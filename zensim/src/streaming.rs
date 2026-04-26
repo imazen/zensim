@@ -593,15 +593,29 @@ pub(crate) fn compute_multiscale_stats_streaming(
 pub(crate) fn convert_source_to_xyb(
     source: &impl ImageSource,
     padded_width: usize,
-    #[allow(unused_variables)] parallel: bool,
+    parallel: bool,
 ) -> [Vec<f32>; 3] {
-    let width = source.width();
     let height = source.height();
     let n = padded_width * height;
     let mut planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    convert_source_to_xyb_into(source, &mut planes, padded_width, parallel);
+    planes
+}
+
+/// Like [`convert_source_to_xyb`], but writes into pre-allocated planes
+/// instead of allocating new ones. Each plane must have at least
+/// `padded_width * source.height()` elements.
+pub(crate) fn convert_source_to_xyb_into(
+    source: &impl ImageSource,
+    planes: &mut [Vec<f32>; 3],
+    padded_width: usize,
+    #[allow(unused_variables)] parallel: bool,
+) {
+    let width = source.width();
+    let height = source.height();
 
     let chunk_rows = 64;
-    let [ref mut p0, ref mut p1, ref mut p2] = planes;
+    let [ref mut p0, ref mut p1, ref mut p2] = *planes;
     let p0_chunks: Vec<&mut [f32]> = p0.chunks_mut(chunk_rows * padded_width).collect();
     let p1_chunks: Vec<&mut [f32]> = p1.chunks_mut(chunk_rows * padded_width).collect();
     let p2_chunks: Vec<&mut [f32]> = p2.chunks_mut(chunk_rows * padded_width).collect();
@@ -922,8 +936,6 @@ pub(crate) fn convert_source_to_xyb(
             .enumerate()
             .for_each(|args| process_chunk(args));
     }
-
-    planes
 }
 
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
@@ -1492,23 +1504,85 @@ impl PrecomputedReference {
         let width = source.width();
         let height = source.height();
         let padded_width = simd_padded_width(width);
-        let mut planes = convert_source_to_xyb(source, padded_width, parallel);
+        Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
+            convert_source_to_xyb_into(source, scale0, padded_width, parallel);
+        })
+    }
 
-        let mut scales = Vec::with_capacity(num_scales);
+    /// Allocate scale buffers up front and fill them via `fill_scale0`, then
+    /// downscale level by level. This avoids the working-buffer + clone
+    /// pattern (which at 4K cost 99 MB of throwaway alloc + 4 clones totalling
+    /// 131 MB of memcpy and a blocking munmap on drop).
+    fn build_from_dims(
+        num_scales: usize,
+        padded_width: usize,
+        height: usize,
+        parallel: bool,
+        fill_scale0: impl FnOnce(&mut [Vec<f32>; 3]),
+    ) -> Self {
+        // Compute scale dimensions up front (powers-of-2 down)
+        let mut dims = Vec::with_capacity(num_scales);
         let mut w = padded_width;
         let mut h = height;
-
-        for scale in 0..num_scales {
+        for _ in 0..num_scales {
             if w < 8 || h < 8 {
                 break;
             }
+            dims.push((w, h));
+            w /= 2;
+            h /= 2;
+        }
 
-            scales.push((planes.clone(), w, h));
+        // Allocate ALL scale buffers up front. vec![0.0; n] hits the calloc
+        // fast path (zero-COW pages on Linux), so this is cheap even for the
+        // total 132 MB working set at 4K.
+        let mut scales: Vec<([Vec<f32>; 3], usize, usize)> = dims
+            .iter()
+            .map(|&(sw, sh)| {
+                let n = sw * sh;
+                ([vec![0.0; n], vec![0.0; n], vec![0.0; n]], sw, sh)
+            })
+            .collect();
 
-            if scale < num_scales - 1 {
-                let (nw, nh) = downscale_3_planes(&mut planes, w, h, parallel);
-                w = nw;
-                h = nh;
+        // Fill scale 0 directly from the caller (no working buffer).
+        fill_scale0(&mut scales[0].0);
+
+        // Downscale scale[i-1] -> scale[i] out of place. We need the previous
+        // scale's data to remain owned, so use the _into variant.
+        for i in 1..scales.len() {
+            let prev_w = scales[i - 1].1;
+            let (new_w, new_h) = (scales[i].1, scales[i].2);
+            let (lo, hi) = scales.split_at_mut(i);
+            let src = &lo[i - 1].0;
+            let dst = &mut hi[0].0;
+            let [ref mut d0, ref mut d1, ref mut d2] = *dst;
+            #[cfg(feature = "threads")]
+            if parallel {
+                let _ = maybe_join(
+                    true,
+                    || crate::blur::downscale_2x_into(&src[0], prev_w, d0, new_w, new_h),
+                    || {
+                        maybe_join(
+                            true,
+                            || {
+                                crate::blur::downscale_2x_into(&src[1], prev_w, d1, new_w, new_h)
+                            },
+                            || {
+                                crate::blur::downscale_2x_into(&src[2], prev_w, d2, new_w, new_h)
+                            },
+                        );
+                    },
+                );
+            } else {
+                crate::blur::downscale_2x_into(&src[0], prev_w, d0, new_w, new_h);
+                crate::blur::downscale_2x_into(&src[1], prev_w, d1, new_w, new_h);
+                crate::blur::downscale_2x_into(&src[2], prev_w, d2, new_w, new_h);
+            }
+            #[cfg(not(feature = "threads"))]
+            {
+                crate::blur::downscale_2x_into(&src[0], prev_w, d0, new_w, new_h);
+                crate::blur::downscale_2x_into(&src[1], prev_w, d1, new_w, new_h);
+                crate::blur::downscale_2x_into(&src[2], prev_w, d2, new_w, new_h);
             }
         }
 
@@ -1529,27 +1603,9 @@ impl PrecomputedReference {
         parallel: bool,
     ) -> Self {
         let padded_width = simd_padded_width(width);
-        let mut xyb = convert_linear_planar_to_xyb(planes, width, height, stride, padded_width);
-
-        let mut scales = Vec::with_capacity(num_scales);
-        let mut w = padded_width;
-        let mut h = height;
-
-        for scale in 0..num_scales {
-            if w < 8 || h < 8 {
-                break;
-            }
-
-            scales.push((xyb.clone(), w, h));
-
-            if scale < num_scales - 1 {
-                let (nw, nh) = downscale_3_planes(&mut xyb, w, h, parallel);
-                w = nw;
-                h = nh;
-            }
-        }
-
-        Self { scales }
+        Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
+            convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, scale0);
+        })
     }
 }
 
@@ -1565,17 +1621,30 @@ pub(crate) fn convert_linear_planar_to_xyb(
     stride: usize,
     padded_width: usize,
 ) -> [Vec<f32>; 3] {
-    use crate::color::linear_to_positive_xyb_planar_into;
-
     let n = padded_width * height;
     let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, &mut out);
+    out
+}
+
+/// Like [`convert_linear_planar_to_xyb`] but writes into pre-allocated planes
+/// (each at least `padded_width * height` elements).
+pub(crate) fn convert_linear_planar_to_xyb_into(
+    planes: [&[f32]; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+    padded_width: usize,
+    out: &mut [Vec<f32>; 3],
+) {
+    use crate::color::linear_to_positive_xyb_planar_into;
 
     // Pack planar → interleaved [f32; 3] per row, then convert to XYB.
     // The per-row buffer fits in L1 cache (~12KB for 1024px).
     let mut rgb_row: Vec<[f32; 3]> = vec![[0.0; 3]; width];
 
     // Destructure for independent mutable borrows
-    let [ref mut o0, ref mut o1, ref mut o2] = out;
+    let [ref mut o0, ref mut o1, ref mut o2] = *out;
 
     for y in 0..height {
         let row_off = y * stride;
@@ -1620,8 +1689,6 @@ pub(crate) fn convert_linear_planar_to_xyb(
             }
         }
     }
-
-    out
 }
 
 /// Streaming multi-scale stats using a precomputed reference.

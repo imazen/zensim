@@ -1821,6 +1821,25 @@ fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
     );
 }
 
+/// Out-of-place 2× downscale: read from `src` (`src_w × src_h`), write to
+/// `dst` (`new_w × new_h` where `new_w = src_w / 2`, `new_h = src_h / 2`).
+///
+/// Compared to [`downscale_2x_inplace`] this avoids reading and writing the
+/// same buffer — useful when callers want to keep the source data alive
+/// (e.g. multi-scale pyramid construction with all levels owned).
+pub fn downscale_2x_into(
+    src: &[f32],
+    src_w: usize,
+    dst: &mut [f32],
+    new_w: usize,
+    new_h: usize,
+) {
+    incant!(
+        downscale_2x_into_inner(src, src_w, dst, new_w, new_h),
+        [v4, v3, neon, wasm128, scalar]
+    );
+}
+
 /// AVX-512 downscale: process 16 output pixels per iteration.
 #[cfg(target_arch = "x86_64")]
 #[arcane]
@@ -1948,6 +1967,141 @@ fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usiz
             plane[out_row + x] =
                 (plane[row0 + sx] + plane[row0 + sx + 1] + plane[row1 + sx] + plane[row1 + sx + 1])
                     * 0.25;
+        }
+    }
+}
+
+// ─── Out-of-place 2× downscale (separate src and dst slices) ─────────────
+
+/// AVX-512 out-of-place downscale: 16 output pixels per iteration.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn downscale_2x_into_inner_v4(
+    token: archmage::X64V4Token,
+    src: &[f32],
+    src_w: usize,
+    dst: &mut [f32],
+    new_w: usize,
+    new_h: usize,
+) {
+    let quarter = f32x16::splat(token, 0.25);
+    let v3 = token.v3();
+    let quarter8 = f32x8::splat(v3, 0.25);
+
+    for y in 0..new_h {
+        let row0 = y * 2 * src_w;
+        let row1 = row0 + src_w;
+        let out_row = y * new_w;
+
+        let chunks16 = new_w / 16;
+        for chunk in 0..chunks16 {
+            let ox = chunk * 16;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 16];
+            for i in 0..16 {
+                let s = sx + i * 2;
+                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+            }
+            let result = f32x16::from_array(token, arr) * quarter;
+            dst[out_row + ox..][..16].copy_from_slice(&result.to_array());
+        }
+
+        let base8 = chunks16 * 16;
+        let chunks8 = (new_w - base8) / 8;
+        for chunk in 0..chunks8 {
+            let ox = base8 + chunk * 8;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
+                let s = sx + i * 2;
+                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+            }
+            let result = f32x8::from_array(v3, arr) * quarter8;
+            dst[out_row + ox..][..8].copy_from_slice(&result.to_array());
+        }
+
+        for x in (base8 + chunks8 * 8)..new_w {
+            let sx = x * 2;
+            dst[out_row + x] =
+                (src[row0 + sx] + src[row0 + sx + 1] + src[row1 + sx] + src[row1 + sx + 1]) * 0.25;
+        }
+    }
+}
+
+/// AVX2 out-of-place downscale: 8 output pixels per iteration.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn downscale_2x_into_inner_v3(
+    token: archmage::X64V3Token,
+    src: &[f32],
+    src_w: usize,
+    dst: &mut [f32],
+    new_w: usize,
+    new_h: usize,
+) {
+    let quarter = f32x8::splat(token, 0.25);
+
+    for y in 0..new_h {
+        let row0 = y * 2 * src_w;
+        let row1 = row0 + src_w;
+        let out_row = y * new_w;
+
+        let chunks8 = new_w / 8;
+        for chunk in 0..chunks8 {
+            let ox = chunk * 8;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
+                let s = sx + i * 2;
+                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+            }
+            let result = f32x8::from_array(token, arr) * quarter;
+            dst[out_row + ox..][..8].copy_from_slice(&result.to_array());
+        }
+
+        for x in (chunks8 * 8)..new_w {
+            let sx = x * 2;
+            dst[out_row + x] =
+                (src[row0 + sx] + src[row0 + sx + 1] + src[row1 + sx] + src[row1 + sx + 1]) * 0.25;
+        }
+    }
+}
+
+#[magetypes(neon, wasm128, scalar)]
+fn downscale_2x_into_inner(
+    token: Token,
+    src: &[f32],
+    src_w: usize,
+    dst: &mut [f32],
+    new_w: usize,
+    new_h: usize,
+) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
+    let quarter = f32x8::splat(token, 0.25);
+
+    for y in 0..new_h {
+        let row0 = y * 2 * src_w;
+        let row1 = row0 + src_w;
+        let out_row = y * new_w;
+
+        let chunks8 = new_w / 8;
+        for chunk in 0..chunks8 {
+            let ox = chunk * 8;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
+                let s = sx + i * 2;
+                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+            }
+            let result = f32x8::from_array(token, arr) * quarter;
+            dst[out_row + ox..][..8].copy_from_slice(&result.to_array());
+        }
+
+        for x in (chunks8 * 8)..new_w {
+            let sx = x * 2;
+            dst[out_row + x] =
+                (src[row0 + sx] + src[row0 + sx + 1] + src[row1 + sx] + src[row1 + sx + 1]) * 0.25;
         }
     }
 }
