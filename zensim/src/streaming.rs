@@ -88,35 +88,6 @@ fn downscale_6_planes(
     nw_nh
 }
 
-/// Upsample a 2D buffer by 2x (nearest-neighbor) and add to `dst` with a weight.
-///
-/// `src` is `src_w × src_h` elements (row-major), `dst` is `dst_w × dst_h` elements.
-/// Each source pixel maps to a 2×2 block in the destination.
-/// Handles edge cases where `dst` dimensions are odd (2*src_w-1 or 2*src_h-1).
-fn upsample_2x_add(
-    src: &[f32],
-    src_w: usize,
-    src_h: usize,
-    dst: &mut [f32],
-    dst_w: usize,
-    dst_h: usize,
-    weight: f32,
-) {
-    for sy in 0..src_h {
-        let src_row = &src[sy * src_w..(sy + 1) * src_w];
-        let dy0 = sy * 2;
-        // Write to even row
-        if dy0 < dst_h {
-            upsample_row_2x(src_row, &mut dst[dy0 * dst_w..(dy0 + 1) * dst_w], weight);
-        }
-        // Write same values to odd row (nearest-neighbor vertical duplication)
-        let dy1 = dy0 + 1;
-        if dy1 < dst_h {
-            upsample_row_2x(src_row, &mut dst[dy1 * dst_w..(dy1 + 1) * dst_w], weight);
-        }
-    }
-}
-
 /// Weighted add: `dst[i] += src[i] * weight`. Auto-vectorized across architectures.
 #[autoversion]
 fn weighted_add(dst: &mut [f32], src: &[f32], weight: f32) {
@@ -192,19 +163,68 @@ fn diffmap_accum_hf(
     }
 }
 
-/// Upsample one source row to two destination rows (nearest-neighbor 2×).
-/// Each source pixel duplicates to a 1×2 horizontal pair in the destination row.
-#[autoversion]
-fn upsample_row_2x(src_row: &[f32], dst_row: &mut [f32], weight: f32) {
-    let dst_len = dst_row.len();
-    for (i, &s) in src_row.iter().enumerate() {
-        let v = s * weight;
-        let dx = i * 2;
-        if dx < dst_len {
-            dst_row[dx] += v;
+/// Nearest-neighbor power-of-2 upsample with weighted accumulation into `dst`,
+/// in a single pass. Replaces the chain of `upsample_2x → clone → upsample_2x`
+/// used during diffmap multi-scale fusion. Each src pixel covers a
+/// `factor × factor` block in dst, scaled by `weight`, added to existing dst.
+///
+/// `factor = 1 << scale_levels`. When `factor == 1`, this is row-by-row
+/// `weighted_add`.
+fn upsample_pow2x_add(
+    src: &[f32],
+    src_w: usize,
+    src_h: usize,
+    dst: &mut [f32],
+    dst_w: usize,
+    dst_h: usize,
+    factor: usize,
+    weight: f32,
+) {
+    if factor == 1 {
+        let copy_w = src_w.min(dst_w);
+        let copy_h = src_h.min(dst_h);
+        for y in 0..copy_h {
+            weighted_add(
+                &mut dst[y * dst_w..y * dst_w + copy_w],
+                &src[y * src_w..y * src_w + copy_w],
+                weight,
+            );
         }
-        if dx + 1 < dst_len {
-            dst_row[dx + 1] += v;
+        return;
+    }
+
+    for sy in 0..src_h {
+        let dy_start = sy * factor;
+        if dy_start >= dst_h {
+            break;
+        }
+        let dy_end = (dy_start + factor).min(dst_h);
+        let src_row = &src[sy * src_w..(sy + 1) * src_w];
+        let copy_w = (src_w * factor).min(dst_w);
+
+        for dy in dy_start..dy_end {
+            let dst_row = &mut dst[dy * dst_w..dy * dst_w + copy_w];
+            upsample_row_powx_add(src_row, dst_row, factor, weight);
+        }
+    }
+}
+
+/// Helper: accumulate `src[i] * weight` replicated `factor` times into `dst`.
+/// `factor` is small (typically 2, 4, 8) and known at the SIMD-version
+/// inlining boundary.
+#[autoversion]
+fn upsample_row_powx_add(src_row: &[f32], dst_row: &mut [f32], factor: usize, weight: f32) {
+    let dst_len = dst_row.len();
+    let mut di = 0;
+    for &s in src_row {
+        let v = s * weight;
+        let end = (di + factor).min(dst_len);
+        for x in di..end {
+            dst_row[x] += v;
+        }
+        di += factor;
+        if di >= dst_len {
+            break;
         }
     }
 }
@@ -1837,42 +1857,10 @@ fn compute_diffmap_from_xyb(
         if blend <= 0.0 {
             continue;
         }
-        if scale == 0 {
-            // Scale 0 is already at full resolution — just add weighted
-            weighted_add(&mut fused, dm, blend);
-        } else {
-            // Upsample coarser scale back to full resolution
-            // Each scale level is 2x smaller, so upsample `scale` times
-            let mut current = dm.clone();
-            let mut cw = *dm_w;
-            let mut ch = *dm_h;
-            for _ in 0..scale {
-                let tw = (cw * 2).min(full_w);
-                let th = (ch * 2).min(full_h);
-                let mut upsampled = vec![0.0f32; tw * th];
-                upsample_2x_add(&current, cw, ch, &mut upsampled, tw, th, 1.0);
-                current = upsampled;
-                cw = tw;
-                ch = th;
-            }
-            // Add to fused (dimensions should match or be close)
-            let copy_w = cw.min(full_w);
-            let copy_h = ch.min(full_h);
-            if cw == full_w {
-                // Same stride — single contiguous weighted_add
-                let n = copy_h * copy_w;
-                weighted_add(&mut fused[..n], &current[..n], blend);
-            } else {
-                // Different strides — row-by-row weighted_add
-                for y in 0..copy_h {
-                    weighted_add(
-                        &mut fused[y * full_w..y * full_w + copy_w],
-                        &current[y * cw..y * cw + copy_w],
-                        blend,
-                    );
-                }
-            }
-        }
+        // factor = 2^scale: scale 0 is identity (no upsample), scale s replicates each
+        // src pixel into a (2^s) × (2^s) block.
+        let factor = 1usize << scale;
+        upsample_pow2x_add(dm, *dm_w, *dm_h, &mut fused, full_w, full_h, factor, blend);
     }
 
     let result = combine_scores(&stats, weights, config, mean_offset);
