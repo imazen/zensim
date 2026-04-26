@@ -42,3 +42,7 @@ zenbench = { workspace = true }
 [[bench]]
 name = "bench_mismatch"
 harness = false
+
+[[bench]]
+name = "bench_color_diffmap"
+harness = false
