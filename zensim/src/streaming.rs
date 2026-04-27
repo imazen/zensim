@@ -1499,6 +1499,30 @@ fn process_scale_bands(
     (accum.finalize(), diffmap)
 }
 
+/// Reusable scratch buffers for [`Zensim::compute_with_ref_into`].
+///
+/// Designed for encoder quantization loops that call `compute_with_ref` many
+/// times against the same precomputed reference. Holds the distorted-side
+/// XYB plane allocation across calls so it isn't freed and reallocated each
+/// iteration.
+///
+/// At 1920×1080 the per-call dst plane allocation is ~25 MB; at 3840×2160
+/// it is ~99 MB. Reusing the allocation skips the kernel page-fault commit
+/// on subsequent calls.
+#[derive(Default)]
+pub struct ZensimScratch {
+    pub(crate) dst_planes: [Vec<f32>; 3],
+}
+
+impl ZensimScratch {
+    /// Create an empty scratch. The first call to `compute_with_ref_into`
+    /// will allocate buffers sized for the distorted image; subsequent
+    /// calls grow the buffers if necessary or reuse them in place.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Pre-computed reference image data for batch comparison against multiple distorted images.
 ///
 /// Caches the reference image's XYB color-space planes and downscale pyramid so that
@@ -1725,17 +1749,54 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = simd_padded_width(width);
+    let n = padded_width * height;
+    let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    let result = compute_multiscale_stats_streaming_with_ref_borrowed(
+        precomputed,
+        distorted,
+        &mut dst_planes,
+        config,
+        weights,
+    );
+    #[cfg(feature = "threads")]
+    dealloc_planes(dst_planes, None);
+    #[cfg(not(feature = "threads"))]
+    drop(dst_planes);
+    result
+}
+
+/// Like [`compute_multiscale_stats_streaming_with_ref`] but borrows
+/// `dst_planes` from the caller. The Vecs are resized to `padded_width *
+/// height` (preserving capacity if it already fits) and reused — no
+/// per-call allocation. After return they hold the smallest-scale data.
+pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
+    precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource,
+    dst_planes: &mut [Vec<f32>; 3],
+    config: &ZensimConfig,
+    weights: &[f64],
+) -> (Vec<ScaleStats>, [f64; 3]) {
+    let width = distorted.width();
+    let height = distorted.height();
+    let padded_width = simd_padded_width(width);
     let num_scales = config.num_scales.min(precomputed.scales.len());
-
     let parallel = config.allow_multithreading;
+    let n = padded_width * height;
 
-    // Only convert distorted to XYB
-    let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
+    // Ensure each plane has exactly `n` elements. Existing capacity is reused.
+    for p in dst_planes.iter_mut() {
+        if p.len() < n {
+            p.resize(n, 0.0);
+        } else {
+            p.truncate(n);
+        }
+    }
 
-    // Compute mean_offset using scale-0 reference planes and fresh distorted planes
+    convert_source_to_xyb_into(distorted, dst_planes, padded_width, parallel);
+
     let (ref src_planes_s0, _, _) = precomputed.scales[0];
     let mean_offset =
-        compute_xyb_mean_offset(src_planes_s0, &dst_planes, width, height, padded_width);
+        compute_xyb_mean_offset(src_planes_s0, dst_planes, width, height, padded_width);
 
     let mut stats = Vec::with_capacity(num_scales);
     let mut w = padded_width;
@@ -1751,21 +1812,15 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
         debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
 
         let (scale_stat, _) =
-            process_scale_bands(src_planes, &dst_planes, w, h, config, scale, weights, None);
+            process_scale_bands(src_planes, dst_planes, w, h, config, scale, weights, None);
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {
-            let (nw, nh) = downscale_3_planes(&mut dst_planes, w, h, parallel);
+            let (nw, nh) = downscale_3_planes(dst_planes, w, h, parallel);
             w = nw;
             h = nh;
         }
     }
-
-    // Background deallocation for distorted planes
-    #[cfg(feature = "threads")]
-    dealloc_planes(dst_planes, None);
-    #[cfg(not(feature = "threads"))]
-    drop(dst_planes);
 
     (stats, mean_offset)
 }

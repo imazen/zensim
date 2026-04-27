@@ -859,6 +859,41 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+    /// Compare against a precomputed reference, reusing caller-owned scratch
+    /// buffers. Designed for encoder quantization loops that compare many
+    /// distorted candidates against the same reference: the per-call XYB
+    /// plane allocation (which can be ~25 MB at 1080p, ~99 MB at 4K) is
+    /// kept alive across calls instead of being freed and reallocated.
+    ///
+    /// The first call costs the same as [`compute_with_ref`]; subsequent
+    /// calls skip the allocation and the OS page-fault commit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    pub fn compute_with_ref_into(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        scratch: &mut crate::streaming::ZensimScratch,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        if distorted.width() < 8 || distorted.height() < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        let config = config_from_params(params, self.parallel);
+        let (stats, mean_offset) =
+            crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
+                precomputed,
+                distorted,
+                &mut scratch.dst_planes,
+                &config,
+                params.weights,
+            );
+        let result = combine_scores(&stats, params.weights, &config, mean_offset);
+        Ok(result.with_profile(self.profile))
+    }
+
     /// Precompute reference from planar linear RGB f32 data.
     ///
     /// `planes` are `[R, G, B]`, each with at least `stride * height` elements.

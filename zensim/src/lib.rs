@@ -151,7 +151,7 @@ pub use source::{
 };
 
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
-pub use streaming::PrecomputedReference;
+pub use streaming::{PrecomputedReference, ZensimScratch};
 
 /// Training/research API — requires `features = ["training"]`.
 ///
