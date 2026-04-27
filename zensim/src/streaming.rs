@@ -1569,7 +1569,7 @@ impl PrecomputedReference {
         num_scales: usize,
         padded_width: usize,
         height: usize,
-        parallel: bool,
+        #[allow(unused_variables)] parallel: bool,
         fill_scale0: impl FnOnce(&mut [Vec<f32>; 3]),
     ) -> Self {
         // Compute scale dimensions up front (powers-of-2 down)
