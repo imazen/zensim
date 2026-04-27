@@ -1834,7 +1834,10 @@ pub fn downscale_2x_into(
     new_w: usize,
     new_h: usize,
 ) {
-    incant!(downscale_2x_into_inner(src, src_w, dst, new_w, new_h));
+    incant!(
+        downscale_2x_into_inner(src, src_w, dst, new_w, new_h),
+        [v4x, v4, v3, neon, wasm128, scalar]
+    );
 }
 
 /// AVX-512 downscale: process 16 output pixels per iteration.
@@ -1970,15 +1973,28 @@ fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usiz
 
 // ─── Out-of-place 2× downscale (separate src and dst slices) ─────────────
 //
-// Single magetypes-generic body covers v4 / v3 / neon / wasm128 / scalar.
-// On AVX-512 the f32x16 path is native; on AVX2 it's a polyfill of 2× f32x8
-// (giving 2-way ILP without manual unroll); on NEON / WASM SIMD128 it's a
-// polyfill of 4× 128-bit ops; the scalar tier degenerates to a tight loop.
+// Two magetypes blocks — each tier uses its native SIMD width, so we get
+// hand-tuned-per-tier perf without duplicating bodies via #[arcane]:
+//   - v4 / v4x (AVX-512 family): f32x16 native body, 16 outputs per inner iter
+//   - v3 / neon / wasm128 / scalar: f32x8 native body, 8 outputs per inner iter
+// Both blocks emit the same base name `downscale_2x_into_inner`; the
+// suffixed variants have disjoint tier sets, so `incant!` resolves cleanly.
 
-// Single magetypes-generic body with `define(f32x16)` for the lane type
-// alias. On AVX-512 the f32x16 path is native; on AVX2 it polyfills to
-// 2× f32x8 (giving 2-way ILP); on NEON / WASM SIMD128 it's 4× 128-bit ops.
-#[magetypes(define(f32x16), v4, v3, neon, wasm128, scalar)]
+// Tier-natural SIMD widths: AVX-512 wants f32x16, AVX2 wants f32x8 native.
+// We'd ideally express this as two `#[magetypes]` blocks (v4/v4x f32x16 and
+// v3/neon/wasm128 f32x8), but the magetypes resolver auto-appends a `_scalar`
+// variant to any block that doesn't list `scalar` or `default`, which makes
+// both blocks emit `_scalar` and collide. There's no `-scalar` / `no_scalar`
+// flag in 0.9.22. Tracking issue: imazen/archmage (this comment can be
+// removed once magetypes adds opt-out).
+//
+// Workaround (Pattern C from the magetypes README): one #[magetypes] block
+// for v4/v4x/neon/wasm128/scalar with f32x16 body, plus a standalone
+// `#[arcane]` for v3 with the hand-tuned f32x8 body. `incant!` resolves
+// suffixes uniformly. Same per-tier-natural-width perf as 4 hand-tuned
+// `#[arcane]` variants, but only the v3 path is hand-written.
+
+#[magetypes(define(f32x16), v4, v4x, neon, wasm128, scalar)]
 fn downscale_2x_into_inner(
     token: Token,
     src: &[f32],
@@ -2008,6 +2024,44 @@ fn downscale_2x_into_inner(
         }
 
         for x in (chunks16 * 16)..new_w {
+            let sx = x * 2;
+            dst[out_row + x] =
+                (src[row0 + sx] + src[row0 + sx + 1] + src[row1 + sx] + src[row1 + sx + 1]) * 0.25;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn downscale_2x_into_inner_v3(
+    token: archmage::X64V3Token,
+    src: &[f32],
+    src_w: usize,
+    dst: &mut [f32],
+    new_w: usize,
+    new_h: usize,
+) {
+    let quarter = f32x8::splat(token, 0.25);
+
+    for y in 0..new_h {
+        let row0 = y * 2 * src_w;
+        let row1 = row0 + src_w;
+        let out_row = y * new_w;
+
+        let chunks8 = new_w / 8;
+        for chunk in 0..chunks8 {
+            let ox = chunk * 8;
+            let sx = ox * 2;
+            let mut arr = [0.0f32; 8];
+            for i in 0..8 {
+                let s = sx + i * 2;
+                arr[i] = src[row0 + s] + src[row0 + s + 1] + src[row1 + s] + src[row1 + s + 1];
+            }
+            let result = f32x8::from_array(token, arr) * quarter;
+            dst[out_row + ox..][..8].copy_from_slice(&result.to_array());
+        }
+
+        for x in (chunks8 * 8)..new_w {
             let sx = x * 2;
             dst[out_row + x] =
                 (src[row0 + sx] + src[row0 + sx + 1] + src[row1 + sx] + src[row1 + sx + 1]) * 0.25;
