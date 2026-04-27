@@ -1980,21 +1980,15 @@ fn downscale_2x_inner(token: Token, plane: &mut [f32], width: usize, new_w: usiz
 // Both blocks emit the same base name `downscale_2x_into_inner`; the
 // suffixed variants have disjoint tier sets, so `incant!` resolves cleanly.
 
-// Tier-natural SIMD widths: AVX-512 wants f32x16, AVX2 wants f32x8 native.
-// We'd ideally express this as two `#[magetypes]` blocks (v4/v4x f32x16 and
-// v3/neon/wasm128 f32x8), but the magetypes resolver auto-appends a `_scalar`
-// variant to any block that doesn't list `scalar` or `default`, which makes
-// both blocks emit `_scalar` and collide. There's no `-scalar` / `no_scalar`
-// flag in 0.9.22. Tracking issue: imazen/archmage (this comment can be
-// removed once magetypes adds opt-out).
-//
-// Workaround (Pattern C from the magetypes README): one #[magetypes] block
-// for v4/v4x/neon/wasm128/scalar with f32x16 body, plus a standalone
-// `#[arcane]` for v3 with the hand-tuned f32x8 body. `incant!` resolves
-// suffixes uniformly. Same per-tier-natural-width perf as 4 hand-tuned
-// `#[arcane]` variants, but only the v3 path is hand-written.
+// Tier-natural SIMD widths via two #[magetypes] blocks: AVX-512 family
+// uses f32x16 native; everything else uses f32x8 (native on AVX2 / NEON
+// polyfilled to 2× / WASM SIMD128 polyfilled to 2×). The first block uses
+// additive-mode (`+v4, +v4x, -v3, -neon, -wasm128, -scalar`) to leave only
+// the AVX-512 tiers and explicitly drop the auto-scalar fallback —
+// requires magetypes >= 0.9.23, which honors `-scalar` removal.
+// The second block emits the `_scalar` fallback for everyone else.
 
-#[magetypes(define(f32x16), v4, v4x, neon, wasm128, scalar)]
+#[magetypes(define(f32x16), +v4, +v4x, -v3, -neon, -wasm128, -scalar)]
 fn downscale_2x_into_inner(
     token: Token,
     src: &[f32],
@@ -2031,10 +2025,9 @@ fn downscale_2x_into_inner(
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn downscale_2x_into_inner_v3(
-    token: archmage::X64V3Token,
+#[magetypes(define(f32x8), v3, neon, wasm128, scalar)]
+fn downscale_2x_into_inner(
+    token: Token,
     src: &[f32],
     src_w: usize,
     dst: &mut [f32],
