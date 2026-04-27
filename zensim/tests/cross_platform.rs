@@ -83,16 +83,19 @@ fn hardcoded_reference_scores() {
 
     // Reference scores with concordant-trained weights (228 weights, SROCC=0.9942).
     // Uses linear-srgb crate (C0-continuous constants) for sRGB linearization.
+    // Cube root via magetypes::cbrt_midp (3 ULP, 2 Halley) since 0038bc36;
+    // values shifted from the prior hand-rolled cbrt by ≤1e-2 absolute /
+    // ≤2e-4 relative (different Kahan magic constant, identical algorithm).
     #[allow(clippy::excessive_precision)]
     let expected: &[(&str, f64)] = &[
-        ("checkerboard+blur", -79.872_537_867_843_306),
-        ("checkerboard+sharpen", 29.587_543_251_423_142),
-        ("mandelbrot+blur", 8.478_409_174_126_597),
-        ("mandelbrot+color_shift", 48.138_848_249_261_251),
-        ("noise+blur", 60.015_600_223_264_798),
-        ("noise+block_artifacts", 52.799_117_798_200_086),
-        ("color_blocks+color_shift", 30.398_914_843_637_783),
-        ("color_blocks+sharpen", -5.656_076_020_014_737),
+        ("checkerboard+blur", -79.872_577_454_381_457),
+        ("checkerboard+sharpen", 29.588_149_295_371_096),
+        ("mandelbrot+blur", 8.479_272_203_622_543),
+        ("mandelbrot+color_shift", 48.143_677_644_353_694),
+        ("noise+blur", 60.014_996_187_146_878),
+        ("noise+block_artifacts", 52.798_793_807_864_449),
+        ("color_blocks+color_shift", 30.389_337_020_934_434),
+        ("color_blocks+sharpen", -5.661_428_862_086_183),
     ];
 
     let mut failures = Vec::new();
