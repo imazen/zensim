@@ -6,7 +6,7 @@
 //! - [`LabelStyle::segmented_strip`] — multiple [`LabelSegment`]s,
 //!   each aligned independently within the same strip via [`Layers`].
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::color::{Color, rgb};
 use super::geom::{HAlign, Insets, Rect, Size, VAlign};
@@ -235,7 +235,7 @@ pub(super) fn paint_segmented_strip(
     segments: &[LabelSegment],
     style: &LabelStyle,
     rect: Rect,
-    canvas: &mut RgbaImage,
+    canvas: &mut Bitmap,
 ) {
     fill_rect(canvas, rect, style.bg);
 
@@ -258,7 +258,7 @@ pub(super) fn paint_segmented_strip(
     }
 
     // Rasterize each segment once so we have actual widths.
-    let mut rasters: Vec<(LabelSegment, RgbaImage)> = Vec::with_capacity(segments.len());
+    let mut rasters: Vec<(LabelSegment, Bitmap)> = Vec::with_capacity(segments.len());
     for seg in segments {
         // Per-segment char_h overrides take precedence; cap at the
         // shared char_h derived from the strip's geometry so all
@@ -269,7 +269,7 @@ pub(super) fn paint_segmented_strip(
         if w == 0 || glyph_h == 0 {
             continue;
         }
-        let Some(img) = RgbaImage::from_raw(w, glyph_h, buf) else {
+        let Some(img) = Bitmap::from_raw(w, glyph_h, buf) else {
             continue;
         };
         rasters.push((seg.clone(), img));
@@ -295,7 +295,7 @@ pub(super) fn paint_segmented_strip(
     let typo_shift = ((char_h as f32) * font::TYPO_CAP_MID_OFFSET).round() as u32;
     let baseline_y = inner.y + (inner.h.saturating_sub(char_h)) / 2 + typo_shift;
 
-    let place_group = |g: usize, x_start: u32, canvas: &mut RgbaImage| {
+    let place_group = |g: usize, x_start: u32, canvas: &mut Bitmap| {
         let mut x = x_start;
         let mut first = true;
         for &i in &group_segs[g] {
@@ -387,20 +387,15 @@ mod tests {
     use super::super::node::image as image_node;
     use super::super::sizing::SizeRule;
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use crate::pixel_ops::Bitmap;
 
-    fn solid(w: u32, h: u32, c: Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     /// Helpers for SegmentedStrip pixel-level structural tests. Render
     /// a strip + return the canvas for inspection.
-    fn render_seg_strip(
-        segments: Vec<LabelSegment>,
-        style: &LabelStyle,
-        w: u32,
-        h: u32,
-    ) -> RgbaImage {
+    fn render_seg_strip(segments: Vec<LabelSegment>, style: &LabelStyle, w: u32, h: u32) -> Bitmap {
         let n: Node = style
             .segmented_strip(segments)
             .width(SizeRule::Fixed(w))
@@ -409,13 +404,13 @@ mod tests {
     }
 
     /// Find rightmost x at row `y` matching `is_target`.
-    fn rightmost_x(img: &RgbaImage, y: u32, is_target: impl Fn(&[u8; 4]) -> bool) -> Option<u32> {
+    fn rightmost_x(img: &Bitmap, y: u32, is_target: impl Fn(&[u8; 4]) -> bool) -> Option<u32> {
         (0..img.width())
             .rev()
-            .find(|&x| is_target(&img.get_pixel(x, y).0))
+            .find(|&x| is_target(&img.get_pixel(x, y)))
     }
-    fn leftmost_x(img: &RgbaImage, y: u32, is_target: impl Fn(&[u8; 4]) -> bool) -> Option<u32> {
-        (0..img.width()).find(|&x| is_target(&img.get_pixel(x, y).0))
+    fn leftmost_x(img: &Bitmap, y: u32, is_target: impl Fn(&[u8; 4]) -> bool) -> Option<u32> {
+        (0..img.width()).find(|&x| is_target(&img.get_pixel(x, y)))
     }
     fn is_orange(p: &[u8; 4]) -> bool {
         p[0] > 200 && (140..200).contains(&p[1]) && p[2] < 130
@@ -440,7 +435,7 @@ mod tests {
             .label_styled("HELLO", &style)
             .width(SizeRule::Fixed(40))
             .render(40);
-        assert_eq!(canvas.get_pixel(0, 0), &Rgba([100, 0, 0, 255]));
+        assert_eq!(canvas.get_pixel(0, 0), [100, 0, 0, 255]);
     }
 
     #[test]
@@ -459,7 +454,7 @@ mod tests {
         let mut saw_cyan = false;
         for y in 0..canvas.height() {
             for x in 0..canvas.width() {
-                let p = canvas.get_pixel(x, y).0;
+                let p = canvas.get_pixel(x, y);
                 if is_orange(&p) {
                     saw_orange = true;
                 }
@@ -585,7 +580,7 @@ mod tests {
         );
         // Measure orange glyph height — should be > 30 (more than half).
         let orange_ys: Vec<u32> = (0..canvas.height())
-            .filter(|&y| (0..canvas.width()).any(|x| is_orange(&canvas.get_pixel(x, y).0)))
+            .filter(|&y| (0..canvas.width()).any(|x| is_orange(&canvas.get_pixel(x, y))))
             .collect();
         assert!(!orange_ys.is_empty(), "no orange found");
         let glyph_h = orange_ys.last().unwrap() - orange_ys.first().unwrap() + 1;
@@ -692,7 +687,7 @@ mod tests {
             60,
         );
         let orange_ys: Vec<u32> = (0..canvas.height())
-            .filter(|&y| (0..canvas.width()).any(|x| is_orange(&canvas.get_pixel(x, y).0)))
+            .filter(|&y| (0..canvas.width()).any(|x| is_orange(&canvas.get_pixel(x, y))))
             .collect();
         let glyph_top = *orange_ys.first().unwrap();
         let glyph_bot = *orange_ys.last().unwrap();

@@ -3,7 +3,7 @@
 //! [`LayoutMod`] trait that gives every node and builder fluent
 //! modifier methods (`.padding(8)`, `.center()`, `.background(c)`, ...).
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::color::Color;
 use super::geom::{HAlign, Insets, Rect, Size, VAlign};
@@ -130,7 +130,7 @@ pub(super) fn measure_aspect(num: u32, den: u32, child: &Node, max: Size) -> Siz
 
 // ── Per-modifier paint helpers ────────────────────────────────────────
 
-pub(super) fn paint_padded(insets: Insets, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_padded(insets: Insets, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     let inner = Rect::new(
         rect.x.saturating_add(insets.left),
         rect.y.saturating_add(insets.top),
@@ -140,7 +140,7 @@ pub(super) fn paint_padded(insets: Insets, child: &Node, rect: Rect, canvas: &mu
     child.paint(inner, canvas);
 }
 
-pub(super) fn paint_align(h: HAlign, v: VAlign, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_align(h: HAlign, v: VAlign, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     let child_size = child.measure(rect.size());
     let x_off = match h {
         HAlign::Left => 0,
@@ -188,7 +188,7 @@ fn contains_text(node: &Node) -> bool {
     }
 }
 
-pub(super) fn paint_fit(mode: Fit, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_fit(mode: Fit, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     if let Node::Image(img) = child {
         paint::render_image(img, mode, rect, canvas);
     } else {
@@ -196,12 +196,12 @@ pub(super) fn paint_fit(mode: Fit, child: &Node, rect: Rect, canvas: &mut RgbaIm
     }
 }
 
-pub(super) fn paint_background(color: Color, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_background(color: Color, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     paint::fill_rect(canvas, rect, color);
     child.paint(rect, canvas);
 }
 
-pub(super) fn paint_border(color: Color, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_border(color: Color, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     child.paint(rect, canvas);
     paint::draw_rect_border(canvas, rect, color);
 }
@@ -354,9 +354,9 @@ pub trait LayoutMod: Sized {
             .into()
     }
 
-    /// Render this tree into an [`RgbaImage`] of width `max_w`.
+    /// Render this tree into an [`Bitmap`] of width `max_w`.
     /// Convenience for [`super::render`] when chaining off a builder.
-    fn render(self, max_w: u32) -> RgbaImage {
+    fn render(self, max_w: u32) -> Bitmap {
         super::render(&self.into_node(), max_w)
     }
 }
@@ -387,10 +387,10 @@ mod tests {
     use super::super::color::{BLACK, WHITE};
     use super::super::node::{empty, image as image_node};
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use crate::pixel_ops::Bitmap;
 
-    fn solid(w: u32, h: u32, c: Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     #[test]
@@ -429,8 +429,8 @@ mod tests {
             .center()
             .size(100, 60)
             .render(100);
-        assert_eq!(img.get_pixel(50, 30), &Rgba([255, 255, 0, 255]));
-        assert_eq!(img.get_pixel(0, 0), &Rgba(BLACK));
+        assert_eq!(img.get_pixel(50, 30), [255, 255, 0, 255]);
+        assert_eq!(img.get_pixel(0, 0), BLACK);
     }
     #[test]
     fn background_paints_first() {
@@ -438,7 +438,7 @@ mod tests {
             .background([10, 20, 30, 255])
             .size(20, 20)
             .render(20);
-        assert_eq!(img.get_pixel(5, 5), &Rgba([10, 20, 30, 255]));
+        assert_eq!(img.get_pixel(5, 5), [10, 20, 30, 255]);
     }
     #[test]
     fn border_paints_outline() {
@@ -447,9 +447,9 @@ mod tests {
             .border(WHITE)
             .size(10, 10)
             .render(10);
-        assert_eq!(img.get_pixel(0, 0), &Rgba(WHITE));
-        assert_eq!(img.get_pixel(9, 0), &Rgba(WHITE));
-        assert_eq!(img.get_pixel(5, 5), &Rgba(BLACK));
+        assert_eq!(img.get_pixel(0, 0), WHITE);
+        assert_eq!(img.get_pixel(9, 0), WHITE);
+        assert_eq!(img.get_pixel(5, 5), BLACK);
     }
     #[test]
     fn fit_contain_letterboxes() {
@@ -457,7 +457,7 @@ mod tests {
             .fit_contain()
             .size(40, 40)
             .render(40);
-        assert_eq!(img.get_pixel(20, 0), &Rgba(BLACK));
-        assert_eq!(img.get_pixel(20, 20), &Rgba([255, 0, 0, 255]));
+        assert_eq!(img.get_pixel(20, 0), BLACK);
+        assert_eq!(img.get_pixel(20, 20), [255, 0, 0, 255]);
     }
 }

@@ -1125,22 +1125,11 @@ fn compare_resized(
     classify_rgba_pair(zensim, exp, ew, eh, &act_resized, ew, eh, tolerance)
 }
 
-/// Resize packed RGBA bytes. Uses zenresize when available, falls back to image crate.
+/// Resize packed RGBA bytes via the crate-internal `pixel_ops` seam (zenresize-backed).
 fn resize_rgba(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
-    #[cfg(feature = "zenresize")]
-    {
-        let config = zenresize::ResizeConfig::builder(sw, sh, dw, dh)
-            .filter(zenresize::Filter::Triangle)
-            .format(zenresize::PixelDescriptor::RGBA8_SRGB)
-            .build();
-        zenresize::Resizer::new(&config).resize(src)
-    }
-    #[cfg(not(feature = "zenresize"))]
-    {
-        let img = image::RgbaImage::from_raw(sw, sh, src.to_vec())
-            .expect("resize: data length does not match dimensions");
-        image::imageops::resize(&img, dw, dh, image::imageops::FilterType::Triangle).into_raw()
-    }
+    let img = crate::pixel_ops::Bitmap::from_raw(sw, sh, src.to_vec())
+        .expect("resize: data length does not match dimensions");
+    crate::pixel_ops::resize(&img, dw, dh, crate::pixel_ops::ResampleFilter::Triangle).into_raw()
 }
 
 /// Try orientation transforms for w↔h swaps, using corner-SAD pre-filter.
@@ -1159,29 +1148,29 @@ fn compare_orientation_swap(
     ah: u32,
     tolerance: &RegressionTolerance,
 ) -> Result<(RegressionReport, ComparisonMethod), ZensimError> {
-    use image::RgbaImage;
-    use image::imageops;
+    use crate::pixel_ops;
+    use crate::pixel_ops::Bitmap;
 
     if ew < 8 || eh < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
 
-    let act_img = RgbaImage::from_raw(aw, ah, act.to_vec())
+    let act_img = Bitmap::from_raw(aw, ah, act.to_vec())
         .expect("actual: data length does not match dimensions");
 
     // Build only transforms that produce matching dimensions (ew×eh).
     // For w↔h swap: rot90, rot270, transpose, transverse all produce (ah, aw) = (ew, eh).
-    let rot90 = imageops::rotate90(&act_img);
-    let rot270 = imageops::rotate270(&act_img);
-    let candidates: Vec<(RgbaImage, ComparisonMethod)> = vec![
+    let rot90 = pixel_ops::rotate90(&act_img);
+    let rot270 = pixel_ops::rotate270(&act_img);
+    let candidates: Vec<(Bitmap, ComparisonMethod)> = vec![
         (rot90.clone(), ComparisonMethod::Rotated90),
         (rot270.clone(), ComparisonMethod::Rotated270),
         (
-            imageops::flip_horizontal(&rot90),
+            pixel_ops::flip_horizontal(&rot90),
             ComparisonMethod::Transpose,
         ),
         (
-            imageops::flip_horizontal(&rot270),
+            pixel_ops::flip_horizontal(&rot270),
             ComparisonMethod::Transverse,
         ),
     ];
@@ -1506,8 +1495,9 @@ mod tests {
         }
 
         // Upscale to 32x32 — classified as LargeDifference (100% size change)
-        let img = image::RgbaImage::from_raw(16, 16, small_rgba.clone()).unwrap();
-        let big = image::imageops::resize(&img, 32, 32, image::imageops::FilterType::Lanczos3);
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 16, small_rgba.clone()).unwrap();
+        let big =
+            crate::pixel_ops::resize(&img, 32, 32, crate::pixel_ops::ResampleFilter::Lanczos3);
         let big_rgba = big.into_raw();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(50.0);
@@ -1683,8 +1673,8 @@ mod tests {
     fn detect_transform_catches_hflip() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         let rgba = asymmetric_gradient(16, 16);
-        let img = image::RgbaImage::from_raw(16, 16, rgba.clone()).unwrap();
-        let flipped = image::imageops::flip_horizontal(&img).into_raw();
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 16, rgba.clone()).unwrap();
+        let flipped = crate::pixel_ops::flip_horizontal(&img).into_raw();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
         let orig = check_regression(
@@ -1711,8 +1701,8 @@ mod tests {
     fn detect_transform_catches_vflip() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         let rgba = asymmetric_gradient(16, 16);
-        let img = image::RgbaImage::from_raw(16, 16, rgba.clone()).unwrap();
-        let flipped = image::imageops::flip_vertical(&img).into_raw();
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 16, rgba.clone()).unwrap();
+        let flipped = crate::pixel_ops::flip_vertical(&img).into_raw();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
         let orig = check_regression(
@@ -1739,8 +1729,8 @@ mod tests {
     fn detect_transform_catches_rot180() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         let rgba = asymmetric_gradient(16, 16);
-        let img = image::RgbaImage::from_raw(16, 16, rgba.clone()).unwrap();
-        let rotated = image::imageops::rotate180(&img).into_raw();
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 16, rgba.clone()).unwrap();
+        let rotated = crate::pixel_ops::rotate180(&img).into_raw();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
         let orig = check_regression(
@@ -1801,8 +1791,8 @@ mod tests {
     fn orientation_swap_detects_rot90() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         let rgba = asymmetric_gradient(16, 24);
-        let img = image::RgbaImage::from_raw(16, 24, rgba.clone()).unwrap();
-        let rotated = image::imageops::rotate90(&img);
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 24, rgba.clone()).unwrap();
+        let rotated = crate::pixel_ops::rotate90(&img);
         let rot_rgba = rotated.clone().into_raw();
         let (rw, rh) = rotated.dimensions(); // 24x16
 
@@ -1835,8 +1825,8 @@ mod tests {
     fn orientation_swap_detects_rot270() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         let rgba = asymmetric_gradient(16, 24);
-        let img = image::RgbaImage::from_raw(16, 24, rgba.clone()).unwrap();
-        let rotated = image::imageops::rotate270(&img);
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 24, rgba.clone()).unwrap();
+        let rotated = crate::pixel_ops::rotate270(&img);
         let rot_rgba = rotated.clone().into_raw();
         let (rw, rh) = rotated.dimensions();
 
@@ -1867,9 +1857,9 @@ mod tests {
     fn orientation_swap_detects_transpose() {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         let rgba = asymmetric_gradient(16, 24);
-        let img = image::RgbaImage::from_raw(16, 24, rgba.clone()).unwrap();
+        let img = crate::pixel_ops::Bitmap::from_raw(16, 24, rgba.clone()).unwrap();
         // Transpose = rot90 + flipH
-        let transposed = image::imageops::flip_horizontal(&image::imageops::rotate90(&img));
+        let transposed = crate::pixel_ops::flip_horizontal(&crate::pixel_ops::rotate90(&img));
         let t_rgba = transposed.clone().into_raw();
         let (tw, th) = transposed.dimensions();
 
@@ -1893,8 +1883,8 @@ mod tests {
         let z = Zensim::new(zensim::ZensimProfile::latest());
         // 100x100 image, cropped to 97x97 (3% diff, > ±2px, within 5%)
         let rgba100 = asymmetric_gradient(100, 100);
-        let img100 = image::RgbaImage::from_raw(100, 100, rgba100.clone()).unwrap();
-        let cropped = image::imageops::crop_imm(&img100, 1, 1, 97, 97).to_image();
+        let img100 = crate::pixel_ops::Bitmap::from_raw(100, 100, rgba100.clone()).unwrap();
+        let cropped = crate::pixel_ops::crop(&img100, 1, 1, 97, 97);
         let rgba97 = cropped.into_raw();
 
         let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);

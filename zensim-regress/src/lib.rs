@@ -74,6 +74,11 @@ pub mod manifest;
 pub mod oracle;
 /// Memorable names from hashes (e.g., `sea:a1b2...` → `sunny-crab`).
 pub mod petname;
+/// Private wrapper around the `image` crate's pixel ops. All
+/// `image::imageops::*` calls in this crate route through here so
+/// future migration phases can swap implementations behind a single
+/// seam (issue #18).
+pub(crate) mod pixel_ops;
 /// S3/R2 remote reference image storage configuration.
 pub mod remote;
 /// HTML report generation from manifest data.
@@ -90,6 +95,8 @@ pub mod upload;
 
 // Re-export key types at crate root for convenience
 pub use error::RegressError;
+/// Public canvas type — RGBA8 bitmap, image-crate-free.
+pub use pixel_ops::{Bitmap, PngError};
 pub use testing::{
     ComparisonMethod, DimensionInfo, DimensionMismatchKind, RegressionReport, RegressionTolerance,
     check_regression, check_regression_resized, detect_transform, shrink_tolerance,

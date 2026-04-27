@@ -26,4 +26,7 @@ rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
 codec-corpus = "1.0.3"
 zenbench = "0.1.2"
-zenresize = { version = "0.2.1", default-features = false, features = ["std"] }
+zenresize = { version = "0.3.1", default-features = false, features = ["std"] }
+zenpng = { version = "0.1.4", default-features = false }
+zenpixels = { version = "0.2.10", default-features = false }
+enough = { version = "0.4.2", default-features = false, features = ["std"] }

@@ -9,7 +9,7 @@
 
 use std::sync::OnceLock;
 
-use image::{GrayImage, imageops};
+use crate::pixel_ops::{self, GrayBitmap, ResampleFilter};
 
 /// Base glyph width in the embedded strip (before scaling).
 const BASE_CHAR_W: u32 = 26;
@@ -24,12 +24,10 @@ const FIRST_CHAR: u32 = 0x20;
 static FONT_PNG: &[u8] = include_bytes!("font_strip.png");
 
 /// Decoded font strip (grayscale, decoded once).
-fn font_strip() -> &'static GrayImage {
-    static STRIP: OnceLock<GrayImage> = OnceLock::new();
+fn font_strip() -> &'static GrayBitmap {
+    static STRIP: OnceLock<GrayBitmap> = OnceLock::new();
     STRIP.get_or_init(|| {
-        image::load_from_memory(FONT_PNG)
-            .expect("embedded font strip PNG is invalid")
-            .to_luma8()
+        GrayBitmap::from_png_bytes(FONT_PNG).expect("embedded font strip PNG is invalid")
     })
 }
 
@@ -91,13 +89,14 @@ pub fn render_text_height(
     let scaled_char_w = char_width_for_height(target_char_h);
     let scaled_char_h = target_char_h;
 
-    // Scale the entire strip at once (one resize, not per-char)
+    // Scale the entire strip at once (one resize, not per-char).
+    // Lanczos3 — sharp downsampling for crisp glyph edges.
     let scaled_strip_w = scaled_char_w * CHAR_COUNT;
-    let scaled_strip = imageops::resize(
+    let scaled_strip = pixel_ops::resize_gray(
         strip,
         scaled_strip_w,
         scaled_char_h,
-        imageops::FilterType::Lanczos3,
+        ResampleFilter::Lanczos3,
     );
 
     let out_w = max_cols * scaled_char_w;
@@ -124,7 +123,7 @@ pub fn render_text_height(
                     if sx >= scaled_strip.width() {
                         continue;
                     }
-                    let alpha = scaled_strip.get_pixel(sx, gy)[0];
+                    let alpha = scaled_strip.get_pixel(sx, gy);
                     if alpha == 0 {
                         continue;
                     }
@@ -246,15 +245,11 @@ pub fn render_lines_fitted(
         return (vec![], 0, 0);
     }
 
-    // Scale strip once
+    // Scale strip once.
     let strip = font_strip();
     let scaled_strip_w = char_w * CHAR_COUNT;
-    let scaled_strip = imageops::resize(
-        strip,
-        scaled_strip_w,
-        char_h,
-        imageops::FilterType::Lanczos3,
-    );
+    let scaled_strip =
+        pixel_ops::resize_gray(strip, scaled_strip_w, char_h, ResampleFilter::Lanczos3);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
     for pixel in buf.chunks_exact_mut(4) {
@@ -277,7 +272,7 @@ pub fn render_lines_fitted(
                     if sx >= scaled_strip.width() {
                         continue;
                     }
-                    let alpha = scaled_strip.get_pixel(sx, gy)[0];
+                    let alpha = scaled_strip.get_pixel(sx, gy);
                     if alpha == 0 {
                         continue;
                     }
@@ -443,7 +438,7 @@ mod tests {
             let mut lit = 0u32;
             for y in 0..BASE_CHAR_H {
                 for x in x0..x0 + BASE_CHAR_W {
-                    if strip.get_pixel(x, y)[0] > 128 {
+                    if strip.get_pixel(x, y) > 128 {
                         lit += 1;
                     }
                 }

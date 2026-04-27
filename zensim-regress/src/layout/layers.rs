@@ -1,7 +1,7 @@
 //! Z-stack container — children render at the same rect in painter's
 //! order. Roughly CSS `position: absolute` siblings.
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::geom::{Rect, Size};
 use super::node::Node;
@@ -52,7 +52,7 @@ pub(super) fn measure(children: &[Node], max: Size) -> Size {
     out
 }
 
-pub(super) fn paint(children: &[Node], rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint(children: &[Node], rect: Rect, canvas: &mut Bitmap) {
     let n = safety::cap_children(children.len());
     for c in children.iter().take(n) {
         c.paint(rect, canvas);
@@ -65,10 +65,10 @@ mod tests {
     use super::super::modifiers::LayoutMod;
     use super::super::node::{empty, image as image_node};
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use crate::pixel_ops::Bitmap;
 
-    fn solid(w: u32, h: u32, c: super::super::color::Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: super::super::color::Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     #[test]
@@ -87,7 +87,7 @@ mod tests {
         let bg = empty().background([255, 0, 0, 255]).fill();
         let dot = image_node(solid(4, 4, [0, 255, 0, 255])).center();
         let img = layers().child(bg).child(dot).size(20, 20).render(20);
-        assert_eq!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(10, 10), &Rgba([0, 255, 0, 255]));
+        assert_eq!(img.get_pixel(0, 0), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(10, 10), [0, 255, 0, 255]);
     }
 }

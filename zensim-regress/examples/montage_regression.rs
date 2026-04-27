@@ -13,7 +13,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use image::{Rgba, RgbaImage};
+use zensim_regress::Bitmap;
 use zensim_regress::diff_image::{AnnotationText, MontageOptions};
 
 fn main() {
@@ -94,31 +94,31 @@ fn main() {
     println!("Wrote 6 scenes to {}", dir.display());
 }
 
-fn gradient(w: u32, h: u32) -> RgbaImage {
-    RgbaImage::from_fn(w, h, |x, y| {
-        Rgba([
+fn gradient(w: u32, h: u32) -> Bitmap {
+    Bitmap::from_fn(w, h, |x, y| {
+        [
             ((x * 255) / w.max(1)) as u8,
             ((y * 255) / h.max(1)) as u8,
             (((x + y) * 255) / (w + h).max(1)) as u8,
             255,
-        ])
+        ]
     })
 }
 
-fn with_center_shift(src: &RgbaImage, dg: i16, db: i16) -> RgbaImage {
+fn with_center_shift(src: &Bitmap, dg: i16, db: i16) -> Bitmap {
     let (w, h) = (src.width(), src.height());
-    RgbaImage::from_fn(w, h, |x, y| {
+    Bitmap::from_fn(w, h, |x, y| {
         let p = src.get_pixel(x, y);
         let in_center = x > w / 4 && x < 3 * w / 4 && y > h / 4 && y < 3 * h / 4;
         if in_center {
-            Rgba([
+            [
                 p[0],
                 p[1].saturating_add_signed(dg.try_into().unwrap_or(0)),
                 p[2].saturating_add_signed(db.try_into().unwrap_or(0)),
                 255,
-            ])
+            ]
         } else {
-            *p
+            p
         }
     })
 }

@@ -2,7 +2,7 @@
 //! row | column`. Distribution along the main axis is controlled by
 //! [`MainAlign`]; cross-axis alignment by [`CrossAlign`].
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::geom::{Axis, Rect, Size};
 use super::node::Node;
@@ -123,7 +123,7 @@ pub(super) fn paint(
     align_items: CrossAlign,
     children: &[Node],
     rect: Rect,
-    canvas: &mut RgbaImage,
+    canvas: &mut Bitmap,
 ) {
     if children.is_empty() {
         return;
@@ -265,10 +265,10 @@ mod tests {
     use super::super::node::{empty, image as image_node};
     use super::super::sizing::SizeRule;
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use crate::pixel_ops::Bitmap;
 
-    fn solid(w: u32, h: u32, c: super::super::color::Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: super::super::color::Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     #[test]
@@ -303,8 +303,8 @@ mod tests {
             .child(small)
             .child(big)
             .render(40);
-        assert_eq!(n.get_pixel(20, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(n.get_pixel(0, 5), &Rgba([0, 0, 0, 255]));
+        assert_eq!(n.get_pixel(20, 5), [255, 0, 0, 255]);
+        assert_eq!(n.get_pixel(0, 5), [0, 0, 0, 255]);
     }
 
     #[test]
@@ -319,8 +319,8 @@ mod tests {
             .child(big)
             .size(40, 45)
             .render(40);
-        assert_eq!(img.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(39, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(img.get_pixel(0, 0), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(39, 0), [255, 0, 0, 255]);
     }
 
     #[test]
@@ -333,8 +333,8 @@ mod tests {
             .child(b)
             .size(50, 10)
             .render(50);
-        assert_eq!(img.get_pixel(5, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(45, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(5, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(45, 5), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -347,8 +347,8 @@ mod tests {
             .child(grow)
             .size(60, 10)
             .render(60);
-        assert_eq!(img.get_pixel(5, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(50, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(5, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(50, 5), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -361,7 +361,7 @@ mod tests {
             .child(b)
             .size(60, 10)
             .render(60);
-        assert_eq!(img.get_pixel(20, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(50, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(20, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(50, 5), [0, 0, 255, 255]);
     }
 }

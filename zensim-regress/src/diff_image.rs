@@ -3,7 +3,9 @@
 //! Creates amplified difference images and side-by-side comparison montages
 //! for visual regression analysis.
 
-use image::{Rgba, RgbaImage, imageops};
+use crate::pixel_ops::Bitmap;
+
+use crate::pixel_ops::{self, ResampleFilter};
 
 /// Default minimum panel dimension (in pixels) for montage upscaling.
 ///
@@ -19,7 +21,7 @@ pub const DEFAULT_MIN_PANEL_SIZE: u32 = 256;
 /// If both dimensions already meet the threshold, the image is returned as-is.
 ///
 /// This preserves sharp pixel boundaries — no interpolation, no blurring.
-pub fn pixelate_upscale(img: &RgbaImage, min_dim: u32) -> RgbaImage {
+pub fn pixelate_upscale(img: &Bitmap, min_dim: u32) -> Bitmap {
     let (w, h) = img.dimensions();
     if w == 0 || h == 0 || (w >= min_dim && h >= min_dim) {
         return img.clone();
@@ -35,11 +37,11 @@ pub fn pixelate_upscale(img: &RgbaImage, min_dim: u32) -> RgbaImage {
 
     let new_w = w * n;
     let new_h = h * n;
-    let mut out = RgbaImage::new(new_w, new_h);
+    let mut out = Bitmap::new(new_w, new_h);
 
     for y in 0..h {
         for x in 0..w {
-            let px = *img.get_pixel(x, y);
+            let px = img.get_pixel(x, y);
             let bx = x * n;
             let by = y * n;
             for dy in 0..n {
@@ -61,11 +63,7 @@ pub fn pixelate_upscale(img: &RgbaImage, min_dim: u32) -> RgbaImage {
 /// # Panics
 ///
 /// Panics if expected and actual have different dimensions.
-pub fn generate_diff_image(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
-    amplification: u8,
-) -> RgbaImage {
+pub fn generate_diff_image(expected: &Bitmap, actual: &Bitmap, amplification: u8) -> Bitmap {
     let (w, h) = expected.dimensions();
     assert_eq!(
         (w, h),
@@ -78,7 +76,7 @@ pub fn generate_diff_image(
     );
 
     let amp = amplification.max(1) as i16;
-    let mut diff = RgbaImage::new(w, h);
+    let mut diff = Bitmap::new(w, h);
 
     for y in 0..h {
         for x in 0..w {
@@ -98,9 +96,9 @@ pub fn generate_diff_image(
                 ((e[2] as i32 * ea / 255 - a[2] as i32 * aa / 255).abs() * amp32).min(255) as u8;
 
             if dr == 0 && dg == 0 && db == 0 {
-                diff.put_pixel(x, y, Rgba([24, 24, 24, 255]));
+                diff.put_pixel(x, y, [24, 24, 24, 255]);
             } else {
-                diff.put_pixel(x, y, Rgba([dr, dg, db, 255]));
+                diff.put_pixel(x, y, [dr, dg, db, 255]);
             }
         }
     }
@@ -113,20 +111,20 @@ pub fn generate_diff_image(
 /// Panels are placed left-to-right with a gap between them.
 /// The montage height is the maximum panel height; shorter panels
 /// are top-aligned against a dark background.
-pub fn create_montage(panels: &[&RgbaImage], gap: u32) -> RgbaImage {
+pub fn create_montage(panels: &[&Bitmap], gap: u32) -> Bitmap {
     if panels.is_empty() {
-        return RgbaImage::new(1, 1);
+        return Bitmap::new(1, 1);
     }
 
     let max_h = panels.iter().map(|p| p.height()).max().unwrap_or(1);
     let total_w: u32 = panels.iter().map(|p| p.width()).sum::<u32>()
         + gap * (panels.len() as u32).saturating_sub(1);
 
-    let mut montage = RgbaImage::from_pixel(total_w, max_h, Rgba([32, 32, 32, 255]));
+    let mut montage = Bitmap::from_pixel(total_w, max_h, [32, 32, 32, 255]);
 
     let mut x_offset: i64 = 0;
     for panel in panels {
-        imageops::overlay(&mut montage, *panel, x_offset, 0);
+        pixel_ops::overlay(&mut montage, panel, x_offset, 0);
         x_offset += panel.width() as i64 + gap as i64;
     }
 
@@ -148,11 +146,11 @@ pub fn create_montage(panels: &[&RgbaImage], gap: u32) -> RgbaImage {
     structural diff, and spatial heatmap"
 )]
 pub fn create_comparison_montage(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     amplification: u8,
     gap: u32,
-) -> RgbaImage {
+) -> Bitmap {
     let diff = generate_diff_image(expected, actual, amplification);
     create_montage(&[expected, actual, &diff], gap)
 }
@@ -160,7 +158,7 @@ pub fn create_comparison_montage(
 /// Generate an amplified diff image from raw RGBA byte slices.
 ///
 /// Convenience wrapper around [`generate_diff_image`] for callers working
-/// with `&[u8]` pixel buffers instead of `RgbaImage`.
+/// with `&[u8]` pixel buffers instead of `Bitmap`.
 ///
 /// # Panics
 ///
@@ -172,10 +170,10 @@ pub fn generate_diff_image_raw(
     width: u32,
     height: u32,
     amplification: u8,
-) -> RgbaImage {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+) -> Bitmap {
+    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
     generate_diff_image(&exp_img, &act_img, amplification)
 }
@@ -199,10 +197,10 @@ pub fn create_comparison_montage_raw(
     height: u32,
     amplification: u8,
     gap: u32,
-) -> RgbaImage {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+) -> Bitmap {
+    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
     create_comparison_montage(&exp_img, &act_img, amplification, gap)
 }
@@ -229,11 +227,11 @@ pub fn create_comparison_montage_raw(
 ///
 /// Panics if expected and actual have different dimensions.
 pub fn generate_structural_diff(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     blur_radius: u32,
     amplification: u8,
-) -> RgbaImage {
+) -> Bitmap {
     let (w, h) = expected.dimensions();
     assert_eq!(
         (w, h),
@@ -249,8 +247,9 @@ pub fn generate_structural_diff(
 
     // Convert to grayscale f32, premultiplied by alpha so transparent
     // pixels contribute zero regardless of their RGB values.
-    let to_gray = |img: &RgbaImage| -> Vec<f32> {
-        img.pixels()
+    let to_gray = |img: &Bitmap| -> Vec<f32> {
+        img.as_raw()
+            .chunks_exact(4)
             .map(|px| {
                 let a = px[3] as f32 / 255.0;
                 (0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32) * a
@@ -266,7 +265,7 @@ pub fn generate_structural_diff(
     let blurred_act = box_blur_gray(&gray_act, w, h, blur_radius);
 
     // High-pass residuals: |pixel - local_mean|
-    let mut diff = RgbaImage::new(w, h);
+    let mut diff = Bitmap::new(w, h);
 
     for y in 0..h {
         for x in 0..w {
@@ -278,15 +277,15 @@ pub fn generate_structural_diff(
             let delta = (res_exp - res_act) * amp;
 
             if delta.abs() < 1.0 {
-                diff.put_pixel(x, y, Rgba([24, 24, 24, 255]));
+                diff.put_pixel(x, y, [24, 24, 24, 255]);
             } else if delta > 0.0 {
                 // Expected has structure, actual doesn't → cyan (missing)
                 let v = delta.min(255.0) as u8;
-                diff.put_pixel(x, y, Rgba([0, v, v, 255]));
+                diff.put_pixel(x, y, [0, v, v, 255]);
             } else {
                 // Actual has structure, expected doesn't → orange (added)
                 let v = (-delta).min(255.0) as u8;
-                diff.put_pixel(x, y, Rgba([v, (v as f32 * 0.6) as u8, 0, 255]));
+                diff.put_pixel(x, y, [v, (v as f32 * 0.6) as u8, 0, 255]);
             }
         }
     }
@@ -302,11 +301,11 @@ pub fn generate_structural_diff_raw(
     height: u32,
     blur_radius: u32,
     amplification: u8,
-) -> RgbaImage {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
-        .expect("expected: invalid dimensions");
+) -> Bitmap {
+    let exp_img =
+        Bitmap::from_raw(width, height, expected.to_vec()).expect("expected: invalid dimensions");
     let act_img =
-        RgbaImage::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
+        Bitmap::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
     generate_structural_diff(&exp_img, &act_img, blur_radius, amplification)
 }
 
@@ -393,12 +392,12 @@ fn box_blur_gray(src: &[f32], w: u32, h: u32, radius: u32) -> Vec<f32> {
 ///
 /// Panics if expected and actual have different dimensions.
 pub fn create_structural_montage(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     amplification: u8,
     gap: u32,
     blur_radius: u32,
-) -> RgbaImage {
+) -> Bitmap {
     let pixel_diff = generate_diff_image(expected, actual, amplification);
     let struct_diff = generate_structural_diff(expected, actual, blur_radius, amplification);
     create_montage(&[expected, actual, &pixel_diff, &struct_diff], gap)
@@ -413,11 +412,11 @@ pub fn create_structural_montage_raw(
     amplification: u8,
     gap: u32,
     blur_radius: u32,
-) -> RgbaImage {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
-        .expect("expected: invalid dimensions");
+) -> Bitmap {
+    let exp_img =
+        Bitmap::from_raw(width, height, expected.to_vec()).expect("expected: invalid dimensions");
     let act_img =
-        RgbaImage::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
+        Bitmap::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
     create_structural_montage(&exp_img, &act_img, amplification, gap, blur_radius)
 }
 
@@ -638,12 +637,12 @@ pub fn spatial_analysis(
 /// ```
 #[deprecated(since = "0.2.3", note = "use MontageOptions::render() instead")]
 pub fn create_annotated_montage(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     amplification: u8,
     gap: u32,
     annotation: &AnnotationText,
-) -> RgbaImage {
+) -> Bitmap {
     MontageOptions {
         amplification,
         gap,
@@ -664,10 +663,10 @@ pub fn create_annotated_montage_raw(
     amplification: u8,
     gap: u32,
     annotation: &AnnotationText,
-) -> RgbaImage {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+) -> Bitmap {
+    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
     #[allow(deprecated)]
     create_annotated_montage(&exp_img, &act_img, amplification, gap, annotation)
@@ -702,10 +701,10 @@ pub fn format_annotation_spatial(
 
 fn render_montage_impl(
     options: &MontageOptions,
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     annotation: &AnnotationText,
-) -> RgbaImage {
+) -> Bitmap {
     let amplification = options.amplification;
 
     // Generate diffs at original resolution (before upscale) so pixel-level
@@ -744,13 +743,13 @@ fn render_montage_impl(
 /// of "PIXEL DIFF"), mismatched uses 20 to reserve space for resized
 /// annotations on tighter cells.
 fn compose_montage(
-    panels: [RgbaImage; 4],
+    panels: [Bitmap; 4],
     options: &MontageOptions,
     annotation: &AnnotationText,
     spatial: &SpatialAnalysis,
     has_differences: bool,
     longest_label_floor: u32,
-) -> RgbaImage {
+) -> Bitmap {
     use crate::font;
     use crate::layout::{
         self, CrossAlign, HAlign, Insets, LabelSegment, LabelStyle, LayoutMod, SizeRule, Track,
@@ -809,7 +808,7 @@ fn compose_montage(
         .with_padding(Insets::xy(pad, 0))
         .with_char_h(ar_char_h);
 
-    let cell = |panel: RgbaImage, label_node: layout::Node| -> layout::Node {
+    let cell = |panel: Bitmap, label_node: layout::Node| -> layout::Node {
         layout::column()
             .child(label_node.height(SizeRule::Fixed(label_h)))
             .child(layout::image(panel))
@@ -844,11 +843,11 @@ fn compose_montage(
     // doesn't re-compute char_h via the auto-fit formula at paint time
     // (which would shift one or two pixels when an enclosing Align reduces
     // the rect to the measured natural width).
-    fn rasterized_image(buf: Vec<u8>, w: u32, h: u32) -> Option<RgbaImage> {
+    fn rasterized_image(buf: Vec<u8>, w: u32, h: u32) -> Option<Bitmap> {
         if w == 0 || h == 0 {
             return None;
         }
-        RgbaImage::from_raw(w, h, buf)
+        Bitmap::from_raw(w, h, buf)
     }
 
     if let Some(t) = annotation.title.as_deref().filter(|s| !s.is_empty()) {
@@ -936,10 +935,10 @@ fn compose_montage(
 /// - Panel 3 (ADD/REMOVE): Structural diff on shared canvas, blue borders for both
 fn render_mismatched_montage(
     options: &MontageOptions,
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     annotation: &AnnotationText,
-) -> RgbaImage {
+) -> Bitmap {
     let (ew, eh) = expected.dimensions();
     let (aw, ah) = actual.dimensions();
     let amplification = options.amplification;
@@ -955,11 +954,11 @@ fn render_mismatched_montage(
     let ax_off_x = (canvas_w - aw) / 2;
     let ax_off_y = (canvas_h - ah) / 2;
 
-    let panel_bg = Rgba([32, 32, 32, 255]);
+    let panel_bg = [32, 32, 32, 255];
 
     // Panel 0: EXPECTED on canvas
-    let mut panel_expected = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
-    imageops::overlay(
+    let mut panel_expected = Bitmap::from_pixel(canvas_w, canvas_h, panel_bg);
+    pixel_ops::overlay(
         &mut panel_expected,
         expected,
         ex_off_x as i64,
@@ -975,16 +974,16 @@ fn render_mismatched_montage(
     );
 
     // Panel 1: ACTUAL on canvas
-    let mut panel_actual = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
-    imageops::overlay(&mut panel_actual, actual, ax_off_x as i64, ax_off_y as i64);
+    let mut panel_actual = Bitmap::from_pixel(canvas_w, canvas_h, panel_bg);
+    pixel_ops::overlay(&mut panel_actual, actual, ax_off_x as i64, ax_off_y as i64);
     draw_rect_border(&mut panel_actual, ax_off_x, ax_off_y, aw, ah, border_color);
 
     // Panel 2: PIXEL DIFF — resize actual to expected dims, compute diff
     // Triangle (bilinear) — fast enough for diagnostic montage, Lanczos3 is overkill.
-    let act_resized = imageops::resize(actual, ew, eh, imageops::FilterType::Triangle);
+    let act_resized = pixel_ops::resize(actual, ew, eh, ResampleFilter::Triangle);
     let pixel_diff_raw = generate_diff_image(expected, &act_resized, amplification);
-    let mut panel_pixel_diff = RgbaImage::from_pixel(canvas_w, canvas_h, panel_bg);
-    imageops::overlay(
+    let mut panel_pixel_diff = Bitmap::from_pixel(canvas_w, canvas_h, panel_bg);
+    pixel_ops::overlay(
         &mut panel_pixel_diff,
         &pixel_diff_raw,
         ex_off_x as i64,
@@ -1000,16 +999,16 @@ fn render_mismatched_montage(
     );
 
     // Panel 3: STRUCTURAL ADD/REMOVE on shared canvas with transparent bg
-    let transparent = Rgba([0, 0, 0, 0]);
-    let mut exp_on_canvas = RgbaImage::from_pixel(canvas_w, canvas_h, transparent);
-    imageops::overlay(
+    let transparent = [0, 0, 0, 0];
+    let mut exp_on_canvas = Bitmap::from_pixel(canvas_w, canvas_h, transparent);
+    pixel_ops::overlay(
         &mut exp_on_canvas,
         expected,
         ex_off_x as i64,
         ex_off_y as i64,
     );
-    let mut act_on_canvas = RgbaImage::from_pixel(canvas_w, canvas_h, transparent);
-    imageops::overlay(&mut act_on_canvas, actual, ax_off_x as i64, ax_off_y as i64);
+    let mut act_on_canvas = Bitmap::from_pixel(canvas_w, canvas_h, transparent);
+    pixel_ops::overlay(&mut act_on_canvas, actual, ax_off_x as i64, ax_off_y as i64);
     let mut panel_structural =
         generate_structural_diff(&exp_on_canvas, &act_on_canvas, 3, amplification);
     // Blue borders for both image bounds on the structural panel
@@ -1069,7 +1068,7 @@ fn render_mismatched_montage(
 /// relative to the worst cell. Cell text shows `pct% Δmax_delta`,
 /// `zdsim:NNN` and an optional structural tag (ADDED / MISSING / changed).
 /// Composed via the [`crate::layout`] module.
-fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> RgbaImage {
+fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Bitmap {
     use crate::font;
     use crate::layout::{self, LayoutMod, Track, rgb};
 
@@ -1119,7 +1118,7 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
             let lines: Vec<(&str, [u8; 4])> = vec![("ok", COLOR_OK)];
             let (tbuf, tw, th) = font::render_lines_fitted(&lines, cell_bg, cell_text_w);
             (tw > 0 && th > 0)
-                .then(|| RgbaImage::from_raw(tw, th, tbuf))
+                .then(|| Bitmap::from_raw(tw, th, tbuf))
                 .flatten()
         } else {
             let line1 = format!("{:.0}% \u{0394}{}", pct, r.max_delta);
@@ -1152,7 +1151,7 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
             }
             let (tbuf, tw, th) = font::render_lines_fitted(&lines, cell_bg, cell_text_w);
             (tw > 0 && th > 0)
-                .then(|| RgbaImage::from_raw(tw, th, tbuf))
+                .then(|| Bitmap::from_raw(tw, th, tbuf))
                 .flatten()
         };
 
@@ -1166,38 +1165,11 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
     g.background(rgb(18, 18, 18)).render(total_w)
 }
 
-/// Draw a 1px rectangular outline.
-///
-/// Used to show image bounds in mismatched-dimension montage panels.
-fn draw_rect_border(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 4]) {
-    if w == 0 || h == 0 {
-        return;
-    }
-    let px = Rgba(color);
-    let img_w = img.width();
-    let img_h = img.height();
-    let x_end = x0.saturating_add(w).min(img_w);
-    let y_end = y0.saturating_add(h).min(img_h);
-    // Top and bottom edges
-    for x in x0..x_end {
-        if y0 < img_h {
-            img.put_pixel(x, y0, px);
-        }
-        let bot = y_end.saturating_sub(1);
-        if bot < img_h && bot > y0 {
-            img.put_pixel(x, bot, px);
-        }
-    }
-    // Left and right edges
-    for y in y0..y_end {
-        if x0 < img_w {
-            img.put_pixel(x0, y, px);
-        }
-        let right = x_end.saturating_sub(1);
-        if right < img_w && right > x0 {
-            img.put_pixel(right, y, px);
-        }
-    }
+/// Draw a 1-px rectangular outline. Re-exported from
+/// [`crate::pixel_ops::draw_rect_border`] to keep the diff_image
+/// internal call sites concise.
+fn draw_rect_border(img: &mut Bitmap, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 4]) {
+    pixel_ops::draw_rect_border(img, x0, y0, w, h, color);
 }
 
 /// Rendering options for annotated montages.
@@ -1296,10 +1268,10 @@ impl MontageOptions {
     /// bounds and the pixel diff computed on center-cropped or resized copies.
     pub fn render(
         &self,
-        expected: &RgbaImage,
-        actual: &RgbaImage,
+        expected: &Bitmap,
+        actual: &Bitmap,
         annotation: &AnnotationText,
-    ) -> RgbaImage {
+    ) -> Bitmap {
         if expected.dimensions() != actual.dimensions() {
             render_mismatched_montage(self, expected, actual, annotation)
         } else {
@@ -1500,12 +1472,8 @@ mod tests {
     /// EXPECTED/ACTUAL/PIXEL DIFF strips' heights.
     #[test]
     fn montage_label_strips_have_uniform_height() {
-        let exp = RgbaImage::from_fn(96, 96, |x, y| {
-            Rgba([(x * 2) as u8, (y * 2) as u8, 128, 255])
-        });
-        let act = RgbaImage::from_fn(96, 96, |x, y| {
-            Rgba([(x * 2) as u8, (y * 2) as u8 + 30, 128, 255])
-        });
+        let exp = Bitmap::from_fn(96, 96, |x, y| [(x * 2) as u8, (y * 2) as u8, 128, 255]);
+        let act = Bitmap::from_fn(96, 96, |x, y| [(x * 2) as u8, (y * 2) as u8 + 30, 128, 255]);
         let opts = MontageOptions::default();
         let canvas = opts.render(&exp, &act, &AnnotationText::empty());
 
@@ -1520,7 +1488,7 @@ mod tests {
         let mut runs: Vec<(u32, u32)> = Vec::new();
         let mut start: Option<u32> = None;
         for y in 0..canvas.height() {
-            let p = canvas.get_pixel(pad, y).0;
+            let p = canvas.get_pixel(pad, y);
             if p == label_bg {
                 if start.is_none() {
                     start = Some(y);
@@ -1556,7 +1524,7 @@ mod tests {
         );
 
         // Sanity: above row 0 strip is canvas_bg (top padding).
-        let above = canvas.get_pixel(pad, runs[0].0 - 1).0;
+        let above = canvas.get_pixel(pad, runs[0].0 - 1);
         assert_eq!(
             above, canvas_bg,
             "expected canvas_bg above row 0 strip, got {above:?}"
@@ -1588,7 +1556,7 @@ mod tests {
         let mut orange_xs = Vec::new();
         let mut cyan_xs = Vec::new();
         for x in 0..canvas.width() {
-            let p = canvas.get_pixel(x, mid_y).0;
+            let p = canvas.get_pixel(x, mid_y);
             // ADD is orange-ish (R high, G mid, B low).
             if p[0] > 100 && p[1] > 80 && p[2] < 120 {
                 orange_xs.push(x);
@@ -1617,12 +1585,8 @@ mod tests {
     /// row's vertical center.
     #[test]
     fn montage_add_remove_labels_are_separated() {
-        let exp = RgbaImage::from_fn(96, 96, |x, y| {
-            Rgba([(x * 2) as u8, (y * 2) as u8, 128, 255])
-        });
-        let act = RgbaImage::from_fn(96, 96, |x, y| {
-            Rgba([(x * 2) as u8, (y * 2) as u8 + 30, 128, 255])
-        });
+        let exp = Bitmap::from_fn(96, 96, |x, y| [(x * 2) as u8, (y * 2) as u8, 128, 255]);
+        let act = Bitmap::from_fn(96, 96, |x, y| [(x * 2) as u8, (y * 2) as u8 + 30, 128, 255]);
         let opts = MontageOptions::default();
         let canvas = opts.render(&exp, &act, &AnnotationText::empty());
 
@@ -1635,7 +1599,7 @@ mod tests {
         let mut runs: Vec<(u32, u32)> = Vec::new();
         let mut start: Option<u32> = None;
         for y in 0..canvas.height() {
-            let p = canvas.get_pixel(8, y).0;
+            let p = canvas.get_pixel(8, y);
             if p == label_bg {
                 if start.is_none() {
                     start = Some(y);
@@ -1656,7 +1620,7 @@ mod tests {
         let strip_x_end = canvas_w - 8;
         let mut text_xs: Vec<u32> = Vec::new();
         for x in strip_x_start..strip_x_end {
-            let p = canvas.get_pixel(x, mid_y).0;
+            let p = canvas.get_pixel(x, mid_y);
             if p != label_bg && p != [18, 18, 18, 255] && p != [32, 32, 32, 255] {
                 text_xs.push(x);
             }
@@ -1696,20 +1660,18 @@ mod tests {
 
     #[test]
     fn diff_identical_images() {
-        let img = RgbaImage::from_fn(8, 8, |x, y| {
-            Rgba([(x * 32) as u8, (y * 32) as u8, 128, 255])
-        });
+        let img = Bitmap::from_fn(8, 8, |x, y| [(x * 32) as u8, (y * 32) as u8, 128, 255]);
         let diff = generate_diff_image(&img, &img, 10);
         // All pixels should be dark gray (no difference)
-        for pixel in diff.pixels() {
-            assert_eq!(*pixel, Rgba([24, 24, 24, 255]));
+        for pixel in diff.as_raw().chunks_exact(4) {
+            assert_eq!(pixel, [24, 24, 24, 255]);
         }
     }
 
     #[test]
     fn diff_amplification() {
-        let a = RgbaImage::from_pixel(4, 4, Rgba([100, 100, 100, 255]));
-        let b = RgbaImage::from_pixel(4, 4, Rgba([101, 100, 98, 255]));
+        let a = Bitmap::from_pixel(4, 4, [100, 100, 100, 255]);
+        let b = Bitmap::from_pixel(4, 4, [101, 100, 98, 255]);
 
         let diff_1x = generate_diff_image(&a, &b, 1);
         let diff_10x = generate_diff_image(&a, &b, 10);
@@ -1726,13 +1688,13 @@ mod tests {
     #[test]
     fn diff_transparent_pixels_are_zero() {
         // Different RGB but both fully transparent — should show no diff
-        let a = RgbaImage::from_pixel(4, 4, Rgba([255, 0, 0, 0]));
-        let b = RgbaImage::from_pixel(4, 4, Rgba([0, 255, 0, 0]));
+        let a = Bitmap::from_pixel(4, 4, [255, 0, 0, 0]);
+        let b = Bitmap::from_pixel(4, 4, [0, 255, 0, 0]);
         let diff = generate_diff_image(&a, &b, 10);
-        for pixel in diff.pixels() {
+        for pixel in diff.as_raw().chunks_exact(4) {
             assert_eq!(
-                *pixel,
-                Rgba([24, 24, 24, 255]),
+                pixel,
+                [24, 24, 24, 255],
                 "transparent pixels should diff to zero"
             );
         }
@@ -1741,8 +1703,8 @@ mod tests {
     #[test]
     fn diff_semitransparent_scales_by_alpha() {
         // Same RGB, different alpha — diff should reflect the visual difference
-        let a = RgbaImage::from_pixel(4, 4, Rgba([200, 200, 200, 128]));
-        let b = RgbaImage::from_pixel(4, 4, Rgba([200, 200, 200, 0]));
+        let a = Bitmap::from_pixel(4, 4, [200, 200, 200, 128]);
+        let b = Bitmap::from_pixel(4, 4, [200, 200, 200, 0]);
         let diff = generate_diff_image(&a, &b, 1);
         let p = diff.get_pixel(0, 0);
         // a premul: 200*128/255 ≈ 100, b premul: 0. delta ≈ 100 per channel.
@@ -1751,8 +1713,8 @@ mod tests {
 
     #[test]
     fn diff_clamps_to_255() {
-        let a = RgbaImage::from_pixel(2, 2, Rgba([0, 0, 0, 255]));
-        let b = RgbaImage::from_pixel(2, 2, Rgba([200, 200, 200, 255]));
+        let a = Bitmap::from_pixel(2, 2, [0, 0, 0, 255]);
+        let b = Bitmap::from_pixel(2, 2, [200, 200, 200, 255]);
         let diff = generate_diff_image(&a, &b, 10);
         let p = diff.get_pixel(0, 0);
         assert_eq!(p[0], 255); // 200*10 clamped to 255
@@ -1760,9 +1722,9 @@ mod tests {
 
     #[test]
     fn montage_dimensions() {
-        let a = RgbaImage::new(10, 20);
-        let b = RgbaImage::new(10, 20);
-        let c = RgbaImage::new(10, 20);
+        let a = Bitmap::new(10, 20);
+        let b = Bitmap::new(10, 20);
+        let c = Bitmap::new(10, 20);
         let montage = create_montage(&[&a, &b, &c], 2);
         assert_eq!(montage.width(), 34); // 10+2+10+2+10
         assert_eq!(montage.height(), 20);
@@ -1770,8 +1732,8 @@ mod tests {
 
     #[test]
     fn montage_different_heights() {
-        let a = RgbaImage::new(10, 30);
-        let b = RgbaImage::new(10, 10);
+        let a = Bitmap::new(10, 30);
+        let b = Bitmap::new(10, 10);
         let montage = create_montage(&[&a, &b], 4);
         assert_eq!(montage.width(), 24); // 10+4+10
         assert_eq!(montage.height(), 30); // max height
@@ -1779,31 +1741,29 @@ mod tests {
 
     #[test]
     fn pixelate_noop_when_large_enough() {
-        let img = RgbaImage::from_pixel(300, 300, Rgba([100, 100, 100, 255]));
+        let img = Bitmap::from_pixel(300, 300, [100, 100, 100, 255]);
         let up = pixelate_upscale(&img, 256);
         assert_eq!(up.dimensions(), (300, 300));
     }
 
     #[test]
     fn pixelate_scales_8x8_to_at_least_256() {
-        let img = RgbaImage::from_fn(8, 8, |x, y| {
-            Rgba([(x * 32) as u8, (y * 32) as u8, 128, 255])
-        });
+        let img = Bitmap::from_fn(8, 8, |x, y| [(x * 32) as u8, (y * 32) as u8, 128, 255]);
         let up = pixelate_upscale(&img, 256);
         // 256/8 = 32, so N=32, output = 256×256
         assert_eq!(up.dimensions(), (256, 256));
         // Each original pixel should be a 32×32 block
-        let orig = *img.get_pixel(1, 2);
+        let orig = img.get_pixel(1, 2);
         for dy in 0..32 {
             for dx in 0..32 {
-                assert_eq!(*up.get_pixel(32 + dx, 2 * 32 + dy), orig);
+                assert_eq!(up.get_pixel(32 + dx, 2 * 32 + dy), orig);
             }
         }
     }
 
     #[test]
     fn pixelate_rectangular() {
-        let img = RgbaImage::from_pixel(4, 16, Rgba([50, 100, 150, 255]));
+        let img = Bitmap::from_pixel(4, 16, [50, 100, 150, 255]);
         let up = pixelate_upscale(&img, 256);
         // N = max(ceil(256/4), ceil(256/16)) = max(64, 16) = 64
         assert_eq!(up.dimensions(), (256, 1024));
@@ -1811,7 +1771,7 @@ mod tests {
 
     #[test]
     fn pixelate_disabled_with_zero() {
-        let img = RgbaImage::from_pixel(4, 4, Rgba([100; 4]));
+        let img = Bitmap::from_pixel(4, 4, [100; 4]);
         let up = pixelate_upscale(&img, 0);
         assert_eq!(up.dimensions(), (4, 4));
     }
@@ -1819,8 +1779,8 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn comparison_montage_works() {
-        let expected = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
-        let actual = RgbaImage::from_pixel(8, 8, Rgba([101, 99, 100, 255]));
+        let expected = Bitmap::from_pixel(8, 8, [100, 100, 100, 255]);
+        let actual = Bitmap::from_pixel(8, 8, [101, 99, 100, 255]);
         let montage = create_comparison_montage(&expected, &actual, 10, 2);
         assert_eq!(montage.width(), 28); // 8+2+8+2+8
         assert_eq!(montage.height(), 8);
@@ -1828,8 +1788,8 @@ mod tests {
 
     #[test]
     fn diff_raw_matches_typed() {
-        let exp = RgbaImage::from_pixel(4, 4, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(4, 4, Rgba([105, 100, 95, 255]));
+        let exp = Bitmap::from_pixel(4, 4, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(4, 4, [105, 100, 95, 255]);
 
         let typed = generate_diff_image(&exp, &act, 10);
         let raw = generate_diff_image_raw(exp.as_raw(), act.as_raw(), 4, 4, 10);
@@ -1839,8 +1799,8 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn comparison_montage_raw_matches_typed() {
-        let exp = RgbaImage::from_pixel(4, 4, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(4, 4, Rgba([105, 100, 95, 255]));
+        let exp = Bitmap::from_pixel(4, 4, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(4, 4, [105, 100, 95, 255]);
 
         let typed = create_comparison_montage(&exp, &act, 10, 2);
         let raw = create_comparison_montage_raw(exp.as_raw(), act.as_raw(), 4, 4, 10, 2);
@@ -1849,8 +1809,8 @@ mod tests {
 
     #[test]
     fn annotated_montage_adds_text_strips() {
-        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
+        let exp = Bitmap::from_pixel(32, 32, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(32, 32, [110, 100, 90, 255]);
         let ann = AnnotationText {
             primary_lines: vec![
                 ("FAIL".into(), COLOR_FAIL),
@@ -1871,8 +1831,8 @@ mod tests {
 
     #[test]
     fn annotated_montage_empty_text_no_text_strip() {
-        let exp = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
-        let act = RgbaImage::from_pixel(16, 16, Rgba([100; 4]));
+        let exp = Bitmap::from_pixel(16, 16, [100; 4]);
+        let act = Bitmap::from_pixel(16, 16, [100; 4]);
         let with_text = AnnotationText {
             primary_lines: vec![("hello".into(), [255; 4])],
             ..AnnotationText::empty()
@@ -1890,8 +1850,8 @@ mod tests {
 
     #[test]
     fn annotated_montage_upscales_tiny_images() {
-        let exp = RgbaImage::from_pixel(8, 8, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(8, 8, Rgba([110, 100, 90, 255]));
+        let exp = Bitmap::from_pixel(8, 8, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(8, 8, [110, 100, 90, 255]);
         // Default options — upscale to 256
         let montage = MontageOptions::default().render(&exp, &act, &AnnotationText::empty());
         // Panels should be 256×256 (8×32), so montage width >= 2*256
@@ -1957,29 +1917,28 @@ mod tests {
 
     #[test]
     fn structural_diff_identical_is_dark() {
-        let img = RgbaImage::from_fn(32, 32, |x, y| {
-            Rgba([(x * 8) as u8, (y * 8) as u8, 128, 255])
-        });
+        let img = Bitmap::from_fn(32, 32, |x, y| [(x * 8) as u8, (y * 8) as u8, 128, 255]);
         let diff = generate_structural_diff(&img, &img, 3, 10);
         // All pixels should be dark gray (no structural difference)
-        for px in diff.pixels() {
-            assert_eq!(*px, Rgba([24, 24, 24, 255]));
+        for px in diff.as_raw().chunks_exact(4) {
+            assert_eq!(px, [24, 24, 24, 255]);
         }
     }
 
     #[test]
     fn structural_diff_detects_added_edge() {
         // Uniform expected, expected+edge actual
-        let exp = RgbaImage::from_pixel(64, 64, Rgba([128, 128, 128, 255]));
+        let exp = Bitmap::from_pixel(64, 64, [128, 128, 128, 255]);
         let mut act = exp.clone();
         // Add a bright horizontal line (simulates a watermark edge)
         for x in 10..54 {
-            act.put_pixel(x, 32, Rgba([255, 255, 255, 255]));
+            act.put_pixel(x, 32, [255, 255, 255, 255]);
         }
         let diff = generate_structural_diff(&exp, &act, 2, 10);
         // Should have non-dark pixels around y=32 (orange = added structure)
         let non_dark: usize = diff
-            .pixels()
+            .as_raw()
+            .chunks_exact(4)
             .filter(|px| px[0] > 24 || px[1] > 24 || px[2] > 24)
             .count();
         assert!(
@@ -1991,15 +1950,16 @@ mod tests {
     #[test]
     fn structural_diff_detects_missing_edge() {
         // Expected has edge, actual is uniform
-        let mut exp = RgbaImage::from_pixel(64, 64, Rgba([128, 128, 128, 255]));
+        let mut exp = Bitmap::from_pixel(64, 64, [128, 128, 128, 255]);
         for x in 10..54 {
-            exp.put_pixel(x, 32, Rgba([255, 255, 255, 255]));
+            exp.put_pixel(x, 32, [255, 255, 255, 255]);
         }
-        let act = RgbaImage::from_pixel(64, 64, Rgba([128, 128, 128, 255]));
+        let act = Bitmap::from_pixel(64, 64, [128, 128, 128, 255]);
         let diff = generate_structural_diff(&exp, &act, 2, 10);
         // Should have cyan pixels around y=32 (missing structure)
         let cyan_pixels: usize = diff
-            .pixels()
+            .as_raw()
+            .chunks_exact(4)
             .filter(|px| px[1] > 50 && px[2] > 50 && px[0] < 10)
             .count();
         assert!(
@@ -2010,8 +1970,8 @@ mod tests {
 
     #[test]
     fn structural_montage_has_4_panels() {
-        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
+        let exp = Bitmap::from_pixel(32, 32, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(32, 32, [110, 100, 90, 255]);
         let montage = create_structural_montage(&exp, &act, 10, 2, 3);
         // 4 panels of 32px + 3 gaps of 2px = 134
         assert_eq!(montage.width(), 32 * 4 + 2 * 3);
@@ -2027,8 +1987,8 @@ mod tests {
 
     #[test]
     fn mismatched_montage_renders_without_panic() {
-        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(48, 24, Rgba([110, 100, 90, 255]));
+        let exp = Bitmap::from_pixel(32, 32, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(48, 24, [110, 100, 90, 255]);
         let opts = MontageOptions {
             min_panel_size: 0,
             ..Default::default()
@@ -2041,12 +2001,8 @@ mod tests {
 
     #[test]
     fn mismatched_montage_orientation_swap() {
-        let exp = RgbaImage::from_fn(64, 48, |x, y| {
-            Rgba([(x * 4) as u8, (y * 5) as u8, 128, 255])
-        });
-        let act = RgbaImage::from_fn(48, 64, |x, y| {
-            Rgba([(x * 5) as u8, (y * 4) as u8, 128, 255])
-        });
+        let exp = Bitmap::from_fn(64, 48, |x, y| [(x * 4) as u8, (y * 5) as u8, 128, 255]);
+        let act = Bitmap::from_fn(48, 64, |x, y| [(x * 5) as u8, (y * 4) as u8, 128, 255]);
         let opts = MontageOptions {
             min_panel_size: 0,
             ..Default::default()
@@ -2058,8 +2014,8 @@ mod tests {
 
     #[test]
     fn mismatched_montage_with_annotation() {
-        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(40, 30, Rgba([110, 100, 90, 255]));
+        let exp = Bitmap::from_pixel(32, 32, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(40, 30, [110, 100, 90, 255]);
         let ann = AnnotationText {
             primary_lines: vec![("FAIL: dimensions differ".into(), [255, 80, 80, 255])],
             ..AnnotationText::empty()
@@ -2075,8 +2031,8 @@ mod tests {
 
     #[test]
     fn same_dimension_still_uses_normal_path() {
-        let exp = RgbaImage::from_pixel(32, 32, Rgba([100, 100, 100, 255]));
-        let act = RgbaImage::from_pixel(32, 32, Rgba([110, 100, 90, 255]));
+        let exp = Bitmap::from_pixel(32, 32, [100, 100, 100, 255]);
+        let act = Bitmap::from_pixel(32, 32, [110, 100, 90, 255]);
         // Should not crash — uses render_montage_impl
         let montage = MontageOptions::default().render(&exp, &act, &AnnotationText::empty());
         assert!(montage.width() >= 32 * 2);
@@ -2084,13 +2040,13 @@ mod tests {
 
     #[test]
     fn draw_rect_border_on_small_image() {
-        let mut img = RgbaImage::from_pixel(10, 10, Rgba([0, 0, 0, 255]));
+        let mut img = Bitmap::from_pixel(10, 10, [0, 0, 0, 255]);
         draw_rect_border(&mut img, 2, 2, 6, 6, [255, 255, 255, 255]);
         // Top-left corner of border
-        assert_eq!(img.get_pixel(2, 2).0, [255, 255, 255, 255]);
+        assert_eq!(img.get_pixel(2, 2), [255, 255, 255, 255]);
         // Bottom-right corner of border
-        assert_eq!(img.get_pixel(7, 7).0, [255, 255, 255, 255]);
+        assert_eq!(img.get_pixel(7, 7), [255, 255, 255, 255]);
         // Inside border (not on edge)
-        assert_eq!(img.get_pixel(4, 4).0, [0, 0, 0, 255]);
+        assert_eq!(img.get_pixel(4, 4), [0, 0, 0, 255]);
     }
 }

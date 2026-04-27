@@ -12,7 +12,7 @@
 
 use std::env;
 
-use image::{Rgba, RgbaImage};
+use zensim_regress::Bitmap;
 use zensim_regress::diff_image::{
     AnnotationText, MontageOptions, create_montage, generate_diff_image,
 };
@@ -37,30 +37,30 @@ fn main() {
     println!("--- Creating test images ({w}x{h}) ---\n");
 
     // Baseline: colorful gradient
-    let expected = RgbaImage::from_fn(w, h, |x, y| {
-        Rgba([(x * 4) as u8, (y * 4) as u8, ((x + y) * 2) as u8, 255])
+    let expected = Bitmap::from_fn(w, h, |x, y| {
+        [(x * 4) as u8, (y * 4) as u8, ((x + y) * 2) as u8, 255]
     });
 
     // Variant 1: off-by-one rounding in R channel
-    let rounding = RgbaImage::from_fn(w, h, |x, y| {
+    let rounding = Bitmap::from_fn(w, h, |x, y| {
         let e = expected.get_pixel(x, y);
-        Rgba([e[0].saturating_add(1), e[1], e[2], 255])
+        [e[0].saturating_add(1), e[1], e[2], 255]
     });
 
     // Variant 2: color shift in center region
-    let color_shift = RgbaImage::from_fn(w, h, |x, y| {
+    let color_shift = Bitmap::from_fn(w, h, |x, y| {
         let e = expected.get_pixel(x, y);
         if x > 16 && x < 48 && y > 16 && y < 48 {
-            Rgba([e[0], e[1].saturating_add(30), e[2].wrapping_sub(20), 255])
+            [e[0], e[1].saturating_add(30), e[2].wrapping_sub(20), 255]
         } else {
-            *e
+            e
         }
     });
 
     // Variant 3: channel swap (R↔B)
-    let channel_swap = RgbaImage::from_fn(w, h, |x, y| {
+    let channel_swap = Bitmap::from_fn(w, h, |x, y| {
         let e = expected.get_pixel(x, y);
-        Rgba([e[2], e[1], e[0], 255])
+        [e[2], e[1], e[0], 255]
     });
 
     // ─── Generate diffs ─────────────────────────────────────────────────

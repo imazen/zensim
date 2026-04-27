@@ -13,7 +13,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use image::{Rgba, RgbaImage};
+use zensim_regress::Bitmap;
 use zensim_regress::layout::*;
 
 // ── Helper "templates" used by the template scenes ────────────────────
@@ -60,14 +60,14 @@ fn swatch(label: &str, color: Color) -> Node {
 }
 
 /// Colorful gradient square — used as a stand-in for an image.
-fn gradient(w: u32, h: u32) -> RgbaImage {
-    RgbaImage::from_fn(w, h, |x, y| {
-        Rgba([
+fn gradient(w: u32, h: u32) -> Bitmap {
+    Bitmap::from_fn(w, h, |x, y| {
+        [
             ((x * 255) / w.max(1)) as u8,
             ((y * 255) / h.max(1)) as u8,
             (((x + y) * 200) / (w + h).max(1) + 30) as u8,
             255,
-        ])
+        ]
     })
 }
 

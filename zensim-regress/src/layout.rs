@@ -66,7 +66,7 @@
 // feature is off, those items appear unused — silence the noise.
 #![cfg_attr(not(feature = "_internal_api"), allow(dead_code, unused_imports))]
 
-use image::{Rgba, RgbaImage};
+use crate::pixel_ops::Bitmap;
 
 pub mod color;
 pub mod geom;
@@ -166,17 +166,17 @@ pub fn em(units: f32) -> u32 {
 
 /// Render `tree` against `max_w` using default limits, scale 1, and
 /// black background.
-pub fn render(tree: &Node, max_w: u32) -> RgbaImage {
+pub fn render(tree: &Node, max_w: u32) -> Bitmap {
     render_with_config(tree, &RenderConfig::new(max_w))
 }
 
 /// As [`render`], with a custom default canvas background.
-pub fn render_with(tree: &Node, max_w: u32, bg: Color) -> RgbaImage {
+pub fn render_with(tree: &Node, max_w: u32, bg: Color) -> Bitmap {
     render_with_config(tree, &RenderConfig::new(max_w).with_bg(bg))
 }
 
 /// As [`render_with`], with explicit safety limits.
-pub fn render_with_limits(tree: &Node, max_w: u32, bg: Color, limits: LayoutLimits) -> RgbaImage {
+pub fn render_with_limits(tree: &Node, max_w: u32, bg: Color, limits: LayoutLimits) -> Bitmap {
     render_with_config(
         tree,
         &RenderConfig::new(max_w).with_bg(bg).with_limits(limits),
@@ -194,7 +194,7 @@ pub fn render_with_limits(tree: &Node, max_w: u32, bg: Color, limits: LayoutLimi
 /// 5. The canvas is sized to the measured tree, clamped per axis to
 ///    `limits.max_dim` and rescaled (preserving aspect) to fit
 ///    `limits.max_pixels`.
-pub fn render_with_config(tree: &Node, cfg: &RenderConfig) -> RgbaImage {
+pub fn render_with_config(tree: &Node, cfg: &RenderConfig) -> Bitmap {
     safety::with_limits(cfg.limits, || {
         safety::with_base_em(cfg.base_em, || {
             // Apply scale by walking the tree once. Cheap clone for
@@ -205,7 +205,7 @@ pub fn render_with_config(tree: &Node, cfg: &RenderConfig) -> RgbaImage {
             let root_max = Size::new(max_w, u32::MAX / 2);
             let measured = safety::clamp_size(scaled.measure(root_max));
             let s = safety::clamp_to_pixel_budget(measured);
-            let mut canvas = RgbaImage::from_pixel(s.w.max(1), s.h.max(1), Rgba(cfg.bg));
+            let mut canvas = Bitmap::from_pixel(s.w.max(1), s.h.max(1), cfg.bg);
             scaled.paint(Rect::new(0, 0, s.w, s.h), &mut canvas);
             canvas
         })
@@ -215,7 +215,7 @@ pub fn render_with_config(tree: &Node, cfg: &RenderConfig) -> RgbaImage {
 /// Render the tree directly into an existing canvas at `rect`. The
 /// caller is responsible for calling this within a
 /// [`safety::with_limits`] scope if non-default caps are wanted.
-pub fn render_into(tree: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub fn render_into(tree: &Node, rect: Rect, canvas: &mut Bitmap) {
     tree.paint(rect, canvas);
 }
 
@@ -225,7 +225,6 @@ mod tests {
     //! their respective submodules.
 
     use super::*;
-    use image::Rgba;
 
     #[test]
     fn builder_chain_produces_node() {
@@ -233,11 +232,7 @@ mod tests {
             .gap(8)
             .align_items(CrossAlign::Center)
             .child("hi")
-            .child(image(image::RgbaImage::from_pixel(
-                10,
-                10,
-                Rgba([255, 255, 255, 255]),
-            )))
+            .child(image(Bitmap::from_pixel(10, 10, [255, 255, 255, 255])))
             .padding(4)
             .background(hex("#123456"));
     }
@@ -283,26 +278,10 @@ mod tests {
         let n = grid()
             .cols(2)
             .equal_rows(2)
-            .cell(
-                0,
-                0,
-                image(image::RgbaImage::from_pixel(20, 20, image::Rgba(WHITE))),
-            )
-            .cell(
-                1,
-                0,
-                image(image::RgbaImage::from_pixel(20, 20, image::Rgba(WHITE))),
-            )
-            .cell(
-                0,
-                1,
-                image(image::RgbaImage::from_pixel(20, 20, image::Rgba(WHITE))),
-            )
-            .cell(
-                1,
-                1,
-                image(image::RgbaImage::from_pixel(20, 20, image::Rgba(WHITE))),
-            );
+            .cell(0, 0, image(Bitmap::from_pixel(20, 20, WHITE)))
+            .cell(1, 0, image(Bitmap::from_pixel(20, 20, WHITE)))
+            .cell(0, 1, image(Bitmap::from_pixel(20, 20, WHITE)))
+            .cell(1, 1, image(Bitmap::from_pixel(20, 20, WHITE)));
         let canvas = render(&Node::from(n), 200);
         assert!(canvas.height() < default_max_dim());
     }
@@ -391,9 +370,9 @@ mod tests {
             .size(100, 10)
             .render(100);
         // 25% / 75% split → red x=0..24, blue x=25..99.
-        assert_eq!(img.get_pixel(10, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(50, 5), &Rgba([0, 0, 255, 255]));
-        assert_eq!(img.get_pixel(90, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(10, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(50, 5), [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(90, 5), [0, 0, 255, 255]);
     }
 
     #[test]

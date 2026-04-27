@@ -1141,9 +1141,8 @@ impl ChecksumManager {
         tolerance: Option<&ToleranceSpec>,
     ) -> Result<CheckResult, RegressError> {
         let actual_path = actual_path.as_ref();
-        let img = image::open(actual_path)
-            .map_err(|e| RegressError::image(actual_path, e))?
-            .to_rgba8();
+        let img = crate::pixel_ops::Bitmap::open(actual_path)
+            .map_err(|e| RegressError::png(actual_path, e))?;
         let (w, h) = img.dimensions();
         self.check_pixels(
             module,
@@ -1575,19 +1574,20 @@ impl ChecksumManager {
         let flat_name = flat_test_name(test_name, detail_name);
         let path = images_dir.join(format!("{flat_name}.png"));
 
-        let img = image::RgbaImage::from_raw(width, height, rgba.to_vec()).ok_or_else(|| {
-            RegressError::Io {
-                path: path.clone(),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "invalid dimensions {width}x{height} for {} bytes",
-                        rgba.len()
+        let img =
+            crate::pixel_ops::Bitmap::from_raw(width, height, rgba.to_vec()).ok_or_else(|| {
+                RegressError::Io {
+                    path: path.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "invalid dimensions {width}x{height} for {} bytes",
+                            rgba.len()
+                        ),
                     ),
-                ),
-            }
-        })?;
-        img.save(&path).map_err(|e| RegressError::image(&path, e))?;
+                }
+            })?;
+        img.save(&path).map_err(|e| RegressError::png(&path, e))?;
         Ok(path)
     }
 
@@ -1659,9 +1659,9 @@ impl ChecksumManager {
 
         if rw != aw || rh != ah {
             // Dimensions differ — render() dispatches to the shared-canvas montage.
-            let ref_img = image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec())
+            let ref_img = crate::pixel_ops::Bitmap::from_raw(rw, rh, ref_rgba.to_vec())
                 .expect("ref: invalid dimensions");
-            let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+            let act_img = crate::pixel_ops::Bitmap::from_raw(aw, ah, actual_rgba.to_vec())
                 .expect("actual: invalid dimensions");
 
             let title = format!("{} {}", test_name, detail_name).trim().to_string();
@@ -1688,9 +1688,9 @@ impl ChecksumManager {
             None => AnnotationText::empty().with_title(title),
         };
 
-        let ref_img =
-            image::RgbaImage::from_raw(rw, rh, ref_rgba.to_vec()).expect("ref: invalid dimensions");
-        let act_img = image::RgbaImage::from_raw(aw, ah, actual_rgba.to_vec())
+        let ref_img = crate::pixel_ops::Bitmap::from_raw(rw, rh, ref_rgba.to_vec())
+            .expect("ref: invalid dimensions");
+        let act_img = crate::pixel_ops::Bitmap::from_raw(aw, ah, actual_rgba.to_vec())
             .expect("actual: invalid dimensions");
         let montage = MontageOptions::default().render(&ref_img, &act_img, &annotation);
         match montage.save(&out_path) {
@@ -1793,9 +1793,7 @@ fn flat_test_name(test_name: &str, detail_name: &str) -> String {
 
 /// Decode a PNG reference image to RGBA8 pixels.
 fn decode_reference_png(path: &Path) -> Result<(Vec<u8>, u32, u32), RegressError> {
-    let img = image::open(path)
-        .map_err(|e| RegressError::image(path, e))?
-        .to_rgba8();
+    let img = crate::pixel_ops::Bitmap::open(path).map_err(|e| RegressError::png(path, e))?;
     let (w, h) = img.dimensions();
     Ok((img.into_raw(), w, h))
 }
