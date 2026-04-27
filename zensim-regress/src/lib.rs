@@ -49,6 +49,23 @@ pub mod font;
 pub mod generators;
 /// Pixel and file hashing (`ChecksumHasher` trait, `SeaHasher`).
 pub mod hasher;
+/// Retained-tree layout primitives for composing labeled image grids.
+///
+/// **Internal — not part of the stable public API.** Used by
+/// [`diff_image`]'s montage compositor and by debug examples. The
+/// surface (Node variants, modifier methods, render entry points) is
+/// expected to change as the image-crate → zen-ecosystem migration
+/// progresses; in particular `Node::Image` will likely change pixel
+/// type. Pinned external use will break.
+///
+/// Exposed publicly only when the `_internal_api` cargo feature is
+/// enabled (used by `examples/layout_gallery.rs`). For everything
+/// else use the [`diff_image::MontageOptions`] API.
+#[cfg(feature = "_internal_api")]
+#[doc(hidden)]
+pub mod layout;
+#[cfg(not(feature = "_internal_api"))]
+mod layout;
 /// Advisory file locking for parallel test safety.
 pub mod lock;
 /// TSV manifest writer for CI result aggregation across platforms.
