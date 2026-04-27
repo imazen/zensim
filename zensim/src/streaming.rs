@@ -29,7 +29,7 @@ use rayon::prelude::*;
 use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
-const STRIP_INNER: usize = 16;
+pub(crate) const STRIP_INNER: usize = 16;
 
 /// Run two closures in parallel (rayon) or sequentially, depending on `parallel`.
 #[inline]
@@ -1907,7 +1907,7 @@ pub(crate) fn compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
 
 /// Core diffmap pipeline: takes pre-converted XYB planes, runs multi-scale
 /// processing, and fuses per-scale diffmaps into a single full-resolution map.
-fn compute_diffmap_from_xyb(
+pub(crate) fn compute_diffmap_from_xyb(
     precomputed: &PrecomputedReference,
     mut dst_planes: [Vec<f32>; 3],
     width: usize,

@@ -172,7 +172,7 @@ impl DiffmapWeighting {
     ///
     /// `per_scale_weights[s][c]` = feature weights for scale `s`, channel `c`.
     /// `scale_blend_weights[s]` = fraction of total weight mass at scale `s`.
-    fn resolve_multiscale(
+    pub(crate) fn resolve_multiscale(
         self,
         profile_weights: &[f64],
         num_scales: usize,
@@ -349,7 +349,7 @@ fn trained_multiscale_weights(
 /// Divides each diffmap value by `1 + strength * local_variance(Y_src)`,
 /// where local_variance is computed from the Y plane of the precomputed
 /// reference at scale 0, using integral images for O(1) per-pixel variance.
-fn apply_contrast_masking(
+pub(crate) fn apply_contrast_masking(
     diffmap: &mut [f32],
     precomputed: &PrecomputedReference,
     width: usize,
@@ -489,7 +489,7 @@ fn apply_masking_row(
 
 /// Element-wise sqrt, auto-vectorized.
 #[autoversion]
-fn sqrt_inplace(data: &mut [f32]) {
+pub(crate) fn sqrt_inplace(data: &mut [f32]) {
     for v in data.iter_mut() {
         *v = v.sqrt();
     }
@@ -556,6 +556,22 @@ pub struct DiffmapResult {
 }
 
 impl DiffmapResult {
+    /// Internal constructor used by streaming consumers that produce
+    /// pre-trimmed diffmaps and finalized [`ZensimResult`]s.
+    pub(crate) fn from_parts_internal(
+        result: ZensimResult,
+        diffmap: Vec<f32>,
+        width: usize,
+        height: usize,
+    ) -> Self {
+        Self {
+            result,
+            diffmap,
+            width,
+            height,
+        }
+    }
+
     /// The full zensim comparison result (score, features, etc.).
     pub fn result(&self) -> &ZensimResult {
         &self.result

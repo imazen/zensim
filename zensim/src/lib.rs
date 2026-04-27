@@ -129,6 +129,7 @@ pub mod profile;
 mod simd_ops;
 pub mod source;
 mod streaming;
+mod streaming_diffmap;
 
 // --- Primary API ---
 pub use error::ZensimError;
@@ -152,6 +153,7 @@ pub use source::{
 
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
+pub use streaming_diffmap::{StreamingDiffmap, StripContribution};
 
 /// Training/research API — requires `features = ["training"]`.
 ///
