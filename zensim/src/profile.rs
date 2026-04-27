@@ -37,6 +37,16 @@ impl ZensimProfile {
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
         }
     }
+
+    /// Number of pyramid scales this profile's metric uses.
+    ///
+    /// Pass this to [`crate::PrecomputedReference::new`] (or
+    /// [`crate::PrecomputedReference::from_linear_planar`]) when building a
+    /// reference manually so the precomputed pyramid matches what
+    /// `Zensim::compute_with_ref_*` will request.
+    pub fn num_scales(&self) -> usize {
+        self.params().num_scales
+    }
 }
 
 impl core::fmt::Display for ZensimProfile {

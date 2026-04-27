@@ -1465,10 +1465,30 @@ pub struct PrecomputedReference {
 }
 
 impl PrecomputedReference {
-    /// Build a precomputed reference from an ImageSource.
+    /// Build a precomputed reference from an [`ImageSource`].
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
-    pub(crate) fn new(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
+    /// Use [`ZensimProfile::num_scales`](crate::ZensimProfile::num_scales) to pick
+    /// `num_scales` matching the profile you'll compare against (typically 4 for the
+    /// default profile).
+    ///
+    /// Set `parallel = true` to use rayon for the XYB conversion and downscale
+    /// passes when the `threads` feature is enabled (no-op otherwise).
+    ///
+    /// # Encoder use case
+    ///
+    /// Callers running iterative encoder loops (e.g. target-quality JPEG/JXL) can
+    /// build the reference once and reuse it across many distorted candidates:
+    ///
+    /// ```ignore
+    /// use zensim::{Zensim, ZensimProfile, PrecomputedReference, RgbSlice};
+    /// let metric = Zensim::new(ZensimProfile::latest());
+    /// let src = RgbSlice::new(&pixels, w, h);
+    /// let reference = PrecomputedReference::new(&src, ZensimProfile::latest().num_scales(), true);
+    /// // ... in loop: produce `distorted`, then
+    /// let result = metric.compute_with_ref_and_diffmap(&reference, &distorted, ZensimProfile::latest())?;
+    /// ```
+    pub fn new(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
         let width = source.width();
         let height = source.height();
         let padded_width = simd_padded_width(width);
@@ -1497,10 +1517,15 @@ impl PrecomputedReference {
 
     /// Build a precomputed reference from planar linear RGB f32 data.
     ///
-    /// `planes` are `[R, G, B]`, each with `stride * height` elements (or more).
+    /// `planes` are `[R, G, B]`, each with at least `stride * height` elements.
     /// `stride` is the number of f32 elements per row (may be larger than `width`
     /// for padded buffers). Converts to positive XYB internally.
-    pub(crate) fn from_linear_planar(
+    ///
+    /// Use this when the caller already has linear-light channel buffers — for
+    /// example an encoder's reconstruction pipeline emitting linear f32 strips.
+    /// Avoids the interleave-to-RGBA round trip that
+    /// [`PrecomputedReference::new`] would require.
+    pub fn from_linear_planar(
         planes: [&[f32]; 3],
         width: usize,
         height: usize,
