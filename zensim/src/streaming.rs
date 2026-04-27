@@ -233,6 +233,36 @@ fn upsample_row_powx_add(src_row: &[f32], dst_row: &mut [f32], factor: usize, we
 #[cfg(feature = "threads")]
 static DEALLOC_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 
+/// Total bytes below which we drop synchronously instead of spawning a
+/// background thread. Empirically, thread spawn + atomic-bookkeeping cost
+/// (~20 µs) exceeds the cost of freeing a small allocation. We only pay
+/// the spawn for working sets large enough to justify async munmap.
+#[cfg(feature = "threads")]
+const DEALLOC_THREAD_THRESHOLD_BYTES: usize = 4 * 1024 * 1024;
+
+/// Drop one or two `[Vec<f32>; 3]` working buffers, choosing between
+/// synchronous drop (small) and a background thread (large).
+#[cfg(feature = "threads")]
+fn dealloc_planes(p1: [Vec<f32>; 3], p2: Option<[Vec<f32>; 3]>) {
+    let bytes = p1.iter().map(|v| v.capacity() * core::mem::size_of::<f32>()).sum::<usize>()
+        + p2.as_ref()
+            .map(|p| p.iter().map(|v| v.capacity() * core::mem::size_of::<f32>()).sum::<usize>())
+            .unwrap_or(0);
+    if bytes < DEALLOC_THREAD_THRESHOLD_BYTES {
+        drop(p1);
+        drop(p2);
+        return;
+    }
+    let mut guard = DEALLOC_THREAD.lock().unwrap();
+    if let Some(prev) = guard.take() {
+        let _ = prev.join();
+    }
+    *guard = Some(std::thread::spawn(move || {
+        drop(p1);
+        drop(p2);
+    }));
+}
+
 /// Per-scale feature accumulators. Collects raw sums across strips,
 /// finalized to ScaleStats at the end.
 struct ScaleAccumulators {
@@ -565,19 +595,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
         }
     }
 
-    // Background deallocation: move XYB planes to a background thread
-    // to avoid blocking on munmap syscalls.
+    // Async drop for large working sets (avoids blocking on munmap), sync
+    // drop for small ones (where spawn overhead dominates).
     #[cfg(feature = "threads")]
-    {
-        let mut guard = DEALLOC_THREAD.lock().unwrap();
-        if let Some(prev) = guard.take() {
-            let _ = prev.join();
-        }
-        *guard = Some(std::thread::spawn(move || {
-            drop(src_planes);
-            drop(dst_planes);
-        }));
-    }
+    dealloc_planes(src_planes, Some(dst_planes));
     #[cfg(not(feature = "threads"))]
     {
         drop(src_planes);
@@ -1742,15 +1763,7 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref(
 
     // Background deallocation for distorted planes
     #[cfg(feature = "threads")]
-    {
-        let mut guard = DEALLOC_THREAD.lock().unwrap();
-        if let Some(prev) = guard.take() {
-            let _ = prev.join();
-        }
-        *guard = Some(std::thread::spawn(move || {
-            drop(dst_planes);
-        }));
-    }
+    dealloc_planes(dst_planes, None);
     #[cfg(not(feature = "threads"))]
     drop(dst_planes);
 
@@ -1902,15 +1915,7 @@ fn compute_diffmap_from_xyb(
     }
 
     #[cfg(feature = "threads")]
-    {
-        let mut guard = DEALLOC_THREAD.lock().unwrap();
-        if let Some(prev) = guard.take() {
-            let _ = prev.join();
-        }
-        *guard = Some(std::thread::spawn(move || {
-            drop(dst_planes);
-        }));
-    }
+    dealloc_planes(dst_planes, None);
     #[cfg(not(feature = "threads"))]
     drop(dst_planes);
 
