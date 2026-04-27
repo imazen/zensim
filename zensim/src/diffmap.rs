@@ -403,6 +403,10 @@ fn apply_contrast_masking(
 /// Apply contrast masking for one row using precomputed integral images.
 ///
 /// `dims` is packed as `[width, iw, r]` to keep param count low for autoversion.
+///
+/// The inner range `[r, width-r-1]` has a constant box size `(y1-y0)*(2r+1)`,
+/// so its `inv_count` is hoisted out of the loop and the division becomes a
+/// multiply. Edge ranges keep the full per-pixel computation.
 #[autoversion]
 fn apply_masking_row(
     dm_row: &mut [f32],
@@ -416,24 +420,65 @@ fn apply_masking_row(
     let [width, iw, r] = dims;
     let y0 = dy.saturating_sub(r);
     let y1 = (dy + r + 1).min(height);
-    for (dx, dm_val) in dm_row[..width].iter_mut().enumerate() {
-        let x0 = dx.saturating_sub(r);
-        let x1 = (dx + r + 1).min(width);
+    let yh = y1 - y0;
 
-        // Integral image box query: sum over [y0..y1, x0..x1]
+    // Edge handling: for dx in [0, r) and [width-r, width), the box is clipped
+    // by image boundaries so the count varies per dx. Beyond that, count is
+    // constant — hoist its reciprocal and turn /count and /mask into multiplies.
+    let edge_lo = r.min(width);
+    let edge_hi = width.saturating_sub(r);
+
+    let masked_div = |dm_val: &mut f32, x0: usize, x1: usize| {
         let tl = y0 * iw + x0;
         let tr = y0 * iw + x1;
         let bl = y1 * iw + x0;
         let br = y1 * iw + x1;
-
         let sum = int_sum[br] - int_sum[tr] - int_sum[bl] + int_sum[tl];
         let sq = int_sq[br] - int_sq[tr] - int_sq[bl] + int_sq[tl];
-        let count = ((y1 - y0) * (x1 - x0)) as f64;
-
+        let count = (yh * (x1 - x0)) as f64;
         let mean = sum / count;
         let variance = (sq / count - mean * mean).max(0.0) as f32;
         let mask = 1.0 + strength * variance;
         *dm_val /= mask;
+    };
+
+    // Left edge (x1 - x0 < 2r+1)
+    for dx in 0..edge_lo {
+        let x0 = dx.saturating_sub(r);
+        let x1 = (dx + r + 1).min(width);
+        masked_div(&mut dm_row[dx], x0, x1);
+    }
+
+    // Interior: constant count = yh * (2r+1). Hoist inv_count out of the loop
+    // and keep the box-query + mean + variance computation in f64 (the
+    // box-corner subtractions can lose precision in f32 because the integral
+    // image accumulates over the whole image).
+    if edge_hi > edge_lo {
+        let count = (yh * (2 * r + 1)) as f64;
+        let inv_count = 1.0 / count;
+        let row_y0 = y0 * iw;
+        let row_y1 = y1 * iw;
+        for dx in edge_lo..edge_hi {
+            let x0 = dx - r;
+            let x1 = dx + r + 1;
+            let tl = row_y0 + x0;
+            let tr = row_y0 + x1;
+            let bl = row_y1 + x0;
+            let br = row_y1 + x1;
+            let sum = int_sum[br] - int_sum[tr] - int_sum[bl] + int_sum[tl];
+            let sq = int_sq[br] - int_sq[tr] - int_sq[bl] + int_sq[tl];
+            let mean = sum * inv_count;
+            let variance = (sq * inv_count - mean * mean).max(0.0) as f32;
+            let mask = 1.0 + strength * variance;
+            dm_row[dx] *= 1.0 / mask;
+        }
+    }
+
+    // Right edge
+    for dx in edge_hi.max(edge_lo)..width {
+        let x0 = dx.saturating_sub(r);
+        let x1 = (dx + r + 1).min(width);
+        masked_div(&mut dm_row[dx], x0, x1);
     }
 }
 
