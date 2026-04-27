@@ -131,80 +131,6 @@ pub fn create_montage(panels: &[&Bitmap], gap: u32) -> Bitmap {
     montage
 }
 
-/// Create a 3-panel comparison montage: Expected | Actual | Diff.
-///
-/// **Prefer [`create_annotated_montage`]** — it produces a labeled 2×2 grid
-/// with structural diff, colored constraint text, and a 9-cell spatial
-/// heatmap. This function produces a bare strip with no labels or stats.
-///
-/// # Panics
-///
-/// Panics if expected and actual have different dimensions.
-#[deprecated(
-    since = "0.2.2",
-    note = "use create_annotated_montage for labeled panels, \
-    structural diff, and spatial heatmap"
-)]
-pub fn create_comparison_montage(
-    expected: &Bitmap,
-    actual: &Bitmap,
-    amplification: u8,
-    gap: u32,
-) -> Bitmap {
-    let diff = generate_diff_image(expected, actual, amplification);
-    create_montage(&[expected, actual, &diff], gap)
-}
-
-/// Generate an amplified diff image from raw RGBA byte slices.
-///
-/// Convenience wrapper around [`generate_diff_image`] for callers working
-/// with `&[u8]` pixel buffers instead of `Bitmap`.
-///
-/// # Panics
-///
-/// Panics if either slice length doesn't match `width * height * 4`,
-/// or if expected and actual have different dimensions.
-pub fn generate_diff_image_raw(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    amplification: u8,
-) -> Bitmap {
-    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
-        .expect("expected: invalid dimensions for pixel data");
-    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
-        .expect("actual: invalid dimensions for pixel data");
-    generate_diff_image(&exp_img, &act_img, amplification)
-}
-
-/// Create a 3-panel comparison montage from raw RGBA byte slices.
-///
-/// Convenience wrapper around [`create_comparison_montage`].
-///
-/// **Prefer [`create_annotated_montage_raw`]** for labeled output with
-/// structural diff and spatial heatmap.
-#[deprecated(
-    since = "0.2.2",
-    note = "use create_annotated_montage_raw for labeled panels, \
-    structural diff, and spatial heatmap"
-)]
-#[allow(deprecated)]
-pub fn create_comparison_montage_raw(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    amplification: u8,
-    gap: u32,
-) -> Bitmap {
-    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
-        .expect("expected: invalid dimensions for pixel data");
-    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
-        .expect("actual: invalid dimensions for pixel data");
-    create_comparison_montage(&exp_img, &act_img, amplification, gap)
-}
-
 // ─── Structural diff (high-pass residual) ───────────────────────────────
 
 /// Generate a structural diff image showing where structure exists in one
@@ -291,22 +217,6 @@ pub fn generate_structural_diff(
     }
 
     diff
-}
-
-/// Generate structural diff from raw RGBA byte slices.
-pub fn generate_structural_diff_raw(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    blur_radius: u32,
-    amplification: u8,
-) -> Bitmap {
-    let exp_img =
-        Bitmap::from_raw(width, height, expected.to_vec()).expect("expected: invalid dimensions");
-    let act_img =
-        Bitmap::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
-    generate_structural_diff(&exp_img, &act_img, blur_radius, amplification)
 }
 
 /// Box blur on a grayscale f32 buffer. O(1) per pixel via running sums.
@@ -401,23 +311,6 @@ pub fn create_structural_montage(
     let pixel_diff = generate_diff_image(expected, actual, amplification);
     let struct_diff = generate_structural_diff(expected, actual, blur_radius, amplification);
     create_montage(&[expected, actual, &pixel_diff, &struct_diff], gap)
-}
-
-/// Create a 4-panel structural montage from raw RGBA byte slices.
-pub fn create_structural_montage_raw(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    amplification: u8,
-    gap: u32,
-    blur_radius: u32,
-) -> Bitmap {
-    let exp_img =
-        Bitmap::from_raw(width, height, expected.to_vec()).expect("expected: invalid dimensions");
-    let act_img =
-        Bitmap::from_raw(width, height, actual.to_vec()).expect("actual: invalid dimensions");
-    create_structural_montage(&exp_img, &act_img, amplification, gap, blur_radius)
 }
 
 // ─── Spatial analysis ───────────────────────────────────────────────────
@@ -627,76 +520,6 @@ pub fn spatial_analysis(
         rows,
         regions,
     }
-}
-
-/// Create a labeled 2×2 grid montage.
-///
-/// **Deprecated** — use [`MontageOptions::render`] instead:
-/// ```ignore
-/// MontageOptions::default().render(&expected, &actual, &AnnotationText::empty())
-/// ```
-#[deprecated(since = "0.2.3", note = "use MontageOptions::render() instead")]
-pub fn create_annotated_montage(
-    expected: &Bitmap,
-    actual: &Bitmap,
-    amplification: u8,
-    gap: u32,
-    annotation: &AnnotationText,
-) -> Bitmap {
-    MontageOptions {
-        amplification,
-        gap,
-        ..Default::default()
-    }
-    .render(expected, actual, annotation)
-}
-
-/// Create a labeled 2×2 grid montage from raw RGBA byte slices.
-///
-/// **Deprecated** — use [`MontageOptions::render`] instead.
-#[deprecated(since = "0.2.3", note = "use MontageOptions::render() instead")]
-pub fn create_annotated_montage_raw(
-    expected: &[u8],
-    actual: &[u8],
-    width: u32,
-    height: u32,
-    amplification: u8,
-    gap: u32,
-    annotation: &AnnotationText,
-) -> Bitmap {
-    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
-        .expect("expected: invalid dimensions for pixel data");
-    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
-        .expect("actual: invalid dimensions for pixel data");
-    #[allow(deprecated)]
-    create_annotated_montage(&exp_img, &act_img, amplification, gap, annotation)
-}
-
-/// Format a regression report as annotation text.
-///
-/// **Deprecated** — use [`AnnotationText::from_report`] instead.
-#[deprecated(since = "0.2.3", note = "use AnnotationText::from_report() instead")]
-pub fn format_annotation(
-    report: &crate::testing::RegressionReport,
-    tolerance: &crate::testing::RegressionTolerance,
-) -> AnnotationText {
-    AnnotationText::from_report(report, tolerance)
-}
-
-/// Format annotation with spatial analysis included.
-///
-/// **Deprecated** — use [`AnnotationText::from_report`] instead.
-/// Spatial heatmap is now computed automatically by [`MontageOptions::render`].
-#[deprecated(
-    since = "0.2.3",
-    note = "use AnnotationText::from_report(); spatial is now computed by MontageOptions::render()"
-)]
-pub fn format_annotation_spatial(
-    report: &crate::testing::RegressionReport,
-    tolerance: &crate::testing::RegressionTolerance,
-    _spatial: Option<&SpatialAnalysis>,
-) -> AnnotationText {
-    AnnotationText::from_report(report, tolerance)
 }
 
 fn render_montage_impl(
@@ -1292,13 +1115,6 @@ pub struct AnnotationText {
     /// Colored lines for the primary text block.
     /// Red for failing constraints, green for passing, gray for info.
     pub primary_lines: Vec<(String, [u8; 4])>,
-    /// Spatial analysis — ignored by [`MontageOptions::render`] which computes
-    /// its own from the pixel data. Retained for backward compatibility.
-    #[deprecated(
-        since = "0.2.3",
-        note = "spatial is now computed automatically by MontageOptions::render()"
-    )]
-    pub spatial: Option<SpatialAnalysis>,
     /// Extra text lines (alpha info, etc). Shown below heatmap if present.
     pub extra: String,
 }
@@ -1309,12 +1125,10 @@ const COLOR_DETAIL: [u8; 4] = [170, 170, 170, 255]; // dim gray
 
 impl AnnotationText {
     /// No annotation — produces a bare montage with no text or heatmap.
-    #[allow(deprecated)]
     pub fn empty() -> Self {
         Self {
             title: None,
             primary_lines: vec![],
-            spatial: None,
             extra: String::new(),
         }
     }
@@ -1423,11 +1237,9 @@ impl AnnotationText {
             );
         }
 
-        #[allow(deprecated)]
         Self {
             title: None,
             primary_lines: lines,
-            spatial: None,
             extra,
         }
     }
@@ -1774,37 +1586,6 @@ mod tests {
         let img = Bitmap::from_pixel(4, 4, [100; 4]);
         let up = pixelate_upscale(&img, 0);
         assert_eq!(up.dimensions(), (4, 4));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn comparison_montage_works() {
-        let expected = Bitmap::from_pixel(8, 8, [100, 100, 100, 255]);
-        let actual = Bitmap::from_pixel(8, 8, [101, 99, 100, 255]);
-        let montage = create_comparison_montage(&expected, &actual, 10, 2);
-        assert_eq!(montage.width(), 28); // 8+2+8+2+8
-        assert_eq!(montage.height(), 8);
-    }
-
-    #[test]
-    fn diff_raw_matches_typed() {
-        let exp = Bitmap::from_pixel(4, 4, [100, 100, 100, 255]);
-        let act = Bitmap::from_pixel(4, 4, [105, 100, 95, 255]);
-
-        let typed = generate_diff_image(&exp, &act, 10);
-        let raw = generate_diff_image_raw(exp.as_raw(), act.as_raw(), 4, 4, 10);
-        assert_eq!(typed, raw);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn comparison_montage_raw_matches_typed() {
-        let exp = Bitmap::from_pixel(4, 4, [100, 100, 100, 255]);
-        let act = Bitmap::from_pixel(4, 4, [105, 100, 95, 255]);
-
-        let typed = create_comparison_montage(&exp, &act, 10, 2);
-        let raw = create_comparison_montage_raw(exp.as_raw(), act.as_raw(), 4, 4, 10, 2);
-        assert_eq!(typed, raw);
     }
 
     #[test]

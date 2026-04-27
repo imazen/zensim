@@ -58,7 +58,8 @@ pub fn arch_matches(entry_tag: &str, current_tag: &str) -> bool {
 }
 
 /// All known architecture tags, for validation.
-pub const KNOWN_ARCH_TAGS: &[&str] = &[
+#[cfg(test)]
+pub(crate) const KNOWN_ARCH_TAGS: &[&str] = &[
     "x86_64",
     "x86_64-avx2",
     "x86_64-avx512",

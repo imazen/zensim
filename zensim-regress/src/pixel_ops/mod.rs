@@ -89,8 +89,8 @@ impl Bitmap {
         }
     }
 
-    /// Create a bitmap from raw RGBA8 bytes. Returns `None` if
-    /// `pixels.len() != width * height * 4`.
+    /// Create a bitmap from raw RGBA8 bytes (packed, no row padding).
+    /// Returns `None` if `pixels.len() != width * height * 4`.
     pub fn from_raw(width: u32, height: u32, pixels: Vec<u8>) -> Option<Self> {
         if pixels.len() != (width as usize) * (height as usize) * 4 {
             return None;
@@ -99,6 +99,31 @@ impl Bitmap {
             width,
             height,
             pixels,
+        })
+    }
+
+    /// Copy a packed RGBA8 byte slice into a new owned bitmap.
+    ///
+    /// Convenience for callers who hold `&[u8]` (e.g., decoder output)
+    /// and want an owned [`Bitmap`] for use with [`crate::diff_image`]
+    /// APIs. For zero-copy borrowing with stride support, use
+    /// [`BitmapRef::from_borrowed_rgba8_packed`] /
+    /// [`BitmapRef::from_borrowed_rgba8_strided`].
+    pub fn from_rgba_slice(rgba: &[u8], width: u32, height: u32) -> Result<Self, BitmapError> {
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or(BitmapError::InvalidDimensions { width, height })?;
+        if rgba.len() != expected {
+            return Err(BitmapError::BufferTooSmall {
+                required: expected,
+                actual: rgba.len(),
+            });
+        }
+        Ok(Self {
+            width,
+            height,
+            pixels: rgba.to_vec(),
         })
     }
 
@@ -209,7 +234,222 @@ impl Bitmap {
         )
         .map_err(|e| PngError::Encode(format!("{e:?}")))
     }
+
+    /// Borrow this bitmap as a [`BitmapRef`] (zero-copy, packed stride).
+    pub fn as_ref(&self) -> BitmapRef<'_> {
+        BitmapRef {
+            width: self.width,
+            height: self.height,
+            stride_bytes: self.width.saturating_mul(4),
+            data: &self.pixels,
+        }
+    }
 }
+
+impl<'a> From<&'a Bitmap> for BitmapRef<'a> {
+    fn from(b: &'a Bitmap) -> Self {
+        b.as_ref()
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// BitmapRef — borrowed RGBA8 view, stride-aware
+// ════════════════════════════════════════════════════════════════════════
+
+/// Borrowed RGBA8 bitmap view with stride support.
+///
+/// Wraps an external `&[u8]` buffer with arbitrary row stride for
+/// **zero-copy interop** with strided pixel sources (e.g.,
+/// `zenpixels::PixelSlice`, mmap'd image rows, decoder line buffers).
+///
+/// # Constructing from `zenpixels::PixelSlice`
+///
+/// `zenpixels` types are intentionally not part of this crate's public
+/// API surface (to keep version coalescing safe for downstream
+/// consumers). Callers that depend on both crates can build a
+/// [`BitmapRef`] from a `PixelSlice` using only its public accessors:
+///
+/// ```ignore
+/// // The caller depends on both zenpixels and zensim-regress directly.
+/// let bm = BitmapRef::from_borrowed_rgba8_strided(
+///     slice.as_strided_bytes(),
+///     slice.width(),
+///     slice.rows(),
+///     slice.stride() as u32,
+/// )?;
+/// ```
+///
+/// To feed a `BitmapRef` into a montage / diff API that expects an owned
+/// [`Bitmap`], call [`BitmapRef::to_owned`] (compacts strided rows into a
+/// packed `Vec<u8>`).
+#[derive(Copy, Clone, Debug)]
+pub struct BitmapRef<'a> {
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+    data: &'a [u8],
+}
+
+impl<'a> BitmapRef<'a> {
+    /// Borrow a packed RGBA8 buffer (stride = `width * 4`).
+    pub fn from_borrowed_rgba8_packed(
+        data: &'a [u8],
+        width: u32,
+        height: u32,
+    ) -> Result<Self, BitmapError> {
+        let stride = width
+            .checked_mul(4)
+            .ok_or(BitmapError::InvalidDimensions { width, height })?;
+        Self::from_borrowed_rgba8_strided(data, width, height, stride)
+    }
+
+    /// Borrow a strided RGBA8 buffer.
+    ///
+    /// `stride_bytes` is the byte distance between the start of
+    /// consecutive rows; it must be at least `width * 4`. The buffer
+    /// must contain at least `(height - 1) * stride_bytes + width * 4`
+    /// bytes (the last row need not have its trailing padding present).
+    pub fn from_borrowed_rgba8_strided(
+        data: &'a [u8],
+        width: u32,
+        height: u32,
+        stride_bytes: u32,
+    ) -> Result<Self, BitmapError> {
+        let row_bytes = width
+            .checked_mul(4)
+            .ok_or(BitmapError::InvalidDimensions { width, height })?;
+        if stride_bytes < row_bytes {
+            return Err(BitmapError::StrideTooSmall {
+                stride_bytes,
+                min_stride: row_bytes,
+            });
+        }
+        if height == 0 || width == 0 {
+            return Ok(Self {
+                width,
+                height,
+                stride_bytes,
+                data: &data[..0],
+            });
+        }
+        let required = (height as usize - 1)
+            .checked_mul(stride_bytes as usize)
+            .and_then(|n| n.checked_add(row_bytes as usize))
+            .ok_or(BitmapError::InvalidDimensions { width, height })?;
+        if data.len() < required {
+            return Err(BitmapError::BufferTooSmall {
+                required,
+                actual: data.len(),
+            });
+        }
+        Ok(Self {
+            width,
+            height,
+            stride_bytes,
+            data,
+        })
+    }
+
+    /// Width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    /// Height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    /// `(width, height)` in pixels.
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+    /// Stride between consecutive rows, in bytes.
+    pub fn stride_bytes(&self) -> u32 {
+        self.stride_bytes
+    }
+    /// `true` if `stride_bytes == width * 4` (no row padding).
+    pub fn is_packed(&self) -> bool {
+        self.stride_bytes == self.width.saturating_mul(4)
+    }
+    /// Borrow row `y` as `width * 4` bytes (no trailing padding).
+    /// Returns an empty slice if `y >= height`.
+    pub fn row(&self, y: u32) -> &[u8] {
+        if y >= self.height {
+            return &[];
+        }
+        let off = (y as usize) * (self.stride_bytes as usize);
+        let end = off + (self.width as usize) * 4;
+        &self.data[off..end]
+    }
+
+    /// Compact this strided view into an owned, packed [`Bitmap`].
+    ///
+    /// For packed inputs (`is_packed() == true`) this still allocates;
+    /// use [`Bitmap::from_rgba_slice`] if you'd rather copy from `&[u8]`
+    /// directly.
+    pub fn to_owned(&self) -> Bitmap {
+        let row_bytes = (self.width as usize) * 4;
+        let mut pixels = Vec::with_capacity(row_bytes * (self.height as usize));
+        for y in 0..self.height {
+            pixels.extend_from_slice(self.row(y));
+        }
+        Bitmap {
+            width: self.width,
+            height: self.height,
+            pixels,
+        }
+    }
+}
+
+/// Errors from constructing a [`Bitmap`] / [`BitmapRef`] from raw bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BitmapError {
+    /// `width * height * 4` overflowed `usize`.
+    InvalidDimensions {
+        /// The width that caused overflow.
+        width: u32,
+        /// The height that caused overflow.
+        height: u32,
+    },
+    /// Provided buffer was smaller than required.
+    BufferTooSmall {
+        /// Bytes required to address all `height` rows of `width` pixels at the given stride.
+        required: usize,
+        /// Bytes actually provided.
+        actual: usize,
+    },
+    /// Provided stride was smaller than `width * 4`.
+    StrideTooSmall {
+        /// Stride bytes provided.
+        stride_bytes: u32,
+        /// Minimum stride bytes (`width * 4`).
+        min_stride: u32,
+    },
+}
+
+impl std::fmt::Display for BitmapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BitmapError::InvalidDimensions { width, height } => {
+                write!(f, "invalid bitmap dimensions: {width}×{height}")
+            }
+            BitmapError::BufferTooSmall { required, actual } => {
+                write!(
+                    f,
+                    "buffer too small: required {required} bytes, got {actual}"
+                )
+            }
+            BitmapError::StrideTooSmall {
+                stride_bytes,
+                min_stride,
+            } => write!(
+                f,
+                "stride too small: {stride_bytes} bytes, must be at least {min_stride}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BitmapError {}
 
 /// PNG encode/decode error. Hides `zenpng` internals from the public
 /// API.
@@ -680,6 +920,81 @@ mod tests {
     fn bitmap_from_raw_validates_size() {
         assert!(Bitmap::from_raw(2, 2, vec![0u8; 16]).is_some());
         assert!(Bitmap::from_raw(2, 2, vec![0u8; 12]).is_none());
+    }
+
+    #[test]
+    fn bitmap_from_rgba_slice_copies() {
+        let bytes = [1, 2, 3, 255, 4, 5, 6, 255];
+        let b = Bitmap::from_rgba_slice(&bytes, 2, 1).unwrap();
+        assert_eq!(b.get_pixel(0, 0), [1, 2, 3, 255]);
+        assert_eq!(b.get_pixel(1, 0), [4, 5, 6, 255]);
+    }
+
+    #[test]
+    fn bitmap_from_rgba_slice_rejects_undersize() {
+        assert_eq!(
+            Bitmap::from_rgba_slice(&[0u8; 4], 2, 1).unwrap_err(),
+            BitmapError::BufferTooSmall {
+                required: 8,
+                actual: 4
+            }
+        );
+    }
+
+    #[test]
+    fn bitmapref_packed_round_trip() {
+        let bytes: Vec<u8> = (0..2 * 3 * 4).map(|i| i as u8).collect();
+        let r = BitmapRef::from_borrowed_rgba8_packed(&bytes, 2, 3).unwrap();
+        assert_eq!(r.dimensions(), (2, 3));
+        assert!(r.is_packed());
+        let owned = r.to_owned();
+        assert_eq!(owned.as_raw(), bytes);
+    }
+
+    #[test]
+    fn bitmapref_strided_compacts_row_padding() {
+        // 2x2 RGBA with 12-byte stride (2*4 = 8 bytes of pixels + 4 bytes pad).
+        let mut bytes = vec![0u8; 24];
+        bytes[0..8].copy_from_slice(&[1, 2, 3, 255, 4, 5, 6, 255]); // row 0
+        bytes[12..20].copy_from_slice(&[7, 8, 9, 255, 10, 11, 12, 255]); // row 1
+        let r = BitmapRef::from_borrowed_rgba8_strided(&bytes, 2, 2, 12).unwrap();
+        assert!(!r.is_packed());
+        assert_eq!(r.row(0), &[1, 2, 3, 255, 4, 5, 6, 255]);
+        assert_eq!(r.row(1), &[7, 8, 9, 255, 10, 11, 12, 255]);
+        let owned = r.to_owned();
+        assert_eq!(
+            owned.as_raw(),
+            &[1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]
+        );
+    }
+
+    #[test]
+    fn bitmapref_rejects_undersize_stride() {
+        let bytes = [0u8; 32];
+        assert!(matches!(
+            BitmapRef::from_borrowed_rgba8_strided(&bytes, 2, 2, 4),
+            Err(BitmapError::StrideTooSmall { .. })
+        ));
+    }
+
+    #[test]
+    fn bitmapref_rejects_short_buffer() {
+        let bytes = [0u8; 8];
+        // Need at least (2-1)*12 + 2*4 = 20 bytes for a 2x2 strided bitmap.
+        assert!(matches!(
+            BitmapRef::from_borrowed_rgba8_strided(&bytes, 2, 2, 12),
+            Err(BitmapError::BufferTooSmall { .. })
+        ));
+    }
+
+    #[test]
+    fn bitmap_as_ref_is_packed_view() {
+        let b = Bitmap::from_pixel(3, 2, [9, 9, 9, 255]);
+        let r: BitmapRef<'_> = (&b).into();
+        assert_eq!(r.dimensions(), (3, 2));
+        assert!(r.is_packed());
+        assert_eq!(r.stride_bytes(), 12);
+        assert_eq!(r.row(0), b.as_raw()[..12].to_vec().as_slice());
     }
 
     #[test]
