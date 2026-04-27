@@ -312,6 +312,49 @@ pub const GLYPH_W: u32 = BASE_CHAR_W;
 /// Base character height in pixels (before scaling).
 pub const GLYPH_H: u32 = BASE_CHAR_H;
 
+// ─── Cheap measurement (no rasterization) ──────────────────────────────
+
+/// Return the `(w, h)` a [`render_text_height`] call would produce —
+/// without actually rasterizing. Useful for two-pass layout where the
+/// measure pass needs sizes but the render pass will rasterize anyway.
+pub fn measure_text_height(text: &str, target_char_h: u32) -> (u32, u32) {
+    if target_char_h == 0 {
+        return (0, 0);
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let max_cols = lines.iter().map(|l| l.len()).max().unwrap_or(0) as u32;
+    let num_lines = lines.len() as u32;
+    if max_cols == 0 || num_lines == 0 {
+        return (0, 0);
+    }
+    let scaled_char_w = char_width_for_height(target_char_h);
+    (max_cols * scaled_char_w, num_lines * target_char_h)
+}
+
+/// Return the `(w, h)` a [`render_text_wrapped`] call would produce.
+pub fn measure_text_wrapped(text: &str, target_char_h: u32, max_width_px: u32) -> (u32, u32) {
+    if target_char_h == 0 || max_width_px == 0 {
+        return (0, 0);
+    }
+    let scaled_char_w = char_width_for_height(target_char_h);
+    let max_cols = (max_width_px / scaled_char_w.max(1)) as usize;
+    let wrapped = wrap_text(text, max_cols.max(1));
+    measure_text_height(&wrapped, target_char_h)
+}
+
+/// Return the `(w, h)` a [`render_lines_fitted`] call would produce.
+pub fn measure_lines_fitted(lines: &[(&str, [u8; 4])], max_width_px: u32) -> (u32, u32) {
+    if lines.is_empty() || max_width_px == 0 {
+        return (0, 0);
+    }
+    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(1) as u32;
+    let char_h = (max_width_px as f32 / longest as f32 * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
+        .floor() as u32;
+    let char_h = char_h.clamp(BASE_CHAR_H / 4, BASE_CHAR_H);
+    let char_w = char_width_for_height(char_h);
+    (longest * char_w, lines.len() as u32 * char_h)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -45,6 +45,8 @@ pub mod error;
 pub mod fetch;
 /// Minimal bitmap font for annotating diff images.
 pub mod font;
+/// Retained-tree layout primitives for composing labeled image grids.
+pub mod layout;
 /// Deterministic synthetic test image generators.
 pub mod generators;
 /// Pixel and file hashing (`ChecksumHasher` trait, `SeaHasher`).
