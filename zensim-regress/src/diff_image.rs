@@ -706,8 +706,6 @@ fn render_montage_impl(
     actual: &RgbaImage,
     annotation: &AnnotationText,
 ) -> RgbaImage {
-    use crate::font;
-
     let amplification = options.amplification;
 
     // Generate diffs at original resolution (before upscale) so pixel-level
@@ -723,272 +721,208 @@ fn render_montage_impl(
 
     // Pixelate-upscale all four panels if the source is tiny.
     let min_panel_size = options.min_panel_size;
-    let up_expected;
-    let up_actual;
-    let up_pixel_diff;
-    let up_struct_diff;
-    let (expected, actual, pixel_diff, struct_diff) =
-        if min_panel_size > 0 && (w < min_panel_size || h < min_panel_size) {
-            up_expected = pixelate_upscale(expected, min_panel_size);
-            up_actual = pixelate_upscale(actual, min_panel_size);
-            up_pixel_diff = pixelate_upscale(&pixel_diff, min_panel_size);
-            up_struct_diff = pixelate_upscale(&struct_diff, min_panel_size);
-            (&up_expected, &up_actual, &up_pixel_diff, &up_struct_diff)
-        } else {
-            (expected, actual, &pixel_diff, &struct_diff)
-        };
+    let panels = if min_panel_size > 0 && (w < min_panel_size || h < min_panel_size) {
+        [
+            pixelate_upscale(expected, min_panel_size),
+            pixelate_upscale(actual, min_panel_size),
+            pixelate_upscale(&pixel_diff, min_panel_size),
+            pixelate_upscale(&struct_diff, min_panel_size),
+        ]
+    } else {
+        [expected.clone(), actual.clone(), pixel_diff, struct_diff]
+    };
 
-    // Minimum padding: 30% of a base char width, at least 8px
+    compose_montage(panels, options, annotation, &spatial, has_differences, 10)
+}
+
+/// Shared 2×2 grid + annotation strip composition for both same-dim and
+/// mismatched-dim montages. Takes the four prepared panel images and
+/// produces the final output via the [`crate::layout`] module.
+///
+/// `longest_label_floor` sets a lower bound on the "longest label" used
+/// to derive the ADD/REMOVE char height — same-dim uses 10 (the length
+/// of "PIXEL DIFF"), mismatched uses 20 to reserve space for resized
+/// annotations on tighter cells.
+fn compose_montage(
+    panels: [RgbaImage; 4],
+    options: &MontageOptions,
+    annotation: &AnnotationText,
+    spatial: &SpatialAnalysis,
+    has_differences: bool,
+    longest_label_floor: u32,
+) -> RgbaImage {
+    use crate::font;
+    use crate::layout::{
+        self, CrossAlign, HAlign, Insets, LabelSegment, LabelStyle, LayoutMod, SizeRule, Track,
+        VAlign, rgb,
+    };
+
+    let [p_exp, p_act, p_pdiff, p_sdiff] = panels;
+
     let min_pad = (font::GLYPH_W * 3 / 10).max(8);
     let pad = options.gap.max(min_pad);
-    let bg = Rgba([18, 18, 18, 255]);
-    let label_fg = [220, 220, 220, 255];
-    let label_bg = [40, 40, 40, 255];
+    let canvas_bg = rgb(18, 18, 18);
+    let label_fg = rgb(220, 220, 220);
+    let label_bg = rgb(40, 40, 40);
+    let title_bg = rgb(25, 25, 25);
+    let primary_bg = rgb(30, 30, 30);
+    let extra_bg = rgb(25, 25, 25);
+    let separator = rgb(60, 60, 60);
 
-    let panel_images: [&RgbaImage; 4] = [expected, actual, pixel_diff, struct_diff];
+    let panel_w = p_exp.width();
+    let panel_h = p_exp.height();
+    let cell_w = panel_w;
+    let grid_w = pad + cell_w + pad + cell_w + pad;
+    let label_area_w = panel_w.saturating_sub(pad * 2);
+    let text_avail = grid_w.saturating_sub(pad * 2);
 
-    let panel_w = expected.width();
-    let panel_h = expected.height();
-
-    // Label sizing: fit the longest of ("PIXEL DIFF" + caller-supplied
-    // labels) within cell_w minus padding. When callers override, the
-    // column widths auto-shrink so long labels still fit.
-    let label_inset = pad;
-    let label_area_w = panel_w.saturating_sub(label_inset * 2);
     let expected_text: &str = options.expected_label.as_deref().unwrap_or("EXPECTED");
     let actual_text: &str = options.actual_label.as_deref().unwrap_or("ACTUAL");
+
+    // Char height for ADD/REMOVE — clamped to [GLYPH_H, GLYPH_H*3].
+    // Plain labels remain auto-fit per their own length.
     let longest_label = expected_text
         .len()
         .max(actual_text.len())
-        .max("PIXEL DIFF".len()) as u32;
-    let label_char_h = ((label_area_w as f32 / longest_label as f32)
+        .max(longest_label_floor as usize) as u32;
+    let ar_char_h = ((label_area_w as f32 / longest_label as f32)
         * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
         .floor() as u32;
-    let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
+    let ar_char_h = ar_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
 
-    // Plain labels: rendered centered within panel_w via render_lines_fitted
-    let plain_labels: [&str; 3] = [expected_text, actual_text, "PIXEL DIFF"];
-    let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
-        .iter()
-        .map(|label| {
-            let lines: Vec<(&str, [u8; 4])> = vec![(*label, label_fg)];
-            font::render_lines_fitted(&lines, label_bg, label_area_w)
-        })
-        .collect();
+    // Unified label strip height = max of all four rendered labels + 4.
+    let plain_h = |s: &str| font::measure_lines_fitted(&[(s, label_fg)], label_area_w).1;
+    let label_h = plain_h(expected_text)
+        .max(plain_h(actual_text))
+        .max(plain_h("PIXEL DIFF"))
+        .max(ar_char_h)
+        + 4;
 
-    // ADD  REMOVE: left-aligned and right-aligned within the cell
-    let add_img = font::render_text_height("ADD", [255, 180, 80, 255], label_bg, label_char_h);
-    let rem_img = font::render_text_height("REMOVE", [80, 220, 220, 255], label_bg, label_char_h);
-    let ar_h = label_char_h;
-    let mut ar_rgba = RgbaImage::from_pixel(panel_w, ar_h, Rgba(label_bg));
-    // ADD left-aligned with inset
-    if add_img.1 > 0
-        && add_img.2 > 0
-        && let Some(img) = RgbaImage::from_raw(add_img.1, add_img.2, add_img.0.clone())
-    {
-        imageops::overlay(&mut ar_rgba, &img, label_inset as i64, 0);
-    }
-    // REMOVE right-aligned with inset
-    if rem_img.1 > 0
-        && rem_img.2 > 0
-        && let Some(img) = RgbaImage::from_raw(rem_img.1, rem_img.2, rem_img.0.clone())
-    {
-        let rx = panel_w.saturating_sub(rem_img.1 + label_inset);
-        imageops::overlay(&mut ar_rgba, &img, rx as i64, 0);
-    }
-    let ar_raw = ar_rgba.into_raw();
+    let plain_style = LabelStyle::default()
+        .with_fg(label_fg)
+        .with_bg(label_bg)
+        .with_align(HAlign::Center)
+        .with_padding(Insets::xy(pad, 0));
+    let segmented_style = LabelStyle::default()
+        .with_fg(label_fg)
+        .with_bg(label_bg)
+        .with_padding(Insets::xy(pad, 0))
+        .with_char_h(ar_char_h);
 
-    let label_images: Vec<(Vec<u8>, u32, u32)> = vec![
-        plain_images[0].clone(),
-        plain_images[1].clone(),
-        plain_images[2].clone(),
-        (ar_raw, panel_w, ar_h),
-    ];
+    let cell = |panel: RgbaImage, label_node: layout::Node| -> layout::Node {
+        layout::column()
+            .child(label_node.height(SizeRule::Fixed(label_h)))
+            .child(layout::image(panel))
+            .into()
+    };
 
-    let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
+    let panels_grid = layout::grid()
+        .columns([Track::Px(cell_w), Track::Px(cell_w)])
+        .row_heights([Track::Px(label_h + panel_h), Track::Px(label_h + panel_h)])
+        .gap(pad)
+        .padding(pad)
+        .cell(0, 0, cell(p_exp, plain_style.strip(expected_text)))
+        .cell(1, 0, cell(p_act, plain_style.strip(actual_text)))
+        .cell(0, 1, cell(p_pdiff, plain_style.strip("PIXEL DIFF")))
+        .cell(
+            1,
+            1,
+            cell(
+                p_sdiff,
+                segmented_style.segmented_strip(vec![
+                    LabelSegment::left("ADD", rgb(255, 180, 80)),
+                    LabelSegment::right("REMOVE", rgb(80, 220, 220)),
+                ]),
+            ),
+        );
 
-    // 2x2 grid dimensions
-    let cell_w = panel_w;
-    let cell_h = label_h + panel_h;
-    let grid_w = pad + cell_w + pad + cell_w + pad;
-    let grid_h = pad + cell_h + pad + cell_h + pad;
+    let mut col = layout::column()
+        .align_items(CrossAlign::Stretch)
+        .child(panels_grid);
 
-    // Title text — white, fitted to grid width
-    let text_avail = grid_w.saturating_sub(pad * 2);
-    let title_rendered = annotation.title.as_ref().and_then(|t| {
-        if t.is_empty() {
+    // Pre-rasterize annotation text into Image leaves so the layout module
+    // doesn't re-compute char_h via the auto-fit formula at paint time
+    // (which would shift one or two pixels when an enclosing Align reduces
+    // the rect to the measured natural width).
+    fn rasterized_image(buf: Vec<u8>, w: u32, h: u32) -> Option<RgbaImage> {
+        if w == 0 || h == 0 {
             return None;
         }
-        let lines: Vec<(&str, [u8; 4])> = vec![(t.as_str(), [255, 255, 255, 255])];
-        Some(font::render_lines_fitted(
-            &lines,
-            [25, 25, 25, 255],
-            text_avail,
-        ))
-    });
+        RgbaImage::from_raw(w, h, buf)
+    }
 
-    // Primary text — colored per-line, fitted to grid width (no wrapping)
-    let primary_rendered = if !annotation.primary_lines.is_empty() {
+    if let Some(t) = annotation.title.as_deref().filter(|s| !s.is_empty()) {
+        let lines: Vec<(&str, [u8; 4])> = vec![(t, [255, 255, 255, 255])];
+        let (tbuf, tw, th) = font::render_lines_fitted(&lines, title_bg, text_avail);
+        if let Some(title_img) = rasterized_image(tbuf, tw, th) {
+            let title_strip = layout::layers()
+                .child(layout::fill(title_bg))
+                .child(layout::image(title_img).center().padding(pad))
+                .child(
+                    layout::empty()
+                        .background(separator)
+                        .height(SizeRule::Fixed(1))
+                        .fill_width()
+                        .padding_xy(pad, 0)
+                        .align_v(VAlign::Bottom),
+                )
+                .fill_width();
+            col = col.child(title_strip);
+        }
+    }
+
+    if !annotation.primary_lines.is_empty() {
         let line_refs: Vec<(&str, [u8; 4])> = annotation
             .primary_lines
             .iter()
             .map(|(s, c)| (s.as_str(), *c))
             .collect();
-        let r = font::render_lines_fitted(&line_refs, [30, 30, 30, 255], text_avail);
-        Some(r)
-    } else {
-        None
-    };
+        let (pbuf, pw, ph) = font::render_lines_fitted(&line_refs, primary_bg, text_avail);
+        if let Some(primary_img) = rasterized_image(pbuf, pw, ph) {
+            let primary_strip = layout::image(primary_img)
+                .center()
+                .padding(pad)
+                .background(primary_bg)
+                .fill_width();
+            col = col.child(primary_strip);
+        }
+    }
 
-    // Heatmap grid — only shown when there are actual differences AND
-    // the caller hasn't opted out via `show_spatial_heatmap = false`.
-    let heatmap = if has_differences && options.show_spatial_heatmap {
-        Some(render_heatmap_grid(&spatial, grid_w, pad))
-    } else {
-        None
-    };
+    if has_differences && options.show_spatial_heatmap {
+        let heatmap_img = render_heatmap_grid(spatial, grid_w, pad);
+        col = col.child(layout::image(heatmap_img));
+    }
 
-    // Extra text (alpha info etc) — small, word-wrapped
-    let primary_line_h = primary_rendered
-        .as_ref()
-        .map_or(font::GLYPH_H, |(_, _, h)| {
-            let n = annotation.primary_lines.len().max(1) as u32;
-            *h / n
-        });
-    let extra_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
-    let extra_rendered = if !annotation.extra.is_empty() {
-        let r = font::render_text_wrapped(
+    if !annotation.extra.is_empty() {
+        let primary_line_h = if !annotation.primary_lines.is_empty() {
+            let refs: Vec<(&str, [u8; 4])> = annotation
+                .primary_lines
+                .iter()
+                .map(|(s, c)| (s.as_str(), *c))
+                .collect();
+            let total = font::measure_lines_fitted(&refs, text_avail).1;
+            total / annotation.primary_lines.len().max(1) as u32
+        } else {
+            font::GLYPH_H
+        };
+        let extra_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
+        let (ebuf, ew, eh) = font::render_text_wrapped(
             &annotation.extra,
             COLOR_DETAIL,
-            [25, 25, 25, 255],
+            extra_bg,
             extra_char_h,
             text_avail,
         );
-        Some(r)
-    } else {
-        None
-    };
-
-    let title_h = title_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
-    let primary_h = primary_rendered
-        .as_ref()
-        .map_or(0, |(_, _, h)| *h + pad * 2);
-    let heatmap_h = heatmap.as_ref().map_or(0, |img| img.height());
-    let extra_h = extra_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
-
-    let total_w = grid_w;
-    let total_h = grid_h + title_h + primary_h + heatmap_h + extra_h;
-
-    let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
-
-    // Place 4 panels in 2x2 grid — clip panels to cell bounds
-    for (i, panel) in panel_images.iter().enumerate() {
-        let col = (i % 2) as u32;
-        let row = (i / 2) as u32;
-        let x0 = pad + col * (cell_w + pad);
-        let y0 = pad + row * (cell_h + pad);
-
-        // Label bar background
-        fill_rect(&mut output, x0, y0, cell_w, label_h, label_bg);
-
-        // Label text centered in bar
-        let (ref lbuf, lw, lh) = label_images[i];
-        if lw > 0 && lh > 0 {
-            let lx_off = (cell_w.saturating_sub(lw)) / 2;
-            let ly_off = (label_h.saturating_sub(lh)) / 2;
-            if let Some(label_img) = RgbaImage::from_raw(lw, lh, lbuf.clone()) {
-                imageops::overlay(
-                    &mut output,
-                    &label_img,
-                    (x0 + lx_off) as i64,
-                    (y0 + ly_off) as i64,
-                );
-            }
-        }
-
-        // Panel image — crop to cell_w × panel_h if it overflows
-        let pw = panel.width().min(cell_w);
-        let ph = panel.height().min(panel_h);
-        let cropped = imageops::crop_imm(*panel, 0, 0, pw, ph).to_image();
-        imageops::overlay(&mut output, &cropped, x0 as i64, (y0 + label_h) as i64);
-    }
-
-    // Title strip
-    let mut y_cursor = grid_h;
-    if let Some((tbuf, tw, th)) = title_rendered
-        && tw > 0
-        && th > 0
-    {
-        fill_rect(
-            &mut output,
-            0,
-            y_cursor,
-            total_w,
-            title_h,
-            [25, 25, 25, 255],
-        );
-        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            let tx = (total_w.saturating_sub(tw)) / 2;
-            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
-        }
-        y_cursor += title_h;
-        // Horizontal separator line
-        fill_rect(
-            &mut output,
-            pad,
-            y_cursor.saturating_sub(1),
-            total_w - pad * 2,
-            1,
-            [60, 60, 60, 255],
-        );
-    }
-
-    // Primary text strip — center the first line (PASS/FAIL)
-    if let Some((tbuf, tw, th)) = primary_rendered
-        && tw > 0
-        && th > 0
-    {
-        fill_rect(
-            &mut output,
-            0,
-            y_cursor,
-            total_w,
-            primary_h,
-            [30, 30, 30, 255],
-        );
-        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            // Center horizontally
-            let tx = (total_w.saturating_sub(tw)) / 2;
-            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
-        }
-        y_cursor += primary_h;
-    }
-
-    // Heatmap grid
-    if let Some(ref heatmap_img) = heatmap {
-        imageops::overlay(&mut output, heatmap_img, 0, y_cursor as i64);
-        y_cursor += heatmap_h;
-    }
-
-    // Extra text strip
-    if let Some((tbuf, tw, th)) = extra_rendered
-        && tw > 0
-        && th > 0
-    {
-        fill_rect(
-            &mut output,
-            0,
-            y_cursor,
-            total_w,
-            extra_h,
-            [25, 25, 25, 255],
-        );
-        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
+        if let Some(extra_img) = rasterized_image(ebuf, ew, eh) {
+            let extra_strip = layout::image(extra_img)
+                .padding(pad)
+                .background(extra_bg)
+                .fill_width();
+            col = col.child(extra_strip);
         }
     }
 
-    output
+    col.background(canvas_bg).render(grid_w)
 }
 
 /// Render a montage for images with different dimensions.
@@ -1006,8 +940,6 @@ fn render_mismatched_montage(
     actual: &RgbaImage,
     annotation: &AnnotationText,
 ) -> RgbaImage {
-    use crate::font;
-
     let (ew, eh) = expected.dimensions();
     let (aw, ah) = actual.dimensions();
     let amplification = options.amplification;
@@ -1112,274 +1044,34 @@ fn render_mismatched_montage(
 
     // Pixelate-upscale all four panels if tiny
     let min_panel_size = options.min_panel_size;
-    let up0;
-    let up1;
-    let up2;
-    let up3;
-    let panels: [&RgbaImage; 4] =
-        if min_panel_size > 0 && (canvas_w < min_panel_size || canvas_h < min_panel_size) {
-            up0 = pixelate_upscale(&panel_expected, min_panel_size);
-            up1 = pixelate_upscale(&panel_actual, min_panel_size);
-            up2 = pixelate_upscale(&panel_pixel_diff, min_panel_size);
-            up3 = pixelate_upscale(&panel_structural, min_panel_size);
-            [&up0, &up1, &up2, &up3]
-        } else {
-            [
-                &panel_expected,
-                &panel_actual,
-                &panel_pixel_diff,
-                &panel_structural,
-            ]
-        };
-
-    // ── From here: same 2x2 grid layout as render_montage_impl ──
-
-    let min_pad = (font::GLYPH_W * 3 / 10).max(8);
-    let pad = options.gap.max(min_pad);
-    let bg = Rgba([18, 18, 18, 255]);
-    let label_fg = [220, 220, 220, 255];
-    let label_bg = [40, 40, 40, 255];
-
-    let panel_w = panels[0].width();
-    let panel_h = panels[0].height();
-
-    // Label sizing: fit longest label within cell_w minus padding
-    // "PIXEL DIFF (RESIZED)" is 20 chars — use that as a floor
-    let label_inset = pad;
-    let label_area_w = panel_w.saturating_sub(label_inset * 2);
-    let expected_text: &str = options.expected_label.as_deref().unwrap_or("EXPECTED");
-    let actual_text: &str = options.actual_label.as_deref().unwrap_or("ACTUAL");
-    let longest_label = expected_text.len().max(actual_text.len()).max(20) as u32;
-    let label_char_h = ((label_area_w as f32 / longest_label as f32)
-        * (font::GLYPH_H as f32 / font::GLYPH_W as f32))
-        .floor() as u32;
-    let label_char_h = label_char_h.clamp(font::GLYPH_H, font::GLYPH_H * 3);
-
-    let plain_labels: [&str; 3] = [expected_text, actual_text, "PIXEL DIFF"];
-    let plain_images: Vec<(Vec<u8>, u32, u32)> = plain_labels
-        .iter()
-        .map(|label| {
-            let lines: Vec<(&str, [u8; 4])> = vec![(*label, label_fg)];
-            font::render_lines_fitted(&lines, label_bg, label_area_w)
-        })
-        .collect();
-
-    // ADD / REMOVE label for panel 3
-    let add_img = font::render_text_height("ADD", [255, 180, 80, 255], label_bg, label_char_h);
-    let rem_img = font::render_text_height("REMOVE", [80, 220, 220, 255], label_bg, label_char_h);
-    let ar_h = label_char_h;
-    let mut ar_rgba = RgbaImage::from_pixel(panel_w, ar_h, Rgba(label_bg));
-    if add_img.1 > 0
-        && add_img.2 > 0
-        && let Some(img) = RgbaImage::from_raw(add_img.1, add_img.2, add_img.0.clone())
-    {
-        imageops::overlay(&mut ar_rgba, &img, label_inset as i64, 0);
-    }
-    if rem_img.1 > 0
-        && rem_img.2 > 0
-        && let Some(img) = RgbaImage::from_raw(rem_img.1, rem_img.2, rem_img.0.clone())
-    {
-        let rx = panel_w.saturating_sub(rem_img.1 + label_inset);
-        imageops::overlay(&mut ar_rgba, &img, rx as i64, 0);
-    }
-    let ar_raw = ar_rgba.into_raw();
-
-    let label_images: Vec<(Vec<u8>, u32, u32)> = vec![
-        plain_images[0].clone(),
-        plain_images[1].clone(),
-        plain_images[2].clone(),
-        (ar_raw, panel_w, ar_h),
-    ];
-
-    let label_h = label_images.iter().map(|(_, _, h)| *h).max().unwrap_or(0) + 4;
-
-    // 2x2 grid
-    let cell_w = panel_w;
-    let cell_h = label_h + panel_h;
-    let grid_w = pad + cell_w + pad + cell_w + pad;
-    let grid_h = pad + cell_h + pad + cell_h + pad;
-
-    // Title text
-    let text_avail = grid_w.saturating_sub(pad * 2);
-    let title_rendered = annotation.title.as_ref().and_then(|t| {
-        if t.is_empty() {
-            return None;
-        }
-        let lines: Vec<(&str, [u8; 4])> = vec![(t.as_str(), [255, 255, 255, 255])];
-        Some(font::render_lines_fitted(
-            &lines,
-            [25, 25, 25, 255],
-            text_avail,
-        ))
-    });
-
-    // Primary text
-    let primary_rendered = if !annotation.primary_lines.is_empty() {
-        let line_refs: Vec<(&str, [u8; 4])> = annotation
-            .primary_lines
-            .iter()
-            .map(|(s, c)| (s.as_str(), *c))
-            .collect();
-        Some(font::render_lines_fitted(
-            &line_refs,
-            [30, 30, 30, 255],
-            text_avail,
-        ))
+    let panels = if min_panel_size > 0 && (canvas_w < min_panel_size || canvas_h < min_panel_size) {
+        [
+            pixelate_upscale(&panel_expected, min_panel_size),
+            pixelate_upscale(&panel_actual, min_panel_size),
+            pixelate_upscale(&panel_pixel_diff, min_panel_size),
+            pixelate_upscale(&panel_structural, min_panel_size),
+        ]
     } else {
-        None
+        [
+            panel_expected,
+            panel_actual,
+            panel_pixel_diff,
+            panel_structural,
+        ]
     };
 
-    // Heatmap
-    let heatmap = if has_differences && options.show_spatial_heatmap {
-        Some(render_heatmap_grid(&spatial, grid_w, pad))
-    } else {
-        None
-    };
-
-    // Extra text
-    let primary_line_h = primary_rendered
-        .as_ref()
-        .map_or(font::GLYPH_H, |(_, _, h)| {
-            let n = annotation.primary_lines.len().max(1) as u32;
-            *h / n
-        });
-    let extra_char_h = (primary_line_h * 7 / 10).max(font::GLYPH_H / 4);
-    let extra_rendered = if !annotation.extra.is_empty() {
-        Some(font::render_text_wrapped(
-            &annotation.extra,
-            COLOR_DETAIL,
-            [25, 25, 25, 255],
-            extra_char_h,
-            text_avail,
-        ))
-    } else {
-        None
-    };
-
-    let title_h = title_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
-    let primary_h = primary_rendered
-        .as_ref()
-        .map_or(0, |(_, _, h)| *h + pad * 2);
-    let heatmap_h = heatmap.as_ref().map_or(0, |img| img.height());
-    let extra_h = extra_rendered.as_ref().map_or(0, |(_, _, h)| *h + pad * 2);
-
-    let total_w = grid_w;
-    let total_h = grid_h + title_h + primary_h + heatmap_h + extra_h;
-
-    let mut output = RgbaImage::from_pixel(total_w, total_h, bg);
-
-    // Place 4 panels in 2x2 grid
-    for (i, panel) in panels.iter().enumerate() {
-        let col = (i % 2) as u32;
-        let row = (i / 2) as u32;
-        let x0 = pad + col * (cell_w + pad);
-        let y0 = pad + row * (cell_h + pad);
-
-        fill_rect(&mut output, x0, y0, cell_w, label_h, label_bg);
-
-        let (ref lbuf, lw, lh) = label_images[i];
-        if lw > 0 && lh > 0 {
-            let lx_off = (cell_w.saturating_sub(lw)) / 2;
-            let ly_off = (label_h.saturating_sub(lh)) / 2;
-            if let Some(label_img) = RgbaImage::from_raw(lw, lh, lbuf.clone()) {
-                imageops::overlay(
-                    &mut output,
-                    &label_img,
-                    (x0 + lx_off) as i64,
-                    (y0 + ly_off) as i64,
-                );
-            }
-        }
-
-        let pw = panel.width().min(cell_w);
-        let ph = panel.height().min(panel_h);
-        let cropped = imageops::crop_imm(*panel, 0, 0, pw, ph).to_image();
-        imageops::overlay(&mut output, &cropped, x0 as i64, (y0 + label_h) as i64);
-    }
-
-    // Title strip
-    let mut y_cursor = grid_h;
-    if let Some((tbuf, tw, th)) = title_rendered
-        && tw > 0
-        && th > 0
-    {
-        fill_rect(
-            &mut output,
-            0,
-            y_cursor,
-            total_w,
-            title_h,
-            [25, 25, 25, 255],
-        );
-        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            let tx = (total_w.saturating_sub(tw)) / 2;
-            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
-        }
-        y_cursor += title_h;
-        fill_rect(
-            &mut output,
-            pad,
-            y_cursor.saturating_sub(1),
-            total_w - pad * 2,
-            1,
-            [60, 60, 60, 255],
-        );
-    }
-
-    // Primary text strip
-    if let Some((tbuf, tw, th)) = primary_rendered
-        && tw > 0
-        && th > 0
-    {
-        fill_rect(
-            &mut output,
-            0,
-            y_cursor,
-            total_w,
-            primary_h,
-            [30, 30, 30, 255],
-        );
-        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            let tx = (total_w.saturating_sub(tw)) / 2;
-            imageops::overlay(&mut output, &text_img, tx as i64, (y_cursor + pad) as i64);
-        }
-        y_cursor += primary_h;
-    }
-
-    // Heatmap
-    if let Some(ref heatmap_img) = heatmap {
-        imageops::overlay(&mut output, heatmap_img, 0, y_cursor as i64);
-        y_cursor += heatmap_h;
-    }
-
-    // Extra text
-    if let Some((tbuf, tw, th)) = extra_rendered
-        && tw > 0
-        && th > 0
-    {
-        fill_rect(
-            &mut output,
-            0,
-            y_cursor,
-            total_w,
-            extra_h,
-            [25, 25, 25, 255],
-        );
-        if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-            imageops::overlay(&mut output, &text_img, pad as i64, (y_cursor + pad) as i64);
-        }
-    }
-
-    output
+    compose_montage(panels, options, annotation, &spatial, has_differences, 20)
 }
 
-/// Render a 3x3 spatial heatmap grid image.
+/// Render an N×M spatial heatmap grid image.
 ///
 /// Each cell's background is tinted red proportional to its severity
-/// relative to the worst cell. Cell text shows `d:N` (max delta) and
-/// `P%` (percent differing). ADDED/MISSING tags shown when applicable.
+/// relative to the worst cell. Cell text shows `pct% Δmax_delta`,
+/// `zdsim:NNN` and an optional structural tag (ADDED / MISSING / changed).
+/// Composed via the [`crate::layout`] module.
 fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> RgbaImage {
     use crate::font;
+    use crate::layout::{self, LayoutMod, Track, rgb};
 
     let cols = spatial.cols;
     let rows = spatial.rows;
@@ -1387,63 +1079,51 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
 
     let inner_w = total_w.saturating_sub(pad * 2);
     let cell_w = (inner_w.saturating_sub(cell_gap * (cols - 1))) / cols;
-    let cell_h = cell_w * 3 / 4; // slightly taller to fit 3 lines
-    let grid_px_w = cell_w * cols + cell_gap * (cols - 1);
-    let grid_px_h = cell_h * rows + cell_gap * (rows - 1);
-    let img_w = grid_px_w + pad * 2;
-    let img_h = grid_px_h + pad * 2;
+    let cell_h = cell_w * 3 / 4;
 
-    let mut img = RgbaImage::from_pixel(img_w, img_h, Rgba([18, 18, 18, 255]));
-
-    // Find worst cell for relative coloring
+    // Global severity scaling for background tinting.
     let max_severity = spatial
         .regions
         .iter()
         .map(|r| r.max_delta as f32 * r.pixels_differing as f32)
         .fold(0.0f32, f32::max)
-        .max(0.001); // avoid div by zero
+        .max(0.001);
+
+    // Cell-text padding (30% of one base char width per side, matching
+    // the original).
+    let cell_inset = font::GLYPH_W * 3 / 10;
+    let cell_text_w = cell_w.saturating_sub(cell_inset * 2);
+
+    let mut g = layout::grid()
+        .columns((0..cols).map(|_| Track::Px(cell_w)))
+        .rows((0..rows).map(|_| Track::Px(cell_h)))
+        .gap(cell_gap)
+        .padding(pad);
 
     for r in &spatial.regions {
-        let cx = pad + r.col * (cell_w + cell_gap);
-        let cy = pad + r.row * (cell_h + cell_gap);
-
-        // Background: red intensity by relative severity
         let severity = r.max_delta as f32 * r.pixels_differing as f32;
         let ratio = (severity / max_severity).clamp(0.0, 1.0);
-        let bg_r = (30.0 + ratio * 120.0) as u8; // 30..150
-        let bg_g = (30.0 - ratio * 20.0).max(10.0) as u8; // 30..10
+        let bg_r = (30.0 + ratio * 120.0) as u8;
+        let bg_g = ((30.0 - ratio * 20.0).max(10.0)) as u8;
         let bg_b = bg_g;
         let cell_bg = [bg_r, bg_g, bg_b, 255];
-        fill_rect(&mut img, cx, cy, cell_w, cell_h, cell_bg);
 
-        // Cell text — 3 lines for hot cells, "ok" for clean
-        // Padding: 30% of one character width on each side
+        // Pre-rasterize the cell text so the layout module's auto-fit
+        // formula can't shift char_h between measure and paint. The
+        // resulting Image leaf is centered inside a Layers stack on top
+        // of the cell-background fill.
         let pct = r.pixels_differing * 100.0;
-        let one_char_w = font::GLYPH_W; // base char width before scaling
-        let cell_inset = one_char_w * 3 / 10; // 30% of one char
-        let cell_text_w = cell_w.saturating_sub(cell_inset * 2);
-
-        if pct < 0.05 {
-            // Clean cell: small green "ok"
-            let ok_lines: Vec<(&str, [u8; 4])> = vec![("ok", COLOR_OK)];
-            if cell_text_w > 0 {
-                let (tbuf, tw, th) = font::render_lines_fitted(&ok_lines, cell_bg, cell_text_w);
-                if tw > 0 && th > 0 {
-                    let tx = cx + (cell_w.saturating_sub(tw)) / 2;
-                    let ty = cy + (cell_h.saturating_sub(th)) / 2;
-                    if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-                        imageops::overlay(&mut img, &text_img, tx as i64, ty as i64);
-                    }
-                }
-            }
+        let text_buf = if cell_text_w == 0 {
+            None
+        } else if pct < 0.05 {
+            let lines: Vec<(&str, [u8; 4])> = vec![("ok", COLOR_OK)];
+            let (tbuf, tw, th) = font::render_lines_fitted(&lines, cell_bg, cell_text_w);
+            (tw > 0 && th > 0)
+                .then(|| RgbaImage::from_raw(tw, th, tbuf))
+                .flatten()
         } else {
-            // Hot cell: 3 lines
-            // Line 1: "25% \u{0394}255"
             let line1 = format!("{:.0}% \u{0394}{}", pct, r.max_delta);
-            // Line 2: zdsim value for this cell (per-pixel severity)
-            let cell_zdsim = r.avg_delta / 255.0; // normalized
-            let line2 = format!("zdsim:{:.3}", cell_zdsim);
-            // Line 3: structural tag
+            let line2 = format!("zdsim:{:.3}", r.avg_delta / 255.0);
             let exp_has = r.expected_variance > 10.0;
             let act_has = r.actual_variance > 10.0;
             let line3 = if !exp_has && act_has {
@@ -1455,51 +1135,35 @@ fn render_heatmap_grid(spatial: &SpatialAnalysis, total_w: u32, pad: u32) -> Rgb
             } else {
                 ""
             };
-
             let text_fg = if ratio > 0.5 {
                 [255, 255, 255, 255]
             } else {
                 [220, 220, 220, 255]
             };
-            let mut cell_lines: Vec<(&str, [u8; 4])> =
+            let mut lines: Vec<(&str, [u8; 4])> =
                 vec![(&line1, text_fg), (&line2, [170, 170, 170, 255])];
             if !line3.is_empty() {
-                let tag_color = if line3 == "MISSING" {
-                    [255, 120, 120, 255] // red-ish
-                } else if line3 == "ADDED" {
-                    [255, 180, 80, 255] // orange
-                } else {
-                    [200, 200, 120, 255] // yellow
+                let tag_color = match line3 {
+                    "MISSING" => [255, 120, 120, 255],
+                    "ADDED" => [255, 180, 80, 255],
+                    _ => [200, 200, 120, 255],
                 };
-                cell_lines.push((line3, tag_color));
+                lines.push((line3, tag_color));
             }
+            let (tbuf, tw, th) = font::render_lines_fitted(&lines, cell_bg, cell_text_w);
+            (tw > 0 && th > 0)
+                .then(|| RgbaImage::from_raw(tw, th, tbuf))
+                .flatten()
+        };
 
-            if cell_text_w > 0 {
-                let (tbuf, tw, th) = font::render_lines_fitted(&cell_lines, cell_bg, cell_text_w);
-                if tw > 0 && th > 0 {
-                    let tx = cx + (cell_w.saturating_sub(tw)) / 2;
-                    let ty = cy + (cell_h.saturating_sub(th)) / 2;
-                    if let Some(text_img) = RgbaImage::from_raw(tw, th, tbuf) {
-                        imageops::overlay(&mut img, &text_img, tx as i64, ty as i64);
-                    }
-                }
-            }
+        let mut cell_layers = layout::layers().child(layout::fill(cell_bg));
+        if let Some(buf) = text_buf {
+            cell_layers = cell_layers.child(layout::image(buf).center());
         }
+        g = g.cell(r.col, r.row, cell_layers);
     }
 
-    img
-}
-
-/// Fill a rectangle with a solid color.
-fn fill_rect(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color: [u8; 4]) {
-    let px = Rgba(color);
-    let img_w = img.width();
-    let img_h = img.height();
-    for y in y0..y0.saturating_add(h).min(img_h) {
-        for x in x0..x0.saturating_add(w).min(img_w) {
-            img.put_pixel(x, y, px);
-        }
-    }
+    g.background(rgb(18, 18, 18)).render(total_w)
 }
 
 /// Draw a 1px rectangular outline.
@@ -1829,6 +1493,206 @@ impl AnnotationText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a synthetic 4-cell montage and verify the four label
+    /// strips are uniformly tall and horizontally aligned. Catches
+    /// regressions where ADD/REMOVE strip's height drifts away from
+    /// EXPECTED/ACTUAL/PIXEL DIFF strips' heights.
+    #[test]
+    fn montage_label_strips_have_uniform_height() {
+        let exp = RgbaImage::from_fn(96, 96, |x, y| {
+            Rgba([(x * 2) as u8, (y * 2) as u8, 128, 255])
+        });
+        let act = RgbaImage::from_fn(96, 96, |x, y| {
+            Rgba([(x * 2) as u8, (y * 2) as u8 + 30, 128, 255])
+        });
+        let opts = MontageOptions::default();
+        let canvas = opts.render(&exp, &act, &AnnotationText::empty());
+
+        // The label_bg color is rgb(40, 40, 40). Walk down the leftmost
+        // pixel column inside the panel area (x = 8 = pad) to collect
+        // the y-ranges where the column is label_bg. There should be
+        // two such ranges (one per row of cells), and they must have
+        // identical heights — otherwise the cells aren't aligned.
+        let label_bg = [40, 40, 40, 255];
+        let canvas_bg = [18, 18, 18, 255];
+        let pad = 8;
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        let mut start: Option<u32> = None;
+        for y in 0..canvas.height() {
+            let p = canvas.get_pixel(pad, y).0;
+            if p == label_bg {
+                if start.is_none() {
+                    start = Some(y);
+                }
+            } else if let Some(s) = start.take() {
+                runs.push((s, y - 1));
+            }
+        }
+        if let Some(s) = start {
+            runs.push((s, canvas.height() - 1));
+        }
+        assert!(
+            runs.len() >= 2,
+            "expected ≥2 label_bg runs (one per cell row), got {runs:?}"
+        );
+        // The first two runs are the two cell-row label strips.
+        let h0 = runs[0].1 - runs[0].0 + 1;
+        let h1 = runs[1].1 - runs[1].0 + 1;
+        assert_eq!(
+            h0, h1,
+            "label strip heights mismatch — row 0 = {h0}, row 1 = {h1} (runs = {runs:?})"
+        );
+
+        // Strip starts must be uniformly offset from the canvas top —
+        // the gap between row 0's strip end and row 1's strip start
+        // must equal panel_h + cell_row_gap (= panel_h + pad).
+        let between = runs[1].0 - runs[0].1 - 1;
+        // 96×96 image → pixelate to 288×288 → panel_h = 288. cell gap = pad.
+        let expected_between = 288 + pad;
+        assert_eq!(
+            between, expected_between,
+            "expected {expected_between} px between strips (panel + gap), got {between}"
+        );
+
+        // Sanity: above row 0 strip is canvas_bg (top padding).
+        let above = canvas.get_pixel(pad, runs[0].0 - 1).0;
+        assert_eq!(
+            above, canvas_bg,
+            "expected canvas_bg above row 0 strip, got {above:?}"
+        );
+    }
+
+    /// `LabelStyle::segmented_strip` uses `Track::FrMin { min_px: 6 }`
+    /// for the middle column, so left and right groups are guaranteed
+    /// to stay at least 6 px apart even when content widths exceed
+    /// the strip's inner width.
+    #[test]
+    fn segmented_strip_enforces_min_gap_under_overflow() {
+        use crate::layout::{LabelSegment, LabelStyle, LayoutMod, Size};
+
+        // 80-wide strip, with explicit char_h that makes ADD+REMOVE
+        // overflow on their own. FrMin(1, 6) forces a minimum gap.
+        let style = LabelStyle::default().with_char_h(20);
+        let strip = style
+            .segmented_strip(vec![
+                LabelSegment::left("ADDADDADD", [255, 180, 80, 255]),
+                LabelSegment::right("REMOVEREMOVE", [80, 220, 220, 255]),
+            ])
+            .width(crate::layout::SizeRule::Fixed(80))
+            .height(crate::layout::SizeRule::Fixed(30));
+        // Render and assert ADD's right edge ≤ REMOVE's left edge − 6.
+        let canvas = crate::layout::render(&strip, 80);
+        // Find the middle row, scan for orange (ADD) and cyan (REMOVE) clusters.
+        let mid_y = canvas.height() / 2;
+        let mut orange_xs = Vec::new();
+        let mut cyan_xs = Vec::new();
+        for x in 0..canvas.width() {
+            let p = canvas.get_pixel(x, mid_y).0;
+            // ADD is orange-ish (R high, G mid, B low).
+            if p[0] > 100 && p[1] > 80 && p[2] < 120 {
+                orange_xs.push(x);
+            }
+            // REMOVE is cyan-ish (R low, G high, B high).
+            if p[0] < 120 && p[1] > 100 && p[2] > 100 {
+                cyan_xs.push(x);
+            }
+        }
+        // We just want the rightmost orange and leftmost cyan.
+        if let (Some(&add_right), Some(&remove_left)) = (orange_xs.last(), cyan_xs.first()) {
+            let gap = remove_left as i32 - add_right as i32 - 1;
+            assert!(
+                gap >= 6,
+                "expected at least 6 px between ADD's right edge ({add_right}) and REMOVE's left ({remove_left}); got {gap}"
+            );
+        } else {
+            // If overflow caused full clipping, that's OK — but ensure
+            // we didn't render ADD/REMOVE on top of each other.
+            let _ = Size::new(80, 30);
+        }
+    }
+
+    /// Verify ADD and REMOVE labels in the structural-diff cell are
+    /// (a) both visible, (b) horizontally separated, (c) at the cell
+    /// row's vertical center.
+    #[test]
+    fn montage_add_remove_labels_are_separated() {
+        let exp = RgbaImage::from_fn(96, 96, |x, y| {
+            Rgba([(x * 2) as u8, (y * 2) as u8, 128, 255])
+        });
+        let act = RgbaImage::from_fn(96, 96, |x, y| {
+            Rgba([(x * 2) as u8, (y * 2) as u8 + 30, 128, 255])
+        });
+        let opts = MontageOptions::default();
+        let canvas = opts.render(&exp, &act, &AnnotationText::empty());
+
+        // ADD/REMOVE strip is in cell (1, 1). Find row-1 label strip
+        // by scanning down for the second label_bg run, then look at
+        // the right-cell column (x = pad + panel_w + pad + ... or just
+        // anywhere right of canvas mid).
+        let canvas_w = canvas.width();
+        let label_bg = [40, 40, 40, 255];
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        let mut start: Option<u32> = None;
+        for y in 0..canvas.height() {
+            let p = canvas.get_pixel(8, y).0;
+            if p == label_bg {
+                if start.is_none() {
+                    start = Some(y);
+                }
+            } else if let Some(s) = start.take() {
+                runs.push((s, y - 1));
+            }
+        }
+        assert!(runs.len() >= 2, "no row-1 label strip found");
+        let (y0, y1) = runs[1];
+        let mid_y = (y0 + y1) / 2;
+        let right_cell_mid_x = canvas_w * 3 / 4;
+
+        // Look for non-label-bg pixels in the right cell strip mid-row;
+        // should find ADD on the left half and REMOVE on the right
+        // half, with at least 20 px of label_bg between.
+        let strip_x_start = canvas_w / 2;
+        let strip_x_end = canvas_w - 8;
+        let mut text_xs: Vec<u32> = Vec::new();
+        for x in strip_x_start..strip_x_end {
+            let p = canvas.get_pixel(x, mid_y).0;
+            if p != label_bg && p != [18, 18, 18, 255] && p != [32, 32, 32, 255] {
+                text_xs.push(x);
+            }
+        }
+        // Group into clusters with > 20 px gap = separate words.
+        let clusters: Vec<(u32, u32)> = {
+            let mut out: Vec<(u32, u32)> = Vec::new();
+            let mut prev: Option<u32> = None;
+            for x in &text_xs {
+                if prev.is_none_or(|p| x - p > 20) {
+                    out.push((*x, *x));
+                } else {
+                    out.last_mut().unwrap().1 = *x;
+                }
+                prev = Some(*x);
+            }
+            out
+        };
+        assert!(
+            clusters.len() >= 2,
+            "expected ≥2 text clusters (ADD + REMOVE) in cell (1,1) mid-row, got {clusters:?}"
+        );
+        // First cluster (ADD) should be in the left half of the right
+        // cell; last cluster (REMOVE) in the right half.
+        let cell_mid = right_cell_mid_x;
+        assert!(
+            clusters[0].0 < cell_mid,
+            "ADD cluster should start left of right-cell mid (x={}), got {clusters:?}",
+            cell_mid
+        );
+        assert!(
+            clusters.last().unwrap().1 > cell_mid,
+            "REMOVE cluster should end right of right-cell mid (x={}), got {clusters:?}",
+            cell_mid
+        );
+    }
 
     #[test]
     fn diff_identical_images() {

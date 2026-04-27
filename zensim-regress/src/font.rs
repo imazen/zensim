@@ -233,13 +233,11 @@ pub fn render_lines_fitted(
     if lines.is_empty() || max_width_px == 0 {
         return (vec![], 0, 0);
     }
-
-    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(1) as u32;
-    // Compute char height that fits the longest line
-    let char_h = (max_width_px as f32 / longest as f32 * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
-        .floor() as u32;
-    let char_h = char_h.clamp(BASE_CHAR_H / 4, BASE_CHAR_H);
-    let char_w = char_width_for_height(char_h);
+    let (char_w, char_h) = fit_char_h_for_lines(lines, max_width_px);
+    if char_w == 0 || char_h == 0 {
+        return (vec![], 0, 0);
+    }
+    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
 
     let out_w = longest * char_w;
     let out_h = lines.len() as u32 * char_h;
@@ -312,6 +310,14 @@ pub const GLYPH_W: u32 = BASE_CHAR_W;
 /// Base character height in pixels (before scaling).
 pub const GLYPH_H: u32 = BASE_CHAR_H;
 
+/// Typographic vertical-centering adjustment as a fraction of char
+/// height. Empirically derived from the embedded Consolas strip: the
+/// inked cap-mid (cap-top + baseline)/2 sits at ~42.6% of cell height,
+/// while the geometric cell mid is 50%. To make capitals appear
+/// visually centered when an enclosing layout uses geometric
+/// centering, shift the cell down by this fraction.
+pub const TYPO_CAP_MID_OFFSET: f32 = 0.074;
+
 // ─── Cheap measurement (no rasterization) ──────────────────────────────
 
 /// Return the `(w, h)` a [`render_text_height`] call would produce —
@@ -344,15 +350,39 @@ pub fn measure_text_wrapped(text: &str, target_char_h: u32, max_width_px: u32) -
 
 /// Return the `(w, h)` a [`render_lines_fitted`] call would produce.
 pub fn measure_lines_fitted(lines: &[(&str, [u8; 4])], max_width_px: u32) -> (u32, u32) {
+    let (char_w, char_h) = fit_char_h_for_lines(lines, max_width_px);
+    if char_w == 0 || char_h == 0 {
+        return (0, 0);
+    }
+    let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
+    (longest * char_w, lines.len() as u32 * char_h)
+}
+
+/// Internal: derive `(char_w, char_h)` such that
+/// `longest * char_w ≤ max_width_px`. `char_w` is computed via
+/// [`char_width_for_height`] which rounds half-up, so the naive formula
+/// `floor(max_width_px / longest * BASE_H/BASE_W)` can overshoot by 1
+/// when char_w rounds up. We post-correct by decrementing `char_h`
+/// until `longest * char_w ≤ max_width_px`.
+pub(crate) fn fit_char_h_for_lines(lines: &[(&str, [u8; 4])], max_width_px: u32) -> (u32, u32) {
     if lines.is_empty() || max_width_px == 0 {
         return (0, 0);
     }
     let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(1) as u32;
-    let char_h = (max_width_px as f32 / longest as f32 * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
+    if longest == 0 {
+        return (0, 0);
+    }
+    let mut char_h = (max_width_px as f32 / longest as f32
+        * (BASE_CHAR_H as f32 / BASE_CHAR_W as f32))
         .floor() as u32;
-    let char_h = char_h.clamp(BASE_CHAR_H / 4, BASE_CHAR_H);
-    let char_w = char_width_for_height(char_h);
-    (longest * char_w, lines.len() as u32 * char_h)
+    char_h = char_h.clamp(BASE_CHAR_H / 4, BASE_CHAR_H);
+    // Post-correct: char_width_for_height rounds half-up, so the
+    // initial char_h can produce `longest * char_w > max_width_px` by
+    // 1 character pixel. Decrement until it fits or we hit the floor.
+    while char_h > BASE_CHAR_H / 4 && longest * char_width_for_height(char_h) > max_width_px {
+        char_h -= 1;
+    }
+    (char_width_for_height(char_h), char_h)
 }
 
 #[cfg(test)]

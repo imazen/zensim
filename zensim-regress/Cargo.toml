@@ -16,6 +16,10 @@ default = ["threads"]
 threads = ["zensim/threads"]
 archmage = ["dep:archmage"]
 zenresize = ["dep:zenresize"]
+## INTERNAL — exposes the `layout` module publicly for examples / debug
+## tools. Not part of the public API; the underscore prefix signals
+## "do not depend on this from outside `zensim-regress`."
+_internal_api = []
 
 [dependencies]
 zensim = { workspace = true, default-features = false, features = ["classification"] }
@@ -46,3 +50,9 @@ harness = false
 [[bench]]
 name = "bench_color_diffmap"
 harness = false
+
+# Layout-module gallery — requires the internal-API feature flag because
+# the layout module is private by default.
+[[example]]
+name = "layout_gallery"
+required-features = ["_internal_api"]
