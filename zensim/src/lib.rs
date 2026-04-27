@@ -48,8 +48,8 @@
 //!
 //! ## zenpixels support
 //!
-//! With the `zenpixels` feature, any [`zenpixels::PixelSlice`] or
-//! [`zenpixels::PixelBuffer`] can be used directly via [`ZenpixelsSource`]:
+//! With the `zenpixels` feature, any `zenpixels::PixelSlice` or
+//! `zenpixels::PixelBuffer` can be used directly via `ZenpixelsSource`:
 //!
 //! ```ignore
 //! use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
@@ -62,7 +62,7 @@
 //! Supported: Rgb8, Rgba8, Bgra8, Rgbx8, Bgrx8, Rgba16, RgbaF32 (sRGB/BT.709/linear).
 //! Premultiplied alpha is un-premultiplied automatically. RGBX/BGRX padding bytes
 //! are treated as opaque automatically. HDR (PQ, HLG) and grayscale are rejected
-//! with [`UnsupportedFormat`].
+//! with `UnsupportedFormat` (zenpixels feature).
 //!
 //! ## Input requirements
 //!
@@ -74,7 +74,7 @@
 //!   Passing wide-gamut data as sRGB will produce incorrect scores.
 //! - **Pixel formats:** [`RgbSlice`] (sRGB u8), [`RgbaSlice`] (sRGB u8 + alpha),
 //!   `imgref::ImgRef` (sRGB u8, stride-aware, default feature),
-//!   [`ZenpixelsSource`] (zenpixels `PixelSlice`/`PixelBuffer`, `zenpixels` feature),
+//!   `ZenpixelsSource` (zenpixels `PixelSlice`/`PixelBuffer`, `zenpixels` feature),
 //!   [`StridedBytes`] (any of `Srgb8Rgb`, `Srgb8Rgba`, `Srgb8Bgra`,
 //!   `Srgb16Rgba`, `LinearF32Rgba`), or implement [`ImageSource`] directly.
 //! - **Alpha:** RGBA inputs are composited over a deterministic noise

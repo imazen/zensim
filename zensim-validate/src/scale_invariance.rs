@@ -119,7 +119,10 @@ pub fn run(csv_path: &Path, out_dir: Option<&Path>, weights: &[f64]) -> anyhow::
 
     eprintln!("Computing zensim per row...");
     let enriched = compute_zensim_per_row(rows, weights)?;
-    let kept = enriched.iter().filter(|r| r.zensim_score.is_finite()).count();
+    let kept = enriched
+        .iter()
+        .filter(|r| r.zensim_score.is_finite())
+        .count();
     eprintln!("Computed: {} valid / {} rows", kept, enriched.len());
 
     let enriched_csv = out_dir.join("scale_pyramid_with_zensim.csv");
@@ -149,7 +152,10 @@ pub fn run(csv_path: &Path, out_dir: Option<&Path>, weights: &[f64]) -> anyhow::
     let mut all_fits: Vec<(GroupKey, &'static str, bool, Fit)> = Vec::new();
     for (key, members) in &groups {
         // x = log2(pixel_count); y = metric value at that level.
-        let xs: Vec<f64> = members.iter().map(|r| (r.row.pixel_count as f64).log2()).collect();
+        let xs: Vec<f64> = members
+            .iter()
+            .map(|r| (r.row.pixel_count as f64).log2())
+            .collect();
         for (mname, higher_better, getter) in &metrics {
             let ys: Vec<f64> = members.iter().map(getter).collect();
             // Skip if any NaN/Inf.
@@ -275,7 +281,13 @@ fn compute_zensim_per_row(
             let ref_img = match image::open(ref_path) {
                 Ok(i) => i.to_rgb8(),
                 Err(e) => {
-                    eprintln!("skip {}/L{}: open ref {}: {}", src_id, level_idx, ref_path.display(), e);
+                    eprintln!(
+                        "skip {}/L{}: open ref {}: {}",
+                        src_id,
+                        level_idx,
+                        ref_path.display(),
+                        e
+                    );
                     let n = progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if (n + 1).is_multiple_of(10) || n + 1 == total {
                         eprintln!("  zensim refs: {}/{}", n + 1, total);
@@ -295,12 +307,11 @@ fn compute_zensim_per_row(
                 }
                 return local;
             }
-            let ref_pixels: Vec<[u8; 3]> = ref_img
-                .pixels()
-                .map(|p| [p.0[0], p.0[1], p.0[2]])
-                .collect();
+            let ref_pixels: Vec<[u8; 3]> =
+                ref_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
             // num_scales=4 matches the standard zensim profile / weight layout.
-            let precomputed = match zensim::precompute_reference_with_scales(&ref_pixels, lw, lh, 4) {
+            let precomputed = match zensim::precompute_reference_with_scales(&ref_pixels, lw, lh, 4)
+            {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("skip {}/L{}: precompute: {}", src_id, level_idx, e);
@@ -323,10 +334,8 @@ fn compute_zensim_per_row(
                 if dw as usize != lw || dh as usize != lh {
                     continue;
                 }
-                let dec_pixels: Vec<[u8; 3]> = dec_img
-                    .pixels()
-                    .map(|p| [p.0[0], p.0[1], p.0[2]])
-                    .collect();
+                let dec_pixels: Vec<[u8; 3]> =
+                    dec_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
                 let result = match zensim::compute_zensim_with_ref_and_config(
                     &precomputed,
                     &dec_pixels,
@@ -588,19 +597,16 @@ fn write_html_report(
             .iter()
             .filter(|(_, mn, _, fit)| *mn == m && fit.r_squared >= 0.8)
             .collect();
-        filtered.sort_by(|a, b| {
-            b.3.beta
-                .abs()
-                .partial_cmp(&a.3.beta.abs())
-                .unwrap()
-        });
+        filtered.sort_by(|a, b| b.3.beta.abs().partial_cmp(&a.3.beta.abs()).unwrap());
         let top: Vec<_> = filtered.into_iter().take(10).collect();
         if top.is_empty() {
             html.push_str("<p><em>No fits with R² ≥ 0.8.</em></p>");
             continue;
         }
         html.push_str("<table><thead><tr>");
-        for h in ["source", "codec", "quality", "family", "param", "β/oct", "R²"] {
+        for h in [
+            "source", "codec", "quality", "family", "param", "β/oct", "R²",
+        ] {
             html.push_str(&format!("<th>{}</th>", h));
         }
         html.push_str("</tr></thead><tbody>");
@@ -655,4 +661,3 @@ mod tests {
         assert!(linear_fit(&[], &[]).is_none());
     }
 }
-

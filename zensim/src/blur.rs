@@ -1827,13 +1827,7 @@ fn downscale_2x(plane: &mut [f32], width: usize, new_w: usize, new_h: usize) {
 /// Compared to [`downscale_2x_inplace`] this avoids reading and writing the
 /// same buffer — useful when callers want to keep the source data alive
 /// (e.g. multi-scale pyramid construction with all levels owned).
-pub fn downscale_2x_into(
-    src: &[f32],
-    src_w: usize,
-    dst: &mut [f32],
-    new_w: usize,
-    new_h: usize,
-) {
+pub fn downscale_2x_into(src: &[f32], src_w: usize, dst: &mut [f32], new_w: usize, new_h: usize) {
     incant!(
         downscale_2x_into_inner(src, src_w, dst, new_w, new_h),
         [v4x, v4, v3, neon, wasm128, scalar]

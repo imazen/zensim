@@ -443,10 +443,10 @@ fn apply_masking_row(
     };
 
     // Left edge (x1 - x0 < 2r+1)
-    for dx in 0..edge_lo {
+    for (dx, dm_val) in dm_row.iter_mut().enumerate().take(edge_lo) {
         let x0 = dx.saturating_sub(r);
         let x1 = (dx + r + 1).min(width);
-        masked_div(&mut dm_row[dx], x0, x1);
+        masked_div(dm_val, x0, x1);
     }
 
     // Interior: constant count = yh * (2r+1). Hoist inv_count out of the loop
@@ -458,7 +458,7 @@ fn apply_masking_row(
         let inv_count = 1.0 / count;
         let row_y0 = y0 * iw;
         let row_y1 = y1 * iw;
-        for dx in edge_lo..edge_hi {
+        for (dx, dm_val) in dm_row.iter_mut().enumerate().take(edge_hi).skip(edge_lo) {
             let x0 = dx - r;
             let x1 = dx + r + 1;
             let tl = row_y0 + x0;
@@ -470,15 +470,20 @@ fn apply_masking_row(
             let mean = sum * inv_count;
             let variance = (sq * inv_count - mean * mean).max(0.0) as f32;
             let mask = 1.0 + strength * variance;
-            dm_row[dx] *= 1.0 / mask;
+            *dm_val *= 1.0 / mask;
         }
     }
 
     // Right edge
-    for dx in edge_hi.max(edge_lo)..width {
+    for (dx, dm_val) in dm_row
+        .iter_mut()
+        .enumerate()
+        .take(width)
+        .skip(edge_hi.max(edge_lo))
+    {
         let x0 = dx.saturating_sub(r);
         let x1 = (dx + r + 1).min(width);
-        masked_div(&mut dm_row[dx], x0, x1);
+        masked_div(dm_val, x0, x1);
     }
 }
 

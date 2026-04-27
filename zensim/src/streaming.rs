@@ -219,8 +219,8 @@ fn upsample_row_powx_add(src_row: &[f32], dst_row: &mut [f32], factor: usize, we
     for &s in src_row {
         let v = s * weight;
         let end = (di + factor).min(dst_len);
-        for x in di..end {
-            dst_row[x] += v;
+        for slot in &mut dst_row[di..end] {
+            *slot += v;
         }
         di += factor;
         if di >= dst_len {
@@ -244,9 +244,16 @@ const DEALLOC_THREAD_THRESHOLD_BYTES: usize = 4 * 1024 * 1024;
 /// synchronous drop (small) and a background thread (large).
 #[cfg(feature = "threads")]
 fn dealloc_planes(p1: [Vec<f32>; 3], p2: Option<[Vec<f32>; 3]>) {
-    let bytes = p1.iter().map(|v| v.capacity() * core::mem::size_of::<f32>()).sum::<usize>()
+    let bytes = p1
+        .iter()
+        .map(|v| v.capacity() * core::mem::size_of::<f32>())
+        .sum::<usize>()
         + p2.as_ref()
-            .map(|p| p.iter().map(|v| v.capacity() * core::mem::size_of::<f32>()).sum::<usize>())
+            .map(|p| {
+                p.iter()
+                    .map(|v| v.capacity() * core::mem::size_of::<f32>())
+                    .sum::<usize>()
+            })
             .unwrap_or(0);
     if bytes < DEALLOC_THREAD_THRESHOLD_BYTES {
         drop(p1);
@@ -1499,7 +1506,7 @@ fn process_scale_bands(
     (accum.finalize(), diffmap)
 }
 
-/// Reusable scratch buffers for [`Zensim::compute_with_ref_into`].
+/// Reusable scratch buffers for [`crate::Zensim::compute_with_ref_into`].
 ///
 /// Designed for encoder quantization loops that call `compute_with_ref` many
 /// times against the same precomputed reference. Holds the distorted-side
@@ -1609,12 +1616,8 @@ impl PrecomputedReference {
                     || {
                         maybe_join(
                             true,
-                            || {
-                                crate::blur::downscale_2x_into(&src[1], prev_w, d1, new_w, new_h)
-                            },
-                            || {
-                                crate::blur::downscale_2x_into(&src[2], prev_w, d2, new_w, new_h)
-                            },
+                            || crate::blur::downscale_2x_into(&src[1], prev_w, d1, new_w, new_h),
+                            || crate::blur::downscale_2x_into(&src[2], prev_w, d2, new_w, new_h),
                         );
                     },
                 );

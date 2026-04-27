@@ -3,15 +3,17 @@
 
 use zensim::{DiffmapOptions, DiffmapWeighting, RgbaSlice, Zensim, ZensimProfile};
 
+type ImageGen = fn(u32, u32) -> Vec<[u8; 4]>;
+
 fn gradient(w: u32, h: u32, seed: u32) -> Vec<[u8; 4]> {
     let mut s = seed;
     let mut out = Vec::with_capacity((w * h) as usize);
     for y in 0..h {
         for x in 0..w {
             s = s.wrapping_mul(1103515245).wrapping_add(12345);
-            let r = ((x * 251 + s.wrapping_mul(7) >> 8) % 256) as u8;
-            let g = ((y * 173 + s.wrapping_mul(13) >> 8) % 256) as u8;
-            let b = (((x ^ y) * 47 + s.wrapping_mul(19) >> 8) % 256) as u8;
+            let r = ((x * 251 + (s.wrapping_mul(7) >> 8)) % 256) as u8;
+            let g = ((y * 173 + (s.wrapping_mul(13) >> 8)) % 256) as u8;
+            let b = (((x ^ y) * 47 + (s.wrapping_mul(19) >> 8)) % 256) as u8;
             out.push([r, g, b, 255]);
         }
     }
@@ -22,7 +24,7 @@ fn checker(w: u32, h: u32, sz: u32) -> Vec<[u8; 4]> {
     let mut out = Vec::with_capacity((w * h) as usize);
     for y in 0..h {
         for x in 0..w {
-            let on = ((x / sz) + (y / sz)) % 2 == 0;
+            let on = ((x / sz) + (y / sz)).is_multiple_of(2);
             let v = if on { 200 } else { 50 };
             out.push([v, v, v, 255]);
         }
@@ -31,11 +33,10 @@ fn checker(w: u32, h: u32, sz: u32) -> Vec<[u8; 4]> {
 }
 
 fn jpeg_like(w: u32, h: u32, q: u8) -> Vec<[u8; 4]> {
-    // Simulate JPEG-style block quantization: round each 8x8 block's mean
+    // Simulate JPEG-style block quantization: round each 8x8 block's mean.
     let mut out = vec![[0u8; 4]; (w * h) as usize];
     for by in 0..(h / 8) {
         for bx in 0..(w / 8) {
-            // Sum block
             let mut sums = [0u32; 3];
             for y in 0..8 {
                 for x in 0..8 {
@@ -43,9 +44,9 @@ fn jpeg_like(w: u32, h: u32, q: u8) -> Vec<[u8; 4]> {
                     let yy = by * 8 + y;
                     let mut s = (xx ^ yy).wrapping_mul(0x9E37);
                     s = s.wrapping_mul(1103515245).wrapping_add(12345);
-                    sums[0] += ((xx * 251 + s.wrapping_mul(7) >> 8) % 256) as u32;
-                    sums[1] += ((yy * 173 + s.wrapping_mul(13) >> 8) % 256) as u32;
-                    sums[2] += (((xx ^ yy) * 47 + s.wrapping_mul(19) >> 8) % 256) as u32;
+                    sums[0] += (xx * 251 + (s.wrapping_mul(7) >> 8)) % 256;
+                    sums[1] += (yy * 173 + (s.wrapping_mul(13) >> 8)) % 256;
+                    sums[2] += ((xx ^ yy) * 47 + (s.wrapping_mul(19) >> 8)) % 256;
                 }
             }
             let mean = [sums[0] / 64, sums[1] / 64, sums[2] / 64];
@@ -69,13 +70,49 @@ fn jpeg_like(w: u32, h: u32, q: u8) -> Vec<[u8; 4]> {
 fn main() {
     let z = Zensim::new(ZensimProfile::latest());
 
-    let cases: &[(&str, u32, u32, fn(u32, u32) -> Vec<[u8; 4]>, fn(u32, u32) -> Vec<[u8; 4]>)] = &[
-        ("identical_512", 512, 512, |w, h| gradient(w, h, 1), |w, h| gradient(w, h, 1)),
-        ("noise_512", 512, 512, |w, h| gradient(w, h, 1), |w, h| gradient(w, h, 7)),
-        ("checker_512", 512, 512, |w, h| checker(w, h, 8), |w, h| checker(w, h, 9)),
-        ("jpeg_q90", 1024, 768, |w, h| jpeg_like(w, h, 250), |w, h| jpeg_like(w, h, 200)),
-        ("jpeg_q50", 1024, 768, |w, h| jpeg_like(w, h, 250), |w, h| jpeg_like(w, h, 100)),
-        ("identical_1080", 1920, 1080, |w, h| gradient(w, h, 42), |w, h| gradient(w, h, 42)),
+    let cases: &[(&str, u32, u32, ImageGen, ImageGen)] = &[
+        (
+            "identical_512",
+            512,
+            512,
+            |w, h| gradient(w, h, 1),
+            |w, h| gradient(w, h, 1),
+        ),
+        (
+            "noise_512",
+            512,
+            512,
+            |w, h| gradient(w, h, 1),
+            |w, h| gradient(w, h, 7),
+        ),
+        (
+            "checker_512",
+            512,
+            512,
+            |w, h| checker(w, h, 8),
+            |w, h| checker(w, h, 9),
+        ),
+        (
+            "jpeg_q90",
+            1024,
+            768,
+            |w, h| jpeg_like(w, h, 250),
+            |w, h| jpeg_like(w, h, 200),
+        ),
+        (
+            "jpeg_q50",
+            1024,
+            768,
+            |w, h| jpeg_like(w, h, 250),
+            |w, h| jpeg_like(w, h, 100),
+        ),
+        (
+            "identical_1080",
+            1920,
+            1080,
+            |w, h| gradient(w, h, 42),
+            |w, h| gradient(w, h, 42),
+        ),
     ];
 
     println!("# zensim score dump (commit-stable A/B comparison fixture)");

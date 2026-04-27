@@ -2630,7 +2630,7 @@ dependencies = [
 
 [[package]]
 name = "zensim"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2665,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "zensim-regress"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "archmage",
  "base64",

@@ -243,7 +243,7 @@ fn score_reproducibility_across_tiers() {
                     feat_diffs.push((i, u, *rf, *tf));
                 }
             }
-            feat_diffs.sort_by(|a, b| b.1.cmp(&a.1));
+            feat_diffs.sort_by_key(|x| std::cmp::Reverse(x.1));
             eprintln!(
                 "    features diverging: {}/{}",
                 feat_diffs.len(),

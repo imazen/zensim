@@ -77,10 +77,7 @@ fn bench_precompute_reference(suite: &mut zenbench::Suite) {
 /// Diffmap: cheapest options (no masking, no sqrt, no edge_mse, no hf).
 fn bench_diffmap_minimal(suite: &mut zenbench::Suite) {
     suite.group("diffmap_minimal", |group| {
-        for &(label, w, h) in &[
-            ("256x256", 256u32, 256u32),
-            ("1920x1080", 1920, 1080),
-        ] {
+        for &(label, w, h) in &[("256x256", 256u32, 256u32), ("1920x1080", 1920, 1080)] {
             let z = Zensim::new(ZensimProfile::latest());
             let src = gradient_rgba(w, h);
             let dst = noise_rgba(w, h, 11);
@@ -105,10 +102,7 @@ fn bench_diffmap_minimal(suite: &mut zenbench::Suite) {
 /// Diffmap: full options (masking + sqrt + edge_mse + hf).
 fn bench_diffmap_full(suite: &mut zenbench::Suite) {
     suite.group("diffmap_full", |group| {
-        for &(label, w, h) in &[
-            ("256x256", 256u32, 256u32),
-            ("1920x1080", 1920, 1080),
-        ] {
+        for &(label, w, h) in &[("256x256", 256u32, 256u32), ("1920x1080", 1920, 1080)] {
             let z = Zensim::new(ZensimProfile::latest());
             let src = gradient_rgba(w, h);
             let dst = noise_rgba(w, h, 11);

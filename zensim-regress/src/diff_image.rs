@@ -1538,14 +1538,29 @@ fn draw_rect_border(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, color
 
 /// Rendering options for annotated montages.
 ///
-/// Use `Default` for the common case — all fields have sensible defaults.
+/// `MontageOptions` is `#[non_exhaustive]`, so out-of-crate callers can't
+/// construct it via struct literal (with or without `..Default::default()`).
+/// Use [`Default`] + direct field assignment instead — all fields are still
+/// public. This indirection lets us add new options in future patch releases
+/// without breaking caller code.
 ///
 /// ```
 /// # use zensim_regress::diff_image::MontageOptions;
+/// // The common case
 /// let opts = MontageOptions::default();
-/// let custom = MontageOptions { amplification: 50, ..Default::default() };
+///
+/// // Override individual fields
+/// let mut custom = MontageOptions::default();
+/// custom.amplification = 50;
+///
+/// // Override several at once
+/// let mut labeled = MontageOptions::default();
+/// labeled.expected_label = Some("ORIG".into());
+/// labeled.actual_label = Some("DEFAULT".into());
+/// labeled.show_spatial_heatmap = false;
 /// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MontageOptions {
     /// Diff amplification factor (default: 10).
     pub amplification: u8,

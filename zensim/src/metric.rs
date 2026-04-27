@@ -865,7 +865,7 @@ impl Zensim {
     /// plane allocation (which can be ~25 MB at 1080p, ~99 MB at 4K) is
     /// kept alive across calls instead of being freed and reallocated.
     ///
-    /// The first call costs the same as [`compute_with_ref`]; subsequent
+    /// The first call costs the same as [`Zensim::compute_with_ref`]; subsequent
     /// calls skip the allocation and the OS page-fault commit.
     ///
     /// # Errors

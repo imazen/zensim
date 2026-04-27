@@ -75,10 +75,8 @@ fn main() {
 
     let ann = AnnotationText::empty();
     if let Some(ref path) = save_path {
-        let opts = MontageOptions {
-            amplification: 50,
-            ..Default::default()
-        };
+        let mut opts = MontageOptions::default();
+        opts.amplification = 50;
         let montage = opts.render(&expected, &rounding, &ann);
         let save = format!("{}_rounding.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
@@ -93,10 +91,8 @@ fn main() {
     println!("  +30 green, -20 blue in center 32x32 region.\n");
 
     if let Some(ref path) = save_path {
-        let opts = MontageOptions {
-            amplification: 5,
-            ..Default::default()
-        };
+        let mut opts = MontageOptions::default();
+        opts.amplification = 5;
         let montage = opts.render(&expected, &color_shift, &ann);
         let save = format!("{}_colorshift.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();
@@ -111,10 +107,8 @@ fn main() {
     println!("  RGB/BGR swap — large difference everywhere.\n");
 
     if let Some(ref path) = save_path {
-        let opts = MontageOptions {
-            amplification: 1,
-            ..Default::default()
-        };
+        let mut opts = MontageOptions::default();
+        opts.amplification = 1;
         let montage = opts.render(&expected, &channel_swap, &ann);
         let save = format!("{}_channelswap.png", path.trim_end_matches(".png"));
         montage.save(&save).unwrap();

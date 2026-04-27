@@ -63,7 +63,11 @@ fn main() {
 
         println!(
             "{}x{}: precompute={:.2}ms  e2e={:.2}ms  compute_with_ref={:.2}ms  Δ(pre-(e2e-compute))={:.2}ms",
-            w, h, pre_t, e2e_t, ref_t,
+            w,
+            h,
+            pre_t,
+            e2e_t,
+            ref_t,
             pre_t - (e2e_t - ref_t),
         );
     }
