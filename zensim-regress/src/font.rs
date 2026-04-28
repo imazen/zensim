@@ -41,7 +41,8 @@ pub fn render_text(text: &str, fg: [u8; 4], bg: [u8; 4]) -> (Vec<u8>, u32, u32) 
 /// Render text word-wrapped to fit within `max_width_px` pixels.
 ///
 /// Lines are broken on spaces. If a single word is wider than `max_width_px`,
-/// it is placed on its own line (not split mid-word).
+/// it is placed on its own line (not split mid-word). Lines stack tightly
+/// — for typographic leading, see [`render_text_wrapped_lh`].
 ///
 /// Returns `(pixels, width, height)`.
 pub fn render_text_wrapped(
@@ -51,6 +52,19 @@ pub fn render_text_wrapped(
     target_char_h: u32,
     max_width_px: u32,
 ) -> (Vec<u8>, u32, u32) {
+    render_text_wrapped_lh(text, fg, bg, target_char_h, max_width_px, 1.0)
+}
+
+/// Same as [`render_text_wrapped`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn render_text_wrapped_lh(
+    text: &str,
+    fg: [u8; 4],
+    bg: [u8; 4],
+    target_char_h: u32,
+    max_width_px: u32,
+    line_height: f32,
+) -> (Vec<u8>, u32, u32) {
     if target_char_h == 0 || max_width_px == 0 {
         return (vec![], 0, 0);
     }
@@ -58,13 +72,15 @@ pub fn render_text_wrapped(
     let scaled_char_w = char_width_for_height(target_char_h);
     let max_cols = (max_width_px / scaled_char_w.max(1)) as usize;
     let wrapped = wrap_text(text, max_cols.max(1));
-    render_text_height(&wrapped, fg, bg, target_char_h)
+    render_text_height_lh(&wrapped, fg, bg, target_char_h, line_height)
 }
 
 /// Render a string at a given pixel height.
 ///
 /// The font is scaled so each character is `target_char_h` pixels tall.
 /// Character width scales proportionally to maintain the monospace aspect ratio.
+/// Multi-line input stacks lines tightly (no inter-line leading) — for a
+/// typographic gap, use [`render_text_height_lh`] with `line_height > 1.0`.
 ///
 /// Returns `(pixels, width, height)`.
 pub fn render_text_height(
@@ -72,6 +88,23 @@ pub fn render_text_height(
     fg: [u8; 4],
     bg: [u8; 4],
     target_char_h: u32,
+) -> (Vec<u8>, u32, u32) {
+    render_text_height_lh(text, fg, bg, target_char_h, 1.0)
+}
+
+/// Same as [`render_text_height`], but stacks multi-line input with a
+/// CSS-`line-height` ratio (`line_height = 1.2` ≈ default browser
+/// leading). The first line still occupies `target_char_h` pixels;
+/// each subsequent line advances by `round(target_char_h *
+/// line_height)`, clamped to ≥ 1px. The output buffer height is
+/// `(num_lines - 1) * line_advance + target_char_h` — no trailing
+/// leading.
+pub fn render_text_height_lh(
+    text: &str,
+    fg: [u8; 4],
+    bg: [u8; 4],
+    target_char_h: u32,
+    line_height: f32,
 ) -> (Vec<u8>, u32, u32) {
     if target_char_h == 0 {
         return (vec![], 0, 0);
@@ -88,6 +121,7 @@ pub fn render_text_height(
     let strip = font_strip();
     let scaled_char_w = char_width_for_height(target_char_h);
     let scaled_char_h = target_char_h;
+    let line_advance = line_advance_px(scaled_char_h, line_height);
 
     // Scale the entire strip at once (one resize, not per-char).
     // Lanczos3 — sharp downsampling for crisp glyph edges.
@@ -100,7 +134,7 @@ pub fn render_text_height(
     );
 
     let out_w = max_cols * scaled_char_w;
-    let out_h = num_lines * scaled_char_h;
+    let out_h = stacked_height_px(scaled_char_h, line_advance, num_lines);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
 
@@ -111,7 +145,7 @@ pub fn render_text_height(
 
     // Blit characters
     for (line_idx, line) in lines.iter().enumerate() {
-        let y_base = line_idx as u32 * scaled_char_h;
+        let y_base = line_idx as u32 * line_advance;
         for (col, ch) in line.chars().enumerate() {
             let x_base = col as u32 * scaled_char_w;
             let glyph_idx = char_index(ch);
@@ -205,6 +239,34 @@ fn char_width_for_height(target_char_h: u32) -> u32 {
     (BASE_CHAR_W * target_char_h + BASE_CHAR_H / 2) / BASE_CHAR_H
 }
 
+/// Vertical stride between consecutive lines (`char_h * line_height`,
+/// clamped to ≥ 1px and ≥ char_h so lines never overlap). A
+/// non-finite, non-positive, or NaN `line_height` is treated as 1.0.
+fn line_advance_px(char_h: u32, line_height: f32) -> u32 {
+    if char_h == 0 {
+        return 0;
+    }
+    let lh = if line_height.is_finite() && line_height > 0.0 {
+        line_height
+    } else {
+        1.0
+    };
+    let advance = ((char_h as f32) * lh).round() as u32;
+    advance.max(char_h.max(1))
+}
+
+/// Total stacked height for `n` lines: `(n - 1) * line_advance + char_h`.
+/// No trailing leading; a single line is exactly `char_h` tall.
+fn stacked_height_px(char_h: u32, line_advance: u32, n_lines: u32) -> u32 {
+    if n_lines == 0 {
+        return 0;
+    }
+    n_lines
+        .saturating_sub(1)
+        .saturating_mul(line_advance)
+        .saturating_add(char_h)
+}
+
 /// Map a character to its index in the font strip.
 /// ASCII 32-126 at indices 0-94, then extras: Δ at 95.
 fn char_index(ch: char) -> u32 {
@@ -224,10 +286,23 @@ fn char_index(ch: char) -> u32 {
 ///
 /// Returns `(pixels, width, height)`. No word-wrapping — each line is
 /// rendered as-is. The font size is computed from the longest line.
+/// Lines stack tightly; for typographic leading, see
+/// [`render_lines_fitted_lh`].
 pub fn render_lines_fitted(
     lines: &[(&str, [u8; 4])],
     bg: [u8; 4],
     max_width_px: u32,
+) -> (Vec<u8>, u32, u32) {
+    render_lines_fitted_lh(lines, bg, max_width_px, 1.0)
+}
+
+/// Same as [`render_lines_fitted`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn render_lines_fitted_lh(
+    lines: &[(&str, [u8; 4])],
+    bg: [u8; 4],
+    max_width_px: u32,
+    line_height: f32,
 ) -> (Vec<u8>, u32, u32) {
     if lines.is_empty() || max_width_px == 0 {
         return (vec![], 0, 0);
@@ -236,10 +311,11 @@ pub fn render_lines_fitted(
     if char_w == 0 || char_h == 0 {
         return (vec![], 0, 0);
     }
+    let line_advance = line_advance_px(char_h, line_height);
     let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
 
     let out_w = longest * char_w;
-    let out_h = lines.len() as u32 * char_h;
+    let out_h = stacked_height_px(char_h, line_advance, lines.len() as u32);
 
     if out_w == 0 || out_h == 0 {
         return (vec![], 0, 0);
@@ -257,7 +333,7 @@ pub fn render_lines_fitted(
     }
 
     for (line_idx, (text, fg)) in lines.iter().enumerate() {
-        let y_base = line_idx as u32 * char_h;
+        let y_base = line_idx as u32 * line_advance;
         // Center each line within the output width
         let line_w = text.len() as u32 * char_w;
         let x_offset = (out_w.saturating_sub(line_w)) / 2;
@@ -319,6 +395,12 @@ pub const TYPO_CAP_MID_OFFSET: f32 = 0.074;
 /// without actually rasterizing. Useful for two-pass layout where the
 /// measure pass needs sizes but the render pass will rasterize anyway.
 pub fn measure_text_height(text: &str, target_char_h: u32) -> (u32, u32) {
+    measure_text_height_lh(text, target_char_h, 1.0)
+}
+
+/// Same as [`measure_text_height`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn measure_text_height_lh(text: &str, target_char_h: u32, line_height: f32) -> (u32, u32) {
     if target_char_h == 0 {
         return (0, 0);
     }
@@ -329,28 +411,57 @@ pub fn measure_text_height(text: &str, target_char_h: u32) -> (u32, u32) {
         return (0, 0);
     }
     let scaled_char_w = char_width_for_height(target_char_h);
-    (max_cols * scaled_char_w, num_lines * target_char_h)
+    let line_advance = line_advance_px(target_char_h, line_height);
+    (
+        max_cols * scaled_char_w,
+        stacked_height_px(target_char_h, line_advance, num_lines),
+    )
 }
 
 /// Return the `(w, h)` a [`render_text_wrapped`] call would produce.
 pub fn measure_text_wrapped(text: &str, target_char_h: u32, max_width_px: u32) -> (u32, u32) {
+    measure_text_wrapped_lh(text, target_char_h, max_width_px, 1.0)
+}
+
+/// Same as [`measure_text_wrapped`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn measure_text_wrapped_lh(
+    text: &str,
+    target_char_h: u32,
+    max_width_px: u32,
+    line_height: f32,
+) -> (u32, u32) {
     if target_char_h == 0 || max_width_px == 0 {
         return (0, 0);
     }
     let scaled_char_w = char_width_for_height(target_char_h);
     let max_cols = (max_width_px / scaled_char_w.max(1)) as usize;
     let wrapped = wrap_text(text, max_cols.max(1));
-    measure_text_height(&wrapped, target_char_h)
+    measure_text_height_lh(&wrapped, target_char_h, line_height)
 }
 
 /// Return the `(w, h)` a [`render_lines_fitted`] call would produce.
 pub fn measure_lines_fitted(lines: &[(&str, [u8; 4])], max_width_px: u32) -> (u32, u32) {
+    measure_lines_fitted_lh(lines, max_width_px, 1.0)
+}
+
+/// Same as [`measure_lines_fitted`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn measure_lines_fitted_lh(
+    lines: &[(&str, [u8; 4])],
+    max_width_px: u32,
+    line_height: f32,
+) -> (u32, u32) {
     let (char_w, char_h) = fit_char_h_for_lines(lines, max_width_px);
     if char_w == 0 || char_h == 0 {
         return (0, 0);
     }
     let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
-    (longest * char_w, lines.len() as u32 * char_h)
+    let line_advance = line_advance_px(char_h, line_height);
+    (
+        longest * char_w,
+        stacked_height_px(char_h, line_advance, lines.len() as u32),
+    )
 }
 
 /// Internal: derive `(char_w, char_h)` such that
