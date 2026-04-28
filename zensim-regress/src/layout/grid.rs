@@ -524,7 +524,7 @@ pub(super) fn paint(
     }
 
     let n_cells = safety::cap_cells(cells.len());
-    for (span, child) in cells.iter().take(n_cells) {
+    for (i, (span, child)) in cells.iter().take(n_cells).enumerate() {
         if span.col >= cols.len() as u32 || span.row >= rows.len() as u32 {
             continue;
         }
@@ -549,7 +549,15 @@ pub(super) fn paint(
         let y1 = rect.y + pad + y_end;
         let w = x1.saturating_sub(x0);
         let h = y1.saturating_sub(y0);
-        child.paint(Rect::new(x0, y0, w, h), canvas);
+        let child_rect = Rect::new(x0, y0, w, h);
+        super::diagnostics::check_contained(
+            super::diagnostics::ContainerKind::Grid,
+            i,
+            child.kind(),
+            rect,
+            child_rect,
+        );
+        child.paint(child_rect, canvas);
     }
 }
 

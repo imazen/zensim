@@ -7,7 +7,7 @@ use crate::pixel_ops::Bitmap;
 use super::geom::{Axis, Rect, Size};
 use super::node::Node;
 use super::safety;
-use super::sizing::{CrossAlign, MainAlign};
+use super::sizing::{CrossAlign, MainAlign, SizeRule};
 
 #[derive(Clone, Debug)]
 pub struct Stack {
@@ -236,6 +236,13 @@ pub(super) fn paint(
             Axis::Horizontal => Rect::new(cursor, rect.y + cross_off, m_size, cross_size),
             Axis::Vertical => Rect::new(rect.x + cross_off, cursor, cross_size, m_size),
         };
+        super::diagnostics::check_contained(
+            super::diagnostics::ContainerKind::Stack,
+            i,
+            child.kind(),
+            rect,
+            child_rect,
+        );
         child.paint(child_rect, canvas);
 
         cursor = cursor.saturating_add(m_size);
@@ -245,17 +252,52 @@ pub(super) fn paint(
     }
 }
 
+/// Find a `Grow` (or `Fill`) weight on the main axis by walking through
+/// transparent modifier wrappers. Without this walk, chaining
+/// `.grow(1).fill_height()` (which wraps as
+/// `Sized<Hug, Fill>(Sized<Grow(1), Hug>(child))`) hides the Grow weight
+/// behind the outer Sized's `Hug` width, and the Stack treats the node
+/// as a Hug child with `measured.w == axis_max`.
+///
+/// Walk rules:
+/// - `Sized`: if the main-axis rule's `grow_weight() > 0`, return it.
+///   Else if it's `Hug`, recurse into the child (the wrapper doesn't
+///   override main-axis sizing). Else (`Fixed` / `Percent`) the wrapper
+///   nails the main-axis size — return 0.
+/// - `Background`, `Border`, `Align`, `Aspect`, `Constrain`, `Padded`:
+///   pass-through wrappers — recurse. (`Padded` and `Constrain` adjust
+///   sizes, but don't override a child's grow intent.)
+/// - Anything else: not a grow node, return 0.
 fn main_grow_weight(node: &Node, axis: Axis) -> u32 {
-    match node {
-        Node::Sized { w, h, .. } => {
-            let r = match axis {
-                Axis::Horizontal => *w,
-                Axis::Vertical => *h,
-            };
-            r.grow_weight()
+    let mut current = node;
+    // Bound the walk so a malformed tree can't loop indefinitely.
+    for _ in 0..16 {
+        match current {
+            Node::Sized { w, h, child } => {
+                let main_rule = match axis {
+                    Axis::Horizontal => *w,
+                    Axis::Vertical => *h,
+                };
+                let weight = main_rule.grow_weight();
+                if weight > 0 {
+                    return weight;
+                }
+                if matches!(main_rule, SizeRule::Hug) {
+                    current = child;
+                } else {
+                    return 0;
+                }
+            }
+            Node::Background { child, .. }
+            | Node::Border { child, .. }
+            | Node::Align { child, .. }
+            | Node::Aspect { child, .. }
+            | Node::Constrain { child, .. }
+            | Node::Padded { child, .. } => current = child,
+            _ => return 0,
         }
-        _ => 0,
     }
+    0
 }
 
 #[cfg(test)]
@@ -363,5 +405,35 @@ mod tests {
             .render(60);
         assert_eq!(img.get_pixel(20, 5), [255, 0, 0, 255]);
         assert_eq!(img.get_pixel(50, 5), [0, 0, 255, 255]);
+    }
+
+    /// Regression: chaining `.grow(n).fill_height()` (or any `Sized` whose
+    /// main-axis rule is `Hug`) used to hide the inner Grow weight from
+    /// the Stack's `main_grow_weight` walker, so two grow children would
+    /// each measure as `axis_max` wide and the second would paint off-
+    /// canvas. Mirrors gallery scene 08 ("flex-grow weights").
+    #[test]
+    fn grow_through_outer_hug_wrapper_distributes_correctly() {
+        let hug = image_node(solid(60, 10, [255, 0, 0, 255]));
+        // Both wrap as Sized<Hug,Fill>(Sized<Grow(_),Hug>(Background(Empty))).
+        // Pre-fix the outer Sized<Hug,Fill> reported grow_weight=0 and the
+        // Stack treated these as Hug children with measured.w == axis_max.
+        let g1 = empty().background([0, 255, 0, 255]).grow(1).fill_height();
+        let g2 = empty().background([0, 0, 255, 255]).grow(2).fill_height();
+        let img = row()
+            .align_items(CrossAlign::Stretch)
+            .child(hug)
+            .child(g1)
+            .child(g2)
+            .size(360, 10)
+            .render(360);
+        // Available remainder = 360 - 60 = 300, split 1:2 → g1=100, g2=200.
+        // Hug: x ∈ [0..60), green: [60..160), blue: [160..360).
+        assert_eq!(img.get_pixel(30, 5), [255, 0, 0, 255], "hug");
+        assert_eq!(img.get_pixel(110, 5), [0, 255, 0, 255], "grow 1");
+        // The pre-fix bug had grow 2 painted off-canvas; this pixel was
+        // bg-black instead of blue.
+        assert_eq!(img.get_pixel(250, 5), [0, 0, 255, 255], "grow 2");
+        assert_eq!(img.get_pixel(355, 5), [0, 0, 255, 255], "grow 2 right edge");
     }
 }

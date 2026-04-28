@@ -69,6 +69,7 @@
 use crate::pixel_ops::Bitmap;
 
 pub mod color;
+pub mod diagnostics;
 pub mod geom;
 pub mod grid;
 pub mod label;
@@ -84,6 +85,7 @@ pub mod text;
 // ── Public API re-exports ─────────────────────────────────────────────
 
 pub use color::{BLACK, Color, TRANSPARENT, WHITE, hex, rgb, rgba};
+pub use diagnostics::{ContainerKind, LayoutError, NodeKind, Overflow, collect_paint_errors};
 pub use geom::{Axis, HAlign, Insets, Rect, Size, VAlign};
 pub use grid::{Grid, GridSpan, grid};
 pub use label::{LabelSegment, LabelStyle};
@@ -217,6 +219,79 @@ pub fn render_with_config(tree: &Node, cfg: &RenderConfig) -> Bitmap {
 /// [`safety::with_limits`] scope if non-default caps are wanted.
 pub fn render_into(tree: &Node, rect: Rect, canvas: &mut Bitmap) {
     tree.paint(rect, canvas);
+}
+
+// ── Checked render — surfaces paint-time containment errors ────────────
+
+/// Result of a checked render: the bitmap (off-canvas pixels are still
+/// clipped exactly as in [`render`]) plus any [`LayoutError`]s that
+/// occurred during paint.
+///
+/// `errors.is_empty()` means every container kept its children inside
+/// its rect; non-empty means somewhere a `Stack`/`Grid` distributed a
+/// child rect that overflowed the parent. The bitmap is always
+/// produced — diagnostics never abort painting.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct RenderOutcome {
+    /// The rendered bitmap. Identical bytes to what [`render`] /
+    /// [`render_with_config`] would have produced.
+    pub bitmap: Bitmap,
+    /// Containment violations observed during paint. Empty for a clean
+    /// render.
+    pub errors: Vec<LayoutError>,
+}
+
+impl RenderOutcome {
+    /// Convert into `Result`: `Ok(bitmap)` on a clean render, `Err`
+    /// containing the bitmap and the errors otherwise. Useful when a
+    /// caller wants to error out on any layout violation but still
+    /// inspect the (partially-rendered) bitmap for debugging.
+    pub fn into_result(self) -> Result<Bitmap, RenderOutcome> {
+        if self.errors.is_empty() {
+            Ok(self.bitmap)
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl std::fmt::Display for RenderOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.errors.is_empty() {
+            write!(
+                f,
+                "RenderOutcome (clean): {}×{} bitmap",
+                self.bitmap.width(),
+                self.bitmap.height(),
+            )
+        } else {
+            writeln!(
+                f,
+                "RenderOutcome ({} layout error{}): {}×{} bitmap",
+                self.errors.len(),
+                if self.errors.len() == 1 { "" } else { "s" },
+                self.bitmap.width(),
+                self.bitmap.height(),
+            )?;
+            for (i, e) in self.errors.iter().enumerate() {
+                writeln!(f, "  [{i}] {e}")?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Checked variant of [`render`]: returns the bitmap and any paint-time
+/// containment violations.
+pub fn render_checked(tree: &Node, max_w: u32) -> RenderOutcome {
+    render_with_config_checked(tree, &RenderConfig::new(max_w))
+}
+
+/// Checked variant of [`render_with_config`].
+pub fn render_with_config_checked(tree: &Node, cfg: &RenderConfig) -> RenderOutcome {
+    let (bitmap, errors) = diagnostics::collect_paint_errors(|| render_with_config(tree, cfg));
+    RenderOutcome { bitmap, errors }
 }
 
 #[cfg(test)]
@@ -421,5 +496,90 @@ mod tests {
         let n = text(TextSpec::fixed("x", WHITE, BLACK, u32::MAX)).background(BLACK);
         let s = n.measure(Size::new(1000, 1000));
         assert!(s.h <= default_max_dim());
+    }
+
+    // ── render_checked / RenderOutcome ─────────────────────────────────
+
+    #[test]
+    fn checked_render_clean_layout_has_no_errors() {
+        let n = row()
+            .child(empty().background([255, 0, 0, 255]).size(20, 20))
+            .child(empty().background([0, 255, 0, 255]).grow(1).fill_height())
+            .child(empty().background([0, 0, 255, 255]).grow(2).fill_height())
+            .size(120, 20);
+        let outcome = render_checked(&n, 120);
+        assert!(
+            outcome.errors.is_empty(),
+            "expected zero errors, got: {outcome}",
+        );
+        assert_eq!(outcome.bitmap.dimensions(), (120, 20));
+    }
+
+    /// A row whose Sized<Fixed,_> children's natural sizes sum past the
+    /// container's main-axis size will overflow on paint. The
+    /// `render_checked` outcome must surface a [`LayoutError`] for the
+    /// offending children.
+    #[test]
+    fn checked_render_surfaces_stack_overflow() {
+        // Three 100-wide Fixed children in a 120-wide row — third
+        // child's cursor position exceeds the row's right edge.
+        let n = row()
+            .child(empty().background([255, 0, 0, 255]).size(100, 20))
+            .child(empty().background([0, 255, 0, 255]).size(100, 20))
+            .child(empty().background([0, 0, 255, 255]).size(100, 20))
+            .size(120, 20);
+        let outcome = render_checked(&n, 120);
+        assert!(
+            !outcome.errors.is_empty(),
+            "expected layout errors, got clean render: {outcome}",
+        );
+        // At least one error reports a Stack container overflowing on the right.
+        assert!(
+            outcome
+                .errors
+                .iter()
+                .any(|e| { matches!(e.container, ContainerKind::Stack) && e.overflow.right > 0 }),
+            "expected Stack right-overflow, got errors: {:#?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn render_outcome_into_result_is_ok_on_clean_render() {
+        let n = empty().background(WHITE).size(8, 8);
+        let outcome = render_checked(&n, 8);
+        assert!(outcome.into_result().is_ok());
+    }
+
+    #[test]
+    fn render_outcome_into_result_is_err_on_overflow() {
+        let n = row()
+            .child(empty().background(WHITE).size(50, 10))
+            .child(empty().background(BLACK).size(50, 10))
+            .size(60, 10);
+        let outcome = render_checked(&n, 60);
+        let r = outcome.into_result();
+        assert!(r.is_err());
+        if let Err(e) = r {
+            assert!(!e.errors.is_empty());
+            // The bitmap inside the error is still rendered (with clipping).
+            assert_eq!(e.bitmap.dimensions(), (60, 10));
+        }
+    }
+
+    /// Layout-gallery scene 8 mirror — confirms a clean
+    /// `.grow(N).fill_height()` chain (post the `main_grow_weight`
+    /// walker fix) renders without paint-time containment errors.
+    #[test]
+    fn checked_render_gallery_grow_fill_height_chain_clean() {
+        let hug = empty().background([255, 0, 0, 255]).size(80, 40);
+        let g1 = empty().background([0, 255, 0, 255]).grow(1).fill_height();
+        let g2 = empty().background([0, 0, 255, 255]).grow(2).fill_height();
+        let n = row().child(hug).child(g1).child(g2).size(500, 56);
+        let outcome = render_checked(&n, 500);
+        assert!(
+            outcome.errors.is_empty(),
+            "scene-8-style layout should be clean post-fix: {outcome}",
+        );
     }
 }

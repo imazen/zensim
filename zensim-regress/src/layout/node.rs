@@ -162,6 +162,30 @@ pub fn line(s: impl Into<String>, fg: Color) -> Node {
 // ── Dispatch tables ────────────────────────────────────────────────────
 
 impl Node {
+    /// Coarse classification — used by paint-time diagnostics to label
+    /// offending children without exposing the full enum.
+    pub fn kind(&self) -> super::diagnostics::NodeKind {
+        use super::diagnostics::NodeKind;
+        match self {
+            Node::Empty => NodeKind::Empty,
+            Node::Fill(_) => NodeKind::Fill,
+            Node::Image(_) => NodeKind::Image,
+            Node::Text(_) => NodeKind::Text,
+            Node::Stack { .. } => NodeKind::Stack,
+            Node::Grid { .. } => NodeKind::Grid,
+            Node::Layers(_) => NodeKind::Layers,
+            Node::Padded { .. } => NodeKind::Padded,
+            Node::Sized { .. } => NodeKind::Sized,
+            Node::Constrain { .. } => NodeKind::Constrain,
+            Node::Aspect { .. } => NodeKind::Aspect,
+            Node::Align { .. } => NodeKind::Align,
+            Node::Fit { .. } => NodeKind::Fit,
+            Node::Background { .. } => NodeKind::Background,
+            Node::Border { .. } => NodeKind::Border,
+            Node::SegmentedStrip { .. } => NodeKind::SegmentedStrip,
+        }
+    }
+
     /// Measure this node given the maximum available `(w, h)`. The
     /// returned size is clamped to `max` and to [`safety::MAX_DIM`].
     /// If recursion exceeds [`safety::MAX_DEPTH`] (e.g., a malicious
