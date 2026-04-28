@@ -56,12 +56,35 @@ pub(super) fn measure_padded(insets: Insets, child: &Node, max: Size) -> Size {
 }
 
 pub(super) fn measure_sized(w: SizeRule, h: SizeRule, child: &Node, max: Size) -> Size {
-    let child_size = child.measure(max);
+    // For non-Hug rules, the rule resolves to a concrete axis size that
+    // *is* the constraint we should pass to the child — otherwise a
+    // wrapped-text leaf inside e.g. `.width(Fixed(50))` would measure
+    // itself against the parent's wide max and report a single-line
+    // height. For Hug we pass the parent's max unchanged (no extra
+    // constraint added by us).
+    let probe = |rule: SizeRule, axis_max: u32| -> u32 {
+        match rule {
+            SizeRule::Hug => axis_max,
+            // Fill / Grow inside an unbounded constraint would otherwise
+            // happily stretch to u32::MAX; clamp to MAX_DIM and to the
+            // available axis_max.
+            SizeRule::Fill | SizeRule::Grow(_) => safety::clamp_dim(axis_max),
+            SizeRule::Fixed(v) => safety::clamp_dim(v).min(axis_max),
+            SizeRule::Percent(p) => {
+                if axis_max == 0 || p.is_nan() {
+                    0
+                } else {
+                    let v = ((axis_max as f32) * p.clamp(0.0, 1.0)).round() as u32;
+                    safety::clamp_dim(v).min(axis_max)
+                }
+            }
+        }
+    };
+    let child_max = Size::new(probe(w, max.w), probe(h, max.h));
+    let child_size = child.measure(child_max);
     let resolve = |rule: SizeRule, axis_max: u32, child_dim: u32| -> u32 {
         match rule {
             SizeRule::Hug => child_dim,
-            // Fill / Grow inside an unbounded constraint would otherwise
-            // happily stretch to u32::MAX; clamp to MAX_DIM.
             SizeRule::Fill | SizeRule::Grow(_) => safety::clamp_dim(axis_max),
             SizeRule::Fixed(v) => safety::clamp_dim(v),
             SizeRule::Percent(p) => {
@@ -422,6 +445,76 @@ mod tests {
     fn aspect_ratio_16_9_from_width() {
         let n = image_node(solid(160, 50, WHITE)).aspect_ratio(16, 9);
         assert_eq!(n.measure(Size::new(200, 200)), Size::new(160, 90));
+    }
+
+    /// Regression: `Sized<Fixed(narrow), Hug>` containing wrapped text used
+    /// to measure the child against the parent's wide max instead of the
+    /// resolved 50px width, so `Hug` reported a single-line height. The
+    /// width constraint must be propagated to the child measure.
+    #[test]
+    fn sized_fixed_width_propagates_to_wrapped_text_height() {
+        use super::super::node::text;
+        use super::super::text::TextSpec;
+        let spec = TextSpec::wrapped(
+            "this sentence is long enough to require multiple lines",
+            WHITE,
+            BLACK,
+            8,
+        );
+        let unconstrained_h = text(spec.clone()).measure(Size::new(2000, 2000)).h;
+        let narrowed_h = text(spec)
+            .width(SizeRule::Fixed(50))
+            .measure(Size::new(2000, 2000))
+            .h;
+        assert!(
+            narrowed_h > unconstrained_h,
+            "wrapping at 50px should be taller than wrapping at 2000px \
+             (got narrowed_h={narrowed_h}, unconstrained_h={unconstrained_h})",
+        );
+    }
+
+    /// Sister regression: same shape but for the height axis — `Sized<Hug,
+    /// Fixed(short)>` should clamp wrapped text's measured height even
+    /// when the child would naturally be taller. (Pre-fix this happened
+    /// to work because `resolve(Fixed)` returns the rule unconditionally,
+    /// but verifies the probe doesn't regress that path.)
+    #[test]
+    fn sized_fixed_height_overrides_child_intrinsic() {
+        use super::super::node::text;
+        use super::super::text::TextSpec;
+        let spec = TextSpec::wrapped(
+            "this sentence is long enough to require multiple lines",
+            WHITE,
+            BLACK,
+            8,
+        );
+        let n = text(spec).height(SizeRule::Fixed(20));
+        assert_eq!(n.measure(Size::new(2000, 2000)).h, 20);
+    }
+
+    /// `Sized<Percent(0.25), Hug>` on wrapped text inside a 400-wide
+    /// parent should wrap at 100px and report the corresponding height,
+    /// not the height-at-400.
+    #[test]
+    fn sized_percent_width_propagates_to_wrapped_text_height() {
+        use super::super::node::text;
+        use super::super::text::TextSpec;
+        let spec = TextSpec::wrapped(
+            "this sentence is long enough to require multiple lines",
+            WHITE,
+            BLACK,
+            8,
+        );
+        let h_full = text(spec.clone()).measure(Size::new(400, 1000)).h;
+        let h_quarter = text(spec)
+            .width(SizeRule::Percent(0.25))
+            .measure(Size::new(400, 1000))
+            .h;
+        assert!(
+            h_quarter > h_full,
+            "Percent(0.25) of 400 → 100px wrap should be taller than wrap at 400px \
+             (got h_quarter={h_quarter}, h_full={h_full})",
+        );
     }
     #[test]
     fn align_centers_in_oversized_rect() {
