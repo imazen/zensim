@@ -11,6 +11,10 @@ pub(crate) struct ScaleBuffers {
     pub temp_blur: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
+    /// Scratch for the streaming SSIM kernel (zwe #1). Empty when the
+    /// `zwe-streaming-ssim` feature is off.
+    #[cfg(feature = "zwe-streaming-ssim")]
+    pub streaming: crate::streaming_fused::StreamingSsimScratch,
 }
 
 impl ScaleBuffers {
@@ -23,6 +27,8 @@ impl ScaleBuffers {
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
             mask: vec![0.0; size],
+            #[cfg(feature = "zwe-streaming-ssim")]
+            streaming: Default::default(),
         }
     }
 

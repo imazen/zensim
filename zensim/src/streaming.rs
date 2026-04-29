@@ -1150,6 +1150,21 @@ fn process_strip_channel(
             // Tracked but deferred — needs a careful kernel rewrite session.
             #[cfg(feature = "zwe-time-phases")]
             let _t0 = std::time::Instant::now();
+
+            // Streaming SSIM (zwe #1): replace 4-plane H-blur with 2-plane
+            // (μ only), then run the row-major streaming kernel that keeps
+            // σ in a (2r+1)-row ring buffer.
+            #[cfg(feature = "zwe-streaming-ssim")]
+            fused_blur_h_mu(
+                src_c,
+                dst_c,
+                &mut bufs.mu1,
+                &mut bufs.mu2,
+                width,
+                strip_h,
+                config.blur_radius,
+            );
+            #[cfg(not(feature = "zwe-streaming-ssim"))]
             fused_blur_h_ssim(
                 src_c,
                 dst_c,
@@ -1173,7 +1188,30 @@ fn process_strip_channel(
             // extended features which also need temp_blur for blurs)
             #[cfg(feature = "zwe-time-phases")]
             let _t1 = std::time::Instant::now();
-            #[cfg(feature = "zwe-minimal-kernel")]
+            #[cfg(feature = "zwe-streaming-ssim")]
+            {
+                strip_acc = crate::streaming_fused::streaming_features_ssim(
+                    &bufs.mu1,
+                    &bufs.mu2,
+                    src_c,
+                    dst_c,
+                    width,
+                    strip_h,
+                    inner_start,
+                    inner_h,
+                    config.blur_radius,
+                    &mut bufs.mask,
+                    &mut bufs.mul_buf,
+                    store_mu,
+                    &mut bufs.temp_blur,
+                    store_sd,
+                    &mut bufs.streaming,
+                );
+            }
+            #[cfg(all(
+                not(feature = "zwe-streaming-ssim"),
+                feature = "zwe-minimal-kernel",
+            ))]
             {
                 strip_acc = crate::fused::fused_vblur_features_ssim_const::<
                     { crate::fused::fbits::MINIMAL_SSIM },
@@ -1196,7 +1234,10 @@ fn process_strip_channel(
                     store_sd,
                 );
             }
-            #[cfg(not(feature = "zwe-minimal-kernel"))]
+            #[cfg(all(
+                not(feature = "zwe-streaming-ssim"),
+                not(feature = "zwe-minimal-kernel"),
+            ))]
             {
                 strip_acc = fused_vblur_features_ssim(
                     &bufs.mu1,

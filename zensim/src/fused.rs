@@ -202,7 +202,7 @@ pub(crate) fn fused_vblur_features_edge(
 // ============================================================
 
 #[inline(always)]
-fn mirror_idx(i: usize, r: usize, height: usize) -> usize {
+pub(crate) fn mirror_idx(i: usize, r: usize, height: usize) -> usize {
     if i <= r {
         (r - i).min(height - 1)
     } else {
@@ -211,7 +211,7 @@ fn mirror_idx(i: usize, r: usize, height: usize) -> usize {
 }
 
 #[inline(always)]
-fn vblur_add_idx(y: usize, r: usize, height: usize) -> usize {
+pub(crate) fn vblur_add_idx(y: usize, r: usize, height: usize) -> usize {
     let add_raw = y + r + 1;
     if add_raw < height {
         add_raw
@@ -224,7 +224,7 @@ fn vblur_add_idx(y: usize, r: usize, height: usize) -> usize {
 }
 
 #[inline(always)]
-fn vblur_rem_idx(y: usize, r: usize, height: usize) -> usize {
+pub(crate) fn vblur_rem_idx(y: usize, r: usize, height: usize) -> usize {
     let rem_i = y as isize - r as isize;
     let idx = if rem_i < 0 {
         rem_i.unsigned_abs()

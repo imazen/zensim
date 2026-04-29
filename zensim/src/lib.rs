@@ -132,6 +132,8 @@ pub mod source;
 mod streaming;
 #[cfg(feature = "zwe-time-phases")]
 pub mod streaming;
+#[cfg(feature = "zwe-streaming-ssim")]
+mod streaming_fused;
 
 // --- Primary API ---
 pub use error::ZensimError;

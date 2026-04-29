@@ -62,6 +62,12 @@ zwe-pruned-v0-2 = []
 ## regresses on 1080p multithread due to L2 spill on Zen 4).
 zwe-strip-inner-16 = []
 zwe-strip-inner-64 = []
+## σ-plane elimination: streaming SSIM kernel (row-major) that stores σ_sq
+## and σ_12 in a (2r+1)-row ring buffer rather than full-strip planes.
+## Drops ~30 MB of memory traffic per image. Scalar implementation (SIMD
+## variants are followup); gated for benchmarking against the existing
+## fused 4-plane kernel.
+zwe-streaming-ssim = []
 
 [dependencies]
 archmage = { workspace = true }
