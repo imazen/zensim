@@ -16,6 +16,7 @@ cc = "1"
 zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
 zenbench = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+moxcms = { path = "/home/lilith/work/moxcms" }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
 butteraugli = "0.9"
