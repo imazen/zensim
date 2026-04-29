@@ -34,6 +34,84 @@
 //! # Ok::<(), zensim::ZensimError>(())
 //! ```
 //!
+//! ## Encoder closed-loop pattern (per-window quality probe)
+//!
+//! For codec quantization controllers that want a per-window quality signal
+//! mid-encode (rather than one global score post-encode), pre-slice the
+//! source into row-windows that match the encoder's natural emission
+//! cadence, build a [`PrecomputedReference`] per window once, then call
+//! [`compute_with_ref_into`](crate::Zensim::compute_with_ref_into) per
+//! window with a shared [`ZensimScratch`] to amortize allocations.
+//!
+//! ```
+//! use zensim::{Zensim, ZensimProfile, RgbSlice, ZensimScratch};
+//! # let (source_pixels, width, height) = (vec![[0u8; 3]; 16 * 8], 16usize, 8usize);
+//! # const WINDOW_ROWS: usize = 4;
+//! let z = Zensim::new(ZensimProfile::latest());
+//!
+//! // Up front: pre-slice the source into row-windows. Build one
+//! // PrecomputedReference per window (each is small — only that
+//! // window's pyramid).
+//! let mut window_refs = Vec::new();
+//! let mut y = 0;
+//! while y < height {
+//!     let h = (height - y).min(WINDOW_ROWS);
+//!     if h < 8 { break; }  // zensim's minimum dim
+//!     let start = y * width;
+//!     let end = start + h * width;
+//!     let win = RgbSlice::new(&source_pixels[start..end], width, h);
+//!     window_refs.push((y, h, z.precompute_reference(&win)?));
+//!     y += WINDOW_ROWS;
+//! }
+//!
+//! // Per encode iMCU window i: compute canonical zensim on the slice,
+//! // reusing scratch buffers across all calls.
+//! let mut scratch = ZensimScratch::new();
+//! for (y0, h, pre) in &window_refs {
+//!     # let distorted_window: Vec<[u8; 3]> = vec![[0u8; 3]; (*h) * width];
+//!     let dst = RgbSlice::new(&distorted_window, width, *h);
+//!     let result = z.compute_with_ref_into(pre, &dst, &mut scratch)?;
+//!     // Feed result.score() into your AQ controller…
+//!     let _ = result.score();
+//! }
+//! # Ok::<(), zensim::ZensimError>(())
+//! ```
+//!
+//! ### Caveats — read before deploying as a control signal
+//!
+//! Empirical validation against full-image diffmap as ground-truth (see
+//! parked branch `explored/issue-16-option-d-slice-canonical-and-zenwebp-data`
+//! and the `slice_localized_distortion.rs` / `slice_real_codec_localization.rs`
+//! examples in `zensim-regress`):
+//!
+//! - **Truncated pyramid context.** A 64-row window's pyramid is 64→32→16→8
+//!   rows at scales 0–3. SSIM uses an 11×11 window (radius 5), so scale 3
+//!   has 0 valid SSIM rows in 8 input rows; scale 2 has ~6 valid rows of 16.
+//!   The features at coarser scales are dominated by mirror-padded boundary
+//!   data, not content. The trained weights at scales 1–3 carry ~94% of
+//!   the weight mass.
+//!
+//! - **On *synthetic* injected-distortion** (one window heavily damaged,
+//!   others clean): per-window canonical correctly identifies the damaged
+//!   window 100% of the time. The clean-vs-damaged gap dwarfs any
+//!   pad-noise contribution.
+//!
+//! - **On *real* codec output** (mozjpeg / zenjpeg sRGB / zenjpeg XYB /
+//!   zenavif at q60–q90): per-window canonical's top-1 ranking matches
+//!   ground-truth (full-image diffmap aggregated per window) only ~24%
+//!   of the time. Top-3 overlap is 1.71/3 ≈ 57%. Mean SROCC = 0.57.
+//!
+//! - **Treat the per-window signal as a *guidance* signal, not a per-window
+//!   precision oracle.** Pair with EMA smoothing across windows and an
+//!   iteration-boundary canonical check ([`Zensim::compute_with_ref`])
+//!   for the global score.
+//!
+//! - **Cost.** With K windows of ~`H/K` rows each, total per-iteration
+//!   compute is roughly the same as one full-image canonical compute,
+//!   distributed across the encoder's iMCU emissions. The
+//!   [`PrecomputedReference`] builds amortize across all encoder
+//!   iterations against the same source.
+//!
 //! ## RGBA support
 //!
 //! ```
