@@ -59,6 +59,36 @@ use rayon::prelude::*;
 use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
+// Inner rows per strip. Each strip's H-blur covers STRIP_INNER + 2*overlap
+// rows, and the overlap rows get re-H-blurred at the next strip boundary.
+// Larger values reduce that duplicate work; smaller values keep the H-blur
+// plane allocation in L2.
+//
+// At 1080p with the default `blur_radius=5, blur_passes=1` (overlap=5):
+//   16 → 67 strips × 26 rows = ~63% overlap waste, 800 KB plane footprint
+//   32 → 34 strips × 42 rows = ~30% waste, 1.3 MB footprint
+//   64 → 17 strips × 74 rows = ~16% waste, 2.3 MB footprint
+//
+// Zen 4 L2 is 1 MB per core. At 32 the working set is right at the L2
+// boundary — spills slightly but cache is forgiving. At 64 the spill is
+// significant on 1080p multithreaded (16 cores all hammering L3).
+//
+// Empirical (1080p, fastest run on a busy box):
+//   16 → 15.01 ms MT   (baseline)
+//   32 → 14.66 ms MT   (-2.3%, wins at 1080p; sub-1080p sizes also win)
+//   64 → 18.80 ms MT   (+25%, regresses on 1080p MT due to L2 spill)
+//
+// 32 is the safer default: improves all sizes on single-thread, slight win
+// at 1080p multithread, no regression. 64 is opt-in for sub-1080p single-
+// thread workloads where L2 pressure isn't the bottleneck.
+#[cfg(all(
+    not(feature = "zwe-strip-inner-16"),
+    not(feature = "zwe-strip-inner-64"),
+))]
+const STRIP_INNER: usize = 32;
+#[cfg(feature = "zwe-strip-inner-64")]
+const STRIP_INNER: usize = 64;
+#[cfg(feature = "zwe-strip-inner-16")]
 const STRIP_INNER: usize = 16;
 
 /// Run two closures in parallel (rayon) or sequentially, depending on `parallel`.
@@ -502,14 +532,23 @@ impl ScaleAccumulators {
     }
 }
 
+/// Per-channel-at-scale dispatch decision. `None` slots are skipped entirely
+/// (the channel doesn't need ssim, edge, or mse at this scale).
+pub(crate) type ScaleActive = [Option<(usize, bool, bool)>; 3];
+
 /// Determine which channels need SSIM, edge, and/or MSE computation at a given scale.
+///
+/// Returns a stack-allocated `[Option<(c, need_ssim, need_edge)>; 3]`. The
+/// previous Vec<…> return allocated per call (4 calls per image, ~ns each);
+/// the array version both saves the alloc and gives LLVM enough shape info
+/// to specialize the dispatch loop.
 #[cfg_attr(feature = "zwe-static-dispatch", allow(dead_code))]
 fn active_channels(
     scale_idx: usize,
     n_scales: usize,
     config: &ZensimConfig,
     weights: &[f64],
-) -> Vec<(usize, bool, bool)> {
+) -> ScaleActive {
     let compute_all = config.compute_all_features;
     let extended = config.extended_features;
     let basic_fpc = FEATURES_PER_CHANNEL_BASIC; // 13
@@ -528,12 +567,12 @@ fn active_channels(
     //     0-2: ssim_max, art_max, det_max
     //     3-5: ssim_p95, art_p95, det_p95
     let basic_total = n_scales * basic_fpc * 3;
-    let mut active = Vec::new();
+    let mut active: ScaleActive = [None; 3];
     let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
     for c in 0..3 {
         if beyond {
             if compute_all || extended {
-                active.push((c, true, true));
+                active[c] = Some((c, true, true));
             }
         } else {
             let base = scale_idx * (basic_fpc * 3) + c * basic_fpc;
@@ -550,7 +589,7 @@ fn active_channels(
                 need_edge = true; // art_max/det_max or art_p95/det_p95
             }
             if need_ssim || need_edge || need_mse {
-                active.push((c, need_ssim, need_edge));
+                active[c] = Some((c, need_ssim, need_edge));
             }
         }
     }
@@ -569,19 +608,52 @@ pub(crate) fn compute_xyb_mean_offset(
     height: usize,
     padded_width: usize,
 ) -> [f64; 3] {
-    let mut offset = [0.0f64; 3];
     let n = (width * height) as f64;
-    for c in 0..3 {
-        let mut src_sum = 0.0f64;
-        let mut dst_sum = 0.0f64;
-        for y in 0..height {
-            let row_start = y * padded_width;
-            for x in 0..width {
-                src_sum += src_planes[c][row_start + x] as f64;
-                dst_sum += dst_planes[c][row_start + x] as f64;
+
+    // Sum (src - dst) per row in chunks, summed across chunks. Serial cost
+    // at 1080p is ~6.2M f32-load pairs per channel × 3 channels — measurable
+    // (was a separate full-image pass). Parallelizing across rayon threads
+    // brings it under the noise floor when threads is enabled.
+    let chunk_rows = 64usize;
+    let row_indices: Vec<usize> = (0..height).step_by(chunk_rows).collect();
+
+    let per_chunk = |row_start: usize| -> [f64; 3] {
+        let row_end = (row_start + chunk_rows).min(height);
+        let mut diff = [0.0f64; 3];
+        for c in 0..3 {
+            let mut acc = 0.0f64;
+            for y in row_start..row_end {
+                let s = &src_planes[c][y * padded_width..y * padded_width + width];
+                let d = &dst_planes[c][y * padded_width..y * padded_width + width];
+                let mut row_sum = 0.0f64;
+                for i in 0..width {
+                    row_sum += (s[i] - d[i]) as f64;
+                }
+                acc += row_sum;
             }
+            diff[c] = acc;
         }
-        offset[c] = (src_sum - dst_sum) / n;
+        diff
+    };
+
+    #[cfg(feature = "threads")]
+    let chunks: Vec<[f64; 3]> = if cfg!(feature = "threads") {
+        use rayon::prelude::*;
+        row_indices.into_par_iter().map(per_chunk).collect()
+    } else {
+        row_indices.into_iter().map(per_chunk).collect()
+    };
+    #[cfg(not(feature = "threads"))]
+    let chunks: Vec<[f64; 3]> = row_indices.into_iter().map(per_chunk).collect();
+
+    let mut offset = [0.0f64; 3];
+    for chunk_diff in &chunks {
+        for c in 0..3 {
+            offset[c] += chunk_diff[c];
+        }
+    }
+    for c in 0..3 {
+        offset[c] /= n;
     }
     offset
 }
@@ -1041,7 +1113,41 @@ fn process_strip_channel(
         // Force mu1/mu2 storage when diffmap needs edge/MSE or HF features
         let store_mu = config.extended_features || dm_needs_edge || dm_needs_hf;
         if need_ssim {
-            // Fused H-blur: src,dst → 4 H-blurred planes in one pass
+            // PERF NOTE (zwe #1): the largest unrealised win in this kernel.
+            //
+            // fused_blur_h_ssim writes four full-strip planes (mu1, mu2,
+            // sigma_sq, sigma12). At 1080p strip_inner=64 that's ~568 KB
+            // per plane × 4 = 2.3 MB of write traffic per channel-at-scale,
+            // immediately read back by the V-blur. Across all scales × 3
+            // channels: ~30–40 MB of σ-plane store/load traffic per image.
+            // Most of it doesn't fit in per-core L2.
+            //
+            // Eliminating sigma_sq + sigma12 plane storage would halve the
+            // SSIM-path memory traffic. Two designs work:
+            //
+            //   A) Ring-buffer the σ planes at (2*radius+1) rows × W. H-blur
+            //      writes row y into slot (y % ring_size); V-blur reads with
+            //      the same indexing. Requires interleaving H-blur and
+            //      V-blur in time — H-blur fills the ring `r+1` rows ahead
+            //      of V-blur consumption. ~84 KB per σ plane, fits in L1.
+            //
+            //   B) Drop H-blur of σ entirely; compute σ²(x,y) and σ₁₂(x,y)
+            //      inside the V-blur kernel from raw src+dst. Maintain
+            //      V-running-sums of (src²+dst²) and (src·dst) per column,
+            //      then do an inline H-blur at each output pixel-vector
+            //      (sliding 2r+1-element sum). Saves all σ plane traffic
+            //      and the H-blur arithmetic for σ.
+            //
+            // Both restructure the v4/v3/scalar kernels and break the
+            // current "all H-blur, then all V-blur" phase split. (B) is
+            // tighter but has more SIMD register pressure (needs 6 V-running
+            // sums per column group instead of 4, plus the H-blur slide).
+            // (A) is mechanically cleaner but more memory traffic than (B).
+            //
+            // Estimated impact: 25–35% wall-time reduction at 1080p
+            // single-thread; multithreaded win depends on whether DRAM is
+            // the bottleneck (bandwidth-bound case sees the largest win).
+            // Tracked but deferred — needs a careful kernel rewrite session.
             #[cfg(feature = "zwe-time-phases")]
             let _t0 = std::time::Instant::now();
             fused_blur_h_ssim(
@@ -1258,6 +1364,18 @@ fn process_strip_channel(
             }
 
             // Step 4: masked SSIM (needs sigma_sq and sigma12 — recompute from fused H-blur)
+            //
+            // PERF NOTE (zwe #5): the fused V-blur kernel had σ²(x,y) and
+            // σ₁₂(x,y) in SIMD registers when this path was taken, but
+            // didn't write them to memory. Re-deriving via two
+            // (sq_sum_into + box_blur_1pass_into) pairs costs four
+            // full-image passes. Extending the fused kernel signatures to
+            // write `sigma_sq_out`, `sigma_12_out` when extended_features
+            // is on would eliminate this. The change touches v4/v3/neon/
+            // scalar variants of fused_vblur_features_ssim plus the
+            // _const sibling — non-trivial. Tracked but deferred since
+            // extended_features is a research-only flag (training / weight
+            // ablation), not on the production hot path.
             if need_ssim {
                 // sigma_sq and sigma12 are NOT stored from fused pass — recompute
                 sq_sum_into(src_c, dst_c, &mut bufs.mul_buf);
@@ -1479,8 +1597,11 @@ fn process_scale_bands(
     // [(0,T,T),(1,T,T),(2,T,T)]. Bypassing it tests whether the dispatch
     // logic itself sits on the critical path.
     #[cfg(feature = "zwe-static-dispatch")]
-    let scale_active: [(usize, bool, bool); 3] =
-        [(0, true, true), (1, true, true), (2, true, true)];
+    let scale_active: ScaleActive = [
+        Some((0, true, true)),
+        Some((1, true, true)),
+        Some((2, true, true)),
+    ];
     #[cfg(not(feature = "zwe-static-dispatch"))]
     let scale_active = active_channels(scale_idx, config.num_scales, config, weights);
     #[cfg(feature = "zwe-static-dispatch")]
@@ -1538,7 +1659,10 @@ fn process_scale_bands(
             let dm_start = (y - band_first_y) * width;
             let dm_n = inner_h * width;
 
-            for &(c, need_ssim, need_edge) in &scale_active {
+            for entry in &scale_active {
+                let Some((c, need_ssim, need_edge)) = *entry else {
+                    continue;
+                };
                 let dm_info = match band_dm.as_mut() {
                     Some(dm) if need_ssim => {
                         let dm_w = diffmap_weights.unwrap();

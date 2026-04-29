@@ -56,6 +56,12 @@ zwe-time-phases = []
 ## need_ssim=false for those cells. Bench-only — switches default profile
 ## without going through ZensimProfile API.
 zwe-pruned-v0-2 = []
+## STRIP_INNER tuning. Default is 32 (Goldilocks: L2-friendly, low overlap).
+## Set zwe-strip-inner-16 for the original tight-L2 baseline.
+## Set zwe-strip-inner-64 for largest strips (best at <1080p single-thread,
+## regresses on 1080p multithread due to L2 spill on Zen 4).
+zwe-strip-inner-16 = []
+zwe-strip-inner-64 = []
 
 [dependencies]
 archmage = { workspace = true }

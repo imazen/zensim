@@ -2557,9 +2557,9 @@ dependencies = [
 
 [[package]]
 name = "zenbench"
-version = "0.1.4"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52ca74d848b16c0f1bb00e06a954706e7aa7c2caa1bc28193737ca3a16d3ad68"
+checksum = "472869a31fa1491b714ac27f0fec63bd17f03412e562f196f97b3fadd3d46db7"
 dependencies = [
  "clap",
  "fs4",
@@ -2659,6 +2659,7 @@ dependencies = [
  "rgb",
  "ssimulacra2",
  "which",
+ "zenbench",
  "zenpnm",
  "zensim",
 ]
