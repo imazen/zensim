@@ -678,11 +678,50 @@ pub(crate) fn resize_gray(src: &GrayBitmap, w: u32, h: u32, filter: ResampleFilt
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Overlay (straight-alpha source-over) + crop + flips + rotates
+// Overlay (linear-light premultiplied source-over) + crop + flips + rotates
 // ════════════════════════════════════════════════════════════════════════
 
+/// Convert one sRGB straight-alpha u8 RGBA pixel to premultiplied linear f32.
+#[inline]
+fn srgb_u8_to_linear_premul(rgba: &[u8]) -> [f32; 4] {
+    debug_assert_eq!(rgba.len(), 4);
+    let a = rgba[3] as f32 * (1.0 / 255.0);
+    let r = linear_srgb::default::srgb_u8_to_linear(rgba[0]) * a;
+    let g = linear_srgb::default::srgb_u8_to_linear(rgba[1]) * a;
+    let b = linear_srgb::default::srgb_u8_to_linear(rgba[2]) * a;
+    [r, g, b, a]
+}
+
+/// Convert one premultiplied linear f32 RGBA pixel back to sRGB straight-alpha u8.
+#[inline]
+fn linear_premul_to_srgb_u8(rgba: [f32; 4]) -> [u8; 4] {
+    let a = rgba[3].clamp(0.0, 1.0);
+    if a < 1.0 / 512.0 {
+        // Vanishing alpha — write a fully-transparent pixel rather than divide by ~0.
+        return [0, 0, 0, 0];
+    }
+    let inv_a = 1.0 / a;
+    let r_lin = (rgba[0] * inv_a).clamp(0.0, 1.0);
+    let g_lin = (rgba[1] * inv_a).clamp(0.0, 1.0);
+    let b_lin = (rgba[2] * inv_a).clamp(0.0, 1.0);
+    [
+        linear_srgb::default::linear_to_srgb_u8(r_lin),
+        linear_srgb::default::linear_to_srgb_u8(g_lin),
+        linear_srgb::default::linear_to_srgb_u8(b_lin),
+        (a * 255.0 + 0.5) as u8,
+    ]
+}
+
 /// Source-over composite of `src` onto `canvas` at signed `(dx, dy)`.
-/// Both straight-alpha sRGB-u8. Out-of-bounds pixels are clipped.
+///
+/// Both inputs are sRGB-encoded straight-alpha u8 RGBA. The composite is
+/// performed in **premultiplied linear-light f32** via `zenblend::blend_row`
+/// — this avoids the under-darkening artifact you get blending sRGB-encoded
+/// straight-alpha values directly. Pixels with source alpha 0 or 255 take
+/// fast paths that skip the linear conversion (pure transparent / pure
+/// opaque cases are bit-identical to a direct copy).
+///
+/// Out-of-bounds pixels are clipped.
 pub(crate) fn overlay(canvas: &mut Bitmap, src: &Bitmap, dx: i64, dy: i64) {
     let cw = canvas.width as i64;
     let ch = canvas.height as i64;
@@ -701,17 +740,34 @@ pub(crate) fn overlay(canvas: &mut Bitmap, src: &Bitmap, dx: i64, dy: i64) {
     let sy_start = (y_start - dy) as u32;
     let cw_u = canvas.width as usize;
     let sw_u = src.width as usize;
+    let row_w = (x_end - x_start) as usize;
+    if row_w == 0 {
+        return;
+    }
+
+    // Per-row scratch buffers. Reused across all destination rows. Holds
+    // partial-alpha pixels; the fully-transparent / fully-opaque fast paths
+    // never touch these.
+    let mut src_lin = vec![0.0f32; row_w * 4];
+    let mut dst_lin = vec![0.0f32; row_w * 4];
+    // Index map — for each x in [0, row_w) we record whether the pixel
+    // needed the linear path. Used to write only the partial-alpha pixels
+    // back from the linear scratch (the fast paths already wrote their
+    // result directly into canvas).
+    let mut needs_linear = vec![false; row_w];
 
     for y_dst in y_start..y_end {
         let y_src = sy_start + (y_dst - y_start) as u32;
         let dst_row_off = (y_dst as usize) * cw_u * 4;
         let src_row_off = (y_src as usize) * sw_u * 4;
-        for x_dst in x_start..x_end {
+
+        let mut any_partial = false;
+        for (i, x_dst) in (x_start..x_end).enumerate() {
             let x_src = sx_start + (x_dst - x_start) as u32;
             let d_off = dst_row_off + (x_dst as usize) * 4;
             let s_off = src_row_off + (x_src as usize) * 4;
-
             let sa = src.pixels[s_off + 3];
+            needs_linear[i] = false;
             if sa == 0 {
                 continue;
             }
@@ -719,22 +775,39 @@ pub(crate) fn overlay(canvas: &mut Bitmap, src: &Bitmap, dx: i64, dy: i64) {
                 canvas.pixels[d_off..d_off + 4].copy_from_slice(&src.pixels[s_off..s_off + 4]);
                 continue;
             }
-            // Straight-alpha source-over.
-            let sa_u = sa as u32;
-            let inv_sa = 255 - sa_u;
-            let da = canvas.pixels[d_off + 3] as u32;
-            // out_a = sa + da * (1 - sa) / 255
-            let out_a = (sa_u + (da * inv_sa).div_ceil(255)).min(255);
-            for c in 0..3 {
-                let s = src.pixels[s_off + c] as u32;
-                let d = canvas.pixels[d_off + c] as u32;
-                // Blend in straight alpha:
-                //   out_c = (s * sa + d * da * (1 - sa) / 255) / out_a
-                let num = s * sa_u + (d * da * inv_sa) / (255 * 255);
-                let v = num.checked_div(out_a).unwrap_or(0);
-                canvas.pixels[d_off + c] = v.min(255) as u8;
+            // Partial alpha — convert into the linear scratch.
+            let s_lin = srgb_u8_to_linear_premul(&src.pixels[s_off..s_off + 4]);
+            let d_lin = srgb_u8_to_linear_premul(&canvas.pixels[d_off..d_off + 4]);
+            src_lin[i * 4..i * 4 + 4].copy_from_slice(&s_lin);
+            dst_lin[i * 4..i * 4 + 4].copy_from_slice(&d_lin);
+            needs_linear[i] = true;
+            any_partial = true;
+        }
+
+        if !any_partial {
+            continue;
+        }
+
+        // Blend partial-alpha src OVER dst — zenblend mutates the first
+        // operand in place, so after this `src_lin` holds the composite.
+        // (Fully-transparent and fully-opaque slots in src_lin / dst_lin
+        // contain stale zeros, but we won't write them back below.)
+        zenblend::blend_row(&mut src_lin, &dst_lin, zenblend::BlendMode::SrcOver);
+
+        // Convert blended pixels back and write to canvas.
+        for i in 0..row_w {
+            if !needs_linear[i] {
+                continue;
             }
-            canvas.pixels[d_off + 3] = out_a as u8;
+            let x_dst = x_start + i as i64;
+            let d_off = dst_row_off + (x_dst as usize) * 4;
+            let blended = [
+                src_lin[i * 4],
+                src_lin[i * 4 + 1],
+                src_lin[i * 4 + 2],
+                src_lin[i * 4 + 3],
+            ];
+            canvas.pixels[d_off..d_off + 4].copy_from_slice(&linear_premul_to_srgb_u8(blended));
         }
     }
 }
@@ -1027,6 +1100,43 @@ mod tests {
         let src = solid(2, 2, [255, 0, 0, 0]);
         overlay(&mut canvas, &src, 1, 1);
         assert_eq!(canvas.get_pixel(1, 1), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn overlay_partial_alpha_uses_linear_compositing() {
+        // 50%-alpha white over solid black. The naïve sRGB straight-alpha
+        // formula gives `(255*128 + 0*127*255/255) / 255 ≈ 128` (sRGB gray
+        // 128 = linear ≈ 0.216). The correct linear-light average of black
+        // (lin 0) and white (lin 1) at 50%/50% is linear 0.5 → sRGB 188.
+        // Our linear path should land near 188, not 128.
+        let mut canvas = solid(2, 2, [0, 0, 0, 255]);
+        let src = solid(2, 2, [255, 255, 255, 128]);
+        overlay(&mut canvas, &src, 0, 0);
+        let p = canvas.get_pixel(0, 0);
+        assert_eq!(p[3], 255, "alpha out should saturate (over opaque dst)");
+        assert!(
+            p[0] >= 180 && p[0] <= 195,
+            "expected linear-correct gray near 188, got {}",
+            p[0]
+        );
+        assert_eq!(p[0], p[1]);
+        assert_eq!(p[1], p[2]);
+    }
+
+    #[test]
+    fn overlay_partial_alpha_dark_over_light_doesnt_under_darken() {
+        // Inverse case: 50%-alpha black over solid white. Naïve sRGB
+        // average yields ~128 sRGB (linear ~0.216 — way too dark).
+        // Linear-correct average of 0 and 1 at 50% is 0.5 → sRGB 188.
+        let mut canvas = solid(2, 2, [255, 255, 255, 255]);
+        let src = solid(2, 2, [0, 0, 0, 128]);
+        overlay(&mut canvas, &src, 0, 0);
+        let p = canvas.get_pixel(0, 0);
+        assert!(
+            p[0] >= 180 && p[0] <= 195,
+            "expected linear-correct gray near 188, got {}",
+            p[0]
+        );
     }
 
     #[test]

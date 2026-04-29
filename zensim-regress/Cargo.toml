@@ -29,6 +29,12 @@ archmage = { workspace = true, features = ["testable_dispatch"], optional = true
 zenresize = { workspace = true }
 zenpng = { workspace = true }
 zenpixels = { workspace = true }
+# Linear-light premultiplied f32 compositing (Porter-Duff src-over without
+# the under-darkening artifact you get when blending in sRGB-encoded
+# straight-alpha u8). Used internally by pixel_ops::overlay; no zenblend
+# type appears in the public API per the issue #18 isolation rule.
+zenblend = { workspace = true }
+linear-srgb = { workspace = true }
 enough = { workspace = true }
 imgref = { workspace = true }
 rgb = { workspace = true }
