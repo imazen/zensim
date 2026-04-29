@@ -70,6 +70,10 @@ harness = false
 name = "bench_color_diffmap"
 harness = false
 
+[[bench]]
+name = "bench_font"
+harness = false
+
 # Layout-module gallery — requires the internal-API feature flag because
 # the layout module is private by default.
 [[example]]

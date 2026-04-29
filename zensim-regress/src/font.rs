@@ -330,13 +330,16 @@ fn wrap_text(text: &str, max_cols: usize) -> String {
 /// At small char_h this manifests as visible "edges of other characters"
 /// inside each glyph.
 ///
-/// Implementation: drive zenresize directly with its built-in input-
-/// side `.crop(x, y, w, h)`. The crop is a logical sampling-rect — no
-/// input copy, zenresize just adjusts the indices it reads from the
-/// source slice. Pass `strip.as_raw()` once per glyph; zenresize
-/// samples only that glyph's rectangle. The resampler clamps at the
-/// crop boundary instead of borrowing from neighbors, eliminating
-/// inter-glyph bleed.
+/// Implementation: wrap the strip as a `zenpixels::PixelSlice` (zero-
+/// copy strided view), then `crop_view(...)` for each glyph cell — that
+/// also-zero-copy adjusts only the slice's offset+stride. Drive
+/// `zenresize::StreamingResize` row-by-row, feeding `cell.row(y)`
+/// directly (a 26×4 byte sub-slice of the original strip's bytes — no
+/// copy, no full-strip-width row reads).
+///
+/// The resampler clamps at the cell edge because the streaming
+/// resizer's source dims are the *cell's* dims (26×54), not the full
+/// strip. So the filter footprint can never reach into adjacent glyphs.
 fn build_scaled_strip_per_cell(
     strip: &Bitmap,
     scaled_char_w: u32,
@@ -348,30 +351,56 @@ fn build_scaled_strip_per_cell(
         return Bitmap::new(scaled_strip_w.max(1), scaled_char_h.max(1));
     }
     let mut out = vec![0u8; (scaled_strip_w as usize) * (scaled_char_h as usize) * 4];
-    let strip_bytes = strip.as_raw();
-    let strip_w = strip.width();
-    let strip_h = strip.height();
     let scaled_strip_w_usize = scaled_strip_w as usize;
     let scaled_char_w_usize = scaled_char_w as usize;
-    for glyph_idx in 0..CHAR_COUNT {
-        // zenresize: source-region crop on the input + resize to
-        // (scaled_char_w, scaled_char_h). Zero-copy on the input —
-        // zenresize re-indexes into `strip_bytes` rather than copying
-        // the cell.
-        let cfg = zenresize::ResizeConfig::builder(strip_w, strip_h, scaled_char_w, scaled_char_h)
-            .crop(glyph_idx * BASE_CHAR_W, 0, BASE_CHAR_W, BASE_CHAR_H)
+
+    // Strided zero-copy view of the strip.
+    let strip_slice = zenpixels::PixelSlice::new(
+        strip.as_raw(),
+        strip.width(),
+        strip.height(),
+        (strip.width() as usize) * 4,
+        zenpixels::PixelDescriptor::RGBA8_SRGB,
+    )
+    .expect("strip slice dims valid");
+
+    let cfg =
+        zenresize::ResizeConfig::builder(BASE_CHAR_W, BASE_CHAR_H, scaled_char_w, scaled_char_h)
             .filter(filter.to_zenresize_filter())
             .input(zenresize::PixelDescriptor::RGBA8_SRGB)
             .build();
-        let scaled_cell = zenresize::Resizer::new(&cfg).resize(strip_bytes);
-        // Blit into the assembled strip at glyph_idx * scaled_char_w.
+
+    for glyph_idx in 0..CHAR_COUNT {
+        // crop_view: zero-copy strided sub-view of cell `glyph_idx`.
+        let cell = strip_slice.crop_view(glyph_idx * BASE_CHAR_W, 0, BASE_CHAR_W, BASE_CHAR_H);
+
+        // Streaming resizer dimensioned for this single cell. Weight
+        // tables are recomputed per glyph (same dims, same filter, so
+        // the cost is identical work — just no shared cache today).
+        let mut sr = zenresize::StreamingResize::new(&cfg);
         let cell_x = (glyph_idx as usize) * scaled_char_w_usize;
-        for y in 0..scaled_char_h {
-            let src_off = (y as usize) * scaled_char_w_usize * 4;
-            let dst_off = ((y as usize) * scaled_strip_w_usize + cell_x) * 4;
-            let n = scaled_char_w_usize * 4;
-            out[dst_off..dst_off + n].copy_from_slice(&scaled_cell[src_off..src_off + n]);
+        let mut output_y = 0u32;
+
+        let drain = |sr: &mut zenresize::StreamingResize, output_y: &mut u32, out: &mut [u8]| {
+            while let Some(row) = sr.next_output_row() {
+                if *output_y < scaled_char_h {
+                    let dst_off = (*output_y as usize * scaled_strip_w_usize + cell_x) * 4;
+                    let n = scaled_char_w_usize * 4;
+                    out[dst_off..dst_off + n].copy_from_slice(row);
+                    *output_y += 1;
+                }
+            }
+        };
+
+        for y in 0..BASE_CHAR_H {
+            // Zero-copy row slice — points into the strip's underlying
+            // bytes via the cell's stride; no row-bytes copy here.
+            let row = cell.row(y);
+            sr.push_row(row).expect("push_row");
+            drain(&mut sr, &mut output_y, &mut out);
         }
+        sr.finish();
+        drain(&mut sr, &mut output_y, &mut out);
     }
     Bitmap::from_raw(scaled_strip_w, scaled_char_h, out)
         .expect("per-cell strip dimensions match buffer")
