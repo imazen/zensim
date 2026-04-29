@@ -992,11 +992,24 @@ code { font-family: "SF Mono", Menlo, Consolas, ui-monospace, monospace; font-si
     align-items: center;
 }
 .scene-image img {
-    max-width: 100%;
+    /* Native pixel size only. `max-width: 100%` would force the browser
+       to downscale wide PNGs, and `image-rendering: pixelated` does NOT
+       prevent the smoothing browsers apply on bilinear downscale (only
+       on upscale). Wrapping container handles overflow with horizontal
+       scroll. Result: every pixel rendered is a real pixel from the
+       PNG — no phantom-stripe artifacts from interpolation. */
+    width: auto;
+    height: auto;
+    max-width: none;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: #000;
-    image-rendering: pixelated;
+    display: block;
+}
+.scene-image {
+    overflow-x: auto;
 }
 .scene-image-meta {
     margin-top: 8px;
