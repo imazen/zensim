@@ -24,7 +24,7 @@
 //!
 //! Word-wraps on spaces when a max width is specified.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::pixel_ops::{Bitmap, GrayBitmap, ResampleFilter};
 
@@ -187,29 +187,19 @@ pub fn render_text_height_lh(
         return (vec![], 0, 0);
     }
 
-    let strip = font_strip();
     let scaled_char_w = char_width_for_height(target_char_h);
     let scaled_char_h = target_char_h;
     let line_advance = line_advance_px(scaled_char_h, line_height);
 
-    // Resample each glyph cell IN ISOLATION. The source strip is a
-    // contiguous image with adjacent glyph cells; a single resize of
-    // the whole strip lets the reconstruction filter (Mitchell, ~4-tap
-    // footprint) sample across cell boundaries — so a sliver of
-    // neighboring glyphs' alpha leaks into the output. Per-cell resize
-    // confines the filter to the cell's own pixels: the resampler
-    // clamps at the cell edge instead of pulling from adjacent glyphs,
-    // so each glyph renders without neighbor-edge artifacts.
+    // Resample each glyph cell IN ISOLATION. See `build_scaled_strip_per_cell`
+    // for the why; the result is cached by `(char_w, char_h, filter)` so
+    // multi-pass renders at the same canvas size pay the resample cost
+    // exactly once.
     //
     // Mitchell-Netravali — minimal overshoot, no halo rings. Lanczos
     // produces visible side-lobe ringing on sharp glyph edges; Triangle
     // is artifact-free but visibly soft.
-    let scaled_strip = build_scaled_strip_per_cell(
-        strip,
-        scaled_char_w,
-        scaled_char_h,
-        ResampleFilter::Mitchell,
-    );
+    let scaled_strip = cached_scaled_strip(scaled_char_w, scaled_char_h, ResampleFilter::Mitchell);
 
     let out_w = max_cols * scaled_char_w;
     let out_h = stacked_height_px(scaled_char_h, line_advance, num_lines);
@@ -340,6 +330,59 @@ fn wrap_text(text: &str, max_cols: usize) -> String {
 /// The resampler clamps at the cell edge because the streaming
 /// resizer's source dims are the *cell's* dims (26×54), not the full
 /// strip. So the filter footprint can never reach into adjacent glyphs.
+/// Scaled-strip cache keyed by canvas (target glyph dims + filter).
+///
+/// `MontageOptions::render` issues many text renders per call, almost
+/// all at the same `char_h` (panel labels at one size, heatmap stats
+/// at another). The strip itself is color-independent — RGB is constant
+/// 255, alpha carries coverage, tinting happens at composite — so the
+/// cache key is purely `(scaled_char_w, scaled_char_h, filter)`.
+///
+/// Bounded LRU (capacity 8) so a pathological call sequence can't grow
+/// it unboundedly. Vec-based: N is small enough that linear scan beats
+/// a HashMap. Built outside the lock to avoid serialising bench rounds.
+fn cached_scaled_strip(
+    scaled_char_w: u32,
+    scaled_char_h: u32,
+    filter: ResampleFilter,
+) -> Arc<Bitmap> {
+    type Key = (u32, u32, ResampleFilter);
+    const CAP: usize = 8;
+    static CACHE: OnceLock<Mutex<Vec<(Key, Arc<Bitmap>)>>> = OnceLock::new();
+
+    let key: Key = (scaled_char_w, scaled_char_h, filter);
+    let cache = CACHE.get_or_init(|| Mutex::new(Vec::with_capacity(CAP)));
+
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(idx) = guard.iter().position(|(k, _)| *k == key) {
+            // Bump to MRU (back of vec).
+            let entry = guard.remove(idx);
+            guard.push(entry);
+            return guard.last().unwrap().1.clone();
+        }
+    }
+
+    let strip = font_strip();
+    let scaled = Arc::new(build_scaled_strip_per_cell(
+        strip,
+        scaled_char_w,
+        scaled_char_h,
+        filter,
+    ));
+
+    if let Ok(mut guard) = cache.lock() {
+        // Race-tolerant: another thread may have inserted the same key
+        // in the gap between the miss and the build. Dedup before push.
+        if !guard.iter().any(|(k, _)| *k == key) {
+            if guard.len() >= CAP {
+                guard.remove(0);
+            }
+            guard.push((key, scaled.clone()));
+        }
+    }
+    scaled
+}
+
 fn build_scaled_strip_per_cell(
     strip: &Bitmap,
     scaled_char_w: u32,
@@ -493,10 +536,9 @@ pub fn render_lines_fitted_lh(
         return (vec![], 0, 0);
     }
 
-    // Per-cell isolated resize — see render_text_height_lh's comment
-    // on neighbor-glyph bleed.
-    let strip = font_strip();
-    let scaled_strip = build_scaled_strip_per_cell(strip, char_w, char_h, ResampleFilter::Mitchell);
+    // Per-cell isolated resize, cached by canvas — see
+    // `cached_scaled_strip` and `build_scaled_strip_per_cell`.
+    let scaled_strip = cached_scaled_strip(char_w, char_h, ResampleFilter::Mitchell);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
     for pixel in buf.chunks_exact_mut(4) {

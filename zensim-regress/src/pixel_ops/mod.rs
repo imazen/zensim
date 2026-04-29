@@ -27,7 +27,7 @@ use zenpixels::PixelBuffer;
 use zenpng::{EncodeConfig, PngDecodeConfig};
 
 /// Resampling filter for [`resize`].
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ResampleFilter {
     /// Nearest-neighbor — pixelated, fastest.
     #[allow(dead_code)]
