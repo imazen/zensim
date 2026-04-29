@@ -47,6 +47,15 @@ zwe-minimal-kernel = []
 ## SSIM kernel using the actual V0_2 active-feature set per cell. Output is
 ## correct.
 zwe-inner-elide = []
+## Prints H-blur and V-blur timings for a single compute call. Useful for
+## bandwidth/critical-path inspection. Output is correct, but the prints
+## destroy benchmark accuracy.
+zwe-time-phases = []
+## Internal experiment: swap default WEIGHTS to a pruned V0_2 variant where
+## SSIM weights of low-mass cells (0X, 0B, 1X, 2X) are zeroed, flipping
+## need_ssim=false for those cells. Bench-only — switches default profile
+## without going through ZensimProfile API.
+zwe-pruned-v0-2 = []
 
 [dependencies]
 archmage = { workspace = true }

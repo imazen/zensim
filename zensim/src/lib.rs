@@ -128,7 +128,10 @@ mod pool;
 pub mod profile;
 mod simd_ops;
 pub mod source;
+#[cfg(not(feature = "zwe-time-phases"))]
 mod streaming;
+#[cfg(feature = "zwe-time-phases")]
+pub mod streaming;
 
 // --- Primary API ---
 pub use error::ZensimError;

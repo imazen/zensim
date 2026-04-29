@@ -7,6 +7,7 @@ publish = false
 [features]
 training = ["zensim/training"]
 # zenresize = ["zensim/zenresize"]
+zwe-time-phases-driver = ["zensim/zwe-time-phases"]
 
 [build-dependencies]
 cc = "1"

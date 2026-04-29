@@ -17,6 +17,34 @@ use crate::diffmap::PixelFeatureWeights;
 use crate::fused::fused_vblur_features_edge;
 #[cfg(not(feature = "zwe-minimal-kernel"))]
 use crate::fused::fused_vblur_features_ssim;
+
+#[cfg(feature = "zwe-time-phases")]
+pub mod phase_timing {
+    use core::sync::atomic::{AtomicU64, Ordering};
+    pub static H_BLUR_SSIM_NS: AtomicU64 = AtomicU64::new(0);
+    pub static H_BLUR_MU_NS: AtomicU64 = AtomicU64::new(0);
+    pub static V_BLUR_SSIM_NS: AtomicU64 = AtomicU64::new(0);
+    pub static V_BLUR_EDGE_NS: AtomicU64 = AtomicU64::new(0);
+
+    pub fn reset() {
+        for a in [
+            &H_BLUR_SSIM_NS,
+            &H_BLUR_MU_NS,
+            &V_BLUR_SSIM_NS,
+            &V_BLUR_EDGE_NS,
+        ] {
+            a.store(0, Ordering::Relaxed);
+        }
+    }
+    pub fn snapshot() -> [u64; 4] {
+        [
+            H_BLUR_SSIM_NS.load(Ordering::Relaxed),
+            H_BLUR_MU_NS.load(Ordering::Relaxed),
+            V_BLUR_SSIM_NS.load(Ordering::Relaxed),
+            V_BLUR_EDGE_NS.load(Ordering::Relaxed),
+        ]
+    }
+}
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
@@ -1014,6 +1042,8 @@ fn process_strip_channel(
         let store_mu = config.extended_features || dm_needs_edge || dm_needs_hf;
         if need_ssim {
             // Fused H-blur: src,dst → 4 H-blurred planes in one pass
+            #[cfg(feature = "zwe-time-phases")]
+            let _t0 = std::time::Instant::now();
             fused_blur_h_ssim(
                 src_c,
                 dst_c,
@@ -1025,11 +1055,18 @@ fn process_strip_channel(
                 strip_h,
                 config.blur_radius,
             );
+            #[cfg(feature = "zwe-time-phases")]
+            phase_timing::H_BLUR_SSIM_NS.fetch_add(
+                _t0.elapsed().as_nanos() as u64,
+                core::sync::atomic::Ordering::Relaxed,
+            );
 
             // Fused V-blur + ALL feature extraction
             // mu1/mu2 outputs go to mask/mul_buf (mu1/mu2 still hold H-blurred values)
             // sd_out goes to temp_blur (only used when store_sd=true, extracted before
             // extended features which also need temp_blur for blurs)
+            #[cfg(feature = "zwe-time-phases")]
+            let _t1 = std::time::Instant::now();
             #[cfg(feature = "zwe-minimal-kernel")]
             {
                 strip_acc = crate::fused::fused_vblur_features_ssim_const::<
@@ -1074,6 +1111,11 @@ fn process_strip_channel(
                     store_sd,
                 );
             }
+            #[cfg(feature = "zwe-time-phases")]
+            phase_timing::V_BLUR_SSIM_NS.fetch_add(
+                _t1.elapsed().as_nanos() as u64,
+                core::sync::atomic::Ordering::Relaxed,
+            );
 
             // Accumulate weighted features into diffmap before extended features
             // overwrites temp_blur. Inner rows are at inner_start..inner_start+inner_h
@@ -1117,6 +1159,8 @@ fn process_strip_channel(
             accum.ssim_d2[c] += strip_acc.ssim_d2;
         } else {
             // Edge-only: fused H-blur for mu1/mu2, then fused V-blur
+            #[cfg(feature = "zwe-time-phases")]
+            let _t0 = std::time::Instant::now();
             fused_blur_h_mu(
                 src_c,
                 dst_c,
@@ -1126,7 +1170,14 @@ fn process_strip_channel(
                 strip_h,
                 config.blur_radius,
             );
+            #[cfg(feature = "zwe-time-phases")]
+            phase_timing::H_BLUR_MU_NS.fetch_add(
+                _t0.elapsed().as_nanos() as u64,
+                core::sync::atomic::Ordering::Relaxed,
+            );
 
+            #[cfg(feature = "zwe-time-phases")]
+            let _t1 = std::time::Instant::now();
             strip_acc = fused_vblur_features_edge(
                 &bufs.mu1,
                 &bufs.mu2,
@@ -1140,6 +1191,11 @@ fn process_strip_channel(
                 &mut bufs.mask,
                 &mut bufs.mul_buf,
                 config.extended_features,
+            );
+            #[cfg(feature = "zwe-time-phases")]
+            phase_timing::V_BLUR_EDGE_NS.fetch_add(
+                _t1.elapsed().as_nanos() as u64,
+                core::sync::atomic::Ordering::Relaxed,
             );
         }
 

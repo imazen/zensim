@@ -1646,7 +1646,10 @@ pub const FEATURES_PER_SCALE: usize = FEATURES_PER_CHANNEL_WITH_PEAKS * 3;
 /// Layout: 4 scales × 3 channels (X,Y,B) × 13 basic features, then
 ///         4 scales × 3 channels × 6 peak features = 228 total.
 #[cfg(any(feature = "training", test))]
+#[cfg(not(feature = "zwe-pruned-v0-2"))]
 pub const WEIGHTS: &[f64; 228] = &crate::profile::WEIGHTS_PREVIEW_V0_2;
+#[cfg(feature = "zwe-pruned-v0-2")]
+pub const WEIGHTS: &[f64; 228] = &crate::profile::WEIGHTS_PREVIEW_V0_2_PRUNED;
 
 pub(crate) fn combine_scores(
     scale_stats: &[ScaleStats],
