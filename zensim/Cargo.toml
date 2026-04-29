@@ -34,6 +34,10 @@ zenpixels = ["dep:zenpixels"]
 ## Uses zenresize for resampling — training/research feature.
 ## Commented out: zenresize not yet published to crates.io.
 # zenresize = ["dep:zenresize"]
+## Internal experiment: replace runtime active_channels dispatch with a
+## hardcoded const result for the default V0_2 weights. Used to measure
+## whether dispatch overhead is on the critical path.
+zwe-static-dispatch = []
 
 [dependencies]
 archmage = { workspace = true }

@@ -473,6 +473,7 @@ impl ScaleAccumulators {
 }
 
 /// Determine which channels need SSIM, edge, and/or MSE computation at a given scale.
+#[cfg_attr(feature = "zwe-static-dispatch", allow(dead_code))]
 fn active_channels(
     scale_idx: usize,
     n_scales: usize,
@@ -1388,7 +1389,18 @@ fn process_scale_bands(
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
+    // Variant A control: hardcode the active-channel set for the default V0_2
+    // weights. With those weights every (scale, channel) cell needs both ssim
+    // and edge, so the runtime active_channels() call always returns
+    // [(0,T,T),(1,T,T),(2,T,T)]. Bypassing it tests whether the dispatch
+    // logic itself sits on the critical path.
+    #[cfg(feature = "zwe-static-dispatch")]
+    let scale_active: [(usize, bool, bool); 3] =
+        [(0, true, true), (1, true, true), (2, true, true)];
+    #[cfg(not(feature = "zwe-static-dispatch"))]
     let scale_active = active_channels(scale_idx, config.num_scales, config, weights);
+    #[cfg(feature = "zwe-static-dispatch")]
+    let _ = (scale_idx, weights);
 
     let parallel = config.allow_multithreading && cfg!(feature = "threads");
     let total_strips = height.div_ceil(STRIP_INNER);
