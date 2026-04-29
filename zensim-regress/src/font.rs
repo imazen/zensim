@@ -26,7 +26,7 @@
 
 use std::sync::OnceLock;
 
-use crate::pixel_ops::{self, Bitmap, GrayBitmap, ResampleFilter};
+use crate::pixel_ops::{Bitmap, GrayBitmap, ResampleFilter};
 
 /// Precomputed sRGB-u8 → linear-f32 lookup table — reused for every
 /// glyph composite to avoid per-pixel pow() calls. Built lazily on
@@ -192,24 +192,21 @@ pub fn render_text_height_lh(
     let scaled_char_h = target_char_h;
     let line_advance = line_advance_px(scaled_char_h, line_height);
 
-    // Scale the entire strip at once (one resize, not per-char). The
-    // strip is RGBA8 (white fg, alpha=coverage), so zenresize routes
-    // through its `RGBA8_SRGB` pipeline: gray channel sRGB→linear (no-op
-    // since constant 255), alpha treated as linear (correct — coverage
-    // is a linear quantity), premultiplied + resampled + unpremultiplied
-    // in linear space, output back as sRGB-u8 RGBA. The resulting alpha
-    // values are mathematically correct coverage post-resample, with no
-    // double-gamma trap.
+    // Resample each glyph cell IN ISOLATION. The source strip is a
+    // contiguous image with adjacent glyph cells; a single resize of
+    // the whole strip lets the reconstruction filter (Mitchell, ~4-tap
+    // footprint) sample across cell boundaries — so a sliver of
+    // neighboring glyphs' alpha leaks into the output. Per-cell resize
+    // confines the filter to the cell's own pixels: the resampler
+    // clamps at the cell edge instead of pulling from adjacent glyphs,
+    // so each glyph renders without neighbor-edge artifacts.
     //
-    // Mitchell-Netravali filter — minimal overshoot on sharp glyph
-    // edges. Lanczos's negative side-lobes produce visible halo rings
-    // outside glyph edges that even gamma-correct blending can't undo.
-    // Triangle is artifact-free but visibly soft. Mitchell is the right
-    // point for binary-edge content like glyph strips.
-    let scaled_strip_w = scaled_char_w * CHAR_COUNT;
-    let scaled_strip = pixel_ops::resize(
+    // Mitchell-Netravali — minimal overshoot, no halo rings. Lanczos
+    // produces visible side-lobe ringing on sharp glyph edges; Triangle
+    // is artifact-free but visibly soft.
+    let scaled_strip = build_scaled_strip_per_cell(
         strip,
-        scaled_strip_w,
+        scaled_char_w,
         scaled_char_h,
         ResampleFilter::Mitchell,
     );
@@ -321,6 +318,65 @@ fn wrap_text(text: &str, max_cols: usize) -> String {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
+/// Build a downscaled glyph strip by resampling each glyph cell IN
+/// ISOLATION, then concatenating them horizontally.
+///
+/// Why per-cell: the source strip is `BASE_CHAR_W * CHAR_COUNT` pixels
+/// wide with adjacent glyph cells touching. A single resize of the
+/// whole strip lets a multi-tap reconstruction filter (Mitchell, Lanczos,
+/// etc.) sample across cell boundaries — at the rightmost column of
+/// glyph N, the filter footprint extends into the leftmost column of
+/// glyph N+1, pulling a thin sliver of N+1's alpha into N's output.
+/// At small char_h this manifests as visible "edges of other characters"
+/// inside each glyph.
+///
+/// Implementation: drive zenresize directly with its built-in input-
+/// side `.crop(x, y, w, h)`. The crop is a logical sampling-rect — no
+/// input copy, zenresize just adjusts the indices it reads from the
+/// source slice. Pass `strip.as_raw()` once per glyph; zenresize
+/// samples only that glyph's rectangle. The resampler clamps at the
+/// crop boundary instead of borrowing from neighbors, eliminating
+/// inter-glyph bleed.
+fn build_scaled_strip_per_cell(
+    strip: &Bitmap,
+    scaled_char_w: u32,
+    scaled_char_h: u32,
+    filter: ResampleFilter,
+) -> Bitmap {
+    let scaled_strip_w = scaled_char_w * CHAR_COUNT;
+    if scaled_char_w == 0 || scaled_char_h == 0 {
+        return Bitmap::new(scaled_strip_w.max(1), scaled_char_h.max(1));
+    }
+    let mut out = vec![0u8; (scaled_strip_w as usize) * (scaled_char_h as usize) * 4];
+    let strip_bytes = strip.as_raw();
+    let strip_w = strip.width();
+    let strip_h = strip.height();
+    let scaled_strip_w_usize = scaled_strip_w as usize;
+    let scaled_char_w_usize = scaled_char_w as usize;
+    for glyph_idx in 0..CHAR_COUNT {
+        // zenresize: source-region crop on the input + resize to
+        // (scaled_char_w, scaled_char_h). Zero-copy on the input —
+        // zenresize re-indexes into `strip_bytes` rather than copying
+        // the cell.
+        let cfg = zenresize::ResizeConfig::builder(strip_w, strip_h, scaled_char_w, scaled_char_h)
+            .crop(glyph_idx * BASE_CHAR_W, 0, BASE_CHAR_W, BASE_CHAR_H)
+            .filter(filter.to_zenresize_filter())
+            .input(zenresize::PixelDescriptor::RGBA8_SRGB)
+            .build();
+        let scaled_cell = zenresize::Resizer::new(&cfg).resize(strip_bytes);
+        // Blit into the assembled strip at glyph_idx * scaled_char_w.
+        let cell_x = (glyph_idx as usize) * scaled_char_w_usize;
+        for y in 0..scaled_char_h {
+            let src_off = (y as usize) * scaled_char_w_usize * 4;
+            let dst_off = ((y as usize) * scaled_strip_w_usize + cell_x) * 4;
+            let n = scaled_char_w_usize * 4;
+            out[dst_off..dst_off + n].copy_from_slice(&scaled_cell[src_off..src_off + n]);
+        }
+    }
+    Bitmap::from_raw(scaled_strip_w, scaled_char_h, out)
+        .expect("per-cell strip dimensions match buffer")
+}
+
 /// Compute the character width for a given target character height.
 fn char_width_for_height(target_char_h: u32) -> u32 {
     (BASE_CHAR_W * target_char_h + BASE_CHAR_H / 2) / BASE_CHAR_H
@@ -408,11 +464,10 @@ pub fn render_lines_fitted_lh(
         return (vec![], 0, 0);
     }
 
-    // Scale strip once via the RGBA8_SRGB pipeline (correct alpha
-    // resampling) using Mitchell — see render_text_height_lh's comment.
+    // Per-cell isolated resize — see render_text_height_lh's comment
+    // on neighbor-glyph bleed.
     let strip = font_strip();
-    let scaled_strip_w = char_w * CHAR_COUNT;
-    let scaled_strip = pixel_ops::resize(strip, scaled_strip_w, char_h, ResampleFilter::Mitchell);
+    let scaled_strip = build_scaled_strip_per_cell(strip, char_w, char_h, ResampleFilter::Mitchell);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
     for pixel in buf.chunks_exact_mut(4) {

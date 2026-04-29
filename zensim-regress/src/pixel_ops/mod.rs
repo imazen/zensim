@@ -46,6 +46,14 @@ pub enum ResampleFilter {
 
 impl ResampleFilter {
     fn to_zenresize(self) -> zenresize::Filter {
+        self.to_zenresize_filter()
+    }
+
+    /// Map to the matching `zenresize::Filter`. Crate-internal so callers
+    /// (like `font::build_scaled_strip_per_cell`) can drive zenresize
+    /// directly with custom config (e.g., input-side crop) instead of
+    /// going through `pixel_ops::resize`.
+    pub(crate) fn to_zenresize_filter(self) -> zenresize::Filter {
         match self {
             ResampleFilter::Nearest => zenresize::Filter::Box,
             ResampleFilter::Triangle => zenresize::Filter::Triangle,
