@@ -38,6 +38,15 @@ zenpixels = ["dep:zenpixels"]
 ## hardcoded const result for the default V0_2 weights. Used to measure
 ## whether dispatch overhead is on the critical path.
 zwe-static-dispatch = []
+## Internal experiment: swap the v4 SSIM kernel for a const-generic version
+## with M=MINIMAL_SSIM (only ssim_d active). Measures the upper bound of
+## what's saveable by eliding dead accumulators inside the SIMD loop.
+## Output is incorrect — for timing only.
+zwe-minimal-kernel = []
+## Internal experiment: per-(scale,channel) const-mask dispatch into the v4
+## SSIM kernel using the actual V0_2 active-feature set per cell. Output is
+## correct.
+zwe-inner-elide = []
 
 [dependencies]
 archmage = { workspace = true }

@@ -14,7 +14,9 @@ use crate::color::{
     linear_to_positive_xyb_planar_into, srgb_to_positive_xyb_planar_into,
 };
 use crate::diffmap::PixelFeatureWeights;
-use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
+use crate::fused::fused_vblur_features_edge;
+#[cfg(not(feature = "zwe-minimal-kernel"))]
+use crate::fused::fused_vblur_features_ssim;
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
@@ -1028,24 +1030,50 @@ fn process_strip_channel(
             // mu1/mu2 outputs go to mask/mul_buf (mu1/mu2 still hold H-blurred values)
             // sd_out goes to temp_blur (only used when store_sd=true, extracted before
             // extended features which also need temp_blur for blurs)
-            strip_acc = fused_vblur_features_ssim(
-                &bufs.mu1,
-                &bufs.mu2,
-                &bufs.sigma1_sq,
-                &bufs.sigma12,
-                src_c,
-                dst_c,
-                width,
-                strip_h,
-                inner_start,
-                inner_h,
-                config.blur_radius,
-                &mut bufs.mask,
-                &mut bufs.mul_buf,
-                store_mu,
-                &mut bufs.temp_blur,
-                store_sd,
-            );
+            #[cfg(feature = "zwe-minimal-kernel")]
+            {
+                strip_acc = crate::fused::fused_vblur_features_ssim_const::<
+                    { crate::fused::fbits::MINIMAL_SSIM },
+                >(
+                    &bufs.mu1,
+                    &bufs.mu2,
+                    &bufs.sigma1_sq,
+                    &bufs.sigma12,
+                    src_c,
+                    dst_c,
+                    width,
+                    strip_h,
+                    inner_start,
+                    inner_h,
+                    config.blur_radius,
+                    &mut bufs.mask,
+                    &mut bufs.mul_buf,
+                    store_mu,
+                    &mut bufs.temp_blur,
+                    store_sd,
+                );
+            }
+            #[cfg(not(feature = "zwe-minimal-kernel"))]
+            {
+                strip_acc = fused_vblur_features_ssim(
+                    &bufs.mu1,
+                    &bufs.mu2,
+                    &bufs.sigma1_sq,
+                    &bufs.sigma12,
+                    src_c,
+                    dst_c,
+                    width,
+                    strip_h,
+                    inner_start,
+                    inner_h,
+                    config.blur_radius,
+                    &mut bufs.mask,
+                    &mut bufs.mul_buf,
+                    store_mu,
+                    &mut bufs.temp_blur,
+                    store_sd,
+                );
+            }
 
             // Accumulate weighted features into diffmap before extended features
             // overwrites temp_blur. Inner rows are at inner_start..inner_start+inner_h
