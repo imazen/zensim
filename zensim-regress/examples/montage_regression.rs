@@ -1,20 +1,28 @@
-//! Regression-comparison harness for the montage compositor.
+//! Public-API regression gallery — exercises every visual entry point
+//! in `diff_image::*` plus `generators` to detect output changes
+//! between branches.
 //!
-//! Renders six representative montages — same-dim plain, same-dim
-//! annotated, mismatched-dim plain, mismatched-dim annotated, tiny
-//! image (pixelate-upscale), and custom labels — into the directory
-//! given by the first arg. Used to confirm the layout-module port
-//! preserves visual output.
+//! Run with:
 //!
 //! ```text
 //! cargo run -p zensim-regress --example montage_regression -- /tmp/baseline
+//! ```
+//!
+//! Diff against another run:
+//!
+//! ```text
+//! cargo run -p zensim-regress --example montage_diff -- A B
 //! ```
 
 use std::env;
 use std::path::PathBuf;
 
 use zensim_regress::Bitmap;
-use zensim_regress::diff_image::{AnnotationText, MontageOptions};
+use zensim_regress::diff_image::{
+    AnnotationText, MontageOptions, create_montage, create_structural_montage, generate_diff_image,
+    generate_structural_diff, pixelate_upscale,
+};
+use zensim_regress::generators;
 
 fn main() {
     let dir: PathBuf = env::args()
@@ -91,7 +99,145 @@ fn main() {
         m.save(dir.join("06_custom_labels.png")).unwrap();
     }
 
-    println!("Wrote 6 scenes to {}", dir.display());
+    // ── Additional scenes exercising the rest of the public API ──────
+
+    // Scene 7: large image (256×256) — different from 5/6 in that it
+    // does NOT trigger pixelate-upscale, so the panels render at 1:1.
+    {
+        let exp = gradient(256, 256);
+        let act = with_center_shift(&exp, 20, -20);
+        let m = MontageOptions::default().render(&exp, &act, &AnnotationText::empty());
+        m.save(dir.join("07_large.png")).unwrap();
+    }
+
+    // Scene 8: PASS annotation (green primary lines).
+    {
+        let exp = gradient(96, 96);
+        let act = with_center_shift(&exp, 1, 0);
+        let mut ann = AnnotationText::empty().with_title("scene 8 — passing");
+        ann.primary_lines = vec![
+            ("PASS".to_string(), [80, 220, 80, 255]),
+            ("zdsim 0.001 ≤ 0.01 ok".to_string(), [80, 220, 80, 255]),
+        ];
+        let m = MontageOptions::default().render(&exp, &act, &ann);
+        m.save(dir.join("08_passing.png")).unwrap();
+    }
+
+    // Scene 9: title-only annotation (no primary_lines, no extra).
+    {
+        let exp = gradient(96, 96);
+        let act = with_center_shift(&exp, 30, 0);
+        let ann = AnnotationText::empty()
+            .with_title("title-only annotation, very long: lorem ipsum dolor sit amet");
+        let m = MontageOptions::default().render(&exp, &act, &ann);
+        m.save(dir.join("09_title_only.png")).unwrap();
+    }
+
+    // Scene 10: amplification sweep — 1, 5, 10, 50 across the same
+    // tiny pixel diff. Tests `MontageOptions::amplification`.
+    {
+        let exp = gradient(96, 96);
+        let act = with_center_shift(&exp, 5, 0);
+        let mut panels: Vec<Bitmap> = Vec::new();
+        for amp in [1u8, 5, 10, 50] {
+            let mut opts = MontageOptions::default();
+            opts.amplification = amp;
+            opts.show_spatial_heatmap = false;
+            let mut ann = AnnotationText::empty();
+            ann.primary_lines = vec![(format!("amp={amp}"), [200, 200, 200, 255])];
+            panels.push(opts.render(&exp, &act, &ann));
+        }
+        let strip = create_montage(&panels.iter().collect::<Vec<_>>(), 8);
+        strip.save(dir.join("10_amplification_sweep.png")).unwrap();
+    }
+
+    // Scene 11: standalone diff image (no montage frame). Just the raw
+    // amplified pixel difference.
+    {
+        let exp = gradient(192, 96);
+        let act = with_center_shift(&exp, 40, -20);
+        let diff = generate_diff_image(&exp, &act, 10);
+        diff.save(dir.join("11_diff_only.png")).unwrap();
+    }
+
+    // Scene 12: standalone structural diff (cyan = structure missing,
+    // orange = added). Watermark-style: small bright shape only in `act`.
+    {
+        let exp = gradient(192, 96);
+        let mut act = exp.clone();
+        // Stamp a small white square that only exists in `act`.
+        for y in 30..50 {
+            for x in 80..120 {
+                act.put_pixel(x, y, [255, 255, 255, 255]);
+            }
+        }
+        let s_diff = generate_structural_diff(&exp, &act, 3, 6);
+        s_diff.save(dir.join("12_structural_diff.png")).unwrap();
+    }
+
+    // Scene 13: 4-panel structural montage (exp / act / pixel diff /
+    // structural diff).
+    {
+        let exp = gradient(120, 96);
+        let mut act = with_center_shift(&exp, 30, -20);
+        // Add a structural change visible to structural diff.
+        for y in 20..30 {
+            for x in 80..110 {
+                act.put_pixel(x, y, [255, 255, 255, 255]);
+            }
+        }
+        let m = create_structural_montage(&exp, &act, 8, 4, 3);
+        m.save(dir.join("13_structural_montage.png")).unwrap();
+    }
+
+    // Scene 14: pixelate_upscale — turn an 8×8 image into a chunky 64×64
+    // preview without filtering.
+    {
+        let small = Bitmap::from_fn(8, 8, |x, y| {
+            [
+                (x * 32) as u8,
+                (y * 32) as u8,
+                (((x + y) * 16) % 256) as u8,
+                255,
+            ]
+        });
+        let big = pixelate_upscale(&small, 64);
+        big.save(dir.join("14_pixelate_upscale.png")).unwrap();
+    }
+
+    // Scene 15: a strip of generators::* outputs — one panel per
+    // synthetic generator. Exercises the public surface that produces
+    // RGBA byte buffers (which we then wrap into Bitmap for the strip).
+    {
+        let dim = 96u32;
+        let mk = |bytes: Vec<u8>| Bitmap::from_rgba_slice(&bytes, dim, dim).expect("rgba dims");
+        let panels = [
+            mk(generators::gradient(dim, dim)),
+            mk(generators::checkerboard(dim, dim, 8)),
+            mk(generators::value_noise(dim, dim, 42)),
+            mk(generators::mandelbrot(dim, dim)),
+            mk(generators::color_blocks(dim, dim)),
+        ];
+        let strip = create_montage(&panels.iter().collect::<Vec<_>>(), 4);
+        strip.save(dir.join("15_generators_strip.png")).unwrap();
+    }
+
+    // Scene 16: off_by_n diff — a controlled per-pixel offset to
+    // test that the diff visualization picks up scattered noise
+    // versus blocked changes.
+    {
+        let dim = 128u32;
+        let exp_bytes = generators::gradient(dim, dim);
+        let act_bytes = generators::off_by_n(&exp_bytes, 8, 3);
+        let exp = Bitmap::from_rgba_slice(&exp_bytes, dim, dim).unwrap();
+        let act = Bitmap::from_rgba_slice(&act_bytes, dim, dim).unwrap();
+        let mut ann = AnnotationText::empty().with_title("scene 16 — off_by_n(8, every 3rd)");
+        ann.extra = "should look like uniform speckle".to_string();
+        let m = MontageOptions::default().render(&exp, &act, &ann);
+        m.save(dir.join("16_off_by_n.png")).unwrap();
+    }
+
+    println!("Wrote 16 scenes to {}", dir.display());
 }
 
 fn gradient(w: u32, h: u32) -> Bitmap {
