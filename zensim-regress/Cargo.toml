@@ -66,3 +66,8 @@ harness = false
 [[example]]
 name = "layout_gallery"
 required-features = ["_internal_api"]
+
+# Syntax comparison: fluent / macros / closure-builder side-by-side.
+[[example]]
+name = "syntax_comparison"
+required-features = ["_internal_api"]
