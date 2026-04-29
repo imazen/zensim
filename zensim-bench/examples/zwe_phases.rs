@@ -46,21 +46,52 @@ fn dump(label: &str, iters: usize, width: usize, height: usize) {
         std::hint::black_box(r);
     }
     let total = t0.elapsed().as_nanos() as u64;
-    let [hs, hm, vs, ve] = phase_timing::snapshot();
+    let [hs, hm, vs, ve, xyb, meanoff, ds] = phase_timing::snapshot();
     let hb = hs + hm;
     let vb = vs + ve;
+    let xyb_total = xyb + meanoff;
     let to_ms = |ns: u64| (ns / iters as u64) as f64 / 1e6;
+    let pct = |ns: u64| 100.0 * ns as f64 / total as f64;
     println!(
-        "{label:>14}  total/iter={:>7.3} ms   H-ssim={:>6.3}  H-mu={:>6.3}  V-ssim={:>6.3}  V-edge={:>6.3}   H/iter={:>6.3} ({:>4.1}%)  V/iter={:>6.3} ({:>4.1}%)",
+        "{label:>14}  total/iter={:>7.3} ms",
         total as f64 / iters as f64 / 1e6,
+    );
+    println!(
+        "{:>14}    H-blur:        {:>7.3} ms ({:>5.1}%)  [ssim={:.3} mu={:.3}]",
+        "",
+        to_ms(hb),
+        pct(hb),
         to_ms(hs),
         to_ms(hm),
+    );
+    println!(
+        "{:>14}    V-blur:        {:>7.3} ms ({:>5.1}%)  [ssim={:.3} edge={:.3}]",
+        "",
+        to_ms(vb),
+        pct(vb),
         to_ms(vs),
         to_ms(ve),
-        to_ms(hb),
-        100.0 * hb as f64 / total as f64,
-        to_ms(vb),
-        100.0 * vb as f64 / total as f64,
+    );
+    println!(
+        "{:>14}    XYB+mean_off:  {:>7.3} ms ({:>5.1}%)  [convert={:.3} mean={:.3}]",
+        "",
+        to_ms(xyb_total),
+        pct(xyb_total),
+        to_ms(xyb),
+        to_ms(meanoff),
+    );
+    println!(
+        "{:>14}    Downscale:     {:>7.3} ms ({:>5.1}%)",
+        "",
+        to_ms(ds),
+        pct(ds),
+    );
+    let other = total.saturating_sub(hb + vb + xyb_total + ds);
+    println!(
+        "{:>14}    Other:         {:>7.3} ms ({:>5.1}%)",
+        "",
+        to_ms(other),
+        pct(other),
     );
 }
 

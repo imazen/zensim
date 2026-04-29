@@ -118,7 +118,10 @@
 #![forbid(unsafe_code)]
 
 mod blur;
+#[cfg(not(feature = "zwe-pub-color"))]
 mod color;
+#[cfg(feature = "zwe-pub-color")]
+pub mod color;
 mod diffmap;
 mod error;
 mod fused;

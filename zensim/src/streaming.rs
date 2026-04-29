@@ -25,6 +25,9 @@ pub mod phase_timing {
     pub static H_BLUR_MU_NS: AtomicU64 = AtomicU64::new(0);
     pub static V_BLUR_SSIM_NS: AtomicU64 = AtomicU64::new(0);
     pub static V_BLUR_EDGE_NS: AtomicU64 = AtomicU64::new(0);
+    pub static XYB_CONVERT_NS: AtomicU64 = AtomicU64::new(0);
+    pub static XYB_MEAN_OFFSET_NS: AtomicU64 = AtomicU64::new(0);
+    pub static DOWNSCALE_NS: AtomicU64 = AtomicU64::new(0);
 
     pub fn reset() {
         for a in [
@@ -32,16 +35,22 @@ pub mod phase_timing {
             &H_BLUR_MU_NS,
             &V_BLUR_SSIM_NS,
             &V_BLUR_EDGE_NS,
+            &XYB_CONVERT_NS,
+            &XYB_MEAN_OFFSET_NS,
+            &DOWNSCALE_NS,
         ] {
             a.store(0, Ordering::Relaxed);
         }
     }
-    pub fn snapshot() -> [u64; 4] {
+    pub fn snapshot() -> [u64; 7] {
         [
             H_BLUR_SSIM_NS.load(Ordering::Relaxed),
             H_BLUR_MU_NS.load(Ordering::Relaxed),
             V_BLUR_SSIM_NS.load(Ordering::Relaxed),
             V_BLUR_EDGE_NS.load(Ordering::Relaxed),
+            XYB_CONVERT_NS.load(Ordering::Relaxed),
+            XYB_MEAN_OFFSET_NS.load(Ordering::Relaxed),
+            DOWNSCALE_NS.load(Ordering::Relaxed),
         ]
     }
 }
@@ -2056,11 +2065,25 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         }
     }
 
+    #[cfg(feature = "zwe-time-phases")]
+    let _t_xyb = std::time::Instant::now();
     convert_source_to_xyb_into(distorted, dst_planes, padded_width, parallel);
+    #[cfg(feature = "zwe-time-phases")]
+    phase_timing::XYB_CONVERT_NS.fetch_add(
+        _t_xyb.elapsed().as_nanos() as u64,
+        core::sync::atomic::Ordering::Relaxed,
+    );
 
     let (ref src_planes_s0, _, _) = precomputed.scales[0];
+    #[cfg(feature = "zwe-time-phases")]
+    let _t_mean = std::time::Instant::now();
     let mean_offset =
         compute_xyb_mean_offset(src_planes_s0, dst_planes, width, height, padded_width);
+    #[cfg(feature = "zwe-time-phases")]
+    phase_timing::XYB_MEAN_OFFSET_NS.fetch_add(
+        _t_mean.elapsed().as_nanos() as u64,
+        core::sync::atomic::Ordering::Relaxed,
+    );
 
     let mut stats = Vec::with_capacity(num_scales);
     let mut w = padded_width;
@@ -2080,7 +2103,14 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {
+            #[cfg(feature = "zwe-time-phases")]
+            let _t_ds = std::time::Instant::now();
             let (nw, nh) = downscale_3_planes(dst_planes, w, h, parallel);
+            #[cfg(feature = "zwe-time-phases")]
+            phase_timing::DOWNSCALE_NS.fetch_add(
+                _t_ds.elapsed().as_nanos() as u64,
+                core::sync::atomic::Ordering::Relaxed,
+            );
             w = nw;
             h = nh;
         }
