@@ -23,8 +23,11 @@ pub fn checkerboard(w: u32, h: u32, freq: u32) -> Vec<u8> {
             let tile = ((x * freq / w) + (y * freq / h)) % 2;
             let v = if tile == 0 { 240u8 } else { 16u8 };
             let r = v;
-            let g = v.wrapping_add((x % 17) as u8);
-            let b = v.wrapping_add((y % 13) as u8);
+            // saturating: v=240 light tile + offset must clamp, not
+            // wrap — wrapping puts G≈0 on a near-white pixel and shows
+            // up as magenta vertical/horizontal lines.
+            let g = v.saturating_add((x % 17) as u8);
+            let b = v.saturating_add((y % 13) as u8);
             let off = ((y * w + x) * 4) as usize;
             buf[off] = r;
             buf[off + 1] = g;
