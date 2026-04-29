@@ -69,11 +69,18 @@
 use crate::pixel_ops::Bitmap;
 
 pub mod color;
+/// Closure-builder layer over the existing fluent builder. Internal
+/// API — gated behind the `_internal_api` feature flag.
+#[cfg(feature = "_internal_api")]
+pub mod compose;
 pub mod diagnostics;
 pub mod geom;
 pub mod grid;
 pub mod label;
 pub mod layers;
+/// Array-children macros (`column!`, `row!`, `layers!`). Internal
+/// API — only defined when the `_internal_api` feature is on.
+pub mod macros;
 pub mod modifiers;
 pub mod node;
 pub mod paint;
