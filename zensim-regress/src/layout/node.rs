@@ -37,6 +37,10 @@ pub enum Node {
         justify: super::sizing::MainAlign,
         align_items: super::sizing::CrossAlign,
         children: Vec<Node>,
+        /// Proportionally shrink non-rigid children when their natural
+        /// sizes overflow `main_avail`. Off by default — see
+        /// [`super::Stack::shrink_on_overflow`].
+        shrink: bool,
     },
     Grid {
         cols: Vec<super::sizing::Track>,
@@ -261,12 +265,14 @@ impl Node {
                 justify,
                 align_items,
                 children,
+                shrink,
             } => Node::Stack {
                 axis,
                 justify,
                 align_items,
                 gap: s(gap),
                 children: children.into_iter().map(|c| c.scaled(scale)).collect(),
+                shrink,
             },
             Node::Grid {
                 cols,
@@ -379,7 +385,17 @@ impl Node {
                 justify,
                 align_items,
                 children,
-            } => stack::paint(*axis, *gap, *justify, *align_items, children, rect, canvas),
+                shrink,
+            } => stack::paint(
+                *axis,
+                *gap,
+                *justify,
+                *align_items,
+                *shrink,
+                children,
+                rect,
+                canvas,
+            ),
             Node::Grid {
                 cols,
                 rows,

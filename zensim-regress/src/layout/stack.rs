@@ -16,6 +16,7 @@ pub struct Stack {
     justify: MainAlign,
     align_items: CrossAlign,
     children: Vec<Node>,
+    shrink: bool,
 }
 
 impl Stack {
@@ -26,6 +27,7 @@ impl Stack {
             justify: MainAlign::Start,
             align_items: CrossAlign::Start,
             children: Vec::new(),
+            shrink: false,
         }
     }
 
@@ -39,6 +41,16 @@ impl Stack {
     }
     pub fn align_items(mut self, a: CrossAlign) -> Self {
         self.align_items = a;
+        self
+    }
+    /// Allow proportional shrinking of non-rigid (non-`Fixed`) children
+    /// when their summed natural size exceeds the available main-axis
+    /// space. Default `false` — overflow is left to the diagnostics
+    /// layer so layout bugs surface loudly rather than silently
+    /// compress content. Enable when you want CSS-flex-style graceful
+    /// shrinking instead.
+    pub fn shrink_on_overflow(mut self, on: bool) -> Self {
+        self.shrink = on;
         self
     }
     pub fn child(mut self, c: impl Into<Node>) -> Self {
@@ -63,6 +75,7 @@ impl From<Stack> for Node {
             justify: s.justify,
             align_items: s.align_items,
             children: s.children,
+            shrink: s.shrink,
         }
     }
 }
@@ -121,6 +134,7 @@ pub(super) fn paint(
     gap: u32,
     justify: MainAlign,
     align_items: CrossAlign,
+    shrink: bool,
     children: &[Node],
     rect: Rect,
     canvas: &mut Bitmap,
@@ -191,6 +205,52 @@ pub(super) fn paint(
         main_sizes[i] = main_sizes[i].saturating_add(remainder.saturating_sub(allotted));
     }
 
+    // ── Shrink-on-overflow ─────────────────────────────────────────────
+    // CSS-flex-style proportional shrink: when the summed natural sizes
+    // of non-rigid children exceed `main_avail`, shrink each shrinkable
+    // child by `main_avail / shrinkable_total`. Rigid (`Sized<Fixed,_>`)
+    // children keep their declared size — let them overflow loudly.
+    // Grow children already get 0 share when there's no remainder;
+    // they don't need shrinking.
+    if shrink && used_main > main_avail {
+        let mut shrinkable_total: u64 = 0;
+        let mut shrinkable_indices: Vec<usize> = Vec::with_capacity(children.len());
+        for (i, child) in children.iter().enumerate() {
+            if weights[i] > 0 {
+                continue; // grow children — already at 0 / no basis to shrink
+            }
+            if main_axis_is_rigid(child, axis) {
+                continue; // Sized<Fixed,_> — keep declared size
+            }
+            shrinkable_total = shrinkable_total.saturating_add(main_sizes[i] as u64);
+            shrinkable_indices.push(i);
+        }
+        if shrinkable_total > 0 && !shrinkable_indices.is_empty() {
+            // Sum of rigid + grow main_sizes is what we cannot shrink.
+            let unshrinkable: u64 = main_sizes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !shrinkable_indices.contains(i))
+                .map(|(_, m)| *m as u64)
+                .sum();
+            let target_shrinkable = (main_avail as u64).saturating_sub(unshrinkable);
+            // Distribute target_shrinkable across shrinkable_indices proportionally.
+            let mut allotted_shrunk: u64 = 0;
+            let mut last_idx: Option<usize> = None;
+            for &i in &shrinkable_indices {
+                let share = (main_sizes[i] as u64) * target_shrinkable / shrinkable_total;
+                main_sizes[i] = share as u32;
+                allotted_shrunk += share;
+                last_idx = Some(i);
+            }
+            // Leftover rounding pixels → last shrunk child.
+            if let Some(i) = last_idx {
+                let extra = target_shrinkable.saturating_sub(allotted_shrunk);
+                main_sizes[i] = main_sizes[i].saturating_add(extra as u32);
+            }
+        }
+    }
+
     let total_children_main: u32 = main_sizes.iter().sum();
     let leftover = main_avail.saturating_sub(total_children_main);
 
@@ -250,6 +310,36 @@ pub(super) fn paint(
             cursor = cursor.saturating_add(gap).saturating_add(extra_gap);
         }
     }
+}
+
+/// `true` if the node has a `Sized<Fixed, _>` rule on the main axis,
+/// found through transparent modifier wrappers — these children should
+/// NOT be shrunk on overflow (they declared a hard size).
+fn main_axis_is_rigid(node: &Node, axis: Axis) -> bool {
+    let mut current = node;
+    for _ in 0..16 {
+        match current {
+            Node::Sized { w, h, child } => {
+                let main_rule = match axis {
+                    Axis::Horizontal => *w,
+                    Axis::Vertical => *h,
+                };
+                match main_rule {
+                    SizeRule::Fixed(_) => return true,
+                    SizeRule::Hug => current = child,
+                    _ => return false,
+                }
+            }
+            Node::Background { child, .. }
+            | Node::Border { child, .. }
+            | Node::Align { child, .. }
+            | Node::Aspect { child, .. }
+            | Node::Constrain { child, .. }
+            | Node::Padded { child, .. } => current = child,
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// Find a `Grow` (or `Fill`) weight on the main axis by walking through
@@ -435,5 +525,77 @@ mod tests {
         // bg-black instead of blue.
         assert_eq!(img.get_pixel(250, 5), [0, 0, 255, 255], "grow 2");
         assert_eq!(img.get_pixel(355, 5), [0, 0, 255, 255], "grow 2 right edge");
+    }
+
+    /// `shrink_on_overflow(true)` proportionally shrinks Hug children
+    /// when their summed natural sizes exceed the row's main axis.
+    /// Without it, the same row overflows on the right.
+    #[test]
+    fn shrink_on_overflow_compresses_hug_children() {
+        // Three Sized<Hug,_> children whose intrinsic widths sum to 90,
+        // in a 60-wide row. With shrink: each shrinks to 60/90 = 2/3 of
+        // its size. Without: total 90 > 60, last child paints partially
+        // off-canvas.
+        let mk = |c: super::super::color::Color| image_node(solid(30, 10, c));
+        let img = row()
+            .shrink_on_overflow(true)
+            .child(mk([255, 0, 0, 255]))
+            .child(mk([0, 255, 0, 255]))
+            .child(mk([0, 0, 255, 255]))
+            .size(60, 10)
+            .render(60);
+        // 30 → 20 each. Cursor: 0, 20, 40. Final: red [0..20), green
+        // [20..40), blue [40..60).
+        assert_eq!(img.get_pixel(10, 5), [255, 0, 0, 255], "red");
+        assert_eq!(
+            img.get_pixel(30, 5),
+            [0, 255, 0, 255],
+            "green (centered after shrink)"
+        );
+        assert_eq!(
+            img.get_pixel(55, 5),
+            [0, 0, 255, 255],
+            "blue (visible at right)"
+        );
+    }
+
+    /// `shrink_on_overflow(true)` does NOT shrink rigid `Sized<Fixed, _>`
+    /// children — they keep their declared size.
+    #[test]
+    fn shrink_skips_fixed_children() {
+        let rigid = empty().background([255, 0, 0, 255]).size(40, 10);
+        let flex = empty().background([0, 255, 0, 255]).size(20, 10);
+        let img = row()
+            .shrink_on_overflow(true)
+            .child(rigid)
+            .child(flex)
+            .size(50, 10)
+            .render(50);
+        // Rigid stays at 40px (red [0..40)), flex shrinks from 20 to
+        // 10px (50 - 40 = 10) — green [40..50).
+        // Actually the second child here is also Sized<Fixed,Fixed> via
+        // .size(), so it's also rigid → not shrunk. So we'll have
+        // overflow. Verify red still occupies the first 40px.
+        assert_eq!(img.get_pixel(10, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(30, 5), [255, 0, 0, 255]);
+    }
+
+    /// Default behavior (`shrink: false`) preserves overflow — the
+    /// diagnostics layer can flag it.
+    #[test]
+    fn shrink_off_by_default_overflow_preserved() {
+        let mk = |c: super::super::color::Color| image_node(solid(30, 10, c));
+        let img = row()
+            .child(mk([255, 0, 0, 255]))
+            .child(mk([0, 255, 0, 255]))
+            .child(mk([0, 0, 255, 255]))
+            .size(60, 10)
+            .render(60);
+        // Without shrink: cursor 0, 30, 60, 90. Red [0..30), green [30..60),
+        // blue at [60..) — off-canvas, not visible.
+        assert_eq!(img.get_pixel(10, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(45, 5), [0, 255, 0, 255]);
+        // Pixel at x=55 should still be green (last visible non-overflow).
+        assert_eq!(img.get_pixel(55, 5), [0, 255, 0, 255]);
     }
 }

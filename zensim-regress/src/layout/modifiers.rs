@@ -21,7 +21,35 @@ pub(super) fn wrap_padded(child: Node, insets: Insets) -> Node {
         child: Box::new(child),
     }
 }
+/// Wrap a node in a [`Node::Sized`], merging with any existing `Sized`
+/// at the root: a `Hug` rule on an axis defers to the inner rule on
+/// that axis, so chained calls like `.grow(1).fill_height()` produce a
+/// single `Sized<Grow(1), Fill>(child)` rather than a nested
+/// `Sized<Hug, Fill>(Sized<Grow(1), Hug>(child))`. The latter form
+/// shadowed the inner Grow weight from the Stack's `main_grow_weight`
+/// detector. Folding here keeps the IR flat so the detector's recursive
+/// walk only has to handle wrapping by other modifiers.
 pub(super) fn wrap_sized(child: Node, w: SizeRule, h: SizeRule) -> Node {
+    if let Node::Sized {
+        w: inner_w,
+        h: inner_h,
+        child: inner,
+    } = child
+    {
+        let merged_w = match w {
+            SizeRule::Hug => inner_w,
+            other => other,
+        };
+        let merged_h = match h {
+            SizeRule::Hug => inner_h,
+            other => other,
+        };
+        return Node::Sized {
+            w: merged_w,
+            h: merged_h,
+            child: inner,
+        };
+    }
     Node::Sized {
         w,
         h,
