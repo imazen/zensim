@@ -1,15 +1,62 @@
 //! Monospace font rendering for annotating diff images.
 //!
 //! Embeds a Consolas glyph strip (48px, ASCII 32–126) as a PNG, decoded
-//! once on first use. Renders text at any size by downscaling with the
-//! `image` crate's Lanczos3 resampler — the base is larger than any
-//! render target, so we always downsample (crisp edges, no upscale blur).
+//! once on first use into an RGBA8 [`Bitmap`] with `(R, G, B) = (255, 255,
+//! 255)` (white-tinted) and `A = source PNG value` (linear coverage).
+//! Renders text at any size by downscaling via `pixel_ops::resize`
+//! (Mitchell-Netravali) — the base is larger than any render target, so
+//! we always downsample. Mitchell over Lanczos because Lanczos's
+//! negative side-lobes produce visible halo rings outside glyph edges
+//! at small char_h.
+//!
+//! Resampling is correct because the strip is RGBA: zenresize's
+//! `RGBA8_SRGB` pipeline treats alpha as linear (the right semantics
+//! for a coverage mask), premultiplies, resamples in linear-light, and
+//! unpremultiplies on output. The earlier `GRAY8_SRGB` path applied an
+//! sRGB curve to the coverage values, which is mathematically wrong
+//! since coverage is a linear quantity by definition.
+//!
+//! Composite is gamma-correct: per glyph pixel, read the strip's alpha
+//! as coverage and lerp `fg`/`bg` in linear-sRGB space via the LUT-
+//! backed [`blend_channel_gamma_correct`] helper. A naive
+//! `fg*a + bg*(1-a)` lerp in sRGB-encoded byte space produces muddy
+//! halos at mid-alpha because sRGB→linear is non-linear.
 //!
 //! Word-wraps on spaces when a max width is specified.
 
 use std::sync::OnceLock;
 
-use crate::pixel_ops::{self, GrayBitmap, ResampleFilter};
+use crate::pixel_ops::{self, Bitmap, GrayBitmap, ResampleFilter};
+
+/// Precomputed sRGB-u8 → linear-f32 lookup table — reused for every
+/// glyph composite to avoid per-pixel pow() calls. Built lazily on
+/// first use; ~1KB, computed in microseconds.
+fn srgb_to_linear_lut() -> &'static [f32; 256] {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| {
+        let mut t = [0.0f32; 256];
+        for (i, slot) in t.iter_mut().enumerate() {
+            *slot = linear_srgb::default::srgb_u8_to_linear(i as u8);
+        }
+        t
+    })
+}
+
+/// Gamma-correct blend of a foreground over a background using a glyph
+/// alpha as the coverage mask. Returns the blended sRGB-u8 channel.
+///
+/// `alpha` is the coverage from the glyph rasterizer (treated as
+/// linear coverage — anti-aliasing area-of-overlap, not an sRGB
+/// quantity). `fg` and `bg` are sRGB-u8.
+#[inline]
+fn blend_channel_gamma_correct(fg: u8, bg: u8, alpha: u8) -> u8 {
+    let lut = srgb_to_linear_lut();
+    let fg_lin = lut[fg as usize];
+    let bg_lin = lut[bg as usize];
+    let a = (alpha as f32) * (1.0 / 255.0);
+    let blended = fg_lin * a + bg_lin * (1.0 - a);
+    linear_srgb::default::linear_to_srgb_u8(blended)
+}
 
 /// Base glyph width in the embedded strip (before scaling).
 const BASE_CHAR_W: u32 = 26;
@@ -23,11 +70,33 @@ const FIRST_CHAR: u32 = 0x20;
 /// The embedded font strip PNG (Consolas 48px, grayscale).
 static FONT_PNG: &[u8] = include_bytes!("font_strip.png");
 
-/// Decoded font strip (grayscale, decoded once).
-fn font_strip() -> &'static GrayBitmap {
-    static STRIP: OnceLock<GrayBitmap> = OnceLock::new();
+/// Decoded font strip as RGBA8 (white-tinted, alpha = coverage).
+///
+/// The PNG is grayscale where each value represents the glyph's
+/// coverage at that pixel — a *linear* quantity (area-of-overlap),
+/// NOT sRGB-encoded brightness. We store it as `(255, 255, 255, value)`
+/// so that:
+/// 1. Resampling via zenresize uses the `RGBA8_SRGB` pipeline that
+///    correctly treats alpha as linear (premultiply, resample, unpremultiply).
+///    The previous `GRAY8_SRGB` path mistakenly applied an sRGB gamma
+///    curve to the coverage values, producing slightly-wrong alpha
+///    after downsample.
+/// 2. The composite step reads only the alpha channel as the coverage
+///    mask. The chosen `fg` color is the actual fg — the strip's RGB
+///    just signals "white-tinted glyph" semantically.
+///
+/// Decoded once on first use; subsequent calls reuse the static.
+fn font_strip() -> &'static Bitmap {
+    static STRIP: OnceLock<Bitmap> = OnceLock::new();
     STRIP.get_or_init(|| {
-        GrayBitmap::from_png_bytes(FONT_PNG).expect("embedded font strip PNG is invalid")
+        let gray =
+            GrayBitmap::from_png_bytes(FONT_PNG).expect("embedded font strip PNG is invalid");
+        let (w, h) = (gray.width, gray.height);
+        let mut rgba = Vec::with_capacity((w as usize) * (h as usize) * 4);
+        for &v in gray.pixels.iter() {
+            rgba.extend_from_slice(&[255, 255, 255, v]);
+        }
+        Bitmap::from_raw(w, h, rgba).expect("strip dimensions match buffer")
     })
 }
 
@@ -123,14 +192,26 @@ pub fn render_text_height_lh(
     let scaled_char_h = target_char_h;
     let line_advance = line_advance_px(scaled_char_h, line_height);
 
-    // Scale the entire strip at once (one resize, not per-char).
-    // Lanczos3 — sharp downsampling for crisp glyph edges.
+    // Scale the entire strip at once (one resize, not per-char). The
+    // strip is RGBA8 (white fg, alpha=coverage), so zenresize routes
+    // through its `RGBA8_SRGB` pipeline: gray channel sRGB→linear (no-op
+    // since constant 255), alpha treated as linear (correct — coverage
+    // is a linear quantity), premultiplied + resampled + unpremultiplied
+    // in linear space, output back as sRGB-u8 RGBA. The resulting alpha
+    // values are mathematically correct coverage post-resample, with no
+    // double-gamma trap.
+    //
+    // Mitchell-Netravali filter — minimal overshoot on sharp glyph
+    // edges. Lanczos's negative side-lobes produce visible halo rings
+    // outside glyph edges that even gamma-correct blending can't undo.
+    // Triangle is artifact-free but visibly soft. Mitchell is the right
+    // point for binary-edge content like glyph strips.
     let scaled_strip_w = scaled_char_w * CHAR_COUNT;
-    let scaled_strip = pixel_ops::resize_gray(
+    let scaled_strip = pixel_ops::resize(
         strip,
         scaled_strip_w,
         scaled_char_h,
-        ResampleFilter::Lanczos3,
+        ResampleFilter::Mitchell,
     );
 
     let out_w = max_cols * scaled_char_w;
@@ -157,7 +238,10 @@ pub fn render_text_height_lh(
                     if sx >= scaled_strip.width() {
                         continue;
                     }
-                    let alpha = scaled_strip.get_pixel(sx, gy);
+                    // Read coverage from the RGBA strip's alpha channel.
+                    // RGB is constant 255 (white-tinted) and is unused
+                    // at composite — we tint with `fg` directly.
+                    let alpha = scaled_strip.get_pixel(sx, gy)[3];
                     if alpha == 0 {
                         continue;
                     }
@@ -172,11 +256,14 @@ pub fn render_text_height_lh(
                     if alpha == 255 {
                         buf[off..off + 4].copy_from_slice(&fg);
                     } else {
+                        // Gamma-correct blend in linear-sRGB space for
+                        // RGB; alpha (channel 3) blends linearly since
+                        // it isn't gamma-encoded.
+                        buf[off] = blend_channel_gamma_correct(fg[0], bg[0], alpha);
+                        buf[off + 1] = blend_channel_gamma_correct(fg[1], bg[1], alpha);
+                        buf[off + 2] = blend_channel_gamma_correct(fg[2], bg[2], alpha);
                         let a = alpha as u16;
                         let inv_a = 255 - a;
-                        buf[off] = ((fg[0] as u16 * a + bg[0] as u16 * inv_a) / 255) as u8;
-                        buf[off + 1] = ((fg[1] as u16 * a + bg[1] as u16 * inv_a) / 255) as u8;
-                        buf[off + 2] = ((fg[2] as u16 * a + bg[2] as u16 * inv_a) / 255) as u8;
                         buf[off + 3] = ((fg[3] as u16 * a + bg[3] as u16 * inv_a) / 255) as u8;
                     }
                 }
@@ -321,11 +408,11 @@ pub fn render_lines_fitted_lh(
         return (vec![], 0, 0);
     }
 
-    // Scale strip once.
+    // Scale strip once via the RGBA8_SRGB pipeline (correct alpha
+    // resampling) using Mitchell — see render_text_height_lh's comment.
     let strip = font_strip();
     let scaled_strip_w = char_w * CHAR_COUNT;
-    let scaled_strip =
-        pixel_ops::resize_gray(strip, scaled_strip_w, char_h, ResampleFilter::Lanczos3);
+    let scaled_strip = pixel_ops::resize(strip, scaled_strip_w, char_h, ResampleFilter::Mitchell);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
     for pixel in buf.chunks_exact_mut(4) {
@@ -348,7 +435,8 @@ pub fn render_lines_fitted_lh(
                     if sx >= scaled_strip.width() {
                         continue;
                     }
-                    let alpha = scaled_strip.get_pixel(sx, gy);
+                    // Coverage from the RGBA strip's alpha channel.
+                    let alpha = scaled_strip.get_pixel(sx, gy)[3];
                     if alpha == 0 {
                         continue;
                     }
@@ -361,11 +449,12 @@ pub fn render_lines_fitted_lh(
                     if alpha == 255 {
                         buf[off..off + 4].copy_from_slice(fg);
                     } else {
+                        // Gamma-correct RGB blend; linear alpha blend.
+                        buf[off] = blend_channel_gamma_correct(fg[0], bg[0], alpha);
+                        buf[off + 1] = blend_channel_gamma_correct(fg[1], bg[1], alpha);
+                        buf[off + 2] = blend_channel_gamma_correct(fg[2], bg[2], alpha);
                         let a = alpha as u16;
                         let inv_a = 255 - a;
-                        buf[off] = ((fg[0] as u16 * a + bg[0] as u16 * inv_a) / 255) as u8;
-                        buf[off + 1] = ((fg[1] as u16 * a + bg[1] as u16 * inv_a) / 255) as u8;
-                        buf[off + 2] = ((fg[2] as u16 * a + bg[2] as u16 * inv_a) / 255) as u8;
                         buf[off + 3] = ((fg[3] as u16 * a + bg[3] as u16 * inv_a) / 255) as u8;
                     }
                 }
@@ -549,7 +638,8 @@ mod tests {
             let mut lit = 0u32;
             for y in 0..BASE_CHAR_H {
                 for x in x0..x0 + BASE_CHAR_W {
-                    if strip.get_pixel(x, y) > 128 {
+                    // Strip is RGBA — coverage is in alpha.
+                    if strip.get_pixel(x, y)[3] > 128 {
                         lit += 1;
                     }
                 }

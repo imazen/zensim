@@ -32,9 +32,15 @@ pub enum ResampleFilter {
     /// Nearest-neighbor — pixelated, fastest.
     #[allow(dead_code)]
     Nearest,
-    /// Bilinear — fast, soft.
+    /// Bilinear — fast, soft, no overshoot.
     Triangle,
-    /// Lanczos-3 — sharp, slower.
+    /// Mitchell-Netravali (B=1/3, C=1/3) — gentle ~1% ringing,
+    /// slightly soft. Good default for content with sharp edges
+    /// (glyphs, thin lines) where Lanczos's overshoot is too aggressive.
+    Mitchell,
+    /// Lanczos-3 — sharpest, with ~5% over/undershoot at sharp edges.
+    /// Ideal for natural images; produces visible halo rings on
+    /// 1-bit-ish content like glyph strips.
     Lanczos3,
 }
 
@@ -43,6 +49,7 @@ impl ResampleFilter {
         match self {
             ResampleFilter::Nearest => zenresize::Filter::Box,
             ResampleFilter::Triangle => zenresize::Filter::Triangle,
+            ResampleFilter::Mitchell => zenresize::Filter::Mitchell,
             ResampleFilter::Lanczos3 => zenresize::Filter::Lanczos,
         }
     }
@@ -567,6 +574,7 @@ impl GrayBitmap {
         })
     }
 
+    #[allow(dead_code)] // used by font test only (font_strip is RGBA now)
     pub(crate) fn width(&self) -> u32 {
         self.width
     }
@@ -576,6 +584,7 @@ impl GrayBitmap {
         self.height
     }
 
+    #[allow(dead_code)] // used by font test only
     pub(crate) fn get_pixel(&self, x: u32, y: u32) -> u8 {
         if x >= self.width || y >= self.height {
             return 0;
@@ -653,7 +662,12 @@ pub(crate) fn resize(src: &Bitmap, w: u32, h: u32, filter: ResampleFilter) -> Bi
     }
 }
 
-/// Resample a [`GrayBitmap`]. Used by the font glyph-strip downscale.
+/// Resample a [`GrayBitmap`]. Currently unused — the font module
+/// switched to an RGBA8 strip so the resize uses the correct
+/// linear-alpha pipeline. Kept for future callers that genuinely need
+/// gamma-aware single-channel resize (no double-encoding trap as long
+/// as the caller passes the right `TransferFunction`).
+#[allow(dead_code)]
 pub(crate) fn resize_gray(src: &GrayBitmap, w: u32, h: u32, filter: ResampleFilter) -> GrayBitmap {
     if src.width == 0 || src.height == 0 || w == 0 || h == 0 {
         return GrayBitmap {
@@ -678,11 +692,50 @@ pub(crate) fn resize_gray(src: &GrayBitmap, w: u32, h: u32, filter: ResampleFilt
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Overlay (straight-alpha source-over) + crop + flips + rotates
+// Overlay (linear-light premultiplied source-over) + crop + flips + rotates
 // ════════════════════════════════════════════════════════════════════════
 
+/// Convert one sRGB straight-alpha u8 RGBA pixel to premultiplied linear f32.
+#[inline]
+fn srgb_u8_to_linear_premul(rgba: &[u8]) -> [f32; 4] {
+    debug_assert_eq!(rgba.len(), 4);
+    let a = rgba[3] as f32 * (1.0 / 255.0);
+    let r = linear_srgb::default::srgb_u8_to_linear(rgba[0]) * a;
+    let g = linear_srgb::default::srgb_u8_to_linear(rgba[1]) * a;
+    let b = linear_srgb::default::srgb_u8_to_linear(rgba[2]) * a;
+    [r, g, b, a]
+}
+
+/// Convert one premultiplied linear f32 RGBA pixel back to sRGB straight-alpha u8.
+#[inline]
+fn linear_premul_to_srgb_u8(rgba: [f32; 4]) -> [u8; 4] {
+    let a = rgba[3].clamp(0.0, 1.0);
+    if a < 1.0 / 512.0 {
+        // Vanishing alpha — write a fully-transparent pixel rather than divide by ~0.
+        return [0, 0, 0, 0];
+    }
+    let inv_a = 1.0 / a;
+    let r_lin = (rgba[0] * inv_a).clamp(0.0, 1.0);
+    let g_lin = (rgba[1] * inv_a).clamp(0.0, 1.0);
+    let b_lin = (rgba[2] * inv_a).clamp(0.0, 1.0);
+    [
+        linear_srgb::default::linear_to_srgb_u8(r_lin),
+        linear_srgb::default::linear_to_srgb_u8(g_lin),
+        linear_srgb::default::linear_to_srgb_u8(b_lin),
+        (a * 255.0 + 0.5) as u8,
+    ]
+}
+
 /// Source-over composite of `src` onto `canvas` at signed `(dx, dy)`.
-/// Both straight-alpha sRGB-u8. Out-of-bounds pixels are clipped.
+///
+/// Both inputs are sRGB-encoded straight-alpha u8 RGBA. The composite is
+/// performed in **premultiplied linear-light f32** via `zenblend::blend_row`
+/// — this avoids the under-darkening artifact you get blending sRGB-encoded
+/// straight-alpha values directly. Pixels with source alpha 0 or 255 take
+/// fast paths that skip the linear conversion (pure transparent / pure
+/// opaque cases are bit-identical to a direct copy).
+///
+/// Out-of-bounds pixels are clipped.
 pub(crate) fn overlay(canvas: &mut Bitmap, src: &Bitmap, dx: i64, dy: i64) {
     let cw = canvas.width as i64;
     let ch = canvas.height as i64;
@@ -701,17 +754,34 @@ pub(crate) fn overlay(canvas: &mut Bitmap, src: &Bitmap, dx: i64, dy: i64) {
     let sy_start = (y_start - dy) as u32;
     let cw_u = canvas.width as usize;
     let sw_u = src.width as usize;
+    let row_w = (x_end - x_start) as usize;
+    if row_w == 0 {
+        return;
+    }
+
+    // Per-row scratch buffers. Reused across all destination rows. Holds
+    // partial-alpha pixels; the fully-transparent / fully-opaque fast paths
+    // never touch these.
+    let mut src_lin = vec![0.0f32; row_w * 4];
+    let mut dst_lin = vec![0.0f32; row_w * 4];
+    // For each x in [0, row_w) we record whether the pixel needed the
+    // linear path. Used to write only the partial-alpha pixels back from
+    // the linear scratch (the fast paths already wrote their result
+    // directly into canvas).
+    let mut needs_linear = vec![false; row_w];
 
     for y_dst in y_start..y_end {
         let y_src = sy_start + (y_dst - y_start) as u32;
         let dst_row_off = (y_dst as usize) * cw_u * 4;
         let src_row_off = (y_src as usize) * sw_u * 4;
-        for x_dst in x_start..x_end {
+
+        let mut any_partial = false;
+        for (i, x_dst) in (x_start..x_end).enumerate() {
             let x_src = sx_start + (x_dst - x_start) as u32;
             let d_off = dst_row_off + (x_dst as usize) * 4;
             let s_off = src_row_off + (x_src as usize) * 4;
-
             let sa = src.pixels[s_off + 3];
+            needs_linear[i] = false;
             if sa == 0 {
                 continue;
             }
@@ -719,22 +789,37 @@ pub(crate) fn overlay(canvas: &mut Bitmap, src: &Bitmap, dx: i64, dy: i64) {
                 canvas.pixels[d_off..d_off + 4].copy_from_slice(&src.pixels[s_off..s_off + 4]);
                 continue;
             }
-            // Straight-alpha source-over.
-            let sa_u = sa as u32;
-            let inv_sa = 255 - sa_u;
-            let da = canvas.pixels[d_off + 3] as u32;
-            // out_a = sa + da * (1 - sa) / 255
-            let out_a = (sa_u + (da * inv_sa).div_ceil(255)).min(255);
-            for c in 0..3 {
-                let s = src.pixels[s_off + c] as u32;
-                let d = canvas.pixels[d_off + c] as u32;
-                // Blend in straight alpha:
-                //   out_c = (s * sa + d * da * (1 - sa) / 255) / out_a
-                let num = s * sa_u + (d * da * inv_sa) / (255 * 255);
-                let v = num.checked_div(out_a).unwrap_or(0);
-                canvas.pixels[d_off + c] = v.min(255) as u8;
+            // Partial alpha — convert into the linear scratch.
+            let s_lin = srgb_u8_to_linear_premul(&src.pixels[s_off..s_off + 4]);
+            let d_lin = srgb_u8_to_linear_premul(&canvas.pixels[d_off..d_off + 4]);
+            src_lin[i * 4..i * 4 + 4].copy_from_slice(&s_lin);
+            dst_lin[i * 4..i * 4 + 4].copy_from_slice(&d_lin);
+            needs_linear[i] = true;
+            any_partial = true;
+        }
+
+        if !any_partial {
+            continue;
+        }
+
+        // Blend partial-alpha src OVER dst — zenblend mutates the first
+        // operand in place, so after this `src_lin` holds the composite.
+        zenblend::blend_row(&mut src_lin, &dst_lin, zenblend::BlendMode::SrcOver);
+
+        // Convert blended pixels back and write to canvas.
+        for i in 0..row_w {
+            if !needs_linear[i] {
+                continue;
             }
-            canvas.pixels[d_off + 3] = out_a as u8;
+            let x_dst = x_start + i as i64;
+            let d_off = dst_row_off + (x_dst as usize) * 4;
+            let blended = [
+                src_lin[i * 4],
+                src_lin[i * 4 + 1],
+                src_lin[i * 4 + 2],
+                src_lin[i * 4 + 3],
+            ];
+            canvas.pixels[d_off..d_off + 4].copy_from_slice(&linear_premul_to_srgb_u8(blended));
         }
     }
 }
@@ -842,6 +927,12 @@ pub(crate) fn rotate270(src: &Bitmap) -> Bitmap {
 // ════════════════════════════════════════════════════════════════════════
 
 /// Fill the rectangle `(x, y, w, h)` of `img` with `color`. Clips.
+///
+/// For fully-opaque colors (`color[3] == 255`) this stamps bytes
+/// directly. For partial-alpha colors the fill is composited in
+/// linear-light premultiplied f32 (`color` SrcOver canvas) so that
+/// translucent fills don't overwrite the destination's existing alpha
+/// or under-darken edges.
 pub(crate) fn fill_rect(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]) {
     let img_w = img.width;
     let img_h = img.height;
@@ -851,19 +942,58 @@ pub(crate) fn fill_rect(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32, color:
         return;
     }
     let stride = (img_w as usize) * 4;
-    // Build one row of fill bytes once.
     let row_w = (x_end - x) as usize;
-    let mut row = Vec::with_capacity(row_w * 4);
-    for _ in 0..row_w {
-        row.extend_from_slice(&color);
+
+    // Fast path: fully opaque or fully transparent — byte stamp / no-op.
+    if color[3] == 255 {
+        let mut row = Vec::with_capacity(row_w * 4);
+        for _ in 0..row_w {
+            row.extend_from_slice(&color);
+        }
+        for yy in y..y_end {
+            let off = (yy as usize) * stride + (x as usize) * 4;
+            img.pixels[off..off + row_w * 4].copy_from_slice(&row);
+        }
+        return;
     }
+    if color[3] == 0 {
+        return;
+    }
+
+    // Partial-alpha: composite via zenblend in linear-premul f32.
+    let solid_lin = srgb_u8_to_linear_premul(&color);
+    // Pre-fill an fg scratch with the solid color repeated.
+    let mut fg = vec![0.0f32; row_w * 4];
+    for px in fg.chunks_exact_mut(4) {
+        px.copy_from_slice(&solid_lin);
+    }
+    let mut bg = vec![0.0f32; row_w * 4];
+    let mut blended = vec![0.0f32; row_w * 4];
+
     for yy in y..y_end {
         let off = (yy as usize) * stride + (x as usize) * 4;
-        img.pixels[off..off + row_w * 4].copy_from_slice(&row);
+        // Convert canvas row → linear premul into bg.
+        for (i, dst_px) in bg.chunks_exact_mut(4).enumerate() {
+            let p_off = off + i * 4;
+            dst_px.copy_from_slice(&srgb_u8_to_linear_premul(&img.pixels[p_off..p_off + 4]));
+        }
+        // Re-seed blended from fg (zenblend mutates the first operand).
+        blended.copy_from_slice(&fg);
+        zenblend::blend_row(&mut blended, &bg, zenblend::BlendMode::SrcOver);
+        // Convert blended → sRGB-u8 back into canvas.
+        for (i, src_px) in blended.chunks_exact(4).enumerate() {
+            let p_off = off + i * 4;
+            let pix = [src_px[0], src_px[1], src_px[2], src_px[3]];
+            img.pixels[p_off..p_off + 4].copy_from_slice(&linear_premul_to_srgb_u8(pix));
+        }
     }
 }
 
 /// Draw a 1-px outline at the rectangle `(x, y, w, h)`.
+///
+/// For fully-opaque colors this stamps bytes directly. For partial-
+/// alpha colors each border pixel is composited in linear-light
+/// premultiplied f32 — same semantics as [`fill_rect`].
 pub(crate) fn draw_rect_border(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]) {
     if w == 0 || h == 0 {
         return;
@@ -874,22 +1004,32 @@ pub(crate) fn draw_rect_border(img: &mut Bitmap, x: u32, y: u32, w: u32, h: u32,
     let y_end = y.saturating_add(h).min(img_h);
     let bot = y_end.saturating_sub(1);
     let right = x_end.saturating_sub(1);
-    // Top + bottom.
-    for xx in x..x_end {
-        if y < img_h {
-            img.put_pixel(xx, y, color);
-        }
-        if bot < img_h && bot > y {
-            img.put_pixel(xx, bot, color);
-        }
+
+    // For partial-alpha borders we'd duplicate the fill_rect blend logic
+    // for every single pixel. Instead, route each side through fill_rect
+    // (1-pixel-thick rect) — fully opaque hits the fast byte path; partial
+    // alpha gets the correct linear-premul composite. Layout splits so
+    // each border pixel is touched exactly once (no corner double-blend):
+    //   top:    full row at y
+    //   bottom: full row at bot (if bot != y)
+    //   left:   column slice strictly between top and bottom
+    //   right:  column slice strictly between top and bottom (if right != x)
+    if x_end > x && y < img_h {
+        fill_rect(img, x, y, x_end - x, 1, color);
     }
-    // Left + right.
-    for yy in y..y_end {
+    if x_end > x && bot < img_h && bot > y {
+        fill_rect(img, x, bot, x_end - x, 1, color);
+    }
+    // Interior column range (rows strictly between top and bottom).
+    let interior_top = y.saturating_add(1);
+    let interior_bot = bot; // exclusive
+    if interior_bot > interior_top {
+        let interior_h = interior_bot - interior_top;
         if x < img_w {
-            img.put_pixel(x, yy, color);
+            fill_rect(img, x, interior_top, 1, interior_h, color);
         }
         if right < img_w && right > x {
-            img.put_pixel(right, yy, color);
+            fill_rect(img, right, interior_top, 1, interior_h, color);
         }
     }
 }
@@ -1037,6 +1177,81 @@ mod tests {
         assert_eq!(canvas.get_pixel(0, 0), [255, 0, 0, 255]);
         assert_eq!(canvas.get_pixel(1, 1), [255, 0, 0, 255]);
         assert_eq!(canvas.get_pixel(3, 3), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn overlay_partial_alpha_uses_linear_compositing() {
+        // 50%-alpha white over solid black. The naïve sRGB straight-alpha
+        // formula gives sRGB ~128 (linear ~0.216 — way too dark). The
+        // correct linear-light average of 0 and 1 at 50% is 0.5 → sRGB 188.
+        let mut canvas = solid(2, 2, [0, 0, 0, 255]);
+        let src = solid(2, 2, [255, 255, 255, 128]);
+        overlay(&mut canvas, &src, 0, 0);
+        let p = canvas.get_pixel(0, 0);
+        assert_eq!(p[3], 255, "alpha out should saturate (over opaque dst)");
+        assert!(
+            p[0] >= 180 && p[0] <= 195,
+            "expected linear-correct gray near 188, got {}",
+            p[0]
+        );
+        assert_eq!(p[0], p[1]);
+        assert_eq!(p[1], p[2]);
+    }
+
+    #[test]
+    fn overlay_partial_alpha_dark_over_light_doesnt_under_darken() {
+        // Inverse: 50%-alpha black over solid white. Naïve sRGB average
+        // yields ~128 sRGB. Linear-correct is sRGB ~188.
+        let mut canvas = solid(2, 2, [255, 255, 255, 255]);
+        let src = solid(2, 2, [0, 0, 0, 128]);
+        overlay(&mut canvas, &src, 0, 0);
+        let p = canvas.get_pixel(0, 0);
+        assert!(
+            p[0] >= 180 && p[0] <= 195,
+            "expected linear-correct gray near 188, got {}",
+            p[0]
+        );
+    }
+
+    #[test]
+    fn fill_rect_partial_alpha_blends_in_linear() {
+        // 50%-alpha white over solid black should land near sRGB 188,
+        // matching overlay's linear-correct semantics. The old impl
+        // overwrote bytes and would give sRGB 255 (alpha 128).
+        let mut img = solid(4, 4, [0, 0, 0, 255]);
+        fill_rect(&mut img, 0, 0, 4, 4, [255, 255, 255, 128]);
+        let p = img.get_pixel(1, 1);
+        assert_eq!(p[3], 255, "dst alpha must stay 255 (over opaque)");
+        assert!(
+            p[0] >= 180 && p[0] <= 195,
+            "expected linear-correct gray near 188, got {}",
+            p[0]
+        );
+    }
+
+    #[test]
+    fn fill_rect_opaque_fast_path_unchanged() {
+        // Fully-opaque fills must still stamp bytes exactly.
+        let mut img = solid(4, 4, [10, 20, 30, 255]);
+        fill_rect(&mut img, 1, 1, 2, 2, [50, 60, 70, 255]);
+        assert_eq!(img.get_pixel(1, 1), [50, 60, 70, 255]);
+        assert_eq!(img.get_pixel(0, 0), [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn draw_rect_border_partial_alpha_blends() {
+        // Partial-alpha border on opaque canvas — every border pixel
+        // should land near sRGB 188 (linear midpoint), not 255.
+        let mut img = solid(6, 6, [0, 0, 0, 255]);
+        draw_rect_border(&mut img, 1, 1, 4, 4, [255, 255, 255, 128]);
+        let p = img.get_pixel(1, 1);
+        assert!(
+            p[0] >= 180 && p[0] <= 195,
+            "border partial-alpha expected ~188, got {}",
+            p[0]
+        );
+        // Interior must remain untouched by border draw.
+        assert_eq!(img.get_pixel(2, 2), [0, 0, 0, 255]);
     }
 
     #[test]

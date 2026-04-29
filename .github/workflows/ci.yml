@@ -190,6 +190,7 @@ jobs:
             "rgb::Rgb"
             "bytemuck::"
             " image::"
+            "linear_srgb::"
           )
           fail=0
           for f in "${forbidden[@]}"; do
