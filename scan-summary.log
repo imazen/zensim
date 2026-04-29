@@ -1,0 +1,48 @@
+sources scanned: 3574
+rows skipped (missing metrics): 6036
+adjacent-q pairs with at least one regressing metric: 4119
+unanimous (5/5 metrics regress): 1244
+
+Unanimous regressions by q-boundary (q_lo→q_hi: source-count):
+  q20→q25: 427
+  q70→q80: 274
+  q50→q60: 81
+  q75→q80: 67
+  q5→q10: 41
+  q50→q80: 40
+  q15→q25: 36
+  q40→q80: 27
+  q40→q60: 26
+  q87→q90: 25
+  q30→q60: 17
+  q90→q95: 17
+  q87→q95: 16
+  q75→q90: 16
+  q75→q87: 10
+
+Any-metric regressions by q-boundary (top 20):
+  q20→q25: 871
+  q5→q10: 541
+  q70→q80: 314
+  q40→q50: 308
+  q15→q25: 223
+  q15→q20: 215
+  q30→q40: 152
+  q50→q60: 140
+  q50→q80: 86
+  q70→q75: 84
+  q50→q70: 82
+  q75→q80: 71
+  q10→q15: 67
+  q20→q30: 66
+  q40→q80: 59
+  q40→q60: 56
+  q40→q70: 48
+  q75→q87: 47
+  q60→q70: 45
+  q30→q50: 41
+
+Q-boundaries where ≥50% of sources show ANY-metric regression:
+
+Wrote /tmp/zenwebp-nonmono/unanimous-regressions.csv (1244 rows)
+Wrote /tmp/zenwebp-nonmono/all-regressions.csv (4119 rows)
