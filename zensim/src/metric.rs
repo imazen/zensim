@@ -472,6 +472,14 @@ impl ZensimResult {
         self
     }
 
+    /// Replace the raw distance and score with values from the MLP
+    /// scoring path. Internal use only — called by
+    /// [`apply_mlp_scoring`](crate::metric::apply_mlp_scoring).
+    pub(crate) fn set_mlp_score(&mut self, raw_distance: f64, score: f64) {
+        self.raw_distance = raw_distance;
+        self.score = score;
+    }
+
     /// Create a NaN sentinel result (for error/placeholder paths).
     pub fn nan() -> Self {
         Self {
@@ -811,7 +819,8 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let config = config_from_params(params, self.parallel);
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
+        apply_mlp_scoring(&mut result, params)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -850,12 +859,13 @@ impl Zensim {
             return Err(ZensimError::ImageTooSmall);
         }
         let config = config_from_params(params, self.parallel);
-        let result = crate::streaming::compute_zensim_streaming_with_ref(
+        let mut result = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
             &config,
             params.weights,
         );
+        apply_mlp_scoring(&mut result, params)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -890,7 +900,8 @@ impl Zensim {
                 &config,
                 params.weights,
             );
-        let result = combine_scores(&stats, params.weights, &config, mean_offset);
+        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        apply_mlp_scoring(&mut result, params)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1285,7 +1296,9 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
             passes: params.blur_passes,
         },
         downscale_filter: DownscaleFilter::default(),
-        compute_all_features: false,
+        // MLP-scored profiles need the full feature vector populated;
+        // the linear path can skip features it doesn't use.
+        compute_all_features: params.mlp_bytes.is_some(),
         extended_features: false,
         extended_masking_strength: 4.0,
         num_scales: params.num_scales,
@@ -1293,6 +1306,33 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
     }
+}
+
+/// Replace `result.raw_distance` and `result.score` with the MLP forward
+/// pass output when the profile uses an MLP scorer. No-op for linear
+/// profiles. Trims `result.features` to the scorer's expected input
+/// length so the f64→f32 conversion sees the right slice.
+pub(crate) fn apply_mlp_scoring(
+    result: &mut ZensimResult,
+    params: &crate::profile::ProfileParams,
+) -> Result<(), ZensimError> {
+    let Some(loader) = params.mlp_bytes else {
+        return Ok(());
+    };
+    let bytes = loader();
+    let scorer = crate::mlp::MlpScorer::from_bytes(bytes)
+        .map_err(|_| ZensimError::InvalidDataLength)?;
+    let n_inputs = scorer.n_inputs();
+    let features = result.features();
+    if features.len() < n_inputs {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    let raw = scorer
+        .score(&features[..n_inputs])
+        .map_err(|_| ZensimError::InvalidDataLength)? as f64;
+    let score = distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b);
+    result.set_mlp_score(raw, score);
+    Ok(())
 }
 
 /// Features per channel per scale: 19 features always emitted.
