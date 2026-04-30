@@ -29,7 +29,27 @@ use rayon::prelude::*;
 use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
-const STRIP_INNER: usize = 16;
+///
+/// Each strip's H-blur covers `STRIP_INNER + 2 * overlap` rows; the overlap
+/// rows get re-H-blurred at the next strip boundary. Larger values reduce
+/// that duplicate work; smaller values keep the H-blur plane allocation in
+/// L2.
+///
+/// At 1080p with the default `blur_radius = 5, blur_passes = 1` (overlap=5):
+///   16 → 67 strips × 26 rows ≈ 63% overlap waste, 800 KB plane footprint
+///   32 → 34 strips × 42 rows ≈ 30% overlap waste, 1.3 MB footprint
+///   64 → 17 strips × 74 rows ≈ 16% overlap waste, 2.3 MB footprint
+///
+/// Zen 4 has 1 MB L2 per core. At 32 the working set sits right at the L2
+/// boundary, with mild spill into L3 — the duplicate-H-blur saving wins.
+/// At 64 the spill is significant on 1080p multithreaded (16 cores all
+/// hammering shared L3) and regresses; 32 is the safer default.
+///
+/// Empirical (1080p, fastest run on a busy host):
+///   16 → 15.01 ms MT  (baseline)
+///   32 → 14.66 ms MT  (-2.3%, also wins single-thread at every size)
+///   64 → 18.80 ms MT  (+25%, regresses on 1080p MT due to L2 spill)
+const STRIP_INNER: usize = 32;
 
 /// Run two closures in parallel (rayon) or sequentially, depending on `parallel`.
 #[inline]
@@ -472,13 +492,22 @@ impl ScaleAccumulators {
     }
 }
 
+/// Per-channel-at-scale dispatch decision. `None` slots are skipped entirely
+/// (the channel doesn't need ssim, edge, or mse at this scale).
+type ScaleActive = [Option<(usize, bool, bool)>; 3];
+
 /// Determine which channels need SSIM, edge, and/or MSE computation at a given scale.
+///
+/// Returns a stack-allocated `[Option<(c, need_ssim, need_edge)>; 3]`.
+/// The previous `Vec<…>` return allocated per call (one per scale × image
+/// — small but unnecessary). The fixed-size form also gives LLVM enough
+/// shape information to specialize the channel dispatch loop downstream.
 fn active_channels(
     scale_idx: usize,
     n_scales: usize,
     config: &ZensimConfig,
     weights: &[f64],
-) -> Vec<(usize, bool, bool)> {
+) -> ScaleActive {
     let compute_all = config.compute_all_features;
     let extended = config.extended_features;
     let basic_fpc = FEATURES_PER_CHANNEL_BASIC; // 13
@@ -497,12 +526,12 @@ fn active_channels(
     //     0-2: ssim_max, art_max, det_max
     //     3-5: ssim_p95, art_p95, det_p95
     let basic_total = n_scales * basic_fpc * 3;
-    let mut active = Vec::new();
+    let mut active: ScaleActive = [None; 3];
     let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
-    for c in 0..3 {
+    for (c, slot) in active.iter_mut().enumerate() {
         if beyond {
             if compute_all || extended {
-                active.push((c, true, true));
+                *slot = Some((c, true, true));
             }
         } else {
             let base = scale_idx * (basic_fpc * 3) + c * basic_fpc;
@@ -519,7 +548,7 @@ fn active_channels(
                 need_edge = true; // art_max/det_max or art_p95/det_p95
             }
             if need_ssim || need_edge || need_mse {
-                active.push((c, need_ssim, need_edge));
+                *slot = Some((c, need_ssim, need_edge));
             }
         }
     }
@@ -538,19 +567,53 @@ pub(crate) fn compute_xyb_mean_offset(
     height: usize,
     padded_width: usize,
 ) -> [f64; 3] {
-    let mut offset = [0.0f64; 3];
     let n = (width * height) as f64;
-    for c in 0..3 {
-        let mut src_sum = 0.0f64;
-        let mut dst_sum = 0.0f64;
-        for y in 0..height {
-            let row_start = y * padded_width;
-            for x in 0..width {
-                src_sum += src_planes[c][row_start + x] as f64;
-                dst_sum += dst_planes[c][row_start + x] as f64;
+
+    // Sum (src - dst) per row in chunks, summed across chunks. The
+    // serial form (full-image pass over both src and dst per channel) is
+    // ~6.2M f32-load-pairs at 1080p × 3 channels — measurable. Chunking
+    // and parallelising via rayon brings it under noise when the
+    // `threads` feature is enabled.
+    let chunk_rows = 64usize;
+    let row_indices: Vec<usize> = (0..height).step_by(chunk_rows).collect();
+
+    let per_chunk = |row_start: usize| -> [f64; 3] {
+        let row_end = (row_start + chunk_rows).min(height);
+        let mut diff = [0.0f64; 3];
+        for c in 0..3 {
+            let mut acc = 0.0f64;
+            for y in row_start..row_end {
+                let s = &src_planes[c][y * padded_width..y * padded_width + width];
+                let d = &dst_planes[c][y * padded_width..y * padded_width + width];
+                let mut row_sum = 0.0f64;
+                for i in 0..width {
+                    row_sum += (s[i] - d[i]) as f64;
+                }
+                acc += row_sum;
             }
+            diff[c] = acc;
         }
-        offset[c] = (src_sum - dst_sum) / n;
+        diff
+    };
+
+    #[cfg(feature = "threads")]
+    let chunks: Vec<[f64; 3]> = if cfg!(feature = "threads") {
+        use rayon::prelude::*;
+        row_indices.into_par_iter().map(per_chunk).collect()
+    } else {
+        row_indices.into_iter().map(per_chunk).collect()
+    };
+    #[cfg(not(feature = "threads"))]
+    let chunks: Vec<[f64; 3]> = row_indices.into_iter().map(per_chunk).collect();
+
+    let mut offset = [0.0f64; 3];
+    for chunk_diff in &chunks {
+        for (o, &d) in offset.iter_mut().zip(chunk_diff.iter()) {
+            *o += d;
+        }
+    }
+    for o in &mut offset {
+        *o /= n;
     }
     offset
 }
@@ -1442,7 +1505,10 @@ fn process_scale_bands(
             let dm_start = (y - band_first_y) * width;
             let dm_n = inner_h * width;
 
-            for &(c, need_ssim, need_edge) in &scale_active {
+            for entry in &scale_active {
+                let Some((c, need_ssim, need_edge)) = *entry else {
+                    continue;
+                };
                 let dm_info = match band_dm.as_mut() {
                     Some(dm) if need_ssim => {
                         let dm_w = diffmap_weights.unwrap();
