@@ -1,49 +1,55 @@
 //! MLP runtime — load + forward pass for small dense networks.
 //!
-//! This module is the inference path for [`ZensimProfile::V0_4`](crate::profile::ZensimProfile),
+//! This module is the inference path for [`ZensimProfile::PreviewV0_4`](crate::profile::ZensimProfile),
 //! which scores feature vectors through a small MLP rather than the
-//! linear dot product used by `V0_2`. The on-disk format is a packed
-//! binary (`ZNPK` magic) shipped via `include_bytes!` from the trained
-//! weights file. See [`model`] for the full layout.
+//! linear dot product used by V0_2. The on-disk format is ZNPR v2 — a
+//! packed binary shipped via `include_bytes!` from the trained weights
+//! file.
 //!
-//! # Provenance
+//! # Backed by [`zenpredict`]
 //!
-//! Vendored from [zenpicker](https://github.com/imazen/zenanalyze)
-//! v0.1.0 (originally `AGPL-3.0-only OR LicenseRef-Imazen-Commercial`),
-//! re-licensed under zensim's `MIT OR Apache-2.0` by the copyright
-//! holder (Imazen / Lilith River). The on-disk format is intentionally
-//! kept identical to zenpicker's so bake tooling and round-trip checks
-//! can be shared between the two crates.
+//! All types in this module are re-exports from the
+//! [`zenpredict`](https://github.com/imazen/zenanalyze) crate, which
+//! is the canonical MLP runtime for the imazen image-codec ecosystem
+//! (zenjpeg / zenwebp / zenavif / zenjxl picker selection + zensim
+//! V0_4 perceptual scoring). The format and dispatch math live there;
+//! we only re-export the surface we use here so consumer code can
+//! say `zensim::mlp::Predictor` without a separate `use zenpredict`.
 //!
-//! Vendored modules: [`error`], [`model`], [`inference`]. The
-//! `picker`/`mask`/`rescue` layers from zenpicker are codec-side
-//! concerns and are not vendored here.
+//! # License note
+//!
+//! `zenpredict` is `AGPL-3.0-only OR LicenseRef-Imazen-Commercial`.
+//! Adding it as a non-optional dependency means binaries that link
+//! zensim's V0_4 path acquire AGPL obligations (or need a commercial
+//! license from Imazen). zensim itself remains MIT/Apache-2.0 — the
+//! V0_2 linear path has no `zenpredict` dependency.
 //!
 //! # Usage sketch
 //!
 //! ```ignore
-//! use zensim::mlp::{Model, forward};
+//! use zensim::mlp::{Model, Predictor};
 //!
 //! static MODEL_BYTES: &[u8] = include_bytes!("../../weights/v04.bin");
 //!
 //! let model = Model::from_bytes(MODEL_BYTES)?;
-//! let mut scratch_a = vec![0f32; model.scratch_len()];
-//! let mut scratch_b = vec![0f32; model.scratch_len()];
-//! let mut output = vec![0f32; model.n_outputs()];
-//!
-//! forward(&model, &features, &mut scratch_a, &mut scratch_b, &mut output)?;
+//! let mut p = Predictor::new(model);
+//! let distance = p.predict(&features)?[0];
 //! ```
 
-pub mod bake;
-mod error;
-mod inference;
-mod model;
-mod scorer;
+pub use zenpredict::{
+    Activation, FORMAT_VERSION, FeatureBound, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView,
+    Metadata, MetadataEntry, MetadataType, Model, Predictor, Section, WeightDtype, WeightStorage,
+    keys,
+};
 
-#[cfg(test)]
-mod tests;
+/// Errors raised by [`Model::from_bytes`] and the forward pass. Alias
+/// of [`zenpredict::PredictError`] for source compatibility with
+/// earlier zensim versions; new code should use the alias name.
+pub type MlpError = zenpredict::PredictError;
 
-pub use error::MlpError;
-pub use inference::forward;
-pub use model::{Activation, FORMAT_VERSION, LEAKY_RELU_ALPHA, LayerView, Model, WeightDtype, WeightStorage};
-pub use scorer::{MlpScorer, MlpScratch};
+/// ZNPR v2 byte-stream composer. Used by `zensim-validate`'s
+/// `--algorithm mlp` arm to bake trained weights, and by zensim's
+/// V0_4 placeholder.
+pub mod bake {
+    pub use zenpredict::bake::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+}
