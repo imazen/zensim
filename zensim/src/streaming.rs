@@ -492,13 +492,22 @@ impl ScaleAccumulators {
     }
 }
 
+/// Per-channel-at-scale dispatch decision. `None` slots are skipped entirely
+/// (the channel doesn't need ssim, edge, or mse at this scale).
+type ScaleActive = [Option<(usize, bool, bool)>; 3];
+
 /// Determine which channels need SSIM, edge, and/or MSE computation at a given scale.
+///
+/// Returns a stack-allocated `[Option<(c, need_ssim, need_edge)>; 3]`.
+/// The previous `Vec<…>` return allocated per call (one per scale × image
+/// — small but unnecessary). The fixed-size form also gives LLVM enough
+/// shape information to specialize the channel dispatch loop downstream.
 fn active_channels(
     scale_idx: usize,
     n_scales: usize,
     config: &ZensimConfig,
     weights: &[f64],
-) -> Vec<(usize, bool, bool)> {
+) -> ScaleActive {
     let compute_all = config.compute_all_features;
     let extended = config.extended_features;
     let basic_fpc = FEATURES_PER_CHANNEL_BASIC; // 13
@@ -517,12 +526,12 @@ fn active_channels(
     //     0-2: ssim_max, art_max, det_max
     //     3-5: ssim_p95, art_p95, det_p95
     let basic_total = n_scales * basic_fpc * 3;
-    let mut active = Vec::new();
+    let mut active: ScaleActive = [None; 3];
     let beyond = scale_idx * (basic_fpc * 3) >= weights.len();
-    for c in 0..3 {
+    for (c, slot) in active.iter_mut().enumerate() {
         if beyond {
             if compute_all || extended {
-                active.push((c, true, true));
+                *slot = Some((c, true, true));
             }
         } else {
             let base = scale_idx * (basic_fpc * 3) + c * basic_fpc;
@@ -539,7 +548,7 @@ fn active_channels(
                 need_edge = true; // art_max/det_max or art_p95/det_p95
             }
             if need_ssim || need_edge || need_mse {
-                active.push((c, need_ssim, need_edge));
+                *slot = Some((c, need_ssim, need_edge));
             }
         }
     }
@@ -1462,7 +1471,10 @@ fn process_scale_bands(
             let dm_start = (y - band_first_y) * width;
             let dm_n = inner_h * width;
 
-            for &(c, need_ssim, need_edge) in &scale_active {
+            for entry in &scale_active {
+                let Some((c, need_ssim, need_edge)) = *entry else {
+                    continue;
+                };
                 let dm_info = match band_dm.as_mut() {
                     Some(dm) if need_ssim => {
                         let dm_w = diffmap_weights.unwrap();
