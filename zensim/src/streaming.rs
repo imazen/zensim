@@ -29,7 +29,27 @@ use rayon::prelude::*;
 use std::sync::Mutex;
 
 /// Inner strip height: rows of useful output per strip (must be even for 2x downscale).
-const STRIP_INNER: usize = 16;
+///
+/// Each strip's H-blur covers `STRIP_INNER + 2 * overlap` rows; the overlap
+/// rows get re-H-blurred at the next strip boundary. Larger values reduce
+/// that duplicate work; smaller values keep the H-blur plane allocation in
+/// L2.
+///
+/// At 1080p with the default `blur_radius = 5, blur_passes = 1` (overlap=5):
+///   16 → 67 strips × 26 rows ≈ 63% overlap waste, 800 KB plane footprint
+///   32 → 34 strips × 42 rows ≈ 30% overlap waste, 1.3 MB footprint
+///   64 → 17 strips × 74 rows ≈ 16% overlap waste, 2.3 MB footprint
+///
+/// Zen 4 has 1 MB L2 per core. At 32 the working set sits right at the L2
+/// boundary, with mild spill into L3 — the duplicate-H-blur saving wins.
+/// At 64 the spill is significant on 1080p multithreaded (16 cores all
+/// hammering shared L3) and regresses; 32 is the safer default.
+///
+/// Empirical (1080p, fastest run on a busy host):
+///   16 → 15.01 ms MT  (baseline)
+///   32 → 14.66 ms MT  (-2.3%, also wins single-thread at every size)
+///   64 → 18.80 ms MT  (+25%, regresses on 1080p MT due to L2 spill)
+const STRIP_INNER: usize = 32;
 
 /// Run two closures in parallel (rayon) or sequentially, depending on `parallel`.
 #[inline]
