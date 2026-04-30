@@ -1,5 +1,6 @@
 #![allow(clippy::needless_range_loop)] // Training loops index parallel arrays by shared index
 
+mod mlp_train;
 mod scale_invariance;
 
 use calamine::{Reader, Xlsx};
@@ -150,6 +151,89 @@ struct Args {
     /// Unspecified datasets default to weight 1.0.
     #[arg(long)]
     dataset_weights: Option<String>,
+
+    /// (--algorithm mlp) Hidden-layer width. Default 32.
+    #[arg(long, default_value = "32")]
+    mlp_hidden: usize,
+
+    /// (--algorithm mlp) Number of epochs. Default 200.
+    #[arg(long, default_value = "200")]
+    mlp_epochs: usize,
+
+    /// (--algorithm mlp) Pairs sampled per epoch. Default 50_000.
+    #[arg(long, default_value = "50000")]
+    mlp_pairs_per_epoch: usize,
+
+    /// (--algorithm mlp) Output path for the v1 ZNPK binary. Default
+    /// /tmp/zensim_trained_mlp.bin.
+    #[arg(long, default_value = "/tmp/zensim_trained_mlp.bin")]
+    mlp_output: PathBuf,
+
+    /// (--algorithm mlp) Default train_weight applied to each --also
+    /// dataset. Lets the operator mix human datasets into the
+    /// training pool without losing them as validation gates. The
+    /// V0_2 lesson: KADIK and TID pull in opposite directions, so
+    /// the model needs gradients from both. 0.0 = pure holdout
+    /// (--also datasets are validation-only by default).
+    #[arg(long, default_value = "0.0")]
+    mlp_train_also_weight: f64,
+
+    /// (--algorithm mlp) How to aggregate per-dataset SROCC into
+    /// the best-checkpoint signal. `min` is the right default for
+    /// shipping a metric — it picks the model that doesn't badly
+    /// regress on any holdout. `mean` is appropriate when datasets
+    /// are known to agree (rarely the case for human image quality).
+    #[arg(long, value_enum, default_value = "min")]
+    mlp_validation_policy: MlpValidationPolicyArg,
+
+    /// (--algorithm mlp) Append 4 size-axis features to each pair's
+    /// feature vector before training: log2(pixels), log2(min_dim),
+    /// log2(max_dim), and log2(max/min) signed by aspect orientation.
+    /// Bumps n_features 228 → 232. Resolves V0_2's known scale drift
+    /// (codec 0.46 |β|/oct, content 0.71 |β|/oct).
+    ///
+    /// Requires that the dataset loader produced reference dimensions
+    /// (synthetic CSV has them; human datasets get probed lazily).
+    /// Pairs with unknown dimensions get zero-filled axes — the model
+    /// learns to ignore them.
+    ///
+    /// Trained models with size axes are NOT loadable in zensim
+    /// runtime <= 0.2.x; they require a runtime that knows to compute
+    /// and append the axes before forward(). The V0_4 dispatch path
+    /// in this branch handles both 228- and 232-input MLPs.
+    #[arg(long, default_value = "false")]
+    mlp_size_axes: bool,
+
+    /// (--algorithm mlp) Fraction of each --also dataset that goes
+    /// into the training pool when --mlp-train-also-weight > 0.
+    /// `0.0` = no split (the entire --also dataset is validation-only,
+    /// classic V0_2 holdout methodology). `0.7` = 70% of pairs train,
+    /// 30% validate. Splits are deterministic per dataset name so
+    /// reruns reproduce.
+    ///
+    /// Per-pair split (not per-image-source). Different distortions of
+    /// the same reference may end up on opposite sides — fine when
+    /// the underlying signal is "what does the human rank these
+    /// distortions" rather than "does the model generalize to unseen
+    /// reference images". For source-disjoint splits, slice the
+    /// dataset offline before passing it to --also.
+    #[arg(long, default_value = "0.0")]
+    mlp_human_train_fraction: f64,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum MlpValidationPolicyArg {
+    Mean,
+    Min,
+}
+
+impl MlpValidationPolicyArg {
+    fn to_inner(self) -> mlp_train::ValidationPolicy {
+        match self {
+            Self::Mean => mlp_train::ValidationPolicy::Mean,
+            Self::Min => mlp_train::ValidationPolicy::Min,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -211,6 +295,10 @@ enum TrainAlgorithm {
     Pairwise,
     /// L1-regularized FISTA: maximizes Pearson(distances, human_ranks) as differentiable Spearman proxy
     Proximal,
+    /// 2-layer MLP (228 → n_hidden LeakyReLU → 1 Identity) trained via
+    /// RankNet pairwise loss + Adam. Outputs a v1 ZNPK binary at
+    /// `--mlp-output` (default `/tmp/zensim_trained_mlp.bin`).
+    Mlp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -241,6 +329,10 @@ struct DatasetWithFeatures {
     human_scores: Vec<f64>,
     features: Vec<Vec<f64>>,
     ref_keys: Vec<String>,
+    /// Per-pair reference dimensions (width, height) in pixels. Empty
+    /// when no loader populated them; otherwise length matches
+    /// `human_scores`.
+    dimensions: Vec<(u32, u32)>,
 }
 
 struct CacheConfig {
@@ -845,11 +937,22 @@ fn main() {
                             all_features.len()
                         );
 
+                        let merged_dimensions: Vec<(u32, u32)> = all_valid_indices
+                            .iter()
+                            .map(|&idx| {
+                                if (idx as usize) < pairs.len() {
+                                    probe_image_dimensions(&pairs[idx as usize].reference)
+                                } else {
+                                    (0, 0)
+                                }
+                            })
+                            .collect();
                         let merged = DatasetWithFeatures {
                             name: ds.name,
                             human_scores: all_human_scores,
                             features: all_features,
                             ref_keys: all_ref_keys,
+                            dimensions: merged_dimensions,
                         };
 
                         // Save updated cache (new timestamped file)
@@ -1214,6 +1317,199 @@ fn main() {
             .map(parse_dataset_weights)
             .unwrap_or_default();
 
+        // MLP path is structurally different — outputs a binary
+        // model rather than f64 weights. Handle it before the f64
+        // dispatch so we can early-return with just the .bin file.
+        if matches!(args.algorithm, TrainAlgorithm::Mlp) {
+            // Resolve per-dataset train weights:
+            //   - The primary dataset (first in dataset_groups, from
+            //     --dataset) gets train_weight = 1.0 unless overridden
+            //     via --dataset-weights.
+            //   - --also datasets default to 0.0 (validation-only),
+            //     unless --dataset-weights names them with a positive
+            //     value.
+            //
+            // This implements the V0_2 lesson: hold human datasets out
+            // by default so we gate on generalization, not the
+            // synthetic-dominated mean.
+            struct OwnedGroup {
+                name: String,
+                scores: Vec<f64>,
+                features: Vec<Vec<f64>>,
+                train_weight: f64,
+                validation_weight: f64,
+            }
+            // Build group list with optional per-dataset train/val
+            // split. Policy:
+            //   - Primary --dataset (idx 0): always single group,
+            //     train_w=1.0, val_w=0.0. No split (it's
+            //     in-distribution by construction).
+            //   - --also datasets: if mlp_human_train_fraction > 0
+            //     AND the resolved train_weight > 0, split each pair
+            //     vector into train/val portions and emit two groups.
+            //     Else single val-only group (V0_2 holdout policy).
+            // When --mlp-size-axes is set, attach 4 scale-aware features
+            // to every pair before forming groups. Unknown dimensions
+            // (loader returned (0, 0)) get zero-filled axes so the
+            // model can still train without segfaulting; in practice
+            // all our loaders populate dimensions reliably.
+            let augment_features = |feats: &[Vec<f64>], dims: &[(u32, u32)]| -> Vec<Vec<f64>> {
+                if !args.mlp_size_axes {
+                    return feats.to_vec();
+                }
+                feats
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let mut v = f.clone();
+                        let (w, h) = dims.get(i).copied().unwrap_or((0, 0));
+                        append_size_axes(&mut v, w, h);
+                        v
+                    })
+                    .collect()
+            };
+            let n_features_for_train = if args.mlp_size_axes {
+                n_features + 4
+            } else {
+                n_features
+            };
+            if args.mlp_size_axes {
+                let any_unknown: usize = all_datasets
+                    .iter()
+                    .map(|ds| ds.dimensions.iter().filter(|(w, h)| *w == 0 || *h == 0).count())
+                    .sum();
+                if any_unknown > 0 {
+                    eprintln!(
+                        "  Warning: {} pairs have unknown dimensions (0,0); size axes will be zero-filled.",
+                        any_unknown
+                    );
+                }
+            }
+
+            let mut groups_owned: Vec<OwnedGroup> = Vec::new();
+            for (idx, ds) in all_datasets.iter().enumerate() {
+                let name = &ds.name;
+                let scores = &ds.human_scores;
+                let feats = &ds.features;
+                let ref_keys = &ds.ref_keys;
+                let dims = &ds.dimensions;
+                if idx == 0 {
+                    groups_owned.push(OwnedGroup {
+                        name: name.clone(),
+                        scores: scores.clone(),
+                        features: augment_features(feats, dims),
+                        train_weight: 1.0,
+                        validation_weight: 0.0,
+                    });
+                    continue;
+                }
+                let lcname = name.to_lowercase();
+                let resolved_train_weight = ds_weight_map
+                    .get(&lcname)
+                    .copied()
+                    .unwrap_or(args.mlp_train_also_weight);
+                let split_frac = args.mlp_human_train_fraction;
+                if resolved_train_weight == 0.0 || split_frac <= 0.0 {
+                    groups_owned.push(OwnedGroup {
+                        name: name.clone(),
+                        scores: scores.clone(),
+                        features: augment_features(feats, dims),
+                        train_weight: 0.0,
+                        validation_weight: 1.0,
+                    });
+                    continue;
+                }
+                // Prefer source-disjoint split when ref_keys cover all
+                // pairs; fall back to per-pair if the loader didn't
+                // populate them or there's only one unique source.
+                let use_source_disjoint = !ref_keys.is_empty() && ref_keys.len() == scores.len();
+                let (train_idx, val_idx) = if use_source_disjoint {
+                    source_disjoint_split(ref_keys, split_frac, &lcname)
+                } else {
+                    deterministic_split(scores.len(), split_frac, &lcname)
+                };
+                let split_kind = if use_source_disjoint {
+                    "source-disjoint"
+                } else {
+                    "per-pair"
+                };
+                eprintln!(
+                    "  MLP split for '{}': {} ({} train, {} val)",
+                    name,
+                    split_kind,
+                    train_idx.len(),
+                    val_idx.len(),
+                );
+                let train_scores: Vec<f64> = train_idx.iter().map(|&i| scores[i]).collect();
+                let train_feats_raw: Vec<Vec<f64>> =
+                    train_idx.iter().map(|&i| feats[i].clone()).collect();
+                let train_dims: Vec<(u32, u32)> =
+                    train_idx.iter().map(|&i| dims.get(i).copied().unwrap_or((0, 0))).collect();
+                let train_features = augment_features(&train_feats_raw, &train_dims);
+                let val_scores: Vec<f64> = val_idx.iter().map(|&i| scores[i]).collect();
+                let val_feats_raw: Vec<Vec<f64>> =
+                    val_idx.iter().map(|&i| feats[i].clone()).collect();
+                let val_dims: Vec<(u32, u32)> =
+                    val_idx.iter().map(|&i| dims.get(i).copied().unwrap_or((0, 0))).collect();
+                let val_features = augment_features(&val_feats_raw, &val_dims);
+                groups_owned.push(OwnedGroup {
+                    name: format!("{name}_train"),
+                    scores: train_scores,
+                    features: train_features,
+                    train_weight: resolved_train_weight,
+                    validation_weight: 0.0,
+                });
+                groups_owned.push(OwnedGroup {
+                    name: format!("{name}_val"),
+                    scores: val_scores,
+                    features: val_features,
+                    train_weight: 0.0,
+                    validation_weight: 1.0,
+                });
+            }
+            let group_refs: Vec<Vec<&[f64]>> = groups_owned
+                .iter()
+                .map(|g| g.features.iter().map(|v| v.as_slice()).collect())
+                .collect();
+            let groups: Vec<mlp_train::TrainingGroup<'_>> = groups_owned
+                .iter()
+                .zip(group_refs.iter())
+                .map(|(g, refs)| mlp_train::TrainingGroup {
+                    name: g.name.clone(),
+                    human_scores: &g.scores,
+                    features: refs.as_slice(),
+                    train_weight: g.train_weight,
+                    validation_weight: g.validation_weight,
+                })
+                .collect();
+
+            let hyper = mlp_train::MlpHyperparams {
+                n_hidden: args.mlp_hidden,
+                n_epochs: args.mlp_epochs,
+                pairs_per_epoch: args.mlp_pairs_per_epoch,
+                validation_policy: args.mlp_validation_policy.to_inner(),
+                ..Default::default()
+            };
+            let bytes = mlp_train::train_mlp(&groups, n_features_for_train, &hyper, &mut training_log);
+            std::fs::write(&args.mlp_output, &bytes).expect("write MLP binary");
+            log_line(
+                &format!(
+                    "MLP saved: {} ({} bytes)",
+                    args.mlp_output.display(),
+                    bytes.len()
+                ),
+                &mut training_log,
+            );
+            zensim::mlp::Model::from_bytes(Box::leak(bytes.into_boxed_slice()))
+                .expect("MLP bake roundtrip should load");
+            log_line("MLP bake roundtrip: OK", &mut training_log);
+
+            let log_path = args.mlp_output.with_extension("log");
+            std::fs::write(&log_path, training_log.join("\n"))
+                .expect("write MLP log");
+            return;
+        }
+
         let best_weights = if matches!(args.algorithm, TrainAlgorithm::Proximal) {
             // Proximal handles single and multi-dataset natively
             let ds_weights: Vec<f64> = dataset_groups
@@ -1294,6 +1590,7 @@ fn main() {
                     &mut training_log,
                 ),
                 TrainAlgorithm::Proximal => unreachable!(),
+                TrainAlgorithm::Mlp => unreachable!("Mlp handled above with early return"),
             };
             print_trained_results(
                 &dataset_groups[0].1,
@@ -1423,6 +1720,7 @@ fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> Data
     let mut human_scores = Vec::with_capacity(cached.valid_indices.len());
     let mut features = Vec::with_capacity(cached.valid_indices.len());
     let mut ref_keys = Vec::with_capacity(cached.valid_indices.len());
+    let mut dimensions = Vec::with_capacity(cached.valid_indices.len());
 
     let mut nan_skipped = 0usize;
     for (i, &idx) in cached.valid_indices.iter().enumerate() {
@@ -1436,6 +1734,7 @@ fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> Data
             human_scores.push(score);
             features.push(cached.features[i].clone());
             ref_keys.push(cached.ref_keys[i].clone());
+            dimensions.push(probe_image_dimensions(&pairs[idx as usize].reference));
         }
     }
     if nan_skipped > 0 {
@@ -1449,6 +1748,7 @@ fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> Data
         human_scores,
         features,
         ref_keys,
+        dimensions,
     }
 }
 
@@ -1683,6 +1983,7 @@ fn load_and_compute(
     let mut human_scores = Vec::new();
     let mut features = Vec::new();
     let mut ref_keys = Vec::new();
+    let mut dimensions = Vec::new();
     let mut valid_indices = Vec::new();
     let mut n_valid = 0;
 
@@ -1691,6 +1992,7 @@ fn load_and_compute(
             human_scores.push(hs);
             features.push(result.into_features());
             ref_keys.push(key);
+            dimensions.push(probe_image_dimensions(&pairs[idx].reference));
             valid_indices.push(idx as u32);
             n_valid += 1;
         }
@@ -1704,6 +2006,7 @@ fn load_and_compute(
             human_scores,
             features,
             ref_keys,
+            dimensions,
         },
         valid_indices,
     )
@@ -3757,6 +4060,144 @@ fn eval_srocc(human_scores: &[f64], features: &[&[f64]], weights: &[f64]) -> f64
 }
 
 // ===== Dataset loaders =====
+
+/// Probe image dimensions from a path, with global memoization.
+///
+/// Only the reference image is probed (zensim's pyramid is sized to
+/// the reference; distorted must match). Returns `(0, 0)` for unknown
+/// — callers treating that as "skip size axes" is fine.
+fn probe_image_dimensions(path: &std::path::Path) -> (u32, u32) {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u32, u32)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let g = cache.lock().unwrap();
+        if let Some(&dims) = g.get(path) {
+            return dims;
+        }
+    }
+    let dims = match image::image_dimensions(path) {
+        Ok((w, h)) => (w, h),
+        Err(_) => (0, 0),
+    };
+    cache.lock().unwrap().insert(path.to_path_buf(), dims);
+    dims
+}
+
+/// Append the four size-axis features to a feature vector. Length
+/// goes from N → N+4. Order: log2(pixel_count), log2(min_dim),
+/// log2(max_dim), log2(max/min) signed by aspect orientation
+/// (positive when width > height).
+///
+/// Skips append (returns `false`) when dimensions are `(0, 0)` —
+/// caller can fall back to a non-size MLP path or 0-pad the axes.
+fn append_size_axes(features: &mut Vec<f64>, width: u32, height: u32) -> bool {
+    if width == 0 || height == 0 {
+        features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+        return false;
+    }
+    let w = width as f64;
+    let h = height as f64;
+    let pixels = w * h;
+    let min_dim = w.min(h);
+    let max_dim = w.max(h);
+    let log2_pixels = pixels.log2();
+    let log2_min = min_dim.log2();
+    let log2_max = max_dim.log2();
+    let log_aspect_signed = (max_dim / min_dim).log2() * if w >= h { 1.0 } else { -1.0 };
+    features.extend_from_slice(&[log2_pixels, log2_min, log2_max, log_aspect_signed]);
+    true
+}
+
+/// Deterministic train/val split of `[0, n)` indices.
+///
+/// Seed is derived from `name` so the split is stable across reruns
+/// (a corpus's "train" pairs stay "train" pairs). Fisher-Yates
+/// shuffle, then `ceil(n * train_fraction)` indices go to train and
+/// the remainder go to val.
+fn deterministic_split(n: usize, train_fraction: f64, name: &str) -> (Vec<usize>, Vec<usize>) {
+    let mut indices: Vec<usize> = (0..n).collect();
+    if n == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let mut next = stream_for(name);
+    for i in (1..n).rev() {
+        let j = (next() as usize) % (i + 1);
+        indices.swap(i, j);
+    }
+    let n_train = ((n as f64 * train_fraction).ceil() as usize).min(n);
+    let train = indices[..n_train].to_vec();
+    let val = indices[n_train..].to_vec();
+    (train, val)
+}
+
+/// Source-disjoint split: every pair sharing a reference image goes
+/// entirely to train OR entirely to val. Stronger generalization
+/// signal than the per-pair split because the model can't memorize
+/// "this reference + this distortion → this score" and have a sibling
+/// distortion of the same reference in val.
+///
+/// When `ref_keys` is empty (no per-pair source identity available)
+/// or has only one unique key, falls back to per-pair split.
+fn source_disjoint_split(
+    ref_keys: &[String],
+    train_fraction: f64,
+    name: &str,
+) -> (Vec<usize>, Vec<usize>) {
+    if ref_keys.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut unique: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for k in ref_keys {
+        unique.insert(k.as_str());
+    }
+    let mut unique: Vec<&str> = unique.into_iter().collect();
+    if unique.len() < 2 {
+        // Single unique source — can't source-disjoint split it.
+        return deterministic_split(ref_keys.len(), train_fraction, name);
+    }
+    let mut next = stream_for(name);
+    for i in (1..unique.len()).rev() {
+        let j = (next() as usize) % (i + 1);
+        unique.swap(i, j);
+    }
+    let n_unique = unique.len();
+    let n_train_refs = ((n_unique as f64 * train_fraction).ceil() as usize).min(n_unique);
+    let train_refs: std::collections::HashSet<&str> =
+        unique[..n_train_refs].iter().copied().collect();
+    let mut train_idx = Vec::new();
+    let mut val_idx = Vec::new();
+    for (i, k) in ref_keys.iter().enumerate() {
+        if train_refs.contains(k.as_str()) {
+            train_idx.push(i);
+        } else {
+            val_idx.push(i);
+        }
+    }
+    (train_idx, val_idx)
+}
+
+/// Build a deterministic SplitMix64 stream seeded from `name`.
+///
+/// FNV-1a hash → SplitMix64. Reused by both per-pair and
+/// source-disjoint splits so reseeding behaves consistently.
+fn stream_for(name: &str) -> impl FnMut() -> u64 {
+    let mut seed: u64 = 0xcbf2_9ce4_8422_2325 ^ 0xC0FFEE_DEADBEEF_u64.rotate_left(13);
+    for &b in name.as_bytes() {
+        seed ^= b as u64;
+        seed = seed.wrapping_mul(0x100_0000_01b3);
+    }
+    let mut state = seed;
+    move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
 
 fn load_tid2013(base: &Path) -> Vec<ImagePair> {
     let mos_path = base.join("mos_with_names.txt");

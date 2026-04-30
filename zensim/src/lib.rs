@@ -202,6 +202,7 @@ mod error;
 mod fused;
 pub mod mapping;
 mod metric;
+pub mod mlp;
 mod pool;
 pub mod profile;
 mod simd_ops;

@@ -2693,6 +2693,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenpredict"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "zenresize"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2725,6 +2734,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "zenpixels",
+ "zenpredict",
 ]
 
 [[package]]

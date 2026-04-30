@@ -45,6 +45,12 @@ linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
 zenpixels = { version = "0.2.10", optional = true, default-features = false }
+# Runtime for V0_4's MLP scorer. AGPL-3.0-only OR LicenseRef-Imazen-Commercial
+# upstream — adding it to zensim's MIT/Apache-2.0 dependency tree means
+# downstream binaries acquire AGPL obligations transitively. If that's
+# unacceptable for a given consumer, build with `--no-default-features`
+# and skip the V0_4 path; V0_2 has no zenpredict dependency.
+zenpredict = { workspace = true }
 # zenresize = { workspace = true, optional = true }  # re-enable when published
 
 [dev-dependencies]

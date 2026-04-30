@@ -14,6 +14,12 @@ pub enum ZensimProfile {
     PreviewV0_1,
     /// Preview v0.2. Concordance-filtered 218k pairs, Nelder-Mead SROCC=0.9960.
     PreviewV0_2,
+    /// Preview v0.4. MLP-scored profile, scaffolded with a placeholder
+    /// network that reproduces V0_2 byte-for-byte until trained weights
+    /// land. Use [`ZensimProfile::latest`] in production — this variant
+    /// exists so the V0_4 dispatch path can be exercised end-to-end
+    /// while training is still in progress.
+    PreviewV0_4,
 }
 
 impl ZensimProfile {
@@ -27,6 +33,7 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
+            Self::PreviewV0_4 => "zensim-preview-v0.4",
         }
     }
 
@@ -35,6 +42,7 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
+            Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
         }
     }
 }
@@ -52,6 +60,7 @@ impl core::fmt::Display for ZensimProfile {
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub struct ProfileParams {
     /// Scoring weights (one per feature, length = `FEATURES_PER_SCALE * num_scales`).
+    /// Empty `&[]` for MLP-scored profiles — see [`mlp_bytes`](Self::mlp_bytes).
     pub weights: &'static [f64],
     /// Box blur radius at scale 0 (kernel width = `2 * radius + 1`).
     pub blur_radius: usize,
@@ -63,11 +72,25 @@ pub struct ProfileParams {
     pub score_mapping_a: f64,
     /// Score mapping exponent B in `100 - A × d^B`.
     pub score_mapping_b: f64,
+    /// MLP scorer for non-linear profiles. When `Some`, the scoring
+    /// path replaces the linear `dot(features, weights)` with a forward
+    /// pass through the MLP loaded from these bytes (`ZNPK` v1 format).
+    /// `None` for V0_1 / V0_2 — they keep the classic linear path.
+    ///
+    /// Stored as a function pointer rather than `&'static [u8]` so the
+    /// bytes can be lazily baked at first use (V0_4 placeholder is built
+    /// at runtime from `WEIGHTS_PREVIEW_V0_2`; trained bakes will move
+    /// to a `static` byte array once the training pipeline lands).
+    pub mlp_bytes: Option<fn() -> &'static [u8]>,
 }
 
 #[cfg(feature = "training")]
 impl ProfileParams {
     /// Create custom params for weight training/exploration.
+    ///
+    /// MLP scoring is disabled (`mlp_bytes = None`) for custom params;
+    /// research-side MLP exploration goes through `zensim-validate`'s
+    /// `--algorithm mlp` arm instead.
     pub fn custom(
         weights: &'static [f64],
         blur_radius: usize,
@@ -83,6 +106,7 @@ impl ProfileParams {
             num_scales,
             score_mapping_a,
             score_mapping_b,
+            mlp_bytes: None,
         }
     }
 }
@@ -96,6 +120,7 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     num_scales: 4,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
+    mlp_bytes: None,
 };
 
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
@@ -105,6 +130,68 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     num_scales: 4,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
+    mlp_bytes: None,
+};
+
+/// V0_4 placeholder MLP bytes — single-layer 228 → 1 linear MLP that
+/// reproduces V0_2 byte-for-byte. The per-input weights are
+/// `WEIGHTS_PREVIEW_V0_2[i] / num_scales` so the MLP forward output
+/// equals the V0_2 linear scorer's `raw_distance` (after V0_2's
+/// post-divide by `num_scales`).
+///
+/// This placeholder is replaced by trained weights once the V0_4
+/// training pipeline (`zensim-validate --algorithm mlp`) ships.
+fn v0_4_placeholder_bytes() -> &'static [u8] {
+    use crate::mlp::bake::{BakeLayer, BakeRequest, bake_v2};
+    use crate::mlp::{Activation, WeightDtype};
+    use std::sync::LazyLock;
+    static BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| {
+        let n_scales = PROFILE_PREVIEW_V0_2.num_scales as f64;
+        let n_inputs = WEIGHTS_PREVIEW_V0_2.len();
+        // Single 228 → 1 linear layer with the V0_2 weights pre-divided
+        // by num_scales so the MLP forward output equals V0_2's
+        // post-normalization raw_distance.
+        let weights_f32: Vec<f32> = WEIGHTS_PREVIEW_V0_2
+            .iter()
+            .map(|&w| (w / n_scales) as f32)
+            .collect();
+        let bias = [0.0f32];
+        let scaler_mean = vec![0.0f32; n_inputs];
+        let scaler_scale = vec![1.0f32; n_inputs];
+        let layers = [BakeLayer {
+            in_dim: n_inputs,
+            out_dim: 1,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &weights_f32,
+            biases: &bias,
+        }];
+        bake_v2(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &scaler_mean,
+            scaler_scale: &scaler_scale,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &[],
+        })
+        .expect("v0_4 placeholder bake")
+    });
+    BYTES.as_slice()
+}
+
+static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
+    // Linear weights are unused on the MLP path but kept non-empty so
+    // any caller that introspects `params.weights` length without
+    // checking `mlp_bytes.is_some()` sees a sensible (V0_2-equivalent)
+    // value.
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    mlp_bytes: Some(v0_4_placeholder_bytes),
 };
 
 // --- Weight arrays ---

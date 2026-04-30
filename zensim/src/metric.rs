@@ -472,6 +472,14 @@ impl ZensimResult {
         self
     }
 
+    /// Replace the raw distance and score with values from the MLP
+    /// scoring path. Internal use only — called by
+    /// [`apply_mlp_scoring`](crate::metric::apply_mlp_scoring).
+    pub(crate) fn set_mlp_score(&mut self, raw_distance: f64, score: f64) {
+        self.raw_distance = raw_distance;
+        self.score = score;
+    }
+
     /// Create a NaN sentinel result (for error/placeholder paths).
     pub fn nan() -> Self {
         Self {
@@ -811,7 +819,13 @@ impl Zensim {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         let config = config_from_params(params, self.parallel);
-        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            source.width() as u32,
+            source.height() as u32,
+        )?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -850,12 +864,18 @@ impl Zensim {
             return Err(ZensimError::ImageTooSmall);
         }
         let config = config_from_params(params, self.parallel);
-        let result = crate::streaming::compute_zensim_streaming_with_ref(
+        let mut result = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
             distorted,
             &config,
             params.weights,
         );
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            distorted.width() as u32,
+            distorted.height() as u32,
+        )?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -890,7 +910,13 @@ impl Zensim {
                 &config,
                 params.weights,
             );
-        let result = combine_scores(&stats, params.weights, &config, mean_offset);
+        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            distorted.width() as u32,
+            distorted.height() as u32,
+        )?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1285,7 +1311,9 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
             passes: params.blur_passes,
         },
         downscale_filter: DownscaleFilter::default(),
-        compute_all_features: false,
+        // MLP-scored profiles need the full feature vector populated;
+        // the linear path can skip features it doesn't use.
+        compute_all_features: params.mlp_bytes.is_some(),
         extended_features: false,
         extended_masking_strength: 4.0,
         num_scales: params.num_scales,
@@ -1293,6 +1321,85 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
     }
+}
+
+/// Replace `result.raw_distance` and `result.score` with the MLP forward
+/// pass output when the profile uses an MLP scorer. No-op for linear
+/// profiles.
+///
+/// When the loaded MLP's `n_inputs` exceeds `result.features().len()`
+/// by exactly 4, this function appends size-axis features derived
+/// from the source `(width, height)` before scoring. This matches
+/// the V0_4 trainer's `--mlp-size-axes` mode (228 → 232 inputs):
+/// log2(pixels), log2(min_dim), log2(max_dim), and signed
+/// log2(max/min) by aspect orientation.
+pub(crate) fn apply_mlp_scoring(
+    result: &mut ZensimResult,
+    params: &crate::profile::ProfileParams,
+    width: u32,
+    height: u32,
+) -> Result<(), ZensimError> {
+    let Some(loader) = params.mlp_bytes else {
+        return Ok(());
+    };
+    let bytes = loader();
+    let model = crate::mlp::Model::from_bytes(bytes)
+        .map_err(|_| ZensimError::InvalidDataLength)?;
+    let n_inputs = model.n_inputs();
+    let features = result.features();
+    let mut predictor = crate::mlp::Predictor::new(model);
+
+    // Build the f32 feature vector the MLP expects. Three shapes:
+    //   - n_inputs == features.len(): standard scorer (228 features)
+    //   - n_inputs == features.len() + 4: size-axis-augmented (232)
+    //   - n_inputs <  features.len(): strict-prefix (e.g. trained on
+    //     228 of a 300-feature extended tail)
+    let raw = if n_inputs == features.len() {
+        let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
+        predictor
+            .predict(&f32_features)
+            .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+    } else if n_inputs == features.len() + 4 {
+        let mut augmented = features.to_vec();
+        append_mlp_size_axes(&mut augmented, width, height);
+        let f32_features: Vec<f32> = augmented.iter().map(|&v| v as f32).collect();
+        predictor
+            .predict(&f32_features)
+            .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+    } else if n_inputs < features.len() {
+        let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
+        predictor
+            .predict(&f32_features)
+            .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+    } else {
+        return Err(ZensimError::InvalidDataLength);
+    };
+
+    let score = distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b);
+    result.set_mlp_score(raw, score);
+    Ok(())
+}
+
+/// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed
+/// log2(max/min))` to a feature vector. Mirrors the trainer-side
+/// `append_size_axes` in `zensim-validate/src/main.rs` so a model
+/// trained with `--mlp-size-axes` produces the same input layout
+/// at runtime.
+fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
+    if width == 0 || height == 0 {
+        features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
+        return;
+    }
+    let w = width as f64;
+    let h = height as f64;
+    let pixels = w * h;
+    let min_dim = w.min(h);
+    let max_dim = w.max(h);
+    let log2_pixels = pixels.log2();
+    let log2_min = min_dim.log2();
+    let log2_max = max_dim.log2();
+    let log_aspect_signed = (max_dim / min_dim).log2() * if w >= h { 1.0 } else { -1.0 };
+    features.extend_from_slice(&[log2_pixels, log2_min, log2_max, log_aspect_signed]);
 }
 
 /// Features per channel per scale: 19 features always emitted.
