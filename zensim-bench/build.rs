@@ -181,6 +181,8 @@ fn compile_ffi_shims(libjxl_dir: &Path, build_dir: &Path) {
         .file("ffi/butteraugli_ffi.cpp")
         .include(libjxl_dir)
         .include(libjxl_dir.join("lib/include"))
+        .include(libjxl_dir.join("third_party/highway"))
+        .include(libjxl_dir.join("third_party/skcms"))
         .include(build_dir.join("lib/include"))
         .include("ffi")
         .opt_level(3)
