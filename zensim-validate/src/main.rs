@@ -564,7 +564,12 @@ fn main() {
     }
     let train = args.train || args.train_only;
     let cv_mode = args.cross_validate.is_some() || args.leave_one_out;
-    let compute_all = train || args.compute_all || args.extract_only || cv_mode;
+    // Eval-only with --weights-file should also take the cache fast-path
+    // so we don't recompute hundreds of thousands of features just to dot
+    // a different weight vector against them.
+    let eval_only_weights = args.weights_file.is_some() && !train && !cv_mode;
+    let compute_all =
+        train || args.compute_all || args.extract_only || cv_mode || eval_only_weights;
     let blur_passes = args.blur_passes;
     let blur_radius = args.blur_radius;
     let num_scales = args.num_scales;
