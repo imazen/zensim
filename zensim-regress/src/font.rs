@@ -347,19 +347,21 @@ fn cached_scaled_strip(
     filter: ResampleFilter,
 ) -> Arc<Bitmap> {
     type Key = (u32, u32, ResampleFilter);
+    type CacheEntry = (Key, Arc<Bitmap>);
+    type Cache = Mutex<Vec<CacheEntry>>;
     const CAP: usize = 8;
-    static CACHE: OnceLock<Mutex<Vec<(Key, Arc<Bitmap>)>>> = OnceLock::new();
+    static CACHE: OnceLock<Cache> = OnceLock::new();
 
     let key: Key = (scaled_char_w, scaled_char_h, filter);
     let cache = CACHE.get_or_init(|| Mutex::new(Vec::with_capacity(CAP)));
 
-    if let Ok(mut guard) = cache.lock() {
-        if let Some(idx) = guard.iter().position(|(k, _)| *k == key) {
-            // Bump to MRU (back of vec).
-            let entry = guard.remove(idx);
-            guard.push(entry);
-            return guard.last().unwrap().1.clone();
-        }
+    if let Ok(mut guard) = cache.lock()
+        && let Some(idx) = guard.iter().position(|(k, _)| *k == key)
+    {
+        // Bump to MRU (back of vec).
+        let entry = guard.remove(idx);
+        guard.push(entry);
+        return guard.last().unwrap().1.clone();
     }
 
     let strip = font_strip();

@@ -674,20 +674,15 @@ pub(crate) fn resize(src: &Bitmap, w: u32, h: u32, filter: ResampleFilter) -> Bi
 /// skip the gamma round-trip. Use only for byte-space diagnostic
 /// pipelines where the downstream consumer (e.g. `abs(e - a)` on u8
 /// pixels) is itself byte-linear; otherwise prefer [`resize`].
-pub(crate) fn resize_byte_linear(
-    src: &Bitmap,
-    w: u32,
-    h: u32,
-    filter: ResampleFilter,
-) -> Bitmap {
+pub(crate) fn resize_byte_linear(src: &Bitmap, w: u32, h: u32, filter: ResampleFilter) -> Bitmap {
     if src.width == 0 || src.height == 0 || w == 0 || h == 0 {
         return Bitmap::new(w, h);
     }
     if (src.width, src.height) == (w, h) {
         return src.clone();
     }
-    let desc = zenresize::PixelDescriptor::RGBA8_SRGB
-        .with_transfer(zenresize::TransferFunction::Linear);
+    let desc =
+        zenresize::PixelDescriptor::RGBA8_SRGB.with_transfer(zenresize::TransferFunction::Linear);
     let config = zenresize::ResizeConfig::builder(src.width, src.height, w, h)
         .filter(filter.to_zenresize())
         .input(desc)

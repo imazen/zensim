@@ -91,12 +91,9 @@ pub fn generate_diff_image(expected: &Bitmap, actual: &Bitmap, amplification: u8
             let a = actual.get_pixel(x, y);
             let ea = e[3] as i32;
             let aa = a[3] as i32;
-            let dr =
-                ((e[0] as i32 * ea / 255 - a[0] as i32 * aa / 255).abs() * amp).min(255) as u8;
-            let dg =
-                ((e[1] as i32 * ea / 255 - a[1] as i32 * aa / 255).abs() * amp).min(255) as u8;
-            let db =
-                ((e[2] as i32 * ea / 255 - a[2] as i32 * aa / 255).abs() * amp).min(255) as u8;
+            let dr = ((e[0] as i32 * ea / 255 - a[0] as i32 * aa / 255).abs() * amp).min(255) as u8;
+            let dg = ((e[1] as i32 * ea / 255 - a[1] as i32 * aa / 255).abs() * amp).min(255) as u8;
+            let db = ((e[2] as i32 * ea / 255 - a[2] as i32 * aa / 255).abs() * amp).min(255) as u8;
             if dr == 0 && dg == 0 && db == 0 {
                 diff.put_pixel(x, y, [24, 24, 24, 255]);
             } else {
