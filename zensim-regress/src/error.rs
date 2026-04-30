@@ -14,13 +14,13 @@ pub enum RegressError {
         source: std::io::Error,
     },
 
-    /// Image decoding error.
-    #[error("image error at {path}: {source}")]
-    Image {
+    /// PNG decode/encode error.
+    #[error("PNG error at {path}: {message}")]
+    Png {
         /// File path that caused the error.
         path: PathBuf,
-        /// Underlying image error.
-        source: image::ImageError,
+        /// Underlying PNG error message (string form, hides backend).
+        message: String,
     },
 
     /// No checksum file found for this test.
@@ -70,10 +70,10 @@ impl RegressError {
         }
     }
 
-    pub(crate) fn image(path: impl Into<PathBuf>, source: image::ImageError) -> Self {
-        Self::Image {
+    pub(crate) fn png(path: impl Into<PathBuf>, source: crate::pixel_ops::PngError) -> Self {
+        Self::Png {
             path: path.into(),
-            source,
+            message: source.to_string(),
         }
     }
 }

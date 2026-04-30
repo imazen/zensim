@@ -7,7 +7,7 @@
 //! - [`super::stack`] / [`super::grid`] / [`super::layers`] — containers,
 //! - [`super::modifiers`] — modifier nodes.
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::color::Color;
 use super::geom::Size;
@@ -27,7 +27,7 @@ pub enum Node {
     // ── Leaves ────────────────────────────────────────────────────────
     Empty,
     Fill(Color),
-    Image(RgbaImage),
+    Image(Bitmap),
     Text(TextSpec),
 
     // ── Containers ────────────────────────────────────────────────────
@@ -37,6 +37,10 @@ pub enum Node {
         justify: super::sizing::MainAlign,
         align_items: super::sizing::CrossAlign,
         children: Vec<Node>,
+        /// Proportionally shrink non-rigid children when their natural
+        /// sizes overflow `main_avail`. Off by default — see
+        /// [`super::Stack::shrink_on_overflow`].
+        shrink: bool,
     },
     Grid {
         cols: Vec<super::sizing::Track>,
@@ -121,8 +125,8 @@ impl From<String> for Node {
     }
 }
 
-impl From<RgbaImage> for Node {
-    fn from(img: RgbaImage) -> Node {
+impl From<Bitmap> for Node {
+    fn from(img: Bitmap) -> Node {
         Node::Image(img)
     }
 }
@@ -135,7 +139,7 @@ pub fn empty() -> Node {
 pub fn fill(c: Color) -> Node {
     Node::Fill(c)
 }
-pub fn image(img: RgbaImage) -> Node {
+pub fn image(img: Bitmap) -> Node {
     Node::Image(img)
 }
 pub fn text(spec: TextSpec) -> Node {
@@ -162,6 +166,30 @@ pub fn line(s: impl Into<String>, fg: Color) -> Node {
 // ── Dispatch tables ────────────────────────────────────────────────────
 
 impl Node {
+    /// Coarse classification — used by paint-time diagnostics to label
+    /// offending children without exposing the full enum.
+    pub fn kind(&self) -> super::diagnostics::NodeKind {
+        use super::diagnostics::NodeKind;
+        match self {
+            Node::Empty => NodeKind::Empty,
+            Node::Fill(_) => NodeKind::Fill,
+            Node::Image(_) => NodeKind::Image,
+            Node::Text(_) => NodeKind::Text,
+            Node::Stack { .. } => NodeKind::Stack,
+            Node::Grid { .. } => NodeKind::Grid,
+            Node::Layers(_) => NodeKind::Layers,
+            Node::Padded { .. } => NodeKind::Padded,
+            Node::Sized { .. } => NodeKind::Sized,
+            Node::Constrain { .. } => NodeKind::Constrain,
+            Node::Aspect { .. } => NodeKind::Aspect,
+            Node::Align { .. } => NodeKind::Align,
+            Node::Fit { .. } => NodeKind::Fit,
+            Node::Background { .. } => NodeKind::Background,
+            Node::Border { .. } => NodeKind::Border,
+            Node::SegmentedStrip { .. } => NodeKind::SegmentedStrip,
+        }
+    }
+
     /// Measure this node given the maximum available `(w, h)`. The
     /// returned size is clamped to `max` and to [`safety::MAX_DIM`].
     /// If recursion exceeds [`safety::MAX_DEPTH`] (e.g., a malicious
@@ -237,12 +265,14 @@ impl Node {
                 justify,
                 align_items,
                 children,
+                shrink,
             } => Node::Stack {
                 axis,
                 justify,
                 align_items,
                 gap: s(gap),
                 children: children.into_iter().map(|c| c.scaled(scale)).collect(),
+                shrink,
             },
             Node::Grid {
                 cols,
@@ -332,7 +362,7 @@ impl Node {
         }
     }
 
-    pub(super) fn paint(&self, rect: super::geom::Rect, canvas: &mut RgbaImage) {
+    pub(super) fn paint(&self, rect: super::geom::Rect, canvas: &mut Bitmap) {
         if rect.w == 0 || rect.h == 0 {
             return;
         }
@@ -343,7 +373,7 @@ impl Node {
         };
     }
 
-    fn paint_inner(&self, rect: super::geom::Rect, canvas: &mut RgbaImage) {
+    fn paint_inner(&self, rect: super::geom::Rect, canvas: &mut Bitmap) {
         match self {
             Node::Empty => {}
             Node::Fill(c) => paint::fill_rect(canvas, rect, *c),
@@ -355,7 +385,17 @@ impl Node {
                 justify,
                 align_items,
                 children,
-            } => stack::paint(*axis, *gap, *justify, *align_items, children, rect, canvas),
+                shrink,
+            } => stack::paint(
+                *axis,
+                *gap,
+                *justify,
+                *align_items,
+                *shrink,
+                children,
+                rect,
+                canvas,
+            ),
             Node::Grid {
                 cols,
                 rows,
@@ -386,10 +426,9 @@ impl Node {
 mod tests {
     use super::super::color::WHITE;
     use super::*;
-    use image::Rgba;
 
-    fn solid(w: u32, h: u32, c: Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     #[test]

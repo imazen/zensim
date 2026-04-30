@@ -61,9 +61,7 @@ impl ChecksumHasher for SeaHasher {
     }
 
     fn hash_file(&self, path: &Path) -> Result<String, RegressError> {
-        let img = image::open(path)
-            .map_err(|e| RegressError::image(path, e))?
-            .to_rgba8();
+        let img = crate::pixel_ops::Bitmap::open(path).map_err(|e| RegressError::png(path, e))?;
         let (w, h) = img.dimensions();
         Ok(self.hash_pixels(img.as_raw(), w, h))
     }
@@ -139,7 +137,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let pixels = vec![128u8; 4 * 4 * 4]; // 4x4 gray RGBA
         let path = dir.path().join("test.png");
-        let img = image::RgbaImage::from_raw(4, 4, pixels.clone()).unwrap();
+        let img = crate::pixel_ops::Bitmap::from_raw(4, 4, pixels.clone()).unwrap();
         img.save(&path).unwrap();
 
         let pixel_hash = SeaHasher.hash_file(&path).unwrap();

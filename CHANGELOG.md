@@ -32,27 +32,19 @@ _(none currently queued)_
 
 ## zensim-regress
 
-### [0.4.0] - 2026-04-27
+### [0.4.0] - 2026-04-27 _(unreleased)_
 
-Semver-breaking bump because `MontageOptions` is now `#[non_exhaustive]`.
-Out-of-crate callers can no longer use struct-literal construction at all
-(with or without `..Default::default()` — the Rust language disallows both
-on non-exhaustive structs). Migrate to the `Default` + direct-field-assign
-pattern; the fields stay public:
+Breaking release (latest published is 0.3.1). Drops the `image` crate
+from the runtime dependency tree, switches the public canvas type to a
+new `Bitmap` (owned, packed RGBA8) plus `BitmapRef<'a>` (borrowed
+view, stride-aware) for zero-copy interop with strided pixel sources
+such as `zenpixels::PixelSlice`. Also makes `MontageOptions`
+`#[non_exhaustive]` so subsequent field additions are additive.
 
-```rust
-// Before (0.3.x):
-let opts = MontageOptions { amplification: 50, ..Default::default() };
-
-// After (0.4.0):
-let mut opts = MontageOptions::default();
-opts.amplification = 50;
-```
-
-This trade lets us add new option fields in subsequent patch releases
-without semver breaks.
-
-### Added
+#### Added
+- `Bitmap`, `BitmapRef<'a>`, `PngError`, `BitmapError` — the public canvas surface (re-exported at crate root). `Bitmap` is owned + packed; `BitmapRef<'a>` borrows external buffers with arbitrary row stride. `BitmapRef::from_borrowed_rgba8_strided` and `from_borrowed_rgba8_packed` cover both common cases; `to_owned()` compacts strided into packed. `From<&Bitmap> for BitmapRef<'_>` provides ergonomic interop.
+- `Bitmap::from_rgba_slice(rgba, width, height)` — owned-copy construction from `&[u8]` (one-line replacement for callers of the deleted `*_raw` functions).
+- CI `no-leakage` job running `cargo public-api -p zensim-regress` and rejecting any public surface that names `zenpixels::`, `zenresize::`, `zenpng::`, `zenblend::`, `enough::`, `imgref::`, `bytemuck::`, `image::`, or `rgb::Rgb*`. `zensim::` is intentionally allowed.
 - `MontageOptions::expected_label` and `actual_label` allow overriding the
   default `"EXPECTED"` / `"ACTUAL"` panel headers — useful for A/B
   comparisons where that framing doesn't fit (e.g. `"ORIG"` / `"DEFAULT"`)
@@ -61,7 +53,46 @@ without semver breaks.
   lossy encodings, where every region has full-magnitude differences and
   the 3×3 heatmap strip is uniformly red (`17f55e4`).
 
-### Changed
+#### Removed
+- The `image` crate is no longer a runtime dependency (now `dev-dependencies` only, used by tests/examples that decode JPEG fixtures).
+- `diff_image::create_comparison_montage`, `create_comparison_montage_raw`, `create_annotated_montage`, `create_annotated_montage_raw`, `format_annotation`, `format_annotation_spatial` — deprecated since 0.2.3; use `MontageOptions::render` and `AnnotationText::from_report`.
+- `diff_image::generate_diff_image_raw`, `generate_structural_diff_raw`, `create_structural_montage_raw` — replace with the typed equivalent and `Bitmap::from_rgba_slice` / `BitmapRef::from_borrowed_rgba8_packed` at the call site.
+- `AnnotationText::spatial` field — deprecated since 0.2.3 (computed automatically by `MontageOptions::render`).
+- `pub mod arch` demoted to `pub(crate)` — no external consumers.
+- `pub use tolerance::ToleranceSpec as Tolerance` alias dropped — use `RegressionTolerance` (re-exported at crate root) or `tolerance::ToleranceSpec` directly.
+
+#### Changed
 - `MontageOptions` is now `#[non_exhaustive]`. Subsequent field additions
   will be additive (no further semver breaks). Callers must switch from
   struct-literal construction to `Default::default()` + field assignment.
+- MSRV bumped to 1.93 (transitive minimum from `zenresize` / `zenpng` / `zenblend`).
+
+#### Migration
+
+```rust
+// MontageOptions — before (0.3.x):
+let opts = MontageOptions { amplification: 50, ..Default::default() };
+
+// After (0.4.0):
+let mut opts = MontageOptions::default();
+opts.amplification = 50;
+```
+
+| Old | New |
+|---|---|
+| `generate_diff_image_raw(exp, act, w, h, amp)` | `generate_diff_image(&Bitmap::from_rgba_slice(exp, w, h)?, &Bitmap::from_rgba_slice(act, w, h)?, amp)` |
+| `create_comparison_montage{,_raw}(...)` | `MontageOptions::default().render(...)` |
+| `create_annotated_montage{,_raw}(...)` | `MontageOptions::default().render(...)` |
+| `create_structural_montage_raw(...)` | `create_structural_montage(&Bitmap::from_rgba_slice(...)?, ...)` |
+| `Tolerance` (alias) | `RegressionTolerance` |
+| `AnnotationText { spatial: Some(...), .. }` | drop the field — `MontageOptions::render` computes it from pixels |
+
+Known external migrations needed:
+- `~/work/zen/zenjpeg/zenjpeg/tests/bundled/visual_diff_regression.rs` — uses `create_comparison_montage_raw` and `generate_diff_image_raw`.
+- `~/work/zen/zenjpeg/zenjpeg/examples/mozjpeg_parity_regress.rs` — uses the `Tolerance` alias.
+
+<details>
+<summary>Replaced earlier 0.4.0 draft (never published) — see git log for original wording.</summary>
+
+The original `[0.4.0]` draft covered only the `MontageOptions::#[non_exhaustive]` change. It was never tagged or pushed to crates.io (latest published: 0.3.1), so the breaking changes above ride on the same 0.4.0 bump.
+</details>

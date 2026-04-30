@@ -23,8 +23,9 @@
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
-use image::RgbaImage;
-use image::imageops::{self, FilterType};
+use crate::pixel_ops::Bitmap;
+
+use crate::pixel_ops::{self, ResampleFilter};
 
 /// Encode an image as sixel bytes.
 ///
@@ -32,7 +33,7 @@ use image::imageops::{self, FilterType};
 /// while preserving aspect ratio.
 ///
 /// Uses a 240-color palette: 216-color 6×6×6 RGB cube + 24 grayscale levels.
-pub fn sixel_encode(img: &RgbaImage, max_width: Option<u32>) -> Vec<u8> {
+pub fn sixel_encode(img: &Bitmap, max_width: Option<u32>) -> Vec<u8> {
     let img = maybe_resize(img, max_width);
     let (w, h) = img.dimensions();
 
@@ -132,7 +133,7 @@ pub fn sixel_encode(img: &RgbaImage, max_width: Option<u32>) -> Vec<u8> {
 ///
 /// If `max_width` is set, the image is downscaled to fit.
 /// Writes newlines before and after the sixel data, under a single stdout lock.
-pub fn print_image(img: &RgbaImage, max_width: Option<u32>) {
+pub fn print_image(img: &Bitmap, max_width: Option<u32>) {
     let bytes = sixel_encode(img, max_width);
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
@@ -147,8 +148,8 @@ pub fn print_image(img: &RgbaImage, max_width: Option<u32>) {
 /// Produces a 2×2 grid (Expected | Actual | Pixel Diff | Structural Diff)
 /// with spatial heatmap. All output is written under a single stdout lock.
 pub fn print_comparison(
-    expected: &RgbaImage,
-    actual: &RgbaImage,
+    expected: &Bitmap,
+    actual: &Bitmap,
     amplification: u8,
     max_width: Option<u32>,
 ) {
@@ -181,9 +182,9 @@ pub fn save_comparison_png(
 ) {
     use crate::diff_image::{AnnotationText, MontageOptions};
 
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
     let opts = MontageOptions {
         amplification,
@@ -205,9 +206,9 @@ pub fn print_comparison_raw(
     amplification: u8,
     max_width: Option<u32>,
 ) {
-    let exp_img = RgbaImage::from_raw(width, height, expected.to_vec())
+    let exp_img = Bitmap::from_raw(width, height, expected.to_vec())
         .expect("expected: invalid dimensions for pixel data");
-    let act_img = RgbaImage::from_raw(width, height, actual.to_vec())
+    let act_img = Bitmap::from_raw(width, height, actual.to_vec())
         .expect("actual: invalid dimensions for pixel data");
     print_comparison(&exp_img, &act_img, amplification, max_width);
 }
@@ -284,7 +285,7 @@ fn color_dist_sq(r1: u8, g1: u8, b1: u8, r2: u8, g2: u8, b2: u8) -> u32 {
 }
 
 /// Quantize an entire image to palette indices.
-fn quantize_image(img: &RgbaImage, palette: &[[u8; 3]]) -> Vec<u8> {
+fn quantize_image(img: &Bitmap, palette: &[[u8; 3]]) -> Vec<u8> {
     let (w, h) = img.dimensions();
     let mut indices = Vec::with_capacity((w * h) as usize);
     for y in 0..h {
@@ -305,12 +306,12 @@ fn quantize_image(img: &RgbaImage, palette: &[[u8; 3]]) -> Vec<u8> {
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 /// Resize the image if it exceeds max_width, preserving aspect ratio.
-fn maybe_resize(img: &RgbaImage, max_width: Option<u32>) -> RgbaImage {
+fn maybe_resize(img: &Bitmap, max_width: Option<u32>) -> Bitmap {
     match max_width {
         Some(max_w) if img.width() > max_w => {
             let scale = max_w as f64 / img.width() as f64;
             let new_h = (img.height() as f64 * scale).round() as u32;
-            imageops::resize(img, max_w, new_h.max(1), FilterType::Lanczos3)
+            pixel_ops::resize(img, max_w, new_h.max(1), ResampleFilter::Lanczos3)
         }
         _ => img.clone(),
     }
@@ -340,7 +341,6 @@ fn flush_run(out: &mut Vec<u8>, ch: u8, len: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::Rgba;
 
     #[test]
     fn palette_has_240_entries() {
@@ -382,21 +382,21 @@ mod tests {
 
     #[test]
     fn sixel_starts_with_dcs() {
-        let img = RgbaImage::from_pixel(4, 4, Rgba([128, 128, 128, 255]));
+        let img = Bitmap::from_pixel(4, 4, [128, 128, 128, 255]);
         let bytes = sixel_encode(&img, None);
         assert!(bytes.starts_with(b"\x1bPq"));
     }
 
     #[test]
     fn sixel_ends_with_st() {
-        let img = RgbaImage::from_pixel(4, 4, Rgba([128, 128, 128, 255]));
+        let img = Bitmap::from_pixel(4, 4, [128, 128, 128, 255]);
         let bytes = sixel_encode(&img, None);
         assert!(bytes.ends_with(b"\x1b\\"));
     }
 
     #[test]
     fn sixel_contains_raster_attrs() {
-        let img = RgbaImage::from_pixel(16, 12, Rgba([64, 64, 64, 255]));
+        let img = Bitmap::from_pixel(16, 12, [64, 64, 64, 255]);
         let bytes = sixel_encode(&img, None);
         let s = String::from_utf8_lossy(&bytes);
         assert!(s.contains("\"1;1;16;12"), "missing raster attributes: {s}");
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn sixel_respects_max_width() {
-        let img = RgbaImage::from_pixel(100, 50, Rgba([128, 128, 128, 255]));
+        let img = Bitmap::from_pixel(100, 50, [128, 128, 128, 255]);
         let bytes = sixel_encode(&img, Some(40));
         let s = String::from_utf8_lossy(&bytes);
         // Should contain resized dimensions
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn sixel_single_color_image() {
         // A uniform image should produce very compact sixel output
-        let img = RgbaImage::from_pixel(100, 6, Rgba([128, 128, 128, 255]));
+        let img = Bitmap::from_pixel(100, 6, [128, 128, 128, 255]);
         let bytes = sixel_encode(&img, None);
         let s = String::from_utf8_lossy(&bytes);
         // Should use RLE for the uniform run
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn sixel_multi_band() {
         // 12 rows = 2 bands of 6
-        let img = RgbaImage::from_pixel(4, 12, Rgba([200, 100, 50, 255]));
+        let img = Bitmap::from_pixel(4, 12, [200, 100, 50, 255]);
         let bytes = sixel_encode(&img, None);
         let s = String::from_utf8_lossy(&bytes);
         // Should contain a band separator
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn resize_preserves_aspect() {
-        let img = RgbaImage::new(200, 100);
+        let img = Bitmap::new(200, 100);
         let resized = maybe_resize(&img, Some(100));
         assert_eq!(resized.width(), 100);
         assert_eq!(resized.height(), 50);
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn resize_noop_when_smaller() {
-        let img = RgbaImage::new(50, 50);
+        let img = Bitmap::new(50, 50);
         let resized = maybe_resize(&img, Some(100));
         assert_eq!(resized.width(), 50);
         assert_eq!(resized.height(), 50);

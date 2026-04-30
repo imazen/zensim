@@ -13,8 +13,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use image::{Rgba, RgbaImage};
+use zensim_regress::Bitmap;
+use zensim_regress::layout::compose::*;
 use zensim_regress::layout::*;
+use zensim_regress::{column, row};
 
 // ── Helper "templates" used by the template scenes ────────────────────
 
@@ -60,14 +62,14 @@ fn swatch(label: &str, color: Color) -> Node {
 }
 
 /// Colorful gradient square — used as a stand-in for an image.
-fn gradient(w: u32, h: u32) -> RgbaImage {
-    RgbaImage::from_fn(w, h, |x, y| {
-        Rgba([
+fn gradient(w: u32, h: u32) -> Bitmap {
+    Bitmap::from_fn(w, h, |x, y| {
+        [
             ((x * 255) / w.max(1)) as u8,
             ((y * 255) / h.max(1)) as u8,
             (((x + y) * 200) / (w + h).max(1) + 30) as u8,
             255,
-        ])
+        ]
     })
 }
 
@@ -617,6 +619,116 @@ fn main() {
                 )
                 .background(hex("#121212"))
         ),
+        // ── Syntax styles ─────────────────────────────────────────────
+        scene!(
+            "Style: fluent builder (status quo)",
+            "The original chained-method syntax. Modifiers attach via `.gap`, `.padding`, etc. Children added via `.child(...)` calls.",
+            500,
+            row()
+                .gap(4)
+                .child(swatch("A", hex("#ef4444")))
+                .child(swatch("B", hex("#10b981")))
+                .child(swatch("C", hex("#3b82f6")))
+                .padding(8)
+                .background(hex("#0e0e10"))
+                .size(500, 80)
+        ),
+        scene!(
+            "Style: array-children macros",
+            "`column![...]` / `row![...]` / `layers![...]` macros expand to existing builder chains. Children are an array literal — tighter tree shape, modifiers chain after the macro. Internal-only API (gated behind the `_internal_api` feature).",
+            500,
+            row![
+                swatch("A", hex("#ef4444")),
+                swatch("B", hex("#10b981")),
+                swatch("C", hex("#3b82f6")),
+            ]
+            .gap(4)
+            .padding(8)
+            .background(hex("#0e0e10"))
+            .size(500, 80)
+        ),
+        scene!(
+            "Style: closure-builder (compose)",
+            "`column_block(|c| {...})` / `row_block(|r| {...})` / `layers_block(|l| {...})` — lexical nesting matches the box tree. Each closure receives a `&mut ColumnCtx` / `RowCtx` / `LayersCtx`. Refactoring a sub-tree into `fn add_pair(r: &mut RowCtx, ...)` is the killer feature.",
+            500,
+            row_block(|r| {
+                r.gap(4);
+                r.push(swatch("A", hex("#ef4444")));
+                r.push(swatch("B", hex("#10b981")));
+                r.push(swatch("C", hex("#3b82f6")));
+            })
+            .padding(8)
+            .background(hex("#0e0e10"))
+            .size(500, 80)
+        ),
+        scene!(
+            "Style: factored fragments (compose's killer feature)",
+            "A function `fn add_swatches(r: &mut RowCtx, colors: &[Color])` is a real, type-checked, container-affine layout fragment — it can only be called inside a row. Fluent and macros can't do this without macros-on-top-of-macros or runtime branching.",
+            500,
+            row_block(|r| {
+                r.gap(4);
+                fn add_swatches(r: &mut RowCtx, colors: &[Color]) {
+                    for (i, c) in colors.iter().enumerate() {
+                        r.push(swatch(["X", "Y", "Z", "W", "V", "U"][i.min(5)], *c));
+                    }
+                }
+                add_swatches(
+                    r,
+                    &[
+                        hex("#ef4444"),
+                        hex("#10b981"),
+                        hex("#3b82f6"),
+                        hex("#f59e0b"),
+                        hex("#a855f7"),
+                    ],
+                );
+            })
+            .padding(8)
+            .background(hex("#0e0e10"))
+            .size(500, 80)
+        ),
+        scene!(
+            "Style: nested macros for grid-of-grids feel",
+            "`column![ row![...], row![...] ]` reads almost like HTML's `<col><row>...</row></col>`. Modifier-as-suffix is the only thing keeping it from being literal HTML.",
+            520,
+            column![
+                row![
+                    swatch("EXPECTED", hex("#ef4444")),
+                    swatch("ACTUAL", hex("#10b981")),
+                ]
+                .gap(4),
+                row![
+                    swatch("PIXEL DIFF", hex("#3b82f6")),
+                    swatch("HEATMAP", hex("#f59e0b")),
+                ]
+                .gap(4),
+            ]
+            .gap(4)
+            .padding(8)
+            .background(hex("#0e0e10"))
+            .size(520, 180)
+        ),
+        scene!(
+            "Style: closure-builder layered",
+            "Nested `layers_block` inside `column_block`. Each `&mut Ctx` is its own type; a function expecting `&mut LayersCtx` can't accidentally be called inside a column.",
+            520,
+            column_block(|c| {
+                c.gap(4);
+                c.layers(|l| {
+                    l.fill(hex("#1f2733"));
+                    l.push(line("EXPECTED — closure builder", WHITE).padding(8));
+                });
+                c.row(|r| {
+                    r.gap(4);
+                    r.push(swatch("A", hex("#ef4444")));
+                    r.push(swatch("B", hex("#10b981")));
+                    r.push(swatch("C", hex("#3b82f6")));
+                });
+            })
+            .padding(8)
+            .background(hex("#0e0e10"))
+            .size(520, 160)
+        ),
     ];
 
     // ── Render & save ─────────────────────────────────────────────────
@@ -880,11 +992,24 @@ code { font-family: "SF Mono", Menlo, Consolas, ui-monospace, monospace; font-si
     align-items: center;
 }
 .scene-image img {
-    max-width: 100%;
+    /* Native pixel size only. `max-width: 100%` would force the browser
+       to downscale wide PNGs, and `image-rendering: pixelated` does NOT
+       prevent the smoothing browsers apply on bilinear downscale (only
+       on upscale). Wrapping container handles overflow with horizontal
+       scroll. Result: every pixel rendered is a real pixel from the
+       PNG — no phantom-stripe artifacts from interpolation. */
+    width: auto;
+    height: auto;
+    max-width: none;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: #000;
-    image-rendering: pixelated;
+    display: block;
+}
+.scene-image {
+    overflow-x: auto;
 }
 .scene-image-meta {
     margin-top: 8px;

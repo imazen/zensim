@@ -3,7 +3,7 @@
 //! [`LayoutMod`] trait that gives every node and builder fluent
 //! modifier methods (`.padding(8)`, `.center()`, `.background(c)`, ...).
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::color::Color;
 use super::geom::{HAlign, Insets, Rect, Size, VAlign};
@@ -21,7 +21,35 @@ pub(super) fn wrap_padded(child: Node, insets: Insets) -> Node {
         child: Box::new(child),
     }
 }
+/// Wrap a node in a [`Node::Sized`], merging with any existing `Sized`
+/// at the root: a `Hug` rule on an axis defers to the inner rule on
+/// that axis, so chained calls like `.grow(1).fill_height()` produce a
+/// single `Sized<Grow(1), Fill>(child)` rather than a nested
+/// `Sized<Hug, Fill>(Sized<Grow(1), Hug>(child))`. The latter form
+/// shadowed the inner Grow weight from the Stack's `main_grow_weight`
+/// detector. Folding here keeps the IR flat so the detector's recursive
+/// walk only has to handle wrapping by other modifiers.
 pub(super) fn wrap_sized(child: Node, w: SizeRule, h: SizeRule) -> Node {
+    if let Node::Sized {
+        w: inner_w,
+        h: inner_h,
+        child: inner,
+    } = child
+    {
+        let merged_w = match w {
+            SizeRule::Hug => inner_w,
+            other => other,
+        };
+        let merged_h = match h {
+            SizeRule::Hug => inner_h,
+            other => other,
+        };
+        return Node::Sized {
+            w: merged_w,
+            h: merged_h,
+            child: inner,
+        };
+    }
     Node::Sized {
         w,
         h,
@@ -56,12 +84,35 @@ pub(super) fn measure_padded(insets: Insets, child: &Node, max: Size) -> Size {
 }
 
 pub(super) fn measure_sized(w: SizeRule, h: SizeRule, child: &Node, max: Size) -> Size {
-    let child_size = child.measure(max);
+    // For non-Hug rules, the rule resolves to a concrete axis size that
+    // *is* the constraint we should pass to the child — otherwise a
+    // wrapped-text leaf inside e.g. `.width(Fixed(50))` would measure
+    // itself against the parent's wide max and report a single-line
+    // height. For Hug we pass the parent's max unchanged (no extra
+    // constraint added by us).
+    let probe = |rule: SizeRule, axis_max: u32| -> u32 {
+        match rule {
+            SizeRule::Hug => axis_max,
+            // Fill / Grow inside an unbounded constraint would otherwise
+            // happily stretch to u32::MAX; clamp to MAX_DIM and to the
+            // available axis_max.
+            SizeRule::Fill | SizeRule::Grow(_) => safety::clamp_dim(axis_max),
+            SizeRule::Fixed(v) => safety::clamp_dim(v).min(axis_max),
+            SizeRule::Percent(p) => {
+                if axis_max == 0 || p.is_nan() {
+                    0
+                } else {
+                    let v = ((axis_max as f32) * p.clamp(0.0, 1.0)).round() as u32;
+                    safety::clamp_dim(v).min(axis_max)
+                }
+            }
+        }
+    };
+    let child_max = Size::new(probe(w, max.w), probe(h, max.h));
+    let child_size = child.measure(child_max);
     let resolve = |rule: SizeRule, axis_max: u32, child_dim: u32| -> u32 {
         match rule {
             SizeRule::Hug => child_dim,
-            // Fill / Grow inside an unbounded constraint would otherwise
-            // happily stretch to u32::MAX; clamp to MAX_DIM.
             SizeRule::Fill | SizeRule::Grow(_) => safety::clamp_dim(axis_max),
             SizeRule::Fixed(v) => safety::clamp_dim(v),
             SizeRule::Percent(p) => {
@@ -130,7 +181,7 @@ pub(super) fn measure_aspect(num: u32, den: u32, child: &Node, max: Size) -> Siz
 
 // ── Per-modifier paint helpers ────────────────────────────────────────
 
-pub(super) fn paint_padded(insets: Insets, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_padded(insets: Insets, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     let inner = Rect::new(
         rect.x.saturating_add(insets.left),
         rect.y.saturating_add(insets.top),
@@ -140,7 +191,7 @@ pub(super) fn paint_padded(insets: Insets, child: &Node, rect: Rect, canvas: &mu
     child.paint(inner, canvas);
 }
 
-pub(super) fn paint_align(h: HAlign, v: VAlign, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_align(h: HAlign, v: VAlign, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     let child_size = child.measure(rect.size());
     let x_off = match h {
         HAlign::Left => 0,
@@ -188,7 +239,7 @@ fn contains_text(node: &Node) -> bool {
     }
 }
 
-pub(super) fn paint_fit(mode: Fit, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_fit(mode: Fit, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     if let Node::Image(img) = child {
         paint::render_image(img, mode, rect, canvas);
     } else {
@@ -196,12 +247,12 @@ pub(super) fn paint_fit(mode: Fit, child: &Node, rect: Rect, canvas: &mut RgbaIm
     }
 }
 
-pub(super) fn paint_background(color: Color, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_background(color: Color, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     paint::fill_rect(canvas, rect, color);
     child.paint(rect, canvas);
 }
 
-pub(super) fn paint_border(color: Color, child: &Node, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn paint_border(color: Color, child: &Node, rect: Rect, canvas: &mut Bitmap) {
     child.paint(rect, canvas);
     paint::draw_rect_border(canvas, rect, color);
 }
@@ -354,9 +405,9 @@ pub trait LayoutMod: Sized {
             .into()
     }
 
-    /// Render this tree into an [`RgbaImage`] of width `max_w`.
+    /// Render this tree into an [`Bitmap`] of width `max_w`.
     /// Convenience for [`super::render`] when chaining off a builder.
-    fn render(self, max_w: u32) -> RgbaImage {
+    fn render(self, max_w: u32) -> Bitmap {
         super::render(&self.into_node(), max_w)
     }
 }
@@ -387,10 +438,10 @@ mod tests {
     use super::super::color::{BLACK, WHITE};
     use super::super::node::{empty, image as image_node};
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use crate::pixel_ops::Bitmap;
 
-    fn solid(w: u32, h: u32, c: Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     #[test]
@@ -423,14 +474,84 @@ mod tests {
         let n = image_node(solid(160, 50, WHITE)).aspect_ratio(16, 9);
         assert_eq!(n.measure(Size::new(200, 200)), Size::new(160, 90));
     }
+
+    /// Regression: `Sized<Fixed(narrow), Hug>` containing wrapped text used
+    /// to measure the child against the parent's wide max instead of the
+    /// resolved 50px width, so `Hug` reported a single-line height. The
+    /// width constraint must be propagated to the child measure.
+    #[test]
+    fn sized_fixed_width_propagates_to_wrapped_text_height() {
+        use super::super::node::text;
+        use super::super::text::TextSpec;
+        let spec = TextSpec::wrapped(
+            "this sentence is long enough to require multiple lines",
+            WHITE,
+            BLACK,
+            8,
+        );
+        let unconstrained_h = text(spec.clone()).measure(Size::new(2000, 2000)).h;
+        let narrowed_h = text(spec)
+            .width(SizeRule::Fixed(50))
+            .measure(Size::new(2000, 2000))
+            .h;
+        assert!(
+            narrowed_h > unconstrained_h,
+            "wrapping at 50px should be taller than wrapping at 2000px \
+             (got narrowed_h={narrowed_h}, unconstrained_h={unconstrained_h})",
+        );
+    }
+
+    /// Sister regression: same shape but for the height axis — `Sized<Hug,
+    /// Fixed(short)>` should clamp wrapped text's measured height even
+    /// when the child would naturally be taller. (Pre-fix this happened
+    /// to work because `resolve(Fixed)` returns the rule unconditionally,
+    /// but verifies the probe doesn't regress that path.)
+    #[test]
+    fn sized_fixed_height_overrides_child_intrinsic() {
+        use super::super::node::text;
+        use super::super::text::TextSpec;
+        let spec = TextSpec::wrapped(
+            "this sentence is long enough to require multiple lines",
+            WHITE,
+            BLACK,
+            8,
+        );
+        let n = text(spec).height(SizeRule::Fixed(20));
+        assert_eq!(n.measure(Size::new(2000, 2000)).h, 20);
+    }
+
+    /// `Sized<Percent(0.25), Hug>` on wrapped text inside a 400-wide
+    /// parent should wrap at 100px and report the corresponding height,
+    /// not the height-at-400.
+    #[test]
+    fn sized_percent_width_propagates_to_wrapped_text_height() {
+        use super::super::node::text;
+        use super::super::text::TextSpec;
+        let spec = TextSpec::wrapped(
+            "this sentence is long enough to require multiple lines",
+            WHITE,
+            BLACK,
+            8,
+        );
+        let h_full = text(spec.clone()).measure(Size::new(400, 1000)).h;
+        let h_quarter = text(spec)
+            .width(SizeRule::Percent(0.25))
+            .measure(Size::new(400, 1000))
+            .h;
+        assert!(
+            h_quarter > h_full,
+            "Percent(0.25) of 400 → 100px wrap should be taller than wrap at 400px \
+             (got h_quarter={h_quarter}, h_full={h_full})",
+        );
+    }
     #[test]
     fn align_centers_in_oversized_rect() {
         let img = image_node(solid(20, 10, [255, 255, 0, 255]))
             .center()
             .size(100, 60)
             .render(100);
-        assert_eq!(img.get_pixel(50, 30), &Rgba([255, 255, 0, 255]));
-        assert_eq!(img.get_pixel(0, 0), &Rgba(BLACK));
+        assert_eq!(img.get_pixel(50, 30), [255, 255, 0, 255]);
+        assert_eq!(img.get_pixel(0, 0), BLACK);
     }
     #[test]
     fn background_paints_first() {
@@ -438,7 +559,7 @@ mod tests {
             .background([10, 20, 30, 255])
             .size(20, 20)
             .render(20);
-        assert_eq!(img.get_pixel(5, 5), &Rgba([10, 20, 30, 255]));
+        assert_eq!(img.get_pixel(5, 5), [10, 20, 30, 255]);
     }
     #[test]
     fn border_paints_outline() {
@@ -447,9 +568,9 @@ mod tests {
             .border(WHITE)
             .size(10, 10)
             .render(10);
-        assert_eq!(img.get_pixel(0, 0), &Rgba(WHITE));
-        assert_eq!(img.get_pixel(9, 0), &Rgba(WHITE));
-        assert_eq!(img.get_pixel(5, 5), &Rgba(BLACK));
+        assert_eq!(img.get_pixel(0, 0), WHITE);
+        assert_eq!(img.get_pixel(9, 0), WHITE);
+        assert_eq!(img.get_pixel(5, 5), BLACK);
     }
     #[test]
     fn fit_contain_letterboxes() {
@@ -457,7 +578,7 @@ mod tests {
             .fit_contain()
             .size(40, 40)
             .render(40);
-        assert_eq!(img.get_pixel(20, 0), &Rgba(BLACK));
-        assert_eq!(img.get_pixel(20, 20), &Rgba([255, 0, 0, 255]));
+        assert_eq!(img.get_pixel(20, 0), BLACK);
+        assert_eq!(img.get_pixel(20, 20), [255, 0, 0, 255]);
     }
 }

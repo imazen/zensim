@@ -5,7 +5,7 @@ edition = "2024"
 description = "Visual regression testing persistence and workflow for zensim"
 repository = "https://github.com/imazen/zensim"
 license = "MIT OR Apache-2.0"
-rust-version = "1.89.0"
+rust-version = "1.93.0"
 keywords = ["visual", "regression", "testing", "image", "checksum"]
 categories = ["development-tools::testing", "multimedia::images"]
 exclude = ["examples/*.png", "tests/fixtures/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
@@ -15,7 +15,6 @@ default = ["threads"]
 ## Forward threading to zensim. Disable for wasm32 or single-threaded use.
 threads = ["zensim/threads"]
 archmage = ["dep:archmage"]
-zenresize = ["dep:zenresize"]
 ## INTERNAL — exposes the `layout` module publicly for examples / debug
 ## tools. Not part of the public API; the underscore prefix signals
 ## "do not depend on this from outside `zensim-regress`."
@@ -24,11 +23,26 @@ _internal_api = []
 [dependencies]
 zensim = { workspace = true, default-features = false, features = ["classification"] }
 archmage = { workspace = true, features = ["testable_dispatch"], optional = true }
-zenresize = { workspace = true, optional = true }
-# zenpng = { workspace = true, optional = true }
-# enough = { workspace = true, optional = true }
+# Pixel ops backend — `image`-crate-free. zenresize for resampling,
+# zenpng for PNG IO. None of these crates' types appear in the public
+# API of zensim-regress (constraint per migration plan, issue #18).
+zenresize = { workspace = true }
+zenpng = { workspace = true }
+zenpixels = { workspace = true }
+# Linear-light premultiplied f32 compositing (Porter-Duff src-over). Used
+# internally by pixel_ops::overlay / fill_rect / draw_rect_border for
+# partial-alpha blending — fixes the under-darkening artifact you get
+# from blending sRGB-encoded straight-alpha values directly.
+zenblend = { workspace = true }
+enough = { workspace = true }
+imgref = { workspace = true }
+rgb = { workspace = true }
+bytemuck = { workspace = true }
+# Used internally for gamma-correct text blending in `font::*` and
+# the linear-premul conversion path in `pixel_ops::*`. Not exposed in
+# the public API (the `no-leakage` CI guard verifies).
+linear-srgb = { workspace = true }
 seahash = "4.1.0"
-image = { workspace = true }
 thiserror = { workspace = true }
 base64 = "0.22.1"
 
@@ -40,6 +54,11 @@ tempfile = "3.27.0"
 archmage = { workspace = true, features = ["testable_dispatch"] }
 codec-corpus = { workspace = true }
 zenbench = { workspace = true }
+# `image` is a dev-only convenience for tests/benches/examples. It is NOT
+# allowed in the runtime crate (would leak into the public API surface and
+# create version-coalescing fragility for downstream users). See CI check
+# in `.github/workflows/ci.yml` — `no-image-in-runtime`.
+image = { workspace = true }
 # codec-corpus-fetch is local-only; uncomment for real_images tests
 # codec-corpus-fetch = { path = "/home/lilith/work/codec-corpus-fetch" }
 
@@ -51,8 +70,17 @@ harness = false
 name = "bench_color_diffmap"
 harness = false
 
+[[bench]]
+name = "bench_font"
+harness = false
+
 # Layout-module gallery — requires the internal-API feature flag because
 # the layout module is private by default.
 [[example]]
 name = "layout_gallery"
+required-features = ["_internal_api"]
+
+# Syntax comparison: fluent / macros / closure-builder side-by-side.
+[[example]]
+name = "syntax_comparison"
 required-features = ["_internal_api"]

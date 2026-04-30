@@ -2,53 +2,20 @@
 //! drawing primitives. Called by both the per-modifier paint paths
 //! ([`super::node::Node::paint`]) and the public render entry points.
 
-use image::{Rgba, RgbaImage, imageops};
+use crate::pixel_ops::Bitmap;
 
 use super::color::Color;
 use super::geom::Rect;
 use super::sizing::Fit;
 use super::text::TextSpec;
+use crate::pixel_ops::{self, ResampleFilter};
 
-pub fn fill_rect(img: &mut RgbaImage, rect: Rect, color: Color) {
-    let px = Rgba(color);
-    let img_w = img.width();
-    let img_h = img.height();
-    let x_end = rect.x.saturating_add(rect.w).min(img_w);
-    let y_end = rect.y.saturating_add(rect.h).min(img_h);
-    for y in rect.y..y_end {
-        for x in rect.x..x_end {
-            img.put_pixel(x, y, px);
-        }
-    }
+pub fn fill_rect(img: &mut Bitmap, rect: Rect, color: Color) {
+    pixel_ops::fill_rect(img, rect.x, rect.y, rect.w, rect.h, color);
 }
 
-pub fn draw_rect_border(img: &mut RgbaImage, rect: Rect, color: Color) {
-    if rect.w == 0 || rect.h == 0 {
-        return;
-    }
-    let px = Rgba(color);
-    let img_w = img.width();
-    let img_h = img.height();
-    let x_end = rect.x.saturating_add(rect.w).min(img_w);
-    let y_end = rect.y.saturating_add(rect.h).min(img_h);
-    for x in rect.x..x_end {
-        if rect.y < img_h {
-            img.put_pixel(x, rect.y, px);
-        }
-        let bot = y_end.saturating_sub(1);
-        if bot < img_h && bot > rect.y {
-            img.put_pixel(x, bot, px);
-        }
-    }
-    for y in rect.y..y_end {
-        if rect.x < img_w {
-            img.put_pixel(rect.x, y, px);
-        }
-        let right = x_end.saturating_sub(1);
-        if right < img_w && right > rect.x {
-            img.put_pixel(right, y, px);
-        }
-    }
+pub fn draw_rect_border(img: &mut Bitmap, rect: Rect, color: Color) {
+    pixel_ops::draw_rect_border(img, rect.x, rect.y, rect.w, rect.h, color);
 }
 
 /// Paint an image leaf into `rect` with the given [`Fit`] mode.
@@ -56,7 +23,7 @@ pub fn draw_rect_border(img: &mut RgbaImage, rect: Rect, color: Color) {
 /// `Fit::None` and `Fit::Stretch` (no resize needed) place the image at
 /// the rect's top-left; `Fit::Contain` and `Fit::Cover` center within
 /// the rect.
-pub(super) fn render_image(img: &RgbaImage, mode: Fit, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn render_image(img: &Bitmap, mode: Fit, rect: Rect, canvas: &mut Bitmap) {
     if rect.w == 0 || rect.h == 0 {
         return;
     }
@@ -64,13 +31,13 @@ pub(super) fn render_image(img: &RgbaImage, mode: Fit, rect: Rect, canvas: &mut 
     if iw == 0 || ih == 0 {
         return;
     }
-    let scaled: Option<RgbaImage> = match mode {
+    let scaled: Option<Bitmap> = match mode {
         Fit::None => None,
-        Fit::Stretch if (iw, ih) != (rect.w, rect.h) => Some(imageops::resize(
+        Fit::Stretch if (iw, ih) != (rect.w, rect.h) => Some(pixel_ops::resize(
             img,
             rect.w,
             rect.h,
-            imageops::FilterType::Lanczos3,
+            ResampleFilter::Triangle,
         )),
         Fit::Stretch => None,
         Fit::Contain | Fit::Cover => {
@@ -83,12 +50,7 @@ pub(super) fn render_image(img: &RgbaImage, mode: Fit, rect: Rect, canvas: &mut 
             };
             let nw = (iw as f32 * s).round().max(1.0) as u32;
             let nh = (ih as f32 * s).round().max(1.0) as u32;
-            Some(imageops::resize(
-                img,
-                nw,
-                nh,
-                imageops::FilterType::Lanczos3,
-            ))
+            Some(pixel_ops::resize(img, nw, nh, ResampleFilter::Triangle))
         }
     };
 
@@ -108,7 +70,7 @@ pub(super) fn render_image(img: &RgbaImage, mode: Fit, rect: Rect, canvas: &mut 
     };
 
     if sw <= rect.w && sh <= rect.h {
-        imageops::overlay(canvas, src, dst_x, dst_y);
+        pixel_ops::overlay(canvas, src, dst_x, dst_y);
     } else {
         let crop_x = if centered {
             sw.saturating_sub(rect.w) / 2
@@ -122,7 +84,7 @@ pub(super) fn render_image(img: &RgbaImage, mode: Fit, rect: Rect, canvas: &mut 
         };
         let cw = rect.w.min(sw);
         let ch = rect.h.min(sh);
-        let cropped = imageops::crop_imm(src, crop_x, crop_y, cw, ch).to_image();
+        let cropped = pixel_ops::crop(src, crop_x, crop_y, cw, ch);
         let (dst_x, dst_y) = if centered {
             (
                 rect.x.saturating_add(rect.w.saturating_sub(cw) / 2) as i64,
@@ -131,20 +93,20 @@ pub(super) fn render_image(img: &RgbaImage, mode: Fit, rect: Rect, canvas: &mut 
         } else {
             (rect.x as i64, rect.y as i64)
         };
-        imageops::overlay(canvas, &cropped, dst_x, dst_y);
+        pixel_ops::overlay(canvas, &cropped, dst_x, dst_y);
     }
 }
 
 /// Paint a text leaf at the rect's top-left. The rasterizer is given
 /// `(rect.w, rect.h)` so glyph height shrinks to fit either axis.
 /// Wrap in [`super::node::Node::Align`] to reposition.
-pub(super) fn render_text(spec: &TextSpec, rect: Rect, canvas: &mut RgbaImage) {
+pub(super) fn render_text(spec: &TextSpec, rect: Rect, canvas: &mut Bitmap) {
     let (buf, w, h) = spec.rasterize(rect.w, rect.h);
     if w == 0 || h == 0 {
         return;
     }
-    let Some(img) = RgbaImage::from_raw(w, h, buf) else {
+    let Some(img) = Bitmap::from_raw(w, h, buf) else {
         return;
     };
-    imageops::overlay(canvas, &img, rect.x as i64, rect.y as i64);
+    pixel_ops::overlay(canvas, &img, rect.x as i64, rect.y as i64);
 }

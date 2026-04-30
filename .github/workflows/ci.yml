@@ -157,6 +157,55 @@ jobs:
       - name: Check MSRV
         run: cargo hack check --rust-version --workspace --exclude zensim-validate --exclude zensim-bench --exclude zensim-wasm-tests
 
+  no-leakage:
+    name: zensim-regress public API leakage check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
+      - name: Forbid zen-ecosystem types in zensim-regress public API
+        run: |
+          set -euo pipefail
+          # Capture the full public API surface (including pub re-exports
+          # and reachable trait bounds).
+          api=$(cargo public-api -p zensim-regress)
+          echo "$api"
+          # Forbidden type prefixes — these crates would force a downstream
+          # consumer of zensim-regress to share the same major (or 0.x) version
+          # we depend on, breaking any project that pins a different version.
+          # `zensim::` is intentionally allowed: zensim-regress is the regression
+          # layer for zensim and shares its semver lifecycle.
+          forbidden=(
+            "zenpixels::"
+            "zenresize::"
+            "zenpng::"
+            "zenblend::"
+            "enough::"
+            "imgref::"
+            "rgb::Rgba"
+            "rgb::Rgb"
+            "bytemuck::"
+            " image::"
+            "linear_srgb::"
+          )
+          fail=0
+          for f in "${forbidden[@]}"; do
+            if echo "$api" | grep -qF -- "$f"; then
+              echo "::error::Forbidden type prefix '$f' appears in zensim-regress public API"
+              echo "$api" | grep -F -- "$f" || true
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::zensim-regress is leaking zen-ecosystem types in its public API."
+            echo "Wrap such types behind the crate-internal pixel_ops module (see CLAUDE.md)."
+            exit 1
+          fi
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

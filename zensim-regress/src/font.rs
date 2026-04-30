@@ -1,15 +1,62 @@
 //! Monospace font rendering for annotating diff images.
 //!
 //! Embeds a Consolas glyph strip (48px, ASCII 32–126) as a PNG, decoded
-//! once on first use. Renders text at any size by downscaling with the
-//! `image` crate's Lanczos3 resampler — the base is larger than any
-//! render target, so we always downsample (crisp edges, no upscale blur).
+//! once on first use into an RGBA8 [`Bitmap`] with `(R, G, B) = (255, 255,
+//! 255)` (white-tinted) and `A = source PNG value` (linear coverage).
+//! Renders text at any size by downscaling via `pixel_ops::resize`
+//! (Mitchell-Netravali) — the base is larger than any render target, so
+//! we always downsample. Mitchell over Lanczos because Lanczos's
+//! negative side-lobes produce visible halo rings outside glyph edges
+//! at small char_h.
+//!
+//! Resampling is correct because the strip is RGBA: zenresize's
+//! `RGBA8_SRGB` pipeline treats alpha as linear (the right semantics
+//! for a coverage mask), premultiplies, resamples in linear-light, and
+//! unpremultiplies on output. The earlier `GRAY8_SRGB` path applied an
+//! sRGB curve to the coverage values, which is mathematically wrong
+//! since coverage is a linear quantity by definition.
+//!
+//! Composite is gamma-correct: per glyph pixel, read the strip's alpha
+//! as coverage and lerp `fg`/`bg` in linear-sRGB space via the LUT-
+//! backed [`blend_channel_gamma_correct`] helper. A naive
+//! `fg*a + bg*(1-a)` lerp in sRGB-encoded byte space produces muddy
+//! halos at mid-alpha because sRGB→linear is non-linear.
 //!
 //! Word-wraps on spaces when a max width is specified.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
-use image::{GrayImage, imageops};
+use crate::pixel_ops::{Bitmap, GrayBitmap, ResampleFilter};
+
+/// Precomputed sRGB-u8 → linear-f32 lookup table — reused for every
+/// glyph composite to avoid per-pixel pow() calls. Built lazily on
+/// first use; ~1KB, computed in microseconds.
+fn srgb_to_linear_lut() -> &'static [f32; 256] {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| {
+        let mut t = [0.0f32; 256];
+        for (i, slot) in t.iter_mut().enumerate() {
+            *slot = linear_srgb::default::srgb_u8_to_linear(i as u8);
+        }
+        t
+    })
+}
+
+/// Gamma-correct blend of a foreground over a background using a glyph
+/// alpha as the coverage mask. Returns the blended sRGB-u8 channel.
+///
+/// `alpha` is the coverage from the glyph rasterizer (treated as
+/// linear coverage — anti-aliasing area-of-overlap, not an sRGB
+/// quantity). `fg` and `bg` are sRGB-u8.
+#[inline]
+fn blend_channel_gamma_correct(fg: u8, bg: u8, alpha: u8) -> u8 {
+    let lut = srgb_to_linear_lut();
+    let fg_lin = lut[fg as usize];
+    let bg_lin = lut[bg as usize];
+    let a = (alpha as f32) * (1.0 / 255.0);
+    let blended = fg_lin * a + bg_lin * (1.0 - a);
+    linear_srgb::default::linear_to_srgb_u8(blended)
+}
 
 /// Base glyph width in the embedded strip (before scaling).
 const BASE_CHAR_W: u32 = 26;
@@ -23,13 +70,33 @@ const FIRST_CHAR: u32 = 0x20;
 /// The embedded font strip PNG (Consolas 48px, grayscale).
 static FONT_PNG: &[u8] = include_bytes!("font_strip.png");
 
-/// Decoded font strip (grayscale, decoded once).
-fn font_strip() -> &'static GrayImage {
-    static STRIP: OnceLock<GrayImage> = OnceLock::new();
+/// Decoded font strip as RGBA8 (white-tinted, alpha = coverage).
+///
+/// The PNG is grayscale where each value represents the glyph's
+/// coverage at that pixel — a *linear* quantity (area-of-overlap),
+/// NOT sRGB-encoded brightness. We store it as `(255, 255, 255, value)`
+/// so that:
+/// 1. Resampling via zenresize uses the `RGBA8_SRGB` pipeline that
+///    correctly treats alpha as linear (premultiply, resample, unpremultiply).
+///    The previous `GRAY8_SRGB` path mistakenly applied an sRGB gamma
+///    curve to the coverage values, producing slightly-wrong alpha
+///    after downsample.
+/// 2. The composite step reads only the alpha channel as the coverage
+///    mask. The chosen `fg` color is the actual fg — the strip's RGB
+///    just signals "white-tinted glyph" semantically.
+///
+/// Decoded once on first use; subsequent calls reuse the static.
+fn font_strip() -> &'static Bitmap {
+    static STRIP: OnceLock<Bitmap> = OnceLock::new();
     STRIP.get_or_init(|| {
-        image::load_from_memory(FONT_PNG)
-            .expect("embedded font strip PNG is invalid")
-            .to_luma8()
+        let gray =
+            GrayBitmap::from_png_bytes(FONT_PNG).expect("embedded font strip PNG is invalid");
+        let (w, h) = (gray.width, gray.height);
+        let mut rgba = Vec::with_capacity((w as usize) * (h as usize) * 4);
+        for &v in gray.pixels.iter() {
+            rgba.extend_from_slice(&[255, 255, 255, v]);
+        }
+        Bitmap::from_raw(w, h, rgba).expect("strip dimensions match buffer")
     })
 }
 
@@ -43,7 +110,8 @@ pub fn render_text(text: &str, fg: [u8; 4], bg: [u8; 4]) -> (Vec<u8>, u32, u32) 
 /// Render text word-wrapped to fit within `max_width_px` pixels.
 ///
 /// Lines are broken on spaces. If a single word is wider than `max_width_px`,
-/// it is placed on its own line (not split mid-word).
+/// it is placed on its own line (not split mid-word). Lines stack tightly
+/// — for typographic leading, see [`render_text_wrapped_lh`].
 ///
 /// Returns `(pixels, width, height)`.
 pub fn render_text_wrapped(
@@ -53,6 +121,19 @@ pub fn render_text_wrapped(
     target_char_h: u32,
     max_width_px: u32,
 ) -> (Vec<u8>, u32, u32) {
+    render_text_wrapped_lh(text, fg, bg, target_char_h, max_width_px, 1.0)
+}
+
+/// Same as [`render_text_wrapped`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn render_text_wrapped_lh(
+    text: &str,
+    fg: [u8; 4],
+    bg: [u8; 4],
+    target_char_h: u32,
+    max_width_px: u32,
+    line_height: f32,
+) -> (Vec<u8>, u32, u32) {
     if target_char_h == 0 || max_width_px == 0 {
         return (vec![], 0, 0);
     }
@@ -60,13 +141,15 @@ pub fn render_text_wrapped(
     let scaled_char_w = char_width_for_height(target_char_h);
     let max_cols = (max_width_px / scaled_char_w.max(1)) as usize;
     let wrapped = wrap_text(text, max_cols.max(1));
-    render_text_height(&wrapped, fg, bg, target_char_h)
+    render_text_height_lh(&wrapped, fg, bg, target_char_h, line_height)
 }
 
 /// Render a string at a given pixel height.
 ///
 /// The font is scaled so each character is `target_char_h` pixels tall.
 /// Character width scales proportionally to maintain the monospace aspect ratio.
+/// Multi-line input stacks lines tightly (no inter-line leading) — for a
+/// typographic gap, use [`render_text_height_lh`] with `line_height > 1.0`.
 ///
 /// Returns `(pixels, width, height)`.
 pub fn render_text_height(
@@ -74,6 +157,23 @@ pub fn render_text_height(
     fg: [u8; 4],
     bg: [u8; 4],
     target_char_h: u32,
+) -> (Vec<u8>, u32, u32) {
+    render_text_height_lh(text, fg, bg, target_char_h, 1.0)
+}
+
+/// Same as [`render_text_height`], but stacks multi-line input with a
+/// CSS-`line-height` ratio (`line_height = 1.2` ≈ default browser
+/// leading). The first line still occupies `target_char_h` pixels;
+/// each subsequent line advances by `round(target_char_h *
+/// line_height)`, clamped to ≥ 1px. The output buffer height is
+/// `(num_lines - 1) * line_advance + target_char_h` — no trailing
+/// leading.
+pub fn render_text_height_lh(
+    text: &str,
+    fg: [u8; 4],
+    bg: [u8; 4],
+    target_char_h: u32,
+    line_height: f32,
 ) -> (Vec<u8>, u32, u32) {
     if target_char_h == 0 {
         return (vec![], 0, 0);
@@ -87,21 +187,22 @@ pub fn render_text_height(
         return (vec![], 0, 0);
     }
 
-    let strip = font_strip();
     let scaled_char_w = char_width_for_height(target_char_h);
     let scaled_char_h = target_char_h;
+    let line_advance = line_advance_px(scaled_char_h, line_height);
 
-    // Scale the entire strip at once (one resize, not per-char)
-    let scaled_strip_w = scaled_char_w * CHAR_COUNT;
-    let scaled_strip = imageops::resize(
-        strip,
-        scaled_strip_w,
-        scaled_char_h,
-        imageops::FilterType::Lanczos3,
-    );
+    // Resample each glyph cell IN ISOLATION. See `build_scaled_strip_per_cell`
+    // for the why; the result is cached by `(char_w, char_h, filter)` so
+    // multi-pass renders at the same canvas size pay the resample cost
+    // exactly once.
+    //
+    // Mitchell-Netravali — minimal overshoot, no halo rings. Lanczos
+    // produces visible side-lobe ringing on sharp glyph edges; Triangle
+    // is artifact-free but visibly soft.
+    let scaled_strip = cached_scaled_strip(scaled_char_w, scaled_char_h, ResampleFilter::Mitchell);
 
     let out_w = max_cols * scaled_char_w;
-    let out_h = num_lines * scaled_char_h;
+    let out_h = stacked_height_px(scaled_char_h, line_advance, num_lines);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
 
@@ -112,7 +213,7 @@ pub fn render_text_height(
 
     // Blit characters
     for (line_idx, line) in lines.iter().enumerate() {
-        let y_base = line_idx as u32 * scaled_char_h;
+        let y_base = line_idx as u32 * line_advance;
         for (col, ch) in line.chars().enumerate() {
             let x_base = col as u32 * scaled_char_w;
             let glyph_idx = char_index(ch);
@@ -124,7 +225,10 @@ pub fn render_text_height(
                     if sx >= scaled_strip.width() {
                         continue;
                     }
-                    let alpha = scaled_strip.get_pixel(sx, gy)[0];
+                    // Read coverage from the RGBA strip's alpha channel.
+                    // RGB is constant 255 (white-tinted) and is unused
+                    // at composite — we tint with `fg` directly.
+                    let alpha = scaled_strip.get_pixel(sx, gy)[3];
                     if alpha == 0 {
                         continue;
                     }
@@ -139,11 +243,14 @@ pub fn render_text_height(
                     if alpha == 255 {
                         buf[off..off + 4].copy_from_slice(&fg);
                     } else {
+                        // Gamma-correct blend in linear-sRGB space for
+                        // RGB; alpha (channel 3) blends linearly since
+                        // it isn't gamma-encoded.
+                        buf[off] = blend_channel_gamma_correct(fg[0], bg[0], alpha);
+                        buf[off + 1] = blend_channel_gamma_correct(fg[1], bg[1], alpha);
+                        buf[off + 2] = blend_channel_gamma_correct(fg[2], bg[2], alpha);
                         let a = alpha as u16;
                         let inv_a = 255 - a;
-                        buf[off] = ((fg[0] as u16 * a + bg[0] as u16 * inv_a) / 255) as u8;
-                        buf[off + 1] = ((fg[1] as u16 * a + bg[1] as u16 * inv_a) / 255) as u8;
-                        buf[off + 2] = ((fg[2] as u16 * a + bg[2] as u16 * inv_a) / 255) as u8;
                         buf[off + 3] = ((fg[3] as u16 * a + bg[3] as u16 * inv_a) / 255) as u8;
                     }
                 }
@@ -201,9 +308,180 @@ fn wrap_text(text: &str, max_cols: usize) -> String {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
+/// Build a downscaled glyph strip by resampling each glyph cell IN
+/// ISOLATION, then concatenating them horizontally.
+///
+/// Why per-cell: the source strip is `BASE_CHAR_W * CHAR_COUNT` pixels
+/// wide with adjacent glyph cells touching. A single resize of the
+/// whole strip lets a multi-tap reconstruction filter (Mitchell, Lanczos,
+/// etc.) sample across cell boundaries — at the rightmost column of
+/// glyph N, the filter footprint extends into the leftmost column of
+/// glyph N+1, pulling a thin sliver of N+1's alpha into N's output.
+/// At small char_h this manifests as visible "edges of other characters"
+/// inside each glyph.
+///
+/// Implementation: wrap the strip as a `zenpixels::PixelSlice` (zero-
+/// copy strided view), then `crop_view(...)` for each glyph cell — that
+/// also-zero-copy adjusts only the slice's offset+stride. Drive
+/// `zenresize::StreamingResize` row-by-row, feeding `cell.row(y)`
+/// directly (a 26×4 byte sub-slice of the original strip's bytes — no
+/// copy, no full-strip-width row reads).
+///
+/// The resampler clamps at the cell edge because the streaming
+/// resizer's source dims are the *cell's* dims (26×54), not the full
+/// strip. So the filter footprint can never reach into adjacent glyphs.
+/// Scaled-strip cache keyed by canvas (target glyph dims + filter).
+///
+/// `MontageOptions::render` issues many text renders per call, almost
+/// all at the same `char_h` (panel labels at one size, heatmap stats
+/// at another). The strip itself is color-independent — RGB is constant
+/// 255, alpha carries coverage, tinting happens at composite — so the
+/// cache key is purely `(scaled_char_w, scaled_char_h, filter)`.
+///
+/// Bounded LRU (capacity 8) so a pathological call sequence can't grow
+/// it unboundedly. Vec-based: N is small enough that linear scan beats
+/// a HashMap. Built outside the lock to avoid serialising bench rounds.
+fn cached_scaled_strip(
+    scaled_char_w: u32,
+    scaled_char_h: u32,
+    filter: ResampleFilter,
+) -> Arc<Bitmap> {
+    type Key = (u32, u32, ResampleFilter);
+    type CacheEntry = (Key, Arc<Bitmap>);
+    type Cache = Mutex<Vec<CacheEntry>>;
+    const CAP: usize = 8;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+
+    let key: Key = (scaled_char_w, scaled_char_h, filter);
+    let cache = CACHE.get_or_init(|| Mutex::new(Vec::with_capacity(CAP)));
+
+    if let Ok(mut guard) = cache.lock()
+        && let Some(idx) = guard.iter().position(|(k, _)| *k == key)
+    {
+        // Bump to MRU (back of vec).
+        let entry = guard.remove(idx);
+        guard.push(entry);
+        return guard.last().unwrap().1.clone();
+    }
+
+    let strip = font_strip();
+    let scaled = Arc::new(build_scaled_strip_per_cell(
+        strip,
+        scaled_char_w,
+        scaled_char_h,
+        filter,
+    ));
+
+    if let Ok(mut guard) = cache.lock() {
+        // Race-tolerant: another thread may have inserted the same key
+        // in the gap between the miss and the build. Dedup before push.
+        if !guard.iter().any(|(k, _)| *k == key) {
+            if guard.len() >= CAP {
+                guard.remove(0);
+            }
+            guard.push((key, scaled.clone()));
+        }
+    }
+    scaled
+}
+
+fn build_scaled_strip_per_cell(
+    strip: &Bitmap,
+    scaled_char_w: u32,
+    scaled_char_h: u32,
+    filter: ResampleFilter,
+) -> Bitmap {
+    let scaled_strip_w = scaled_char_w * CHAR_COUNT;
+    if scaled_char_w == 0 || scaled_char_h == 0 {
+        return Bitmap::new(scaled_strip_w.max(1), scaled_char_h.max(1));
+    }
+    let mut out = vec![0u8; (scaled_strip_w as usize) * (scaled_char_h as usize) * 4];
+    let scaled_strip_w_usize = scaled_strip_w as usize;
+    let scaled_char_w_usize = scaled_char_w as usize;
+
+    // Strided zero-copy view of the strip.
+    let strip_slice = zenpixels::PixelSlice::new(
+        strip.as_raw(),
+        strip.width(),
+        strip.height(),
+        (strip.width() as usize) * 4,
+        zenpixels::PixelDescriptor::RGBA8_SRGB,
+    )
+    .expect("strip slice dims valid");
+
+    let cfg =
+        zenresize::ResizeConfig::builder(BASE_CHAR_W, BASE_CHAR_H, scaled_char_w, scaled_char_h)
+            .filter(filter.to_zenresize_filter())
+            .input(zenresize::PixelDescriptor::RGBA8_SRGB)
+            .build();
+
+    for glyph_idx in 0..CHAR_COUNT {
+        // crop_view: zero-copy strided sub-view of cell `glyph_idx`.
+        let cell = strip_slice.crop_view(glyph_idx * BASE_CHAR_W, 0, BASE_CHAR_W, BASE_CHAR_H);
+
+        // Streaming resizer dimensioned for this single cell. Weight
+        // tables are recomputed per glyph (same dims, same filter, so
+        // the cost is identical work — just no shared cache today).
+        let mut sr = zenresize::StreamingResize::new(&cfg);
+        let cell_x = (glyph_idx as usize) * scaled_char_w_usize;
+        let mut output_y = 0u32;
+
+        let drain = |sr: &mut zenresize::StreamingResize, output_y: &mut u32, out: &mut [u8]| {
+            while let Some(row) = sr.next_output_row() {
+                if *output_y < scaled_char_h {
+                    let dst_off = (*output_y as usize * scaled_strip_w_usize + cell_x) * 4;
+                    let n = scaled_char_w_usize * 4;
+                    out[dst_off..dst_off + n].copy_from_slice(row);
+                    *output_y += 1;
+                }
+            }
+        };
+
+        for y in 0..BASE_CHAR_H {
+            // Zero-copy row slice — points into the strip's underlying
+            // bytes via the cell's stride; no row-bytes copy here.
+            let row = cell.row(y);
+            sr.push_row(row).expect("push_row");
+            drain(&mut sr, &mut output_y, &mut out);
+        }
+        sr.finish();
+        drain(&mut sr, &mut output_y, &mut out);
+    }
+    Bitmap::from_raw(scaled_strip_w, scaled_char_h, out)
+        .expect("per-cell strip dimensions match buffer")
+}
+
 /// Compute the character width for a given target character height.
 fn char_width_for_height(target_char_h: u32) -> u32 {
     (BASE_CHAR_W * target_char_h + BASE_CHAR_H / 2) / BASE_CHAR_H
+}
+
+/// Vertical stride between consecutive lines (`char_h * line_height`,
+/// clamped to ≥ 1px and ≥ char_h so lines never overlap). A
+/// non-finite, non-positive, or NaN `line_height` is treated as 1.0.
+fn line_advance_px(char_h: u32, line_height: f32) -> u32 {
+    if char_h == 0 {
+        return 0;
+    }
+    let lh = if line_height.is_finite() && line_height > 0.0 {
+        line_height
+    } else {
+        1.0
+    };
+    let advance = ((char_h as f32) * lh).round() as u32;
+    advance.max(char_h.max(1))
+}
+
+/// Total stacked height for `n` lines: `(n - 1) * line_advance + char_h`.
+/// No trailing leading; a single line is exactly `char_h` tall.
+fn stacked_height_px(char_h: u32, line_advance: u32, n_lines: u32) -> u32 {
+    if n_lines == 0 {
+        return 0;
+    }
+    n_lines
+        .saturating_sub(1)
+        .saturating_mul(line_advance)
+        .saturating_add(char_h)
 }
 
 /// Map a character to its index in the font strip.
@@ -225,10 +503,23 @@ fn char_index(ch: char) -> u32 {
 ///
 /// Returns `(pixels, width, height)`. No word-wrapping — each line is
 /// rendered as-is. The font size is computed from the longest line.
+/// Lines stack tightly; for typographic leading, see
+/// [`render_lines_fitted_lh`].
 pub fn render_lines_fitted(
     lines: &[(&str, [u8; 4])],
     bg: [u8; 4],
     max_width_px: u32,
+) -> (Vec<u8>, u32, u32) {
+    render_lines_fitted_lh(lines, bg, max_width_px, 1.0)
+}
+
+/// Same as [`render_lines_fitted`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn render_lines_fitted_lh(
+    lines: &[(&str, [u8; 4])],
+    bg: [u8; 4],
+    max_width_px: u32,
+    line_height: f32,
 ) -> (Vec<u8>, u32, u32) {
     if lines.is_empty() || max_width_px == 0 {
         return (vec![], 0, 0);
@@ -237,24 +528,19 @@ pub fn render_lines_fitted(
     if char_w == 0 || char_h == 0 {
         return (vec![], 0, 0);
     }
+    let line_advance = line_advance_px(char_h, line_height);
     let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
 
     let out_w = longest * char_w;
-    let out_h = lines.len() as u32 * char_h;
+    let out_h = stacked_height_px(char_h, line_advance, lines.len() as u32);
 
     if out_w == 0 || out_h == 0 {
         return (vec![], 0, 0);
     }
 
-    // Scale strip once
-    let strip = font_strip();
-    let scaled_strip_w = char_w * CHAR_COUNT;
-    let scaled_strip = imageops::resize(
-        strip,
-        scaled_strip_w,
-        char_h,
-        imageops::FilterType::Lanczos3,
-    );
+    // Per-cell isolated resize, cached by canvas — see
+    // `cached_scaled_strip` and `build_scaled_strip_per_cell`.
+    let scaled_strip = cached_scaled_strip(char_w, char_h, ResampleFilter::Mitchell);
 
     let mut buf = vec![0u8; (out_w * out_h * 4) as usize];
     for pixel in buf.chunks_exact_mut(4) {
@@ -262,7 +548,7 @@ pub fn render_lines_fitted(
     }
 
     for (line_idx, (text, fg)) in lines.iter().enumerate() {
-        let y_base = line_idx as u32 * char_h;
+        let y_base = line_idx as u32 * line_advance;
         // Center each line within the output width
         let line_w = text.len() as u32 * char_w;
         let x_offset = (out_w.saturating_sub(line_w)) / 2;
@@ -277,7 +563,8 @@ pub fn render_lines_fitted(
                     if sx >= scaled_strip.width() {
                         continue;
                     }
-                    let alpha = scaled_strip.get_pixel(sx, gy)[0];
+                    // Coverage from the RGBA strip's alpha channel.
+                    let alpha = scaled_strip.get_pixel(sx, gy)[3];
                     if alpha == 0 {
                         continue;
                     }
@@ -290,11 +577,12 @@ pub fn render_lines_fitted(
                     if alpha == 255 {
                         buf[off..off + 4].copy_from_slice(fg);
                     } else {
+                        // Gamma-correct RGB blend; linear alpha blend.
+                        buf[off] = blend_channel_gamma_correct(fg[0], bg[0], alpha);
+                        buf[off + 1] = blend_channel_gamma_correct(fg[1], bg[1], alpha);
+                        buf[off + 2] = blend_channel_gamma_correct(fg[2], bg[2], alpha);
                         let a = alpha as u16;
                         let inv_a = 255 - a;
-                        buf[off] = ((fg[0] as u16 * a + bg[0] as u16 * inv_a) / 255) as u8;
-                        buf[off + 1] = ((fg[1] as u16 * a + bg[1] as u16 * inv_a) / 255) as u8;
-                        buf[off + 2] = ((fg[2] as u16 * a + bg[2] as u16 * inv_a) / 255) as u8;
                         buf[off + 3] = ((fg[3] as u16 * a + bg[3] as u16 * inv_a) / 255) as u8;
                     }
                 }
@@ -324,6 +612,12 @@ pub const TYPO_CAP_MID_OFFSET: f32 = 0.074;
 /// without actually rasterizing. Useful for two-pass layout where the
 /// measure pass needs sizes but the render pass will rasterize anyway.
 pub fn measure_text_height(text: &str, target_char_h: u32) -> (u32, u32) {
+    measure_text_height_lh(text, target_char_h, 1.0)
+}
+
+/// Same as [`measure_text_height`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn measure_text_height_lh(text: &str, target_char_h: u32, line_height: f32) -> (u32, u32) {
     if target_char_h == 0 {
         return (0, 0);
     }
@@ -334,28 +628,57 @@ pub fn measure_text_height(text: &str, target_char_h: u32) -> (u32, u32) {
         return (0, 0);
     }
     let scaled_char_w = char_width_for_height(target_char_h);
-    (max_cols * scaled_char_w, num_lines * target_char_h)
+    let line_advance = line_advance_px(target_char_h, line_height);
+    (
+        max_cols * scaled_char_w,
+        stacked_height_px(target_char_h, line_advance, num_lines),
+    )
 }
 
 /// Return the `(w, h)` a [`render_text_wrapped`] call would produce.
 pub fn measure_text_wrapped(text: &str, target_char_h: u32, max_width_px: u32) -> (u32, u32) {
+    measure_text_wrapped_lh(text, target_char_h, max_width_px, 1.0)
+}
+
+/// Same as [`measure_text_wrapped`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn measure_text_wrapped_lh(
+    text: &str,
+    target_char_h: u32,
+    max_width_px: u32,
+    line_height: f32,
+) -> (u32, u32) {
     if target_char_h == 0 || max_width_px == 0 {
         return (0, 0);
     }
     let scaled_char_w = char_width_for_height(target_char_h);
     let max_cols = (max_width_px / scaled_char_w.max(1)) as usize;
     let wrapped = wrap_text(text, max_cols.max(1));
-    measure_text_height(&wrapped, target_char_h)
+    measure_text_height_lh(&wrapped, target_char_h, line_height)
 }
 
 /// Return the `(w, h)` a [`render_lines_fitted`] call would produce.
 pub fn measure_lines_fitted(lines: &[(&str, [u8; 4])], max_width_px: u32) -> (u32, u32) {
+    measure_lines_fitted_lh(lines, max_width_px, 1.0)
+}
+
+/// Same as [`measure_lines_fitted`], with a CSS-`line-height` ratio
+/// applied to the inter-line stride.
+pub fn measure_lines_fitted_lh(
+    lines: &[(&str, [u8; 4])],
+    max_width_px: u32,
+    line_height: f32,
+) -> (u32, u32) {
     let (char_w, char_h) = fit_char_h_for_lines(lines, max_width_px);
     if char_w == 0 || char_h == 0 {
         return (0, 0);
     }
     let longest = lines.iter().map(|(s, _)| s.len()).max().unwrap_or(0) as u32;
-    (longest * char_w, lines.len() as u32 * char_h)
+    let line_advance = line_advance_px(char_h, line_height);
+    (
+        longest * char_w,
+        stacked_height_px(char_h, line_advance, lines.len() as u32),
+    )
 }
 
 /// Internal: derive `(char_w, char_h)` such that
@@ -443,7 +766,8 @@ mod tests {
             let mut lit = 0u32;
             for y in 0..BASE_CHAR_H {
                 for x in x0..x0 + BASE_CHAR_W {
-                    if strip.get_pixel(x, y)[0] > 128 {
+                    // Strip is RGBA — coverage is in alpha.
+                    if strip.get_pixel(x, y)[3] > 128 {
                         lit += 1;
                     }
                 }

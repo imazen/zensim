@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use image::RgbaImage;
+use crate::pixel_ops::Bitmap;
 
 use super::geom::{Rect, Size};
 use super::node::Node;
@@ -491,7 +491,7 @@ pub(super) fn paint(
     pad: u32,
     cells: &[(GridSpan, Node)],
     rect: Rect,
-    canvas: &mut RgbaImage,
+    canvas: &mut Bitmap,
 ) {
     if cols.is_empty() || rows.is_empty() {
         return;
@@ -524,7 +524,7 @@ pub(super) fn paint(
     }
 
     let n_cells = safety::cap_cells(cells.len());
-    for (span, child) in cells.iter().take(n_cells) {
+    for (i, (span, child)) in cells.iter().take(n_cells).enumerate() {
         if span.col >= cols.len() as u32 || span.row >= rows.len() as u32 {
             continue;
         }
@@ -549,7 +549,15 @@ pub(super) fn paint(
         let y1 = rect.y + pad + y_end;
         let w = x1.saturating_sub(x0);
         let h = y1.saturating_sub(y0);
-        child.paint(Rect::new(x0, y0, w, h), canvas);
+        let child_rect = Rect::new(x0, y0, w, h);
+        super::diagnostics::check_contained(
+            super::diagnostics::ContainerKind::Grid,
+            i,
+            child.kind(),
+            rect,
+            child_rect,
+        );
+        child.paint(child_rect, canvas);
     }
 }
 
@@ -559,10 +567,10 @@ mod tests {
     use super::super::modifiers::LayoutMod;
     use super::super::node::{empty, image as image_node};
     use super::*;
-    use image::{Rgba, RgbaImage};
+    use crate::pixel_ops::Bitmap;
 
-    fn solid(w: u32, h: u32, c: super::super::color::Color) -> RgbaImage {
-        RgbaImage::from_pixel(w, h, Rgba(c))
+    fn solid(w: u32, h: u32, c: super::super::color::Color) -> Bitmap {
+        Bitmap::from_pixel(w, h, c)
     }
 
     #[test]
@@ -577,10 +585,10 @@ mod tests {
             .cell(1, 1, empty().background([255, 255, 0, 255]).fill())
             .size(80, 80)
             .render(80);
-        assert_eq!(img.get_pixel(20, 20), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(60, 20), &Rgba([0, 255, 0, 255]));
-        assert_eq!(img.get_pixel(20, 60), &Rgba([0, 0, 255, 255]));
-        assert_eq!(img.get_pixel(60, 60), &Rgba([255, 255, 0, 255]));
+        assert_eq!(img.get_pixel(20, 20), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(60, 20), [0, 255, 0, 255]);
+        assert_eq!(img.get_pixel(20, 60), [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(60, 60), [255, 255, 0, 255]);
     }
 
     #[test]
@@ -593,8 +601,8 @@ mod tests {
             .cell(1, 0, empty().background([0, 0, 255, 255]).fill())
             .size(100, 10)
             .render(100);
-        assert_eq!(img.get_pixel(10, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(50, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(10, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(50, 5), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -607,8 +615,8 @@ mod tests {
             .cell(1, 0, empty().background([0, 0, 255, 255]).fill())
             .size(100, 10)
             .render(100);
-        assert_eq!(img.get_pixel(7, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(50, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(7, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(50, 5), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -636,9 +644,9 @@ mod tests {
         // Track positions: red 0..80, green 80..90, blue 90..170.
         // Even though we asked for 100 of available, FrMin took its
         // 10 anyway and pushed blue past col 1's natural end.
-        assert_eq!(img.get_pixel(40, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(85, 5), &Rgba([0, 255, 0, 255])); // FrMin's min
-        assert_eq!(img.get_pixel(120, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(40, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(85, 5), [0, 255, 0, 255]); // FrMin's min
+        assert_eq!(img.get_pixel(120, 5), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -671,9 +679,9 @@ mod tests {
             .size(100, 10)
             .render(100);
         // Total within available (100). Right cell (blue) ends at x=99.
-        assert_eq!(img.get_pixel(99, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(99, 5), [0, 0, 255, 255]);
         // Far-left red, far-right blue, with green strip somewhere in between.
-        assert_eq!(img.get_pixel(0, 5), &Rgba([255, 0, 0, 255]));
+        assert_eq!(img.get_pixel(0, 5), [255, 0, 0, 255]);
     }
 
     #[test]
@@ -697,9 +705,9 @@ mod tests {
             .size(100, 10)
             .render(100);
         // Red 0..40, green 40..60, blue 60..100.
-        assert_eq!(img.get_pixel(20, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(50, 5), &Rgba([0, 255, 0, 255])); // FrMin = 20
-        assert_eq!(img.get_pixel(80, 5), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(20, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(50, 5), [0, 255, 0, 255]); // FrMin = 20
+        assert_eq!(img.get_pixel(80, 5), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -715,11 +723,11 @@ mod tests {
             .cell(1, 0, empty().background([0, 0, 255, 255]).fill())
             .size(64, 36)
             .render(64);
-        assert_eq!(img.get_pixel(8, 18), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(27, 18), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(36, 18), &Rgba([0, 0, 255, 255]));
-        assert_eq!(img.get_pixel(55, 18), &Rgba([0, 0, 255, 255]));
-        assert_eq!(img.get_pixel(56, 18), &Rgba(BLACK));
+        assert_eq!(img.get_pixel(8, 18), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(27, 18), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(36, 18), [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(55, 18), [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(56, 18), BLACK);
     }
 
     #[test]
@@ -733,9 +741,9 @@ mod tests {
             .place("act", empty().background([0, 0, 255, 255]).fill())
             .size(40, 30)
             .render(40);
-        assert_eq!(img.get_pixel(20, 5), &Rgba([255, 0, 0, 255]));
-        assert_eq!(img.get_pixel(10, 20), &Rgba([0, 255, 0, 255]));
-        assert_eq!(img.get_pixel(30, 20), &Rgba([0, 0, 255, 255]));
+        assert_eq!(img.get_pixel(20, 5), [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(10, 20), [0, 255, 0, 255]);
+        assert_eq!(img.get_pixel(30, 20), [0, 0, 255, 255]);
     }
 
     #[test]
@@ -748,8 +756,8 @@ mod tests {
             .place("a", empty().background([255, 0, 0, 255]).fill())
             .size(40, 40)
             .render(40);
-        assert_eq!(img.get_pixel(10, 10), &Rgba([0, 255, 0, 255]));
-        assert_eq!(img.get_pixel(30, 10), &Rgba([0, 255, 0, 255]));
-        assert_eq!(img.get_pixel(20, 30), &Rgba([255, 0, 0, 255]));
+        assert_eq!(img.get_pixel(10, 10), [0, 255, 0, 255]);
+        assert_eq!(img.get_pixel(30, 10), [0, 255, 0, 255]);
+        assert_eq!(img.get_pixel(20, 30), [255, 0, 0, 255]);
     }
 }

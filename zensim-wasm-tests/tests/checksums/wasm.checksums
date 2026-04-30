@@ -4,7 +4,7 @@
 # The 'tolerance' line below each section header is informational only.
 
 ## checkerboard 64x64_f8
-~ quick-bat-b8a2a59c66:sea  x86_64-avx512  @6be2202  auto-accepted
+~ clear-pine-a8396559e9:sea  unknown  @  auto-accepted vs quick-bat-b8a2a59c66:sea
 
 ## color_blocks 64x64
 ~ dim-fire-07719bcb02:sea  x86_64-avx512  @6be2202  auto-accepted
