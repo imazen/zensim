@@ -567,19 +567,53 @@ pub(crate) fn compute_xyb_mean_offset(
     height: usize,
     padded_width: usize,
 ) -> [f64; 3] {
-    let mut offset = [0.0f64; 3];
     let n = (width * height) as f64;
-    for c in 0..3 {
-        let mut src_sum = 0.0f64;
-        let mut dst_sum = 0.0f64;
-        for y in 0..height {
-            let row_start = y * padded_width;
-            for x in 0..width {
-                src_sum += src_planes[c][row_start + x] as f64;
-                dst_sum += dst_planes[c][row_start + x] as f64;
+
+    // Sum (src - dst) per row in chunks, summed across chunks. The
+    // serial form (full-image pass over both src and dst per channel) is
+    // ~6.2M f32-load-pairs at 1080p × 3 channels — measurable. Chunking
+    // and parallelising via rayon brings it under noise when the
+    // `threads` feature is enabled.
+    let chunk_rows = 64usize;
+    let row_indices: Vec<usize> = (0..height).step_by(chunk_rows).collect();
+
+    let per_chunk = |row_start: usize| -> [f64; 3] {
+        let row_end = (row_start + chunk_rows).min(height);
+        let mut diff = [0.0f64; 3];
+        for c in 0..3 {
+            let mut acc = 0.0f64;
+            for y in row_start..row_end {
+                let s = &src_planes[c][y * padded_width..y * padded_width + width];
+                let d = &dst_planes[c][y * padded_width..y * padded_width + width];
+                let mut row_sum = 0.0f64;
+                for i in 0..width {
+                    row_sum += (s[i] - d[i]) as f64;
+                }
+                acc += row_sum;
             }
+            diff[c] = acc;
         }
-        offset[c] = (src_sum - dst_sum) / n;
+        diff
+    };
+
+    #[cfg(feature = "threads")]
+    let chunks: Vec<[f64; 3]> = if cfg!(feature = "threads") {
+        use rayon::prelude::*;
+        row_indices.into_par_iter().map(per_chunk).collect()
+    } else {
+        row_indices.into_iter().map(per_chunk).collect()
+    };
+    #[cfg(not(feature = "threads"))]
+    let chunks: Vec<[f64; 3]> = row_indices.into_iter().map(per_chunk).collect();
+
+    let mut offset = [0.0f64; 3];
+    for chunk_diff in &chunks {
+        for (o, &d) in offset.iter_mut().zip(chunk_diff.iter()) {
+            *o += d;
+        }
+    }
+    for o in &mut offset {
+        *o /= n;
     }
     offset
 }
