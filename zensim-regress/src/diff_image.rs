@@ -60,6 +60,13 @@ pub fn pixelate_upscale(img: &Bitmap, min_dim: u32) -> Bitmap {
 /// Unchanged pixels are dark gray. Differences glow in the color of the
 /// channels that differ, amplified by the given factor for visibility.
 ///
+/// The diff is byte-space `abs(e - a)` premultiplied by alpha. Pair
+/// it with a byte-linear resize (no gamma) when the inputs need to be
+/// reshaped before diffing — see `pixel_ops::resize_byte_linear`. A
+/// gamma-correct (sRGB-aware) resize feeding a byte-space diff
+/// amplifies 1-LSB encoding mismatches at every interpolated output
+/// column into visible periodic stripes.
+///
 /// # Panics
 ///
 /// Panics if expected and actual have different dimensions.
@@ -75,26 +82,21 @@ pub fn generate_diff_image(expected: &Bitmap, actual: &Bitmap, amplification: u8
         actual.height(),
     );
 
-    let amp = amplification.max(1) as i16;
+    let amp = amplification.max(1) as i32;
     let mut diff = Bitmap::new(w, h);
 
     for y in 0..h {
         for x in 0..w {
             let e = expected.get_pixel(x, y);
             let a = actual.get_pixel(x, y);
-
-            // Compare premultiplied values so transparent pixels diff to zero
-            // regardless of their RGB garbage values.
             let ea = e[3] as i32;
             let aa = a[3] as i32;
-            let amp32 = amp as i32;
             let dr =
-                ((e[0] as i32 * ea / 255 - a[0] as i32 * aa / 255).abs() * amp32).min(255) as u8;
+                ((e[0] as i32 * ea / 255 - a[0] as i32 * aa / 255).abs() * amp).min(255) as u8;
             let dg =
-                ((e[1] as i32 * ea / 255 - a[1] as i32 * aa / 255).abs() * amp32).min(255) as u8;
+                ((e[1] as i32 * ea / 255 - a[1] as i32 * aa / 255).abs() * amp).min(255) as u8;
             let db =
-                ((e[2] as i32 * ea / 255 - a[2] as i32 * aa / 255).abs() * amp32).min(255) as u8;
-
+                ((e[2] as i32 * ea / 255 - a[2] as i32 * aa / 255).abs() * amp).min(255) as u8;
             if dr == 0 && dg == 0 && db == 0 {
                 diff.put_pixel(x, y, [24, 24, 24, 255]);
             } else {
@@ -801,9 +803,12 @@ fn render_mismatched_montage(
     pixel_ops::overlay(&mut panel_actual, actual, ax_off_x as i64, ax_off_y as i64);
     draw_rect_border(&mut panel_actual, ax_off_x, ax_off_y, aw, ah, border_color);
 
-    // Panel 2: PIXEL DIFF — resize actual to expected dims, compute diff
-    // Triangle (bilinear) — fast enough for diagnostic montage, Lanczos3 is overkill.
-    let act_resized = pixel_ops::resize(actual, ew, eh, ResampleFilter::Triangle);
+    // Panel 2: PIXEL DIFF — resize actual to expected dims and diff.
+    // Byte-linear resize + byte-space diff: resize and diff must
+    // agree on color space, otherwise the per-channel diff amplifies
+    // sRGB↔linear encoding mismatches at every interpolated output
+    // column into periodic stripes.
+    let act_resized = pixel_ops::resize_byte_linear(actual, ew, eh, ResampleFilter::Triangle);
     let pixel_diff_raw = generate_diff_image(expected, &act_resized, amplification);
     let mut panel_pixel_diff = Bitmap::from_pixel(canvas_w, canvas_h, panel_bg);
     pixel_ops::overlay(
