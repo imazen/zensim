@@ -142,15 +142,40 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// This placeholder is replaced by trained weights once the V0_4
 /// training pipeline (`zensim-validate --algorithm mlp`) ships.
 fn v0_4_placeholder_bytes() -> &'static [u8] {
+    use crate::mlp::bake::{BakeLayer, BakeRequest, bake_v2};
+    use crate::mlp::{Activation, WeightDtype};
     use std::sync::LazyLock;
     static BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| {
         let n_scales = PROFILE_PREVIEW_V0_2.num_scales as f64;
-        let normalized: Vec<f64> = WEIGHTS_PREVIEW_V0_2
+        let n_inputs = WEIGHTS_PREVIEW_V0_2.len();
+        // Single 228 → 1 linear layer with the V0_2 weights pre-divided
+        // by num_scales so the MLP forward output equals V0_2's
+        // post-normalization raw_distance.
+        let weights_f32: Vec<f32> = WEIGHTS_PREVIEW_V0_2
             .iter()
-            .map(|&w| w / n_scales)
+            .map(|&w| (w / n_scales) as f32)
             .collect();
-        // Schema hash 0 — placeholder is build-stamped, not corpus-trained.
-        crate::mlp::bake::bake_linear_v1(&normalized, 0)
+        let bias = [0.0f32];
+        let scaler_mean = vec![0.0f32; n_inputs];
+        let scaler_scale = vec![1.0f32; n_inputs];
+        let layers = [BakeLayer {
+            in_dim: n_inputs,
+            out_dim: 1,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &weights_f32,
+            biases: &bias,
+        }];
+        bake_v2(&BakeRequest {
+            schema_hash: 0,
+            flags: 0,
+            scaler_mean: &scaler_mean,
+            scaler_scale: &scaler_scale,
+            layers: &layers,
+            feature_bounds: &[],
+            metadata: &[],
+        })
+        .expect("v0_4 placeholder bake")
     });
     BYTES.as_slice()
 }
