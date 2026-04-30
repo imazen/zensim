@@ -14,6 +14,7 @@
 #[cfg(target_arch = "x86_64")]
 use archmage::arcane;
 use archmage::incant;
+use archmage::rite;
 use archmage::magetypes;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
@@ -875,8 +876,13 @@ fn fused_vblur_ssim_inner_v4_const<const M: u32>(
 
 /// Tail columns (width % 16) processed by the existing v3+scalar paths.
 /// Skips the v4 main loop columns that the const kernel already handled.
+///
+/// `#[rite]` so the call from `fused_vblur_ssim_inner_v4_const` (arcane)
+/// inlines into its target_feature region. Was nested arcane before — a
+/// boundary crossing per kernel invocation. Per-call cost is small but
+/// the pattern is what we want consistent across the codebase.
 #[cfg(target_arch = "x86_64")]
-#[arcane]
+#[rite]
 fn fused_vblur_ssim_inner_v4_tail(
     token: archmage::X64V4Token,
     h_mu1: &[f32],
