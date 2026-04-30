@@ -44,7 +44,7 @@
 
 use crate::fused::{StripChannelAccum, mirror_idx};
 #[cfg(target_arch = "x86_64")]
-use archmage::arcane;
+use archmage::{arcane, rite};
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
 
@@ -145,6 +145,78 @@ fn h_blur_sigma_row_scalar(
     }
 }
 
+/// AVX-512 H-blur of a single row's σ for one 16-col chunk.
+///
+/// Used by the col-group-outer streaming kernel to stream σ-plane data
+/// directly into a per-col-group ring buffer without writing a full
+/// strip-wide σ plane to memory. Boundary case (col_base near image
+/// edges) falls through to scalar with mirror-reflection.
+// `#[rite]` so this inlines into the parent #[arcane] (run_inner_loop_v4)
+// without crossing a target_feature boundary. Nested arcane = perf bug.
+#[cfg(target_arch = "x86_64")]
+#[rite]
+fn h_blur_sigma_chunk_v4(
+    token: archmage::X64V4Token,
+    src: &[f32],
+    dst: &[f32],
+    row: usize,
+    col_base: usize,
+    width: usize,
+    radius: usize,
+    out_sq: &mut [f32; 16],
+    out_12: &mut [f32; 16],
+) {
+    let r = radius;
+    let diam = 2 * r + 1;
+    let inv = f32x16::splat(token, 1.0 / diam as f32);
+    let row_off = row * width;
+    let body_start = r;
+    let body_end = if width > 2 * r { width - r } else { r };
+
+    if col_base >= body_start && col_base + 16 <= body_end {
+        // Body case: straight-line SIMD, no boundary mirror.
+        let mut sumsq = f32x16::zero(token);
+        let mut sumprod = f32x16::zero(token);
+        for k in 0..diam {
+            let in_off = row_off + col_base + k - r;
+            let s = f32x16::from_array(token, src[in_off..in_off + 16].try_into().unwrap());
+            let d = f32x16::from_array(token, dst[in_off..in_off + 16].try_into().unwrap());
+            sumsq = s.mul_add(s, d.mul_add(d, sumsq));
+            sumprod = s.mul_add(d, sumprod);
+        }
+        let avg_sq = sumsq * inv;
+        let avg_12 = sumprod * inv;
+        *out_sq = avg_sq.to_array();
+        *out_12 = avg_12.to_array();
+    } else {
+        // Boundary case: per-col scalar with mirror-reflection.
+        for c in 0..16 {
+            let x = col_base + c;
+            let mut sumsq = 0.0f32;
+            let mut sum12 = 0.0f32;
+            for k in 0..diam {
+                let mut xi = x as isize + k as isize - r as isize;
+                if xi < 0 {
+                    xi = -xi;
+                }
+                if xi >= width as isize {
+                    xi = 2 * (width as isize - 1) - xi;
+                }
+                if xi < 0 {
+                    xi = 0;
+                }
+                let xi = xi as usize;
+                let s = src[row_off + xi];
+                let d = dst[row_off + xi];
+                sumsq += s * s + d * d;
+                sum12 += s * d;
+            }
+            out_sq[c] = sumsq / diam as f32;
+            out_12[c] = sum12 / diam as f32;
+        }
+    }
+}
+
 /// AVX-512 single-row H-blur for σ_sq + σ_12.
 ///
 /// Strategy: maintain a sliding sum across (2r+1) column positions. At each
@@ -154,6 +226,9 @@ fn h_blur_sigma_row_scalar(
 /// For the body (`r..width-r`) we can do this with straight-line SIMD; the
 /// boundary edges (left r cols, right r cols) need mirror-reflection and
 /// fall back to scalar — they're a tiny fraction of the work.
+// `#[arcane]`: this is the per-row H-blur entry point called from the
+// public `h_blur_sigma_row` dispatcher. Once-per-row calls amortise the
+// target_feature boundary over 1920 cols of work.
 #[cfg(target_arch = "x86_64")]
 #[arcane]
 fn h_blur_sigma_row_v4(
@@ -548,7 +623,6 @@ fn run_inner_loop_v4(
     store_sd: bool,
     scratch: &mut StreamingSsimScratch,
 ) {
-    use fbits::*;
     let diam = 2 * radius + 1;
     let inv_n = 1.0 / diam as f32;
     let inv_n_v = f32x16::splat(token, inv_n);
@@ -564,34 +638,74 @@ fn run_inner_loop_v4(
         let inner_y = inner_start + step;
         let pixel_row = inner_y * width;
 
-        // Emit features per col group.
+        // Determine slide boundary for this step. We process emit and slide
+        // together in a single cg loop, so the H-blur of the new σ row must
+        // happen BEFORE the cg loop (the slide section reads from the new
+        // ring slot).
+        let slide = if step + 1 < inner_h {
+            let next_y = inner_y + 1;
+            let row_leaving = if inner_y >= radius {
+                inner_y - radius
+            } else {
+                radius - inner_y
+            }
+            .min(strip_h - 1);
+            let row_entering = {
+                let raw = next_y as isize + radius as isize;
+                if raw >= strip_h as isize {
+                    (2 * (strip_h as isize - 1) - raw).max(0) as usize
+                } else {
+                    raw as usize
+                }
+            }
+            .min(strip_h - 1);
+            let slot_old = row_leaving % diam;
+            let slot_new = row_entering % diam;
+
+            // H-blur new row's σ for the full width into ring slot_new.
+            // (This OVERWRITES slot_new's data — but slot_new == slot_old
+            // in the interior, so we must subtract from V-sums BEFORE this
+            // overwrites. That happens inside the cg loop below.)
+            //
+            // We can't H-blur yet — the cg loop below subtracts old slot
+            // values first. So we stash the slide info and H-blur after
+            // all cgs have subtracted.
+            Some((row_leaving, row_entering, slot_old, slot_new))
+        } else {
+            None
+        };
+
+        // Single cg loop: load v_*, emit, subtract row_leaving (still cached
+        // in ring), store v_* back. After the cg loop we H-blur new row σ
+        // and run a second short cg loop to add new row contributions.
         for cg in 0..col_chunks {
             let col_base = cg * 16;
             let off = col_base;
 
-            let v_mu1 = f32x16::from_array(
+            // Load V-sums into registers (single round-trip per cg per step).
+            let mut v_mu1 = f32x16::from_array(
                 token,
                 scratch.col_v_mu1[off..off + 16].try_into().unwrap(),
             );
-            let v_mu2 = f32x16::from_array(
+            let mut v_mu2 = f32x16::from_array(
                 token,
                 scratch.col_v_mu2[off..off + 16].try_into().unwrap(),
             );
-            let v_sumsq = f32x16::from_array(
+            let mut v_sumsq = f32x16::from_array(
                 token,
                 scratch.col_v_sumsq[off..off + 16].try_into().unwrap(),
             );
-            let v_sumprod = f32x16::from_array(
+            let mut v_sumprod = f32x16::from_array(
                 token,
                 scratch.col_v_sumprod[off..off + 16].try_into().unwrap(),
             );
 
+            // === Emit features ===
             let mu1 = v_mu1 * inv_n_v;
             let mu2 = v_mu2 * inv_n_v;
             let ssq = v_sumsq * inv_n_v;
             let s12 = v_sumprod * inv_n_v;
 
-            // SSIM
             let mu_diff = mu1 - mu2;
             let num_m = mu_diff.mul_add(-mu_diff, one);
             let num_s = two.mul_add((-mu1).mul_add(mu2, s12), c2v);
@@ -614,7 +728,6 @@ fn run_inner_loop_v4(
                 mu2_out[pixel_off..pixel_off + 16].copy_from_slice(&mu2.to_array());
             }
 
-            // Edge
             let s = f32x16::from_array(token, src[pixel_off..pixel_off + 16].try_into().unwrap());
             let d = f32x16::from_array(token, dst[pixel_off..pixel_off + 16].try_into().unwrap());
             let diff1 = (s - mu1).abs();
@@ -637,20 +750,56 @@ fn run_inner_loop_v4(
             acc.edge_art_max = acc.edge_art_max.max(artifact.reduce_max());
             acc.edge_det_max = acc.edge_det_max.max(detail_lost.reduce_max());
 
-            // HF energy + texture
             let vs = s - mu1;
             let vd = d - mu2;
             acc.hf_sq_src += (vs * vs).reduce_add() as f64;
             acc.hf_sq_dst += (vd * vd).reduce_add() as f64;
             acc.hf_abs_src += diff1.reduce_add() as f64;
             acc.hf_abs_dst += diff2.reduce_add() as f64;
-
-            // MSE
             let pd = s - d;
             acc.mse += (pd * pd).reduce_add() as f64;
+
+            // === Subtract row_leaving (kept in registers, then store) ===
+            if let Some((row_leaving, _, slot_old, _)) = slide {
+                let mu1_lo = f32x16::from_array(
+                    token,
+                    mu1_full[row_leaving * width + col_base..row_leaving * width + col_base + 16]
+                        .try_into()
+                        .unwrap(),
+                );
+                let mu2_lo = f32x16::from_array(
+                    token,
+                    mu2_full[row_leaving * width + col_base..row_leaving * width + col_base + 16]
+                        .try_into()
+                        .unwrap(),
+                );
+                let ring_sq_lo = f32x16::from_array(
+                    token,
+                    scratch.sigma_ring_sq[slot_old * width + col_base..slot_old * width + col_base + 16]
+                        .try_into()
+                        .unwrap(),
+                );
+                let ring_12_lo = f32x16::from_array(
+                    token,
+                    scratch.sigma_ring_12[slot_old * width + col_base..slot_old * width + col_base + 16]
+                        .try_into()
+                        .unwrap(),
+                );
+                v_mu1 = v_mu1 - mu1_lo;
+                v_mu2 = v_mu2 - mu2_lo;
+                v_sumsq = v_sumsq - ring_sq_lo;
+                v_sumprod = v_sumprod - ring_12_lo;
+
+                // Store back the post-subtract V-sums; the add pass below
+                // re-loads and finalises after H-blur of the new σ row.
+                scratch.col_v_mu1[off..off + 16].copy_from_slice(&v_mu1.to_array());
+                scratch.col_v_mu2[off..off + 16].copy_from_slice(&v_mu2.to_array());
+                scratch.col_v_sumsq[off..off + 16].copy_from_slice(&v_sumsq.to_array());
+                scratch.col_v_sumprod[off..off + 16].copy_from_slice(&v_sumprod.to_array());
+            }
         }
 
-        // Scalar tail for any cols past col_chunks * 16.
+        // Scalar tail emission for cols past col_chunks * 16.
         for x in tail_start..width {
             let mu1 = scratch.col_v_mu1[x] * inv_n;
             let mu2 = scratch.col_v_mu2[x] * inv_n;
@@ -668,16 +817,9 @@ fn run_inner_loop_v4(
             acc.ssim_d2 += sd2 as f64;
             acc.ssim_d8 += (sd4 * sd4) as f64;
             acc.ssim_max = acc.ssim_max.max(sd);
-
             let pixel_off = pixel_row + x;
-            if store_sd {
-                sd_out[pixel_off] = sd;
-            }
-            if store_mu {
-                mu1_out[pixel_off] = mu1;
-                mu2_out[pixel_off] = mu2;
-            }
-
+            if store_sd { sd_out[pixel_off] = sd; }
+            if store_mu { mu1_out[pixel_off] = mu1; mu2_out[pixel_off] = mu2; }
             let sv = src[pixel_off];
             let dv = dst[pixel_off];
             let diff1 = (sv - mu1).abs();
@@ -699,7 +841,6 @@ fn run_inner_loop_v4(
             acc.edge_det8 += (dl4 * dl4) as f64;
             acc.edge_art_max = acc.edge_art_max.max(artifact);
             acc.edge_det_max = acc.edge_det_max.max(detail_lost);
-
             let vs = sv - mu1;
             let vd = dv - mu2;
             acc.hf_sq_src += (vs * vs) as f64;
@@ -710,180 +851,53 @@ fn run_inner_loop_v4(
             acc.mse += (pd * pd) as f64;
         }
 
-        // Slide V-window for the next inner row.
-        if step + 1 < inner_h {
-            let next_y = inner_y + 1;
-            let row_leaving = if inner_y >= radius {
-                inner_y - radius
-            } else {
-                radius - inner_y
-            }
-            .min(strip_h - 1);
-            let row_entering = {
-                let raw = next_y as isize + radius as isize;
-                if raw >= strip_h as isize {
-                    (2 * (strip_h as isize - 1) - raw).max(0) as usize
-                } else {
-                    raw as usize
-                }
-            }
-            .min(strip_h - 1);
-
-            let slot_old = row_leaving % diam;
-            let slot_new = row_entering % diam;
-
-            // Subtract row_leaving from V-sums (SIMD over col chunks).
-            for cg in 0..col_chunks {
-                let col_base = cg * 16;
-                let mu1_lo = f32x16::from_array(
-                    token,
-                    mu1_full[row_leaving * width + col_base..row_leaving * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let mu2_lo = f32x16::from_array(
-                    token,
-                    mu2_full[row_leaving * width + col_base..row_leaving * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let ring_sq_lo = f32x16::from_array(
-                    token,
-                    scratch.sigma_ring_sq[slot_old * width + col_base
-                        ..slot_old * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let ring_12_lo = f32x16::from_array(
-                    token,
-                    scratch.sigma_ring_12[slot_old * width + col_base
-                        ..slot_old * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-
-                let v_mu1 = f32x16::from_array(
-                    token,
-                    scratch.col_v_mu1[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let v_mu2 = f32x16::from_array(
-                    token,
-                    scratch.col_v_mu2[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let v_sumsq = f32x16::from_array(
-                    token,
-                    scratch.col_v_sumsq[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let v_sumprod = f32x16::from_array(
-                    token,
-                    scratch.col_v_sumprod[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-
-                scratch.col_v_mu1[col_base..col_base + 16]
-                    .copy_from_slice(&(v_mu1 - mu1_lo).to_array());
-                scratch.col_v_mu2[col_base..col_base + 16]
-                    .copy_from_slice(&(v_mu2 - mu2_lo).to_array());
-                scratch.col_v_sumsq[col_base..col_base + 16]
-                    .copy_from_slice(&(v_sumsq - ring_sq_lo).to_array());
-                scratch.col_v_sumprod[col_base..col_base + 16]
-                    .copy_from_slice(&(v_sumprod - ring_12_lo).to_array());
-            }
+        // === Slide step 2: H-blur new σ row, then add ===
+        if let Some((_, row_entering, slot_old, slot_new)) = slide {
+            // Subtract σ for tail cols (separate loop; SIMD body already did).
             for x in tail_start..width {
-                scratch.col_v_mu1[x] -= mu1_full[row_leaving * width + x];
-                scratch.col_v_mu2[x] -= mu2_full[row_leaving * width + x];
+                scratch.col_v_mu1[x] -= mu1_full[(if inner_y >= radius { inner_y - radius } else { radius - inner_y }).min(strip_h - 1) * width + x];
+                scratch.col_v_mu2[x] -= mu2_full[(if inner_y >= radius { inner_y - radius } else { radius - inner_y }).min(strip_h - 1) * width + x];
                 scratch.col_v_sumsq[x] -= scratch.sigma_ring_sq[slot_old * width + x];
                 scratch.col_v_sumprod[x] -= scratch.sigma_ring_12[slot_old * width + x];
             }
 
-            // H-blur new row into ring slot (scalar — see TODO note below).
-            let src_row_new = &src[row_entering * width..row_entering * width + width];
-            let dst_row_new = &dst[row_entering * width..row_entering * width + width];
-            let ring_sq_new =
-                &mut scratch.sigma_ring_sq[slot_new * width..slot_new * width + width];
-            let ring_12_new =
-                &mut scratch.sigma_ring_12[slot_new * width..slot_new * width + width];
-            h_blur_sigma_row(
-                src_row_new,
-                dst_row_new,
-                ring_sq_new,
-                ring_12_new,
+            // H-blur the new σ row (full width, single call). We're already
+            // inside the arcane region (run_inner_loop_v4), so call the v4
+            // variant directly rather than going through the plain
+            // `h_blur_sigma_row` dispatcher — that would cross two
+            // target_feature boundaries per row (out and back in).
+            let ring_sq_dst = &mut scratch.sigma_ring_sq[slot_new * width..slot_new * width + width];
+            let ring_12_dst = &mut scratch.sigma_ring_12[slot_new * width..slot_new * width + width];
+            h_blur_sigma_row_v4(
+                token,
+                &src[row_entering * width..row_entering * width + width],
+                &dst[row_entering * width..row_entering * width + width],
+                ring_sq_dst,
+                ring_12_dst,
                 width,
                 radius,
             );
 
-            // Add new row to V-sums.
+            // Add row_entering contributions (SIMD body + scalar tail).
             for cg in 0..col_chunks {
                 let col_base = cg * 16;
-                let mu1_hi = f32x16::from_array(
-                    token,
-                    mu1_full[row_entering * width + col_base
-                        ..row_entering * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let mu2_hi = f32x16::from_array(
-                    token,
-                    mu2_full[row_entering * width + col_base
-                        ..row_entering * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let ring_sq_hi = f32x16::from_array(
-                    token,
-                    scratch.sigma_ring_sq[slot_new * width + col_base
-                        ..slot_new * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let ring_12_hi = f32x16::from_array(
-                    token,
-                    scratch.sigma_ring_12[slot_new * width + col_base
-                        ..slot_new * width + col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-
-                let v_mu1 = f32x16::from_array(
-                    token,
-                    scratch.col_v_mu1[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let v_mu2 = f32x16::from_array(
-                    token,
-                    scratch.col_v_mu2[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let v_sumsq = f32x16::from_array(
-                    token,
-                    scratch.col_v_sumsq[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-                let v_sumprod = f32x16::from_array(
-                    token,
-                    scratch.col_v_sumprod[col_base..col_base + 16]
-                        .try_into()
-                        .unwrap(),
-                );
-
-                scratch.col_v_mu1[col_base..col_base + 16]
-                    .copy_from_slice(&(v_mu1 + mu1_hi).to_array());
-                scratch.col_v_mu2[col_base..col_base + 16]
-                    .copy_from_slice(&(v_mu2 + mu2_hi).to_array());
-                scratch.col_v_sumsq[col_base..col_base + 16]
-                    .copy_from_slice(&(v_sumsq + ring_sq_hi).to_array());
-                scratch.col_v_sumprod[col_base..col_base + 16]
-                    .copy_from_slice(&(v_sumprod + ring_12_hi).to_array());
+                let off = col_base;
+                let mut v_mu1 = f32x16::from_array(token, scratch.col_v_mu1[off..off + 16].try_into().unwrap());
+                let mut v_mu2 = f32x16::from_array(token, scratch.col_v_mu2[off..off + 16].try_into().unwrap());
+                let mut v_sumsq = f32x16::from_array(token, scratch.col_v_sumsq[off..off + 16].try_into().unwrap());
+                let mut v_sumprod = f32x16::from_array(token, scratch.col_v_sumprod[off..off + 16].try_into().unwrap());
+                let mu1_hi = f32x16::from_array(token, mu1_full[row_entering * width + col_base..row_entering * width + col_base + 16].try_into().unwrap());
+                let mu2_hi = f32x16::from_array(token, mu2_full[row_entering * width + col_base..row_entering * width + col_base + 16].try_into().unwrap());
+                let ring_sq_hi = f32x16::from_array(token, scratch.sigma_ring_sq[slot_new * width + col_base..slot_new * width + col_base + 16].try_into().unwrap());
+                let ring_12_hi = f32x16::from_array(token, scratch.sigma_ring_12[slot_new * width + col_base..slot_new * width + col_base + 16].try_into().unwrap());
+                v_mu1 = v_mu1 + mu1_hi;
+                v_mu2 = v_mu2 + mu2_hi;
+                v_sumsq = v_sumsq + ring_sq_hi;
+                v_sumprod = v_sumprod + ring_12_hi;
+                scratch.col_v_mu1[off..off + 16].copy_from_slice(&v_mu1.to_array());
+                scratch.col_v_mu2[off..off + 16].copy_from_slice(&v_mu2.to_array());
+                scratch.col_v_sumsq[off..off + 16].copy_from_slice(&v_sumsq.to_array());
+                scratch.col_v_sumprod[off..off + 16].copy_from_slice(&v_sumprod.to_array());
             }
             for x in tail_start..width {
                 scratch.col_v_mu1[x] += mu1_full[row_entering * width + x];
@@ -893,11 +907,6 @@ fn run_inner_loop_v4(
             }
         }
     }
-
-    // TODO: vectorize `h_blur_sigma_row` itself. Currently scalar — that's
-    // 11 loads + 22 fmadds + 2 stores per col, all serial. SIMD'ing the
-    // inner H-window sum would close most of the remaining gap to the
-    // baseline 4-plane H-blur kernel.
 }
 
 #[allow(dead_code)]
