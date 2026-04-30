@@ -173,59 +173,25 @@ pub fn srgb_to_xyb_planar_into(
     );
 }
 
-/// Pick the SIMD cbrt variant per the `zwe-xyb-cbrt-lowp` feature.
-///
-/// `cbrt_midp` (default): max 3 ULP, ~9 decimal digits. The historical
-/// choice when the kernel was first written.
-///
-/// `cbrt_lowp` (gated): ~1.8x faster (1 division vs 2), ~4.5 decimal
-/// digits, max 259 ULP. Magetypes documents this as "suitable for
-/// perceptual color (Oklab/XYB) targeting 8-bit output" — and our SSIM
-/// aggregates millions of pixels, so per-pixel ~5e-5 cbrt error is far
-/// below the metric's noise floor.
-macro_rules! cbrt_pref {
-    ($v:expr) => {{
-        #[cfg(feature = "zwe-xyb-cbrt-lowp")]
-        {
-            $v.cbrt_lowp()
-        }
-        #[cfg(not(feature = "zwe-xyb-cbrt-lowp"))]
-        {
-            $v.cbrt_midp()
-        }
-    }};
-}
-
-/// matlut-style cbrt LUT: 4096-entry f32 table mapping `linear → cbrt(linear)`.
-///
-/// Indexed by `(linear * 4095.0).clamp(0, 4095) as i32`. The post-matrix
-/// inputs to cbrt are clamped to `>= K_B0 ≈ 0.0038` (so no negatives) and
-/// in practice ≤ 1.0 for sRGB content. 12-bit quantization gives
-/// ~5e-4 max error in cbrt output — comfortably below the metric's
-/// per-pixel noise floor.
-///
-/// Lookup pattern mirrors `convert_8px_u8_rgb_matlut` in zenpixels-convert:
-/// SIMD multiply + clamp + `to_i32_round`, extract lanes to scalar array,
-/// gather from LUT, pack back into a SIMD vector.
-#[cfg(feature = "zwe-xyb-cbrt-lut")]
-pub(crate) fn cbrt_lut_4096() -> &'static [f32; 4096] {
-    use core::sync::atomic::{AtomicPtr, Ordering};
-    use std::sync::OnceLock;
-    static LUT: OnceLock<&'static [f32; 4096]> = OnceLock::new();
-    let _ = AtomicPtr::<u8>::new; // silence unused if not needed
-    LUT.get_or_init(|| {
-        let mut t: Box<[f32; 4096]> = vec![0.0f32; 4096]
-            .into_boxed_slice()
-            .try_into()
-            .ok()
-            .unwrap();
-        for (i, slot) in t.iter_mut().enumerate() {
-            // cbrt of normalized [0..1] linear value.
-            *slot = (i as f32 / 4095.0).cbrt();
-        }
-        Box::leak(t)
-    })
-}
+// Note: this module uses `cbrt_lowp` for the SIMD cbrt step in sRGB→XYB.
+// `cbrt_lowp` is one Halley iteration (~15 bits / 4.5 decimal digits, max
+// 259 ULP); `cbrt_midp` is two Halley iterations (~24 bits / 9 decimal
+// digits, max 3 ULP). Magetypes explicitly documents `cbrt_lowp` as
+// "suitable for perceptual color (Oklab/XYB) targeting 8-bit output" —
+// SSIM-style aggregate metrics over millions of pixels are far below
+// what 4.5 decimals can resolve.
+//
+// We benchmarked alternatives:
+//   approach                    ns/px (1080p min, MP/s)
+//   cbrt_midp (old default)     2.32 ns/px (430)
+//   cbrt_lowp (current)         1.97 ns/px (510)   ← -15%
+//   cbrt LUT (4096-entry)       3.04 ns/px (329)   ← gather > arithmetic
+//   moxcms 3D-LUT trilinear     2.60 ns/px (385)   ← LUT framework cost
+//   cbrt-first (matlut shape)   max error 0.21 (XYB scale ~1) — rejected
+//
+// Validation: max relative SROCC drift on the 218k synthetic test set is
+// 5.6e-5 (f32 summation noise). KADIK/TID/CID22 unchanged within 1e-4.
+// See commit log for the investigation chain.
 
 /// Make XYB values positive (required for SSIM-like comparisons).
 /// X: multiply by 14, add 0.42
@@ -302,46 +268,13 @@ fn srgb_to_positive_xyb_planar_inner_v4(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        // SIMD cube root. Three implementations gated by features:
-        //   default        — magetypes `cbrt_midp` (max 3 ULP, 2 Halley)
-        //   zwe-xyb-cbrt-lowp — `cbrt_lowp` (~15 bits, 1 Halley, 1.8x faster)
-        //   zwe-xyb-cbrt-lut  — matlut-style 4096-entry LUT scalar gather
+        // SIMD cube root. Single Halley iteration, ~15 bits / ~4.5 decimal
+        // digits of accuracy — matches `cbrt_midp`'s output to ≤259 ULP
+        // and is 1.8x faster (1 division vs 2). See module-level note.
         // Safe because mixed >= K_B0 ≈ 0.0038 (no zeros/denormals/NaN/inf).
-        #[cfg(feature = "zwe-xyb-cbrt-lut")]
-        let (t0, t1, t2) = {
-            let lut = crate::color::cbrt_lut_4096();
-            let lut_max = f32x16::splat(token, 4095.0);
-            // Per-lane idx = clamp(mixed * 4095, 0, 4095) → scalar gather → pack.
-            let idx0 = (mixed0 * lut_max).max(zero).min(lut_max).to_i32_round();
-            let idx1 = (mixed1 * lut_max).max(zero).min(lut_max).to_i32_round();
-            let idx2 = (mixed2 * lut_max).max(zero).min(lut_max).to_i32_round();
-            let i0 = idx0.to_array();
-            let i1 = idx1.to_array();
-            let i2 = idx2.to_array();
-            let mut o0 = [0.0f32; 16];
-            let mut o1 = [0.0f32; 16];
-            let mut o2 = [0.0f32; 16];
-            for k in 0..16 {
-                o0[k] = lut[(i0[k] as usize) & 0xFFF];
-                o1[k] = lut[(i1[k] as usize) & 0xFFF];
-                o2[k] = lut[(i2[k] as usize) & 0xFFF];
-            }
-            (
-                f32x16::from_array(token, o0),
-                f32x16::from_array(token, o1),
-                f32x16::from_array(token, o2),
-            )
-        };
-        #[cfg(all(
-            not(feature = "zwe-xyb-cbrt-lut"),
-            feature = "zwe-xyb-cbrt-lowp",
-        ))]
-        let (t0, t1, t2) = (mixed0.cbrt_lowp(), mixed1.cbrt_lowp(), mixed2.cbrt_lowp());
-        #[cfg(all(
-            not(feature = "zwe-xyb-cbrt-lut"),
-            not(feature = "zwe-xyb-cbrt-lowp"),
-        ))]
-        let (t0, t1, t2) = (mixed0.cbrt_midp(), mixed1.cbrt_midp(), mixed2.cbrt_midp());
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -406,9 +339,9 @@ fn srgb_to_positive_xyb_planar_inner_v4(
             .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
             .max(zero8);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab8;
         let c1 = t1 + ab8;
@@ -514,9 +447,9 @@ fn srgb_to_positive_xyb_planar_inner_v3(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -627,9 +560,9 @@ fn srgb_to_positive_xyb_planar_inner(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -732,9 +665,9 @@ fn srgb_to_xyb_planar_inner_v3(
         let mixed1 = mixed1.max(zero);
         let mixed2 = mixed2.max(zero);
 
-        let c0 = mixed0.cbrt_midp() + ab;
-        let c1 = mixed1.cbrt_midp() + ab;
-        let c2 = mixed2.cbrt_midp();
+        let c0 = mixed0.cbrt_lowp() + ab;
+        let c1 = mixed1.cbrt_lowp() + ab;
+        let c2 = mixed2.cbrt_lowp();
 
         // XYB transform: X = 0.5*(c0-c1), Y = 0.5*(c0+c1), B = c2
         let x = half * (c0 - c1);
@@ -833,9 +766,9 @@ fn srgb_to_xyb_planar_inner(
         let mixed1 = mixed1.max(zero);
         let mixed2 = mixed2.max(zero);
 
-        let c0 = mixed0.cbrt_midp() + ab;
-        let c1 = mixed1.cbrt_midp() + ab;
-        let c2 = mixed2.cbrt_midp();
+        let c0 = mixed0.cbrt_lowp() + ab;
+        let c1 = mixed1.cbrt_lowp() + ab;
+        let c2 = mixed2.cbrt_lowp();
 
         // XYB transform: X = 0.5*(c0-c1), Y = 0.5*(c0+c1), B = c2
         let x = half * (c0 - c1);
@@ -1041,9 +974,9 @@ fn linear_to_positive_xyb_planar_inner_v4(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -1110,9 +1043,9 @@ fn linear_to_positive_xyb_planar_inner_v4(
             .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
             .max(zero8);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab8;
         let c1 = t1 + ab8;
@@ -1221,9 +1154,9 @@ fn linear_to_positive_xyb_planar_inner_v3(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;
@@ -1336,9 +1269,9 @@ fn linear_to_positive_xyb_planar_inner(
             .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
             .max(zero);
 
-        let t0 = mixed0.cbrt_midp();
-        let t1 = mixed1.cbrt_midp();
-        let t2 = mixed2.cbrt_midp();
+        let t0 = mixed0.cbrt_lowp();
+        let t1 = mixed1.cbrt_lowp();
+        let t2 = mixed2.cbrt_lowp();
 
         let c0 = t0 + ab;
         let c1 = t1 + ab;

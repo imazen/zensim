@@ -71,15 +71,6 @@ zwe-streaming-ssim = []
 ## Re-exposes the `color` module publicly so benches can call the sRGB→XYB
 ## kernels directly.
 zwe-pub-color = []
-## Use cbrt_lowp instead of cbrt_midp in sRGB→XYB. ~1.8x faster cbrt at
-## ~4.5 decimal digits of precision — well above what SSIM-style aggregate
-## metrics need. Gate is on by default; flip off for accuracy comparison.
-zwe-xyb-cbrt-lowp = []
-## matlut-style cbrt LUT: replaces SIMD cbrt with a 4096-entry f32 lookup
-## table. Per-lane scalar gather from L1 — same pattern as zenpixels-
-## convert's u8 matlut encode step. Trumps zwe-xyb-cbrt-lowp when both are
-## set.
-zwe-xyb-cbrt-lut = []
 
 [dependencies]
 archmage = { workspace = true }
