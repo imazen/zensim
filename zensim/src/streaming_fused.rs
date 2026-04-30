@@ -102,10 +102,28 @@ fn h_blur_sigma_row(
 ) {
     #[cfg(target_arch = "x86_64")]
     if let Some(token) = <archmage::X64V4Token as archmage::SimdToken>::summon() {
-        h_blur_sigma_row_v4(token, src_row, dst_row, out_sigma_sq, out_sigma_12, width, radius);
+        h_blur_sigma_row_v4_arcane(token, src_row, dst_row, out_sigma_sq, out_sigma_12, width, radius);
         return;
     }
     h_blur_sigma_row_scalar(src_row, dst_row, out_sigma_sq, out_sigma_12, width, radius);
+}
+
+/// `#[arcane]` wrapper that establishes the target_feature region for
+/// the dispatcher's external callers. Inside arcane callers (like
+/// `run_inner_loop_v4`) you'd call `h_blur_sigma_row_v4` (the rite)
+/// directly with the already-existing token.
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn h_blur_sigma_row_v4_arcane(
+    token: archmage::X64V4Token,
+    src_row: &[f32],
+    dst_row: &[f32],
+    out_sigma_sq: &mut [f32],
+    out_sigma_12: &mut [f32],
+    width: usize,
+    radius: usize,
+) {
+    h_blur_sigma_row_v4(token, src_row, dst_row, out_sigma_sq, out_sigma_12, width, radius);
 }
 
 #[inline]
@@ -226,11 +244,11 @@ fn h_blur_sigma_chunk_v4(
 /// For the body (`r..width-r`) we can do this with straight-line SIMD; the
 /// boundary edges (left r cols, right r cols) need mirror-reflection and
 /// fall back to scalar — they're a tiny fraction of the work.
-// `#[arcane]`: this is the per-row H-blur entry point called from the
-// public `h_blur_sigma_row` dispatcher. Once-per-row calls amortise the
-// target_feature boundary over 1920 cols of work.
+// `#[rite]` so this inlines into any #[arcane] caller's target_feature
+// region. The plain-fn `h_blur_sigma_row` dispatcher uses the small
+// `#[arcane]` wrapper below to enter the target_feature region first.
 #[cfg(target_arch = "x86_64")]
-#[arcane]
+#[rite]
 fn h_blur_sigma_row_v4(
     token: archmage::X64V4Token,
     src_row: &[f32],
