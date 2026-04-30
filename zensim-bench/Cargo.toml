@@ -23,6 +23,7 @@ rgb = { workspace = true }
 zenpnm = "0.1"
 bytemuck = { workspace = true }
 which = "8"
+zenbench = { workspace = true }
 
 [[bench]]
 name = "bench_compare"
