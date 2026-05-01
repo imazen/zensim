@@ -186,6 +186,23 @@ struct Args {
     #[arg(long, value_enum, default_value = "min")]
     mlp_validation_policy: MlpValidationPolicyArg,
 
+    /// (--algorithm mlp) Coefficient λ for the magnitude-matching auxiliary
+    /// loss. 0 (default) = pure RankNet pairwise loss, sign-only — what V0_4
+    /// shipped with. λ > 0 adds `λ · (pred_diff − α · target_diff)²` per
+    /// sampled pair, pinning the *magnitude* of pair-score differences to
+    /// be proportional to the target's pair-score differences (not just
+    /// the sign). Provides slope-continuity guidance, useful when the
+    /// target metric is a continuous signal like SSIM2 score.
+    #[arg(long, default_value_t = 0.0)]
+    mlp_magnitude_match_lambda: f64,
+
+    /// (--algorithm mlp) Scale factor α in the magnitude-matching term.
+    /// Choose approximately `std(pred_diff) / std(target_diff)` after
+    /// warmup. Default 30 matches V0_4 raw distance scale (~30) vs
+    /// normalized human_score scale (~1).
+    #[arg(long, default_value_t = 30.0)]
+    mlp_magnitude_match_alpha: f64,
+
     /// (--algorithm mlp) Append 4 size-axis features to each pair's
     /// feature vector before training: log2(pixels), log2(min_dim),
     /// log2(max_dim), and log2(max/min) signed by aspect orientation.
@@ -219,6 +236,53 @@ struct Args {
     /// dataset offline before passing it to --also.
     #[arg(long, default_value = "0.0")]
     mlp_human_train_fraction: f64,
+
+    /// (--algorithm mlp) Path to a TSV produced by
+    /// `gen_zenanalyze_features` (header: `stem\tsource_path\tfeat...`).
+    /// Per-pair features for each loaded dataset get augmented with the
+    /// reference-image's zenanalyze values, looked up by `ref_keys[i]`
+    /// (file stem). Bumps n_features. Pairs whose stem isn't in the TSV
+    /// fall back to zero-fill, matching the size-axes pattern.
+    ///
+    /// Use with `--mlp-zenanalyze-features` to select a subset of TSV
+    /// columns; default is "all columns from the TSV header in order".
+    #[arg(long)]
+    mlp_zenanalyze_tsv: Option<PathBuf>,
+
+    /// (--algorithm mlp) Comma-separated list of zenanalyze feature
+    /// names (matching the TSV header — snake_case `variance`,
+    /// `edge_density`, etc.) to use from `--mlp-zenanalyze-tsv`. When
+    /// unset, every feature column from the TSV header is appended
+    /// in order. Mismatched names are an error.
+    #[arg(long)]
+    mlp_zenanalyze_features: Option<String>,
+
+    /// (--algorithm mlp) Fraction of training pair samples drawn from
+    /// the "low-quality" band (defined by `--mlp-low-band-target-min`
+    /// / `--mlp-low-band-target-max` on the human_score scale, which
+    /// for synthetic SSIM2-target training is `((raw + 50) / 150)
+    /// .clamp(0, 1)`). 0.0 (default) keeps uniform pair sampling. 0.5
+    /// means half of every batch is drawn from the low-band index list,
+    /// the other half uniform across the group.
+    ///
+    /// Used to counteract the synthetic dataset's natural bias toward
+    /// SSIM2 75-90 (28% of pairs) and densify gradient at SSIM2 25-60
+    /// where most web compression decisions live but training data is
+    /// sparse (~25% of pairs). Re-runs eval gates against the full
+    /// SSIM2 range, so this only changes the *gradient distribution*,
+    /// not the holdout-quality measurement.
+    #[arg(long, default_value_t = 0.0)]
+    mlp_low_band_oversample: f64,
+
+    /// (--algorithm mlp) Lower bound of the low-band on the
+    /// human_score scale. Default 0.333 = SSIM2 0 (`(0 + 50) / 150`).
+    #[arg(long, default_value_t = 0.333)]
+    mlp_low_band_target_min: f64,
+
+    /// (--algorithm mlp) Upper bound of the low-band on the
+    /// human_score scale. Default 0.733 = SSIM2 60 (`(60 + 50) / 150`).
+    #[arg(long, default_value_t = 0.733)]
+    mlp_low_band_target_max: f64,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -287,6 +351,18 @@ enum DatasetFormat {
     Pipal,
     Cid22,
     KonfigIqa,
+    /// KonJND-1k corpus (Lin, Hosu, Saupe 2022). Loader emits one pair
+    /// per (source, codec, file_idx) with `human_score` derived from
+    /// the per-(source, codec) mean PJND threshold:
+    ///   below PJND  →  subtle linear decline from 1.0 to 0.95
+    ///   at PJND     →  0.95 (just noticeable)
+    ///   above PJND  →  linear decline 0.95 → 0.0 over remaining levels
+    /// The PJND threshold is content-dependent — sources humans rate as
+    /// JPEG-tolerant get higher scores at the same file_idx than fragile
+    /// sources. That's the human-perceptibility signal pure file_idx
+    /// ranking doesn't capture. The score is in [0, 1] (higher = better
+    /// quality) consistent with other --also datasets.
+    KonJnd1k,
     Synthetic,
 }
 
@@ -1124,6 +1200,7 @@ fn main() {
                 "pipal" => DatasetFormat::Pipal,
                 "cid22" => DatasetFormat::Cid22,
                 "konfig-iqa" | "konfig" => DatasetFormat::KonfigIqa,
+                "konjnd1k" | "konjnd" => DatasetFormat::KonJnd1k,
                 "synthetic" | "synth" => DatasetFormat::Synthetic,
                 _ => {
                     eprintln!("Unknown format: {}", parts[0]);
@@ -1218,6 +1295,68 @@ fn main() {
             all_datasets.push(ds);
         }
     }
+
+    // V0_6 augmentation: append zenanalyze features looked up by per-pair
+    // ref_keys (file stem). Done once across every loaded dataset so the
+    // downstream MLP / CV / LOO paths all see the wider feature vector
+    // without further plumbing. Mismatched stems get zero-filled
+    // (consistent with the size-axes pattern).
+    let zenanalyze_extras: usize = if let Some(tsv) = &args.mlp_zenanalyze_tsv {
+        let (_, names, table) = load_zenanalyze_tsv(tsv);
+        let selected: Vec<usize> = if let Some(spec) = &args.mlp_zenanalyze_features {
+            let mut idx = Vec::new();
+            for raw in spec.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                match names.iter().position(|n| n.eq_ignore_ascii_case(raw)) {
+                    Some(i) => idx.push(i),
+                    None => {
+                        eprintln!(
+                            "error: --mlp-zenanalyze-features '{raw}' not in TSV header [{}]",
+                            names.join(",")
+                        );
+                        std::process::exit(2);
+                    }
+                }
+            }
+            idx
+        } else {
+            (0..names.len()).collect()
+        };
+        let n_extras = selected.len();
+        let zero_fill = vec![0.0_f64; n_extras];
+        let mut total_pairs = 0usize;
+        let mut hit_pairs = 0usize;
+        for ds in all_datasets.iter_mut() {
+            for (row_idx, key) in ds.ref_keys.iter().enumerate() {
+                total_pairs += 1;
+                let extras: &[f64] = match table.get(key.as_str()) {
+                    Some(vec) => {
+                        hit_pairs += 1;
+                        vec
+                    }
+                    None => &zero_fill,
+                };
+                let row = &mut ds.features[row_idx];
+                for &si in &selected {
+                    row.push(extras[si]);
+                }
+            }
+        }
+        eprintln!(
+            "V0_6 zenanalyze: appended {n_extras} feature(s) [{}] to {hit_pairs}/{total_pairs} \
+             pairs ({:.1}% hit) from TSV {}",
+            selected
+                .iter()
+                .map(|&i| names[i].as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            (hit_pairs as f64 / total_pairs.max(1) as f64) * 100.0,
+            tsv.display()
+        );
+        n_extras
+    } else {
+        0
+    };
+    let n_features = n_features + zenanalyze_extras;
 
     // Cross-validation modes
     if let Some(k) = args.cross_validate {
@@ -1493,6 +1632,11 @@ fn main() {
                 n_epochs: args.mlp_epochs,
                 pairs_per_epoch: args.mlp_pairs_per_epoch,
                 validation_policy: args.mlp_validation_policy.to_inner(),
+                magnitude_match_lambda: args.mlp_magnitude_match_lambda,
+                magnitude_match_alpha: args.mlp_magnitude_match_alpha,
+                low_band_oversample: args.mlp_low_band_oversample,
+                low_band_target_min: args.mlp_low_band_target_min,
+                low_band_target_max: args.mlp_low_band_target_max,
                 ..Default::default()
             };
             let bytes = mlp_train::train_mlp(&groups, n_features_for_train, &hyper, &mut training_log);
@@ -1707,6 +1851,7 @@ fn load_pairs(
         DatasetFormat::Pipal => load_pipal(path),
         DatasetFormat::Cid22 => load_cid22(path),
         DatasetFormat::KonfigIqa => load_konfig_iqa(path),
+        DatasetFormat::KonJnd1k => load_konjnd1k(path),
         DatasetFormat::Synthetic => load_synthetic(path, target_metric),
     };
     if max_images > 0 && max_images < pairs.len() {
@@ -1805,6 +1950,7 @@ fn load_and_compute(
         DatasetFormat::Pipal => load_pipal(path),
         DatasetFormat::Cid22 => load_cid22(path),
         DatasetFormat::KonfigIqa => load_konfig_iqa(path),
+        DatasetFormat::KonJnd1k => load_konjnd1k(path),
         DatasetFormat::Synthetic => load_synthetic(path, target_metric),
     };
 
@@ -4099,6 +4245,72 @@ fn probe_image_dimensions(path: &std::path::Path) -> (u32, u32) {
 ///
 /// Skips append (returns `false`) when dimensions are `(0, 0)` —
 /// caller can fall back to a non-size MLP path or 0-pad the axes.
+/// Parse a `gen_zenanalyze_features`-style TSV: first row is header
+/// `stem\tsource_path\tfeat1\tfeat2\t...`. Returns:
+/// - source_paths_by_stem: HashMap<stem, src_path_string>
+/// - feature_names: Vec<String> (columns from idx 2 onwards)
+/// - feature_table: HashMap<stem, Vec<f64>> (length = feature_names.len())
+///
+/// Non-finite entries (NaN, Inf) are coerced to 0.0 so downstream
+/// standardization can't blow up; the per-row "missing stem" zero-fill
+/// has the same effect.
+fn load_zenanalyze_tsv(
+    path: &Path,
+) -> (
+    std::collections::HashMap<String, String>,
+    Vec<String>,
+    std::collections::HashMap<String, Vec<f64>>,
+) {
+    let data = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("error: failed to read --mlp-zenanalyze-tsv {}: {e}", path.display());
+        std::process::exit(2);
+    });
+    let mut lines = data.lines();
+    let header = lines.next().unwrap_or("");
+    let cols: Vec<&str> = header.split('\t').collect();
+    if cols.len() < 3 || cols[0] != "stem" || cols[1] != "source_path" {
+        eprintln!(
+            "error: --mlp-zenanalyze-tsv {} header must start with 'stem\\tsource_path\\t...' (got {:?})",
+            path.display(),
+            cols
+        );
+        std::process::exit(2);
+    }
+    let names: Vec<String> = cols[2..].iter().map(|s| s.to_string()).collect();
+    let n_feat = names.len();
+    let mut by_stem: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut table: std::collections::HashMap<String, Vec<f64>> =
+        std::collections::HashMap::new();
+    let mut bad_rows = 0usize;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() != 2 + n_feat {
+            bad_rows += 1;
+            continue;
+        }
+        let stem = cols[0].to_string();
+        let src = cols[1].to_string();
+        let mut vals = Vec::with_capacity(n_feat);
+        for c in &cols[2..] {
+            let v: f64 = c.parse().unwrap_or(0.0);
+            vals.push(if v.is_finite() { v } else { 0.0 });
+        }
+        by_stem.insert(stem.clone(), src);
+        table.insert(stem, vals);
+    }
+    if bad_rows > 0 {
+        eprintln!(
+            "  warning: skipped {bad_rows} malformed rows in {}",
+            path.display()
+        );
+    }
+    (by_stem, names, table)
+}
+
 fn append_size_axes(features: &mut Vec<f64>, width: u32, height: u32) -> bool {
     if width == 0 || height == 0 {
         features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
@@ -4595,6 +4807,93 @@ fn load_cid22(base: &Path) -> Vec<ImagePair> {
     }
 
     println!("  CID22: {} pairs", pairs.len());
+    pairs
+}
+
+/// Load KonJND-1k. Emits one pair per (source, codec, file_idx) with
+/// `human_score` derived from the per-(source, codec) mean PJND
+/// threshold. See [`DatasetFormat::KonJnd1k`] for the score schedule.
+///
+/// The dataset has 504 JPEG sources (100 file levels each) and 504 BPG
+/// sources (51 levels each) — disjoint source sets. Total: 76,104 pairs.
+fn load_konjnd1k(base: &Path) -> Vec<ImagePair> {
+    let csv_path = base.join("subjective_ratings.csv");
+    if !csv_path.exists() {
+        eprintln!("Cannot find subjective_ratings.csv in {:?}", base);
+        return vec![];
+    }
+
+    let mut rdr = match csv::Reader::from_path(&csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Failed to open {}: {}", csv_path.display(), e);
+            return vec![];
+        }
+    };
+
+    let mut pairs = Vec::new();
+    let mut sources_seen = 0usize;
+    for record in rdr.records().flatten() {
+        if record.len() < 5 {
+            continue;
+        }
+        let image_id = record.get(0).unwrap_or(""); // e.g. "SRC0001.png"
+        let comp = record.get(1).unwrap_or(""); // "JPEG" or "BPG"
+        let mean_pjnd: f64 = match record.get(3).unwrap_or("").parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let stem = image_id.trim_end_matches(".png");
+        if stem.is_empty() {
+            continue;
+        }
+        let (subdir, ext, n_levels) = match comp {
+            "JPEG" => ("jpeg", "jpg", 100u32),
+            "BPG" => ("bpg", "png", 51u32),
+            _ => continue,
+        };
+        let ref_path = base.join("source_image").join(image_id);
+        if !ref_path.exists() {
+            continue;
+        }
+        sources_seen += 1;
+
+        // Score schedule. file_idx ∈ [1, n_levels].
+        // Below PJND: linear decline from 1.0 (idx=0) to 0.95 (idx=PJND).
+        // Above PJND: linear decline from 0.95 (idx=PJND) to 0.0 (idx=n_levels).
+        // Content-aware: a JPEG-tolerant source (high PJND) gives higher
+        // scores at the same file_idx than a fragile source (low PJND).
+        let pjnd_clamped = mean_pjnd.clamp(1.0, n_levels as f64 - 1.0);
+        let n_levels_f = n_levels as f64;
+        for level in 1..=n_levels {
+            let dist_name = format!("{stem}_{comp}_{level:03}.{ext}");
+            let dist_path = base.join(subdir).join(&dist_name);
+            if !dist_path.exists() {
+                continue;
+            }
+            let idx = level as f64;
+            let score = if idx <= pjnd_clamped {
+                // Below threshold: 1.0 → 0.95 over [0, PJND]
+                1.0 - 0.05 * (idx / pjnd_clamped)
+            } else {
+                // Above threshold: 0.95 → 0.0 over [PJND, n_levels]
+                let above = idx - pjnd_clamped;
+                let span = n_levels_f - pjnd_clamped;
+                (0.95 - 0.95 * (above / span)).max(0.0)
+            };
+            pairs.push(ImagePair {
+                reference: ref_path.clone(),
+                distorted: dist_path,
+                human_score: score,
+            });
+        }
+    }
+
+    println!(
+        "  KonJND-1k: {} pairs across {} (source, codec) combinations",
+        pairs.len(),
+        sources_seen
+    );
     pairs
 }
 

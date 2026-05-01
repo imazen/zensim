@@ -844,9 +844,9 @@ dependencies = [
 
 [[package]]
 name = "garb"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96bf7a00ed7fc01dae4e581831996672b2824746af4c0a658ee28ca3cbb823dc"
+checksum = "ae3f56f280a24621bef5778559c4502d10136565311efa37a7b4ca257dce00ed"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2582,6 +2582,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenanalyze"
+version = "0.1.0"
+dependencies = [
+ "archmage",
+ "garb",
+ "linear-srgb",
+ "magetypes",
+ "zenpixels",
+ "zenpixels-convert",
+]
+
+[[package]]
 name = "zenbench"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2631,9 +2643,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b45ae17fc05f120bfaef6f80966a929e911bf99fd0174b7f391a7b4b0fea2d1"
+checksum = "37ca9800adc8a4f4c5f270deb961f92eefe9755196058e169a2301b333d2fd45"
 dependencies = [
  "bytemuck",
  "imgref",
@@ -2643,9 +2655,9 @@ dependencies = [
 
 [[package]]
 name = "zenpixels-convert"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8448e21cea740838e8d7bde61ce22074e75d98b4b02757af71ac59342a930f6f"
+checksum = "1d0f4d117f75bb4d2471c7c0b940f27492839d1e23e83dd4ee7a53232c78076e"
 dependencies = [
  "archmage",
  "bytemuck",
@@ -2754,6 +2766,7 @@ dependencies = [
  "rgb",
  "ssimulacra2",
  "which",
+ "zenanalyze",
  "zenbench",
  "zenpnm",
  "zenpredict",

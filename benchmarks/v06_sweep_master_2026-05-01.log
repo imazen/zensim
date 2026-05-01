@@ -1,0 +1,42 @@
+[10:49:58] start combo=var feats=variance
+[10:49:58] start combo=lhe feats=luma_histogram_entropy
+[10:49:58] start combo=edge feats=edge_density
+[11:04:05] done combo=lhe best_val=0.7982 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_lhe_20260501T164958.bin
+[11:04:05] start combo=dctY feats=dct_compressibility_y
+[11:09:39] done combo=edge best_val=0.8201 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_edge_20260501T164958.bin
+[11:09:39] start combo=var_edge feats=variance,edge_density
+[11:10:23] done combo=var best_val=0.8268 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_var_20260501T164958.bin
+[11:10:23] start combo=var_chroma feats=variance,chroma_complexity
+[11:14:30] done combo=dctY best_val=0.8120 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_dctY_20260501T164958.bin
+[11:14:30] start combo=edge_chroma_unif feats=edge_density,chroma_complexity,uniformity
+[11:17:42] done combo=var_chroma best_val=0.8050 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_var_chroma_20260501T164958.bin
+[11:17:42] start combo=var_edge_lhe feats=variance,edge_density,luma_histogram_entropy
+[11:17:55] done combo=var_edge best_val=0.8356 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_var_edge_20260501T164958.bin
+[11:17:55] start combo=dct_hf feats=dct_compressibility_y,dct_compressibility_uv,high_freq_energy_ratio
+[11:24:52] done combo=edge_chroma_unif best_val=0.8170 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_edge_chroma_unif_20260501T164958.bin
+[11:24:52] start combo=content4 feats=variance,edge_density,luma_histogram_entropy,chroma_complexity
+[11:25:54] done combo=var_edge_lhe best_val=0.8112 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_var_edge_lhe_20260501T164958.bin
+[11:25:54] start combo=sharp_edge_unif_hf feats=laplacian_variance,edge_density,uniformity,high_freq_energy_ratio
+[11:30:41] done combo=dct_hf best_val=0.8374 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_dct_hf_20260501T164958.bin
+[11:30:41] start combo=ALL15 feats=variance,edge_density,chroma_complexity,luma_histogram_entropy,dct_compressibility_y,dct_compressibility_uv,high_freq_energy_ratio,uniformity,colourfulness,laplacian_variance,log_pixels,aspect_min_over_max,flat_color_block_ratio,gradient_fraction,hdr_present
+[11:35:16] done combo=sharp_edge_unif_hf best_val=0.8072 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_sharp_edge_unif_hf_20260501T164958.bin
+[11:38:38] done combo=ALL15 best_val=0.8213 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_ALL15_20260501T164958.bin
+[11:39:04] done combo=content4 best_val=0.8328 out=/mnt/v/output/zensim/synthetic-v2/runs/v06_content4_20260501T164958.bin
+=== sweep done 20260501T164958 ===
+
+## V0_6 sweep summary
+
+| combo | best_val_min_srocc |
+|---|--:|
+| var | 0.8268 |
+| edge | 0.8201 |
+| lhe | 0.7982 |
+| dctY | 0.8120 |
+| var_edge | 0.8356 |
+| var_chroma | 0.8050 |
+| edge_chroma_unif | 0.8170 |
+| var_edge_lhe | 0.8112 |
+| dct_hf | 0.8374 |
+| content4 | 0.8328 |
+| sharp_edge_unif_hf | 0.8072 |
+| ALL15 | 0.8213 |
