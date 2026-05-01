@@ -268,8 +268,13 @@ enum TargetMetric {
     GpuButteraugli,
     /// CPU SSIMULACRA2 (fast-ssim2)
     CpuSsim2,
-    /// CPU Butteraugli (butteraugli crate)
+    /// CPU Butteraugli max-norm (butteraugli crate `.score` field)
     CpuButteraugli,
+    /// CPU Butteraugli 3-norm via libjxl-style averaged p-norm
+    /// `((Σdᵖ/n)^(1/p) + (Σd^(2p)/n)^(1/(2p)) + (Σd^(4p)/n)^(1/(4p))) / 3` at p=3.
+    /// Reads `butteraugli_3norm` column produced by zensim-bench's
+    /// gen_butteraugli_3norm binary. Matches Cloudinary CID22 paper Table 4.
+    CpuButteraugli3Norm,
     /// DSSIM (structural dissimilarity)
     Dssim,
 }
@@ -1640,6 +1645,7 @@ fn main() {
                 Some(TargetMetric::GpuButteraugli) => "_gpu_butteraugli",
                 Some(TargetMetric::CpuSsim2) => "_cpu_ssim2",
                 Some(TargetMetric::CpuButteraugli) => "_cpu_butteraugli",
+                Some(TargetMetric::CpuButteraugli3Norm) => "_cpu_butteraugli3norm",
                 Some(TargetMetric::Dssim) => "_dssim",
                 None => "",
             };
@@ -4704,6 +4710,7 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
         TargetMetric::GpuButteraugli => col("gpu_butteraugli").or_else(|| col("butteraugli")),
         TargetMetric::CpuSsim2 => col("cpu_ssimulacra2"),
         TargetMetric::CpuButteraugli => col("cpu_butteraugli"),
+        TargetMetric::CpuButteraugli3Norm => col("butteraugli_3norm"),
         TargetMetric::Dssim => col("dssim"),
     }
     .unwrap_or_else(|| {

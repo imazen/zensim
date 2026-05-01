@@ -72,3 +72,4 @@ Cargo.toml.original.txt
 fuzz-*.log
 
 .workongoing
+.session-log-*
