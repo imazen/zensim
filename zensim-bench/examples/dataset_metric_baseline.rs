@@ -58,11 +58,21 @@ struct DatasetSpec {
     pairs: Vec<Pair>,
 }
 
+/// Calibration pair from KonJND-1k. Carries the codec subset (JPEG or
+/// BPG) — not used for SROCC, only for grouping in the calibration
+/// table.
+#[derive(Debug, Clone)]
+struct KonJndPair {
+    pair: Pair,
+    codec: String,
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut kadid: Option<PathBuf> = None;
     let mut tid: Option<PathBuf> = None;
     let mut cid22: Option<PathBuf> = None;
+    let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut max_pairs: usize = 500;
     while let Some(a) = args.next() {
@@ -70,6 +80,7 @@ fn main() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
             "--tid" => tid = Some(args.next().unwrap().into()),
             "--cid22" => cid22 = Some(args.next().unwrap().into()),
+            "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
             other => {
@@ -99,8 +110,8 @@ fn main() {
         });
     }
 
-    if datasets.is_empty() {
-        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22");
+    if datasets.is_empty() && konjnd.is_none() {
+        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --konjnd");
         std::process::exit(1);
     }
 
@@ -182,6 +193,265 @@ fn main() {
             started.elapsed().as_secs_f64()
         );
     }
+
+    // ---- KonJND-1k visually-lossless calibration ----
+    //
+    // KonJND-1k pairs source images with the distorted version at each
+    // source's mean PJND threshold ("just barely noticeable"). For every
+    // metric we report mean ± stdev across the 504 JPEG and 504 BPG
+    // sources. The Cloudinary CID22 paper Table 4 publishes these for
+    // SSIMULACRA 2 / Butteraugli / VMAF / etc. — comparing our numbers
+    // with that table cross-validates our pipeline implementation
+    // against the published reference values.
+    if let Some(p) = konjnd {
+        let pairs = load_konjnd(&p, usize::MAX);
+        let n_total = pairs.len();
+        if n_total >= 4 {
+            eprintln!("=== KonJND-1k (n={n_total}) ===");
+            let z_v04 = Zensim::new(ZensimProfile::PreviewV0_4);
+            let started = std::time::Instant::now();
+            let progress = AtomicUsize::new(0);
+            let log_every = (n_total / 20).max(1);
+            type CalibRow = (f64, f64, f64, f64); // v02_dist, v04_dist, ssim2, butter
+            let results: Vec<Option<(String, CalibRow)>> = pairs
+                .par_iter()
+                .map(|kp| {
+                    let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                    if p.is_multiple_of(log_every) {
+                        let elapsed = started.elapsed().as_secs_f64();
+                        let rate = p as f64 / elapsed;
+                        let eta = (n_total - p) as f64 / rate;
+                        eprintln!("  konjnd {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
+                    }
+                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref())
+                        .map(|row| (kp.codec.clone(), row))
+                })
+                .collect();
+            let scored: Vec<(String, CalibRow)> = results.into_iter().flatten().collect();
+            eprintln!(
+                "  konjnd done {}/{n_total} valid in {:.1}s",
+                scored.len(),
+                started.elapsed().as_secs_f64()
+            );
+
+            println!();
+            println!("## KonJND-1k visually-lossless calibration (Lin, Hosu, Saupe 2022)");
+            println!();
+            println!(
+                "Pairs at the per-source mean PJND (Probabilistic Just-Noticeable-Difference)\n\
+                 threshold. Each source's pair is the just-barely-perceptible distortion. The\n\
+                 Cloudinary CID22 paper Table 4 publishes these mean ± stdev anchors for\n\
+                 several metrics; comparing our SSIMULACRA 2 / Butteraugli numbers below with\n\
+                 that table cross-validates the pipeline."
+            );
+            for codec in ["JPEG", "BPG"] {
+                let subset: Vec<&CalibRow> = scored
+                    .iter()
+                    .filter_map(|(c, r)| (c == codec).then_some(r))
+                    .collect();
+                let n = subset.len();
+                if n == 0 {
+                    continue;
+                }
+                let v02_d: Vec<f64> = subset.iter().map(|r| r.0).collect();
+                let v04_d: Vec<f64> = subset.iter().map(|r| r.1).collect();
+                let ssim2: Vec<f64> = subset.iter().map(|r| r.2).collect();
+                let butter: Vec<f64> = subset.iter().map(|r| r.3).collect();
+                let m_v02 = mean(&v02_d);
+                let s_v02 = stddev(&v02_d, m_v02);
+                let m_v04 = mean(&v04_d);
+                let s_v04 = stddev(&v04_d, m_v04);
+                let m_ss = mean(&ssim2);
+                let s_ss = stddev(&ssim2, m_ss);
+                let m_ba = mean(&butter);
+                let s_ba = stddev(&butter, m_ba);
+                println!();
+                println!("### {codec} subset (n = {n})");
+                println!();
+                println!("| metric | mean | stdev | Cloudinary Table 4 (paper) |");
+                println!("|---|--:|--:|---|");
+                println!("| V0_2 raw distance | {m_v02:.4} | {s_v02:.4} | — |");
+                println!("| V0_4 raw distance | {m_v04:.4} | {s_v04:.4} | — |");
+                let (ss_ref, ba_ref) = match codec {
+                    "BPG" => ("65.38 ± 5.10", "1.528 ± 0.192"),
+                    "JPEG" => ("63.10 ± 4.65", "1.699 ± 0.229"),
+                    _ => ("—", "—"),
+                };
+                println!("| fast-ssim2 score | {m_ss:.2} | {s_ss:.2} | {ss_ref} |");
+                println!("| butteraugli 3-norm | {m_ba:.4} | {s_ba:.4} | {ba_ref} |");
+            }
+        }
+    }
+}
+
+fn process_konjnd_pair(
+    kp: &KonJndPair,
+    z_v04: &Zensim,
+    v04_bake: Option<&[u8]>,
+) -> Option<(f64, f64, f64, f64)> {
+    let p = &kp.pair;
+    let src_img = match image::open(&p.reference) {
+        Ok(img) => img.to_rgb8(),
+        Err(_) => return None,
+    };
+    let dst_img = match image::open(&p.distorted) {
+        Ok(img) => img.to_rgb8(),
+        Err(_) => return None,
+    };
+    let (w, h) = src_img.dimensions();
+    let (dw, dh) = dst_img.dimensions();
+    if w != dw || h != dh {
+        return None;
+    }
+    let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+    let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+    let w_us = w as usize;
+    let h_us = h as usize;
+    if w_us < 8 || h_us < 8 {
+        return None;
+    }
+    let s = RgbSlice::new(&src_pixels, w_us, h_us);
+    let d = RgbSlice::new(&dst_pixels, w_us, h_us);
+    let result = z_v04.compute(&s, &d).ok()?;
+    let features = result.features();
+    let n_v02 = zensim::profile::LINEAR_WEIGHTS_PREVIEW_V0_2.len();
+    if features.len() < n_v02 {
+        return None;
+    }
+    let v02_dot: f64 = features[..n_v02]
+        .iter()
+        .zip(zensim::profile::LINEAR_WEIGHTS_PREVIEW_V0_2.iter())
+        .map(|(f, w)| f * w)
+        .sum();
+    let v02_distance = v02_dot / 4.0;
+    let v04_distance = if let Some(bytes) = v04_bake {
+        let model = Model::from_bytes(bytes).ok()?;
+        let n_inputs = model.n_inputs();
+        if features.len() < n_inputs {
+            f64::NAN
+        } else {
+            let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
+            let mut p = Predictor::new(model);
+            p.predict(&f32_features).ok()?[0] as f64
+        }
+    } else {
+        f64::NAN
+    };
+    let s_img = Img::new(src_pixels.as_slice(), w_us, h_us);
+    let d_img = Img::new(dst_pixels.as_slice(), w_us, h_us);
+    let ssim2 = fast_ssim2::compute_ssimulacra2(s_img, d_img).ok()?;
+    let src_rgb8: &[RGB8] = bytemuck::cast_slice(&src_pixels);
+    let dst_rgb8: &[RGB8] = bytemuck::cast_slice(&dst_pixels);
+    let s_b = Img::new(src_rgb8, w_us, h_us);
+    let d_b = Img::new(dst_rgb8, w_us, h_us);
+    let bp = ButteraugliParams::default().with_compute_diffmap(true);
+    let butter = butteraugli::butteraugli(s_b, d_b, &bp).ok()?;
+    let three_norm = match &butter.diffmap {
+        Some(dm) => libjxl_pnorm(dm.buf(), 3.0),
+        None => f64::NAN,
+    };
+    Some((v02_distance, v04_distance, ssim2, three_norm))
+}
+
+/// libjxl's `ComputeDistanceP` for diffmap-of-floats. Source:
+/// `libjxl/lib/extras/metrics.cc`, `ComputeDistanceP` (slow path).
+///
+/// Despite the name "p-norm", it is the average of three p-norms at p,
+/// 2p, and 4p:
+///
+///   pnorm_libjxl(p) = ( (Σ d^p / n)^(1/p)
+///                     + (Σ d^(2p) / n)^(1/(2p))
+///                     + (Σ d^(4p) / n)^(1/(4p)) ) / 3
+///
+/// This is what the Cloudinary CID22 paper Table 4 reports as
+/// "Butteraugli 3-norm" — a single p-norm doesn't reproduce the
+/// published values.
+fn libjxl_pnorm(diffmap: &[f32], p: f64) -> f64 {
+    if diffmap.is_empty() {
+        return f64::NAN;
+    }
+    let mut sum1 = [0.0_f64; 3];
+    for &v in diffmap {
+        let d = v as f64;
+        let mut acc = d.powf(p);
+        sum1[0] += acc;
+        acc *= acc;
+        sum1[1] += acc;
+        acc *= acc;
+        sum1[2] += acc;
+    }
+    let one_per_pixels = 1.0 / diffmap.len() as f64;
+    let mut v = 0.0_f64;
+    for (i, &s) in sum1.iter().enumerate() {
+        let exponent = 1.0 / (p * (1u32 << i) as f64);
+        v += (one_per_pixels * s).powf(exponent);
+    }
+    v / 3.0
+}
+
+fn load_konjnd(base: &Path, max: usize) -> Vec<KonJndPair> {
+    let csv_path = base.join("subjective_ratings.csv");
+    let mut rdr = match csv::Reader::from_path(&csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        if record.len() < 5 {
+            continue;
+        }
+        let image_id = record.get(0).unwrap_or("");
+        let comp = record.get(1).unwrap_or("");
+        let mean_threshold: f64 = match record.get(3).unwrap_or("").parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let stem = image_id.trim_end_matches(".png");
+        if stem.is_empty() {
+            continue;
+        }
+        let level = mean_threshold.round().clamp(1.0, 100.0) as u32;
+        let (subdir, ext) = match comp {
+            "JPEG" => ("jpeg", "jpg"),
+            "BPG" => ("bpg", "png"),
+            _ => continue,
+        };
+        let dist_name = format!("{stem}_{comp}_{level:03}.{ext}");
+        let ref_path = base.join("source_image").join(image_id);
+        let dist_path = base.join(subdir).join(&dist_name);
+        if !dist_path.exists() {
+            continue;
+        }
+        pairs.push(KonJndPair {
+            pair: Pair {
+                reference: ref_path,
+                distorted: dist_path,
+                human_score: mean_threshold,
+            },
+            codec: comp.to_string(),
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+fn mean(v: &[f64]) -> f64 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.iter().sum::<f64>() / v.len() as f64
+}
+
+fn stddev(v: &[f64], m: f64) -> f64 {
+    if v.len() < 2 {
+        return 0.0;
+    }
+    (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() - 1) as f64).sqrt()
 }
 
 fn process_pair(
