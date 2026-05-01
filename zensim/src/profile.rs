@@ -135,13 +135,18 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 
 /// V0_4 placeholder MLP bytes — single-layer 228 → 1 linear MLP that
 /// reproduces V0_2 byte-for-byte. The per-input weights are
-/// `WEIGHTS_PREVIEW_V0_2[i] / num_scales` so the MLP forward output
-/// equals the V0_2 linear scorer's `raw_distance` (after V0_2's
+/// `LINEAR_WEIGHTS_PREVIEW_V0_2[i] / num_scales` so the MLP forward
+/// output equals the V0_2 linear scorer's `raw_distance` (after V0_2's
 /// post-divide by `num_scales`).
 ///
 /// This placeholder is replaced by trained weights once the V0_4
-/// training pipeline (`zensim-validate --algorithm mlp`) ships.
-fn v0_4_placeholder_bytes() -> &'static [u8] {
+/// training pipeline (`zensim-validate --algorithm mlp`) ships. Public
+/// alias [`mlp_bake_preview_v0_4`] is the stable accessor.
+///
+/// Sized for ZNPR v2: 128-byte header + 32-byte aligned scaler +
+/// 48-byte LayerEntry + weights + bias ≈ 1100 bytes. Built on first
+/// access, cached in a `LazyLock`.
+pub fn mlp_bake_preview_v0_4() -> &'static [u8] {
     use crate::mlp::bake::{BakeLayer, BakeRequest, bake_v2};
     use crate::mlp::{Activation, WeightDtype};
     use std::sync::LazyLock;
@@ -191,7 +196,7 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     num_scales: 4,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
-    mlp_bytes: Some(v0_4_placeholder_bytes),
+    mlp_bytes: Some(mlp_bake_preview_v0_4),
 };
 
 // --- Weight arrays ---
@@ -670,3 +675,21 @@ pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
     12.8104312758,
     0.0000000000, // Scale 3 Channel B
 ];
+
+// --- Canonical aliases ---
+//
+// Preferred name going forward — the explicit `LINEAR_` prefix
+// disambiguates from V0_4's MLP weights, which ship as packed ZNPR v2
+// bytes rather than a flat coefficient array. The unprefixed
+// `WEIGHTS_PREVIEW_V0_X` names are kept indefinitely for source
+// compatibility with code written against zensim 0.2.x and earlier.
+
+/// Alias for [`WEIGHTS_PREVIEW_V0_1`]. Linear scoring weights for the
+/// V0_1 profile, 228 entries (4 scales × 3 channels × 19 features).
+/// Use this name in new code; the unprefixed alias is kept forever.
+pub use self::WEIGHTS_PREVIEW_V0_1 as LINEAR_WEIGHTS_PREVIEW_V0_1;
+
+/// Alias for [`WEIGHTS_PREVIEW_V0_2`]. Linear scoring weights for the
+/// V0_2 profile. See [`LINEAR_WEIGHTS_PREVIEW_V0_1`] for naming
+/// rationale.
+pub use self::WEIGHTS_PREVIEW_V0_2 as LINEAR_WEIGHTS_PREVIEW_V0_2;

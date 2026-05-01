@@ -24,6 +24,10 @@ zenpnm = "0.1"
 bytemuck = { workspace = true }
 which = "8"
 zenbench = { workspace = true }
+zenpredict = { workspace = true }
+csv = "1"
+image = { workspace = true }
+rayon = { workspace = true }
 
 [[bench]]
 name = "bench_compare"
