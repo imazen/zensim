@@ -2745,14 +2745,18 @@ dependencies = [
  "bytemuck",
  "cc",
  "criterion",
+ "csv",
  "fast-ssim2",
+ "image",
  "imgref",
  "linear-srgb",
+ "rayon",
  "rgb",
  "ssimulacra2",
  "which",
  "zenbench",
  "zenpnm",
+ "zenpredict",
  "zensim",
 ]
 
