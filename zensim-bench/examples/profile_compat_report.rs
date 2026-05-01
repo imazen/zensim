@@ -76,6 +76,7 @@ fn main() {
     let mut kadid: Option<PathBuf> = None;
     let mut tid: Option<PathBuf> = None;
     let mut cid22: Option<PathBuf> = None;
+    let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
     let mut max_pairs: usize = usize::MAX;
@@ -85,6 +86,7 @@ fn main() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
             "--tid" => tid = Some(args.next().unwrap().into()),
             "--cid22" => cid22 = Some(args.next().unwrap().into()),
+            "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--output" => output = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
@@ -124,8 +126,8 @@ fn main() {
             pairs: load_cid22(&p, max_pairs),
         });
     }
-    if datasets.is_empty() {
-        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22");
+    if datasets.is_empty() && konjnd.is_none() {
+        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --konjnd");
         std::process::exit(1);
     }
 
@@ -484,6 +486,132 @@ fn main() {
         );
     }
 
+    // ---- KonJND-1k visually-lossless calibration ----
+    //
+    // KonJND-1k pairs at the per-source mean PJND threshold are the
+    // canonical "near visually lossless" anchors. The Cloudinary CID22
+    // paper (Sneyers, Ben Baruch, Vaxman, 2023, Table 4) publishes
+    // mean ± stdev for each metric on this corpus. We compute the same
+    // for V0_2 and V0_4 so both can be located on the same external
+    // calibration anchor.
+    if let Some(p) = konjnd {
+        let pairs = load_konjnd(&p, max_pairs);
+        let n_total = pairs.len();
+        eprintln!("=== KonJND-1k (n={n_total}) ===");
+        if n_total < 4 {
+            println!();
+            println!("## Visually-lossless calibration (KonJND-1k)");
+            println!();
+            println!(
+                "Loaded only {n_total} pairs from {} — skipping.",
+                p.display()
+            );
+        } else {
+            let started = std::time::Instant::now();
+            let progress = AtomicUsize::new(0);
+            let log_every = (n_total / 20).max(1);
+            let results: Vec<Option<Row>> = pairs
+                .par_iter()
+                .map(|pair| {
+                    let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                    if p.is_multiple_of(log_every) {
+                        let elapsed = started.elapsed().as_secs_f64();
+                        let rate = p as f64 / elapsed;
+                        let eta = (n_total - p) as f64 / rate;
+                        eprintln!("  konjnd {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
+                    }
+                    process_pair(pair, &z_v04, &v04_bake_bytes)
+                })
+                .collect();
+            let scored: Vec<(&Pair, Row)> = pairs
+                .iter()
+                .zip(results.iter())
+                .filter_map(|(p, r)| r.as_ref().map(|row| (p, *row)))
+                .collect();
+            eprintln!(
+                "  konjnd done {n_scored}/{n_total} valid in {:.1}s",
+                started.elapsed().as_secs_f64(),
+                n_scored = scored.len()
+            );
+
+            println!();
+            println!("## Visually-lossless calibration (KonJND-1k)");
+            println!();
+            println!(
+                "1008 source images split into 504 JPEG and 504 BPG (no overlap). For each\n\
+                 source, the Probabilistic Just-Noticeable-Difference (PJND) threshold is the\n\
+                 mean file index where observers report just noticing the compression artifact\n\
+                 ([Lin, Hosu, Saupe, IEEE T-CSVT 2022](https://ieeexplore.ieee.org/document/9802742)).\n\
+                 Pairs below are at `round(mean PJND)` per source — the canonical near\n\
+                 visually-lossless anchor.\n\
+                 \n\
+                 Cloudinary CID22 paper Table 4 publishes the same anchor for nine reference\n\
+                 metrics. Numbers below place V0_2 and V0_4 on the same external scale; mean ±\n\
+                 stdev that's a tight band means the metric agrees with the human PJND notion\n\
+                 of visually-lossless (low cross-source variance), regardless of where the mean\n\
+                 lands on the 0-100 score scale."
+            );
+            println!();
+            for codec in ["JPEG", "BPG"] {
+                let key = format!("konjnd:{codec}");
+                let subset: Vec<&(&Pair, Row)> = scored
+                    .iter()
+                    .filter(|(p, _)| p.codec_class == key)
+                    .collect();
+                let n = subset.len();
+                if n == 0 {
+                    continue;
+                }
+                let v02_d: Vec<f64> = subset.iter().map(|(_, r)| r.v02_distance).collect();
+                let v04_d: Vec<f64> = subset.iter().map(|(_, r)| r.v04_distance).collect();
+                let v02_s: Vec<f64> = subset.iter().map(|(_, r)| r.v02_score).collect();
+                let v04_s: Vec<f64> = subset.iter().map(|(_, r)| r.v04_score).collect();
+                println!("### {codec} subset (n = {n})");
+                println!();
+                let m_v02_d = mean(&v02_d);
+                let s_v02_d = stddev(&v02_d, m_v02_d);
+                let m_v04_d = mean(&v04_d);
+                let s_v04_d = stddev(&v04_d, m_v04_d);
+                let m_v02_s = mean(&v02_s);
+                let s_v02_s = stddev(&v02_s, m_v02_s);
+                let m_v04_s = mean(&v04_s);
+                let s_v04_s = stddev(&v04_s, m_v04_s);
+                println!("| metric | mean | stdev |");
+                println!("|---|--:|--:|");
+                println!("| V0_2 raw distance | {m_v02_d:.4} | {s_v02_d:.4} |");
+                println!("| V0_4 raw distance | {m_v04_d:.4} | {s_v04_d:.4} |");
+                println!("| V0_2 score | {m_v02_s:.2} | {s_v02_s:.2} |");
+                println!("| V0_4 score | {m_v04_s:.2} | {s_v04_s:.2} |");
+                println!();
+                let table4 = match codec {
+                    "BPG" => {
+                        "Cloudinary Table 4 reference values for BPG at PJND:\n\
+                         - SSIMULACRA 2: 65.38 ± 5.10\n\
+                         - DSSIM ×1000: 3.357 ± 1.267\n\
+                         - Butteraugli 3-norm: 1.528 ± 0.192\n\
+                         - MS-SSIM ×100: 99.21 ± 0.40\n\
+                         - VMAF: 90.05 ± 2.25\n\
+                         - PSNR-Y: 39.61 ± 2.98\n\
+                         - PSNR-HVS: 40.31 ± 1.78"
+                    }
+                    "JPEG" => {
+                        "Cloudinary Table 4 reference values for JPEG at PJND:\n\
+                         - SSIMULACRA 2: 63.10 ± 4.65\n\
+                         - DSSIM ×1000: 3.817 ± 1.297\n\
+                         - Butteraugli 3-norm: 1.699 ± 0.229\n\
+                         - MS-SSIM ×100: 99.22 ± 0.38\n\
+                         - VMAF: 91.86 ± 1.90\n\
+                         - PSNR-Y: 36.70 ± 3.79\n\
+                         - PSNR-HVS: 39.96 ± 1.79"
+                    }
+                    _ => "",
+                };
+                println!("{table4}");
+                println!();
+            }
+        }
+    }
+
     // Write the per-pair CSV for downstream analysis.
     if let Some(out) = output {
         eprintln!("writing {} rows to {}", all_rows_csv.len(), out.display());
@@ -725,6 +853,80 @@ fn load_cid22(base: &Path, max: usize) -> Vec<Pair> {
             codec_class: format!("cid22:{encoder}"),
             quality_class: q,
             human_score: mcos,
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// Load KonJND-1k pairs at the mean PJND threshold.
+///
+/// CSV format (`subjective_ratings.csv`):
+///   `image_id,Compression type,No. of ratings,mean,std,ratings`
+///
+/// File layout under `base`:
+///   `source_image/SRC{NNNN}.png`
+///   `jpeg/SRC{NNNN}_JPEG_{NNN}.jpg`     — 504 sources, 100 levels each
+///   `bpg/SRC{NNNN}_BPG_{NNN}.png`       — 504 sources, 51 levels each
+///
+/// `mean` is the average index where observers just barely notice the
+/// distortion. We pair the source with the distorted image at
+/// `round(mean)` — that's the just-noticeable-difference pair, the
+/// canonical "near visually lossless" anchor for this corpus.
+///
+/// Sources are split disjointly between the JPEG and BPG subsets — each
+/// SRC**** appears in exactly one of them.
+///
+/// Polarity note: `human_score` here is the PJND threshold value (1..N
+/// where N is the number of distortion levels). Higher threshold = the
+/// codec degrades more gracefully on this source. It is NOT a quality
+/// MOS, so SROCC against it has different semantics than KADID/TID/CID22
+/// — the visually-lossless calibration section treats it accordingly.
+fn load_konjnd(base: &Path, max: usize) -> Vec<Pair> {
+    let csv_path = base.join("subjective_ratings.csv");
+    let mut rdr = match csv::Reader::from_path(&csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        if record.len() < 5 {
+            continue;
+        }
+        let image_id = record.get(0).unwrap_or(""); // e.g. "SRC0001.png"
+        let comp = record.get(1).unwrap_or(""); // "JPEG" or "BPG"
+        let mean: f64 = match record.get(3).unwrap_or("").parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let stem = image_id.trim_end_matches(".png");
+        if stem.is_empty() {
+            continue;
+        }
+        let level = mean.round().clamp(1.0, 100.0) as u32;
+        let (subdir, ext) = match comp {
+            "JPEG" => ("jpeg", "jpg"),
+            "BPG" => ("bpg", "png"),
+            _ => continue,
+        };
+        let dist_name = format!("{stem}_{comp}_{level:03}.{ext}");
+        let ref_path = base.join("source_image").join(image_id);
+        let dist_path = base.join(subdir).join(&dist_name);
+        if !dist_path.exists() {
+            // out-of-range threshold (e.g., BPG level above 51) — skip
+            continue;
+        }
+        pairs.push(Pair {
+            reference: ref_path,
+            distorted: dist_path,
+            codec_class: format!("konjnd:{comp}"),
+            quality_class: format!("{level:03}"),
+            human_score: mean,
         });
         if pairs.len() >= max {
             break;

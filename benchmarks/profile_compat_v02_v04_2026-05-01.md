@@ -203,3 +203,55 @@ Pairs where V0_2 and V0_4 score the SAME comparison most differently. Useful for
 | KADIK10k | I25.png | kadid:23 | 05 | -100.00 | 53.49 | +153.49 |
 | KADIK10k | I47.png | kadid:25 | 01 | -53.45 | 100.00 | +153.45 |
 | TID2013 | i04.BMP | tid:05 | 5 | -53.34 | 100.00 | +153.34 |
+
+## Visually-lossless calibration (KonJND-1k)
+
+1008 source images split into 504 JPEG and 504 BPG (no overlap). For each
+source, the Probabilistic Just-Noticeable-Difference (PJND) threshold is the
+mean file index where observers report just noticing the compression artifact
+([Lin, Hosu, Saupe, IEEE T-CSVT 2022](https://ieeexplore.ieee.org/document/9802742)).
+Pairs below are at `round(mean PJND)` per source — the canonical near
+visually-lossless anchor.
+
+Cloudinary CID22 paper Table 4 publishes the same anchor for nine reference
+metrics. Numbers below place V0_2 and V0_4 on the same external scale; mean ±
+stdev that's a tight band means the metric agrees with the human PJND notion
+of visually-lossless (low cross-source variance), regardless of where the mean
+lands on the 0-100 score scale.
+
+### JPEG subset (n = 504)
+
+| metric | mean | stdev |
+|---|--:|--:|
+| V0_2 raw distance | 2.1120 | 0.4455 |
+| V0_4 raw distance | -6.0101 | 1.2995 |
+| V0_2 score | 69.76 | 4.45 |
+| V0_4 score | 100.00 | 0.00 |
+
+Cloudinary Table 4 reference values for JPEG at PJND:
+- SSIMULACRA 2: 63.10 ± 4.65
+- DSSIM ×1000: 3.817 ± 1.297
+- Butteraugli 3-norm: 1.699 ± 0.229
+- MS-SSIM ×100: 99.22 ± 0.38
+- VMAF: 91.86 ± 1.90
+- PSNR-Y: 36.70 ± 3.79
+- PSNR-HVS: 39.96 ± 1.79
+
+### BPG subset (n = 504)
+
+| metric | mean | stdev |
+|---|--:|--:|
+| V0_2 raw distance | 1.8835 | 0.4378 |
+| V0_4 raw distance | -6.1630 | 1.5266 |
+| V0_2 score | 72.12 | 4.51 |
+| V0_4 score | 100.00 | 0.00 |
+
+Cloudinary Table 4 reference values for BPG at PJND:
+- SSIMULACRA 2: 65.38 ± 5.10
+- DSSIM ×1000: 3.357 ± 1.267
+- Butteraugli 3-norm: 1.528 ± 0.192
+- MS-SSIM ×100: 99.21 ± 0.40
+- VMAF: 90.05 ± 2.25
+- PSNR-Y: 39.61 ± 2.98
+- PSNR-HVS: 40.31 ± 1.78
+
