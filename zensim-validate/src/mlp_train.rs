@@ -59,6 +59,37 @@ pub struct MlpHyperparams {
     /// 0 disables early stopping.
     pub early_stop_patience: usize,
     pub validation_policy: ValidationPolicy,
+    /// Coefficient for the magnitude-matching auxiliary loss. 0 disables
+    /// (pure RankNet, V0_4 default). When > 0, adds
+    /// `λ · (pred_diff − α · target_diff)²` per pair, where
+    /// `target_diff = human_score_a − human_score_b` and `α` is
+    /// `magnitude_match_alpha`. Pins the *magnitude* of pair-score
+    /// differences to a multiple of the target difference, not just the
+    /// sign — gives the MLP slope-continuity guidance that pure RankNet
+    /// lacks.
+    pub magnitude_match_lambda: f64,
+    /// Scale factor `α` in the magnitude-matching term. Choose
+    /// approximately `std(pred_diff) / std(target_diff)` after warmup.
+    /// Default 30 — rough match for V0_4 raw distance scale (~30) vs
+    /// normalized human_score scale (~1).
+    pub magnitude_match_alpha: f64,
+    /// Fraction of training pair samples drawn from the "low-quality"
+    /// band (defined by `low_band_target_min`..`low_band_target_max` on
+    /// the human_score scale). 0.0 (default) disables — sampling stays
+    /// uniform over the group. 0.5 means half of every batch is drawn
+    /// from the low-band index list, the other half uniform.
+    ///
+    /// For synthetic SSIM2-target training, human_score is
+    /// `((raw_ssim2 + 50) / 150).clamp(0, 1)`, so the operationally-
+    /// critical SSIM2 [0, 60] band corresponds to human_score [0.333,
+    /// 0.733] — the default range below.
+    ///
+    /// Use to counteract the synthetic dataset's natural bias toward
+    /// SSIM2 75-90 (28% of pairs) at the expense of the 25-60 band
+    /// (~25% of pairs but where most web compression decisions live).
+    pub low_band_oversample: f64,
+    pub low_band_target_min: f64,
+    pub low_band_target_max: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -74,6 +105,11 @@ impl Default for MlpHyperparams {
             l2_lambda: 1e-5,
             early_stop_patience: 50,
             validation_policy: ValidationPolicy::Min,
+            magnitude_match_lambda: 0.0,
+            magnitude_match_alpha: 30.0,
+            low_band_oversample: 0.0,
+            low_band_target_min: 0.333,
+            low_band_target_max: 0.733,
         }
     }
 }
@@ -234,6 +270,46 @@ pub fn train_mlp(
             .collect()
     };
 
+    // V0_7 sampler bias: pre-compute per-group "low-band" index lists
+    // for oversampling pairs whose target falls in the operationally-
+    // critical band. Empty when oversampling is disabled or when no
+    // pairs fall in the band.
+    let low_band_indices: Vec<Vec<usize>> = if hyperparams.low_band_oversample > 0.0 {
+        groups
+            .iter()
+            .map(|g| {
+                g.human_scores
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &s)| {
+                        (s.is_finite()
+                            && s >= hyperparams.low_band_target_min
+                            && s <= hyperparams.low_band_target_max)
+                            .then_some(i)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if hyperparams.low_band_oversample > 0.0 {
+        for (gi, ix) in low_band_indices.iter().enumerate() {
+            log_line(
+                &format!(
+                    "  low-band pool: '{}' has {}/{} pairs in [{:.3}, {:.3}] (oversample fraction {:.2})",
+                    groups[gi].name,
+                    ix.len(),
+                    groups[gi].human_scores.len(),
+                    hyperparams.low_band_target_min,
+                    hyperparams.low_band_target_max,
+                    hyperparams.low_band_oversample,
+                ),
+                log,
+            );
+        }
+    }
+
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
             * 0.5
@@ -252,8 +328,27 @@ pub fn train_mlp(
             if n < 2 {
                 continue;
             }
-            let ia = (rng.next_u64() as usize) % n;
-            let ib = (rng.next_u64() as usize) % n;
+            // V0_7 low-band oversampling: with the configured probability,
+            // draw both endpoints from the low-band pool for this group.
+            // Falls back to uniform sampling when the pool is empty (the
+            // low band might not exist for some validation-only groups).
+            let use_low_band = hyperparams.low_band_oversample > 0.0
+                && !low_band_indices.is_empty()
+                && !low_band_indices[g_idx].is_empty()
+                && rng.next_f64_unit() < hyperparams.low_band_oversample;
+            let (ia, ib) = if use_low_band {
+                let pool = &low_band_indices[g_idx];
+                let lp = pool.len();
+                (
+                    pool[(rng.next_u64() as usize) % lp],
+                    pool[(rng.next_u64() as usize) % lp],
+                )
+            } else {
+                (
+                    (rng.next_u64() as usize) % n,
+                    (rng.next_u64() as usize) % n,
+                )
+            };
             if ia == ib {
                 continue;
             }
@@ -264,7 +359,8 @@ pub fn train_mlp(
             let (ya, ha_pre, ha) = forward(xa, &w1, &b1, &w2, &b2, n_features, n_hidden, hyperparams.leaky_alpha);
             let (yb, hb_pre, hb) = forward(xb, &w1, &b1, &w2, &b2, n_features, n_hidden, hyperparams.leaky_alpha);
 
-            let target = (g.human_scores[ia] - g.human_scores[ib]).signum();
+            let target_signed = g.human_scores[ia] - g.human_scores[ib];
+            let target = target_signed.signum();
             if target == 0.0 {
                 continue;
             }
@@ -275,7 +371,25 @@ pub fn train_mlp(
             n_steps += 1;
 
             let sig_z = 1.0 / (1.0 + (-z).exp());
-            let dl_d_pred_diff = -target * sig_z;
+            let mut dl_d_pred_diff = -target * sig_z;
+
+            // Magnitude-matching auxiliary loss: pins pred_diff to be
+            // proportional to target_signed (not just the right sign).
+            // Adds λ·(pred_diff − α·target_signed)² to the loss; gradient
+            // through pred_diff: 2·λ·(pred_diff − α·target_signed). Note
+            // target_signed is in human_score units (typically ~[-1, 1])
+            // and pred_diff is in raw V0_4 distance units (typically
+            // ~[-30, 30]), so α ≈ 30 brings them to the same scale.
+            // Disabled when λ == 0 (pure RankNet, V0_4 default).
+            if hyperparams.magnitude_match_lambda > 0.0 {
+                let mag_residual =
+                    pred_diff - hyperparams.magnitude_match_alpha * target_signed;
+                let mag_loss =
+                    hyperparams.magnitude_match_lambda * mag_residual * mag_residual;
+                total_loss += mag_loss;
+                dl_d_pred_diff += 2.0 * hyperparams.magnitude_match_lambda * mag_residual;
+            }
+
             let dl_dya = -dl_d_pred_diff;
             let dl_dyb = dl_d_pred_diff;
 

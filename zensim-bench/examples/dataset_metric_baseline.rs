@@ -35,7 +35,9 @@
 //!     --v04-bake /mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin \
 //!     --max-pairs 500
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use butteraugli::ButteraugliParams;
@@ -44,6 +46,99 @@ use rayon::prelude::*;
 use rgb::RGB8;
 use zenpredict::{Model, Predictor};
 use zensim::{RgbSlice, Zensim, ZensimProfile};
+
+/// Optional V0_6 augmentation: per-reference zenanalyze features looked
+/// up by file stem (matching the `zensim-validate` runtime path). Loaded
+/// from a `gen_zenanalyze_features` TSV. `selected` indexes the columns
+/// from the TSV header in the order they should be appended.
+#[derive(Debug, Clone)]
+struct ZenanalyzeAugment {
+    table: Arc<HashMap<String, Vec<f64>>>,
+    selected: Vec<usize>,
+    n_extras: usize,
+}
+
+impl ZenanalyzeAugment {
+    fn lookup(&self, ref_path: &Path) -> Vec<f64> {
+        let stem = ref_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        match self.table.get(stem) {
+            Some(vec) => self.selected.iter().map(|&i| vec[i]).collect(),
+            None => vec![0.0_f64; self.n_extras],
+        }
+    }
+}
+
+fn load_zenanalyze_tsv(path: &Path, features: Option<&str>) -> ZenanalyzeAugment {
+    let data = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("failed to read --zenanalyze-tsv {}: {e}", path.display());
+        std::process::exit(1);
+    });
+    let mut lines = data.lines();
+    let header = lines.next().unwrap_or("");
+    let cols: Vec<&str> = header.split('\t').collect();
+    if cols.len() < 3 || cols[0] != "stem" || cols[1] != "source_path" {
+        eprintln!(
+            "TSV {} header must start 'stem\\tsource_path\\t...' (got {cols:?})",
+            path.display()
+        );
+        std::process::exit(1);
+    }
+    let names: Vec<String> = cols[2..].iter().map(|s| s.to_string()).collect();
+    let n_feat = names.len();
+    let selected: Vec<usize> = if let Some(spec) = features {
+        let mut idx = Vec::new();
+        for raw in spec.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            match names.iter().position(|n| n.eq_ignore_ascii_case(raw)) {
+                Some(i) => idx.push(i),
+                None => {
+                    eprintln!(
+                        "--zenanalyze-features '{raw}' not in TSV header [{}]",
+                        names.join(",")
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        idx
+    } else {
+        (0..n_feat).collect()
+    };
+    let mut table: HashMap<String, Vec<f64>> = HashMap::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() != 2 + n_feat {
+            continue;
+        }
+        let stem = cols[0].to_string();
+        let mut vals = Vec::with_capacity(n_feat);
+        for c in &cols[2..] {
+            let v: f64 = c.parse().unwrap_or(0.0);
+            vals.push(if v.is_finite() { v } else { 0.0 });
+        }
+        table.insert(stem, vals);
+    }
+    let n_extras = selected.len();
+    eprintln!(
+        "loaded zenanalyze TSV: {} stems × {n_extras} features [{}]",
+        table.len(),
+        selected
+            .iter()
+            .map(|&i| names[i].as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    ZenanalyzeAugment {
+        table: Arc::new(table),
+        selected,
+        n_extras,
+    }
+}
 
 #[derive(Debug, Clone)]
 struct Pair {
@@ -75,6 +170,9 @@ fn main() {
     let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut max_pairs: usize = 500;
+    let mut per_pair_output: Option<PathBuf> = None;
+    let mut zenanalyze_tsv: Option<PathBuf> = None;
+    let mut zenanalyze_features: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
@@ -83,12 +181,18 @@ fn main() {
             "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
+            "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
+            "--zenanalyze-tsv" => zenanalyze_tsv = Some(args.next().unwrap().into()),
+            "--zenanalyze-features" => zenanalyze_features = Some(args.next().unwrap()),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
             }
         }
     }
+    let augment: Option<ZenanalyzeAugment> = zenanalyze_tsv
+        .as_ref()
+        .map(|p| load_zenanalyze_tsv(p, zenanalyze_features.as_deref()));
 
     let mut datasets = Vec::new();
     if let Some(p) = kadid {
@@ -132,6 +236,25 @@ fn main() {
     println!("| Dataset | n | V0_2 | V0_4 (bake) | fast-ssim2 | butteraugli |");
     println!("|---------|--:|:----:|:-----------:|:----------:|:-----------:|");
 
+    // Optional per-pair CSV: dataset, reference, codec, quality, human, v02_dist, v04_dist, ssim2, butter
+    let mut per_pair_writer: Option<csv::Writer<std::fs::File>> =
+        per_pair_output.as_ref().map(|p| {
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            let mut w = csv::Writer::from_path(p).expect("open per-pair csv");
+            w.write_record([
+                "dataset",
+                "human_score",
+                "v02_distance",
+                "v04_distance",
+                "fast_ssim2_score",
+                "butter_3norm",
+            ])
+            .unwrap();
+            w
+        });
+
     for ds in &datasets {
         let n = ds.pairs.len();
         eprintln!("=== {} (n={n}) ===", ds.name);
@@ -156,7 +279,7 @@ fn main() {
                     let eta = (n - p) as f64 / rate;
                     eprintln!("  {p}/{n} ({rate:.1}/s, ETA {eta:.0}s)");
                 }
-                process_pair(pair, &z_v04, v04_bake_bytes.as_deref())
+                process_pair(pair, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref())
             })
             .collect();
 
@@ -187,6 +310,21 @@ fn main() {
             "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} |",
             ds.name, n_valid, srocc_v02, srocc_v04, srocc_ssim2, srocc_butter
         );
+
+        if let Some(w) = per_pair_writer.as_mut() {
+            for row in &pairs_with {
+                w.write_record([
+                    ds.name,
+                    &format!("{:.6}", row.0),
+                    &format!("{:.6}", row.1),
+                    &format!("{:.6}", row.2),
+                    &format!("{:.4}", row.3),
+                    &format!("{:.6}", row.4),
+                ])
+                .unwrap();
+            }
+            w.flush().unwrap();
+        }
 
         eprintln!(
             "  done {n_valid}/{n} valid in {:.1}s",
@@ -223,7 +361,7 @@ fn main() {
                         let eta = (n_total - p) as f64 / rate;
                         eprintln!("  konjnd {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
                     }
-                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref())
+                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref())
                         .map(|row| (kp.codec.clone(), row))
                 })
                 .collect();
@@ -288,6 +426,7 @@ fn process_konjnd_pair(
     kp: &KonJndPair,
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
+    augment: Option<&ZenanalyzeAugment>,
 ) -> Option<(f64, f64, f64, f64)> {
     let p = &kp.pair;
     let src_img = match image::open(&p.reference) {
@@ -324,13 +463,23 @@ fn process_konjnd_pair(
         .map(|(f, w)| f * w)
         .sum();
     let v02_distance = v02_dot / 4.0;
+    let augmented_features: Vec<f64> = if let Some(a) = augment {
+        let mut v: Vec<f64> = features.to_vec();
+        v.extend_from_slice(&a.lookup(&p.reference));
+        v
+    } else {
+        features.to_vec()
+    };
     let v04_distance = if let Some(bytes) = v04_bake {
         let model = Model::from_bytes(bytes).ok()?;
         let n_inputs = model.n_inputs();
-        if features.len() < n_inputs {
+        if augmented_features.len() < n_inputs {
             f64::NAN
         } else {
-            let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
+            let f32_features: Vec<f32> = augmented_features[..n_inputs]
+                .iter()
+                .map(|&v| v as f32)
+                .collect();
             let mut p = Predictor::new(model);
             p.predict(&f32_features).ok()?[0] as f64
         }
@@ -458,6 +607,7 @@ fn process_pair(
     pair: &Pair,
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
+    augment: Option<&ZenanalyzeAugment>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
     let src_img = match image::open(&pair.reference) {
         Ok(img) => img.to_rgb8(),
@@ -503,13 +653,25 @@ fn process_pair(
     let v02 = v02_dot / 4.0; // V0_2 has num_scales = 4
 
     // V0_4 trained bake: load model, run Predictor on the features.
+    // If augment (V0_6 zenanalyze TSV) is set, append per-reference
+    // analysis features before slicing to the model's n_inputs.
+    let augmented_features: Vec<f64> = if let Some(a) = augment {
+        let mut v: Vec<f64> = features.to_vec();
+        v.extend_from_slice(&a.lookup(&pair.reference));
+        v
+    } else {
+        features.to_vec()
+    };
     let v04 = if let Some(bytes) = v04_bake {
         let model = Model::from_bytes(bytes).ok()?;
         let n_inputs = model.n_inputs();
-        if features.len() < n_inputs {
+        if augmented_features.len() < n_inputs {
             f64::NAN
         } else {
-            let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
+            let f32_features: Vec<f32> = augmented_features[..n_inputs]
+                .iter()
+                .map(|&v| v as f32)
+                .collect();
             let mut p = Predictor::new(model);
             p.predict(&f32_features).ok()?[0] as f64
         }
