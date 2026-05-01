@@ -46,6 +46,8 @@ node_modules/
 *.bmp
 *.tiff
 *.tif
+# Benchmark/report charts are intentional deliverables
+!benchmarks/*.png
 
 # OS
 .DS_Store

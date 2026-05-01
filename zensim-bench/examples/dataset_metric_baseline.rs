@@ -75,6 +75,7 @@ fn main() {
     let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut max_pairs: usize = 500;
+    let mut per_pair_output: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
@@ -83,6 +84,7 @@ fn main() {
             "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
+            "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -131,6 +133,25 @@ fn main() {
 
     println!("| Dataset | n | V0_2 | V0_4 (bake) | fast-ssim2 | butteraugli |");
     println!("|---------|--:|:----:|:-----------:|:----------:|:-----------:|");
+
+    // Optional per-pair CSV: dataset, reference, codec, quality, human, v02_dist, v04_dist, ssim2, butter
+    let mut per_pair_writer: Option<csv::Writer<std::fs::File>> =
+        per_pair_output.as_ref().map(|p| {
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            let mut w = csv::Writer::from_path(p).expect("open per-pair csv");
+            w.write_record([
+                "dataset",
+                "human_score",
+                "v02_distance",
+                "v04_distance",
+                "fast_ssim2_score",
+                "butter_3norm",
+            ])
+            .unwrap();
+            w
+        });
 
     for ds in &datasets {
         let n = ds.pairs.len();
@@ -187,6 +208,21 @@ fn main() {
             "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} |",
             ds.name, n_valid, srocc_v02, srocc_v04, srocc_ssim2, srocc_butter
         );
+
+        if let Some(w) = per_pair_writer.as_mut() {
+            for row in &pairs_with {
+                w.write_record([
+                    ds.name,
+                    &format!("{:.6}", row.0),
+                    &format!("{:.6}", row.1),
+                    &format!("{:.6}", row.2),
+                    &format!("{:.4}", row.3),
+                    &format!("{:.6}", row.4),
+                ])
+                .unwrap();
+            }
+            w.flush().unwrap();
+        }
 
         eprintln!(
             "  done {n_valid}/{n} valid in {:.1}s",
