@@ -815,6 +815,41 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+    /// Compare source and distorted images, returning the **extended** feature
+    /// set (300 features at the default 4-scale, 3-channel layout) instead of
+    /// the standard 228 weighted-only set.
+    ///
+    /// The extended set adds 6 masked features (SSIM/edge/MSE weighted by
+    /// source flatness) per channel per scale on top of the 228 features
+    /// returned by [`Zensim::compute`]. The score is identical to `compute()`
+    /// — only the first 228 features have non-zero weights — but the extra 72
+    /// features are useful inputs for retraining downstream models (selectors,
+    /// regressors) without re-running the costly multi-scale stats pass.
+    ///
+    /// Layout (default profile, 4 scales × 3 channels):
+    /// - 0..156   — basic features (13/channel/scale): SSIM/edge/HF errors
+    /// - 156..228 — peak features (6/channel/scale): SSIM/edge max + p95
+    /// - 228..300 — masked features (6/channel/scale): SSIM/edge/MSE flatness-weighted
+    ///
+    /// Use [`FeatureView`] for named access. Cost overhead vs `compute()` is
+    /// modest — the masking pass reuses the already-computed flatness map.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    pub fn compute_extended_features(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        validate_pair(source, distorted)?;
+        let mut config = config_from_params(params, self.parallel);
+        config.extended_features = true;
+        let result = compute_with_config_inner(source, distorted, &config, params.weights);
+        Ok(result.with_profile(self.profile))
+    }
+
     /// Pre-compute reference image data for batch comparison.
     ///
     /// # Errors
@@ -1808,6 +1843,54 @@ mod tests {
             all_nonzero,
             default_nonzero,
         );
+    }
+
+    /// `Zensim::compute_extended_features` returns 300 features at the
+    /// default 4-scale, 3-channel layout, and produces a score that matches
+    /// `Zensim::compute` to within a small numerical tolerance (the extra
+    /// 72 features have zero weight, so the weighted score is unchanged).
+    #[test]
+    fn compute_extended_features_returns_300() {
+        use crate::source::RgbSlice;
+        let w = 64;
+        let h = 64;
+        let (src, dst) = make_gradient_pair(w, h);
+        let src_img = RgbSlice::new(&src, w, h);
+        let dst_img = RgbSlice::new(&dst, w, h);
+
+        let z = crate::Zensim::new(crate::ZensimProfile::latest());
+        let standard = z.compute(&src_img, &dst_img).unwrap();
+        let extended = z.compute_extended_features(&src_img, &dst_img).unwrap();
+
+        assert_eq!(standard.features().len(), 228);
+        assert_eq!(extended.features().len(), 300);
+        // Score should match: extra features have zero weight in the
+        // weighted-distance calculation.
+        assert!(
+            (standard.score() - extended.score()).abs() < 0.01,
+            "standard score {} vs extended score {}",
+            standard.score(),
+            extended.score()
+        );
+        // Sanity: features 0..228 should agree wherever the standard path
+        // populated them. The standard path skips channels whose weights are
+        // all-zero (leaving 0.0 in those slots); the extended path forces
+        // every channel/feature to be computed. So we only enforce equality
+        // on slots the standard path actually filled.
+        for i in 0..228 {
+            let a = standard.features()[i];
+            let b = extended.features()[i];
+            if a != 0.0 {
+                assert!(
+                    (a - b).abs() < 1e-6,
+                    "feature {i}: standard {a} vs extended {b}"
+                );
+            }
+        }
+        // The trailing 72 masked features should be non-negative.
+        for (i, &f) in extended.features()[228..].iter().enumerate() {
+            assert!(f >= 0.0, "extended feature {} is negative: {}", 228 + i, f);
+        }
     }
 
     /// Helper: create a gradient test image pair.

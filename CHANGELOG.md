@@ -9,6 +9,16 @@ _(none currently queued)_
 
 ## zensim
 
+### [0.2.8] - 2026-05-04
+
+### Added
+- `Zensim::compute_extended_features()` — public method returning the full
+  300-feature extended set (basic + peaks + masked) instead of the standard
+  228 set. Score is identical to `compute()` (the extra 72 masked features
+  have zero weight in the standard profiles); the extra features are useful
+  inputs for downstream model training without re-running the multi-scale
+  stats pass. Available without the `training` feature flag.
+
 ### [0.2.7] - 2026-04-27
 
 ### Added
