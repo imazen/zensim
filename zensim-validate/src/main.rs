@@ -1328,16 +1328,19 @@ fn main() {
         for ds in all_datasets.iter_mut() {
             for (row_idx, key) in ds.ref_keys.iter().enumerate() {
                 total_pairs += 1;
-                let extras: &[f64] = match table.get(key.as_str()) {
+                let row = &mut ds.features[row_idx];
+                match table.get(key.as_str()) {
                     Some(vec) => {
                         hit_pairs += 1;
-                        vec
+                        for &si in &selected {
+                            row.push(vec[si]);
+                        }
                     }
-                    None => &zero_fill,
-                };
-                let row = &mut ds.features[row_idx];
-                for &si in &selected {
-                    row.push(extras[si]);
+                    None => {
+                        for v in &zero_fill {
+                            row.push(*v);
+                        }
+                    }
                 }
             }
         }
