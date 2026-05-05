@@ -179,6 +179,9 @@ pub fn mlp_bake_preview_v0_4() -> &'static [u8] {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
         })
         .expect("v0_4 placeholder bake")
     });

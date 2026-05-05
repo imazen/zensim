@@ -19,7 +19,7 @@ set -euo pipefail
 EXTENDED_CSV="${1:-/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv}"
 TS=$(date -u +%Y%m%dT%H%M%S)
 
-ROOT=/home/lilith/work/zen/zensim--v04-mlp
+ROOT=${ROOT:-/home/lilith/work/zen/zensim}
 VALIDATE=$ROOT/target/release/zensim-validate
 EVAL=$ROOT/target/release/examples/dataset_metric_baseline
 SCORE=$ROOT/target/release/examples/score_synthetic_with_mlp
