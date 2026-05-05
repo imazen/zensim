@@ -1,0 +1,32 @@
+  Synthetic: 340206 pairs, target=GpuSsim2
+Loaded 340206 pairs (300 features) from cache "/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv.features.20260505_050620.bin" (60.6s)
+Truncating features from 300 to 228 (tier: Peaks)
+Loaded 10125 pairs from cache "/mnt/v/dataset/kadid10k.features.20260306_021954.bin" (0.2s)
+Loaded 3000 pairs from cache "/mnt/v/dataset/tid2013.features.20260306_022005.bin" (4.1s)
+  KonJND-1k: 76104 pairs across 1008 (source, codec) combinations
+Loaded 76104 pairs from cache "/mnt/v/datasets/KonJND-1k/KonJND-1k.features.20260501_095545.bin" (61.8s)
+V0_6 zenanalyze: appended 3 feature(s) [dct_compressibility_y,dct_compressibility_uv,high_freq_energy_ratio] to 429124/429435 pairs (99.9% hit) from TSV /mnt/v/output/zensim/synthetic-v2/zenanalyze_union_v1.tsv
+
+=== Synthetic — Correlation with Human Ratings (embedded weights) ===
+SROCC (Spearman):  0.9942
+PLCC  (Pearson):   0.9606
+KROCC (Kendall):   0.9358
+Metric score range: -315.34 to 99.85, mean: 70.04
+Raw distance: min=0.001, p10=0.294, p50=1.604, p90=5.172, max=88.578, mean=2.390
+Raw dist corr: SROCC=0.9942  KROCC=0.9358 | clamped scores: 5007/340206 (1.5%)
+
+MLP train: arch=[231 → 64 (LeakyReLU α=0.01) → 1], val_policy=Min
+      train group 0: 'Synthetic' n=340206 train_w=1.000 val_w=0.000
+   val-only group 1: 'Kadid10k' n=10125 train_w=0.000 val_w=1.000
+   val-only group 2: 'Tid2013' n=3000 train_w=0.000 val_w=1.000
+   val-only group 3: 'konjnd1k' n=76104 train_w=0.000 val_w=1.000
+  epoch   0 | lr=0.00100 | loss=0.1025 | val_mean=0.8241 (best=-inf) | Synthetic=0.9921 Kadid10k=0.8372 Tid2013=0.8241 konjnd1k=0.9514 | t=3.0s
+  epoch  10 | lr=0.00090 | loss=0.0876 | val_mean=0.8199 (best=0.8241) | Synthetic=0.9977 Kadid10k=0.8311 Tid2013=0.8199 konjnd1k=0.9539 | t=26.4s
+  epoch  20 | lr=0.00065 | loss=0.0835 | val_mean=0.7884 (best=0.8241) | Synthetic=0.9981 Kadid10k=0.7884 Tid2013=0.8231 konjnd1k=0.9509 | t=54.3s
+  epoch  30 | lr=0.00035 | loss=0.0800 | val_mean=0.7824 (best=0.8241) | Synthetic=0.9986 Kadid10k=0.7824 Tid2013=0.8037 konjnd1k=0.9516 | t=88.5s
+  epoch  40 | lr=0.00010 | loss=0.0761 | val_mean=0.8157 (best=0.8241) | Synthetic=0.9988 Kadid10k=0.8196 Tid2013=0.8157 konjnd1k=0.9526 | t=125.5s
+  epoch  50 | lr=0.00100 | loss=0.0845 | val_mean=0.8048 (best=0.8241) | Synthetic=0.9972 Kadid10k=0.8048 Tid2013=0.8225 konjnd1k=0.9527 | t=153.0s
+  early stop at epoch 50 (no validation improvement for 50 epochs)
+MLP train: best validation mean SROCC = 0.8241
+MLP saved: /mnt/v/output/zensim/synthetic-v2/runs/v06_baseline_rebake_20260505T202738.bin (61724 bytes)
+MLP bake roundtrip: OK

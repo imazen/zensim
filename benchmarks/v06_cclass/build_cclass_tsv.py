@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Augment zenanalyze TSV with content_class one-hot columns.
+
+Reads zenanalyze_union_v1.tsv (stem, source_path, feat1...feat15) and writes
+zenanalyze_union_v1_cclass.tsv (same + cclass_photo, cclass_screen,
+cclass_lineart, cclass_synthetic, cclass_document) using a basename
+heuristic. Most reference images are photo; only a tiny fraction (terminal_,
+windows_, gui_, *Chart*, *Graph*, *Logo*, *Pie*) are screen/line-art.
+
+The synthetic-v2 corpus is photo-dominant (~99.5%); content_class therefore
+acts as a small per-image hint rather than a balanced categorical.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+INPUT_TSV = Path("/mnt/v/output/zensim/synthetic-v2/zenanalyze_union_v1.tsv")
+OUTPUT_TSV = Path("/mnt/v/output/zensim/synthetic-v2/zenanalyze_union_v1_cclass.tsv")
+
+CCLASS_NAMES = ["cclass_photo", "cclass_screen", "cclass_lineart", "cclass_synthetic", "cclass_document"]
+
+
+def classify(stem: str, source_path: str) -> str:
+    stem_l = stem.lower()
+    src_l = source_path.lower()
+
+    # Explicit screen captures (terminal recordings, OS UI screenshots, GUI captures)
+    if re.match(r"^(terminal|windows|macos|ubuntu|linux|gui|app|browser|ide|editor)_", stem_l):
+        return "screen"
+    if "screenshot" in stem_l or "screen-capture" in stem_l:
+        return "screen"
+
+    # Charts, diagrams, infographics, logos → line-art
+    if re.search(r"chart|graph|piechart|pie-chart|diagram|infographic", stem_l):
+        return "lineart"
+    if re.search(r"verkehr|temperament|stockquote|performance-graph", stem_l):
+        return "lineart"
+    if "logo" in stem_l:
+        return "lineart"
+
+    # Synthetic test patterns (path-based)
+    if "/synthetic/" in src_l or stem_l.startswith("synth_"):
+        return "synthetic"
+
+    # Document / scanned text — none expected in synthetic-v2 corpus
+    if re.search(r"scan|document|invoice|receipt|page-\d+", stem_l):
+        return "document"
+
+    return "photo"
+
+
+def one_hot(cclass: str) -> list[str]:
+    return [
+        "1.0" if cclass == name.replace("cclass_", "") else "0.0"
+        for name in CCLASS_NAMES
+    ]
+
+
+def main() -> int:
+    if not INPUT_TSV.exists():
+        print(f"missing input: {INPUT_TSV}", file=sys.stderr)
+        return 2
+
+    counts: dict[str, int] = {}
+    with INPUT_TSV.open() as fin, OUTPUT_TSV.open("w") as fout:
+        header = fin.readline().rstrip("\n")
+        cols = header.split("\t")
+        if cols[0] != "stem" or cols[1] != "source_path":
+            print(f"unexpected header: {header}", file=sys.stderr)
+            return 2
+        new_header = "\t".join(cols + CCLASS_NAMES)
+        fout.write(new_header + "\n")
+        for line in fin:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            stem = parts[0]
+            src = parts[1]
+            cclass = classify(stem, src)
+            counts[cclass] = counts.get(cclass, 0) + 1
+            fout.write("\t".join(parts + one_hot(cclass)) + "\n")
+
+    print(f"wrote {OUTPUT_TSV}")
+    print("class counts:")
+    for k in sorted(counts.keys()):
+        print(f"  {k}: {counts[k]}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
