@@ -17,24 +17,30 @@
 set -euo pipefail
 
 SRC_DIR=${SRC_DIR:-/mnt/v/input/zensim/sources}
-GEN_DIR=/mnt/v/input/zensim/sources_gen_v06rb
+GEN_DIR=/mnt/v/input/zensim/sources_gen_v06rb_raw
 OUT_DIR=${OUT_DIR:-/mnt/v/output/zensim/v06-rebalance}
 REMOTE_DIR=${REMOTE_DIR:-/mnt/v/input/zensim/images}
 GENERATOR=${GENERATOR:-/home/lilith/work/coefficient/target/release/examples/generate_zensim_training}
 
 [ -x "$GENERATOR" ] || { echo "missing $GENERATOR"; exit 1; }
 
-# Build a curated source dir of symlinks pointing only at gen-* PNGs.
-# The generator scans the --sources directory non-recursively.
+# Build a curated source dir of symlinks pointing only at gen-*_1024sq.png,
+# renamed to drop the bucket suffix. The encoder rejects any file whose stem
+# ends with a known bucket label (treats it as a pre-cropped tile and refuses
+# to re-tile to prevent recursion). By feeding it the 1024sq sources without
+# the suffix, the encoder treats each as a raw source and tiles into all 6
+# buckets at the e1 q-grid — same shape as the existing safe-synthetic CSV.
 mkdir -p "$GEN_DIR"
 find "$GEN_DIR" -maxdepth 1 -type l -delete  # clean stale links
 
 n=0
-for f in "$SRC_DIR"/gen-*.png; do
-  ln -sf "$f" "$GEN_DIR/$(basename "$f")"
+for f in "$SRC_DIR"/gen-*_1024sq.png; do
+  bn=$(basename "$f")
+  bare="${bn%_1024sq.png}"
+  ln -sf "$f" "$GEN_DIR/${bare}.png"
   n=$((n + 1))
 done
-echo "linked $n gen-* sources into $GEN_DIR"
+echo "linked $n gen-*_1024sq sources (suffix stripped) into $GEN_DIR"
 
 mkdir -p "$OUT_DIR"
 
