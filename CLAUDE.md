@@ -106,35 +106,36 @@ CMA-ES weights at `runs/weights_20260307T124130_gpu_ssim2.txt` (42 non-zero, ver
 - `--algorithm pairwise` — RankNet SGD, converges to embedded weights (can't escape local opt)
 - Default (no flag) — Nelder-Mead with random restarts, good for single-dataset
 
-## V0_7 e1 fill (in-flight, 2026-05-04+)
+## V0_7 e1 fill (READY, 2026-05-05)
 
 The V0_7 post-fill plan documented at `docs/NEXT_TIER_DATA_PLAN.md` and
 `benchmarks/low_quality_improvement_plan_2026-05-01.md` (visible on the
 `v04-mlp` jj branch) targets the SSIM2 25-60 band where current models
-drop to 0.86-0.91 SROCC. The plan is to densify with ~140k zenjpeg-420-e1
-pairs at 39 q levels, then retrain V0_7 (V0_6 dct_hf + sampler bias).
+drop to 0.86-0.91 SROCC. The plan was to densify with ~140k
+zenjpeg-420-e1 pairs at 39 q levels, then retrain V0_7 (V0_6 dct_hf +
+sampler bias).
 
 ### Status as of 2026-05-05
 
-- **e1 generator builds & runs.** The 2026-05-04 session fixed sibling-repo
-  build breakages across zenavif, zenwebp, coefficient (commits a5b0042
-  on zenavif, e37e5f7 on coefficient). `cargo build --release --features
-  "gpu,all-codecs,zenwebp" --example generate_zensim_training` succeeds in
-  `/home/lilith/work/coefficient/`.
-- **Partial e1 encodes on disk.** `/mnt/v/input/zensim/images/<src>/zenjpeg-420-e1/qXX.{jpg,png}`
-  has roughly 122k pairs encoded but the assembly into
-  `training_safe_synthetic_extended.csv` was never completed — the
-  generator died from CUDA context corruption after a SIGSTOP/SIGCONT
-  cycle for local-machine responsiveness. Restart attempts hit the
-  same CUDA error (cudaFreeAsync failures cascading from prior ctx).
-- **Recovery options**:
-  1. **Reboot + restart**: clean CUDA ctx, generator resumes from
-     ledger (skips done pairs), should finish in ~15 min.
-  2. **Run on vast.ai** (recommended for future zensim work — see
-     "Future zensim compute on vast.ai" below): avoids local GPU
-     contention with active workflows.
-- V0_7 training (`bash benchmarks/v07_postfill_run.sh ...`) is blocked
-  on the extended CSV existing.
+- **e1 fill 87% complete + assembled.** The 2026-05-04 session fixed
+  sibling-repo build breakages (commits a5b0042 on zenavif, e37e5f7
+  on coefficient) so the `coefficient/examples/generate_zensim_training`
+  binary builds. Local generator produced **122,117 e1 pairs** before
+  CUDA context corruption ended the run early (~85% of the planned
+  140k). The remaining ~21k pairs can be backfilled later.
+- **Extended CSV ready**: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv`
+  (340,206 rows = 218k existing safe-synthetic base + 122k new e1 rows).
+  Zero CID22 validation leaks (the e1 source corpus
+  `/mnt/v/input/zensim/sources` was already filtered).
+- **V0_7 training is unblocked**: `bash benchmarks/v07_postfill_run.sh
+  /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv`
+  (visible on the v04-mlp jj branch).
+- The 21k missing pairs are stored as encoded files on disk
+  (`/mnt/v/input/zensim/images/<src>/zenjpeg-420-e1/qXX.png`) but
+  weren't scored before the generator died. Re-running the generator
+  with the same args picks them up and re-emits a fresh CSV at
+  `/mnt/v/output/zensim/training.csv`. Best done after a reboot
+  (CUDA context is clean) or on vast.ai (next section).
 
 ### Future zensim compute on vast.ai
 
