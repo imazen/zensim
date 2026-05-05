@@ -9,7 +9,7 @@ BAKE=${1:-}
 [ -n "$BAKE" ] || { echo "usage: $0 <bake.bin>"; exit 1; }
 [ -f "$BAKE" ] || { echo "missing bake $BAKE"; exit 1; }
 
-ROOT=${ROOT:-/home/lilith/work/zen/zensim}
+ROOT=${ROOT:-/home/lilith/work/zen/zensim--v06-rebalance}
 EVAL=$ROOT/target/release/examples/dataset_metric_baseline
 TSV=/mnt/v/output/zensim/synthetic-v2/zenanalyze_union_v1_cclass.tsv
 KADID=/mnt/v/dataset/kadid10k

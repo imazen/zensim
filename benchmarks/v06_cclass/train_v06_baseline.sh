@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-ROOT=${ROOT:-/home/lilith/work/zen/zensim}
+ROOT=${ROOT:-/home/lilith/work/zen/zensim--v06-rebalance}
 EXTENDED_CSV=${EXTENDED_CSV:-/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv}
 TS=$(date -u +%Y%m%dT%H%M%S)
 
