@@ -1,0 +1,32 @@
+
+=== Synthetic — Correlation with Human Ratings (embedded weights) ===
+SROCC (Spearman):  0.9942
+PLCC  (Pearson):   0.9606
+KROCC (Kendall):   0.9358
+Metric score range: -265.57 to 99.87, mean: 73.63
+Raw distance: min=0.001, p10=0.245, p50=1.337, p90=4.310, max=73.815, mean=1.992
+Raw dist corr: SROCC=0.9942  KROCC=0.9358 | clamped scores: 3479/340206 (1.0%)
+
+FiLM dispatch: 5 content classes from zenanalyze tail [photo,screen,lineart,synthetic,document]
+FiLM-MLP train: arch=[content(231) → 64 (FiLM, LeakyReLU α=0.01) → 1], cclass=5 (photo,screen,lineart,synthetic,document), val_policy=Min
+      train group 0: 'Synthetic' n=340206 train_w=1.000 val_w=0.000
+   val-only group 1: 'Kadid10k' n=10125 train_w=0.000 val_w=1.000
+   val-only group 2: 'Tid2013' n=3000 train_w=0.000 val_w=1.000
+   val-only group 3: 'konjnd1k' n=76104 train_w=0.000 val_w=1.000
+  epoch   0 | lr=0.00100 | loss=0.1012 | val_mean=0.8045 (best=-inf) | Synthetic=0.9948 Kadid10k=0.8045 Tid2013=0.8209 konjnd1k=0.9544 | t=3.3s
+  epoch  10 | lr=0.00090 | loss=0.0822 | val_mean=0.8462 (best=0.8045) | Synthetic=0.9971 Kadid10k=0.8570 Tid2013=0.8462 konjnd1k=0.9480 | t=44.9s
+  epoch  20 | lr=0.00065 | loss=0.0809 | val_mean=0.8304 (best=0.8462) | Synthetic=0.9976 Kadid10k=0.8397 Tid2013=0.8304 konjnd1k=0.9507 | t=91.3s
+  epoch  30 | lr=0.00035 | loss=0.0787 | val_mean=0.8174 (best=0.8462) | Synthetic=0.9984 Kadid10k=0.8174 Tid2013=0.8244 konjnd1k=0.9527 | t=137.4s
+  epoch  40 | lr=0.00010 | loss=0.0765 | val_mean=0.8175 (best=0.8462) | Synthetic=0.9987 Kadid10k=0.8175 Tid2013=0.8311 konjnd1k=0.9522 | t=181.4s
+  epoch  50 | lr=0.00100 | loss=0.0814 | val_mean=0.8100 (best=0.8462) | Synthetic=0.9980 Kadid10k=0.8100 Tid2013=0.8370 konjnd1k=0.9550 | t=226.9s
+  epoch  60 | lr=0.00090 | loss=0.0819 | val_mean=0.7742 (best=0.8462) | Synthetic=0.9982 Kadid10k=0.7742 Tid2013=0.8174 konjnd1k=0.9511 | t=272.2s
+  early stop at epoch 60 (no validation improvement for 50 epochs)
+FiLM-MLP train: best validation min SROCC = 0.8462
+  FiLM bake class 0 (photo): /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.c0_photo.bin (63044 bytes)
+  FiLM bake class 1 (screen): /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.c1_screen.bin (63044 bytes)
+  FiLM bake class 2 (lineart): /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.c2_lineart.bin (63044 bytes)
+  FiLM bake class 3 (synthetic): /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.c3_synthetic.bin (63044 bytes)
+  FiLM bake class 4 (document): /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.c4_document.bin (63044 bytes)
+FiLM manifest: /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.film_manifest.tsv
+MLP (FiLM class 0='photo') primary bake: /mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.bin (63044 bytes)
+FiLM-MLP train: best validation min SROCC = 0.8462

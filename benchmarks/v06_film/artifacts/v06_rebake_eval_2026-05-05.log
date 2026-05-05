@@ -1,0 +1,94 @@
+loaded zenanalyze TSV: 4717 stems × 3 features [dct_compressibility_y,dct_compressibility_uv,high_freq_energy_ratio]
+# Baseline-metric SROCC vs human MOS
+
+Max 1500 pairs per dataset.
+
+| Dataset | n | V0_2 | V0_4 (bake) | fast-ssim2 | butteraugli |
+|---------|--:|:----:|:-----------:|:----------:|:-----------:|
+=== KADIK10k (n=1500) ===
+  150/1500 (78.4/s, ETA 17s)
+  300/1500 (70.7/s, ETA 17s)
+  450/1500 (70.5/s, ETA 15s)
+  600/1500 (69.8/s, ETA 13s)
+  750/1500 (69.5/s, ETA 11s)
+  900/1500 (70.2/s, ETA 9s)
+  1050/1500 (70.2/s, ETA 6s)
+  1200/1500 (70.2/s, ETA 4s)
+  1350/1500 (70.1/s, ETA 2s)
+  1500/1500 (70.5/s, ETA 0s)
+| KADIK10k | 1500 | 0.8284 | 0.8478 | 0.8155 | 0.5864 |
+  done 1500/1500 valid in 21.7s
+=== TID2013 (n=1500) ===
+  150/1500 (70.6/s, ETA 19s)
+  300/1500 (71.8/s, ETA 17s)
+  450/1500 (71.1/s, ETA 15s)
+  600/1500 (71.4/s, ETA 13s)
+  750/1500 (71.6/s, ETA 10s)
+  900/1500 (70.4/s, ETA 9s)
+  1050/1500 (71.2/s, ETA 6s)
+  1200/1500 (70.3/s, ETA 4s)
+  1350/1500 (69.9/s, ETA 2s)
+  1500/1500 (68.8/s, ETA 0s)
+| TID2013 | 1500 | 0.8494 | 0.8268 | 0.8525 | 0.6827 |
+  done 1500/1500 valid in 21.9s
+=== CID22 (n=1500) ===
+  150/1500 (55.9/s, ETA 24s)
+  300/1500 (52.1/s, ETA 23s)
+  450/1500 (51.3/s, ETA 20s)
+  600/1500 (51.2/s, ETA 18s)
+  750/1500 (50.3/s, ETA 15s)
+  900/1500 (50.4/s, ETA 12s)
+  1050/1500 (49.9/s, ETA 9s)
+  1200/1500 (49.9/s, ETA 6s)
+  1350/1500 (49.7/s, ETA 3s)
+  1500/1500 (49.8/s, ETA 0s)
+| CID22 | 1500 | 0.8911 | 0.8909 | 0.8928 | 0.7670 |
+  done 1500/1500 valid in 30.8s
+=== KonJND-1k (n=1008) ===
+  konjnd 50/1008 (60.0/s, ETA 16s)
+  konjnd 100/1008 (49.8/s, ETA 18s)
+  konjnd 150/1008 (46.9/s, ETA 18s)
+  konjnd 200/1008 (44.6/s, ETA 18s)
+  konjnd 250/1008 (43.5/s, ETA 17s)
+  konjnd 300/1008 (43.0/s, ETA 16s)
+  konjnd 350/1008 (42.8/s, ETA 15s)
+  konjnd 400/1008 (42.3/s, ETA 14s)
+  konjnd 450/1008 (42.8/s, ETA 13s)
+  konjnd 500/1008 (42.8/s, ETA 12s)
+  konjnd 550/1008 (42.4/s, ETA 11s)
+  konjnd 600/1008 (42.4/s, ETA 10s)
+  konjnd 650/1008 (42.3/s, ETA 8s)
+  konjnd 700/1008 (42.3/s, ETA 7s)
+  konjnd 750/1008 (41.7/s, ETA 6s)
+  konjnd 800/1008 (42.1/s, ETA 5s)
+  konjnd 850/1008 (42.0/s, ETA 4s)
+  konjnd 900/1008 (42.0/s, ETA 3s)
+  konjnd 950/1008 (41.9/s, ETA 1s)
+  konjnd 1000/1008 (42.3/s, ETA 0s)
+  konjnd done 1008/1008 valid in 24.7s
+
+## KonJND-1k visually-lossless calibration (Lin, Hosu, Saupe 2022)
+
+Pairs at the per-source mean PJND (Probabilistic Just-Noticeable-Difference)
+threshold. Each source's pair is the just-barely-perceptible distortion. The
+Cloudinary CID22 paper Table 4 publishes these mean ± stdev anchors for
+several metrics; comparing our SSIMULACRA 2 / Butteraugli numbers below with
+that table cross-validates the pipeline.
+
+### JPEG subset (n = 504)
+
+| metric | mean | stdev | Cloudinary Table 4 (paper) |
+|---|--:|--:|---|
+| V0_2 raw distance | 2.1120 | 0.4455 | — |
+| V0_4 raw distance | -6.1778 | 1.8590 | — |
+| fast-ssim2 score | 62.55 | 5.03 | 63.10 ± 4.65 |
+| butteraugli 3-norm | 1.6993 | 0.2274 | 1.699 ± 0.229 |
+
+### BPG subset (n = 504)
+
+| metric | mean | stdev | Cloudinary Table 4 (paper) |
+|---|--:|--:|---|
+| V0_2 raw distance | 1.8835 | 0.4378 | — |
+| V0_4 raw distance | -7.2530 | 2.0936 | — |
+| fast-ssim2 score | 65.38 | 5.42 | 65.38 ± 5.10 |
+| butteraugli 3-norm | 1.5283 | 0.1912 | 1.528 ± 0.192 |
