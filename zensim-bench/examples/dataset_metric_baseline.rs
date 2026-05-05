@@ -245,6 +245,7 @@ fn main() {
             let mut w = csv::Writer::from_path(p).expect("open per-pair csv");
             w.write_record([
                 "dataset",
+                "reference_stem",
                 "human_score",
                 "v02_distance",
                 "v04_distance",
@@ -283,7 +284,28 @@ fn main() {
             })
             .collect();
 
-        let pairs_with: Vec<(f64, f64, f64, f64, f64)> = results.into_iter().flatten().collect();
+        // Pair (row, ref_stem) for per-pair CSV output. Iterate in lockstep
+        // with `results` so a None metric row is dropped here too.
+        let pairs_with: Vec<(f64, f64, f64, f64, f64)> = results
+            .iter()
+            .filter_map(|r| r.as_ref().copied())
+            .collect();
+        let pairs_with_ref: Vec<(String, (f64, f64, f64, f64, f64))> = ds
+            .pairs
+            .iter()
+            .zip(results.iter())
+            .filter_map(|(pair, row)| {
+                row.as_ref().map(|r| {
+                    let stem = pair
+                        .reference
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    (stem, *r)
+                })
+            })
+            .collect();
         let n_valid = pairs_with.len();
         if n_valid < 4 {
             println!(
@@ -312,9 +334,10 @@ fn main() {
         );
 
         if let Some(w) = per_pair_writer.as_mut() {
-            for row in &pairs_with {
+            for (stem, row) in &pairs_with_ref {
                 w.write_record([
                     ds.name,
+                    stem.as_str(),
                     &format!("{:.6}", row.0),
                     &format!("{:.6}", row.1),
                     &format!("{:.6}", row.2),
