@@ -56,6 +56,77 @@ struct ZenanalyzeAugment {
     table: Arc<HashMap<String, Vec<f64>>>,
     selected: Vec<usize>,
     n_extras: usize,
+    /// Optional: indices within `selected` that correspond to the
+    /// content-class one-hot tail (used by FiLM dispatch). Empty for
+    /// non-FiLM evals.
+    cclass_indices_in_selected: Vec<usize>,
+}
+
+/// Optional FiLM dispatch: K per-class bake byte-streams, picked by the
+/// reference image's cclass column. Loaded from a `.film_manifest.tsv`.
+#[derive(Debug, Clone)]
+struct FilmManifest {
+    /// `per_class[c]` = bake bytes for class `c`. Index matches the
+    /// position of the corresponding `cclass_<name>` column in the
+    /// zenanalyze TSV's cclass tail.
+    per_class: Vec<Vec<u8>>,
+    class_names: Vec<String>,
+}
+
+fn load_film_manifest(manifest_path: &Path) -> FilmManifest {
+    let data = std::fs::read_to_string(manifest_path).unwrap_or_else(|e| {
+        eprintln!("failed to read --film-manifest {}: {e}", manifest_path.display());
+        std::process::exit(1);
+    });
+    let mut lines = data.lines();
+    let header = lines.next().unwrap_or("");
+    if header.split('\t').next() != Some("class_index") {
+        eprintln!("FiLM manifest header must begin with 'class_index': got '{header}'");
+        std::process::exit(1);
+    }
+    let mut entries: Vec<(usize, String, PathBuf)> = Vec::new();
+    for line in lines {
+        if line.is_empty() { continue; }
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() != 3 { continue; }
+        let idx: usize = cols[0].parse().unwrap_or_else(|_| {
+            eprintln!("bad class_index '{}'", cols[0]);
+            std::process::exit(1);
+        });
+        entries.push((idx, cols[1].to_string(), PathBuf::from(cols[2])));
+    }
+    entries.sort_by_key(|e| e.0);
+    let max_idx = entries.iter().map(|e| e.0).max().unwrap_or(0);
+    let mut per_class: Vec<Vec<u8>> = vec![Vec::new(); max_idx + 1];
+    let mut class_names: Vec<String> = vec![String::new(); max_idx + 1];
+    for (idx, name, path) in entries {
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+            eprintln!("failed to read FiLM bake {}: {e}", path.display());
+            std::process::exit(1);
+        });
+        per_class[idx] = bytes;
+        class_names[idx] = name;
+    }
+    eprintln!(
+        "loaded FiLM manifest: {} classes [{}]",
+        per_class.len(),
+        class_names.join(",")
+    );
+    FilmManifest { per_class, class_names }
+}
+
+/// Pick the class index from a one-hot tail. Returns 0 if the tail is
+/// all-zero (default to first class — matches our photo-default).
+fn pick_film_class(augment: &ZenanalyzeAugment, ref_path: &Path) -> usize {
+    let extras = augment.lookup(ref_path);
+    let tail_offset = augment.n_extras - augment.cclass_indices_in_selected.len();
+    let tail = &extras[tail_offset..];
+    let mut best = 0usize;
+    let mut best_v = f64::NEG_INFINITY;
+    for (i, &v) in tail.iter().enumerate() {
+        if v > best_v { best_v = v; best = i; }
+    }
+    if best_v <= 0.0 { 0 } else { best }
 }
 
 impl ZenanalyzeAugment {
@@ -133,10 +204,23 @@ fn load_zenanalyze_tsv(path: &Path, features: Option<&str>) -> ZenanalyzeAugment
             .collect::<Vec<_>>()
             .join(",")
     );
+    // Detect the contiguous trailing block of `cclass_*` columns, if any.
+    // The block starts where the first `cclass_*` selected name appears
+    // and continues to the end. Mid-list cclass names (interleaved) are
+    // not supported.
+    let cclass_indices_in_selected: Vec<usize> = {
+        let mut v = Vec::new();
+        for (i, &s) in selected.iter().enumerate().rev() {
+            if names[s].starts_with("cclass_") { v.push(i); } else { break; }
+        }
+        v.reverse();
+        v
+    };
     ZenanalyzeAugment {
         table: Arc::new(table),
         selected,
         n_extras,
+        cclass_indices_in_selected,
     }
 }
 
@@ -173,6 +257,7 @@ fn main() {
     let mut per_pair_output: Option<PathBuf> = None;
     let mut zenanalyze_tsv: Option<PathBuf> = None;
     let mut zenanalyze_features: Option<String> = None;
+    let mut film_manifest_path: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
@@ -184,6 +269,7 @@ fn main() {
             "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
             "--zenanalyze-tsv" => zenanalyze_tsv = Some(args.next().unwrap().into()),
             "--zenanalyze-features" => zenanalyze_features = Some(args.next().unwrap()),
+            "--film-manifest" => film_manifest_path = Some(args.next().unwrap().into()),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -225,6 +311,24 @@ fn main() {
             eprintln!("failed to read v04 bake at {:?}: {e}", p);
             std::process::exit(1);
         })
+    });
+
+    // Optional FiLM manifest. When present, V0_4 dispatch routes each
+    // pair through the per-class bake selected by the reference's
+    // cclass column (argmax of the cclass tail in the zenanalyze TSV).
+    let film_manifest: Option<FilmManifest> = film_manifest_path.as_ref().map(|p| {
+        if augment.is_none() {
+            eprintln!("--film-manifest requires --zenanalyze-tsv with cclass tail");
+            std::process::exit(1);
+        }
+        if augment.as_ref().unwrap().cclass_indices_in_selected.is_empty() {
+            eprintln!(
+                "--film-manifest requires the trailing zenanalyze features to be cclass_*; \
+                 selected list has no cclass tail"
+            );
+            std::process::exit(1);
+        }
+        load_film_manifest(p)
     });
 
     println!(
@@ -279,7 +383,7 @@ fn main() {
                     let eta = (n - p) as f64 / rate;
                     eprintln!("  {p}/{n} ({rate:.1}/s, ETA {eta:.0}s)");
                 }
-                process_pair(pair, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref())
+                process_pair(pair, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref(), film_manifest.as_ref())
             })
             .collect();
 
@@ -361,7 +465,7 @@ fn main() {
                         let eta = (n_total - p) as f64 / rate;
                         eprintln!("  konjnd {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
                     }
-                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref())
+                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref(), film_manifest.as_ref())
                         .map(|row| (kp.codec.clone(), row))
                 })
                 .collect();
@@ -427,6 +531,7 @@ fn process_konjnd_pair(
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
     augment: Option<&ZenanalyzeAugment>,
+    film: Option<&FilmManifest>,
 ) -> Option<(f64, f64, f64, f64)> {
     let p = &kp.pair;
     let src_img = match image::open(&p.reference) {
@@ -470,7 +575,8 @@ fn process_konjnd_pair(
     } else {
         features.to_vec()
     };
-    let v04_distance = if let Some(bytes) = v04_bake {
+    let bake_for_pair = select_bake(p, v04_bake, augment, film);
+    let v04_distance = if let Some(bytes) = bake_for_pair {
         let model = Model::from_bytes(bytes).ok()?;
         let n_inputs = model.n_inputs();
         if augmented_features.len() < n_inputs {
@@ -603,11 +709,30 @@ fn stddev(v: &[f64], m: f64) -> f64 {
     (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() - 1) as f64).sqrt()
 }
 
+/// Select the V0_4 bake bytes for a given pair. With no FiLM manifest,
+/// returns `single_bake`. With FiLM, picks `film.per_class[c]` where
+/// `c = argmax(cclass tail of augment.lookup(ref))`.
+fn select_bake<'a>(
+    pair: &Pair,
+    single_bake: Option<&'a [u8]>,
+    augment: Option<&ZenanalyzeAugment>,
+    film: Option<&'a FilmManifest>,
+) -> Option<&'a [u8]> {
+    if let (Some(film), Some(aug)) = (film, augment) {
+        let c = pick_film_class(aug, &pair.reference);
+        let bake = film.per_class.get(c)?;
+        if bake.is_empty() { None } else { Some(bake.as_slice()) }
+    } else {
+        single_bake
+    }
+}
+
 fn process_pair(
     pair: &Pair,
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
     augment: Option<&ZenanalyzeAugment>,
+    film: Option<&FilmManifest>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
     let src_img = match image::open(&pair.reference) {
         Ok(img) => img.to_rgb8(),
@@ -662,7 +787,8 @@ fn process_pair(
     } else {
         features.to_vec()
     };
-    let v04 = if let Some(bytes) = v04_bake {
+    let bake_for_pair = select_bake(pair, v04_bake, augment, film);
+    let v04 = if let Some(bytes) = bake_for_pair {
         let model = Model::from_bytes(bytes).ok()?;
         let n_inputs = model.n_inputs();
         if augmented_features.len() < n_inputs {

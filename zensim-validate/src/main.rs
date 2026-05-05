@@ -283,6 +283,24 @@ struct Args {
     /// human_score scale. Default 0.733 = SSIM2 60 (`(60 + 50) / 150`).
     #[arg(long, default_value_t = 0.733)]
     mlp_low_band_target_max: f64,
+
+    /// (--algorithm mlp) Enable FiLM (Feature-wise Linear Modulation)
+    /// gating with the last K columns of the appended zenanalyze
+    /// features as one-hot content-class indicators. Requires
+    /// `--mlp-zenanalyze-features` to end with a contiguous block of
+    /// `cclass_*` columns; the K columns are split off the input and
+    /// fed into a separate (gamma, beta) affine that modulates the
+    /// hidden pre-activation. Bakes K models (one per class) folded
+    /// to standard ZNPR v3 and writes them as `<--mlp-output-stem>.c<i>.bin`
+    /// plus a `.film_manifest.tsv` mapping class index → bake path.
+    #[arg(long, default_value_t = false)]
+    mlp_film_onehot_content_class: bool,
+
+    /// (--algorithm mlp / FiLM) Comma-separated list of class column
+    /// prefixes to identify the cclass tail of `--mlp-zenanalyze-features`.
+    /// Default matches the V0_6+cclass convention.
+    #[arg(long, default_value = "cclass_")]
+    mlp_film_cclass_prefix: String,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -1642,6 +1660,122 @@ fn main() {
                 low_band_target_max: args.mlp_low_band_target_max,
                 ..Default::default()
             };
+
+            // ===========================
+            // FiLM-MLP path (V0_6 + FiLM)
+            // ===========================
+            if args.mlp_film_onehot_content_class {
+                // Discover the cclass tail of the appended zenanalyze
+                // features. The user is expected to pass
+                // `--mlp-zenanalyze-features <content...>,cclass_a,cclass_b,...`
+                // with class columns at the END of the list. We split
+                // the trailing block whose names start with the
+                // configured prefix.
+                let zen_spec = args.mlp_zenanalyze_features.as_deref()
+                    .expect("FiLM requires --mlp-zenanalyze-features with a cclass tail");
+                let zen_names: Vec<&str> = zen_spec
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                // Count contiguous trailing names matching the prefix.
+                let prefix = args.mlp_film_cclass_prefix.as_str();
+                let mut n_cclass = 0usize;
+                for name in zen_names.iter().rev() {
+                    if name.starts_with(prefix) { n_cclass += 1; } else { break; }
+                }
+                if n_cclass == 0 {
+                    eprintln!(
+                        "error: --mlp-film-onehot-content-class requires the trailing zenanalyze \
+                         features to start with prefix '{prefix}'; got [{zen_spec}]"
+                    );
+                    std::process::exit(2);
+                }
+                // Names of each class — strip the prefix.
+                let class_names: Vec<String> = zen_names
+                    .iter()
+                    .rev()
+                    .take(n_cclass)
+                    .map(|n| n.strip_prefix(prefix).unwrap_or(n).to_string())
+                    .rev()
+                    .collect();
+                log_line(
+                    &format!(
+                        "FiLM dispatch: {n_cclass} content classes from zenanalyze tail [{}]",
+                        class_names.join(",")
+                    ),
+                    &mut training_log,
+                );
+                // Sanity: cclass tail must come AFTER any --mlp-size-axes
+                // pad. Today the order is [content..., zenanalyze...,
+                // size_axes...]; we don't support FiLM with size-axes.
+                if args.mlp_size_axes {
+                    eprintln!("error: --mlp-film-onehot-content-class is not compatible with --mlp-size-axes");
+                    std::process::exit(2);
+                }
+
+                let film_out = mlp_train::train_mlp_film(
+                    &groups, n_features_for_train, n_cclass, &class_names,
+                    &hyper, &mut training_log,
+                );
+
+                // Write per-class bakes and a manifest TSV.
+                let stem = args.mlp_output.with_extension("");
+                let parent = args.mlp_output.parent().map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let stem_name = stem.file_name().map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "film".to_string());
+                let manifest_path = parent.join(format!("{stem_name}.film_manifest.tsv"));
+                let mut manifest_lines = vec!["class_index\tclass_name\tbake_path".to_string()];
+                for (c, bake) in film_out.per_class_bake.iter().enumerate() {
+                    let path = parent.join(format!("{stem_name}.c{c}_{}.bin", film_out.class_names[c]));
+                    std::fs::write(&path, bake).expect("write FiLM per-class bake");
+                    log_line(
+                        &format!(
+                            "  FiLM bake class {c} ({}): {} ({} bytes)",
+                            film_out.class_names[c], path.display(), bake.len(),
+                        ),
+                        &mut training_log,
+                    );
+                    // Roundtrip-check the per-class bake.
+                    zensim::mlp::Model::from_bytes(Box::leak(bake.clone().into_boxed_slice()))
+                        .expect("FiLM bake roundtrip should load");
+                    manifest_lines.push(format!(
+                        "{c}\t{}\t{}",
+                        film_out.class_names[c],
+                        path.display()
+                    ));
+                }
+                std::fs::write(&manifest_path, manifest_lines.join("\n") + "\n")
+                    .expect("write FiLM manifest");
+                log_line(&format!("FiLM manifest: {}", manifest_path.display()), &mut training_log);
+
+                // Also write the "default" class (= argmax of `b_gamma`
+                // across classes summed with W_gamma; for V0_6 photo
+                // dominance, just default to class 0=photo) as the
+                // primary --mlp-output so existing eval pipes that
+                // expect a single bake still work.
+                std::fs::write(&args.mlp_output, &film_out.per_class_bake[0])
+                    .expect("write primary FiLM bake (class 0)");
+                log_line(
+                    &format!(
+                        "MLP (FiLM class 0='{}') primary bake: {} ({} bytes)",
+                        film_out.class_names[0], args.mlp_output.display(),
+                        film_out.per_class_bake[0].len(),
+                    ),
+                    &mut training_log,
+                );
+                log_line(
+                    &format!("FiLM-MLP train: best validation min SROCC = {:.4}", film_out.best_val_score),
+                    &mut training_log,
+                );
+
+                let log_path = args.mlp_output.with_extension("log");
+                std::fs::write(&log_path, training_log.join("\n"))
+                    .expect("write FiLM MLP log");
+                return;
+            }
+
             let bytes = mlp_train::train_mlp(&groups, n_features_for_train, &hyper, &mut training_log);
             std::fs::write(&args.mlp_output, &bytes).expect("write MLP binary");
             log_line(

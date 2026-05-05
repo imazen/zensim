@@ -1000,3 +1000,554 @@ mod tests {
         );
     }
 }
+
+// =====================================================================
+// FiLM (Feature-wise Linear Modulation) variant of train_mlp.
+// =====================================================================
+//
+// Architecture:
+//
+//     x_full = [x_features, c_onehot]    (n_features = n_content + n_cclass)
+//     h_pre  = W1 · x_features + b1                   (R^H from content only)
+//     gamma  = W_gamma · c_onehot + b_gamma           (R^H, init b_gamma=1)
+//     beta   = W_beta  · c_onehot + b_beta            (R^H, init b_beta=0)
+//     h_pre' = gamma ⊙ h_pre + beta                   (FiLM gate)
+//     h      = LeakyReLU(h_pre')
+//     y      = W2 · h + b2
+//
+// Bake output:
+//   - One ZNPR v3 model per content class with FiLM folded into the
+//     first layer: W1' = W1 · diag(gamma_c), b1' = gamma_c ⊙ b1 + beta_c.
+//     The folded model has shape (n_content + n_cclass) → H → 1 with
+//     the cclass tail of W1' set to zero so existing ZNPR loaders read
+//     the same n_inputs as the V0_6+cclass concat baseline. This keeps
+//     the public bake format additive — existing models still load,
+//     and FiLM models look like ordinary MLPs to zenpredict.
+
+#[derive(Debug)]
+pub struct FilmBakeOutput {
+    pub class_names: Vec<String>,
+    pub per_class_bake: Vec<Vec<u8>>,
+    pub best_val_score: f64,
+    pub gamma_w: Vec<f64>,
+    pub gamma_b: Vec<f64>,
+    pub beta_w: Vec<f64>,
+    pub beta_b: Vec<f64>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn train_mlp_film(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    n_cclass: usize,
+    class_names: &[String],
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+) -> FilmBakeOutput {
+    assert!(n_cclass >= 1, "n_cclass must be >= 1");
+    assert!(
+        n_features > n_cclass,
+        "n_features={n_features} must exceed n_cclass={n_cclass}"
+    );
+    assert_eq!(class_names.len(), n_cclass);
+    let n_content = n_features - n_cclass;
+    let n_outputs = 1usize;
+    let n_hidden = hyperparams.n_hidden;
+
+    assert!(!groups.is_empty(), "need at least one training group");
+    for g in groups {
+        assert_eq!(g.human_scores.len(), g.features.len(), "{}: scores/features length mismatch", g.name);
+        assert!(g.features.iter().all(|f| f.len() == n_features), "{}: feature length mismatch", g.name);
+    }
+    let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
+    assert!(train_total > 0.0, "no training groups (all train_weight == 0)");
+    let train_indices: Vec<usize> = groups.iter().enumerate()
+        .filter_map(|(i, g)| if g.train_weight > 0.0 { Some(i) } else { None }).collect();
+    let val_indices: Vec<usize> = groups.iter().enumerate()
+        .filter_map(|(i, g)| if g.validation_weight > 0.0 { Some(i) } else { None }).collect();
+
+    let log_line = |msg: &str, log: &mut Vec<String>| {
+        eprintln!("{msg}");
+        log.push(msg.to_string());
+    };
+
+    log_line(&format!(
+        "FiLM-MLP train: arch=[content({n_content}) → {n_hidden} (FiLM, LeakyReLU α={alpha}) → 1], cclass={n_cclass} ({}), val_policy={:?}",
+        class_names.join(","),
+        hyperparams.validation_policy,
+        alpha = hyperparams.leaky_alpha,
+    ), log);
+    for (i, g) in groups.iter().enumerate() {
+        let role = match (g.train_weight > 0.0, g.validation_weight > 0.0) {
+            (true, true) => "train+val", (true, false) => "train",
+            (false, true) => "val-only", (false, false) => "report",
+        };
+        log_line(&format!("  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+            g.name, g.features.len(), g.train_weight, g.validation_weight), log);
+    }
+
+    let (content_mean, content_scale) = compute_content_scaler(groups, &train_indices, n_content);
+    let mut scaler_mean = vec![0.0f64; n_features];
+    let mut scaler_scale = vec![1.0f64; n_features];
+    scaler_mean[..n_content].copy_from_slice(&content_mean);
+    scaler_scale[..n_content].copy_from_slice(&content_scale);
+
+    let std_features: Vec<Vec<f64>> = groups.iter().map(|g| {
+        let mut buf = vec![0.0f64; g.features.len() * n_features];
+        for (i, &f) in g.features.iter().enumerate() {
+            for d in 0..n_content {
+                buf[i * n_features + d] = (f[d] - content_mean[d]) / content_scale[d].max(1e-12);
+            }
+            for d in 0..n_cclass {
+                buf[i * n_features + n_content + d] = f[n_content + d];
+            }
+        }
+        buf
+    }).collect();
+
+    let mut rng = SplitMix64::new(hyperparams.seed);
+    let std1 = (2.0 / (n_content + n_hidden) as f64).sqrt();
+    let std2 = (2.0 / (n_hidden + n_outputs) as f64).sqrt();
+    let std_film = (2.0 / (n_cclass + n_hidden) as f64).sqrt() * 0.1;
+    let mut w1 = (0..n_content * n_hidden).map(|_| rng.next_normal() * std1).collect::<Vec<_>>();
+    let mut b1 = vec![0.0f64; n_hidden];
+    let mut w2 = (0..n_hidden * n_outputs).map(|_| rng.next_normal() * std2).collect::<Vec<_>>();
+    let mut b2 = vec![0.0f64; n_outputs];
+    let mut wg = (0..n_cclass * n_hidden).map(|_| rng.next_normal() * std_film).collect::<Vec<_>>();
+    let mut bg = vec![1.0f64; n_hidden];
+    let mut wbe = (0..n_cclass * n_hidden).map(|_| rng.next_normal() * std_film).collect::<Vec<_>>();
+    let mut bbe = vec![0.0f64; n_hidden];
+
+    let mut adam = AdamState::new(w1.len(), b1.len(), w2.len(), b2.len());
+    let mut adam_film = AdamFilmState::new(wg.len(), bg.len(), wbe.len(), bbe.len());
+
+    let start = Instant::now();
+    let mut best_val_score = f64::NEG_INFINITY;
+    let mut best: Option<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> = None;
+    let mut stale_epochs = 0usize;
+
+    let cdf: Vec<f64> = {
+        let mut cum = 0.0;
+        train_indices.iter().map(|&gi| { cum += groups[gi].train_weight; cum / train_total }).collect()
+    };
+
+    let low_band_indices: Vec<Vec<usize>> = if hyperparams.low_band_oversample > 0.0 {
+        groups.iter().map(|g| {
+            g.human_scores.iter().enumerate()
+                .filter_map(|(i, &s)| (s.is_finite() && s >= hyperparams.low_band_target_min && s <= hyperparams.low_band_target_max).then_some(i))
+                .collect::<Vec<_>>()
+        }).collect()
+    } else {
+        Vec::new()
+    };
+
+    for epoch in 0..hyperparams.n_epochs {
+        let lr = hyperparams.initial_lr
+            * 0.5
+            * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
+
+        let mut total_loss = 0.0f64;
+        let mut n_steps = 0u64;
+
+        for _ in 0..hyperparams.pairs_per_epoch {
+            let u = rng.next_f64_unit();
+            let g_idx = train_indices[cdf.partition_point(|&c| c < u).min(cdf.len() - 1)];
+            let g = &groups[g_idx];
+            let n = g.features.len();
+            if n < 2 { continue; }
+            let use_low_band = hyperparams.low_band_oversample > 0.0
+                && !low_band_indices.is_empty()
+                && !low_band_indices[g_idx].is_empty()
+                && rng.next_f64_unit() < hyperparams.low_band_oversample;
+            let (ia, ib) = if use_low_band {
+                let pool = &low_band_indices[g_idx];
+                let lp = pool.len();
+                let ai = (rng.next_u64() as usize) % lp;
+                let bi = (rng.next_u64() as usize) % lp;
+                (pool[ai], pool[bi])
+            } else {
+                ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n)
+            };
+            if ia == ib { continue; }
+
+            let g_feats = &std_features[g_idx];
+            let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
+            let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+            let (ya, ha_pre, ha_film_pre, ha, gamma_a, _beta_a) = forward_film(
+                xa, &w1, &b1, &w2, &b2, &wg, &bg, &wbe, &bbe,
+                n_content, n_cclass, n_hidden, hyperparams.leaky_alpha,
+            );
+            let (yb, hb_pre, hb_film_pre, hb, gamma_b, _beta_b) = forward_film(
+                xb, &w1, &b1, &w2, &b2, &wg, &bg, &wbe, &bbe,
+                n_content, n_cclass, n_hidden, hyperparams.leaky_alpha,
+            );
+
+            let target_signed = g.human_scores[ia] - g.human_scores[ib];
+            let target = target_signed.signum();
+            if target == 0.0 { continue; }
+            let pred_diff = yb - ya;
+            let z = -target * pred_diff;
+            let loss = if z > 50.0 { z } else if z < -50.0 { 0.0 } else { (z.exp() + 1.0).ln() };
+            total_loss += loss;
+            n_steps += 1;
+
+            let sig_z = 1.0 / (1.0 + (-z).exp());
+            let mut dl_d_pred_diff = -target * sig_z;
+
+            if hyperparams.magnitude_match_lambda > 0.0 {
+                let mag_residual = pred_diff - hyperparams.magnitude_match_alpha * target_signed;
+                let mag_loss = hyperparams.magnitude_match_lambda * mag_residual * mag_residual;
+                total_loss += mag_loss;
+                dl_d_pred_diff += 2.0 * hyperparams.magnitude_match_lambda * mag_residual;
+            }
+
+            let dl_dya = -dl_d_pred_diff;
+            let dl_dyb = dl_d_pred_diff;
+
+            backprop_film(
+                xa, &ha_pre, &ha_film_pre, &ha, &gamma_a, dl_dya,
+                &w2, &mut adam.gw1, &mut adam.gb1, &mut adam.gw2, &mut adam.gb2,
+                &mut adam_film.gwg, &mut adam_film.gbg, &mut adam_film.gwbe, &mut adam_film.gbbe,
+                n_content, n_cclass, n_hidden, hyperparams.leaky_alpha,
+            );
+            backprop_film(
+                xb, &hb_pre, &hb_film_pre, &hb, &gamma_b, dl_dyb,
+                &w2, &mut adam.gw1, &mut adam.gb1, &mut adam.gw2, &mut adam.gb2,
+                &mut adam_film.gwg, &mut adam_film.gbg, &mut adam_film.gwbe, &mut adam_film.gbbe,
+                n_content, n_cclass, n_hidden, hyperparams.leaky_alpha,
+            );
+
+            if hyperparams.l2_lambda > 0.0 {
+                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) { *g += hyperparams.l2_lambda * w; }
+                for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) { *g += hyperparams.l2_lambda * w; }
+                for (g, &w) in adam_film.gwg.iter_mut().zip(wg.iter()) { *g += hyperparams.l2_lambda * w; }
+                for (g, &w) in adam_film.gwbe.iter_mut().zip(wbe.iter()) { *g += hyperparams.l2_lambda * w; }
+            }
+
+            adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+            adam_film.step(&mut wg, &mut bg, &mut wbe, &mut bbe, lr);
+        }
+
+        let avg_loss = if n_steps > 0 { total_loss / n_steps as f64 } else { 0.0 };
+
+        if epoch % hyperparams.log_every == 0 || epoch == hyperparams.n_epochs - 1 {
+            let group_srocc: Vec<f64> = groups.iter().enumerate().map(|(gi, g)| {
+                let preds = predict_group_film(
+                    &std_features[gi], g.features.len(), n_features, n_content, n_cclass,
+                    &w1, &b1, &w2, &b2, &wg, &bg, &wbe, &bbe, n_hidden, hyperparams.leaky_alpha,
+                );
+                let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
+                spearman_correlation(g.human_scores, &neg_preds)
+            }).collect();
+
+            let val_score = if val_indices.is_empty() {
+                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+            } else {
+                match hyperparams.validation_policy {
+                    ValidationPolicy::Mean => {
+                        let total: f64 = val_indices.iter().map(|&i| groups[i].validation_weight).sum();
+                        val_indices.iter().map(|&i| group_srocc[i] * groups[i].validation_weight).sum::<f64>() / total
+                    }
+                    ValidationPolicy::Min => val_indices.iter().map(|&i| group_srocc[i]).fold(f64::INFINITY, f64::min),
+                }
+            };
+
+            let elapsed = start.elapsed().as_secs_f64();
+            let per_group = group_srocc.iter().zip(groups.iter())
+                .map(|(s, g)| format!("{}={s:.4}", g.name)).collect::<Vec<_>>().join(" ");
+            log_line(&format!(
+                "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val_mean={val_score:.4} (best={best_val_score:.4}) | {per_group} | t={elapsed:.1}s"
+            ), log);
+
+            if val_score > best_val_score {
+                best_val_score = val_score;
+                stale_epochs = 0;
+                best = Some((w1.clone(), b1.clone(), w2.clone(), b2.clone(), wg.clone(), bg.clone(), wbe.clone(), bbe.clone()));
+            } else {
+                stale_epochs += hyperparams.log_every;
+                if hyperparams.early_stop_patience > 0 && stale_epochs >= hyperparams.early_stop_patience {
+                    log_line(&format!("  early stop at epoch {epoch} (no validation improvement for {stale_epochs} epochs)"), log);
+                    break;
+                }
+            }
+        }
+    }
+
+    let (w1f, b1f, w2f, b2f, wgf, bgf, wbef, bbef) = best.unwrap_or((w1, b1, w2, b2, wg, bg, wbe, bbe));
+    log_line(&format!("FiLM-MLP train: best validation min SROCC = {best_val_score:.4}"), log);
+
+    // Bake K=n_cclass per-class models with FiLM folded into the first
+    // layer. Each is a regular V0_6+cclass-shaped ZNPR v3 model that
+    // existing zensim::mlp::Model::from_bytes loads directly.
+    let mut per_class_bake = Vec::with_capacity(n_cclass);
+    for c in 0..n_cclass {
+        let mut gamma_c = bgf.clone();
+        let mut beta_c = bbef.clone();
+        for h in 0..n_hidden {
+            gamma_c[h] += wgf[c * n_hidden + h];
+            beta_c[h] += wbef[c * n_hidden + h];
+        }
+
+        let mut w1_folded = vec![0.0f64; n_features * n_hidden];
+        for i in 0..n_content {
+            for h in 0..n_hidden {
+                w1_folded[i * n_hidden + h] = w1f[i * n_hidden + h] * gamma_c[h];
+            }
+        }
+        // cclass rows of W1' are zero (FiLM is already folded in).
+        let mut b1_folded = vec![0.0f64; n_hidden];
+        for h in 0..n_hidden {
+            b1_folded[h] = gamma_c[h] * b1f[h] + beta_c[h];
+        }
+
+        let bake = bake_two_layer_znpr_v2(
+            &scaler_mean, &scaler_scale,
+            &w1_folded, &b1_folded, &w2f, &b2f,
+            n_features, n_hidden, n_outputs,
+        );
+        per_class_bake.push(bake);
+    }
+
+    FilmBakeOutput {
+        class_names: class_names.to_vec(),
+        per_class_bake,
+        best_val_score,
+        gamma_w: wgf,
+        gamma_b: bgf,
+        beta_w: wbef,
+        beta_b: bbef,
+    }
+}
+
+fn compute_content_scaler(
+    groups: &[TrainingGroup<'_>],
+    train_indices: &[usize],
+    n_content: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let mut count = 0u64;
+    let mut mean = vec![0.0f64; n_content];
+    for &gi in train_indices {
+        for f in groups[gi].features {
+            for d in 0..n_content { mean[d] += f[d]; }
+            count += 1;
+        }
+    }
+    let n = count.max(1) as f64;
+    for m in &mut mean { *m /= n; }
+    let mut var = vec![0.0f64; n_content];
+    for &gi in train_indices {
+        for f in groups[gi].features {
+            for d in 0..n_content {
+                let dx = f[d] - mean[d];
+                var[d] += dx * dx;
+            }
+        }
+    }
+    let std = var.iter().map(|&v| (v / n).sqrt().max(1e-8)).collect();
+    (mean, std)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn forward_film(
+    x_full: &[f64],
+    w1: &[f64], b1: &[f64], w2: &[f64], b2: &[f64],
+    wg: &[f64], bg: &[f64], wbe: &[f64], bbe: &[f64],
+    n_content: usize, n_cclass: usize, n_hidden: usize, alpha: f64,
+) -> (f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    let mut h_pre = b1.to_vec();
+    for i in 0..n_content {
+        let s = x_full[i];
+        if s == 0.0 { continue; }
+        let row = &w1[i * n_hidden..(i + 1) * n_hidden];
+        for (acc, &w) in h_pre.iter_mut().zip(row.iter()) {
+            *acc += s * w;
+        }
+    }
+    let mut gamma = bg.to_vec();
+    let mut beta = bbe.to_vec();
+    for c in 0..n_cclass {
+        let s = x_full[n_content + c];
+        if s == 0.0 { continue; }
+        let g_row = &wg[c * n_hidden..(c + 1) * n_hidden];
+        let b_row = &wbe[c * n_hidden..(c + 1) * n_hidden];
+        for h in 0..n_hidden {
+            gamma[h] += s * g_row[h];
+            beta[h] += s * b_row[h];
+        }
+    }
+    let h_film_pre: Vec<f64> = h_pre.iter().zip(gamma.iter()).zip(beta.iter())
+        .map(|((&hp, &g), &b)| g * hp + b).collect();
+    let h: Vec<f64> = h_film_pre.iter().map(|&v| if v >= 0.0 { v } else { alpha * v }).collect();
+    let mut y = b2[0];
+    for o in 0..n_hidden { y += h[o] * w2[o]; }
+    (y, h_pre, h_film_pre, h, gamma, beta)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn backprop_film(
+    x_full: &[f64],
+    h_pre: &[f64], h_film_pre: &[f64], h: &[f64], gamma: &[f64],
+    dl_dy: f64,
+    w2: &[f64],
+    gw1: &mut [f64], gb1: &mut [f64], gw2: &mut [f64], gb2: &mut [f64],
+    gwg: &mut [f64], gbg: &mut [f64], gwbe: &mut [f64], gbbe: &mut [f64],
+    n_content: usize, n_cclass: usize, n_hidden: usize, alpha: f64,
+) {
+    for o in 0..n_hidden { gw2[o] += dl_dy * h[o]; }
+    gb2[0] += dl_dy;
+
+    let mut dl_dh_film_pre = vec![0.0f64; n_hidden];
+    for o in 0..n_hidden {
+        let dh = dl_dy * w2[o];
+        dl_dh_film_pre[o] = if h_film_pre[o] >= 0.0 { dh } else { alpha * dh };
+    }
+
+    let mut dl_dh_pre = vec![0.0f64; n_hidden];
+    let mut dl_dgamma = vec![0.0f64; n_hidden];
+    let mut dl_dbeta = vec![0.0f64; n_hidden];
+    for hh in 0..n_hidden {
+        dl_dh_pre[hh] = dl_dh_film_pre[hh] * gamma[hh];
+        dl_dgamma[hh] = dl_dh_film_pre[hh] * h_pre[hh];
+        dl_dbeta[hh] = dl_dh_film_pre[hh];
+    }
+
+    for i in 0..n_content {
+        let s = x_full[i];
+        if s == 0.0 { continue; }
+        let row = &mut gw1[i * n_hidden..(i + 1) * n_hidden];
+        for (g, &dh) in row.iter_mut().zip(dl_dh_pre.iter()) {
+            *g += s * dh;
+        }
+    }
+    for (g, &dh) in gb1.iter_mut().zip(dl_dh_pre.iter()) { *g += dh; }
+
+    for c in 0..n_cclass {
+        let s = x_full[n_content + c];
+        if s == 0.0 { continue; }
+        let g_row = &mut gwg[c * n_hidden..(c + 1) * n_hidden];
+        let b_row = &mut gwbe[c * n_hidden..(c + 1) * n_hidden];
+        for hh in 0..n_hidden {
+            g_row[hh] += s * dl_dgamma[hh];
+            b_row[hh] += s * dl_dbeta[hh];
+        }
+    }
+    for (g, &dg) in gbg.iter_mut().zip(dl_dgamma.iter()) { *g += dg; }
+    for (g, &db) in gbbe.iter_mut().zip(dl_dbeta.iter()) { *g += db; }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn predict_group_film(
+    std_x: &[f64], n_pairs: usize, n_features: usize,
+    n_content: usize, n_cclass: usize,
+    w1: &[f64], b1: &[f64], w2: &[f64], b2: &[f64],
+    wg: &[f64], bg: &[f64], wbe: &[f64], bbe: &[f64],
+    n_hidden: usize, alpha: f64,
+) -> Vec<f64> {
+    (0..n_pairs).map(|i| {
+        let xi = &std_x[i * n_features..(i + 1) * n_features];
+        let (y, _, _, _, _, _) = forward_film(xi, w1, b1, w2, b2, wg, bg, wbe, bbe, n_content, n_cclass, n_hidden, alpha);
+        y
+    }).collect()
+}
+
+struct AdamFilmState {
+    gwg: Vec<f64>, gbg: Vec<f64>, gwbe: Vec<f64>, gbbe: Vec<f64>,
+    mwg: Vec<f64>, mbg: Vec<f64>, mwbe: Vec<f64>, mbbe: Vec<f64>,
+    vwg: Vec<f64>, vbg: Vec<f64>, vwbe: Vec<f64>, vbbe: Vec<f64>,
+    t: u64,
+}
+
+impl AdamFilmState {
+    fn new(nwg: usize, nbg: usize, nwbe: usize, nbbe: usize) -> Self {
+        Self {
+            gwg: vec![0.0; nwg], gbg: vec![0.0; nbg], gwbe: vec![0.0; nwbe], gbbe: vec![0.0; nbbe],
+            mwg: vec![0.0; nwg], mbg: vec![0.0; nbg], mwbe: vec![0.0; nwbe], mbbe: vec![0.0; nbbe],
+            vwg: vec![0.0; nwg], vbg: vec![0.0; nbg], vwbe: vec![0.0; nwbe], vbbe: vec![0.0; nbbe],
+            t: 0,
+        }
+    }
+    fn step(&mut self, wg: &mut [f64], bg: &mut [f64], wbe: &mut [f64], bbe: &mut [f64], lr: f64) {
+        self.t += 1;
+        let beta1: f64 = 0.9; let beta2: f64 = 0.999; let eps: f64 = 1e-8;
+        let bc1 = 1.0 - beta1.powi(self.t as i32);
+        let bc2 = 1.0 - beta2.powi(self.t as i32);
+        let update = |w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64]| {
+            for i in 0..w.len() {
+                m[i] = beta1 * m[i] + (1.0 - beta1) * g[i];
+                v[i] = beta2 * v[i] + (1.0 - beta2) * g[i] * g[i];
+                let m_hat = m[i] / bc1;
+                let v_hat = v[i] / bc2;
+                w[i] -= lr * m_hat / (v_hat.sqrt() + eps);
+                g[i] = 0.0;
+            }
+        };
+        update(wg, &mut self.gwg, &mut self.mwg, &mut self.vwg);
+        update(bg, &mut self.gbg, &mut self.mbg, &mut self.vbg);
+        update(wbe, &mut self.gwbe, &mut self.mwbe, &mut self.vwbe);
+        update(bbe, &mut self.gbbe, &mut self.mbbe, &mut self.vbbe);
+    }
+}
+
+#[cfg(test)]
+mod film_tests {
+    use super::*;
+    use zensim::mlp::{Model, Predictor};
+
+    fn predict_one(predictor: &mut Predictor<'_>, features: &[f64]) -> f64 {
+        let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
+        predictor.predict(&f32_features).unwrap()[0] as f64
+    }
+
+    /// 8 content features + 3-class cclass; class 0 wants y=sum(x),
+    /// class 1 wants y=-sum(x), class 2 wants y=sum(x[:4]). Tests
+    /// FiLM gating + per-class bake roundtrip.
+    #[test]
+    fn film_recovers_class_dependent_target() {
+        let n_content = 8;
+        let n_cclass = 3;
+        let n_features = n_content + n_cclass;
+        let n_train = 600;
+        let mut rng = SplitMix64::new(11);
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n_train);
+        let mut targets: Vec<f64> = Vec::with_capacity(n_train);
+        for i in 0..n_train {
+            let x_content: Vec<f64> = (0..n_content).map(|_| rng.next_normal()).collect();
+            let class = i % n_cclass;
+            let mut full = x_content.clone();
+            for k in 0..n_cclass {
+                full.push(if k == class { 1.0 } else { 0.0 });
+            }
+            let s_all: f64 = x_content.iter().sum();
+            let s_first: f64 = x_content.iter().take(4).sum();
+            let y = match class { 0 => s_all, 1 => -s_all, _ => s_first };
+            features_owned.push(full);
+            targets.push(y);
+        }
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth_film".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 16, n_epochs: 80, pairs_per_epoch: 5_000,
+            initial_lr: 0.005, log_every: 20, early_stop_patience: 0,
+            ..Default::default()
+        };
+        let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let mut log = Vec::new();
+        let out = train_mlp_film(&[group], n_features, n_cclass, &names, &hyper, &mut log);
+        assert!(out.best_val_score > 0.6, "FiLM failed to learn class-dependent target: {}", out.best_val_score);
+        for (c, bake) in out.per_class_bake.iter().enumerate() {
+            let leaked: &'static [u8] = Box::leak(bake.clone().into_boxed_slice());
+            let model = Model::from_bytes(leaked).expect("FiLM bake roundtrip");
+            let mut p = Predictor::new(model);
+            let row0_idx = (0..n_train).find(|&i| (i % n_cclass) == c).unwrap();
+            let row = &features_owned[row0_idx];
+            let y = predict_one(&mut p, row);
+            assert!(y.is_finite(), "non-finite prediction class {c}");
+        }
+    }
+}
