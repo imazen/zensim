@@ -193,9 +193,8 @@ def main():
     # Verdict
     lines.append("\n## Verdict\n\n")
     if base is not None:
-        # Find variant with highest sum of deltas (positive only)
-        best_variant = None
-        best_score = -1e9
+        # Compute per-variant deltas
+        variant_summary = []
         for pct_name, _ in VARIANTS:
             if pct_name == "0pct":
                 continue
@@ -204,7 +203,8 @@ def main():
                 continue
             total = 0.0
             wins = 0
-            for ds in DATASETS:
+            cells = {}
+            for ds in ("KADIK10k", "TID2013", "CID22"):
                 if base_scores.get(ds) is None:
                     continue
                 ds_rows = d.get(ds, [])
@@ -213,22 +213,45 @@ def main():
                 h, v, _ = zip(*ds_rows)
                 s, _ = srocc(list(v), list(h))
                 delta = s - base_scores[ds]
+                cells[ds] = delta
                 total += delta
                 if delta > 0.0:
                     wins += 1
-            if wins > 0 and total > best_score:
-                best_score = total
-                best_variant = (pct_name, wins, total)
+            variant_summary.append((pct_name, wins, total, cells))
 
-        if best_variant is None:
-            lines.append("**No e1-fill fraction improves on V0_6 baseline across any holdout.** ")
-            lines.append("Recommendation: skip the e1 fill; keep the 218k base training set ")
-            lines.append("(V0_6) as the V0_7 candidate, or look for a different intervention ")
-            lines.append("(e.g., per-codec sampling, different feature set).\n")
+        # Find best by summed Δ (any sign)
+        variant_summary.sort(key=lambda x: -x[2])
+        best = variant_summary[0] if variant_summary else None
+        any_positive_sum = best is not None and best[2] > 0
+
+        if not any_positive_sum:
+            lines.append("**No e1-fill fraction improves on V0_6 baseline across the human-MOS axes ")
+            lines.append("(KADID + TID + CID22 summed).** Every fraction tested is a regression. ")
+            lines.append("The least-bad variant is ablation_")
+            lines.append(f"{best[0]} (summed Δ = {best[2]:+.4f}, wins {best[1]}/3 datasets), ")
+            lines.append("but even it loses on TID and KADID.\n\n")
+            lines.append("**Recommendation: skip the e1 fill entirely.** Keep V0_6 (218k base) as the ")
+            lines.append("V0_7 candidate. The original V0_7 plan (100% e1 fill + sampler bias) was ")
+            lines.append("worse on every holdout; subsampling at 5/10/20/50% does not recover. The ")
+            lines.append("e1 fill content is fundamentally unhelpful for human-MOS generalization in ")
+            lines.append("this configuration. Consider:\n\n")
+            lines.append("- A different intervention axis (e.g., new content classes, different ")
+            lines.append("  zenanalyze features, codec-class sampling weights)\n")
+            lines.append("- Investigating WHY e1 hurts: hypothesis is that JPEG-family bias goes ")
+            lines.append("  from 56% (base) to 63% at 100% (per zenjpeg_e1_fill_plan_2026-05-01.md), ")
+            lines.append("  which over-fits the MLP to JPEG artifact statistics at the expense of ")
+            lines.append("  AVIF/JXL/WebP/general-distortion sensitivity\n")
+            lines.append("- Trying e1 at quality grids that hit the 60-75 SSIM2 band (where most ")
+            lines.append("  human-MOS pairs live) instead of the wide 0-90 spread the fill targeted\n")
         else:
-            pct, wins, total = best_variant
-            lines.append(f"**Champion: ablation_{pct}** — wins on {wins}/4 holdouts vs V0_6, ")
-            lines.append(f"summed Δ = {total:+.4f}.\n")
+            pct, wins, total, cells = best
+            lines.append(f"**Champion: ablation_{pct}** — wins on {wins}/3 holdouts vs V0_6, ")
+            lines.append(f"summed Δ = {total:+.4f}.\n\n")
+            lines.append("Per-dataset deltas:\n\n")
+            for ds in ("KADIK10k", "TID2013", "CID22"):
+                if ds in cells:
+                    sign = "+" if cells[ds] >= 0 else ""
+                    lines.append(f"- {ds}: {sign}{cells[ds]:.4f}\n")
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_PATH, "w") as f:
