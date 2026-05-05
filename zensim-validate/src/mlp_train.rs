@@ -522,7 +522,7 @@ pub fn train_mlp(
 /// Bake a 2-layer MLP (LeakyReLU → Identity) into ZNPR v2 bytes.
 /// Converts f64 weights to f32 once and feeds them to [`bake_v2`].
 #[allow(clippy::too_many_arguments)]
-fn bake_two_layer_znpr_v2(
+pub(crate) fn bake_two_layer_znpr_v2(
     scaler_mean: &[f64],
     scaler_scale: &[f64],
     w1: &[f64],
@@ -572,7 +572,7 @@ fn bake_two_layer_znpr_v2(
     .expect("v2 bake of 2-layer MLP")
 }
 
-fn compute_scaler_from_groups(
+pub(crate) fn compute_scaler_from_groups(
     groups: &[TrainingGroup<'_>],
     train_indices: &[usize],
     n_features: usize,
@@ -700,7 +700,7 @@ fn predict_group(
         .collect()
 }
 
-fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
+pub(crate) fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len();
     if n < 2 {
         return 0.0;
@@ -810,16 +810,16 @@ impl AdamState {
     }
 }
 
-struct SplitMix64 {
+pub(crate) struct SplitMix64 {
     state: u64,
 }
 
 impl SplitMix64 {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.state;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -827,11 +827,11 @@ impl SplitMix64 {
         z ^ (z >> 31)
     }
 
-    fn next_f64_unit(&mut self) -> f64 {
+    pub(crate) fn next_f64_unit(&mut self) -> f64 {
         ((self.next_u64() >> 11) as f64 + 0.5) / ((1u64 << 53) as f64)
     }
 
-    fn next_normal(&mut self) -> f64 {
+    pub(crate) fn next_normal(&mut self) -> f64 {
         let u1 = self.next_f64_unit().max(1e-12);
         let u2 = self.next_f64_unit();
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()

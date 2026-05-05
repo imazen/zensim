@@ -8,6 +8,10 @@ publish = false
 
 [features]
 default = []
+## Enable Mixture-of-Experts (MoE) trainer + manifest baker. Adds the
+## `--mlp-moe-onehot-content-class` family of CLI flags. See
+## `docs/moe_architecture.md`.
+moe = []
 # zenresize = ["zensim/zenresize"]  # re-enable when zenresize published
 
 [dependencies]
@@ -24,4 +28,4 @@ anyhow = "1"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize"))']
+check-cfg = ['cfg(feature, values("zenresize", "moe"))']

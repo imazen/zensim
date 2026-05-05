@@ -1,6 +1,8 @@
 #![allow(clippy::needless_range_loop)] // Training loops index parallel arrays by shared index
 
 mod mlp_train;
+#[cfg(feature = "moe")]
+mod mlp_train_moe;
 mod scale_invariance;
 
 use calamine::{Reader, Xlsx};
@@ -283,6 +285,51 @@ struct Args {
     /// human_score scale. Default 0.733 = SSIM2 60 (`(60 + 50) / 150`).
     #[arg(long, default_value_t = 0.733)]
     mlp_low_band_target_max: f64,
+
+    /// (--algorithm mlp) Enable Mixture-of-Experts (MoE). Requires
+    /// `--mlp-zenanalyze-features` to end with a contiguous block of
+    /// `cclass_*` columns; one expert is created per cclass column
+    /// (`--mlp-moe-experts` overrides). All K experts forward in
+    /// parallel, soft-weighted by a learned gate over the SAME input.
+    /// Bake produces K standard ZNPR v3 expert files plus one gate
+    /// bake plus a `<--mlp-output-stem>.moe_manifest.tsv`. Available
+    /// only with the `moe` cargo feature enabled.
+    #[arg(long, default_value_t = false)]
+    mlp_moe_onehot_content_class: bool,
+
+    /// (--algorithm mlp / MoE) Comma-separated list of class column
+    /// prefixes to identify the cclass tail of `--mlp-zenanalyze-features`.
+    /// Default matches the V0_6+cclass convention.
+    #[arg(long, default_value = "cclass_")]
+    mlp_moe_cclass_prefix: String,
+
+    /// (--algorithm mlp / MoE) Override expert count. Default = number
+    /// of cclass tail columns. Setting this to a value different from
+    /// the cclass count makes the gate learn its own routing without
+    /// per-expert class names.
+    #[arg(long, default_value_t = 0)]
+    mlp_moe_experts: usize,
+
+    /// (--algorithm mlp / MoE) Hidden width of the gate network.
+    #[arg(long, default_value_t = 32)]
+    mlp_moe_gate_hidden: usize,
+
+    /// (--algorithm mlp / MoE) Softmax temperature. <1 sharpens, >1
+    /// softens. Default 1.0.
+    #[arg(long, default_value_t = 1.0)]
+    mlp_moe_gate_temperature: f64,
+
+    /// (--algorithm mlp / MoE) Coefficient for the load-balance KL
+    /// regularizer that prevents gate collapse. 0 disables. Default
+    /// 0.01.
+    #[arg(long, default_value_t = 0.01)]
+    mlp_moe_load_balance_lambda: f64,
+
+    /// (--algorithm mlp / MoE) Inference-time hard top-1 routing
+    /// threshold. If `max_softmax(w) > threshold` the runtime evaluates
+    /// only the argmax expert (saves K-1 forwards). Default 0.95.
+    #[arg(long, default_value_t = 0.95)]
+    mlp_moe_hard_top1_threshold: f64,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -657,6 +704,177 @@ fn utc_timestamp() -> String {
 fn log_line(msg: &str, log: &mut Vec<String>) {
     println!("{}", msg);
     log.push(msg.to_string());
+}
+
+/// Train MoE end-to-end and write per-expert + gate bakes plus a
+/// `<stem>.moe_manifest.tsv`. Mirrors the FiLM CLI conventions in
+/// the v06-film branch but ships expert artifacts plus a runtime
+/// gate model — see `docs/moe_architecture.md`.
+#[cfg(feature = "moe")]
+fn run_moe_training(
+    args: &Args,
+    groups: &[mlp_train::TrainingGroup<'_>],
+    n_features_for_train: usize,
+    hyper: &mlp_train::MlpHyperparams,
+    training_log: &mut Vec<String>,
+) {
+    let zen_spec = args
+        .mlp_zenanalyze_features
+        .as_deref()
+        .expect("MoE requires --mlp-zenanalyze-features with a cclass tail");
+    let zen_names: Vec<&str> = zen_spec
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let prefix = args.mlp_moe_cclass_prefix.as_str();
+    let mut n_cclass = 0usize;
+    for name in zen_names.iter().rev() {
+        if name.starts_with(prefix) {
+            n_cclass += 1;
+        } else {
+            break;
+        }
+    }
+    if n_cclass == 0 {
+        eprintln!(
+            "error: --mlp-moe-onehot-content-class requires the trailing zenanalyze \
+             features to start with prefix '{prefix}'; got [{zen_spec}]"
+        );
+        std::process::exit(2);
+    }
+    if args.mlp_size_axes {
+        eprintln!("error: --mlp-moe-onehot-content-class is not compatible with --mlp-size-axes");
+        std::process::exit(2);
+    }
+    let class_names: Vec<String> = zen_names
+        .iter()
+        .rev()
+        .take(n_cclass)
+        .map(|n| n.strip_prefix(prefix).unwrap_or(n).to_string())
+        .rev()
+        .collect();
+    let n_experts = if args.mlp_moe_experts == 0 {
+        n_cclass
+    } else {
+        args.mlp_moe_experts
+    };
+    let expert_names: Vec<String> = if n_experts == n_cclass {
+        class_names.clone()
+    } else {
+        (0..n_experts).map(|i| format!("e{i}")).collect()
+    };
+    log_line(
+        &format!(
+            "MoE dispatch: K={n_experts} experts, gate sees full input ({n_features_for_train} dims) \
+             including {n_cclass}-way cclass tail [{}]",
+            class_names.join(","),
+        ),
+        training_log,
+    );
+
+    let moe_hp = mlp_train_moe::MoeHyperparams {
+        n_experts,
+        gate_hidden: args.mlp_moe_gate_hidden,
+        gate_temperature: args.mlp_moe_gate_temperature,
+        load_balance_lambda: args.mlp_moe_load_balance_lambda,
+        hard_top1_threshold: args.mlp_moe_hard_top1_threshold,
+    };
+
+    let moe_out = mlp_train_moe::train_mlp_moe(
+        groups,
+        n_features_for_train,
+        &expert_names,
+        hyper,
+        &moe_hp,
+        training_log,
+    );
+
+    let stem = args.mlp_output.with_extension("");
+    let parent = args
+        .mlp_output
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let stem_name = stem
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "moe".to_string());
+    let manifest_path = parent.join(format!("{stem_name}.moe_manifest.tsv"));
+    let gate_path = parent.join(format!("{stem_name}.gate.bin"));
+
+    // Header + metadata block.
+    let mut manifest_lines: Vec<String> = vec![
+        "# zensim MoE manifest v1".to_string(),
+        format!("# n_experts\t{}", moe_out.n_experts),
+        format!("# gate_temperature\t{}", moe_out.gate_temperature),
+        format!("# hard_top1_threshold\t{}", moe_out.hard_top1_threshold),
+        format!("# n_features\t{}", moe_out.n_features),
+        format!("# n_hidden\t{}", moe_out.n_hidden),
+        "role\tindex\tname\tbake_path".to_string(),
+    ];
+
+    std::fs::write(&gate_path, &moe_out.gate_bake).expect("write MoE gate bake");
+    log_line(
+        &format!(
+            "  MoE gate bake: {} ({} bytes, {n_features_for_train}→{}→{n_experts} ReLU/Identity)",
+            gate_path.display(),
+            moe_out.gate_bake.len(),
+            args.mlp_moe_gate_hidden,
+        ),
+        training_log,
+    );
+    zensim::mlp::Model::from_bytes(Box::leak(moe_out.gate_bake.clone().into_boxed_slice()))
+        .expect("MoE gate bake roundtrip");
+    manifest_lines.push(format!("gate\t-1\tgate\t{}", gate_path.display()));
+
+    for (k, bake) in moe_out.expert_bakes.iter().enumerate() {
+        let name = &moe_out.expert_names[k];
+        let path = parent.join(format!("{stem_name}.e{k}_{name}.bin"));
+        std::fs::write(&path, bake).expect("write MoE expert bake");
+        log_line(
+            &format!(
+                "  MoE expert {k} ({name}): {} ({} bytes)",
+                path.display(),
+                bake.len()
+            ),
+            training_log,
+        );
+        zensim::mlp::Model::from_bytes(Box::leak(bake.clone().into_boxed_slice()))
+            .expect("MoE expert bake roundtrip");
+        manifest_lines.push(format!("expert\t{k}\t{name}\t{}", path.display()));
+    }
+
+    std::fs::write(&manifest_path, manifest_lines.join("\n") + "\n")
+        .expect("write MoE manifest");
+    log_line(
+        &format!("MoE manifest: {}", manifest_path.display()),
+        training_log,
+    );
+
+    // Primary --mlp-output: write expert 0's bake so existing
+    // single-bake eval paths still load something. The MoE-aware
+    // eval path uses the manifest instead.
+    std::fs::write(&args.mlp_output, &moe_out.expert_bakes[0])
+        .expect("write primary MoE bake (expert 0)");
+    log_line(
+        &format!(
+            "MoE primary bake (expert 0='{}'): {} ({} bytes)",
+            moe_out.expert_names[0],
+            args.mlp_output.display(),
+            moe_out.expert_bakes[0].len(),
+        ),
+        training_log,
+    );
+    log_line(
+        &format!(
+            "MoE-MLP train: best validation SROCC = {:.4}",
+            moe_out.best_val_score
+        ),
+        training_log,
+    );
+    let log_path = args.mlp_output.with_extension("log");
+    std::fs::write(&log_path, training_log.join("\n")).expect("write MoE MLP log");
 }
 
 /// Parse dataset weight specification like "synthetic:3.0,tid2013:1.0".
@@ -1642,6 +1860,25 @@ fn main() {
                 low_band_target_max: args.mlp_low_band_target_max,
                 ..Default::default()
             };
+
+            // ====================================
+            // MoE-MLP path (V0_6 + Mixture-of-Experts)
+            // ====================================
+            #[cfg(feature = "moe")]
+            if args.mlp_moe_onehot_content_class {
+                run_moe_training(
+                    &args, &groups, n_features_for_train, &hyper, &mut training_log,
+                );
+                return;
+            }
+            #[cfg(not(feature = "moe"))]
+            if args.mlp_moe_onehot_content_class {
+                eprintln!(
+                    "error: --mlp-moe-onehot-content-class requires building with --features moe"
+                );
+                std::process::exit(2);
+            }
+
             let bytes = mlp_train::train_mlp(&groups, n_features_for_train, &hyper, &mut training_log);
             std::fs::write(&args.mlp_output, &bytes).expect("write MLP binary");
             log_line(

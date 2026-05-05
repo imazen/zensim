@@ -140,6 +140,214 @@ fn load_zenanalyze_tsv(path: &Path, features: Option<&str>) -> ZenanalyzeAugment
     }
 }
 
+/// MoE manifest: gate model + K expert models, plus runtime knobs.
+/// Loaded from `<stem>.moe_manifest.tsv` produced by
+/// `zensim-validate --algorithm mlp --mlp-moe-onehot-content-class`.
+#[cfg(feature = "moe")]
+#[derive(Debug, Clone)]
+struct MoeManifest {
+    gate_bake: Vec<u8>,
+    expert_bakes: Vec<Vec<u8>>,
+    /// Class short names — surfaced only in the load-time log line; not
+    /// consulted at inference (the runtime indexes `expert_bakes` by
+    /// gate argmax / mixture position, not by name).
+    #[allow(dead_code)]
+    expert_names: Vec<String>,
+    n_experts: usize,
+    gate_temperature: f64,
+    hard_top1_threshold: f64,
+}
+
+#[cfg(feature = "moe")]
+fn load_moe_manifest(manifest_path: &Path) -> MoeManifest {
+    let data = std::fs::read_to_string(manifest_path).unwrap_or_else(|e| {
+        eprintln!("failed to read --moe-manifest {}: {e}", manifest_path.display());
+        std::process::exit(1);
+    });
+    let mut n_experts: usize = 0;
+    let mut gate_temperature: f64 = 1.0;
+    let mut hard_top1_threshold: f64 = 0.95;
+    let mut gate_path: Option<PathBuf> = None;
+    let mut expert_entries: Vec<(usize, String, PathBuf)> = Vec::new();
+    let mut header_seen = false;
+    for raw in data.lines() {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("# ") {
+            // metadata line: `# key\tvalue` or freeform header
+            let parts: Vec<&str> = rest.splitn(2, '\t').collect();
+            if parts.len() == 2 {
+                match parts[0] {
+                    "n_experts" => n_experts = parts[1].parse().unwrap_or(0),
+                    "gate_temperature" => gate_temperature = parts[1].parse().unwrap_or(1.0),
+                    "hard_top1_threshold" => {
+                        hard_top1_threshold = parts[1].parse().unwrap_or(0.95)
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        if !header_seen {
+            // Body header: role\tindex\tname\tbake_path
+            let cols: Vec<&str> = line.split('\t').collect();
+            if cols.len() == 4 && cols[0] == "role" {
+                header_seen = true;
+                continue;
+            }
+            // Tolerate manifests that omit the body header.
+        }
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() != 4 {
+            continue;
+        }
+        let role = cols[0];
+        let idx: i64 = cols[1].parse().unwrap_or(-2);
+        let name = cols[2].to_string();
+        let path = PathBuf::from(cols[3]);
+        match role {
+            "gate" => gate_path = Some(path),
+            "expert" => {
+                let i = idx.max(0) as usize;
+                expert_entries.push((i, name, path));
+            }
+            _ => {}
+        }
+    }
+    let gate_path = gate_path.unwrap_or_else(|| {
+        eprintln!("MoE manifest missing 'gate' row");
+        std::process::exit(1);
+    });
+    expert_entries.sort_by_key(|e| e.0);
+    if n_experts == 0 {
+        n_experts = expert_entries.len();
+    }
+    if expert_entries.len() != n_experts {
+        eprintln!(
+            "MoE manifest: expected {n_experts} experts, found {}",
+            expert_entries.len()
+        );
+        std::process::exit(1);
+    }
+    let gate_bake = std::fs::read(&gate_path).unwrap_or_else(|e| {
+        eprintln!("failed to read MoE gate bake {}: {e}", gate_path.display());
+        std::process::exit(1);
+    });
+    let mut expert_bakes = Vec::with_capacity(n_experts);
+    let mut expert_names = Vec::with_capacity(n_experts);
+    for (_idx, name, path) in expert_entries {
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+            eprintln!("failed to read MoE expert {}: {e}", path.display());
+            std::process::exit(1);
+        });
+        expert_bakes.push(bytes);
+        expert_names.push(name);
+    }
+    eprintln!(
+        "loaded MoE manifest: K={n_experts} experts [{}], τ={gate_temperature}, hard_top1_threshold={hard_top1_threshold}",
+        expert_names.join(",")
+    );
+    MoeManifest {
+        gate_bake,
+        expert_bakes,
+        expert_names,
+        n_experts,
+        gate_temperature,
+        hard_top1_threshold,
+    }
+}
+
+/// Evaluate the MoE on the given augmented features. Loads the gate
+/// + each expert via `Model::from_bytes` and runs them in sequence.
+/// Returns NaN on any I/O / dimension failure.
+///
+/// At inference: gate model produces K logits, softmax gives weights
+/// `w[K]`. If `max(w) > hard_top1_threshold`, we run only the argmax
+/// expert (saves K-1 forwards). Otherwise we run all K and compute
+/// `Σ w_k · y_k`.
+#[cfg(feature = "moe")]
+fn score_moe(features: &[f64], moe: &MoeManifest) -> f64 {
+    // Gate forward.
+    let gate_model = match Model::from_bytes(&moe.gate_bake) {
+        Ok(m) => m,
+        Err(_) => return f64::NAN,
+    };
+    let n_inputs = gate_model.n_inputs();
+    if features.len() < n_inputs {
+        return f64::NAN;
+    }
+    let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
+    let mut gate_pred = Predictor::new(gate_model);
+    let logits_f32 = match gate_pred.predict(&f32_features) {
+        Ok(v) => v.to_vec(),
+        Err(_) => return f64::NAN,
+    };
+    if logits_f32.len() != moe.n_experts {
+        return f64::NAN;
+    }
+    // Softmax with temperature.
+    let inv_tau = 1.0 / moe.gate_temperature.max(1e-6);
+    let max_z = logits_f32.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as f64;
+    let exps: Vec<f64> = logits_f32
+        .iter()
+        .map(|&v| (((v as f64) - max_z) * inv_tau).exp())
+        .collect();
+    let sum: f64 = exps.iter().sum();
+    let weights: Vec<f64> = if sum > 0.0 {
+        exps.iter().map(|&e| e / sum).collect()
+    } else {
+        vec![1.0 / moe.n_experts as f64; moe.n_experts]
+    };
+
+    // Hard top-1 shortcut.
+    let (argmax, &max_w) = weights
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or((0, &0.0));
+
+    if max_w > moe.hard_top1_threshold {
+        // Single expert.
+        let model = match Model::from_bytes(&moe.expert_bakes[argmax]) {
+            Ok(m) => m,
+            Err(_) => return f64::NAN,
+        };
+        let m_inputs = model.n_inputs();
+        if features.len() < m_inputs {
+            return f64::NAN;
+        }
+        let mf: Vec<f32> = features[..m_inputs].iter().map(|&v| v as f32).collect();
+        let mut p = Predictor::new(model);
+        return match p.predict(&mf) {
+            Ok(out) => out[0] as f64,
+            Err(_) => f64::NAN,
+        };
+    }
+
+    // Soft mixture.
+    let mut acc = 0.0f64;
+    for k in 0..moe.n_experts {
+        let model = match Model::from_bytes(&moe.expert_bakes[k]) {
+            Ok(m) => m,
+            Err(_) => return f64::NAN,
+        };
+        let m_inputs = model.n_inputs();
+        if features.len() < m_inputs {
+            return f64::NAN;
+        }
+        let mf: Vec<f32> = features[..m_inputs].iter().map(|&v| v as f32).collect();
+        let mut p = Predictor::new(model);
+        let y = match p.predict(&mf) {
+            Ok(out) => out[0] as f64,
+            Err(_) => return f64::NAN,
+        };
+        acc += weights[k] * y;
+    }
+    acc
+}
+
 #[derive(Debug, Clone)]
 struct Pair {
     reference: PathBuf,
@@ -173,6 +381,8 @@ fn main() {
     let mut per_pair_output: Option<PathBuf> = None;
     let mut zenanalyze_tsv: Option<PathBuf> = None;
     let mut zenanalyze_features: Option<String> = None;
+    #[cfg(feature = "moe")]
+    let mut moe_manifest_path: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
@@ -184,12 +394,27 @@ fn main() {
             "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
             "--zenanalyze-tsv" => zenanalyze_tsv = Some(args.next().unwrap().into()),
             "--zenanalyze-features" => zenanalyze_features = Some(args.next().unwrap()),
+            #[cfg(feature = "moe")]
+            "--moe-manifest" => moe_manifest_path = Some(args.next().unwrap().into()),
+            #[cfg(not(feature = "moe"))]
+            "--moe-manifest" => {
+                eprintln!("--moe-manifest requires building with --features moe");
+                std::process::exit(2);
+            }
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
             }
         }
     }
+    #[cfg(feature = "moe")]
+    let moe_manifest: Option<MoeManifest> = moe_manifest_path.as_ref().map(|p| {
+        if zenanalyze_tsv.is_none() {
+            eprintln!("--moe-manifest requires --zenanalyze-tsv (gate sees full input including cclass tail)");
+            std::process::exit(1);
+        }
+        load_moe_manifest(p)
+    });
     let augment: Option<ZenanalyzeAugment> = zenanalyze_tsv
         .as_ref()
         .map(|p| load_zenanalyze_tsv(p, zenanalyze_features.as_deref()));
@@ -279,7 +504,13 @@ fn main() {
                     let eta = (n - p) as f64 / rate;
                     eprintln!("  {p}/{n} ({rate:.1}/s, ETA {eta:.0}s)");
                 }
-                process_pair(pair, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref())
+                process_pair(
+                    pair,
+                    &z_v04,
+                    v04_bake_bytes.as_deref(),
+                    augment.as_ref(),
+                    #[cfg(feature = "moe")] moe_manifest.as_ref(),
+                )
             })
             .collect();
 
@@ -361,8 +592,14 @@ fn main() {
                         let eta = (n_total - p) as f64 / rate;
                         eprintln!("  konjnd {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
                     }
-                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref(), augment.as_ref())
-                        .map(|row| (kp.codec.clone(), row))
+                    process_konjnd_pair(
+                        kp,
+                        &z_v04,
+                        v04_bake_bytes.as_deref(),
+                        augment.as_ref(),
+                        #[cfg(feature = "moe")] moe_manifest.as_ref(),
+                    )
+                    .map(|row| (kp.codec.clone(), row))
                 })
                 .collect();
             let scored: Vec<(String, CalibRow)> = results.into_iter().flatten().collect();
@@ -427,6 +664,7 @@ fn process_konjnd_pair(
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
     augment: Option<&ZenanalyzeAugment>,
+    #[cfg(feature = "moe")] moe: Option<&MoeManifest>,
 ) -> Option<(f64, f64, f64, f64)> {
     let p = &kp.pair;
     let src_img = match image::open(&p.reference) {
@@ -470,7 +708,14 @@ fn process_konjnd_pair(
     } else {
         features.to_vec()
     };
-    let v04_distance = if let Some(bytes) = v04_bake {
+    #[cfg(feature = "moe")]
+    let moe_score = moe.map(|m| score_moe(&augmented_features, m));
+    #[cfg(not(feature = "moe"))]
+    let moe_score: Option<f64> = None;
+
+    let v04_distance = if let Some(score) = moe_score {
+        score
+    } else if let Some(bytes) = v04_bake {
         let model = Model::from_bytes(bytes).ok()?;
         let n_inputs = model.n_inputs();
         if augmented_features.len() < n_inputs {
@@ -608,6 +853,7 @@ fn process_pair(
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
     augment: Option<&ZenanalyzeAugment>,
+    #[cfg(feature = "moe")] moe: Option<&MoeManifest>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
     let src_img = match image::open(&pair.reference) {
         Ok(img) => img.to_rgb8(),
@@ -662,7 +908,16 @@ fn process_pair(
     } else {
         features.to_vec()
     };
-    let v04 = if let Some(bytes) = v04_bake {
+    // V0_4 distance — when an MoE manifest is loaded, route through
+    // the gate + K experts; otherwise use the single bake.
+    #[cfg(feature = "moe")]
+    let moe_score = moe.map(|m| score_moe(&augmented_features, m));
+    #[cfg(not(feature = "moe"))]
+    let moe_score: Option<f64> = None;
+
+    let v04 = if let Some(score) = moe_score {
+        score
+    } else if let Some(bytes) = v04_bake {
         let model = Model::from_bytes(bytes).ok()?;
         let n_inputs = model.n_inputs();
         if augmented_features.len() < n_inputs {

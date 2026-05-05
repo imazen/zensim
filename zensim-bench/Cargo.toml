@@ -6,6 +6,10 @@ publish = false
 
 [features]
 training = ["zensim/training"]
+## Enable Mixture-of-Experts (MoE) evaluation in the baseline harness:
+## `--moe-manifest <path>` routes each pair through K expert bakes
+## weighted by a gate model. See `docs/moe_architecture.md`.
+moe = []
 # zenresize = ["zensim/zenresize"]
 
 [build-dependencies]
@@ -40,4 +44,4 @@ harness = false
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']
+check-cfg = ['cfg(feature, values("zenresize", "training", "moe"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']
