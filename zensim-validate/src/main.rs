@@ -1322,7 +1322,9 @@ fn main() {
             (0..names.len()).collect()
         };
         let n_extras = selected.len();
-        let zero_fill = vec![0.0_f64; n_extras];
+        // zero_fill must be sized so that zero_fill[selected[i]] is valid for
+        // every i; selected indices are bounded by names.len(), not n_extras.
+        let zero_fill = vec![0.0_f64; names.len()];
         let mut total_pairs = 0usize;
         let mut hit_pairs = 0usize;
         for ds in all_datasets.iter_mut() {
