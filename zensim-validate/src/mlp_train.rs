@@ -565,6 +565,9 @@ fn bake_two_layer_znpr_v2(
         layers: &layers,
         feature_bounds: &[],
         metadata: &[],
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
     })
     .expect("v2 bake of 2-layer MLP")
 }
