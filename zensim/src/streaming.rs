@@ -1612,9 +1612,32 @@ impl ZensimScratch {
 /// Created via [`Zensim::precompute_reference`](crate::Zensim::precompute_reference).
 pub struct PrecomputedReference {
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
+    /// Reference image width in pixels (unpadded). Used to validate that
+    /// distorted images passed to `compute_with_ref*` match the dimensions
+    /// the precomputed pyramid was built for.
+    pub(crate) ref_width: usize,
+    /// Reference image height in pixels.
+    pub(crate) ref_height: usize,
 }
 
 impl PrecomputedReference {
+    /// Reference image width in pixels (the unpadded width passed at construction).
+    ///
+    /// Distorted images compared against this reference via
+    /// [`Zensim::compute_with_ref`](crate::Zensim::compute_with_ref) and friends
+    /// must match this width exactly; otherwise the call returns
+    /// [`ZensimError::DimensionMismatch`](crate::ZensimError::DimensionMismatch).
+    pub fn width(&self) -> usize {
+        self.ref_width
+    }
+
+    /// Reference image height in pixels.
+    ///
+    /// See [`width`](Self::width) for the matching contract on distorted images.
+    pub fn height(&self) -> usize {
+        self.ref_height
+    }
+
     /// Build a precomputed reference from an ImageSource.
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
@@ -1625,6 +1648,7 @@ impl PrecomputedReference {
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
             convert_source_to_xyb_into(source, scale0, padded_width, parallel);
         })
+        .with_ref_dims(width, height)
     }
 
     /// Allocate scale buffers up front and fill them via `fill_scale0`, then
@@ -1700,7 +1724,21 @@ impl PrecomputedReference {
             }
         }
 
-        Self { scales }
+        Self {
+            scales,
+            ref_width: 0,
+            ref_height: 0,
+        }
+    }
+
+    /// Set the unpadded reference dimensions on a freshly-built pyramid.
+    ///
+    /// Internal — chained from each public constructor so callers see the
+    /// dimensions they passed in, not the padded width.
+    fn with_ref_dims(mut self, width: usize, height: usize) -> Self {
+        self.ref_width = width;
+        self.ref_height = height;
+        self
     }
 
     /// Build a precomputed reference from planar linear RGB f32 data.
@@ -1720,6 +1758,7 @@ impl PrecomputedReference {
         Self::build_from_dims(num_scales, padded_width, height, parallel, |scale0| {
             convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, scale0);
         })
+        .with_ref_dims(width, height)
     }
 }
 
@@ -1877,8 +1916,18 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         }
 
         let (ref src_planes, src_w, src_h) = precomputed.scales[scale];
-        debug_assert_eq!(w, src_w, "width mismatch at scale {scale}");
-        debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
+        // Internal invariant: dims match because the public API
+        // (Zensim::compute_with_ref*) validates distorted dims against
+        // PrecomputedReference dims before reaching this code, and both
+        // sides downscale by the same factor each scale.
+        assert_eq!(
+            w, src_w,
+            "internal invariant violated: width mismatch at scale {scale}"
+        );
+        assert_eq!(
+            h, src_h,
+            "internal invariant violated: height mismatch at scale {scale}"
+        );
 
         let (scale_stat, _) =
             process_scale_bands(src_planes, dst_planes, w, h, config, scale, weights, None);
@@ -2003,8 +2052,18 @@ fn compute_diffmap_from_xyb(
         }
 
         let (ref src_planes, src_w, src_h) = precomputed.scales[scale];
-        debug_assert_eq!(w, src_w, "width mismatch at scale {scale}");
-        debug_assert_eq!(h, src_h, "height mismatch at scale {scale}");
+        // Internal invariant: dims match because the public API
+        // (Zensim::compute_with_ref*) validates distorted dims against
+        // PrecomputedReference dims before reaching this code, and both
+        // sides downscale by the same factor each scale.
+        assert_eq!(
+            w, src_w,
+            "internal invariant violated: width mismatch at scale {scale}"
+        );
+        assert_eq!(
+            h, src_h,
+            "internal invariant violated: height mismatch at scale {scale}"
+        );
 
         // Request diffmap at every scale
         let eq = PixelFeatureWeights {

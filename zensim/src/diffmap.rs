@@ -616,6 +616,12 @@ impl crate::metric::Zensim {
         if distorted.width() < 8 || distorted.height() < 8 {
             return Err(ZensimError::ImageTooSmall);
         }
+        crate::metric::validate_ref_match(precomputed, distorted)?;
+        crate::metric::check_within_max_pixels(
+            distorted.width(),
+            distorted.height(),
+            self.max_pixels(),
+        )?;
 
         let width = distorted.width();
         let height = distorted.height();

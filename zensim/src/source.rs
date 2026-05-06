@@ -144,7 +144,12 @@ impl<'a> RgbSlice<'a> {
         width: usize,
         height: usize,
     ) -> Result<Self, crate::ZensimError> {
-        if data.len() < width * height {
+        // Use checked_mul: on 32-bit / wasm32 a 1<<30 × 8 multiply wraps to 0
+        // and the length check would silently pass. Reject overflow up front.
+        let required = width
+            .checked_mul(height)
+            .ok_or(crate::ZensimError::ImageTooLarge)?;
+        if data.len() < required {
             return Err(crate::ZensimError::InvalidDataLength);
         }
         Ok(Self {
@@ -235,7 +240,11 @@ impl<'a> RgbaSlice<'a> {
         height: usize,
         alpha_mode: AlphaMode,
     ) -> Result<Self, crate::ZensimError> {
-        if data.len() < width * height {
+        // Checked multiply guards 32-bit / wasm32 from `width * height` wrap.
+        let required = width
+            .checked_mul(height)
+            .ok_or(crate::ZensimError::ImageTooLarge)?;
+        if data.len() < required {
             return Err(crate::ZensimError::InvalidDataLength);
         }
         Ok(Self {
@@ -365,12 +374,20 @@ impl<'a> StridedBytes<'a> {
         alpha_mode: AlphaMode,
     ) -> Result<Self, crate::ZensimError> {
         let bpp = pixel_format.bytes_per_pixel();
-        let min_stride = width * bpp;
+        // `width * bpp` and `(height - 1) * stride + min_stride` are
+        // attacker-influenced; on 32-bit / wasm32 they wrap silently. Use
+        // checked arithmetic and treat overflow as `ImageTooLarge`.
+        let min_stride = width
+            .checked_mul(bpp)
+            .ok_or(crate::ZensimError::ImageTooLarge)?;
         if stride < min_stride {
             return Err(crate::ZensimError::InvalidStride);
         }
         if height > 0 {
-            let required = (height - 1) * stride + min_stride;
+            let required = (height - 1)
+                .checked_mul(stride)
+                .and_then(|v| v.checked_add(min_stride))
+                .ok_or(crate::ZensimError::ImageTooLarge)?;
             if data.len() < required {
                 return Err(crate::ZensimError::InvalidDataLength);
             }
