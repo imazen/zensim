@@ -75,6 +75,36 @@ fn m1_diffmap_with_ref_dim_mismatch_returns_err() {
     }
 }
 
+#[test]
+fn m1_diffmap_with_ref_linear_planar_dim_mismatch_returns_err() {
+    use zensim::DiffmapOptions;
+    let big_pixels = vec![[10u8, 20, 30]; 32 * 16];
+    let big = RgbSlice::new(&big_pixels, 32, 16);
+
+    let zensim = z();
+    let pre = zensim.precompute_reference(&big).unwrap();
+
+    // Build a smaller distorted set as planar f32 and feed it with the
+    // wrong (width, height) — must reject before allocating internals.
+    let small_w = 16usize;
+    let small_h = 8usize;
+    let r = vec![0.5f32; small_w * small_h];
+    let g = vec![0.5f32; small_w * small_h];
+    let b = vec![0.5f32; small_w * small_h];
+
+    match zensim.compute_with_ref_and_diffmap_linear_planar(
+        &pre,
+        [&r, &g, &b],
+        small_w,
+        small_h,
+        small_w,
+        DiffmapOptions::default(),
+    ) {
+        Ok(_) => panic!("expected DimensionMismatch"),
+        Err(e) => assert_eq!(e, ZensimError::DimensionMismatch),
+    }
+}
+
 // ─── M2: integer overflow rejection ────────────────────────────────────────
 
 #[test]

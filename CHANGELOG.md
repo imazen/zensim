@@ -7,6 +7,30 @@
      Persist across patch releases. Only clear when the breaking release ships. -->
 _(none currently queued)_
 
+### Added (zensim, unreleased)
+- `Zensim::with_max_pixels(usize)` / `Zensim::max_pixels()` — opt-in cap on
+  `width × height` per image, enforced before allocation. Default `None`
+  (no cap). Use when feeding untrusted dimensions to avoid runaway allocation.
+- `try_score_from_features` — `Result`-returning replacement for the
+  panicking `score_from_features` (now deprecated, kept as a wrapper).
+- `PrecomputedReference::width()` / `height()` — public accessors so callers
+  can verify dimensions before passing distorted images to `compute_with_ref*`.
+- `ZensimError` variants `ImageTooLarge` and `FeatureWeightsLengthMismatch`.
+  `ZensimError` is now `#[non_exhaustive]`.
+
+### Fixed (zensim, unreleased)
+- `compute_with_ref*` (including `compute_with_ref_and_diffmap` and
+  `compute_with_ref_and_diffmap_linear_planar`) now rejects distorted
+  images whose dimensions differ from the precomputed reference with
+  `DimensionMismatch` instead of silently producing garbage scores or
+  panicking on slice out-of-range.
+- `RgbSlice` / `RgbaSlice` / `StridedBytes` now use `checked_mul` /
+  `checked_add` for `width × height` and stride arithmetic, returning
+  `ImageTooLarge` on overflow instead of wrapping silently on 32-bit /
+  wasm32 targets.
+- `simd_padded_width` saturates to `usize::MAX` instead of wrapping; every
+  downstream allocation site is now guarded by `checked_padded_plane_len`.
+
 ## zensim
 
 ### [0.2.8] - 2026-05-04

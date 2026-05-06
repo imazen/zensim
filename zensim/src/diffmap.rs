@@ -696,6 +696,13 @@ impl crate::metric::Zensim {
     /// # Errors
     ///
     /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::DimensionMismatch`] if `width` / `height`
+    /// differ from the precomputed reference's recorded dimensions.
+    /// Returns [`ZensimError::ImageTooLarge`] if `width × height` exceeds
+    /// the configured `max_pixels` cap or if `stride × height` overflows
+    /// `usize`. Returns [`ZensimError::InvalidStride`] if `stride < width`.
+    /// Returns [`ZensimError::InvalidDataLength`] if any plane is shorter
+    /// than `stride × height`.
     pub fn compute_with_ref_and_diffmap_linear_planar(
         &self,
         precomputed: &PrecomputedReference,
@@ -709,6 +716,23 @@ impl crate::metric::Zensim {
         let params = self.profile().params();
         if width < 8 || height < 8 {
             return Err(ZensimError::ImageTooSmall);
+        }
+        if precomputed.width() != width || precomputed.height() != height {
+            return Err(ZensimError::DimensionMismatch);
+        }
+        crate::metric::check_within_max_pixels(width, height, self.max_pixels())?;
+        if stride < width {
+            return Err(ZensimError::InvalidStride);
+        }
+        // `stride * height` must fit in usize; reject overflow up front so
+        // downstream `y * stride + x` arithmetic cannot wrap on 32-bit.
+        let row_capacity = stride
+            .checked_mul(height)
+            .ok_or(ZensimError::ImageTooLarge)?;
+        for plane in &planes {
+            if plane.len() < row_capacity {
+                return Err(ZensimError::InvalidDataLength);
+            }
         }
 
         let config = config_from_params(params, self.parallel());
