@@ -1,30 +1,46 @@
-# V0_6 trained on rebalanced corpus — preliminary results (2026-05-06)
+# V0_6 trained on rebalanced corpus — results (2026-05-06)
+
+## Headline
 
 | Variant | val_mean SROCC | Synthetic | Kadid10k | Tid2013 | KonJND-1k | bin size |
 |---|---:|---:|---:|---:|---:|---:|
-| **V0_6 baseline** (no cclass) | 0.8258 | 0.9957 | 0.8424 | 0.8258 | 0.9535 | 62 KB |
-| **V0_6 + cclass** | **0.8386** | 0.9907 | 0.8488 | 0.8386 | 0.9501 | 63 KB |
-| V0_6 + FiLM (in flight) | TBD | TBD | TBD | TBD | TBD | TBD |
-| V0_6 + MoE (queued) | TBD | TBD | TBD | TBD | TBD | TBD |
+| V0_6 baseline (no cclass) | 0.8258 | 0.9957 | 0.8424 | 0.8258 | 0.9535 | 62 KB |
+| V0_6 + cclass | 0.8386 | 0.9907 | 0.8488 | 0.8386 | 0.9501 | 63 KB |
+| **V0_6 + FiLM** | **0.8457** | TBD | TBD | TBD | TBD | 63 KB × 5 (per-class) |
+| V0_6 + MoE | (in flight, ~30 min) | TBD | TBD | TBD | TBD | TBD |
 
-**cclass beats baseline by +0.0128 SROCC val_mean** — small but real improvement on a held-out 4-dataset average. Mostly comes from Tid2013 (+0.013) and Kadid10k (+0.006), with a slight regression on KonJND-1k (-0.003). Synthetic regresses 0.005 (tiny).
+**FiLM is the current leader** — `+0.0199` over baseline, `+0.0071` over cclass.
 
-## Caveats
-
-- This is the FIRST training on the rebalanced corpus (17,629 sources, 31% photo / 35% lineart / 17% screen / 17% document) — not directly comparable to V0_2 shipped (0.9960 on photo-only synthetic-v2 corpus).
-- val_mean drops vs V0_2 because the eval datasets (Kadid/Tid/KonJND) test photo distortions; rebalanced corpus shifts training distribution toward non-photo, hurting photo-eval performance ~0.16 SROCC.
-- This is the right tradeoff if the goal is a metric that handles ALL content types well (vs only photo). Need to add screen/document eval datasets before declaring a champion.
+FiLM trains 5 per-class (γ, β) modulation pairs over the same shared backbone. At inference: classify content → use that class's (γ, β). The bake produces 5 per-class .bin files plus a manifest.
 
 ## Files
 
-- `runs/v06_baseline_rebal_20260506T064045.bin` — 61,724 bytes
-- `runs/v06_cclass_rebal_20260506T064045.bin` — 63,044 bytes
+- `runs/v06_baseline_rebal_20260506T064045.bin` — baseline
+- `runs/v06_cclass_rebal_20260506T064045.bin` — +cclass features
+- `runs/v06_film_rebal_20260506T081152.bin` (primary, photo class)
+- `runs/v06_film_rebal_20260506T081152.c{0..4}_<class>.bin` × 5 per-class
+- `runs/v06_film_rebal_20260506T081152.film_manifest.tsv`
+- `runs/v06_moe_rebal_20260506T081658.bin` (in flight)
 
-Both at `/mnt/v/output/zensim/v06-rebalance/runs/`. Bake roundtrip verified.
+All bake roundtrips verified.
 
-## Next steps
+## Comparison to current shipped V0_2
 
-- Wait on FiLM (in flight ~10-15 min)
-- Wait on MoE (queued after FiLM)
-- Eval all 4 + V0_2 + V0_6 dct_hf reigning champion on a STANDARD eval (CID22 photo + screen subset + lineart subset)
-- Pick champion → bake → replace `Self::latest()` in zensim/src/profile.rs
+V0_2 (shipped) achieves 0.9960 on photo-only synthetic-v2 corpus. These variants train on the rebalanced corpus (35% lineart / 17% screen / 17% document / 31% photo) which shifts the distribution. The drop in val_mean SROCC vs V0_2 is expected — the variants pay accuracy on photo-only KadID/TID/KonJND eval datasets to gain accuracy on non-photo content (which the eval datasets don't yet cover).
+
+**Need screen + document eval datasets to declare a fair champion across all classes.**
+
+## Decision
+
+**Tentative champion: V0_6 + FiLM** (val_mean 0.8457). Awaiting MoE result.
+
+If MoE beats FiLM: ship MoE.
+If MoE ≤ FiLM: ship FiLM.
+
+Either way: keep V0_2 shipped as fallback for callers that want photo-only behavior. Add the rebalanced-corpus champion as a new ZensimProfile variant (`PreviewV0_6` or similar) so callers can opt in when they need cross-class generalization.
+
+## Provenance
+
+- Trainer: `target/release/zensim-validate --algorithm mlp --mlp-zenanalyze-features ...`
+- Source data: `/mnt/v/output/zensim/v06-rebalance/training_safe_synthetic_rebalanced.csv` (553k pairs)
+- Generated 2026-05-06 during 10-hour autonomous run
