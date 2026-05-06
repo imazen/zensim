@@ -348,7 +348,8 @@ fn compute_zensim_per_row(
                 };
                 // The result's score uses the embedded weights; for custom
                 // weights we re-score from the feature vector.
-                let (score, raw) = zensim::score_from_features(result.features(), weights);
+                let (score, raw) = zensim::try_score_from_features(result.features(), weights)
+                    .expect("features and weights length mismatch");
                 local.push((i, score, raw));
             }
             let n = progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
