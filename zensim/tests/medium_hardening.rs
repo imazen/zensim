@@ -1,9 +1,10 @@
-//! Regression tests for the M1-M3 hardening pass (audit 2026-05-06).
+//! Regression tests for the M1-M4 hardening pass (audit 2026-05-06).
 //!
 //! Each test maps to one audit finding:
 //! - M1: cross-image dim mismatch in `compute_with_ref*` returns Err.
 //! - M2: 32-bit `width * height` / stride overflow rejected at construction.
 //! - M3: `Zensim::with_max_pixels` cap fires before allocation.
+//! - M4: `try_score_from_features` returns Err on length mismatch.
 
 use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
 
@@ -209,3 +210,23 @@ fn m3_generous_cap_does_not_block() {
         .expect("usize::MAX cap accepts everything");
 }
 
+// ─── M4: try_score_from_features length mismatch ───────────────────────────
+
+#[cfg(feature = "training")]
+#[test]
+fn m4_try_score_from_features_length_mismatch_returns_err() {
+    let features = vec![0.5_f64; 39];
+    let weights = vec![0.5_f64; 13];
+    let err = zensim::try_score_from_features(&features, &weights).unwrap_err();
+    assert_eq!(err, ZensimError::FeatureWeightsLengthMismatch);
+}
+
+#[cfg(feature = "training")]
+#[test]
+fn m4_try_score_from_features_matched_lengths_ok() {
+    let features = vec![0.0_f64; 39];
+    let weights = vec![1.0_f64; 39];
+    let (score, raw) = zensim::try_score_from_features(&features, &weights).unwrap();
+    assert!(score.is_finite());
+    assert!(raw.is_finite());
+}

@@ -305,16 +305,40 @@ fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
 }
 
 /// Compute score from raw features using custom weights.
-/// `features`: raw features from ZensimResult.features
-/// `weights`: one weight per feature (len must equal features.len())
-/// Returns (score, raw_distance)
+///
+/// # Panics
+///
+/// Panics if `features.len() != weights.len()`. Prefer
+/// [`try_score_from_features`] for caller-supplied lengths — this thin
+/// wrapper exists for backwards compatibility and will be removed in a
+/// future major release.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
+#[deprecated(
+    since = "0.2.9",
+    note = "use `try_score_from_features` which returns a Result instead of panicking on length mismatch"
+)]
 pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
-    assert_eq!(
-        features.len(),
-        weights.len(),
-        "features and weights must have same length"
-    );
+    try_score_from_features(features, weights)
+        .expect("score_from_features: features and weights must have same length")
+}
+
+/// Compute score from raw features using custom weights.
+///
+/// `features`: raw features from `ZensimResult::features()`.
+/// `weights`: one weight per feature; `weights.len()` must equal
+/// `features.len()`.
+///
+/// Returns `(score, raw_distance)` on success, or
+/// [`ZensimError::FeatureWeightsLengthMismatch`] if the slices have
+/// different lengths.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
+pub fn try_score_from_features(
+    features: &[f64],
+    weights: &[f64],
+) -> Result<(f64, f64), ZensimError> {
+    if features.len() != weights.len() {
+        return Err(ZensimError::FeatureWeightsLengthMismatch);
+    }
     let raw_distance: f64 = features
         .iter()
         .zip(weights.iter())
@@ -335,7 +359,7 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .unwrap_or(FEATURES_PER_CHANNEL_BASIC * 3);
     let n_scales = features.len() / features_per_scale;
     let raw_distance = raw_distance / n_scales.max(1) as f64;
-    (distance_to_score(raw_distance), raw_distance)
+    Ok((distance_to_score(raw_distance), raw_distance))
 }
 
 /// Pre-compute reference with a custom number of pyramid scales.

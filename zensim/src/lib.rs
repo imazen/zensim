@@ -238,11 +238,14 @@ pub use streaming::{PrecomputedReference, ZensimScratch};
 /// with non-default `ZensimConfig` are **not comparable** to the default
 /// trained weights or the 0-100 score scale.
 #[cfg(feature = "training")]
+#[allow(deprecated)]
+pub use metric::score_from_features;
+#[cfg(feature = "training")]
 pub use metric::{
     BlurKernel, CH_B, CH_X, CH_Y, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC,
     FEATURES_PER_CHANNEL_EXTENDED, FEATURES_PER_CHANNEL_WITH_PEAKS, FEATURES_PER_SCALE, WEIGHTS,
     ZensimConfig, compute_zensim_with_config, compute_zensim_with_ref_and_config,
-    precompute_reference_with_scales, score_from_features,
+    precompute_reference_with_scales, try_score_from_features,
 };
 
 #[cfg(feature = "zenpixels")]
