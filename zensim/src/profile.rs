@@ -134,56 +134,22 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     mlp_bytes: None,
 };
 
-/// V0_4 placeholder MLP bytes — single-layer 228 → 1 linear MLP that
-/// reproduces V0_2 byte-for-byte. The per-input weights are
-/// `LINEAR_WEIGHTS_PREVIEW_V0_2[i] / num_scales` so the MLP forward
-/// output equals the V0_2 linear scorer's `raw_distance` (after V0_2's
-/// post-divide by `num_scales`).
+/// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear,
+/// trained 2026-05-07 on the 2.37M-row unified-corpus Parquet against
+/// `score_ssim2` with MSE + 0.5·RankNet loss; source-disjoint
+/// 80/10/10 split, AdamW lr=3e-3, batch 16384, 50 epochs. Best epoch
+/// 44 (val_srocc=0.9547, test_srocc=0.9814 on held-out source images).
 ///
-/// This placeholder is replaced by trained weights once the V0_4
-/// training pipeline (`zensim-validate --algorithm mlp`) ships. Public
-/// alias [`mlp_bake_preview_v0_4`] is the stable accessor.
+/// The bake's final layer was rewritten as `(-W)·x + (100 - b)` so
+/// the MLP output is on a "distance" scale (0 = identical, 100 =
+/// worst). Combined with `score_mapping_a = 1.0`, `score_mapping_b =
+/// 1.0`, runtime computes `score = 100 - 1·d^1 = ssim2_target`,
+/// which is what callers expect from a `score()` accessor returning
+/// 0..100 with 100 = identical.
 ///
-/// Sized for ZNPR v2: 128-byte header + 32-byte aligned scaler +
-/// 48-byte LayerEntry + weights + bias ≈ 1100 bytes. Built on first
-/// access, cached in a `LazyLock`.
+/// File: `zensim/weights/v0_4_2026-05-07.bin` — 61,561 bytes ZNPR v2.
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    use crate::mlp::bake::{BakeLayer, BakeRequest, bake_v2};
-    use crate::mlp::{Activation, WeightDtype};
-    use std::sync::LazyLock;
-    static BYTES: LazyLock<Vec<u8>> = LazyLock::new(|| {
-        let n_scales = PROFILE_PREVIEW_V0_2.num_scales as f64;
-        let n_inputs = WEIGHTS_PREVIEW_V0_2.len();
-        // Single 228 → 1 linear layer with the V0_2 weights pre-divided
-        // by num_scales so the MLP forward output equals V0_2's
-        // post-normalization raw_distance.
-        let weights_f32: Vec<f32> = WEIGHTS_PREVIEW_V0_2
-            .iter()
-            .map(|&w| (w / n_scales) as f32)
-            .collect();
-        let bias = [0.0f32];
-        let scaler_mean = vec![0.0f32; n_inputs];
-        let scaler_scale = vec![1.0f32; n_inputs];
-        let layers = [BakeLayer {
-            in_dim: n_inputs,
-            out_dim: 1,
-            activation: Activation::Identity,
-            dtype: WeightDtype::F32,
-            weights: &weights_f32,
-            biases: &bias,
-        }];
-        bake_v2(&BakeRequest {
-            schema_hash: 0,
-            flags: 0,
-            scaler_mean: &scaler_mean,
-            scaler_scale: &scaler_scale,
-            layers: &layers,
-            feature_bounds: &[],
-            metadata: &[],
-        })
-        .expect("v0_4 placeholder bake")
-    });
-    BYTES.as_slice()
+    include_bytes!("../weights/v0_4_2026-05-07.bin")
 }
 
 static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
@@ -195,8 +161,11 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    score_mapping_a: 18.0,
-    score_mapping_b: 0.7,
+    // The bake flips the final layer (see `mlp_bake_preview_v0_4`),
+    // so the model output is already on the 0..100 distance scale —
+    // identity mapping with a=1, b=1 produces `score = ssim2_target`.
+    score_mapping_a: 1.0,
+    score_mapping_b: 1.0,
     mlp_bytes: Some(mlp_bake_preview_v0_4),
 };
 

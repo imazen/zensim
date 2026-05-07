@@ -41,8 +41,4 @@
 // or load MLP models should depend on `zenpredict` directly. We
 // re-export here only what `zensim::metric` and `zensim::profile`
 // actually consume.
-pub(crate) use zenpredict::{Activation, Model, Predictor, WeightDtype};
-
-pub(crate) mod bake {
-    pub(crate) use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
-}
+pub(crate) use zenpredict::{Model, Predictor};

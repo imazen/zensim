@@ -17,12 +17,17 @@
 These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
 ### Added (zensim, unreleased)
-- `ZensimProfile::PreviewV0_4` — MLP-scored profile. Currently a
-  placeholder network (228 → 1 linear) that bit-reproduces V0_2 until
-  trained weights land. Selecting this variant routes scoring through
-  the `zenpredict` ZNPR v2 forward pass. The MLP runtime is
-  internal-only — consumers that want to bake/load custom MLP weights
-  should depend on `zenpredict` directly.
+- `ZensimProfile::PreviewV0_4` — MLP-scored profile shipping a real
+  trained 228 → 64 LeakyReLU → 1 network (`zensim/weights/v0_4_2026-05-07.bin`,
+  61 KB ZNPR v2). Trained 2026-05-07 on the 2.37M-row unified-corpus
+  Parquet against `score_ssim2` with `MSE + 0.5·RankNet` loss; best
+  epoch 44, val_srocc=0.9547, test_srocc=0.9814 on a source-disjoint
+  held-out split. Final layer is flipped to "distance" semantics
+  (0=identical, 100=worst) so the runtime `100 - 1·d^1` mapping with
+  `(score_mapping_a, score_mapping_b) = (1.0, 1.0)` produces ssim2-scale
+  output (0..100, 100=identical). The MLP runtime is internal-only —
+  consumers that want to bake/load custom MLP weights should depend on
+  `zenpredict` directly.
 
 ### Changed (zensim, unreleased)
 - MSRV bumped to **1.93** (transitive minimum from `zenpredict` 0.1.0

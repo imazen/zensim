@@ -1,11 +1,15 @@
 //! V0_4 MLP dispatch end-to-end tests.
 //!
-//! The V0_4 placeholder is a single-layer 228 → 1 linear MLP whose
-//! weights are `WEIGHTS_PREVIEW_V0_2 / num_scales`, so the MLP forward
-//! output equals the V0_2 linear scorer's `raw_distance` (after
-//! V0_2's post-divide). These tests verify the full dispatch path —
-//! profile params → MLP load → forward → score override — produces
-//! results matching V0_2 within f32 precision.
+//! V0_4 ships the trained 228 → 64 LeakyReLU → 1 MLP from
+//! `zensim/weights/v0_4_2026-05-07.bin` (val_srocc=0.9547,
+//! test_srocc=0.9814). The bake's final layer is flipped to
+//! "distance" semantics (0 = identical, 100 = worst), so the runtime
+//! `score = 100 - 1·d^1` mapping with `(a=1, b=1)` produces ssim2-scale
+//! output (0..100, 100 = identical).
+//!
+//! These tests assert the dispatch path — profile params → MLP load →
+//! forward → mapped score — produces sane outputs in the right range
+//! and tracks degradation monotonically.
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
@@ -26,45 +30,60 @@ fn make_test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
 }
 
 #[test]
-fn v04_placeholder_reproduces_v02_score() {
+fn v04_score_is_in_unit_range() {
     let (src, dst) = make_test_pair(64, 64);
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z_v02 = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
-    let z_v04 = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let r = z.compute(&s, &d).unwrap();
 
-    let r_v02 = z_v02.compute(&s, &d).unwrap();
-    let r_v04 = z_v04.compute(&s, &d).unwrap();
-
-    // Placeholder MLP runs the same dot product in f32 instead of
-    // f64. Drift is ~1e-4 in raw_distance, ≪0.01 in score.
-    let raw_diff = (r_v02.raw_distance() - r_v04.raw_distance()).abs();
-    let score_diff = (r_v02.score() - r_v04.score()).abs();
+    let score = r.score();
     assert!(
-        raw_diff < 1e-3,
-        "v0_4 placeholder raw_distance drift: v02={} v04={} diff={raw_diff}",
-        r_v02.raw_distance(),
-        r_v04.raw_distance()
+        (0.0..=100.0).contains(&score),
+        "v0_4 score out of range: {score}"
     );
-    assert!(
-        score_diff < 1e-2,
-        "v0_4 placeholder score drift: v02={} v04={} diff={score_diff}",
-        r_v02.score(),
-        r_v04.score()
-    );
-    assert_eq!(r_v04.profile(), ZensimProfile::PreviewV0_4);
+    assert_eq!(r.profile(), ZensimProfile::PreviewV0_4);
 }
 
 #[test]
-fn v04_identical_images_score_100() {
+fn v04_identical_inputs_near_perfect() {
     let (src, _) = make_test_pair(32, 32);
     let s = RgbSlice::new(&src, 32, 32);
 
     let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
-    assert_eq!(r.score(), 100.0, "identical inputs must score exactly 100");
-    assert_eq!(r.raw_distance(), 0.0);
+
+    // Trained MLP + scaler: identical inputs produce all-zero raw
+    // features, but the scaler shifts/scales each feature by its
+    // train-set mean/std, so the standardized vector is non-zero and
+    // the model output is some small finite distance — not exactly 0.
+    // The CID22 paper anchors visually-lossless at MCOS≈90, so we
+    // require identical inputs to score above 90 with comfortable
+    // headroom.
+    let score = r.score();
+    assert!(
+        score >= 90.0,
+        "identical inputs should score >= 90 (visually lossless), got {score}"
+    );
+}
+
+#[test]
+fn v04_degraded_scores_lower_than_identical() {
+    let (src, dst) = make_test_pair(64, 64);
+    let s = RgbSlice::new(&src, 64, 64);
+    let d = RgbSlice::new(&dst, 64, 64);
+
+    let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let r_self = z.compute(&s, &s).unwrap();
+    let r_diff = z.compute(&s, &d).unwrap();
+
+    assert!(
+        r_diff.score() < r_self.score(),
+        "degraded score {} should be < identical score {}",
+        r_diff.score(),
+        r_self.score()
+    );
 }
 
 #[test]
