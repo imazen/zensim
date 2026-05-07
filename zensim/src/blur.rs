@@ -2069,12 +2069,33 @@ fn downscale_2x_into_inner(
 /// rows is odd, spreading all 16 rows across distinct cache sets.
 /// Below 512, the working set fits in L1 and aliasing doesn't matter.
 pub(crate) fn simd_padded_width(width: usize) -> usize {
-    let aligned = (width + 15) & !15;
+    // For widths near `usize::MAX` the original `(width + 15) & !15` would
+    // wrap silently. Saturate to `usize::MAX` instead — every downstream
+    // allocation site that derives from `padded_width` is guarded by
+    // `padded_width.checked_mul(height)` (see [`checked_padded_plane_len`])
+    // and will surface `ImageTooLarge` rather than wrap.
+    let aligned = match width.checked_add(15) {
+        Some(v) => v & !15,
+        None => return usize::MAX,
+    };
     if aligned >= 512 && (aligned / 16).is_multiple_of(2) {
-        aligned + 16
+        aligned.saturating_add(16)
     } else {
         aligned
     }
+}
+
+/// Compute `padded_width * height` for plane-allocation sites with overflow
+/// detection. Used by streaming-pipeline paths whose dimensions originate
+/// from a public API that already validated `width × height` but not
+/// `padded_width × height`.
+pub(crate) fn checked_padded_plane_len(
+    padded_width: usize,
+    height: usize,
+) -> Result<usize, crate::ZensimError> {
+    padded_width
+        .checked_mul(height)
+        .ok_or(crate::ZensimError::ImageTooLarge)
 }
 
 #[cfg(test)]

@@ -1157,7 +1157,10 @@ fn main() {
             };
             let scores_and_dists: Vec<(f64, f64)> = feats
                 .iter()
-                .map(|f| zensim::score_from_features(f, w))
+                .map(|f| {
+                    zensim::try_score_from_features(f, w)
+                        .expect("features and weights length mismatch")
+                })
                 .collect();
             let custom_scores: Vec<f64> = scores_and_dists.iter().map(|&(s, _)| s).collect();
             let raw_dists: Vec<f64> = scores_and_dists.iter().map(|&(_, d)| d).collect();
@@ -1317,7 +1320,11 @@ fn main() {
                 let feats: Vec<&[f64]> = f.iter().map(|v| v.as_slice()).collect();
                 let trained_scores: Vec<f64> = feats
                     .iter()
-                    .map(|feat| zensim::score_from_features(feat, &best_weights).0)
+                    .map(|feat| {
+                        zensim::try_score_from_features(feat, &best_weights)
+                            .expect("features and weights length mismatch")
+                            .0
+                    })
                     .collect();
                 let srocc = spearman_correlation(h, &trained_scores);
                 log_line(
@@ -1732,7 +1739,11 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
     let metric_scores: Vec<f64> = ds
         .features
         .iter()
-        .map(|f| zensim::score_from_features(f, &ew).0)
+        .map(|f| {
+            zensim::try_score_from_features(f, &ew)
+                .expect("features and weights length mismatch")
+                .0
+        })
         .collect();
 
     let srocc = spearman_correlation(&ds.human_scores, &metric_scores);
@@ -1767,7 +1778,11 @@ fn report_embedded_correlations(ds: &DatasetWithFeatures, log: &mut Vec<String>)
     let raw_dists: Vec<f64> = ds
         .features
         .iter()
-        .map(|f| zensim::score_from_features(f, &ew).1)
+        .map(|f| {
+            zensim::try_score_from_features(f, &ew)
+                .expect("features and weights length mismatch")
+                .1
+        })
         .collect();
     let min_d = raw_dists.iter().cloned().fold(f64::INFINITY, f64::min);
     let max_d = raw_dists.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -2023,7 +2038,8 @@ fn write_features_csv(path: &Path, human_scores: &[f64], features: &[Vec<f64>]) 
 
     let ew = expand_embedded_weights(n_features);
     for (human, feat) in human_scores.iter().zip(features) {
-        let (score, raw) = zensim::score_from_features(feat, &ew);
+        let (score, raw) = zensim::try_score_from_features(feat, &ew)
+            .expect("features and weights length mismatch");
         write!(f, "{},{},{}", human, score, raw).unwrap();
         for v in feat {
             write!(f, ",{}", v).unwrap();
@@ -3355,7 +3371,11 @@ fn print_trained_results(
 ) {
     let trained_scores: Vec<f64> = feats
         .iter()
-        .map(|f| zensim::score_from_features(f, weights).0)
+        .map(|f| {
+            zensim::try_score_from_features(f, weights)
+                .expect("features and weights length mismatch")
+                .0
+        })
         .collect();
 
     let srocc = spearman_correlation(human_scores, &trained_scores);
@@ -3751,7 +3771,11 @@ fn train_weights_multi(
 fn eval_srocc(human_scores: &[f64], features: &[&[f64]], weights: &[f64]) -> f64 {
     let predicted: Vec<f64> = features
         .iter()
-        .map(|f| zensim::score_from_features(f, weights).0)
+        .map(|f| {
+            zensim::try_score_from_features(f, weights)
+                .expect("features and weights length mismatch")
+                .0
+        })
         .collect();
     spearman_correlation(human_scores, &predicted)
 }

@@ -305,16 +305,40 @@ fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
 }
 
 /// Compute score from raw features using custom weights.
-/// `features`: raw features from ZensimResult.features
-/// `weights`: one weight per feature (len must equal features.len())
-/// Returns (score, raw_distance)
+///
+/// # Panics
+///
+/// Panics if `features.len() != weights.len()`. Prefer
+/// [`try_score_from_features`] for caller-supplied lengths — this thin
+/// wrapper exists for backwards compatibility and will be removed in a
+/// future major release.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
+#[deprecated(
+    since = "0.2.9",
+    note = "use `try_score_from_features` which returns a Result instead of panicking on length mismatch"
+)]
 pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
-    assert_eq!(
-        features.len(),
-        weights.len(),
-        "features and weights must have same length"
-    );
+    try_score_from_features(features, weights)
+        .expect("score_from_features: features and weights must have same length")
+}
+
+/// Compute score from raw features using custom weights.
+///
+/// `features`: raw features from `ZensimResult::features()`.
+/// `weights`: one weight per feature; `weights.len()` must equal
+/// `features.len()`.
+///
+/// Returns `(score, raw_distance)` on success, or
+/// [`ZensimError::FeatureWeightsLengthMismatch`] if the slices have
+/// different lengths.
+#[cfg_attr(not(feature = "training"), allow(dead_code))]
+pub fn try_score_from_features(
+    features: &[f64],
+    weights: &[f64],
+) -> Result<(f64, f64), ZensimError> {
+    if features.len() != weights.len() {
+        return Err(ZensimError::FeatureWeightsLengthMismatch);
+    }
     let raw_distance: f64 = features
         .iter()
         .zip(weights.iter())
@@ -335,7 +359,7 @@ pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
         .unwrap_or(FEATURES_PER_CHANNEL_BASIC * 3);
     let n_scales = features.len() / features_per_scale;
     let raw_distance = raw_distance / n_scales.max(1) as f64;
-    (distance_to_score(raw_distance), raw_distance)
+    Ok((distance_to_score(raw_distance), raw_distance))
 }
 
 /// Pre-compute reference with a custom number of pyramid scales.
@@ -353,10 +377,16 @@ pub fn precompute_reference_with_scales(
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    if source.len() != width * height {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    // Reject any width/height combination whose padded-plane size would
+    // overflow `usize` on the current target.
+    check_within_max_pixels(width, height, None)?;
+    if source.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
-    let src_img = crate::source::RgbSlice::new(source, width, height);
+    let src_img = crate::source::RgbSlice::try_new(source, width, height)?;
     Ok(crate::streaming::PrecomputedReference::new(
         &src_img, num_scales, true,
     ))
@@ -377,10 +407,16 @@ pub fn compute_zensim_with_ref_and_config(
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    if distorted.len() != width * height {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    if distorted.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
-    let dst_img = crate::source::RgbSlice::new(distorted, width, height);
+    if precomputed.width() != width || precomputed.height() != height {
+        return Err(ZensimError::DimensionMismatch);
+    }
+    let dst_img = crate::source::RgbSlice::try_new(distorted, width, height)?;
     let result = crate::streaming::compute_zensim_streaming_with_ref(
         precomputed,
         &dst_img,
@@ -770,14 +806,23 @@ use crate::source::ImageSource;
 pub struct Zensim {
     profile: ZensimProfile,
     parallel: bool,
+    /// Optional cap on total pixels (`width * height`) per image. `None`
+    /// disables the cap. Allocation grows roughly `~14 × pixels × 4 B` for
+    /// the streaming pipeline, so callers feeding untrusted dimensions
+    /// should set this. See [`Zensim::with_max_pixels`].
+    max_pixels: Option<usize>,
 }
 
 impl Zensim {
     /// Create a new `Zensim` with the given profile. Parallel by default.
+    /// No `max_pixels` cap is set by default — callers feeding
+    /// untrusted dimensions should explicitly call
+    /// [`Zensim::with_max_pixels`].
     pub fn new(profile: ZensimProfile) -> Self {
         Self {
             profile,
             parallel: true,
+            max_pixels: None,
         }
     }
 
@@ -786,6 +831,29 @@ impl Zensim {
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self
+    }
+
+    /// Set a cap on total pixels (`width * height`) accepted by every
+    /// `compute*` entry point. Images exceeding the cap are rejected with
+    /// [`ZensimError::ImageTooLarge`] before any allocation runs.
+    ///
+    /// Default: `None` (no cap). Recommended for services accepting
+    /// network-supplied dimensions: zensim allocates roughly
+    /// `width × height × 4 bytes × ~14` for the streaming XYB pyramid plus
+    /// destination planes, so a 4K (≈8.3 MP) image needs ~470 MB of
+    /// scratch. A cap of e.g. 64 MP (8192×8192) keeps the worst case at
+    /// ~3.6 GB.
+    ///
+    /// Pass [`usize::MAX`] explicitly to disable the cap on a previously
+    /// configured `Zensim`.
+    pub fn with_max_pixels(mut self, max_pixels: usize) -> Self {
+        self.max_pixels = Some(max_pixels);
+        self
+    }
+
+    /// Current `max_pixels` cap, if any.
+    pub fn max_pixels(&self) -> Option<usize> {
+        self.max_pixels
     }
 
     /// Current profile.
@@ -810,6 +878,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
+        check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
         Ok(result.with_profile(self.profile))
@@ -844,6 +913,7 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
+        check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let mut config = config_from_params(params, self.parallel);
         config.extended_features = true;
         let result = compute_with_config_inner(source, distorted, &config, params.weights);
@@ -863,6 +933,7 @@ impl Zensim {
         if source.width() < 8 || source.height() < 8 {
             return Err(ZensimError::ImageTooSmall);
         }
+        check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         Ok(crate::streaming::PrecomputedReference::new(
             source,
             params.num_scales,
@@ -875,6 +946,12 @@ impl Zensim {
     /// # Errors
     ///
     /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::DimensionMismatch`] if `distorted.width()` /
+    /// `distorted.height()` differ from the precomputed reference's
+    /// dimensions (see
+    /// [`PrecomputedReference::width`](crate::PrecomputedReference::width)).
+    /// Returns [`ZensimError::ImageTooLarge`] if dimensions exceed the
+    /// configured `max_pixels` cap.
     pub fn compute_with_ref(
         &self,
         precomputed: &crate::streaming::PrecomputedReference,
@@ -884,6 +961,8 @@ impl Zensim {
         if distorted.width() < 8 || distorted.height() < 8 {
             return Err(ZensimError::ImageTooSmall);
         }
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
         let result = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
@@ -916,6 +995,8 @@ impl Zensim {
         if distorted.width() < 8 || distorted.height() < 8 {
             return Err(ZensimError::ImageTooSmall);
         }
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
         let (stats, mean_offset) =
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
@@ -951,6 +1032,17 @@ impl Zensim {
         let params = self.profile.params();
         if width < 8 || height < 8 {
             return Err(ZensimError::ImageTooSmall);
+        }
+        check_within_max_pixels(width, height, self.max_pixels)?;
+        // `stride * height` must fit in usize on 32-bit; reject overflow up
+        // front so downstream `y * stride + x` arithmetic cannot wrap.
+        let row_capacity = stride
+            .checked_mul(height)
+            .ok_or(ZensimError::ImageTooLarge)?;
+        for plane in &planes {
+            if plane.len() < row_capacity {
+                return Err(ZensimError::InvalidDataLength);
+            }
         }
         Ok(crate::streaming::PrecomputedReference::from_linear_planar(
             planes,
@@ -1201,6 +1293,55 @@ pub(crate) fn validate_pair(
     if source.width() != distorted.width() || source.height() != distorted.height() {
         return Err(ZensimError::DimensionMismatch);
     }
+    Ok(())
+}
+
+/// Validate that `distorted` matches the dimensions baked into `precomputed`.
+///
+/// A precomputed reference is built from a specific source's `width × height`
+/// (recorded on the struct via
+/// [`PrecomputedReference::width`](crate::PrecomputedReference::width) /
+/// [`height`](crate::PrecomputedReference::height)). Reusing it against a
+/// distorted image with different dims would either silently produce garbage
+/// scores (smaller padded width misaligns reference rows) or panic on slice
+/// out-of-range. Reject such calls up front.
+pub(crate) fn validate_ref_match(
+    precomputed: &crate::streaming::PrecomputedReference,
+    distorted: &impl ImageSource,
+) -> Result<(), ZensimError> {
+    if precomputed.width() != distorted.width() || precomputed.height() != distorted.height() {
+        return Err(ZensimError::DimensionMismatch);
+    }
+    Ok(())
+}
+
+/// Reject `width × height` if it overflows `usize` on the current target,
+/// exceeds the configured `max_pixels` cap, or if the padded plane size
+/// (`simd_padded_width(width) × height`) would overflow during downstream
+/// allocation.
+///
+/// Centralizes the overflow guard so 32-bit / wasm32 builds (where
+/// `usize = u32`) cannot wrap silently inside downstream allocation math.
+pub(crate) fn check_within_max_pixels(
+    width: usize,
+    height: usize,
+    max_pixels: Option<usize>,
+) -> Result<(), ZensimError> {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    if let Some(cap) = max_pixels
+        && pixels > cap
+    {
+        return Err(ZensimError::ImageTooLarge);
+    }
+    // Also confirm the padded plane size fits. `simd_padded_width` rounds
+    // up to a multiple of 16 (and may add another 16 above 512 wide), so
+    // `padded_width * height` may overflow even when `width * height` did
+    // not. Guarding here is cheaper than threading checked-arithmetic
+    // through every internal allocation site.
+    let padded = crate::blur::simd_padded_width(width);
+    crate::blur::checked_padded_plane_len(padded, height)?;
     Ok(())
 }
 
@@ -1628,10 +1769,15 @@ pub fn compute_zensim_with_config(
     if width < 8 || height < 8 {
         return Err(ZensimError::ImageTooSmall);
     }
-    if source.len() != width * height {
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(ZensimError::ImageTooLarge)?;
+    // Also reject overflow on the padded plane size (simd_padded_width(width) * height).
+    check_within_max_pixels(width, height, None)?;
+    if source.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
-    if distorted.len() != width * height {
+    if distorted.len() != pixels {
         return Err(ZensimError::InvalidDataLength);
     }
     if source.len() != distorted.len() {
