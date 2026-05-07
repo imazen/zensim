@@ -38,6 +38,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -55,7 +56,7 @@ def load_parquets(input_dir: Path, sweeps: list[str]) -> pd.DataFrame:
         parqs.extend(sorted(input_dir.glob(f"unified_{s}_*.parquet")))
     if not parqs:
         raise SystemExit(f"no parquets matching sweeps={sweeps} in {input_dir}")
-    print(f"Loading {len(parqs)} parquets:")
+    print(f"Loading {len(parqs)} parquets:", flush=True)
     keep_meta = ["sweep_id", "codec", "image_basename", "q", "knob_tuple_json",
                  "score_zensim", "score_ssim2",
                  "score_butteraugli_max", "score_butteraugli_pnorm3",
@@ -65,11 +66,13 @@ def load_parquets(input_dir: Path, sweeps: list[str]) -> pd.DataFrame:
     for p in parqs:
         cols_avail = pq.ParquetFile(p).schema.names
         cols = [c for c in keep_meta + feat_cols if c in cols_avail]
+        t0 = time.time()
         df = pq.read_table(p, columns=cols).to_pandas()
-        print(f"  {p.name}: {len(df):,} rows × {len(cols)} cols")
+        print(f"  {p.name}: {len(df):,} rows × {len(cols)} cols "
+              f"({time.time()-t0:.1f}s)", flush=True)
         frames.append(df)
     full = pd.concat(frames, ignore_index=True)
-    print(f"Total: {len(full):,} rows")
+    print(f"Total: {len(full):,} rows", flush=True)
     return full
 
 
@@ -94,22 +97,33 @@ def make_split(df: pd.DataFrame, val_frac: float, test_frac: float,
 
 
 def build_arrays(df: pd.DataFrame, target_col: str
-                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     feat_cols = [c for c in df.columns if c.startswith("feat_")
                  and int(c[5:]) < 228]
     feat_cols = sorted(feat_cols, key=lambda c: int(c[5:]))
     n_features = len(feat_cols)
-    print(f"Using {n_features} feature columns: feat_0..feat_{n_features-1}")
-    has_y = df[target_col].notna() & df[target_col].abs().lt(1e6)
-    has_x = df[feat_cols].notna().all(axis=1)
-    keep = has_y & has_x
-    print(f"Dropping {(~keep).sum():,} rows with NaN/inf in target or features")
-    sub = df[keep]
-    X = sub[feat_cols].to_numpy(dtype=np.float32)
-    y = sub[target_col].to_numpy(dtype=np.float32)
-    images = sub["image_basename"].to_numpy()
-    sweep_codec = (sub["sweep_id"] + ":" + sub["codec"]).to_numpy()
-    return X, y, images, sweep_codec
+    print(f"Using {n_features} feature columns: feat_0..feat_{n_features-1}",
+          flush=True)
+    print("Materializing feature matrix (this is the slow part — pandas → "
+          "numpy on 2M+ rows × 228 cols)...", flush=True)
+    t0 = time.time()
+    X_full = df[feat_cols].to_numpy(dtype=np.float32)
+    y_full = df[target_col].to_numpy(dtype=np.float32)
+    print(f"  done in {time.time()-t0:.1f}s, X shape {X_full.shape}", flush=True)
+
+    # Drop rows with NaN/inf in target or features.
+    finite_y = np.isfinite(y_full) & (np.abs(y_full) < 1e6)
+    finite_x = np.isfinite(X_full).all(axis=1)
+    keep_mask = finite_y & finite_x
+    n_drop = int((~keep_mask).sum())
+    if n_drop:
+        print(f"Dropping {n_drop:,} rows with NaN/inf in target or features",
+              flush=True)
+
+    images = df["image_basename"].to_numpy()
+    sweep_codec = (df["sweep_id"].astype(str) + ":"
+                    + df["codec"].astype(str)).to_numpy()
+    return X_full, y_full, images, sweep_codec, keep_mask
 
 
 def standardize(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
@@ -268,7 +282,9 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
                               for k, v in model.state_dict().items()}}
         print(f"  epoch {ep:3d}  train_loss={ep_loss/max(1,n_batches):.4f}  "
               f"val_mse={val_mse:.3f}  val_srocc={val_sr:.4f}  "
-              f"val_krocc={val_kr:.4f}", flush=True)
+              f"val_krocc={val_kr:.4f}",
+              flush=True)
+        sys.stdout.flush()
 
     if best["state"]:
         model.load_state_dict(best["state"])
@@ -321,20 +337,22 @@ def main() -> int:
         print(f"Subsampled to {len(df):,} rows")
 
     is_tr, is_va, is_te = make_split(df, args.val_frac, args.test_frac, args.seed)
-    X, y, images, sc = build_arrays(df, target_col)
+    X, y, images, sc, keep_mask = build_arrays(df, target_col)
 
-    # Re-mask after dropna so masks align with X/y
-    keep_idx = df.index[df[target_col].notna()
-                        & df[[c for c in df.columns
-                              if c.startswith("feat_") and int(c[5:]) < 228]]
-                        .notna().all(axis=1)]
-    is_tr_x = is_tr[keep_idx]
-    is_va_x = is_va[keep_idx]
-    is_te_x = is_te[keep_idx]
+    # Combine the original split masks with the NaN-drop mask so X/y/g_all
+    # are all aligned at the row level.
+    is_tr_x = is_tr & keep_mask
+    is_va_x = is_va & keep_mask
+    is_te_x = is_te & keep_mask
 
-    # Image-id encoding for ranknet groups (only need within-train uniqueness)
-    img_to_id = {n: i for i, n in enumerate(np.unique(images))}
-    g_all = np.array([img_to_id[n] for n in images], dtype=np.int64)
+    # Image-id encoding for ranknet groups. pandas.factorize is ~50× faster
+    # than np.unique + dict lookup over 2M+ strings.
+    print("Encoding image groups for RankNet...", flush=True)
+    t0 = time.time()
+    codes, _ = pd.factorize(images, sort=False)
+    g_all = codes.astype(np.int64)
+    print(f"  {len(set(codes.tolist())):,} unique images "
+          f"({time.time()-t0:.1f}s)", flush=True)
 
     cfg = TrainConfig(
         target=args.target, loss=args.loss,
@@ -403,7 +421,7 @@ def main() -> int:
     np.savez(run_dir / "scaler.npz", mean=scaler_mean, std=scaler_std)
 
     # Predictions parquet for downstream analysis
-    val_df = df.iloc[keep_idx][is_va_x].copy().reset_index(drop=True)
+    val_df = df[is_va_x].copy().reset_index(drop=True)
     with torch.no_grad():
         pv = model(torch.from_numpy(Xv).to(device)).cpu().numpy()
     val_df["pred"] = pv
