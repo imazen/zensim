@@ -4,6 +4,26 @@
 //! score output. A given profile should produce approximately the same scores
 //! across versions, but profiles may be removed in future major versions as
 //! the algorithm evolves.
+//!
+//! # Profile-version policy
+//!
+//! Versions that have publicly shipped (`PreviewV0_1`, `PreviewV0_2`) stay
+//! enabled in the default feature set — they're stable, default-on, part of
+//! the published API surface.
+//!
+//! **Any new profile version is opt-in.** Newer variants (`PreviewV0_4`,
+//! and any future `PreviewV0_5+` we add) MUST be gated behind the
+//! `__experimental_versions` cargo feature. They stay opt-in until
+//! validated against external anchors (CID22 paper Table 4, KonJND-1k
+//! PJND), proven not to regress on the human-rated holdout sets
+//! (KADID10k_val, TID2013_val), and explicitly promoted in a release
+//! notes entry. Promotion = removing the `#[cfg(feature = "...")]` gate;
+//! never silently flip a `latest()` to a still-gated variant.
+//!
+//! This matters because the experimental feature also activates
+//! `zenpredict` (AGPL-3.0-only OR LicenseRef-Imazen-Commercial) and the
+//! bundled trained-weight `.bin` files. Default builds remain
+//! MIT/Apache-2.0 with no AGPL transitive obligations.
 
 /// Named metric profile. Scores for a given profile should be approximately
 /// stable across crate versions. Profiles may be removed in future versions.
