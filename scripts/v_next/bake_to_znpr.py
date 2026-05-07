@@ -59,12 +59,22 @@ def _find_bake_bin() -> Path:
 DEFAULT_BAKE_BIN = _find_bake_bin()
 
 
-def state_dict_to_layers(sd: dict[str, torch.Tensor]) -> tuple[list[dict], int, int]:
+def state_dict_to_layers(sd: dict[str, torch.Tensor],
+                          flip_output: bool = False
+                          ) -> tuple[list[dict], int, int]:
     """Walk a Sequential(Linear, LeakyReLU, ..., Linear) state_dict and emit
     JSON-shaped layers + (n_inputs, n_outputs).
 
     Mirrors the architecture in `MLP` from train_v_next_mlp.py:
         Linear -> LeakyReLU -> Linear -> LeakyReLU -> ... -> Linear (final)
+
+    `flip_output=True` rewrites the final linear layer to emit
+    `100 - (W·x + b)` instead of `W·x + b`. This is the math trick
+    that lets us train on `ssim2` directly (so val_srocc tracks the
+    canonical CID22 MCOS scale) while still routing through zensim's
+    classic `score = 100 - a*d^b` mapping with `a=1, b=1`. After the
+    flip, MLP output is "distance" semantics (0=identical, 100=worst)
+    so `score = 100 - 1*d^1 = ssim2_target`.
     """
     keys = sorted(sd.keys(),
                    key=lambda k: int(k.split(".")[1]))  # net.0.weight → 0
@@ -83,6 +93,10 @@ def state_dict_to_layers(sd: dict[str, torch.Tensor]) -> tuple[list[dict], int, 
     last = len(pairs) - 1
     layers = []
     for i, (W, b) in enumerate(pairs):
+        if i == last and flip_output:
+            # 100 - (W·x + b) = (-W)·x + (100 - b)
+            W = -W
+            b = 100.0 - b
         out_dim, in_dim = W.shape
         # Trainer uses LeakyReLU between layers and identity on the final.
         # zenpredict-bake's JSON variant is "leakyrelu" (no underscore).
@@ -100,7 +114,7 @@ def state_dict_to_layers(sd: dict[str, torch.Tensor]) -> tuple[list[dict], int, 
     return layers, layers[0]["in_dim"], layers[-1]["out_dim"]
 
 
-def build_bake_request(run_dir: Path) -> dict:
+def build_bake_request(run_dir: Path, flip_output: bool = True) -> dict:
     sd_path = run_dir / "model.pt"
     scaler_path = run_dir / "scaler.npz"
     meta_path = run_dir / "meta.json"
@@ -111,7 +125,7 @@ def build_bake_request(run_dir: Path) -> dict:
 
     sd = torch.load(sd_path, map_location="cpu", weights_only=True)
     scaler = np.load(scaler_path)
-    layers_json, n_in, n_out = state_dict_to_layers(sd)
+    layers_json, n_in, n_out = state_dict_to_layers(sd, flip_output=flip_output)
 
     if scaler["mean"].shape[0] != n_in:
         raise SystemExit(
@@ -160,6 +174,15 @@ def main() -> int:
                     help=f"Path to zenpredict-bake (default: {DEFAULT_BAKE_BIN})")
     ap.add_argument("--keep-json", action="store_true",
                     help="Persist the intermediate BakeRequestJson next to --out")
+    ap.add_argument("--no-flip-output", action="store_true",
+                    help="Skip the final-layer 100-x transform. Default ON: "
+                         "the trainer optimizes against `ssim2` directly so the "
+                         "MLP outputs 0..100 quality-scale; the bake flips "
+                         "this to 0..100 distance-scale so zensim's classic "
+                         "`score = 100 - a*d^b` mapping with (a=1, b=1) "
+                         "produces the right output. Pass --no-flip-output "
+                         "when bakeing a model trained on a 'distance'-"
+                         "shaped target to begin with.")
     args = ap.parse_args()
 
     bake_bin = Path(args.bake_bin)
@@ -172,8 +195,10 @@ def main() -> int:
     out_path = Path(args.out).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Building BakeRequestJson from {run_dir} ...")
-    req = build_bake_request(run_dir)
+    flip = not args.no_flip_output
+    print(f"Building BakeRequestJson from {run_dir} "
+          f"(flip_output={flip}) ...")
+    req = build_bake_request(run_dir, flip_output=flip)
     n_in = req["layers"][0]["in_dim"]
     n_out = req["layers"][-1]["out_dim"]
     n_layers = len(req["layers"])
