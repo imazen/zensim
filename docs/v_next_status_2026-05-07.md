@@ -48,21 +48,29 @@ place for a future retry.
 
 ## In flight
 
-### Local training (RTX 5070)
+### Local training (RTX 5070) — DONE
 
 `scripts/v_next/train_v_next_mlp.py` — 228 → 64 LeakyReLU → 1 MLP,
 predicting `score_ssim2`, `mse + 0.5·ranknet` loss, source-disjoint
 80/10/10 split, AdamW lr=3e-3, batch 16384, 50 epochs.
 
-```
-epoch   0  val_srocc=0.8239  val_krocc=0.6459
-epoch   1  val_srocc=0.8644  val_krocc=0.6911
-epoch   2  val_srocc=0.8892  val_krocc=0.7280
-...
-```
+Final: best epoch 44, **val_srocc=0.9547**, **test_srocc=0.9814**.
+Output:
+`/mnt/v/zen/zensim-training/2026-05-07/runs/20260507T115414_v_next_ssim2_64h_full/`.
 
-Trajectory healthy; expect plateau around `val_srocc ≈ 0.95`. Output:
-`/mnt/v/zen/zensim-training/2026-05-07/runs/<ts>_v_next_ssim2_64h_full/`.
+**Contamination audit (post-train):**
+- Source-disjoint split verified by reproducing the seed=0 split
+  bit-exactly: 783 train / 98 val / 98 test images, all mutually
+  disjoint.
+- 0 CID22-named files in the corpus (none of the validation refs
+  could leak through).
+- **Codec coverage caveat**: trainer default is `--sweeps v15r,v15rc`
+  which is zenjpeg only (2.30M of the 2.37M rows). The v12_{zenavif,
+  zenjxl, zenwebp} + v14_zenpng parquets are present and
+  schema-compatible (300 features each) but were not loaded. The
+  baked V0_4 is therefore a zenjpeg-tuned model. Cross-codec
+  generalization remains unverified until the v16 sweep is rerun
+  successfully.
 
 ### Cross-codec sweeps on vast.ai
 
