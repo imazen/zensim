@@ -112,6 +112,29 @@ def build_arrays(df: pd.DataFrame, target_col: str
     return X, y, images, sweep_codec
 
 
+def standardize(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-feature Z-score on the training split, applied to val + test.
+
+    Replaces NaN/inf with 0 after standardization (some features are
+    degenerate at certain content classes and don't carry signal).
+    Returns (X_train, X_val, X_test, mean, std) — mean/std saved into
+    the bake's scaler section so runtime forward pass reproduces the
+    same normalization.
+    """
+    mean = X_train.mean(axis=0)
+    std = X_train.std(axis=0)
+    # Floor std away from zero so constant features don't explode after divide.
+    std = np.where(std < 1e-6, 1.0, std)
+    Xt = (X_train - mean) / std
+    Xv = (X_val - mean) / std
+    Xs = (X_test - mean) / std
+    for arr in (Xt, Xv, Xs):
+        arr[~np.isfinite(arr)] = 0.0
+    return Xt.astype(np.float32), Xv.astype(np.float32), Xs.astype(np.float32), \
+           mean.astype(np.float32), std.astype(np.float32)
+
+
 class MLP(torch.nn.Module):
     def __init__(self, n_in: int, hidden: list[int]):
         super().__init__()
@@ -324,17 +347,24 @@ def main() -> int:
     print(f"Train rows: {is_tr_x.sum():,}  Val rows: {is_va_x.sum():,}  "
           f"Test rows: {is_te_x.sum():,}")
 
+    # Standardize features on the train split. Without this the raw
+    # feat_* columns span ~7 orders of magnitude (some 0..1 SSIM means,
+    # some MSE values >100, plus rare outliers >700) and the linear
+    # init can't escape early gradient explosion.
+    Xt, Xv, Xs, scaler_mean, scaler_std = standardize(
+        X[is_tr_x], X[is_va_x], X[is_te_x])
+    print(f"Standardized features: train mean abs={np.abs(Xt).mean():.3f}, "
+          f"std={Xt.std():.3f}")
+
     t0 = time.time()
-    model, metrics = train(cfg,
-                            X[is_tr_x], y[is_tr_x], g_all[is_tr_x],
-                            X[is_va_x], y[is_va_x], g_all[is_va_x],
-                            device)
+    model, metrics = train(cfg, Xt, y[is_tr_x], g_all[is_tr_x],
+                           Xv, y[is_va_x], g_all[is_va_x], device)
     train_secs = time.time() - t0
 
     # Test
     model.eval()
     with torch.no_grad():
-        pt = model(torch.from_numpy(X[is_te_x]).to(device)).cpu().numpy()
+        pt = model(torch.from_numpy(Xs).to(device)).cpu().numpy()
     test_mse = float(np.mean((pt - y[is_te_x]) ** 2))
     test_sr = srocc(pt, y[is_te_x])
     test_kr = krocc(pt, y[is_te_x])
@@ -369,10 +399,13 @@ def main() -> int:
         json.dump({"config": asdict(cfg), "metrics": metrics,
                    "target_col": target_col,
                    "n_features": int(X.shape[1])}, f, indent=2)
+    # Save scaler so the bake step can roundtrip the normalization
+    np.savez(run_dir / "scaler.npz", mean=scaler_mean, std=scaler_std)
+
     # Predictions parquet for downstream analysis
     val_df = df.iloc[keep_idx][is_va_x].copy().reset_index(drop=True)
     with torch.no_grad():
-        pv = model(torch.from_numpy(X[is_va_x]).to(device)).cpu().numpy()
+        pv = model(torch.from_numpy(Xv).to(device)).cpu().numpy()
     val_df["pred"] = pv
     val_df["target_value"] = y[is_va_x]
     val_df["residual"] = val_df["pred"] - val_df["target_value"]
