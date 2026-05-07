@@ -220,10 +220,13 @@ class TrainConfig:
     dropout: float
     rank_weight: float
     seed: int
+    tv_weight: float = 0.0  # Per-curve monotonicity penalty weight.
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
-          X_val, y_val, g_val, device) -> tuple[MLP, dict]:
+          X_val, y_val, g_val, device,
+          tv_pairs_train: np.ndarray | None = None
+          ) -> tuple[MLP, dict]:
     torch.manual_seed(cfg.seed)
     n_in = X_train.shape[1]
     model = MLP(n_in, cfg.hidden).to(device)
@@ -237,11 +240,24 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     Xv = torch.from_numpy(X_val).to(device)
     yv = torch.from_numpy(y_val).to(device)
 
+    # Adjacent-q pairs (lower_idx, higher_idx) within each curve for
+    # the TV regularizer. `pred[lower] >= pred[higher]` is a violation
+    # (worse-q produced higher quality score), penalized as
+    # `relu(pred[lower] - pred[higher])`.
+    tv_pairs_t = None
+    if tv_pairs_train is not None and cfg.tv_weight > 0:
+        tv_pairs_t = torch.from_numpy(tv_pairs_train).to(device)
+        print(f"  TV regularizer: {len(tv_pairs_t):,} adjacent-q pairs, "
+              f"weight={cfg.tv_weight}", flush=True)
+
     best = {"epoch": -1, "val_srocc": -1, "val_mse": math.inf,
             "state": None}
 
     n = Xt.size(0)
     bs = min(cfg.batch_size, n)
+    # TV pair sample size per batch — match batch_size so the
+    # regularizer term is the same scale as MSE.
+    tv_bs = bs if tv_pairs_t is not None else 0
     for ep in range(cfg.epochs):
         model.train()
         perm = torch.randperm(n, device=device)
@@ -263,6 +279,16 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
                 loss = mse + cfg.rank_weight * rk
             else:
                 raise ValueError(cfg.loss)
+            if tv_pairs_t is not None:
+                # Sample adjacent-q pairs and penalize non-monotonic ones.
+                pair_idx = torch.randint(
+                    0, tv_pairs_t.size(0), (tv_bs,), device=device)
+                lo = tv_pairs_t[pair_idx, 0]
+                hi = tv_pairs_t[pair_idx, 1]
+                pred_lo = model(Xt[lo])
+                pred_hi = model(Xt[hi])
+                tv = torch.relu(pred_lo - pred_hi).mean()
+                loss = loss + cfg.tv_weight * tv
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -318,6 +344,10 @@ def main() -> int:
     ap.add_argument("--out-dir",
                     default="/mnt/v/zen/zensim-training/2026-05-07/runs")
     ap.add_argument("--tag", default="v_next")
+    ap.add_argument("--tv-weight", type=float, default=0.0,
+                    help="Per-curve monotonicity penalty weight. Penalizes "
+                         "adjacent-q score reversals within each "
+                         "(image, codec, knob_tuple) curve. 0 disables.")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -359,7 +389,8 @@ def main() -> int:
         hidden=[int(h) for h in args.hidden.split(",")],
         epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
         weight_decay=args.weight_decay, dropout=args.dropout,
-        rank_weight=args.rank_weight, seed=args.seed)
+        rank_weight=args.rank_weight, seed=args.seed,
+        tv_weight=args.tv_weight)
 
     print(f"Config: {cfg}")
     print(f"Train rows: {is_tr_x.sum():,}  Val rows: {is_va_x.sum():,}  "
@@ -374,9 +405,37 @@ def main() -> int:
     print(f"Standardized features: train mean abs={np.abs(Xt).mean():.3f}, "
           f"std={Xt.std():.3f}")
 
+    # Build adjacent-q TV pairs over training rows. For each
+    # (image_basename, codec, knob_tuple_json) curve, sort by q and
+    # emit (lower_q_idx, higher_q_idx) pairs. These are *post-mask*
+    # local indices — they reference rows in the standardized Xt.
+    tv_pairs_train = None
+    if args.tv_weight > 0:
+        print("Building TV adjacency pairs from training rows...", flush=True)
+        t0 = time.time()
+        df_tr = df.loc[is_tr_x, ["image_basename", "codec", "knob_tuple_json", "q"]] \
+                  .reset_index(drop=True)
+        df_tr["local_idx"] = np.arange(len(df_tr), dtype=np.int64)
+        df_tr = df_tr.sort_values(
+            ["image_basename", "codec", "knob_tuple_json", "q"], kind="stable")
+        # Adjacent rows within the same group: shift by 1 and check the
+        # group keys still match.
+        same_curve = (
+            (df_tr["image_basename"].values[1:] == df_tr["image_basename"].values[:-1]) &
+            (df_tr["codec"].values[1:] == df_tr["codec"].values[:-1]) &
+            (df_tr["knob_tuple_json"].values[1:] == df_tr["knob_tuple_json"].values[:-1]) &
+            (df_tr["q"].values[1:] > df_tr["q"].values[:-1])
+        )
+        lo = df_tr["local_idx"].values[:-1][same_curve]
+        hi = df_tr["local_idx"].values[1:][same_curve]
+        tv_pairs_train = np.stack([lo, hi], axis=1).astype(np.int64)
+        print(f"  {len(tv_pairs_train):,} adjacent-q pairs "
+              f"({time.time()-t0:.1f}s)", flush=True)
+
     t0 = time.time()
     model, metrics = train(cfg, Xt, y[is_tr_x], g_all[is_tr_x],
-                           Xv, y[is_va_x], g_all[is_va_x], device)
+                           Xv, y[is_va_x], g_all[is_va_x], device,
+                           tv_pairs_train=tv_pairs_train)
     train_secs = time.time() - t0
 
     # Test
