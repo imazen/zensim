@@ -39,16 +39,22 @@ import pyarrow.parquet as pq
 DEFAULT_DIR = Path("/mnt/v/zen/zensim-training/2026-05-07/unified")
 
 
-def load_unified(input_dir: Path) -> pd.DataFrame:
+def load_unified(input_dir: Path, sweeps: list[str] | None = None) -> pd.DataFrame:
     parqs = sorted(input_dir.glob("unified_*.parquet"))
+    if sweeps:
+        parqs = [p for p in parqs
+                 if any(p.name.startswith(f"unified_{s}_") for s in sweeps)]
     if not parqs:
-        raise SystemExit(f"no unified parquets in {input_dir}")
+        raise SystemExit(f"no unified parquets in {input_dir} matching {sweeps}")
     print(f"Loading {len(parqs)} parquet shards ...")
-    keep_cols = None
-    frames = []
+    keep_cols: list[str] | None = None
+    frames: list[pd.DataFrame] = []
     for p in parqs:
-        cols_in_file = pq.ParquetFile(p).schema.names
-        # Skip raw 300-feat columns for analysis (massive, not needed here)
+        try:
+            cols_in_file = pq.ParquetFile(p).schema.names
+        except Exception as e:
+            print(f"  SKIP {p.name}: {e}")
+            continue
         if keep_cols is None:
             keep_cols = [c for c in cols_in_file if not c.startswith("feat_")]
         keep_now = [c for c in keep_cols if c in cols_in_file]
@@ -56,6 +62,8 @@ def load_unified(input_dir: Path) -> pd.DataFrame:
         df["__shard"] = p.name
         frames.append(df)
         print(f"  {p.name}: {len(df):,} rows")
+    if not frames:
+        raise SystemExit("no readable parquets")
     full = pd.concat(frames, ignore_index=True)
     print(f"Total: {len(full):,} rows × {full.shape[1]} cols")
     return full
@@ -112,30 +120,48 @@ def bumpiness_per_curve(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def disagreement_residual(df: pd.DataFrame) -> pd.DataFrame:
-    """delta = zensim_score - 100*(1 - clip(butteraugli_max / 6.0, 0, 1))
-    Larger |delta| means stronger disagreement.
+    """delta_ba = zensim_score - 100*(1 - clip(butteraugli_max/6, 0, 1))
+       delta_ssim2 = zensim_score - score_ssim2
+
+    Returns whichever residuals are computable from the available columns.
+    Some sweep×codec combos lack one or both reference metrics.
     """
-    work = df.dropna(subset=["score_zensim", "score_butteraugli_max"]).copy()
-    ba_proxy = 100.0 * (1.0 - np.clip(work["score_butteraugli_max"] / 6.0, 0.0, 1.0))
-    work["delta_ba"] = work["score_zensim"] - ba_proxy
-    if "score_ssim2" in work.columns:
-        s2 = work["score_ssim2"].fillna(np.nan)
-        work["delta_ssim2"] = work["score_zensim"] - s2
-    return work[["sweep_id", "image_basename", "codec", "q", "knob_tuple_json",
-                 "score_zensim", "score_ssim2", "score_butteraugli_max",
-                 "delta_ba"] + (["delta_ssim2"] if "score_ssim2" in work.columns else [])]
+    needed = ["score_zensim"]
+    has_ba = "score_butteraugli_max" in df.columns
+    has_s2 = "score_ssim2" in df.columns
+    if not has_ba and not has_s2:
+        return pd.DataFrame()
+    drop_subset = needed + (["score_butteraugli_max"] if has_ba else []) \
+                          + (["score_ssim2"] if has_s2 else [])
+    work = df.dropna(subset=drop_subset).copy()
+    if has_ba:
+        ba_proxy = 100.0 * (1.0 - np.clip(work["score_butteraugli_max"] / 6.0,
+                                           0.0, 1.0))
+        work["delta_ba"] = work["score_zensim"] - ba_proxy
+    if has_s2:
+        work["delta_ssim2"] = work["score_zensim"] - work["score_ssim2"]
+    cols = ["sweep_id", "image_basename", "codec", "q", "knob_tuple_json",
+            "score_zensim"]
+    if has_ba:
+        cols += ["score_butteraugli_max", "delta_ba"]
+    if has_s2:
+        cols += ["score_ssim2", "delta_ssim2"]
+    return work[cols]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-dir", default=str(DEFAULT_DIR))
+    ap.add_argument("--sweeps", default=None,
+                    help="Comma-separated sweep ids to include (default: all readable)")
     ap.add_argument("--top-k", type=int, default=5000)
     ap.add_argument("--mono-eps", type=float, default=0.5,
                     help="Min downward step (in zensim points) to flag")
     args = ap.parse_args()
 
     in_dir = Path(args.input_dir)
-    df = load_unified(in_dir)
+    sweeps = args.sweeps.split(",") if args.sweeps else None
+    df = load_unified(in_dir, sweeps=sweeps)
 
     print("\n# 1. Monotonicity violations")
     mv = find_monotonicity_violations(df, eps=args.mono_eps)
@@ -163,26 +189,31 @@ def main() -> int:
         print(f"  {len(bp):,} curves → {out.name}")
         print(agg.to_string())
 
-    print("\n# 3. zensim ↔ butteraugli disagreement")
+    print("\n# 3. zensim ↔ reference-metric disagreement")
     da = disagreement_residual(df)
-    if not da.empty:
-        # Top 5k high+low residuals as adversarial seeds
-        top_high = da.nlargest(args.top_k, "delta_ba")
-        top_low = da.nsmallest(args.top_k, "delta_ba")
+    if da.empty:
+        print("  no reference-metric columns available; skipping")
+    else:
+        sort_col = "delta_ba" if "delta_ba" in da.columns else "delta_ssim2"
+        top_high = da.nlargest(args.top_k, sort_col)
+        top_low = da.nsmallest(args.top_k, sort_col)
         adv = pd.concat([top_high, top_low], ignore_index=True)
         out = in_dir / "adversarial_pairs_top_disagree.parquet"
         adv.to_parquet(out, compression="zstd", compression_level=9)
-        print(f"  {len(adv):,} adversarial pairs → {out.name}")
-        print(f"  delta_ba: mean={da['delta_ba'].mean():+.2f} "
-              f"std={da['delta_ba'].std():.2f} "
-              f"p1={np.quantile(da['delta_ba'], 0.01):+.2f} "
-              f"p99={np.quantile(da['delta_ba'], 0.99):+.2f}")
-        per_codec = da.groupby(["sweep_id", "codec"])["delta_ba"].agg(
-            n="size", mean="mean", std="std",
-            p1=lambda s: float(np.quantile(s, 0.01)),
-            p99=lambda s: float(np.quantile(s, 0.99)),
-        )
-        print(per_codec.to_string())
+        print(f"  {len(adv):,} adversarial pairs (sorted by {sort_col}) → {out.name}")
+        for col in ("delta_ba", "delta_ssim2"):
+            if col not in da.columns:
+                continue
+            print(f"  {col}: mean={da[col].mean():+.2f} "
+                  f"std={da[col].std():.2f} "
+                  f"p1={np.quantile(da[col], 0.01):+.2f} "
+                  f"p99={np.quantile(da[col], 0.99):+.2f}")
+            per_codec = da.groupby(["sweep_id", "codec"])[col].agg(
+                n="size", mean="mean", std="std",
+                p1=lambda s: float(np.quantile(s, 0.01)),
+                p99=lambda s: float(np.quantile(s, 0.99)),
+            )
+            print(per_codec.to_string())
 
     return 0
 
