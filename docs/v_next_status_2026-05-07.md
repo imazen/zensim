@@ -14,6 +14,38 @@ Live status as I work toward a real V0_4 bake on the unified corpus.
 
 `zensim` bumps to **0.3.0** on next release (queued in CHANGELOG).
 
+## v16 cross-codec sweep — FAILED, all workers destroyed
+
+The 25-box vast.ai cross-codec sweep (v16w / v16a / v16j) produced
+empty score columns on every cell. Workers reported "[done]" rows;
+TSVs have the right header + chunk-key fields but `encoded_bytes /
+encode_ms / decode_ms / score_*` are all blank.
+
+The same `zen-metrics-0.6.8-linux-x86_64-gpu` binary running locally
+on the same source-image directory produces working zenwebp output
+("2/2 cells emitted; encode-fail=0"), so the binary itself is fine.
+The failure is environment-side: most likely the
+`ghcr.io/imazen/zen-metrics-sweep:0.6.3` docker image is missing
+something the binary dlopens (libwebp / libaom / libjxl runtime), or
+something in the worker's onstart pipeline got truncated.
+
+Spent: \$0.64 of \$31.74 vast.ai credit. No retry attempted —
+correct fix is to:
+
+1. Spin up a SINGLE vast.ai box, drop into `docker exec` on the
+   image, run the binary against one source image manually, look at
+   stderr.
+2. If it's a runtime lib gap, rebuild the docker image with the
+   missing libs.
+3. Run a 1-chunk smoke before scaling.
+
+The chunk JSONLs (`/mnt/v/zen/zensim-training/2026-05-07/v16-chunks/`),
+the chunks-uploaded R2 prefixes
+(`s3://coefficient/jobs/sweep-v16{w,a,j}-2026-05-07/chunks.jsonl`),
+and the source-mirrored prefixes
+(`s3://zentrain/sweep-v16{w,a,j}-2026-05-07/sources/`) all stay in
+place for a future retry.
+
 ## In flight
 
 ### Local training (RTX 5070)
@@ -34,18 +66,7 @@ Trajectory healthy; expect plateau around `val_srocc ≈ 0.95`. Output:
 
 ### Cross-codec sweeps on vast.ai
 
-| Run | Codec | Boxes | Cells planned | Files at last check |
-|---|---|---:|---:|---:|
-| `sweep-v16w-2026-05-07` | zenwebp | 10 | 329,616 | 340 / 1962 |
-| `sweep-v16a-2026-05-07` | zenavif | 5 | 41,202 | 0 / ~1962 (booting) |
-| `sweep-v16j-2026-05-07` | zenjxl | 10 | 109,872 | 0 / ~1962 (booting) |
-
-Total burn: ~25 boxes × ~$0.05/hr ≈ **$1.25/hr**. Source corpus
-mirrored to `s3://zentrain/sweep-v16{w,a,j}-2026-05-07/sources/` from
-the v15r 1024 px Lanczos3 corpus. Worker docker image
-`ghcr.io/imazen/zen-metrics-sweep:0.6.3` with binary
-`zen-metrics-0.6.8-linux-x86_64-gpu` (53× faster than 0.6.5 per
-the v_next handoff).
+See "v16 cross-codec sweep — FAILED" above. All workers destroyed.
 
 ## Score mapping question (for V0_4 bake follow-up)
 
