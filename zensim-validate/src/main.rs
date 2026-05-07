@@ -1,5 +1,9 @@
 #![allow(clippy::needless_range_loop)] // Training loops index parallel arrays by shared index
 
+// mlp_train module removed in this branch — perceptual-MLP training
+// happens through zenanalyze/zentrain (Python pipeline, ZNPR v2 bake)
+// rather than the in-tree Rust RankNet that originally lived here.
+// See docs/PR_24_REVIEW_2026-05-07.md for context.
 mod scale_invariance;
 
 use calamine::{Reader, Xlsx};
@@ -150,6 +154,12 @@ struct Args {
     /// Unspecified datasets default to weight 1.0.
     #[arg(long)]
     dataset_weights: Option<String>,
+    // MLP-trainer args (mlp_hidden, mlp_epochs, mlp_pairs_per_epoch,
+    // mlp_output, mlp_train_also_weight, mlp_validation_policy,
+    // mlp_size_axes, mlp_human_train_fraction) and the Mlp variant of
+    // TrainAlgorithm were removed in this branch — perceptual-MLP
+    // training now happens through zenanalyze/zentrain rather than the
+    // in-tree Rust RankNet trainer. See docs/PR_24_REVIEW_2026-05-07.md.
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -184,8 +194,13 @@ enum TargetMetric {
     GpuButteraugli,
     /// CPU SSIMULACRA2 (fast-ssim2)
     CpuSsim2,
-    /// CPU Butteraugli (butteraugli crate)
+    /// CPU Butteraugli max-norm (butteraugli crate `.score` field)
     CpuButteraugli,
+    /// CPU Butteraugli 3-norm via libjxl-style averaged p-norm
+    /// `((Σdᵖ/n)^(1/p) + (Σd^(2p)/n)^(1/(2p)) + (Σd^(4p)/n)^(1/(4p))) / 3` at p=3.
+    /// Reads `butteraugli_3norm` column produced by zensim-bench's
+    /// gen_butteraugli_3norm binary. Matches Cloudinary CID22 paper Table 4.
+    CpuButteraugli3Norm,
     /// DSSIM (structural dissimilarity)
     Dssim,
 }
@@ -1217,6 +1232,10 @@ fn main() {
             .map(parse_dataset_weights)
             .unwrap_or_default();
 
+        // MLP path is structurally different — outputs a binary
+        // model rather than f64 weights. Handle it before the f64
+        // dispatch so we can early-return with just the .bin file.
+
         let best_weights = if matches!(args.algorithm, TrainAlgorithm::Proximal) {
             // Proximal handles single and multi-dataset natively
             let ds_weights: Vec<f64> = dataset_groups
@@ -1350,6 +1369,7 @@ fn main() {
                 Some(TargetMetric::GpuButteraugli) => "_gpu_butteraugli",
                 Some(TargetMetric::CpuSsim2) => "_cpu_ssim2",
                 Some(TargetMetric::CpuButteraugli) => "_cpu_butteraugli",
+                Some(TargetMetric::CpuButteraugli3Norm) => "_cpu_butteraugli3norm",
                 Some(TargetMetric::Dssim) => "_dssim",
                 None => "",
             };
@@ -3780,8 +3800,6 @@ fn eval_srocc(human_scores: &[f64], features: &[&[f64]], weights: &[f64]) -> f64
     spearman_correlation(human_scores, &predicted)
 }
 
-// ===== Dataset loaders =====
-
 fn load_tid2013(base: &Path) -> Vec<ImagePair> {
     let mos_path = base.join("mos_with_names.txt");
     if !mos_path.exists() {
@@ -4287,6 +4305,7 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
         TargetMetric::GpuButteraugli => col("gpu_butteraugli").or_else(|| col("butteraugli")),
         TargetMetric::CpuSsim2 => col("cpu_ssimulacra2"),
         TargetMetric::CpuButteraugli => col("cpu_butteraugli"),
+        TargetMetric::CpuButteraugli3Norm => col("butteraugli_3norm"),
         TargetMetric::Dssim => col("dssim"),
     }
     .unwrap_or_else(|| {

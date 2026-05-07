@@ -16,7 +16,7 @@ zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
-butteraugli = "0.9"
+butteraugli = { version = "0.9", features = ["avx512"] }
 linear-srgb = { workspace = true , path = "../../linear-srgb" }
 imgref = { workspace = true }
 rgb = { workspace = true }
@@ -24,6 +24,10 @@ zenpnm = "0.1"
 bytemuck = { workspace = true }
 which = "8"
 zenbench = { workspace = true }
+zenpredict = { workspace = true }
+csv = "1"
+image = { workspace = true }
+rayon = { workspace = true }
 
 [[bench]]
 name = "bench_compare"

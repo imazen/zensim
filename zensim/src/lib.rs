@@ -202,6 +202,10 @@ mod error;
 mod fused;
 pub mod mapping;
 mod metric;
+// MLP runtime is internal — V0_4 dispatch is exposed only through
+// `ZensimProfile::PreviewV0_4`. Consumers wanting to bake/load custom
+// MLP weights should depend on the `zenpredict` crate directly.
+pub(crate) mod mlp;
 mod pool;
 pub mod profile;
 mod simd_ops;

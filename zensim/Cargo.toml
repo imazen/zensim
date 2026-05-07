@@ -1,12 +1,12 @@
 [package]
 name = "zensim"
-version = "0.2.8"
+version = "0.3.0"
 edition = "2024"
 description = "Fast psychovisual image similarity metric"
 repository = "https://github.com/imazen/zensim"
 license = "MIT OR Apache-2.0"
 readme = "../README.md"
-rust-version = "1.89.0"
+rust-version = "1.93.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
 exclude = ["benches/", "tests/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
@@ -45,6 +45,12 @@ linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
 zenpixels = { version = "0.2.10", optional = true, default-features = false }
+# Runtime for V0_4's MLP scorer. AGPL-3.0-only OR LicenseRef-Imazen-Commercial
+# upstream — adding it to zensim's MIT/Apache-2.0 dependency tree means
+# downstream binaries acquire AGPL obligations transitively. If that's
+# unacceptable for a given consumer, build with `--no-default-features`
+# and skip the V0_4 path; V0_2 has no zenpredict dependency.
+zenpredict = { workspace = true }
 # zenresize = { workspace = true, optional = true }  # re-enable when published
 
 [dev-dependencies]
