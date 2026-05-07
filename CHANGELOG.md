@@ -23,6 +23,10 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
   the `zenpredict` ZNPR v2 forward pass. The MLP runtime is
   internal-only — consumers that want to bake/load custom MLP weights
   should depend on `zenpredict` directly.
+
+### Changed (zensim, unreleased)
+- MSRV bumped to **1.93** (transitive minimum from `zenpredict` 0.1.0
+  via the new V0_4 path).
 - `Zensim::with_max_pixels(usize)` / `Zensim::max_pixels()` — opt-in cap on
   `width × height` per image, enforced before allocation. Default `None`
   (no cap). Use when feeding untrusted dimensions to avoid runaway allocation.
