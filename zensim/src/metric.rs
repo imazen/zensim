@@ -511,6 +511,7 @@ impl ZensimResult {
     /// Replace the raw distance and score with values from the MLP
     /// scoring path. Internal use only — called by
     /// [`apply_mlp_scoring`](crate::metric::apply_mlp_scoring).
+    #[cfg(feature = "__experimental_versions")]
     pub(crate) fn set_mlp_score(&mut self, raw_distance: f64, score: f64) {
         self.raw_distance = raw_distance;
         self.score = score;
@@ -1510,6 +1511,7 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
 /// log2(pixels), log2(min_dim), log2(max_dim), and signed
 /// log2(max/min) by aspect orientation.
 pub(crate) fn apply_mlp_scoring(
+    #[cfg_attr(not(feature = "__experimental_versions"), allow(unused_variables))]
     result: &mut ZensimResult,
     params: &crate::profile::ProfileParams,
     width: u32,
@@ -1518,40 +1520,50 @@ pub(crate) fn apply_mlp_scoring(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
-    let bytes = loader();
-    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
-    let n_inputs = model.n_inputs();
-    let features = result.features();
-    let mut predictor = crate::mlp::Predictor::new(model);
+    // Without `__experimental_versions`, no profile sets `mlp_bytes`,
+    // so the early return above keeps this function a no-op without
+    // pulling in the `zenpredict`-backed MLP runtime.
+    #[cfg(feature = "__experimental_versions")]
+    {
+        let bytes = loader();
+        let model = crate::mlp::Model::from_bytes(bytes)
+            .map_err(|_| ZensimError::InvalidDataLength)?;
+        let n_inputs = model.n_inputs();
+        let features = result.features();
+        let mut predictor = crate::mlp::Predictor::new(model);
 
-    // Build the f32 feature vector the MLP expects. Three shapes:
-    //   - n_inputs == features.len(): standard scorer (228 features)
-    //   - n_inputs == features.len() + 4: size-axis-augmented (232)
-    //   - n_inputs <  features.len(): strict-prefix (e.g. trained on
-    //     228 of a 300-feature extended tail)
-    let raw = if n_inputs == features.len() {
-        let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
-        predictor
-            .predict(&f32_features)
-            .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
-    } else if n_inputs == features.len() + 4 {
-        let mut augmented = features.to_vec();
-        append_mlp_size_axes(&mut augmented, width, height);
-        let f32_features: Vec<f32> = augmented.iter().map(|&v| v as f32).collect();
-        predictor
-            .predict(&f32_features)
-            .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
-    } else if n_inputs < features.len() {
-        let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
-        predictor
-            .predict(&f32_features)
-            .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
-    } else {
-        return Err(ZensimError::InvalidDataLength);
-    };
+        // Build the f32 feature vector the MLP expects. Three shapes:
+        //   - n_inputs == features.len(): standard scorer (228 features)
+        //   - n_inputs == features.len() + 4: size-axis-augmented (232)
+        //   - n_inputs <  features.len(): strict-prefix (e.g. trained on
+        //     228 of a 300-feature extended tail)
+        let raw = if n_inputs == features.len() {
+            let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
+            predictor
+                .predict(&f32_features)
+                .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+        } else if n_inputs == features.len() + 4 {
+            let mut augmented = features.to_vec();
+            append_mlp_size_axes(&mut augmented, width, height);
+            let f32_features: Vec<f32> = augmented.iter().map(|&v| v as f32).collect();
+            predictor
+                .predict(&f32_features)
+                .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+        } else if n_inputs < features.len() {
+            let f32_features: Vec<f32> =
+                features[..n_inputs].iter().map(|&v| v as f32).collect();
+            predictor
+                .predict(&f32_features)
+                .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+        } else {
+            return Err(ZensimError::InvalidDataLength);
+        };
 
-    let score = distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b);
-    result.set_mlp_score(raw, score);
+        let score = distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b);
+        result.set_mlp_score(raw, score);
+    }
+    #[cfg(not(feature = "__experimental_versions"))]
+    let _ = (loader, width, height); // silence unused warnings when feature off
     Ok(())
 }
 
@@ -1560,6 +1572,7 @@ pub(crate) fn apply_mlp_scoring(
 /// `append_size_axes` in `zensim-validate/src/main.rs` so a model
 /// trained with `--mlp-size-axes` produces the same input layout
 /// at runtime.
+#[cfg(feature = "__experimental_versions")]
 fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
     if width == 0 || height == 0 {
         features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);

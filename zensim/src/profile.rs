@@ -14,11 +14,12 @@ pub enum ZensimProfile {
     PreviewV0_1,
     /// Preview v0.2. Concordance-filtered 218k pairs, Nelder-Mead SROCC=0.9960.
     PreviewV0_2,
-    /// Preview v0.4. MLP-scored profile, scaffolded with a placeholder
-    /// network that reproduces V0_2 byte-for-byte until trained weights
-    /// land. Use [`ZensimProfile::latest`] in production — this variant
-    /// exists so the V0_4 dispatch path can be exercised end-to-end
-    /// while training is still in progress.
+    /// Preview v0.4. MLP-scored profile (228 → 64 LeakyReLU → 1) trained
+    /// 2026-04-30 with synthetic + KADID_train + TID_train mixed
+    /// supervision. **Experimental** — gated behind the
+    /// `__experimental_versions` cargo feature; not part of the
+    /// crates.io-published surface.
+    #[cfg(feature = "__experimental_versions")]
     PreviewV0_4,
 }
 
@@ -33,6 +34,7 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
+            #[cfg(feature = "__experimental_versions")]
             Self::PreviewV0_4 => "zensim-preview-v0.4",
         }
     }
@@ -42,6 +44,7 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
+            #[cfg(feature = "__experimental_versions")]
             Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
         }
     }
@@ -135,23 +138,28 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 };
 
 /// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear,
-/// trained 2026-05-07 on the 2.37M-row unified-corpus Parquet against
-/// `score_ssim2` with MSE + 0.5·RankNet loss; source-disjoint
-/// 80/10/10 split, AdamW lr=3e-3, batch 16384, 50 epochs. Best epoch
-/// 44 (val_srocc=0.9547, test_srocc=0.9814 on held-out source images).
+/// trained 2026-04-30 with mixed supervision: synthetic 218k pairs
+/// (train_w=1.0) + KADID10k_train 7125 pairs (train_w=0.3) +
+/// TID2013_train 2160 pairs (train_w=0.3); validation on held-out
+/// KADID10k_val (SROCC=0.9417), TID2013_val (0.9414), CID22 (0.8928).
+/// Outputs raw distance directly (0..90 range, mean 2.8 over the
+/// training distribution) — compatible with the classic
+/// `100 - 18·d^0.7` score mapping shared with V0_1 / V0_2.
 ///
-/// The bake's final layer was rewritten as `(-W)·x + (100 - b)` so
-/// the MLP output is on a "distance" scale (0 = identical, 100 =
-/// worst). Combined with `score_mapping_a = 1.0`, `score_mapping_b =
-/// 1.0`, runtime computes `score = 100 - 1·d^1 = ssim2_target`,
-/// which is what callers expect from a `score()` accessor returning
-/// 0..100 with 100 = identical.
+/// On the full benchmark datasets (`zensim-bench`'s
+/// `dataset_metric_baseline`) this bake achieves:
+/// KADIK10k 0.8432, TID2013 0.8401, CID22 0.8893 — beating V0_2 by
+/// +0.024 on KADIK and +0.022 on CID22, tying TID.
 ///
-/// File: `zensim/weights/v0_4_2026-05-07.bin` — 61,561 bytes ZNPR v2.
+/// File: `zensim/weights/v0_4_2026-04-30.bin` — 60,932 bytes ZNPR v2.
+/// Gated behind `__experimental_versions` because the `weights/`
+/// directory is excluded from the published crate.
+#[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    include_bytes!("../weights/v0_4_2026-05-07.bin")
+    include_bytes!("../weights/v0_4_2026-04-30.bin")
 }
 
+#[cfg(feature = "__experimental_versions")]
 static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
@@ -161,11 +169,10 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    // The bake flips the final layer (see `mlp_bake_preview_v0_4`),
-    // so the model output is already on the 0..100 distance scale —
-    // identity mapping with a=1, b=1 produces `score = ssim2_target`.
-    score_mapping_a: 1.0,
-    score_mapping_b: 1.0,
+    // V0_4 outputs raw distance, same semantics as V0_1/V0_2 — use the
+    // classic mapping so V0_4 scores stay drop-in comparable.
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
     mlp_bytes: Some(mlp_bake_preview_v0_4),
 };
 

@@ -17,17 +17,21 @@
 These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
 ### Added (zensim, unreleased)
-- `ZensimProfile::PreviewV0_4` — MLP-scored profile shipping a real
-  trained 228 → 64 LeakyReLU → 1 network (`zensim/weights/v0_4_2026-05-07.bin`,
-  61 KB ZNPR v2). Trained 2026-05-07 on the 2.37M-row unified-corpus
-  Parquet against `score_ssim2` with `MSE + 0.5·RankNet` loss; best
-  epoch 44, val_srocc=0.9547, test_srocc=0.9814 on a source-disjoint
-  held-out split. Final layer is flipped to "distance" semantics
-  (0=identical, 100=worst) so the runtime `100 - 1·d^1` mapping with
-  `(score_mapping_a, score_mapping_b) = (1.0, 1.0)` produces ssim2-scale
-  output (0..100, 100=identical). The MLP runtime is internal-only —
-  consumers that want to bake/load custom MLP weights should depend on
-  `zenpredict` directly.
+- `ZensimProfile::PreviewV0_4` — MLP-scored profile, behind the new
+  `__experimental_versions` cargo feature (off by default; not part of
+  the crates.io-published surface). Ships the 2026-04-30 trained
+  228 → 64 LeakyReLU → 1 network (`zensim/weights/v0_4_2026-04-30.bin`,
+  60 KB ZNPR v2) trained with synthetic + KADID_train + TID_train
+  mixed supervision and validated on held-out KADID_val (SROCC=0.9417),
+  TID_val (0.9414), CID22 (0.8928). Outputs raw distance (0..90 range)
+  using the classic `100 - 18·d^0.7` score mapping shared with V0_1 /
+  V0_2.
+- `__experimental_versions` cargo feature — gates V0_4's profile,
+  the `mlp` dispatch module, the `zenpredict` runtime dependency, and
+  the bundled trained-weight `.bin`. The `weights/` directory is
+  excluded from `cargo publish` artifacts (`package.exclude`), so
+  default builds drop the AGPL-licensed `zenpredict` runtime entirely
+  and remain MIT/Apache-2.0.
 
 ### Changed (zensim, unreleased)
 - MSRV bumped to **1.93** (transitive minimum from `zenpredict` 0.1.0

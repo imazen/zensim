@@ -205,6 +205,9 @@ mod metric;
 // MLP runtime is internal — V0_4 dispatch is exposed only through
 // `ZensimProfile::PreviewV0_4`. Consumers wanting to bake/load custom
 // MLP weights should depend on the `zenpredict` crate directly.
+// Gated behind `__experimental_versions` so default builds drop the
+// AGPL-licensed `zenpredict` runtime and the bundled trained `.bin`.
+#[cfg(feature = "__experimental_versions")]
 pub(crate) mod mlp;
 mod pool;
 pub mod profile;
