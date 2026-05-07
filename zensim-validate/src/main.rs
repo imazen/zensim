@@ -969,6 +969,13 @@ fn main() {
             primary.features.len(),
             n_features_extracted
         );
+        // Honor --features-csv even in extract-only mode so callers
+        // can pipe features into external pipelines (e.g. the V0_6
+        // mixed-supervision trainer).
+        if let Some(ref csv_path) = args.features_csv {
+            write_features_csv(csv_path, &primary.human_scores, &primary.features);
+            println!("Wrote features CSV: {}", csv_path.display());
+        }
         return;
     }
 
