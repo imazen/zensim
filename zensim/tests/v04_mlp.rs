@@ -85,7 +85,11 @@ fn v04_degraded_does_not_exceed_identical() {
         .iter()
         .enumerate()
         .map(|(i, &[r, g, b])| {
-            if i % 2 == 0 { [255 - r, 255 - g, 255 - b] } else { [r, g, b] }
+            if i % 2 == 0 {
+                [255 - r, 255 - g, 255 - b]
+            } else {
+                [r, g, b]
+            }
         })
         .collect();
     let d = RgbSlice::new(&dst, 64, 64);

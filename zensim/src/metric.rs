@@ -1526,8 +1526,8 @@ pub(crate) fn apply_mlp_scoring(
     #[cfg(feature = "__experimental_versions")]
     {
         let bytes = loader();
-        let model = crate::mlp::Model::from_bytes(bytes)
-            .map_err(|_| ZensimError::InvalidDataLength)?;
+        let model =
+            crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
         let n_inputs = model.n_inputs();
         let features = result.features();
         let mut predictor = crate::mlp::Predictor::new(model);
@@ -1550,8 +1550,7 @@ pub(crate) fn apply_mlp_scoring(
                 .predict(&f32_features)
                 .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
         } else if n_inputs < features.len() {
-            let f32_features: Vec<f32> =
-                features[..n_inputs].iter().map(|&v| v as f32).collect();
+            let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
             predictor
                 .predict(&f32_features)
                 .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
