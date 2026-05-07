@@ -178,14 +178,14 @@ Each item lists: prerequisite, path to artefact, acceptance criterion.
 # Sources (already on R2):
 #   s3://zentrain/sweep-v15r-2026-05-06/sources/  (981 PNGs)
 # Mirror to /mnt/v (durable Windows volume):
-mkdir -p /mnt/v/zen/zensim-training/v15r-2026-05-07
-aws s3 sync s3://zentrain/sweep-v15r-2026-05-06/  /mnt/v/zen/zensim-training/v15r-2026-05-07/v15r/   --endpoint-url=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
-aws s3 sync s3://zentrain/sweep-v15rc-2026-05-07/ /mnt/v/zen/zensim-training/v15r-2026-05-07/v15rc/  --endpoint-url=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+mkdir -p /mnt/v/zen/zensim-training/2026-05-07
+aws s3 sync s3://zentrain/sweep-v15r-2026-05-06/  /mnt/v/zen/zensim-training/2026-05-07/v15r/   --endpoint-url=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+aws s3 sync s3://zentrain/sweep-v15rc-2026-05-07/ /mnt/v/zen/zensim-training/2026-05-07/v15rc/  --endpoint-url=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
 # Copy zenanalyze features TSV (currently only in /tmp):
-cp /tmp/v15r-prep/features_v15r_combined.tsv /mnt/v/zen/zensim-training/v15r-2026-05-07/features_v15r_combined.tsv
+cp /tmp/v15r-prep/features_v15r_combined.tsv /mnt/v/zen/zensim-training/2026-05-07/features_v15r_combined.tsv
 ```
 
-**Acceptance:** `/mnt/v/zen/zensim-training/v15r-2026-05-07/` contains all
+**Acceptance:** `/mnt/v/zen/zensim-training/2026-05-07/` contains all
 TSVs, parquets, and the features TSV. /tmp paths can be safely wiped.
 
 ### 4.2 Cross-codec sweep on 1024 px corpus (~500K cells per codec)
