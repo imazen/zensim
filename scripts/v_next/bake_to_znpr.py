@@ -32,7 +32,31 @@ import numpy as np
 import torch
 
 
-DEFAULT_BAKE_BIN = Path.home() / "work/zen/zenanalyze/target/release/zenpredict-bake"
+def _find_bake_bin() -> Path:
+    """Prefer a v2-only zenpredict-bake (published 0.1.0). Fall back to
+    the local zenanalyze checkout's release binary if it's been
+    installed via `cargo install`. The local target/release binary
+    emits ZNPR v3 which zensim 0.3.0's pinned `zenpredict = "0.1.0"`
+    cannot read; we'd rather fail loudly than silently write an
+    unloadable bake."""
+    candidates = [
+        # Durable copy of zenpredict 0.1.0's bake CLI (writes v2). Created
+        # via `cargo install zenpredict --bin zenpredict-bake` then copied
+        # to the v_next training dir so it survives /tmp wipes.
+        Path("/mnt/v/zen/zensim-training/2026-05-07/zenpredict-bake-v0.1.0"),
+        Path("/tmp/zenpredict-installed/bin/zenpredict-bake"),
+        Path.home() / ".cargo/bin/zenpredict-bake",
+        # Last resort: the local zenanalyze checkout (writes v3 — caller
+        # must override `zensim`'s zenpredict dep first).
+        Path.home() / "work/zen/zenanalyze/target/release/zenpredict-bake",
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return candidates[-1]
+
+
+DEFAULT_BAKE_BIN = _find_bake_bin()
 
 
 def state_dict_to_layers(sd: dict[str, torch.Tensor]) -> tuple[list[dict], int, int]:
@@ -61,7 +85,8 @@ def state_dict_to_layers(sd: dict[str, torch.Tensor]) -> tuple[list[dict], int, 
     for i, (W, b) in enumerate(pairs):
         out_dim, in_dim = W.shape
         # Trainer uses LeakyReLU between layers and identity on the final.
-        activation = "identity" if i == last else "leaky_relu"
+        # zenpredict-bake's JSON variant is "leakyrelu" (no underscore).
+        activation = "identity" if i == last else "leakyrelu"
         layers.append({
             "in_dim": int(in_dim),
             "out_dim": int(out_dim),
@@ -101,12 +126,12 @@ def build_bake_request(run_dir: Path) -> dict:
 
     metadata = []
     for k, v in (meta.get("config") or {}).items():
-        metadata.append({"key": f"train.{k}", "type": "text",
+        metadata.append({"key": f"train.{k}", "type": "utf8",
                          "text": str(v)})
     for k, v in (meta.get("metrics") or {}).items():
-        metadata.append({"key": f"metric.{k}", "type": "text",
+        metadata.append({"key": f"metric.{k}", "type": "utf8",
                          "text": str(v)})
-    metadata.append({"key": "zensim.profile", "type": "text",
+    metadata.append({"key": "zensim.profile", "type": "utf8",
                      "text": "zensim-preview-v0.4"})
 
     return {
