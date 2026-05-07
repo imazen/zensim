@@ -2695,9 +2695,10 @@ dependencies = [
 [[package]]
 name = "zenpredict"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da940aa02fa5dbb80e4cfe6883c82a7d39c814bc503e4c8c6f6d534e53a0a2ec"
 dependencies = [
  "bytemuck",
- "libm",
  "serde",
  "serde_json",
 ]
@@ -2722,7 +2723,7 @@ dependencies = [
 
 [[package]]
 name = "zensim"
-version = "0.2.8"
+version = "0.3.0"
 dependencies = [
  "archmage",
  "bytemuck",

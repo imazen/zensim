@@ -154,7 +154,6 @@ struct Args {
     /// Unspecified datasets default to weight 1.0.
     #[arg(long)]
     dataset_weights: Option<String>,
-
     // MLP-trainer args (mlp_hidden, mlp_epochs, mlp_pairs_per_epoch,
     // mlp_output, mlp_train_also_weight, mlp_validation_policy,
     // mlp_size_axes, mlp_human_train_fraction) and the Mlp variant of
@@ -257,10 +256,6 @@ struct DatasetWithFeatures {
     human_scores: Vec<f64>,
     features: Vec<Vec<f64>>,
     ref_keys: Vec<String>,
-    /// Per-pair reference dimensions (width, height) in pixels. Empty
-    /// when no loader populated them; otherwise length matches
-    /// `human_scores`.
-    dimensions: Vec<(u32, u32)>,
 }
 
 struct CacheConfig {
@@ -865,22 +860,11 @@ fn main() {
                             all_features.len()
                         );
 
-                        let merged_dimensions: Vec<(u32, u32)> = all_valid_indices
-                            .iter()
-                            .map(|&idx| {
-                                if (idx as usize) < pairs.len() {
-                                    probe_image_dimensions(&pairs[idx as usize].reference)
-                                } else {
-                                    (0, 0)
-                                }
-                            })
-                            .collect();
                         let merged = DatasetWithFeatures {
                             name: ds.name,
                             human_scores: all_human_scores,
                             features: all_features,
                             ref_keys: all_ref_keys,
-                            dimensions: merged_dimensions,
                         };
 
                         // Save updated cache (new timestamped file)
@@ -1466,7 +1450,6 @@ fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> Data
     let mut human_scores = Vec::with_capacity(cached.valid_indices.len());
     let mut features = Vec::with_capacity(cached.valid_indices.len());
     let mut ref_keys = Vec::with_capacity(cached.valid_indices.len());
-    let mut dimensions = Vec::with_capacity(cached.valid_indices.len());
 
     let mut nan_skipped = 0usize;
     for (i, &idx) in cached.valid_indices.iter().enumerate() {
@@ -1480,7 +1463,6 @@ fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> Data
             human_scores.push(score);
             features.push(cached.features[i].clone());
             ref_keys.push(cached.ref_keys[i].clone());
-            dimensions.push(probe_image_dimensions(&pairs[idx as usize].reference));
         }
     }
     if nan_skipped > 0 {
@@ -1494,7 +1476,6 @@ fn build_dataset_from_cache(cached: CachedFeatures, pairs: &[ImagePair]) -> Data
         human_scores,
         features,
         ref_keys,
-        dimensions,
     }
 }
 
@@ -1729,7 +1710,6 @@ fn load_and_compute(
     let mut human_scores = Vec::new();
     let mut features = Vec::new();
     let mut ref_keys = Vec::new();
-    let mut dimensions = Vec::new();
     let mut valid_indices = Vec::new();
     let mut n_valid = 0;
 
@@ -1738,7 +1718,6 @@ fn load_and_compute(
             human_scores.push(hs);
             features.push(result.into_features());
             ref_keys.push(key);
-            dimensions.push(probe_image_dimensions(&pairs[idx].reference));
             valid_indices.push(idx as u32);
             n_valid += 1;
         }
@@ -1752,7 +1731,6 @@ fn load_and_compute(
             human_scores,
             features,
             ref_keys,
-            dimensions,
         },
         valid_indices,
     )
@@ -3821,37 +3799,6 @@ fn eval_srocc(human_scores: &[f64], features: &[&[f64]], weights: &[f64]) -> f64
         .collect();
     spearman_correlation(human_scores, &predicted)
 }
-
-// ===== Dataset loaders =====
-
-/// Probe image dimensions from a path, with global memoization.
-///
-/// Only the reference image is probed (zensim's pyramid is sized to
-/// the reference; distorted must match). Returns `(0, 0)` for unknown
-/// — callers treating that as "skip size axes" is fine.
-fn probe_image_dimensions(path: &std::path::Path) -> (u32, u32) {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u32, u32)>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    {
-        let g = cache.lock().unwrap();
-        if let Some(&dims) = g.get(path) {
-            return dims;
-        }
-    }
-    let dims = match image::image_dimensions(path) {
-        Ok((w, h)) => (w, h),
-        Err(_) => (0, 0),
-    };
-    cache.lock().unwrap().insert(path.to_path_buf(), dims);
-    dims
-}
-
-/// Append the four size-axis features to a feature vector. Length
-/// goes from N → N+4. Order: log2(pixel_count), log2(min_dim),
-/// log2(max_dim), log2(max/min) signed by aspect orientation
 
 fn load_tid2013(base: &Path) -> Vec<ImagePair> {
     let mos_path = base.join("mos_with_names.txt");

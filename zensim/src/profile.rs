@@ -58,6 +58,7 @@ impl core::fmt::Display for ZensimProfile {
 /// Each parameter's effect on computation path and performance is documented
 /// on the corresponding field of `ZensimConfig` in `metric.rs`.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
+#[non_exhaustive]
 pub struct ProfileParams {
     /// Scoring weights (one per feature, length = `FEATURES_PER_SCALE * num_scales`).
     /// Empty `&[]` for MLP-scored profiles — see [`mlp_bytes`](Self::mlp_bytes).
@@ -81,7 +82,7 @@ pub struct ProfileParams {
     /// bytes can be lazily baked at first use (V0_4 placeholder is built
     /// at runtime from `WEIGHTS_PREVIEW_V0_2`; trained bakes will move
     /// to a `static` byte array once the training pipeline lands).
-    pub mlp_bytes: Option<fn() -> &'static [u8]>,
+    pub(crate) mlp_bytes: Option<fn() -> &'static [u8]>,
 }
 
 #[cfg(feature = "training")]
@@ -146,7 +147,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// Sized for ZNPR v2: 128-byte header + 32-byte aligned scaler +
 /// 48-byte LayerEntry + weights + bias ≈ 1100 bytes. Built on first
 /// access, cached in a `LazyLock`.
-pub fn mlp_bake_preview_v0_4() -> &'static [u8] {
+pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
     use crate::mlp::bake::{BakeLayer, BakeRequest, bake_v2};
     use crate::mlp::{Activation, WeightDtype};
     use std::sync::LazyLock;
@@ -179,9 +180,6 @@ pub fn mlp_bake_preview_v0_4() -> &'static [u8] {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
-            output_specs: &[],
-            discrete_sets: &[],
-            sparse_overrides: &[],
         })
         .expect("v0_4 placeholder bake")
     });

@@ -5,9 +5,24 @@
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that ship together in the next major (or minor for 0.x).
      Persist across patch releases. Only clear when the breaking release ships. -->
-_(none currently queued)_
+- `ZensimError` is now `#[non_exhaustive]` — pattern matching outside this
+  crate must include a wildcard arm. New `ImageTooLarge` and
+  `FeatureWeightsLengthMismatch` variants ride on this attribute.
+- `ProfileParams` is now `#[non_exhaustive]` — external code can no longer
+  construct it via struct literal. Pick one of the canonical
+  `ZensimProfile::Preview*` variants instead. This unlocks future
+  internal field additions (e.g. V0_4 MLP dispatch's `mlp_bytes`)
+  without further breaking bumps.
+
+These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
 ### Added (zensim, unreleased)
+- `ZensimProfile::PreviewV0_4` — MLP-scored profile. Currently a
+  placeholder network (228 → 1 linear) that bit-reproduces V0_2 until
+  trained weights land. Selecting this variant routes scoring through
+  the `zenpredict` ZNPR v2 forward pass. The MLP runtime is
+  internal-only — consumers that want to bake/load custom MLP weights
+  should depend on `zenpredict` directly.
 - `Zensim::with_max_pixels(usize)` / `Zensim::max_pixels()` — opt-in cap on
   `width × height` per image, enforced before allocation. Default `None`
   (no cap). Use when feeding untrusted dimensions to avoid runaway allocation.

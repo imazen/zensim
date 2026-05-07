@@ -36,20 +36,13 @@
 //! let distance = p.predict(&features)?[0];
 //! ```
 
-pub use zenpredict::{
-    Activation, FORMAT_VERSION, FeatureBound, Header, LEAKY_RELU_ALPHA, LayerEntry, LayerView,
-    Metadata, MetadataEntry, MetadataType, Model, Predictor, Section, WeightDtype, WeightStorage,
-    keys,
-};
+// Internal-only re-exports of the zenpredict types we use. The module
+// is `pub(crate)` (see `lib.rs`), so consumer crates that want to bake
+// or load MLP models should depend on `zenpredict` directly. We
+// re-export here only what `zensim::metric` and `zensim::profile`
+// actually consume.
+pub(crate) use zenpredict::{Activation, Model, Predictor, WeightDtype};
 
-/// Errors raised by [`Model::from_bytes`] and the forward pass. Alias
-/// of [`zenpredict::PredictError`] for source compatibility with
-/// earlier zensim versions; new code should use the alias name.
-pub type MlpError = zenpredict::PredictError;
-
-/// ZNPR v2 byte-stream composer. Used by `zensim-validate`'s
-/// `--algorithm mlp` arm to bake trained weights, and by zensim's
-/// V0_4 placeholder.
-pub mod bake {
-    pub use zenpredict::bake::{BakeError, BakeLayer, BakeMetadataEntry, BakeRequest, bake_v2};
+pub(crate) mod bake {
+    pub(crate) use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
 }

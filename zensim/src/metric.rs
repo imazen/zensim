@@ -1519,8 +1519,7 @@ pub(crate) fn apply_mlp_scoring(
         return Ok(());
     };
     let bytes = loader();
-    let model = crate::mlp::Model::from_bytes(bytes)
-        .map_err(|_| ZensimError::InvalidDataLength)?;
+    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
     let n_inputs = model.n_inputs();
     let features = result.features();
     let mut predictor = crate::mlp::Predictor::new(model);

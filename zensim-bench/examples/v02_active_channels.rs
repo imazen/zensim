@@ -23,7 +23,7 @@ fn main() {
     let mut total_skipped = 0;
     for s in 0..n_scales {
         let mut row = format!("  s{} ", s);
-        for c in 0..3 {
+        for (c, chan_name) in chan_names.iter().enumerate().take(3) {
             let base = s * (basic_fpc * 3) + c * basic_fpc;
             let need_ssim = has_weight(base, 3);
             let need_hf = has_weight(base + 10, 3);
@@ -50,7 +50,7 @@ fn main() {
                 }
                 row.push_str(&format!(
                     "| {:<13}",
-                    format!("{} ({})", chan_names[c], tags.join(""))
+                    format!("{} ({})", chan_name, tags.join(""))
                 ));
             } else {
                 total_skipped += 1;
