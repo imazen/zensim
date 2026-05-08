@@ -99,9 +99,12 @@ def load_human_csv(path: Path, dataset_name: str, target_col: str,
     The 2026-04-30 V0_4 bake used train_weight=0.3 for human-MOS
     rows alongside synthetic train_weight=1.0 — same recipe here.
     """
-    print(f"Loading {dataset_name} CSV {path.name}...", flush=True)
+    print(f"Loading {dataset_name} {path.name}...", flush=True)
     t0 = time.time()
-    df = pd.read_csv(path)
+    if path.suffix == ".parquet":
+        df = pq.read_table(path).to_pandas()
+    else:
+        df = pd.read_csv(path)
     n_orig = len(df)
 
     feat_cols_csv = [f"f{i}" for i in range(228)]
@@ -131,10 +134,18 @@ def load_human_csv(path: Path, dataset_name: str, target_col: str,
 
     # Source-disjoint split: assign each unique ref to train or val.
     refs = pd.Series(df["ref_basename"].unique())
-    rng = np.random.default_rng(seed + hash(dataset_name) % 1024)
+    # Python's `hash()` is randomized per process, so use a stable
+    # in-process hash so re-runs with the same --seed get identical
+    # KADID/TID train/val splits.
+    name_seed = sum(ord(c) for c in dataset_name) * 31
+    rng = np.random.default_rng(seed + name_seed)
     perm = rng.permutation(len(refs))
-    n_val = max(1, int(round(len(refs) * val_frac)))
-    val_refs = set(refs.iloc[perm[:n_val]])
+    # `val_frac=0` means no val-only split — the rows go through the
+    # standard image-basename split via `make_split` like synthetic
+    # rows. Use this for the canonical synthetic CSV (added as a
+    # human-csv style input but with weight=1.0 and no val carving).
+    n_val = int(round(len(refs) * val_frac))
+    val_refs = set(refs.iloc[perm[:n_val]]) if n_val > 0 else set()
     out["is_val_only"] = out["image_basename"].isin(val_refs)
     out["train_weight"] = np.where(out["is_val_only"], 0.0, train_weight)
     out["dataset"] = dataset_name
@@ -496,16 +507,20 @@ def main() -> int:
                          "adjacent-q score reversals within each "
                          "(image, codec, knob_tuple) curve. 0 disables.")
     ap.add_argument("--human-csv", action="append", default=[],
-                    metavar="NAME:PATH:WEIGHT",
-                    help="Add a human-MOS dataset CSV produced by "
-                         "`zensim-validate --extract-only --features-csv`. "
-                         "Format: NAME:PATH:WEIGHT (e.g. "
-                         "kadid:/path/kadid.csv:0.3). Repeat for multiple "
-                         "datasets. Each adds rows with image_basename = "
-                         "ref_basename and target = human_score*100. The "
-                         "rows are split internally — 25%% of each refs "
-                         "go to a val-only set so the trainer's mean val "
-                         "SROCC reports per-dataset performance honestly.")
+                    metavar="NAME:PATH:WEIGHT[:VAL_FRAC]",
+                    help="Add a CSV produced by `zensim-validate "
+                         "--extract-only --features-csv`. Format: "
+                         "NAME:PATH:WEIGHT[:VAL_FRAC]. WEIGHT scales the "
+                         "MSE term per row (synthetic synth canonical = "
+                         "1.0; KADID/TID human-MOS = 0.3 per the V0_4 "
+                         "recipe). VAL_FRAC reserves that fraction of "
+                         "the dataset's unique refs as val-only (default "
+                         "0.25 for human-MOS datasets). Pass 0.0 for the "
+                         "canonical synthetic CSV — its rows go through "
+                         "the normal image-basename split. Pass 1.0 for "
+                         "CID22 holdout / pure validation sets so they "
+                         "never appear in training. Repeat the flag for "
+                         "multiple datasets.")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -537,13 +552,18 @@ def main() -> int:
     human_frames = []
     for spec in args.human_csv:
         parts = spec.split(":")
-        if len(parts) != 3:
+        if len(parts) == 3:
+            name, csv_path, weight_str = parts
+            val_frac = 0.25
+        elif len(parts) == 4:
+            name, csv_path, weight_str, val_frac_str = parts
+            val_frac = float(val_frac_str)
+        else:
             raise SystemExit(
-                f"--human-csv expects NAME:PATH:WEIGHT, got {spec!r}")
-        name, csv_path, weight_str = parts
+                f"--human-csv expects NAME:PATH:WEIGHT[:VAL_FRAC], got {spec!r}")
         weight = float(weight_str)
         h = load_human_csv(Path(csv_path), name, target_col, weight,
-                           seed=args.seed)
+                           val_frac=val_frac, seed=args.seed)
         human_frames.append(h)
     if human_frames:
         n_synth = len(df)
