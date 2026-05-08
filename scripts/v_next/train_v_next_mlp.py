@@ -76,6 +76,76 @@ def load_parquets(input_dir: Path, sweeps: list[str]) -> pd.DataFrame:
     return full
 
 
+def load_human_csv(path: Path, dataset_name: str, target_col: str,
+                    train_weight: float, val_frac: float = 0.25,
+                    seed: int = 0) -> pd.DataFrame:
+    """Load a zensim-validate `--features-csv` output and turn it into
+    rows compatible with the unified-parquet schema.
+
+    The CSV is `(ref_basename, human_score, metric_score, raw_distance,
+    f0..f299)`. We:
+    - take only `f0..f227` (the basic + peak features that the V0_4
+      runtime expects — extended features at f228..f299 are unused),
+    - rename them to `feat_0..feat_227`,
+    - scale `human_score` (already in [0,1]) to [0,100] so it's
+      comparable with `score_ssim2`,
+    - tag the rows with `dataset=<name>`, `train_weight=<weight>`,
+      `image_basename = ref_basename`, and synthetic `q=0` /
+      `knob_tuple_json="human"` so the downstream split logic still
+      works without special-casing.
+    - assign each ref to either the train half or val half (`is_val_only`)
+      via a per-dataset source-disjoint split with the given `val_frac`.
+
+    The 2026-04-30 V0_4 bake used train_weight=0.3 for human-MOS
+    rows alongside synthetic train_weight=1.0 — same recipe here.
+    """
+    print(f"Loading {dataset_name} CSV {path.name}...", flush=True)
+    t0 = time.time()
+    df = pd.read_csv(path)
+    n_orig = len(df)
+
+    feat_cols_csv = [f"f{i}" for i in range(228)]
+    if not all(c in df.columns for c in feat_cols_csv):
+        raise SystemExit(
+            f"{path}: missing one of f0..f227 (got cols: "
+            f"{[c for c in df.columns if c.startswith('f')][:5]}...)"
+        )
+
+    # Build the unified-schema rows.
+    out = pd.DataFrame()
+    out["image_basename"] = df["ref_basename"]
+    out["sweep_id"] = f"human-{dataset_name}"
+    out["codec"] = f"human-{dataset_name}"
+    out["q"] = 0
+    out["knob_tuple_json"] = "human"
+    # human_score is in [0, 1]; scale to [0, 100] to match score_ssim2.
+    score_100 = df["human_score"].astype(float) * 100.0
+    out["score_zensim"] = score_100
+    out["score_ssim2"] = score_100
+    out["score_butteraugli_max"] = float("nan")
+    out["score_butteraugli_pnorm3"] = float("nan")
+    out["metric_runtime"] = float("nan")
+    out["content_class"] = ""
+    for i in range(228):
+        out[f"feat_{i}"] = df[f"f{i}"]
+
+    # Source-disjoint split: assign each unique ref to train or val.
+    refs = pd.Series(df["ref_basename"].unique())
+    rng = np.random.default_rng(seed + hash(dataset_name) % 1024)
+    perm = rng.permutation(len(refs))
+    n_val = max(1, int(round(len(refs) * val_frac)))
+    val_refs = set(refs.iloc[perm[:n_val]])
+    out["is_val_only"] = out["image_basename"].isin(val_refs)
+    out["train_weight"] = np.where(out["is_val_only"], 0.0, train_weight)
+    out["dataset"] = dataset_name
+    out["target_human"] = score_100  # explicit copy for V0_6 ranknet groups
+
+    print(f"  {n_orig:,} rows, {len(refs)} unique refs "
+          f"(val={n_val} val_only refs); train_w={train_weight}, "
+          f"loaded in {time.time()-t0:.1f}s", flush=True)
+    return out
+
+
 def make_split(df: pd.DataFrame, val_frac: float, test_frac: float,
                seed: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Source-disjoint split on image_basename. Returns boolean masks."""
@@ -247,7 +317,9 @@ class TrainConfig:
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
           X_val, y_val, g_val, device,
-          tv_pairs_train: np.ndarray | None = None
+          tv_pairs_train: np.ndarray | None = None,
+          w_train: np.ndarray | None = None,
+          val_dataset_labels: np.ndarray | None = None,
           ) -> tuple[MLP, dict]:
     torch.manual_seed(cfg.seed)
     n_in = X_train.shape[1]
@@ -261,6 +333,13 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     gt = torch.from_numpy(g_train).to(device)
     Xv = torch.from_numpy(X_val).to(device)
     yv = torch.from_numpy(y_val).to(device)
+    # Per-row training weight: synthetic rows = 1.0, KADID/TID rows
+    # default 0.3 to match the 2026-04-30 V0_4 mixed-supervision
+    # recipe. Applied only to MSE — RankNet's pair sampling already
+    # naturally over-represents larger groups, and weighting pairs
+    # would double-count.
+    wt = (torch.from_numpy(w_train).to(device).float()
+          if w_train is not None else None)
 
     # Adjacent-q pairs (lower_idx, higher_idx) within each curve for
     # the TV regularizer. `pred[lower] >= pred[higher]` is a violation
@@ -311,7 +390,13 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
                 pred = model(x)
                 pred_lo = pred_hi = None
 
-            mse = torch.mean((pred - y) ** 2)
+            if wt is not None:
+                w = wt[idx]
+                # Per-row weighted MSE; normalize by sum-of-weights so
+                # the magnitude stays comparable to unweighted MSE.
+                mse = ((pred - y) ** 2 * w).sum() / w.sum().clamp_min(1e-6)
+            else:
+                mse = torch.mean((pred - y) ** 2)
             if cfg.loss == "mse":
                 loss = mse
             elif cfg.loss == "ranknet":
@@ -336,14 +421,41 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
         val_mse = float(np.mean((pv - y_val) ** 2))
         val_sr = srocc(pv, y_val)
         val_kr = krocc(pv, y_val)
-        if val_sr > best["val_srocc"]:
-            best = {"epoch": ep, "val_srocc": val_sr, "val_mse": val_mse,
+
+        # Per-dataset val SROCC — when human-MOS data is mixed in,
+        # the global SROCC is dominated by the synthetic majority and
+        # hides whether the model actually generalizes to human
+        # ratings. Report per-dataset SROCC every epoch and use the
+        # *mean* over datasets as the model-selection criterion if
+        # multiple datasets are present.
+        per_ds_srocc: dict[str, float] = {}
+        per_ds_str = ""
+        if val_dataset_labels is not None:
+            unique_ds = sorted(set(val_dataset_labels.tolist()))
+            for ds_name in unique_ds:
+                mask = val_dataset_labels == ds_name
+                if mask.sum() < 2:
+                    continue
+                s = srocc(pv[mask], y_val[mask])
+                per_ds_srocc[ds_name] = s
+            if per_ds_srocc:
+                per_ds_str = "  " + "  ".join(
+                    f"{k}={v:.4f}" for k, v in per_ds_srocc.items())
+        # Selection metric: mean of per-dataset SROCCs when human
+        # datasets are present, else the global SROCC.
+        if len(per_ds_srocc) >= 2:
+            sel_metric = float(np.mean(list(per_ds_srocc.values())))
+        else:
+            sel_metric = val_sr
+        if sel_metric > best["val_srocc"]:
+            best = {"epoch": ep, "val_srocc": sel_metric, "val_mse": val_mse,
                     "val_krocc": val_kr,
+                    "per_ds_srocc": dict(per_ds_srocc),
                     "state": {k: v.detach().clone().cpu()
                               for k, v in model.state_dict().items()}}
         print(f"  epoch {ep:3d}  train_loss={ep_loss/max(1,n_batches):.4f}  "
               f"val_mse={val_mse:.3f}  val_srocc={val_sr:.4f}  "
-              f"val_krocc={val_kr:.4f}",
+              f"val_krocc={val_kr:.4f}  sel={sel_metric:.4f}{per_ds_str}",
               flush=True)
         sys.stdout.flush()
 
@@ -383,6 +495,17 @@ def main() -> int:
                     help="Per-curve monotonicity penalty weight. Penalizes "
                          "adjacent-q score reversals within each "
                          "(image, codec, knob_tuple) curve. 0 disables.")
+    ap.add_argument("--human-csv", action="append", default=[],
+                    metavar="NAME:PATH:WEIGHT",
+                    help="Add a human-MOS dataset CSV produced by "
+                         "`zensim-validate --extract-only --features-csv`. "
+                         "Format: NAME:PATH:WEIGHT (e.g. "
+                         "kadid:/path/kadid.csv:0.3). Repeat for multiple "
+                         "datasets. Each adds rows with image_basename = "
+                         "ref_basename and target = human_score*100. The "
+                         "rows are split internally — 25%% of each refs "
+                         "go to a val-only set so the trainer's mean val "
+                         "SROCC reports per-dataset performance honestly.")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -401,7 +524,41 @@ def main() -> int:
                .reset_index(drop=True)
         print(f"Subsampled to {len(df):,} rows")
 
+    # Tag synthetic rows with default dataset / weight / val flag so the
+    # human-MOS rows can be concatenated cleanly without a schema clash.
+    df["dataset"] = "synthetic"
+    df["train_weight"] = 1.0
+    df["is_val_only"] = False
+
+    # Optionally splice in human-rated CSVs (KADID, TID, ...) using the
+    # 2026-04-30 V0_4 mixed-supervision recipe — synthetic train_w=1.0,
+    # human train_w=0.3, with 25% of each dataset's refs reserved as
+    # val-only.
+    human_frames = []
+    for spec in args.human_csv:
+        parts = spec.split(":")
+        if len(parts) != 3:
+            raise SystemExit(
+                f"--human-csv expects NAME:PATH:WEIGHT, got {spec!r}")
+        name, csv_path, weight_str = parts
+        weight = float(weight_str)
+        h = load_human_csv(Path(csv_path), name, target_col, weight,
+                           seed=args.seed)
+        human_frames.append(h)
+    if human_frames:
+        n_synth = len(df)
+        df = pd.concat([df] + human_frames, ignore_index=True)
+        print(f"After human-MOS splice: {n_synth:,} synthetic + "
+              f"{len(df) - n_synth:,} human = {len(df):,} total rows")
+
     is_tr, is_va, is_te = make_split(df, args.val_frac, args.test_frac, args.seed)
+    # Force human val-only rows (is_val_only=True) into val regardless of
+    # what make_split picked — they were never candidates for training.
+    if df["is_val_only"].any():
+        force_val = df["is_val_only"].to_numpy()
+        is_tr = is_tr & ~force_val
+        is_te = is_te & ~force_val
+        is_va = is_va | force_val
     X, y, images, sc, keep_mask = build_arrays(df, target_col)
 
     # Combine the original split masks with the NaN-drop mask so X/y/g_all
@@ -467,10 +624,21 @@ def main() -> int:
         print(f"  {len(tv_pairs_train):,} adjacent-q pairs "
               f"({time.time()-t0:.1f}s)", flush=True)
 
+    # Per-row training weight (1.0 for synthetic, configurable for human
+    # rows via the `--human-csv` flag). Applied inside the train loop's
+    # MSE term so KADID/TID rows don't get overwhelmed by the synthetic
+    # majority. Per-dataset val labels let the trainer report and select
+    # on the *mean* over datasets rather than the synthetic-dominated
+    # global SROCC.
+    w_train = df["train_weight"].to_numpy(dtype=np.float32)[is_tr_x]
+    val_dataset_labels = df["dataset"].to_numpy()[is_va_x]
+
     t0 = time.time()
     model, metrics = train(cfg, Xt, y[is_tr_x], g_all[is_tr_x],
                            Xv, y[is_va_x], g_all[is_va_x], device,
-                           tv_pairs_train=tv_pairs_train)
+                           tv_pairs_train=tv_pairs_train,
+                           w_train=w_train,
+                           val_dataset_labels=val_dataset_labels)
     train_secs = time.time() - t0
 
     # Test

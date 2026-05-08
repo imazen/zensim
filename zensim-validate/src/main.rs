@@ -973,7 +973,12 @@ fn main() {
         // can pipe features into external pipelines (e.g. the V0_6
         // mixed-supervision trainer).
         if let Some(ref csv_path) = args.features_csv {
-            write_features_csv(csv_path, &primary.human_scores, &primary.features);
+            write_features_csv_with_refs(
+                csv_path,
+                &primary.human_scores,
+                &primary.features,
+                Some(&primary.ref_keys),
+            );
             println!("Wrote features CSV: {}", csv_path.display());
         }
         return;
@@ -2053,26 +2058,63 @@ fn print_cv_summary(label: &str, trained_sroccs: &[f64], embedded_sroccs: &[f64]
 }
 
 fn write_features_csv(path: &Path, human_scores: &[f64], features: &[Vec<f64>]) {
-    use std::io::Write;
-    let mut f = std::fs::File::create(path).expect("Failed to create features CSV");
+    write_features_csv_with_refs(path, human_scores, features, None);
+}
+
+fn write_features_csv_with_refs(
+    path: &Path,
+    human_scores: &[f64],
+    features: &[Vec<f64>],
+    ref_basenames: Option<&[String]>,
+) {
+    use std::io::{BufWriter, Write};
+    // BufWriter cuts the 10k-row CSV write from ~5 minutes to seconds
+    // on /mnt/v (bytes-at-a-time `write!` over a CIFS-backed mount was
+    // I/O-bound on syscalls).
+    let raw = std::fs::File::create(path).expect("Failed to create features CSV");
+    let mut f = BufWriter::with_capacity(1 << 20, raw);
 
     let n_features = features[0].len();
-    write!(f, "human_score,metric_score,raw_distance").unwrap();
+    // Optional `ref_basename` column lets the V0_6 trainer group rows
+    // by source reference image for RankNet — without it, every pair
+    // ends up in its own singleton group and the pairwise loss never
+    // fires.
+    //
+    // When ref_basenames is provided we skip the metric_score /
+    // raw_distance columns entirely. They're only useful for the
+    // human-eval pipeline (analyzer plotting) and require running
+    // zensim's V0_2 weights against every row, which costs ~20 ms on
+    // a 300-feature vector × 10k rows = several minutes per dataset.
+    let extract_mode = ref_basenames.is_some();
+    if let Some(_) = ref_basenames {
+        write!(f, "ref_basename,").unwrap();
+    }
+    write!(f, "human_score").unwrap();
+    if !extract_mode {
+        write!(f, ",metric_score,raw_distance").unwrap();
+    }
     for i in 0..n_features {
         write!(f, ",f{}", i).unwrap();
     }
     writeln!(f).unwrap();
 
-    let ew = expand_embedded_weights(n_features);
-    for (human, feat) in human_scores.iter().zip(features) {
-        let (score, raw) = zensim::try_score_from_features(feat, &ew)
-            .expect("features and weights length mismatch");
-        write!(f, "{},{},{}", human, score, raw).unwrap();
+    let ew = if extract_mode { Vec::new() } else { expand_embedded_weights(n_features) };
+    for (i, (human, feat)) in human_scores.iter().zip(features).enumerate() {
+        if let Some(refs) = ref_basenames {
+            write!(f, "{},", refs.get(i).map(|s| s.as_str()).unwrap_or("")).unwrap();
+        }
+        write!(f, "{}", human).unwrap();
+        if !extract_mode {
+            let (score, raw) = zensim::try_score_from_features(feat, &ew)
+                .expect("features and weights length mismatch");
+            write!(f, ",{},{}", score, raw).unwrap();
+        }
         for v in feat {
             write!(f, ",{}", v).unwrap();
         }
         writeln!(f).unwrap();
     }
+    f.flush().expect("Failed to flush features CSV");
     println!("Wrote features to {:?}", path);
 }
 
