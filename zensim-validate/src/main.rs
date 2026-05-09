@@ -2098,7 +2098,11 @@ fn write_features_csv_with_refs(
     }
     writeln!(f).unwrap();
 
-    let ew = if extract_mode { Vec::new() } else { expand_embedded_weights(n_features) };
+    let ew = if extract_mode {
+        Vec::new()
+    } else {
+        expand_embedded_weights(n_features)
+    };
     for (i, (human, feat)) in human_scores.iter().zip(features).enumerate() {
         if let Some(refs) = ref_basenames {
             write!(f, "{},", refs.get(i).map(|s| s.as_str()).unwrap_or("")).unwrap();
