@@ -626,6 +626,12 @@ def main() -> int:
     ap.add_argument("--lr-cycle-period", type=int, default=50,
                     help="First cycle length (epochs) for "
                          "cosine_cyclic schedule. T_mult=1.")
+    ap.add_argument("--class-balance", default="none",
+                    choices=["none", "weight"],
+                    help="Per-content-class balancing for synth rows. "
+                         "weight: inverse-frequency multiplier on each "
+                         "row's train_weight (rows with empty "
+                         "content_class are left at 1.0).")
     ap.add_argument("--optimizer", default="adamw",
                     choices=["adamw", "adam"],
                     help="adam matches the Rust trainer (no decoupled "
@@ -738,6 +744,35 @@ def main() -> int:
         df = pd.concat([df] + human_frames, ignore_index=True)
         print(f"After human-MOS splice: {n_synth:,} synthetic + "
               f"{len(df) - n_synth:,} human = {len(df):,} total rows")
+
+    # Per-content-class balancing (per zensim CLAUDE.md "Training goals" #1
+    # context: CID22 has mixed content classes; CLIC2025-derived synth is
+    # ~70% illustration/screen-mixed, ~30% photo). Multiplies train_weight
+    # by an inverse-frequency factor so each class contributes equally to
+    # the MSE term. Rows with empty content_class (human-MOS) are left at
+    # weight 1.0. Sample-mode is not yet implemented — only weight-mode.
+    if args.class_balance == "weight":
+        counts = df["content_class"].value_counts(dropna=False)
+        labelled = counts.drop("", errors="ignore")
+        if labelled.empty or labelled.sum() == 0:
+            print("class-balance=weight: no non-empty content_class; skipping",
+                  flush=True)
+        else:
+            mean_cnt = labelled.mean()
+            cls_weights = (mean_cnt / labelled).to_dict()
+            cls_weights[""] = 1.0
+            cls_weights[None] = 1.0
+            multiplier = df["content_class"].map(cls_weights).fillna(1.0)
+            df["train_weight"] = (df["train_weight"]
+                                  * multiplier.astype(np.float32))
+            print("class-balance=weight applied. Per-class multipliers:",
+                  flush=True)
+            for c, w in sorted(cls_weights.items(),
+                               key=lambda kv: -labelled.get(kv[0], 0)):
+                if c in ("", None):
+                    continue
+                print(f"  {c!r}: count={labelled[c]:,} "
+                      f"× {w:.3f}", flush=True)
 
     is_tr, is_va, is_te = make_split(df, args.val_frac, args.test_frac, args.seed)
     # Force human val-only rows (is_val_only=True) into val regardless of
