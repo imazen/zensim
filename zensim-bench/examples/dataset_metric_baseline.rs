@@ -72,6 +72,7 @@ fn main() {
     let mut kadid: Option<PathBuf> = None;
     let mut tid: Option<PathBuf> = None;
     let mut cid22: Option<PathBuf> = None;
+    let mut csiq: Option<PathBuf> = None;
     let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut max_pairs: usize = 500;
@@ -83,6 +84,7 @@ fn main() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
             "--tid" => tid = Some(args.next().unwrap().into()),
             "--cid22" => cid22 = Some(args.next().unwrap().into()),
+            "--csiq" => csiq = Some(args.next().unwrap().into()),
             "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
@@ -115,9 +117,15 @@ fn main() {
             pairs: load_cid22(&p, max_pairs),
         });
     }
+    if let Some(p) = csiq {
+        datasets.push(DatasetSpec {
+            name: "CSIQ",
+            pairs: load_csiq(&p, max_pairs),
+        });
+    }
 
     if datasets.is_empty() && konjnd.is_none() {
-        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --konjnd");
+        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --csiq, --konjnd");
         std::process::exit(1);
     }
 
@@ -240,7 +248,7 @@ fn main() {
         // human_score is normalized [0, 1] by load_cid22, so we apply
         // band cuts in normalized units (0.50 / 0.65 / 0.90). Near-PJND
         // sub-band is [0.58, 0.68] (KonJND PJND mean = 63 ± 5).
-        if ds.name == "CID22" {
+        if ds.name == "CID22" || ds.name == "CSIQ" {
             let bands: [(&str, f64, f64); 5] = [
                 ("B0 below medium (<50)", -f64::INFINITY, 0.50),
                 ("B1 medium [50,65)",      0.50,           0.65),
@@ -786,6 +794,47 @@ fn load_cid22(base: &Path, max: usize) -> Vec<Pair> {
             reference: base.join(r),
             distorted: base.join(dist),
             human_score: mcos / 100.0,
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// CSIQ compression subset loader. Reads pre-extracted CSV
+/// `csiq_compression_pairs.csv` (jpeg + jpeg2000 only, 145 pairs).
+/// CSV format: reference,distorted,distortion_type,distortion_level,dmos.
+/// DMOS is in [0, ~0.5]; mapped to score-equivalent via
+/// `human_score = 1 - dmos` so identical = 1.0 and worst ≈ 0.5.
+///
+/// Caveat: CSIQ JPEG/JPEG2000 are older codec versions; SROCC is still
+/// rank-meaningful but band cuts at [50, 65, 90] are heuristic
+/// (Table 5 alignment is for CID22 MCOS specifically).
+fn load_csiq(base: &Path, max: usize) -> Vec<Pair> {
+    let csv_path = base.join("csiq_compression_pairs.csv");
+    let mut rdr = match csv::Reader::from_path(&csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        if record.len() < 5 {
+            continue;
+        }
+        let r = record.get(0).unwrap();
+        let dist = record.get(1).unwrap();
+        let dmos: f64 = match record.get(4).unwrap().parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        pairs.push(Pair {
+            reference: base.join(r),
+            distorted: base.join(dist),
+            human_score: 1.0 - dmos,
         });
         if pairs.len() >= max {
             break;
