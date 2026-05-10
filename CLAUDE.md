@@ -71,9 +71,44 @@ evaluation decision flows from this:
 
 - Paper PDF: `/mnt/v/zen/zensim-training/2026-05-07/papers/CID22_wg1m99012.pdf`
 - Distilled notes: `docs/CID22_PAPER_NOTES_2026-05-07.md`
+- Table 2 / 4 / 5 extracts + per-band rule: `docs/CID22_TABLES_2_4_2026-05-10.md`
 - KonJND anchor cross-validation: `benchmarks/baseline_metrics_with_konjnd_2026-05-01.md`
 - 2026-05-10 champion + recipe + Phase 4 plan: `benchmarks/champion_2026-05-10.md`,
   `docs/phase4_reference/README.md`
+
+## Per-band reporting rule (locked 2026-05-10, mandatory)
+
+Every CID22/KADID/TID/KonJND eval MUST report **per-band metrics**,
+not just aggregate SROCC. The bands are anchored to CID22 Table 5
+(MCOS and SSIMULACRA 2 scales align 1:1):
+
+| Band | Score range | Meaning |
+|---|---|---|
+| **B0: below medium** | < 50 | Obvious distortion |
+| **B1: medium** | 50 ≤ s < 65 | Visible artifacts |
+| **B2: high** | 65 ≤ s < 90 | Subtle artifacts |
+| **B3: visually lossless** | ≥ 90 | No visible difference |
+| **Near-PJND** (sub-band) | 58 ≤ s ≤ 68 | KonJND PJND mean ≈ 63-65 ± 5 |
+
+For each (model, dataset) eval:
+1. **Per-band SROCC** (Spearman within each band)
+2. **Per-band MAE** (mean absolute prediction error, score units)
+3. **Per-band non-monotonic q-step rate** (within-curve adjacent-q
+   reversals, segmented by lower-q band)
+4. **Per-band sample count (n)**
+
+The aggregate SROCC hides band-specific failures. A model with
+aggregate 0.89 can be 0.95 in B3 and 0.65 in B1 — that is a
+different product than 0.85 across all bands.
+
+**Why this matters**: zensim is a user-facing dial. A user typing
+"give me zensim 70" lives in B2 (high quality). A user typing
+"zensim 55" lives in B1 (medium). If the metric is well-calibrated
+at B3 but breaks at B1, low-q encodes get the wrong settings.
+
+Until the harness emits this, treat any "champion" claim as
+provisional. Aggregate numbers are pipeline-health checks, not
+release gates.
 
 ## Release Process
 
