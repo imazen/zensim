@@ -243,21 +243,43 @@ fn main() {
 
         // ---- Per-band reporting (per zensim/CLAUDE.md "Per-band reporting rule")
         //
-        // For CID22 specifically, MCOS maps 1:1 to the canonical SSIMULACRA 2
-        // scale (Table 5). Bands: B0 < 50, B1 [50,65), B2 [65,90), B3 >= 90.
-        // human_score is normalized [0, 1] by load_cid22, so we apply
-        // band cuts in normalized units (0.50 / 0.65 / 0.90). Near-PJND
-        // sub-band is [0.58, 0.68] (KonJND PJND mean = 63 ± 5).
-        if ds.name == "CID22" || ds.name == "CSIQ" {
-            let bands: [(&str, f64, f64); 5] = [
+        // Bands aligned to CID22 MCOS / SSIMULACRA 2 score thresholds via
+        // Table 5: medium=50, high=65, visually-lossless=90. Each dataset's
+        // human_score is normalized to its own scale; the band cuts below
+        // are in *that* normalized scale.
+        //
+        //   CID22:  MCOS / 100      → cuts at 0.50, 0.65, 0.90 ;
+        //                              Near-PJND [0.58, 0.68]
+        //   CSIQ:   (1 - DMOS)      → use CID22 cuts directly (1:1 score map heuristic)
+        //   KADID:  (DMOS - 1) / 4  → DMOS thresholds 3.7/4.3/4.5 → 0.675/0.825/0.875
+        //   TID:    MOS / 9         → MOS thresholds 4.5/5.5/6.0 → 0.500/0.611/0.667
+        let bands: Option<[(&str, f64, f64); 5]> = match ds.name {
+            "CID22" | "CSIQ" => Some([
                 ("B0 below medium (<50)", -f64::INFINITY, 0.50),
                 ("B1 medium [50,65)",      0.50,           0.65),
                 ("B2 high [65,90)",        0.65,           0.90),
                 ("B3 visually-lossless (≥90)", 0.90,       f64::INFINITY),
                 ("Near-PJND [58,68]",      0.58,           0.68),
-            ];
+            ]),
+            "KADIK10k" => Some([
+                ("B0 below medium (<3.7)", -f64::INFINITY, 0.675),
+                ("B1 medium [3.7,4.3)",    0.675,          0.825),
+                ("B2 high [4.3,4.5)",      0.825,          0.875),
+                ("B3 visually-lossless (≥4.5)", 0.875,     f64::INFINITY),
+                ("Near-PJND [3.9,4.2]",    0.725,          0.800),
+            ]),
+            "TID2013" => Some([
+                ("B0 below medium (<4.5)", -f64::INFINITY, 0.500),
+                ("B1 medium [4.5,5.5)",    0.500,          0.611),
+                ("B2 high [5.5,6.0)",      0.611,          0.667),
+                ("B3 visually-lossless (≥6.0)", 0.667,     f64::INFINITY),
+                ("Near-PJND [4.8,5.2]",    0.533,          0.578),
+            ]),
+            _ => None,
+        };
+        if let Some(bands) = bands {
             println!();
-            println!("### CID22 per-band SROCC (vs MCOS)");
+            println!("### {} per-band SROCC (vs human MOS)", ds.name);
             println!();
             println!("| Band | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |");
             println!("|---|--:|:--:|:--:|:--:|:--:|:--:|--:|--:|");
