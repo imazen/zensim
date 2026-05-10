@@ -2695,16 +2695,6 @@ dependencies = [
 [[package]]
 name = "zenpredict"
 version = "0.1.0"
-dependencies = [
- "bytemuck",
- "libm",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "zenpredict"
-version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da940aa02fa5dbb80e4cfe6883c82a7d39c814bc503e4c8c6f6d534e53a0a2ec"
 dependencies = [
@@ -2746,7 +2736,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "zenpixels",
- "zenpredict 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zenpredict",
 ]
 
 [[package]]
@@ -2768,7 +2758,7 @@ dependencies = [
  "which",
  "zenbench",
  "zenpnm",
- "zenpredict 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zenpredict",
  "zensim",
 ]
 
@@ -2810,7 +2800,7 @@ dependencies = [
  "glob",
  "image",
  "rayon",
- "zenpredict 0.1.0",
+ "zenpredict",
  "zensim",
 ]
 

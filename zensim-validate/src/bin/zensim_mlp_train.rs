@@ -80,6 +80,14 @@ struct Args {
     #[arg(long)]
     out: PathBuf,
 
+    /// Cap features at the first N columns. The V0_4 zensim runtime
+    /// produces 228 features (basic + peak); CSVs may include
+    /// extended features at f228..f299 that the runtime can't supply.
+    /// Pass `--max-features 228` to match the V0_4 runtime input
+    /// dimensionality.
+    #[arg(long)]
+    max_features: Option<usize>,
+
     /// Optional path to dump the trainer log for the run.
     #[arg(long)]
     log_path: Option<PathBuf>,
@@ -204,6 +212,14 @@ fn main() {
         });
         g.train_w = train_w;
         g.val_w = val_w;
+        if let Some(cap) = args.max_features
+            && g.n_features > cap
+        {
+            for row in &mut g.feature_rows {
+                row.truncate(cap);
+            }
+            g.n_features = cap;
+        }
         if n_features == 0 {
             n_features = g.n_features;
         } else if n_features != g.n_features {

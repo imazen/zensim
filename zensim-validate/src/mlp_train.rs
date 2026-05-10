@@ -443,13 +443,15 @@ fn bake_two_layer_znpr_v2(
             biases: &b2_f32,
         },
     ];
-    bake_v2(&BakeRequest::new(
-        0,
-        0,
-        &scaler_mean_f32,
-        &scaler_scale_f32,
-        &layers,
-    ))
+    bake_v2(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: &scaler_mean_f32,
+        scaler_scale: &scaler_scale_f32,
+        layers: &layers,
+        feature_bounds: &[],
+        metadata: &[],
+    })
     .expect("v2 bake of 2-layer MLP")
 }
 
