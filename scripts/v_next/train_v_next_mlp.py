@@ -344,6 +344,8 @@ class TrainConfig:
     init: str = "kaiming"          # "kaiming" | "glorot" — Rust used Glorot.
     val_policy: str = "mean"       # "mean" | "min" — Rust used `Min` (worst
                                    # per-group SROCC), Python defaulted to mean.
+    lr_cycle_period: int = 50      # First cycle length in epochs for
+                                   # cosine_cyclic schedule. T_mult=1.
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
@@ -368,6 +370,14 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     if cfg.lr_schedule == "cosine":
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(
             opt, T_max=cfg.epochs, eta_min=cfg.lr * 0.01)
+    elif cfg.lr_schedule == "cosine_cyclic":
+        # Warm-restart cosine — `T_0` is the first cycle length in
+        # epochs. `T_mult=1` keeps subsequent cycles equal-length.
+        # The Rust trainer's recovery candidate hypothesis was that
+        # cyclic cosine with T_0 ≈ 50 helps escape sharp minima
+        # without the full annealing decay starving late training.
+        sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            opt, T_0=cfg.lr_cycle_period, T_mult=1, eta_min=cfg.lr * 0.01)
     else:
         sched = None
 
@@ -607,10 +617,15 @@ def main() -> int:
                          "adjacent-q score reversals within each "
                          "(image, codec, knob_tuple) curve. 0 disables.")
     ap.add_argument("--lr-schedule", default="constant",
-                    choices=["constant", "cosine"],
+                    choices=["constant", "cosine", "cosine_cyclic"],
                     help="LR schedule. cosine matches the deleted Rust "
                          "mlp_train.rs trainer that produced V0_5's "
-                         "CID22 0.8893 SROCC.")
+                         "CID22 0.8893 SROCC. cosine_cyclic uses "
+                         "CosineAnnealingWarmRestarts with T_0 = "
+                         "--lr-cycle-period (default 50).")
+    ap.add_argument("--lr-cycle-period", type=int, default=50,
+                    help="First cycle length (epochs) for "
+                         "cosine_cyclic schedule. T_mult=1.")
     ap.add_argument("--optimizer", default="adamw",
                     choices=["adamw", "adam"],
                     help="adam matches the Rust trainer (no decoupled "
@@ -766,6 +781,7 @@ def main() -> int:
         rank_weight=args.rank_weight, seed=args.seed,
         tv_weight=args.tv_weight,
         lr_schedule=args.lr_schedule,
+        lr_cycle_period=args.lr_cycle_period,
         optimizer=args.optimizer,
         init=args.init,
         val_policy=args.val_policy)
