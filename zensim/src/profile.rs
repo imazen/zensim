@@ -157,23 +157,32 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     mlp_bytes: None,
 };
 
-/// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear,
-/// trained 2026-04-30 with mixed supervision: synthetic 218k pairs
-/// (train_w=1.0) + KADID10k_train 7125 pairs (train_w=0.3) +
-/// TID2013_train 2160 pairs (train_w=0.3); validation on held-out
-/// KADID10k_val (SROCC=0.9417), TID2013_val (0.9414), CID22 (0.8928).
-/// Outputs raw distance directly (0..90 range, mean 2.8 over the
-/// training distribution) — compatible with the classic
-/// `100 - 18·d^0.7` score mapping shared with V0_1 / V0_2.
+/// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear.
+///
+/// **Bake provenance (2026-05-09 swap)**: this slot now ships the
+/// **V0_5 SSIM2-proxy MLP** trained 2026-05-01 (file
+/// `runs/v04_mlp_ssim2_holdout_20260501T045510.bin`). Source corpus:
+/// safe-synthetic 218k source-disjoint 80/20, target = ssim2.
+/// Recovery register's "current CID22 leader" — the swap was
+/// recommended at `docs/RECOVERY_REGISTER_2026-05-08.md` line 24.
 ///
 /// On the full benchmark datasets (`zensim-bench`'s
-/// `dataset_metric_baseline`) this bake achieves:
-/// KADIK10k 0.8432, TID2013 0.8401, CID22 0.8893 — beating V0_2 by
-/// +0.024 on KADIK and +0.022 on CID22, tying TID.
+/// `dataset_metric_baseline`):
+/// **CID22 0.8934, KADID 0.8505, TID 0.8492** — improves the prior
+/// 2026-04-30 mixed-supervision bake (CID22 0.8893 / KADID 0.8432 /
+/// TID 0.8401) by +0.004 / +0.007 / +0.009 respectively. Same byte
+/// format (60,932 bytes ZNPR v2). Outputs raw distance directly
+/// (0..90 range, mean 2.8 over the training distribution) —
+/// compatible with the classic `100 - 18·d^0.7` score mapping.
 ///
-/// File: `zensim/weights/v0_4_2026-04-30.bin` — 60,932 bytes ZNPR v2.
-/// Gated behind `__experimental_versions` because the `weights/`
-/// directory is excluded from the published crate.
+/// Predecessor (the 2026-04-30 mixed-supervision bake) is preserved
+/// at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin`
+/// (byte-identical to the prior shipped state).
+///
+/// File: `zensim/weights/v0_4_2026-04-30.bin`. Slot name preserved
+/// for source-compat with consumer pinning. Gated behind
+/// `__experimental_versions` because the `weights/` directory is
+/// excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
     include_bytes!("../weights/v0_4_2026-04-30.bin")
