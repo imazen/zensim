@@ -388,15 +388,19 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
             # bottleneck on a 228 → 64 → 1 MLP — Python overhead per
             # `model(...)` call dwarfed the actual matmul.
             if tv_pairs_t is not None:
+                # Use actual batch size, not the constant `bs` — the last
+                # partial batch is smaller than `bs` and slicing on `bs`
+                # over-reads into the TV-pair predictions.
+                n_main = x.size(0)
                 pair_idx = torch.randint(
                     0, tv_pairs_t.size(0), (tv_bs,), device=device)
                 lo = tv_pairs_t[pair_idx, 0]
                 hi = tv_pairs_t[pair_idx, 1]
                 fused = torch.cat([x, Xt[lo], Xt[hi]], dim=0)
                 pred_all = model(fused)
-                pred = pred_all[:bs]
-                pred_lo = pred_all[bs:bs + tv_bs]
-                pred_hi = pred_all[bs + tv_bs:]
+                pred = pred_all[:n_main]
+                pred_lo = pred_all[n_main:n_main + tv_bs]
+                pred_hi = pred_all[n_main + tv_bs:]
             else:
                 pred = model(x)
                 pred_lo = pred_hi = None
