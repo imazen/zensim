@@ -2,6 +2,79 @@
 
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).
 
+## Training goals (priority order, locked 2026-05-10)
+
+zensim is a **user-facing quality dial** — users type a target zensim score
+and the codec stack picks an encode that hits it. Every training and
+evaluation decision flows from this:
+
+1. **CID22 SROCC is the gold standard.** Sneyers / Ben Baruch / Vaxman
+   *AIC-3 Contribution from Cloudinary: CID22* (2023, JPEG WG1
+   `wg1m99012`) is the only large held-out human-MOS dataset that
+   exercises **codec-output distortions specifically**. KADID-10k and
+   TID2013 are **NOT compression-tuned** — KADID's distortions are
+   ~95% non-compression (blur, noise, color, geometric); TID2013 is
+   similar. Use them as **integrity guards**, not optimization
+   targets — a model that does well on KADID/TID but tanks CID22 has
+   overfit to non-compression distortion shape. **Optimize CID22.**
+
+2. **Smoothness AND monotonicity** are first-class objectives, not
+   nice-to-haves. The user is going to type "give me zensim 85" — if
+   slightly worse encodes can score higher (non-monotone), the dial
+   misbehaves. Bumpiness target: **≤ V0_2's 4.86%** non-monotonic
+   q-step rate (project floor); ssim2 GT is 5.08%. TV regularization
+   in `train_v_next_mlp.py --tv-weight 10..30` is the lever.
+
+3. **Anchor at perceptibility thresholds.** KonJND-1k (`/mnt/v/dataset/konjnd-1k/`,
+   1008 src × 504 JPEG + 504 BPG, mean PJND scored against ssim2 ≈ 63
+   per CID22 paper Table 4) is the anchor. A trained model must score
+   at-PJND pairs ≈ 63 ± 5; if it saturates to 100 there, "visually
+   lossless" calibration is broken. Validate every champion via
+   `dataset_metric_baseline --konjnd ...`.
+
+4. **Filter synthetic training data by ssim2 ↔ butteraugli agreement.**
+   The 218k clean safe-synthetic includes pairs where ssim2 and
+   butter disagree on relative quality ranking — those are noisy
+   labels for ranking-based training. Drop pairs (or whole curves)
+   where the two metrics' relative ranking disagrees within an
+   `(image, codec)` group. The CID22 paper (Tables 3, 6) flags
+   regimes where ssim2 is less accurate (very high q, very low q);
+   concordance with butter is the simplest cross-check available
+   without human MOS.
+
+5. **The CID22 paper governs ssim2-accuracy regions.** From Tables 3
+   (per-codec SROCC) and 6 (pairwise SROCC vs absolute):
+   - ssim2 is most reliable in q-band ~50..90
+   - ssim2 less reliable at q > 95 (saturation, near-lossless tail)
+   - ssim2 less reliable at q < 30 (extreme distortion outside its
+     training distribution; KADID-style analytic distortions overlap
+     with this)
+   - When training, weight pairs in q-band 50..90 higher OR drop
+     pairs outside [30, 95] OR weight by butter-concordance (which
+     captures the same signal indirectly).
+
+### What NOT to optimize
+
+- Aggregate (KADID + TID + CID22) / 3 SROCC. KADID and TID are not
+  weighted for compression. A model that beats V0_5 on aggregate by
+  +0.04 but loses 0.01 on CID22 is **worse for the product**, even
+  though the headline number rose. Always report CID22 separately.
+- Synthetic ssim2-target val_srocc as a primary target. Synthetic
+  val tracks the trainer's own loss, not held-out human judgement;
+  it has been > 0.99 across most of our 30+ training runs while
+  CID22 stayed at 0.85-0.88. Use synthetic val only as a sanity
+  guard against pipeline breaks.
+- Metrics that average over very-low-q (q < 30) and very-high-q
+  (q > 95) ssim2 — those bands are unreliable per the CID22 paper.
+
+### Reference materials
+
+- Paper PDF: `/mnt/v/zen/zensim-training/2026-05-07/papers/CID22_wg1m99012.pdf`
+- Distilled notes: `docs/CID22_PAPER_NOTES_2026-05-07.md`
+- KonJND anchor cross-validation: `benchmarks/baseline_metrics_with_konjnd_2026-05-01.md`
+- 2026-05-10 champion + recipe + Phase 4 plan: `benchmarks/champion_2026-05-10.md`,
+  `docs/phase4_reference/README.md`
+
 ## Release Process
 
 `zensim` and `zensim-regress` are released **independently** with **separate semver**. A bump to zensim does not require a bump to zensim-regress, and vice versa. Tag format:

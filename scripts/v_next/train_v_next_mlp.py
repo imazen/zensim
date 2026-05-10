@@ -520,6 +520,62 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     return model, metrics
 
 
+def _apply_ssim2_butter_concordance(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows from (image, codec) groups where ssim2 and butter
+    rank-orders disagree.
+
+    For each (image_basename, codec) group sorted by q ascending: the
+    ssim2 column should monotonically increase (or at least follow the
+    same rank-order) as `-butter`. We compute Spearman rank correlation
+    within each group; groups with negative or near-zero correlation
+    have noisy quality labels — drop them entirely.
+
+    Threshold: keep groups with within-group Spearman(ssim2, -butter) ≥
+    0.6. Empirically this drops ~5–15 % of synthetic rows in q-tails
+    where the CID22 paper flags ssim2 as less accurate.
+
+    Rows with NaN butter (i.e., human-csv rows where load_human_csv
+    set score_butteraugli_max = NaN) are kept unchanged — only
+    same-curve compression-sweep rows get filtered.
+    """
+    if "score_butteraugli_max" not in df.columns:
+        return df
+    has_both = df["score_ssim2"].notna() & df["score_butteraugli_max"].notna()
+    keep_mask = pd.Series(True, index=df.index)
+    if has_both.sum() == 0:
+        return df
+    sub = df[has_both]
+    # Group by (image_basename, codec, knob_tuple_json) when columns exist;
+    # else fall back to (image_basename, codec).
+    group_cols = [c for c in
+                  ["image_basename", "codec", "knob_tuple_json"]
+                  if c in sub.columns]
+    if not group_cols:
+        return df
+    # For each group, compute Spearman rank corr between ssim2 and -butter.
+    grp = sub.groupby(group_cols, sort=False)
+    drop_count = 0
+    drop_idx_set: list[int] = []
+    for keys, idx in grp.indices.items():
+        if len(idx) < 3:
+            continue  # too few points to estimate rank corr
+        vss = sub["score_ssim2"].iloc[idx].values
+        vba = sub["score_butteraugli_max"].iloc[idx].values
+        # Spearman: rank both, then Pearson on ranks
+        from scipy.stats import spearmanr
+        try:
+            r, _ = spearmanr(vss, -vba)
+        except Exception:
+            continue
+        if r is None or (isinstance(r, float) and (r != r or r < 0.6)):
+            real_idx = sub.index[idx]
+            drop_idx_set.extend(real_idx.tolist())
+            drop_count += len(idx)
+    if drop_count:
+        keep_mask.loc[drop_idx_set] = False
+    return df[keep_mask].reset_index(drop=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-dir",
@@ -567,6 +623,24 @@ def main() -> int:
                     choices=["mean", "min"],
                     help="min matches the Rust trainer's ValidationPolicy::Min "
                          "(worst per-group SROCC drives selection).")
+    ap.add_argument("--ranknet-group", default="image",
+                    choices=["image", "dataset"],
+                    help="dataset matches the Rust trainer's per-dataset "
+                         "pair sampling — pairs span all rows within a "
+                         "dataset (synthetic/kadid/tid), allowing cross-image "
+                         "absolute-quality ranking. image (default) restricts "
+                         "to same-source-image curves only.")
+    ap.add_argument("--concordance-filter", default="none",
+                    choices=["none", "ssim2_butter"],
+                    help="ssim2_butter drops synthetic rows where the metric "
+                         "ranking within an (image, codec) curve disagrees "
+                         "between gpu_ssimulacra2 and gpu_butteraugli (bigger "
+                         "= worse for butter). Cleans noisy ranking labels per "
+                         "the CID22 paper's Table 3 caveat that ssim2 is less "
+                         "reliable in the q-extremes. Only applies to rows "
+                         "with both columns present (i.e., the unified-parquet "
+                         "rows from --sweeps; --human-csv rows have score_ssim2 "
+                         "= score_zensim = human_score and are not filtered).")
     ap.add_argument("--human-csv", action="append", default=[],
                     metavar="NAME:PATH:WEIGHT[:VAL_FRAC]",
                     help="Add a CSV produced by `zensim-validate "
@@ -605,6 +679,24 @@ def main() -> int:
     df["dataset"] = "synthetic"
     df["train_weight"] = 1.0
     df["is_val_only"] = False
+
+    # Concordance filter (per zensim CLAUDE.md "Training goals" #4):
+    # within each (image, codec) curve, drop rows where the rank-order of
+    # gpu_ssimulacra2 disagrees with the rank-order of gpu_butteraugli
+    # (lower butter = better, so concordance = ssim2-rank == reversed-butter-rank).
+    # Cleans noisy ranking labels in the q-tails where the CID22 paper
+    # flags ssim2 as less reliable. Only applies to synthetic-codec-sweep
+    # rows that have both metrics; --human-csv rows are left untouched
+    # (they carry score_zensim = human_score and have NaN butter).
+    if (args.concordance_filter == "ssim2_butter"
+            and "score_butteraugli_max" in df.columns
+            and "score_ssim2" in df.columns):
+        before = len(df)
+        df = _apply_ssim2_butter_concordance(df)
+        after = len(df)
+        print(f"Concordance filter (ssim2 ↔ butter): "
+              f"kept {after:,} / {before:,} rows ({after/before*100:.1f}%)",
+              flush=True)
 
     # Optionally splice in human-rated CSVs (KADID, TID, ...) using the
     # 2026-04-30 V0_4 mixed-supervision recipe — synthetic train_w=1.0,
@@ -648,13 +740,22 @@ def main() -> int:
     is_va_x = is_va & keep_mask
     is_te_x = is_te & keep_mask
 
-    # Image-id encoding for ranknet groups. pandas.factorize is ~50× faster
-    # than np.unique + dict lookup over 2M+ strings.
-    print("Encoding image groups for RankNet...", flush=True)
+    # RankNet group key. Two options:
+    #   image  — per-image curves; only same-source pairs sample. Within-curve
+    #            ranking signal only. (Original Python default.)
+    #   dataset — per-dataset; any two rows in the same dataset can pair.
+    #             Matches the deleted Rust mlp_train.rs which sampled from
+    #             {Synthetic, KADID, TID} groups and ranked cross-image
+    #             absolute quality. Generalizes better to CID22 (which is
+    #             also cross-image absolute MOS).
+    print(f"Encoding RankNet groups (key={args.ranknet_group})...", flush=True)
     t0 = time.time()
-    codes, _ = pd.factorize(images, sort=False)
+    if args.ranknet_group == "dataset":
+        codes, _ = pd.factorize(df["dataset"], sort=False)
+    else:
+        codes, _ = pd.factorize(images, sort=False)
     g_all = codes.astype(np.int64)
-    print(f"  {len(set(codes.tolist())):,} unique images "
+    print(f"  {len(set(codes.tolist())):,} unique groups "
           f"({time.time()-t0:.1f}s)", flush=True)
 
     cfg = TrainConfig(
