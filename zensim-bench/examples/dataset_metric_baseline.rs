@@ -251,8 +251,8 @@ fn main() {
             println!();
             println!("### CID22 per-band SROCC (vs MCOS)");
             println!();
-            println!("| Band | n | V0_2 | V0_4 (bake) | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |");
-            println!("|---|--:|:--:|:--:|:--:|:--:|--:|--:|");
+            println!("| Band | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |");
+            println!("|---|--:|:--:|:--:|:--:|:--:|:--:|--:|--:|");
             for (label, lo, hi) in &bands {
                 let idxs: Vec<usize> = humans
                     .iter()
@@ -272,6 +272,11 @@ fn main() {
                 let s_v04 = spearman(&h_b, &v04_b).abs();
                 let s_ssim = spearman(&h_b, &ssim_b).abs();
                 let s_ba = spearman(&h_b, &ba_b).abs();
+                // 200-iteration bootstrap 95% CI for V0_4 SROCC. Uses
+                // xorshift64 from a fixed seed for reproducibility (no
+                // rand crate dep). Small n (e.g. B3 ~ 43) needs CI
+                // reported because point estimates are noisy.
+                let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, &v04_b, 200, 0xC0FFEE);
                 // MAE: V0_4 outputs distance ≈ 100 - score. Compare predicted
                 // *score* = 100 - V0_4 distance against human MCOS * 100.
                 let mae_v04: f64 = idxs.iter()
@@ -284,7 +289,7 @@ fn main() {
                     .map(|&i| (v02[i] - (100.0 - humans[i] * 100.0)).abs())
                     .sum::<f64>() / idxs.len() as f64;
                 println!(
-                    "| {label} | {} | {s_v02:.4} | {s_v04:.4} | {s_ssim:.4} | {s_ba:.4} | {mae_v04:.2} | {mae_v02:.2} |",
+                    "| {label} | {} | {s_v02:.4} | {s_v04:.4} | [{ci_lo:.2}, {ci_hi:.2}] | {s_ssim:.4} | {s_ba:.4} | {mae_v04:.2} | {mae_v02:.2} |",
                     idxs.len()
                 );
             }
@@ -831,4 +836,36 @@ fn ranks(v: &[f64]) -> Vec<f64> {
         i = j;
     }
     r
+}
+
+/// Bootstrap 95% CI for |Spearman(a, b)| using `iters` resamples and a
+/// deterministic xorshift64 seed. Returns (lo, hi) at the 2.5% / 97.5%
+/// percentile of the empirical distribution.
+fn bootstrap_srocc_ci_95(a: &[f64], b: &[f64], iters: usize, seed: u64) -> (f64, f64) {
+    let n = a.len();
+    if n < 4 || iters < 2 {
+        return (f64::NAN, f64::NAN);
+    }
+    let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut samples: Vec<f64> = Vec::with_capacity(iters);
+    let mut a_b = vec![0.0f64; n];
+    let mut b_b = vec![0.0f64; n];
+    for _ in 0..iters {
+        for k in 0..n {
+            let idx = (next() % (n as u64)) as usize;
+            a_b[k] = a[idx];
+            b_b[k] = b[idx];
+        }
+        samples.push(spearman(&a_b, &b_b).abs());
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let lo_idx = ((iters as f64) * 0.025).round() as usize;
+    let hi_idx = (((iters as f64) * 0.975).round() as usize).min(iters - 1);
+    (samples[lo_idx], samples[hi_idx])
 }
