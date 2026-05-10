@@ -232,6 +232,64 @@ fn main() {
             "  done {n_valid}/{n} valid in {:.1}s",
             started.elapsed().as_secs_f64()
         );
+
+        // ---- Per-band reporting (per zensim/CLAUDE.md "Per-band reporting rule")
+        //
+        // For CID22 specifically, MCOS maps 1:1 to the canonical SSIMULACRA 2
+        // scale (Table 5). Bands: B0 < 50, B1 [50,65), B2 [65,90), B3 >= 90.
+        // human_score is normalized [0, 1] by load_cid22, so we apply
+        // band cuts in normalized units (0.50 / 0.65 / 0.90). Near-PJND
+        // sub-band is [0.58, 0.68] (KonJND PJND mean = 63 ± 5).
+        if ds.name == "CID22" {
+            let bands: [(&str, f64, f64); 5] = [
+                ("B0 below medium (<50)", -f64::INFINITY, 0.50),
+                ("B1 medium [50,65)",      0.50,           0.65),
+                ("B2 high [65,90)",        0.65,           0.90),
+                ("B3 visually-lossless (≥90)", 0.90,       f64::INFINITY),
+                ("Near-PJND [58,68]",      0.58,           0.68),
+            ];
+            println!();
+            println!("### CID22 per-band SROCC (vs MCOS)");
+            println!();
+            println!("| Band | n | V0_2 | V0_4 (bake) | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |");
+            println!("|---|--:|:--:|:--:|:--:|:--:|--:|--:|");
+            for (label, lo, hi) in &bands {
+                let idxs: Vec<usize> = humans
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &h)| (h >= *lo && h < *hi).then_some(i))
+                    .collect();
+                if idxs.len() < 4 {
+                    println!("| {label} | {} | n/a | n/a | n/a | n/a | n/a | n/a |", idxs.len());
+                    continue;
+                }
+                let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
+                let v02_b: Vec<f64> = idxs.iter().map(|&i| v02[i]).collect();
+                let v04_b: Vec<f64> = idxs.iter().map(|&i| v04[i]).collect();
+                let ssim_b: Vec<f64> = idxs.iter().map(|&i| ssim2[i]).collect();
+                let ba_b: Vec<f64> = idxs.iter().map(|&i| butter[i]).collect();
+                let s_v02 = spearman(&h_b, &v02_b).abs();
+                let s_v04 = spearman(&h_b, &v04_b).abs();
+                let s_ssim = spearman(&h_b, &ssim_b).abs();
+                let s_ba = spearman(&h_b, &ba_b).abs();
+                // MAE: V0_4 outputs distance ≈ 100 - score. Compare predicted
+                // *score* = 100 - V0_4 distance against human MCOS * 100.
+                let mae_v04: f64 = idxs.iter()
+                    .map(|&i| ((100.0 - v04[i]) - humans[i] * 100.0).abs())
+                    .sum::<f64>() / idxs.len() as f64;
+                // V0_2 outputs raw distance ~ 0..90. Skip score-mapping for
+                // V0_2 MAE; just report mean(|distance - (100 - MCOS)|) as a
+                // rough cross-scale anchor.
+                let mae_v02: f64 = idxs.iter()
+                    .map(|&i| (v02[i] - (100.0 - humans[i] * 100.0)).abs())
+                    .sum::<f64>() / idxs.len() as f64;
+                println!(
+                    "| {label} | {} | {s_v02:.4} | {s_v04:.4} | {s_ssim:.4} | {s_ba:.4} | {mae_v04:.2} | {mae_v02:.2} |",
+                    idxs.len()
+                );
+            }
+            println!();
+        }
     }
 
     // ---- KonJND-1k visually-lossless calibration ----
