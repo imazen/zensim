@@ -1,9 +1,15 @@
 #![allow(clippy::needless_range_loop)] // Training loops index parallel arrays by shared index
 
-// mlp_train module removed in this branch — perceptual-MLP training
-// happens through zenanalyze/zentrain (Python pipeline, ZNPR v2 bake)
-// rather than the in-tree Rust RankNet that originally lived here.
-// See docs/PR_24_REVIEW_2026-05-07.md for context.
+// Perceptual-MLP training in Rust — was removed in commit e6132243
+// then restored 2026-05-10 (Tick 41) to close the structural CID22
+// 0.8893 SROCC ceiling that the Python trainer (which now lives at
+// zensim/scripts/v_next/train_v_next_mlp.py) cannot reach. The Rust
+// trainer's per-step pair-sampling Adam loop runs ~50,000 steps per
+// epoch in <1s on CPU; the Python version does ~14 batches per epoch
+// at ~3s on the same GPU. The Adam-update frequency difference is
+// the bulk of the remaining gap.
+#[allow(dead_code)] // CLI dispatch wired in a follow-up tick
+mod mlp_train;
 mod scale_invariance;
 
 use calamine::{Reader, Xlsx};
