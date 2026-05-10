@@ -76,6 +76,8 @@ fn main() {
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut max_pairs: usize = 500;
     let mut per_pair_output: Option<PathBuf> = None;
+    let mut konjnd_features_csv: Option<PathBuf> = None;
+    let mut konjnd_anchor_target: f64 = 63.0;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
@@ -85,6 +87,8 @@ fn main() {
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
             "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
+            "--konjnd-features-csv" => konjnd_features_csv = Some(args.next().unwrap().into()),
+            "--konjnd-anchor-target" => konjnd_anchor_target = args.next().unwrap().parse().unwrap(),
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -248,8 +252,8 @@ fn main() {
             let started = std::time::Instant::now();
             let progress = AtomicUsize::new(0);
             let log_every = (n_total / 20).max(1);
-            type CalibRow = (f64, f64, f64, f64); // v02_dist, v04_dist, ssim2, butter
-            let results: Vec<Option<(String, CalibRow)>> = pairs
+            type CalibRow = (f64, f64, f64, f64, Vec<f64>); // v02_dist, v04_dist, ssim2, butter, features
+            let results: Vec<Option<(String, String, CalibRow)>> = pairs
                 .par_iter()
                 .map(|kp| {
                     let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -259,11 +263,55 @@ fn main() {
                         let eta = (n_total - p) as f64 / rate;
                         eprintln!("  konjnd {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
                     }
+                    let ref_basename = kp
+                        .pair
+                        .reference
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref())
-                        .map(|row| (kp.codec.clone(), row))
+                        .map(|row| (kp.codec.clone(), ref_basename, row))
                 })
                 .collect();
-            let scored: Vec<(String, CalibRow)> = results.into_iter().flatten().collect();
+            let scored: Vec<(String, String, CalibRow)> = results.into_iter().flatten().collect();
+
+            // Optionally emit per-pair feature CSV for trainer anchor input.
+            // Format matches trainer's --human-csv expectation:
+            //   ref_basename, human_score (in [0,1]), f0..f227
+            // human_score is set to konjnd_anchor_target/100 so the trainer's
+            // load_human_csv multiplies it back to the absolute target (e.g.
+            // 0.63 -> score_zensim=63 — the CID22 paper Table 4 anchor).
+            if let Some(out_path) = konjnd_features_csv.as_ref() {
+                use std::io::Write;
+                let f = std::fs::File::create(out_path).expect("create konjnd-features-csv");
+                let mut w = std::io::BufWriter::new(f);
+                let n_feat = 228usize;
+                write!(w, "ref_basename,human_score").unwrap();
+                for i in 0..n_feat {
+                    write!(w, ",f{i}").unwrap();
+                }
+                writeln!(w).unwrap();
+                let target_normalized = konjnd_anchor_target / 100.0;
+                let mut rows_written = 0usize;
+                for (_codec, ref_name, row) in &scored {
+                    if row.4.len() < n_feat {
+                        continue;
+                    }
+                    write!(w, "{ref_name},{target_normalized:.6}").unwrap();
+                    for v in &row.4[..n_feat] {
+                        write!(w, ",{v:.6}").unwrap();
+                    }
+                    writeln!(w).unwrap();
+                    rows_written += 1;
+                }
+                w.flush().unwrap();
+                eprintln!(
+                    "  konjnd features CSV: {} rows -> {}",
+                    rows_written,
+                    out_path.display()
+                );
+            }
             eprintln!(
                 "  konjnd done {}/{n_total} valid in {:.1}s",
                 scored.len(),
@@ -283,7 +331,7 @@ fn main() {
             for codec in ["JPEG", "BPG"] {
                 let subset: Vec<&CalibRow> = scored
                     .iter()
-                    .filter_map(|(c, r)| (c == codec).then_some(r))
+                    .filter_map(|(c, _ref_name, r)| (c == codec).then_some(r))
                     .collect();
                 let n = subset.len();
                 if n == 0 {
@@ -324,7 +372,7 @@ fn process_konjnd_pair(
     kp: &KonJndPair,
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
-) -> Option<(f64, f64, f64, f64)> {
+) -> Option<(f64, f64, f64, f64, Vec<f64>)> {
     let p = &kp.pair;
     let src_img = match image::open(&p.reference) {
         Ok(img) => img.to_rgb8(),
@@ -386,7 +434,8 @@ fn process_konjnd_pair(
         Some(dm) => libjxl_pnorm(dm.buf(), 3.0),
         None => f64::NAN,
     };
-    Some((v02_distance, v04_distance, ssim2, three_norm))
+    let features_vec: Vec<f64> = features.iter().copied().collect();
+    Some((v02_distance, v04_distance, ssim2, three_norm, features_vec))
 }
 
 /// libjxl's `ComputeDistanceP` for diffmap-of-floats. Source:
