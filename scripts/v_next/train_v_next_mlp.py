@@ -231,7 +231,7 @@ def standardize(X_train: np.ndarray, X_val: np.ndarray, X_test: np.ndarray
 
 
 class MLP(torch.nn.Module):
-    def __init__(self, n_in: int, hidden: list[int]):
+    def __init__(self, n_in: int, hidden: list[int], init: str = "kaiming"):
         super().__init__()
         layers = []
         prev = n_in
@@ -241,6 +241,18 @@ class MLP(torch.nn.Module):
             prev = h
         layers.append(torch.nn.Linear(prev, 1))
         self.net = torch.nn.Sequential(*layers)
+        if init == "glorot":
+            # Glorot/Xavier-normal init matches the deleted Rust mlp_train.rs
+            # which used `std = sqrt(2 / (n_in + n_out))` per layer. PyTorch's
+            # default is Kaiming-uniform; Glorot has different fan handling
+            # that better matches RankNet's scale assumptions.
+            for m in self.net:
+                if isinstance(m, torch.nn.Linear):
+                    fan_in, fan_out = m.weight.shape[1], m.weight.shape[0]
+                    std = (2.0 / (fan_in + fan_out)) ** 0.5
+                    torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                    if m.bias is not None:
+                        torch.nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x).squeeze(-1)
@@ -327,6 +339,11 @@ class TrainConfig:
     lr_schedule: str = "constant"  # "constant" | "cosine" — cosine matches the
                                    # deleted Rust mlp_train.rs trainer that
                                    # produced V0_5's CID22 0.8893.
+    optimizer: str = "adamw"       # "adamw" | "adam" — Rust trainer used Adam
+                                   # (no decoupled weight decay).
+    init: str = "kaiming"          # "kaiming" | "glorot" — Rust used Glorot.
+    val_policy: str = "mean"       # "mean" | "min" — Rust used `Min` (worst
+                                   # per-group SROCC), Python defaulted to mean.
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
@@ -337,9 +354,13 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
           ) -> tuple[MLP, dict]:
     torch.manual_seed(cfg.seed)
     n_in = X_train.shape[1]
-    model = MLP(n_in, cfg.hidden).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr,
-                            weight_decay=cfg.weight_decay)
+    model = MLP(n_in, cfg.hidden, init=cfg.init).to(device)
+    if cfg.optimizer == "adam":
+        opt = torch.optim.Adam(model.parameters(), lr=cfg.lr,
+                               weight_decay=cfg.weight_decay)
+    else:
+        opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr,
+                                weight_decay=cfg.weight_decay)
     # LR scheduler. The deleted Rust mlp_train.rs (PR #29 e613224) used
     # "Adam with cosine annealing" which is hypothesized to be one of the
     # ingredients that gave V0_5 its CID22 0.8893 SROCC; replicate that
@@ -470,10 +491,15 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
             if per_ds_srocc:
                 per_ds_str = "  " + "  ".join(
                     f"{k}={v:.4f}" for k, v in per_ds_srocc.items())
-        # Selection metric: mean of per-dataset SROCCs when human
-        # datasets are present, else the global SROCC.
+        # Selection metric: per `cfg.val_policy`. Min matches the Rust
+        # trainer (worst per-group SROCC); mean was the Python default
+        # but lets the synthetic majority dominate selection.
         if len(per_ds_srocc) >= 2:
-            sel_metric = float(np.mean(list(per_ds_srocc.values())))
+            vals = list(per_ds_srocc.values())
+            if cfg.val_policy == "min":
+                sel_metric = float(min(vals))
+            else:
+                sel_metric = float(np.mean(vals))
         else:
             sel_metric = val_sr
         if sel_metric > best["val_srocc"]:
@@ -529,6 +555,18 @@ def main() -> int:
                     help="LR schedule. cosine matches the deleted Rust "
                          "mlp_train.rs trainer that produced V0_5's "
                          "CID22 0.8893 SROCC.")
+    ap.add_argument("--optimizer", default="adamw",
+                    choices=["adamw", "adam"],
+                    help="adam matches the Rust trainer (no decoupled "
+                         "weight decay).")
+    ap.add_argument("--init", default="kaiming",
+                    choices=["kaiming", "glorot"],
+                    help="glorot matches the Rust trainer's std=sqrt(2/(in+out)) "
+                         "normal init.")
+    ap.add_argument("--val-policy", default="mean",
+                    choices=["mean", "min"],
+                    help="min matches the Rust trainer's ValidationPolicy::Min "
+                         "(worst per-group SROCC drives selection).")
     ap.add_argument("--human-csv", action="append", default=[],
                     metavar="NAME:PATH:WEIGHT[:VAL_FRAC]",
                     help="Add a CSV produced by `zensim-validate "
@@ -626,7 +664,10 @@ def main() -> int:
         weight_decay=args.weight_decay, dropout=args.dropout,
         rank_weight=args.rank_weight, seed=args.seed,
         tv_weight=args.tv_weight,
-        lr_schedule=args.lr_schedule)
+        lr_schedule=args.lr_schedule,
+        optimizer=args.optimizer,
+        init=args.init,
+        val_policy=args.val_policy)
 
     print(f"Config: {cfg}")
     print(f"Train rows: {is_tr_x.sum():,}  Val rows: {is_va_x.sum():,}  "
