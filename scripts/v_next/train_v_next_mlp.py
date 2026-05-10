@@ -324,6 +324,9 @@ class TrainConfig:
     rank_weight: float
     seed: int
     tv_weight: float = 0.0  # Per-curve monotonicity penalty weight.
+    lr_schedule: str = "constant"  # "constant" | "cosine" — cosine matches the
+                                   # deleted Rust mlp_train.rs trainer that
+                                   # produced V0_5's CID22 0.8893.
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
@@ -337,6 +340,15 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     model = MLP(n_in, cfg.hidden).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr,
                             weight_decay=cfg.weight_decay)
+    # LR scheduler. The deleted Rust mlp_train.rs (PR #29 e613224) used
+    # "Adam with cosine annealing" which is hypothesized to be one of the
+    # ingredients that gave V0_5 its CID22 0.8893 SROCC; replicate that
+    # path when cfg.lr_schedule == "cosine".
+    if cfg.lr_schedule == "cosine":
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=cfg.epochs, eta_min=cfg.lr * 0.01)
+    else:
+        sched = None
 
     # Pre-bake tensors on GPU
     Xt = torch.from_numpy(X_train).to(device)
@@ -429,6 +441,8 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
             opt.step()
             ep_loss += float(loss.item())
             n_batches += 1
+        if sched is not None:
+            sched.step()
 
         model.eval()
         with torch.no_grad():
@@ -510,6 +524,11 @@ def main() -> int:
                     help="Per-curve monotonicity penalty weight. Penalizes "
                          "adjacent-q score reversals within each "
                          "(image, codec, knob_tuple) curve. 0 disables.")
+    ap.add_argument("--lr-schedule", default="constant",
+                    choices=["constant", "cosine"],
+                    help="LR schedule. cosine matches the deleted Rust "
+                         "mlp_train.rs trainer that produced V0_5's "
+                         "CID22 0.8893 SROCC.")
     ap.add_argument("--human-csv", action="append", default=[],
                     metavar="NAME:PATH:WEIGHT[:VAL_FRAC]",
                     help="Add a CSV produced by `zensim-validate "
@@ -606,7 +625,8 @@ def main() -> int:
         epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
         weight_decay=args.weight_decay, dropout=args.dropout,
         rank_weight=args.rank_weight, seed=args.seed,
-        tv_weight=args.tv_weight)
+        tv_weight=args.tv_weight,
+        lr_schedule=args.lr_schedule)
 
     print(f"Config: {cfg}")
     print(f"Train rows: {is_tr_x.sum():,}  Val rows: {is_va_x.sum():,}  "
