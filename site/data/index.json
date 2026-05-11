@@ -2,7 +2,7 @@
   "bakes": [
     {
       "label": "V0_5_leaked",
-      "notes": "Currently shipping; trained on leaked CSV (12% of pairs leaked from CID22 holdout)",
+      "notes": "Archived; trained on leaked CSV (11.77% training pairs near-duplicates of CID22 holdout)",
       "json": "bakes/V0_5_leaked.json",
       "datasets": [
         "CID22",
@@ -11,9 +11,19 @@
       ]
     },
     {
-      "label": "V0_6_clean",
-      "notes": "Honest baseline after stage-1+stage-2 overlap audit + cleaning; seed=42 h=128 TV=10",
-      "json": "bakes/V0_6_clean.json",
+      "label": "V0_6_clean_baseline",
+      "notes": "Honest baseline post-cleaning; seed=42 (V0_5 default)",
+      "json": "bakes/V0_6_clean_baseline.json",
+      "datasets": [
+        "CID22",
+        "KADIK10k",
+        "TID2013"
+      ]
+    },
+    {
+      "label": "V0_7_shipped",
+      "notes": "NEW SHIPPED. seed=0 best of 5-seed sweep; affine-calibrated alpha=34.30 beta=-4.03 to paper Table 5 anchors; CID22=0.8912 BEATS fast-ssim2 (0.8895) by +0.0017",
+      "json": "bakes/V0_7_shipped.json",
       "datasets": [
         "CID22",
         "KADIK10k",
