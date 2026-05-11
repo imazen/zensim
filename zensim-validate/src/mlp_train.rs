@@ -120,6 +120,42 @@ pub fn train_mlp(
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
 ) -> Vec<u8> {
+    train_mlp_with_tv(groups, n_features, hyperparams, log, None)
+}
+
+/// TV (total-variation) regularizer for adjacent-q monotonicity.
+///
+/// `pairs[k] = (lo_idx, hi_idx)` references rows in the concatenated
+/// trainer-feature space (group 0 rows first, then group 1, etc.).
+/// Penalty per pair = `max(0, pred[hi_idx] - pred[lo_idx])` — Rust
+/// trainer outputs are distance-like (lower = better quality), so a
+/// monotone curve has pred[lo_q] > pred[hi_q]. Violations have
+/// pred[hi_q] > pred[lo_q].
+pub struct TvRegularizer {
+    pub pairs: Vec<(usize, usize)>,
+    pub features: Vec<Vec<f64>>,
+    pub weight: f64,
+    /// Apply TV update every N RankNet pair updates. 50 is a good
+    /// default — 50,000 / 50 = 1000 TV steps per epoch.
+    pub apply_every: usize,
+    /// Mini-batch size of TV pairs per update. 32 is fine.
+    pub batch: usize,
+}
+
+impl TvRegularizer {
+    fn n_features_check(&self) -> usize {
+        self.features.first().map(|v| v.len()).unwrap_or(0)
+    }
+}
+
+/// Internal entry point that accepts an optional TV regularizer.
+pub fn train_mlp_with_tv(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+) -> Vec<u8> {
     let n_outputs = 1usize;
     let n_hidden = hyperparams.n_hidden;
 
@@ -197,6 +233,22 @@ pub fn train_mlp(
             buf
         })
         .collect();
+
+    // Standardize TV-regularizer features using the same scaler, in
+    // their flat (n_rows × n_features) form. The TV pairs reference
+    // row indices in this flat buffer.
+    let tv_std: Option<Vec<f64>> = tv.map(|t| {
+        assert_eq!(t.n_features_check(), n_features,
+                   "TV features dimensionality must match training features");
+        let n_rows = t.features.len();
+        let mut buf = vec![0.0f64; n_rows * n_features];
+        for (i, f) in t.features.iter().enumerate() {
+            for d in 0..n_features {
+                buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+        }
+        buf
+    });
 
     // 3. Initialize weights (Xavier-Glorot for tanh/leaky-relu).
     let mut rng = SplitMix64::new(hyperparams.seed);
@@ -300,6 +352,51 @@ pub fn train_mlp(
             }
 
             adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+
+            // TV regularizer step (per-curve adjacent-q monotonicity).
+            // Apply every `apply_every` pair updates. Penalty per TV pair:
+            // max(0, pred[hi_q] - pred[lo_q]) — Rust trainer output is
+            // distance-like (lower = better), so a monotone curve has
+            // pred[lo_q] > pred[hi_q]; the ReLU penalizes the opposite.
+            if let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
+                && tv_cfg.weight > 0.0
+                && tv_cfg.apply_every > 0
+                && n_steps.is_multiple_of(tv_cfg.apply_every as u64)
+                && !tv_cfg.pairs.is_empty()
+            {
+                let scale = tv_cfg.weight / tv_cfg.batch.max(1) as f64;
+                for _ in 0..tv_cfg.batch {
+                    let pair_idx = (rng.next_u64() as usize) % tv_cfg.pairs.len();
+                    let (lo, hi) = tv_cfg.pairs[pair_idx];
+                    let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
+                    let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
+                    let (y_lo, h_lo_pre, h_lo) = forward(
+                        xlo, &w1, &b1, &w2, &b2,
+                        n_features, n_hidden, hyperparams.leaky_alpha);
+                    let (y_hi, h_hi_pre, h_hi) = forward(
+                        xhi, &w1, &b1, &w2, &b2,
+                        n_features, n_hidden, hyperparams.leaky_alpha);
+                    // Violation = (y_hi - y_lo) > 0 (worse direction).
+                    let viol = y_hi - y_lo;
+                    if viol <= 0.0 {
+                        continue;
+                    }
+                    // d_loss/d_y_hi = +scale ; d_loss/d_y_lo = -scale
+                    backprop_step(
+                        xhi, &h_hi_pre, &h_hi, scale,
+                        &w1, &mut adam.gw1, &mut adam.gb1,
+                        &w2, &mut adam.gw2, &mut adam.gb2,
+                        n_features, n_hidden, hyperparams.leaky_alpha,
+                    );
+                    backprop_step(
+                        xlo, &h_lo_pre, &h_lo, -scale,
+                        &w1, &mut adam.gw1, &mut adam.gb1,
+                        &w2, &mut adam.gw2, &mut adam.gb2,
+                        n_features, n_hidden, hyperparams.leaky_alpha,
+                    );
+                    adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                }
+            }
         }
 
         let avg_loss = if n_steps > 0 { total_loss / n_steps as f64 } else { 0.0 };
