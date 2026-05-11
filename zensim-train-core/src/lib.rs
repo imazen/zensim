@@ -89,6 +89,45 @@ pub use stats::{pearson, ranks, spearman};
 
 pub mod mlp;
 
+/// TV (total-variation) regularizer for adjacent-quality monotonicity.
+///
+/// `pairs[k] = (lo_idx, hi_idx)` references rows in
+/// [`TvRegularizer::features`]. Penalty per pair =
+/// `max(0, pred[hi_idx] - pred[lo_idx])` — Rust-trainer outputs are
+/// distance-like (lower = better quality), so a monotone curve has
+/// `pred[lo_q] > pred[hi_q]`. Violations are when
+/// `pred[hi_q] > pred[lo_q]`.
+///
+/// The trainer applies TV updates every `apply_every` RankNet steps,
+/// sampling `batch` pairs per update. At 50_000 pairs/epoch and the
+/// default `apply_every = 50`, that's 1000 TV gradient steps per epoch.
+#[derive(Debug, Clone)]
+pub struct TvRegularizer {
+    /// Pair indices: `(lo_idx, hi_idx)` into [`Self::features`]. `lo_idx`
+    /// should be the higher-quality row, `hi_idx` the lower-quality row.
+    pub pairs: Vec<(usize, usize)>,
+    /// Feature rows in the same `n_features`-dimensional space as the
+    /// training groups. The trainer standardizes these with the same
+    /// scaler as the training data so weights generalize.
+    pub features: Vec<Vec<f64>>,
+    /// TV penalty weight (added to the per-step gradient scale).
+    pub weight: f64,
+    /// Apply TV update every N RankNet pair updates. 50 is a good
+    /// default — 50_000 RankNet pairs / 50 = 1000 TV steps per epoch.
+    pub apply_every: usize,
+    /// Mini-batch size of TV pairs per update. 32 is fine.
+    pub batch: usize,
+}
+
+impl TvRegularizer {
+    /// Width of each feature row in [`Self::features`]. Returns 0 if no
+    /// rows are present. The trainer asserts this matches the
+    /// `n_features` passed to `train_mlp_with_tv`.
+    pub fn n_features(&self) -> usize {
+        self.features.first().map(|v| v.len()).unwrap_or(0)
+    }
+}
+
 /// One named slice of training/validation data.
 ///
 /// Multi-group training resolves single-corpus dominance: per-step
@@ -165,6 +204,31 @@ mod tests {
         let y_monotonic: Vec<f64> = vec![1.0, 100.0, 1000.0, 10000.0, 100000.0];
         assert!((spearman(&x, &y_linear) - 1.0).abs() < 1e-10);
         assert!((spearman(&x, &y_monotonic) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn tv_regularizer_n_features_empty() {
+        let tv = TvRegularizer {
+            pairs: vec![],
+            features: vec![],
+            weight: 1.0,
+            apply_every: 50,
+            batch: 32,
+        };
+        assert_eq!(tv.n_features(), 0);
+    }
+
+    #[test]
+    fn tv_regularizer_n_features_nonempty() {
+        let tv = TvRegularizer {
+            pairs: vec![(0, 1), (2, 3)],
+            features: vec![vec![0.1; 228], vec![0.2; 228], vec![0.3; 228], vec![0.4; 228]],
+            weight: 10.0,
+            apply_every: 50,
+            batch: 32,
+        };
+        assert_eq!(tv.n_features(), 228);
+        assert_eq!(tv.pairs.len(), 2);
     }
 
     #[test]
