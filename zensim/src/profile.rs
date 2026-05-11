@@ -179,19 +179,35 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin`
 /// (byte-identical to the prior shipped state).
 ///
-/// File: `zensim/weights/v0_5_2026-05-11.bin` (md5 `0133d165`). Replaces
-/// the prior 2026-04-30 V0_4 ship per the 2026-05-11 user-directed cycle:
-/// new bake is TV=10 h128 KonJND-aligned + affine-calibrated (α=33.27,
-/// β=-3.791) to match ssim2's per-band SROCC across all 3 datasets
-/// (KADID 0.9434, TID 0.9553, CID22 0.8900). Function and slot names
-/// preserved (mlp_bake_preview_v0_4, PROFILE_PREVIEW_V0_4) for
-/// source-compat with consumer pinning. Old V0_4 bake archived at
-/// `zensim/weights/archive/v0_4_2026-04-30.bin` for reproducibility.
+/// File: `zensim/weights/v0_7_2026-05-11.bin` (md5 `b31741e3`).
+/// Trained on **leak-free** safe-synthetic CSV (1,015 perceptual
+/// duplicates of CID22 holdout removed; -28% rows). h=128, TV=10,
+/// seed=0, KonJND-aligned. Affine-calibrated (α=34.3019, β=-4.0336)
+/// against ssim2 on the synth corpus.
+///
+/// **First honest clean-corpus bake that exceeds fast-ssim2 on CID22
+/// aggregate**: V0_7 CID22 SROCC = 0.8912 vs fast-ssim2 0.8895
+/// (+0.0017). Per-band CID22: B0 0.4279, B1 0.4354, B2 0.7842 (BEATS
+/// ssim2 0.7722), B3 0.1595 (BEATS ssim2 0.1121), Near-PJND 0.3591.
+/// Wins 2 of 5 bands (B2, B3); aggregate-bar met.
+///
+/// **Holdout-overlap remediation**: V0_5's 0.8900 was inflated by
+/// 11.77 % training-pair leak from 22 of 49 CID22 holdout refs (via
+/// hex-hashed crops circumventing the filename blocklist). The
+/// dHash-64 audit + stage-2 sliding-window detector
+/// (`zensim-validate/src/bin/check_holdout_overlap{,_stage2}.rs`)
+/// drove the cleanup; cleaned features file at
+/// `/tmp/zensim_loop/safe_synth_clean_features.csv`.
+///
+/// Function and slot names preserved (`mlp_bake_preview_v0_4`,
+/// `PROFILE_PREVIEW_V0_4`) for source-compat with consumer pinning.
+/// Predecessor `zensim/weights/v0_5_2026-05-11.bin` archived at
+/// `zensim/weights/archive/v0_5_2026-05-11.bin` for reproducibility.
 /// Gated behind `__experimental_versions` because the `weights/`
 /// directory is excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    include_bytes!("../weights/v0_5_2026-05-11.bin")
+    include_bytes!("../weights/v0_7_2026-05-11.bin")
 }
 
 #[cfg(feature = "__experimental_versions")]
