@@ -1,0 +1,24 @@
+{
+  "bakes": [
+    {
+      "label": "V0_5_leaked",
+      "notes": "Currently shipping; trained on leaked CSV (12% of pairs leaked from CID22 holdout)",
+      "json": "bakes/V0_5_leaked.json",
+      "datasets": [
+        "CID22",
+        "KADIK10k",
+        "TID2013"
+      ]
+    },
+    {
+      "label": "V0_6_clean",
+      "notes": "Honest baseline after stage-1+stage-2 overlap audit + cleaning; seed=42 h=128 TV=10",
+      "json": "bakes/V0_6_clean.json",
+      "datasets": [
+        "CID22",
+        "KADIK10k",
+        "TID2013"
+      ]
+    }
+  ]
+}

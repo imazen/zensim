@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>zensim — V_X champion progression vs CID22 paper</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           margin: 24px; color: #222; max-width: 1200px; }
+    h1 { font-weight: 700; letter-spacing: -0.02em; }
+    h2 { border-bottom: 1px solid #eee; padding-bottom: 4px; margin-top: 36px; }
+    .lede { color: #666; font-size: 14px; max-width: 80ch; }
+    .chart { width: 100%; min-height: 480px; margin: 16px 0; }
+    .controls { display: flex; gap: 16px; align-items: center; margin: 16px 0;
+                padding: 12px; background: #f7f7f7; border-radius: 6px; }
+    .controls label { font-size: 13px; font-weight: 600; }
+    .controls select { padding: 4px 8px; font-size: 14px; }
+    table { border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 10px; text-align: left; }
+    th { background: #f0f0f0; }
+    td.delta-good { color: #0a7d28; font-weight: 600; }
+    td.delta-bad  { color: #b1130c; font-weight: 600; }
+    td.delta-near { color: #555; }
+    .notes { font-size: 13px; color: #555; margin-top: 12px; }
+    .small { font-size: 12px; color: #888; }
+    .red { color: #b1130c; }
+    .green { color: #0a7d28; }
+  </style>
+</head>
+<body>
+  <h1>zensim — V_X progression vs CID22 paper</h1>
+  <p class="lede">
+    Interactive per-band SROCC graphs for our V_X champion bakes
+    versus the SSIMULACRA 2 reference and the CID22 paper's
+    published numbers. Data updated nightly via the
+    <code>build_site_data.py</code> pipeline.
+    Shipping bar: <strong>match-or-exceed fast-ssim2 across all four
+    quality bands</strong> (B0–B3 per <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">paper Table 5</a>).
+  </p>
+
+  <h2>Aggregate SROCC per dataset</h2>
+  <div class="controls">
+    <label>Dataset:
+      <select id="ds-aggregate"></select>
+    </label>
+    <span class="small">CID22 is the only true held-out test; KADID/TID/KonJND are in training.</span>
+  </div>
+  <div id="chart-aggregate" class="chart"></div>
+
+  <h2>Per-band SROCC (CID22 49-ref held-out)</h2>
+  <div class="controls">
+    <label>Dataset:
+      <select id="ds-perband"></select>
+    </label>
+    <span class="small">Bands per CID22 paper Table 5: B0&lt;50 / B1 [50,65) / B2 [65,90) / B3≥90.</span>
+  </div>
+  <div id="chart-perband" class="chart"></div>
+
+  <h2>Paper-parity table (Table 3 — full 250-ref SROCC; CID22 paper)</h2>
+  <p class="lede">
+    Paper-published SROCC values vs our reproduction. SSIMULACRA 2's
+    KRCC 0.7033 / SRCC 0.88541 / PCC 0.87448 / MAE 4.97 is the
+    49-ref held-out target. We use the 49-ref held-out subset only.
+  </p>
+  <div id="parity-table"></div>
+
+  <h2>Notes</h2>
+  <p class="lede">
+    Site source: <code>site/index.html</code>. Data builder:
+    <code>scripts/v_next/build_site_data.py</code>. See the
+    <a href="https://github.com/imazen/zensim/blob/main/docs/PARITY_AND_METHODOLOGY_PLAN_2026-05-11.md">parity plan</a>
+    for the full audit + methodology pipeline.
+  </p>
+  <p class="lede">
+    Caveat: paper used libjxl 0.8's ssim2; we use our own fast-ssim2
+    Rust port. KonJND-1k Table 4 reproduction matches to 3-4 sig figs;
+    full CID22 Table 3 reproduction is pending Goal 3 work.
+  </p>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
