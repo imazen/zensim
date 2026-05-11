@@ -11,6 +11,62 @@
 //! `w2` is `(n_hidden × 1)` (so a flat slice of length `n_hidden`).
 
 use crate::TrainingGroup;
+use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
+use zenpredict::{Activation, WeightDtype};
+
+/// Bake a 2-layer MLP (LeakyReLU → Identity) into a ZNPR v2 byte stream.
+///
+/// Converts f64 weights to f32 once and feeds them to [`bake_v2`].
+/// Output is the same byte stream produced by
+/// `zensim-validate::mlp_train::bake_two_layer_znpr_v2` — readable by
+/// any `zenpredict::Predictor` loaded from those bytes.
+#[allow(clippy::too_many_arguments)]
+pub fn bake_two_layer_znpr_v2(
+    scaler_mean: &[f64],
+    scaler_scale: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_inputs: usize,
+    n_hidden: usize,
+    n_outputs: usize,
+) -> Vec<u8> {
+    let scaler_mean_f32: Vec<f32> = scaler_mean.iter().map(|&v| v as f32).collect();
+    let scaler_scale_f32: Vec<f32> = scaler_scale.iter().map(|&v| v as f32).collect();
+    let w1_f32: Vec<f32> = w1.iter().map(|&v| v as f32).collect();
+    let b1_f32: Vec<f32> = b1.iter().map(|&v| v as f32).collect();
+    let w2_f32: Vec<f32> = w2.iter().map(|&v| v as f32).collect();
+    let b2_f32: Vec<f32> = b2.iter().map(|&v| v as f32).collect();
+    let layers = [
+        BakeLayer {
+            in_dim: n_inputs,
+            out_dim: n_hidden,
+            activation: Activation::LeakyRelu,
+            dtype: WeightDtype::F32,
+            weights: &w1_f32,
+            biases: &b1_f32,
+        },
+        BakeLayer {
+            in_dim: n_hidden,
+            out_dim: n_outputs,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w2_f32,
+            biases: &b2_f32,
+        },
+    ];
+    bake_v2(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: &scaler_mean_f32,
+        scaler_scale: &scaler_scale_f32,
+        layers: &layers,
+        feature_bounds: &[],
+        metadata: &[],
+    })
+    .expect("v2 bake of 2-layer MLP")
+}
 
 /// Compute per-feature `(mean, std)` across all `train_indices` groups.
 /// Validation-only groups are excluded so the scaler never sees val data.
@@ -277,6 +333,38 @@ mod tests {
         assert_eq!(gw2, vec![1.0, 1.0]);
         assert_eq!(gb2, vec![1.0]);
         assert_eq!(gb1, vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn bake_two_layer_znpr_v2_header_and_size() {
+        // 2 inputs, 3 hidden, 1 output → w1 6 floats, b1 3, w2 3, b2 1,
+        // scaler 2+2 floats. We just check the bytes start with the
+        // ZNPR magic and are nonzero — exact byte layout is governed by
+        // zenpredict::bake_v2 and exercised by its own tests.
+        let bytes = bake_two_layer_znpr_v2(
+            &[0.5, -0.2],
+            &[1.0, 1.0],
+            &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            &[0.0, 0.0, 0.0],
+            &[1.0, 2.0, 3.0],
+            &[0.5],
+            2,
+            3,
+            1,
+        );
+        assert_eq!(&bytes[0..4], b"ZNPR", "expected ZNPR magic");
+        // u16 version at offset 4
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        assert_eq!(version, 2, "expected v2");
+        // u32 n_inputs at offset 8
+        let n_inputs = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        assert_eq!(n_inputs, 2);
+        // u32 n_outputs at offset 12
+        let n_outputs = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
+        assert_eq!(n_outputs, 1);
+        // u32 n_layers at offset 16
+        let n_layers = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        assert_eq!(n_layers, 2);
     }
 
     #[test]
