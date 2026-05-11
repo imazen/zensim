@@ -1,0 +1,14 @@
+MLP train: arch=[228 → 128 (LeakyReLU α=0.01) → 1], val_policy=Min
+      train group 0: 'safesyn' n=218089 train_w=1.000 val_w=0.000
+  train+val group 1: 'kadid' n=10125 train_w=0.300 val_w=1.000
+  train+val group 2: 'tid' n=3000 train_w=0.300 val_w=1.000
+  epoch   0 | lr=0.00100 | loss=0.2234 | val_mean=0.9095 (best=-inf) | safesyn=0.9882 kadid=0.9095 tid=0.9144 | t=5.6s
+  epoch  25 | lr=0.00050 | loss=0.1536 | val_mean=0.9371 (best=0.9095) | safesyn=0.9958 kadid=0.9371 tid=0.9450 | t=123.9s
+  epoch  50 | lr=0.00100 | loss=0.1719 | val_mean=0.9352 (best=0.9371) | safesyn=0.9958 kadid=0.9352 tid=0.9448 | t=242.4s
+  epoch  75 | lr=0.00050 | loss=0.1474 | val_mean=0.9378 (best=0.9371) | safesyn=0.9954 kadid=0.9378 tid=0.9518 | t=360.4s
+  epoch 100 | lr=0.00100 | loss=0.1720 | val_mean=0.9335 (best=0.9378) | safesyn=0.9951 kadid=0.9335 tid=0.9435 | t=476.7s
+  epoch 125 | lr=0.00050 | loss=0.1474 | val_mean=0.9433 (best=0.9378) | safesyn=0.9952 kadid=0.9433 tid=0.9553 | t=597.9s
+  epoch 150 | lr=0.00100 | loss=0.1663 | val_mean=0.9309 (best=0.9433) | safesyn=0.9951 kadid=0.9309 tid=0.9463 | t=715.6s
+  epoch 175 | lr=0.00050 | loss=0.1521 | val_mean=0.9405 (best=0.9433) | safesyn=0.9962 kadid=0.9405 tid=0.9499 | t=821.7s
+  early stop at epoch 175 (no validation improvement for 50 epochs)
+MLP train: best validation mean SROCC = 0.9433
