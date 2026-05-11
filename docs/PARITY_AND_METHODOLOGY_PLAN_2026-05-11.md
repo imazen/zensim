@@ -14,15 +14,16 @@ test parity" (Phase 1 milestone) to a full **methodology-conformant
 
 ---
 
-## Five user goals
+## Six user goals
 
 | # | Goal | Status | Owner artifacts |
 |---|---|---|---|
 | 1 | **Rust trainer ↔ Python trainer parity** (same ZNPR v2 bytes for a fixed seed) | not started | `zensim-train-core/tests/parity_*.rs`, `scripts/v_next/dump_python_state.py` |
-| 2 | **Methodology matches each of the 30 paper pages** | partially extracted | `docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md` (new) |
+| 2 | **Methodology matches each of the 30 paper pages** | in progress (10/30) | `docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md` |
 | 3 | **Reproduce CID22 paper SSIM2 numbers** (Tables 3, 5, 6) on the 49-ref held-out validation | not started | `zensim-bench/examples/reproduce_cid22_table_3.rs` etc. |
 | 4 | **Balanced extensive synth-corpus holdout testing** | not started | `zensim-train-core/tests/balanced_holdout.rs`, new synth split spec |
-| 5 | **No holdout overlap detection (including cropped variants)** | not started | `zensim-validate/src/holdout_overlap.rs`, `bin/check_holdout_overlap` |
+| 5 | **No holdout overlap detection (including cropped variants)** | shipped (stage 1+2) | `zensim-validate/src/bin/check_holdout_overlap{,_stage2}.rs`, `benchmarks/holdout_overlap_audit_2026-05-11.md` |
+| **6** | **Publish results as an interactive GitHub Pages site** with per-5-band SROCC graphs, scatter plots, data-parity tables vs CID22 paper | not started | `zensim/site/` (new), GH Actions workflow, published at `imazen.github.io/zensim/` |
 
 Every goal lands as a tracked deliverable with success criteria and
 a measurable artifact under git. No goal is "done" until the artifact
@@ -281,6 +282,81 @@ A two-stage detector:
 
 ---
 
+## Goal 6 — Interactive GitHub Pages site with band graphs + parity tables
+
+### Definition
+
+A static site (Yew/Leptos WASM or plain HTML+JS+Plotly) published at
+`imazen.github.io/zensim/` (or similar) that lets a reader:
+
+- **Compare metrics side-by-side per 5-band**: B0 / B1 / B2 / B3 cuts
+  on the CID22 49-ref held-out, with SROCC, KRCC, PCC, MAE, n.
+- **Drill into scatter plots** of predicted-vs-truth per metric and
+  per band, with the option to overlay multiple metrics.
+- **Reproduce the paper's tables** (Tables 3, 5, 6) with our numbers
+  in a side-by-side delta column ("paper SROCC 0.882 / ours 0.8XXX /
+  Δ ±0.00X"). When ours is within ±0.002 of paper: green; outside:
+  red with a note linking to the page-by-page methodology checklist.
+- **Per-codec breakdowns** for JPEG / JPEG XL / WebP / AVIF / HEIC /
+  JPEG 2000 (paper's 6 codecs).
+- **Per-content-class breakdowns** using the paper's 15 categories
+  (Page 6 — pending Goal 4 sampler rewrite).
+- **Time-series** of our V_X champion progression (V0_2 → V0_4 →
+  V0_5 → V0_6 …) on each band's SROCC.
+
+### Tech stack candidates
+
+- **Plotly.js + plain HTML/JS** — fast iteration, no build step,
+  reasonable interactivity. Probably the right starting point.
+- **Observable Plot** — even simpler for static plots, less
+  interactive.
+- **Yew/Leptos + plotters-rs** — pure-Rust, ties in nicely with the
+  WASM trainer goal but heavier scaffolding.
+- **Echarts / D3** — more complex; only if Plotly doesn't fit.
+
+Recommendation: **start with Plotly.js + a small Python script that
+generates JSON data files** under `site/data/`. CI rebuilds JSON
+when bakes change; HTML/JS reads the JSON. This is the lightest
+moving-parts option for a research-grade site.
+
+### Subtasks
+
+1. **Decide data shape**: per-bake JSON with `{band: {srocc, krcc,
+   pcc, mae, n}, scatter: [(predicted, truth, band), …], …}`.
+2. **Write `scripts/v_next/build_site_data.py`** that takes a list
+   of bakes and emits the JSON files.
+3. **Write `site/index.html`** with Plotly bar charts (per-band
+   SROCC) and scatter (predicted vs truth).
+4. **Add `site/about.md`** explaining the methodology + linking to
+   `CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md`.
+5. **Add GH Actions workflow** that:
+   - On push: re-runs `dataset_metric_baseline` against the shipped
+     bakes; regenerates `site/data/*.json`; commits to `gh-pages`.
+   - On scheduled: same thing nightly.
+6. **Enable GitHub Pages** on `imazen/zensim` repo, source `gh-pages`
+   branch.
+
+### Success criteria
+
+- Site loads with 4-band stacked bar chart of SROCC per shipped bake.
+- Each band has a "drill into scatter" link revealing the underlying
+  scatter and residual histogram.
+- A "parity vs CID22 paper" view shows Table 3 / 5 / 6 reproduction
+  with delta column.
+- All data files are git-committed and regeneratable from a clean
+  clone via `scripts/v_next/build_site_data.py`.
+- Site URL is shareable (e.g. as a link in a Slack/email).
+
+### Dependencies
+
+- **Goal 3** must ship first (we need reproduced paper numbers to
+  display). Without it, the parity column has no data.
+- **Goal 4** is helpful (per-content-class breakdowns need the 15
+  categories) but not blocking.
+- **Goal 1** is independent.
+
+---
+
 ## Phasing & priority
 
 Suggested execution order across the next ~20 ticks:
@@ -302,6 +378,10 @@ Suggested execution order across the next ~20 ticks:
 5. **Goal 4** (balanced holdout) — **MEDIUM**. We have CID22 as the
    gold standard already; balanced synth is "extra" but needed for
    per-band SROCC stability.
+6. **Goal 6** (interactive GitHub Pages site) — **MEDIUM-HIGH** once
+   Goal 3 numbers are in hand. The site is the deliverable that
+   surfaces our work to anyone outside this loop — it's the public
+   accountability mechanism for the "match-or-exceed ssim2" claim.
 
 ---
 
