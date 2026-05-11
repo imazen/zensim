@@ -77,15 +77,82 @@ Legend:
 
 ---
 
-## Continued reading: pages 6–30 (queued)
+## Page 6 — Figure 2 (15 content categories, the canonical list)
+
+The paper labels its 15 content categories by name; we should use
+these exact names if our balanced-holdout is to be paper-comparable
+(Goal 4 expansion target).
+
+| Category | Refs |
+|---|--:|
+| animals | 11 |
+| art-abstract-decoration | 16 |
+| building-monument | 26 |
+| diagram-chart | 13 |
+| food-drinks | 26 |
+| illustration-logo-text | 12 |
+| indoors-rooms | 25 |
+| landscape-nature | 23 |
+| materials-clothes | 8 |
+| night-nightlife | 18 |
+| people-fashion | 18 |
+| portrait | 10 |
+| sky-clouds | 9 |
+| sports | 17 |
+| urban-industrial-cars | 18 |
+| **Total** | **250** |
+
+| Element | Status | Notes / owning artifact |
+|---|---|---|
+| **15 canonical category names + counts** | ❌ | Goal 4 balanced-holdout sampler currently clusters on `zenanalyze` features (7 classes). **Replace** with these 15 paper-aligned names; cluster CID22 refs first by visual inspection to label, then propagate the label scheme to our larger source corpus via nearest-neighbour. |
+| Distribution skewed: building-monument and food-drinks each get 26, diagram-chart only 13 | ✅ | informs that balanced sampling must use stratified proportions, not uniform — Goal 4 corpus must respect these ratios |
+
+## Page 7 — Crowdsourcing scale + outlier detection
+
+| Element | Status | Notes |
+|---|---|---|
+| **1,071,300 TSBPC opinions / 35,710 sessions; 334,920 DSBQS opinions / 11,164 sessions** | — | informational, scale context |
+| Honeypot screening: 2 obvious questions per 30-question session | — | informational |
+| **TSBPC outlier rule**: per-session mean agreement < 0.25 → discard. **5,257 sessions (14.7 %) discarded**. | — | doesn't apply (no human raters); but DOES inform our `ssim2 ↔ butter` concordance filter at the same threshold magnitude |
+| DSBQS outlier rules: (a) ref image gets score < 5, (b) > 20 % responses exactly = 5 (slider stuck), (c) mobile device, (d) abs(normalized diff) > 1 mean OR > 1 std | — | informational; KonJND-1k anchors have similar gates |
+| First 3 scores of each DSBQS session also dropped (training effect) | — | informational |
+
+## Page 8 — Bias correction, RMOS Elo, **monotonicity constraint** (LOAD-BEARING)
+
+| Element | Status | Notes |
+|---|---|---|
+| **Bias correction**: per-session adjustment to zero out normalized-diff mean; clamp to `[0,10]` | — | informational; we don't do per-session, but per-image bias is mitigated by our averaging |
+| **MCOS** = 10 × mean of bias-corrected scores per anchor. Scale `[0, 100]`. | ✅ | confirms our 0..100 zensim scale is paper-compatible |
+| **Reference MCOS range: 82.5–92.6, mean 88.3** | ✅ | matches the V0_5 affine calibration target (already in `affine_calibrate_znpr_v2.py`) — refs aren't perfect 100, they cluster around 88.3 |
+| **RMOS via Elo tournament**: A>B=2 wins for A, "I can't choose"=1 win each, normalized to `[0,1]` | — | informational |
+| **Forced monotonicity in RMOS**: add **200 dummy "higher bitrate is better" opinions** per same-codec adjacent-bitrate pair | ✅ | **directly motivates our `--tv-weight` regularizer.** We use TV-on-adjacent-q pairs (lo<hi quality) — analogous mechanism, different implementation. |
+| Worst-vs-best Elo tie smoothing: 10 % tie across all pairs to handle infinities | — | informational |
+
+## Page 9 — Anchor adjustments (Table 1)
+
+| Element | Status | Notes |
+|---|---|---|
+| **Table 1**: MCOS adjustments during interpolation, per anchor type | — | informational |
+| **28 cases where q90 JPEG > reference score** | — | rare but happens; informs that even "the original" can score below an alias |
+| ~5 % of MCOS scores adjusted; mean abs change 0.72; max 2.59 | — | informational |
+| **RMOS=0 → anchor in 97 % of cases (87 % q30 JPEG)** | — | informational; informs that q30 JPEG is a reliable "minimum quality" anchor |
+
+## Page 10 — Final MCOS distribution + monotonicity impact (LOAD-BEARING)
+
+| Element | Status | Notes |
+|---|---|---|
+| **91.7 % of CID22 has MCOS ≥ 50** | ✅ | matches our pipeline focus (medium-quality-and-up) |
+| MCOS distribution: bulk in MCOS 60 (medium-high) and 88 (near-lossless) | ✅ | informs our B2/B3 band emphasis |
+| **Bootstrap CI**: 200 resamples → 90% CI width 4.457 (σ=1.254) | ❌ | We don't yet emit bootstrap CIs on our metric/SROCC reports. **Follow-up**: add `--bootstrap N` to `dataset_metric_baseline` to emit 90% CI alongside point SROCC. |
+| **Effect of removing monotonicity constraint**: KRCC drops 0.937 → 0.5559 (40 % drop); SRCC drops 0.997 → 0.7417 (26 % drop) | ✅ | **VALIDATES our TV regularizer is doing the right thing.** Without monotonicity supervision, ranking accuracy degrades by ~25-40 %. |
+| Effect of skipping bias correction alone: minor (KRCC 0.9411 vs 0.9361) | — | informs that bias correction is nice-to-have, not essential |
+
+---
+
+## Continued reading: pages 11–30 (queued)
 
 Next subtasks:
-- p. 6–10: scoring + bias correction (load-bearing for MCOS reproduction)
-- p. 11–15: Table 3 numbers — `Goal 3` reproduction target
-- p. 16–20: Table 5 + Table 6 — quality-scale anchors + pairwise SROCC
-- p. 21–25: SSIMULACRA 2 architecture (Goal 3 / future zensim arch parity)
+- p. 11–15: Tables 2-4 + IQA metric overview
+- p. 16–20: **Table 3 (per-metric SROCC) — Goal 3 reproduction target**
+- p. 21–25: SSIMULACRA 2 architecture description
 - p. 26–30: limitations + conclusions + references
-
-Each next page-block adds 5-10 rows to this checklist. The ❌ rows
-become explicit follow-up issues; ⏳ rows get a tracking note in the
-relevant code.
