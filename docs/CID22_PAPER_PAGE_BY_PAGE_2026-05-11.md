@@ -208,9 +208,112 @@ these exact names if our balanced-holdout is to be paper-comparable
 
 ---
 
-## Continued reading: pages 16–30 (queued)
+## Page 16 — Encoder results: median + 5th-percentile bpp-MCOS curves
+
+| Element | Status | Notes |
+|---|---|---|
+| Fig 8: median MCOS vs bpp per encoder | — | informational |
+| Fig 9: 5th-percentile MCOS vs bpp ("worst-case") | — | informational; matches our "low-q sweep density" requirement |
+| **Encoder-consistency framework**: pick encoder setting `M_avg − mσ ≥ M_min` (m=1 → 1/6 below threshold; m=2 → 1/50; m=3 → 1/1000) | ⏳ | Goal 6 site should expose σ alongside median for each encoder setting. Currently we only report per-bake SROCC, not per-encoder-setting σ. **Follow-up**: extend `dataset_metric_baseline` to emit per-encoder-setting σ. |
+
+## Page 17 — Per-category encoder behaviour (Fig 10) + **objective metrics list**
+
+| Element | Status | Notes |
+|---|---|---|
+| Fig 10: visual consistency (σ vs MCOS, by encoder) | — | informational; JPEG XL most consistent, AVIF/WebP less so |
+| Per-category encoder ordering varies (diagram-chart: AVIF wins; landscape-nature: AVIF ≤ MozJPEG) | ✅ | confirms why Goal 4 balanced holdout needs per-category measurement |
+| **Objective metric set (paper-canonical list)**: PSNR (ImageMagick 6.9.11), VMAF + SSIM + MS-SSIM + PSNR-Y + PSNR-HVS + CIEDE2000 (vmaf v2.3.0), Butteraugli + SSIMULACRA 1/2 (libjxl 0.8), LPIPS v0.1.4, DSSIM v3.2.0, FSIM v0.3.5 | ⏳ | We have **fast-ssim2** (our own) but not libjxl 0.8's ssim2. Goal 3 reproduction must caveat any delta between our fast-ssim2 and libjxl 0.8's. |
+
+## Page 18 — Fig 11: per-category bpp-MCOS curves (visual reference only)
+
+— Fifteen 3×5 grid of plots, one per content category. Visual.
+
+## Page 19 — Fig 12: per-image curves for portrait category (10 images)
+
+The **10 portrait refs** are explicitly named — useful for cross-
+referencing our holdout: `pexels-photo-1933873`,
+`pexels-photo-2598024`, `pexels-photo-2811087`, `pexels-photo-2846602`,
+`pexels-photo-3155588`, `pexels-photo-3568544`, `pexels-photo-3586798`,
+`pexels-photo-6996399`, `pexels-photo-7114620`, `pexels-photo-796526`.
+
+| Element | Status | Notes |
+|---|---|---|
+| The "portrait" 10 refs include `pexels-photo-1933873` — also one of the **8 unblocked refs** flagged by our overlap audit | ✅ | Audit-trail: `pexels-photo-1933873` is in our holdout and the generator now blocks it. |
+
+## Page 20 — **Table 3 / Table 4 / Table 5 — Goal 3 reproduction targets**
+
+### Table 3 — Metric correlation with CID22 MCOS (all 250 refs)
+
+| Metric | KRCC | SRCC | PCC |
+|---|--:|--:|--:|
+| **SSIMULACRA 2** | **0.6934** | **0.882** | **0.8601** |
+| Butteraugli 2-norm | -0.6575 | -0.8455 | -0.8089 |
+| Butteraugli 3-norm | -0.6547 | -0.8387 | -0.7903 |
+| DSSIM | -0.6428 | -0.8399 | -0.7813 |
+| VMAF | 0.6176 | 0.8163 | 0.7799 |
+| FSIM | 0.6089 | 0.8005 | 0.7676 |
+| PSNR-HVS | 0.6076 | 0.8100 | 0.7559 |
+| Butteraugli max-norm | -0.5843 | -0.7738 | -0.7074 |
+| SSIM | 0.5628 | 0.7577 | 0.7005 |
+| MS-SSIM | 0.5596 | 0.7551 | 0.7035 |
+| LPIPS | -0.5417 | -0.7316 | -0.6932 |
+| SSIMULACRA 1 | -0.5255 | -0.7175 | -0.6940 |
+| PSNR-Y | 0.4452 | 0.6246 | 0.5901 |
+| PSNR (ImageMagick) | 0.3472 | 0.5002 | 0.4817 |
+| CIEDE2000 | 0.3154 | 0.4584 | 0.4096 |
+
+**Caveat**: 201/250 refs were in SSIMULACRA 2's training set. On the
+**49 held-out** refs, paper-reported SSIMULACRA 2 is:
+- **KRCC 0.7033 / SRCC 0.88541 / PCC 0.87448 / MAE 4.97**
+
+That held-out number is the **Goal 3 hard target** for our
+`fast-ssim2`. Reproduction tolerance per the plan: ±0.002 SROCC.
+
+### Table 4 — Metric scores at KonJND-1k PJND threshold (mean ± stdev)
+
+| Metric | BPG images | JPEG images |
+|---|--:|--:|
+| PSNR-Y | 39.61 ± 2.98 | 36.70 ± 3.79 |
+| PSNR-HVS | 40.31 ± 1.78 | 39.96 ± 1.79 |
+| SSIM (×100) | 98.55 ± 0.76 | 98.54 ± 0.81 |
+| MS-SSIM (×100) | 99.21 ± 0.40 | 99.22 ± 0.38 |
+| VMAF | 90.05 ± 2.25 | 91.86 ± 1.90 |
+| **SSIMULACRA 2** | **65.38 ± 5.10** | **63.10 ± 4.65** |
+| DSSIM (×1000) | 3.357 ± 1.267 | 3.817 ± 1.297 |
+| Butteraugli 3-norm | 1.528 ± 0.192 | 1.699 ± 0.229 |
+| PSNR (ImageMagick) | 35.17 ± 2.69 | 32.70 ± 3.32 |
+
+**Used by us**: KonJND PJND check confirms our V0_5 calibration target
+of ssim2 ≈ 63 ± 5 at PJND (matches the 63.10 ± 4.65 JPEG number).
+
+### Table 5 — Quality-scale alignment (CID22 MCOS as canonical)
+
+| Dataset / metric | medium (50) | high (65) | vis. lossless (90) |
+|---|--:|--:|--:|
+| **CID22 (MCOS)** | **50** | **65** | **90** |
+| TID2013 (MOS) | 4.5 | 5.5 | 6 |
+| KADID10k (DMOS) | 3.7 | 4.3 | 4.5 |
+| KonFiG-IQA (F-JND) | 1.5 | 0.7 | 0 |
+| AIC-3 (JND) | 3 | 1.7 | 0 |
+| KonJND-1k (PJND) | — | — | 1 |
+| PSNR-HVS | 35 | 40 | 50 |
+| MS-SSIM (×100) | 98 | 99.2 | 99.8 |
+| VMAF | 83 | 91 | 96 |
+| DSSIM (×1000) | 8 | 3.5 | 1 |
+| Butteraugli 3-norm | 2.5 | 1.6 | 0.5 |
+| **SSIMULACRA 2** | **50** | **65** | **90** |
+
+| Element | Status | Notes |
+|---|---|---|
+| **SSIMULACRA 2 maps 1:1 to CID22 MCOS** | ✅ | this is why we keep `score_ssim2` as the training target; matches `CLAUDE.md` per-band B0/B1/B2/B3 cuts |
+| Band boundaries: **50 / 65 / 90** for medium / high / visually-lossless | ✅ | our `CLAUDE.md` bands match exactly |
+| TID2013 MOS scale 0–9, mid≈4.5; KADID DMOS scale 1–5, mid≈3.7 | ✅ | inform per-band cutoffs when computing per-band SROCC for those datasets |
+| KonJND-1k PJND ≈ 63 ± 5 on SSIM2 (from Table 4 JPEG row) | ✅ | matches our V0_5 calibration anchor |
+
+---
+
+## Continued reading: pages 21–30 (queued)
 
 Next subtasks:
-- p. 16–20: IQA metric definitions + **Table 3 SROCC numbers (Goal 3 target)**
-- p. 21–25: SSIMULACRA 2 architecture + tables 5/6
-- p. 26–30: limitations + conclusions
+- p. 21–25: SSIMULACRA 2 architecture description + pairwise SROCC (Table 6)
+- p. 26–30: limitations + conclusions + references
