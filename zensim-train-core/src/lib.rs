@@ -87,6 +87,8 @@ mod adam;
 mod stats;
 pub use stats::{pearson, ranks, spearman};
 
+pub mod mlp;
+
 /// One named slice of training/validation data.
 ///
 /// Multi-group training resolves single-corpus dominance: per-step
