@@ -1,0 +1,34 @@
+[package]
+name = "zensim-train-core"
+version = "0.0.1"
+edition = "2024"
+description = "Pure-Rust trainer core for zensim MLP profiles (RankNet + Adam). WASM-compatible."
+license = "MIT"
+publish = false
+
+# Phase 1 of docs/WASM_CUBECL_TRAINER_PLAN.md:
+# - bit-exact reproduction of zensim-validate/src/mlp_train.rs
+# - no rayon-by-default, no std::fs, no std::time::Instant (use web-time)
+# - works on wasm32-unknown-unknown
+#
+# Compiles to a cdylib via a later sibling crate (zensim-train-wasm)
+# that adds wasm-bindgen on top of this pure-logic core.
+
+[features]
+default = []
+# Optional in the core; the WASM crate will leave it off, the native
+# validate binary will turn it on for parallel RankNet pair sampling.
+parallel = ["dep:rayon"]
+
+[dependencies]
+zenpredict = { workspace = true }
+# Cross-platform monotonic clock: std on native, performance.now() on WASM.
+web-time = "1"
+rayon = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Seed-stable bit-exact reproduction tests vs the canonical
+# zensim-validate trainer will live here.
+
+[lints.clippy]
+uninlined_format_args = "allow"

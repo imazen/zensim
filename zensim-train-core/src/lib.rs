@@ -1,0 +1,127 @@
+//! Pure-Rust trainer core for zensim MLP profiles.
+//!
+//! WASM-compatible reimplementation of `zensim-validate/src/mlp_train.rs`.
+//! Phase 1 of `docs/WASM_CUBECL_TRAINER_PLAN.md` — bit-exact reproduction
+//! milestone first, then CubeCL kernel acceleration in Phase 2.
+//!
+//! Public surface (planned, growing):
+//! - [`MlpHyperparams`] — knobs (epochs, lr, l2, validation policy)
+//! - [`TrainingGroup`] — one named slice of training/validation data
+//! - [`ValidationPolicy`] — `Mean` or `Min` aggregation across groups
+//! - `train_mlp` — main entrypoint, returns a ZNPR v2 bake
+//!
+//! The current scaffold is intentionally minimal: it re-exports
+//! `zenpredict::Activation` / `WeightDtype` and declares the
+//! hyperparameter types. Bodies will land incrementally so each commit
+//! has a clean intermediate.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+pub use zenpredict::{Activation, WeightDtype};
+
+/// How to aggregate per-group SROCC into the single value used for
+/// best-checkpoint selection.
+///
+/// `Min` is the right default when shipping a metric: a model whose
+/// worst dataset is bad will be observably bad in production.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValidationPolicy {
+    /// Average across all validation groups.
+    Mean,
+    /// Take the worst-performing group's SROCC.
+    Min,
+}
+
+/// Knobs for the trainer. Defaults match the V0_4 baseline architecture
+/// (228 → 32 → 1) with `Min` validation gating.
+#[derive(Clone, Debug)]
+pub struct MlpHyperparams {
+    /// Hidden-layer width (single hidden layer for now).
+    pub n_hidden: usize,
+    /// Maximum number of epochs.
+    pub n_epochs: usize,
+    /// RankNet pair samples per epoch.
+    pub pairs_per_epoch: usize,
+    /// Adam initial learning rate.
+    pub initial_lr: f64,
+    /// LeakyReLU negative-side slope.
+    pub leaky_alpha: f64,
+    /// PRNG seed.
+    pub seed: u64,
+    /// Log validation SROCC every N epochs.
+    pub log_every: usize,
+    /// L2 regularization on layer weights (not biases). 0 disables.
+    pub l2_lambda: f64,
+    /// Stop after this many epochs of no validation improvement. 0 disables.
+    pub early_stop_patience: usize,
+    /// How to combine per-group SROCC.
+    pub validation_policy: ValidationPolicy,
+}
+
+impl Default for MlpHyperparams {
+    fn default() -> Self {
+        Self {
+            n_hidden: 32,
+            n_epochs: 200,
+            pairs_per_epoch: 50_000,
+            initial_lr: 0.001,
+            leaky_alpha: 0.01,
+            seed: 42,
+            log_every: 10,
+            l2_lambda: 1e-5,
+            early_stop_patience: 50,
+            validation_policy: ValidationPolicy::Min,
+        }
+    }
+}
+
+#[allow(dead_code)]
+mod rng;
+#[cfg(test)]
+pub(crate) use rng::SplitMix64;
+
+#[allow(dead_code)]
+mod adam;
+
+mod stats;
+pub use stats::{pearson, ranks, spearman};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_hparams_v04() {
+        let h = MlpHyperparams::default();
+        assert_eq!(h.n_hidden, 32);
+        assert_eq!(h.n_epochs, 200);
+        assert_eq!(h.validation_policy, ValidationPolicy::Min);
+    }
+
+    #[test]
+    fn splitmix_seed_stable() {
+        let mut a = SplitMix64::new(42);
+        let mut b = SplitMix64::new(42);
+        for _ in 0..1000 {
+            assert_eq!(a.next_u64(), b.next_u64());
+        }
+    }
+
+    #[test]
+    fn pearson_perfect_linear() {
+        let x: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 3.0).collect();
+        let r = pearson(&x, &y);
+        assert!((r - 1.0).abs() < 1e-10, "expected r≈1, got {r}");
+    }
+
+    #[test]
+    fn spearman_rank_invariant() {
+        let x: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let y_linear: Vec<f64> = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        let y_monotonic: Vec<f64> = vec![1.0, 100.0, 1000.0, 10000.0, 100000.0];
+        assert!((spearman(&x, &y_linear) - 1.0).abs() < 1e-10);
+        assert!((spearman(&x, &y_monotonic) - 1.0).abs() < 1e-10);
+    }
+}
