@@ -65,6 +65,12 @@ def main():
     ap.add_argument("--bin", required=True, help="ZSFC v3 features.bin path")
     ap.add_argument("--csv", required=True, help="Paired training CSV with source_path + gpu_ssimulacra2")
     ap.add_argument("--out", required=True, help="Output CSV path")
+    ap.add_argument("--clip-mode", default="clip01", choices=["clip01", "raw100", "minmax"],
+                    help="How to rescale target into trainer space: "
+                         "clip01 = clip(0,100)/100 (default, safe for safesyn-shape corpora); "
+                         "raw100 = divide by 100 only, no clip (preserves negative ssim2 for "
+                         "very-low-q pairs in KonJND); "
+                         "minmax = per-corpus (target - min) / (max - min), maps to [0, 1].")
     ap.add_argument("--target-col", default="gpu_ssimulacra2",
                     help="Column from --csv to use as score (will be clipped to [0,100] then divided by 100)")
     args = ap.parse_args()
@@ -102,7 +108,19 @@ def main():
         print(f"  WARNING: sample mismatch — using ref_keys from .bin instead")
         ref_basenames = pd.Series(ref_keys)
 
-    target = csv_rows[args.target_col].astype(float).clip(0, 100) / 100.0
+    raw_target = csv_rows[args.target_col].astype(float)
+    if args.clip_mode == "clip01":
+        target = raw_target.clip(0, 100) / 100.0
+    elif args.clip_mode == "raw100":
+        target = raw_target / 100.0
+    elif args.clip_mode == "minmax":
+        lo, hi = raw_target.min(), raw_target.max()
+        if hi <= lo:
+            raise SystemExit(f"--clip-mode minmax: target column has zero range ({lo}..{hi})")
+        target = (raw_target - lo) / (hi - lo)
+    else:
+        raise SystemExit(f"unknown --clip-mode {args.clip_mode}")
+    print(f"  target range after {args.clip_mode}: [{target.min():.4f}, {target.max():.4f}], mean {target.mean():.4f}")
 
     out_df = pd.DataFrame({
         "ref_basename": ref_basenames.values,
