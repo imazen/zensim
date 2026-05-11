@@ -32,6 +32,17 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
   excluded from `cargo publish` artifacts (`package.exclude`), so
   default builds drop the AGPL-licensed `zenpredict` runtime entirely
   and remain MIT/Apache-2.0.
+- `benchmarks/pareto_2026-05-11.md` — comprehensive Pareto-frontier
+  summary from the 2026-05-11 training cycle. Documents post-bake
+  binary eval numbers (`dataset_metric_baseline` full 4292-pair
+  CID22): V0_4 lands at **KADID 0.8432 / TID 0.8401 / CID22 0.8893 /
+  non-mono 4.57%**, distinct from the training-time held-out val
+  SROCC numbers reported above. Per-band CID22 reveals V0_5 wins
+  B0+B1 narrowly; KonJND-aligned recipes win B2 (q65-90) and B3
+  (visually-lossless, by 2.8×). No bake in the recipe space
+  dual-clears CID22 > 0.8934 and non-mono < 4.86%. Plots at
+  `/mnt/v/output/zensim/cycle_2026-05-11/`; script archive at
+  `benchmarks/make_cid22_*_2026-05-11.py`.
 
 ### Changed (zensim, unreleased)
 - MSRV bumped to **1.93** (transitive minimum from `zenpredict` 0.1.0
