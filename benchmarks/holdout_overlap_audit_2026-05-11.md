@@ -152,3 +152,96 @@ the 512×512 used in CID22. **Same content, different resolution.**
 the blocklist with all 22 distinct leaked IDs (option 2), defer
 stage 2 to a follow-up tick once the cleaned corpus is in hand
 (option 3).
+
+---
+
+## Stage-2 results — sliding-window cropped-variant detection
+
+**Tool**: `cargo run --release -p zensim-validate --bin check_holdout_overlap_stage2`
+**Algorithm**: aspect-1:1 windows of decreasing size (max → s/2 → s/4 …
+down to 96px floor) over each training source; dHash each window;
+find minimum Hamming distance to any CID22 ref. ~16 windows per
+typical source. Stride = window_size / 4 per scale.
+**Per-source TSV**: `benchmarks/holdout_overlap_2026-05-11_stage2.tsv`.
+
+### Headline
+
+Stage 2 catches **far more leakage** than stage 1 because cropped
+sub-regions in larger training sources are now detected.
+
+| Filter | Distinct sources | Training pairs | Fraction of 218k |
+|---|--:|--:|--:|
+| Strict d≤10, any window | 713 | (not tallied) | — |
+| Strict d≤10, window ≥ 128 | **425** | **25,674** | **11.77 %** |
+| Strict d≤8, window ≥ 128  | **179** | **10,801** | **4.95 %** |
+| Strict d≤8, window ≥ 256 |   45 | (not tallied) | — |
+
+The window-size filter is **essential**: small (102 / 128 px)
+windows can dHash-match coincidentally on textureless regions. The
+window≥128 cut is the minimum for reliable matches; window≥256 is
+"undeniable" (only 45 sources reach that bar, but they are
+guaranteed leaks).
+
+### Strongest matches (sample from `d ≤ 8 ∧ window ≥ 128`)
+
+```
+d=2  src=11f2b039b293758398b1a7a8afa64bb2_1022x818.png  ref=2887497.png  window=(357,510,204×204)
+d=2  src=11f2b039b293758398b1a7a8afa64bb2_818x1022.png  ref=2887497.png  window=(255,612,204×204)
+d=3  src=0987f273de1dc9b3_1024sq.png                     ref=2887497.png  window=(0,320,128×128)
+d=3  src=11f2b039b293758398b1a7a8afa64bb2_1024sq.png    ref=2887497.png  window=(384,672,128×128)
+d=3  src=11f2b039b293758398b1a7a8afa64bb2_513x769.png   ref=2887497.png  window=(128,544,128×128)
+```
+
+These are near-identical crops of `2887497.png`'s content,
+re-tiled into the training source under hex-hashed names. d=2 means
+**62 of 64 dHash bits agree** — essentially the same image.
+
+### Dominant leaked ref: `2887497`
+
+The single CID22 ref `2887497.png` is the most-frequent stage-2
+target. It appears in tens of training sources via different
+crops/resizes. Likely a public-domain image (or one popular enough)
+that was used widely in our source curation.
+
+### Combined stage-1 + stage-2 distinct leaked sources
+
+- Stage-1 strict (d≤10): 1 source / 61 pairs
+- Stage-1 relaxed (d≤16): 67 sources / 4,032 pairs (1.84 %)
+- **Stage-2 strict** (d≤8, w≥128): 179 sources / 10,801 pairs (4.95 %)
+- **Stage-2 relaxed** (d≤10, w≥128): 425 sources / 25,674 pairs (11.77 %)
+
+The union of stage-1 (d≤16) and stage-2 (d≤10, w≥128) will
+contaminate **~12 % of training pairs**.
+
+### Second structural gap discovered
+
+`CID22_VALIDATION_41` covers **41 of 49** held-out refs by filename.
+The 8 unblocked refs (descriptive filenames, not numeric IDs) are:
+
+```
+21169144185_3f7977cb5a_o
+3316926_opo25u
+adriankierman-report-page
+pexels-photo-1933873
+pexels-photo-2686358
+pexels-photo-2802032
+pexels-photo-4210863
+ularapi_Semarang_City_Logo
+```
+
+All 8 have stage-2 hits. **Adding them to the blocklist is necessary
+even if we keep the filename-hash approach.**
+
+### Revised remediation requirements
+
+1. **Add all 49 (not just 41) CID22 ref filenames** to the blocklist.
+2. **Add a perceptual-hash gate** in the generator that drops any
+   source whose dHash distance to ANY CID22 ref is ≤ 16 OR whose
+   sliding-window best-window distance is ≤ 10 with window ≥ 128.
+3. **Regenerate `safe_synthetic`** with both filters active.
+4. **Retrain V_NEXT** on the cleaned ~190k-pair CSV and measure
+   honest CID22 SROCC delta. Expected delta from current V0_5:
+   −0.005 to −0.020 (proportional to 12 % contamination minus the
+   fraction that was trivially-predicted anyway).
+5. **Add the audit to CI** so any future training CSV is auto-scanned.
+
