@@ -57,6 +57,54 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
 - `ZensimError` variants `ImageTooLarge` and `FeatureWeightsLengthMismatch`.
   `ZensimError` is now `#[non_exhaustive]`.
 
+### Added (zensim, unreleased) — 2026-05-11 audit + parity cycle
+- `zensim-validate/src/bin/check_holdout_overlap.rs` — stage-1
+  dHash-64 perceptual overlap detector. Catches resize/exact-image
+  leaks of CID22 holdout refs into the training corpus. Found 1
+  strict (d≤8) + 66 relaxed (d≤16) hits on the safe-synthetic 218k
+  CSV; 22 of 49 holdout refs were affected (`8d83f43e`,
+  `fcc48941`).
+- `zensim-validate/src/bin/check_holdout_overlap_stage2.rs` —
+  stage-2 sliding-window cropped-variant detector. Found 425
+  d≤10/window≥128 hits (25,674 training pairs / 11.77 %), with
+  strongest matches at d=2 (effectively-identical crops of CID22
+  ref `2887497.png`) (`0f019f99`, `dd4e9885`).
+- `scripts/v_next/regen_tv_pairs.py` — rebuilds TV pairs file
+  for the Rust trainer after a CSV is filtered. Used to produce
+  the cleaned 216,151-pair TV file for V0_6 (`9faadca8`).
+- `zensim-train-core` — new workspace member, WASM-compatible
+  pure-Rust trainer core. Phase 1 of the WASM/CubeCL trainer plan
+  (`docs/WASM_CUBECL_TRAINER_PLAN.md`). 15 unit tests, bit-exact
+  ports of `SplitMix64`, `AdamState`, `pearson` / `ranks` /
+  `spearman`, MLP `forward` / `backprop_step` / `predict_group`,
+  `compute_scaler_from_groups`, `bake_two_layer_znpr_v2`,
+  `TrainingGroup<'a>`, `TvRegularizer`, `MlpHyperparams`.
+  (`49832a68`, `b1d190bf`, `ca7159e4`, `6db42725`, `dce062bf`)
+- `docs/PARITY_AND_METHODOLOGY_PLAN_2026-05-11.md` — 6-goal
+  parity-and-methodology plan covering trainer parity (Goal 1),
+  paper page-by-page methodology (Goal 2), SSIM2 reproduction
+  (Goal 3), balanced synth holdout (Goal 4), holdout-overlap
+  detection (Goal 5, shipped), and an interactive GH Pages site
+  (Goal 6, scaffolded) (`78392387`, `f7182c43`).
+- `docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md` — 30-page-by-page
+  methodology checklist (Goal 2, complete). Extracts Tables 3,
+  4, 5, 6, 7 verbatim as Goal 3 reproduction targets. Confirms
+  zensim's per-band cutoffs (50/65/90) match the paper's
+  canonical scale (`24cbebec`, `23f3d4c4`, `3d513707`,
+  `2797bbb4`, `1ba6bc20`, `d574979a`).
+- `benchmarks/holdout_overlap_audit_2026-05-11.md` — full audit
+  report with remediation plan (3 user-authorization questions).
+- `benchmarks/v0_6_eval_2026-05-11.md` — V0_6 evaluation against
+  KADID + TID + CID22 + KonJND. **Honest CID22 SROCC = 0.8839**
+  (vs V0_5's leaked-training 0.8900, vs fast-ssim2's 0.8895).
+  KonJND PJND reproduction matches paper Table 4 to 3-4 sig figs.
+  (`0f8ceb8d`)
+- `site/`, `scripts/v_next/build_site_data.py`,
+  `.github/workflows/pages.yml` — Goal 6 GitHub Pages scaffold.
+  Plotly.js-based per-band SROCC bars, per-bake comparison,
+  paper Table 3 parity table. Local-preview-ready; GH Pages
+  activation pending user authorization. (`0218a00b`, `aaf4cf0b`)
+
 ### Fixed (zensim, unreleased)
 - `compute_with_ref*` (including `compute_with_ref_and_diffmap` and
   `compute_with_ref_and_diffmap_linear_planar`) now rejects distorted
