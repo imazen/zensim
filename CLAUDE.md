@@ -104,6 +104,42 @@ CID22 training data still must NOT be added to the trainer (the 49
 held-out reference images stay sacred). All training continues on
 synth-only `/mnt/v` corpus.
 
+### Long-term goals (added 2026-05-11, user directive)
+
+The recovery cycle is converging — V0_5 shipped 2026-05-11. Going
+forward, the priorities are:
+
+1. **Pure-Rust training pipeline that runs in WebAssembly on background
+   workers** with **CubeCL acceleration**. Interactive exploration:
+   user adjusts weights / targets in browser → background worker
+   retrains → updated plots stream back. Replaces the current Python
+   trainer (`train_v_next_mlp.py`) which can't ship to browsers.
+   Owner crate: TBD (likely a new `zensim-train-wasm/` workspace
+   member). Dependencies: CubeCL (GPU compute in WASM), wasmtime
+   (host runtime), zenwasm-abi (existing host-cdylib loader).
+
+2. **Reproduce CID22 paper methodology end-to-end**. The 2023 Sneyers
+   / Ben Baruch / Vaxman paper (and any subsequent revision) is the
+   methodology spec for image quality metric evaluation. Required:
+   - Match the per-codec SROCC numbers (paper Table 3) for ssim2,
+     butteraugli, and our zensim profiles.
+   - Match the pairwise SROCC numbers (paper Table 6).
+   - Match the per-band statistics (paper Table 5 cutoffs).
+   - Match the PJND calibration (paper Table 4, KonJND-1k anchor).
+   Use the same training/validation splits the paper describes.
+   When our numbers diverge from paper numbers by > 0.01 SROCC,
+   investigate before shipping.
+
+3. **Read both revisions of the CID22 paper (~30 pages each)** and
+   maintain `docs/CID22_PAPER_NOTES_2026-05-07.md` as the synthesis.
+   Anything that contradicts our internal practice should be flagged
+   in the synthesis and resolved.
+
+4. **Commit regularly**. Every tick must produce a measurable advance
+   (training step, eval, plot, doc update with new facts). No
+   SKIP-only ticks. If stuck waiting on a long-running job, switch to
+   one of the long-term goals above.
+
 ### Reference materials
 
 - Paper PDF: `/mnt/v/zen/zensim-training/2026-05-07/papers/CID22_wg1m99012.pdf`
