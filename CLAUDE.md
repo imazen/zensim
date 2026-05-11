@@ -2,28 +2,41 @@
 
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).
 
-## Training goals (priority order, locked 2026-05-10)
+## Training goals (priority order, locked 2026-05-10, revised 2026-05-11)
 
 zensim is a **user-facing quality dial** — users type a target zensim score
 and the codec stack picks an encode that hits it. Every training and
 evaluation decision flows from this:
 
-1. **CID22 SROCC is the gold standard.** Sneyers / Ben Baruch / Vaxman
-   *AIC-3 Contribution from Cloudinary: CID22* (2023, JPEG WG1
-   `wg1m99012`) is the only large held-out human-MOS dataset that
-   exercises **codec-output distortions specifically**. KADID-10k and
-   TID2013 are **NOT compression-tuned** — KADID's distortions are
-   ~95% non-compression (blur, noise, color, geometric); TID2013 is
-   similar. Use them as **integrity guards**, not optimization
-   targets — a model that does well on KADID/TID but tanks CID22 has
-   overfit to non-compression distortion shape. **Optimize CID22.**
+1. **Match-or-exceed fast-ssim2 across all quality bands** (PRIMARY goal,
+   revised 2026-05-11 per user directive). Consistent results relative to
+   subjective quality across the full 0-100 range matters more than dial
+   smoothness. Specifically: per-band SROCC on KADID/TID/CID22 must
+   match-or-exceed fast-ssim2's per-band SROCC. CID22 aggregate SROCC
+   must reach fast-ssim2's level (0.8895) — this is the **shipping bar**.
+   Tighter calibration scatter (lower per-bin residual) is the secondary
+   shipping consideration. **Adding new bakes and swapping the shipped
+   weight is explicitly permitted to achieve this.**
 
-2. **Smoothness AND monotonicity** are first-class objectives, not
-   nice-to-haves. The user is going to type "give me zensim 85" — if
-   slightly worse encodes can score higher (non-monotone), the dial
-   misbehaves. Bumpiness target: **≤ V0_2's 4.86%** non-monotonic
-   q-step rate (project floor); ssim2 GT is 5.08%. TV regularization
-   in `train_v_next_mlp.py --tv-weight 10..30` is the lever.
+2. **CID22 SROCC is the gold standard for cross-band evaluation.** Sneyers
+   / Ben Baruch / Vaxman *AIC-3 Contribution from Cloudinary: CID22*
+   (2023, JPEG WG1 `wg1m99012`) is the only large held-out human-MOS
+   dataset that exercises **codec-output distortions specifically**.
+   KADID-10k and TID2013 are **NOT compression-tuned** — KADID's
+   distortions are ~95% non-compression (blur, noise, color, geometric);
+   TID2013 is similar. Use them as **integrity guards** alongside CID22,
+   not as the only optimization targets. Per-band CID22 SROCC is the
+   shipping gate for goal #1.
+
+3. **Smoothness AND monotonicity** are first-class objectives but
+   secondary to band coverage (revised 2026-05-11 per user directive).
+   The user typing "give me zensim 85" still needs monotonic behavior,
+   but the bar has been **lightly raised to accommodate band coverage**.
+   Bumpiness target: **≤ 5.5%** non-monotonic q-step rate on JPEG unified
+   parquet (raised from V0_2's 4.86% floor). ssim2 GT is 5.08%. TV
+   regularization in `train_v_next_mlp.py --tv-weight 10..30` is the
+   lever. If a bake achieves goal #1 and band coverage but exceeds 5.5%
+   bumpiness, surface to user for case-by-case decision.
 
 3. **Anchor at perceptibility thresholds.** KonJND-1k (`/mnt/v/dataset/konjnd-1k/`,
    1008 src × 504 JPEG + 504 BPG, mean PJND scored against ssim2 ≈ 63
@@ -55,17 +68,41 @@ evaluation decision flows from this:
 
 ### What NOT to optimize
 
-- Aggregate (KADID + TID + CID22) / 3 SROCC. KADID and TID are not
-  weighted for compression. A model that beats V0_5 on aggregate by
-  +0.04 but loses 0.01 on CID22 is **worse for the product**, even
-  though the headline number rose. Always report CID22 separately.
+- Aggregate (KADID + TID + CID22) / 3 SROCC as a SOLE target. KADID and
+  TID alone are not weighted for compression; they're valuable as part
+  of "match-or-exceed ssim2 across all bands" (goal #1, 2026-05-11),
+  but not as the only signal. Always report all three plus per-band
+  CID22 alongside any aggregate.
 - Synthetic ssim2-target val_srocc as a primary target. Synthetic
   val tracks the trainer's own loss, not held-out human judgement;
   it has been > 0.99 across most of our 30+ training runs while
   CID22 stayed at 0.85-0.88. Use synthetic val only as a sanity
   guard against pipeline breaks.
 - Metrics that average over very-low-q (q < 30) and very-high-q
-  (q > 95) ssim2 — those bands are unreliable per the CID22 paper.
+  (q > 95) ssim2 — those bands are unreliable per the CID22 paper,
+  but per-bin SROCC at 5-unit granularity in those bands IS the
+  pathology view we use for goal #1 (band coverage).
+
+### Shipping policy (added 2026-05-11)
+
+The shipped weight at `zensim/weights/v0_X_<date>.bin` may be added,
+swapped, or rotated to advance goal #1 (match-or-exceed ssim2 across
+all bands). When swapping:
+1. New bake must match-or-exceed fast-ssim2 per-band SROCC on KADID,
+   TID, AND CID22.
+2. Non-mono q-step rate must be ≤ 5.5% on JPEG unified parquet
+   (raised from the V0_2 floor 4.86% to accommodate band coverage).
+3. Apply affine calibration via
+   `scripts/v_next/affine_calibrate_znpr_v2.py` so calibrated output
+   range matches truth distribution (p5..p95 ≈ ssim2 truth p5..p95).
+4. Archive the prior shipped weight at `zensim/weights/archive/`
+   (with date stamp) for reproducibility.
+5. Update CHANGELOG.md with verification numbers in the `[Unreleased]`
+   section.
+
+CID22 training data still must NOT be added to the trainer (the 49
+held-out reference images stay sacred). All training continues on
+synth-only `/mnt/v` corpus.
 
 ### Reference materials
 
