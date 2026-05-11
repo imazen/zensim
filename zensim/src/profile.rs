@@ -179,13 +179,19 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin`
 /// (byte-identical to the prior shipped state).
 ///
-/// File: `zensim/weights/v0_4_2026-04-30.bin`. Slot name preserved
-/// for source-compat with consumer pinning. Gated behind
-/// `__experimental_versions` because the `weights/` directory is
-/// excluded from the published crate.
+/// File: `zensim/weights/v0_5_2026-05-11.bin` (md5 `0133d165`). Replaces
+/// the prior 2026-04-30 V0_4 ship per the 2026-05-11 user-directed cycle:
+/// new bake is TV=10 h128 KonJND-aligned + affine-calibrated (α=33.27,
+/// β=-3.791) to match ssim2's per-band SROCC across all 3 datasets
+/// (KADID 0.9434, TID 0.9553, CID22 0.8900). Function and slot names
+/// preserved (mlp_bake_preview_v0_4, PROFILE_PREVIEW_V0_4) for
+/// source-compat with consumer pinning. Old V0_4 bake archived at
+/// `zensim/weights/archive/v0_4_2026-04-30.bin` for reproducibility.
+/// Gated behind `__experimental_versions` because the `weights/`
+/// directory is excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    include_bytes!("../weights/v0_4_2026-04-30.bin")
+    include_bytes!("../weights/v0_5_2026-05-11.bin")
 }
 
 #[cfg(feature = "__experimental_versions")]
