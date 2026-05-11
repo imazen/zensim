@@ -1,0 +1,10 @@
+# Baseline-metric SROCC vs human MOS
+
+Max 99999 pairs per dataset.
+
+| Dataset | n | V0_2 | V0_4 (bake) | fast-ssim2 | butteraugli |
+|---------|--:|:----:|:-----------:|:----------:|:-----------:|
+=== KADIK10k (n=10125) ===
+  1012/10125 (75.6/s, ETA 121s)
+  2024/10125 (76.5/s, ETA 106s)
+  3036/10125 (76.9/s, ETA 92s)
