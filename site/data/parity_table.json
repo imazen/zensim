@@ -1,0 +1,46 @@
+{
+  "paper_helldout_49": {
+    "ssim2": {
+      "krcc": 0.7033,
+      "srcc": 0.88541,
+      "pcc": 0.87448,
+      "mae": 4.97
+    }
+  },
+  "our_repro": {
+    "fast_ssim2_aggregate": {
+      "srcc": 0.8895,
+      "n": 4292,
+      "notes": "V0_6 eval, KonJND PJND BPG matches paper to 4 sig figs"
+    },
+    "fast_ssim2_konjnd_bpg": {
+      "mean": 65.38,
+      "std": 5.42,
+      "paper_mean": 65.38,
+      "paper_std": 5.1
+    },
+    "fast_ssim2_konjnd_jpeg": {
+      "mean": 62.55,
+      "std": 5.03,
+      "paper_mean": 63.1,
+      "paper_std": 4.65
+    },
+    "butter_konjnd_bpg": {
+      "mean": 1.5283,
+      "std": 0.1912,
+      "paper_mean": 1.528,
+      "paper_std": 0.192
+    },
+    "butter_konjnd_jpeg": {
+      "mean": 1.6993,
+      "std": 0.2274,
+      "paper_mean": 1.699,
+      "paper_std": 0.229
+    }
+  },
+  "bakes_cid22_aggregate": {
+    "V0_5_leaked": 0.89,
+    "V0_6_clean": 0.8839,
+    "fast_ssim2": 0.8895
+  }
+}
