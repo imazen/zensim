@@ -397,7 +397,118 @@ one objective metric. These are **direct Goal 3 reproduction targets**
 
 ---
 
-## Continued reading: pages 26–30 (queued)
+## Page 26 — **Table 6 (pairwise SROCC) + SSIMULACRA 2 architecture**
 
-Next subtasks:
-- p. 26–30: pairwise SROCC (Table 6), SSIMULACRA 2 architecture, limitations, conclusions
+### Table 6 — Metric correlation with **MCOS differences** (within-source pairwise)
+
+| Metric | KRCC | SRCC | PCC |
+|---|--:|--:|--:|
+| **SSIMULACRA 2** | **0.7536** | **0.9210** | **0.9085** |
+| DSSIM | 0.7203 | -0.9019 | -0.8352 |
+| **SSIMULACRA 1** (rises from 7th in Table 3 to **3rd**) | 0.7059 | -0.8915 | -0.8399 |
+| Butteraugli 2-norm | 0.6852 | -0.8688 | -0.8422 |
+| FSIM | 0.6828 | 0.8656 | 0.8411 |
+| Butteraugli 3-norm | 0.6787 | -0.8610 | -0.8252 |
+| LPIPS | 0.6711 | -0.8612 | -0.7901 |
+| CIEDE2000 | 0.6576 | 0.8482 | 0.7690 |
+| SSIM | 0.6487 | 0.8426 | 0.7703 |
+| PSNR-HVS | 0.6440 | 0.8365 | 0.7992 |
+| PSNR-Y | 0.6264 | 0.8259 | 0.7888 |
+| PSNR (ImageMagick) | 0.6214 | 0.8197 | 0.7745 |
+| MS-SSIM | 0.6039 | 0.7967 | 0.7367 |
+| **VMAF** (drops from 5th in Table 3 to **14th**) | 0.6018 | 0.7894 | 0.7784 |
+| Butteraugli max-norm | 0.5877 | -0.7773 | -0.7351 |
+
+**Key observation**: pairwise correlations (within-source) are HIGHER
+than absolute correlations (Table 3) for almost every metric. Some
+metrics shift ranks dramatically:
+
+- SSIMULACRA 1 is mediocre at absolute MOS but a great pairwise predictor
+- VMAF is great at absolute MOS but weak pairwise
+- LPIPS / DSSIM rise to top tier pairwise
+
+| Element | Status | Notes |
+|---|---|---|
+| **Within-source pairwise SROCC is what zensim is actually used for** (codec orchestrator picks BEST encode among siblings) | ✅ | matches our RankNet within-source training loss |
+| Paper's Table 6 ssim2 pairwise = **0.9210** | ✅ | Goal 3 reproduction target on top of Table 3's 0.882 |
+| SSIM2 still wins pairwise — robust to fidelity-vs-appeal noise | ✅ | further validates ssim2 as our training target |
+
+### SSIMULACRA 2 architecture (reproduction-relevant facts)
+
+- **Asymmetric metric**: SSIM2(a,b) ≠ SSIM2(b,a). Smooth-source-and-distorted-has-edges (ringing) penalized differently than smooth-source-edge-source-and-smooth-distorted (smoothing). Important for fidelity.
+- Built on **multiscale SSIM**.
+- Color space: **XYB** (perceptual). Downsampling between scales: **linear RGB** (proper sampling).
+- **6 scales** (1:1 to 1:32).
+- 3 components (X, Y, B-Y) × 3 maps (SSIM + 2 asymmetric ringing/smoothing) × 6 scales = **54 error maps**.
+- Each map aggregated via **L1 and L4 norms** → 54 × 2 = **108 sub-scores**.
+- Final score = weighted sum of 108 sub-scores (linear).
+- Weights optimized on 201 / 250 CID22 refs.
+- **49-ref held-out validation: KRCC 0.7033 / SRCC 0.88541 / PCC 0.87448 / MAE 4.97**.
+
+| Element | Status | Notes |
+|---|---|---|
+| **SSIM2 = 6 scales × 3 components × 3 maps × 2 norms = 108 sub-scores** | ⏳ | our zensim today: 4 scales × 13 features + 6 peaks + (6 masked + 4 psycho) extended = 228 (or 348 extended) features. **Architecture parity gap**: zensim has fewer scales but more feature types. **Long-term Goal**: revisit whether 6 scales would help low-quality bands. |
+| **XYB color space + linear-RGB downsampling** | ✅ | zensim's pipeline does the same (per `zensim` source) |
+| **Asymmetric metric** penalizing smoothing vs ringing differently | ⏳ | zensim does ringing detection via tier-3 features but the asymmetry isn't explicit. **Follow-up**: investigate whether asymmetric features improve B1/B2 SROCC. |
+| Weighted-sum-of-sub-scores final layer | ✅ | zensim V0_2 uses linear weights; V0_4+ uses MLP. MLP is more expressive but more risky; our shipping bar requires it match-or-exceed the linear ssim2 result. |
+
+## Page 27 — Fig 18 (pairwise scatter plots)
+
+| Element | Status | Notes |
+|---|---|---|
+| Fig 18: 9 panels showing pairwise (Δmetric, ΔMCOS) scatter with quadrant percentages | — | informational |
+| Quadrants: bottom-left + top-right = correct; top-left + bottom-right = wrong-sign | ✅ | informs our "false-positive vs false-negative" follow-up |
+| Per-metric KRCC/SRCC/PCC in panel titles match Table 6 | ✅ | reproduction sanity check |
+
+## Page 28 — Application ranges + Fig 19/20 metric consistency
+
+| Element | Status | Notes |
+|---|---|---|
+| **Asymmetric false-positive vs false-negative bias** per metric — Butteraugli FN-prone, MS-SSIM FP-prone | ⏳ | **Goal 6 site follow-up**: extend per-pair scatter to show FN vs FP rate per metric and per band |
+| Fig 19/20: stddev of MOS given metric score, plotted along metric range | — | informs that some metrics are reliable in some ranges but not others |
+| **Higher curves on consistency plot = lower stddev = more reliable** | ✅ | matches our V0_5/V0_6 calibration goal |
+
+## Page 29 — **Table 7 (recommended quality ranges) + Conclusion**
+
+### Table 7 — Recommended quality ranges per metric
+
+| Metric | very low | low | medium | high | very high | visually lossless |
+|---|---|---|---|---|---|---|
+| CID22 MCOS anchor | | 25 | 50 | 65 | 80 | 90 |
+| KADID10k DMOS anchor | 2 | 3 | 3.7 | 4.3 | 4.4 | 4.5 |
+| PSNR-Y | very poor | very poor | very poor | very poor | very poor | very poor |
+| PSNR-HVS | poor | mediocre | good | mediocre | good | good |
+| SSIM | good | mediocre | mediocre | mediocre | poor | poor |
+| MS-SSIM | very good | good | mediocre | mediocre | poor | poor |
+| VMAF | good | mediocre | good | good | mediocre | mediocre |
+| **SSIMULACRA 2** | mediocre | good | **very good** | **very good** | **very good** | **very good** |
+| DSSIM | good | very good | very good | good | good | good |
+| Butteraugli 3-norm | very poor | poor | mediocre | good | very good | very good |
+| PSNR (ImageMagick) | very poor | very poor | very poor | very poor | very poor | poor |
+
+| Element | Status | Notes |
+|---|---|---|
+| SSIM2 is **"very good" in every band ≥ medium**, only "good" or "mediocre" in low/very-low | ✅ | matches our shipping criterion (match-or-exceed ssim2 across all bands); ssim2's weakness at B0 is where zensim must close the gap |
+| Butteraugli "very good" at high+ but "very poor" at low | ✅ | tells us when to weight butter in multi-supervision |
+| DSSIM "good"-or-"very good" across all bands | ✅ | candidate for low-q-band supervision |
+| PSNR-Y "very poor" everywhere | — | informational |
+
+### Conclusion summary
+
+- 22,153 images / 1.4M opinions / 6 codecs (JPEG, JPEG 2000, JPEG XL, HEIC, WebP, AVIF)
+- Quality range: medium → visually lossless
+- TSBPC + DSBQS hybrid
+- SSIMULACRA 2 introduced; KRCC 0.7033 / SRCC 0.88541 / PCC 0.87448 / MAE 4.97 on 49-ref held-out
+
+## Page 30 — References
+
+References list. No load-bearing methodology.
+
+---
+
+## Reading complete: 30 / 30 pages walked
+
+Goal 2 done. All ❌ rows have explicit follow-ups; ⏳ rows have
+tracking notes. The next workstream that depends on this doc is
+**Goal 3** (reproduce paper SSIM2 numbers): all per-dataset, per-metric
+SROCC targets are now extracted into the tables above.
