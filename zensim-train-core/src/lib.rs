@@ -87,6 +87,46 @@ mod adam;
 mod stats;
 pub use stats::{pearson, ranks, spearman};
 
+/// One named slice of training/validation data.
+///
+/// Multi-group training resolves single-corpus dominance: per-step
+/// sampling picks a group in proportion to `train_weight`, then
+/// samples a pair within. `train_weight` and `validation_weight` are
+/// independent — a group can be in both pools (trained on AND gated
+/// against), in only one, or in neither (per-epoch SROCC still
+/// logged for transparency).
+///
+/// Ports the lifetime-borrowed shape from
+/// `zensim-validate::mlp_train::TrainingGroup`. The current trainer
+/// stores `human_scores` and `features` as borrowed slices so the
+/// caller can keep the canonical CSV-derived arrays alive while the
+/// trainer iterates. The WASM port will need an owned variant once
+/// inputs come from `Vec`-shaped Worker postMessage payloads — we'll
+/// add `TrainingGroupOwned` then; for Phase 1 milestone (bit-exact
+/// reproduction) we mirror the existing shape verbatim.
+#[derive(Debug)]
+pub struct TrainingGroup<'a> {
+    /// Human-readable name (used in trainer logs).
+    pub name: String,
+    /// Per-pair quality scores. HIGHER means MORE similar to source.
+    pub human_scores: &'a [f64],
+    /// Per-pair feature vectors. `features.len() == human_scores.len()`,
+    /// and every inner slice has length `n_features` (checked by
+    /// `train_mlp` callers).
+    pub features: &'a [&'a [f64]],
+    /// Weight in the per-step group selection distribution. The
+    /// per-pair sampling probability is `train_weight / total_weight`,
+    /// so doubling `train_weight` doubles the sampling rate.
+    /// Set to `0.0` to exclude this group from training.
+    pub train_weight: f64,
+    /// Weight in the per-epoch validation aggregation. `0.0` excludes
+    /// the group from best-checkpoint scoring (it's still reported in
+    /// the log). For [`ValidationPolicy::Min`], weights act as a soft
+    /// inclusion mask — any group with `validation_weight > 0`
+    /// participates in the min.
+    pub validation_weight: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +163,23 @@ mod tests {
         let y_monotonic: Vec<f64> = vec![1.0, 100.0, 1000.0, 10000.0, 100000.0];
         assert!((spearman(&x, &y_linear) - 1.0).abs() < 1e-10);
         assert!((spearman(&x, &y_monotonic) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn training_group_construct() {
+        let scores: Vec<f64> = vec![85.0, 70.0, 55.0];
+        let feat_rows: Vec<Vec<f64>> = vec![vec![0.1, 0.2], vec![0.3, 0.4], vec![0.5, 0.6]];
+        let feat_refs: Vec<&[f64]> = feat_rows.iter().map(|v| v.as_slice()).collect();
+        let g = TrainingGroup {
+            name: "synth-test".into(),
+            human_scores: &scores,
+            features: &feat_refs,
+            train_weight: 1.0,
+            validation_weight: 0.0,
+        };
+        assert_eq!(g.human_scores.len(), 3);
+        assert_eq!(g.features.len(), 3);
+        assert_eq!(g.features[1].len(), 2);
+        assert_eq!(g.name, "synth-test");
     }
 }
