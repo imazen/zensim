@@ -149,10 +149,68 @@ these exact names if our balanced-holdout is to be paper-comparable
 
 ---
 
-## Continued reading: pages 11–30 (queued)
+## Page 11 — MCOS distribution (Fig 3) + disagreement mitigation effect
+
+| Element | Status | Notes |
+|---|---|---|
+| **Fig 3**: MCOS distribution by encoder, stacked histogram | — | informational; visualizes the codec-comparison shape |
+| Bulk of CID22 in **MCOS 30–90 range**, peak around MCOS 88 (near-lossless) | ✅ | matches our pipeline's B2/B3 emphasis |
+| Effect of skipping DSBQS-disagreement mitigation: SRCC 0.8868 / PCC 0.9013 / MAE 4.47 | — | informational; mild effect |
+| Purpose of mitigation: complement incomplete TSBPC + resolve TSBPC↔DSBQS disagreements (Fig 4) | — | informational |
+
+## Page 12 — Fidelity vs appeal disagreement (Fig 4)
+
+| Element | Status | Notes |
+|---|---|---|
+| **Fig 4 example**: JPEG XL q60 ↔ AVIF aurora cq37, both ≈ 0.5 bpp. TSBPC says AVIF better (Elo 1695 vs 1552), DSBQS says JPEG XL better (MCOS 69.0 vs 59.3) | ⏳ | **Important caveat for Goal 3 reproduction**: when our zensim disagrees with paper SROCC for a particular pair, we can't always tell if WE'RE wrong vs the paper's MOS being a fidelity-vs-appeal corner case. **Follow-up**: when reproducing Table 3, flag cases where our score disagrees and check the (image-pair, ΔMCOS, ΔTSBPC) tuple — small ΔTSBPC = ambiguous ground truth. |
+| Fidelity = faithfulness to reference; Appeal = "I prefer this even with detail loss" | ✅ | aligned: zensim is a **fidelity** metric, not appeal. Confirmed via the V0_5 KonJND anchor check. |
+| AIC-3 CTC dataset [16] only measures appeal (no reference shown) | — | informational; different goal from CID22 |
+| Final CID22 MCOS = 67.1 for JPEG XL, 56.7 for AVIF — DSBQS dominates the merge | ✅ | confirms the merge tilts toward fidelity (good for our use case) |
+
+## Page 13 — AIC-3 image 4 fidelity-vs-appeal example (Fig 5)
+
+| Element | Status | Notes |
+|---|---|---|
+| **Fig 5**: VVC at 2 JND looks "better" than reference because VVC denoises artistic noise in source | ✅ | confirms: a metric that scores "denoise improvement" as quality loss (which zensim does) matches fidelity |
+| ΔTSBPC definition: `(#A>B) − (#B>A)` per triplet; larger = clearer consensus | — | informational |
+| Image scores "agree" with comparison if preferred image has higher score (no tie) | — | informational |
+
+## Page 14 — Table 2 (TSBPC↔MCOS agreement) + sample-size analysis
+
+**Table 2 (load-bearing)**: agreement % between TSBPC consensus and MCOS, by mitigation strategy and ΔTSBPC. Excerpt:
+
+| ΔTSBPC | none | monoton only | both | avg ΔMCOS | pairs |
+|--:|--:|--:|--:|--:|--:|
+| 1 | 64.6% | 54.1% | 56.3% | 1.98 | 12997 |
+| 3 | 86.9% | 79.6% | 75.3% | 5.76 | 11168 |
+| 5 | 96.8% | 93.5% | 88.9% | 10.08 | 10169 |
+| 7 | 99.4% | 99.4% | 96.0% | 14.83 | 8500 |
+| 10 | 100% | 99.8% | 99.4% | 19.26 | 5884 |
+| 12 | 100% | 100% | 100% | 19.38 | 119 |
+
+| Element | Status | Notes |
+|---|---|---|
+| **Empirical relationship: avg ΔMCOS ≈ 2 × ΔTSBPC** | — | informational; calibration insight |
+| MCOS gap ≥ 20 → unanimous TSBPC consensus | ✅ | matches our shipping bar: target SROCC tightness in B2/B3 where most pairs differ by < 20 MCOS units |
+| **Mitigations REDUCE the raw agreement** but improve calibration: monoton-only agreement is 54% at ΔTSBPC=1 (down from 64% raw); both mitigations = 56% | ⏳ | nuanced — monotonicity helps cross-image calibration but hurts raw within-image rank agreement for tiny gaps. **Implication for V_NEXT**: TV regularizer might also reduce raw agreement on tiny gaps; that's the price of cross-image calibration. Our per-band SROCC measurement is the correct way to detect this trade-off. |
+| **Sample size guidance** (Fig 7): 80 DSBQS / 5 TSBPC per pair = within 90% CI of full | — | not directly applicable to our pipeline |
+
+## Page 15 — Fig 7 sample size table + protocol improvements
+
+| Element | Status | Notes |
+|---|---|---|
+| Fig 7: full RMSE table of (DSBQS%, TSBPC%) sample size vs full MCOS | — | informational |
+| **80 DSBQS / 5 TSBPC = enough for 90% CI** | — | reduces future experiment cost |
+| Future TSBPC variants: include `R` in triplets, A\|B + R\|R toggle, single-image-at-a-time + 3-button | — | informational |
+| **Viewing-conditions not modeled** in CID22 (sRGB only, no HDR, no per-DPI variants) | ⏳ | **Goal 4 follow-up**: include a viewing-conditions-aware test, OR explicitly caveat that zensim is sRGB-only matching the paper |
+| Mobile viewers excluded from CID22 | — | informational |
+| AIC-3 CTC [16]: pairwise without reference → measures appeal only | — | informational |
+
+---
+
+## Continued reading: pages 16–30 (queued)
 
 Next subtasks:
-- p. 11–15: Tables 2-4 + IQA metric overview
-- p. 16–20: **Table 3 (per-metric SROCC) — Goal 3 reproduction target**
-- p. 21–25: SSIMULACRA 2 architecture description
-- p. 26–30: limitations + conclusions + references
+- p. 16–20: IQA metric definitions + **Table 3 SROCC numbers (Goal 3 target)**
+- p. 21–25: SSIMULACRA 2 architecture + tables 5/6
+- p. 26–30: limitations + conclusions
