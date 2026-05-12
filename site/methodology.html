@@ -391,11 +391,26 @@ python3 scripts/v_next/affine_calibrate_znpr_v2.py \
       stratified MLP training, runtime dispatch path.
     </li>
     <li>
-      <strong>Multi-bake ensemble at runtime</strong> — load 4 seed bakes,
-      average outputs. The cycle-5 ensemble experiment showed this gives
-      +0.0033 on AIC-3 over single-seed ssim2. Cost: 4× the bake size
-      in memory + 4× the inference cost (small for a 30k-param MLP).
-      Would deliver the recipe's expected SROCC reliably (no seed-luck).
+      <strong>Multi-bake ensemble at runtime</strong> — Section 6.4
+      shows {V0_16, V0_20, V0_21} 3-bake ensemble beats ssim2 by
+      +0.0086 on AIC-3 (and +0.0013 CID22) with 3× inference cost.
+      Requires zenpredict extension to load and average outputs from
+      N bakes. Engineering work:
+      <ul>
+        <li><code>zenpredict::Predictor::with_ensemble(&amp;[bake_bytes])</code>
+            constructor that holds N <code>Model</code>s.</li>
+        <li><code>predict()</code> averages the N forward-pass outputs
+            element-wise.</li>
+        <li><code>zensim::ProfileParams</code> gains an optional
+            <code>extra_bakes: &amp;[&amp;[u8]]</code> field via
+            <code>__experimental_versions</code> feature.</li>
+        <li>Default ProfileParams unchanged (single-bake); ensemble
+            opt-in via a new <code>ZensimProfile::PreviewV0_4Ensemble</code>
+            variant.</li>
+      </ul>
+      Estimated ~3-4 hours of Rust work. Tests can reuse the existing
+      V0_4 unit tests, with new tests asserting the 3-bake output equals
+      the mean of 3 single-bake outputs on a fixed input.
     </li>
     <li>
       <strong>Deeper or wider architecture</strong> — current MLP is 228→128→1.
