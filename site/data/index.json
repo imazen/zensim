@@ -21,8 +21,18 @@
       ]
     },
     {
+      "label": "V0_7_seed0_initial",
+      "notes": "Initial seed=0 V0_7 ship; CID22=0.8912 but non-mono 5.67% over 5.5% target; superseded by seed=1",
+      "json": "bakes/V0_7_seed0_initial.json",
+      "datasets": [
+        "CID22",
+        "KADIK10k",
+        "TID2013"
+      ]
+    },
+    {
       "label": "V0_7_shipped",
-      "notes": "NEW SHIPPED. seed=0 best of 5-seed sweep; affine-calibrated alpha=34.30 beta=-4.03 to paper Table 5 anchors; CID22=0.8912 BEATS fast-ssim2 (0.8895) by +0.0017",
+      "notes": "NEW CURRENT SHIP. seed=1 best of 5-seed sweep on both criteria; affine \u03b1=31.25 \u03b2=-4.03; CID22=0.8933 (+0.0038 vs ssim2), non-mono=5.46% (within target)",
       "json": "bakes/V0_7_shipped.json",
       "datasets": [
         "CID22",
