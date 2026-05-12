@@ -150,6 +150,11 @@ def load_human_csv(path: Path, dataset_name: str, target_col: str,
     out["train_weight"] = np.where(out["is_val_only"], 0.0, train_weight)
     out["dataset"] = dataset_name
     out["target_human"] = score_100  # explicit copy for V0_6 ranknet groups
+    # Optional: preserve `dssim` column for cycle-7 co-training. When the
+    # CSV has it, the downstream trainer reads it via `df["dssim"]` when
+    # `--dssim-weight > 0`.
+    if "dssim" in df.columns:
+        out["dssim"] = df["dssim"].astype(np.float32)
 
     print(f"  {n_orig:,} rows, {len(refs)} unique refs "
           f"(val={n_val} val_only refs); train_w={train_weight}, "
@@ -716,7 +721,17 @@ def main() -> int:
         "zensim": "score_zensim",
     }[args.target]
 
-    df = load_parquets(Path(args.input_dir), args.sweeps.split(","))
+    # When the user passes only --human-csv (no --sweeps), allow skipping
+    # the parquet load entirely. The dataframe is built from human-csv rows
+    # alone in that case (V0_16 + V0_24 use this path for the safe-synthetic
+    # CSV which carries `feat_0..feat_227` directly).
+    if args.sweeps and args.sweeps != "NONE":
+        df = load_parquets(Path(args.input_dir), args.sweeps.split(","))
+    else:
+        if not args.human_csv:
+            raise SystemExit("Pass either --sweeps or --human-csv")
+        print("Sweeps disabled (`--sweeps NONE` or empty); training from --human-csv rows only")
+        df = pd.DataFrame()
     if args.max_rows:
         df = df.sample(min(args.max_rows, len(df)), random_state=args.seed)\
                .reset_index(drop=True)
