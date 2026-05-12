@@ -31,6 +31,8 @@ jobs:
       # regeneration from a hosted eval-log artifact, add the build
       # step here using build_site_data.py.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
