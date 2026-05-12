@@ -361,9 +361,16 @@ ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
         AIC-3 power pair; V0_16 is the CID22 anchor.</strong></li>
   </ul>
   <p>
-    <strong>Recommendation for ensemble runtime</strong>: load 3 bakes
-    (V0_16, V0_20, V0_21), average outputs. 3× the inference cost but
-    +0.0086 SROCC on AIC-3 with no CID22 regression.
+    <strong>Recommendation for ensemble runtime</strong>: load 2 bakes
+    {V0_16, V0_20}, average outputs. <strong>2× inference cost</strong>
+    (not 3×) and combined Δ vs ssim2 = +0.0100 (CID22 +0.0015, AIC-3
+    +0.0085). After exhaustive search of all 7-bake subsets, this is
+    the optimum on the sum-of-deltas axis.
+  </p>
+  <p>
+    The 3-bake {V0_16, V0_20, V0_21} gives +0.0099 combined — virtually
+    tied. V0_21's butter-clean signal is redundant with V0_20's seed=123
+    AIC-3 strength. The 2-bake is the recommended deployment.
   </p>
 
   <h2>7. Honest-vs-tainted comparison (V0_8 vs V0_16)</h2>
@@ -427,8 +434,9 @@ python3 scripts/v_next/affine_calibrate_znpr_v2.py \
     </li>
     <li>
       <strong>Multi-bake ensemble at runtime</strong> — Section 6.4
-      shows {V0_16, V0_20, V0_21} 3-bake ensemble beats ssim2 by
-      +0.0086 on AIC-3 (and +0.0013 CID22) with 3× inference cost.
+      shows {V0_16, V0_20} 2-bake ensemble (after exhaustive 7-bake
+      subset search) is the optimum: combined Δ vs ssim2 = +0.0100
+      (CID22 +0.0015, AIC-3 +0.0085) with 2× inference cost.
       Requires zenpredict extension to load and average outputs from
       N bakes. Engineering work:
       <ul>
