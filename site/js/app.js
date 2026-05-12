@@ -153,8 +153,45 @@ function renderParityTable() {
   div.innerHTML = `<table>${rows.join('')}</table>`;
 }
 
+async function loadParityTable() {
+  try {
+    return await fetchJSON('data/parity_table.json');
+  } catch {
+    return null;
+  }
+}
+
+function renderKonjndTable(parity) {
+  if (!parity) return;
+  const div = document.getElementById('konjnd-table');
+  if (!div) return;
+  const r = parity.our_repro;
+  const rows = [
+    `<tr><th>Metric</th><th>Subset</th><th>Ours (mean ± stdev)</th><th>Paper Table 4</th><th>Δ</th></tr>`,
+  ];
+  const subsets = [
+    { metric: 'fast-ssim2', subset: 'BPG',  ours: r.fast_ssim2_konjnd_bpg,  paper_mean: r.fast_ssim2_konjnd_bpg.paper_mean, paper_std: r.fast_ssim2_konjnd_bpg.paper_std },
+    { metric: 'fast-ssim2', subset: 'JPEG', ours: r.fast_ssim2_konjnd_jpeg, paper_mean: r.fast_ssim2_konjnd_jpeg.paper_mean, paper_std: r.fast_ssim2_konjnd_jpeg.paper_std },
+    { metric: 'butter 3-norm', subset: 'BPG',  ours: r.butter_konjnd_bpg,  paper_mean: r.butter_konjnd_bpg.paper_mean, paper_std: r.butter_konjnd_bpg.paper_std },
+    { metric: 'butter 3-norm', subset: 'JPEG', ours: r.butter_konjnd_jpeg, paper_mean: r.butter_konjnd_jpeg.paper_mean, paper_std: r.butter_konjnd_jpeg.paper_std },
+  ];
+  for (const s of subsets) {
+    const delta = s.ours.mean - s.paper_mean;
+    const cls = deltaCls(delta, 0.6);  // within paper's reported stdev
+    rows.push(`<tr>
+      <td>${s.metric}</td><td>${s.subset}</td>
+      <td>${s.ours.mean.toFixed(2)} ± ${s.ours.std.toFixed(2)}</td>
+      <td>${s.paper_mean.toFixed(2)} ± ${s.paper_std.toFixed(2)}</td>
+      <td class="${cls}">${delta >= 0 ? '+' : ''}${delta.toFixed(3)}</td>
+    </tr>`);
+  }
+  div.innerHTML = `<table>${rows.join('')}</table>`;
+}
+
 async function main() {
   const bakes = await loadAllBakes();
+  const parity = await loadParityTable();
+  renderKonjndTable(parity);
   if (bakes.length === 0) {
     document.body.insertAdjacentHTML('beforeend',
       '<p class="red">No bake data found. Run scripts/v_next/build_site_data.py first.</p>');

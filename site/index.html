@@ -33,11 +33,32 @@
   <p class="lede">
     Interactive per-band SROCC graphs for our V_X champion bakes
     versus the SSIMULACRA 2 reference and the CID22 paper's
-    published numbers. Data updated nightly via the
-    <code>build_site_data.py</code> pipeline.
-    Shipping bar: <strong>match-or-exceed fast-ssim2 across all four
-    quality bands</strong> (B0–B3 per <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">paper Table 5</a>).
+    published numbers. Shipping bar: <strong>match-or-exceed
+    fast-ssim2 across all four quality bands</strong> (B0–B3 per
+    <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">paper Table 5</a>).
   </p>
+
+  <section style="background:#eaf6ea; border-left: 4px solid #0a7d28; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
+    <strong>Current champion: V0_7 (seed=1, 2026-05-11)</strong> —
+    CID22 SROCC <strong>0.8933</strong>
+    (<span class="green">+0.0038 above fast-ssim2's 0.8895</span>);
+    non-mono q-step rate <strong>5.46 %</strong>
+    (<span class="green">within 5.5 % target</span>).
+    First honest clean-corpus bake to meet both shipping criteria
+    simultaneously. Trained on perceptual-deduped CSV (156k pairs
+    after dropping 1,015 sources flagged by the
+    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/holdout_overlap_audit_2026-05-11.md">overlap audit</a>).
+  </section>
+
+  <h2>Goal 3 — KonJND-1k PJND validation vs paper Table 4</h2>
+  <p class="lede">
+    Independent sanity check that our <code>fast-ssim2</code> +
+    <code>butter</code> implementations reproduce the CID22 paper's
+    headline KonJND-1k numbers (paper p. 20 Table 4). Our
+    measurements match to 3–4 significant figures — pipeline
+    validated.
+  </p>
+  <div id="konjnd-table"></div>
 
   <h2>Aggregate SROCC per dataset</h2>
   <div class="controls">
