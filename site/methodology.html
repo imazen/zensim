@@ -311,7 +311,48 @@ python3 scripts/v_next/affine_calibrate_znpr_v2.py \
   --out-bake v0_16_calibrated.bin \
   --alpha 28.0366 --beta -5.0738</pre>
 
-  <h2>9. Known gaps</h2>
+  <h2>9. What's next (cycle 6 candidates)</h2>
+  <p>
+    The TV/seed exploration is exhausted at the current architecture
+    (h=128 MLP, RankNet + TV, no content awareness). To clear ssim2 on
+    CID22 by a margin larger than seed σ, the recipe needs structural
+    change. Candidates:
+  </p>
+  <ol>
+    <li>
+      <strong>Image-type-aware MLP dispatch</strong> — train multiple
+      specialized MLPs (e.g., one per content class: photo / screen /
+      line-art / mixed) plus a classifier that picks which MLP to use
+      per image. The user has stated this as the priority direction.
+      A working prototype would require: content classifier training,
+      stratified MLP training, runtime dispatch path.
+    </li>
+    <li>
+      <strong>Multi-bake ensemble at runtime</strong> — load 4 seed bakes,
+      average outputs. The cycle-5 ensemble experiment showed this gives
+      +0.0033 on AIC-3 over single-seed ssim2. Cost: 4× the bake size
+      in memory + 4× the inference cost (small for a 30k-param MLP).
+      Would deliver the recipe's expected SROCC reliably (no seed-luck).
+    </li>
+    <li>
+      <strong>Deeper or wider architecture</strong> — current MLP is 228→128→1.
+      Tried h=256 (V0_13, no improvement). Could try 2 hidden layers
+      (228→128→64→1) or wider with stronger L2 (1e-4 instead of 1e-5).
+    </li>
+    <li>
+      <strong>Butter-concordant training data</strong> — the 218k synth
+      pairs include ~42% curves where ssim2 and butter disagree on
+      ranking. A "concordance-clean" CSV (script written but not yet
+      trained on) might reduce label noise.
+    </li>
+    <li>
+      <strong>Additional held-out datasets</strong> — extend evaluation
+      to AIC-4 sample dataset, JPEG XS test corpora. Cross-dataset
+      consistency is the bar; CID22-only is biased.
+    </li>
+  </ol>
+
+  <h2>10. Known gaps</h2>
   <ul>
     <li><strong>dssim integration</strong>: the unified parquet doesn't carry dssim. Adding it requires extending <code>dataset_metric_baseline.rs</code> with a dssim crate dependency.</li>
     <li><strong>B0 SROCC -0.020</strong>: V0_16 still trails ssim2 in B0 (below-medium quality). May require content-class-aware MLP dispatch.</li>
