@@ -346,6 +346,11 @@ class TrainConfig:
                                    # per-group SROCC), Python defaulted to mean.
     lr_cycle_period: int = 50      # First cycle length in epochs for
                                    # cosine_cyclic schedule. T_mult=1.
+    dssim_weight: float = 0.0      # Cycle-7 dssim co-training auxiliary loss
+                                   # weight. When > 0, adds
+                                   # `dssim_weight * mse(pred, (1-dssim)*100)`
+                                   # to the loss. Targets JPEG-AI deficit
+                                   # (AIC-4: V0_16=0.7951, dssim=0.9147).
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
@@ -353,6 +358,7 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
           tv_pairs_train: np.ndarray | None = None,
           w_train: np.ndarray | None = None,
           val_dataset_labels: np.ndarray | None = None,
+          dssim_train: np.ndarray | None = None,
           ) -> tuple[MLP, dict]:
     torch.manual_seed(cfg.seed)
     n_in = X_train.shape[1]
@@ -394,6 +400,16 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     # would double-count.
     wt = (torch.from_numpy(w_train).to(device).float()
           if w_train is not None else None)
+    # dssim co-training target (quality-scaled: (1 - dssim) * 100).
+    # When cfg.dssim_weight > 0 and dssim_train provided, the loss adds
+    # an MSE term against this target.
+    dst = None
+    if cfg.dssim_weight > 0 and dssim_train is not None:
+        dssim_quality = (1.0 - dssim_train) * 100.0
+        dst = torch.from_numpy(dssim_quality.astype(np.float32)).to(device)
+        print(f"  dssim co-training: weight={cfg.dssim_weight}, "
+              f"target range [{float(dst.min()):.2f}, {float(dst.max()):.2f}]",
+              flush=True)
 
     # Adjacent-q pairs (lower_idx, higher_idx) within each curve for
     # the TV regularizer. `pred[lower] >= pred[higher]` is a violation
@@ -467,6 +483,13 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
             if pred_lo is not None:
                 tv = torch.relu(pred_lo - pred_hi).mean()
                 loss = loss + cfg.tv_weight * tv
+            if dst is not None:
+                # dssim auxiliary MSE against quality-scaled dssim target.
+                # Pulls pred toward (1-dssim)*100; rank-invariant with the
+                # ssim2 head since both are quality (higher = better).
+                dssim_target = dst[idx]
+                dssim_mse = torch.mean((pred - dssim_target) ** 2)
+                loss = loss + cfg.dssim_weight * dssim_mse
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -612,6 +635,10 @@ def main() -> int:
     ap.add_argument("--out-dir",
                     default="/mnt/v/zen/zensim-training/2026-05-07/runs")
     ap.add_argument("--tag", default="v_next")
+    ap.add_argument("--dssim-weight", type=float, default=0.0,
+                    help="cycle-7 dssim co-training auxiliary loss weight "
+                         "(0.0 = disabled, V0_16 behavior; suggested 0.3 to "
+                         "target JPEG-AI deficit)")
     ap.add_argument("--tv-weight", type=float, default=0.0,
                     help="Per-curve monotonicity penalty weight. Penalizes "
                          "adjacent-q score reversals within each "
@@ -814,7 +841,7 @@ def main() -> int:
         epochs=args.epochs, batch_size=args.batch_size, lr=args.lr,
         weight_decay=args.weight_decay, dropout=args.dropout,
         rank_weight=args.rank_weight, seed=args.seed,
-        tv_weight=args.tv_weight,
+        tv_weight=args.tv_weight, dssim_weight=args.dssim_weight,
         lr_schedule=args.lr_schedule,
         lr_cycle_period=args.lr_cycle_period,
         optimizer=args.optimizer,
@@ -870,12 +897,30 @@ def main() -> int:
     w_train = df["train_weight"].to_numpy(dtype=np.float32)[is_tr_x]
     val_dataset_labels = df["dataset"].to_numpy()[is_va_x]
 
+    # dssim co-training: load column from the dataframe if --dssim-weight > 0
+    dssim_train = None
+    if args.dssim_weight > 0:
+        if "dssim" not in df.columns:
+            raise SystemExit(
+                "--dssim-weight > 0 but no 'dssim' column in training "
+                "dataframe; check that --human-csv points to a file with "
+                "dssim scores (e.g. training_safe_synthetic.csv has it).")
+        dssim_train = df["dssim"].to_numpy(dtype=np.float32)[is_tr_x]
+        n_nan = int(np.isnan(dssim_train).sum())
+        if n_nan:
+            print(f"WARNING: {n_nan:,} NaN dssim values; setting to 0 "
+                  f"(quality=100 → no penalty toward these rows)", flush=True)
+            dssim_train = np.where(np.isnan(dssim_train), 0.0, dssim_train)
+        print(f"dssim co-training: weight={args.dssim_weight}, "
+              f"target rows={len(dssim_train):,}", flush=True)
+
     t0 = time.time()
     model, metrics = train(cfg, Xt, y[is_tr_x], g_all[is_tr_x],
                            Xv, y[is_va_x], g_all[is_va_x], device,
                            tv_pairs_train=tv_pairs_train,
                            w_train=w_train,
-                           val_dataset_labels=val_dataset_labels)
+                           val_dataset_labels=val_dataset_labels,
+                           dssim_train=dssim_train)
     train_secs = time.time() - t0
 
     # Test
