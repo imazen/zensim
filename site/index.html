@@ -38,18 +38,33 @@
     <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">paper Table 5</a>).
   </p>
 
+  <section style="background:#fff7e6; border-left: 4px solid #d18811; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
+    <strong>⚠️ V0_8 ship CID22 SROCC is INFLATED (2026-05-12)</strong> —
+    the V0_8 training CSV's perceptual-overlap cleanup ran at a looser
+    threshold than d≤16. Of the 156,420-row "clean" training set,
+    <strong>11,629 rows (7.43 %)</strong> were near-duplicates of 22 of
+    the 49 CID22 held-out references (hex-hashed crops/resizes).
+    V0_8's reported <strong>0.8948</strong> is therefore inflated by
+    training-set leakage. The 361 contaminated source files + 30.6 GiB
+    of encoded variants + .features.bin caches + tower mirror have been
+    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/contaminated_sources_purged_2026-05-12.txt">permanently purged</a>.
+    V0_15 honest retrain is in flight; expected CID22 ≈ 0.890-0.892.
+    Until V0_15 lands, V0_8 remains the runtime ship but its numbers
+    should be treated as upper bound, not benchmark.
+  </section>
+
   <section style="background:#eaf6ea; border-left: 4px solid #0a7d28; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
-    <strong>Current champion: V0_8 (TV=15, seed=1, 2026-05-11 eve)</strong> —
-    CID22 SROCC <strong>0.8948</strong>
-    (<span class="green">+0.0053 above fast-ssim2's 0.8895</span>);
+    <strong>Current ship: V0_8 (TV=15, seed=1, 2026-05-11 eve)</strong> —
+    CID22 SROCC <strong>0.8948 (tainted, see banner above)</strong>;
     <strong>B1 SROCC gap closed 50 %</strong> (V0_7's -0.027 → V0_8's
     -0.014 vs ssim2);
     non-mono q-step rate <strong>5.87 %</strong>
     (within raised 6.0 % gate).
     V0_8 trades smoothness for B1 closure; predecessor V0_7 seed=1
     (5.46 % non-mono, B1 -0.027) archived. Trained on perceptual-
-    deduped CSV (156k pairs after the
-    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/holdout_overlap_audit_2026-05-11.md">overlap audit</a>).
+    deduped CSV (156k pairs after the original
+    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/holdout_overlap_audit_2026-05-11.md">overlap audit</a>
+    — which used a looser threshold than the 2026-05-12 d≤16 purge).
   </section>
 
   <h2>Goal 3 — KonJND-1k PJND validation vs paper Table 4</h2>
