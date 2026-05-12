@@ -109,6 +109,15 @@ struct Args {
     #[arg(long, default_value_t = 32)]
     tv_batch: usize,
 
+    /// Per-band TV weights `[B0, B1, B2, B3]`. When set, the TV
+    /// pairs file MUST include a `band_id` column (use
+    /// `regen_tv_pairs.py --emit-bands`). Pair-specific weight
+    /// replaces the flat `--tv-weight`. Example:
+    /// `--tv-band-weights 10,20,10,10` pushes B1 (medium-quality
+    /// band) harder than other bands.
+    #[arg(long, value_parser = parse_band_weights)]
+    tv_band_weights: Option<[f64; 4]>,
+
     /// Optional path to dump the trainer log for the run.
     #[arg(long)]
     log_path: Option<PathBuf>,
@@ -204,6 +213,21 @@ fn load_csv(path: &PathBuf, name: &str) -> Result<LoadedGroup, String> {
         feature_rows,
         n_features,
     })
+}
+
+fn parse_band_weights(s: &str) -> Result<[f64; 4], String> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 4 {
+        return Err(format!(
+            "expected 4 comma-separated floats for B0,B1,B2,B3; got {}",
+            parts.len()
+        ));
+    }
+    let mut out = [0.0; 4];
+    for (i, p) in parts.iter().enumerate() {
+        out[i] = p.trim().parse().map_err(|e| format!("bad weight at index {i}: {e}"))?;
+    }
+    Ok(out)
 }
 
 fn main() {
@@ -309,12 +333,15 @@ fn main() {
         });
         let rdr = BufReader::new(f);
         let mut pairs: Vec<(usize, usize)> = Vec::new();
+        let mut bands: Vec<u8> = Vec::new();
+        let mut tv_has_bands = false;
         for (i, line) in rdr.lines().enumerate() {
             let line = line.unwrap_or_else(|e| {
                 eprintln!("read TV pair line {}: {e}", i + 1);
                 std::process::exit(1);
             });
             if i == 0 && line.starts_with("lo_") {
+                tv_has_bands = line.contains("band_id");
                 continue; // header
             }
             let parts: Vec<&str> = line.split('\t').collect();
@@ -333,15 +360,34 @@ fn main() {
                 continue; // ignore out-of-range pairs
             }
             pairs.push((lo, hi));
+            if tv_has_bands && parts.len() >= 3 {
+                let band: u8 = parts[2].parse().unwrap_or(2).min(3);
+                bands.push(band);
+            }
         }
-        println!("Loaded {} TV pairs from {tv_path:?} (weight {}, every {}, batch {})",
-            pairs.len(), args.tv_weight, args.tv_apply_every, args.tv_batch);
+        let band_id = if tv_has_bands && bands.len() == pairs.len() {
+            Some(bands)
+        } else {
+            None
+        };
+        let band_weights = args.tv_band_weights;
+        println!(
+            "Loaded {} TV pairs from {tv_path:?} (weight {}, every {}, batch {}, bands={}, band_weights={:?})",
+            pairs.len(),
+            args.tv_weight,
+            args.tv_apply_every,
+            args.tv_batch,
+            band_id.is_some(),
+            band_weights,
+        );
         Some(TvRegularizer {
             pairs,
             features: all_features,
             weight: args.tv_weight,
             apply_every: args.tv_apply_every,
             batch: args.tv_batch,
+            band_id,
+            band_weights,
         })
     } else {
         None

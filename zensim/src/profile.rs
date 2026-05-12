@@ -139,6 +139,10 @@ impl ProfileParams {
             num_scales,
             score_mapping_a,
             score_mapping_b,
+            // Custom training params get the legacy distance-to-score mapping
+            // (V0_2 semantics). V0_8+ pre-calibrated bakes set the flag in
+            // their static `ProfileParams` definitions.
+            skip_score_mapping: false,
             mlp_bytes: None,
         }
     }

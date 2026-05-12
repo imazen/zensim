@@ -140,6 +140,16 @@ pub struct TvRegularizer {
     pub apply_every: usize,
     /// Mini-batch size of TV pairs per update. 32 is fine.
     pub batch: usize,
+    /// Per-pair band id (0..3 → B0/B1/B2/B3 per CID22 paper Table 5).
+    /// When `Some`, must have the same length as `pairs`. The TV
+    /// gradient for pair `k` is scaled by `band_weights[band_id[k]]`
+    /// (if `band_weights` is also set) instead of the flat `weight`.
+    pub band_id: Option<Vec<u8>>,
+    /// Per-band TV weights `[B0, B1, B2, B3]`. When `Some`, must be
+    /// paired with `band_id`. Used in place of `weight` for per-pair
+    /// scaling. Set to e.g. `[10.0, 20.0, 10.0, 10.0]` to push B1
+    /// harder than other bands.
+    pub band_weights: Option<[f64; 4]>,
 }
 
 impl TvRegularizer {
@@ -364,10 +374,18 @@ pub fn train_mlp_with_tv(
                 && n_steps.is_multiple_of(tv_cfg.apply_every as u64)
                 && !tv_cfg.pairs.is_empty()
             {
-                let scale = tv_cfg.weight / tv_cfg.batch.max(1) as f64;
+                let flat_scale = tv_cfg.weight / tv_cfg.batch.max(1) as f64;
+                let per_band_active = tv_cfg.band_id.is_some() && tv_cfg.band_weights.is_some();
                 for _ in 0..tv_cfg.batch {
                     let pair_idx = (rng.next_u64() as usize) % tv_cfg.pairs.len();
                     let (lo, hi) = tv_cfg.pairs[pair_idx];
+                    let scale = if per_band_active {
+                        let band = tv_cfg.band_id.as_ref().unwrap()[pair_idx] as usize;
+                        let bw = tv_cfg.band_weights.as_ref().unwrap()[band];
+                        bw / tv_cfg.batch.max(1) as f64
+                    } else {
+                        flat_scale
+                    };
                     let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
                     let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
                     let (y_lo, h_lo_pre, h_lo) = forward(
