@@ -2,6 +2,7 @@
 name = "zensim-train-core"
 version = "0.0.1"
 edition = "2024"
+rust-version = "1.93.0"
 description = "Pure-Rust trainer core for zensim MLP profiles (RankNet + Adam). WASM-compatible."
 license = "MIT"
 publish = false
