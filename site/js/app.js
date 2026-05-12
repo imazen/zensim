@@ -226,6 +226,7 @@ function renderParetoCid22Aic3(bakes) {
   }
   // Add hard-coded ensemble points (not in bakes index)
   const ensemblePoints = [
+    { label: '{V0_16,V0_20} 2-bake (OPTIMUM)', aic: 0.8050, cid: 0.8910, color: '#d18811' },
     { label: '{V0_16,V0_21} 2-bake', aic: 0.8024, cid: 0.8911, color: '#d18811' },
     { label: '{V0_16,V0_20,V0_21} 3-bake', aic: 0.8051, cid: 0.8908, color: '#d18811' },
     { label: '5-bake ensemble', aic: 0.8012, cid: 0.8896, color: '#7fb3d5' },
