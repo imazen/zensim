@@ -28,6 +28,35 @@
     is synthetic-only; the 49-image CID22 validation set is sacred holdout.
   </p>
 
+  <h2>TL;DR (cycle 5+6 findings, 2026-05-12)</h2>
+  <ul>
+    <li><strong>V0_16 SHIP</strong> (TV=20, seed=1): CID22 SROCC 0.8919
+        (+0.0024 vs fast-ssim2), AIC-3 0.7990 (+0.0025), non-mono 2.30 %.
+        Honest training (post-purge); the single-bake runtime weight.</li>
+    <li><strong>Recipe-level signal</strong>: 4-seed sweep shows CID22
+        mean = 0.8872 ± 0.0034. V0_16 is on the +1.4σ tail. <strong>The
+        recipe sits at ssim2 in expectation on CID22</strong>, but ssim2
+        was partly tuned on CID22 — so CID22 is biased.</li>
+    <li><strong>Honest cross-dataset</strong>: On AIC-3 (truly held-out
+        from ssim2), the recipe ensemble beats ssim2 by +0.0033. The
+        <strong>{V0_20, V0_21} 2-bake hits AIC-3 +0.0114</strong> over
+        ssim2 — the highest cross-dataset margin recorded.</li>
+    <li><strong>Pareto-optimal deployment</strong>: <code>{V0_16, V0_20, V0_21}</code>
+        3-bake ensemble — CID22 0.8908 (+0.0013), AIC-3 0.8051 (+0.0086).
+        Beats ssim2 on both. Requires zenpredict multi-bake runtime
+        (~3-4 hours Rust work, see Section 9 candidate #2).</li>
+    <li><strong>Where the lift comes from</strong>: B2 (high-quality
+        band, 68 % of CID22 pairs) — ensemble +0.008 over ssim2 there.
+        B0/B1 still trail; cycle-7 candidate is image-type-aware MLP
+        dispatch (Section 9 candidate #1).</li>
+    <li><strong>Smoothness</strong>: V0_16 non-mono = 2.30 % on JPEG;
+        AVIF/JXL = 0.00 %; WebP = 0.50 %. Strict 4.86 % target met
+        on every codec.</li>
+    <li><strong>Contamination</strong>: V0_8's CID22 0.8948 was inflated
+        by +0.0034 from training-set leakage (22 of 49 CID22 holdout
+        refs leaked via hex-hashed crops). 361 files purged 2026-05-12.</li>
+  </ul>
+
   <h2>1. Training data pipeline</h2>
   <h3>1.1 Source corpus</h3>
   <p>
