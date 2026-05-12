@@ -194,49 +194,59 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin`
 /// (byte-identical to the prior shipped state).
 ///
-/// File: `zensim/weights/v0_8_2026-05-11.bin` (md5 `67482691`).
-/// Trained on **leak-free** safe-synthetic CSV (1,015 perceptual
-/// duplicates of CID22 holdout removed; -28% rows). h=128,
-/// **TV=15** (raised from V0_7's TV=10 to close the B1 gap),
-/// seed=1, KonJND-aligned. Affine-calibrated (α=31.1041,
-/// β=-4.3882, R²=0.76) against ssim2 on the synth corpus.
+/// File: `zensim/weights/v0_15_2026-05-12.bin` (md5 `73d5e418`,
+/// affine-calibrated α=26.9332, β=-4.5520, R²=0.7447 against ssim2
+/// truth on unified JPEG parquet; raw bake md5 was `bb09b939`).
+/// Trained on **fully-purged** safe-synthetic CSV (144,791 rows after
+/// 11,629 contaminated rows at perceptual-duplicate d≤16 were removed
+/// via the 2026-05-12 purge — see
+/// `benchmarks/contaminated_sources_purged_2026-05-12.txt` for the
+/// 361 source PNGs that were permanently deleted).
+/// h=128, **TV=15**, seed=1, KonJND-aligned.
 ///
-/// **Trades smoothness for CID22**: V0_8 CID22 SROCC = 0.8948 vs
-/// fast-ssim2 0.8895 (**+0.0053**, vs V0_7's +0.0038). Per-band:
-/// - B0 (<50): 0.4321 vs ssim2 0.4418 (-0.010 vs V0_7 -0.005)
-/// - B1 [50,65): **0.4554** vs ssim2 0.4694 (**-0.014, BIG B1 improvement
-///   vs V0_7's -0.027**)
-/// - B2 [65,90): 0.7872 vs ssim2 0.7722 (+0.015 BEATS)
-/// - B3 (≥90, n=43): 0.1628 vs ssim2 0.1121 (+0.051 BEATS)
-/// - Near-PJND: 0.3673 vs ssim2 0.3908 (-0.024 vs V0_7 -0.017)
+/// **V0_15 honest results** vs fast-ssim2 0.8895:
+/// - CID22 SROCC = **0.8914** (+0.0019, beats ssim2)
+/// - AIC-3 CTC = **0.8019** (+0.0054, beats ssim2)
+/// - Non-mono q-step rate = **2.51 %** (MEETS strict 4.86 % target;
+///   1/2 of V0_8's 5.87 %)
+/// - val_mean = **0.9427** (beats V0_8's 0.9416)
 ///
-/// **Non-mono q-step rate = 5.87 % (OVER 5.5 % target by 0.37 %)**.
-/// CLAUDE.md smoothness gate updated from 5.5 % to 6.0 % to permit
-/// this ship — the B1 closure was judged worth the smoothness
-/// regression. Prior V0_7 ship (5.46 %, B1 -0.027) archived at
-/// `zensim/weights/archive/v0_7_seed1_tv10_2026-05-11.bin`.
+/// **Per-band CID22** (honest, no contamination inflation):
+/// - B0 (<50): 0.3933 vs ssim2 0.4418 (-0.049)
+/// - B1 [50,65): 0.4307 vs ssim2 0.4694 (-0.039)
+/// - B2 [65,90): 0.7849 vs ssim2 0.7722 (+0.013 BEATS)
+/// - B3 (≥90, n=43): **0.1886** vs ssim2 0.1121 (+0.077 BEATS, best of any bake)
+/// - Near-PJND: 0.3453 vs ssim2 0.3908 (-0.046)
 ///
-/// **Holdout-overlap remediation**: V0_5's 0.8900 was inflated by
-/// 11.77 % training-pair leak from 22 of 49 CID22 holdout refs (via
-/// hex-hashed crops circumventing the filename blocklist). The
-/// dHash-64 audit + stage-2 sliding-window detector
-/// (`zensim-validate/src/bin/check_holdout_overlap{,_stage2}.rs`)
-/// drove the cleanup; cleaned features file at
-/// `/tmp/zensim_loop/safe_synth_clean_features.csv`.
+/// **V0_8 was tainted**: its CID22 0.8948 included +0.0034 inflation
+/// from training-set leakage of 22 of 49 CID22 holdout refs (via
+/// hex-hashed crops circumventing the filename blocklist + the
+/// looser-than-d≤16 perceptual-overlap cleanup). The 2026-05-12 purge
+/// removed those 361 source files + 30.6 GiB of encoded variants +
+/// .features.bin caches + tower mirror, permanently. V0_15 is the
+/// honest replacement.
+///
+/// **V0_8's per-band B0/B1 advantages were artifacts**:
+/// V0_8 B0 -0.010 vs V0_15 -0.049 (the 0.039 difference was contamination)
+/// V0_8 B1 -0.014 vs V0_15 -0.039 (the 0.025 difference was contamination)
+/// V0_15 honestly shows the model is weaker than ssim2 in low-quality
+/// bands. Goal #1 (match-or-exceed all bands) is not met by either,
+/// but V0_15's report is honest while V0_8's wasn't.
 ///
 /// Function and slot names preserved (`mlp_bake_preview_v0_4`,
 /// `PROFILE_PREVIEW_V0_4`) for source-compat with consumer pinning.
 /// Predecessors archived at `zensim/weights/archive/`:
-/// - `v0_5_2026-05-11.bin` (md5 `0133d165`, training leak 11.77 %)
-/// - `v0_7_seed0_2026-05-11.bin` (md5 `b31741e3`, initial V0_7
-///   ship before seed=1 swap; CID22 0.8912, non-mono 5.67 %)
-/// - `v0_7_seed1_tv10_2026-05-11.bin` (md5 `0ad0dace`, V0_7
-///   seed=1 TV=10 superseded by V0_8 TV=15)
+/// - `v0_5_2026-05-11.bin` (md5 `0133d165`, original 11.77% leak)
+/// - `v0_7_seed0_2026-05-11.bin` (md5 `b31741e3`)
+/// - `v0_7_seed1_tv10_2026-05-11.bin` (md5 `0ad0dace`)
+/// - `v0_8_tainted_2026-05-11.bin` (md5 `67482691`, +0.0034 inflation
+///   confirmed 2026-05-12)
+///
 /// Gated behind `__experimental_versions` because the `weights/`
 /// directory is excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    include_bytes!("../weights/v0_8_2026-05-11.bin")
+    include_bytes!("../weights/v0_15_2026-05-12.bin")
 }
 
 #[cfg(feature = "__experimental_versions")]

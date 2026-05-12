@@ -57,7 +57,32 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
 - `ZensimError` variants `ImageTooLarge` and `FeatureWeightsLengthMismatch`.
   `ZensimError` is now `#[non_exhaustive]`.
 
-### Added (zensim, unreleased) — V0_8 ship 2026-05-11 (eve)
+### Added (zensim, unreleased) — V0_15 ship 2026-05-12 (HONEST replacement for tainted V0_8)
+- **V0_15 shipped (TV=15, seed=1)** at
+  `zensim/weights/v0_15_2026-05-12.bin` (md5 `73d5e418`, 119,812 bytes,
+  affine-calibrated α=26.9332, β=-4.5520, R²=0.7447).
+  Trained on **fully-purged** safe-synthetic CSV (144,791 rows after
+  the 2026-05-12 user-directed purge removed 361 contaminated source
+  PNGs + 30.6 GiB encoded variants + .features.bin caches + tower mirror).
+  **Honest CID22 SROCC = 0.8914** (+0.0019 vs ssim2's 0.8895);
+  **AIC-3 CTC = 0.8019** (+0.0054 vs ssim2's 0.7965);
+  **Non-mono q-step = 2.51%** (MEETS strict 4.86% target, vs V0_8's 5.87%).
+  Per-band: B3 +0.077 (best of any bake); B0/B1/Near-PJND show honest
+  gaps to ssim2 (-0.049/-0.039/-0.046) where V0_8's were artificially
+  small (-0.010/-0.014/-0.024) due to training-set leakage.
+  Predecessor V0_8 (md5 `67482691`) archived at
+  `zensim/weights/archive/v0_8_tainted_2026-05-11.bin` with
+  `tainted` suffix; its 0.8948 CID22 was inflated by +0.0034 from
+  contamination.
+- **Holdout-overlap PURGE (2026-05-12)**: per user directive, deleted
+  361 contaminated source files + all derivatives identified at d≤16
+  perceptual-hash threshold (~75 GiB freed). Manifest preserved at
+  `benchmarks/contaminated_sources_purged_2026-05-12.txt`. The
+  original holdout-overlap audit used a looser threshold; this purge
+  goes broader to eliminate residual cropped/resized near-duplicates
+  of the 49 CID22 held-out references.
+
+### Added (zensim, unreleased) — V0_8 ship 2026-05-11 (eve) [SUPERSEDED 2026-05-12]
 - **V0_8 shipped (TV=15, seed=1)** at
   `zensim/weights/v0_8_2026-05-11.bin` (md5 `67482691`, 119,812 bytes).
   Trades smoothness for B1 closure: **CID22 SROCC = 0.8948** vs
