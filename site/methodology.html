@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>zensim — Methodology</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           margin: 24px; color: #222; max-width: 900px; line-height: 1.55; }
+    h1 { font-weight: 700; letter-spacing: -0.02em; }
+    h2 { border-bottom: 1px solid #eee; padding-bottom: 4px; margin-top: 36px; }
+    h3 { color: #444; margin-top: 24px; }
+    code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-size: 13px; }
+    pre { background: #f4f4f4; padding: 12px 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+    .lede { color: #666; font-size: 14px; max-width: 80ch; }
+    table { border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 10px; text-align: left; }
+    th { background: #f0f0f0; }
+    .nav { background: #eaf6ea; border-left: 4px solid #0a7d28; padding: 8px 14px; margin: 12px 0; }
+    .footnote { font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <div class="nav">← <a href="index.html">Back to dashboard</a></div>
+  <h1>zensim methodology</h1>
+  <p class="lede">
+    How the V_X bakes are trained, calibrated, and validated. All training
+    is synthetic-only; the 49-image CID22 validation set is sacred holdout.
+  </p>
+
+  <h2>1. Training data pipeline</h2>
+  <h3>1.1 Source corpus</h3>
+  <p>
+    Training pairs come from <code>/mnt/v/input/zensim/sources/</code> — a corpus of
+    hex-hashed PNG crops/resizes derived from CLIC 2025 + non-CID22 image
+    collections. After the 2026-05-12 d≤16 perceptual-hash purge, the
+    corpus excludes all sources within perceptual-hash distance 16 of any
+    of the 49 CID22 validation references (361 files removed).
+  </p>
+  <h3>1.2 Synthetic pair generation</h3>
+  <p>
+    Each source image is encoded by 6 codec×quality grids (zenjpeg/zenavif/
+    zenwebp/zenjxl/zenpng/zengif, multiple quality levels each) via
+    <code>coefficient/examples/generate_zensim_training</code>. For each
+    (reference, distorted) pair we compute <code>gpu_ssimulacra2</code>
+    (training target) and <code>gpu_butteraugli</code> (validator only).
+  </p>
+  <h3>1.3 The purge (2026-05-12)</h3>
+  <p>
+    The original 2026-05-11 perceptual-overlap cleanup used a threshold
+    too lax to catch the leaks. The 2026-05-12 purge identified
+    <strong>361 contaminated source files</strong> at dHash-64 distance
+    ≤ 16 from any CID22 validation reference. Total deletion footprint
+    ~75 GiB across:
+  </p>
+  <ul>
+    <li>361 source PNGs (282 MiB) + tower NFS mirror</li>
+    <li>361 encoded variant directories (30.6 GiB)</li>
+    <li>27 cached feature .bin files (9 GiB) + tower mirror (3.2 GiB)</li>
+    <li>15 training CSVs stripped of 7-10% rows each</li>
+  </ul>
+  <p>
+    Manifest preserved at
+    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/contaminated_sources_purged_2026-05-12.txt">benchmarks/contaminated_sources_purged_2026-05-12.txt</a>.
+  </p>
+
+  <h2>2. Feature extraction</h2>
+  <p>
+    Per-pair features f0..f227 come from <code>zenanalyze</code> Tier 1+2+3+
+    Palette+Alpha+tier_depth passes on the distorted image (228-dim feature
+    vector). zenanalyze emits 90 additional features f228..f299 on the
+    <code>feat/dense-percentiles</code> branch, but the runtime uses only
+    the first 228 to match the bake's input dimensionality
+    (<code>--max-features 228</code> in the trainer).
+  </p>
+
+  <h2>3. Training algorithm</h2>
+  <h3>3.1 Architecture</h3>
+  <pre>228 → 128 (LeakyReLU α=0.01) → 1 (Identity)
+~30k trainable parameters
+ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
+
+  <h3>3.2 RankNet pairwise objective</h3>
+  <p>
+    For each training pair <code>(low, hi)</code> sharing a reference and codec
+    with q<sub>low</sub> &lt; q<sub>hi</sub> (so hi has higher ssim2), the
+    loss is <code>log(1 + exp(pred[hi] − pred[low]))</code> — penalizing
+    predictions where the higher-quality side has a higher distance.
+  </p>
+
+  <h3>3.3 Total-variation (TV) regularization</h3>
+  <p>
+    Within each (source, codec) curve, adjacent-q pairs additionally feed a TV
+    loss <code>max(0, pred[hi] − pred[low])</code>. This explicit
+    monotonicity prior is what closes the within-curve smoothness.
+    V0_16 uses flat TV weight = 20; we found this is the sweet spot between
+    V0_15 (TV=15, undersmoothed B1) and V0_10's per-band [15,25,15,15]
+    (overshot and hurt B1).
+  </p>
+
+  <h3>3.4 Multi-group validation policy</h3>
+  <p>
+    The trainer maintains 4 groups: safesyn (training only, weight 1.0),
+    kadid (train weight 0.3, validate), tid (train weight 0.3, validate),
+    konjnd (train weight 0.5, validate). <code>val_policy=min</code> uses
+    the worst-per-group SROCC as the early-stop signal — preventing any
+    one group from being sacrificed.
+  </p>
+
+  <h3>3.5 Cyclic cosine learning rate</h3>
+  <p>
+    Cyclical 50-epoch cosine schedule (0.001 → 0.0001 → restart). Each cycle
+    explores a local optimum then resets to escape. Early-stop patience 50
+    epochs typically ends training around ep 140-190.
+  </p>
+
+  <h3>3.6 Affine calibration</h3>
+  <p>
+    Raw bake output is rank-meaningful but not calibrated to ssim2's 0..100
+    scale. Post-training we fit <code>y_cal = α + β · y_raw</code> by linear
+    regression against ssim2 truth on the JPEG unified parquet (≈ 36k pairs).
+    For V0_16: α = 28.0366, β = -5.0738, R² = 0.7423. The calibration is
+    rank-invariant — only the scale/offset changes, not the SROCC.
+  </p>
+  <p>
+    Implementation: <code>scripts/v_next/affine_calibrate_znpr_v2.py</code>
+    mutates the final Linear layer in place: <code>W' = β·W</code>,
+    <code>b' = β·b + α</code>. The bake stays 119,812 bytes.
+  </p>
+
+  <h2>4. Validation</h2>
+  <h3>4.1 CID22 held-out (gold standard)</h3>
+  <p>
+    The 49 CID22 references at <code>/mnt/v/dataset/cid22/CID22_validation_set/original/</code>
+    are sacred holdout — their content never enters training. We measure CID22 aggregate SROCC
+    on 4,292 (ref, dist) pairs and per-band SROCC on the 4 paper-Table-5
+    bands (B0&lt;50, B1[50,65), B2[65,90), B3≥90 MCOS) plus a Near-PJND
+    sub-band [58,68].
+  </p>
+  <h3>4.2 AIC-3 CTC (held-out cross-codec)</h3>
+  <p>
+    600 codec-output pairs (10 images × 6 codecs × 10 quality strata) from
+    JPEG AIC-3 (EPFL). Provides cross-codec generalization signal independent
+    of CID22.
+  </p>
+  <h3>4.3 KADID10k + TID2013 (in training, sanity guard)</h3>
+  <p>
+    KADID-10k and TID2013 are in the training validation groups, so their
+    SROCC is not held-out. They serve as pipeline-health checks for synthetic
+    distortions (blur, noise, color shift — which compose ~95% of those
+    datasets).
+  </p>
+  <h3>4.4 Non-monotonic q-step rate (smoothness gate)</h3>
+  <p>
+    On the JPEG unified parquet (7,200 quality curves × 4 q steps each =
+    28,800 adjacent-q pairs), count pairs where higher q produced lower
+    predicted quality. Goal: ≤ 4.86% (V0_2 floor; SSIM2 truth is 5.08%).
+    V0_16 achieves <strong>2.30%</strong>.
+  </p>
+
+  <h2>5. Metrics used in this report</h2>
+  <table>
+    <tr><th>Metric</th><th>Role</th><th>Direction</th></tr>
+    <tr><td>fast-ssim2</td><td>Training target + reference baseline</td><td>higher = better quality (0..100)</td></tr>
+    <tr><td>butteraugli (3-norm)</td><td>Validation cross-check (concordance filter)</td><td>distance — lower = better</td></tr>
+    <tr><td>dssim</td><td><em>Not currently integrated</em> (queued)</td><td>—</td></tr>
+    <tr><td>V_X / V0_16</td><td>The MLP we ship</td><td>distance internally; affine-calibrated to ssim2 scale</td></tr>
+    <tr><td>MCOS (CID22)</td><td>Human ground truth</td><td>0..100, higher = better</td></tr>
+    <tr><td>score.jnd (AIC-3)</td><td>Human JND — alternative ground truth</td><td>negative — more negative = more degraded</td></tr>
+  </table>
+
+  <h2>6. Honest-vs-tainted comparison (V0_8 vs V0_16)</h2>
+  <p>
+    Before the 2026-05-12 purge, V0_8 (shipped 2026-05-11 eve) reported CID22
+    SROCC 0.8948. After the audit revealed 11,629 training rows from
+    contaminated sources, V0_8 was archived and V0_16 (same recipe except
+    TV=15 → 20, on properly-purged 144,791-row CSV) shipped with CID22
+    0.8919 — **+0.0024 above fast-ssim2** honestly. V0_8's apparent
+    +0.0053 lead was 0.0034 inflation (training-set leakage of 22 of 49
+    CID22 holdout refs via hex-hashed crops) + 0.0019 genuine signal.
+  </p>
+  <p>
+    The B1 closure narrative is the most subtle finding: V0_8 had B1 SROCC
+    0.4554 (claimed -0.014 below ssim2), but that included contamination
+    bias. V0_15 with TV=15 on clean data could only reach B1 0.4307
+    (-0.039). V0_16 with TV=20 on the same clean data reaches B1 0.4559
+    — matching V0_8's number HONESTLY. The B1 ceiling wasn't fundamental;
+    V0_15 was under-regularized.
+  </p>
+
+  <h2>7. Reproducibility</h2>
+  <p>
+    All training data, scripts, and bakes are in the
+    <a href="https://github.com/imazen/zensim">imazen/zensim</a> repo
+    (private clone in the imazen org).
+  </p>
+  <pre>cargo build --release -p zensim-validate --bin zensim_mlp_train
+
+target/release/zensim_mlp_train \
+  --group safesyn_purged:/tmp/zensim_loop/safe_synth_clean_features.csv:1.0:0.0 \
+  --group kadid:/mnt/v/.../kadid_features.csv:0.3:1.0 \
+  --group tid:/mnt/v/.../tid_features.csv:0.3:1.0 \
+  --group konjnd:/tmp/zensim_loop/konjnd_aligned_features.csv:0.5:1.0 \
+  --hidden 128 --seed 1 --epochs 300 --max-features 228 \
+  --tv-pairs-file /tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv \
+  --tv-weight 20 \
+  --val-policy min \
+  --out v0_16.bin
+
+python3 scripts/v_next/affine_calibrate_znpr_v2.py \
+  --in-bake v0_16.bin \
+  --out-bake v0_16_calibrated.bin \
+  --alpha 28.0366 --beta -5.0738</pre>
+
+  <h2>8. Known gaps</h2>
+  <ul>
+    <li><strong>dssim integration</strong>: the unified parquet doesn't carry dssim. Adding it requires extending <code>dataset_metric_baseline.rs</code> with a dssim crate dependency.</li>
+    <li><strong>B0 SROCC -0.020</strong>: V0_16 still trails ssim2 in B0 (below-medium quality). May require content-class-aware MLP dispatch.</li>
+    <li><strong>KonJND-1k path</strong>: dataset directory not currently mounted under <code>/mnt/v/dataset/</code>; PJND validation deferred.</li>
+    <li><strong>Coefficient repo blocklist</strong>: 361 hex stems should be added to the synth generator's blocklist to prevent re-introduction. Out-of-repo from zensim; needs user touch.</li>
+  </ul>
+
+  <div class="footnote">
+    Last updated: 2026-05-12.
+    Source: <a href="https://github.com/imazen/zensim/blob/main/site/methodology.html">site/methodology.html</a>.
+  </div>
+</body>
+</html>

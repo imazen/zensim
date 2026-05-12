@@ -345,6 +345,38 @@ function renderStep5(step5Bakes) {
   Plotly.newPlot('chart-step5', traces, layout, { responsive: true });
 }
 
+async function loadScatter(label) {
+  try {
+    return await fetchJSON(`data/scatter/${label}.json`);
+  } catch (e) {
+    console.warn(`scatter ${label} not found:`, e.message);
+    return null;
+  }
+}
+
+const BAND_COLOR = ['#b1130c', '#d18811', '#0a7d28', '#1f77b4']; // B0 red, B1 orange, B2 green, B3 blue
+
+function renderScatter(scatter, xKey, xLabel, divId) {
+  if (!scatter) return;
+  const pts = scatter.points;
+  // One trace per band for colored legend
+  const traces = [0, 1, 2, 3].map(band => ({
+    x: pts.filter(p => p.band === band).map(p => p[xKey]),
+    y: pts.filter(p => p.band === band).map(p => p.v),
+    mode: 'markers',
+    type: 'scatter',
+    marker: { size: 4, color: BAND_COLOR[band], opacity: 0.5 },
+    name: `B${band} (n=${pts.filter(p => p.band === band).length})`,
+  }));
+  const layout = {
+    title: `${scatter.label} (V_X, y) vs ${xLabel} (x) — CID22 ${scatter.n} pairs, colored by MCOS band`,
+    xaxis: { title: xLabel },
+    yaxis: { title: 'V_X quality (= -distance)' },
+    showlegend: true,
+  };
+  Plotly.newPlot(divId, traces, layout, { responsive: true });
+}
+
 async function main() {
   const bakes = await loadAllBakes();
   const parity = await loadParityTable();
@@ -369,6 +401,10 @@ async function main() {
   if (document.getElementById('chart-pareto')) renderPareto(bakes);
   const step5 = await loadStep5Bakes();
   if (document.getElementById('chart-step5')) renderStep5(step5);
+  const scatter = await loadScatter('v0_16');
+  if (document.getElementById('chart-scatter-ssim2')) renderScatter(scatter, 's', 'fast-ssim2 score', 'chart-scatter-ssim2');
+  if (document.getElementById('chart-scatter-butter')) renderScatter(scatter, 'b', '−butter (3-norm) — higher=better', 'chart-scatter-butter');
+  if (document.getElementById('chart-scatter-human')) renderScatter(scatter, 'h', 'human MCOS', 'chart-scatter-human');
 
   aggSelect.addEventListener('change', e => renderAggregate(bakes, e.target.value));
   pbSelect.addEventListener('change',  e => renderPerBand(bakes,  e.target.value));

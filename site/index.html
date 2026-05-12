@@ -30,6 +30,7 @@
 </head>
 <body>
   <h1>zensim — V_X progression vs CID22 paper</h1>
+  <p style="margin: 4px 0 16px 0; font-size: 14px;"><a href="methodology.html">→ Full methodology</a></p>
   <p class="lede">
     Interactive per-band SROCC graphs for our V_X champion bakes
     versus the SSIMULACRA 2 reference and the CID22 paper's
@@ -102,6 +103,23 @@
     49-ref held-out target. We use the 49-ref held-out subset only.
   </p>
   <div id="parity-table"></div>
+
+  <h2>Scatter plots: V0_16 vs reference metrics (CID22)</h2>
+  <p class="lede">
+    Each point is one CID22 (reference, distorted) pair, plotted by V0_16's
+    quality score (−distance, y-axis) against a reference metric (x-axis).
+    Color = MCOS band (red=B0 below-medium, orange=B1 medium, green=B2 high,
+    blue=B3 visually-lossless).
+    A perfect rank match shows monotonic clouds.
+    <strong>dssim is not yet plotted</strong> — only ssim2 + butter are in the
+    current eval pipeline (dssim integration is queued).
+  </p>
+  <h3>V0_16 vs fast-ssim2</h3>
+  <div id="chart-scatter-ssim2" class="chart"></div>
+  <h3>V0_16 vs butteraugli (3-norm, negated)</h3>
+  <div id="chart-scatter-butter" class="chart"></div>
+  <h3>V0_16 vs human MCOS (gold standard)</h3>
+  <div id="chart-scatter-human" class="chart"></div>
 
   <h2>Step-5 per-band SROCC on CID22</h2>
   <p class="lede">
