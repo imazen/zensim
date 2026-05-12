@@ -58,6 +58,24 @@
         "CID22",
         "AIC-3 CTC"
       ]
+    },
+    {
+      "label": "V0_11_flat_tv20",
+      "notes": "Flat TV=20 seed=1. CID22=0.8897 (+0.0002 vs ssim2, -0.005 below V0_8). AIC-3=0.8056 (BEATS V0_8 0.8043 by +0.0013, +0.0091 vs ssim2). Non-mono=2.33%. B0 regression -0.040. Pareto point: best AIC-3 + good smoothness, worst B0.",
+      "json": "bakes/V0_11_flat_tv20.json",
+      "datasets": [
+        "CID22",
+        "AIC-3 CTC"
+      ]
+    },
+    {
+      "label": "V0_12_b1_oversample",
+      "notes": "V0_8 recipe on B1-oversampled safesyn (171k rows, B1 matches CID22 23.6%). CID22=0.8895 (ties ssim2 exactly). AIC-3=0.7972 (+0.0007). NEW NON-MONO RECORD: 1.68% (1/3 of V0_8). B3 +0.085 best ever. B1=-0.025 — B1 oversample HYPOTHESIS DISPROVED.",
+      "json": "bakes/V0_12_b1_oversample.json",
+      "datasets": [
+        "CID22",
+        "AIC-3 CTC"
+      ]
     }
   ]
 }
