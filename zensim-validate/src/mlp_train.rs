@@ -948,7 +948,7 @@ impl SplitMix64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zensim::mlp::{Model, Predictor};
+    use zenpredict::{Model, Predictor};
 
     fn predict_one(predictor: &mut Predictor<'_>, features: &[f64]) -> f64 {
         let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
