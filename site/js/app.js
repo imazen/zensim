@@ -300,7 +300,15 @@ function renderStep5(step5Bakes) {
       line: { color: BAKE_COLORS[i % BAKE_COLORS.length], width: 2 },
     });
   });
-  // ssim2 + butter references (use first bake's data — same metrics for all)
+  // V0_2 + ssim2 + butter references (use first bake's data — same metrics for all)
+  traces.push({
+    x: xs,
+    y: first.bands.map(b => b.srocc_v02),
+    mode: 'lines+markers',
+    type: 'scatter',
+    name: 'V0_2 (linear baseline)',
+    line: { color: '#7fb3d5', width: 1, dash: 'dashdot' },
+  });
   traces.push({
     x: xs,
     y: first.bands.map(b => b.srocc_ssim2),
