@@ -136,6 +136,21 @@
   </p>
   <div id="chart-step5" class="chart"></div>
 
+  <h2>V0_16 non-mono q-step rate across codecs</h2>
+  <p class="lede">
+    The V0_16 ship's smoothness gate (≤ 4.86 % non-monotonic q-step rate)
+    holds across all major codec families. AVIF and JXL produce perfectly
+    smooth quality curves; WebP and JPEG are well below target.
+  </p>
+  <table>
+    <tr><th>Codec</th><th>Non-mono q-step rate</th><th>Notes</th></tr>
+    <tr><td>AVIF</td><td><strong>0.00 %</strong></td><td>Perfect smoothness</td></tr>
+    <tr><td>JPEG XL</td><td><strong>0.00 %</strong></td><td>Perfect smoothness</td></tr>
+    <tr><td>WebP</td><td>0.50 %</td><td>Near-perfect</td></tr>
+    <tr><td>JPEG</td><td>2.30 %</td><td>Within 4.86 % target; coarsest q steps</td></tr>
+    <tr><td>PNG</td><td>n/a</td><td>Lossless — no quality curves</td></tr>
+  </table>
+
   <h2>Pareto: CID22 SROCC vs non-mono q-step rate</h2>
   <p class="lede">
     Each bake is a point. The X axis is reversed so smoother bakes appear on the right.
