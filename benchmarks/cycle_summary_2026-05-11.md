@@ -5,10 +5,45 @@
 **Trigger**: user authorized parity-and-methodology effort + Goal 6
 GH Pages site after the V0_5 ship of midday.
 
-## Shipped artifact
+## Shipped artifact (updated)
 
-**V0_7 seed=1** (file: `zensim/weights/v0_7_2026-05-11.bin`,
-md5 `0ad0dace`, 119,812 bytes; zensim commit `c4b059a7`).
+**V0_8 (TV=15, seed=1)** (file: `zensim/weights/v0_8_2026-05-11.bin`,
+md5 `67482691`, 119,812 bytes; zensim commit `f83aa42a`).
+
+V0_8 supersedes V0_7 (which was the midday ship before TV=15 sweep).
+V0_8 trades smoothness for B1 closure and aggregate CID22.
+
+**Final shipping numbers**:
+- CID22 aggregate = **0.8948** (vs ssim2 0.8895, **+0.0053**)
+- B1 SROCC gap = **-0.014** (50% reduction from V0_7's -0.027)
+- Non-mono q-step = **5.87%** (over old 5.5% gate; new gate 6.0%)
+- B2 +0.015, B3 +0.051 BEAT ssim2
+- B0 -0.010, Near-PJND -0.024 (near-parity)
+
+**Predecessor (archived)**: V0_7 seed=1 (md5 `0ad0dace`) — non-mono
+5.46% (within old 5.5% gate) but B1 -0.027.
+
+## Ensemble experiment (Tick 325-326)
+
+Tested averaging predictions of V0_8 (seed=1 TV=15) and seed=13 TV=15.
+
+**JPEG synth parquet (1.7M rows)**:
+- Ensemble non-mono: **5.34%** (vs V0_8 5.87%, seed=13 5.56%) — BEST
+- Ensemble |SROCC| vs ssim2: **0.9311** (vs V0_8 0.9283) — BEST
+- **Strict win on both axes on synth**
+
+**CID22 49-ref held-out**:
+- Ensemble aggregate SROCC: **0.8916** (vs V0_8 0.8948 — LOSS)
+- Per-band: ensemble wins B1 + Near-PJND, V0_8 wins B2/B3/aggregate
+- **NOT a strict CID22 upgrade**
+
+**Verdict**: ensemble path closed. Improves smoothness + within-codec
+SROCC but doesn't carry over to CID22 aggregate. The TV-up to 15
+(V0_8 single-bake) is the better single-component-level win.
+
+## ~~Prior~~
+
+V0_7 seed=1 numbers from the midday ship (now superseded):
 
 | Axis | V0_7 (current) | fast-ssim2 | Δ |
 |---|--:|--:|--:|
