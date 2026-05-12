@@ -136,6 +136,19 @@ def load_jnd_csv(path: str, metric_lookup: dict[str, dict]) -> list[dict]:
     return rows
 
 
+RENAME_ZEN_METRICS = {
+    "dssim_gpu":             "score_dssim",
+    "dssim":                 "score_dssim_cpu",
+    "ssim2_gpu":             "score_ssim2_gpu",
+    "ssim2":                 "score_ssim2",
+    "butteraugli_max_gpu":   "score_butter_max",
+    "butteraugli_pnorm3_gpu":"score_butter_p3",
+    "butteraugli_max":       "score_butter_max_cpu",
+    "butteraugli_pnorm3":    "score_butter_p3_cpu",
+    "zensim":                "score_zensim",
+}
+
+
 def merge_metric_tsv(rows: list[dict], tsv_path: str) -> None:
     if not tsv_path or not os.path.exists(tsv_path):
         print(f"  skip metrics merge: {tsv_path} not found", file=sys.stderr)
@@ -153,7 +166,8 @@ def merge_metric_tsv(rows: list[dict], tsv_path: str) -> None:
     known = {"ref_path", "dist_path", "codec", "image_name", "dlevel"}
     sample = next(iter(by_key.values()))
     metric_cols = [c for c in sample if c not in known and not c.startswith("human_")]
-    print(f"  {tsv_path}: {len(by_key)} rows, metric cols: {metric_cols}",
+    print(f"  {tsv_path}: {len(by_key)} rows, metric cols: {metric_cols} → "
+          f"{[RENAME_ZEN_METRICS.get(c, c) for c in metric_cols]}",
           file=sys.stderr)
     for row in rows:
         k = (row["codec"], row["image_name"], row["dlevel"])
@@ -163,7 +177,7 @@ def merge_metric_tsv(rows: list[dict], tsv_path: str) -> None:
         for c in metric_cols:
             v = _float(m.get(c))
             if v is not None:
-                row[c] = v
+                row[RENAME_ZEN_METRICS.get(c, c)] = v
 
 
 def write_parquet(rows: list[dict], out_path: str) -> None:

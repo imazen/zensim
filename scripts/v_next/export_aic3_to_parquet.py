@@ -94,13 +94,26 @@ def merge_metric_tsv(rows: list[dict], tsv_path: str) -> None:
             except (KeyError, ValueError):
                 continue
             by_key[k] = r
+    # Rename zen-metrics column names → canonical site convention (score_*).
+    rename = {
+        "dssim_gpu":             "score_dssim",
+        "dssim":                 "score_dssim_cpu",
+        "ssim2_gpu":             "score_ssim2_gpu",
+        "ssim2":                 "score_ssim2",
+        "butteraugli_max_gpu":   "score_butter_max",
+        "butteraugli_pnorm3_gpu":"score_butter_p3",
+        "butteraugli_max":       "score_butter_max_cpu",
+        "butteraugli_pnorm3":    "score_butter_p3_cpu",
+        "zensim":                "score_zensim",
+    }
     metric_cols = []
     if by_key:
         sample = next(iter(by_key.values()))
         known = {"ref_path", "dist_path", "codec", "img_name", "quality",
                  "quality_selected", "bpp", "score_jnd"}
         metric_cols = [c for c in sample.keys() if c not in known]
-        print(f"  {tsv_path}: {len(by_key)} rows, metric cols: {metric_cols}",
+        print(f"  {tsv_path}: {len(by_key)} rows, metric cols: {metric_cols} → "
+              f"{[rename.get(c, c) for c in metric_cols]}",
               file=sys.stderr)
     for row in rows:
         k = (row["codec"], row["image_name"], row["quality_index"])
@@ -109,7 +122,7 @@ def merge_metric_tsv(rows: list[dict], tsv_path: str) -> None:
             continue
         for c in metric_cols:
             try:
-                row[c] = float(m[c])
+                row[rename.get(c, c)] = float(m[c])
             except (KeyError, ValueError):
                 continue
 
@@ -118,15 +131,20 @@ def write_parquet(rows: list[dict], out_path: str) -> None:
     if not rows:
         print("no rows; nothing to write", file=sys.stderr)
         sys.exit(1)
-    cols: dict[str, list] = {}
+    # Collect every column name across rows (preserve first-seen order;
+    # missing values → None per pa.Table.from_pydict semantics).
+    col_order: list[str] = []
+    seen: set[str] = set()
     for r in rows:
-        for k, v in r.items():
-            cols.setdefault(k, []).append(v)
+        for k in r:
+            if k not in seen:
+                col_order.append(k); seen.add(k)
+    cols: dict[str, list] = {c: [r.get(c) for r in rows] for c in col_order}
     fields: list[pa.Field] = []
-    for k in cols:
+    for k in col_order:
         if k in ("q", "quality_index"):
             t = pa.uint32()
-        elif k in ("bpp", "human_jnd") or k.startswith("score_"):
+        elif k in ("bpp", "human_jnd") or k.startswith("score_") or k.startswith("human_"):
             t = pa.float32()
         else:
             t = pa.string()
