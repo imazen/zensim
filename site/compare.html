@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>zensim — interactive corpus comparison</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           margin: 24px; color: #222; max-width: 1400px; }
+    h1 { font-weight: 700; letter-spacing: -0.02em; }
+    h2 { border-bottom: 1px solid #eee; padding-bottom: 4px; margin-top: 28px; }
+    .lede { color: #666; font-size: 14px; max-width: 80ch; }
+    .layout { display: grid; grid-template-columns: 280px 1fr; gap: 24px; margin-top: 16px; }
+    .panel { background: #f7f7f7; border-radius: 6px; padding: 12px; font-size: 13px; }
+    .panel h3 { margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase;
+                letter-spacing: 0.04em; color: #555; }
+    .corpus-list { display: flex; flex-direction: column; gap: 4px; }
+    .corpus-list label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .axis-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+    .axis-row select { padding: 4px 6px; font-size: 13px; }
+    .chart { width: 100%; min-height: 520px; }
+    table { border-collapse: collapse; margin: 12px 0; font-size: 12px; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 3px 8px; text-align: left; }
+    th { background: #f0f0f0; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .progress { font-size: 12px; color: #555; min-height: 18px; }
+    .progress.busy { color: #b1130c; }
+    .progress.ok   { color: #0a7d28; }
+    button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+    .small { font-size: 12px; color: #888; }
+  </style>
+</head>
+<body>
+  <h1>zensim — interactive corpus comparison</h1>
+  <p style="margin: 4px 0 16px 0; font-size: 14px;">
+    <a href="index.html">← V_X champion site</a> ·
+    <a href="methodology.html">methodology</a>
+  </p>
+  <p class="lede">
+    Pick corpora, choose any X/Y pair of metrics, get scatter +
+    step-5 line + per-band SROCC. Per the
+    <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">CID22 2023 paper</a>
+    Table 5 band cutoffs. Data is fetched via HTTP-range from R2 and
+    queried in-browser with DuckDB-WASM; all CPU work happens on a
+    Web Worker.
+  </p>
+
+  <div class="layout">
+    <div>
+      <div class="panel">
+        <h3>Corpora</h3>
+        <div class="corpus-list" id="corpus-list">
+          <p class="small">loading manifest…</p>
+        </div>
+      </div>
+      <div class="panel" style="margin-top: 12px;">
+        <h3>Axes</h3>
+        <div class="axis-row">
+          <label for="x-axis">X axis</label>
+          <select id="x-axis"><option value="q">q (codec quality)</option></select>
+        </div>
+        <div class="axis-row">
+          <label for="y-axis">Y axis</label>
+          <select id="y-axis"><option value="score_ssim2">ssim2</option></select>
+        </div>
+      </div>
+      <div class="panel" style="margin-top: 12px;">
+        <h3>Filters</h3>
+        <div class="axis-row">
+          <label for="codec-filter">Codec</label>
+          <select id="codec-filter"><option value="">(all)</option></select>
+        </div>
+        <div class="axis-row">
+          <label for="version-filter">Codec version</label>
+          <select id="version-filter"><option value="">(all)</option></select>
+        </div>
+      </div>
+      <div class="panel" style="margin-top: 12px;">
+        <h3>Render</h3>
+        <button id="run">Run query</button>
+        <div class="progress" id="progress">idle</div>
+      </div>
+    </div>
+
+    <div>
+      <h2>Scatter + step-5 line</h2>
+      <div id="scatter" class="chart"></div>
+
+      <h2>Per-band SROCC</h2>
+      <table id="band-table">
+        <thead>
+          <tr><th>Band</th><th>Range (X)</th>
+              <th class="num">n</th>
+              <th class="num">SROCC</th>
+              <th class="num">KROCC</th>
+              <th class="num">PLCC</th>
+              <th class="num">RMSE</th></tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" class="small">no data yet</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Candlestick by band <span class="small">(coming next)</span></h2>
+      <div id="candlestick" class="chart" style="min-height: 320px;"></div>
+
+      <h2>Y → codec param lookup <span class="small">(coming next)</span></h2>
+      <div id="param-lookup" class="small">configure target Y and the table will list codec settings that hit it ±1 zq.</div>
+    </div>
+  </div>
+
+  <script type="module" src="js/compare.js"></script>
+</body>
+</html>
