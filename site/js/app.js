@@ -264,6 +264,76 @@ function renderPareto(bakes) {
   Plotly.newPlot('chart-pareto', traces, layout, { responsive: true });
 }
 
+async function loadStep5Bakes() {
+  // Try to load step-5 band JSONs for the bakes we have data for.
+  const labels = ['v0_15'];  // expand as more bakes get step-5 emitted
+  const out = [];
+  for (const lab of labels) {
+    try {
+      const data = await fetchJSON(`data/step5_bands/${lab}.json`);
+      out.push(data);
+    } catch (e) {
+      console.warn(`step5 bands for ${lab} not found:`, e.message);
+    }
+  }
+  return out;
+}
+
+function renderStep5(step5Bakes) {
+  if (!step5Bakes || step5Bakes.length === 0) return;
+  const div = document.getElementById('chart-step5');
+  if (!div) return;
+  // X = bin center; Y = SROCC; line per (bake, metric)
+  const traces = [];
+  for (const bake of step5Bakes) {
+    const xs = bake.bands.map(b => (b.bin_lo + b.bin_hi) / 2);
+    traces.push({
+      x: xs,
+      y: bake.bands.map(b => b.srocc_v04),
+      mode: 'lines+markers',
+      type: 'scatter',
+      name: `${bake.label} (V_X)`,
+      line: { color: '#0a7d28', width: 2 },
+    });
+    // ssim2 reference (same across bakes — first bake's ssim2)
+    traces.push({
+      x: xs,
+      y: bake.bands.map(b => b.srocc_ssim2),
+      mode: 'lines+markers',
+      type: 'scatter',
+      name: 'fast-ssim2',
+      line: { color: '#b1130c', width: 2, dash: 'dash' },
+    });
+    traces.push({
+      x: xs,
+      y: bake.bands.map(b => b.srocc_butter),
+      mode: 'lines+markers',
+      type: 'scatter',
+      name: 'butter (3-norm)',
+      line: { color: '#888', width: 1, dash: 'dot' },
+    });
+    // Annotate n per bin under the X axis
+    break;  // only render first bake for now
+  }
+  const layout = {
+    title: `Within-bin SROCC at step-5 MCOS bins (CID22, ${step5Bakes[0].total_pairs} pairs)`,
+    xaxis: { title: 'MCOS bin center', range: [0, 100] },
+    yaxis: { title: 'SROCC (within bin)', range: [-1.05, 1.05] },
+    shapes: [
+      { type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: '#bbb', width: 1 } },
+    ],
+    annotations: [
+      {
+        xref: 'paper', x: 0.01, y: 0.95, yanchor: 'top',
+        text: `Bin n: ${step5Bakes[0].bands.map(b => `[${b.bin_lo},${b.bin_hi}):${b.n}`).join(' • ')}`,
+        showarrow: false,
+        font: { size: 10, color: '#666' },
+      },
+    ],
+  };
+  Plotly.newPlot('chart-step5', traces, layout, { responsive: true });
+}
+
 async function main() {
   const bakes = await loadAllBakes();
   const parity = await loadParityTable();
@@ -286,6 +356,8 @@ async function main() {
   renderPerBand(bakes, pbSelect.value);
   renderParityTable();
   if (document.getElementById('chart-pareto')) renderPareto(bakes);
+  const step5 = await loadStep5Bakes();
+  if (document.getElementById('chart-step5')) renderStep5(step5);
 
   aggSelect.addEventListener('change', e => renderAggregate(bakes, e.target.value));
   pbSelect.addEventListener('change',  e => renderPerBand(bakes,  e.target.value));
