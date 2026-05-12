@@ -43,9 +43,10 @@ const STUB_MANIFEST = {
       url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenwebp.parquet` },
     { id: "v14_zenpng",  label: "zenpng sweep v14 (2.4k rows, R2)",   codec: "zenpng",
       url: `${R2_BASE}/parquets/codec-sweeps/unified_v14_zenpng.parquet` },
-    // The two v15 zenjpeg sweeps (1.79M + 514k rows, ~1.2 GB combined)
-    // are NOT uploaded yet — would need explicit user authorization given
-    // their size + R2 egress cost.
+    { id: "v15r_zenjpeg",  label: "zenjpeg sweep v15r (1.79M rows, R2 ⚠ large)", codec: "zenjpeg",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v15r_zenjpeg.parquet` },
+    { id: "v15rc_zenjpeg", label: "zenjpeg sweep v15rc (514k rows, R2 ⚠ large)", codec: "zenjpeg",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v15rc_zenjpeg.parquet` },
   ],
   metrics: [
     { id: "q",                        label: "q (codec quality)" },

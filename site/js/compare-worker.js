@@ -84,6 +84,8 @@ const CORPUS_URLS = {
   v12_zenwebp: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenwebp.parquet`,
   v13_zenjpeg: `${R2_BASE}/parquets/codec-sweeps/unified_v13_zenjpeg.parquet`,
   v14_zenpng:  `${R2_BASE}/parquets/codec-sweeps/unified_v14_zenpng.parquet`,
+  v15r_zenjpeg:  `${R2_BASE}/parquets/codec-sweeps/unified_v15r_zenjpeg.parquet`,
+  v15rc_zenjpeg: `${R2_BASE}/parquets/codec-sweeps/unified_v15rc_zenjpeg.parquet`,
 };
 
 async function runQuery(msg) {
