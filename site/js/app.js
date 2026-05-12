@@ -202,6 +202,9 @@ const NONMONO_PCT_BY_LABEL = {
   'V0_12_b1_oversample': 1.68,
   'V0_16_shipped': 2.30,
   'V0_17_tv25_notship': 2.44,
+  'V0_18_seed42': 2.01,
+  'V0_19_seed7': 2.84,
+  'V0_20_seed123': 2.65,
 };
 
 function renderPareto(bakes) {

@@ -1,0 +1,10 @@
+{
+  "label": "V0_19_seed7",
+  "notes": "Same recipe as V0_16 (h=128, flat TV=20) but seed=7. Cycle-5 4-seed sweep. CID22=0.8848 (-0.0047 vs ssim2). AIC-3=0.7986 (+0.0021 vs ssim2). Non-mono=2.84% (highest of the 4 seeds). NOT shipped.",
+  "non_mono_q_step_pct": 2.84,
+  "aggregate": {
+    "CID22": {"n": 4292, "v02": 0.8676, "v04": 0.8848, "ssim2": 0.8895, "butter": 0.7412},
+    "AIC-3 CTC": {"n": 600, "v02": 0.7962, "v04": 0.7986, "ssim2": 0.7965, "butter": 0.7095}
+  },
+  "per_band": {"CID22": []}
+}

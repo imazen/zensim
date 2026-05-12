@@ -81,10 +81,25 @@
       "label": "V0_16_shipped",
       "notes": "CURRENT SHIP (2026-05-12). Honest training (clean 144k CSV post-purge). TV=20 raised from V0_15's TV=15 — recovers V0_8's B1 closure HONESTLY. CID22=0.8919 (+0.0024 vs ssim2). AIC-3=0.7990. Non-mono=2.30% (best of any bake). B1=0.4559 matches V0_8 tainted's 0.4554 HONESTLY.",
       "json": "bakes/V0_16_shipped.json",
-      "datasets": [
-        "CID22",
-        "AIC-3 CTC"
-      ]
+      "datasets": ["CID22", "AIC-3 CTC"]
+    },
+    {
+      "label": "V0_18_seed42",
+      "notes": "Seed sweep (cycle 5). Same recipe as V0_16, seed=42. CID22=0.8847, AIC-3=0.7899, non-mono=2.01% (best of sweep). Worst CID22 of the 4 seeds. NOT shipped.",
+      "json": "bakes/V0_18_seed42.json",
+      "datasets": ["CID22", "AIC-3 CTC"]
+    },
+    {
+      "label": "V0_19_seed7",
+      "notes": "Seed sweep (cycle 5). Same recipe as V0_16, seed=7. CID22=0.8848, AIC-3=0.7986, non-mono=2.84%. NOT shipped.",
+      "json": "bakes/V0_19_seed7.json",
+      "datasets": ["CID22", "AIC-3 CTC"]
+    },
+    {
+      "label": "V0_20_seed123",
+      "notes": "Seed sweep (cycle 5). Same recipe as V0_16, seed=123. CID22=0.8872, AIC-3=0.8097 (best AIC-3 single-seed), non-mono=2.65%. NOT shipped.",
+      "json": "bakes/V0_20_seed123.json",
+      "datasets": ["CID22", "AIC-3 CTC"]
     }
   ]
 }
