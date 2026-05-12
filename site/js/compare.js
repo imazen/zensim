@@ -19,15 +19,22 @@ const R2_BASE = "https://zentrain.r2.dev/zensim-compare-site"; // placeholder; u
 const STUB_MANIFEST = {
   base_url: R2_BASE,
   corpora: [
-    { id: "v13_zenjpeg",  label: "zenjpeg sweep (v13, 36k rows)",        codec: "zenjpeg" },
-    { id: "v12_zenavif",  label: "zenavif sweep (v12, 4k rows)",          codec: "zenavif" },
-    { id: "v12_zenjxl",   label: "zenjxl sweep (v12, 32k rows)",          codec: "zenjxl"  },
-    { id: "v12_zenwebp",  label: "zenwebp sweep (v12, 1k rows)",          codec: "zenwebp" },
-    { id: "v14_zenpng",   label: "zenpng sweep (v14, 2.4k rows)",         codec: "zenpng"  },
-    { id: "v15r_zenjpeg", label: "zenjpeg sweep (v15r, 1.79M rows)",      codec: "zenjpeg" },
-    { id: "cid22",        label: "CID22 (human MOS, 4292 rows) [TODO]",   codec: "*"       },
-    { id: "kadid10k",     label: "KADID-10k (human DMOS, 10k rows) [TODO]", codec: "*"     },
-    { id: "tid2013",      label: "TID2013 (human MOS, 3k rows) [TODO]",   codec: "*"       },
+    // In-repo parquets (no R2 needed) — small enough to ship via gh-pages.
+    { id: "aic3_ctc_epfl", label: "AIC-3 CTC EPFL (n=600, human JND, 6 codecs)",
+      codec: "*", url: "data/parquet/aic3_ctc_epfl.parquet" },
+    { id: "aic4_sample",   label: "AIC-4 sample (n=300, reconstructed JND + paper metrics)",
+      codec: "*", url: "data/parquet/aic4_sample.parquet" },
+    // R2-hosted parquets (URL becomes available once user enables public-read).
+    { id: "v13_zenjpeg",  label: "zenjpeg sweep v13 (36k rows) [R2 pending]",      codec: "zenjpeg" },
+    { id: "v12_zenavif",  label: "zenavif sweep v12 (4k rows) [R2 pending]",        codec: "zenavif" },
+    { id: "v12_zenjxl",   label: "zenjxl sweep v12 (32k rows) [R2 pending]",        codec: "zenjxl"  },
+    { id: "v12_zenwebp",  label: "zenwebp sweep v12 (1k rows) [R2 pending]",        codec: "zenwebp" },
+    { id: "v14_zenpng",   label: "zenpng sweep v14 (2.4k rows) [R2 pending]",       codec: "zenpng"  },
+    { id: "v15r_zenjpeg", label: "zenjpeg sweep v15r (1.79M rows) [R2 pending]",    codec: "zenjpeg" },
+    // Human-rated datasets — export pending.
+    { id: "cid22",        label: "CID22 (human MOS, 4292 rows) [TODO]",             codec: "*"       },
+    { id: "kadid10k",     label: "KADID-10k (human DMOS, 10k rows) [TODO]",         codec: "*"       },
+    { id: "tid2013",      label: "TID2013 (human MOS, 3k rows) [TODO]",             codec: "*"       },
   ],
   metrics: [
     { id: "q",                        label: "q (codec quality)" },

@@ -68,6 +68,13 @@ async function initDuckDB() {
   return db;
 }
 
+// Map corpus id → parquet URL (relative to site root). Stub manifest in
+// compare.js carries the authoritative list; this map is the fallback.
+const CORPUS_URLS = {
+  aic3_ctc_epfl: "data/parquet/aic3_ctc_epfl.parquet",
+  aic4_sample:   "data/parquet/aic4_sample.parquet",
+};
+
 async function runQuery(msg) {
   const { corpora, x_metric, y_metric, codec_filter, version_filter } = msg;
   postMessage({ type: "progress", data: `query: corpora=${corpora.join(",")} X=${x_metric} Y=${y_metric}` });
@@ -85,49 +92,168 @@ async function runQuery(msg) {
     }
   }
 
-  // PLACEHOLDER: until real parquets are uploaded to R2, return a synthetic
-  // demo dataset so the UI round-trip is visible. Replaces all of this once
-  // the upload+manifest step lands.
-  //
-  // Demo: if Y is a JS-MLP metric and we have its bake, score a few synthetic
-  // 228-vectors to show the path works end-to-end.
-  const bakeId = bakeIdForMetric(y_metric);
-  const model = bakeId ? bakeCache.get(bakeId) : null;
-  const N = 2000;
-  const rows = [];
-  for (let i = 0; i < N; i++) {
-    const x = Math.random() * 100;
-    let y;
-    if (model) {
-      // Map X (0..100) into a synthetic 228-feature pattern, score with MLP.
-      const features = new Float32Array(228);
-      for (let k = 0; k < 228; k++) features[k] = x / 100 + 0.01 * Math.sin(k * 0.1);
-      y = predict(model, features)[0];
-    } else {
-      y = 0.85 * x + (Math.random() - 0.5) * 25;
-    }
-    rows.push({ x, y });
+  // Real DuckDB-WASM path: query each selected corpus's parquet, union, project
+  // X+Y columns, return rows. If a metric is a JS-MLP variant
+  // (score_zensim_v0_X), we ALSO pull feat_0..feat_227 columns and apply the
+  // bake per-row in this worker.
+  const usable = corpora.filter((c) => CORPUS_URLS[c]);
+  if (usable.length === 0) {
+    postMessage({ type: "error", data: `no in-repo parquets selected (R2-hosted corpora not yet enabled). Pick AIC-3 or AIC-4.` });
+    return;
   }
-  // step-5 binning
-  const bins = new Map();
+
+  await initDuckDB();
+  const conn = await db.connect();
+
+  // Determine which columns to SELECT — start broad, then trim later when
+  // we know exactly which need to be projected for X/Y.
+  const allCols = ["codec", "q", "human_jnd", "human_jnd_ci_lo", "human_jnd_ci_hi",
+                   "score_zensim", "score_ssim2_gpu", "score_dssim",
+                   "score_butter_max", "score_butter_p3", "score_ssim2_paper",
+                   "score_cvvdp", "score_iw_ssim", "bpp", "quality_index", "dlevel"];
+
+  // Build UNION ALL query across selected corpora, projecting only columns
+  // that exist in each (DuckDB columns_from_parquet would be cleaner but we
+  // just try-coalesce for simplicity).
+  let rows = [];
+  for (const corpusId of usable) {
+    const url = CORPUS_URLS[corpusId];
+    postMessage({ type: "progress", data: `querying ${corpusId} (${url})…` });
+    // Use TRY_CAST in case some columns are missing; coalesce to NULL.
+    const colList = allCols.map((c) => `TRY_CAST(${c} AS DOUBLE) AS ${c}`).join(", ");
+    const sql = `SELECT codec AS codec_, ${colList} FROM '${url}'`;
+    try {
+      const result = await conn.query(sql);
+      for (const r of result.toArray()) {
+        const obj = r.toJSON();
+        // codec column collision: SELECT codec AS codec_ + codec inside colList
+        // would conflict. Use the original `codec` value if codec_ is null.
+        rows.push({ ...obj, corpus: corpusId });
+      }
+    } catch (e) {
+      postMessage({ type: "progress", data: `${corpusId} failed: ${e.message}` });
+    }
+  }
+  postMessage({ type: "progress", data: `fetched ${rows.length} rows` });
+
+  // Apply codec / version filter if set.
+  if (codec_filter) rows = rows.filter((r) => r.codec_ === codec_filter);
+
+  // Compute X and Y per row.
+  const bakeId = bakeIdForMetric(y_metric);
+  const bakeModel = bakeId ? bakeCache.get(bakeId) : null;
+
+  // For JS-MLP scoring we need feat_0..feat_227 — but the AIC parquets DON'T
+  // carry feature columns. Surface that.
+  if (bakeModel) {
+    const hasFeat = rows.length > 0 && rows[0].feat_0 !== undefined;
+    if (!hasFeat) {
+      postMessage({ type: "progress", data: `note: ${y_metric} needs feat_0..feat_227 from the parquet; AIC corpora don't carry them. Falling back to score_zensim.` });
+    }
+  }
+
+  const dataPoints = [];
   for (const r of rows) {
-    const b = Math.floor(r.x / 5) * 5;
+    const x = (x_metric in r) ? r[x_metric] : (x_metric === "q" ? r.q : null);
+    let y;
+    if (bakeModel && r.feat_0 !== undefined) {
+      const features = new Float32Array(228);
+      for (let k = 0; k < 228; k++) features[k] = r[`feat_${k}`] ?? 0;
+      y = predict(bakeModel, features)[0];
+    } else {
+      y = (y_metric in r) ? r[y_metric] : null;
+    }
+    if (x != null && y != null && Number.isFinite(x) && Number.isFinite(y)) {
+      dataPoints.push({ x, y });
+    }
+  }
+  await conn.close();
+  postMessage({ type: "progress", data: `kept ${dataPoints.length} valid (x, y) rows` });
+
+  // step-5 binning over the X range (anchored to multiples of 5).
+  const bins = new Map();
+  for (const p of dataPoints) {
+    const b = Math.floor(p.x / 5) * 5;
     if (!bins.has(b)) bins.set(b, []);
-    bins.get(b).push(r.y);
+    bins.get(b).push(p.y);
   }
   const step5 = Array.from(bins.entries())
     .sort((a, b) => a[0] - b[0])
     .map(([x, ys]) => ({ x: x + 2.5, median_y: median(ys) }));
 
-  // Stub bands (real per-band SROCC TODO once real metrics flow through)
-  const bands = [
-    { label: "B0 below medium",     range: "<50",       n: 0, srocc: NaN, krocc: NaN, plcc: NaN, rmse: NaN },
-    { label: "B1 medium",            range: "[50,65)",   n: 0, srocc: NaN, krocc: NaN, plcc: NaN, rmse: NaN },
-    { label: "B2 high",              range: "[65,90)",   n: 0, srocc: NaN, krocc: NaN, plcc: NaN, rmse: NaN },
-    { label: "B3 visually-lossless", range: "≥90",       n: 0, srocc: NaN, krocc: NaN, plcc: NaN, rmse: NaN },
-  ];
+  // Per-band SROCC (aggregate, by Y-value bands per CID22 Table 5).
+  const bands = computeBandSrocc(dataPoints);
 
-  postMessage({ type: "result", data: { rows, step5, bands } });
+  postMessage({ type: "result", data: { rows: dataPoints, step5, bands } });
+}
+
+function spearman(xs, ys) {
+  if (xs.length < 5) return NaN;
+  const n = xs.length;
+  const idx = Array.from({ length: n }, (_, i) => i);
+  const rank = (vals) => {
+    const sorted = [...idx].sort((a, b) => vals[a] - vals[b]);
+    const r = new Array(n);
+    let i = 0;
+    while (i < n) {
+      let j = i + 1;
+      while (j < n && vals[sorted[j]] === vals[sorted[i]]) j++;
+      const avg = (i + j - 1) / 2 + 1;
+      for (let k = i; k < j; k++) r[sorted[k]] = avg;
+      i = j;
+    }
+    return r;
+  };
+  const rx = rank(xs);
+  const ry = rank(ys);
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += rx[i]; my += ry[i]; }
+  mx /= n; my /= n;
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = rx[i] - mx, dy = ry[i] - my;
+    num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+  }
+  if (dx2 === 0 || dy2 === 0) return NaN;
+  return num / Math.sqrt(dx2 * dy2);
+}
+
+function computeBandSrocc(points) {
+  // CID22 Table 5 bands on Y axis. (We use Y as the "quality" reference
+  // for binning, which is conventional; flip if X is the reference.)
+  const bands = [
+    { label: "B0 below medium",      range: "<50",       lo: -Infinity, hi: 50 },
+    { label: "B1 medium",            range: "[50,65)",   lo: 50, hi: 65 },
+    { label: "B2 high",              range: "[65,90)",   lo: 65, hi: 90 },
+    { label: "B3 visually-lossless", range: "≥90",       lo: 90, hi: Infinity },
+    { label: "Near-PJND",            range: "[58,68]",   lo: 58, hi: 68 },
+  ];
+  for (const b of bands) {
+    const sub = points.filter((p) => p.y >= b.lo && p.y < b.hi);
+    const xs = sub.map((p) => p.x);
+    const ys = sub.map((p) => p.y);
+    b.n = sub.length;
+    b.srocc = spearman(xs, ys);
+    // Pearson (PLCC) on raw values
+    if (sub.length >= 5) {
+      let mx = 0, my = 0;
+      for (let i = 0; i < sub.length; i++) { mx += xs[i]; my += ys[i]; }
+      mx /= sub.length; my /= sub.length;
+      let num = 0, dx2 = 0, dy2 = 0, rmse = 0;
+      for (let i = 0; i < sub.length; i++) {
+        const dx = xs[i] - mx, dy = ys[i] - my;
+        num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+        const err = xs[i] - ys[i];
+        rmse += err * err;
+      }
+      b.plcc = (dx2 === 0 || dy2 === 0) ? NaN : num / Math.sqrt(dx2 * dy2);
+      b.rmse = Math.sqrt(rmse / sub.length);
+    } else {
+      b.plcc = NaN; b.rmse = NaN;
+    }
+    b.krocc = NaN; // Kendall TODO (more expensive O(n^2))
+  }
+  return bands;
 }
 
 function median(xs) {
