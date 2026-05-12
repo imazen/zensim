@@ -990,7 +990,8 @@ fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
     let i_dist    = find(&["dist_path", "distorted", "dist"]);
     let i_codec   = find(&["codec", "encoder"]);
     let i_version = find(&["version", "setting", "quality", "dlevel", "quality_index"]);
-    let i_score   = find(&["score_jnd", "human_jnd", "human_score", "mcos", "dmos", "mos"]);
+    let i_score   = find(&["score_jnd", "human_jnd", "human_score", "human_mos", "human_dmos",
+                            "mcos", "dmos", "mos"]);
     if i_ref.is_none() || i_dist.is_none() || i_score.is_none() {
         eprintln!("--pairs-tsv {}: missing required column(s) ref_path/dist_path/<score>; header was {:?}",
                   path.display(), headers);
