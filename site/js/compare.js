@@ -110,13 +110,38 @@ function initWorker() {
   worker = new Worker("js/compare-worker.js", { type: "module" });
   worker.onmessage = (e) => {
     const { type, data } = e.data;
-    if (type === "ready")    setProgress("worker ready · DuckDB-WASM loaded", "ok");
+    if (type === "ready")    setProgress("worker ready", "ok");
     if (type === "progress") setProgress(data, "busy");
     if (type === "error")    setProgress("error: " + data, "busy");
+    if (type === "codecs")   populateFilters(data);
     if (type === "result")   renderResult(data);
   };
   worker.onerror = (err) => setProgress("worker error: " + err.message, "busy");
   worker.postMessage({ type: "init", base_url: R2_BASE });
+}
+
+function populateFilters({ codecs, versions }) {
+  const cSel = $("codec-filter"), vSel = $("version-filter");
+  const prevC = cSel.value, prevV = vSel.value;
+  cSel.innerHTML = '<option value="">(all codecs)</option>' +
+    codecs.map((c) => `<option value="${c}">${c}</option>`).join("");
+  vSel.innerHTML = '<option value="">(all versions)</option>' +
+    versions.map((v) => `<option value="${v}">${shortVersion(v)}</option>`).join("");
+  // Restore prior selection if still available.
+  if (codecs.includes(prevC)) cSel.value = prevC;
+  if (versions.includes(prevV)) vSel.value = prevV;
+}
+
+function shortVersion(json) {
+  // knob_tuple_json is typically "{}" or '{"effort":7}' style — show
+  // a compact form for the dropdown.
+  if (!json || json === "{}") return "(default)";
+  try {
+    const obj = JSON.parse(json);
+    return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join(" ");
+  } catch {
+    return json.length > 40 ? json.slice(0, 37) + "…" : json;
+  }
 }
 
 function renderResult(data) {
@@ -198,6 +223,16 @@ function bindRun() {
       codec_filter: $("codec-filter").value || null,
       version_filter: $("version-filter").value || null,
     });
+  });
+  // When the corpus selection changes, ask the worker for the new
+  // {codecs, versions} list so the filter dropdowns reflect current corpora.
+  document.querySelector("#corpus-list").addEventListener("change", () => {
+    const corpora = selectedCorpora();
+    if (corpora.length === 0) {
+      populateFilters({ codecs: [], versions: [] });
+      return;
+    }
+    worker.postMessage({ type: "list_codecs", corpora });
   });
 }
 

@@ -136,8 +136,16 @@ async function runQuery(msg) {
   }
   postMessage({ type: "progress", data: `fetched ${rows.length} rows` });
 
-  // Apply codec / version filter if set.
-  if (codec_filter) rows = rows.filter((r) => r.codec_ === codec_filter);
+  // Apply codec / version filter if set. The SELECT aliases codec→codec_,
+  // and TRY_CAST drops the original 'codec' column — but we kept the
+  // original string codec via the `corpus` insertion above; pull from the
+  // raw row in either column.
+  if (codec_filter) {
+    rows = rows.filter((r) => r.codec_ === codec_filter || r.codec === codec_filter);
+  }
+  if (version_filter) {
+    rows = rows.filter((r) => r.knob_tuple_json === version_filter);
+  }
 
   // Compute X and Y per row.
   const bakeId = bakeIdForMetric(y_metric);
@@ -301,6 +309,37 @@ function median(xs) {
   return s.length % 2 ? s[m] : 0.5 * (s[m - 1] + s[m]);
 }
 
+async function listCorpusCodecs(corpora) {
+  const usable = corpora.filter((c) => CORPUS_URLS[c]);
+  if (usable.length === 0) {
+    postMessage({ type: "codecs", data: { codecs: [], versions: [] } });
+    return;
+  }
+  if (!db) await initDuckDB();
+  const conn = await db.connect();
+  const codecs = new Set();
+  const versions = new Set();
+  for (const corpusId of usable) {
+    const url = CORPUS_URLS[corpusId];
+    try {
+      const r1 = await conn.query(`SELECT DISTINCT codec FROM '${url}' WHERE codec IS NOT NULL`);
+      for (const row of r1.toArray()) codecs.add(String(row.toJSON().codec));
+      // knob_tuple_json may not exist on AIC parquets — try / catch.
+      try {
+        const r2 = await conn.query(`SELECT DISTINCT knob_tuple_json FROM '${url}' WHERE knob_tuple_json IS NOT NULL`);
+        for (const row of r2.toArray()) {
+          const k = row.toJSON().knob_tuple_json;
+          if (k && k !== "{}") versions.add(String(k));
+        }
+      } catch (_) { /* knob_tuple_json absent — fine */ }
+    } catch (e) {
+      postMessage({ type: "progress", data: `codec-enum ${corpusId} failed: ${e.message}` });
+    }
+  }
+  await conn.close();
+  postMessage({ type: "codecs", data: { codecs: Array.from(codecs).sort(), versions: Array.from(versions).sort() } });
+}
+
 self.onmessage = async (e) => {
   const msg = e.data;
   try {
@@ -309,6 +348,8 @@ self.onmessage = async (e) => {
       // DuckDB-WASM is heavy (~10 MB); defer until first query to keep
       // page-load fast. Signal ready immediately so the UI is responsive.
       postMessage({ type: "ready" });
+    } else if (msg.type === "list_codecs") {
+      await listCorpusCodecs(msg.corpora || []);
     } else if (msg.type === "query") {
       // Lazy-load DuckDB only when the user hits Run.
       if (!db) await initDuckDB();
