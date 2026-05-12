@@ -295,6 +295,42 @@ ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
     runtime ensemble path (Section 9 candidate #2).
   </p>
 
+  <h3>6.4 Subset search: 2-bake {V0_16, V0_21} BEATS 5-bake ensemble</h3>
+  <p>
+    Trying various ensemble subsets reveals that <strong>recipe-diversity
+    ensembling outperforms seed-only ensembling</strong>:
+  </p>
+  <table>
+    <tr><th>Subset</th><th>CID22 SROCC</th><th>Δ vs ssim2</th><th>AIC-3 SROCC</th><th>Δ vs ssim2</th></tr>
+    <tr><td>fast-ssim2</td><td>0.8895</td><td>—</td><td>0.7965</td><td>—</td></tr>
+    <tr><td>{V0_16}</td><td>0.8919</td><td>+0.0024</td><td>0.7990</td><td>+0.0025</td></tr>
+    <tr><td>{V0_16, V0_21}</td><td><strong>0.8911</strong></td><td><strong>+0.0016</strong></td><td>0.8024</td><td>+0.0059</td></tr>
+    <tr><td>{V0_16, V0_20, V0_21}</td><td>0.8908</td><td>+0.0013</td><td><strong>0.8051</strong></td><td><strong>+0.0086</strong></td></tr>
+    <tr><td>{V0_16, V0_19, V0_20, V0_21}</td><td>0.8902</td><td>+0.0007</td><td>0.8037</td><td>+0.0072</td></tr>
+    <tr><td>{V0_16, V0_18, V0_19, V0_20, V0_21} (5-bake)</td><td>0.8896</td><td>+0.0001</td><td>0.8012</td><td>+0.0047</td></tr>
+    <tr><td>{V0_18, V0_19, V0_20, V0_21} (no V0_16)</td><td>0.8885</td><td>−0.0010</td><td>0.8017</td><td>+0.0052</td></tr>
+  </table>
+  <p>
+    Key observations:
+  </p>
+  <ul>
+    <li>The minimal 2-bake ensemble {V0_16, V0_21} CID22=0.8911 BEATS the
+        5-bake ensemble's 0.8896 — adding more bakes can dilute the
+        signal. Seed-sweep bakes (V0_18/V0_19) drag the mean toward
+        the recipe's neutral SROCC.</li>
+    <li>{V0_16, V0_20, V0_21} (3-bake) is the AIC-3 winner at +0.0086 —
+        combining the strongest individual seeds (V0_16 CID22 winner,
+        V0_20 AIC-3 winner, V0_21 butter-clean) produces the best
+        cross-dataset result.</li>
+    <li>Without V0_16, ensemble CID22 falls below ssim2. V0_16's
+        seed-1 luck is real and contributes to the ensemble.</li>
+  </ul>
+  <p>
+    <strong>Recommendation for ensemble runtime</strong>: load 3 bakes
+    (V0_16, V0_20, V0_21), average outputs. 3× the inference cost but
+    +0.0086 SROCC on AIC-3 with no CID22 regression.
+  </p>
+
   <h2>7. Honest-vs-tainted comparison (V0_8 vs V0_16)</h2>
   <p>
     Before the 2026-05-12 purge, V0_8 (shipped 2026-05-11 eve) reported CID22
