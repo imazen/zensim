@@ -24,6 +24,12 @@ const STUB_MANIFEST = {
       codec: "*", url: "data/parquet/aic3_ctc_epfl.parquet" },
     { id: "aic4_sample",   label: "AIC-4 sample (n=300, reconstructed JND + paper metrics)",
       codec: "*", url: "data/parquet/aic4_sample.parquet" },
+    { id: "cid22",   label: "CID22 (n=4341, MCOS — gold-standard codec-output)",
+      codec: "*", url: "data/parquet/cid22.parquet" },
+    { id: "kadid10k", label: "KADID-10k (n=10125, DMOS — 25 analytic distortions × 5 levels)",
+      codec: "*", url: "data/parquet/kadid.parquet" },
+    { id: "tid2013",  label: "TID2013 (n=3000, MOS — 24 distortions × 5 levels)",
+      codec: "*", url: "data/parquet/tid.parquet" },
     // R2-hosted parquets (URL becomes available once user enables public-read).
     { id: "v13_zenjpeg",  label: "zenjpeg sweep v13 (36k rows) [R2 pending]",      codec: "zenjpeg" },
     { id: "v12_zenavif",  label: "zenavif sweep v12 (4k rows) [R2 pending]",        codec: "zenavif" },
@@ -31,10 +37,6 @@ const STUB_MANIFEST = {
     { id: "v12_zenwebp",  label: "zenwebp sweep v12 (1k rows) [R2 pending]",        codec: "zenwebp" },
     { id: "v14_zenpng",   label: "zenpng sweep v14 (2.4k rows) [R2 pending]",       codec: "zenpng"  },
     { id: "v15r_zenjpeg", label: "zenjpeg sweep v15r (1.79M rows) [R2 pending]",    codec: "zenjpeg" },
-    // Human-rated datasets — export pending.
-    { id: "cid22",        label: "CID22 (human MOS, 4292 rows) [TODO]",             codec: "*"       },
-    { id: "kadid10k",     label: "KADID-10k (human DMOS, 10k rows) [TODO]",         codec: "*"       },
-    { id: "tid2013",      label: "TID2013 (human MOS, 3k rows) [TODO]",             codec: "*"       },
   ],
   metrics: [
     { id: "q",                        label: "q (codec quality)" },

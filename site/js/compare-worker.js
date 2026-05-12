@@ -73,6 +73,9 @@ async function initDuckDB() {
 const CORPUS_URLS = {
   aic3_ctc_epfl: "data/parquet/aic3_ctc_epfl.parquet",
   aic4_sample:   "data/parquet/aic4_sample.parquet",
+  cid22:         "data/parquet/cid22.parquet",
+  kadid10k:      "data/parquet/kadid.parquet",
+  tid2013:       "data/parquet/tid.parquet",
 };
 
 async function runQuery(msg) {
