@@ -1558,7 +1558,15 @@ pub(crate) fn apply_mlp_scoring(
             return Err(ZensimError::InvalidDataLength);
         };
 
-        let score = distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b);
+        let score = if params.skip_score_mapping {
+            // The bake is already MCOS-calibrated (V0_8+); the raw
+            // output IS the final score. Skipping the
+            // `100 − A·d^B` transform avoids producing garbage
+            // (e.g. raw=90 → mapped=-374).
+            raw
+        } else {
+            distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+        };
         result.set_mlp_score(raw, score);
     }
     #[cfg(not(feature = "__experimental_versions"))]
