@@ -201,6 +201,7 @@ const NONMONO_PCT_BY_LABEL = {
   'V0_11_flat_tv20': 2.33,
   'V0_12_b1_oversample': 1.68,
   'V0_16_shipped': 2.30,
+  'V0_17_tv25_notship': 2.44,
 };
 
 function renderPareto(bakes) {
@@ -267,7 +268,7 @@ function renderPareto(bakes) {
 
 async function loadStep5Bakes() {
   // Try to load step-5 band JSONs for the bakes we have data for.
-  const labels = ['v0_16', 'v0_15', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
+  const labels = ['v0_16', 'v0_15', 'v0_17', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
   const out = [];
   for (const lab of labels) {
     try {
@@ -402,7 +403,7 @@ async function main() {
   const step5 = await loadStep5Bakes();
   if (document.getElementById('chart-step5')) renderStep5(step5);
   // Default scatter is V0_16; can swap via the selector
-  const scatterLabels = ['v0_16', 'v0_15', 'v0_8_tainted'];
+  const scatterLabels = ['v0_16', 'v0_15', 'v0_17', 'v0_8_tainted'];
   const scatterCache = {};
   for (const lab of scatterLabels) scatterCache[lab] = await loadScatter(lab);
   function renderScatterTriple(label) {
