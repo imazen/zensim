@@ -239,10 +239,18 @@ User spec, verbatim:
 > range along x axis, and a table for srocc and other stats per
 > band for comparison of y compared to x. this is a crucial goal.
 > cpu work on a background worker with progress indicator.
-> additionally add separate data and charts as the 2024 paper
+> additionally add separate data and charts as the 2023 paper
 > does. offer both scatter and candlestick and ci interval tables
 > by band. allow filtering by codec and codec version and y score
 > to codec param table.
+
+**User-clarified stack decisions (2026-05-12)**:
+- **Query engine**: DuckDB-WASM (SQL over parquet, HTTP-range fetch).
+- **Hosting**: Cloudflare R2 with public-read buckets. Parquet
+  files NOT committed to the repo (gh-pages 1 GB cap).
+- **Paper reference**: 2023 edition (the one we already have at
+  `/mnt/v/zen/zensim-training/2026-05-07/papers/CID22_wg1m99012.pdf`).
+  Spec's "2023 paper" replaces the original "2024 paper" typo.
 
 Implementation must:
 
