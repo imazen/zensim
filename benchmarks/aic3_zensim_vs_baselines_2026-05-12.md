@@ -1,5 +1,17 @@
 # AIC-3 CTC EPFL — zensim V0_16 vs fast-ssim2 vs dssim (n=600)
 
+> ⚠️ **SUPERSEDED — V0_2 mislabel** (correction landed 2026-05-12 evening).
+> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zen-metrics batch --metric zensim`
+> defaults to `ZensimProfile::latest() == PreviewV0_2`, not the V0_4 MLP path.
+>
+> **Canonical replacement docs**:
+> - [`cycle_6_finals_2026-05-12.md`](./cycle_6_finals_2026-05-12.md) — cross-corpus aggregate + per-codec scorecard
+> - [`aic_per_codec_v0_16_2026-05-12.md`](./aic_per_codec_v0_16_2026-05-12.md) — AIC-3/AIC-4 per-codec TRUE V0_16
+>
+> **TRUE V0_16 on AIC-3** (via `dataset_metric_baseline --v04-bake`): **0.7990** vs fast-ssim2 0.7965 (**+0.0025**).
+>
+> This doc is kept for historical record only; do not cite the V0_16 numbers below.
+
 **Dataset**: `/mnt/v/dataset/aic3_ctc_epfl/`
 **Source CSV**: `info_with_bitrates.csv`
 **n**: 600 (10 references × 6 codecs × 10 quality levels)

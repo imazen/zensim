@@ -1,5 +1,20 @@
 # AIC-4 sample — zensim V0_16 vs paper metrics vs zen-metrics CLI (n=300)
 
+> ⚠️ **SUPERSEDED — V0_2 mislabel** (correction landed 2026-05-12 evening).
+> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zen-metrics batch --metric zensim`
+> defaults to `ZensimProfile::latest() == PreviewV0_2`, not the V0_4 MLP path.
+>
+> **Canonical replacement docs**:
+> - [`cycle_6_finals_2026-05-12.md`](./cycle_6_finals_2026-05-12.md) — cross-corpus + per-codec scorecard
+> - [`aic_per_codec_v0_16_2026-05-12.md`](./aic_per_codec_v0_16_2026-05-12.md) — TRUE V0_16 per-codec
+>
+> **TRUE V0_16 on AIC-4** (via `dataset_metric_baseline --v04-bake`): **0.9175** vs fast-ssim2 0.9127 (**+0.0048**).
+>
+> The single big deficit (JPEG-AI: V0_16 0.7951 vs ssim2 0.8459 vs dssim 0.9147) is the biggest
+> cycle-7 actionable — see `aic_per_codec_v0_16_2026-05-12.md` for the full analysis.
+>
+> This doc is kept for historical record only; do not cite the V0_16 numbers below.
+
 **Dataset**: `/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset/`
 **JND CSV**: `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv`
 **Pre-computed metric CSV**: `JPEG-AIC_metric_scores.csv` (same dir)

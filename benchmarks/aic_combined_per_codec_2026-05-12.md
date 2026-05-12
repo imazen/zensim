@@ -1,5 +1,19 @@
 # AIC-3 + AIC-4 — per-codec |SROCC| comparison across V_X / ssim2 / dssim / butter
 
+> ⚠️ **SUPERSEDED — V0_2 mislabel** (correction landed 2026-05-12 evening).
+> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zen-metrics batch --metric zensim`
+> defaults to `ZensimProfile::latest() == PreviewV0_2`, not the V0_4 MLP path.
+>
+> **Canonical replacement docs**:
+> - [`cycle_6_finals_2026-05-12.md`](./cycle_6_finals_2026-05-12.md) — top-level
+> - [`aic_per_codec_v0_16_2026-05-12.md`](./aic_per_codec_v0_16_2026-05-12.md) — TRUE V0_16 per-codec
+>
+> The "Pattern 3: V0_16 wins JPEG-derived codecs, loses HEVC/AV1-derived" was describing V0_2's
+> per-codec behavior. TRUE V0_16 fixed those AVIF gaps; on held-out CID22 V0_16 wins 5 of 9 codecs
+> including **AVIF_aurora_slow (+0.038 vs ssim2)** — the biggest per-codec gain in the cycle.
+>
+> This doc is kept for historical record only; do not cite the V0_16 numbers below.
+
 **Background**: After completing the dssim/ssim2/butter backfill on both
 AIC corpora (tick 458), the per-codec story tells a clearer cycle-7
 story than the aggregates do.
