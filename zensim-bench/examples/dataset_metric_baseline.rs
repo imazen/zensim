@@ -84,6 +84,12 @@ fn main() {
     let mut per_pair_output: Option<PathBuf> = None;
     let mut konjnd_features_csv: Option<PathBuf> = None;
     let mut konjnd_anchor_target: f64 = 63.0;
+    /// Generic `--pairs-tsv <NAME>:<PATH>` flag, repeatable.
+    /// TSV columns: ref_path, dist_path, codec, [version|image_name|...], human_score
+    /// Order: cols 0/1 are ref/dist; the LAST column is treated as human_score
+    /// (a float in any scale; SROCC is rank-invariant). Optional codec column at
+    /// index 2 and version column at index 3 (or 4 if there's an image_name col).
+    let mut pairs_tsv: Vec<(String, PathBuf)> = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
             "--kadid" => kadid = Some(args.next().unwrap().into()),
@@ -98,6 +104,16 @@ fn main() {
             "--konjnd-features-csv" => konjnd_features_csv = Some(args.next().unwrap().into()),
             "--konjnd-anchor-target" => {
                 konjnd_anchor_target = args.next().unwrap().parse().unwrap()
+            }
+            "--pairs-tsv" => {
+                let arg = args.next().expect("--pairs-tsv NAME:PATH");
+                if let Some(idx) = arg.find(':') {
+                    let (name, path) = arg.split_at(idx);
+                    pairs_tsv.push((name.to_string(), PathBuf::from(&path[1..])));
+                } else {
+                    eprintln!("--pairs-tsv expects NAME:PATH (got {arg})");
+                    std::process::exit(1);
+                }
             }
             other => {
                 eprintln!("unknown arg: {other}");
@@ -124,6 +140,13 @@ fn main() {
             name: "CID22",
             pairs: load_cid22(&p, max_pairs),
         });
+    }
+    // Generic TSV input — leak the name string to satisfy the &'static
+    // lifetime on `DatasetSpec.name` (this is a one-shot CLI tool).
+    for (name, path) in &pairs_tsv {
+        let pairs = load_pairs_tsv(path, max_pairs);
+        let leaked: &'static str = Box::leak(name.clone().into_boxed_str());
+        datasets.push(DatasetSpec { name: leaked, pairs });
     }
     if let Some(p) = csiq {
         datasets.push(DatasetSpec {
@@ -933,6 +956,68 @@ fn load_csiq(base: &Path, max: usize) -> Vec<Pair> {
 ///
 /// Paths in the CSV are absolute; the `base` argument is the CSV path
 /// itself (not a directory root).
+/// Generic loader for `--pairs-tsv NAME:PATH`.
+///
+/// TSV header is required. Columns: `ref_path`, `dist_path`, `codec`,
+/// `(version|image_name|quality|dlevel|...)`, ..., last col is human score.
+/// The header row identifies columns by NAME — we look for `ref_path`,
+/// `dist_path`, `codec`, `version` / `quality` (whichever exists),
+/// and the score column (`score_jnd` / `human_jnd` / `human_score` / last col).
+fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
+    let mut rdr = match csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .from_path(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let headers = match rdr.headers() {
+        Ok(h) => h.clone(),
+        Err(e) => {
+            eprintln!("--pairs-tsv {}: header read failed: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let find = |names: &[&str]| -> Option<usize> {
+        for (i, h) in headers.iter().enumerate() {
+            if names.contains(&h) { return Some(i); }
+        }
+        None
+    };
+    let i_ref     = find(&["ref_path", "reference", "ref"]);
+    let i_dist    = find(&["dist_path", "distorted", "dist"]);
+    let i_codec   = find(&["codec", "encoder"]);
+    let i_version = find(&["version", "setting", "quality", "dlevel", "quality_index"]);
+    let i_score   = find(&["score_jnd", "human_jnd", "human_score", "mcos", "dmos", "mos"]);
+    if i_ref.is_none() || i_dist.is_none() || i_score.is_none() {
+        eprintln!("--pairs-tsv {}: missing required column(s) ref_path/dist_path/<score>; header was {:?}",
+                  path.display(), headers);
+        return Vec::new();
+    }
+    let i_ref = i_ref.unwrap();
+    let i_dist = i_dist.unwrap();
+    let i_score = i_score.unwrap();
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        let r = match record.get(i_ref) { Some(s) => s, None => continue };
+        let d = match record.get(i_dist) { Some(s) => s, None => continue };
+        let s = match record.get(i_score).and_then(|s| s.parse::<f64>().ok()) {
+            Some(v) => v, None => continue,
+        };
+        pairs.push(Pair {
+            reference: PathBuf::from(r),
+            distorted: PathBuf::from(d),
+            human_score: s,
+            codec: i_codec.and_then(|i| record.get(i)).map(|s| s.to_string()),
+            version: i_version.and_then(|i| record.get(i)).map(|s| s.to_string()),
+        });
+        if pairs.len() >= max { break; }
+    }
+    pairs
+}
+
 fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
     let mut rdr = match csv::Reader::from_path(csv_path) {
         Ok(r) => r,
