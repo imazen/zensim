@@ -208,6 +208,57 @@ const NONMONO_PCT_BY_LABEL = {
   'V0_21_butter_clean': 2.91,
 };
 
+function renderParetoCid22Aic3(bakes) {
+  // 2D Pareto: x = AIC-3 SROCC, y = CID22 SROCC. Both axes higher = better.
+  // Each bake is a labelled point + ssim2 reference + ensemble points.
+  const xs = []; const ys = []; const labels = []; const colors = [];
+  for (const b of bakes) {
+    const aic = b.data.aggregate?.['AIC-3 CTC']?.v04;
+    const cid = b.data.aggregate?.CID22?.v04;
+    if (aic == null || cid == null) continue;
+    xs.push(aic); ys.push(cid); labels.push(b.label);
+    if (b.label === 'V0_16_shipped') colors.push('#0a7d28');
+    else if (b.label === 'V0_21_butter_clean') colors.push('#9467bd');
+    else if (b.label.startsWith('V0_5') || b.label.startsWith('V0_6') || b.label.startsWith('V0_7') || b.label === 'V0_8_shipped')
+      colors.push('#888');
+    else colors.push('#1f77b4');
+  }
+  // Add hard-coded ensemble points (not in bakes index)
+  const ensemblePoints = [
+    { label: '{V0_16,V0_21} 2-bake', aic: 0.8024, cid: 0.8911, color: '#d18811' },
+    { label: '{V0_16,V0_20,V0_21} 3-bake', aic: 0.8051, cid: 0.8908, color: '#d18811' },
+    { label: '5-bake ensemble', aic: 0.8012, cid: 0.8896, color: '#7fb3d5' },
+  ];
+  for (const p of ensemblePoints) {
+    xs.push(p.aic); ys.push(p.cid); labels.push(p.label); colors.push(p.color);
+  }
+  const traces = [
+    {
+      x: xs, y: ys, text: labels,
+      mode: 'markers+text', textposition: 'top center', type: 'scatter',
+      marker: { size: 12, color: colors, line: { width: 1, color: '#222' } },
+      name: 'V_X bakes + ensembles',
+    },
+    {
+      x: [0.7965], y: [0.8895], text: ['fast-ssim2'],
+      mode: 'markers+text', textposition: 'bottom center', type: 'scatter',
+      marker: { size: 14, color: '#b1130c', symbol: 'diamond' },
+      name: 'fast-ssim2',
+    },
+  ];
+  const layout = {
+    title: 'CID22 vs AIC-3 SROCC — V_X bakes + ensembles (target: upper-right of ssim2)',
+    xaxis: { title: 'AIC-3 CTC SROCC' },
+    yaxis: { title: 'CID22 SROCC' },
+    shapes: [
+      { type: 'line', xref: 'x', x0: 0.7965, x1: 0.7965, yref: 'paper', y0: 0, y1: 1, line: { color: '#b1130c', dash: 'dash', width: 1 } },
+      { type: 'line', yref: 'y', y0: 0.8895, y1: 0.8895, xref: 'paper', x0: 0, x1: 1, line: { color: '#b1130c', dash: 'dash', width: 1 } },
+    ],
+    showlegend: false,
+  };
+  Plotly.newPlot('chart-pareto-cid22-aic3', traces, layout, { responsive: true });
+}
+
 function renderPareto(bakes) {
   // Scatter: x = non-mono %, y = CID22 SROCC.
   // Each bake is a labelled point. ssim2 reference as a separate marker.
@@ -404,6 +455,7 @@ async function main() {
   renderPerBand(bakes, pbSelect.value);
   renderParityTable();
   if (document.getElementById('chart-pareto')) renderPareto(bakes);
+  if (document.getElementById('chart-pareto-cid22-aic3')) renderParetoCid22Aic3(bakes);
   const step5 = await loadStep5Bakes();
   if (document.getElementById('chart-step5')) renderStep5(step5);
   // Default scatter is V0_16; can swap via the selector
