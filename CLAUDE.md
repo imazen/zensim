@@ -119,6 +119,24 @@ Trained on safe-synthetic CSV with 1,015 perceptual-duplicate sources
 removed (28 % of original 218k pairs); h=128, TV=15, seed=1, KonJND-
 aligned. Affine-calibrated (α=31.1041, β=-4.3882, R²=0.76).
 
+> **⚠️ V0_8 CID22 SROCC IS INFLATED (added 2026-05-12)**: the
+> perceptual-overlap cleanup used to produce the V0_8 training CSV
+> was at a looser threshold than d≤16. The 156,420-row clean CSV
+> still contained **11,629 contaminated rows (7.43%)** mapping to
+> 361 hex-hashed source files that were perceptual-near-duplicates
+> of the 49 CID22 held-out references (22 of 49 leaked).
+>
+> The 2026-05-12 purge deleted those 361 sources + 30.6 GiB of
+> encoded variants + .features.bin caches + tower mirror, then
+> rebuilt the clean CSV at 144,791 rows (manifest at
+> `benchmarks/contaminated_sources_purged_2026-05-12.txt`).
+>
+> V0_15 retrain on the truly-clean CSV is in flight. Expected
+> honest CID22 SROCC: **0.890-0.892** (V0_8's 0.8948 was inflated
+> by ~0.005 SROCC due to training-set leakage). Until V0_15 lands,
+> V0_8 remains the runtime ship but its number should be treated
+> as upper-bound, not benchmark.
+
 **Runtime score-mapping fix landed in same commit**: the V0_4 slot's
 profile now sets `skip_score_mapping = true`, so the V0_8 bake's
 MCOS-aligned raw output (0..100 range) is returned directly without
