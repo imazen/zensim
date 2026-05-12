@@ -14,7 +14,7 @@
 // uploaded; the page falls back to a stub corpus list so the UI is
 // visible end-to-end. Real wiring lands in subsequent commits.
 
-const R2_BASE = "https://zentrain.r2.dev/zensim-compare-site"; // placeholder; user to confirm public URL
+const R2_BASE = "https://zentrain-r2.imazen.org/zensim-compare-site";
 
 const STUB_MANIFEST = {
   base_url: R2_BASE,
@@ -30,13 +30,22 @@ const STUB_MANIFEST = {
       codec: "*", url: "data/parquet/kadid.parquet" },
     { id: "tid2013",  label: "TID2013 (n=3000, MOS — 24 distortions × 5 levels)",
       codec: "*", url: "data/parquet/tid.parquet" },
-    // R2-hosted parquets (URL becomes available once user enables public-read).
-    { id: "v13_zenjpeg",  label: "zenjpeg sweep v13 (36k rows) [R2 pending]",      codec: "zenjpeg" },
-    { id: "v12_zenavif",  label: "zenavif sweep v12 (4k rows) [R2 pending]",        codec: "zenavif" },
-    { id: "v12_zenjxl",   label: "zenjxl sweep v12 (32k rows) [R2 pending]",        codec: "zenjxl"  },
-    { id: "v12_zenwebp",  label: "zenwebp sweep v12 (1k rows) [R2 pending]",        codec: "zenwebp" },
-    { id: "v14_zenpng",   label: "zenpng sweep v14 (2.4k rows) [R2 pending]",       codec: "zenpng"  },
-    { id: "v15r_zenjpeg", label: "zenjpeg sweep v15r (1.79M rows) [R2 pending]",    codec: "zenjpeg" },
+    // R2-hosted codec-sweep parquets at zentrain-r2.imazen.org. Carries
+    // feat_0..feat_299 columns (zensim per-pair features) so the JS-MLP
+    // path can apply any V_X bake on the fly.
+    { id: "v13_zenjpeg", label: "zenjpeg sweep v13 (36k rows, R2)",   codec: "zenjpeg",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v13_zenjpeg.parquet` },
+    { id: "v12_zenavif", label: "zenavif sweep v12 (4k rows, R2)",    codec: "zenavif",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenavif.parquet` },
+    { id: "v12_zenjxl",  label: "zenjxl sweep v12 (32k rows, R2)",    codec: "zenjxl",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenjxl.parquet` },
+    { id: "v12_zenwebp", label: "zenwebp sweep v12 (1k rows, R2)",    codec: "zenwebp",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenwebp.parquet` },
+    { id: "v14_zenpng",  label: "zenpng sweep v14 (2.4k rows, R2)",   codec: "zenpng",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v14_zenpng.parquet` },
+    // The two v15 zenjpeg sweeps (1.79M + 514k rows, ~1.2 GB combined)
+    // are NOT uploaded yet — would need explicit user authorization given
+    // their size + R2 egress cost.
   ],
   metrics: [
     { id: "q",                        label: "q (codec quality)" },

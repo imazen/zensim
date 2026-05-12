@@ -70,12 +70,20 @@ async function initDuckDB() {
 
 // Map corpus id → parquet URL (relative to site root). Stub manifest in
 // compare.js carries the authoritative list; this map is the fallback.
+const R2_BASE = "https://zentrain-r2.imazen.org/zensim-compare-site";
 const CORPUS_URLS = {
+  // In-repo human-rated parquets (small, gh-pages cap-OK).
   aic3_ctc_epfl: "data/parquet/aic3_ctc_epfl.parquet",
   aic4_sample:   "data/parquet/aic4_sample.parquet",
   cid22:         "data/parquet/cid22.parquet",
   kadid10k:      "data/parquet/kadid.parquet",
   tid2013:       "data/parquet/tid.parquet",
+  // R2-hosted codec-sweep parquets — carry feat_0..feat_299 for JS-MLP.
+  v12_zenavif: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenavif.parquet`,
+  v12_zenjxl:  `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenjxl.parquet`,
+  v12_zenwebp: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenwebp.parquet`,
+  v13_zenjpeg: `${R2_BASE}/parquets/codec-sweeps/unified_v13_zenjpeg.parquet`,
+  v14_zenpng:  `${R2_BASE}/parquets/codec-sweeps/unified_v14_zenpng.parquet`,
 };
 
 async function runQuery(msg) {
