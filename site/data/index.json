@@ -42,12 +42,21 @@
     },
     {
       "label": "V0_8_shipped",
-      "notes": "CURRENT SHIP. seed=1 TV=15; CID22=0.8948 (+0.0053 vs ssim2); B1=-0.014 (50% reduction from V0_7 -0.027); non-mono 5.87% (within 6.0% gate)",
+      "notes": "CURRENT SHIP. seed=1 TV=15; CID22=0.8948 (+0.0053 vs ssim2); B1=-0.014 (50% reduction from V0_7 -0.027); non-mono 5.87% (within 6.0% gate). AIC-3 held-out: 0.8043 (+0.0078 vs ssim2).",
       "json": "bakes/V0_8_shipped.json",
       "datasets": [
         "CID22",
         "KADIK10k",
         "TID2013"
+      ]
+    },
+    {
+      "label": "V0_10_perband_tv15_25_15_15",
+      "notes": "Per-band TV experiment [15,25,15,15] seed=1. Best non-mono ever (2.40%, meets strict 4.86% target) but FAILS goal #1: CID22=0.8877 < ssim2; AIC-3=0.7945 < ssim2; B1=-0.036 (worst). Hypothesis disproved — heavy B1 TV does not close B1 gap.",
+      "json": "bakes/V0_10_perband_tv15_25_15_15.json",
+      "datasets": [
+        "CID22",
+        "AIC-3 CTC"
       ]
     }
   ]
