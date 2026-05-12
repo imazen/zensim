@@ -169,7 +169,43 @@ ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
     <tr><td>score.jnd (AIC-3)</td><td>Human JND — alternative ground truth</td><td>negative — more negative = more degraded</td></tr>
   </table>
 
-  <h2>6. Honest-vs-tainted comparison (V0_8 vs V0_16)</h2>
+  <h2>6. Seed variance: V0_16 SHIP vs V_X recipe</h2>
+  <p>
+    A 4-seed sweep over the V0_16 recipe (h=128, flat TV=20, clean data,
+    seeds 1/7/42/123) reveals substantial CID22 SROCC variance that
+    val_mean does NOT detect:
+  </p>
+  <table>
+    <tr><th>Seed</th><th>Bake</th><th>val_mean</th><th>CID22 SROCC</th><th>Δ vs ssim2 0.8895</th></tr>
+    <tr><td>1</td><td><strong>V0_16 SHIP</strong></td><td>0.9403</td><td><strong>0.8919</strong></td><td><span style="color:#0a7d28;">+0.0024</span></td></tr>
+    <tr><td>7</td><td>V0_19</td><td>0.9403</td><td>0.8848</td><td><span style="color:#b1130c;">−0.0047</span></td></tr>
+    <tr><td>42</td><td>V0_18</td><td>0.9401</td><td>0.8847</td><td><span style="color:#b1130c;">−0.0048</span></td></tr>
+    <tr><td>123</td><td>V0_20</td><td>0.9397</td><td>0.8872</td><td><span style="color:#b1130c;">−0.0023</span></td></tr>
+    <tr><th>mean</th><th>—</th><th>0.9401</th><th>0.8872</th><th>−0.0023</th></tr>
+    <tr><th>stdev</th><th>—</th><th>0.0003</th><th>0.0034</th><th>—</th></tr>
+  </table>
+  <p>
+    Three of four seeds land BELOW fast-ssim2. V0_16 (seed=1) is a
+    +1.4σ outlier on the high side. <strong>val_mean is seed-insensitive
+    (stdev 0.0003) while CID22 is seed-sensitive (stdev 0.0034)</strong>
+    — the training validation groups (KADID/TID/KonJND) don't reflect
+    CID22 variance.
+  </p>
+  <p>
+    <strong>Honest framing</strong>: V0_16 SHIP delivers CID22 SROCC
+    0.8919 — that's the measured value for the actual runtime bake.
+    But the underlying RECIPE produces bakes averaging 0.8872 (slightly
+    below ssim2). V0_16 is on the favorable tail of the seed distribution.
+    "V_X recipe beats ssim2" overclaims; "V0_16 SHIP scores 0.8919" is
+    accurate.
+  </p>
+  <p>
+    Future direction: ensemble across seeds, or move to a different
+    architecture (image-type-aware dispatch, deeper model) where the
+    expected per-seed result clears ssim2 by margin larger than seed σ.
+  </p>
+
+  <h2>7. Honest-vs-tainted comparison (V0_8 vs V0_16)</h2>
   <p>
     Before the 2026-05-12 purge, V0_8 (shipped 2026-05-11 eve) reported CID22
     SROCC 0.8948. After the audit revealed 11,629 training rows from
@@ -188,7 +224,7 @@ ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
     V0_15 was under-regularized.
   </p>
 
-  <h2>7. Reproducibility</h2>
+  <h2>8. Reproducibility</h2>
   <p>
     All training data, scripts, and bakes are in the
     <a href="https://github.com/imazen/zensim">imazen/zensim</a> repo
@@ -212,10 +248,11 @@ python3 scripts/v_next/affine_calibrate_znpr_v2.py \
   --out-bake v0_16_calibrated.bin \
   --alpha 28.0366 --beta -5.0738</pre>
 
-  <h2>8. Known gaps</h2>
+  <h2>9. Known gaps</h2>
   <ul>
     <li><strong>dssim integration</strong>: the unified parquet doesn't carry dssim. Adding it requires extending <code>dataset_metric_baseline.rs</code> with a dssim crate dependency.</li>
     <li><strong>B0 SROCC -0.020</strong>: V0_16 still trails ssim2 in B0 (below-medium quality). May require content-class-aware MLP dispatch.</li>
+    <li><strong>Seed variance</strong>: see Section 6. CID22 has σ≈0.0034 across seeds while val_mean has σ≈0.0003. V0_16's apparent ssim2 beat is largely seed-1 luck.</li>
     <li><strong>KonJND-1k path</strong>: dataset directory not currently mounted under <code>/mnt/v/dataset/</code>; PJND validation deferred.</li>
     <li><strong>Coefficient repo blocklist</strong>: 361 hex stems should be added to the synth generator's blocklist to prevent re-introduction. Out-of-repo from zensim; needs user touch.</li>
   </ul>
