@@ -1,16 +1,24 @@
-# Context Handoff (2026-05-12)
+# Context Handoff (2026-05-12, updated post-V0_16)
 
 ## What just shipped
 
-**V0_15 is the current runtime weight** (zensim/weights/v0_15_2026-05-12.bin,
-md5 `73d5e418`). Honest replacement for the tainted V0_8.
+**V0_16 is the current runtime weight** (zensim/weights/v0_16_2026-05-12.bin,
+md5 `baf3fdcb`). V0_16 supersedes V0_15 same day; V0_15 had TV=15 and
+weak B0/B1 coverage; V0_16 raised TV to 20 and recovered the B1 closure
+HONESTLY (without the contamination V0_8 had).
 
-| Metric | V0_15 (honest) | V0_8 (tainted, archived) | fast-ssim2 |
-|---|--:|--:|--:|
-| CID22 SROCC | **0.8914** (+0.0019) | 0.8948 (+0.0053, inflated) | 0.8895 |
-| AIC-3 CTC | **0.8019** (+0.0054) | 0.8043 (+0.0078) | 0.7965 |
-| Non-mono % | **2.51 %** (meets strict 4.86 % target) | 5.87 % | 5.08 % |
-| Val mean | 0.9427 | 0.9416 | — |
+| Metric | V0_16 (clean TV=20) | V0_15 (clean TV=15, archived) | V0_8 (tainted, archived) | fast-ssim2 |
+|---|--:|--:|--:|--:|
+| CID22 SROCC | **0.8919** (+0.0024) | 0.8914 (+0.0019) | 0.8948 (+0.0053, inflated) | 0.8895 |
+| AIC-3 CTC | **0.7990** (+0.0025) | 0.8019 (+0.0054) | 0.8043 (+0.0078) | 0.7965 |
+| Non-mono % | **2.30 %** (best ever) | 2.51 % | 5.87 % | 5.08 % |
+| B1 SROCC | **0.4559** (-0.014 vs ssim2) | 0.4307 (-0.039) | 0.4554 (-0.014 INFLATED) | 0.4694 |
+| Val mean | 0.9403 | 0.9427 | 0.9416 | — |
+
+**Key recovery insight**: V0_8's B1 closure (-0.014) came from training-set
+leakage. V0_15 on clean data couldn't reproduce it (-0.039). V0_16 with
+TV=20 recovers V0_8's B1 number HONESTLY — proving the B1 floor wasn't
+fundamental, just under-regularized in V0_15.
 
 ## The purge (2026-05-12, user-directed)
 
@@ -36,22 +44,27 @@ stripped of 7-10% rows each.
 (361 absolute paths). V0_8 archived at
 `zensim/weights/archive/v0_8_tainted_2026-05-11.bin`.
 
-## V0_15 recipe (recoverable)
+## V0_16 recipe (recoverable, current ship)
 
 - Training CSV: `/tmp/zensim_loop/safe_synth_clean_features.csv` (144,791 rows
   after purge, was 156,420)
 - TV pairs: `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv` (205,654
   pairs after index remap)
-- Hyperparams: h=128, flat TV=15, seed=1, 300 epochs (early-stop ep 190)
-- Affine-calibrated: α=26.9332, β=-4.5520, R²=0.7447 (matches ssim2 truth
-  distribution on synth corpus)
+- Hyperparams: h=128, **flat TV=20**, seed=1, 300 epochs (early-stop ep 190)
+- Affine-calibrated: α=28.0366, β=-5.0738, R²=0.7423
 - Trainer: `target/release/zensim_mlp_train` (zensim-validate crate)
+- Raw bake md5 (before calibration): `b3f5fc59`
+- Calibrated bake md5: `baf3fdcb`
+
+## V0_15 recipe (archived; for reference)
+
+- Same data + TV pairs as V0_16
+- TV=15, seed=1, calibration α=26.9332, β=-4.5520, R²=0.7447
+- md5 `73d5e418` (after calibration). Archived at `weights/archive/`.
 
 ## What's running right now
 
-**V0_16 trainer** (PID 3222018, launched tick 370): same as V0_15 but flat
-TV=20 instead of 15. Hypothesis: does stronger TV on clean data help?
-Output: `/tmp/zensim_loop/v0_16_purged_tv20_seed1.bin`. ETA ~12 min.
+Nothing — V0_16 ship has been committed and pushed.
 
 ## Site state (Goal #6)
 

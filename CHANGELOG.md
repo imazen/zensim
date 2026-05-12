@@ -57,7 +57,21 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
 - `ZensimError` variants `ImageTooLarge` and `FeatureWeightsLengthMismatch`.
   `ZensimError` is now `#[non_exhaustive]`.
 
-### Added (zensim, unreleased) — V0_15 ship 2026-05-12 (HONEST replacement for tainted V0_8)
+### Added (zensim, unreleased) — V0_16 ship 2026-05-12 (HONEST B1 closure)
+- **V0_16 shipped (TV=20, seed=1)** at
+  `zensim/weights/v0_16_2026-05-12.bin` (md5 `baf3fdcb`, 119,812 bytes,
+  affine-calibrated α=28.0366, β=-5.0738, R²=0.7423; raw bake md5 `b3f5fc59`).
+  Trained on same purged 144,791-row CSV as V0_15 but with **TV=20**
+  instead of 15, which recovers V0_8's B1 closure honestly (V0_15 was
+  undersmoothed for B1 at TV=15).
+  **CID22 SROCC = 0.8919** (+0.0024 vs ssim2); **AIC-3 = 0.7990** (+0.0025);
+  **Non-mono = 2.30 %** (best of any bake; 1/2.5 of V0_8's 5.87 %).
+  Per-band **B1 = 0.4559** (-0.014 vs ssim2 0.4694, MATCHES V0_8's
+  tainted -0.014 HONESTLY). V0_15 superseded same day (was the first
+  honest ship but had B1 -0.039 with TV=15); V0_15 archived at
+  `zensim/weights/archive/v0_15_2026-05-12.bin` (md5 `73d5e418`).
+
+### Added (zensim, unreleased) — V0_15 ship 2026-05-12 (HONEST replacement for tainted V0_8, SAME-DAY SUPERSEDED by V0_16)
 - **V0_15 shipped (TV=15, seed=1)** at
   `zensim/weights/v0_15_2026-05-12.bin` (md5 `73d5e418`, 119,812 bytes,
   affine-calibrated α=26.9332, β=-4.5520, R²=0.7447).
