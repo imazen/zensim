@@ -6,8 +6,8 @@
     "md5": "b31741e3c6950ba1767dd19020aca893",
     "size_bytes": 119812
   },
-  "train_csv": "/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_perceptual_clean.csv",
-  "notes": "Initial seed=0 V0_7 ship; CID22=0.8912 but non-mono 5.67% over 5.5% target; superseded by seed=1",
+  "train_csv": null,
+  "notes": "Initial V0_7 (seed=0) ship; non-mono over target; archived",
   "aggregate": {
     "KADIK10k": {
       "n": 10125,

@@ -6,8 +6,8 @@
     "md5": "0133d1653ca58ac6bd1669b6c421e5bd",
     "size_bytes": 119812
   },
-  "train_csv": "/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv",
-  "notes": "Archived; trained on leaked CSV (11.77% training pairs near-duplicates of CID22 holdout)",
+  "train_csv": null,
+  "notes": "Training leak 11.77% (22 of 49 CID22 holdout refs); archived",
   "aggregate": {
     "KADIK10k": {
       "n": 10125,

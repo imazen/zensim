@@ -1,13 +1,13 @@
 {
-  "label": "V0_7_shipped",
+  "label": "V0_7_seed1_TV10",
   "eval_log_path": "/tmp/zensim_loop/v0_7_seed1_eval.log",
   "bake": {
-    "path": "/home/lilith/work/zen/zensim/zensim/weights/v0_7_2026-05-11.bin",
+    "path": "/home/lilith/work/zen/zensim/zensim/weights/archive/v0_7_seed1_tv10_2026-05-11.bin",
     "md5": "0ad0dace2adcdeaaa53a962a4c07d25d",
     "size_bytes": 119812
   },
-  "train_csv": "/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_perceptual_clean.csv",
-  "notes": "NEW CURRENT SHIP. seed=1 best of 5-seed sweep on both criteria; affine \u03b1=31.25 \u03b2=-4.03; CID22=0.8933 (+0.0038 vs ssim2), non-mono=5.46% (within target)",
+  "train_csv": null,
+  "notes": "V0_7 seed=1 TV=10 ship before V0_8 swap; archived",
   "aggregate": {
     "KADIK10k": {
       "n": 10125,

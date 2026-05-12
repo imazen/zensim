@@ -1,32 +1,32 @@
 {
-  "label": "V0_6_clean_baseline",
-  "eval_log_path": "/tmp/zensim_loop/v0_6_clean_full_eval.log",
+  "label": "V0_8_shipped",
+  "eval_log_path": "/tmp/zensim_loop/v0_8_tv15_seed1_eval.log",
   "bake": {
-    "path": "/tmp/zensim_loop/v0_6_clean_h128_tv10_seed42.bin",
-    "md5": "f660457037152a1e1d2f95de0034cb96",
+    "path": "/home/lilith/work/zen/zensim/zensim/weights/v0_8_2026-05-11.bin",
+    "md5": "6748269139b6194e846c3353ed3cedc0",
     "size_bytes": 119812
   },
   "train_csv": null,
-  "notes": "Honest seed=42 baseline post-cleaning",
+  "notes": "CURRENT SHIP. seed=1 TV=15; CID22=0.8948 (+0.0053 vs ssim2); B1=-0.014 (50% reduction from V0_7 -0.027); non-mono 5.87% (within 6.0% gate)",
   "aggregate": {
     "KADIK10k": {
       "n": 10125,
       "v02": 0.8192,
-      "v04": 0.9418,
+      "v04": 0.9422,
       "ssim2": 0.8133,
       "butter": 0.6062
     },
     "TID2013": {
       "n": 3000,
       "v02": 0.8427,
-      "v04": 0.9538,
+      "v04": 0.9515,
       "ssim2": 0.846,
       "butter": 0.6696
     },
     "CID22": {
       "n": 4292,
       "v02": 0.8676,
-      "v04": 0.8839,
+      "v04": 0.8948,
       "ssim2": 0.8895,
       "butter": 0.7412
     }
@@ -37,45 +37,45 @@
         "band": "B0 below medium (<3.7)",
         "n": 6620,
         "v02": 0.6633,
-        "v04": 0.8794,
-        "ci_lo": 0.87,
+        "v04": 0.8818,
+        "ci_lo": 0.88,
         "ci_hi": 0.89,
         "ssim2": 0.6368,
         "butter": 0.3935,
-        "mae": 63.74
+        "mae": 64.63
       },
       {
         "band": "B1 medium [3.7,4.3)",
         "n": 1671,
         "v02": 0.2385,
-        "v04": 0.4132,
-        "ci_lo": 0.38,
-        "ci_hi": 0.45,
+        "v04": 0.4042,
+        "ci_lo": 0.36,
+        "ci_hi": 0.44,
         "ssim2": 0.2593,
         "butter": 0.1399,
-        "mae": 29.1
+        "mae": 29.65
       },
       {
         "band": "B2 high [4.3,4.5)",
         "n": 787,
         "v02": 0.2025,
-        "v04": 0.2363,
-        "ci_lo": 0.17,
-        "ci_hi": 0.3,
+        "v04": 0.2322,
+        "ci_lo": 0.16,
+        "ci_hi": 0.29,
         "ssim2": 0.2115,
         "butter": 0.1445,
-        "mae": 22.54
+        "mae": 23.03
       },
       {
         "band": "B3 visually-lossless (\u22654.5)",
         "n": 1047,
         "v02": 0.2326,
-        "v04": 0.2615,
-        "ci_lo": 0.21,
-        "ci_hi": 0.31,
+        "v04": 0.2534,
+        "ci_lo": 0.2,
+        "ci_hi": 0.3,
         "ssim2": 0.2396,
         "butter": 0.1979,
-        "mae": 20.42
+        "mae": 20.75
       }
     ],
     "TID2013": [
@@ -83,45 +83,45 @@
         "band": "B0 below medium (<4.5)",
         "n": 1418,
         "v02": 0.7762,
-        "v04": 0.8944,
-        "ci_lo": 0.88,
-        "ci_hi": 0.91,
+        "v04": 0.8814,
+        "ci_lo": 0.87,
+        "ci_hi": 0.89,
         "ssim2": 0.7351,
         "butter": 0.4438,
-        "mae": 59.98
+        "mae": 60.8
       },
       {
         "band": "B1 medium [4.5,5.5)",
         "n": 797,
         "v02": 0.4195,
-        "v04": 0.6389,
-        "ci_lo": 0.6,
+        "v04": 0.6317,
+        "ci_lo": 0.58,
         "ci_hi": 0.68,
         "ssim2": 0.432,
         "butter": 0.3054,
-        "mae": 47.36
+        "mae": 47.84
       },
       {
         "band": "B2 high [5.5,6.0)",
         "n": 556,
         "v02": 0.1655,
-        "v04": 0.376,
-        "ci_lo": 0.31,
-        "ci_hi": 0.45,
+        "v04": 0.3657,
+        "ci_lo": 0.3,
+        "ci_hi": 0.44,
         "ssim2": 0.1429,
         "butter": 0.0676,
-        "mae": 42.25
+        "mae": 42.72
       },
       {
         "band": "B3 visually-lossless (\u22656.0)",
         "n": 229,
         "v02": 0.3091,
-        "v04": 0.1254,
-        "ci_lo": 0.01,
-        "ci_hi": 0.25,
+        "v04": 0.2127,
+        "ci_lo": 0.09,
+        "ci_hi": 0.35,
         "ssim2": 0.2738,
         "butter": 0.2813,
-        "mae": 38.52
+        "mae": 39.05
       }
     ],
     "CID22": [
@@ -129,45 +129,45 @@
         "band": "B0 below medium (<50)",
         "n": 324,
         "v02": 0.4072,
-        "v04": 0.4088,
-        "ci_lo": 0.32,
-        "ci_hi": 0.49,
+        "v04": 0.4321,
+        "ci_lo": 0.34,
+        "ci_hi": 0.52,
         "ssim2": 0.4418,
         "butter": 0.2041,
-        "mae": 59.0
+        "mae": 59.24
       },
       {
         "band": "B1 medium [50,65)",
         "n": 1010,
         "v02": 0.4119,
-        "v04": 0.444,
-        "ci_lo": 0.39,
-        "ci_hi": 0.5,
+        "v04": 0.4554,
+        "ci_lo": 0.41,
+        "ci_hi": 0.51,
         "ssim2": 0.4694,
         "butter": 0.2803,
-        "mae": 47.15
+        "mae": 47.33
       },
       {
         "band": "B2 high [65,90)",
         "n": 2915,
         "v02": 0.7359,
-        "v04": 0.7673,
-        "ci_lo": 0.75,
-        "ci_hi": 0.78,
+        "v04": 0.7872,
+        "ci_lo": 0.77,
+        "ci_hi": 0.8,
         "ssim2": 0.7722,
         "butter": 0.5891,
-        "mae": 30.89
+        "mae": 31.05
       },
       {
         "band": "B3 visually-lossless (\u226590)",
         "n": 43,
         "v02": 0.0035,
-        "v04": 0.1684,
+        "v04": 0.1628,
         "ci_lo": 0.01,
-        "ci_hi": 0.49,
+        "ci_hi": 0.47,
         "ssim2": 0.1121,
         "butter": 0.1564,
-        "mae": 22.01
+        "mae": 22.08
       }
     ]
   }

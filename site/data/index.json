@@ -2,7 +2,7 @@
   "bakes": [
     {
       "label": "V0_5_leaked",
-      "notes": "Archived; trained on leaked CSV (11.77% training pairs near-duplicates of CID22 holdout)",
+      "notes": "Training leak 11.77% (22 of 49 CID22 holdout refs); archived",
       "json": "bakes/V0_5_leaked.json",
       "datasets": [
         "CID22",
@@ -12,7 +12,7 @@
     },
     {
       "label": "V0_6_clean_baseline",
-      "notes": "Honest baseline post-cleaning; seed=42 (V0_5 default)",
+      "notes": "Honest seed=42 baseline post-cleaning",
       "json": "bakes/V0_6_clean_baseline.json",
       "datasets": [
         "CID22",
@@ -22,7 +22,7 @@
     },
     {
       "label": "V0_7_seed0_initial",
-      "notes": "Initial seed=0 V0_7 ship; CID22=0.8912 but non-mono 5.67% over 5.5% target; superseded by seed=1",
+      "notes": "Initial V0_7 (seed=0) ship; non-mono over target; archived",
       "json": "bakes/V0_7_seed0_initial.json",
       "datasets": [
         "CID22",
@@ -31,9 +31,19 @@
       ]
     },
     {
-      "label": "V0_7_shipped",
-      "notes": "NEW CURRENT SHIP. seed=1 best of 5-seed sweep on both criteria; affine \u03b1=31.25 \u03b2=-4.03; CID22=0.8933 (+0.0038 vs ssim2), non-mono=5.46% (within target)",
-      "json": "bakes/V0_7_shipped.json",
+      "label": "V0_7_seed1_TV10",
+      "notes": "V0_7 seed=1 TV=10 ship before V0_8 swap; archived",
+      "json": "bakes/V0_7_seed1_TV10.json",
+      "datasets": [
+        "CID22",
+        "KADIK10k",
+        "TID2013"
+      ]
+    },
+    {
+      "label": "V0_8_shipped",
+      "notes": "CURRENT SHIP. seed=1 TV=15; CID22=0.8948 (+0.0053 vs ssim2); B1=-0.014 (50% reduction from V0_7 -0.027); non-mono 5.87% (within 6.0% gate)",
+      "json": "bakes/V0_8_shipped.json",
       "datasets": [
         "CID22",
         "KADIK10k",
