@@ -200,6 +200,7 @@ const NONMONO_PCT_BY_LABEL = {
   'V0_10_perband_tv15_25_15_15': 2.40,
   'V0_11_flat_tv20': 2.33,
   'V0_12_b1_oversample': 1.68,
+  'V0_16_shipped': 2.30,
 };
 
 function renderPareto(bakes) {
@@ -266,7 +267,7 @@ function renderPareto(bakes) {
 
 async function loadStep5Bakes() {
   // Try to load step-5 band JSONs for the bakes we have data for.
-  const labels = ['v0_15', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
+  const labels = ['v0_16', 'v0_15', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
   const out = [];
   for (const lab of labels) {
     try {

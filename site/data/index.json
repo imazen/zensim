@@ -76,6 +76,15 @@
         "CID22",
         "AIC-3 CTC"
       ]
+    },
+    {
+      "label": "V0_16_shipped",
+      "notes": "CURRENT SHIP (2026-05-12). Honest training (clean 144k CSV post-purge). TV=20 raised from V0_15's TV=15 — recovers V0_8's B1 closure HONESTLY. CID22=0.8919 (+0.0024 vs ssim2). AIC-3=0.7990. Non-mono=2.30% (best of any bake). B1=0.4559 matches V0_8 tainted's 0.4554 HONESTLY.",
+      "json": "bakes/V0_16_shipped.json",
+      "datasets": [
+        "CID22",
+        "AIC-3 CTC"
+      ]
     }
   ]
 }
