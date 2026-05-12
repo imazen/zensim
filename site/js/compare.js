@@ -31,17 +31,24 @@ const STUB_MANIFEST = {
   ],
   metrics: [
     { id: "q",                        label: "q (codec quality)" },
-    { id: "score_ssim2",              label: "ssim2" },
+    { id: "score_ssim2",              label: "ssim2 (sweep-time)" },
     { id: "score_butteraugli_max",    label: "butteraugli (max-norm)" },
     { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm)" },
-    { id: "score_zensim",             label: "zensim (parquet-stored)" },
-    { id: "score_zensim_v0_2",        label: "zensim V0_2 (JS-MLP)" },
-    { id: "score_zensim_v0_16",       label: "zensim V0_16 SHIP (JS-MLP)" },
-    { id: "score_zensim_v0_18",       label: "zensim V0_18 seed 42 (JS-MLP)" },
+    { id: "score_zensim",             label: "zensim (sweep-time bake)" },
+    { id: "score_dssim",              label: "dssim (when present)" },
+    // JS-MLP variants — bakes shipped under site/weights/*.bin.
+    // Worker loads the bake and applies it to feat_0..feat_227.
+    { id: "score_zensim_v0_4",        label: "zensim V0_4 (JS-MLP, 228→64→1, 2026-04-30)" },
+    { id: "score_zensim_v0_16",       label: "zensim V0_16 SHIP (JS-MLP, 228→128→1, 2026-05-12)" },
     { id: "score_zensim_v0_20",       label: "zensim V0_20 seed 123 (JS-MLP)" },
-    { id: "score_zensim_v0_21",       label: "zensim V0_21 butter-clean (JS-MLP)" },
-    { id: "human_mos",                label: "human MOS / DMOS (corpus-dependent)" },
+    { id: "score_zensim_v0_22",       label: "zensim V0_22 konjnd_w=1 (JS-MLP)" },
+    // Human-rated columns (corpus-dependent — only available when a
+    // human-rated corpus like AIC-3/AIC-4/CID22 is selected).
+    { id: "human_jnd",                label: "human JND / MOS (corpus-dependent)" },
+    { id: "human_jnd_ci_lo",          label: "human JND — CI lower (AIC-4 only)" },
+    { id: "human_jnd_ci_hi",          label: "human JND — CI upper (AIC-4 only)" },
     { id: "encoded_bytes",            label: "encoded bytes" },
+    { id: "bpp",                      label: "bits per pixel (AIC-3 only for now)" },
   ],
 };
 
