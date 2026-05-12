@@ -222,7 +222,12 @@ mod tests {
     fn tv_regularizer_n_features_nonempty() {
         let tv = TvRegularizer {
             pairs: vec![(0, 1), (2, 3)],
-            features: vec![vec![0.1; 228], vec![0.2; 228], vec![0.3; 228], vec![0.4; 228]],
+            features: vec![
+                vec![0.1; 228],
+                vec![0.2; 228],
+                vec![0.3; 228],
+                vec![0.4; 228],
+            ],
             weight: 10.0,
             apply_every: 50,
             batch: 32,

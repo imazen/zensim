@@ -206,12 +206,8 @@ fn main() -> Result<()> {
 /// same image.
 fn dhash_64_path(path: &Path) -> Result<u64> {
     let img = image::open(path).with_context(|| format!("decoding {}", path.display()))?;
-    let small = image::imageops::resize(
-        &img.to_luma8(),
-        9,
-        8,
-        image::imageops::FilterType::Lanczos3,
-    );
+    let small =
+        image::imageops::resize(&img.to_luma8(), 9, 8, image::imageops::FilterType::Lanczos3);
     let mut hash = 0u64;
     let mut bit = 0u32;
     for y in 0..8 {

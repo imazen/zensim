@@ -30,7 +30,10 @@ pub fn pearson(x: &[f64], y: &[f64]) -> f64 {
 pub fn ranks(v: &[f64]) -> Vec<f64> {
     let n = v.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap_or(core::cmp::Ordering::Equal));
+    idx.sort_by(|&a, &b| {
+        v[a].partial_cmp(&v[b])
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
     let mut r = vec![0.0f64; n];
     let mut i = 0;
     while i < n {

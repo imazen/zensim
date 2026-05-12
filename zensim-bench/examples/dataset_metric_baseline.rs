@@ -92,7 +92,9 @@ fn main() {
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
             "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
             "--konjnd-features-csv" => konjnd_features_csv = Some(args.next().unwrap().into()),
-            "--konjnd-anchor-target" => konjnd_anchor_target = args.next().unwrap().parse().unwrap(),
+            "--konjnd-anchor-target" => {
+                konjnd_anchor_target = args.next().unwrap().parse().unwrap()
+            }
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -133,7 +135,9 @@ fn main() {
     }
 
     if datasets.is_empty() && konjnd.is_none() {
-        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --csiq, --aic3, --konjnd");
+        eprintln!(
+            "no datasets — pass at least one of --kadid, --tid, --cid22, --csiq, --aic3, --konjnd"
+        );
         std::process::exit(1);
     }
 
@@ -264,24 +268,24 @@ fn main() {
         let bands: Option<[(&str, f64, f64); 5]> = match ds.name {
             "CID22" | "CSIQ" => Some([
                 ("B0 below medium (<50)", -f64::INFINITY, 0.50),
-                ("B1 medium [50,65)",      0.50,           0.65),
-                ("B2 high [65,90)",        0.65,           0.90),
-                ("B3 visually-lossless (≥90)", 0.90,       f64::INFINITY),
-                ("Near-PJND [58,68]",      0.58,           0.68),
+                ("B1 medium [50,65)", 0.50, 0.65),
+                ("B2 high [65,90)", 0.65, 0.90),
+                ("B3 visually-lossless (≥90)", 0.90, f64::INFINITY),
+                ("Near-PJND [58,68]", 0.58, 0.68),
             ]),
             "KADIK10k" => Some([
                 ("B0 below medium (<3.7)", -f64::INFINITY, 0.675),
-                ("B1 medium [3.7,4.3)",    0.675,          0.825),
-                ("B2 high [4.3,4.5)",      0.825,          0.875),
-                ("B3 visually-lossless (≥4.5)", 0.875,     f64::INFINITY),
-                ("Near-PJND [3.9,4.2]",    0.725,          0.800),
+                ("B1 medium [3.7,4.3)", 0.675, 0.825),
+                ("B2 high [4.3,4.5)", 0.825, 0.875),
+                ("B3 visually-lossless (≥4.5)", 0.875, f64::INFINITY),
+                ("Near-PJND [3.9,4.2]", 0.725, 0.800),
             ]),
             "TID2013" => Some([
                 ("B0 below medium (<4.5)", -f64::INFINITY, 0.500),
-                ("B1 medium [4.5,5.5)",    0.500,          0.611),
-                ("B2 high [5.5,6.0)",      0.611,          0.667),
-                ("B3 visually-lossless (≥6.0)", 0.667,     f64::INFINITY),
-                ("Near-PJND [4.8,5.2]",    0.533,          0.578),
+                ("B1 medium [4.5,5.5)", 0.500, 0.611),
+                ("B2 high [5.5,6.0)", 0.611, 0.667),
+                ("B3 visually-lossless (≥6.0)", 0.667, f64::INFINITY),
+                ("Near-PJND [4.8,5.2]", 0.533, 0.578),
             ]),
             _ => None,
         };
@@ -289,7 +293,9 @@ fn main() {
             println!();
             println!("### {} per-band SROCC (vs human MOS)", ds.name);
             println!();
-            println!("| Band | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |");
+            println!(
+                "| Band | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |"
+            );
             println!("|---|--:|:--:|:--:|:--:|:--:|:--:|--:|--:|");
             for (label, lo, hi) in &bands {
                 let idxs: Vec<usize> = humans
@@ -298,7 +304,10 @@ fn main() {
                     .filter_map(|(i, &h)| (h >= *lo && h < *hi).then_some(i))
                     .collect();
                 if idxs.len() < 4 {
-                    println!("| {label} | {} | n/a | n/a | n/a | n/a | n/a | n/a |", idxs.len());
+                    println!(
+                        "| {label} | {} | n/a | n/a | n/a | n/a | n/a | n/a |",
+                        idxs.len()
+                    );
                     continue;
                 }
                 let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
@@ -317,15 +326,19 @@ fn main() {
                 let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, &v04_b, 200, 0xC0FFEE);
                 // MAE: V0_4 outputs distance ≈ 100 - score. Compare predicted
                 // *score* = 100 - V0_4 distance against human MCOS * 100.
-                let mae_v04: f64 = idxs.iter()
+                let mae_v04: f64 = idxs
+                    .iter()
                     .map(|&i| ((100.0 - v04[i]) - humans[i] * 100.0).abs())
-                    .sum::<f64>() / idxs.len() as f64;
+                    .sum::<f64>()
+                    / idxs.len() as f64;
                 // V0_2 outputs raw distance ~ 0..90. Skip score-mapping for
                 // V0_2 MAE; just report mean(|distance - (100 - MCOS)|) as a
                 // rough cross-scale anchor.
-                let mae_v02: f64 = idxs.iter()
+                let mae_v02: f64 = idxs
+                    .iter()
                     .map(|&i| (v02[i] - (100.0 - humans[i] * 100.0)).abs())
-                    .sum::<f64>() / idxs.len() as f64;
+                    .sum::<f64>()
+                    / idxs.len() as f64;
                 println!(
                     "| {label} | {} | {s_v02:.4} | {s_v04:.4} | [{ci_lo:.2}, {ci_hi:.2}] | {s_ssim:.4} | {s_ba:.4} | {mae_v04:.2} | {mae_v02:.2} |",
                     idxs.len()

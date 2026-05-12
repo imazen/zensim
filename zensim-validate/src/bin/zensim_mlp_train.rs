@@ -22,10 +22,15 @@ use std::path::PathBuf;
 #[allow(dead_code)] // some helpers are unused in this binary
 mod mlp_train;
 
-use mlp_train::{MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv};
+use mlp_train::{
+    MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv,
+};
 
 #[derive(Parser)]
-#[command(name = "zensim_mlp_train", about = "Rust RankNet MLP trainer (V0_5 recipe)")]
+#[command(
+    name = "zensim_mlp_train",
+    about = "Rust RankNet MLP trainer (V0_5 recipe)"
+)]
 struct Args {
     /// Group spec: NAME:CSV_PATH:TRAIN_WEIGHT:VAL_WEIGHT. Repeat for
     /// each dataset. CSV header must include `ref_basename`,
@@ -139,7 +144,12 @@ fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64), String> {
     }
     let train_w: f64 = parts[2].parse().map_err(|e| format!("bad train_w: {e}"))?;
     let val_w: f64 = parts[3].parse().map_err(|e| format!("bad val_w: {e}"))?;
-    Ok((parts[0].to_string(), PathBuf::from(parts[1]), train_w, val_w))
+    Ok((
+        parts[0].to_string(),
+        PathBuf::from(parts[1]),
+        train_w,
+        val_w,
+    ))
 }
 
 fn load_csv(path: &PathBuf, name: &str) -> Result<LoadedGroup, String> {
@@ -225,7 +235,10 @@ fn parse_band_weights(s: &str) -> Result<[f64; 4], String> {
     }
     let mut out = [0.0; 4];
     for (i, p) in parts.iter().enumerate() {
-        out[i] = p.trim().parse().map_err(|e| format!("bad weight at index {i}: {e}"))?;
+        out[i] = p
+            .trim()
+            .parse()
+            .map_err(|e| format!("bad weight at index {i}: {e}"))?;
     }
     Ok(out)
 }
@@ -246,11 +259,10 @@ fn main() {
     let mut loaded: Vec<LoadedGroup> = Vec::new();
     let mut n_features = 0usize;
     for spec in &args.group {
-        let (name, path, train_w, val_w) =
-            parse_group_spec(spec).unwrap_or_else(|e| {
-                eprintln!("{e}");
-                std::process::exit(2);
-            });
+        let (name, path, train_w, val_w) = parse_group_spec(spec).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        });
         let mut g = load_csv(&path, &name).unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(1);
@@ -311,7 +323,10 @@ fn main() {
         validation_policy: val_policy,
     };
 
-    println!("Training: {} groups, {n_features} features, {hyperparams:?}", groups.len());
+    println!(
+        "Training: {} groups, {n_features} features, {hyperparams:?}",
+        groups.len()
+    );
 
     // Build optional TV regularizer: load pairs file, concatenate
     // all-group features into a flat row index space (trainer row =
@@ -394,13 +409,18 @@ fn main() {
     };
 
     let mut log: Vec<String> = Vec::new();
-    let bake_bytes = train_mlp_with_tv(&groups, n_features, &hyperparams, &mut log, tv_regularizer.as_ref());
+    let bake_bytes = train_mlp_with_tv(
+        &groups,
+        n_features,
+        &hyperparams,
+        &mut log,
+        tv_regularizer.as_ref(),
+    );
 
-    std::fs::write(&args.out, &bake_bytes)
-        .unwrap_or_else(|e| {
-            eprintln!("write {:?}: {e}", args.out);
-            std::process::exit(1);
-        });
+    std::fs::write(&args.out, &bake_bytes).unwrap_or_else(|e| {
+        eprintln!("write {:?}: {e}", args.out);
+        std::process::exit(1);
+    });
     println!("Wrote {} bytes to {:?}", bake_bytes.len(), args.out);
 
     if let Some(log_path) = &args.log_path {

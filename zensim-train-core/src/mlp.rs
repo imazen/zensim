@@ -378,8 +378,26 @@ mod tests {
         let n_hidden = 2;
         let alpha = 0.01;
         let preds = predict_group(&std_x, 2, n_features, &w1, &b1, &w2, &b2, n_hidden, alpha);
-        let (y0, _, _) = forward(&std_x[0..2], &w1, &b1, &w2, &b2, n_features, n_hidden, alpha);
-        let (y1, _, _) = forward(&std_x[2..4], &w1, &b1, &w2, &b2, n_features, n_hidden, alpha);
+        let (y0, _, _) = forward(
+            &std_x[0..2],
+            &w1,
+            &b1,
+            &w2,
+            &b2,
+            n_features,
+            n_hidden,
+            alpha,
+        );
+        let (y1, _, _) = forward(
+            &std_x[2..4],
+            &w1,
+            &b1,
+            &w2,
+            &b2,
+            n_features,
+            n_hidden,
+            alpha,
+        );
         assert!((preds[0] - y0).abs() < 1e-15);
         assert!((preds[1] - y1).abs() < 1e-15);
     }

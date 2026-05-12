@@ -31,7 +31,10 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Stage-2 sliding-window cropped-variant overlap detector")]
+#[command(
+    version,
+    about = "Stage-2 sliding-window cropped-variant overlap detector"
+)]
 struct Args {
     /// Directory containing CID22 validation references.
     #[arg(long)]
@@ -152,7 +155,10 @@ fn main() -> Result<()> {
         }
     }
     eprintln!();
-    eprintln!("=== STAGE-2 FLAGGED (best-window Hamming <= {}) ===", args.threshold);
+    eprintln!(
+        "=== STAGE-2 FLAGGED (best-window Hamming <= {}) ===",
+        args.threshold
+    );
     if flagged.is_empty() {
         eprintln!("  (none)");
     } else {
@@ -171,12 +177,8 @@ fn main() -> Result<()> {
 /// dHash-64 of a `DynamicImage`. Resize to 9×8 grayscale Lanczos3, set
 /// bit per row-adjacent pixel pair if `left > right`.
 fn dhash_64(img: &DynamicImage) -> u64 {
-    let small = image::imageops::resize(
-        &img.to_luma8(),
-        9,
-        8,
-        image::imageops::FilterType::Lanczos3,
-    );
+    let small =
+        image::imageops::resize(&img.to_luma8(), 9, 8, image::imageops::FilterType::Lanczos3);
     let mut hash = 0u64;
     let mut bit = 0u32;
     for y in 0..8 {

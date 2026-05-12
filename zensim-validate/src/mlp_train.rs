@@ -171,12 +171,24 @@ pub fn train_mlp_with_tv(
 
     assert!(!groups.is_empty(), "need at least one training group");
     for g in groups {
-        assert_eq!(g.human_scores.len(), g.features.len(), "{}: scores/features length mismatch", g.name);
-        assert!(g.features.iter().all(|f| f.len() == n_features), "{}: feature length mismatch", g.name);
+        assert_eq!(
+            g.human_scores.len(),
+            g.features.len(),
+            "{}: scores/features length mismatch",
+            g.name
+        );
+        assert!(
+            g.features.iter().all(|f| f.len() == n_features),
+            "{}: feature length mismatch",
+            g.name
+        );
     }
 
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
-    assert!(train_total > 0.0, "no training groups (all train_weight == 0)");
+    assert!(
+        train_total > 0.0,
+        "no training groups (all train_weight == 0)"
+    );
 
     let train_indices: Vec<usize> = groups
         .iter()
@@ -186,7 +198,13 @@ pub fn train_mlp_with_tv(
     let val_indices: Vec<usize> = groups
         .iter()
         .enumerate()
-        .filter_map(|(i, g)| if g.validation_weight > 0.0 { Some(i) } else { None })
+        .filter_map(|(i, g)| {
+            if g.validation_weight > 0.0 {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect();
 
     let log_line = |msg: &str, log: &mut Vec<String>| {
@@ -224,7 +242,8 @@ pub fn train_mlp_with_tv(
     // 1. Compute per-feature scaler (mean / std) using ALL training-group
     //    samples. Validation-only groups are excluded from the scaler so
     //    we never look at validation data during fit.
-    let (scaler_mean, scaler_scale) = compute_scaler_from_groups(groups, &train_indices, n_features);
+    let (scaler_mean, scaler_scale) =
+        compute_scaler_from_groups(groups, &train_indices, n_features);
 
     // 2. Standardize features per group up-front. Standardizing now
     //    avoids redoing it inside the per-step inner loop and lets the
@@ -248,8 +267,11 @@ pub fn train_mlp_with_tv(
     // their flat (n_rows × n_features) form. The TV pairs reference
     // row indices in this flat buffer.
     let tv_std: Option<Vec<f64>> = tv.map(|t| {
-        assert_eq!(t.n_features_check(), n_features,
-                   "TV features dimensionality must match training features");
+        assert_eq!(
+            t.n_features_check(),
+            n_features,
+            "TV features dimensionality must match training features"
+        );
         let n_rows = t.features.len();
         let mut buf = vec![0.0f64; n_rows * n_features];
         for (i, f) in t.features.iter().enumerate() {
@@ -323,8 +345,26 @@ pub fn train_mlp_with_tv(
             let g_feats = &std_features[g_idx];
             let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
             let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
-            let (ya, ha_pre, ha) = forward(xa, &w1, &b1, &w2, &b2, n_features, n_hidden, hyperparams.leaky_alpha);
-            let (yb, hb_pre, hb) = forward(xb, &w1, &b1, &w2, &b2, n_features, n_hidden, hyperparams.leaky_alpha);
+            let (ya, ha_pre, ha) = forward(
+                xa,
+                &w1,
+                &b1,
+                &w2,
+                &b2,
+                n_features,
+                n_hidden,
+                hyperparams.leaky_alpha,
+            );
+            let (yb, hb_pre, hb) = forward(
+                xb,
+                &w1,
+                &b1,
+                &w2,
+                &b2,
+                n_features,
+                n_hidden,
+                hyperparams.leaky_alpha,
+            );
 
             let target = (g.human_scores[ia] - g.human_scores[ib]).signum();
             if target == 0.0 {
@@ -332,7 +372,13 @@ pub fn train_mlp_with_tv(
             }
             let pred_diff = yb - ya;
             let z = -target * pred_diff;
-            let loss = if z > 50.0 { z } else if z < -50.0 { 0.0 } else { (z.exp() + 1.0).ln() };
+            let loss = if z > 50.0 {
+                z
+            } else if z < -50.0 {
+                0.0
+            } else {
+                (z.exp() + 1.0).ln()
+            };
             total_loss += loss;
             n_steps += 1;
 
@@ -342,14 +388,34 @@ pub fn train_mlp_with_tv(
             let dl_dyb = dl_d_pred_diff;
 
             backprop_step(
-                xa, &ha_pre, &ha, dl_dya,
-                &w1, &mut adam.gw1, &mut adam.gb1, &w2, &mut adam.gw2, &mut adam.gb2,
-                n_features, n_hidden, hyperparams.leaky_alpha,
+                xa,
+                &ha_pre,
+                &ha,
+                dl_dya,
+                &w1,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &w2,
+                &mut adam.gw2,
+                &mut adam.gb2,
+                n_features,
+                n_hidden,
+                hyperparams.leaky_alpha,
             );
             backprop_step(
-                xb, &hb_pre, &hb, dl_dyb,
-                &w1, &mut adam.gw1, &mut adam.gb1, &w2, &mut adam.gw2, &mut adam.gb2,
-                n_features, n_hidden, hyperparams.leaky_alpha,
+                xb,
+                &hb_pre,
+                &hb,
+                dl_dyb,
+                &w1,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &w2,
+                &mut adam.gw2,
+                &mut adam.gb2,
+                n_features,
+                n_hidden,
+                hyperparams.leaky_alpha,
             );
 
             if hyperparams.l2_lambda > 0.0 {
@@ -389,11 +455,25 @@ pub fn train_mlp_with_tv(
                     let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
                     let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
                     let (y_lo, h_lo_pre, h_lo) = forward(
-                        xlo, &w1, &b1, &w2, &b2,
-                        n_features, n_hidden, hyperparams.leaky_alpha);
+                        xlo,
+                        &w1,
+                        &b1,
+                        &w2,
+                        &b2,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
+                    );
                     let (y_hi, h_hi_pre, h_hi) = forward(
-                        xhi, &w1, &b1, &w2, &b2,
-                        n_features, n_hidden, hyperparams.leaky_alpha);
+                        xhi,
+                        &w1,
+                        &b1,
+                        &w2,
+                        &b2,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
+                    );
                     // Violation = (y_hi - y_lo) > 0 (worse direction).
                     let viol = y_hi - y_lo;
                     if viol <= 0.0 {
@@ -401,23 +481,45 @@ pub fn train_mlp_with_tv(
                     }
                     // d_loss/d_y_hi = +scale ; d_loss/d_y_lo = -scale
                     backprop_step(
-                        xhi, &h_hi_pre, &h_hi, scale,
-                        &w1, &mut adam.gw1, &mut adam.gb1,
-                        &w2, &mut adam.gw2, &mut adam.gb2,
-                        n_features, n_hidden, hyperparams.leaky_alpha,
+                        xhi,
+                        &h_hi_pre,
+                        &h_hi,
+                        scale,
+                        &w1,
+                        &mut adam.gw1,
+                        &mut adam.gb1,
+                        &w2,
+                        &mut adam.gw2,
+                        &mut adam.gb2,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
                     );
                     backprop_step(
-                        xlo, &h_lo_pre, &h_lo, -scale,
-                        &w1, &mut adam.gw1, &mut adam.gb1,
-                        &w2, &mut adam.gw2, &mut adam.gb2,
-                        n_features, n_hidden, hyperparams.leaky_alpha,
+                        xlo,
+                        &h_lo_pre,
+                        &h_lo,
+                        -scale,
+                        &w1,
+                        &mut adam.gw1,
+                        &mut adam.gb1,
+                        &w2,
+                        &mut adam.gw2,
+                        &mut adam.gb2,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
                     );
                     adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
                 }
             }
         }
 
-        let avg_loss = if n_steps > 0 { total_loss / n_steps as f64 } else { 0.0 };
+        let avg_loss = if n_steps > 0 {
+            total_loss / n_steps as f64
+        } else {
+            0.0
+        };
 
         if epoch % hyperparams.log_every == 0 || epoch == hyperparams.n_epochs - 1 {
             // Per-group SROCC. The MLP outputs raw_distance (lower =
@@ -430,8 +532,15 @@ pub fn train_mlp_with_tv(
                 .enumerate()
                 .map(|(gi, g)| {
                     let preds = predict_group(
-                        &std_features[gi], g.features.len(), n_features,
-                        &w1, &b1, &w2, &b2, n_hidden, hyperparams.leaky_alpha,
+                        &std_features[gi],
+                        g.features.len(),
+                        n_features,
+                        &w1,
+                        &b1,
+                        &w2,
+                        &b2,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
                     spearman_correlation(g.human_scores, &neg_preds)
@@ -446,8 +555,10 @@ pub fn train_mlp_with_tv(
             } else {
                 match hyperparams.validation_policy {
                     ValidationPolicy::Mean => {
-                        let total: f64 =
-                            val_indices.iter().map(|&i| groups[i].validation_weight).sum();
+                        let total: f64 = val_indices
+                            .iter()
+                            .map(|&i| groups[i].validation_weight)
+                            .sum();
                         val_indices
                             .iter()
                             .map(|&i| group_srocc[i] * groups[i].validation_weight)
@@ -491,7 +602,9 @@ pub fn train_mlp_with_tv(
                 ));
             } else {
                 stale_epochs += hyperparams.log_every;
-                if hyperparams.early_stop_patience > 0 && stale_epochs >= hyperparams.early_stop_patience {
+                if hyperparams.early_stop_patience > 0
+                    && stale_epochs >= hyperparams.early_stop_patience
+                {
                     log_line(
                         &format!(
                             "  early stop at epoch {epoch} (no validation improvement for {stale_epochs} epochs)"
@@ -504,7 +617,10 @@ pub fn train_mlp_with_tv(
         }
     }
 
-    log_line(&format!("MLP train: best validation mean SROCC = {best_val_score:.4}"), log);
+    log_line(
+        &format!("MLP train: best validation mean SROCC = {best_val_score:.4}"),
+        log,
+    );
     best_bake.unwrap_or_else(|| {
         bake_two_layer_znpr_v2(
             &scaler_mean,
@@ -776,14 +892,7 @@ impl AdamState {
         }
     }
 
-    fn step(
-        &mut self,
-        w1: &mut [f64],
-        b1: &mut [f64],
-        w2: &mut [f64],
-        b2: &mut [f64],
-        lr: f64,
-    ) {
+    fn step(&mut self, w1: &mut [f64], b1: &mut [f64], w2: &mut [f64], b2: &mut [f64], lr: f64) {
         self.t += 1;
         let beta1: f64 = 0.9;
         let beta2: f64 = 0.999;
@@ -934,10 +1043,7 @@ mod tests {
         let val_features: Vec<Vec<f64>> = (0..80)
             .map(|_| (0..n_features).map(|_| rng.next_normal()).collect())
             .collect();
-        let val_scores: Vec<f64> = val_features
-            .iter()
-            .map(|f| f.iter().sum::<f64>())
-            .collect();
+        let val_scores: Vec<f64> = val_features.iter().map(|f| f.iter().sum::<f64>()).collect();
         let val_refs: Vec<&[f64]> = val_features.iter().map(|v| v.as_slice()).collect();
 
         let groups = vec![
