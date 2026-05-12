@@ -106,6 +106,12 @@
       "notes": "Cycle-6 candidate #4: butter-concordant training (128k rows). CID22=0.8874 single-bake, BUT 5-bake ensemble (V0_16/V0_18/V0_19/V0_20/V0_21) BEATS ssim2 on BOTH CID22 (0.8896 +0.0001) AND AIC-3 (0.8012 +0.0047). Complementary signal in ensemble.",
       "json": "bakes/V0_21_butter_clean.json",
       "datasets": ["CID22", "AIC-3 CTC"]
+    },
+    {
+      "label": "V0_22_konjnd_w1",
+      "notes": "Cycle-6 specialty: V0_16 recipe with konjnd train_w=1.0 (vs V0_16's 0.5). BEST Near-PJND SROCC (0.3710, +0.0163 over V0_16) AND best smoothness (non-mono 1.96%) of any bake. But worst AIC-3 (-0.0059 vs ssim2). NOT shipped; doesn't help general ensemble.",
+      "json": "bakes/V0_22_konjnd_w1.json",
+      "datasets": ["CID22", "AIC-3 CTC"]
     }
   ]
 }
