@@ -118,8 +118,16 @@ def load_human_csv(path: Path, dataset_name: str, target_col: str,
     out = pd.DataFrame()
     out["image_basename"] = df["ref_basename"]
     out["sweep_id"] = f"human-{dataset_name}"
-    out["codec"] = f"human-{dataset_name}"
-    out["q"] = 0
+    # Cycle-7: preserve real codec/quality from synth CSV when present.
+    # Lets TV regularizer work on safe-synthetic rows (which have real
+    # q values per quality column). Falls back to V0_16 behavior
+    # (codec="human-<name>", q=0) when those columns are absent.
+    if "codec_real" in df.columns and "quality" in df.columns:
+        out["codec"] = df["codec_real"]
+        out["q"] = df["quality"].astype(np.int32)
+    else:
+        out["codec"] = f"human-{dataset_name}"
+        out["q"] = 0
     out["knob_tuple_json"] = "human"
     # human_score is in [0, 1]; scale to [0, 100] to match score_ssim2.
     score_100 = df["human_score"].astype(float) * 100.0
@@ -497,9 +505,15 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
                 # dssim auxiliary MSE against quality-scaled dssim target.
                 # Pulls pred toward (1-dssim)*100; rank-invariant with the
                 # ssim2 head since both are quality (higher = better).
+                # NaN-aware: only rows that have dssim contribute. Sweep
+                # parquet rows (which lack dssim) skip this term cleanly.
                 dssim_target = dst[idx]
-                dssim_mse = torch.mean((pred - dssim_target) ** 2)
-                loss = loss + cfg.dssim_weight * dssim_mse
+                mask = ~torch.isnan(dssim_target)
+                if mask.any():
+                    p_valid = pred[mask]
+                    t_valid = dssim_target[mask]
+                    dssim_mse = torch.mean((p_valid - t_valid) ** 2)
+                    loss = loss + cfg.dssim_weight * dssim_mse
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -927,12 +941,14 @@ def main() -> int:
                 "dssim scores (e.g. training_safe_synthetic.csv has it).")
         dssim_train = df["dssim"].to_numpy(dtype=np.float32)[is_tr_x]
         n_nan = int(np.isnan(dssim_train).sum())
-        if n_nan:
-            print(f"WARNING: {n_nan:,} NaN dssim values; setting to 0 "
-                  f"(quality=100 → no penalty toward these rows)", flush=True)
-            dssim_train = np.where(np.isnan(dssim_train), 0.0, dssim_train)
+        n_valid = int(np.sum(~np.isnan(dssim_train)))
         print(f"dssim co-training: weight={args.dssim_weight}, "
-              f"target rows={len(dssim_train):,}", flush=True)
+              f"valid target rows={n_valid:,} / {len(dssim_train):,} "
+              f"(NaN={n_nan:,} — masked out, not pushed to quality=100)",
+              flush=True)
+        # KEEP NaN; the train() loop masks them out of the dssim term so
+        # rows without dssim (e.g. sweep parquets) don't get spurious
+        # quality=100 targets pulling pred to 100.
 
     t0 = time.time()
     model, metrics = train(cfg, Xt, y[is_tr_x], g_all[is_tr_x],
