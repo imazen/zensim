@@ -256,11 +256,18 @@ Implementation must:
 
 1. **Corpus + distortion selector** — checkbox UI, multi-select.
    Each corpus knows its own list of distortions/codecs. At
-   minimum: CID22, KADID-10k, TID2013, KonJND-1k, AIC-3 CTC,
-   AIC-4 (when available), plus our internal synthetic
-   safe-synthetic and unified V_X parquets. The selector is a
-   SUPERSET — user picks any combination across corpora and the
-   site stitches the rows together.
+   minimum: CID22, KADID-10k, TID2013, KonJND-1k, **AIC-3 CTC**
+   (`/mnt/v/dataset/aic3_ctc_epfl/`), **AIC-4 sample**
+   (`/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset/` +
+   metric/JND CSVs at
+   `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/`), plus our
+   internal synthetic safe-synthetic and unified V_X parquets.
+   The selector is a SUPERSET — user picks any combination
+   across corpora and the site stitches the rows together.
+   **AIC-3/AIC-4 are mandatory for low-q human-judgment coverage**
+   (CID22's MOS distribution is concentrated in B2/B3; AIC-3 CTC
+   and AIC-4 reconstructed-JND span the B0/B1 bands that matter
+   most for compression product decisions).
 
 2. **X/Y axis dropdowns** — both can be ANY metric: codec
    quality (q), dssim, ssim2, butteraugli (3-norm or max-norm or
@@ -296,13 +303,14 @@ Implementation must:
    box (p5/p25/p50/p75/p95) plus a bootstrap 95% CI on the
    median. Tabulate per (codec, band).
 
-7. **2024-paper charts** — reproduce the figures/tables the
-   2024 CID22 edition (the one that references dssim) adds over
-   the 2023 paper. The 2024 paper is NOT yet on disk; fetch +
-   page-to-PNG when available, identify which charts are new vs
-   2023 (Tables 3/4/5/6 are 2023; the 2024 additions need to be
-   enumerated). The site adds those alongside the interactive
-   widget.
+7. **2023-paper charts** — reproduce the figures/tables from the
+   2023 CID22 paper at
+   `/mnt/v/zen/zensim-training/2026-05-07/papers/CID22_wg1m99012.pdf`
+   (Tables 3 per-codec SROCC, 4 PJND calibration, 5 band cutoffs,
+   6 pairwise SROCC). The site renders these as static tables/
+   plots ALONGSIDE the interactive widget so users can compare
+   our V_X numbers against paper-reported baselines on the same
+   page.
 
 8. **Codec filtering** — filter rows by codec name AND codec
    version (e.g. zenjpeg-420 vs zenjpeg-444, JXL d1 vs d2, AVIF

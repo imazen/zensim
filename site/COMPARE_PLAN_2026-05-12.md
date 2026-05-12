@@ -35,11 +35,14 @@ Stack decisions (user-confirmed 2026-05-12):
 ### Missing from local store (must be added before launch)
 
 1. **dssim** — not scored. Needs a Rust binary pass.
-2. **Human MOS / DMOS / PJND** — CID22, KADID-10k, TID2013, KonJND-1k. Export each to parquet:
-   - CID22: `/mnt/v/dataset/cid22/CID22_validation_set.csv` (4,292 rows, MOS scale)
-   - KADID: `/mnt/v/dataset/kadid10k/` (10,125 rows, DMOS)
-   - TID2013: `/mnt/v/dataset/tid2013/` (3,000 rows, MOS)
-   - KonJND-1k: location TBD (missing — see CLAUDE.md outstanding items)
+2. **Human MOS / DMOS / PJND / JND** — CID22, KADID-10k, TID2013, KonJND-1k, AIC-3 CTC, AIC-4 sample. Export each to parquet:
+   - **CID22**: `/mnt/v/dataset/cid22/CID22_validation_set.csv` (4,292 rows, MOS scale)
+   - **KADID-10k**: `/mnt/v/dataset/kadid10k/` (10,125 rows, DMOS)
+   - **TID2013**: `/mnt/v/dataset/tid2013/` (3,000 rows, MOS)
+   - **KonJND-1k**: location TBD (missing — see CLAUDE.md outstanding items)
+   - **AIC-3 CTC EPFL** (low-q coverage — MANDATORY): `/mnt/v/dataset/aic3_ctc_epfl/` (decoded + original subdirs); score CSVs at the dataset root or sidecar
+   - **AIC-4 sample reconstructed-JND** (low-q coverage — MANDATORY): `/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset/` (full_resolution_images + PTC_images); metric/JND CSVs at `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC-4_reconstructed_jnd_scores.csv` + `JPEG-AIC_metric_scores.csv`
+   - **Why AIC matters**: CID22 MOS skews toward B2/B3; AIC-3 CTC and AIC-4 JND cover B0/B1 (low-q regime) where compression-product decisions live. Per the CID22 paper itself ssim2 is less reliable at q<30; AIC's low-q data is what tells us whether V_X bakes generalize there.
 3. **V_X bake .bin files** — ship under `site/weights/` for in-browser MLP. Sources:
    - V0_2 (legacy 228-handcoded): `zensim/weights/archive/v0_2_handcoded.bin` (if not present, extract from the source-of-record in profile.rs)
    - V0_16 (current ship): `zensim/weights/v0_16_2026-05-12.bin`
@@ -126,7 +129,7 @@ site/
 8. ⬜ Implement codec / codec-version filter (extract from `knob_tuple_json`).
 9. ⬜ Implement Y→codec-param lookup table.
 10. ⬜ Ship V_X bakes; implement JS MLP forward pass.
-11. ⬜ Export CID22/KADID/TID human-rated parquets; upload to R2.
+11. ⬜ Export CID22/KADID/TID/**AIC-3/AIC-4** human-rated parquets; upload to R2. AIC-3/AIC-4 are mandatory for low-q coverage.
 12. ⬜ Add MOS/DMOS to axis dropdown (gated on corpus selection — only available when a human-rated corpus is selected).
 13. ⬜ Implement candlestick + CI-interval table by band.
 14. ⬜ Implement dssim scoring (Rust binary, separate ticket); re-run scoring pass for all parquets; add `score_dssim` column.
@@ -136,6 +139,12 @@ Each step lands as its own commit. Steps 3–9 are the MVP; ship at step 9 and i
 
 ## Open items requiring user input
 
-- **R2 public-read setup**: enable r2.dev URL (e.g. `https://pub-<hash>.r2.dev/zentrain/zensim-compare-site/`) OR custom domain? Once enabled, paste the URL so JS can hard-code `BASE_URL`.
-- **dssim**: separate multi-hour project. Defer to a later cycle.
-- **KonJND-1k corpus**: missing from disk. Either restore from external source or skip its anchor data.
+1. **R2 public-read URL form**: the parquet/weights data has to be reachable from the browser. Two options:
+   - **r2.dev preview URL** — Cloudflare auto-issues `https://pub-<hash>.r2.dev/zentrain/...` per bucket when "Public access" is enabled in the R2 console. Zero infra, but the hash is opaque and the bucket name is exposed.
+   - **Custom domain** — e.g. `https://data.imazen.io/zensim/`. Requires a Cloudflare CNAME + bucket binding. Nicer URL, more setup.
+
+   Either is fine for the site. I can't enable public access from the env — it's an R2 console toggle. Once you flip it and paste the URL, I update `R2_BASE` in `compare.js` and uploads can begin.
+
+2. **dssim integration**: requires a Rust binary pass over every parquet's rows to add a `score_dssim` column. Multi-hour. Defer to a later cycle unless you'd like it prioritized.
+
+3. **KonJND-1k corpus**: dataset directory `/mnt/v/dataset/konjnd-1k/` is missing from disk. Either restore from an external source or skip its PJND anchor data and accept that the calibrate-at-PJND step in the methodology stays at its current state.
