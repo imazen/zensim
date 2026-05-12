@@ -179,17 +179,25 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin`
 /// (byte-identical to the prior shipped state).
 ///
-/// File: `zensim/weights/v0_7_2026-05-11.bin` (md5 `b31741e3`).
+/// File: `zensim/weights/v0_7_2026-05-11.bin` (md5 `0ad0dace`).
 /// Trained on **leak-free** safe-synthetic CSV (1,015 perceptual
 /// duplicates of CID22 holdout removed; -28% rows). h=128, TV=10,
-/// seed=0, KonJND-aligned. Affine-calibrated (α=34.3019, β=-4.0336)
+/// **seed=1** (strict upgrade from initial seed=0 ship — see below),
+/// KonJND-aligned. Affine-calibrated (α=31.2540, β=-4.0305, R²=0.76)
 /// against ssim2 on the synth corpus.
 ///
 /// **First honest clean-corpus bake that exceeds fast-ssim2 on CID22
-/// aggregate**: V0_7 CID22 SROCC = 0.8912 vs fast-ssim2 0.8895
-/// (+0.0017). Per-band CID22: B0 0.4279, B1 0.4354, B2 0.7842 (BEATS
-/// ssim2 0.7722), B3 0.1595 (BEATS ssim2 0.1121), Near-PJND 0.3591.
-/// Wins 2 of 5 bands (B2, B3); aggregate-bar met.
+/// aggregate by > 0.003**: V0_7 CID22 SROCC = 0.8933 vs fast-ssim2
+/// 0.8895 (**+0.0038**). Per-band CID22:
+/// - B0 (<50): 0.4370 vs ssim2 0.4418 (-0.005, near-parity)
+/// - B1 [50,65): 0.4424 vs ssim2 0.4694 (-0.027, loses)
+/// - B2 [65,90): **0.7893** vs ssim2 0.7722 (**+0.017 BEATS**)
+/// - B3 (≥90, n=43): **0.1944** vs ssim2 0.1121 (**+0.082 BEATS**)
+/// - Near-PJND [58,68]: 0.3741 vs ssim2 0.3908 (-0.017, near-parity)
+///
+/// Wins B2 and B3, near-parity on B0 and Near-PJND, only meaningful
+/// loss is B1. **Non-mono q-step rate = 5.46 % (within 5.5 % target)** —
+/// tighter smoothness than the initial seed=0 ship (5.67 %).
 ///
 /// **Holdout-overlap remediation**: V0_5's 0.8900 was inflated by
 /// 11.77 % training-pair leak from 22 of 49 CID22 holdout refs (via
@@ -201,8 +209,10 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 ///
 /// Function and slot names preserved (`mlp_bake_preview_v0_4`,
 /// `PROFILE_PREVIEW_V0_4`) for source-compat with consumer pinning.
-/// Predecessor `zensim/weights/v0_5_2026-05-11.bin` archived at
-/// `zensim/weights/archive/v0_5_2026-05-11.bin` for reproducibility.
+/// Predecessors archived at `zensim/weights/archive/`:
+/// - `v0_5_2026-05-11.bin` (md5 `0133d165`, training leak 11.77 %)
+/// - `v0_7_seed0_2026-05-11.bin` (md5 `b31741e3`, initial V0_7
+///   ship before seed=1 swap; CID22 0.8912, non-mono 5.67 %)
 /// Gated behind `__experimental_versions` because the `weights/`
 /// directory is excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]

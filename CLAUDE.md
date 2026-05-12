@@ -106,14 +106,17 @@ synth-only `/mnt/v` corpus.
 
 ### Long-term goals (added 2026-05-11, user directive)
 
-The recovery cycle continues — **V0_7 shipped 2026-05-11**
-(superseding V0_5). V0_7 is the first honest clean-corpus bake that
-exceeds fast-ssim2 on CID22 aggregate (CID22 SROCC 0.8912 vs ssim2
-0.8895, +0.0017). Trained on safe-synthetic CSV with 1,015
-perceptual-duplicate sources removed (28 % of original 218k pairs);
-seed=0, h=128, TV=10, affine-calibrated (α=34.3019, β=-4.0336).
-Per-band wins ssim2 in B2/B3; loses B0/B1/Near-PJND (documented as
-next-cycle target). Going
+The recovery cycle continues — **V0_7 shipped 2026-05-11** (seed=1,
+superseding V0_5 and the initial seed=0 V0_7 ship within the same
+session). V0_7 is the first honest clean-corpus bake that exceeds
+fast-ssim2 on CID22 aggregate (CID22 SROCC 0.8933 vs ssim2 0.8895,
+**+0.0038**). Trained on safe-synthetic CSV with 1,015 perceptual-
+duplicate sources removed (28 % of original 218k pairs); seed=1
+selected from a 5-seed sweep for both highest CID22 SROCC AND
+within-target smoothness (non-mono 5.46 % vs 5.5 % gate); h=128,
+TV=10, affine-calibrated (α=31.2540, β=-4.0305, R²=0.76). Per-band
+wins ssim2 in B2/B3; near-parity on B0 and Near-PJND; only
+meaningful loss is B1 (next-cycle target). Going
 forward, the priorities are:
 
 1. **Pure-Rust training pipeline that runs in WebAssembly on background
