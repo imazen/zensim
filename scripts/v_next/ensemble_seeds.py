@@ -51,9 +51,19 @@ def band_of(mcos):
 
 
 def main():
-    files = sys.argv[1:]
+    args = sys.argv[1:]
+    # Optional first arg: --dataset CID22|AIC-3 CTC
+    dataset = "CID22"
+    if args and args[0].startswith("--dataset"):
+        if "=" in args[0]:
+            dataset = args[0].split("=", 1)[1]
+        else:
+            dataset = args[1]; args = args[1:]
+        args = args[1:]
+    files = args
     if not files:
-        print("Usage: ensemble_seeds.py file1 file2 [...]", file=sys.stderr); sys.exit(1)
+        print("Usage: ensemble_seeds.py [--dataset NAME] file1 file2 [...]", file=sys.stderr); sys.exit(1)
+    print(f"Dataset filter: {dataset}", file=sys.stderr)
 
     # Read each file into list of (human, v04, ssim2, butter)
     runs = []
@@ -62,7 +72,7 @@ def main():
         with open(f) as fp:
             r = csv.DictReader(fp)
             for row in r:
-                if row.get("dataset") != "CID22":
+                if row.get("dataset") != dataset:
                     continue
                 try:
                     h = float(row["human_score"]) * 100.0
