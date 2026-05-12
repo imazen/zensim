@@ -88,14 +88,25 @@
   </p>
   <div id="parity-table"></div>
 
+  <h2>Pareto: CID22 SROCC vs non-mono q-step rate</h2>
+  <p class="lede">
+    Each bake is a point. The X axis is reversed so smoother bakes appear on the right.
+    The dashed line marks fast-ssim2's CID22 SROCC (0.8895). Goal #1 is to be both
+    above the line AND to the right of fast-ssim2's non-mono 5.08 %.
+  </p>
+  <div id="chart-pareto" class="chart"></div>
+
   <h2>Bake history</h2>
   <table id="bake-history">
-    <tr><th>Bake</th><th>CID22 SROCC</th><th>vs ssim2</th><th>Non-mono</th><th>Status</th></tr>
-    <tr><td>V0_5 leaked</td><td>0.8900</td><td><span class="delta-near">+0.0005</span></td><td>5.36 %</td><td><span class="small">archived (training leak 11.77 %)</span></td></tr>
-    <tr><td>V0_6 clean (seed=42)</td><td>0.8839</td><td><span class="delta-bad">−0.0056</span></td><td>5.94 %</td><td><span class="small">honest baseline</span></td></tr>
-    <tr><td>V0_7 seed=0 (initial)</td><td>0.8912</td><td><span class="delta-good">+0.0017</span></td><td>5.67 %</td><td><span class="small">archived (non-mono over)</span></td></tr>
-    <tr><td>V0_7 seed=1 TV=10</td><td>0.8933</td><td><span class="delta-good">+0.0038</span></td><td>5.46 %</td><td><span class="small">archived (B1 -0.027)</span></td></tr>
-    <tr><td><strong>V0_8 TV=15 seed=1 (SHIPPED)</strong></td><td><strong>0.8948</strong></td><td><span class="delta-good">+0.0053</span></td><td>5.87 %</td><td><strong>current ship · B1 -0.014</strong></td></tr>
+    <tr><th>Bake</th><th>CID22 SROCC</th><th>vs ssim2</th><th>Non-mono</th><th>AIC-3 SROCC</th><th>Status</th></tr>
+    <tr><td>V0_5 leaked</td><td>0.8900</td><td><span class="delta-near">+0.0005</span></td><td>5.36 %</td><td>—</td><td><span class="small">archived (training leak 11.77 %)</span></td></tr>
+    <tr><td>V0_6 clean (seed=42)</td><td>0.8839</td><td><span class="delta-bad">−0.0056</span></td><td>5.94 %</td><td>—</td><td><span class="small">honest baseline</span></td></tr>
+    <tr><td>V0_7 seed=0 (initial)</td><td>0.8912</td><td><span class="delta-good">+0.0017</span></td><td>5.67 %</td><td>—</td><td><span class="small">archived (non-mono over)</span></td></tr>
+    <tr><td>V0_7 seed=1 TV=10</td><td>0.8933</td><td><span class="delta-good">+0.0038</span></td><td>5.46 %</td><td>—</td><td><span class="small">archived (B1 -0.027)</span></td></tr>
+    <tr><td><strong>V0_8 TV=15 seed=1 (SHIPPED)</strong></td><td><strong>0.8948</strong></td><td><span class="delta-good">+0.0053</span></td><td>5.87 %</td><td><strong>0.8043</strong> (+0.0078)</td><td><strong>current ship · B1 -0.014</strong></td></tr>
+    <tr><td>V0_10 [15,25,15,15]</td><td>0.8877</td><td><span class="delta-bad">−0.0018</span></td><td>2.40 %</td><td>0.7945 (−0.0020)</td><td><span class="small">smoothness specialist; B1 -0.036</span></td></tr>
+    <tr><td>V0_11 flat TV=20</td><td>0.8897</td><td><span class="delta-near">+0.0002</span></td><td>2.33 %</td><td><strong>0.8056</strong> (+0.0091)</td><td><span class="small">beats V0_8 on AIC-3 but B0 -0.040</span></td></tr>
+    <tr><td>V0_12 B1 oversample</td><td>0.8895</td><td><span class="delta-near">±0.0000</span></td><td><strong>1.68 %</strong></td><td>0.7972 (+0.0007)</td><td><span class="small">best non-mono; B1 oversample disproved (B1 -0.025)</span></td></tr>
   </table>
 
   <h2>Notes</h2>

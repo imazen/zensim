@@ -188,6 +188,82 @@ function renderKonjndTable(parity) {
   div.innerHTML = `<table>${rows.join('')}</table>`;
 }
 
+// Non-mono q-step rates for bakes where we don't (yet) emit a field
+// in the per-bake JSON. Values come from `score_unified_with_bake.py`
+// on unified_v13_zenjpeg.parquet (the same harness CLAUDE.md references).
+const NONMONO_PCT_BY_LABEL = {
+  'V0_5_leaked': 5.36,
+  'V0_6_clean_baseline': 5.94,
+  'V0_7_seed0_initial': 5.67,
+  'V0_7_seed1_TV10': 5.46,
+  'V0_8_shipped': 5.87,
+  'V0_10_perband_tv15_25_15_15': 2.40,
+  'V0_11_flat_tv20': 2.33,
+  'V0_12_b1_oversample': 1.68,
+};
+
+function renderPareto(bakes) {
+  // Scatter: x = non-mono %, y = CID22 SROCC.
+  // Each bake is a labelled point. ssim2 reference as a separate marker.
+  const xs = [];
+  const ys = [];
+  const labels = [];
+  const colors = [];
+  for (const b of bakes) {
+    const nm = b.data.non_mono_q_step_pct ?? NONMONO_PCT_BY_LABEL[b.label];
+    const srocc = b.data.aggregate?.CID22?.v04;
+    if (nm == null || srocc == null) continue;
+    xs.push(nm);
+    ys.push(srocc);
+    labels.push(b.label);
+    // Color: ship (V0_8) green, archived gray, smoothness specialists blue
+    if (b.label === 'V0_8_shipped') colors.push('#0a7d28');
+    else if (b.label.startsWith('V0_5') || b.label.startsWith('V0_6') || b.label.startsWith('V0_7'))
+      colors.push('#888');
+    else colors.push('#1f77b4');
+  }
+  // ssim2 reference (CID22 0.8895, non-mono 5.08% per CLAUDE.md)
+  const ssim2 = bakes[0]?.data?.aggregate?.CID22?.ssim2 ?? 0.8895;
+  const traces = [
+    {
+      x: xs,
+      y: ys,
+      text: labels,
+      mode: 'markers+text',
+      textposition: 'top center',
+      type: 'scatter',
+      marker: { size: 14, color: colors, line: { width: 1, color: '#222' } },
+      name: 'V_X bakes',
+    },
+    {
+      x: [5.08],
+      y: [ssim2],
+      text: ['fast-ssim2'],
+      mode: 'markers+text',
+      textposition: 'bottom center',
+      type: 'scatter',
+      marker: { size: 16, color: '#b1130c', symbol: 'diamond' },
+      name: 'fast-ssim2',
+    },
+  ];
+  const layout = {
+    title: 'Pareto: CID22 SROCC vs JPEG non-mono q-step rate',
+    xaxis: {
+      title: 'Non-mono q-step % (lower = smoother)',
+      autorange: 'reversed',  // smoother on the right
+    },
+    yaxis: { title: 'CID22 SROCC (higher = more correlated with human MOS)' },
+    showlegend: false,
+    shapes: [
+      {
+        type: 'line', xref: 'paper', x0: 0, x1: 1, y0: ssim2, y1: ssim2,
+        line: { color: '#b1130c', dash: 'dash', width: 1 },
+      },
+    ],
+  };
+  Plotly.newPlot('chart-pareto', traces, layout, { responsive: true });
+}
+
 async function main() {
   const bakes = await loadAllBakes();
   const parity = await loadParityTable();
@@ -209,6 +285,7 @@ async function main() {
   renderAggregate(bakes, aggSelect.value);
   renderPerBand(bakes, pbSelect.value);
   renderParityTable();
+  if (document.getElementById('chart-pareto')) renderPareto(bakes);
 
   aggSelect.addEventListener('change', e => renderAggregate(bakes, e.target.value));
   pbSelect.addEventListener('change',  e => renderPerBand(bakes,  e.target.value));
