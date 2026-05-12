@@ -324,6 +324,12 @@ ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
         cross-dataset result.</li>
     <li>Without V0_16, ensemble CID22 falls below ssim2. V0_16's
         seed-1 luck is real and contributes to the ensemble.</li>
+    <li>Exhaustive search (all 26 multi-bake subsets of the 5 bakes):
+        the best AIC-3 ensemble is <code>{V0_20, V0_21}</code> at
+        0.8079 (+0.0114 vs ssim2) — but it loses 0.0006 on CID22.
+        <code>{V0_20, V0_21}</code> beats every subset that contains
+        V0_18 or V0_19 on AIC-3. <strong>V0_20 + V0_21 are the
+        AIC-3 power pair; V0_16 is the CID22 anchor.</strong></li>
   </ul>
   <p>
     <strong>Recommendation for ensemble runtime</strong>: load 3 bakes
