@@ -48,7 +48,14 @@ fn is_banned(path: &Path) -> bool {
 }
 ```
 
-**Action needed**: copy the 361 stems from `benchmarks/contaminated_sources_purged_2026-05-12.txt` (one per line, `.png` extension to strip), apply the diff above to `coefficient/examples/generate_zensim_training.rs`, run `cargo build -p coefficient --examples` to verify, commit.
+**Action needed**: the 361 stems are pre-formatted as a Rust constant array in `benchmarks/purged_hex_stems_const_2026-05-12.rs` — just `include!()` it or paste-in. Then apply the `is_banned()` diff above to `coefficient/examples/generate_zensim_training.rs`, run `cargo build -p coefficient --examples` to verify, commit.
+
+**Drop-in commands**:
+```bash
+# From coefficient repo root:
+cp ../zensim/benchmarks/purged_hex_stems_const_2026-05-12.rs examples/purged_hex_stems_const_2026-05-12.rs
+# Add `mod purged_hex_stems_const_2026_05_12;` and `use purged_hex_stems_const_2026_05_12::PURGED_HEX_STEMS_2026_05_12;` to generate_zensim_training.rs, then apply the is_banned() diff.
+```
 
 **Why this matters**: the purge removed the source files but the generator still has the BANNED_PATH_PATTERNS list that ONLY catches the original 49 CID22 stems (`1418519`, `pexels-photo-1933873`, etc.). If anyone re-runs the generator against a new source corpus that includes the same hex-hashed crops (or new ones), they'd re-contaminate. The hex-stem blocklist is the durable fix.
 
