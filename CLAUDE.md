@@ -224,6 +224,98 @@ Until the harness emits this, treat any "champion" claim as
 provisional. Aggregate numbers are pipeline-health checks, not
 release gates.
 
+## Interactive comparison site (CRUCIAL GOAL, locked 2026-05-12)
+
+User spec, verbatim:
+
+> make the interactive online gh site offer the following
+> interactive interface: user can tap checkboxes to select a
+> superset of image corpuses and their distortions. user can
+> choose an x axis of any metric — codec quality, dssim, ssim2,
+> butteraugli, zensim 02, zensim 18 or latest best, or human
+> reference data. user can choose y axis from any of those.
+> javascript will load parquet data for the corpuses and do a
+> scatter plot, as well as linear line step 5 1 to 100 or equiv
+> range along x axis, and a table for srocc and other stats per
+> band for comparison of y compared to x. this is a crucial goal.
+> cpu work on a background worker with progress indicator.
+> additionally add separate data and charts as the 2024 paper
+> does. offer both scatter and candlestick and ci interval tables
+> by band. allow filtering by codec and codec version and y score
+> to codec param table.
+
+Implementation must:
+
+1. **Corpus + distortion selector** — checkbox UI, multi-select.
+   Each corpus knows its own list of distortions/codecs. At
+   minimum: CID22, KADID-10k, TID2013, KonJND-1k, AIC-3 CTC,
+   AIC-4 (when available), plus our internal synthetic
+   safe-synthetic and unified V_X parquets. The selector is a
+   SUPERSET — user picks any combination across corpora and the
+   site stitches the rows together.
+
+2. **X/Y axis dropdowns** — both can be ANY metric: codec
+   quality (q), dssim, ssim2, butteraugli (3-norm or max-norm or
+   diffmap mean), zensim V0_2, zensim V0_18 / latest-best
+   (currently V0_16), or human reference data (MOS / DMOS /
+   PJND). Both dropdowns must offer the same metric set; X=Y is
+   the identity sanity check.
+
+3. **Parquet loading from JS** — fetch `.parquet` files for the
+   selected corpora directly. Use Arrow-JS or DuckDB-WASM, NOT
+   CSV/JSON. Parquet files are committed under
+   `site/data/parquet/<corpus>/<distortion>.parquet` or pulled
+   from R2. The 2026-05-07 unified parquet store at
+   `/mnt/v/zen/zensim-training/2026-05-07/unified/` is the
+   shipping source of truth (~2.37 M rows × 50 cols).
+
+4. **Background worker** — Web Worker with a visible progress
+   indicator (file load, decode, statistics). Main UI thread
+   must not block while a 3 GB parquet decodes.
+
+5. **Scatter + step-5 line + per-band SROCC table** — for the
+   selected (X, Y, corpora):
+   - Scatter plot of every row.
+   - A step-5 line: bin X by 5-unit steps from 1 to 100 (or the
+     X-metric's equivalent range — e.g. butteraugli's 0..30,
+     dssim's 0..1), median Y per bin connected.
+   - SROCC + KROCC + PLCC + RMSE per band (B0/B1/B2/B3/Near-PJND
+     anchored to CID22 Table 5) AND aggregated, with sample
+     counts.
+
+6. **Candlestick + CI-interval tables by band** — separate
+   visualization mode. For each band on X, show Y's percentile
+   box (p5/p25/p50/p75/p95) plus a bootstrap 95% CI on the
+   median. Tabulate per (codec, band).
+
+7. **2024-paper charts** — reproduce the figures/tables the
+   2024 CID22 edition (the one that references dssim) adds over
+   the 2023 paper. The 2024 paper is NOT yet on disk; fetch +
+   page-to-PNG when available, identify which charts are new vs
+   2023 (Tables 3/4/5/6 are 2023; the 2024 additions need to be
+   enumerated). The site adds those alongside the interactive
+   widget.
+
+8. **Codec filtering** — filter rows by codec name AND codec
+   version (e.g. zenjpeg-420 vs zenjpeg-444, JXL d1 vs d2, AVIF
+   speed 6 vs 8). Filter persists across X/Y/corpus changes.
+
+9. **Y score → codec param table** — given a target Y value,
+   show the codec parameters that achieve it (within ±1 zq or
+   equivalent). This is the user-facing "I want Y=70, what
+   should the codec do?" lookup that motivates zensim shipping
+   in the first place.
+
+10. **No regressions**: the existing methodology page +
+    pre-computed chart sections (8 chart sections at
+    <https://imazen.github.io/zensim/>) stay intact. The new
+    interactive widget is ADDITIVE — a new page (or a top
+    section on index.html) — not a replacement.
+
+**Status**: not started 2026-05-12. Spec captured here; first
+step is to inventory available parquet sources and confirm
+schema (metric column names) before designing the UI.
+
 ## Release Process
 
 `zensim` and `zensim-regress` are released **independently** with **separate semver**. A bump to zensim does not require a bump to zensim-regress, and vice versa. Tag format:
