@@ -205,6 +205,7 @@ const NONMONO_PCT_BY_LABEL = {
   'V0_18_seed42': 2.01,
   'V0_19_seed7': 2.84,
   'V0_20_seed123': 2.65,
+  'V0_21_butter_clean': 2.91,
 };
 
 function renderPareto(bakes) {
