@@ -73,6 +73,7 @@ fn main() {
     let mut tid: Option<PathBuf> = None;
     let mut cid22: Option<PathBuf> = None;
     let mut csiq: Option<PathBuf> = None;
+    let mut aic3: Option<PathBuf> = None;
     let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
     let mut max_pairs: usize = 500;
@@ -85,6 +86,7 @@ fn main() {
             "--tid" => tid = Some(args.next().unwrap().into()),
             "--cid22" => cid22 = Some(args.next().unwrap().into()),
             "--csiq" => csiq = Some(args.next().unwrap().into()),
+            "--aic3" => aic3 = Some(args.next().unwrap().into()),
             "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
@@ -123,9 +125,15 @@ fn main() {
             pairs: load_csiq(&p, max_pairs),
         });
     }
+    if let Some(p) = aic3 {
+        datasets.push(DatasetSpec {
+            name: "AIC-3 CTC",
+            pairs: load_aic3(&p, max_pairs),
+        });
+    }
 
     if datasets.is_empty() && konjnd.is_none() {
-        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --csiq, --konjnd");
+        eprintln!("no datasets — pass at least one of --kadid, --tid, --cid22, --csiq, --aic3, --konjnd");
         std::process::exit(1);
     }
 
@@ -857,6 +865,52 @@ fn load_csiq(base: &Path, max: usize) -> Vec<Pair> {
             reference: base.join(r),
             distorted: base.join(dist),
             human_score: 1.0 - dmos,
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// AIC-3 CTC (EPFL) loader. Reads a paired CSV produced by
+/// `scripts/v_next/aic3_pairs_csv.py` with columns:
+/// `ref_path, dist_path, codec, quality_idx, quality_selected, score_jnd, method`.
+///
+/// `score_jnd` is a human-judged JND (just-noticeable-difference) score
+/// where 0 = identical and more negative = more degraded. Empirically
+/// the dataset spans ~[-3, 0]. We map to `human_score = (score_jnd + 3) / 3`
+/// so that 1.0 = identical and 0.0 = worst, matching the "higher = better"
+/// convention used by KADID/TID/CID22 loaders.
+///
+/// SROCC vs zensim/ssim2 distance should be NEGATIVE under this
+/// convention (since distance grows as human_score shrinks).
+///
+/// Paths in the CSV are absolute; the `base` argument is the CSV path
+/// itself (not a directory root).
+fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
+    let mut rdr = match csv::Reader::from_path(csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        if record.len() < 6 {
+            continue;
+        }
+        let r = record.get(0).unwrap();
+        let dist = record.get(1).unwrap();
+        let score_jnd: f64 = match record.get(5).unwrap().parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        pairs.push(Pair {
+            reference: PathBuf::from(r),
+            distorted: PathBuf::from(dist),
+            human_score: (score_jnd + 3.0) / 3.0,
         });
         if pairs.len() >= max {
             break;
