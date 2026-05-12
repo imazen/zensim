@@ -108,46 +108,75 @@ async function runQuery(msg) {
   await initDuckDB();
   const conn = await db.connect();
 
-  // Determine which columns to SELECT — start broad, then trim later when
-  // we know exactly which need to be projected for X/Y.
-  const allCols = ["codec", "q", "human_jnd", "human_jnd_ci_lo", "human_jnd_ci_hi",
+  // Per-corpus schema cache: map parquet URL → Set of column names.
+  // First time a URL is seen, run DESCRIBE; cached for the worker session.
+  if (!self._schemaCache) self._schemaCache = new Map();
+  const schemaCache = self._schemaCache;
+  async function getSchema(url) {
+    if (schemaCache.has(url)) return schemaCache.get(url);
+    const r = await conn.query(`DESCRIBE SELECT * FROM '${url}' LIMIT 0`);
+    const cols = new Set();
+    for (const row of r.toArray()) cols.add(String(row.toJSON().column_name));
+    schemaCache.set(url, cols);
+    return cols;
+  }
+
+  // The wishlist — every column the comparison-site UI might want to
+  // project. Per-corpus we intersect this with the parquet schema.
+  const allCols = ["codec", "q", "version", "image_name",
+                   "human_jnd", "human_jnd_ci_lo", "human_jnd_ci_hi",
+                   "human_mos", "human_dmos", "human_dmos_var", "human_elo",
                    "score_zensim", "score_ssim2_gpu", "score_dssim",
                    "score_butter_max", "score_butter_p3", "score_ssim2_paper",
-                   "score_cvvdp", "score_iw_ssim", "bpp", "quality_index", "dlevel"];
+                   "score_cvvdp", "score_iw_ssim", "score_ms_ssim",
+                   "score_psnr_y", "score_ssim", "score_vmaf_neg",
+                   "score_hdr_vdp_2", "score_hdr_vdp_3",
+                   "bpp", "quality_index", "dlevel", "encoded_bytes"];
 
-  // Build UNION ALL query across selected corpora, projecting only columns
-  // that exist in each (DuckDB columns_from_parquet would be cleaner but we
-  // just try-coalesce for simplicity).
   let rows = [];
   for (const corpusId of usable) {
     const url = CORPUS_URLS[corpusId];
     postMessage({ type: "progress", data: `querying ${corpusId} (${url})…` });
-    // Use TRY_CAST in case some columns are missing; coalesce to NULL.
-    const colList = allCols.map((c) => `TRY_CAST(${c} AS DOUBLE) AS ${c}`).join(", ");
-    const sql = `SELECT codec AS codec_, ${colList} FROM '${url}'`;
+    let schemaCols;
+    try {
+      schemaCols = await getSchema(url);
+    } catch (e) {
+      postMessage({ type: "progress", data: `${corpusId} schema-fetch failed: ${e.message}` });
+      continue;
+    }
+    // Project only columns the parquet actually carries. Numeric ones get
+    // TRY_CAST to DOUBLE; codec / version / image_name stay text.
+    const numericPrefix = (c) => c.startsWith("score_") || c.startsWith("human_") ||
+                                  c === "bpp" || c === "q" || c === "quality_index" ||
+                                  c === "dlevel" || c === "encoded_bytes";
+    const projectCols = allCols.filter((c) => schemaCols.has(c));
+    if (projectCols.length === 0) {
+      postMessage({ type: "progress", data: `${corpusId} has no known columns; skipping` });
+      continue;
+    }
+    const colList = projectCols.map((c) =>
+      numericPrefix(c) ? `TRY_CAST(${c} AS DOUBLE) AS ${c}` : `${c}`
+    ).join(", ");
+    const sql = `SELECT ${colList} FROM '${url}'`;
     try {
       const result = await conn.query(sql);
       for (const r of result.toArray()) {
         const obj = r.toJSON();
-        // codec column collision: SELECT codec AS codec_ + codec inside colList
-        // would conflict. Use the original `codec` value if codec_ is null.
         rows.push({ ...obj, corpus: corpusId });
       }
     } catch (e) {
-      postMessage({ type: "progress", data: `${corpusId} failed: ${e.message}` });
+      postMessage({ type: "progress", data: `${corpusId} query failed: ${e.message}` });
     }
   }
   postMessage({ type: "progress", data: `fetched ${rows.length} rows` });
 
-  // Apply codec / version filter if set. The SELECT aliases codec→codec_,
-  // and TRY_CAST drops the original 'codec' column — but we kept the
-  // original string codec via the `corpus` insertion above; pull from the
-  // raw row in either column.
+  // Apply codec / version filter if set. `codec` is the only column we keep
+  // as text (per `numericPrefix` filter above), so simple === works.
   if (codec_filter) {
-    rows = rows.filter((r) => r.codec_ === codec_filter || r.codec === codec_filter);
+    rows = rows.filter((r) => r.codec === codec_filter);
   }
   if (version_filter) {
-    rows = rows.filter((r) => r.knob_tuple_json === version_filter);
+    rows = rows.filter((r) => r.version === version_filter || r.knob_tuple_json === version_filter);
   }
 
   // Compute X and Y per row.
