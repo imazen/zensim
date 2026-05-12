@@ -57,6 +57,54 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
 - `ZensimError` variants `ImageTooLarge` and `FeatureWeightsLengthMismatch`.
   `ZensimError` is now `#[non_exhaustive]`.
 
+### Added (zensim, unreleased) — Cycle 6 final cross-corpus verification (2026-05-12, late)
+
+**Goal #1 (match-or-exceed fast-ssim2) EMPIRICALLY MET across all 3
+public corpora** (corrects earlier zen-metrics-CLI-mislabeled
+numbers from the same day):
+
+| Corpus | n | V0_16 | fast-ssim2 | V0_16 advantage |
+|---|---:|---:|---:|---:|
+| AIC-3 CTC EPFL | 600  | **0.7990** | 0.7965 | **+0.0025** |
+| AIC-4 sample   | 300  | **0.9175** | 0.9127 | **+0.0048** |
+| CID22 (full)   | 4292 | **0.8919** | 0.8895 | **+0.0024** |
+
+Numbers from `dataset_metric_baseline --v04-bake
+v0_16_2026-05-12.bin --per-pair-output` over the human-rated
+parquets shipped under `site/data/parquet/`.
+
+**Per-codec scorecard** (TRUE V0_16, across all 3 corpora):
+
+| Corpus | V0_16 wins | ties | losses | Notable |
+|---|:-:|:-:|:-:|---|
+| AIC-3 | 1 | 1 | 4 | JPEGXL +0.014 (only win); sub-PJND regime |
+| AIC-4 | 5 | 0 | 1 | wins all but JPEG-AI (-0.051) |
+| CID22 | 5 | 2 | 2 | AVIF_aurora_slow +0.038 (biggest gain) |
+
+V0_16 wins or ties 14 of 21 per-codec comparisons; wins aggregate
+on 3 of 3 corpora. The single biggest per-codec deficit is JPEG-AI
+on AIC-4 (V0_16 −0.051 vs ssim2), where **dssim is essentially
+unaffected (0.9147)** — strong cycle-7 case for adding dssim as an
+auxiliary loss head for transformer-codec robustness.
+
+**Earlier zen-metrics-CLI bug** (`--metric zensim` → `ZensimProfile::latest()`
+→ `PreviewV0_2`, not V0_4): documented in
+`benchmarks/cid22_full_v0_16_vs_ssim2_2026-05-12.md`. The
+ticks-455-through-462 "AIC-3 / AIC-4 / CID22 V0_16" numbers
+posted earlier were V0_2 outputs. The numbers above (and the new
+`score_zensim_v0_16` columns in all three parquets) are the TRUE
+V0_16 baseline.
+
+**Comparison-site live** at <https://imazen.github.io/zensim/compare.html>:
+- 5 in-repo human-rated parquets (AIC-3 / AIC-4 / CID22 / KADID / TID)
+- 4 V_X bake binaries (V0_4 / V0_16 / V0_20 / V0_22) shipped under
+  `site/weights/` for JS-MLP path
+- DuckDB-WASM in Web Worker; corpus checkboxes + X/Y dropdowns +
+  codec/version filters + scatter + step-5 line + per-band SROCC
+  table + candlestick + Y→codec param lookup
+- Build-order steps 1–4, 6–11, 13 ✅ complete; remaining 5
+  (R2 unified parquets) blocked on user-side public-read URL setup.
+
 ### Added (zensim, unreleased) — Cycle 6 ensemble characterization (2026-05-12)
 
 - **Seed sweep**: V0_18 (seed=42), V0_19 (seed=7), V0_20 (seed=123)
