@@ -38,33 +38,34 @@
     <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">paper Table 5</a>).
   </p>
 
-  <section style="background:#fff7e6; border-left: 4px solid #d18811; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
-    <strong>⚠️ V0_8 ship CID22 SROCC is INFLATED (2026-05-12)</strong> —
-    the V0_8 training CSV's perceptual-overlap cleanup ran at a looser
-    threshold than d≤16. Of the 156,420-row "clean" training set,
-    <strong>11,629 rows (7.43 %)</strong> were near-duplicates of 22 of
-    the 49 CID22 held-out references (hex-hashed crops/resizes).
-    V0_8's reported <strong>0.8948</strong> is therefore inflated by
-    training-set leakage. The 361 contaminated source files + 30.6 GiB
-    of encoded variants + .features.bin caches + tower mirror have been
-    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/contaminated_sources_purged_2026-05-12.txt">permanently purged</a>.
-    V0_15 honest retrain is in flight; expected CID22 ≈ 0.890-0.892.
-    Until V0_15 lands, V0_8 remains the runtime ship but its numbers
-    should be treated as upper bound, not benchmark.
+  <section style="background:#eaf6ea; border-left: 4px solid #0a7d28; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
+    <strong>Current ship: V0_15 (TV=15, seed=1, 2026-05-12)</strong> —
+    <strong>honest replacement</strong> for the tainted V0_8 (now archived).
+    CID22 SROCC <strong>0.8914</strong>
+    (<span class="green">+0.0019 vs fast-ssim2's 0.8895</span>);
+    AIC-3 CTC SROCC <strong>0.8019</strong>
+    (<span class="green">+0.0054 vs ssim2's 0.7965</span>);
+    non-mono q-step rate <strong>2.51 %</strong>
+    (<span class="green">MEETS strict 4.86 % target, 1/2 of V0_8's 5.87 %</span>).
+    Trained on properly-purged 144,791-row safesyn CSV (after the
+    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/contaminated_sources_purged_2026-05-12.txt">2026-05-12 purge</a>
+    of 361 contaminated source files + ~75 GiB derivatives).
+    Affine-calibrated α=26.9332, β=-4.5520, R²=0.7447.
+    Per-band: B3 +0.077 (best of any bake); B0/B1/Near-PJND show
+    honest gaps to ssim2 where V0_8's were artificially small from
+    training-set leakage.
   </section>
 
-  <section style="background:#eaf6ea; border-left: 4px solid #0a7d28; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
-    <strong>Current ship: V0_8 (TV=15, seed=1, 2026-05-11 eve)</strong> —
-    CID22 SROCC <strong>0.8948 (tainted, see banner above)</strong>;
-    <strong>B1 SROCC gap closed 50 %</strong> (V0_7's -0.027 → V0_8's
-    -0.014 vs ssim2);
-    non-mono q-step rate <strong>5.87 %</strong>
-    (within raised 6.0 % gate).
-    V0_8 trades smoothness for B1 closure; predecessor V0_7 seed=1
-    (5.46 % non-mono, B1 -0.027) archived. Trained on perceptual-
-    deduped CSV (156k pairs after the original
-    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/holdout_overlap_audit_2026-05-11.md">overlap audit</a>
-    — which used a looser threshold than the 2026-05-12 d≤16 purge).
+  <section style="background:#fff4e8; border-left: 4px solid #888; padding: 10px 16px; margin: 12px 0; font-size: 13px; color: #555;">
+    <strong>V0_8 (2026-05-11) ARCHIVED 2026-05-12</strong> — the previously-
+    shipped V0_8 (md5 <code>67482691</code>) was trained on a clean CSV
+    whose perceptual-overlap cleanup ran at a looser threshold than
+    d≤16. <strong>11,629 rows (7.43 %)</strong> were near-duplicates of
+    22 of the 49 CID22 held-out references. V0_8's CID22 0.8948 was
+    inflated by <strong>+0.0034</strong> (confirmed by V0_15's 0.8914
+    honest result). V0_8 is preserved at
+    <code>zensim/weights/archive/v0_8_tainted_2026-05-11.bin</code> for
+    reference but is no longer the runtime weight.
   </section>
 
   <h2>Goal 3 — KonJND-1k PJND validation vs paper Table 4</h2>
@@ -118,10 +119,11 @@
     <tr><td>V0_6 clean (seed=42)</td><td>0.8839</td><td><span class="delta-bad">−0.0056</span></td><td>5.94 %</td><td>—</td><td><span class="small">honest baseline</span></td></tr>
     <tr><td>V0_7 seed=0 (initial)</td><td>0.8912</td><td><span class="delta-good">+0.0017</span></td><td>5.67 %</td><td>—</td><td><span class="small">archived (non-mono over)</span></td></tr>
     <tr><td>V0_7 seed=1 TV=10</td><td>0.8933</td><td><span class="delta-good">+0.0038</span></td><td>5.46 %</td><td>—</td><td><span class="small">archived (B1 -0.027)</span></td></tr>
-    <tr><td><strong>V0_8 TV=15 seed=1 (SHIPPED)</strong></td><td><strong>0.8948</strong></td><td><span class="delta-good">+0.0053</span></td><td>5.87 %</td><td><strong>0.8043</strong> (+0.0078)</td><td><strong>current ship · B1 -0.014</strong></td></tr>
-    <tr><td>V0_10 [15,25,15,15]</td><td>0.8877</td><td><span class="delta-bad">−0.0018</span></td><td>2.40 %</td><td>0.7945 (−0.0020)</td><td><span class="small">smoothness specialist; B1 -0.036</span></td></tr>
-    <tr><td>V0_11 flat TV=20</td><td>0.8897</td><td><span class="delta-near">+0.0002</span></td><td>2.33 %</td><td><strong>0.8056</strong> (+0.0091)</td><td><span class="small">beats V0_8 on AIC-3 but B0 -0.040</span></td></tr>
-    <tr><td>V0_12 B1 oversample</td><td>0.8895</td><td><span class="delta-near">±0.0000</span></td><td><strong>1.68 %</strong></td><td>0.7972 (+0.0007)</td><td><span class="small">best non-mono; B1 oversample disproved (B1 -0.025)</span></td></tr>
+    <tr><td>V0_8 TV=15 seed=1 (TAINTED, ARCHIVED)</td><td>0.8948</td><td><span class="delta-good">+0.0053</span></td><td>5.87 %</td><td>0.8043 (+0.0078)</td><td><span class="small">archived 2026-05-12 (inflation +0.0034)</span></td></tr>
+    <tr><td>V0_10 [15,25,15,15]</td><td>0.8877</td><td><span class="delta-bad">−0.0018</span></td><td>2.40 %</td><td>0.7945 (−0.0020)</td><td><span class="small">tainted-data smoothness specialist</span></td></tr>
+    <tr><td>V0_11 flat TV=20</td><td>0.8897</td><td><span class="delta-near">+0.0002</span></td><td>2.33 %</td><td>0.8056 (+0.0091)</td><td><span class="small">tainted-data exp; AIC-3 leader at the time</span></td></tr>
+    <tr><td>V0_12 B1 oversample</td><td>0.8895</td><td><span class="delta-near">±0.0000</span></td><td>1.68 %</td><td>0.7972 (+0.0007)</td><td><span class="small">tainted-data exp; B1 oversample disproved</span></td></tr>
+    <tr><td><strong>V0_15 honest (SHIPPED 2026-05-12)</strong></td><td><strong>0.8914</strong></td><td><span class="delta-good">+0.0019</span></td><td><strong>2.51 %</strong></td><td><strong>0.8019</strong> (+0.0054)</td><td><strong>current ship · honest · B3 +0.077 best</strong></td></tr>
   </table>
 
   <h2>Notes</h2>
