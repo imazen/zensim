@@ -116,3 +116,28 @@ discipline.
 
 User explicitly authorized all 3 cycle-7 items including dssim
 co-training. Plan executes autonomously.
+## Data-prep gap for V0_24 training (discovered tick 487)
+
+The trainer patch (`--dssim-weight 0.3` flag) is verified syntax-clean
+and the loss-side wiring is correct. But there's a data-availability
+gap: the trainer reads from unified parquets at
+`/mnt/v/zen/zensim-training/2026-05-07/unified/` which carry
+`score_zensim / score_ssim2 / score_butteraugli_max / score_butteraugli_pnorm3`
+but NOT `dssim`. The synth CSV
+`/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_perceptual_clean.csv`
+HAS `dssim` (range [0, 0.2]) but isn't in parquet form and uses a
+different schema (`source_path / decoded_path / codec / quality /
+gpu_ssimulacra2 / dssim`).
+
+**Next tick step**: write a small script that joins the two:
+- Source rows by `(image_path, codec, q)` from unified parquets.
+- Join `dssim` column from `training_safe_synthetic_perceptual_clean.csv`
+  matched by `(decoded_path basename → image_path + codec, q)`.
+- Emit `unified_v15rdc_zenjpeg.parquet` (or similar) with the dssim column.
+
+Then re-run `train_v_next_mlp.py --sweeps v15rdc --dssim-weight 0.3`.
+
+Alternative: add a `--dssim-csv` flag to the trainer that loads dssim
+from a CSV separately and joins at train time. ~30 lines Python.
+
+Either way the run is ~15 min once the data is in place.
