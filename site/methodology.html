@@ -205,6 +205,37 @@ ZNPR v2 binary serialization (3,200 bytes header + weights)</pre>
     expected per-seed result clears ssim2 by margin larger than seed σ.
   </p>
 
+  <h3>6.1 Ensemble experiment (mean of 4 seeds)</h3>
+  <p>
+    Averaging the v04_distance predictions across the 4 seeds yields:
+  </p>
+  <table>
+    <tr><th>Model</th><th>CID22 SROCC</th><th>Δ vs ssim2</th></tr>
+    <tr><td>fast-ssim2</td><td>0.8895</td><td>—</td></tr>
+    <tr><td>V0_16 alone (seed=1)</td><td><strong>0.8919</strong></td><td>+0.0024</td></tr>
+    <tr><td>4-seed ensemble</td><td>0.8892</td><td>−0.0003</td></tr>
+    <tr><td>V0_18 (seed=42)</td><td>0.8847</td><td>−0.0048</td></tr>
+    <tr><td>V0_19 (seed=7)</td><td>0.8848</td><td>−0.0047</td></tr>
+    <tr><td>V0_20 (seed=123)</td><td>0.8872</td><td>−0.0023</td></tr>
+  </table>
+  <p>
+    The ensemble lands at <strong>0.8892, essentially tied with ssim2</strong>.
+    Ensembling reduces variance (beats 3 of 4 single seeds) but doesn't
+    exceed V0_16's single-seed luck. <strong>Conclusion: the V_X recipe
+    sits at ssim2-level on CID22 in expectation.</strong> V0_16 SHIP delivers
+    +0.0024 above ssim2 from seed-1 luck, not recipe-level superiority.
+  </p>
+  <p>
+    Per-band ensemble vs ssim2 (CID22):
+  </p>
+  <table>
+    <tr><th>Band</th><th>n</th><th>Ensemble SROCC</th><th>ssim2 SROCC</th><th>Δ</th></tr>
+    <tr><td>B0 (&lt;50)</td><td>324</td><td>0.4344</td><td>0.4418</td><td>−0.007</td></tr>
+    <tr><td>B1 [50,65)</td><td>1010</td><td>0.4607</td><td>0.4694</td><td>−0.009</td></tr>
+    <tr><td>B2 [65,90)</td><td>2915</td><td>0.7730</td><td>0.7722</td><td>+0.001</td></tr>
+    <tr><td>B3 (≥90)</td><td>43</td><td>(small n, noisy)</td><td>(small n)</td><td>—</td></tr>
+  </table>
+
   <h2>7. Honest-vs-tainted comparison (V0_8 vs V0_16)</h2>
   <p>
     Before the 2026-05-12 purge, V0_8 (shipped 2026-05-11 eve) reported CID22
