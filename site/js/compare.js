@@ -44,7 +44,8 @@ const STUB_MANIFEST = {
     { id: "score_butteraugli_max",    label: "butteraugli (max-norm)" },
     { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm)" },
     { id: "score_zensim",             label: "zensim V0_2 linear (sweep-time / zen-metrics CLI default)" },
-    { id: "score_zensim_v0_16",       label: "zensim V0_16 SHIP (TRUE MLP via dataset_metric_baseline)" },
+    { id: "score_v0_2_linear",        label: "zensim V0_2 linear (also present in AIC-3/CID22/KADID/TID)" },
+    { id: "score_zensim_v0_16",       label: "zensim V0_16 SHIP (TRUE MLP)" },
     { id: "score_dssim",              label: "dssim (when present)" },
     // JS-MLP variants — bakes shipped under site/weights/*.bin.
     // Worker loads the bake and applies it to feat_0..feat_227. (NB: AIC + CID22
