@@ -153,3 +153,43 @@ Each step lands as its own commit. Steps 3–9 are the MVP; ship at step 9 and i
 2. **dssim integration**: requires a Rust binary pass over every parquet's rows to add a `score_dssim` column. Multi-hour. Defer to a later cycle unless you'd like it prioritized.
 
 3. **KonJND-1k corpus**: dataset directory `/mnt/v/dataset/konjnd-1k/` is missing from disk. Either restore from an external source or skip its PJND anchor data and accept that the calibrate-at-PJND step in the methodology stays at its current state.
+
+## R2 CORS configuration
+
+Bucket `zentrain` has CORS enabled (set via `aws s3api put-bucket-cors`):
+
+```json
+{
+  "CORSRules": [{
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }]
+}
+```
+
+Without this, the browser preflight OPTIONS to R2 returns 403 and
+DuckDB-WASM range-fetch fails — surfaces to the user as a "404"
+because the fetch promise rejects before any response body arrives.
+
+Verified:
+- Preflight: `OPTIONS` with `Origin: https://imazen.github.io` →
+  HTTP 204 with `access-control-allow-origin: *`,
+  `access-control-allow-headers: range`,
+  `access-control-allow-methods: GET, HEAD`.
+- GET with Origin: HTTP 206 (range partial) with
+  `access-control-allow-origin: *`.
+- DuckDB Python `INSTALL httpfs; LOAD httpfs; SELECT FROM '<URL>'`
+  succeeds; returns 36000-row count + per-codec aggregate on
+  v13_zenjpeg.
+
+R2 doesn't expose CORS rules via the public custom-domain endpoint,
+only via the S3 API at `<account>.r2.cloudflarestorage.com`. To
+modify in future:
+
+    aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+        s3api put-bucket-cors --bucket zentrain --cors-configuration file://cors.json
+
+NOTE: `ExposeHeaders` field is REJECTED by R2's S3 API as
+MalformedXML — leave it out.
