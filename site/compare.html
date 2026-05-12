@@ -119,8 +119,33 @@
       </p>
       <div id="candlestick" class="chart" style="min-height: 360px;"></div>
 
-      <h2>Y → codec param lookup <span class="small">(coming next)</span></h2>
-      <div id="param-lookup" class="small">configure target Y and the table will list codec settings that hit it ±1 zq.</div>
+      <h2>Y → codec param lookup</h2>
+      <p class="small" style="margin: 4px 0 8px 0; color: #555;">
+        Enter a target Y value; the table lists rows whose Y is within
+        the tolerance, grouped by (codec, version), with their encoded
+        bytes when available. This is the user-facing "I want zensim
+        70, what should the codec do?" lookup.
+      </p>
+      <div class="controls" style="margin-bottom: 0;">
+        <label>target Y <input id="lookup-target" type="number" step="any"
+                style="width: 90px;"></label>
+        <label>tolerance <input id="lookup-tol" type="number" step="any"
+                value="2.0" style="width: 70px;"></label>
+        <button id="lookup-run">Find rows</button>
+        <span class="progress" id="lookup-progress" style="margin-left: 12px;"></span>
+      </div>
+      <table id="lookup-table">
+        <thead>
+          <tr><th>codec</th><th>version</th>
+              <th class="num">n</th>
+              <th class="num">Y median</th>
+              <th class="num">X median</th>
+              <th class="num">bytes median</th></tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="6" class="small">no query yet</td></tr>
+        </tbody>
+      </table>
     </div>
   </div>
 

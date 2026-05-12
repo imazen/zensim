@@ -309,6 +309,61 @@ function median(xs) {
   return s.length % 2 ? s[m] : 0.5 * (s[m - 1] + s[m]);
 }
 
+async function runLookup(msg) {
+  const { corpora, x_metric, y_metric, target_y, tolerance } = msg;
+  const usable = corpora.filter((c) => CORPUS_URLS[c]);
+  if (usable.length === 0) {
+    postMessage({ type: "lookup_result", data: { groups: [] } });
+    return;
+  }
+  postMessage({ type: "progress", data: `lookup: Y=${y_metric} target=${target_y} ±${tolerance}` });
+  const conn = await db.connect();
+  // Group by (codec, knob_tuple_json), report n / median Y / median X /
+  // median encoded_bytes for rows where |y - target| ≤ tolerance.
+  const colExpr = (name, fallback) => `TRY_CAST(${name} AS DOUBLE)`;
+  const allRows = [];
+  for (const corpusId of usable) {
+    const url = CORPUS_URLS[corpusId];
+    // Pull only the rows we need (post-filter in JS so we can handle
+    // missing columns gracefully across corpora with different schemas).
+    const sql = `
+      SELECT codec,
+             ${colExpr(x_metric)} AS x,
+             ${colExpr(y_metric)} AS y,
+             ${colExpr("encoded_bytes")} AS bytes,
+             TRY_CAST(knob_tuple_json AS VARCHAR) AS knob_tuple_json
+        FROM '${url}'
+       WHERE ${colExpr(y_metric)} IS NOT NULL
+         AND ABS(${colExpr(y_metric)} - ${Number(target_y)}) <= ${Number(tolerance)}`;
+    try {
+      const result = await conn.query(sql);
+      for (const row of result.toArray()) allRows.push(row.toJSON());
+    } catch (e) {
+      postMessage({ type: "progress", data: `${corpusId} lookup failed: ${e.message}` });
+    }
+  }
+  await conn.close();
+
+  // Group by (codec, knob_tuple_json).
+  const groups = new Map();
+  for (const r of allRows) {
+    const key = `${r.codec || "?"}|${r.knob_tuple_json || ""}`;
+    if (!groups.has(key)) groups.set(key, { codec: r.codec || "?", version: r.knob_tuple_json || "", xs: [], ys: [], bs: [] });
+    const g = groups.get(key);
+    if (Number.isFinite(r.x)) g.xs.push(r.x);
+    if (Number.isFinite(r.y)) g.ys.push(r.y);
+    if (Number.isFinite(r.bytes)) g.bs.push(r.bytes);
+  }
+  const sortedYs = (arr) => [...arr].sort((a, b) => a - b);
+  const mid = (arr) => arr.length === 0 ? null : sortedYs(arr)[Math.floor(arr.length / 2)];
+  const out = Array.from(groups.values()).map((g) => ({
+    codec: g.codec, version: g.version, n: g.ys.length,
+    y_median: mid(g.ys), x_median: mid(g.xs),
+    bytes_median: mid(g.bs),
+  })).sort((a, b) => b.n - a.n);
+  postMessage({ type: "lookup_result", data: { groups: out } });
+}
+
 async function listCorpusCodecs(corpora) {
   const usable = corpora.filter((c) => CORPUS_URLS[c]);
   if (usable.length === 0) {
@@ -350,6 +405,9 @@ self.onmessage = async (e) => {
       postMessage({ type: "ready" });
     } else if (msg.type === "list_codecs") {
       await listCorpusCodecs(msg.corpora || []);
+    } else if (msg.type === "lookup") {
+      if (!db) await initDuckDB();
+      await runLookup(msg);
     } else if (msg.type === "query") {
       // Lazy-load DuckDB only when the user hits Run.
       if (!db) await initDuckDB();

@@ -113,8 +113,9 @@ function initWorker() {
     if (type === "ready")    setProgress("worker ready", "ok");
     if (type === "progress") setProgress(data, "busy");
     if (type === "error")    setProgress("error: " + data, "busy");
-    if (type === "codecs")   populateFilters(data);
-    if (type === "result")   renderResult(data);
+    if (type === "codecs")        populateFilters(data);
+    if (type === "result")        renderResult(data);
+    if (type === "lookup_result") renderLookup(data);
   };
   worker.onerror = (err) => setProgress("worker error: " + err.message, "busy");
   worker.postMessage({ type: "init", base_url: R2_BASE });
@@ -130,6 +131,26 @@ function populateFilters({ codecs, versions }) {
   // Restore prior selection if still available.
   if (codecs.includes(prevC)) cSel.value = prevC;
   if (versions.includes(prevV)) vSel.value = prevV;
+}
+
+function renderLookup({ groups }) {
+  const tbody = document.querySelector("#lookup-table tbody");
+  tbody.innerHTML = "";
+  if (groups.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="small">no rows in tolerance</td></tr>`;
+    $("lookup-progress").textContent = "0 groups";
+    return;
+  }
+  for (const g of groups) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${g.codec}</td><td>${shortVersion(g.version)}</td>
+      <td class="num">${g.n}</td>
+      <td class="num">${g.y_median != null ? g.y_median.toFixed(3) : "—"}</td>
+      <td class="num">${g.x_median != null ? g.x_median.toFixed(3) : "—"}</td>
+      <td class="num">${g.bytes_median != null ? g.bytes_median.toFixed(0) : "—"}</td>`;
+    tbody.appendChild(tr);
+  }
+  $("lookup-progress").textContent = `${groups.length} (codec,version) groups`;
 }
 
 function shortVersion(json) {
@@ -222,6 +243,23 @@ function bindRun() {
       y_metric: $("y-axis").value,
       codec_filter: $("codec-filter").value || null,
       version_filter: $("version-filter").value || null,
+    });
+  });
+  $("lookup-run").addEventListener("click", () => {
+    const corpora = selectedCorpora();
+    const t = Number($("lookup-target").value);
+    const tol = Number($("lookup-tol").value);
+    if (corpora.length === 0) { $("lookup-progress").textContent = "pick a corpus first"; return; }
+    if (!Number.isFinite(t))    { $("lookup-progress").textContent = "target required"; return; }
+    if (!Number.isFinite(tol) || tol <= 0) { $("lookup-progress").textContent = "tolerance must be > 0"; return; }
+    $("lookup-progress").textContent = `looking up Y=${t} ±${tol}…`;
+    worker.postMessage({
+      type: "lookup",
+      corpora,
+      x_metric: $("x-axis").value,
+      y_metric: $("y-axis").value,
+      target_y: t,
+      tolerance: tol,
     });
   });
   // When the corpus selection changes, ask the worker for the new
