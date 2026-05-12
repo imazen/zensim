@@ -422,9 +422,14 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
     # `relu(pred[lower] - pred[higher])`.
     tv_pairs_t = None
     if tv_pairs_train is not None and cfg.tv_weight > 0:
-        tv_pairs_t = torch.from_numpy(tv_pairs_train).to(device)
-        print(f"  TV regularizer: {len(tv_pairs_t):,} adjacent-q pairs, "
-              f"weight={cfg.tv_weight}", flush=True)
+        if len(tv_pairs_train) == 0:
+            print(f"  TV regularizer disabled: 0 adjacent-q pairs in training "
+                  f"set (likely --human-csv-only mode with synthetic q=0); "
+                  f"set --tv-weight=0 to silence this message", flush=True)
+        else:
+            tv_pairs_t = torch.from_numpy(tv_pairs_train).to(device)
+            print(f"  TV regularizer: {len(tv_pairs_t):,} adjacent-q pairs, "
+                  f"weight={cfg.tv_weight}", flush=True)
 
     best = {"epoch": -1, "val_srocc": -1, "val_mse": math.inf,
             "state": None}
