@@ -50,6 +50,10 @@ struct Pair {
     reference: PathBuf,
     distorted: PathBuf,
     human_score: f64,
+    /// Optional codec / encoder label (CID22 sets it; others may leave None).
+    codec: Option<String>,
+    /// Optional version / setting label (CID22's "setting" column; q30, e7_q30, …).
+    version: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +171,10 @@ fn main() {
             let mut w = csv::Writer::from_path(p).expect("open per-pair csv");
             w.write_record([
                 "dataset",
+                "reference",
+                "distorted",
+                "codec",
+                "version",
                 "human_score",
                 "v02_distance",
                 "v04_distance",
@@ -190,7 +198,9 @@ fn main() {
         let z_v04 = Zensim::new(ZensimProfile::PreviewV0_4);
 
         type MetricRow = (f64, f64, f64, f64, f64);
-        let results: Vec<Option<MetricRow>> = ds
+        /// (ref_path, dist_path, codec, version, human, v02, v04, ssim2, butter)
+        type EnrichedRow = (String, String, String, String, f64, f64, f64, f64, f64);
+        let results: Vec<Option<EnrichedRow>> = ds
             .pairs
             .par_iter()
             .map(|pair| {
@@ -201,11 +211,18 @@ fn main() {
                     let eta = (n - p) as f64 / rate;
                     eprintln!("  {p}/{n} ({rate:.1}/s, ETA {eta:.0}s)");
                 }
-                process_pair(pair, &z_v04, v04_bake_bytes.as_deref())
+                let metrics: MetricRow = process_pair(pair, &z_v04, v04_bake_bytes.as_deref())?;
+                Some((
+                    pair.reference.to_string_lossy().to_string(),
+                    pair.distorted.to_string_lossy().to_string(),
+                    pair.codec.clone().unwrap_or_default(),
+                    pair.version.clone().unwrap_or_default(),
+                    metrics.0, metrics.1, metrics.2, metrics.3, metrics.4,
+                ))
             })
             .collect();
 
-        let pairs_with: Vec<(f64, f64, f64, f64, f64)> = results.into_iter().flatten().collect();
+        let pairs_with: Vec<EnrichedRow> = results.into_iter().flatten().collect();
         let n_valid = pairs_with.len();
         if n_valid < 4 {
             println!(
@@ -214,11 +231,12 @@ fn main() {
             );
             continue;
         }
-        let humans: Vec<f64> = pairs_with.iter().map(|t| t.0).collect();
-        let v02: Vec<f64> = pairs_with.iter().map(|t| t.1).collect();
-        let v04: Vec<f64> = pairs_with.iter().map(|t| t.2).collect();
-        let ssim2: Vec<f64> = pairs_with.iter().map(|t| t.3).collect();
-        let butter: Vec<f64> = pairs_with.iter().map(|t| t.4).collect();
+        // EnrichedRow indices: 0=ref, 1=dist, 2=codec, 3=version, 4=human, 5=v02, 6=v04, 7=ssim2, 8=butter
+        let humans: Vec<f64> = pairs_with.iter().map(|t| t.4).collect();
+        let v02:    Vec<f64> = pairs_with.iter().map(|t| t.5).collect();
+        let v04:    Vec<f64> = pairs_with.iter().map(|t| t.6).collect();
+        let ssim2:  Vec<f64> = pairs_with.iter().map(|t| t.7).collect();
+        let butter: Vec<f64> = pairs_with.iter().map(|t| t.8).collect();
 
         // Spearman against human MOS — abs since each metric has its
         // own polarity (zensim is distance, ssim2 is score, butteraugli
@@ -237,11 +255,15 @@ fn main() {
             for row in &pairs_with {
                 w.write_record([
                     ds.name,
-                    &format!("{:.6}", row.0),
-                    &format!("{:.6}", row.1),
-                    &format!("{:.6}", row.2),
-                    &format!("{:.4}", row.3),
+                    &row.0,
+                    &row.1,
+                    &row.2,
+                    &row.3,
                     &format!("{:.6}", row.4),
+                    &format!("{:.6}", row.5),
+                    &format!("{:.6}", row.6),
+                    &format!("{:.4}", row.7),
+                    &format!("{:.6}", row.8),
                 ])
                 .unwrap();
             }
@@ -629,6 +651,8 @@ fn load_konjnd(base: &Path, max: usize) -> Vec<KonJndPair> {
                 reference: ref_path,
                 distorted: dist_path,
                 human_score: mean_threshold,
+                codec: None,
+                version: None,
             },
             codec: comp.to_string(),
         });
@@ -757,6 +781,8 @@ fn load_kadid(base: &Path, max: usize) -> Vec<Pair> {
             reference: base.join("images").join(r),
             distorted: base.join("images").join(dist),
             human_score: (dmos - 1.0) / 4.0,
+            codec: None,
+            version: None,
         });
         if pairs.len() >= max {
             break;
@@ -801,6 +827,8 @@ fn load_tid(base: &Path, max: usize) -> Vec<Pair> {
             reference: ref_path,
             distorted: dist_path,
             human_score: mos / 9.0,
+            codec: None,
+            version: None,
         });
         if pairs.len() >= max {
             break;
@@ -837,6 +865,8 @@ fn load_cid22(base: &Path, max: usize) -> Vec<Pair> {
             reference: base.join(r),
             distorted: base.join(dist),
             human_score: mcos / 100.0,
+            codec: Some(encoder.to_string()),
+            version: Some(record.get(3).unwrap_or("").to_string()),
         });
         if pairs.len() >= max {
             break;
@@ -878,6 +908,8 @@ fn load_csiq(base: &Path, max: usize) -> Vec<Pair> {
             reference: base.join(r),
             distorted: base.join(dist),
             human_score: 1.0 - dmos,
+            codec: None,
+            version: None,
         });
         if pairs.len() >= max {
             break;
@@ -924,6 +956,8 @@ fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
             reference: PathBuf::from(r),
             distorted: PathBuf::from(dist),
             human_score: (score_jnd + 3.0) / 3.0,
+            codec: None,
+            version: None,
         });
         if pairs.len() >= max {
             break;

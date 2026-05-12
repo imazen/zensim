@@ -43,12 +43,15 @@ const STUB_MANIFEST = {
     { id: "score_ssim2",              label: "ssim2 (sweep-time)" },
     { id: "score_butteraugli_max",    label: "butteraugli (max-norm)" },
     { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm)" },
-    { id: "score_zensim",             label: "zensim (sweep-time bake)" },
+    { id: "score_zensim",             label: "zensim V0_2 linear (sweep-time / zen-metrics CLI default)" },
+    { id: "score_zensim_v0_16",       label: "zensim V0_16 SHIP (TRUE MLP via dataset_metric_baseline)" },
     { id: "score_dssim",              label: "dssim (when present)" },
     // JS-MLP variants — bakes shipped under site/weights/*.bin.
-    // Worker loads the bake and applies it to feat_0..feat_227.
-    { id: "score_zensim_v0_4",        label: "zensim V0_4 (JS-MLP, 228→64→1, 2026-04-30)" },
-    { id: "score_zensim_v0_16",       label: "zensim V0_16 SHIP (JS-MLP, 228→128→1, 2026-05-12)" },
+    // Worker loads the bake and applies it to feat_0..feat_227. (NB: AIC + CID22
+    // + KADID + TID parquets don't carry feat_* columns; only codec-sweep
+    // parquets do, which need R2 hosting.)
+    { id: "score_zensim_v0_4_jsmlp",  label: "zensim V0_4 (JS-MLP, 228→64→1, 2026-04-30)" },
+    { id: "score_zensim_v0_16_jsmlp", label: "zensim V0_16 (JS-MLP from feat_*)" },
     { id: "score_zensim_v0_20",       label: "zensim V0_20 seed 123 (JS-MLP)" },
     { id: "score_zensim_v0_22",       label: "zensim V0_22 konjnd_w=1 (JS-MLP)" },
     // Human-rated columns (corpus-dependent — only available when a
