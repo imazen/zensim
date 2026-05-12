@@ -57,6 +57,32 @@ These two together require a `0.2.x → 0.3.0` minor bump on next release.
 - `ZensimError` variants `ImageTooLarge` and `FeatureWeightsLengthMismatch`.
   `ZensimError` is now `#[non_exhaustive]`.
 
+### Added (zensim, unreleased) — Cycle 6 ensemble characterization (2026-05-12)
+
+- **Seed sweep**: V0_18 (seed=42), V0_19 (seed=7), V0_20 (seed=123)
+  trained with V0_16 recipe. Mean CID22 = 0.8872 ± 0.0034 (V0_16 is
+  +1.4σ outlier on the high side).
+- **Recipe-diversity bakes**: V0_21 (butter-clean training), V0_22
+  (konjnd_w=1.0), V0_23 (val_policy=mean). V0_22 = best smoothness
+  (1.96% non-mono) + best Near-PJND (0.3710); V0_23 = within seed
+  variance of V0_16 (val_policy is a save-time criterion only).
+- **Exhaustive 7-bake subset search**: identifies **{V0_16, V0_20}
+  2-bake** as the Pareto-optimal runtime ensemble: CID22 0.8910
+  (+0.0015 vs ssim2), AIC-3 0.8050 (+0.0085), 2× inference cost.
+- **AIC-3 cross-dataset validation**: V_X recipe beats fast-ssim2
+  on truly held-out AIC-3 by ≥+0.0033 in 4-bake ensemble, +0.0114 in
+  best subset {V0_20, V0_21}. CID22 (partly ssim2-tuned) shows a
+  smaller margin.
+- **All scripts shipped**: `apply_butter_filter.py`,
+  `band_balance_safesyn.py`, `ensemble_seeds.py` (with --dataset flag),
+  `per_band_step5.py`, `build_scatter_data.py`,
+  `content_class_explore.py`.
+- **Methodology page**: 10 sections + TL;DR. Live at
+  <https://imazen.github.io/zensim/methodology.html>.
+- **Site charts**: 8 chart sections (aggregate, per-band, scatter,
+  step-5, 2D Pareto, non-mono Pareto, cross-codec smoothness, bake
+  history).
+
 ### Added (zensim, unreleased) — V0_16 ship 2026-05-12 (HONEST B1 closure)
 - **V0_16 shipped (TV=20, seed=1)** at
   `zensim/weights/v0_16_2026-05-12.bin` (md5 `baf3fdcb`, 119,812 bytes,
