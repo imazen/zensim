@@ -30,7 +30,12 @@ Stack decisions (user-confirmed 2026-05-12):
 - Identifiers: `image_path / codec / q / knob_tuple_json`
 - Outputs: `encoded_bytes / encode_ms / decode_ms`
 - Reference metrics: `score_zensim / score_ssim2 / score_butteraugli_max / score_butteraugli_pnorm3`
-- Features: `feat_0 .. feat_N` (zenanalyze 102 active feature IDs 0–121 expanded to 228 via 4-scale packing for zensim; some sweeps store the full 300-column extended set)
+- Features: `feat_0 .. feat_299` — **zensim per-pair similarity features** (4 scales × 3 channels × 25 features/channel = 300). Source: `zenmetrics/.../sweep/feature_writer.rs`. These are NOT zenanalyze image features — they're computed from a (reference, distorted) PAIR by zensim itself.
+  - `feat_0..feat_155` (156) — basic features (39/channel/scale: SSIM/edge/MSE stats)
+  - `feat_156..feat_227` (72) — peak features (6/channel/scale: SSIM/edge max + p95)
+  - `feat_0..feat_227` (228) — **the input the V_X MLP bake consumes** (`zensim::profile::WEIGHTS_PREVIEW_V0_X[228]`, per `zensim/src/metric.rs:910`)
+  - `feat_228..feat_299` (72) — masked / flatness-weighted features, in the parquet but unused by current V_X weights (sit there for future bake variants)
+- **zenanalyze features are a separate set** (102 active IDs 0–121, single-image content classification for picker routing). They appear in different sweep parquets under different column names (e.g. `feat_aq_map_p50`, `feat_noise_floor_y_p50`) and are NOT in the unified `feat_0..feat_299` schema.
 
 ### Missing from local store (must be added before launch)
 
