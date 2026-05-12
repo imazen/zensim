@@ -104,9 +104,9 @@
   </p>
   <div id="parity-table"></div>
 
-  <h2>Scatter plots: V0_16 vs reference metrics (CID22)</h2>
+  <h2>Scatter plots: V_X vs reference metrics (CID22)</h2>
   <p class="lede">
-    Each point is one CID22 (reference, distorted) pair, plotted by V0_16's
+    Each point is one CID22 (reference, distorted) pair, plotted by V_X's
     quality score (−distance, y-axis) against a reference metric (x-axis).
     Color = MCOS band (red=B0 below-medium, orange=B1 medium, green=B2 high,
     blue=B3 visually-lossless).
@@ -114,6 +114,12 @@
     <strong>dssim is not yet plotted</strong> — only ssim2 + butter are in the
     current eval pipeline (dssim integration is queued).
   </p>
+  <div class="controls">
+    <label>Bake:
+      <select id="scatter-bake-select"></select>
+    </label>
+    <span class="small">Compare V0_16 (current ship), V0_15 (archived same-day), and V0_8 (tainted, archived).</span>
+  </div>
   <h3>V0_16 vs fast-ssim2</h3>
   <div id="chart-scatter-ssim2" class="chart"></div>
   <h3>V0_16 vs butteraugli (3-norm, negated)</h3>

@@ -401,10 +401,28 @@ async function main() {
   if (document.getElementById('chart-pareto')) renderPareto(bakes);
   const step5 = await loadStep5Bakes();
   if (document.getElementById('chart-step5')) renderStep5(step5);
-  const scatter = await loadScatter('v0_16');
-  if (document.getElementById('chart-scatter-ssim2')) renderScatter(scatter, 's', 'fast-ssim2 score', 'chart-scatter-ssim2');
-  if (document.getElementById('chart-scatter-butter')) renderScatter(scatter, 'b', '−butter (3-norm) — higher=better', 'chart-scatter-butter');
-  if (document.getElementById('chart-scatter-human')) renderScatter(scatter, 'h', 'human MCOS', 'chart-scatter-human');
+  // Default scatter is V0_16; can swap via the selector
+  const scatterLabels = ['v0_16', 'v0_15', 'v0_8_tainted'];
+  const scatterCache = {};
+  for (const lab of scatterLabels) scatterCache[lab] = await loadScatter(lab);
+  function renderScatterTriple(label) {
+    const s = scatterCache[label];
+    if (!s) return;
+    if (document.getElementById('chart-scatter-ssim2')) renderScatter(s, 's', 'fast-ssim2 score', 'chart-scatter-ssim2');
+    if (document.getElementById('chart-scatter-butter')) renderScatter(s, 'b', '−butter (3-norm) — higher=better', 'chart-scatter-butter');
+    if (document.getElementById('chart-scatter-human')) renderScatter(s, 'h', 'human MCOS', 'chart-scatter-human');
+  }
+  renderScatterTriple('v0_16');
+  const scatterSel = document.getElementById('scatter-bake-select');
+  if (scatterSel) {
+    for (const lab of scatterLabels) {
+      const o = document.createElement('option');
+      o.value = lab; o.textContent = lab + (lab === 'v0_16' ? ' (current ship)' : (lab === 'v0_8_tainted' ? ' (archived, was tainted)' : ' (archived)'));
+      if (lab === 'v0_16') o.selected = true;
+      scatterSel.appendChild(o);
+    }
+    scatterSel.addEventListener('change', e => renderScatterTriple(e.target.value));
+  }
 
   aggSelect.addEventListener('change', e => renderAggregate(bakes, e.target.value));
   pbSelect.addEventListener('change',  e => renderPerBand(bakes,  e.target.value));
