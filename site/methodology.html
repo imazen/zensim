@@ -342,8 +342,14 @@ python3 scripts/v_next/affine_calibrate_znpr_v2.py \
     <li>
       <strong>Butter-concordant training data</strong> — the 218k synth
       pairs include ~42% curves where ssim2 and butter disagree on
-      ranking. A "concordance-clean" CSV (script written but not yet
-      trained on) might reduce label noise.
+      ranking. V0_21 (tested 2026-05-12, cycle 6) was trained on
+      butter-concordant data (128k rows, 11% dropped vs V0_16's 144k).
+      Result: <strong>trade-off</strong> — AIC-3 improved +0.0070 to
+      0.8060 (above ssim2 by +0.0095), but CID22 regressed −0.0045 to
+      0.8874 (below ssim2 by −0.0021), and non-mono rose 0.61pp to 2.91%.
+      CID22 is ssim2-tuned so it rewards keeping the noisy ssim2-flagged
+      signal; unbiased AIC-3 prefers butter-clean training. Not a ship
+      candidate due to CID22 regression below the shipping bar.
     </li>
     <li>
       <strong>Additional held-out datasets</strong> — extend evaluation
