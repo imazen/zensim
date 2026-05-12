@@ -266,7 +266,7 @@ function renderPareto(bakes) {
 
 async function loadStep5Bakes() {
   // Try to load step-5 band JSONs for the bakes we have data for.
-  const labels = ['v0_15'];  // expand as more bakes get step-5 emitted
+  const labels = ['v0_15', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
   const out = [];
   for (const lab of labels) {
     try {
@@ -279,53 +279,55 @@ async function loadStep5Bakes() {
   return out;
 }
 
+const BAKE_COLORS = ['#0a7d28', '#1f77b4', '#9467bd', '#ff7f0e'];
+
 function renderStep5(step5Bakes) {
   if (!step5Bakes || step5Bakes.length === 0) return;
   const div = document.getElementById('chart-step5');
   if (!div) return;
-  // X = bin center; Y = SROCC; line per (bake, metric)
+  const first = step5Bakes[0];
+  const xs = first.bands.map(b => (b.bin_lo + b.bin_hi) / 2);
   const traces = [];
-  for (const bake of step5Bakes) {
-    const xs = bake.bands.map(b => (b.bin_lo + b.bin_hi) / 2);
+  // One V_X series per bake
+  step5Bakes.forEach((bake, i) => {
+    const bxs = bake.bands.map(b => (b.bin_lo + b.bin_hi) / 2);
     traces.push({
-      x: xs,
+      x: bxs,
       y: bake.bands.map(b => b.srocc_v04),
       mode: 'lines+markers',
       type: 'scatter',
-      name: `${bake.label} (V_X)`,
-      line: { color: '#0a7d28', width: 2 },
+      name: bake.label,
+      line: { color: BAKE_COLORS[i % BAKE_COLORS.length], width: 2 },
     });
-    // ssim2 reference (same across bakes — first bake's ssim2)
-    traces.push({
-      x: xs,
-      y: bake.bands.map(b => b.srocc_ssim2),
-      mode: 'lines+markers',
-      type: 'scatter',
-      name: 'fast-ssim2',
-      line: { color: '#b1130c', width: 2, dash: 'dash' },
-    });
-    traces.push({
-      x: xs,
-      y: bake.bands.map(b => b.srocc_butter),
-      mode: 'lines+markers',
-      type: 'scatter',
-      name: 'butter (3-norm)',
-      line: { color: '#888', width: 1, dash: 'dot' },
-    });
-    // Annotate n per bin under the X axis
-    break;  // only render first bake for now
-  }
+  });
+  // ssim2 + butter references (use first bake's data — same metrics for all)
+  traces.push({
+    x: xs,
+    y: first.bands.map(b => b.srocc_ssim2),
+    mode: 'lines+markers',
+    type: 'scatter',
+    name: 'fast-ssim2',
+    line: { color: '#b1130c', width: 2, dash: 'dash' },
+  });
+  traces.push({
+    x: xs,
+    y: first.bands.map(b => b.srocc_butter),
+    mode: 'lines+markers',
+    type: 'scatter',
+    name: 'butter (3-norm)',
+    line: { color: '#888', width: 1, dash: 'dot' },
+  });
   const layout = {
-    title: `Within-bin SROCC at step-5 MCOS bins (CID22, ${step5Bakes[0].total_pairs} pairs)`,
-    xaxis: { title: 'MCOS bin center', range: [0, 100] },
+    title: `Within-bin SROCC at step-5 MCOS bins (CID22)`,
+    xaxis: { title: 'MCOS bin center (5-unit bins)', range: [0, 100] },
     yaxis: { title: 'SROCC (within bin)', range: [-1.05, 1.05] },
     shapes: [
       { type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: '#bbb', width: 1 } },
     ],
     annotations: [
       {
-        xref: 'paper', x: 0.01, y: 0.95, yanchor: 'top',
-        text: `Bin n: ${step5Bakes[0].bands.map(b => `[${b.bin_lo},${b.bin_hi}):${b.n}`).join(' • ')}`,
+        xref: 'paper', x: 0.01, y: -0.18, yanchor: 'top',
+        text: `Per-bin n (${first.label}): ${first.bands.map(b => `[${b.bin_lo},${b.bin_hi}):${b.n}`).join(' • ')}`,
         showarrow: false,
         font: { size: 10, color: '#666' },
       },
