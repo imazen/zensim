@@ -120,8 +120,10 @@ function initWorker() {
 }
 
 function renderResult(data) {
-  // data: { rows: [{x, y, codec, q, knob_json}], bands: [{label, n, srocc, ...}], step5: [{x, median_y}] }
+  // data: { rows, step5, bands, boxes }
   setProgress(`rendered ${data.rows?.length ?? 0} rows`, "ok");
+  const xLabel = $("x-axis").options[$("x-axis").selectedIndex].text;
+  const yLabel = $("y-axis").options[$("y-axis").selectedIndex].text;
 
   if (data.rows?.length) {
     const trace = {
@@ -140,9 +142,32 @@ function renderResult(data) {
     }] : [];
     Plotly.newPlot("scatter", [trace, ...step], {
       margin: { t: 30, r: 30, b: 50, l: 60 },
-      xaxis: { title: $("x-axis").options[$("x-axis").selectedIndex].text },
-      yaxis: { title: $("y-axis").options[$("y-axis").selectedIndex].text },
+      xaxis: { title: xLabel },
+      yaxis: { title: yLabel },
       hovermode: "closest",
+    }, { responsive: true });
+  }
+
+  // Candlestick / box plot: per-bin (p5, p25, p50, p75, p95) of Y.
+  if (data.boxes?.length) {
+    const traces = data.boxes.map((b) => ({
+      type: "box",
+      x: Array(5).fill(b.x_mid),
+      // Plotly box-plot accepts q1/median/q3/lowerfence/upperfence directly.
+      lowerfence: [b.p5],
+      q1: [b.p25],
+      median: [b.p50],
+      q3: [b.p75],
+      upperfence: [b.p95],
+      name: `${b.x_lo}–${b.x_hi} (n=${b.n})`,
+      showlegend: false,
+      marker: { color: "#4a6fa5" },
+      width: 4,
+    }));
+    Plotly.newPlot("candlestick", traces, {
+      margin: { t: 30, r: 30, b: 50, l: 60 },
+      xaxis: { title: xLabel },
+      yaxis: { title: yLabel },
     }, { responsive: true });
   }
 
@@ -152,10 +177,10 @@ function renderResult(data) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${b.label}</td><td>${b.range}</td>
       <td class="num">${b.n}</td>
-      <td class="num">${b.srocc?.toFixed(4) ?? "—"}</td>
-      <td class="num">${b.krocc?.toFixed(4) ?? "—"}</td>
-      <td class="num">${b.plcc ?.toFixed(4) ?? "—"}</td>
-      <td class="num">${b.rmse ?.toFixed(3) ?? "—"}</td>`;
+      <td class="num">${Number.isFinite(b.srocc) ? b.srocc.toFixed(4) : "—"}</td>
+      <td class="num">${Number.isFinite(b.krocc) ? b.krocc.toFixed(4) : "—"}</td>
+      <td class="num">${Number.isFinite(b.plcc)  ? b.plcc .toFixed(4) : "—"}</td>
+      <td class="num">${Number.isFinite(b.rmse)  ? b.rmse .toFixed(3) : "—"}</td>`;
     tbody.appendChild(tr);
   }
 }

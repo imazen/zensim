@@ -184,7 +184,45 @@ async function runQuery(msg) {
   // Per-band SROCC (aggregate, by Y-value bands per CID22 Table 5).
   const bands = computeBandSrocc(dataPoints);
 
-  postMessage({ type: "result", data: { rows: dataPoints, step5, bands } });
+  // Per-band box-plot stats (p5/p25/p50/p75/p95) for the candlestick mode.
+  // Bins X axis into 5-unit steps and reports Y distribution per bin.
+  const boxes = computeBoxes(dataPoints, 5);
+
+  postMessage({ type: "result", data: { rows: dataPoints, step5, bands, boxes } });
+}
+
+function quantile(sorted, q) {
+  if (sorted.length === 0) return NaN;
+  if (sorted.length === 1) return sorted[0];
+  const idx = q * (sorted.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+function computeBoxes(points, binWidth) {
+  const bins = new Map();
+  for (const p of points) {
+    const b = Math.floor(p.x / binWidth) * binWidth;
+    if (!bins.has(b)) bins.set(b, []);
+    bins.get(b).push(p.y);
+  }
+  return Array.from(bins.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([x, ys]) => {
+      const s = [...ys].sort((a, b) => a - b);
+      return {
+        x_lo: x,
+        x_hi: x + binWidth,
+        x_mid: x + binWidth / 2,
+        n: s.length,
+        p5:  quantile(s, 0.05),
+        p25: quantile(s, 0.25),
+        p50: quantile(s, 0.50),
+        p75: quantile(s, 0.75),
+        p95: quantile(s, 0.95),
+      };
+    });
 }
 
 function spearman(xs, ys) {

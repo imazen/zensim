@@ -110,8 +110,14 @@
         </tbody>
       </table>
 
-      <h2>Candlestick by band <span class="small">(coming next)</span></h2>
-      <div id="candlestick" class="chart" style="min-height: 320px;"></div>
+      <h2>Candlestick by X-axis bin <span class="small">(p5–p25–p50–p75–p95)</span></h2>
+      <p class="small" style="margin: 4px 0 8px 0; color: #555;">
+        Each box shows the Y distribution within a 5-unit X bin.
+        Box edges = p25 / p75 (the interquartile range); whiskers = p5 / p95.
+        For AIC-4 the reconstructed-JND CI bounds (`human_jnd_ci_lo`/`hi`)
+        could populate the whiskers directly per-pair — TODO if Y=human_jnd.
+      </p>
+      <div id="candlestick" class="chart" style="min-height: 360px;"></div>
 
       <h2>Y → codec param lookup <span class="small">(coming next)</span></h2>
       <div id="param-lookup" class="small">configure target Y and the table will list codec settings that hit it ±1 zq.</div>
