@@ -41,9 +41,17 @@
     Pick corpora, choose any X/Y pair of metrics, get scatter +
     step-5 line + per-band SROCC. Per the
     <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">CID22 2023 paper</a>
-    Table 5 band cutoffs. Data is fetched via HTTP-range from R2 and
-    queried in-browser with DuckDB-WASM; all CPU work happens on a
-    Web Worker.
+    Table 5 band cutoffs. Data is queried in-browser with DuckDB-WASM
+    (HTTP-range over parquet); all CPU work happens on a Web Worker.
+  </p>
+  <p class="lede" style="margin-top: 6px;">
+    <strong>Try first:</strong> the default pick (AIC-3 corpus, X =
+    <code>q</code>, Y = <code>score_ssim2</code>) shows the canonical
+    sweep-time encoder-quality-vs-perceptual-metric relationship.
+    Switch Y to <code>score_dssim</code> to see how DSSIM ranks pairs
+    differently, or to <code>human_jnd</code> to see how the metric
+    tracks the subjective JND. AIC-4 carries the same shape on a
+    300-row paper-curated corpus with reconstructed JND.
   </p>
 
   <div class="layout">
