@@ -108,10 +108,10 @@ fn main() -> Result<()> {
             // header
             continue;
         }
-        if let Some(first_col) = line.split(',').next() {
-            if !first_col.is_empty() {
-                distinct_sources.insert(first_col.to_string());
-            }
+        if let Some(first_col) = line.split(',').next()
+            && !first_col.is_empty()
+        {
+            distinct_sources.insert(first_col.to_string());
         }
     }
     let sources: Vec<String> = distinct_sources.into_iter().collect();
@@ -125,7 +125,7 @@ fn main() -> Result<()> {
         .par_iter()
         .map(|path| {
             let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n % chunk_progress == 0 {
+            if n.is_multiple_of(chunk_progress) {
                 eprintln!("  hashing source {} / {}", n, total);
             }
             let h = match dhash_64_path(Path::new(path)) {

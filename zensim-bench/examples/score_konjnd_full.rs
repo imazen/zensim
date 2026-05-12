@@ -15,7 +15,7 @@ use imgref::Img;
 use rayon::prelude::*;
 use rgb::RGB8;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -106,7 +106,7 @@ fn main() {
     let n_total = triples.len();
     triples
         .par_iter()
-        .for_each(|(src_stem, codec, q, src_path, dist_path)| {
+        .for_each(|(_src_stem, codec, q, src_path, dist_path)| {
             let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if p.is_multiple_of(500) {
                 let elapsed = started.elapsed().as_secs_f64();

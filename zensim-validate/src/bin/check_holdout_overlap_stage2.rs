@@ -30,6 +30,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+/// Per-window scan result: (best_ref_path, distance, ref_dx, ref_dy, src_dx, src_dy).
+type WindowMatch = (String, u32, u32, u32, u32, u32);
+
+/// Per-source result: (src_path, optional best match across windows).
+type SourceScan = (String, Option<WindowMatch>);
+
 #[derive(Parser, Debug)]
 #[command(
     version,
@@ -87,10 +93,10 @@ fn main() -> Result<()> {
         if i == 0 {
             continue;
         }
-        if let Some(first) = line.split(',').next() {
-            if !first.is_empty() {
-                distinct_sources.insert(first.to_string());
-            }
+        if let Some(first) = line.split(',').next()
+            && !first.is_empty()
+        {
+            distinct_sources.insert(first.to_string());
         }
     }
     let sources: Vec<String> = distinct_sources.into_iter().collect();
@@ -100,11 +106,11 @@ fn main() -> Result<()> {
     let total = sources.len();
     let chunk = (total / 20).max(1);
     let counter = std::sync::atomic::AtomicUsize::new(0);
-    let results: Vec<(String, Option<(String, u32, u32, u32, u32, u32)>)> = sources
+    let results: Vec<SourceScan> = sources
         .par_iter()
         .map(|src_path| {
             let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if n % chunk == 0 {
+            if n.is_multiple_of(chunk) {
                 eprintln!("  scanning {} / {}", n, total);
             }
             let img = match image::open(Path::new(src_path)) {
@@ -202,7 +208,7 @@ fn scan_windows(
     img: &DynamicImage,
     cid22: &[(String, u64)],
     min_window: u32,
-) -> Option<(String, u32, u32, u32, u32, u32)> {
+) -> Option<WindowMatch> {
     let (w, h) = img.dimensions();
     let max_window = w.min(h);
     if max_window < min_window {
@@ -214,7 +220,7 @@ fn scan_windows(
             .min_by_key(|(_, d, _, _, _)| *d)
             .map(|(n, d, x, y, s)| (n, d, x, y, s, 1));
     }
-    let mut best: Option<(String, u32, u32, u32, u32, u32)> = None;
+    let mut best: Option<WindowMatch> = None;
     let mut window_count = 0u32;
     let mut window_size = max_window;
     while window_size >= min_window {

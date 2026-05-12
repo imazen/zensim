@@ -548,7 +548,7 @@ fn process_konjnd_pair(
         Some(dm) => libjxl_pnorm(dm.buf(), 3.0),
         None => f64::NAN,
     };
-    let features_vec: Vec<f64> = features.iter().copied().collect();
+    let features_vec: Vec<f64> = features.to_vec();
     Some((v02_distance, v04_distance, ssim2, three_norm, features_vec))
 }
 

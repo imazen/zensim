@@ -2092,7 +2092,7 @@ fn write_features_csv_with_refs(
     // zensim's V0_2 weights against every row, which costs ~20 ms on
     // a 300-feature vector × 10k rows = several minutes per dataset.
     let extract_mode = ref_basenames.is_some();
-    if let Some(_) = ref_basenames {
+    if ref_basenames.is_some() {
         write!(f, "ref_basename,").unwrap();
     }
     write!(f, "human_score").unwrap();
