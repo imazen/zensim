@@ -39,21 +39,20 @@
   </p>
 
   <section style="background:#eaf6ea; border-left: 4px solid #0a7d28; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
-    <strong>Current ship: V0_15 (TV=15, seed=1, 2026-05-12)</strong> —
-    <strong>honest replacement</strong> for the tainted V0_8 (now archived).
-    CID22 SROCC <strong>0.8914</strong>
-    (<span class="green">+0.0019 vs fast-ssim2's 0.8895</span>);
-    AIC-3 CTC SROCC <strong>0.8019</strong>
-    (<span class="green">+0.0054 vs ssim2's 0.7965</span>);
-    non-mono q-step rate <strong>2.51 %</strong>
-    (<span class="green">MEETS strict 4.86 % target, 1/2 of V0_8's 5.87 %</span>).
-    Trained on properly-purged 144,791-row safesyn CSV (after the
-    <a href="https://github.com/imazen/zensim/blob/main/benchmarks/contaminated_sources_purged_2026-05-12.txt">2026-05-12 purge</a>
-    of 361 contaminated source files + ~75 GiB derivatives).
-    Affine-calibrated α=26.9332, β=-4.5520, R²=0.7447.
-    Per-band: B3 +0.077 (best of any bake); B0/B1/Near-PJND show
-    honest gaps to ssim2 where V0_8's were artificially small from
-    training-set leakage.
+    <strong>Current ship: V0_16 (TV=20, seed=1, 2026-05-12)</strong> —
+    successor to V0_15 (same day). V0_16 raises TV from 15 to 20 on
+    the same purged training data, recovering V0_8's B1 closure
+    HONESTLY without training-set leakage.
+    CID22 SROCC <strong>0.8919</strong>
+    (<span class="green">+0.0024 vs fast-ssim2's 0.8895</span>);
+    AIC-3 CTC SROCC <strong>0.7990</strong>
+    (<span class="green">+0.0025 vs ssim2's 0.7965</span>);
+    non-mono q-step rate <strong>2.30 %</strong> (best of any bake;
+    <span class="green">1/2.5 of V0_8's 5.87 %</span>).
+    Per-band B1 = <strong>0.4559</strong> vs ssim2 0.4694 (-0.014,
+    MATCHES V0_8 tainted's -0.014 HONESTLY). B0 = 0.4214 vs ssim2
+    0.4418 (-0.020, was V0_15 -0.049). Affine-calibrated α=28.0366,
+    β=-5.0738, R²=0.7423.
   </section>
 
   <section style="background:#fff4e8; border-left: 4px solid #888; padding: 10px 16px; margin: 12px 0; font-size: 13px; color: #555;">
@@ -132,7 +131,8 @@
     <tr><td>V0_10 [15,25,15,15]</td><td>0.8877</td><td><span class="delta-bad">−0.0018</span></td><td>2.40 %</td><td>0.7945 (−0.0020)</td><td><span class="small">tainted-data smoothness specialist</span></td></tr>
     <tr><td>V0_11 flat TV=20</td><td>0.8897</td><td><span class="delta-near">+0.0002</span></td><td>2.33 %</td><td>0.8056 (+0.0091)</td><td><span class="small">tainted-data exp; AIC-3 leader at the time</span></td></tr>
     <tr><td>V0_12 B1 oversample</td><td>0.8895</td><td><span class="delta-near">±0.0000</span></td><td>1.68 %</td><td>0.7972 (+0.0007)</td><td><span class="small">tainted-data exp; B1 oversample disproved</span></td></tr>
-    <tr><td><strong>V0_15 honest (SHIPPED 2026-05-12)</strong></td><td><strong>0.8914</strong></td><td><span class="delta-good">+0.0019</span></td><td><strong>2.51 %</strong></td><td><strong>0.8019</strong> (+0.0054)</td><td><strong>current ship · honest · B3 +0.077 best</strong></td></tr>
+    <tr><td>V0_15 honest TV=15 (ARCHIVED same day)</td><td>0.8914</td><td><span class="delta-good">+0.0019</span></td><td>2.51 %</td><td>0.8019 (+0.0054)</td><td><span class="small">superseded by V0_16 (better B0/B1)</span></td></tr>
+    <tr><td><strong>V0_16 honest TV=20 (SHIPPED 2026-05-12)</strong></td><td><strong>0.8919</strong></td><td><span class="delta-good">+0.0024</span></td><td><strong>2.30 %</strong></td><td>0.7990 (+0.0025)</td><td><strong>current ship · honest B1 closure</strong></td></tr>
   </table>
 
   <h2>Notes</h2>

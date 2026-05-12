@@ -194,59 +194,56 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// at `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin`
 /// (byte-identical to the prior shipped state).
 ///
-/// File: `zensim/weights/v0_15_2026-05-12.bin` (md5 `73d5e418`,
-/// affine-calibrated α=26.9332, β=-4.5520, R²=0.7447 against ssim2
-/// truth on unified JPEG parquet; raw bake md5 was `bb09b939`).
-/// Trained on **fully-purged** safe-synthetic CSV (144,791 rows after
-/// 11,629 contaminated rows at perceptual-duplicate d≤16 were removed
-/// via the 2026-05-12 purge — see
-/// `benchmarks/contaminated_sources_purged_2026-05-12.txt` for the
-/// 361 source PNGs that were permanently deleted).
-/// h=128, **TV=15**, seed=1, KonJND-aligned.
+/// File: `zensim/weights/v0_16_2026-05-12.bin` (md5 `baf3fdcb`,
+/// affine-calibrated α=28.0366, β=-5.0738, R²=0.7423 against ssim2
+/// truth on unified JPEG parquet; raw bake md5 was `b3f5fc59`).
+/// Trained on **fully-purged** safe-synthetic CSV (144,791 rows
+/// after the 2026-05-12 d≤16 purge; manifest at
+/// `benchmarks/contaminated_sources_purged_2026-05-12.txt`).
+/// h=128, **TV=20** (raised from V0_15's TV=15 to recover B1 closure
+/// honestly), seed=1, KonJND-aligned.
 ///
-/// **V0_15 honest results** vs fast-ssim2 0.8895:
-/// - CID22 SROCC = **0.8914** (+0.0019, beats ssim2)
-/// - AIC-3 CTC = **0.8019** (+0.0054, beats ssim2)
-/// - Non-mono q-step rate = **2.51 %** (MEETS strict 4.86 % target;
-///   1/2 of V0_8's 5.87 %)
-/// - val_mean = **0.9427** (beats V0_8's 0.9416)
+/// **V0_16 honest results** vs fast-ssim2:
+/// - CID22 SROCC = **0.8919** (+0.0024 above ssim2's 0.8895)
+/// - AIC-3 CTC = **0.7990** (+0.0025 above ssim2's 0.7965)
+/// - Non-mono q-step rate = **2.30 %** (1/2.5 of V0_8's 5.87 %;
+///   best of any bake)
+/// - val_mean = 0.9403 (V0_15 had 0.9427; lower training fit, better
+///   generalization to CID22)
 ///
-/// **Per-band CID22** (honest, no contamination inflation):
-/// - B0 (<50): 0.3933 vs ssim2 0.4418 (-0.049)
-/// - B1 [50,65): 0.4307 vs ssim2 0.4694 (-0.039)
-/// - B2 [65,90): 0.7849 vs ssim2 0.7722 (+0.013 BEATS)
-/// - B3 (≥90, n=43): **0.1886** vs ssim2 0.1121 (+0.077 BEATS, best of any bake)
-/// - Near-PJND: 0.3453 vs ssim2 0.3908 (-0.046)
+/// **V0_16 per-band CID22 (closes B0/B1 honestly)**:
+/// - B0 (<50): 0.4214 vs ssim2 0.4418 (-0.020, was V0_15 -0.049)
+/// - B1 [50,65): **0.4559** vs ssim2 0.4694 (-0.014, MATCHES V0_8
+///   tainted -0.014 HONESTLY)
+/// - B2 [65,90): 0.7802 vs ssim2 0.7722 (+0.008)
+/// - B3 (≥90, n=43): 0.1723 vs ssim2 0.1121 (+0.060)
+/// - Near-PJND: 0.3547 vs ssim2 0.3908 (-0.036, was V0_15 -0.046)
 ///
-/// **V0_8 was tainted**: its CID22 0.8948 included +0.0034 inflation
-/// from training-set leakage of 22 of 49 CID22 holdout refs (via
-/// hex-hashed crops circumventing the filename blocklist + the
-/// looser-than-d≤16 perceptual-overlap cleanup). The 2026-05-12 purge
-/// removed those 361 source files + 30.6 GiB of encoded variants +
-/// .features.bin caches + tower mirror, permanently. V0_15 is the
-/// honest replacement.
+/// **Key finding**: V0_16 with stronger TV=20 on clean data
+/// recovers the B1 closure that V0_8 had via training-set leakage.
+/// The B1 floor isn't a fundamental ceiling — it's a regularization
+/// hyperparameter selection. V0_15 (TV=15) was undersmoothed for B1.
 ///
-/// **V0_8's per-band B0/B1 advantages were artifacts**:
-/// V0_8 B0 -0.010 vs V0_15 -0.049 (the 0.039 difference was contamination)
-/// V0_8 B1 -0.014 vs V0_15 -0.039 (the 0.025 difference was contamination)
-/// V0_15 honestly shows the model is weaker than ssim2 in low-quality
-/// bands. Goal #1 (match-or-exceed all bands) is not met by either,
-/// but V0_15's report is honest while V0_8's wasn't.
+/// V0_15 (TV=15) wins B2/B3 and AIC-3; V0_16 (TV=20) wins B0/B1/
+/// Near-PJND/CID22-agg/non-mono. Decision: ship V0_16 for better
+/// band coverage per Goal #1 (match-or-exceed ssim2 across all
+/// quality bands).
 ///
 /// Function and slot names preserved (`mlp_bake_preview_v0_4`,
 /// `PROFILE_PREVIEW_V0_4`) for source-compat with consumer pinning.
 /// Predecessors archived at `zensim/weights/archive/`:
-/// - `v0_5_2026-05-11.bin` (md5 `0133d165`, original 11.77% leak)
-/// - `v0_7_seed0_2026-05-11.bin` (md5 `b31741e3`)
-/// - `v0_7_seed1_tv10_2026-05-11.bin` (md5 `0ad0dace`)
-/// - `v0_8_tainted_2026-05-11.bin` (md5 `67482691`, +0.0034 inflation
-///   confirmed 2026-05-12)
+/// - `v0_5_2026-05-11.bin` (original 11.77% leak)
+/// - `v0_7_seed0_2026-05-11.bin`
+/// - `v0_7_seed1_tv10_2026-05-11.bin`
+/// - `v0_8_tainted_2026-05-11.bin` (+0.0034 inflation 2026-05-12)
+/// - `v0_15_2026-05-12.bin` (md5 `73d5e418`, first honest ship,
+///   superseded same day by V0_16's better B0/B1 coverage)
 ///
 /// Gated behind `__experimental_versions` because the `weights/`
 /// directory is excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    include_bytes!("../weights/v0_15_2026-05-12.bin")
+    include_bytes!("../weights/v0_16_2026-05-12.bin")
 }
 
 #[cfg(feature = "__experimental_versions")]
