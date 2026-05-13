@@ -143,15 +143,21 @@ explicit authorization.
 | **V0_17 ensemble concat** | **VERIFIED** | 11 of 13 metrics beat V0_16; -0.0012 AIC-4 trade is the only loss |
 | Aggressive tv-band [5,40,5,40] | falsified | over-correction, CID22 0.8822 |
 | mid-q-boost on full recipe | falsified | trails V0_16 on aggregate, only better B3 single-bake SROCC |
-| --low-q-boost on full recipe | NOT tested | candidate for cycle-15 |
+| --low-q-boost 1.5 on full recipe | **FALSIFIED** (tick 651) | val_mean +0.0010 misleads; CID22 -0.0090, AIC-3 -0.0029, AIC-4 -0.0050 |
 | 3-way mix with cycle-14-s7 | tested | trails 3-way s42 mix on AIC-4 preservation |
 
 ## Trainer infrastructure shipped during cycle-14
 
 - `--low-q-boost <f64>` flag in `zensim_mlp_train.rs` (zensim
   `dacd425f`) — per-row sampling-CDF based row weighting for B0+B1.
-  Ported from Python trainer. Not exercised in cycle-14 (candidate
-  for cycle-15).
+  Ported from Python trainer. Tested at tick 651 on V0_16 full recipe
+  + `--low-q-boost 1.5` — **FALSIFIED at multi-corpus eval despite
+  val_mean lift**: val_mean 0.9413 (+0.0010 over V0_16 0.9403) BUT
+  CID22 0.8829 (-0.0090), AIC-3 0.7961 (-0.0029), AIC-4 0.9125
+  (-0.0050). Classic val-vs-test divergence — KADID-dominated val
+  rewards B0/B1 boost, codec-curve CID22 doesn't. The flag works
+  correctly; the cycle-9 hypothesis (B0/B1 boost helps generalization)
+  doesn't transfer from KADID val to CID22 / AIC.
 - `--mid-q-boost <f64>` flag (same commit) — B1+B2 row weighting.
 - Test `train_mlp_low_q_boost_changes_outputs` — verifies the per-row
   CDF wiring works AND default-1.0 is bit-identical to no-boost.
@@ -186,6 +192,17 @@ explicit authorization.
    4 training groups including konjnd@0.5. Full bit-identical
    reproduction verified.
 
+6. **val_mean is NOT a reliable CID22 proxy** (tick 651 finding).
+   Two cycle-14-era flags both lift val_mean modestly but have
+   OPPOSITE effects on CID22:
+   - Per-band TV (V0_17 component): val_mean +0.0021, CID22 +0.0013
+   - low-q-boost 1.5: val_mean +0.0010, CID22 **-0.0090**
+   The mechanism differs: per-band TV penalizes within-curve non-
+   monotonicity (helps CID22's codec-curves), while low-q-boost
+   re-weights pair sampling toward bands that KADID/TID reward more
+   than CID22. **Every cycle-15+ candidate MUST be CID22-evaluated
+   directly**; val_mean improvements are not sufficient evidence.
+
 ## Artifacts inventory (cycle-14)
 
 Bakes:
@@ -194,6 +211,7 @@ Bakes:
 - `benchmarks/rust_v0_X_2026-05-13_cycle14_full_seed42.{raw.bin,bin}` (md5 006c1fec raw)
 - `benchmarks/rust_v0_X_2026-05-13_v0_16_plus_midq15.{raw.bin,bin}` (md5 11683c6d raw)
 - `benchmarks/rust_v0_X_2026-05-13_v0_16_tvband_5_40_5_40.{raw.bin,bin}` (md5 2dad7c27 raw)
+- `benchmarks/rust_v0_X_2026-05-13_v0_16_plus_lowq15.{raw.bin,bin}` (md5 b73499d2 raw / 92469d8f calibrated; falsified at tick 651)
 - `benchmarks/rust_v0_X_2026-05-13_concat_v0_16_c14s1.{raw.bin,bin}` (V0_17 w=0.5, md5 c679866a raw)
 - `benchmarks/rust_v0_X_2026-05-13_concat_w04_v0_16_c14s1.{raw.bin,bin}` (V0_17 w=0.4, md5 c7a2c2c5 raw)
 - **`benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.{raw.bin,bin}`** (V0_17 3-way SHIP CANDIDATE, md5 83d0c6ad raw)
