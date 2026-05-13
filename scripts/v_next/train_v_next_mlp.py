@@ -728,6 +728,11 @@ def main() -> int:
                          "the full multiplier, 50<=score<65 (B1) gets "
                          "sqrt(multiplier). Default 1.0 = no boost. Use "
                          "to address CID22 B0/B1 SROCC ceiling (cycle-9).")
+    ap.add_argument("--mid-q-boost", type=float, default=1.0,
+                    help="Multiply train_weight for mid-quality rows (B1+B2: "
+                         "50<=score<90) by this factor. Targets V0_16's "
+                         "structural lead on B1/B2 ranking identified in "
+                         "tick 558. Default 1.0 = no boost.")
     ap.add_argument("--low-q-pair-boost", type=float, default=1.0,
                     help="Cycle-9b lever: weight RankNet pair losses by max "
                          "boost of the pair's two endpoints (B0 endpoint → "
@@ -902,6 +907,18 @@ def main() -> int:
         print(f"low-q-boost: B0 (score<50) n={n_b0:,} × {boost:.3f}; "
               f"B1 (50..65) n={n_b1:,} × {sqrt_boost:.3f}; "
               f"others × 1.0", flush=True)
+
+    if args.mid_q_boost != 1.0 and target_col in df.columns:
+        boost = float(args.mid_q_boost)
+        target_vals = df[target_col].to_numpy(dtype=np.float32)
+        mult = np.ones_like(target_vals, dtype=np.float32)
+        b1b2_mask = (target_vals >= 50.0) & (target_vals < 90.0)
+        mult[b1b2_mask] = boost
+        n_b1b2 = int(b1b2_mask.sum())
+        df["train_weight"] = (df["train_weight"]
+                              * mult.astype(np.float32))
+        print(f"mid-q-boost: B1+B2 (50<=score<90) n={n_b1b2:,} × "
+              f"{boost:.3f}; others × 1.0", flush=True)
 
     is_tr, is_va, is_te = make_split(df, args.val_frac, args.test_frac, args.seed)
     # Force human val-only rows (is_val_only=True) into val regardless of
