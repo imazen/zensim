@@ -1,13 +1,43 @@
-# Context Handoff (2026-05-13, updated post-V0_17 ship)
+# Context Handoff (2026-05-13, updated post-V0_18 ship)
 
 ## What just shipped
 
-**V0_17 is the current runtime weight** (`zensim/weights/v0_17_2026-05-13.bin`,
-calibrated md5 `2775812d7ffa3964a531022416527009`, 355,332 bytes,
+**V0_18 is the current runtime weight** (`zensim/weights/v0_18_2026-05-13.bin`,
+md5 `2cc537470e68f7379e759811ddd22900`, **93,064 bytes** —
+**-73.8 % vs V0_17**, 228→384→1 architecture, I8 weight quantization
+with per-output f32 scales). Same weight VALUES as V0_17 (3-way
+concat construction); only `WeightDtype` changed from F32 to I8.
+Decompression happens inline in `zenpredict::inference::saxpy_matmul_i8`.
+
+V0_17 archived to `zensim/weights/archive/v0_17_2026-05-13.bin`.
+
+Cross-corpus SROCC vs V0_17 (worst Δ -0.0010 on AIC-4 / -0.0008 on
+AIC-3, both within sampling noise):
+
+| Corpus | V0_18 (I8) | V0_17 (F32) | Δ |
+|---|--:|--:|--:|
+| KADID10k (10125) | 0.9427 | 0.9428 | -0.0001 |
+| TID2013 (3000) | 0.9525 | 0.9525 | 0.0000 |
+| CID22 (4292) | **0.8934** | **0.8934** | 0.0000 |
+| AIC-4 (300) | 0.9153 | 0.9163 | -0.0010 |
+| AIC-3 CTC (600) | 0.7998 | 0.8006 | -0.0008 |
+| KonJND-JPEG B0 (1418) | 0.8913 | 0.8909 | +0.0004 |
+| Non-mono v15r raw % | **5.47** | 5.49 | -0.02 pp |
+
+CID22 stays at 0.8934 — clears the V_X loop target. All 5 v04_mlp
+tests pass with V0_18 in the ship slot.
+
+Investigation: `benchmarks/v0_17_quantization_review_2026-05-13.md`
+(commit `5416944c`). Tool: `zensim-bench/examples/quant_compare.rs`.
+
+## V0_17 (now archived) — 228→384→1 concat MLP
+
+V0_17 (`zensim/weights/archive/v0_17_2026-05-13.bin`,
+md5 `2775812d7ffa3964a531022416527009`, 355,332 bytes,
 228→384→1 architecture). Built by 3-way concat construction:
 `0.65 × V0_16 + 0.30 × cycle-14-s1 + 0.05 × cycle-14-s42` (mathematically
 equivalent to a 3-bake ensemble, runs as a single forward pass). V0_16
-moved to `zensim/weights/archive/v0_16_2026-05-12.bin`.
+moved to `zensim/weights/archive/v0_16_2026-05-12.bin` at V0_17 ship.
 
 V0_17 wins V0_16 on **11 of 13 measured metrics**:
 

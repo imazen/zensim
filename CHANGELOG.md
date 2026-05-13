@@ -16,6 +16,50 @@
 
 These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
+### Added (zensim, unreleased) — V0_18 SHIPPED: V0_17 weights quantized to I8 (2026-05-13)
+
+**SHIPPED 2026-05-13** as `zensim/weights/v0_18_2026-05-13.bin`. V0_17
+moved to `zensim/weights/archive/`. Identical weight values to V0_17 —
+only the bake's `weight_dtype` changed from F32 (0) to I8 (2). Per-output
+f32 scales handle dequant inside `saxpy_matmul_i8` (zenpredict
+`inference.rs:188-217`). Drop-in for runtime; no Rust API change.
+
+Size: **93,064 bytes** (-73.8 % vs V0_17's 355,332 B; -262 KB embed
+budget recovered for downstream binaries).
+
+Cross-corpus SROCC vs V0_17 (worst Δ -0.0010 on AIC-4):
+
+| Corpus | V0_18 (I8) | V0_17 (F32) | Δ |
+|---|--:|--:|--:|
+| KADID10k (10125) | 0.9427 | 0.9428 | -0.0001 |
+| TID2013 (3000) | 0.9525 | 0.9525 | 0.0000 |
+| CID22 (4292) | **0.8934** | **0.8934** | 0.0000 |
+| AIC-4 (300) | 0.9153 | 0.9163 | -0.0010 |
+| AIC-3 CTC (600) | 0.7998 | 0.8006 | -0.0008 |
+| KonJND-JPEG B0 (1418) | 0.8913 | 0.8909 | +0.0004 |
+| KonJND-JPEG B1 (797) | 0.6345 | 0.6342 | +0.0003 |
+
+CID22 stays at 0.8934 — clears the V_X loop target. All deltas are well
+under sampling noise (CI ±0.02 on CID22 B0).
+
+Non-mono q-step rate (unified_v15r_zenjpeg, 1.69M adjacent-q pairs):
+**5.47 %** vs V0_17's 5.49 % (-0.02 pp; under the 6.0 % ship gate per
+`zensim/CLAUDE.md`). Soft-iso projection still drops it to 0 %.
+
+Tool: `zensim-bench/examples/quant_compare.rs` re-bakes V0_17 weights
+with `WeightDtype::I8`. Python scorer extended to parse F16+I8 bakes
+(`scripts/v_next/score_unified_with_bake.py:46-67`).
+
+Report: `benchmarks/v0_17_quantization_review_2026-05-13.md`.
+
+Ship procedure (executed 2026-05-13):
+1. ✓ Re-baked V0_17 weights to I8 via `quant_compare`
+2. ✓ Copied to `zensim/weights/v0_18_2026-05-13.bin` (md5 `2cc53747…`)
+3. ✓ Updated `zensim/src/profile.rs:246` → v0_18 filename
+4. ✓ Moved `v0_17_2026-05-13.bin` to `zensim/weights/archive/`
+5. ✓ Cross-corpus validation: 5-corpus + KonJND-JPEG B0/B1 + non-mono gates
+6. ✓ All 5 v04_mlp tests pass
+
 ### Added (zensim, unreleased) — V0_17 SHIPPED: 228→384→1 concat MLP (2026-05-13, cycle-14)
 
 **SHIPPED 2026-05-13** as `zensim/weights/v0_17_2026-05-13.bin`. V0_16

@@ -53,12 +53,27 @@ def parse_bake_v2(path: Path):
         # scales unused for F32
         _scales_off, _scales_len = struct.unpack("<II", data[e_off + 20:e_off + 28])
         b_off, b_len = struct.unpack("<II", data[e_off + 28:e_off + 36])
-        assert weight_dtype == 0, f"F32 only (got {weight_dtype})"
-        # weights stored row-major [in_dim, out_dim] flattened — confirmed in v2.rs
         n_w = in_dim * out_dim
-        weights = np.frombuffer(
-            data, dtype=np.float32, count=n_w, offset=w_off
-        ).reshape(in_dim, out_dim).copy()
+        # 0=F32, 1=F16, 2=I8 with per-output f32 scales.
+        if weight_dtype == 0:
+            weights = np.frombuffer(
+                data, dtype=np.float32, count=n_w, offset=w_off
+            ).reshape(in_dim, out_dim).copy()
+        elif weight_dtype == 1:
+            raw = np.frombuffer(
+                data, dtype=np.uint16, count=n_w, offset=w_off
+            ).copy()
+            weights = raw.view(np.float16).astype(np.float32).reshape(in_dim, out_dim)
+        elif weight_dtype == 2:
+            raw = np.frombuffer(
+                data, dtype=np.int8, count=n_w, offset=w_off
+            ).reshape(in_dim, out_dim).astype(np.float32)
+            scales = np.frombuffer(
+                data, dtype=np.float32, count=out_dim, offset=_scales_off
+            ).copy()
+            weights = raw * scales[None, :]
+        else:
+            raise AssertionError(f"unknown weight_dtype {weight_dtype}")
         biases = np.frombuffer(
             data, dtype=np.float32, count=out_dim, offset=b_off
         ).copy()

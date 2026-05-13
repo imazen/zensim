@@ -390,6 +390,47 @@ fn main() {
                 );
             }
             println!();
+
+            // Fine-grained step-5 reporting (20 bins of width 0.05 across the
+            // normalized 0..1 human-score scale). The 4-band CID22 Table 5
+            // cuts above are too coarse — they hide failures inside a 25-point
+            // band. This step-5 grid is the always-on minimum per the
+            // 2026-05-13 user directive "require more than 4 bands for eval
+            // always". Bins with n < 4 emit n/a but still appear in the table
+            // so the coverage gaps are visible.
+            println!("### {} step-5 per-band SROCC (20 bins of width 0.05 on normalized score)", ds.name);
+            println!();
+            println!("| Bin (normalized) | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter |");
+            println!("|---|--:|:--:|:--:|:--:|:--:|:--:|");
+            for bin in 0..20 {
+                let lo = bin as f64 * 0.05;
+                let hi = lo + 0.05;
+                let label = format!("[{:.2}, {:.2})", lo, hi);
+                let idxs: Vec<usize> = humans
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &h)| (h >= lo && h < hi).then_some(i))
+                    .collect();
+                if idxs.len() < 4 {
+                    println!("| {label} | {} | n/a | n/a | n/a | n/a | n/a |", idxs.len());
+                    continue;
+                }
+                let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
+                let v02_b: Vec<f64> = idxs.iter().map(|&i| v02[i]).collect();
+                let v04_b: Vec<f64> = idxs.iter().map(|&i| v04[i]).collect();
+                let ssim_b: Vec<f64> = idxs.iter().map(|&i| ssim2[i]).collect();
+                let ba_b: Vec<f64> = idxs.iter().map(|&i| butter[i]).collect();
+                let s_v02 = spearman(&h_b, &v02_b).abs();
+                let s_v04 = spearman(&h_b, &v04_b).abs();
+                let s_ssim = spearman(&h_b, &ssim_b).abs();
+                let s_ba = spearman(&h_b, &ba_b).abs();
+                let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, &v04_b, 200, 0xC0FFEE);
+                println!(
+                    "| {label} | {} | {s_v02:.4} | {s_v04:.4} | [{ci_lo:.2}, {ci_hi:.2}] | {s_ssim:.4} | {s_ba:.4} |",
+                    idxs.len()
+                );
+            }
+            println!();
         }
     }
 
