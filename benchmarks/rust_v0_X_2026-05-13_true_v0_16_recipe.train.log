@@ -1,0 +1,27 @@
+MLP train: arch=[228 → 128 (LeakyReLU α=0.01) → 1], val_policy=Min
+      train group 0: 'safesyn_purged' n=144791 train_w=1.000 val_w=0.000
+  train+val group 1: 'kadid' n=10125 train_w=0.300 val_w=1.000
+  train+val group 2: 'tid' n=3000 train_w=0.300 val_w=1.000
+  train+val group 3: 'konjnd' n=76104 train_w=0.500 val_w=1.000
+  epoch   0 | lr=0.00100 | loss=0.2139 | val_mean=0.9002 (best=-inf) | safesyn_purged=0.9919 kadid=0.9002 tid=0.9126 konjnd=0.9929 | t=6.2s
+  epoch  10 | lr=0.00090 | loss=0.1618 | val_mean=0.9183 (best=0.9002) | safesyn_purged=0.9943 kadid=0.9183 tid=0.9193 konjnd=0.9958 | t=60.0s
+  epoch  20 | lr=0.00065 | loss=0.1561 | val_mean=0.9257 (best=0.9183) | safesyn_purged=0.9929 kadid=0.9257 tid=0.9383 konjnd=0.9955 | t=114.0s
+  epoch  30 | lr=0.00035 | loss=0.1487 | val_mean=0.9345 (best=0.9257) | safesyn_purged=0.9952 kadid=0.9345 tid=0.9484 konjnd=0.9965 | t=168.0s
+  epoch  40 | lr=0.00010 | loss=0.1418 | val_mean=0.9401 (best=0.9345) | safesyn_purged=0.9960 kadid=0.9401 tid=0.9496 konjnd=0.9967 | t=221.8s
+  epoch  50 | lr=0.00100 | loss=0.1626 | val_mean=0.9135 (best=0.9401) | safesyn_purged=0.9926 kadid=0.9135 tid=0.9201 konjnd=0.9945 | t=275.8s
+  epoch  60 | lr=0.00090 | loss=0.1630 | val_mean=0.9227 (best=0.9401) | safesyn_purged=0.9917 kadid=0.9227 tid=0.9332 konjnd=0.9933 | t=329.4s
+  epoch  70 | lr=0.00065 | loss=0.1529 | val_mean=0.9327 (best=0.9401) | safesyn_purged=0.9940 kadid=0.9327 tid=0.9370 konjnd=0.9963 | t=383.1s
+  epoch  80 | lr=0.00035 | loss=0.1477 | val_mean=0.9364 (best=0.9401) | safesyn_purged=0.9952 kadid=0.9364 tid=0.9472 konjnd=0.9964 | t=437.1s
+  epoch  90 | lr=0.00010 | loss=0.1373 | val_mean=0.9402 (best=0.9401) | safesyn_purged=0.9961 kadid=0.9402 tid=0.9521 konjnd=0.9970 | t=490.9s
+  epoch 100 | lr=0.00100 | loss=0.1593 | val_mean=0.9286 (best=0.9402) | safesyn_purged=0.9953 kadid=0.9286 tid=0.9365 konjnd=0.9963 | t=544.6s
+  epoch 110 | lr=0.00090 | loss=0.1569 | val_mean=0.9313 (best=0.9402) | safesyn_purged=0.9944 kadid=0.9315 tid=0.9313 konjnd=0.9958 | t=598.2s
+  epoch 120 | lr=0.00065 | loss=0.1498 | val_mean=0.9310 (best=0.9402) | safesyn_purged=0.9948 kadid=0.9310 tid=0.9416 konjnd=0.9954 | t=651.9s
+  epoch 130 | lr=0.00035 | loss=0.1488 | val_mean=0.9345 (best=0.9402) | safesyn_purged=0.9947 kadid=0.9345 tid=0.9426 konjnd=0.9956 | t=705.8s
+  epoch 140 | lr=0.00010 | loss=0.1387 | val_mean=0.9403 (best=0.9402) | safesyn_purged=0.9960 kadid=0.9403 tid=0.9501 konjnd=0.9969 | t=759.4s
+  epoch 150 | lr=0.00100 | loss=0.1560 | val_mean=0.9275 (best=0.9403) | safesyn_purged=0.9950 kadid=0.9275 tid=0.9320 konjnd=0.9960 | t=813.0s
+  epoch 160 | lr=0.00090 | loss=0.1542 | val_mean=0.9259 (best=0.9403) | safesyn_purged=0.9941 kadid=0.9259 tid=0.9340 konjnd=0.9954 | t=866.7s
+  epoch 170 | lr=0.00065 | loss=0.1521 | val_mean=0.9312 (best=0.9403) | safesyn_purged=0.9959 kadid=0.9312 tid=0.9397 konjnd=0.9965 | t=920.6s
+  epoch 180 | lr=0.00035 | loss=0.1438 | val_mean=0.9369 (best=0.9403) | safesyn_purged=0.9942 kadid=0.9369 tid=0.9448 konjnd=0.9962 | t=974.5s
+  epoch 190 | lr=0.00010 | loss=0.1383 | val_mean=0.9397 (best=0.9403) | safesyn_purged=0.9959 kadid=0.9397 tid=0.9487 konjnd=0.9968 | t=1028.2s
+  early stop at epoch 190 (no validation improvement for 50 epochs)
+MLP train: best validation mean SROCC = 0.9403
