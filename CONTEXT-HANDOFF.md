@@ -46,15 +46,38 @@ stripped of 7-10% rows each.
 
 ## V0_16 recipe (recoverable, current ship)
 
-- Training CSV: `/tmp/zensim_loop/safe_synth_clean_features.csv` (144,791 rows
-  after purge, was 156,420)
-- TV pairs: `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv` (205,654
-  pairs after index remap)
-- Hyperparams: h=128, **flat TV=20**, seed=1, 300 epochs (early-stop ep 190)
-- Affine-calibrated: α=28.0366, β=-5.0738, R²=0.7423
-- Trainer: `target/release/zensim_mlp_train` (zensim-validate crate)
-- Raw bake md5 (before calibration): `b3f5fc59`
-- Calibrated bake md5: `baf3fdcb`
+**CORRECTED 2026-05-13 (ticks 605-612)**: the prior version of this
+section listed only 3 training groups (safesyn + kadid + tid). V0_16
+was actually trained with **4 groups**, including the KonJND-aligned
+group at train_w=0.5. Reproducing without the konjnd group gives
+CID22 SROCC ≈ 0.876 (rerun result at tick 605), -0.016 below V0_16's
+0.8919. Source of truth: `/tmp/zensim_loop/v0_16_train.stdout`
+(V0_16's actual training log).
+
+Training groups (NAME:PATH:TRAIN_W:VAL_W passed to `zensim_mlp_train`):
+- **safesyn_purged**: `/tmp/zensim_loop/safe_synth_clean_features.csv`
+  (144,791 rows after purge, was 156,420), 1.0:0.0
+- **kadid**: `/mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv`
+  (10,125), 0.3:1.0
+- **tid**: `/mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv`
+  (3,000), 0.3:1.0
+- **konjnd**: `/tmp/zensim_loop/konjnd_aligned_features.csv`
+  (76,104 rows; KonJND-1k PJND-aligned), **0.5**:1.0 ← previously omitted
+
+TV pairs: `/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv` (205,654
+pairs; ALL in-range when 4 groups present — drops to 130,558 with just
+3 groups because konjnd's row indices are missing)
+Hyperparams: h=128, **flat TV=20**, seed=1, 300 epochs (early-stop ep 190
+in V0_16's training)
+Affine-calibrated: α=28.0366, β=-5.0738, R²=0.7423
+Trainer: `target/release/zensim_mlp_train` (zensim-validate crate)
+Raw bake md5 (before calibration): `b3f5fc59`
+Calibrated bake md5: `baf3fdcb`
+
+Tick 612 verification: re-running with the 4-group recipe at seed=1
+produced BIT-IDENTICAL epoch 0 (loss=0.2139 val_mean=0.9002
+safesyn_purged=0.9919 kadid=0.9002 tid=0.9126 konjnd=0.9929) to
+V0_16's training log. Full reproduction in progress.
 
 ## V0_15 recipe (archived; for reference)
 

@@ -20,6 +20,10 @@
 #   - /tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv (205,654 pairs)
 #   - /mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv
 #   - /mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv
+#   - /tmp/zensim_loop/konjnd_aligned_features.csv     (76,104 KonJND-1k pairs;
+#     RESTORED 2026-05-13 tick 612 — the V0_16 training log shows konjnd
+#     was used at train_w=0.5 and the prior recipe runner was missing it,
+#     producing CID22 0.876 instead of V0_16's 0.8919)
 #
 # Output:
 #   - benchmarks/rust_v0_X_<DATE>.raw.bin       (uncalibrated bake)
@@ -60,6 +64,7 @@ done
 SAFESYN_CSV="/tmp/zensim_loop/safe_synth_clean_features.csv"
 KADID_CSV="/mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv"
 TID_CSV="/mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv"
+KONJND_CSV="/tmp/zensim_loop/konjnd_aligned_features.csv"
 TV_PAIRS="/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv"
 
 # --- V0_16 hyperparameters (matches CONTEXT-HANDOFF.md exactly) ---
@@ -85,7 +90,7 @@ EVAL_LOG="$OUT_DIR/rust_v0_X_${DATE}${SUFFIX}.eval.log"
 
 # --- Pre-flight checks ---
 echo "==> Pre-flight"
-for f in "$SAFESYN_CSV" "$KADID_CSV" "$TID_CSV" "$TV_PAIRS"; do
+for f in "$SAFESYN_CSV" "$KADID_CSV" "$TID_CSV" "$KONJND_CSV" "$TV_PAIRS"; do
     if [[ ! -f "$f" ]]; then
         echo "MISSING INPUT: $f" >&2
         echo "See script header for regeneration instructions." >&2
@@ -108,9 +113,10 @@ BIN="$REPO_ROOT/target/release/zensim_mlp_train"
 echo "==> Training V0_16 recipe → $RAW_BAKE"
 echo "    h=$HIDDEN tv_weight=$TV_WEIGHT seed=$SEED epochs=$EPOCHS lr=$LR val_policy=$VAL_POLICY"
 "$BIN" \
-    --group "safesyn:$SAFESYN_CSV:1.0:0.0" \
+    --group "safesyn_purged:$SAFESYN_CSV:1.0:0.0" \
     --group "kadid:$KADID_CSV:0.3:1.0" \
     --group "tid:$TID_CSV:0.3:1.0" \
+    --group "konjnd:$KONJND_CSV:0.5:1.0" \
     --hidden "$HIDDEN" \
     --epochs "$EPOCHS" \
     --lr "$LR" \
