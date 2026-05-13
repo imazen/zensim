@@ -108,7 +108,7 @@ def main():
     cols = ["image_path", "codec", "q", "knob_tuple_json", args.ref_col] + feat_cols
     t = pq.read_table(args.parquet, columns=cols)
 
-    X = np.stack([t[c].to_numpy(dtype=np.float32) for c in feat_cols], axis=1)
+    X = np.stack([np.asarray(t[c].to_numpy(), dtype=np.float32) for c in feat_cols], axis=1)
     y = forward(X, sm, ss, layers)[:, 0]
     score = (100.0 - y) if args.flip_output else y
     print(f"Bake score-space: range [{score.min():.3f}, {score.max():.3f}]")
