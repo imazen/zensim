@@ -116,11 +116,37 @@ def main():
     # per curve (running-max projection in whichever direction makes the curve
     # monotonic), and count reversals again. Soft-iso is the production
     # default; raw is reported as a diagnostic.
+    #
+    # Per-band non-mono accounting per zensim/CLAUDE.md "Per-band reporting
+    # rule": adjacent-q pair reversals are bucketed by the band of the
+    # LOWER-q endpoint (in score space, using the calibrated 0-100 scale
+    # against `pred` directly — for V0_X bakes pred is already in 0-100
+    # range; for V0_2 / V0_4 distance bakes the bands still partition the
+    # score axis meaningfully via the absolute value).
     n_curves = 0
     n_curves_w_violations_raw = 0
     total_pairs = 0
     n_violations_raw = 0
     n_violations_iso = 0
+    # Per-band counters. Bands are anchored to CID22 Table 5 cuts on a
+    # 0-100 score scale (B0<50, B1 [50,65), B2 [65,90), B3≥90).
+    band_names = ["B0 (<50)", "B1 [50,65)", "B2 [65,90)", "B3 (≥90)"]
+    band_edges = [(-np.inf, 50.0), (50.0, 65.0), (65.0, 90.0), (90.0, np.inf)]
+    per_band_pairs = [0] * 4
+    per_band_raw_viols = [0] * 4
+    per_band_iso_viols = [0] * 4
+
+    def band_of(score):
+        # Bake's output may be in score or distance semantics; for binning
+        # we use abs to keep the partition stable. V0_X bakes output 0-100
+        # scores directly; V0_2 / V0_4 distance bakes output 0..~80 range
+        # where the rough magnitude still falls into the band intervals.
+        v = abs(float(score))
+        for i, (lo, hi) in enumerate(band_edges):
+            if lo <= v < hi:
+                return i
+        return 3  # ≥90 catch-all
+
     # Store smoothed predictions back into df["pred_iso"] so downstream
     # consumers can use them. Default = identical to pred; overwritten per
     # curve below when soft-iso is enabled.
@@ -142,6 +168,8 @@ def main():
         if viols_A <= viols_B:
             # Distance semantics: enforce non-increasing along q.
             v_raw = viols_A
+            raw_viol_at = [preds[i + 1] > preds[i] + args.eps
+                           for i in range(len(preds) - 1)]
             if apply_iso:
                 running_min = preds[0]
                 fixed = preds.copy()
@@ -153,11 +181,16 @@ def main():
                 df.loc[g.index, "pred_iso"] = fixed
                 v_iso = sum(1 for i in range(len(fixed) - 1)
                             if fixed[i + 1] > fixed[i] + args.eps)
+                iso_viol_at = [fixed[i + 1] > fixed[i] + args.eps
+                               for i in range(len(fixed) - 1)]
             else:
                 v_iso = v_raw
+                iso_viol_at = raw_viol_at
         else:
             # Score semantics: enforce non-decreasing along q.
             v_raw = viols_B
+            raw_viol_at = [preds[i + 1] < preds[i] - args.eps
+                           for i in range(len(preds) - 1)]
             if apply_iso:
                 running_max = preds[0]
                 fixed = preds.copy()
@@ -169,8 +202,20 @@ def main():
                 df.loc[g.index, "pred_iso"] = fixed
                 v_iso = sum(1 for i in range(len(fixed) - 1)
                             if fixed[i + 1] < fixed[i] - args.eps)
+                iso_viol_at = [fixed[i + 1] < fixed[i] - args.eps
+                               for i in range(len(fixed) - 1)]
             else:
                 v_iso = v_raw
+                iso_viol_at = raw_viol_at
+        # Per-band attribution (bucket each adjacent-pair by the band of
+        # the lower-q endpoint's prediction).
+        for i in range(len(preds) - 1):
+            b = band_of(preds[i])
+            per_band_pairs[b] += 1
+            if raw_viol_at[i]:
+                per_band_raw_viols[b] += 1
+            if iso_viol_at[i]:
+                per_band_iso_viols[b] += 1
         total_pairs += len(preds) - 1
         n_violations_raw += v_raw
         n_violations_iso += v_iso
@@ -187,6 +232,22 @@ def main():
     if apply_iso:
         print(f"After soft-iso:     {n_violations_iso:,} ({iso_rate:.2f}%)  [SHIPPED via soft_iso_smooth.py]")
     print()
+
+    # Per-band non-mono q-step rate (zensim/CLAUDE.md per-band reporting rule).
+    # Pair is attributed to the band of its lower-q endpoint.
+    print("Per-band non-mono q-step rate (CLAUDE.md rule):")
+    print("  | Band         |        n |    raw % | after-iso % |")
+    print("  |--------------|---------:|---------:|------------:|")
+    for i, name in enumerate(band_names):
+        n = per_band_pairs[i]
+        if n == 0:
+            print(f"  | {name:<12} | {n:>8} |      n/a |         n/a |")
+            continue
+        r_raw = per_band_raw_viols[i] / n * 100
+        r_iso = per_band_iso_viols[i] / n * 100
+        print(f"  | {name:<12} | {n:>8,} | {r_raw:>7.2f}% | {r_iso:>10.2f}% |")
+    print()
+
     # Project floor target: < 4.86% per zensim/CLAUDE.md goal #2.
     # Soft-iso is on by default; the headline is the iso rate. Raw rate is
     # the diagnostic that tells us how lossy the smoother had to be.
