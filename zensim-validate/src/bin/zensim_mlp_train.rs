@@ -165,6 +165,17 @@ struct Args {
     /// Optional path to dump the trainer log for the run.
     #[arg(long)]
     log_path: Option<PathBuf>,
+
+    /// Output weight dtype for the baked ZNPR v2: `f32`, `f16`, or `i8`.
+    /// Default `f32` matches every shipped bake through V0_17. `i8` cuts
+    /// the bin to ~26% with per-output f32 scales; verified on V0_18
+    /// (no measurable SROCC change vs V0_17 across KADID/TID/CID22/AIC).
+    /// `f16` cuts to ~50% with zero SROCC change. Inference cost: F16
+    /// adds a per-weight bit-shift dequant; I8 adds one fma per output
+    /// after the inner loop. Both are negligible at zensim's 88K-param
+    /// scale.
+    #[arg(long, default_value = "f32")]
+    out_dtype: String,
 }
 
 struct LoadedGroup {
@@ -348,6 +359,16 @@ fn main() {
         })
         .collect();
 
+    let out_dtype = match args.out_dtype.to_ascii_lowercase().as_str() {
+        "f32" => zenpredict::WeightDtype::F32,
+        "f16" => zenpredict::WeightDtype::F16,
+        "i8" => zenpredict::WeightDtype::I8,
+        other => {
+            eprintln!("--out-dtype must be one of f32 / f16 / i8, got {other:?}");
+            std::process::exit(2);
+        }
+    };
+
     let hyperparams = MlpHyperparams {
         n_hidden: args.hidden,
         n_epochs: args.epochs,
@@ -361,6 +382,7 @@ fn main() {
         validation_policy: val_policy,
         low_q_boost: args.low_q_boost,
         mid_q_boost: args.mid_q_boost,
+        out_dtype,
     };
 
     println!(

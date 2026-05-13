@@ -76,6 +76,12 @@ pub struct MlpHyperparams {
     /// +0.003 mean lift — useful for downstream codec orchestrators
     /// that need stable per-image ranking.
     pub mid_q_boost: f64,
+    /// Output weight dtype for baked ZNPR v2. Default F32 matches every
+    /// shipped bake through V0_17. I8 saves ~74 % bin size with no
+    /// measurable SROCC change (verified on V0_18 across KADID, TID,
+    /// CID22, AIC-3, AIC-4, KonJND). F16 saves ~50 % with bit-identical
+    /// SROCC. Dequantization is inline in `zenpredict::saxpy_matmul_*`.
+    pub out_dtype: WeightDtype,
 }
 
 impl Default for MlpHyperparams {
@@ -93,6 +99,7 @@ impl Default for MlpHyperparams {
             validation_policy: ValidationPolicy::Min,
             low_q_boost: 1.0,
             mid_q_boost: 1.0,
+            out_dtype: WeightDtype::F32,
         }
     }
 }
@@ -680,6 +687,7 @@ pub fn train_mlp_with_tv(
                     n_features,
                     n_hidden,
                     n_outputs,
+                    hyperparams.out_dtype,
                 ));
             } else {
                 stale_epochs += hyperparams.log_every;
@@ -713,14 +721,20 @@ pub fn train_mlp_with_tv(
             n_features,
             n_hidden,
             n_outputs,
+            hyperparams.out_dtype,
         )
     })
 }
 
 /// Bake a 2-layer MLP (LeakyReLU → Identity) into ZNPR v2 bytes.
 /// Converts f64 weights to f32 once and feeds them to [`bake_v2`].
+///
+/// `dtype` controls the weight encoding for BOTH layers. F32 produces
+/// the historical 355 KB-ish bake; F16 halves it; I8 (per-output f32
+/// scales) cuts it to ~26 %. See V0_18 (2026-05-13) for cross-corpus
+/// quality validation of I8 quant on the V0_17 weights.
 #[allow(clippy::too_many_arguments)]
-fn bake_two_layer_znpr_v2(
+pub fn bake_two_layer_znpr_v2(
     scaler_mean: &[f64],
     scaler_scale: &[f64],
     w1: &[f64],
@@ -730,6 +744,7 @@ fn bake_two_layer_znpr_v2(
     n_inputs: usize,
     n_hidden: usize,
     n_outputs: usize,
+    dtype: WeightDtype,
 ) -> Vec<u8> {
     let scaler_mean_f32: Vec<f32> = scaler_mean.iter().map(|&v| v as f32).collect();
     let scaler_scale_f32: Vec<f32> = scaler_scale.iter().map(|&v| v as f32).collect();
@@ -742,7 +757,7 @@ fn bake_two_layer_znpr_v2(
             in_dim: n_inputs,
             out_dim: n_hidden,
             activation: Activation::LeakyRelu,
-            dtype: WeightDtype::F32,
+            dtype,
             weights: &w1_f32,
             biases: &b1_f32,
         },
@@ -750,7 +765,7 @@ fn bake_two_layer_znpr_v2(
             in_dim: n_hidden,
             out_dim: n_outputs,
             activation: Activation::Identity,
-            dtype: WeightDtype::F32,
+            dtype,
             weights: &w2_f32,
             biases: &b2_f32,
         },
