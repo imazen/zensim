@@ -16,6 +16,46 @@
 
 These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
+### Added (zensim, unreleased) — Soft-iso default-on + Rust trainer V0_16-aligned defaults (2026-05-13)
+
+User directive 2026-05-13: *"if iso smooth is a win why not always do it
+- presume we have regular memory loss and make the best params and tools
+the default ones."* Three best-known-config decisions moved from "behind
+a flag a future agent has to remember" to "default behavior the code
+does on its own". Commit `21efc115`.
+
+- `scripts/v_next/score_unified_with_bake.py` — soft-iso projection
+  applied by default (auto-detects sign convention per curve), reports
+  both raw and post-iso non-mono. Headline is the post-iso number; raw
+  is reported as the diagnostic for "how broken would this bake be
+  without smoothing". Opt out with `--no-soft-iso` for pathology
+  inspection only. Verified at cycle-11 to drop non-mono 5.5-6.3% → 0%
+  with SROCC cost ≤0.0008 across V0_16/V0_26/V0_31/V0_38. End-to-end
+  validation at tick 595: V0_16 on `unified_v13_zenjpeg.parquet` shows
+  raw 2.30% (matches canonical `CONTEXT-HANDOFF.md` number) → 0.00%
+  after iso.
+- `site/js/compare-worker.js` — `applySoftIsoPerCurve` + `countCurveViolations`
+  helpers added; applied to bake-scored Y values (zensim V_X variants)
+  per (`image_path`|`image_name`, `codec`, `knob_tuple_json`) curve
+  before SROCC / step-5 / box-plot computation. Reference metrics
+  (ssim2, butter, dssim, MOS) are passed through unchanged. Progress
+  message reports before/after non-mono rate and corrected-pair count.
+  Added `image_path` + `knob_tuple_json` to the project wishlist so
+  per-curve grouping has the keys it needs.
+- `zensim-validate/src/bin/zensim_mlp_train.rs` — defaults aligned to
+  the V0_16 SHIP recipe captured in `CONTEXT-HANDOFF.md`:
+  `--hidden` 64 → 128, `--seed` 42 → 1, `--max-features` `Option<usize>`
+  default `None` → `usize` default 228. TV defaults stay at 0 because
+  TV requires an explicit `--tv-pairs-file`; the binary's module
+  docstring now shows the full V0_16 invocation in one line. Build
+  clean at 2.81s.
+- `docs/phase4_reference/README.md` — opening header rewritten to make
+  the trainer's restoration after the 2026-05-07 deletion impossible
+  to miss. Three separate sessions hallucinated the (now-LIVE) Rust
+  trainer as deleted by reading the old framing here; the new opening
+  has an explicit CURRENT STATUS callout pointing at the live source
+  and at `CONTEXT-HANDOFF.md`'s V0_16 recipe.
+
 ### Added (zensim, unreleased)
 - `ZensimProfile::PreviewV0_4` — MLP-scored profile, behind the new
   `__experimental_versions` cargo feature (off by default; not part of
