@@ -1,12 +1,32 @@
-# Phase 4 reference: deleted Rust mlp_train.rs
+# Phase 4 reference: snapshot of Rust mlp_train.rs at deletion (since RESTORED)
+
+> **CURRENT STATUS (2026-05-13)**: The Rust trainer
+> `zensim-validate/src/mlp_train.rs` is **LIVE in main** and has been
+> since 2026-05-10 commit `ec40ec8` ("tick 41 — restore Rust mlp_train").
+> The binary `target/release/zensim_mlp_train` is the canonical
+> trainer that produced V0_15 and V0_16 (current ship). See
+> `../../CONTEXT-HANDOFF.md` for the V0_16 recipe.
+>
+> **This file is a historical snapshot**, NOT a description of current
+> state. It preserves the source as it existed when the trainer had
+> just been deleted (commit `e613224`, 2026-05-07) so the restore-
+> and-modernize work at tick 41 had something to start from. **If you
+> are reading this and considering "restoring the deleted Rust
+> trainer" — stop and run `ls zensim-validate/src/mlp_train.rs`. It
+> exists.** Three separate sessions have now hallucinated a
+> not-deleted file as deleted by reading the old framing in this doc;
+> do not be the fourth.
+
+---
 
 This is the source of `zensim-validate/src/mlp_train.rs` recovered from
 git commit `3ffc74a` (the commit before its deletion in PR #29 commit
 `e613224`). It produced the V0_5 SSIM2-proxy bake at
 `/mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_ssim2_holdout_20260501T045510.bin`
-which gives CID22 SROCC 0.8893 — a number my Python `train_v_next_mlp.py`
-cannot reach even with the literal recipe ingredients (h=32, pure
-RankNet, cosine LR, no TV) — best Python yields CID22 0.8472 (-0.042).
+which gives CID22 SROCC 0.8893 — a number that Python `train_v_next_mlp.py`
+could not reach even with the literal recipe ingredients (h=32, pure
+RankNet, cosine LR, no TV) — best Python yielded CID22 0.8472 (-0.042).
+This Python-vs-Rust gap is why the Rust trainer was restored on 2026-05-10.
 
 ## Identified ingredient differences
 

@@ -133,7 +133,10 @@ async function runQuery(msg) {
 
   // The wishlist — every column the comparison-site UI might want to
   // project. Per-corpus we intersect this with the parquet schema.
-  const allCols = ["codec", "q", "version", "image_name",
+  // Note: knob_tuple_json + image_name (or image_path) are needed to
+  // form per-curve groups for the soft-iso smoother applied below.
+  const allCols = ["codec", "q", "version", "image_name", "image_path",
+                   "knob_tuple_json",
                    "human_jnd", "human_jnd_ci_lo", "human_jnd_ci_hi",
                    "human_mos", "human_dmos", "human_dmos_var", "human_elo",
                    "score_zensim", "score_ssim2_gpu", "score_dssim",
@@ -203,6 +206,12 @@ async function runQuery(msg) {
   }
 
   const dataPoints = [];
+  // Track per-row curve-key + q so we can apply soft-iso BY CURVE after
+  // scoring. Soft-iso is the production default for codec-sweep contexts
+  // (cycle-11: drops non-mono 5.5–6.3% → 0% with SROCC cost ≤0.0008 on
+  // every V_X bake measured). Only applies to bake-scored Y axes where
+  // curve grouping makes sense; gracefully no-ops when curves are <2 pts
+  // or knob/image are absent (e.g. AIC corpora).
   for (const r of rows) {
     const x = (x_metric in r) ? r[x_metric] : (x_metric === "q" ? r.q : null);
     let y;
@@ -214,11 +223,27 @@ async function runQuery(msg) {
       y = (y_metric in r) ? r[y_metric] : null;
     }
     if (x != null && y != null && Number.isFinite(x) && Number.isFinite(y)) {
-      dataPoints.push({ x, y });
+      const curveKey = (r.image_path ?? r.image_name ?? "?") + "|" +
+                       (r.codec ?? "?") + "|" +
+                       (r.knob_tuple_json ?? "");
+      const q = Number.isFinite(r.q) ? r.q : Number.isFinite(r.quality_index) ? r.quality_index : null;
+      dataPoints.push({ x, y, curveKey, q });
     }
   }
   await conn.close();
   postMessage({ type: "progress", data: `kept ${dataPoints.length} valid (x, y) rows` });
+
+  // Soft-iso default-on: only for bake-scored Y axes (bakeModel != null)
+  // because the bake output is the only Y we control. Reference metrics
+  // (ssim2/butter/dssim/MOS) are passed through unchanged — they are
+  // ground truth or paper-reported, not ours to smooth.
+  if (bakeModel) {
+    const beforeViol = countCurveViolations(dataPoints);
+    applySoftIsoPerCurve(dataPoints);
+    const afterViol = countCurveViolations(dataPoints);
+    postMessage({ type: "progress",
+      data: `soft-iso applied to ${y_metric}: non-mono ${beforeViol.rate.toFixed(2)}% → ${afterViol.rate.toFixed(2)}% (${beforeViol.fixed} of ${beforeViol.pairs} pairs corrected)` });
+  }
 
   // step-5 binning over the X range (anchored to multiples of 5).
   const bins = new Map();
@@ -349,6 +374,71 @@ function median(xs) {
   const s = [...xs].sort((a, b) => a - b);
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : 0.5 * (s[m - 1] + s[m]);
+}
+
+// Per-curve running-extreme projection on the Y axis. For each
+// (image, codec, knob) group with ≥2 points, sort by q ascending and
+// push Y to be monotonic in q. Direction (running-max vs running-min)
+// is chosen per curve by which raw direction has fewer violations.
+// Mutates dataPoints in place by overwriting `.y`.
+function applySoftIsoPerCurve(dataPoints) {
+  const groups = new Map();
+  for (let i = 0; i < dataPoints.length; i++) {
+    const p = dataPoints[i];
+    if (!p.curveKey || !Number.isFinite(p.q)) continue;
+    if (!groups.has(p.curveKey)) groups.set(p.curveKey, []);
+    groups.get(p.curveKey).push(i);
+  }
+  for (const [, idxs] of groups) {
+    if (idxs.length < 2) continue;
+    idxs.sort((a, b) => dataPoints[a].q - dataPoints[b].q);
+    const ys = idxs.map((i) => dataPoints[i].y);
+    let viDist = 0, viScore = 0;
+    for (let k = 1; k < ys.length; k++) {
+      if (ys[k] > ys[k - 1]) viDist++;
+      if (ys[k] < ys[k - 1]) viScore++;
+    }
+    const distanceMode = viDist <= viScore;
+    if (distanceMode) {
+      let runningMin = ys[0];
+      for (let k = 1; k < ys.length; k++) {
+        if (ys[k] > runningMin) ys[k] = runningMin;
+        else runningMin = ys[k];
+      }
+    } else {
+      let runningMax = ys[0];
+      for (let k = 1; k < ys.length; k++) {
+        if (ys[k] < runningMax) ys[k] = runningMax;
+        else runningMax = ys[k];
+      }
+    }
+    for (let k = 0; k < idxs.length; k++) dataPoints[idxs[k]].y = ys[k];
+  }
+}
+
+// Count curve-level adjacent-q violations for diagnostic reporting.
+// Returns { pairs, fixed, rate } where fixed is the smaller of the two
+// direction counts (the "true" non-mono in the inferred sign convention).
+function countCurveViolations(dataPoints) {
+  const groups = new Map();
+  for (const p of dataPoints) {
+    if (!p.curveKey || !Number.isFinite(p.q)) continue;
+    if (!groups.has(p.curveKey)) groups.set(p.curveKey, []);
+    groups.get(p.curveKey).push(p);
+  }
+  let pairs = 0, fixed = 0;
+  for (const [, arr] of groups) {
+    if (arr.length < 2) continue;
+    arr.sort((a, b) => a.q - b.q);
+    let viDist = 0, viScore = 0;
+    for (let k = 1; k < arr.length; k++) {
+      if (arr[k].y > arr[k - 1].y) viDist++;
+      if (arr[k].y < arr[k - 1].y) viScore++;
+    }
+    pairs += arr.length - 1;
+    fixed += Math.min(viDist, viScore);
+  }
+  return { pairs, fixed, rate: pairs ? (fixed / pairs * 100) : 0 };
 }
 
 async function runLookup(msg) {

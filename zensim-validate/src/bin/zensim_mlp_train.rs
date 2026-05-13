@@ -5,13 +5,23 @@
 //! and trains the multi-group RankNet MLP. Writes ZNPR v2 bytes to
 //! `--out PATH`.
 //!
-//! Example:
+//! ## V0_16 SHIP recipe (current default)
+//!
+//! Defaults are tuned to the V0_16 ship recipe (CID22 SROCC 0.8919 on
+//! 4292 pairs, +0.0024 over fast-ssim2). To reproduce V0_16:
+//!
 //!     zensim_mlp_train \
-//!       --group safesyn:/tmp/safe_synth_218k_features.csv:1.0:0.0 \
+//!       --group safesyn:/tmp/safe_synth_clean_features.csv:1.0:0.0 \
 //!       --group kadid:/path/to/kadid_features.csv:0.3:1.0 \
 //!       --group tid:/path/to/tid_features.csv:0.3:1.0 \
-//!       --hidden 64 --epochs 300 --pairs-per-epoch 50000 \
-//!       --out benchmarks/rust_v0_5_2026-05-10.bin
+//!       --tv-pairs-file /tmp/combined_purged_tv_pairs_bands.tsv \
+//!       --out benchmarks/rust_v0_X_$(date -u +%Y-%m-%d).bin
+//!
+//! All other flags (--hidden 128, --tv-weight 20, --epochs 300,
+//! --val-policy min, --lr 1e-3, --max-features 228, --seed 1) default
+//! to the V0_16 ship values; override only when running cycle
+//! experiments. See zensim/CONTEXT-HANDOFF.md for the full recipe
+//! provenance (raw bake md5 b3f5fc59, calibrated baf3fdcb).
 
 use clap::Parser;
 use std::fs::File;
@@ -39,8 +49,11 @@ struct Args {
     #[arg(long, required = true)]
     group: Vec<String>,
 
-    /// Number of hidden units in the single hidden layer.
-    #[arg(long, default_value_t = 64)]
+    /// Number of hidden units in the single hidden layer. Default 128
+    /// matches the V0_16 ship recipe. Other tested architectures:
+    /// h=32 (V0_4 placeholder, too small), h=64 (V0_5, AIC-4-friendly
+    /// but -0.01 CID22), h=192/256 (overfit, worse on both axes).
+    #[arg(long, default_value_t = 128)]
     hidden: usize,
 
     /// Training epochs.
@@ -69,8 +82,8 @@ struct Args {
     #[arg(long, default_value = "min")]
     val_policy: String,
 
-    /// Random seed.
-    #[arg(long, default_value_t = 42)]
+    /// Random seed. Default 1 matches V0_16 ship.
+    #[arg(long, default_value_t = 1)]
     seed: u64,
 
     /// Log every N epochs.
@@ -85,13 +98,15 @@ struct Args {
     #[arg(long)]
     out: PathBuf,
 
-    /// Cap features at the first N columns. The V0_4 zensim runtime
-    /// produces 228 features (basic + peak); CSVs may include
-    /// extended features at f228..f299 that the runtime can't supply.
-    /// Pass `--max-features 228` to match the V0_4 runtime input
-    /// dimensionality.
-    #[arg(long)]
-    max_features: Option<usize>,
+    /// Cap features at the first N columns. Default 228 matches the
+    /// V0_4 zensim runtime input width. CSVs may include extended
+    /// features at f228..f299 (per-pair training-side features) that
+    /// the runtime can't supply; capping at 228 keeps train/inference
+    /// feature spaces aligned. Pass `--max-features 300` only for
+    /// content-classifier or research bakes that don't ship as runtime
+    /// weights.
+    #[arg(long, default_value_t = 228)]
+    max_features: usize,
 
     /// TV-regularizer pair indices TSV. Two columns: lo_trainer_idx,
     /// hi_trainer_idx. Indices reference rows in the concatenated
@@ -269,9 +284,8 @@ fn main() {
         });
         g.train_w = train_w;
         g.val_w = val_w;
-        if let Some(cap) = args.max_features
-            && g.n_features > cap
-        {
+        let cap = args.max_features;
+        if g.n_features > cap {
             for row in &mut g.feature_rows {
                 row.truncate(cap);
             }
