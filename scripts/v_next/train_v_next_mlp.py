@@ -274,6 +274,7 @@ class MLP(torch.nn.Module):
 def ranknet_loss(pred: torch.Tensor, target: torch.Tensor,
                   groups: torch.Tensor, max_total_pairs: int = 4096,
                   low_q_pair_boost: float = 1.0,
+                  row_sample_weights: torch.Tensor | None = None,
                   ) -> torch.Tensor:
     """Pairwise sigmoid loss (Bradley–Terry / RankNet) over same-group pairs.
 
@@ -303,8 +304,21 @@ def ranknet_loss(pred: torch.Tensor, target: torch.Tensor,
     n_candidates = min(max_total_pairs * max(num_unique, 1) * 2,
                        max_total_pairs * 256)
     n_candidates = min(n_candidates, 1_048_576)
-    i = torch.randint(0, n, (n_candidates,), device=device)
-    j = torch.randint(0, n, (n_candidates,), device=device)
+    # Cycle-13: when row_sample_weights given, bias pair sampling by row
+    # weight (mirrors the deleted Rust trainer's behavior at e6132243^).
+    # Default (None) preserves uniform sampling.
+    if row_sample_weights is not None and (row_sample_weights != 1.0).any():
+        # Normalize to a probability distribution
+        w = row_sample_weights.clamp_min(0.0)
+        if w.sum() > 0:
+            i = torch.multinomial(w, n_candidates, replacement=True)
+            j = torch.multinomial(w, n_candidates, replacement=True)
+        else:
+            i = torch.randint(0, n, (n_candidates,), device=device)
+            j = torch.randint(0, n, (n_candidates,), device=device)
+    else:
+        i = torch.randint(0, n, (n_candidates,), device=device)
+        j = torch.randint(0, n, (n_candidates,), device=device)
     keep = (groups[i] == groups[j]) & (i < j)
     i = i[keep]
     j = j[keep]
@@ -395,6 +409,12 @@ class TrainConfig:
                                    # for pairs where either endpoint has
                                    # target < 50 by factor; sqrt(factor)
                                    # for 50..65. Targets B0/B1 SROCC.
+    ranknet_sample_weights: bool = False  # Cycle-13: bias RankNet pair
+                                          # sampling by row train_weight
+                                          # (mirrors deleted Rust trainer
+                                          # at e6132243^ where train_weight
+                                          # controls pair-sampling
+                                          # probability, NOT MSE weight).
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
@@ -524,7 +544,10 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
                 loss = mse
             elif cfg.loss == "ranknet":
                 loss = ranknet_loss(pred, y, g,
-                                    low_q_pair_boost=cfg.low_q_pair_boost)
+                                    low_q_pair_boost=cfg.low_q_pair_boost,
+                                    row_sample_weights=(wt[idx]
+                                        if cfg.ranknet_sample_weights and wt is not None
+                                        else None))
             elif cfg.loss == "mse_rank":
                 rk = ranknet_loss(pred, y, g,
                                   low_q_pair_boost=cfg.low_q_pair_boost)
@@ -739,6 +762,14 @@ def main() -> int:
                          "boost factor, B1 → sqrt boost, else 1.0). Targets "
                          "B0/B1 ranking signal at the rank-loss term rather "
                          "than via MSE row weighting (cycle-9). Default 1.0.")
+    ap.add_argument("--ranknet-sample-weights", action="store_true",
+                    help="Cycle-13: bias RankNet pair-sampling probability "
+                         "by each row's train_weight. Mirrors the deleted "
+                         "Rust trainer's semantics at e6132243^ where "
+                         "doubling train_weight doubles pair-sampling "
+                         "rate (instead of the Python trainer's default of "
+                         "multiplying the MSE loss term). Test whether "
+                         "this closes the V0_15/V0_16 recipe gap.")
     ap.add_argument("--optimizer", default="adamw",
                     choices=["adamw", "adam"],
                     help="adam matches the Rust trainer (no decoupled "
@@ -962,6 +993,7 @@ def main() -> int:
         rank_weight=args.rank_weight, seed=args.seed,
         tv_weight=args.tv_weight, dssim_weight=args.dssim_weight,
         low_q_pair_boost=args.low_q_pair_boost,
+        ranknet_sample_weights=args.ranknet_sample_weights,
         lr_schedule=args.lr_schedule,
         lr_cycle_period=args.lr_cycle_period,
         optimizer=args.optimizer,
