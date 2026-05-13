@@ -325,7 +325,11 @@ function renderPareto(bakes) {
 
 async function loadStep5Bakes() {
   // Try to load step-5 band JSONs for the bakes we have data for.
-  const labels = ['v0_16', 'v0_15', 'v0_17', 'v0_18', 'v0_19', 'v0_20', 'v0_21', 'v0_22', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
+  // V0_18+ legacy bakes (May 12 exploration, different lineage from the V0_18
+  // ship on 2026-05-13) are archived under step5_bands/legacy_2026-05-12/.
+  // Regenerate `v0_18.json` against the actual ship's CID22 eval before
+  // re-adding it here.
+  const labels = ['v0_16', 'v0_15', 'v0_17', 'v0_8_tainted'];  // expand as more bakes get step-5 emitted
   const out = [];
   for (const lab of labels) {
     try {
@@ -461,7 +465,9 @@ async function main() {
   const step5 = await loadStep5Bakes();
   if (document.getElementById('chart-step5')) renderStep5(step5);
   // Default scatter is V0_16; can swap via the selector
-  const scatterLabels = ['v0_16', 'v0_15', 'v0_17', 'v0_18', 'v0_19', 'v0_20', 'v0_21', 'v0_22', 'v0_8_tainted'];
+  // Scatter data for V0_18+ from May 12 exploration is archived under
+  // scatter/legacy_2026-05-12/; those bakes are NOT the V0_18 ship.
+  const scatterLabels = ['v0_16', 'v0_15', 'v0_17', 'v0_8_tainted'];
   const scatterCache = {};
   for (const lab of scatterLabels) scatterCache[lab] = await loadScatter(lab);
   function renderScatterTriple(label) {

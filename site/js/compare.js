@@ -53,25 +53,34 @@ const STUB_MANIFEST = {
     { id: "score_ssim2",              label: "ssim2 (sweep-time)" },
     { id: "score_butteraugli_max",    label: "butteraugli (max-norm)" },
     { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm)" },
+    // --- Current zensim ship ---
+    { id: "score_zensim_v0_18",       label: "★ zensim V0_18 — CURRENT SHIP (2026-05-13; 228→384→1 I8, 93 KB; CID22 0.8934)" },
+    // --- Stable linear profiles (always available) ---
     { id: "score_zensim",             label: "zensim V0_2 linear (sweep-time / zen-metrics CLI default)" },
     { id: "score_v0_2_linear",        label: "zensim V0_2 linear (also present in AIC-3/CID22/KADID/TID)" },
-    { id: "score_zensim_v0_16",       label: "zensim V0_16 (archived 2026-05-13, prior ship before V0_17)" },
-    { id: "score_zensim_v0_26",       label: "zensim V0_26 cycle-7 candidate (KonJND-aligned, no dssim)" },
-    { id: "score_zensim_v0_31",       label: "zensim V0_31 cycle-8 AIC-4 winner (KonJND w=0.5)" },
-    { id: "score_zensim_v0_38",       label: "zensim V0_38 cycle-10a B0/B3 specialist (synth+KonJND+KADID+TID, seed=3)" },
-    { id: "score_zensim_v0_17",       label: "zensim V0_17 (archived 2026-05-13, prior ship before V0_18 — F32 weights, 355 KB)" },
-    { id: "score_zensim_v0_18",       label: "zensim V0_18 SHIP (V0_17 weights at I8 quant, 93 KB / -73.8 %; CID22 0.8934 identical to V0_17 to 4 decimals)" },
-    { id: "score_zensim_v0_17_c14_s7",  label: "zensim V0_17 cycle-14 seed=7 (B0+B3 SROCC specialist; best per-band B0 0.4611 + B3 0.2240 of any bake)" },
-    { id: "score_zensim_v0_17_c14_s42", label: "zensim V0_17 cycle-14 seed=42 (AIC-4 specialist; AIC-4 0.9201 beats V0_16 ship by +0.0026)" },
+    // --- Archived prior ships, newest first ---
+    { id: "score_zensim_v0_17",       label: "zensim V0_17 (archived 2026-05-13; F32 weights, 355 KB — V0_18 is the bit-equivalent I8 re-bake)" },
+    { id: "score_zensim_v0_16",       label: "zensim V0_16 (archived 2026-05-13; the base V0_17 was constructed from)" },
+    // --- Non-shipped Rust V_X candidates from the recovery-cycle exploration ---
+    // (Numerically higher than V0_17/V0_18 because the V_X experimentation
+    //  ran ahead through cycles 7–10 before the cycle-14 reset landed V0_17;
+    //  these are exploratory data points, NOT successors to V0_18.)
+    { id: "score_zensim_v0_26",       label: "zensim V0_26 (cycle-7 candidate, KonJND-aligned, no dssim — not shipped)" },
+    { id: "score_zensim_v0_31",       label: "zensim V0_31 (cycle-8 candidate, AIC-4 specialist, KonJND w=0.5 — not shipped)" },
+    { id: "score_zensim_v0_38",       label: "zensim V0_38 (cycle-10a B0/B3 specialist, seed=3 — not shipped)" },
+    { id: "score_zensim_v0_17_c14_s7",  label: "zensim V0_17 cycle-14 seed=7 (B0+B3 specialist input to the V0_17 concat — not standalone ship)" },
+    { id: "score_zensim_v0_17_c14_s42", label: "zensim V0_17 cycle-14 seed=42 (AIC-4 specialist input to the V0_17 concat — not standalone ship)" },
+    // --- Other metrics ---
     { id: "score_dssim",              label: "dssim (when present)" },
-    // JS-MLP variants — bakes shipped under site/weights/*.bin.
-    // Worker loads the bake and applies it to feat_0..feat_227. (NB: AIC + CID22
-    // + KADID + TID parquets don't carry feat_* columns; only codec-sweep
-    // parquets do, which need R2 hosting.)
-    { id: "score_zensim_v0_4_jsmlp",  label: "zensim V0_4 (JS-MLP, 228→64→1, 2026-04-30)" },
-    { id: "score_zensim_v0_16_jsmlp", label: "zensim V0_16 (JS-MLP from feat_*)" },
-    { id: "score_zensim_v0_20",       label: "zensim V0_20 seed 123 (JS-MLP)" },
-    { id: "score_zensim_v0_22",       label: "zensim V0_22 konjnd_w=1 (JS-MLP)" },
+    // --- Legacy JS-MLP variants (different numbering scheme!) ---
+    // These were loaded client-side via a JavaScript MLP runtime in an
+    // older site iteration. V0_19/V0_20/V0_22 here are NOT the Rust
+    // runtime V_X numbering — they're separate experiments that happen
+    // to share digits. Kept available for historical comparison only.
+    { id: "score_zensim_v0_4_jsmlp",  label: "zensim V0_4 (legacy JS-MLP, 228→64→1, 2026-04-30 — different lineage from runtime V0_4)" },
+    { id: "score_zensim_v0_16_jsmlp", label: "zensim V0_16 (legacy JS-MLP from feat_* — different lineage from runtime V0_16)" },
+    { id: "score_zensim_v0_20",       label: "zensim V0_20 (legacy JS-MLP, seed 123 — NOT a successor to V0_18)" },
+    { id: "score_zensim_v0_22",       label: "zensim V0_22 (legacy JS-MLP, konjnd_w=1 — NOT a successor to V0_18)" },
     // Human-rated columns (corpus-dependent — only available when a
     // human-rated corpus like AIC-3/AIC-4/CID22 is selected).
     { id: "human_jnd",                label: "human JND / MOS (corpus-dependent)" },
