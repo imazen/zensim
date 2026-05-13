@@ -39,7 +39,7 @@ use mlp_train::{
 #[derive(Parser)]
 #[command(
     name = "zensim_mlp_train",
-    about = "Rust RankNet MLP trainer (V0_5 recipe)"
+    about = "Rust RankNet MLP trainer (defaults match V0_16 ship recipe — see benchmarks/recipe_v0_16.sh for the full invocation)"
 )]
 struct Args {
     /// Group spec: NAME:CSV_PATH:TRAIN_WEIGHT:VAL_WEIGHT. Repeat for
