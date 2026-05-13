@@ -60,16 +60,16 @@ mantissas look uniform-random to a general compressor.
 | bitpack-±1 | 1.232 | 110 | 1 | 0.4 | alloc |
 
 `lib KB` is decode-only stripped size minus an empty-Rust floor
-(decode-baseline minus its blob: 329 KB on this toolchain) minus the
-candidate's embedded blob. ruzstd built without the `hash` feature
-(no `twox-hash`, saves ~1 KB); lz4_flex without `frame` for same reason.
+(decode-baseline minus its blob: 329 KB) minus the candidate's blob.
+ruzstd built without `hash` (no twox-hash, saves ~1 KB); lz4_flex
+without `frame` for same reason.
 
-Cross-reference: the prior agent's report
+Cross-reference: prior agent's report
 (`zenpredict_rle_zerobias_eval_2026-05-13.md`) measured `zstd-22` at
-83,902 B on V0_18 raw (τ=0), matching this run's 83,899 B within
-rounding. The 75 % shrink that report shipped required a **τ=0.005
-rebake** zero-biasing 87.5 % of weights — the decoder choice is the
-same, the rebake is what unlocks the savings.
+83,902 B on V0_18 raw (τ=0), matching this run within rounding. The
+75 % shrink that report shipped required a **τ=0.005 rebake** zero-
+biasing 87.5 % of weights — decoder choice is the same, the rebake is
+what unlocks savings.
 
 ## Round-trip verification
 
@@ -94,15 +94,14 @@ All 15 cases (5 candidates × 3 bakes) round-tripped byte-for-byte.
   123 KB stripped is 4× over the 30 KB budget.
 
 **Recommendation for `feature = "compressed-weights"` in zenpredict
-0.2.0**: do not ship one on the strength of these numbers. 4.5-9 %
-shrink doesn't justify ruzstd's 123 KB or miniz_oxide's 22 KB — every
-codec crate wrapping zenpredict pays those bytes. Compressing a 141 KB
-picker to ~130 KB saves ~11 KB and adds 22 KB of decoder. Net loss.
+0.2.0**: do not ship one. 4.5-9 % shrink doesn't justify ruzstd's
+123 KB or miniz_oxide's 22 KB — every codec crate wrapping zenpredict
+pays those bytes. Compressing a 141 KB picker to ~130 KB saves ~11 KB
+and adds 22 KB of decoder. Net loss.
 
-If the τ-rebake lands first (where the 75 % shrink actually lives),
-then **prefer miniz_oxide over ruzstd** for picker-shaped (≤ 500 KB)
-bakes: 22 KB + 2 allocs vs. 123 KB + 30+ allocs at a ratio gap small
-enough (prior agent's τ=0.005: zstd-22 18,597 B vs. gzip-9 20,190 B,
-a 7-9 % zstd edge) that the library cost erases the saved bytes on
-every bake under ~2 MB. lz4_flex, snap, bitpack-±1 are non-starters
-here — each expands every tested bake.
+If a τ-rebake lands first (where the 75 % shrink lives), **prefer
+miniz_oxide over ruzstd** for picker-shaped (≤ 500 KB) bakes: 22 KB +
+2 allocs vs. 123 KB + 30+ allocs at a gap (prior agent's τ=0.005:
+zstd-22 18,597 B vs. gzip-9 20,190 B, 7-9 % edge) too small to erase
+the library cost on every bake under ~2 MB. lz4_flex, snap, bitpack-±1
+are non-starters — each expands every tested bake.

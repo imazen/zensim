@@ -4,6 +4,8 @@ Perceptual image similarity in 22 ms at 1080p. 18x faster than C++ SSIMULACRA2 a
 
 Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — multi-scale SSIM, edge artifacts, detail loss, and high-frequency features in XYB color space — but with trained weights, fused SIMD kernels, and multi-threaded computation.
 
+**Interactive chart exploration**: <https://imazen.github.io/zensim/> — scatter zensim / fast-ssim2 / butteraugli against human MOS across CID22 / KADID / TID / AIC corpora, filter by codec + version, with per-band SROCC tables and step-5 (20-bin) breakdowns.
+
 ## Speed
 
 AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O, pre-allocated buffers. zensim and ssimulacra2-rs use rayon (all cores); C++ libjxl, fast-ssim2, and butteraugli-rs are single-threaded. Enabling rayon for fast-ssim2 and butteraugli-rs made them slower at small sizes due to thread-pool overhead, so they're benchmarked single-threaded. Median of 100 samples via criterion.
