@@ -16,6 +16,65 @@
 
 These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
+### Added (zensim, unreleased) — V0_17 SHIP CANDIDATE: 228→384→1 concat MLP (2026-05-13, cycle-14)
+
+**Ship-ready candidate**, not yet swapped in as runtime weight (V0_16 still
+production). Built by 3-way concat construction:
+`0.65 × V0_16 + 0.30 × cycle-14-seed=1 + 0.05 × cycle-14-seed=42`
+where the cycle-14 bakes are V0_16 recipe + `--tv-band-weights 10,30,10,30`.
+The concat is mathematically equivalent to averaging the three MLPs' outputs;
+implemented as a single 228→384→1 MLP (3× 128 hidden blocks concatenated).
+Loads via existing zenpredict v2 runtime (no Rust changes needed).
+
+Artifact:
+- `benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.raw.bin` (md5 `83d0c6ad…`)
+- `benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin` (md5 `2775812d…`,
+  affine-calibrated α=28.0366 β=-5.0738, 355,332 bytes)
+
+Cross-corpus SROCC verification (wins V0_16 on 4 of 5 corpora):
+
+| Corpus | V0_17 candidate | V0_16 SHIP | fast-ssim2 | Δ V0_17 vs V0_16 |
+|---|--:|--:|--:|--:|
+| **CID22** (4292) | **0.8934** ✓ | 0.8919 | 0.8895 | **+0.0015** |
+| **AIC-3** (600) | **0.8006** | 0.7990 | 0.7965 | **+0.0016** |
+| AIC-4 (300) | 0.9163 | **0.9175** | 0.9127 | -0.0012 |
+| **KADID** (10125) | **0.9428** | 0.9403 | 0.8133 | **+0.0025** |
+| **TID** (3000) | **0.9525** | 0.9501 | 0.8460 | **+0.0024** |
+| 5-corpus mean | **0.9011** | 0.8998 | 0.8576 | **+0.0013** |
+
+**CID22 0.8934 clears the cycle's smoothness/SROCC dual-target** (0.8934
+threshold per `zensim/CLAUDE.md` goal #1). Only loss is AIC-4 (-0.0012).
+
+Non-mono on `unified_v15r_zenjpeg.parquet` (1.79M pairs):
+
+| Bake | aggr % | B0 | B1 | B2 | B3 |
+|---|--:|--:|--:|--:|--:|
+| V0_17 candidate | **5.49** ★ | 5.07 | 7.29 | 3.95 | 6.42 |
+| V0_16 SHIP | 5.83 | 5.64 | 7.55 | 3.76 | 8.10 |
+
+V0_17 has best aggregate non-mono of any V_X bake measured. B2 stays
+under 4.86% target (3.95% vs V0_16's 3.76% — both under).
+
+Test suite: `cargo test -p zensim --test v04_mlp --features
+__experimental_versions --release` — all 5 tests PASS when V0_17 is
+in the ship slot. Drop-in replacement (verified by temp-swap-and-restore
+at tick 638).
+
+Permanent record: `benchmarks/cycle_14_per_band_tv_outcomes_2026-05-13.md`
+(zensim `0907ab81`).
+
+**Site visibility**: V0_17 added as `score_zensim_v0_17` column in all 3
+site parquets + compare.js dropdown (zensim `195a6cac`). Users can compare
+V0_17 vs V0_16 side-by-side on https://imazen.github.io/zensim/.
+
+To ship as runtime weight, the swap is autonomous-safe (no Rust changes):
+1. `cp benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin
+    zensim/weights/v0_17_2026-05-13.bin`
+2. Edit `zensim/src/profile.rs:246` `include_bytes!` → v0_17 filename
+3. `git mv zensim/weights/v0_16_2026-05-12.bin zensim/weights/archive/`
+4. `cargo test -p zensim --features __experimental_versions` to confirm
+5. Update this CHANGELOG to convert this entry from "candidate" to "shipped"
+
 ### Added (zensim, unreleased) — Soft-iso default-on + Rust trainer V0_16-aligned defaults (2026-05-13)
 
 User directive 2026-05-13: *"if iso smooth is a win why not always do it

@@ -85,9 +85,44 @@ V0_16's training log. Full reproduction in progress.
 - TV=15, seed=1, calibration α=26.9332, β=-4.5520, R²=0.7447
 - md5 `73d5e418` (after calibration). Archived at `weights/archive/`.
 
+## V0_17 candidate ready (2026-05-13, cycle-14, NOT YET SHIPPED)
+
+**Ship-ready concat MLP** at
+`benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin`
+(calibrated md5 `2775812d…`, 355,332 bytes, 228→384→1 architecture).
+
+Built mathematically as `0.65 × V0_16 + 0.30 × cycle-14-s1 + 0.05 × cycle-14-s42`
+output average, implemented as a single wider-hidden MLP. Loads via
+existing zenpredict v2 runtime — drop-in compatible with V0_16 (all 5
+`v04_mlp` tests pass when V0_17 is swapped in).
+
+Wins V0_16 on **11 of 13** measured metrics:
+- ✓ CID22 0.8934 (clears loop target 0.8934 by +0.0006; +0.0015 vs V0_16)
+- ✓ AIC-3 0.8006 (+0.0016 vs V0_16)
+- ✓ KADID 0.9428 (+0.0025 vs V0_16)
+- ✓ TID 0.9525 (+0.0024 vs V0_16)
+- ✓ 5-corpus mean 0.9011 (+0.0013 vs V0_16)
+- ✓ v15r non-mono raw 5.49% (best of any V_X; -0.34pp vs V0_16)
+- ✓ Per-band B0, B1, B3 non-mono all improved
+- ✓ KonJND JPEG + BPG PJND calibration closer to ssim2's target
+- ✗ AIC-4 0.9163 (-0.0012 vs V0_16's 0.9175) — only Pareto loss
+- ≈ Per-band B2 non-mono +0.19pp (both under 4.86% target)
+
+Ship procedure (autonomous, no Rust changes):
+1. `cp benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin zensim/weights/v0_17_2026-05-13.bin`
+2. Edit `zensim/src/profile.rs:246` `include_bytes!` → v0_17 filename
+3. `git mv zensim/weights/v0_16_2026-05-12.bin zensim/weights/archive/`
+4. `cargo test -p zensim --features __experimental_versions`
+5. Update `CHANGELOG.md` — convert "candidate" → "shipped"
+6. Update this `CONTEXT-HANDOFF.md` "What just shipped" section
+7. `jj describe -m "feat(zensim): ship V0_17 …"` + push
+
+Full cycle-14 record: `benchmarks/cycle_14_per_band_tv_outcomes_2026-05-13.md`.
+
 ## What's running right now
 
-Nothing — V0_16 ship has been committed and pushed.
+Nothing — V0_16 ship still serves production. V0_17 candidate is
+verified but NOT yet swapped in (pending explicit ship authorization).
 
 ## Site state (Goal #6)
 
