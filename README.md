@@ -32,15 +32,19 @@ Reproduce: `cargo bench -p zensim-bench --bench bench_compare` (C++ libjxl FFI r
 
 ## Correlation with human perception
 
-Spearman rank-order correlation (SROCC) on raw perceptual distance against three independent human-rated image quality databases. Higher is better; 1.0 = perfect agreement with human rankings. None of these datasets were used for training.
+Spearman rank-order correlation (SROCC) against three independent human-rated image quality databases. Higher is better; 1.0 = perfect agreement with human rankings. None of these datasets were used for training of either profile.
 
-| Dataset | Pairs | SROCC | KROCC |
-|---------|------:|------:|------:|
-| [CID22](https://cloudinary.com/labs/cid22) (codec compression) | 4,292 | 0.8676 | 0.6786 |
-| [TID2013](https://www.ponomarenko.info/tid2013.htm) (24 distortion types) | 3,000 | 0.8427 | 0.6657 |
-| [KADID-10k](https://database.mmsp-kn.de/kadid-10k-database.html) (25 distortion types) | 10,125 | 0.8192 | 0.6139 |
+| Dataset | Pairs | V0_2 (linear, default) | V0_18 (MLP, `__experimental_versions`) | fast-ssim2 |
+|---------|------:|----------------------:|--------------------------------------:|-----------:|
+| [CID22](https://cloudinary.com/labs/cid22) — compression artifacts | 4,292 | 0.8676 | **0.8934** | 0.8895 |
+| [TID2013](https://www.ponomarenko.info/tid2013.htm) — 24 distortion types | 3,000 | 0.8427 | **0.9525** | 0.8460 |
+| [KADID-10k](https://database.mmsp-kn.de/kadid-10k-database.html) — 25 distortion types | 10,125 | 0.8192 | **0.9427** | 0.8133 |
+| AIC-3 CTC (codec compression, EPFL) | 600 | 0.7962 | **0.8006** | 0.7965 |
+| AIC-4 sample (reconstructed JND, EPFL) | 300 | 0.9107 | **0.9163** | 0.9127 |
 
-Weights trained on 218k concordance-filtered synthetic pairs (6 codecs, q5-q100, Nelder-Mead optimization). Training-set SROCC: 0.9960. See `zensim/src/profile.rs` for weights.
+V0_2 (default-on linear profile): 218k concordance-filtered synthetic pairs, Nelder-Mead.
+
+V0_18 (`__experimental_versions` MLP profile, shipped 2026-05-13): 228→384→1 LeakyReLU with I8 quantization, 93 KB bake. Built by 3-way concat construction over V0_16 + cycle-14 variants, mathematically equivalent to a 3-bake output ensemble. Trained on 144k clean safe-synthetic + KADID + TID + KonJND-aligned pairs (CID22 / AIC corpora are held out across both training and validation). Methodology: [`benchmarks/v0_18_methodology_2026-05-13.md`](benchmarks/v0_18_methodology_2026-05-13.md).
 
 <details>
 <summary>Reproduce these numbers</summary>
@@ -164,12 +168,15 @@ Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-
 
 Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a given profile stay stable across crate versions.
 
-| Profile | Training | SROCC |
-|---------|----------|------:|
-| `PreviewV0_1` | 344k synthetic, 5-fold CV | 0.9936 |
-| `PreviewV0_2` | 218k concordance-filtered, Nelder-Mead | 0.9960 |
+| Profile | Default-on | Training | CID22 SROCC | Bake size |
+|---------|:---------:|----------|------:|:---------:|
+| `PreviewV0_1` | ✓ | 344k synthetic, 5-fold CV | 0.86 | linear weights |
+| `PreviewV0_2` | ✓ | 218k concordance-filtered, Nelder-Mead | 0.87 | linear weights |
+| `PreviewV0_4` (rotation slot) | feature-gated | currently holds V0_18 bytes — see below | 0.89 | 93 KB I8 MLP |
 
 `ZensimProfile::latest()` returns `PreviewV0_2`. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+
+**`PreviewV0_4`** is the experimental MLP rotation slot — gated behind the `__experimental_versions` cargo feature so default crates.io builds stay lean MIT/Apache without an AGPL-dual-licensed dependency in their tree. Its underlying bake bytes have moved through V0_4 → V0_5 → V0_7 → V0_8 → V0_15 → V0_16 → V0_17 → V0_18 (2026-04-30 through 2026-05-13). Today the slot ships V0_18 weights: 228→384→1 LeakyReLU MLP, I8 quantized, MCOS-aligned 0–100 output.
 
 ## Feature flags
 
@@ -214,7 +221,7 @@ To reproduce the SROCC numbers above, you need the three human-rated datasets. A
 
 ## MSRV
 
-Rust 1.89.0 (2024 edition).
+Rust 1.93.0 (2024 edition).
 
 ## Image tech I maintain
 
