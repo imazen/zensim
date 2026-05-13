@@ -16,10 +16,10 @@
 
 These two together require a `0.2.x → 0.3.0` minor bump on next release.
 
-### Added (zensim, unreleased) — V0_17 SHIP CANDIDATE: 228→384→1 concat MLP (2026-05-13, cycle-14)
+### Added (zensim, unreleased) — V0_17 SHIPPED: 228→384→1 concat MLP (2026-05-13, cycle-14)
 
-**Ship-ready candidate**, not yet swapped in as runtime weight (V0_16 still
-production). Built by 3-way concat construction:
+**SHIPPED 2026-05-13** as `zensim/weights/v0_17_2026-05-13.bin`. V0_16
+moved to `zensim/weights/archive/`. Built by 3-way concat construction:
 `0.65 × V0_16 + 0.30 × cycle-14-seed=1 + 0.05 × cycle-14-seed=42`
 where the cycle-14 bakes are V0_16 recipe + `--tv-band-weights 10,30,10,30`.
 The concat is mathematically equivalent to averaging the three MLPs' outputs;
@@ -67,13 +67,13 @@ Permanent record: `benchmarks/cycle_14_per_band_tv_outcomes_2026-05-13.md`
 site parquets + compare.js dropdown (zensim `195a6cac`). Users can compare
 V0_17 vs V0_16 side-by-side on https://imazen.github.io/zensim/.
 
-To ship as runtime weight, the swap is autonomous-safe (no Rust changes):
-1. `cp benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin
-    zensim/weights/v0_17_2026-05-13.bin`
-2. Edit `zensim/src/profile.rs:246` `include_bytes!` → v0_17 filename
-3. `git mv zensim/weights/v0_16_2026-05-12.bin zensim/weights/archive/`
-4. `cargo test -p zensim --features __experimental_versions` to confirm
-5. Update this CHANGELOG to convert this entry from "candidate" to "shipped"
+Ship procedure (executed 2026-05-13):
+1. ✓ Copied source bake into `zensim/weights/v0_17_2026-05-13.bin`
+2. ✓ Updated `zensim/src/profile.rs:246` `include_bytes!` → v0_17 filename
+3. ✓ Moved `v0_16_2026-05-12.bin` to `zensim/weights/archive/`
+4. ✓ `cargo test -p zensim --test v04_mlp --features __experimental_versions --release`
+   — all 5 tests pass with V0_17 in ship slot
+5. ✓ This entry converted to "SHIPPED"
 
 ### Added (zensim, unreleased) — Soft-iso default-on + Rust trainer V0_16-aligned defaults (2026-05-13)
 

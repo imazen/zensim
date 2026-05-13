@@ -243,7 +243,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// directory is excluded from the published crate.
 #[cfg(feature = "__experimental_versions")]
 pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
-    include_bytes!("../weights/v0_16_2026-05-12.bin")
+    include_bytes!("../weights/v0_17_2026-05-13.bin")
 }
 
 #[cfg(feature = "__experimental_versions")]

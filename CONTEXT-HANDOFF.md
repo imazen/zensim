@@ -1,11 +1,33 @@
-# Context Handoff (2026-05-12, updated post-V0_16)
+# Context Handoff (2026-05-13, updated post-V0_17 ship)
 
 ## What just shipped
 
-**V0_16 is the current runtime weight** (zensim/weights/v0_16_2026-05-12.bin,
-md5 `baf3fdcb`). V0_16 supersedes V0_15 same day; V0_15 had TV=15 and
+**V0_17 is the current runtime weight** (`zensim/weights/v0_17_2026-05-13.bin`,
+calibrated md5 `2775812d7ffa3964a531022416527009`, 355,332 bytes,
+228→384→1 architecture). Built by 3-way concat construction:
+`0.65 × V0_16 + 0.30 × cycle-14-s1 + 0.05 × cycle-14-s42` (mathematically
+equivalent to a 3-bake ensemble, runs as a single forward pass). V0_16
+moved to `zensim/weights/archive/v0_16_2026-05-12.bin`.
+
+V0_17 wins V0_16 on **11 of 13 measured metrics**:
+
+| Metric | V0_17 (new ship) | V0_16 (archived) | Δ |
+|---|--:|--:|--:|
+| CID22 SROCC (4292) | **0.8934** | 0.8919 | +0.0015 ✓ |
+| AIC-3 SROCC (600) | **0.8006** | 0.7990 | +0.0016 ✓ |
+| AIC-4 SROCC (300) | 0.9163 | **0.9175** | -0.0012 (only loss) |
+| KADID SROCC (10125) | **0.9428** | 0.9403 | +0.0025 ✓ |
+| TID SROCC (3000) | **0.9525** | 0.9501 | +0.0024 ✓ |
+| 5-corpus mean SROCC | **0.9011** | 0.8998 | +0.0013 ✓ |
+| v15r non-mono raw % | **5.49** | 5.83 | -0.34pp ✓ best V_X |
+| KonJND JPEG mean | **54.54** | 53.72 | +0.82 closer to ssim2 ✓ |
+| KonJND BPG mean | **56.54** | 55.51 | +1.03 closer to ssim2 ✓ |
+| zensim test suite (5 tests) | PASS | PASS | drop-in compatible |
+
+Note: V0_16 supersedes V0_15 same day; V0_15 had TV=15 and
 weak B0/B1 coverage; V0_16 raised TV to 20 and recovered the B1 closure
-HONESTLY (without the contamination V0_8 had).
+HONESTLY (without the contamination V0_8 had). V0_17 is built ON V0_16
+plus 2 cycle-14 components.
 
 | Metric | V0_16 (clean TV=20) | V0_15 (clean TV=15, archived) | V0_8 (tainted, archived) | fast-ssim2 |
 |---|--:|--:|--:|--:|
@@ -85,44 +107,41 @@ V0_16's training log. Full reproduction in progress.
 - TV=15, seed=1, calibration α=26.9332, β=-4.5520, R²=0.7447
 - md5 `73d5e418` (after calibration). Archived at `weights/archive/`.
 
-## V0_17 candidate ready (2026-05-13, cycle-14, NOT YET SHIPPED)
+## V0_17 recipe (CURRENT SHIP, 2026-05-13, cycle-14)
 
-**Ship-ready concat MLP** at
-`benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin`
-(calibrated md5 `2775812d…`, 355,332 bytes, 228→384→1 architecture).
+V0_17 is a 3-way **concat MLP** mathematically equivalent to averaging
+three component MLPs' outputs, implemented as a single 228→384→1 forward
+pass. Component bakes:
 
-Built mathematically as `0.65 × V0_16 + 0.30 × cycle-14-s1 + 0.05 × cycle-14-s42`
-output average, implemented as a single wider-hidden MLP. Loads via
-existing zenpredict v2 runtime — drop-in compatible with V0_16 (all 5
-`v04_mlp` tests pass when V0_17 is swapped in).
+| Weight | Component | Recipe |
+|---|---|---|
+| 0.65 | V0_16 (now archived) | 4-group safesyn+kadid+tid+konjnd, h=128, TV=20, seed=1 |
+| 0.30 | cycle-14-s1 | Same recipe + `--tv-band-weights 10,30,10,30`, seed=1 |
+| 0.05 | cycle-14-s42 | Same recipe + `--tv-band-weights 10,30,10,30`, seed=42 |
 
-Wins V0_16 on **11 of 13** measured metrics:
-- ✓ CID22 0.8934 (clears loop target 0.8934 by +0.0006; +0.0015 vs V0_16)
-- ✓ AIC-3 0.8006 (+0.0016 vs V0_16)
-- ✓ KADID 0.9428 (+0.0025 vs V0_16)
-- ✓ TID 0.9525 (+0.0024 vs V0_16)
-- ✓ 5-corpus mean 0.9011 (+0.0013 vs V0_16)
-- ✓ v15r non-mono raw 5.49% (best of any V_X; -0.34pp vs V0_16)
-- ✓ Per-band B0, B1, B3 non-mono all improved
-- ✓ KonJND JPEG + BPG PJND calibration closer to ssim2's target
-- ✗ AIC-4 0.9163 (-0.0012 vs V0_16's 0.9175) — only Pareto loss
-- ≈ Per-band B2 non-mono +0.19pp (both under 4.86% target)
+Construction (single-bake equivalent of output averaging):
+- Hidden W0 = column-concat of the three W0s → shape (228, 384)
+- Hidden b0 = vector-concat of the three b0s → shape (384,)
+- Output W1 = row-concat of (w_i × W1_i) → shape (384, 1)
+- Output b1 = weighted average of the three b1s → shape (1,)
+- LeakyReLU activation between (per-component, applied independently)
 
-Ship procedure (autonomous, no Rust changes):
-1. `cp benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin zensim/weights/v0_17_2026-05-13.bin`
-2. Edit `zensim/src/profile.rs:246` `include_bytes!` → v0_17 filename
-3. `git mv zensim/weights/v0_16_2026-05-12.bin zensim/weights/archive/`
-4. `cargo test -p zensim --features __experimental_versions`
-5. Update `CHANGELOG.md` — convert "candidate" → "shipped"
-6. Update this `CONTEXT-HANDOFF.md` "What just shipped" section
-7. `jj describe -m "feat(zensim): ship V0_17 …"` + push
+Affine calibration α=28.0366 β=-5.0738 baked into final layer (inherited
+from V0_16; same `skip_score_mapping=true` runtime path).
+
+Build script (Python) in cycle-14 outcomes doc; component bakes
+preserved at:
+- V0_16 raw bake: `/tmp/zensim_loop/v0_16_purged_tv20_seed1.bin` +
+  `benchmarks/rust_v0_X_2026-05-13_true_v0_16_recipe.raw.bin`
+  (bit-identical)
+- cycle-14-s1: `benchmarks/rust_v0_X_2026-05-13_cycle14_full_recipe.raw.bin`
+- cycle-14-s42: `benchmarks/rust_v0_X_2026-05-13_cycle14_full_seed42.raw.bin`
 
 Full cycle-14 record: `benchmarks/cycle_14_per_band_tv_outcomes_2026-05-13.md`.
 
 ## What's running right now
 
-Nothing — V0_16 ship still serves production. V0_17 candidate is
-verified but NOT yet swapped in (pending explicit ship authorization).
+Nothing — V0_17 ship has been committed and pushed.
 
 ## Site state (Goal #6)
 
