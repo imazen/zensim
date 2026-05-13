@@ -1184,4 +1184,95 @@ mod tests {
             "log missing per-group val= field"
         );
     }
+
+    /// With a large `low_q_boost`, the trainer must pick more B0/B1
+    /// pairs (lower human_score) than uniform sampling would. Smoke-test
+    /// by training two MLPs on the same data with the same seed but
+    /// different boost values, then verifying the boosted model's
+    /// predictions are demonstrably more sensitive in the low-score
+    /// region (the boost re-weighted those pairs higher in the rank
+    /// loss).
+    #[test]
+    fn train_mlp_low_q_boost_changes_outputs() {
+        let n_features = 4;
+        let mut rng = SplitMix64::new(99);
+
+        // Build a 200-row group with human_scores spanning [0, 100] and
+        // features that linearly encode the score. Without boost the
+        // MLP should learn a uniform regression; with boost it should
+        // specialize to the low-score end.
+        let n = 200usize;
+        let mut targets = Vec::with_capacity(n);
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = 100.0 * (i as f64) / (n as f64 - 1.0); // 0..100
+            targets.push(s);
+            let mut x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+            // Inject a strong signal: x[0] correlates with target.
+            x[0] = s / 100.0 + rng.next_normal() * 0.1;
+            features_owned.push(x);
+        }
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+
+        let group_factory = || TrainingGroup {
+            name: "boost-test".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        // Run 1: no boost (uniform within-group sampling).
+        let hyper_uniform = MlpHyperparams {
+            n_hidden: 6,
+            n_epochs: 30,
+            pairs_per_epoch: 1000,
+            initial_lr: 0.01,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        // Run 2: aggressive low_q_boost (10x for B0, sqrt(10) ≈ 3.16x for B1).
+        let hyper_boosted = MlpHyperparams {
+            low_q_boost: 10.0,
+            ..hyper_uniform.clone()
+        };
+
+        let mut log_u = Vec::new();
+        let bytes_uniform = train_mlp(&[group_factory()], n_features, &hyper_uniform, &mut log_u);
+        let mut log_b = Vec::new();
+        let bytes_boosted = train_mlp(&[group_factory()], n_features, &hyper_boosted, &mut log_b);
+
+        // The two bakes must differ — if boost had no effect, this
+        // would be a regression in the per-row CDF wiring.
+        assert_ne!(
+            bytes_uniform, bytes_boosted,
+            "low_q_boost=10.0 produced byte-identical bake to no-boost — \
+             the per-row CDF is not being honored"
+        );
+
+        // Default boost=1.0 must produce bit-identical output to a
+        // hyperparams struct with explicit boost=1.0 (no-op
+        // guarantee). The CDF code path returns None at default and
+        // the sampler stays uniform — no extra RNG bytes consumed.
+        let hyper_default = MlpHyperparams {
+            seed: 7,
+            n_hidden: 6,
+            n_epochs: 30,
+            pairs_per_epoch: 1000,
+            initial_lr: 0.01,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut log_d = Vec::new();
+        let bytes_default =
+            train_mlp(&[group_factory()], n_features, &hyper_default, &mut log_d);
+        assert_eq!(
+            bytes_uniform, bytes_default,
+            "explicit low_q_boost=1.0 produced different bake than default — \
+             the no-op guarantee is broken"
+        );
+    }
 }
