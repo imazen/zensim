@@ -696,6 +696,12 @@ def main() -> int:
                     help="cycle-7 dssim co-training auxiliary loss weight "
                          "(0.0 = disabled, V0_16 behavior; suggested 0.3 to "
                          "target JPEG-AI deficit)")
+    ap.add_argument("--tv-pairs-file", type=str, default=None,
+                    help="Load pre-built adjacent-q TV pairs from TSV "
+                         "(columns lo_trainer_idx + hi_trainer_idx, "
+                         "optional band_id). Overrides auto-build from "
+                         "training rows. Used to reproduce V0_16's "
+                         "combined_purged_tv_pairs_bands.tsv (205,654 pairs).")
     ap.add_argument("--tv-weight", type=float, default=0.0,
                     help="Per-curve monotonicity penalty weight. Penalizes "
                          "adjacent-q score reversals within each "
@@ -963,7 +969,26 @@ def main() -> int:
     # emit (lower_q_idx, higher_q_idx) pairs. These are *post-mask*
     # local indices — they reference rows in the standardized Xt.
     tv_pairs_train = None
-    if args.tv_weight > 0:
+    if args.tv_weight > 0 and args.tv_pairs_file:
+        print(f"Loading external TV pairs from {args.tv_pairs_file}...", flush=True)
+        t0 = time.time()
+        tv_df = pd.read_csv(args.tv_pairs_file, sep="\t")
+        if "lo_trainer_idx" not in tv_df.columns or "hi_trainer_idx" not in tv_df.columns:
+            raise SystemExit(
+                f"--tv-pairs-file {args.tv_pairs_file} missing required "
+                f"columns lo_trainer_idx + hi_trainer_idx (got: {list(tv_df.columns)})"
+            )
+        n_tr = int(is_tr_x.sum())
+        lo = tv_df["lo_trainer_idx"].to_numpy(dtype=np.int64)
+        hi = tv_df["hi_trainer_idx"].to_numpy(dtype=np.int64)
+        in_range = (lo >= 0) & (lo < n_tr) & (hi >= 0) & (hi < n_tr)
+        lo = lo[in_range]
+        hi = hi[in_range]
+        tv_pairs_train = np.stack([lo, hi], axis=1).astype(np.int64)
+        print(f"  {len(tv_pairs_train):,} external TV pairs loaded "
+              f"({time.time()-t0:.1f}s; {int((~in_range).sum())} rows dropped "
+              f"as out-of-range for n_train={n_tr})", flush=True)
+    elif args.tv_weight > 0:
         print("Building TV adjacency pairs from training rows...", flush=True)
         t0 = time.time()
         df_tr = df.loc[is_tr_x, ["image_basename", "codec", "knob_tuple_json", "q"]] \
