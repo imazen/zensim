@@ -305,7 +305,10 @@ def ranknet_loss(pred: torch.Tensor, target: torch.Tensor,
                        max_total_pairs * 256)
     n_candidates = min(n_candidates, 1_048_576)
     # Cycle-13: when row_sample_weights given, bias pair sampling by row
-    # weight (mirrors the deleted Rust trainer's behavior at e6132243^).
+    # weight (mirrors the Rust trainer at zensim-validate/src/mlp_train.rs
+    # where train_weight controls per-step pair-sampling probability, not
+    # per-row MSE multiplier — the two trainers implement different
+    # objectives despite sharing the `train_weight` field name).
     # Default (None) preserves uniform sampling.
     if row_sample_weights is not None and (row_sample_weights != 1.0).any():
         # Normalize to a probability distribution
@@ -389,13 +392,15 @@ class TrainConfig:
     rank_weight: float
     seed: int
     tv_weight: float = 0.0  # Per-curve monotonicity penalty weight.
-    lr_schedule: str = "constant"  # "constant" | "cosine" — cosine matches the
-                                   # deleted Rust mlp_train.rs trainer that
-                                   # produced V0_5's CID22 0.8893.
-    optimizer: str = "adamw"       # "adamw" | "adam" — Rust trainer used Adam
+    lr_schedule: str = "constant"  # "constant" | "cosine" — cosine matches
+                                   # the Rust trainer at
+                                   # zensim-validate/src/mlp_train.rs which
+                                   # produced V0_5's CID22 0.8893 and
+                                   # V0_15/V0_16's 0.8914/0.8919.
+    optimizer: str = "adamw"       # "adamw" | "adam" — Rust trainer uses Adam
                                    # (no decoupled weight decay).
-    init: str = "kaiming"          # "kaiming" | "glorot" — Rust used Glorot.
-    val_policy: str = "mean"       # "mean" | "min" — Rust used `Min` (worst
+    init: str = "kaiming"          # "kaiming" | "glorot" — Rust uses Glorot.
+    val_policy: str = "mean"       # "mean" | "min" — Rust uses `Min` (worst
                                    # per-group SROCC), Python defaulted to mean.
     lr_cycle_period: int = 50      # First cycle length in epochs for
                                    # cosine_cyclic schedule. T_mult=1.
@@ -411,10 +416,11 @@ class TrainConfig:
                                    # for 50..65. Targets B0/B1 SROCC.
     ranknet_sample_weights: bool = False  # Cycle-13: bias RankNet pair
                                           # sampling by row train_weight
-                                          # (mirrors deleted Rust trainer
-                                          # at e6132243^ where train_weight
-                                          # controls pair-sampling
-                                          # probability, NOT MSE weight).
+                                          # (mirrors the Rust trainer at
+                                          # zensim-validate/src/mlp_train.rs
+                                          # where train_weight controls
+                                          # pair-sampling probability, NOT
+                                          # per-row MSE weight as in Python).
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
