@@ -138,7 +138,7 @@ echo "==> CID22 eval (full 4292 pairs) → $EVAL_LOG"
 cargo build -p zensim-bench --example dataset_metric_baseline --release 2>&1 | tail -2
 "$REPO_ROOT/target/release/examples/dataset_metric_baseline" \
     --v04-bake "$CAL_BAKE" \
-    --cid22-only \
+    --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
     2>&1 | tee "$EVAL_LOG" | tail -10
 
 echo
