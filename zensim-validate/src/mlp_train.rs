@@ -59,6 +59,23 @@ pub struct MlpHyperparams {
     /// 0 disables early stopping.
     pub early_stop_patience: usize,
     pub validation_policy: ValidationPolicy,
+    /// Cycle-9 row-weight boost for B0 + B1 (low-quality) rows.
+    /// When > 1.0, biases per-step pair sampling within each training
+    /// group toward rows whose `human_score` (0-100 scale) is below 50
+    /// (full boost) or in [50, 65) (sqrt(boost)). Default 1.0 = no-op,
+    /// uniform within-group sampling. Composes multiplicatively with
+    /// `mid_q_boost`. The original Python-side experiments (cycle-9,
+    /// zensim 4b998258) tested 1.5x and 3x; 1.5x was the sweet spot
+    /// for B0 SROCC gains without B2 regression.
+    pub low_q_boost: f64,
+    /// Cycle-12 row-weight boost for B1 + B2 (medium-quality) rows.
+    /// When > 1.0, biases per-step pair sampling toward rows whose
+    /// `human_score` is in [50, 90). Default 1.0 = no-op. The Python-
+    /// side cycle-12 finding (zensim 4da7d1fa) at boost=1.5 was a
+    /// σ-tightener (4x tighter seed-to-seed CID22 variance) with small
+    /// +0.003 mean lift — useful for downstream codec orchestrators
+    /// that need stable per-image ranking.
+    pub mid_q_boost: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -74,6 +91,8 @@ impl Default for MlpHyperparams {
             l2_lambda: 1e-5,
             early_stop_patience: 50,
             validation_policy: ValidationPolicy::Min,
+            low_q_boost: 1.0,
+            mid_q_boost: 1.0,
         }
     }
 }
@@ -318,6 +337,53 @@ pub fn train_mlp_with_tv(
             .collect()
     };
 
+    // Pre-compute per-row sampling CDFs for each training group when
+    // either low_q_boost or mid_q_boost is non-trivial. Indexed by
+    // position-in-train_indices so the hot loop can look up by the same
+    // index used for the group CDF.
+    //
+    // Band cuts are anchored to CID22 Table 5 (human_score 0-100 scale,
+    // see zensim/CLAUDE.md "Per-band reporting rule"):
+    //   B0 < 50               full low_q_boost
+    //   B1 [50, 65)           sqrt(low_q_boost), AND full mid_q_boost
+    //   B2 [65, 90)           full mid_q_boost
+    //   B3 ≥ 90               no boost
+    // When both boosts are 1.0 the per-row CDF is None and within-group
+    // sampling stays uniform (identical to V0_5/V0_15/V0_16 trainer
+    // behavior).
+    let needs_row_boost = hyperparams.low_q_boost != 1.0 || hyperparams.mid_q_boost != 1.0;
+    let per_row_cdfs: Vec<Option<Vec<f64>>> = train_indices
+        .iter()
+        .map(|&gi| {
+            if !needs_row_boost {
+                return None;
+            }
+            let g = &groups[gi];
+            let mut cum = 0.0;
+            let raw: Vec<f64> = g
+                .human_scores
+                .iter()
+                .map(|&s| {
+                    let mut w = 1.0;
+                    if hyperparams.low_q_boost != 1.0 {
+                        if s < 50.0 {
+                            w *= hyperparams.low_q_boost;
+                        } else if s < 65.0 {
+                            w *= hyperparams.low_q_boost.sqrt();
+                        }
+                    }
+                    if hyperparams.mid_q_boost != 1.0 && (50.0..90.0).contains(&s) {
+                        w *= hyperparams.mid_q_boost;
+                    }
+                    cum += w;
+                    cum
+                })
+                .collect();
+            let total = *raw.last().unwrap_or(&1.0);
+            Some(raw.into_iter().map(|c| c / total).collect())
+        })
+        .collect();
+
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
             * 0.5
@@ -328,16 +394,31 @@ pub fn train_mlp_with_tv(
 
         for _ in 0..hyperparams.pairs_per_epoch {
             // Pick a training group via inverse-CDF sampling, then a
-            // pair (ia, ib) within that group.
+            // pair (ia, ib) within that group. If per-row CDFs are
+            // populated (boost != 1.0), use weighted sampling for the
+            // pair; otherwise uniform.
             let u = rng.next_f64_unit();
-            let g_idx = train_indices[cdf.partition_point(|&c| c < u).min(cdf.len() - 1)];
+            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            let g_idx = train_indices[train_pos];
             let g = &groups[g_idx];
             let n = g.features.len();
             if n < 2 {
                 continue;
             }
-            let ia = (rng.next_u64() as usize) % n;
-            let ib = (rng.next_u64() as usize) % n;
+            let (ia, ib) = match &per_row_cdfs[train_pos] {
+                Some(row_cdf) => {
+                    let ua = rng.next_f64_unit();
+                    let ub = rng.next_f64_unit();
+                    (
+                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                    )
+                }
+                None => (
+                    (rng.next_u64() as usize) % n,
+                    (rng.next_u64() as usize) % n,
+                ),
+            };
             if ia == ib {
                 continue;
             }

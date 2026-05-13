@@ -138,6 +138,30 @@ struct Args {
     #[arg(long, value_parser = parse_band_weights)]
     tv_band_weights: Option<[f64; 4]>,
 
+    /// Cycle-9 row-weight boost for B0 + B1 (low-quality) rows
+    /// during per-step RankNet pair sampling. Multiplies the per-row
+    /// sampling weight: full boost for human_score<50, sqrt(boost)
+    /// for 50..65, 1.0 elsewhere. Default 1.0 = no-op. Composes
+    /// multiplicatively with --mid-q-boost. Python-side cycle-9
+    /// findings: boost=1.5 closed B0 SROCC by +0.011 with mild B2
+    /// regression at single seed; multi-seed verification showed
+    /// 5-seed mean was within noise so it didn't ship as default —
+    /// useful for B0-targeted ablations.
+    #[arg(long, default_value_t = 1.0)]
+    low_q_boost: f64,
+
+    /// Cycle-12 row-weight boost for B1 + B2 (medium-quality) rows
+    /// during per-step RankNet pair sampling. Multiplies per-row
+    /// sampling weight for human_score in [50, 90). Default 1.0 =
+    /// no-op. Python-side cycle-12 finding: boost=1.5 was a
+    /// σ-tightener (4x tighter seed-to-seed CID22 variance vs
+    /// baseline 0.0068 → 0.0016) with small +0.003 mean lift; useful
+    /// for downstream codec orchestrators needing stable per-image
+    /// ranking. Boost=2.0 plateaus (no additional mean lift, σ
+    /// widens again).
+    #[arg(long, default_value_t = 1.0)]
+    mid_q_boost: f64,
+
     /// Optional path to dump the trainer log for the run.
     #[arg(long)]
     log_path: Option<PathBuf>,
@@ -335,6 +359,8 @@ fn main() {
         l2_lambda: args.l2,
         early_stop_patience: args.early_stop_patience,
         validation_policy: val_policy,
+        low_q_boost: args.low_q_boost,
+        mid_q_boost: args.mid_q_boost,
     };
 
     println!(
