@@ -102,6 +102,30 @@ all bands). When swapping:
    (with date stamp) for reproducibility.
 5. Update CHANGELOG.md with verification numbers in the `[Unreleased]`
    section.
+6. **Land a paired methodology doc** at
+   `benchmarks/v0_X_methodology_YYYY-MM-DD.md` BEFORE flipping the
+   `include_bytes!` in `zensim/src/profile.rs`. Template:
+   `benchmarks/v0_18_methodology_2026-05-13.md`. The doc MUST cover
+   (a) architecture + parameter count + bin size + md5,
+   (b) full trainer command + every hyperparameter + every input
+   file's MD5 + row count,
+   (c) lineage for built-from-prior-bakes constructions (ensemble,
+   concat, finetune, KD) — each component documented to the same
+   depth,
+   (d) calibration script + α/β,
+   (e) held-out SROCC on KADID/TID/CID22/AIC-3/AIC-4/KonJND with
+   both 4-band CID22 Table 5 cuts and step-5 (20-bin) per-corpus,
+   (f) non-mono q-step rate (raw + after soft-iso, aggregate +
+   per-band),
+   (g) data-lineage table (path / MD5 / row count / CID22-contam
+   status) for every training input,
+   (h) honest gaps — what the new bake does WORSE than the prior
+   ship and why shipping anyway is the right trade.
+
+A bake without a methodology doc = **untrustworthy bake**. Numbers
+can be reproduced; without methodology they can't be verified,
+can't be improved on, and can't survive context loss. Effective
+2026-05-13.
 
 CID22 training data still must NOT be added to the trainer (the 49
 held-out reference images stay sacred). All training continues on
