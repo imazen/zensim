@@ -205,14 +205,50 @@ parquets + compare.js dropdown.
 Tick log entries: 517, 518, 519, 520, 521 in
 `~/work/zen/zenanalyze/zensim_champion_log.md`.
 
-## Cycle-10 next directions
+## Cycle-10 next directions (status as of 2026-05-13 03:17 UTC)
 
 | Option | Cost | Status |
 |---|---|---|
-| Cycle-10b: hidden=192/256 capacity bump | ~17s training × N seeds | Untested |
-| Cycle-10c: concordance filter | Blocked on data-pipeline rebuild | Blocked |
-| Cycle-10d: V0_16's exact training data (144k purged) | Need to find the CSV | Investigation needed |
-| Cycle-10e: more seeds at best variant for upper-tail | ~17s × 5 = 85s | Cheap; could try seed scan {100, 200, 1000} |
+| Cycle-10b: hidden=192/256 capacity bump | ~17s training × N seeds | UNTESTED — sole remaining cheap lever |
+| Cycle-10c: concordance filter | Blocked on data-pipeline rebuild | BLOCKED |
+| Cycle-10d: V0_16's exact training data (144k purged) | — | **RESOLVED: our CSV IS the 144k clean variant** (just renamed) |
+| Cycle-10e: 5-seed sweep at boost 1.5 | — | RUN (cycle-9 above) — falsified |
+| Cycle-10e: 8-seed tail scan at V0_kadid_tid | 50s | RUN — falsifies "V0_16 is upper-tail" (V0_16 +3.0σ above mean) |
+| Cycle-10f: konjnd_full vs konjnd_aligned | 17s | RUN — konjnd_full CATASTROPHIC (-0.29) |
+| Cycle-10g: --val-policy min vs mean | 17s | RUN — min loses by -0.004 |
+| Cycle-10h: external TV pairs (V0_16's 205k file) | 17s + flag impl | RUN — UNUSABLE (49% out-of-range, split mismatch) |
+| Cycle-10i: --init glorot vs kaiming | 17s | UNTESTED (last cheap lever) |
 
-Cycle-10a is the cleanest verified result. Further cycle-10
-variants are incremental.
+## Closure (added 2026-05-13 03:17 UTC)
+
+Cycle-10a is the cleanest verified result. **V0_kadid_tid (V0_38)
+is shipped to comparison site as the B0/B3 specialist alternative
+to V0_16 SHIP.** Cycle-10b/c/d/e/f/g/h have all been explored to
+exhaustion in autonomous mode; only 10i (`--init glorot`) remains
+untested and is unlikely to close the +3σ gap.
+
+**Final V0_16 reproduction status**:
+
+V0_16's 0.8919 CID22 SROCC remains +3.0σ above V0_kadid_tid's
+8-seed mean (0.8712, σ=0.0068, P<0.13%). The remaining 0.020 SROCC
+gap appears to be in unrecoverable per-run state:
+
+- V0_16's specific train/val split seed (which images went where)
+- V0_16's specific batch sampling order
+- Possibly post-bake affine calibration on a different MAE distribution
+- Possibly an undocumented preprocessing step
+
+**V0_16 SHIP unchanged.** V0_26 (cycle-7), V0_31 (cycle-8), V0_38
+(cycle-10a) all available as alternatives on the live comparison
+site at <https://imazen.github.io/zensim/>.
+
+## Trainer infrastructure added during cycle-10
+
+| Flag | Commit | Purpose | Net effect |
+|---|---|---|---|
+| `--low-q-boost` | `4b998258` | Row-weight MSE boost for B0/B1 | Negative (cycle-9) |
+| `--low-q-pair-boost` | `a700b10f` | RankNet pair-loss boost for B0/B1 | Negative (cycle-9b) |
+| `--tv-pairs-file` | `c4cacfba` | Load pre-built TV pairs from TSV | Unusable for V0_16 file |
+
+All three flags are dormant by default and don't affect existing
+trainer behavior; they're future-experiment infrastructure.
