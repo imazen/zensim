@@ -59,6 +59,7 @@ const STUB_MANIFEST = {
     { id: "score_zensim_v0_26",       label: "zensim V0_26 cycle-7 candidate (KonJND-aligned, no dssim)" },
     { id: "score_zensim_v0_31",       label: "zensim V0_31 cycle-8 AIC-4 winner (KonJND w=0.5)" },
     { id: "score_zensim_v0_38",       label: "zensim V0_38 cycle-10a B0/B3 specialist (synth+KonJND+KADID+TID, seed=3)" },
+    { id: "score_zensim_v0_17",       label: "zensim V0_17 cycle-14 concat (0.65×V0_16 + 0.30×c14-s1 + 0.05×c14-s42 → 228→384→1; CID22 0.8934 clears loop target)" },
     { id: "score_dssim",              label: "dssim (when present)" },
     // JS-MLP variants — bakes shipped under site/weights/*.bin.
     // Worker loads the bake and applies it to feat_0..feat_227. (NB: AIC + CID22
