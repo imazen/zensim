@@ -272,7 +272,8 @@ class MLP(torch.nn.Module):
 
 
 def ranknet_loss(pred: torch.Tensor, target: torch.Tensor,
-                  groups: torch.Tensor, max_total_pairs: int = 4096
+                  groups: torch.Tensor, max_total_pairs: int = 4096,
+                  low_q_pair_boost: float = 1.0,
                   ) -> torch.Tensor:
     """Pairwise sigmoid loss (Bradley–Terry / RankNet) over same-group pairs.
 
@@ -318,8 +319,33 @@ def ranknet_loss(pred: torch.Tensor, target: torch.Tensor,
     nonzero = t_diff != 0
     if nonzero.sum() == 0:
         return torch.zeros((), device=device)
+    i_nz = i[nonzero]
+    j_nz = j[nonzero]
     sign = torch.sign(t_diff[nonzero])
-    return torch.nn.functional.softplus(-sign * p_diff[nonzero]).mean()
+    losses = torch.nn.functional.softplus(-sign * p_diff[nonzero])
+    if low_q_pair_boost == 1.0:
+        return losses.mean()
+    # Cycle-9b: weight each pair by max(boost_i, boost_j) where
+    # boost = low_q_pair_boost if endpoint.target<50, sqrt(boost) if
+    # 50..65, else 1.0. Oversamples low-q ranking signal at the
+    # RankNet loss term (which carries most rank-correlation signal).
+    sqrt_boost = float(low_q_pair_boost) ** 0.5
+    ti = target[i_nz]
+    tj = target[j_nz]
+    boost_i = torch.where(
+        ti < 50.0,
+        torch.full_like(ti, float(low_q_pair_boost)),
+        torch.where(ti < 65.0,
+                    torch.full_like(ti, sqrt_boost),
+                    torch.ones_like(ti)))
+    boost_j = torch.where(
+        tj < 50.0,
+        torch.full_like(tj, float(low_q_pair_boost)),
+        torch.where(tj < 65.0,
+                    torch.full_like(tj, sqrt_boost),
+                    torch.ones_like(tj)))
+    weights = torch.maximum(boost_i, boost_j)
+    return (losses * weights).sum() / weights.sum().clamp_min(1e-6)
 
 
 def srocc(a: np.ndarray, b: np.ndarray) -> float:
@@ -364,6 +390,11 @@ class TrainConfig:
                                    # `dssim_weight * mse(pred, (1-dssim)*100)`
                                    # to the loss. Targets JPEG-AI deficit
                                    # (AIC-4: V0_16=0.7951, dssim=0.9147).
+    low_q_pair_boost: float = 1.0  # Cycle-9b RankNet pair-resampling boost.
+                                   # When > 1, weights ranknet softplus loss
+                                   # for pairs where either endpoint has
+                                   # target < 50 by factor; sqrt(factor)
+                                   # for 50..65. Targets B0/B1 SROCC.
 
 
 def train(cfg: TrainConfig, X_train, y_train, g_train,
@@ -492,9 +523,11 @@ def train(cfg: TrainConfig, X_train, y_train, g_train,
             if cfg.loss == "mse":
                 loss = mse
             elif cfg.loss == "ranknet":
-                loss = ranknet_loss(pred, y, g)
+                loss = ranknet_loss(pred, y, g,
+                                    low_q_pair_boost=cfg.low_q_pair_boost)
             elif cfg.loss == "mse_rank":
-                rk = ranknet_loss(pred, y, g)
+                rk = ranknet_loss(pred, y, g,
+                                  low_q_pair_boost=cfg.low_q_pair_boost)
                 loss = mse + cfg.rank_weight * rk
             else:
                 raise ValueError(cfg.loss)
@@ -689,6 +722,12 @@ def main() -> int:
                          "the full multiplier, 50<=score<65 (B1) gets "
                          "sqrt(multiplier). Default 1.0 = no boost. Use "
                          "to address CID22 B0/B1 SROCC ceiling (cycle-9).")
+    ap.add_argument("--low-q-pair-boost", type=float, default=1.0,
+                    help="Cycle-9b lever: weight RankNet pair losses by max "
+                         "boost of the pair's two endpoints (B0 endpoint → "
+                         "boost factor, B1 → sqrt boost, else 1.0). Targets "
+                         "B0/B1 ranking signal at the rank-loss term rather "
+                         "than via MSE row weighting (cycle-9). Default 1.0.")
     ap.add_argument("--optimizer", default="adamw",
                     choices=["adamw", "adam"],
                     help="adam matches the Rust trainer (no decoupled "
@@ -899,6 +938,7 @@ def main() -> int:
         weight_decay=args.weight_decay, dropout=args.dropout,
         rank_weight=args.rank_weight, seed=args.seed,
         tv_weight=args.tv_weight, dssim_weight=args.dssim_weight,
+        low_q_pair_boost=args.low_q_pair_boost,
         lr_schedule=args.lr_schedule,
         lr_cycle_period=args.lr_cycle_period,
         optimizer=args.optimizer,
