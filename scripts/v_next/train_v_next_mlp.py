@@ -683,6 +683,12 @@ def main() -> int:
                          "weight: inverse-frequency multiplier on each "
                          "row's train_weight (rows with empty "
                          "content_class are left at 1.0).")
+    ap.add_argument("--low-q-boost", type=float, default=1.0,
+                    help="Multiply train_weight for low-quality rows by this "
+                         "factor. Bins by target column: score<50 (B0) gets "
+                         "the full multiplier, 50<=score<65 (B1) gets "
+                         "sqrt(multiplier). Default 1.0 = no boost. Use "
+                         "to address CID22 B0/B1 SROCC ceiling (cycle-9).")
     ap.add_argument("--optimizer", default="adamw",
                     choices=["adamw", "adam"],
                     help="adam matches the Rust trainer (no decoupled "
@@ -834,6 +840,23 @@ def main() -> int:
                     continue
                 print(f"  {c!r}: count={labelled[c]:,} "
                       f"× {w:.3f}", flush=True)
+
+    if args.low_q_boost != 1.0 and target_col in df.columns:
+        boost = float(args.low_q_boost)
+        sqrt_boost = boost ** 0.5
+        target_vals = df[target_col].to_numpy(dtype=np.float32)
+        mult = np.ones_like(target_vals, dtype=np.float32)
+        b0_mask = target_vals < 50.0
+        b1_mask = (target_vals >= 50.0) & (target_vals < 65.0)
+        mult[b0_mask] = boost
+        mult[b1_mask] = sqrt_boost
+        n_b0 = int(b0_mask.sum())
+        n_b1 = int(b1_mask.sum())
+        df["train_weight"] = (df["train_weight"]
+                              * mult.astype(np.float32))
+        print(f"low-q-boost: B0 (score<50) n={n_b0:,} × {boost:.3f}; "
+              f"B1 (50..65) n={n_b1:,} × {sqrt_boost:.3f}; "
+              f"others × 1.0", flush=True)
 
     is_tr, is_va, is_te = make_split(df, args.val_frac, args.test_frac, args.seed)
     # Force human val-only rows (is_val_only=True) into val regardless of
