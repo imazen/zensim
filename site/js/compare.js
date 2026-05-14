@@ -307,11 +307,25 @@ function bindRun() {
 }
 
 async function main() {
-  // Try to fetch the live manifest; fall back to stub if 404 (pre-upload phase).
+  // Try to fetch the live manifest; merge with the stub. The R2
+  // manifest is authoritative for `parquets` (live row counts +
+  // bytes), but the stub carries the renderable `corpora` and
+  // `metrics` arrays the UI iterates over — never let the R2
+  // fetch null those out.
   let manifest = STUB_MANIFEST;
   try {
     const r = await fetch(`${R2_BASE}/parquets/_manifest.json`);
-    if (r.ok) manifest = await r.json();
+    if (r.ok) {
+      const live = await r.json();
+      manifest = {
+        ...STUB_MANIFEST,
+        ...live,
+        // Preserve renderable arrays from the stub when the live
+        // manifest doesn't supply them.
+        corpora: live.corpora ?? STUB_MANIFEST.corpora,
+        metrics: live.metrics ?? STUB_MANIFEST.metrics,
+      };
+    }
   } catch (_) { /* offline / pre-upload — use stub */ }
 
   renderCorpusList(manifest);
