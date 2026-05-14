@@ -1,4 +1,26 @@
-# dHash-64 threshold revert — 2026-05-14
+# dHash-64 system is fundamentally flawed — full revert (2026-05-14)
+
+## Summary
+
+After **two rounds of user-eye review of side-by-side montages**
+(d ≤ 16 KADID cross-corpus, d ≤ 10 strict KADID/TID training-source,
+CID22 stage1 d ≤ 10 whole-image, CID22 stage2 d=4-10 sub-window),
+user verdict: **none of the flagged "matches" are actually the same
+image.** dHash-64 is fundamentally flawed for our content domain.
+
+Failure modes confirmed:
+- **Flat-region matching**: UI/screen-content training sources
+  produce mostly-zero dHash codes that match any other flat region.
+- **Composition overlap**: photos with similar layouts (sky on top,
+  ground on bottom) dHash similarly even when subject content is
+  vastly different.
+- **Sub-window false positives**: stage2's sliding-window scan picks
+  up 102×102 or 128×128 patches of CID22 refs that match a training
+  source by texture/composition without depicting the same content.
+
+The whole 2026-05-12 → 2026-05-14 "contamination cleanup" pipeline
+is RETRACTED. **Zero contamination has been demonstrated against any
+training source at any threshold the user reviewed.**
 
 ## What happened
 

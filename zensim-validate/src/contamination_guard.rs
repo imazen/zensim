@@ -1,22 +1,39 @@
 //! Runtime contamination guard for the V_X training pipeline.
 //!
-//! Refuses to load a training-features CSV that contains any
-//! reference basename listed in the 2026-05-14 KADID/TID overlap
-//! audit. The blocklist is embedded as `static BLOCKLIST` below
-//! so the trainer cannot accidentally load contaminated data even
-//! if a stale CSV is on disk somewhere.
+//! Refuses to load a training-features CSV whose first column
+//! contains any reference basename listed in the embedded blocklist
+//! at `zensim/benchmarks/contamination_blocklist_2026-05-14.txt`.
 //!
-//! ## Provenance
+//! ## Provenance — blocklist EMPTY as of 2026-05-14 evening
 //!
-//! The blocklist is the union of:
-//! - `zensim/benchmarks/kadid_overlap_2026-05-14.tsv` rows with
-//!   hamming ≤ 16 (118 sources, KADID I01..I81 overlap)
-//! - `zensim/benchmarks/tid_overlap_2026-05-14.tsv` rows with
-//!   hamming ≤ 16 (33 sources, TID I01..I25 overlap)
-//! - dedup union = 149 unique source basenames
+//! The blocklist file currently contains only comments. The
+//! 149-basename d ≤ 16 blocklist that originally populated it
+//! was user-reviewed and confirmed to be all false positives
+//! (dHash-64 d ≤ 16 is the loose screening threshold from the
+//! literature, not a contamination threshold for our content
+//! domain — flat-region UI matches dominate the false-positive
+//! set). The d ≤ 10 retry produced 7 candidates, also reviewed,
+//! also rejected.
 //!
-//! Both audits used dHash-64 against the synth-v2 training-source
-//! corpus at /mnt/v/input/zensim/sources/.
+//! Rejected blocklist preserved at
+//! `zensim/benchmarks/contamination_blocklist_2026-05-14_REJECTED_false_positives.txt`
+//! for historical record.
+//!
+//! ## Future use
+//!
+//! The guard infrastructure stays active because it's the right
+//! mechanism for catching real contamination. To repopulate:
+//!
+//! 1. Run `check_holdout_overlap --threshold 10` (strict).
+//! 2. Build side-by-side montages of every flagged pair.
+//! 3. Get user sign-off entry-by-entry — never auto-quarantine.
+//! 4. Add user-approved basenames to the blocklist file (one per
+//!    line, no extension, no comment prefix; `#`-prefixed lines
+//!    and blanks are ignored).
+//!
+//! Do NOT regenerate programmatically from a TSV filter without
+//! user review — that path produced 149 false positives the
+//! first time.
 //!
 //! ## Usage
 //!
