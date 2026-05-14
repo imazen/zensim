@@ -8,18 +8,19 @@
 
 (none currently queued — the 0.3.0 breaks shipped 2026-05-13)
 
-### Changed
+### Reverted (same-day)
 
-- **`PreviewV0_3` bytes swapped to V0_19 bake** (md5
-  `239b55936f3ae1e0c2a72aa6d14d4f27`, 93,064 B). Trained on the
-  2026-05-14-clean corpus (138,872-row safe-synthetic after the
-  KADID/TID perceptual-overlap purge). 3-way concat ensemble (base +
-  cycle-14 s1 + cycle-14 s42, 0.65/0.30/0.05 mix) affine-calibrated and
-  I8-quantized via `rebake_v3_1`. Honest CID22 SROCC 0.8785 (vs V0_18's
-  inflated 0.8934); wins V0_18 on KADID (+0.0034 → 0.9461) and TID
-  (+0.0028 → 0.9553). Prior V0_18 bake archived at
-  `zensim/weights/archive/v0_18_inflated_pre_v19_swap_2026-05-14.bin`.
-  Methodology doc: `benchmarks/v0_19_methodology_2026-05-14.md`.
+- **V0_19 swap REVERTED.** Earlier this session shipped V0_19 with
+  the claim that V0_18's CID22 SROCC was "inflated by KADID-overlap
+  training content." User reviewed the side-by-side montages and
+  confirmed those matches were dHash-64 d ≤ 16 false positives —
+  vastly different images at the loose screening threshold.
+  Re-audit at d ≤ 10 (the strict "very likely same image"
+  threshold) finds **zero cross-corpus CID22 ↔ KADID/TID
+  overlap**. `PreviewV0_3` bytes restored to
+  `v0_18_2026-05-13.bin`. V0_19 archived at
+  `zensim/weights/archive/v0_19_overcleaned_2026-05-14.bin`.
+  Full revert writeup: `benchmarks/dhash_threshold_revert_2026-05-14.md`.
 
 ### Roadmap
 

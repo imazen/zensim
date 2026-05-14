@@ -244,14 +244,18 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 ///   superseded same day by V0_16's better B0/B1 coverage)
 /// - `v0_16_2026-05-12.bin` (the base V0_18 was constructed from)
 /// - `v0_17_2026-05-13.bin` (F32 of V0_18; V0_18 is the I8 re-bake)
-/// - `v0_18_2026-05-13.bin` (md5 `c94e93607390d0b6704e95f3851d421e`,
-///   shipped 2026-05-13 → 2026-05-14. CID22 0.8934 was inflated by
-///   the pre-2026-05-14 training corpus containing KADID-overlap
-///   sources that indirectly boosted CID22 by ~0.013; V0_19 ships
-///   the honest equivalent on the cleaned 2026-05-14 corpus.
-///   Archived at `zensim/weights/archive/v0_18_inflated_pre_v19_swap_2026-05-14.bin`.)
+/// - `v0_19_2026-05-14.bin` (briefly shipped 2026-05-14 then reverted
+///   same day; commit f8a3280 → revert. The "contamination cleanup"
+///   that motivated V0_19 used dHash-64 at d≤16 which is the LOOSE
+///   screening threshold; user review of the side-by-side montages
+///   confirmed those matches were vastly different images. Re-audit
+///   at d≤10 (the strict "very likely same image" threshold) found
+///   zero cross-corpus CID22 ↔ KADID matches. V0_18's CID22 SROCC
+///   0.8934 is therefore NOT inflated. V0_19 archived at
+///   `zensim/weights/archive/v0_19_overcleaned_2026-05-14.bin` for
+///   reference.)
 pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
-    include_bytes!("../weights/v0_19_2026-05-14.bin")
+    include_bytes!("../weights/v0_18_2026-05-13.bin")
 }
 
 static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
