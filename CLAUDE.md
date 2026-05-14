@@ -422,28 +422,72 @@ Never publish without a matching pushed tag. Never tag without passing semver-ch
 
 ## Weight Training & Dataset Contamination
 
-### Safe synthetic dataset
-- File: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv` (218,089 pairs)
-- Created from `training_concordant.csv` minus all 49 CID22 validation image sources
-- 475 CID22-contaminated pairs removed (7 unblocked CID22 stems × ~68 pairs each)
-- The generator's `CID22_VALIDATION_41` blocklist only covers 41 of 49 validation images
-- **Always use this CSV for training**, never `training_with_dssim.csv` or `training_concordant.csv`
-- Feature cache: `training_safe_synthetic.csv.features.*.bin` (300 extended features)
+### Canonical clean corpus (V0_19+, 2026-05-14)
 
-### Dataset contamination rules
-- **CID22**: 49 validation images. 41 blocked in generator, 7 leaked into training sources. Safe synthetic excludes all 49. CID22 is safe as a human evaluation set.
-- **KADIK10k**: Uses I01-I81 reference images. **Perceptual contamination
-  confirmed 2026-05-14** — dHash-64 audit against synth-v2 training
-  found 6 training sources at strict d≤10 (notably I18 with 4 size
-  variants from the `gmessages` source) and 118 at loose d≤16.
-  KADID aggregate SROCC numbers from any V_X bake trained on
-  uncleaned safe-synthetic are **inflated**. Use as integrity
-  guard, not as primary ship gate. Full audit at
+**Single source of truth**: `/mnt/v/zen/zensim-training/2026-05-14-clean/`
+(see `_MANIFEST.md` for md5s + row counts).
+
+| Component | Path | Rows |
+|---|---|---|
+| Safe-synthetic (CID22 + KADID/TID perceptual purge) | `safe_synth_v19_clean_features.csv` | 138,872 |
+| KADID-10k features                                  | `kadid_features.csv`                  | 10,125 |
+| TID2013 features                                    | `tid_features.csv`                    | 3,000 |
+| KonJND aligned features                             | `konjnd_aligned_features.csv`         | 76,104 |
+| TV regularizer pairs                                | `tv_pairs_bands.tsv`                  | 205,654 |
+
+The 138,872-row safe-synthetic CSV is the V0_18 base (144,791) minus 149
+basenames flagged for KADID/TID perceptual-near-duplication
+(d≤16). The 2026-05-12 CID22 purge (361 sources removed for d≤16
+overlap with the 49 CID22 held-out refs) is also already applied
+upstream.
+
+**Contamination guard ships unconditionally**: `zensim_mlp_train` calls
+`contamination_guard::scrub_csv_or_die` on every `--group` CSV path.
+The guard refuses to load any file whose path contains
+`CONTAMINATED_2026-05-14_DO_NOT_USE` or whose first column contains any
+basename listed in `benchmarks/contamination_blocklist_2026-05-14.txt`
+(149 entries). Set
+`ZENSIM_BYPASS_CONTAMINATION_GUARD_FOR_AUDIT_I_REALLY_MEAN_IT=1` to
+disable for audit-only work; never ship a bake trained with the bypass.
+
+### Quarantined CSVs (DO NOT USE)
+
+These paths were the V_X training inputs prior to 2026-05-14:
+
+- `/tmp/zensim_loop/safe_synth_clean_features.CONTAMINATED_2026-05-14_use_canonical_v19_clean_INSTEAD.csv`
+- `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.CONTAMINATED_2026-05-14_DO_NOT_USE.csv`
+
+The `CONTAMINATED_` suffix is intentional — both the contamination
+guard AND a human inspecting the path are warned. Original 218,089-row
+CSV (the V_X-era safe synthetic) was decontaminated in two phases:
+- **2026-05-12 (Phase 1)**: removed 361 sources with perceptual overlap
+  (d≤16) against the 49 CID22 refs → 144,791 rows.
+- **2026-05-14 (Phase 2)**: removed 149 additional sources with
+  perceptual overlap (d≤16) against KADID or TID refs → 138,872 rows.
+
+### Dataset contamination rules (2026-05-14, post-V0_18-repro)
+- **CID22**: 49 validation images. The 2026-05-12 purge (361 sources)
+  removed all training sources at d≤16 from any of the 49 refs. CID22
+  is now a safe human-evaluation holdout. V0_18 reproduction
+  (commit `d516abe`) confirmed the pipeline is faithful: 3-way concat
+  re-trained on the pre-2026-05-14 corpus gives CID22 SROCC 0.8912 vs
+  documented 0.8934. V0_19 trained on the post-2026-05-14 corpus gives
+  honest CID22 SROCC 0.8786.
+- **KADIK10k**: Uses I01-I81 reference images. Phase-2 (2026-05-14)
+  purge removed 118 training sources at d≤16 (notably I18 with 4 size
+  variants from `gmessages`). The 2026-05-14 cross-corpus audit found
+  **8 of 81 KADID refs (10 %) perceptually overlap with 3 of 49 CID22
+  refs** (I02, I08, I24, I25, I28, I30, I34, I61 near
+  `2887497.png`/`373965.png`/`792079.png`). KADID is therefore NOT a
+  fully-independent integrity guard for CID22-trained models. Audit at
+  `benchmarks/cross_corpus_overlap_kadid_vs_cid22_2026-05-14.tsv` +
   `benchmarks/kadid_overlap_2026-05-14.tsv`.
-- **TID2013**: Uses 25 reference images. **Minor perceptual contamination
-  confirmed 2026-05-14** — 1 strict (d≤10) match against I12, 33 loose
-  (d≤16). Unlikely to move aggregate SROCC by more than ±0.005, but
-  not bit-clean. Audit at `benchmarks/tid_overlap_2026-05-14.tsv`.
+- **TID2013**: 25 reference images. Phase-2 purge removed 33 training
+  sources at d≤16. The 2026-05-14 cross-corpus audit shows TID refs
+  are **perceptually disjoint from CID22 at d≤16** (zero matches) —
+  TID is the cleanest cross-corpus integrity guard. Audit at
+  `benchmarks/cross_corpus_overlap_tid_vs_cid22_2026-05-14.tsv` +
+  `benchmarks/tid_overlap_2026-05-14.tsv`.
 - **The file-name "no overlap" check is insufficient**. File names of
   hex-hashed training sources don't collide with KADID's I01..I81 or
   TID's I01..I25 namespace by construction, but perceptual content
@@ -452,7 +496,18 @@ Never publish without a matching pushed tag. Never tag without passing semver-ch
   CLIC + CID22 crawls). Every new corpus added as a holdout MUST go
   through `check_holdout_overlap` (dHash-64) against every training
   CSV before it's used as a ship gate.
-- **Synthetic training sources**: Hex-hashed tiles from CLIC 2025 + CID22 collections, 3,579 unique refs after CID22 exclusion.
+- **Synthetic training sources**: Hex-hashed tiles from CLIC 2025 +
+  CID22 collections, ~3,430 unique refs after the 2026-05-12 + 2026-
+  05-14 perceptual-overlap purges.
+- **dssim co-training is FALSIFIED** (cycle-7 verdict, commit
+  `4ed499e`): all 5 dssim-weighted variants regressed CID22 by 0.04–0.07
+  vs V0_16 baseline. Don't retry without a fundamentally different
+  mechanism. The identified next lever for B0/B1 SROCC is direct
+  JPEG-AI training-corpus acquisition (not started).
+- **AIC-3 / AIC-4 are HOLDOUT-ONLY**. Never train on them. Their
+  low-q human MOS is the cleanest signal we have for B0/B1 bands
+  (CID22 concentrates in B2/B3). Per CLAUDE.md, mandatory for low-q
+  evaluation.
 
 ### Available human datasets for training/evaluation
 Three independent human datasets: **KADIK10k** (10,125 pairs), **CID22** (4,292 pairs), **TID2013** (3,000 pairs).

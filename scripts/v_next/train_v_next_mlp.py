@@ -1,5 +1,31 @@
 #!/usr/bin/env python3
-"""Train a 228 → H → 1 MLP perceptual scorer on the unified parquet.
+"""DEPRECATED 2026-05-14 — use the Rust trainer ``zensim_mlp_train``.
+
+This Python trainer was the V_X (V0_2 → V0_18) workhorse but has been
+superseded by the Rust trainer at
+``zensim-validate/src/bin/zensim_mlp_train.rs`` for all V0_19+ work.
+The Rust trainer:
+- enforces the 2026-05-14 contamination guard (149-basename blocklist)
+  on every ``--group`` CSV before any row is loaded;
+- writes ZNPR v3 directly (no v2 → v3 migration step);
+- ships the same MLP architecture (228 → H → 1) and the same multi-
+  group RankNet loss as this script;
+- runs ~3-5× faster on a 7950X without GPU.
+
+If you must use this script for a one-off comparison: it reads the
+unified parquet store at ``2026-05-07/unified`` which is **pre-cleanup
+data — perceptually contaminated with KADID-overlap content**. Any
+bake produced here will reproduce V0_18-era numbers, not V0_19+ honest
+ceilings. Don't ship from this script's output.
+
+The canonical 2026-05-14-clean corpus lives at
+``/mnt/v/zen/zensim-training/2026-05-14-clean/`` with per-file md5s
+in ``_MANIFEST.md``; only the Rust trainer reads from it.
+
+────────────────────────────────────────────────────────────
+Historical doc-string (kept for reference, do NOT follow):
+
+Train a 228 → H → 1 MLP perceptual scorer on the unified parquet.
 
 Targets (configurable via --target):
 - ssim2          (recommended; aligns zensim with the well-validated SSIMULACRA2)
@@ -16,7 +42,7 @@ Loss options (--loss):
             distortions; loss aligns with -SROCC at training time.
 - mse_rank  Sum: 1.0*MSE + 0.5*RankNet (recommended starting point).
 
-Usage:
+Usage (DEPRECATED — points at pre-cleanup contaminated parquet):
     python3 scripts/v_next/train_v_next_mlp.py \\
         --input-dir /mnt/v/zen/zensim-training/2026-05-07/unified \\
         --target ssim2 --loss mse_rank --hidden 64 --epochs 50 \\
