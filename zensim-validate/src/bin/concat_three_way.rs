@@ -72,12 +72,14 @@ fn parse_coeffs(s: &str) -> (f32, f32, f32) {
     (a, b, c)
 }
 
-/// Returns (scaler_mean, scaler_scale, W0[228*128], b0[128], W1[128], b1[1]).
+/// Returns (scaler_mean, scaler_scale, W0[n_in*128], b0[128], W1[128], b1[1]).
 fn load_single_mlp(path: &PathBuf) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, f32) {
     let bytes = fs::read(path).expect("read bake");
     let model = Model::from_bytes(&bytes).expect("parse bake");
     assert_eq!(model.n_layers(), 2, "expected 2-layer MLP at {path:?}");
-    assert_eq!(model.n_inputs(), 228, "expected 228 inputs at {path:?}");
+    // Input width is whatever the bake was trained at (228 for V0_18,
+    // 372 for V0_20a IW-feature bakes). The concat just needs the
+    // three inputs to MATCH each other — checked in the caller.
     assert_eq!(model.n_outputs(), 1, "expected 1 output at {path:?}");
 
     let scaler_mean = model.scaler_mean().to_vec();
@@ -130,11 +132,17 @@ fn main() {
     let (sm_b, ss_b, w0_b, b0_b, w1_b, b1_b) = load_single_mlp(&args.s1);
     let (sm_c, ss_c, w0_c, b0_c, w1_c, b1_c) = load_single_mlp(&args.s42);
 
+    // Auto-detect input width from the scaler length (= n_inputs).
+    let n_in = sm_a.len();
+    assert_eq!(sm_b.len(), n_in, "scaler size mismatch: base={n_in}, s1={}", sm_b.len());
+    assert_eq!(sm_c.len(), n_in, "scaler size mismatch: base={n_in}, s42={}", sm_c.len());
+    eprintln!("concat input width: {n_in} (228=V0_18 basic+peaks, 372=V0_20a +IW)");
+
     // All three should share the same scaler (trained on the same
     // feature distribution). Verify with a tight tolerance; on mismatch,
     // use the base's scaler — the linear blend is dominated by it anyway.
     let mut warn_scaler = false;
-    for i in 0..228 {
+    for i in 0..n_in {
         if (sm_a[i] - sm_b[i]).abs() > 1e-4
             || (sm_a[i] - sm_c[i]).abs() > 1e-4
             || (ss_a[i] - ss_b[i]).abs() > 1e-4
@@ -152,9 +160,9 @@ fn main() {
 
     // Build layer 0: weights are [W_a | W_b | W_c] along the OUTPUT
     // (hidden) dim. Row-major layout means new[r, c_new] = old[r, c_local].
-    let mut w0_concat = vec![0.0f32; 228 * 384];
+    let mut w0_concat = vec![0.0f32; n_in * 384];
     let mut b0_concat = vec![0.0f32; 384];
-    for r in 0..228 {
+    for r in 0..n_in {
         for c in 0..128 {
             w0_concat[r * 384 + c + 0] = w0_a[r * 128 + c];
             w0_concat[r * 384 + c + 128] = w0_b[r * 128 + c];
@@ -182,7 +190,7 @@ fn main() {
 
     let layers = [
         BakeLayer {
-            in_dim: 228,
+            in_dim: n_in,
             out_dim: 384,
             activation: zenpredict::Activation::LeakyRelu,
             dtype: zenpredict::WeightDtype::F32,
