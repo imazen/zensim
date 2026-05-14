@@ -10,7 +10,7 @@
 //! use zensim_regress::testing::{RegressionTolerance, check_regression};
 //! # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
 //!
-//! let z = Zensim::new(ZensimProfile::latest());
+//! let z = Zensim::new(ZensimProfile::PreviewV0_2);
 //! let expected = RgbSlice::new(&expected_px, 8, 8);
 //! let actual = RgbSlice::new(&actual_px, 8, 8);
 //!
@@ -843,7 +843,7 @@ pub(crate) fn build_report(
 /// use zensim::{Zensim, ZensimProfile, RgbSlice};
 /// use zensim_regress::testing::{RegressionTolerance, check_regression};
 /// # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-/// let z = Zensim::new(ZensimProfile::latest());
+/// let z = Zensim::new(ZensimProfile::PreviewV0_2);
 /// let expected = RgbSlice::new(&expected_px, 8, 8);
 /// let actual = RgbSlice::new(&actual_px, 8, 8);
 ///
@@ -1484,7 +1484,7 @@ mod tests {
 
     #[test]
     fn resized_comparison_same_image_different_size() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
 
         // Create a 16x16 gradient image
         let mut small_rgba = Vec::with_capacity(16 * 16 * 4);
@@ -1518,7 +1518,7 @@ mod tests {
 
     #[test]
     fn resized_comparison_too_small_returns_error() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let small = vec![0u8; 4 * 4 * 4]; // 4x4 RGBA
         let big = vec![0u8; 16 * 16 * 4];
         let tol = RegressionTolerance::exact();
@@ -1529,7 +1529,7 @@ mod tests {
 
     #[test]
     fn off_by_one_uses_center_crop() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
 
         // Create a 16x16 image and a 17x15 variant (off by 1 in each axis)
         let mut rgba16 = Vec::with_capacity(16 * 16 * 4);
@@ -1671,7 +1671,7 @@ mod tests {
 
     #[test]
     fn detect_transform_catches_hflip() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = asymmetric_gradient(16, 16);
         let img = crate::pixel_ops::Bitmap::from_raw(16, 16, rgba.clone()).unwrap();
         let flipped = crate::pixel_ops::flip_horizontal(&img).into_raw();
@@ -1699,7 +1699,7 @@ mod tests {
 
     #[test]
     fn detect_transform_catches_vflip() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = asymmetric_gradient(16, 16);
         let img = crate::pixel_ops::Bitmap::from_raw(16, 16, rgba.clone()).unwrap();
         let flipped = crate::pixel_ops::flip_vertical(&img).into_raw();
@@ -1727,7 +1727,7 @@ mod tests {
 
     #[test]
     fn detect_transform_catches_rot180() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = asymmetric_gradient(16, 16);
         let img = crate::pixel_ops::Bitmap::from_raw(16, 16, rgba.clone()).unwrap();
         let rotated = crate::pixel_ops::rotate180(&img).into_raw();
@@ -1755,7 +1755,7 @@ mod tests {
 
     #[test]
     fn detect_transform_returns_none_for_unrelated_images() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba_a = asymmetric_gradient(16, 16);
         // Completely different image
         let rgba_b: Vec<u8> = (0..16 * 16)
@@ -1779,7 +1779,7 @@ mod tests {
 
     #[test]
     fn detect_transform_returns_none_for_too_small() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = vec![128u8; 4 * 4 * 4]; // 4x4 — too small
         let tol = RegressionTolerance::exact();
         assert!(detect_transform(&z, &rgba, &rgba, 4, 4, 10.0, &tol).is_none());
@@ -1789,7 +1789,7 @@ mod tests {
 
     #[test]
     fn orientation_swap_detects_rot90() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = asymmetric_gradient(16, 24);
         let img = crate::pixel_ops::Bitmap::from_raw(16, 24, rgba.clone()).unwrap();
         let rotated = crate::pixel_ops::rotate90(&img);
@@ -1823,7 +1823,7 @@ mod tests {
 
     #[test]
     fn orientation_swap_detects_rot270() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = asymmetric_gradient(16, 24);
         let img = crate::pixel_ops::Bitmap::from_raw(16, 24, rgba.clone()).unwrap();
         let rotated = crate::pixel_ops::rotate270(&img);
@@ -1855,7 +1855,7 @@ mod tests {
 
     #[test]
     fn orientation_swap_detects_transpose() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = asymmetric_gradient(16, 24);
         let img = crate::pixel_ops::Bitmap::from_raw(16, 24, rgba.clone()).unwrap();
         // Transpose = rot90 + flipH
@@ -1880,7 +1880,7 @@ mod tests {
 
     #[test]
     fn crop_difference_same_content_uses_center_crop() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         // 100x100 image, cropped to 97x97 (3% diff, > ±2px, within 5%)
         let rgba100 = asymmetric_gradient(100, 100);
         let img100 = crate::pixel_ops::Bitmap::from_raw(100, 100, rgba100.clone()).unwrap();
@@ -2043,7 +2043,7 @@ mod tests {
 
     #[test]
     fn set_dimension_info_on_report() {
-        let z = Zensim::new(zensim::ZensimProfile::latest());
+        let z = Zensim::new(zensim::ZensimProfile::PreviewV0_2);
         let rgba = vec![128u8; 8 * 8 * 4];
         let tol = RegressionTolerance::exact();
         let mut report = check_regression(

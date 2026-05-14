@@ -218,7 +218,7 @@ fn main() {
         // PreviewV0_4 forces feature population (the MLP path needs them).
         // We use it to extract features once per pair, then score V0_2,
         // V0_4 (trained), SSIM2, and Butteraugli on the same data.
-        let z_v04 = Zensim::new(ZensimProfile::PreviewV0_4);
+        let z_v04 = Zensim::new(ZensimProfile::PreviewV0_3);
 
         type MetricRow = (f64, f64, f64, f64, f64);
         /// (ref_path, dist_path, codec, version, human, v02, v04, ssim2, butter)
@@ -448,7 +448,7 @@ fn main() {
         let n_total = pairs.len();
         if n_total >= 4 {
             eprintln!("=== KonJND-1k (n={n_total}) ===");
-            let z_v04 = Zensim::new(ZensimProfile::PreviewV0_4);
+            let z_v04 = Zensim::new(ZensimProfile::PreviewV0_3);
             let started = std::time::Instant::now();
             let progress = AtomicUsize::new(0);
             let log_every = (n_total / 20).max(1);

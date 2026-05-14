@@ -86,7 +86,7 @@ fn main() {
         "/mnt/v/input/zensim/sources/03484c8be395c40d_1024sq.png",
     ];
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let mut scratch = ZensimScratch::new();
 
     println!(

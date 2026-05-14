@@ -149,7 +149,7 @@ fn main() {
         pairs.len()
     );
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let mut scratch = ZensimScratch::new();
 
     println!(

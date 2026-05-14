@@ -9,7 +9,6 @@
 //! Gated behind `__experimental_versions` to match the profile's
 //! feature gate.
 
-#![cfg(feature = "__experimental_versions")]
 
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
@@ -35,7 +34,7 @@ fn v04_score_is_in_unit_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -43,7 +42,7 @@ fn v04_score_is_in_unit_range() {
         (0.0..=100.0).contains(&score),
         "v0_4 score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_4);
+    assert_eq!(r.profile(), ZensimProfile::PreviewV0_3);
 }
 
 #[test]
@@ -51,7 +50,7 @@ fn v04_identical_inputs_near_perfect() {
     let (src, _) = make_test_pair(32, 32);
     let s = RgbSlice::new(&src, 32, 32);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
 
     // Trained MLP + scaler: identical inputs produce all-zero raw
@@ -94,7 +93,7 @@ fn v04_degraded_does_not_exceed_identical() {
         .collect();
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
     let r_self = z.compute(&s, &s).unwrap();
     let r_diff = z.compute(&s, &d).unwrap();
 
@@ -112,7 +111,7 @@ fn v04_compute_with_ref_matches_compute() {
     let s = RgbSlice::new(&src, 96, 64);
     let d = RgbSlice::new(&dst, 96, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
 
     let r_direct = z.compute(&s, &d).unwrap();
     let pre = z.precompute_reference(&s).unwrap();
@@ -129,5 +128,5 @@ fn v04_compute_with_ref_matches_compute() {
 
 #[test]
 fn v04_profile_name() {
-    assert_eq!(ZensimProfile::PreviewV0_4.name(), "zensim-preview-v0.4");
+    assert_eq!(ZensimProfile::PreviewV0_3.name(), "zensim-preview-v0.3");
 }

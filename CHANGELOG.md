@@ -3,18 +3,103 @@
 ## [Unreleased]
 
 ### QUEUED BREAKING CHANGES
-<!-- Breaking changes that ship together in the next major (or minor for 0.x).
+<!-- Breaking changes that ship together in the next minor for 0.x.
      Persist across patch releases. Only clear when the breaking release ships. -->
-- `ZensimError` is now `#[non_exhaustive]` — pattern matching outside this
-  crate must include a wildcard arm. New `ImageTooLarge` and
-  `FeatureWeightsLengthMismatch` variants ride on this attribute.
-- `ProfileParams` is now `#[non_exhaustive]` — external code can no longer
-  construct it via struct literal. Pick one of the canonical
-  `ZensimProfile::Preview*` variants instead. This unlocks future
-  internal field additions (e.g. V0_4 MLP dispatch's `mlp_bytes`)
-  without further breaking bumps.
 
-These two together require a `0.2.x → 0.3.0` minor bump on next release.
+(none currently queued — the 0.3.0 breaks shipped 2026-05-13)
+
+### Roadmap
+
+- **Zero-biased V0_18 rebake** — once validated, the bake bytes inside
+  `PreviewV0_3` get swapped to a τ=0.005 zero-biased variant of V0_18.
+  Score-stable contract holds (per-output SROCC within 0.001 of V0_18)
+  but the weight bytes gain 87 percentage-point higher zero density
+  for downstream LZ4 compression. Helper available now in
+  `zenpredict-bake::apply_zero_bias`; the actual rebake + paired
+  methodology doc lands in a follow-up.
+- **LZ4-compressed weights** — zenpredict 0.x (post-0.2) adds a
+  `compressed-weights` cargo feature with `WeightDtype::I8Lz4`. Once
+  that lands AND the zero-biased rebake ships, the V_X bake size
+  drops from 93 KB to ~25 KB. See zenpredict CHANGELOG for the
+  vendor / runtime / size details.
+
+## [0.3.0] - 2026-05-13
+
+### Changed (breaking)
+
+- **`ZensimProfile::PreviewV0_4` renamed to `ZensimProfile::PreviewV0_3`**.
+  The variant tracks the crate's minor version that introduced it,
+  not the underlying bake's internal version. The bake bytes inside
+  this variant are V0_18 today; future 0.3.x patches may swap to
+  V0_18-zerobiased or other score-stable variants. Migration:
+  find-replace `ZensimProfile::PreviewV0_4` → `ZensimProfile::PreviewV0_3`.
+- **`ZensimProfile::latest()` returns `PreviewV0_3`** (was `PreviewV0_2`).
+  Default consumers of `Zensim::new(ZensimProfile::latest())` now get
+  the MLP-scored V0_18 path. CID22 SROCC jumps from V0_2's 0.8676 to
+  V0_18's 0.8934; KADID from 0.8192 to 0.9427; TID from 0.8427 to
+  0.9525. Behavioral consequence: "identical inputs → raw_distance = 0
+  exactly" no longer holds (the MLP biases produce a small non-zero
+  raw output that the runtime clamps to score=100 at the score level).
+  Pin to `PreviewV0_2` to preserve the legacy linear behavior.
+- **`__experimental_versions` cargo feature removed**. The MLP path
+  ships unconditionally in 0.3.0; `zenpredict` is now a required
+  (not optional) dependency. zenpredict's license is MIT/Apache-2.0
+  matching zensim — the AGPL-disclaimer comments in the old feature
+  doc described a license plan that never went into effect.
+- **`weights/` directory included in the published crate**. The
+  V0_18 .bin (93 KB I8 bake, md5 `2cc537470e68f7379e759811ddd22900`)
+  now ships with `cargo install zensim` so the MLP path works
+  end-to-end without path-pinning. `weights/` was previously in
+  `package.exclude`.
+- `ZensimError` is now `#[non_exhaustive]` — pattern matching outside
+  this crate must include a wildcard arm. New `ImageTooLarge` and
+  `FeatureWeightsLengthMismatch` variants ride on this attribute.
+- `ProfileParams` is now `#[non_exhaustive]` — external code can no
+  longer construct it via struct literal. Pick one of the canonical
+  `ZensimProfile::Preview*` variants instead.
+
+### Added
+
+- MLP-scored outputs are now clamped to [0, 100] at the score level.
+  V0_18 (and any future MLP profile) can occasionally extrapolate
+  slightly past the calibration range for out-of-distribution inputs
+  (perfectly-identical pairs, sub-pyramid-min image sizes,
+  all-zero features). The documented score contract is 0..100;
+  consumers don't need to defensive-clamp on every call. The raw
+  MLP output remains visible via `ZensimResult::raw_distance()`
+  for callers who want the unclamped signal.
+
+### Cross-corpus SROCC vs human MOS (V0_18 inside PreviewV0_3)
+
+| Corpus | V0_18 (PreviewV0_3) | V0_2 (PreviewV0_2) | fast-ssim2 baseline |
+|---|--:|--:|--:|
+| CID22 (4292) | **0.8934** | 0.8676 | 0.8895 |
+| KADID10k (10125) | **0.9427** | 0.8192 | 0.8133 |
+| TID2013 (3000) | **0.9525** | 0.8427 | 0.8460 |
+| AIC-3 (600) | **0.7998** | 0.7962 | 0.7965 |
+| AIC-4 (300) | **0.9153** | 0.9107 | 0.9127 |
+| Non-mono v15r raw % | 5.47 | n/a (linear) | 5.08 |
+
+V0_18 wins fast-ssim2 on 4 of 5 corpora and is within sampling noise
+on AIC-3. The MLP profile is now the recommended default for new
+consumers.
+
+### Migration guide
+
+```rust
+// Before (zensim 0.2.x):
+let z = Zensim::new(ZensimProfile::latest());     // returns PreviewV0_2 (linear)
+let z = Zensim::new(ZensimProfile::PreviewV0_4);  // requires --features __experimental_versions
+
+// After (zensim 0.3.x):
+let z = Zensim::new(ZensimProfile::latest());     // returns PreviewV0_3 (MLP, V0_18 bytes)
+let z = Zensim::new(ZensimProfile::PreviewV0_3);  // explicit — no feature flag needed
+let z = Zensim::new(ZensimProfile::PreviewV0_2);  // legacy linear, still available
+```
+
+If your code asserts `result.raw_distance() == 0.0` for identical
+inputs OR relies on hardcoded V0_2 reference scores, pin to
+`PreviewV0_2` explicitly.
 
 ### Added (zensim, unreleased) — V0_18 SHIPPED: V0_17 weights quantized to I8 (2026-05-13)
 

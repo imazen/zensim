@@ -1118,7 +1118,11 @@ mod tests {
             p[0] = p[0].wrapping_add(50);
         }
 
-        let z = crate::Zensim::new(ZensimProfile::latest());
+        // Tiny 16x16 input: use the linear V0_2 profile explicitly. The
+        // MLP profile (now returned by `latest()`) needs the full 228
+        // features that only compute on larger inputs; the diffmap
+        // pipeline being tested here doesn't depend on the profile.
+        let z = crate::Zensim::new(ZensimProfile::PreviewV0_2);
         let src = RgbSlice::new(&pixels, 16, 16);
         let dst = RgbSlice::new(&dst, 16, 16);
 

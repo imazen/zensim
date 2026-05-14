@@ -460,7 +460,7 @@ fn compare_outputs(
         return Ok(SimdConsistencyReport::single_tier(perm_report));
     }
 
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::PreviewV0_2);
 
     let ref_label = outputs[0].0.clone();
     let ref_w = outputs[0].2 as usize;

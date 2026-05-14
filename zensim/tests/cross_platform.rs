@@ -86,12 +86,17 @@ fn generate_test_pairs(w: usize, h: usize) -> Vec<TestPair> {
 /// the 8 reference pairs below). Tighter would require pinning every
 /// reduction-order knob, which makes future perf work in the parallel
 /// kernels impossible without burning the V0_2 profile.
+///
+/// Pinned to `PreviewV0_2` rather than `latest()` because the reference
+/// scores below are V0_2-specific (228-weight linear profile, SROCC=0.9942).
+/// `latest()` returns the MLP `PreviewV0_3` in zensim 0.3.x — its scores
+/// for the same inputs are unrelated to the V0_2 calibration.
 #[test]
 fn hardcoded_reference_scores() {
     const W: usize = 128;
     const H: usize = 128;
     const TOLERANCE: f64 = 1e-2;
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let pairs = generate_test_pairs(W, H);
 
     // Reference scores with concordant-trained weights (228 weights, SROCC=0.9942).
@@ -458,11 +463,20 @@ fn determinism_same_platform() {
 
 /// Identical images must score exactly 100.0 with raw_distance=0.0 and all-zero features.
 /// Tests all 4 generators with separately-allocated copies (not same pointer).
+///
+/// Pinned to `PreviewV0_2` rather than `latest()` because the
+/// "raw_distance == 0.0 for identical input" invariant is V0_2-specific:
+/// V0_2 is a linear-weighted sum of feature distances, so all-zero
+/// features → 0 distance → score 100 by the `100 − 18·d^0.7` mapping.
+/// The MLP profile `PreviewV0_3` evaluates a LeakyReLU forward pass
+/// on the (all-zero) feature vector; its biases produce a non-zero raw
+/// output, which the runtime clamps to 100 at the score level.
+/// Different invariant, different test surface.
 #[test]
 fn identical_images_score_100() {
     const W: usize = 128;
     const H: usize = 128;
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
 
     let images: &[(&str, Vec<[u8; 3]>)] = &[
         ("checkerboard", gen_checkerboard(W, H, 8)),

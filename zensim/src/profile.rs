@@ -1,52 +1,59 @@
 //! Named metric profiles.
 //!
 //! Each [`ZensimProfile`] variant bundles weights and parameters that affect
-//! score output. A given profile should produce approximately the same scores
-//! across versions, but profiles may be removed in future major versions as
-//! the algorithm evolves.
+//! score output. A given profile produces approximately the same scores
+//! across crate patch versions. Variant names track the crate's minor
+//! version that introduced them — `PreviewV0_3` is the variant shipped
+//! by zensim 0.3.x; the underlying bake bytes inside the variant may
+//! be swapped during 0.3.x patches as long as scores stay approximately
+//! stable (per the [`zensim::CLAUDE.md`] shipping policy).
 //!
-//! # Profile-version policy
+//! Profile names and crate-version names are **two different things**:
+//! - **Profile name** (`PreviewV0_3`) is the API surface — what
+//!   downstream code matches on or constructs.
+//! - **Bake-bytes version** (V0_18, V0_18-zerobiased, ...) is the
+//!   implementation detail recorded in the methodology doc paired
+//!   with each crate release.
 //!
-//! Versions that have publicly shipped (`PreviewV0_1`, `PreviewV0_2`) stay
-//! enabled in the default feature set — they're stable, default-on, part of
-//! the published API surface.
-//!
-//! **Any new profile version is opt-in.** Newer variants (`PreviewV0_4`,
-//! and any future `PreviewV0_5+` we add) MUST be gated behind the
-//! `__experimental_versions` cargo feature. They stay opt-in until
-//! validated against external anchors (CID22 paper Table 4, KonJND-1k
-//! PJND), proven not to regress on the human-rated holdout sets
-//! (KADID10k_val, TID2013_val), and explicitly promoted in a release
-//! notes entry. Promotion = removing the `#[cfg(feature = "...")]` gate;
-//! never silently flip a `latest()` to a still-gated variant.
-//!
-//! This matters because the experimental feature also activates
-//! `zenpredict` (AGPL-3.0-only OR LicenseRef-Imazen-Commercial) and the
-//! bundled trained-weight `.bin` files. Default builds remain
-//! MIT/Apache-2.0 with no AGPL transitive obligations.
+//! [`zensim::CLAUDE.md`]: https://github.com/imazen/zensim/blob/main/CLAUDE.md
 
-/// Named metric profile. Scores for a given profile should be approximately
-/// stable across crate versions. Profiles may be removed in future versions.
+/// Named metric profile. Scores for a given profile stay approximately
+/// stable across crate versions. Variants may be removed in future
+/// major (or minor-for-0.x) version bumps.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZensimProfile {
     /// Preview v0.1. Trained on 344k synthetic pairs, 5-fold CV SROCC=0.9936.
+    /// Linear-weights profile, no MLP forward pass.
     PreviewV0_1,
     /// Preview v0.2. Concordance-filtered 218k pairs, Nelder-Mead SROCC=0.9960.
+    /// Linear-weights profile, no MLP forward pass. The historical
+    /// stable default — `latest()` returned this through zensim 0.2.x.
     PreviewV0_2,
-    /// Preview v0.4. MLP-scored profile (228 → 64 LeakyReLU → 1) trained
-    /// 2026-04-30 with synthetic + KADID_train + TID_train mixed
-    /// supervision. **Experimental** — gated behind the
-    /// `__experimental_versions` cargo feature; not part of the
-    /// crates.io-published surface.
-    #[cfg(feature = "__experimental_versions")]
-    PreviewV0_4,
+    /// Preview v0.3. MLP-scored profile, shipped 2026-05-13 with
+    /// zensim 0.3.0. Underlying bake at crate version 0.3.0 is **V0_18**:
+    /// 228→384→1 LeakyReLU MLP, I8 quantized with per-output f32 scales,
+    /// 93 KB bake (md5 `2cc537470e68f7379e759811ddd22900`). Built by
+    /// 3-way concat construction over V0_16 + cycle-14-s1 + cycle-14-s42
+    /// (mathematically equivalent to averaging three 228→128→1 MLPs).
+    ///
+    /// Cross-corpus SROCC (held-out): CID22 0.8934, KADID 0.9427, TID 0.9525,
+    /// AIC-3 0.7998, AIC-4 0.9153.
+    ///
+    /// Methodology: `benchmarks/v0_18_methodology_2026-05-13.md`.
+    ///
+    /// The bake bytes inside this variant may be swapped during 0.3.x
+    /// patches (e.g. to a zero-biased + LZ4-compressed V0_18 once that
+    /// path lands per the `zenpredict` roadmap). Cross-patch score
+    /// stability is the contract; bit-identity is not.
+    PreviewV0_3,
 }
 
 impl ZensimProfile {
     /// Latest recommended general-purpose profile.
+    /// Returns [`Self::PreviewV0_3`] in zensim 0.3.x.
     pub fn latest() -> Self {
-        Self::PreviewV0_2
+        Self::PreviewV0_3
     }
 
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
@@ -54,8 +61,7 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
-            #[cfg(feature = "__experimental_versions")]
-            Self::PreviewV0_4 => "zensim-preview-v0.4",
+            Self::PreviewV0_3 => "zensim-preview-v0.3",
         }
     }
 
@@ -64,8 +70,7 @@ impl ZensimProfile {
         match self {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
-            #[cfg(feature = "__experimental_versions")]
-            Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
+            Self::PreviewV0_3 => &PROFILE_PREVIEW_V0_3,
         }
     }
 }
@@ -229,25 +234,21 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// band coverage per Goal #1 (match-or-exceed ssim2 across all
 /// quality bands).
 ///
-/// Function and slot names preserved (`mlp_bake_preview_v0_4`,
-/// `PROFILE_PREVIEW_V0_4`) for source-compat with consumer pinning.
 /// Predecessors archived at `zensim/weights/archive/`:
+/// - `v0_4_2026-04-30.bin` (original V0_4 placeholder MLP)
 /// - `v0_5_2026-05-11.bin` (original 11.77% leak)
 /// - `v0_7_seed0_2026-05-11.bin`
 /// - `v0_7_seed1_tv10_2026-05-11.bin`
 /// - `v0_8_tainted_2026-05-11.bin` (+0.0034 inflation 2026-05-12)
 /// - `v0_15_2026-05-12.bin` (md5 `73d5e418`, first honest ship,
 ///   superseded same day by V0_16's better B0/B1 coverage)
-///
-/// Gated behind `__experimental_versions` because the `weights/`
-/// directory is excluded from the published crate.
-#[cfg(feature = "__experimental_versions")]
-pub(crate) fn mlp_bake_preview_v0_4() -> &'static [u8] {
+/// - `v0_16_2026-05-12.bin` (the base V0_18 was constructed from)
+/// - `v0_17_2026-05-13.bin` (F32 of V0_18; V0_18 is the I8 re-bake)
+pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
     include_bytes!("../weights/v0_18_2026-05-13.bin")
 }
 
-#[cfg(feature = "__experimental_versions")]
-static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
+static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
     // checking `mlp_bytes.is_some()` sees a sensible (V0_2-equivalent)
@@ -256,15 +257,15 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    // V0_8 bake is already MCOS-calibrated (affine α=31.10 β=-4.39
-    // baked in during ship). The runtime returns the bake's raw output
+    // V0_18 bake is already MCOS-calibrated (affine α=28.04 β=-5.07
+    // inherited from V0_16). The runtime returns the bake's raw output
     // directly as the score — applying the V0_2 `100 - 18·d^0.7` on
     // top of an MCOS-aligned value would produce garbage. Set
     // `skip_score_mapping = true` to bypass the transform.
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
-    mlp_bytes: Some(mlp_bake_preview_v0_4),
+    mlp_bytes: Some(mlp_bake_preview_v0_3),
 };
 
 // --- Weight arrays ---

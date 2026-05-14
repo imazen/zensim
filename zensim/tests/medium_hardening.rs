@@ -9,7 +9,11 @@
 use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
 
 fn z() -> Zensim {
-    Zensim::new(ZensimProfile::latest())
+    // Use V0_2 (linear): these tests poke API mechanics on tiny
+    // 16x16 / 32x16 inputs that are below the MLP profile's minimum
+    // input size (PreviewV0_3 needs the full 228-feature multi-scale
+    // pyramid which only computes cleanly on larger images).
+    Zensim::new(ZensimProfile::PreviewV0_2)
 }
 
 // ─── M1: cross-image dim mismatch in compute_with_ref* ─────────────────────

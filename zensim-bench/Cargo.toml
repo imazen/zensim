@@ -12,10 +12,8 @@ training = ["zensim/training"]
 cc = "1"
 
 [dependencies]
-# zensim-bench is internal tooling (not published) — flip
-# `__experimental_versions` on so the V0_4 dispatch path and trained
-# bake are reachable from the bench/example harnesses.
-zensim = { workspace = true, features = ["threads", "avx512", "imgref", "__experimental_versions"] }
+# zensim-bench is internal tooling (not published).
+zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }

@@ -46,7 +46,7 @@ fn bench_baseline(suite: &mut zenbench::Suite) {
             ("600x450", 600, 450),
             ("3840x2160", 3840, 2160),
         ] {
-            let z = Zensim::new(ZensimProfile::latest());
+            let z = Zensim::new(ZensimProfile::PreviewV0_2);
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let src = gradient_rgba(w, h);
             let dst = gradient_rgba(w, h);
@@ -71,7 +71,7 @@ fn bench_detect_unrelated(suite: &mut zenbench::Suite) {
             ("600x450", 600, 450),
             ("3840x2160", 3840, 2160),
         ] {
-            let z = Zensim::new(ZensimProfile::latest());
+            let z = Zensim::new(ZensimProfile::PreviewV0_2);
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(w, h);
             let act = noise_rgba(w, h, 42);
@@ -99,7 +99,7 @@ fn bench_detect_flipped(suite: &mut zenbench::Suite) {
             ("600x450", 600, 450),
             ("3840x2160", 3840, 2160),
         ] {
-            let z = Zensim::new(ZensimProfile::latest());
+            let z = Zensim::new(ZensimProfile::PreviewV0_2);
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(w, h);
             let img = image::RgbaImage::from_raw(w, h, exp.clone()).unwrap();
@@ -128,7 +128,7 @@ fn bench_resized_orientation(suite: &mut zenbench::Suite) {
             ("600x450", 600, 450),
             ("2160x3840", 2160, 3840),
         ] {
-            let z = Zensim::new(ZensimProfile::latest());
+            let z = Zensim::new(ZensimProfile::PreviewV0_2);
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(w, h);
             let img = image::RgbaImage::from_raw(w, h, exp.clone()).unwrap();
@@ -161,7 +161,7 @@ fn bench_resized_off_by_one(suite: &mut zenbench::Suite) {
             ("600x450", 600, 450),
             ("3840x2160", 3840, 2160),
         ] {
-            let z = Zensim::new(ZensimProfile::latest());
+            let z = Zensim::new(ZensimProfile::PreviewV0_2);
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(w, h);
             let act = gradient_rgba(w + 1, h - 1);
@@ -190,7 +190,7 @@ fn bench_resized_large(suite: &mut zenbench::Suite) {
             ("600x450_vs_300x200", 600u32, 450u32, 300u32, 200u32),
             ("3840x2160_vs_1920x1080", 3840, 2160, 1920, 1080),
         ] {
-            let z = Zensim::new(ZensimProfile::latest());
+            let z = Zensim::new(ZensimProfile::PreviewV0_2);
             let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
             let exp = gradient_rgba(ew, eh);
             let act = noise_rgba(aw, ah, 99);

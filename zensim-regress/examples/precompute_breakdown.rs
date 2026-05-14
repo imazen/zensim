@@ -18,7 +18,7 @@ fn gradient(w: u32, h: u32, seed: u32) -> Vec<[u8; 4]> {
 }
 
 fn main() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
 
     for &(w, h) in &[(1920u32, 1080u32), (3840, 2160)] {
         let src = gradient(w, h, 42);

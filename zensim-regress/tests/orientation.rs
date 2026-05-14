@@ -46,7 +46,7 @@ fn px(rgba: &[u8]) -> Vec<[u8; 4]> {
 #[test]
 fn orientation_1_self_comparison_scores_100() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::exact();
 
     let (rgba, w, h) = load_rgba(&dir.join("Landscape_1.jpg"));
@@ -96,7 +96,7 @@ fn swapped_dim_orientations_have_swapped_dimensions() {
 #[test]
 fn swapped_orientations_classified_as_orientation_swap() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
 
     let (ref_rgba, rw, rh) = load_rgba(&dir.join("Landscape_1.jpg"));
@@ -120,7 +120,7 @@ fn swapped_orientations_classified_as_orientation_swap() {
 #[test]
 fn portrait_swapped_orientations_classified_as_orientation_swap() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
 
     let (ref_rgba, rw, rh) = load_rgba(&dir.join("Portrait_1.jpg"));
@@ -144,7 +144,7 @@ fn portrait_swapped_orientations_classified_as_orientation_swap() {
 #[test]
 fn all_orientation_pairs_produce_reports_without_panic() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::off_by_one().with_min_similarity(0.0);
 
     for prefix in ["Landscape", "Portrait"] {
@@ -196,7 +196,7 @@ fn apply_transform(img: &RgbaImage, method: ComparisonMethod) -> RgbaImage {
 #[test]
 fn exact_same_dim_transforms_detected() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::exact();
 
     let (ref_rgba, rw, rh) = load_rgba(&dir.join("Landscape_1.jpg"));
@@ -253,7 +253,7 @@ fn exact_same_dim_transforms_detected() {
 #[test]
 fn exact_swapped_dim_transforms_detected() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::exact();
 
     let (ref_rgba, rw, rh) = load_rgba(&dir.join("Landscape_1.jpg"));
@@ -299,7 +299,7 @@ fn exact_swapped_dim_transforms_detected() {
 #[test]
 fn exact_same_dim_transforms_portrait() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::exact();
 
     let (ref_rgba, rw, rh) = load_rgba(&dir.join("Portrait_1.jpg"));
@@ -346,7 +346,7 @@ fn exact_same_dim_transforms_portrait() {
 #[test]
 fn exact_swapped_dim_transforms_portrait() {
     let dir = orientation_dir();
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let tol = RegressionTolerance::exact();
 
     let (ref_rgba, rw, rh) = load_rgba(&dir.join("Portrait_1.jpg"));

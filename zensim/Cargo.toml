@@ -9,7 +9,7 @@ readme = "../README.md"
 rust-version = "1.93.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
-exclude = ["benches/", "tests/", "weights/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+exclude = ["benches/", "tests/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
 
 [features]
 default = ["avx512", "imgref", "threads"]
@@ -25,18 +25,6 @@ training = []
 classification = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
-## Enable experimental profiles (currently `PreviewV0_4` MLP) and the
-## bundled trained-weight `.bin`. Off by default. Excluded from
-## `cargo publish` artifacts (the `weights/` directory is in `package.exclude`),
-## so building this feature outside the source tree fails the
-## `include_bytes!` lookup — that's intentional. V0_4 is a development /
-## experimental path, not a stable public API.
-##
-## Activates the `zenpredict` runtime dependency
-## (AGPL-3.0-only OR LicenseRef-Imazen-Commercial). Default builds
-## without this feature do NOT link `zenpredict` and stay fully
-## MIT/Apache-2.0.
-__experimental_versions = ["dep:zenpredict"]
 ## Enable ImageSource adapter for zenpixels PixelSlice/PixelBuffer types.
 ## Automatically maps PixelDescriptor to correct format, alpha mode, and
 ## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
@@ -57,12 +45,11 @@ linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
 zenpixels = { version = "0.2.10", optional = true, default-features = false }
-# Runtime for V0_4's MLP scorer. AGPL-3.0-only OR LicenseRef-Imazen-Commercial
-# upstream — gated behind `__experimental_versions` so default builds
-# don't pull AGPL into MIT/Apache-2.0 dependency trees. Activate the
-# feature only when you intentionally want the experimental V0_4 path
-# and accept the license obligations.
-zenpredict = { workspace = true, optional = true }
+# Runtime for the `PreviewV0_3` MLP scorer. zenpredict is MIT/Apache-2.0
+# (matching zensim), so the runtime dep is unconditional in 0.3.0+.
+# Prior comments claiming AGPL referred to a license plan that was
+# superseded before zenpredict's 0.1.0 publish.
+zenpredict = { workspace = true }
 # zenresize = { workspace = true, optional = true }  # re-enable when published
 
 [dev-dependencies]
@@ -76,4 +63,4 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "__experimental_versions"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads"))']  # zenresize kept in check-cfg for gated code

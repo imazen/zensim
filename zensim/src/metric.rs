@@ -511,7 +511,6 @@ impl ZensimResult {
     /// Replace the raw distance and score with values from the MLP
     /// scoring path. Internal use only — called by
     /// [`apply_mlp_scoring`](crate::metric::apply_mlp_scoring).
-    #[cfg(feature = "__experimental_versions")]
     pub(crate) fn set_mlp_score(&mut self, raw_distance: f64, score: f64) {
         self.raw_distance = raw_distance;
         self.score = score;
@@ -1511,7 +1510,6 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
 /// log2(pixels), log2(min_dim), log2(max_dim), and signed
 /// log2(max/min) by aspect orientation.
 pub(crate) fn apply_mlp_scoring(
-    #[cfg_attr(not(feature = "__experimental_versions"), allow(unused_variables))]
     result: &mut ZensimResult,
     params: &crate::profile::ProfileParams,
     width: u32,
@@ -1520,10 +1518,6 @@ pub(crate) fn apply_mlp_scoring(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
-    // Without `__experimental_versions`, no profile sets `mlp_bytes`,
-    // so the early return above keeps this function a no-op without
-    // pulling in the `zenpredict`-backed MLP runtime.
-    #[cfg(feature = "__experimental_versions")]
     {
         let bytes = loader();
         let model =
@@ -1563,14 +1557,19 @@ pub(crate) fn apply_mlp_scoring(
             // output IS the final score. Skipping the
             // `100 − A·d^B` transform avoids producing garbage
             // (e.g. raw=90 → mapped=-374).
-            raw
+            //
+            // Clamp to [0, 100] because MLPs trained against ssim2 /
+            // MCOS extrapolate slightly past the calibration range
+            // for out-of-distribution inputs (perfectly-identical
+            // pairs, all-zero features, sub-pyramid-min image sizes).
+            // The documented score contract is 0..100; consumers
+            // shouldn't have to defensive-clamp on every call.
+            raw.clamp(0.0, 100.0)
         } else {
             distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
         };
         result.set_mlp_score(raw, score);
     }
-    #[cfg(not(feature = "__experimental_versions"))]
-    let _ = (loader, width, height); // silence unused warnings when feature off
     Ok(())
 }
 
@@ -1579,7 +1578,6 @@ pub(crate) fn apply_mlp_scoring(
 /// `append_size_axes` in `zensim-validate/src/main.rs` so a model
 /// trained with `--mlp-size-axes` produces the same input layout
 /// at runtime.
-#[cfg(feature = "__experimental_versions")]
 fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
     if width == 0 || height == 0 {
         features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
@@ -2130,7 +2128,13 @@ mod tests {
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
 
-        let z = crate::Zensim::new(crate::ZensimProfile::latest());
+        // Linear-profile-specific test: the score-equality assertion
+        // only holds for profiles whose scoring is linear-weighted on
+        // the 228 features (the extended 300 features just have
+        // weight=0 in those slots). MLP profiles (PreviewV0_3 +) score
+        // via a forward pass — extended features change the input
+        // shape and break the equality. Pin to V0_2.
+        let z = crate::Zensim::new(crate::ZensimProfile::PreviewV0_2);
         let standard = z.compute(&src_img, &dst_img).unwrap();
         let extended = z.compute_extended_features(&src_img, &dst_img).unwrap();
 

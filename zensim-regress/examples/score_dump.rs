@@ -68,7 +68,7 @@ fn jpeg_like(w: u32, h: u32, q: u8) -> Vec<[u8; 4]> {
 }
 
 fn main() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
 
     let cases: &[(&str, u32, u32, ImageGen, ImageGen)] = &[
         (

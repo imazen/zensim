@@ -156,7 +156,7 @@ fn main() {
     );
     println!("|---------|--:|:----:|:----:|:----:|:----:|:----:|:----:|");
 
-    let z_v04 = Zensim::new(ZensimProfile::PreviewV0_4);
+    let z_v04 = Zensim::new(ZensimProfile::PreviewV0_3);
 
     for ds in &datasets {
         let n = ds.pairs.len();
