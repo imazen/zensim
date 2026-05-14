@@ -8,20 +8,33 @@
 
 (none currently queued — the 0.3.0 breaks shipped 2026-05-13)
 
+### Changed
+
+- **`PreviewV0_3` bytes swapped to V0_19 bake** (md5
+  `239b55936f3ae1e0c2a72aa6d14d4f27`, 93,064 B). Trained on the
+  2026-05-14-clean corpus (138,872-row safe-synthetic after the
+  KADID/TID perceptual-overlap purge). 3-way concat ensemble (base +
+  cycle-14 s1 + cycle-14 s42, 0.65/0.30/0.05 mix) affine-calibrated and
+  I8-quantized via `rebake_v3_1`. Honest CID22 SROCC 0.8785 (vs V0_18's
+  inflated 0.8934); wins V0_18 on KADID (+0.0034 → 0.9461) and TID
+  (+0.0028 → 0.9553). Prior V0_18 bake archived at
+  `zensim/weights/archive/v0_18_inflated_pre_v19_swap_2026-05-14.bin`.
+  Methodology doc: `benchmarks/v0_19_methodology_2026-05-14.md`.
+
 ### Roadmap
 
-- **Zero-biased V0_18 rebake** — once validated, the bake bytes inside
-  `PreviewV0_3` get swapped to a τ=0.005 zero-biased variant of V0_18.
-  Score-stable contract holds (per-output SROCC within 0.001 of V0_18)
-  but the weight bytes gain 87 percentage-point higher zero density
-  for downstream LZ4 compression. Helper available now in
-  `zenpredict-bake::apply_zero_bias`; the actual rebake + paired
-  methodology doc lands in a follow-up.
+- **V0_20**: B0/B1 low-quality band improvement via one or more of:
+  IW-style information-content-weighted spatial pooling, distortion-
+  manifold pre-training, LMS+opponent-channel cross-color-space features,
+  JND-unit calibration anchor on AIC-3. See
+  `docs/literature_notes_2026-05-14.md` for the experiment queue.
+- **V0_21**: linear distillation of V0_20 MLP with JND-unit anchored
+  calibration.
 - **LZ4-compressed weights** — zenpredict 0.x (post-0.2) adds a
   `compressed-weights` cargo feature with `WeightDtype::I8Lz4`. Once
-  that lands AND the zero-biased rebake ships, the V_X bake size
-  drops from 93 KB to ~25 KB. See zenpredict CHANGELOG for the
-  vendor / runtime / size details.
+  that lands the V_X bake size could drop from 93 KB to ~13 KB
+  (zerobiased+LZ4 measured 2026-05-14, with 0.003 SROCC trade we
+  declined). See zenpredict CHANGELOG for vendor / runtime details.
 
 ## [0.3.0] - 2026-05-13
 
