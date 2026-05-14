@@ -2,26 +2,79 @@
 //!
 //! Reads one or more `--group NAME:CSV:TRAIN_W:VAL_W` CSVs (each in
 //! the trainer-compatible shape `ref_basename, human_score, f0..f227`)
-//! and trains the multi-group RankNet MLP. Writes ZNPR v2 bytes to
+//! and trains the multi-group RankNet MLP. Writes ZNPR v3 bytes to
 //! `--out PATH`.
 //!
-//! ## V0_16 SHIP recipe (current default)
+//! ## Canonical V0_18-methodology recipe (2026-05-14, RECOMMENDED)
 //!
-//! Defaults are tuned to the V0_16 ship recipe (CID22 SROCC 0.8919 on
-//! 4292 pairs, +0.0024 over fast-ssim2). To reproduce V0_16:
+//! V0_18 is a **3-way concat ensemble** of three 228→128→1 single
+//! MLPs averaged at the output (0.65/0.30/0.05 mix). Each component
+//! has its own seed and TV config. To reproduce V0_19+ on the
+//! canonical KADID/TID-perceptually-cleaned 2026-05-14 corpus:
 //!
-//!     zensim_mlp_train \
-//!       --group safesyn:/tmp/safe_synth_clean_features.csv:1.0:0.0 \
-//!       --group kadid:/path/to/kadid_features.csv:0.3:1.0 \
-//!       --group tid:/path/to/tid_features.csv:0.3:1.0 \
-//!       --tv-pairs-file /tmp/combined_purged_tv_pairs_bands.tsv \
-//!       --out benchmarks/rust_v0_X_$(date -u +%Y-%m-%d).bin
+//! ```sh
+//! CLEAN=/mnt/v/zen/zensim-training/2026-05-14-clean
 //!
-//! All other flags (--hidden 128, --tv-weight 20, --epochs 300,
-//! --val-policy min, --lr 1e-3, --max-features 228, --seed 1) default
-//! to the V0_16 ship values; override only when running cycle
-//! experiments. See zensim/CONTEXT-HANDOFF.md for the full recipe
-//! provenance (raw bake md5 b3f5fc59, calibrated baf3fdcb).
+//! # Component 1: V0_16-base equivalent (no TV regularizer, seed=1).
+//! zensim_mlp_train \
+//!   --group safesyn:$CLEAN/safe_synth_v19_clean_features.csv:1.0:0.0 \
+//!   --group kadid:$CLEAN/kadid_features.csv:0.3:1.0 \
+//!   --group tid:$CLEAN/tid_features.csv:0.3:1.0 \
+//!   --group konjnd:$CLEAN/konjnd_aligned_features.csv:0.5:1.0 \
+//!   --hidden 128 --epochs 300 --seed 1 \
+//!   --out benchmarks/v0_X_base_seed1_$(date -u +%Y-%m-%d).bin
+//!
+//! # Component 2: cycle-14 TV-regularized, seed=1.
+//! zensim_mlp_train \
+//!   <same 4 groups> \
+//!   --hidden 128 --epochs 300 --seed 1 \
+//!   --tv-pairs-file $CLEAN/tv_pairs_bands.tsv \
+//!   --tv-weight 1.0 --tv-band-weights 10,30,10,30 \
+//!   --tv-apply-every 50 --tv-batch 32 \
+//!   --out benchmarks/v0_X_cycle14_s1_$(date -u +%Y-%m-%d).bin
+//!
+//! # Component 3: cycle-14 TV-regularized, seed=42.
+//! zensim_mlp_train \
+//!   <same 4 groups + same TV flags but> \
+//!   --seed 42 \
+//!   --out benchmarks/v0_X_cycle14_s42_$(date -u +%Y-%m-%d).bin
+//!
+//! # Concat three into one wide ensemble bake:
+//! cargo run --release -p zensim-validate --bin concat_three_way -- \
+//!   --base benchmarks/v0_X_base_seed1_...bin \
+//!   --s1   benchmarks/v0_X_cycle14_s1_...bin \
+//!   --s42  benchmarks/v0_X_cycle14_s42_...bin \
+//!   --out  benchmarks/v0_X_concat_3way_$(date -u +%Y-%m-%d).bin
+//!
+//! # Affine-calibrate (α=28.0366, β=-5.0738 inherits from V0_16 lineage):
+//! python3 scripts/v_next/affine_calibrate_znpr_v2.py \
+//!   --in-bake  benchmarks/v0_X_concat_3way_...bin \
+//!   --out-bake zensim/weights/v0_X_$(date -u +%Y-%m-%d)_f32.bin \
+//!   --alpha 28.0366 --beta -5.0738
+//!
+//! # I8 re-quantize:
+//! cargo run --release -p zensim-bench --example quant_compare -- \
+//!   zensim/weights/v0_X_$(date -u +%Y-%m-%d)_f32.bin /tmp/quant
+//! ```
+//!
+//! ## Contamination guard
+//!
+//! Every `--group <name>:<csv>:...` call passes the CSV through
+//! `contamination_guard::scrub_csv_or_die` before training begins.
+//! The 149-basename KADID+TID overlap blocklist is embedded at
+//! compile time via `include_str!` from
+//! `benchmarks/contamination_blocklist_2026-05-14.txt` — even if a
+//! stale CSV is on disk somewhere, the trainer refuses to use it.
+//! Filenames containing `CONTAMINATED` are rejected on sight before
+//! any row scan.
+//!
+//! ## Defaults
+//!
+//! All other flags (--hidden 128, --epochs 300, --val-policy min,
+//! --lr 1e-3, --max-features 228, --seed 1) default to the V0_16/V0_18
+//! ship values; override only for cycle experiments. See
+//! `benchmarks/v0_18_methodology_2026-05-13.md` for the canonical
+//! per-bake methodology + reproduction.
 
 use clap::Parser;
 use std::fs::File;
@@ -31,6 +84,9 @@ use std::path::PathBuf;
 #[path = "../mlp_train.rs"]
 #[allow(dead_code)] // some helpers are unused in this binary
 mod mlp_train;
+
+#[path = "../contamination_guard.rs"]
+mod contamination_guard;
 
 use mlp_train::{
     MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv,
@@ -312,6 +368,16 @@ fn main() {
         let (name, path, train_w, val_w) = parse_group_spec(spec).unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(2);
+        });
+        // 2026-05-14 contamination guard: refuse to load any CSV that
+        // contains a KADID/TID-overlap basename. Exits 2 with a loud
+        // message if the input is contaminated. See
+        // `crate::contamination_guard::BLOCKLIST_TXT` for the 149
+        // basenames committed at
+        // benchmarks/contamination_blocklist_2026-05-14.txt.
+        contamination_guard::scrub_csv_or_die(&path).unwrap_or_else(|e| {
+            eprintln!("contamination_guard read error on {}: {e}", path.display());
+            std::process::exit(1);
         });
         let mut g = load_csv(&path, &name).unwrap_or_else(|e| {
             eprintln!("{e}");

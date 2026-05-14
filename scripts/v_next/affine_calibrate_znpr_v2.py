@@ -37,7 +37,15 @@ def parse_bake_v2_offsets(data: bytes):
     """Return parsed header info + per-layer offsets so we can mutate in place."""
     assert data[0:4] == b"ZNPR"
     version = struct.unpack("<H", data[4:6])[0]
-    assert version == 2, f"expected v2, got {version}"
+    # Calibration math is identical for v2 and v3 — both use the same
+    # layer-table + section-offset layout for the first 96 bytes of
+    # the header. v3.1 (2026-05-14) added reserved header fields at
+    # offset 96..128 (compression flag, decompressed_payload_len,
+    # feature_order, output_order), all of which are zero for the
+    # F32 bakes we calibrate here. The check is permissive:
+    # accept any v2/v3 bake. If a future v4 changes the layer-table
+    # layout, this assertion will catch it loudly.
+    assert version in (2, 3), f"expected ZNPR v2 or v3, got {version}"
     n_inputs = struct.unpack("<I", data[8:12])[0]
     n_outputs = struct.unpack("<I", data[12:16])[0]
     n_layers = struct.unpack("<I", data[16:20])[0]

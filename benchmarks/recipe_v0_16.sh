@@ -15,15 +15,17 @@
 # loss" per user) can reproduce V0_16 in one command without hunting
 # through tick logs or commit messages.
 #
-# Inputs (must exist locally; see "Regenerate inputs" section below):
-#   - /tmp/zensim_loop/safe_synth_clean_features.csv   (144,791 rows post-purge)
-#   - /tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv (205,654 pairs)
-#   - /mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv
-#   - /mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv
-#   - /tmp/zensim_loop/konjnd_aligned_features.csv     (76,104 KonJND-1k pairs;
-#     RESTORED 2026-05-13 tick 612 — the V0_16 training log shows konjnd
-#     was used at train_w=0.5 and the prior recipe runner was missing it,
-#     producing CID22 0.876 instead of V0_16's 0.8919)
+# Inputs (canonical clean corpus at /mnt/v/zen/zensim-training/2026-05-14-clean/):
+#   - safe_synth_v19_clean_features.csv (138,872 rows; V0_18 base minus
+#     KADID/TID perceptual-overlap purge per audit 2026-05-14)
+#   - tv_pairs_bands.tsv                (205,654 pairs)
+#   - kadid_features.csv                (KADID-10k training + validation)
+#   - tid_features.csv                  (TID2013 training + validation)
+#   - konjnd_aligned_features.csv       (76,104 KonJND-1k anchor pairs)
+#
+# These are mirrored from /mnt/v block storage. The previous /tmp paths
+# have been renamed with `.CONTAMINATED_2026-05-14_DO_NOT_USE` suffix
+# and the contamination_guard binary refuses them at training time.
 #
 # Output:
 #   - benchmarks/rust_v0_X_<DATE>.raw.bin       (uncalibrated bake)
@@ -61,11 +63,18 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-SAFESYN_CSV="/tmp/zensim_loop/safe_synth_clean_features.csv"
-KADID_CSV="/mnt/v/zen/zensim-training/2026-05-07/v06-features/kadid_features.csv"
-TID_CSV="/mnt/v/zen/zensim-training/2026-05-07/v06-features/tid_features.csv"
-KONJND_CSV="/tmp/zensim_loop/konjnd_aligned_features.csv"
-TV_PAIRS="/tmp/zensim_loop/combined_purged_tv_pairs_bands.tsv"
+# 2026-05-14: switched to the canonical clean corpus at
+# /mnt/v/zen/zensim-training/2026-05-14-clean/ which is V0_18's
+# base training data minus the 149 KADID/TID perceptual-overlap
+# basenames found in the 2026-05-14 dHash-64 audit. The OLD /tmp
+# paths have been renamed with `.CONTAMINATED_2026-05-14_DO_NOT_USE`
+# suffix; zensim_mlp_train refuses to load them.
+CANON=/mnt/v/zen/zensim-training/2026-05-14-clean
+SAFESYN_CSV="$CANON/safe_synth_v19_clean_features.csv"
+KADID_CSV="$CANON/kadid_features.csv"
+TID_CSV="$CANON/tid_features.csv"
+KONJND_CSV="$CANON/konjnd_aligned_features.csv"
+TV_PAIRS="$CANON/tv_pairs_bands.tsv"
 
 # --- V0_16 hyperparameters (matches CONTEXT-HANDOFF.md exactly) ---
 HIDDEN=128            # binary default since tick 594; explicit for clarity
