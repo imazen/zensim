@@ -235,6 +235,79 @@ impl WeightedPool {
     }
 }
 
+/// Per-channel IW-pooled SSIM block emitted in the V0_20a feature
+/// extension. Mirrors the 6 "masked" features in the existing extended
+/// profile but with the weight direction inverted (high info content
+/// gets MORE weight, not less).
+#[derive(Debug, Clone, Copy)]
+pub struct IwSsimFeatures {
+    /// Weighted mean of per-pixel SSIM(src, dst) at this scale & channel.
+    pub iw_ssim_mean: f64,
+    /// Weighted L2 of SSIM.
+    pub iw_ssim_2nd: f64,
+    /// Weighted L4 of SSIM (peak-emphasising, matches `ssim_4th`).
+    pub iw_ssim_4th: f64,
+    /// Weighted L4 of edge artifact map.
+    pub iw_art_4th: f64,
+    /// Weighted L4 of edge detail-lost map.
+    pub iw_det_4th: f64,
+    /// Weighted mean of (src-dst)².
+    pub iw_mse: f64,
+}
+
+impl IwSsimFeatures {
+    /// Number of features per call — matches `FEATURES_PER_CHANNEL_*_MASKED` in `metric.rs`.
+    pub const FEATURES_PER_CALL: usize = 6;
+
+    /// Flatten into the wire-order indices used by the trainer.
+    pub fn as_array(&self) -> [f64; 6] {
+        [
+            self.iw_ssim_mean,
+            self.iw_ssim_2nd,
+            self.iw_ssim_4th,
+            self.iw_art_4th,
+            self.iw_det_4th,
+            self.iw_mse,
+        ]
+    }
+
+    /// Pool the supplied per-pixel maps with IW weights computed from
+    /// the reference plane. All inputs must be the same length =
+    /// `width * height`. `ref_plane` is the reference channel at this
+    /// scale (used for weight computation); `ssim_map` / `art_map` /
+    /// `det_map` / `mse_map` are pre-computed per-pixel diffmaps from
+    /// the basic feature pipeline.
+    ///
+    /// Designed for the V0_20a sweep: take an existing reference +
+    /// diffmap, weight by reference info-content, output 6 features.
+    pub fn pool_from_maps(
+        ref_plane: &[f32],
+        width: usize,
+        height: usize,
+        stride: usize,
+        ssim_map: &[f32],
+        art_map: &[f32],
+        det_map: &[f32],
+        mse_map: &[f32],
+        config: IwWeightConfig,
+    ) -> Self {
+        let weights = compute_iw_weights(ref_plane, width, height, stride, config);
+        let n = width * height;
+        assert_eq!(ssim_map.len(), n, "ssim_map size mismatch");
+        assert_eq!(art_map.len(), n, "art_map size mismatch");
+        assert_eq!(det_map.len(), n, "det_map size mismatch");
+        assert_eq!(mse_map.len(), n, "mse_map size mismatch");
+        Self {
+            iw_ssim_mean: WeightedPool::mean(ssim_map, &weights),
+            iw_ssim_2nd: WeightedPool::l2(ssim_map, &weights),
+            iw_ssim_4th: WeightedPool::l4(ssim_map, &weights),
+            iw_art_4th: WeightedPool::l4(art_map, &weights),
+            iw_det_4th: WeightedPool::l4(det_map, &weights),
+            iw_mse: WeightedPool::mean(mse_map, &weights),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +390,54 @@ mod tests {
         let edge_weight_r = w[2]; // x=2, just right of step
         assert!(edge_weight_l > 0.0);
         assert!(edge_weight_r > 0.0);
+    }
+
+    #[test]
+    fn pool_from_maps_uniform_weights_match_unweighted() {
+        // Build a 4×4 reference, uniform — so weights are all `weight_floor·max=floor·0=0`,
+        // which the floor raises to a uniform positive value, recovering
+        // the unweighted pool.
+        let ref_plane = vec![5.0f32; 16];
+        let ssim = vec![0.8f32; 16];
+        let art = vec![0.1f32; 16];
+        let det = vec![0.1f32; 16];
+        let mse = vec![0.01f32; 16];
+        let f = IwSsimFeatures::pool_from_maps(
+            &ref_plane, 4, 4, 4, &ssim, &art, &det, &mse, IwWeightConfig::default(),
+        );
+        assert!((f.iw_ssim_mean - 0.8).abs() < 1e-6);
+        assert!((f.iw_ssim_2nd - 0.8).abs() < 1e-6);
+        assert!((f.iw_ssim_4th - 0.8).abs() < 1e-6);
+        assert!((f.iw_mse - 0.01).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pool_from_maps_emphasises_edge_regions() {
+        // Reference: step edge (left=0, right=10). SSIM-map: errors only
+        // at the edge column. With IW weighting (texture-emphasising),
+        // the pool should report a LARGER error than uniform pooling
+        // because the edge-pixel errors get more weight.
+        let ref_plane: Vec<f32> = (0..16)
+            .map(|i| if (i % 4) < 2 { 0.0 } else { 10.0 })
+            .collect();
+        // Inject error only at the edge column (x=1, where step happens).
+        let mut ssim_err = vec![0.0f32; 16];
+        for y in 0..4 {
+            ssim_err[y * 4 + 1] = 1.0; // strong SSIM error at edge
+        }
+        let zero = vec![0.0f32; 16];
+        let iw = IwSsimFeatures::pool_from_maps(
+            &ref_plane, 4, 4, 4, &ssim_err, &zero, &zero, &zero, IwWeightConfig::default(),
+        );
+        // Unweighted: 4/16 = 0.25. IW-weighted: edge pixels (which have
+        // high variance) get more weight → IW mean should be > 0.25.
+        let unweighted_mean = ssim_err.iter().sum::<f32>() as f64 / 16.0;
+        assert!(
+            iw.iw_ssim_mean > unweighted_mean,
+            "IW mean {} should exceed unweighted {}",
+            iw.iw_ssim_mean,
+            unweighted_mean,
+        );
     }
 
     #[test]
