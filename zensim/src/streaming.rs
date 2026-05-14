@@ -327,6 +327,15 @@ struct ScaleAccumulators {
     masked_art4: [f64; 3],
     masked_det4: [f64; 3],
     masked_mse: [f64; 3],
+    // IW (information-content-weighted) features — Wang & Li 2011.
+    // Same shape as masked_*, opposite weight polarity (texture-emphasising).
+    // Gated by `config.compute_iw_features`; zero on the off-path.
+    iw_ssim_d: [f64; 3],
+    iw_ssim_d4: [f64; 3],
+    iw_ssim_d2: [f64; 3],
+    iw_art4: [f64; 3],
+    iw_det4: [f64; 3],
+    iw_mse: [f64; 3],
     // Total inner pixels processed
     n: usize,
 }
@@ -360,6 +369,12 @@ impl ScaleAccumulators {
             masked_art4: [0.0; 3],
             masked_det4: [0.0; 3],
             masked_mse: [0.0; 3],
+            iw_ssim_d: [0.0; 3],
+            iw_ssim_d4: [0.0; 3],
+            iw_ssim_d2: [0.0; 3],
+            iw_art4: [0.0; 3],
+            iw_det4: [0.0; 3],
+            iw_mse: [0.0; 3],
             n: 0,
         }
     }
@@ -393,6 +408,12 @@ impl ScaleAccumulators {
             self.masked_art4[c] += other.masked_art4[c];
             self.masked_det4[c] += other.masked_det4[c];
             self.masked_mse[c] += other.masked_mse[c];
+            self.iw_ssim_d[c] += other.iw_ssim_d[c];
+            self.iw_ssim_d4[c] += other.iw_ssim_d4[c];
+            self.iw_ssim_d2[c] += other.iw_ssim_d2[c];
+            self.iw_art4[c] += other.iw_art4[c];
+            self.iw_det4[c] += other.iw_det4[c];
+            self.iw_mse[c] += other.iw_mse[c];
         }
         self.n += other.n;
     }
@@ -418,6 +439,10 @@ impl ScaleAccumulators {
         let mut masked_art_4th = [0.0f64; 3];
         let mut masked_det_4th = [0.0f64; 3];
         let mut masked_mse = [0.0f64; 3];
+        let mut iw_ssim = [0.0f64; 9];
+        let mut iw_art_4th = [0.0f64; 3];
+        let mut iw_det_4th = [0.0f64; 3];
+        let mut iw_mse = [0.0f64; 3];
 
         for c in 0..3 {
             ssim[c * 2] = self.ssim_d[c] * one_over_n;
@@ -467,6 +492,15 @@ impl ScaleAccumulators {
             masked_art_4th[c] = (self.masked_art4[c] * one_over_n).powf(0.25);
             masked_det_4th[c] = (self.masked_det4[c] * one_over_n).powf(0.25);
             masked_mse[c] = self.masked_mse[c] * one_over_n;
+
+            // IW (information-content-weighted) features. Same wire
+            // shape as masked_*; weight direction inverted upstream.
+            iw_ssim[c * 3] = self.iw_ssim_d[c] * one_over_n;
+            iw_ssim[c * 3 + 1] = (self.iw_ssim_d4[c] * one_over_n).powf(0.25);
+            iw_ssim[c * 3 + 2] = (self.iw_ssim_d2[c] * one_over_n).sqrt();
+            iw_art_4th[c] = (self.iw_art4[c] * one_over_n).powf(0.25);
+            iw_det_4th[c] = (self.iw_det4[c] * one_over_n).powf(0.25);
+            iw_mse[c] = self.iw_mse[c] * one_over_n;
         }
 
         ScaleStats {
@@ -488,6 +522,10 @@ impl ScaleAccumulators {
             masked_art_4th,
             masked_det_4th,
             masked_mse,
+            iw_ssim,
+            iw_art_4th,
+            iw_det_4th,
+            iw_mse,
         }
     }
 }
@@ -1204,23 +1242,33 @@ fn process_strip_channel(
         accum.edge_det8[c] += strip_acc.edge_det8;
         accum.edge_det_max[c] = accum.edge_det_max[c].max(strip_acc.edge_det_max);
 
-        // Extended: masked features using stored V-blurred mu1/mu2
-        if config.extended_features {
+        // Extended: masked features using stored V-blurred mu1/mu2.
+        // The activity-map + blur work is shared between the
+        // `extended_features` (texture-suppressing masked) path and the
+        // `compute_iw_features` (texture-emphasising IW) path — we
+        // compute the blurred activity once and derive both weights.
+        let need_activity = config.extended_features || config.compute_iw_features;
+        if need_activity {
             let inner_off = inner_start * width;
             let inner_n = inner_h * width;
             let strip_n = strip_h * width;
             let k = config.extended_masking_strength;
+            let k_iw = config.iw_strength;
             let inner_src = &src_c[inner_off..inner_off + inner_n];
             let inner_dst = &dst_c[inner_off..inner_off + inner_n];
 
-            // Step 1: |src - mu1| → mask (full strip for blur context)
+            // Step 1: |src - mu1| → mask (full strip for blur context).
+            // The buffer is named `mask` for legacy reasons but at this
+            // point it holds the raw activity = |src - mu1|.
             abs_diff_into(
                 &src_c[..strip_n],
                 &bufs.mu1[..strip_n],
                 &mut bufs.mask[..strip_n],
             );
 
-            // Step 2: blur the activity map → mul_buf
+            // Step 2: blur the activity map → mul_buf. After this,
+            // mul_buf holds the per-pixel blurred reference-activity
+            // signal shared by both mask and iw_weight.
             box_blur_1pass_into(
                 &bufs.mask[..strip_n],
                 &mut bufs.mul_buf[..strip_n],
@@ -1230,14 +1278,30 @@ fn process_strip_channel(
                 config.blur_radius,
             );
 
-            // Step 3: mask = 1/(1+k*blurred) for inner region
-            for i in 0..inner_n {
-                bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+            // Step 3a: masked weight (texture-suppressing) for the
+            // existing extended_features block.
+            if config.extended_features {
+                for i in 0..inner_n {
+                    bufs.mask[inner_off + i] =
+                        1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+                }
+            }
+            // Step 3b: IW weight (texture-emphasising) — same blurred
+            // activity, inverted polarity. Wang & Li 2011 IW-SSIM. The
+            // weight floor of 1.0 ensures flat regions still contribute
+            // non-zero signal (matches the iw_pool::WeightedPool unit
+            // tests).
+            if config.compute_iw_features {
+                for i in 0..inner_n {
+                    bufs.iw_weight[inner_off + i] =
+                        1.0 + k_iw * bufs.mul_buf[inner_off + i];
+                }
             }
 
-            // Step 4: masked SSIM (needs sigma_sq and sigma12 — recompute from fused H-blur)
-            if need_ssim {
-                // sigma_sq and sigma12 are NOT stored from fused pass — recompute
+            // Step 4: masked + IW SSIM (needs sigma_sq and sigma12 —
+            // recompute from fused H-blur; sigma buffers are not stored
+            // from the fused pass).
+            if need_ssim && (config.extended_features || config.compute_iw_features) {
                 sq_sum_into(src_c, dst_c, &mut bufs.mul_buf);
                 box_blur_1pass_into(
                     &bufs.mul_buf,
@@ -1257,42 +1321,78 @@ fn process_strip_channel(
                     config.blur_radius,
                 );
 
-                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
                 let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
                 let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
                 let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
                 let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
-                let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
-                    inner_mu1,
-                    inner_mu2,
-                    inner_sig_sq,
-                    inner_sig12,
-                    inner_mask,
-                );
-                accum.masked_ssim_d[c] += sum_d;
-                accum.masked_ssim_d4[c] += sum_d4;
-                accum.masked_ssim_d2[c] += sum_d2;
+
+                if config.extended_features {
+                    let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+                    let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                        inner_mu1,
+                        inner_mu2,
+                        inner_sig_sq,
+                        inner_sig12,
+                        inner_mask,
+                    );
+                    accum.masked_ssim_d[c] += sum_d;
+                    accum.masked_ssim_d4[c] += sum_d4;
+                    accum.masked_ssim_d2[c] += sum_d2;
+                }
+                if config.compute_iw_features {
+                    let inner_iw = &bufs.iw_weight[inner_off..inner_off + inner_n];
+                    let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                        inner_mu1,
+                        inner_mu2,
+                        inner_sig_sq,
+                        inner_sig12,
+                        inner_iw,
+                    );
+                    accum.iw_ssim_d[c] += sum_d;
+                    accum.iw_ssim_d4[c] += sum_d4;
+                    accum.iw_ssim_d2[c] += sum_d2;
+                }
             }
 
-            // Masked edge (art_4th, det_4th)
+            // Masked + IW edge (art_4th, det_4th)
             if need_edge {
-                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
                 let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
                 let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
-                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
-                    inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask,
-                );
-                accum.masked_art4[c] += art4;
-                accum.masked_det4[c] += det4;
+                if config.extended_features {
+                    let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+                    let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
+                        inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask,
+                    );
+                    accum.masked_art4[c] += art4;
+                    accum.masked_det4[c] += det4;
+                }
+                if config.compute_iw_features {
+                    let inner_iw = &bufs.iw_weight[inner_off..inner_off + inner_n];
+                    let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
+                        inner_src, inner_dst, inner_mu1, inner_mu2, inner_iw,
+                    );
+                    accum.iw_art4[c] += art4;
+                    accum.iw_det4[c] += det4;
+                }
             }
 
-            // Masked MSE: Σ(src-dst)² × mask
-            let mut masked_mse_sum = 0.0f64;
-            for i in 0..inner_n {
-                let d = inner_src[i] - inner_dst[i];
-                masked_mse_sum += (d * d * bufs.mask[inner_off + i]) as f64;
+            // Masked + IW MSE: Σ(src-dst)² × weight
+            if config.extended_features {
+                let mut masked_mse_sum = 0.0f64;
+                for i in 0..inner_n {
+                    let d = inner_src[i] - inner_dst[i];
+                    masked_mse_sum += (d * d * bufs.mask[inner_off + i]) as f64;
+                }
+                accum.masked_mse[c] += masked_mse_sum;
             }
-            accum.masked_mse[c] += masked_mse_sum;
+            if config.compute_iw_features {
+                let mut iw_mse_sum = 0.0f64;
+                for i in 0..inner_n {
+                    let d = inner_src[i] - inner_dst[i];
+                    iw_mse_sum += (d * d * bufs.iw_weight[inner_off + i]) as f64;
+                }
+                accum.iw_mse[c] += iw_mse_sum;
+            }
         }
         return;
     }
@@ -1379,10 +1479,12 @@ fn process_strip_channel(
     accum.hf_abs_src[c] += abs_diff_sum(inner_src, inner_mu1);
     accum.hf_abs_dst[c] += abs_diff_sum(inner_dst, inner_mu2);
 
-    // Extended: masked features
-    if config.extended_features {
+    // Extended: masked + IW features (shared activity-map computation)
+    let need_activity = config.extended_features || config.compute_iw_features;
+    if need_activity {
         let strip_n = strip_h * width;
         let k = config.extended_masking_strength;
+        let k_iw = config.iw_strength;
 
         abs_diff_into(
             &src_c[..strip_n],
@@ -1399,37 +1501,78 @@ fn process_strip_channel(
             config.blur_radius,
         );
 
-        for i in 0..inner_n {
-            bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+        if config.extended_features {
+            for i in 0..inner_n {
+                bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+            }
+        }
+        if config.compute_iw_features {
+            for i in 0..inner_n {
+                bufs.iw_weight[inner_off + i] = 1.0 + k_iw * bufs.mul_buf[inner_off + i];
+            }
         }
 
         if need_ssim {
-            let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
             let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
             let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
             let inner_sig_sq = &bufs.sigma1_sq[inner_off..inner_off + inner_n];
             let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
-            let (sum_d, sum_d4, sum_d2) =
-                ssim_channel_masked(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_mask);
-            accum.masked_ssim_d[c] += sum_d;
-            accum.masked_ssim_d4[c] += sum_d4;
-            accum.masked_ssim_d2[c] += sum_d2;
+
+            if config.extended_features {
+                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+                let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                    inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_mask,
+                );
+                accum.masked_ssim_d[c] += sum_d;
+                accum.masked_ssim_d4[c] += sum_d4;
+                accum.masked_ssim_d2[c] += sum_d2;
+            }
+            if config.compute_iw_features {
+                let inner_iw = &bufs.iw_weight[inner_off..inner_off + inner_n];
+                let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                    inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_iw,
+                );
+                accum.iw_ssim_d[c] += sum_d;
+                accum.iw_ssim_d4[c] += sum_d4;
+                accum.iw_ssim_d2[c] += sum_d2;
+            }
         }
 
         if need_edge {
-            let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-            let (_art, art4, _det, det4, _art2, _det2) =
-                edge_diff_channel_masked(inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask);
-            accum.masked_art4[c] += art4;
-            accum.masked_det4[c] += det4;
+            if config.extended_features {
+                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
+                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
+                    inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask,
+                );
+                accum.masked_art4[c] += art4;
+                accum.masked_det4[c] += det4;
+            }
+            if config.compute_iw_features {
+                let inner_iw = &bufs.iw_weight[inner_off..inner_off + inner_n];
+                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
+                    inner_src, inner_dst, inner_mu1, inner_mu2, inner_iw,
+                );
+                accum.iw_art4[c] += art4;
+                accum.iw_det4[c] += det4;
+            }
         }
 
-        let mut masked_mse_sum = 0.0f64;
-        for i in 0..inner_n {
-            let d = inner_src[i] - inner_dst[i];
-            masked_mse_sum += (d * d * bufs.mask[inner_off + i]) as f64;
+        if config.extended_features {
+            let mut masked_mse_sum = 0.0f64;
+            for i in 0..inner_n {
+                let d = inner_src[i] - inner_dst[i];
+                masked_mse_sum += (d * d * bufs.mask[inner_off + i]) as f64;
+            }
+            accum.masked_mse[c] += masked_mse_sum;
         }
-        accum.masked_mse[c] += masked_mse_sum;
+        if config.compute_iw_features {
+            let mut iw_mse_sum = 0.0f64;
+            for i in 0..inner_n {
+                let d = inner_src[i] - inner_dst[i];
+                iw_mse_sum += (d * d * bufs.iw_weight[inner_off + i]) as f64;
+            }
+            accum.iw_mse[c] += iw_mse_sum;
+        }
     }
 }
 

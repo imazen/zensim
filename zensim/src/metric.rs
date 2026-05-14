@@ -236,6 +236,29 @@ pub struct ZensimConfig {
     /// Typical range: 2.0–8.0.
     pub extended_masking_strength: f32,
 
+    /// Compute information-content-weighted (IW) features (Wang & Li
+    /// 2011, IW-SSIM). When `true`, emits a per-scale per-channel block
+    /// of 6 features (`iw_ssim_mean / iw_ssim_4th / iw_ssim_2nd /
+    /// iw_art_4th / iw_det_4th / iw_mse`) pooled with weights derived
+    /// from the source image's local activity — the OPPOSITE polarity
+    /// of the `extended_features` masked block (which suppresses
+    /// texture). Texture-rich regions get MORE weight, mirroring
+    /// Wang's GSM-on-wavelet info-content estimator.
+    ///
+    /// At `num_scales = 4` and 3 channels, enabling this adds 72
+    /// features (228 → 300 in the basic profile).
+    ///
+    /// **Zero overhead when `false`** — the per-pixel work is gated by
+    /// a constant-per-call branch in the SIMD loop; the branch
+    /// predictor sees a fixed direction.
+    pub compute_iw_features: bool,
+
+    /// IW weighting strength: `iw_weight[i] = 1.0 + k * blur(|src - mu|)`.
+    /// Only used when `compute_iw_features` is true. Higher values
+    /// concentrate the pool more aggressively on textured / edge
+    /// regions. Default: 4.0 (mirrors `extended_masking_strength`).
+    pub iw_strength: f32,
+
     /// Maximum number of downscale levels (default: 4).
     ///
     /// Each level halves resolution. 4 scales covers 1×, 2×, 4×, 8× — sufficient
@@ -272,6 +295,8 @@ impl Default for ZensimConfig {
             compute_all_features: false,
             extended_features: false,
             extended_masking_strength: 4.0,
+            compute_iw_features: false,
+            iw_strength: 4.0,
             num_scales: crate::NUM_SCALES,
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
@@ -469,6 +494,17 @@ pub(crate) struct ScaleStats {
     pub(crate) art_p95: [f64; 3],
     /// L8 power pool edge detail_lost per channel = 3 values: (Σd⁸/N)^(1/8)
     pub(crate) det_p95: [f64; 3],
+    // --- IW (information-content-weighted) features (only populated when
+    //     compute_iw_features=true). Texture-EMPHASISING counterpart to
+    //     the masked_* block. Wang & Li 2011 IW-SSIM. ---
+    /// IW SSIM: [mean, 4th, 2nd] per channel = 9 values
+    pub(crate) iw_ssim: [f64; 9],
+    /// IW edge artifact L4 per channel = 3 values
+    pub(crate) iw_art_4th: [f64; 3],
+    /// IW edge detail_lost L4 per channel = 3 values
+    pub(crate) iw_det_4th: [f64; 3],
+    /// IW MSE per channel = 3 values
+    pub(crate) iw_mse: [f64; 3],
 }
 
 /// Result from a zensim comparison.
@@ -1492,6 +1528,8 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         compute_all_features: params.mlp_bytes.is_some(),
         extended_features: false,
         extended_masking_strength: 4.0,
+        compute_iw_features: false,
+        iw_strength: 4.0,
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
@@ -1650,6 +1688,27 @@ pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize = 19;
 ///
 /// Total features = `num_scales × 3 channels × 25` = 300 at 4 scales.
 pub const FEATURES_PER_CHANNEL_EXTENDED: usize = 25;
+
+/// Information-content-weighted (IW) features per channel per scale.
+/// Wang & Li 2011 — IW-SSIM. Same 6 feature slots as the `masked_*`
+/// block but with the weight polarity flipped: texture-rich regions
+/// get MORE weight.
+///
+/// ```text
+///  Index  Name               Pooling  Source
+///  ─────  ─────────────────  ───────  ──────────────────
+///  0      iw_ssim_mean       mean     SSIM × iw_weight
+///  1      iw_ssim_4th        L4       SSIM × iw_weight
+///  2      iw_ssim_2nd        L2       SSIM × iw_weight
+///  3      iw_art_4th         L4       edge artifact × iw_weight
+///  4      iw_det_4th         L4       edge detail_lost × iw_weight
+///  5      iw_mse             mean     (src-dst)² × iw_weight
+/// ```
+///
+/// Enabled via `ZensimConfig::compute_iw_features`. At `num_scales = 4`
+/// and 3 channels, adds 72 features → total profile becomes 300
+/// (basic + peaks + IW).
+pub const FEATURES_PER_CHANNEL_IW: usize = 6;
 
 /// Named view over a flat feature vector.
 ///
@@ -1960,20 +2019,24 @@ pub(crate) fn combine_scores(
     mean_offset: [f64; 3],
 ) -> ZensimResult {
     let extended = config.extended_features;
+    let iw = config.compute_iw_features;
 
-    // Feature vector layout:
+    // Feature vector layout (in order they appear in the Vec):
     //   [0..N_basic)        — 13/ch × 3ch × n_scales (basic features)
     //   [N_basic..N_peaks)  — 6/ch × 3ch × n_scales peak features (always included)
-    //   [N_peaks..N_all)    — 6/ch × 3ch × n_scales masked features (if extended)
+    //   [N_peaks..N_masked) — 6/ch × 3ch × n_scales masked features (if extended)
+    //   [N_masked..N_iw)    — 6/ch × 3ch × n_scales IW features (if compute_iw_features)
     //
     // Both basic and peak features are scored: features[0..WEIGHTS.len()]
-    // produces the dot product used for the final score.
+    // produces the dot product used for the final score. Masked + IW are
+    // training-only feature additions consumed by MLP-scored profiles.
     let n_scales = scale_stats.len();
     let basic_per_ch = FEATURES_PER_CHANNEL_BASIC; // 13
     let basic_total = n_scales * basic_per_ch * 3;
     let peak_total = n_scales * 6 * 3;
     let masked_total = if extended { n_scales * 6 * 3 } else { 0 };
-    let total = basic_total + peak_total + masked_total;
+    let iw_total = if iw { n_scales * FEATURES_PER_CHANNEL_IW * 3 } else { 0 };
+    let total = basic_total + peak_total + masked_total + iw_total;
 
     let mut features = Vec::with_capacity(total);
     let mut raw_distance = 0.0f64;
@@ -2019,6 +2082,21 @@ pub(crate) fn combine_scores(
                 features.push(ss.masked_art_4th[c].abs());
                 features.push(ss.masked_det_4th[c].abs());
                 features.push(ss.masked_mse[c]);
+            }
+        }
+    }
+
+    // Pass 4: IW (information-content-weighted) features (6/ch —
+    // texture-emphasising counterpart to masked). Wang & Li 2011.
+    if iw {
+        for ss in scale_stats.iter() {
+            for c in 0..3 {
+                features.push(ss.iw_ssim[c * 3].abs());
+                features.push(ss.iw_ssim[c * 3 + 1].abs());
+                features.push(ss.iw_ssim[c * 3 + 2].abs());
+                features.push(ss.iw_art_4th[c].abs());
+                features.push(ss.iw_det_4th[c].abs());
+                features.push(ss.iw_mse[c]);
             }
         }
     }
@@ -2112,6 +2190,112 @@ mod tests {
             "compute_all should have >= features: {} vs {}",
             all_nonzero,
             default_nonzero,
+        );
+    }
+
+    /// V0_20a IW pool integration: `compute_iw_features=true` must
+    /// emit 72 additional features (228 → 300 at 4 scales × 3 ch × 6),
+    /// AND those features must differ from the masked block when both
+    /// are enabled (weight polarity is opposite).
+    #[test]
+    fn compute_iw_features_emits_300_when_enabled() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                // Add a textured patch so the IW weights actually vary.
+                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
+                src[y * w + x] = [r.saturating_add(noise), g, 128];
+                dst[y * w + x] = [r.saturating_add(noise).saturating_add(5), g, 125];
+            }
+        }
+
+        // Off → 228 features (basic + peaks, masked OFF, iw OFF)
+        let off = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(off.features.len(), 228);
+
+        // IW only → 228 + 72 = 300 features
+        let iw_only = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                compute_iw_features: true,
+                iw_strength: 4.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(iw_only.features.len(), 300);
+
+        // First 228 must match exactly (IW must not perturb basic/peaks).
+        for i in 0..228 {
+            let d = (off.features[i] - iw_only.features[i]).abs();
+            assert!(
+                d < 1e-9,
+                "IW must not affect basic/peak features; index {} differs by {}",
+                i,
+                d,
+            );
+        }
+
+        // IW block must produce non-zero output (we have textured patches).
+        let iw_block_nonzero = iw_only.features[228..]
+            .iter()
+            .filter(|f| f.abs() > 1e-12)
+            .count();
+        assert!(iw_block_nonzero > 0, "IW block was all zeros");
+
+        // When both extended_features and compute_iw_features are on,
+        // total = 228 + 72 (masked) + 72 (IW) = 372. Masked and IW
+        // pools have OPPOSITE weight polarity, so the two 72-feature
+        // blocks must differ.
+        let both = compute_zensim_with_config(
+            &src,
+            &dst,
+            w,
+            h,
+            ZensimConfig {
+                compute_all_features: true,
+                extended_features: true,
+                compute_iw_features: true,
+                iw_strength: 4.0,
+                extended_masking_strength: 4.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(both.features.len(), 372);
+
+        let mut masked_iw_diff_count = 0usize;
+        for i in 0..72 {
+            let masked = both.features[228 + i];
+            let iw = both.features[228 + 72 + i];
+            if (masked - iw).abs() > 1e-9 {
+                masked_iw_diff_count += 1;
+            }
+        }
+        assert!(
+            masked_iw_diff_count >= 60,
+            "masked vs IW features should differ; only {}/72 differed",
+            masked_iw_diff_count,
         );
     }
 

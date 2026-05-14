@@ -11,6 +11,12 @@ pub(crate) struct ScaleBuffers {
     pub temp_blur: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
+    /// Information-content (IW) weights — texture-EMPHASISING counterpart
+    /// to `mask`. Populated when `ZensimConfig::compute_iw_features` is
+    /// true. Same per-pixel layout; reuses the same blurred-activity
+    /// signal but with inverted polarity (`1 + k_iw * blur(|src - mu|)`
+    /// instead of `1 / (1 + k_mask * blur(|src - mu|))`).
+    pub iw_weight: Vec<f32>,
 }
 
 impl ScaleBuffers {
@@ -23,6 +29,7 @@ impl ScaleBuffers {
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
             mask: vec![0.0; size],
+            iw_weight: vec![0.0; size],
         }
     }
 
@@ -34,5 +41,6 @@ impl ScaleBuffers {
         self.sigma12.resize(size, 0.0);
         self.temp_blur.resize(size, 0.0);
         self.mask.resize(size, 0.0);
+        self.iw_weight.resize(size, 0.0);
     }
 }
