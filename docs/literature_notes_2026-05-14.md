@@ -1,6 +1,7 @@
 # Literature notes — three papers for V0_20+ design (2026-05-14)
 
 User requested reading:
+0. **TOP PRIORITY**: https://arxiv.org/abs/2509.13150 (Mohammadi/Jenadeleh/Sneyers/Saupe/Ascenso 2025, IEEE Access, **Evaluation of Objective IQA Metrics for HF Image Compression** — 27 metrics × JPEG AIC-3 benchmark, Z-RMSE methodology, MRR+Wilcoxon significance tests, **CVVDP wins SOTA**)
 1. https://arxiv.org/html/2504.06301v1 (Jenadeleh et al. 2025, QoMEX, JPEG AIC-3 subjective study)
 2. https://ece.uwaterloo.ca/~z70wang/research/iwssim/ (Wang & Li 2011, IW-SSIM)
 3. https://jov.arvojournals.org/article.aspx?articleid=2599945 (Ghadiyaram & Bovik 2017, FRIQUEE / Bag of features)
@@ -8,6 +9,116 @@ User requested reading:
 5. https://www.researchgate.net/publication/372468177 (Testolina et al. 2023, QoMEX, JPEG AIC-3 *dataset*)
 
 Synthesis below; full per-paper summaries follow.
+
+## 0. TOP-PRIORITY paper — Mohammadi et al. 2025 (IEEE Access)
+
+**"Evaluation of Objective Image Quality Metrics for High-Fidelity
+Image Compression"** — Mohammadi, Jenadeleh, Sneyers, Saupe, Ascenso.
+IEEE Access DOI 10.1109/ACCESS.2024.0429000, arXiv:2509.13150.
+Code + dataset: https://github.com/shimamohammadi/EvaluationMetrics.
+
+**Why this is top priority**: it's the most rigorous benchmark of
+IQA metrics in the high-fidelity regime to date. 27 metrics × 5
+sources × 6 codecs × 10 quality levels = 300 stimuli on JPEG AIC-3.
+Defines the **statistical framework** every metric paper should
+adopt: Z-RMSE, MRR significance test, Wilcoxon on logistic residuals.
+
+### Headline numbers (full-res, SROCC; All / HF / MF)
+
+| Metric | All | HF (0-1 JND) | MF (>1 JND) | Z-RMSE | Notes |
+|---|---:|---:|---:|---:|---|
+| **CVVDP**       | **0.960** | 0.852 | **0.893** | **9.45**  | SOTA, stat. sig. over all others |
+| IW-SSIM         | 0.944 | 0.867 | 0.825 | 31.51 | best classical, decisive 2nd |
+| HDR-VDP-3       | 0.929 | **0.873** | 0.768 | — | top HF tier |
+| MS-SSIM         | 0.927 | 0.855 | 0.763 | — | |
+| NLPD            | 0.917 | 0.873 | 0.714 | — | top HF (tied) |
+| VMAF-NEG        | 0.915 | 0.810 | 0.743 | — | |
+| SSIM            | 0.911 | 0.864 | 0.704 | — | |
+| PieAPP          | 0.909 | 0.740 | 0.764 | — | best LEARNING in MF |
+| HDR-VDP-2       | 0.908 | 0.807 | 0.742 | — | |
+| SSIMULACRA1     | 0.907 | 0.854 | 0.691 | — | |
+| VIF             | 0.905 | 0.839 | 0.684 | — | |
+| **SSIMULACRA2** | **0.905** | **0.831** | **0.687** | **47.63** | **rank 12, 5× Z-RMSE vs CVVDP** |
+| BUTTERAUGLI     | 0.893 | — | — | — | |
+| VMAF            | 0.889 | — | — | — | |
+| LPIPS           | 0.867 | — | — | — | learning, underperforms HF |
+| PSNRY           | 0.812 | — | — | **13.36** | **excellent Z-RMSE despite bad PLCC** |
+| DISTS           | 0.801 | — | — | — | |
+| TOPIQ           | 0.763 | — | — | — | |
+
+### Key findings
+
+- **CVVDP is statistically superior** to every other metric (MRR + Wilcoxon both confirm). zensim's MLP-on-SSIMULACRA2 features inherits SSIMULACRA2's mid-pack performance at HF unless we change something.
+- **Learning-based metrics underperform** in HF because they train on ACR scores in wide-quality datasets — none cover near-lossless. **Exception: PieAPP**, the only one trained on PAIRWISE preferences. Validates our RankNet pairwise loss.
+- **Saturation in HF is universal** for classical structural metrics. zensim B8/B9 performance is bottlenecked by this saturation, not by our MLP.
+- **JPEG AI artifacts deviate most** — most metrics rank-order JPEG AI badly. JPEG-AI corpus acquisition is doubly motivated now.
+- **Z-RMSE vs SROCC disagrees by 5× scale** between SSIMULACRA2 (47.63) and CVVDP (9.45) — SROCC alone is hiding a much larger HF gap.
+
+### Z-RMSE — replace MSE eval with this
+
+```
+Z-RMSE = √( (1/n) · Σ ((Ŝ_i − μ_i) / σ_i)² )
+```
+
+where `μ_i / σ_i` are the per-sample subjective mean / std-dev from
+bootstrap. Equivalent to maximizing Gaussian log-likelihood with
+per-sample observation noise.
+
+Penalizes **errors less where humans disagreed, more where the JND is sharp**.
+PSNRY's reliability shows in its low Z-RMSE (13.36) despite worse SROCC.
+SSIMULACRA2's overconfident errors on consensus-clear pairs show in
+its high Z-RMSE.
+
+### MRR + Wilcoxon — drop "is +0.001 SROCC real?" ambiguity
+
+- **Meng-Rosenthal-Rubin** (paired SROCC differences sharing a common
+  subjective vector): the right test for "does metric A beat metric B
+  on the same MOS set?".
+- **Wilcoxon signed-rank on logistic residuals** with effect size
+  `r = Z / √N`: complements MRR; non-parametric residual-based.
+- Together they distinguish "real lift" from "noise within sampling"
+  rigorously.
+
+### Recommended joint reporting (paper recommends this combination)
+
+`PLCC, SROCC, KT, OR, PWRC` AND `Z-RMSE` together. SROCC alone is the
+single most misleading practice — different metrics disagree by
+different magnitudes on each statistic, and the joint pattern is the
+real signal.
+
+### Direct quotes
+
+> "CVVDP demonstrates statistically significant superiority over all
+> other metrics."
+
+> On SSIMULACRA2: "Builds on MS-SSIM and operates in a perceptually
+> aligned color space (XYB)... uses additional error maps to specifically
+> detect compression artifacts like blockiness and blurring."
+
+> "Learning-based metrics, while effective at lower quality levels,
+> struggle to distinguish subtle perceptual differences that are still
+> meaningful to human observers in high-quality images."
+
+> "Existing metrics... tend to saturate in the high-quality range."
+
+### Concrete actions for zensim
+
+| Action | Priority | Effort | Impact |
+|---|---|---|---|
+| Add Z-RMSE to eval harness alongside SROCC | now | low | reveals hidden HF gap |
+| Add MRR + Wilcoxon significance tests | now | low | "is +0.001 real?" answered rigorously |
+| Acquire AIC-3 (300 stim + per-sample σ) | now | low (CC0) | rigorous HF eval zensim has never seen |
+| JND-anchored calibration (task #41) | next | low | reuses AIC-3 + dial honesty |
+| CVVDP distillation experiment | mid | high | only known path to ≥ 0.95 HF SROCC for XYB metrics |
+| PWRC (Pearson Weighted Rank Correlation) | now | low | dial-honesty stat for user input |
+
+CVVDP-distillation framing: CVVDP is a perceptually-grounded model
+(contrast detection, masking, foveation). Training a 228 → H → 1 MLP
+to match CVVDP outputs on a large unlabeled (ref, distorted) pool
+gives us a "fast CVVDP". Not exactly the Su 2023 manifold approach
+but related. Plausible V0_22 idea.
+
+---
 
 ## Synthesis for zensim V0_20+ roadmap
 

@@ -258,6 +258,50 @@ forward, the priorities are:
 - 2026-05-10 champion + recipe + Phase 4 plan: `benchmarks/champion_2026-05-10.md`,
   `docs/phase4_reference/README.md`
 
+## Statistical rigor — mandatory full-stat reporting (2026-05-14)
+
+Every eval that emits SROCC MUST also emit, in the same report:
+
+| Stat | What it answers for zensim |
+|---|---|
+| **SROCC** (Spearman rank correlation) | Rank agreement — "if I rank by zensim, does that match human rank?" |
+| **PLCC / Pearson** | Dial-honesty — "does a 1-point change in zensim correspond to a 1-point change in human MOS?" Pearson on the calibrated metric output is the **load-bearing stat for user-facing dials**, since users type a target zensim score and expect linear response. |
+| **KROCC** (Kendall tau) | Rank-difference variant; sometimes more stable than SROCC at small n |
+| **Outlier Ratio (OR)** | Fraction of predictions outside ±2σ of subjective. Reveals model-vs-truth pathologies SROCC hides. |
+| **PWRC** (Pearson Weighted Rank Correlation) | Hybrid stat from the IQA literature — rank-transform inputs, weight by importance, Pearson. Mohammadi 2025 recommends it as one of the load-bearing five. |
+| **Z-RMSE** (per-sample-σ-normalized RMSE) | From Mohammadi 2025: `Z-RMSE = √((1/n) Σ ((Ŝ−μ)/σ)²)` where μ/σ are bootstrap subjective stats per stimulus. Penalizes errors LESS where humans disagreed, MORE where the JND is sharp. **The single best stat for "does this metric track the consensus when there IS one?"** Required when the corpus ships per-sample σ (AIC-3 / AIC-4 / CID22 all do via bootstrap). |
+| **MRR p-value** (Meng-Rosenthal-Rubin paired SROCC test) | When comparing two metrics A and B against the same MOS set, "is A−B difference real?" — needed because A and B are correlated via shared MOS. |
+| **Wilcoxon signed-rank on residuals** (with `r = Z/√N` effect size) | Non-parametric companion to MRR — captures different aspects of significance. |
+
+**Source rationale**: Mohammadi/Jenadeleh/Sneyers/Saupe/Ascenso 2025
+("Evaluation of Objective IQA Metrics for HF Image Compression",
+arXiv:2509.13150, IEEE Access) demonstrate that SROCC alone is the
+**single most misleading practice** in IQA evaluation. Different
+metrics disagree by different magnitudes on each statistic; the joint
+pattern is the real signal. SSIMULACRA2's SROCC 0.905 vs CVVDP's 0.960
+looks like a 5 % gap, but Z-RMSE shows the actual scale gap is 5×
+(47.63 vs 9.45). zensim inherits SSIMULACRA2's HF saturation; we need
+to MEASURE it before we can improve it.
+
+**Mandatory tool support**: `dataset_metric_baseline`, any new
+per-pair eval binary, and any web-site comparison view MUST emit
+this full stat set. SROCC-only reports are a regression and should
+not be accepted.
+
+For per-band tables (10-band B0..B9 + legacy 4-band cuts), emit the
+full stat set per band per corpus — yes, that's a lot of columns,
+but the joint picture is what catches "winning B0..B5 while losing
+B6..B9" tradeoffs we'd otherwise miss.
+
+When `--per-pair-output` is set, the per-pair CSV becomes the input
+for the bootstrap σ computation; the eval should compute and cache
+bootstrap σ per (corpus, sample) once and reuse it across metric
+comparisons.
+
+For statistical-test outputs (MRR, Wilcoxon), report **p-values + effect
+sizes**, never just p<0.05/p>0.05. The user reads the trade-off
+explicitly.
+
 ## Per-band reporting rule (10 bands required, 2026-05-14)
 
 Every CID22/KADID/TID/AIC-3/AIC-4/KonJND eval MUST report **10
