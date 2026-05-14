@@ -114,7 +114,8 @@ all bands). When swapping:
    depth,
    (d) calibration script + α/β,
    (e) held-out SROCC on KADID/TID/CID22/AIC-3/AIC-4/KonJND with
-   both 4-band CID22 Table 5 cuts and step-5 (20-bin) per-corpus,
+   the **10-band width-10 grid (mandatory)** AND the legacy 4-band
+   CID22 Table 5 cuts AND step-5 (20-bin) per-corpus,
    (f) non-mono q-step rate (raw + after soft-iso, aggregate +
    per-band),
    (g) data-lineage table (path / MD5 / row count / CID22-contam
@@ -214,39 +215,65 @@ forward, the priorities are:
 - 2026-05-10 champion + recipe + Phase 4 plan: `benchmarks/champion_2026-05-10.md`,
   `docs/phase4_reference/README.md`
 
-## Per-band reporting rule (locked 2026-05-10, mandatory)
+## Per-band reporting rule (10 bands required, 2026-05-14)
 
-Every CID22/KADID/TID/KonJND eval MUST report **per-band metrics**,
-not just aggregate SROCC. The bands are anchored to CID22 Table 5
-(MCOS and SSIMULACRA 2 scales align 1:1):
+Every CID22/KADID/TID/AIC-3/AIC-4/KonJND eval MUST report **10
+bands**, not 4. The 4-band CID22 Table 5 cuts are kept alongside
+for compatibility with the 2023 paper, but the **10-band grid is
+the primary release gate**.
 
-| Band | Score range | Meaning |
-|---|---|---|
-| **B0: below medium** | < 50 | Obvious distortion |
-| **B1: medium** | 50 ≤ s < 65 | Visible artifacts |
-| **B2: high** | 65 ≤ s < 90 | Subtle artifacts |
-| **B3: visually lossless** | ≥ 90 | No visible difference |
-| **Near-PJND** (sub-band) | 58 ≤ s ≤ 68 | KonJND PJND mean ≈ 63-65 ± 5 |
+The 10 bands tile the 0..100 MCOS / SSIMULACRA 2 score range with
+uniform width 10:
 
-For each (model, dataset) eval:
-1. **Per-band SROCC** (Spearman within each band)
+| Band | Score range |
+|---|---|
+| **B0** | 0 ≤ s < 10 |
+| **B1** | 10 ≤ s < 20 |
+| **B2** | 20 ≤ s < 30 |
+| **B3** | 30 ≤ s < 40 |
+| **B4** | 40 ≤ s < 50 |
+| **B5** | 50 ≤ s < 60 |
+| **B6** | 60 ≤ s < 70 |
+| **B7** | 70 ≤ s < 80 |
+| **B8** | 80 ≤ s < 90 |
+| **B9** | 90 ≤ s ≤ 100 |
+
+`Near-PJND` (58 ≤ s ≤ 68) is reported as an additional sub-band
+(spans B5+B6) — KonJND's PJND mean lands here and a regression in
+this region breaks "visually lossless" calibration.
+
+Legacy 4-band CID22 cuts (B0<50 / B1 50-65 / B2 65-90 / B3 ≥90)
+are reported alongside the 10-band grid in every eval that touches
+the CID22 corpus, since the 2023 paper's Tables 3-6 use them.
+
+For each (model, dataset) eval the harness MUST emit:
+1. **Per-band SROCC** (Spearman within each of the 10 bands)
 2. **Per-band MAE** (mean absolute prediction error, score units)
-3. **Per-band non-monotonic q-step rate** (within-curve adjacent-q
-   reversals, segmented by lower-q band)
-4. **Per-band sample count (n)**
+3. **Per-band non-monotonic q-step rate** (adjacent-q reversals
+   within each curve, segmented by lower-q band)
+4. **Per-band sample count (n)** — flag any band with n < 30 as
+   "noisy estimate"
 
-The aggregate SROCC hides band-specific failures. A model with
-aggregate 0.89 can be 0.95 in B3 and 0.65 in B1 — that is a
-different product than 0.85 across all bands.
+**Why 10 not 4**: aggregate SROCC hides band-specific failures.
+4 bands hide them less, but still merge product-distinct regions
+(e.g. B2: 65..90 covers both "subtle artifacts" and "near-lossless"
+which behave very differently). 10 bands × width-10 surfaces
+boundary effects at every 10-zq step — the granularity at which
+codec consumers actually tune.
 
 **Why this matters**: zensim is a user-facing dial. A user typing
-"give me zensim 70" lives in B2 (high quality). A user typing
-"zensim 55" lives in B1 (medium). If the metric is well-calibrated
-at B3 but breaks at B1, low-q encodes get the wrong settings.
+"give me zensim 70" lives in 10-band B7. A user typing "zensim 55"
+lives in B5. If the metric is well-calibrated at B9 but breaks at
+B5, low-q encodes get the wrong settings.
 
-Until the harness emits this, treat any "champion" claim as
-provisional. Aggregate numbers are pipeline-health checks, not
-release gates.
+Until the harness emits the 10-band grid, treat any "champion"
+claim as provisional. Aggregate numbers and the 4-band CID22 cuts
+are pipeline-health checks, not release gates.
+
+**Site requirement**: the interactive comparison site at
+<https://imazen.github.io/zensim/> MUST render the 10-band table
+alongside the legacy 4-band table for every (corpus, X, Y)
+selection.
 
 ## Interactive comparison site (CRUCIAL GOAL, locked 2026-05-12)
 
@@ -318,9 +345,10 @@ Implementation must:
    - A step-5 line: bin X by 5-unit steps from 1 to 100 (or the
      X-metric's equivalent range — e.g. butteraugli's 0..30,
      dssim's 0..1), median Y per bin connected.
-   - SROCC + KROCC + PLCC + RMSE per band (B0/B1/B2/B3/Near-PJND
-     anchored to CID22 Table 5) AND aggregated, with sample
-     counts.
+   - SROCC + KROCC + PLCC + RMSE per band — emit the **10-band
+     width-10 grid (B0..B9)** as the primary table, and the legacy
+     4-band CID22 Table 5 cuts (B0..B3 + Near-PJND) alongside for
+     paper comparison. Plus aggregated, with sample counts.
 
 6. **Candlestick + CI-interval tables by band** — separate
    visualization mode. For each band on X, show Y's percentile

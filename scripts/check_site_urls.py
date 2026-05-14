@@ -183,8 +183,22 @@ def check_local(url):
 
 
 def check_remote(url, timeout=5):
-    """HTTP HEAD against url. Return (status_code, error_str|None)."""
-    req = urllib.request.Request(url, method="HEAD")
+    """HTTP HEAD against url. Return (status_code, error_str|None).
+
+    Cloudflare / R2 sometimes 403s default urllib UAs; spoof a real
+    browser UA so the probe matches what the deployed JS sees from
+    a user's browser.
+    """
+    req = urllib.request.Request(
+        url,
+        method="HEAD",
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            )
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, None
