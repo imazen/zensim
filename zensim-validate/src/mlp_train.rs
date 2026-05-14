@@ -1099,7 +1099,7 @@ mod tests {
 
         let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
         let model = Model::from_bytes(leaked).expect("bake should load");
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
 
         let preds: Vec<f64> = features_owned
             .iter()
@@ -1174,7 +1174,7 @@ mod tests {
 
         let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
         let model = Model::from_bytes(leaked).expect("bake should load");
-        let mut predictor = Predictor::new(model);
+        let mut predictor = Predictor::new(&model);
 
         let val_preds: Vec<f64> = val_features
             .iter()

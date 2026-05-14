@@ -163,14 +163,14 @@ fn main() {
 
     // Build predictors over each variant (parse from the bytes we just baked).
     let model_f32 = Model::from_bytes(&bytes_f32).expect("model f32");
-    let mut pred_f32 = Predictor::new(model_f32);
+    let mut pred_f32 = Predictor::new(&model_f32);
     // Re-bake F32 should be byte-identical structurally; verify size and parity.
     let f16_bytes = &variants[1].2;
     let i8_bytes = &variants[2].2;
     let model_f16 = Model::from_bytes(f16_bytes).expect("model f16");
-    let mut pred_f16 = Predictor::new(model_f16);
+    let mut pred_f16 = Predictor::new(&model_f16);
     let model_i8 = Model::from_bytes(i8_bytes).expect("model i8");
-    let mut pred_i8 = Predictor::new(model_i8);
+    let mut pred_i8 = Predictor::new(&model_i8);
 
     // Synthesize 1k random feature vectors and measure prediction divergence.
     // Use a tiny LCG so this is deterministic without an extra crate.

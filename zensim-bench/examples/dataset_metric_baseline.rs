@@ -676,7 +676,7 @@ fn process_konjnd_pair(
             f64::NAN
         } else {
             let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
-            let mut p = Predictor::new(model);
+            let mut p = Predictor::new(&model);
             p.predict(&f32_features).ok()?[0] as f64
         }
     } else {
@@ -858,7 +858,7 @@ fn process_pair(
             f64::NAN
         } else {
             let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
-            let mut p = Predictor::new(model);
+            let mut p = Predictor::new(&model);
             p.predict(&f32_features).ok()?[0] as f64
         }
     } else {

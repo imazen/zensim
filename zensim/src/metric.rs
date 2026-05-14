@@ -1524,7 +1524,7 @@ pub(crate) fn apply_mlp_scoring(
             crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
         let n_inputs = model.n_inputs();
         let features = result.features();
-        let mut predictor = crate::mlp::Predictor::new(model);
+        let mut predictor = crate::mlp::Predictor::new(&model);
 
         // Build the f32 feature vector the MLP expects. Three shapes:
         //   - n_inputs == features.len(): standard scorer (228 features)

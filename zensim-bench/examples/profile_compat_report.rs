@@ -694,7 +694,7 @@ fn process_pair(pair: &Pair, z_v04: &Zensim, v04_bake: &[u8]) -> Option<Row> {
         return None;
     }
     let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
-    let mut p = Predictor::new(model);
+    let mut p = Predictor::new(&model);
     let v04_distance = p.predict(&f32_features).ok()?[0] as f64;
 
     let v02_score = distance_to_score(v02_distance);
