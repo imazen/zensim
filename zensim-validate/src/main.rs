@@ -108,6 +108,23 @@ struct Args {
     #[arg(long, default_value = "4.0")]
     extended_masking_strength: f32,
 
+    /// Compute IW (information-content-weighted) features
+    /// (Wang & Li 2011 IW-SSIM). 6 features per channel per scale —
+    /// at 4 scales × 3 ch = 72 features. Texture-EMPHASISING
+    /// counterpart to `--extended-features`. With this flag the
+    /// emitted features.csv has 228 + 72 = 300 columns
+    /// (basic + peaks + IW); with both `--extended-features` and
+    /// `--iw-features` it has 372 columns
+    /// (basic + peaks + masked + IW).
+    #[arg(long, default_value = "false")]
+    iw_features: bool,
+
+    /// IW weighting strength: `iw_weight[i] = 1 + k * blur(|src - mu|)`.
+    /// Only used when --iw-features is set. Default: 4.0
+    /// (mirrors --extended-masking-strength).
+    #[arg(long, default_value = "4.0")]
+    iw_strength: f32,
+
     /// Downscale filter for pyramid construction: box, mitchell, lanczos
     #[arg(long, default_value = "box")]
     downscale_filter: String,
@@ -268,6 +285,23 @@ struct CacheConfig {
     num_scales: u32,
     blur_passes: u8,
     blur_radius: u32,
+    /// Feature-shape kind. Differentiates basic+peaks (228) /
+    /// extended+masked (300) / IW (300) / both (372) caches so a
+    /// recipe change doesn't accidentally read stale features.
+    /// Added 2026-05-14 for V0_20a IW integration.
+    feature_kind: u8,
+}
+
+impl CacheConfig {
+    /// Pack the feature-shape into a single byte:
+    ///   bit 0 = extended_features (masked block present)
+    ///   bit 1 = compute_iw_features (IW block present)
+    pub fn pack_kind(extended: bool, iw: bool) -> u8 {
+        let mut k = 0u8;
+        if extended { k |= 1; }
+        if iw { k |= 2; }
+        k
+    }
 }
 
 /// Cached features without human scores (which are target-metric-dependent).
@@ -296,7 +330,13 @@ fn save_feature_cache(
     f.write_all(&config.num_scales.to_le_bytes())?;
     f.write_all(&[config.blur_passes])?;
     f.write_all(&config.blur_radius.to_le_bytes())?;
-    f.write_all(&0u32.to_le_bytes())?; // reserved (was masking_bits)
+    // Repurpose former masking_bits reserved field for feature_kind
+    // (bit 0 = extended, bit 1 = iw). v3 caches were always written
+    // with 0 here, which maps to "basic + peaks only" — that matches
+    // existing pre-IW caches with 228 features. Caches written with
+    // --iw-features set will have bit 1 = 1 and force re-extraction
+    // on a non-IW load.
+    f.write_all(&(config.feature_kind as u32).to_le_bytes())?;
 
     let n_pairs = ds.features.len() as u32;
     let n_features = if ds.features.is_empty() {
@@ -380,7 +420,9 @@ fn load_feature_cache(
     let num_scales = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
     let blur_passes = read_bytes(&mut pos, 1)?[0];
     let blur_radius = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
-    let _reserved = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap());
+    // Repurposed reserved field — feature_kind bit-flag
+    // (bit 0 = extended, bit 1 = iw). Pre-IW caches wrote 0.
+    let feature_kind = u32::from_le_bytes(read_bytes(&mut pos, 4)?.try_into().unwrap()) as u8;
 
     if num_scales != config.num_scales {
         eprintln!(
@@ -403,7 +445,13 @@ fn load_feature_cache(
         );
         return Ok(None);
     }
-    // _reserved (was masking_bits) — no longer validated
+    if feature_kind != config.feature_kind {
+        eprintln!(
+            "Feature cache: feature_kind mismatch (cache=0b{:02b}, current=0b{:02b}; bit0=extended, bit1=iw), recomputing",
+            feature_kind, config.feature_kind
+        );
+        return Ok(None);
+    }
 
     // Pair/feature counts — v2 uses u64, v3 uses u32/u16
     let (n_pairs, n_features) = if version == 2 {
@@ -598,6 +646,10 @@ fn main() {
     // The --feature-tier flag controls which features are used for training.
     let extended_features = args.extended_features || train || args.extract_only;
     let extended_masking_strength = args.extended_masking_strength;
+    // IW features are OFF by default and never auto-enabled — they
+    // change the feature-vector shape, so callers must opt in explicitly.
+    let iw_features = args.iw_features;
+    let iw_strength = args.iw_strength;
     let downscale_filter = match args.downscale_filter.as_str() {
         "box" => zensim::DownscaleFilter::Box2x2,
         #[cfg(feature = "zenresize")]
@@ -625,6 +677,7 @@ fn main() {
         num_scales: num_scales as u32,
         blur_passes,
         blur_radius: blur_radius as u32,
+        feature_kind: CacheConfig::pack_kind(extended_features, iw_features),
     };
 
     // Load and compute primary dataset (with optional caching)
@@ -728,6 +781,8 @@ fn main() {
                         config.compute_all_features = compute_all;
                         config.extended_features = extended_features;
                         config.extended_masking_strength = extended_masking_strength;
+                        config.compute_iw_features = iw_features;
+                        config.iw_strength = iw_strength;
                         config.blur_passes = blur_passes;
                         config.blur_radius = blur_radius;
                         config.num_scales = num_scales;
@@ -923,6 +978,8 @@ fn main() {
                     args.target_metric,
                     extended_features,
                     extended_masking_strength,
+                    iw_features,
+                    iw_strength,
                     downscale_filter,
                 );
                 if let Err(e) = save_feature_cache(&save_path, &ds, &valid_indices, &cache_config) {
@@ -946,6 +1003,8 @@ fn main() {
             args.target_metric,
             extended_features,
             extended_masking_strength,
+            iw_features,
+            iw_strength,
             downscale_filter,
         );
         if compute_all {
@@ -1095,6 +1154,8 @@ fn main() {
                             args.target_metric,
                             extended_features,
                             extended_masking_strength,
+                            iw_features,
+                            iw_strength,
                             downscale_filter,
                         );
                         if let Err(e) =
@@ -1120,6 +1181,8 @@ fn main() {
                     args.target_metric,
                     extended_features,
                     extended_masking_strength,
+                    iw_features,
+                    iw_strength,
                     downscale_filter,
                 );
                 if compute_all {
@@ -1535,6 +1598,8 @@ fn load_and_compute(
     target_metric: Option<TargetMetric>,
     extended_features: bool,
     extended_masking_strength: f32,
+    iw_features: bool,
+    iw_strength: f32,
     downscale_filter: zensim::DownscaleFilter,
 ) -> (DatasetWithFeatures, Vec<u32>) {
     let pairs = match format {
@@ -1580,16 +1645,23 @@ fn load_and_compute(
     config.compute_all_features = compute_all;
     config.extended_features = extended_features;
     config.extended_masking_strength = extended_masking_strength;
+    config.compute_iw_features = iw_features;
+    config.iw_strength = iw_strength;
     config.blur_passes = blur_passes;
     config.blur_radius = blur_radius;
     config.num_scales = num_scales;
     config.downscale_filter = downscale_filter;
 
-    let fpc = if config.extended_features {
+    // FPC is used for cache-key sizing. Extended adds 6/ch; IW adds 6/ch.
+    let mut fpc = if config.extended_features {
         zensim::FEATURES_PER_CHANNEL_EXTENDED
     } else {
         zensim::FEATURES_PER_CHANNEL_WITH_PEAKS
     };
+    if config.compute_iw_features {
+        // FEATURES_PER_CHANNEL_IW = 6
+        fpc += 6;
+    }
     let total_features = num_scales * 3 * fpc;
     eprintln!(
         "  Config: scales={}, blur_passes={}, blur_radius={}, extended={}, downscale={:?}",
