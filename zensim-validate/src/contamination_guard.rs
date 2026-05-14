@@ -159,15 +159,23 @@ pub fn scrub_csv_or_die<P: AsRef<Path>>(csv_path: P) -> std::io::Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn blocklist_has_expected_size() {
-        assert_eq!(blocklist().len(), 149,
-            "2026-05-14 KADID+TID overlap audit produced 149 unique basenames; \
-             if this asserts, the blocklist file was changed without updating the test");
+    fn blocklist_is_empty_post_revert() {
+        // The 149-basename blocklist was emptied 2026-05-14 evening
+        // after user review of the dHash side-by-side montages proved
+        // them all false positives. See
+        // `benchmarks/dhash_threshold_revert_2026-05-14.md`. The
+        // 149-entry archive is preserved at
+        // `benchmarks/contamination_blocklist_2026-05-14_REJECTED_false_positives.txt`.
+        assert_eq!(blocklist().len(), 0,
+            "blocklist file should be empty (comments-only); any new entries \
+             must be user-verified via side-by-side montage review first");
     }
     #[test]
-    fn blocklist_contains_known_offender() {
-        // I18 had 4 size variants of `gmessages` in the KADID overlap.
+    fn blocklist_ignores_comment_lines() {
+        // The blocklist file is mostly comments now. Make sure the parser
+        // strips them and yields the empty set.
         let bl = blocklist();
-        assert!(bl.contains("gmessages_1022x818"), "gmessages_1022x818 expected in blocklist");
+        assert!(!bl.iter().any(|s| s.starts_with('#')),
+            "comment lines must be filtered out by the parser");
     }
 }

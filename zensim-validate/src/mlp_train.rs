@@ -309,15 +309,30 @@ pub fn train_mlp_with_tv(
     });
 
     // 3. Initialize weights (Xavier-Glorot for tanh/leaky-relu).
-    let mut rng = SplitMix64::new(hyperparams.seed);
+    //
+    // METHODOLOGY: the init RNG and the sampler RNG are SEPARATE so
+    // that comparing trainers at different `n_features` (e.g.
+    // 228 baseline vs 372 IW A/B) sees the SAME sequence of training
+    // pair draws. Using one RNG for both would cause the sampler
+    // state at epoch 0 to differ between the two arms (init consumes
+    // more normals when n_features is larger), making the A/B
+    // unfair. Both seeds derive deterministically from
+    // `hyperparams.seed` so reproducibility is preserved.
+    let mut init_rng = SplitMix64::new(hyperparams.seed);
+    let mut rng = SplitMix64::new(
+        hyperparams
+            .seed
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(0xDEADBEEFCAFEBABE),
+    );
     let std1 = (2.0 / (n_features + n_hidden) as f64).sqrt();
     let std2 = (2.0 / (n_hidden + n_outputs) as f64).sqrt();
     let mut w1 = (0..n_features * n_hidden)
-        .map(|_| rng.next_normal() * std1)
+        .map(|_| init_rng.next_normal() * std1)
         .collect::<Vec<_>>();
     let mut b1 = vec![0.0f64; n_hidden];
     let mut w2 = (0..n_hidden * n_outputs)
-        .map(|_| rng.next_normal() * std2)
+        .map(|_| init_rng.next_normal() * std2)
         .collect::<Vec<_>>();
     let mut b2 = vec![0.0f64; n_outputs];
 
