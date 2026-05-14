@@ -281,22 +281,52 @@ fn main() {
         println!();
         println!("### {} full statistical panel (CLAUDE.md rigor mandate)", ds.name);
         println!();
-        println!("| Metric | SROCC | PLCC | KROCC | OR | PWRC |");
-        println!("|---|---:|---:|---:|---:|---:|");
-        for (name, vals) in &[
+        println!("| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |");
+        println!("|---|---:|---:|---:|---:|---:|---:|");
+        let metrics_for_panel: &[(&str, &Vec<f64>)] = &[
             ("V0_2",     &v02),
             ("V0_4 (bake)", &v04),
             ("fast-ssim2", &ssim2),
             ("butteraugli", &butter),
-        ] {
+        ];
+        for (name, vals) in metrics_for_panel {
             let s = spearman(&humans, vals).abs();
             let p = pearson(&humans, vals).abs();
             let k = kendall_tau(&humans, vals).abs();
             let or_ = outlier_ratio(vals, &humans);
             let pw = pwrc(&humans, vals).abs();
+            // Z-RMSE: rescale predictions to MOS units first (Mohammadi
+            // 2025 convention) so Z-RMSE units match the JND/MCOS scale.
+            let rescaled = rescale_to_match(vals, &humans);
+            let z = z_rmse(&rescaled, &humans, None);
             println!(
-                "| {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} |",
-                name, s, p, k, or_, pw
+                "| {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} |",
+                name, s, p, k, or_, pw, z
+            );
+        }
+        println!();
+        println!("_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable on this corpus). \
+On AIC-3 / AIC-4 / CID22 with bootstrap σ available, this becomes the σ-normalized form \
+recommended by Mohammadi et al. 2025 (arXiv:2509.13150)._");
+        println!();
+
+        // MRR pairwise + Wilcoxon: rigorously test whether V0_4 (the
+        // bake under test) beats each baseline. Both stats are
+        // per CLAUDE.md "Statistical rigor" mandate.
+        let v04_srocc = spearman(&humans, &v04).abs();
+        println!("### {} significance vs V0_4 bake (MRR + Wilcoxon, two-tailed)", ds.name);
+        println!();
+        println!("| Comparison | SROCC_other | SROCC_V0_4 | MRR z | MRR p | Wilcoxon z | Wilcoxon p | effect r |");
+        println!("|---|---:|---:|---:|---:|---:|---:|---:|");
+        for (name, other) in &[("V0_2", &v02), ("fast-ssim2", &ssim2), ("butteraugli", &butter)] {
+            let r_other = spearman(&humans, other).abs();
+            let r_v04 = v04_srocc;
+            let r12 = spearman(other, &v04).abs();
+            let (mrr_z, mrr_p, _dir) = mrr_test(r_other, r_v04, r12, n_valid);
+            let (w_z, w_p, w_r) = wilcoxon_signed_rank(other, &v04, &humans);
+            println!(
+                "| {} vs V0_4 | {:.4} | {:.4} | {:.3} | {:.4} | {:.3} | {:.4} | {:.3} |",
+                name, r_other, r_v04, mrr_z, mrr_p, w_z, w_p, w_r
             );
         }
         println!();
@@ -1184,10 +1214,223 @@ fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
 // ---- Statistical helpers (CLAUDE.md mandatory full-stat panel) ----
 //
 // Per zensim/CLAUDE.md "Statistical rigor" (2026-05-14): every eval
-// that emits SROCC MUST also emit PLCC, KROCC, OR, PWRC, and (when
-// per-stimulus subjective σ is available) Z-RMSE. MRR + Wilcoxon are
-// the right tests for "is A − B real?". This block implements the
-// first four; Z-RMSE / MRR / Wilcoxon are queued.
+// that emits SROCC MUST also emit PLCC, KROCC, OR, PWRC, Z-RMSE, MRR
+// p-value, and Wilcoxon signed-rank + effect size. Full mandate
+// shipped here.
+//
+// Reference impls: Mohammadi et al. 2025 "Evaluation of Objective IQA
+// Metrics for HF Image Compression" (arXiv:2509.13150) reference
+// notebooks at github.com/shimamohammadi/EvaluationMetrics.
+
+/// Z-RMSE: σ-normalized RMSE between metric predictions and subjective
+/// scores. Penalizes errors LESS where humans disagreed (large σ) and
+/// MORE where the JND is sharp (small σ). From Mohammadi 2025 eq. 5:
+///
+/// ```text
+/// Z-RMSE = √( (1/n) · Σ ((Ŝ_i − μ_i) / σ_i)² )
+/// ```
+///
+/// where μ_i and σ_i are the per-stimulus subjective mean and σ
+/// (from bootstrap of human ratings). When per-stimulus σ is not
+/// available, falls back to corpus-wide σ (less informative but still
+/// captures the magnitude of metric error).
+///
+/// Predictions must be on the same scale as subjective (apply affine
+/// rescale via least-squares OR Pearson-based fit before computing
+/// Z-RMSE; this fn assumes already-rescaled inputs).
+pub fn z_rmse(predicted: &[f64], target: &[f64], target_sigma: Option<&[f64]>) -> f64 {
+    let n = predicted.len();
+    if n < 2 || target.len() != n {
+        return f64::NAN;
+    }
+    let sigma_global = {
+        let mean: f64 = target.iter().sum::<f64>() / n as f64;
+        let var: f64 = target.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64;
+        var.sqrt().max(1e-9)
+    };
+    let mut sum_sq = 0.0f64;
+    let mut count = 0;
+    for i in 0..n {
+        let sig = match target_sigma {
+            Some(s) if i < s.len() && s[i].is_finite() && s[i] > 0.0 => s[i],
+            _ => sigma_global,
+        };
+        let z = (predicted[i] - target[i]) / sig;
+        if z.is_finite() {
+            sum_sq += z * z;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return f64::NAN;
+    }
+    (sum_sq / count as f64).sqrt()
+}
+
+/// Rescale `predicted` to `target`'s mean/scale via least-squares
+/// affine fit `Ŝ = a + b · pred` (the only step where polarity matters).
+/// Returns the rescaled predictions. Use BEFORE z_rmse so the units
+/// match.
+pub fn rescale_to_match(predicted: &[f64], target: &[f64]) -> Vec<f64> {
+    let n = predicted.len().min(target.len());
+    if n < 2 {
+        return predicted.to_vec();
+    }
+    let mean_p: f64 = predicted.iter().take(n).sum::<f64>() / n as f64;
+    let mean_t: f64 = target.iter().take(n).sum::<f64>() / n as f64;
+    let mut cov = 0.0f64;
+    let mut var_p = 0.0f64;
+    for i in 0..n {
+        let dp = predicted[i] - mean_p;
+        let dt = target[i] - mean_t;
+        cov += dp * dt;
+        var_p += dp * dp;
+    }
+    let b = if var_p.abs() < 1e-12 { 0.0 } else { cov / var_p };
+    let a = mean_t - b * mean_p;
+    predicted.iter().map(|p| a + b * p).collect()
+}
+
+/// Meng-Rosenthal-Rubin paired SROCC test (1992). Tests H0: r1 = r2
+/// where r1 = corr(metric_a, target) and r2 = corr(metric_b, target),
+/// accounting for the correlation r12 = corr(metric_a, metric_b).
+/// Returns (z_statistic, p_value, effect_direction).
+///
+/// p_value is two-tailed (Pr(|Z| > observed)). effect_direction is
+/// +1 if r1 > r2, -1 if r2 > r1, 0 if tied.
+///
+/// Implements the Fisher-z form (eq. 11 in Mohammadi 2025):
+/// ```text
+/// f = (1 − r_bar²) ⁻¹ · ⟨r1², r2², r12 × (2 r_bar² − r12)⟩ correction
+/// z = √(n − 3) · (atanh(r1) − atanh(r2)) / √(2 (1 − r12) · f)
+/// ```
+///
+/// where r_bar = (r1 + r2) / 2.
+///
+/// This is the standard form used in IQA-metric evaluation
+/// (Mohammadi 2025, also in Sneyers 2023 CID22 paper).
+pub fn mrr_test(r1: f64, r2: f64, r12: f64, n: usize) -> (f64, f64, i8) {
+    if n < 4 {
+        return (f64::NAN, f64::NAN, 0);
+    }
+    let z1 = r1.atanh();
+    let z2 = r2.atanh();
+    let r_bar = (r1 + r2) / 2.0;
+    // Steiger / Meng-Rosenthal-Rubin variance correction
+    let denom1 = 1.0 - r_bar * r_bar;
+    if denom1.abs() < 1e-12 {
+        return (f64::NAN, f64::NAN, 0);
+    }
+    let f = (1.0 - r12) / (2.0 * denom1);
+    let h = (1.0 - f * r_bar * r_bar) / (1.0 - r_bar * r_bar);
+    let var_z_diff = 2.0 * (1.0 - r12) * h / (n as f64 - 3.0);
+    if var_z_diff <= 0.0 {
+        return (f64::NAN, f64::NAN, 0);
+    }
+    let z_stat = (z1 - z2) / var_z_diff.sqrt();
+    // Two-tailed normal p-value: erfc(|z| / √2)
+    let p = libm_erfc_half(z_stat.abs());
+    let dir: i8 = if r1 > r2 { 1 } else if r2 > r1 { -1 } else { 0 };
+    (z_stat, p, dir)
+}
+
+/// Two-tailed p-value of a standard normal: `erfc(|z| / √2)`.
+/// Inline erfc approximation (no libm dependency).
+fn libm_erfc_half(z: f64) -> f64 {
+    let x = z / std::f64::consts::SQRT_2;
+    // Abramowitz & Stegun 7.1.26 erfc approximation (max relative
+    // error ~3e-7 for x ≥ 0).
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let poly = ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t
+        + 0.254829592)
+        * t;
+    poly * (-x * x).exp()
+}
+
+/// Wilcoxon signed-rank test on absolute residuals. Tests H0: the
+/// distributions of |e_a| and |e_b| are equal, where
+/// e_x = z(metric_x) − z(target). Returns (z_statistic, p_value,
+/// effect_size r = Z / √N).
+///
+/// Sign convention: positive z_statistic ⇒ metric_a has LARGER errors
+/// than metric_b on average (i.e. metric_b is better).
+///
+/// Non-parametric companion to MRR: doesn't assume normality of
+/// Fisher-z transformed correlations. Mohammadi 2025 uses both as
+/// confirmatory tests.
+pub fn wilcoxon_signed_rank(
+    metric_a: &[f64],
+    metric_b: &[f64],
+    target: &[f64],
+) -> (f64, f64, f64) {
+    let n = metric_a.len().min(metric_b.len()).min(target.len());
+    if n < 6 {
+        return (f64::NAN, f64::NAN, f64::NAN);
+    }
+    // z-normalize each input
+    let z = |xs: &[f64]| -> Vec<f64> {
+        let m: f64 = xs.iter().sum::<f64>() / n as f64;
+        let v: f64 = xs.iter().map(|x| (x - m).powi(2)).sum::<f64>() / n as f64;
+        let sd = v.sqrt().max(1e-12);
+        xs.iter().map(|x| (x - m) / sd).collect()
+    };
+    let za = z(metric_a);
+    let zb = z(metric_b);
+    let zt = z(target);
+
+    let mut diffs: Vec<f64> = (0..n)
+        .map(|i| {
+            let ea = (za[i] - zt[i]).abs();
+            let eb = (zb[i] - zt[i]).abs();
+            ea - eb
+        })
+        .filter(|d| d.abs() > 1e-12)
+        .collect();
+    let n_nonzero = diffs.len();
+    if n_nonzero < 6 {
+        return (f64::NAN, f64::NAN, f64::NAN);
+    }
+    // Sort by |diff|, assign ranks (with average-rank ties), apply
+    // sign of diff.
+    let mut idx: Vec<usize> = (0..n_nonzero).collect();
+    idx.sort_by(|&a, &b| diffs[a].abs().partial_cmp(&diffs[b].abs()).unwrap_or(std::cmp::Ordering::Equal));
+    let mut ranks = vec![0.0f64; n_nonzero];
+    let mut i = 0;
+    while i < n_nonzero {
+        let mut j = i + 1;
+        while j < n_nonzero
+            && (diffs[idx[j]].abs() - diffs[idx[i]].abs()).abs() < 1e-12
+        {
+            j += 1;
+        }
+        let avg_rank = (i + j + 1) as f64 / 2.0;
+        for k in i..j {
+            ranks[idx[k]] = avg_rank;
+        }
+        i = j;
+    }
+    let mut w_plus = 0.0f64;
+    let mut w_minus = 0.0f64;
+    for k in 0..n_nonzero {
+        if diffs[k] > 0.0 {
+            w_plus += ranks[k];
+        } else {
+            w_minus += ranks[k];
+        }
+    }
+    let n_f = n_nonzero as f64;
+    let mean_w = n_f * (n_f + 1.0) / 4.0;
+    let var_w = n_f * (n_f + 1.0) * (2.0 * n_f + 1.0) / 24.0;
+    // Use the smaller of w_plus / w_minus for the z statistic
+    let w = w_plus.min(w_minus);
+    let z_stat = (w - mean_w) / var_w.sqrt();
+    let p = libm_erfc_half(z_stat.abs());
+    // Effect size r = Z / √N (Rosenthal 1991 convention; |r| ∈ [0, 1])
+    let r = z_stat.abs() / n_f.sqrt();
+    // Sign convention: positive ⇒ a has larger errors than b ⇒ b is better.
+    let signed_z = if w_plus > w_minus { z_stat.abs() } else { -z_stat.abs() };
+    (signed_z, p, r)
+}
 
 /// Pearson product-moment correlation. The dial-honesty stat — measures
 /// linearity between predictor and target, not just rank order. Critical
