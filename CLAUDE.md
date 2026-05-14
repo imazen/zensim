@@ -432,8 +432,26 @@ Never publish without a matching pushed tag. Never tag without passing semver-ch
 
 ### Dataset contamination rules
 - **CID22**: 49 validation images. 41 blocked in generator, 7 leaked into training sources. Safe synthetic excludes all 49. CID22 is safe as a human evaluation set.
-- **KADIK10k**: Uses I01-I81 reference images (Kodak etc). No overlap with hex-hashed training sources. Safe as training or evaluation.
-- **TID2013**: Uses 25 reference images. No overlap with training sources. Safe as training or evaluation.
+- **KADIK10k**: Uses I01-I81 reference images. **Perceptual contamination
+  confirmed 2026-05-14** — dHash-64 audit against synth-v2 training
+  found 6 training sources at strict d≤10 (notably I18 with 4 size
+  variants from the `gmessages` source) and 118 at loose d≤16.
+  KADID aggregate SROCC numbers from any V_X bake trained on
+  uncleaned safe-synthetic are **inflated**. Use as integrity
+  guard, not as primary ship gate. Full audit at
+  `benchmarks/kadid_overlap_2026-05-14.tsv`.
+- **TID2013**: Uses 25 reference images. **Minor perceptual contamination
+  confirmed 2026-05-14** — 1 strict (d≤10) match against I12, 33 loose
+  (d≤16). Unlikely to move aggregate SROCC by more than ±0.005, but
+  not bit-clean. Audit at `benchmarks/tid_overlap_2026-05-14.tsv`.
+- **The file-name "no overlap" check is insufficient**. File names of
+  hex-hashed training sources don't collide with KADID's I01..I81 or
+  TID's I01..I25 namespace by construction, but perceptual content
+  can still overlap (Kodak / Lena / Mandrill / Lighthouse are common
+  source images that may appear under hex-hashed names in the
+  CLIC + CID22 crawls). Every new corpus added as a holdout MUST go
+  through `check_holdout_overlap` (dHash-64) against every training
+  CSV before it's used as a ship gate.
 - **Synthetic training sources**: Hex-hashed tiles from CLIC 2025 + CID22 collections, 3,579 unique refs after CID22 exclusion.
 
 ### Available human datasets for training/evaluation

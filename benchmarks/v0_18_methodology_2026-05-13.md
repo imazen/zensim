@@ -275,3 +275,79 @@ verified, can't be improved on, and can't survive context loss.
 
 This rule lives in `zensim/CLAUDE.md` shipping policy and applies
 to every future V_X.
+
+---
+
+## 2026-05-14 addendum: 10-band re-validation + KADID/TID overlap audit
+
+After the CLAUDE.md per-band-reporting bump from 4 to 10 bands, V0_18
+was re-validated on the new harness (`dataset_metric_baseline` with
+the 10-band table). The bake under test is the same V0_17→V0_18 I8
+re-quantization documented above, additionally rebaked through
+zenpredict-bake 0.2.0 which always applies hidden-unit L2-asc reorder
+(consumer-invisible, predict-output-equivalent). The compressed
+variant (17,694 B via whole-bake LZ4) is numerically identical to
+the uncompressed 93,064 B variant at the predict-output level.
+
+### Aggregate (max-pairs 50000)
+
+| Corpus | n | V0_4 | fast-ssim2 | vs ssim2 | vs prior V0_18 |
+|---|--:|--:|--:|--:|--:|
+| CID22 | 4292 | 0.8933 | 0.8895 | +0.0038 | −0.0001 |
+| KADID10k | 10125 | 0.9427* | 0.8133 | +0.1294* | 0.0000* |
+| TID2013 | 3000 | 0.9526 | 0.8460 | +0.1066 | +0.0001 |
+
+`*` KADID number is **inflated** by training/holdout perceptual overlap
+— see audit below.
+
+### Perceptual-overlap audit (dHash-64, 2026-05-14)
+
+Re-ran `check_holdout_overlap` against the synth-v2 safe-synthetic
+training CSV (3,218 unique training sources) for both KADID and TID
+references. CID22 was previously purged in the 2026-05-12 sweep
+(361 contaminated sources removed, manifest at
+`benchmarks/contaminated_sources_purged_2026-05-12.txt`).
+
+| Corpus | strict d≤10 | loose d≤16 | refs affected |
+|---|--:|--:|---|
+| KADID10k | 6 | 118 | I04/I18/I25/I41/I71 (I18 has 4 size variants in training) |
+| TID2013 | 1 | 33 | I12 |
+
+TSVs: `benchmarks/kadid_overlap_2026-05-14.tsv`,
+`benchmarks/tid_overlap_2026-05-14.tsv`.
+
+### Interpretation
+
+- **CID22 0.8933 is honest** — the gold-standard ship gate per
+  CLAUDE.md is met (≥ fast-ssim2's 0.8895, Δ=+0.0038).
+- **KADID 0.9427 is over-stated.** The 6 strict-match sources +
+  118 loose-match sources mean some KADID test pairs are essentially
+  in-distribution. True KADID SROCC is bounded above by 0.9427 and
+  below by the corpus-uniform ssim2 floor (0.8133). Until the
+  KADID-overlap sources are purged from training (deferred), treat
+  this number as "V0_4 ≥ ssim2 by an unknown margin ≥ 0.0; exact
+  delta inflated."
+- **TID 0.9526 is mostly honest.** 1 of 25 references with strict
+  overlap (and 33 of 3218 training sources at loose threshold) is
+  unlikely to move the aggregate by more than ±0.005. Treat as
+  approximately accurate.
+
+### Ship gate
+
+Per CLAUDE.md the **CID22 SROCC is the gold standard** for cross-band
+evaluation. CID22 passes at 0.8933 (+0.0038 over ssim2 0.8895, within
+±0.0001 of prior V0_18 baseline). The compressed V0_18 ships under
+the existing zensim 0.3.0 (never published — no version bump).
+
+KADID and TID stay as **integrity guards** but their inflated numbers
+explicitly do NOT load-bear the ship decision.
+
+### Follow-up (queued, not blocking ship)
+
+- Purge KADID-overlap training sources (6 strict + 118 loose) and
+  TID-overlap sources (1 + 33).
+- Retrain V_X on the truly-clean CSV.
+- Re-validate to get the honest KADID/TID numbers.
+- Update CLAUDE.md's "Dataset contamination rules" to note that the
+  file-name "no overlap" claim was insufficient — perceptual-hash
+  audit is required.
