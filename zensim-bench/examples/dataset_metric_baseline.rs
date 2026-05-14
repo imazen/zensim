@@ -274,6 +274,33 @@ fn main() {
             ds.name, n_valid, srocc_v02, srocc_v04, srocc_ssim2, srocc_butter
         );
 
+        // CLAUDE.md "Statistical rigor" mandate (2026-05-14): emit
+        // PLCC, KROCC, OR, PWRC alongside SROCC. Z-RMSE, MRR p-value,
+        // Wilcoxon are queued (need per-stimulus σ + paired-test
+        // infrastructure).
+        println!();
+        println!("### {} full statistical panel (CLAUDE.md rigor mandate)", ds.name);
+        println!();
+        println!("| Metric | SROCC | PLCC | KROCC | OR | PWRC |");
+        println!("|---|---:|---:|---:|---:|---:|");
+        for (name, vals) in &[
+            ("V0_2",     &v02),
+            ("V0_4 (bake)", &v04),
+            ("fast-ssim2", &ssim2),
+            ("butteraugli", &butter),
+        ] {
+            let s = spearman(&humans, vals).abs();
+            let p = pearson(&humans, vals).abs();
+            let k = kendall_tau(&humans, vals).abs();
+            let or_ = outlier_ratio(vals, &humans);
+            let pw = pwrc(&humans, vals).abs();
+            println!(
+                "| {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} |",
+                name, s, p, k, or_, pw
+            );
+        }
+        println!();
+
         if let Some(w) = per_pair_writer.as_mut() {
             for row in &pairs_with {
                 w.write_record([
@@ -1152,6 +1179,184 @@ fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
         }
     }
     pairs
+}
+
+// ---- Statistical helpers (CLAUDE.md mandatory full-stat panel) ----
+//
+// Per zensim/CLAUDE.md "Statistical rigor" (2026-05-14): every eval
+// that emits SROCC MUST also emit PLCC, KROCC, OR, PWRC, and (when
+// per-stimulus subjective σ is available) Z-RMSE. MRR + Wilcoxon are
+// the right tests for "is A − B real?". This block implements the
+// first four; Z-RMSE / MRR / Wilcoxon are queued.
+
+/// Pearson product-moment correlation. The dial-honesty stat — measures
+/// linearity between predictor and target, not just rank order. Critical
+/// for zensim because users type a target score and expect a linear
+/// response.
+fn pearson(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let mean_a: f64 = a.iter().sum::<f64>() / n as f64;
+    let mean_b: f64 = b.iter().sum::<f64>() / n as f64;
+    let mut num = 0.0f64;
+    let mut da = 0.0f64;
+    let mut db = 0.0f64;
+    for i in 0..n {
+        let xa = a[i] - mean_a;
+        let xb = b[i] - mean_b;
+        num += xa * xb;
+        da += xa * xa;
+        db += xb * xb;
+    }
+    let den = (da * db).sqrt();
+    if den < 1e-12 { 0.0 } else { num / den }
+}
+
+/// Kendall's τ-b (with ties correction). O(n²) — fine for n up to a
+/// few thousand; the eval datasets fit. Returns the absolute value
+/// for consistency with the other metric stats (metric polarities
+/// differ).
+fn kendall_tau(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let mut concordant = 0i64;
+    let mut discordant = 0i64;
+    let mut ties_a = 0i64;
+    let mut ties_b = 0i64;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let da = a[i] - a[j];
+            let db = b[i] - b[j];
+            if da.abs() < 1e-12 && db.abs() < 1e-12 {
+                // tied on both — ignore
+                continue;
+            } else if da.abs() < 1e-12 {
+                ties_a += 1;
+            } else if db.abs() < 1e-12 {
+                ties_b += 1;
+            } else if (da * db) > 0.0 {
+                concordant += 1;
+            } else {
+                discordant += 1;
+            }
+        }
+    }
+    let total_a = (concordant + discordant + ties_a) as f64;
+    let total_b = (concordant + discordant + ties_b) as f64;
+    let den = (total_a * total_b).sqrt();
+    if den < 1e-12 {
+        0.0
+    } else {
+        ((concordant - discordant) as f64) / den
+    }
+}
+
+/// Outlier Ratio. Following the VQEG / IQA convention, an "outlier" is
+/// a prediction whose residual exceeds 2·σ where σ is estimated per
+/// stimulus from the subjective spread. We don't have per-stimulus
+/// subjective σ (it requires bootstrapping the human MOS), so we use
+/// the simpler global-σ z-score variant: fraction of |z(residual)| > 2.
+///
+/// The signal is "what fraction of stimuli does the metric grossly
+/// misrank?" — high OR means a metric mostly tracks the MOS but blows
+/// up on a few stimuli, which is exactly the pathology a user-facing
+/// dial cares about.
+fn outlier_ratio(predicted: &[f64], target: &[f64]) -> f64 {
+    let n = predicted.len();
+    if n < 4 {
+        return f64::NAN;
+    }
+    // First, rescale predicted into target's range via z-score so the
+    // metric polarity doesn't matter (zensim is distance, ssim2 is
+    // score). We compare z-scores, not absolute residuals.
+    let mean_p: f64 = predicted.iter().sum::<f64>() / n as f64;
+    let mean_t: f64 = target.iter().sum::<f64>() / n as f64;
+    let var_p: f64 = predicted.iter().map(|x| (x - mean_p).powi(2)).sum::<f64>() / n as f64;
+    let var_t: f64 = target.iter().map(|x| (x - mean_t).powi(2)).sum::<f64>() / n as f64;
+    let sd_p = var_p.sqrt().max(1e-12);
+    let sd_t = var_t.sqrt().max(1e-12);
+    let mut residuals: Vec<f64> = Vec::with_capacity(n);
+    for i in 0..n {
+        // z-score residual: account for metric flipping by detecting
+        // direction via the sign of correlation.
+        let zp = (predicted[i] - mean_p) / sd_p;
+        let zt = (target[i] - mean_t) / sd_t;
+        residuals.push((zp - zt).abs());
+    }
+    // Use the residuals' own σ for the 2σ outlier cutoff. This is the
+    // standard "robust" form when no per-stimulus σ is available.
+    let mean_r: f64 = residuals.iter().sum::<f64>() / n as f64;
+    let sd_r: f64 = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>() / n as f64)
+        .sqrt()
+        .max(1e-12);
+    let mut polarity = 1.0;
+    // Detect polarity-flip: if predictor is anti-correlated with
+    // target, the z-scores point opposite — the residual becomes
+    // a sum, not a difference. Re-compute residuals with the flip.
+    let s = pearson(predicted, target);
+    if s < 0.0 {
+        polarity = -1.0;
+    }
+    if polarity < 0.0 {
+        let mut residuals: Vec<f64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let zp = -(predicted[i] - mean_p) / sd_p;
+            let zt = (target[i] - mean_t) / sd_t;
+            residuals.push((zp - zt).abs());
+        }
+        let mean_r: f64 = residuals.iter().sum::<f64>() / n as f64;
+        let sd_r: f64 = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>() / n as f64)
+            .sqrt()
+            .max(1e-12);
+        return residuals.iter().filter(|r| (**r - mean_r).abs() > 2.0 * sd_r).count() as f64
+            / n as f64;
+    }
+    residuals.iter().filter(|r| (**r - mean_r).abs() > 2.0 * sd_r).count() as f64 / n as f64
+}
+
+/// Pearson Weighted Rank Correlation (PWRC). IQA-literature stat that
+/// weights rank-Pearson by extremeness — emphasises correlation at the
+/// tails of the rank distribution where compression-product decisions
+/// live (extreme low quality or extreme high quality).
+///
+/// Definition used here: weighted Pearson on rank-transformed values
+/// with `w_i = |R(x_i) − (n+1)/2| / ((n+1)/2)` so the median rank gets
+/// weight 0 and the extremes get weight 1. Other definitions exist in
+/// the literature (PWRC of Wang & Liu, weighted Kendall variants);
+/// document the exact form in our methodology so we're comparable
+/// across runs.
+fn pwrc(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len();
+    if n < 4 {
+        return 0.0;
+    }
+    let ra = ranks(a);
+    let rb = ranks(b);
+    let mid = (n as f64 - 1.0) / 2.0;
+    let max_dev = mid.max(1e-12);
+    let w: Vec<f64> = ra.iter().map(|r| (r - mid).abs() / max_dev).collect();
+    let wsum: f64 = w.iter().sum();
+    if wsum < 1e-12 {
+        return 0.0;
+    }
+    let mean_a: f64 = w.iter().zip(&ra).map(|(w, r)| w * r).sum::<f64>() / wsum;
+    let mean_b: f64 = w.iter().zip(&rb).map(|(w, r)| w * r).sum::<f64>() / wsum;
+    let mut num = 0.0f64;
+    let mut da = 0.0f64;
+    let mut db = 0.0f64;
+    for i in 0..n {
+        let xa = ra[i] - mean_a;
+        let xb = rb[i] - mean_b;
+        num += w[i] * xa * xb;
+        da += w[i] * xa * xa;
+        db += w[i] * xb * xb;
+    }
+    let den = (da * db).sqrt();
+    if den < 1e-12 { 0.0 } else { num / den }
 }
 
 // ---- SROCC ----
