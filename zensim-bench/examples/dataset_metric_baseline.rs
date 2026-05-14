@@ -1379,17 +1379,53 @@ pub fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
     let b4_sign = if p_corr < 0.0 { -1.0 } else { 1.0 };
 
     // Mohammadi `my_fit.py` baseline init, plus alternative starts
-    // for ill-conditioned narrow-range cases (where the logistic
-    // operates in its near-linear tail). The alternatives shift b3
-    // off the data center and stretch b4 by factors of 1 / 2 / 10,
-    // which is what curve_fit does internally via its LM trust region
-    // when the initial p0 doesn't make progress.
-    let starts: [[f64; 4]; 5] = [
+    // for ill-conditioned narrow-range cases. With narrow input
+    // ranges (e.g. IW-SSIM in [0.97, 0.99]) the 4-param logistic has
+    // flat ridges in parameter space — scipy's LM converges to
+    // "tail-anchor" minima where b1 or b2 are ±thousands and the
+    // logistic operates in its near-linear tail. The starts below
+    // cover both conventional (b1=t_max, b2=t_min) and tail-anchor
+    // regimes so the multi-start matches scipy's effective behavior
+    // within ±0.05 Z-RMSE on narrow-range metrics.
+    //
+    // Sign convention: b1/b2 are upper/lower asymptotes. For
+    // distance-style decreasing metrics (b4 < 0), they swap roles.
+    // The "extreme tail" starts include large opposite-sign variants
+    // that cover the regime where the logistic degenerates to a
+    // near-linear function in the data range.
+    // For narrow-range metrics (IW-SSIM in [0.97, 0.99]) scipy converges
+    // to "near-linear-tail" minima where b3 sits ~25σ OUTSIDE the data
+    // range and b1 (or b2) is large enough that the logistic operates
+    // entirely on one of its near-linear tails over the data span.
+    // Reference IW-SSIM scipy fit: b3=1.16 (26·p_std above data center),
+    // b1=-7079, b4=0.022. We seed several b3-outside-data starts so the
+    // multi-start covers that regime.
+    let p_max = predicted.iter().take(n).cloned().fold(f64::NEG_INFINITY, f64::max);
+    let p_min = predicted.iter().take(n).cloned().fold(f64::INFINITY, f64::min);
+    let t_span = (t_max - t_min).abs().max(1.0);
+    let tail = 1000.0 * t_span; // extreme tail magnitude
+    let b3_high = p_max + 25.0 * p_std; // ~scipy's IW-SSIM b3=1.16
+    let b3_low = p_min - 25.0 * p_std;
+    let starts: [[f64; 4]; 13] = [
+        // Conventional starts (Mohammadi `my_fit.py` baseline + b4 sweep)
         [t_max, t_min, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
         [t_max, t_min, mean_p, (p_std * 0.1 * b4_sign).copysign(b4_sign)],
         [t_max, t_min, mean_p, (p_std * 10.0 * b4_sign).copysign(b4_sign)],
         [t_max, t_min, mean_p + p_std, (p_std * b4_sign).copysign(b4_sign)],
         [t_max, t_min, mean_p - p_std, (p_std * b4_sign).copysign(b4_sign)],
+        // Tail-anchor starts: b1 or b2 at ±tail with b3 at data center.
+        [-tail, t_max, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [t_max, -tail, mean_p, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [tail, t_min, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [t_min, tail, mean_p, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        // b3-outside-data starts (the regime scipy converges to for
+        // narrow-range metrics). Pair with extreme-tail asymptotes and
+        // small b4 so the logistic crosses through the data range as a
+        // near-linear function with slope (b2-b1)/b4.
+        [-tail, t_max, b3_high, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [t_max, -tail, b3_low, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [tail, t_min, b3_low, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [t_min, tail, b3_high, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
     ];
     let mut best_b: Option<[f64; 4]> = None;
     let mut best_cost = f64::INFINITY;
