@@ -86,15 +86,27 @@ evaluation decision flows from this:
   but per-bin SROCC at 5-unit granularity in those bands IS the
   pathology view we use for goal #1 (band coverage).
 
-### Shipping policy (added 2026-05-11)
+### Shipping policy (revised 2026-05-14 — gates are ADVISORY)
 
 The shipped weight at `zensim/weights/v0_X_<date>.bin` may be added,
 swapped, or rotated to advance goal #1 (match-or-exceed ssim2 across
-all bands). When swapping:
-1. New bake must match-or-exceed fast-ssim2 per-band SROCC on KADID,
-   TID, AND CID22.
-2. Non-mono q-step rate must be ≤ 5.5% on JPEG unified parquet
-   (raised from the V0_2 floor 4.86% to accommodate band coverage).
+all bands) AND to **dramatically improve low-q (B0..B5) bands**, the
+regime where compression product decisions live.
+
+Per user directive 2026-05-14: **CID22 aggregate SROCC and
+non-monotonic q-step rate are advisory, not hard ship-blocking
+gates.** A bake that drops CID22 by 0.005 while gaining +0.05 on
+B0/B1 IS the winning trade. Surface the per-band picture; let the
+user make the call.
+
+When swapping, REPORT (don't block on):
+1. Per-band SROCC (10-band B0..B9 + legacy 4-band CID22 cuts) vs
+   fast-ssim2 baseline on KADID, TID, AND CID22. Flag bands where
+   the new bake loses ssim2 separately from bands where it wins.
+2. Non-mono q-step rate on JPEG unified parquet (raw + after
+   soft-iso, aggregate + per-band). Historical reference: V0_2
+   4.86 %, V0_8 5.87 %. Above 6 % is **noted, not blocked**; user
+   decides if the trade is worth it.
 3. Apply affine calibration via
    `scripts/v_next/affine_calibrate_znpr_v2.py` so calibrated output
    range matches truth distribution (p5..p95 ≈ ssim2 truth p5..p95).
@@ -127,6 +139,37 @@ A bake without a methodology doc = **untrustworthy bake**. Numbers
 can be reproduced; without methodology they can't be verified,
 can't be improved on, and can't survive context loss. Effective
 2026-05-13.
+
+### Experiment-rigor policy (added 2026-05-14, user directive)
+
+**Push every experiment to the paper-claimed benefit before
+falsifying it.** A single half-tuned run that fails to reproduce a
+paper's headline number is not a falsification — it's a
+hyperparameter / seed / recipe miss. Per paper:
+
+1. Quote the paper's claimed lift (e.g., "IW-SSIM +0.006 SROCC vs
+   MS-SSIM on TID2008") AND the paper's experimental conditions
+   (corpus, training split, hyperparams).
+2. Run our adaptation. If our result is BELOW the paper's claim by
+   more than measurement noise: extend the sweep (more seeds,
+   broader hyperparam grid, longer training, alternative
+   reimplementations) before declaring failure.
+3. Falsification requires: a documented sweep that exhausted the
+   paper's described configuration space PLUS at least one
+   reasonable extension, AND the result still fails to match.
+4. Land a `benchmarks/v0_X_method_<paper>_2026-MM-DD.md` doc with
+   the paper claim, our sweep grid, the result-vs-claim table, the
+   git commits, and the input MD5s.
+
+**Architecture is open.** Adding features (LMS / opponent channels,
+IW-weighted pooling, distortion-manifold encoder, JND-anchored
+calibration) is welcome if scientifically motivated. Don't be
+precious about the 228-feature input shape or 228 → H → 1 MLP
+topology.
+
+**B0..B5 lift is the dominant priority.** A bake that wins B6..B9
+but loses B0..B5 is the wrong direction — low/mid-q is where
+compression product decisions live.
 
 CID22 training data still must NOT be added to the trainer (the 49
 held-out reference images stay sacred). All training continues on
