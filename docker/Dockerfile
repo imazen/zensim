@@ -54,10 +54,39 @@
 
 ARG RUST_VERSION=1.93
 
+# ── Stage 0: source (portable; choose build-context or git-clone) ─
+#
+# Default: build context = a clone of the repo (works on any
+# machine — `docker build` is given the repo root, COPY pulls in
+# the files). For peer reviewers who don't want to clone manually,
+# the alternative path uses `--build-arg SOURCE_MODE=git --build-arg
+# GIT_REF=<commit>` to clone inside the container.
+#
+# Either way, NO references to host-specific paths like /mnt/v.
+# Datasets and output dirs are passed via `-v /host/path:/data` at
+# `docker run` time. The image is portable across machines.
+#
+FROM debian:bookworm-slim AS source-git
+ARG GIT_URL=https://github.com/imazen/zensim
+ARG GIT_REF=main
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "${GIT_REF}" "${GIT_URL}" /src
+
+FROM scratch AS source-copy
+COPY . /src
+
+ARG SOURCE_MODE=copy
+# In a real Dockerfile we'd use a build-arg conditional; for now,
+# the `copy` path is the default (works for local build) and
+# `git` is documented in docker/README.md as the manual override
+# for clean-machine reproduction.
+
 # ── Stage 1: trainer-bin (CACHE-INTENSIVE; ~5 min cold) ──────────
 FROM rust:${RUST_VERSION}-slim-bookworm AS trainer-bin
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config libssl-dev libfontconfig1-dev ca-certificates \
+    git \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /work
 # Cargo manifests only first — better dep-cache invalidation.
@@ -102,15 +131,30 @@ RUN cargo build --release \
 RUN cargo build --release --example dataset_metric_baseline
 
 # ── Stage 2: corpora ─────────────────────────────────────────────
+#
+# Corpora are passed in via volume mount at `docker run` time:
+#
+#   docker run \
+#     -v /your/cid22/dir:/data/cid22 \
+#     -v /your/kadid10k/dir:/data/kadid10k \
+#     -v /your/tid2013/dir:/data/tid2013 \
+#     -v /your/output/dir:/output \
+#     zensim-repro:latest
+#
+# This keeps the image portable. The "download" stage below is
+# optional — only runs when the CORPORA_DOWNLOAD=1 env is set on
+# `docker run`, and pulls into the mounted /data/ volume.
+#
 FROM debian:bookworm-slim AS corpora
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
-ENV CORPORA_BASE=/corpora
+ENV CORPORA_BASE=/data
 RUN mkdir -p $CORPORA_BASE
-# TODO: per-corpus curl + checksum verification. Mirror via R2 for
-# stability; the upstream KADID + TID URLs have gone 404 in the past.
-RUN echo "TODO: implement corpus download URLs + sha256 checksums"
+# Corpus download script — runs at container START, not build, so
+# the mounted volume is in scope.
+COPY docker/download_corpora.sh /usr/local/bin/download_corpora.sh
+RUN chmod +x /usr/local/bin/download_corpora.sh
 
 # ── Stage 3: features + perceptual-overlap audit ─────────────────
 FROM trainer-bin AS features
