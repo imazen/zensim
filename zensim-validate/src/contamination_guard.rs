@@ -61,6 +61,21 @@ pub fn blocklist() -> HashSet<&'static str> {
 
 pub fn scrub_csv_or_die<P: AsRef<Path>>(csv_path: P) -> std::io::Result<()> {
     let path = csv_path.as_ref();
+    // Audit-only bypass: when running a V0_18-reproduction or similar
+    // historical-comparison train, we DELIBERATELY want to use the
+    // pre-contamination corpus. The env var name is intentionally
+    // verbose to prevent accidental use.
+    if std::env::var("ZENSIM_BYPASS_CONTAMINATION_GUARD_FOR_AUDIT_I_REALLY_MEAN_IT")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        eprintln!(
+            "⚠ contamination_guard BYPASSED for {} via env var. Audit/reproduction context only — \
+             do NOT ship bakes trained under this bypass.",
+            path.display()
+        );
+        return Ok(());
+    }
     if path
         .file_name()
         .and_then(|n| n.to_str())
@@ -69,7 +84,8 @@ pub fn scrub_csv_or_die<P: AsRef<Path>>(csv_path: P) -> std::io::Result<()> {
     {
         eprintln!(
             "REFUSE: input CSV {} is explicitly tagged CONTAMINATED. \
-             Use a canonical clean CSV from /mnt/v/zen/zensim-training/2026-05-14-clean/ instead.",
+             Use a canonical clean CSV from /mnt/v/zen/zensim-training/2026-05-14-clean/ instead. \
+             (Audit override: ZENSIM_BYPASS_CONTAMINATION_GUARD_FOR_AUDIT_I_REALLY_MEAN_IT=1)",
             path.display()
         );
         std::process::exit(2);

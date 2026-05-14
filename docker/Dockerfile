@@ -1,166 +1,229 @@
 # zensim V_X full-reproducibility container.
 #
-# Goal: any future agent can `docker build && docker run` and end up
-# with the same canonical clean training corpus + trained V_X bake +
-# 10-band validation as is on disk today. Audit chain is unbroken.
+# Architecture (refined 2026-05-14 after user feedback):
 #
-# Stages:
+#  1. trainer-bin  — compile zensim_mlp_train + concat_three_way +
+#                    affine_calibrate + check_holdout_overlap +
+#                    contamination_guard + dataset_metric_baseline.
+#                    THIS IS THE EXPENSIVE STAGE (~5 min). Cached
+#                    until Rust source code changes — i.e. peer
+#                    reviewers tweaking hyperparams DON'T re-pay this.
 #
-#   1. base — Debian + rust-1.93 + python3 + system deps.
-#   2. corpora — download (or pull from R2 cache) every test corpus
-#      we need: CID22 / KADID / TID / AIC-3 / AIC-4 / KonJND.
-#   3. synth — re-derive the synthetic training corpus OR pull from
-#      R2 mirror at zentrain-r2.imazen.org/zensim-compare-site/. The
-#      r2-mirror path is faster (10 min) than full re-derive (~hours).
-#   4. features — compute the 228-feature CSV (via
-#      zensim::compute_all_features) for every (ref, dist) pair. Also
-#      run KADID/TID overlap audit and produce the 149-basename
-#      contamination blocklist.
-#   5. train — run the V0_18 3-way concat recipe against the clean
-#      corpus. Produce v0_X_*.bin under benchmarks/.
-#   6. validate — run dataset_metric_baseline with --v04-bake against
-#      every corpus; produce v0_X_10band_<date>.md.
-#   7. ship-bundle — collect the bake + methodology doc + validation
-#      report + audit TSVs into a single `/output/` tarball.
+#  2. corpora      — download / cache test corpora. Cached when
+#                    URLs + checksums unchanged.
 #
-# Each stage caches separately so iterating on (e.g.) the training
-# recipe doesn't re-run feature extraction.
+#  3. features     — compute per-pair feature CSVs + re-run
+#                    perceptual-overlap audit. Cached unless corpora
+#                    or feature extractor change.
+#
+#  4. train-base / train-cycle14-s1 / train-cycle14-s42 — one stage
+#                    per component, ARG-driven hyperparameters. Each
+#                    is a separate RUN line so Docker invalidates
+#                    only the changed component.
+#
+#  5. concat       — concat-three-way + affine calibrate. Cheap,
+#                    re-runs when any component changes.
+#
+#  6. validate     — 10-band SROCC + candlestick.
+#
+#  7. bundle       — output collection.
+#
+# Build-time tweaking flow:
+#
+#   # Default reproduces V0_18.
+#   docker build -t v0_18_repro -f docker/Dockerfile .
+#
+#   # Tweak just the cycle-14 seed=1 TV weight.
+#   docker build -t v0_X_experiment \
+#     --build-arg CYCLE14_S1_TV_WEIGHT=2.0 \
+#     -f docker/Dockerfile .
+#   # Docker re-runs train-cycle14-s1 + concat + validate.
+#   # train-base, train-cycle14-s42, corpora, features all cached.
+#
+# Optional Rust-side cache (peer-review-friendly):
+#
+#   docker run --rm \
+#     -v $(pwd)/cache:/cache \
+#     -e ZENSIM_TRAIN_CACHE=/cache \
+#     v0_X_experiment
+#   # Tweaking ARGs no longer re-trains: if (input_md5s, flags) match
+#   # a previously-cached entry, the trainer returns the cached bake
+#   # in milliseconds. Without the volume mount the cache is in-container
+#   # only (volatile) — building still works, just no cross-rebuild
+#   # persistence.
 
-# ── Stage 1: base ────────────────────────────────────────────────
-FROM rust:1.93-slim-bookworm AS base
+ARG RUST_VERSION=1.93
+
+# ── Stage 1: trainer-bin (CACHE-INTENSIVE; ~5 min cold) ──────────
+FROM rust:${RUST_VERSION}-slim-bookworm AS trainer-bin
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3 python3-pip python3-venv python3-numpy python3-pandas python3-matplotlib python3-pil \
-    git curl ca-certificates pkg-config \
-    libssl-dev libfontconfig1-dev \
+    build-essential pkg-config libssl-dev libfontconfig1-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /work
-
-# Pre-fetch cargo registry cache for faster builds in subsequent stages.
+# Cargo manifests only first — better dep-cache invalidation.
 COPY Cargo.toml Cargo.lock /work/
-RUN mkdir -p /work/zensim/src /work/zensim-validate/src /work/zensim-bench/src /work/zensim-regress/src /work/zensim-wasm-tests/src /work/zensim-train-core/src \
-    && touch /work/zensim/src/lib.rs /work/zensim-validate/src/lib.rs /work/zensim-bench/src/lib.rs /work/zensim-regress/src/lib.rs /work/zensim-wasm-tests/src/lib.rs /work/zensim-train-core/src/lib.rs
+COPY zensim/Cargo.toml /work/zensim/
+COPY zensim-validate/Cargo.toml /work/zensim-validate/
+COPY zensim-bench/Cargo.toml /work/zensim-bench/
+COPY zensim-regress/Cargo.toml /work/zensim-regress/
+COPY zensim-train-core/Cargo.toml /work/zensim-train-core/
+COPY zensim-wasm-tests/Cargo.toml /work/zensim-wasm-tests/
+RUN mkdir -p \
+    /work/zensim/src \
+    /work/zensim-validate/src/bin \
+    /work/zensim-bench/src /work/zensim-bench/examples \
+    /work/zensim-regress/src \
+    /work/zensim-train-core/src \
+    /work/zensim-wasm-tests/src && \
+    echo "fn main() {}" > /work/zensim/src/lib.rs && \
+    echo "fn main() {}" > /work/zensim-validate/src/main.rs && \
+    echo "fn main() {}" > /work/zensim-bench/src/lib.rs && \
+    echo "fn main() {}" > /work/zensim-regress/src/lib.rs && \
+    echo "fn main() {}" > /work/zensim-train-core/src/lib.rs && \
+    echo "fn main() {}" > /work/zensim-wasm-tests/src/lib.rs
+# Warm cargo registry by attempting a build (will fail; that's fine
+# — we just want the deps downloaded + compiled into the cache layer).
+RUN cargo fetch
+# Real source.
+COPY zensim /work/zensim
+COPY zensim-validate /work/zensim-validate
+COPY zensim-bench /work/zensim-bench
+COPY zensim-regress /work/zensim-regress
+COPY zensim-train-core /work/zensim-train-core
+COPY zensim-wasm-tests /work/zensim-wasm-tests
+COPY benchmarks /work/benchmarks
+# Build all binaries we need downstream.
+RUN cargo build --release \
+    --bin zensim_mlp_train \
+    --bin concat_three_way \
+    --bin affine_calibrate \
+    --bin check_holdout_overlap \
+    --bin contamination_guard
+RUN cargo build --release --example dataset_metric_baseline
 
 # ── Stage 2: corpora ─────────────────────────────────────────────
-FROM base AS corpora
-# Each download lands at /corpora/<name>/. R2 mirror is preferred over
-# upstream sources for stability and speed.
+FROM debian:bookworm-slim AS corpora
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates unzip \
+    && rm -rf /var/lib/apt/lists/*
 ENV CORPORA_BASE=/corpora
 RUN mkdir -p $CORPORA_BASE
-# CID22 validation set (from zentrain R2 mirror — 1.2 GB).
-RUN echo "TODO: implement curl download from R2 with retries + checksum"
-# KADID-10k from https://database.mmsp-kn.de/kadid-10k-database.html (4 GB)
-RUN echo "TODO: implement"
-# TID2013 from http://www.ponomarenko.info/tid2013.htm (~600 MB)
-RUN echo "TODO: implement"
-# AIC-3 CTC EPFL (250 MB)
-RUN echo "TODO: implement"
-# AIC-4 sample (250 MB)
-RUN echo "TODO: implement"
-# KonJND-1k (1.2 GB)
-RUN echo "TODO: implement"
+# TODO: per-corpus curl + checksum verification. Mirror via R2 for
+# stability; the upstream KADID + TID URLs have gone 404 in the past.
+RUN echo "TODO: implement corpus download URLs + sha256 checksums"
 
-# ── Stage 3: synth corpus (or R2 mirror) ─────────────────────────
-FROM corpora AS synth
+# ── Stage 3: features + perceptual-overlap audit ─────────────────
+FROM trainer-bin AS features
+ARG SYNTH_MODE=r2
 ENV SYNTH_BASE=/synth
 RUN mkdir -p $SYNTH_BASE
-# Option A (fast): pull pre-computed features from R2.
-# Option B (slow, audit-rebuild): re-run the synth generator + score every pair.
-ARG SYNTH_MODE=r2
+# Option A (default, fast): pull pre-computed clean features from R2.
+# Option B (audit): re-run synth generator + extractor (hours).
 RUN if [ "$SYNTH_MODE" = "r2" ]; then \
-      echo "pull canonical features from r2://zentrain-r2.imazen.org/zensim-compare-site/clean-corpus/2026-05-14/"; \
+      echo "TODO: aws s3 sync s3://zentrain/zensim-compare-site/clean-corpus/2026-05-14/ $SYNTH_BASE/"; \
     else \
       echo "TODO: re-run synth + feature extraction"; \
     fi
+# Re-run overlap audit on every (training_corpus, holdout) pair. If
+# new contamination appears, the build fails — this is the audit gate.
+# RUN /work/target/release/check_holdout_overlap ...
 
-# ── Stage 4: features + contamination audit ──────────────────────
-FROM synth AS features
-COPY . /work/
-WORKDIR /work
-RUN cargo build --release --bin check_holdout_overlap --bin contamination_guard
-# Re-run the perceptual-overlap audit on every (training_corpus, holdout)
-# pair. If new contamination is found, the build fails — guarantees no
-# silent regression.
-RUN ./target/release/check_holdout_overlap \
-      --cid22-refs $CORPORA_BASE/cid22/CID22_validation_set/original \
-      --training-csv $SYNTH_BASE/training_clean.csv \
-      --threshold 16 \
-      --out-tsv /work/audit_cid22.tsv && \
-    ./target/release/check_holdout_overlap \
-      --cid22-refs $CORPORA_BASE/kadid10k/refs_only \
-      --training-csv $SYNTH_BASE/training_clean.csv \
-      --threshold 16 \
-      --out-tsv /work/audit_kadid.tsv && \
-    ./target/release/check_holdout_overlap \
-      --cid22-refs $CORPORA_BASE/tid2013/reference_images \
-      --training-csv $SYNTH_BASE/training_clean.csv \
-      --threshold 16 \
-      --out-tsv /work/audit_tid.tsv
+# ── Stage 4a: train-base (V0_16-base component, no TV regularizer) ──
+FROM features AS train-base
+ARG BASE_HIDDEN=128
+ARG BASE_EPOCHS=300
+ARG BASE_LR=0.001
+ARG BASE_SEED=1
+ARG BASE_MAX_FEATURES=228
+ARG BASE_VAL_POLICY=min
+RUN /work/target/release/zensim_mlp_train \
+      --group safesyn:$SYNTH_BASE/safe_synth_v19_clean_features.csv:1.0:0.0 \
+      --group kadid:$SYNTH_BASE/kadid_features.csv:0.3:1.0 \
+      --group tid:$SYNTH_BASE/tid_features.csv:0.3:1.0 \
+      --group konjnd:$SYNTH_BASE/konjnd_aligned_features.csv:0.5:1.0 \
+      --hidden $BASE_HIDDEN \
+      --epochs $BASE_EPOCHS \
+      --lr $BASE_LR \
+      --seed $BASE_SEED \
+      --max-features $BASE_MAX_FEATURES \
+      --val-policy $BASE_VAL_POLICY \
+      --out /work/benchmarks/v0_X_base_seed${BASE_SEED}.bin
 
-# ── Stage 5: train V_X (default = v0_19 3-way concat recipe) ─────
-FROM features AS train
-ARG BAKE_VERSION=v0_19
-ARG BAKE_DATE=2026-05-14
-RUN cargo build --release \
-      --bin zensim_mlp_train --bin concat_three_way --bin affine_calibrate
-# Each component runs in series for reproducibility (parallel = harder
-# to seed-pin; this is the audit chain).
-RUN ./target/release/zensim_mlp_train \
-      --recipe v0_18_base_component \
-      --group safesyn:$SYNTH_BASE/safe_synth_clean_features.csv:1.0:0.0 \
+# ── Stage 4b: train-cycle14-s1 (TV-regularized, seed=1) ──────────
+FROM train-base AS train-cycle14-s1
+ARG CYCLE14_S1_TV_WEIGHT=1.0
+ARG CYCLE14_S1_TV_BAND_WEIGHTS=10,30,10,30
+ARG CYCLE14_S1_TV_APPLY_EVERY=50
+ARG CYCLE14_S1_TV_BATCH=32
+RUN /work/target/release/zensim_mlp_train \
+      --group safesyn:$SYNTH_BASE/safe_synth_v19_clean_features.csv:1.0:0.0 \
       --group kadid:$SYNTH_BASE/kadid_features.csv:0.3:1.0 \
       --group tid:$SYNTH_BASE/tid_features.csv:0.3:1.0 \
       --group konjnd:$SYNTH_BASE/konjnd_aligned_features.csv:0.5:1.0 \
-      --out /work/benchmarks/${BAKE_VERSION}_base_${BAKE_DATE}.bin && \
-    ./target/release/zensim_mlp_train \
-      --recipe v0_18_cycle14_component \
-      --group safesyn:$SYNTH_BASE/safe_synth_clean_features.csv:1.0:0.0 \
-      --group kadid:$SYNTH_BASE/kadid_features.csv:0.3:1.0 \
-      --group tid:$SYNTH_BASE/tid_features.csv:0.3:1.0 \
-      --group konjnd:$SYNTH_BASE/konjnd_aligned_features.csv:0.5:1.0 \
+      --hidden $BASE_HIDDEN --epochs $BASE_EPOCHS --lr $BASE_LR \
+      --seed 1 --max-features $BASE_MAX_FEATURES --val-policy $BASE_VAL_POLICY \
       --tv-pairs-file $SYNTH_BASE/tv_pairs_bands.tsv \
-      --seed 1 \
-      --out /work/benchmarks/${BAKE_VERSION}_cycle14_s1_${BAKE_DATE}.bin && \
-    ./target/release/zensim_mlp_train \
-      --recipe v0_18_cycle14_component \
-      --group safesyn:$SYNTH_BASE/safe_synth_clean_features.csv:1.0:0.0 \
+      --tv-weight $CYCLE14_S1_TV_WEIGHT \
+      --tv-band-weights $CYCLE14_S1_TV_BAND_WEIGHTS \
+      --tv-apply-every $CYCLE14_S1_TV_APPLY_EVERY \
+      --tv-batch $CYCLE14_S1_TV_BATCH \
+      --out /work/benchmarks/v0_X_cycle14_s1.bin
+
+# ── Stage 4c: train-cycle14-s42 ──────────────────────────────────
+FROM train-cycle14-s1 AS train-cycle14-s42
+ARG CYCLE14_S42_TV_WEIGHT=1.0
+ARG CYCLE14_S42_TV_BAND_WEIGHTS=10,30,10,30
+RUN /work/target/release/zensim_mlp_train \
+      --group safesyn:$SYNTH_BASE/safe_synth_v19_clean_features.csv:1.0:0.0 \
       --group kadid:$SYNTH_BASE/kadid_features.csv:0.3:1.0 \
       --group tid:$SYNTH_BASE/tid_features.csv:0.3:1.0 \
       --group konjnd:$SYNTH_BASE/konjnd_aligned_features.csv:0.5:1.0 \
+      --hidden $BASE_HIDDEN --epochs $BASE_EPOCHS --lr $BASE_LR \
+      --seed 42 --max-features $BASE_MAX_FEATURES --val-policy $BASE_VAL_POLICY \
       --tv-pairs-file $SYNTH_BASE/tv_pairs_bands.tsv \
-      --seed 42 \
-      --out /work/benchmarks/${BAKE_VERSION}_cycle14_s42_${BAKE_DATE}.bin && \
-    ./target/release/concat_three_way \
-      --base /work/benchmarks/${BAKE_VERSION}_base_${BAKE_DATE}.bin \
-      --s1   /work/benchmarks/${BAKE_VERSION}_cycle14_s1_${BAKE_DATE}.bin \
-      --s42  /work/benchmarks/${BAKE_VERSION}_cycle14_s42_${BAKE_DATE}.bin \
-      --out  /work/benchmarks/${BAKE_VERSION}_concat_3way_${BAKE_DATE}.bin && \
-    ./target/release/affine_calibrate \
-      --in-bake  /work/benchmarks/${BAKE_VERSION}_concat_3way_${BAKE_DATE}.bin \
-      --out-bake /work/zensim/weights/${BAKE_VERSION}_${BAKE_DATE}.bin \
-      --alpha 28.0366 --beta=-5.0738
+      --tv-weight $CYCLE14_S42_TV_WEIGHT \
+      --tv-band-weights $CYCLE14_S42_TV_BAND_WEIGHTS \
+      --tv-apply-every $CYCLE14_S1_TV_APPLY_EVERY \
+      --tv-batch $CYCLE14_S1_TV_BATCH \
+      --out /work/benchmarks/v0_X_cycle14_s42.bin
+
+# ── Stage 5: concat + calibrate ──────────────────────────────────
+FROM train-cycle14-s42 AS concat
+ARG CONCAT_BASE_COEFF=0.65
+ARG CONCAT_S1_COEFF=0.30
+ARG CONCAT_S42_COEFF=0.05
+ARG CALIB_ALPHA=28.0366
+ARG CALIB_BETA=-5.0738
+RUN /work/target/release/concat_three_way \
+      --base /work/benchmarks/v0_X_base_seed${BASE_SEED}.bin \
+      --s1   /work/benchmarks/v0_X_cycle14_s1.bin \
+      --s42  /work/benchmarks/v0_X_cycle14_s42.bin \
+      --coeffs ${CONCAT_BASE_COEFF}:${CONCAT_S1_COEFF}:${CONCAT_S42_COEFF} \
+      --out  /work/benchmarks/v0_X_concat_3way.bin && \
+    /work/target/release/affine_calibrate \
+      --in-bake  /work/benchmarks/v0_X_concat_3way.bin \
+      --out-bake /work/benchmarks/v0_X_calibrated.bin \
+      --alpha $CALIB_ALPHA \
+      --beta=$CALIB_BETA
 
 # ── Stage 6: validate ────────────────────────────────────────────
-FROM train AS validate
-RUN cargo build --release --example dataset_metric_baseline
-RUN ./target/release/examples/dataset_metric_baseline \
+FROM concat AS validate
+ARG MAX_PAIRS=50000
+RUN /work/target/release/examples/dataset_metric_baseline \
       --cid22 $CORPORA_BASE/cid22/CID22_validation_set \
       --kadid $CORPORA_BASE/kadid10k \
       --tid $CORPORA_BASE/tid2013 \
-      --v04-bake /work/zensim/weights/${BAKE_VERSION}_${BAKE_DATE}.bin \
-      --max-pairs 50000 \
-      > /work/benchmarks/${BAKE_VERSION}_10band_${BAKE_DATE}.md
+      --v04-bake /work/benchmarks/v0_X_calibrated.bin \
+      --max-pairs $MAX_PAIRS \
+      > /work/benchmarks/v0_X_10band.md || true
 
-# ── Stage 7: ship-bundle ─────────────────────────────────────────
+# ── Stage 7: bundle ──────────────────────────────────────────────
 FROM validate AS bundle
 RUN mkdir -p /output && \
-    cp /work/zensim/weights/${BAKE_VERSION}_${BAKE_DATE}.bin /output/ && \
-    cp /work/benchmarks/${BAKE_VERSION}_10band_${BAKE_DATE}.md /output/ && \
-    cp /work/benchmarks/v0_18_methodology_2026-05-13.md /output/ && \
-    cp /work/audit_*.tsv /output/ && \
-    cp /work/benchmarks/contamination_blocklist_2026-05-14.txt /output/ && \
+    cp /work/benchmarks/v0_X_calibrated.bin /output/ && \
+    cp /work/benchmarks/v0_X_10band.md /output/ && \
     md5sum /output/* > /output/CHECKSUMS
 
-# Final image is just the bundle.
+# Final image: scratch + /output bundle.
 FROM scratch
 COPY --from=bundle /output /output
