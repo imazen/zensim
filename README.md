@@ -34,7 +34,7 @@ Reproduce: `cargo bench -p zensim-bench --bench bench_compare` (C++ libjxl FFI r
 
 Spearman rank-order correlation (SROCC) against three independent human-rated image quality databases. Higher is better; 1.0 = perfect agreement with human rankings. None of these datasets were used for training of either profile.
 
-| Dataset | Pairs | V0_2 (linear, default) | V0_18 (MLP, `__experimental_versions`) | fast-ssim2 |
+| Dataset | Pairs | V0_2 (linear) | V0_3 (MLP, default) | fast-ssim2 |
 |---------|------:|----------------------:|--------------------------------------:|-----------:|
 | [CID22](https://cloudinary.com/labs/cid22) — compression artifacts | 4,292 | 0.8676 | **0.8934** | 0.8895 |
 | [TID2013](https://www.ponomarenko.info/tid2013.htm) — 24 distortion types | 3,000 | 0.8427 | **0.9525** | 0.8460 |
@@ -44,7 +44,7 @@ Spearman rank-order correlation (SROCC) against three independent human-rated im
 
 V0_2 (default-on linear profile): 218k concordance-filtered synthetic pairs, Nelder-Mead.
 
-V0_18 (`__experimental_versions` MLP profile, shipped 2026-05-13): 228→384→1 LeakyReLU with I8 quantization, 93 KB bake. Built by 3-way concat construction over V0_16 + cycle-14 variants, mathematically equivalent to a 3-bake output ensemble. Trained on 144k clean safe-synthetic + KADID + TID + KonJND-aligned pairs (CID22 / AIC corpora are held out across both training and validation). Methodology: [`benchmarks/v0_18_methodology_2026-05-13.md`](benchmarks/v0_18_methodology_2026-05-13.md).
+`PreviewV0_3` (the MLP profile, default-on in zensim 0.3.0+): 228→384→1 LeakyReLU with I8 quantization, 93 KB bake (md5 `2cc537470e68f7379e759811ddd22900`). Built by 3-way concat construction over V0_16 + cycle-14 variants, mathematically equivalent to a 3-bake output ensemble (internal weights commonly called "V0_18"). Trained on 144k clean safe-synthetic + KADID + TID + KonJND-aligned pairs (CID22 / AIC corpora held out across both training and validation). Methodology: [`benchmarks/v0_18_methodology_2026-05-13.md`](benchmarks/v0_18_methodology_2026-05-13.md).
 
 <details>
 <summary>Reproduce these numbers</summary>
@@ -172,11 +172,11 @@ Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a
 |---------|:---------:|----------|------:|:---------:|
 | `PreviewV0_1` | ✓ | 344k synthetic, 5-fold CV | 0.86 | linear weights |
 | `PreviewV0_2` | ✓ | 218k concordance-filtered, Nelder-Mead | 0.87 | linear weights |
-| `PreviewV0_4` (rotation slot) | feature-gated | currently holds V0_18 bytes — see below | 0.89 | 93 KB I8 MLP |
+| `PreviewV0_3` | ✓ | 144k clean safe-synth + KADID + TID + KonJND | **0.89** | 93 KB I8 MLP |
 
-`ZensimProfile::latest()` returns `PreviewV0_2`. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+`ZensimProfile::latest()` returns `PreviewV0_3` in zensim 0.3.x. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
-**`PreviewV0_4`** is the experimental MLP rotation slot — gated behind the `__experimental_versions` cargo feature so default crates.io builds stay lean MIT/Apache without an AGPL-dual-licensed dependency in their tree. Its underlying bake bytes have moved through V0_4 → V0_5 → V0_7 → V0_8 → V0_15 → V0_16 → V0_17 → V0_18 (2026-04-30 through 2026-05-13). Today the slot ships V0_18 weights: 228→384→1 LeakyReLU MLP, I8 quantized, MCOS-aligned 0–100 output.
+**`PreviewV0_3`** is the MLP profile, shipped 2026-05-13 with zensim 0.3.0. Variant name tracks the crate's minor version that introduced it; the underlying bake bytes inside the variant are V0_18 today (228→384→1 LeakyReLU MLP, I8 quantized, MCOS-aligned 0–100 output) and may rotate to score-stable variants during 0.3.x patches. zenpredict is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 
 ## Feature flags
 

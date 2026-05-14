@@ -12,17 +12,16 @@
 //! [`zenpredict`](https://github.com/imazen/zenanalyze) crate, which
 //! is the canonical MLP runtime for the imazen image-codec ecosystem
 //! (zenjpeg / zenwebp / zenavif / zenjxl picker selection + zensim
-//! V0_4 perceptual scoring). The format and dispatch math live there;
+//! V0_3 perceptual scoring). The format and dispatch math live there;
 //! we only re-export the surface we use here so consumer code can
 //! say `zensim::mlp::Predictor` without a separate `use zenpredict`.
 //!
 //! # License note
 //!
-//! `zenpredict` is `AGPL-3.0-only OR LicenseRef-Imazen-Commercial`.
-//! Adding it as a non-optional dependency means binaries that link
-//! zensim's V0_4 path acquire AGPL obligations (or need a commercial
-//! license from Imazen). zensim itself remains MIT/Apache-2.0 — the
-//! V0_2 linear path has no `zenpredict` dependency.
+//! `zenpredict` is `MIT OR Apache-2.0` — matches zensim. The runtime
+//! is intentionally permissive so it can be embedded in any consumer.
+//! Older notes claimed AGPL/commercial; that licensing plan never
+//! shipped. zensim default builds remain MIT/Apache.
 //!
 //! # Usage sketch
 //!

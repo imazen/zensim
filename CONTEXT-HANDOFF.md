@@ -261,5 +261,8 @@ V0_16 SHIP is at the +1.4σ tail. Recipe ensemble ≈ ssim2.
 - Don't re-add CID22 holdout content to training (the 49 refs at
   `/mnt/v/dataset/cid22/CID22_validation_set/original/` are SACRED)
 - Don't trust V0_8's CID22 0.8948 number anywhere public — it's inflated
-- Don't `cargo publish` zensim (it's behind `__experimental_versions`
-  feature and not yet ready for crates.io)
+- zensim 0.3.0 is staged but not published. `__experimental_versions`
+  feature was removed; `PreviewV0_3` is the default MLP profile.
+  Run the full publish protocol (`cargo semver-checks` + CI green on
+  all platforms + tag + GitHub release + `cargo publish`) only with
+  explicit user "go ahead" per CLAUDE.md.
