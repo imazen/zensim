@@ -26,7 +26,7 @@
 //! model is the one with the highest validation mean.
 
 use std::time::Instant;
-use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
+use zenpredict_bake::{BakeLayer, BakeRequest, bake};
 use zenpredict::{Activation, WeightDtype};
 
 /// How to aggregate per-group SROCC into the single value used for
@@ -770,7 +770,7 @@ pub fn bake_two_layer_znpr_v2(
             biases: &b2_f32,
         },
     ];
-    bake_v2(&BakeRequest {
+    bake(&BakeRequest {
         schema_hash: 0,
         flags: 0,
         scaler_mean: &scaler_mean_f32,
@@ -778,8 +778,15 @@ pub fn bake_two_layer_znpr_v2(
         layers: &layers,
         feature_bounds: &[],
         metadata: &[],
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
+        hu_permutations: None,
     })
-    .expect("v2 bake of 2-layer MLP")
+    .expect("v3 bake of 2-layer MLP")
 }
 
 fn compute_scaler_from_groups(

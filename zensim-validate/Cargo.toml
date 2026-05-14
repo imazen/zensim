@@ -13,6 +13,7 @@ default = []
 [dependencies]
 zensim = { path = "../zensim", features = ["training"] }
 zenpredict = { workspace = true }
+zenpredict-bake = { workspace = true }
 image = { workspace = true }
 rayon = { workspace = true }
 csv = "1"
