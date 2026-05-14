@@ -218,6 +218,20 @@ struct Args {
     #[arg(long, default_value_t = 1.0)]
     mid_q_boost: f64,
 
+    /// V0_20a row-weight boost for B3 (visually-lossless, human_score
+    /// ≥ 90) rows during per-step RankNet pair sampling. Multiplies
+    /// per-row sampling weight for human_score >= 90. Default 1.0 =
+    /// no-op. The B3 band is small (e.g. ~43/4292 CID22 pairs, ~486/10125
+    /// KADID), so val_policy=min selecting on KADID/TID/KonJND
+    /// structurally underfits the visually-lossless tail. Recommended
+    /// for any IW-feature (Wang 2011) or HF-targeted training where
+    /// B3 SROCC is a ship gate: 2.0–4.0 depending on B3 sample density.
+    /// Composes multiplicatively but B3 is mutually exclusive with B0-B2,
+    /// so the multiplier only takes effect on B3 rows. Added 2026-05-14
+    /// after V0_20a sweep revealed B3 underfit at default 1.0.
+    #[arg(long, default_value_t = 1.0)]
+    high_q_boost: f64,
+
     /// Optional path to dump the trainer log for the run.
     #[arg(long)]
     log_path: Option<PathBuf>,
@@ -448,6 +462,7 @@ fn main() {
         validation_policy: val_policy,
         low_q_boost: args.low_q_boost,
         mid_q_boost: args.mid_q_boost,
+        high_q_boost: args.high_q_boost,
         out_dtype,
     };
 

@@ -76,6 +76,20 @@ pub struct MlpHyperparams {
     /// +0.003 mean lift — useful for downstream codec orchestrators
     /// that need stable per-image ranking.
     pub mid_q_boost: f64,
+    /// V0_20a-era row-weight boost for B3 (visually-lossless, human_score
+    /// ≥ 90) rows. When > 1.0, biases per-step pair sampling toward
+    /// rows in the visually-lossless tail. Default 1.0 = no-op.
+    ///
+    /// **Motivation**: with val_policy=min selecting on KADID/TID/KonJND
+    /// (none of which span B3 well), the trainer structurally underfits
+    /// the visually-lossless tail. The B3 band is exactly where IW-SSIM-
+    /// style features (Wang & Li 2011, Mohammadi 2025) carry signal —
+    /// `--high-q-boost` ensures the trainer gets enough B3 supervision
+    /// for the MLP to learn the relevant weights. Recommended values:
+    /// 2.0-4.0 depending on B3 sample density. Composes multiplicatively
+    /// with `mid_q_boost` (boundary at 90 means it's mutually exclusive
+    /// with `mid_q_boost`'s [50, 90) range).
+    pub high_q_boost: f64,
     /// Output weight dtype for baked ZNPR v2. Default F32 matches every
     /// shipped bake through V0_17. I8 saves ~74 % bin size with no
     /// measurable SROCC change (verified on V0_18 across KADID, TID,
@@ -99,6 +113,7 @@ impl Default for MlpHyperparams {
             validation_policy: ValidationPolicy::Min,
             low_q_boost: 1.0,
             mid_q_boost: 1.0,
+            high_q_boost: 1.0,
             out_dtype: WeightDtype::F32,
         }
     }
@@ -360,20 +375,22 @@ pub fn train_mlp_with_tv(
     };
 
     // Pre-compute per-row sampling CDFs for each training group when
-    // either low_q_boost or mid_q_boost is non-trivial. Indexed by
-    // position-in-train_indices so the hot loop can look up by the same
-    // index used for the group CDF.
+    // any of low_q_boost / mid_q_boost / high_q_boost is non-trivial.
+    // Indexed by position-in-train_indices so the hot loop can look up
+    // by the same index used for the group CDF.
     //
     // Band cuts are anchored to CID22 Table 5 (human_score 0-100 scale,
     // see zensim/CLAUDE.md "Per-band reporting rule"):
     //   B0 < 50               full low_q_boost
     //   B1 [50, 65)           sqrt(low_q_boost), AND full mid_q_boost
     //   B2 [65, 90)           full mid_q_boost
-    //   B3 ≥ 90               no boost
-    // When both boosts are 1.0 the per-row CDF is None and within-group
+    //   B3 ≥ 90               full high_q_boost (V0_20a addition)
+    // When all boosts are 1.0 the per-row CDF is None and within-group
     // sampling stays uniform (identical to V0_5/V0_15/V0_16 trainer
     // behavior).
-    let needs_row_boost = hyperparams.low_q_boost != 1.0 || hyperparams.mid_q_boost != 1.0;
+    let needs_row_boost = hyperparams.low_q_boost != 1.0
+        || hyperparams.mid_q_boost != 1.0
+        || hyperparams.high_q_boost != 1.0;
     let per_row_cdfs: Vec<Option<Vec<f64>>> = train_indices
         .iter()
         .map(|&gi| {
@@ -396,6 +413,9 @@ pub fn train_mlp_with_tv(
                     }
                     if hyperparams.mid_q_boost != 1.0 && (50.0..90.0).contains(&s) {
                         w *= hyperparams.mid_q_boost;
+                    }
+                    if hyperparams.high_q_boost != 1.0 && s >= 90.0 {
+                        w *= hyperparams.high_q_boost;
                     }
                     cum += w;
                     cum
