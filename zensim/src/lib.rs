@@ -200,6 +200,7 @@ mod color;
 mod diffmap;
 mod error;
 mod fused;
+mod iw_pool;
 pub mod mapping;
 mod metric;
 // MLP runtime is internal — V0_4 dispatch is exposed only through
