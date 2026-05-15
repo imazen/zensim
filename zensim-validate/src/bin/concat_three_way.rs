@@ -36,8 +36,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::Parser;
-use zenpredict::{Model, WeightStorage};
-use zenpredict_bake::{BakeLayer, BakeRequest, bake};
+use zenpredict::{FeatureTransform, Model, WeightStorage};
+use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
 #[derive(Parser)]
 #[command(about = "Concat three single-MLP bakes into one wide-MLP ensemble bake")]
@@ -72,8 +72,20 @@ fn parse_coeffs(s: &str) -> (f32, f32, f32) {
     (a, b, c)
 }
 
-/// Returns (scaler_mean, scaler_scale, W0[n_in*128], b0[128], W1[128], b1[1]).
-fn load_single_mlp(path: &PathBuf) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, f32) {
+struct LoadedMlp {
+    scaler_mean: Vec<f32>,
+    scaler_scale: Vec<f32>,
+    w0: Vec<f32>,
+    b0: Vec<f32>,
+    w1: Vec<f32>,
+    b1: f32,
+    feature_transforms: Option<Vec<FeatureTransform>>,
+    feature_transform_params: Option<Vec<Vec<f32>>>,
+}
+
+/// Returns (scaler_mean, scaler_scale, W0[n_in*128], b0[128], W1[128], b1[1])
+/// plus the bake's feature_transforms + per-feature params (for V_20+).
+fn load_single_mlp(path: &PathBuf) -> LoadedMlp {
     let bytes = fs::read(path).expect("read bake");
     let model = Model::from_bytes(&bytes).expect("parse bake");
     assert_eq!(model.n_layers(), 2, "expected 2-layer MLP at {path:?}");
@@ -117,7 +129,21 @@ fn load_single_mlp(path: &PathBuf) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, V
     };
     let b1 = l1.biases[0];
 
-    (scaler_mean, scaler_scale, w0, b0, w1, b1)
+    let feature_transforms = model.feature_transforms().map(|s| s.to_vec());
+    let feature_transform_params = model
+        .feature_transform_params()
+        .map(|s| s.iter().map(|v| v.to_vec()).collect());
+
+    LoadedMlp {
+        scaler_mean,
+        scaler_scale,
+        w0,
+        b0,
+        w1,
+        b1,
+        feature_transforms,
+        feature_transform_params,
+    }
 }
 
 fn main() {
@@ -128,15 +154,59 @@ fn main() {
         ca + cb + cc
     );
 
-    let (sm_a, ss_a, w0_a, b0_a, w1_a, b1_a) = load_single_mlp(&args.base);
-    let (sm_b, ss_b, w0_b, b0_b, w1_b, b1_b) = load_single_mlp(&args.s1);
-    let (sm_c, ss_c, w0_c, b0_c, w1_c, b1_c) = load_single_mlp(&args.s42);
+    let a = load_single_mlp(&args.base);
+    let b = load_single_mlp(&args.s1);
+    let c = load_single_mlp(&args.s42);
+    let sm_a = a.scaler_mean;
+    let ss_a = a.scaler_scale;
+    let w0_a = a.w0;
+    let b0_a = a.b0;
+    let w1_a = a.w1;
+    let b1_a = a.b1;
+    let sm_b = b.scaler_mean;
+    let ss_b = b.scaler_scale;
+    let w0_b = b.w0;
+    let b0_b = b.b0;
+    let w1_b = b.w1;
+    let b1_b = b.b1;
+    let sm_c = c.scaler_mean;
+    let ss_c = c.scaler_scale;
+    let w0_c = c.w0;
+    let b0_c = c.b0;
+    let w1_c = c.w1;
+    let b1_c = c.b1;
 
     // Auto-detect input width from the scaler length (= n_inputs).
     let n_in = sm_a.len();
     assert_eq!(sm_b.len(), n_in, "scaler size mismatch: base={n_in}, s1={}", sm_b.len());
     assert_eq!(sm_c.len(), n_in, "scaler size mismatch: base={n_in}, s42={}", sm_c.len());
     eprintln!("concat input width: {n_in} (228=V0_18 basic+peaks, 372=V0_20a +IW)");
+
+    // Propagate feature_transforms + params from the base bake. All
+    // three components MUST have the same transforms (the trainer
+    // applies them identically across components); we assert this and
+    // emit the base's metadata in the concat bake. Without this, the
+    // runtime feeds RAW features into a network trained on
+    // TRANSFORMED features → garbage predictions (V_20 D1 hit this
+    // exact bug before the fix).
+    if let (Some(ta), Some(tb), Some(tc)) =
+        (&a.feature_transforms, &b.feature_transforms, &c.feature_transforms)
+    {
+        assert_eq!(ta, tb, "feature_transforms mismatch: base vs s1");
+        assert_eq!(ta, tc, "feature_transforms mismatch: base vs s42");
+    } else if a.feature_transforms.is_some()
+        || b.feature_transforms.is_some()
+        || c.feature_transforms.is_some()
+    {
+        panic!(
+            "feature_transforms mismatch: base={:?} s1={:?} s42={:?} (all three must agree)",
+            a.feature_transforms.is_some(),
+            b.feature_transforms.is_some(),
+            c.feature_transforms.is_some()
+        );
+    }
+    let feature_transforms = a.feature_transforms;
+    let feature_transform_params = a.feature_transform_params;
 
     // All three should share the same scaler (trained on the same
     // feature distribution). Verify with a tight tolerance; on mismatch,
@@ -207,6 +277,50 @@ fn main() {
         },
     ];
 
+    // Emit feature_transforms + params metadata when the components
+    // carried them (V_20+ bakes). Bakers omit FEATURE_TRANSFORMS
+    // entirely when every entry is `Identity` per zenpredict convention.
+    let transforms_blob: Option<String> = feature_transforms.as_ref().and_then(|ts| {
+        if ts.iter().all(|t| *t == FeatureTransform::Identity) {
+            None
+        } else {
+            Some(ts.iter().map(|t| t.as_token()).collect::<Vec<_>>().join("\n"))
+        }
+    });
+    let params_blob: Option<String> = feature_transform_params.as_ref().and_then(|params| {
+        if params.iter().all(|p| p.is_empty()) {
+            None
+        } else {
+            Some(
+                params
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|v| format!("{v}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        }
+    });
+    let mut metadata: Vec<BakeMetadataEntry<'_>> = Vec::new();
+    if let Some(blob) = &transforms_blob {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::keys::FEATURE_TRANSFORMS,
+            kind: zenpredict::MetadataType::Utf8,
+            value: blob.as_bytes(),
+        });
+    }
+    if let Some(blob) = &params_blob {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::keys::FEATURE_TRANSFORM_PARAMS,
+            kind: zenpredict::MetadataType::Utf8,
+            value: blob.as_bytes(),
+        });
+    }
+
     let bytes = bake(&BakeRequest {
         schema_hash: 0,
         flags: 0,
@@ -214,7 +328,7 @@ fn main() {
         scaler_scale: &scaler_scale,
         layers: &layers,
         feature_bounds: &[],
-        metadata: &[],
+        metadata: &metadata,
         output_specs: &[],
         discrete_sets: &[],
         sparse_overrides: &[],
