@@ -43,7 +43,9 @@ use imgref::Img;
 use rayon::prelude::*;
 use rgb::RGB8;
 use zenpredict::{Model, Predictor};
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{
+    compute_zensim_with_config, RgbSlice, Zensim, ZensimConfig, ZensimProfile,
+};
 
 #[derive(Debug, Clone)]
 struct Pair {
@@ -192,6 +194,22 @@ fn main() {
         })
     });
 
+    // Inspect the bake's input width ONCE to pick the feature regime
+    // the per-pair compute must produce. 228 = standard, 300 = extended
+    // (adds 72 masked), 372 = extended + IW (Wang & Li 2011). Without
+    // this dispatch, IW bakes load fine but get fed truncated features
+    // and produce noise (SROCC ≈ 0.01).
+    let feature_regime: FeatureRegime = v04_bake_bytes
+        .as_deref()
+        .and_then(|bytes| Model::from_bytes(bytes).ok())
+        .map(|model| {
+            let n = model.n_inputs();
+            let r = FeatureRegime::from_n_inputs(n);
+            eprintln!("v04 bake: n_inputs={n} → feature regime {r:?}");
+            r
+        })
+        .unwrap_or(FeatureRegime::Standard);
+
     println!(
         "# Baseline-metric SROCC vs human MOS\n\nMax {} pairs per dataset.",
         max_pairs
@@ -250,7 +268,8 @@ fn main() {
                     let eta = (n - p) as f64 / rate;
                     eprintln!("  {p}/{n} ({rate:.1}/s, ETA {eta:.0}s)");
                 }
-                let metrics: MetricRow = process_pair(pair, &z_v04, v04_bake_bytes.as_deref())?;
+                let metrics: MetricRow =
+                    process_pair(pair, &z_v04, v04_bake_bytes.as_deref(), feature_regime)?;
                 Some((
                     pair.reference.to_string_lossy().to_string(),
                     pair.distorted.to_string_lossy().to_string(),
@@ -896,10 +915,38 @@ fn stddev(v: &[f64], m: f64) -> f64 {
     (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (v.len() - 1) as f64).sqrt()
 }
 
+/// Feature-width regime needed by the loaded bake. Inferred once from
+/// `Model::n_inputs()` so per-pair compute can pick the cheapest path
+/// that produces enough columns.
+#[derive(Copy, Clone, Debug)]
+enum FeatureRegime {
+    /// 228 features — basic + peaks. Default `Zensim::compute` path.
+    Standard,
+    /// 300 features — adds 72 masked (`extended_features=true`).
+    Extended,
+    /// 372 features — adds 72 masked + 72 IW
+    /// (`extended_features=true` + `compute_iw_features=true`).
+    /// Wang & Li 2011 IW-SSIM pool, used by V_20a IW bakes.
+    ExtendedIw,
+}
+
+impl FeatureRegime {
+    fn from_n_inputs(n_inputs: usize) -> Self {
+        if n_inputs <= 228 {
+            FeatureRegime::Standard
+        } else if n_inputs <= 300 {
+            FeatureRegime::Extended
+        } else {
+            FeatureRegime::ExtendedIw
+        }
+    }
+}
+
 fn process_pair(
     pair: &Pair,
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
+    regime: FeatureRegime,
 ) -> Option<(f64, f64, f64, f64, f64)> {
     let src_img = match image::open(&pair.reference) {
         Ok(img) => img.to_rgb8(),
@@ -925,11 +972,19 @@ fn process_pair(
     let s = RgbSlice::new(&src_pixels, w_us, h_us);
     let d = RgbSlice::new(&dst_pixels, w_us, h_us);
 
-    // Single compute pass via V0_4 profile — this populates the full
-    // 228-feature vector (the MLP path forces compute_all_features=true).
-    // We then score V0_2 manually (dot product with V0_2 weights) and
-    // V0_4 manually (Predictor over the trained bake).
-    let result = z_v04.compute(&s, &d).ok()?;
+    // Single compute pass — picks the feature regime needed by the
+    // loaded bake. 228 = basic + peaks (cheap); 300 = adds masked
+    // (extended); 372 = adds masked + IW. V_20a IW-SSIM bakes use 372.
+    let result = match regime {
+        FeatureRegime::Standard => z_v04.compute(&s, &d).ok()?,
+        FeatureRegime::Extended => z_v04.compute_extended_features(&s, &d).ok()?,
+        FeatureRegime::ExtendedIw => {
+            let mut cfg = ZensimConfig::default();
+            cfg.extended_features = true;
+            cfg.compute_iw_features = true;
+            compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, cfg).ok()?
+        }
+    };
     let features = result.features();
     if features.len() < zensim::profile::LINEAR_WEIGHTS_PREVIEW_V0_2.len() {
         return None;
