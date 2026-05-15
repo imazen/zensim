@@ -556,6 +556,271 @@ serializer; trusting it keeps wire-format invariants in one place.
 Ad-hoc emitters drift, get out of sync with v3.x extensions, and
 ship wrong-shape bakes that load but score garbage.
 
+## Principled experiment workflow for V_X bakes (added 2026-05-15)
+
+This section is the **methodology** version of the V_20 learnings
+above — the ordered checklist for doing the work, not the catalog
+of what we learned. Follow these steps every time a new bake / runtime
+experiment is opened. Skipping steps creates the failure modes
+documented in the V_20 learnings section (silent metadata loss,
+double-applied affine, hard-clamp ties, untrustworthy SROCC-only
+reports). Each step ends in a tangible artifact — if there is no
+artifact, the step did not happen.
+
+### Step 1 — Write the hypothesis and falsification ($\le$ 5 minutes)
+
+Before opening a trainer, write four sentences:
+
+1. **Hypothesis**: "Adding feature transform set X should lift
+   CID22 SROCC by Δ ≥ 0.005 (or another concrete metric), justified
+   by Pearson lift Δr ≥ 0.05 on the screen for ≥ N features."
+2. **Falsification**: "If CID22 aggregate SROCC drops or stays flat
+   across 3 seeds, the hypothesis is dead and we move on."
+3. **Cost ceiling**: "Allowed budget: 1× pretrain + K× fine-tune.
+   If we hit that budget without lift, abandon."
+4. **Ship form**: "If the hypothesis succeeds, we ship as
+   PreviewV0_N (single-bake) OR PreviewV0_(N+1) (multi-bake) with
+   metadata propagated and runtime dispatch correct."
+
+Artifact: a 4-line scratch note at the top of the experiment log
+(`benchmarks/v0_X_<name>_<date>.md`). If you cannot write these
+four lines, you are not ready to train.
+
+### Step 2 — Decide the reporting panel upfront
+
+Mandatory stat panel = Mohammadi 2025 full set (SROCC + PLCC +
+KROCC + OR + PWRC + Z-RMSE), at **both aggregate and 10-band level**
+(B0..B9). SROCC alone is the "single most misleading practice" —
+don't lapse back to it just because the experiment is preliminary.
+
+Held-out discipline:
+
+- Train on synth + KADID + TID. Inspect aggregate stats and
+  KADID/TID per-band signal during iteration.
+- **CID22 is opened LAST**, once per experiment, at decision time.
+  Inspecting CID22 mid-experiment leaks information into the
+  hyperparameter choice.
+
+Decide before the first train run which corpora produce which signal.
+
+Artifact: a table at the top of the experiment log listing
+"corpus / role / when inspected". Stick to it.
+
+### Step 3 — Seed=1 first as cheap signal
+
+Run a single seed=1 fine-tune before sweeping. The cost is ~20% of
+a 5-seed sweep and most negative results are visible at seed=1.
+
+Decision tree:
+
+- **Seed=1 wins held-out signal corpus by ≥ the falsification
+  threshold** → sweep 5 seeds for CI. Then open CID22.
+- **Seed=1 flat or negative** → hypothesis probably dead.
+  Document the negative result and stop. Do NOT sweep 5 seeds
+  hoping seed=2 wins — that is p-hacking.
+- **Seed=1 mixed** → before sweeping, diagnose mechanism (which
+  per-band moved, which feature transforms contributed). Decide
+  whether the mixed signal is worth a 5× compute spend.
+
+Artifact: seed=1 eval log committed to `benchmarks/`, with the
+decision recorded in the experiment log.
+
+### Step 4 — Diagnose bake shape before any calibration
+
+Every bake's raw output is either **distance-shaped** (training
+target was distance, low = high quality, range often 0..30) OR
+**score-shaped** (training target was MOS, high = high quality,
+range often 0..100). The two cannot be mixed without per-bake
+affine handling.
+
+Diagnostic: run the bake on 100 random pairs from the safe-synthetic
+training set, plot `bake_output vs MOS`. If slope ≈ -1, distance-shaped.
+If slope ≈ +1, score-shaped. If slope is near zero or sign-ambiguous,
+something is wrong with the bake (most likely missing feature_transforms
+metadata — see Step 6).
+
+Affine policy:
+
+- Distance-shaped bake → apply
+  `scripts/v_next/affine_calibrate_znpr_v2.py` to fit α, β:
+  `score = α + β · distance`, β should be negative.
+- Score-shaped bake → **NO affine**. The bake already maps to
+  approximately 0..100; an affine on top inverts the response.
+- Multi-bake runtime mixing both shapes → each sub-bake gets its
+  OWN calibration. Mixing is in score space, not raw space. This
+  is currently NOT implemented in PreviewV0_4 and is the root
+  cause of the V_20_4 TID B0/B1 SROCC=0 issue.
+
+Artifact: a `shape: distance | score` line in the bake's
+methodology doc. Future tools read this to decide affine handling.
+
+### Step 5 — Use the JSON pipeline; do not write ad-hoc serializers
+
+For every new bake-producing tool (concat, distill, ensemble-collapse,
+zerobias-rebake), emit `BakeRequestJson` and shell out to
+`zenpredict-bake <input.json> <output.bin>`. The template is
+`scripts/v_next/v0_20b/bake_znpr_v3.py`.
+
+Anti-pattern: writing a Python function that emits ZNPR v3 bytes
+directly. The wire format has alignment, section ordering, and
+header invariants that only the Rust serializer enforces. Drift
+between ad-hoc emitters and `zenpredict-bake` ships wrong-shape
+bakes that load but score garbage.
+
+Artifact: the bake-producing script's main loop ends in a
+`subprocess.run(["zenpredict-bake", "in.json", "out.bin"])` call,
+or equivalent. No `struct.pack` in the call graph.
+
+### Step 6 — Propagate metadata across every derived-bake tool
+
+For every tool that takes input bakes and produces an output bake,
+audit the metadata pipeline. The fields that MUST propagate:
+
+- `zentrain.feature_transforms` (Vec<TransformOp>)
+- `zentrain.feature_transform_params` (Vec<f32>)
+- Per-bake calibration (α, β) where present
+- `output_specs[]`, `sparse_overrides[]`, `discrete_sets[]`
+
+Rule for multi-source derived bakes:
+
+- **Single-source derived** (e.g., affine rebake) → copy source's
+  metadata verbatim. Audit that the byte-rewriter touches only
+  the layer being modified.
+- **Multi-source concat** → all inputs MUST agree on
+  feature_transforms. Assert this and fail loudly if not — heterogeneous
+  feature shaping in a concat is undefined behavior.
+- **Multi-source ensemble (runtime mix)** → each sub-bake retains
+  its own metadata; the runtime dispatches per-sub-bake (Step 7).
+
+Smoke test: every derived-bake tool MUST ship a test that produces
+a bake from synthetic inputs and runs it through `Predictor::predict`
+or `predict_transformed`, asserting the output is non-NaN AND
+within the expected shape (distance vs score). This test caught
+the V_20 concat regression in CI.
+
+Artifact: a `tests/` test in the bake-producing tool's crate.
+Without it the tool is not landable.
+
+### Step 7 — Runtime forward path: predict_transformed dispatch
+
+Every eval harness, runtime path, and validation tool that consumes a
+bake MUST contain:
+
+```rust
+let raw = if model.has_nontrivial_feature_transforms() {
+    model.predict_transformed(&features)
+} else {
+    model.predict(&features)
+};
+```
+
+The check is cheap (one boolean on the bake metadata) and the cost
+of getting it wrong is silent garbage output. Fixed call sites as
+of 2026-05-15: `apply_mlp_scoring` in `zensim/src/metric.rs`,
+`dataset_metric_baseline.rs` in zensim-bench, `ensemble_mix.rs` in
+zensim-validate. New tools MUST follow this pattern from the first
+commit.
+
+Smoke test: validation harness includes one test pair with known
+features and known expected score, run through the production
+forward path. If the test ever passes for a transform-bearing
+bake without `predict_transformed`, the dispatch is wrong.
+
+### Step 8 — Visual diagnostics before the next experiment
+
+Before designing the next iteration of bake / direction, produce
+three diagnostics from the current results:
+
+1. **Candlestick chart** of V_X → V_X+1 SROCC deltas per (corpus,
+   band). Tells you which corpus / band is improving vs regressing
+   at a glance. Builder:
+   `scripts/v_next/build_per_pair_candlestick.py` (or whatever
+   chart-build script the experiment log references).
+2. **Per-pair extract** for any failure mode (e.g., TID B0/B1
+   SROCC=0 ties → pull the 50 worst-error pairs, show
+   `image_path, mos, score, raw_bake_output, clamp_flag` per
+   row). Reveals whether the failure is clamp, calibration, or
+   missing transforms.
+3. **Low-n band ceiling analysis** for any (corpus, band) with
+   n < 100. Builder:
+   `scripts/v_next/v0_20_low_n_band_analysis.py`. Reports the
+   empirical CI upper bound — that is the maximum plausible SROCC
+   at that n, regardless of bake. Rankings between bakes are
+   indistinguishable when n < 30; mark those bands as such.
+
+These are 30-minute investments that prevent 4-hour
+wrong-direction experiments. Build them BEFORE asking the
+question "what should we try next?"
+
+Artifact: the three diagnostics committed to `benchmarks/` and
+referenced from the experiment log.
+
+### Step 9 — Soft-clamp the runtime, recalibrate on shape mismatch
+
+Multi-bake runtimes that mix bakes of different shapes (distance
++ score), or that extrapolate outside training distribution, will
+produce raw outputs outside [0, 100]. Hard `score.clamp(0.0, 100.0)`
+creates ties → SROCC collapses to 0 on affected bands.
+
+Two ship-safe options:
+
+1. **Per-bake recalibration**: rebake the score-shaped component
+   with explicit `α=0, β=1` metadata, then re-derive the multi-bake
+   mix in score space (each sub-bake gets affine-applied separately
+   before mix). Use this when the runtime is locked to a known set
+   of bake shapes.
+2. **Soft-clamp**: replace the hard clamp with
+   `100.0 / (1.0 + (-(raw - 50.0) / 20.0).exp())`. Preserves rank
+   ordering at the extremes without flattening into ties. Costs
+   ~1 ns per score (single exp call). Use this when sub-bake shapes
+   may evolve over time.
+
+PreviewV0_4 currently uses hard clamp and needs option 1 or 2
+applied; documented as TODO in the V_20 learnings section.
+
+Artifact: an integration test that scores 100 heavy-distortion
+pairs from TID B0/B1 and asserts no more than 5% are pinned at 0
+or 100.
+
+### Step 10 — Falsification is data; commit the negative result
+
+Negative findings are first-class output. When a hypothesis falsifies:
+
+- Write the falsification log to `benchmarks/<experiment>_<date>.log`
+  alongside the positive logs.
+- Update CLAUDE.md learnings section with the negative result
+  ("V_20b synth pre-train does not transfer to CID22 — FRIQUEE
+  2017 caveat materialized").
+- Add a one-line entry to the V_X timeline / candlestick chart so
+  the failure shows up alongside successes.
+- Do NOT retry the falsified hypothesis without NEW evidence
+  (e.g., different pre-train corpus, different head architecture,
+  external paper showing the recipe works on similar data).
+
+A session that produces two falsifications and zero wins is NOT a
+failed session — it's a session that ruled out two directions.
+Commit the work like any other.
+
+Artifact: the falsification log + CLAUDE.md learning entry + V_X
+timeline update.
+
+### Anti-pattern catalogue (don't do these)
+
+| Anti-pattern | Failure mode | Correct pattern |
+|---|---|---|
+| Train 5 seeds before checking seed=1 | 5× compute wasted on dead hypothesis | Step 3 |
+| Inspect CID22 mid-experiment | Information leak into hyperparam choice | Step 2 |
+| Apply V_18's α, β to a score-shaped bake | Inverted predictions, SROCC=0 | Step 4 |
+| Write Python that emits ZNPR v3 bytes directly | Wire-format drift, silent garbage | Step 5 |
+| Concat bakes without verifying metadata agreement | Wrong forward path, NaN cascade | Step 6 |
+| Call `model.predict()` unconditionally | Transform-bearing bakes produce garbage | Step 7 |
+| Design next experiment without diagnostics | 4-hour wrong-direction experiments | Step 8 |
+| Hard-clamp multi-bake output to [0, 100] | Ties → SROCC=0 on heavy distortion | Step 9 |
+| Bury falsifications in scratch dirs | Future sessions retry dead hypotheses | Step 10 |
+| `sed`/`echo` markdown tables to terminal | Tables don't render in message UI | Render directly in chat |
+| Report SROCC alone, even per-band | Hides PWRC / Z-RMSE / OR regressions | Full Mohammadi panel |
+| Skip ≥ 60 s commands' output to disk | Re-run cost when context loss | `2>&1 \| tee benchmarks/<name>.log` |
+
 ## Interactive comparison site (CRUCIAL GOAL, locked 2026-05-12)
 
 User spec, verbatim:
