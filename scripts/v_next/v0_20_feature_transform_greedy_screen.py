@@ -270,7 +270,22 @@ def screen_one_feature(
     mos: np.ndarray,
 ) -> dict:
     """For one feature column, sweep all transforms × param configs and
-    return the best transform's (lift, transform_token, params, etc.)."""
+    return the best transform's (lift, transform_token, params, etc.).
+
+    Training-safety gates (added 2026-05-15 after first run hit NaN
+    loss): some transforms produce NaN on real training data when the
+    Pearson screen accepts them via its NaN-dropping rule. The gates:
+
+    - `log` requires `min(feat) > 0` (strictly positive). Mathematically
+      `log(x ≤ 0) = NaN`, and the trainer's apply path doesn't drop
+      bad rows.
+    - `log1p` requires `min(feat) > -1` (anything > -1, since
+      `log1p(0) = 0`).
+
+    Other transforms (`signed_*`, `clip_then_log1p`, `winsor_p99`,
+    `quantile_bins`) are safe across the full real line."""
+    finite = feat_col[np.isfinite(feat_col)]
+    feat_min = float(finite.min()) if finite.size else 0.0
     baseline, n = safe_pearson(feat_col, mos)
     baseline_spearman = safe_spearman(feat_col, mos)
     best_lift = 0.0
@@ -278,6 +293,11 @@ def screen_one_feature(
     best_params: list[float] = []
     best_corr = baseline
     for token, fn in TRANSFORMS.items():
+        # Training-safety gates
+        if token == "log" and feat_min <= 0.0:
+            continue
+        if token == "log1p" and feat_min <= -1.0:
+            continue
         for params in sweep_for(token, feat_col):
             tx = fn(feat_col, params)
             corr, _ = safe_pearson(tx, mos)
