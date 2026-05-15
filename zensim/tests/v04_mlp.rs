@@ -130,3 +130,39 @@ fn v04_compute_with_ref_matches_compute() {
 fn v04_profile_name() {
     assert_eq!(ZensimProfile::PreviewV0_3.name(), "zensim-preview-v0.3");
 }
+
+#[test]
+fn v04_profile_name_and_score() {
+    // PreviewV0_4 is the D2 α=0.7 multi-bake ensemble (V_18 ship +
+    // V_20 IS calibrated). Smoke-test that the profile loads both
+    // bakes, scores in the 0..100 range, and produces a different
+    // score from PreviewV0_3 (proving the second bake is actually
+    // mixed in — if mlp_bytes_b3 were silently ignored, scores would
+    // be identical).
+    assert_eq!(ZensimProfile::PreviewV0_4.name(), "zensim-preview-v0.4");
+
+    let (src, dst) = make_test_pair(64, 64);
+    let s = RgbSlice::new(&src, 64, 64);
+    let d = RgbSlice::new(&dst, 64, 64);
+
+    let z3 = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z4 = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let r3 = z3.compute(&s, &d).unwrap();
+    let r4 = z4.compute(&s, &d).unwrap();
+
+    let s3 = r3.score();
+    let s4 = r4.score();
+    assert!(
+        (0.0..=100.0).contains(&s4),
+        "v0.4 score out of range: {s4}"
+    );
+    assert_eq!(r4.profile(), ZensimProfile::PreviewV0_4);
+    // Different mix → different output. If mlp_bytes_b3 were ignored,
+    // s4 would equal s3 exactly. We want them measurably different
+    // to confirm the secondary bake is mixed in.
+    assert!(
+        (s3 - s4).abs() > 0.01,
+        "PreviewV0_3 and PreviewV0_4 produced near-identical scores ({s3} vs {s4}); \
+         the D2 secondary bake doesn't appear to be active"
+    );
+}

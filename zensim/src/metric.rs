@@ -1558,36 +1558,18 @@ pub(crate) fn apply_mlp_scoring(
     };
     {
         let bytes = loader();
-        let model =
-            crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
-        let n_inputs = model.n_inputs();
-        let features = result.features();
-        let mut predictor = crate::mlp::Predictor::new(&model);
-
-        // Build the f32 feature vector the MLP expects. Three shapes:
-        //   - n_inputs == features.len(): standard scorer (228 features)
-        //   - n_inputs == features.len() + 4: size-axis-augmented (232)
-        //   - n_inputs <  features.len(): strict-prefix (e.g. trained on
-        //     228 of a 300-feature extended tail)
-        let raw = if n_inputs == features.len() {
-            let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
-            predictor
-                .predict(&f32_features)
-                .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
-        } else if n_inputs == features.len() + 4 {
-            let mut augmented = features.to_vec();
-            append_mlp_size_axes(&mut augmented, width, height);
-            let f32_features: Vec<f32> = augmented.iter().map(|&v| v as f32).collect();
-            predictor
-                .predict(&f32_features)
-                .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
-        } else if n_inputs < features.len() {
-            let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
-            predictor
-                .predict(&f32_features)
-                .map_err(|_| ZensimError::InvalidDataLength)?[0] as f64
+        let raw_primary = forward_one_bake(bytes, result.features(), width, height)?;
+        // Optional secondary bake (D2 multi-output ensemble, e.g.
+        // V_20 IS B3 specialist) — its forward path runs over the SAME
+        // 228-feature vector but applies its own `feature_transforms`
+        // metadata. Both bakes' raw outputs are mixed linearly at
+        // `mlp_primary_mix` weight on the primary.
+        let raw = if let Some(b3_loader) = params.mlp_bytes_b3 {
+            let raw_b3 = forward_one_bake(b3_loader(), result.features(), width, height)?;
+            let a = params.mlp_primary_mix as f64;
+            a * raw_primary + (1.0 - a) * raw_b3
         } else {
-            return Err(ZensimError::InvalidDataLength);
+            raw_primary
         };
 
         let score = if params.skip_score_mapping {
@@ -1616,6 +1598,50 @@ pub(crate) fn apply_mlp_scoring(
 /// `append_size_axes` in `zensim-validate/src/main.rs` so a model
 /// trained with `--mlp-size-axes` produces the same input layout
 /// at runtime.
+/// Forward one bake over `features` and return the raw output scalar.
+/// Handles the three accepted input-width shapes (n_inputs == features,
+/// n_inputs == features+4 with size-axes, n_inputs < features prefix)
+/// and dispatches to `predict_transformed` when the bake declares
+/// non-trivial `feature_transforms` metadata (V_20+ input-shaping
+/// bakes); otherwise uses the plain `predict` path with zero overhead.
+fn forward_one_bake(
+    bytes: &[u8],
+    features: &[f64],
+    width: u32,
+    height: u32,
+) -> Result<f64, ZensimError> {
+    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
+    let n_inputs = model.n_inputs();
+    let mut predictor = crate::mlp::Predictor::new(&model);
+    let needs_transforms = model.has_nontrivial_feature_transforms();
+    let dispatch = |p: &mut crate::mlp::Predictor<'_>,
+                    x: &[f32]|
+     -> Result<f64, ZensimError> {
+        let out = if needs_transforms {
+            p.predict_transformed(x)
+                .map_err(|_| ZensimError::InvalidDataLength)?
+        } else {
+            p.predict(x)
+                .map_err(|_| ZensimError::InvalidDataLength)?
+        };
+        Ok(out[0] as f64)
+    };
+    if n_inputs == features.len() {
+        let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
+        dispatch(&mut predictor, &f32_features)
+    } else if n_inputs == features.len() + 4 {
+        let mut augmented = features.to_vec();
+        append_mlp_size_axes(&mut augmented, width, height);
+        let f32_features: Vec<f32> = augmented.iter().map(|&v| v as f32).collect();
+        dispatch(&mut predictor, &f32_features)
+    } else if n_inputs < features.len() {
+        let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
+        dispatch(&mut predictor, &f32_features)
+    } else {
+        Err(ZensimError::InvalidDataLength)
+    }
+}
+
 fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
     if width == 0 || height == 0 {
         features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);

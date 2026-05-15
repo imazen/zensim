@@ -132,6 +132,7 @@ fn main() -> ExitCode {
     let mut csvs: Vec<(String, PathBuf)> = Vec::new();
     let mut bakes: Vec<(String, PathBuf)> = Vec::new();
     let mut band_edges: Vec<f64> = vec![50.0, 65.0, 90.0];
+    let mut raw_predictions = false;
 
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -156,6 +157,12 @@ fn main() -> ExitCode {
             "--band-edges" => {
                 let s = args.next().expect("--band-edges comma-list");
                 band_edges = s.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+            }
+            "--raw" => {
+                // Skip Z-score normalization. Use this to find a mix α
+                // that matches the runtime's raw-output linear blend
+                // (Zensim::compute multi-bake forward).
+                raw_predictions = true;
             }
             _ => {
                 eprintln!("unknown arg: {}", a);
@@ -211,7 +218,10 @@ fn main() -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
-            bake_preds.insert(bname.clone(), normalize(&preds));
+            bake_preds.insert(
+                bname.clone(),
+                if raw_predictions { preds } else { normalize(&preds) },
+            );
         }
 
         println!("# Ensemble mix on `{}` (n={})", name, scores.len());

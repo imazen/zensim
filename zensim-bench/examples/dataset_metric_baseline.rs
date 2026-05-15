@@ -80,6 +80,11 @@ fn main() {
     let mut aic3: Option<PathBuf> = None;
     let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
+    /// When set, drive the V_04 column via `Zensim::compute()` using
+    /// the named profile's live runtime — bypasses `--v04-bake`. Used
+    /// to eval the D2 multi-bake ensemble (PreviewV0_4 = V_18 ship +
+    /// V_20 IS calibrated mixed at α=0.7).
+    let mut zensim_profile_override: Option<zensim::ZensimProfile> = None;
     let mut max_pairs: usize = 500;
     let mut per_pair_output: Option<PathBuf> = None;
     let mut konjnd_features_csv: Option<PathBuf> = None;
@@ -99,6 +104,17 @@ fn main() {
             "--aic3" => aic3 = Some(args.next().unwrap().into()),
             "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
+            "--zensim-profile" => {
+                let v = args.next().expect("--zensim-profile <v0-3|v0-4>");
+                zensim_profile_override = Some(match v.as_str() {
+                    "v0-3" | "v03" | "preview-v0.3" => zensim::ZensimProfile::PreviewV0_3,
+                    "v0-4" | "v04" | "preview-v0.4" => zensim::ZensimProfile::PreviewV0_4,
+                    other => {
+                        eprintln!("--zensim-profile must be v0-3 or v0-4, got {other:?}");
+                        std::process::exit(2);
+                    }
+                });
+            }
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
             "--per-pair-output" => per_pair_output = Some(args.next().unwrap().into()),
             "--konjnd-features-csv" => konjnd_features_csv = Some(args.next().unwrap().into()),
@@ -218,7 +234,7 @@ fn main() {
         // PreviewV0_4 forces feature population (the MLP path needs them).
         // We use it to extract features once per pair, then score V0_2,
         // V0_4 (trained), SSIM2, and Butteraugli on the same data.
-        let z_v04 = Zensim::new(ZensimProfile::PreviewV0_3);
+        let z_v04 = Zensim::new(zensim_profile_override.unwrap_or(ZensimProfile::PreviewV0_3));
 
         type MetricRow = (f64, f64, f64, f64, f64);
         /// (ref_path, dist_path, codec, version, human, v02, v04, ssim2, butter)
@@ -574,7 +590,7 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
         let n_total = pairs.len();
         if n_total >= 4 {
             eprintln!("=== KonJND-1k (n={n_total}) ===");
-            let z_v04 = Zensim::new(ZensimProfile::PreviewV0_3);
+            let z_v04 = Zensim::new(zensim_profile_override.unwrap_or(ZensimProfile::PreviewV0_3));
             let started = std::time::Instant::now();
             let progress = AtomicUsize::new(0);
             let log_every = (n_total / 20).max(1);
@@ -753,7 +769,12 @@ fn process_konjnd_pair(
             }
         }
     } else {
-        f64::NAN
+        // Fall back to the live Zensim runtime's score. For
+        // PreviewV0_3 this is the V_18 ship single-bake forward; for
+        // PreviewV0_4 it's the D2 α=0.7 multi-bake mix. Both return
+        // the calibrated MCOS 0..100 score. Convert to "distance" via
+        // 100 - score so downstream uses the same convention.
+        100.0 - result.score()
     };
     let s_img = Img::new(src_pixels.as_slice(), w_us, h_us);
     let d_img = Img::new(dst_pixels.as_slice(), w_us, h_us);
@@ -939,7 +960,13 @@ fn process_pair(
             }
         }
     } else {
-        f64::NAN
+        // No external bake: emit the live Zensim runtime's score
+        // converted to distance-convention (100 - score). For
+        // PreviewV0_3 this is V_18 ship; for PreviewV0_4 it's the
+        // D2 α=0.7 multi-bake mix. Pre-existing eval callers passed
+        // --v04-bake explicitly so we never hit this branch; new
+        // callers can omit --v04-bake to test the live runtime.
+        100.0 - result.score()
     };
 
     // fast-ssim2 — score, higher = more similar.

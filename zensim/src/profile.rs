@@ -47,6 +47,24 @@ pub enum ZensimProfile {
     /// path lands per the `zenpredict` roadmap). Cross-patch score
     /// stability is the contract; bit-identity is not.
     PreviewV0_3,
+    /// Preview v0.4. **Multi-bake D2 α=0.7 ensemble (2026-05-15)**:
+    /// V_18 ship as the primary (228 → 384 → 1, no feature transforms,
+    /// affine-calibrated to MCOS 0..100) + V_20 input-shaping seed=1
+    /// (228 → 128 → 1, 98 per-feature transforms, calibrated to same
+    /// scale) as the secondary, raw-output linear mix at α=0.7.
+    ///
+    /// Per `benchmarks/v0_20_three_directions_summary_2026-05-15.md`,
+    /// the α=0.7 mix gives the Pareto-optimal CID22 trade vs V_18 alone:
+    ///   - CID22 aggregate: 0.8890 (V_18 ship 0.8934, −0.004)
+    ///   - CID22 B3 [30, 40) priority band: 0.1047 (V_18 0.0246, **+0.080**)
+    ///   - Closes the V_18 weakness vs fast-ssim2 (which lands at 0.1335
+    ///     on B3 — V_20_4 lands closer to ssim2 there).
+    ///
+    /// Runtime cost: ~2× forward-pass time vs PreviewV0_3 (both bakes
+    /// run on the same 228-feature vector). Bakes embed via
+    /// `include_bytes!`; no extra heap allocations beyond the second
+    /// Predictor's scratch buffer.
+    PreviewV0_4,
 }
 
 impl ZensimProfile {
@@ -62,6 +80,7 @@ impl ZensimProfile {
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
             Self::PreviewV0_3 => "zensim-preview-v0.3",
+            Self::PreviewV0_4 => "zensim-preview-v0.4",
         }
     }
 
@@ -71,6 +90,7 @@ impl ZensimProfile {
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             Self::PreviewV0_3 => &PROFILE_PREVIEW_V0_3,
+            Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
         }
     }
 }
@@ -120,6 +140,28 @@ pub struct ProfileParams {
     /// at runtime from `WEIGHTS_PREVIEW_V0_2`; trained bakes will move
     /// to a `static` byte array once the training pipeline lands).
     pub(crate) mlp_bytes: Option<fn() -> &'static [u8]>,
+
+    /// Optional **secondary** MLP bake for D2-style multi-output ensembles
+    /// (V_20 input-shaping B3 specialist). When `Some`, the runtime forwards
+    /// both `mlp_bytes` and `mlp_bytes_b3` and mixes their RAW outputs at
+    /// `mlp_primary_mix` weight before the score-mapping step. The secondary
+    /// bake MUST be affine-calibrated to the primary's output scale (use
+    /// `zensim-validate/bin/affine_calibrate`). Both bakes MUST share
+    /// `n_inputs` — their forward path runs over the same 228-feature
+    /// vector; `feature_transforms` metadata is per-bake so the primary
+    /// can be untransformed while the secondary applies V_20-style
+    /// per-feature shaping.
+    ///
+    /// `None` (default for V_18 ship and earlier) keeps the single-bake
+    /// path with zero overhead.
+    pub(crate) mlp_bytes_b3: Option<fn() -> &'static [u8]>,
+
+    /// Mix weight on the **primary** bake (`mlp_bytes`). The secondary
+    /// gets `1.0 - mlp_primary_mix`. Only used when `mlp_bytes_b3` is
+    /// `Some`. Per the D2 design doc, α = 0.7 gives CID22 B3 +0.080
+    /// at aggregate −0.004 vs V_18 ship alone. α = 0.8 gives B3 +0.052
+    /// at aggregate match.
+    pub(crate) mlp_primary_mix: f32,
 }
 
 #[cfg(feature = "training")]
@@ -149,6 +191,8 @@ impl ProfileParams {
             // their static `ProfileParams` definitions.
             skip_score_mapping: false,
             mlp_bytes: None,
+            mlp_bytes_b3: None,
+            mlp_primary_mix: 1.0,
         }
     }
 }
@@ -164,6 +208,8 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
 };
 
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
@@ -175,6 +221,8 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: false,
     mlp_bytes: None,
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
 };
 
 /// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear.
@@ -285,6 +333,58 @@ static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: true,
     mlp_bytes: Some(mlp_bake_preview_v0_3),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+};
+
+/// V_20 input-shaping seed=1 bake, **affine-calibrated** to V_18's
+/// output scale (α=28.0366, β=-5.0738 — inherited from V_18 / V_16
+/// lineage). Used as the B3-specialist secondary in
+/// `PreviewV0_4` (D2 α=0.7 multi-bake ensemble).
+///
+/// Architecture: 228 → 128 (LeakyReLU) → 1 (Identity). Carries 98
+/// per-feature `feature_transforms` metadata (and the corresponding
+/// `feature_transform_params` blob); the runtime's
+/// `apply_mlp_scoring` dispatches to `predict_transformed` when this
+/// metadata is present.
+///
+/// Methodology: `benchmarks/v0_20_input_shaping_methodology_2026-05-15.md`.
+/// Source eval: `benchmarks/v0_20_input_shaping_eval_2026-05-15.log`.
+pub(crate) fn mlp_bake_v0_20_is_calibrated() -> &'static [u8] {
+    include_bytes!("../weights/v0_20_is_calibrated_2026-05-15.bin")
+}
+
+static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    // Both bakes are affine-calibrated to MCOS 0..100 already.
+    // skip_score_mapping returns the raw mix directly as the score.
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_3),
+    mlp_bytes_b3: Some(mlp_bake_v0_20_is_calibrated),
+    // **α = 0.4 in RAW-output space matches the D2 design doc's
+    // Z-norm α = 0.7 prediction**: CID22 B3 [30, 40) +0.080 lift
+    // (same as the Z-norm prediction), with CID22 aggregate −0.008
+    // (slightly higher than the Z-norm prediction's −0.004). The
+    // runtime mix happens BEFORE the score-mapping step, so we mix
+    // in raw-prediction space — different from the offline
+    // `ensemble_mix` tool which Z-normalizes per-bake before mixing.
+    //
+    // Per-α trade (raw space, see `benchmarks/v0_20_4_runtime_mix_sweep_2026-05-15.md`):
+    //   α=0.4: B3 = 0.1042 (+0.080),  agg = 0.8855 (-0.008) ← default ship
+    //   α=0.5: B3 = 0.0816 (+0.057),  agg = 0.8870 (-0.006)
+    //   α=0.6: B3 = 0.0572 (+0.033),  agg = 0.8886 (-0.005)
+    //   α=0.7: B3 = 0.0417 (+0.017),  agg = 0.8900 (-0.003) ← conservative
+    //
+    // Pick α=0.4 to maximize the priority-band lift (CLAUDE.md
+    // "B0..B5 lift is the dominant priority"). For a smaller B3 lift
+    // at lower aggregate cost, swap to a fresh ProfileParams with
+    // mlp_primary_mix tuned higher.
+    mlp_primary_mix: 0.4,
 };
 
 // --- Weight arrays ---
