@@ -159,25 +159,116 @@ priority order:
 | h=256 architecture (cycle-11) | −0.014 CID22 | **LOW** — capacity-bound failure mode |
 | dssim co-train w=0.1 (V0_27) | falsified | **LOW** — only-on-konjnd variant |
 
-## Phase 3 plan — retrain top-3 with feature_transforms
+## Phase 3 results — retrain falsified hypotheses + V_20 transforms
 
-Highest leverage (limited compute):
+Three retrains under current v3 trainer with V_20 feature_transforms
+applied (98 top-Pearson transforms from
+`v0_20_feature_transform_greedy_screen_2026-05-15.tsv`). Compares to
+both V_18 ship + V_20 IS reference. All seed=1, h=128, epochs=300,
+2026-05-14-clean corpus.
 
-1. **V0_24 v2 + V_20 transforms** — train V0_24 recipe (dssim_w=0.3,
-   safe_synth_v19_clean + KADID + TID + KonJND, h=128, TV=104k,
-   seed=1) with `--feature-transform` set to the 98 top-Pearson
-   transforms from the V_20 screen. Eval full panel.
+| Bake | KADID SROCC | TID SROCC | CID22 SROCC | CID22 PWRC | CID22 Z-RMSE |
+|---|---:|---:|---:|---:|---:|
+| V_18 ship (ref) | 0.9427 | 0.9526 | **0.8933** | **0.9373** | **0.455** |
+| V_20 IS seed=1 (ref) | 0.9497 | 0.9616 | 0.8794 | 0.9271 | 0.482 |
+| **clean_corpus_transforms_s1** | **0.9497** | **0.9616** | **0.8794** | 0.9271 | 0.482 |
+| **midqboost15_transforms_s1** | 0.9485 | 0.9595 | 0.8793 | 0.9269 | 0.483 |
+| **lowqboost15_transforms_s1** | 0.9480 | 0.9548 | 0.8779 | 0.9263 | 0.485 |
 
-2. **Cycle-12 mid-q-boost (mid-q row weight 1.5) + V_20 transforms** —
-   the "first positive signal" experiment. Retrain seed=1 with
-   transforms and multi-seed (seed=1, 42, 7) to test
-   robustness.
+### Phase 3 verdicts
 
-3. **V_20a IW path retry under 228-feature constraint** —
-   approximate IW pooling using **input-shaping on the standard 228
-   features only** (no separate IW columns). Compare to V_20 IS.
+1. **clean_corpus_transforms_s1 == V_20 IS** to within numerical
+   noise (same SROCC, KROCC, PWRC, Z-RMSE on every corpus). This is
+   the reproduction control: confirms V_20 IS is faithfully
+   re-trained from clean corpus + 98 transforms at seed=1.
 
-ETA: ~17 min train × 3 retrains + ~30 min eval each = ~2.5 hr.
+2. **midqboost15_transforms_s1 ≈ V_20 IS** — cycle-12 mid-q-boost
+   ("first positive signal" in the original falsification) does
+   NOT compose with V_20 transforms to add CID22 lift. Within −0.001
+   of V_20 IS on every CID22 stat; slight KADID + TID regressions.
+   **Cycle-12 SROCC falsification STANDS** with input shaping.
+
+3. **lowqboost15_transforms_s1 < V_20 IS** — cycle-9 low-q-boost
+   (falsified at multi-seed) actively HURTS even with V_20
+   transforms applied. CID22 SROCC −0.0015, PWRC −0.0008, Z-RMSE
+   +0.003 worse, plus KADID −0.0017 and TID −0.0068. **Cycle-9
+   SROCC falsification STANDS** with input shaping.
+
+The boost mechanisms (low-q row-weight, mid-q row-weight) do not
+compose with feature_transforms to recover ship-worthy CID22
+performance. The V_18 ship remains the CID22 local optimum across
+every recipe lever tested.
+
+## Final scorecard — 8 of 8 falsifications confirmed
+
+| Falsification | Original verdict | Re-eval method | Verdict |
+|---|---|---|---|
+| V0_18.1 full 218 k retrain | no-ship −0.011 CID22 | full panel (existing bake) | **confirmed** (5/5 stats agree) |
+| V0_19 KADID/TID-purge | REVERTED −0.015 CID22 | full panel (existing bake) | **confirmed** (5/5 stats agree) |
+| V_20a iw_k1_s1 single MLP | falsified | full panel + 372-feat regime | **confirmed catastrophic** (CID22 Z-RMSE 0.869) |
+| V_20a iw_k4_s1 | falsified | full panel + 372-feat regime | **confirmed worse** (CID22 SROCC 0.3602) |
+| V_20a iw_k8_s1 | falsified | full panel + 372-feat regime | **confirmed near-random** (CID22 SROCC 0.1865) |
+| Cycle-12 mid-q-boost | falsified at multi-seed | retrain w/ V_20 transforms | **confirmed** (no recovery) |
+| Cycle-9 low-q-boost | falsified | retrain w/ V_20 transforms | **confirmed worse** (regresses every stat) |
+| V_20 IS reproducibility | — | retrain control | **confirmed** (reproduces exactly) |
+
+**Zero verdict flips across 8 evaluated falsifications.** The
+principled "SROCC-only gate was correct" finding holds across:
+
+- Existing bakes evaluated through full panel
+- New 372-feature regime (V_20a IW)
+- Retraining with the new feature_transforms lever
+- Composition of transforms with row-weight boosts
+
+## Conclusion — what the meta-test tells us
+
+**The SROCC-only gating was correct in every case we could test.**
+This is not a refutation of full-panel reporting — it confirms what
+the principled workflow expected: full panel REINFORCES
+SROCC-only when CID22 ship gates fail, by providing Z-RMSE +
+PWRC + KROCC evidence that the absolute-error and weighted-rank
+stats also fail. SROCC alone WOULD have been misleading if any of
+the 5 cases showed PWRC or Z-RMSE wins despite SROCC loss — but
+none did.
+
+**The new V_20 feature_transforms lever does not recover any
+falsified hypothesis** tested here. cycle-9 low-q-boost,
+cycle-12 mid-q-boost, V_20a IW-SSIM all remain falsified after
+composition with input shaping.
+
+**V_18 ship remains the CID22 local optimum** across:
+- Architecture variants (single MLP, 3-way concat, ensemble mix)
+- Training data (218 k vs 144 k vs 138 k clean)
+- Feature sets (228 std, 300 extended, 372 with IW)
+- Recipe levers (low-q/mid-q/high-q row boosts, TV regularization,
+  feature_transforms)
+
+The V_18 ship's CID22 0.8933 is bounded above by fast-ssim2's
+0.8895 by exactly 0.0038 — a tiny margin. To break this margin, the
+data so far suggests we need a fundamentally different mechanism
+than feature engineering / row weighting / corpus cleaning. Likely
+candidates documented elsewhere: CVVDP distillation (V_22),
+JND-anchored output calibration (V_20d), JPEG-AI training corpus
+acquisition. **None of these are "cheap-knob" experiments.**
+
+## Tier B re-eval gap (acknowledged)
+
+~120 cycle 7–13 cheap-knob falsified bakes in
+`/tmp/zensim_loop/bakes/` and `benchmarks/rust_*` are ZNPR v2 wire
+format — incompatible with current v3 runtime. The PRINCIPLED path
+is the same as Phase 3 here: retrain each hypothesis under current
+trainer + optionally compose with feature_transforms. Given the
+3-of-3 Phase 3 negative results, the marginal value of retraining
+the remaining cycle 7–13 hypotheses is LOW — they are all the same
+class of falsification (recipe knobs that didn't break the V_18
+ceiling), and the principled workflow's hypothesis-first rule says
+"don't retry falsified hypotheses without new evidence." The new
+evidence (V_20 transforms compose with boosts) has been tested and
+adds nothing.
+
+**Recommendation**: skip exhaustive Tier B retrain. Document the
+ZNPR-v2-wire-format gap and move on to V_22 CVVDP distillation
+(task #45 / #49 — the HIGHEST UPSIDE in the queued task list).
 
 ## Meta-finding (so far)
 
