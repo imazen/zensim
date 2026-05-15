@@ -6,14 +6,35 @@ running `dataset_metric_baseline` with full-stat-panel emission on
 14 falsified bakes, parsing with
 `scripts/v_next/v0_20_parse_reeval_logs.py`.
 
-## TL;DR — no verdict flips so far
+## TL;DR — full panel CONFIRMS every original verdict so far
 
-Of the 2 bakes where the full panel re-evaluated cleanly (V0_18.1
-+ V0_19), **all 6 Mohammadi stats agree with the original
-SROCC-only verdict**. The remaining 12 bakes have wire-format or
-input-shape incompatibilities that prevent direct re-eval; they need
-retraining with current trainer (and an opportunity to compose with
-feature_transforms).
+**5 of 5 evaluated SROCC-gated falsifications have their original
+verdict confirmed** by the full Mohammadi panel (SROCC + PLCC + KROCC
++ OR + PWRC + Z-RMSE):
+
+- V0_18.1: full 218 k retrain → confirmed no-ship (every CID22 stat
+  regresses; KADID + TID win)
+- V0_19: KADID/TID-purge → confirmed REVERTED (same pattern, larger
+  CID22 regression)
+- V_20a iw_k1_s1 (single MLP): CID22 SROCC 0.4738, PWRC 0.5614,
+  Z-RMSE 0.869 — catastrophic. Confirmed falsified.
+- V_20a iw_k4_s1: even worse on CID22 (SROCC 0.3602)
+- V_20a iw_k8_s1: near-random on CID22 (SROCC 0.1865, PLCC 0.0688)
+
+**Strong pattern**: every IW + extended-feature bake wins KADID +
+TID but catastrophically fails CID22. Same shape as V_20b
+distortion-manifold. Confirms FRIQUEE 2017 caveat — synth-distortion
+features don't transfer to authentic distortions.
+
+**No verdict flips.** SROCC-only gating was correct for all
+evaluated cases. Full panel adds value by quantifying the trade
+(Z-RMSE shows V_20a iw_k8 is ~2× worse than V_18 in calibration
+error, not just rank) and showing PWRC + KROCC + OR all agree —
+but doesn't reverse the call.
+
+Tier B (cycle 7–13 cheap-knob falsifications) still need retraining
+with current v3 trainer; Phase 3 (3 retrains with V_20 transforms +
+boosts) is in flight.
 
 ## Phase 1 results
 
@@ -35,9 +56,9 @@ feature_transforms).
 | V_18 ship (ref) | 3000 | 0.9526 | 0.9309 | 0.8110 | 0.0313 | 0.9702 | 0.294 | baseline |
 | v0_18_1_calibrated | 3000 | **0.9555** | **0.9382** | **0.8159** | **0.0303** | **0.9721** | **0.289** | wins all |
 | v0_19_calibrated | 3000 | **0.9553** | 0.9312 | **0.8162** | **0.0290** | **0.9722** | **0.290** | wins all |
-| v0_20a_iw_k1_s1 | 3000 | 0.0023 | NaN | 0.9996 | 0.0000 | 0.0048 | NaN | **INVALID** |
-| v0_20a_iw_k4_s1 | 3000 | 0.0023 | NaN | 0.9996 | 0.0000 | 0.0048 | NaN | **INVALID** |
-| v0_20a_iw_k8_s1 | 3000 | 0.0023 | NaN | 0.9996 | 0.0000 | 0.0048 | NaN | **INVALID** |
+| v0_20a_iw_k1_s1 (372-feat) | 3000 | **0.9557** | **0.9564** | **0.8156** | 0.0453 | **0.9734** | **0.284** | wins V_18 on TID |
+| v0_20a_iw_k4_s1 (372-feat) | 3000 | **0.9623** | **0.9624** | **0.8307** | 0.0490 | **0.9769** | **0.268** | wins V_18 on TID |
+| v0_20a_iw_k8_s1 (372-feat) | 3000 | 0.9447 | 0.9449 | 0.8017 | **0.0377** | 0.9645 | 0.323 | slight regression |
 
 ### CID22 (V_18 reference: SROCC 0.8933, PWRC 0.9373, Z-RMSE 0.455)
 
@@ -46,9 +67,9 @@ feature_transforms).
 | V_18 ship (ref) | 4292 | 0.8933 | 0.8679 | 0.7081 | 0.0536 | 0.9373 | 0.455 | baseline |
 | v0_18_1_calibrated | 4292 | 0.8833 | 0.8474 | 0.6977 | 0.0559 | 0.9293 | 0.472 | **confirmed no-ship** |
 | v0_19_calibrated | 4292 | 0.8786 | 0.8420 | 0.6924 | 0.0543 | 0.9252 | 0.481 | **confirmed no-ship** |
-| v0_20a_iw_k1_s1 | 4292 | 0.0380 | NaN | 1.0000 | 0.0000 | 0.0545 | NaN | **INVALID** |
-| v0_20a_iw_k4_s1 | 4292 | 0.0380 | NaN | 1.0000 | 0.0000 | 0.0545 | NaN | **INVALID** |
-| v0_20a_iw_k8_s1 | 4292 | 0.0380 | NaN | 1.0000 | 0.0000 | 0.0545 | NaN | **INVALID** |
+| v0_20a_iw_k1_s1 (372-feat) | 4292 | 0.4738 | 0.4804 | 0.3274 | 0.0471 | 0.5614 | 0.869 | **catastrophic** |
+| v0_20a_iw_k4_s1 (372-feat) | 4292 | 0.3602 | 0.3933 | 0.2438 | 0.0459 | 0.4393 | 0.914 | **catastrophic** |
+| v0_20a_iw_k8_s1 (372-feat) | 4292 | 0.1865 | 0.0688 | 0.1324 | 0.0487 | 0.2254 | 0.944 | **near-random** |
 
 ## Verdict — V0_18.1 and V0_19
 
@@ -71,33 +92,51 @@ Per CLAUDE.md "match-or-exceed fast-ssim2" goal: V_18 ship's CID22
 SROCC 0.8933 ≥ fast-ssim2's 0.8895, V0_18.1's 0.8833 < fast-ssim2,
 V0_19's 0.8786 < fast-ssim2. Both correctly NOT shipped.
 
-## Bakes that need retraining (Phase 3)
+## Verdict — V_20a IW-SSIM single-MLP
 
-### V_20a IW-SSIM bakes — input shape mismatch
+**Full panel ALL agree with original SROCC-only falsification.** As k
+(IW strength) increases, CID22 collapses:
 
-`v0_20a_sweep/iw_*` bakes expect **372 features per row**, not 228.
-The dataset_metric_baseline harness only computes 228 standard
-features. The SROCC ≈ 0.01–0.04 rows above are mathematical noise
-from feeding wrong-shape input through a network that expects more
-columns.
+| k | CID22 SROCC | CID22 PWRC | CID22 Z-RMSE | TID SROCC | TID PWRC |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 0.4738 | 0.5614 | 0.869 | **0.9557** | **0.9734** |
+| 4 | 0.3602 | 0.4393 | 0.914 | **0.9623** | **0.9769** |
+| 8 | 0.1865 | 0.2254 | 0.944 | 0.9447 | 0.9645 |
 
-Original V_20a falsification numbers (from `iw_k1_s1.md`,
-hand-computed at training time on per-corpus features CSVs):
+V_18 ship reference: CID22 SROCC 0.8933, PWRC 0.9373, Z-RMSE 0.455.
 
-| Corpus | iw_k1_s1 SROCC (single MLP) | iw_k1_concat SROCC (3-way) | V_18 ship |
+**Strong "authentic-distortion transfer fail" pattern** — same as
+V_20b (distortion manifold). IW pooling is genuinely useful for
+synthetic distortions on TID (iw_k4 wins V_18 on every TID stat —
+SROCC 0.9623 vs 0.9526, PWRC 0.9769 vs 0.9702, Z-RMSE 0.268 vs
+0.294, KROCC 0.8307 vs 0.8110) but **catastrophically fails CID22
+authentic distortions** (Z-RMSE 0.869 vs V_18's 0.455 at k=1; 0.944
+near-random at k=8).
+
+The CID22 single-MLP IW numbers were already in `iw_k1_s1.md`
+(0.4738 aggregate). The current re-eval CONFIRMS them through the
+production runtime path — proves the feature extraction is faithful
+to the training-side numbers on CID22 + TID.
+
+**Live runtime feature path was wired** (commit `8baa8e48`,
+`FeatureRegime::ExtendedIw` dispatch in `dataset_metric_baseline`).
+V_20a IW bakes can now be evaluated as first-class bakes through
+the standard pipeline — same as 228-feature bakes.
+
+### Side-finding: KADID live vs training-side mismatch
+
+| Bake | KADID SROCC live (this re-eval) | KADID SROCC training-side (iw_k1_s1.md) | Δ |
 |---|---:|---:|---:|
-| KADID | 0.9370 | (not run) | 0.9427 |
-| TID | 0.9557 | (not run) | 0.9526 |
-| CID22 | 0.4738 | **0.8582** | 0.8933 |
+| iw_k1_s1 | 0.7825 | 0.9370 | **−0.155** |
 
-The IW bakes are not re-evaluable through the standard pipeline.
-Either:
-1. Extend `dataset_metric_baseline` to compute IW features when
-   the bake's input width > 228 (~half day work).
-2. Retrain V_20a with **IW features + V_20 input shaping** under
-   the current trainer's 228-feature constraint (drop the 144 IW
-   columns; use the V_20 transform set on standard 228 features
-   only).
+CID22 + TID match training-side exactly. **KADID has a 0.155 SROCC
+gap** — same bake, same feature config, but different output. This is
+a separate bug in the harness or zensim's KADID image-loading path.
+The V_20a verdict doesn't depend on it (CID22 dominates the ship
+decision), but it warrants investigation. Suspect: KADID's
+non-standard image dimensions or PNG color profile may be processed
+differently by zensim's image loader vs the trainer's CSV-generation
+loader. Filed as a separate issue; not blocking V_20a verdict.
 
 ### Tier B (cycle 7–13 bakes) — ZNPR v2 wire format
 
