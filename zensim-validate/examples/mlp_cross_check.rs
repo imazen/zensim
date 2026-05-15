@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("loaded {path} ({} bytes)", bytes.len());
 
     let model = zenpredict::Model::from_bytes(&bytes)?;
-    let mut p = zenpredict::Predictor::new(model);
+    let mut p = zenpredict::Predictor::new(&model);
 
     let features_05 = vec![0.5f32; 228];
     let out_05 = p.predict(&features_05)?;

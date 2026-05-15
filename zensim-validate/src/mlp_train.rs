@@ -26,7 +26,8 @@
 //! model is the one with the highest validation mean.
 
 use std::time::Instant;
-use zenpredict_bake::{BakeLayer, BakeRequest, bake};
+use zenpredict::FeatureTransform;
+use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zenpredict::{Activation, WeightDtype};
 
 /// How to aggregate per-group SROCC into the single value used for
@@ -96,6 +97,20 @@ pub struct MlpHyperparams {
     /// CID22, AIC-3, AIC-4, KonJND). F16 saves ~50 % with bit-identical
     /// SROCC. Dequantization is inline in `zenpredict::saxpy_matmul_*`.
     pub out_dtype: WeightDtype,
+
+    /// V0_20 input-shaping research (2026-05-14): optional per-feature
+    /// transforms applied BEFORE the scaler in the runtime. When set,
+    /// the bake's `zentrain.feature_transforms` metadata records the
+    /// list; the runtime applies them via
+    /// [`zenpredict::Predictor::predict_transformed`].
+    ///
+    /// Length MUST equal `n_features` when present. Caller is
+    /// responsible for applying the same transforms to feature_rows
+    /// before constructing `TrainingGroup` (since the trainer never
+    /// sees the raw rows separately — the scaler is fit to whatever
+    /// the trainer receives). An all-`Identity` vector emits no
+    /// metadata (consumers treat absence as all-identity).
+    pub feature_transforms: Option<Vec<FeatureTransform>>,
 }
 
 impl Default for MlpHyperparams {
@@ -115,6 +130,7 @@ impl Default for MlpHyperparams {
             mid_q_boost: 1.0,
             high_q_boost: 1.0,
             out_dtype: WeightDtype::F32,
+            feature_transforms: None,
         }
     }
 }
@@ -723,6 +739,7 @@ pub fn train_mlp_with_tv(
                     n_hidden,
                     n_outputs,
                     hyperparams.out_dtype,
+                    hyperparams.feature_transforms.as_deref(),
                 ));
             } else {
                 stale_epochs += hyperparams.log_every;
@@ -757,6 +774,7 @@ pub fn train_mlp_with_tv(
             n_hidden,
             n_outputs,
             hyperparams.out_dtype,
+            hyperparams.feature_transforms.as_deref(),
         )
     })
 }
@@ -780,6 +798,7 @@ pub fn bake_two_layer_znpr_v2(
     n_hidden: usize,
     n_outputs: usize,
     dtype: WeightDtype,
+    feature_transforms: Option<&[FeatureTransform]>,
 ) -> Vec<u8> {
     let scaler_mean_f32: Vec<f32> = scaler_mean.iter().map(|&v| v as f32).collect();
     let scaler_scale_f32: Vec<f32> = scaler_scale.iter().map(|&v| v as f32).collect();
@@ -805,6 +824,36 @@ pub fn bake_two_layer_znpr_v2(
             biases: &b2_f32,
         },
     ];
+    // Feature-transforms metadata (V0_20 input-shaping research). Bakers
+    // omit the key entirely when every feature is `Identity` per the
+    // zenpredict convention — consumers treat absence as all-identity.
+    let transforms_blob: Option<String> = feature_transforms.and_then(|ts| {
+        if ts.iter().all(|t| *t == FeatureTransform::Identity) {
+            None
+        } else {
+            assert_eq!(
+                ts.len(),
+                n_inputs,
+                "feature_transforms.len()={} must equal n_inputs={}",
+                ts.len(),
+                n_inputs
+            );
+            Some(
+                ts.iter()
+                    .map(|t| t.as_token())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        }
+    });
+    let metadata: Vec<BakeMetadataEntry<'_>> = match &transforms_blob {
+        Some(blob) => vec![BakeMetadataEntry {
+            key: zenpredict::keys::FEATURE_TRANSFORMS,
+            kind: zenpredict::MetadataType::Utf8,
+            value: blob.as_bytes(),
+        }],
+        None => Vec::new(),
+    };
     bake(&BakeRequest {
         schema_hash: 0,
         flags: 0,
@@ -812,7 +861,7 @@ pub fn bake_two_layer_znpr_v2(
         scaler_scale: &scaler_scale_f32,
         layers: &layers,
         feature_bounds: &[],
-        metadata: &[],
+        metadata: &metadata,
         output_specs: &[],
         discrete_sets: &[],
         sparse_overrides: &[],

@@ -246,6 +246,27 @@ struct Args {
     /// scale.
     #[arg(long, default_value = "f32")]
     out_dtype: String,
+
+    /// V0_20 input-shaping research: apply a `FeatureTransform` to a
+    /// specific feature column BEFORE the trainer's scaler runs. Format
+    /// is `<token>:<feature_idx>` where token is one of `identity`,
+    /// `log`, `log1p`, `signed_log1p`, `signed_sqrt`, `signed_cbrt`,
+    /// and feature_idx is in [0, n_features). Repeat the flag for each
+    /// transformed feature; features not listed default to `identity`.
+    ///
+    /// The trainer applies the transform to feature_rows in-place after
+    /// CSV load, then trains as usual. The bake emits
+    /// `zentrain.feature_transforms` metadata; zenpredict 0.2.0+ runtime
+    /// applies the same transform via `Predictor::predict_transformed`.
+    ///
+    /// Example: `--feature-transform signed_log1p:42 --feature-transform
+    /// signed_sqrt:103` applies signed_log1p to feature 42 and
+    /// signed_sqrt to feature 103, identity to all 226 other features.
+    ///
+    /// See V0_20 design doc:
+    /// `benchmarks/v0_20_v0_21_design_2026-05-14.md`.
+    #[arg(long, value_name = "TOKEN:IDX")]
+    feature_transform: Vec<String>,
 }
 
 struct LoadedGroup {
@@ -422,6 +443,77 @@ fn main() {
         std::process::exit(2);
     }
 
+    // V0_20 input-shaping: parse `--feature-transform TOKEN:IDX`
+    // repeating flags into a per-feature transform list. Default
+    // is all-Identity. Apply transforms to feature_rows in-place so
+    // the trainer's scaler is fit to the post-transform distribution.
+    let feature_transforms: Option<Vec<zenpredict::FeatureTransform>> =
+        if args.feature_transform.is_empty() {
+            None
+        } else {
+            let mut transforms = vec![zenpredict::FeatureTransform::Identity; n_features];
+            for spec in &args.feature_transform {
+                let (token, idx_str) = spec.split_once(':').unwrap_or_else(|| {
+                    eprintln!(
+                        "--feature-transform expects TOKEN:IDX (got {spec:?})"
+                    );
+                    std::process::exit(2);
+                });
+                let idx: usize = idx_str.parse().unwrap_or_else(|_| {
+                    eprintln!("--feature-transform: bad idx {idx_str:?}");
+                    std::process::exit(2);
+                });
+                if idx >= n_features {
+                    eprintln!(
+                        "--feature-transform: idx {idx} >= n_features {n_features}"
+                    );
+                    std::process::exit(2);
+                }
+                let transform =
+                    zenpredict::FeatureTransform::from_token(token).unwrap_or_else(|_| {
+                        eprintln!(
+                            "--feature-transform: unknown token {token:?} (valid: \
+                             identity, log, log1p, signed_log1p, signed_sqrt, \
+                             signed_cbrt)"
+                        );
+                        std::process::exit(2);
+                    });
+                if transforms[idx] != zenpredict::FeatureTransform::Identity
+                    && transforms[idx] != transform
+                {
+                    eprintln!(
+                        "--feature-transform: feature {idx} already set to {:?}, \
+                         can't override with {transform:?}",
+                        transforms[idx]
+                    );
+                    std::process::exit(2);
+                }
+                transforms[idx] = transform;
+            }
+            // Apply per-feature transforms in-place across every group's
+            // feature_rows. The trainer's scaler sees the transformed
+            // distribution and the bake's metadata records the list so
+            // the runtime applies the same transform before its scaler.
+            let summary = transforms
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| **t != zenpredict::FeatureTransform::Identity)
+                .map(|(i, t)| format!("f{i}={}", t.as_token()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("feature_transforms: {summary}");
+            for g in &mut loaded {
+                for row in &mut g.feature_rows {
+                    for (i, t) in transforms.iter().enumerate() {
+                        if *t != zenpredict::FeatureTransform::Identity {
+                            row[i] = t.apply(row[i] as f32) as f64;
+                        }
+                    }
+                }
+            }
+            Some(transforms)
+        };
+
     // Build TrainingGroups (borrows feature rows from `loaded`).
     let feat_refs: Vec<Vec<&[f64]>> = loaded
         .iter()
@@ -464,6 +556,7 @@ fn main() {
         mid_q_boost: args.mid_q_boost,
         high_q_boost: args.high_q_boost,
         out_dtype,
+        feature_transforms: feature_transforms.clone(),
     };
 
     println!(
