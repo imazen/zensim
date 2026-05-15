@@ -249,23 +249,36 @@ struct Args {
 
     /// V0_20 input-shaping research: apply a `FeatureTransform` to a
     /// specific feature column BEFORE the trainer's scaler runs. Format
-    /// is `<token>:<feature_idx>` where token is one of `identity`,
-    /// `log`, `log1p`, `signed_log1p`, `signed_sqrt`, `signed_cbrt`,
-    /// and feature_idx is in [0, n_features). Repeat the flag for each
-    /// transformed feature; features not listed default to `identity`.
+    /// is `<token>:<feature_idx>[:<params>]` where:
+    ///
+    /// - `<token>` is one of `identity`, `log`, `log1p`, `signed_log1p`,
+    ///   `signed_sqrt`, `signed_cbrt`, `clip_then_log1p`, `winsor_p99`,
+    ///   `quantile_bins`.
+    /// - `<feature_idx>` is in `[0, n_features)`.
+    /// - `<params>` (optional) is comma-separated f32 values; required
+    ///   for the parameterized variants:
+    ///   - `clip_then_log1p:<idx>:<epsilon>` — 1 param
+    ///   - `winsor_p99:<idx>:<p1>,<p99>` — 2 params
+    ///   - `quantile_bins:<idx>:<e0>,<e1>,...,<e_{N-1}>` — N edges
+    ///
+    /// Repeat the flag for each transformed feature; features not listed
+    /// default to `identity`.
     ///
     /// The trainer applies the transform to feature_rows in-place after
-    /// CSV load, then trains as usual. The bake emits
-    /// `zentrain.feature_transforms` metadata; zenpredict 0.2.0+ runtime
-    /// applies the same transform via `Predictor::predict_transformed`.
+    /// CSV load, then trains as usual. The bake emits both
+    /// `zentrain.feature_transforms` and (when any feature has params)
+    /// `zentrain.feature_transform_params` metadata; zenpredict 0.2.0+
+    /// runtime applies the same transform via
+    /// `Predictor::predict_transformed`.
     ///
-    /// Example: `--feature-transform signed_log1p:42 --feature-transform
-    /// signed_sqrt:103` applies signed_log1p to feature 42 and
-    /// signed_sqrt to feature 103, identity to all 226 other features.
+    /// Examples:
+    /// - `--feature-transform signed_log1p:42` — no params
+    /// - `--feature-transform winsor_p99:42:1.5,98.5` — clamp to [1.5, 98.5]
+    /// - `--feature-transform clip_then_log1p:42:0.001` — ε=0.001
     ///
     /// See V0_20 design doc:
     /// `benchmarks/v0_20_v0_21_design_2026-05-14.md`.
-    #[arg(long, value_name = "TOKEN:IDX")]
+    #[arg(long, value_name = "TOKEN:IDX[:PARAMS]")]
     feature_transform: Vec<String>,
 }
 
@@ -443,76 +456,167 @@ fn main() {
         std::process::exit(2);
     }
 
-    // V0_20 input-shaping: parse `--feature-transform TOKEN:IDX`
+    // V0_20 input-shaping: parse `--feature-transform TOKEN:IDX[:PARAMS]`
     // repeating flags into a per-feature transform list. Default
     // is all-Identity. Apply transforms to feature_rows in-place so
     // the trainer's scaler is fit to the post-transform distribution.
-    let feature_transforms: Option<Vec<zenpredict::FeatureTransform>> =
-        if args.feature_transform.is_empty() {
-            None
-        } else {
-            let mut transforms = vec![zenpredict::FeatureTransform::Identity; n_features];
-            for spec in &args.feature_transform {
-                let (token, idx_str) = spec.split_once(':').unwrap_or_else(|| {
-                    eprintln!(
-                        "--feature-transform expects TOKEN:IDX (got {spec:?})"
-                    );
-                    std::process::exit(2);
-                });
-                let idx: usize = idx_str.parse().unwrap_or_else(|_| {
-                    eprintln!("--feature-transform: bad idx {idx_str:?}");
-                    std::process::exit(2);
-                });
-                if idx >= n_features {
-                    eprintln!(
-                        "--feature-transform: idx {idx} >= n_features {n_features}"
-                    );
-                    std::process::exit(2);
-                }
-                let transform =
-                    zenpredict::FeatureTransform::from_token(token).unwrap_or_else(|_| {
+    //
+    // Parameterized variants (clip_then_log1p / winsor_p99 / quantile_bins)
+    // accept comma-separated f32 params after the third colon. Per-feature
+    // params accumulate in a parallel `Vec<Vec<f32>>`; an empty inner vec
+    // means "no params for this feature".
+    let (feature_transforms, feature_transform_params): (
+        Option<Vec<zenpredict::FeatureTransform>>,
+        Option<Vec<Vec<f32>>>,
+    ) = if args.feature_transform.is_empty() {
+        (None, None)
+    } else {
+        let mut transforms = vec![zenpredict::FeatureTransform::Identity; n_features];
+        let mut params: Vec<Vec<f32>> = vec![Vec::new(); n_features];
+        for spec in &args.feature_transform {
+            // splitn(3) — allow PARAMS to contain ':' if needed
+            // (we don't currently support that, but splitn(3) keeps
+            // the door open and isolates the token + idx cleanly).
+            let parts: Vec<&str> = spec.splitn(3, ':').collect();
+            if parts.len() < 2 {
+                eprintln!("--feature-transform expects TOKEN:IDX[:PARAMS] (got {spec:?})");
+                std::process::exit(2);
+            }
+            let token = parts[0];
+            let idx_str = parts[1];
+            let params_str = parts.get(2).copied().unwrap_or("");
+            let idx: usize = idx_str.parse().unwrap_or_else(|_| {
+                eprintln!("--feature-transform: bad idx {idx_str:?}");
+                std::process::exit(2);
+            });
+            if idx >= n_features {
+                eprintln!("--feature-transform: idx {idx} >= n_features {n_features}");
+                std::process::exit(2);
+            }
+            let transform = zenpredict::FeatureTransform::from_token(token).unwrap_or_else(|_| {
+                eprintln!(
+                    "--feature-transform: unknown token {token:?} (valid: \
+                     identity, log, log1p, signed_log1p, signed_sqrt, \
+                     signed_cbrt, clip_then_log1p, winsor_p99, quantile_bins)"
+                );
+                std::process::exit(2);
+            });
+            if transforms[idx] != zenpredict::FeatureTransform::Identity
+                && transforms[idx] != transform
+            {
+                eprintln!(
+                    "--feature-transform: feature {idx} already set to {:?}, \
+                     can't override with {transform:?}",
+                    transforms[idx]
+                );
+                std::process::exit(2);
+            }
+            let parsed_params: Vec<f32> = if params_str.is_empty() {
+                Vec::new()
+            } else {
+                params_str
+                    .split(',')
+                    .map(|s| {
+                        s.trim().parse::<f32>().unwrap_or_else(|_| {
+                            eprintln!("--feature-transform: bad param {s:?} in {spec:?}");
+                            std::process::exit(2);
+                        })
+                    })
+                    .collect()
+            };
+            // Validate param count matches variant expectation
+            match transform {
+                zenpredict::FeatureTransform::ClipThenLog1p => {
+                    if !parsed_params.is_empty() && parsed_params.len() != 1 {
                         eprintln!(
-                            "--feature-transform: unknown token {token:?} (valid: \
-                             identity, log, log1p, signed_log1p, signed_sqrt, \
-                             signed_cbrt)"
+                            "--feature-transform clip_then_log1p:{idx}: expected 1 param (epsilon), got {}",
+                            parsed_params.len()
                         );
                         std::process::exit(2);
-                    });
-                if transforms[idx] != zenpredict::FeatureTransform::Identity
-                    && transforms[idx] != transform
-                {
-                    eprintln!(
-                        "--feature-transform: feature {idx} already set to {:?}, \
-                         can't override with {transform:?}",
-                        transforms[idx]
-                    );
-                    std::process::exit(2);
+                    }
                 }
-                transforms[idx] = transform;
-            }
-            // Apply per-feature transforms in-place across every group's
-            // feature_rows. The trainer's scaler sees the transformed
-            // distribution and the bake's metadata records the list so
-            // the runtime applies the same transform before its scaler.
-            let summary = transforms
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| **t != zenpredict::FeatureTransform::Identity)
-                .map(|(i, t)| format!("f{i}={}", t.as_token()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            println!("feature_transforms: {summary}");
-            for g in &mut loaded {
-                for row in &mut g.feature_rows {
-                    for (i, t) in transforms.iter().enumerate() {
-                        if *t != zenpredict::FeatureTransform::Identity {
-                            row[i] = t.apply(row[i] as f32) as f64;
+                zenpredict::FeatureTransform::WinsorP99 => {
+                    if !parsed_params.is_empty() && parsed_params.len() != 2 {
+                        eprintln!(
+                            "--feature-transform winsor_p99:{idx}: expected 2 params (p1, p99), got {}",
+                            parsed_params.len()
+                        );
+                        std::process::exit(2);
+                    }
+                    if parsed_params.len() == 2 && parsed_params[0] > parsed_params[1] {
+                        eprintln!(
+                            "--feature-transform winsor_p99:{idx}: p1={} > p99={}; pass them in (low, high) order",
+                            parsed_params[0], parsed_params[1]
+                        );
+                        std::process::exit(2);
+                    }
+                }
+                zenpredict::FeatureTransform::QuantileBins => {
+                    if parsed_params.len() < 2 && !parsed_params.is_empty() {
+                        eprintln!(
+                            "--feature-transform quantile_bins:{idx}: need at least 2 edges (got {})",
+                            parsed_params.len()
+                        );
+                        std::process::exit(2);
+                    }
+                    // Validate edges sorted ascending
+                    for w in parsed_params.windows(2) {
+                        if w[0] > w[1] {
+                            eprintln!(
+                                "--feature-transform quantile_bins:{idx}: edges not sorted ascending"
+                            );
+                            std::process::exit(2);
                         }
                     }
                 }
+                _ => {
+                    // Non-parameterized variants ignore params; warn if any provided
+                    if !parsed_params.is_empty() {
+                        eprintln!(
+                            "warning: --feature-transform {token}:{idx} ignores params {parsed_params:?} \
+                             (this variant doesn't consume any)"
+                        );
+                    }
+                }
             }
-            Some(transforms)
-        };
+            transforms[idx] = transform;
+            params[idx] = parsed_params;
+        }
+        // Apply per-feature transforms in-place across every group's
+        // feature_rows. The trainer's scaler sees the transformed
+        // distribution and the bake's metadata records the list so
+        // the runtime applies the same transform before its scaler.
+        let summary = transforms
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| **t != zenpredict::FeatureTransform::Identity)
+            .map(|(i, t)| {
+                if params[i].is_empty() {
+                    format!("f{i}={}", t.as_token())
+                } else {
+                    let pstr = params[i]
+                        .iter()
+                        .map(|v| format!("{v}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("f{i}={}({pstr})", t.as_token())
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("feature_transforms: {summary}");
+        for g in &mut loaded {
+            for row in &mut g.feature_rows {
+                for (i, t) in transforms.iter().enumerate() {
+                    if *t != zenpredict::FeatureTransform::Identity {
+                        row[i] = t.apply_with_params(row[i] as f32, &params[i]) as f64;
+                    }
+                }
+            }
+        }
+        let any_params = params.iter().any(|p| !p.is_empty());
+        (Some(transforms), if any_params { Some(params) } else { None })
+    };
 
     // Build TrainingGroups (borrows feature rows from `loaded`).
     let feat_refs: Vec<Vec<&[f64]>> = loaded
@@ -557,6 +661,7 @@ fn main() {
         high_q_boost: args.high_q_boost,
         out_dtype,
         feature_transforms: feature_transforms.clone(),
+        feature_transform_params: feature_transform_params.clone(),
     };
 
     println!(

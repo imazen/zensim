@@ -111,6 +111,15 @@ pub struct MlpHyperparams {
     /// the trainer receives). An all-`Identity` vector emits no
     /// metadata (consumers treat absence as all-identity).
     pub feature_transforms: Option<Vec<FeatureTransform>>,
+
+    /// V0_20 parameterized feature-transform params (added 2026-05-15).
+    /// Parallel to `feature_transforms`; each inner `Vec<f32>` is the
+    /// param list for that feature (empty for non-parameterized
+    /// variants). When `Some(_)` AND any inner vec is non-empty,
+    /// `zentrain.feature_transform_params` metadata is emitted in the
+    /// bake. The runtime reads it via `Model::feature_transform_params()`
+    /// and applies via `FeatureTransform::apply_with_params`.
+    pub feature_transform_params: Option<Vec<Vec<f32>>>,
 }
 
 impl Default for MlpHyperparams {
@@ -131,6 +140,7 @@ impl Default for MlpHyperparams {
             high_q_boost: 1.0,
             out_dtype: WeightDtype::F32,
             feature_transforms: None,
+            feature_transform_params: None,
         }
     }
 }
@@ -740,6 +750,7 @@ pub fn train_mlp_with_tv(
                     n_outputs,
                     hyperparams.out_dtype,
                     hyperparams.feature_transforms.as_deref(),
+                    hyperparams.feature_transform_params.as_deref(),
                 ));
             } else {
                 stale_epochs += hyperparams.log_every;
@@ -775,6 +786,7 @@ pub fn train_mlp_with_tv(
             n_outputs,
             hyperparams.out_dtype,
             hyperparams.feature_transforms.as_deref(),
+            hyperparams.feature_transform_params.as_deref(),
         )
     })
 }
@@ -799,6 +811,7 @@ pub fn bake_two_layer_znpr_v2(
     n_outputs: usize,
     dtype: WeightDtype,
     feature_transforms: Option<&[FeatureTransform]>,
+    feature_transform_params: Option<&[Vec<f32>]>,
 ) -> Vec<u8> {
     let scaler_mean_f32: Vec<f32> = scaler_mean.iter().map(|&v| v as f32).collect();
     let scaler_scale_f32: Vec<f32> = scaler_scale.iter().map(|&v| v as f32).collect();
@@ -846,14 +859,50 @@ pub fn bake_two_layer_znpr_v2(
             )
         }
     });
-    let metadata: Vec<BakeMetadataEntry<'_>> = match &transforms_blob {
-        Some(blob) => vec![BakeMetadataEntry {
+    // Feature-transform-params metadata (V0_20 parameterized variants).
+    // Newline-separated per feature; each line is comma-separated f32
+    // (empty for non-parameterized features). Omitted when no feature
+    // carries params.
+    let params_blob: Option<String> = feature_transform_params.and_then(|params| {
+        if params.iter().all(|p| p.is_empty()) {
+            None
+        } else {
+            assert_eq!(
+                params.len(),
+                n_inputs,
+                "feature_transform_params.len()={} must equal n_inputs={}",
+                params.len(),
+                n_inputs
+            );
+            Some(
+                params
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|v| format!("{v}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        }
+    });
+    let mut metadata: Vec<BakeMetadataEntry<'_>> = Vec::new();
+    if let Some(blob) = &transforms_blob {
+        metadata.push(BakeMetadataEntry {
             key: zenpredict::keys::FEATURE_TRANSFORMS,
             kind: zenpredict::MetadataType::Utf8,
             value: blob.as_bytes(),
-        }],
-        None => Vec::new(),
-    };
+        });
+    }
+    if let Some(blob) = &params_blob {
+        metadata.push(BakeMetadataEntry {
+            key: zenpredict::keys::FEATURE_TRANSFORM_PARAMS,
+            kind: zenpredict::MetadataType::Utf8,
+            value: blob.as_bytes(),
+        });
+    }
     bake(&BakeRequest {
         schema_hash: 0,
         flags: 0,
