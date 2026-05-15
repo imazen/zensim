@@ -254,8 +254,17 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 ///   0.8934 is therefore NOT inflated. V0_19 archived at
 ///   `zensim/weights/archive/v0_19_overcleaned_2026-05-14.bin` for
 ///   reference.)
+///
+/// **2026-05-14 ship-form swap (this commit)**: the shipped bytes are
+/// the zerobiased + LZ4-compressed variant of V_18 at 17,940 bytes
+/// (down from the raw 93,064 bytes — a 5.2× reduction). Per-pair
+/// outputs are score-equivalent to the raw bake (CID22 SROCC 0.8933
+/// reproduces exactly across 4292 pairs). zenpredict 0.2.0+ ships
+/// LZ4 decompression unconditionally so no consumer-facing feature
+/// flag is needed. The raw 93 KB variant lives at
+/// `zensim/weights/v0_18_2026-05-13.bin` for reproduction reference.
 pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
-    include_bytes!("../weights/v0_18_2026-05-13.bin")
+    include_bytes!("../weights/v0_18_zerobiased_lz4_2026-05-13.bin")
 }
 
 static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
