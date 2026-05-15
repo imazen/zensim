@@ -333,13 +333,40 @@ Legacy 4-band CID22 cuts (B0<50 / B1 50-65 / B2 65-90 / B3 ≥90)
 are reported alongside the 10-band grid in every eval that touches
 the CID22 corpus, since the 2023 paper's Tables 3-6 use them.
 
-For each (model, dataset) eval the harness MUST emit:
-1. **Per-band SROCC** (Spearman within each of the 10 bands)
-2. **Per-band MAE** (mean absolute prediction error, score units)
-3. **Per-band non-monotonic q-step rate** (adjacent-q reversals
-   within each curve, segmented by lower-q band)
-4. **Per-band sample count (n)** — flag any band with n < 30 as
-   "noisy estimate"
+For each (model, dataset) eval the harness MUST emit the **same
+full statistical-rigor panel per band** as the aggregate (per the
+"Statistical rigor" section above): SROCC, PLCC, KROCC, OR, PWRC,
+Z-RMSE, plus per-band MAE, non-mono q-step rate, and n. SROCC alone
+per band is **NOT** sufficient and produces misleading rankings —
+especially at low n where the SROCC CI exceeds 0.3.
+
+For each (model, dataset) eval the harness MUST emit per band:
+1. **SROCC** (Spearman rank, with 95% bootstrap CI)
+2. **PLCC** (Pearson on calibrated outputs)
+3. **KROCC** (Kendall-τ)
+4. **OR** (outlier ratio — predictions outside ±2σ of subjective)
+5. **PWRC** (Pearson-weighted rank correlation, Mohammadi 2025)
+6. **Z-RMSE** (σ-normalized RMSE; per-stimulus σ on AIC-3/AIC-4/CID22
+   where bootstrap σ is available, corpus-wide σ elsewhere)
+7. **MAE** (mean absolute prediction error in score units)
+8. **Non-monotonic q-step rate** (adjacent-q reversals within each
+   curve, segmented by lower-q band)
+9. **n** (sample count) — flag bands with n < 30 as "noisy
+   estimate" (CI widths exceed ±0.3 SROCC; rankings between bakes
+   are not statistically distinguishable at this n)
+
+**Why the full panel per band, not SROCC-only**: SROCC is
+calibration-invariant and bounded [-1, 1]. PWRC + Z-RMSE capture
+different failure modes — PWRC weights important pairs higher,
+Z-RMSE measures absolute σ-normalized error. A bake can win SROCC
+on a band while losing Z-RMSE (badly miscalibrated to scale) or
+losing PWRC (wins on tied/duplicate pairs that don't matter). The
+joint pattern is the real signal.
+
+**Current gap**: `dataset_metric_baseline` emits the full panel at
+the aggregate but only SROCC + CI per band. Extending per-band
+emission to the full panel is a queued fix (~3 hr) — DO this before
+the next ship-grade comparison.
 
 **Why 10 not 4**: aggregate SROCC hides band-specific failures.
 4 bands hide them less, but still merge product-distinct regions
@@ -361,6 +388,173 @@ are pipeline-health checks, not release gates.
 <https://imazen.github.io/zensim/> MUST render the 10-band table
 alongside the legacy 4-band table for every (corpus, X, Y)
 selection.
+
+## V_20 input-shaping + multi-bake runtime — learnings (added 2026-05-15)
+
+After running V_20 input-shaping (feature transforms applied
+pre-scaler), V_20b distortion manifold (Su 2023 contrastive
+pre-train), D1 (3-way concat with transforms), D2 (V_18 + V_20 IS
+runtime ensemble), and D3 (tighter transform subset) — these
+learnings shape future V_X experiments. Read before designing new
+training experiments or ship candidates.
+
+### Pearson screen is necessary, not sufficient
+
+The greedy correlation screen at
+`scripts/v_next/v0_20_feature_transform_greedy_screen.py` finds
+features where |Pearson(transform(feat), MOS)| beats Identity by
+some threshold. The screen reliably filters which features WORTH
+RUNNING MLP variants on (cuts ~1600 brute-force cells to ~100). But
+**Pearson lift on raw features does NOT guarantee MLP-training
+SROCC lift**. The MLP already does non-linear absorption of feature
+non-linearities; the transform's benefit is at the standardize
+step, not the MLP's expressivity. Train + eval to confirm.
+
+### Training-safety gates on the screen (mandatory)
+
+`log` requires `min(feat) > 0`; `log1p` requires `min(feat) > -1`.
+Without these gates the screen accepts transforms that produce NaN
+on real training data (the screen drops NaN rows in Pearson, but
+the trainer doesn't drop bad rows — NaN cascades to standardize +
+gradient → NaN loss at epoch 0). Already wired into the screen
+script; preserve when adding new transforms.
+
+### V_20 input-shaping is a B3 specialist, not an aggregate win
+
+V_20 IS single-MLP closes CID22 B3 [30, 40) gap by **+0.129 SROCC**
+(0.0246 → 0.1534, also passing fast-ssim2's 0.1335 floor) but
+**costs −0.014 CID22 aggregate** (B4–B8 each lose 0.02–0.06). Same
+shape as V_20a multi-output. The mid-band regression is intrinsic
+to the feature shaping, not removable by ensemble averaging.
+
+For a clean ship: pair V_20 IS with V_18 ship via the multi-bake
+runtime (PreviewV0_4). **D2 α=0.4 raw-space ≡ α=0.7 z-norm** —
+delivers +0.080 CID22 B3 lift at −0.008 aggregate. **But** the
+hard `score.clamp(0.0, 100.0)` in `apply_mlp_scoring` flattens
+V_20+ predictions on heavy-distortion images (TID B0/B1 → score=0
+ties → SROCC=0). Fix when you have time: soft saturation or
+per-bake recalibration so V_20 IS raw stays in [0, 100].
+
+### V_20b distortion manifold — falsified for CID22 priority
+
+Su 2023's contrastive pre-train + fine-tune approach **wins every
+metric on KADID + TID** (SROCC +0.023 / +0.027, Z-RMSE 23–31%
+reduction) — the mechanism IS learning useful structure on
+training-side data. But **loses every metric on held-out CID22**
+(SROCC −0.027, B3 [30, 40) no lift). This is the FRIQUEE 2017
+caveat materializing: synth pre-train → authentic-distortion
+transfer fails. Do NOT pursue further Su-2023-style mechanisms on
+the synth corpus without first solving the CID22-transfer problem
+(e.g., adding CID22-train-fold to fine-tune phase, domain
+adaptation, ...).
+
+### D3 tighter transforms — falsified vs V_20 IS
+
+Cutting the transform set from 98 (lift ≥ 0.05) to 60 (lift ≥ 0.10)
+gave back HALF the B3 lift (+0.055 vs +0.129) WITHOUT recovering
+the mid-band cost. The "borderline" 0.05–0.10 lift transforms ARE
+driving most of the B3 gain. Don't trim aggressively on the lift
+threshold — let the trainer absorb the noise.
+
+### D1 3-way concat ≈ V_20 IS single MLP
+
+Training cycle-14 TV-regularized components with V_20 transforms +
+concat at V_18's 0.65/0.30/0.05 mix gave SAME CID22 SROCC (0.8794)
+as single-MLP V_20 IS. The 3-way concat does NOT stabilize the
+mid-band regression. Don't run the full concat recipe just because
+V_18 ship used it — the value-add depends on TV's effect on
+specific bands, which input-shaping bypasses.
+
+### Multi-bake runtime — when to use
+
+**Use PreviewV0_4 (V_18 ship + V_20 IS @ α=0.4)** when you need
+CID22 B3 lift and can tolerate −0.008 aggregate. The Zensim::compute
+runtime forwards both bakes (V_18 via plain `predict`, V_20 IS via
+`predict_transformed`) and mixes RAW outputs linearly before
+clamp. Cost: ~2× forward pass time per call vs PreviewV0_3.
+
+**Do NOT use** for very-low-quality input regimes (TID-style B0/B1)
+until the runtime clamp issue is fixed — current implementation
+degenerates SROCC there.
+
+### Bake-metadata propagation across derived bakes (CRITICAL)
+
+**Every tool that produces a derived ZNPR v3 bake from input bakes
+MUST propagate `zentrain.feature_transforms` and
+`zentrain.feature_transform_params` metadata**, or runtime
+predictions will silently degrade (raw features fed into a network
+trained on transformed features → wrong predictions, possibly
+NaN). Caught and fixed in `concat_three_way` (commit `6ad46950`)
+after D1 first eval showed catastrophic regression (CID22 0.5700
+vs V_18 base 0.8880).
+
+Tools that touch bake bytes MUST be audited for this:
+- `concat_three_way` ✓ (fixed 2026-05-15)
+- `affine_calibrate` — preserves metadata via byte-rewrite of final
+  layer only; ✓ by construction
+- `quant_compare` — converts F32 → I8; ⚠ verify metadata
+  preservation before any future use
+- Any future `bake_optimized` / `zerobias_rebake` consumer in this
+  repo — ⚠ verify
+
+### Runtime forward path MUST dispatch to `predict_transformed`
+
+Both `dataset_metric_baseline`, `ensemble_mix`, and zensim's own
+`apply_mlp_scoring` were originally calling `Predictor::predict`
+unconditionally. For V_20+ bakes with feature_transforms metadata,
+this feeds raw features into a transform-expecting network and
+produces garbage (often NaN). All three are fixed; new tools that
+forward bake bytes through Predictor MUST check
+`model.has_nontrivial_feature_transforms()` and dispatch to
+`predict_transformed` when true.
+
+### Affine-calibration policy (don't double-apply)
+
+V_18 ship's affine α=28.0366, β=−5.0738 is a **distance→score**
+transform (β is negative because raw is distance). Bakes whose raw
+output is already approximately score-shaped (e.g., V_20 IS,
+trained directly against MOS targets) DO NOT need this affine.
+Applying it inverts and shifts predictions away from [0, 100]; the
+`score.clamp(0, 100)` then flattens many predictions to 0 →
+degenerate ranking.
+
+Per-bake calibration check: if the trainer's loss was RankNet on
+distance, apply V_18's affine. If the trainer's loss was MSE on
+MOS (or similar score-shaped target), the bake is already
+calibrated — no affine needed.
+
+### Soft-clamp the multi-bake output (TODO)
+
+The current `score.clamp(0.0, 100.0)` at the end of
+`apply_mlp_scoring` is a hard boundary. When the multi-bake mix
+goes below 0 or above 100 (V_20+ bakes extrapolating outside their
+training distribution), the clamp creates ties → SROCC=0 on
+affected bands. Replace with a soft saturation
+(e.g., `100 / (1 + exp(-(raw - 50) / 10))`) or per-bake
+recalibration so raw outputs stay within [0, 100].
+
+## JSON pipeline mandate for ZNPR v3 bakes (2026-05-15)
+
+**Ad-hoc Python emitters for ZNPR v3 wire format are BANNED.** All
+new bake-side serialization goes through the
+`zenpredict-bake <input.json> <output.bin>` CLI (binary at
+`~/work/zen/zenanalyze/target/release/zenpredict-bake` after a
+`cargo build --release -p zenpredict-bake`).
+
+The JSON format is documented in `zenpredict-bake/src/json.rs`:
+`BakeRequestJson` with fields `schema_hash, flags, scaler_mean,
+scaler_scale, layers[], feature_bounds[], metadata[],
+output_specs[], sparse_overrides[]`. Per-bake metadata entries
+declare `key: String, type: utf8/bytes/numeric, value: ...`.
+
+Use `scripts/v_next/v0_20b/bake_znpr_v3.py` as a template — emits
+JSON, shells to `zenpredict-bake`, exits.
+
+**Why**: the wire format is small but easy to get wrong (alignment,
+section ordering, header layout). zenpredict-bake is the canonical
+serializer; trusting it keeps wire-format invariants in one place.
+Ad-hoc emitters drift, get out of sync with v3.x extensions, and
+ship wrong-shape bakes that load but score garbage.
 
 ## Interactive comparison site (CRUCIAL GOAL, locked 2026-05-12)
 
