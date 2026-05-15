@@ -51,6 +51,40 @@ artifact-saturated reference-quality images).
 This is **the gap V0_20b distortion-manifold pre-training should
 close**.
 
+## AIC-3 per-codec breakdown (n=50 per codec)
+
+Surfaces which codecs V_18 handles well vs poorly:
+
+| Codec | n | V_18 SROCC | V_2 SROCC | fast-ssim2 SROCC | Δ vs ssim2 | V_18 AT-1-JND median |
+|---|---:|---:|---:|---:|---:|---:|
+| AVIF       | 50 | 0.9500 | 0.9398 | 0.9358 | +0.014 | 75.93 |
+| JPEG-1     | 50 | 0.9536 | 0.9518 | **0.9629** | **−0.009** ⚠ | 72.93 |
+| JPEG-2000  | 50 | **0.9147** ⚠ | 0.8949 | 0.9023 | +0.012 | 77.62 |
+| JPEGXL     | 50 | **0.9833** ✓ | 0.9831 | 0.9663 | +0.017 | 71.80 |
+| VVC        | 50 | 0.9201 | 0.9231 | 0.8945 | +0.026 | 76.88 |
+| **OVERALL** | 250 | **0.9149** | 0.8968 | 0.8943 | +0.021 | 73.92 |
+
+**Findings**:
+- **V_18 beats fast-ssim2 on 4 of 5 codecs.** The exception is
+  legacy **JPEG-1** where V_18 underperforms by 0.009 SROCC. This
+  is consistent with V_18's known CID22 weakness on the low-quality
+  legacy-JPEG band.
+- **Weakest absolute SROCC: JPEG-2000 (0.9147) and VVC (0.9201).**
+  Both lifted vs ssim2 but lowest overall. These are also the
+  codecs farthest from the synthetic training distribution
+  (zenjpeg / WebP / JXL dominated training).
+- **Strongest: JPEGXL (0.9833).** Consistent with JXL being heavily
+  represented in the V_18 training corpus.
+- **AT-1-JND landing varies 71.80–77.62 across codecs** (5.82-point
+  spread). The V_18 dial is **not fully codec-agnostic at JND** —
+  same subjective "just noticeable" lands at different V_X scores
+  depending on which codec produced the distortion. Codec-specific
+  calibration is a V0_20d Option-C variant worth considering.
+
+The +0.026 lift on VVC and +0.021 overall vs ssim2 on a held-out
+corpus that V_18 has never seen during training is honest
+generalization signal.
+
 ## Per-corpus per-band performance vs fast-ssim2
 
 KADID and TID are auxiliary integrity corpora (not compression-tuned
