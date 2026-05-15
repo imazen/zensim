@@ -742,7 +742,15 @@ fn process_konjnd_pair(
         } else {
             let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
             let mut p = Predictor::new(&model);
-            p.predict(&f32_features).ok()?[0] as f64
+            // V_20+ bakes carry feature_transforms metadata; use the
+            // transform-aware path. zenpredict's predict_transformed
+            // is a zero-cost no-op when the bake has no transforms,
+            // so this is safe for V_18 (no transforms) too.
+            if model.has_nontrivial_feature_transforms() {
+                p.predict_transformed(&f32_features).ok()?[0] as f64
+            } else {
+                p.predict(&f32_features).ok()?[0] as f64
+            }
         }
     } else {
         f64::NAN
@@ -924,7 +932,11 @@ fn process_pair(
         } else {
             let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
             let mut p = Predictor::new(&model);
-            p.predict(&f32_features).ok()?[0] as f64
+            if model.has_nontrivial_feature_transforms() {
+                p.predict_transformed(&f32_features).ok()?[0] as f64
+            } else {
+                p.predict(&f32_features).ok()?[0] as f64
+            }
         }
     } else {
         f64::NAN

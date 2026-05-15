@@ -82,15 +82,80 @@ V_18 base_seed1 is the apples-to-apples comparison for a single
 ≥ 0.005 with no >0.005 KADID/TID regression, that's evidence the
 mechanism transfers and warrants a full 3-way concat sweep.
 
-## Results
+## Results (2026-05-15, single-MLP seed=1)
 
-_(Pending — training in flight as of 2026-05-15)_
-
-| Bake | KADID | TID | CID22 | CID22 B3 [30,40) | n |
+| Bake | KADID | TID | CID22 (agg) | CID22 B3 [30,40) | n training |
 |---|---:|---:|---:|---:|---:|
-| V_18 ship | 0.9427 | 0.9526 | 0.8933 | 0.0246 | (ref) |
-| V_18 base_seed1 | 0.9326 (est) | 0.9521 (est) | 0.8880 | (TBD) | (ref) |
-| V_20 input-shaping seed1 | TBD | TBD | TBD | TBD | 138872+10125+3000+76104 |
+| V_18 ship (3-way concat) | 0.9427 | 0.9526 | **0.8933** | 0.0246 | (ref) |
+| **V_20 input-shaping seed=1** | **0.9497** | **0.9616** | 0.8794 | **0.1534** | 138872+10125+3000+76104 |
+| Δ vs V_18 ship | **+0.007** ✓ | **+0.009** ✓ | **−0.014** ✗ | **+0.129** ✓ | |
+
+### CID22 per-band breakdown (the why-aggregate-dropped story)
+
+| 10-band | n | V_18 ship | V_20 IS | Δ |
+|---|---:|---:|---:|---:|
+| **B3 [30, 40)** | **57** | **0.0246** | **0.1534** | **+0.129** ✓ closes the V_18 weakness vs fast-ssim2 |
+| B4 [40, 50) | 266 | 0.3029 | 0.2717 | −0.031 |
+| B5 [50, 60) | 615 | 0.3891 | 0.3344 | −0.055 |
+| B6 [60, 70) | 836 | 0.3943 | 0.3930 | −0.001 |
+| B7 [70, 80) | 1092 | 0.3936 | 0.3692 | −0.024 |
+| B8 [80, 90) | 1382 | 0.5127 | 0.4938 | −0.019 |
+| B9 [90, 100) | 43 | 0.1545 | 0.1146 | −0.040 |
+
+### Interpretation
+
+**V_20 input-shaping is a real lift on the V_18 weakness** — CID22 B3
+[30, 40) closes by +0.129 (from below fast-ssim2 to above it). The
+training-side mechanism transfers: every per-band metric on KADID
+and TID improves materially. The 98 winsor_p99 + 43 clip_then_log1p
++ 26 signed_cbrt + 16 quantile_bins + 35 signed_sqrt transforms
+applied per the greedy screen DO help the MLP train better.
+
+**But the broader CID22 trade is wrong-direction.** B4–B8 (4191 of
+4292 pairs, vs B3's 57) lose 0.02–0.06 SROCC each. The aggregate
+drops because the win on the small-n B3 doesn't compensate for the
+many-small-losses on the larger bands.
+
+This is **same shape as V_20a multi-output**: lift the priority weak
+band at the cost of a broader regression. Different mechanism, same
+trade structure.
+
+### Per-band MAE story
+
+The MAE column reveals an additional issue: V_20 IS has CID22 MAE
+in the 28-63 range — much higher than V_18's typical 8-77 range
+(per the V_18 reference card). The model's output scale is OFF
+because the affine calibration step wasn't applied (V_18 ship is
+calibrated with α=28.0366, β=-5.0738). V_20 IS bake is raw.
+
+The SROCC numbers above are calibration-invariant, so they reflect
+the underlying ranking ability. The MAE column would equalize with
+proper affine calibration. This isn't a real concern for SROCC
+comparison.
+
+## Decision
+
+Single-MLP V_20 IS does NOT cleanly beat V_18 ship on CID22
+aggregate. Three paths forward (ranked):
+
+1. **Full 3-way concat with transforms** (~1 day compute): train the
+   cycle-14 seed=1 and seed=42 TV-regularized components also with
+   the V_20 transforms, concat with V_18's 0.65/0.30/0.05 mix.
+   Hypothesis: the ensemble averaging stabilizes B4-B8 regression
+   while preserving B3 lift. If this clears CID22 ≥ 0.8933 AND
+   B3 ≥ 0.13, it's a SHIP candidate.
+
+2. **Less aggressive transform set** (~few hours): re-run with
+   lift threshold raised from 0.05 to 0.10 → 98 → 50 features.
+   Hypothesis: most of the B3 lift comes from a smaller subset of
+   transforms; fewer = less drift on B4-B8.
+
+3. **Falsify + pivot to V_20b** (~half hour to document): conclude
+   that single-MLP V_20 IS is the wrong-direction trade for
+   aggregate ship, document the +0.129 B3 finding as a valuable
+   data point, and move effort to V_20b distortion manifold
+   pre-training (where the encoder is trained on unlabeled signal
+   and may not have the same B4-B8 regression).
 
 ## Acceptance gate
 
