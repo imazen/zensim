@@ -67,6 +67,27 @@ pub struct IwWeightConfig {
     /// when the reference is locally constant. Default: 1e-3 of the
     /// dynamic range.
     pub weight_floor: f32,
+    /// When `Some(sigma_e_sq)`, apply Wang & Li 2011's information-
+    /// content transform on the raw estimator output:
+    ///
+    ///   `w(x) ← log₂(1.0 + w_raw(x) / sigma_e_sq)`
+    ///
+    /// This is the paper's exact weight formula — `w_raw(x)` plays the
+    /// role of the GSM scale parameter σ²_p(x), and `sigma_e_sq` is
+    /// the noise-floor variance σ²_e. The log saturates high-variance
+    /// regions instead of letting them dominate proportional to σ².
+    ///
+    /// `None` (default for back-compat with V_20a sweep) keeps the raw
+    /// estimator output as the weight — variance / gradient magnitude
+    /// directly. The default exists so existing experiments stay
+    /// reproducible; new work should set `info_log_sigma_e_sq` for
+    /// paper-faithful behavior.
+    ///
+    /// Added 2026-05-15 after the V_20a IW-SSIM falsification revealed
+    /// our implementation diverged from the paper's `log(1 + σ²_p/σ²_e)`
+    /// weight formula. See `benchmarks/extended_iw_runtime_perf_2026-05-15.md`
+    /// and the IW-paper-faithfulness analysis in the same message.
+    pub info_log_sigma_e_sq: Option<f32>,
 }
 
 impl Default for IwWeightConfig {
@@ -75,6 +96,7 @@ impl Default for IwWeightConfig {
             kind: IwWeightKind::LocalVariance,
             kernel_half: 2,
             weight_floor: 1.0e-3,
+            info_log_sigma_e_sq: None,
         }
     }
 }
@@ -115,6 +137,17 @@ pub fn compute_iw_weights(
         }
         IwWeightKind::LocalGradL2 => {
             compute_gradient(ref_plane, width, height, stride, GradNorm::L2, &mut weights);
+        }
+    }
+
+    // Paper-faithful info-content transform: apply log₂(1 + w / σ²_e)
+    // when configured. Must happen BEFORE the weight floor — the floor
+    // is a numerical guard, the log is the perceptual one.
+    if let Some(sigma_e_sq) = config.info_log_sigma_e_sq {
+        let inv_sigma = 1.0_f32 / sigma_e_sq.max(1e-12);
+        for w in &mut weights {
+            // log₂(1 + w/σ²_e) — non-negative for non-negative w, ≈ w/σ²_e/ln2 for small w.
+            *w = (1.0_f32 + (*w) * inv_sigma).log2();
         }
     }
 
@@ -476,6 +509,7 @@ mod tests {
             kind: IwWeightKind::LocalVariance,
             kernel_half: 1,
             weight_floor: 0.01,
+            info_log_sigma_e_sq: None,
         };
         let w = compute_iw_weights(&plane, 4, 4, 4, config);
         let max_w = w.iter().copied().fold(0.0f32, f32::max);
@@ -486,5 +520,48 @@ mod tests {
             min_w >= 0.01 * max_w - 1e-6,
             "min {min_w} should be at least 0.01·max {max_w}"
         );
+    }
+
+    /// With `info_log_sigma_e_sq: Some(σ²_e)`, weights become
+    /// `log₂(1 + σ²_p / σ²_e)`. Verify the saturation curve:
+    /// a peak with 100× the variance of the floor produces weight ≈
+    /// `log₂(101) ≈ 6.66`, NOT 100× the floor's weight.
+    #[test]
+    fn info_log_transform_saturates_high_variance() {
+        // Pure peak at center, 0 elsewhere → variance is concentrated
+        // at the center pixel.
+        let plane = vec![
+            0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        let raw_cfg = IwWeightConfig {
+            kind: IwWeightKind::LocalVariance,
+            kernel_half: 1,
+            weight_floor: 0.0,
+            info_log_sigma_e_sq: None,
+        };
+        let log_cfg = IwWeightConfig {
+            info_log_sigma_e_sq: Some(1.0),
+            weight_floor: 0.0,
+            ..raw_cfg
+        };
+        let raw_w = compute_iw_weights(&plane, 4, 4, 4, raw_cfg);
+        let log_w = compute_iw_weights(&plane, 4, 4, 4, log_cfg);
+        let raw_max = raw_w.iter().copied().fold(0.0f32, f32::max);
+        let log_max = log_w.iter().copied().fold(0.0f32, f32::max);
+        // Raw variance can be huge (depends on σ²_p in the window).
+        // Log-transformed must be log₂(1 + raw_max / 1.0) — for a
+        // raw_max > 1, log_max strictly < raw_max.
+        if raw_max > 2.0 {
+            assert!(
+                log_max < raw_max,
+                "log transform should reduce {raw_max} (got log_max={log_max})"
+            );
+            // And specifically: log_max == log₂(1 + raw_max)
+            let expected = (1.0 + raw_max).log2();
+            assert!(
+                (log_max - expected).abs() < 1e-4,
+                "log_max {log_max} should equal log₂(1 + {raw_max}) = {expected}"
+            );
+        }
     }
 }
