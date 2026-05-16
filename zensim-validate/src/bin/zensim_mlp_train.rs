@@ -167,7 +167,7 @@ struct Args {
     /// TV-regularizer pair indices TSV. Two columns: lo_trainer_idx,
     /// hi_trainer_idx. Indices reference rows in the concatenated
     /// trainer-feature space (group 0 first, then group 1, etc.).
-    /// Penalty per pair: max(0, pred[hi] - pred[lo]).
+    /// Penalty per pair: `max(0, pred[hi] - pred[lo])`.
     #[arg(long)]
     tv_pairs_file: Option<PathBuf>,
 

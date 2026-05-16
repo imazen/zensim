@@ -109,7 +109,8 @@ impl core::fmt::Display for ZensimProfile {
 #[non_exhaustive]
 pub struct ProfileParams {
     /// Scoring weights (one per feature, length = `FEATURES_PER_SCALE * num_scales`).
-    /// Empty `&[]` for MLP-scored profiles — see [`mlp_bytes`](Self::mlp_bytes).
+    /// Empty `&[]` for MLP-scored profiles (the bake bytes live in a
+    /// crate-private `mlp_bytes` field accessed via the profile API).
     pub weights: &'static [f64],
     /// Box blur radius at scale 0 (kernel width = `2 * radius + 1`).
     pub blur_radius: usize,
@@ -118,11 +119,11 @@ pub struct ProfileParams {
     /// Number of pyramid scales (typically 4).
     pub num_scales: usize,
     /// Score mapping coefficient A in `100 - A × d^B`. **Ignored when
-    /// [`skip_score_mapping`] is `true` (the bake is already
+    /// [`Self::skip_score_mapping`] is `true` (the bake is already
     /// MCOS-calibrated).**
     pub score_mapping_a: f64,
     /// Score mapping exponent B in `100 - A × d^B`. **Ignored when
-    /// [`skip_score_mapping`] is `true`.**
+    /// [`Self::skip_score_mapping`] is `true`.**
     pub score_mapping_b: f64,
     /// When `true`, the MLP bake's raw output is returned **directly**
     /// as the final score (no `100 − A·d^B` transform). This is correct

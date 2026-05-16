@@ -83,7 +83,7 @@ struct LoadedMlp {
     feature_transform_params: Option<Vec<Vec<f32>>>,
 }
 
-/// Returns (scaler_mean, scaler_scale, W0[n_in*128], b0[128], W1[128], b1[1])
+/// Returns `(scaler_mean, scaler_scale, W0[n_in*128], b0[128], W1[128], b1[1])`
 /// plus the bake's feature_transforms + per-feature params (for V_20+).
 fn load_single_mlp(path: &PathBuf) -> LoadedMlp {
     let bytes = fs::read(path).expect("read bake");

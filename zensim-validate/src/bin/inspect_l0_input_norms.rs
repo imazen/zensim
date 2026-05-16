@@ -15,7 +15,7 @@
 //!
 //! ## Usage
 //!
-//! ```
+//! ```sh
 //! cargo run --release -p zensim-validate --bin inspect_l0_input_norms -- \
 //!   --bake benchmarks/v0_20_extended_seed1_2026-05-15.bin \
 //!   [--top 20] [--regions]

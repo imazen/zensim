@@ -4,8 +4,9 @@
 //! Loss: RankNet pairwise (sigmoid cross-entropy on signed distance
 //! deltas). Optimizer: Adam with cosine annealing.
 //!
-//! Output: a v1 ZNPK byte stream that loads via
-//! [`zensim::mlp::Model::from_bytes`].
+//! Output: a ZNPR v3 byte stream that loads via
+//! `zensim::mlp::Model::from_bytes` (the `zensim::mlp` module re-exports
+//! `zenpredict::Model`).
 //!
 //! This is the runtime-side counterpart to zenpicker's Python
 //! distillation pipeline (`tools/train_hybrid.py`). Pure Rust, no
@@ -196,8 +197,8 @@ pub fn train_mlp(
 /// trainer-feature space (group 0 rows first, then group 1, etc.).
 /// Penalty per pair = `max(0, pred[hi_idx] - pred[lo_idx])` — Rust
 /// trainer outputs are distance-like (lower = better quality), so a
-/// monotone curve has pred[lo_q] > pred[hi_q]. Violations have
-/// pred[hi_q] > pred[lo_q].
+/// monotone curve has `pred[lo_q] > pred[hi_q]`. Violations have
+/// `pred[hi_q] > pred[lo_q]`.
 pub struct TvRegularizer {
     pub pairs: Vec<(usize, usize)>,
     pub features: Vec<Vec<f64>>,

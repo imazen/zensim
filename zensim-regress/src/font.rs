@@ -18,7 +18,8 @@
 //!
 //! Composite is gamma-correct: per glyph pixel, read the strip's alpha
 //! as coverage and lerp `fg`/`bg` in linear-sRGB space via the LUT-
-//! backed [`blend_channel_gamma_correct`] helper. A naive
+//! backed `blend_channel_gamma_correct` helper (private module fn).
+//! A naive
 //! `fg*a + bg*(1-a)` lerp in sRGB-encoded byte space produces muddy
 //! halos at mid-alpha because sRGB→linear is non-linear.
 //!
