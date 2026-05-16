@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::prelude::*;
-use zensim::{compute_zensim_with_config, ZensimConfig};
+use zensim::{ZensimConfig, compute_zensim_with_config};
 
 #[derive(Debug, Clone)]
 struct Pair {
@@ -135,7 +135,11 @@ fn main() {
         writeln!(w).unwrap();
     }
     w.flush().unwrap();
-    eprintln!("Wrote {} rows × {n_feat} features to {}", rows.len(), out.display());
+    eprintln!(
+        "Wrote {} rows × {n_feat} features to {}",
+        rows.len(),
+        out.display()
+    );
 }
 
 fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<f64>)> {

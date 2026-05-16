@@ -43,8 +43,11 @@ labels) drives gradient. Distortion-manifold pre-training uses **all
    `(image, codec)` group, sort rows by zq, sample triplets where
    anchor + positive are at adjacent zq values and negative is far.
 4. **Fine-tune**: freeze encoder (or partially), train a small
-   regression/ranking head on the labeled MOS subset (KADID + TID +
-   CID22-train-fold).
+   regression/ranking head on the labeled MOS subset (KADID + TID
+   only). **CID22 is validation-only — never use CID22 human MOS as
+   a training target. CID22 ssim2/CVVDP scores on the training-only
+   subset CAN be used, since those are metric scores not human
+   labels.**
 
 ## Our adaptation
 
@@ -67,8 +70,12 @@ output: zensim score
 Pre-training: encoder φ only, on 218k unlabeled pairs via triplet
 loss + zq-based triplet sampler.
 
-Fine-tune: head ψ on labeled corpora (CID22 + KADID + TID), with
-encoder either frozen or partially unfrozen (smaller LR).
+Fine-tune: head ψ on labeled corpora (KADID + TID for human MOS;
+CID22 ssim2/CVVDP-target metric scores on the training-only subset
+allowed as a metric-anchored auxiliary signal). **NEVER use CID22
+human MOS as a fine-tune target — CID22 human MOS is validation-only
+across the entire zensim project.** Encoder either frozen or
+partially unfrozen (smaller LR).
 
 This is a **two-layer MLP, same wire format as V_18**. Bakes go through
 ZNPR v3 unchanged. The only architectural change is the training
@@ -119,8 +126,11 @@ fidelity.
 ### Phase 3 — Fine-tune head (~1 day)
 
 Either: (a) freeze encoder, train head with RankNet on
-KADID+TID+CID22-train-fold; OR (b) joint fine-tune at LR/10 for both.
-Output bake = standard 228→64→1 MLP, ZNPR v3.
+**KADID + TID human MOS only** (optionally plus CID22 ssim2/CVVDP
+metric scores on the training-only subset — NOT CID22 human MOS);
+OR (b) joint fine-tune at LR/10 for both. Output bake = standard
+228→64→1 MLP, ZNPR v3. **CID22 human MOS is sacred validation —
+never a training target.**
 
 Validation: V_18 reference card gate (CID22 0.8933 + B3 ≥ 0.13).
 
@@ -147,8 +157,11 @@ ship as V_20b candidate or archive based on V_18 ref card numbers.
    synthetic distortions may not transfer to CID22's
    "authentically-distorted" images (the FRIQUEE caveat —
    Ghadiyaram 2017 found synthetic-trained models broke on authentic
-   data). Mitigation: include CID22-train-fold in fine-tune; report
-   cross-corpus generalization as primary acceptance.
+   data). Mitigation: **NOT** including CID22 human MOS in fine-tune
+   (sacred validation), but the CID22 training-only subset's
+   ssim2/CVVDP metric scores ARE an allowed auxiliary signal for the
+   metric-distillation path. Report cross-corpus generalization on
+   the 49-ref CID22 validation holdout as primary acceptance.
 
 3. **MLP capacity ceiling**: V_18 ship's 372→384→1 architecture may
    already saturate the available information in our 228 features.

@@ -27,8 +27,8 @@
 
 use std::time::Instant;
 use zenpredict::FeatureTransform;
-use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 use zenpredict::{Activation, WeightDtype};
+use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
 /// How to aggregate per-group SROCC into the single value used for
 /// best-checkpoint selection.
@@ -482,10 +482,7 @@ pub fn train_mlp_with_tv(
                         row_cdf.partition_point(|&c| c < ub).min(n - 1),
                     )
                 }
-                None => (
-                    (rng.next_u64() as usize) % n,
-                    (rng.next_u64() as usize) % n,
-                ),
+                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
             };
             if ia == ib {
                 continue;
@@ -1423,8 +1420,7 @@ mod tests {
             ..Default::default()
         };
         let mut log_d = Vec::new();
-        let bytes_default =
-            train_mlp(&[group_factory()], n_features, &hyper_default, &mut log_d);
+        let bytes_default = train_mlp(&[group_factory()], n_features, &hyper_default, &mut log_d);
         assert_eq!(
             bytes_uniform, bytes_default,
             "explicit low_q_boost=1.0 produced different bake than default — \

@@ -444,9 +444,13 @@ training-side data. But **loses every metric on held-out CID22**
 (SROCC −0.027, B3 [30, 40) no lift). This is the FRIQUEE 2017
 caveat materializing: synth pre-train → authentic-distortion
 transfer fails. Do NOT pursue further Su-2023-style mechanisms on
-the synth corpus without first solving the CID22-transfer problem
-(e.g., adding CID22-train-fold to fine-tune phase, domain
-adaptation, ...).
+the synth corpus without first solving the CID22-transfer problem.
+**The transfer fix must NOT involve CID22 human MOS in training**
+(see "CID22 is VALIDATION-ONLY" section above). Allowed
+directions: domain adaptation with unlabeled CID22 image pairs,
+metric-anchored fine-tuning using CID22 training-only-subset
+ssim2/CVVDP scores, additional authentic-distortion corpora with
+their own held-out CID22-style validation gates.
 
 ### D3 tighter transforms — falsified vs V_20 IS
 
@@ -555,6 +559,78 @@ section ordering, header layout). zenpredict-bake is the canonical
 serializer; trusting it keeps wire-format invariants in one place.
 Ad-hoc emitters drift, get out of sync with v3.x extensions, and
 ship wrong-shape bakes that load but score garbage.
+
+## CID22 is VALIDATION-ONLY (added 2026-05-15)
+
+**CID22 human MOS is sacred validation across the entire zensim
+project. NEVER use CID22 human MOS as a training target.** This rule
+is load-bearing — every documented contamination cleanup
+(2026-05-12 perceptual-overlap purge, 2026-05-14 dHash audits) exists
+to defend this gate.
+
+### What "validation only" means in practice
+
+- **NO** `--group cid22:...` argument in any `zensim_mlp_train`
+  invocation that loads CID22 human MCOS as the `human_score`
+  column. CID22 human MOS appears only at the END of an experiment
+  via `dataset_metric_baseline --cid22 /mnt/v/dataset/cid22/...`.
+- **NO** "CID22-train-fold" or "CID22-train-subset" carved out of
+  the validation set for fine-tuning a head. The 49-reference
+  held-out set is the WHOLE CID22 (4,292 pairs across the 49 refs).
+  There is no "training-fold half" to peel off.
+- **NO** indirect leakage: training-source perceptual-near-duplicates
+  of CID22 references count as contamination too. The
+  `check_holdout_overlap` audit (dHash d≤10 + user-eye verification
+  per the 2026-05-14 revert) is mandatory before any new training
+  corpus lands.
+
+### What IS permitted
+
+- CID22 ssim2 or CVVDP metric scores on the **training-only subset
+  of the broader CID22 image library** (i.e., images that exist in
+  the CID22 source pool but are NOT part of the 49-reference
+  validation set + their distorted pairs). The training-only subset
+  must be extracted from a different source than the validation set
+  on disk — typically the unfiltered CID22 image library at the
+  upstream source, NOT `/mnt/v/dataset/cid22/CID22_validation_set/`.
+- Metric-anchored training signal on that training-only subset uses
+  ssim2 (fast-ssim2 / GPU ssim2) or CVVDP as the target column —
+  never human MOS.
+- Whoever extracts the training-only-subset metric-anchored CSV
+  MUST document the cut clearly (`_MANIFEST.md` entry: "CID22
+  training-only subset, ssim2-anchored, N pairs, source images
+  NOT in the 49-ref validation set, verified by basename diff").
+
+### What's currently extracted
+
+`/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.csv`
+is **validation only** (4292 pairs from the 49-ref held-out set,
+`human_score` = MCOS / 100). It exists for end-of-experiment full-
+panel evaluation, NOT training input. The file's `_MANIFEST.md`
+spells this out.
+
+The historical V_18/V_19/V_20a/V_20b training pipelines have NEVER
+included CID22 as a `--group` to the trainer — confirmed by
+inspecting every methodology doc at `benchmarks/v0_1*_methodology*.md`
+and `benchmarks/v0_19_REVERTED_2026-05-14.md`. The training command
+loads `safesyn + kadid + tid + konjnd` only.
+
+### Why this rule is absolute
+
+CID22 (Sneyers / Ben Baruch / Vaxman 2023, JPEG WG1 `wg1m99012`)
+is the only large human-MOS dataset that exercises **codec-output
+distortions** specifically (KADID + TID are ~95 % non-compression
+synthetic distortions). It is the **single gold-standard
+generalization holdout** for compression-targeted metrics. If we
+train on any part of its human-MOS labels — even a "train fold"
+carved from the same 49 references — we lose the only honest
+generalization check we have.
+
+Past CID22-contamination incidents (V0_8 perceptual-near-duplicate
+leak, V0_19 indirect KADID-overlap inflation) cost the recovery
+cycle weeks of wasted training. The "no CID22 human MOS as training
+target" rule prevents the next such incident. Re-read this section
+whenever drafting a new training corpus or fine-tune fold.
 
 ## ZNPR v2 PROHIBITED (added 2026-05-15)
 

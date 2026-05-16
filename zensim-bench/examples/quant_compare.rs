@@ -57,10 +57,7 @@ fn main() {
     for (li, layer) in model.layers().enumerate() {
         let w: Vec<f32> = match &layer.weights {
             WeightStorage::F32(w) => w.to_vec(),
-            WeightStorage::F16(w) => w
-                .iter()
-                .map(|b| zenpredict::f16_bits_to_f32(*b))
-                .collect(),
+            WeightStorage::F16(w) => w.iter().map(|b| zenpredict::f16_bits_to_f32(*b)).collect(),
             WeightStorage::I8 { weights, scales } => weights
                 .iter()
                 .enumerate()
@@ -185,7 +182,9 @@ fn main() {
     let n_samples = 1024usize;
     let mut rng: u64 = 0x9E37_79B9_7F4A_7C15;
     let mut next_f32 = || -> f32 {
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         // Uniform in [-3, 3], approximately covering the post-scaler input range.
         let u = ((rng >> 33) as u32) as f32 / (u32::MAX >> 1) as f32 - 1.0;
         u * 3.0

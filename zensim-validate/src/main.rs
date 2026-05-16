@@ -298,8 +298,12 @@ impl CacheConfig {
     ///   bit 1 = compute_iw_features (IW block present)
     pub fn pack_kind(extended: bool, iw: bool) -> u8 {
         let mut k = 0u8;
-        if extended { k |= 1; }
-        if iw { k |= 2; }
+        if extended {
+            k |= 1;
+        }
+        if iw {
+            k |= 2;
+        }
         k
     }
 }

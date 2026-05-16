@@ -178,8 +178,18 @@ fn main() {
 
     // Auto-detect input width from the scaler length (= n_inputs).
     let n_in = sm_a.len();
-    assert_eq!(sm_b.len(), n_in, "scaler size mismatch: base={n_in}, s1={}", sm_b.len());
-    assert_eq!(sm_c.len(), n_in, "scaler size mismatch: base={n_in}, s42={}", sm_c.len());
+    assert_eq!(
+        sm_b.len(),
+        n_in,
+        "scaler size mismatch: base={n_in}, s1={}",
+        sm_b.len()
+    );
+    assert_eq!(
+        sm_c.len(),
+        n_in,
+        "scaler size mismatch: base={n_in}, s42={}",
+        sm_c.len()
+    );
     eprintln!("concat input width: {n_in} (228=V0_18 basic+peaks, 372=V0_20a +IW)");
 
     // Propagate feature_transforms + params from the base bake. All
@@ -189,9 +199,11 @@ fn main() {
     // runtime feeds RAW features into a network trained on
     // TRANSFORMED features → garbage predictions (V_20 D1 hit this
     // exact bug before the fix).
-    if let (Some(ta), Some(tb), Some(tc)) =
-        (&a.feature_transforms, &b.feature_transforms, &c.feature_transforms)
-    {
+    if let (Some(ta), Some(tb), Some(tc)) = (
+        &a.feature_transforms,
+        &b.feature_transforms,
+        &c.feature_transforms,
+    ) {
         assert_eq!(ta, tb, "feature_transforms mismatch: base vs s1");
         assert_eq!(ta, tc, "feature_transforms mismatch: base vs s42");
     } else if a.feature_transforms.is_some()
@@ -223,7 +235,9 @@ fn main() {
         }
     }
     if warn_scaler {
-        eprintln!("WARNING: scaler stats differ across sub-MLPs; using base's. Check trainer determinism.");
+        eprintln!(
+            "WARNING: scaler stats differ across sub-MLPs; using base's. Check trainer determinism."
+        );
     }
     let scaler_mean = sm_a;
     let scaler_scale = ss_a;
@@ -255,8 +269,13 @@ fn main() {
     }
     let b1_concat = vec![ca * b1_a + cb * b1_b + cc * b1_c; 1];
 
-    eprintln!("concat sanity: l0 weights={} l0 biases={} l1 weights={} l1 bias={}",
-        w0_concat.len(), b0_concat.len(), w1_concat.len(), b1_concat.len());
+    eprintln!(
+        "concat sanity: l0 weights={} l0 biases={} l1 weights={} l1 bias={}",
+        w0_concat.len(),
+        b0_concat.len(),
+        w1_concat.len(),
+        b1_concat.len()
+    );
 
     let layers = [
         BakeLayer {
@@ -284,7 +303,12 @@ fn main() {
         if ts.iter().all(|t| *t == FeatureTransform::Identity) {
             None
         } else {
-            Some(ts.iter().map(|t| t.as_token()).collect::<Vec<_>>().join("\n"))
+            Some(
+                ts.iter()
+                    .map(|t| t.as_token())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
         }
     });
     let params_blob: Option<String> = feature_transform_params.as_ref().and_then(|params| {

@@ -138,11 +138,7 @@ fn predict_all(bake: &[u8], features: &[Vec<f32>]) -> Result<Vec<f64>, String> {
 }
 
 fn band_label(idx: usize, edges: &[f64]) -> String {
-    let lo = if idx == 0 {
-        0.0
-    } else {
-        edges[idx - 1]
-    };
+    let lo = if idx == 0 { 0.0 } else { edges[idx - 1] };
     let hi = if idx >= edges.len() {
         100.0
     } else {
@@ -183,7 +179,9 @@ fn main() -> ExitCode {
     let bake_path = match bake_path {
         Some(p) => p,
         None => {
-            eprintln!("usage: eval_bake_per_band --bake PATH --csv NAME:PATH [--csv ...] [--band-edges 50,65,90] [--out-md PATH]");
+            eprintln!(
+                "usage: eval_bake_per_band --bake PATH --csv NAME:PATH [--csv ...] [--band-edges 50,65,90] [--out-md PATH]"
+            );
             return ExitCode::from(2);
         }
     };

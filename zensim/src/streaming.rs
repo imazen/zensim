@@ -1282,8 +1282,7 @@ fn process_strip_channel(
             // existing extended_features block.
             if config.extended_features {
                 for i in 0..inner_n {
-                    bufs.mask[inner_off + i] =
-                        1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
+                    bufs.mask[inner_off + i] = 1.0 / (1.0 + k * bufs.mul_buf[inner_off + i]);
                 }
             }
             // Step 3b: IW weight (texture-emphasising) — same blurred
@@ -1293,8 +1292,7 @@ fn process_strip_channel(
             // tests).
             if config.compute_iw_features {
                 for i in 0..inner_n {
-                    bufs.iw_weight[inner_off + i] =
-                        1.0 + k_iw * bufs.mul_buf[inner_off + i];
+                    bufs.iw_weight[inner_off + i] = 1.0 + k_iw * bufs.mul_buf[inner_off + i];
                 }
             }
 
@@ -1521,7 +1519,11 @@ fn process_strip_channel(
             if config.extended_features {
                 let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
                 let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
-                    inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_mask,
+                    inner_mu1,
+                    inner_mu2,
+                    inner_sig_sq,
+                    inner_sig12,
+                    inner_mask,
                 );
                 accum.masked_ssim_d[c] += sum_d;
                 accum.masked_ssim_d4[c] += sum_d4;
@@ -1529,9 +1531,8 @@ fn process_strip_channel(
             }
             if config.compute_iw_features {
                 let inner_iw = &bufs.iw_weight[inner_off..inner_off + inner_n];
-                let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
-                    inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_iw,
-                );
+                let (sum_d, sum_d4, sum_d2) =
+                    ssim_channel_masked(inner_mu1, inner_mu2, inner_sig_sq, inner_sig12, inner_iw);
                 accum.iw_ssim_d[c] += sum_d;
                 accum.iw_ssim_d4[c] += sum_d4;
                 accum.iw_ssim_d2[c] += sum_d2;
@@ -1549,9 +1550,8 @@ fn process_strip_channel(
             }
             if config.compute_iw_features {
                 let inner_iw = &bufs.iw_weight[inner_off..inner_off + inner_n];
-                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
-                    inner_src, inner_dst, inner_mu1, inner_mu2, inner_iw,
-                );
+                let (_art, art4, _det, det4, _art2, _det2) =
+                    edge_diff_channel_masked(inner_src, inner_dst, inner_mu1, inner_mu2, inner_iw);
                 accum.iw_art4[c] += art4;
                 accum.iw_det4[c] += det4;
             }

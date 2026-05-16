@@ -220,7 +220,11 @@ fn main() -> ExitCode {
             };
             bake_preds.insert(
                 bname.clone(),
-                if raw_predictions { preds } else { normalize(&preds) },
+                if raw_predictions {
+                    preds
+                } else {
+                    normalize(&preds)
+                },
             );
         }
 
@@ -314,7 +318,11 @@ fn main() -> ExitCode {
                             "| {:.1} | {:.4} | {} |",
                             alpha,
                             agg,
-                            bands.iter().map(|(s, _)| s.clone()).collect::<Vec<_>>().join(" | ")
+                            bands
+                                .iter()
+                                .map(|(s, _)| s.clone())
+                                .collect::<Vec<_>>()
+                                .join(" | ")
                         );
                     }
                     println!();
@@ -359,7 +367,8 @@ fn main() -> ExitCode {
                     }
                     if per_band_indices.len() >= 4 && per_band_indices[3].len() >= 10 {
                         let p: Vec<f64> = per_band_indices[3].iter().map(|&i| mix[i]).collect();
-                        let s: Vec<f64> = per_band_indices[3].iter().map(|&i| scores_pct[i]).collect();
+                        let s: Vec<f64> =
+                            per_band_indices[3].iter().map(|&i| scores_pct[i]).collect();
                         let v = spearman(&p, &s).abs();
                         if v > best_b3.3 {
                             best_b3 = (alpha_a, alpha_b, alpha_c, v);

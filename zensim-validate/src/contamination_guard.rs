@@ -166,16 +166,21 @@ mod tests {
         // `benchmarks/dhash_threshold_revert_2026-05-14.md`. The
         // 149-entry archive is preserved at
         // `benchmarks/contamination_blocklist_2026-05-14_REJECTED_false_positives.txt`.
-        assert_eq!(blocklist().len(), 0,
+        assert_eq!(
+            blocklist().len(),
+            0,
             "blocklist file should be empty (comments-only); any new entries \
-             must be user-verified via side-by-side montage review first");
+             must be user-verified via side-by-side montage review first"
+        );
     }
     #[test]
     fn blocklist_ignores_comment_lines() {
         // The blocklist file is mostly comments now. Make sure the parser
         // strips them and yields the empty set.
         let bl = blocklist();
-        assert!(!bl.iter().any(|s| s.starts_with('#')),
-            "comment lines must be filtered out by the parser");
+        assert!(
+            !bl.iter().any(|s| s.starts_with('#')),
+            "comment lines must be filtered out by the parser"
+        );
     }
 }

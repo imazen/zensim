@@ -59,11 +59,17 @@ fn main() {
     assert!(data.len() >= HEADER_SIZE, "bake too small");
     assert_eq!(&data[0..4], b"ZNPR", "bad magic");
     let version = read_u16(&data, 4);
-    assert!(version == 2 || version == 3, "expected v2 or v3, got {version}");
+    assert!(
+        version == 2 || version == 3,
+        "expected v2 or v3, got {version}"
+    );
     let n_outputs = read_u32(&data, 12) as usize;
     let n_layers = read_u32(&data, 16) as usize;
     let layer_table_off = read_u32(&data, 48) as usize;
-    assert_eq!(n_outputs, 1, "calibration assumes scalar output; got {n_outputs}");
+    assert_eq!(
+        n_outputs, 1,
+        "calibration assumes scalar output; got {n_outputs}"
+    );
     assert!(n_layers >= 1, "no layers");
 
     // Read the last layer's weights + biases section offsets.
@@ -73,7 +79,10 @@ fn main() {
     let out_dim = read_u32(&data, entry_off + 4) as usize;
     assert_eq!(out_dim, 1, "final layer must have out_dim=1");
     let weight_dtype = data[entry_off + 9];
-    assert_eq!(weight_dtype, 0, "calibrate requires F32 weights (dtype=0); got dtype={weight_dtype}");
+    assert_eq!(
+        weight_dtype, 0,
+        "calibrate requires F32 weights (dtype=0); got dtype={weight_dtype}"
+    );
 
     let w_off = read_u32(&data, entry_off + 12) as usize;
     let w_len = read_u32(&data, entry_off + 16) as usize;

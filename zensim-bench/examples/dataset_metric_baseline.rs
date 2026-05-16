@@ -43,9 +43,7 @@ use imgref::Img;
 use rayon::prelude::*;
 use rgb::RGB8;
 use zenpredict::{Model, Predictor};
-use zensim::{
-    compute_zensim_with_config, RgbSlice, Zensim, ZensimConfig, ZensimProfile,
-};
+use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
 
 #[derive(Debug, Clone)]
 struct Pair {
@@ -164,7 +162,10 @@ fn main() {
     for (name, path) in &pairs_tsv {
         let pairs = load_pairs_tsv(path, max_pairs);
         let leaked: &'static str = Box::leak(name.clone().into_boxed_str());
-        datasets.push(DatasetSpec { name: leaked, pairs });
+        datasets.push(DatasetSpec {
+            name: leaked,
+            pairs,
+        });
     }
     if let Some(p) = csiq {
         datasets.push(DatasetSpec {
@@ -275,7 +276,11 @@ fn main() {
                     pair.distorted.to_string_lossy().to_string(),
                     pair.codec.clone().unwrap_or_default(),
                     pair.version.clone().unwrap_or_default(),
-                    metrics.0, metrics.1, metrics.2, metrics.3, metrics.4,
+                    metrics.0,
+                    metrics.1,
+                    metrics.2,
+                    metrics.3,
+                    metrics.4,
                 ))
             })
             .collect();
@@ -291,9 +296,9 @@ fn main() {
         }
         // EnrichedRow indices: 0=ref, 1=dist, 2=codec, 3=version, 4=human, 5=v02, 6=v04, 7=ssim2, 8=butter
         let humans: Vec<f64> = pairs_with.iter().map(|t| t.4).collect();
-        let v02:    Vec<f64> = pairs_with.iter().map(|t| t.5).collect();
-        let v04:    Vec<f64> = pairs_with.iter().map(|t| t.6).collect();
-        let ssim2:  Vec<f64> = pairs_with.iter().map(|t| t.7).collect();
+        let v02: Vec<f64> = pairs_with.iter().map(|t| t.5).collect();
+        let v04: Vec<f64> = pairs_with.iter().map(|t| t.6).collect();
+        let ssim2: Vec<f64> = pairs_with.iter().map(|t| t.7).collect();
         let butter: Vec<f64> = pairs_with.iter().map(|t| t.8).collect();
 
         // Spearman against human MOS — abs since each metric has its
@@ -314,12 +319,15 @@ fn main() {
         // Wilcoxon are queued (need per-stimulus σ + paired-test
         // infrastructure).
         println!();
-        println!("### {} full statistical panel (CLAUDE.md rigor mandate)", ds.name);
+        println!(
+            "### {} full statistical panel (CLAUDE.md rigor mandate)",
+            ds.name
+        );
         println!();
         println!("| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |");
         println!("|---|---:|---:|---:|---:|---:|---:|");
         let metrics_for_panel: &[(&str, &Vec<f64>)] = &[
-            ("V0_2",     &v02),
+            ("V0_2", &v02),
             ("V0_4 (bake)", &v04),
             ("fast-ssim2", &ssim2),
             ("butteraugli", &butter),
@@ -346,22 +354,33 @@ fn main() {
             );
         }
         println!();
-        println!("_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable on this corpus). \
+        println!(
+            "_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable on this corpus). \
 On AIC-3 / AIC-4 / CID22 with bootstrap σ available, this becomes the σ-normalized form \
 recommended by Mohammadi et al. 2025 (arXiv:2509.13150). Z-RMSE rescale is 4-parameter \
 logistic (Mohammadi 2025 convention), NOT affine — affine inflates Z-RMSE on nonlinear \
-metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the residual._");
+metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the residual._"
+        );
         println!();
 
         // MRR pairwise + Wilcoxon: rigorously test whether V0_4 (the
         // bake under test) beats each baseline. Both stats are
         // per CLAUDE.md "Statistical rigor" mandate.
         let v04_srocc = spearman(&humans, &v04).abs();
-        println!("### {} significance vs V0_4 bake (MRR + Wilcoxon, two-tailed)", ds.name);
+        println!(
+            "### {} significance vs V0_4 bake (MRR + Wilcoxon, two-tailed)",
+            ds.name
+        );
         println!();
-        println!("| Comparison | SROCC_other | SROCC_V0_4 | MRR z | MRR p | Wilcoxon z | Wilcoxon p | effect r |");
+        println!(
+            "| Comparison | SROCC_other | SROCC_V0_4 | MRR z | MRR p | Wilcoxon z | Wilcoxon p | effect r |"
+        );
         println!("|---|---:|---:|---:|---:|---:|---:|---:|");
-        for (name, other) in &[("V0_2", &v02), ("fast-ssim2", &ssim2), ("butteraugli", &butter)] {
+        for (name, other) in &[
+            ("V0_2", &v02),
+            ("fast-ssim2", &ssim2),
+            ("butteraugli", &butter),
+        ] {
             let r_other = spearman(&humans, other).abs();
             let r_v04 = v04_srocc;
             let r12 = spearman(other, &v04).abs();
@@ -499,9 +518,14 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
             // whose normalized scores use different cuts (KADID, TID) the
             // band edges below map directly to width-10 zones on the
             // dataset's normalized human-score scale.
-            println!("### {} 10-band SROCC (PRIMARY: B0..B9 width-10 on normalized score)", ds.name);
+            println!(
+                "### {} 10-band SROCC (PRIMARY: B0..B9 width-10 on normalized score)",
+                ds.name
+            );
             println!();
-            println!("| Band | range | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE |");
+            println!(
+                "| Band | range | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE |"
+            );
             println!("|---|---|--:|:--:|:--:|:--:|:--:|:--:|--:|");
             for band_idx in 0..10 {
                 let lo = band_idx as f64 * 0.10;
@@ -559,9 +583,14 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
             // 20 bins of width 0.05. Retained because high-density corpora
             // (n >= 1000) benefit from the finer grid; primary release gate
             // is the 10-band table above.
-            println!("### {} step-5 per-band SROCC (20 bins of width 0.05 on normalized score)", ds.name);
+            println!(
+                "### {} step-5 per-band SROCC (20 bins of width 0.05 on normalized score)",
+                ds.name
+            );
             println!();
-            println!("| Bin (normalized) | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter |");
+            println!(
+                "| Bin (normalized) | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter |"
+            );
             println!("|---|--:|:--:|:--:|:--:|:--:|:--:|");
             for bin in 0..20 {
                 let lo = bin as f64 * 0.05;
@@ -1225,9 +1254,7 @@ fn load_csiq(base: &Path, max: usize) -> Vec<Pair> {
 /// `dist_path`, `codec`, `version` / `quality` (whichever exists),
 /// and the score column (`score_jnd` / `human_jnd` / `human_score` / last col).
 fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
-    let mut rdr = match csv::ReaderBuilder::new()
-        .delimiter(b'\t')
-        .from_path(path) {
+    let mut rdr = match csv::ReaderBuilder::new().delimiter(b'\t').from_path(path) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("failed to open {}: {e}", path.display());
@@ -1243,19 +1270,32 @@ fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
     };
     let find = |names: &[&str]| -> Option<usize> {
         for (i, h) in headers.iter().enumerate() {
-            if names.contains(&h) { return Some(i); }
+            if names.contains(&h) {
+                return Some(i);
+            }
         }
         None
     };
-    let i_ref     = find(&["ref_path", "reference", "ref"]);
-    let i_dist    = find(&["dist_path", "distorted", "dist"]);
-    let i_codec   = find(&["codec", "encoder"]);
+    let i_ref = find(&["ref_path", "reference", "ref"]);
+    let i_dist = find(&["dist_path", "distorted", "dist"]);
+    let i_codec = find(&["codec", "encoder"]);
     let i_version = find(&["version", "setting", "quality", "dlevel", "quality_index"]);
-    let i_score   = find(&["score_jnd", "human_jnd", "human_score", "human_mos", "human_dmos",
-                            "mcos", "dmos", "mos"]);
+    let i_score = find(&[
+        "score_jnd",
+        "human_jnd",
+        "human_score",
+        "human_mos",
+        "human_dmos",
+        "mcos",
+        "dmos",
+        "mos",
+    ]);
     if i_ref.is_none() || i_dist.is_none() || i_score.is_none() {
-        eprintln!("--pairs-tsv {}: missing required column(s) ref_path/dist_path/<score>; header was {:?}",
-                  path.display(), headers);
+        eprintln!(
+            "--pairs-tsv {}: missing required column(s) ref_path/dist_path/<score>; header was {:?}",
+            path.display(),
+            headers
+        );
         return Vec::new();
     }
     let i_ref = i_ref.unwrap();
@@ -1263,10 +1303,17 @@ fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
     let i_score = i_score.unwrap();
     let mut pairs = Vec::new();
     for record in rdr.records().flatten() {
-        let r = match record.get(i_ref) { Some(s) => s, None => continue };
-        let d = match record.get(i_dist) { Some(s) => s, None => continue };
+        let r = match record.get(i_ref) {
+            Some(s) => s,
+            None => continue,
+        };
+        let d = match record.get(i_dist) {
+            Some(s) => s,
+            None => continue,
+        };
         let s = match record.get(i_score).and_then(|s| s.parse::<f64>().ok()) {
-            Some(v) => v, None => continue,
+            Some(v) => v,
+            None => continue,
         };
         pairs.push(Pair {
             reference: PathBuf::from(r),
@@ -1275,7 +1322,9 @@ fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
             codec: i_codec.and_then(|i| record.get(i)).map(|s| s.to_string()),
             version: i_version.and_then(|i| record.get(i)).map(|s| s.to_string()),
         });
-        if pairs.len() >= max { break; }
+        if pairs.len() >= max {
+            break;
+        }
     }
     pairs
 }
@@ -1393,7 +1442,11 @@ pub fn rescale_to_match(predicted: &[f64], target: &[f64]) -> Vec<f64> {
         cov += dp * dt;
         var_p += dp * dp;
     }
-    let b = if var_p.abs() < 1e-12 { 0.0 } else { cov / var_p };
+    let b = if var_p.abs() < 1e-12 {
+        0.0
+    } else {
+        cov / var_p
+    };
     let a = mean_t - b * mean_p;
     predicted.iter().map(|p| a + b * p).collect()
 }
@@ -1440,7 +1493,12 @@ pub fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
     // Degenerate guards: if predicted has zero variance, no nonlinear fit is
     // possible; affine = constant function.
     let mean_p: f64 = predicted.iter().take(n).sum::<f64>() / n as f64;
-    let var_p: f64 = predicted.iter().take(n).map(|x| (x - mean_p).powi(2)).sum::<f64>() / n as f64;
+    let var_p: f64 = predicted
+        .iter()
+        .take(n)
+        .map(|x| (x - mean_p).powi(2))
+        .sum::<f64>()
+        / n as f64;
     if !var_p.is_finite() || var_p < 1e-18 {
         return rescale_to_match(predicted, target);
     }
@@ -1450,7 +1508,11 @@ pub fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
         return rescale_to_match(predicted, target);
     }
     // Initial parameter guesses, identical to Mohammadi `my_fit.py` p0.
-    let t_max = target.iter().take(n).cloned().fold(f64::NEG_INFINITY, f64::max);
+    let t_max = target
+        .iter()
+        .take(n)
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let t_min = target.iter().take(n).cloned().fold(f64::INFINITY, f64::min);
     let p_std = var_p.sqrt();
     // Also detect predicted vs target correlation to seed an
@@ -1494,32 +1556,105 @@ pub fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
     // Reference IW-SSIM scipy fit: b3=1.16 (26·p_std above data center),
     // b1=-7079, b4=0.022. We seed several b3-outside-data starts so the
     // multi-start covers that regime.
-    let p_max = predicted.iter().take(n).cloned().fold(f64::NEG_INFINITY, f64::max);
-    let p_min = predicted.iter().take(n).cloned().fold(f64::INFINITY, f64::min);
+    let p_max = predicted
+        .iter()
+        .take(n)
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let p_min = predicted
+        .iter()
+        .take(n)
+        .cloned()
+        .fold(f64::INFINITY, f64::min);
     let t_span = (t_max - t_min).abs().max(1.0);
     let tail = 1000.0 * t_span; // extreme tail magnitude
     let b3_high = p_max + 25.0 * p_std; // ~scipy's IW-SSIM b3=1.16
     let b3_low = p_min - 25.0 * p_std;
     let starts: [[f64; 4]; 13] = [
         // Conventional starts (Mohammadi `my_fit.py` baseline + b4 sweep)
-        [t_max, t_min, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_max, t_min, mean_p, (p_std * 0.1 * b4_sign).copysign(b4_sign)],
-        [t_max, t_min, mean_p, (p_std * 10.0 * b4_sign).copysign(b4_sign)],
-        [t_max, t_min, mean_p + p_std, (p_std * b4_sign).copysign(b4_sign)],
-        [t_max, t_min, mean_p - p_std, (p_std * b4_sign).copysign(b4_sign)],
+        [
+            t_max,
+            t_min,
+            mean_p,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p,
+            (p_std * 0.1 * b4_sign).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p,
+            (p_std * 10.0 * b4_sign).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p + p_std,
+            (p_std * b4_sign).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p - p_std,
+            (p_std * b4_sign).copysign(b4_sign),
+        ],
         // Tail-anchor starts: b1 or b2 at ±tail with b3 at data center.
-        [-tail, t_max, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_max, -tail, mean_p, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [tail, t_min, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_min, tail, mean_p, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [
+            -tail,
+            t_max,
+            mean_p,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            -tail,
+            mean_p,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            tail,
+            t_min,
+            mean_p,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_min,
+            tail,
+            mean_p,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
         // b3-outside-data starts (the regime scipy converges to for
         // narrow-range metrics). Pair with extreme-tail asymptotes and
         // small b4 so the logistic crosses through the data range as a
         // near-linear function with slope (b2-b1)/b4.
-        [-tail, t_max, b3_high, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_max, -tail, b3_low, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [tail, t_min, b3_low, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_min, tail, b3_high, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [
+            -tail,
+            t_max,
+            b3_high,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            -tail,
+            b3_low,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            tail,
+            t_min,
+            b3_low,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_min,
+            tail,
+            b3_high,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
     ];
     let mut best_b: Option<[f64; 4]> = None;
     let mut best_cost = f64::INFINITY;
@@ -1536,7 +1671,10 @@ pub fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
         None => return rescale_to_match(predicted, target),
     };
 
-    let any_bad = predicted.iter().take(n).any(|&x| !logistic_eval(&b, x).is_finite());
+    let any_bad = predicted
+        .iter()
+        .take(n)
+        .any(|&x| !logistic_eval(&b, x).is_finite());
     if any_bad {
         eprintln!(
             "warning: rescale_logistic — fitted model produces non-finite output (n={}), falling back to affine",
@@ -1585,12 +1723,7 @@ fn logistic_eval(b: &[f64; 4], x: f64) -> f64 {
 /// d/db3 = -(b1-b2) · E / (b4 · A²)
 /// d/db4 = -(b1-b2) · E · (x-b3) / (b4² · A²)
 /// ```
-fn run_lm(
-    predicted: &[f64],
-    target: &[f64],
-    n: usize,
-    b0: [f64; 4],
-) -> Option<([f64; 4], f64)> {
+fn run_lm(predicted: &[f64], target: &[f64], n: usize, b0: [f64; 4]) -> Option<([f64; 4], f64)> {
     let max_iters = 500usize;
     let tol = 1e-10f64;
     let cost_tol = 1e-12f64;
@@ -1758,7 +1891,11 @@ fn solve_4x4_gauss(aug: &mut [[f64; 5]; 4]) -> Option<[f64; 4]> {
         }
         x[i] = sum / aug[i][i];
     }
-    if x.iter().all(|v| v.is_finite()) { Some(x) } else { None }
+    if x.iter().all(|v| v.is_finite()) {
+        Some(x)
+    } else {
+        None
+    }
 }
 
 /// Meng-Rosenthal-Rubin paired SROCC test (1992). Tests H0: r1 = r2
@@ -1800,7 +1937,13 @@ pub fn mrr_test(r1: f64, r2: f64, r12: f64, n: usize) -> (f64, f64, i8) {
     let z_stat = (z1 - z2) / var_z_diff.sqrt();
     // Two-tailed normal p-value: erfc(|z| / √2)
     let p = libm_erfc_half(z_stat.abs());
-    let dir: i8 = if r1 > r2 { 1 } else if r2 > r1 { -1 } else { 0 };
+    let dir: i8 = if r1 > r2 {
+        1
+    } else if r2 > r1 {
+        -1
+    } else {
+        0
+    };
     (z_stat, p, dir)
 }
 
@@ -1828,11 +1971,7 @@ fn libm_erfc_half(z: f64) -> f64 {
 /// Non-parametric companion to MRR: doesn't assume normality of
 /// Fisher-z transformed correlations. Mohammadi 2025 uses both as
 /// confirmatory tests.
-pub fn wilcoxon_signed_rank(
-    metric_a: &[f64],
-    metric_b: &[f64],
-    target: &[f64],
-) -> (f64, f64, f64) {
+pub fn wilcoxon_signed_rank(metric_a: &[f64], metric_b: &[f64], target: &[f64]) -> (f64, f64, f64) {
     let n = metric_a.len().min(metric_b.len()).min(target.len());
     if n < 6 {
         return (f64::NAN, f64::NAN, f64::NAN);
@@ -1863,14 +2002,17 @@ pub fn wilcoxon_signed_rank(
     // Sort by |diff|, assign ranks (with average-rank ties), apply
     // sign of diff.
     let mut idx: Vec<usize> = (0..n_nonzero).collect();
-    idx.sort_by(|&a, &b| diffs[a].abs().partial_cmp(&diffs[b].abs()).unwrap_or(std::cmp::Ordering::Equal));
+    idx.sort_by(|&a, &b| {
+        diffs[a]
+            .abs()
+            .partial_cmp(&diffs[b].abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut ranks = vec![0.0f64; n_nonzero];
     let mut i = 0;
     while i < n_nonzero {
         let mut j = i + 1;
-        while j < n_nonzero
-            && (diffs[idx[j]].abs() - diffs[idx[i]].abs()).abs() < 1e-12
-        {
+        while j < n_nonzero && (diffs[idx[j]].abs() - diffs[idx[i]].abs()).abs() < 1e-12 {
             j += 1;
         }
         let avg_rank = (i + j + 1) as f64 / 2.0;
@@ -1898,7 +2040,11 @@ pub fn wilcoxon_signed_rank(
     // Effect size r = Z / √N (Rosenthal 1991 convention; |r| ∈ [0, 1])
     let r = z_stat.abs() / n_f.sqrt();
     // Sign convention: positive ⇒ a has larger errors than b ⇒ b is better.
-    let signed_z = if w_plus > w_minus { z_stat.abs() } else { -z_stat.abs() };
+    let signed_z = if w_plus > w_minus {
+        z_stat.abs()
+    } else {
+        -z_stat.abs()
+    };
     (signed_z, p, r)
 }
 
@@ -2025,10 +2171,17 @@ fn outlier_ratio(predicted: &[f64], target: &[f64]) -> f64 {
         let sd_r: f64 = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>() / n as f64)
             .sqrt()
             .max(1e-12);
-        return residuals.iter().filter(|r| (**r - mean_r).abs() > 2.0 * sd_r).count() as f64
+        return residuals
+            .iter()
+            .filter(|r| (**r - mean_r).abs() > 2.0 * sd_r)
+            .count() as f64
             / n as f64;
     }
-    residuals.iter().filter(|r| (**r - mean_r).abs() > 2.0 * sd_r).count() as f64 / n as f64
+    residuals
+        .iter()
+        .filter(|r| (**r - mean_r).abs() > 2.0 * sd_r)
+        .count() as f64
+        / n as f64
 }
 
 /// Pearson Weighted Rank Correlation (PWRC). IQA-literature stat that
@@ -2196,7 +2349,11 @@ mod tests {
 
         assert!(z_log.is_finite() && z_aff.is_finite(), "Z-RMSE not finite");
         // Logistic recovers the ground-truth mapping → near-zero residual.
-        assert!(z_log < 0.01, "expected Z-RMSE near zero on clean logistic data, got {}", z_log);
+        assert!(
+            z_log < 0.01,
+            "expected Z-RMSE near zero on clean logistic data, got {}",
+            z_log
+        );
         // Affine leaves the saturation regions as systematic residual.
         // The exact gap depends on n and shape; require ≥10× improvement.
         assert!(
@@ -2227,7 +2384,10 @@ mod tests {
         }
         let fit_log = rescale_logistic(&predicted, &target);
         let z_log = z_rmse(&fit_log, &target, None);
-        assert!(z_log.is_finite(), "Z-RMSE must be finite for anti-correlated fit");
+        assert!(
+            z_log.is_finite(),
+            "Z-RMSE must be finite for anti-correlated fit"
+        );
         // Decreasing logistic should recover with near-zero residual.
         assert!(
             z_log < 0.01,
@@ -2241,14 +2401,21 @@ mod tests {
     /// limit). Tolerance accounts for LM convergence noise.
     #[test]
     fn logistic_matches_affine_on_linear_metric() {
-        let target: Vec<f64> = (0..50).map(|i| 10.0 + 1.5 * (i as f64) / 49.0 * 80.0).collect();
+        let target: Vec<f64> = (0..50)
+            .map(|i| 10.0 + 1.5 * (i as f64) / 49.0 * 80.0)
+            .collect();
         let predicted: Vec<f64> = (0..50).map(|i| -5.0 + 0.7 * i as f64).collect();
         let aff = rescale_to_match(&predicted, &target);
         let log = rescale_logistic(&predicted, &target);
         let z_aff = z_rmse(&aff, &target, None);
         let z_log = z_rmse(&log, &target, None);
         // Logistic shouldn't be drastically worse than affine on linear data.
-        assert!(z_log < z_aff * 1.5 + 1e-3, "z_log={} > 1.5 * z_aff={}", z_log, z_aff);
+        assert!(
+            z_log < z_aff * 1.5 + 1e-3,
+            "z_log={} > 1.5 * z_aff={}",
+            z_log,
+            z_aff
+        );
     }
 
     /// Degenerate input (all predictions identical): logistic should
@@ -2263,7 +2430,11 @@ mod tests {
         // is a constant function — every output equals mean(target).
         let mean_t = target.iter().sum::<f64>() / target.len() as f64;
         for v in fit {
-            assert!((v - mean_t).abs() < 1e-9 || v == 3.14, "fit value {} unexpected", v);
+            assert!(
+                (v - mean_t).abs() < 1e-9 || v == 3.14,
+                "fit value {} unexpected",
+                v
+            );
         }
     }
 
@@ -2335,9 +2506,15 @@ mod tests {
             mos.push(m);
             sigma.push(s);
             ssim2.push(v);
-            if let Some(i) = col_psnry { psnry.push(rec[i].parse().unwrap_or(f64::NAN)); }
-            if let Some(i) = col_iwssim { iwssim.push(rec[i].parse().unwrap_or(f64::NAN)); }
-            if let Some(i) = col_cvvdp { cvvdp.push(rec[i].parse().unwrap_or(f64::NAN)); }
+            if let Some(i) = col_psnry {
+                psnry.push(rec[i].parse().unwrap_or(f64::NAN));
+            }
+            if let Some(i) = col_iwssim {
+                iwssim.push(rec[i].parse().unwrap_or(f64::NAN));
+            }
+            if let Some(i) = col_cvvdp {
+                cvvdp.push(rec[i].parse().unwrap_or(f64::NAN));
+            }
         }
 
         let n = mos.len();
@@ -2347,7 +2524,10 @@ mod tests {
         // SSIMULACRA2 Z-RMSE — paper Table I value 47.63.
         let fit_ssim2 = rescale_logistic(&ssim2, &mos);
         let z_ssim2 = z_rmse(&fit_ssim2, &mos, Some(&sigma));
-        eprintln!("anchor SSIMULACRA2 Z-RMSE = {:.4} (paper 47.63, tol ±0.5)", z_ssim2);
+        eprintln!(
+            "anchor SSIMULACRA2 Z-RMSE = {:.4} (paper 47.63, tol ±0.5)",
+            z_ssim2
+        );
         assert!(
             (z_ssim2 - 47.63).abs() <= 0.5,
             "SSIMULACRA2 Z-RMSE {:.4} deviates from Mohammadi 2025's 47.63 by > 0.5",
@@ -2364,7 +2544,10 @@ mod tests {
             }
             let fit = rescale_logistic(vals, &mos);
             let z = z_rmse(&fit, &mos, Some(&sigma));
-            eprintln!("anchor {} Z-RMSE      = {:.4} (paper {:.2})", name, z, paper);
+            eprintln!(
+                "anchor {} Z-RMSE      = {:.4} (paper {:.2})",
+                name, z, paper
+            );
             assert!(
                 (z - paper).abs() <= 0.5,
                 "{} Z-RMSE {:.4} deviates from Mohammadi 2025's {:.2} by > 0.5",

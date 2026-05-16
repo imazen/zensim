@@ -9,7 +9,6 @@
 //! Gated behind `__experimental_versions` to match the profile's
 //! feature gate.
 
-
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
 fn make_test_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
@@ -152,10 +151,7 @@ fn v04_profile_name_and_score() {
 
     let s3 = r3.score();
     let s4 = r4.score();
-    assert!(
-        (0.0..=100.0).contains(&s4),
-        "v0.4 score out of range: {s4}"
-    );
+    assert!((0.0..=100.0).contains(&s4), "v0.4 score out of range: {s4}");
     assert_eq!(r4.profile(), ZensimProfile::PreviewV0_4);
     // Different mix → different output. If mlp_bytes_b3 were ignored,
     // s4 would equal s3 exactly. We want them measurably different

@@ -1614,15 +1614,12 @@ fn forward_one_bake(
     let n_inputs = model.n_inputs();
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
-    let dispatch = |p: &mut crate::mlp::Predictor<'_>,
-                    x: &[f32]|
-     -> Result<f64, ZensimError> {
+    let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
             p.predict_transformed(x)
                 .map_err(|_| ZensimError::InvalidDataLength)?
         } else {
-            p.predict(x)
-                .map_err(|_| ZensimError::InvalidDataLength)?
+            p.predict(x).map_err(|_| ZensimError::InvalidDataLength)?
         };
         Ok(out[0] as f64)
     };
@@ -2061,7 +2058,11 @@ pub(crate) fn combine_scores(
     let basic_total = n_scales * basic_per_ch * 3;
     let peak_total = n_scales * 6 * 3;
     let masked_total = if extended { n_scales * 6 * 3 } else { 0 };
-    let iw_total = if iw { n_scales * FEATURES_PER_CHANNEL_IW * 3 } else { 0 };
+    let iw_total = if iw {
+        n_scales * FEATURES_PER_CHANNEL_IW * 3
+    } else {
+        0
+    };
     let total = basic_total + peak_total + masked_total + iw_total;
 
     let mut features = Vec::with_capacity(total);

@@ -615,7 +615,10 @@ fn main() {
             }
         }
         let any_params = params.iter().any(|p| !p.is_empty());
-        (Some(transforms), if any_params { Some(params) } else { None })
+        (
+            Some(transforms),
+            if any_params { Some(params) } else { None },
+        )
     };
 
     // Build TrainingGroups (borrows feature rows from `loaded`).

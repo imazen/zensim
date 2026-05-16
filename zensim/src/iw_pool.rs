@@ -101,7 +101,14 @@ pub fn compute_iw_weights(
 
     match config.kind {
         IwWeightKind::LocalVariance => {
-            compute_local_variance(ref_plane, width, height, stride, config.kernel_half, &mut weights);
+            compute_local_variance(
+                ref_plane,
+                width,
+                height,
+                stride,
+                config.kernel_half,
+                &mut weights,
+            );
         }
         IwWeightKind::LocalGradL1 => {
             compute_gradient(ref_plane, width, height, stride, GradNorm::L1, &mut weights);
@@ -231,7 +238,11 @@ impl WeightedPool {
             num += v * v * v * v * (weights[i] as f64);
             den += weights[i] as f64;
         }
-        if den < 1e-12 { 0.0 } else { (num / den).powf(0.25) }
+        if den < 1e-12 {
+            0.0
+        } else {
+            (num / den).powf(0.25)
+        }
     }
 }
 
@@ -403,7 +414,15 @@ mod tests {
         let det = vec![0.1f32; 16];
         let mse = vec![0.01f32; 16];
         let f = IwSsimFeatures::pool_from_maps(
-            &ref_plane, 4, 4, 4, &ssim, &art, &det, &mse, IwWeightConfig::default(),
+            &ref_plane,
+            4,
+            4,
+            4,
+            &ssim,
+            &art,
+            &det,
+            &mse,
+            IwWeightConfig::default(),
         );
         assert!((f.iw_ssim_mean - 0.8).abs() < 1e-6);
         assert!((f.iw_ssim_2nd - 0.8).abs() < 1e-6);
@@ -427,7 +446,15 @@ mod tests {
         }
         let zero = vec![0.0f32; 16];
         let iw = IwSsimFeatures::pool_from_maps(
-            &ref_plane, 4, 4, 4, &ssim_err, &zero, &zero, &zero, IwWeightConfig::default(),
+            &ref_plane,
+            4,
+            4,
+            4,
+            &ssim_err,
+            &zero,
+            &zero,
+            &zero,
+            IwWeightConfig::default(),
         );
         // Unweighted: 4/16 = 0.25. IW-weighted: edge pixels (which have
         // high variance) get more weight → IW mean should be > 0.25.
@@ -442,7 +469,9 @@ mod tests {
 
     #[test]
     fn compute_iw_weights_applies_floor() {
-        let plane = vec![0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let plane = vec![
+            0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
         let config = IwWeightConfig {
             kind: IwWeightKind::LocalVariance,
             kernel_half: 1,
@@ -453,6 +482,9 @@ mod tests {
         let min_w = w.iter().copied().fold(f32::INFINITY, f32::min);
         assert!(max_w > 0.0);
         // Floor of 0.01 * max_w means min should be at least 0.01 of max
-        assert!(min_w >= 0.01 * max_w - 1e-6, "min {min_w} should be at least 0.01·max {max_w}");
+        assert!(
+            min_w >= 0.01 * max_w - 1e-6,
+            "min {min_w} should be at least 0.01·max {max_w}"
+        );
     }
 }
