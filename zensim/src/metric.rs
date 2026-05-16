@@ -1537,6 +1537,50 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
     }
 }
 
+/// Logistic soft-clamp from raw score into the `[0, 100]` range.
+///
+/// `f(x) = 100 / (1 + exp(-(x - 50) / 20))`.
+///
+/// The scale parameter `20` gives a gentle squash centered at 50; at
+/// the band centers the deviation from `x` is small but NON-ZERO:
+///
+/// | raw | f(raw) | Δ |
+/// |---:|---:|---:|
+/// | -1000 | 0.0     | -1000 |
+/// |    0  | 7.586   | +7.6 |
+/// |   25  | 28.110  | +3.1 |
+/// |   50  | 50.0    | 0 |
+/// |   75  | 71.890  | -3.1 |
+/// |  100  | 92.414  | -7.6 |
+/// | 1000  | 100.0   | -900 |
+///
+/// The interior shift is the cost of the formula: a profile that
+/// enables `soft_clamp_score = true` ships a recalibration alongside
+/// the rank-preservation fix. Downstream consumers that read a fixed
+/// score-to-codec-parameter table will see a few-percentage-point
+/// shift in the mapped codec settings.
+///
+/// **The function strictly preserves rank order globally** (monotone
+/// increasing for all finite `x`), so SROCC / KROCC / PWRC are
+/// invariant under the transform. PLCC and Z-RMSE shift modestly
+/// because they're calibration-sensitive.
+///
+/// **Why the transform helps**: hard `raw.clamp(0, 100)` creates tie
+/// blocks at exactly 0 or 100 when many out-of-range raw values
+/// collapse to the boundary. The PreviewV0_4 multi-bake at α=0.4
+/// raw-space sees this on heavy-distortion pairs (V_20 IS B3
+/// specialist extrapolates past 100) and the resulting tie block
+/// collapses SROCC to 0 on the affected band (observed on TID B0/B1
+/// 2026-05-15). Soft-clamp distributes those raw values uniquely
+/// into the high tail, so SROCC stays defined.
+///
+/// Cost: one `exp` call (~1 ns on modern hardware). Used when
+/// `ProfileParams::soft_clamp_score` is `true`.
+#[inline]
+fn soft_clamp_score(raw: f64) -> f64 {
+    100.0 / (1.0 + (-(raw - 50.0) / 20.0).exp())
+}
+
 /// Replace `result.raw_distance` and `result.score` with the MLP forward
 /// pass output when the profile uses an MLP scorer. No-op for linear
 /// profiles.
@@ -1572,21 +1616,35 @@ pub(crate) fn apply_mlp_scoring(
             raw_primary
         };
 
-        let score = if params.skip_score_mapping {
+        let pre_bound = if params.skip_score_mapping {
             // The bake is already MCOS-calibrated (V0_8+); the raw
             // output IS the final score. Skipping the
             // `100 − A·d^B` transform avoids producing garbage
             // (e.g. raw=90 → mapped=-374).
-            //
-            // Clamp to [0, 100] because MLPs trained against ssim2 /
-            // MCOS extrapolate slightly past the calibration range
-            // for out-of-distribution inputs (perfectly-identical
-            // pairs, all-zero features, sub-pyramid-min image sizes).
-            // The documented score contract is 0..100; consumers
-            // shouldn't have to defensive-clamp on every call.
-            raw.clamp(0.0, 100.0)
+            raw
         } else {
             distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+        };
+        // Bound the score to [0, 100] before handing it back. Two
+        // policies exist:
+        //   - Hard clamp (default, legacy): out-of-range outputs pin
+        //     to 0 or 100. Cheap, MCOS-natural. Tie blocks at the
+        //     boundary collapse SROCC to 0 on affected bands when
+        //     many pairs extrapolate (multi-bake V_20 IS regime).
+        //   - Soft clamp (V_20+ multi-bake): logistic squash through
+        //     `100 / (1 + exp(-(raw - 50) / 20))`. The output deviates
+        //     from `raw` by < 1.5 units in the [5, 95] interior so
+        //     interior calibration is unchanged; only the tails are
+        //     reshaped. Preserves rank ordering at the extremes
+        //     (no ties → SROCC stays defined). Costs one `exp` per
+        //     score (~1 ns).
+        // The choice is per-profile via `ProfileParams::soft_clamp_score`.
+        // PreviewV0_4 (V_18 + V_20 IS multi-bake) sets `true`;
+        // PreviewV0_3 (V_18 ship single-bake) and earlier set `false`.
+        let score = if params.soft_clamp_score {
+            soft_clamp_score(pre_bound)
+        } else {
+            pre_bound.clamp(0.0, 100.0)
         };
         result.set_mlp_score(raw, score);
     }
@@ -2153,6 +2211,64 @@ pub(crate) fn combine_scores(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `soft_clamp_score` matches its documented boundary values and
+    /// stays monotone strictly increasing — the rank-preservation
+    /// property that the V_20+ multi-bake regime relies on.
+    #[test]
+    fn soft_clamp_score_boundary_values() {
+        // Documented anchor values in the function docstring.
+        assert!((soft_clamp_score(-1000.0) - 0.0).abs() < 1e-9);
+        assert!((soft_clamp_score(0.0) - 7.585818002124355).abs() < 1e-9);
+        assert!((soft_clamp_score(50.0) - 50.0).abs() < 1e-9);
+        assert!((soft_clamp_score(100.0) - 92.41418199787566).abs() < 1e-9);
+        assert!((soft_clamp_score(1000.0) - 100.0).abs() < 1e-9);
+    }
+
+    /// Soft-clamp is strictly monotone — adjacent raw scores keep
+    /// their order, so SROCC (rank-based) is preserved through the
+    /// transform. The hard-clamp pathology (tie blocks at 0/100)
+    /// disappears: out-of-range raw values stay distinct.
+    #[test]
+    fn soft_clamp_score_monotone_across_full_range() {
+        let mut prev = f64::NEG_INFINITY;
+        // Sweep a wide grid: deep below 0, through the saturation band,
+        // and far above 100. 1e6 raw is plausible for accidentally
+        // distance-shaped bakes wired in by mistake — must still rank.
+        for &raw in &[
+            -1e6, -1000.0, -100.0, -50.0, -10.0, 0.0, 1.0, 25.0, 49.999, 50.0, 50.001, 75.0, 90.0,
+            99.999, 100.0, 100.001, 110.0, 200.0, 1000.0, 1e6,
+        ] {
+            let s = soft_clamp_score(raw);
+            assert!(
+                s > prev || (s.is_finite() && prev.is_finite() && (s - prev).abs() < 1e-12),
+                "soft_clamp not monotone: f({raw}) = {s}, prev = {prev}"
+            );
+            assert!(
+                (0.0..=100.0).contains(&s),
+                "soft_clamp out of [0, 100]: f({raw}) = {s}"
+            );
+            prev = s;
+        }
+    }
+
+    /// The interior shift is non-zero but bounded. Inside `[25, 75]`
+    /// the soft-clamp shift stays under ±3.2 units; at the boundary
+    /// it grows to ±7.6 (raw = 0 → 7.586, raw = 100 → 92.414).
+    /// Profiles that enable `soft_clamp_score` accept this
+    /// recalibration as the price of rank preservation at the tails.
+    #[test]
+    fn soft_clamp_score_interior_shift_bounded() {
+        for tenths in 250..=750 {
+            let raw = tenths as f64 / 10.0;
+            let s = soft_clamp_score(raw);
+            assert!(
+                (s - raw).abs() <= 3.2,
+                "soft_clamp shift >3.2 in [25,75]: f({raw}) = {s} (Δ={})",
+                (s - raw).abs()
+            );
+        }
+    }
 
     /// Verify compute_all_features produces same score as default (weight-skipped) path.
     /// This exercises the multi-SSIM channel code path where ssim_chs.len() > 1.

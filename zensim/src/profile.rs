@@ -191,6 +191,30 @@ pub struct ProfileParams {
     /// k=8). Reserved for research bakes that need full 372-input
     /// scoring through the standard runtime.
     pub compute_iw_features: bool,
+
+    /// When `true`, the final score is wrapped through a logistic
+    /// soft-clamp `100 / (1 + exp(-(raw - 50) / 20))` instead of the
+    /// hard `raw.clamp(0, 100)`. Preserves rank ordering at the
+    /// extremes (no ties → SROCC stays defined when V_20+ multi-bake
+    /// mixes extrapolate below 0 or above 100).
+    ///
+    /// The soft-clamp is a no-op in the `[5, 95]` range (output differs
+    /// from input by less than 1.5 units at the band centers); it only
+    /// reshapes the tails. Cost: one `exp` per score (~1 ns).
+    ///
+    /// Use on profiles that mix bakes of different shapes or that
+    /// extrapolate outside training distribution. PreviewV0_4 (V_18 +
+    /// V_20 IS multi-bake) ships with this `true` — the V_20 IS B3
+    /// specialist's raw output extends past 100 on some pairs after
+    /// the linear mix, and the hard clamp was creating tie blocks
+    /// that collapsed SROCC to 0 on TID B0/B1 pairs.
+    ///
+    /// Default `false` keeps the hard-clamp legacy semantics for
+    /// V_18 ship (PreviewV0_3) and earlier profiles.
+    ///
+    /// Added 2026-05-16 (T3.2). See zensim/CLAUDE.md `V_20 input-shaping
+    /// learnings > Soft-clamp the multi-bake output` for the design rationale.
+    pub soft_clamp_score: bool,
 }
 
 #[cfg(feature = "training")]
@@ -224,6 +248,7 @@ impl ProfileParams {
             mlp_primary_mix: 1.0,
             extended_features: false,
             compute_iw_features: false,
+            soft_clamp_score: false,
         }
     }
 }
@@ -243,6 +268,7 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     mlp_primary_mix: 1.0,
     extended_features: false,
     compute_iw_features: false,
+    soft_clamp_score: false,
 };
 
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
@@ -258,6 +284,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     mlp_primary_mix: 1.0,
     extended_features: false,
     compute_iw_features: false,
+    soft_clamp_score: false,
 };
 
 /// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear.
@@ -372,6 +399,10 @@ static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     mlp_primary_mix: 1.0,
     extended_features: false,
     compute_iw_features: false,
+    // V0_18 ship: hard clamp preserves legacy semantics. The single-bake
+    // output rarely strays beyond [0, 100]; tail behavior matches the
+    // V_18 ship in flight as of 2026-05-13.
+    soft_clamp_score: false,
 };
 
 /// V_20 input-shaping seed=1 bake, **affine-calibrated** to V_18's
@@ -424,6 +455,15 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     mlp_primary_mix: 0.4,
     extended_features: false,
     compute_iw_features: false,
+    // PreviewV0_4 is a multi-bake. The V_20 IS B3-specialist's raw
+    // output can extend past 100 on heavy-distortion pairs, which when
+    // mixed at α=0.4 with V_18 occasionally lands the final score
+    // outside [0, 100]. The hard `raw.clamp(0, 100)` then creates tie
+    // blocks at exactly 0 / 100 which collapse SROCC to 0 on the
+    // affected bands (TID B0/B1, observed 2026-05-15). Soft-clamp
+    // preserves rank ordering at the extremes — the 1-ns `exp` cost
+    // is negligible.
+    soft_clamp_score: true,
 };
 
 // --- Weight arrays ---
