@@ -63,9 +63,10 @@ fn main() {
 
     let pairs: Vec<Pair> = match corpus.as_str() {
         "konjnd" => load_konjnd(&path, max_pairs),
+        "konjnd_full" => load_konjnd_full(&path, max_pairs),
         "aic3" => load_aic3(&path, max_pairs),
         _ => {
-            eprintln!("--corpus must be konjnd or aic3, got {corpus:?}");
+            eprintln!("--corpus must be one of: konjnd, konjnd_full, aic3 (got {corpus:?})");
             std::process::exit(2);
         }
     };
@@ -201,6 +202,56 @@ fn load_konjnd(base: &Path, max: usize) -> Vec<Pair> {
             distorted: dist_path,
             human_score: mean_threshold,
             ref_basename: image_id.to_string(),
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// Full KonJND-1k loader: reads `konjnd_full_scored.csv` which lists
+/// every (source × codec × quality) variant (~76k pairs) along with the
+/// metric scores. We emit one row per pair, using `gpu_ssimulacra2 / 100`
+/// as the `human_score` anchor — matching the convention used in the
+/// existing `/mnt/v/zen/zensim-training/2026-05-14-clean/konjnd_aligned_features.csv`.
+/// The score is NOT a real human MOS for these pairs; the canonical
+/// 1008-source human-PJND anchors live in `subjective_ratings.csv`
+/// (loaded by the `konjnd` corpus type).
+fn load_konjnd_full(csv_path: &Path, max: usize) -> Vec<Pair> {
+    let mut rdr = match csv::Reader::from_path(csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        if record.len() < 5 {
+            continue;
+        }
+        let src_path = record.get(0).unwrap_or("");
+        let dist_path = record.get(1).unwrap_or("");
+        // gpu_ssimulacra2 / 100 → 0..1 score anchor
+        let score_norm: f64 = match record.get(4).and_then(|s| s.parse::<f64>().ok()) {
+            Some(v) => v / 100.0,
+            None => continue,
+        };
+        if src_path.is_empty() || dist_path.is_empty() {
+            continue;
+        }
+        let ref_pb = PathBuf::from(src_path);
+        let basename = ref_pb
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        pairs.push(Pair {
+            reference: ref_pb,
+            distorted: PathBuf::from(dist_path),
+            human_score: score_norm,
+            ref_basename: basename,
         });
         if pairs.len() >= max {
             break;
