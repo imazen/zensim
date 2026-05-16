@@ -2463,20 +2463,34 @@ mod tests {
     /// and checks that our Rust logistic fit reproduces the paper's
     /// SSIMULACRA2 Z-RMSE of 47.63 within ±0.5.
     ///
-    /// Skipped silently if the CSV isn't present (e.g. on CI without
-    /// `/mnt/v` mount). Marked `#[ignore]` would defeat the purpose
-    /// — we explicitly want this to run by default when the file is
-    /// available — so it's gated on file existence at the start.
+    /// Gated by env var per CLAUDE.md "NO GRACEFUL SKIPS IN TESTS":
+    /// the skip decision must be visible in the full chain (CI →
+    /// justfile → test invocation), never made silently inside the
+    /// test body.
+    ///
+    /// - **Default**: not run (skip with a loud notice).
+    /// - **`ZENSIM_TEST_AIC3=1`**: enable. The CSV path is the standard
+    ///   /mnt/v location (`Anchor_assessment_on_PTC_full_resolution_
+    ///   Aug_3_2025.csv`) — fails LOUDLY if the file isn't there.
+    /// - **`ZENSIM_AIC3_CSV=/path/to/custom.csv`**: override the path
+    ///   (still requires `ZENSIM_TEST_AIC3=1`).
     #[test]
     fn anchor_csv_reproduces_mohammadi_zrmse() {
-        let csv_path = "/mnt/v/input/datasets/aic3/EvaluationMetrics/Anchor_assessment_on_PTC_full_resolution_Aug_3_2025.csv";
-        if !std::path::Path::new(csv_path).exists() {
+        if std::env::var("ZENSIM_TEST_AIC3").is_err() {
             eprintln!(
-                "anchor_csv_reproduces_mohammadi_zrmse: skipping ({} not present)",
-                csv_path
+                "anchor_csv_reproduces_mohammadi_zrmse: skip — set ZENSIM_TEST_AIC3=1 to enable"
             );
             return;
         }
+        let csv_path = std::env::var("ZENSIM_AIC3_CSV").unwrap_or_else(|_| {
+            "/mnt/v/input/datasets/aic3/EvaluationMetrics/Anchor_assessment_on_PTC_full_resolution_Aug_3_2025.csv"
+                .to_string()
+        });
+        assert!(
+            std::path::Path::new(&csv_path).exists(),
+            "ZENSIM_TEST_AIC3=1 but CSV missing at {csv_path}; \
+             set ZENSIM_AIC3_CSV to override the path"
+        );
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(true)
             .from_path(csv_path)
