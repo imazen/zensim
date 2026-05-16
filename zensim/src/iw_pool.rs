@@ -35,10 +35,11 @@
 //! `streaming::process_scale_bands`.
 
 /// Choice of per-pixel info-content estimator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IwWeightKind {
     /// Local variance in a square window (kernel size set by config).
     /// Default. Closest to Wang 2011's GSM scale parameter direction.
+    #[default]
     LocalVariance,
     /// L1 norm of the gradient — `|∂x I| + |∂y I|`. Cheaper than variance,
     /// emphasises edges.
@@ -65,12 +66,6 @@ pub enum IwWeightKind {
     /// produces raw σ²_p; the log transform is applied at
     /// [`compute_iw_weights`] time.
     SteerablePyramidLogGsm,
-}
-
-impl Default for IwWeightKind {
-    fn default() -> Self {
-        Self::LocalVariance
-    }
 }
 
 /// IW weight computation parameters.

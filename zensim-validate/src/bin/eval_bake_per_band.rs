@@ -209,10 +209,10 @@ fn main() -> ExitCode {
         .to_string();
 
     writeln!(writer, "# Per-band eval: `{}`", bake_name).ok();
-    writeln!(writer, "").ok();
+    writeln!(writer).ok();
     writeln!(writer, "Bake bytes: {}", bake.len()).ok();
     writeln!(writer, "Band edges (human_score): {:?}", band_edges).ok();
-    writeln!(writer, "").ok();
+    writeln!(writer).ok();
 
     for (name, csv) in &csvs {
         let (scores, features) = match load_csv(csv) {
@@ -248,14 +248,14 @@ fn main() -> ExitCode {
             features.first().map(|f| f.len()).unwrap_or(0),
         )
         .ok();
-        writeln!(writer, "").ok();
+        writeln!(writer).ok();
         writeln!(
             writer,
             "**Aggregate**: SROCC = {:.4}, PLCC = {:.4}",
             s_all, p_all
         )
         .ok();
-        writeln!(writer, "").ok();
+        writeln!(writer).ok();
 
         // Per-band: bucket by human score
         let n_bands = band_edges.len() + 1;
@@ -298,7 +298,7 @@ fn main() -> ExitCode {
             )
             .ok();
         }
-        writeln!(writer, "").ok();
+        writeln!(writer).ok();
     }
 
     ExitCode::SUCCESS

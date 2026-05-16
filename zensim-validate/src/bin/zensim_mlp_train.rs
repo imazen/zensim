@@ -380,7 +380,9 @@ fn load_auto_transforms_from_screen(
     let lift_col = col("lift");
 
     let mut loaded = 0usize;
-    for line in lines.flatten() {
+    // map_while stops on Err — flatten() would infinite-loop on a
+    // sticky read error (per clippy::lines_filter_map_ok).
+    for line in lines.map_while(Result::ok) {
         if line.trim().is_empty() {
             continue;
         }

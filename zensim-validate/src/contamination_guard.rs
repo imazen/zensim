@@ -122,10 +122,8 @@ pub fn scrub_csv_or_die<P: AsRef<Path>>(csv_path: P) -> std::io::Result<()> {
         if let Some(idx) = line.find(',') {
             let basename = &line[..idx];
             total += 1;
-            if bl.contains(basename) {
-                if bad.len() < 10 {
-                    bad.push(basename.to_string());
-                }
+            if bl.contains(basename) && bad.len() < 10 {
+                bad.push(basename.to_string());
             }
         }
     }

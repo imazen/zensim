@@ -119,12 +119,10 @@ fn load_single_mlp(path: &PathBuf) -> LoadedMlp {
         WeightStorage::F32(w) => w.to_vec(),
         WeightStorage::F16(w) => w.iter().map(|b| zenpredict::f16_bits_to_f32(*b)).collect(),
         WeightStorage::I8 { weights, scales } => {
-            let mut out = Vec::with_capacity(weights.len());
-            for (idx, w) in weights.iter().enumerate() {
-                let o = idx % 1;
-                out.push(*w as f32 * scales[o]);
-            }
-            out
+            // Layer 1 is hidden → 1 (out_dim = 1), so scales has a single
+            // entry. No need for an idx % out_dim — every weight uses
+            // scales[0].
+            weights.iter().map(|w| *w as f32 * scales[0]).collect()
         }
     };
     let b1 = l1.biases[0];
@@ -248,26 +246,24 @@ fn main() {
     let mut b0_concat = vec![0.0f32; 384];
     for r in 0..n_in {
         for c in 0..128 {
-            w0_concat[r * 384 + c + 0] = w0_a[r * 128 + c];
+            w0_concat[r * 384 + c] = w0_a[r * 128 + c];
             w0_concat[r * 384 + c + 128] = w0_b[r * 128 + c];
             w0_concat[r * 384 + c + 256] = w0_c[r * 128 + c];
         }
     }
-    for c in 0..128 {
-        b0_concat[c + 0] = b0_a[c];
-        b0_concat[c + 128] = b0_b[c];
-        b0_concat[c + 256] = b0_c[c];
-    }
+    b0_concat[..128].copy_from_slice(&b0_a);
+    b0_concat[128..256].copy_from_slice(&b0_b);
+    b0_concat[256..384].copy_from_slice(&b0_c);
 
     // Build layer 1: w1_concat = [ca*w1_a, cb*w1_b, cc*w1_c] as a single 384-vec.
     // Bias: ca*b1_a + cb*b1_b + cc*b1_c (the output of each sub-MLP gets its bias).
     let mut w1_concat = vec![0.0f32; 384];
     for c in 0..128 {
-        w1_concat[c + 0] = ca * w1_a[c];
+        w1_concat[c] = ca * w1_a[c];
         w1_concat[c + 128] = cb * w1_b[c];
         w1_concat[c + 256] = cc * w1_c[c];
     }
-    let b1_concat = vec![ca * b1_a + cb * b1_b + cc * b1_c; 1];
+    let b1_concat = vec![ca * b1_a + cb * b1_b + cc * b1_c];
 
     eprintln!(
         "concat sanity: l0 weights={} l0 biases={} l1 weights={} l1 bias={}",
