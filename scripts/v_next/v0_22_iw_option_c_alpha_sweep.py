@@ -28,10 +28,57 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
 from pathlib import Path
 
-from scipy.stats import spearmanr
+import numpy as np
+from scipy.optimize import curve_fit
+from scipy.stats import kendalltau, pearsonr, spearmanr
+
+
+def _logistic_4p(x: np.ndarray, b1: float, b2: float, b3: float, b4: float) -> np.ndarray:
+    """4-parameter logistic per Mohammadi 2025 / VQEG."""
+    return b1 * (0.5 - 1.0 / (1.0 + np.exp(b2 * (x - b3)))) + b4 * x + (b1 / 2.0)
+
+
+def rescale_logistic(predicted: list[float], target: list[float]) -> list[float]:
+    """Map predicted into target's MOS scale via 4-parameter logistic.
+
+    Falls back to identity-z if the curve_fit fails. This matches the
+    Rust eval harness's `rescale_logistic` in dataset_metric_baseline.rs.
+    """
+    pred = np.asarray(predicted, dtype=np.float64)
+    tgt = np.asarray(target, dtype=np.float64)
+    if len(pred) < 8 or pred.std() < 1e-9 or tgt.std() < 1e-9:
+        # Identity-z fallback
+        return [(p - pred.mean()) / max(pred.std(), 1e-12) * tgt.std() + tgt.mean() for p in pred]
+    # Auto-detect polarity: if Pearson(pred, tgt) negative, flip pred sign
+    p_corr = float(np.corrcoef(pred, tgt)[0, 1])
+    flipped = pred if p_corr >= 0 else -pred
+    b1_0 = float(tgt.max() - tgt.min())
+    b2_0 = 1.0 / max(flipped.std(), 1e-6)
+    b3_0 = float(flipped.mean())
+    b4_0 = 0.0
+    try:
+        popt, _ = curve_fit(
+            _logistic_4p, flipped, tgt, p0=[b1_0, b2_0, b3_0, b4_0], maxfev=5000
+        )
+        rescaled = _logistic_4p(flipped, *popt)
+        if np.any(np.isnan(rescaled)) or np.any(np.isinf(rescaled)):
+            raise RuntimeError("nan-bearing rescale")
+        return rescaled.tolist()
+    except Exception:
+        # Identity-z fallback
+        return [(p - flipped.mean()) / max(flipped.std(), 1e-12) * tgt.std() + tgt.mean() for p in flipped]
+
+
+def z_rmse(predicted: list[float], target: list[float]) -> float:
+    """σ-normalized RMSE — corpus-wide σ (Mohammadi 2025 form)."""
+    pred = np.asarray(predicted, dtype=np.float64)
+    tgt = np.asarray(target, dtype=np.float64)
+    sd = max(float(tgt.std()), 1e-12)
+    return float(np.sqrt(np.mean(((pred - tgt) / sd) ** 2)))
 
 
 def load_per_pair(csv_path: Path) -> dict[tuple[str, str, str], dict]:
@@ -162,6 +209,37 @@ def main() -> int:
         sd = max(var**0.5, 1e-12)
         return [(v - m) / sd for v in vals]
 
+    def full_panel(pred: list[float], tgt: list[float]) -> dict[str, float]:
+        """Compute SROCC + PLCC + KROCC + PWRC-proxy + Z-RMSE (Mohammadi 2025).
+
+        PLCC is computed AFTER 4-parameter logistic rescale (per Mohammadi
+        eq. 5), Z-RMSE is corpus-wide σ-normalized RMSE on the same
+        rescaled predictions. PWRC is approximated as Pearson on
+        rank-transformed values (the Wang-Liu form lives in the Rust
+        harness; this script uses a simple corr-of-ranks as proxy).
+        """
+        srocc = abs(spearmanr(pred, tgt).correlation)
+        krocc = abs(kendalltau(pred, tgt).correlation)
+        rescaled = rescale_logistic(pred, tgt)
+        plcc = abs(pearsonr(rescaled, tgt).correlation)
+        zr = z_rmse(rescaled, tgt)
+        # PWRC proxy: Pearson on rank-transformed values, weighted by
+        # extremeness — Wang & Liu form, simplified.
+        rs_p = np.argsort(np.argsort(np.asarray(pred))).astype(float)
+        rs_t = np.argsort(np.argsort(np.asarray(tgt))).astype(float)
+        mid = (len(pred) - 1) / 2.0
+        w = np.abs(rs_t - mid) / max(mid, 1e-12)
+        if w.sum() < 1e-12:
+            pwrc = 0.0
+        else:
+            wm_p = float(np.sum(w * rs_p) / w.sum())
+            wm_t = float(np.sum(w * rs_t) / w.sum())
+            num = float(np.sum(w * (rs_p - wm_p) * (rs_t - wm_t)))
+            d1 = float(np.sum(w * (rs_p - wm_p) ** 2))
+            d2 = float(np.sum(w * (rs_t - wm_t) ** 2))
+            pwrc = abs(num / max((d1 * d2) ** 0.5, 1e-12))
+        return {"srocc": srocc, "plcc": plcc, "krocc": krocc, "pwrc": pwrc, "zrmse": zr}
+
     rows_out: list[dict] = []
     for ds in sorted(joined):
         rows = joined[ds]
@@ -171,36 +249,32 @@ def main() -> int:
         v02_arr = [r["v02_raw"] for r in rows]
         ssim2_arr = [r["fast_ssim2"] for r in rows]
         butter_arr = [r["butter"] for r in rows]
-        srocc_v02 = abs(spearmanr(v02_arr, humans).correlation)
-        srocc_ssim2 = abs(spearmanr(ssim2_arr, humans).correlation)
-        srocc_butter = abs(spearmanr(butter_arr, humans).correlation)
-        srocc_v18 = abs(spearmanr(v18_arr, humans).correlation)
-        srocc_v22 = abs(spearmanr(v22_arr, humans).correlation)
+        baseline_v02 = full_panel(v02_arr, humans)
+        baseline_ssim2 = full_panel(ssim2_arr, humans)
+        baseline_butter = full_panel(butter_arr, humans)
+        baseline_v18 = full_panel(v18_arr, humans)
+        baseline_v22 = full_panel(v22_arr, humans)
         # Per-bake z-normalization before mix — the offline `ensemble_mix`
         # tool's approach (CLAUDE.md V_20 learnings § "Multi-bake runtime").
-        # Removes scale-mismatch effects between V_18 ship's raw distribution
-        # (mean ~50, stdev ~25) and V_22-IW's (mean ~95, stdev ~5 due to
-        # upper saturation). Z-space mix is what PreviewV0_4's runtime
-        # CANNOT do without ProfileParams changes — it mixes in raw space.
         v18_z = zscore(v18_arr)
         v22_z = zscore(v22_arr)
         for alpha in alphas:
             mix_raw = [alpha * a + (1 - alpha) * b for a, b in zip(v18_arr, v22_arr)]
             mix_z = [alpha * a + (1 - alpha) * b for a, b in zip(v18_z, v22_z)]
-            srocc_mix_raw = abs(spearmanr(mix_raw, humans).correlation)
-            srocc_mix_z = abs(spearmanr(mix_z, humans).correlation)
+            panel_raw = full_panel(mix_raw, humans)
+            panel_z = full_panel(mix_z, humans)
             rows_out.append(
                 {
                     "dataset": ds,
                     "n": len(rows),
                     "alpha": alpha,
-                    "srocc_mix": srocc_mix_raw,
-                    "srocc_mix_z": srocc_mix_z,
-                    "srocc_v18": srocc_v18,
-                    "srocc_v22": srocc_v22,
-                    "srocc_v02": srocc_v02,
-                    "srocc_ssim2": srocc_ssim2,
-                    "srocc_butter": srocc_butter,
+                    "raw": panel_raw,
+                    "z": panel_z,
+                    "v18": baseline_v18,
+                    "v22": baseline_v22,
+                    "v02": baseline_v02,
+                    "ssim2": baseline_ssim2,
+                    "butter": baseline_butter,
                 }
             )
 
@@ -208,8 +282,13 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:
         f.write("# V_22-IW Option C α-sweep — V_18 ship × V_22-IW seed=1 multi-bake (2026-05-16)\n\n")
-        f.write("Post-hoc analysis of `α × V_18_raw + (1−α) × V_22-IW_raw` per-pair mix\n")
-        f.write("at α ∈ " + ", ".join(f"{a:.2f}" for a in alphas) + ".\n\n")
+        f.write("Post-hoc full Mohammadi panel sweep of `α × V_18_raw + (1−α) × V_22-IW_raw`\n")
+        f.write("per-pair mix at α ∈ " + ", ".join(f"{a:.2f}" for a in alphas) + ".\n\n")
+        f.write("Per CLAUDE.md `SROCC-only verdicts BANNED` (2026-05-15) the verdict\n")
+        f.write("uses the full panel — SROCC + PLCC + KROCC + PWRC + Z-RMSE — at each\n")
+        f.write("(corpus, α). PLCC + Z-RMSE are computed after a 4-parameter logistic\n")
+        f.write("rescale (Mohammadi 2025 eq. 5) so they're calibration-aware. PWRC is a\n")
+        f.write("Wang-Liu-form proxy: weighted Pearson on rank-transformed values.\n\n")
         f.write("**Inputs**:\n")
         f.write(f"- V_18 ship per-pair: `{args.v18}`\n")
         f.write(f"- V_22-IW seed=1 per-pair: `{args.v22iw}`\n\n")
@@ -217,94 +296,98 @@ def main() -> int:
         for ds in sorted(joined):
             ds_rows = [r for r in rows_out if r["dataset"] == ds]
             n = ds_rows[0]["n"]
-            v18 = ds_rows[0]["srocc_v18"]
-            v22 = ds_rows[0]["srocc_v22"]
-            v02 = ds_rows[0]["srocc_v02"]
-            ssim2 = ds_rows[0]["srocc_ssim2"]
-            butter = ds_rows[0]["srocc_butter"]
+            v18 = ds_rows[0]["v18"]
+            v22 = ds_rows[0]["v22"]
+            ssim2 = ds_rows[0]["ssim2"]
             f.write(f"## {ds} (n = {n:,})\n\n")
-            f.write(
-                f"Baselines (no mix): V_0_2 = {v02:.4f}, V_18 ship = **{v18:.4f}**, "
-                f"V_22-IW = **{v22:.4f}**, fast-ssim2 = {ssim2:.4f}, butter = {butter:.4f}.\n\n"
-            )
-            f.write(
-                "| α (V_18 weight) | SROCC raw-mix | SROCC z-mix | Δ raw vs V_18 | Δ z vs V_18 |\n"
-            )
-            f.write("|---|---:|---:|---:|---:|\n")
-            for r in ds_rows:
-                d_v18_raw = r["srocc_mix"] - v18
-                d_v18_z = r["srocc_mix_z"] - v18
-                marker = ""
-                if r["alpha"] in (0.0, 1.0):
-                    marker = " (= V_22-IW alone)" if r["alpha"] == 0.0 else " (= V_18 alone)"
+            f.write("Baselines (no mix), full Mohammadi panel:\n\n")
+            f.write("| Metric | SROCC | PLCC | KROCC | PWRC | Z-RMSE |\n")
+            f.write("|---|---:|---:|---:|---:|---:|\n")
+            for lbl, b in [
+                ("V_18 ship", v18),
+                ("V_22-IW", v22),
+                ("V_0_2", ds_rows[0]["v02"]),
+                ("fast-ssim2", ssim2),
+                ("butter", ds_rows[0]["butter"]),
+            ]:
                 f.write(
-                    f"| {r['alpha']:.2f}{marker} | {r['srocc_mix']:.4f} | "
-                    f"{r['srocc_mix_z']:.4f} | {d_v18_raw:+.4f} | {d_v18_z:+.4f} |\n"
+                    f"| {lbl} | {b['srocc']:.4f} | {b['plcc']:.4f} | "
+                    f"{b['krocc']:.4f} | {b['pwrc']:.4f} | {b['zrmse']:.3f} |\n"
                 )
             f.write("\n")
+            for mix_label, mix_key in (("RAW-mix", "raw"), ("Z-mix", "z")):
+                f.write(f"### α sweep — {mix_label} ({ds})\n\n")
+                f.write(
+                    "| α | SROCC | PLCC | KROCC | PWRC | Z-RMSE | Δ SROCC vs V_18 | Δ Z-RMSE vs V_18 |\n"
+                )
+                f.write("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+                for r in ds_rows:
+                    panel = r[mix_key]
+                    d_srocc = panel["srocc"] - v18["srocc"]
+                    # For Z-RMSE: LOWER is better, so Δ is panel - v18 (positive = worse)
+                    d_zr = panel["zrmse"] - v18["zrmse"]
+                    marker = ""
+                    if r["alpha"] in (0.0, 1.0):
+                        marker = " (= V_22-IW alone)" if r["alpha"] == 0.0 else " (= V_18 alone)"
+                    f.write(
+                        f"| {r['alpha']:.2f}{marker} | {panel['srocc']:.4f} | "
+                        f"{panel['plcc']:.4f} | {panel['krocc']:.4f} | "
+                        f"{panel['pwrc']:.4f} | {panel['zrmse']:.3f} | "
+                        f"{d_srocc:+.4f} | {d_zr:+.3f} |\n"
+                    )
+                f.write("\n")
 
-        # Pareto summary across datasets — raw and z-normalized mixes
-        f.write("## Cross-corpus Pareto picks (RAW-output mix)\n\n")
-        f.write("For each α, raw-space mix SROCC per corpus.\n\n")
+        # Cross-corpus picks per stat — Z-RMSE is the load-bearing stat
+        # for V_22-IW because the failure mode is calibration-saturation,
+        # which SROCC misses but Z-RMSE catches.
         datasets = sorted(joined)
-        f.write("| α | " + " | ".join(datasets) + " |\n")
-        f.write("|---|" + "|".join(["---:"] * len(datasets)) + "|\n")
-        for alpha in alphas:
-            cells = [f"{alpha:.2f}"]
-            for ds in datasets:
-                r = next(
-                    r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
-                )
-                cells.append(f"{r['srocc_mix']:.4f}")
-            f.write("| " + " | ".join(cells) + " |\n")
-        f.write("\n")
-        f.write("## Cross-corpus Pareto picks (Z-NORMALIZED mix)\n\n")
-        f.write("Per-bake z-normalization before mix — the offline `ensemble_mix`\n")
-        f.write("tool's approach. Removes scale-mismatch between V_18 (mean ~50,\n")
-        f.write("stdev ~25) and V_22-IW (mean ~95, stdev ~5 due to upper saturation).\n\n")
-        f.write("| α | " + " | ".join(datasets) + " |\n")
-        f.write("|---|" + "|".join(["---:"] * len(datasets)) + "|\n")
-        for alpha in alphas:
-            cells = [f"{alpha:.2f}"]
-            for ds in datasets:
-                r = next(
-                    r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
-                )
-                cells.append(f"{r['srocc_mix_z']:.4f}")
-            f.write("| " + " | ".join(cells) + " |\n")
-        f.write("\n")
+        for stat_label, stat_key, lower_is_better in (
+            ("SROCC", "srocc", False),
+            ("Z-RMSE (lower = better)", "zrmse", True),
+            ("PLCC", "plcc", False),
+            ("PWRC", "pwrc", False),
+        ):
+            for mix_label, mix_key in (("RAW", "raw"), ("Z-NORM", "z")):
+                f.write(f"## Cross-corpus {stat_label} ({mix_label} mix)\n\n")
+                f.write("| α | " + " | ".join(datasets) + " |\n")
+                f.write("|---|" + "|".join(["---:"] * len(datasets)) + "|\n")
+                for alpha in alphas:
+                    cells = [f"{alpha:.2f}"]
+                    for ds in datasets:
+                        r = next(
+                            r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
+                        )
+                        cells.append(f"{r[mix_key][stat_key]:.4f}")
+                    f.write("| " + " | ".join(cells) + " |\n")
+                f.write("\n")
 
-        # Decision aids — for raw-mix and z-mix separately
-        for mix_label, mix_key in (("RAW-mix", "srocc_mix"), ("Z-mix", "srocc_mix_z")):
-            f.write(f"## Decision aid ({mix_label}): how many corpora does each α beat fast-ssim2 on?\n\n")
-            f.write("| α | wins vs ssim2 | total | corpora won |\n")
-            f.write("|---|--:|--:|---|\n")
+        # CLAUDE.md ship gate: ≥3 of 5 stats agree that mix beats V_18.
+        f.write("## Multi-stat ship gate per CLAUDE.md (≥3 of 5 stats beat V_18)\n\n")
+        f.write("For each (mix, α), count of stats (SROCC, PLCC, KROCC, PWRC, Z-RMSE)\n")
+        f.write("where the mix beats V_18 ship on each corpus. Mix-vs-V_18 win:\n")
+        f.write("higher SROCC/PLCC/KROCC/PWRC, LOWER Z-RMSE.\n\n")
+        for mix_label, mix_key in (("RAW", "raw"), ("Z-NORM", "z")):
+            f.write(f"### {mix_label} mix\n\n")
+            f.write("| α | " + " | ".join(f"{ds} (stats won)" for ds in datasets) + " | total ship-grade |\n")
+            f.write("|---|" + "|".join(["---"] * (len(datasets) + 1)) + "|\n")
             for alpha in alphas:
-                wins = []
+                cells = [f"{alpha:.2f}"]
+                ship_grade_count = 0
                 for ds in datasets:
-                    r = next(
-                        r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
-                    )
-                    if r[mix_key] > r["srocc_ssim2"]:
-                        wins.append(ds)
-                f.write(
-                    f"| {alpha:.2f} | {len(wins)} | {len(datasets)} | {', '.join(wins) if wins else '—'} |\n"
-                )
-            f.write("\n")
-            f.write(f"## Decision aid ({mix_label}): how many corpora does each α beat V_18 ship on?\n\n")
-            f.write("| α | wins vs V_18 | total | corpora won |\n")
-            f.write("|---|--:|--:|---|\n")
-            for alpha in alphas:
-                wins = []
-                for ds in datasets:
-                    r = next(
-                        r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
-                    )
-                    if r[mix_key] > r["srocc_v18"]:
-                        wins.append(ds)
-                f.write(
-                    f"| {alpha:.2f} | {len(wins)} | {len(datasets)} | {', '.join(wins) if wins else '—'} |\n"
-                )
+                    r = next(r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha)
+                    panel = r[mix_key]
+                    base = r["v18"]
+                    won = 0
+                    for stat in ("srocc", "plcc", "krocc", "pwrc"):
+                        if panel[stat] > base[stat]:
+                            won += 1
+                    if panel["zrmse"] < base["zrmse"]:
+                        won += 1
+                    cells.append(f"{won}/5")
+                    if won >= 3:
+                        ship_grade_count += 1
+                cells.append(f"**{ship_grade_count}/{len(datasets)}**" if ship_grade_count > 0 else "—")
+                f.write("| " + " | ".join(cells) + " |\n")
             f.write("\n")
 
     print(f"wrote {args.out}")

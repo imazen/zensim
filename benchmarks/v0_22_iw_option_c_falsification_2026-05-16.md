@@ -3,21 +3,82 @@
 **Status**: T1.4 (V_18 + V_22-IW multi-bake α sweep) closed with
 negative result. Both raw-output linear mix AND per-bake-z-normalized
 mix sweep fail to find an α ∈ (0, 1) that Pareto-improves over V_18
-ship alone on any held-out corpus.
+ship alone on any held-out corpus per the full Mohammadi 2025 panel
+(SROCC + PLCC + KROCC + PWRC + Z-RMSE). Earlier draft used SROCC
+alone, which CLAUDE.md `SROCC-only verdicts BANNED` forbids; this
+revision uses the full panel and confirms the verdict (and refines
+the V_22-IW-alone characterization at α=0.0).
 
-## Key numbers — α-sweep mix SROCC
+## V_22-IW alone (α=0.0) vs V_18 ship — full Mohammadi panel
 
-The mix `α × V_18_raw + (1 − α) × V_22-IW_raw` at α ∈ {0.0, 0.3,
-0.5, 0.7, 0.9, 1.0}:
+The unambiguous panel reading at the endpoint that's *not* the V_18
+ship alone:
 
-| α | CID22 raw-mix | CID22 z-mix | KADID raw-mix | KADID z-mix | TID raw-mix | TID z-mix |
+| Corpus | Stat | V_18 ship | V_22-IW | Δ (better/worse) |
+|---|---|---:|---:|:--|
+| CID22 | SROCC | 0.8933 | 0.6122 | **−0.281 (worse)** |
+| CID22 | PLCC  | 0.8911 | 0.5900 | **−0.301 (worse)** |
+| CID22 | KROCC | 0.7081 | 0.4283 | **−0.280 (worse)** |
+| CID22 | PWRC  | 0.9373 | 0.7270 | **−0.210 (worse)** |
+| CID22 | Z-RMSE| 0.454  | 0.807  | **+0.354 (worse, lower is better)** |
+| KADID | SROCC | 0.9387 | 0.9447 | +0.006 (better) |
+| KADID | PLCC  | 0.9395 | 0.9458 | +0.006 (better) |
+| KADID | KROCC | 0.7855 | 0.7949 | +0.009 (better) |
+| KADID | PWRC  | 0.9631 | 0.9675 | +0.004 (better) |
+| KADID | Z-RMSE| 0.343  | 0.325  | **−0.018 (better)** |
+| TID   | SROCC | 0.9526 | 0.9580 | +0.005 (better) |
+| TID   | PLCC  | 0.9554 | 0.9585 | +0.003 (better) |
+| TID   | KROCC | 0.8110 | 0.8200 | +0.009 (better) |
+| TID   | PWRC  | 0.9702 | 0.9741 | +0.004 (better) |
+| TID   | Z-RMSE| 0.295  | 0.285  | **−0.010 (better)** |
+
+V_22-IW alone hits **5/5 stats better than V_18** on KADID, **5/5
+better** on TID, **0/5 better** on CID22. Per CLAUDE.md's
+multi-stat agreement rule ("ships when at least 3 of 5 stats agree
+on improvement"), V_22-IW alone has 2 of 3 ship-grade corpora
+above threshold — a strong partial confirmation that the IW-SSIM
+training target produces a genuinely better metric on synthetic
+distortions (KADID + TID), with the CID22 collapse remaining the
+fatal flaw.
+
+Critically: the Z-RMSE column makes the V_22-IW wins **real wins,
+not SROCC artifacts**. V_22-IW's predictions on KADID + TID are
+σ-normalized closer to the human MOS than V_18's are. This is
+calibration improvement, not just rank-shuffling.
+
+## Key numbers — α-sweep mix SROCC + Z-RMSE
+
+The mix `α × V_18_raw + (1 − α) × V_22-IW_raw`. Z-RMSE values
+LOWER = better:
+
+| α | CID22 SROCC | CID22 Z-RMSE | KADID SROCC | KADID Z-RMSE | TID SROCC | TID Z-RMSE |
 |---|---:|---:|---:|---:|---:|---:|
-| 0.00 (V_22-IW alone) | 0.6122 | 0.6122 | 0.9447 | 0.9447 | 0.9580 | 0.9580 |
-| 0.30 | 0.6444 | 0.2972 | 0.8605 | 0.9229 | 0.8901 | 0.9291 |
-| 0.50 | 0.8474 | 0.3579 | 0.9271 | 0.0109 | 0.9434 | 0.0301 |
-| 0.70 | 0.8811 | 0.7886 | 0.9351 | 0.9050 | 0.9497 | 0.9252 |
-| 0.90 | 0.8910 | 0.8823 | 0.9379 | 0.9349 | 0.9519 | 0.9494 |
-| 1.00 (V_18 alone) | 0.8933 | 0.8933 | 0.9387 | 0.9387 | 0.9526 | 0.9526 |
+| 0.00 (V_22-IW alone) | 0.6122 | **0.807** | 0.9447 | **0.325** | 0.9580 | **0.285** |
+| 0.30 | 0.6444 | 0.733 | 0.8605 | 0.508 | 0.8901 | 0.480 |
+| 0.50 | 0.8474 | 0.527 | 0.9271 | 0.372 | 0.9434 | 0.325 |
+| 0.70 | 0.8811 | 0.474 | 0.9351 | 0.352 | 0.9497 | 0.304 |
+| 0.90 | 0.8910 | 0.457 | 0.9379 | 0.345 | 0.9519 | 0.297 |
+| 1.00 (V_18 alone) | 0.8933 | **0.454** | 0.9387 | **0.343** | 0.9526 | **0.295** |
+
+Observations:
+1. **CID22 column is monotonic in α**: Z-RMSE descends 0.807 → 0.454
+   as α rises 0.0 → 1.0. No intermediate α is better than V_18 alone.
+2. **KADID and TID Z-RMSE are MINIMIZED at α=0.0** (V_22-IW alone):
+   KADID 0.325 (best), TID 0.285 (best). Any mix introduces worse
+   calibration error on these corpora.
+3. **No α ∈ (0, 1) Pareto-improves over both endpoints simultaneously
+   on any single stat across all 3 corpora.**
+
+## Z-NORM mix is catastrophic at intermediate α
+
+Z-NORM mix at α=0.5 on KADID/TID:
+- KADID Z-RMSE: 0.999 (vs V_18 0.343 — 2.9x worse)
+- TID Z-RMSE: 0.988 (vs V_18 0.295 — 3.3x worse)
+
+This is the destructive interference signal — per-bake z-normalization
+flips signs on pairs where V_18 and V_22-IW disagree on rank, and
+the mix cancels both. Raw-space mix avoids this trap but still
+underperforms V_18 alone.
 
 ## Verdict
 
