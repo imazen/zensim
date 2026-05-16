@@ -50,8 +50,8 @@ echo
 "$EVAL_BIN" \
   --kadid /mnt/v/dataset/kadid10k \
   --tid /mnt/v/dataset/tid2013 \
-  --cid22 /mnt/v/dataset/cid22 \
-  --konjnd /mnt/v/dataset/konjnd-1k \
+  --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
+  --konjnd /mnt/v/datasets/KonJND-1k/KonJND-1k \
   --aic3 /mnt/v/dataset/aic3_ctc_epfl/decoded/info.csv \
   --v04-bake "$BAKE" \
   --max-pairs 99999 \
