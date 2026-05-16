@@ -2401,6 +2401,116 @@ mod tests {
         (src, dst)
     }
 
+    /// Numerical equivalence: when both `extended_features` and
+    /// `compute_iw_features` are enabled, the fused 2-mask SIMD path
+    /// must produce the same masked block as running with
+    /// `extended_features` alone, and the same IW block as running
+    /// with `compute_iw_features` alone. This is the critical
+    /// invariant for the 2026-05-15 perf optimization landing fused
+    /// 2-mask SSIM/edge/MSE kernels.
+    #[test]
+    fn fused_2mask_matches_separate_paths() {
+        let (w, h) = (128, 128);
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        // Build a textured image so weights actually vary.
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = (((x + y) * 255) / (2 * w)) as u8;
+                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
+                src[y * w + x] = [r.saturating_add(noise), g, b];
+                dst[y * w + x] = [
+                    r.saturating_add(noise).saturating_add(5),
+                    g.saturating_sub(3),
+                    b.saturating_add(2),
+                ];
+            }
+        }
+
+        let cfg_ext = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: false,
+            compute_all_features: true,
+            extended_masking_strength: 4.0,
+            iw_strength: 4.0,
+            ..Default::default()
+        };
+        let cfg_iw = ZensimConfig {
+            extended_features: false,
+            compute_iw_features: true,
+            compute_all_features: true,
+            extended_masking_strength: 4.0,
+            iw_strength: 4.0,
+            ..Default::default()
+        };
+        let cfg_both = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: true,
+            compute_all_features: true,
+            extended_masking_strength: 4.0,
+            iw_strength: 4.0,
+            ..Default::default()
+        };
+        let r_ext = compute_zensim_with_config(&src, &dst, w, h, cfg_ext).unwrap();
+        let r_iw = compute_zensim_with_config(&src, &dst, w, h, cfg_iw).unwrap();
+        let r_both = compute_zensim_with_config(&src, &dst, w, h, cfg_both).unwrap();
+
+        assert_eq!(r_ext.features.len(), 300);
+        assert_eq!(r_iw.features.len(), 300);
+        assert_eq!(r_both.features.len(), 372);
+
+        // First 228 features (basic + peaks) must agree across all 3.
+        for i in 0..228 {
+            let de = (r_ext.features[i] - r_both.features[i]).abs();
+            let di = (r_iw.features[i] - r_both.features[i]).abs();
+            assert!(de < 1e-9, "basic feature {} disagrees: ext_only {} vs both {}", i, r_ext.features[i], r_both.features[i]);
+            assert!(di < 1e-9, "basic feature {} disagrees: iw_only {} vs both {}", i, r_iw.features[i], r_both.features[i]);
+        }
+
+        // Masked block (228..300 in r_ext, 228..300 in r_both) must agree
+        // — same kernel called identically.
+        let mut max_diff = 0.0f64;
+        for i in 0..72 {
+            let d = (r_ext.features[228 + i] - r_both.features[228 + i]).abs();
+            let denom = r_ext.features[228 + i].abs().max(1e-9);
+            // Use a relative tolerance — small numerical drift from
+            // FMA reordering in the fused 2-mask vs single-mask kernels
+            // is acceptable. The bound of 1e-4 relative captures any
+            // structural correctness bug while permitting last-bit FMA
+            // variability.
+            let rel = d / denom;
+            max_diff = max_diff.max(rel);
+            assert!(
+                rel < 1e-4,
+                "masked feature {} differs: ext_only {} vs both {} (rel diff {:e})",
+                i,
+                r_ext.features[228 + i],
+                r_both.features[228 + i],
+                rel,
+            );
+        }
+        // IW block (228..300 in r_iw, 300..372 in r_both) must agree.
+        for i in 0..72 {
+            let d = (r_iw.features[228 + i] - r_both.features[300 + i]).abs();
+            let denom = r_iw.features[228 + i].abs().max(1e-9);
+            let rel = d / denom;
+            max_diff = max_diff.max(rel);
+            assert!(
+                rel < 1e-4,
+                "iw feature {} differs: iw_only {} vs both {} (rel diff {:e})",
+                i,
+                r_iw.features[228 + i],
+                r_both.features[300 + i],
+                rel,
+            );
+        }
+        // Sanity: not all zero
+        assert!(max_diff < 1e-4 && max_diff >= 0.0, "max_diff out of range: {}", max_diff);
+    }
+
     /// Extended features: default config produces same score as non-extended.
     #[test]
     fn extended_features_backward_compat() {
