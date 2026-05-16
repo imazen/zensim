@@ -1074,7 +1074,7 @@ fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
 fn ranks(v: &[f64]) -> Vec<f64> {
     let n = v.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap_or(std::cmp::Ordering::Equal));
+    idx.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
     let mut r = vec![0.0f64; n];
     let mut i = 0;
     while i < n {

@@ -2252,7 +2252,13 @@ fn spearman(a: &[f64], b: &[f64]) -> f64 {
 fn ranks(v: &[f64]) -> Vec<f64> {
     let n = v.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap_or(std::cmp::Ordering::Equal));
+    // `total_cmp` is NaN-safe (NaN sorts deterministically), unlike
+    // `partial_cmp(...).unwrap_or(Equal)` which violates total order
+    // when NaN is present and panics in Rust 1.81+ sort. NaN
+    // predictions arise when a transform-bearing bake produces flat
+    // output for heavy-distortion pairs — keep the per-band SROCC
+    // path robust against them.
+    idx.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
     let mut r = vec![0.0f64; n];
     let mut i = 0;
     while i < n {
@@ -2295,7 +2301,8 @@ fn bootstrap_srocc_ci_95(a: &[f64], b: &[f64], iters: usize, seed: u64) -> (f64,
         }
         samples.push(spearman(&a_b, &b_b).abs());
     }
-    samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // total_cmp: NaN-safe deterministic ordering. See ranks() comment.
+    samples.sort_by(|a, b| a.total_cmp(b));
     let lo_idx = ((iters as f64) * 0.025).round() as usize;
     let hi_idx = (((iters as f64) * 0.975).round() as usize).min(iters - 1);
     (samples[lo_idx], samples[hi_idx])
@@ -2559,5 +2566,43 @@ mod tests {
         assert_within("PSNR-Y ", &psnry, 13.36);
         assert_within("IW-SSIM", &iwssim, 31.51);
         assert_within("CVVDP  ", &cvvdp, 9.45);
+    }
+
+    /// Regression test: ranks() must not panic when inputs contain NaN.
+    ///
+    /// The original `partial_cmp(...).unwrap_or(Ordering::Equal)` pattern
+    /// violated total order when NaN was present — `5.0 == NaN` AND
+    /// `6.0 == NaN` but `5.0 != 6.0` is a transitivity break and Rust
+    /// 1.81+ sort panics with "user-provided comparison function does
+    /// not correctly implement a total order". The fix uses
+    /// `f64::total_cmp` which is NaN-safe.
+    ///
+    /// This NaN is real, not synthetic: transform-bearing bakes
+    /// (V_20+) on heavy-distortion pairs (TID B0/B1) sometimes produce
+    /// flat scaler output → flat predictions → NaN in the resulting
+    /// ranks. The eval harness must survive this rather than crashing
+    /// halfway through a multi-corpus run.
+    #[test]
+    fn ranks_handles_nan_without_panic() {
+        let v = [0.5_f64, f64::NAN, 0.3, 0.8, f64::NAN, 0.1];
+        let r = ranks(&v);
+        // 6 elements → ranks sum to 0+1+2+3+4+5 = 15 regardless of NaN.
+        let sum: f64 = r.iter().sum();
+        assert!(
+            (sum - 15.0).abs() < 1e-9,
+            "rank sum should be 15 (0..5 ranks); got {sum} (ranks {r:?})"
+        );
+        // Non-NaN values must be ranked correctly relative to each other.
+        // total_cmp places NaN at the high end, so 0.1, 0.3, 0.5, 0.8
+        // get ranks 0, 1, 2, 3 (in some order — the two NaNs land at 4, 5).
+        let non_nan_indices = [5usize, 2, 0, 3]; // 0.1, 0.3, 0.5, 0.8
+        for (rank_pos, &i) in non_nan_indices.iter().enumerate() {
+            assert!(
+                (r[i] - rank_pos as f64).abs() < 1e-9,
+                "v[{i}]={} should have rank {rank_pos}, got {}",
+                v[i],
+                r[i]
+            );
+        }
     }
 }

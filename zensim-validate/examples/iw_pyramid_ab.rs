@@ -224,7 +224,7 @@ fn spearman(a: &[f32], b: &[f32]) -> f64 {
 fn ranks(v: &[f32]) -> Vec<usize> {
     let n = v.len();
     let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&i, &j| v[i].partial_cmp(&v[j]).unwrap_or(std::cmp::Ordering::Equal));
+    idx.sort_by(|&i, &j| v[i].total_cmp(&v[j]));
     let mut r = vec![0usize; n];
     for (rank, &i) in idx.iter().enumerate() {
         r[i] = rank;
@@ -242,5 +242,5 @@ fn topk_overlap(a: &[f32], b: &[f32], k: usize) -> usize {
 }
 
 fn b_cmp(x: f32, y: f32) -> std::cmp::Ordering {
-    x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
+    x.total_cmp(&y)
 }

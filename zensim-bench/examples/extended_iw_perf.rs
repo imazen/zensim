@@ -121,7 +121,7 @@ fn main() {
             times.push(elapsed);
             n_features = result.features().len();
         }
-        times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        times.sort_by(|a, b| a.total_cmp(b));
         let min = times[0];
         let median = times[times.len() / 2];
         let mean: f64 = times.iter().sum::<f64>() / times.len() as f64;

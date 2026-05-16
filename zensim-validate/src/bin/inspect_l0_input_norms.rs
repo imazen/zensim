@@ -149,7 +149,7 @@ fn main() -> ExitCode {
 
     // Top-K and bottom-K.
     let mut idx_sorted: Vec<usize> = (0..in_dim).collect();
-    idx_sorted.sort_by(|&a, &b| norms[b].partial_cmp(&norms[a]).unwrap_or(std::cmp::Ordering::Equal));
+    idx_sorted.sort_by(|&a, &b| norms[b].total_cmp(&norms[a]));
 
     println!();
     println!("## Top-{top} inputs by L2 norm");
@@ -204,7 +204,7 @@ fn main() -> ExitCode {
             }
             let mean: f32 = slice.iter().sum::<f32>() / n as f32;
             let mut sorted = slice.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            sorted.sort_by(|a, b| a.total_cmp(b));
             let median = sorted[n / 2];
             let max = sorted[n - 1];
             let dead = slice.iter().filter(|&&v| v < dead_threshold).count();

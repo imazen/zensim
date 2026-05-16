@@ -2273,7 +2273,7 @@ fn train_weights(
      -> f64 {
         indexed.clear();
         indexed.extend(distances.iter().copied().enumerate());
-        indexed.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
         let mut i = 0;
         while i < n_train {
             let mut j = i + 1;
@@ -2439,7 +2439,7 @@ fn train_weights(
 
                 // Sort by Pearson descending, take top 4 unique weights
                 candidates
-                    .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                    .sort_by(|a, b| b.0.total_cmp(&a.0));
                 candidates.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-12);
                 candidates.truncate(4);
 
@@ -2516,7 +2516,7 @@ fn train_weights(
             d / n_scales
         })
         .collect();
-    dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    dists.sort_unstable_by(|a, b| a.total_cmp(b));
     let p50 = dists[dists.len() / 2];
     if p50 > 0.0 {
         let target_p50 = 1.7;
@@ -2562,7 +2562,7 @@ fn normalize_weights(
             d / n_scales
         })
         .collect();
-    dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    dists.sort_unstable_by(|a, b| a.total_cmp(b));
     let p50 = dists[dists.len() / 2];
     if p50 > 0.0 {
         let target_p50 = 1.7;
@@ -2589,7 +2589,7 @@ fn fast_kendall(x: &[f64], y: &[f64]) -> f64 {
 
     // Sort by x, then count inversions in y using merge sort
     let mut pairs: Vec<(f64, f64)> = x.iter().copied().zip(y.iter().copied()).collect();
-    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     // Count ties in x and y
     let mut x_ties = 0i64;
@@ -2609,7 +2609,7 @@ fn fast_kendall(x: &[f64], y: &[f64]) -> f64 {
     }
     {
         let mut sorted_y: Vec<f64> = pairs.iter().map(|p| p.1).collect();
-        sorted_y.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted_y.sort_by(|a, b| a.total_cmp(b));
         let mut i = 0;
         while i < n {
             let mut j = i + 1;
@@ -3690,7 +3690,7 @@ fn train_weights_multi(
         let n = ds.n_train;
         indexed.clear();
         indexed.extend(distances[..n].iter().copied().enumerate());
-        indexed.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
         let mut i = 0;
         while i < n {
             let mut j = i + 1;
@@ -4555,7 +4555,7 @@ fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
 fn ranks(data: &[f64]) -> Vec<f64> {
     let n = data.len();
     let mut indexed: Vec<(usize, f64)> = data.iter().copied().enumerate().collect();
-    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
 
     let mut result = vec![0.0f64; n];
     let mut i = 0;
