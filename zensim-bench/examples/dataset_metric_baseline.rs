@@ -1046,17 +1046,34 @@ fn process_pair(
     v04_bake: Option<&[u8]>,
     regime: FeatureRegime,
 ) -> Option<(f64, f64, f64, f64, f64)> {
+    let debug = std::env::var("ZENSIM_DEBUG_PROCESS_PAIR").is_ok();
     let src_img = match image::open(&pair.reference) {
         Ok(img) => img.to_rgb8(),
-        Err(_) => return None,
+        Err(e) => {
+            if debug {
+                eprintln!("[fail ref] {}: {}", pair.reference.display(), e);
+            }
+            return None;
+        }
     };
     let dst_img = match image::open(&pair.distorted) {
         Ok(img) => img.to_rgb8(),
-        Err(_) => return None,
+        Err(e) => {
+            if debug {
+                eprintln!("[fail dst] {}: {}", pair.distorted.display(), e);
+            }
+            return None;
+        }
     };
     let (w, h) = src_img.dimensions();
     let (dw, dh) = dst_img.dimensions();
     if w != dw || h != dh {
+        if debug {
+            eprintln!(
+                "[fail dim] {} ref={w}x{h} dst={dw}x{dh}",
+                pair.reference.display()
+            );
+        }
         return None;
     }
     let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
@@ -1074,17 +1091,67 @@ fn process_pair(
     // loaded bake. 228 = basic + peaks (cheap); 300 = adds masked
     // (extended); 372 = adds masked + IW. V_20a IW-SSIM bakes use 372.
     let result = match regime {
-        FeatureRegime::Standard => z_v04.compute(&s, &d).ok()?,
-        FeatureRegime::Extended => z_v04.compute_extended_features(&s, &d).ok()?,
+        FeatureRegime::Standard => match z_v04.compute(&s, &d) {
+            Ok(r) => r,
+            Err(e) => {
+                if debug {
+                    eprintln!(
+                        "[fail compute standard] {} ({}x{}): {:?}",
+                        pair.reference.display(),
+                        w,
+                        h,
+                        e
+                    );
+                }
+                return None;
+            }
+        },
+        FeatureRegime::Extended => match z_v04.compute_extended_features(&s, &d) {
+            Ok(r) => r,
+            Err(e) => {
+                if debug {
+                    eprintln!(
+                        "[fail compute extended] {} ({}x{}): {:?}",
+                        pair.reference.display(),
+                        w,
+                        h,
+                        e
+                    );
+                }
+                return None;
+            }
+        },
         FeatureRegime::ExtendedIw => {
             let mut cfg = ZensimConfig::default();
             cfg.extended_features = true;
             cfg.compute_iw_features = true;
-            compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, cfg).ok()?
+            match compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, cfg) {
+                Ok(r) => r,
+                Err(e) => {
+                    if debug {
+                        eprintln!(
+                            "[fail compute extendediw] {} ({}x{}): {:?}",
+                            pair.reference.display(),
+                            w,
+                            h,
+                            e
+                        );
+                    }
+                    return None;
+                }
+            }
         }
     };
     let features = result.features();
     if features.len() < zensim::profile::LINEAR_WEIGHTS_PREVIEW_V0_2.len() {
+        if debug {
+            eprintln!(
+                "[fail feat-len] {} features={} required={}",
+                pair.reference.display(),
+                features.len(),
+                zensim::profile::LINEAR_WEIGHTS_PREVIEW_V0_2.len()
+            );
+        }
         return None;
     }
 
@@ -1125,14 +1192,42 @@ fn process_pair(
     // fast-ssim2 — score, higher = more similar.
     let s_img = Img::new(src_pixels.as_slice(), w_us, h_us);
     let d_img = Img::new(dst_pixels.as_slice(), w_us, h_us);
-    let ssim2 = fast_ssim2::compute_ssimulacra2(s_img, d_img).ok()?;
+    let ssim2 = match fast_ssim2::compute_ssimulacra2(s_img, d_img) {
+        Ok(s) => s,
+        Err(e) => {
+            if debug {
+                eprintln!(
+                    "[fail ssim2] {} ({}x{}): {:?}",
+                    pair.reference.display(),
+                    w,
+                    h,
+                    e
+                );
+            }
+            return None;
+        }
+    };
 
     // butteraugli — score, higher = more different.
     let src_rgb8: &[RGB8] = bytemuck::cast_slice(&src_pixels);
     let dst_rgb8: &[RGB8] = bytemuck::cast_slice(&dst_pixels);
     let s_b = Img::new(src_rgb8, w_us, h_us);
     let d_b = Img::new(dst_rgb8, w_us, h_us);
-    let butter = butteraugli::butteraugli(s_b, d_b, &ButteraugliParams::default()).ok()?;
+    let butter = match butteraugli::butteraugli(s_b, d_b, &ButteraugliParams::default()) {
+        Ok(b) => b,
+        Err(e) => {
+            if debug {
+                eprintln!(
+                    "[fail butter] {} ({}x{}): {:?}",
+                    pair.reference.display(),
+                    w,
+                    h,
+                    e
+                );
+            }
+            return None;
+        }
+    };
 
     Some((pair.human_score, v02, v04, ssim2, butter.score))
 }
@@ -1398,6 +1493,21 @@ fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
     pairs
 }
 
+/// AIC-3 CTC info.csv schema: `score.jnd, codec, img.number, img.name,
+/// quality, quality.selected, method`. Reference image lives at
+/// `<root>/original/<img.name>.png` where `<root>` is the parent of the
+/// `decoded/` dir holding info.csv. Distorted images live at
+/// `<root>/decoded/<img.name>/<codec>_<img.name>_<quality>.png`.
+///
+/// score.jnd is negative (more negative = more degraded), spans ~[-3, 0].
+/// Convention: `human_score = (score_jnd + 3) / 3` so 1.0 = identical and
+/// 0.0 = worst quality, matching KADID/TID's "higher = better".
+///
+/// (Earlier draft of this loader treated fields 0 and 1 as absolute
+/// paths, which silently produced 0-valid AIC-3 eval results when the
+/// CSV format diverged. Path-construction logic now matches
+/// extract_features_372col's load_aic3 — verified 600/600 valid on
+/// 2026-05-16 via aic3_one_pair_smoke.rs.)
 fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
     let mut rdr = match csv::Reader::from_path(csv_path) {
         Ok(r) => r,
@@ -1406,23 +1516,40 @@ fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
             return Vec::new();
         }
     };
+    let root: PathBuf = csv_path
+        .parent()
+        .and_then(|d| d.parent())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let original_dir = root.join("original");
+    let decoded_dir = root.join("decoded");
     let mut pairs = Vec::new();
     for record in rdr.records().flatten() {
-        if record.len() < 6 {
+        if record.len() < 5 {
             continue;
         }
-        let r = record.get(0).unwrap();
-        let dist = record.get(1).unwrap();
-        let score_jnd: f64 = match record.get(5).unwrap().parse() {
-            Ok(v) => v,
-            Err(_) => continue,
+        let score_jnd: f64 = match record.get(0).and_then(|s| s.parse().ok()) {
+            Some(v) => v,
+            None => continue,
         };
+        let codec = record.get(1).unwrap_or("");
+        let img_name = record.get(3).unwrap_or("");
+        let quality = record.get(4).unwrap_or("");
+        if codec.is_empty() || img_name.is_empty() || quality.is_empty() {
+            continue;
+        }
+        let ref_path = original_dir.join(format!("{img_name}.png"));
+        let dist_name = format!("{codec}_{img_name}_{quality}.png");
+        let dist_path = decoded_dir.join(img_name).join(&dist_name);
+        if !ref_path.exists() || !dist_path.exists() {
+            continue;
+        }
         pairs.push(Pair {
-            reference: PathBuf::from(r),
-            distorted: PathBuf::from(dist),
+            reference: ref_path,
+            distorted: dist_path,
             human_score: (score_jnd + 3.0) / 3.0,
-            codec: None,
-            version: None,
+            codec: Some(codec.to_string()),
+            version: Some(quality.to_string()),
         });
         if pairs.len() >= max {
             break;
