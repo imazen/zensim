@@ -162,6 +162,34 @@ pub struct ProfileParams {
     /// at aggregate −0.004 vs V_18 ship alone. α = 0.8 gives B3 +0.052
     /// at aggregate match.
     pub(crate) mlp_primary_mix: f32,
+
+    /// When `true`, the runtime computes the **extended-features**
+    /// block (228 → 300 features — adds 72 masked features) per pair
+    /// via `Zensim::compute_extended_features`. Required when the
+    /// profile's MLP bake has `n_inputs > 228`. Default `false` keeps
+    /// the V_18 / V_20 IS 228-feature fast path.
+    ///
+    /// The masking pass reuses the already-computed flatness map, so
+    /// extended-features overhead is moderate (~10–30 % per-pair compute
+    /// vs standard). Distinct from `compute_iw_features` which adds
+    /// a separate weighted pool (more expensive).
+    ///
+    /// Added 2026-05-15 to enable V_20 extended-shaping profile
+    /// (PreviewV0_5_Extended at 300-feat input) after the V_20a IW
+    /// (372-feat) path was falsified for CID22 transfer.
+    pub extended_features: bool,
+
+    /// When `true`, the runtime also computes the **IW pool** block
+    /// (300 → 372 features — adds 72 IW-weighted features per Wang &
+    /// Li 2011). Implies `extended_features = true` for the standard
+    /// IW layout. Default `false`.
+    ///
+    /// **Note**: setting this for a shipping profile is currently
+    /// discouraged — V_20a IW bakes catastrophically failed CID22
+    /// transfer (Z-RMSE 0.869 vs V_18's 0.455 at k=1; near-random at
+    /// k=8). Reserved for research bakes that need full 372-input
+    /// scoring through the standard runtime.
+    pub compute_iw_features: bool,
 }
 
 #[cfg(feature = "training")]
@@ -193,6 +221,8 @@ impl ProfileParams {
             mlp_bytes: None,
             mlp_bytes_b3: None,
             mlp_primary_mix: 1.0,
+            extended_features: false,
+            compute_iw_features: false,
         }
     }
 }
@@ -210,6 +240,8 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     mlp_bytes: None,
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
+    extended_features: false,
+    compute_iw_features: false,
 };
 
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
@@ -223,6 +255,8 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     mlp_bytes: None,
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
+    extended_features: false,
+    compute_iw_features: false,
 };
 
 /// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear.
@@ -335,6 +369,8 @@ static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     mlp_bytes: Some(mlp_bake_preview_v0_3),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
+    extended_features: false,
+    compute_iw_features: false,
 };
 
 /// V_20 input-shaping seed=1 bake, **affine-calibrated** to V_18's
@@ -385,6 +421,8 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     // at lower aggregate cost, swap to a fresh ProfileParams with
     // mlp_primary_mix tuned higher.
     mlp_primary_mix: 0.4,
+    extended_features: false,
+    compute_iw_features: false,
 };
 
 // --- Weight arrays ---

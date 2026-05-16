@@ -1526,9 +1526,9 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         // MLP-scored profiles need the full feature vector populated;
         // the linear path can skip features it doesn't use.
         compute_all_features: params.mlp_bytes.is_some(),
-        extended_features: false,
+        extended_features: params.extended_features,
         extended_masking_strength: 4.0,
-        compute_iw_features: false,
+        compute_iw_features: params.compute_iw_features,
         iw_strength: 4.0,
         num_scales: params.num_scales,
         score_mapping_a: params.score_mapping_a,
