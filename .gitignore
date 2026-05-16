@@ -79,3 +79,7 @@ fuzz-*.log
 # Python
 __pycache__/
 *.pyc
+
+# Eval-harness per-pair output CSVs (large, regenerated on each eval)
+benchmarks/*_per_pair.csv
+benchmarks/*_per_pair_*.csv
