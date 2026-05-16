@@ -255,6 +255,16 @@ pub use metric::{
     precompute_reference_with_scales, try_score_from_features,
 };
 
+/// IW-weight estimator types — requires `features = ["training"]`.
+///
+/// Exposes the Wang & Li 2011 info-content weight estimators
+/// ([`iw_pool::IwWeightKind`], [`iw_pool::IwWeightConfig`]) and the
+/// `compute_iw_weights` entry point used for research experiments.
+/// Including the steerable-pyramid GSM approximation spike added
+/// 2026-05-15 — see `benchmarks/iw_pyramid_spike_methodology_2026-05-15.md`.
+#[cfg(feature = "training")]
+pub use iw_pool::{IwWeightConfig, IwWeightKind, compute_iw_weights};
+
 #[cfg(feature = "zenpixels")]
 mod zenpixels_compat;
 #[cfg(feature = "zenpixels")]
