@@ -947,7 +947,7 @@ fn stddev(v: &[f64], m: f64) -> f64 {
 /// Feature-width regime needed by the loaded bake. Inferred once from
 /// `Model::n_inputs()` so per-pair compute can pick the cheapest path
 /// that produces enough columns.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum FeatureRegime {
     /// 228 features — basic + peaks. Default `Zensim::compute` path.
     Standard,
@@ -2566,6 +2566,35 @@ mod tests {
         assert_within("PSNR-Y ", &psnry, 13.36);
         assert_within("IW-SSIM", &iwssim, 31.51);
         assert_within("CVVDP  ", &cvvdp, 9.45);
+    }
+
+    /// Dispatch-boundary test for `FeatureRegime::from_n_inputs`.
+    ///
+    /// The boundaries are load-bearing: 228 → Standard (`Zensim::compute`),
+    /// 300 → Extended (adds masked), 372 → ExtendedIw (adds IW pool).
+    /// Wrong dispatch leads to feeding truncated features into a network
+    /// that expects more columns (silent NaN cascade — see commit
+    /// 8baa8e48 for the V_20a IW debug that motivated this wiring).
+    #[test]
+    fn feature_regime_dispatch_boundaries() {
+        use FeatureRegime::*;
+        // 228 inclusive bound: standard
+        assert_eq!(FeatureRegime::from_n_inputs(0), Standard);
+        assert_eq!(FeatureRegime::from_n_inputs(1), Standard);
+        assert_eq!(FeatureRegime::from_n_inputs(227), Standard);
+        assert_eq!(FeatureRegime::from_n_inputs(228), Standard);
+        // 229..=300 inclusive: extended
+        assert_eq!(FeatureRegime::from_n_inputs(229), Extended);
+        assert_eq!(FeatureRegime::from_n_inputs(299), Extended);
+        assert_eq!(FeatureRegime::from_n_inputs(300), Extended);
+        // 301..: extended+IW
+        assert_eq!(FeatureRegime::from_n_inputs(301), ExtendedIw);
+        assert_eq!(FeatureRegime::from_n_inputs(371), ExtendedIw);
+        assert_eq!(FeatureRegime::from_n_inputs(372), ExtendedIw);
+        // Future hypothetical wider bakes still get the largest regime,
+        // not a separate variant — graceful for forward compatibility.
+        assert_eq!(FeatureRegime::from_n_inputs(500), ExtendedIw);
+        assert_eq!(FeatureRegime::from_n_inputs(usize::MAX), ExtendedIw);
     }
 
     /// Regression test: ranks() must not panic when inputs contain NaN.

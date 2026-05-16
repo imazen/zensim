@@ -839,6 +839,50 @@ etc.), check the workspace `Cargo.toml` for the right pattern. If
 a sibling exists under `~/work/zen/`, use path. Never copy a
 published-crate version from crates.io into a workspace dep.
 
+## Shell scripting gotchas (added 2026-05-15)
+
+### Bash readonly variables: GROUPS, PIPESTATUS, EUID, UID, ...
+
+Assigning to these in a bash script may silently fail to take effect
+— the result `$VAR` resolves to the builtin value, not yours. The
+trap that bit a Phase 3 retrain script today:
+
+```bash
+GROUPS="--group safesyn:... --group kadid:..."   # silently overridden
+zensim_mlp_train $GROUPS ...                     # bash sees $GROUPS = "1000"
+# error: unexpected argument '1000' found
+```
+
+`$GROUPS` is bash's primary-group ID (e.g., `1000` on most Linux
+boxes). Reading from it gives the readonly builtin; writing to it
+in `bash` works in interactive sessions but is unreliable in scripts
+(depends on `set -u`, shell mode, etc.).
+
+**Avoid these names in scripts**: `BASH`, `BASHOPTS`, `BASHPID`,
+`BASH_*`, `COMP_*`, `DIRSTACK`, `EUID`, `FUNCNAME`, `GROUPS`,
+`HISTCMD`, `HOSTNAME`, `HOSTTYPE`, `LINENO`, `MACHTYPE`, `OSTYPE`,
+`PIPESTATUS`, `PPID`, `RANDOM`, `SECONDS`, `SHELLOPTS`, `UID`.
+Pick descriptive prefixed names instead (`DSET_GROUPS`, `TRAIN_GROUPS`,
+`PIPE_STATUS`).
+
+When debugging a script that produces unexpected positional args:
+
+```bash
+# This trick reveals readonly-builtin collisions:
+GROUPS="hello"; echo "[$GROUPS]"   # might print "[1000]" not "[hello]"
+```
+
+If you see "unexpected argument 'NNNN' found" from a CLI tool and
+NNNN is a small integer (often 1000, 65534, 0), suspect a readonly
+collision before suspecting the CLI.
+
+### `set -u` masks the readonly collision
+
+With `set -u` on, writing to a readonly variable produces no error;
+the read silently uses the readonly value. Without `set -u`, the
+same script may still appear to work in some shells. Make the
+diagnostic explicit by renaming.
+
 ## Principled experiment workflow for V_X bakes (added 2026-05-15)
 
 This section is the **methodology** version of the V_20 learnings
