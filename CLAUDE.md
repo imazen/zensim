@@ -2,6 +2,20 @@
 
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).
 
+## ⇒ POST-COMPACT / NEW SESSION: read [`SESSION-RESUME.md`](SESSION-RESUME.md) FIRST
+
+Then return here. `SESSION-RESUME.md` is the canonical entry point —
+it points at every other doc + lists the current critical-path
+tasks. Reading order on resume:
+
+1. [`SESSION-RESUME.md`](SESSION-RESUME.md) — current state, ~2 min
+2. This doc (`CLAUDE.md`) — methodology + workflow + gotchas
+3. [`CONTEXT-HANDOFF.md`](CONTEXT-HANDOFF.md) — yesterday's snapshot
+4. [`RESEARCH.md`](RESEARCH.md) — corpus map + workflow recipes
+5. [`benchmarks/INDEX.md`](benchmarks/INDEX.md) — find prior
+   experiments
+6. Run `TaskList` and work on the lowest unblocked task
+
 ## Training goals (priority order, locked 2026-05-10, revised 2026-05-11)
 
 zensim is a **user-facing quality dial** — users type a target zensim score
