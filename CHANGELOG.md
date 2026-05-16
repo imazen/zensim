@@ -6,7 +6,72 @@
 <!-- Breaking changes that ship together in the next minor for 0.x.
      Persist across patch releases. Only clear when the breaking release ships. -->
 
-(none currently queued — the 0.3.0 breaks shipped 2026-05-13)
+- `ProfileParams` gained two new fields: `extended_features: bool`,
+  `compute_iw_features: bool` (both default `false`). Downstream
+  callers that construct `ProfileParams` with named-field syntax
+  (rare — most use the `static`-defined profiles) need to add the
+  two new fields. Added 2026-05-15 (commit `f140776a`).
+
+### Added (2026-05-16)
+
+- **`RESEARCH.md`** — top-level pit-of-success research guide.
+  Corpus map (train vs validation roles), data storage conventions,
+  workflow recipes, bakes inventory, sibling-repo map. (`ec27122e`)
+- **`scripts/v_next/README.md`** — index of 39 Python helpers
+  grouped by theme; marks legacy vs current. (`49f8ed1b`)
+- **`benchmarks/INDEX.md`** — TOC for 76 methodology + falsification
+  docs. Reading-order suggestions for common goals. (`3d14b2bb`)
+
+### Fixed (2026-05-16)
+
+- **NaN-safe sort across 17 sites** — replace
+  `partial_cmp(...).unwrap_or(Ordering::Equal)` with `f64::total_cmp`.
+  Closes the per-band crash that forced per-corpus eval workarounds
+  during IW-feature re-eval. + regression test. (`2e5816a1`)
+- **`anchor_csv_reproduces_mohammadi_zrmse`** test — env-var gating
+  (`ZENSIM_TEST_AIC3=1`) replaces silent file-existence skip per
+  CLAUDE.md "NO GRACEFUL SKIPS IN TESTS". (`37c1f397`)
+- **6 clippy fixes** + **4 misc warning cleanups** → zero zensim-
+  side warnings. (`02ccc42b`, `95c20288`)
+
+### Changed (2026-05-16)
+
+- **CLAUDE.md "SROCC-only verdicts BANNED + ssim2-target training
+  bias"** section (`ef0ed9a3`). Every ship / no-ship call now
+  requires the full Mohammadi 2025 panel. Prior "falsified on
+  SROCC" labels in `benchmarks/v0_20*` are provisional.
+- **CLAUDE.md "CID22 is VALIDATION-ONLY"** section (`c81b393f`).
+- **CLAUDE.md "ZNPR v2 PROHIBITED"** section + source fixes
+  (`58e6f8d8`). All zensim-side `bake_v2` callers switched to `bake()`.
+- **CLAUDE.md "Bash readonly variable gotcha"** (`c8b02b3d`).
+
+### Added (2026-05-15)
+
+- **`ProfileParams.extended_features` + `compute_iw_features`**
+  fields. Lets a profile opt in to 300- or 372-feature regimes via
+  the runtime path. (`f140776a`)
+- **`FeatureRegime` auto-detection** in `dataset_metric_baseline` —
+  dispatches per-pair compute by `Model::n_inputs()`: 228 → Standard,
+  300 → Extended, 372 → ExtendedIw. (`8baa8e48`)
+- **`--auto-transforms <PATH>`** flag on `zensim_mlp_train`. Loads
+  V_20 screen TSV; applies per-feature transforms with lift ≥
+  min-lift. Smoke-tested: 98 transforms = V_20 IS adopted set
+  exactly. (`d32ca890`)
+- **IW-SSIM compute script** at
+  `scripts/v_next/compute_iwssim_on_safesyn.py` via piq 0.8.0.
+  Vast.ai parallelization at `scripts/v_next/vastai_iwssim/`. (`24986ff3`)
+- **`info_log_sigma_e_sq`** option in `IwWeightConfig` — Wang & Li
+  2011 paper-faithful `log₂(1 + σ²/σ²_e)` weight formula. (`c23f178c`)
+- **`SteerablePyramidLogGsm`** variant of `IwWeightKind` — directional-
+  max paper-faithful weight estimator spike. A/B vs spatial variance
+  Pearson 0.838 (decorrelated). (`f1ad0d6`)
+- **`inspect_l0_input_norms`** binary — per-input L2 norm reporter.
+  Confirmed across 4 bakes: IW + masked features ARE selected by
+  GD (69–96 % of basic-block mean L2). (`bc9e6b60`)
+- **`extended_iw_perf`** benchmark — 4-permutation runtime cost.
+  Combined Extended+IW: **+12 % at 1024²** post-optimization (was
+  +25 %; perf agent merged the fused 2-mask SIMD kernels via
+  worktree branch). (`1fa696ec`, `e5651013`)
 
 ### Reverted (same-day)
 

@@ -1,304 +1,231 @@
-# zensim — context handoff (2026-05-14)
+# zensim — context handoff (2026-05-16)
 
-Written immediately before a session reset. Read this first.
+Written for the next session reset. Read this first, then
+[RESEARCH.md](RESEARCH.md) and [CLAUDE.md](CLAUDE.md).
 
 ## TL;DR — what's live
 
-- **Shipped bake**: `zensim/weights/v0_18_2026-05-13.bin` (v3 format,
-  93,064 B, md5 `c94e93607390d0b6704e95f3851d421e`). V0_18 zerobiased+HU-reordered
-  as of 2026-05-13. **CID22 SROCC 0.8933** on standard validation —
-  but this number is INFLATED because V0_18's training corpus had
-  perceptual overlap with KADID/TID reference images. CID22 purge
-  from 2026-05-12 was honest; KADID/TID purge happened later
-  (2026-05-14) — V0_18 is "honest on CID22, inflated on KADID/TID".
+- **Shipped bake**: `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin`
+  (ZNPR v3, ~18 KB compressed from 93 KB raw, md5 in
+  `benchmarks/v0_18_methodology_2026-05-13.md`). V_18 3-way concat
+  (V_16 base + cycle-14 s1 + cycle-14 s42). **CID22 SROCC 0.8933**,
+  but per CLAUDE.md "SROCC-only verdicts BANNED" (added 2026-05-15)
+  this single number isn't the ship gate — the full Mohammadi 2025
+  panel is.
+- **Multi-bake runtime live**: `PreviewV0_4` mixes V_18 ship + V_20 IS
+  calibrated at α = 0.4 raw space. CID22 B3 +0.080 lift at agg
+  −0.008.
 - **Crate version**: zensim 0.3.0, never published. Swap bake bytes
   in place; no version bump.
-- **46 zensim --lib unit tests** still pass.
+- **Test status**: 68 zensim --lib unit tests pass + 2 regression
+  tests (NaN-safe sort, FeatureRegime dispatch).
+- **Clippy**: zero zensim-side warnings (zenpredict sibling owns 5
+  unrelated warnings at `../zenanalyze`).
 
-## What happened 2026-05-14 (this session)
+## What happened on 2026-05-16 (today's session)
 
-### 1. Contamination audit caught KADID/TID overlap
+### A. Methodology critique — SROCC banned as primary gate
 
-`zensim-validate/bin/check_holdout_overlap` (dHash-64) audited the
-synth-v2 training corpus vs KADID I01..I81 and TID I01..I25 refs.
-At d≤16 threshold:
+User directive: *"our srocc gating is bad, wrong, stop it. iwssim
+wins the important metrics but we trained older bakes with synth
+data and ssim2 as golden and of course we aren't going to win
+against that using the ssim2 favoring srocc. also we didn't
+calculate iwssim to make it trainable."*
 
-- **149 unique source basenames** with perceptual overlap (118 KADID,
-  33 TID). Audit TSVs at
-  `benchmarks/{kadid,tid}_overlap_2026-05-14.tsv`.
+Two new CLAUDE.md sections (commits `ef0ed9a3`, `c81b393f`,
+`58e6f8d8`):
 
-| Holdout | strict d≤10 | loose d≤16 | refs affected |
-|---|--:|--:|---|
-| KADID10k | 6 | 118 | I04 / I18 (×4) / I25 / I41 / I71 |
-| TID2013 | 1 | 33 | I12 |
+1. **"SROCC-only verdicts BANNED + ssim2-target training bias"** —
+   every ship/no-ship call requires the full Mohammadi 2025 panel
+   (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE). Prior "falsified
+   on SROCC" labels in `benchmarks/v0_20*` are provisional.
 
-CID22 already purged 2026-05-12 (361 sources for 22 of 49 refs).
-Preserved.
+2. **"CID22 is VALIDATION-ONLY"** — explicit rule that CID22
+   human MOS is never a training target. Only metric scores
+   (ssim2 / CVVDP) on the training-only subset of the broader
+   CID22 image library are permitted.
 
-### 2. Contamination guard plumbed into trainer
+3. **"ZNPR v2 PROHIBITED"** — every new bake must be v3
+   (header byte 4 = `0x03`). `bake_two_layer_znpr_v2` →
+   `bake_two_layer_znpr_v3` rename; all `bake_v2` callers
+   switched to `bake()` (v3 path).
 
-- `zensim-validate/src/contamination_guard.rs` (module)
-- `zensim-validate/src/bin/contamination_guard.rs` (CLI)
-- 149-basename blocklist embedded at compile time via
-  `include_str!("../../benchmarks/contamination_blocklist_2026-05-14.txt")`
-- `zensim_mlp_train` calls `scrub_csv_or_die` per `--group` CSV.
-  Exits 2 on detection. Filenames containing `CONTAMINATED` get
-  rejected on sight.
+### B. New infrastructure landed
 
-**Audit bypass**: `ZENSIM_BYPASS_CONTAMINATION_GUARD_FOR_AUDIT_I_REALLY_MEAN_IT=1`
-disables the guard with a loud warning. Audit/reproduction only.
-Don't ship bakes trained with this set.
+- **`--auto-transforms <PATH>`** flag on `zensim_mlp_train` (commit
+  `d32ca890`): loads winning per-feature transforms from a screen
+  TSV. Smoke-tested at min-lift=0.05 → 98 transforms (= V_20 IS
+  adopted set exactly).
+- **`ProfileParams.extended_features` + `compute_iw_features`**
+  (commit `f140776a`): runtime path opt-in for 300- or 372-feature
+  regimes. All existing profiles default to `false`.
+- **`FeatureRegime` auto-detection** in `dataset_metric_baseline`
+  (commits `8baa8e48`, `c8b02b3d`): inspects `Model::n_inputs()`
+  and dispatches per-pair compute. 228 → standard, 300 → extended,
+  372 → extended + IW. Unit test added.
+- **`inspect_l0_input_norms`** binary (commit `bc9e6b60`): per-
+  input L2 norm reporter for any ZNPR v3 bake. Used to prove IW +
+  masked features ARE selected by GD across 4 bakes (69–96 % of
+  basic-block mean L2).
+- **`compute_iwssim_on_safesyn.py`** (commit `24986ff3`): IW-SSIM
+  target compute script via piq 0.8.0 (PyTorch, CUDA). Full safesyn
+  run in flight at PID 4048804 (~7 hr remaining); vast.ai
+  parallelization spec at `scripts/v_next/vastai_iwssim/` (~1 hr
+  / ~$5).
+- **`SteerablePyramidLogGsm`** weight estimator variant (commit
+  `f1ad0d6`): paper-faithful Wang & Li 2011 spike. A/B vs spatial
+  variance Pearson 0.838 (decorrelated).
+- **`info_log_sigma_e_sq`** in `IwWeightConfig` (commit `c23f178c`):
+  the paper's `log₂(1 + σ²_p / σ²_e)` weight formula. Off by
+  default for back-compat.
 
-### 3. Quarantined contaminated CSVs
+### C. Performance optimization — combined Extended+IW overhead
 
-Renamed with `.CONTAMINATED_2026-05-14_DO_NOT_USE.csv` suffix:
+Dropped from **+25 % to +12 % at 1024²** (commit `e5651013` via
+worktree perf agent). Fused 2-mask SIMD kernels for SSIM + edge +
+MSE+weights paths; V-blur-only on H-blurred sigma buffers; fixed
+pre-existing IW-only mu1 swap bug. Full numbers in
+[`benchmarks/extended_iw_runtime_perf_optimized_2026-05-15.md`](benchmarks/extended_iw_runtime_perf_optimized_2026-05-15.md).
 
-- `/tmp/zensim_loop/safe_synth_clean_features.CONTAMINATED_*.csv`
-  (V0_18's 144,791-row base — CID22-purged but contains the 149
-  KADID/TID-overlap basenames)
-- `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.CONTAMINATED_*.csv`
-- `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.CONTAMINATED_*.csv`
-- `/mnt/v/zen/zensim-training/2026-05-07/v06-features/safe_synth_ssim2_features.CONTAMINATED_*.{csv,parquet}`
+### D. Tightening sweep
 
-### 4. Canonical clean corpus (single source of truth)
+Eight commits clearing warnings + adding regression tests:
 
-`/mnt/v/zen/zensim-training/2026-05-14-clean/`:
+- **NaN-safe sort across 17 sites** (`2e5816a1`) —
+  `partial_cmp(...).unwrap_or(Equal)` → `total_cmp` to fix the
+  Rust 1.81+ sort panic when NaN is present. Closes the per-band
+  crash that forced per-corpus eval workarounds.
+- **6 clippy fixes** (`02ccc42b`) + **4 warning cleanups**
+  (`95c20288`) → zero zensim-side warnings.
+- **anchor_csv test env-var gating** (`37c1f397`) — replaces silent
+  file-existence skip per CLAUDE.md "NO GRACEFUL SKIPS IN TESTS".
+- **FeatureRegime dispatch boundary test** (`c8b02b3d`).
+- **Bash readonly variable gotcha** doc (`c8b02b3d`).
 
-| File | md5 | rows |
-|---|---|--:|
-| `safe_synth_v19_clean_features.csv` | `71a0a78428ded74e60fd569ba77ed7e0` | 138,872 |
-| `kadid_features.csv` | `6f07b25ce854fd6f8dc596cf055747d1` | 10,125 |
-| `tid_features.csv` | `7189f57a832161c82aee3a8860c677a1` | 3,000 |
-| `konjnd_aligned_features.csv` | `209ebdb6586cf76c5d57a62883b314e3` | 76,104 |
-| `tv_pairs_bands.tsv` | `ad18f6cc46fc8f812b69e7030d63393b` | 205,654 |
+### E. Pit-of-success docs (today's chunk)
 
-Plus `_MANIFEST.md` with full audit lineage.
+Three new top-level docs:
 
-### 5. V0_19 — built, validated, NOT YET decided
+- **`RESEARCH.md`** (`ec27122e`) — top-level research-entry guide.
+  Corpus map, workflow recipes, bakes inventory, sibling-repo
+  map. This is the "first glance" doc for new contributors.
+- **`scripts/v_next/README.md`** (`49f8ed1b`) — index of 39
+  Python helpers grouped by theme; marks legacy vs current.
+- **`benchmarks/INDEX.md`** (`3d14b2bb`) — TOC for 76 methodology
+  + falsification docs. Reading-order suggestions for common
+  goals.
 
-Followed V0_18 3-way concat recipe exactly on the clean corpus.
+## V_20a IW + V_20 extended status
 
-**Bakes**:
-- `benchmarks/v0_19_base_seed1_2026-05-14.bin`
-- `benchmarks/v0_19_cycle14_s1_2026-05-14.bin`
-- `benchmarks/v0_19_cycle14_s42_2026-05-14.bin`
-- `benchmarks/v0_19_concat_3way_2026-05-14.bin`
-- `benchmarks/v0_19_calibrated_2026-05-14.bin`
+Per the new methodology, the V_20a IW falsification verdict
+(CID22 SROCC catastrophic) is **provisional**. Why:
 
-**Validation** (`benchmarks/v0_19_10band_2026-05-14.md`):
+- We trained against ssim2 targets → bakes optimize for ssim2-shaped
+  output.
+- SROCC against ssim2-derived MOS-equivalents on CID22 favors
+  ssim2-shaped surfaces.
+- IW-SSIM-quality bakes deliberately are NOT ssim2-shaped.
+- TID + KADID FULL panel: V_20a iw_k1 wins +0.018 SROCC + better
+  Z-RMSE + better PWRC.
 
-| Corpus | V0_19 | fast-ssim2 | vs ssim2 | vs V0_18 (inflated) |
-|---|--:|--:|--:|--:|
-| CID22 | **0.8786** | 0.8895 | **−0.0109** | −0.0147 |
-| KADID10k | 0.9462 | 0.8133 | +0.1329 | +0.0035 |
-| TID2013 | 0.9553 | 0.8460 | +0.1093 | +0.0027 |
+Once the IW-SSIM target column lands (in flight at PID 4048804),
+retrain against IW-SSIM and re-eval. The expectation is the IW
+direction will re-rank.
 
-V0_19 CID22 is below fast-ssim2's 0.8895. I initially marked this
-as ship-blocking. **The user pushed back** ("rejecting a ship
-because it decontaminated is bad") and is **correct**. V0_18's
-apparent CID22 advantage may have been contamination-driven; V0_19
-is the honest baseline.
+## Runtime cost ladder (2026-05-16, post-perf-opt)
 
-**V0_18 reproduction audit IN FLIGHT** to confirm. Trains V0_19
-pipeline on V0_18's ORIGINAL contaminated corpus (env-var bypass):
-- `benchmarks/v0_18_repro_base_seed1.bin` (PID in `/tmp/v18_repro_base.pid`)
-- `benchmarks/v0_18_repro_cycle14_s1.bin` (PID in `/tmp/v18_repro_s1.pid`)
-- `benchmarks/v0_18_repro_cycle14_s42.bin` (PID in `/tmp/v18_repro_s42.pid`)
+| Config | 1024² mean ms | × baseline | ns / pixel | When to use |
+|---|---:|---:|---:|---|
+| Standard (228) | 15.93 | 1.00 | 15.2 | Default fast path; all production bakes today |
+| Extended only (300) | ~17.4 | 1.14 | 17.4 | Future PreviewV0_5 candidates (none shipped) |
+| IW only (300) | ~17.5 | 1.15 | 17.5 | V_20a-style IW bakes (none shipped) |
+| Extended + IW (372) | **~13.8** | **1.12** | **13.8** | V_20 IW+ext+transforms research bakes |
 
-Each train ~25 min wall, started ~08:50 UTC, should be done by ~09:15.
+Optimization shrank the combined path; "Extended + IW" is now
+cheaper than the user-target +15 %. Compute saving comes from
+fused 2-mask SIMD + V-blur-only on H-blurred sigma buffers + IW-
+only mu1 fix.
 
-**Once repro completes**:
-- If V0_18 repro CID22 ≈ 0.8933 → V0_19 pipeline is faithful;
-  V0_19's 0.8786 is the honest cost of decontamination. SHIP V0_19.
-- If V0_18 repro CID22 ≠ 0.8933 → pipeline differs from what made
-  V0_18. INVESTIGATE before shipping.
+## What's running / pending
 
-### 6. V0_2 → V0_18 candlestick
+- **IW-SSIM compute on safesyn** (local PID 4048804, ~7 hr ETA).
+  Output: `iwssim_targets_safesyn_2026-05-15.parquet`. Vast.ai
+  alternative at `scripts/v_next/vastai_iwssim/` (other session
+  handling that).
+- **V_22 CVVDP distillation** (task #45/#49) — highest-conviction
+  next direction. Targets the training-objective level which is
+  the actual bottleneck per the L0-norm GD-selection analysis.
+- **V_20d JND-anchored output calibration** (task #41) — second
+  conviction. Replaces the output-scale calibration with PJND units.
+- **Trainer `--target-column` flag** — queued. Without it, every
+  V_X bake remains structurally an ssim2 predictor.
 
-`benchmarks/v0_2_to_v0_18_candlestick_2026-05-14.{png,svg,tsv}`,
-n=17,417 paired rows. V0_2 saturates at top (53% of pairs in
-[95,100) bin); V0_18 within that bin spans p5=35.7 to p95=97.1.
-
-### 7. V0_18 methodology hallucination caught + corrected
-
-V0_18 methodology referenced 2 scripts NEVER in git history:
-`scripts/v_next/concat_three_way.py` and
-`/tmp/zensim_loop/concat_construct.py`. Audited via `git log --all
---diff-filter=A --name-only`. Doc corrected. Reproduction now uses
-the real `zensim-validate/bin/concat_three_way` Rust binary.
-
-Memory: `feedback_methodology_must_be_real.md` codifies "every
-script path in a methodology doc must be git-log-verifiable."
-
-### 8. Rust ports of Python pipeline
-
-- `zensim-validate/bin/concat_three_way` — replaces phantom
-  `concat_three_way.py`. The canonical reproduction now.
-- `zensim-validate/bin/affine_calibrate` — replaces
-  `affine_calibrate_znpr_v2.py`. Md5-byte-identical output.
-- `affine_calibrate_znpr_v2.py` accepts both v2 AND v3 bakes.
-
-V_X ship pipeline is now pure `cargo run`. Zero Python.
-
-### 9. zenpredict 0.3 FeatureTransform variants (V0_20 prep)
-
-Added 3 parameter-less variants to `FeatureTransform` enum:
-
-- `SignedLog1p`: `sign(x) · ln(1 + |x|)`
-- `SignedSqrt`: `sign(x) · sqrt(|x|)`
-- `SignedCbrt`: `sign(x) · cbrt(|x|)`
-
-Wire tokens: `signed_log1p`, `signed_sqrt`, `signed_cbrt`. Std and
-no_std paths. Trains can now opt-in per-feature via metadata.
-
-### 10. Dockerfile architecture refactored
-
-`docker/Dockerfile`:
-
-1. `trainer-bin` — slow stage, builds all Rust binaries once
-2. `corpora` — downloads test corpora (URLs still TODO)
-3. `features` — feature extraction + audit gate
-4. `train-base` / `train-cycle14-s1` / `train-cycle14-s42` —
-   separate stages, ARG-driven hyperparams. Tweak one without
-   re-paying others.
-5. `concat` / `validate` / `bundle` — cheap downstream
-
-Build-time tweaking:
-```sh
-docker build --build-arg CYCLE14_S1_TV_WEIGHT=2.0 -f docker/Dockerfile .
-```
-
-Only re-runs the affected component + downstream.
-
-### 11. Optional Rust-side cache (NOT YET wired)
-
-`zensim-validate/src/train_cache.rs` — content-addressable cache
-keyed on `SHA-256(binary_version || input_md5s || flags)`. In-tree
-md5+sha256, no external deps. Optional via volume mount:
-
-```sh
-docker run -v $(pwd)/cache:/cache -e ZENSIM_TRAIN_CACHE=/cache ...
-```
-
-Without the mount, in-container only (volatile). Module compiles
-but NOT yet plumbed into `zensim_mlp_train::main()`. ~30 LOC TO-DO.
-
-### 12. Site fixes (earlier in session)
-
-`zensim/site/compare.html` was broken (`manifest.corpora is not
-iterable`). Fixed by merging the R2 manifest WITH the JS stub.
-`check_site_urls.py` now spoofs Chrome UA (R2 was 403-ing urllib's
-default UA). All 39 URLs pass; Playwright-verified.
-
-## Outstanding work (priority order)
-
-1. **V0_18 reproduction audit completes** (~10 more min from
-   2026-05-14 ~09:00 UTC). If CID22 ≈ 0.8933 → ship V0_19 in place
-   (no version bump) and supersede V0_18.
-2. **Wire `train_cache` into `zensim_mlp_train::main()`**. ~30 LOC.
-3. **Fix `quant_compare.rs`** to accept v3 bakes (currently asserts
-   v2 only; blocks V_X → I8 path on v3 inputs).
-4. **Dockerfile R2 sync + corpus URLs + checksums**. Stubs in place.
-5. **`--recipe-version` flag** in `zensim_mlp_train`. Pins all
-   hyperparams to a frozen named recipe so future default changes
-   don't break past invocations.
-6. **V0_20 input-shaping experiments**. FeatureTransform variants
-   ready; need per-feature training sweeps.
-7. **V0_21 linear distillation**. Ridge regression with engineered
-   features vs MLP teacher; target beat V0_2's 0.8676.
-
-## Critical rules to restate
-
-- 10-band SROCC reporting is the PRIMARY release gate (revised
-  2026-05-14). Legacy 4-band CID22 cuts retained for paper compat.
-- NEVER ship a bake without re-running `check_holdout_overlap`
-  against ALL holdout corpora at d≤16 (dHash-64).
-- "match-or-exceed fast-ssim2" is the aspiration, **NOT** a strict
-  block. V0_19 is below fast-ssim2 on CID22; that's an honest gap
-  to close, not a reason to ship the inflated baseline.
-- "NEVER CLAIM FALSE COMPLETION" — every methodology doc's script
-  references must be `git log -- <path>`-verifiable.
-- Don't ship bakes trained with `ZENSIM_BYPASS_CONTAMINATION_GUARD_*`
-  set. Audit-only.
-
-## Commits this session (zensim main, oldest → newest)
-
-- `83f1b3ec` — 10-band per-band reporting + site URL fixes
-- `97fd9a43` — site manifest merge fix (compare.html)
-- `d0b8c291` — zensim → zenpredict 0.2.0 + V0_18 v2→v3 + 10-band
-- `d6f12e48` — ship V0_18 zerobiased+HU in place
-- `f0394bff` — V0_19/20/21 training kickoff + candlestick + concat
-- `984e3da7` — V0_18 methodology hallucination fix
-- `4609d0f7` — V0_19 honest failure + guard + canonical clean corpus
-- `fe6cbdb5` — Rust affine_calibrate + Dockerfile scaffold
-- `04e2a16b` — V0_18 repro audit + Dockerfile refactor + train_cache
-  + FeatureTransform v3.0 variants
-
-## Inputs (locations)
-
-- Test corpora: `/mnt/v/dataset/{cid22,kadid10k,tid2013}/`
-- KonJND: `/mnt/v/dataset/konfig-iqa/` (verify — old refs claimed
-  `/mnt/v/datasets/KonJND-1k/` which doesn't exist on this box)
-- Training corpus (clean canonical):
-  `/mnt/v/zen/zensim-training/2026-05-14-clean/`
-- Audit blocklist:
-  `benchmarks/contamination_blocklist_2026-05-14.txt`
-- Methodology:
-  - `benchmarks/v0_18_methodology_2026-05-13.md` (with 2026-05-14
-    addendum + hallucination-fix note)
-  - `benchmarks/v0_19_methodology_2026-05-14.md`
-  - `benchmarks/v0_20_v0_21_design_2026-05-14.md`
-
-## How to run a re-training right now (recipe pinned)
+## Reproduce the V_18 ship from scratch
 
 ```sh
 CLEAN=/mnt/v/zen/zensim-training/2026-05-14-clean
+DATE=$(date -u +%Y-%m-%d)
 
-# Component 1: V0_16-base equivalent
-cargo run --release -p zensim-validate --bin zensim_mlp_train -- \
+# Component 1: V_16-equivalent base seed=1 (no TV regularizer)
+./target/release/zensim_mlp_train \
   --group safesyn:$CLEAN/safe_synth_v19_clean_features.csv:1.0:0.0 \
   --group kadid:$CLEAN/kadid_features.csv:0.3:1.0 \
   --group tid:$CLEAN/tid_features.csv:0.3:1.0 \
   --group konjnd:$CLEAN/konjnd_aligned_features.csv:0.5:1.0 \
-  --hidden 128 --epochs 300 --seed 1 \
-  --out benchmarks/v0_X_base_seed1_$(date -u +%Y-%m-%d).bin
+  --hidden 128 --epochs 300 --seed 1 --max-features 228 --val-policy min \
+  --out benchmarks/v0_X_base_seed1_${DATE}.bin
 
-# Component 2: cycle-14 seed=1 TV-regularized
-cargo run --release -p zensim-validate --bin zensim_mlp_train -- \
+# Component 2: cycle-14 TV seed=1 (TV-regularized)
+./target/release/zensim_mlp_train \
   --group safesyn:$CLEAN/safe_synth_v19_clean_features.csv:1.0:0.0 \
   --group kadid:$CLEAN/kadid_features.csv:0.3:1.0 \
   --group tid:$CLEAN/tid_features.csv:0.3:1.0 \
   --group konjnd:$CLEAN/konjnd_aligned_features.csv:0.5:1.0 \
-  --hidden 128 --epochs 300 --seed 1 \
+  --hidden 128 --epochs 300 --seed 1 --max-features 228 --val-policy min \
   --tv-pairs-file $CLEAN/tv_pairs_bands.tsv \
   --tv-weight 1.0 --tv-band-weights 10,30,10,30 \
   --tv-apply-every 50 --tv-batch 32 \
-  --out benchmarks/v0_X_cycle14_s1_$(date -u +%Y-%m-%d).bin
+  --out benchmarks/v0_X_cycle14_s1_${DATE}.bin
 
-# Component 3: cycle-14 seed=42 (same flags, --seed 42)
+# Component 3: cycle-14 TV seed=42 (same flags, --seed 42)
 
-# Concat:
+# Concat the three components:
 cargo run --release -p zensim-validate --bin concat_three_way -- \
-  --base benchmarks/v0_X_base_seed1_*.bin \
-  --s1   benchmarks/v0_X_cycle14_s1_*.bin \
-  --s42  benchmarks/v0_X_cycle14_s42_*.bin \
+  --base benchmarks/v0_X_base_seed1_${DATE}.bin \
+  --s1   benchmarks/v0_X_cycle14_s1_${DATE}.bin \
+  --s42  benchmarks/v0_X_cycle14_s42_${DATE}.bin \
   --coeffs 0.65:0.30:0.05 \
-  --out  benchmarks/v0_X_concat_3way_$(date -u +%Y-%m-%d).bin
+  --out  benchmarks/v0_X_concat_3way_${DATE}.bin
 
-# Affine calibrate (V0_16 lineage):
+# Affine calibrate (V_16-lineage α/β):
 cargo run --release -p zensim-validate --bin affine_calibrate -- \
-  --in-bake benchmarks/v0_X_concat_3way_*.bin \
-  --out-bake zensim/weights/v0_X_$(date -u +%Y-%m-%d).bin \
+  --in-bake  benchmarks/v0_X_concat_3way_${DATE}.bin \
+  --out-bake zensim/weights/v0_X_${DATE}.bin \
   --alpha 28.0366 --beta=-5.0738
 
-# Validate (10-band primary):
+# Validate (full Mohammadi panel):
 cargo run --release -p zensim-bench --example dataset_metric_baseline -- \
   --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
   --kadid /mnt/v/dataset/kadid10k \
   --tid /mnt/v/dataset/tid2013 \
-  --v04-bake zensim/weights/v0_X_$(date -u +%Y-%m-%d).bin \
-  --max-pairs 50000 > benchmarks/v0_X_10band_$(date -u +%Y-%m-%d).md
+  --v04-bake zensim/weights/v0_X_${DATE}.bin \
+  --max-pairs 50000 > benchmarks/v0_X_panel_${DATE}.md
 ```
 
-That's the canonical 2026-05-14 ship pipeline. Pure Rust. Memorize it
-or `cat CONTEXT-HANDOFF.md` after the reset.
+## What to do next session
+
+1. Check the IW-SSIM compute status (PID 4048804 or vast.ai output).
+   If done, the parquet sidecar should be at
+   `/mnt/v/output/zensim/synthetic-v2/iwssim_targets_safesyn_2026-05-15.parquet`.
+2. Add the trainer `--target-column NAME` flag so we can switch
+   from ssim2 → IW-SSIM regression target. The merge step (joining
+   the parquet sidecar onto the features CSV by `(source_path,
+   decoded_path)`) needs a small pre-processing script too.
+3. Retrain a V_22-candidate against IW-SSIM target.
+4. Run the full Mohammadi panel on it. The expectation per the
+   methodology critique: this is the first bake whose CID22 verdict
+   isn't structurally rigged.
+
+If any of those steps surface an unexpected blocker, return to
+CLAUDE.md "Principled experiment workflow" and write down what was
+tried before continuing.
