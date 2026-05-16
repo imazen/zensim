@@ -714,7 +714,7 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
                         .and_then(|s| s.to_str())
                         .unwrap_or("")
                         .to_string();
-                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref())
+                    process_konjnd_pair(kp, &z_v04, v04_bake_bytes.as_deref(), feature_regime)
                         .map(|row| (kp.codec.clone(), ref_basename, row))
                 })
                 .collect();
@@ -816,6 +816,7 @@ fn process_konjnd_pair(
     kp: &KonJndPair,
     z_v04: &Zensim,
     v04_bake: Option<&[u8]>,
+    regime: FeatureRegime,
 ) -> Option<(f64, f64, f64, f64, Vec<f64>)> {
     let p = &kp.pair;
     let src_img = match image::open(&p.reference) {
@@ -840,7 +841,21 @@ fn process_konjnd_pair(
     }
     let s = RgbSlice::new(&src_pixels, w_us, h_us);
     let d = RgbSlice::new(&dst_pixels, w_us, h_us);
-    let result = z_v04.compute(&s, &d).ok()?;
+    // Dispatch on regime to compute the right feature width for the
+    // loaded bake. Without this, V_20+ bakes (n_inputs > 228) get fed
+    // truncated feature vectors and produce NaN scores — observed on
+    // V_22-IW (n_inputs=372) yielding NaN mean ± stdev on every KonJND
+    // pair (2026-05-16 eval).
+    let result = match regime {
+        FeatureRegime::Standard => z_v04.compute(&s, &d).ok()?,
+        FeatureRegime::Extended => z_v04.compute_extended_features(&s, &d).ok()?,
+        FeatureRegime::ExtendedIw => {
+            let mut cfg = ZensimConfig::default();
+            cfg.extended_features = true;
+            cfg.compute_iw_features = true;
+            compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, cfg).ok()?
+        }
+    };
     let features = result.features();
     let n_v02 = zensim::profile::LINEAR_WEIGHTS_PREVIEW_V0_2.len();
     if features.len() < n_v02 {
