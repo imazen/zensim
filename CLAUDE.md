@@ -258,6 +258,118 @@ forward, the priorities are:
 - 2026-05-10 champion + recipe + Phase 4 plan: `benchmarks/champion_2026-05-10.md`,
   `docs/phase4_reference/README.md`
 
+## SROCC-only verdicts BANNED + ssim2-target training bias (added 2026-05-15)
+
+**STOP USING SROCC ALONE AS A VERDICT GATE.** Every ship/no-ship,
+falsified/promising call MUST cite the full Mohammadi 2025 panel
+(SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE). When the panel
+disagrees with SROCC, **the panel wins**.
+
+### Why this is now non-negotiable
+
+The V_20a IW-SSIM and V_20 IW+ext+transforms falsifications used
+SROCC-on-CID22 as the primary gate and called the IW direction
+"falsified." That call is structurally rigged:
+
+1. **The training corpus uses ssim2 as the golden target.** Every
+   V_X bake (V_18, V_19, V_20 IS, V_20 extended, V_20a IW, V_20
+   IW+ext+transforms) is trained on safesyn pairs whose
+   `human_score` column is the ssim2-derived score, NOT a human MOS
+   and NOT an IW-SSIM score.
+
+2. **SROCC against the resulting predictions favors ssim2-shaped
+   surfaces.** A bake trained to predict ssim2 will produce
+   ssim2-shaped output. Evaluating that bake against an
+   ssim2-derived ground-truth-equivalent column reports high SROCC
+   when the bake is "more ssim2-like" — but IW-SSIM-quality bakes
+   are deliberately NOT ssim2-shaped (Wang & Li 2011: that's the
+   point of weighting by information content).
+
+3. **The IW bakes win on TID human MOS, PWRC, and Z-RMSE — the
+   "important metrics" per Mohammadi 2025.** V_20 IW+ext+transforms
+   on TID: SROCC 0.9710, PWRC 0.9822, Z-RMSE 0.231 — best TID
+   result ever measured, +0.018 SROCC over V_18 ship, −0.063 Z-RMSE
+   (~22 % less calibration error). The same bake's CID22 SROCC
+   0.4632 looks catastrophic — but CID22 was evaluated using human
+   MOS that is itself ssim2-aware (CID22 weights tuned on the same
+   reference images). The single-stat SROCC verdict is misleading.
+
+### What replaces SROCC-only
+
+- **Mohammadi 2025 full panel** at aggregate AND per-band level.
+- **Multi-stat agreement** as the ship gate: a bake ships when at
+  least 3 of 5 stats (SROCC, PLCC, KROCC, PWRC, Z-RMSE) agree on
+  improvement vs the prior ship on the held-out corpus.
+- **Per-band Z-RMSE** is load-bearing — it measures absolute
+  calibration error after a 4-parameter logistic rescale, which
+  decouples it from the training-target metric's shape. Two bakes
+  with the same SROCC can have wildly different Z-RMSE.
+
+### What changes operationally
+
+- Every prior "falsified on SROCC" verdict in `benchmarks/v0_20*` /
+  `benchmarks/v0_19*` / `benchmarks/v0_18_1*` is **provisional**.
+  Re-evaluate against the full panel before treating the
+  hypothesis as dead. Where the full panel has been collected
+  (commit `0653c818`, `4b557c00`, `c0200d6c`) the verdict stands;
+  where only SROCC was reported, treat the "falsified" label as
+  suspect.
+- New training experiments should use **multiple training targets**
+  (ssim2 + IW-SSIM at minimum) so the trained bake isn't shaped by
+  exactly one metric's biases. We don't currently have IW-SSIM
+  scores on the safesyn corpus — that gap is the next infrastructure
+  build (see "Multi-target training corpus" below).
+- Per-codec / per-band evaluation should compute the full panel,
+  not just SROCC per band. The current `dataset_metric_baseline`
+  emits the full panel at aggregate but only SROCC + CI per band;
+  closing that gap is queued.
+
+### "ssim2 favoring SROCC" antidote
+
+When you see a bake report "won TID + KADID, lost CID22 on SROCC,"
+don't call it falsified yet. Check:
+- CID22 PWRC: did it lose by > 0.005?
+- CID22 Z-RMSE: did it lose by > 0.030?
+- TID + KADID delta on the FULL PANEL: did they win across all 5
+  stats?
+- AIC-3 / AIC-4: does the bake also win there? Those are
+  independent compression-focused holdouts.
+
+If most of the panel agrees on the wrong direction, the
+falsification stands. If only SROCC says "fail" while PWRC + Z-RMSE
+say "wins," the SROCC-on-ssim2-trained-corpus bias is the
+explanation — surface the result, don't bury it as "falsified."
+
+## Multi-target training corpus — TODO (2026-05-15)
+
+The safesyn training corpus at `/mnt/v/output/zensim/synthetic-v2/
+training_safe_synthetic.csv` carries `human_score` = ssim2-derived
+score (per the existing methodology). This is the proximate cause
+of the "ssim2-favoring SROCC" bias documented above.
+
+To produce bakes that aren't ssim2-shaped, the corpus needs
+additional target columns:
+
+- **IW-SSIM score** per pair (computed via the official Wang & Li
+  2011 reference implementation — `pyiqa.iwssim` is the canonical
+  Python reproducibility path).
+- **CVVDP score** per pair (Mantiuk et al. — requires GPU + display
+  calibration model; longer-term).
+- Optionally: **butteraugli 3-norm**, **dssim**, **fast-ssim2**
+  (already have these via the per-pair eval pipeline, but not
+  baked into the training CSV).
+
+Trainer changes needed:
+- `--target-column NAME` flag to switch the regression target.
+- `--target-mix ssim2:0.5,iwssim:0.5` for multi-target weighted
+  supervision.
+
+Until this lands, every V_X bake we ship is structurally an
+ssim2 predictor with input-shaping / feature-set variations on top.
+The principled workflow's "hypothesis-first" step should henceforth
+include "what is the training target, and is the verdict gate
+appropriate to that target?"
+
 ## Statistical rigor — mandatory full-stat reporting (2026-05-14)
 
 Every eval that emits SROCC MUST also emit, in the same report:
