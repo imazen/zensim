@@ -103,31 +103,133 @@ AND the prediction's variance is even smaller.
    to thread `regime` through this function. Result: V_22-IW
    produces NaN on every KonJND pair.
 
-## Hypothesis verdict — provisional pending re-eval
+## Hypothesis verdict — FINAL (after re-eval)
 
+Re-eval completed at 2026-05-16T22:50Z with CID22 path corrected.
 Per `benchmarks/v0_22_iw_methodology_2026-05-16.md` step 10
-(falsification gates):
+(falsification gates), three gates:
 
-- **Hypothesis confirmed on TID**: V_22-IW +0.112 SROCC over V_18
-  ship/ssim2. Full Mohammadi panel pending re-eval.
-- **Hypothesis partially confirmed on KADID**: V_22-IW WINS B0..B7
-  (the priority band per CLAUDE.md "B0..B5 lift is the dominant
-  priority"), LOSES B8/B9 (high-quality, near-saturation regime).
-  Aggregate −0.03 SROCC loss is within tolerance.
-- **CID22 verdict deferred** to re-eval.
-- **Ship form decision deferred** — Option C (V_22-IW as the
-  PreviewV0_4 secondary, replacing V_20 IS) looks most appealing
-  given the strong low-q win + high-q flattening pattern, but
-  CID22 results are required first.
+### Gate 1 — "CID22 SROCC drops > 0.030 AND PWRC + Z-RMSE also drop"
 
-## Next steps
+**HIT.** All 5 stats unanimously confirm V_22-IW worse on CID22:
 
-1. **In flight (re-eval)**: complete eval with CID22 path fixed.
-   Expected: B0..B5 wins on CID22 (consistent with V_18 ship's
-   CID22 0.89 baseline, V_22-IW should fall to ~0.85-0.88).
-2. **Fix queued (T4.3)**: KonJND path + AIC-3 0-valid investigation.
-3. **Don't sweep seeds yet** — wait for CID22 full panel verdict
-   per CLAUDE.md "Seed=1 first as cheap signal" workflow step 3.
-4. **If hypothesis fully confirms**: design V_22-IW v2 with
-   target-distribution transform (per "Diagnosis" above) before
-   moving to seed=2/3 sweep.
+| Stat | V_22-IW | fast-ssim2 | V_0_2 | Δ V_22-IW vs ssim2 |
+|---|---:|---:|---:|---:|
+| SROCC | 0.6122 | 0.8895 | 0.8676 | **−0.277** |
+| PLCC | 0.5803 | 0.8778 | 0.8561 | **−0.297** |
+| KROCC | 0.4283 | 0.7062 | 0.6786 | **−0.278** |
+| OR | 0.0408 | 0.0424 | 0.0478 | −0.002 (near-parity) |
+| PWRC | 0.7270 | 0.9351 | 0.9174 | **−0.208** |
+| Z-RMSE | 0.806 | 0.460 | 0.498 | **+0.346** (higher = worse) |
+
+Per-band CID22 mid-quality bands (where 80 % of CID22 mass lives):
+
+| Band | n | V_22-IW SROCC | fast-ssim2 SROCC | Δ |
+|---|--:|---:|---:|---:|
+| B5 [0.50, 0.60) | 615 | 0.0593 | 0.3888 | −0.330 |
+| B6 [0.60, 0.70) | 836 | 0.0499 | 0.4173 | −0.367 |
+| B7 [0.70, 0.80) | 1092 | 0.2087 | 0.3974 | −0.189 |
+| B8 [0.80, 0.90) | 1382 | 0.4118 | 0.5006 | −0.089 |
+
+V_22-IW collapses near-randomly on the B5/B6 mid-quality band. This is
+where compression-product decisions live. **Fatal.**
+
+### Gate 2 — "TID SROCC drops vs V_18 ship"
+
+**NOT HIT.** V_22-IW TID SROCC = 0.9580 vs V_18 ship/ssim2 ≈ 0.846 —
+**+0.112 SROCC win**, the largest single-corpus SROCC lift measured
+for zensim. The IW-SSIM target IS capturing something useful on
+TID synthetic distortions.
+
+### Gate 3 — "Multiple seeds (1, 2, 3) all hit the falsification"
+
+Only seed=1 tested. Per methodology doc step 3 "Seed=1 first as cheap
+signal" decision tree:
+- Seed=1 wins held-out signal → sweep 5 seeds
+- Seed=1 flat or negative → stop, document
+- Seed=1 mixed → diagnose mechanism BEFORE sweeping
+
+Result is **mixed** — TID wins, CID22 collapses. Per methodology
+doc step 10:
+
+> A session that produces two falsifications and zero wins is NOT
+> a failed session — it's a session that ruled out two directions.
+
+We have ONE falsification (V_22-IW standalone bake for CID22) and
+ONE confirmation (V_22-IW captures TID-relevant signal). The
+session output is **a clear partial verdict**:
+
+- **Standalone bake replacement of V_18 ship: FALSIFIED.** V_22-IW
+  cannot replace V_18 ship as PreviewV0_3 — CID22 collapse is
+  unrecoverable at the standalone-bake level.
+- **Multi-bake secondary candidate: VIABLE.** V_22-IW's TID win
+  is genuine. As a SECONDARY in a multi-bake with V_18 ship
+  primary (Option C in the methodology doc), V_22-IW could
+  contribute to a Pareto-improved ship.
+
+## Ship form decision — Option C with α tuning
+
+Path forward:
+1. **Do NOT replace V_18 ship with V_22-IW standalone.** Confirmed
+   falsification on CID22 panel.
+2. **Test V_18 + V_22-IW multi-bake at various α** (similar to D2
+   PreviewV0_4 design). Goal: keep V_18's CID22 0.89 anchor while
+   pulling in the TID win.
+3. **Do NOT sweep seeds 2 and 3 yet.** Per methodology doc step 3:
+   "If seed=1 mixed → diagnose mechanism before sweeping." We have
+   the mechanism: IW-SSIM target collapses on CID22 compression
+   artifacts (FRIQUEE 2017 caveat materialized).
+4. **Design V_22-IW v2 with target-distribution transform** before
+   seed sweep:
+   - `-log(1 - iwssim + ε)` to spread high-q tail
+   - Or train against a non-flattening target alongside IW-SSIM
+   - Or use winsor_p99 on the target itself, mapping
+     iwssim ∈ [0.999, 1.0] to a wider output range
+
+## What this experiment confirmed
+
+The 2026-05-15 CLAUDE.md addition "SROCC-only verdicts BANNED +
+ssim2-target training bias" was the right call. The seed=1 results
+make the bias mechanism concrete:
+
+- A bake trained on ssim2-derived targets (V_18 ship) wins CID22
+  by ~0.28 SROCC over a bake trained on IW-SSIM targets (V_22-IW)
+  — much larger than chance, even on this single test.
+- The win is not because V_18 ship "understands compression
+  better" in some absolute sense; it's because the CID22 MOS was
+  collected against an SSIMULACRA-2-aware reference, and the
+  V_18 surface matches that shape.
+
+This is exactly the "structurally rigged" framing in CLAUDE.md.
+The METRIC choice IS the verdict choice — if we want a metric
+that captures compression quality independently of SSIMULACRA-2,
+the training target needs to break free of ssim2 too. IW-SSIM is
+a step in that direction but not THE answer (it loses CID22
+because it shares enough ssim2-bias to be "almost ssim2" while
+adding IW-pool that's the wrong shape for compression).
+
+## Comparison to V_18 ship + V_20 IS multi-bake (PreviewV0_4)
+
+| Corpus | V_18 ship | V_22-IW | PreviewV0_4 (V_18 + V_20 IS @ α=0.4) |
+|---|---:|---:|---:|
+| CID22 SROCC | ~0.893 | 0.6122 | ~0.886 (V_18 anchor preserved) |
+| TID SROCC | ~0.840 | **0.9580** | ~0.840 (V_20 IS is B3 specialist on CID22, not TID booster) |
+| KADID B0 SROCC | ~0.64 | **0.89** | varies by mix |
+
+V_22-IW's profile (TID 0.96, CID22 0.61, KADID-B0 0.89) is
+COMPLEMENTARY to V_18 ship's (CID22 0.89, TID 0.84, KADID-B0 0.64).
+Option C multi-bake at α ≈ 0.7 (heavy V_18 weight) should
+maintain V_18's CID22 anchor while pulling TID up.
+
+## Next steps (queued)
+
+1. **T1.4 (new)**: Test V_18 + V_22-IW multi-bake at α ∈ {0.3, 0.5,
+   0.7, 0.8, 0.9} in PreviewV0_4 slot. Pick the α that maximizes
+   the multi-corpus Pareto frontier.
+2. **T4.3 (queued)**: Fix KonJND ExtendedIw dispatch + AIC-3 0 valid.
+3. **T1.5 (new)**: Design V_22-IW v2 with target-distribution
+   transform (log-distance target, multi-target loss). Train if
+   Option C results don't reach the V_18 ship's CID22 anchor.
+4. **Document the V_22-IW seed=1 verdict** in
+   `benchmarks/v0_22_iw_methodology_2026-05-16.md`'s "Falsification
+   gate" section per methodology workflow step 10.
