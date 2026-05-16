@@ -455,12 +455,15 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
         };
         if let Some(bands) = bands {
             println!();
-            println!("### {} per-band SROCC (vs human MOS)", ds.name);
+            println!(
+                "### {} legacy 4-band full Mohammadi panel (CID22 paper Table 5 cuts)",
+                ds.name
+            );
             println!();
             println!(
-                "| Band | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE | V0_2 MAE |"
+                "| Band | n | Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE | V0_4 95% CI |"
             );
-            println!("|---|--:|:--:|:--:|:--:|:--:|:--:|--:|--:|");
+            println!("|---|--:|:--|---:|---:|---:|---:|---:|---:|---:|---:|");
             for (label, lo, hi) in &bands {
                 let idxs: Vec<usize> = humans
                     .iter()
@@ -469,64 +472,82 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
                     .collect();
                 if idxs.len() < 4 {
                     println!(
-                        "| {label} | {} | n/a | n/a | n/a | n/a | n/a | n/a |",
+                        "| {label} | {} | — | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |",
                         idxs.len()
                     );
                     continue;
                 }
                 let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
-                let v02_b: Vec<f64> = idxs.iter().map(|&i| v02[i]).collect();
-                let v04_b: Vec<f64> = idxs.iter().map(|&i| v04[i]).collect();
-                let ssim_b: Vec<f64> = idxs.iter().map(|&i| ssim2[i]).collect();
-                let ba_b: Vec<f64> = idxs.iter().map(|&i| butter[i]).collect();
-                let s_v02 = spearman(&h_b, &v02_b).abs();
-                let s_v04 = spearman(&h_b, &v04_b).abs();
-                let s_ssim = spearman(&h_b, &ssim_b).abs();
-                let s_ba = spearman(&h_b, &ba_b).abs();
-                // 200-iteration bootstrap 95% CI for V0_4 SROCC. Uses
-                // xorshift64 from a fixed seed for reproducibility (no
-                // rand crate dep). Small n (e.g. B3 ~ 43) needs CI
-                // reported because point estimates are noisy.
-                let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, &v04_b, 200, 0xC0FFEE);
-                // MAE: V0_4 outputs distance ≈ 100 - score. Compare predicted
-                // *score* = 100 - V0_4 distance against human MCOS * 100.
-                let mae_v04: f64 = idxs
-                    .iter()
-                    .map(|&i| ((100.0 - v04[i]) - humans[i] * 100.0).abs())
-                    .sum::<f64>()
-                    / idxs.len() as f64;
-                // V0_2 outputs raw distance ~ 0..90. Skip score-mapping for
-                // V0_2 MAE; just report mean(|distance - (100 - MCOS)|) as a
-                // rough cross-scale anchor.
-                let mae_v02: f64 = idxs
-                    .iter()
-                    .map(|&i| (v02[i] - (100.0 - humans[i] * 100.0)).abs())
-                    .sum::<f64>()
-                    / idxs.len() as f64;
-                println!(
-                    "| {label} | {} | {s_v02:.4} | {s_v04:.4} | [{ci_lo:.2}, {ci_hi:.2}] | {s_ssim:.4} | {s_ba:.4} | {mae_v04:.2} | {mae_v02:.2} |",
-                    idxs.len()
-                );
+                let metric_vals_b: [(&str, Vec<f64>); 4] = [
+                    ("V0_2", idxs.iter().map(|&i| v02[i]).collect()),
+                    ("V0_4 (bake)", idxs.iter().map(|&i| v04[i]).collect()),
+                    ("fast-ssim2", idxs.iter().map(|&i| ssim2[i]).collect()),
+                    ("butter", idxs.iter().map(|&i| butter[i]).collect()),
+                ];
+                let noisy = if idxs.len() < 30 { " ⚠" } else { "" };
+                for (mi, (mname, vals_b)) in metric_vals_b.iter().enumerate() {
+                    let s = spearman(&h_b, vals_b).abs();
+                    let p = pearson(&h_b, vals_b).abs();
+                    let k = kendall_tau(&h_b, vals_b).abs();
+                    let or_ = outlier_ratio(vals_b, &h_b);
+                    let pw = pwrc(&h_b, vals_b).abs();
+                    let rescaled = rescale_logistic(vals_b, &h_b);
+                    let z = z_rmse(&rescaled, &h_b, None);
+                    let mae: f64 = rescaled
+                        .iter()
+                        .zip(h_b.iter())
+                        .map(|(r, h)| (r - h).abs())
+                        .sum::<f64>()
+                        / idxs.len() as f64;
+                    let ci_cell = if mi == 1 {
+                        let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, vals_b, 200, 0xC0FFEE);
+                        format!("[{ci_lo:.2}, {ci_hi:.2}]")
+                    } else {
+                        "—".to_string()
+                    };
+                    let band_cell = if mi == 0 {
+                        format!("{label}{noisy}")
+                    } else {
+                        "  ".to_string()
+                    };
+                    let n_cell = if mi == 0 {
+                        format!("{}", idxs.len())
+                    } else {
+                        "".to_string()
+                    };
+                    println!(
+                        "| {band_cell} | {n_cell} | {mname} | {s:.4} | {p:.4} | {k:.4} | {or_:.4} | {pw:.4} | {z:.3} | {mae:.4} | {ci_cell} |"
+                    );
+                }
             }
             println!();
 
-            // ---- 10-band width-10 reporting (primary release gate) ----
+            // ---- 10-band width-10 full Mohammadi panel (T3.1, 2026-05-16)
             //
             // The 10-band grid is the PRIMARY per-band table required by
-            // zensim/CLAUDE.md (revised 2026-05-14: "10 bands not 4").
-            // Width-10 on the 0-100 MCOS / SSIMULACRA 2 scale. For corpora
-            // whose normalized scores use different cuts (KADID, TID) the
-            // band edges below map directly to width-10 zones on the
-            // dataset's normalized human-score scale.
+            // zensim/CLAUDE.md (revised 2026-05-14: "10 bands not 4",
+            // revised 2026-05-15: "full Mohammadi panel per band, not
+            // SROCC-only — SROCC-only verdicts are BANNED"). Width-10 on
+            // the 0-100 MCOS / SSIMULACRA 2 scale. For corpora whose
+            // normalized scores use different cuts (KADID, TID) the band
+            // edges below map directly to width-10 zones on the dataset's
+            // normalized human-score scale.
+            //
+            // Emits ONE row per (band, metric) — 10 bands × 4 metrics =
+            // 40 data rows per dataset. The joint pattern across SROCC +
+            // PLCC + KROCC + OR + PWRC + Z-RMSE is the load-bearing
+            // signal per CLAUDE.md `Statistical rigor` mandate; SROCC
+            // alone hides PWRC / Z-RMSE / OR regressions that change the
+            // verdict.
             println!(
-                "### {} 10-band SROCC (PRIMARY: B0..B9 width-10 on normalized score)",
+                "### {} 10-band full Mohammadi panel (PRIMARY release gate)",
                 ds.name
             );
             println!();
             println!(
-                "| Band | range | n | V0_2 | V0_4 (bake) | V0_4 95% CI | fast-ssim2 | butter | V0_4 MAE |"
+                "| Band | range | n | Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE | 95% CI |"
             );
-            println!("|---|---|--:|:--:|:--:|:--:|:--:|:--:|--:|");
+            println!("|---|---|--:|:--|---:|---:|---:|---:|---:|---:|---:|---:|");
             for band_idx in 0..10 {
                 let lo = band_idx as f64 * 0.10;
                 let hi = lo + 0.10;
@@ -549,34 +570,67 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
                     .collect();
                 if idxs.len() < 4 {
                     println!(
-                        "| {label} | {range_label} | {} | n/a | n/a | n/a | n/a | n/a | n/a |",
+                        "| {label} | {range_label} | {} | — | n/a | n/a | n/a | n/a | n/a | n/a | n/a | — |",
                         idxs.len()
                     );
                     continue;
                 }
                 let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
-                let v02_b: Vec<f64> = idxs.iter().map(|&i| v02[i]).collect();
-                let v04_b: Vec<f64> = idxs.iter().map(|&i| v04[i]).collect();
-                let ssim_b: Vec<f64> = idxs.iter().map(|&i| ssim2[i]).collect();
-                let ba_b: Vec<f64> = idxs.iter().map(|&i| butter[i]).collect();
-                let s_v02 = spearman(&h_b, &v02_b).abs();
-                let s_v04 = spearman(&h_b, &v04_b).abs();
-                let s_ssim = spearman(&h_b, &ssim_b).abs();
-                let s_ba = spearman(&h_b, &ba_b).abs();
-                let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, &v04_b, 200, 0xC0FFEE);
-                let mae_v04: f64 = idxs
-                    .iter()
-                    .map(|&i| ((100.0 - v04[i]) - humans[i] * 100.0).abs())
-                    .sum::<f64>()
-                    / idxs.len() as f64;
+                let metric_vals_b: [(&str, Vec<f64>); 4] = [
+                    ("V0_2", idxs.iter().map(|&i| v02[i]).collect()),
+                    ("V0_4 (bake)", idxs.iter().map(|&i| v04[i]).collect()),
+                    ("fast-ssim2", idxs.iter().map(|&i| ssim2[i]).collect()),
+                    ("butter", idxs.iter().map(|&i| butter[i]).collect()),
+                ];
                 let noisy = if idxs.len() < 30 { " ⚠" } else { "" };
-                println!(
-                    "| {label}{noisy} | {range_label} | {} | {s_v02:.4} | {s_v04:.4} | [{ci_lo:.2}, {ci_hi:.2}] | {s_ssim:.4} | {s_ba:.4} | {mae_v04:.2} |",
-                    idxs.len()
-                );
+                for (mi, (mname, vals_b)) in metric_vals_b.iter().enumerate() {
+                    let s = spearman(&h_b, vals_b).abs();
+                    let p = pearson(&h_b, vals_b).abs();
+                    let k = kendall_tau(&h_b, vals_b).abs();
+                    let or_ = outlier_ratio(vals_b, &h_b);
+                    let pw = pwrc(&h_b, vals_b).abs();
+                    // Z-RMSE: logistic-rescale the predictions into MOS
+                    // units (Mohammadi 2025 convention) then compute
+                    // σ-normalized RMSE with corpus-wide σ. Per-stimulus
+                    // σ unavailable at this aggregation level.
+                    let rescaled = rescale_logistic(vals_b, &h_b);
+                    let z = z_rmse(&rescaled, &h_b, None);
+                    // MAE: report in MOS units after logistic rescale so
+                    // it's comparable across the metric polarities (V0_4
+                    // is distance, ssim2 is score, butter is distance —
+                    // the rescaled prediction is in target's MOS units).
+                    let mae: f64 = rescaled
+                        .iter()
+                        .zip(h_b.iter())
+                        .map(|(r, h)| (r - h).abs())
+                        .sum::<f64>()
+                        / idxs.len() as f64;
+                    let ci_cell = if mi == 1 {
+                        // V0_4 only — bootstrap CI for the bake under test.
+                        let (ci_lo, ci_hi) = bootstrap_srocc_ci_95(&h_b, vals_b, 200, 0xC0FFEE);
+                        format!("[{ci_lo:.2}, {ci_hi:.2}]")
+                    } else {
+                        "—".to_string()
+                    };
+                    let band_cell = if mi == 0 {
+                        format!("{label}{noisy} | {range_label}")
+                    } else {
+                        "  | ".to_string()
+                    };
+                    let n_cell = if mi == 0 {
+                        format!("{}", idxs.len())
+                    } else {
+                        "".to_string()
+                    };
+                    println!(
+                        "| {band_cell} | {n_cell} | {mname} | {s:.4} | {p:.4} | {k:.4} | {or_:.4} | {pw:.4} | {z:.3} | {mae:.4} | {ci_cell} |"
+                    );
+                }
             }
             println!();
-            println!("_⚠ marks bands with n < 30 — point estimate is noisy._");
+            println!(
+                "_⚠ marks bands with n < 30 — point estimates are noisy (CI widths exceed ±0.3 SROCC at n<30; rankings between metrics not statistically distinguishable). MAE and Z-RMSE are computed after a 4-parameter logistic rescale per Mohammadi 2025. 95% CI column populated for the V0_4 bake (the row under test); other metrics' CIs omitted to keep the table readable._"
+            );
             println!();
 
             // ---- Fine-grained step-5 (optional supplement) ----
