@@ -280,6 +280,44 @@ struct Args {
     /// `benchmarks/v0_20_v0_21_design_2026-05-14.md`.
     #[arg(long, value_name = "TOKEN:IDX[:PARAMS]")]
     feature_transform: Vec<String>,
+
+    /// V0_20 input-shaping: auto-load per-feature transforms from a
+    /// greedy-screen TSV (winning transform per feature with
+    /// `lift >= --auto-transforms-min-lift`). Default-on path for any
+    /// MLP training going forward — winsor_p99 / signed_cbrt /
+    /// signed_sqrt / etc. applied per feature where the screen says
+    /// they beat identity.
+    ///
+    /// TSV format (per `scripts/v_next/v0_20_feature_transform_greedy_screen.py`):
+    /// columns `feat_idx, best_transform, params_csv, baseline_pearson,
+    /// transformed_pearson, lift, baseline_spearman, n_samples`.
+    ///
+    /// When combined with `--feature-transform` flags, the auto-loaded
+    /// set is applied first and per-flag overrides may set a feature
+    /// back to identity (use `--feature-transform identity:<idx>`) or
+    /// switch its transform. Conflicts (auto-loaded + flag both
+    /// non-identity, non-matching) are an error.
+    ///
+    /// Recommended default: `--auto-transforms benchmarks/v0_20_feature_transform_greedy_screen_2026-05-15.tsv`
+    /// for any new MLP bake. Per the methodology critique
+    /// (CLAUDE.md "SROCC-only verdicts BANNED" section), this is the
+    /// least-controversial training-side win measured to date —
+    /// V_20 IS (98 transforms) wins KADID + TID across the full
+    /// Mohammadi panel.
+    #[arg(long, value_name = "PATH")]
+    auto_transforms: Option<PathBuf>,
+
+    /// Min Pearson-lift threshold for `--auto-transforms`. Features in
+    /// the screen TSV with `lift < this` are left as identity. Default
+    /// 0.05 matches the V_20 IS adopted set (98 of 228 features at
+    /// idx < 228, 139 at idx < 300).
+    ///
+    /// Lower values (0.02) admit more transforms but include borderline
+    /// ones the trainer may not need. D3 sweep showed lift ≥ 0.10 cuts
+    /// to 60 transforms and gives back half the B3 lift — don't trim
+    /// aggressively without re-testing.
+    #[arg(long, default_value_t = 0.05, value_name = "FLOAT")]
+    auto_transforms_min_lift: f64,
 }
 
 struct LoadedGroup {
@@ -289,6 +327,106 @@ struct LoadedGroup {
     human_scores: Vec<f64>,
     feature_rows: Vec<Vec<f64>>,
     n_features: usize,
+}
+
+/// Load per-feature transforms from a screen TSV (output of
+/// `scripts/v_next/v0_20_feature_transform_greedy_screen.py`). Populates
+/// `transforms` and `params` in place for every row where `lift >=
+/// min_lift` AND `feat_idx < n_features`. Returns the count of
+/// transforms actually loaded (i.e., non-identity entries written).
+///
+/// TSV columns expected: feat_idx, best_transform, params_csv,
+/// baseline_pearson, transformed_pearson, lift, baseline_spearman,
+/// n_samples (header row is required).
+fn load_auto_transforms_from_screen(
+    tsv_path: &PathBuf,
+    min_lift: f64,
+    n_features: usize,
+    transforms: &mut [zenpredict::FeatureTransform],
+    params: &mut [Vec<f32>],
+) -> usize {
+    let file = match File::open(tsv_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "--auto-transforms: cannot open {}: {e}",
+                tsv_path.display()
+            );
+            std::process::exit(2);
+        }
+    };
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    let header_line = match lines.next() {
+        Some(Ok(l)) => l,
+        _ => {
+            eprintln!("--auto-transforms: empty TSV {}", tsv_path.display());
+            std::process::exit(2);
+        }
+    };
+    let header: Vec<&str> = header_line.split('\t').collect();
+    let col = |name: &str| -> usize {
+        header.iter().position(|c| c.trim() == name).unwrap_or_else(|| {
+            eprintln!(
+                "--auto-transforms: missing column {name:?} in TSV header {:?}",
+                header
+            );
+            std::process::exit(2);
+        })
+    };
+    let idx_col = col("feat_idx");
+    let xform_col = col("best_transform");
+    let params_col = col("params_csv");
+    let lift_col = col("lift");
+
+    let mut loaded = 0usize;
+    for line in lines.flatten() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let cells: Vec<&str> = line.split('\t').collect();
+        if cells.len() <= idx_col.max(xform_col).max(params_col).max(lift_col) {
+            continue;
+        }
+        let Ok(idx) = cells[idx_col].trim().parse::<usize>() else {
+            continue;
+        };
+        if idx >= n_features {
+            continue;
+        }
+        let Ok(lift) = cells[lift_col].trim().parse::<f64>() else {
+            continue;
+        };
+        if lift < min_lift {
+            continue;
+        }
+        let token = cells[xform_col].trim();
+        if token == "identity" || token.is_empty() {
+            continue;
+        }
+        let transform = match zenpredict::FeatureTransform::from_token(token) {
+            Ok(t) => t,
+            Err(_) => {
+                eprintln!(
+                    "--auto-transforms: unknown transform token {token:?} at idx {idx} (lift {lift:.4}); skipping"
+                );
+                continue;
+            }
+        };
+        let params_str = cells[params_col].trim();
+        let parsed_params: Vec<f32> = if params_str.is_empty() {
+            Vec::new()
+        } else {
+            params_str
+                .split(',')
+                .filter_map(|s| s.trim().parse::<f32>().ok())
+                .collect()
+        };
+        transforms[idx] = transform;
+        params[idx] = parsed_params;
+        loaded += 1;
+    }
+    loaded
 }
 
 fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64), String> {
@@ -465,14 +603,39 @@ fn main() {
     // accept comma-separated f32 params after the third colon. Per-feature
     // params accumulate in a parallel `Vec<Vec<f32>>`; an empty inner vec
     // means "no params for this feature".
+    //
+    // When `--auto-transforms` is set, pre-populate the transform list
+    // from the screen TSV first; then `--feature-transform` flags
+    // override per-feature (or extend if the auto set didn't cover
+    // that feature).
     let (feature_transforms, feature_transform_params): (
         Option<Vec<zenpredict::FeatureTransform>>,
         Option<Vec<Vec<f32>>>,
-    ) = if args.feature_transform.is_empty() {
+    ) = if args.feature_transform.is_empty() && args.auto_transforms.is_none() {
         (None, None)
     } else {
         let mut transforms = vec![zenpredict::FeatureTransform::Identity; n_features];
         let mut params: Vec<Vec<f32>> = vec![Vec::new(); n_features];
+
+        // Step 1: load auto-transforms from screen TSV if specified.
+        if let Some(tsv_path) = &args.auto_transforms {
+            let n_loaded = load_auto_transforms_from_screen(
+                tsv_path,
+                args.auto_transforms_min_lift,
+                n_features,
+                &mut transforms,
+                &mut params,
+            );
+            eprintln!(
+                "--auto-transforms: loaded {n_loaded} transforms from {} (min-lift={})",
+                tsv_path.display(),
+                args.auto_transforms_min_lift,
+            );
+        }
+
+        // Step 2: apply explicit --feature-transform flags (may override
+        // auto-loaded entries when the flag's transform matches the auto
+        // value; conflicts error out below).
         for spec in &args.feature_transform {
             // splitn(3) — allow PARAMS to contain ':' if needed
             // (we don't currently support that, but splitn(3) keeps
