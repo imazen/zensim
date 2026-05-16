@@ -11,7 +11,6 @@
 //!                       [--band-count N] [--band-edges 50,65,90]
 //!                       [--out-md PATH]
 
-use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};

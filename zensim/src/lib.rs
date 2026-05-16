@@ -263,7 +263,9 @@ pub use metric::{
 /// Including the steerable-pyramid GSM approximation spike added
 /// 2026-05-15 — see `benchmarks/iw_pyramid_spike_methodology_2026-05-15.md`.
 #[cfg(feature = "training")]
-pub use iw_pool::{IwWeightConfig, IwWeightKind, compute_iw_weights};
+pub use iw_pool::{
+    IwSsimFeatures, IwWeightConfig, IwWeightKind, WeightedPool, compute_iw_weights,
+};
 
 #[cfg(feature = "zenpixels")]
 mod zenpixels_compat;
