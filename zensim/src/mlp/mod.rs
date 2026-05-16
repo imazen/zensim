@@ -2,9 +2,10 @@
 //!
 //! This module is the inference path for [`ZensimProfile::PreviewV0_3`](crate::profile::ZensimProfile),
 //! which scores feature vectors through a small MLP rather than the
-//! linear dot product used by V0_2. The on-disk format is ZNPR v2 — a
+//! linear dot product used by V0_2. The on-disk format is ZNPR v3 — a
 //! packed binary shipped via `include_bytes!` from the trained weights
-//! file.
+//! file. (v2 bakes are still loadable for backwards compatibility, but
+//! NEW bakes must be v3 per CLAUDE.md.)
 //!
 //! # Backed by [`zenpredict`]
 //!

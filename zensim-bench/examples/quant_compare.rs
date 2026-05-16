@@ -23,8 +23,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
 use zenpredict::{Model, Predictor, WeightDtype, WeightStorage};
+use zenpredict_bake::{BakeLayer, BakeRequest, bake};
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -47,14 +47,14 @@ fn main() {
         bytes_f32.len(),
         model.n_layers(),
         model.n_inputs(),
-        model.layers().first().map(|l| l.out_dim).unwrap_or(0),
+        model.layers().next().map(|l| l.out_dim).unwrap_or(0),
         model.n_outputs(),
     );
 
     // Extract f32 weights and biases per layer.
     let mut layer_data: Vec<(Vec<f32>, Vec<f32>, usize, usize, zenpredict::Activation)> =
         Vec::new();
-    for (li, layer) in model.layers().iter().enumerate() {
+    for (li, layer) in model.layers().enumerate() {
         let w: Vec<f32> = match &layer.weights {
             WeightStorage::F32(w) => w.to_vec(),
             WeightStorage::F16(w) => w
@@ -149,8 +149,15 @@ fn main() {
             layers: &layers,
             feature_bounds: &[],
             metadata: &[],
+            output_specs: &[],
+            discrete_sets: &[],
+            sparse_overrides: &[],
+            feature_order: None,
+            output_order: None,
+            compressed: false,
+            hu_permutations: None,
         };
-        let bytes = bake_v2(&req).expect("bake");
+        let bytes = bake(&req).expect("bake v3");
         let path = out_dir.join(format!("{stem}_{label}.bin"));
         fs::write(&path, &bytes).expect("write variant");
         println!(

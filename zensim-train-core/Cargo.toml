@@ -23,6 +23,7 @@ parallel = ["dep:rayon"]
 
 [dependencies]
 zenpredict = { workspace = true }
+zenpredict-bake = { workspace = true }
 # Cross-platform monotonic clock: std on native, performance.now() on WASM.
 web-time = "1"
 rayon = { workspace = true, optional = true }

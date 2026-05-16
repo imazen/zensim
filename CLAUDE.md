@@ -556,6 +556,101 @@ serializer; trusting it keeps wire-format invariants in one place.
 Ad-hoc emitters drift, get out of sync with v3.x extensions, and
 ship wrong-shape bakes that load but score garbage.
 
+## ZNPR v2 PROHIBITED (added 2026-05-15)
+
+**Producing ZNPR v2 bakes is BANNED. Period.** Every new bake MUST
+be v3 (header byte 4 = `0x03`). Tools producing v2 are bugs that
+need fixing on contact — not "legacy support" or "compatibility
+shims."
+
+### Why
+
+The current zensim runtime loads v3 bakes only. The 2026-05-15
+falsification re-evaluation exposed ~150 pre-existing v2 bakes
+across `benchmarks/rust_*`, `benchmarks/h*x*`, and
+`/tmp/zensim_loop/bakes/` that are **structurally unevaluable** by
+the current runtime — every recovery-cycle falsified hypothesis
+(cycles 7–14) is locked behind this wire-format gap. Producing
+more v2 makes the gap worse and creates "ghost bakes" that look
+like data but can't be re-tested.
+
+### How to comply
+
+- **Bake-emitting code** uses `zenpredict::bake(&BakeRequest{...})`
+  (the v3 path). NEVER call `zenpredict::bake::bake_v2`.
+- **Read the bake's header byte 4** as a smoke test in any tool
+  that produces a bake: assert it's `0x03` before writing the file.
+- **Function names + docs** that say "v2" but emit v3 are
+  misleading — rename + correct comments on contact (e.g. zensim's
+  `bake_two_layer_znpr_v2` was renamed to `bake_two_layer_znpr_v3`
+  on 2026-05-15; the function had been emitting v3 internally for
+  weeks).
+- **Tests that lock in v2** (`assert_eq!(version, 2)`) are wrong —
+  fix them to assert v3.
+
+### Audit list (as of 2026-05-15)
+
+Existing `bake_v2` callers in this repo:
+
+- `zensim-train-core/src/mlp.rs` — REMOVE v2 path; only emit v3.
+- `zensim-bench/examples/quant_compare.rs` — same.
+- `zenpredict::bake::bake_v2` is still EXPORTED from the sibling
+  `zenanalyze/zenpredict` crate, but it MUST NOT be imported into
+  zensim crates. If you see `use zenpredict::bake::{..., bake_v2}`,
+  fix the import to `bake` only.
+
+### Re-bake old v2 bakes when possible
+
+If a falsification's bake is v2 and the hypothesis is worth
+re-testing: **retrain** under the current trainer (which emits v3
+through `bake()`). Don't write a v2→v3 upgrade tool — the right
+fix is "retrain, evaluate on full Mohammadi panel" per the
+principled experiment workflow. Bakes are cheap; ghost data isn't.
+
+## zenpredict crate dependency policy (added 2026-05-15)
+
+**Use path or git refs to the local `zenanalyze/zenpredict` repo,
+NEVER the published crates.io version.** zenpredict 0.1.0 on
+crates.io is v2-only; v3 lives unpublished on the local sibling.
+Pinning the published version would silently ship a runtime that
+can't load any current bake.
+
+### Default: path ref (sibling worktrees)
+
+In the zensim workspace `Cargo.toml`:
+
+```toml
+[workspace.dependencies]
+zenpredict = { path = "../zenanalyze/zenpredict" }
+zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
+```
+
+This works when the user's machine has both repos checked out as
+siblings under `~/work/zen/` — which is the standard layout for
+zen-org work. Path is preferred because it makes cross-repo edits
+inspectable in `cargo build` output and avoids stale lockfiles.
+
+### Fallback: git ref (CI, fresh clones)
+
+For CI or environments without the sibling worktree, use git refs
+pinned to a specific commit:
+
+```toml
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "<commit-sha>" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "<commit-sha>" }
+```
+
+Update the `rev` deliberately when a v3 feature lands that zensim
+needs. Do NOT use a branch ref (`branch = "main"`) — that causes
+silent breakage when zenanalyze's main moves.
+
+### Audit
+
+When adding a new zen-internal dependency (zencodec, zenresize,
+etc.), check the workspace `Cargo.toml` for the right pattern. If
+a sibling exists under `~/work/zen/`, use path. Never copy a
+published-crate version from crates.io into a workspace dep.
+
 ## Principled experiment workflow for V_X bakes (added 2026-05-15)
 
 This section is the **methodology** version of the V_20 learnings

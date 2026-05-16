@@ -8,7 +8,7 @@
 //! - [`MlpHyperparams`] — knobs (epochs, lr, l2, validation policy)
 //! - [`TrainingGroup`] — one named slice of training/validation data
 //! - [`ValidationPolicy`] — `Mean` or `Min` aggregation across groups
-//! - `train_mlp` — main entrypoint, returns a ZNPR v2 bake
+//! - `train_mlp` — main entrypoint, returns a ZNPR v3 bake
 //!
 //! The current scaffold is intentionally minimal: it re-exports
 //! `zenpredict::Activation` / `WeightDtype` and declares the

@@ -11,17 +11,19 @@
 //! `w2` is `(n_hidden × 1)` (so a flat slice of length `n_hidden`).
 
 use crate::TrainingGroup;
-use zenpredict::bake::{BakeLayer, BakeRequest, bake_v2};
 use zenpredict::{Activation, WeightDtype};
+use zenpredict_bake::{BakeLayer, BakeRequest, bake};
 
-/// Bake a 2-layer MLP (LeakyReLU → Identity) into a ZNPR v2 byte stream.
+/// Bake a 2-layer MLP (LeakyReLU → Identity) into a ZNPR v3 byte stream.
 ///
-/// Converts f64 weights to f32 once and feeds them to [`bake_v2`].
+/// Converts f64 weights to f32 once and feeds them to [`bake`].
 /// Output is the same byte stream produced by
-/// `zensim-validate::mlp_train::bake_two_layer_znpr_v2` — readable by
+/// `zensim-validate::mlp_train::bake_two_layer_znpr_v3` — readable by
 /// any `zenpredict::Predictor` loaded from those bytes.
+///
+/// ZNPR v2 production is prohibited per CLAUDE.md (2026-05-15).
 #[allow(clippy::too_many_arguments)]
-pub fn bake_two_layer_znpr_v2(
+pub fn bake_two_layer_znpr_v3(
     scaler_mean: &[f64],
     scaler_scale: &[f64],
     w1: &[f64],
@@ -56,7 +58,7 @@ pub fn bake_two_layer_znpr_v2(
             biases: &b2_f32,
         },
     ];
-    bake_v2(&BakeRequest {
+    bake(&BakeRequest {
         schema_hash: 0,
         flags: 0,
         scaler_mean: &scaler_mean_f32,
@@ -64,8 +66,15 @@ pub fn bake_two_layer_znpr_v2(
         layers: &layers,
         feature_bounds: &[],
         metadata: &[],
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
+        hu_permutations: None,
     })
-    .expect("v2 bake of 2-layer MLP")
+    .expect("v3 bake of 2-layer MLP")
 }
 
 /// Compute per-feature `(mean, std)` across all `train_indices` groups.
@@ -336,12 +345,12 @@ mod tests {
     }
 
     #[test]
-    fn bake_two_layer_znpr_v2_header_and_size() {
+    fn bake_two_layer_znpr_v3_header_and_size() {
         // 2 inputs, 3 hidden, 1 output → w1 6 floats, b1 3, w2 3, b2 1,
         // scaler 2+2 floats. We just check the bytes start with the
-        // ZNPR magic and are nonzero — exact byte layout is governed by
-        // zenpredict::bake_v2 and exercised by its own tests.
-        let bytes = bake_two_layer_znpr_v2(
+        // ZNPR magic and that version is v3 — exact byte layout is
+        // governed by zenpredict_bake::bake and exercised by its own tests.
+        let bytes = bake_two_layer_znpr_v3(
             &[0.5, -0.2],
             &[1.0, 1.0],
             &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
@@ -353,18 +362,9 @@ mod tests {
             1,
         );
         assert_eq!(&bytes[0..4], b"ZNPR", "expected ZNPR magic");
-        // u16 version at offset 4
+        // u16 version at offset 4 — must be v3 per CLAUDE.md (v2 prohibited).
         let version = u16::from_le_bytes([bytes[4], bytes[5]]);
-        assert_eq!(version, 2, "expected v2");
-        // u32 n_inputs at offset 8
-        let n_inputs = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
-        assert_eq!(n_inputs, 2);
-        // u32 n_outputs at offset 12
-        let n_outputs = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
-        assert_eq!(n_outputs, 1);
-        // u32 n_layers at offset 16
-        let n_layers = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
-        assert_eq!(n_layers, 2);
+        assert_eq!(version, 3, "expected v3 — v2 production is banned");
     }
 
     #[test]

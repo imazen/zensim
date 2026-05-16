@@ -2784,6 +2784,7 @@ dependencies = [
  "zenbench",
  "zenpnm",
  "zenpredict",
+ "zenpredict-bake",
  "zensim",
 ]
 
@@ -2819,6 +2820,7 @@ dependencies = [
  "rayon",
  "web-time",
  "zenpredict",
+ "zenpredict-bake",
 ]
 
 [[package]]

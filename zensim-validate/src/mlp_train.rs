@@ -91,7 +91,7 @@ pub struct MlpHyperparams {
     /// with `mid_q_boost` (boundary at 90 means it's mutually exclusive
     /// with `mid_q_boost`'s [50, 90) range).
     pub high_q_boost: f64,
-    /// Output weight dtype for baked ZNPR v2. Default F32 matches every
+    /// Output weight dtype for baked ZNPR v3. Default F32 matches every
     /// shipped bake through V0_17. I8 saves ~74 % bin size with no
     /// measurable SROCC change (verified on V0_18 across KADID, TID,
     /// CID22, AIC-3, AIC-4, KonJND). F16 saves ~50 % with bit-identical
@@ -738,7 +738,7 @@ pub fn train_mlp_with_tv(
             if val_score > best_val_score {
                 best_val_score = val_score;
                 stale_epochs = 0;
-                best_bake = Some(bake_two_layer_znpr_v2(
+                best_bake = Some(bake_two_layer_znpr_v3(
                     &scaler_mean,
                     &scaler_scale,
                     &w1,
@@ -774,7 +774,7 @@ pub fn train_mlp_with_tv(
         log,
     );
     best_bake.unwrap_or_else(|| {
-        bake_two_layer_znpr_v2(
+        bake_two_layer_znpr_v3(
             &scaler_mean,
             &scaler_scale,
             &w1,
@@ -791,15 +791,16 @@ pub fn train_mlp_with_tv(
     })
 }
 
-/// Bake a 2-layer MLP (LeakyReLU → Identity) into ZNPR v2 bytes.
-/// Converts f64 weights to f32 once and feeds them to [`bake_v2`].
+/// Bake a 2-layer MLP (LeakyReLU → Identity) into ZNPR v3 bytes.
+/// Converts f64 weights to f32 once and feeds them to [`bake`].
+/// ZNPR v2 production is prohibited per CLAUDE.md (2026-05-15).
 ///
 /// `dtype` controls the weight encoding for BOTH layers. F32 produces
 /// the historical 355 KB-ish bake; F16 halves it; I8 (per-output f32
 /// scales) cuts it to ~26 %. See V0_18 (2026-05-13) for cross-corpus
 /// quality validation of I8 quant on the V0_17 weights.
 #[allow(clippy::too_many_arguments)]
-pub fn bake_two_layer_znpr_v2(
+pub fn bake_two_layer_znpr_v3(
     scaler_mean: &[f64],
     scaler_scale: &[f64],
     w1: &[f64],
