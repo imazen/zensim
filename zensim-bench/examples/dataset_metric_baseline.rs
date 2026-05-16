@@ -80,20 +80,20 @@ fn main() {
     let mut aic3: Option<PathBuf> = None;
     let mut konjnd: Option<PathBuf> = None;
     let mut v04_bake_path: Option<PathBuf> = None;
-    /// When set, drive the V_04 column via `Zensim::compute()` using
-    /// the named profile's live runtime — bypasses `--v04-bake`. Used
-    /// to eval the D2 multi-bake ensemble (PreviewV0_4 = V_18 ship +
-    /// V_20 IS calibrated mixed at α=0.7).
+    // When set, drive the V_04 column via `Zensim::compute()` using
+    // the named profile's live runtime — bypasses `--v04-bake`. Used
+    // to eval the D2 multi-bake ensemble (PreviewV0_4 = V_18 ship +
+    // V_20 IS calibrated mixed at α=0.7).
     let mut zensim_profile_override: Option<zensim::ZensimProfile> = None;
     let mut max_pairs: usize = 500;
     let mut per_pair_output: Option<PathBuf> = None;
     let mut konjnd_features_csv: Option<PathBuf> = None;
     let mut konjnd_anchor_target: f64 = 63.0;
-    /// Generic `--pairs-tsv <NAME>:<PATH>` flag, repeatable.
-    /// TSV columns: ref_path, dist_path, codec, [version|image_name|...], human_score
-    /// Order: cols 0/1 are ref/dist; the LAST column is treated as human_score
-    /// (a float in any scale; SROCC is rank-invariant). Optional codec column at
-    /// index 2 and version column at index 3 (or 4 if there's an image_name col).
+    // Generic `--pairs-tsv <NAME>:<PATH>` flag, repeatable.
+    // TSV columns: ref_path, dist_path, codec, [version|image_name|...], human_score
+    // Order: cols 0/1 are ref/dist; the LAST column is treated as human_score
+    // (a float in any scale; SROCC is rank-invariant). Optional codec column at
+    // index 2 and version column at index 3 (or 4 if there's an image_name col).
     let mut pairs_tsv: Vec<(String, PathBuf)> = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -2041,7 +2041,7 @@ pub fn wilcoxon_signed_rank(metric_a: &[f64], metric_b: &[f64], target: &[f64]) 
     let zb = z(metric_b);
     let zt = z(target);
 
-    let mut diffs: Vec<f64> = (0..n)
+    let diffs: Vec<f64> = (0..n)
         .map(|i| {
             let ea = (za[i] - zt[i]).abs();
             let eb = (zb[i] - zt[i]).abs();
