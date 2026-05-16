@@ -1,0 +1,15 @@
+v04 bake: n_inputs=372 → feature regime ExtendedIw
+# Baseline-metric SROCC vs human MOS
+
+Max 99999 pairs per dataset.
+
+| Dataset | n | V0_2 | V0_4 (bake) | fast-ssim2 | butteraugli |
+|---------|--:|:----:|:-----------:|:----------:|:-----------:|
+=== KADIK10k (n=10125) ===
+  1012/10125 (79.0/s, ETA 115s)
+  2024/10125 (78.3/s, ETA 103s)
+  3036/10125 (77.8/s, ETA 91s)
+  4048/10125 (77.3/s, ETA 79s)
+  5060/10125 (77.3/s, ETA 66s)
+  6072/10125 (77.4/s, ETA 52s)
+  7084/10125 (77.5/s, ETA 39s)
