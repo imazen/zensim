@@ -1,9 +1,18 @@
 //! Standalone binary that wraps `zensim-validate::mlp_train::train_mlp`.
 //!
 //! Reads one or more `--group NAME:CSV:TRAIN_W:VAL_W` CSVs (each in
-//! the trainer-compatible shape `ref_basename, human_score, f0..f227`)
+//! the trainer-compatible shape `ref_basename, <target>, f0..f227`)
 //! and trains the multi-group RankNet MLP. Writes ZNPR v3 bytes to
 //! `--out PATH`.
+//!
+//! The target column defaults to `human_score` (legacy ssim2-derived
+//! score, multiplied by 100 to match score_zensim scale). Use
+//! `--target-column NAME` to retarget the regression — `iwssim`
+//! (already available on the safesyn corpus) or future
+//! `cvvdp_pycvvdp_v054` once the corpus carries it. Pair with
+//! `--target-scale` if the new column is not in `[0, 1]`. This breaks
+//! the ssim2-target training bias documented in `CLAUDE.md > SROCC-only
+//! verdicts BANNED + ssim2-target training bias` (2026-05-15).
 //!
 //! ## Canonical V0_18-methodology recipe (2026-05-14, RECOMMENDED)
 //!
@@ -318,6 +327,53 @@ struct Args {
     /// aggressively without re-testing.
     #[arg(long, default_value_t = 0.05, value_name = "FLOAT")]
     auto_transforms_min_lift: f64,
+
+    /// Name of the column in each group CSV to use as the regression
+    /// target. Default `human_score` matches every V_X bake through
+    /// V_20 — the column carries the ssim2-derived score per pair.
+    ///
+    /// **Why this flag exists**: every V_X bake trained against the
+    /// default produces an ssim2-shaped output surface, and any
+    /// SROCC-against-ssim2-derived-MOS evaluation favors that shape by
+    /// construction (the "ssim2-target training bias" documented in
+    /// `CLAUDE.md > SROCC-only verdicts BANNED`). To get an
+    /// ssim2-independent bake, train against a different target column
+    /// — `iwssim` (Wang & Li 2011, available on safesyn at
+    /// `/mnt/v/zen/zensim-training/2026-05-16/safesyn_with_iwssim.csv`)
+    /// or `cvvdp_pycvvdp_v054` (Mantiuk, coming via zenmetrics CVVDP
+    /// sweep) once features are extracted onto a corpus carrying that
+    /// column.
+    ///
+    /// The CSV header must contain the named column; missing column =
+    /// hard error. Pair this with `--target-scale` if the new column
+    /// is not in `[0, 1]` — the trainer multiplies the loaded value by
+    /// `--target-scale` to bring it to `score_zensim` (0..100) units,
+    /// matching the legacy `human_score * 100` convention. The per-row
+    /// boost thresholds (`--low-q-boost` at < 50, `--mid-q-boost` at
+    /// 50..90, `--high-q-boost` at ≥ 90) operate on the scaled value,
+    /// so they still align with band cutoffs after the scale.
+    ///
+    /// Examples:
+    /// - `--target-column iwssim` (IW-SSIM ∈ [0, 1], default scale 100)
+    /// - `--target-column cpu_ssimulacra2 --target-scale 1.0`
+    ///   (already in score units; pass scale 1.0 to avoid x100)
+    /// - `--target-column cvvdp_jod --target-scale 10.0`
+    ///   (CVVDP JOD ∈ [0, 10]; x10 brings to 0..100 band-cutoff space)
+    #[arg(long, default_value = "human_score", value_name = "NAME")]
+    target_column: String,
+
+    /// Multiplier applied to the loaded `--target-column` value before
+    /// training. Default 100.0 matches the legacy `human_score * 100`
+    /// convention (human_score is in [0, 1]; multiplied to land in the
+    /// 0..100 `score_zensim` band-cutoff space).
+    ///
+    /// Set to 1.0 if the target column is already in `score_zensim`
+    /// units (e.g., `cpu_ssimulacra2`). Set to 10.0 for CVVDP JOD
+    /// (∈ [0, 10]) to bring to 0..100. The per-row boost thresholds
+    /// (`--low-q-boost`, `--mid-q-boost`, `--high-q-boost`) and the
+    /// validation SROCC reporting both operate on the scaled value.
+    #[arg(long, default_value_t = 100.0, value_name = "FLOAT")]
+    target_scale: f64,
 }
 
 struct LoadedGroup {
@@ -446,7 +502,12 @@ fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64), String> {
     ))
 }
 
-fn load_csv(path: &PathBuf, name: &str) -> Result<LoadedGroup, String> {
+fn load_csv(
+    path: &PathBuf,
+    name: &str,
+    target_column: &str,
+    target_scale: f64,
+) -> Result<LoadedGroup, String> {
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
     let mut rdr = BufReader::new(file);
     let mut header = String::new();
@@ -455,8 +516,8 @@ fn load_csv(path: &PathBuf, name: &str) -> Result<LoadedGroup, String> {
     let cols: Vec<&str> = header.trim_end().split(',').collect();
     let score_idx = cols
         .iter()
-        .position(|&c| c == "human_score")
-        .ok_or_else(|| format!("{path:?}: missing human_score column"))?;
+        .position(|&c| c == target_column)
+        .ok_or_else(|| format!("{path:?}: missing target column {target_column:?}"))?;
     let f0 = cols
         .iter()
         .position(|&c| c == "f0")
@@ -489,11 +550,19 @@ fn load_csv(path: &PathBuf, name: &str) -> Result<LoadedGroup, String> {
                 fields.len()
             ));
         }
-        // Multiply by 100 to match `score_zensim` scale (consistent with Python's load_human_csv).
+        // Multiply by `target_scale` (default 100.0) to match `score_zensim` units.
+        // The legacy default brought `human_score ∈ [0, 1]` to 0..100; new
+        // target columns may already be in 0..100 (`--target-scale 1.0`) or
+        // need a different multiplier (CVVDP JOD ∈ [0, 10] → 10.0).
         let score: f64 = fields[score_idx]
             .parse::<f64>()
-            .map_err(|e| format!("{path:?} line {}: bad human_score: {e}", lineno + 2))?
-            * 100.0;
+            .map_err(|e| {
+                format!(
+                    "{path:?} line {}: bad target column {target_column:?}: {e}",
+                    lineno + 2
+                )
+            })?
+            * target_scale;
         let mut row = Vec::with_capacity(n_features);
         for i in 0..n_features {
             row.push(
@@ -567,10 +636,11 @@ fn main() {
             eprintln!("contamination_guard read error on {}: {e}", path.display());
             std::process::exit(1);
         });
-        let mut g = load_csv(&path, &name).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(1);
-        });
+        let mut g = load_csv(&path, &name, &args.target_column, args.target_scale)
+            .unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(1);
+            });
         g.train_w = train_w;
         g.val_w = val_w;
         let cap = args.max_features;
