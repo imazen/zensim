@@ -37,6 +37,12 @@ struct Pair {
     distorted: PathBuf,
     human_score: f64,
     ref_basename: String,
+    /// Optional named extra target columns emitted alongside
+    /// `human_score` (e.g., IW-SSIM on safesyn). Each entry becomes a
+    /// CSV column between `human_score` and `f0`. The trainer's
+    /// `--target-column NAME` flag (T1.1) selects which column is the
+    /// regression target.
+    extra_targets: Vec<(String, f64)>,
 }
 
 fn main() {
@@ -65,8 +71,11 @@ fn main() {
         "konjnd" => load_konjnd(&path, max_pairs),
         "konjnd_full" => load_konjnd_full(&path, max_pairs),
         "aic3" => load_aic3(&path, max_pairs),
+        "safesyn" => load_safesyn(&path, max_pairs),
         _ => {
-            eprintln!("--corpus must be one of: konjnd, konjnd_full, aic3 (got {corpus:?})");
+            eprintln!(
+                "--corpus must be one of: konjnd, konjnd_full, aic3, safesyn (got {corpus:?})"
+            );
             std::process::exit(2);
         }
     };
@@ -82,7 +91,7 @@ fn main() {
     let progress = AtomicUsize::new(0);
     let log_every = (n_total / 20).max(1);
 
-    let scored: Vec<Option<(String, f64, Vec<f64>)>> = pairs
+    let scored: Vec<Option<(String, f64, Vec<(String, f64)>, Vec<f64>)>> = pairs
         .par_iter()
         .map(|kp| {
             let p = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -96,7 +105,8 @@ fn main() {
         })
         .collect();
 
-    let mut rows: Vec<(String, f64, Vec<f64>)> = scored.into_iter().flatten().collect();
+    let mut rows: Vec<(String, f64, Vec<(String, f64)>, Vec<f64>)> =
+        scored.into_iter().flatten().collect();
     eprintln!(
         "scored {}/{} pairs in {:.1}s",
         rows.len(),
@@ -104,13 +114,21 @@ fn main() {
         started.elapsed().as_secs_f64()
     );
 
-    let n_feat = rows.first().map(|r| r.2.len()).unwrap_or(0);
+    let n_feat = rows.first().map(|r| r.3.len()).unwrap_or(0);
     if n_feat != 372 {
         eprintln!(
             "WARNING: expected 372 features per pair, got {n_feat} — \
              check ZensimConfig extended/iw flags + image dimensions"
         );
     }
+
+    // Header layout: ref_basename, human_score, <extra-target columns…>, f0..f<n-1>.
+    // Extra target column names come from the first row's `extra_targets`; every row
+    // is asserted to carry the same set in the same order (loader contract).
+    let extra_names: Vec<String> = rows
+        .first()
+        .map(|r| r.2.iter().map(|(n, _)| n.clone()).collect())
+        .unwrap_or_default();
 
     // Write CSV
     use std::io::{BufWriter, Write};
@@ -122,13 +140,19 @@ fn main() {
     let f = std::fs::File::create(&out).expect("create output CSV");
     let mut w = BufWriter::with_capacity(1 << 20, f);
     write!(w, "ref_basename,human_score").unwrap();
+    for name in &extra_names {
+        write!(w, ",{name}").unwrap();
+    }
     for i in 0..n_feat {
         write!(w, ",f{i}").unwrap();
     }
     writeln!(w).unwrap();
     rows.sort_by(|a, b| a.0.cmp(&b.0));
-    for (ref_name, human, feats) in &rows {
+    for (ref_name, human, extras, feats) in &rows {
         write!(w, "{ref_name},{human}").unwrap();
+        for (_, v) in extras {
+            write!(w, ",{v}").unwrap();
+        }
         for v in feats {
             write!(w, ",{v}").unwrap();
         }
@@ -142,7 +166,7 @@ fn main() {
     );
 }
 
-fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<f64>)> {
+fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<(String, f64)>, Vec<f64>)> {
     let src_img = image::open(&kp.reference).ok()?.to_rgb8();
     let dst_img = image::open(&kp.distorted).ok()?.to_rgb8();
     let (w, h) = src_img.dimensions();
@@ -162,7 +186,12 @@ fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<f64>)> {
     config.compute_iw_features = true;
     let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config).ok()?;
     let features: Vec<f64> = result.features().to_vec();
-    Some((kp.ref_basename.clone(), kp.human_score, features))
+    Some((
+        kp.ref_basename.clone(),
+        kp.human_score,
+        kp.extra_targets.clone(),
+        features,
+    ))
 }
 
 fn load_konjnd(base: &Path, max: usize) -> Vec<Pair> {
@@ -206,6 +235,7 @@ fn load_konjnd(base: &Path, max: usize) -> Vec<Pair> {
             distorted: dist_path,
             human_score: mean_threshold,
             ref_basename: image_id.to_string(),
+            extra_targets: Vec::new(),
         });
         if pairs.len() >= max {
             break;
@@ -256,6 +286,7 @@ fn load_konjnd_full(csv_path: &Path, max: usize) -> Vec<Pair> {
             distorted: PathBuf::from(dist_path),
             human_score: score_norm,
             ref_basename: basename,
+            extra_targets: Vec::new(),
         });
         if pairs.len() >= max {
             break;
@@ -311,6 +342,125 @@ fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
             distorted: dist_path,
             human_score: score_jnd,
             ref_basename: format!("{img_name}.png"),
+            extra_targets: Vec::new(),
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// Safesyn (safe-synthetic) loader with IW-SSIM target column.
+///
+/// Reads the enriched safesyn TSV at
+/// `/mnt/v/zen/zensim-training/<date>/safesyn_with_iwssim.csv`
+/// (produced by `scripts/v_next/merge_iwssim_into_safesyn.py`).
+/// Schema: `source_path, decoded_path, codec, quality, width, height,
+/// gpu_ssimulacra2, gpu_butteraugli, cpu_ssimulacra2, cpu_butteraugli,
+/// size_bytes, run_id, dssim, iwssim`.
+///
+/// Emits one Pair per row with:
+/// - `reference = source_path`
+/// - `distorted = decoded_path`
+/// - `ref_basename = source_path file stem`
+/// - `human_score = cpu_ssimulacra2 / 100` (legacy ssim2 target in [0, 1])
+/// - `extra_targets = [("iwssim", iwssim_value)]` — emitted in the
+///   output CSV as a column between `human_score` and `f0`. The
+///   trainer's `--target-column iwssim` flag (T1.1) selects this
+///   column as the regression target instead of `human_score`.
+///
+/// This is the V_22-IW training-data input. The 196 086-pair safesyn
+/// corpus is the only large-N corpus that carries an IW-SSIM target
+/// (computed via `scripts/v_next/compute_iwssim_on_safesyn.py`).
+fn load_safesyn(csv_path: &Path, max: usize) -> Vec<Pair> {
+    let mut rdr = match csv::Reader::from_path(csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    // Header positions are stable (this file is generated, not
+    // hand-edited), but look them up by name to be robust to future
+    // column reorderings.
+    let header = rdr
+        .headers()
+        .map(|h| h.iter().map(String::from).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let pos = |name: &str| -> Option<usize> { header.iter().position(|c| c == name) };
+    let src_col = match pos("source_path") {
+        Some(i) => i,
+        None => {
+            eprintln!("{}: missing source_path column", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let dst_col = match pos("decoded_path") {
+        Some(i) => i,
+        None => {
+            eprintln!("{}: missing decoded_path column", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let cpu_ssim2_col = match pos("cpu_ssimulacra2") {
+        Some(i) => i,
+        None => {
+            eprintln!("{}: missing cpu_ssimulacra2 column", csv_path.display());
+            return Vec::new();
+        }
+    };
+    // Half the safesyn rows have empty cpu_ssimulacra2 (zenavif / zenjxl
+    // codec families were scored GPU-only). Both metrics are in
+    // score_zensim units, so use cpu when present, fall back to gpu.
+    let gpu_ssim2_col = match pos("gpu_ssimulacra2") {
+        Some(i) => i,
+        None => {
+            eprintln!("{}: missing gpu_ssimulacra2 column", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let iwssim_col = match pos("iwssim") {
+        Some(i) => i,
+        None => {
+            eprintln!("{}: missing iwssim column", csv_path.display());
+            return Vec::new();
+        }
+    };
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        let src_path = record.get(src_col).unwrap_or("");
+        let dst_path = record.get(dst_col).unwrap_or("");
+        if src_path.is_empty() || dst_path.is_empty() {
+            continue;
+        }
+        let ssim2_raw: f64 = match record
+            .get(cpu_ssim2_col)
+            .and_then(|s| s.parse::<f64>().ok())
+            .or_else(|| record.get(gpu_ssim2_col).and_then(|s| s.parse::<f64>().ok()))
+        {
+            Some(v) => v,
+            None => continue,
+        };
+        let iwssim: f64 = match record.get(iwssim_col).and_then(|s| s.parse().ok()) {
+            Some(v) => v,
+            None => continue,
+        };
+        let ref_pb = PathBuf::from(src_path);
+        let basename = ref_pb
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        // Legacy convention: `human_score` is the ssim2 target divided
+        // by 100 so it lands in [0, 1]. The trainer multiplies by 100
+        // (default --target-scale) to recover score_zensim units.
+        pairs.push(Pair {
+            reference: ref_pb,
+            distorted: PathBuf::from(dst_path),
+            human_score: ssim2_raw / 100.0,
+            ref_basename: basename,
+            extra_targets: vec![("iwssim".to_string(), iwssim)],
         });
         if pairs.len() >= max {
             break;
