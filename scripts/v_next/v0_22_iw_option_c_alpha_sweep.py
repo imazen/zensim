@@ -123,6 +123,30 @@ def main() -> int:
         print(f"  {ds}: {len(rows):,}")
     print()
 
+    # Drop rows with NaN V_18 OR V_22-IW raw — V_22-IW had 320 NaN
+    # KADID outputs (the degenerate high-q regime per
+    # `benchmarks/v0_22_iw_seed1_eval_findings_2026-05-16.md`). NaN
+    # propagates through spearmanr → all-NaN result, masking real signal.
+    # Per CLAUDE.md "NaN-safe sort" precedent: drop, then report n_used.
+    import math
+    nan_drops: dict[str, int] = {}
+    for ds in list(joined):
+        kept = [
+            r
+            for r in joined[ds]
+            if not (
+                math.isnan(r["v18_raw"]) or math.isnan(r["v22_raw"])
+                or math.isnan(r["human_score"])
+            )
+        ]
+        nan_drops[ds] = len(joined[ds]) - len(kept)
+        joined[ds] = kept
+    if any(c > 0 for c in nan_drops.values()):
+        print("NaN-bearing rows dropped per dataset:")
+        for ds, n in sorted(nan_drops.items()):
+            print(f"  {ds}: {n}")
+        print()
+
     # Compute SROCC per (dataset, α). For each α, mix = α·V_18 + (1−α)·V_22-IW.
     # Higher V_18_raw = higher distance ⇒ lower quality (in legacy ABI), but
     # V_18 ship has `skip_score_mapping=true`, so its raw IS the score:
@@ -130,6 +154,13 @@ def main() -> int:
     # ∈ [0,1] × 100, output is score-shaped). So we treat both as
     # score-shaped and SROCC vs human_score directly — abs() handles the
     # legacy polarity confusion at the absolute level.
+
+    def zscore(vals: list[float]) -> list[float]:
+        n = len(vals)
+        m = sum(vals) / n
+        var = sum((v - m) ** 2 for v in vals) / n
+        sd = max(var**0.5, 1e-12)
+        return [(v - m) / sd for v in vals]
 
     rows_out: list[dict] = []
     for ds in sorted(joined):
@@ -145,15 +176,26 @@ def main() -> int:
         srocc_butter = abs(spearmanr(butter_arr, humans).correlation)
         srocc_v18 = abs(spearmanr(v18_arr, humans).correlation)
         srocc_v22 = abs(spearmanr(v22_arr, humans).correlation)
+        # Per-bake z-normalization before mix — the offline `ensemble_mix`
+        # tool's approach (CLAUDE.md V_20 learnings § "Multi-bake runtime").
+        # Removes scale-mismatch effects between V_18 ship's raw distribution
+        # (mean ~50, stdev ~25) and V_22-IW's (mean ~95, stdev ~5 due to
+        # upper saturation). Z-space mix is what PreviewV0_4's runtime
+        # CANNOT do without ProfileParams changes — it mixes in raw space.
+        v18_z = zscore(v18_arr)
+        v22_z = zscore(v22_arr)
         for alpha in alphas:
-            mix = [alpha * a + (1 - alpha) * b for a, b in zip(v18_arr, v22_arr)]
-            srocc_mix = abs(spearmanr(mix, humans).correlation)
+            mix_raw = [alpha * a + (1 - alpha) * b for a, b in zip(v18_arr, v22_arr)]
+            mix_z = [alpha * a + (1 - alpha) * b for a, b in zip(v18_z, v22_z)]
+            srocc_mix_raw = abs(spearmanr(mix_raw, humans).correlation)
+            srocc_mix_z = abs(spearmanr(mix_z, humans).correlation)
             rows_out.append(
                 {
                     "dataset": ds,
                     "n": len(rows),
                     "alpha": alpha,
-                    "srocc_mix": srocc_mix,
+                    "srocc_mix": srocc_mix_raw,
+                    "srocc_mix_z": srocc_mix_z,
                     "srocc_v18": srocc_v18,
                     "srocc_v22": srocc_v22,
                     "srocc_v02": srocc_v02,
@@ -185,24 +227,25 @@ def main() -> int:
                 f"Baselines (no mix): V_0_2 = {v02:.4f}, V_18 ship = **{v18:.4f}**, "
                 f"V_22-IW = **{v22:.4f}**, fast-ssim2 = {ssim2:.4f}, butter = {butter:.4f}.\n\n"
             )
-            f.write("| α (V_18 weight) | SROCC mix | Δ vs V_18 ship | Δ vs fast-ssim2 |\n")
-            f.write("|---|---:|---:|---:|\n")
+            f.write(
+                "| α (V_18 weight) | SROCC raw-mix | SROCC z-mix | Δ raw vs V_18 | Δ z vs V_18 |\n"
+            )
+            f.write("|---|---:|---:|---:|---:|\n")
             for r in ds_rows:
-                d_v18 = r["srocc_mix"] - v18
-                d_ssim2 = r["srocc_mix"] - ssim2
+                d_v18_raw = r["srocc_mix"] - v18
+                d_v18_z = r["srocc_mix_z"] - v18
                 marker = ""
                 if r["alpha"] in (0.0, 1.0):
                     marker = " (= V_22-IW alone)" if r["alpha"] == 0.0 else " (= V_18 alone)"
                 f.write(
                     f"| {r['alpha']:.2f}{marker} | {r['srocc_mix']:.4f} | "
-                    f"{d_v18:+.4f} | {d_ssim2:+.4f} |\n"
+                    f"{r['srocc_mix_z']:.4f} | {d_v18_raw:+.4f} | {d_v18_z:+.4f} |\n"
                 )
             f.write("\n")
 
-        # Pareto summary across datasets
-        f.write("## Cross-corpus Pareto picks\n\n")
-        f.write("For each α, list the SROCC per corpus to identify the\n")
-        f.write("trade-off frontier.\n\n")
+        # Pareto summary across datasets — raw and z-normalized mixes
+        f.write("## Cross-corpus Pareto picks (RAW-output mix)\n\n")
+        f.write("For each α, raw-space mix SROCC per corpus.\n\n")
         datasets = sorted(joined)
         f.write("| α | " + " | ".join(datasets) + " |\n")
         f.write("|---|" + "|".join(["---:"] * len(datasets)) + "|\n")
@@ -215,34 +258,54 @@ def main() -> int:
                 cells.append(f"{r['srocc_mix']:.4f}")
             f.write("| " + " | ".join(cells) + " |\n")
         f.write("\n")
+        f.write("## Cross-corpus Pareto picks (Z-NORMALIZED mix)\n\n")
+        f.write("Per-bake z-normalization before mix — the offline `ensemble_mix`\n")
+        f.write("tool's approach. Removes scale-mismatch between V_18 (mean ~50,\n")
+        f.write("stdev ~25) and V_22-IW (mean ~95, stdev ~5 due to upper saturation).\n\n")
+        f.write("| α | " + " | ".join(datasets) + " |\n")
+        f.write("|---|" + "|".join(["---:"] * len(datasets)) + "|\n")
+        for alpha in alphas:
+            cells = [f"{alpha:.2f}"]
+            for ds in datasets:
+                r = next(
+                    r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
+                )
+                cells.append(f"{r['srocc_mix_z']:.4f}")
+            f.write("| " + " | ".join(cells) + " |\n")
+        f.write("\n")
 
-        # Decision aid: per α, count of corpora where mix beats fast-ssim2
-        f.write("## Decision aid: how many corpora does each α beat fast-ssim2 on?\n\n")
-        f.write("| α | wins vs ssim2 | total | corpora won |\n")
-        f.write("|---|--:|--:|---|\n")
-        for alpha in alphas:
-            wins = []
-            for ds in datasets:
-                r = next(
-                    r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
+        # Decision aids — for raw-mix and z-mix separately
+        for mix_label, mix_key in (("RAW-mix", "srocc_mix"), ("Z-mix", "srocc_mix_z")):
+            f.write(f"## Decision aid ({mix_label}): how many corpora does each α beat fast-ssim2 on?\n\n")
+            f.write("| α | wins vs ssim2 | total | corpora won |\n")
+            f.write("|---|--:|--:|---|\n")
+            for alpha in alphas:
+                wins = []
+                for ds in datasets:
+                    r = next(
+                        r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
+                    )
+                    if r[mix_key] > r["srocc_ssim2"]:
+                        wins.append(ds)
+                f.write(
+                    f"| {alpha:.2f} | {len(wins)} | {len(datasets)} | {', '.join(wins) if wins else '—'} |\n"
                 )
-                if r["srocc_mix"] > r["srocc_ssim2"]:
-                    wins.append(ds)
-            f.write(f"| {alpha:.2f} | {len(wins)} | {len(datasets)} | {', '.join(wins) if wins else '—'} |\n")
-        f.write("\n")
-        f.write("## Decision aid: how many corpora does each α beat V_18 ship on?\n\n")
-        f.write("| α | wins vs V_18 | total | corpora won |\n")
-        f.write("|---|--:|--:|---|\n")
-        for alpha in alphas:
-            wins = []
-            for ds in datasets:
-                r = next(
-                    r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
+            f.write("\n")
+            f.write(f"## Decision aid ({mix_label}): how many corpora does each α beat V_18 ship on?\n\n")
+            f.write("| α | wins vs V_18 | total | corpora won |\n")
+            f.write("|---|--:|--:|---|\n")
+            for alpha in alphas:
+                wins = []
+                for ds in datasets:
+                    r = next(
+                        r for r in rows_out if r["dataset"] == ds and r["alpha"] == alpha
+                    )
+                    if r[mix_key] > r["srocc_v18"]:
+                        wins.append(ds)
+                f.write(
+                    f"| {alpha:.2f} | {len(wins)} | {len(datasets)} | {', '.join(wins) if wins else '—'} |\n"
                 )
-                if r["srocc_mix"] > r["srocc_v18"]:
-                    wins.append(ds)
-            f.write(f"| {alpha:.2f} | {len(wins)} | {len(datasets)} | {', '.join(wins) if wins else '—'} |\n")
-        f.write("\n")
+            f.write("\n")
 
     print(f"wrote {args.out}")
     print()
