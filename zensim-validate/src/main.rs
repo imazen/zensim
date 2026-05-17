@@ -11,6 +11,8 @@
 #[allow(dead_code)] // CLI dispatch wired in a follow-up tick
 mod mlp_train;
 mod scale_invariance;
+#[allow(dead_code)] // SIMD kernels exposed via mlp_train::forward/backprop_step
+mod simd_mlp;
 
 use calamine::{Reader, Xlsx};
 use clap::Parser;

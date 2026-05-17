@@ -1,0 +1,51 @@
+warning: unused import: `super::*`
+   --> zensim-validate/benches/../src/simd_mlp.rs:611:9
+    |
+611 |     use super::*;
+    |         ^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zensim-validate` (bench "bench_mlp_kernels") generated 1 warning (run `cargo fix --bench "bench_mlp_kernels" -p zensim-validate` to apply 1 suggestion)
+    Finished `bench` profile [optimized] target(s) in 0.09s
+     Running benches/bench_mlp_kernels.rs (target/release/deps/bench_mlp_kernels-287ee6534f47e245)
+[zenbench] calibration: int=0.22ns/iter mem_bw=122.1GiB/s mem_lat=9.8ns
+[zenbench] timer resolution: 9ns, loop overhead: 0.17ns/iter, TSC: 4.897 ticks/ns (invariant)
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1778996629-4c6c1
+  git: a6f70aabf3d1881263b61867610530998c21a9be
+═══════════════════════════════════════════════════════════════
+
+  forward_372x128  100 rounds × 210 calls
+                    mean ±mad µs  95% CI vs base     ops/s
+  ├─ scalar          6.3 ±1.2µs  [6.0–6.6]µs        7.56G [1]
+  ╰─ simd_dispatch   3.6 ±0.9µs  [-45.3%–-39.9%]    13.3G [2]
+
+  simd_dispatch  ███████████████████████████████████████████████████ 13.3 Gops/s
+  scalar         █████████████████████████████ 7.56 Gops/s
+  [1] CV=24%
+  [2] CV=26%
+
+  backprop_372x128  120 rounds × 215 calls
+                    mean ±mad µs  95% CI vs base     ops/s
+  ├─ scalar          4.5 ±1.0µs  [4.3–4.6]µs        10.7G
+  ╰─ simd_dispatch   2.4 ±0.6µs  [-51.3%–-45.3%]    19.9G [1]
+
+  simd_dispatch  ███████████████████████████████████████████████████ 19.9 Gops/s
+  scalar         ███████████████████████████ 10.7 Gops/s
+  [1] CV=35%
+
+  pair_372x128  200 rounds × 36 calls
+                     mean ±mad µs  95% CI vs base     ops/s
+  ├─ scalar          23.3 ±1.3µs  [22.2–24.6]µs      8.17G [1]
+  ╰─ simd_dispatch   13.0 ±1.0µs  [-42.8%–-41.1%]    14.6G [2]
+
+  simd_dispatch  ███████████████████████████████████████████████████ 14.6 Gops/s
+  scalar         █████████████████████████████ 8.17 Gops/s
+  [1] CV=38%
+  [2] CV=34%
+
+  total: 31.0s  (420 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
