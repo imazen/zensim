@@ -1,0 +1,46 @@
+//! Buffer pool for reusable allocations across metric computation.
+
+/// Pre-allocated buffers for metric computation, reused across scales.
+pub(crate) struct ScaleBuffers {
+    pub mul_buf: Vec<f32>,
+    pub mu1: Vec<f32>,
+    pub mu2: Vec<f32>,
+    /// Holds blur(src² + dst²) for combined SSIM computation.
+    pub sigma1_sq: Vec<f32>,
+    pub sigma12: Vec<f32>,
+    pub temp_blur: Vec<f32>,
+    /// Local contrast masking weights (when masking enabled).
+    pub mask: Vec<f32>,
+    /// Information-content (IW) weights — texture-EMPHASISING counterpart
+    /// to `mask`. Populated when `ZensimConfig::compute_iw_features` is
+    /// true. Same per-pixel layout; reuses the same blurred-activity
+    /// signal but with inverted polarity (`1 + k_iw * blur(|src - mu|)`
+    /// instead of `1 / (1 + k_mask * blur(|src - mu|))`).
+    pub iw_weight: Vec<f32>,
+}
+
+impl ScaleBuffers {
+    pub fn new(size: usize) -> Self {
+        Self {
+            mul_buf: vec![0.0; size],
+            mu1: vec![0.0; size],
+            mu2: vec![0.0; size],
+            sigma1_sq: vec![0.0; size],
+            sigma12: vec![0.0; size],
+            temp_blur: vec![0.0; size],
+            mask: vec![0.0; size],
+            iw_weight: vec![0.0; size],
+        }
+    }
+
+    pub fn resize(&mut self, size: usize) {
+        self.mul_buf.resize(size, 0.0);
+        self.mu1.resize(size, 0.0);
+        self.mu2.resize(size, 0.0);
+        self.sigma1_sq.resize(size, 0.0);
+        self.sigma12.resize(size, 0.0);
+        self.temp_blur.resize(size, 0.0);
+        self.mask.resize(size, 0.0);
+        self.iw_weight.resize(size, 0.0);
+    }
+}

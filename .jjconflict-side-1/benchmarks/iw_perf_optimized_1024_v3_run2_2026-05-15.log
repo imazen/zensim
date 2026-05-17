@@ -1,0 +1,13 @@
+# Extended-features + IW runtime cost (4 permutations)
+
+Image: 1024×1024 (1048576 pixels), iters per config: 100
+Synthetic deterministic gradient + perturbation
+
+| Config | n_features | min ms | median ms | mean ms | × vs standard |
+|---|---:|---:|---:|---:|---:|
+| Standard      (228 features) | 228 | 11.13 | 12.31 | 12.57 | 1.00× |
+| Extended only (300 features = +masked) | 300 | 12.41 | 13.31 | 13.58 | 1.08× |
+| IW only       (300 features = +IW) | 300 | 12.28 | 13.51 | 13.79 | 1.10× |
+| Extended + IW (372 features = +masked +IW) | 372 | 12.94 | 13.78 | 14.06 | 1.12× |
+
+_All times are wall-clock per `compute_zensim_with_config` call, single (ref, dist) pair, parallel=true (rayon)._

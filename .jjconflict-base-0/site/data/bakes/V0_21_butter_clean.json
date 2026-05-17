@@ -1,0 +1,18 @@
+{
+  "label": "V0_21_butter_clean",
+  "notes": "Cycle-6 experiment: V0_16 recipe (h=128, flat TV=20, seed=1) on butter-concordant training data (128,466 rows after dropping 11.27% ssim2/butter rank-discordant pairs). Single-bake trade-off: CID22=0.8874 (-0.0045 vs V0_16; below ssim2), AIC-3=0.8060 (+0.0070 vs V0_16; clearly above ssim2 by +0.0095). Non-mono=2.91%. NOT shipped as single bake. BUT — in 5-bake ensemble (V0_16/V0_18/V0_19/V0_20/V0_21), V0_21's complementary signal lifts ensemble to CID22 0.8896 (+0.0001 vs ssim2) AND AIC-3 0.8012 (+0.0047). The recipe-best.",
+  "non_mono_q_step_pct": 2.91,
+  "aggregate": {
+    "CID22": {"n": 4292, "v02": 0.8676, "v04": 0.8874, "ssim2": 0.8895, "butter": 0.7412},
+    "AIC-3 CTC": {"n": 600, "v02": 0.7962, "v04": 0.8060, "ssim2": 0.7965, "butter": 0.7095}
+  },
+  "per_band": {
+    "CID22": [
+      {"band": "B0 below medium (<50)", "n": 324, "v02": 0.4072, "v04": 0.4185, "ci_lo": 0.33, "ci_hi": 0.51, "ssim2": 0.4418, "butter": 0.2041, "mae": 58.55},
+      {"band": "B1 medium [50,65)", "n": 1010, "v02": 0.4119, "v04": 0.4346, "ci_lo": 0.39, "ci_hi": 0.49, "ssim2": 0.4694, "butter": 0.2803, "mae": 46.38},
+      {"band": "B2 high [65,90)", "n": 2915, "v02": 0.7359, "v04": 0.7810, "ci_lo": 0.76, "ci_hi": 0.79, "ssim2": 0.7722, "butter": 0.5891, "mae": 29.53},
+      {"band": "B3 visually-lossless (≥90)", "n": 43, "v02": 0.0035, "v04": 0.1429, "ci_lo": 0.01, "ci_hi": 0.45, "ssim2": 0.1121, "butter": 0.1564, "mae": 20.07},
+      {"band": "Near-PJND [58,68]", "n": 787, "v02": 0.3551, "v04": 0.3493, "ci_lo": 0.29, "ci_hi": 0.40, "ssim2": 0.3908, "butter": 0.2491, "mae": 42.30}
+    ]
+  }
+}

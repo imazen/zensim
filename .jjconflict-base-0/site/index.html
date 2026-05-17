@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>zensim — V_X champion progression vs CID22 paper</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           margin: 24px; color: #222; max-width: 1200px; }
+    h1 { font-weight: 700; letter-spacing: -0.02em; }
+    h2 { border-bottom: 1px solid #eee; padding-bottom: 4px; margin-top: 36px; }
+    .lede { color: #666; font-size: 14px; max-width: 80ch; }
+    .chart { width: 100%; min-height: 480px; margin: 16px 0; }
+    .controls { display: flex; gap: 16px; align-items: center; margin: 16px 0;
+                padding: 12px; background: #f7f7f7; border-radius: 6px; }
+    .controls label { font-size: 13px; font-weight: 600; }
+    .controls select { padding: 4px 8px; font-size: 14px; }
+    table { border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 10px; text-align: left; }
+    th { background: #f0f0f0; }
+    td.delta-good { color: #0a7d28; font-weight: 600; }
+    td.delta-bad  { color: #b1130c; font-weight: 600; }
+    td.delta-near { color: #555; }
+    .notes { font-size: 13px; color: #555; margin-top: 12px; }
+    .small { font-size: 12px; color: #888; }
+    .red { color: #b1130c; }
+    .green { color: #0a7d28; }
+  </style>
+</head>
+<body>
+  <h1>zensim — V_X progression vs CID22 paper</h1>
+  <p style="margin: 4px 0 16px 0; font-size: 14px;">
+    <a href="methodology.html">→ Full methodology</a> ·
+    <a href="compare.html">→ Interactive corpus comparison</a>
+    <span class="small" style="margin-left: 6px;">(new — pick any corpus / X / Y → scatter + step-5 + per-band SROCC)</span>
+  </p>
+  <p class="lede">
+    Interactive per-band SROCC graphs for our V_X champion bakes
+    versus the SSIMULACRA 2 reference and the CID22 paper's
+    published numbers. Shipping bar: <strong>match-or-exceed
+    fast-ssim2 across all four quality bands</strong> (B0–B3 per
+    <a href="https://github.com/imazen/zensim/blob/main/docs/CID22_PAPER_PAGE_BY_PAGE_2026-05-11.md">paper Table 5</a>).
+  </p>
+
+  <section style="background:#eaf6ea; border-left: 4px solid #0a7d28; padding: 12px 18px; margin: 16px 0; font-size: 14px;">
+    <strong>Current ship: V0_16 (TV=20, seed=1, 2026-05-12)</strong> —
+    successor to V0_15 (same day). V0_16 raises TV from 15 to 20 on
+    the same purged training data, recovering V0_8's B1 closure
+    HONESTLY without training-set leakage.
+    CID22 SROCC <strong>0.8919</strong>
+    (<span class="green">+0.0024 vs fast-ssim2's 0.8895</span>);
+    AIC-3 CTC SROCC <strong>0.7990</strong>
+    (<span class="green">+0.0025 vs ssim2's 0.7965</span>);
+    non-mono q-step rate <strong>2.30 %</strong> (best of any bake;
+    <span class="green">1/2.5 of V0_8's 5.87 %</span>).
+    Per-band B1 = <strong>0.4559</strong> vs ssim2 0.4694 (-0.014,
+    MATCHES V0_8 tainted's -0.014 HONESTLY). B0 = 0.4214 vs ssim2
+    0.4418 (-0.020, was V0_15 -0.049). Affine-calibrated α=28.0366,
+    β=-5.0738, R²=0.7423.
+  </section>
+
+  <section style="background:#fff4e8; border-left: 4px solid #888; padding: 10px 16px; margin: 12px 0; font-size: 13px; color: #555;">
+    <strong>V0_8 (2026-05-11) ARCHIVED 2026-05-12</strong> — the previously-
+    shipped V0_8 (md5 <code>67482691</code>) was trained on a clean CSV
+    whose perceptual-overlap cleanup ran at a looser threshold than
+    d≤16. <strong>11,629 rows (7.43 %)</strong> were near-duplicates of
+    22 of the 49 CID22 held-out references. V0_8's CID22 0.8948 was
+    inflated by <strong>+0.0034</strong> (confirmed by V0_15's 0.8914
+    honest result). V0_8 is preserved at
+    <code>zensim/weights/archive/v0_8_tainted_2026-05-11.bin</code> for
+    reference but is no longer the runtime weight.
+  </section>
+
+  <h2>Goal 3 — KonJND-1k PJND validation vs paper Table 4</h2>
+  <p class="lede">
+    Independent sanity check that our <code>fast-ssim2</code> +
+    <code>butter</code> implementations reproduce the CID22 paper's
+    headline KonJND-1k numbers (paper p. 20 Table 4). Our
+    measurements match to 3–4 significant figures — pipeline
+    validated.
+  </p>
+  <div id="konjnd-table"></div>
+
+  <h2>Aggregate SROCC per dataset</h2>
+  <div class="controls">
+    <label>Dataset:
+      <select id="ds-aggregate"></select>
+    </label>
+    <span class="small">CID22 is the only true held-out test; KADID/TID/KonJND are in training.</span>
+  </div>
+  <div id="chart-aggregate" class="chart"></div>
+
+  <h2>Per-band SROCC (CID22 49-ref held-out)</h2>
+  <div class="controls">
+    <label>Dataset:
+      <select id="ds-perband"></select>
+    </label>
+    <span class="small">Bands per CID22 paper Table 5: B0&lt;50 / B1 [50,65) / B2 [65,90) / B3≥90.</span>
+  </div>
+  <div id="chart-perband" class="chart"></div>
+
+  <h2>Paper-parity table (Table 3 — full 250-ref SROCC; CID22 paper)</h2>
+  <p class="lede">
+    Paper-published SROCC values vs our reproduction. SSIMULACRA 2's
+    KRCC 0.7033 / SRCC 0.88541 / PCC 0.87448 / MAE 4.97 is the
+    49-ref held-out target. We use the 49-ref held-out subset only.
+  </p>
+  <div id="parity-table"></div>
+
+  <h2>Scatter plots: V_X vs reference metrics (CID22)</h2>
+  <p class="lede">
+    Each point is one CID22 (reference, distorted) pair, plotted by V_X's
+    quality score (−distance, y-axis) against a reference metric (x-axis).
+    Color = MCOS band (red=B0 below-medium, orange=B1 medium, green=B2 high,
+    blue=B3 visually-lossless).
+    A perfect rank match shows monotonic clouds.
+    <strong>dssim is not yet plotted</strong> — only ssim2 + butter are in the
+    current eval pipeline (dssim integration is queued).
+  </p>
+  <div class="controls">
+    <label>Bake:
+      <select id="scatter-bake-select"></select>
+    </label>
+    <span class="small">Compare V0_16 (current ship), V0_15 (archived same-day), and V0_8 (tainted, archived).</span>
+  </div>
+  <h3>V0_16 vs fast-ssim2</h3>
+  <div id="chart-scatter-ssim2" class="chart"></div>
+  <h3>V0_16 vs butteraugli (3-norm, negated)</h3>
+  <div id="chart-scatter-butter" class="chart"></div>
+  <h3>V0_16 vs human MCOS (gold standard)</h3>
+  <div id="chart-scatter-human" class="chart"></div>
+
+  <h2>Step-5 per-band SROCC on CID22</h2>
+  <p class="lede">
+    Within-bin SROCC at step-5 MCOS granularity (vs the 4 broader bands
+    above). Each point is the rank correlation of a metric's score vs
+    human MOS for pairs whose MCOS falls in that 5-point window. Tail
+    bins have small <code>n</code> — see annotations.
+  </p>
+  <div id="chart-step5" class="chart"></div>
+
+  <h2>V0_16 non-mono q-step rate across codecs</h2>
+  <p class="lede">
+    The V0_16 ship's smoothness gate (≤ 4.86 % non-monotonic q-step rate)
+    holds across all major codec families. AVIF and JXL produce perfectly
+    smooth quality curves; WebP and JPEG are well below target.
+  </p>
+  <table>
+    <tr><th>Codec</th><th>Non-mono q-step rate</th><th>Notes</th></tr>
+    <tr><td>AVIF</td><td><strong>0.00 %</strong></td><td>Perfect smoothness</td></tr>
+    <tr><td>JPEG XL</td><td><strong>0.00 %</strong></td><td>Perfect smoothness</td></tr>
+    <tr><td>WebP</td><td>0.50 %</td><td>Near-perfect</td></tr>
+    <tr><td>JPEG</td><td>2.30 %</td><td>Within 4.86 % target; coarsest q steps</td></tr>
+    <tr><td>PNG</td><td>n/a</td><td>Lossless — no quality curves</td></tr>
+  </table>
+
+  <h2>Pareto: CID22 SROCC vs AIC-3 SROCC (held-out 2D)</h2>
+  <p class="lede">
+    Both axes are SROCC vs human MOS; higher = better. Dashed lines mark
+    fast-ssim2 levels. Target = upper-right quadrant (beats ssim2 on both).
+    Orange = ensemble subsets (recipe-diversity). Green = current ship V0_16.
+    Purple = V0_21 butter-clean single bake.
+  </p>
+  <div id="chart-pareto-cid22-aic3" class="chart"></div>
+
+  <h2>Pareto: CID22 SROCC vs non-mono q-step rate</h2>
+  <p class="lede">
+    Each bake is a point. The X axis is reversed so smoother bakes appear on the right.
+    The dashed line marks fast-ssim2's CID22 SROCC (0.8895). Goal #1 is to be both
+    above the line AND to the right of fast-ssim2's non-mono 5.08 %.
+  </p>
+  <div id="chart-pareto" class="chart"></div>
+
+  <h2>Bake history</h2>
+  <table id="bake-history">
+    <tr><th>Bake</th><th>CID22 SROCC</th><th>vs ssim2</th><th>Non-mono</th><th>AIC-3 SROCC</th><th>Status</th></tr>
+    <tr><td>V0_5 leaked</td><td>0.8900</td><td><span class="delta-near">+0.0005</span></td><td>5.36 %</td><td>—</td><td><span class="small">archived (training leak 11.77 %)</span></td></tr>
+    <tr><td>V0_6 clean (seed=42)</td><td>0.8839</td><td><span class="delta-bad">−0.0056</span></td><td>5.94 %</td><td>—</td><td><span class="small">honest baseline</span></td></tr>
+    <tr><td>V0_7 seed=0 (initial)</td><td>0.8912</td><td><span class="delta-good">+0.0017</span></td><td>5.67 %</td><td>—</td><td><span class="small">archived (non-mono over)</span></td></tr>
+    <tr><td>V0_7 seed=1 TV=10</td><td>0.8933</td><td><span class="delta-good">+0.0038</span></td><td>5.46 %</td><td>—</td><td><span class="small">archived (B1 -0.027)</span></td></tr>
+    <tr><td>V0_8 TV=15 seed=1 (TAINTED, ARCHIVED)</td><td>0.8948</td><td><span class="delta-good">+0.0053</span></td><td>5.87 %</td><td>0.8043 (+0.0078)</td><td><span class="small">archived 2026-05-12 (inflation +0.0034)</span></td></tr>
+    <tr><td>V0_10 [15,25,15,15]</td><td>0.8877</td><td><span class="delta-bad">−0.0018</span></td><td>2.40 %</td><td>0.7945 (−0.0020)</td><td><span class="small">tainted-data smoothness specialist</span></td></tr>
+    <tr><td>V0_11 flat TV=20</td><td>0.8897</td><td><span class="delta-near">+0.0002</span></td><td>2.33 %</td><td>0.8056 (+0.0091)</td><td><span class="small">tainted-data exp; AIC-3 leader at the time</span></td></tr>
+    <tr><td>V0_12 B1 oversample</td><td>0.8895</td><td><span class="delta-near">±0.0000</span></td><td>1.68 %</td><td>0.7972 (+0.0007)</td><td><span class="small">tainted-data exp; B1 oversample disproved</span></td></tr>
+    <tr><td>V0_15 honest TV=15 (ARCHIVED same day)</td><td>0.8914</td><td><span class="delta-good">+0.0019</span></td><td>2.51 %</td><td>0.8019 (+0.0054)</td><td><span class="small">superseded by V0_16 (better B0/B1)</span></td></tr>
+    <tr><td><strong>V0_16 honest TV=20 (SHIPPED 2026-05-12)</strong></td><td><strong>0.8919</strong></td><td><span class="delta-good">+0.0024</span></td><td><strong>2.30 %</strong></td><td>0.7990 (+0.0025)</td><td><strong>current ship · honest B1 closure</strong></td></tr>
+    <tr><td>V0_17 honest TV=25 (NOT SHIPPED)</td><td>0.8849</td><td><span class="delta-bad">−0.0046</span></td><td>2.44 %</td><td>0.7995 (+0.0030)</td><td><span class="small">over-regularized; B2/B3 collapse; AIC-3 marginal +0.0005 vs V0_16</span></td></tr>
+    <tr><td>V0_18 seed=42 (NOT SHIPPED)</td><td>0.8847</td><td><span class="delta-bad">−0.0048</span></td><td><strong>2.01 %</strong></td><td>0.7899 (−0.0066)</td><td><span class="small">seed sweep; best non-mono of sweep</span></td></tr>
+    <tr><td>V0_19 seed=7 (NOT SHIPPED)</td><td>0.8848</td><td><span class="delta-bad">−0.0047</span></td><td>2.84 %</td><td>0.7986 (+0.0021)</td><td><span class="small">seed sweep; best per-band B0/B1 (0.452/0.476)</span></td></tr>
+    <tr><td>V0_20 seed=123 (NOT SHIPPED)</td><td>0.8872</td><td><span class="delta-bad">−0.0023</span></td><td>2.65 %</td><td><strong>0.8097</strong> (+0.0132)</td><td><span class="small">seed sweep; best AIC-3 single-seed</span></td></tr>
+    <tr><td>4-seed ensemble (V0_16/18/19/20)</td><td>0.8892</td><td><span class="delta-near">−0.0003</span></td><td>—</td><td>0.7998 (+0.0033)</td><td><span class="small">CID22 tied; AIC-3 beats ssim2</span></td></tr>
+    <tr><td>V0_21 butter-clean (NOT SHIPPED)</td><td>0.8874</td><td><span class="delta-bad">−0.0021</span></td><td>2.91 %</td><td>0.8060 (+0.0095)</td><td><span class="small">single-bake trade-off; ensemble member</span></td></tr>
+    <tr><td>5-bake ensemble (V0_16/18/19/20/21)</td><td>0.8896</td><td><span class="delta-good">+0.0001</span></td><td>—</td><td>0.8012 (+0.0047)</td><td><span class="small">diluted; subset search found better below</span></td></tr>
+    <tr><td><strong>{V0_16, V0_20} 2-bake</strong></td><td><strong>0.8910</strong></td><td><span class="delta-good">+0.0015</span></td><td>—</td><td><strong>0.8050</strong> (+0.0085)</td><td><strong>OPTIMUM · runtime ensemble recommendation (after exhaustive 7-bake search)</strong></td></tr>
+    <tr><td>{V0_16, V0_20, V0_21} 3-bake</td><td>0.8908</td><td><span class="delta-good">+0.0013</span></td><td>—</td><td>0.8051 (+0.0086)</td><td><span class="small">virtually tied with 2-bake at +0.0099 combined</span></td></tr>
+    <tr><td>V0_22 konjnd_w=1.0 (specialty)</td><td>0.8870</td><td><span class="delta-bad">−0.0025</span></td><td><strong>1.96 %</strong></td><td>0.7906 (−0.0059)</td><td><span class="small">best smoothness + Near-PJND; not shipped</span></td></tr>
+  </table>
+
+  <h2>Notes</h2>
+  <p class="lede">
+    Site source: <code>site/index.html</code>. Data builder:
+    <code>scripts/v_next/build_site_data.py</code>. See the
+    <a href="https://github.com/imazen/zensim/blob/main/docs/PARITY_AND_METHODOLOGY_PLAN_2026-05-11.md">parity plan</a>
+    for the full audit + methodology pipeline.
+  </p>
+  <p class="lede">
+    Caveat: paper used libjxl 0.8's ssim2; we use our own fast-ssim2
+    Rust port. KonJND-1k Table 4 reproduction matches to 3-4 sig figs;
+    full CID22 Table 3 reproduction is pending Goal 3 work.
+  </p>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

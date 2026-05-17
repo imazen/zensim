@@ -1,0 +1,66 @@
+[package]
+name = "zensim"
+version = "0.3.0"
+edition = "2024"
+description = "Fast psychovisual image similarity metric"
+repository = "https://github.com/imazen/zensim"
+license = "MIT OR Apache-2.0"
+readme = "../README.md"
+rust-version = "1.93.0"
+keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
+categories = ["multimedia::images", "computer-vision"]
+exclude = ["benches/", "tests/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+
+[features]
+default = ["avx512", "imgref", "threads"]
+avx512 = ["archmage/avx512", "magetypes/avx512"]
+## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
+threads = ["dep:rayon"]
+## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
+## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
+## scale count) whose outputs are incomparable with the default trained weights.
+training = []
+## Exposes classification API: classify(), ClassifiedResult, ErrorClassification,
+## DeltaStats, AlphaStratifiedStats. Used by zensim-regress for regression testing.
+classification = []
+## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
+imgref = ["dep:imgref", "dep:rgb"]
+## Enable ImageSource adapter for zenpixels PixelSlice/PixelBuffer types.
+## Automatically maps PixelDescriptor to correct format, alpha mode, and
+## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
+## alpha (un-premultiplied on the fly).
+zenpixels = ["dep:zenpixels"]
+## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
+## Uses zenresize for resampling — training/research feature.
+## Commented out: zenresize not yet published to crates.io.
+# zenresize = ["dep:zenresize"]
+
+[dependencies]
+archmage = { workspace = true }
+bytemuck = { workspace = true }
+magetypes = { workspace = true }
+rayon = { workspace = true, optional = true }
+thiserror = { workspace = true }
+linear-srgb = { workspace = true }
+imgref = { workspace = true, optional = true }
+rgb = { workspace = true, optional = true }
+zenpixels = { version = "0.2.10", optional = true, default-features = false }
+# Runtime for the `PreviewV0_3` MLP scorer. zenpredict is MIT/Apache-2.0
+# (matching zensim), so the runtime dep is unconditional in 0.3.0+.
+# Prior comments claiming AGPL referred to a license plan that was
+# superseded before zenpredict's 0.1.0 publish.
+zenpredict = { workspace = true }
+# zenresize = { workspace = true, optional = true }  # re-enable when published
+
+[dev-dependencies]
+image = { workspace = true }
+archmage = { workspace = true, features = ["testable_dispatch"] }
+serde_json = "1"
+
+[lints.clippy]
+uninlined_format_args = "allow"
+too_many_arguments = "allow"
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads"))']  # zenresize kept in check-cfg for gated code

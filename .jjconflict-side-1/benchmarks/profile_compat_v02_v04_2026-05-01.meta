@@ -1,0 +1,15 @@
+Source: zensim-bench/examples/profile_compat_report.rs
+Generated: 2026-05-01 (UTC)
+Bake: v04_mlp_v5znpr2_20260430T044620.bin
+Datasets: KADIK10k (n=10125), TID2013 (n=3000), CID22 (n=4292) — full corpora
+Walltime: 2:55 on AMD Ryzen 9 7950X (rayon-parallel, ~100 pair/s)
+CSV: /mnt/v/output/zensim/profile_compat_v02_v04_20260501.csv (17,417 rows)
+
+Reproduce:
+  cargo run --release -p zensim-bench --example profile_compat_report -- \
+    --kadid /mnt/v/dataset/kadid10k \
+    --tid /mnt/v/dataset/tid2013 \
+    --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
+    --v04-bake /mnt/v/output/zensim/synthetic-v2/runs/v04_mlp_v5znpr2_20260430T044620.bin \
+    --output /mnt/v/output/zensim/profile_compat_v02_v04_<date>.csv \
+    --top-k 30

@@ -1,0 +1,5 @@
+training_source	dhash	nearest_cid22_ref	nearest_dhash	hamming
+/mnt/v/input/zensim/sources/00b13be94a4867dd_1022x818.png	9c1414141598980a	7062219.png	989036969c8c9292	17
+/mnt/v/input/zensim/sources/00b13be94a4867dd_1024sq.png	189c141475989862	7062219.png	989036969c8c9292	20
+/mnt/v/input/zensim/sources/00b13be94a4867dd_512sq.png	72353531242a383c	162520.png	64d4711b2c2c30b0	19
+/mnt/v/input/zensim/sources/00b13be94a4867dd_513x769.png	1a3235252238181a	1531677.png	686030307050491b	22

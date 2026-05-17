@@ -1,0 +1,87 @@
+{
+  "label": "V0_11_flat_tv20",
+  "eval_log_path": "/tmp/zensim_loop/v0_11_cid22_aic3_eval.stdout",
+  "bake": {
+    "path": "/tmp/zensim_loop/v0_11_flat_tv20_seed1.bin",
+    "md5": "eed8d048540a98c9db567eba411394eb",
+    "size_bytes": 119812
+  },
+  "train_csv": "/tmp/zensim_loop/safe_synth_clean_features.csv",
+  "notes": "Flat TV=20 seed=1. CID22=0.8897 (+0.0002 over ssim2 but -0.005 below V0_8). AIC-3=0.8056 (BEATS V0_8 0.8043 by +0.0013, beats ssim2 by +0.0091). Non-mono=2.33% (new record before V0_12 surpassed). B0 weakness: -0.040 vs ssim2. Trade-off: better AIC-3 + smoothness, worse CID22 aggregate + B0. NOT ship (B0 regression).",
+  "non_mono_q_step_pct": 2.33,
+  "aggregate": {
+    "CID22": {
+      "n": 4292,
+      "v02": 0.8676,
+      "v04": 0.8897,
+      "ssim2": 0.8895,
+      "butter": 0.7412
+    },
+    "AIC-3 CTC": {
+      "n": 600,
+      "v02": 0.7962,
+      "v04": 0.8056,
+      "ssim2": 0.7965,
+      "butter": 0.7095
+    }
+  },
+  "per_band": {
+    "CID22": [
+      {
+        "band": "B0 below medium (<50)",
+        "n": 324,
+        "v02": 0.4072,
+        "v04": 0.4021,
+        "ci_lo": 0.31,
+        "ci_hi": 0.49,
+        "ssim2": 0.4418,
+        "butter": 0.2041,
+        "mae": 58.89
+      },
+      {
+        "band": "B1 medium [50,65)",
+        "n": 1010,
+        "v02": 0.4119,
+        "v04": 0.4527,
+        "ci_lo": 0.40,
+        "ci_hi": 0.50,
+        "ssim2": 0.4694,
+        "butter": 0.2803,
+        "mae": 46.80
+      },
+      {
+        "band": "B2 high [65,90)",
+        "n": 2915,
+        "v02": 0.7359,
+        "v04": 0.7811,
+        "ci_lo": 0.77,
+        "ci_hi": 0.79,
+        "ssim2": 0.7722,
+        "butter": 0.5891,
+        "mae": 30.11
+      },
+      {
+        "band": "B3 visually-lossless (≥90)",
+        "n": 43,
+        "v02": 0.0035,
+        "v04": 0.1868,
+        "ci_lo": 0.01,
+        "ci_hi": 0.50,
+        "ssim2": 0.1121,
+        "butter": 0.1564,
+        "mae": 20.78
+      },
+      {
+        "band": "Near-PJND [58,68]",
+        "n": 787,
+        "v02": 0.3551,
+        "v04": 0.3563,
+        "ci_lo": 0.30,
+        "ci_hi": 0.41,
+        "ssim2": 0.3908,
+        "butter": 0.2491,
+        "mae": 42.76
+      }
+    ]
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "label": "V0_15",
+  "dataset": "CID22",
+  "step": 5,
+  "total_pairs": 4292,
+  "bands": [
+    {
+      "bin_lo": 30,
+      "bin_hi": 35,
+      "n": 15,
+      "srocc_v02": 0.3107,
+      "srocc_v04": -0.5893,
+      "srocc_ssim2": 0.5107,
+      "srocc_butter": -0.1036
+    },
+    {
+      "bin_lo": 35,
+      "bin_hi": 40,
+      "n": 42,
+      "srocc_v02": 0.2142,
+      "srocc_v04": -0.0403,
+      "srocc_ssim2": 0.1466,
+      "srocc_butter": 0.1668
+    },
+    {
+      "bin_lo": 40,
+      "bin_hi": 45,
+      "n": 98,
+      "srocc_v02": 0.0759,
+      "srocc_v04": 0.0819,
+      "srocc_ssim2": 0.004,
+      "srocc_butter": 0.1438
+    },
+    {
+      "bin_lo": 45,
+      "bin_hi": 50,
+      "n": 168,
+      "srocc_v02": 0.202,
+      "srocc_v04": -0.2451,
+      "srocc_ssim2": 0.2228,
+      "srocc_butter": 0.1348
+    },
+    {
+      "bin_lo": 50,
+      "bin_hi": 55,
+      "n": 266,
+      "srocc_v02": 0.1673,
+      "srocc_v04": -0.1879,
+      "srocc_ssim2": 0.2077,
+      "srocc_butter": 0.0943
+    },
+    {
+      "bin_lo": 55,
+      "bin_hi": 60,
+      "n": 349,
+      "srocc_v02": 0.2275,
+      "srocc_v04": -0.2329,
+      "srocc_ssim2": 0.2561,
+      "srocc_butter": 0.1487
+    },
+    {
+      "bin_lo": 60,
+      "bin_hi": 65,
+      "n": 395,
+      "srocc_v02": 0.2247,
+      "srocc_v04": -0.2019,
+      "srocc_ssim2": 0.237,
+      "srocc_butter": 0.1268
+    },
+    {
+      "bin_lo": 65,
+      "bin_hi": 70,
+      "n": 441,
+      "srocc_v02": 0.1341,
+      "srocc_v04": -0.151,
+      "srocc_ssim2": 0.1538,
+      "srocc_butter": 0.0329
+    },
+    {
+      "bin_lo": 70,
+      "bin_hi": 75,
+      "n": 503,
+      "srocc_v02": 0.2305,
+      "srocc_v04": -0.2157,
+      "srocc_ssim2": 0.2406,
+      "srocc_butter": 0.1913
+    },
+    {
+      "bin_lo": 75,
+      "bin_hi": 80,
+      "n": 589,
+      "srocc_v02": 0.1988,
+      "srocc_v04": -0.2192,
+      "srocc_ssim2": 0.2093,
+      "srocc_butter": 0.1796
+    },
+    {
+      "bin_lo": 80,
+      "bin_hi": 85,
+      "n": 632,
+      "srocc_v02": 0.2151,
+      "srocc_v04": -0.2425,
+      "srocc_ssim2": 0.2405,
+      "srocc_butter": 0.2016
+    },
+    {
+      "bin_lo": 85,
+      "bin_hi": 90,
+      "n": 750,
+      "srocc_v02": 0.1756,
+      "srocc_v04": -0.2236,
+      "srocc_ssim2": 0.223,
+      "srocc_butter": 0.1245
+    },
+    {
+      "bin_lo": 90,
+      "bin_hi": 95,
+      "n": 43,
+      "srocc_v02": -0.0035,
+      "srocc_v04": 0.1886,
+      "srocc_ssim2": -0.1121,
+      "srocc_butter": -0.1564
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+=== seed=0 ===
+| CID22 | 4292 | 0.8676 | 0.8761 | 0.8895 | 0.7412 |
+Reversed pairs: 101,526 (6.00%)
+✗ Non-mono rate 6.00% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=1 ===
+| CID22 | 4292 | 0.8676 | 0.8874 | 0.8895 | 0.7412 |
+Reversed pairs: 84,144 (4.97%)
+✗ Non-mono rate 4.97% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=2 ===
+| CID22 | 4292 | 0.8676 | 0.8786 | 0.8895 | 0.7412 |
+Reversed pairs: 107,231 (6.34%)
+✗ Non-mono rate 6.34% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=3 ===
+| CID22 | 4292 | 0.8676 | 0.8848 | 0.8895 | 0.7412 |
+Reversed pairs: 105,984 (6.26%)
+✗ Non-mono rate 6.26% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=4 ===
+| CID22 | 4292 | 0.8676 | 0.8719 | 0.8895 | 0.7412 |
+Reversed pairs: 97,087 (5.74%)
+✗ Non-mono rate 5.74% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=5 ===
+| CID22 | 4292 | 0.8676 | 0.8765 | 0.8895 | 0.7412 |
+Reversed pairs: 91,445 (5.41%)
+✗ Non-mono rate 5.41% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=6 ===
+| CID22 | 4292 | 0.8676 | 0.8863 | 0.8895 | 0.7412 |
+Reversed pairs: 122,817 (7.26%)
+✗ Non-mono rate 7.26% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=7 ===
+| CID22 | 4292 | 0.8676 | 0.8865 | 0.8895 | 0.7412 |
+Reversed pairs: 102,429 (6.05%)
+✗ Non-mono rate 6.05% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=8 ===
+| CID22 | 4292 | 0.8676 | 0.8750 | 0.8895 | 0.7412 |
+Reversed pairs: 112,098 (6.63%)
+✗ Non-mono rate 6.63% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=9 ===
+| CID22 | 4292 | 0.8676 | 0.8819 | 0.8895 | 0.7412 |
+Reversed pairs: 101,006 (5.97%)
+✗ Non-mono rate 5.97% ≥ target 4.86% — smoothness goal NOT MET
+=== seed=42 ===
+| CID22 | 4292 | 0.8676 | 0.8822 | 0.8895 | 0.7412 |
+Reversed pairs: 95,478 (5.64%)
+✗ Non-mono rate 5.64% ≥ target 4.86% — smoothness goal NOT MET

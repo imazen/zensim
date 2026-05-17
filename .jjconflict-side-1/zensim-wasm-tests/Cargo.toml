@@ -1,0 +1,13 @@
+[package]
+name = "zensim-wasm-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Integration tests for zensim under wasm32-wasip1 + simd128"
+
+[dependencies]
+zensim = { workspace = true, features = ["imgref", "classification"] }
+zensim-regress = { workspace = true, default-features = false }
+
+[lints.clippy]
+uninlined_format_args = "allow"

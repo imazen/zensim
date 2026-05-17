@@ -1,0 +1,54 @@
+# Baseline-metric SROCC vs human MOS
+
+Max 99999 pairs per dataset.
+
+| Dataset | n | V0_2 | V0_4 (bake) | fast-ssim2 | butteraugli |
+|---------|--:|:----:|:-----------:|:----------:|:-----------:|
+=== KonJND-1k (n=1008) ===
+  konjnd 50/1008 (64.8/s, ETA 15s)
+  konjnd 100/1008 (49.9/s, ETA 18s)
+  konjnd 150/1008 (48.7/s, ETA 18s)
+  konjnd 200/1008 (46.6/s, ETA 17s)
+  konjnd 250/1008 (45.7/s, ETA 17s)
+  konjnd 300/1008 (44.8/s, ETA 16s)
+  konjnd 350/1008 (44.3/s, ETA 15s)
+  konjnd 400/1008 (44.9/s, ETA 14s)
+  konjnd 450/1008 (43.9/s, ETA 13s)
+  konjnd 500/1008 (44.4/s, ETA 11s)
+  konjnd 550/1008 (43.6/s, ETA 11s)
+  konjnd 600/1008 (43.5/s, ETA 9s)
+  konjnd 650/1008 (43.4/s, ETA 8s)
+  konjnd 700/1008 (43.4/s, ETA 7s)
+  konjnd 750/1008 (43.5/s, ETA 6s)
+  konjnd 800/1008 (43.2/s, ETA 5s)
+  konjnd 850/1008 (43.2/s, ETA 4s)
+  konjnd 900/1008 (43.2/s, ETA 2s)
+  konjnd 950/1008 (43.0/s, ETA 1s)
+  konjnd 1000/1008 (43.2/s, ETA 0s)
+  konjnd done 1008/1008 valid in 23.9s
+
+## KonJND-1k visually-lossless calibration (Lin, Hosu, Saupe 2022)
+
+Pairs at the per-source mean PJND (Probabilistic Just-Noticeable-Difference)
+threshold. Each source's pair is the just-barely-perceptible distortion. The
+Cloudinary CID22 paper Table 4 publishes these mean ± stdev anchors for
+several metrics; comparing our SSIMULACRA 2 / Butteraugli numbers below with
+that table cross-validates the pipeline.
+
+### JPEG subset (n = 504)
+
+| metric | mean | stdev | Cloudinary Table 4 (paper) |
+|---|--:|--:|---|
+| V0_2 raw distance | 2.1120 | 0.4455 | — |
+| V0_4 raw distance | -6.0799 | 1.4921 | — |
+| fast-ssim2 score | 62.55 | 5.03 | 63.10 ± 4.65 |
+| butteraugli 3-norm | 1.6993 | 0.2274 | 1.699 ± 0.229 |
+
+### BPG subset (n = 504)
+
+| metric | mean | stdev | Cloudinary Table 4 (paper) |
+|---|--:|--:|---|
+| V0_2 raw distance | 1.8835 | 0.4378 | — |
+| V0_4 raw distance | -6.7868 | 1.6546 | — |
+| fast-ssim2 score | 65.38 | 5.42 | 65.38 ± 5.10 |
+| butteraugli 3-norm | 1.5283 | 0.1912 | 1.528 ± 0.192 |

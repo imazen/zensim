@@ -1,0 +1,12 @@
+MLP train: arch=[228 → 128 (LeakyReLU α=0.01) → 1], val_policy=Min
+      train group 0: 'safesyn' n=218089 train_w=1.000 val_w=0.000
+  train+val group 1: 'kadid' n=10125 train_w=0.300 val_w=1.000
+  train+val group 2: 'tid' n=3000 train_w=0.300 val_w=1.000
+  epoch   0 | lr=0.00100 | loss=0.2264 | val_mean=0.9017 (best=-inf) | safesyn=0.9913 kadid=0.9017 tid=0.9213 | t=5.3s
+  epoch  25 | lr=0.00050 | loss=0.1566 | val_mean=0.9320 (best=0.9017) | safesyn=0.9956 kadid=0.9320 tid=0.9455 | t=119.4s
+  epoch  50 | lr=0.00100 | loss=0.1722 | val_mean=0.8481 (best=0.9320) | safesyn=0.9948 kadid=0.8481 tid=0.9275 | t=235.0s
+  epoch  75 | lr=0.00050 | loss=0.1550 | val_mean=0.9408 (best=0.9320) | safesyn=0.9957 kadid=0.9408 tid=0.9480 | t=350.9s
+  epoch 100 | lr=0.00100 | loss=0.1644 | val_mean=0.9306 (best=0.9408) | safesyn=0.9949 kadid=0.9306 tid=0.9399 | t=464.0s
+  epoch 125 | lr=0.00050 | loss=0.1453 | val_mean=0.9385 (best=0.9408) | safesyn=0.9949 kadid=0.9385 tid=0.9499 | t=577.3s
+  early stop at epoch 125 (no validation improvement for 50 epochs)
+MLP train: best validation mean SROCC = 0.9408

@@ -1,0 +1,20 @@
+# Contamination blocklist — EMPTY as of 2026-05-14 (evening revert).
+#
+# The 149-basename d ≤ 16 blocklist was reviewed by the user and
+# proven to be all false positives. The d ≤ 10 retry produced 7
+# candidate basenames; user reviewed those too and confirmed they
+# are also vastly different images with shared flat regions
+# (where dHash is structurally unreliable).
+#
+# Conclusion: zero contamination has been demonstrated against
+# the V_X training corpus at any threshold the user has signed
+# off on.
+#
+# The rejected 149-basename blocklist is preserved at
+# `contamination_blocklist_2026-05-14_REJECTED_false_positives.txt`
+# for historical record.
+#
+# This file remains parsed by zensim-validate's contamination_guard
+# module so the infrastructure stays in place for future use — but
+# the blocklist itself is empty. Any new entries MUST come with a
+# user-approved side-by-side montage.

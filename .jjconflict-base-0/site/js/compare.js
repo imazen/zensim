@@ -1,0 +1,337 @@
+// compare.js — main thread for the interactive corpus comparison page.
+//
+// Responsibilities:
+//   - Fetch _manifest.json (corpus list, metric names, R2 base URL).
+//   - Render corpus checkboxes + X/Y axis dropdowns + filters.
+//   - Forward "run query" to the Web Worker.
+//   - Receive query results and render Plotly scatter + step-5 line +
+//     per-band SROCC table.
+//
+// All CPU-heavy work (DuckDB SQL, MLP forward pass, statistics) happens
+// in compare-worker.js. The main thread only does UI + plotting.
+//
+// MVP STATE (2026-05-12): skeleton only. _manifest.json is not yet
+// uploaded; the page falls back to a stub corpus list so the UI is
+// visible end-to-end. Real wiring lands in subsequent commits.
+
+const R2_BASE = "https://zentrain-r2.imazen.org/zensim-compare-site";
+
+const STUB_MANIFEST = {
+  base_url: R2_BASE,
+  corpora: [
+    // In-repo parquets (no R2 needed) — small enough to ship via gh-pages.
+    { id: "aic3_ctc_epfl", label: "AIC-3 CTC EPFL (n=600, human JND, 6 codecs)",
+      codec: "*", url: "data/parquet/aic3_ctc_epfl.parquet" },
+    { id: "aic4_sample",   label: "AIC-4 sample (n=300, reconstructed JND + paper metrics)",
+      codec: "*", url: "data/parquet/aic4_sample.parquet" },
+    { id: "cid22",   label: "CID22 (n=4341, MCOS — gold-standard codec-output)",
+      codec: "*", url: "data/parquet/cid22.parquet" },
+    { id: "kadid10k", label: "KADID-10k (n=10125, DMOS — 25 analytic distortions × 5 levels)",
+      codec: "*", url: "data/parquet/kadid.parquet" },
+    { id: "tid2013",  label: "TID2013 (n=3000, MOS — 24 distortions × 5 levels)",
+      codec: "*", url: "data/parquet/tid.parquet" },
+    // R2-hosted codec-sweep parquets at zentrain-r2.imazen.org. Carries
+    // feat_0..feat_299 columns (zensim per-pair features) so the JS-MLP
+    // path can apply any V_X bake on the fly.
+    { id: "v13_zenjpeg", label: "zenjpeg sweep v13 (36k rows, R2)",   codec: "zenjpeg",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v13_zenjpeg.parquet` },
+    { id: "v12_zenavif", label: "zenavif sweep v12 (4k rows, R2)",    codec: "zenavif",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenavif.parquet` },
+    { id: "v12_zenjxl",  label: "zenjxl sweep v12 (32k rows, R2)",    codec: "zenjxl",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenjxl.parquet` },
+    { id: "v12_zenwebp", label: "zenwebp sweep v12 (1k rows, R2)",    codec: "zenwebp",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenwebp.parquet` },
+    { id: "v14_zenpng",  label: "zenpng sweep v14 (2.4k rows, R2)",   codec: "zenpng",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v14_zenpng.parquet` },
+    { id: "v15r_zenjpeg",  label: "zenjpeg sweep v15r (1.79M rows, R2 ⚠ large)", codec: "zenjpeg",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v15r_zenjpeg.parquet` },
+    { id: "v15rc_zenjpeg", label: "zenjpeg sweep v15rc (514k rows, R2 ⚠ large)", codec: "zenjpeg",
+      url: `${R2_BASE}/parquets/codec-sweeps/unified_v15rc_zenjpeg.parquet` },
+  ],
+  metrics: [
+    { id: "q",                        label: "q (codec quality)" },
+    { id: "score_ssim2",              label: "ssim2 (sweep-time)" },
+    { id: "score_butteraugli_max",    label: "butteraugli (max-norm)" },
+    { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm)" },
+    // --- Current zensim ship ---
+    { id: "score_zensim_v0_18",       label: "★ zensim V0_18 — CURRENT SHIP (2026-05-13; 228→384→1 I8, 93 KB; CID22 0.8934)" },
+    // --- Stable linear profiles (always available) ---
+    { id: "score_zensim",             label: "zensim V0_2 linear (sweep-time / zen-metrics CLI default)" },
+    { id: "score_v0_2_linear",        label: "zensim V0_2 linear (also present in AIC-3/CID22/KADID/TID)" },
+    // --- Archived prior ships, newest first ---
+    { id: "score_zensim_v0_17",       label: "zensim V0_17 (archived 2026-05-13; F32 weights, 355 KB — V0_18 is the bit-equivalent I8 re-bake)" },
+    { id: "score_zensim_v0_16",       label: "zensim V0_16 (archived 2026-05-13; the base V0_17 was constructed from)" },
+    // --- Non-shipped Rust V_X candidates from the recovery-cycle exploration ---
+    // (Numerically higher than V0_17/V0_18 because the V_X experimentation
+    //  ran ahead through cycles 7–10 before the cycle-14 reset landed V0_17;
+    //  these are exploratory data points, NOT successors to V0_18.)
+    { id: "score_zensim_v0_26",       label: "zensim V0_26 (cycle-7 candidate, KonJND-aligned, no dssim — not shipped)" },
+    { id: "score_zensim_v0_31",       label: "zensim V0_31 (cycle-8 candidate, AIC-4 specialist, KonJND w=0.5 — not shipped)" },
+    { id: "score_zensim_v0_38",       label: "zensim V0_38 (cycle-10a B0/B3 specialist, seed=3 — not shipped)" },
+    { id: "score_zensim_v0_17_c14_s7",  label: "zensim V0_17 cycle-14 seed=7 (B0+B3 specialist input to the V0_17 concat — not standalone ship)" },
+    { id: "score_zensim_v0_17_c14_s42", label: "zensim V0_17 cycle-14 seed=42 (AIC-4 specialist input to the V0_17 concat — not standalone ship)" },
+    // --- Other metrics ---
+    { id: "score_dssim",              label: "dssim (when present)" },
+    // --- Legacy JS-MLP variants (different numbering scheme!) ---
+    // These were loaded client-side via a JavaScript MLP runtime in an
+    // older site iteration. V0_19/V0_20/V0_22 here are NOT the Rust
+    // runtime V_X numbering — they're separate experiments that happen
+    // to share digits. Kept available for historical comparison only.
+    { id: "score_zensim_v0_4_jsmlp",  label: "zensim V0_4 (legacy JS-MLP, 228→64→1, 2026-04-30 — different lineage from runtime V0_4)" },
+    { id: "score_zensim_v0_16_jsmlp", label: "zensim V0_16 (legacy JS-MLP from feat_* — different lineage from runtime V0_16)" },
+    { id: "score_zensim_v0_20",       label: "zensim V0_20 (legacy JS-MLP, seed 123 — NOT a successor to V0_18)" },
+    { id: "score_zensim_v0_22",       label: "zensim V0_22 (legacy JS-MLP, konjnd_w=1 — NOT a successor to V0_18)" },
+    // Human-rated columns (corpus-dependent — only available when a
+    // human-rated corpus like AIC-3/AIC-4/CID22 is selected).
+    { id: "human_jnd",                label: "human JND / MOS (corpus-dependent)" },
+    { id: "human_jnd_ci_lo",          label: "human JND — CI lower (AIC-4 only)" },
+    { id: "human_jnd_ci_hi",          label: "human JND — CI upper (AIC-4 only)" },
+    { id: "encoded_bytes",            label: "encoded bytes" },
+    { id: "bpp",                      label: "bits per pixel (AIC-3 only for now)" },
+  ],
+};
+
+const $ = (id) => document.getElementById(id);
+
+function renderCorpusList(manifest) {
+  const list = $("corpus-list");
+  list.innerHTML = "";
+  for (const c of manifest.corpora) {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = c.id;
+    cb.dataset.codec = c.codec;
+    if (c.id === "v13_zenjpeg") cb.checked = true; // sensible default
+    const span = document.createElement("span");
+    span.textContent = c.label;
+    label.appendChild(cb);
+    label.appendChild(span);
+    list.appendChild(label);
+  }
+}
+
+function renderAxisDropdowns(manifest) {
+  const xSel = $("x-axis"), ySel = $("y-axis");
+  xSel.innerHTML = "";
+  ySel.innerHTML = "";
+  for (const m of manifest.metrics) {
+    const oX = document.createElement("option");
+    oX.value = m.id; oX.textContent = m.label;
+    xSel.appendChild(oX);
+    const oY = oX.cloneNode(true);
+    ySel.appendChild(oY);
+  }
+  xSel.value = "q";
+  ySel.value = "score_ssim2";
+}
+
+function selectedCorpora() {
+  return Array.from(document.querySelectorAll("#corpus-list input:checked"))
+              .map((cb) => cb.value);
+}
+
+function setProgress(msg, state = "") {
+  const p = $("progress");
+  p.textContent = msg;
+  p.className = "progress" + (state ? " " + state : "");
+}
+
+let worker = null;
+function initWorker() {
+  worker = new Worker("js/compare-worker.js", { type: "module" });
+  worker.onmessage = (e) => {
+    const { type, data } = e.data;
+    if (type === "ready")    setProgress("worker ready", "ok");
+    if (type === "progress") setProgress(data, "busy");
+    if (type === "error")    setProgress("error: " + data, "busy");
+    if (type === "codecs")        populateFilters(data);
+    if (type === "result")        renderResult(data);
+    if (type === "lookup_result") renderLookup(data);
+  };
+  worker.onerror = (err) => setProgress("worker error: " + err.message, "busy");
+  worker.postMessage({ type: "init", base_url: R2_BASE });
+}
+
+function populateFilters({ codecs, versions }) {
+  const cSel = $("codec-filter"), vSel = $("version-filter");
+  const prevC = cSel.value, prevV = vSel.value;
+  cSel.innerHTML = '<option value="">(all codecs)</option>' +
+    codecs.map((c) => `<option value="${c}">${c}</option>`).join("");
+  vSel.innerHTML = '<option value="">(all versions)</option>' +
+    versions.map((v) => `<option value="${v}">${shortVersion(v)}</option>`).join("");
+  // Restore prior selection if still available.
+  if (codecs.includes(prevC)) cSel.value = prevC;
+  if (versions.includes(prevV)) vSel.value = prevV;
+}
+
+function renderLookup({ groups }) {
+  const tbody = document.querySelector("#lookup-table tbody");
+  tbody.innerHTML = "";
+  if (groups.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="small">no rows in tolerance</td></tr>`;
+    $("lookup-progress").textContent = "0 groups";
+    return;
+  }
+  for (const g of groups) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${g.codec}</td><td>${shortVersion(g.version)}</td>
+      <td class="num">${g.n}</td>
+      <td class="num">${g.y_median != null ? g.y_median.toFixed(3) : "—"}</td>
+      <td class="num">${g.x_median != null ? g.x_median.toFixed(3) : "—"}</td>
+      <td class="num">${g.bytes_median != null ? g.bytes_median.toFixed(0) : "—"}</td>`;
+    tbody.appendChild(tr);
+  }
+  $("lookup-progress").textContent = `${groups.length} (codec,version) groups`;
+}
+
+function shortVersion(json) {
+  // knob_tuple_json is typically "{}" or '{"effort":7}' style — show
+  // a compact form for the dropdown.
+  if (!json || json === "{}") return "(default)";
+  try {
+    const obj = JSON.parse(json);
+    return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join(" ");
+  } catch {
+    return json.length > 40 ? json.slice(0, 37) + "…" : json;
+  }
+}
+
+function renderResult(data) {
+  // data: { rows, step5, bands, boxes }
+  setProgress(`rendered ${data.rows?.length ?? 0} rows`, "ok");
+  const xLabel = $("x-axis").options[$("x-axis").selectedIndex].text;
+  const yLabel = $("y-axis").options[$("y-axis").selectedIndex].text;
+
+  if (data.rows?.length) {
+    const trace = {
+      x: data.rows.map((r) => r.x),
+      y: data.rows.map((r) => r.y),
+      mode: "markers", type: "scattergl",
+      marker: { size: 3, opacity: 0.35 },
+      name: "rows",
+    };
+    const step = data.step5?.length ? [{
+      x: data.step5.map((r) => r.x),
+      y: data.step5.map((r) => r.median_y),
+      mode: "lines+markers", type: "scatter",
+      line: { color: "#b1130c", width: 2 },
+      name: "step-5 median",
+    }] : [];
+    Plotly.newPlot("scatter", [trace, ...step], {
+      margin: { t: 30, r: 30, b: 50, l: 60 },
+      xaxis: { title: xLabel },
+      yaxis: { title: yLabel },
+      hovermode: "closest",
+    }, { responsive: true });
+  }
+
+  // Candlestick / box plot: per-bin (p5, p25, p50, p75, p95) of Y.
+  if (data.boxes?.length) {
+    const traces = data.boxes.map((b) => ({
+      type: "box",
+      x: Array(5).fill(b.x_mid),
+      // Plotly box-plot accepts q1/median/q3/lowerfence/upperfence directly.
+      lowerfence: [b.p5],
+      q1: [b.p25],
+      median: [b.p50],
+      q3: [b.p75],
+      upperfence: [b.p95],
+      name: `${b.x_lo}–${b.x_hi} (n=${b.n})`,
+      showlegend: false,
+      marker: { color: "#4a6fa5" },
+      width: 4,
+    }));
+    Plotly.newPlot("candlestick", traces, {
+      margin: { t: 30, r: 30, b: 50, l: 60 },
+      xaxis: { title: xLabel },
+      yaxis: { title: yLabel },
+    }, { responsive: true });
+  }
+
+  const tbody = document.querySelector("#band-table tbody");
+  tbody.innerHTML = "";
+  for (const b of (data.bands ?? [])) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${b.label}</td><td>${b.range}</td>
+      <td class="num">${b.n}</td>
+      <td class="num">${Number.isFinite(b.srocc) ? b.srocc.toFixed(4) : "—"}</td>
+      <td class="num">${Number.isFinite(b.krocc) ? b.krocc.toFixed(4) : "—"}</td>
+      <td class="num">${Number.isFinite(b.plcc)  ? b.plcc .toFixed(4) : "—"}</td>
+      <td class="num">${Number.isFinite(b.rmse)  ? b.rmse .toFixed(3) : "—"}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function bindRun() {
+  $("run").addEventListener("click", () => {
+    const corpora = selectedCorpora();
+    if (corpora.length === 0) { setProgress("pick at least one corpus", "busy"); return; }
+    setProgress("querying…", "busy");
+    worker.postMessage({
+      type: "query",
+      corpora,
+      x_metric: $("x-axis").value,
+      y_metric: $("y-axis").value,
+      codec_filter: $("codec-filter").value || null,
+      version_filter: $("version-filter").value || null,
+    });
+  });
+  $("lookup-run").addEventListener("click", () => {
+    const corpora = selectedCorpora();
+    const t = Number($("lookup-target").value);
+    const tol = Number($("lookup-tol").value);
+    if (corpora.length === 0) { $("lookup-progress").textContent = "pick a corpus first"; return; }
+    if (!Number.isFinite(t))    { $("lookup-progress").textContent = "target required"; return; }
+    if (!Number.isFinite(tol) || tol <= 0) { $("lookup-progress").textContent = "tolerance must be > 0"; return; }
+    $("lookup-progress").textContent = `looking up Y=${t} ±${tol}…`;
+    worker.postMessage({
+      type: "lookup",
+      corpora,
+      x_metric: $("x-axis").value,
+      y_metric: $("y-axis").value,
+      target_y: t,
+      tolerance: tol,
+    });
+  });
+  // When the corpus selection changes, ask the worker for the new
+  // {codecs, versions} list so the filter dropdowns reflect current corpora.
+  document.querySelector("#corpus-list").addEventListener("change", () => {
+    const corpora = selectedCorpora();
+    if (corpora.length === 0) {
+      populateFilters({ codecs: [], versions: [] });
+      return;
+    }
+    worker.postMessage({ type: "list_codecs", corpora });
+  });
+}
+
+async function main() {
+  // Try to fetch the live manifest; merge with the stub. The R2
+  // manifest is authoritative for `parquets` (live row counts +
+  // bytes), but the stub carries the renderable `corpora` and
+  // `metrics` arrays the UI iterates over — never let the R2
+  // fetch null those out.
+  let manifest = STUB_MANIFEST;
+  try {
+    const r = await fetch(`${R2_BASE}/parquets/_manifest.json`);
+    if (r.ok) {
+      const live = await r.json();
+      manifest = {
+        ...STUB_MANIFEST,
+        ...live,
+        // Preserve renderable arrays from the stub when the live
+        // manifest doesn't supply them.
+        corpora: live.corpora ?? STUB_MANIFEST.corpora,
+        metrics: live.metrics ?? STUB_MANIFEST.metrics,
+      };
+    }
+  } catch (_) { /* offline / pre-upload — use stub */ }
+
+  renderCorpusList(manifest);
+  renderAxisDropdowns(manifest);
+  bindRun();
+  initWorker();
+}
+
+main();

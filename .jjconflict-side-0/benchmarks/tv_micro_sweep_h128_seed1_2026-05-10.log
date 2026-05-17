@@ -1,0 +1,12 @@
+=== TV=33 ===
+| CID22 | 4292 | 0.8676 | 0.8784 | 0.8895 | 0.7412 |
+Reversed pairs: 95,200 (5.63%)
+✗ Non-mono rate 5.63% ≥ target 4.86% — smoothness goal NOT MET
+=== TV=35 ===
+| CID22 | 4292 | 0.8676 | 0.8782 | 0.8895 | 0.7412 |
+Reversed pairs: 98,885 (5.85%)
+✗ Non-mono rate 5.85% ≥ target 4.86% — smoothness goal NOT MET
+=== TV=40 ===
+| CID22 | 4292 | 0.8676 | 0.8846 | 0.8895 | 0.7412 |
+Reversed pairs: 91,471 (5.41%)
+✗ Non-mono rate 5.41% ≥ target 4.86% — smoothness goal NOT MET

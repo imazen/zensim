@@ -1,0 +1,18 @@
+{
+  "label": "V0_19_seed7",
+  "notes": "Same recipe as V0_16 (h=128, flat TV=20) but seed=7. Cycle-5 4-seed sweep. CID22=0.8848 (-0.0047 vs ssim2). AIC-3=0.7986 (+0.0021 vs ssim2). Non-mono=2.84% (highest of the 4 seeds). NOT shipped. SURPRISE: best per-band B0 (0.4521) and B1 (0.4757) of ANY bake — but aggregate CID22 below V0_16. Within-band wins don't translate to aggregate.",
+  "non_mono_q_step_pct": 2.84,
+  "aggregate": {
+    "CID22": {"n": 4292, "v02": 0.8676, "v04": 0.8848, "ssim2": 0.8895, "butter": 0.7412},
+    "AIC-3 CTC": {"n": 600, "v02": 0.7962, "v04": 0.7986, "ssim2": 0.7965, "butter": 0.7095}
+  },
+  "per_band": {
+    "CID22": [
+      {"band": "B0 below medium (<50)", "n": 324, "v02": 0.4072, "v04": 0.4521, "ci_lo": 0.36, "ci_hi": 0.54, "ssim2": 0.4418, "butter": 0.2041, "mae": 58.38},
+      {"band": "B1 medium [50,65)", "n": 1010, "v02": 0.4119, "v04": 0.4757, "ci_lo": 0.43, "ci_hi": 0.53, "ssim2": 0.4694, "butter": 0.2803, "mae": 46.37},
+      {"band": "B2 high [65,90)", "n": 2915, "v02": 0.7359, "v04": 0.7586, "ci_lo": 0.74, "ci_hi": 0.77, "ssim2": 0.7722, "butter": 0.5891, "mae": 29.55},
+      {"band": "B3 visually-lossless (≥90)", "n": 43, "v02": 0.0035, "v04": 0.2021, "ci_lo": 0.02, "ci_hi": 0.51, "ssim2": 0.1121, "butter": 0.1564, "mae": 19.85},
+      {"band": "Near-PJND [58,68]", "n": 787, "v02": 0.3551, "v04": 0.3841, "ci_lo": 0.33, "ci_hi": 0.44, "ssim2": 0.3908, "butter": 0.2491, "mae": 42.33}
+    ]
+  }
+}

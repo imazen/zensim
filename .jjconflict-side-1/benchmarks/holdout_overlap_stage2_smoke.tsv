@@ -1,0 +1,5 @@
+training_source	nearest_cid22_ref	best_window_hamming	best_window_x	best_window_y	best_window_size
+/mnt/v/input/zensim/sources/00b13be94a4867dd_1022x818.png	adriankierman-report-page.png	10	204	255	204
+/mnt/v/input/zensim/sources/00b13be94a4867dd_1024sq.png	2887497.png	12	896	544	128
+/mnt/v/input/zensim/sources/00b13be94a4867dd_512sq.png	2670327.png	14	224	128	128
+/mnt/v/input/zensim/sources/00b13be94a4867dd_513x769.png	2670327.png	14	224	256	128

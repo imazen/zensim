@@ -1,0 +1,16 @@
+# zenbench results (complete)
+# git: baca221a8b34db9c3e22700b0bf3914320358e91
+# 2026-05-17T06:19:03Z
+#
+# Re-read this file instead of re-running the benchmark.
+# Formats:  cargo bench -- --format=llm|csv|md|json
+# Env var:  ZENBENCH_FORMAT=llm cargo bench
+# Disable:  ZENBENCH_NO_SAVE=1 cargo bench
+#
+# Fields: group | benchmark | vs_base comparison | min mean median mad | throughput | n cv rounds calls
+#
+group=adam_step_full_47873_params benchmark=scalar  |  vs_base=baseline  |  min=57.65µs mean=59.97µs median=58.80µs mad=1.26µs  |  throughput=798.32 Mparams/s  |  n=30 cv=7.1% rounds=30 calls=16 mean_ci=[58.80µs 61.78µs] cold=58.38µs
+group=adam_step_full_47873_params benchmark=simd  |  vs_base_pct=-51.43 ci=[-52.88% -49.97%] significant=true effect=-17.50 p=0.0000  |  min=27.17µs mean=29.04µs median=28.12µs mad=1.33µs  |  throughput=1.65 Gparams/s  |  n=30 cv=7.6% rounds=30 calls=16 mean_ci=[28.34µs 29.89µs] cold=27.76µs
+group=adam_w1_only_47616_params benchmark=scalar  |  vs_base=baseline  |  min=57.01µs mean=59.52µs median=58.99µs mad=1.01µs  |  throughput=799.98 Mparams/s  |  n=30 cv=2.9% rounds=30 calls=33 mean_ci=[58.95µs 60.16µs] cold=58.13µs
+group=adam_w1_only_47616_params benchmark=simd  |  vs_base_pct=-52.88 ci=[-53.76% -51.98%] significant=true effect=-19.75 p=0.0000  |  min=26.49µs mean=28.32µs median=27.59µs mad=1.01µs  |  throughput=1.68 Gparams/s  |  n=30 cv=7.1% rounds=30 calls=33 mean_ci=[27.66µs 29.07µs] cold=27.54µs
+group=adam_w1_only_47616_params benchmark=simd_rsqrt_lose  |  vs_base_pct=-47.83 ci=[-48.87% -46.77%] significant=true effect=-15.71 p=0.0000  |  min=29.29µs mean=31.05µs median=30.26µs mad=1.13µs  |  throughput=1.53 Gparams/s  |  n=30 cv=6.1% rounds=30 calls=33 mean_ci=[30.44µs 31.78µs] cold=29.36µs

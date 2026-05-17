@@ -1,0 +1,174 @@
+{
+  "label": "V0_5_leaked",
+  "eval_log_path": "/tmp/zensim_loop/v0_5_shipped_full_eval.log",
+  "bake": {
+    "path": "/home/lilith/work/zen/zensim/zensim/weights/archive/v0_5_2026-05-11.bin",
+    "md5": "0133d1653ca58ac6bd1669b6c421e5bd",
+    "size_bytes": 119812
+  },
+  "train_csv": null,
+  "notes": "Training leak 11.77% (22 of 49 CID22 holdout refs); archived",
+  "aggregate": {
+    "KADIK10k": {
+      "n": 10125,
+      "v02": 0.8192,
+      "v04": 0.8432,
+      "ssim2": 0.8133,
+      "butter": 0.6062
+    },
+    "TID2013": {
+      "n": 3000,
+      "v02": 0.8427,
+      "v04": 0.8401,
+      "ssim2": 0.846,
+      "butter": 0.6696
+    },
+    "CID22": {
+      "n": 4292,
+      "v02": 0.8676,
+      "v04": 0.8893,
+      "ssim2": 0.8895,
+      "butter": 0.7412
+    }
+  },
+  "per_band": {
+    "KADIK10k": [
+      {
+        "band": "B0 below medium (<3.7)",
+        "n": 6620,
+        "v02": 0.6633,
+        "v04": 0.6636,
+        "ci_lo": 0.65,
+        "ci_hi": 0.68,
+        "ssim2": 0.6368,
+        "butter": 0.3935,
+        "mae": 48.85
+      },
+      {
+        "band": "B1 medium [3.7,4.3)",
+        "n": 1671,
+        "v02": 0.2385,
+        "v04": 0.3355,
+        "ci_lo": 0.29,
+        "ci_hi": 0.39,
+        "ssim2": 0.2593,
+        "butter": 0.1399,
+        "mae": 24.58
+      },
+      {
+        "band": "B2 high [4.3,4.5)",
+        "n": 787,
+        "v02": 0.2025,
+        "v04": 0.2135,
+        "ci_lo": 0.15,
+        "ci_hi": 0.29,
+        "ssim2": 0.2115,
+        "butter": 0.1445,
+        "mae": 34.27
+      },
+      {
+        "band": "B3 visually-lossless (\u22654.5)",
+        "n": 1047,
+        "v02": 0.2326,
+        "v04": 0.242,
+        "ci_lo": 0.19,
+        "ci_hi": 0.3,
+        "ssim2": 0.2396,
+        "butter": 0.1979,
+        "mae": 44.73
+      }
+    ],
+    "TID2013": [
+      {
+        "band": "B0 below medium (<4.5)",
+        "n": 1418,
+        "v02": 0.7762,
+        "v04": 0.735,
+        "ci_lo": 0.71,
+        "ci_hi": 0.76,
+        "ssim2": 0.7351,
+        "butter": 0.4438,
+        "mae": 41.77
+      },
+      {
+        "band": "B1 medium [4.5,5.5)",
+        "n": 797,
+        "v02": 0.4195,
+        "v04": 0.3588,
+        "ci_lo": 0.3,
+        "ci_hi": 0.42,
+        "ssim2": 0.432,
+        "butter": 0.3054,
+        "mae": 36.98
+      },
+      {
+        "band": "B2 high [5.5,6.0)",
+        "n": 556,
+        "v02": 0.1655,
+        "v04": 0.1856,
+        "ci_lo": 0.12,
+        "ci_hi": 0.26,
+        "ssim2": 0.1429,
+        "butter": 0.0676,
+        "mae": 50.92
+      },
+      {
+        "band": "B3 visually-lossless (\u22656.0)",
+        "n": 229,
+        "v02": 0.3091,
+        "v04": 0.2683,
+        "ci_lo": 0.13,
+        "ci_hi": 0.4,
+        "ssim2": 0.2738,
+        "butter": 0.2813,
+        "mae": 50.24
+      }
+    ],
+    "CID22": [
+      {
+        "band": "B0 below medium (<50)",
+        "n": 324,
+        "v02": 0.4072,
+        "v04": 0.4396,
+        "ci_lo": 0.36,
+        "ci_hi": 0.53,
+        "ssim2": 0.4418,
+        "butter": 0.2041,
+        "mae": 60.45
+      },
+      {
+        "band": "B1 medium [50,65)",
+        "n": 1010,
+        "v02": 0.4119,
+        "v04": 0.4488,
+        "ci_lo": 0.41,
+        "ci_hi": 0.5,
+        "ssim2": 0.4694,
+        "butter": 0.2803,
+        "mae": 59.32
+      },
+      {
+        "band": "B2 high [65,90)",
+        "n": 2915,
+        "v02": 0.7359,
+        "v04": 0.7746,
+        "ci_lo": 0.76,
+        "ci_hi": 0.79,
+        "ssim2": 0.7722,
+        "butter": 0.5891,
+        "mae": 56.65
+      },
+      {
+        "band": "B3 visually-lossless (\u226590)",
+        "n": 43,
+        "v02": 0.0035,
+        "v04": 0.0642,
+        "ci_lo": 0.01,
+        "ci_hi": 0.38,
+        "ssim2": 0.1121,
+        "butter": 0.1564,
+        "mae": 55.68
+      }
+    ]
+  }
+}

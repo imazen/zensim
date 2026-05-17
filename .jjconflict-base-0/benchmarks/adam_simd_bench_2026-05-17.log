@@ -1,0 +1,50 @@
+   Compiling zensim-validate v0.1.0 (/home/lilith/work/zen/zensim/zensim-validate)
+warning: function `synth_state` is never used
+   --> zensim-validate/benches/../src/adam_simd.rs:364:8
+    |
+364 |     fn synth_state(n: usize, seed: u64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    |        ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `make_args` is never used
+   --> zensim-validate/benches/../src/adam_simd.rs:390:8
+    |
+390 |     fn make_args<'a>(
+    |        ^^^^^^^^^
+
+warning: `zensim-validate` (bench "adam_bench") generated 2 warnings
+    Finished `bench` profile [optimized] target(s) in 17.65s
+     Running benches/adam_bench.rs (/home/lilith/work/zen/zensim/target/release/deps/adam_bench-8d48eb86a992edb7)
+[zenbench] calibration: int=0.19ns/iter mem_bw=125.8GiB/s mem_lat=9.1ns
+[zenbench] timer resolution: 9ns, loop overhead: 0.17ns/iter, TSC: 4.899 ticks/ns (invariant)
+[zenbench] results → /tmp/zenbench/zenbench-1778998034-55a07.txt
+
+═══════════════════════════════════════════════════════════════
+  zenbench  1778998034-55a07
+  git: baca221a8b34db9c3e22700b0bf3914320358e91
+═══════════════════════════════════════════════════════════════
+
+  adam_step_full_47873_params  30 rounds × 17 calls
+              mean ±mad µs  95% CI vs base     params/s
+  ├─ scalar   58.5 ±0.7µs  [57.8–59.4]µs       819M
+  ╰─ simd     32.4 ±0.8µs  [-45.8%–-44.4%]    1.48G
+
+  simd    ███████████████████████████████████████████████████████ 1.48 Gparams/s
+  scalar  ██████████████████████████████ 819 Mparams/s
+
+  adam_w1_only_47616_params  30 rounds × 17 calls
+              mean ±mad µs  95% CI vs base     params/s
+  ├─ scalar   59.0 ±1.0µs  [58.0–60.1]µs       808M
+  ╰─ simd     27.9 ±0.7µs  [-53.0%–-50.8%]    1.71G
+
+  simd    ███████████████████████████████████████████████████████ 1.71 Gparams/s
+  scalar  ██████████████████████████ 808 Mparams/s
+
+  total: 5.5s  (55 noisy rounds)
+═══════════════════════════════════════════════════════════════
+  filter: cargo bench -- --group=NAME  format: --format=llm|csv|md|json
+group=adam_step_full_47873_params benchmark=scalar  |  vs_base=baseline  |  min=56.18µs mean=58.48µs median=57.94µs mad=697.1ns  |  throughput=818.59 Mparams/s  |  n=30 cv=3.8% rounds=30 calls=17 mean_ci=[57.81µs 59.36µs] cold=57.89µs
+group=adam_step_full_47873_params benchmark=simd  |  vs_base_pct=-45.10 ci=[-45.78% -44.42%] significant=true effect=-22.11 p=0.0000  |  min=30.81µs mean=32.38µs median=31.74µs mad=796.3ns  |  throughput=1.48 Gparams/s  |  n=30 cv=7.6% rounds=30 calls=17 mean_ci=[31.66µs 33.39µs] cold=27.93µs
+group=adam_w1_only_47616_params benchmark=scalar  |  vs_base=baseline  |  min=56.43µs mean=58.96µs median=57.79µs mad=996.5ns  |  throughput=807.63 Mparams/s  |  n=30 cv=4.9% rounds=30 calls=17 mean_ci=[58.03µs 60.07µs] cold=56.84µs
+group=adam_w1_only_47616_params benchmark=simd  |  vs_base_pct=-51.89 ci=[-53.02% -50.79%] significant=true effect=-24.41 p=0.0000  |  min=26.43µs mean=27.91µs median=27.47µs mad=745.0ns  |  throughput=1.71 Gparams/s  |  n=30 cv=4.7% rounds=30 calls=17 mean_ci=[27.50µs 28.41µs] cold=26.44µs

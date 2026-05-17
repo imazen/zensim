@@ -1,0 +1,1330 @@
+{
+  "s3_base": "https://s3-us-west-2.amazonaws.com/imageflow-resources/visual_test_checksums",
+  "source_repo": "https://github.com/imazen/imageflow",
+  "checksums_path": "imageflow_core/tests/visuals/checksums.json",
+  "note": "Bitmap checksums (containing _) are stored as {checksum}.png. Encoded checksums use their original extension. Pairs are [test_name, old_checksum, new_checksum].",
+  "commits": [
+    {
+      "commit": "77fdb819",
+      "message": "tests: lower file sizes, fix concurrency issues with shared checksums file, and cleanup a bit",
+      "change_type": "resize_and_hash_format",
+      "description": "Widened hash hex format from 16 to 17 digits; added 70x70 constraint to orientation tests (smaller output via downscaling); changed IDCT test source image.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "FillRect",
+          "00000000926176F5_00000000ADFEB2D0",
+          "0D598E323926176F5_0E6130049ADFEB2D0"
+        ],
+        [
+          "FillRectAndCrop",
+          "00000000339E65FD_00000000255DDCBF",
+          "023BA4FE3339E65FD_0116F4507255DDCBF"
+        ],
+        [
+          "FillRectEECCFF",
+          "00000000B145CEEF_0000000040D894D1",
+          "0E147E001B145CEEF_0B0FCB3BE40D894D1"
+        ],
+        [
+          "FillRectEECCFFExpand2233AAFF",
+          "000000003EB738BD_0000000040D894D1",
+          "0937142823EB738BD_0B0FCB3BE40D894D1"
+        ],
+        [
+          "MarsRGB_ICC_Scaled400300",
+          "0000000099707A45_00000000ADFEB2D0",
+          "0DD59FE3499707A45_0E6130049ADFEB2D0"
+        ],
+        [
+          "MarsRGB_ICCv4_Scaled400300",
+          "000000007CEFD345_00000000ADFEB2D0",
+          "058321AAA7CEFD345_0E6130049ADFEB2D0"
+        ],
+        [
+          "RingsDownscaling",
+          "000000006D692DB7_0000000040D894D1",
+          "0EE9297726D692DB7_0B0FCB3BE40D894D1"
+        ],
+        [
+          "ScaleIDCTFastvsSlow",
+          "000000001CF68BA1_00000000ADFEB2D0",
+          "0B09A350E1CF68BA1_0E6130049ADFEB2D0"
+        ],
+        [
+          "ScaleIDCT_approx_gamma",
+          "00000000D7EE2A4B_000000005568096D",
+          "0C50CCE2B23D62296_0BA63E6C61FFC4738"
+        ],
+        [
+          "ScaleTheHouse",
+          "00000000246993A8_00000000ADFEB2D0",
+          "09D924EBD246993A8_0E6130049ADFEB2D0"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_1.jpg",
+          "000000007D9D8C7C_000000001FFC4738",
+          "083E1FCFF3851D1B6_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_2.jpg",
+          "00000000861A30EB_000000001FFC4738",
+          "0ADC9DA2A19C25C68_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_3.jpg",
+          "000000003A4B5EAA_000000001FFC4738",
+          "0B687558AEAE73E51_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_4.jpg",
+          "000000008D2FBCDC_000000001FFC4738",
+          "0232585D9FDF7B29A_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "000000003C954E74_000000001FFC4738",
+          "0409D893487749351_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "00000000D81160B1_000000001FFC4738",
+          "0179CE9A65DFA655A_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "000000000A791B44_000000001FFC4738",
+          "01D3B7D7C2E2DD097_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "000000002335F17A_000000001FFC4738",
+          "072A5D5F55F2F766C_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_1.jpg",
+          "000000009E302B5A_00000000635040B8",
+          "0210F8E073780D06F_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_2.jpg",
+          "00000000FDB31144_00000000635040B8",
+          "0075357F03CA7905C_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_3.jpg",
+          "00000000A82D4B9F_00000000635040B8",
+          "0CD894466B9A19F74_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_4.jpg",
+          "0000000015463E64_00000000635040B8",
+          "0E7AB4F5995F22FC0_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "00000000BC7AA54D_00000000635040B8",
+          "09FB9BD4A2DBD6675_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "0000000066DE0680_00000000635040B8",
+          "0F4E9AE316D1D4557_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "0000000093934B7D_00000000635040B8",
+          "0282E7DBBBC5F1C04_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "0000000095C53ACC_00000000635040B8",
+          "0B451105AF2018CC0_0C7861091F69310F8"
+        ]
+      ]
+    },
+    {
+      "commit": "29b8603c",
+      "message": "fix(color): fix color parsing (rgba/argb issue; extract to helpers",
+      "change_type": "color_parsing",
+      "description": "Fixed 4/8-char hex color parsing from ARGB to RGBA byte order. Background fill colors parsed differently, changing composited output.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "FillRectAndCrop",
+          "023BA4FE3339E65FD_0116F4507255DDCBF",
+          "04B6B0FAB662799FD_0116F4507255DDCBF"
+        ],
+        [
+          "FillRectEECCFF",
+          "0E147E001B145CEEF_0B0FCB3BE40D894D1",
+          "08A6375B9C732AEAF_0B0FCB3BE40D894D1"
+        ],
+        [
+          "FillRectEECCFFExpand2233AAFF",
+          "0937142823EB738BD_0B0FCB3BE40D894D1",
+          "05183988224D26B2E_0B0FCB3BE40D894D1"
+        ]
+      ]
+    },
+    {
+      "commit": "9d6b40c6",
+      "message": "Use new transpose system instead of 1d,1d scaling; update checksums",
+      "change_type": "resampling",
+      "description": "Replaced 1D-resample-with-transpose-on-write with dedicated transpose pass. Pipeline ordering change affects orientation-corrected outputs for EXIF flags 5-8.",
+      "expected_delta": "moderate",
+      "pairs": [
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "0409D893487749351_0737E89DC5F717498",
+          "0C079E43D0925816A_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "0179CE9A65DFA655A_0737E89DC5F717498",
+          "0B24610914DDEB7F2_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "01D3B7D7C2E2DD097_0737E89DC5F717498",
+          "0982C092126876C30_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "072A5D5F55F2F766C_0737E89DC5F717498",
+          "00D8B760E16DD53FD_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "09FB9BD4A2DBD6675_0C7861091F69310F8",
+          "0ABEDF71EE6F18C12_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "0F4E9AE316D1D4557_0C7861091F69310F8",
+          "004C62B97EC8D30DA_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "0282E7DBBBC5F1C04_0C7861091F69310F8",
+          "08AD26A75427087CF_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "0B451105AF2018CC0_0C7861091F69310F8",
+          "0EB83280FD9A0BA1E_0C7861091F69310F8"
+        ]
+      ]
+    },
+    {
+      "commit": "3db8caa9",
+      "message": "Improve image hashing; fix stride involvement; change all checksums",
+      "change_type": "hashing_only",
+      "description": "Switched from djb2 hash of full stride*height to XxHash of pixel data only (excluding row padding). Bitmaps identical, only hash changed.",
+      "expected_delta": "none",
+      "pairs": [
+        [
+          "DetectWhitespace",
+          "007BE112F5DDA4D01_0B144C3EB1ECD0F26",
+          "0549704430DA253E1_0B144C3EB1ECD0F26"
+        ],
+        [
+          "FillRect",
+          "0D598E323926176F5_0E6130049ADFEB2D0",
+          "0E528C65475538702_0E6130049ADFEB2D0"
+        ],
+        [
+          "FillRectAndCrop",
+          "04B6B0FAB662799FD_0116F4507255DDCBF",
+          "023A1A32B1D12004D_0116F4507255DDCBF"
+        ],
+        [
+          "FillRectEECCFF",
+          "08A6375B9C732AEAF_0B0FCB3BE40D894D1",
+          "0D2D3A96EC962A552_0B0FCB3BE40D894D1"
+        ],
+        [
+          "FillRectEECCFFExpand2233AAFF",
+          "05183988224D26B2E_0B0FCB3BE40D894D1",
+          "0BEE361EED2335E51_0B0FCB3BE40D894D1"
+        ],
+        [
+          "MarsRGB_ICC_Scaled400300",
+          "0DD59FE3499707A45_0E6130049ADFEB2D0",
+          "051EA508DFA6C0FDA_0E6130049ADFEB2D0"
+        ],
+        [
+          "MarsRGB_ICCv4_Scaled400300",
+          "058321AAA7CEFD345_0E6130049ADFEB2D0",
+          "0CEA7717E76E828C0_0E6130049ADFEB2D0"
+        ],
+        [
+          "RingsDownscaling",
+          "0EE9297726D692DB7_0B0FCB3BE40D894D1",
+          "041EAE7364EE7D48F_0B0FCB3BE40D894D1"
+        ],
+        [
+          "ScaleIDCTFastvsSlow",
+          "0B09A350E1CF68BA1_0E6130049ADFEB2D0",
+          "04549C40B272C69E8_0E6130049ADFEB2D0"
+        ],
+        [
+          "ScaleIDCT_approx_gamma",
+          "0C50CCE2B23D62296_0BA63E6C61FFC4738",
+          "01DD6D368FDF435EF_0BA63E6C61FFC4738"
+        ],
+        [
+          "ScaleTheHouse",
+          "09D924EBD246993A8_0E6130049ADFEB2D0",
+          "0568E6941605D8031_0E6130049ADFEB2D0"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_1.jpg",
+          "083E1FCFF3851D1B6_0737E89DC5F717498",
+          "0D893C1AB988C1626_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_2.jpg",
+          "0ADC9DA2A19C25C68_0737E89DC5F717498",
+          "0F26C3C320ED5A074_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_3.jpg",
+          "0B687558AEAE73E51_0737E89DC5F717498",
+          "0BE692134537D68C9_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_4.jpg",
+          "0232585D9FDF7B29A_0737E89DC5F717498",
+          "0983D7771C9D027F3_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "0C079E43D0925816A_0737E89DC5F717498",
+          "0C80D19F51A28A93B_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "0B24610914DDEB7F2_0737E89DC5F717498",
+          "022F25890464CEF5E_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "0982C092126876C30_0737E89DC5F717498",
+          "052524D529AA08236_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "00D8B760E16DD53FD_0737E89DC5F717498",
+          "03797221195AC1AF6_0737E89DC5F717498"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_1.jpg",
+          "0210F8E073780D06F_0C7861091F69310F8",
+          "0130B45451220FE91_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_2.jpg",
+          "0075357F03CA7905C_0C7861091F69310F8",
+          "0821FC43B168957D2_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_3.jpg",
+          "0CD894466B9A19F74_0C7861091F69310F8",
+          "0F4B6AFFAAF67A89E_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_4.jpg",
+          "0E7AB4F5995F22FC0_0C7861091F69310F8",
+          "0DF5904E42A836E8E_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "0ABEDF71EE6F18C12_0C7861091F69310F8",
+          "0D76AD5A6519860A1_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "004C62B97EC8D30DA_0C7861091F69310F8",
+          "00D24FDAA62F061A5_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "08AD26A75427087CF_0C7861091F69310F8",
+          "0002098ACFD00B380_0C7861091F69310F8"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "0EB83280FD9A0BA1E_0C7861091F69310F8",
+          "0AC9F547ADDDEF923_0C7861091F69310F8"
+        ],
+        [
+          "WhiteBalanceNight",
+          "05A40A24C0C427A54_0219F93FDDB57B45C",
+          "0D84206BD2DD308DA_0219F93FDDB57B45C"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "0DA2D9B594A27AC3B_0E6130049ADFEB2D0",
+          "0E9E7863A738C1054_0E6130049ADFEB2D0"
+        ]
+      ]
+    },
+    {
+      "commit": "11050483",
+      "message": "Update checksums (bitmaps are still identical - hashing changed)",
+      "change_type": "hashing_only",
+      "description": "Info-hash component changed (metadata hash). Commit message: bitmaps are still identical.",
+      "expected_delta": "none",
+      "pairs": [
+        [
+          "DetectWhitespace",
+          "0549704430DA253E1_0B144C3EB1ECD0F26",
+          "0549704430DA253E1_0BF71EF9142619372"
+        ],
+        [
+          "FillRect",
+          "0E528C65475538702_0E6130049ADFEB2D0",
+          "0E528C65475538702_05C9232CFE2672D1C"
+        ],
+        [
+          "FillRectAndCrop",
+          "023A1A32B1D12004D_0116F4507255DDCBF",
+          "023A1A32B1D12004D_0AB5E1BFABF8ED80B"
+        ],
+        [
+          "FillRectEECCFF",
+          "0D2D3A96EC962A552_0B0FCB3BE40D894D1",
+          "0D2D3A96EC962A552_05C92341756E39E1D"
+        ],
+        [
+          "FillRectEECCFFExpand2233AAFF",
+          "0BEE361EED2335E51_0B0FCB3BE40D894D1",
+          "0BEE361EED2335E51_05C92341756E39E1D"
+        ],
+        [
+          "MarsRGB_ICC_Scaled400300",
+          "051EA508DFA6C0FDA_0E6130049ADFEB2D0",
+          "051EA508DFA6C0FDA_0EED88CCC2F4CD12F"
+        ],
+        [
+          "MarsRGB_ICCv4_Scaled400300",
+          "0CEA7717E76E828C0_0E6130049ADFEB2D0",
+          "0CEA7717E76E828C0_0EED88CCC2F4CD12F"
+        ],
+        [
+          "RingsDownscaling",
+          "041EAE7364EE7D48F_0B0FCB3BE40D894D1",
+          "01940B7927644E09D_0EED8B70233576250"
+        ],
+        [
+          "ScaleIDCTFastvsSlow",
+          "04549C40B272C69E8_0E6130049ADFEB2D0",
+          "04549C40B272C69E8_0EED88CCC2F4CD12F"
+        ],
+        [
+          "ScaleIDCT_approx_gamma",
+          "01DD6D368FDF435EF_0BA63E6C61FFC4738",
+          "01DD6D368FDF435EF_0E685FA15F0460A97"
+        ],
+        [
+          "ScaleTheHouse",
+          "0568E6941605D8031_0E6130049ADFEB2D0",
+          "0A3BD3A96AD6F1112_0EED88CCC2F4CD12F"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_1.jpg",
+          "0D893C1AB988C1626_0737E89DC5F717498",
+          "0DD4E589FF3B2583D_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_2.jpg",
+          "0F26C3C320ED5A074_0737E89DC5F717498",
+          "0002595D4CEF82803_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_3.jpg",
+          "0BE692134537D68C9_0737E89DC5F717498",
+          "0BE76E2D685843DBE_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_4.jpg",
+          "0983D7771C9D027F3_0737E89DC5F717498",
+          "0C73E7AF1E910BDB3_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "0C80D19F51A28A93B_0737E89DC5F717498",
+          "0E8F3F2910ECD8E67_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "022F25890464CEF5E_0737E89DC5F717498",
+          "0F5916524A935E579_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "052524D529AA08236_0737E89DC5F717498",
+          "0999D8F191D67E119_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "03797221195AC1AF6_0737E89DC5F717498",
+          "081E94E0FE038C1BE_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_1.jpg",
+          "0130B45451220FE91_0C7861091F69310F8",
+          "0130B45451220FE91_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_2.jpg",
+          "0821FC43B168957D2_0C7861091F69310F8",
+          "062DB2532218625B6_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_3.jpg",
+          "0F4B6AFFAAF67A89E_0C7861091F69310F8",
+          "096F72D2415C9920A_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_4.jpg",
+          "0DF5904E42A836E8E_0C7861091F69310F8",
+          "0A5BF44ADD6E8811F_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "0D76AD5A6519860A1_0C7861091F69310F8",
+          "00B12890EFB300DB5_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "00D24FDAA62F061A5_0C7861091F69310F8",
+          "00D24FDAA62F061A5_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "0002098ACFD00B380_0C7861091F69310F8",
+          "0002098ACFD00B380_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "0AC9F547ADDDEF923_0C7861091F69310F8",
+          "026BD1030254479A0_0AE4839D1D9B04C57"
+        ],
+        [
+          "WhiteBalanceNight",
+          "0D84206BD2DD308DA_0219F93FDDB57B45C",
+          "0D84206BD2DD308DA_05C9231C6124D62A8"
+        ],
+        [
+          "jpeg_crop",
+          "0AC75CD46C66EA068_0C6CF405827FDE14C",
+          "0227EE691E56BA13A_0FB5487907981932B"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "0E9E7863A738C1054_0E6130049ADFEB2D0",
+          "05820E15210C44934_05C9232CFE2672D1C"
+        ]
+      ]
+    },
+    {
+      "commit": "3787d913",
+      "message": "Cleanup the JSON API; remove what's not fully functional. Remove frame_count, current_frame_index, resample_1d, process_all_gif_frames, enable_jpeg_block_scaling, WhiteBalance low_threshold and high_threshold merged to threshold, prefer_1d_twice, crop_whitespace, &trim.threshold, &trim.percentpadding",
+      "change_type": "resampling",
+      "description": "Removed prefer_1d_twice option, forced 2D render path. Single-pass 2D resample vs two sequential 1D passes.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "ScaleTheHouse",
+          "0A3BD3A96AD6F1112_0EED88CCC2F4CD12F",
+          "047AE058719BD4B9C_0EED88CCC2F4CD12F"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "05820E15210C44934_05C9232CFE2672D1C",
+          "036AA4DCCE19C8DB7_05C9232CFE2672D1C"
+        ]
+      ]
+    },
+    {
+      "commit": "fd3399c8",
+      "message": "Fix WebPDecoder bug",
+      "change_type": "decoder_bug_fix",
+      "description": "Fixed WebPDecoder copying config via Option::unwrap() instead of storing directly. Config mutations were lost.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "webp_lossless_alpha_decode_and_scale",
+          "0FCB5CCEA5ABBFA36_0172196390B512E97",
+          "057FA4CBAC9D0E267_0172196390B512E97"
+        ],
+        [
+          "webp_lossy_alpha_decode_and_scale",
+          "0D1D23044A7DC58FF_0172196390B512E97",
+          "09F54D063249F69C8_0172196390B512E97"
+        ]
+      ]
+    },
+    {
+      "commit": "0859c3bf",
+      "message": "Fix bug in watermark layout",
+      "change_type": "compositing_bug_fix",
+      "description": "Fixed watermark constraint using host dimensions instead of watermark dimensions for scaling.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "Watermark1",
+          "06E7792859C160C4C_0DE3336C466C67DD9",
+          "008A242F2FBED3C1D_0DE3336C466C67DD9"
+        ]
+      ]
+    },
+    {
+      "commit": "079d0075",
+      "message": "Update visual test checksums to match linux laptop",
+      "change_type": "platform_diff",
+      "description": "Checksum update for different Linux machine. Platform-specific FP rounding in JPEG decode, resampling.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "RingsDownscaling",
+          "01940B7927644E09D_0EED8B70233576250",
+          "019EAD88244775C0C_05C92341756E39E1D"
+        ],
+        [
+          "ScaleTheHouse",
+          "047AE058719BD4B9C_0EED88CCC2F4CD12F",
+          "0B16D8BA1DA8542C8_0EED88CCC2F4CD12F"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_1.jpg",
+          "0DD4E589FF3B2583D_0AF9F040B874D83F7",
+          "018BC932FB29F2C53_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_2.jpg",
+          "0002595D4CEF82803_0AF9F040B874D83F7",
+          "06C1C57656959DBA7_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_3.jpg",
+          "0BE76E2D685843DBE_0AF9F040B874D83F7",
+          "0F3D491AA982C264E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_4.jpg",
+          "0C73E7AF1E910BDB3_0AF9F040B874D83F7",
+          "08A5881EF99D80FD8_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "0E8F3F2910ECD8E67_0AF9F040B874D83F7",
+          "02BFB031B1C19953B_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "0F5916524A935E579_0AF9F040B874D83F7",
+          "07D83583A0B0DE00E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "0999D8F191D67E119_0AF9F040B874D83F7",
+          "02F0D57CD8CBE311E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "081E94E0FE038C1BE_0AF9F040B874D83F7",
+          "0CE9B8941AD0C33EE_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_1.jpg",
+          "0130B45451220FE91_0AE4839D1D9B04C57",
+          "0B1B9458B228702CA_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_3.jpg",
+          "096F72D2415C9920A_0AE4839D1D9B04C57",
+          "06F2ECAFA6CA86A45_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_4.jpg",
+          "0A5BF44ADD6E8811F_0AE4839D1D9B04C57",
+          "010697250A94CE7C8_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "00B12890EFB300DB5_0AE4839D1D9B04C57",
+          "0907DA4EA24978ADD_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "00D24FDAA62F061A5_0AE4839D1D9B04C57",
+          "0D6BF8E39199C6CD8_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "0002098ACFD00B380_0AE4839D1D9B04C57",
+          "0E650925ECEC2E598_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "026BD1030254479A0_0AE4839D1D9B04C57",
+          "082E998208E7201E4_0AE4839D1D9B04C57"
+        ],
+        [
+          "encode_gradients",
+          "00D10466A8552DCF6.png",
+          "0CE86FEE99A0E0F35.png"
+        ],
+        [
+          "jpeg_crop",
+          "0227EE691E56BA13A_0FB5487907981932B",
+          "0071CBD976FC79E41_0FB5487907981932B"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "036AA4DCCE19C8DB7_05C9232CFE2672D1C",
+          "03FB3160ED6A86E15_05C9232CFE2672D1C"
+        ]
+      ]
+    },
+    {
+      "commit": "2cd06cf4",
+      "message": "benchmark on new",
+      "change_type": "rendering_rewrite",
+      "description": "Ported fill_rect and bitmap creation from C FFI to pure Rust. Also ported save_png.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "RingsDownscaling",
+          "01940B7927644E09D_0EED8B70233576250",
+          "019EAD88244775C0C_05C92341756E39E1D"
+        ],
+        [
+          "ScaleTheHouse",
+          "047AE058719BD4B9C_0EED88CCC2F4CD12F",
+          "0B16D8BA1DA8542C8_0EED88CCC2F4CD12F"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_1.jpg",
+          "0DD4E589FF3B2583D_0AF9F040B874D83F7",
+          "018BC932FB29F2C53_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_2.jpg",
+          "0002595D4CEF82803_0AF9F040B874D83F7",
+          "06C1C57656959DBA7_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_3.jpg",
+          "0BE76E2D685843DBE_0AF9F040B874D83F7",
+          "0F3D491AA982C264E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_4.jpg",
+          "0C73E7AF1E910BDB3_0AF9F040B874D83F7",
+          "08A5881EF99D80FD8_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "0E8F3F2910ECD8E67_0AF9F040B874D83F7",
+          "02BFB031B1C19953B_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "0F5916524A935E579_0AF9F040B874D83F7",
+          "07D83583A0B0DE00E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "0999D8F191D67E119_0AF9F040B874D83F7",
+          "02F0D57CD8CBE311E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "081E94E0FE038C1BE_0AF9F040B874D83F7",
+          "0CE9B8941AD0C33EE_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_1.jpg",
+          "0130B45451220FE91_0AE4839D1D9B04C57",
+          "0B1B9458B228702CA_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_3.jpg",
+          "096F72D2415C9920A_0AE4839D1D9B04C57",
+          "06F2ECAFA6CA86A45_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_4.jpg",
+          "0A5BF44ADD6E8811F_0AE4839D1D9B04C57",
+          "010697250A94CE7C8_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "00B12890EFB300DB5_0AE4839D1D9B04C57",
+          "0907DA4EA24978ADD_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "00D24FDAA62F061A5_0AE4839D1D9B04C57",
+          "0D6BF8E39199C6CD8_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "0002098ACFD00B380_0AE4839D1D9B04C57",
+          "0E650925ECEC2E598_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "026BD1030254479A0_0AE4839D1D9B04C57",
+          "082E998208E7201E4_0AE4839D1D9B04C57"
+        ],
+        [
+          "encode_gradients",
+          "00D10466A8552DCF6.png",
+          "0CE86FEE99A0E0F35.png"
+        ],
+        [
+          "jpeg_crop",
+          "0227EE691E56BA13A_0FB5487907981932B",
+          "0071CBD976FC79E41_0FB5487907981932B"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "036AA4DCCE19C8DB7_05C9232CFE2672D1C",
+          "03FB3160ED6A86E15_05C9232CFE2672D1C"
+        ]
+      ]
+    },
+    {
+      "commit": "a9b8f5dc",
+      "message": "Add matte support to LibjpegTurbo and MozJpeg encoder presets. Fixes #417",
+      "change_type": "compositing",
+      "description": "Added alpha-to-matte compositing before JPEG encoding. Transparent pixels now blended with matte in linear RGB.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "transparent_png_to_jpeg_constrained",
+          "0FBB24D3F885B8A79.jpg",
+          "0D6B7D34193494A6C.jpg"
+        ]
+      ]
+    },
+    {
+      "commit": "3542b52d",
+      "message": "Implement remaining rounded corners features and add optimized anti-aliasing",
+      "change_type": "rendering",
+      "description": "Rewrote rounded corners: row-clearing to per-pixel anti-aliased with volumetric offset and linear RGB blending.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "RoundCornersExcessiveRadius",
+          "003FAA736DCBE680A_02E471F17F7F9607D",
+          "0B3DBECF5967D7AF4_02E471F17F7F9607D"
+        ],
+        [
+          "RoundCornersLarge",
+          "0C305A9B7191B90A2_05C92341756E39E1D",
+          "0E4832C8B06698929_05C92341756E39E1D"
+        ],
+        [
+          "RoundCornersSmall",
+          "0BDD3055414AD86FE_0172196390B512E97",
+          "02DE05B755CD85DEF_0172196390B512E97"
+        ],
+        [
+          "RoundImageCornersTransparent",
+          "000A50748F5391A1E_05C9232CFE2672D1C",
+          "090A2E5CC38966EE9_05C9232CFE2672D1C"
+        ],
+        [
+          "test_round_corners_command_string",
+          "0961D137E68D8D1AB_0BF80F0AE71CD9A63",
+          "05218274046A5989B_0BF80F0AE71CD9A63"
+        ],
+        [
+          "transparent_png_to_png_round_corners",
+          "0463E25A35437EF7E.png",
+          "070F860839693FDC7.png"
+        ]
+      ]
+    },
+    {
+      "commit": "d5f439c7",
+      "message": "Fix #613, 24-bit PNG files with a zero alpha channel are now properly encoded when using lossy PNG and when no transparency-inducing operations are performed.",
+      "change_type": "alpha_handling",
+      "description": "Added normalize_alpha() before pngquant. 24-bit PNGs with zero alpha treated as transparent; now set alpha=255.",
+      "expected_delta": "large",
+      "pairs": [
+        [
+          "test_problematic_png_lossy",
+          "0E5E63543D35A149D.png",
+          "03B9493B2F3806A45.png"
+        ]
+      ]
+    },
+    {
+      "commit": "46115d2b",
+      "message": "Give macos the png it wants",
+      "change_type": "platform_diff",
+      "description": "Single checksum for Watermark1 on macOS ARM vs x86 FP rounding difference.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "Watermark1",
+          "008A242F2FBED3C1D_0DE3336C466C67DD9",
+          "0BA80ECA19E36402B_0DE3336C466C67DD9"
+        ]
+      ]
+    },
+    {
+      "commit": "7db3e38d",
+      "message": "feat: update dependencies, update visual test checksums",
+      "change_type": "dependency_update",
+      "description": "Updated png 0.17->0.18, gif 0.13->0.14, libwebp-sys to upstream. Encoder library changes, all delta<=1.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "RoundImageCornersTransparent",
+          "090A2E5CC38966EE9_05C9232CFE2672D1C",
+          "04DDB423C5B1F7B67_05C9232CFE2672D1C"
+        ],
+        [
+          "ScaleTheHouse",
+          "0B16D8BA1DA8542C8_0EED88CCC2F4CD12F",
+          "0CC28FE1824AC038A_0EED88CCC2F4CD12F"
+        ],
+        [
+          "WatermarkPixelMargins",
+          "054089B96BC0E7A70_0DE3336C466C67DD9",
+          "0497C9EB1DDD2E121_0DE3336C466C67DD9"
+        ],
+        [
+          "WatermarkSmall",
+          "09BF9877BE2CB36AC_0DE3336C466C67DD9",
+          "0557572D9A7BE702D_0DE3336C466C67DD9"
+        ],
+        [
+          "WatermarkSmallOnPnga",
+          "0D6EA2688E7F01BD5_073B7BE0C1ABF189F",
+          "00B8964A26734CD49_073B7BE0C1ABF189F"
+        ],
+        [
+          "crop_with_preshrink",
+          "04FF87FFA9A645517_09D5B46DC8E13B7B4",
+          "05FA86FAE1D5C4D84_09D5B46DC8E13B7B4"
+        ],
+        [
+          "encode_gradients",
+          "0CE86FEE99A0E0F35.png",
+          "076352CAA7352268E.png"
+        ],
+        [
+          "matte_transparent_png",
+          "03D1AA84D6ED36458.png",
+          "03E567299F9FC711C.png"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "03FB3160ED6A86E15_05C9232CFE2672D1C",
+          "0FF1D9DF83E36E6AF_05C9232CFE2672D1C"
+        ],
+        [
+          "test_branching_crop_whitespace_gradient_output_1",
+          "01864661ED8AB31EF.png",
+          "006EB6624F7756938.png"
+        ],
+        [
+          "test_problematic_png_lossy",
+          "03B9493B2F3806A45.png",
+          "0975AE793470B6949.png"
+        ],
+        [
+          "transparent_png_to_jpeg",
+          "0DC709F50C5148224.jpg",
+          "0C50382C6AABA03D1.jpg"
+        ],
+        [
+          "transparent_png_to_jpeg_constrained",
+          "0D6B7D34193494A6C.jpg",
+          "0833CA19C036F4212.jpg"
+        ],
+        [
+          "transparent_png_to_png_round_corners",
+          "070F860839693FDC7.png",
+          "09161C21C9425956D.png"
+        ],
+        [
+          "transparent_webp_to_webp",
+          "0026D28C52CC20F72.webp",
+          "000210ACC7DE6DB35.webp"
+        ],
+        [
+          "watermark_jpeg_over_pnga",
+          "04C0143A72CB4EBAA_073B7BE0C1ABF189F",
+          "00DD64A2220F28AD3_073B7BE0C1ABF189F"
+        ]
+      ]
+    },
+    {
+      "commit": "d6af6e13",
+      "message": "perf: add linear-to-sRGB LUT for faster, more accurate conversion",
+      "change_type": "lut_precision",
+      "description": "Replaced fastpow linear-to-sRGB with 16384-entry exact LUT. 0.81% off-by-one rate down to 0.4%. All deltas exactly +/-1 LSB.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "FillRectEECCFFExpand2233AAFF",
+          "0BEE361EED2335E51_05C92341756E39E1D",
+          "05CF8D3116589B4C4_05C92341756E39E1D"
+        ],
+        [
+          "RingsDownscaling",
+          "019EAD88244775C0C_05C92341756E39E1D",
+          "029A257F5BD794397_05C92341756E39E1D"
+        ],
+        [
+          "RoundCornersCustomPercentSemiTransparent",
+          "0110973B94D95FAAF_0AB5E1C2525624E58",
+          "0E2B10B2531C86B06_0AB5E1C2525624E58"
+        ],
+        [
+          "RoundImageCornersTransparent",
+          "04DDB423C5B1F7B67_05C9232CFE2672D1C",
+          "0810D08F811EF6F36_05C9232CFE2672D1C"
+        ],
+        [
+          "ScaleTheHouse",
+          "0CC28FE1824AC038A_0EED88CCC2F4CD12F",
+          "04E757B139F442B6C_0EED88CCC2F4CD12F"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_1.jpg",
+          "018BC932FB29F2C53_0AF9F040B874D83F7",
+          "09EBB4046B3D679C0_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_2.jpg",
+          "06C1C57656959DBA7_0AF9F040B874D83F7",
+          "0C8DCFD8A05038B0B_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_3.jpg",
+          "0F3D491AA982C264E_0AF9F040B874D83F7",
+          "0852C0EC80A6CE627_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_4.jpg",
+          "08A5881EF99D80FD8_0AF9F040B874D83F7",
+          "0AECF53474F06828E_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_5.jpg",
+          "02BFB031B1C19953B_0AF9F040B874D83F7",
+          "0AAFB940A070C1BA1_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_6.jpg",
+          "07D83583A0B0DE00E_0AF9F040B874D83F7",
+          "0D1A92F8808319893_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_7.jpg",
+          "02F0D57CD8CBE311E_0AF9F040B874D83F7",
+          "0FB73C8AFEE5E4CFC_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Landscape_8.jpg",
+          "0CE9B8941AD0C33EE_0AF9F040B874D83F7",
+          "0CBDA7249CA5C65A2_0AF9F040B874D83F7"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_1.jpg",
+          "0B1B9458B228702CA_0AE4839D1D9B04C57",
+          "066AB572A0E893AA8_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_2.jpg",
+          "062DB2532218625B6_0AE4839D1D9B04C57",
+          "0D858ED2F9ED7FC7C_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_3.jpg",
+          "06F2ECAFA6CA86A45_0AE4839D1D9B04C57",
+          "044766125D97831B1_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_4.jpg",
+          "010697250A94CE7C8_0AE4839D1D9B04C57",
+          "07D072BA64201D430_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_5.jpg",
+          "0907DA4EA24978ADD_0AE4839D1D9B04C57",
+          "0B6BB8CE7E2363611_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_6.jpg",
+          "0D6BF8E39199C6CD8_0AE4839D1D9B04C57",
+          "09F7F9CDFE1346CEB_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_7.jpg",
+          "0E650925ECEC2E598_0AE4839D1D9B04C57",
+          "0794ECDC04E4A3023_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Apply_Orientation_Portrait_8.jpg",
+          "082E998208E7201E4_0AE4839D1D9B04C57",
+          "0FF491745A3D6889D_0AE4839D1D9B04C57"
+        ],
+        [
+          "Test_Jpeg_Simple.jpg",
+          "018BC932FB29F2C53_0AF9F040B874D83F7",
+          "09EBB4046B3D679C0_0AF9F040B874D83F7"
+        ],
+        [
+          "Watermark1",
+          "0BA80ECA19E36402B_0DE3336C466C67DD9",
+          "0ED10EA93A14399AB_0DE3336C466C67DD9"
+        ],
+        [
+          "WatermarkPixelMargins",
+          "0497C9EB1DDD2E121_0DE3336C466C67DD9",
+          "05A43D398CB3015B2_0DE3336C466C67DD9"
+        ],
+        [
+          "WatermarkSmall",
+          "0557572D9A7BE702D_0DE3336C466C67DD9",
+          "06A91254020A2ED4F_0DE3336C466C67DD9"
+        ],
+        [
+          "WatermarkSmallOnPnga",
+          "00B8964A26734CD49_073B7BE0C1ABF189F",
+          "00AA224A4A91EE900_073B7BE0C1ABF189F"
+        ],
+        [
+          "crop_with_preshrink",
+          "05FA86FAE1D5C4D84_09D5B46DC8E13B7B4",
+          "0951F5819DFF86EB2_09D5B46DC8E13B7B4"
+        ],
+        [
+          "jpeg_crop",
+          "0071CBD976FC79E41_0FB5487907981932B",
+          "0898DE290496D5432_0FB5487907981932B"
+        ],
+        [
+          "matte_transparent_png",
+          "03E567299F9FC711C.png",
+          "08C1CB011BAC2D931.png"
+        ],
+        [
+          "mountain_gif_scaled400",
+          "0FF1D9DF83E36E6AF_05C9232CFE2672D1C",
+          "09BE890F42B77AD0C_05C9232CFE2672D1C"
+        ],
+        [
+          "read_gif_and_vertical_distort",
+          "02791C7249C972865_0B92852F636EA711E",
+          "0ECA7B0A575397199_0B92852F636EA711E"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 1",
+          "00196D6A86FF77C80_0BF80F0AE71CD9A63",
+          "072553AC03191B2A4_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 2",
+          "0539F9C3B850149CB_0BF80F0AE71CD9A63",
+          "0B5000C6D0B870BFD_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 3",
+          "0B43B2563C986473D_0BF80F0AE71CD9A63",
+          "0930EB6276BA24E30_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 4",
+          "03AE71E563BAA50E1_0BF80F0AE71CD9A63",
+          "0FF676B5A6E01B5D2_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 5",
+          "0E5CFC4A0932ACF87_0BF80F0AE71CD9A63",
+          "061D723B363D205CE_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 6",
+          "0463725A658D46C9F_0BF80F0AE71CD9A63",
+          "001F4D3E2837E8FA3_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 7",
+          "04D1EC9C034ADD12F_0BF80F0AE71CD9A63",
+          "03810D700B99845A5_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test ConstraintMode::FitPad on jpeg with exif rotate 8",
+          "0DB362A903C79AC30_0BF80F0AE71CD9A63",
+          "020910A76D03A23D4_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test cropping jpeg with exif rotate 1",
+          "0C862D7FC5A78146F_0AF9F04019B0BAF16",
+          "0619BA2103699EEC1_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 2",
+          "0D870139306239192_0AF9F04019B0BAF16",
+          "0DDBBB8264CC347E1_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 3",
+          "02CF2323FBBBA9D5D_0AF9F04019B0BAF16",
+          "058F69DB99DF3F418_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 4",
+          "09EAC17A52CD098D9_0AF9F04019B0BAF16",
+          "0A02E15D910373064_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 5",
+          "0D797226A41557C8C_0AF9F04019B0BAF16",
+          "03CBEC90D29BE7FBE_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 6",
+          "0F7C3FC9519DD2F52_0AF9F04019B0BAF16",
+          "0944126DD54AACA23_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 7",
+          "07118D8E2CD72C483_0AF9F04019B0BAF16",
+          "03A061C3876BB48E5_0AF9F04019B0BAF16"
+        ],
+        [
+          "test cropping jpeg with exif rotate 8",
+          "0CAA4C5C85C19D4D1_0AF9F04019B0BAF16",
+          "0430E5236098E276D_0AF9F04019B0BAF16"
+        ],
+        [
+          "test rotate jpeg 90 degrees",
+          "0285B89DDE072042D_0AE4839D1D9B04C57",
+          "05F7A37CF59F2DF40_0AE4839D1D9B04C57"
+        ],
+        [
+          "test_problematic_png_lossy",
+          "0975AE793470B6949.png",
+          "06547A9912F275413.png"
+        ],
+        [
+          "test_rot_90_and_red_dot",
+          "0176FBE641002F3ED_0AE4839D1D9B04C57",
+          "0D84CFA3211D00386_0AE4839D1D9B04C57"
+        ],
+        [
+          "test_rot_90_and_red_dot_command_string",
+          "0C790C6600AFBBADA_0AE4839D1D9B04C57",
+          "0C593CB334AB223B4_0AE4839D1D9B04C57"
+        ],
+        [
+          "test_round_corners_command_string",
+          "05218274046A5989B_0BF80F0AE71CD9A63",
+          "028F07F09FEE83065_0BF80F0AE71CD9A63"
+        ],
+        [
+          "test_webp_to_webp_quality",
+          "0AFEF1F4539220FD1.webp",
+          "042C3C137D1AED4D0.webp"
+        ],
+        [
+          "transparent_png_to_jpeg",
+          "0C50382C6AABA03D1.jpg",
+          "07DF581CAAC9C661E.jpg"
+        ],
+        [
+          "transparent_png_to_jpeg_constrained",
+          "0833CA19C036F4212.jpg",
+          "0D0E7AA9F6F8E4BF2.jpg"
+        ],
+        [
+          "transparent_webp_to_webp",
+          "000210ACC7DE6DB35.webp",
+          "0FF8635A6B1EB4B08.webp"
+        ],
+        [
+          "trim_resize_whitespace_with_padding",
+          "0C98752E6DE58648A.png",
+          "065771681E1EBEC91.png"
+        ],
+        [
+          "trim_resize_whitespace_without_padding",
+          "094AD8123D38FF811.png",
+          "0F5776301F2BF52C6.png"
+        ],
+        [
+          "trim_whitespace_with_padding",
+          "0BEBDEBEADEFEF409.png",
+          "0F1CFFF5682129C96.png"
+        ],
+        [
+          "trim_whitespace_with_padding_no_resize",
+          "0BEBDEBEADEFEF409.png",
+          "0F1CFFF5682129C96.png"
+        ],
+        [
+          "watermark_jpeg_over_pnga",
+          "00DD64A2220F28AD3_073B7BE0C1ABF189F",
+          "067E9590017B13898_073B7BE0C1ABF189F"
+        ],
+        [
+          "webp_lossless_alpha_decode_and_scale",
+          "057FA4CBAC9D0E267_0172196390B512E97",
+          "0DCE6166F46CF5A24_0172196390B512E97"
+        ],
+        [
+          "webp_lossy_alpha_decode_and_scale",
+          "09F54D063249F69C8_0172196390B512E97",
+          "05EF3D9DAC72DD995_0172196390B512E97"
+        ],
+        [
+          "webp_lossy_opaque_decode_and_scale",
+          "041A5FD590623EB11_0172196390B512E97",
+          "0A0E5B9130C80B541_0172196390B512E97"
+        ]
+      ]
+    },
+    {
+      "commit": "39269e3d",
+      "message": "chore: update visual test checksums after matte compositing fix",
+      "change_type": "compositing",
+      "description": "Updated transparent_png_to_jpeg after LUT change (d6af6e13). Improved sRGB in apply_matte changed blended values by +/-1.",
+      "expected_delta": "subtle_lsb",
+      "pairs": [
+        [
+          "transparent_png_to_jpeg",
+          "07DF581CAAC9C661E.jpg",
+          "04BA3FD20D016E645.jpg"
+        ]
+      ]
+    },
+    {
+      "commit": "20d2fd4b",
+      "message": "fix: correct gAMA handling for both decoders, match Chrome/Firefox behavior",
+      "change_type": "gamma_handling",
+      "description": "Fixed gAMA chunk reading (encoder-only fields were always None). Added non-neutral gamma handling, Chrome-style neutral detection.",
+      "expected_delta": "moderate",
+      "pairs": [
+        [
+          "cms_gama_srgb_045455",
+          "0FC8764685D20261A_0AB5E1BE6E70B2E49",
+          "0E355D34895E73664_0AB5E1BE6E70B2E49"
+        ]
+      ]
+    }
+  ]
+}
