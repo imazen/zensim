@@ -105,12 +105,13 @@ fn main() {
             "--konjnd" => konjnd = Some(args.next().unwrap().into()),
             "--v04-bake" => v04_bake_path = Some(args.next().unwrap().into()),
             "--zensim-profile" => {
-                let v = args.next().expect("--zensim-profile <v0-3|v0-4>");
+                let v = args.next().expect("--zensim-profile <v0-3|v0-4|v0-5>");
                 zensim_profile_override = Some(match v.as_str() {
                     "v0-3" | "v03" | "preview-v0.3" => zensim::ZensimProfile::PreviewV0_3,
                     "v0-4" | "v04" | "preview-v0.4" => zensim::ZensimProfile::PreviewV0_4,
+                    "v0-5" | "v05" | "preview-v0.5" => zensim::ZensimProfile::PreviewV0_5,
                     other => {
-                        eprintln!("--zensim-profile must be v0-3 or v0-4, got {other:?}");
+                        eprintln!("--zensim-profile must be v0-3, v0-4, or v0-5, got {other:?}");
                         std::process::exit(2);
                     }
                 });
