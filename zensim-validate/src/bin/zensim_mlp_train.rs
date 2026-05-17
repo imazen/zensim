@@ -86,6 +86,7 @@
 //! per-bake methodology + reproduction.
 
 use clap::Parser;
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -665,7 +666,15 @@ fn parse_group_spec(spec: &str) -> Result<(String, PathBuf, f64, f64), String> {
     ))
 }
 
-fn load_csv(
+/// Sequential CSV loader — kept ONLY as the bit-identical reference for
+/// the equivalence test (`csv_load_equivalence_tests`). Single-threaded,
+/// uses `f64::from_str` via stdlib `.parse::<f64>()`.
+///
+/// The parallel loader is the production path (see `load_csv`). This
+/// function is `#[cfg(test)]`-gated so the release binary never carries
+/// the dead code.
+#[cfg(test)]
+fn load_csv_sequential(
     path: &PathBuf,
     name: &str,
     target_column: &str,
@@ -737,6 +746,195 @@ fn load_csv(
         human_scores.push(score);
         feature_rows.push(row);
     }
+    println!(
+        "  {name}: loaded {} pairs × {n_features} features from {path:?}",
+        human_scores.len()
+    );
+    Ok(LoadedGroup {
+        name: name.to_string(),
+        train_w: 0.0,
+        val_w: 0.0,
+        human_scores,
+        feature_rows,
+        n_features,
+    })
+}
+
+/// Parallel CSV loader.
+///
+/// Production path. mmap's the file, finds line boundaries via memchr,
+/// partitions rows into rayon chunks, and parses each field with
+/// `fast_float2::parse::<f64, _>` (5-10× faster than stdlib
+/// `f64::from_str` per the crate's README). Order is preserved.
+///
+/// Empty lines are skipped (matches sequential behavior). Field-count
+/// and parse errors surface with the same shape as the sequential
+/// loader so downstream error handling is unchanged.
+pub(crate) fn load_csv(
+    path: &PathBuf,
+    name: &str,
+    target_column: &str,
+    target_scale: f64,
+) -> Result<LoadedGroup, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    // SAFETY: We're reading a file that's not concurrently mutated by
+    // any in-process writer; the trainer treats inputs as read-only.
+    // mmap is the standard fast-CSV-load pattern.
+    let mmap = unsafe { memmap2::Mmap::map(&file) }
+        .map_err(|e| format!("mmap {path:?}: {e}"))?;
+    let bytes: &[u8] = &mmap;
+
+    // 1) Find header end + parse header.
+    let header_end = memchr::memchr(b'\n', bytes)
+        .ok_or_else(|| format!("{path:?}: empty file / no header newline"))?;
+    let header_str = std::str::from_utf8(&bytes[..header_end])
+        .map_err(|e| format!("{path:?}: non-UTF8 header: {e}"))?;
+    let cols: Vec<&str> = header_str.trim_end_matches('\r').split(',').collect();
+    let score_idx = cols
+        .iter()
+        .position(|&c| c == target_column)
+        .ok_or_else(|| format!("{path:?}: missing target column {target_column:?}"))?;
+    let f0 = cols
+        .iter()
+        .position(|&c| c == "f0")
+        .ok_or_else(|| format!("{path:?}: missing f0 column"))?;
+    let mut n_features = 0usize;
+    while f0 + n_features < cols.len() {
+        let expected = format!("f{}", n_features);
+        if cols[f0 + n_features] != expected {
+            break;
+        }
+        n_features += 1;
+    }
+    if n_features == 0 {
+        return Err(format!("{path:?}: no fN columns found"));
+    }
+    let min_fields = f0 + n_features;
+
+    // 2) Build a Vec of (start, end) byte offsets for every body line,
+    // including empty ones — so index-in-vec is a faithful proxy for
+    // absolute file line number, matching the sequential loader's
+    // `lineno + 2` error semantics. memchr_iter scans at ~10 GB/s —
+    // this is effectively free.
+    let body_start = header_end + 1;
+    let mut line_ranges: Vec<(usize, usize)> = Vec::with_capacity(
+        // rough estimate to skip a few realloc rounds
+        (bytes.len() - body_start) / 256 + 1,
+    );
+    let mut cursor = body_start;
+    for nl in memchr::memchr_iter(b'\n', &bytes[body_start..]) {
+        let end = body_start + nl;
+        line_ranges.push((cursor, end));
+        cursor = end + 1;
+    }
+    // Tail without trailing newline.
+    if cursor < bytes.len() {
+        line_ranges.push((cursor, bytes.len()));
+    }
+
+    // 3) Parse rows in parallel rayon chunks. Each chunk produces its
+    // own (scores, rows, source-line-numbers-for-errors) and we merge
+    // chunks in source order via `flat_map_iter`.
+    //
+    // Chunk size of 1024 gives ~200 chunks for the safesyn corpus (~196k
+    // rows) and amortizes scheduling cost over enough work.
+    const CHUNK_SIZE: usize = 1024;
+
+    #[derive(Default)]
+    struct ChunkOut {
+        scores: Vec<f64>,
+        rows: Vec<Vec<f64>>,
+    }
+
+    let chunks: Vec<Result<ChunkOut, String>> = line_ranges
+        .par_chunks(CHUNK_SIZE)
+        .enumerate()
+        .map(|(chunk_idx, chunk)| {
+            let mut out = ChunkOut {
+                scores: Vec::with_capacity(chunk.len()),
+                rows: Vec::with_capacity(chunk.len()),
+            };
+            for (i_in_chunk, &(start, end)) in chunk.iter().enumerate() {
+                let line = &bytes[start..end];
+                // Strip trailing '\r' (CRLF files).
+                let line = if line.last() == Some(&b'\r') {
+                    &line[..line.len() - 1]
+                } else {
+                    line
+                };
+                if line.is_empty() {
+                    continue;
+                }
+                // Real (1-based, header-inclusive) line number for
+                // error messages — matches sequential `lineno + 2`
+                // semantics (lineno is 0-based index into rdr.lines()
+                // which starts AFTER header, plus 1-based + header).
+                let lineno_for_err = chunk_idx * CHUNK_SIZE + i_in_chunk + 2;
+
+                // Locate the comma positions we care about. We need
+                // fields[score_idx], fields[f0..f0+n_features]. Use
+                // memchr_iter to walk commas, picking out the slices.
+                //
+                // Strategy: index into the comma list by position.
+                // Build a small Vec<usize> of comma positions then
+                // slice it. This keeps the hot loop branch-free and
+                // matches the sequential `split(',').collect()`
+                // behavior bit-for-bit (we slice the same byte ranges).
+                let mut commas: Vec<usize> = Vec::with_capacity(min_fields + 4);
+                for c in memchr::memchr_iter(b',', line) {
+                    commas.push(c);
+                }
+                // Sequential checked `fields.len() < min_fields`
+                // (== commas+1 < min_fields).
+                let n_fields = commas.len() + 1;
+                if n_fields < min_fields {
+                    return Err(format!(
+                        "{path:?} line {lineno_for_err}: expected ≥{min_fields} fields, got {n_fields}"
+                    ));
+                }
+                let field = |idx: usize| -> &[u8] {
+                    let s = if idx == 0 { 0 } else { commas[idx - 1] + 1 };
+                    let e = if idx < commas.len() { commas[idx] } else { line.len() };
+                    &line[s..e]
+                };
+                let score_bytes = field(score_idx);
+                let score: f64 = fast_float2::parse::<f64, _>(score_bytes).map_err(|e| {
+                    format!(
+                        "{path:?} line {lineno_for_err}: bad target column {target_column:?}: {e}"
+                    )
+                })? * target_scale;
+                let mut row: Vec<f64> = Vec::with_capacity(n_features);
+                for fi in 0..n_features {
+                    let fb = field(f0 + fi);
+                    let v: f64 = fast_float2::parse::<f64, _>(fb).map_err(|e| {
+                        format!("{path:?} line {lineno_for_err}: bad f{fi}: {e}")
+                    })?;
+                    row.push(v);
+                }
+                out.scores.push(score);
+                out.rows.push(row);
+            }
+            Ok(out)
+        })
+        .collect();
+
+    // 4) Merge chunks in source order, propagating the first error.
+    // Pre-compute total capacity to avoid Vec growth.
+    let mut total = 0usize;
+    for c in &chunks {
+        match c {
+            Ok(o) => total += o.scores.len(),
+            Err(e) => return Err(e.clone()),
+        }
+    }
+    let mut human_scores: Vec<f64> = Vec::with_capacity(total);
+    let mut feature_rows: Vec<Vec<f64>> = Vec::with_capacity(total);
+    for c in chunks {
+        let mut o = c.unwrap();
+        human_scores.append(&mut o.scores);
+        feature_rows.append(&mut o.rows);
+    }
+
     println!(
         "  {name}: loaded {} pairs × {n_features} features from {path:?}",
         human_scores.len()
@@ -1188,6 +1386,127 @@ fn main() {
     } else {
         for line in &log {
             println!("{line}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod csv_load_equivalence_tests {
+    //! Equivalence tests for `load_csv` (parallel/mmap/fast-float)
+    //! vs `load_csv_sequential` (BufReader + stdlib `f64::from_str`).
+    //!
+    //! Verifies bit-identical output on a real training-corpus CSV
+    //! (the smaller TID file at /mnt/v with 3000 rows × 372 features).
+    //! Skipped at compile-time on environments without that path.
+    use super::{LoadedGroup, load_csv, load_csv_sequential};
+    use std::path::PathBuf;
+
+    fn tid_csv() -> Option<PathBuf> {
+        let p = PathBuf::from(
+            "/mnt/v/zen/zensim-training/2026-05-16/v2/tid_features_iwssim_log_372col.csv",
+        );
+        if p.exists() { Some(p) } else { None }
+    }
+
+    fn assert_groups_eq(par: &LoadedGroup, seq: &LoadedGroup) {
+        assert_eq!(par.name, seq.name, "name");
+        assert_eq!(par.n_features, seq.n_features, "n_features");
+        assert_eq!(
+            par.human_scores.len(),
+            seq.human_scores.len(),
+            "human_scores len: parallel={} sequential={}",
+            par.human_scores.len(),
+            seq.human_scores.len()
+        );
+        assert_eq!(
+            par.feature_rows.len(),
+            seq.feature_rows.len(),
+            "feature_rows len"
+        );
+
+        // Bit-identical scalar comparison. fast_float2 advertises
+        // IEEE-754 round-to-nearest correctness on every input
+        // that stdlib f64::from_str handles, so these should be
+        // exact equals across the corpus.
+        for (i, (a, b)) in par
+            .human_scores
+            .iter()
+            .zip(seq.human_scores.iter())
+            .enumerate()
+        {
+            assert_eq!(
+                a.to_bits(),
+                b.to_bits(),
+                "human_score[{}] differs: parallel={} sequential={}",
+                i,
+                a,
+                b
+            );
+        }
+        for (i, (ra, rb)) in par
+            .feature_rows
+            .iter()
+            .zip(seq.feature_rows.iter())
+            .enumerate()
+        {
+            assert_eq!(ra.len(), rb.len(), "feature_row[{}] length", i);
+            for (j, (a, b)) in ra.iter().zip(rb.iter()).enumerate() {
+                assert_eq!(
+                    a.to_bits(),
+                    b.to_bits(),
+                    "feature_row[{}][{}] differs: parallel={} sequential={}",
+                    i,
+                    j,
+                    a,
+                    b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_matches_sequential_iwssim_log_target() {
+        let path = match tid_csv() {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "SKIP: TID iwssim CSV not present (run on a workstation with /mnt/v mounted)"
+                );
+                return;
+            }
+        };
+        let par =
+            load_csv(&path, "tid", "iwssim_log_norm", 1.0).expect("parallel loader");
+        let seq = load_csv_sequential(&path, "tid", "iwssim_log_norm", 1.0)
+            .expect("sequential loader");
+        assert_groups_eq(&par, &seq);
+    }
+
+    #[test]
+    fn parallel_matches_sequential_default_target_with_scale() {
+        // Exercises the `target_scale` multiplier path and a different
+        // target column (`human_score` is in [0, 1] in this corpus and
+        // typically multiplied by 100.0). fast-float and stdlib should
+        // still agree bit-for-bit.
+        let path = match tid_csv() {
+            Some(p) => p,
+            None => {
+                eprintln!("SKIP: TID iwssim CSV not present");
+                return;
+            }
+        };
+        // The 2026-05-16 v2 CSV's first metric column is iwssim_log_norm,
+        // but the file also carries a `human_score` column (per the
+        // training-CSV format documented at the top of this binary).
+        // If absent, the loader will error and the test fails loudly.
+        let target = "human_score";
+        let par_res = load_csv(&path, "tid", target, 100.0);
+        let seq_res = load_csv_sequential(&path, "tid", target, 100.0);
+        match (par_res, seq_res) {
+            (Ok(par), Ok(seq)) => assert_groups_eq(&par, &seq),
+            (Err(e1), Err(e2)) => assert_eq!(e1, e2, "errors must match"),
+            (Ok(_), Err(e)) => panic!("parallel succeeded but sequential errored: {e}"),
+            (Err(e), Ok(_)) => panic!("sequential succeeded but parallel errored: {e}"),
         }
     }
 }

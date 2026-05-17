@@ -109,11 +109,28 @@ pub fn scrub_csv_or_die<P: AsRef<Path>>(csv_path: P) -> std::io::Result<()> {
         );
         std::process::exit(2);
     }
+    let bl = blocklist();
+    // Fast path: when the blocklist is empty (post-2026-05-14 revert
+    // state — see provenance comment above), there's nothing the
+    // per-row scan could ever flag. Skip the second full read of the
+    // CSV; the parallel load_csv path will read the file shortly.
+    // Re-populate the blocklist (per the documented user-review
+    // procedure) to re-enable the row scan.
+    if bl.is_empty() {
+        // Still need to honor the CONTAMINATED filename check above
+        // (already enforced before this point) and open the file once
+        // to surface any I/O errors early.
+        let _ = File::open(path)?;
+        eprintln!(
+            "contamination_guard: {} blocklist empty — row scan skipped",
+            path.display()
+        );
+        return Ok(());
+    }
     let f = File::open(path)?;
     let mut r = BufReader::new(f);
     let mut header = String::new();
     r.read_line(&mut header)?;
-    let bl = blocklist();
     let mut bad: Vec<String> = Vec::new();
     let mut total: usize = 0;
     for line in r.lines() {
