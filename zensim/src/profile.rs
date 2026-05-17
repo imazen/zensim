@@ -65,6 +65,47 @@ pub enum ZensimProfile {
     /// `include_bytes!`; no extra heap allocations beyond the second
     /// Predictor's scratch buffer.
     PreviewV0_4,
+    /// Preview v0.5 — **V_22-IW v2 single-bake (2026-05-16)**: a 372 →
+    /// 128 → 1 LeakyReLU MLP trained on safesyn against a
+    /// log-transformed IW-SSIM target (Wang & Li 2011) instead of
+    /// ssim2-derived scores. The log target spreads the saturated
+    /// upper tail [0.99, 1.0] across a wide range, fixing the high-q
+    /// flattening pathology of V_22-IW v1.
+    ///
+    /// Cross-corpus held-out SROCC (full Mohammadi panel verdict in
+    /// `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`):
+    ///   - **AIC-3 0.8071** (vs V_18 ship 0.7996 — **+0.008 win** on
+    ///     the primary low-q compression corpus)
+    ///   - **KADID 0.9475** (vs V_18 ship 0.9387 — **+0.009 win**
+    ///     NaN-filtered)
+    ///   - **TID 0.9617** (vs V_18 ship 0.9526 — **+0.009 win**)
+    ///   - CID22 0.8164 (vs V_18 ship 0.8933 — −0.077 loss; this is
+    ///     the cost of escaping the ssim2-target training bias
+    ///     documented in CLAUDE.md "SROCC-only verdicts BANNED")
+    ///
+    /// Z-RMSE wins on AIC-3, KADID, TID (better calibration error,
+    /// not just rank). 3 of 4 ship-grade corpora pass the
+    /// CLAUDE.md ≥3-of-5-stats agreement rule on the full Mohammadi
+    /// panel.
+    ///
+    /// **Use this profile** when AIC-3-style low-q compression
+    /// decisions matter more than CID22 mid-q rank fidelity. For the
+    /// CID22-anchored use case, keep `PreviewV0_3` (V_18 ship).
+    ///
+    /// Bake: `zensim/weights/v0_22_iw_v2_2026-05-16.bin` (200 KB,
+    /// ZNPR v3, md5 `fec221a4c5eaf792d1a34e6a3b3e8c0d`). Architecture:
+    /// 372 → 128 (LeakyReLU α=0.01) → 1 (Identity). Carries 139
+    /// per-feature `feature_transforms` metadata. Output is
+    /// score-shaped (raw value IS the final 0..100 score) because
+    /// the training target was pre-scaled into score_zensim units
+    /// via `iwssim_log_norm = -log(1 - iwssim + 1e-6) / 13.72 × 100`.
+    ///
+    /// Runtime cost: ~3× the basic-feature compute time of
+    /// PreviewV0_3 (372-feature extended + IW pool path instead of
+    /// 228 standard). Single-bake forward — no multi-bake overhead.
+    ///
+    /// Methodology: `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
+    PreviewV0_5,
 }
 
 impl ZensimProfile {
@@ -81,6 +122,7 @@ impl ZensimProfile {
             Self::PreviewV0_2 => "zensim-preview-v0.2",
             Self::PreviewV0_3 => "zensim-preview-v0.3",
             Self::PreviewV0_4 => "zensim-preview-v0.4",
+            Self::PreviewV0_5 => "zensim-preview-v0.5",
         }
     }
 
@@ -91,6 +133,7 @@ impl ZensimProfile {
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             Self::PreviewV0_3 => &PROFILE_PREVIEW_V0_3,
             Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
+            Self::PreviewV0_5 => &PROFILE_PREVIEW_V0_5,
         }
     }
 }
@@ -464,6 +507,52 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     // preserves rank ordering at the extremes — the 1-ns `exp` cost
     // is negligible.
     soft_clamp_score: true,
+};
+
+/// V_22-IW v2 single-bake (2026-05-16).
+///
+/// 372 → 128 (LeakyReLU α=0.01) → 1, trained on safesyn against the
+/// log-transformed IW-SSIM target `iwssim_log_norm =
+/// -log(1 - iwssim + 1e-6) / 13.7202 × 100`. Carries 139 per-feature
+/// `feature_transforms` from the V_20 IS greedy screen.
+///
+/// File: `zensim/weights/v0_22_iw_v2_2026-05-16.bin` (200 984 bytes,
+/// md5 `fec221a4c5eaf792d1a34e6a3b3e8c0d`). Methodology:
+/// `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
+pub(crate) fn mlp_bake_preview_v0_5() -> &'static [u8] {
+    include_bytes!("../weights/v0_22_iw_v2_2026-05-16.bin")
+}
+
+static PROFILE_PREVIEW_V0_5: ProfileParams = ProfileParams {
+    // V_22-IW v2 doesn't use the linear-weights path; this stays as
+    // V0_2's weights for any introspection caller that reads
+    // `params.weights` without checking `mlp_bytes.is_some()`.
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    // V_22-IW v2's target column is `iwssim_log_norm`, pre-scaled to
+    // 0..100. The bake's raw output IS the final score; no
+    // `100 − A·d^B` distance-to-score transform should run.
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5),
+    // Single-bake profile — no secondary.
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // V_22-IW v2 needs the full 372-feature input (228 standard + 72
+    // masked + 72 IW pool per Wang & Li 2011). Both flags must be
+    // true for the runtime to compute the right feature width.
+    extended_features: true,
+    compute_iw_features: true,
+    // Single-bake forward — no multi-bake destructive interference at
+    // boundaries. Predictions stay within [0, 100] for in-distribution
+    // inputs (training target was pre-scaled into that range). Hard
+    // clamp is fine; soft-clamp would introduce unnecessary
+    // recalibration shift (per CLAUDE.md "interior shift" docs on
+    // metric.rs::soft_clamp_score).
+    soft_clamp_score: false,
 };
 
 // --- Weight arrays ---

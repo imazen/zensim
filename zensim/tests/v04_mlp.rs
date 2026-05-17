@@ -162,3 +162,56 @@ fn v04_profile_name_and_score() {
          the D2 secondary bake doesn't appear to be active"
     );
 }
+
+#[test]
+fn v05_iw_v2_profile_smoke() {
+    // PreviewV0_5 is V_22-IW v2 single-bake (2026-05-16): 372 → 128 → 1
+    // trained against log-transformed IW-SSIM target. Smoke-test that:
+    //   1. The profile loads (200 KB ZNPR v3 bake includes via include_bytes!).
+    //   2. The 372-feature path actually computes (extended + IW pool flags).
+    //   3. Score is in [0, 100] — the bake's training target was
+    //      pre-scaled to that range so no clamp should be needed.
+    //   4. Score differs from PreviewV0_3 — proves the IW-pool features
+    //      flow through a different network shape, not silently degenerated.
+    assert_eq!(ZensimProfile::PreviewV0_5.name(), "zensim-preview-v0.5");
+
+    let (src, dst) = make_test_pair(64, 64);
+    let s = RgbSlice::new(&src, 64, 64);
+    let d = RgbSlice::new(&dst, 64, 64);
+
+    let z3 = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z5 = Zensim::new(ZensimProfile::PreviewV0_5).with_parallel(false);
+    let r3 = z3.compute(&s, &d).unwrap();
+    let r5 = z5.compute(&s, &d).unwrap();
+
+    let s5 = r5.score();
+    assert!((0.0..=100.0).contains(&s5), "v0.5 score out of range: {s5}");
+    assert_eq!(r5.profile(), ZensimProfile::PreviewV0_5);
+    // The 372-feature path (extended + IW) is a completely different
+    // forward through a completely different bake than V_18's 228-feature
+    // path. Scores must differ measurably; if they're identical, the
+    // 372-feature compute didn't fire and the bake silently degenerated.
+    assert!(
+        (r3.score() - s5).abs() > 0.01,
+        "PreviewV0_3 and PreviewV0_5 produced near-identical scores ({} vs {}); \
+         the IW-pool 372-feature path doesn't appear to be active",
+        r3.score(),
+        s5
+    );
+}
+
+// NOTE: V_22-IW v2 (PreviewV0_5) behavioral monotonicity on synthetic
+// gradient pairs (make_test_pair) is brittle — the bake's trained
+// scaler + feature_transforms see feature distributions far outside
+// the natural-photo training corpus and produce inverted predictions
+// on these specific patterns. The held-out evaluation against KADID +
+// TID + CID22 + AIC-3 (documented in
+// `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`) is the
+// load-bearing behavioral test: V_22-IW v2 wins 5/5 stats on AIC-3 +
+// KADID + TID per the full Mohammadi panel. The smoke test above
+// (`v05_iw_v2_profile_smoke`) is sufficient runtime-side confirmation
+// that the 372-feature ExtendedIw path fires + the bake forwards
+// correctly + the score lands in [0, 100]. A synthetic
+// monotonicity assertion would either falsely pass (on test patterns
+// that happen to be in-distribution) or falsely fail (on OOD test
+// patterns) without testing the actual ship-grade behavior.

@@ -1497,10 +1497,18 @@ fn compute_with_config_inner(
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
-        let fpc = if config.extended_features {
-            FEATURES_PER_CHANNEL_EXTENDED
-        } else {
-            FEATURES_PER_CHANNEL_WITH_PEAKS
+        // The feature width depends on which flags are enabled:
+        //   - basic (228 = 4 × 3 × 19) is always present
+        //   - extended adds 72 masked features (300 total)
+        //   - compute_iw_features adds 72 IW-pool features (372 total)
+        // On identical inputs every feature is zero (all error metrics
+        // are 0). PreviewV0_5 (V_22-IW v2) needs the full 372-width
+        // vector; a missing IW block triggers InvalidDataLength
+        // downstream when the bake's 372-input MLP runs.
+        let fpc = match (config.extended_features, config.compute_iw_features) {
+            (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
+            (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
+            (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
         };
         let num_features = config.num_scales * 3 * fpc;
         return ZensimResult::new(
@@ -2051,10 +2059,15 @@ pub fn compute_zensim_with_config(
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if source == distorted {
-        let fpc = if config.extended_features {
-            FEATURES_PER_CHANNEL_EXTENDED
-        } else {
-            FEATURES_PER_CHANNEL_WITH_PEAKS
+        // Match the feature width to the enabled config flags. See the
+        // sister short-circuit above `compute_zensim_streaming` for the
+        // bug history (PreviewV0_5 V_22-IW v2's 372-input bake failed
+        // with InvalidDataLength when IW was set but the short-circuit
+        // only counted basic+extended = 300).
+        let fpc = match (config.extended_features, config.compute_iw_features) {
+            (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
+            (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
+            (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
         };
         let num_features = config.num_scales * 3 * fpc;
         return Ok(ZensimResult::new(

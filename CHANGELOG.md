@@ -14,6 +14,20 @@
 
 ### Added (2026-05-16)
 
+- **`ZensimProfile::PreviewV0_5`** — V_22-IW v2 single-bake (372 →
+  128 → 1, trained against log-transformed IW-SSIM target). New
+  ADDITIVE profile alongside `PreviewV0_3` (V_18 ship) and
+  `PreviewV0_4` (V_18 + V_20 IS multi-bake). Wins AIC-3 +0.008
+  SROCC, KADID +0.009 (NaN-filtered), TID +0.009 on the full
+  Mohammadi panel — 3 of 4 ship-grade corpora pass CLAUDE.md's
+  ≥3-of-5 rule. Loses CID22 by SROCC −0.077 (the cost of escaping
+  the ssim2-target training bias documented in CLAUDE.md
+  "SROCC-only verdicts BANNED"). Use this profile when AIC-3-style
+  low-q compression decisions matter more than CID22 mid-q rank
+  fidelity. Methodology:
+  `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
+  Bake: `zensim/weights/v0_22_iw_v2_2026-05-16.bin` (200 KB ZNPR
+  v3, md5 `fec221a4c5eaf792d1a34e6a3b3e8c0d`).
 - **`RESEARCH.md`** — top-level pit-of-success research guide.
   Corpus map (train vs validation roles), data storage conventions,
   workflow recipes, bakes inventory, sibling-repo map. (`ec27122e`)
@@ -24,6 +38,13 @@
 
 ### Fixed (2026-05-16)
 
+- **Identical-pair short-circuit feature-width** — `compute_zensim`
+  and `compute_zensim_with_config` only counted basic+extended
+  features (300) in the identical-pair fast path even when
+  `compute_iw_features = true`. PreviewV0_5's 372-input bake hit
+  `InvalidDataLength` on every identical pair. Now correctly
+  emits the full extended+IW feature width when both flags are
+  set. (`<this commit>`)
 - **NaN-safe sort across 17 sites** — replace
   `partial_cmp(...).unwrap_or(Ordering::Equal)` with `f64::total_cmp`.
   Closes the per-band crash that forced per-corpus eval workarounds
