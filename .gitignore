@@ -83,3 +83,4 @@ __pycache__/
 # Eval-harness per-pair output CSVs (large, regenerated on each eval)
 benchmarks/*_per_pair.csv
 benchmarks/*_per_pair_*.csv
+benchmarks/v0_22_iw_v3_seed1_2026-05-17.bin

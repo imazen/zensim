@@ -1959,6 +1959,10 @@ fn run_minibatch_with_nin(
 /// T8.2: variant of [`backprop_step`] that accumulates into a
 /// caller-supplied `LocalGrads` instead of the AdamState's per-param
 /// buffers. Mathematically identical — only the destination differs.
+///
+/// T8.5: delegates to [`crate::simd_mlp::backprop_step`] for AVX-512 /
+/// AVX2 / scalar dispatch. LocalGrads' four Vec<f64> buffers map 1:1
+/// onto backprop_step's `&mut [f64]` grad parameters.
 #[allow(clippy::too_many_arguments)]
 fn backprop_into(
     local: &mut LocalGrads,
@@ -1971,30 +1975,20 @@ fn backprop_into(
     n_hidden: usize,
     alpha: f64,
 ) {
-    for o in 0..n_hidden {
-        local.gw2[o] += dl_dy * h[o];
-    }
-    local.gb2[0] += dl_dy;
-
-    let mut dl_dh_pre = vec![0.0f64; n_hidden];
-    for o in 0..n_hidden {
-        let dh = dl_dy * w2[o];
-        dl_dh_pre[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
-    }
-
-    for i in 0..n_features {
-        let s = x[i];
-        if s == 0.0 {
-            continue;
-        }
-        let row = &mut local.gw1[i * n_hidden..(i + 1) * n_hidden];
-        for (g, &dh) in row.iter_mut().zip(dl_dh_pre.iter()) {
-            *g += s * dh;
-        }
-    }
-    for (g, &dh) in local.gb1.iter_mut().zip(dl_dh_pre.iter()) {
-        *g += dh;
-    }
+    crate::simd_mlp::backprop_step(
+        x,
+        h_pre,
+        h,
+        dl_dy,
+        &mut local.gw1,
+        &mut local.gb1,
+        w2,
+        &mut local.gw2,
+        &mut local.gb2,
+        n_features,
+        n_hidden,
+        alpha,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
