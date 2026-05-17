@@ -90,6 +90,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
+#[path = "../simd_mlp.rs"]
+#[allow(dead_code)] // forward/backprop dispatch fns are used through mlp_train
+mod simd_mlp;
+
 #[path = "../mlp_train.rs"]
 #[allow(dead_code)] // some helpers are unused in this binary
 mod mlp_train;

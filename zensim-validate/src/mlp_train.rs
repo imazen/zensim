@@ -953,6 +953,17 @@ fn compute_scaler_from_groups(
     (mean, std)
 }
 
+/// MLP forward pass: `x → (linear w1+b1) → LeakyReLU → (linear w2+b2) → y`.
+///
+/// Returns `(y, h_pre, h)` where `h_pre` is the pre-activation hidden
+/// vector (needed for the LeakyReLU derivative in backprop) and `h` is
+/// the post-activation hidden vector (needed for the gw2 outer-product).
+///
+/// Delegates to the SIMD-dispatched implementation in [`crate::simd_mlp`];
+/// the scalar fallback path there is bit-identical to the historical
+/// implementation. On Zen 4 / Sapphire Rapids / Ice Lake the AVX-512
+/// f64x8 path runs ~3-5× faster than scalar on the production
+/// (372 × 128) shape.
 #[allow(clippy::too_many_arguments)]
 fn forward(
     x: &[f64],
@@ -964,28 +975,18 @@ fn forward(
     n_hidden: usize,
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
-    let mut h_pre = b1.to_vec();
-    for i in 0..n_features {
-        let s = x[i];
-        if s == 0.0 {
-            continue;
-        }
-        let row = &w1[i * n_hidden..(i + 1) * n_hidden];
-        for (acc, &w) in h_pre.iter_mut().zip(row.iter()) {
-            *acc += s * w;
-        }
-    }
-    let h: Vec<f64> = h_pre
-        .iter()
-        .map(|&v| if v >= 0.0 { v } else { alpha * v })
-        .collect();
-    let mut y = b2[0];
-    for o in 0..n_hidden {
-        y += h[o] * w2[o];
-    }
-    (y, h_pre, h)
+    crate::simd_mlp::forward(x, w1, b1, w2, b2, n_features, n_hidden, alpha)
 }
 
+/// RankNet-style backprop step: accumulates `∂L/∂w1`, `∂L/∂b1`,
+/// `∂L/∂w2`, `∂L/∂b2` from a single `(y, h_pre, h, dl_dy)` quadruple.
+///
+/// Gradient buffers are accumulated INTO (not overwritten); the caller
+/// is responsible for zeroing them at the start of an Adam step. The
+/// `_w1` parameter is unused (kept for caller signature compatibility).
+///
+/// Delegates to [`crate::simd_mlp`]; see that module's docs for the
+/// dispatch tree and bit-identity guarantees.
 #[allow(clippy::too_many_arguments)]
 fn backprop_step(
     x: &[f64],
@@ -1002,30 +1003,9 @@ fn backprop_step(
     n_hidden: usize,
     alpha: f64,
 ) {
-    for o in 0..n_hidden {
-        gw2[o] += dl_dy * h[o];
-    }
-    gb2[0] += dl_dy;
-
-    let mut dl_dh_pre = vec![0.0f64; n_hidden];
-    for o in 0..n_hidden {
-        let dh = dl_dy * w2[o];
-        dl_dh_pre[o] = if h_pre[o] >= 0.0 { dh } else { alpha * dh };
-    }
-
-    for i in 0..n_features {
-        let s = x[i];
-        if s == 0.0 {
-            continue;
-        }
-        let row = &mut gw1[i * n_hidden..(i + 1) * n_hidden];
-        for (g, &dh) in row.iter_mut().zip(dl_dh_pre.iter()) {
-            *g += s * dh;
-        }
-    }
-    for (g, &dh) in gb1.iter_mut().zip(dl_dh_pre.iter()) {
-        *g += dh;
-    }
+    crate::simd_mlp::backprop_step(
+        x, h_pre, h, dl_dy, gw1, gb1, w2, gw2, gb2, n_features, n_hidden, alpha,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

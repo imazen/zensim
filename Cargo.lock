@@ -2836,6 +2836,7 @@ dependencies = [
  "glob",
  "image",
  "rayon",
+ "zenbench",
  "zenpredict",
  "zenpredict-bake",
  "zensim",

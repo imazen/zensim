@@ -11,6 +11,8 @@
 #[allow(dead_code)] // CLI dispatch wired in a follow-up tick
 mod mlp_train;
 mod scale_invariance;
+#[allow(dead_code)] // forward/backprop_step are wired into mlp_train.rs
+mod simd_mlp;
 
 use calamine::{Reader, Xlsx};
 use clap::Parser;

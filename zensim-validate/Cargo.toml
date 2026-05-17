@@ -24,6 +24,13 @@ glob = "0.3"
 cmaes = { version = "0.2", default-features = false }
 anyhow = "1"
 
+[dev-dependencies]
+zenbench = { workspace = true }
+
+[[bench]]
+name = "bench_mlp_kernels"
+harness = false
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("zenresize"))']
