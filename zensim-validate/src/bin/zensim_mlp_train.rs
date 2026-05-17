@@ -374,6 +374,45 @@ struct Args {
     /// validation SROCC reporting both operate on the scaled value.
     #[arg(long, default_value_t = 100.0, value_name = "FLOAT")]
     target_scale: f64,
+
+    /// T8.1 (2026-05-16): mini-batch SGD size. Default 1 = per-pair
+    /// Adam (bit-identical to legacy / V_18 / V_22-IW trainer). When
+    /// > 1, the trainer accumulates K RankNet pair gradients between
+    /// each Adam step, with a final-flush at epoch end if
+    /// `pairs_per_epoch % K != 0`.
+    ///
+    /// **Convergence implications**: less noisy gradients than per-pair
+    /// SGD. Usually helps generalization. Can hurt regularization on
+    /// small datasets — Adam's bias correction `(1 - β^t)` decays K×
+    /// slower because `t` increments K× less often. Mathematically
+    /// still correct, just on a different schedule.
+    ///
+    /// **Determinism**: same `--seed N` produces same sample sequence
+    /// regardless of K (only Adam call cadence changes). Bake bytes
+    /// for `--minibatch-size 1` are bit-identical to the legacy trainer.
+    ///
+    /// Recommended K-ablation: K ∈ {1, 8, 64, 256} on the target
+    /// recipe before flipping. See `benchmarks/trainer_perf_analysis_2026-05-16.md`.
+    #[arg(long, default_value_t = 1, value_name = "K")]
+    minibatch_size: usize,
+
+    /// T8.2 (2026-05-16): enable rayon parallel-batch within each
+    /// mini-batch. Implies `--minibatch-size > 1` (no-op when K=1).
+    ///
+    /// **Speedup target**: ~10-25× on a 16-core AMD Ryzen 9 7950X at
+    /// K=64 vs sequential K=1, per the T8.1+T8.2 perf analysis.
+    ///
+    /// **Determinism preserved**: the K sample draws are sequential
+    /// on the main RNG; only forward+backward are dispatched to
+    /// rayon, and the per-pair LocalGrads reduce runs sequentially
+    /// in source order. Same `--seed N --minibatch-size K
+    /// --parallel-batch` produces bit-identical bake bytes regardless
+    /// of `RAYON_NUM_THREADS`.
+    ///
+    /// **No-op when --minibatch-size == 1** — the sequential per-pair
+    /// path is always taken to preserve legacy bit-identity.
+    #[arg(long, default_value_t = false)]
+    parallel_batch: bool,
 }
 
 struct LoadedGroup {
@@ -900,6 +939,8 @@ fn main() {
         out_dtype,
         feature_transforms: feature_transforms.clone(),
         feature_transform_params: feature_transform_params.clone(),
+        minibatch_size: args.minibatch_size.max(1),
+        parallel_batch: args.parallel_batch,
     };
 
     println!(
