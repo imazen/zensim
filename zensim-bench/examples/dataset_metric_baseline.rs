@@ -451,6 +451,23 @@ metrics (PSNR-Y, Butteraugli) by 30× because saturation regions dominate the re
                 ("B3 visually-lossless (≥6.0)", 0.667, f64::INFINITY),
                 ("Near-PJND [4.8,5.2]", 0.533, 0.578),
             ]),
+            // AIC-3 CTC: skipped from the per-band path. AIC-3 pairs
+            // are organized as `60 sources × 10 quality.selected steps`,
+            // with human_score = (score_jnd + 3) / 3 quantized to a
+            // discrete JND-step grid. Each 10-band [a, b) window picks
+            // up ~60 pairs that share the SAME human_score (one JND
+            // step) → rank-based SROCC/KROCC/PWRC collapse to 0.0.
+            //
+            // CLAUDE.md "Per-band reporting rule" mandates 10 bands for
+            // AIC-3, but the rule presumes a continuous MOS scale. AIC-3
+            // needs a *different* band axis (e.g., per quality.selected
+            // bucket OR per codec-difficulty stratum) to surface
+            // band-level signal. Queued as a follow-up — for the V_22
+            // family verdict the aggregate Mohammadi panel is the
+            // load-bearing read on AIC-3 (it does NOT degenerate at
+            // aggregate because the score_jnd values across ALL
+            // 60 × 10 = 600 pairs span the full [-3, 0] range with
+            // non-trivial rank structure).
             _ => None,
         };
         if let Some(bands) = bands {
