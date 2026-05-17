@@ -549,6 +549,41 @@ struct LoadedGroup {
     n_features: usize,
 }
 
+impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
+    fn from(o: zensim_validate::parquet_loader::OwnedLoadedGroup) -> Self {
+        Self {
+            name: o.name,
+            train_w: o.train_w,
+            val_w: o.val_w,
+            human_scores: o.human_scores,
+            feature_rows: o.feature_rows,
+            n_features: o.n_features,
+        }
+    }
+}
+
+/// Dispatch to the right loader based on file extension. `.parquet` ->
+/// load_parquet (T8.10), anything else (typically `.csv`) -> load_csv
+/// (the parallel mmap+memchr+fast_float loader from T8.9).
+fn load_group_dispatch(
+    path: &PathBuf,
+    name: &str,
+    target_column: &str,
+    target_scale: f64,
+) -> Result<LoadedGroup, String> {
+    let is_parquet = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.eq_ignore_ascii_case("parquet"))
+        .unwrap_or(false);
+    if is_parquet {
+        zensim_validate::parquet_loader::load_parquet(path, name, target_column, target_scale)
+            .map(LoadedGroup::from)
+    } else {
+        load_csv(path, name, target_column, target_scale)
+    }
+}
+
 /// Load per-feature transforms from a screen TSV (output of
 /// `scripts/v_next/v0_20_feature_transform_greedy_screen.py`). Populates
 /// `transforms` and `params` in place for every row where `lift >=
@@ -997,7 +1032,7 @@ fn main() {
             eprintln!("contamination_guard read error on {}: {e}", path.display());
             std::process::exit(1);
         });
-        let mut g = load_csv(&path, &name, &args.target_column, args.target_scale)
+        let mut g = load_group_dispatch(&path, &name, &args.target_column, args.target_scale)
             .unwrap_or_else(|e| {
                 eprintln!("{e}");
                 std::process::exit(1);
