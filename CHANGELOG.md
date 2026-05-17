@@ -38,13 +38,29 @@
 
 ### Fixed (2026-05-16)
 
+- **PreviewV0_5 live-runtime calibration** — the v2 bake's raw
+  output is distance-shaped (range approximately `[-17, 5]`)
+  because the trainer's RankNet loss is rank-invariant and doesn't
+  constrain absolute scale. The runtime path
+  (`Zensim::compute()`) was clamping the negative raw values to 0,
+  destroying rank information and giving SROCC 0.2531 on AIC-3
+  (vs 0.8071 via the `--v04-bake` direct-bytes path). Applied
+  affine `y' = 52.7171 + (-3.2898) · y` to the final layer
+  in-place (LS fit across 17,697 pooled KADID+TID+CID22+AIC-3
+  pairs, correlation 0.874). Live-runtime SROCC now matches the
+  direct-bytes SROCC within f32 rounding (0.8070 vs 0.8071).
+  The shipped bake is now
+  `zensim/weights/v0_22_iw_v2_calibrated_2026-05-16.bin` (md5
+  `8f587de61b59c5b03f8d8cfad11cfc4d`); the raw uncalibrated bake
+  remains at `zensim/weights/v0_22_iw_v2_2026-05-16.bin` for
+  reproducibility + downstream training.
 - **Identical-pair short-circuit feature-width** — `compute_zensim`
   and `compute_zensim_with_config` only counted basic+extended
   features (300) in the identical-pair fast path even when
   `compute_iw_features = true`. PreviewV0_5's 372-input bake hit
   `InvalidDataLength` on every identical pair. Now correctly
   emits the full extended+IW feature width when both flags are
-  set. (`<this commit>`)
+  set.
 - **NaN-safe sort across 17 sites** — replace
   `partial_cmp(...).unwrap_or(Ordering::Equal)` with `f64::total_cmp`.
   Closes the per-band crash that forced per-corpus eval workarounds

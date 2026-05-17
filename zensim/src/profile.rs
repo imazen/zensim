@@ -509,18 +509,33 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     soft_clamp_score: true,
 };
 
-/// V_22-IW v2 single-bake (2026-05-16).
+/// V_22-IW v2 single-bake (2026-05-16) — **affine-calibrated**.
 ///
 /// 372 → 128 (LeakyReLU α=0.01) → 1, trained on safesyn against the
 /// log-transformed IW-SSIM target `iwssim_log_norm =
 /// -log(1 - iwssim + 1e-6) / 13.7202 × 100`. Carries 139 per-feature
 /// `feature_transforms` from the V_20 IS greedy screen.
 ///
-/// File: `zensim/weights/v0_22_iw_v2_2026-05-16.bin` (200 984 bytes,
-/// md5 `fec221a4c5eaf792d1a34e6a3b3e8c0d`). Methodology:
-/// `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
+/// The trainer's RankNet loss is rank-invariant — it doesn't constrain
+/// absolute scale. The raw bake's predictions land in approximately
+/// `[-17, 5]` (distance-shaped: lower = better quality) on real test
+/// pairs, not the [0, 100] score range. To make the runtime path
+/// produce calibrated 0..100 scores, the final layer is
+/// affine-transformed with `y' = 52.7171 + (-3.2898) · y`, fit by
+/// least-squares across KADID + TID + CID22 + AIC-3 per-pair output
+/// (correlation 0.874 against pooled human MOS).
+///
+/// File: `zensim/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`
+/// (200 984 bytes, md5 `8f587de61b59c5b03f8d8cfad11cfc4d`). The raw
+/// uncalibrated bake is preserved at
+/// `zensim/weights/v0_22_iw_v2_2026-05-16.bin` for reproducibility
+/// + downstream training (the calibration is byte-rewrite of the
+/// final layer only; all metadata + feature_transforms propagate
+/// unchanged).
+///
+/// Methodology: `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
 pub(crate) fn mlp_bake_preview_v0_5() -> &'static [u8] {
-    include_bytes!("../weights/v0_22_iw_v2_2026-05-16.bin")
+    include_bytes!("../weights/v0_22_iw_v2_calibrated_2026-05-16.bin")
 }
 
 static PROFILE_PREVIEW_V0_5: ProfileParams = ProfileParams {
