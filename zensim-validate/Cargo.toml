@@ -28,6 +28,8 @@ anyhow = "1"
 memmap2 = "0.9.10"
 memchr = "2.8.0"
 fast-float2 = "0.2.3"
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"] }
+arrow = { version = "58.3.0", default-features = false }
 
 [dev-dependencies]
 zenbench = { workspace = true }
