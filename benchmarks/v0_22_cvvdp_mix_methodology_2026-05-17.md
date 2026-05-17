@@ -99,3 +99,32 @@ KADID by 0.012, TID by 0.013, KonJND by **0.108**. AIC-3 is a wash.
 
 - T11.13 commit + matrix data
 - benchmarks/cvvdp_matrix_2026-05-17/safesyn_verdicts/v22cvvdp_*.md
+
+## Update 2026-05-17 (post-publish) — h64 + extended α edges
+
+Extended α edges (single seed=3 at h128):
+
+| α | CID22 | KADID | TID | KonJND | AIC-3 |
+|---:|---:|---:|---:|---:|---:|
+| 0.30 | 0.8756 | **0.9107** | 0.8966 | 0.1371 | 0.8233 |
+| 0.40 | 0.8881 | 0.9067 | 0.8944 | **0.3059** | 0.8360 |
+| 0.50 | 0.8961 | 0.8943 | 0.8818 | 0.1976 | 0.8331 |
+| 0.70 | 0.8732 | 0.8566 | 0.8662 | 0.2072 | 0.8242 |
+
+α=0.40 remains the balanced sweet spot. α=0.30 is the KADID/TID
+specialist if those weight more.
+
+h64 vs h128 5-seed CI on cv40 (CID22 SROCC):
+
+| Variant | mean | std | sample bake |
+|---|---:|---:|---:|
+| h128 (200KB) | **0.8852** | 0.0042 | s3 = 0.8881 |
+| h64 (105KB) | 0.8799 | 0.0040 | s3 = 0.8802 |
+
+h128 has +0.005 SROCC mean (1× std) over h64. Different from
+zenjpeg-only matrix where h64==h128. With multi-corpus mix target, the
+extra capacity at h128 earns 0.005 CID22 SROCC — meaningful but small.
+
+**Final production recommendations:**
+- Default ship: `v22_mix_cv40_iw60_s3_h128.bin` (200 KB, CID22 SROCC 0.8881)
+- Size-economy alternative: `v22_mix_cv40_iw60_s3_h64.bin` (105 KB, CID22 SROCC 0.8802)
