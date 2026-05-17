@@ -19,7 +19,7 @@
 use std::fs::File;
 use std::path::PathBuf;
 
-use arrow::array::{Array, Float32Array, Float64Array};
+use arrow::array::{Array, Float32Array, Float64Array, Int32Array, Int64Array, UInt32Array, UInt64Array};
 use arrow::datatypes::DataType;
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -186,6 +186,11 @@ pub fn load_parquet(
         let mut per_col_f64: Vec<Vec<f64>> = Vec::with_capacity(n_features);
         for &pi in &proj_feature_indices {
             let col = batch.column(pi);
+            // Feature columns may be Float64/Float32 (the common case)
+            // OR an integer type (Int32/Int64/UInt32/UInt64). Some
+            // feature extractors emit count-style features (e.g.
+            // KonJND's f12) as integers; the trainer / runtime
+            // consumes them as f64 anyway, so widen silently.
             let v: Vec<f64> = match col.data_type() {
                 DataType::Float64 => {
                     let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -195,9 +200,25 @@ pub fn load_parquet(
                     let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
                     (0..n_rows).map(|i| a.value(i) as f64).collect()
                 }
+                DataType::Int64 => {
+                    let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::Int32 => {
+                    let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::UInt64 => {
+                    let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::UInt32 => {
+                    let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
                 other => {
                     return Err(format!(
-                        "{path:?}: feature column has unsupported dtype {other:?} (need Float32/Float64)",
+                        "{path:?}: feature column has unsupported dtype {other:?} (need Float32/Float64/Int32/Int64/UInt32/UInt64)",
                     ));
                 }
             };
