@@ -809,6 +809,122 @@ through `bake()`). Don't write a v2→v3 upgrade tool — the right
 fix is "retrain, evaluate on full Mohammadi panel" per the
 principled experiment workflow. Bakes are cheap; ghost data isn't.
 
+## Canonical bake / eval / training tool inventory (added 2026-05-17)
+
+**When you need to do X, use this tool — don't write a new one.**
+
+### Bake compression (quant + zero-bias + LZ4 + Hu-reorder)
+**`zenpredict-bake/examples/rebake_v3_1.rs`** at
+`/home/lilith/work/zen/zenanalyze/zenpredict-bake/examples/rebake_v3_1.rs`.
+Build with `cargo build --release --example rebake_v3_1 -p zenpredict-bake`.
+
+```sh
+# Compress a ZNPR v3 bake to i8 + zerobias + LZ4 (Hu-reorder via --optimize)
+.../target/release/examples/rebake_v3_1 \
+    <input.bin> <output.bin> \
+    --dtype i8 --zerobias 0.005 --compress --optimize
+```
+Verified 2026-05-17 on mix_cv40_iw60_s3_h128: 200,984 bytes → 52,006
+bytes (25.9%) with **CID22 SROCC delta < 0.001** on every Mohammadi-panel
+stat. Preserves `feature_transforms`, `output_specs`, `discrete_sets`,
+`sparse_overrides`, and all metadata entries — unlike the broken
+`zensim-bench/examples/quant_compare.rs` which drops them.
+
+**DO NOT USE** `zensim-bench/examples/quant_compare.rs` — it drops
+metadata, causing catastrophic SROCC collapse (0.88 → 0.53 on the mix
+champion). It is a diagnostic-only weight-magnitude reporter; for any
+actual rebake, use `rebake_v3_1`.
+
+### Bake creation from JSON (the trainer side)
+**`zenpredict-bake` binary** at
+`/home/lilith/work/zen/zenanalyze/zenpredict-bake/src/bin/zenpredict_bake.rs`.
+Build with `cargo build --release --bin zenpredict-bake -p zenpredict-bake`.
+
+```sh
+.../target/release/zenpredict-bake <input.json> <output.bin>
+```
+The JSON pipeline is mandated for any new bake-producing tool (per
+"JSON pipeline mandate" section below). See template at
+`zensim/scripts/v_next/v0_20b/bake_znpr_v3.py`.
+
+### Bake inspection (peek at metadata + weights)
+**`zenpredict-inspect` binary** at
+`/home/lilith/work/zen/zenanalyze/zenpredict-bake/src/bin/zenpredict_inspect.rs`.
+Shows header, n_inputs/outputs/layers, dtype, feature_transforms,
+metadata entries, weight magnitude statistics per layer.
+
+### Bake evaluation (per-bake instant verdict from parquet sidecars)
+**`bake_verdict` binary** at
+`/home/lilith/work/zen/zensim/zensim-validate/src/bin/bake_verdict.rs`.
+Build with `cargo build --release --bin bake_verdict -p zensim-validate`.
+
+```sh
+./target/release/bake_verdict --bake <bake.bin> \
+    [--corpora cid22,kadid,tid,konjnd,aic3] \
+    [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features] \
+    [--output verdict.md]
+```
+Loads pre-extracted 372-feature parquets per validation corpus + bake
+bytes, scores MLP via `Predictor::predict_transformed`, emits full
+Mohammadi panel (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) aggregate +
+10-band per corpus. **~3.5 sec for all 5 corpora.** Replaces the older
+`dataset_metric_baseline` which re-decodes images (~15-20 min per bake).
+
+### Bake training (MLP supervised learning)
+**`zensim_mlp_train` binary** at
+`/home/lilith/work/zen/zensim/zensim-validate/src/bin/zensim_mlp_train.rs`.
+Supports `--group <name>:<path.parquet>:train_w:val_w` (auto-detects
+.csv vs .parquet by extension), `--target-column NAME`,
+`--feature-set extended_iw|extended|standard`, full PWRC+NiN flags,
+auto-transforms via `--auto-transforms <screen.tsv>`.
+
+### Eval matrix comparison (N bakes side-by-side)
+**`scripts/cvvdp_matrix_compare.sh`** at
+`/home/lilith/work/zen/zensim/scripts/cvvdp_matrix_compare.sh`. Runs
+bake_verdict on every `*.bin` in a dir + emits a per-corpus
+SROCC/Z-RMSE/PWRC table for ship-decision review.
+
+### Affine calibration of an existing bake
+**Missing v3 equivalent.** The historical `affine_calibrate_znpr_v2.py`
+hard-coded v2 parse — it's now DEPRECATED and refuses to run. Build a
+v3 affine tool when needed (the math is `W' = β·W, b' = β·b + α`
+applied to the final layer; emit via the JSON pipeline through
+`zenpredict-bake`).
+
+### Per-corpus baseline metric extraction
+**Missing v3 equivalent.** Older `score_unified_with_bake.py` was
+v2-only (DEPRECATED, refuses). Use `zen-metrics batch` (from
+`/home/lilith/work/zen/zenmetrics/target/release/zen-metrics`) for
+metric scoring on (ref, dist) pairs, then merge into per-corpus
+parquet sidecars analogous to T11.7 safesyn CVVDP backfill.
+
+### CVVDP scoring
+**`zen-metrics`** at
+`/home/lilith/work/zen/zenmetrics/target/release/zen-metrics`.
+Build with `cargo build --release --bin zen-metrics --features 'gpu-cvvdp,gpu-cuda' -p zen-metrics-cli`.
+
+```sh
+zen-metrics batch --metric cvvdp --gpu-runtime cuda \
+    --pairs <pairs.tsv> --output <scores.tsv>
+```
+Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
+16-bit RGB and 8-bit RGBA inputs (decoder widening pending). For TID's
+`.BMP` images, convert to PNG first (see T11.10b notes).
+
+### Migration tools
+- **`zenanalyze/zentrain/tools/migrate_znpr_v2_to_v3.py`** — converts
+  an old v2 bake to v3. Use this exactly once per archived bake; the
+  trainer + bake_verdict + zen-metrics all produce v3 natively now.
+
+### Deprecated / DO NOT USE
+- `zensim-bench/examples/quant_compare.rs` — drops metadata, catastrophic SROCC loss.
+- `scripts/v_next/affine_calibrate_znpr_v2.py` — refuses to run (v2 only).
+- `scripts/v_next/score_unified_with_bake.py` — refuses to run (v2 only).
+- `scripts/v_next/soft_iso_smooth.py` — refuses to run (depends on v2 scorer).
+- `dataset_metric_baseline` (zensim-bench example) — slow (15-20 min)
+  AND silently drops KADID rows on image-decode failures. Use
+  `bake_verdict` instead.
+
 ## zenpredict crate dependency policy (added 2026-05-15)
 
 **Use path or git refs to the local `zenanalyze/zenpredict` repo,

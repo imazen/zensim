@@ -1,4 +1,27 @@
 #!/usr/bin/env python3
+# !!!! DEPRECATED — ZNPR V2 ONLY, V3 IS MANDATED !!!!
+# This script hard-codes `assert version == 2` and CANNOT process
+# current bakes. Per CLAUDE.md "ZNPR v2 PROHIBITED (2026-05-15)".
+#
+# V3 replacements:
+# - affine_calibrate: use zenpredict-bake/examples/rebake_v3_1.rs
+#   with metadata-injected affine OR build a small v3 affine tool
+#   that mirrors the W'=β·W, b'=β·b+α math via the BakeRequestJson pipeline
+# - score_unified_with_bake: use zenpredict::Predictor (Rust) or
+#   zensim-validate/src/bin/bake_verdict.rs for parquet-features eval
+# - soft_iso_smooth: apply same algorithm directly to bake_verdict's
+#   per-pair predictions written by --per-pair-output
+#
+# This file is kept for git-history reference only. DO NOT INVOKE.
+
+import sys
+sys.stderr.write(
+    f"REFUSE: {sys.argv[0]} is ZNPR v2 only. See header comment for v3 alternatives.\n"
+)
+sys.exit(2)
+
+# ──────── ORIGINAL SCRIPT BELOW (HISTORICAL) ────────
+#!/usr/bin/env python3
 """Soft-isotonic per-curve score smoother for zensim bakes.
 
 For each (image_path, codec, knob_tuple_json) curve in a unified
