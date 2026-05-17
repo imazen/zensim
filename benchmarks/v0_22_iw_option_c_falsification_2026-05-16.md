@@ -9,6 +9,35 @@ alone, which CLAUDE.md `SROCC-only verdicts BANNED` forbids; this
 revision uses the full panel and confirms the verdict (and refines
 the V_22-IW-alone characterization at α=0.0).
 
+## AIC-3 corpus included — verdict updated (2026-05-16)
+
+The initial α-sweep ran on per-pair CSVs that DROPPED all AIC-3 rows
+(a `load_aic3` schema bug — see commit `796a689`). Re-ran with the
+fix: both V_18 ship and V_22-IW v2 per-pair CSVs at
+`benchmarks/v0_18_ship_eval_per_pair_2026-05-16_v2.csv` and
+`benchmarks/v0_22_iw_seed1_2026-05-16_eval_per_pair_v2.csv` now
+include 600 AIC-3 rows.
+
+AIC-3 baseline (V_22-IW vs V_18 ship):
+
+| Stat | V_18 ship | V_22-IW | fast-ssim2 | Δ V_22-IW vs V_18 |
+|---|---:|---:|---:|---:|
+| SROCC | 0.7996 | 0.7600 | 0.7965 | **−0.040 (worse)** |
+| PLCC  | 0.8093 | 0.7708 | 0.8075 | **−0.039 (worse)** |
+| KROCC | 0.6302 | 0.5894 | 0.6288 | **−0.041 (worse)** |
+| PWRC  | 0.8697 | 0.8354 | 0.8665 | **−0.034 (worse)** |
+| Z-RMSE| 0.588  | 0.637  | 0.590  | **+0.049 (worse)** |
+
+V_22-IW loses on ALL 5 stats on AIC-3 — same pattern as CID22.
+
+**With AIC-3 included, V_22-IW alone hits 2 of 4 ship-grade corpora
+(wins KADID + TID, loses CID22 + AIC-3). The CID22 + AIC-3 axis —
+the compression-focused human-MOS corpora — both reject V_22-IW.**
+
+Per the user's explicit guidance (2026-05-16): "cid22 and aic are
+the most important eval validation sets." V_22-IW seed=1 fails both
+of them across the full Mohammadi panel.
+
 ## V_22-IW alone (α=0.0) vs V_18 ship — full Mohammadi panel
 
 The unambiguous panel reading at the endpoint that's *not* the V_18
