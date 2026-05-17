@@ -40,6 +40,15 @@ use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 #[path = "adam_simd.rs"]
 mod adam_simd;
 
+// Norm-in-Norm + RankNet hybrid loss (Li, Jiang, Jiang 2020,
+// arXiv:2008.03889). Opt-in via `MlpHyperparams::norm_in_norm_weight >
+// 0`. Computes a batch-correlated auxiliary loss on the 2K predictions
+// produced by K mini-batch pair forwards, with closed-form gradient
+// added to the RankNet per-prediction backprop direction. See module
+// docs for the exact formula and gradient derivation.
+#[path = "loss_norm_in_norm.rs"]
+mod loss_norm_in_norm;
+
 /// How to aggregate per-group SROCC into the single value used for
 /// best-checkpoint selection.
 ///
@@ -161,18 +170,153 @@ pub struct MlpHyperparams {
     /// `rayon::par_iter` with per-thread accumulators that reduce
     /// into a single LocalGrads before the Adam step.
     ///
-    /// **Default `false`** so the trainer remains bit-identical to
-    /// the legacy sequential code path unless explicitly opted in.
-    ///
-    /// **Determinism is preserved**: the sample-drawing sequence is
-    /// run sequentially on the main RNG to produce a `Vec` of K
-    /// (group_idx, ia, ib) tuples, and only forward+backward are
-    /// parallelized. Same `seed` + same `minibatch_size` produces
-    /// bit-identical bake bytes regardless of thread count.
+    /// **Default `true`** (2026-05-17 CLAUDE.md "fast mode on by
+    /// default" directive). Parallelism does NOT change behavior:
+    /// the sample-drawing sequence runs sequentially on the main
+    /// RNG to produce a `Vec` of K (group_idx, ia, ib) tuples, the
+    /// per-pair LocalGrads reduce runs in source order — same
+    /// `seed + minibatch_size` produces bit-identical bake bytes
+    /// regardless of thread count (T8.2 determinism gate).
     ///
     /// When `minibatch_size == 1` this flag is ignored (the
     /// sequential path is always taken — no per-batch overhead).
     pub parallel_batch: bool,
+
+    /// PWRC-aligned per-pair weighting on the RankNet loss (Wu et al.
+    /// 2018, "A Perceptually Weighted Rank Correlation Indicator for
+    /// Objective Image Quality Assessment", IEEE TIP, DOI
+    /// 10.1109/TIP.2018.2799331; reference MATLAB at
+    /// <https://github.com/wqb-uestc/PWRC>). When `false` (default),
+    /// every drawn (ia, ib) pair contributes loss & gradient at
+    /// weight 1.0 — bit-identical to the pre-PWRC trainer.
+    ///
+    /// When `true`, each pair's contribution to the loss & its gradient
+    /// is multiplied by `pwrc_pair_weight(MOS_a, MOS_b)`. Reference
+    /// `PWRC.m`:
+    ///
+    /// ```text
+    /// level    = max(label_r_left, label_r_right) - 1     // rank-quality
+    /// diff     = |label_r - pred_r|  (left) + |label_r - pred_r|  (right)
+    /// w_pre    = exp( level/(len-1) + diff/(2*(len-1)) )  // unnormalized
+    /// w_norm   = w_pre / sum(w_pre)                       // normalized
+    /// ```
+    ///
+    /// The `diff` term penalizes ranking mismatch between predictions
+    /// and labels, but it depends on the CURRENT model's full-corpus
+    /// ranking — recomputing it per Adam step would dominate runtime.
+    /// We drop it and keep the label-only term, which is the
+    /// "perceptually weighted" piece: pairs whose maximum quality is
+    /// high get more weight. In rank-normalized form on dense MOS that
+    /// reduces to `w(a, b) = exp(max(MOS_a, MOS_b) / 100)`, the
+    /// trainer's closed-form default when `pwrc_band_weights` is None.
+    ///
+    /// **Band-weight override**: if `pwrc_band_weights` is `Some(v)`,
+    /// the per-pair weight is `v[band_idx(max(MOS_a, MOS_b))]` where
+    /// `band_idx(s) = clamp(floor(s/10), 0, len-1)`. A 10-element
+    /// vector matches the 10-band B0..B9 grid (CLAUDE.md "Per-band
+    /// reporting rule"). Use this to invert the Wu 2018 direction —
+    /// e.g., `[5,4,3,2,1.5,1,1,1,1,1]` upweights B0..B5 (zensim
+    /// "low-q priority").
+    ///
+    /// No per-pair normalization is applied: the published formula
+    /// divides by `omega = sum_pairs w_unnorm` to make PWRC a unit-
+    /// range indicator, but for SGD any constant scale is absorbed by
+    /// the learning rate. Skipping the normalization keeps the
+    /// gradient magnitude in the same ballpark as the unweighted
+    /// trainer (mean weight ≈ exp(0.5) ≈ 1.65 under the closed-form
+    /// default), so `--initial-lr` doesn't need retuning.
+    pub pwrc_pair_weight: bool,
+
+    /// PWRC sensory threshold `T` (Wu et al. 2018) on the same scale
+    /// as `human_scores` (= `score_zensim` in 0..100 units). Pairs with
+    /// `|MOS_a - MOS_b| < pwrc_sensory_threshold` are dropped (they're
+    /// perceptually tied and not informative for ranking learning).
+    /// Default `0.0` = no drop, matching the legacy `target.signum() ==
+    /// 0.0` "skip exact ties only" behavior.
+    ///
+    /// The published recommendation is `T = 5` MOS units on a 100-unit
+    /// scale — pairs within ~5 % of MOS range are dropped. Set to 0.0
+    /// to disable. Active only when `pwrc_pair_weight` is true.
+    ///
+    /// **Determinism note**: dropped pairs decrement the per-epoch
+    /// step counter but the RNG sequence (which `(ia, ib)` is drawn
+    /// at each step) is unchanged — same `seed` produces same draws
+    /// regardless of `pwrc_sensory_threshold`.
+    pub pwrc_sensory_threshold: f64,
+
+    /// Optional per-band weight vector for PWRC pair weighting.
+    /// `None` = use closed-form Wu 2018 default `exp(max_MOS / 100)`.
+    /// `Some(v)` = look up `v[clamp(floor(max_MOS / band_width), 0,
+    /// v.len()-1)]` where `band_width = 100.0 / v.len()`. Typical:
+    /// 10-element vector aligned with the B0..B9 grid. Active only
+    /// when `pwrc_pair_weight` is true.
+    pub pwrc_band_weights: Option<Vec<f64>>,
+
+    /// Norm-in-Norm + RankNet hybrid loss weight `β` (Li, Jiang, Jiang
+    /// 2020, "Norm-in-Norm Loss with Faster Convergence and Better
+    /// Performance for Image Quality Assessment", ACM MM, arXiv:
+    /// 2008.03889; reference impl
+    /// <https://github.com/lidq92/LinearityIQA>).
+    ///
+    /// **Default `0.0` = pure RankNet** — bit-identical bake bytes to
+    /// the pre-NiN trainer at any `minibatch_size`. When `> 0.0`, an
+    /// auxiliary loss term is added on top of every mini-batch's
+    /// RankNet gradients:
+    ///
+    /// ```text
+    ///   total_loss = ranknet_loss + norm_in_norm_weight · norm_in_norm_loss
+    /// ```
+    ///
+    /// where `norm_in_norm_loss` is computed over the `2K` predictions
+    /// generated by the `K` pair forwards in the mini-batch (each pair
+    /// contributes both `y_a` and `y_b`, paired with the matching
+    /// human scores `MOS_a, MOS_b`). The Norm-in-Norm loss itself,
+    /// with `ε = 1e-8`:
+    ///
+    /// ```text
+    ///   ŝ_n = (Ŝ - mean(Ŝ)) / (||Ŝ - mean(Ŝ)||_q + ε)
+    ///   s_n = (S - mean(S)) / (||S - mean(S)||_q + ε)
+    ///   loss_NiN = (||ŝ_n - s_n||_p / scale)^p
+    ///   scale    = 2^max(1, 1/q) · N^max(0, 1/p - 1/q)
+    /// ```
+    ///
+    /// Per Li 2020 Table 2 last row (KonIQ-10k headline result), the
+    /// recommended hybrid is `β = 0.1, p = 1, q = 2` — that
+    /// configuration lifted SROCC 0.928 → 0.937 (RankNet alone →
+    /// hybrid) and PLCC 0.928 → 0.947 vs MSE 0.851 / 0.825.
+    ///
+    /// **Sign convention**: the zensim trainer's MLP outputs
+    /// `raw_distance` (LOWER = more similar; opposite of MOS). The NiN
+    /// loss therefore pairs `Ŝ` with `−MOS` rather than `+MOS` so the
+    /// gradient pulls the prediction surface in the
+    /// `distance ↔ −MOS` direction — same orientation as the RankNet
+    /// `(MOS_a − MOS_b).signum() · (y_a − y_b)` convention already
+    /// established in the trainer.
+    ///
+    /// **Requires `minibatch_size ≥ 16`** for stable batch statistics.
+    /// The trainer errors out at `K < 16` when `norm_in_norm_weight >
+    /// 0` with a clear message ("requires --minibatch-size >= 16 for
+    /// stable batch statistics; bump K or disable").
+    pub norm_in_norm_weight: f64,
+
+    /// Inner-norm exponent `p` for the Norm-in-Norm loss (Li 2020).
+    /// Default `1.0` matches Table 1's best single-loss setting and
+    /// the headline `(β=0.1, p=1, q=2)` hybrid recommendation. Set to
+    /// `2.0` alongside `norm_in_norm_q = 2.0` to recover the
+    /// PLCC-induced special case (paper Section 2.2, Eqn 14):
+    /// `loss ∝ (1 − PLCC)`.
+    ///
+    /// Only meaningful when `norm_in_norm_weight > 0`.
+    pub norm_in_norm_p: f64,
+
+    /// Outer (denominator) q-norm exponent for the Norm-in-Norm loss
+    /// (Li 2020). Default `2.0` recovers the z-score-equivalent
+    /// normalization of the reference impl
+    /// (<https://github.com/lidq92/LinearityIQA/blob/master/IQAloss.py>
+    /// — `torch.norm(y_pred, p=q)`).
+    ///
+    /// Only meaningful when `norm_in_norm_weight > 0`.
+    pub norm_in_norm_q: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -195,8 +339,47 @@ impl Default for MlpHyperparams {
             feature_transforms: None,
             feature_transform_params: None,
             minibatch_size: 1,
-            parallel_batch: false,
+            parallel_batch: true,
+            pwrc_pair_weight: false,
+            pwrc_sensory_threshold: 0.0,
+            pwrc_band_weights: None,
+            norm_in_norm_weight: 0.0,
+            norm_in_norm_p: 1.0,
+            norm_in_norm_q: 2.0,
         }
+    }
+}
+
+/// Compute the per-pair PWRC loss weight given the two human scores
+/// (in `score_zensim` 0..100 units) and an optional band-weight
+/// vector.
+///
+/// **Closed-form default (`band_weights == None`)**: `exp(max(a, b) /
+/// 100)` — the label-only term from Wu et al. 2018 `PWRC.m` after
+/// dropping the prediction-error `diff` piece (see `MlpHyperparams::
+/// pwrc_pair_weight` docs for the full derivation). Range:
+/// `[exp(0), exp(1)] = [1.0, 2.718]`.
+///
+/// **Band-weight override**: `band_weights[clamp(floor(max(a,b) /
+/// band_width), 0, n-1)]` where `band_width = 100.0 / n`. For a
+/// 10-element vector each entry covers 10 score units: index 0 =
+/// [0, 10), index 9 = [90, 100].
+///
+/// Always returns a finite, positive weight. NaN-safe: clamps inputs
+/// into `[0, 100]` first so the band index can't index OOB.
+#[inline]
+pub fn pwrc_pair_weight(a: f64, b: f64, band_weights: Option<&[f64]>) -> f64 {
+    let max_mos = a.max(b).clamp(0.0, 100.0);
+    match band_weights {
+        Some(v) if !v.is_empty() => {
+            let band_width = 100.0 / v.len() as f64;
+            // floor; cap at len-1 (so MOS == 100.0 lands in the last bin).
+            let raw_idx = (max_mos / band_width).floor() as isize;
+            let idx = raw_idx.clamp(0, v.len() as isize - 1) as usize;
+            v[idx]
+        }
+        // Closed-form Wu 2018 (label-only, see fn docstring).
+        _ => (max_mos / 100.0).exp(),
     }
 }
 
@@ -526,6 +709,34 @@ pub fn train_mlp_with_tv(
     // so push/clear in the hot loop don't realloc.
     let mut parallel_batch_buffer: Vec<(usize, usize, usize)> = Vec::with_capacity(k);
 
+    // Norm-in-Norm hybrid loss gate (Li et al. 2020). When opted in via
+    // `norm_in_norm_weight > 0.0`, the auxiliary loss is computed on
+    // each mini-batch's 2K predictions. Batch statistics are unstable
+    // at N < ~16 so we enforce `K >= 16` up front rather than
+    // silently producing nonsense gradients.
+    let nin_on = hyperparams.norm_in_norm_weight > 0.0;
+    if nin_on {
+        assert!(
+            k >= 16,
+            "--norm-in-norm-weight={} requires --minibatch-size >= 16 \
+             for stable batch statistics; bump K (currently {}) or set \
+             --norm-in-norm-weight 0 to disable",
+            hyperparams.norm_in_norm_weight,
+            k
+        );
+        log_line(
+            &format!(
+                "MLP train: Norm-in-Norm hybrid loss active (Li 2020): \
+                 β={:.4} p={:.2} q={:.2} on 2K={} predictions per batch",
+                hyperparams.norm_in_norm_weight,
+                hyperparams.norm_in_norm_p,
+                hyperparams.norm_in_norm_q,
+                2 * k,
+            ),
+            log,
+        );
+    }
+
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
             * 0.5
@@ -565,6 +776,46 @@ pub fn train_mlp_with_tv(
                 continue;
             }
 
+            // Norm-in-Norm (Li 2020) path: ALWAYS buffer K samples and
+            // route through `run_minibatch_with_nin` (sequential within
+            // the mini-batch — the NiN loss is a batch-correlated
+            // function and cannot be cleanly chunked the way pure
+            // RankNet can). Forward, NiN-loss + grad, backward, single
+            // Adam step. Takes precedence over the `parallel` path
+            // because the two are mutually exclusive routings.
+            if nin_on {
+                parallel_batch_buffer.push((g_idx, ia, ib));
+                if parallel_batch_buffer.len() >= k {
+                    let (steps_added, loss_added) = run_minibatch_with_nin(
+                        &parallel_batch_buffer,
+                        groups,
+                        &std_features,
+                        &w1,
+                        &b1,
+                        &w2,
+                        &b2,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
+                        hyperparams.l2_lambda,
+                        hyperparams.pwrc_pair_weight,
+                        hyperparams.pwrc_sensory_threshold,
+                        hyperparams.pwrc_band_weights.as_deref(),
+                        hyperparams.norm_in_norm_weight,
+                        hyperparams.norm_in_norm_p,
+                        hyperparams.norm_in_norm_q,
+                    );
+                    parallel_batch_buffer.clear();
+                    total_loss += loss_added;
+                    n_steps += steps_added;
+                    if steps_added > 0 {
+                        adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                    }
+                }
+                continue;
+            }
+
             // T8.2 parallel-batch path: buffer up to K (g_idx, ia, ib)
             // samples on the main RNG (sequential), then process the
             // entire batch concurrently into a Vec<LocalGrads> whose
@@ -588,6 +839,9 @@ pub fn train_mlp_with_tv(
                         n_hidden,
                         hyperparams.leaky_alpha,
                         hyperparams.l2_lambda,
+                        hyperparams.pwrc_pair_weight,
+                        hyperparams.pwrc_sensory_threshold,
+                        hyperparams.pwrc_band_weights.as_deref(),
                     );
                     parallel_batch_buffer.clear();
                     total_loss += loss_added;
@@ -623,25 +877,47 @@ pub fn train_mlp_with_tv(
                 hyperparams.leaky_alpha,
             );
 
-            let target = (g.human_scores[ia] - g.human_scores[ib]).signum();
+            let mos_a = g.human_scores[ia];
+            let mos_b = g.human_scores[ib];
+            let target = (mos_a - mos_b).signum();
             if target == 0.0 {
                 continue;
             }
+            // PWRC sensory-threshold drop (Wu et al. 2018): pairs with
+            // |ΔMOS| < T are perceptually tied and uninformative for
+            // ranking learning. The RNG advances identically vs the
+            // off path (the drop happens AFTER (ia,ib) draw), so K=1
+            // + threshold=0 is bit-identical to the legacy trainer.
+            if hyperparams.pwrc_pair_weight
+                && hyperparams.pwrc_sensory_threshold > 0.0
+                && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold
+            {
+                continue;
+            }
+            // PWRC per-pair weight (default 1.0 when disabled). Scales
+            // both loss & dl/dy linearly — the gradient is `pair_weight
+            // * dl/dy` because loss is linear in pair_weight.
+            let pair_weight = if hyperparams.pwrc_pair_weight {
+                pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
+            } else {
+                1.0
+            };
             let pred_diff = yb - ya;
             let z = -target * pred_diff;
-            let loss = if z > 50.0 {
+            let loss_raw = if z > 50.0 {
                 z
             } else if z < -50.0 {
                 0.0
             } else {
                 (z.exp() + 1.0).ln()
             };
+            let loss = loss_raw * pair_weight;
             total_loss += loss;
             n_steps += 1;
             steps_since_adam += 1;
 
             let sig_z = 1.0 / (1.0 + (-z).exp());
-            let dl_d_pred_diff = -target * sig_z;
+            let dl_d_pred_diff = -target * sig_z * pair_weight;
             let dl_dya = -dl_d_pred_diff;
             let dl_dyb = dl_d_pred_diff;
 
@@ -799,27 +1075,68 @@ pub fn train_mlp_with_tv(
         }
         // T8.2 final-flush for parallel buffer: handle the partial
         // batch at epoch end if pairs_per_epoch % K != 0. Buffer is
-        // empty in K=1 / non-parallel modes (never populated).
+        // empty in K=1 / non-parallel modes (never populated). When
+        // NiN is on, route the leftover through `run_minibatch_with_nin`
+        // — same routing as the main loop — but only when the leftover
+        // is large enough for stable batch statistics (≥ 16 samples).
+        // Partial batches smaller than 16 are dropped (RNG sequence is
+        // unchanged because we drew them; only the gradient update is
+        // skipped — corresponds to "we observed the pairs but the NiN
+        // batch statistics would be too noisy to use").
         if !parallel_batch_buffer.is_empty() {
-            let (steps_added, loss_added) = run_parallel_minibatch(
-                &parallel_batch_buffer,
-                groups,
-                &std_features,
-                &w1,
-                &b1,
-                &w2,
-                &b2,
-                &mut adam,
-                n_features,
-                n_hidden,
-                hyperparams.leaky_alpha,
-                hyperparams.l2_lambda,
-            );
-            parallel_batch_buffer.clear();
-            total_loss += loss_added;
-            n_steps += steps_added;
-            if steps_added > 0 {
-                adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+            if nin_on {
+                if parallel_batch_buffer.len() >= 16 {
+                    let (steps_added, loss_added) = run_minibatch_with_nin(
+                        &parallel_batch_buffer,
+                        groups,
+                        &std_features,
+                        &w1,
+                        &b1,
+                        &w2,
+                        &b2,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        hyperparams.leaky_alpha,
+                        hyperparams.l2_lambda,
+                        hyperparams.pwrc_pair_weight,
+                        hyperparams.pwrc_sensory_threshold,
+                        hyperparams.pwrc_band_weights.as_deref(),
+                        hyperparams.norm_in_norm_weight,
+                        hyperparams.norm_in_norm_p,
+                        hyperparams.norm_in_norm_q,
+                    );
+                    total_loss += loss_added;
+                    n_steps += steps_added;
+                    if steps_added > 0 {
+                        adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                    }
+                }
+                parallel_batch_buffer.clear();
+            } else {
+                let (steps_added, loss_added) = run_parallel_minibatch(
+                    &parallel_batch_buffer,
+                    groups,
+                    &std_features,
+                    &w1,
+                    &b1,
+                    &w2,
+                    &b2,
+                    &mut adam,
+                    n_features,
+                    n_hidden,
+                    hyperparams.leaky_alpha,
+                    hyperparams.l2_lambda,
+                    hyperparams.pwrc_pair_weight,
+                    hyperparams.pwrc_sensory_threshold,
+                    hyperparams.pwrc_band_weights.as_deref(),
+                );
+                parallel_batch_buffer.clear();
+                total_loss += loss_added;
+                n_steps += steps_added;
+                if steps_added > 0 {
+                    adam.step(&mut w1, &mut b1, &mut w2, &mut b2, lr);
+                }
             }
         }
 
@@ -1253,6 +1570,9 @@ fn run_parallel_minibatch(
     n_hidden: usize,
     alpha: f64,
     l2_lambda: f64,
+    pwrc_enabled: bool,
+    pwrc_sensory_threshold: f64,
+    pwrc_band_weights: Option<&[f64]>,
 ) -> (u64, f64) {
     // Chunk size is a **fixed function of K** (not thread count) so
     // the chunk partition — and therefore the FP reduce order — is
@@ -1301,26 +1621,41 @@ fn run_parallel_minibatch(
                 let (yb, hb_pre, hb) =
                     forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
 
-                let target = (groups[g_idx].human_scores[ia]
-                    - groups[g_idx].human_scores[ib])
-                    .signum();
+                let mos_a = groups[g_idx].human_scores[ia];
+                let mos_b = groups[g_idx].human_scores[ib];
+                let target = (mos_a - mos_b).signum();
                 if target == 0.0 {
                     continue;
                 }
+                // PWRC sensory-threshold drop (Wu et al. 2018) — mirrors
+                // the sequential path. Drops happen before grad accum
+                // so chunk_steps doesn't tick (the Adam step counter
+                // tracks gradient-contributing draws only).
+                if pwrc_enabled
+                    && pwrc_sensory_threshold > 0.0
+                    && (mos_a - mos_b).abs() < pwrc_sensory_threshold
+                {
+                    continue;
+                }
+                let pair_weight = if pwrc_enabled {
+                    pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
+                } else {
+                    1.0
+                };
                 let pred_diff = yb - ya;
                 let z = -target * pred_diff;
-                let loss = if z > 50.0 {
+                let loss_raw = if z > 50.0 {
                     z
                 } else if z < -50.0 {
                     0.0
                 } else {
                     (z.exp() + 1.0).ln()
                 };
-                chunk_loss += loss;
+                chunk_loss += loss_raw * pair_weight;
                 chunk_steps += 1;
 
                 let sig_z = 1.0 / (1.0 + (-z).exp());
-                let dl_d_pred_diff = -target * sig_z;
+                let dl_d_pred_diff = -target * sig_z * pair_weight;
                 let dl_dya = -dl_d_pred_diff;
                 let dl_dyb = dl_d_pred_diff;
 
@@ -1386,6 +1721,235 @@ fn run_parallel_minibatch(
             for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
                 *g += scale * w;
             }
+        }
+    }
+
+    (steps_added, total_loss)
+}
+
+/// Norm-in-Norm + RankNet hybrid mini-batch (Li et al. 2020,
+/// arXiv:2008.03889). Runs the entire mini-batch sequentially because
+/// the Norm-in-Norm loss is batch-correlated: it depends on the mean
+/// and q-norm of the full set of 2K predictions, and chunking the
+/// batch across rayon threads would either change the FP reduce order
+/// per-thread-count (breaks determinism) or require an extra sync
+/// barrier between forward and backward. Sequential within the mini-
+/// batch is fast enough — K ≤ ~2048 is the practical range and at
+/// 372 × 128 the per-pair forward+backward is ~50 µs / pair → ≤ 200
+/// ms per batch — and produces bit-identical bake bytes regardless of
+/// thread pool.
+///
+/// Flow:
+/// 1. Forward all 2K predictions (sequential).
+/// 2. Compute per-pair RankNet loss + per-pair `dl_dya, dl_dyb`
+///    contributions (sequential, identical math to the legacy path).
+/// 3. Compute Norm-in-Norm loss and per-prediction gradient over the
+///    2K (prediction, `-MOS`) pairs in one call to
+///    [`loss_norm_in_norm::compute_norm_in_norm_loss_and_grad`].
+/// 4. Combine: `dl_dy_total = dl_dy_ranknet + β · nin_grad`.
+/// 5. Backward all 2K predictions with the combined `dl_dy_total`
+///    into a single `LocalGrads`, transferred into the AdamState.
+///
+/// **Sign convention**: zensim MLP outputs `raw_distance` (lower =
+/// more similar), opposite of MOS. So the labels passed to NiN are
+/// `-MOS`, not `+MOS`, to keep the Δ direction consistent with
+/// RankNet's `(MOS_a - MOS_b).signum() · (y_a - y_b)` target.
+///
+/// **PWRC composition**: when `pwrc_enabled`, the RankNet term is
+/// scaled per-pair by the PWRC weight. The Norm-in-Norm term is
+/// not — it's a global loss over the whole batch and the per-pair
+/// weight concept doesn't apply (the paper's loss is unweighted).
+///
+/// Returns `(gradient_contributing_steps, accumulated_loss)`. The
+/// caller is responsible for calling `adam.step(...)` after this
+/// (when `steps_added > 0`) to consume the gradients and advance `t`.
+///
+/// Skipped pairs (target=0 OR PWRC sensory drop) contribute 0 to grads
+/// and 0 to steps_added — they're functionally no-ops. Their NiN
+/// contribution is also dropped: the prediction is forward'd but
+/// excluded from the NiN batch (otherwise the NiN batch would have
+/// "ghost" predictions with no matching label gradient pull).
+#[allow(clippy::too_many_arguments)]
+fn run_minibatch_with_nin(
+    samples: &[(usize, usize, usize)],
+    groups: &[TrainingGroup<'_>],
+    std_features: &[Vec<f64>],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    adam: &mut AdamState,
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+    l2_lambda: f64,
+    pwrc_enabled: bool,
+    pwrc_sensory_threshold: f64,
+    pwrc_band_weights: Option<&[f64]>,
+    nin_weight: f64,
+    nin_p: f64,
+    nin_q: f64,
+) -> (u64, f64) {
+    // Per-pair forward outputs kept around for the second pass (the
+    // NiN-augmented backward). `Option` because skipped pairs (target
+    // = 0 or PWRC drop) contribute nothing.
+    struct PairForward<'a> {
+        xa: &'a [f64],
+        xb: &'a [f64],
+        ya: f64,
+        yb: f64,
+        ha_pre: Vec<f64>,
+        ha: Vec<f64>,
+        hb_pre: Vec<f64>,
+        hb: Vec<f64>,
+        // RankNet contributions (already PWRC-scaled when enabled).
+        dl_dya_rn: f64,
+        dl_dyb_rn: f64,
+        ranknet_loss: f64,
+        mos_a: f64,
+        mos_b: f64,
+    }
+    let mut forwards: Vec<Option<PairForward<'_>>> = Vec::with_capacity(samples.len());
+    let mut total_loss = 0.0f64;
+    let mut steps_added: u64 = 0;
+
+    for &(g_idx, ia, ib) in samples {
+        let g_feats = &std_features[g_idx];
+        let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
+        let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+        let mos_a = groups[g_idx].human_scores[ia];
+        let mos_b = groups[g_idx].human_scores[ib];
+        let target = (mos_a - mos_b).signum();
+        if target == 0.0 {
+            forwards.push(None);
+            continue;
+        }
+        if pwrc_enabled
+            && pwrc_sensory_threshold > 0.0
+            && (mos_a - mos_b).abs() < pwrc_sensory_threshold
+        {
+            forwards.push(None);
+            continue;
+        }
+        let pair_weight = if pwrc_enabled {
+            pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
+        } else {
+            1.0
+        };
+        let (ya, ha_pre, ha) = forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
+        let (yb, hb_pre, hb) = forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
+        let pred_diff = yb - ya;
+        let z = -target * pred_diff;
+        let loss_raw = if z > 50.0 {
+            z
+        } else if z < -50.0 {
+            0.0
+        } else {
+            (z.exp() + 1.0).ln()
+        };
+        let loss = loss_raw * pair_weight;
+        total_loss += loss;
+        steps_added += 1;
+
+        let sig_z = 1.0 / (1.0 + (-z).exp());
+        let dl_d_pred_diff = -target * sig_z * pair_weight;
+        let dl_dya_rn = -dl_d_pred_diff;
+        let dl_dyb_rn = dl_d_pred_diff;
+
+        forwards.push(Some(PairForward {
+            xa,
+            xb,
+            ya,
+            yb,
+            ha_pre,
+            ha,
+            hb_pre,
+            hb,
+            dl_dya_rn,
+            dl_dyb_rn,
+            ranknet_loss: loss,
+            mos_a,
+            mos_b,
+        }));
+    }
+    // Sanity: total_loss already accumulated above. Pull the ranknet
+    // loss field back out per-pair only for diagnostics; the running
+    // `total_loss` is canonical.
+    let _ = |p: &PairForward<'_>| p.ranknet_loss;
+
+    // Compute Norm-in-Norm loss + per-prediction gradient over the 2N
+    // surviving predictions. Labels = -MOS so the NiN gradient pulls
+    // in the same `distance ↔ -MOS` direction as the RankNet term
+    // (see function docstring for sign convention).
+    let mut nin_preds: Vec<f64> = Vec::with_capacity(2 * forwards.len());
+    let mut nin_labels: Vec<f64> = Vec::with_capacity(2 * forwards.len());
+    // Map: nin_preds index → (pair_idx, is_b). We need this to scatter
+    // the per-prediction gradient back to the right pair forward.
+    let mut nin_idx_map: Vec<(usize, bool)> = Vec::with_capacity(2 * forwards.len());
+    for (pi, p) in forwards.iter().enumerate() {
+        if let Some(p) = p {
+            nin_preds.push(p.ya);
+            nin_labels.push(-p.mos_a);
+            nin_idx_map.push((pi, false));
+            nin_preds.push(p.yb);
+            nin_labels.push(-p.mos_b);
+            nin_idx_map.push((pi, true));
+        }
+    }
+    let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
+            &nin_preds, &nin_labels, nin_p, nin_q,
+        )
+    } else {
+        (0.0, vec![0.0; nin_preds.len()])
+    };
+    total_loss += nin_weight * nin_loss;
+
+    // Backward pass: combine the per-prediction NiN gradient with the
+    // per-pair RankNet `dl_dy` contributions and run backprop into a
+    // single LocalGrads. Sequential — same FP reduce order regardless
+    // of thread count, identical for any pool size.
+    let mut local = LocalGrads::zero(n_features, n_hidden);
+    for (nin_pos, &(pi, is_b)) in nin_idx_map.iter().enumerate() {
+        let p = forwards[pi].as_ref().expect("None pair excluded above");
+        let nin_g = nin_grad[nin_pos] * nin_weight;
+        if is_b {
+            let dl_dy_b = p.dl_dyb_rn + nin_g;
+            backprop_into(
+                &mut local, p.xb, &p.hb_pre, &p.hb, dl_dy_b, w2, n_features, n_hidden, alpha,
+            );
+        } else {
+            let dl_dy_a = p.dl_dya_rn + nin_g;
+            backprop_into(
+                &mut local, p.xa, &p.ha_pre, &p.ha, dl_dy_a, w2, n_features, n_hidden, alpha,
+            );
+        }
+    }
+
+    // Transfer accumulated grads into AdamState's per-param buffers.
+    for (a, b) in adam.gw1.iter_mut().zip(local.gw1.iter()) {
+        *a += b;
+    }
+    for (a, b) in adam.gb1.iter_mut().zip(local.gb1.iter()) {
+        *a += b;
+    }
+    for (a, b) in adam.gw2.iter_mut().zip(local.gw2.iter()) {
+        *a += b;
+    }
+    adam.gb2[0] += local.gb2[0];
+
+    // L2 regularization: in the sequential path L2 is applied once per
+    // pair (so K pair updates add K*λ*w to grads). Mirror that scaling
+    // here: apply L2 `steps_added` times (counts only gradient-
+    // contributing pairs, matching the existing run_parallel_minibatch
+    // convention).
+    if l2_lambda > 0.0 && steps_added > 0 {
+        let scale = l2_lambda * steps_added as f64;
+        for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+            *g += scale * w;
+        }
+        for (g, &w) in adam.gw2.iter_mut().zip(w2.iter()) {
+            *g += scale * w;
         }
     }
 
@@ -2094,5 +2658,750 @@ mod tests {
             "K=64 SROCC {srocc_k64_seq:.4} differs from K=1 SROCC {srocc_k1:.4} by {delta:.4} — \
              expected within 0.05 (mini-batching shouldn't hurt convergence by much on this toy)"
         );
+    }
+
+    // ---- PWRC tests (2026-05-17) ----
+
+    /// `--pwrc-pair-weight` off (default) MUST produce bit-identical
+    /// bake bytes to a hyperparams struct that never mentions PWRC.
+    /// This is the load-bearing backwards-compatibility guarantee
+    /// promised in `MlpHyperparams::pwrc_pair_weight` docs.
+    #[test]
+    fn train_mlp_pwrc_disabled_matches_legacy() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(303, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        // Re-scale targets to span 0..100 so they look like score_zensim units.
+        let t_min = targets.iter().copied().fold(f64::INFINITY, f64::min);
+        let t_max = targets.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let scaled_targets: Vec<f64> = targets
+            .iter()
+            .map(|&t| 100.0 * (t - t_min) / (t_max - t_min).max(1e-12))
+            .collect();
+
+        let group_factory = || TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &scaled_targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 25,
+            pairs_per_epoch: 800,
+            initial_lr: 0.005,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            ..Default::default()
+        };
+
+        let mut log_a = Vec::new();
+        let bake_default = train_mlp(&[group_factory()], n_features, &base, &mut log_a);
+
+        // Explicit pwrc_pair_weight=false — must match.
+        let hyper_explicit_off = MlpHyperparams {
+            pwrc_pair_weight: false,
+            pwrc_sensory_threshold: 5.0, // ignored when off
+            pwrc_band_weights: Some(vec![10.0, 5.0, 1.0]), // also ignored when off
+            ..base.clone()
+        };
+        let mut log_b = Vec::new();
+        let bake_explicit_off = train_mlp(&[group_factory()], n_features, &hyper_explicit_off, &mut log_b);
+
+        assert_eq!(
+            bake_default, bake_explicit_off,
+            "explicit pwrc_pair_weight=false produced different bake than default — \
+             the no-op / bit-identical guarantee is broken"
+        );
+
+        // pwrc_pair_weight=true MUST produce different bytes (sanity:
+        // the weighting is actually being applied somewhere).
+        let hyper_on = MlpHyperparams {
+            pwrc_pair_weight: true,
+            pwrc_sensory_threshold: 0.0, // no drops, only weighting
+            pwrc_band_weights: None,
+            ..base.clone()
+        };
+        let mut log_c = Vec::new();
+        let bake_on = train_mlp(&[group_factory()], n_features, &hyper_on, &mut log_c);
+        assert_ne!(
+            bake_default, bake_on,
+            "pwrc_pair_weight=true produced byte-identical bake to off — \
+             the weighting is not being applied to the loss/grad scalars"
+        );
+
+        // Same with K>1 / parallel batch: K=8 + PWRC off must match
+        // K=8 + PWRC absent (sequential path mirror for the parallel
+        // path's PWRC handling).
+        let hyper_k8 = MlpHyperparams {
+            minibatch_size: 8,
+            ..base.clone()
+        };
+        let hyper_k8_pwrc_off = MlpHyperparams {
+            minibatch_size: 8,
+            pwrc_pair_weight: false,
+            pwrc_sensory_threshold: 5.0,
+            pwrc_band_weights: Some(vec![1.0, 2.0]),
+            ..base.clone()
+        };
+        let mut log_d = Vec::new();
+        let mut log_e = Vec::new();
+        let bake_k8 = train_mlp(&[group_factory()], n_features, &hyper_k8, &mut log_d);
+        let bake_k8_off = train_mlp(&[group_factory()], n_features, &hyper_k8_pwrc_off, &mut log_e);
+        assert_eq!(
+            bake_k8, bake_k8_off,
+            "K=8 + explicit pwrc_pair_weight=false produced different bake than K=8 + default — \
+             the parallel-batch PWRC plumbing is not no-op when off"
+        );
+    }
+
+    /// `pwrc_pair_weight(a, b, None)` and `pwrc_pair_weight(a, b,
+    /// Some([...]))` produce the documented closed-form / band-lookup
+    /// results. Direct unit test of the public helper.
+    #[test]
+    fn pwrc_pair_weight_helper_formula() {
+        // Closed-form: exp(max/100). max=0 -> 1.0; max=100 -> e.
+        let w_lo = pwrc_pair_weight(0.0, 0.0, None);
+        let w_hi = pwrc_pair_weight(100.0, 50.0, None);
+        let w_mid = pwrc_pair_weight(50.0, 30.0, None);
+        assert!((w_lo - 1.0).abs() < 1e-12, "max=0 -> exp(0)=1, got {w_lo}");
+        assert!(
+            (w_hi - std::f64::consts::E).abs() < 1e-12,
+            "max=100 -> exp(1)=e, got {w_hi}"
+        );
+        assert!(
+            (w_mid - (0.5f64).exp()).abs() < 1e-12,
+            "max=50 -> exp(0.5), got {w_mid}"
+        );
+
+        // Band weights: 10-band grid, max=5 -> band 0; max=15 -> band 1;
+        // max=100 -> band 9 (clamped).
+        let bands = vec![5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 1.0, 1.0, 1.0, 1.0];
+        assert_eq!(pwrc_pair_weight(5.0, 0.0, Some(&bands)), 5.0);
+        assert_eq!(pwrc_pair_weight(15.0, 0.0, Some(&bands)), 4.0);
+        assert_eq!(pwrc_pair_weight(99.999, 0.0, Some(&bands)), 1.0);
+        // MOS=100 lands in the last bin (clamp).
+        assert_eq!(pwrc_pair_weight(100.0, 0.0, Some(&bands)), 1.0);
+
+        // NaN / negative / out-of-range MOS: clamp to [0, 100].
+        // Note: NaN propagates through `max` per IEEE 754 but f64::max
+        // in Rust uses total-cmp semantics; we clamp afterwards anyway.
+        assert_eq!(pwrc_pair_weight(-10.0, -5.0, Some(&bands)), 5.0); // clamped to 0 -> band 0
+        assert_eq!(pwrc_pair_weight(150.0, 0.0, Some(&bands)), 1.0);  // clamped to 100 -> band 9
+
+        // Single-element band vector: every MOS maps to index 0.
+        let one = vec![7.0];
+        assert_eq!(pwrc_pair_weight(0.0, 0.0, Some(&one)), 7.0);
+        assert_eq!(pwrc_pair_weight(100.0, 0.0, Some(&one)), 7.0);
+    }
+
+    /// Sensory-threshold drop: with `T = 50.0` on a [0, 100]-spread
+    /// dataset, ~half of all randomly-drawn pairs should be dropped.
+    /// Verify by training with a heavy ST and checking that the
+    /// resulting bake is non-trivially different from the no-drop
+    /// counterpart (the n_steps counter accounts only for kept pairs).
+    #[test]
+    fn train_mlp_pwrc_dropping_ties_drops_them() {
+        let n_features = 4;
+        let mut rng = SplitMix64::new(42);
+        let n = 200usize;
+        let mut targets = Vec::with_capacity(n);
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = 100.0 * (i as f64) / (n as f64 - 1.0); // 0..100, dense
+            targets.push(s);
+            let mut x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+            x[0] = s / 100.0 + rng.next_normal() * 0.1;
+            features_owned.push(x);
+        }
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+
+        let group_factory = || TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 6,
+            n_epochs: 30,
+            pairs_per_epoch: 1000,
+            initial_lr: 0.01,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            // Disable weighting so we isolate the threshold effect.
+            pwrc_pair_weight: true,
+            pwrc_sensory_threshold: 0.0,
+            pwrc_band_weights: Some(vec![1.0]), // every pair gets weight 1.0
+            ..Default::default()
+        };
+        let mut log_no_drop = Vec::new();
+        let bake_no_drop = train_mlp(&[group_factory()], n_features, &base, &mut log_no_drop);
+
+        // Heavy threshold: drop pairs within 50 MOS units.
+        let hyper_drop = MlpHyperparams {
+            pwrc_sensory_threshold: 50.0,
+            ..base.clone()
+        };
+        let mut log_drop = Vec::new();
+        let bake_drop = train_mlp(&[group_factory()], n_features, &hyper_drop, &mut log_drop);
+
+        assert_ne!(
+            bake_no_drop, bake_drop,
+            "pwrc_sensory_threshold=50 dropped pairs but bake bytes unchanged — \
+             the drop is not affecting the gradient stream"
+        );
+
+        // The T=50 trainer drops ~75% of pairs (P(|Δ|<50) on uniform
+        // 0..100 ≈ 0.75), so its weights move ~4x less per epoch.
+        // After 30 epochs, the no-drop model has seen ~30k gradient
+        // updates vs ~7.5k for the drop model. Confirm this via the
+        // log's loss trajectory: drop-model's epoch-0 loss should be
+        // close to no-drop's, but the drop-model converges slower.
+        //
+        // Direct evidence: pass T=10000 (drop EVERY pair, single-
+        // epoch n_steps=0) and confirm the bake is also distinct
+        // from baseline AND from T=50 drop (n_steps=0 every epoch
+        // means total_loss/n_steps=0 and no weight updates AT ALL).
+        let hyper_drop_all = MlpHyperparams {
+            pwrc_sensory_threshold: 10_000.0, // exceeds any |a-b|
+            ..base.clone()
+        };
+        let mut log_drop_all = Vec::new();
+        let bake_drop_all = train_mlp(&[group_factory()], n_features, &hyper_drop_all, &mut log_drop_all);
+        // With every pair dropped, the trainer never updates weights
+        // and bakes the random Xavier init. Different from baseline.
+        assert_ne!(
+            bake_no_drop, bake_drop_all,
+            "T=10000 (drop-all) bake matches baseline — the threshold gate is broken"
+        );
+        // Different from T=50 drop too (T=50 still updates on ~25% of pairs).
+        assert_ne!(
+            bake_drop, bake_drop_all,
+            "T=50 and T=10000 produced identical bakes — the dropout fraction \
+             is not actually controlled by the threshold"
+        );
+
+        // Loss inspection: parse `loss=NNN.NNNN` from each per-epoch
+        // log line. The drop=all bake's avg_loss is total_loss/n_steps
+        // = 0/0 -> 0.0; baseline's is positive.
+        let parse_loss = |log: &[String]| -> Vec<f64> {
+            log.iter()
+                .filter_map(|line| {
+                    line.find(" loss=").and_then(|i| {
+                        let tail = &line[i + " loss=".len()..];
+                        let end = tail
+                            .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+                            .unwrap_or(tail.len());
+                        tail[..end].parse::<f64>().ok()
+                    })
+                })
+                .collect()
+        };
+        let losses_no_drop = parse_loss(&log_no_drop);
+        let losses_drop_all = parse_loss(&log_drop_all);
+        assert!(!losses_no_drop.is_empty(), "no-drop log missing loss=");
+        assert!(!losses_drop_all.is_empty(), "drop-all log missing loss=");
+        assert!(
+            losses_no_drop[0] > 0.0,
+            "no-drop epoch-0 loss should be positive, got {}",
+            losses_no_drop[0]
+        );
+        assert!(
+            losses_drop_all[0] == 0.0,
+            "drop-all epoch-0 loss should be 0.0 (no pairs survived), got {}",
+            losses_drop_all[0]
+        );
+    }
+
+    /// PWRC band weighting must scale gradients: a high-weight band
+    /// (e.g., B0=10.0) MUST produce a larger Adam update than the
+    /// same pair drawn with weight 1.0. Verify by running 1-step
+    /// training with a single low-q pair drawn N times under two
+    /// weight schedules and comparing the bake-output magnitudes.
+    #[test]
+    fn train_mlp_pwrc_weights_amplify_low_q() {
+        let n_features = 4;
+        let mut rng = SplitMix64::new(11);
+        // Build a dataset that ONLY contains low-q pairs (all scores
+        // < 10), so every drawn pair lands in band 0. This isolates
+        // the band-weight effect.
+        let n = 50usize;
+        let mut targets = Vec::with_capacity(n);
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = 10.0 * (i as f64) / (n as f64 - 1.0); // 0..10
+            targets.push(s);
+            let mut x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+            x[0] = s / 10.0 + rng.next_normal() * 0.1;
+            features_owned.push(x);
+        }
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+
+        let group_factory = || TrainingGroup {
+            name: "lowq".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 6,
+            n_epochs: 20,
+            pairs_per_epoch: 500,
+            initial_lr: 0.001,
+            seed: 11,
+            log_every: 100,
+            early_stop_patience: 0,
+            pwrc_pair_weight: true,
+            pwrc_sensory_threshold: 0.0,
+            // 10-band grid: band 0 is for max_MOS in [0, 10).
+            ..Default::default()
+        };
+
+        // Weight 1.0 in band 0 (baseline).
+        let hyper_w1 = MlpHyperparams {
+            pwrc_band_weights: Some(vec![1.0; 10]),
+            ..base.clone()
+        };
+        let mut log_w1 = Vec::new();
+        let _bake_w1 = train_mlp(&[group_factory()], n_features, &hyper_w1, &mut log_w1);
+
+        // Weight 10.0 in band 0.
+        let mut bands_hi = vec![1.0; 10];
+        bands_hi[0] = 10.0;
+        let hyper_w10 = MlpHyperparams {
+            pwrc_band_weights: Some(bands_hi),
+            ..base.clone()
+        };
+        let mut log_w10 = Vec::new();
+        let _bake_w10 = train_mlp(&[group_factory()], n_features, &hyper_w10, &mut log_w10);
+
+        // The per-epoch loss line should reflect higher loss
+        // magnitude at weight=10 (since loss is scaled by weight).
+        let parse_loss = |log: &[String]| -> Vec<f64> {
+            log.iter()
+                .filter_map(|line| {
+                    line.find(" loss=").and_then(|i| {
+                        let tail = &line[i + " loss=".len()..];
+                        let end = tail
+                            .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+                            .unwrap_or(tail.len());
+                        tail[..end].parse::<f64>().ok()
+                    })
+                })
+                .collect()
+        };
+        let losses_w1 = parse_loss(&log_w1);
+        let losses_w10 = parse_loss(&log_w10);
+        assert!(!losses_w1.is_empty() && !losses_w10.is_empty(),
+            "log missing avg_loss= (w1: {}, w10: {})",
+            losses_w1.len(), losses_w10.len());
+        // First-epoch avg_loss at weight=10 must be substantially
+        // larger than at weight=1 (the same pred_diff distribution
+        // is scaled 10x).
+        let l1 = losses_w1[0];
+        let l10 = losses_w10[0];
+        assert!(
+            l10 > l1 * 3.0,
+            "weight=10 first-epoch avg_loss {l10:.4} should be >= 3x weight=1 first-epoch avg_loss {l1:.4} \
+             (expect ~10x; allow 3x margin for accumulator FP differences)"
+        );
+    }
+
+    /// PWRC-on training must still converge on a synthetic dataset.
+    /// This rules out gradient blow-up / sign-flip bugs from the
+    /// pair_weight scaling.
+    #[test]
+    fn train_mlp_pwrc_converges() {
+        let n_features = 16;
+        let n_train = 300;
+        let mut rng = SplitMix64::new(7);
+        let true_w: Vec<f64> = (0..n_features)
+            .map(|i| (i as f64 - 8.0) * 0.3 + rng.next_normal() * 0.1)
+            .collect();
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n_train);
+        let mut targets: Vec<f64> = Vec::with_capacity(n_train);
+        for _ in 0..n_train {
+            let x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+            let mut y: f64 = x.iter().zip(true_w.iter()).map(|(a, b)| a * b).sum();
+            y += 0.1 * x[0] * x[0];
+            y += rng.next_normal() * 0.05;
+            features_owned.push(x);
+            targets.push(y);
+        }
+        // Rescale targets to [0, 100] so PWRC band weights interpret
+        // them as score_zensim units.
+        let t_min = targets.iter().copied().fold(f64::INFINITY, f64::min);
+        let t_max = targets.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let scaled: Vec<f64> = targets
+            .iter()
+            .map(|&t| 100.0 * (t - t_min) / (t_max - t_min).max(1e-12))
+            .collect();
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &scaled,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let hyper = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 80,
+            pairs_per_epoch: 1500,
+            initial_lr: 0.005,
+            log_every: 100,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            pwrc_pair_weight: true,
+            pwrc_sensory_threshold: 5.0,
+            pwrc_band_weights: None, // closed-form Wu 2018 default
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+
+        let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+        let model = Model::from_bytes(leaked).expect("bake should load");
+        let mut predictor = Predictor::new(&model);
+
+        let preds: Vec<f64> = features_owned
+            .iter()
+            .map(|f| predict_one(&mut predictor, f))
+            .collect();
+        let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
+        let srocc = spearman_correlation(&scaled, &neg_preds);
+        assert!(
+            srocc > 0.80,
+            "PWRC-on trainer failed to converge on synthetic ranking: SROCC={srocc:.4}"
+        );
+    }
+
+    // ---- Norm-in-Norm + RankNet hybrid tests (Li 2020) ----
+
+    /// `--norm-in-norm-weight 0.0` (default) MUST produce bit-identical
+    /// bake bytes to a `MlpHyperparams::default()` call — the legacy
+    /// compatibility guarantee. Same RNG sequence, same Adam cadence,
+    /// no NiN code path entered (verified by absence of NiN log line).
+    #[test]
+    fn train_mlp_nin_disabled_matches_legacy() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(101, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+
+        let group_factory = || TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 25,
+            pairs_per_epoch: 800,
+            initial_lr: 0.005,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            ..Default::default()
+        };
+
+        // K=1 default (legacy code path; both NiN and minibatch off).
+        let mut log_a = Vec::new();
+        let bake_default = train_mlp(&[group_factory()], n_features, &base, &mut log_a);
+
+        // Explicit norm_in_norm_weight=0.0 — must match.
+        let hyper_explicit_off = MlpHyperparams {
+            norm_in_norm_weight: 0.0,
+            norm_in_norm_p: 1.0,
+            norm_in_norm_q: 2.0,
+            ..base.clone()
+        };
+        let mut log_b = Vec::new();
+        let bake_explicit_off = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_explicit_off,
+            &mut log_b,
+        );
+        assert_eq!(
+            bake_default, bake_explicit_off,
+            "norm_in_norm_weight=0.0 (default) produced different bake than \
+             explicit 0.0 — the no-op / bit-identical guarantee is broken"
+        );
+        assert!(
+            !log_a.iter().any(|l| l.contains("Norm-in-Norm")),
+            "NiN log line should not appear when weight=0.0"
+        );
+
+        // K=64 minibatch + parallel_batch + NiN-off must match the
+        // pre-NiN K=64 trainer (i.e., the existing T8.2 path).
+        let hyper_k64 = MlpHyperparams {
+            minibatch_size: 64,
+            parallel_batch: true,
+            ..base.clone()
+        };
+        let mut log_c = Vec::new();
+        let bake_k64_legacy = train_mlp(&[group_factory()], n_features, &hyper_k64, &mut log_c);
+
+        let hyper_k64_nin_off = MlpHyperparams {
+            norm_in_norm_weight: 0.0,
+            ..hyper_k64.clone()
+        };
+        let mut log_d = Vec::new();
+        let bake_k64_nin_off = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_k64_nin_off,
+            &mut log_d,
+        );
+        assert_eq!(
+            bake_k64_legacy, bake_k64_nin_off,
+            "K=64 with norm_in_norm_weight=0.0 produced different bake than \
+             K=64 alone — NiN-off path must route through the legacy parallel \
+             code path, not the NiN path"
+        );
+    }
+
+    /// With `β=0.1, p=1, q=2`, the hybrid trainer MUST reach comparable
+    /// SROCC to RankNet-alone on a synthetic ranking problem. Per Li
+    /// 2020 Table 2 the hybrid wins by ~0.01 SROCC on real corpora; on
+    /// synthetic toys the two should be within noise (we accept ≥ 0.80
+    /// SROCC and within 0.10 of pure-RankNet — generous because the
+    /// NiN path uses a different forward order / Adam cadence).
+    #[test]
+    fn train_mlp_norm_in_norm_converges() {
+        let n_features = 16;
+        let n_train = 400;
+        let (features_owned, targets) = make_synth_dataset(303, n_train, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+
+        let group_factory = || TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let eval_srocc = |bake: &[u8]| -> f64 {
+            let leaked: &'static [u8] = Box::leak(bake.to_vec().into_boxed_slice());
+            let model = Model::from_bytes(leaked).expect("bake should load");
+            let mut predictor = Predictor::new(&model);
+            let preds: Vec<f64> = features_owned
+                .iter()
+                .map(|f| predict_one(&mut predictor, f))
+                .collect();
+            let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
+            spearman_correlation(&targets, &neg_preds)
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 12,
+            n_epochs: 80,
+            pairs_per_epoch: 2000,
+            initial_lr: 0.005,
+            seed: 7,
+            log_every: 100,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            minibatch_size: 32,
+            parallel_batch: true,
+            ..Default::default()
+        };
+
+        // RankNet-only baseline at the same K.
+        let mut log_rn = Vec::new();
+        let bake_rn = train_mlp(&[group_factory()], n_features, &base, &mut log_rn);
+        let srocc_rn = eval_srocc(&bake_rn);
+
+        // Hybrid β=0.1, p=1, q=2 (paper-recommended).
+        let hybrid = MlpHyperparams {
+            norm_in_norm_weight: 0.1,
+            norm_in_norm_p: 1.0,
+            norm_in_norm_q: 2.0,
+            ..base.clone()
+        };
+        let mut log_h = Vec::new();
+        let bake_h = train_mlp(&[group_factory()], n_features, &hybrid, &mut log_h);
+        let srocc_h = eval_srocc(&bake_h);
+
+        // Both must learn the ranking; hybrid is within 0.1 of RN.
+        assert!(
+            srocc_rn > 0.80,
+            "RankNet baseline failed to recover synthetic ranking: SROCC={srocc_rn:.4}"
+        );
+        assert!(
+            srocc_h > 0.80,
+            "NiN+RankNet hybrid failed to recover synthetic ranking: SROCC={srocc_h:.4}"
+        );
+        let delta = (srocc_rn - srocc_h).abs();
+        assert!(
+            delta < 0.10,
+            "Hybrid SROCC {srocc_h:.4} differs from RN SROCC {srocc_rn:.4} by \
+             {delta:.4} — expected within 0.10 on this synthetic"
+        );
+        // Hybrid log MUST mention NiN activation (sanity check that
+        // the path was actually taken).
+        assert!(
+            log_h.iter().any(|l| l.contains("Norm-in-Norm")),
+            "Hybrid log missing NiN activation line — path may not have been entered"
+        );
+    }
+
+    /// With β=0.1, the trained MLP's output range should be closer to
+    /// the (negated) MOS range than pure RankNet's. RankNet is rank-
+    /// only and produces unbounded outputs; NiN normalizes to the
+    /// label scale via batch statistics. This is the calibration win
+    /// the paper claims at the trainer level (not just at eval-time
+    /// post-hoc affine).
+    ///
+    /// **Test design**: train both at K=32 on a 200-pair synthetic
+    /// where MOS ∈ [0, 100]. RankNet should produce wider-range
+    /// predictions (output range many σs wide); hybrid should produce
+    /// a tighter range that — after sign-flip — lands closer to the
+    /// MOS distribution's [0, 100] envelope.
+    #[test]
+    fn train_mlp_norm_in_norm_helps_calibration() {
+        let n_features = 8;
+        let mut rng = SplitMix64::new(151);
+        let n = 200usize;
+        let mut targets: Vec<f64> = Vec::with_capacity(n);
+        let mut features_owned: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = 100.0 * (i as f64) / (n as f64 - 1.0); // 0..100
+            targets.push(s);
+            let mut x: Vec<f64> = (0..n_features).map(|_| rng.next_normal()).collect();
+            x[0] = s / 100.0 + rng.next_normal() * 0.1;
+            features_owned.push(x);
+        }
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group_factory = || TrainingGroup {
+            name: "calib".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+
+        let base = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 60,
+            pairs_per_epoch: 1500,
+            initial_lr: 0.005,
+            seed: 13,
+            log_every: 100,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            minibatch_size: 32,
+            parallel_batch: true,
+            ..Default::default()
+        };
+        let hybrid = MlpHyperparams {
+            norm_in_norm_weight: 0.1,
+            norm_in_norm_p: 1.0,
+            norm_in_norm_q: 2.0,
+            ..base.clone()
+        };
+
+        let mut log_rn = Vec::new();
+        let bake_rn = train_mlp(&[group_factory()], n_features, &base, &mut log_rn);
+        let mut log_h = Vec::new();
+        let bake_h = train_mlp(&[group_factory()], n_features, &hybrid, &mut log_h);
+
+        let preds = |bake: &[u8]| -> Vec<f64> {
+            let leaked: &'static [u8] = Box::leak(bake.to_vec().into_boxed_slice());
+            let model = Model::from_bytes(leaked).expect("bake should load");
+            let mut predictor = Predictor::new(&model);
+            // Trainer output is distance-like (LOWER = higher MOS), so
+            // negate to put predictions on the MOS axis for range
+            // comparison. The MOS range here is [0, 100].
+            features_owned
+                .iter()
+                .map(|f| -predict_one(&mut predictor, f))
+                .collect()
+        };
+        let p_rn = preds(&bake_rn);
+        let p_h = preds(&bake_h);
+        // Compute range as (max - min) of each prediction set.
+        let range = |p: &[f64]| -> f64 {
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            for &v in p {
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            hi - lo
+        };
+        let r_rn = range(&p_rn);
+        let r_h = range(&p_h);
+        // The hybrid's range may be smaller (calibration to label scale)
+        // or larger (the NiN gradient pulls toward the MOS range scale,
+        // which is ~100 units, while pure RankNet typically produces
+        // smaller-range outputs since it's optimizing pairwise margins).
+        // What we ACTUALLY want to assert is that the hybrid output
+        // range is closer to the MOS range (= 100) than RankNet's.
+        let mos_range = 100.0f64;
+        let dist_rn = (r_rn - mos_range).abs();
+        let dist_h = (r_h - mos_range).abs();
+        assert!(
+            dist_h < dist_rn,
+            "Hybrid range {r_h:.2} should be closer to MOS range {mos_range} than \
+             RankNet's {r_rn:.2}; got dist_h={dist_h:.2}, dist_rn={dist_rn:.2}"
+        );
+        // Also assert the hybrid output doesn't blow up to insane
+        // ranges (calibration sanity bound from task spec).
+        assert!(
+            r_h < 500.0,
+            "Hybrid output range {r_h:.2} exceeds [0, 500] — gradient may be \
+             miscalibrated or NiN sign convention wrong"
+        );
+    }
+
+    /// `--norm-in-norm-weight > 0` with K < 16 MUST panic with a clear
+    /// message at trainer entry — the batch statistics required for
+    /// NiN are unstable below ~16 samples.
+    #[test]
+    #[should_panic(expected = "requires --minibatch-size >= 16")]
+    fn train_mlp_norm_in_norm_errors_on_small_k() {
+        let n_features = 4;
+        let (features_owned, targets) = make_synth_dataset(401, 50, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "tiny".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 4,
+            n_epochs: 5,
+            pairs_per_epoch: 100,
+            minibatch_size: 8, // < 16 → must error
+            parallel_batch: true,
+            norm_in_norm_weight: 0.1,
+            norm_in_norm_p: 1.0,
+            norm_in_norm_q: 2.0,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let _ = train_mlp(&[group], n_features, &hyper, &mut log);
     }
 }

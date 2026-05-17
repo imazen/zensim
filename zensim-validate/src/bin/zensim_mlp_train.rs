@@ -400,23 +400,143 @@ struct Args {
     #[arg(long, default_value_t = 1, value_name = "K")]
     minibatch_size: usize,
 
-    /// T8.2 (2026-05-16): enable rayon parallel-batch within each
-    /// mini-batch. Implies `--minibatch-size > 1` (no-op when K=1).
-    ///
-    /// **Speedup target**: ~10-25× on a 16-core AMD Ryzen 9 7950X at
-    /// K=64 vs sequential K=1, per the T8.1+T8.2 perf analysis.
-    ///
-    /// **Determinism preserved**: the K sample draws are sequential
-    /// on the main RNG; only forward+backward are dispatched to
-    /// rayon, and the per-pair LocalGrads reduce runs sequentially
-    /// in source order. Same `--seed N --minibatch-size K
-    /// --parallel-batch` produces bit-identical bake bytes regardless
-    /// of `RAYON_NUM_THREADS`.
-    ///
-    /// **No-op when --minibatch-size == 1** — the sequential per-pair
-    /// path is always taken to preserve legacy bit-identity.
-    #[arg(long, default_value_t = false)]
+    /// **DEPRECATED**: rayon parallel-batch is now ALWAYS on when
+    /// `--minibatch-size > 1` (no behavior change vs sequential —
+    /// bit-identical bake bytes per the T8.2 determinism gate). The
+    /// flag is kept for backwards compatibility but has no effect.
+    /// Removed CLAUDE.md "fast mode on by default" gate, 2026-05-17.
+    #[arg(long, default_value_t = true, hide = true)]
     parallel_batch: bool,
+
+    /// Enable PWRC-aligned pair weighting (Wu et al. 2018, IEEE TIP
+    /// DOI 10.1109/TIP.2018.2799331; reference MATLAB at
+    /// <https://github.com/wqb-uestc/PWRC>). When set, each drawn
+    /// RankNet pair's loss and gradient are multiplied by the
+    /// label-only PWRC weight `exp(max(MOS_a, MOS_b) / 100)` (closed-
+    /// form default), and pairs with `|ΔMOS| < --pwrc-sensory-
+    /// threshold` are dropped as perceptually tied.
+    ///
+    /// **Off (default)**: bit-identical to the pre-PWRC trainer —
+    /// every pair contributes weight 1.0, no threshold dropping.
+    ///
+    /// **Determinism note**: enabling PWRC does not change the RNG
+    /// stream; same `--seed N` yields the same `(group, ia, ib)`
+    /// draw sequence, with some pairs filtered out by the sensory
+    /// threshold. The Adam mini-batch counter advances only for
+    /// gradient-contributing draws.
+    ///
+    /// Use `--pwrc-band-weights` to override the closed-form weight
+    /// with an explicit per-band schedule (e.g., to invert the Wu
+    /// 2018 direction and upweight B0..B5, the zensim "low-q
+    /// priority" target per CLAUDE.md "B0..B5 lift is the dominant
+    /// priority"). See `benchmarks/v0_X_pwrc_design_2026-05-17.md`
+    /// for design rationale + expected ablation behavior.
+    #[arg(long, default_value_t = false)]
+    pwrc_pair_weight: bool,
+
+    /// PWRC sensory threshold `T` (Wu et al. 2018) on the same scale
+    /// as `human_score` (= `score_zensim` 0..100 after `--target-
+    /// scale`). Pairs with `|MOS_a - MOS_b| < T` are dropped from
+    /// training as perceptually tied. Default 5.0 matches the
+    /// published recommendation (~5 % of a 100-unit MOS range).
+    ///
+    /// Set to 0.0 to disable threshold-based dropping while keeping
+    /// the per-pair weighting active. Active only when `--pwrc-pair-
+    /// weight` is set.
+    #[arg(long, default_value_t = 5.0, value_name = "FLOAT")]
+    pwrc_sensory_threshold: f64,
+
+    /// Optional explicit per-band weight vector for `--pwrc-pair-
+    /// weight`. Comma-separated f64 values; each entry's bin is
+    /// `[i*100/N, (i+1)*100/N)` for `N = len(values)`. Example:
+    ///
+    /// - `--pwrc-band-weights 5,4,3,2,1.5,1,1,1,1,1` (10 bands, B0..B9)
+    ///   upweights low-q (zensim "B0..B5 lift" target).
+    /// - `--pwrc-band-weights 1,1.2,1.5,2.0` (4 bands, [0,25),
+    ///   [25,50), [50,75), [75,100]) approximates the closed-form
+    ///   Wu 2018 schedule with coarse bins.
+    ///
+    /// When omitted, the trainer uses the closed-form `exp(max_MOS /
+    /// 100)` weight from the Wu 2018 paper (label-only piece; see
+    /// `MlpHyperparams::pwrc_pair_weight` doc). Active only when
+    /// `--pwrc-pair-weight` is set.
+    #[arg(long, value_parser = parse_pwrc_band_weights, value_name = "W0,W1,...")]
+    pwrc_band_weights: Option<Vec<f64>>,
+
+    /// Norm-in-Norm + RankNet hybrid loss weight `β` (Li, Jiang, Jiang
+    /// 2020, "Norm-in-Norm Loss with Faster Convergence and Better
+    /// Performance for Image Quality Assessment", ACM MM, arXiv:
+    /// 2008.03889; reference impl
+    /// <https://github.com/lidq92/LinearityIQA>).
+    ///
+    /// **Default 0.0 = pure RankNet** (bit-identical bake bytes to the
+    /// legacy / pre-NiN trainer at any `--minibatch-size`). When set
+    /// to a positive value (paper recommends 0.1), an auxiliary loss
+    /// term is added on top of every mini-batch's RankNet gradients:
+    ///
+    /// ```text
+    ///   total = ranknet + norm_in_norm_weight · norm_in_norm_loss
+    /// ```
+    ///
+    /// The Norm-in-Norm loss is computed over the 2K predictions
+    /// generated by the K pair forwards in the mini-batch (with
+    /// `ε = 1e-8`):
+    ///
+    /// ```text
+    ///   ŝ_n = (Ŝ - mean(Ŝ)) / (||Ŝ - mean(Ŝ)||_q + ε)
+    ///   s_n = (-MOS - mean(-MOS)) / (||-MOS - mean(-MOS)||_q + ε)
+    ///   loss_NiN = (||ŝ_n - s_n||_p / scale)^p
+    ///   scale    = 2^max(1, 1/q) · N^max(0, 1/p - 1/q)
+    /// ```
+    ///
+    /// Per Li 2020 Table 2 last row (KonIQ-10k headline result), the
+    /// recommended hybrid is `β = 0.1, p = 1, q = 2` — that
+    /// configuration lifted SROCC 0.928 → 0.937 and PLCC 0.928 →
+    /// 0.947 vs RankNet alone.
+    ///
+    /// **Requires `--minibatch-size >= 16`** for stable batch
+    /// statistics. The trainer errors out at K < 16 when this is set.
+    #[arg(long, default_value_t = 0.0, value_name = "FLOAT")]
+    norm_in_norm_weight: f64,
+
+    /// Inner-norm exponent `p` for the Norm-in-Norm loss (Li 2020).
+    /// Default 1.0 per Table 1 (best single-loss config) and the
+    /// recommended (β=0.1, p=1, q=2) hybrid. Set to 2.0 alongside
+    /// `--norm-in-norm-q 2.0` to recover the PLCC-induced special
+    /// case (paper Section 2.2, Eqn 14): `loss ∝ (1 − PLCC)`.
+    ///
+    /// Only meaningful when `--norm-in-norm-weight > 0`.
+    #[arg(long, default_value_t = 1.0, value_name = "FLOAT")]
+    norm_in_norm_p: f64,
+
+    /// Outer (denominator) q-norm exponent for the Norm-in-Norm loss
+    /// (Li 2020). Default 2.0 recovers the z-score-equivalent
+    /// normalization of the reference impl.
+    ///
+    /// Only meaningful when `--norm-in-norm-weight > 0`.
+    #[arg(long, default_value_t = 2.0, value_name = "FLOAT")]
+    norm_in_norm_q: f64,
+}
+
+/// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
+/// non-empty comma-separated list of finite, non-negative f64s.
+fn parse_pwrc_band_weights(s: &str) -> Result<Vec<f64>, String> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.is_empty() {
+        return Err("expected at least one band weight".to_string());
+    }
+    let mut out = Vec::with_capacity(parts.len());
+    for (i, p) in parts.iter().enumerate() {
+        let v: f64 = p
+            .trim()
+            .parse()
+            .map_err(|e| format!("band {i}: parse '{p}': {e}"))?;
+        if !v.is_finite() || v < 0.0 {
+            return Err(format!("band {i}: weight {v} must be finite and >= 0"));
+        }
+        out.push(v);
+    }
+    Ok(out)
 }
 
 struct LoadedGroup {
@@ -945,6 +1065,12 @@ fn main() {
         feature_transform_params: feature_transform_params.clone(),
         minibatch_size: args.minibatch_size.max(1),
         parallel_batch: args.parallel_batch,
+        pwrc_pair_weight: args.pwrc_pair_weight,
+        pwrc_sensory_threshold: args.pwrc_sensory_threshold,
+        pwrc_band_weights: args.pwrc_band_weights.clone(),
+        norm_in_norm_weight: args.norm_in_norm_weight,
+        norm_in_norm_p: args.norm_in_norm_p,
+        norm_in_norm_q: args.norm_in_norm_q,
     };
 
     println!(

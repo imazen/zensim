@@ -10,6 +10,8 @@
 // the bulk of the remaining gap.
 #[allow(dead_code)] // CLI dispatch wired in a follow-up tick
 mod mlp_train;
+#[allow(dead_code)] // Used by mlp_train when norm_in_norm_weight > 0
+mod loss_norm_in_norm;
 mod scale_invariance;
 #[allow(dead_code)] // SIMD kernels exposed via mlp_train::forward/backprop_step
 mod simd_mlp;
