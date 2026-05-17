@@ -813,45 +813,44 @@ principled experiment workflow. Bakes are cheap; ghost data isn't.
 
 **When you need to do X, use this tool — don't write a new one.**
 
-### Bake compression (quant + zero-bias + LZ4 + Hu-reorder)
-**`zenpredict-bake/examples/rebake_v3_1.rs`** at
-`/home/lilith/work/zen/zenanalyze/zenpredict-bake/examples/rebake_v3_1.rs`.
-Build with `cargo build --release --example rebake_v3_1 -p zenpredict-bake`.
+### Primary `zenpredict` CLI (bake / inspect / repack)
+**`zenpredict` binary** at
+`/home/lilith/work/zen/zenanalyze/zenpredict-bake/src/bin/zenpredict.rs`.
+Build with `cargo build --release --bin zenpredict -p zenpredict-bake`.
+
+The single canonical CLI with three subcommands:
 
 ```sh
-# Compress a ZNPR v3 bake to i8 + zerobias + LZ4 (Hu-reorder via --optimize)
-.../target/release/examples/rebake_v3_1 \
-    <input.bin> <output.bin> \
-    --dtype i8 --zerobias 0.005 --compress --optimize
+# Convert BakeRequestJson to ZNPR v3 bin
+zenpredict bake <input.json> <output.bin>
+
+# Inspect a ZNPR v3 bake's structure + metadata + weight stats
+zenpredict inspect <bake.bin>
+
+# Re-bake an existing v3 with different dtype/compression
+zenpredict repack <input.bin> <output.bin> \
+    [--dtype f32|f16|i8] [--zerobias <tau>] [--compress] [--optimize]
 ```
-Verified 2026-05-17 on mix_cv40_iw60_s3_h128: 200,984 bytes → 52,006
-bytes (25.9%) with **CID22 SROCC delta < 0.001** on every Mohammadi-panel
-stat. Preserves `feature_transforms`, `output_specs`, `discrete_sets`,
-`sparse_overrides`, and all metadata entries — unlike the broken
-`zensim-bench/examples/quant_compare.rs` which drops them.
+
+`repack` preserves `feature_transforms`, `output_specs`,
+`discrete_sets`, `sparse_overrides`, and all metadata entries.
+Verified 2026-05-17 on V_22-IW v2 PreviewV0_5 (200,984 → 14,065 bytes,
+7.0% of input, CID22 SROCC delta 0.0003).
+
+The legacy `zenpredict-bake` and `zenpredict-inspect` binaries still
+ship but are thin shims that call the same `cli::run_*` functions —
+they're deprecated-in-favor-of subcommands. Per zenanalyze CLAUDE.md,
+binaries are not part of the semver surface; future passes may remove
+the legacy aliases.
 
 **DO NOT USE** `zensim-bench/examples/quant_compare.rs` — it drops
 metadata, causing catastrophic SROCC collapse (0.88 → 0.53 on the mix
 champion). It is a diagnostic-only weight-magnitude reporter; for any
-actual rebake, use `rebake_v3_1`.
+actual rebake, use `zenpredict repack`.
 
-### Bake creation from JSON (the trainer side)
-**`zenpredict-bake` binary** at
-`/home/lilith/work/zen/zenanalyze/zenpredict-bake/src/bin/zenpredict_bake.rs`.
-Build with `cargo build --release --bin zenpredict-bake -p zenpredict-bake`.
-
-```sh
-.../target/release/zenpredict-bake <input.json> <output.bin>
-```
-The JSON pipeline is mandated for any new bake-producing tool (per
-"JSON pipeline mandate" section below). See template at
+The JSON pipeline is still mandated for any new bake-producing tool
+(per "JSON pipeline mandate" section below). See template at
 `zensim/scripts/v_next/v0_20b/bake_znpr_v3.py`.
-
-### Bake inspection (peek at metadata + weights)
-**`zenpredict-inspect` binary** at
-`/home/lilith/work/zen/zenanalyze/zenpredict-bake/src/bin/zenpredict_inspect.rs`.
-Shows header, n_inputs/outputs/layers, dtype, feature_transforms,
-metadata entries, weight magnitude statistics per layer.
 
 ### Bake evaluation (per-bake instant verdict from parquet sidecars)
 **`bake_verdict` binary** at
