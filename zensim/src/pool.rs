@@ -17,6 +17,13 @@ pub(crate) struct ScaleBuffers {
     /// signal but with inverted polarity (`1 + k_iw * blur(|src - mu|)`
     /// instead of `1 / (1 + k_mask * blur(|src - mu|))`).
     pub iw_weight: Vec<f32>,
+    /// Strip-local H-blur of the current channel's source. Used as the
+    /// per-channel "local mean" reference for the masked/IW activity
+    /// computation (`activity = box_blur(|src - h_blur_src|)`). See
+    /// `docs/PRINCIPLED_ACTIVITY.md`. Decouples the activity signal
+    /// from cross-channel `bufs.mu1` reuse — every channel sees its
+    /// own H-blurred source at all strip rows (inner + overlap).
+    pub h_blur_src: Vec<f32>,
 }
 
 impl ScaleBuffers {
@@ -30,6 +37,7 @@ impl ScaleBuffers {
             temp_blur: vec![0.0; size],
             mask: vec![0.0; size],
             iw_weight: vec![0.0; size],
+            h_blur_src: vec![0.0; size],
         }
     }
 
@@ -42,5 +50,6 @@ impl ScaleBuffers {
         self.temp_blur.resize(size, 0.0);
         self.mask.resize(size, 0.0);
         self.iw_weight.resize(size, 0.0);
+        self.h_blur_src.resize(size, 0.0);
     }
 }
