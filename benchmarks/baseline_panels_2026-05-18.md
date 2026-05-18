@@ -7,7 +7,7 @@ Data sources per (metric, corpus):
 
 - **ssim2** (fast-ssim2 score): per-pair CSV `benchmarks/v0_22_iw_v3_seed1_2026-05-17_eval_per_pair.csv` for CID22 / KADID / TID / AIC-3 CTC. Per-pair CSV does NOT carry KonJND-1k, so the KonJND row uses the AIC-3 anchor CSV's SSIMULACRA2 column — n/a for the KonJND-1k corpus directly.
 - **cvvdp** (cvvdp_imazen_v0_0_1): score TSVs at `/mnt/v/zen/zensim-eval/{cid22,kadid,tid,aic3,konjnd_{jpeg,bpg}}_cvvdp_scores_2026-05-17.tsv`, joined to corpus MOS sources.
-- **iwssim**: only AIC-3 anchor CSV has IW-SSIM per pair across the validation corpora. CID22 / KADID / TID / KonJND IW-SSIM scoring runs are NOT on disk; those cells are marked `n/a`.
+- **iwssim** (iwssim-gpu, `iwssim_gpu` column): score TSVs at `/mnt/v/zen/zensim-training/2026-05-18-iwssim-panels/{cid22,kadid,tid,konjnd_{jpeg,bpg},aic3}_iwssim_scores.tsv`, produced by `zen-metrics batch --metric iwssim-gpu --gpu-runtime cuda` on the same pair lists as cvvdp (all corpora have min(W, H) ≥ 384, well above the 176-pixel paper-strict floor — no adaptive small-image path needed). Joined to corpus MOS sources via `dist_path`. AIC-3 anchor PTC subset still uses the anchor CSV's `iw_ssim` column (the n=300 PTC-restricted set is canonical for paper anchor cross-validation).
 - **Per-stimulus σ** for Z-RMSE: AIC-3 (anchor CSV `std_bootstrap`), TID (mos_std.txt). CID22 / KADID / KonJND use corpus-wide σ fallback (matches bake_verdict.rs convention).
 - **PLCC**: 4-parameter logistic rescale (Mohammadi 2025 / ITU-T P.1401).
 - Per-band slicing is the CLAUDE.md 10-band width-10 grid on [0, 1].
@@ -16,14 +16,14 @@ Data sources per (metric, corpus):
 
 ## CID22 (n=4292)
 
-_cvvdp panel uses 4292 join; iwssim n/a (no per-corpus IW-SSIM extract on disk)._
+_cvvdp and iwssim panels use the same 4292 join (cvvdp pairs TSV ↔ MCOS CSV)._
 
 
 | Metric | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
 |---|--:|---:|---:|---:|---:|---:|---:|
 | ssim2 (fast-ssim2) | 4292 | 0.8895 | 0.8879 | 0.7062 | 0.0424 | 0.9351 | 0.460 |
 | cvvdp | 4292 | 0.8214 | 0.8251 | 0.6238 | 0.0424 | 0.8842 | 0.565 |
-| iwssim | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| iwssim | 4292 | 0.7836 | 0.7926 | 0.5938 | 0.0520 | 0.8525 | 0.610 |
 
 
 ### CID22 10-band panels
@@ -59,18 +59,32 @@ _cvvdp panel uses 4292 join; iwssim n/a (no per-corpus IW-SSIM extract on disk).
 | B9 | [0.90, 1.00] | 43 | 0.0809 | 0.3060 | 0.0631 | 0.0930 | 0.1739 | 0.952 |
 
 
-_iwssim per-band: n/a (no per-corpus IW-SSIM scoring run on disk)._
+#### iwssim
+
+| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---|--:|---:|---:|---:|---:|---:|---:|
+| B0 | [0.00, 0.10) | 0 | n/a | n/a | n/a | n/a | n/a | n/a |
+| B1 | [0.10, 0.20) | 0 | n/a | n/a | n/a | n/a | n/a | n/a |
+| B2 | [0.20, 0.30) | 1 | n/a | n/a | n/a | n/a | n/a | n/a |
+| B3 | [0.30, 0.40) | 57 | 0.0955 | 0.1457 | 0.0827 | 0.0526 | 0.0091 | 0.989 |
+| B4 | [0.40, 0.50) | 266 | 0.2101 | 0.2615 | 0.1429 | 0.0564 | 0.2605 | 0.965 |
+| B5 | [0.50, 0.60) | 615 | 0.1928 | 0.2389 | 0.1309 | 0.0472 | 0.2241 | 0.971 |
+| B6 | [0.60, 0.70) | 836 | 0.2101 | 0.2357 | 0.1388 | 0.0383 | 0.2530 | 0.972 |
+| B7 | [0.70, 0.80) | 1092 | 0.2826 | 0.2985 | 0.1938 | 0.0504 | 0.3261 | 0.954 |
+| B8 | [0.80, 0.90) | 1382 | 0.4129 | 0.4161 | 0.2798 | 0.0499 | 0.4844 | 0.909 |
+| B9 | [0.90, 1.00] | 43 | 0.1338 | 0.5198 | 0.0963 | 0.0465 | 0.2532 | 0.854 |
+
 
 ## KADID-10k (n=10125)
 
-_cvvdp panel uses 10125 join; iwssim n/a._
+_cvvdp and iwssim panels both use the 10125 join._
 
 
 | Metric | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
 |---|--:|---:|---:|---:|---:|---:|---:|
 | ssim2 (fast-ssim2) | 10125 | 0.8133 | 0.8107 | 0.6174 | 0.0516 | 0.8828 | 0.585 |
 | cvvdp | 10125 | 0.8339 | 0.8337 | 0.6389 | 0.0417 | 0.9018 | 0.552 |
-| iwssim | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| iwssim | 10125 | 0.8498 | 0.8446 | 0.6663 | 0.0357 | 0.9112 | 0.535 |
 
 
 ### KADID-10k 10-band panels
@@ -106,18 +120,32 @@ _cvvdp panel uses 10125 join; iwssim n/a._
 | B9 | [0.90, 1.00] | 486 | 0.1672 | 0.1577 | 0.1216 | 0.0412 | 0.1881 | 0.987 |
 
 
-_iwssim per-band: n/a._
+#### iwssim
+
+| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---|--:|---:|---:|---:|---:|---:|---:|
+| B0 | [0.00, 0.10) | 705 | 0.2604 | 0.2875 | 0.1823 | 0.0426 | 0.3351 | 0.958 |
+| B1 | [0.10, 0.20) | 910 | 0.2508 | 0.2546 | 0.1719 | 0.0341 | 0.3122 | 0.967 |
+| B2 | [0.20, 0.30) | 1111 | 0.1735 | 0.1772 | 0.1206 | 0.0432 | 0.2090 | 0.984 |
+| B3 | [0.30, 0.40) | 1291 | 0.1874 | 0.1885 | 0.1307 | 0.0434 | 0.2255 | 0.982 |
+| B4 | [0.40, 0.50) | 1013 | 0.1363 | 0.1380 | 0.0954 | 0.0464 | 0.1608 | 0.990 |
+| B5 | [0.50, 0.60) | 919 | 0.1196 | 0.1276 | 0.0830 | 0.0370 | 0.1572 | 0.992 |
+| B6 | [0.60, 0.70) | 936 | 0.1457 | 0.1453 | 0.1002 | 0.0310 | 0.1683 | 0.989 |
+| B7 | [0.70, 0.80) | 985 | 0.1963 | 0.2129 | 0.1393 | 0.0457 | 0.2264 | 0.977 |
+| B8 | [0.80, 0.90) | 1699 | 0.3874 | 0.3910 | 0.2726 | 0.0294 | 0.4583 | 0.920 |
+| B9 | [0.90, 1.00] | 486 | 0.1402 | 0.1782 | 0.1013 | 0.0185 | 0.1546 | 0.984 |
+
 
 ## TID2013 (n=3000)
 
-_cvvdp and ssim2 Z-RMSE both use corpus-wide σ (per-stim mos_std contains zeros / near-zeros that blow up per-sample-σ-normalization). iwssim n/a._
+_cvvdp, ssim2, and iwssim Z-RMSE all use corpus-wide σ (per-stim mos_std contains zeros / near-zeros that blow up per-sample-σ-normalization)._
 
 
 | Metric | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
 |---|--:|---:|---:|---:|---:|---:|---:|
 | ssim2 (fast-ssim2) | 3000 | 0.8460 | 0.8504 | 0.6614 | 0.0467 | 0.8846 | 0.526 |
 | cvvdp | 3000 | 0.8531 | 0.8644 | 0.6721 | 0.0427 | 0.8853 | 0.503 |
-| iwssim | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| iwssim | 3000 | 0.7794 | 0.8306 | 0.5995 | 0.0327 | 0.8489 | 0.557 |
 
 
 ### TID2013 10-band panels
@@ -153,18 +181,32 @@ _cvvdp and ssim2 Z-RMSE both use corpus-wide σ (per-stim mos_std contains zeros
 | B9 | [0.90, 1.00] | 0 | n/a | n/a | n/a | n/a | n/a | n/a |
 
 
-_iwssim per-band: n/a._
+#### iwssim
+
+| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---|--:|---:|---:|---:|---:|---:|---:|
+| B0 ⚠ | [0.00, 0.10) | 29 | 0.0264 | 0.2398 | 0.0025 | 0.0690 | 0.0459 | 0.971 |
+| B1 | [0.10, 0.20) | 34 | 0.4815 | 0.5827 | 0.3375 | 0.0294 | 0.6605 | 0.813 |
+| B2 | [0.20, 0.30) | 185 | 0.2469 | 0.2769 | 0.1697 | 0.0270 | 0.3046 | 0.961 |
+| B3 | [0.30, 0.40) | 493 | 0.3351 | 0.3418 | 0.2284 | 0.0325 | 0.4192 | 0.940 |
+| B4 | [0.40, 0.50) | 677 | 0.3454 | 0.3601 | 0.2323 | 0.0443 | 0.4139 | 0.933 |
+| B5 | [0.50, 0.60) | 705 | 0.2966 | 0.2963 | 0.2014 | 0.0369 | 0.3570 | 0.955 |
+| B6 | [0.60, 0.70) | 809 | 0.2189 | 0.2350 | 0.1485 | 0.0284 | 0.2680 | 0.972 |
+| B7 | [0.70, 0.80) | 67 | 0.3070 | 0.3599 | 0.2110 | 0.0597 | 0.3668 | 0.933 |
+| B8 | [0.80, 0.90) | 1 | n/a | n/a | n/a | n/a | n/a | n/a |
+| B9 | [0.90, 1.00] | 0 | n/a | n/a | n/a | n/a | n/a | n/a |
+
 
 ## KonJND-1k (n=1008)
 
-_cvvdp panel: 1008-pair PJND-threshold join (missing 0 file-not-found). ssim2/iwssim n/a — no per-pair score extract on the 1008 PJND anchor pairs is on disk; see `benchmarks/baseline_metrics_with_konjnd_2026-05-01.md` for the published Cloudinary Table 4 mean ± stdev calibration anchor._
+_cvvdp and iwssim panels: 1008-pair PJND-threshold join (missing 0 file-not-found, joined via image_id × codec × round(t) → 504 JPEG + 504 BPG distorted paths). ssim2 n/a — no per-pair fast-ssim2 score extract on the 1008 PJND anchor pairs is on disk; see `benchmarks/baseline_metrics_with_konjnd_2026-05-01.md` for the published Cloudinary Table 4 mean ± stdev calibration anchor._
 
 
 | Metric | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
 |---|--:|---:|---:|---:|---:|---:|---:|
 | ssim2 (fast-ssim2) | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
 | cvvdp | 1008 | 0.0482 | 0.1521 | 0.0256 | 0.0347 | 0.0225 | 0.988 |
-| iwssim | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| iwssim | 1008 | 0.1859 | 0.2274 | 0.1327 | 0.0308 | 0.3097 | 0.974 |
 
 
 _Per-band: KonJND-1k human_score is a PJND threshold in raw units (range 22..70), not a 0..1 normalised quality. The 10-band 0..1 grid does not apply (matches `bake_verdict.rs` `enable_per_band=false` for KonJND-1k)._
@@ -172,14 +214,14 @@ _Per-band: KonJND-1k human_score is a PJND threshold in raw units (range 22..70)
 
 ## AIC-3 CTC per-pair sweep (n=600)
 
-_`human_score` is the reconstructed JND from the per-pair CSV's normalised target column (matches `dataset_metric_baseline` convention). ssim2 SROCC 0.7965 reproduces the canonical fast-ssim2 baseline at n=600. cvvdp/iwssim n/a here because the n=600 join requires the larger AIC-3 subjective panel; the PTC anchor subset (n=300) is reported separately below._
+_`human_score` is the reconstructed JND from the per-pair CSV's normalised target column (matches `dataset_metric_baseline` convention). ssim2 SROCC 0.7965 reproduces the canonical fast-ssim2 baseline at n=600. cvvdp + iwssim were re-joined 2026-05-18 against the per-pair `human_score` column at n=600 — the cvvdp scores come from `/mnt/v/zen/zensim-eval/aic3_cvvdp_scores_2026-05-17.tsv` and the iwssim scores from `/mnt/v/zen/zensim-training/2026-05-18-iwssim-panels/aic3_iwssim_scores.tsv`. The PTC anchor subset (n=300) below uses the anchor CSV's per-pair bootstrap σ and its own iwssim / cvvdp / ssim2 columns directly._
 
 
 | Metric | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
 |---|--:|---:|---:|---:|---:|---:|---:|
 | ssim2 (fast-ssim2) | 600 | 0.7965 | 0.8086 | 0.6288 | 0.0567 | 0.8716 | 0.588 |
-| cvvdp | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| iwssim | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| cvvdp | 600 | 0.7918 | 0.8034 | 0.6257 | 0.0417 | 0.8657 | 0.595 |
+| iwssim | 600 | 0.7735 | 0.7907 | 0.6064 | 0.0450 | 0.8536 | 0.612 |
 
 ## AIC-3 CTC anchor PTC subset (n=300)
 
@@ -203,7 +245,7 @@ _Per-band slicing: AIC-3 CTC `human_score` (column `distortion`) is a reconstruc
 
 - **cvvdp** = ColorVideoVDP-imazen v0.0.1 (GPU), scored via `zen-metrics batch --metric cvvdp --gpu-runtime cuda`. TSVs land in `/mnt/v/zen/zensim-eval/`. Higher is better (CVVDP score domain `[0, 10]`).
 
-- **iwssim** = IW-SSIM (Wang & Li 2011 reference implementation). Only the AIC-3 anchor CSV has IW-SSIM per pair across our validation corpora; the CID22/KADID/TID/KonJND IW-SSIM scoring runs are NOT on disk. Closing this gap would require a `zen-metrics batch --metric iwssim` (or pyiqa.iwssim) sweep on the four corpora.
+- **iwssim** = IW-SSIM (Wang & Li 2011), `iwssim-gpu` GPU implementation via the `iwssim-gpu` crate (umbrella `iwssim_imazen_v<VER>`, score column `iwssim_gpu` in the per-corpus TSVs). Range `[0, 1]`; 1.0 = identical. Scored via `zen-metrics batch --metric iwssim-gpu --gpu-runtime cuda` on the same pair lists as cvvdp. All four large-corpus pair lists (CID22, KADID, TID, KonJND-1k JPEG+BPG subset) have min(W, H) ≥ 384, well above the 176-pixel paper-strict floor; the adaptive small-image reflect-pad path (`IwssimStrategy::ReflectPad`) was not exercised. AIC-3 anchor n=300 PTC subset still uses the anchor CSV's `iw_ssim` column directly (validates against Mohammadi 2025's paper Z-RMSE 31.51 within 0.06).
 
 - **Bootstrap σ**: AIC-3 from anchor CSV `std_bootstrap` column (per-stimulus); TID from `mos_std.txt` (per-stimulus). CID22, KADID, KonJND use corpus-wide σ fallback (matches `bake_verdict.rs` convention for missing per-stimulus σ).
 
@@ -218,5 +260,5 @@ _Per-band slicing: AIC-3 CTC `human_score` (column `distortion`) is a reconstruc
 
 ## Data gaps (need follow-up scoring runs to fill)
 
-- **iwssim × {CID22, KADID, TID, KonJND-1k}**: no per-pair IW-SSIM extract on disk. Fix: `zen-metrics batch --metric iwssim` (or `pyiqa.iwssim`) over the four corpora's pair-lists.
+- **iwssim × {CID22, KADID, TID, KonJND-1k, AIC-3 CTC n=600}**: **FILLED 2026-05-18.** Per-pair iwssim-gpu scores live under `/mnt/v/zen/zensim-training/2026-05-18-iwssim-panels/{cid22,kadid,tid,konjnd_{jpeg,bpg},aic3}_iwssim_scores.tsv`, produced by `zen-metrics batch --metric iwssim-gpu --gpu-runtime cuda` (commit branch `feat/iwssim-baseline-panels`). Aggregate + 10-band panels patched into the corpus sections above. Total scoring wall time ~28 min on the local 5070-class GPU. Cross-check against the 300-row AIC-3 anchor PTC subset (250 rows in the cvvdp pairs TSV overlap with the anchor; the other 50 are `VM_*` codec entries that the cvvdp pairs TSV doesn't cover): zen-metrics iwssim-gpu vs anchor CSV iw_ssim has Pearson 0.9973 / median abs-diff 0.00018 / max 0.00172 — essentially bit-equal to the canonical Wang & Li 2011 reference within float-precision noise. iwssim-gpu was simultaneously re-joined to the per-pair-CSV `human_score` for the AIC-3 CTC n=600 row above (and cvvdp re-joined from `aic3_cvvdp_scores_2026-05-17.tsv`).
 - **ssim2 × KonJND-1k**: per-pair fast-ssim2 over the 1008 PJND-mean pairs is not in the per-pair CSV. The aggregate calibration mean ± stdev is documented at `benchmarks/baseline_metrics_with_konjnd_2026-05-01.md` (JPEG 62.55 ± 5.03, BPG 65.38 ± 5.42). A Mohammadi panel requires per-pair scores against the PJND threshold; fix: extract fast-ssim2 per (source × at-PJND-level) pair via the `dataset_metric_baseline --konjnd` per-pair path. n.b. ssim2 score vs PJND threshold is the calibration check, not a discrimination check — the panel SROCC is expected to be near 0 because all 1008 pairs are at the same perceptual threshold by design.
