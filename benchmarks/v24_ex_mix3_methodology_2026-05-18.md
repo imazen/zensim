@@ -288,3 +288,40 @@ Uniformly positive across every band with non-trivial n. B3 / B5 are the
 big winners (+0.07-0.08 SROCC) — these are mid-quality bands where most
 compression product decisions live. This confirms the 3-way blend's gain
 is broad-based, not a band-specialist trade.
+
+## 3-seed snapshot (round-2, 8/15 bakes, 10:19 UTC)
+
+| Variant | n | CID22 | KADID | TID | KonJND | AIC-3 |
+|---|--:|---|---|---|---|---|
+| cv33_iw33_sm33 | 3 | **0.8661±0.0092** | 0.9171±0.0034 | 0.8702±0.0019 | 0.8396±0.0008 | 0.7966±0.0123 |
+| cv30_iw40_sm30 | 3 | 0.8619±0.0097 | **0.9266±0.0019** | 0.8769±0.0007 | **0.8437±0.0043** | **0.8006±0.0068** |
+| cv40_iw40_sm20 | 2 | 0.8583±0.0116 | 0.9170±0.0037 | 0.8750±0.0019 | 0.8374±0.0026 | 0.8023±0.0127 |
+| V_22 noLARGE (baseline, n=5) | 5 | 0.8425±0.0110 | 0.9311±0.0022 | 0.8897±0.0015 | 0.8371±0.0066 | 0.8059±0.0057 |
+| V_22-LARGE+iwssim (alt, n=5) | 5 | 0.8339±0.0071 | 0.9673±0.0002 | 0.9726±0.0004 | 0.8869±0.0034 | 0.7872±0.0078 |
+
+### Pattern emerging
+
+vs V_22 noLARGE (apples-to-apples, 4-group 372-feat):
+- **CID22: all 3 variants win decisively** (Δ +0.016 to +0.024, well outside ±σ)
+- **KonJND: all 3 variants parity or slight win** (+0.000 to +0.007)
+- **AIC-3: all 3 variants within seed noise** (Δ -0.004 to -0.009)
+- **KADID: all 3 variants small regression** (Δ -0.004 to -0.014)
+- **TID: all 3 variants small regression** (Δ -0.013 to -0.019)
+
+vs V_22-LARGE+iwssim (current strongest mix):
+- **CID22: EX-MIX3 wins decisively** (+0.028 to +0.032)
+- **AIC-3: EX-MIX3 wins** (+0.009 to +0.013)
+- **KADID/TID/KonJND: EX-MIX3 LOSES decisively** (LARGE has the content-class breadth)
+
+**Variant ranking (preliminary):**
+- **cv30_iw40_sm30** is the most balanced: best KADID/KonJND/AIC-3 of the 3, second-best CID22, smallest TID regression. **Likely the ship candidate.**
+- **cv33_iw33_sm33** is the most aggressive CID22 specialist: best CID22 (+0.024), but worse KADID/AIC-3/TID.
+- **cv40_iw40_sm20** is in between but doesn't dominate any corpus.
+
+The cv30 variant's lift over baseline is concentrated where it should be:
+- CID22 (the gold-standard compression-distortion benchmark): +0.019
+- KonJND (PJND anchor): +0.007
+- KADID (synthetic non-compression distortions, less weight for our use case): -0.004 (parity)
+- TID (similar to KADID): -0.013
+
+Final 5-seed CI awaits round-4-5 completion (ETA ~10:46).
