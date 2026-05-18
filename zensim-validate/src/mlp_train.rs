@@ -2160,8 +2160,15 @@ fn predict_group_pool_head(
 /// `zensim_train_core::hybrid_head::{forward_hybrid_head,
 /// backprop_step_hybrid_head}` and the bake metadata key changes to
 /// `zentrain.hybrid_head`. Supports RankNet + minibatch + PWRC + L2 +
-/// TV. NiN is queued for v1 (not yet wired — when `nin_on` the
-/// trainer panics).
+/// TV + **NiN (Li 2020 norm-in-norm hybrid loss)**.
+///
+/// NiN composition: when `norm_in_norm_weight > 0`, the per-pair
+/// forward state is buffered until K pairs accumulate, then
+/// `flush_hybrid_head_nin_batch` computes NiN over the 2K predictions,
+/// scatters per-prediction grad back through `backprop_step_hybrid_head`
+/// (which routes through BOTH rank-head + pool-head + sigmoid α),
+/// and Adam-steps. The TV regularizer is skipped on the NiN-active
+/// path (mirrors pool-head trainer).
 ///
 /// **Adam slot layout** (different from pool_head trainer):
 /// - gw1/gb1: layer-1 (n_features × n_hidden) + (n_hidden) — unchanged
@@ -2197,10 +2204,14 @@ fn train_mlp_hybrid_head_with_tv(
             g.name
         );
     }
-    assert!(
-        hyperparams.norm_in_norm_weight == 0.0,
-        "hybrid_head: NiN composition is queued for v1; set --norm-in-norm-weight 0"
-    );
+    let nin_on = hyperparams.norm_in_norm_weight > 0.0;
+    if nin_on {
+        assert!(
+            hyperparams.minibatch_size >= 16,
+            "hybrid_head + NiN composition: K (minibatch_size) must be ≥16 for stable batch statistics; got {}",
+            hyperparams.minibatch_size
+        );
+    }
 
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(train_total > 0.0, "no training groups (all train_weight == 0)");
@@ -2374,7 +2385,17 @@ fn train_mlp_hybrid_head_with_tv(
     }
     log_line(
         &format!(
-            "hybrid_head: ENABLED — sigmoid-bounded α-mix init α_logit=0 (α=0.5), K={k} sequential"
+            "hybrid_head: ENABLED — sigmoid-bounded α-mix init α_logit=0 (α=0.5), K={k} sequential, NiN={}",
+            if nin_on {
+                format!(
+                    "w={:.3} p={:.2} q={:.2}",
+                    hyperparams.norm_in_norm_weight,
+                    hyperparams.norm_in_norm_p,
+                    hyperparams.norm_in_norm_q
+                )
+            } else {
+                "off".to_string()
+            }
         ),
         log,
     );
@@ -2412,6 +2433,14 @@ fn train_mlp_hybrid_head_with_tv(
             *rank_b = b2_vec[0];
             *reducer_b = b2_vec[1];
         };
+
+    // NiN buffer — accumulates K hybrid-head pair forwards (or None for
+    // dropped pairs) when nin_on. Reset each epoch (final-flush at end).
+    let mut nin_buffer: Vec<Option<HybridPairForward<'_>>> = if nin_on {
+        Vec::with_capacity(k)
+    } else {
+        Vec::new()
+    };
 
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
@@ -2481,12 +2510,66 @@ fn train_mlp_hybrid_head_with_tv(
             let mos_b = g.human_scores[ib];
             let target = (mos_a - mos_b).signum();
             if target == 0.0 {
+                if nin_on {
+                    nin_buffer.push(None);
+                    if nin_buffer.len() >= k {
+                        flush_hybrid_head_nin_batch(
+                            &mut nin_buffer,
+                            &mut w1,
+                            &mut b1,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut alpha_logit,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            leaky,
+                            hyperparams.l2_lambda,
+                            hyperparams.norm_in_norm_weight,
+                            hyperparams.norm_in_norm_p,
+                            hyperparams.norm_in_norm_q,
+                            lr,
+                            &mut total_loss,
+                            &mut n_steps,
+                            &do_adam_step,
+                        );
+                    }
+                }
                 continue;
             }
             if hyperparams.pwrc_pair_weight
                 && hyperparams.pwrc_sensory_threshold > 0.0
                 && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold
             {
+                if nin_on {
+                    nin_buffer.push(None);
+                    if nin_buffer.len() >= k {
+                        flush_hybrid_head_nin_batch(
+                            &mut nin_buffer,
+                            &mut w1,
+                            &mut b1,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut alpha_logit,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            leaky,
+                            hyperparams.l2_lambda,
+                            hyperparams.norm_in_norm_weight,
+                            hyperparams.norm_in_norm_p,
+                            hyperparams.norm_in_norm_q,
+                            lr,
+                            &mut total_loss,
+                            &mut n_steps,
+                            &do_adam_step,
+                        );
+                    }
+                }
                 continue;
             }
             let pair_weight = if hyperparams.pwrc_pair_weight {
@@ -2508,8 +2591,71 @@ fn train_mlp_hybrid_head_with_tv(
 
             let sig_z = 1.0 / (1.0 + (-z).exp());
             let dl_d_pred_diff = -target * sig_z * pair_weight;
-            let dl_dya = -dl_d_pred_diff;
-            let dl_dyb = dl_d_pred_diff;
+            let dl_dya_rn = -dl_d_pred_diff;
+            let dl_dyb_rn = dl_d_pred_diff;
+
+            // NiN-aware path: buffer the per-pair forward; flush the
+            // K-pair batch through `flush_hybrid_head_nin_batch` which
+            // computes NiN over all 2K predictions and routes per-
+            // prediction grad through the hybrid-head chain rule
+            // (rank + pool + sigmoid α).
+            if nin_on {
+                nin_buffer.push(Some(HybridPairForward {
+                    xa,
+                    xb,
+                    ya,
+                    yb,
+                    ya_rank,
+                    yb_rank,
+                    ya_pool,
+                    yb_pool,
+                    alpha_a,
+                    alpha_b,
+                    ha_pre,
+                    ha,
+                    hb_pre,
+                    hb,
+                    sa,
+                    sb,
+                    max_a,
+                    max_b,
+                    dl_dya_rn,
+                    dl_dyb_rn,
+                    mos_a,
+                    mos_b,
+                }));
+                if nin_buffer.len() >= k {
+                    flush_hybrid_head_nin_batch(
+                        &mut nin_buffer,
+                        &mut w1,
+                        &mut b1,
+                        &mut rank_w,
+                        &mut rank_b,
+                        &mut reducer_w,
+                        &mut reducer_b,
+                        &mut alpha_logit,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        leaky,
+                        hyperparams.l2_lambda,
+                        hyperparams.norm_in_norm_weight,
+                        hyperparams.norm_in_norm_p,
+                        hyperparams.norm_in_norm_q,
+                        lr,
+                        &mut total_loss,
+                        &mut n_steps,
+                        &do_adam_step,
+                    );
+                }
+                // TV regularizer is skipped on the NiN-active path
+                // (mirrors pool-head trainer; the V_22/V_24 recipe
+                // doesn't use TV).
+                continue;
+            }
+
+            let dl_dya = dl_dya_rn;
+            let dl_dyb = dl_dyb_rn;
             steps_since_adam += 1;
 
             // Per-pair gradient accumulators (rank_w / rank_b / α_logit
@@ -2609,7 +2755,9 @@ fn train_mlp_hybrid_head_with_tv(
             }
 
             // TV regularizer (per-curve adjacent-q monotonicity).
-            if let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
+            // Skipped on the NiN-active path (mirrors pool-head trainer).
+            if !nin_on
+                && let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
                 && tv_cfg.weight > 0.0
                 && tv_cfg.apply_every > 0
                 && n_steps.is_multiple_of(tv_cfg.apply_every as u64)
@@ -2763,8 +2911,8 @@ fn train_mlp_hybrid_head_with_tv(
             }
         }
 
-        // Final-flush leftover K>1 accumulated gradient.
-        if k > 1 && steps_since_adam > 0 {
+        // Final-flush leftover K>1 accumulated gradient (RankNet path).
+        if k > 1 && !nin_on && steps_since_adam > 0 {
             do_adam_step(
                 &mut adam,
                 &mut w1,
@@ -2777,6 +2925,40 @@ fn train_mlp_hybrid_head_with_tv(
                 lr,
                 n_hidden,
             );
+        }
+
+        // Final-flush leftover NiN buffer if any surviving pairs ≥ 16.
+        // Mirrors the pool-head trainer's final-flush at the same
+        // threshold (NiN needs ≥16 predictions for stable batch
+        // mean/std; smaller batches are dropped).
+        if nin_on && !nin_buffer.is_empty() {
+            let surviving = nin_buffer.iter().filter(|p| p.is_some()).count();
+            if surviving >= 16 {
+                flush_hybrid_head_nin_batch(
+                    &mut nin_buffer,
+                    &mut w1,
+                    &mut b1,
+                    &mut rank_w,
+                    &mut rank_b,
+                    &mut reducer_w,
+                    &mut reducer_b,
+                    &mut alpha_logit,
+                    &mut adam,
+                    n_features,
+                    n_hidden,
+                    leaky,
+                    hyperparams.l2_lambda,
+                    hyperparams.norm_in_norm_weight,
+                    hyperparams.norm_in_norm_p,
+                    hyperparams.norm_in_norm_q,
+                    lr,
+                    &mut total_loss,
+                    &mut n_steps,
+                    &do_adam_step,
+                );
+            } else {
+                nin_buffer.clear();
+            }
         }
 
         let avg_loss = if n_steps > 0 {
@@ -3105,6 +3287,241 @@ pub(crate) fn flush_pool_head_nin_batch(
         adam.step(w1, b1, &mut r_w_vec, &mut r_b_vec, lr);
         *reducer_w = [r_w_vec[0], r_w_vec[1], r_w_vec[2], r_w_vec[3]];
         *reducer_b = r_b_vec[0];
+        *n_steps += steps_added;
+    }
+    nin_buffer.clear();
+}
+
+/// Per-pair forward state retained across an NiN-aware hybrid-head
+/// mini-batch (Li 2020 hybrid loss composed with the rank ⊕α pool
+/// head). The flush pass walks every `Some(_)` entry, computes NiN
+/// over their 2N predictions, then routes per-prediction grads
+/// through `backprop_step_hybrid_head` (which back-routes through
+/// both heads + the sigmoid-bounded learned α). `None` entries are
+/// dropped pairs (target=0 or PWRC sensory-threshold violations) —
+/// kept in the buffer to preserve the per-pair RNG draw schedule,
+/// but they contribute neither to NiN statistics nor backprop.
+pub(crate) struct HybridPairForward<'a> {
+    pub(crate) xa: &'a [f64],
+    pub(crate) xb: &'a [f64],
+    pub(crate) ya: f64,
+    pub(crate) yb: f64,
+    pub(crate) ya_rank: f64,
+    pub(crate) yb_rank: f64,
+    pub(crate) ya_pool: f64,
+    pub(crate) yb_pool: f64,
+    pub(crate) alpha_a: f64,
+    pub(crate) alpha_b: f64,
+    pub(crate) ha_pre: Vec<f64>,
+    pub(crate) ha: Vec<f64>,
+    pub(crate) hb_pre: Vec<f64>,
+    pub(crate) hb: Vec<f64>,
+    pub(crate) sa: [f64; 4],
+    pub(crate) sb: [f64; 4],
+    pub(crate) max_a: usize,
+    pub(crate) max_b: usize,
+    pub(crate) dl_dya_rn: f64,
+    pub(crate) dl_dyb_rn: f64,
+    pub(crate) mos_a: f64,
+    pub(crate) mos_b: f64,
+}
+
+/// Flush an NiN-aware hybrid-head mini-batch. Computes NiN over the
+/// 2N surviving predictions (composite outputs `y = α·y_rank +
+/// (1−α)·y_pool`), scatters per-prediction grad back to each pair's
+/// `dl_dya/dl_dyb` (combined with the cached RankNet contribution),
+/// and routes through `backprop_step_hybrid_head` — accumulating
+/// into the hybrid Adam slots:
+/// - `gw1/gb1` (layer-1)
+/// - `gw2[0..n_hidden]` (rank_w), `gw2[n_hidden..n_hidden+4]` (reducer_w),
+///   `gw2[n_hidden+4]` (α_logit)
+/// - `gb2[0]` (rank_b), `gb2[1]` (reducer_b)
+///
+/// After accumulation, L2 (scaled by `steps_added`) is applied to
+/// `w1 + rank_w + reducer_w` (α_logit unregularized) and the Adam
+/// step is performed via `do_adam_step`. This matches the pool-head
+/// trainer's flush cadence: K pairs → 1 Adam step.
+#[allow(clippy::too_many_arguments)]
+fn flush_hybrid_head_nin_batch<F>(
+    nin_buffer: &mut Vec<Option<HybridPairForward<'_>>>,
+    w1: &mut Vec<f64>,
+    b1: &mut Vec<f64>,
+    rank_w: &mut Vec<f64>,
+    rank_b: &mut f64,
+    reducer_w: &mut [f64; 4],
+    reducer_b: &mut f64,
+    alpha_logit: &mut f64,
+    adam: &mut AdamState,
+    n_features: usize,
+    n_hidden: usize,
+    leaky_alpha: f64,
+    l2_lambda: f64,
+    nin_weight: f64,
+    nin_p: f64,
+    nin_q: f64,
+    lr: f64,
+    total_loss: &mut f64,
+    n_steps: &mut u64,
+    do_adam_step: &F,
+) where
+    F: Fn(
+        &mut AdamState,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut f64,
+        &mut [f64; 4],
+        &mut f64,
+        &mut f64,
+        f64,
+        usize,
+    ),
+{
+    use zensim_train_core::hybrid_head as hh;
+
+    // Gather all surviving predictions into the NiN input vectors.
+    // Sign convention mirrors the pool-head flush: NiN labels are
+    // `-mos` (raw_distance, LOWER = more similar), so the NiN loss
+    // computes against distance-space rather than score-space.
+    let mut nin_preds: Vec<f64> = Vec::with_capacity(2 * nin_buffer.len());
+    let mut nin_labels: Vec<f64> = Vec::with_capacity(2 * nin_buffer.len());
+    let mut nin_idx_map: Vec<(usize, bool)> = Vec::with_capacity(2 * nin_buffer.len());
+    for (pi, slot) in nin_buffer.iter().enumerate() {
+        if let Some(p) = slot {
+            nin_preds.push(p.ya);
+            nin_labels.push(-p.mos_a);
+            nin_idx_map.push((pi, false));
+            nin_preds.push(p.yb);
+            nin_labels.push(-p.mos_b);
+            nin_idx_map.push((pi, true));
+        }
+    }
+    let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
+            &nin_preds, &nin_labels, nin_p, nin_q,
+        )
+    } else {
+        (0.0, vec![0.0; nin_preds.len()])
+    };
+    *total_loss += nin_weight * nin_loss;
+
+    let mut steps_added: u64 = 0;
+    let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+    let mut g_rank_b_buf = 0.0f64;
+    let mut g_red_w: [f64; 4] = [0.0; 4];
+    let mut g_red_b: f64 = 0.0;
+    let mut g_alpha_logit: f64 = 0.0;
+
+    // Backward pass: per-prediction NiN grad + per-pair RankNet grad
+    // routed through hybrid-head chain rule. Each pair contributes
+    // 2 predictions to NiN; steps_added counts each PAIR once (so
+    // the mini-batch's Adam step cadence matches the pool-head
+    // trainer's `flush_pool_head_nin_batch`).
+    for (nin_pos, &(pi, is_b)) in nin_idx_map.iter().enumerate() {
+        let p = match &nin_buffer[pi] {
+            Some(p) => p,
+            None => continue, // unreachable per nin_idx_map construction
+        };
+        let nin_g = nin_grad[nin_pos] * nin_weight;
+        if is_b {
+            let dl_dy = p.dl_dyb_rn + nin_g;
+            hh::backprop_step_hybrid_head(
+                p.xb,
+                &p.hb_pre,
+                &p.hb,
+                &p.sb,
+                p.max_b,
+                p.yb_rank,
+                p.yb_pool,
+                p.alpha_b,
+                dl_dy,
+                rank_w,
+                reducer_w,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_alpha_logit,
+                n_features,
+                n_hidden,
+                leaky_alpha,
+            );
+            // Count one step per pair, on the `b` half (so we don't
+            // double-count). The `a` iteration handles is_b=false,
+            // the `b` iteration handles is_b=true.
+            steps_added += 1;
+        } else {
+            let dl_dy = p.dl_dya_rn + nin_g;
+            hh::backprop_step_hybrid_head(
+                p.xa,
+                &p.ha_pre,
+                &p.ha,
+                &p.sa,
+                p.max_a,
+                p.ya_rank,
+                p.ya_pool,
+                p.alpha_a,
+                dl_dy,
+                rank_w,
+                reducer_w,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_alpha_logit,
+                n_features,
+                n_hidden,
+                leaky_alpha,
+            );
+        }
+    }
+
+    // L2 on w1 + rank_w + reducer_w, scaled by steps_added (mirrors
+    // the pool-head trainer's per-step L2 schedule). α_logit
+    // unregularized.
+    if l2_lambda > 0.0 && steps_added > 0 {
+        let scale = l2_lambda * steps_added as f64;
+        for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+            *g += scale * w;
+        }
+        for j in 0..n_hidden {
+            g_rank_w_buf[j] += scale * rank_w[j];
+        }
+        for kk in 0..4 {
+            g_red_w[kk] += scale * reducer_w[kk];
+        }
+    }
+
+    // Fold per-pair grads into Adam w2/b2 slots (same layout as the
+    // RankNet path: gw2 = [rank_w | reducer_w | α_logit], gb2 =
+    // [rank_b, reducer_b]).
+    for j in 0..n_hidden {
+        adam.gw2[j] += g_rank_w_buf[j];
+    }
+    for kk in 0..4 {
+        adam.gw2[n_hidden + kk] += g_red_w[kk];
+    }
+    adam.gw2[n_hidden + 4] += g_alpha_logit;
+    adam.gb2[0] += g_rank_b_buf;
+    adam.gb2[1] += g_red_b;
+
+    if steps_added > 0 {
+        do_adam_step(
+            adam,
+            w1,
+            b1,
+            rank_w,
+            rank_b,
+            reducer_w,
+            reducer_b,
+            alpha_logit,
+            lr,
+            n_hidden,
+        );
         *n_steps += steps_added;
     }
     nin_buffer.clear();
