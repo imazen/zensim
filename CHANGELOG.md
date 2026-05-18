@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Falsified (2026-05-18, EXP-V22-HYBRID 5-seed CI)
+
+- **EXP-V22-HYBRID falsified for both trails.** V_22-mix-LARGE+iwssim
+  recipe (same `mix_cv40_iw60` target the Balanced ship uses) with
+  the `hybrid_head` architecture (shared learned scalar α gate
+  fusing rank + pool heads, NOT per-sample). 5-seed CI: CID22 mean
+  **0.8623** σ=0.0119 (range [0.8436, 0.8739]), KADID mean 0.9276,
+  TID mean 0.8890, KonJND mean **0.7646** σ=0.0186, AIC-3 mean
+  0.8036. Median-pick by CID22 = seed 3 (0.8662). Packed (i8 +
+  zerobias 0.005 + lz4): 223,354 → 43,387 bytes (19.4% of input),
+  CID22 drift +0.0005 (raw 0.8662 → packed 0.8657), md5
+  `bc20284e75412e5ba82375fbda1271bd`.
+- **Balanced-trail gate (vs V_22-mix-LARGE+iwssim)**: FAIL. Step 1
+  PASS — A>>B decisive on CID22 (+0.0333, h=+41.97) AND AIC-3
+  (+0.0189, h=+17.44). Step 2 FAIL — B>>A decisive on KADID
+  (−0.0362), TID (−0.0823), AND KonJND (**−0.1113**). Step 3 FAIL
+  — KonJND −0.1113 EXCEEDS the −0.10 noise tolerance.
+- **Compression-trail gate (vs V_24-per-sample-α s4)**: FAIL.
+  Step 1 FAIL — neither CID22 (tied, DecScore +0.000, Δ=+0.0016)
+  nor AIC-3 (B>>A, Δ=−0.0149) is A>>B decisive. Step 2 FAIL —
+  B>>A decisive on AIC-3. Step 3 PASS — KonJND −0.0266, KADID
+  −0.0001, TID +0.0013 all within −0.10 tolerance.
+- **Mechanism**: hybrid_head (shared α scalar) on the V_22 recipe
+  is materially identical to V_24-hybrid no-NiN s4 packed (also a
+  hybrid_head bake, CID22 0.8657 — same number) but at +0.030 CID22
+  / +0.019 AIC-3 vs Balanced and at KonJND −0.111 cost. The
+  architectural lever (hybrid_head vs per-sample-α) does NOT flip
+  either gate. The trail-relevant signal is in the per-sample α
+  head (compression trail) and the V_22 recipe's KonJND weight 0.02
+  preserving the JND surface (balanced trail). Combining the V_22
+  recipe with a non-per-sample head loses both directions.
+- **No ship rotation.** Compression ship and Balanced ship
+  unchanged. Bakes retained at
+  `/mnt/v/zen/zensim-eval/exp_v22_hybrid_2026-05-18/v22_hybrid_s{1..5}_h128.bin`
+  for falsification record. NO crate version bump. Per
+  `benchmarks/exp_v22_hybrid_falsification_2026-05-18.md`.
+
 ### Falsified (2026-05-18, EXP-IWSSIM-PERSAMPLE 5-seed CI)
 
 - **EXP-IWSSIM-PERSAMPLE falsified for both trails.** Dropping
