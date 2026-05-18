@@ -2494,6 +2494,37 @@ mod tests {
     }
 
     #[test]
+    fn thurstone_grad_clip_engages_for_deep_wrong_direction() {
+        // At very wrong-direction pred_diff, Mills-ratio approximation
+        // makes φ/Φ → |u|. Without the clip, dl_du is unbounded; with
+        // the clip we get -10 · d · target as the gradient.
+        let d = 0.6745;
+        let target = 1.0;
+        let pred_diff = -30.0; // u = -20.235 → φ/Φ ≈ 20 (very large)
+        let (loss, dl) = thurstone_pair_loss_and_grad(target, pred_diff, d);
+        assert!(loss > 100.0, "deep-wrong loss should be huge; got {loss}");
+        // Gradient clipped to -10 · d · 1 = -6.745.
+        assert!(
+            (dl - (-10.0 * d * target)).abs() < 1e-9,
+            "expected clipped gradient -{d}; got {dl}"
+        );
+    }
+
+    #[test]
+    fn thurstone_grad_clip_no_op_for_correct_direction() {
+        // Correct direction has |φ/Φ| < 1 (well within [-10, 0]), so
+        // the clip never engages and the result is identical to the
+        // unclipped formula.
+        let d = 0.6745;
+        let target = 1.0;
+        let pred_diff = 1.0;
+        let u = d * target * pred_diff;
+        let expected = -(norm_pdf(u) / norm_cdf(u)) * d * target;
+        let (_, dl) = thurstone_pair_loss_and_grad(target, pred_diff, d);
+        assert!((dl - expected).abs() < 1e-12, "clip changed correct path");
+    }
+
+    #[test]
     fn thurstone_jnd_at_unit_gap() {
         // Sanity: at pred_diff = ±1 (one latent JND), Φ(d · 1) = 0.75
         // by construction.
