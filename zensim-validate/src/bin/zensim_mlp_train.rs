@@ -103,7 +103,8 @@ mod simd_mlp;
 mod contamination_guard;
 
 use mlp_train::{
-    MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv,
+    MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, load_per_sample_alpha_warm_init,
+    train_mlp_with_tv,
 };
 
 #[derive(Parser)]
@@ -588,6 +589,21 @@ struct Args {
     /// (skipped on this path — V_22 recipe doesn't use TV).
     #[arg(long, default_value_t = false)]
     per_sample_alpha_head: bool,
+
+    /// V_24 finetune-from-bake: continue training from an existing
+    /// per-sample-α ZNPR v3 bake instead of random Xavier init. The
+    /// bake's `scaler_mean`, `scaler_scale`, `w1`, `b1`, `rank_w`,
+    /// `rank_b`, `reducer_w`, `reducer_b`, `W_α`, `b_α` are loaded
+    /// verbatim; training proceeds with the supplied LR + epochs.
+    ///
+    /// Only valid with `--per-sample-alpha-head`. Bake's `n_features`
+    /// must equal trainer's effective `n_features` (after
+    /// `--max-features` truncation) and bake's hidden width must equal
+    /// `--hidden`. Recommended invocation: `--lr 1e-4 --epochs 30` for
+    /// a brief, gentle finetune that preserves the prior checkpoint's
+    /// strengths.
+    #[arg(long)]
+    continue_from: Option<PathBuf>,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1350,6 +1366,48 @@ fn main() {
         }
     };
 
+    // Load warm-init bake if --continue-from was supplied.
+    let warm_init = if let Some(path) = &args.continue_from {
+        if !args.per_sample_alpha_head {
+            eprintln!("--continue-from requires --per-sample-alpha-head");
+            std::process::exit(2);
+        }
+        let bytes = std::fs::read(path).unwrap_or_else(|e| {
+            eprintln!("read --continue-from {path:?}: {e}");
+            std::process::exit(1);
+        });
+        let init = load_per_sample_alpha_warm_init(&bytes).unwrap_or_else(|e| {
+            eprintln!("parse --continue-from {path:?}: {e}");
+            std::process::exit(1);
+        });
+        // Validate shape alignment vs trainer.
+        if init.n_features != n_features {
+            eprintln!(
+                "--continue-from n_features={} != trainer n_features={}",
+                init.n_features, n_features
+            );
+            std::process::exit(1);
+        }
+        if init.n_hidden != args.hidden {
+            eprintln!(
+                "--continue-from n_hidden={} != --hidden={}",
+                init.n_hidden, args.hidden
+            );
+            std::process::exit(1);
+        }
+        eprintln!(
+            "[continue-from] loaded {} bytes: n_features={}, n_hidden={}, w1.len()={}, b_α={:.4}",
+            bytes.len(),
+            init.n_features,
+            init.n_hidden,
+            init.w1.len(),
+            init.b_alpha,
+        );
+        Some(init)
+    } else {
+        None
+    };
+
     let hyperparams = MlpHyperparams {
         n_hidden: args.hidden,
         n_epochs: args.epochs,
@@ -1378,6 +1436,7 @@ fn main() {
         pool_head: args.pool_head,
         hybrid_head: args.hybrid_head,
         per_sample_alpha_head: args.per_sample_alpha_head,
+        per_sample_alpha_warm_init: warm_init,
     };
 
     println!(

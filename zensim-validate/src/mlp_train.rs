@@ -29,7 +29,7 @@
 use rayon::prelude::*;
 use std::time::Instant;
 use zenpredict::FeatureTransform;
-use zenpredict::{Activation, WeightDtype};
+use zenpredict::{Activation, Model, WeightDtype, WeightStorage};
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
 // Adam SIMD kernel — replaces the per-element scalar loop in
@@ -399,6 +399,24 @@ pub struct MlpHyperparams {
     ///   the per-sample backprop to the TV gradient path).
     /// - Parallel-batch flag (sequential mini-batch only).
     pub per_sample_alpha_head: bool,
+
+    /// V_24 finetune-from-bake: optional warm-init weights for the
+    /// per-sample α head trainer. When `Some(_)`, the trainer skips
+    /// the random Xavier init AND the scaler computation from training
+    /// data, using the pre-baked weights + scaler instead. Enables
+    /// brief finetune from an existing per-sample α bake (e.g., V_24
+    /// per-sample-α 5-seed pool) without re-randomizing the model.
+    ///
+    /// Validation:
+    /// - `init.n_features` MUST equal trainer's `n_features` (panic
+    ///   otherwise — caller's responsibility to align)
+    /// - `init.n_hidden` MUST equal `hyperparams.n_hidden`
+    /// - Only consulted on the `per_sample_alpha_head == true` path.
+    ///
+    /// Use with a small `initial_lr` (e.g. 1e-4) and short `n_epochs`
+    /// (10-30) for proper finetune behavior — the default 1e-3 + 300
+    /// epochs would wash out the init.
+    pub per_sample_alpha_warm_init: Option<PerSampleAlphaWarmInit>,
 }
 
 impl Default for MlpHyperparams {
@@ -431,8 +449,215 @@ impl Default for MlpHyperparams {
             pool_head: false,
             hybrid_head: false,
             per_sample_alpha_head: false,
+            per_sample_alpha_warm_init: None,
         }
     }
+}
+
+/// Warm-init payload for `train_mlp_per_sample_alpha_head` to
+/// continue training from a previously baked per-sample α head.
+///
+/// All fields are pulled directly from a ZNPR v3 bake produced by
+/// `bake_per_sample_alpha_head_v3` (the regular trainer path):
+/// - `scaler_mean` / `scaler_scale` — n_features f32s each, fed to
+///   `compute_scaler_from_groups` override below.
+/// - `w1` — `(n_features × n_hidden)` row-major f32s, layer-0 weights.
+/// - `b1` — `n_hidden` f32s, layer-0 biases.
+/// - `rank_w` / `rank_b` — extracted from `zentrain.per_sample_alpha_head`
+///   metadata payload.
+/// - `reducer_w` / `reducer_b` — same metadata.
+/// - `w_alpha` / `b_alpha` — same metadata.
+///
+/// The struct is the runtime mirror of `PerSampleAlphaHeadModel` but
+/// in f64 (the trainer's working type) — the loader does the f32→f64
+/// upcast once at startup.
+#[derive(Clone, Debug)]
+pub struct PerSampleAlphaWarmInit {
+    pub n_features: usize,
+    pub n_hidden: usize,
+    pub scaler_mean: Vec<f64>,
+    pub scaler_scale: Vec<f64>,
+    pub w1: Vec<f64>,
+    pub b1: Vec<f64>,
+    pub rank_w: Vec<f64>,
+    pub rank_b: f64,
+    pub reducer_w: [f64; 4],
+    pub reducer_b: f64,
+    pub w_alpha: Vec<f64>,
+    pub b_alpha: f64,
+}
+
+/// Load a per-sample α head bake (ZNPR v3) and extract every weight
+/// the trainer needs to resume training from it.
+///
+/// Caller passes the bake bytes (typically `std::fs::read(path)`).
+/// Returns an error string for the binary to surface.
+///
+/// Validates:
+/// - bake parses as a v3 model
+/// - n_layers == 2 (rank head emits a passthrough layer-1)
+/// - layer 0 weights are F32 (the only dtype trainer warm-init supports)
+/// - `zentrain.per_sample_alpha_head` metadata is present + correct size
+pub fn load_per_sample_alpha_warm_init(
+    bytes: &[u8],
+) -> Result<PerSampleAlphaWarmInit, String> {
+    let model = Model::from_bytes(bytes)
+        .map_err(|e| format!("parse v3 bake: {e:?}"))?;
+    let n_features = model.n_inputs();
+    if model.n_layers() < 1 {
+        return Err(format!(
+            "expected >=1 layer in bake; got {}",
+            model.n_layers()
+        ));
+    }
+    let layer0 = model.layer(0);
+    let n_hidden = layer0.out_dim;
+    if layer0.in_dim != n_features {
+        return Err(format!(
+            "layer 0 in_dim={} != n_inputs={}",
+            layer0.in_dim, n_features
+        ));
+    }
+
+    let w1_f32: Vec<f32> = match &layer0.weights {
+        WeightStorage::F32(s) => s.to_vec(),
+        WeightStorage::F16(_) => {
+            return Err("layer 0 weights are F16; warm-init only supports F32".to_string());
+        }
+        WeightStorage::I8 { .. } => {
+            return Err("layer 0 weights are I8; warm-init only supports F32".to_string());
+        }
+    };
+    if w1_f32.len() != n_features * n_hidden {
+        return Err(format!(
+            "layer 0 weights len={} != n_features*n_hidden={}*{}={}",
+            w1_f32.len(),
+            n_features,
+            n_hidden,
+            n_features * n_hidden
+        ));
+    }
+
+    // Extract hidden-unit permutation from layer 1 (permuted identity).
+    // The bake function applies hu_reorder.l2_asc to layer 0 + a matching
+    // permutation to layer 1 (initially identity). After permutation,
+    // layer-1 row i has its single 1.0 at column perm[i] where perm[i] is
+    // the OLD index (natural-order) that's now at NEW position i. To undo
+    // the permutation and get natural-order W1, we inverse-permute layer 0
+    // columns: natural_W1[r, perm[new_idx]] = permuted_W1[r, new_idx].
+    //
+    // The metadata payload (rank_w, w_alpha, reducer_w, b_α) was NOT
+    // permuted — it remained in natural order. So once W1 is restored to
+    // natural order, layer 0's hidden vector aligns with metadata indices,
+    // matching how the trainer originally produced these weights in memory.
+    let hu_perm: Vec<usize> = if model.n_layers() >= 2 {
+        let layer1 = model.layer(1);
+        let l1_w_f32: Vec<f32> = match &layer1.weights {
+            WeightStorage::F32(s) => s.to_vec(),
+            _ => return Err("layer 1 weights are not F32; warm-init expects identity F32 passthrough".to_string()),
+        };
+        if l1_w_f32.len() != n_hidden * n_hidden {
+            return Err(format!(
+                "layer 1 weights len={} != n_hidden*n_hidden={}*{}={}",
+                l1_w_f32.len(), n_hidden, n_hidden, n_hidden * n_hidden
+            ));
+        }
+        // For each row, find column index with value 1.0 (or maximum
+        // value — tolerates float error). That column is perm[row].
+        let mut perm = vec![0usize; n_hidden];
+        for r in 0..n_hidden {
+            let row = &l1_w_f32[r * n_hidden..(r + 1) * n_hidden];
+            let (best_col, _best_v) = row
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
+                .expect("non-empty row");
+            perm[r] = best_col;
+        }
+        // Sanity: perm must be a permutation of 0..n_hidden.
+        let mut seen = vec![false; n_hidden];
+        for &p in &perm {
+            if p >= n_hidden || seen[p] {
+                return Err(format!(
+                    "layer 1 is not a valid permuted identity (duplicate or OOB perm[i]={p})"
+                ));
+            }
+            seen[p] = true;
+        }
+        perm
+    } else {
+        (0..n_hidden).collect() // identity
+    };
+
+    let scaler_mean: Vec<f64> = model.scaler_mean().iter().map(|&v| v as f64).collect();
+    let scaler_scale: Vec<f64> = model.scaler_scale().iter().map(|&v| v as f64).collect();
+
+    // Inverse-permute layer 0 columns: natural_W1[r, perm[i]] = permuted_W1[r, i].
+    // Also permute b1 the same way: natural_b1[perm[i]] = permuted_b1[i].
+    let mut w1 = vec![0.0f64; n_features * n_hidden];
+    let mut b1 = vec![0.0f64; n_hidden];
+    let permuted_b1: Vec<f64> = layer0.biases.iter().map(|&v| v as f64).collect();
+    for r in 0..n_features {
+        for i in 0..n_hidden {
+            let natural_col = hu_perm[i];
+            w1[r * n_hidden + natural_col] = w1_f32[r * n_hidden + i] as f64;
+        }
+    }
+    for i in 0..n_hidden {
+        b1[hu_perm[i]] = permuted_b1[i];
+    }
+
+    // Extract per_sample_alpha_head metadata payload.
+    let md = model.metadata();
+    let entry = md
+        .get("zentrain.per_sample_alpha_head")
+        .ok_or_else(|| {
+            "bake has no zentrain.per_sample_alpha_head metadata; not a per-sample α bake"
+                .to_string()
+        })?;
+    let payload = entry.value;
+    let expected = (2 * n_hidden + 8) * 4;
+    if payload.len() != expected {
+        return Err(format!(
+            "per_sample_alpha_head payload len={} != expected={}",
+            payload.len(),
+            expected
+        ));
+    }
+    let mut floats = Vec::with_capacity(2 * n_hidden + 8);
+    for chunk in payload.chunks_exact(4) {
+        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    let w_alpha: Vec<f64> = floats[..n_hidden].iter().map(|&v| v as f64).collect();
+    let b_alpha = floats[n_hidden] as f64;
+    let rank_w: Vec<f64> = floats[n_hidden + 1..2 * n_hidden + 1]
+        .iter()
+        .map(|&v| v as f64)
+        .collect();
+    let rank_b = floats[2 * n_hidden + 1] as f64;
+    let reducer_w: [f64; 4] = [
+        floats[2 * n_hidden + 2] as f64,
+        floats[2 * n_hidden + 3] as f64,
+        floats[2 * n_hidden + 4] as f64,
+        floats[2 * n_hidden + 5] as f64,
+    ];
+    let reducer_b = floats[2 * n_hidden + 6] as f64;
+    // floats[2*n_hidden+7] = p_norm — runtime constant (6.0), trainer doesn't store.
+
+    Ok(PerSampleAlphaWarmInit {
+        n_features,
+        n_hidden,
+        scaler_mean,
+        scaler_scale,
+        w1,
+        b1,
+        rank_w,
+        rank_b,
+        reducer_w,
+        reducer_b,
+        w_alpha,
+        b_alpha,
+    })
 }
 
 /// Compute the per-pair PWRC loss weight given the two human scores
@@ -4580,8 +4805,36 @@ fn train_mlp_per_sample_alpha_head(
         );
     }
 
-    let (scaler_mean, scaler_scale) =
-        compute_scaler_from_groups(groups, &train_indices, n_features);
+    // Warm-init shortcut: when `per_sample_alpha_warm_init` is provided,
+    // skip scaler-from-groups and Xavier weight init — use the bake's
+    // values verbatim. This makes the trainer a true finetune from a
+    // prior checkpoint instead of a fresh random training run.
+    let (scaler_mean, scaler_scale) = if let Some(init) = &hyperparams.per_sample_alpha_warm_init
+    {
+        assert_eq!(
+            init.n_features, n_features,
+            "warm-init n_features={} ≠ trainer n_features={}",
+            init.n_features, n_features
+        );
+        assert_eq!(
+            init.n_hidden, n_hidden,
+            "warm-init n_hidden={} ≠ hyperparams n_hidden={}",
+            init.n_hidden, n_hidden
+        );
+        log_line(
+            &format!(
+                "per_sample_alpha_warm_init: ENABLED — loaded weights from prior bake (scaler_mean μ={:.3}, scaler_scale μ={:.3}, w1[0..4]={:?}, b_α={:.4})",
+                init.scaler_mean.iter().sum::<f64>() / init.scaler_mean.len() as f64,
+                init.scaler_scale.iter().sum::<f64>() / init.scaler_scale.len() as f64,
+                &init.w1[..4.min(init.w1.len())],
+                init.b_alpha,
+            ),
+            log,
+        );
+        (init.scaler_mean.clone(), init.scaler_scale.clone())
+    } else {
+        compute_scaler_from_groups(groups, &train_indices, n_features)
+    };
 
     let std_features: Vec<Vec<f64>> = groups
         .iter()
@@ -4598,14 +4851,30 @@ fn train_mlp_per_sample_alpha_head(
         .collect();
 
     let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
-    let mut w1 = init_model.w1.clone();
-    let mut b1 = init_model.b1.clone();
-    let mut rank_w = init_model.rank_w.clone();
-    let mut rank_b = init_model.rank_b;
-    let mut reducer_w = init_model.reducer_w;
-    let mut reducer_b = init_model.reducer_b;
-    let mut w_alpha = init_model.w_alpha.clone();
-    let mut b_alpha = init_model.b_alpha;
+    let (mut w1, mut b1, mut rank_w, mut rank_b, mut reducer_w, mut reducer_b, mut w_alpha, mut b_alpha) =
+        if let Some(init) = &hyperparams.per_sample_alpha_warm_init {
+            (
+                init.w1.clone(),
+                init.b1.clone(),
+                init.rank_w.clone(),
+                init.rank_b,
+                init.reducer_w,
+                init.reducer_b,
+                init.w_alpha.clone(),
+                init.b_alpha,
+            )
+        } else {
+            (
+                init_model.w1.clone(),
+                init_model.b1.clone(),
+                init_model.rank_w.clone(),
+                init_model.rank_b,
+                init_model.reducer_w,
+                init_model.reducer_b,
+                init_model.w_alpha.clone(),
+                init_model.b_alpha,
+            )
+        };
 
     let mut rng = SplitMix64::new(
         hyperparams
