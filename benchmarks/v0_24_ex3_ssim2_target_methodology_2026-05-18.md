@@ -1,7 +1,14 @@
 # V_24 EX-3 SSIMULACRA2 target backfill — methodology (in progress)
 
-**Status:** corpus building. Fleet 70% complete as of 2026-05-18T06:30Z.
-NOT a shipped bake yet.
+**Status:** corpus partially built. Fleet 82% complete as of 2026-05-18T06:38Z (619/754 sidecars). NOT a shipped bake yet — V_24 retrain is the next session's task.
+
+## Session result snapshot
+
+- **LARGE 3-target corpus**: 54,900 rows × 300 features (score_ssim2 dropped per Anti-pattern #6) + cvvdp + iwssim + ssim2 + mix_cv33_iw33_sm33 → `large_3target_300feat_minus_ssim2.parquet` (33 MB)
+- **KADID 4-target**: 10,125 rows × 372 features + ssim2 → `kadid_4target_372col.parquet` (30 MB)
+- **TID 4-target**: 3,000 rows × 372 features + ssim2 → `tid_4target_372col.parquet` (9 MB)
+- **safesyn**: DEFERRED — local scoring ~57 hr, fleet only covers LARGE
+- **Sidecar score stats (n=55,000, partial fleet)**: min=-50.54, max=99.99, mean=73.38, std=22.51, NaN=0, zero=0
 
 **Source spec:** EX-3 from `PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md` § 6 + 7 + 8.
 
