@@ -417,6 +417,75 @@ pub struct MlpHyperparams {
     /// (10-30) for proper finetune behavior — the default 1e-3 + 300
     /// epochs would wash out the init.
     pub per_sample_alpha_warm_init: Option<PerSampleAlphaWarmInit>,
+
+    /// PJND-aware pair weighting (2026-05-18 experiment).
+    ///
+    /// When `Some(config)`, pairs sampled from the target group (by
+    /// name, typically `"konjnd"`) are weighted by a gaussian-product
+    /// factor based on the pair's (midpoint, gap) in MOS space. The
+    /// factor multiplies into the existing PWRC `pair_weight`:
+    ///
+    /// ```text
+    ///   mid    = 0.5 * (mos_a + mos_b)
+    ///   gap    = |mos_a - mos_b|
+    ///   w_mid  = exp(-((mid - threshold) / sigma_mid)^2)
+    ///   w_gap  = exp(-((gap - gap_anchor) / sigma_gap)^2)
+    ///   factor = (w_mid * w_gap) / normalization_z
+    /// ```
+    ///
+    /// `normalization_z` is the empirical mean of `w_mid * w_gap` over
+    /// the target group's all-cross-pairs space — divides out so the
+    /// expected weight under uniform sampling is ~1.0, preserving the
+    /// gradient-magnitude scale of the unweighted run. Computed by the
+    /// pre-processing diagnostic
+    /// `scripts/v_next/build_pjnd_pair_weights.py` and passed in via
+    /// CLI (`--pjnd-normalization-z FLOAT`).
+    ///
+    /// **Hypothesis (V_24 PJND-aware pair-weighting experiment)**: konjnd
+    /// learning is gradient-starved on the perceptual-just-noticeable-
+    /// difference boundary. Pairs at the threshold midpoint AND with the
+    /// typical JND-boundary gap carry the actual ranking signal;
+    /// downweighting "clearly-different" and "clearly-tied" pairs lets
+    /// the encoder spend its budget on the load-bearing region.
+    ///
+    /// **Falsification**: if the konjnd SROCC doesn't lift vs the same
+    /// recipe without PJND-weighting, the boundary-pair hypothesis is
+    /// dead.
+    ///
+    /// Only the call sites in the K=1 sequential, K>1 parallel, and
+    /// K>1 NiN paths multiply this factor into `pair_weight` when
+    /// `target_group_idx == Some(g_idx)`. The factor is multiplicative
+    /// over PWRC, NOT a replacement. Default `None` = legacy (no PJND
+    /// weighting); active only when `--pjnd-aware-pair-weighting`.
+    pub pjnd_pair_weighting: Option<PjndPairWeightingConfig>,
+}
+
+/// Configuration for PJND-aware pair weighting on a single training group.
+///
+/// See `MlpHyperparams::pjnd_pair_weighting` for design rationale + math.
+#[derive(Clone, Debug)]
+pub struct PjndPairWeightingConfig {
+    /// Index into `groups` slice of the target group (typically the konjnd
+    /// group). Set to `None` at config-construction time and resolved by
+    /// the trainer once the group list is known (matches by name).
+    pub target_group_idx: Option<usize>,
+    /// Name of the target group (e.g., `"konjnd"`). Used to resolve
+    /// `target_group_idx` after groups are loaded.
+    pub target_group_name: String,
+    /// PJND midpoint threshold in MOS units. Pair midpoints near this
+    /// value get the highest `w_mid`. Default 45.0 (empirical midpoint
+    /// of konjnd bimodal cluster centers ~31 and ~58).
+    pub threshold: f64,
+    /// Gaussian sigma for pair-midpoint proximity to threshold.
+    pub sigma_mid: f64,
+    /// Typical pair gap for JND-boundary pairs. Default 27.0 (cluster
+    /// center gap 58 - 31 in the konjnd corpus).
+    pub gap_anchor: f64,
+    /// Gaussian sigma for pair-gap proximity to anchor.
+    pub sigma_gap: f64,
+    /// Normalization constant: `w_unnorm / Z` so `E[w | uniform sampling]
+    /// ≈ 1.0`. Computed by the pre-processing diagnostic.
+    pub normalization_z: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -450,7 +519,35 @@ impl Default for MlpHyperparams {
             hybrid_head: false,
             per_sample_alpha_head: false,
             per_sample_alpha_warm_init: None,
+            pjnd_pair_weighting: None,
         }
+    }
+}
+
+/// Compute the PJND-aware multiplicative pair-weight factor for the given
+/// pair scores. Returns 1.0 when `pjnd` is `None` or when the pair's group
+/// index doesn't match `pjnd.target_group_idx`.
+///
+/// See `MlpHyperparams::pjnd_pair_weighting` for math + design rationale.
+#[inline]
+pub fn pjnd_pair_weight_factor(
+    mos_a: f64,
+    mos_b: f64,
+    g_idx: usize,
+    pjnd: Option<&PjndPairWeightingConfig>,
+) -> f64 {
+    match pjnd {
+        Some(cfg) if cfg.target_group_idx == Some(g_idx) => {
+            let mid = 0.5 * (mos_a + mos_b);
+            let gap = (mos_a - mos_b).abs();
+            let z_mid = (mid - cfg.threshold) / cfg.sigma_mid.max(1e-6);
+            let z_gap = (gap - cfg.gap_anchor) / cfg.sigma_gap.max(1e-6);
+            let w_mid = (-(z_mid * z_mid)).exp();
+            let w_gap = (-(z_gap * z_gap)).exp();
+            let z = cfg.normalization_z.max(1e-12);
+            (w_mid * w_gap) / z
+        }
+        _ => 1.0,
     }
 }
 
@@ -834,6 +931,20 @@ pub fn train_mlp_with_tv(
         "no training groups (all train_weight == 0)"
     );
 
+    // PJND-aware pair weighting: resolve target group index by name.
+    // See `MlpHyperparams::pjnd_pair_weighting` for design rationale + math.
+    let pjnd_cfg: Option<PjndPairWeightingConfig> = hyperparams
+        .pjnd_pair_weighting
+        .as_ref()
+        .map(|cfg| {
+            let idx = groups
+                .iter()
+                .position(|g| g.name == cfg.target_group_name);
+            let mut resolved = cfg.clone();
+            resolved.target_group_idx = idx;
+            resolved
+        });
+
     let train_indices: Vec<usize> = groups
         .iter()
         .enumerate()
@@ -855,6 +966,31 @@ pub fn train_mlp_with_tv(
         eprintln!("{msg}");
         log.push(msg.to_string());
     };
+
+    if let Some(cfg) = &pjnd_cfg {
+        log_line(
+            &format!(
+                "pjnd_pair_weighting: ENABLED — target_group='{}' resolved_idx={:?} threshold={:.2} sigma_mid={:.2} gap_anchor={:.2} sigma_gap={:.2} Z={:.6}",
+                cfg.target_group_name,
+                cfg.target_group_idx,
+                cfg.threshold,
+                cfg.sigma_mid,
+                cfg.gap_anchor,
+                cfg.sigma_gap,
+                cfg.normalization_z,
+            ),
+            log,
+        );
+        if cfg.target_group_idx.is_none() {
+            log_line(
+                &format!(
+                    "  WARNING: target group '{}' not found in trainer groups; PJND weighting will be inactive",
+                    cfg.target_group_name
+                ),
+                log,
+            );
+        }
+    }
 
     log_line(
         &format!(
@@ -1144,6 +1280,7 @@ pub fn train_mlp_with_tv(
                         hyperparams.norm_in_norm_weight,
                         hyperparams.norm_in_norm_p,
                         hyperparams.norm_in_norm_q,
+                        pjnd_cfg.as_ref(),
                     );
                     parallel_batch_buffer.clear();
                     total_loss += loss_added;
@@ -1181,6 +1318,7 @@ pub fn train_mlp_with_tv(
                         hyperparams.pwrc_pair_weight,
                         hyperparams.pwrc_sensory_threshold,
                         hyperparams.pwrc_band_weights.as_deref(),
+                        pjnd_cfg.as_ref(),
                     );
                     parallel_batch_buffer.clear();
                     total_loss += loss_added;
@@ -1235,11 +1373,17 @@ pub fn train_mlp_with_tv(
             }
             // PWRC per-pair weight (default 1.0 when disabled). Scales
             // both loss & dl/dy linearly — the gradient is `pair_weight
-            // * dl/dy` because loss is linear in pair_weight.
-            let pair_weight = if hyperparams.pwrc_pair_weight {
-                pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
-            } else {
-                1.0
+            // * dl/dy` because loss is linear in pair_weight. Multiplied
+            // with PJND-aware pair-weight factor (see
+            // `MlpHyperparams::pjnd_pair_weighting`).
+            let pair_weight = {
+                let pwrc_w = if hyperparams.pwrc_pair_weight {
+                    pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
+                } else {
+                    1.0
+                };
+                let pjnd_w = pjnd_pair_weight_factor(mos_a, mos_b, g_idx, pjnd_cfg.as_ref());
+                pwrc_w * pjnd_w
             };
             let pred_diff = yb - ya;
             let z = -target * pred_diff;
@@ -1444,6 +1588,7 @@ pub fn train_mlp_with_tv(
                         hyperparams.norm_in_norm_weight,
                         hyperparams.norm_in_norm_p,
                         hyperparams.norm_in_norm_q,
+                        pjnd_cfg.as_ref(),
                     );
                     total_loss += loss_added;
                     n_steps += steps_added;
@@ -1469,6 +1614,7 @@ pub fn train_mlp_with_tv(
                     hyperparams.pwrc_pair_weight,
                     hyperparams.pwrc_sensory_threshold,
                     hyperparams.pwrc_band_weights.as_deref(),
+                    pjnd_cfg.as_ref(),
                 );
                 parallel_batch_buffer.clear();
                 total_loss += loss_added;
@@ -4094,6 +4240,7 @@ fn run_parallel_minibatch(
     pwrc_enabled: bool,
     pwrc_sensory_threshold: f64,
     pwrc_band_weights: Option<&[f64]>,
+    pjnd_cfg: Option<&PjndPairWeightingConfig>,
 ) -> (u64, f64) {
     // Chunk size is a **fixed function of K** (not thread count) so
     // the chunk partition — and therefore the FP reduce order — is
@@ -4158,10 +4305,14 @@ fn run_parallel_minibatch(
                 {
                     continue;
                 }
-                let pair_weight = if pwrc_enabled {
-                    pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
-                } else {
-                    1.0
+                let pair_weight = {
+                    let pwrc_w = if pwrc_enabled {
+                        pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
+                    } else {
+                        1.0
+                    };
+                    let pjnd_w = pjnd_pair_weight_factor(mos_a, mos_b, g_idx, pjnd_cfg);
+                    pwrc_w * pjnd_w
                 };
                 let pred_diff = yb - ya;
                 let z = -target * pred_diff;
@@ -4310,6 +4461,7 @@ fn run_minibatch_with_nin(
     nin_weight: f64,
     nin_p: f64,
     nin_q: f64,
+    pjnd_cfg: Option<&PjndPairWeightingConfig>,
 ) -> (u64, f64) {
     // Per-pair forward outputs kept around for the second pass (the
     // NiN-augmented backward). `Option` because skipped pairs (target
@@ -4352,10 +4504,14 @@ fn run_minibatch_with_nin(
             forwards.push(None);
             continue;
         }
-        let pair_weight = if pwrc_enabled {
-            pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
-        } else {
-            1.0
+        let pair_weight = {
+            let pwrc_w = if pwrc_enabled {
+                pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
+            } else {
+                1.0
+            };
+            let pjnd_w = pjnd_pair_weight_factor(mos_a, mos_b, g_idx, pjnd_cfg);
+            pwrc_w * pjnd_w
         };
         let (ya, ha_pre, ha) = forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
         let (yb, hb_pre, hb) = forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
@@ -4753,6 +4909,21 @@ fn train_mlp_per_sample_alpha_head(
         );
     }
 
+    // PJND-aware pair weighting: resolve target group index by name. Build a
+    // local config with the resolved index so the hot-loop helper doesn't
+    // re-resolve every pair. None when --pjnd-aware-pair-weighting isn't set.
+    let pjnd_cfg: Option<PjndPairWeightingConfig> = hyperparams
+        .pjnd_pair_weighting
+        .as_ref()
+        .map(|cfg| {
+            let idx = groups
+                .iter()
+                .position(|g| g.name == cfg.target_group_name);
+            let mut resolved = cfg.clone();
+            resolved.target_group_idx = idx;
+            resolved
+        });
+
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(train_total > 0.0, "no training groups");
 
@@ -4961,6 +5132,30 @@ fn train_mlp_per_sample_alpha_head(
         ),
         log,
     );
+    if let Some(cfg) = &pjnd_cfg {
+        log_line(
+            &format!(
+                "pjnd_pair_weighting: ENABLED — target_group='{}' resolved_idx={:?} threshold={:.2} sigma_mid={:.2} gap_anchor={:.2} sigma_gap={:.2} Z={:.6}",
+                cfg.target_group_name,
+                cfg.target_group_idx,
+                cfg.threshold,
+                cfg.sigma_mid,
+                cfg.gap_anchor,
+                cfg.sigma_gap,
+                cfg.normalization_z,
+            ),
+            log,
+        );
+        if cfg.target_group_idx.is_none() {
+            log_line(
+                &format!(
+                    "  WARNING: target group '{}' not found in trainer groups; PJND weighting will be inactive",
+                    cfg.target_group_name
+                ),
+                log,
+            );
+        }
+    }
 
     // Adam-step closure: pack/unpack our parameters into the Adam slots.
     let do_adam_step = |adam: &mut AdamState,
@@ -5099,10 +5294,14 @@ fn train_mlp_per_sample_alpha_head(
                 }
                 continue;
             }
-            let pair_weight = if hyperparams.pwrc_pair_weight {
-                pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
-            } else {
-                1.0
+            let pair_weight = {
+                let pwrc_w = if hyperparams.pwrc_pair_weight {
+                    pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
+                } else {
+                    1.0
+                };
+                let pjnd_w = pjnd_pair_weight_factor(mos_a, mos_b, g_idx, pjnd_cfg.as_ref());
+                pwrc_w * pjnd_w
             };
             let pred_diff = yb - ya;
             let z = -target * pred_diff;

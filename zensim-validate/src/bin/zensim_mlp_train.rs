@@ -103,8 +103,8 @@ mod simd_mlp;
 mod contamination_guard;
 
 use mlp_train::{
-    MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, load_per_sample_alpha_warm_init,
-    train_mlp_with_tv,
+    MlpHyperparams, PjndPairWeightingConfig, TrainingGroup, TvRegularizer, ValidationPolicy,
+    load_per_sample_alpha_warm_init, train_mlp_with_tv,
 };
 
 #[derive(Parser)]
@@ -604,6 +604,53 @@ struct Args {
     /// strengths.
     #[arg(long)]
     continue_from: Option<PathBuf>,
+
+    /// PJND-aware pair weighting (V_24 PJND-aware experiment).
+    ///
+    /// When set, pairs from the target group (typically `konjnd`) are
+    /// weighted by a gaussian-product factor peaking at the perceptual
+    /// just-noticeable-difference boundary. See
+    /// `MlpHyperparams::pjnd_pair_weighting` docstring for math.
+    ///
+    /// **Hypothesis**: konjnd learning is gradient-starved on the JND
+    /// boundary — pairs at threshold midpoint AND typical JND-boundary
+    /// gap carry the ranking signal. Boosting those vs flat sampling
+    /// should lift KonJND without warping the encoder.
+    #[arg(long, default_value_t = false)]
+    pjnd_aware_pair_weighting: bool,
+
+    /// Target group name for PJND pair weighting (default `konjnd`).
+    /// Matched against `--group <name>:...` group identifiers.
+    #[arg(long, default_value_t = String::from("konjnd"))]
+    pjnd_target_group: String,
+
+    /// PJND midpoint threshold in MOS units. Pair midpoints near this
+    /// value get the highest `w_mid`. Default 45.0 (empirical midpoint
+    /// of konjnd bimodal cluster centers ~31 and ~58).
+    #[arg(long, default_value_t = 45.0)]
+    pjnd_threshold: f64,
+
+    /// Gaussian sigma for pair-midpoint proximity to threshold.
+    #[arg(long, default_value_t = 8.0)]
+    pjnd_sigma_mid: f64,
+
+    /// Typical pair gap for JND-boundary pairs (the gap that separates
+    /// just-below-threshold from just-above-threshold variants).
+    /// Default 27.0 (cluster center gap 58 - 31).
+    #[arg(long, default_value_t = 27.0)]
+    pjnd_gap_anchor: f64,
+
+    /// Gaussian sigma for pair-gap proximity to anchor.
+    #[arg(long, default_value_t = 10.0)]
+    pjnd_sigma_gap: f64,
+
+    /// Normalization constant Z so `E[w | uniform sampling] ≈ 1.0`.
+    /// Computed by `scripts/v_next/build_pjnd_pair_weights.py` against
+    /// the target group's score distribution. Trainer divides each
+    /// pair's gaussian weight by Z to keep gradient magnitude in the
+    /// same ballpark as unweighted training.
+    #[arg(long, default_value_t = 0.329719)]
+    pjnd_normalization_z: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1437,6 +1484,19 @@ fn main() {
         hybrid_head: args.hybrid_head,
         per_sample_alpha_head: args.per_sample_alpha_head,
         per_sample_alpha_warm_init: warm_init,
+        pjnd_pair_weighting: if args.pjnd_aware_pair_weighting {
+            Some(PjndPairWeightingConfig {
+                target_group_idx: None,
+                target_group_name: args.pjnd_target_group.clone(),
+                threshold: args.pjnd_threshold,
+                sigma_mid: args.pjnd_sigma_mid,
+                gap_anchor: args.pjnd_gap_anchor,
+                sigma_gap: args.pjnd_sigma_gap,
+                normalization_z: args.pjnd_normalization_z,
+            })
+        } else {
+            None
+        },
     };
 
     println!(
