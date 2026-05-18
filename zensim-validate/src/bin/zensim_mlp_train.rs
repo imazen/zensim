@@ -567,6 +567,27 @@ struct Args {
     ///   `--pwrc-band-weights`, TV regularizer, L2, low/mid/high-q boosts.
     #[arg(long, default_value_t = false)]
     hybrid_head: bool,
+
+    /// EX-2 follow-up²: per-sample α head. Replaces the scalar α in
+    /// `--hybrid-head` with a learned function `α(x) = sigmoid(W_α · h
+    /// + b_α)` predicted from the encoder's hidden vector. Lets the
+    /// model assign α per-pair so photo-like inputs (CID22-shaped)
+    /// pull α toward rank-dominant while JND-step-grid inputs
+    /// (KonJND-shaped) pull α toward pool-dominant.
+    ///
+    /// Mutually exclusive with `--pool-head` AND `--hybrid-head`. The
+    /// bake metadata key changes to `zentrain.per_sample_alpha_head`
+    /// with payload `[W_α[n_hidden] | b_α | rank_w[n_hidden] |
+    /// rank_b | reducer_w[4] | reducer_b | p_norm]` (size
+    /// `4·(2·n_hidden + 8)`).
+    ///
+    /// **What composes**: NiN composition (mandatory for V_22-LARGE
+    /// recipe), `--minibatch-size K`, PWRC weights, L2 on layer-1 +
+    /// rank_w + reducer_w + W_α (b_α unregularized),
+    /// low/mid/high-q row boosts. **What is omitted**: TV regularizer
+    /// (skipped on this path — V_22 recipe doesn't use TV).
+    #[arg(long, default_value_t = false)]
+    per_sample_alpha_head: bool,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1356,6 +1377,7 @@ fn main() {
         norm_in_norm_q: args.norm_in_norm_q,
         pool_head: args.pool_head,
         hybrid_head: args.hybrid_head,
+        per_sample_alpha_head: args.per_sample_alpha_head,
     };
 
     println!(

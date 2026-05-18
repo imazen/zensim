@@ -370,6 +370,35 @@ pub struct MlpHyperparams {
     /// `rank_w[n_hidden]`, `rank_b`, `alpha_logit`, `reducer_w[4]`,
     /// `reducer_b`, `p_norm`).
     pub hybrid_head: bool,
+
+    /// EX-2 follow-up²: per-sample α head. Replaces the bake-level
+    /// scalar α_logit with a learned per-pair α via `α(x) =
+    /// sigmoid(W_α · h + b_α)`. Lets photo-like inputs pull α toward
+    /// the rank head while JND-step-grid inputs pull α toward the
+    /// pool head.
+    ///
+    /// Mutually exclusive with `pool_head` AND `hybrid_head`. The
+    /// bake metadata key becomes `zentrain.per_sample_alpha_head`
+    /// with payload `[W_α[n_hidden] | b_α | rank_w[n_hidden] |
+    /// rank_b | reducer_w[4] | reducer_b | p_norm]`. Architectural
+    /// cost: +(n_hidden + 1) weights vs scalar-α hybrid.
+    ///
+    /// **What composes (v0 wiring, 2026-05-18):**
+    /// - RankNet pair loss + Adam + cosine LR + early-stop
+    /// - `--minibatch-size K` (sequential gradient accumulation)
+    /// - NiN composition (per V_22-LARGE recipe)
+    /// - `--pwrc-pair-weight` + `--pwrc-sensory-threshold` +
+    ///   `--pwrc-band-weights`
+    /// - L2 (`--l2`) on layer-1 + rank_w + reducer_w + W_α
+    ///   (b_α unregularized)
+    /// - Low/Mid/High-q row boosts
+    ///
+    /// **What is omitted (v0):**
+    /// - TV regularizer (skipped on per-sample α path; the V_22
+    ///   recipe doesn't use TV; reactivating requires extending
+    ///   the per-sample backprop to the TV gradient path).
+    /// - Parallel-batch flag (sequential mini-batch only).
+    pub per_sample_alpha_head: bool,
 }
 
 impl Default for MlpHyperparams {
@@ -401,6 +430,7 @@ impl Default for MlpHyperparams {
             norm_in_norm_q: 2.0,
             pool_head: false,
             hybrid_head: false,
+            per_sample_alpha_head: false,
         }
     }
 }
@@ -538,10 +568,16 @@ pub fn train_mlp_with_tv(
     // wire-in (the sequential mini-batch path covers V_22-mix-LARGE's
     // K=256 recipe at h=128 in ~25 min wall on the 7950X — fast enough
     // that a SIMD/par-chunks port is queued, not load-bearing).
+    let head_flags = (hyperparams.pool_head as u8)
+        + (hyperparams.hybrid_head as u8)
+        + (hyperparams.per_sample_alpha_head as u8);
     assert!(
-        !(hyperparams.pool_head && hyperparams.hybrid_head),
-        "pool_head and hybrid_head are mutually exclusive"
+        head_flags <= 1,
+        "pool_head / hybrid_head / per_sample_alpha_head are mutually exclusive"
     );
+    if hyperparams.per_sample_alpha_head {
+        return train_mlp_per_sample_alpha_head(groups, n_features, hyperparams, log);
+    }
     if hyperparams.hybrid_head {
         return train_mlp_hybrid_head_with_tv(groups, n_features, hyperparams, log, tv);
     }
@@ -4409,6 +4445,860 @@ impl SplitMix64 {
         let u2 = self.next_f64_unit();
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
     }
+}
+
+/// Per-pair forward state retained across an NiN-aware per-sample
+/// α-head mini-batch. The flush walks every `Some(_)` entry, computes
+/// NiN over the 2N predictions, and routes per-prediction grad through
+/// `backprop_step_per_sample_alpha_head` (which extends hybrid_head
+/// with the W_α path's contribution to ∂L/∂h_j).
+pub(crate) struct PerSampleAlphaPairForward<'a> {
+    pub(crate) xa: &'a [f64],
+    pub(crate) xb: &'a [f64],
+    pub(crate) ya: f64,
+    pub(crate) yb: f64,
+    pub(crate) ya_rank: f64,
+    pub(crate) yb_rank: f64,
+    pub(crate) ya_pool: f64,
+    pub(crate) yb_pool: f64,
+    pub(crate) alpha_a: f64,
+    pub(crate) alpha_b: f64,
+    pub(crate) ha_pre: Vec<f64>,
+    pub(crate) ha: Vec<f64>,
+    pub(crate) hb_pre: Vec<f64>,
+    pub(crate) hb: Vec<f64>,
+    pub(crate) sa: [f64; 4],
+    pub(crate) sb: [f64; 4],
+    pub(crate) max_a: usize,
+    pub(crate) max_b: usize,
+    pub(crate) dl_dya_rn: f64,
+    pub(crate) dl_dyb_rn: f64,
+    pub(crate) mos_a: f64,
+    pub(crate) mos_b: f64,
+}
+
+/// Production trainer for the per-sample α head. Mirrors
+/// `train_mlp_hybrid_head_with_tv` but routes through
+/// `backprop_step_per_sample_alpha_head` and packs the per-sample
+/// `(W_α, b_α)` parameters into Adam.
+///
+/// **Adam w2/b2 layout**:
+/// - `gw2[0..n_hidden]`           = rank_w
+/// - `gw2[n_hidden..n_hidden+4]`  = reducer_w
+/// - `gw2[n_hidden+4..2·n_hidden+4]` = W_α
+/// - `gw2[2·n_hidden+4]`          = b_α
+/// - `gb2[0]`                     = rank_b
+/// - `gb2[1]`                     = reducer_b
+///
+/// TV regularizer is OMITTED on this path (the V_22-LARGE recipe
+/// doesn't use TV). NiN composes via `flush_per_sample_alpha_nin_batch`
+/// in the same per-pair grad-scatter pattern as the hybrid path.
+#[allow(clippy::too_many_lines)]
+fn train_mlp_per_sample_alpha_head(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+) -> Vec<u8> {
+    use zensim_train_core::per_sample_alpha_head as psah;
+
+    let n_hidden = hyperparams.n_hidden;
+    let leaky = hyperparams.leaky_alpha;
+
+    assert!(!groups.is_empty(), "need at least one training group");
+    for g in groups {
+        assert_eq!(
+            g.human_scores.len(),
+            g.features.len(),
+            "{}: scores/features length mismatch",
+            g.name
+        );
+        assert!(
+            g.features.iter().all(|f| f.len() == n_features),
+            "{}: feature length mismatch",
+            g.name
+        );
+    }
+    let nin_on = hyperparams.norm_in_norm_weight > 0.0;
+    if nin_on {
+        assert!(
+            hyperparams.minibatch_size >= 16,
+            "per_sample_alpha_head + NiN: K (minibatch_size) must be ≥16; got {}",
+            hyperparams.minibatch_size
+        );
+    }
+
+    let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
+    assert!(train_total > 0.0, "no training groups");
+
+    let train_indices: Vec<usize> = groups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, g)| if g.train_weight > 0.0 { Some(i) } else { None })
+        .collect();
+    let val_indices: Vec<usize> = groups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, g)| {
+            if g.validation_weight > 0.0 {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let log_line = |msg: &str, log: &mut Vec<String>| {
+        eprintln!("{msg}");
+        log.push(msg.to_string());
+    };
+
+    log_line(
+        &format!(
+            "MLP train (PER-SAMPLE-α): arch=[{n_features} → {n_hidden} (LeakyReLU α={leaky}) \
+             → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy={:?}",
+            hyperparams.validation_policy,
+        ),
+        log,
+    );
+    for (i, g) in groups.iter().enumerate() {
+        let role = match (g.train_weight > 0.0, g.validation_weight > 0.0) {
+            (true, true) => "train+val",
+            (true, false) => "train",
+            (false, true) => "val-only",
+            (false, false) => "report",
+        };
+        log_line(
+            &format!(
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                g.name,
+                g.features.len(),
+                g.train_weight,
+                g.validation_weight,
+            ),
+            log,
+        );
+    }
+
+    let (scaler_mean, scaler_scale) =
+        compute_scaler_from_groups(groups, &train_indices, n_features);
+
+    let std_features: Vec<Vec<f64>> = groups
+        .iter()
+        .map(|g| {
+            let mut buf = vec![0.0f64; g.features.len() * n_features];
+            for (i, &f) in g.features.iter().enumerate() {
+                for d in 0..n_features {
+                    buf[i * n_features + d] =
+                        (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                }
+            }
+            buf
+        })
+        .collect();
+
+    let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
+    let mut w1 = init_model.w1.clone();
+    let mut b1 = init_model.b1.clone();
+    let mut rank_w = init_model.rank_w.clone();
+    let mut rank_b = init_model.rank_b;
+    let mut reducer_w = init_model.reducer_w;
+    let mut reducer_b = init_model.reducer_b;
+    let mut w_alpha = init_model.w_alpha.clone();
+    let mut b_alpha = init_model.b_alpha;
+
+    let mut rng = SplitMix64::new(
+        hyperparams
+            .seed
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(0x0123456789ABCDEF),
+    );
+
+    // Adam slot sizes: w2 = n_hidden (rank_w) + 4 (reducer_w)
+    //                       + n_hidden (W_α) + 1 (b_α).
+    // b2 = 2 (rank_b, reducer_b).
+    let n_w2 = n_hidden + 4 + n_hidden + 1;
+    let n_b2 = 2;
+    let mut adam = AdamState::new(w1.len(), b1.len(), n_w2, n_b2);
+
+    let start = Instant::now();
+    let mut best_val_score = f64::NEG_INFINITY;
+    let mut best_bake: Option<Vec<u8>> = None;
+    let mut stale_epochs = 0usize;
+
+    let cdf: Vec<f64> = {
+        let mut cum = 0.0;
+        train_indices
+            .iter()
+            .map(|&gi| {
+                cum += groups[gi].train_weight;
+                cum / train_total
+            })
+            .collect()
+    };
+
+    let needs_row_boost = hyperparams.low_q_boost != 1.0
+        || hyperparams.mid_q_boost != 1.0
+        || hyperparams.high_q_boost != 1.0;
+    let per_row_cdfs: Vec<Option<Vec<f64>>> = train_indices
+        .iter()
+        .map(|&gi| {
+            if !needs_row_boost {
+                return None;
+            }
+            let g = &groups[gi];
+            let mut cum = 0.0;
+            let raw: Vec<f64> = g
+                .human_scores
+                .iter()
+                .map(|&s| {
+                    let mut w = 1.0;
+                    if hyperparams.low_q_boost != 1.0 {
+                        if s < 50.0 {
+                            w *= hyperparams.low_q_boost;
+                        } else if s < 65.0 {
+                            w *= hyperparams.low_q_boost.sqrt();
+                        }
+                    }
+                    if hyperparams.mid_q_boost != 1.0 && (50.0..90.0).contains(&s) {
+                        w *= hyperparams.mid_q_boost;
+                    }
+                    if hyperparams.high_q_boost != 1.0 && s >= 90.0 {
+                        w *= hyperparams.high_q_boost;
+                    }
+                    cum += w;
+                    cum
+                })
+                .collect();
+            let total = *raw.last().unwrap_or(&1.0);
+            Some(raw.into_iter().map(|c| c / total).collect())
+        })
+        .collect();
+
+    let k = hyperparams.minibatch_size.max(1);
+    log_line(
+        &format!(
+            "per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K={k} sequential, NiN={}",
+            if nin_on {
+                format!(
+                    "w={:.3} p={:.2} q={:.2}",
+                    hyperparams.norm_in_norm_weight,
+                    hyperparams.norm_in_norm_p,
+                    hyperparams.norm_in_norm_q
+                )
+            } else {
+                "off".to_string()
+            }
+        ),
+        log,
+    );
+
+    // Adam-step closure: pack/unpack our parameters into the Adam slots.
+    let do_adam_step = |adam: &mut AdamState,
+                        w1: &mut Vec<f64>,
+                        b1: &mut Vec<f64>,
+                        rank_w: &mut Vec<f64>,
+                        rank_b: &mut f64,
+                        reducer_w: &mut [f64; 4],
+                        reducer_b: &mut f64,
+                        w_alpha: &mut Vec<f64>,
+                        b_alpha: &mut f64,
+                        lr: f64,
+                        n_hidden: usize| {
+        let mut w2_vec = vec![0.0f64; n_hidden + 4 + n_hidden + 1];
+        for j in 0..n_hidden {
+            w2_vec[j] = rank_w[j];
+        }
+        for kk in 0..4 {
+            w2_vec[n_hidden + kk] = reducer_w[kk];
+        }
+        for j in 0..n_hidden {
+            w2_vec[n_hidden + 4 + j] = w_alpha[j];
+        }
+        w2_vec[n_hidden + 4 + n_hidden] = *b_alpha;
+        let mut b2_vec = vec![*rank_b, *reducer_b];
+        adam.step(w1, b1, &mut w2_vec, &mut b2_vec, lr);
+        for j in 0..n_hidden {
+            rank_w[j] = w2_vec[j];
+        }
+        for kk in 0..4 {
+            reducer_w[kk] = w2_vec[n_hidden + kk];
+        }
+        for j in 0..n_hidden {
+            w_alpha[j] = w2_vec[n_hidden + 4 + j];
+        }
+        *b_alpha = w2_vec[n_hidden + 4 + n_hidden];
+        *rank_b = b2_vec[0];
+        *reducer_b = b2_vec[1];
+    };
+
+    let mut nin_buffer: Vec<Option<PerSampleAlphaPairForward<'_>>> = if nin_on {
+        Vec::with_capacity(k)
+    } else {
+        Vec::new()
+    };
+
+    for epoch in 0..hyperparams.n_epochs {
+        let lr = hyperparams.initial_lr
+            * 0.5
+            * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
+
+        let mut total_loss = 0.0f64;
+        let mut n_steps = 0u64;
+        let mut steps_since_adam = 0u64;
+
+        for _ in 0..hyperparams.pairs_per_epoch {
+            let u = rng.next_f64_unit();
+            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            let g_idx = train_indices[train_pos];
+            let g = &groups[g_idx];
+            let n = g.features.len();
+            if n < 2 {
+                continue;
+            }
+            let (ia, ib) = match &per_row_cdfs[train_pos] {
+                Some(row_cdf) => {
+                    let ua = rng.next_f64_unit();
+                    let ub = rng.next_f64_unit();
+                    (
+                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                    )
+                }
+                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
+            };
+            if ia == ib {
+                continue;
+            }
+
+            let g_feats = &std_features[g_idx];
+            let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
+            let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+
+            let (ya, ya_rank, ya_pool, alpha_a, _ali_a, ha_pre, ha, sa, max_a) =
+                psah::forward_per_sample_alpha_head(
+                    xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    n_features, n_hidden, leaky,
+                );
+            let (yb, yb_rank, yb_pool, alpha_b, _ali_b, hb_pre, hb, sb, max_b) =
+                psah::forward_per_sample_alpha_head(
+                    xb, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    n_features, n_hidden, leaky,
+                );
+
+            let mos_a = g.human_scores[ia];
+            let mos_b = g.human_scores[ib];
+            let target = (mos_a - mos_b).signum();
+            if target == 0.0 {
+                if nin_on {
+                    nin_buffer.push(None);
+                    if nin_buffer.len() >= k {
+                        flush_per_sample_alpha_nin_batch(
+                            &mut nin_buffer,
+                            &mut w1, &mut b1, &mut rank_w, &mut rank_b,
+                            &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
+                            &mut adam, n_features, n_hidden, leaky,
+                            hyperparams.l2_lambda,
+                            hyperparams.norm_in_norm_weight,
+                            hyperparams.norm_in_norm_p,
+                            hyperparams.norm_in_norm_q,
+                            lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                        );
+                    }
+                }
+                continue;
+            }
+            if hyperparams.pwrc_pair_weight
+                && hyperparams.pwrc_sensory_threshold > 0.0
+                && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold
+            {
+                if nin_on {
+                    nin_buffer.push(None);
+                    if nin_buffer.len() >= k {
+                        flush_per_sample_alpha_nin_batch(
+                            &mut nin_buffer,
+                            &mut w1, &mut b1, &mut rank_w, &mut rank_b,
+                            &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
+                            &mut adam, n_features, n_hidden, leaky,
+                            hyperparams.l2_lambda,
+                            hyperparams.norm_in_norm_weight,
+                            hyperparams.norm_in_norm_p,
+                            hyperparams.norm_in_norm_q,
+                            lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                        );
+                    }
+                }
+                continue;
+            }
+            let pair_weight = if hyperparams.pwrc_pair_weight {
+                pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
+            } else {
+                1.0
+            };
+            let pred_diff = yb - ya;
+            let z = -target * pred_diff;
+            let loss_raw = if z > 50.0 {
+                z
+            } else if z < -50.0 {
+                0.0
+            } else {
+                (z.exp() + 1.0).ln()
+            };
+            total_loss += loss_raw * pair_weight;
+            n_steps += 1;
+
+            let sig_z = 1.0 / (1.0 + (-z).exp());
+            let dl_d_pred_diff = -target * sig_z * pair_weight;
+            let dl_dya_rn = -dl_d_pred_diff;
+            let dl_dyb_rn = dl_d_pred_diff;
+
+            if nin_on {
+                nin_buffer.push(Some(PerSampleAlphaPairForward {
+                    xa, xb, ya, yb,
+                    ya_rank, yb_rank, ya_pool, yb_pool,
+                    alpha_a, alpha_b,
+                    ha_pre, ha, hb_pre, hb,
+                    sa, sb, max_a, max_b,
+                    dl_dya_rn, dl_dyb_rn, mos_a, mos_b,
+                }));
+                if nin_buffer.len() >= k {
+                    flush_per_sample_alpha_nin_batch(
+                        &mut nin_buffer,
+                        &mut w1, &mut b1, &mut rank_w, &mut rank_b,
+                        &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
+                        &mut adam, n_features, n_hidden, leaky,
+                        hyperparams.l2_lambda,
+                        hyperparams.norm_in_norm_weight,
+                        hyperparams.norm_in_norm_p,
+                        hyperparams.norm_in_norm_q,
+                        lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                    );
+                }
+                continue;
+            }
+
+            // Plain RankNet path (no NiN).
+            let dl_dya = dl_dya_rn;
+            let dl_dyb = dl_dyb_rn;
+            steps_since_adam += 1;
+
+            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+            let mut g_rank_b_buf = 0.0f64;
+            let mut g_red_w: [f64; 4] = [0.0; 4];
+            let mut g_red_b: f64 = 0.0;
+            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+            let mut g_b_alpha: f64 = 0.0;
+
+            psah::backprop_step_per_sample_alpha_head(
+                xa, &ha_pre, &ha, &sa, max_a, ya_rank, ya_pool, alpha_a, dl_dya,
+                &rank_w, &reducer_w, &w_alpha,
+                &mut adam.gw1, &mut adam.gb1,
+                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                &mut g_red_w, &mut g_red_b,
+                &mut g_w_alpha_buf, &mut g_b_alpha,
+                n_features, n_hidden, leaky,
+            );
+            psah::backprop_step_per_sample_alpha_head(
+                xb, &hb_pre, &hb, &sb, max_b, yb_rank, yb_pool, alpha_b, dl_dyb,
+                &rank_w, &reducer_w, &w_alpha,
+                &mut adam.gw1, &mut adam.gb1,
+                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                &mut g_red_w, &mut g_red_b,
+                &mut g_w_alpha_buf, &mut g_b_alpha,
+                n_features, n_hidden, leaky,
+            );
+
+            if hyperparams.l2_lambda > 0.0 {
+                let l2 = hyperparams.l2_lambda;
+                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                    *g += l2 * w;
+                }
+                for j in 0..n_hidden {
+                    g_rank_w_buf[j] += l2 * rank_w[j];
+                    g_w_alpha_buf[j] += l2 * w_alpha[j];
+                }
+                for kk in 0..4 {
+                    g_red_w[kk] += l2 * reducer_w[kk];
+                }
+            }
+
+            // Fold per-pair grads into Adam w2/b2 slots.
+            for j in 0..n_hidden {
+                adam.gw2[j] += g_rank_w_buf[j];
+            }
+            for kk in 0..4 {
+                adam.gw2[n_hidden + kk] += g_red_w[kk];
+            }
+            for j in 0..n_hidden {
+                adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+            }
+            adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+            adam.gb2[0] += g_rank_b_buf;
+            adam.gb2[1] += g_red_b;
+
+            if k == 1 || steps_since_adam >= k as u64 {
+                do_adam_step(
+                    &mut adam, &mut w1, &mut b1,
+                    &mut rank_w, &mut rank_b,
+                    &mut reducer_w, &mut reducer_b,
+                    &mut w_alpha, &mut b_alpha,
+                    lr, n_hidden,
+                );
+                steps_since_adam = 0;
+            }
+        }
+
+        // Final-flush leftover K>1 (RankNet path).
+        if k > 1 && !nin_on && steps_since_adam > 0 {
+            do_adam_step(
+                &mut adam, &mut w1, &mut b1,
+                &mut rank_w, &mut rank_b,
+                &mut reducer_w, &mut reducer_b,
+                &mut w_alpha, &mut b_alpha,
+                lr, n_hidden,
+            );
+        }
+        if nin_on && !nin_buffer.is_empty() {
+            let surviving = nin_buffer.iter().filter(|p| p.is_some()).count();
+            if surviving >= 16 {
+                flush_per_sample_alpha_nin_batch(
+                    &mut nin_buffer,
+                    &mut w1, &mut b1, &mut rank_w, &mut rank_b,
+                    &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
+                    &mut adam, n_features, n_hidden, leaky,
+                    hyperparams.l2_lambda,
+                    hyperparams.norm_in_norm_weight,
+                    hyperparams.norm_in_norm_p,
+                    hyperparams.norm_in_norm_q,
+                    lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                );
+            } else {
+                nin_buffer.clear();
+            }
+        }
+
+        let avg_loss = if n_steps > 0 {
+            total_loss / n_steps as f64
+        } else {
+            0.0
+        };
+
+        if epoch % hyperparams.log_every == 0 || epoch == hyperparams.n_epochs - 1 {
+            // Per-sample α diagnostic: compute α at a sample of inputs
+            // to log mean/min/max α at this epoch.
+            let mut alpha_samples: Vec<f64> = Vec::new();
+            for (gi, gfeats) in std_features.iter().enumerate() {
+                let n = groups[gi].features.len();
+                if n == 0 {
+                    continue;
+                }
+                let step = (n / 64).max(1);
+                let mut i = 0;
+                while i < n && alpha_samples.len() < 512 {
+                    let xi = &gfeats[i * n_features..(i + 1) * n_features];
+                    let (_, _, _, alpha, _, _, _, _, _) = psah::forward_per_sample_alpha_head(
+                        xi, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
+                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
+                    );
+                    alpha_samples.push(alpha);
+                    i += step;
+                }
+            }
+            let alpha_mean = alpha_samples.iter().sum::<f64>() / alpha_samples.len().max(1) as f64;
+            let alpha_min = alpha_samples.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+            let alpha_max = alpha_samples.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+
+            let group_srocc: Vec<f64> = groups
+                .iter()
+                .enumerate()
+                .map(|(gi, g)| {
+                    let preds = predict_group_per_sample_alpha_head(
+                        &std_features[gi],
+                        g.features.len(),
+                        n_features,
+                        &w1, &b1, &rank_w, rank_b,
+                        &reducer_w, reducer_b,
+                        &w_alpha, b_alpha,
+                        n_hidden, leaky,
+                    );
+                    let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
+                    spearman_correlation(g.human_scores, &neg_preds)
+                })
+                .collect();
+
+            let val_score = if val_indices.is_empty() {
+                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+            } else {
+                match hyperparams.validation_policy {
+                    ValidationPolicy::Mean => {
+                        let total: f64 = val_indices
+                            .iter()
+                            .map(|&i| groups[i].validation_weight)
+                            .sum();
+                        val_indices
+                            .iter()
+                            .map(|&i| group_srocc[i] * groups[i].validation_weight)
+                            .sum::<f64>()
+                            / total
+                    }
+                    ValidationPolicy::Min => val_indices
+                        .iter()
+                        .map(|&i| group_srocc[i])
+                        .fold(f64::INFINITY, f64::min),
+                }
+            };
+
+            let elapsed = start.elapsed().as_secs_f64();
+            let per_group = group_srocc
+                .iter()
+                .zip(groups.iter())
+                .map(|(s, g)| format!("{}={s:.4}", g.name))
+                .collect::<Vec<_>>()
+                .join(" ");
+            log_line(
+                &format!(
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val={val_score:.4} (best={best_val_score:.4}) | α(x): μ={alpha_mean:.3} [min={alpha_min:.3}, max={alpha_max:.3}] | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
+                    reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3],
+                ),
+                log,
+            );
+
+            if val_score > best_val_score {
+                best_val_score = val_score;
+                stale_epochs = 0;
+                let model = psah::PerSampleAlphaHeadModel {
+                    scaler_mean: scaler_mean.clone(),
+                    scaler_scale: scaler_scale.clone(),
+                    w1: w1.clone(),
+                    b1: b1.clone(),
+                    rank_w: rank_w.clone(),
+                    rank_b,
+                    reducer_w,
+                    reducer_b,
+                    w_alpha: w_alpha.clone(),
+                    b_alpha,
+                    n_hidden,
+                    n_features,
+                };
+                best_bake = Some(psah::bake_per_sample_alpha_head_v3(&model));
+            } else {
+                stale_epochs += hyperparams.log_every;
+                if hyperparams.early_stop_patience > 0
+                    && stale_epochs >= hyperparams.early_stop_patience
+                {
+                    log_line(
+                        &format!(
+                            "  early stop at epoch {epoch} (no val improvement for {stale_epochs} epochs)"
+                        ),
+                        log,
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    log_line(
+        &format!(
+            "MLP train (PER-SAMPLE-α): best val SROCC = {best_val_score:.4} | final reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] b_α={:.3}",
+            reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], b_alpha,
+        ),
+        log,
+    );
+    best_bake.unwrap_or_else(|| {
+        let model = psah::PerSampleAlphaHeadModel {
+            scaler_mean: scaler_mean.clone(),
+            scaler_scale: scaler_scale.clone(),
+            w1: w1.clone(),
+            b1: b1.clone(),
+            rank_w: rank_w.clone(),
+            rank_b,
+            reducer_w,
+            reducer_b,
+            w_alpha: w_alpha.clone(),
+            b_alpha,
+            n_hidden,
+            n_features,
+        };
+        psah::bake_per_sample_alpha_head_v3(&model)
+    })
+}
+
+/// Predict per-sample α head outputs for every row in a flat
+/// (n_pairs × n_features) standardized feature buffer.
+#[allow(clippy::too_many_arguments)]
+fn predict_group_per_sample_alpha_head(
+    std_x: &[f64],
+    n_pairs: usize,
+    n_features: usize,
+    w1: &[f64],
+    b1: &[f64],
+    rank_w: &[f64],
+    rank_b: f64,
+    reducer_w: &[f64; 4],
+    reducer_b: f64,
+    w_alpha: &[f64],
+    b_alpha: f64,
+    n_hidden: usize,
+    leaky: f64,
+) -> Vec<f64> {
+    use zensim_train_core::per_sample_alpha_head as psah;
+    (0..n_pairs)
+        .map(|i| {
+            let xi = &std_x[i * n_features..(i + 1) * n_features];
+            let (y, _, _, _, _, _, _, _, _) = psah::forward_per_sample_alpha_head(
+                xi, w1, b1, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha,
+                n_features, n_hidden, leaky,
+            );
+            y
+        })
+        .collect()
+}
+
+/// NiN-aware flush for the per-sample α head. Computes NiN over the
+/// 2N surviving predictions and routes per-prediction grad through
+/// `backprop_step_per_sample_alpha_head`. Accumulates into the Adam
+/// slots laid out in `train_mlp_per_sample_alpha_head`, then performs
+/// one Adam step. L2 is applied K·λ·w scaled by `steps_added`
+/// (matches hybrid_head flush).
+#[allow(clippy::too_many_arguments)]
+fn flush_per_sample_alpha_nin_batch<F>(
+    nin_buffer: &mut Vec<Option<PerSampleAlphaPairForward<'_>>>,
+    w1: &mut Vec<f64>,
+    b1: &mut Vec<f64>,
+    rank_w: &mut Vec<f64>,
+    rank_b: &mut f64,
+    reducer_w: &mut [f64; 4],
+    reducer_b: &mut f64,
+    w_alpha: &mut Vec<f64>,
+    b_alpha: &mut f64,
+    adam: &mut AdamState,
+    n_features: usize,
+    n_hidden: usize,
+    leaky_alpha: f64,
+    l2_lambda: f64,
+    nin_weight: f64,
+    nin_p: f64,
+    nin_q: f64,
+    lr: f64,
+    total_loss: &mut f64,
+    n_steps: &mut u64,
+    do_adam_step: &F,
+) where
+    F: Fn(
+        &mut AdamState,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut f64,
+        &mut [f64; 4],
+        &mut f64,
+        &mut Vec<f64>,
+        &mut f64,
+        f64,
+        usize,
+    ),
+{
+    use zensim_train_core::per_sample_alpha_head as psah;
+
+    let mut nin_preds: Vec<f64> = Vec::with_capacity(2 * nin_buffer.len());
+    let mut nin_labels: Vec<f64> = Vec::with_capacity(2 * nin_buffer.len());
+    let mut nin_idx_map: Vec<(usize, bool)> = Vec::with_capacity(2 * nin_buffer.len());
+    for (pi, slot) in nin_buffer.iter().enumerate() {
+        if let Some(p) = slot {
+            nin_preds.push(p.ya);
+            nin_labels.push(-p.mos_a);
+            nin_idx_map.push((pi, false));
+            nin_preds.push(p.yb);
+            nin_labels.push(-p.mos_b);
+            nin_idx_map.push((pi, true));
+        }
+    }
+    let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
+            &nin_preds, &nin_labels, nin_p, nin_q,
+        )
+    } else {
+        (0.0, vec![0.0; nin_preds.len()])
+    };
+    *total_loss += nin_weight * nin_loss;
+
+    let mut steps_added: u64 = 0;
+    let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+    let mut g_rank_b_buf = 0.0f64;
+    let mut g_red_w: [f64; 4] = [0.0; 4];
+    let mut g_red_b: f64 = 0.0;
+    let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+    let mut g_b_alpha: f64 = 0.0;
+
+    for (nin_pos, &(pi, is_b)) in nin_idx_map.iter().enumerate() {
+        let p = match &nin_buffer[pi] {
+            Some(p) => p,
+            None => continue,
+        };
+        let nin_g = nin_grad[nin_pos] * nin_weight;
+        if is_b {
+            let dl_dy = p.dl_dyb_rn + nin_g;
+            psah::backprop_step_per_sample_alpha_head(
+                p.xb, &p.hb_pre, &p.hb, &p.sb, p.max_b,
+                p.yb_rank, p.yb_pool, p.alpha_b, dl_dy,
+                rank_w, reducer_w, w_alpha,
+                &mut adam.gw1, &mut adam.gb1,
+                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                &mut g_red_w, &mut g_red_b,
+                &mut g_w_alpha_buf, &mut g_b_alpha,
+                n_features, n_hidden, leaky_alpha,
+            );
+            steps_added += 1;
+        } else {
+            let dl_dy = p.dl_dya_rn + nin_g;
+            psah::backprop_step_per_sample_alpha_head(
+                p.xa, &p.ha_pre, &p.ha, &p.sa, p.max_a,
+                p.ya_rank, p.ya_pool, p.alpha_a, dl_dy,
+                rank_w, reducer_w, w_alpha,
+                &mut adam.gw1, &mut adam.gb1,
+                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                &mut g_red_w, &mut g_red_b,
+                &mut g_w_alpha_buf, &mut g_b_alpha,
+                n_features, n_hidden, leaky_alpha,
+            );
+        }
+    }
+
+    if l2_lambda > 0.0 && steps_added > 0 {
+        let scale = l2_lambda * steps_added as f64;
+        for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+            *g += scale * w;
+        }
+        for j in 0..n_hidden {
+            g_rank_w_buf[j] += scale * rank_w[j];
+            g_w_alpha_buf[j] += scale * w_alpha[j];
+        }
+        for kk in 0..4 {
+            g_red_w[kk] += scale * reducer_w[kk];
+        }
+    }
+
+    for j in 0..n_hidden {
+        adam.gw2[j] += g_rank_w_buf[j];
+    }
+    for kk in 0..4 {
+        adam.gw2[n_hidden + kk] += g_red_w[kk];
+    }
+    for j in 0..n_hidden {
+        adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+    }
+    adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+    adam.gb2[0] += g_rank_b_buf;
+    adam.gb2[1] += g_red_b;
+
+    if steps_added > 0 {
+        do_adam_step(
+            adam, w1, b1, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, lr, n_hidden,
+        );
+        *n_steps += steps_added;
+    }
+    nin_buffer.clear();
 }
 
 #[cfg(test)]

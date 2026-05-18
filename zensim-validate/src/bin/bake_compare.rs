@@ -340,7 +340,42 @@ fn score_corpus(
             }
         })
     };
-    let pool_head_reducer = if hybrid_head.is_some() {
+    // EX-2 follow-up²: per-sample α head dispatch. Takes priority
+    // over hybrid (per-sample is the more general form).
+    let per_sample_alpha_head: Option<(Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32)> = {
+        let md = model.metadata();
+        md.get("zentrain.per_sample_alpha_head").and_then(|entry| {
+            let n_hidden = model.n_outputs();
+            let expected = (2 * n_hidden + 8) * 4;
+            if entry.value.len() != expected {
+                None
+            } else {
+                let mut floats = Vec::with_capacity(2 * n_hidden + 8);
+                for chunk in entry.value.chunks_exact(4) {
+                    floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                }
+                let w_alpha = floats[..n_hidden].to_vec();
+                let b_alpha = floats[n_hidden];
+                let rank_w = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
+                let rank_b = floats[2 * n_hidden + 1];
+                let reducer_w = [
+                    floats[2 * n_hidden + 2],
+                    floats[2 * n_hidden + 3],
+                    floats[2 * n_hidden + 4],
+                    floats[2 * n_hidden + 5],
+                ];
+                let reducer_b = floats[2 * n_hidden + 6];
+                let p_norm = floats[2 * n_hidden + 7];
+                Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+            }
+        })
+    };
+    let hybrid_head = if per_sample_alpha_head.is_some() {
+        None
+    } else {
+        hybrid_head
+    };
+    let pool_head_reducer = if hybrid_head.is_some() || per_sample_alpha_head.is_some() {
         None
     } else {
         pool_head_reducer
@@ -364,6 +399,49 @@ fn score_corpus(
             };
             match result {
                 Ok(out) => {
+                    // Per-sample α dispatch (most general).
+                    if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
+                        per_sample_alpha_head.as_ref()
+                    {
+                        let n = out.len() as f64;
+                        if n <= 0.0 {
+                            return f64::NAN;
+                        }
+                        let mut y_rank = *rank_b as f64;
+                        let mut alpha_logit = *b_alpha as f64;
+                        let mut sum = 0.0f64;
+                        let mut max_v = f64::NEG_INFINITY;
+                        let mut sum_p = 0.0f64;
+                        let p = *p_norm as f64;
+                        for (j, &h) in out.iter().enumerate() {
+                            let hf = h as f64;
+                            y_rank += hf * rank_w[j] as f64;
+                            alpha_logit += hf * w_alpha[j] as f64;
+                            sum += hf;
+                            if hf > max_v {
+                                max_v = hf;
+                            }
+                            sum_p += hf.abs().powf(p);
+                        }
+                        let mu = sum / n;
+                        let mut var = 0.0f64;
+                        for &h in out.iter() {
+                            let d = h as f64 - mu;
+                            var += d * d;
+                        }
+                        let sigma = (var / n).sqrt().max(0.0026);
+                        let p_norm_stat = (sum_p / n).powf(1.0 / p);
+                        let y_pool = mu * reducer_w[0] as f64
+                            + sigma * reducer_w[1] as f64
+                            + max_v * reducer_w[2] as f64
+                            + p_norm_stat * reducer_w[3] as f64
+                            + *reducer_b as f64;
+                        let alpha = {
+                            let xc = alpha_logit.clamp(-20.0, 20.0);
+                            1.0 / (1.0 + (-xc).exp())
+                        };
+                        return alpha * y_rank + (1.0 - alpha) * y_pool;
+                    }
                     if let Some((rank_w, reducer_w, rank_b, alpha_logit, reducer_b, p_norm)) =
                         hybrid_head.as_ref()
                     {

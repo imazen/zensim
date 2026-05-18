@@ -632,9 +632,10 @@ fn score_row(
     has_transforms: bool,
     pool_head_reducer: Option<&([f32; 4], f32, f32)>,
     hybrid_head: Option<&(Vec<f32>, [f32; 4], f32, f32, f32, f32)>,
+    per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
     f32_features: &mut [f32],
     row: &[f64],
-) -> f64 {
+) -> (f64, f64) {
     let n_inputs = f32_features.len();
     let take = n_inputs.min(row.len());
     for i in 0..take {
@@ -652,12 +653,55 @@ fn score_row(
     };
     match result {
         Ok(out) => {
+            // Per-sample α head dispatch — most general; runs first.
+            if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
+                per_sample_alpha_head
+            {
+                let n = out.len() as f64;
+                if n <= 0.0 {
+                    return (f64::NAN, f64::NAN);
+                }
+                let mut y_rank = *rank_b as f64;
+                let mut alpha_logit = *b_alpha as f64;
+                let mut sum = 0.0f64;
+                let mut max_v = f64::NEG_INFINITY;
+                let mut sum_p = 0.0f64;
+                let p = *p_norm as f64;
+                for (j, &h) in out.iter().enumerate() {
+                    let hf = h as f64;
+                    y_rank += hf * rank_w[j] as f64;
+                    alpha_logit += hf * w_alpha[j] as f64;
+                    sum += hf;
+                    if hf > max_v {
+                        max_v = hf;
+                    }
+                    sum_p += hf.abs().powf(p);
+                }
+                let mu = sum / n;
+                let mut var = 0.0f64;
+                for &h in out.iter() {
+                    let d = h as f64 - mu;
+                    var += d * d;
+                }
+                let sigma = (var / n).sqrt().max(0.0026);
+                let p_norm_stat = (sum_p / n).powf(1.0 / p);
+                let y_pool = mu * reducer_w[0] as f64
+                    + sigma * reducer_w[1] as f64
+                    + max_v * reducer_w[2] as f64
+                    + p_norm_stat * reducer_w[3] as f64
+                    + *reducer_b as f64;
+                let alpha = {
+                    let xc = alpha_logit.clamp(-20.0, 20.0);
+                    1.0 / (1.0 + (-xc).exp())
+                };
+                return (alpha * y_rank + (1.0 - alpha) * y_pool, alpha);
+            }
             if let Some((rank_w, reducer_w, rank_b, alpha_logit, reducer_b, p_norm)) =
                 hybrid_head
             {
                 let n = out.len() as f64;
                 if n <= 0.0 {
-                    return f64::NAN;
+                    return (f64::NAN, f64::NAN);
                 }
                 let mut y_rank = *rank_b as f64;
                 let mut sum = 0.0f64;
@@ -690,7 +734,7 @@ fn score_row(
                     let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
                     1.0 / (1.0 + (-xc).exp())
                 };
-                return alpha * y_rank + (1.0 - alpha) * y_pool;
+                return (alpha * y_rank + (1.0 - alpha) * y_pool, alpha);
             }
             if let Some((rw, rb, p_norm)) = pool_head_reducer {
                 // Compute the 4 pool stats over the hidden vector,
@@ -698,7 +742,7 @@ fn score_row(
                 // POOL_STD_FLOOR (0.0026) the trainer uses.
                 let n = out.len() as f64;
                 if n <= 0.0 {
-                    return f64::NAN;
+                    return (f64::NAN, f64::NAN);
                 }
                 let mut sum = 0.0f64;
                 let mut max_v = f64::NEG_INFINITY;
@@ -720,16 +764,18 @@ fn score_row(
                 }
                 let sigma = (var / n).sqrt().max(0.0026);
                 let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                mu * rw[0] as f64
+                let y = mu * rw[0] as f64
                     + sigma * rw[1] as f64
                     + max_v * rw[2] as f64
                     + p_norm_stat * rw[3] as f64
-                    + *rb as f64
+                    + *rb as f64;
+                (y, f64::NAN)
             } else {
-                out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
+                let y = out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN);
+                (y, f64::NAN)
             }
         }
-        Err(_) => f64::NAN,
+        Err(_) => (f64::NAN, f64::NAN),
     }
 }
 
@@ -749,6 +795,41 @@ fn extract_pool_head_reducer(model: &Model) -> Option<([f32; 4], f32, f32)> {
         buf[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
     }
     Some(([buf[0], buf[1], buf[2], buf[3]], buf[4], buf[5]))
+}
+
+/// Read the `zentrain.per_sample_alpha_head` metadata payload, if any.
+/// Returns `Some((W_α, b_α, rank_w, rank_b, reducer_w, reducer_b, p_norm))`.
+///
+/// Payload layout (f32 LE):
+/// `[W_α[0..n_hidden]] [b_α] [rank_w[0..n_hidden]] [rank_b]
+/// [reducer_w[0..4]] [reducer_b] [p_norm]` — total bytes = 4·(2·n_hidden + 8).
+fn extract_per_sample_alpha_head(
+    model: &Model,
+) -> Option<(Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32)> {
+    let md = model.metadata();
+    let entry = md.get("zentrain.per_sample_alpha_head")?;
+    let n_hidden = model.n_outputs();
+    let expected = (2 * n_hidden + 8) * 4;
+    if entry.value.len() != expected {
+        return None;
+    }
+    let mut floats = Vec::with_capacity(2 * n_hidden + 8);
+    for chunk in entry.value.chunks_exact(4) {
+        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    let w_alpha = floats[..n_hidden].to_vec();
+    let b_alpha = floats[n_hidden];
+    let rank_w = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
+    let rank_b = floats[2 * n_hidden + 1];
+    let reducer_w = [
+        floats[2 * n_hidden + 2],
+        floats[2 * n_hidden + 3],
+        floats[2 * n_hidden + 4],
+        floats[2 * n_hidden + 5],
+    ];
+    let reducer_b = floats[2 * n_hidden + 6];
+    let p_norm = floats[2 * n_hidden + 7];
+    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
 }
 
 /// Read the `zentrain.hybrid_head` metadata payload, if any. Returns
@@ -941,6 +1022,11 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
+/// Per-sample α head dispatch tuple — used to thread W_α + b_α +
+/// rank_w + rank_b + reducer_w + reducer_b + p_norm through the
+/// per-corpus scoring chain.
+type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
+
 // ============================================================================
 // Per-corpus pipeline
 // ============================================================================
@@ -975,6 +1061,7 @@ fn render_corpus(
     has_transforms: bool,
     pool_head_reducer: Option<&([f32; 4], f32, f32)>,
     hybrid_head: Option<&(Vec<f32>, [f32; 4], f32, f32, f32, f32)>,
+    per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
     n_inputs: usize,
     model: &Model,
 ) -> Result<CorpusResult, String> {
@@ -984,24 +1071,52 @@ fn render_corpus(
     let humans = g.human_scores;
     let mut predictor = Predictor::new(model);
 
-    // Score every row. f32 scratch buffer reused across all rows
-    // to avoid the per-row allocation that would otherwise dominate
-    // wall time on the bigger corpora (KADID has 10k rows × 372 f32s).
+    // Score every row. f32 scratch buffer reused across all rows.
     let mut scratch = vec![0.0f32; n_inputs];
+    let mut alpha_samples: Vec<f64> = Vec::new();
     let scores: Vec<f64> = g
         .feature_rows
         .iter()
         .map(|row| {
-            score_row(
+            let (y, alpha) = score_row(
                 &mut predictor,
                 has_transforms,
                 pool_head_reducer,
                 hybrid_head,
+                per_sample_alpha_head,
                 &mut scratch,
                 row,
-            )
+            );
+            if alpha.is_finite() && per_sample_alpha_head.is_some() {
+                alpha_samples.push(alpha);
+            }
+            y
         })
         .collect();
+    // Per-sample α diagnostic: emit α distribution stats for this corpus.
+    if let Some(_) = per_sample_alpha_head
+        && !alpha_samples.is_empty()
+    {
+        let n = alpha_samples.len() as f64;
+        let mean = alpha_samples.iter().sum::<f64>() / n;
+        let mut sorted = alpha_samples.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let p = |q: f64| -> f64 {
+            let i = ((sorted.len() - 1) as f64 * q).round() as usize;
+            sorted[i.min(sorted.len() - 1)]
+        };
+        eprintln!(
+            "  α({}): n={} mean={:.3} p05={:.3} p25={:.3} p50={:.3} p75={:.3} p95={:.3}",
+            corpus.display,
+            sorted.len(),
+            mean,
+            p(0.05),
+            p(0.25),
+            p(0.50),
+            p(0.75),
+            p(0.95),
+        );
+    }
 
     let n = scores.len();
     let (srocc, plcc, krocc, or_, pw, z) = aggregate_panel(&scores, &humans);
@@ -1151,18 +1266,24 @@ fn main() -> ExitCode {
     let has_transforms = model.has_nontrivial_feature_transforms();
     let pool_head_reducer = extract_pool_head_reducer(&model);
     let hybrid_head = extract_hybrid_head(&model);
-    // Hybrid takes priority — pool-head dispatch only kicks in when
-    // hybrid is absent (a bake can't carry both).
-    let pool_head_reducer = if hybrid_head.is_some() {
+    let per_sample_alpha_head = extract_per_sample_alpha_head(&model);
+    // Priority: per_sample > hybrid > pool. A bake carries at most one.
+    let hybrid_head = if per_sample_alpha_head.is_some() {
+        None
+    } else {
+        hybrid_head
+    };
+    let pool_head_reducer = if hybrid_head.is_some() || per_sample_alpha_head.is_some() {
         None
     } else {
         pool_head_reducer
     };
     eprintln!(
-        "bake: n_inputs={n_inputs}  feature_transforms={}  pool_head={}  hybrid_head={}",
+        "bake: n_inputs={n_inputs}  feature_transforms={}  pool_head={}  hybrid_head={}  per_sample_α={}",
         if has_transforms { "yes" } else { "no" },
         if pool_head_reducer.is_some() { "yes" } else { "no" },
         if hybrid_head.is_some() { "yes" } else { "no" },
+        if per_sample_alpha_head.is_some() { "yes" } else { "no" },
     );
     if let Some((rw, rb, p_norm)) = pool_head_reducer.as_ref() {
         eprintln!(
@@ -1176,6 +1297,22 @@ fn main() -> ExitCode {
         eprintln!(
             "  hybrid_head: |rank_w|={} α={:.4} (logit={:+.4}) rank_b={:.4} reducer_w=[μ={:.4} σ={:.4} max={:.4} p6={:.4}] reducer_b={:.4} p_norm={:.2}",
             rank_w.len(), alpha, alpha_logit, rank_b,
+            reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], reducer_b, p_norm
+        );
+    }
+    if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
+        per_sample_alpha_head.as_ref()
+    {
+        let w_alpha_mag = w_alpha.iter().map(|&v| (v as f64).abs()).sum::<f64>()
+            / w_alpha.len().max(1) as f64;
+        eprintln!(
+            "  per_sample_α: |W_α|={} mean|W_α|={:.4} b_α={:+.4} (init-α={:.3}) |rank_w|={} rank_b={:.4} reducer_w=[μ={:.4} σ={:.4} max={:.4} p6={:.4}] reducer_b={:.4} p_norm={:.2}",
+            w_alpha.len(),
+            w_alpha_mag,
+            b_alpha,
+            1.0 / (1.0 + (-(*b_alpha as f64)).exp()),
+            rank_w.len(),
+            rank_b,
             reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], reducer_b, p_norm
         );
     }
@@ -1206,7 +1343,16 @@ fn main() -> ExitCode {
 
     let mut results: Vec<CorpusResult> = Vec::new();
     for corpus in &args.corpora {
-        match render_corpus(corpus, &args.features_root, has_transforms, pool_head_reducer.as_ref(), hybrid_head.as_ref(), n_inputs, &model) {
+        match render_corpus(
+            corpus,
+            &args.features_root,
+            has_transforms,
+            pool_head_reducer.as_ref(),
+            hybrid_head.as_ref(),
+            per_sample_alpha_head.as_ref(),
+            n_inputs,
+            &model,
+        ) {
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("bake_verdict: {e}");
