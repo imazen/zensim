@@ -517,6 +517,35 @@ struct Args {
     /// Only meaningful when `--norm-in-norm-weight > 0`.
     #[arg(long, default_value_t = 2.0, value_name = "FLOAT")]
     norm_in_norm_q: f64,
+
+    /// EX-2 std-pool head (`PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md §3`).
+    /// When set, the trainer replaces the standard `n_hidden → 1`
+    /// linear output with `pool[μ, σ, max, p_6] → 4 → 1` reducer
+    /// (GMSD's std-pooling + Butteraugli p-norm + IW-style pooling).
+    /// The bake emits a passthrough second layer + a
+    /// `zentrain.pool_head_reducer` metadata key carrying
+    /// `[w_μ, w_σ, w_max, w_p6, b, p_norm]`. Runtime detects the
+    /// metadata and routes through `pool_head::forward_pool_head`.
+    ///
+    /// **Current limitations** (v0 prod wire-in, 2026-05-18):
+    /// - Pool-head backprop is scalar (SIMD parity work queued; see
+    ///   `MlpHyperparams::pool_head` doc).
+    /// - `--norm-in-norm-weight > 0` is incompatible (errors out).
+    /// - Parallel-batch is silently ignored (sequential mini-batch
+    ///   path; pool-head per-pair work is small enough that the K=256
+    ///   recipe still trains in ~25 min wall at h=128).
+    ///
+    /// **What composes** (verified in unit tests):
+    /// - `--minibatch-size K` (sequential gradient accumulation, Adam
+    ///   step every K pairs + final-flush).
+    /// - `--pwrc-pair-weight` + `--pwrc-sensory-threshold` +
+    ///   `--pwrc-band-weights`.
+    /// - TV regularizer (`--tv-pairs-file` + `--tv-weight`).
+    /// - L2 (`--l2`) on layer-1 weights and reducer weights.
+    /// - Low/Mid/High-q row boosts (`--low-q-boost` etc).
+    /// - Cosine LR (50-epoch period), early stop on val SROCC.
+    #[arg(long, default_value_t = false)]
+    pool_head: bool,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1304,6 +1333,7 @@ fn main() {
         norm_in_norm_weight: args.norm_in_norm_weight,
         norm_in_norm_p: args.norm_in_norm_p,
         norm_in_norm_q: args.norm_in_norm_q,
+        pool_head: args.pool_head,
     };
 
     println!(

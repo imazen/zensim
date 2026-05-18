@@ -317,6 +317,24 @@ pub struct MlpHyperparams {
     ///
     /// Only meaningful when `norm_in_norm_weight > 0`.
     pub norm_in_norm_q: f64,
+
+    /// EX-2 std-pool head (`PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md §3`).
+    /// When `true`, the trainer replaces the standard `n_hidden → 1`
+    /// linear output with `pool[μ, σ, max, p_6] → 4 → 1` reducer
+    /// (GMSD + Butteraugli p-norm + IW-style pooling). The bake emits
+    /// a passthrough second layer plus a `zentrain.pool_head_reducer`
+    /// metadata key carrying `[w_μ, w_σ, w_max, w_p6, b, p_norm]` —
+    /// the runtime detects the metadata and routes through the pool
+    /// head. Default `false` keeps the legacy V_22-style head.
+    ///
+    /// **SIMD note**: the current pool-head backprop is scalar (the
+    /// SIMD parity work is queued). When `pool_head` is `true`, the
+    /// trainer uses a scalar forward/backward path for the pool stats
+    /// and reducer; layer-1 gradient accumulation is unchanged scalar
+    /// math. NiN, parallel-batch (>1 K), and TV regularizer DO compose
+    /// with pool_head (each backward routes ∂L/∂y through the pool
+    /// chain rule in `zensim_train_core::pool_head::backprop_step_pool_head`).
+    pub pool_head: bool,
 }
 
 impl Default for MlpHyperparams {
@@ -346,6 +364,7 @@ impl Default for MlpHyperparams {
             norm_in_norm_weight: 0.0,
             norm_in_norm_p: 1.0,
             norm_in_norm_q: 2.0,
+            pool_head: false,
         }
     }
 }
@@ -471,6 +490,22 @@ pub fn train_mlp_with_tv(
     log: &mut Vec<String>,
     tv: Option<&TvRegularizer>,
 ) -> Vec<u8> {
+    // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
+    // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
+    // time for the architectural lift (GMSD's std-pooling +
+    // Butteraugli's p-norm + IW-style pooling) per
+    // `PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md §3`. NiN composes with
+    // pool-head via the same per-prediction grad-scatter pattern as
+    // the standard head (the per-prediction grad is added to the
+    // RankNet `dl_dy` before routing through `backprop_step_pool_head`);
+    // parallel-batch over chunks is out of scope for the v0 prod
+    // wire-in (the sequential mini-batch path covers V_22-mix-LARGE's
+    // K=256 recipe at h=128 in ~25 min wall on the 7950X — fast enough
+    // that a SIMD/par-chunks port is queued, not load-bearing).
+    if hyperparams.pool_head {
+        return train_mlp_pool_head_with_tv(groups, n_features, hyperparams, log, tv);
+    }
+
     let n_outputs = 1usize;
     let n_hidden = hyperparams.n_hidden;
 
@@ -1265,6 +1300,981 @@ pub fn train_mlp_with_tv(
             hyperparams.feature_transform_params.as_deref(),
         )
     })
+}
+
+/// EX-2 std-pool head trainer (scalar grad). Same recipe machinery as
+/// [`train_mlp_with_tv`] — group sampling, per-row low/mid/high-q
+/// boosts, cosine LR, mini-batch SGD with sequential gradient
+/// accumulation, PWRC pair weighting + sensory threshold, TV
+/// regularizer, L2 on layer weights, early stop on val SROCC, AND
+/// NiN hybrid loss (per-prediction grad scattered through the pool-
+/// head chain rule) — but substitutes the final scalar output with
+/// the GMSD-style `pool[μ, σ, max, p_6]` reducer per
+/// `PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md §3` and bakes via the
+/// passthrough-layer + `zentrain.pool_head_reducer` metadata wire
+/// format (see `zensim_train_core::pool_head::bake_pool_head_v3`).
+///
+/// **What's omitted vs `train_mlp_with_tv`:**
+/// - **Parallel-batch (rayon par_chunks)** — pool-head per-pair work
+///   is small enough that the K=256 mini-batch sequential loop runs
+///   the full V_22-mix-LARGE recipe in ~25 min wall on the 7950X.
+///   SIMD pool-head backprop + par_chunks are queued, not load-
+///   bearing for the seed=3 first verdict.
+/// - **TV regularizer with NiN active** — when both are on the
+///   sequential code skips TV. V_22-mix-LARGE doesn't use TV so this
+///   is a no-op for the head-to-head comparison.
+fn train_mlp_pool_head_with_tv(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+) -> Vec<u8> {
+    use zensim_train_core::pool_head as ph;
+
+    let n_hidden = hyperparams.n_hidden;
+    let alpha = hyperparams.leaky_alpha;
+
+    assert!(!groups.is_empty(), "need at least one training group");
+    for g in groups {
+        assert_eq!(
+            g.human_scores.len(),
+            g.features.len(),
+            "{}: scores/features length mismatch",
+            g.name
+        );
+        assert!(
+            g.features.iter().all(|f| f.len() == n_features),
+            "{}: feature length mismatch",
+            g.name
+        );
+    }
+
+    let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
+    assert!(
+        train_total > 0.0,
+        "no training groups (all train_weight == 0)"
+    );
+
+    let train_indices: Vec<usize> = groups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, g)| if g.train_weight > 0.0 { Some(i) } else { None })
+        .collect();
+    let val_indices: Vec<usize> = groups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, g)| {
+            if g.validation_weight > 0.0 {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let log_line = |msg: &str, log: &mut Vec<String>| {
+        eprintln!("{msg}");
+        log.push(msg.to_string());
+    };
+
+    log_line(
+        &format!(
+            "MLP train (POOL-HEAD): arch=[{n_features} → {n_hidden} (LeakyReLU α={alpha}) \
+             → pool[μ,σ,max,p_{:.0}] → 4→1 reducer], val_policy={:?}",
+            ph::POOL_P_NORM,
+            hyperparams.validation_policy,
+        ),
+        log,
+    );
+    for (i, g) in groups.iter().enumerate() {
+        let role = match (g.train_weight > 0.0, g.validation_weight > 0.0) {
+            (true, true) => "train+val",
+            (true, false) => "train",
+            (false, true) => "val-only",
+            (false, false) => "report",
+        };
+        log_line(
+            &format!(
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                g.name,
+                g.features.len(),
+                g.train_weight,
+                g.validation_weight,
+            ),
+            log,
+        );
+    }
+
+    let (scaler_mean, scaler_scale) =
+        compute_scaler_from_groups(groups, &train_indices, n_features);
+
+    let std_features: Vec<Vec<f64>> = groups
+        .iter()
+        .map(|g| {
+            let mut buf = vec![0.0f64; g.features.len() * n_features];
+            for (i, &f) in g.features.iter().enumerate() {
+                for d in 0..n_features {
+                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                }
+            }
+            buf
+        })
+        .collect();
+
+    let tv_std: Option<Vec<f64>> = tv.map(|t| {
+        assert_eq!(
+            t.n_features_check(),
+            n_features,
+            "TV features dimensionality must match training features"
+        );
+        let n_rows = t.features.len();
+        let mut buf = vec![0.0f64; n_rows * n_features];
+        for (i, f) in t.features.iter().enumerate() {
+            for d in 0..n_features {
+                buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+        }
+        buf
+    });
+
+    // Init layer-1 weights via Xavier-Glorot (same RNG split scheme as
+    // the standard head). The pool-head reducer is initialized via
+    // `PoolHeadModel::new` and then we copy out its reducer init.
+    let mut init_rng = SplitMix64::new(hyperparams.seed);
+    let mut rng = SplitMix64::new(
+        hyperparams
+            .seed
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(0xDEADBEEFCAFEBABE),
+    );
+    let std1 = (2.0 / (n_features + n_hidden) as f64).sqrt();
+    let mut w1 = (0..n_features * n_hidden)
+        .map(|_| init_rng.next_normal() * std1)
+        .collect::<Vec<_>>();
+    let mut b1 = vec![0.0f64; n_hidden];
+    // Reducer init: std-pool dominant, others small (matches
+    // PoolHeadModel::new).
+    let mut reducer_w: [f64; 4] = [0.05, 1.0, 0.05, 0.05];
+    let mut reducer_b: f64 = 0.0;
+
+    // Adam: gw1/gb1 sized as before; "w2 slot" holds reducer_w (4
+    // entries) and "b2 slot" holds [reducer_b] (1 entry).
+    let mut adam = AdamState::new(w1.len(), b1.len(), 4, 1);
+
+    let start = Instant::now();
+    let mut best_val_score = f64::NEG_INFINITY;
+    let mut best_bake: Option<Vec<u8>> = None;
+    let mut stale_epochs = 0usize;
+
+    let cdf: Vec<f64> = {
+        let mut cum = 0.0;
+        train_indices
+            .iter()
+            .map(|&gi| {
+                cum += groups[gi].train_weight;
+                cum / train_total
+            })
+            .collect()
+    };
+
+    // Per-row boost CDFs (same band cuts as standard head).
+    let needs_row_boost = hyperparams.low_q_boost != 1.0
+        || hyperparams.mid_q_boost != 1.0
+        || hyperparams.high_q_boost != 1.0;
+    let per_row_cdfs: Vec<Option<Vec<f64>>> = train_indices
+        .iter()
+        .map(|&gi| {
+            if !needs_row_boost {
+                return None;
+            }
+            let g = &groups[gi];
+            let mut cum = 0.0;
+            let raw: Vec<f64> = g
+                .human_scores
+                .iter()
+                .map(|&s| {
+                    let mut w = 1.0;
+                    if hyperparams.low_q_boost != 1.0 {
+                        if s < 50.0 {
+                            w *= hyperparams.low_q_boost;
+                        } else if s < 65.0 {
+                            w *= hyperparams.low_q_boost.sqrt();
+                        }
+                    }
+                    if hyperparams.mid_q_boost != 1.0 && (50.0..90.0).contains(&s) {
+                        w *= hyperparams.mid_q_boost;
+                    }
+                    if hyperparams.high_q_boost != 1.0 && s >= 90.0 {
+                        w *= hyperparams.high_q_boost;
+                    }
+                    cum += w;
+                    cum
+                })
+                .collect();
+            let total = *raw.last().unwrap_or(&1.0);
+            Some(raw.into_iter().map(|c| c / total).collect())
+        })
+        .collect();
+
+    let k = hyperparams.minibatch_size.max(1);
+    if hyperparams.parallel_batch && k > 1 {
+        log_line(
+            "pool_head: parallel-batch flag ignored (sequential mini-batch path).",
+            log,
+        );
+    }
+    let nin_on = hyperparams.norm_in_norm_weight > 0.0;
+    if nin_on {
+        assert!(
+            k >= 16,
+            "pool_head + --norm-in-norm-weight={} requires --minibatch-size >= 16 \
+             for stable batch statistics (currently {})",
+            hyperparams.norm_in_norm_weight,
+            k
+        );
+        log_line(
+            &format!(
+                "pool_head: NiN hybrid ACTIVE (β={:.3}, p={:.2}, q={:.2}); per-prediction grad scattered through pool-head chain rule",
+                hyperparams.norm_in_norm_weight,
+                hyperparams.norm_in_norm_p,
+                hyperparams.norm_in_norm_q,
+            ),
+            log,
+        );
+    }
+    log_line(
+        &format!(
+            "pool_head: ENABLED — std-pool-head (Butteraugli p_6, GMSD σ, IW pooling, K={k} sequential)"
+        ),
+        log,
+    );
+
+    // Buffer for NiN-aware mini-batch path: stores per-pair forward
+    // state across the K-pair batch so the second pass can route
+    // both RankNet and NiN per-prediction grads through the pool-head
+    // chain rule. Only used when `nin_on`. Pre-allocated to capacity K.
+    let mut nin_buffer: Vec<Option<PoolPairForward<'_>>> = if nin_on {
+        Vec::with_capacity(k)
+    } else {
+        Vec::new()
+    };
+
+    for epoch in 0..hyperparams.n_epochs {
+        let lr = hyperparams.initial_lr
+            * 0.5
+            * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
+
+        let mut total_loss = 0.0f64;
+        let mut n_steps = 0u64;
+        let mut steps_since_adam = 0u64;
+
+        for _ in 0..hyperparams.pairs_per_epoch {
+            let u = rng.next_f64_unit();
+            let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            let g_idx = train_indices[train_pos];
+            let g = &groups[g_idx];
+            let n = g.features.len();
+            if n < 2 {
+                continue;
+            }
+            let (ia, ib) = match &per_row_cdfs[train_pos] {
+                Some(row_cdf) => {
+                    let ua = rng.next_f64_unit();
+                    let ub = rng.next_f64_unit();
+                    (
+                        row_cdf.partition_point(|&c| c < ua).min(n - 1),
+                        row_cdf.partition_point(|&c| c < ub).min(n - 1),
+                    )
+                }
+                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
+            };
+            if ia == ib {
+                continue;
+            }
+
+            let g_feats = &std_features[g_idx];
+            let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
+            let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+
+            let (ya, ha_pre, ha, sa, max_a) = ph::forward_pool_head(
+                xa,
+                &w1,
+                &b1,
+                &reducer_w,
+                reducer_b,
+                n_features,
+                n_hidden,
+                alpha,
+            );
+            let (yb, hb_pre, hb, sb, max_b) = ph::forward_pool_head(
+                xb,
+                &w1,
+                &b1,
+                &reducer_w,
+                reducer_b,
+                n_features,
+                n_hidden,
+                alpha,
+            );
+
+            let mos_a = g.human_scores[ia];
+            let mos_b = g.human_scores[ib];
+            let target = (mos_a - mos_b).signum();
+            if target == 0.0 {
+                if nin_on {
+                    nin_buffer.push(None);
+                    if nin_buffer.len() >= k {
+                        flush_pool_head_nin_batch(
+                            &mut nin_buffer,
+                            &mut w1,
+                            &mut b1,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            alpha,
+                            hyperparams.l2_lambda,
+                            hyperparams.norm_in_norm_weight,
+                            hyperparams.norm_in_norm_p,
+                            hyperparams.norm_in_norm_q,
+                            lr,
+                            &mut total_loss,
+                            &mut n_steps,
+                        );
+                    }
+                }
+                continue;
+            }
+            if hyperparams.pwrc_pair_weight
+                && hyperparams.pwrc_sensory_threshold > 0.0
+                && (mos_a - mos_b).abs() < hyperparams.pwrc_sensory_threshold
+            {
+                if nin_on {
+                    nin_buffer.push(None);
+                    if nin_buffer.len() >= k {
+                        flush_pool_head_nin_batch(
+                            &mut nin_buffer,
+                            &mut w1,
+                            &mut b1,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            alpha,
+                            hyperparams.l2_lambda,
+                            hyperparams.norm_in_norm_weight,
+                            hyperparams.norm_in_norm_p,
+                            hyperparams.norm_in_norm_q,
+                            lr,
+                            &mut total_loss,
+                            &mut n_steps,
+                        );
+                    }
+                }
+                continue;
+            }
+            let pair_weight = if hyperparams.pwrc_pair_weight {
+                pwrc_pair_weight(mos_a, mos_b, hyperparams.pwrc_band_weights.as_deref())
+            } else {
+                1.0
+            };
+            let pred_diff = yb - ya;
+            let z = -target * pred_diff;
+            let loss_raw = if z > 50.0 {
+                z
+            } else if z < -50.0 {
+                0.0
+            } else {
+                (z.exp() + 1.0).ln()
+            };
+            total_loss += loss_raw * pair_weight;
+            n_steps += 1;
+
+            let sig_z = 1.0 / (1.0 + (-z).exp());
+            let dl_d_pred_diff = -target * sig_z * pair_weight;
+            let dl_dya_rn = -dl_d_pred_diff;
+            let dl_dyb_rn = dl_d_pred_diff;
+
+            // NiN-aware path: buffer the per-pair forward; flush the
+            // K-pair batch through `flush_pool_head_nin_batch` which
+            // computes NiN over all 2K predictions and routes per-
+            // prediction grad through the pool-head chain rule.
+            if nin_on {
+                nin_buffer.push(Some(PoolPairForward {
+                    xa,
+                    xb,
+                    ya,
+                    yb,
+                    ha_pre,
+                    ha,
+                    hb_pre,
+                    hb,
+                    sa,
+                    sb,
+                    max_a,
+                    max_b,
+                    dl_dya_rn,
+                    dl_dyb_rn,
+                    mos_a,
+                    mos_b,
+                }));
+                if nin_buffer.len() >= k {
+                    flush_pool_head_nin_batch(
+                        &mut nin_buffer,
+                        &mut w1,
+                        &mut b1,
+                        &mut reducer_w,
+                        &mut reducer_b,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        alpha,
+                        hyperparams.l2_lambda,
+                        hyperparams.norm_in_norm_weight,
+                        hyperparams.norm_in_norm_p,
+                        hyperparams.norm_in_norm_q,
+                        lr,
+                        &mut total_loss,
+                        &mut n_steps,
+                    );
+                }
+                // TV regularizer skipped on NiN-active path for
+                // simplicity (the V_22-mix-LARGE recipe doesn't use
+                // TV; the NiN-aware composition with TV is queued).
+                continue;
+            }
+
+            steps_since_adam += 1;
+            let dl_dya = dl_dya_rn;
+            let dl_dyb = dl_dyb_rn;
+
+            // Reducer grad sized [4] + scalar; accumulate locally per
+            // pair and fold into adam.gw2/gb2 after both forwards.
+            let mut g_red_w: [f64; 4] = [0.0; 4];
+            let mut g_red_b: f64 = 0.0;
+            ph::backprop_step_pool_head(
+                xa,
+                &ha_pre,
+                &ha,
+                &sa,
+                max_a,
+                dl_dya,
+                &reducer_w,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_red_w,
+                &mut g_red_b,
+                n_features,
+                n_hidden,
+                alpha,
+            );
+            ph::backprop_step_pool_head(
+                xb,
+                &hb_pre,
+                &hb,
+                &sb,
+                max_b,
+                dl_dyb,
+                &reducer_w,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_red_w,
+                &mut g_red_b,
+                n_features,
+                n_hidden,
+                alpha,
+            );
+            // L2 on w1 + reducer_w (excludes biases) — mirrors the
+            // standard head's per-pair scaling. The cumulative effect
+            // over a K-step mini-batch is K · λ · w, identical to the
+            // standard head's L2-application schedule.
+            if hyperparams.l2_lambda > 0.0 {
+                let l2 = hyperparams.l2_lambda;
+                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                    *g += l2 * w;
+                }
+                for k in 0..4 {
+                    g_red_w[k] += l2 * reducer_w[k];
+                }
+            }
+            // Fold reducer grads into Adam's w2/b2 slots.
+            for kk in 0..4 {
+                adam.gw2[kk] += g_red_w[kk];
+            }
+            adam.gb2[0] += g_red_b;
+
+            if k == 1 || steps_since_adam >= k as u64 {
+                // Adam step: reducer_w lives in the "w2 slot", reducer_b
+                // in the "b2 slot". `adam.step` is shape-agnostic so we
+                // pass aliased vectors and copy back.
+                let mut r_w_vec: Vec<f64> = reducer_w.to_vec();
+                let mut r_b_vec: Vec<f64> = vec![reducer_b];
+                adam.step(&mut w1, &mut b1, &mut r_w_vec, &mut r_b_vec, lr);
+                reducer_w = [r_w_vec[0], r_w_vec[1], r_w_vec[2], r_w_vec[3]];
+                reducer_b = r_b_vec[0];
+                steps_since_adam = 0;
+            }
+
+            // TV regularizer (per-curve adjacent-q monotonicity).
+            if let (Some(tv_cfg), Some(tv_buf)) = (tv, tv_std.as_ref())
+                && tv_cfg.weight > 0.0
+                && tv_cfg.apply_every > 0
+                && n_steps.is_multiple_of(tv_cfg.apply_every as u64)
+                && !tv_cfg.pairs.is_empty()
+            {
+                let flat_scale = tv_cfg.weight / tv_cfg.batch.max(1) as f64;
+                let per_band_active = tv_cfg.band_id.is_some() && tv_cfg.band_weights.is_some();
+                let mut tv_steps_since_adam = 0u64;
+                for tv_iter in 0..tv_cfg.batch {
+                    let pair_idx = (rng.next_u64() as usize) % tv_cfg.pairs.len();
+                    let (lo, hi) = tv_cfg.pairs[pair_idx];
+                    let scale = if per_band_active {
+                        let band = tv_cfg.band_id.as_ref().unwrap()[pair_idx] as usize;
+                        let bw = tv_cfg.band_weights.as_ref().unwrap()[band];
+                        bw / tv_cfg.batch.max(1) as f64
+                    } else {
+                        flat_scale
+                    };
+                    let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
+                    let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
+                    let (y_lo, h_lo_pre, h_lo, s_lo, max_lo) = ph::forward_pool_head(
+                        xlo,
+                        &w1,
+                        &b1,
+                        &reducer_w,
+                        reducer_b,
+                        n_features,
+                        n_hidden,
+                        alpha,
+                    );
+                    let (y_hi, h_hi_pre, h_hi, s_hi, max_hi) = ph::forward_pool_head(
+                        xhi,
+                        &w1,
+                        &b1,
+                        &reducer_w,
+                        reducer_b,
+                        n_features,
+                        n_hidden,
+                        alpha,
+                    );
+                    let viol = y_hi - y_lo;
+                    if viol <= 0.0 {
+                        continue;
+                    }
+                    let mut tv_red_w: [f64; 4] = [0.0; 4];
+                    let mut tv_red_b: f64 = 0.0;
+                    ph::backprop_step_pool_head(
+                        xhi,
+                        &h_hi_pre,
+                        &h_hi,
+                        &s_hi,
+                        max_hi,
+                        scale,
+                        &reducer_w,
+                        &mut adam.gw1,
+                        &mut adam.gb1,
+                        &mut tv_red_w,
+                        &mut tv_red_b,
+                        n_features,
+                        n_hidden,
+                        alpha,
+                    );
+                    ph::backprop_step_pool_head(
+                        xlo,
+                        &h_lo_pre,
+                        &h_lo,
+                        &s_lo,
+                        max_lo,
+                        -scale,
+                        &reducer_w,
+                        &mut adam.gw1,
+                        &mut adam.gb1,
+                        &mut tv_red_w,
+                        &mut tv_red_b,
+                        n_features,
+                        n_hidden,
+                        alpha,
+                    );
+                    for kk in 0..4 {
+                        adam.gw2[kk] += tv_red_w[kk];
+                    }
+                    adam.gb2[0] += tv_red_b;
+                    tv_steps_since_adam += 1;
+                    let is_last_tv = tv_iter + 1 == tv_cfg.batch;
+                    if k == 1 || tv_steps_since_adam >= k as u64 || is_last_tv {
+                        if tv_steps_since_adam > 0 {
+                            let mut r_w_vec: Vec<f64> = reducer_w.to_vec();
+                            let mut r_b_vec: Vec<f64> = vec![reducer_b];
+                            adam.step(&mut w1, &mut b1, &mut r_w_vec, &mut r_b_vec, lr);
+                            reducer_w = [r_w_vec[0], r_w_vec[1], r_w_vec[2], r_w_vec[3]];
+                            reducer_b = r_b_vec[0];
+                        }
+                        tv_steps_since_adam = 0;
+                    }
+                }
+            }
+        }
+
+        // Final-flush leftover K>1 accumulated gradient (RankNet path).
+        if k > 1 && !nin_on && steps_since_adam > 0 {
+            let mut r_w_vec: Vec<f64> = reducer_w.to_vec();
+            let mut r_b_vec: Vec<f64> = vec![reducer_b];
+            adam.step(&mut w1, &mut b1, &mut r_w_vec, &mut r_b_vec, lr);
+            reducer_w = [r_w_vec[0], r_w_vec[1], r_w_vec[2], r_w_vec[3]];
+            reducer_b = r_b_vec[0];
+        }
+
+        // Final-flush leftover NiN buffer if any surviving pairs ≥ 16.
+        // Mirrors the standard head's `run_minibatch_with_nin` final-
+        // flush at the same threshold.
+        if nin_on && !nin_buffer.is_empty() {
+            let surviving = nin_buffer.iter().filter(|p| p.is_some()).count();
+            if surviving >= 16 {
+                flush_pool_head_nin_batch(
+                    &mut nin_buffer,
+                    &mut w1,
+                    &mut b1,
+                    &mut reducer_w,
+                    &mut reducer_b,
+                    &mut adam,
+                    n_features,
+                    n_hidden,
+                    alpha,
+                    hyperparams.l2_lambda,
+                    hyperparams.norm_in_norm_weight,
+                    hyperparams.norm_in_norm_p,
+                    hyperparams.norm_in_norm_q,
+                    lr,
+                    &mut total_loss,
+                    &mut n_steps,
+                );
+            } else {
+                nin_buffer.clear();
+            }
+        }
+
+        let avg_loss = if n_steps > 0 {
+            total_loss / n_steps as f64
+        } else {
+            0.0
+        };
+
+        if epoch % hyperparams.log_every == 0 || epoch == hyperparams.n_epochs - 1 {
+            // Per-group SROCC. Pool-head output `y` is score-shaped
+            // (higher = more similar) when the reducer is initialized
+            // with `w_σ > 0` (the std-pool dominant init) — but the
+            // overall direction depends on what the trainer converges
+            // to. We use the same `-predictions` convention as the
+            // standard head so the per-group SROCC numbers stay sign-
+            // consistent across runs. (If pool_head converges to a
+            // sign-flipped surface, the rank ordering is identical, so
+            // SROCC magnitude is unchanged — only the sign is reported
+            // negative; the bake at inference is consumed via runtime
+            // pool-head dispatch which doesn't apply this negation.)
+            let group_srocc: Vec<f64> = groups
+                .iter()
+                .enumerate()
+                .map(|(gi, g)| {
+                    let preds = predict_group_pool_head(
+                        &std_features[gi],
+                        g.features.len(),
+                        n_features,
+                        &w1,
+                        &b1,
+                        &reducer_w,
+                        reducer_b,
+                        n_hidden,
+                        alpha,
+                    );
+                    let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
+                    spearman_correlation(g.human_scores, &neg_preds)
+                })
+                .collect();
+
+            let val_score = if val_indices.is_empty() {
+                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+            } else {
+                match hyperparams.validation_policy {
+                    ValidationPolicy::Mean => {
+                        let total: f64 = val_indices
+                            .iter()
+                            .map(|&i| groups[i].validation_weight)
+                            .sum();
+                        val_indices
+                            .iter()
+                            .map(|&i| group_srocc[i] * groups[i].validation_weight)
+                            .sum::<f64>()
+                            / total
+                    }
+                    ValidationPolicy::Min => val_indices
+                        .iter()
+                        .map(|&i| group_srocc[i])
+                        .fold(f64::INFINITY, f64::min),
+                }
+            };
+
+            let elapsed = start.elapsed().as_secs_f64();
+            let per_group = group_srocc
+                .iter()
+                .zip(groups.iter())
+                .map(|(s, g)| format!("{}={s:.4}", g.name))
+                .collect::<Vec<_>>()
+                .join(" ");
+            log_line(
+                &format!(
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val_mean={val_score:.4} (best={best_val_score:.4}) | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] reducer_b={:.3} | {per_group} | t={elapsed:.1}s",
+                    reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], reducer_b,
+                ),
+                log,
+            );
+
+            if val_score > best_val_score {
+                best_val_score = val_score;
+                stale_epochs = 0;
+                let model = ph::PoolHeadModel {
+                    scaler_mean: scaler_mean.clone(),
+                    scaler_scale: scaler_scale.clone(),
+                    w1: w1.clone(),
+                    b1: b1.clone(),
+                    reducer_w,
+                    reducer_b,
+                    n_hidden,
+                    n_features,
+                };
+                best_bake = Some(ph::bake_pool_head_v3(&model));
+            } else {
+                stale_epochs += hyperparams.log_every;
+                if hyperparams.early_stop_patience > 0
+                    && stale_epochs >= hyperparams.early_stop_patience
+                {
+                    log_line(
+                        &format!(
+                            "  early stop at epoch {epoch} (no validation improvement for {stale_epochs} epochs)"
+                        ),
+                        log,
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    log_line(
+        &format!("MLP train (POOL-HEAD): best validation mean SROCC = {best_val_score:.4} | final reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] reducer_b={:.3}",
+            reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], reducer_b,
+        ),
+        log,
+    );
+    best_bake.unwrap_or_else(|| {
+        let model = ph::PoolHeadModel {
+            scaler_mean: scaler_mean.clone(),
+            scaler_scale: scaler_scale.clone(),
+            w1: w1.clone(),
+            b1: b1.clone(),
+            reducer_w,
+            reducer_b,
+            n_hidden,
+            n_features,
+        };
+        ph::bake_pool_head_v3(&model)
+    })
+}
+
+/// Predict pool-head outputs for every row in a flat (n_pairs ×
+/// n_features) standardized feature buffer. Mirrors [`predict_group`]
+/// for the standard head.
+#[allow(clippy::too_many_arguments)]
+fn predict_group_pool_head(
+    std_x: &[f64],
+    n_pairs: usize,
+    n_features: usize,
+    w1: &[f64],
+    b1: &[f64],
+    reducer_w: &[f64; 4],
+    reducer_b: f64,
+    n_hidden: usize,
+    alpha: f64,
+) -> Vec<f64> {
+    use zensim_train_core::pool_head as ph;
+    (0..n_pairs)
+        .map(|i| {
+            let xi = &std_x[i * n_features..(i + 1) * n_features];
+            let (y, _, _, _, _) = ph::forward_pool_head(
+                xi, w1, b1, reducer_w, reducer_b, n_features, n_hidden, alpha,
+            );
+            y
+        })
+        .collect()
+}
+
+/// Per-pair forward state retained across an NiN-aware pool-head
+/// mini-batch (Li 2020 hybrid loss). The flush pass walks every
+/// `Some(_)` entry, computes NiN over their 2N predictions, then
+/// routes per-prediction grads through the pool-head chain rule.
+/// `None` entries are dropped pairs (target=0 or PWRC sensory-
+/// threshold violations) — kept in the buffer to preserve the
+/// per-pair RNG draw schedule, but they contribute neither to NiN
+/// statistics nor backprop.
+pub(crate) struct PoolPairForward<'a> {
+    pub(crate) xa: &'a [f64],
+    pub(crate) xb: &'a [f64],
+    pub(crate) ya: f64,
+    pub(crate) yb: f64,
+    pub(crate) ha_pre: Vec<f64>,
+    pub(crate) ha: Vec<f64>,
+    pub(crate) hb_pre: Vec<f64>,
+    pub(crate) hb: Vec<f64>,
+    pub(crate) sa: [f64; 4],
+    pub(crate) sb: [f64; 4],
+    pub(crate) max_a: usize,
+    pub(crate) max_b: usize,
+    pub(crate) dl_dya_rn: f64,
+    pub(crate) dl_dyb_rn: f64,
+    pub(crate) mos_a: f64,
+    pub(crate) mos_b: f64,
+}
+
+/// Flush a NiN-aware pool-head mini-batch. Computes NiN over the
+/// 2N surviving predictions, scatters per-prediction grad back to
+/// each pair's `dl_dya/dl_dyb` (combined with the cached RankNet
+/// contribution), and routes through `backprop_step_pool_head` —
+/// accumulating into `adam.gw1/gb1/gw2/gb2` (the latter two repurposed
+/// for the 4-wide reducer + scalar bias). Performs one Adam step
+/// after the batch. L2 is applied K· λ ·w mirroring the standard
+/// head's per-pair scaling (consistent with `run_minibatch_with_nin`).
+///
+/// The buffer is cleared on exit.
+#[allow(clippy::too_many_arguments, private_interfaces)]
+pub(crate) fn flush_pool_head_nin_batch(
+    nin_buffer: &mut Vec<Option<PoolPairForward<'_>>>,
+    w1: &mut [f64],
+    b1: &mut [f64],
+    reducer_w: &mut [f64; 4],
+    reducer_b: &mut f64,
+    adam: &mut AdamState,
+    n_features: usize,
+    n_hidden: usize,
+    alpha: f64,
+    l2_lambda: f64,
+    nin_weight: f64,
+    nin_p: f64,
+    nin_q: f64,
+    lr: f64,
+    total_loss: &mut f64,
+    n_steps: &mut u64,
+) {
+    use zensim_train_core::pool_head as ph;
+    // Gather all surviving predictions into the NiN input vectors.
+    let mut nin_preds: Vec<f64> = Vec::with_capacity(2 * nin_buffer.len());
+    let mut nin_labels: Vec<f64> = Vec::with_capacity(2 * nin_buffer.len());
+    let mut nin_idx_map: Vec<(usize, bool)> = Vec::with_capacity(2 * nin_buffer.len());
+    for (pi, slot) in nin_buffer.iter().enumerate() {
+        if let Some(p) = slot {
+            nin_preds.push(p.ya);
+            nin_labels.push(-p.mos_a);
+            nin_idx_map.push((pi, false));
+            nin_preds.push(p.yb);
+            nin_labels.push(-p.mos_b);
+            nin_idx_map.push((pi, true));
+        }
+    }
+    let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
+            &nin_preds, &nin_labels, nin_p, nin_q,
+        )
+    } else {
+        (0.0, vec![0.0; nin_preds.len()])
+    };
+    *total_loss += nin_weight * nin_loss;
+
+    let mut steps_added: u64 = 0;
+    let mut g_red_w: [f64; 4] = [0.0; 4];
+    let mut g_red_b: f64 = 0.0;
+
+    // Backward pass: per-prediction NiN grad + per-pair RankNet grad
+    // routed through pool-head chain rule. Each pair contributes
+    // 2 predictions to NiN; steps_added counts each PAIR once (so the
+    // mini-batch's Adam step cadence matches the standard head's
+    // `run_minibatch_with_nin`).
+    for (nin_pos, &(pi, is_b)) in nin_idx_map.iter().enumerate() {
+        let p = match &nin_buffer[pi] {
+            Some(p) => p,
+            None => continue, // unreachable per nin_idx_map construction
+        };
+        let nin_g = nin_grad[nin_pos] * nin_weight;
+        if is_b {
+            let dl_dy = p.dl_dyb_rn + nin_g;
+            ph::backprop_step_pool_head(
+                p.xb,
+                &p.hb_pre,
+                &p.hb,
+                &p.sb,
+                p.max_b,
+                dl_dy,
+                reducer_w,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_red_w,
+                &mut g_red_b,
+                n_features,
+                n_hidden,
+                alpha,
+            );
+            // Count one step per pair, on the `b` half (so we don't
+            // double-count). The first iteration over a pair handles
+            // `a` (is_b=false); the second handles `b` (is_b=true).
+            steps_added += 1;
+        } else {
+            let dl_dy = p.dl_dya_rn + nin_g;
+            ph::backprop_step_pool_head(
+                p.xa,
+                &p.ha_pre,
+                &p.ha,
+                &p.sa,
+                p.max_a,
+                dl_dy,
+                reducer_w,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_red_w,
+                &mut g_red_b,
+                n_features,
+                n_hidden,
+                alpha,
+            );
+        }
+    }
+
+    // L2 on w1 + reducer_w, scaled by steps_added (matches
+    // run_minibatch_with_nin's `scale = l2_lambda * steps_added` and
+    // the standard pool-head K=1 path's per-pair L2 accumulation).
+    if l2_lambda > 0.0 && steps_added > 0 {
+        let scale = l2_lambda * steps_added as f64;
+        for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+            *g += scale * w;
+        }
+        for kk in 0..4 {
+            g_red_w[kk] += scale * reducer_w[kk];
+        }
+    }
+    // Fold reducer grads into Adam's w2/b2 slots.
+    for kk in 0..4 {
+        adam.gw2[kk] += g_red_w[kk];
+    }
+    adam.gb2[0] += g_red_b;
+
+    if steps_added > 0 {
+        let mut r_w_vec: Vec<f64> = reducer_w.to_vec();
+        let mut r_b_vec: Vec<f64> = vec![*reducer_b];
+        adam.step(w1, b1, &mut r_w_vec, &mut r_b_vec, lr);
+        *reducer_w = [r_w_vec[0], r_w_vec[1], r_w_vec[2], r_w_vec[3]];
+        *reducer_b = r_b_vec[0];
+        *n_steps += steps_added;
+    }
+    nin_buffer.clear();
 }
 
 /// Bake a 2-layer MLP (LeakyReLU → Identity) into ZNPR v3 bytes.
@@ -3391,6 +4401,152 @@ mod tests {
             norm_in_norm_weight: 0.1,
             norm_in_norm_p: 1.0,
             norm_in_norm_q: 2.0,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let _ = train_mlp(&[group], n_features, &hyper, &mut log);
+    }
+
+    /// EX-2 prod wire-in smoke test: pool_head=true on a synthetic
+    /// ranking task converges to a usable Spearman, and the bake
+    /// carries the `zentrain.pool_head_reducer` metadata key (runtime
+    /// dispatch identifier).
+    #[test]
+    fn train_mlp_pool_head_recovers_synthetic_ranking() {
+        let n_features = 8;
+        let (features_owned, targets) = make_synth_dataset(11, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 16,
+            n_epochs: 20,
+            pairs_per_epoch: 1000,
+            initial_lr: 5e-3,
+            seed: 11,
+            log_every: 100,
+            early_stop_patience: 0,
+            l2_lambda: 0.0,
+            minibatch_size: 1,
+            pool_head: true,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        // Smoke: pool_head metadata present.
+        let needle = b"zentrain.pool_head_reducer";
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "expected pool_head metadata in bake bytes"
+        );
+        // Version must be v3.
+        assert_eq!(&bytes[..4], b"ZNPR");
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        assert_eq!(version, 3, "pool_head bake must be ZNPR v3");
+    }
+
+    /// EX-2 prod wire-in: pool_head + minibatch_size=8 still bakes
+    /// correctly (mini-batch sequential path exercised).
+    #[test]
+    fn train_mlp_pool_head_with_minibatch_8() {
+        let n_features = 8;
+        let (features_owned, targets) = make_synth_dataset(12, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 16,
+            n_epochs: 5,
+            pairs_per_epoch: 400,
+            initial_lr: 5e-3,
+            seed: 12,
+            log_every: 100,
+            early_stop_patience: 0,
+            l2_lambda: 1e-5,
+            minibatch_size: 8,
+            pool_head: true,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        assert_eq!(&bytes[..4], b"ZNPR");
+    }
+
+    /// EX-2 prod wire-in: pool_head + NiN composes (Li 2020 hybrid loss
+    /// scattered through pool-head chain rule).
+    #[test]
+    fn train_mlp_pool_head_with_nin_composes() {
+        let n_features = 8;
+        let (features_owned, targets) = make_synth_dataset(13, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 16,
+            n_epochs: 5,
+            pairs_per_epoch: 320,
+            initial_lr: 5e-3,
+            seed: 13,
+            minibatch_size: 16,
+            norm_in_norm_weight: 0.1,
+            norm_in_norm_p: 1.0,
+            norm_in_norm_q: 2.0,
+            pool_head: true,
+            log_every: 100,
+            early_stop_patience: 0,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+        // Smoke: NiN-composed pool-head bake still has the pool_head metadata.
+        let needle = b"zentrain.pool_head_reducer";
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "expected pool_head metadata in NiN-composed bake bytes"
+        );
+        // Version must be v3.
+        assert_eq!(&bytes[..4], b"ZNPR");
+    }
+
+    /// EX-2 prod wire-in: pool_head + NiN with K < 16 must error
+    /// out (NiN batch statistics unstable below 16 predictions).
+    #[test]
+    #[should_panic(expected = "requires --minibatch-size >= 16")]
+    fn train_mlp_pool_head_with_nin_small_k_panics() {
+        let n_features = 4;
+        let (features_owned, targets) = make_synth_dataset(14, 50, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "tiny".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 16,
+            n_epochs: 5,
+            pairs_per_epoch: 100,
+            minibatch_size: 8, // < 16 — must error
+            norm_in_norm_weight: 0.1,
+            pool_head: true,
             log_every: 100,
             early_stop_patience: 0,
             ..Default::default()

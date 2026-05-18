@@ -620,9 +620,16 @@ fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
 /// `f32_features` scratch buffer to avoid the per-row allocation
 /// that would otherwise dominate runtime (~10 ms × 19k pairs ≈ 3
 /// min if we reallocated every call).
+///
+/// EX-2 std-pool head: when `pool_head_reducer` is `Some(([w], b, p_norm))`,
+/// the bake's `predict()` returns the LeakyReLU hidden vector
+/// (passthrough identity layer); we pool `[μ, σ, max, p_norm]` over
+/// that vector and apply the 4→1 linear reducer. Matches the runtime
+/// dispatch in `zensim::metric::apply_mlp_scoring`.
 fn score_row(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,
+    pool_head_reducer: Option<&([f32; 4], f32, f32)>,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
@@ -642,9 +649,64 @@ fn score_row(
         predictor.predict(f32_features)
     };
     match result {
-        Ok(out) => out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN),
+        Ok(out) => {
+            if let Some((rw, rb, p_norm)) = pool_head_reducer {
+                // Compute the 4 pool stats over the hidden vector,
+                // then apply the 4→1 reducer. Floor σ at the same
+                // POOL_STD_FLOOR (0.0026) the trainer uses.
+                let n = out.len() as f64;
+                if n <= 0.0 {
+                    return f64::NAN;
+                }
+                let mut sum = 0.0f64;
+                let mut max_v = f64::NEG_INFINITY;
+                let mut sum_p = 0.0f64;
+                let p = *p_norm as f64;
+                for &h in out.iter() {
+                    let hf = h as f64;
+                    sum += hf;
+                    if hf > max_v {
+                        max_v = hf;
+                    }
+                    sum_p += hf.abs().powf(p);
+                }
+                let mu = sum / n;
+                let mut var = 0.0f64;
+                for &h in out.iter() {
+                    let d = h as f64 - mu;
+                    var += d * d;
+                }
+                let sigma = (var / n).sqrt().max(0.0026);
+                let p_norm_stat = (sum_p / n).powf(1.0 / p);
+                mu * rw[0] as f64
+                    + sigma * rw[1] as f64
+                    + max_v * rw[2] as f64
+                    + p_norm_stat * rw[3] as f64
+                    + *rb as f64
+            } else {
+                out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
+            }
+        }
         Err(_) => f64::NAN,
     }
+}
+
+/// Read the `zentrain.pool_head_reducer` metadata payload, if any.
+/// Returns `Some(([w_μ, w_σ, w_max, w_p6], b, p_norm))` when present
+/// and well-formed. Mirrors the runtime dispatch logic in
+/// `zensim::metric::apply_mlp_scoring`.
+fn extract_pool_head_reducer(model: &Model) -> Option<([f32; 4], f32, f32)> {
+    let md = model.metadata();
+    let entry = md.get("zentrain.pool_head_reducer")?;
+    let v = entry.value;
+    if v.len() != 24 {
+        return None;
+    }
+    let mut buf = [0f32; 6];
+    for (i, chunk) in v.chunks_exact(4).take(6).enumerate() {
+        buf[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    }
+    Some(([buf[0], buf[1], buf[2], buf[3]], buf[4], buf[5]))
 }
 
 // ============================================================================
@@ -834,6 +896,7 @@ fn render_corpus(
     corpus: &Corpus,
     features_root: &Path,
     has_transforms: bool,
+    pool_head_reducer: Option<&([f32; 4], f32, f32)>,
     n_inputs: usize,
     model: &Model,
 ) -> Result<CorpusResult, String> {
@@ -850,7 +913,7 @@ fn render_corpus(
     let scores: Vec<f64> = g
         .feature_rows
         .iter()
-        .map(|row| score_row(&mut predictor, has_transforms, &mut scratch, row))
+        .map(|row| score_row(&mut predictor, has_transforms, pool_head_reducer, &mut scratch, row))
         .collect();
 
     let n = scores.len();
@@ -999,10 +1062,18 @@ fn main() -> ExitCode {
     };
     let n_inputs = model.n_inputs();
     let has_transforms = model.has_nontrivial_feature_transforms();
+    let pool_head_reducer = extract_pool_head_reducer(&model);
     eprintln!(
-        "bake: n_inputs={n_inputs}  feature_transforms={}",
-        if has_transforms { "yes" } else { "no" }
+        "bake: n_inputs={n_inputs}  feature_transforms={}  pool_head={}",
+        if has_transforms { "yes" } else { "no" },
+        if pool_head_reducer.is_some() { "yes" } else { "no" },
     );
+    if let Some((rw, rb, p_norm)) = pool_head_reducer.as_ref() {
+        eprintln!(
+            "  pool_head reducer: w_μ={:.4} w_σ={:.4} w_max={:.4} w_p6={:.4} b={:.4} p_norm={:.2}",
+            rw[0], rw[1], rw[2], rw[3], rb, p_norm
+        );
+    }
 
     let mut buf = String::new();
     buf.push_str("# bake_verdict — instant V_X eval\n\n");
@@ -1013,10 +1084,16 @@ fn main() -> ExitCode {
         "- Feature transforms: {}\n",
         if has_transforms { "yes (uses predict_transformed)" } else { "no" }
     ));
+    if let Some((rw, rb, p_norm)) = pool_head_reducer.as_ref() {
+        buf.push_str(&format!(
+            "- **Pool-head dispatch**: ENABLED. Reducer `[w_μ={:.4}, w_σ={:.4}, w_max={:.4}, w_p6={:.4}, b={:.4}, p_norm={:.2}]`\n",
+            rw[0], rw[1], rw[2], rw[3], rb, p_norm
+        ));
+    }
 
     let mut results: Vec<CorpusResult> = Vec::new();
     for corpus in &args.corpora {
-        match render_corpus(corpus, &args.features_root, has_transforms, n_inputs, &model) {
+        match render_corpus(corpus, &args.features_root, has_transforms, pool_head_reducer.as_ref(), n_inputs, &model) {
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("bake_verdict: {e}");
