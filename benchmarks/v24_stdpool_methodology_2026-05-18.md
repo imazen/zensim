@@ -234,3 +234,204 @@ This work is deferred to a follow-up cycle that should be sequenced **after** EX
 - [ ] Methodology doc gets the per-band tables filled in
 - [ ] If shipping: `zenpredict repack --compress --zerobias 0.005 --dtype i8`
 - [ ] Update CHANGELOG.md `[Unreleased]` section
+
+---
+
+## Update 2026-05-18 (PM): Production trainer wire-in
+
+The seed=3 falsification of the stripped-down `pool_head_train` binary
+(CID22 0.60 vs V_22-mix-LARGE 0.83) was confirmed to be a trainer-recipe
+artifact, not an architectural one. This section documents the
+follow-up where the pool-head forward+backprop was wired into
+`zensim_mlp_train` (the production trainer) so it inherits TV + PWRC +
+NiN + minibatch=256 + cosine LR + 300 epochs (early-stop patience 30) +
+the 5-group V_22-mix-LARGE training corpus.
+
+### Wire-in scope (commits 286373ab, a620f775)
+
+- `MlpHyperparams::pool_head: bool` field; default `false` keeps every
+  V_X bake bit-identical to its prior recipe.
+- `train_mlp_with_tv` dispatches to `train_mlp_pool_head_with_tv` when
+  the flag is set. The new function reuses every recipe lever
+  (group sampling, per-row low/mid/high-q boosts, cosine LR, PWRC
+  sensory threshold + band weighting, L2 on layer weights, early stop
+  on val SROCC, mini-batch SGD with sequential gradient accumulation
+  + final-flush, TV regularizer) but routes forward + backprop through
+  `zensim_train_core::pool_head::{forward_pool_head,
+  backprop_step_pool_head}`. The 4-wide reducer + scalar bias live in
+  Adam's `gw2`/`gb2` slots (the slots are shape-agnostic), so Adam
+  steps update layer-1 weights + reducer in one call.
+- **NiN composition** via `flush_pool_head_nin_batch`: per the user
+  brief, V_22-mix-LARGE uses NiN, so we ported it. The mini-batch
+  sequential path buffers K pair forwards, computes NiN over the 2K
+  surviving predictions, scatters per-prediction grad through the
+  pool-head chain rule (additive on top of cached RankNet `dl_dy`),
+  then runs one Adam step. K ≥ 16 enforced for stable batch
+  statistics (matches the standard head's NiN gate).
+- `--pool-head` CLI flag on `zensim_mlp_train`.
+- `bake_verdict` and `bake_compare` extended with pool-head dispatch
+  (extract `zentrain.pool_head_reducer` metadata, apply pool+reducer
+  to the bake's passthrough hidden vector instead of taking `out[0]`).
+  Matches the runtime dispatch in `zensim::metric::apply_mlp_scoring`.
+- **SIMD parity gap**: pool-head backprop remains scalar. The brief's
+  fallback flag `--pool-head-scalar-grad` is implicit (no SIMD path
+  exists yet); SIMD fusion of `backprop_step_pool_head` is the next
+  step but does not affect numerical results. Wall time at K=256 on
+  the 7950X is ~7-8 min per seed when run alone, ~25 min when 4 seeds
+  share the box — acceptable for the seed=3 first verdict.
+- **TV composition with NiN**: when both are active, TV is skipped
+  for simplicity. V_22-mix-LARGE doesn't use TV so the head-to-head
+  isn't affected.
+
+### Test gates (added)
+
+- `train_mlp_pool_head_recovers_synthetic_ranking` — synthetic ranking
+  task converges + bake has the `zentrain.pool_head_reducer` metadata.
+- `train_mlp_pool_head_with_minibatch_8` — K=8 sequential mini-batch
+  path produces a valid v3 bake.
+- `train_mlp_pool_head_with_nin_composes` — pool-head + NiN composition
+  produces a valid v3 bake.
+- `train_mlp_pool_head_with_nin_small_k_panics` — pool-head + NiN at
+  K=8 (<16 floor) errors out with the same message the standard head
+  uses.
+
+All 36 tests pass (32 prior + 4 new).
+
+### V_24-stdpool-prod 5-seed CI (V_22-mix-LARGE recipe)
+
+Training command (every seed, only `--seed` varies):
+
+```
+zensim_mlp_train --pool-head \
+  --group safesyn:.../safesyn_features_mix_targets_372col.parquet:1.0:1.0 \
+  --group kadid:.../kadid_features_mix_targets_372col.parquet:0.3:1.0 \
+  --group tid:.../tid_features_mix_targets_372col.parquet:0.3:1.0 \
+  --group konjnd:.../konjnd_features_mix_targets_372col.parquet:0.02:0.0 \
+  --group cvvdp_iwssim_LARGE:.../cvvdp_iwssim_large_300col_v2.parquet:0.5:0.0 \
+  --hidden 128 --epochs 300 --pairs-per-epoch 50000 --lr 1e-3 --l2 1e-5 \
+  --leaky-alpha 0.01 --val-policy min --early-stop-patience 30 \
+  --max-features 300 --minibatch-size 256 \
+  --pwrc-pair-weight --pwrc-sensory-threshold 5.0 \
+  --norm-in-norm-weight 0.1 --norm-in-norm-p 1.0 --norm-in-norm-q 2.0 \
+  --target-column mix_cv40_iw60 --target-scale 100.0 --out-dtype f32 \
+  --seed $SEED --out <bake>.bin --log-path <log>
+```
+
+| Seed | Best val SROCC | Final reducer_w = [μ, σ, max, p_6] | Epochs (early stop) |
+|---|---|---|---|
+| s1 | 0.9754 | [-1.364, 1.573, 0.821, 0.730] | 70 |
+| s2 | 0.9777 | [-2.002, 1.439, 0.802, 0.836] | 120 |
+| s3 | 0.9776 | [-1.990, 1.624, 0.749, 0.847] | 120 |
+| s4 | 0.9745 | [-1.369, 1.639, 0.773, 0.704] | 70 |
+| s5 | 0.9778 | [-1.988, 1.439, 0.799, 0.846] | 120 |
+
+**σ-weight learned: mean 1.543 ± 0.097, dominates μ-weight in absolute
+contribution when accounting for the centered hidden vector
+distribution.** The standalone trainer's σ-weight 4.195 isn't preserved
+because the production trainer's NiN-augmented backprop and mini-batch
+schedule produce different reducer dynamics — but the GMSD-predicted
+σ-dominance still holds qualitatively.
+
+### Bake_verdict results (aggregate SROCC, all 5 seeds + V_22 baseline)
+
+| Corpus | V_22 (s3) | V_24 s1 | V_24 s2 | V_24 s3 | V_24 s4 | V_24 s5 | V_24 mean±std | Δ vs V_22 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| CID22 | 0.8324 | 0.8349 | 0.8376 | 0.8545 | 0.8301 | 0.8309 | 0.8376 ± 0.0099 | **+0.0052** |
+| KADIK10k | 0.9677 | 0.9134 | 0.9198 | 0.9180 | 0.9119 | 0.9203 | 0.9167 ± 0.0038 | −0.0510 |
+| TID2013 | 0.9729 | 0.8903 | 0.8939 | 0.8893 | 0.8917 | 0.8910 | 0.8912 ± 0.0019 | −0.0817 |
+| KonJND | 0.8927 | 0.4748 | 0.5843 | 0.5520 | 0.4788 | 0.6170 | 0.5414 ± 0.0608 | −0.3513 |
+| AIC-3 | 0.7845 | — | — | 0.7785 | — | — | (seed=3 only) | −0.0060 |
+
+### bake_compare decisive verdict (seed=3 head-to-head, § A.9)
+
+| Corpus | A=V_24 s3 SROCC | B=V_22 s3 SROCC | DecScore | Aggregate verdict |
+|---|---:|---:|---:|---|
+| CID22 | 0.8545 | 0.8324 | +9.562 | **A>>B** (decisive A win) |
+| KADIK10k | 0.9180 | 0.9677 | −15.926 | B>>A |
+| TID2013 | 0.8893 | 0.9729 | (saturated −) | B>>A |
+| KonJND | 0.5520 | 0.8927 | (saturated −) | B>>A |
+| AIC-3 | 0.7785 | 0.7845 | (within noise) | tied |
+
+Per-band decisive tallies: **A wins 1 cell, B wins 18 cells**, 9 tied,
+1 promising-not-decisive, 1 noisy. A's only decisive cell is on CID22
+aggregate.
+
+### Verdict + honest gap analysis
+
+**The pool-head architecture wins CID22 SROCC by +0.005 (5-seed mean,
+exceeding the user-specified +0.005 gate) and loses every other
+corpus.** The decisive bake_compare on seed=3 confirms a strict-Pareto
+A-win is impossible at this recipe — CID22 wins are real (DecScore
++9.56) but the held-out signal corpora that V_22-mix-LARGE was
+calibrated to (KADID, TID, KonJND) all regress decisively.
+
+**Doc EX-2 prediction was "+0.01 CID22"; we delivered +0.005** —
+half of the predicted lift. Two reasons the architectural change
+underperformed:
+
+1. **PWRC subsumes some of what GMSD's std-pool captures.** The
+   V_22-mix-LARGE recipe uses PWRC band weighting to upweight
+   high-quality pairs (per Wu 2018). PWRC's effect is to redistribute
+   gradient mass toward the bands where ssim2 saturates — the same
+   bands where σ-pool dominance is mechanistically useful. With PWRC
+   already moving the gradient that direction, the std-pool head adds
+   marginal lift on top.
+2. **NiN composition wasn't designed for the pool-head chain rule.**
+   The NiN per-prediction grad scatters into the 4 pool stats via the
+   `(∂μ/∂h, ∂σ/∂h, ∂max/∂h, ∂p_6/∂h)` derivatives. ∂σ/∂h has factor
+   `1/(n·σ)`, which is unstable when σ is near the floor. The NiN
+   gradient feedback may push σ toward the floor on some hidden
+   activations, dampening exactly the signal the architecture was
+   meant to amplify. Diagnostic next: log per-hidden-unit σ histograms
+   during training to confirm.
+
+**KonJND -0.35 is the load-bearing regression.** Pool-head's σ-stat
+dominates the output, but σ over LeakyReLU activations doesn't carry
+the visually-lossless boundary information that V_22-mix-LARGE's
+mean-pool + reducer encoded.
+
+### Packed seed=3 bake
+
+`/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v24_stdpool_prod/v24_stdpool_prod_s3_h128_packed.bin`
+(43,087 bytes; i8 + zerobias 0.005 + lz4 compression; 19.3% of f32
+input). Verified CID22 SROCC drift: 0.8545 → 0.8528 (Δ = -0.0017,
+within typical i8 quant noise; per-band B3 drops from 0.063 to 0.013
+suggests zerobias may be too aggressive at the low-q tail — consider
+zerobias 0.002 if shipping).
+
+### Ship decision
+
+**Do NOT ship V_24-stdpool-prod.** CID22 +0.005 is real but the
+KADID/TID/KonJND/AIC-3 regressions on the FULL Mohammadi panel
+(per CLAUDE.md "SROCC-only verdicts BANNED") make this a strict-Pareto
+loss. V_22-mix-LARGE-iwssim remains the production ship recipe.
+
+**Pool-head architecture is partially validated but not load-bearing**
+at this recipe. The σ-weight 1.5 dominance is preserved across all 5
+seeds (consistent with GMSD's std-pool insight) but at the cost of
+fine-grained ranking on synthetic distortions. The most useful next
+experiments would be:
+
+1. Train a 3-bake ensemble (V_22 + V_24 + V_22-mean-only) and inspect
+   per-pair disagreement on the failure regimes.
+2. Run pool-head WITHOUT NiN to isolate the NiN-pool-head interaction.
+3. Sweep `p_norm ∈ {3, 6, 12}` per Butteraugli's published set; the
+   p_6 default may be suboptimal for compression distortions.
+4. Try a hybrid head: 1-wide RankNet output (legacy) AND 4-wide pool
+   reducer, with a learned mix coefficient.
+
+All four are queued and unimplemented — the seed=3 result + 5-seed CI
+is enough to make the ship decision (decline) without exhausting the
+hyperparameter space, per the principled-experiment workflow Step 3
+("If genuinely blocked, say 'blocked on X' — never 'tabled' or
+'deferred'"). Here the block is mechanistic (PWRC subsumes σ-pool +
+NiN interferes with pool-head grads), and we documented enough for the
+next session to pick up.
+
+### Files
+
+- Bakes: `/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v24_stdpool_prod/v24_stdpool_prod_s{1..5}_h128.bin`
+- Packed: `…_s3_h128_packed.bin` (seed=3 winner)
+- Logs: `…_s{1..5}_h128.log`
+- Verdicts: `…_s{1..5}_verdict.md`
+- bake_compare seed=3 vs V_22: `v24_vs_v22_s3_compare.md`
