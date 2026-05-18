@@ -546,6 +546,27 @@ struct Args {
     /// - Cosine LR (50-epoch period), early stop on val SROCC.
     #[arg(long, default_value_t = false)]
     pool_head: bool,
+
+    /// EX-2 follow-up: hybrid pool + rank head. When set, the trainer
+    /// runs BOTH the standard `n_hidden → 1` rank-net head AND the
+    /// `pool[μ,σ,max,p_6] → 4 → 1` reducer on the same encoder, then
+    /// blends via a sigmoid-bounded learned `α` (`y = α·y_rank + (1−α)·y_pool`).
+    /// Mutually exclusive with `--pool-head`. The bake emits a
+    /// passthrough second layer + a `zentrain.hybrid_head` metadata key
+    /// carrying `[rank_w[n_hidden] | rank_b | α_logit | reducer_w[4] |
+    /// reducer_b | p_norm]`. Runtime detects the key and routes through
+    /// `hybrid_head::apply_hybrid_head_runtime`.
+    ///
+    /// **Current v0 limitations** (2026-05-18):
+    /// - `--norm-in-norm-weight > 0` not yet composed (trainer panics).
+    /// - Parallel-batch flag silently ignored (sequential mini-batch).
+    /// - SIMD backprop queued.
+    ///
+    /// **What composes**:
+    /// - `--minibatch-size K`, `--pwrc-pair-weight`, `--pwrc-sensory-threshold`,
+    ///   `--pwrc-band-weights`, TV regularizer, L2, low/mid/high-q boosts.
+    #[arg(long, default_value_t = false)]
+    hybrid_head: bool,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1334,6 +1355,7 @@ fn main() {
         norm_in_norm_p: args.norm_in_norm_p,
         norm_in_norm_q: args.norm_in_norm_q,
         pool_head: args.pool_head,
+        hybrid_head: args.hybrid_head,
     };
 
     println!(

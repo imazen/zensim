@@ -307,6 +307,44 @@ fn score_corpus(
             }
         })
     };
+    // EX-2 follow-up: hybrid pool+rank head dispatch. Hybrid takes
+    // priority — pool-head dispatch is skipped when hybrid metadata
+    // is present.
+    let hybrid_head: Option<(Vec<f32>, [f32; 4], f32, f32, f32, f32)> = {
+        let md = model.metadata();
+        md.get("zentrain.hybrid_head").and_then(|entry| {
+            let n_hidden = model.n_outputs();
+            let expected = (n_hidden + 8) * 4;
+            if entry.value.len() != expected {
+                None
+            } else {
+                let mut floats = Vec::with_capacity(n_hidden + 8);
+                for chunk in entry.value.chunks_exact(4) {
+                    floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                }
+                let rank_w = floats[..n_hidden].to_vec();
+                let reducer_w = [
+                    floats[n_hidden + 2],
+                    floats[n_hidden + 3],
+                    floats[n_hidden + 4],
+                    floats[n_hidden + 5],
+                ];
+                Some((
+                    rank_w,
+                    reducer_w,
+                    floats[n_hidden],     // rank_b
+                    floats[n_hidden + 1], // α_logit
+                    floats[n_hidden + 6], // reducer_b
+                    floats[n_hidden + 7], // p_norm
+                ))
+            }
+        })
+    };
+    let pool_head_reducer = if hybrid_head.is_some() {
+        None
+    } else {
+        pool_head_reducer
+    };
     let mut predictor = Predictor::new(&model);
     let mut scratch = vec![0.0f32; n_inputs];
     let scores: Vec<f64> = feature_rows
@@ -326,6 +364,46 @@ fn score_corpus(
             };
             match result {
                 Ok(out) => {
+                    if let Some((rank_w, reducer_w, rank_b, alpha_logit, reducer_b, p_norm)) =
+                        hybrid_head.as_ref()
+                    {
+                        let n = out.len() as f64;
+                        if n <= 0.0 {
+                            return f64::NAN;
+                        }
+                        let mut y_rank = *rank_b as f64;
+                        let mut sum = 0.0f64;
+                        let mut max_v = f64::NEG_INFINITY;
+                        let mut sum_p = 0.0f64;
+                        let p = *p_norm as f64;
+                        for (j, &h) in out.iter().enumerate() {
+                            let hf = h as f64;
+                            y_rank += hf * rank_w[j] as f64;
+                            sum += hf;
+                            if hf > max_v {
+                                max_v = hf;
+                            }
+                            sum_p += hf.abs().powf(p);
+                        }
+                        let mu = sum / n;
+                        let mut var = 0.0f64;
+                        for &h in out.iter() {
+                            let d = h as f64 - mu;
+                            var += d * d;
+                        }
+                        let sigma = (var / n).sqrt().max(0.0026);
+                        let p_norm_stat = (sum_p / n).powf(1.0 / p);
+                        let y_pool = mu * reducer_w[0] as f64
+                            + sigma * reducer_w[1] as f64
+                            + max_v * reducer_w[2] as f64
+                            + p_norm_stat * reducer_w[3] as f64
+                            + *reducer_b as f64;
+                        let alpha = {
+                            let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
+                            1.0 / (1.0 + (-xc).exp())
+                        };
+                        return alpha * y_rank + (1.0 - alpha) * y_pool;
+                    }
                     if let Some((rw, rb, p_norm)) = pool_head_reducer.as_ref() {
                         let n = out.len() as f64;
                         if n <= 0.0 {

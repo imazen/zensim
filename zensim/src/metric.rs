@@ -1680,6 +1680,44 @@ fn forward_one_bake(
     let n_inputs = model.n_inputs();
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
+    // EX-2 follow-up: hybrid pool + rank head. Detect
+    // `zentrain.hybrid_head` BEFORE the pool-head dispatch (hybrid is
+    // the more general form — pool-only bakes are unchanged).
+    //
+    // Payload layout (f32 LE):
+    //   [rank_w[0..n_hidden]] [rank_b] [α_logit] [reducer_w[0..4]]
+    //   [reducer_b] [p_norm]
+    // Total bytes = 4 · (n_hidden + 8).
+    let hybrid_head: Option<(Vec<f32>, ([f32; 4], f32, f32, f32, f32))> = {
+        let md = model.metadata();
+        md.get("zentrain.hybrid_head").and_then(|entry| {
+            // n_outputs == n_hidden for the passthrough-layer bake.
+            let n_hidden = model.n_outputs();
+            let expected = (n_hidden + 8) * 4;
+            if entry.value.len() != expected {
+                None
+            } else {
+                let mut floats = Vec::with_capacity(n_hidden + 8);
+                for chunk in entry.value.chunks_exact(4) {
+                    floats.push(f32::from_le_bytes([
+                        chunk[0], chunk[1], chunk[2], chunk[3],
+                    ]));
+                }
+                let rank_w = floats[..n_hidden].to_vec();
+                let rank_b = floats[n_hidden];
+                let alpha_logit = floats[n_hidden + 1];
+                let reducer_w = [
+                    floats[n_hidden + 2],
+                    floats[n_hidden + 3],
+                    floats[n_hidden + 4],
+                    floats[n_hidden + 5],
+                ];
+                let reducer_b = floats[n_hidden + 6];
+                let p_norm = floats[n_hidden + 7];
+                Some((rank_w, (reducer_w, rank_b, alpha_logit, reducer_b, p_norm)))
+            }
+        })
+    };
     // EX-2 std-pool head: detect `zentrain.pool_head_reducer` metadata.
     // When present, the bake emits the LeakyReLU hidden vector as its
     // outputs (n_outputs == n_hidden); we pool 4 stats `[μ, σ, max, p_6]`
@@ -1707,6 +1745,46 @@ fn forward_one_bake(
         } else {
             p.predict(x).map_err(|_| ZensimError::InvalidDataLength)?
         };
+        if let Some((rank_w, (reducer_w, rank_b, alpha_logit, reducer_b, p_norm))) =
+            hybrid_head.as_ref()
+        {
+            // Hybrid head: compute both y_rank and y_pool from the
+            // hidden vector and mix via α = sigmoid(α_logit).
+            let n = out.len() as f64;
+            debug_assert!(n > 0.0, "hybrid-head bake produced empty output");
+            let mut y_rank = *rank_b as f64;
+            let mut sum = 0.0f64;
+            let mut max_v = f64::NEG_INFINITY;
+            let mut sum_p = 0.0f64;
+            let p = *p_norm as f64;
+            for (j, &h) in out.iter().enumerate() {
+                let hf = h as f64;
+                y_rank += hf * rank_w[j] as f64;
+                sum += hf;
+                if hf > max_v {
+                    max_v = hf;
+                }
+                sum_p += hf.abs().powf(p);
+            }
+            let mu = sum / n;
+            let mut var = 0.0f64;
+            for &h in out.iter() {
+                let d = h as f64 - mu;
+                var += d * d;
+            }
+            let sigma = (var / n).sqrt().max(0.0026);
+            let p_norm_stat = (sum_p / n).powf(1.0 / p);
+            let y_pool = mu * reducer_w[0] as f64
+                + sigma * reducer_w[1] as f64
+                + max_v * reducer_w[2] as f64
+                + p_norm_stat * reducer_w[3] as f64
+                + *reducer_b as f64;
+            let alpha = {
+                let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
+                1.0 / (1.0 + (-xc).exp())
+            };
+            return Ok(alpha * y_rank + (1.0 - alpha) * y_pool);
+        }
         if let Some((rw, rb, p_norm)) = pool_head_reducer {
             // `out` is the hidden vector (n_hidden floats). Compute 4
             // pool stats over it.
