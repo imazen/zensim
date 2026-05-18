@@ -435,3 +435,169 @@ next session to pick up.
 - Logs: `…_s{1..5}_h128.log`
 - Verdicts: `…_s{1..5}_verdict.md`
 - bake_compare seed=3 vs V_22: `v24_vs_v22_s3_compare.md`
+
+---
+
+## Update 2026-05-18 (late PM): V_24-stdpool-nonin (NiN OFF) 5-seed CI
+
+### Hypothesis under test
+
+The V_24-stdpool-prod 5-seed CI exhibited a load-bearing KonJND
+regression (-0.351 vs V_22). The hypothesised mechanism (commit
+`50315727`) was: **NiN's per-prediction grad scattering interacts
+poorly with `∂σ/∂h = (h-μ)/(n·σ)` near the σ-floor, dampening the
+σ-pool signal that mechanistically encodes the JND boundary.**
+
+If the diagnosis is correct, training with **NiN disabled but
+everything else identical** should restore KonJND to ≥ 0.85 while
+holding CID22 ≥ +0.005 vs V_22-mix-LARGE.
+
+### Experimental change
+
+| Knob | V_24-stdpool-prod | V_24-stdpool-nonin |
+|---|---|---|
+| `--pool-head` | enabled | enabled |
+| `--norm-in-norm-weight` | `0.1` | **`0.0`** |
+| All other flags | (V_22-mix-LARGE recipe) | (identical) |
+
+5 seeds (1-5), launched in parallel on the 7950X, ~14 min wall each
+(co-tenant with another sweep). Bakes + logs:
+`/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v24_stdpool_nonin/`.
+
+### Per-seed training summary
+
+| Seed | Best val SROCC | Final reducer_w = [μ, σ, max, p_6] | Early stop epoch |
+|---|---|---|---|
+| s1 | 0.9752 | [-1.323, 1.434, 0.839, 0.738] | 70 |
+| s2 | 0.9744 | [-1.438, 1.555, 0.790, 0.712] | 70 |
+| s3 | 0.9780 | [-1.987, 1.531, 0.786, 0.833] | 120 |
+| s4 | 0.9749 | [-1.371, 1.619, 0.777, 0.713] | 70 |
+| s5 | 0.9776 | [-1.953, 1.551, 0.755, 0.894] | 120 |
+
+**σ-weight learned: mean 1.538 ± 0.066** (vs NiN-on's 1.543 ± 0.097).
+σ-dominance preserved — turning NiN off did NOT free the σ-weight to
+grow toward the standalone trainer's 4.195. The production trainer's
+mini-batch + cosine-LR + 5-group sampling schedule appears to be the
+operative regularizer on the reducer magnitudes, NOT NiN.
+
+### Bake_verdict aggregate SROCC (5 seeds + baselines)
+
+| Corpus | V_22-LARGE | V_24-on (mean) | **V_24-off (mean)** | Δ vs V_22 | Δ vs V_24-on |
+|---|---:|---:|---:|---:|---:|
+| CID22 | 0.8324 | 0.8376 | **0.8346 ± 0.0042** | **+0.0022** | −0.0030 |
+| KADIK10k | 0.9677 | 0.9167 | **0.9159 ± 0.0038** | −0.0518 | −0.0008 |
+| TID2013 | 0.9729 | 0.8912 | **0.8907 ± 0.0005** | −0.0822 | −0.0005 |
+| KonJND-1k | 0.8927 | 0.5414 | **0.5227 ± 0.0602** | **−0.3700** | −0.0187 |
+| AIC-3 CTC | 0.7845 | 0.7785 (s3) | **0.7752 ± 0.0060** | −0.0093 | −0.0033 |
+
+Per-seed CID22 (NiN-off): 0.8343 / 0.8359 / 0.8410 / 0.8301 / 0.8318.
+Per-seed KonJND (NiN-off): 0.4678 / 0.4973 / 0.5562 / 0.4805 / 0.6117.
+
+### Hypothesis verdict — **FALSIFIED**
+
+The NiN-pool-head gradient interaction is **NOT** the mechanism
+behind the KonJND collapse. Turning NiN off:
+
+- **Did NOT recover KonJND.** 0.5227 ± 0.060 vs NiN-on 0.5414 ± 0.061
+  is statistically indistinguishable; both deltas vs V_22 are
+  catastrophic (−0.37, −0.35).
+- **Did NOT preserve the CID22 lift.** Δ vs V_22 dropped from
+  +0.0052 (NiN-on) to +0.0022 (NiN-off) — below the +0.005 gate.
+- **σ-weight magnitude unchanged.** Mean 1.538 (off) vs 1.543 (on);
+  NiN was not the regularizer suppressing the σ-weight.
+- **TID/KADID held flat** vs NiN-on — neither corpus moved by more
+  than 0.001 SROCC. NiN was not load-bearing for them either.
+- **AIC-3 dropped slightly** (-0.0033 vs NiN-on) — within noise.
+
+The user-specified Pareto gate (CID22 ≥ +0.005 AND KonJND ≥ 0.85 AND
+KADID/TID within −0.01) FAILS on all four criteria. **No packing,
+no ship.**
+
+### bake_compare seed=3 head-to-head (V_24-nonin vs V_22)
+
+Best NiN-off seed (s3, CID22 SROCC 0.8410) vs V_22-mix-LARGE-iwssim
+ship bake (1000-resample bootstrap, 10-band per-corpus panel):
+
+| Corpus | A=V_24-off s3 SROCC | B=V_22 SROCC | h_SROCC | h_Z-RMSE | PWRC_diff | DecScore | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---|
+| CID22 | 0.8410 | 0.8324 | +4.794 | +19.101 | -0.0000 | **−3.196** | **promising** |
+| KADIK10k | 0.9194 | 0.9677 | −95.099 | −738.343 | −0.0284 | saturated − | B>>A |
+| TID2013 | 0.8908 | 0.9729 | −53.847 | −313.476 | −0.0649 | saturated − | B>>A |
+| KonJND-1k | 0.5562 | 0.8927 | −31.758 | −51.696 | −0.3263 | saturated − | B>>A |
+| AIC-3 CTC | 0.7815 | 0.7845 | −1.363 | −4.570 | −0.0032 | within noise | tied |
+
+CID22 aggregate is "promising" — SROCC + Z-RMSE both improve, but
+DecScore -3.196 is in noise (cutoff |DecScore| > 7.84 for decisive).
+The NiN-on s3 hit DecScore +9.56 (decisive A win on CID22); turning
+NiN off LOST that decisive CID22 win.
+
+### Mechanism re-diagnosis (NiN-off does NOT fix anything)
+
+Since NiN-off neither restores KonJND nor preserves CID22 lift, the
+KonJND failure mode is upstream of NiN. Three candidates remain:
+
+1. **σ-pool over LeakyReLU(α=0.01) is the wrong pooling on
+   visually-lossless boundary data.** KonJND is dominated by pairs
+   near PJND (~63 ssim2) where the per-feature signal-to-noise is
+   high but the absolute distance from reference is small.
+   `σ(h)` over LeakyReLU activations may be dominated by global
+   feature activation variance, not the local boundary structure
+   KonJND scores. Mean-pool (`μ(h)`) carries that boundary signal
+   in V_22-mix-LARGE.
+2. **The 4→1 reducer has too little capacity for KonJND.** The
+   pool-head architecture compresses 128 hidden units to 4 stats
+   then to 1 scalar. KonJND's distribution may need more degrees
+   of freedom in the reducer (e.g., wider reducer 4 → 8 → 1, or
+   per-band reducers).
+3. **`mix_cv40_iw60` target may be wrong for KonJND under pool-head.**
+   The training target is a CVVDP + IW-SSIM blend that doesn't
+   include any PJND-aware component. V_22-mix-LARGE-iwssim trained
+   on the same target hits KonJND 0.89 — so the target isn't
+   sufficient *alone* to break KonJND, but the pool-head + this
+   target combination may be.
+
+### Next mechanism fix candidates (queued, not yet attempted)
+
+Listed in cheapest-first order:
+
+1. **Raise konjnd training group weight** (currently `0.02` train_w)
+   to `0.10` or `0.20` — the architecture starves KonJND for
+   gradient in the production recipe. This is a 1-line trainer
+   change, not an architecture change, and would test whether
+   KonJND failure is gradient-starvation under pool-head.
+   Equally important: it directly tests whether **the existing
+   pool-head architecture can hit KonJND ≥ 0.85** given enough
+   gradient mass.
+2. **Hybrid head**: keep the legacy 1-wide RankNet linear output
+   AND add the 4-stat pool reducer; learn a per-output mix
+   coefficient. Carries V_22's KonJND-strong mean-pool path while
+   adding σ-pool capacity for CID22.
+3. **σ-floor regularizer**: add a penalty
+   `λ · max(0, σ_floor - σ(h))` to discourage the LeakyReLU layer
+   from driving any hidden unit's variance below the floor.
+4. **Per-band reducer**: replace the 4-stat linear reducer with
+   one that takes both the pool stats AND a per-band indicator
+   (computed from the same hidden vector via a 1-layer linear),
+   giving the head 8-16 parameters vs the current 5.
+
+**Recommended next experiment**: option (1), `--group konjnd:0.10:0.0`
+with `--pool-head --norm-in-norm-weight 0.1`, 5-seed CI. If KonJND
+recovers toward 0.85, the architecture is fine and gradient mass
+was the bug. If KonJND still saturates at 0.55, the architecture is
+intrinsically limited for PJND-boundary data and option (2) is the
+next pull.
+
+### Ship decision (unchanged)
+
+**Do NOT ship V_24-stdpool-nonin.** Strict-Pareto loss on
+KADID/TID/KonJND/AIC-3; CID22 lift below the +0.005 gate.
+V_22-mix-LARGE-iwssim remains the production ship recipe.
+
+### Files
+
+- Bakes: `/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v24_stdpool_nonin/v24_stdpool_nonin_s{1..5}_h128.bin`
+- Logs: `…_s{1..5}_h128.log`
+- Stdouts: `…_s{1..5}.stdout`
+- Verdicts: `…_s{1..5}_verdict.md`
+- bake_compare s3 vs V_22: `v24_nonin_vs_v22_s3_compare.md`
+- Launchers: `scripts/v24_stdpool_nonin_train.sh`, `scripts/v24_stdpool_nonin_eval.sh`
