@@ -355,3 +355,88 @@ Final 5-seed CI awaits round-4-5 completion (ETA ~10:46).
 
 cv30_iw40_sm30 is the most balanced (best KADID, best KonJND, smallest TID
 regression, near-best CID22). Recommended ship candidate.
+
+## FINAL 5-seed CI (15/15 bakes complete, 10:45 UTC)
+
+| Variant | n | CID22 | KADID | TID | KonJND | AIC-3 |
+|---|--:|---|---|---|---|---|
+| cv33_iw33_sm33 | 5 | **0.8655±0.0079** | 0.9163±0.0038 | 0.8701±0.0018 | 0.8399±0.0010 | 0.7967±0.0106 |
+| cv30_iw40_sm30 | 5 | 0.8611±0.0078 | **0.9270±0.0017** | 0.8770±0.0013 | 0.8431±0.0034 | 0.7997±0.0068 |
+| cv40_iw40_sm20 | 5 | 0.8608±0.0082 | 0.9182±0.0027 | 0.8762±0.0015 | 0.8392±0.0039 | 0.8021±0.0070 |
+| V_22 noLARGE (baseline, n=5) | 5 | 0.8425±0.0110 | 0.9311±0.0022 | 0.8897±0.0015 | 0.8371±0.0066 | 0.8059±0.0057 |
+| V_22-LARGE+iwssim (alt, n=5) | 5 | 0.8339±0.0071 | 0.9673±0.0002 | 0.9726±0.0004 | 0.8869±0.0034 | 0.7872±0.0078 |
+
+### Δ vs V_22 noLARGE 5-seed baseline
+
+| Variant | ΔCID22 | ΔKADID | ΔTID | ΔKonJND | ΔAIC-3 | strict Pareto gate |
+|---|---:|---:|---:|---:|---:|---|
+| cv33_iw33_sm33 | **+0.023** | -0.015 | -0.020 🚨 | +0.003 | -0.009 | **FAIL** (TID + KADID decisive regression) |
+| cv30_iw40_sm30 | **+0.019** | -0.004 | -0.013 🚨 | +0.006 | -0.006 | **FAIL** (TID decisive regression) |
+| cv40_iw40_sm20 | **+0.018** | -0.013 | -0.013 🚨 | +0.002 | -0.004 | **FAIL** (TID + KADID decisive regression) |
+
+🚨 = decisive regression per § A.9: ΔSROCC < -0.01 AND ΔPWRC < -0.005 AND ΔZ-RMSE > +0.020.
+
+## Pareto verdict: **FAIL on strict gate** but **WIN on compression-priority trail**
+
+The strict Pareto-or-perish gate (≥4-of-6 panel agreement per corpus, NO
+decisive regression on any) fails for all 3 variants — each has a
+decisive TID regression. cv33 and cv40 additionally have decisive KADID
+regression.
+
+But per CLAUDE.md "two-trail SOTA" framework (memory:
+project_two_trail_sota.md / feedback_two_trail_sota.md), there are two
+valid ship trails:
+
+1. **PreviewV0_5Balanced** trail: Pareto-all-corpora, currently
+   V_22-LARGE+iwssim (CID22 0.834, KADID 0.967, TID 0.973, KonJND 0.887,
+   AIC-3 0.787).
+2. **PreviewV0_5Compression** trail: CID22+AIC-3 priority for compression
+   product decisions, currently V_22-372feat (CID22 0.842, KADID 0.931,
+   TID 0.890, KonJND 0.837, AIC-3 0.806).
+
+**EX-MIX3 cv30_iw40_sm30 SUPERSEDES V_22-372feat on the compression trail:**
+- CID22 +0.019 (compression gold standard improves)
+- KonJND +0.006 (PJND parity maintained)
+- KADID -0.004 (near-parity)
+- TID -0.013 (small synthetic-distortion regression)
+- AIC-3 -0.006 (low-q held-out near-parity)
+
+The trade direction is correct: gives up small synthetic-distortion
+accuracy for meaningful compression-gold-standard improvement.
+
+vs V_22-LARGE+iwssim (the balanced trail) cv30 wins **CID22 +0.027 + AIC-3 +0.013**
+but loses **KADID -0.040 + TID -0.096 + KonJND -0.044** — confirms EX-MIX3
+is firmly on the compression trail, not balanced.
+
+## Ship candidate
+
+`/mnt/v/zen/zensim-eval/ex_mix3_2026-05-18/exmix3_cv30_iw40_sm30_s3_h128_packed.bin`
+
+- Source: cv30_iw40_sm30 seed=3 (representative seed near 5-seed mean).
+- Packed: i8 + zerobias 0.005 + lz4 (51,976 bytes = 26.7% of unpacked).
+- Quantization drift: CID22 SROCC +0.0009 (negligible).
+- bake_verdict on packed (sanity check):
+  - CID22 0.8642 ✓
+  - KADID 0.9255 ✓
+  - TID 0.8776 ✓
+  - KonJND 0.8424 ✓
+  - AIC-3 0.8048 ✓
+
+This bake CAN ship as the new PreviewV0_5Compression weight if the user
+prefers a stronger CID22 lift over current V_22-372feat. No crate version
+bump per user direction 2026-05-17.
+
+## Data-lineage table
+
+| Path | Role | sha256 prefix | row count |
+|---|---|---|---|
+| `/mnt/v/zen/zensim-training/2026-05-18-mix3/safesyn.parquet` | training group A | new build | 196,086 |
+| `/mnt/v/zen/zensim-training/2026-05-18-mix3/kadid.parquet` | training group B | new build | 10,125 |
+| `/mnt/v/zen/zensim-training/2026-05-18-mix3/tid.parquet` | training group C | new build | 3,000 |
+| `/mnt/v/zen/zensim-training/2026-05-18-mix3/konjnd.parquet` | training group D (PJND-passthrough) | new build | 1,008 |
+| `/mnt/v/zen/zensim-training/canonical-2026-05-18/val/cid22.parquet` | validation, gold std | `6eea08253fa2` | 4,292 |
+| `/mnt/v/zen/zensim-training/canonical-2026-05-18/val/konjnd.parquet` | validation, PJND | `3e999a372577` | 1,008 |
+
+CID22-contam status: all training sources are derived from canonical
+2026-05-18 corpus, which has the post-2026-05-12 perceptual-overlap
+purge applied. No new contamination risks.
