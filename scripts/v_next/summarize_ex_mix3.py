@@ -38,7 +38,7 @@ def parse_verdict(path: Path) -> dict[str, dict[str, float]]:
     # Match table rows like:
     # | CID22 | 4292 | 0.8558 | 0.8551 | 0.6651 | 0.0473 | 0.9102 | 0.518 |
     pattern = re.compile(
-        r"^\|\s*([A-Za-z0-9\-_]+(?:\s*\([^)]+\))?)\s*\|\s*(\d+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*$",
+        r"^\|\s*([A-Za-z0-9\-_\s]+(?:\s*\([^)]+\))?)\s*\|\s*(\d+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*([\d.\-]+)\s*\|\s*$",
         re.MULTILINE,
     )
     for m in pattern.finditer(text):
