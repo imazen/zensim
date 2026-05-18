@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Falsified (2026-05-18, EXP-V22-PERSAMPLE)
+
+- **EXP-V22-PERSAMPLE (5-seed CI) FALSIFIED.**
+  Trained the V_22-mix-LARGE+iwssim s3 recipe (Balanced ship's training
+  corpus + group weights + target column + NiN + PWRC) but architecturally
+  swapped the vanilla MLP head for the per-sample-α head used by the
+  Compression ship V_24-per-sample-α s4. Hypothesis: same data + better
+  head = balanced-trail Pareto improvement. Result: median seed s2 packed
+  bake (CID22 0.8549 ± 0.0045 across 5 seeds, AIC-3 0.8084 ± 0.0037,
+  KADID 0.9312, TID 0.8899, KonJND 0.8269) fails both shipping gates per
+  § A.9 decisive rule (1000-bootstrap):
+  - vs Balanced ship: decisive A>>B on CID22 (+0.0225) AND AIC-3 (+0.0239)
+    but decisive B>>A on KADID + TID + KonJND. Balanced gate fails on the
+    "no decisive B>>A on any corpus" rule.
+  - vs Compression ship: STRICTLY DOMINATED — B>>A decisive on CID22
+    (−0.0092) AND AIC-3 (−0.0099); KADID/TID tied; KonJND promising
+    +0.019. Compression gate fails step 1 ("decisive A>>B on ≥1 of
+    {CID22, AIC-3}").
+  The per-sample-α head IS a non-trivial architectural improvement on
+  the V_22 recipe (+0.022 CID22 / +0.024 AIC-3 over vanilla MLP at the
+  same training data) but the V_24 ship's extra +0.0092 CID22 lift comes
+  from training-side recipe differences, NOT the head. Architecture is
+  not the load-bearing variable; corpus + group weights are.
+  5-seed CI tight (std 0.0045 on CID22, 0.0037 on AIC-3) — result is
+  highly reproducible. Median seed s2; 44,107-byte packed bake at
+  `/mnt/v/zen/zensim-eval/exp_v22_persample_2026-05-18/v22_persample_s2_h128_packed.bin`
+  (md5 `5779d7b8e807e05c04ee1e00256f46da`).
+  Full report: `benchmarks/exp_v22_persample_falsification_2026-05-18.md`.
+  Both trail ships UNCHANGED. No crate version bump. SOTA_TRAILS.md
+  candidate matrix gains a row.
+
 ### Added (2026-05-18) — `PreviewV0_5Ensemble` runtime ensemble (EXP-ENSEMBLE-V05)
 
 - **New `ZensimProfile::PreviewV0_5Ensemble` variant + `ZensimProfile::ensemble()`
