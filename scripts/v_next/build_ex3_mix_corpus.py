@@ -117,11 +117,12 @@ def build_large_3target(out_path: str, drop_ssim2_feature: bool = True) -> int:
     # Load all per-codec merged parquets
     merged_files = sorted(glob(os.path.join(DATA_DIR_MERGED_300, "unified_*_cvvdp.parquet")))
     print(f"  found {len(merged_files)} merged parquets")
-    tables = []
+    dfs = []
     for f in merged_files:
-        t = pq.read_table(f)
-        tables.append(t)
-    merged = pa.concat_tables(tables).to_pandas()
+        df = pq.read_table(f).to_pandas()
+        dfs.append(df)
+    import pandas as pd
+    merged = pd.concat(dfs, ignore_index=True, sort=False)
     merged["basename"] = merged["image_path"].apply(os.path.basename)
     print(f"  merged rows: {len(merged)}")
 
@@ -217,6 +218,10 @@ def add_ssim2_to_372feat_corpus(corpus: str) -> int:
     local_lite = local_dedup[["image_path", "codec", "q", "ssim2_gpu"]].rename(
         columns={"image_path": "ref_basename", "q": "quality"}
     )
+    # The 372-feat parquets store ref_basename WITHOUT extension (e.g., "I01"),
+    # while the local TSV uses the full filename ("I01.png"). Strip the
+    # extension to align join keys.
+    local_lite["ref_basename"] = local_lite["ref_basename"].apply(lambda s: os.path.splitext(s)[0])
     if "quality" not in targets.columns:
         if "q" in targets.columns:
             targets = targets.rename(columns={"q": "quality"})
