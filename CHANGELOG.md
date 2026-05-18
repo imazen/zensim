@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Falsified (2026-05-18, EXP-PERSAMPLE-MIX3 5-seed CI)
+
+- **EXP-PERSAMPLE-MIX3 falsified for both trails.** Combining the
+  two strongest compression-trail directions from 2026-05-18 — per-
+  sample-α head architecture (V_24) + 3-way `mix_cv30_iw40_sm30`
+  target (0.3·cvvdp + 0.4·iwssim + 0.3·ssim2) — does NOT compound
+  the wins. 5-seed CI: CID22 mean 0.8545 (σ=0.0110, range
+  [0.8403, 0.8707]), KonJND mean 0.8852 (σ=0.0201). Median-pick
+  seed by CID22 SROCC = seed 1 (CID22 0.8549). Packed via
+  `zenpredict repack i8+zerobias 0.005+lz4`: 261 KB → 53.8 KB (20.6%),
+  drift +0.0004 SROCC.
+- **Compression-trail gate (vs V_24-per-sample-α s4)**: FAIL step 1.
+  CID22 B>>A (Δ=−0.0088, h_SROCC=−19.6), AIC-3 B>>A (Δ=−0.0126,
+  h_SROCC=−25.7). Decisively dominated on both compression-targeted
+  corpora; only KonJND wins (+0.0859, h=+40.1), which the
+  compression trail does not gate on.
+- **Balanced-trail gate (vs V_22-mix-LARGE+iwssim)**: FAIL step 2.
+  CID22 A>>B (+0.0229), AIC-3 A>>B (+0.0212) — step 1 passes. But
+  KADID B>>A (Δ=−0.0373, h=−86.9) AND TID B>>A (Δ=−0.0946, h=−54.4)
+  — both decisive losses block the noise-strict step 2.
+- **Mechanism (per `benchmarks/exp_persample_mix3_falsification_2026-05-18.md`)**:
+  adding 30% ssim2 to the target dilutes the cvvdp+iwssim
+  supervision that drives CID22 + AIC-3 wins. The win lands on
+  KonJND (which correlates with ssim2 PJND) where neither trail
+  rewards it. Two independent compression-direction wins (per-
+  sample-α + mix3) trade off rather than compound.
+- **Bake retained as falsification record** at
+  `/mnt/v/zen/zensim-eval/exp_persample_mix3_2026-05-18/persample_mix3_s1_h128_packed.bin`
+  (md5 `7f125de04923eb8ca190ad10ecfd32e7`). NO ship rotation. NO
+  crate version bump (per user policy 2026-05-18).
+- New row in SOTA candidate matrix (`zensim/SOTA_TRAILS.md`).
+
 ### Falsified (2026-05-18, EXP-BALANCED-TILT)
 
 - **EXP-BALANCED-TILT (4-cell single-seed sweep, seed=3) FALSIFIED.**

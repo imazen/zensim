@@ -517,6 +517,77 @@ struct Args {
     /// Only meaningful when `--norm-in-norm-weight > 0`.
     #[arg(long, default_value_t = 2.0, value_name = "FLOAT")]
     norm_in_norm_q: f64,
+
+    /// EX-2 std-pool head (`PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md §3`).
+    /// When set, the trainer replaces the standard `n_hidden → 1`
+    /// linear output with `pool[μ, σ, max, p_6] → 4 → 1` reducer
+    /// (GMSD's std-pooling + Butteraugli p-norm + IW-style pooling).
+    /// The bake emits a passthrough second layer + a
+    /// `zentrain.pool_head_reducer` metadata key carrying
+    /// `[w_μ, w_σ, w_max, w_p6, b, p_norm]`. Runtime detects the
+    /// metadata and routes through `pool_head::forward_pool_head`.
+    ///
+    /// **Current limitations** (v0 prod wire-in, 2026-05-18):
+    /// - Pool-head backprop is scalar (SIMD parity work queued; see
+    ///   `MlpHyperparams::pool_head` doc).
+    /// - `--norm-in-norm-weight > 0` is incompatible (errors out).
+    /// - Parallel-batch is silently ignored (sequential mini-batch
+    ///   path; pool-head per-pair work is small enough that the K=256
+    ///   recipe still trains in ~25 min wall at h=128).
+    ///
+    /// **What composes** (verified in unit tests):
+    /// - `--minibatch-size K` (sequential gradient accumulation, Adam
+    ///   step every K pairs + final-flush).
+    /// - `--pwrc-pair-weight` + `--pwrc-sensory-threshold` +
+    ///   `--pwrc-band-weights`.
+    /// - TV regularizer (`--tv-pairs-file` + `--tv-weight`).
+    /// - L2 (`--l2`) on layer-1 weights and reducer weights.
+    /// - Low/Mid/High-q row boosts (`--low-q-boost` etc).
+    /// - Cosine LR (50-epoch period), early stop on val SROCC.
+    #[arg(long, default_value_t = false)]
+    pool_head: bool,
+
+    /// EX-2 follow-up: hybrid pool + rank head. When set, the trainer
+    /// runs BOTH the standard `n_hidden → 1` rank-net head AND the
+    /// `pool[μ,σ,max,p_6] → 4 → 1` reducer on the same encoder, then
+    /// blends via a sigmoid-bounded learned `α` (`y = α·y_rank + (1−α)·y_pool`).
+    /// Mutually exclusive with `--pool-head`. The bake emits a
+    /// passthrough second layer + a `zentrain.hybrid_head` metadata key
+    /// carrying `[rank_w[n_hidden] | rank_b | α_logit | reducer_w[4] |
+    /// reducer_b | p_norm]`. Runtime detects the key and routes through
+    /// `hybrid_head::apply_hybrid_head_runtime`.
+    ///
+    /// **Current v0 limitations** (2026-05-18):
+    /// - `--norm-in-norm-weight > 0` not yet composed (trainer panics).
+    /// - Parallel-batch flag silently ignored (sequential mini-batch).
+    /// - SIMD backprop queued.
+    ///
+    /// **What composes**:
+    /// - `--minibatch-size K`, `--pwrc-pair-weight`, `--pwrc-sensory-threshold`,
+    ///   `--pwrc-band-weights`, TV regularizer, L2, low/mid/high-q boosts.
+    #[arg(long, default_value_t = false)]
+    hybrid_head: bool,
+
+    /// EX-2 follow-up²: per-sample α head. Replaces the scalar α in
+    /// `--hybrid-head` with a learned function `α(x) = sigmoid(W_α · h
+    /// + b_α)` predicted from the encoder's hidden vector. Lets the
+    /// model assign α per-pair so photo-like inputs (CID22-shaped)
+    /// pull α toward rank-dominant while JND-step-grid inputs
+    /// (KonJND-shaped) pull α toward pool-dominant.
+    ///
+    /// Mutually exclusive with `--pool-head` AND `--hybrid-head`. The
+    /// bake metadata key changes to `zentrain.per_sample_alpha_head`
+    /// with payload `[W_α[n_hidden] | b_α | rank_w[n_hidden] |
+    /// rank_b | reducer_w[4] | reducer_b | p_norm]` (size
+    /// `4·(2·n_hidden + 8)`).
+    ///
+    /// **What composes**: NiN composition (mandatory for V_22-LARGE
+    /// recipe), `--minibatch-size K`, PWRC weights, L2 on layer-1 +
+    /// rank_w + reducer_w + W_α (b_α unregularized),
+    /// low/mid/high-q row boosts. **What is omitted**: TV regularizer
+    /// (skipped on this path — V_22 recipe doesn't use TV).
+    #[arg(long, default_value_t = false)]
+    per_sample_alpha_head: bool,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1304,6 +1375,9 @@ fn main() {
         norm_in_norm_weight: args.norm_in_norm_weight,
         norm_in_norm_p: args.norm_in_norm_p,
         norm_in_norm_q: args.norm_in_norm_q,
+        pool_head: args.pool_head,
+        hybrid_head: args.hybrid_head,
+        per_sample_alpha_head: args.per_sample_alpha_head,
     };
 
     println!(

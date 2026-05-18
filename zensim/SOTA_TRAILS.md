@@ -104,6 +104,7 @@ packed vs V_22-372feat s5" below). Kept at
 | EXP-BALANCED-TILT cell1 moderate (kw=0.10, lw=0.5) seed=3 | 2026-05-18 | 300 | per-sample-α head dispatch | 0.8159 | 0.8051 | 0.9359 | 0.8896 | 0.9567 | FAIL (B>>A on CID22+KADID+TID) | FAIL (B>>A on CID22 AND AIC-3) |
 | EXP-BALANCED-TILT cell2 heavy (kw=0.10, lw=0.3) seed=3 | 2026-05-18 | 300 | per-sample-α head dispatch | 0.8112 | 0.8070 | 0.9379 | 0.8901 | 0.9532 | FAIL (B>>A on CID22+KADID+TID) | FAIL (B>>A on CID22 AND AIC-3) |
 | EXP-BALANCED-TILT cell3 no_large (kw=0.10, lw=0.0) seed=3 | 2026-05-18 | 300 | per-sample-α head dispatch | 0.7686 | 0.8056 | 0.9385 | 0.8906 | 0.9661 | FAIL (B>>A on CID22+KADID+TID) | FAIL (B>>A on CID22 AND AIC-3) — boosting kadid_w/tid_w on per-sample-α architecture FALSIFIED. See `benchmarks/exp_balanced_tilt_falsified_2026-05-18.md`. |
+| EXP-PERSAMPLE-MIX3 (median s1 packed) | 2026-05-18 | 372 | per-sample-α head dispatch | 0.8553 | 0.8057 | 0.9304 | 0.8783 | 0.8939 | FAIL (B>>A on KADID/TID; balanced step 2 fails by wide margin) | FAIL (B>>A on CID22 AND AIC-3 vs current ship; step 1 fails). 5-seed CI: CID22 mean 0.8545 σ=0.0110, KonJND mean 0.8852 σ=0.0201. Adding 30% ssim2 to target gains KonJND (+0.086) but loses CID22 (−0.0088) and AIC-3 (−0.0126) decisively vs per-sample-α s4 alone. Per `benchmarks/exp_persample_mix3_falsification_2026-05-18.md`. |
 
 **Runtime status (2026-05-18, late)**: the per-sample-α dispatch
 landed in `zensim::metric::forward_one_bake`. Bakes carrying

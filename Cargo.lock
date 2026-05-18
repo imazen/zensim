@@ -3267,6 +3267,7 @@ dependencies = [
  "zenpredict",
  "zenpredict-bake",
  "zensim",
+ "zensim-train-core",
 ]
 
 [[package]]
