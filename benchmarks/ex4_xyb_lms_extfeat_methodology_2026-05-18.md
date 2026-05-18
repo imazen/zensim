@@ -1,10 +1,85 @@
 # EX-4 XYB + LMS-biased-log front-end stats + CVVDP-shape per-pair features
 
-**Status: Rust modules + unit tests landed; corpus rebuild + train + eval NOT executed in this session.**
+**Status: FALSIFIED at seed=3 on the 24-feature per-ref-only subset.**
+**Corpus rebuild + V_25 seed=3 train + Mohammadi full-panel eval landed
+this session. Per-pair 19 CVVDP-shape features DEFERRED — dist
+images for the 73k LARGE corpus rows are not on disk locally
+(distortions were generated on vast.ai workers and not synced back).**
 
-This doc covers what landed under `feat/ex4-xyb-frontend-extfeat`,
-what is *not* yet executed, and the next concrete chunks needed to
-ship V_25.
+## Verdict (seed=3, 5-group recipe, 324-feature input)
+
+| Corpus | V_22 baseline (s3, packed) | V_25-extfeat (s3) | Δ |
+|---|---|---|---|
+| CID22 SROCC | 0.8324 | **0.8171** | **−0.0153** |
+| KADID SROCC | 0.9677 | **0.8999** | **−0.0678** |
+| TID SROCC | 0.9729 | **0.8822** | **−0.0907** |
+| KonJND SROCC | 0.8927 | **0.8108** | **−0.0819** |
+| AIC-3 SROCC | 0.7845 | **0.7701** | **−0.0144** |
+
+The doc § 1 hypothesis floor was Δ ≥ +0.005 CID22 SROCC. The measured
+delta is **−0.015 CID22**, **−0.068 KADID**, **−0.091 TID** — universally
+worse, well outside any plausible noise envelope.
+
+Per principled-experiment workflow Step 3 ("Seed=1 flat or negative →
+hypothesis dead. Do NOT sweep 5 seeds — that is p-hacking."), the
+24-per-ref-feature direction is **falsified** at seed=3 and NOT swept
+to 5 seeds.
+
+## Mechanism — what the trainer actually did
+
+`zenpredict inspect --weights` on the V_25 seed=3 bake shows the
+trainer DID learn substantial weights on the 24 EX-4 features:
+
+| Statistic | Base (f0..f299) | EX-4 (f300..f323) |
+|---|---|---|
+| Per-column L2 norm (mean) | 1.282 | 1.236 |
+| Per-column L2 norm (max) | 1.668 | 1.431 (lms_M_p5) |
+| abs_mean (all weights) | 0.0851 | 0.0832 |
+| Near-zero fraction (|w|<0.01) | — | 10.2 % |
+
+The EX-4 features are NOT inert — the trainer assigned them comparable
+weight magnitude to the base features. The performance regression is
+therefore **not** "wasted capacity"; it's **misleading capacity**.
+
+The structural problem: XYB+LMS per-ref features describe the
+**reference image**, NOT the (ref, dist) difference. RankNet's
+pairwise objective compares pairs with the *same* reference, so all
+24 EX-4 features are **identical** within a pair. They cannot carry
+ranking signal directly. What they CAN do is encode per-content-class
+biases in the synth-corpus MOS distribution (e.g., "gen-chart refs
+get systematically higher q for the same human_score than gen-photo
+refs"). The trainer learns those biases — and they fail on held-out
+content (CID22's 49 refs, KADID's 81 refs, TID's 25 refs, KonJND's
+1008 refs — none of which overlap the safesyn training refs).
+
+This is FRIQUEE-2017-shaped: synth-corpus per-image content priors
+do not transfer to authentic-distortion validation. Same mechanism
+as V_20b's falsification (cycle-13). The per-ref XYB+LMS features
+make the problem worse, not better, because they give the trainer
+explicit handles for content-class memorization.
+
+## Hypothesis (per principled-experiment workflow Step 1)
+
+1. **Hypothesis**: Adding 43 CVVDP-shape + XYB/LMS-biased-log
+   feature dimensions to the 300-input MLP should lift CID22 SROCC
+   by `Δ ≥ +0.005` (doc § 8 EX-4 floor) and bigger on chroma-dominant
+   distortions, justified by:
+   - XYB / LMS-biased-log put per-pixel deltas in perceptually
+     uniform spaces (cube-root + log nonlinearity respectively),
+     where every reference IQA metric since SSIMULACRA2 operates.
+   - Mutual-masking residual + Minkowski-β=3 pool capture the
+     same "spread + peak" shape that GMSD's std-pooling proved
+     critical (doc § 3).
+2. **Falsification**: If CID22 aggregate SROCC drops, stays flat
+   across 3 seeds, or if at least 4 of the 6 Mohammadi panel
+   stats agree on regression (Mohammadi 2025 rule), the
+   hypothesis is dead and the doc § 8 EX-4 estimate of `+0.005–0.015`
+   is wrong for *this* feature batch (not necessarily for all
+   front-end work).
+3. **Cost ceiling**: 1× corpus rebuild + seed=1 fine-tune. If
+   seed=1 negative, abandon.
+4. **Ship form**: Single-bake PreviewV0_5+ with `feature_transforms`
+   propagation through `predict_transformed` dispatch.
 
 ## Hypothesis (per principled-experiment workflow Step 1)
 
@@ -177,27 +252,65 @@ schema (300 + 72 IW pool). To eval the new bake we either need to:
 Option (a) is the cheaper path; option (b) is the correct long-term
 schema. Both are queued.
 
-## What this session does NOT claim
+## What this session executed (continuation 2026-05-18)
 
-- **No CID22 SROCC number is reported.** Honest claim per
-  "NEVER CLAIM FALSE COMPLETION": Rust feature modules + tests
-  landed; no training, no eval, no calibration, no ship candidate.
-- **No feature-importance analysis** — that requires a trained
-  bake to read out per-feature gradient magnitude or absolute
-  weight. Queued as part of Chunk B's seed=1 inspection.
-- **No 5-seed CI** — queued for Chunk B after seed=1 passes.
-- **No packed candidate bake path.**
-- **No runtime cost number.** The Rust modules compile and run
-  but were not benchmarked; the CVVDP-shape features are O(n)
-  per pixel × 4 pyramid levels + O(n log n) for percentile
-  sorts in xyb_lms_features. Expected: ~30 ms on a 4 MP image
-  for the combined 43-feature extract.
+The prior agent landed Rust modules + unit tests. This agent executed:
 
-## Honest gaps (doc § 8 acceptance bar)
+1. **Corpus rebuild** (~10 min wall, 16-thread rayon):
+   - `extract_ex4_features` binary added (`zensim-validate/src/bin/`)
+   - Per-ref XYB+LMS 24 features computed once per unique
+     `ref_basename` via cached lookup, then broadcast to all rows.
+   - 9 corpora rebuilt (5 train + 4 validation):
+     * safesyn: 196,086 rows × 3218 unique refs → 66 s wall
+     * cvvdp_iwssim_large: 73,300 rows × 200 unique refs → 5 s wall
+     * kadid (train + val): 10,125 rows × 81 refs → 1.6 s
+     * tid (train + val): 3,000 rows × 25 refs → 0.6 s
+     * konjnd (train + val): 1,008 rows × 1008 refs → 9 s
+     * cid22 (val): 4,292 rows × 49 refs → 0.9 s
+     * aic3 (val): 600 rows × 10 refs → 1.5 s
+   - Output at `/mnt/v/zen/zensim-training/2026-05-18-extfeat/`
+   - All 24 new feature columns are bounded, finite, with
+     plausible per-channel distributions (XYB Y mean ~0.45 ± 0.15,
+     LMS biased-log mean ~−1.8 ± 0.8). No NaN columns; no
+     pathologically-zero columns.
 
-- The user's task brief described EX-4 as "+0.005–0.015 CID22
-  SROCC lift" — this session reports `untested`. Not "below
-  the lower bound" (we measured nothing), but **provisional**.
+2. **Schema normalization**: V_22 trainer used `--max-features 300`
+   (dropped IW pool from 372col parquets). To preserve V_22's exact
+   base-feature set + add EX-4 features at f300..f323 cleanly, the
+   324-col parquets were built by dropping f300..f371 (IW pool block
+   from 372col) and renaming f372..f395 → f300..f323. Trainer then
+   sees f0..f299 = V_22's exact base features + f300..f323 = EX-4.
+
+3. **V_25 seed=3 train**: 324-feature input, 128 hidden,
+   5-group (safesyn 1.0, kadid 0.3, tid 0.3, konjnd 0.02,
+   cvvdp_large 0.5), mix_cv40_iw60 target, PWRC + Norm-in-Norm 0.1,
+   minibatch=256. Early-stopped at epoch 180, val_mean=0.8108,
+   wall ~4 min.
+   Bake: `/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v25_extfeat_mix_cv40_konjnd_0_02_LARGE_iwssim_h128_s3.bin`
+   (169,732 bytes f32 unpacked).
+
+4. **bake_verdict full Mohammadi panel** on all 5 corpora:
+   see "Verdict" section above.
+
+5. **Feature-importance analysis** via `zenpredict inspect --weights`:
+   see "Mechanism" section above.
+
+## What this session does NOT include
+
+- **No 5-seed CI** — falsified at seed=3 per Step 3 decision tree.
+- **No CVVDP-shape per-pair feature corpus rebuild.** The 19 per-pair
+  features need both ref AND dist images. The 73k LARGE corpus dist
+  images live on vast.ai paths not synced locally; regenerating them
+  requires re-running the v15 sweep cluster. KADID / TID / KonJND /
+  CID22 dist images ARE locally available — per-pair feature
+  extraction on those 4 corpora is feasible in ~2-4 hr wall but was
+  NOT executed in this 150-min budget. Queued as Chunk C below.
+- **No packed candidate bake.** A failing-direction bake should not
+  ship.
+- **No runtime cost benchmark.** The 24 EX-4 features are per-ref
+  and computed once per scoring session (not per pair), so runtime
+  cost is ≈ 1 ms per ref image. Not measured precisely because the
+  feature set is falsified.
 - The IW-SSIM batch in the task brief (5-level Laplacian +
   11×11 Gauss + GSM info weights) was **already shipped** in
   zensim as the 72-feature IW pool block (`FEATURES_PER_CHANNEL_IW`
@@ -208,23 +321,55 @@ schema. Both are queued.
   function) is NOT used — substituted with 4-tap `CSF_BAND_WEIGHTS`.
   Crossing the AGPL boundary would require explicit user approval.
 
-## Files changed
+## Chunk C — Per-pair CVVDP-shape features (queued; not executed)
 
-- `zensim/src/lib.rs` — added `pub mod xyb_lms_features` +
-  `pub mod cvvdp_features` (both gated by `training` feature).
-- `zensim/src/color.rs` — `K_M00..K_M22` + `K_B0` visibility
-  bumped from `const` to `pub(crate) const` so feature modules
-  share the constants.
-- `zensim/src/xyb_lms_features.rs` — new (288 lines).
-- `zensim/src/cvvdp_features.rs` — new (398 lines).
-- `benchmarks/ex4_xyb_lms_extfeat_methodology_2026-05-18.md` — this doc.
+The 19 per-pair CVVDP-shape features remain the load-bearing
+candidate from doc § 8 EX-4 because they DO carry per-distortion
+signal (RankNet pairs share the ref but differ in the dist; the
+DKL Δ-stats / Weber pyramid / mutual-masking residual / Minkowski
+pool all depend on the dist).
+
+For KADID, TID, KonJND, CID22 (val) the dist images are locally
+available with known on-disk paths:
+- KADID: `/mnt/v/dataset/kadid10k/images/<I_xx_yy_zz>.png` via dmos.csv row order
+- TID: `/mnt/v/dataset/tid2013/distorted_images_png/<iXX_YY_Z.png>` via mos_with_names.txt
+- KonJND: `/mnt/v/datasets/KonJND-1k/KonJND-1k/distorted_image/...` (verify exact layout)
+- CID22: `/mnt/v/dataset/cid22/CID22_validation_set/compressed/...` (verify exact layout)
+
+For safesyn / cvvdp_iwssim_large the dist images are NOT locally
+available (vast.ai workers). Options to extend Chunk C:
+- (a) Skip the per-pair features for safesyn / cvvdp_large, fill
+  zero columns. Falls back to "if EX-4 helps anywhere, it'll show
+  up on KADID/TID/KonJND/CID22; safesyn supervision is just the
+  base shape."
+- (b) Local re-encode of the 73k cvvdp_iwssim_large rows. Each row
+  has (image_path, codec, q, knob_tuple_json) recoverable via
+  rejoin with cvvdp_imazen_consolidated + iwssim_imazen_consolidated
+  parquets on `(basename, iwssim, cvvdp_score)` keys (verified
+  unique-key join in this session: 65,970 unique tuples cover
+  73,300 rows with ~10 % many-to-many on duplicate scores).
+- (c) Sync dist images from tower (NFS at /mnt/tower if present;
+  this session didn't check).
+
+Chunk C is the **right next experiment** for the EX-4 direction —
+the falsified per-ref-only result here doesn't transfer to
+per-pair-feature trial.
+
+## Files changed (continuation)
+
+- `zensim-validate/src/bin/extract_ex4_features.rs` — new (260 lines).
+  Reads input parquet, extracts 24 per-ref XYB+LMS features with
+  rayon-parallel ref-cache, writes 324-col output parquet, emits
+  per-feature distribution sanity stats.
+- `scripts/v_next/v25_extfeat_launch.sh` — V_25 5-group launch
+  matching V_22-mix-LARGE recipe.
 
 ## Test count
 
-81 / 81 zensim lib tests passing (76 pre-existing + 10 new from
-the EX-4 modules + 1 new doctest, all green).
+81 / 81 zensim lib tests passing.
 
 ## Branch
 
 `feat/ex4-xyb-frontend-extfeat` in zensim. Workspace path:
-`/home/lilith/work/zen/zensim--ex4-extfeat/`.
+`/home/lilith/work/zen/zensim--ex4-extfeat/`. Pushed to origin
+through commit `66fbebf5`.
