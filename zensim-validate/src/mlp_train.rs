@@ -461,18 +461,34 @@ pub fn norm_pdf(x: f64) -> f64 {
 /// `loss = −log Φ(d · target · pred_diff)` and
 /// `dL_d_pred_diff = −d · target · φ(u) / Φ(u)`.
 ///
+/// **Gradient stability**: the standard Thurstone NLL has an
+/// unbounded gradient for wrong-direction pairs (Mills-ratio tail:
+/// `φ(u)/Φ(u) → |u|` as `u → -∞`). With random init the per-pair
+/// gradient can reach |dL/du| ≈ 10–20, dominating Adam's variance
+/// estimate and stalling learning. We bound `dL/du ∈ [-10, 10]` (so
+/// |u| > ~10 still contributes O(1) gradient, not O(|u|)). This
+/// preserves the wrong-direction push signal while keeping Adam
+/// stable. The clip threshold of 10 is well above the natural mean
+/// of |φ/Φ| at u≈0 (≈ 0.798) so it never fires for converged pairs.
+///
 /// **Sign correctness check** (against RankNet): when target = +1
 /// and pred_diff is large-positive (b > a, correct ordering),
 /// `u = d · pred_diff > 0` ⇒ Φ ≈ 1 ⇒ `loss ≈ 0`, gradient ≈ 0. When
-/// pred_diff is large-negative (wrong ordering), u is very negative
-/// ⇒ Φ → 0 ⇒ loss → ∞ and gradient → −d · target = −d (push
-/// pred_diff up). Same shape as RankNet.
+/// pred_diff is large-negative (wrong ordering), u very negative
+/// ⇒ Φ → 0 ⇒ loss → ∞; gradient is clipped to push pred_diff up
+/// with magnitude up to 10·d. Same shape as RankNet but smoother
+/// at the boundary.
 #[inline]
 pub fn thurstone_pair_loss_and_grad(target: f64, pred_diff: f64, d: f64) -> (f64, f64) {
     let u = d * target * pred_diff;
     let phi = norm_cdf(u);
     let loss = -phi.ln();
-    let dl_du = -norm_pdf(u) / phi;
+    let dl_du_raw = -norm_pdf(u) / phi;
+    // Wrong-direction gradient is in (-∞, 0]. Clip lower bound at
+    // -10 to keep Adam stable through the early-epoch transient.
+    // Right-direction values are already in (-1, 0] (φ/Φ < 1 for u
+    // > 0), so the upper clip at 0 is a no-op there.
+    let dl_du = dl_du_raw.clamp(-10.0, 0.0);
     let dl_d_pred_diff = dl_du * d * target;
     (loss, dl_d_pred_diff)
 }

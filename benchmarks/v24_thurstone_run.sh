@@ -27,7 +27,7 @@ OUT="$BAKE_DIR/v24_thurstone_konjnd_002_LARGE_iwssim_s${SEED}_h128.bin"
   --val-policy min \
   --seed "$SEED" \
   --log-every 30 \
-  --early-stop-patience 60 \
+  --early-stop-patience 120 \
   --minibatch-size 256 \
   --pwrc-pair-weight \
   --pwrc-sensory-threshold 5.0 \
