@@ -100,6 +100,43 @@ evaluation decision flows from this:
   but per-bin SROCC at 5-unit granularity in those bands IS the
   pathology view we use for goal #1 (band coverage).
 
+### Two-trail SOTA (added 2026-05-18)
+
+The PreviewV0_5 slot now ships **two parallel variants** defending
+distinct Pareto frontiers. Read `zensim/SOTA_TRAILS.md` for the full
+framework, gate criteria, and candidate matrix.
+
+| Variant | Bake | When to use |
+|---|---|---|
+| `PreviewV0_5` / `PreviewV0_5Balanced` | V_22-mix-LARGE+iwssim (41 KB) | General-purpose. Best balanced-corpus coverage (KADID 0.9677, TID 0.9729, KonJND 0.8927). |
+| `PreviewV0_5Compression` | V_22-372feat (51 KB) | Codec selection / quality dials. Wins CID22 +0.026 + AIC-3 +0.024 decisively per § A.9; loses KADID/TID/KonJND within −0.10 noise tolerance. |
+
+**Gate per trail (formal):**
+
+- **Balanced trail.** A>>B on CID22 decisively per § A.9 AND not
+  decisively B>>A on any of {KADID, TID, KonJND, AIC-3} aggregate.
+- **Compression trail.** A>>B on ≥1 of {CID22, AIC-3} decisively per
+  § A.9 AND not decisively B>>A on the other compression corpus AND
+  mean SROCC regression on {KADID, TID, KonJND} no worse than −0.10
+  on any single corpus.
+
+A new bake ships to the trail whose gate it passes. If passes both
+trails: ship to both (rare — would require a strict Pareto improvement
+over both variants). If passes neither: add row to candidate matrix
+in `SOTA_TRAILS.md` and move on.
+
+**Don't bump the crate version** when rotating a trail's bake (per
+user 2026-05-18: "we don't want crate bumps every time we get a nice
+bake"). The `ProfileParams` static slot owns the bake bytes; rotation
+is a patch-level swap.
+
+**Runtime gap**: V_24-per-sample-α (CID22 0.8641, AIC-3 0.8179)
+dominates the compression-trail winner on § A.9 but uses a custom
+`zentrain.per_sample_alpha_head` dispatch that requires extending
+`zensim::metric::apply_mlp_scoring`. Tracked in `SOTA_TRAILS.md`
+under "runtime-blocked candidates". When the dispatch lands, the
+compression-trail bake rotates.
+
 ### Shipping policy (revised 2026-05-14 — gates are ADVISORY)
 
 The shipped weight at `zensim/weights/v0_X_<date>.bin` may be added,

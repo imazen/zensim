@@ -12,6 +12,43 @@
   (rare — most use the `static`-defined profiles) need to add the
   two new fields. Added 2026-05-15 (commit `f140776a`).
 
+### Changed (2026-05-18) — Two-trail SOTA framework
+
+- **`ZensimProfile::PreviewV0_5` rewired** to the V_22-mix-LARGE+iwssim
+  packed bake (300 → 128 → 1, 41 KB, md5
+  `b703c9cfc7e1908faf5b0e78dc823221`). Previously shipped V_22-IW v2
+  (200 KB) which had CID22 SROCC 0.8164; the new bake reaches CID22
+  0.8324 + best balanced KADID 0.9677 / TID 0.9729 / KonJND 0.8927.
+  Score-shape preserved (raw output IS final 0..100 score). No
+  feature_transforms, no custom head — standard
+  `Predictor::predict` path.
+- **`ZensimProfile::PreviewV0_5Balanced` added** as the explicit
+  balanced-trail name, semantically equivalent to `PreviewV0_5`
+  (both resolve to the same `ProfileParams`).
+- **`ZensimProfile::PreviewV0_5Compression` added** — V_22-372feat
+  packed (372 → 128 → 1, 51 KB, md5
+  `3be4f781238dcb35f32c964cb218a8a4`). Wins CID22 +0.026 (decisive
+  A>>B per § A.9, 1000-bootstrap) and AIC-3 +0.024 vs the balanced
+  ship; loses KADID/TID/KonJND within the compression-trail −0.10
+  noise tolerance. Use for codec-selection / quality-dial workloads
+  where compression-corpus rank fidelity matters more than
+  synthetic / JND coverage.
+- **`ZensimProfile::balanced()` and `compression()` helpers** added
+  for explicit two-trail selection. `latest()` continues to return
+  `PreviewV0_3` (V_18 ship) — the conservative default that hasn't
+  rotated since 2026-05-13.
+- **`SOTA_TRAILS.md`** added at the zensim crate root — source of
+  truth for the two-trail framework, gate criteria per trail, and
+  the candidate matrix (every tested bake's gate verdict).
+- **`zensim/src/profile.rs`** removed the V_22-IW v2 calibrated bake
+  (`v0_22_iw_v2_calibrated_2026-05-16.bin`) from `include_bytes!`
+  but the raw file remains in `zensim/weights/` for reproducibility.
+- **No semver bump.** Adding new enum variants to a `#[non_exhaustive]`
+  enum is patch-level under 0.x semver per zenanalyze's policy
+  (mirrored here). New API surface: `PreviewV0_5Balanced`,
+  `PreviewV0_5Compression`, `balanced()`, `compression()`. Existing
+  callers matching on `PreviewV0_5` continue to compile.
+
 ### Added (2026-05-17, baker scripts only — no Rust changes)
 
 - **`scripts/v_next/bake_to_znpr.py`** and
