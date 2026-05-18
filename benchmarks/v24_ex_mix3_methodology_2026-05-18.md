@@ -238,3 +238,53 @@ Re-launched 15-job matrix at 09:43:50.
 3. If a variant Pareto-wins: `zenpredict repack` packed bake + record path.
 4. If all variants falsified: document root cause (coverage shrink vs 3-way blend) and
    close the experiment with a CLAUDE.md learnings entry.
+
+## Partial results snapshot (round-2, 6/15 bakes, 10:11 UTC)
+
+Per-variant 2-seed mean vs V_22 noLARGE 5-seed baseline mean:
+
+| Variant | CID22 | KADID | TID | KonJND | AIC-3 |
+|---|---|---|---|---|---|
+| cv33_iw33_sm33 (n=2) | 0.8637 | 0.9161 | 0.8706 | 0.8395 | 0.7928 |
+| cv30_iw40_sm30 (n=2) | 0.8612 | 0.9273 | 0.8766 | 0.8447 | 0.7985 |
+| cv40_iw40_sm20 (n=2) | 0.8583 | 0.9170 | 0.8750 | 0.8374 | 0.8023 |
+| baseline V_22 noLARGE (n=5) | 0.8425 | 0.9311 | 0.8897 | 0.8371 | 0.8059 |
+
+### bake_compare (cv30_iw40_sm30 s1 vs V_22 noLARGE s3, 1000 bootstrap)
+
+| Corpus | Verdict | Notes |
+|---|---|---|
+| CID22 | **A>>B (decisive)** | +0.039 SROCC, +0.030 PWRC |
+| KADID | promising | within ±0.001 |
+| TID | **B>>A (decisive)** | -0.015 SROCC |
+| KonJND | tied | -0.004 |
+| AIC-3 | tied | +0.001 |
+
+Overall: A wins 4 decisive cells, B wins 3 — A overall winner. **TID is a
+decisive regression**, so this variant **fails the strict Pareto-or-perish
+gate**. But it's a TRADE — CID22 decisively wins (the gold-standard
+held-out, +0.039 SROCC), TID decisively loses (one of the synthetic
+non-compression corpora, -0.015 SROCC). The trade direction matches the
+"two-trail SOTA" framework in CLAUDE.md / memory: PreviewV0_5Compression
+trail prioritizes CID22 + AIC-3 (compression product decisions);
+PreviewV0_5Balanced trail prioritizes Pareto-all-corpora.
+
+EX-MIX3 is firmly on the compression-priority trail. Final ship decision
+awaits 5-seed CI completion.
+
+## CID22 10-band per-band lift (cv33_iw33_sm33 s1 vs V_22 noLARGE s1)
+
+| Band | n | V_22 noLARGE | cv33 s1 | Δ |
+|---|--:|---:|---:|---:|
+| B3 (30-40) | 57 | 0.0436 | 0.1276 | **+0.084** |
+| B4 (40-50) | 266 | 0.2541 | 0.2830 | +0.029 |
+| B5 (50-60) | 615 | 0.2518 | 0.3220 | **+0.070** |
+| B6 (60-70) | 836 | 0.2438 | 0.2932 | +0.049 |
+| B7 (70-80) | 1092 | 0.3776 | 0.3956 | +0.018 |
+| B8 (80-90) | 1382 | 0.4844 | 0.4867 | +0.002 |
+| B9 (90-100) | 43 | 0.1675 | 0.1992 | +0.032 |
+
+Uniformly positive across every band with non-trivial n. B3 / B5 are the
+big winners (+0.07-0.08 SROCC) — these are mid-quality bands where most
+compression product decisions live. This confirms the 3-way blend's gain
+is broad-based, not a band-specialist trade.
