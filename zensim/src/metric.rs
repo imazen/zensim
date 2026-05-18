@@ -1502,9 +1502,11 @@ fn compute_with_config_inner(
         //   - extended adds 72 masked features (300 total)
         //   - compute_iw_features adds 72 IW-pool features (372 total)
         // On identical inputs every feature is zero (all error metrics
-        // are 0). PreviewV0_5 (V_22-IW v2) needs the full 372-width
-        // vector; a missing IW block triggers InvalidDataLength
-        // downstream when the bake's 372-input MLP runs.
+        // are 0). PreviewV0_5Compression (V_22-372feat) needs the full
+        // 372-width vector; PreviewV0_5 / PreviewV0_5Balanced
+        // (V_22-mix-LARGE+iwssim, 300-input) needs only the extended
+        // 300-width vector. A missing block triggers InvalidDataLength
+        // downstream when the bake's MLP runs.
         let fpc = match (config.extended_features, config.compute_iw_features) {
             (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
             (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
@@ -2061,9 +2063,9 @@ pub fn compute_zensim_with_config(
     if source == distorted {
         // Match the feature width to the enabled config flags. See the
         // sister short-circuit above `compute_zensim_streaming` for the
-        // bug history (PreviewV0_5 V_22-IW v2's 372-input bake failed
-        // with InvalidDataLength when IW was set but the short-circuit
-        // only counted basic+extended = 300).
+        // bug history (the 372-input compute_iw_features path was
+        // discovered when a 372-input bake failed with InvalidDataLength
+        // because the short-circuit only counted basic+extended = 300).
         let fpc = match (config.extended_features, config.compute_iw_features) {
             (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
             (true, false) => FEATURES_PER_CHANNEL_EXTENDED,

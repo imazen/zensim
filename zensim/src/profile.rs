@@ -65,47 +65,82 @@ pub enum ZensimProfile {
     /// `include_bytes!`; no extra heap allocations beyond the second
     /// Predictor's scratch buffer.
     PreviewV0_4,
-    /// Preview v0.5 — **V_22-IW v2 single-bake (2026-05-16)**: a 372 →
-    /// 128 → 1 LeakyReLU MLP trained on safesyn against a
-    /// log-transformed IW-SSIM target (Wang & Li 2011) instead of
-    /// ssim2-derived scores. The log target spreads the saturated
-    /// upper tail [0.99, 1.0] across a wide range, fixing the high-q
-    /// flattening pathology of V_22-IW v1.
+    /// Preview v0.5 — **balanced-trail ship**.
     ///
-    /// Cross-corpus held-out SROCC (full Mohammadi panel verdict in
-    /// `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`):
-    ///   - **AIC-3 0.8071** (vs V_18 ship 0.7996 — **+0.008 win** on
-    ///     the primary low-q compression corpus)
-    ///   - **KADID 0.9475** (vs V_18 ship 0.9387 — **+0.009 win**
-    ///     NaN-filtered)
-    ///   - **TID 0.9617** (vs V_18 ship 0.9526 — **+0.009 win**)
-    ///   - CID22 0.8164 (vs V_18 ship 0.8933 — −0.077 loss; this is
-    ///     the cost of escaping the ssim2-target training bias
-    ///     documented in CLAUDE.md "SROCC-only verdicts BANNED")
+    /// Semantically equivalent to [`Self::PreviewV0_5Balanced`]; this
+    /// variant is kept as the back-compat name for callers that
+    /// matched on `PreviewV0_5` before the two-trail SOTA framework
+    /// landed (2026-05-18). New code should match on
+    /// `PreviewV0_5Balanced` or `PreviewV0_5Compression` explicitly.
     ///
-    /// Z-RMSE wins on AIC-3, KADID, TID (better calibration error,
-    /// not just rank). 3 of 4 ship-grade corpora pass the
-    /// CLAUDE.md ≥3-of-5-stats agreement rule on the full Mohammadi
-    /// panel.
+    /// See [`SOTA_TRAILS.md`](https://github.com/imazen/zensim/blob/main/zensim/SOTA_TRAILS.md)
+    /// for the two-trail framework: this variant ships on the
+    /// **balanced trail** (Pareto-better across all 5 eval corpora).
+    /// For a compression-specialist alternative, see
+    /// [`Self::PreviewV0_5Compression`].
+    PreviewV0_5,
+    /// Preview v0.5, **balanced trail** — V_22-mix-LARGE+iwssim s3
+    /// packed (2026-05-18). 300 → 128 → 1 vanilla LeakyReLU MLP,
+    /// i8 + zerobias + lz4 packed (41,695 bytes,
+    /// md5 `b703c9cfc7e1908faf5b0e78dc823221`).
     ///
-    /// **Use this profile** when AIC-3-style low-q compression
-    /// decisions matter more than CID22 mid-q rank fidelity. For the
-    /// CID22-anchored use case, keep `PreviewV0_3` (V_18 ship).
+    /// Trained on safesyn + KADID + TID + KonJND + LARGE-iwssim
+    /// (5-group) against the `mix_cv40_iw60` target column
+    /// (0.4·cvvdp_log_norm + 0.6·iwssim_log_norm, scale 100). The
+    /// trainer's RankNet + PWRC pair-weighting + NiN-0.1 + LARGE
+    /// anchor produces a bake that defends KADID/TID/KonJND while
+    /// keeping CID22 + AIC-3 within ssim2-baseline range.
     ///
-    /// Bake: `zensim/weights/v0_22_iw_v2_2026-05-16.bin` (200 KB,
-    /// ZNPR v3, md5 `fec221a4c5eaf792d1a34e6a3b3e8c0d`). Architecture:
-    /// 372 → 128 (LeakyReLU α=0.01) → 1 (Identity). Carries 139
-    /// per-feature `feature_transforms` metadata. Output is
-    /// score-shaped (raw value IS the final 0..100 score) because
-    /// the training target was pre-scaled into score_zensim units
-    /// via `iwssim_log_norm = -log(1 - iwssim + 1e-6) / 13.72 × 100`.
+    /// Cross-corpus held-out SROCC:
+    ///   - CID22 0.8324
+    ///   - KADID 0.9677 (best balanced ship)
+    ///   - TID   0.9729 (best balanced ship)
+    ///   - KonJND 0.8927 (best balanced ship)
+    ///   - AIC-3 0.7845
+    ///
+    /// Use this profile when the workload spans multiple distortion
+    /// families (synthetic noise/blur, geometric distortions, JND
+    /// thresholds, compression artifacts). For compression-only
+    /// workloads, see [`Self::PreviewV0_5Compression`].
+    ///
+    /// Methodology: `benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`.
+    PreviewV0_5Balanced,
+    /// Preview v0.5, **compression trail** — V_22-372feat s5 packed
+    /// (2026-05-18). 372 → 128 → 1 vanilla LeakyReLU MLP, i8 +
+    /// zerobias + lz4 packed (51,153 bytes,
+    /// md5 `3be4f781238dcb35f32c964cb218a8a4`).
+    ///
+    /// Same trainer recipe as [`Self::PreviewV0_5Balanced`] but adds
+    /// the 72 IW-pool features (f300..f371: info-content-weighted
+    /// SSIM/edge/MSE pool stats per channel × scale, per Wang & Li
+    /// 2011 IW-SSIM). The LARGE-iwssim corpus is padded with
+    /// IW=zero columns (the distorted images live on retired
+    /// vast.ai workers); the 4 anchor groups carry real IW signal.
+    ///
+    /// Cross-corpus held-out SROCC:
+    ///   - **CID22 0.8580** (+0.026 vs balanced ship — decisive A>>B
+    ///     per § A.9)
+    ///   - **AIC-3 0.8087** (+0.024 vs balanced ship — decisive A>>B)
+    ///   - KADID 0.9319 (−0.036 vs balanced ship — within
+    ///     compression-trail −0.10 tolerance)
+    ///   - TID   0.8875 (−0.085 vs balanced ship — within tolerance)
+    ///   - KonJND 0.8125 (−0.080 vs balanced ship — within tolerance)
+    ///
+    /// Use this profile when scoring compressed images for codec
+    /// selection / quality dials in Imageflow-style pipelines.
+    /// CLAUDE.md establishes the priority: "Imageflow and related
+    /// work is web-focused, not archival — commercial web compression
+    /// targets aggressive settings where every byte matters." CID22
+    /// is human MOS on codec output; AIC-3 is human JND on near-PJND
+    /// codec output. This profile wins both.
     ///
     /// Runtime cost: ~3× the basic-feature compute time of
-    /// PreviewV0_3 (372-feature extended + IW pool path instead of
-    /// 228 standard). Single-bake forward — no multi-bake overhead.
+    /// PreviewV0_3 (372-feature extended + IW pool path). Single-bake
+    /// forward — no multi-bake overhead.
     ///
-    /// Methodology: `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
-    PreviewV0_5,
+    /// Methodology: `benchmarks/v22_372feat_methodology_2026-05-18.md`.
+    /// Bake_compare A.9 verdict: `/tmp/two_trail_372feat_vs_baseline.md`.
+    PreviewV0_5Compression,
 }
 
 impl ZensimProfile {
@@ -113,6 +148,21 @@ impl ZensimProfile {
     /// Returns [`Self::PreviewV0_3`] in zensim 0.3.x.
     pub fn latest() -> Self {
         Self::PreviewV0_3
+    }
+
+    /// Balanced-trail ship — alias for [`Self::PreviewV0_5Balanced`].
+    /// Equivalent to [`Self::PreviewV0_5`], the back-compat name.
+    /// See `zensim/SOTA_TRAILS.md` for the two-trail framework.
+    pub const fn balanced() -> Self {
+        Self::PreviewV0_5Balanced
+    }
+
+    /// Compression-trail ship — alias for [`Self::PreviewV0_5Compression`].
+    /// Use for codec-selection / quality-dial workloads where CID22 +
+    /// AIC-3 rank fidelity is the priority over KADID/TID/KonJND.
+    /// See `zensim/SOTA_TRAILS.md` for the two-trail framework.
+    pub const fn compression() -> Self {
+        Self::PreviewV0_5Compression
     }
 
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
@@ -123,6 +173,8 @@ impl ZensimProfile {
             Self::PreviewV0_3 => "zensim-preview-v0.3",
             Self::PreviewV0_4 => "zensim-preview-v0.4",
             Self::PreviewV0_5 => "zensim-preview-v0.5",
+            Self::PreviewV0_5Balanced => "zensim-preview-v0.5-balanced",
+            Self::PreviewV0_5Compression => "zensim-preview-v0.5-compression",
         }
     }
 
@@ -133,7 +185,12 @@ impl ZensimProfile {
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             Self::PreviewV0_3 => &PROFILE_PREVIEW_V0_3,
             Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
-            Self::PreviewV0_5 => &PROFILE_PREVIEW_V0_5,
+            // PreviewV0_5 + PreviewV0_5Balanced are the same balanced-trail
+            // ship — same bake bytes, same params. The split exists at the
+            // API surface for callers that want to opt into the explicit
+            // two-trail names (balanced / compression). See SOTA_TRAILS.md.
+            Self::PreviewV0_5 | Self::PreviewV0_5Balanced => &PROFILE_PREVIEW_V0_5_BALANCED,
+            Self::PreviewV0_5Compression => &PROFILE_PREVIEW_V0_5_COMPRESSION,
         }
     }
 }
@@ -509,64 +566,84 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     soft_clamp_score: true,
 };
 
-/// V_22-IW v2 single-bake (2026-05-16) — **affine-calibrated**.
+/// V_22-mix-LARGE+iwssim s3 packed (2026-05-18) — **balanced-trail
+/// ship**. 300 → 128 → 1 vanilla LeakyReLU MLP, i8 + zerobias + lz4
+/// packed (41,695 bytes, md5 `b703c9cfc7e1908faf5b0e78dc823221`).
 ///
-/// 372 → 128 (LeakyReLU α=0.01) → 1, trained on safesyn against the
-/// log-transformed IW-SSIM target `iwssim_log_norm =
-/// -log(1 - iwssim + 1e-6) / 13.7202 × 100`. Carries 139 per-feature
-/// `feature_transforms` from the V_20 IS greedy screen.
+/// Trained on the 5-group safesyn + KADID + TID + KonJND + LARGE-iwssim
+/// recipe against the `mix_cv40_iw60` target column
+/// (0.4·cvvdp_log_norm + 0.6·iwssim_log_norm, scale 100). Score-shaped
+/// output — bake's raw value IS the final 0..100 score.
 ///
-/// The trainer's RankNet loss is rank-invariant — it doesn't constrain
-/// absolute scale. The raw bake's predictions land in approximately
-/// `[-17, 5]` (distance-shaped: lower = better quality) on real test
-/// pairs, not the [0, 100] score range. To make the runtime path
-/// produce calibrated 0..100 scores, the final layer is
-/// affine-transformed with `y' = 52.7171 + (-3.2898) · y`, fit by
-/// least-squares across KADID + TID + CID22 + AIC-3 per-pair output
-/// (correlation 0.874 against pooled human MOS).
+/// No `feature_transforms`, no `pool_head_reducer`, no `hybrid_head`,
+/// no `per_sample_alpha_head` metadata. Standard
+/// `Predictor::predict` runtime path, taking `out[0]` from the
+/// 1-wide final layer.
 ///
-/// File: `zensim/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`
-/// (200 984 bytes, md5 `8f587de61b59c5b03f8d8cfad11cfc4d`). The raw
-/// uncalibrated bake is preserved at
-/// `zensim/weights/v0_22_iw_v2_2026-05-16.bin` for reproducibility
-/// + downstream training (the calibration is byte-rewrite of the
-/// final layer only; all metadata + feature_transforms propagate
-/// unchanged).
-///
-/// Methodology: `benchmarks/v0_22_iw_v2_methodology_2026-05-16.md`.
-pub(crate) fn mlp_bake_preview_v0_5() -> &'static [u8] {
-    include_bytes!("../weights/v0_22_iw_v2_calibrated_2026-05-16.bin")
+/// Methodology: `benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`.
+pub(crate) fn mlp_bake_preview_v0_5_balanced() -> &'static [u8] {
+    include_bytes!("../weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin")
 }
 
-static PROFILE_PREVIEW_V0_5: ProfileParams = ProfileParams {
-    // V_22-IW v2 doesn't use the linear-weights path; this stays as
+/// V_22-372feat s5 packed (2026-05-18) — **compression-trail ship**.
+/// 372 → 128 → 1 vanilla LeakyReLU MLP, i8 + zerobias + lz4 packed
+/// (51,153 bytes, md5 `3be4f781238dcb35f32c964cb218a8a4`).
+///
+/// Same trainer recipe as
+/// [`mlp_bake_preview_v0_5_balanced`] but adds the 72 IW-pool features
+/// (f300..f371: info-content-weighted SSIM/edge/MSE pool stats per
+/// channel × scale, per Wang & Li 2011 IW-SSIM). Score-shaped output.
+///
+/// No `feature_transforms` metadata. Standard `Predictor::predict`
+/// runtime path.
+///
+/// Methodology: `benchmarks/v22_372feat_methodology_2026-05-18.md`.
+/// Bake_compare A.9 verdict (1000-bootstrap) at
+/// `/tmp/two_trail_372feat_vs_baseline.md` — decisive A>>B on CID22
+/// (+0.026) and AIC-3 (+0.024); B>>A on KADID/TID/KonJND but within
+/// the compression-trail −0.10 noise tolerance.
+pub(crate) fn mlp_bake_preview_v0_5_compression() -> &'static [u8] {
+    include_bytes!("../weights/v_compression_2026-05-18.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_BALANCED: ProfileParams = ProfileParams {
+    // The mix-bake doesn't use the linear-weights path; this stays as
     // V0_2's weights for any introspection caller that reads
     // `params.weights` without checking `mlp_bytes.is_some()`.
     weights: &WEIGHTS_PREVIEW_V0_2,
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    // V_22-IW v2's target column is `iwssim_log_norm`, pre-scaled to
-    // 0..100. The bake's raw output IS the final score; no
-    // `100 − A·d^B` distance-to-score transform should run.
+    // Score-shaped: the bake's raw output IS the final 0..100 score.
+    // Trained against `mix_cv40_iw60` already pre-scaled to that range.
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
-    mlp_bytes: Some(mlp_bake_preview_v0_5),
-    // Single-bake profile — no secondary.
+    mlp_bytes: Some(mlp_bake_preview_v0_5_balanced),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
-    // V_22-IW v2 needs the full 372-feature input (228 standard + 72
-    // masked + 72 IW pool per Wang & Li 2011). Both flags must be
-    // true for the runtime to compute the right feature width.
+    // 300-feature input = 228 standard + 72 masked (no IW pool).
+    extended_features: true,
+    compute_iw_features: false,
+    // Single-bake forward — predictions stay within [0, 100] for
+    // in-distribution inputs (training target was pre-scaled).
+    soft_clamp_score: false,
+};
+
+static PROFILE_PREVIEW_V0_5_COMPRESSION: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_compression),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 372-feature input = 228 standard + 72 masked + 72 IW pool.
     extended_features: true,
     compute_iw_features: true,
-    // Single-bake forward — no multi-bake destructive interference at
-    // boundaries. Predictions stay within [0, 100] for in-distribution
-    // inputs (training target was pre-scaled into that range). Hard
-    // clamp is fine; soft-clamp would introduce unnecessary
-    // recalibration shift (per CLAUDE.md "interior shift" docs on
-    // metric.rs::soft_clamp_score).
     soft_clamp_score: false,
 };
 
