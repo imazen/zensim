@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Falsified (2026-05-18, EXP-IWSSIM-PERSAMPLE 5-seed CI)
+
+- **EXP-IWSSIM-PERSAMPLE falsified for both trails.** Dropping
+  cvvdp from the target column (pure `iwssim_log_norm` instead of
+  `mix_cv40_iw60`) on the per-sample-α head produces a
+  KADID/TID specialist matching the Balanced ship's synthetic-
+  distortion profile but loses **both** compression-band corpora
+  decisively vs the current Compression ship. 5-seed CI: CID22
+  mean **0.8402** σ=0.0040 (range [0.8357, 0.8446]), AIC-3 mean
+  **0.7992** σ=0.0056, KADID mean 0.9666, TID mean 0.9808, KonJND
+  mean 0.8012. Median-pick by CID22 SROCC = seed 3 (0.8406).
+- **Compression-trail gate (vs V_24-per-sample-α s4 cv40_iw60)**:
+  FAIL. CID22 **B>>A** (Δ=−0.0235, h_SROCC=−52.86), AIC-3 **B>>A**
+  (Δ=−0.0254, h_SROCC=−36.11). Decisively dominated on both
+  compression-targeted corpora; KADID +0.0350 / TID +0.0915 wins
+  cannot rescue under the gate's logical structure (need A>>B on
+  ≥1 compression corpus AND not B>>A on the other; got B>>A on
+  both). Synthetic tolerance (≥−0.10 per corpus on KADID/TID/KonJND)
+  passes trivially.
+- **Balanced-trail gate (vs V_22-mix-LARGE+iwssim)**: FAIL.
+  KonJND **B>>A** (Δ=−0.087, h_SROCC=−38.44) is the blocker. CID22
+  promising A>B, KADID promising B>A, TID A>>B decisive, AIC-3
+  tied. No decisive cross-corpus win pattern.
+- **Mechanism (per `benchmarks/exp_iwssim_persample_falsification_2026-05-18.md`)**:
+  removing cvvdp from the supervision target erases the cvvdp
+  CID22-advantage (raw cvvdp baseline 0.8214 vs iwssim 0.7836 on
+  CID22) that the current Compression ship relies on. Target-shape
+  map updated: cvvdp+iwssim → compression trail; iwssim-only →
+  KADID+TID specialist (no trail slot); ssim2-mix → KonJND
+  specialist (EX-MIX3 finding). Pure iwssim-target on per-sample-α
+  head produces a near-clone of the Balanced ship on synth corpora
+  with a 0.024–0.025 SROCC drop on the compression corpora.
+- **No ship rotation.** Compression ship and Balanced ship
+  unchanged. Bakes retained at
+  `/mnt/v/zen/zensim-eval/exp_iwssim_persample_2026-05-18/iwssim_persample_s{1..5}_h128.bin`
+  for falsification record. NO crate version bump.
+- New row in SOTA candidate matrix (`zensim/SOTA_TRAILS.md`).
+
 ### Falsified (2026-05-18, EXP-V22-PERSAMPLE)
 
 - **EXP-V22-PERSAMPLE (5-seed CI) FALSIFIED.**
