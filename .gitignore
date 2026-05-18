@@ -84,3 +84,4 @@ __pycache__/
 benchmarks/*_per_pair.csv
 benchmarks/*_per_pair_*.csv
 benchmarks/v0_22_iw_v3_seed1_2026-05-17.bin
+benchmarks/v0_24_stdpool_seed3_h128_2026-05-18.bin

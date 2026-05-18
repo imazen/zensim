@@ -89,6 +89,8 @@ pub use stats::{pearson, ranks, spearman};
 
 pub mod mlp;
 
+pub mod pool_head;
+
 /// TV (total-variation) regularizer for adjacent-quality monotonicity.
 ///
 /// `pairs[k] = (lo_idx, hi_idx)` references rows in

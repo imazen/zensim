@@ -1680,6 +1680,26 @@ fn forward_one_bake(
     let n_inputs = model.n_inputs();
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
+    // EX-2 std-pool head: detect `zentrain.pool_head_reducer` metadata.
+    // When present, the bake emits the LeakyReLU hidden vector as its
+    // outputs (n_outputs == n_hidden); we pool 4 stats `[μ, σ, max, p_6]`
+    // and apply a 4→1 linear reducer carried in the metadata payload.
+    // Payload format: 6 f32 LE = [w_μ, w_σ, w_max, w_p6, b, p_norm].
+    let pool_head_reducer: Option<([f32; 4], f32, f32)> = {
+        let md = model.metadata();
+        md.get("zentrain.pool_head_reducer").and_then(|entry| {
+            let v = entry.value;
+            if v.len() != 24 {
+                None
+            } else {
+                let mut buf = [0f32; 6];
+                for (i, chunk) in v.chunks_exact(4).take(6).enumerate() {
+                    buf[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                }
+                Some(([buf[0], buf[1], buf[2], buf[3]], buf[4], buf[5]))
+            }
+        })
+    };
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
             p.predict_transformed(x)
@@ -1687,6 +1707,40 @@ fn forward_one_bake(
         } else {
             p.predict(x).map_err(|_| ZensimError::InvalidDataLength)?
         };
+        if let Some((rw, rb, p_norm)) = pool_head_reducer {
+            // `out` is the hidden vector (n_hidden floats). Compute 4
+            // pool stats over it.
+            let n = out.len() as f64;
+            debug_assert!(n > 0.0, "pool-head bake produced empty output");
+            let mut sum = 0.0f64;
+            let mut max_v = f64::NEG_INFINITY;
+            let mut sum_p = 0.0f64;
+            let p = p_norm as f64;
+            for &h in out.iter() {
+                let hf = h as f64;
+                sum += hf;
+                if hf > max_v {
+                    max_v = hf;
+                }
+                sum_p += hf.abs().powf(p);
+            }
+            let mu = sum / n;
+            let mut var = 0.0f64;
+            for &h in out.iter() {
+                let d = h as f64 - mu;
+                var += d * d;
+            }
+            // Match trainer's POOL_STD_FLOOR = 0.0026 (GMSD `c` constant).
+            let sigma = (var / n).sqrt().max(0.0026);
+            let p_norm_stat = (sum_p / n).powf(1.0 / p);
+            let stats = [mu, sigma, max_v, p_norm_stat];
+            let y = stats[0] * rw[0] as f64
+                + stats[1] * rw[1] as f64
+                + stats[2] * rw[2] as f64
+                + stats[3] * rw[3] as f64
+                + rb as f64;
+            return Ok(y);
+        }
         Ok(out[0] as f64)
     };
     if n_inputs == features.len() {

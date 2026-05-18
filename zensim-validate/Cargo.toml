@@ -12,6 +12,7 @@ default = []
 
 [dependencies]
 zensim = { path = "../zensim", features = ["training"] }
+zensim-train-core = { path = "../zensim-train-core" }
 zenpredict = { workspace = true }
 zenpredict-bake = { workspace = true }
 archmage = { workspace = true }
