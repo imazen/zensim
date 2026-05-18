@@ -2,7 +2,8 @@
 
 **Date:** 2026-05-18
 **Branch:** `feat/v24-alpha-sweep` (forked from `feat/v24-ex3-followup`)
-**Status:** seed=3 sweep completed; 5-seed CI ${SEED5_STATUS}; ${SHIP_STATUS}.
+**Status:** seed=3 sweep across α ∈ {0.025, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35}
+completed; 5-seed CI at α=0.10 completed; **no Pareto-better α exists; no ship.**
 
 ## Goal
 
@@ -139,7 +140,40 @@ call, **not a clean ship decision**.
 
 ## 5-seed CI on α=0.10 (the weighted-best operating point)
 
-${SEED5_RESULTS}
+Trained 5 seeds (1..5) at α=0.10, h=128. Each seed compared against the
+matching V_22-mix-LARGE+iwssim seed via bake_compare (500 bootstrap
+resamples, 10-band, paired per-seed).
+
+| seed | CID22_A | ΔCID22 | KADID_A | ΔKADID | TID_A | ΔTID | KonJND_A | ΔKonJND | AIC-3_A | ΔAIC-3 | Winner |
+|--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 | 0.8726 | +0.0500 | 0.8979 | −0.0694 | 0.8874 | −0.0856 | 0.8404 | −0.0457 | 0.7902 | +0.0131 | B |
+| 2 | 0.8648 | +0.0244 | 0.8984 | −0.0687 | 0.8864 | −0.0859 | 0.8439 | −0.0413 | 0.7859 | −0.0012 | B |
+| 3 | 0.8676 | +0.0353 | 0.9061 | −0.0616 | 0.8902 | −0.0828 | 0.8348 | −0.0581 | 0.7898 | +0.0067 | B |
+| 4 | 0.8643 | +0.0248 | 0.8966 | −0.0708 | 0.8871 | −0.0849 | 0.8461 | −0.0383 | 0.7941 | +0.0034 | B |
+| 5 | 0.8739 | +0.0389 | 0.8991 | −0.0680 | 0.8906 | −0.0822 | 0.7881 | −0.0977 | 0.7958 | −0.0019 | B |
+
+**Mean ± std across 5 seeds:**
+
+| Corpus | A SROCC | B SROCC | Δ |
+|---|---:|---:|---:|
+| CID22 | 0.8686 ± 0.0044 | 0.8339 ± 0.0071 | **+0.0347 ± 0.0107** |
+| KADID | 0.8996 ± 0.0037 | 0.9673 ± 0.0002 | **−0.0677 ± 0.0036** |
+| TID | 0.8883 ± 0.0019 | 0.9726 ± 0.0005 | **−0.0842 ± 0.0017** |
+| KonJND | 0.8306 ± 0.0242 | 0.8869 ± 0.0034 | −0.0562 ± 0.0244 |
+| AIC-3 | 0.7912 ± 0.0039 | 0.7872 ± 0.0078 | **+0.0040 ± 0.0062** |
+
+**Per-seed verdict: B>>A on every seed (all 5).**
+**Aggregate**: A wins 13 decisive cells, B wins 81 (across 5 seeds × 5 corpora × 10 bands).
+
+The CID22 lift of +0.035 SROCC is real (seed variance 0.011 << 0.035 mean
+lift). The KADID/TID losses are also real with tighter CIs. The trade is
+seed-robust; α=0.10 is **NOT a ship candidate** — every seed loses
+decisively to V_22.
+
+The AIC-3 +0.004 mean ± 0.006 std straddles zero; the seed=3 +0.0067
+observation was within seed variance. **AIC-3 movement is NOT a real
+lift, confirming the "structural gap" finding even at the 5-seed-CI
+level.**
 
 ## AIC-3 trend across α (confirms EX-3 follow-up "structural gap" finding)
 
@@ -175,7 +209,47 @@ supervision is needed.
 - 5-seed CI launched only for α=0.10 (the weighted-best). Other α
   are characterized only at seed=3, but their cross-α consistency
   (every α ∈ {0.025, 0.05, ..., 0.35} shows B>>A overall) suggests
-  the finding is seed-robust.
+  the finding is seed-robust — and the 5-seed CI on α=0.10
+  confirms it directly (every seed → B>>A, 13 A-cells vs 81 B-cells
+  across 5×5×10 = 250 (corpus × band × seed) cells).
+
+## Packed α=0.10 seed=3 candidate bake (NOT a ship)
+
+For completeness, the seed=3 α=0.10 bake was packed via
+`rebake_v3_1 --compress --zerobias 0.005 --dtype i8`:
+
+| Bake | Size | CID22 SROCC | Drift vs source |
+|---|---:|---:|---:|
+| `v24_alpha010_s3_h128.bin` (f32) | 157,252 B | 0.86759 | — |
+| `v24_alpha010_s3_h128_packed.bin` (i8+LZ4) | 38,850 B (24.7%) | 0.86762 | 3.65e-5 |
+
+Pack succeeds with drift 30× below the 0.001 ship threshold. The bake
+is technically packable; it is NOT being shipped because it loses
+KADID/TID/KonJND decisively vs V_22 across all 5 seeds.
+
+## Recommended next-experiment directions
+
+The α-sweep falsifies the "soft α preserves K/T" hypothesis. To push
+past this trade, the next experiments should:
+
+1. **Per-band weighted loss** boosting CID22 B6..B8 (where the ssim2
+   target genuinely helps) without diluting K/T B0..B5 supervision.
+   Requires trainer support for per-(group, band) loss weights.
+2. **Per-target separate heads** — train a 2-head MLP, one predicting
+   ssim2_log_norm, the other cvvdp+iwssim, and runtime-mix in
+   score-space. Allows the ssim2-shaped representation to coexist
+   without diluting the cv+iw representation.
+3. **Group weight rebalance** — try down-weighting the LARGE group
+   (currently 0.5) since LARGE is JPEG-only and may carry K/T-
+   inflating signal. Test `--group large:...:0.2` or `:0.1`.
+4. **Distortion-class regularization** — different regularizer
+   strengths per distortion class (compression vs blur/noise/color)
+   to prevent the ssim2 signal from over-influencing non-compression
+   bands.
+5. **AIC-3 specific lever** — the +0.001 to +0.009 sensitivity across
+   α confirms the AIC-3 gap is **NOT** addressable by ssim2 target
+   weighting. AIC-3 needs different features, different MOS supervision
+   (held-out training-only subset per CLAUDE.md), or domain adaptation.
 
 ## Reproducibility
 
