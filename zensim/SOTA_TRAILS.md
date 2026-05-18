@@ -64,6 +64,7 @@ balanced trail.
 |---|---|--:|---|---:|---:|---:|---:|---:|
 | **Balanced** | V_22-mix-LARGE+iwssim s3 packed | 41,695 | 300→128→1 vanilla MLP | 0.8324 | 0.7845 | **0.9677** | **0.9729** | **0.8927** |
 | **Compression** | V_24-per-sample-α s4 packed | 44,109 | 300→128→128(identity) + per-sample-α head | **0.8641** | **0.8183** | 0.9316 | 0.8893 | 0.8080 |
+| **Ensemble** | V_05-ensemble classifier + B + C | 22,690 (classifier only) | 300→64→1 ReLU classifier routes to Balanced or Compression | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 |
 
 Balanced is ZNPR v3, i8 + zerobias + lz4 packed, no metadata
 payload, standard `Predictor::predict` runtime.
@@ -72,6 +73,22 @@ Compression is ZNPR v3, i8 + zerobias + lz4 packed, carries
 `zentrain.per_sample_alpha_head` metadata; runtime dispatch lives
 in `zensim::metric::forward_one_bake` (per-sample-α dispatch landed
 2026-05-18 — supersedes V_22-372feat s5 on the compression trail).
+
+Ensemble is a runtime-routing profile (`PreviewV0_5Ensemble`,
+EXP-ENSEMBLE-V05, 2026-05-18) that forwards a 300 → 64 → 1 ReLU
+classifier per pair, then dispatches to either the Balanced or
+Compression bake based on the classifier sign. Full-corpus routing
+accuracy on the canonical 5-corpus val set: **98.6 %**. Per-corpus
+SROCC tracks `max(Balanced, Compression)` to within 0.014 on every
+corpus. Pareto-dominates the Compression ship on every corpus
+(decisive wins on KADID/TID/KonJND, ties on CID22/AIC-3). Vs the
+Balanced ship: decisive wins on CID22+AIC-3, ties on KADID+TID,
+decisive loss on KonJND (-0.014, within compression-trail § A.10
+-0.10 synthetic tolerance). The Ensemble passes the
+**compression-trail gate**, fails the balanced-trail gate; ships as
+a third variant rather than rotating either trail. Methodology +
+full Mohammadi panel:
+`benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
 
 ### Superseded compression ship
 
@@ -105,6 +122,7 @@ packed vs V_22-372feat s5" below). Kept at
 | EXP-BALANCED-TILT cell2 heavy (kw=0.10, lw=0.3) seed=3 | 2026-05-18 | 300 | per-sample-α head dispatch | 0.8112 | 0.8070 | 0.9379 | 0.8901 | 0.9532 | FAIL (B>>A on CID22+KADID+TID) | FAIL (B>>A on CID22 AND AIC-3) |
 | EXP-BALANCED-TILT cell3 no_large (kw=0.10, lw=0.0) seed=3 | 2026-05-18 | 300 | per-sample-α head dispatch | 0.7686 | 0.8056 | 0.9385 | 0.8906 | 0.9661 | FAIL (B>>A on CID22+KADID+TID) | FAIL (B>>A on CID22 AND AIC-3) — boosting kadid_w/tid_w on per-sample-α architecture FALSIFIED. See `benchmarks/exp_balanced_tilt_falsified_2026-05-18.md`. |
 | EXP-PERSAMPLE-MIX3 (median s1 packed) | 2026-05-18 | 372 | per-sample-α head dispatch | 0.8553 | 0.8057 | 0.9304 | 0.8783 | 0.8939 | FAIL (B>>A on KADID/TID; balanced step 2 fails by wide margin) | FAIL (B>>A on CID22 AND AIC-3 vs current ship; step 1 fails). 5-seed CI: CID22 mean 0.8545 σ=0.0110, KonJND mean 0.8852 σ=0.0201. Adding 30% ssim2 to target gains KonJND (+0.086) but loses CID22 (−0.0088) and AIC-3 (−0.0126) decisively vs per-sample-α s4 alone. Per `benchmarks/exp_persample_mix3_falsification_2026-05-18.md`. |
+| EXP-ENSEMBLE-V05 (classifier + B + C) | 2026-05-18 | 300 | **ensemble-classifier routing dispatch** (zensim::metric::apply_mlp_scoring, 2026-05-18) | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 | FAIL (KonJND −0.014 decisive) | **SHIP** (new third variant, `PreviewV0_5Ensemble`) — decisive A>>B vs Balanced on CID22 (+0.031) AND AIC-3 (+0.029); decisive A>>B vs Compression on KADID/TID/KonJND. Pareto-better than Compression ship on every corpus; ties or wins everything vs Balanced except KonJND (which is within −0.10 tolerance). Adds 22.7 KB classifier bake. |
 
 **Runtime status (2026-05-18, late)**: the per-sample-α dispatch
 landed in `zensim::metric::forward_one_bake`. Bakes carrying

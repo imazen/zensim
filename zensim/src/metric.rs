@@ -1611,19 +1611,46 @@ pub(crate) fn apply_mlp_scoring(
         return Ok(());
     };
     {
-        let bytes = loader();
-        let raw_primary = forward_one_bake(bytes, result.features(), width, height)?;
-        // Optional secondary bake (D2 multi-output ensemble, e.g.
-        // V_20 IS B3 specialist) — its forward path runs over the SAME
-        // 228-feature vector but applies its own `feature_transforms`
-        // metadata. Both bakes' raw outputs are mixed linearly at
-        // `mlp_primary_mix` weight on the primary.
-        let raw = if let Some(b3_loader) = params.mlp_bytes_b3 {
-            let raw_b3 = forward_one_bake(b3_loader(), result.features(), width, height)?;
-            let a = params.mlp_primary_mix as f64;
-            a * raw_primary + (1.0 - a) * raw_b3
+        // **Ensemble routing path** (PreviewV0_5Ensemble) — when an
+        // `ensemble_classifier_bytes` is present, run the classifier
+        // first and route to either the primary (`mlp_bytes`,
+        // balanced) or the alternative (`mlp_bytes_compression`)
+        // based on the classifier's sign. The classifier output is a
+        // pre-sigmoid logit; `logit > 0` ⇔ `sigmoid(logit) > 0.5` →
+        // compression.
+        //
+        // Both target bakes MUST accept the same input feature
+        // shape; the classifier runs over the same vector (its own
+        // `n_inputs` selects the prefix). Documented in
+        // `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
+        let raw = if let (Some(clf_loader), Some(cmp_loader)) = (
+            params.ensemble_classifier_bytes,
+            params.mlp_bytes_compression,
+        ) {
+            let logit =
+                forward_one_bake(clf_loader(), result.features(), width, height)?;
+            if logit > 0.0 {
+                forward_one_bake(cmp_loader(), result.features(), width, height)?
+            } else {
+                forward_one_bake(loader(), result.features(), width, height)?
+            }
         } else {
-            raw_primary
+            let raw_primary =
+                forward_one_bake(loader(), result.features(), width, height)?;
+            // Optional secondary bake (D2 multi-output ensemble, e.g.
+            // V_20 IS B3 specialist) — its forward path runs over the
+            // SAME 228-feature vector but applies its own
+            // `feature_transforms` metadata. Both bakes' raw outputs
+            // are mixed linearly at `mlp_primary_mix` weight on the
+            // primary.
+            if let Some(b3_loader) = params.mlp_bytes_b3 {
+                let raw_b3 =
+                    forward_one_bake(b3_loader(), result.features(), width, height)?;
+                let a = params.mlp_primary_mix as f64;
+                a * raw_primary + (1.0 - a) * raw_b3
+            } else {
+                raw_primary
+            }
         };
 
         let pre_bound = if params.skip_score_mapping {

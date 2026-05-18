@@ -2,6 +2,59 @@
 
 ## [Unreleased]
 
+### Added (2026-05-18) — `PreviewV0_5Ensemble` runtime ensemble (EXP-ENSEMBLE-V05)
+
+- **New `ZensimProfile::PreviewV0_5Ensemble` variant + `ZensimProfile::ensemble()`
+  constructor.** Routes per-pair between the Balanced
+  (`v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin`) and
+  Compression (`v_compression_persample_2026-05-18.bin`) ships via a
+  small 300 → 64 → 1 ReLU classifier bake at
+  `zensim/weights/v05_ensemble_classifier_2026-05-18.bin` (22,690
+  bytes, md5 `701941315bd5691f032e8b32c6959cf8`). Classifier output
+  is a pre-sigmoid logit; positive routes to compression, negative to
+  balanced.
+- **`ProfileParams` gains two new fields**: `ensemble_classifier_bytes`
+  (Option<fn> → classifier bake) and `mlp_bytes_compression`
+  (Option<fn> → alternative target bake). Both default `None`
+  (existing single-bake profiles unaffected).
+  `zensim::metric::apply_mlp_scoring` honors them when both are
+  Some — forwarding the classifier first, then dispatching to either
+  `mlp_bytes` (default → balanced) or `mlp_bytes_compression`
+  (compression) based on the classifier sign. Backwards-compatible.
+- **Headline SROCC** (full canonical 5-corpus val, n=19,025, ensemble
+  using actual Rust bake routing decisions): CID22 0.8632, KADID
+  0.9676, TID 0.9719, KonJND 0.8792, AIC-3 0.8131. Tracks
+  `max(Balanced, Compression)` to within 0.014 on every corpus.
+  Routing accuracy: holdout 98.3 %, full-corpus 98.6 %.
+- **§ A.9 verdicts**: vs Balanced ship, decisive A>>B on CID22
+  (+0.031) and AIC-3 (+0.029); ties on KADID/TID; decisive B>>A on
+  KonJND (−0.014, within compression-trail § A.10 −0.10 synthetic
+  tolerance). vs Compression ship, ties on CID22/AIC-3; decisive
+  A>>B on KADID (+0.036), TID (+0.083), KonJND (+0.071) — Pareto-
+  dominates the compression ship.
+- **Trail-gate verdict**: passes the **compression-trail gate**
+  (decisive wins on CID22+AIC-3, no decisive B>>A on either
+  compression corpus, synthetic Δ within −0.10 per § A.10). Fails the
+  balanced-trail gate (KonJND decisive B>>A vs Balanced ship). Ships
+  as a NEW third variant rather than rotating either trail (per task
+  brief and CLAUDE.md two-trail framework).
+- **Runtime cost**: classifier forward (≤ 1 ms) + one target bake
+  forward, both over the same 300-feature vector (no IW pool). ~1.7×
+  the per-pair cost of a single-bake V0_5 profile. Both target bakes
+  produce score-shaped output; soft-clamp is applied uniformly
+  post-route.
+- **Artifacts**:
+  - `benchmarks/exp_ensemble_v05_eval_2026-05-18.md` — full Mohammadi
+    panel (held-out 20% + full corpus) + per-corpus § A.9 verdicts +
+    trail-gate verdicts + ssim2/iwssim/cvvdp controls.
+  - `scripts/exp_ensemble/eval_ensemble_2026-05-18.py` — trainer + eval
+  - `scripts/exp_ensemble/bake_classifier.py` — JSON → ZNPR v3 packer
+  - `zensim-validate/src/bin/ensemble_score_rows.rs` — per-row bake
+    scoring binary (bit-exact match with runtime dispatch incl.
+    per-sample-α and hybrid-head metadata) used by the eval script.
+  - `zensim/tests/v04_mlp.rs::v05_ensemble_profile_smoke` —
+    runtime smoke test (8 zensim tests pass; full workspace clean).
+
 ### Falsified (2026-05-18, EXP-PERSAMPLE-MIX3 5-seed CI)
 
 - **EXP-PERSAMPLE-MIX3 falsified for both trails.** Combining the

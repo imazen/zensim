@@ -235,6 +235,63 @@ fn v05_two_trail_profile_smoke() {
     // panicking — verified by the score-in-range assertions above.
 }
 
+#[test]
+fn v05_ensemble_profile_smoke() {
+    // EXP-ENSEMBLE-V05 runtime ensemble (2026-05-18) — routes per-pair
+    // between PreviewV0_5Balanced and PreviewV0_5Compression via a
+    // 300 → 64 → 1 classifier bake.
+    //
+    // Smoke-test that:
+    //   1. PreviewV0_5Ensemble's name matches and params load.
+    //   2. The classifier + both target bakes all forward without
+    //      panicking (validates `include_bytes!` resolution +
+    //      `ensemble_classifier_bytes` + `mlp_bytes_compression`
+    //      runtime dispatch in `apply_mlp_scoring`).
+    //   3. The output score is in [0, 100].
+    //
+    // The load-bearing behavioral test (routing accuracy + ensemble
+    // SROCC) lives in `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`
+    // — running it requires the canonical val parquets at
+    // `/mnt/v/zen/zensim-training/canonical-2026-05-18/val/`.
+    assert_eq!(
+        ZensimProfile::PreviewV0_5Ensemble.name(),
+        "zensim-preview-v0.5-ensemble"
+    );
+
+    let (src, dst) = make_test_pair(64, 64);
+    let s = RgbSlice::new(&src, 64, 64);
+    let d = RgbSlice::new(&dst, 64, 64);
+
+    let z = Zensim::new(ZensimProfile::PreviewV0_5Ensemble).with_parallel(false);
+    let r = z.compute(&s, &d).unwrap();
+    let score = r.score();
+    assert!(
+        (0.0..=100.0).contains(&score),
+        "v0.5-ensemble score out of range: {score}"
+    );
+    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5Ensemble);
+
+    // Verify the ensemble produces ONE OF the two target bakes' output —
+    // the routing decision is deterministic per-pair (classifier sign).
+    let z_bal = Zensim::new(ZensimProfile::PreviewV0_5Balanced).with_parallel(false);
+    let z_cmp = Zensim::new(ZensimProfile::PreviewV0_5Compression).with_parallel(false);
+    let s_bal = z_bal.compute(&s, &d).unwrap().score();
+    let s_cmp = z_cmp.compute(&s, &d).unwrap().score();
+    // The ensemble's score MUST equal one of the two (the chosen bake's
+    // soft-clamped score). NOTE: PreviewV0_5Balanced uses HARD clamp
+    // while PreviewV0_5Ensemble applies SOFT clamp uniformly (both
+    // bakes go through the same post-route mapping). So for in-range
+    // outputs the scores match; for outputs that would saturate, the
+    // ensemble's may diverge slightly. Allow generous tolerance to
+    // accommodate the clamp-policy difference.
+    let matches_bal = (score - s_bal).abs() < 1.5;
+    let matches_cmp = (score - s_cmp).abs() < 1.5;
+    assert!(
+        matches_bal || matches_cmp,
+        "ensemble score {score} doesn't match either balanced ({s_bal}) or compression ({s_cmp})"
+    );
+}
+
 // NOTE: V_22-IW v2 (PreviewV0_5) behavioral monotonicity on synthetic
 // gradient pairs (make_test_pair) is brittle — the bake's trained
 // scaler + feature_transforms see feature distributions far outside
