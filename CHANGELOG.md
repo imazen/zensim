@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Falsified (2026-05-18, EXP-BALANCED-TILT)
+
+- **EXP-BALANCED-TILT (4-cell single-seed sweep, seed=3) FALSIFIED.**
+  Tried boosting `kadid_w` / `tid_w` / `konjnd_w` on the per-sample-α
+  architecture (which currently ships the Compression trail) to see
+  if it could match the Balanced trail's KADID/TID/KonJND lead while
+  keeping the per-sample-α CID22 + AIC-3 advantage. All 4 cells
+  (kadid_w ∈ {0.5, 0.8, 1.0}, tid_w mirrored, konjnd_w ∈ {0.05, 0.10},
+  large_w ∈ {0.0, 0.3, 0.5}) FAIL both shipping gates per § A.9
+  decisive rule (1000-bootstrap):
+  - vs Balanced ship: every cell decisively LOSES KADID + TID
+    (h_SROCC −52 to −85; ΔSROCC −0.03 to −0.083). All cells DO
+    win KonJND + AIC-3 decisively, but the KADID/TID loss alone
+    blocks the gate.
+  - vs Compression ship: every cell decisively LOSES CID22
+    (ΔSROCC −0.04 to −0.10); 3 of 4 also decisively LOSE AIC-3,
+    failing the "decisive A>>B on ≥1 of {CID22, AIC-3}" precondition.
+  No 5-seed CI follow-up justified — the failure mode is systematic
+  across all 4 cells, not seed-luck.
+  Full report:
+  `benchmarks/exp_balanced_tilt_falsified_2026-05-18.md`.
+  Bakes + verdicts + per-cell § A.9 reports under
+  `/mnt/v/zen/zensim-eval/exp_balanced_tilt_2026-05-18/`.
+  Both trail ships UNCHANGED (Balanced V_22-mix-LARGE+iwssim s3,
+  Compression V_24-per-sample-α s4).
+
 ### Changed (2026-05-18, even later) — PR #31 (V_06 FiLM-gated MLP) falsification on two-trail framework
 
 - **PR #31 (`v06-rebalanced-corpus`) FALSIFIED on both Balanced and Compression trails.**
@@ -34,7 +60,6 @@
     doc with per-corpus § A.9 panels + ssim2/cvvdp/iwssim controls.
   - `benchmarks/bake_compare_v06_film_vs_balanced_2026-05-18.md`
   - `benchmarks/bake_compare_v06_film_vs_compression_2026-05-18.md`
-
 ### Changed (2026-05-18, later) — Hybrid-head runtime dispatch + FT-gentle verdict
 
 - **`zensim::metric::forward_one_bake` got hybrid-head dispatch.**
