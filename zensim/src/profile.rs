@@ -585,25 +585,32 @@ pub(crate) fn mlp_bake_preview_v0_5_balanced() -> &'static [u8] {
     include_bytes!("../weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin")
 }
 
-/// V_22-372feat s5 packed (2026-05-18) — **compression-trail ship**.
-/// 372 → 128 → 1 vanilla LeakyReLU MLP, i8 + zerobias + lz4 packed
-/// (51,153 bytes, md5 `3be4f781238dcb35f32c964cb218a8a4`).
+/// V_24-per-sample-α s4 packed (2026-05-18) — **compression-trail
+/// ship** (superseded V_22-372feat s5 on 2026-05-18; prior ship kept
+/// at `zensim/weights/v_compression_2026-05-18.bin` for reproducibility).
+/// 300 → 128 → 128 (identity passthrough) MLP with a learned
+/// `zentrain.per_sample_alpha_head` metadata payload (per-sample
+/// rank+pool mix via `α(x) = σ(W_α · h + b_α)`), i8 + zerobias + lz4
+/// packed (44,109 bytes, md5 `f09a9abdce00805000c1d112c2421b2d`).
 ///
-/// Same trainer recipe as
-/// [`mlp_bake_preview_v0_5_balanced`] but adds the 72 IW-pool features
-/// (f300..f371: info-content-weighted SSIM/edge/MSE pool stats per
-/// channel × scale, per Wang & Li 2011 IW-SSIM). Score-shaped output.
+/// 300-feature input = 228 standard + 72 masked (no IW pool). Runtime
+/// detects the `zentrain.per_sample_alpha_head` metadata key in
+/// `forward_one_bake` and dispatches to the per-sample-α formula:
+///   y_rank = h · rank_w + rank_b
+///   [μ, σ, max, p_6](h) → y_pool = stats · reducer_w + reducer_b
+///   α = σ(h · W_α + b_α)
+///   y = α · y_rank + (1 − α) · y_pool
 ///
-/// No `feature_transforms` metadata. Standard `Predictor::predict`
-/// runtime path.
+/// Bake_compare A.9 verdict vs prior 372feat ship (per
+/// `SOTA_TRAILS.md`): A>>B decisive on CID22 (0.8641 vs 0.8580,
+/// +0.0061), AIC-3 (0.8183 vs 0.8087, +0.0096), and TID (0.8893 vs
+/// 0.8875). KADID -0.0003 promising; KonJND -0.0045 tied. Per
+/// strict § A.9 majority rule, per-sample-α IS the compression-trail
+/// SOTA.
 ///
-/// Methodology: `benchmarks/v22_372feat_methodology_2026-05-18.md`.
-/// Bake_compare A.9 verdict (1000-bootstrap) at
-/// `/tmp/two_trail_372feat_vs_baseline.md` — decisive A>>B on CID22
-/// (+0.026) and AIC-3 (+0.024); B>>A on KADID/TID/KonJND but within
-/// the compression-trail −0.10 noise tolerance.
+/// Methodology: `benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`.
 pub(crate) fn mlp_bake_preview_v0_5_compression() -> &'static [u8] {
-    include_bytes!("../weights/v_compression_2026-05-18.bin")
+    include_bytes!("../weights/v_compression_persample_2026-05-18.bin")
 }
 
 static PROFILE_PREVIEW_V0_5_BALANCED: ProfileParams = ProfileParams {
@@ -641,10 +648,18 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION: ProfileParams = ProfileParams {
     mlp_bytes: Some(mlp_bake_preview_v0_5_compression),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
-    // 372-feature input = 228 standard + 72 masked + 72 IW pool.
+    // 300-feature input = 228 standard + 72 masked (no IW pool).
+    // The per-sample-α head bake's RankNet trainer doesn't use
+    // IW-pool features (V_24 lineage from V_22-mix-LARGE recipe).
     extended_features: true,
-    compute_iw_features: true,
-    soft_clamp_score: false,
+    compute_iw_features: false,
+    // Soft-clamp the output: the per-sample-α bake is RankNet-trained
+    // (only rank order constrained, raw values unbounded). Hard
+    // [0, 100] clamp would pin many predictions at the boundaries
+    // and collapse SROCC to 0 via tie blocks. Soft logistic squash
+    // preserves rank ordering at the extremes (CLAUDE.md V_20 §
+    // "Soft-clamp the multi-bake output").
+    soft_clamp_score: true,
 };
 
 // --- Weight arrays ---

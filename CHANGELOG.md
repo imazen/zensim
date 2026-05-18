@@ -12,6 +12,51 @@
   (rare — most use the `static`-defined profiles) need to add the
   two new fields. Added 2026-05-15 (commit `f140776a`).
 
+### Changed (2026-05-18, later) — Per-sample-α runtime dispatch + compression-trail SOTA rotation
+
+- **`zensim::metric::forward_one_bake` got per-sample-α head
+  dispatch.** Bakes carrying a `zentrain.per_sample_alpha_head`
+  metadata payload (V_24-per-sample-α architecture) take a separate
+  code path: the bake's final layer is an `n_hidden × n_hidden`
+  identity passthrough, so `Predictor::predict` returns the
+  post-LeakyReLU hidden vector. The runtime parses the head
+  payload (`[W_α[0..n_hidden]] [b_α] [rank_w[0..n_hidden]] [rank_b]
+  [reducer_w[0..4]] [reducer_b] [p_norm]` as f32-LE, total `4·(2·n_hidden + 8)`
+  bytes) and mixes a rank head + pool head via a per-sample
+  sigmoid gate `α(x) = σ(h · W_α + b_α)`:
+  `y = α · y_rank + (1 − α) · y_pool`. Same dispatch landed in
+  `bake_verdict::score_row` and `bake_compare::score_corpus` for
+  parquet-driven validation parity. Bakes without the metadata
+  key continue through the existing `out[0]` path with zero
+  overhead (one metadata lookup at model-load time, no per-row
+  cost). Regression test:
+  `zensim-validate/tests/per_sample_alpha_runtime.rs`.
+- **`ZensimProfile::PreviewV0_5Compression` rotated to
+  V_24-per-sample-α s4 packed** (300 → 128 → 128(identity) +
+  per-sample-α head, 44,109 bytes, md5
+  `f09a9abdce00805000c1d112c2421b2d`,
+  `zensim/weights/v_compression_persample_2026-05-18.bin`). Vs the
+  prior V_22-372feat s5 ship: decisive A>>B on CID22 (0.8641 vs
+  0.8580), AIC-3 (0.8183 vs 0.8087), and TID (0.8893 vs 0.8875) per
+  § A.9 (1000-bootstrap, full Mohammadi panel). KADID -0.0003
+  promising; KonJND -0.0045 tied. Bake_compare verdict:
+  `/tmp/persample_runtime_compare_vs_372feat.md`. Round-trip CID22
+  SROCC drift (packed vs unpacked): 0.0001, well under the 0.0005
+  pack-quality threshold.
+- **Profile params for PreviewV0_5Compression updated.** Switched
+  `compute_iw_features` from `true` to `false` (300 features, no
+  IW-pool) and `soft_clamp_score` from `false` to `true` (the
+  RankNet-trained bake's raw output isn't [0, 100]-shaped; soft
+  logistic squash preserves rank ordering without tie-block
+  collapse at the boundaries).
+- **Prior compression ship (V_22-372feat s5)** kept at
+  `zensim/weights/v_compression_2026-05-18.bin` for reproducibility.
+- **No crate version bump** per user policy 2026-05-18 ("we don't
+  want crate bumps every time we get a nice bake"). The
+  `ProfileParams` static slot for `PreviewV0_5Compression` is the
+  only public-API-visible change; the new include_bytes! path is
+  internal.
+
 ### Changed (2026-05-18) — Two-trail SOTA framework
 
 - **`ZensimProfile::PreviewV0_5` rewired** to the V_22-mix-LARGE+iwssim

@@ -10,4 +10,5 @@
 //! their own `mod foo;` via `#[path = "../foo.rs"]` and should not be
 //! touched as part of changes that add library surface.
 
+pub mod panel;
 pub mod parquet_loader;

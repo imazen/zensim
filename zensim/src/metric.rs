@@ -1666,12 +1666,143 @@ pub(crate) fn apply_mlp_scoring(
 /// `append_size_axes` in `zensim-validate/src/main.rs` so a model
 /// trained with `--mlp-size-axes` produces the same input layout
 /// at runtime.
+// ============================================================================
+// Per-sample-α head runtime dispatch (V_24-per-sample-α bakes)
+// ============================================================================
+//
+// Bakes trained with `train_mlp_per_sample_alpha_head_with_tv` in
+// zensim-train-core attach a `zentrain.per_sample_alpha_head`
+// metadata entry. The bake's final layer is a `n_hidden × n_hidden`
+// identity matrix (passthrough), so the predictor's output IS the
+// post-LeakyReLU hidden vector `h`. The runtime then mixes a rank
+// head (`y_rank = h · rank_w + rank_b`) and a pool head (`y_pool =
+// stats(h) · reducer_w + reducer_b`) via a per-sample gate
+// `α = σ(h · w_α + b_α)`:
+//
+//     y_final = α · y_rank + (1 − α) · y_pool
+//
+// Payload layout (f32 little-endian):
+//   [w_α[0..n_hidden]] [b_α] [rank_w[0..n_hidden]] [rank_b]
+//   [reducer_w[0..4]] [reducer_b] [p_norm]
+// Total size = (2·n_hidden + 8) × 4 bytes.
+//
+// Constants mirror `zensim-train-core::pool_head` (POOL_P_NORM,
+// POOL_STD_FLOOR). Inlined here to keep zensim's dependency closure
+// minimal (zensim runtime does not depend on zensim-train-core).
+
+const PER_SAMPLE_ALPHA_HEAD_KEY: &str = "zentrain.per_sample_alpha_head";
+const PER_SAMPLE_ALPHA_POOL_STD_FLOOR: f64 = 0.0026;
+
+/// Parsed per-sample α head metadata payload.
+struct PerSampleAlphaMeta {
+    w_alpha: Vec<f32>,
+    b_alpha: f32,
+    rank_w: Vec<f32>,
+    rank_b: f32,
+    reducer_w: [f32; 4],
+    reducer_b: f32,
+    p_norm: f32,
+}
+
+/// Parse the `zentrain.per_sample_alpha_head` payload. Returns
+/// `None` if the payload length doesn't match `(2·n_hidden + 8)·4`.
+fn parse_per_sample_alpha_meta(payload: &[u8], n_hidden: usize) -> Option<PerSampleAlphaMeta> {
+    let expected = (2 * n_hidden + 8) * 4;
+    if payload.len() != expected {
+        return None;
+    }
+    let mut floats: Vec<f32> = Vec::with_capacity(2 * n_hidden + 8);
+    for chunk in payload.chunks_exact(4) {
+        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    let w_alpha: Vec<f32> = floats[..n_hidden].to_vec();
+    let b_alpha = floats[n_hidden];
+    let rank_w: Vec<f32> = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
+    let rank_b = floats[2 * n_hidden + 1];
+    let reducer_w = [
+        floats[2 * n_hidden + 2],
+        floats[2 * n_hidden + 3],
+        floats[2 * n_hidden + 4],
+        floats[2 * n_hidden + 5],
+    ];
+    let reducer_b = floats[2 * n_hidden + 6];
+    let p_norm = floats[2 * n_hidden + 7];
+    Some(PerSampleAlphaMeta {
+        w_alpha,
+        b_alpha,
+        rank_w,
+        rank_b,
+        reducer_w,
+        reducer_b,
+        p_norm,
+    })
+}
+
+/// Apply the per-sample-α runtime to a hidden vector `h`. Returns
+/// the final mixed score `y`. Bit-exact match with
+/// `zensim_train_core::per_sample_alpha_head::apply_per_sample_alpha_head_runtime`
+/// (asserted by the canonical regression test in
+/// `tests/per_sample_alpha_runtime.rs`).
+fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
+    debug_assert_eq!(meta.rank_w.len(), h.len());
+    debug_assert_eq!(meta.w_alpha.len(), h.len());
+    let n = h.len();
+    debug_assert!(n > 0);
+
+    let mut y_rank = meta.rank_b as f64;
+    let mut alpha_logit = meta.b_alpha as f64;
+    let mut sum = 0.0_f64;
+    let mut max_v = f64::NEG_INFINITY;
+    let mut sum_p = 0.0_f64;
+    let p = meta.p_norm as f64;
+    for (j, &hj) in h.iter().enumerate() {
+        let hjf = hj as f64;
+        y_rank += hjf * meta.rank_w[j] as f64;
+        alpha_logit += hjf * meta.w_alpha[j] as f64;
+        sum += hjf;
+        if hjf > max_v {
+            max_v = hjf;
+        }
+        sum_p += hjf.abs().powf(p);
+    }
+    let nf = n as f64;
+    let mu = sum / nf;
+    let mut var = 0.0_f64;
+    for &hj in h.iter() {
+        let d = hj as f64 - mu;
+        var += d * d;
+    }
+    let sigma = (var / nf).sqrt().max(PER_SAMPLE_ALPHA_POOL_STD_FLOOR);
+    let p_norm_stat = (sum_p / nf).powf(1.0 / p);
+
+    let y_pool = mu * meta.reducer_w[0] as f64
+        + sigma * meta.reducer_w[1] as f64
+        + max_v * meta.reducer_w[2] as f64
+        + p_norm_stat * meta.reducer_w[3] as f64
+        + meta.reducer_b as f64;
+
+    // sigmoid with clamp (matches trainer's `sigmoid` helper).
+    let alpha = {
+        let xc = alpha_logit.clamp(-20.0, 20.0);
+        1.0 / (1.0 + (-xc).exp())
+    };
+    alpha * y_rank + (1.0 - alpha) * y_pool
+}
+
 /// Forward one bake over `features` and return the raw output scalar.
 /// Handles the three accepted input-width shapes (n_inputs == features,
 /// n_inputs == features+4 with size-axes, n_inputs < features prefix)
 /// and dispatches to `predict_transformed` when the bake declares
 /// non-trivial `feature_transforms` metadata (V_20+ input-shaping
 /// bakes); otherwise uses the plain `predict` path with zero overhead.
+///
+/// Bakes carrying `zentrain.per_sample_alpha_head` metadata
+/// (V_24-per-sample-α architecture) take a separate dispatch path:
+/// the forward returns `h` (the post-LeakyReLU hidden vector, since
+/// the bake's layer 2 is an identity passthrough) and the runtime
+/// mixes a rank-head + pool-head pair via a per-sample sigmoid gate.
+/// See `apply_per_sample_alpha_runtime` above for the formula and
+/// payload layout.
 fn forward_one_bake(
     bytes: &[u8],
     features: &[f64],
@@ -1682,6 +1813,22 @@ fn forward_one_bake(
     let n_inputs = model.n_inputs();
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
+
+    // Per-sample-α metadata + parsed payload. When present, the
+    // forward output is treated as the hidden vector h (length =
+    // `n_hidden`); otherwise the legacy `out[0]` path is taken.
+    //
+    // The metadata blob is owned by the model bytes — the returned
+    // `MetadataEntry` borrows from `&model`. We copy the value bytes
+    // into an owned Vec so the lifetime is independent of `predictor`
+    // (which also borrows `&model`).
+    let per_sample_alpha: Option<PerSampleAlphaMeta> = {
+        let metadata = model.metadata();
+        metadata
+            .get(PER_SAMPLE_ALPHA_HEAD_KEY)
+            .and_then(|entry| parse_per_sample_alpha_meta(entry.value, model.n_outputs()))
+    };
+
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
             p.predict_transformed(x)
@@ -1689,7 +1836,18 @@ fn forward_one_bake(
         } else {
             p.predict(x).map_err(|_| ZensimError::InvalidDataLength)?
         };
-        Ok(out[0] as f64)
+        if let Some(meta) = &per_sample_alpha {
+            // `out` is the hidden vector h (n_hidden floats). Apply
+            // the per-sample-α runtime formula.
+            if out.len() != meta.rank_w.len() {
+                // Shape mismatch between metadata's declared n_hidden
+                // and bake's n_outputs — bake is malformed.
+                return Err(ZensimError::InvalidDataLength);
+            }
+            Ok(apply_per_sample_alpha_runtime(out, meta))
+        } else {
+            Ok(out[0] as f64)
+        }
     };
     if n_inputs == features.len() {
         let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();

@@ -109,7 +109,7 @@ framework, gate criteria, and candidate matrix.
 | Variant | Bake | When to use |
 |---|---|---|
 | `PreviewV0_5` / `PreviewV0_5Balanced` | V_22-mix-LARGE+iwssim (41 KB) | General-purpose. Best balanced-corpus coverage (KADID 0.9677, TID 0.9729, KonJND 0.8927). |
-| `PreviewV0_5Compression` | V_22-372feat (51 KB) | Codec selection / quality dials. Wins CID22 +0.026 + AIC-3 +0.024 decisively per § A.9; loses KADID/TID/KonJND within −0.10 noise tolerance. |
+| `PreviewV0_5Compression` | V_24-per-sample-α s4 (44 KB) | Codec selection / quality dials. Wins CID22 0.8641, AIC-3 0.8183, TID 0.8893 decisively vs prior 372feat ship per § A.9; KADID/TID/KonJND vs Balanced within −0.10 noise tolerance. Uses `zentrain.per_sample_alpha_head` runtime dispatch in `zensim::metric::forward_one_bake` (landed 2026-05-18). |
 
 **Gate per trail (formal):**
 
@@ -130,12 +130,18 @@ user 2026-05-18: "we don't want crate bumps every time we get a nice
 bake"). The `ProfileParams` static slot owns the bake bytes; rotation
 is a patch-level swap.
 
-**Runtime gap**: V_24-per-sample-α (CID22 0.8641, AIC-3 0.8179)
-dominates the compression-trail winner on § A.9 but uses a custom
-`zentrain.per_sample_alpha_head` dispatch that requires extending
-`zensim::metric::apply_mlp_scoring`. Tracked in `SOTA_TRAILS.md`
-under "runtime-blocked candidates". When the dispatch lands, the
-compression-trail bake rotates.
+**Runtime status (2026-05-18, post-dispatch)**: per-sample-α
+dispatch landed in `zensim::metric::forward_one_bake`,
+`bake_verdict::score_row`, and `bake_compare::score_corpus`.
+V_24-per-sample-α s4 packed (CID22 0.8641, AIC-3 0.8183, packed
+44 KB, md5 `f09a9abdce00805000c1d112c2421b2d`) replaced
+V_22-372feat s5 on the compression trail. The dispatch reads the
+`zentrain.per_sample_alpha_head` metadata, treats `Predictor::predict`'s
+output as the post-LeakyReLU hidden vector (because the bake's
+final layer is an `n_hidden × n_hidden` identity passthrough), and
+mixes a rank head + pool head via a per-sample sigmoid gate.
+Regression test at
+`zensim-validate/tests/per_sample_alpha_runtime.rs`.
 
 ### Shipping policy (revised 2026-05-14 — gates are ADVISORY)
 
