@@ -883,6 +883,59 @@ auto-transforms via `--auto-transforms <screen.tsv>`.
 bake_verdict on every `*.bin` in a dir + emits a per-corpus
 SROCC/Z-RMSE/PWRC table for ship-decision review.
 
+### Decisive A vs B comparison (the canonical ship-decision gate)
+**`bake_compare` binary** at
+`/home/lilith/work/zen/zensim/zensim-validate/src/bin/bake_compare.rs`.
+Build with `cargo build --release --bin bake_compare -p zensim-validate`.
+
+```sh
+./target/release/bake_compare --a <bake_a.bin> --b <bake_b.bin> \
+    [--corpora cid22,kadid,tid,konjnd,aic3] \
+    [--bands 10|4] \
+    [--bootstrap-resamples 1000] \
+    [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features] \
+    [--output report.md] \
+    [--json results.json] \
+    [--seed 42]
+```
+
+Implements § A.9 of `PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md` verbatim
+— Meng-Rosenthal-Rubin (MRR) paired-correlation z-test on both
+SROCC and Z-RMSE, 1000-resample bootstrap CI of every (A-B) panel-
+stat delta, and the 4-condition decisive rule:
+
+```
+DECISIVE_FOR_BAND(A beats B) ⟺
+      n_band ≥ 30
+    ∧ |h_SROCC|  > 1.96  ∧ h_SROCC  > 0
+    ∧ |h_Z-RMSE| > 1.96  ∧ h_Z-RMSE > 0
+    ∧ PWRC_A > PWRC_B
+    ∧ ≥ 4 of 6 panel stats favor A in 95% bootstrap CI
+```
+
+Emits per-(corpus, band): h_SROCC / p_SROCC / h_Z-RMSE / p_Z-RMSE /
+PWRC_diff / agreement_count / DecScore / Decision. Aggregate
+decisive verdict tallies `ADecisivelyBeatsB / BDecisivelyBeatsA /
+PromisingNotDecisive / Tied / Noisy` across all (corpus × band)
+cells; overall winner is whichever has more decisive-band wins.
+
+**Use bake_compare INSTEAD OF eyeballing two bake_verdict outputs
+side-by-side.** SROCC differences that look "obvious" by eye may
+not clear the MRR significance test, and Z-RMSE moves can flip
+the verdict without changing SROCC. The decisive rule is the
+single source of truth.
+
+`bake_verdict A` then `bake_verdict B` is appropriate for the case
+where you only need to know one bake's panel; `bake_compare` is
+required when the decision is "ship A or stay on B." Methodology
+docs for new ship candidates MUST include the `bake_compare`
+summary table per
+`benchmarks/bake_compare_methodology_2026-05-18.md`.
+
+Wall time: ~2 min for the full 5-corpus × 10-band × 1000-resample
+sweep. `--bootstrap-resamples 200 --corpora cid22` for a 10-second
+smoke check on iteration.
+
 ### Affine calibration of an existing bake
 **Missing v3 equivalent.** The historical `affine_calibrate_znpr_v2.py`
 hard-coded v2 parse — it's now DEPRECATED and refuses to run. Build a

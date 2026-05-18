@@ -369,6 +369,46 @@ the existing zensim 0.3.0 (never published — no version bump).
 KADID and TID stay as **integrity guards** but their inflated numbers
 explicitly do NOT load-bear the ship decision.
 
+### Ship comparison vs prior (bake_compare § A.9) — MANDATORY for new candidates
+
+**Effective 2026-05-18: every new ship candidate's methodology doc
+MUST include a `bake_compare <this_bake> vs <prior_ship>` summary
+table in this section.** The decisive-band tally is the
+ship-go/no-go signal; the SROCC/PWRC/Z-RMSE/agree_count columns
+surface the trade-offs the user needs to see.
+
+Required output to paste here:
+
+1. The "Cross-corpus aggregate summary" table from
+   `bake_compare`'s markdown output (shows per-corpus h_SROCC /
+   h_Z-RMSE / DecScore / Verdict in one row each).
+2. The "Decisive-band totals across all (corpus × band) cells"
+   counts (`ADecisivelyBeatsB / BDecisivelyBeatsA /
+   PromisingNotDecisive / Tied / Noisy`).
+3. The overall winner statement (`Overall winner: A / B / tie /
+   no_decisive_evidence`).
+4. Highlights of per-band decisive verdicts on CID22 + AIC-3 —
+   these two are the load-bearing held-out corpora for
+   compression. Flag any decisive B-band loss on CID22 explicitly.
+
+Template / first run: see
+`benchmarks/bake_compare_methodology_2026-05-18.md` for the
+V_22-mix-LARGE+iwssim vs V_22-mix konjnd@0.02 baseline.
+
+Command (adapt the bake paths):
+
+```sh
+./target/release/bake_compare \
+    --a <this_bake>.bin \
+    --b <prior_ship>.bin \
+    --output benchmarks/bake_compare_v0_X_YYYY-MM-DD.md \
+    --json benchmarks/bake_compare_v0_X_YYYY-MM-DD.json
+```
+
+The V_18 ship was published before `bake_compare` existed — there
+is no retroactive A vs B for V_18 vs V_16. From V_22-mix-LARGE+iwssim
+forward, the section is mandatory.
+
 ### Follow-up (queued, not blocking ship)
 
 - Purge KADID-overlap training sources (6 strict + 118 loose) and
