@@ -95,9 +95,10 @@ packed vs V_22-372feat s5" below). Kept at
 | V_24-per-sample-α s4 packed | 2026-05-18 | 300 | **per-sample-α head dispatch** (zensim::metric::forward_one_bake, 2026-05-18) | 0.8641 | 0.8183 | 0.9316 | 0.8893 | 0.8080 | FAIL (B>>A on KADID/TID/KonJND) | **SHIP** (current) — decisive A>>B vs 372feat on CID22+AIC-3+TID per § A.9 (1000-bootstrap); KADID promising; KonJND tied. KADID/TID/KonJND vs Balanced within −0.10 noise tolerance. |
 | V_24-α=0.10 5-seed | 2026-05-18 | 300 | vanilla `predict` | 0.8686 | 0.7912 | 0.8996 | 0.8883 | 0.8306 | FAIL | FAIL (AIC-3 +0.004 not decisive, KADID/TID −0.07) |
 | V_24-stdpool prod | 2026-05-18 | 300 | vanilla `predict` | 0.8376 | 0.7785 | 0.9167 | 0.8912 | 0.5414 | FAIL (KonJND catastrophic) | FAIL (no AIC-3 win; KonJND −0.35) |
-| V_24-FT-gentle s4 packed | 2026-05-18 | 300 | custom head | 0.841 | 0.809 | 0.932 | 0.890 | 0.862 | FAIL (TID −0.04, KonJND −0.03) | promising but runtime-blocked |
-| V_24-PS-konjnd010 | 2026-05-18 | 300 | custom head | 0.794 | 0.803 | 0.930 | 0.889 | **0.971** | FAIL (CID22 −0.04) | FAIL (CID22 −0.04 decisive) |
-| V_24-hybrid NiN s4 | 2026-05-18 | 300 | custom head | 0.8657 | 0.8066 | 0.9304 | 0.8886 | 0.7913 | FAIL | runtime-blocked |
+| V_24-FT-gentle s4 packed | 2026-05-18 | 300 | per-sample-α head dispatch | 0.8451 | 0.8131 | 0.9321 | 0.8896 | 0.8544 | FAIL (CID22 −0.0 vs 372feat) | FAIL — vs new per-sample-α s4 ship: B>>A decisive on CID22 (h=−398.9) AND AIC-3 (h=−73.7); strictly dominated on compression corpora. |
+| V_24-PS-konjnd010 | 2026-05-18 | 300 | per-sample-α head dispatch | 0.794 | 0.803 | 0.930 | 0.889 | **0.971** | FAIL (CID22 −0.04) | FAIL (CID22 −0.04 decisive) |
+| V_24-hybrid NiN s2 packed (f16+zstd) | 2026-05-18 | 300 | **hybrid-head dispatch** (zensim::metric::forward_one_bake, 2026-05-18) | 0.8727 | 0.8096 | 0.9319 | 0.8884 | 0.7906 | FAIL | FAIL by 0.002 on step 3 — A>>B decisive on CID22 (+0.040) and AIC-3 (+0.025) vs Balanced; KonJND −0.102 just over the −0.10 ceiling. vs current per-sample-α ship: A>>B decisive on CID22 (+0.0086) but B>>A decisive on AIC-3 (−0.0087) AND KonJND (−0.017) — fails compression-gate step 2. |
+| V_24-hybrid no-NiN s4 packed (f16+zstd) | 2026-05-18 | 300 | hybrid-head dispatch | 0.8657 | 0.8061 | 0.9285 | 0.8890 | 0.7901 | FAIL | FAIL — vs Balanced KonJND −0.103 fails step 3; vs per-sample-α ship: tied on CID22, B>>A decisive on KADID/AIC-3/KonJND. Strictly dominated by per-sample-α s4 on compression corpora. |
 | V_22-IW v2 (calibrated) | 2026-05-16 | 372 | vanilla `predict` + feature_transforms | 0.8164 | 0.8071 | 0.9475 | 0.9617 | n/a | FAIL (CID22 −0.077) | tied on AIC-3 +0.023, but CID22 −0.077 (loses compression-trail gate step 2) |
 
 **Runtime status (2026-05-18, late)**: the per-sample-α dispatch
@@ -110,12 +111,33 @@ pool via the per-sample sigmoid gate). Same dispatch is in
 `bake_verdict` (`score_row`) and `bake_compare` (`score_corpus`)
 for parquet-driven validation.
 
-Hybrid-head and finetune V_24 architectures (`zentrain.hybrid_head`,
-`zentrain.pool_head_reducer`) remain runtime-blocked until their
-respective dispatches land — they would have to be reimplemented
-on top of the per-sample-α scaffold or as separate metadata paths.
-None of them currently ship; per-sample-α was the only candidate
-that beat 372feat decisively per § A.9.
+**Hybrid-head dispatch also landed 2026-05-18 (late, same day)**.
+Bakes carrying `zentrain.hybrid_head` metadata score through an
+analogous path — the same n_hidden passthrough trick, but the α
+gate is a single learned SCALAR (`α = σ(α_logit)`) shared across
+samples rather than computed per-sample. Both V_24-hybrid NiN s2
+and no-NiN s4 are now evaluable on the production runtime. Neither
+passes the compression-trail gate decisively: NiN s2 fails step 3
+on KonJND by 0.002, no-NiN s4 fails step 3 on KonJND by 0.003 AND
+is strictly dominated by per-sample-α s4 vs the current ship on
+all compression corpora. The audit doc's "borderline (within 0.005
+of the gate)" classification holds.
+
+The finetune V_24 (FT-gentle) architecture uses
+`zentrain.per_sample_alpha_head` metadata too (confirmed via
+`zenpredict inspect` on 2026-05-18) and is now evaluable — but
+it's also strictly dominated by per-sample-α s4 on the compression
+corpora (B>>A decisive on both CID22 and AIC-3) so it does not
+rotate the trail ship. FT-gentle's value-add was tighter KonJND
+preservation (0.8544 vs 0.8080 for the ship); the gate as currently
+specified weights both equally and lets the per-sample-α s4 win on
+the strict reading.
+
+The `zentrain.pool_head_reducer` (pure pool head, no rank head)
+remains the one untested-on-runtime architecture, but no candidate
+bake in the audit-doc tier-1 or tier-2 lists carries it — the
+canonical V_24 family converged on hybrid-head and per-sample-α
+variants. Skipping until a candidate appears.
 
 ---
 

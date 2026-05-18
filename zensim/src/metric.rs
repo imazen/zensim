@@ -1789,6 +1789,125 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
     alpha * y_rank + (1.0 - alpha) * y_pool
 }
 
+// ============================================================================
+// Hybrid-head runtime dispatch (V_24-hybrid bakes)
+// ============================================================================
+//
+// Bakes trained with `train_mlp_hybrid_head_with_tv` in
+// zensim-train-core attach a `zentrain.hybrid_head` metadata
+// entry. Like the per-sample-α head, the bake's final layer is an
+// `n_hidden × n_hidden` identity matrix (passthrough), so the
+// predictor's output IS the post-LeakyReLU hidden vector `h`. The
+// runtime then mixes a rank head (`y_rank = h · rank_w + rank_b`)
+// and a pool head (`y_pool = stats(h) · reducer_w + reducer_b`)
+// via a single LEARNED SCALAR gate `α = σ(α_logit)` (different
+// from the per-sample-α head, where α is computed per-sample from
+// the hidden vector):
+//
+//     y_final = α · y_rank + (1 − α) · y_pool
+//
+// Payload layout (f32 little-endian):
+//   [rank_w[0..n_hidden]] [rank_b] [α_logit]
+//   [reducer_w[0..4]] [reducer_b] [p_norm]
+// Total size = (n_hidden + 8) × 4 bytes.
+//
+// Constants mirror `zensim-train-core::pool_head` (POOL_P_NORM,
+// POOL_STD_FLOOR). Inlined to keep zensim's dependency closure
+// minimal.
+
+const HYBRID_HEAD_KEY: &str = "zentrain.hybrid_head";
+const HYBRID_HEAD_POOL_STD_FLOOR: f64 = 0.0026;
+
+/// Parsed hybrid-head metadata payload.
+struct HybridHeadMeta {
+    rank_w: Vec<f32>,
+    rank_b: f32,
+    alpha_logit: f32,
+    reducer_w: [f32; 4],
+    reducer_b: f32,
+    p_norm: f32,
+}
+
+/// Parse the `zentrain.hybrid_head` payload. Returns `None` if the
+/// payload length doesn't match `(n_hidden + 8) · 4`.
+fn parse_hybrid_head_meta(payload: &[u8], n_hidden: usize) -> Option<HybridHeadMeta> {
+    let expected = (n_hidden + 8) * 4;
+    if payload.len() != expected {
+        return None;
+    }
+    let mut floats: Vec<f32> = Vec::with_capacity(n_hidden + 8);
+    for chunk in payload.chunks_exact(4) {
+        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    let rank_w: Vec<f32> = floats[..n_hidden].to_vec();
+    let rank_b = floats[n_hidden];
+    let alpha_logit = floats[n_hidden + 1];
+    let reducer_w = [
+        floats[n_hidden + 2],
+        floats[n_hidden + 3],
+        floats[n_hidden + 4],
+        floats[n_hidden + 5],
+    ];
+    let reducer_b = floats[n_hidden + 6];
+    let p_norm = floats[n_hidden + 7];
+    Some(HybridHeadMeta {
+        rank_w,
+        rank_b,
+        alpha_logit,
+        reducer_w,
+        reducer_b,
+        p_norm,
+    })
+}
+
+/// Apply the hybrid-head runtime to a hidden vector `h`. Returns the
+/// final mixed score `y`. Bit-exact match with
+/// `zensim_train_core::hybrid_head::apply_hybrid_head_runtime`
+/// (asserted by the canonical regression test in
+/// `tests/hybrid_head_runtime.rs`).
+fn apply_hybrid_head_runtime(h: &[f32], meta: &HybridHeadMeta) -> f64 {
+    debug_assert_eq!(meta.rank_w.len(), h.len());
+    let n = h.len();
+    debug_assert!(n > 0);
+
+    let mut y_rank = meta.rank_b as f64;
+    let mut sum = 0.0_f64;
+    let mut max_v = f64::NEG_INFINITY;
+    let mut sum_p = 0.0_f64;
+    let p = meta.p_norm as f64;
+    for (j, &hj) in h.iter().enumerate() {
+        let hjf = hj as f64;
+        y_rank += hjf * meta.rank_w[j] as f64;
+        sum += hjf;
+        if hjf > max_v {
+            max_v = hjf;
+        }
+        sum_p += hjf.abs().powf(p);
+    }
+    let nf = n as f64;
+    let mu = sum / nf;
+    let mut var = 0.0_f64;
+    for &hj in h.iter() {
+        let d = hj as f64 - mu;
+        var += d * d;
+    }
+    let sigma = (var / nf).sqrt().max(HYBRID_HEAD_POOL_STD_FLOOR);
+    let p_norm_stat = (sum_p / nf).powf(1.0 / p);
+
+    let y_pool = mu * meta.reducer_w[0] as f64
+        + sigma * meta.reducer_w[1] as f64
+        + max_v * meta.reducer_w[2] as f64
+        + p_norm_stat * meta.reducer_w[3] as f64
+        + meta.reducer_b as f64;
+
+    // sigmoid with clamp (matches trainer's `sigmoid` helper).
+    let alpha = {
+        let xc = (meta.alpha_logit as f64).clamp(-20.0, 20.0);
+        1.0 / (1.0 + (-xc).exp())
+    };
+    alpha * y_rank + (1.0 - alpha) * y_pool
+}
+
 /// Forward one bake over `features` and return the raw output scalar.
 /// Handles the three accepted input-width shapes (n_inputs == features,
 /// n_inputs == features+4 with size-axes, n_inputs < features prefix)
@@ -1803,6 +1922,13 @@ fn apply_per_sample_alpha_runtime(h: &[f32], meta: &PerSampleAlphaMeta) -> f64 {
 /// mixes a rank-head + pool-head pair via a per-sample sigmoid gate.
 /// See `apply_per_sample_alpha_runtime` above for the formula and
 /// payload layout.
+///
+/// Bakes carrying `zentrain.hybrid_head` metadata (V_24-hybrid
+/// architecture) take a similar dispatch path, but the α gate is a
+/// single learned SCALAR (`α = σ(α_logit)`) shared across all
+/// samples rather than computed per-sample. See
+/// `apply_hybrid_head_runtime` above for the formula and payload
+/// layout.
 fn forward_one_bake(
     bytes: &[u8],
     features: &[f64],
@@ -1814,9 +1940,12 @@ fn forward_one_bake(
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
 
-    // Per-sample-α metadata + parsed payload. When present, the
-    // forward output is treated as the hidden vector h (length =
-    // `n_hidden`); otherwise the legacy `out[0]` path is taken.
+    // Per-sample-α and hybrid-head metadata + parsed payload. When
+    // present, the forward output is treated as the hidden vector h
+    // (length = `n_hidden`); otherwise the legacy `out[0]` path is
+    // taken. Per-sample-α takes precedence over hybrid-head if both
+    // are somehow present (the two heads are alternative
+    // architectures; a bake should only carry one).
     //
     // The metadata blob is owned by the model bytes — the returned
     // `MetadataEntry` borrows from `&model`. We copy the value bytes
@@ -1827,6 +1956,14 @@ fn forward_one_bake(
         metadata
             .get(PER_SAMPLE_ALPHA_HEAD_KEY)
             .and_then(|entry| parse_per_sample_alpha_meta(entry.value, model.n_outputs()))
+    };
+    let hybrid_head: Option<HybridHeadMeta> = if per_sample_alpha.is_some() {
+        None
+    } else {
+        let metadata = model.metadata();
+        metadata
+            .get(HYBRID_HEAD_KEY)
+            .and_then(|entry| parse_hybrid_head_meta(entry.value, model.n_outputs()))
     };
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
@@ -1845,6 +1982,13 @@ fn forward_one_bake(
                 return Err(ZensimError::InvalidDataLength);
             }
             Ok(apply_per_sample_alpha_runtime(out, meta))
+        } else if let Some(meta) = &hybrid_head {
+            // `out` is the hidden vector h. Apply the scalar-α
+            // hybrid runtime formula.
+            if out.len() != meta.rank_w.len() {
+                return Err(ZensimError::InvalidDataLength);
+            }
+            Ok(apply_hybrid_head_runtime(out, meta))
         } else {
             Ok(out[0] as f64)
         }
