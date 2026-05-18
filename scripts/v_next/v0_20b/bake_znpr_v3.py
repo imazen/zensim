@@ -63,6 +63,26 @@ def main() -> int:
         default=None,
         help="Path to zenpredict-bake binary. Default auto-detects.",
     )
+    ap.add_argument(
+        "--zerobias-tau",
+        type=float,
+        default=0.0,
+        help="Pre-quantization per-layer zerobias threshold "
+        "(zenpredict-bake 0.1.1+). Default 0.0 (disabled). Calibrated "
+        "value: 0.005 → 87.5%% i8 zero density at -0.0001 SROCC on "
+        "V0_18. Pair with --compress.",
+    )
+    ap.add_argument(
+        "--compress",
+        action="store_true",
+        help="LZ4-block-compress the post-header payload at bake time.",
+    )
+    ap.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Run bake_optimized (permutation + compressed-flag search "
+        "+ bounded swap hillclimb). ~1-2 s budget.",
+    )
     args = ap.parse_args()
 
     baker = find_baker(args.zenpredict_bake)
@@ -118,6 +138,15 @@ def main() -> int:
         # No feature_transforms metadata — V_20b is plain 228-feature input.
         "metadata": [],
     }
+    # Bake-time compression knobs (zenpredict-bake 0.1.1+). Each key
+    # is emitted only when non-default; pre-0.1.1 baker binaries
+    # ignore unknown keys silently.
+    if args.zerobias_tau > 0.0:
+        req["zerobias_tau"] = float(args.zerobias_tau)
+    if args.compress:
+        req["compressed"] = True
+    if args.optimize:
+        req["optimize"] = True
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -142,8 +171,17 @@ def main() -> int:
             return result.returncode
     finally:
         json_path.unlink(missing_ok=True)
+    knobs = []
+    if args.zerobias_tau > 0.0:
+        knobs.append(f"zerobias_tau={args.zerobias_tau:.6g}")
+    if args.compress:
+        knobs.append("compressed")
+    if args.optimize:
+        knobs.append("optimize")
+    knob_str = (" knobs=[" + ", ".join(knobs) + "]") if knobs else ""
     print(
-        f"baked {args.out} via {baker.name}: {n_inputs} → {hidden_dim} (LeakyReLU) → 1 (Identity)"
+        f"baked {args.out} via {baker.name}: {n_inputs} → {hidden_dim} "
+        f"(LeakyReLU) → 1 (Identity){knob_str}"
     )
     return 0
 

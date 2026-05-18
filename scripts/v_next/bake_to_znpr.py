@@ -114,7 +114,13 @@ def state_dict_to_layers(sd: dict[str, torch.Tensor],
     return layers, layers[0]["in_dim"], layers[-1]["out_dim"]
 
 
-def build_bake_request(run_dir: Path, flip_output: bool = True) -> dict:
+def build_bake_request(
+    run_dir: Path,
+    flip_output: bool = True,
+    zerobias_tau: float = 0.0,
+    compressed: bool = False,
+    optimize: bool = False,
+) -> dict:
     sd_path = run_dir / "model.pt"
     scaler_path = run_dir / "scaler.npz"
     meta_path = run_dir / "meta.json"
@@ -148,7 +154,7 @@ def build_bake_request(run_dir: Path, flip_output: bool = True) -> dict:
     metadata.append({"key": "zensim.profile", "type": "utf8",
                      "text": "zensim-preview-v0.4"})
 
-    return {
+    req = {
         # 0 = no schema enforcement; runtime accepts any 228-input MLP.
         "schema_hash": 0,
         "flags": 0,
@@ -162,6 +168,16 @@ def build_bake_request(run_dir: Path, flip_output: bool = True) -> dict:
         "discrete_sets": [],
         "sparse_overrides": [],
     }
+    # Bake-time compression knobs (zenpredict-bake 0.1.1+). Each key is
+    # emitted only when non-default; pre-0.1.1 baker binaries ignore
+    # unknown keys silently (`#[serde(default)]`).
+    if zerobias_tau > 0.0:
+        req["zerobias_tau"] = float(zerobias_tau)
+    if compressed:
+        req["compressed"] = True
+    if optimize:
+        req["optimize"] = True
+    return req
 
 
 def main() -> int:
@@ -183,6 +199,20 @@ def main() -> int:
                          "produces the right output. Pass --no-flip-output "
                          "when bakeing a model trained on a 'distance'-"
                          "shaped target to begin with.")
+    ap.add_argument("--zerobias-tau", type=float, default=0.0,
+                    help="Pre-quantization per-layer zerobias threshold "
+                         "(zenpredict-bake 0.1.1+). Default 0.0 (disabled). "
+                         "Calibrated value: 0.005 for 87.5%% i8 zero density "
+                         "at -0.0001 SROCC on V0_18 per "
+                         "benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md. "
+                         "Pair with --compress.")
+    ap.add_argument("--compress", action="store_true",
+                    help="LZ4-block-compress the post-header payload at bake "
+                         "time. Loader transparently decompresses.")
+    ap.add_argument("--optimize", action="store_true",
+                    help="Run bake_optimized (permutation + compressed-flag "
+                         "search + bounded swap hillclimb) instead of plain "
+                         "bake. ~1-2 s budget on V_X-shape models.")
     args = ap.parse_args()
 
     bake_bin = Path(args.bake_bin)
@@ -196,9 +226,23 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     flip = not args.no_flip_output
+    knob_str = []
+    if args.zerobias_tau > 0.0:
+        knob_str.append(f"zerobias_tau={args.zerobias_tau:.6g}")
+    if args.compress:
+        knob_str.append("compressed")
+    if args.optimize:
+        knob_str.append("optimize")
+    knob_msg = ("knobs: " + ", ".join(knob_str)) if knob_str else "knobs: none"
     print(f"Building BakeRequestJson from {run_dir} "
-          f"(flip_output={flip}) ...")
-    req = build_bake_request(run_dir, flip_output=flip)
+          f"(flip_output={flip}, {knob_msg}) ...")
+    req = build_bake_request(
+        run_dir,
+        flip_output=flip,
+        zerobias_tau=args.zerobias_tau,
+        compressed=args.compress,
+        optimize=args.optimize,
+    )
     n_in = req["layers"][0]["in_dim"]
     n_out = req["layers"][-1]["out_dim"]
     n_layers = len(req["layers"])

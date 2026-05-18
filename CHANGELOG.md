@@ -12,6 +12,20 @@
   (rare — most use the `static`-defined profiles) need to add the
   two new fields. Added 2026-05-15 (commit `f140776a`).
 
+### Added (2026-05-17, baker scripts only — no Rust changes)
+
+- **`scripts/v_next/bake_to_znpr.py`** and
+  **`scripts/v_next/v0_20b/bake_znpr_v3.py`** gained three new flags:
+  `--zerobias-tau <τ>`, `--compress`, `--optimize`. These mirror the
+  new `zenpredict-bake` 0.1.1 JSON-side knobs and emit the matching
+  keys in the BakeRequestJson; pre-0.1.1 baker binaries silently
+  ignore the keys. Calibrated `--zerobias-tau 0.005` recommended per
+  `benchmarks/zenpredict_rle_zerobias_eval_2026-05-13.md` (87.5 % i8
+  zero density at SROCC −0.0001 on V0_18). New V_X-shape bakes can
+  drop from ~93 KB to ~38 KB by adding `--zerobias-tau 0.005
+  --compress` to the existing bake command. Defaults to off — every
+  existing bake command produces byte-identical output.
+
 ### Added (2026-05-16)
 
 - **`ZensimProfile::PreviewV0_5`** — V_22-IW v2 single-bake (372 →
