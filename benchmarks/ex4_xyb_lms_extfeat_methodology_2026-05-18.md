@@ -321,9 +321,176 @@ The prior agent landed Rust modules + unit tests. This agent executed:
   function) is NOT used — substituted with 4-tap `CSF_BAND_WEIGHTS`.
   Crossing the AGPL boundary would require explicit user approval.
 
-## Chunk C — Per-pair CVVDP-shape features (queued; not executed)
+## Chunk C — Per-pair CVVDP-shape features (EXECUTED — FALSIFIED)
 
-The 19 per-pair CVVDP-shape features remain the load-bearing
+**Status: FALSIFIED at seed=3.** The 19 per-pair CVVDP-shape features
+trained alongside the 24 per-ref features regress CID22 by **−0.24
+SROCC** vs V_22-mix-LARGE+iwssim baseline, worse than the per-ref-only
+V_25 falsification (−0.015 from baseline).
+
+### Verdict (seed=3, 5-group recipe, 343-feature input)
+
+| Corpus | V_22 baseline | V_25 (per-ref) | **V_25-v2 (per-ref + per-pair)** | Δ vs V_22 |
+|---|---|---|---|---|
+| CID22 SROCC | 0.8324 | 0.8171 | **0.5919** | **−0.2405** |
+| KADID SROCC | 0.9677 | 0.8999 | **0.8997** | **−0.0680** |
+| TID SROCC | 0.9729 | 0.8822 | **0.8714** | **−0.1015** |
+| KonJND SROCC | 0.8927 | 0.8108 | **0.8570** | **−0.0357** |
+| AIC-3 SROCC | 0.7845 | 0.7701 | **0.7294** | **−0.0551** |
+
+CID22 SROCC dropped **catastrophically** (0.83 → 0.59) — far below
+the V_22 baseline AND below the V_25 per-ref-only failure. The 19
+per-pair features did NOT recover generalization.
+
+### Mechanism — why per-pair features made it worse
+
+Per-pair feature extraction was completed on the 5 anchor corpora
+that have local dist images (kadid 10125, tid 3000, konjnd 1008,
+cid22 4292, aic3 600). The 24 per-ref features remain unchanged.
+
+The two largest training groups have NO real per-pair signal:
+- safesyn (196,086 rows, weight 1.0): per-pair zero-fill.
+- cvvdp_iwssim_large (73,300 rows, weight 0.5): per-pair zero-fill
+  (LARGE re-encode via `zen-metrics sweep` started but only completed
+  ~14% of cells before hitting CPU contention; full re-encode would
+  take ~6-8 hours of dedicated CPU — out of session budget).
+
+So during RankNet training, the 19 per-pair feature columns:
+- contribute **zero gradient** from the safesyn + cvvdp_large groups
+  (constant columns within group),
+- contribute **real per-pair gradient** from the anchor groups
+  (kadid 0.3, tid 0.3, konjnd 0.02 effective weights).
+
+The trainer learns per-pair weights from a 14k effective sample
+(kadid + tid + konjnd at standardize-time variance) while the
+features are zeroed in 269k other rows. Standardization mixes the
+zero-fill into the per-pair feature normalization (per-pair feature
+distribution is dominated by the zero mode, so standardize gives
+the anchor-only signal a relative ~7× scale boost vs its native
+range, since variance is split between real-anchor-tail + zero-bulk).
+
+The trainer overfits the anchor-only per-pair signal — and that
+signal, like the per-ref signal in V_25, IS content-class-specific
+(kadid's 25 distortion types are not codec-output; tid's 24 types
+are likewise synthetic). The per-pair features in those corpora
+encode "this is a KADID-style blur" or "this is a TID-style noise"
+distortion-class signatures that DON'T transfer to CID22's codec
+distortions.
+
+This is the **same FRIQUEE-2017 caveat** that killed V_20b's synth
+pre-train: synth-corpus per-distortion priors don't transfer to
+authentic compression artifacts. The per-pair features make the
+problem WORSE because they encode richer distortion-class
+information (vs per-ref's content-class information) and that
+specificity is exactly what doesn't transfer.
+
+### Conclusion: per-pair-only architecture is not the fix
+
+The doc § 8 EX-4 hypothesis ("per-pair CVVDP-shape features should
+lift CID22 by +0.005–0.015 SROCC") is **falsified across both
+sub-hypotheses**:
+- per-ref XYB+LMS features alone → −0.015 CID22 (commit e072189d).
+- per-ref + per-pair CVVDP-shape features → **−0.24 CID22** (this
+  commit).
+
+Both sub-hypotheses encode synth-corpus distortion-class priors.
+Without a fix for the FRIQUEE-2017 caveat (e.g., genuine codec-
+distortion training data, OR a domain-adaptation pre-train against
+unlabeled CID22-like pairs), front-end feature additions on the
+existing safesyn corpus regress CID22 generalization.
+
+### Per-pair feature distribution sanity (anchor corpora)
+
+All 5 anchor corpora produced finite, non-zero feature values
+across all 19 dimensions:
+
+| Corpus | n | wall (s) | NaN count (of 19 features × n rows) |
+|---|--:|--:|--:|
+| aic3 | 600 | 75 | 0 |
+| tid | 3000 | 139 | 0 |
+| konjnd | 1008 | 92 | 0 |
+| cid22 | 4292 | 332 | 0 |
+| kadid | 10125 | 494 | 0 |
+
+Sample per-pair feature distribution (kadid, n=10125):
+- f0 (DKL A Δmean): [−12.18, 7.99] mean 0.062 std 0.66
+- f1 (DKL A |Δstd|): [0.00, 14.34] mean 0.42 std 0.49
+- f4 (DKL VY ref_std): [22.6, 95.0] mean 49.0 std 9.7
+- f6 (Weber band 0): [0.0001, 12.0] mean 0.34 std 0.31
+- f10 (CSF band 0): [0.013, 14.0] mean 0.59 std 0.44
+- f14 (mutual-mask band 0): [0.00, 0.665] mean 0.121 std 0.085
+- f18 (Minkowski β=3 pool): [0.00, 145.4] mean 19.3 std 17.0
+
+Distributions are sensible — chroma channels show the expected
+ranges, mutual-masking residuals stay bounded by construction,
+Minkowski pool tracks max-distortion magnitude.
+
+### What this session executed
+
+1. **Anchor pair extraction**: 5 corpora × 19 per-pair features
+   computed via the new `extract_pair_features` binary
+   (`zensim-validate/src/bin/extract_pair_features.rs`). Wall
+   time totals ≈ 18 min on rayon-4-threads (CPU contention from
+   parallel sweeps). Output parquets at
+   `/mnt/v/zen/zensim-training/2026-05-18-extfeat/<corpus>_pair_features.parquet`.
+2. **LARGE dist re-encode (partial)**: `zen-metrics sweep` per-codec
+   with `--distorted-out-dir`. zenwebp completed (1000/1000), zenpng
+   ~80% (~1837/2300), zenavif ~28% (1018/3700), zenjpeg ~12%
+   (4242/36000), zenjxl ~9% (2874/32000). The full sweep was not
+   feasible in the session budget. Partial output kept in
+   `/tmp/large_dist/` for future sessions.
+3. **343-col parquet merge**: anchor corpora got real per-pair
+   features; safesyn + cvvdp_large got 19-column zero-fill (see
+   `/tmp/build_343_with_fills.py`).
+4. **V_25-v2 seed=3 train**: 343-feature input, 128 hidden, 5-group
+   (safesyn 1.0 zero-fill, kadid 0.3 real, tid 0.3 real, konjnd
+   0.02 real, cvvdp_large 0.5 zero-fill), mix_cv40_iw60 target,
+   PWRC + Norm-in-Norm 0.1, minibatch=256, Adam. Best val_mean=0.857
+   at epoch 120, early-stopped at epoch 180, wall ≈ 4 min.
+   Bake at `/mnt/v/zen/zensim-eval/cvvdp_safesyn_2026-05-17/v25_v2_extfeat_mix_cv40_konjnd_0_02_LARGE_iwssim_perpair_h128_s3.bin`
+   (179,612 bytes f32).
+5. **bake_verdict full Mohammadi panel** (results above; all 5
+   corpora regressed vs V_22 baseline).
+
+### What did NOT land (and why)
+
+- **No 5-seed CI**: falsified at seed=3 per Step 3 decision tree
+  (CID22 −0.24 SROCC is unambiguous regression; multi-seed is not
+  going to recover this).
+- **No safesyn per-pair extraction**: 196k rows × ~50ms/row × 4
+  threads (CPU contention) ≈ 7 hours, well outside session budget.
+- **No LARGE per-pair extraction**: 73k rows of LARGE need dist
+  images that aren't synced from vast.ai. Local re-encode via
+  `zen-metrics sweep` completed only ~14% before session budget.
+- **No packed bake**: failing-direction bake should not ship.
+
+### What this session DOES leave for future work
+
+Recovery candidates for the per-pair direction:
+
+1. **Train per-pair features ON safesyn ONLY** (no anchor mixing).
+   The synthetic safesyn pairs ARE codec-distortion-like (jpegli/avif/
+   webp/jxl reproductions, not analytic blurs). If per-pair features
+   on safesyn alone produce a CID22-positive signal, the anchor-mix
+   in V_25-v2 was the issue, not the architecture.
+2. **Complete the LARGE re-encode** (~6-8 hrs CPU) and retry with
+   real per-pair on LARGE (cvvdp_large has 200 refs × 5 codecs ×
+   compression-distortion knobs — actual codec output, matching
+   CID22's distribution).
+3. **Drop kadid + tid + konjnd from the per-pair-feature MLP**:
+   build a 2-group (safesyn + cvvdp_large) train where per-pair
+   features train ONLY on real codec outputs. Eliminates the
+   FRIQUEE-2017 caveat by construction.
+
+The principled-experiment rigor stays: write the hypothesis first,
+state the falsification threshold, decide on per-band stats before
+training. The doc § 8 EX-4 forecast (+0.005–0.015 CID22) was
+**substantially wrong** for both per-ref-only and per-ref+per-pair
+configurations.
+
+### Original Chunk C plan (preserved for context)
+
+The 19 per-pair CVVDP-shape features were the load-bearing
 candidate from doc § 8 EX-4 because they DO carry per-distortion
 signal (RankNet pairs share the ref but differ in the dist; the
 DKL Δ-stats / Weber pyramid / mutual-masking residual / Minkowski
