@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Changed (2026-05-18, later) — Hybrid-head runtime dispatch + FT-gentle verdict
+
+- **`zensim::metric::forward_one_bake` got hybrid-head dispatch.**
+  Bakes carrying a `zentrain.hybrid_head` metadata payload
+  (V_24-hybrid architecture) take a code path analogous to the
+  per-sample-α head dispatch (above) — the bake's final layer is
+  an `n_hidden × n_hidden` identity passthrough, so
+  `Predictor::predict` returns the post-LeakyReLU hidden vector.
+  The runtime parses the head payload
+  (`[rank_w[0..n_hidden]] [rank_b] [α_logit] [reducer_w[0..4]]
+  [reducer_b] [p_norm]` as f32-LE, total `4·(n_hidden + 8)` bytes)
+  and mixes a rank head + pool head via a single **learned scalar**
+  sigmoid gate `α = σ(α_logit)` (NOT per-sample; that's what
+  distinguishes hybrid-head from per-sample-α). The same dispatch
+  landed in `bake_verdict::score_row` and
+  `bake_compare::score_corpus` for parquet-driven validation parity.
+  Regression test: `zensim-validate/tests/hybrid_head_runtime.rs`
+  (4 tests, all passing). Per-sample-α and hybrid-head metadata
+  are mutually exclusive at detect time; per-sample-α takes
+  precedence when both somehow appear in the same bake.
+- **No SOTA rotation.** Both V_24-hybrid NiN s2 and no-NiN s4 fail
+  the compression-trail gate per § A.9 (1000-bootstrap):
+  - V_24-hybrid NiN s2 packed (f16+zstd, 81 KB): vs Balanced ship
+    A>>B decisive on CID22 (+0.040) AND AIC-3 (+0.025); KonJND
+    −0.102 fails step 3 by 0.002. vs new compression ship: A>>B on
+    CID22 (+0.0086) but B>>A decisive on AIC-3 (−0.0087).
+  - V_24-hybrid no-NiN s4 packed (f16+zstd, 81 KB): vs Balanced
+    same fail by 0.003 on KonJND; vs current compression ship,
+    strictly dominated (0 A wins / 5 B wins across decisive cells).
+  Both candidates' verdicts match the prior audit-doc projection
+  exactly. The dispatch unblocks them for evaluation but they
+  remain falsified on the gate.
+- **V_24-FT-gentle s4 packed verdict** (already in audit doc as
+  "runtime-blocked promising"): metadata is actually
+  `zentrain.per_sample_alpha_head`, not a different architecture
+  — so the just-landed per-sample-α dispatch (commit `708da6b7`)
+  ALREADY scores it correctly. Numbers match audit doc exactly
+  (CID22 0.8451 / AIC-3 0.8131 / KADID 0.9321 / TID 0.8896 / KonJND
+  0.8544). vs new compression ship: B>>A decisive on both CID22
+  and AIC-3 (h=−398.9, h=−73.7); the new per-sample-α s4 strictly
+  dominates on compression corpora despite FT-gentle's tighter
+  KonJND preservation (+0.046). Falsified for compression-trail
+  rotation.
+- **No crate version bump** per user policy 2026-05-18.
+
 ### QUEUED BREAKING CHANGES
 <!-- Breaking changes that ship together in the next minor for 0.x.
      Persist across patch releases. Only clear when the breaking release ships. -->
