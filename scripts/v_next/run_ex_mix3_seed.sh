@@ -37,6 +37,7 @@ mkdir -p "${OUT_DIR}"
     --group "safesyn:${PARQ_DIR}/safesyn.parquet:1.0:0.0" \
     --group "kadid:${PARQ_DIR}/kadid.parquet:0.3:1.0" \
     --group "tid:${PARQ_DIR}/tid.parquet:0.3:1.0" \
+    --group "konjnd:${PARQ_DIR}/konjnd.parquet:0.02:1.0" \
     --hidden 128 --epochs 300 --pairs-per-epoch 50000 --lr 1e-3 --l2 1e-5 \
     --leaky-alpha 0.01 --val-policy min --early-stop-patience 0 \
     --max-features 372 --minibatch-size 256 \

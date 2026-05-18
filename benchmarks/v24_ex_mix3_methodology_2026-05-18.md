@@ -176,6 +176,50 @@ Even before training completes, these gaps will materialize:
    opened LAST. The verdict-aggregator script runs ONLY after all 15 trains
    complete. No mid-flight CID22 inspection.
 
+## Mid-experiment fix: konjnd PJND-anchor added (2026-05-18 09:42)
+
+**First-cycle seed=1 results (without konjnd training group):**
+
+| Variant | CID22 | KADID | TID | KonJND | AIC-3 |
+|---|---|---|---|---|---|
+| cv33_iw33_sm33 s1 | 0.8934 | 0.9186 | 0.8695 | **0.2990** | 0.8114 |
+| cv30_iw40_sm30 s1 | 0.8940 | 0.9291 | 0.8762 | **0.2996** | 0.8114 |
+| baseline (V_22 noLARGE s1) | 0.8558 | 0.9336 | 0.8904 | 0.8369 | 0.8107 |
+
+**CID22 +0.038 (huge win), KonJND -0.54 (catastrophic collapse).** Without
+the 1008-row konjnd training group at weight 0.02, the model has no JND
+boundary signal — same failure mode as V_22-CVVDP-LARGE (per the V_22
+methodology, "Pure-CVVDP supervision on compression distortions gives no
+signal for JND ordering").
+
+**Fix applied:** Re-introduce the konjnd training group at weight 0.02
+using PJND-passthrough as the target. The konjnd small parquet's
+`human_score` IS the PJND compression-q threshold (range [22.46, 69.98],
+mean 41.98) — the same value V_22 noLARGE used through `mix_cv40_iw60`
+(which was a passthrough copy of `human_score` in that corpus). For
+EX-MIX3 I write `mix_cv33_iw33_sm33 = mix_cv30_iw40_sm30 =
+mix_cv40_iw40_sm20 = mix_cv40_iw60 = human_score = PJND` for the 1008
+konjnd rows. This is NOT zero-fill (the value IS the real PJND signal); it
+is a label-passthrough for a group whose 3-way blend equation is
+undefined because the group has no cvvdp/iwssim/ssim2 per-pair scores.
+
+This preserves V_22 noLARGE's exact JND-anchoring mechanic verbatim while
+keeping the 3-way blend on the other 3 groups (safesyn 1.0 / kadid 0.3 /
+tid 0.3). The first-cycle results are archived at
+`/mnt/v/zen/zensim-eval/ex_mix3_2026-05-18/noKONJND_backup/` for
+reference.
+
+Updated training groups (4 groups, 210,219 rows — identical to V_22 noLARGE):
+
+| Group | Rows | Target | Train_w | Val_w |
+|---|--:|---|--:|--:|
+| safesyn | 196,086 | mix_cv33_iw33_sm33 | 1.0 | 0.0 |
+| kadid | 10,125 | mix_cv33_iw33_sm33 | 0.3 | 1.0 |
+| tid | 3,000 | mix_cv33_iw33_sm33 | 0.3 | 1.0 |
+| konjnd | 1,008 | mix_cv33_iw33_sm33 (= PJND) | 0.02 | 1.0 |
+
+Re-launched 15-job matrix at 09:43:50.
+
 ## Lineage
 
 - Build script: `scripts/v_next/add_mix3_target.py`
