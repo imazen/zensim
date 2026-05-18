@@ -408,9 +408,16 @@ def main():
         panel["Balanced (V0_5)"]    = mohammadi_panel(bal["score"].values, human)
         panel["Compression (V0_5)"] = mohammadi_panel(cmp_["score"].values, human)
         panel["Ensemble (V0_5)"]    = mohammadi_panel(ens, human)
-        panel["fast-ssim2 control"] = mohammadi_panel(ssim2, human)
-        panel["iwssim control"]     = mohammadi_panel(iwssim, human)
-        panel["cvvdp control"]      = mohammadi_panel(cvvdp, human)
+        # Controls: skip rows where the entire column is null (canonical
+        # val parquets have null control columns because the score
+        # sidecars live separately at scores/*.parquet, keyed by
+        # (image_path, codec, q, knob_tuple_json) not joinable here).
+        if np.isfinite(ssim2).any():
+            panel["fast-ssim2 control"] = mohammadi_panel(ssim2, human)
+        if np.isfinite(iwssim).any():
+            panel["iwssim control"]     = mohammadi_panel(iwssim, human)
+        if np.isfinite(cvvdp).any():
+            panel["cvvdp control"]      = mohammadi_panel(cvvdp, human)
         full_per_corpus[c] = panel
 
         output_lines.append(f"### {c.upper()} (n = {len(df)}, full corpus)\n\n")
@@ -418,7 +425,20 @@ def main():
         output_lines.append("|---|---:|---:|---:|---:|---:|---:|---:|\n")
         for name, m in panel.items():
             output_lines.append(fmt_panel_row(name, m) + "\n")
-        output_lines.append("\n")
+        if not any(np.isfinite(x).any() for x in (ssim2, iwssim, cvvdp)):
+            output_lines.append(
+                "_Controls (fast-ssim2 / iwssim / cvvdp) omitted: the canonical "
+                "val parquets carry null control columns. Score sidecars live "
+                "separately at `scores/{ssim2_imazen,iwssim_imazen,cvvdp_imazen_v0_0_1}.parquet` "
+                "keyed by (image_path, codec, q, knob_tuple_json) which is not joinable "
+                "to the val parquets' (ref_basename, anchor index) layout. The "
+                "ensemble vs single-bake verdict above is unchanged by this gap; "
+                "control SROCC for these corpora is reported in the per-bake methodology "
+                "docs (`benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`, "
+                "`benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`)._\n\n"
+            )
+        else:
+            output_lines.append("\n")
 
     output_lines.append("## Headline SROCC table (FULL corpus, deployment view)\n\n")
     output_lines.append(
@@ -465,9 +485,13 @@ def main():
         panel["Balanced (V0_5)"]    = mohammadi_panel(bal["score"].values, human)
         panel["Compression (V0_5)"] = mohammadi_panel(cmp["score"].values, human)
         panel["Ensemble (V0_5)"]    = mohammadi_panel(ens, human)
-        panel["fast-ssim2 control"] = mohammadi_panel(ssim2, human)
-        panel["iwssim control"]     = mohammadi_panel(iwssim, human)
-        panel["cvvdp control"]      = mohammadi_panel(cvvdp, human)
+        # Controls (only when populated — see full-corpus block below).
+        if np.isfinite(ssim2).any():
+            panel["fast-ssim2 control"] = mohammadi_panel(ssim2, human)
+        if np.isfinite(iwssim).any():
+            panel["iwssim control"]     = mohammadi_panel(iwssim, human)
+        if np.isfinite(cvvdp).any():
+            panel["cvvdp control"]      = mohammadi_panel(cvvdp, human)
         per_corpus[c] = panel
 
         output_lines.append(f"### {c.upper()} (n_test = {len(idx)})\n\n")

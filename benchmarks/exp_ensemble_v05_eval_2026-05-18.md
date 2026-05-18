@@ -48,9 +48,7 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 4292 | 0.8324 | 0.8289 | 0.6340 | 0.0520 | 0.8324 | 0.559 |
 | Compression (V0_5) | 4292 | 0.8641 | 0.8614 | 0.6742 | 0.0543 | 0.8641 | 0.508 |
 | Ensemble (V0_5) | 4292 | 0.8633 | 0.8597 | 0.6730 | 0.0534 | 0.8633 | 0.511 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
+_Controls (fast-ssim2 / iwssim / cvvdp) omitted: the canonical val parquets carry null control columns. Score sidecars live separately at `scores/{ssim2_imazen,iwssim_imazen,cvvdp_imazen_v0_0_1}.parquet` keyed by (image_path, codec, q, knob_tuple_json) which is not joinable to the val parquets' (ref_basename, anchor index) layout. The ensemble vs single-bake verdict above is unchanged by this gap; control SROCC for these corpora is reported in the per-bake methodology docs (`benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`, `benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`)._
 
 ### KADID (n = 10125, full corpus)
 
@@ -59,9 +57,7 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 10125 | 0.9677 | 0.9686 | 0.8432 | 0.0520 | 0.9677 | 0.249 |
 | Compression (V0_5) | 10125 | 0.9316 | 0.9321 | 0.7684 | 0.0538 | 0.9316 | 0.362 |
 | Ensemble (V0_5) | 10125 | 0.9676 | 0.9685 | 0.8430 | 0.0520 | 0.9676 | 0.249 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
+_Controls (fast-ssim2 / iwssim / cvvdp) omitted: the canonical val parquets carry null control columns. Score sidecars live separately at `scores/{ssim2_imazen,iwssim_imazen,cvvdp_imazen_v0_0_1}.parquet` keyed by (image_path, codec, q, knob_tuple_json) which is not joinable to the val parquets' (ref_basename, anchor index) layout. The ensemble vs single-bake verdict above is unchanged by this gap; control SROCC for these corpora is reported in the per-bake methodology docs (`benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`, `benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`)._
 
 ### TID (n = 3000, full corpus)
 
@@ -70,9 +66,7 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 3000 | 0.9729 | 0.9717 | 0.8571 | 0.0497 | 0.9729 | 0.236 |
 | Compression (V0_5) | 3000 | 0.8893 | 0.9018 | 0.7130 | 0.0523 | 0.8893 | 0.432 |
 | Ensemble (V0_5) | 3000 | 0.9719 | 0.9709 | 0.8558 | 0.0460 | 0.9719 | 0.240 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
+_Controls (fast-ssim2 / iwssim / cvvdp) omitted: the canonical val parquets carry null control columns. Score sidecars live separately at `scores/{ssim2_imazen,iwssim_imazen,cvvdp_imazen_v0_0_1}.parquet` keyed by (image_path, codec, q, knob_tuple_json) which is not joinable to the val parquets' (ref_basename, anchor index) layout. The ensemble vs single-bake verdict above is unchanged by this gap; control SROCC for these corpora is reported in the per-bake methodology docs (`benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`, `benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`)._
 
 ### KONJND (n = 1008, full corpus)
 
@@ -81,9 +75,7 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 1008 | 0.8927 | 0.9265 | 0.7070 | 0.0585 | 0.8927 | 0.376 |
 | Compression (V0_5) | 1008 | 0.8080 | 0.8648 | 0.5935 | 0.0685 | 0.8080 | 0.502 |
 | Ensemble (V0_5) | 1008 | 0.8792 | 0.9214 | 0.6883 | 0.0615 | 0.8792 | 0.389 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
+_Controls (fast-ssim2 / iwssim / cvvdp) omitted: the canonical val parquets carry null control columns. Score sidecars live separately at `scores/{ssim2_imazen,iwssim_imazen,cvvdp_imazen_v0_0_1}.parquet` keyed by (image_path, codec, q, knob_tuple_json) which is not joinable to the val parquets' (ref_basename, anchor index) layout. The ensemble vs single-bake verdict above is unchanged by this gap; control SROCC for these corpora is reported in the per-bake methodology docs (`benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`, `benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`)._
 
 ### AIC3 (n = 600, full corpus)
 
@@ -92,9 +84,7 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 600 | 0.7845 | 0.7953 | 0.6155 | 0.0450 | 0.7845 | 0.606 |
 | Compression (V0_5) | 600 | 0.8183 | 0.8248 | 0.6527 | 0.0583 | 0.8183 | 0.565 |
 | Ensemble (V0_5) | 600 | 0.8132 | 0.8200 | 0.6468 | 0.0583 | 0.8132 | 0.572 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
+_Controls (fast-ssim2 / iwssim / cvvdp) omitted: the canonical val parquets carry null control columns. Score sidecars live separately at `scores/{ssim2_imazen,iwssim_imazen,cvvdp_imazen_v0_0_1}.parquet` keyed by (image_path, codec, q, knob_tuple_json) which is not joinable to the val parquets' (ref_basename, anchor index) layout. The ensemble vs single-bake verdict above is unchanged by this gap; control SROCC for these corpora is reported in the per-bake methodology docs (`benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`, `benchmarks/v0_24_persample_alpha_methodology_2026-05-18.md`)._
 
 ## Headline SROCC table (FULL corpus, deployment view)
 
@@ -115,9 +105,6 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 858 | 0.8413 | 0.8344 | 0.6430 | 0.0606 | 0.8413 | 0.551 |
 | Compression (V0_5) | 858 | 0.8659 | 0.8645 | 0.6770 | 0.0536 | 0.8659 | 0.503 |
 | Ensemble (V0_5) | 858 | 0.8652 | 0.8633 | 0.6763 | 0.0536 | 0.8652 | 0.505 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
 
 ### KADID (n_test = 2025)
 
@@ -126,9 +113,6 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 2025 | 0.9671 | 0.9675 | 0.8426 | 0.0435 | 0.9671 | 0.253 |
 | Compression (V0_5) | 2025 | 0.9259 | 0.9267 | 0.7608 | 0.0489 | 0.9259 | 0.376 |
 | Ensemble (V0_5) | 2025 | 0.9669 | 0.9674 | 0.8423 | 0.0440 | 0.9669 | 0.253 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
 
 ### TID (n_test = 600)
 
@@ -137,9 +121,6 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 600 | 0.9744 | 0.9746 | 0.8624 | 0.0433 | 0.9744 | 0.224 |
 | Compression (V0_5) | 600 | 0.8878 | 0.8985 | 0.7121 | 0.0533 | 0.8878 | 0.439 |
 | Ensemble (V0_5) | 600 | 0.9736 | 0.9737 | 0.8608 | 0.0400 | 0.9736 | 0.228 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
 
 ### KONJND (n_test = 201)
 
@@ -148,9 +129,6 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 201 | 0.8972 | 0.9519 | 0.7130 | 0.0746 | 0.8972 | 0.306 |
 | Compression (V0_5) | 201 | 0.7983 | 0.8851 | 0.5791 | 0.0647 | 0.7983 | 0.465 |
 | Ensemble (V0_5) | 201 | 0.8719 | 0.9472 | 0.6767 | 0.0796 | 0.8719 | 0.321 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
 
 ### AIC3 (n_test = 120)
 
@@ -159,9 +137,6 @@ _Each (corpus, pair) is routed via the trained classifier; scores are the routed
 | Balanced (V0_5) | 120 | 0.7661 | 0.7628 | 0.5919 | 0.0250 | 0.7661 | 0.647 |
 | Compression (V0_5) | 120 | 0.8046 | 0.7998 | 0.6329 | 0.0417 | 0.8046 | 0.600 |
 | Ensemble (V0_5) | 120 | 0.8078 | 0.8019 | 0.6358 | 0.0417 | 0.8078 | 0.597 |
-| fast-ssim2 control | 0 | nan | nan | nan | nan | nan | nan |
-| iwssim control | 0 | nan | nan | nan | nan | nan | nan |
-| cvvdp control | 0 | nan | nan | nan | nan | nan | nan |
 
 ## § A.9 verdicts per corpus
 
