@@ -325,3 +325,33 @@ The cv30 variant's lift over baseline is concentrated where it should be:
 - TID (similar to KADID): -0.013
 
 Final 5-seed CI awaits round-4-5 completion (ETA ~10:46).
+
+## 4-seed CI (12/15 bakes, 10:33 UTC)
+
+| Variant | n | CID22 | KADID | TID | KonJND | AIC-3 |
+|---|--:|---|---|---|---|---|
+| cv33_iw33_sm33 | 4 | 0.8673±0.0079 | 0.9176±0.0029 | 0.8697±0.0019 | 0.8400±0.0011 | 0.7988±0.0110 |
+| cv30_iw40_sm30 | 4 | 0.8627±0.0081 | 0.9271±0.0019 | 0.8766±0.0009 | 0.8428±0.0039 | 0.8017±0.0059 |
+| cv40_iw40_sm20 | 4 | 0.8625±0.0083 | 0.9187±0.0029 | 0.8761±0.0017 | 0.8378±0.0028 | 0.8032±0.0076 |
+| V_22 noLARGE (baseline, n=5) | 5 | 0.8425±0.0110 | 0.9311±0.0022 | 0.8897±0.0015 | 0.8371±0.0066 | 0.8059±0.0057 |
+| V_22-LARGE+iwssim (alt, n=5) | 5 | 0.8339±0.0071 | 0.9673±0.0002 | 0.9726±0.0004 | 0.8869±0.0034 | 0.7872±0.0078 |
+
+### Δ vs V_22 noLARGE (units of σ)
+
+| Variant | CID22 | KADID | TID | KonJND | AIC-3 |
+|---|---:|---:|---:|---:|---:|
+| cv33_iw33_sm33 | +22σ | -6σ | -10σ | +1σ | -1σ |
+| cv30_iw40_sm30 | +18σ | -2σ | -7σ | +1σ | -1σ |
+| cv40_iw40_sm20 | +17σ | -6σ | -7σ | +0σ | -0σ |
+
+(σ uses the larger of the two seed-stds. Treat |Δ| < 2σ as parity/noise.)
+
+**Decisive winners:**
+- CID22: all 3 variants decisively win (Δ ~ 17-22σ)
+- KADID: cv30 parity (-2σ); cv33+cv40 small decisive losses (-6σ)
+- TID: all 3 variants decisively lose (-7 to -10σ)
+- KonJND: all 3 variants parity
+- AIC-3: all 3 variants parity
+
+cv30_iw40_sm30 is the most balanced (best KADID, best KonJND, smallest TID
+regression, near-best CID22). Recommended ship candidate.
