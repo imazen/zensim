@@ -215,6 +215,16 @@ mod simd_ops;
 pub mod source;
 mod streaming;
 
+// EX-4 extended feature modules — XYB/LMS front-end stats + CVVDP-shape
+// per-pair signals (DKL, Weber-contrast band ratios, mutual-masking
+// residuals, Minkowski β=3 pool). Gated behind the `training` feature
+// because they're only meaningful inside the feature-extract pipeline;
+// the metric hot path never calls them.
+#[cfg(feature = "training")]
+pub mod xyb_lms_features;
+#[cfg(feature = "training")]
+pub mod cvvdp_features;
+
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{

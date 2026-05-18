@@ -21,17 +21,19 @@ use magetypes::simd::generic::f32x8 as GenericF32x8;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
 
-// Opsin absorbance matrix (from jpegli/ssimulacra2)
-const K_M02: f32 = 0.078;
-const K_M00: f32 = 0.30;
-const K_M01: f32 = 1.0 - K_M02 - K_M00;
-const K_M12: f32 = 0.078;
-const K_M10: f32 = 0.23;
-const K_M11: f32 = 1.0 - K_M12 - K_M10;
-const K_M20: f32 = 0.243_422_69;
-const K_M21: f32 = 0.204_767_45;
-const K_M22: f32 = 1.0 - K_M20 - K_M21;
-const K_B0: f32 = 0.003_793_073_4;
+// Opsin absorbance matrix (from jpegli/ssimulacra2).
+// `pub(crate)` so sibling feature modules (e.g. `xyb_lms_features`)
+// can lift them without duplicating constants — single source of truth.
+pub(crate) const K_M02: f32 = 0.078;
+pub(crate) const K_M00: f32 = 0.30;
+pub(crate) const K_M01: f32 = 1.0 - K_M02 - K_M00;
+pub(crate) const K_M12: f32 = 0.078;
+pub(crate) const K_M10: f32 = 0.23;
+pub(crate) const K_M11: f32 = 1.0 - K_M12 - K_M10;
+pub(crate) const K_M20: f32 = 0.243_422_69;
+pub(crate) const K_M21: f32 = 0.204_767_45;
+pub(crate) const K_M22: f32 = 1.0 - K_M20 - K_M21;
+pub(crate) const K_B0: f32 = 0.003_793_073_4;
 
 // ─── Gamut conversion matrices (linear light, row-major) ─────────────────
 //
