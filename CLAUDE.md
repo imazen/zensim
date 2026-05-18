@@ -967,6 +967,170 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
   AND silently drops KADID rows on image-decode failures. Use
   `bake_verdict` instead.
 
+## Canonical training/validation corpora (2026-05-18)
+
+**This is the single canonical training/validation parquet set. All
+new V_X training recipes use these. Old per-experiment parquet dirs
+in `/mnt/v/zen/zensim-training/2026-05-{15,17,18}-*/` are FROZEN;
+rebuilds and new joins go here.**
+
+### Local + R2 locations
+
+- **Local**: `/mnt/v/zen/zensim-training/canonical-2026-05-18/`
+- **R2**: `s3://zentrain/canonical-training-2026-05-18/` (bucket
+  `zentrain`, endpoint
+  `https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com`)
+- **Manifest**: `_MANIFEST.json` at the root of both, with per-file
+  row count, byte size, sha256, target-column list, and per-parquet
+  metadata block (canonical_corpus, canonical_role, source_paths,
+  schema_version, training_use, schema_note).
+- **Total size**: 766.5 MiB (under the 5 GB budget; safesyn dominates
+  at 563 MiB, score sidecars are ~4 MiB).
+
+### Layout
+
+```
+canonical-2026-05-18/
+├── _MANIFEST.json                              13 parquet entries + sha256 + per-file metadata
+├── train/
+│   ├── safesyn.parquet                         196,086 rows × 372 features (synthetic-safe, CID22-leak-purged)
+│   ├── kadid.parquet                            10,125 rows × 372 features (KADID-10k DMOS)
+│   ├── tid.parquet                               3,000 rows × 372 features (TID2013 MOS)
+│   ├── konjnd-dense.parquet                     20,160 rows × 372 features (KonJND-1k densified, +pjnd_target)
+│   └── cvvdp_iwssim_LARGE.parquet               73,300 rows × 300 features (iwssim∩cvvdp overlap; NO IW-pool block)
+├── val/                                        HOLDOUT-ONLY. Never train on val/*.parquet's human_score.
+│   ├── cid22.parquet                             4,292 rows × 372 features (MCOS, gold-standard)
+│   ├── kadid.parquet                            10,125 rows × 372 features (DMOS, integrity audit alongside train)
+│   ├── tid.parquet                               3,000 rows × 372 features (MOS, integrity audit alongside train)
+│   ├── konjnd.parquet                            1,008 rows × 372 features (PJND anchor, original)
+│   └── aic3.parquet                                600 rows × 372 features (AIC-3 CTC JND)
+└── scores/                                     Raw-score sidecars. Preserved for any future re-mix.
+    ├── cvvdp_imazen_v0_0_1.parquet            1,169,500 rows (image_path, codec, q, knob_tuple_json, cvvdp_imazen_v0_0_1)
+    ├── iwssim_imazen.parquet                     75,300 rows (same key + iwssim_imazen_v0_0_1)
+    └── ssim2_imazen.parquet                      55,000 rows (same key + ssim2_gpu)
+```
+
+### Canonical schema (training + validation parquets)
+
+Every train/* and val/* parquet uses the same column ordering so
+trainers can switch corpus paths without touching schema-handling
+code:
+
+```
+ref_basename : string                source image identifier
+human_score  : float64               per-corpus native anchor
+  - safesyn:       synthetic ssim2-derived target
+  - kadid:         DMOS (1-5, lower=better)
+  - tid:           MOS (0-9, higher=better)
+  - konjnd-dense:  the active mix output (NOT PJND — use pjnd_target column for PJND)
+  - cvvdp_LARGE:   ssim2-derived training anchor
+  - val/cid22:     MCOS / 100 (validation-only)
+  - val/kadid:     DMOS
+  - val/tid:       MOS
+  - val/konjnd:    mean PJND threshold
+  - val/aic3:      score.jnd (signed JND units, AIC-3 CTC)
+cvvdp_score, cvvdp_log_norm           : f64 (null if not available)
+iwssim, iwssim_log_norm                : f64 (null if not available)
+ssim2_gpu, ssim2_log_norm              : f64 (null if not available)
+pjnd_target                            : f64 (KonJND PJND threshold; null except for konjnd-dense)
+mix_cv25_iw75 … mix_cv75_iw25          : 10 cvvdp×iwssim mix variants
+mix_cv33_iw33_sm33                     : 3-way mix with ssim2 (only kadid + tid have non-null)
+mix_target                             : alias for active --target-column at consumer's choice
+f0..f371                               : 372 features (basic + peak + masked + IW-pool blocks)
+                                         LARGE: f0..f299 only (300 features, no IW-pool block)
+```
+
+Missing target columns are explicit nulls, not silently dropped —
+every parquet has the full superset of target columns so the trainer
+sees a stable schema across corpora.
+
+### Per-canonical-parquet detail
+
+| Canonical path | Rows | Feature cols | Non-null targets | Bytes (zstd-15) | sha256 (prefix) |
+|---|--:|--:|---|--:|---|
+| `train/safesyn.parquet` | 196,086 | 372 | cvvdp_score, cvvdp_log_norm, iwssim, iwssim_log_norm, ssim2_gpu, ssim2_log_norm, mix_cv25..cv75 grid (no `mix_cv33_iw33_sm33`) | 590.5 MB | `1ee0565fb6cb` |
+| `train/kadid.parquet` | 10,125 | 372 | all of the above + `mix_cv33_iw33_sm33` | 31.5 MB | `037685df82f5` |
+| `train/tid.parquet` | 3,000 | 372 | all of the above + `mix_cv33_iw33_sm33` | 9.4 MB | `9d6b6b78b987` |
+| `train/konjnd-dense.parquet` | 20,160 | 372 | `pjnd_target` + mix_cv25..cv75 grid (cvvdp/iwssim/ssim2 are all null) | 67.1 MB | `87e196ba88ba` |
+| `train/cvvdp_iwssim_LARGE.parquet` | 73,300 | **300** | cvvdp_score, cvvdp_log_norm, iwssim, iwssim_log_norm, mix_cv40_iw60 (no ssim2, no full mix grid) | 43.7 MB | `289d45cc3169` |
+| `val/cid22.parquet` | 4,292 | 372 | `human_score` only (MCOS / 100) | 13.0 MB | `6eea08253fa2` |
+| `val/kadid.parquet` | 10,125 | 372 | `human_score` only (DMOS) | 30.1 MB | `04a8d5b0b5f1` |
+| `val/tid.parquet` | 3,000 | 372 | `human_score` only (MOS) | 9.0 MB | `c4a4bf0521da` |
+| `val/konjnd.parquet` | 1,008 | 372 | `human_score` only (mean PJND) | 3.1 MB | `3e999a372577` |
+| `val/aic3.parquet` | 600 | 372 | `human_score` only (score.jnd) | 1.9 MB | `a93aab6d2796` |
+| `scores/cvvdp_imazen_v0_0_1.parquet` | 1,169,500 | — | raw `cvvdp_imazen_v0_0_1` per (image, codec, q, knob) | 3.4 MB | `cfa285e198a8` |
+| `scores/iwssim_imazen.parquet` | 75,300 | — | raw `iwssim_imazen_v0_0_1` | 0.8 MB | `9c29fc8d3dc0` |
+| `scores/ssim2_imazen.parquet` | 55,000 | — | raw `ssim2_gpu` | 0.3 MB | `76bb7731c33b` |
+
+`aic4` is not yet in the canonical set — features for AIC-4 sample
+corpus are not extracted (only raw images at
+`/mnt/v/dataset/aic4_sample/`). To add: run
+`target/release/examples/extract_features_372col --corpus aic4 …`
+and add a `build_val_aic4()` step in
+`scripts/canonical_corpus/build_canonical_parquets.py`.
+
+### Migration table (old → canonical)
+
+| Old path (DEPRECATED, not deleted) | Canonical replacement | Why deprecated |
+|---|---|---|
+| `2026-05-18-v24/safesyn_4target_372col.parquet` | `canonical-2026-05-18/train/safesyn.parquet` | Joined into canonical with full target superset |
+| `2026-05-18-v24/kadid_4target_372col.parquet` | `canonical-2026-05-18/train/kadid.parquet` | same |
+| `2026-05-18-v24/tid_4target_372col.parquet` | `canonical-2026-05-18/train/tid.parquet` | same |
+| `2026-05-18-v24/konjnd_features_mix_targets_372col.parquet` | use konjnd-dense for training, val/konjnd for eval | per-image-anchor subset of the dense set |
+| `2026-05-18-konjnd-dense/konjnd_dense_features_mix_targets_372col.parquet` + `*_pjndtarget_300col.parquet` | `canonical-2026-05-18/train/konjnd-dense.parquet` | joined; `pjnd_target` lifted from pjndtarget's `human_score` |
+| `2026-05-17-cvvdp-merged-trainer/cvvdp_iwssim_large_300col_v2.parquet` | `canonical-2026-05-18/train/cvvdp_iwssim_LARGE.parquet` | schema-aligned (300-feature limitation preserved) |
+| `2026-05-17-cvvdp-merged-trainer/{safesyn,kadid,tid,konjnd}_mix_300col.parquet` | superseded by `train/*.parquet` (372-feat instead of 300) | 372-col variant is canonical |
+| `2026-05-17-cvvdp/*_features_*_372col.parquet` | superseded by canonical per-corpus train + val | upstream intermediate |
+| `2026-05-17-cvvdp/multicodec_cvvdp_300col*.parquet`, `v15r_zenjpeg_cvvdp_*.parquet` | preserved as `2026-05-17-cvvdp-merged/unified_*.parquet` — picker work, not zensim metric — OUT of canonical scope | scope |
+| `2026-05-17-cvvdp-merged/unified_*_cvvdp.parquet` | UNCHANGED — these are picker-work per-codec cuts, not trainer inputs | scope (picker, not zensim metric) |
+| `2026-05-18-extfeat/*.parquet` (343-col extended-features experiment) | NOT in canonical set; experimental 343-col feature variant from EX-4. Promote only if EX-4 results ship the 343-col schema. | experimental scope |
+| `2026-05-18-ssim2/ssim2_imazen_consolidated.parquet` | `canonical-2026-05-18/scores/ssim2_imazen.parquet` | identical content, canonical name |
+| `2026-05-15-cvvdp-r2/cvvdp_imazen_consolidated.parquet` | `canonical-2026-05-18/scores/cvvdp_imazen_v0_0_1.parquet` | identical content, canonical name |
+| `2026-05-15-cvvdp-r2/iwssim_imazen_consolidated.parquet` | `canonical-2026-05-18/scores/iwssim_imazen.parquet` | identical content, canonical name |
+| `2026-05-15-full-features/*_features_372col_2026-05-15.parquet` | `canonical-2026-05-18/val/*.parquet` | per-corpus validation feature extraction is canonical here |
+| `2026-05-18-v24-alpha/*.parquet` (α-sweep variants) | NOT in canonical set; α is a hyperparam, not a corpus | experimental scope |
+| `2026-05-18-ssim2/{kadid,tid,large}_*target*.parquet` | superseded by `2026-05-18-v24/` then `canonical-2026-05-18/train/` | upstream intermediate |
+| `2026-05-15-cvvdp-r2/safesyn_v15r_zenjpeg_cvvdp_300col.parquet` | superseded by `train/safesyn.parquet` (372 features + 4 targets) | older 300-col cut |
+| `2026-05-14-clean/*.csv` | superseded by `train/safesyn.parquet` (post-2026-05-12 perceptual-overlap purge) | older clean cut |
+| `2026-05-16/*.parquet` (safesyn IW-SSIM backfill intermediate) | NOT in canonical set; intermediate sidecar to the 2026-05-17 join | upstream intermediate |
+| `2026-05-07/unified/*.parquet` | NOT in canonical set; older 351-col raw v15-sweep parquets. Keep for forensic. | older feature schema |
+
+**Old paths are NOT deleted.** Many in-flight runners (V_22 retrain
+finishing on `2026-05-18-v24/`, EX-4 343-feat eval on
+`2026-05-18-extfeat/`, α-sweep on `2026-05-18-v24-alpha/`, konjnd-dense
+agent on `2026-05-18-konjnd-dense/`) may still reference them. Cleanup
+of the deprecated dirs is a future-session job — confirm zero in-flight
+references first.
+
+### Build / re-build script
+
+`scripts/canonical_corpus/build_canonical_parquets.py` consolidates
+sources into the canonical layout. Re-run when a new training corpus
+or target column is added; bump the date suffix (`canonical-2026-MM-DD/`)
+and update this section. The script's docstring is the source-of-truth
+on schema and source paths.
+
+### Operational rules
+
+1. **Train recipes** load from `canonical-2026-05-18/train/*.parquet`
+   only. Pass `--target-column NAME` to select among the available
+   target columns. Use the per-parquet "non-null targets" column in
+   the table above to know which columns have real data — null
+   target columns must NOT be silently trained against (the trainer
+   should fail loudly, not learn to predict nulls).
+2. **Val recipes** load from `canonical-2026-05-18/val/*.parquet`
+   only — never load `val/*.parquet`'s `human_score` as a training
+   target. `bake_verdict` already loads from
+   `2026-05-15-full-features/` by default; queued: switch its
+   `--features-root` default to canonical.
+3. **Schema evolution**: adding a new target column means rebuilding
+   the canonical set + bumping the date. Don't sneak a target into
+   `2026-05-18-v24/` after-the-fact.
+4. **R2 sync**: re-upload via
+   `aws s3 sync /mnt/v/zen/zensim-training/canonical-YYYY-MM-DD/ s3://zentrain/canonical-training-YYYY-MM-DD/ --endpoint-url https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com`
+   (with `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` set from
+   `~/.config/cloudflare/r2-credentials`).
+
 ## zenpredict crate dependency policy (added 2026-05-15)
 
 **Use path or git refs to the local `zenanalyze/zenpredict` repo,
