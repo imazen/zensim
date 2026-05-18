@@ -103,7 +103,7 @@ mod simd_mlp;
 mod contamination_guard;
 
 use mlp_train::{
-    MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv,
+    LossKind, MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv,
 };
 
 #[derive(Parser)]
@@ -517,6 +517,48 @@ struct Args {
     /// Only meaningful when `--norm-in-norm-weight > 0`.
     #[arg(long, default_value_t = 2.0, value_name = "FLOAT")]
     norm_in_norm_q: f64,
+
+    /// EX-1 (2026-05-17): pairwise loss kind.
+    ///
+    /// - `ranknet` (default): legacy logistic / Bradley-Terry; bit-
+    ///   identical to V_22-mix-LARGE ship recipe at K, NiN, PWRC
+    ///   defaults.
+    /// - `thurstone`: Case V Gaussian-CDF NLL. `loss = −log Φ(d · target ·
+    ///   (y_b − y_a))` with `d = Φ⁻¹(0.75) ≈ 0.6745`. Doc §4 + §8 EX-1
+    ///   recommends this to close the AIC-3 SROCC gap (0.787 → ≥0.85)
+    ///   while preserving CID22/KonJND.
+    ///
+    /// Thurstone forces sequential per-pair gradients (parallel-batch
+    /// and Norm-in-Norm OFF). Compatible with PWRC pair weighting,
+    /// TV regularizer, low/mid/high-q boosts, and minibatch
+    /// accumulation.
+    #[arg(long, default_value = "ranknet", value_name = "KIND")]
+    loss: String,
+
+    /// EX-1 (2026-05-17): Thurstone JND constant. Default
+    /// `0.6745 = Φ⁻¹(0.75)` places one JND at the 75 %-detection
+    /// boundary per Case V. Increase to compress the embedding scale,
+    /// decrease to stretch it.
+    #[arg(long, default_value_t = 0.6745, value_name = "FLOAT")]
+    thurstone_d: f64,
+
+    /// EX-1 (2026-05-17): drop pairs where `|score_a − score_b| <
+    /// ε` (on the 0..100 `score_zensim` scale, AFTER target_scale ·
+    /// 100 has been applied by the parquet loader). Doc-recommended
+    /// 5.0 (= 0.05 on raw normalised target). Set to 0 to feed every
+    /// pair to the Thurstone NLL (sub-1-unit pairs are mostly
+    /// ssim2/iwssim noise).
+    #[arg(long, default_value_t = 5.0, value_name = "FLOAT")]
+    thurstone_eps: f64,
+
+    /// EX-1 (2026-05-17, doc §4): auxiliary content-class head
+    /// weight. Default 0.0 = no aux head. **Currently must be 0**
+    /// — the per-row class plumbing through `TrainingGroup` is
+    /// queued follow-up work. Flag is accepted to lock the CLI
+    /// shape; setting > 0 will panic with a clear message until the
+    /// plumbing lands.
+    #[arg(long, default_value_t = 0.0, value_name = "FLOAT")]
+    aux_content_class_weight: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1304,6 +1346,19 @@ fn main() {
         norm_in_norm_weight: args.norm_in_norm_weight,
         norm_in_norm_p: args.norm_in_norm_p,
         norm_in_norm_q: args.norm_in_norm_q,
+        loss_kind: match args.loss.to_ascii_lowercase().as_str() {
+            "ranknet" => LossKind::RankNet,
+            "thurstone" => LossKind::Thurstone,
+            other => {
+                eprintln!(
+                    "--loss must be one of `ranknet` / `thurstone`, got {other:?}"
+                );
+                std::process::exit(2);
+            }
+        },
+        thurstone_d: args.thurstone_d,
+        thurstone_eps: args.thurstone_eps,
+        aux_content_class_weight: args.aux_content_class_weight,
     };
 
     println!(

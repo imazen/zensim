@@ -62,6 +62,28 @@ pub enum ValidationPolicy {
     Min,
 }
 
+/// EX-1 (PSYCHOVISUAL_LEARNINGS § 4 + 8, 2026-05-17): pairwise loss
+/// kind. `RankNet` is the legacy logistic / Bradley-Terry default;
+/// `Thurstone` is the Case V Gaussian-CDF variant that places the
+/// 75% detection probability at `|z_i − z_j| = 1` JND (constant
+/// `d ≈ 0.6745 = Φ⁻¹(0.75)`).
+///
+/// **Sign convention**: the zensim MLP outputs *raw distance* (lower
+/// = higher quality). For both losses we treat
+/// `target = (mos_a - mos_b).signum()` so the prediction-side gradient
+/// pulls `y_a < y_b` whenever `mos_a > mos_b`. The Thurstone
+/// likelihood is computed on `target · (yb − ya)`, identical wiring
+/// to RankNet — only the link function (Gaussian CDF vs logistic) and
+/// the JND scaling differ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LossKind {
+    /// Logistic / Bradley-Terry. `loss = log(1 + exp(target · (ya − yb)))`.
+    /// Bit-identical to the V_22-mix-LARGE ship recipe.
+    RankNet,
+    /// Thurstone Case V Gaussian-CDF NLL. EX-1.
+    Thurstone,
+}
+
 /// Knobs for [`train_mlp`]. Defaults match the V0_4 placeholder
 /// architecture (228 → 32 → 1) with `Min` validation gating.
 #[derive(Clone, Debug)]
@@ -317,6 +339,44 @@ pub struct MlpHyperparams {
     ///
     /// Only meaningful when `norm_in_norm_weight > 0`.
     pub norm_in_norm_q: f64,
+
+    /// EX-1 (2026-05-17): pairwise loss kind. Defaults to
+    /// [`LossKind::RankNet`] (bit-identical to the V_22-mix-LARGE
+    /// ship). Set to [`LossKind::Thurstone`] to use Case V Gaussian-
+    /// CDF NLL; per PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM § 4 + 8 this is
+    /// the single highest-yield supervision change for closing the
+    /// AIC-3 SROCC gap (current 0.787 → target ≥ 0.85).
+    pub loss_kind: LossKind,
+
+    /// EX-1 (2026-05-17): Thurstone JND constant.
+    /// `d ≈ 0.6745 = Φ⁻¹(0.75)` places one JND at the 75% detection
+    /// probability per Thurstone's Law of Comparative Judgment (Case
+    /// V), so latent embedding gap `|z_i − z_j| = 1` ↔ 1 JND. Only
+    /// active when `loss_kind == Thurstone`.
+    pub thurstone_d: f64,
+
+    /// EX-1 (2026-05-17): ε on the **normalised score delta** below
+    /// which pairs are dropped before computing Thurstone likelihood.
+    /// Doc-recommended ε ≈ 0.05 on the mix_cv40_iw60 target. Only
+    /// active when `loss_kind == Thurstone`. NOTE: this is separate
+    /// from `pwrc_sensory_threshold` — that one fires on `|MOS_a −
+    /// MOS_b|` in 0..100 score-zensim units (PWRC-aware), while this
+    /// one is on the raw normalised target (0..1 typical) BEFORE the
+    /// `score_zensim` rescale.
+    pub thurstone_eps: f64,
+
+    /// EX-1 (2026-05-17): auxiliary content-class head weight. When
+    /// `> 0.0`, the trainer attaches a 4-class softmax head off the
+    /// shared embedding (predicting photo / lineart / screen /
+    /// document from the row name prefix) and adds
+    /// `aux_content_class_weight · cross_entropy` to the per-pair
+    /// loss for both the `a` and `b` sides. Default `0.0` = no aux
+    /// head, bit-identical to legacy.
+    ///
+    /// Per § 4: "Multiple papers (CPIPS, multi-task SCI) confirm
+    /// cheap regularizer." ~30 extra parameters total (n_hidden ×
+    /// 4 + 4).
+    pub aux_content_class_weight: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -346,8 +406,75 @@ impl Default for MlpHyperparams {
             norm_in_norm_weight: 0.0,
             norm_in_norm_p: 1.0,
             norm_in_norm_q: 2.0,
+            loss_kind: LossKind::RankNet,
+            thurstone_d: 0.6745, // Φ⁻¹(0.75)
+            thurstone_eps: 0.05,
+            aux_content_class_weight: 0.0,
         }
     }
+}
+
+/// EX-1 (2026-05-17): standard normal CDF Φ(x) via Hastings 7-term
+/// approximation (max error ≈ 7.5e-8 across the real line) using
+/// `erf` reconstructed in-place — no extra deps.
+///
+/// `Φ(x) = 0.5 · (1 + erf(x / √2))`. For magnitudes > 8 we clamp to
+/// avoid `0` / `1` exactly so the gradient `-φ(x)/Φ(x)` never divides
+/// by zero. Returned values are in `(0, 1)` strictly.
+#[inline]
+pub fn norm_cdf(x: f64) -> f64 {
+    // erf via Abramowitz & Stegun 7.1.26 (Hastings approximation),
+    // |error| ≤ 1.5e-7 — sufficient for SGD gradients (Adam step
+    // bias correction noise dominates).
+    fn erf_az(x: f64) -> f64 {
+        let sign = if x < 0.0 { -1.0 } else { 1.0 };
+        let z = x.abs();
+        let t = 1.0 / (1.0 + 0.3275911 * z);
+        let y = 1.0
+            - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t
+                + 0.254829592)
+                * t
+                * (-z * z).exp();
+        sign * y
+    }
+    let raw = 0.5 * (1.0 + erf_az(x * std::f64::consts::FRAC_1_SQRT_2));
+    // Strict (0, 1) clamp for numerical safety in `log Φ` and `1/Φ`.
+    raw.clamp(1.0e-300, 1.0 - 1.0e-16)
+}
+
+/// Standard normal PDF φ(x). Inline closed-form, no deps.
+#[inline]
+pub fn norm_pdf(x: f64) -> f64 {
+    const INV_SQRT_TWO_PI: f64 = 0.398_942_280_401_432_7; // 1/√(2π)
+    INV_SQRT_TWO_PI * (-0.5 * x * x).exp()
+}
+
+/// EX-1 (2026-05-17): Thurstone Case V Gaussian-CDF NLL on a single
+/// observed-ordering pair plus the corresponding `∂L/∂pred_diff`.
+///
+/// `target ∈ {−1, +1}` is the human-side ordering (`+1 ⇒ a better
+/// than b ⇒ y_a should be lower since output is distance`). `d` is
+/// the JND scale constant (typically `0.6745 = Φ⁻¹(0.75)` so that
+/// `|z_i − z_j| = 1` is one JND). `pred_diff = y_b − y_a`.
+///
+/// Returns `(loss, dL_d_pred_diff)` where
+/// `loss = −log Φ(d · target · pred_diff)` and
+/// `dL_d_pred_diff = −d · target · φ(u) / Φ(u)`.
+///
+/// **Sign correctness check** (against RankNet): when target = +1
+/// and pred_diff is large-positive (b > a, correct ordering),
+/// `u = d · pred_diff > 0` ⇒ Φ ≈ 1 ⇒ `loss ≈ 0`, gradient ≈ 0. When
+/// pred_diff is large-negative (wrong ordering), u is very negative
+/// ⇒ Φ → 0 ⇒ loss → ∞ and gradient → −d · target = −d (push
+/// pred_diff up). Same shape as RankNet.
+#[inline]
+pub fn thurstone_pair_loss_and_grad(target: f64, pred_diff: f64, d: f64) -> (f64, f64) {
+    let u = d * target * pred_diff;
+    let phi = norm_cdf(u);
+    let loss = -phi.ln();
+    let dl_du = -norm_pdf(u) / phi;
+    let dl_d_pred_diff = dl_du * d * target;
+    (loss, dl_d_pred_diff)
 }
 
 /// Compute the per-pair PWRC loss weight given the two human scores
@@ -703,7 +830,47 @@ pub fn train_mlp_with_tv(
     // same K produces bit-identical bake bytes regardless of
     // thread count.
     let k = hyperparams.minibatch_size.max(1);
-    let parallel = hyperparams.parallel_batch && k > 1;
+    // EX-1 (2026-05-17): Thurstone Case V uses a different link
+    // function than the parallel-batch / Norm-in-Norm fast paths
+    // (which are hardcoded to logistic / sigmoid). Force the
+    // sequential per-pair path when Thurstone is requested so the
+    // Φ-based gradient flows through correctly. This sacrifices the
+    // T8.2 parallelism but keeps correctness — at 50 000 pairs/epoch
+    // × 300 epochs this is still ~30 min on the V_22 recipe.
+    let thurstone_on = hyperparams.loss_kind == LossKind::Thurstone;
+    let parallel = hyperparams.parallel_batch && k > 1 && !thurstone_on;
+    if thurstone_on && hyperparams.norm_in_norm_weight > 0.0 {
+        panic!(
+            "EX-1: --loss thurstone is incompatible with --norm-in-norm-weight > 0 \
+             (Norm-in-Norm batch path uses RankNet sigmoid gradients hardcoded). \
+             Either disable Norm-in-Norm or use --loss ranknet."
+        );
+    }
+    if thurstone_on {
+        log_line(
+            &format!(
+                "MLP train: Thurstone Case V Gaussian-CDF NLL active (EX-1): \
+                 d={:.4} (Φ⁻¹(0.75) ≈ 0.6745), ε={:.3} (drop |Δscore|<ε in 0..100 units); \
+                 minibatch_size={} (parallel-batch and NiN forced off)",
+                hyperparams.thurstone_d, hyperparams.thurstone_eps, k,
+            ),
+            log,
+        );
+    }
+    if hyperparams.aux_content_class_weight > 0.0 {
+        // EX-1 (2026-05-17): content-class aux head requires per-row
+        // labels (photo / lineart / screen / document) that are not
+        // currently threaded through `TrainingGroup`. Plumbing
+        // `Option<&[u8]> classes` end-to-end is queued as follow-up;
+        // until then this flag MUST be 0 — accepting > 0 silently
+        // would do nothing. Surface the gap loudly.
+        panic!(
+            "--aux-content-class-weight={} requested, but TrainingGroup does \
+             not currently carry per-row content classes. Wiring is queued; \
+             set the flag to 0 in the meantime.",
+            hyperparams.aux_content_class_weight
+        );
+    }
     // Buffer holding sequentially-drawn (group_idx, ia, ib) samples
     // for the parallel-batch path. Always pre-allocated to capacity K
     // so push/clear in the hot loop don't realloc.
@@ -894,6 +1061,20 @@ pub fn train_mlp_with_tv(
             {
                 continue;
             }
+            // EX-1 (2026-05-17): Thurstone sensory threshold lives on
+            // the same 0..100 `score_zensim` scale as PWRC's (the
+            // trainer already multiplied `human_score` by 100 at load
+            // time). Doc-recommended ε ≈ 0.05 on normalised target
+            // corresponds to 5.0 on score_zensim. The Thurstone
+            // gradient is well-defined right down to |Δ|→0, but
+            // sub-1 zensim-unit pairs are ssim2/iwssim noise — drop
+            // them.
+            if hyperparams.loss_kind == LossKind::Thurstone
+                && hyperparams.thurstone_eps > 0.0
+                && (mos_a - mos_b).abs() < hyperparams.thurstone_eps
+            {
+                continue;
+            }
             // PWRC per-pair weight (default 1.0 when disabled). Scales
             // both loss & dl/dy linearly — the gradient is `pair_weight
             // * dl/dy` because loss is linear in pair_weight.
@@ -903,21 +1084,39 @@ pub fn train_mlp_with_tv(
                 1.0
             };
             let pred_diff = yb - ya;
-            let z = -target * pred_diff;
-            let loss_raw = if z > 50.0 {
-                z
-            } else if z < -50.0 {
-                0.0
-            } else {
-                (z.exp() + 1.0).ln()
+            let (loss_raw, dl_d_pred_diff_unweighted) = match hyperparams.loss_kind {
+                LossKind::RankNet => {
+                    // Legacy logistic / Bradley-Terry. `loss = log(1 +
+                    // exp(target · (ya − yb)))`; `z = −target · (yb −
+                    // ya)`, so `loss = softplus(z)`. Linearised
+                    // softplus branches guard against overflow at
+                    // large |z|.
+                    let z = -target * pred_diff;
+                    let l = if z > 50.0 {
+                        z
+                    } else if z < -50.0 {
+                        0.0
+                    } else {
+                        (z.exp() + 1.0).ln()
+                    };
+                    let sig_z = 1.0 / (1.0 + (-z).exp());
+                    let dl = -target * sig_z;
+                    (l, dl)
+                }
+                LossKind::Thurstone => {
+                    // EX-1: Φ-based Case V NLL. See
+                    // `thurstone_pair_loss_and_grad` for the gradient
+                    // derivation. `d ≈ 0.6745` makes `|y_a − y_b| = 1`
+                    // one JND (75 % detection prob).
+                    thurstone_pair_loss_and_grad(target, pred_diff, hyperparams.thurstone_d)
+                }
             };
             let loss = loss_raw * pair_weight;
             total_loss += loss;
             n_steps += 1;
             steps_since_adam += 1;
 
-            let sig_z = 1.0 / (1.0 + (-z).exp());
-            let dl_d_pred_diff = -target * sig_z * pair_weight;
+            let dl_d_pred_diff = dl_d_pred_diff_unweighted * pair_weight;
             let dl_dya = -dl_d_pred_diff;
             let dl_dyb = dl_d_pred_diff;
 
@@ -2159,6 +2358,168 @@ mod tests {
     fn predict_one(predictor: &mut Predictor<'_>, features: &[f64]) -> f64 {
         let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();
         predictor.predict(&f32_features).unwrap()[0] as f64
+    }
+
+    // ----------------------------------------------------------------
+    // EX-1 (2026-05-17): Thurstone Case V Gaussian-CDF NLL tests.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn norm_cdf_anchors() {
+        // Standard normal CDF reference points.
+        assert!((norm_cdf(0.0) - 0.5).abs() < 1e-7);
+        // Φ(0.6745) = 0.75 (Thurstone JND anchor — d = Φ⁻¹(0.75)).
+        assert!(
+            (norm_cdf(0.6745) - 0.75).abs() < 1e-4,
+            "Φ(d) = {}",
+            norm_cdf(0.6745)
+        );
+        // Φ(1.96) ≈ 0.975.
+        assert!((norm_cdf(1.96) - 0.975).abs() < 1e-3);
+        // Tails clamp into strictly (0, 1) so log Φ never explodes.
+        assert!(norm_cdf(-50.0) > 0.0);
+        assert!(norm_cdf(50.0) < 1.0);
+    }
+
+    #[test]
+    fn norm_pdf_anchors() {
+        // φ(0) = 1/√(2π) ≈ 0.39894.
+        assert!((norm_pdf(0.0) - 0.398_942_280_4).abs() < 1e-7);
+        // φ(1) = 1/√(2π) · exp(-1/2) ≈ 0.24197.
+        assert!((norm_pdf(1.0) - 0.241_970_724_5).abs() < 1e-7);
+        assert!((norm_pdf(-1.0) - 0.241_970_724_5).abs() < 1e-7);
+    }
+
+    #[test]
+    fn thurstone_loss_correct_ordering_low() {
+        // target = +1, pred_diff (= yb - ya) large positive ⇒ a is
+        // ranked below b in distance, ordering CORRECT ⇒ Φ(u) ≈ 1 ⇒
+        // loss ≈ 0 and gradient ≈ 0.
+        let (loss, dl) = thurstone_pair_loss_and_grad(1.0, 5.0, 0.6745);
+        assert!(loss < 0.01, "loss={loss}");
+        assert!(dl.abs() < 0.01, "dl={dl}");
+    }
+
+    #[test]
+    fn thurstone_loss_wrong_ordering_pushes_correctly() {
+        // target = +1, pred_diff large negative ⇒ a ranks ABOVE b in
+        // distance — wrong direction. Loss must be large positive and
+        // gradient must push pred_diff UP (∂L/∂pred_diff < 0 because
+        // we want to INCREASE pred_diff).
+        let (loss, dl) = thurstone_pair_loss_and_grad(1.0, -3.0, 0.6745);
+        assert!(loss > 1.0, "wrong-direction loss should be large; got {loss}");
+        assert!(
+            dl < 0.0,
+            "gradient must pull pred_diff up; got dl/d(pred_diff)={dl}"
+        );
+    }
+
+    #[test]
+    fn thurstone_loss_target_negative_mirrors() {
+        // target = -1 swaps the desired direction. pred_diff negative
+        // is now CORRECT ⇒ loss ≈ 0; pred_diff positive is wrong.
+        let (loss_correct, _) = thurstone_pair_loss_and_grad(-1.0, -3.0, 0.6745);
+        let (loss_wrong, dl_wrong) = thurstone_pair_loss_and_grad(-1.0, 3.0, 0.6745);
+        assert!(loss_correct < 0.1, "correct-direction loss should be small; {loss_correct}");
+        assert!(
+            loss_wrong > 1.0,
+            "wrong-direction loss should be large; got {loss_wrong}"
+        );
+        // ∂L/∂pred_diff for target=-1 wrong direction should push DOWN.
+        assert!(
+            dl_wrong > 0.0,
+            "for target=-1 wrong, gradient must pull pred_diff down; dl={dl_wrong}"
+        );
+    }
+
+    #[test]
+    fn thurstone_numerical_gradient_check() {
+        // Compare analytical ∂L/∂pred_diff against a centred finite
+        // difference. Use a non-trivial point.
+        let d = 0.6745;
+        let target = 1.0;
+        let pred_diff = -0.4;
+        let eps = 1e-6;
+        let (_, dl) = thurstone_pair_loss_and_grad(target, pred_diff, d);
+        let (l_plus, _) = thurstone_pair_loss_and_grad(target, pred_diff + eps, d);
+        let (l_minus, _) = thurstone_pair_loss_and_grad(target, pred_diff - eps, d);
+        let num = (l_plus - l_minus) / (2.0 * eps);
+        assert!(
+            (dl - num).abs() < 1e-4,
+            "analytical {dl} vs numerical {num}"
+        );
+    }
+
+    #[test]
+    fn thurstone_jnd_at_unit_gap() {
+        // Sanity: at pred_diff = ±1 (one latent JND), Φ(d · 1) = 0.75
+        // by construction.
+        let (_, dl_correct) = thurstone_pair_loss_and_grad(1.0, 1.0, 0.6745);
+        // Gradient at u = +0.6745 should still pull a bit (since
+        // there's a 25 % residual error mass), not zero.
+        assert!(dl_correct < 0.0, "gradient at 1-JND correct still pulls; got {dl_correct}");
+        // Loss = -ln(0.75) ≈ 0.288.
+        let (loss, _) = thurstone_pair_loss_and_grad(1.0, 1.0, 0.6745);
+        let expected = -(0.75_f64.ln());
+        assert!(
+            (loss - expected).abs() < 1e-4,
+            "loss should equal -ln(0.75)≈0.2877; got {loss}"
+        );
+    }
+
+    #[test]
+    fn thurstone_train_smoke_runs_and_recovers_ranking() {
+        // End-to-end: train a tiny MLP on a synthetic group with the
+        // Thurstone loss and confirm SROCC > 0.85. Mirrors the
+        // RankNet smoke test below.
+        let n_features = 4;
+        let n = 50;
+        let mut rng = SplitMix64::new(7);
+        let features_owned: Vec<Vec<f64>> = (0..n)
+            .map(|_| (0..n_features).map(|_| rng.next_normal()).collect())
+            .collect();
+        let targets: Vec<f64> = features_owned
+            .iter()
+            .map(|f| 50.0 + 20.0 * f[0] + 10.0 * f[1].tanh())
+            .collect();
+        let feat_refs: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".into(),
+            human_scores: &targets,
+            features: &feat_refs,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let hyper = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 100,
+            pairs_per_epoch: 1500,
+            initial_lr: 0.005,
+            log_every: 1000,
+            early_stop_patience: 0,
+            validation_policy: ValidationPolicy::Mean,
+            loss_kind: LossKind::Thurstone,
+            thurstone_d: 0.6745,
+            thurstone_eps: 0.5,
+            ..Default::default()
+        };
+        let mut log = Vec::new();
+        let bytes = train_mlp(&[group], n_features, &hyper, &mut log);
+
+        let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
+        let model = Model::from_bytes(leaked).expect("bake should load");
+        let mut predictor = Predictor::new(&model);
+
+        let preds: Vec<f64> = features_owned
+            .iter()
+            .map(|f| predict_one(&mut predictor, f))
+            .collect();
+        let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
+        let srocc = spearman_correlation(&targets, &neg_preds);
+        assert!(
+            srocc > 0.85,
+            "Thurstone MLP failed to recover synthetic ranking: SROCC={srocc:.4}"
+        );
     }
 
     /// Generate a synthetic dataset where the target is a known
