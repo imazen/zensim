@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Changed (2026-05-18, even later) — PR #31 (V_06 FiLM-gated MLP) falsification on two-trail framework
+
+- **PR #31 (`v06-rebalanced-corpus`) FALSIFIED on both Balanced and Compression trails.**
+  The 2026-05-05 FiLM-gated MLP bake at
+  `/mnt/v/output/zensim/synthetic-v2/runs/v06_film_20260505T212932.bin`
+  was re-evaluated against today's two ships under § A.9
+  1000-bootstrap. CID22 wins decisively against Balanced (+0.043
+  SROCC) and marginally against Compression (+0.011 SROCC), but
+  loses decisively on KADID (−0.115 vs Balanced, −0.079 vs
+  Compression), TID (−0.128, −0.044), KonJND-1k (−0.396, −0.311),
+  and AIC-3 (tied with Balanced, **B>>A** vs Compression by −0.032).
+  Both trail gates fail at "no decisive B>>A on any (other)
+  corpus". The PR's reported `val_mean=0.8457` was on the
+  pre-decontamination synthetic-v2 corpus with KonJND-1k 76k-pair
+  validation; today's clean held-out 1008-pair KonJND PJND-threshold
+  subset puts FiLM's photo head at 0.497 SROCC vs Balanced's 0.893.
+- **No rebase performed.** The PR branch is on stale base from
+  2026-05-05; rebasing onto current main would reset 24 540 lines
+  including `iw_pool.rs`, `simd_ops.rs`, 11 newer bakes, both
+  current ships, the entire two-trail framework, the bake_compare
+  tool, and `PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md`. The PR was
+  closed without rebase; the FiLM bake is preserved as historical
+  artifact at the path above.
+- **No SOTA rotation.** Balanced ship remains
+  `zensim/weights/v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin`;
+  compression ship remains
+  `zensim/weights/v_compression_persample_2026-05-18.bin`.
+- **Artifacts**:
+  - `benchmarks/v06_film_falsification_2026-05-18.md` — main verdict
+    doc with per-corpus § A.9 panels + ssim2/cvvdp/iwssim controls.
+  - `benchmarks/bake_compare_v06_film_vs_balanced_2026-05-18.md`
+  - `benchmarks/bake_compare_v06_film_vs_compression_2026-05-18.md`
+
 ### Changed (2026-05-18, later) — Hybrid-head runtime dispatch + FT-gentle verdict
 
 - **`zensim::metric::forward_one_bake` got hybrid-head dispatch.**
