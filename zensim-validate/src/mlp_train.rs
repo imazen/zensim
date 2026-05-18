@@ -830,15 +830,13 @@ pub fn train_mlp_with_tv(
     // same K produces bit-identical bake bytes regardless of
     // thread count.
     let k = hyperparams.minibatch_size.max(1);
-    // EX-1 (2026-05-17): Thurstone Case V uses a different link
-    // function than the parallel-batch / Norm-in-Norm fast paths
-    // (which are hardcoded to logistic / sigmoid). Force the
-    // sequential per-pair path when Thurstone is requested so the
-    // Φ-based gradient flows through correctly. This sacrifices the
-    // T8.2 parallelism but keeps correctness — at 50 000 pairs/epoch
-    // × 300 epochs this is still ~30 min on the V_22 recipe.
+    // EX-1 (2026-05-18): Thurstone Case V Gaussian-CDF NLL composes
+    // with the T8.2 parallel-batch path — `run_parallel_minibatch`
+    // and the sequential per-pair branch both dispatch on
+    // `loss_kind`. NiN (Norm-in-Norm) hardcodes the sigmoid
+    // gradient, so it's still incompatible.
     let thurstone_on = hyperparams.loss_kind == LossKind::Thurstone;
-    let parallel = hyperparams.parallel_batch && k > 1 && !thurstone_on;
+    let parallel = hyperparams.parallel_batch && k > 1;
     if thurstone_on && hyperparams.norm_in_norm_weight > 0.0 {
         panic!(
             "EX-1: --loss thurstone is incompatible with --norm-in-norm-weight > 0 \
@@ -851,7 +849,7 @@ pub fn train_mlp_with_tv(
             &format!(
                 "MLP train: Thurstone Case V Gaussian-CDF NLL active (EX-1): \
                  d={:.4} (Φ⁻¹(0.75) ≈ 0.6745), ε={:.3} (drop |Δscore|<ε in 0..100 units); \
-                 minibatch_size={} (parallel-batch and NiN forced off)",
+                 minibatch_size={}, parallel-batch={parallel}",
                 hyperparams.thurstone_d, hyperparams.thurstone_eps, k,
             ),
             log,
@@ -1009,6 +1007,9 @@ pub fn train_mlp_with_tv(
                         hyperparams.pwrc_pair_weight,
                         hyperparams.pwrc_sensory_threshold,
                         hyperparams.pwrc_band_weights.as_deref(),
+                        hyperparams.loss_kind,
+                        hyperparams.thurstone_d,
+                        hyperparams.thurstone_eps,
                     );
                     parallel_batch_buffer.clear();
                     total_loss += loss_added;
@@ -1329,6 +1330,9 @@ pub fn train_mlp_with_tv(
                     hyperparams.pwrc_pair_weight,
                     hyperparams.pwrc_sensory_threshold,
                     hyperparams.pwrc_band_weights.as_deref(),
+                    hyperparams.loss_kind,
+                    hyperparams.thurstone_d,
+                    hyperparams.thurstone_eps,
                 );
                 parallel_batch_buffer.clear();
                 total_loss += loss_added;
@@ -1756,6 +1760,7 @@ impl LocalGrads {
 /// steps_added — they're functionally no-ops, just like the
 /// sequential path.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn run_parallel_minibatch(
     samples: &[(usize, usize, usize)],
     groups: &[TrainingGroup<'_>],
@@ -1772,6 +1777,12 @@ fn run_parallel_minibatch(
     pwrc_enabled: bool,
     pwrc_sensory_threshold: f64,
     pwrc_band_weights: Option<&[f64]>,
+    // EX-1 (2026-05-18): Thurstone loss path. Default `LossKind::RankNet`
+    // + `thurstone_d = 0.6745` is bit-identical to the legacy parallel
+    // path (LossKind::RankNet never reads `thurstone_d` / `thurstone_eps`).
+    loss_kind: LossKind,
+    thurstone_d: f64,
+    thurstone_eps: f64,
 ) -> (u64, f64) {
     // Chunk size is a **fixed function of K** (not thread count) so
     // the chunk partition — and therefore the FP reduce order — is
@@ -1836,25 +1847,41 @@ fn run_parallel_minibatch(
                 {
                     continue;
                 }
+                // EX-1 (2026-05-18): Thurstone-specific drop (mirrors
+                // sequential path).
+                if loss_kind == LossKind::Thurstone
+                    && thurstone_eps > 0.0
+                    && (mos_a - mos_b).abs() < thurstone_eps
+                {
+                    continue;
+                }
                 let pair_weight = if pwrc_enabled {
                     pwrc_pair_weight(mos_a, mos_b, pwrc_band_weights)
                 } else {
                     1.0
                 };
                 let pred_diff = yb - ya;
-                let z = -target * pred_diff;
-                let loss_raw = if z > 50.0 {
-                    z
-                } else if z < -50.0 {
-                    0.0
-                } else {
-                    (z.exp() + 1.0).ln()
+                let (loss_raw, dl_d_pred_diff_unweighted) = match loss_kind {
+                    LossKind::RankNet => {
+                        let z = -target * pred_diff;
+                        let l = if z > 50.0 {
+                            z
+                        } else if z < -50.0 {
+                            0.0
+                        } else {
+                            (z.exp() + 1.0).ln()
+                        };
+                        let sig_z = 1.0 / (1.0 + (-z).exp());
+                        (l, -target * sig_z)
+                    }
+                    LossKind::Thurstone => {
+                        thurstone_pair_loss_and_grad(target, pred_diff, thurstone_d)
+                    }
                 };
                 chunk_loss += loss_raw * pair_weight;
                 chunk_steps += 1;
 
-                let sig_z = 1.0 / (1.0 + (-z).exp());
-                let dl_d_pred_diff = -target * sig_z * pair_weight;
+                let dl_d_pred_diff = dl_d_pred_diff_unweighted * pair_weight;
                 let dl_dya = -dl_d_pred_diff;
                 let dl_dyb = dl_d_pred_diff;
 

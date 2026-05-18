@@ -1,6 +1,11 @@
 /.cargo/config.toml
 heaptrack.*
 
+# Working notes synthesized from the zenpapers research corpus.
+# Kept out of git so we don't ship literature dumps with the crate.
+PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md
+*_LEARNINGS_FOR_*.md
+
 # === Standard exclusions (do not depend on user ~/.gitignore) ===
 
 # Rust build artifacts
