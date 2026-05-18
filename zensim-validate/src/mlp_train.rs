@@ -399,6 +399,31 @@ pub struct MlpHyperparams {
     ///   the per-sample backprop to the TV gradient path).
     /// - Parallel-batch flag (sequential mini-batch only).
     pub per_sample_alpha_head: bool,
+
+    /// EX-DUAL: dual-target multi-task head. Replaces the
+    /// single-output scalar y with `y_quality` (per-pair RankNet,
+    /// the inference output) AND `y_pjnd` (auxiliary per-source
+    /// PJND regression, training-only). The encoder is shared so
+    /// auxiliary supervision forces PJND-relevant representations.
+    /// Inference baking: single-output (y_pjnd dropped). Metadata
+    /// flag `zentrain.dual_target_head=true` records provenance.
+    ///
+    /// Mutually exclusive with `pool_head`, `hybrid_head`,
+    /// `per_sample_alpha_head`.
+    pub dual_target_head: bool,
+
+    /// EX-DUAL: auxiliary PJND-MSE loss weight (λ_pjnd).
+    /// Effective only when `dual_target_head = true`. Sweep range
+    /// per the EX-DUAL protocol: {0.01, 0.05, 0.1, 0.3, 1.0}.
+    /// λ=0 collapses to single-head RankNet baseline.
+    pub pjnd_loss_weight: f64,
+
+    /// EX-DUAL: name of the training group whose `human_scores`
+    /// column is the PJND-broadcast target (not a ranking
+    /// score). Typically `"konjnd_dense_pjnd"`. Effective only
+    /// when `dual_target_head = true`. `None` = no PJND source =
+    /// dual_target_head collapses to single-head RankNet.
+    pub pjnd_group_name: Option<String>,
 }
 
 impl Default for MlpHyperparams {
@@ -431,6 +456,9 @@ impl Default for MlpHyperparams {
             pool_head: false,
             hybrid_head: false,
             per_sample_alpha_head: false,
+            dual_target_head: false,
+            pjnd_loss_weight: 0.0,
+            pjnd_group_name: None,
         }
     }
 }
@@ -570,11 +598,15 @@ pub fn train_mlp_with_tv(
     // that a SIMD/par-chunks port is queued, not load-bearing).
     let head_flags = (hyperparams.pool_head as u8)
         + (hyperparams.hybrid_head as u8)
-        + (hyperparams.per_sample_alpha_head as u8);
+        + (hyperparams.per_sample_alpha_head as u8)
+        + (hyperparams.dual_target_head as u8);
     assert!(
         head_flags <= 1,
-        "pool_head / hybrid_head / per_sample_alpha_head are mutually exclusive"
+        "pool_head / hybrid_head / per_sample_alpha_head / dual_target_head are mutually exclusive"
     );
+    if hyperparams.dual_target_head {
+        return train_mlp_dual_target_head(groups, n_features, hyperparams, log);
+    }
     if hyperparams.per_sample_alpha_head {
         return train_mlp_per_sample_alpha_head(groups, n_features, hyperparams, log);
     }
@@ -5299,6 +5331,492 @@ fn flush_per_sample_alpha_nin_batch<F>(
         *n_steps += steps_added;
     }
     nin_buffer.clear();
+}
+
+/// EX-DUAL: dual-target multi-task head trainer.
+///
+/// Trains a shared encoder + two output heads:
+/// - `y_quality` (per-pair): RankNet on all groups EXCEPT the one
+///   named by `hyperparams.pjnd_group_name`.
+/// - `y_pjnd` (per-sample): MSE regression on the PJND group only
+///   (its `human_scores` column is read as PJND-broadcast targets,
+///   typically 22..70).
+///
+/// Loss per step: ranknet(y_quality) on one pair from a non-PJND
+/// group + λ_pjnd · MSE(y_pjnd) on one sample from the PJND group.
+///
+/// Bake: single-output (y_quality only). y_pjnd weights stored as
+/// optional diagnostic metadata via `bake_dual_target_head_v3`.
+/// Inference path is unchanged from a standard single-head bake.
+///
+/// Minimal feature set vs `train_mlp_per_sample_alpha_head`:
+/// - Cosine LR schedule (period 50 epochs).
+/// - Best-checkpoint selection by validation SROCC (min or mean).
+/// - Early-stop patience.
+/// - L2 on layer-1 weights + w_qual + w_pjnd (biases unreg.).
+/// - Per-epoch validation: y_quality only (PJND head not validated;
+///   it's auxiliary).
+/// **Omitted (out of scope for v0)**: TV regularizer, NiN composition,
+/// PWRC pair weighting, low/mid/high-q row boosts, K-sequential
+/// mini-batch (K=1 only). The V_22-LARGE knobs that wrap RankNet
+/// can be added later if the dual-target hypothesis survives.
+#[allow(clippy::too_many_lines)]
+fn train_mlp_dual_target_head(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+) -> Vec<u8> {
+    use zensim_train_core::dual_target_head as dth;
+
+    let n_hidden = hyperparams.n_hidden;
+    let leaky = hyperparams.leaky_alpha;
+    let lambda_pjnd = hyperparams.pjnd_loss_weight;
+    let pjnd_group_name = hyperparams.pjnd_group_name.as_deref();
+
+    assert!(!groups.is_empty(), "need at least one training group");
+    for g in groups {
+        assert_eq!(
+            g.human_scores.len(),
+            g.features.len(),
+            "{}: scores/features length mismatch",
+            g.name
+        );
+        assert!(
+            g.features.iter().all(|f| f.len() == n_features),
+            "{}: feature length mismatch",
+            g.name
+        );
+    }
+
+    let log_line = |msg: &str, log: &mut Vec<String>| {
+        eprintln!("{msg}");
+        log.push(msg.to_string());
+    };
+
+    log_line(
+        &format!(
+            "MLP train (DUAL-TARGET): arch=[{n_features} → {n_hidden} (LeakyReLU α={leaky}) \
+             → y_quality, y_pjnd (aux)], λ_pjnd={lambda_pjnd}, pjnd_group={:?}, val_policy={:?}",
+            pjnd_group_name, hyperparams.validation_policy,
+        ),
+        log,
+    );
+
+    // Partition groups: rank (non-PJND) vs pjnd.
+    let mut rank_indices: Vec<usize> = Vec::new();
+    let mut pjnd_idx: Option<usize> = None;
+    for (i, g) in groups.iter().enumerate() {
+        let is_pjnd = pjnd_group_name.is_some_and(|name| g.name == name);
+        if is_pjnd {
+            if pjnd_idx.is_some() {
+                panic!(
+                    "dual_target: more than one group matches pjnd_group_name {:?}",
+                    pjnd_group_name
+                );
+            }
+            pjnd_idx = Some(i);
+        } else if g.train_weight > 0.0 {
+            rank_indices.push(i);
+        }
+    }
+    if lambda_pjnd > 0.0 && pjnd_idx.is_none() {
+        log_line(
+            "dual_target: λ_pjnd>0 but no PJND group matched — collapsing to single-head RankNet",
+            log,
+        );
+    }
+
+    let rank_train_total: f64 = rank_indices.iter().map(|&gi| groups[gi].train_weight).sum();
+    assert!(rank_train_total > 0.0, "no rank training groups");
+
+    let val_indices: Vec<usize> = groups
+        .iter()
+        .enumerate()
+        .filter_map(|(i, g)| {
+            if g.validation_weight > 0.0 {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (i, g) in groups.iter().enumerate() {
+        let role = if Some(i) == pjnd_idx {
+            "pjnd-aux"
+        } else if g.train_weight > 0.0 && g.validation_weight > 0.0 {
+            "rank+val"
+        } else if g.train_weight > 0.0 {
+            "rank"
+        } else if g.validation_weight > 0.0 {
+            "val-only"
+        } else {
+            "report"
+        };
+        log_line(
+            &format!(
+                "  {role:>9} group {i}: '{}' n={} train_w={:.3} val_w={:.3}",
+                g.name,
+                g.features.len(),
+                g.train_weight,
+                g.validation_weight,
+            ),
+            log,
+        );
+    }
+
+    // Scaler computed over rank training groups only (PJND group's
+    // feature distribution may be narrower — using only rank for
+    // scaler matches the production V_22 setup where konjnd doesn't
+    // shape the standardizer).
+    let scaler_groups: Vec<TrainingGroup<'_>> = rank_indices
+        .iter()
+        .map(|&gi| TrainingGroup {
+            name: groups[gi].name.clone(),
+            human_scores: groups[gi].human_scores,
+            features: groups[gi].features,
+            train_weight: groups[gi].train_weight,
+            validation_weight: groups[gi].validation_weight,
+        })
+        .collect();
+    let scaler_train_indices: Vec<usize> = (0..rank_indices.len()).collect();
+    let (scaler_mean, scaler_scale) =
+        compute_scaler_from_groups(&scaler_groups, &scaler_train_indices, n_features);
+
+    let std_features: Vec<Vec<f64>> = groups
+        .iter()
+        .map(|g| {
+            let mut buf = vec![0.0f64; g.features.len() * n_features];
+            for (i, &f) in g.features.iter().enumerate() {
+                for d in 0..n_features {
+                    buf[i * n_features + d] =
+                        (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                }
+            }
+            buf
+        })
+        .collect();
+
+    let init_model = dth::DualTargetHeadModel::new(n_features, n_hidden, hyperparams.seed);
+    let mut w1 = init_model.w1.clone();
+    let mut b1 = init_model.b1.clone();
+    let mut w_qual = init_model.w_qual.clone();
+    let mut b_qual = init_model.b_qual;
+    let mut w_pjnd = init_model.w_pjnd.clone();
+    let mut b_pjnd = init_model.b_pjnd;
+
+    let mut rng = SplitMix64::new(
+        hyperparams
+            .seed
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(0x0123456789ABCDEF),
+    );
+
+    // Adam: w2 slot = [w_qual (n_hidden) | w_pjnd (n_hidden)]; b2 = [b_qual, b_pjnd].
+    let n_w2 = 2 * n_hidden;
+    let n_b2 = 2;
+    let mut adam = AdamState::new(w1.len(), b1.len(), n_w2, n_b2);
+
+    let start = Instant::now();
+    let mut best_val_score = f64::NEG_INFINITY;
+    let mut best_bake: Option<Vec<u8>> = None;
+    let mut stale_epochs = 0usize;
+
+    let cdf: Vec<f64> = {
+        let mut cum = 0.0;
+        rank_indices
+            .iter()
+            .map(|&gi| {
+                cum += groups[gi].train_weight;
+                cum / rank_train_total
+            })
+            .collect()
+    };
+
+    // Track auxiliary loss separately for diagnostic logging.
+    for epoch in 0..hyperparams.n_epochs {
+        let lr = hyperparams.initial_lr
+            * 0.5
+            * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
+
+        let mut total_rank_loss = 0.0f64;
+        let mut total_pjnd_sq = 0.0f64;
+        let mut n_rank_steps = 0u64;
+        let mut n_pjnd_steps = 0u64;
+
+        for _ in 0..hyperparams.pairs_per_epoch {
+            // === RankNet step on a non-PJND group ===
+            let u = rng.next_f64_unit();
+            let pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
+            let g_idx = rank_indices[pos];
+            let g = &groups[g_idx];
+            let n = g.features.len();
+            if n < 2 {
+                continue;
+            }
+            let ia = (rng.next_u64() as usize) % n;
+            let mut ib = (rng.next_u64() as usize) % n;
+            if ib == ia {
+                ib = (ib + 1) % n;
+            }
+            let g_feats = &std_features[g_idx];
+            let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
+            let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
+            let sa = g.human_scores[ia];
+            let sb = g.human_scores[ib];
+            if (sa - sb).abs() < 1e-9 {
+                continue;
+            }
+            let (xhi, xlo, hpref_hi, hpref_lo): (&[f64], &[f64], usize, usize) = if sa > sb {
+                (xa, xb, 0, 0)
+            } else {
+                (xb, xa, 0, 0)
+            };
+            let _ = (hpref_hi, hpref_lo);
+
+            let (y_qhi, _y_phi, hp_hi, h_hi) = dth::forward_dual_target_head(
+                xhi, &w1, &b1, &w_qual, b_qual, &w_pjnd, b_pjnd, n_features, n_hidden, leaky,
+            );
+            let (y_qlo, _y_plo, hp_lo, h_lo) = dth::forward_dual_target_head(
+                xlo, &w1, &b1, &w_qual, b_qual, &w_pjnd, b_pjnd, n_features, n_hidden, leaky,
+            );
+            let d = y_qhi - y_qlo;
+            let sig_neg_d = 1.0 / (1.0 + d.exp());
+            let rank_loss = (1.0 + (-d).exp()).ln();
+            total_rank_loss += rank_loss;
+            n_rank_steps += 1;
+            let dl_dyq_hi = -sig_neg_d;
+            let dl_dyq_lo = sig_neg_d;
+
+            let mut g_w_qual_buf = vec![0.0f64; n_hidden];
+            let mut g_w_pjnd_buf = vec![0.0f64; n_hidden];
+            let mut g_b_qual_step = 0.0f64;
+            let mut g_b_pjnd_step = 0.0f64;
+
+            dth::backprop_step_dual_target_head(
+                xhi,
+                &hp_hi,
+                &h_hi,
+                dl_dyq_hi,
+                0.0,
+                &w_qual,
+                &w_pjnd,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_w_qual_buf,
+                &mut g_b_qual_step,
+                &mut g_w_pjnd_buf,
+                &mut g_b_pjnd_step,
+                n_features,
+                n_hidden,
+                leaky,
+            );
+            dth::backprop_step_dual_target_head(
+                xlo,
+                &hp_lo,
+                &h_lo,
+                dl_dyq_lo,
+                0.0,
+                &w_qual,
+                &w_pjnd,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_w_qual_buf,
+                &mut g_b_qual_step,
+                &mut g_w_pjnd_buf,
+                &mut g_b_pjnd_step,
+                n_features,
+                n_hidden,
+                leaky,
+            );
+
+            // === PJND-MSE auxiliary step (one sample from the PJND group) ===
+            if lambda_pjnd > 0.0 {
+                if let Some(pj_gi) = pjnd_idx {
+                    let pj_n = groups[pj_gi].features.len();
+                    if pj_n >= 1 {
+                        let ip = (rng.next_u64() as usize) % pj_n;
+                        let pj_feats = &std_features[pj_gi];
+                        let xp = &pj_feats[ip * n_features..(ip + 1) * n_features];
+                        let target_pjnd = groups[pj_gi].human_scores[ip];
+
+                        let (_y_qp, y_pp, hp_p, h_p) = dth::forward_dual_target_head(
+                            xp, &w1, &b1, &w_qual, b_qual, &w_pjnd, b_pjnd, n_features, n_hidden,
+                            leaky,
+                        );
+                        let resid = y_pp - target_pjnd;
+                        total_pjnd_sq += resid * resid;
+                        n_pjnd_steps += 1;
+                        let dl_dyp = 2.0 * lambda_pjnd * resid;
+
+                        dth::backprop_step_dual_target_head(
+                            xp,
+                            &hp_p,
+                            &h_p,
+                            0.0,
+                            dl_dyp,
+                            &w_qual,
+                            &w_pjnd,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_w_qual_buf,
+                            &mut g_b_qual_step,
+                            &mut g_w_pjnd_buf,
+                            &mut g_b_pjnd_step,
+                            n_features,
+                            n_hidden,
+                            leaky,
+                        );
+                    }
+                }
+            }
+
+            // L2: layer-1 weights, w_qual, w_pjnd. Biases unreg.
+            let l2 = hyperparams.l2_lambda;
+            if l2 > 0.0 {
+                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                    *g += 2.0 * l2 * w;
+                }
+                for j in 0..n_hidden {
+                    g_w_qual_buf[j] += 2.0 * l2 * w_qual[j];
+                    g_w_pjnd_buf[j] += 2.0 * l2 * w_pjnd[j];
+                }
+            }
+
+            // Pack output grads.
+            for j in 0..n_hidden {
+                adam.gw2[j] += g_w_qual_buf[j];
+                adam.gw2[n_hidden + j] += g_w_pjnd_buf[j];
+            }
+            adam.gb2[0] += g_b_qual_step;
+            adam.gb2[1] += g_b_pjnd_step;
+
+            // Adam step.
+            let mut w2_vec = vec![0.0f64; n_w2];
+            for j in 0..n_hidden {
+                w2_vec[j] = w_qual[j];
+                w2_vec[n_hidden + j] = w_pjnd[j];
+            }
+            let mut b2_vec = vec![b_qual, b_pjnd];
+            adam.step(&mut w1, &mut b1, &mut w2_vec, &mut b2_vec, lr);
+            for j in 0..n_hidden {
+                w_qual[j] = w2_vec[j];
+                w_pjnd[j] = w2_vec[n_hidden + j];
+            }
+            b_qual = b2_vec[0];
+            b_pjnd = b2_vec[1];
+        }
+
+        // Per-epoch validation: y_quality only.
+        if epoch % hyperparams.log_every == 0 || epoch + 1 == hyperparams.n_epochs {
+            let mut val_lines: Vec<String> = Vec::new();
+            let mut val_scores: Vec<(f64, f64)> = Vec::new(); // (weight, srocc)
+            for &vi in &val_indices {
+                let g = &groups[vi];
+                let g_feats = &std_features[vi];
+                let n_pairs = g.features.len();
+                let preds: Vec<f64> = (0..n_pairs)
+                    .map(|i| {
+                        let xi = &g_feats[i * n_features..(i + 1) * n_features];
+                        let (y, _, _, _) = dth::forward_dual_target_head(
+                            xi, &w1, &b1, &w_qual, b_qual, &w_pjnd, b_pjnd, n_features, n_hidden,
+                            leaky,
+                        );
+                        y
+                    })
+                    .collect();
+                let srocc = zensim_train_core::spearman(&preds, g.human_scores);
+                val_lines.push(format!("{}={:.4}", g.name, srocc));
+                if g.validation_weight > 0.0 {
+                    val_scores.push((g.validation_weight, srocc));
+                }
+            }
+            let val_score = match hyperparams.validation_policy {
+                ValidationPolicy::Mean => {
+                    let total_w: f64 = val_scores.iter().map(|(w, _)| *w).sum();
+                    if total_w > 0.0 {
+                        val_scores.iter().map(|(w, s)| w * s).sum::<f64>() / total_w
+                    } else {
+                        f64::NAN
+                    }
+                }
+                ValidationPolicy::Min => val_scores
+                    .iter()
+                    .map(|&(_, s)| s)
+                    .fold(f64::INFINITY, f64::min),
+            };
+            let mean_rank_loss = if n_rank_steps > 0 {
+                total_rank_loss / n_rank_steps as f64
+            } else {
+                f64::NAN
+            };
+            let mean_pjnd_rmse = if n_pjnd_steps > 0 {
+                (total_pjnd_sq / n_pjnd_steps as f64).sqrt()
+            } else {
+                f64::NAN
+            };
+            log_line(
+                &format!(
+                    "epoch {epoch:3} | lr={lr:.5} | rank_loss={mean_rank_loss:.4} pjnd_rmse={mean_pjnd_rmse:.3} | val=[{}] -> {val_score:.4} | t={:.1}s",
+                    val_lines.join(", "),
+                    start.elapsed().as_secs_f64(),
+                ),
+                log,
+            );
+
+            if val_score.is_finite() && val_score > best_val_score {
+                best_val_score = val_score;
+                let model = dth::DualTargetHeadModel {
+                    scaler_mean: scaler_mean.clone(),
+                    scaler_scale: scaler_scale.clone(),
+                    w1: w1.clone(),
+                    b1: b1.clone(),
+                    w_qual: w_qual.clone(),
+                    b_qual,
+                    w_pjnd: w_pjnd.clone(),
+                    b_pjnd,
+                    n_hidden,
+                    n_features,
+                    pjnd_loss_weight: lambda_pjnd,
+                };
+                best_bake = Some(dth::bake_dual_target_head_v3(&model));
+                stale_epochs = 0;
+            } else {
+                stale_epochs += hyperparams.log_every;
+            }
+            if hyperparams.early_stop_patience > 0
+                && stale_epochs >= hyperparams.early_stop_patience
+            {
+                log_line(
+                    &format!(
+                        "dual_target: early-stop at epoch {epoch} (best val SROCC={best_val_score:.4})"
+                    ),
+                    log,
+                );
+                break;
+            }
+        }
+    }
+
+    // Fallback: if validation never produced a checkpoint (e.g. no
+    // val groups), bake the final state.
+    if best_bake.is_none() {
+        let model = dth::DualTargetHeadModel {
+            scaler_mean,
+            scaler_scale,
+            w1,
+            b1,
+            w_qual,
+            b_qual,
+            w_pjnd,
+            b_pjnd,
+            n_hidden,
+            n_features,
+            pjnd_loss_weight: lambda_pjnd,
+        };
+        best_bake = Some(dth::bake_dual_target_head_v3(&model));
+    }
+    best_bake.expect("dual_target_head: bake produced")
 }
 
 #[cfg(test)]

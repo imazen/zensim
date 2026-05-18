@@ -588,6 +588,33 @@ struct Args {
     /// (skipped on this path — V_22 recipe doesn't use TV).
     #[arg(long, default_value_t = false)]
     per_sample_alpha_head: bool,
+
+    /// EX-DUAL: dual-target multi-task head. Adds an auxiliary
+    /// y_pjnd output sharing the encoder with y_quality. The
+    /// y_pjnd head is trained via MSE on a designated PJND group
+    /// (its `human_scores` are read as PJND-broadcast targets).
+    /// **Inference output = y_quality only** — y_pjnd is dropped
+    /// at bake time. Bake gets `zentrain.dual_target_head = "true"`
+    /// metadata and the y_pjnd weights are stored as optional
+    /// diagnostic metadata.
+    ///
+    /// Mutually exclusive with all other `--*-head` flags. Pair
+    /// with `--pjnd-loss-weight LAMBDA` and `--pjnd-group-name NAME`.
+    #[arg(long, default_value_t = false)]
+    dual_target_head: bool,
+
+    /// EX-DUAL: auxiliary PJND-MSE loss weight. Sweep range per
+    /// EX-DUAL protocol: {0.01, 0.05, 0.1, 0.3, 1.0}. λ=0 collapses
+    /// to single-head RankNet baseline.
+    #[arg(long, default_value_t = 0.0)]
+    pjnd_loss_weight: f64,
+
+    /// EX-DUAL: name of the training group whose `human_scores`
+    /// column is the PJND-broadcast target. The group should
+    /// contain ~20k rows for KonJND-1k densified. Required when
+    /// `--dual-target-head` is set and `--pjnd-loss-weight > 0`.
+    #[arg(long)]
+    pjnd_group_name: Option<String>,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1378,6 +1405,9 @@ fn main() {
         pool_head: args.pool_head,
         hybrid_head: args.hybrid_head,
         per_sample_alpha_head: args.per_sample_alpha_head,
+        dual_target_head: args.dual_target_head,
+        pjnd_loss_weight: args.pjnd_loss_weight,
+        pjnd_group_name: args.pjnd_group_name.clone(),
     };
 
     println!(
