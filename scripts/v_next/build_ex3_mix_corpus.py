@@ -1,45 +1,66 @@
 #!/usr/bin/env python3
 """Build the V_24-mix-with-ssim2 training corpus by joining the
 SSIMULACRA2 sidecars (LARGE corpus from EX-3 fleet) onto the
-existing mix-target parquets and emitting new mix columns.
+existing iwssim + cvvdp mix-target parquets and emitting new mix
+targets.
 
-## Inputs (in priority order)
+## Inputs
 
-1. **LARGE corpus** (754-chunk filtered): join the ssim2 sidecars
-   from `/mnt/v/zen/zensim-training/2026-05-18-ssim2/ssim2_imazen_consolidated.parquet`
-   (75,300 rows) onto the existing iwssim 75,300-row corpus at
-   `/mnt/v/zen/zensim-training/2026-05-15-cvvdp-r2/iwssim_imazen_consolidated.parquet`
-   by `(image_path basename, codec, q, knob_tuple_json)` identity.
+1. **EX-3 fleet output** (ssim2-backfill-2026-05-18):
+   - Per-chunk sidecars at `s3://zentrain/ssim2-backfill-2026-05-18/ssim2_imazen/`
+     (~75,300 rows total, 754 chunks of 100 rows each)
+   - Consolidated by `consolidate_ssim2.sh` to
+     `/mnt/v/zen/zensim-training/2026-05-18-ssim2/ssim2_imazen_consolidated.parquet`
 
-2. **safesyn 196k** (in flight as of 2026-05-18): scoring is
-   queued on local workstation but slow (~57 hr); fleet didn't cover
-   safesyn because chunks are LARGE-only. Output joins iwssim_log_norm
-   + cvvdp_log_norm + ssim2_gpu (when available) and emits the mix.
+2. **Existing LARGE corpus**:
+   - iwssim:  `/mnt/v/zen/zensim-training/2026-05-15-cvvdp-r2/iwssim_imazen_consolidated.parquet`
+              (75,300 rows; `iwssim_imazen_v0_0_1` ∈ [0,1])
+   - cvvdp:   `/mnt/v/zen/zensim-training/2026-05-15-cvvdp-r2/cvvdp_imazen_consolidated.parquet`
+              (1,169,500 rows; `cvvdp_imazen_v0_0_1` ∈ [0,10] JOD)
+   - features: `/mnt/v/zen/zensim-training/2026-05-17-cvvdp-merged/unified_*_cvvdp.parquet`
+               (300-feature input + identity tuple + per-corpus extras incl.
+                `score_ssim2` and `score_zensim` as features)
 
-3. **KADID 10125 + TID 3000**: scored locally at
-   `/mnt/v/zen/zensim-training/2026-05-18-ssim2/kadid_ssim2_local.parquet`
-   and `tid_ssim2_local.parquet` respectively. Joined by `ref_path`.
+3. **Existing 372-feature mix-target parquets** (for safesyn/KADID/TID):
+   - `/mnt/v/zen/zensim-training/2026-05-17-cvvdp/{safesyn,kadid,tid}_features_mix_targets_372col.parquet`
+   - Already have cvvdp + iwssim + mix_cv40_iw60. Need ssim2 added.
 
-## Output mix columns
+## Important — Anti-pattern #6 audit decision
 
-The new mix column `mix_cv33_iw33_sm33` is the symmetric 3-way blend
-of normalized cvvdp, iwssim, and ssim2 (renormalized log-norm).
+The 300-feature merged corpus HAS `score_ssim2` and `score_zensim`
+as per-pair feature columns (used as zenanalyze tier3 anchors).
+**Using ssim2 as a target column on this corpus WITHOUT dropping
+`score_ssim2` from features violates Anti-pattern #6** (don't use
+the same metric as both target and feature).
 
-Optional 4-way mix `mix_cv25_iw25_sm25_xyz25` is reserved for future
-butteraugli-pnorm3 backfill (per EX-3 step 5; currently emit 3-way
-only).
+The 372-feature safesyn/kadid/tid corpora do NOT have any ssim2
+as feature (f0..f371 are pure zenanalyze image-property features),
+so adding ssim2 as a target is safe there.
 
-## Output paths
+## Output
 
-`/mnt/v/zen/zensim-training/2026-05-18-ssim2/<corpus>_features_mix_with_ssim2_372col.parquet`
-for each of safesyn, kadid, tid, multicodec.
+LARGE corpus output (where score_ssim2 is dropped from features):
+  `/mnt/v/zen/zensim-training/2026-05-18-ssim2/large_3target_300feat_minus_ssim2.parquet`
 
-## EX-3 audit decision (see commit message for full rationale)
+  Schema: (basename, codec, q, knob_tuple_json, identity tuple)
+        + 299 feature cols (300 minus score_ssim2)
+        + iwssim_imazen_v0_0_1, iwssim_log_norm
+        + cvvdp_imazen_v0_0_1, cvvdp_log_norm
+        + ssim2_gpu, ssim2_log_norm
+        + mix_cv33_iw33_sm33  (3-way blend, equal weights)
 
-`score_ssim2` is NOT in the 372-feature input vector (`f0..f371` are
-zenanalyze image-property features, not per-pair metric scores).
-Anti-pattern #6 ("don't use same metric as both target and feature")
-does not apply — ssim2 is target-only.
+Safesyn/KADID/TID 4-target output (when local ssim2 scoring completes):
+  `/mnt/v/zen/zensim-training/2026-05-18-ssim2/{safesyn,kadid,tid}_4target_372col.parquet`
+
+  Schema: existing 372-feat + iwssim + cvvdp + ssim2
+        + mix_cv33_iw33_sm33
+
+## Status note (2026-05-18)
+
+This script runs as soon as `ssim2_imazen_consolidated.parquet` lands.
+The LARGE join is the primary EX-3 output. Safesyn ssim2 scoring on the
+local workstation takes ~57hr (deferred); KADID+TID local scoring
+takes ~30min and is in flight.
 """
 
 from __future__ import annotations
@@ -47,216 +68,214 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Optional
+from glob import glob
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 
-DATA_DIR_EXISTING = "/mnt/v/zen/zensim-training/2026-05-17-cvvdp"
-DATA_DIR_SSIM2 = "/mnt/v/zen/zensim-training/2026-05-18-ssim2"
+DATA_DIR_FEAT_372 = "/mnt/v/zen/zensim-training/2026-05-17-cvvdp"
+DATA_DIR_MERGED_300 = "/mnt/v/zen/zensim-training/2026-05-17-cvvdp-merged"
+DATA_DIR_TARGETS = "/mnt/v/zen/zensim-training/2026-05-15-cvvdp-r2"
+DATA_DIR_OUT = "/mnt/v/zen/zensim-training/2026-05-18-ssim2"
+
+# Anchors from V_22-mix-LARGE methodology (commit 972201d)
+# cvvdp lo=-2.1188 hi=13.8155, iwssim max_log=13.7202
+# We re-anchor ssim2 from the actual sidecar distribution.
+CVVDP_LO = -2.1188
+CVVDP_HI = 13.8155
 
 
-def log_normalize(scores: np.ndarray, lo: float, hi: float) -> np.ndarray:
-    """Map scores to [0, 100] log-normalized scale matching iwssim_log_norm /
-    cvvdp_log_norm convention.
+def log_norm_iwssim(x: np.ndarray) -> np.ndarray:
+    """iwssim_log_norm: -log(1 - x + 1e-6), then min-max."""
+    return -np.log(np.maximum(1.0 - x, 1e-6))
 
-    For ssim2 (range [0, ~100]), the natural mapping is identity rescale
-    of the saturating tail via 100 - (100 - x) where higher = better.
-    We use the same log-norm as iwssim_log_norm: clip the working range
-    [lo, hi], rescale to [0, 100].
+
+def log_norm_cvvdp(x: np.ndarray, lo: float = CVVDP_LO, hi: float = CVVDP_HI) -> np.ndarray:
+    """cvvdp_log_norm: -log(10 - x + 1e-6), normalized to [0, 100]."""
+    log_x = -np.log(np.maximum(10.0 - x, 1e-6))
+    return np.clip((log_x - lo) / (hi - lo) * 100.0, 0.0, 100.0)
+
+
+def log_norm_ssim2(x: np.ndarray) -> np.ndarray:
+    """ssim2 native scale is roughly [-30, 100] (100=identical).
+
+    Map to [0, 100] linearly: clip to [-30, 100] then rescale.
     """
-    clipped = np.clip(scores, lo, hi)
-    return (clipped - lo) / (hi - lo) * 100.0
+    return np.clip((x + 30.0) / 130.0 * 100.0, 0.0, 100.0)
 
 
-def extract_basename(image_path: str) -> str:
-    """Strip leading `/workspace/sweep/work-*/gXXXX/sources/` from the chunk
-    workers' image_path field, leaving only the basename."""
-    return os.path.basename(image_path)
+def build_large_3target(out_path: str, drop_ssim2_feature: bool = True) -> int:
+    """Build LARGE 3-target corpus (cvvdp + iwssim + ssim2) on the 300-feat
+    merged parquets. Drops score_ssim2 from features to avoid Anti-pattern #6.
 
-
-def join_large_corpus_ssim2(
-    iwssim_consolidated: str,
-    ssim2_consolidated: str,
-    out_path: str,
-) -> int:
-    """Join ssim2 sidecars onto the LARGE iwssim corpus by
-    (basename(image_path), codec, q, knob_tuple_json). Returns row count.
+    Returns row count of the inner join.
     """
-    iwssim = pq.read_table(iwssim_consolidated)
-    ssim2 = pq.read_table(ssim2_consolidated)
-    print(f"  iwssim rows: {iwssim.num_rows}, cols: {iwssim.column_names}")
-    print(f"  ssim2 rows: {ssim2.num_rows}, cols: {ssim2.column_names}")
+    print("=== Building LARGE 3-target corpus ===")
 
-    # Add a "basename" join key to both — image_path field carries a workspace
-    # path that varies per chunk worker, but the basename is canonical.
-    iwssim_bn = pc.binary_join_element_wise(
-        pc.find_substring_regex(iwssim.column("image_path"), "/sources/"),
-        pa.scalar(""),
-        pa.scalar(""),
-    )
-    # Simpler: use string slicing via Python — small overhead for ~75k rows
-    iwssim_df = iwssim.to_pandas()
-    ssim2_df = ssim2.to_pandas()
-    iwssim_df["basename"] = iwssim_df["image_path"].apply(os.path.basename)
-    ssim2_df["basename"] = ssim2_df["image_path"].apply(os.path.basename)
+    # Load all per-codec merged parquets
+    merged_files = sorted(glob(os.path.join(DATA_DIR_MERGED_300, "unified_*_cvvdp.parquet")))
+    print(f"  found {len(merged_files)} merged parquets")
+    tables = []
+    for f in merged_files:
+        t = pq.read_table(f)
+        tables.append(t)
+    merged = pa.concat_tables(tables).to_pandas()
+    merged["basename"] = merged["image_path"].apply(os.path.basename)
+    print(f"  merged rows: {len(merged)}")
 
-    # Inner join — only keep rows present in BOTH sidecars
-    joined = iwssim_df.merge(
-        ssim2_df[["basename", "codec", "q", "knob_tuple_json", "ssim2_gpu"]],
-        on=["basename", "codec", "q", "knob_tuple_json"],
+    # Load iwssim
+    iw = pq.read_table(os.path.join(DATA_DIR_TARGETS, "iwssim_imazen_consolidated.parquet")).to_pandas()
+    iw["basename"] = iw["image_path"].apply(os.path.basename)
+    print(f"  iwssim rows: {len(iw)}")
+
+    # Load ssim2
+    ssim2_path = os.path.join(DATA_DIR_OUT, "ssim2_imazen_consolidated.parquet")
+    if not os.path.isfile(ssim2_path):
+        print(f"  MISSING: {ssim2_path} — run consolidate_ssim2.sh first")
+        return 0
+    sm = pq.read_table(ssim2_path).to_pandas()
+    sm["basename"] = sm["image_path"].apply(os.path.basename)
+    print(f"  ssim2 rows: {len(sm)}")
+
+    # Inner-join all four on (basename, codec, q, knob_tuple_json)
+    key = ["basename", "codec", "q", "knob_tuple_json"]
+    j = merged.merge(
+        iw[key + ["iwssim_imazen_v0_0_1"]],
+        on=key,
         how="inner",
-        validate="one_to_one",
     )
-    print(f"  joined rows: {len(joined)}")
-
-    # Add ssim2_log_norm column. ssim2 scores roughly span [-30, 100] in
-    # practice; map a clipped [-10, 100] window to [0, 100].
-    joined["ssim2_log_norm"] = log_normalize(
-        joined["ssim2_gpu"].to_numpy(), lo=-10.0, hi=100.0
+    print(f"  merged ∩ iwssim: {len(j)}")
+    j = j.merge(
+        sm[key + ["ssim2_gpu"]],
+        on=key,
+        how="inner",
     )
+    print(f"  merged ∩ iwssim ∩ ssim2: {len(j)}")
 
-    # 3-way mix in normalized space: cvvdp+iwssim+ssim2 each get 1/3.
-    # iwssim_log_norm and cvvdp_log_norm are already in [0, 100].
-    # NOTE: the iwssim consolidated parquet has `iwssim_imazen_v0_0_1` not
-    # `iwssim_log_norm` — need to log-normalize iwssim ourselves if we want
-    # to mix on a [0, 100] scale. iwssim in [0, 1] so multiply by 100.
-    if "iwssim_imazen_v0_0_1" in joined.columns:
-        joined["iwssim_log_norm_local"] = joined["iwssim_imazen_v0_0_1"] * 100.0
-    elif "iwssim_log_norm" in joined.columns:
-        joined["iwssim_log_norm_local"] = joined["iwssim_log_norm"]
-    else:
-        raise RuntimeError("no iwssim column found")
+    # Add normalized targets
+    j["iwssim_log_norm"] = log_norm_iwssim(j["iwssim_imazen_v0_0_1"].to_numpy()) * 100.0 / 13.7202
+    j["iwssim_log_norm"] = np.clip(j["iwssim_log_norm"], 0.0, 100.0)
+    j["cvvdp_log_norm"] = log_norm_cvvdp(j["cvvdp_imazen_v0_0_1"].to_numpy())
+    j["ssim2_log_norm"] = log_norm_ssim2(j["ssim2_gpu"].to_numpy())
 
-    # cvvdp is NOT in the iwssim-consolidated parquet — it would need a join
-    # against multicodec_cvvdp_300col.parquet. For now, emit a 2-way mix
-    # of iwssim + ssim2 only since cvvdp on LARGE is in a separate
-    # parquet and the chunk identity match is verified upstream.
-    # Add cvvdp via join with multicodec_cvvdp_300col (also in /mnt/v/...).
-    # TODO: this needs careful identity-tuple matching.
-    joined["mix_iw50_sm50"] = 0.5 * joined["iwssim_log_norm_local"] + 0.5 * joined["ssim2_log_norm"]
+    # 3-way mix: equal weights (EX-3 § 8 recipe)
+    j["mix_cv33_iw33_sm33"] = (
+        j["cvvdp_log_norm"].to_numpy()
+        + j["iwssim_log_norm"].to_numpy()
+        + j["ssim2_log_norm"].to_numpy()
+    ) / 3.0
+    # Also emit the cv25_iw25_sm25_ext25 placeholder (just 3-way since
+    # we don't have butteraugli backfilled yet — symmetric on 3 targets)
+    j["mix_cv33_iw33_sm33_v2"] = j["mix_cv33_iw33_sm33"]
 
-    out_table = pa.Table.from_pandas(joined.drop(columns=["basename"]))
+    # Drop score_ssim2 from features if requested (Anti-pattern #6 mitigation)
+    if drop_ssim2_feature and "score_ssim2" in j.columns:
+        j = j.drop(columns=["score_ssim2"])
+        print("  dropped `score_ssim2` from features (Anti-pattern #6 mitigation)")
+
+    # Drop the temporary basename helper
+    if "basename" in j.columns:
+        j = j.drop(columns=["basename"])
+
+    out_table = pa.Table.from_pandas(j)
     pq.write_table(out_table, out_path, compression="zstd", compression_level=9)
     print(f"  written: {out_path}")
     print(f"  size: {os.path.getsize(out_path) / 1024 / 1024:.2f} MB")
-    return len(joined)
+    print(f"  rows: {len(j)}")
+    return len(j)
 
 
-def join_safesyn_kadid_tid(
-    mix_targets_parquet: str,
-    ssim2_local_parquet: str,
-    out_path: str,
-    corpus_name: str,
-) -> Optional[int]:
-    """Join a locally-computed ssim2 parquet onto an existing
-    {corpus}_features_mix_targets_372col.parquet by ref_basename.
+def add_ssim2_to_372feat_corpus(corpus: str) -> int:
+    """Add ssim2_gpu + mix_cv33_iw33_sm33 to an existing 372-feat
+    mix_targets parquet. Requires a per-corpus local ssim2 score parquet.
 
-    The ssim2 parquet has columns image_path, codec, q, knob_tuple_json,
-    ssim2_gpu. For safesyn/KADID/TID we set image_path to ref_basename
-    when building the TSV so the join key works.
+    Returns 0 if the local parquet is missing.
     """
-    if not os.path.isfile(ssim2_local_parquet):
-        print(f"  SKIP: {ssim2_local_parquet} not yet written")
-        return None
-
-    targets = pq.read_table(mix_targets_parquet).to_pandas()
-    ssim2 = pq.read_table(ssim2_local_parquet).to_pandas()
-    print(f"  {corpus_name}: targets {len(targets)}, ssim2 {len(ssim2)}")
-
-    # ssim2 image_path field was set to the ref_basename during TSV build
-    ssim2_dedup = ssim2.drop_duplicates(subset=["image_path", "codec", "q", "knob_tuple_json"])
-    if corpus_name == "safesyn":
-        # safesyn identity is (source_path, decoded_path) but mix_targets
-        # uses ref_basename. Join on ref_basename + decoded basename if avail.
-        # For now: best-effort by ref_basename + codec + q only.
-        ssim2_lite = ssim2_dedup[["image_path", "codec", "q", "ssim2_gpu"]].rename(
-            columns={"image_path": "ref_basename", "q": "quality"}
-        )
-        # Coerce types
-        ssim2_lite["quality"] = ssim2_lite["quality"].astype(int)
-        if "quality" not in targets.columns and "q" in targets.columns:
-            targets = targets.rename(columns={"q": "quality"})
-        # Many-to-many join is unavoidable here because targets doesn't have
-        # decoded_path; use aggregation (mean ssim2 per ref+codec+q).
-        ssim2_agg = ssim2_lite.groupby(
-            ["ref_basename", "codec", "quality"], as_index=False
-        )["ssim2_gpu"].mean()
-        merged = targets.merge(ssim2_agg, on=["ref_basename", "codec", "quality"], how="left")
-    else:
-        ssim2_lite = ssim2_dedup[["image_path", "ssim2_gpu"]].rename(
-            columns={"image_path": "ref_basename"}
-        )
-        # KADID/TID have ref_basename column but no codec/q for join — use just
-        # ref_basename + first match (ssim2 will repeat for each distortion).
-        # Actually KADID has 81 ref × 25 dist × 5 levels = 10125 distinct pairs;
-        # need a per-pair join. The local TSV has ref + dist paths so build a
-        # dist_basename and join on that.
-        # For now: leave KADID/TID joining as a TODO — the LARGE corpus is the
-        # primary EX-3 target.
-        print(f"  TODO: per-pair join for {corpus_name} needs dist_basename")
-        return None
-
-    n_with_ssim2 = merged["ssim2_gpu"].notna().sum()
-    print(f"  {corpus_name}: merged {len(merged)} rows, {n_with_ssim2} with ssim2")
-    merged["ssim2_log_norm"] = log_normalize(
-        merged["ssim2_gpu"].fillna(0).to_numpy(), lo=-10.0, hi=100.0
+    print(f"=== Adding ssim2 to {corpus} 372-feat corpus ===")
+    targets_path = os.path.join(
+        DATA_DIR_FEAT_372, f"{corpus}_features_mix_targets_372col.parquet"
     )
-    # Symmetric 3-way mix
-    iw = merged["iwssim_log_norm"].fillna(0).to_numpy()
-    cv = merged["cvvdp_log_norm"].fillna(0).to_numpy()
+    if not os.path.isfile(targets_path):
+        print(f"  SKIP: {targets_path} missing")
+        return 0
+    local_ssim2_path = os.path.join(DATA_DIR_OUT, f"{corpus}_ssim2_local.parquet")
+    if not os.path.isfile(local_ssim2_path):
+        print(f"  SKIP: {local_ssim2_path} not yet computed")
+        return 0
+
+    targets = pq.read_table(targets_path).to_pandas()
+    local = pq.read_table(local_ssim2_path).to_pandas()
+    print(f"  targets {len(targets)}, local ssim2 {len(local)}")
+
+    # The local ssim2 TSV uses image_path = basename of ref; the targets
+    # parquet uses ref_basename. Join on ref_basename + codec + quality.
+    local_dedup = local.drop_duplicates(
+        subset=["image_path", "codec", "q", "knob_tuple_json"]
+    )
+    local_lite = local_dedup[["image_path", "codec", "q", "ssim2_gpu"]].rename(
+        columns={"image_path": "ref_basename", "q": "quality"}
+    )
+    if "quality" not in targets.columns:
+        if "q" in targets.columns:
+            targets = targets.rename(columns={"q": "quality"})
+    # Coerce types
+    if "quality" in targets.columns:
+        targets["quality"] = targets["quality"].astype(local_lite["quality"].dtype)
+
+    # Per-ref aggregation: ssim2 may differ by codec/q so do a multi-key join
+    # if both have those columns; else aggregate by ref+codec+quality
+    join_keys = ["ref_basename", "codec", "quality"]
+    available_keys = [k for k in join_keys if k in targets.columns and k in local_lite.columns]
+    if not available_keys:
+        print(f"  SKIP: no join keys overlap between targets and local")
+        return 0
+    print(f"  join keys: {available_keys}")
+    # Aggregate (mean) the local scores by the available keys
+    local_agg = local_lite.groupby(available_keys, as_index=False)["ssim2_gpu"].mean()
+    merged = targets.merge(local_agg, on=available_keys, how="left")
+
+    n_with = merged["ssim2_gpu"].notna().sum()
+    print(f"  merged {len(merged)}; {n_with} with ssim2 ({n_with*100/len(merged):.1f}%)")
+
+    merged["ssim2_log_norm"] = log_norm_ssim2(merged["ssim2_gpu"].fillna(0).to_numpy())
+    # 3-way mix
+    iw = merged.get("iwssim_log_norm", pa.array([0.0] * len(merged))).fillna(0).to_numpy() \
+        if "iwssim_log_norm" in merged.columns else np.zeros(len(merged))
+    cv = merged.get("cvvdp_log_norm", pa.array([0.0] * len(merged))).fillna(0).to_numpy() \
+        if "cvvdp_log_norm" in merged.columns else np.zeros(len(merged))
     sm = merged["ssim2_log_norm"].fillna(0).to_numpy()
     merged["mix_cv33_iw33_sm33"] = (iw + cv + sm) / 3.0
 
+    out_path = os.path.join(DATA_DIR_OUT, f"{corpus}_4target_372col.parquet")
     pq.write_table(pa.Table.from_pandas(merged), out_path, compression="zstd", compression_level=9)
     print(f"  written: {out_path}")
     print(f"  size: {os.path.getsize(out_path) / 1024 / 1024:.2f} MB")
-    return n_with_ssim2
+    return n_with
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--ssim2-consolidated",
-        default=os.path.join(DATA_DIR_SSIM2, "ssim2_imazen_consolidated.parquet"),
-    )
-    parser.add_argument(
-        "--iwssim-consolidated",
-        default="/mnt/v/zen/zensim-training/2026-05-15-cvvdp-r2/iwssim_imazen_consolidated.parquet",
-    )
-    parser.add_argument("--out-dir", default=DATA_DIR_SSIM2)
+    parser.add_argument("--large-only", action="store_true")
+    parser.add_argument("--no-drop-ssim2-feature", action="store_true")
     args = parser.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    os.makedirs(DATA_DIR_OUT, exist_ok=True)
 
-    # Step 1: LARGE corpus join (iwssim + ssim2)
-    if os.path.isfile(args.ssim2_consolidated):
-        print(f"\n=== Step 1: LARGE corpus join (iwssim + ssim2) ===")
-        out_path = os.path.join(args.out_dir, "large_iwssim_ssim2_mix.parquet")
-        n = join_large_corpus_ssim2(
-            args.iwssim_consolidated, args.ssim2_consolidated, out_path
-        )
-        print(f"  Step 1 done: {n} rows")
-    else:
-        print(f"\nSKIP: {args.ssim2_consolidated} not yet built (run consolidate_ssim2.sh first)")
+    # Step 1: LARGE 3-target corpus
+    out_large = os.path.join(DATA_DIR_OUT, "large_3target_300feat_minus_ssim2.parquet")
+    n_large = build_large_3target(
+        out_large, drop_ssim2_feature=not args.no_drop_ssim2_feature
+    )
 
-    # Step 2: per-corpus joins for safesyn/KADID/TID (when local scores land)
-    for corpus in ["safesyn", "kadid", "tid"]:
-        print(f"\n=== Step 2.{corpus}: join into mix_targets ===")
-        mix_targets = os.path.join(
-            DATA_DIR_EXISTING, f"{corpus}_features_mix_targets_372col.parquet"
-        )
-        ssim2_local = os.path.join(args.out_dir, f"{corpus}_ssim2_local.parquet")
-        out_path = os.path.join(
-            args.out_dir, f"{corpus}_features_mix_with_ssim2_372col.parquet"
-        )
-        if not os.path.isfile(mix_targets):
-            print(f"  SKIP: {mix_targets} not found")
-            continue
-        n = join_safesyn_kadid_tid(mix_targets, ssim2_local, out_path, corpus)
+    if args.large_only:
+        print(f"\nDone: large = {n_large}")
+        return
+
+    # Step 2: 372-feat per-corpus joins (require local scoring)
+    for corpus in ["kadid", "tid", "safesyn"]:
+        add_ssim2_to_372feat_corpus(corpus)
 
 
 if __name__ == "__main__":
