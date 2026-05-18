@@ -95,6 +95,8 @@ pub mod hybrid_head;
 
 pub mod per_sample_alpha_head;
 
+pub mod dual_target_head;
+
 /// TV (total-variation) regularizer for adjacent-quality monotonicity.
 ///
 /// `pairs[k] = (lo_idx, hi_idx)` references rows in
