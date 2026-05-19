@@ -19,7 +19,11 @@ fn main() -> anyhow::Result<()> {
 
     let backend = zensim_target::codec::backend_for(zensim_target::CodecKind::Jpeg);
     let (encoded, decoded) = backend.encode_decode(&rgb, w, h, 75.0)?;
-    println!("encoded {} bytes, decoded {} bytes", encoded.len(), decoded.len());
+    println!(
+        "encoded {} bytes, decoded {} bytes",
+        encoded.len(),
+        decoded.len()
+    );
 
     let src: &[[u8; 3]] = bytemuck::cast_slice(&rgb);
     let dst: &[[u8; 3]] = bytemuck::cast_slice(&decoded);

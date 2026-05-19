@@ -55,7 +55,9 @@ impl CodecKind {
             "zenavif" | "avif" => Ok(Self::Avif),
             "zenjxl" | "jxl" => Ok(Self::Jxl),
             "zenpng" | "png" => Ok(Self::Png),
-            other => bail!("unknown codec '{other}'; expected one of: zenjpeg, zenwebp, zenavif, zenjxl, zenpng"),
+            other => bail!(
+                "unknown codec '{other}'; expected one of: zenjpeg, zenwebp, zenavif, zenjxl, zenpng"
+            ),
         }
     }
 
@@ -221,7 +223,16 @@ pub fn target_search(
         if (achieved - spec.target).abs() <= spec.tolerance {
             // Converged.
             return Ok(finalize(
-                codec, spec, encoded, achieved, q_mid, iter + 1, probes, width, height, true,
+                codec,
+                spec,
+                encoded,
+                achieved,
+                q_mid,
+                iter + 1,
+                probes,
+                width,
+                height,
+                true,
             ));
         }
 
