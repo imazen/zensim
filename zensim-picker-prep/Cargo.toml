@@ -27,6 +27,9 @@ enough = { version = "0.4.4", default-features = false, features = ["std"] }
 imgref = "1"
 rgb = "0.8"
 
+# Metric scoring for cross-codec butter sweep
+butteraugli = "0.9.2"
+
 # Pipeline + I/O
 image = { workspace = true }
 rayon = { workspace = true }

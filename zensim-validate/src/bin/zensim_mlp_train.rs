@@ -103,8 +103,8 @@ mod simd_mlp;
 mod contamination_guard;
 
 use mlp_train::{
-    AnchorRows, MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy,
-    train_mlp_with_tv_anchored,
+    AnchorRows, EquivPairs, MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy,
+    train_mlp_with_tv_anchored_equiv,
 };
 
 #[derive(Parser)]
@@ -652,6 +652,33 @@ struct Args {
     /// loss more bandwidth at the cost of rank-loss bandwidth.
     #[arg(long, default_value_t = 0.10)]
     anchor_step_p: f64,
+
+    /// EXP-CROSS-CODEC-METRIC equivalence pair parquet (2026-05-19).
+    /// Path to a parquet built by
+    /// `scripts/v_next/build_cross_codec_equivalence.py` with columns:
+    /// `ref_basename, codec_a, q_a, codec_b, q_b, butter_level,
+    /// butter_a, butter_b, row_weight, fa_0..fa_<N-1>, fb_0..fb_<N-1>`.
+    /// Each row is a cross-codec equivalence pair: features_a and
+    /// features_b come from distortions at q values picked to match
+    /// the same butter level under different codecs. During training
+    /// these pairs apply a shape-free `(y_a − y_b)²` loss so the
+    /// metric learns to score them identically.
+    /// Default empty = no equiv data; ignored if --cross-codec-eq-weight 0.
+    #[arg(long)]
+    cross_codec_eq_parquet: Option<PathBuf>,
+
+    /// EXP-CROSS-CODEC-METRIC equivalence pair loss weight (2026-05-19).
+    /// Default `0.0` = no equivalence stepping. When `> 0`, every
+    /// pair-step with probability `--cross-codec-eq-step-p` samples one
+    /// (A, B) equivalence pair and applies `w · (y_a - y_b)²`. Only
+    /// wired on the per-sample-α head and minibatch-size 1.
+    #[arg(long, default_value_t = 0.0)]
+    cross_codec_eq_weight: f64,
+
+    /// EXP-CROSS-CODEC-METRIC probability that each pair-step also
+    /// performs an equivalence step (2026-05-19). Default `0.10`.
+    #[arg(long, default_value_t = 0.10)]
+    cross_codec_eq_step_p: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1119,6 +1146,175 @@ pub(crate) fn load_csv(
     })
 }
 
+/// Load a cross-codec equivalence parquet for EXP-CROSS-CODEC-METRIC.
+///
+/// Schema: ref_basename, codec_a, q_a, codec_b, q_b, butter_level,
+///         butter_a, butter_b, row_weight, fa_0..fa_<M-1>, fb_0..fb_<M-1>
+///
+/// Truncates each fa_*/fb_* feature row to `max_features` (matches the
+/// trainer's `--max-features`). Returns `(features_a, features_b,
+/// row_weights)` as owned Vec<Vec<f64>> + Vec<f64>.
+fn load_equiv_parquet(
+    path: &PathBuf,
+    max_features: usize,
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>), String> {
+    use arrow::array::{Array, Float32Array, Float64Array};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    let file = std::fs::File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+
+    let arrow_fields = schema.fields();
+    let n_arrow_cols = arrow_fields.len();
+
+    // Locate row_weight.
+    let rw_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "row_weight")
+        .ok_or_else(|| format!("{path:?}: missing row_weight column"))?;
+
+    // Locate fa_0 and count consecutive fa_i.
+    let fa0_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "fa_0")
+        .ok_or_else(|| format!("{path:?}: missing fa_0 column"))?;
+    let mut n_fa = 0usize;
+    while fa0_idx + n_fa < n_arrow_cols {
+        let expected = format!("fa_{}", n_fa);
+        if arrow_fields[fa0_idx + n_fa].name() != &expected {
+            break;
+        }
+        n_fa += 1;
+    }
+    if n_fa == 0 {
+        return Err(format!("{path:?}: no fa_N columns"));
+    }
+
+    // Locate fb_0 and count consecutive fb_i.
+    let fb0_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "fb_0")
+        .ok_or_else(|| format!("{path:?}: missing fb_0 column"))?;
+    let mut n_fb = 0usize;
+    while fb0_idx + n_fb < n_arrow_cols {
+        let expected = format!("fb_{}", n_fb);
+        if arrow_fields[fb0_idx + n_fb].name() != &expected {
+            break;
+        }
+        n_fb += 1;
+    }
+    if n_fb != n_fa {
+        return Err(format!(
+            "{path:?}: fa width {} != fb width {}",
+            n_fa, n_fb
+        ));
+    }
+
+    let n_features = n_fa.min(max_features);
+    if n_features == 0 {
+        return Err(format!("{path:?}: zero features after truncation"));
+    }
+
+    let reader = builder
+        .with_batch_size(8192)
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build: {e}"))?;
+
+    let mut features_a: Vec<Vec<f64>> = Vec::new();
+    let mut features_b: Vec<Vec<f64>> = Vec::new();
+    let mut row_weights: Vec<f64> = Vec::new();
+
+    for batch_res in reader {
+        let batch =
+            batch_res.map_err(|e| format!("{path:?}: read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+
+        // row_weight
+        let rw_col = batch.column(rw_idx);
+        let rw_vec: Vec<f64> = match rw_col.data_type() {
+            arrow::datatypes::DataType::Float64 => {
+                let a = rw_col.as_any().downcast_ref::<Float64Array>().unwrap();
+                (0..n_rows).map(|i| a.value(i)).collect()
+            }
+            arrow::datatypes::DataType::Float32 => {
+                let a = rw_col.as_any().downcast_ref::<Float32Array>().unwrap();
+                (0..n_rows).map(|i| a.value(i) as f64).collect()
+            }
+            other => {
+                return Err(format!(
+                    "{path:?}: row_weight dtype {other:?} unsupported"
+                ));
+            }
+        };
+        row_weights.extend(rw_vec);
+
+        // fa_0..fa_<n_features-1>
+        let mut a_per_col: Vec<Vec<f64>> = Vec::with_capacity(n_features);
+        for i in 0..n_features {
+            let col = batch.column(fa0_idx + i);
+            let v: Vec<f64> = match col.data_type() {
+                arrow::datatypes::DataType::Float64 => {
+                    let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                    (0..n_rows).map(|j| a.value(j)).collect()
+                }
+                arrow::datatypes::DataType::Float32 => {
+                    let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    (0..n_rows).map(|j| a.value(j) as f64).collect()
+                }
+                other => {
+                    return Err(format!(
+                        "{path:?}: fa_{i} dtype {other:?} unsupported"
+                    ));
+                }
+            };
+            a_per_col.push(v);
+        }
+        for row in 0..n_rows {
+            let mut buf = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf[d] = a_per_col[d][row];
+            }
+            features_a.push(buf);
+        }
+
+        // fb_0..fb_<n_features-1>
+        let mut b_per_col: Vec<Vec<f64>> = Vec::with_capacity(n_features);
+        for i in 0..n_features {
+            let col = batch.column(fb0_idx + i);
+            let v: Vec<f64> = match col.data_type() {
+                arrow::datatypes::DataType::Float64 => {
+                    let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                    (0..n_rows).map(|j| a.value(j)).collect()
+                }
+                arrow::datatypes::DataType::Float32 => {
+                    let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    (0..n_rows).map(|j| a.value(j) as f64).collect()
+                }
+                other => {
+                    return Err(format!(
+                        "{path:?}: fb_{i} dtype {other:?} unsupported"
+                    ));
+                }
+            };
+            b_per_col.push(v);
+        }
+        for row in 0..n_rows {
+            let mut buf = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf[d] = b_per_col[d][row];
+            }
+            features_b.push(buf);
+        }
+    }
+
+    Ok((features_a, features_b, row_weights))
+}
+
 fn parse_band_weights(s: &str) -> Result<[f64; 4], String> {
     let parts: Vec<&str> = s.split(',').collect();
     if parts.len() != 4 {
@@ -1449,6 +1645,8 @@ fn main() {
         anchor_loss_weight: args.anchor_loss_weight,
         anchor_target_score: args.anchor_target_score,
         anchor_step_p: args.anchor_step_p,
+        cross_codec_eq_weight: args.cross_codec_eq_weight,
+        cross_codec_eq_step_p: args.cross_codec_eq_step_p,
     };
 
     println!(
@@ -1606,14 +1804,65 @@ fn main() {
         None
     };
 
+    // EXP-CROSS-CODEC-METRIC equivalence pair loader (2026-05-19).
+    // Schema: ref_basename, codec_a, q_a, codec_b, q_b, butter_level,
+    //         butter_a, butter_b, row_weight, fa_0..fa_<M-1>, fb_0..fb_<M-1>
+    // We discard the bookkeeping columns and just collect the standardized
+    // (features_a, features_b) pairs + row_weight.
+    let (equiv_a_storage, equiv_b_storage, equiv_row_weights): (
+        Vec<Vec<f64>>,
+        Vec<Vec<f64>>,
+        Vec<f64>,
+    ) = if let Some(equiv_path) = &args.cross_codec_eq_parquet {
+        if args.cross_codec_eq_weight <= 0.0 {
+            eprintln!(
+                "WARNING: --cross-codec-eq-parquet set but \
+                 --cross-codec-eq-weight is 0; equiv data will be ignored."
+            );
+        }
+        match load_equiv_parquet(equiv_path, n_features) {
+            Ok((a, b, w)) => {
+                eprintln!(
+                    "equiv parquet: loaded {} pairs from {:?} (weight={}, step_p={})",
+                    a.len(),
+                    equiv_path,
+                    args.cross_codec_eq_weight,
+                    args.cross_codec_eq_step_p,
+                );
+                (a, b, w)
+            }
+            Err(e) => {
+                eprintln!("equiv parquet load failed: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
+    let equiv_a_refs: Vec<&[f64]> = equiv_a_storage.iter().map(|r| r.as_slice()).collect();
+    let equiv_b_refs: Vec<&[f64]> = equiv_b_storage.iter().map(|r| r.as_slice()).collect();
+    let equiv_loaded: Option<EquivPairs<'_>> = if args.cross_codec_eq_parquet.is_some()
+        && !equiv_a_storage.is_empty()
+    {
+        Some(EquivPairs {
+            name: "cross_codec_eq".to_string(),
+            features_a: equiv_a_refs.as_slice(),
+            features_b: equiv_b_refs.as_slice(),
+            row_weights: equiv_row_weights.as_slice(),
+        })
+    } else {
+        None
+    };
+
     let mut log: Vec<String> = Vec::new();
-    let bake_bytes = train_mlp_with_tv_anchored(
+    let bake_bytes = train_mlp_with_tv_anchored_equiv(
         &groups,
         n_features,
         &hyperparams,
         &mut log,
         tv_regularizer.as_ref(),
         anchor_loaded.as_ref(),
+        equiv_loaded.as_ref(),
     );
 
     std::fs::write(&args.out, &bake_bytes).unwrap_or_else(|e| {

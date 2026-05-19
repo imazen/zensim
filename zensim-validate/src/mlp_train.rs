@@ -481,6 +481,26 @@ pub struct MlpHyperparams {
     /// values give the anchor more gradient bandwidth at the cost of
     /// rank-loss signal. Only effective when `anchor_loss_weight > 0`.
     pub anchor_step_p: f64,
+
+    /// Cross-codec equivalence pair loss weight (EXP-CROSS-CODEC-METRIC,
+    /// 2026-05-19). When `> 0`, an additional shape-free equivalence
+    /// loss is applied each pair-step with probability `equiv_step_p`:
+    /// a single pair `(features_a, features_b)` is drawn from the
+    /// `EquivPairs` pool, both vectors are forwarded through the
+    /// per-sample-α head, and `w · (y_a − y_b)²` is added to the loss.
+    /// Gradients flow through both forward passes and accumulate into
+    /// a single Adam step.
+    ///
+    /// The pair pool is supplied via the `EquivPairs` argument to
+    /// `train_mlp_with_tv_anchored_equiv`. Default `0.0` = no equiv
+    /// step. Only wired on the `per_sample_alpha_head = true` path.
+    pub cross_codec_eq_weight: f64,
+
+    /// Fraction of pair-steps that get an extra equivalence step
+    /// (default `0.10` = 10% of steps). Same semantics as
+    /// `anchor_step_p` but for the equivalence pool. Only effective
+    /// when `cross_codec_eq_weight > 0`.
+    pub cross_codec_eq_step_p: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -520,6 +540,8 @@ impl Default for MlpHyperparams {
             anchor_loss_weight: 0.0,
             anchor_target_score: 63.0,
             anchor_step_p: 0.10,
+            cross_codec_eq_weight: 0.0,
+            cross_codec_eq_step_p: 0.10,
         }
     }
 }
@@ -600,6 +622,28 @@ pub struct TrainingGroup<'a> {
 pub struct AnchorRows<'a> {
     pub name: String,
     pub features: &'a [&'a [f64]],
+    pub row_weights: &'a [f64],
+}
+
+/// Cross-codec equivalence pairs (2026-05-19, EXP-CROSS-CODEC-METRIC).
+///
+/// Each pair carries two feature vectors `(features_a[i], features_b[i])`
+/// that are derived from distortions produced by DIFFERENT codecs at q
+/// values empirically aligned to the same butteraugli level (the "pivot
+/// metric" for cross-codec equivalence). During training, an equivalence
+/// step samples a pair, forwards BOTH feature vectors, and applies a
+/// squared-difference loss `w · (y_a - y_b)²` so the metric learns to
+/// score perceptually-equivalent cross-codec outputs at the same value.
+///
+/// Unlike AnchorRows (single-row MSE to fixed target), EquivPairs supplies
+/// SHAPE-FREE supervision — the metric is free to choose ANY score for
+/// the equivalence class, as long as both members map to the same number.
+/// This is the core mechanism for intrinsic cross-codec consistency.
+#[derive(Debug)]
+pub struct EquivPairs<'a> {
+    pub name: String,
+    pub features_a: &'a [&'a [f64]],
+    pub features_b: &'a [&'a [f64]],
     pub row_weights: &'a [f64],
 }
 
@@ -687,6 +731,30 @@ pub fn train_mlp_with_tv_anchored(
     tv: Option<&TvRegularizer>,
     anchor: Option<&AnchorRows<'_>>,
 ) -> Vec<u8> {
+    train_mlp_with_tv_anchored_equiv(groups, n_features, hyperparams, log, tv, anchor, None)
+}
+
+/// Entry point with optional cross-codec equivalence pair pool
+/// (EXP-CROSS-CODEC-METRIC, 2026-05-19). When `equiv` is provided AND
+/// `hyperparams.cross_codec_eq_weight > 0` AND
+/// `hyperparams.per_sample_alpha_head` is enabled, the per-sample-α
+/// training loop interleaves equivalence pair steps with regular
+/// pair-loss + anchor steps. Each equivalence step samples one pair
+/// `(features_a, features_b)`, forwards both, and applies
+/// `w · (y_a − y_b)²` MSE on their difference. Gradients flow through
+/// both forward passes into the same Adam state.
+///
+/// For every other head this argument is currently ignored (equiv
+/// wiring is per-sample-α-specific, like anchor).
+pub fn train_mlp_with_tv_anchored_equiv(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+    anchor: Option<&AnchorRows<'_>>,
+    equiv: Option<&EquivPairs<'_>>,
+) -> Vec<u8> {
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
     // time for the architectural lift (GMSD's std-pooling +
@@ -707,7 +775,7 @@ pub fn train_mlp_with_tv_anchored(
         "pool_head / hybrid_head / per_sample_alpha_head are mutually exclusive"
     );
     if hyperparams.per_sample_alpha_head {
-        return train_mlp_per_sample_alpha_head(groups, n_features, hyperparams, log, anchor);
+        return train_mlp_per_sample_alpha_head(groups, n_features, hyperparams, log, anchor, equiv);
     }
     if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
         eprintln!(
@@ -4637,6 +4705,7 @@ fn train_mlp_per_sample_alpha_head(
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
     anchor: Option<&AnchorRows<'_>>,
+    equiv: Option<&EquivPairs<'_>>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
@@ -4663,6 +4732,44 @@ fn train_mlp_per_sample_alpha_head(
     // is provided AND anchor_loss_weight > 0; otherwise it's a no-op.
     let anchor_active =
         anchor.is_some() && hyperparams.anchor_loss_weight > 0.0;
+    let equiv_active =
+        equiv.is_some() && hyperparams.cross_codec_eq_weight > 0.0;
+    if let Some(e) = equiv {
+        assert_eq!(
+            e.features_a.len(),
+            e.features_b.len(),
+            "equiv '{}': features_a/features_b length mismatch",
+            e.name
+        );
+        assert_eq!(
+            e.features_a.len(),
+            e.row_weights.len(),
+            "equiv '{}': features_a/row_weights length mismatch",
+            e.name
+        );
+        for (i, f) in e.features_a.iter().enumerate() {
+            assert_eq!(
+                f.len(),
+                n_features,
+                "equiv '{}' row {} (A): feature length {} != n_features {}",
+                e.name,
+                i,
+                f.len(),
+                n_features
+            );
+        }
+        for (i, f) in e.features_b.iter().enumerate() {
+            assert_eq!(
+                f.len(),
+                n_features,
+                "equiv '{}' row {} (B): feature length {} != n_features {}",
+                e.name,
+                i,
+                f.len(),
+                n_features
+            );
+        }
+    }
     if let Some(a) = anchor {
         assert_eq!(
             a.features.len(),
@@ -4717,6 +4824,23 @@ fn train_mlp_per_sample_alpha_head(
             (0.0..=1.0).contains(&hyperparams.anchor_step_p),
             "--anchor-step-p must be in [0, 1]; got {}",
             hyperparams.anchor_step_p
+        );
+    }
+    if equiv_active {
+        assert!(
+            !nin_on,
+            "per_sample_alpha_head + NiN: cross-codec-eq loss is not yet composed with NiN. \
+             Disable NiN (--norm-in-norm-weight 0) or set --cross-codec-eq-weight 0."
+        );
+        assert_eq!(
+            hyperparams.minibatch_size, 1,
+            "cross-codec-eq loss requires --minibatch-size 1; got {}",
+            hyperparams.minibatch_size
+        );
+        assert!(
+            (0.0..=1.0).contains(&hyperparams.cross_codec_eq_step_p),
+            "--cross-codec-eq-step-p must be in [0, 1]; got {}",
+            hyperparams.cross_codec_eq_step_p
         );
     }
     if (hyperparams.mse_weight > 0.0 || hyperparams.monotonicity_reg > 0.0)
@@ -4848,6 +4972,60 @@ fn train_mlp_per_sample_alpha_head(
             );
         }
         (Vec::new(), Vec::new(), 0.0)
+    };
+
+    // EXP-CROSS-CODEC-METRIC equiv data: standardize each pair's A/B
+    // feature vectors against the SAME training-group scaler. Row CDF
+    // mirrors AnchorRows for per-row weight sampling.
+    let (
+        std_equiv_a,
+        std_equiv_b,
+        equiv_row_cdf,
+        equiv_total_weight,
+    ): (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, f64) = if let (Some(e), true) =
+        (equiv, equiv_active)
+    {
+        let mut bufs_a: Vec<Vec<f64>> = Vec::with_capacity(e.features_a.len());
+        let mut bufs_b: Vec<Vec<f64>> = Vec::with_capacity(e.features_b.len());
+        for (&fa, &fb) in e.features_a.iter().zip(e.features_b.iter()) {
+            let mut buf_a = vec![0.0f64; n_features];
+            let mut buf_b = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf_a[d] = (fa[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                buf_b[d] = (fb[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+            bufs_a.push(buf_a);
+            bufs_b.push(buf_b);
+        }
+        let total: f64 = e.row_weights.iter().sum();
+        let mut cum = 0.0f64;
+        let cdf: Vec<f64> = e
+            .row_weights
+            .iter()
+            .map(|&w| {
+                cum += w.max(0.0);
+                if total > 0.0 { cum / total } else { 0.0 }
+            })
+            .collect();
+        log_line(
+            &format!(
+                "cross-codec-eq: ENABLED — '{}' n={} step_p={:.3} weight={:.3}",
+                e.name,
+                e.features_a.len(),
+                hyperparams.cross_codec_eq_step_p,
+                hyperparams.cross_codec_eq_weight
+            ),
+            log,
+        );
+        (bufs_a, bufs_b, cdf, total)
+    } else {
+        if equiv.is_some() && !equiv_active {
+            log_line(
+                "cross-codec-eq: data supplied but cross_codec_eq_weight = 0 — ignored",
+                log,
+            );
+        }
+        (Vec::new(), Vec::new(), Vec::new(), 0.0)
     };
 
     let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
@@ -5311,6 +5489,119 @@ fn train_mlp_per_sample_alpha_head(
                             psah::backprop_step_per_sample_alpha_head(
                                 xa, &ha_pre_a, &ha_a, &sa_a, max_a_a,
                                 ya_rank_a, ya_pool_a, alpha_a_a, dl_dy,
+                                &rank_w, &reducer_w, &w_alpha,
+                                &mut adam.gw1, &mut adam.gb1,
+                                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                &mut g_red_w, &mut g_red_b,
+                                &mut g_w_alpha_buf, &mut g_b_alpha,
+                                n_features, n_hidden, leaky,
+                            );
+
+                            if hyperparams.l2_lambda > 0.0 {
+                                let l2 = hyperparams.l2_lambda;
+                                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                    *g += l2 * w;
+                                }
+                                for j in 0..n_hidden {
+                                    g_rank_w_buf[j] += l2 * rank_w[j];
+                                    g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                }
+                                for kk in 0..4 {
+                                    g_red_w[kk] += l2 * reducer_w[kk];
+                                }
+                            }
+
+                            for j in 0..n_hidden {
+                                adam.gw2[j] += g_rank_w_buf[j];
+                            }
+                            for kk in 0..4 {
+                                adam.gw2[n_hidden + kk] += g_red_w[kk];
+                            }
+                            for j in 0..n_hidden {
+                                adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                            }
+                            adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                            adam.gb2[0] += g_rank_b_buf;
+                            adam.gb2[1] += g_red_b;
+
+                            do_adam_step(
+                                &mut adam, &mut w1, &mut b1,
+                                &mut rank_w, &mut rank_b,
+                                &mut reducer_w, &mut reducer_b,
+                                &mut w_alpha, &mut b_alpha,
+                                lr, n_hidden,
+                            );
+                        }
+                    }
+                }
+            }
+
+            // EXP-CROSS-CODEC-METRIC equivalence step (2026-05-19).
+            // After each pair Adam step, with probability eq_step_p,
+            // sample one (A, B) equivalence pair, forward both, and
+            // apply w · (y_a - y_b)² MSE gradient via TWO backprops
+            // sharing the same Adam state (single Adam step at end).
+            // Supports K=1 only (asserted at setup when equiv supplied).
+            if equiv_active && k == 1 {
+                let u_take = rng.next_f64_unit();
+                if u_take < hyperparams.cross_codec_eq_step_p {
+                    if let Some(e) = equiv {
+                        if !std_equiv_a.is_empty() && equiv_total_weight > 0.0 {
+                            let u_row = rng.next_f64_unit();
+                            let ei = equiv_row_cdf
+                                .partition_point(|&c| c < u_row)
+                                .min(std_equiv_a.len() - 1);
+                            let xa = std_equiv_a[ei].as_slice();
+                            let xb = std_equiv_b[ei].as_slice();
+
+                            // Forward both halves.
+                            let (ya, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
+                                psah::forward_per_sample_alpha_head(
+                                    xa, &w1, &b1, &rank_w, rank_b,
+                                    &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                    n_features, n_hidden, leaky,
+                                );
+                            let (yb, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
+                                psah::forward_per_sample_alpha_head(
+                                    xb, &w1, &b1, &rank_w, rank_b,
+                                    &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                    n_features, n_hidden, leaky,
+                                );
+                            let row_w = e.row_weights[ei];
+                            let diff = ya - yb;
+                            // L = w · row_w · diff²
+                            // dL/dy_a = 2 · w · row_w · diff
+                            // dL/dy_b = −2 · w · row_w · diff
+                            let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
+                            let dl_dya = scale * diff;
+                            let dl_dyb = -scale * diff;
+                            let loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
+                            total_loss += loss;
+                            n_steps += 1;
+
+                            // Backprop through A.
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_b_buf = 0.0f64;
+                            let mut g_red_w: [f64; 4] = [0.0; 4];
+                            let mut g_red_b: f64 = 0.0;
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_b_alpha: f64 = 0.0;
+
+                            psah::backprop_step_per_sample_alpha_head(
+                                xa, &ha_pre, &ha, &sa, max_a,
+                                ya_rank, ya_pool, alpha_a, dl_dya,
+                                &rank_w, &reducer_w, &w_alpha,
+                                &mut adam.gw1, &mut adam.gb1,
+                                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                &mut g_red_w, &mut g_red_b,
+                                &mut g_w_alpha_buf, &mut g_b_alpha,
+                                n_features, n_hidden, leaky,
+                            );
+
+                            // Backprop through B (accumulates into same buffers).
+                            psah::backprop_step_per_sample_alpha_head(
+                                xb, &hb_pre, &hb, &sb, max_b,
+                                yb_rank, yb_pool, alpha_b, dl_dyb,
                                 &rank_w, &reducer_w, &w_alpha,
                                 &mut adam.gw1, &mut adam.gb1,
                                 &mut g_rank_w_buf, &mut g_rank_b_buf,

@@ -3738,6 +3738,7 @@ dependencies = [
  "almost-enough",
  "anyhow",
  "arrow",
+ "butteraugli",
  "clap",
  "enough 0.4.4",
  "image",
