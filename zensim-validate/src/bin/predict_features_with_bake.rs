@@ -1,18 +1,33 @@
-//! Score one (ref, dist) PNG pair against an arbitrary ZNPR v3 bake.
+//! Score pre-extracted feature rows against an arbitrary ZNPR v3 bake.
 //!
-//! Usage:
-//!   score_pair_with_bake --bake PATH [--bake-post raw|clamp|mapped[:A,B]] \
-//!                        --ref REF.png --dist DIST.png
+//! This is the feature-cache fast path for `cross_codec_consistency.py`
+//! (EVAL-ACCEL 2026-05-19). Instead of decoding images and recomputing
+//! features per `measure(q)` call, the script reads the pre-extracted
+//! 372-feature parquet sidecars at
+//! `/mnt/v/zen/picker-training/2026-05-19/butter/<codec>.parquet`, packs
+//! the relevant rows into a tiny binary blob, and shells to this binary
+//! to get the scores. Skips the ~5-15 s per call that
+//! `score_pair_with_bake` spent on image decode + feature extract.
 //!
-//! Prints one float on stdout — the scored zensim value with the
-//! specified post-processing applied. Used by cross_codec_consistency.py
-//! to binary-search for the q value that matches a target zensim score.
+//! Wire format (input file via `--features-file <path>`):
+//!     u32 LE n_features
+//!     u32 LE n_rows
+//!     f32 LE feature_matrix[n_rows][n_features]  (row-major)
+//!
+//! Smaller fast path (`--features <space-sep floats>`): a single row of
+//! features as a CLI arg, identical semantics to a 1-row input file.
+//!
+//! Output: one score per row, one `%.6f` per line on stdout.
+//!
+//! Honors the same `--bake-post {raw|clamp|mapped[:a,b]}` semantics as
+//! `score_pair_with_bake`, plus the full V_24 dispatch path
+//! (per-sample-α head, hybrid head, tanh output pin) so the produced
+//! score is bit-exact with the slow path on the same feature row.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use zenpredict::{Model, Predictor};
-use zensim::{ZensimConfig, compute_zensim_with_config};
 
 type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
 type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
@@ -44,7 +59,6 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
 }
 
-/// EXP-CROSS-CODEC-V4 tanh-pin scale extractor.
 fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
     let md = model.metadata();
     let entry = md.get("zentrain.tanh_output_head")?;
@@ -113,24 +127,26 @@ fn apply_post(raw: f64, mode: &str) -> f64 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn score_with_bake(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,
     psa: Option<&PerSampleAlphaHeadDispatch>,
     hyb: Option<&HybridHeadDispatch>,
     tanh_pin_scale: Option<f64>,
-    n_inputs: usize,
-    features: &[f64],
+    f32_scratch: &mut [f32],
+    features_row: &[f32],
 ) -> f64 {
-    let mut buf = vec![0.0f32; n_inputs];
-    let take = n_inputs.min(features.len());
-    for i in 0..take {
-        buf[i] = features[i] as f32;
+    let n_inputs = f32_scratch.len();
+    let take = n_inputs.min(features_row.len());
+    f32_scratch[..take].copy_from_slice(&features_row[..take]);
+    for f in &mut f32_scratch[take..] {
+        *f = 0.0;
     }
     let result = if has_transforms {
-        predictor.predict_transformed(&mut buf[..])
+        predictor.predict_transformed(f32_scratch)
     } else {
-        predictor.predict(&mut buf[..])
+        predictor.predict(f32_scratch)
     };
     let y_pre = match result {
         Ok(out) => {
@@ -216,7 +232,6 @@ fn score_with_bake(
         }
         Err(_) => f64::NAN,
     };
-    // EXP-CROSS-CODEC-V4 tanh-pin wrap.
     if let Some(scale) = tanh_pin_scale {
         if !y_pre.is_nan() {
             let xc = (y_pre / scale).clamp(-30.0, 30.0);
@@ -227,72 +242,162 @@ fn score_with_bake(
     y_pre
 }
 
+fn parse_features_arg(s: &str) -> Result<(usize, usize, Vec<f32>), String> {
+    let vals: Result<Vec<f32>, _> = s.split_whitespace().map(|t| t.parse::<f32>()).collect();
+    let vals = vals.map_err(|e| format!("--features parse: {e}"))?;
+    if vals.is_empty() {
+        return Err("--features is empty".into());
+    }
+    Ok((vals.len(), 1, vals))
+}
+
+fn read_features_file(path: &PathBuf) -> Result<(usize, usize, Vec<f32>), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
+    if bytes.len() < 8 {
+        return Err(format!("{path:?}: header too short ({} bytes)", bytes.len()));
+    }
+    let n_features = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let n_rows = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    let expected_floats = n_rows.checked_mul(n_features).ok_or_else(|| {
+        format!("{path:?}: n_rows*n_features overflow ({n_rows} * {n_features})")
+    })?;
+    let expected_bytes = 8 + expected_floats * 4;
+    if bytes.len() != expected_bytes {
+        return Err(format!(
+            "{path:?}: payload size mismatch: header says {n_rows} rows × {n_features} features = {expected_bytes} bytes, got {}",
+            bytes.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(expected_floats);
+    for i in 0..expected_floats {
+        let off = 8 + i * 4;
+        out.push(f32::from_le_bytes([
+            bytes[off],
+            bytes[off + 1],
+            bytes[off + 2],
+            bytes[off + 3],
+        ]));
+    }
+    Ok((n_features, n_rows, out))
+}
+
+fn print_usage() {
+    eprintln!(
+        "predict_features_with_bake — bake forward pass over pre-extracted features\n\
+\n\
+USAGE:\n\
+    predict_features_with_bake --bake <path> [--bake-post raw|clamp|mapped[:a,b]] \\\n\
+        (--features 'f0 f1 f2 ...' | --features-file <path>)\n\
+\n\
+The --features-file format is u32 LE n_features, u32 LE n_rows, then\n\
+n_rows*n_features f32 LE features (row-major). Output is one\n\
+'%.6f'-formatted score per row, one per line, on stdout.\n"
+    );
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mut bake: Option<PathBuf> = None;
     let mut bake_post: String = "clamp".to_string();
-    let mut ref_path: Option<PathBuf> = None;
-    let mut dist_path: Option<PathBuf> = None;
-    let mut dump_features_to: Option<PathBuf> = None;
+    let mut features_arg: Option<String> = None;
+    let mut features_file: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--bake" => bake = Some(args.next().expect("--bake VALUE").into()),
-            "--bake-post" => bake_post = args.next().expect("--bake-post VALUE"),
-            "--ref" => ref_path = Some(args.next().expect("--ref VALUE").into()),
-            "--dist" => dist_path = Some(args.next().expect("--dist VALUE").into()),
-            "--dump-features-to" => {
-                dump_features_to = Some(args.next().expect("--dump-features-to VALUE").into());
+            "--bake" => {
+                let v = match args.next() {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("--bake requires a value");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                bake = Some(v.into());
+            }
+            "--bake-post" => {
+                bake_post = match args.next() {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("--bake-post requires a value");
+                        return ExitCode::FAILURE;
+                    }
+                };
+            }
+            "--features" => {
+                features_arg = args.next();
+                if features_arg.is_none() {
+                    eprintln!("--features requires a value");
+                    return ExitCode::FAILURE;
+                }
+            }
+            "--features-file" => {
+                let v = match args.next() {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("--features-file requires a value");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                features_file = Some(v.into());
+            }
+            "-h" | "--help" => {
+                print_usage();
+                return ExitCode::SUCCESS;
             }
             other => {
                 eprintln!("unknown arg: {other}");
+                print_usage();
                 return ExitCode::FAILURE;
             }
         }
     }
-    let bake = bake.expect("--bake REQUIRED");
-    let ref_path = ref_path.expect("--ref REQUIRED");
-    let dist_path = dist_path.expect("--dist REQUIRED");
-
-    // Load images.
-    let src = image::open(&ref_path).expect("open ref").to_rgb8();
-    let dst = image::open(&dist_path).expect("open dist").to_rgb8();
-    let w = src.width() as usize;
-    let h = src.height() as usize;
-    let src_pixels: Vec<[u8; 3]> = src.pixels().map(|p| p.0).collect();
-    let dst_pixels: Vec<[u8; 3]> = dst.pixels().map(|p| p.0).collect();
-
-    // Compute features with both extended + IW pools (372-feat superset).
-    let mut config = ZensimConfig::default();
-    config.extended_features = true;
-    config.compute_iw_features = true;
-    let result =
-        compute_zensim_with_config(&src_pixels, &dst_pixels, w, h, config).expect("zensim compute");
-    let features: Vec<f64> = result.features().to_vec();
-
-    // EVAL-ACCEL bit-exact verification helper: optionally dump the
-    // computed feature vector in the predict_features_with_bake wire
-    // format so the two binaries can be cross-checked on the exact
-    // same numeric input.
-    if let Some(path) = &dump_features_to {
-        let n_features = features.len();
-        let mut buf = Vec::with_capacity(8 + n_features * 4);
-        buf.extend_from_slice(&(n_features as u32).to_le_bytes());
-        buf.extend_from_slice(&1u32.to_le_bytes()); // n_rows
-        for &v in &features {
-            buf.extend_from_slice(&(v as f32).to_le_bytes());
+    let bake = match bake {
+        Some(b) => b,
+        None => {
+            eprintln!("--bake is REQUIRED");
+            print_usage();
+            return ExitCode::FAILURE;
         }
-        std::fs::write(path, &buf).expect("write --dump-features-to");
-        eprintln!(
-            "dumped {} features ({} bytes) to {}",
-            n_features,
-            buf.len(),
-            path.display()
-        );
-    }
+    };
+    let (n_features_in, n_rows, feature_buf) = match (features_arg, features_file) {
+        (Some(s), None) => match parse_features_arg(&s) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        (None, Some(p)) => match read_features_file(&p) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("{e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        (Some(_), Some(_)) => {
+            eprintln!("specify --features OR --features-file, not both");
+            return ExitCode::FAILURE;
+        }
+        (None, None) => {
+            eprintln!("one of --features or --features-file is REQUIRED");
+            print_usage();
+            return ExitCode::FAILURE;
+        }
+    };
 
-    // Load bake.
-    let bake_bytes = std::fs::read(&bake).expect("read bake");
-    let model = Model::from_bytes(&bake_bytes).expect("parse ZNPR bake");
+    let bake_bytes = match std::fs::read(&bake) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("read bake {bake:?}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let model = match Model::from_bytes(&bake_bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse ZNPR bake: {e:?}");
+            return ExitCode::FAILURE;
+        }
+    };
     let n_inputs = model.n_inputs();
     let has_transforms = model.has_nontrivial_feature_transforms();
     let psa = extract_per_sample_alpha_head(&model);
@@ -300,16 +405,29 @@ fn main() -> ExitCode {
     let tanh_pin_scale = extract_tanh_output_head_scale(&model);
 
     let mut predictor = Predictor::new(&model);
-    let raw = score_with_bake(
-        &mut predictor,
-        has_transforms,
-        psa.as_ref(),
-        hyb.as_ref(),
-        tanh_pin_scale,
-        n_inputs,
-        &features,
-    );
-    let score = apply_post(raw, &bake_post);
-    println!("{:.6}", score);
+    let mut scratch = vec![0.0f32; n_inputs];
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    use std::io::Write as _;
+
+    for row_idx in 0..n_rows {
+        let start = row_idx * n_features_in;
+        let end = start + n_features_in;
+        let row = &feature_buf[start..end];
+        let raw = score_with_bake(
+            &mut predictor,
+            has_transforms,
+            psa.as_ref(),
+            hyb.as_ref(),
+            tanh_pin_scale,
+            &mut scratch,
+            row,
+        );
+        let score = apply_post(raw, &bake_post);
+        if writeln!(out, "{score:.6}").is_err() {
+            return ExitCode::FAILURE;
+        }
+    }
     ExitCode::SUCCESS
 }

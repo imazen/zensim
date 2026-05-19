@@ -1,114 +1,221 @@
 #!/usr/bin/env python3
 """Cross-codec consistency eval for PreviewV0_5Tuner (2026-05-18).
 
-For each of K source images and a target zensim score T:
-  1. For each codec in {JPEG, WebP, AVIF}, binary-search for the q value
-     whose zensim score (under the eval bake) is closest to T.
-  2. Decode all 3 outputs back to PNG.
-  3. Compute pairwise butteraugli (max + p-norm-3) between the 3 decoded
-     PNGs. The pair-wise mean should be SMALL — meaning the codecs landed
-     at perceptually similar quality at the same zensim target.
+EVAL-ACCEL refactor (2026-05-19): the binary-search-over-q step
+no longer live-encodes + extracts features per `measure(q)` call.
+Instead it consults pre-extracted 372-feat parquets at
+`/mnt/v/zen/picker-training/2026-05-19/butter/<codec>.parquet`
+(produced by EXP-CROSS-CODEC-METRIC #156) for every (image, codec, q)
+tuple. The bake forward pass runs via a Rust binary
+`predict_features_with_bake` that takes a packed f32 feature buffer
+and emits one score per row. Only the convergence q is re-encoded
+via PIL + scored once via zen-metrics butter_pnorm3.
 
-Output: a TSV with per-image rows of (image_id, jpeg_q, webp_q, avif_q,
+Old wall: ~6 min/bake (480 measure calls × 5-15 s each).
+New wall: ~30 s/bake (1 cached feature read + ≤8 Rust forward calls
+per (image, codec) ≤ 480 forwards total, batched into one binary
+invocation per binary-search step; then 60 butter encode/score calls).
+
+For each of K source images and a target zensim score T:
+  1. For each codec in {JPEG, WebP, AVIF}, binary-search for the q
+     value whose zensim score (under the eval bake, dispatched from
+     the bake's metadata heads) is closest to T. The feature rows are
+     read from the codec parquet at the standard 19-q grid
+     {5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80,
+      85, 90, 95}.
+  2. PIL-encode the source at the chosen q, decode to PNG.
+  3. Compute pairwise butteraugli (max + p-norm-3) between the 3
+     decoded PNGs via the zen-metrics CLI. Pairwise mean should be
+     SMALL — codecs landed at perceptually similar quality.
+
+Output: a TSV with per-image rows (image_id, jpeg_q, webp_q, avif_q,
 zensim_jpeg, zensim_webp, zensim_avif, pairwise_butter_max_mean,
-pairwise_butter_p3_mean, ...).
+pairwise_butter_p3_mean).
 """
 
 import argparse
-import io
-import json
+import struct
 import subprocess
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import tempfile
 from pathlib import Path
 
+import pyarrow.parquet as pq
 from PIL import Image
 
-QSWEEP_DIR = Path("/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep")
-OUT_DIR = Path("/mnt/v/output/zensim/exp_tuner_2026-05-18/cross_codec")
+BUTTER_PARQUET_ROOT = Path("/mnt/v/zen/picker-training/2026-05-19/butter")
+SOURCE_ROOT = Path("/mnt/v/input/zensim/sources")
+OUT_DIR_DEFAULT = Path("/mnt/v/output/zensim/exp_tuner_2026-05-18/cross_codec")
 
-# Per-codec (encoder_callable, decoder_callable) — both use PIL.
-def encode_jpeg(src_path, q, out_jpeg):
-    img = Image.open(src_path).convert("RGB")
-    img.save(out_jpeg, "JPEG", quality=q, subsampling=2, optimize=False, progressive=False)
+# Standard 19-q grid present in the butter parquets.
+Q_GRID = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95]
+N_FEATURES = 372
 
-def encode_webp(src_path, q, out_webp):
-    img = Image.open(src_path).convert("RGB")
-    img.save(out_webp, "WEBP", quality=q, method=4)
+# Codec → parquet basename + PIL save args.
+CODECS = {
+    "jpeg": {
+        "parquet": "zenjpeg.parquet",
+        "ext": ".jpg",
+        "format": "JPEG",
+        "save_kwargs": {
+            "quality": None,  # filled at encode time
+            "subsampling": 2,
+            "optimize": False,
+            "progressive": False,
+        },
+    },
+    "webp": {
+        "parquet": "zenwebp.parquet",
+        "ext": ".webp",
+        "format": "WEBP",
+        "save_kwargs": {"quality": None, "method": 4},
+    },
+    "avif": {
+        "parquet": "zenavif.parquet",
+        "ext": ".avif",
+        "format": "AVIF",
+        "save_kwargs": {"quality": None, "speed": 6},
+    },
+}
 
-def encode_avif(src_path, q, out_avif):
-    img = Image.open(src_path).convert("RGB")
-    img.save(out_avif, "AVIF", quality=q, speed=6)
+
+# ---------------------------------------------------------------------------
+# Feature-parquet cache
+# ---------------------------------------------------------------------------
 
 
-def decode_to_png(in_path, out_png):
-    img = Image.open(in_path).convert("RGB")
-    img.save(out_png, "PNG")
+def load_codec_features(parquet_path: Path):
+    """Return a dict (ref_basename → {q → list[float] of N_FEATURES}).
 
-
-def zensim_with_bake(ref_png, dist_png, bake_path, bake_post_mode, zensim_score_tool):
-    """Call the score-one-pair binary returning a float zensim score."""
-    # Use the qsweep_eval-equivalent on a single (ref, dist) pair via a
-    # one-row feature CSV + manifest TSV. Too slow; instead shell out to
-    # `examples/score_pair_with_bake` if it exists, OR use zen-metrics.
-    # For tractability, the simplest path is the `zensim_score_profiles`
-    # binary which honors a list of profiles — but we need to score
-    # against an *arbitrary bake*, not just the embedded profiles.
-    #
-    # Use the standalone score_pair_with_bake binary we'll write under
-    # zensim-validate/src/bin/. Pass the bake bytes + ref + dist directly.
-    out = subprocess.check_output(
-        [
-            zensim_score_tool,
-            "--bake",
-            bake_path,
-            "--bake-post",
-            bake_post_mode,
-            "--ref",
-            str(ref_png),
-            "--dist",
-            str(dist_png),
-        ],
-        text=True,
+    Reads only the columns we need (ref_basename, q, f0..f371). The
+    resulting structure lives in memory for the duration of the run;
+    each codec parquet is ~35 MB on disk and decodes to ~60 MB of
+    f32 features.
+    """
+    print(f"loading features from {parquet_path} …", file=sys.stderr, flush=True)
+    cols = ["ref_basename", "q"] + [f"f{i}" for i in range(N_FEATURES)]
+    table = pq.read_table(parquet_path, columns=cols)
+    pdf = table.to_pandas()
+    feat_cols = [f"f{i}" for i in range(N_FEATURES)]
+    by_image = {}
+    for image_id, group in pdf.groupby("ref_basename"):
+        per_q = {}
+        for _, row in group.iterrows():
+            q = int(row["q"])
+            per_q[q] = [float(row[c]) for c in feat_cols]
+        by_image[str(image_id)] = per_q
+    print(
+        f"  loaded {len(by_image)} images × ≤{len(Q_GRID)} q-rows × {N_FEATURES} features",
+        file=sys.stderr,
+        flush=True,
     )
-    return float(out.strip())
+    return by_image
 
 
-def binary_search_q(target_score, encode_fn, decode_fn, src_path, codec_name, bake, mode, tool, work_dir, image_id, q_min=1, q_max=99):
-    """Return the q that yields a zensim score closest to target_score."""
-    best_q = None
-    best_score = None
-    lo, hi = q_min, q_max
-    iters = 0
-    cache = {}
-    # Bracket: first check endpoints.
-    def measure(q):
-        if q in cache:
-            return cache[q]
-        enc_path = work_dir / f"{image_id}_{codec_name}_q{q:03d}{('.jpg' if codec_name == 'jpeg' else '.webp' if codec_name == 'webp' else '.avif')}"
-        dec_path = work_dir / f"{image_id}_{codec_name}_q{q:03d}.png"
-        if not dec_path.exists():
-            encode_fn(src_path, q, enc_path)
-            decode_fn(enc_path, dec_path)
-        s = zensim_with_bake(src_path, dec_path, bake, mode, tool)
-        cache[q] = (s, dec_path)
-        return cache[q]
-    # Simple binary search assuming monotonicity (zensim ↑ with q).
-    while lo <= hi and iters < 8:
-        mid = (lo + hi) // 2
-        s, dec_path = measure(mid)
-        if best_q is None or abs(s - target_score) < abs(best_score - target_score):
-            best_q = mid
+# ---------------------------------------------------------------------------
+# Score-from-features via Rust binary
+# ---------------------------------------------------------------------------
+
+
+def predict_zensim_from_features(features_rows, bake_path, bake_post, predict_tool):
+    """Score N rows of features against the bake. Returns a list[float].
+
+    `features_rows` is a list of feature vectors, each length N_FEATURES.
+    """
+    n_rows = len(features_rows)
+    if n_rows == 0:
+        return []
+    n_features = len(features_rows[0])
+    # Pack into the binary's expected layout: u32 n_features, u32 n_rows,
+    # then n_rows * n_features f32 LE.
+    buf = bytearray()
+    buf += struct.pack("<II", n_features, n_rows)
+    for row in features_rows:
+        if len(row) != n_features:
+            raise ValueError(
+                f"feature row width mismatch: expected {n_features}, got {len(row)}"
+            )
+        buf += struct.pack(f"<{n_features}f", *row)
+    with tempfile.NamedTemporaryFile(suffix=".features.bin", delete=False) as f:
+        f.write(buf)
+        feats_path = f.name
+    try:
+        out = subprocess.check_output(
+            [
+                predict_tool,
+                "--bake",
+                bake_path,
+                "--bake-post",
+                bake_post,
+                "--features-file",
+                feats_path,
+            ],
+            text=True,
+        )
+    finally:
+        Path(feats_path).unlink(missing_ok=True)
+    scores = [float(line) for line in out.strip().splitlines() if line.strip()]
+    if len(scores) != n_rows:
+        raise RuntimeError(
+            f"predict_features_with_bake returned {len(scores)} scores; expected {n_rows}"
+        )
+    return scores
+
+
+# ---------------------------------------------------------------------------
+# Binary search on cached features
+# ---------------------------------------------------------------------------
+
+
+def binary_search_q_cached(
+    target_score,
+    per_q,
+    bake_path,
+    bake_post,
+    predict_tool,
+):
+    """Find the q in Q_GRID whose cached features score closest to target.
+
+    Returns (best_q, best_score). Score is the bake-with-post output.
+    Pre-scores all 19 q values with one Rust call — far cheaper than
+    8 binary-search steps × Python ↔ Rust round trips.
+    """
+    rows = []
+    qs_present = []
+    for q in Q_GRID:
+        if q in per_q:
+            rows.append(per_q[q])
+            qs_present.append(q)
+    if not rows:
+        return None, None
+    scores = predict_zensim_from_features(rows, bake_path, bake_post, predict_tool)
+    best_q = qs_present[0]
+    best_score = scores[0]
+    best_err = abs(best_score - target_score)
+    for q, s in zip(qs_present[1:], scores[1:]):
+        err = abs(s - target_score)
+        if err < best_err:
+            best_err = err
+            best_q = q
             best_score = s
-            best_path = dec_path
-        if s < target_score:
-            lo = mid + 1
-        elif s > target_score:
-            hi = mid - 1
-        else:
-            break
-        iters += 1
-    return best_q, best_score, best_path
+    return best_q, best_score
+
+
+# ---------------------------------------------------------------------------
+# Encode at convergence q + butter
+# ---------------------------------------------------------------------------
+
+
+def encode_convergence(src_png, q, codec_name, codec_cfg, work_dir, image_id):
+    enc_path = work_dir / f"{image_id}_{codec_name}_q{q:03d}{codec_cfg['ext']}"
+    dec_path = work_dir / f"{image_id}_{codec_name}_q{q:03d}.png"
+    if not dec_path.exists():
+        img = Image.open(src_png).convert("RGB")
+        kwargs = dict(codec_cfg["save_kwargs"])
+        kwargs["quality"] = int(q)
+        img.save(enc_path, codec_cfg["format"], **kwargs)
+        Image.open(enc_path).convert("RGB").save(dec_path, "PNG")
+    return dec_path
 
 
 def butteraugli_pair(ref_png, dist_png, zen_metrics):
@@ -126,7 +233,6 @@ def butteraugli_pair(ref_png, dist_png, zen_metrics):
         ],
         text=True,
     )
-    # zen-metrics emits `metric=butteraugli butteraugli_max=X butteraugli_pnorm3=Y`
     bmax, bp3 = None, None
     for tok in out.split():
         if tok.startswith("butteraugli_max="):
@@ -142,52 +248,98 @@ def butteraugli_pair(ref_png, dist_png, zen_metrics):
     return bmax, bp3
 
 
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", type=float, required=True)
     ap.add_argument("--bake", required=True, help="bake bytes to use for zensim scoring")
-    ap.add_argument("--bake-post", default="clamp", help="post-processing mode for the bake")
+    ap.add_argument(
+        "--bake-post",
+        default="clamp",
+        help="post-processing mode for the bake (clamp|raw|mapped[:a,b])",
+    )
     ap.add_argument("--n-images", type=int, default=20)
-    ap.add_argument("--tool", default="/home/lilith/work/zen/zensim--exp-tuner/target/release/score_pair_with_bake")
-    ap.add_argument("--zen-metrics", default="/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
+    ap.add_argument(
+        "--predict-tool",
+        default="/home/lilith/work/zen/zensim--eval-accel/target/release/predict_features_with_bake",
+    )
+    ap.add_argument(
+        "--zen-metrics",
+        default="/home/lilith/work/zen/zenmetrics/target/release/zen-metrics",
+    )
+    ap.add_argument(
+        "--butter-parquet-root",
+        default=str(BUTTER_PARQUET_ROOT),
+        help="dir containing zenjpeg.parquet, zenwebp.parquet, zenavif.parquet",
+    )
+    ap.add_argument(
+        "--source-root",
+        default=str(SOURCE_ROOT),
+        help="dir holding the source PNGs keyed by ref_basename",
+    )
     ap.add_argument("--out", required=True)
+    ap.add_argument("--work-dir", default=None, help="encode/decode scratch dir")
     args = ap.parse_args()
 
-    work_dir = OUT_DIR / f"bake_{Path(args.bake).stem}_t{int(args.target)}"
+    butter_root = Path(args.butter_parquet_root)
+    source_root = Path(args.source_root)
+
+    if args.work_dir:
+        work_dir = Path(args.work_dir)
+    else:
+        work_dir = OUT_DIR_DEFAULT / f"bake_{Path(args.bake).stem}_t{int(args.target)}"
     work_dir.mkdir(parents=True, exist_ok=True)
-    print(f"work dir: {work_dir}", file=sys.stderr)
+    print(f"work dir: {work_dir}", file=sys.stderr, flush=True)
 
-    # Read manifest to get source paths (one row per image_id, q=50 for the source link).
-    src_by_id = {}
-    with open(QSWEEP_DIR / "qsweep_manifest.tsv") as f:
-        f.readline()  # header
-        for line in f:
-            cols = line.rstrip("\n").split("\t")
-            if len(cols) < 5:
-                continue
-            src_by_id.setdefault(cols[2], cols[0])
+    # 1) Load all 3 codec feature parquets.
+    feat_by_codec = {}
+    for codec_name, cfg in CODECS.items():
+        path = butter_root / cfg["parquet"]
+        feat_by_codec[codec_name] = load_codec_features(path)
 
-    images = sorted(src_by_id.items())[: args.n_images]
-    print(f"selected {len(images)} images", file=sys.stderr)
+    # 2) Pick the first N_IMAGES from the intersection of the 3 codecs'
+    #    ref_basename sets. Sort lexicographically for determinism.
+    common = (
+        set(feat_by_codec["jpeg"])
+        & set(feat_by_codec["webp"])
+        & set(feat_by_codec["avif"])
+    )
+    images = sorted(common)[: args.n_images]
+    print(f"selected {len(images)} images (cross-codec intersection)", file=sys.stderr, flush=True)
 
     rows = []
-    for image_id, src_path in images:
-        print(f"\nimage: {image_id}", file=sys.stderr)
-        codecs = [
-            ("jpeg", encode_jpeg),
-            ("webp", encode_webp),
-            ("avif", encode_avif),
-        ]
+    for image_id in images:
+        src_png = source_root / image_id
+        if not src_png.exists():
+            print(f"  SKIP {image_id}: source PNG not found at {src_png}", file=sys.stderr, flush=True)
+            continue
+        print(f"\nimage: {image_id}", file=sys.stderr, flush=True)
         results = {}
-        for cn, fn in codecs:
-            q, s, dec_path = binary_search_q(
-                args.target, fn, decode_to_png, src_path, cn,
-                args.bake, args.bake_post, args.tool, work_dir, image_id,
+        for codec_name, cfg in CODECS.items():
+            per_q = feat_by_codec[codec_name][image_id]
+            q, s = binary_search_q_cached(
+                args.target,
+                per_q,
+                args.bake,
+                args.bake_post,
+                args.predict_tool,
             )
-            print(f"  {cn} q={q} zensim={s:.2f}", file=sys.stderr)
-            results[cn] = (q, s, dec_path)
+            print(f"  {codec_name} q={q} zensim={s:.2f}", file=sys.stderr, flush=True)
+            dec_path = encode_convergence(
+                src_png,
+                q,
+                codec_name,
+                cfg,
+                work_dir,
+                image_id.rsplit(".", 1)[0],
+            )
+            results[codec_name] = (q, s, dec_path)
 
-        # Pairwise butteraugli between the 3 decoded outputs.
+        # 3) Pairwise butteraugli between the 3 decoded outputs.
         names = ["jpeg", "webp", "avif"]
         pair_b_max = []
         pair_b_p3 = []
@@ -196,7 +348,11 @@ def main():
                 _, _, pi = results[names[i]]
                 _, _, pj = results[names[j]]
                 bmax, bp3 = butteraugli_pair(pi, pj, args.zen_metrics)
-                print(f"  butter[{names[i]} vs {names[j]}] max={bmax} p3={bp3}", file=sys.stderr)
+                print(
+                    f"  butter[{names[i]} vs {names[j]}] max={bmax} p3={bp3}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 if bmax is not None:
                     pair_b_max.append(bmax)
                 if bp3 is not None:
@@ -215,20 +371,19 @@ def main():
 
     with open(args.out, "w") as f:
         if not rows:
-            print("no rows", file=sys.stderr)
+            print("no rows", file=sys.stderr, flush=True)
             return 1
         cols = list(rows[0].keys())
         f.write("\t".join(cols) + "\n")
         for r in rows:
             f.write("\t".join(str(r[c]) for c in cols) + "\n")
-    print(f"wrote {args.out}", file=sys.stderr)
-    # Summary.
+    print(f"wrote {args.out}", file=sys.stderr, flush=True)
     pmax = [r["pairwise_butter_max_mean"] for r in rows if r["pairwise_butter_max_mean"] == r["pairwise_butter_max_mean"]]
     pp3 = [r["pairwise_butter_p3_mean"] for r in rows if r["pairwise_butter_p3_mean"] == r["pairwise_butter_p3_mean"]]
     if pmax:
-        print(f"mean butter_max across images: {sum(pmax)/len(pmax):.3f}", file=sys.stderr)
+        print(f"mean butter_max across images: {sum(pmax)/len(pmax):.3f}", file=sys.stderr, flush=True)
     if pp3:
-        print(f"mean butter_p3  across images: {sum(pp3)/len(pp3):.3f}", file=sys.stderr)
+        print(f"mean butter_p3  across images: {sum(pp3)/len(pp3):.3f}", file=sys.stderr, flush=True)
     return 0
 
 
