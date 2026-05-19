@@ -1,0 +1,38 @@
+[package]
+name = "zensim-picker-prep"
+version = "0.1.0"
+edition = "2024"
+description = "Per-codec picker training data prep: encode → decode → zensim_Tuner score per (source, codec, q)"
+license = "MIT"
+publish = false
+
+[dependencies]
+# Local zensim with PreviewV0_5Tuner profile
+zensim = { path = "../zensim", features = ["training"] }
+
+# Codec crates — local sibling paths (user directive: no crates.io versions)
+zenjpeg = { path = "../../zenjpeg/zenjpeg", default-features = false, features = ["zencodec", "decoder", "__expert", "trellis"] }
+zenwebp = { path = "../../zenwebp" }
+zenavif = { path = "../../zenavif", features = ["encode"] }
+zenjxl = { path = "../../zenjxl", features = ["zencodec"] }
+zenpng = { path = "../../zenpng" }
+
+# Helper crates the codecs need
+zencodec = "0.1.20"
+zenpixels = "0.2.10"
+zenpixels-convert = "0.2.10"
+almost-enough = "0.4.3"
+enough = { version = "0.4.4", default-features = false, features = ["std"] }
+imgref = "1"
+rgb = "0.8"
+
+# Pipeline + I/O
+image = { workspace = true }
+rayon = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+serde_json = "1"
+
+# Parquet output
+arrow = { version = "58.3.0", default-features = false }
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"] }
