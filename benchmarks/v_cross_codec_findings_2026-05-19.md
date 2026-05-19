@@ -142,10 +142,32 @@ The equivalence loss appears to:
 
 ## Decision
 
-Ship `PreviewV0_5CrossCodec` (W=1.0, seed=1) as the third Tuner
-trail variant. Seed 2/3 verification queued (training in flight at
-session end — see seed_2/seed_3 trainers). Expected ship bake:
-median or best of 3-seed sweep.
+**Ship `PreviewV0_5CrossCodec` = `cc4_s1_w1.0.bin`** (W=1.0, seed=1)
+as the opt-in variant.
+
+### 3-seed verification
+
+After running seeds 2 and 3 at W=1.0:
+
+| Seed | CID22 | KADID | TID | KonJND | AIC-3 | T=63 (6-img) | T=63 (20-img) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline (tuner_v2_s2) | 0.858 | 0.395 | 0.522 | 0.294 | 0.831 | 6.41 | 8.07 |
+| **s1 W=1.0 (SHIP)** | **0.880** | **0.800** | **0.822** | 0.327 | 0.806 | 4.82 | 5.52 |
+| s2 W=1.0 | 0.819 | 0.308 | 0.367 | 0.211 | 0.784 | 2.97 | **2.81** |
+| s3 W=1.0 | 0.833 | 0.742 | 0.799 | 0.349 | 0.791 | 4.07 | 4.76 |
+
+**Seed variance is high.** Seed 2 collapses to a degenerate solution:
+cross-codec butter hits **2.81 / 2.97 (within striking distance of
+the <2.5 gate)** BUT the underlying ranking quality is poor (KADID
+0.31, TID 0.37). The metric flattens output toward score=63 across
+inputs, achieving cross-codec consistency at the cost of ranking
+signal. Inspection of seed 2 outputs shows all codecs binary-search
+to wildly different q values that all map to zensim≈63 (q=38..89
+across the same image), confirming the rank-degenerate hypothesis.
+
+**Seed 1 is the principled ship**: improves cross-codec consistency
+meaningfully (25–46% reduction) WITHOUT collapsing ranking quality
+(KADID +0.405, TID +0.300, CID22 +0.022).
 
 ## Falsification of strict gate
 
