@@ -103,7 +103,8 @@ mod simd_mlp;
 mod contamination_guard;
 
 use mlp_train::{
-    MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy, train_mlp_with_tv,
+    AnchorRows, MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy,
+    train_mlp_with_tv_anchored,
 };
 
 #[derive(Parser)]
@@ -619,6 +620,38 @@ struct Args {
     /// activate on any strict inversion.
     #[arg(long, default_value_t = 0.0)]
     monotonicity_margin: f64,
+
+    /// `PreviewV0_5TunerV2` cross-codec JND anchor parquet (2026-05-19).
+    /// Path to a parquet with at minimum (`f0..f<N-1>`, `anchor_weight`).
+    /// The target column is the constant `--anchor-target-score`
+    /// regardless of any `human_score` column in the file (we override
+    /// after loading). One row = one anchor pair (source, codec-at-PJND).
+    /// Weighted higher anchor_weight values are sampled preferentially.
+    /// Default empty = no anchor data; ignored if --anchor-loss-weight 0.
+    #[arg(long)]
+    anchor_parquet: Option<PathBuf>,
+
+    /// `PreviewV0_5TunerV2` cross-codec JND anchor loss weight
+    /// (2026-05-19). Default `0.0` = no anchor stepping. When `> 0`,
+    /// every pair-step with probability `--anchor-step-p` samples one
+    /// anchor row and applies MSE against `--anchor-target-score`. Only
+    /// wired on the per-sample-α head and minibatch-size 1.
+    #[arg(long, default_value_t = 0.0)]
+    anchor_loss_weight: f64,
+
+    /// `PreviewV0_5TunerV2` target score the anchor rows regress to
+    /// (2026-05-19). Default `63.0` matches CID22 paper Table 4 PJND
+    /// calibration. Per-row anchor weights multiply this target's MSE
+    /// contribution.
+    #[arg(long, default_value_t = 63.0)]
+    anchor_target_score: f64,
+
+    /// `PreviewV0_5TunerV2` probability that each pair-step also
+    /// performs an anchor step (2026-05-19). Default `0.10` = 10 % of
+    /// pair-steps trigger an anchor row. Higher values give the anchor
+    /// loss more bandwidth at the cost of rank-loss bandwidth.
+    #[arg(long, default_value_t = 0.10)]
+    anchor_step_p: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1413,6 +1446,9 @@ fn main() {
         ranknet_weight: args.ranknet_weight,
         monotonicity_reg: args.monotonicity_reg,
         monotonicity_margin: args.monotonicity_margin,
+        anchor_loss_weight: args.anchor_loss_weight,
+        anchor_target_score: args.anchor_target_score,
+        anchor_step_p: args.anchor_step_p,
     };
 
     println!(
@@ -1500,13 +1536,84 @@ fn main() {
         None
     };
 
+    // PreviewV0_5TunerV2 (2026-05-19): load optional anchor parquet.
+    // The parquet uses `anchor_weight` as the target column (we override
+    // the target score in the trainer); we keep the column-based loader
+    // call to reuse the same parquet machinery — the loaded
+    // `human_scores` field becomes the per-row anchor weight vector.
+    let (anchor_feat_storage, anchor_row_weights): (Vec<Vec<f64>>, Vec<f64>) =
+        if let Some(anchor_path) = &args.anchor_parquet {
+            if args.anchor_loss_weight <= 0.0 {
+                eprintln!(
+                    "WARNING: --anchor-parquet set but --anchor-loss-weight is 0; \
+                     anchor data will be ignored."
+                );
+            }
+            let loader = zensim_validate::parquet_loader::load_parquet(
+                anchor_path,
+                "jnd_anchor",
+                "anchor_weight",
+                1.0,
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("anchor parquet load failed: {e}");
+                std::process::exit(1);
+            });
+            let cap = n_features;
+            let mut feat: Vec<Vec<f64>> = loader.feature_rows;
+            for row in &mut feat {
+                row.truncate(cap);
+            }
+            // Apply feature transforms in-place if active (same as groups).
+            if let Some(ts) = &feature_transforms {
+                let pp = feature_transform_params.as_ref();
+                for row in &mut feat {
+                    for (i, t) in ts.iter().enumerate() {
+                        if *t != zenpredict::FeatureTransform::Identity {
+                            let p = pp
+                                .map(|v| v[i].as_slice())
+                                .unwrap_or(&[][..]);
+                            row[i] = t.apply_with_params(row[i] as f32, p) as f64;
+                        }
+                    }
+                }
+            }
+            eprintln!(
+                "anchor parquet: loaded {} rows from {:?} (target={}, weight={}, step_p={})",
+                feat.len(),
+                anchor_path,
+                args.anchor_target_score,
+                args.anchor_loss_weight,
+                args.anchor_step_p,
+            );
+            (feat, loader.human_scores)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+    let anchor_feat_refs: Vec<&[f64]> = anchor_feat_storage
+        .iter()
+        .map(|r| r.as_slice())
+        .collect();
+    let anchor_loaded: Option<AnchorRows<'_>> = if args.anchor_parquet.is_some()
+        && !anchor_feat_storage.is_empty()
+    {
+        Some(AnchorRows {
+            name: "jnd_anchor".to_string(),
+            features: anchor_feat_refs.as_slice(),
+            row_weights: anchor_row_weights.as_slice(),
+        })
+    } else {
+        None
+    };
+
     let mut log: Vec<String> = Vec::new();
-    let bake_bytes = train_mlp_with_tv(
+    let bake_bytes = train_mlp_with_tv_anchored(
         &groups,
         n_features,
         &hyperparams,
         &mut log,
         tv_regularizer.as_ref(),
+        anchor_loaded.as_ref(),
     );
 
     std::fs::write(&args.out, &bake_bytes).unwrap_or_else(|e| {

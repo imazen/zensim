@@ -452,6 +452,35 @@ pub struct MlpHyperparams {
     /// penalty; otherwise the pair contributes 0. Useful when you
     /// want only "near-tied" pairs to participate.
     pub monotonicity_margin: f64,
+
+    /// `PreviewV0_5TunerV2` cross-codec JND anchor loss weight
+    /// (2026-05-19). When `> 0`, an additional anchor MSE loss is
+    /// applied each pair-step with probability ~`anchor_step_p`:
+    /// a single row is drawn from the anchor pool, forwarded through
+    /// the per-sample-α head, and `w · (y - anchor_target_score)²` is
+    /// added to the loss. Gradients flow through the same per-sample-α
+    /// backprop as the MSE pair loss.
+    ///
+    /// The anchor pool is supplied at the call boundary via the
+    /// `AnchorRows` argument to `train_mlp_with_tv_anchored`. Rows
+    /// carry per-row weights so KonJND PJND anchors (real human data)
+    /// can be weighted higher than synthetic ssim2-derived anchors.
+    /// Default `0.0` = no anchor step. Only wired on the
+    /// `per_sample_alpha_head = true` path.
+    pub anchor_loss_weight: f64,
+
+    /// `PreviewV0_5TunerV2` target score each anchor row regresses to
+    /// (2026-05-19). Default `63.0` matches CID22 paper Table 4 PJND
+    /// calibration. Per-row anchor weights multiply this target's MSE
+    /// contribution; the target itself is shared across rows.
+    pub anchor_target_score: f64,
+
+    /// Fraction of pair-steps that get accompanied by an extra anchor
+    /// step (default `0.10` = 10% of steps). The anchor step samples
+    /// one row, forwards, and applies anchor MSE backprop. Higher
+    /// values give the anchor more gradient bandwidth at the cost of
+    /// rank-loss signal. Only effective when `anchor_loss_weight > 0`.
+    pub anchor_step_p: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -488,6 +517,9 @@ impl Default for MlpHyperparams {
             ranknet_weight: 1.0,
             monotonicity_reg: 0.0,
             monotonicity_margin: 0.0,
+            anchor_loss_weight: 0.0,
+            anchor_target_score: 63.0,
+            anchor_step_p: 0.10,
         }
     }
 }
@@ -552,6 +584,25 @@ pub struct TrainingGroup<'a> {
     pub validation_weight: f64,
 }
 
+/// Cross-codec JND anchor rows for `PreviewV0_5TunerV2` (2026-05-19).
+///
+/// Each row carries a feature vector + a row weight; all rows share the
+/// global anchor target score (typically 63, the CID22-paper PJND
+/// calibration point). During training, anchor steps sample a row,
+/// forward through the head, and apply MSE against `target_score`.
+///
+/// **Why a separate anchor type instead of a regular training group**:
+/// regular groups participate in RankNet *pair* sampling (need ≥2 rows
+/// per source). Anchors are *single-row* MSE supervision against a
+/// constant target — they want different sampling semantics. Keeping
+/// them as a sibling struct keeps the loop unambiguous.
+#[derive(Debug)]
+pub struct AnchorRows<'a> {
+    pub name: String,
+    pub features: &'a [&'a [f64]],
+    pub row_weights: &'a [f64],
+}
+
 /// Train a 2-layer MLP across multiple datasets via RankNet pairwise
 /// loss + Adam, with per-dataset SROCC tracking and best-checkpoint
 /// selection on the validation mean.
@@ -613,6 +664,29 @@ pub fn train_mlp_with_tv(
     log: &mut Vec<String>,
     tv: Option<&TvRegularizer>,
 ) -> Vec<u8> {
+    train_mlp_with_tv_anchored(groups, n_features, hyperparams, log, tv, None)
+}
+
+/// `PreviewV0_5TunerV2` (2026-05-19) entry point with optional JND
+/// anchor data. When `anchor` is provided AND
+/// `hyperparams.anchor_loss_weight > 0` AND
+/// `hyperparams.per_sample_alpha_head` is enabled, the per-sample-α
+/// training loop interleaves anchor MSE steps with regular pair-loss
+/// steps. The anchor rows regress to the constant
+/// `hyperparams.anchor_target_score`.
+///
+/// For every other head (pool_head / hybrid_head / plain MLP) the
+/// anchor argument is ignored (anchor wiring is currently
+/// tuner-specific). Trainer prints a warning if anchor data is supplied
+/// but the per-sample-α path isn't active.
+pub fn train_mlp_with_tv_anchored(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+    anchor: Option<&AnchorRows<'_>>,
+) -> Vec<u8> {
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
     // time for the architectural lift (GMSD's std-pooling +
@@ -633,7 +707,13 @@ pub fn train_mlp_with_tv(
         "pool_head / hybrid_head / per_sample_alpha_head are mutually exclusive"
     );
     if hyperparams.per_sample_alpha_head {
-        return train_mlp_per_sample_alpha_head(groups, n_features, hyperparams, log);
+        return train_mlp_per_sample_alpha_head(groups, n_features, hyperparams, log, anchor);
+    }
+    if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
+        eprintln!(
+            "WARNING: --anchor-loss-weight is only wired on the per-sample-α head; \
+             anchor data ignored on this head."
+        );
     }
     if hyperparams.hybrid_head {
         return train_mlp_hybrid_head_with_tv(groups, n_features, hyperparams, log, tv);
@@ -4556,6 +4636,7 @@ fn train_mlp_per_sample_alpha_head(
     n_features: usize,
     hyperparams: &MlpHyperparams,
     log: &mut Vec<String>,
+    anchor: Option<&AnchorRows<'_>>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
@@ -4576,6 +4657,31 @@ fn train_mlp_per_sample_alpha_head(
             g.name
         );
     }
+
+    // PreviewV0_5TunerV2: validate anchor rows match n_features and
+    // log presence. The anchor is consulted ONLY if both anchor data
+    // is provided AND anchor_loss_weight > 0; otherwise it's a no-op.
+    let anchor_active =
+        anchor.is_some() && hyperparams.anchor_loss_weight > 0.0;
+    if let Some(a) = anchor {
+        assert_eq!(
+            a.features.len(),
+            a.row_weights.len(),
+            "anchor '{}': features/row_weights length mismatch",
+            a.name
+        );
+        for (i, f) in a.features.iter().enumerate() {
+            assert_eq!(
+                f.len(),
+                n_features,
+                "anchor '{}' row {}: feature length {} != n_features {}",
+                a.name,
+                i,
+                f.len(),
+                n_features
+            );
+        }
+    }
     let nin_on = hyperparams.norm_in_norm_weight > 0.0;
     if nin_on {
         assert!(
@@ -4592,6 +4698,25 @@ fn train_mlp_per_sample_alpha_head(
             hyperparams.mse_weight == 0.0 && hyperparams.monotonicity_reg == 0.0,
             "per_sample_alpha_head + NiN: --mse-weight and --monotonicity-reg are not yet \
              composed with NiN. Disable NiN (--norm-in-norm-weight 0) or these aux losses."
+        );
+    }
+    // PreviewV0_5TunerV2: anchor stepping is only wired on K=1 (the
+    // tuner's recipe pins --minibatch-size 1 anyway). NiN incompatible.
+    if hyperparams.anchor_loss_weight > 0.0 && anchor.is_some() {
+        assert!(
+            !nin_on,
+            "per_sample_alpha_head + NiN: anchor loss is not yet composed with NiN. \
+             Disable NiN (--norm-in-norm-weight 0) or set --anchor-loss-weight 0."
+        );
+        assert_eq!(
+            hyperparams.minibatch_size, 1,
+            "anchor loss requires --minibatch-size 1; got {}",
+            hyperparams.minibatch_size
+        );
+        assert!(
+            (0.0..=1.0).contains(&hyperparams.anchor_step_p),
+            "--anchor-step-p must be in [0, 1]; got {}",
+            hyperparams.anchor_step_p
         );
     }
     if (hyperparams.mse_weight > 0.0 || hyperparams.monotonicity_reg > 0.0)
@@ -4673,6 +4798,57 @@ fn train_mlp_per_sample_alpha_head(
             buf
         })
         .collect();
+
+    // PreviewV0_5TunerV2 anchor data: standardize against the SAME
+    // training-group scaler (consistent with the bake's runtime scaler;
+    // the bake metadata captures `scaler_mean` / `scaler_scale` once).
+    // Also build a row-weight CDF over the anchor pool so we can sample
+    // KonJND rows preferentially (per the per-row weights in
+    // AnchorRows.row_weights).
+    let (std_anchor_features, anchor_row_cdf, anchor_total_weight): (
+        Vec<Vec<f64>>,
+        Vec<f64>,
+        f64,
+    ) = if let (Some(a), true) = (anchor, anchor_active) {
+        let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(a.features.len());
+        for &f in a.features.iter() {
+            let mut buf = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+            bufs.push(buf);
+        }
+        let total: f64 = a.row_weights.iter().sum();
+        let mut cum = 0.0f64;
+        let cdf: Vec<f64> = a
+            .row_weights
+            .iter()
+            .map(|&w| {
+                cum += w.max(0.0);
+                if total > 0.0 { cum / total } else { 0.0 }
+            })
+            .collect();
+        log_line(
+            &format!(
+                "anchor: ENABLED — '{}' n={} target_score={:.2} step_p={:.3} weight={:.3}",
+                a.name,
+                a.features.len(),
+                hyperparams.anchor_target_score,
+                hyperparams.anchor_step_p,
+                hyperparams.anchor_loss_weight
+            ),
+            log,
+        );
+        (bufs, cdf, total)
+    } else {
+        if anchor.is_some() && !anchor_active {
+            log_line(
+                "anchor: data supplied but anchor_loss_weight = 0 — ignored",
+                log,
+            );
+        }
+        (Vec::new(), Vec::new(), 0.0)
+    };
 
     let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
     let mut w1 = init_model.w1.clone();
@@ -5085,6 +5261,101 @@ fn train_mlp_per_sample_alpha_head(
                     lr, n_hidden,
                 );
                 steps_since_adam = 0;
+            }
+
+            // PreviewV0_5TunerV2 anchor step (2026-05-19).
+            // After each pair Adam step, with probability anchor_step_p,
+            // sample one anchor row, forward, and apply
+            // w · (y - target)² MSE gradient via a single backprop step
+            // sharing the same Adam state. Supports K=1 only (asserted
+            // at the per-sample-α function head when anchor is given).
+            //
+            // The anchor row's weight scales BOTH the loss and the
+            // gradient (so KonJND PJND rows pull harder than synthetic
+            // rows). The implicit "scale across all anchors" is the
+            // probability `anchor_step_p` itself.
+            if anchor_active && k == 1 {
+                let u_take = rng.next_f64_unit();
+                if u_take < hyperparams.anchor_step_p {
+                    if let Some(a) = anchor {
+                        if !std_anchor_features.is_empty() && anchor_total_weight > 0.0 {
+                            let u_row = rng.next_f64_unit();
+                            let ai = anchor_row_cdf
+                                .partition_point(|&c| c < u_row)
+                                .min(std_anchor_features.len() - 1);
+                            let xa = std_anchor_features[ai].as_slice();
+                            let (ya, ya_rank_a, ya_pool_a, alpha_a_a, _, ha_pre_a, ha_a, sa_a, max_a_a) =
+                                psah::forward_per_sample_alpha_head(
+                                    xa, &w1, &b1, &rank_w, rank_b,
+                                    &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                    n_features, n_hidden, leaky,
+                                );
+                            let target = hyperparams.anchor_target_score;
+                            let row_w = a.row_weights[ai];
+                            let err = ya - target;
+                            // L = anchor_loss_weight · row_w · err²
+                            // dL/dy = 2 · anchor_loss_weight · row_w · err
+                            let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
+                            let dl_dy = scale * err;
+                            let loss = hyperparams.anchor_loss_weight * row_w * err * err;
+                            total_loss += loss;
+                            n_steps += 1;
+
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_b_buf = 0.0f64;
+                            let mut g_red_w: [f64; 4] = [0.0; 4];
+                            let mut g_red_b: f64 = 0.0;
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_b_alpha: f64 = 0.0;
+
+                            psah::backprop_step_per_sample_alpha_head(
+                                xa, &ha_pre_a, &ha_a, &sa_a, max_a_a,
+                                ya_rank_a, ya_pool_a, alpha_a_a, dl_dy,
+                                &rank_w, &reducer_w, &w_alpha,
+                                &mut adam.gw1, &mut adam.gb1,
+                                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                &mut g_red_w, &mut g_red_b,
+                                &mut g_w_alpha_buf, &mut g_b_alpha,
+                                n_features, n_hidden, leaky,
+                            );
+
+                            if hyperparams.l2_lambda > 0.0 {
+                                let l2 = hyperparams.l2_lambda;
+                                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                    *g += l2 * w;
+                                }
+                                for j in 0..n_hidden {
+                                    g_rank_w_buf[j] += l2 * rank_w[j];
+                                    g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                }
+                                for kk in 0..4 {
+                                    g_red_w[kk] += l2 * reducer_w[kk];
+                                }
+                            }
+
+                            for j in 0..n_hidden {
+                                adam.gw2[j] += g_rank_w_buf[j];
+                            }
+                            for kk in 0..4 {
+                                adam.gw2[n_hidden + kk] += g_red_w[kk];
+                            }
+                            for j in 0..n_hidden {
+                                adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                            }
+                            adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                            adam.gb2[0] += g_rank_b_buf;
+                            adam.gb2[1] += g_red_b;
+
+                            do_adam_step(
+                                &mut adam, &mut w1, &mut b1,
+                                &mut rank_w, &mut rank_b,
+                                &mut reducer_w, &mut reducer_b,
+                                &mut w_alpha, &mut b_alpha,
+                                lr, n_hidden,
+                            );
+                        }
+                    }
+                }
             }
         }
 
