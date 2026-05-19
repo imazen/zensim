@@ -1851,55 +1851,102 @@ fn main() {
     // the target score in the trainer); we keep the column-based loader
     // call to reuse the same parquet machinery — the loaded
     // `human_scores` field becomes the per-row anchor weight vector.
-    let (anchor_feat_storage, anchor_row_weights): (Vec<Vec<f64>>, Vec<f64>) =
-        if let Some(anchor_path) = &args.anchor_parquet {
-            if args.anchor_loss_weight <= 0.0 {
-                eprintln!(
-                    "WARNING: --anchor-parquet set but --anchor-loss-weight is 0; \
-                     anchor data will be ignored."
-                );
-            }
-            let loader = zensim_validate::parquet_loader::load_parquet(
-                anchor_path,
-                "jnd_anchor",
-                "anchor_weight",
-                1.0,
-            )
-            .unwrap_or_else(|e| {
-                eprintln!("anchor parquet load failed: {e}");
-                std::process::exit(1);
-            });
-            let cap = n_features;
-            let mut feat: Vec<Vec<f64>> = loader.feature_rows;
+    //
+    // V5 extension (2026-05-19): when the parquet has a `target_score`
+    // column (multi-band piecewise anchors), load it and pass per-row
+    // targets to the trainer. V4-style single-band parquets without
+    // that column fall back to `--anchor-target-score`.
+    let (anchor_feat_storage, anchor_row_weights, anchor_target_scores): (
+        Vec<Vec<f64>>,
+        Vec<f64>,
+        Option<Vec<f64>>,
+    ) = if let Some(anchor_path) = &args.anchor_parquet {
+        if args.anchor_loss_weight <= 0.0 {
+            eprintln!(
+                "WARNING: --anchor-parquet set but --anchor-loss-weight is 0; \
+                 anchor data will be ignored."
+            );
+        }
+        let loader = zensim_validate::parquet_loader::load_parquet(
+            anchor_path,
+            "jnd_anchor",
+            "anchor_weight",
+            1.0,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("anchor parquet load failed: {e}");
+            std::process::exit(1);
+        });
+        let cap = n_features;
+        let mut feat: Vec<Vec<f64>> = loader.feature_rows;
+        for row in &mut feat {
+            row.truncate(cap);
+        }
+        // Apply feature transforms in-place if active (same as groups).
+        if let Some(ts) = &feature_transforms {
+            let pp = feature_transform_params.as_ref();
             for row in &mut feat {
-                row.truncate(cap);
-            }
-            // Apply feature transforms in-place if active (same as groups).
-            if let Some(ts) = &feature_transforms {
-                let pp = feature_transform_params.as_ref();
-                for row in &mut feat {
-                    for (i, t) in ts.iter().enumerate() {
-                        if *t != zenpredict::FeatureTransform::Identity {
-                            let p = pp
-                                .map(|v| v[i].as_slice())
-                                .unwrap_or(&[][..]);
-                            row[i] = t.apply_with_params(row[i] as f32, p) as f64;
-                        }
+                for (i, t) in ts.iter().enumerate() {
+                    if *t != zenpredict::FeatureTransform::Identity {
+                        let p = pp
+                            .map(|v| v[i].as_slice())
+                            .unwrap_or(&[][..]);
+                        row[i] = t.apply_with_params(row[i] as f32, p) as f64;
                     }
                 }
             }
+        }
+        // V5: optional per-row `target_score` column. Row ordering
+        // matches `load_parquet` (same sequential batch scan).
+        let target_scores =
+            zensim_validate::parquet_loader::load_optional_scalar_column(
+                anchor_path,
+                "target_score",
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("anchor target_score load failed: {e}");
+                std::process::exit(1);
+            });
+        if let Some(ref ts) = target_scores {
+            if ts.len() != feat.len() {
+                eprintln!(
+                    "anchor target_score column length ({}) != feature rows ({}); \
+                     refusing to mix shapes",
+                    ts.len(),
+                    feat.len(),
+                );
+                std::process::exit(1);
+            }
+            // Per-row target span summary.
+            let mut ts_sorted = ts.clone();
+            ts_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let (mn, mx) =
+                (ts_sorted.first().copied().unwrap_or(0.0), ts_sorted.last().copied().unwrap_or(0.0));
+            let med = ts_sorted[ts_sorted.len() / 2];
             eprintln!(
-                "anchor parquet: loaded {} rows from {:?} (target={}, weight={}, step_p={})",
+                "anchor parquet: loaded {} rows from {:?} (PER-ROW target_score: min={:.1} median={:.1} max={:.1}, weight={}, step_p={})",
+                feat.len(),
+                anchor_path,
+                mn,
+                med,
+                mx,
+                args.anchor_loss_weight,
+                args.anchor_step_p,
+            );
+        } else {
+            eprintln!(
+                "anchor parquet: loaded {} rows from {:?} (V4-style global target={}, weight={}, step_p={})",
                 feat.len(),
                 anchor_path,
                 args.anchor_target_score,
                 args.anchor_loss_weight,
                 args.anchor_step_p,
             );
-            (feat, loader.human_scores)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        }
+        (feat, loader.human_scores, target_scores)
+    } else {
+        (Vec::new(), Vec::new(), None)
+    };
     let anchor_feat_refs: Vec<&[f64]> = anchor_feat_storage
         .iter()
         .map(|r| r.as_slice())
@@ -1911,6 +1958,7 @@ fn main() {
             name: "jnd_anchor".to_string(),
             features: anchor_feat_refs.as_slice(),
             row_weights: anchor_row_weights.as_slice(),
+            target_scores: anchor_target_scores.as_deref(),
         })
     } else {
         None

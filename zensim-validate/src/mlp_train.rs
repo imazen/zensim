@@ -731,6 +731,14 @@ pub struct AnchorRows<'a> {
     pub name: String,
     pub features: &'a [&'a [f64]],
     pub row_weights: &'a [f64],
+    /// EXP-CROSS-CODEC-V5 (2026-05-19): per-row anchor score target.
+    /// When `Some` and the slice has the same length as `features`, the
+    /// anchor MSE step uses this row's target instead of the global
+    /// `hyperparams.anchor_target_score`. Enables piecewise multi-band
+    /// anchors (e.g. row 0 targets score=90 at butter=0.3, row 1 targets
+    /// score=63 at butter=1.5, etc.). When `None` or empty, the trainer
+    /// falls back to `hyperparams.anchor_target_score` as in V4.
+    pub target_scores: Option<&'a [f64]>,
 }
 
 /// Cross-codec equivalence pairs (2026-05-19, EXP-CROSS-CODEC-METRIC).
@@ -5093,12 +5101,21 @@ fn train_mlp_per_sample_alpha_head(
                 if total > 0.0 { cum / total } else { 0.0 }
             })
             .collect();
+        let target_mode = if a
+            .target_scores
+            .map(|ts| ts.len() == a.features.len())
+            .unwrap_or(false)
+        {
+            "PER-ROW (V5 multi-band)".to_string()
+        } else {
+            format!("{:.2} (global fallback)", hyperparams.anchor_target_score)
+        };
         log_line(
             &format!(
-                "anchor: ENABLED — '{}' n={} target_score={:.2} step_p={:.3} weight={:.3}",
+                "anchor: ENABLED — '{}' n={} target_score={} step_p={:.3} weight={:.3}",
                 a.name,
                 a.features.len(),
-                hyperparams.anchor_target_score,
+                target_mode,
                 hyperparams.anchor_step_p,
                 hyperparams.anchor_loss_weight
             ),
@@ -5677,7 +5694,13 @@ fn train_mlp_per_sample_alpha_head(
                                     n_features, n_hidden, leaky,
                                 );
                             let (ya, dya_dpre) = pin_forward(ya_pre);
-                            let target = hyperparams.anchor_target_score;
+                            // V5: per-row target_score overrides the global
+                            // hyperparams.anchor_target_score when the
+                            // AnchorRows pool ships a per-row target column.
+                            let target = a
+                                .target_scores
+                                .and_then(|ts| ts.get(ai).copied())
+                                .unwrap_or(hyperparams.anchor_target_score);
                             let row_w = a.row_weights[ai];
                             let err = ya - target;
                             // L = anchor_loss_weight · row_w · err²

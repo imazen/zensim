@@ -254,3 +254,67 @@ pub fn load_parquet(
         n_features,
     })
 }
+
+/// Load an optional scalar f64 column from a parquet file by name.
+///
+/// Returns `Ok(None)` if the column doesn't exist in the schema. Returns
+/// `Ok(Some(values))` if the column is present and has Float32/Float64
+/// dtype. Used by the EXP-CROSS-CODEC-V5 trainer to pick up the
+/// `target_score` column from multi-band anchor parquets — when absent
+/// (V4-style single-band parquets), the trainer falls back to the
+/// `--anchor-target-score` CLI default.
+///
+/// Row ordering matches the order rows appear in `load_parquet`'s
+/// returned `feature_rows` — both readers scan the parquet sequentially
+/// with the same batch ordering.
+pub fn load_optional_scalar_column(
+    path: &PathBuf,
+    column: &str,
+) -> Result<Option<Vec<f64>>, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let parquet_schema = builder.parquet_schema().clone();
+
+    let arrow_fields = schema.fields();
+    let arrow_idx = match arrow_fields.iter().position(|f| f.name() == column) {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+
+    let mask = ProjectionMask::leaves(&parquet_schema, [arrow_idx]);
+    let reader = builder
+        .with_projection(mask)
+        .with_batch_size(16384)
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    let mut values: Vec<f64> = Vec::new();
+    for batch_res in reader {
+        let batch =
+            batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+        let col = batch.column(0);
+        match col.data_type() {
+            DataType::Float64 => {
+                let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                values.extend((0..n_rows).map(|i| a.value(i)));
+            }
+            DataType::Float32 => {
+                let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                values.extend((0..n_rows).map(|i| a.value(i) as f64));
+            }
+            other => {
+                return Err(format!(
+                    "{path:?}: column {column:?} has unsupported dtype {other:?} (need Float32/Float64)",
+                ));
+            }
+        }
+    }
+
+    Ok(Some(values))
+}
