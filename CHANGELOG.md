@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Control / Blocked (2026-05-18, EXP-MULTI-CODEC)
+
+- **EXP-MULTI-CODEC control retrain reproduces V_24-per-sample-α
+  s4 bit-perfectly to within float noise on the existing canonical
+  5-codec LARGE (73,300 rows).** Premise audit found the
+  "mostly zenjpeg" framing in the EXP-LARGER-LARGE-V2
+  falsification commit was about the 108k appended rows, not the
+  73k baseline — the existing LARGE already spans 5 codecs
+  (zenjpeg 36k, zenjxl 32k, zenavif 3.9k, zenpng 2.4k, zenwebp 1k),
+  200 sources × per-codec knob grid. 5-seed CI on the existing
+  LARGE: CID22 mean 0.8589 σ=0.0044 (range [0.8547, 0.8640]),
+  s4 = 0.8640 = ship 0.8641 within noise. No ship rotation
+  (control test, no new corpus introduced).
+- **EXP-MULTI-CODEC fleet sweep BLOCKED.** A 112-chunk × 200-row
+  multi-codec sweep (zenwebp + zenavif + zenjxl with current
+  encoder revision, 22,400 cells total) was prepared and uploaded
+  to R2. Smoke instance 37047578 (v17 docker image) panicked at
+  cubecl-cuda device init on `cuCoredumpDeregisterStartCallback`
+  — a symbol the v17 image's `cuda_dlsym_stub.so` LD_PRELOAD shim
+  does NOT intercept (it covers only `cuCoredumpDeregisterCompleteCallback`,
+  the sibling variant). 4-line widening patch saved to
+  `/tmp/cuda_stub_patch_for_user.diff` for operator review;
+  zenmetrics image rebuild + push required to proceed. Smoke
+  instance destroyed; vast.ai spend: ~$0.03 of $9.47 credit
+  (well under the $30 cap). All sweep artifacts (chunks.jsonl,
+  input_parquet, source mirror reuse) staged on R2 and ready
+  to consume once the image is rebuilt. Per
+  `benchmarks/exp_multi_codec_2026-05-18.md`.
+
 ### Falsified (2026-05-18, EXP-V22-HYBRID 5-seed CI)
 
 - **EXP-V22-HYBRID falsified for both trails.** V_22-mix-LARGE+iwssim
