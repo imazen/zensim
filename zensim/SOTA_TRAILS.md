@@ -56,15 +56,68 @@ A ship requires steps 1–3 ALL pass. Step 3 is the noise-tolerance
 exception; without it the compression trail would collapse into the
 balanced trail.
 
+### Tuner trail (`PreviewV0_5Tuner`)
+
+**Audience.** Codec auto-targeting pipelines where the user types a
+target zensim score and the codec stack binary-searches the q (or
+equivalent quality knob) that yields it. Distinct from Balanced /
+Compression because **the gate is monotonicity + calibration honesty,
+not cross-corpus SROCC**. Adding 2026-05-19 per user directive.
+
+**Gate** (formal):
+
+1. **Strict monotonicity on the JPEG 50-image × 19-q sweep ≥ 1 pp
+   better than every V0_5 rank-trail ship.** Strict = decreases only;
+   ties (clamp-flat regions) are counted separately. Failure modes
+   the V0_5 ships exhibit (Balanced/Compression 70–80 % strict mono +
+   57–76 % tied) are the explicit pathology this gate prevents.
+2. **Tied rate ≤ 5 %** on the same sweep. A user dialing "score 70"
+   cannot binary-search a dead zone where many adjacent q values map
+   to the same clamped score.
+3. **Dynamic range ≥ 50 score units** between q=5 median and q=95
+   median across the sweep, so the user's 0..100 dial spans most of
+   the useful quality regime.
+
+**No SROCC gate.** Rank-honest cross-corpus performance is explicitly
+SECONDARY for this trail. The variant doc on `PreviewV0_5Tuner` warns
+"DO NOT use for general ranking workloads"; downstream eval is via the
+`zensim-validate/src/bin/qsweep_eval` harness and per-image binary
+search against codec output, not via the Mohammadi panel.
+
+When a candidate passes all 3 gate criteria AND also passes one of
+the rank trails — that's a Pareto upgrade and SHOULD rotate the
+rank-trail ship as well. The 2026-05-19 ship fails the rank gates by
+construction (safesyn-only training, no KADID/TID/KonJND
+supervision); follow-on tuners that close the rank-trail gap are an
+open research direction.
+
 ---
 
-## Current ship per trail (2026-05-18)
+## Current ship per trail (2026-05-19)
 
 | Trail | Bake | Bytes | Architecture | CID22 | AIC-3 | KADID | TID | KonJND |
 |---|---|--:|---|---:|---:|---:|---:|---:|
 | **Balanced** | V_22-mix-LARGE+iwssim s3 packed | 41,695 | 300→128→1 vanilla MLP | 0.8324 | 0.7845 | **0.9677** | **0.9729** | **0.8927** |
 | **Compression** | V_24-per-sample-α s4 packed | 44,109 | 300→128→128(identity) + per-sample-α head | **0.8641** | **0.8183** | 0.9316 | 0.8893 | 0.8080 |
 | **Ensemble** | V_05-ensemble classifier + B + C | 22,690 (classifier only) | 300→64→1 ReLU classifier routes to Balanced or Compression | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 |
+| **Tuner** | V_tuner-v2-s2 calibrated (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse-only train, affine α=−1590.55 β=52.02 | 0.8786 | 0.8130 | 0.7704 | 0.7476 | 0.2351 |
+
+Tuner monotonicity panel on the 50-image × 19-q JPEG sweep
+(`zensim-validate/src/bin/qsweep_eval`, n=900 adjacent pairs):
+
+| Trail bake | strict_mono | tied_rate | dynamic_range (q=5 med → q=95 med) |
+|---|---:|---:|---:|
+| **Tuner (this trail's ship)** | **0.9278** | **0.0044** | **5.0 → 94.6** = 89.6 units |
+| PreviewV0_3 (legacy V_18 ship) | 0.9367 | 0.0078 | 14.4 → 95.4 = 81.0 units |
+| Balanced | 0.7800 | 0.7556 | 12.0 → 0.0 = anti-monotonic dead zone |
+| Compression | 0.7189 | 0.7033 | 14.4 → 0.0 = anti-monotonic dead zone |
+| Ensemble | 0.8611 | 0.5733 | mixed (classifier-routed) |
+
+Tuner beats every V0_5 rank-trail ship by 6–21 pp on strict monotonicity
+AND has effectively no clamp-flat dead zones (0.44 % tied vs 57–76 % for
+the V0_5 ships, whose clamps pin most of the q-range to score=0). The
+89.6-unit dynamic range covers most of the user-facing 0..100 dial.
+
 
 Balanced is ZNPR v3, i8 + zerobias + lz4 packed, no metadata
 payload, standard `Predictor::predict` runtime.

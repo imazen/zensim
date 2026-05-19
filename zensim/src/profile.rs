@@ -178,6 +178,65 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
     PreviewV0_5Ensemble,
+    /// Preview v0.5, **tuner trail** — V_24-per-sample-α s2 trained
+    /// with `--mse-weight 1.0 --ranknet-weight 0 --monotonicity-reg 1.0`
+    /// on `mix_cv40_iw60` (2026-05-19), affine-calibrated to span 0..100
+    /// across the JPEG q-sweep. 372 → 128 → 128 (identity passthrough)
+    /// MLP with `zentrain.per_sample_alpha_head` metadata payload, F32
+    /// (uncompressed 261,316 bytes, md5 `cab00b89b8a3d4b01de1ab27f5de01cc`).
+    ///
+    /// **Designed for codec auto-targeting, NOT for cross-corpus ranking**:
+    /// a user-facing dial where typing "score 70" lets a codec pipeline
+    /// binary-search for the q value yielding zensim ≈ 70 with predictable
+    /// monotonic behavior. The two evaluation criteria that motivated the
+    /// trail (50-source × 19-q JPEG sweep, n=900 adjacent pairs):
+    ///
+    /// | Bake | strict_mono_rate | tied_rate (clamp flat) |
+    /// |---|---:|---:|
+    /// | PreviewV0_5Tuner | **0.9278** | **0.0044** |
+    /// | PreviewV0_5Balanced | 0.7800 | 0.7556 |
+    /// | PreviewV0_5Compression | 0.7189 | 0.7033 |
+    /// | PreviewV0_5Ensemble | 0.8611 | 0.5733 |
+    /// | PreviewV0_3 (V_18 legacy) | 0.9367 | 0.0078 |
+    ///
+    /// The tuner beats every V0_5 ship by 6–21pp on strict monotonicity
+    /// AND has effectively **no clamp-flat dead zones** (0.4% tied vs
+    /// 57–76% for the V0_5 ships, which collapse most of the q-range
+    /// to score=0). Within-image IQR at q=50 is ~3 score units after
+    /// the affine — binary-search converges to ±2 q precision.
+    ///
+    /// **Cross-corpus held-out SROCC (NOT competitive with the
+    /// general-purpose ships — see caveat below)**:
+    ///   - CID22 0.8786 (+0.014 vs Compression — wins compression-corpus
+    ///     rank, but the eval covers a different distribution shape than
+    ///     codec-tuning).
+    ///   - KADID 0.7704 (−0.20 vs Balanced — synthetic-distortion rank
+    ///     regresses because training corpus was safesyn-only).
+    ///   - TID   0.7476 (−0.23 vs Balanced — same reason).
+    ///   - KonJND 0.2351 (−0.66 vs Balanced — PJND-threshold rank
+    ///     dropped because KonJND-dense was not in the training mix).
+    ///   - AIC-3 0.8130 (tied with Compression).
+    ///
+    /// ## Caveats
+    ///
+    /// **DO NOT use this profile for general ranking workloads** — its
+    /// CID22 SROCC is competitive but KADID/TID/KonJND drop significantly
+    /// vs the Balanced or Compression ships (per § A.10, this profile
+    /// FAILS both rank-trail gates). It exists to expose a **monotonic +
+    /// well-calibrated dial** for codec orchestrators; for cross-corpus
+    /// rank metrics, use [`Self::PreviewV0_5Balanced`] or
+    /// [`Self::PreviewV0_5Compression`].
+    ///
+    /// Bake_compare A.9 verdict (tuner vs Compression): A>>B decisive on
+    /// CID22; B>>A decisive on KADID, TID, KonJND; tied on AIC-3.
+    /// 2 A wins vs 12 B wins across all (corpus × band) cells — tuner
+    /// FAILS the compression-trail gate (mean SROCC regression > 0.10 on
+    /// KADID/TID/KonJND). Ship rationale: the directive's secondary
+    /// criterion permits tuner-only ship when monotonicity beats ships
+    /// AND a "not for general ranking" doc note is attached. This is it.
+    ///
+    /// Methodology: `benchmarks/v_tuner_2026-05-18_methodology.md`.
+    PreviewV0_5Tuner,
 }
 
 impl ZensimProfile {
@@ -213,6 +272,16 @@ impl ZensimProfile {
         Self::PreviewV0_5Ensemble
     }
 
+    /// Tuner trail — alias for [`Self::PreviewV0_5Tuner`]. Designed
+    /// for codec auto-targeting: a monotonic, well-calibrated dial
+    /// across the JPEG q range. **NOT a general-purpose ranking
+    /// metric** — see the variant doc for the cross-corpus SROCC
+    /// caveat. Use only when the workload is "type a target score,
+    /// have a codec hit it." See `benchmarks/v_tuner_2026-05-18_methodology.md`.
+    pub const fn tuner() -> Self {
+        Self::PreviewV0_5Tuner
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -224,6 +293,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Balanced => "zensim-preview-v0.5-balanced",
             Self::PreviewV0_5Compression => "zensim-preview-v0.5-compression",
             Self::PreviewV0_5Ensemble => "zensim-preview-v0.5-ensemble",
+            Self::PreviewV0_5Tuner => "zensim-preview-v0.5-tuner",
         }
     }
 
@@ -241,6 +311,7 @@ impl ZensimProfile {
             Self::PreviewV0_5 | Self::PreviewV0_5Balanced => &PROFILE_PREVIEW_V0_5_BALANCED,
             Self::PreviewV0_5Compression => &PROFILE_PREVIEW_V0_5_COMPRESSION,
             Self::PreviewV0_5Ensemble => &PROFILE_PREVIEW_V0_5_ENSEMBLE,
+            Self::PreviewV0_5Tuner => &PROFILE_PREVIEW_V0_5_TUNER,
         }
     }
 }
@@ -820,6 +891,54 @@ static PROFILE_PREVIEW_V0_5_ENSEMBLE: ProfileParams = ProfileParams {
     soft_clamp_score: true,
     ensemble_classifier_bytes: Some(mlp_bake_preview_v0_5_ensemble_classifier),
     mlp_bytes_compression: Some(mlp_bake_preview_v0_5_compression),
+};
+
+/// PreviewV0_5Tuner bake bytes (2026-05-19). V_24-per-sample-α s2
+/// trained with `--mse-weight 1.0 --ranknet-weight 0
+/// --monotonicity-reg 1.0` on the canonical safesyn corpus against
+/// the `mix_cv40_iw60` target column, then affine-calibrated
+/// (α=−1590.55, β=52.02) so the bake's raw output spans the
+/// 0..100 scale on the JPEG q-sweep test set.
+///
+/// 372 → 128 → 128 (identity passthrough) MLP with
+/// `zentrain.per_sample_alpha_head` metadata payload (uncompressed
+/// F32, 261,316 bytes, md5 `cab00b89b8a3d4b01de1ab27f5de01cc`).
+///
+/// Methodology: `benchmarks/v_tuner_2026-05-18_methodology.md`.
+pub(crate) fn mlp_bake_preview_v0_5_tuner() -> &'static [u8] {
+    include_bytes!("../weights/v_tuner_2026-05-18.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_TUNER: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake is affine-calibrated to MCOS 0..100 — the runtime
+    // returns the bake's per-sample-α-head mix raw output directly
+    // as the score.
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_tuner),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 372-feature input = 228 standard + 72 masked + 72 IW pool
+    // features. Trained with `compute_iw_features: true` so the
+    // runtime must match.
+    extended_features: true,
+    compute_iw_features: true,
+    // Hard clamp — the affine calibration was fitted on the JPEG
+    // q-sweep medians and produces a value in [0, 100] for nearly
+    // all in-distribution inputs. Within-image outliers may exceed
+    // 100 (extra-easy / extra-hard images); the hard clamp pins
+    // them but does not produce mass dead zones (0.4% tied on the
+    // q-sweep is the measured rate). Soft-clamp would be an
+    // optional follow-up if a tuner consumer reports SROCC=0 on a
+    // band due to ties.
+    soft_clamp_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
 };
 
 // --- Weight arrays ---

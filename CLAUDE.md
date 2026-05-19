@@ -100,9 +100,9 @@ evaluation decision flows from this:
   but per-bin SROCC at 5-unit granularity in those bands IS the
   pathology view we use for goal #1 (band coverage).
 
-### Two-trail SOTA (added 2026-05-18)
+### Three-trail SOTA (added 2026-05-18, expanded 2026-05-19)
 
-The PreviewV0_5 slot now ships **two parallel variants** defending
+The PreviewV0_5 slot now ships **three parallel variants** defending
 distinct Pareto frontiers. Read `zensim/SOTA_TRAILS.md` for the full
 framework, gate criteria, and candidate matrix.
 
@@ -110,6 +110,8 @@ framework, gate criteria, and candidate matrix.
 |---|---|---|
 | `PreviewV0_5` / `PreviewV0_5Balanced` | V_22-mix-LARGE+iwssim (41 KB) | General-purpose. Best balanced-corpus coverage (KADID 0.9677, TID 0.9729, KonJND 0.8927). |
 | `PreviewV0_5Compression` | V_24-per-sample-α s4 (44 KB) | Codec selection / quality dials. Wins CID22 0.8641, AIC-3 0.8183, TID 0.8893 decisively vs prior 372feat ship per § A.9; KADID/TID/KonJND vs Balanced within −0.10 noise tolerance. Uses `zentrain.per_sample_alpha_head` runtime dispatch in `zensim::metric::forward_one_bake` (landed 2026-05-18). |
+| `PreviewV0_5Ensemble` | V_05-ensemble classifier (23 KB) + Balanced + Compression bakes | Single-profile alternative when downstream can't pick a trail per-call. Routes each pair through a 300→64→1 classifier; SROCC tracks max(Balanced, Compression) to within 0.014 per corpus. |
+| `PreviewV0_5Tuner` | V_tuner-v2-s2 calibrated (261 KB, F32) | **Codec auto-targeting / quality dials.** User types "score 70", codec binary-searches the q yielding zensim≈70. Strict monotonicity 92.78 % on the 50-image × 19-q JPEG sweep with 0.44 % tied — vs V0_5 ships' 71–86 % strict monotonicity AND 57–76 % tied (clamp-flat dead zones). **NOT for general ranking** — CID22 0.8786 (competitive) but KADID/TID/KonJND drop −0.20 to −0.66 vs Balanced. See `PreviewV0_5Tuner` variant doc for the caveat. |
 
 **Gate per trail (formal):**
 
@@ -119,11 +121,17 @@ framework, gate criteria, and candidate matrix.
   § A.9 AND not decisively B>>A on the other compression corpus AND
   mean SROCC regression on {KADID, TID, KonJND} no worse than −0.10
   on any single corpus.
+- **Tuner trail.** Strict monotonicity ≥ 1 pp better than every V0_5
+  rank-trail ship on the JPEG 50-image × 19-q sweep AND tied rate ≤ 5
+  % AND dynamic range ≥ 50 score units. NO SROCC gate — rank-honest
+  cross-corpus performance is explicitly secondary for this trail.
 
-A new bake ships to the trail whose gate it passes. If passes both
-trails: ship to both (rare — would require a strict Pareto improvement
-over both variants). If passes neither: add row to candidate matrix
-in `SOTA_TRAILS.md` and move on.
+A new bake ships to the trail whose gate it passes. If passes
+multiple trails: ship to all. If passes none: add row to candidate
+matrix in `SOTA_TRAILS.md` and move on. The Tuner trail's 2026-05-19
+ship explicitly fails the rank-trail gates by construction
+(safesyn-only training) — follow-on tuners that close the rank gap
+without losing monotonicity are an open research direction.
 
 **Don't bump the crate version** when rotating a trail's bake (per
 user 2026-05-18: "we don't want crate bumps every time we get a nice

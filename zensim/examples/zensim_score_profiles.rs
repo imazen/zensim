@@ -22,6 +22,7 @@ fn main() {
         ("v0_3 (latest)", ZensimProfile::latest()),
         ("v0_5_balanced", ZensimProfile::PreviewV0_5Balanced),
         ("v0_5_compression", ZensimProfile::PreviewV0_5Compression),
+        ("v0_5_tuner", ZensimProfile::PreviewV0_5Tuner),
     ] {
         let z = Zensim::new(p);
         let r = z.compute(&s, &d).unwrap();
