@@ -44,6 +44,26 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
 }
 
+/// EXP-CROSS-CODEC-V4 tanh-pin scale extractor.
+fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
+    let md = model.metadata();
+    let entry = md.get("zentrain.tanh_output_head")?;
+    if entry.value.len() != 4 {
+        return None;
+    }
+    let scale = f32::from_le_bytes([
+        entry.value[0],
+        entry.value[1],
+        entry.value[2],
+        entry.value[3],
+    ]) as f64;
+    if scale.is_finite() && scale > 0.0 {
+        Some(scale)
+    } else {
+        None
+    }
+}
+
 fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
     let md = model.metadata();
     let entry = md.get("zentrain.hybrid_head")?;
@@ -98,6 +118,7 @@ fn score_with_bake(
     has_transforms: bool,
     psa: Option<&PerSampleAlphaHeadDispatch>,
     hyb: Option<&HybridHeadDispatch>,
+    tanh_pin_scale: Option<f64>,
     n_inputs: usize,
     features: &[f64],
 ) -> f64 {
@@ -111,7 +132,7 @@ fn score_with_bake(
     } else {
         predictor.predict(&mut buf[..])
     };
-    match result {
+    let y_pre = match result {
         Ok(out) => {
             if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) = psa {
                 let n = out.len() as f64;
@@ -194,7 +215,16 @@ fn score_with_bake(
             }
         }
         Err(_) => f64::NAN,
+    };
+    // EXP-CROSS-CODEC-V4 tanh-pin wrap.
+    if let Some(scale) = tanh_pin_scale {
+        if !y_pre.is_nan() {
+            let xc = (y_pre / scale).clamp(-30.0, 30.0);
+            let s = 1.0 / (1.0 + (-xc).exp());
+            return 100.0 * s;
+        }
     }
+    y_pre
 }
 
 fn main() -> ExitCode {
@@ -242,6 +272,7 @@ fn main() -> ExitCode {
     let has_transforms = model.has_nontrivial_feature_transforms();
     let psa = extract_per_sample_alpha_head(&model);
     let hyb = extract_hybrid_head(&model);
+    let tanh_pin_scale = extract_tanh_output_head_scale(&model);
 
     let mut predictor = Predictor::new(&model);
     let raw = score_with_bake(
@@ -249,6 +280,7 @@ fn main() -> ExitCode {
         has_transforms,
         psa.as_ref(),
         hyb.as_ref(),
+        tanh_pin_scale,
         n_inputs,
         &features,
     );

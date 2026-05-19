@@ -21,7 +21,29 @@ use zensim_validate::parquet_loader;
 
 const PER_SAMPLE_ALPHA_KEY: &str = "zentrain.per_sample_alpha_head";
 const HYBRID_HEAD_KEY: &str = "zentrain.hybrid_head";
+const TANH_OUTPUT_HEAD_KEY: &str = "zentrain.tanh_output_head";
 const POOL_STD_FLOOR: f64 = 0.0026;
+
+/// EXP-CROSS-CODEC-V4 tanh-pin scale extractor. Returns `Some(scale)` if
+/// the bake declares `zentrain.tanh_output_head` with a positive f32.
+fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
+    let md = model.metadata();
+    let entry = md.get(TANH_OUTPUT_HEAD_KEY)?;
+    if entry.value.len() != 4 {
+        return None;
+    }
+    let scale = f32::from_le_bytes([
+        entry.value[0],
+        entry.value[1],
+        entry.value[2],
+        entry.value[3],
+    ]) as f64;
+    if scale.is_finite() && scale > 0.0 {
+        Some(scale)
+    } else {
+        None
+    }
+}
 
 type PerSampleAlpha = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
 type HybridHead = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
@@ -84,6 +106,7 @@ fn score_row(
     has_transforms: bool,
     per_sample: Option<&PerSampleAlpha>,
     hybrid: Option<&HybridHead>,
+    tanh_pin_scale: Option<f64>,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
@@ -103,6 +126,17 @@ fn score_row(
     let out = match result {
         Ok(o) => o,
         Err(_) => return f64::NAN,
+    };
+    // Wrap any non-NaN raw output with the optional tanh-pin.
+    let pin = |y_pre: f64| -> f64 {
+        if let Some(scale) = tanh_pin_scale {
+            if !y_pre.is_nan() {
+                let xc = (y_pre / scale).clamp(-30.0, 30.0);
+                let s = 1.0 / (1.0 + (-xc).exp());
+                return 100.0 * s;
+            }
+        }
+        y_pre
     };
     if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) = per_sample {
         let nh = out.len() as f64;
@@ -142,7 +176,7 @@ fn score_row(
             let xc = alpha_logit.clamp(-20.0, 20.0);
             1.0 / (1.0 + (-xc).exp())
         };
-        return alpha * y_rank + (1.0 - alpha) * y_pool;
+        return pin(alpha * y_rank + (1.0 - alpha) * y_pool);
     }
     if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) = hybrid {
         let nh = out.len() as f64;
@@ -180,9 +214,9 @@ fn score_row(
             let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
             1.0 / (1.0 + (-xc).exp())
         };
-        return alpha * y_rank + (1.0 - alpha) * y_pool;
+        return pin(alpha * y_rank + (1.0 - alpha) * y_pool);
     }
-    out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
+    pin(out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN))
 }
 
 fn print_usage() {
@@ -228,6 +262,7 @@ fn main() -> Result<(), String> {
     } else {
         extract_hybrid_head(&model)
     };
+    let tanh_pin_scale = extract_tanh_output_head_scale(&model);
     let g = parquet_loader::load_parquet(&parquet, "rows", "human_score", 1.0)?;
     let humans = g.human_scores;
     let mut predictor = Predictor::new(&model);
@@ -244,6 +279,7 @@ fn main() -> Result<(), String> {
             has_transforms,
             per_sample.as_ref(),
             hybrid.as_ref(),
+            tanh_pin_scale,
             &mut scratch,
             row,
         );
