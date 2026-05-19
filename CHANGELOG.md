@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed (2026-05-19)
+
+- **Per-codec score calibration for `PreviewV0_5Tuner`**. New module
+  `zensim::codec_calibration` exposes `CodecCalibration` +
+  `CalibrationAffine`. Default `PREVIEW_V0_5_TUNER` table fits
+  `ssim2 = α + β · tuner_raw` per codec on 10 images × 19 q × 3 codecs
+  (n=190 per codec, R² 0.93–0.95). At T=63 (CID22-paper PJND anchor)
+  cross-codec mean pairwise butteraugli drops from **6.68 → 5.56**
+  (−17 %); T=70 from 5.00 → 4.19 (−16 %); T=80 from 3.31 → 2.87
+  (−13 %). Closes 31 % of the gap to the structural ~2-butter floor
+  at T=63. The `zensim_score_named` example gains optional
+  `--codec NAME` + `--per-codec-calibration on|off` flags (default
+  `on` for `v0_5_tuner`, `off` for legacy profiles). Methodology:
+  `benchmarks/per_codec_calibration_2026-05-19.md`.
+
 ### Control / Blocked (2026-05-18, EXP-MULTI-CODEC)
 
 - **EXP-MULTI-CODEC control retrain reproduces V_24-per-sample-α

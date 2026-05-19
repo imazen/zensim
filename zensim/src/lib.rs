@@ -196,6 +196,7 @@
 #![forbid(unsafe_code)]
 
 mod blur;
+pub mod codec_calibration;
 mod color;
 mod diffmap;
 mod error;
@@ -240,6 +241,7 @@ pub use metric::{
     AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorCategory, ErrorClassification,
     RoundingBias,
 };
+pub use codec_calibration::{CalibrationAffine, CodecCalibration};
 pub use profile::ZensimProfile;
 pub use source::{
     AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,

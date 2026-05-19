@@ -1,29 +1,49 @@
 //! Score one (ref, dist) pair against a NAMED zensim profile.
 //!
-//! Usage: zensim_score_named PROFILE_NAME ref.png dist.png
+//! Usage: `zensim_score_named PROFILE_NAME ref.png dist.png [--codec NAME] [--per-codec-calibration on|off]`
 //!
-//! PROFILE_NAME ∈ {
+//! `PROFILE_NAME` ∈ {
 //!   v0_2, v0_3, v0_4, v0_5,
 //!   v0_5_balanced, v0_5_compression, v0_5_ensemble, v0_5_tuner,
 //!   latest
 //! }
 //!
-//! Used by cross_codec_consistency.py to binary-search the q value
+//! Optional flags:
+//! - `--codec NAME` — codec the distorted image was produced by
+//!   (`jpeg`, `webp`, `avif`, `jxl`, `png`). Triggers per-codec
+//!   score calibration when paired with `--per-codec-calibration on`
+//!   (default ON for `v0_5_tuner`, OFF for legacy profiles).
+//! - `--per-codec-calibration on|off` — explicitly enable / disable
+//!   per-codec calibration. When ON and a `--codec` is supplied, the
+//!   profile's raw output is rescaled per-codec so that "score=63"
+//!   means the empirical PJND across all codecs. See
+//!   `zensim::codec_calibration` for the math + provenance.
+//!
+//! Used by `cross_codec_consistency.py` to binary-search the q value
 //! achieving a target zensim score under each shipping profile.
 
 use std::env;
 use std::process::ExitCode;
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{CodecCalibration, RgbSlice, Zensim, ZensimProfile};
+
+fn print_usage(arg0: &str) {
+    eprintln!(
+        "Usage: {arg0} PROFILE_NAME ref.png dist.png [--codec NAME] [--per-codec-calibration on|off]"
+    );
+    eprintln!(
+        "  PROFILE_NAME ∈ {{v0_2, v0_3, v0_4, v0_5, v0_5_balanced, v0_5_compression, v0_5_ensemble, v0_5_tuner, latest}}"
+    );
+    eprintln!("  --codec NAME — codec used for the distorted image (jpeg/webp/avif/jxl/png).");
+    eprintln!("  --per-codec-calibration on|off — explicitly toggle calibration (default ON for v0_5_tuner).");
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 4 {
-        eprintln!("Usage: {} PROFILE_NAME ref.png dist.png", args[0]);
-        eprintln!(
-            "  PROFILE_NAME ∈ {{v0_2, v0_3, v0_4, v0_5, v0_5_balanced, v0_5_compression, v0_5_ensemble, v0_5_tuner, latest}}"
-        );
+    if args.len() < 4 {
+        print_usage(&args[0]);
         return ExitCode::FAILURE;
     }
+
     let profile = match args[1].as_str() {
         "v0_2" => ZensimProfile::PreviewV0_2,
         "v0_3" => ZensimProfile::PreviewV0_3,
@@ -36,11 +56,56 @@ fn main() -> ExitCode {
         "latest" => ZensimProfile::latest(),
         other => {
             eprintln!("unknown profile: {other}");
+            print_usage(&args[0]);
             return ExitCode::FAILURE;
         }
     };
-    let img1 = image::open(&args[2]).expect("open ref");
-    let img2 = image::open(&args[3]).expect("open dist");
+    let ref_path = &args[2];
+    let dist_path = &args[3];
+
+    // Parse optional flags
+    let mut codec_name: Option<String> = None;
+    let mut calibration_flag: Option<bool> = None; // None => default
+    let mut i = 4;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--codec" => {
+                if i + 1 >= args.len() {
+                    eprintln!("--codec requires a NAME");
+                    return ExitCode::FAILURE;
+                }
+                codec_name = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--per-codec-calibration" => {
+                if i + 1 >= args.len() {
+                    eprintln!("--per-codec-calibration requires on|off");
+                    return ExitCode::FAILURE;
+                }
+                calibration_flag = match args[i + 1].as_str() {
+                    "on" | "true" | "1" => Some(true),
+                    "off" | "false" | "0" => Some(false),
+                    other => {
+                        eprintln!("--per-codec-calibration must be on|off, got: {other}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown argument: {other}");
+                print_usage(&args[0]);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    // Default calibration policy: ON for PreviewV0_5Tuner only, OFF elsewhere.
+    let calibration_enabled = calibration_flag
+        .unwrap_or(matches!(profile, ZensimProfile::PreviewV0_5Tuner));
+
+    let img1 = image::open(ref_path).expect("open ref");
+    let img2 = image::open(dist_path).expect("open dist");
     let img1 = img1.to_rgb8();
     let img2 = img2.to_rgb8();
     let w = img1.width() as usize;
@@ -60,14 +125,40 @@ fn main() -> ExitCode {
     let s = RgbSlice::new(&src, w, h);
     let d = RgbSlice::new(&dst, w, h);
     let z = Zensim::new(profile);
-    match z.compute(&s, &d) {
-        Ok(r) => {
-            println!("{:.6}", r.score());
-            ExitCode::SUCCESS
-        }
+    let raw = match z.compute(&s, &d) {
+        Ok(r) => r.score(),
         Err(e) => {
             eprintln!("zensim error: {e:?}");
-            ExitCode::FAILURE
+            return ExitCode::FAILURE;
         }
-    }
+    };
+
+    // Apply per-codec calibration when enabled AND the profile is the
+    // Tuner. Other profiles either are not dial-honest (Balanced /
+    // Compression / Ensemble — see CLAUDE.md "tied-rate dead zone")
+    // or pre-date the per-codec fit; passing the flag with them is a
+    // no-op so caller code can stay uniform.
+    let calibrated = if calibration_enabled && matches!(profile, ZensimProfile::PreviewV0_5Tuner) {
+        if let Some(codec) = &codec_name {
+            let cal = CodecCalibration::PREVIEW_V0_5_TUNER;
+            match cal.lookup(codec) {
+                Some(affine) => affine.apply(raw as f32) as f64,
+                None => {
+                    eprintln!(
+                        "warning: unknown codec name `{codec}` — no calibration applied"
+                    );
+                    raw
+                }
+            }
+        } else {
+            // Calibration ON but no codec given: still return raw,
+            // so callers can opt in by passing --codec.
+            raw
+        }
+    } else {
+        raw
+    };
+
+    println!("{calibrated:.6}");
+    ExitCode::SUCCESS
 }
