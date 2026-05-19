@@ -72,9 +72,10 @@ fn main() {
         "konjnd_full" => load_konjnd_full(&path, max_pairs),
         "aic3" => load_aic3(&path, max_pairs),
         "safesyn" => load_safesyn(&path, max_pairs),
+        "qsweep" => load_qsweep_tsv(&path, max_pairs),
         _ => {
             eprintln!(
-                "--corpus must be one of: konjnd, konjnd_full, aic3, safesyn (got {corpus:?})"
+                "--corpus must be one of: konjnd, konjnd_full, aic3, safesyn, qsweep (got {corpus:?})"
             );
             std::process::exit(2);
         }
@@ -461,6 +462,64 @@ fn load_safesyn(csv_path: &Path, max: usize) -> Vec<Pair> {
             human_score: ssim2_raw / 100.0,
             ref_basename: basename,
             extra_targets: vec![("iwssim".to_string(), iwssim)],
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// Generic q-sweep TSV loader for the `PreviewV0_5Tuner` evaluation
+/// harness (2026-05-18). Reads a TSV with the columns:
+///
+/// ```text
+///   ref_path  dist_path  image_id  codec  q
+/// ```
+///
+/// where the first row is the header. `image_id` becomes
+/// `ref_basename` (the field the trainer's downstream tooling
+/// groups on); `q` is loaded into `human_score` (so the eval can
+/// pivot by quality at scoring time without re-parsing); `codec`
+/// becomes an extra target column. Monotonicity is measured
+/// downstream by sorting per (`ref_basename`, `codec`) by `human_score`
+/// (= q) and counting score(q+δ) ≤ score(q) inversions.
+fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    let f = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let r = BufReader::new(f);
+    let mut lines = r.lines();
+    let _header = match lines.next() {
+        Some(Ok(h)) => h,
+        _ => return Vec::new(),
+    };
+    let mut pairs = Vec::new();
+    for line in lines.flatten() {
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() < 5 {
+            continue;
+        }
+        let ref_path = cols[0];
+        let dist_path = cols[1];
+        let image_id = cols[2];
+        let codec = cols[3];
+        let q: f64 = match cols[4].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        pairs.push(Pair {
+            reference: PathBuf::from(ref_path),
+            distorted: PathBuf::from(dist_path),
+            human_score: q,
+            ref_basename: image_id.to_string(),
+            extra_targets: vec![("codec".to_string(), codec.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)) as f64)],
         });
         if pairs.len() >= max {
             break;
