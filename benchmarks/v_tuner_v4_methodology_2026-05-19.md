@@ -134,6 +134,27 @@ time — already plumbed in `apply_mlp_scoring`). Add bake at
 If none pass: write `benchmarks/v_tuner_v4_falsification_2026-05-19.md`
 with the per-bake table + proposed V5 direction.
 
+## Training-time observations (preliminary)
+
+Across all 6 V4 bakes, α(x) saturates to ~0 within 10 epochs (μ < 0.001
+log-line). With α=0, the per-sample-α head degenerates to pure pool-head:
+
+```
+y_pre = 0 · y_rank + 1 · y_pool = y_pool
+y_score = 100 · σ(y_pool / 10)
+```
+
+This is expected behavior for pure-MSE training on a score-shaped target:
+the rank-head's gradient signal vanishes (RankNet weight = 0), and the
+pool-head's 4 stat features ([μ, σ, max, p_6](h)) + bias are sufficient
+to predict the mix_cv40_iw60 score directly. The 128-wide rank head's
+extra capacity isn't needed when the target is already in score space.
+
+The tanh pin's gradient `(100/scale)·σ·(1−σ)` stays in [0.5, 2.5]
+across the interior [5, 95] score region — gradient never vanishes, so
+the pool-head + sigmoid pin trains stably. SROCC climbs from 0.97 → 0.98+
+within 50 epochs.
+
 ## Implementation provenance
 
 - Trainer changes: `zensim-validate/src/mlp_train.rs` (added
