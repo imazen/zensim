@@ -8,10 +8,10 @@
 // epoch in <1s on CPU; the Python version does ~14 batches per epoch
 // at ~3s on the same GPU. The Adam-update frequency difference is
 // the bulk of the remaining gap.
-#[allow(dead_code)] // CLI dispatch wired in a follow-up tick
-mod mlp_train;
 #[allow(dead_code)] // Used by mlp_train when norm_in_norm_weight > 0
 mod loss_norm_in_norm;
+#[allow(dead_code)] // CLI dispatch wired in a follow-up tick
+mod mlp_train;
 mod scale_invariance;
 #[allow(dead_code)] // SIMD kernels exposed via mlp_train::forward/backprop_step
 mod simd_mlp;
@@ -2271,38 +2271,36 @@ fn train_weights(
     let mut dist_ranks = vec![0.0f64; n_train];
     let mut trial_dist = vec![0.0f64; n_train];
 
-    let fast_srocc = |distances: &[f64],
-                      indexed: &mut Vec<(usize, f64)>,
-                      dist_ranks: &mut [f64]|
-     -> f64 {
-        indexed.clear();
-        indexed.extend(distances.iter().copied().enumerate());
-        indexed.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
-        let mut i = 0;
-        while i < n_train {
-            let mut j = i + 1;
-            while j < n_train && indexed[j].1 == indexed[i].1 {
-                j += 1;
+    let fast_srocc =
+        |distances: &[f64], indexed: &mut Vec<(usize, f64)>, dist_ranks: &mut [f64]| -> f64 {
+            indexed.clear();
+            indexed.extend(distances.iter().copied().enumerate());
+            indexed.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            let mut i = 0;
+            while i < n_train {
+                let mut j = i + 1;
+                while j < n_train && indexed[j].1 == indexed[i].1 {
+                    j += 1;
+                }
+                let avg_rank = (i + j) as f64 / 2.0 + 0.5;
+                for k in i..j {
+                    dist_ranks[indexed[k].0] = avg_rank;
+                }
+                i = j;
             }
-            let avg_rank = (i + j) as f64 / 2.0 + 0.5;
-            for k in i..j {
-                dist_ranks[indexed[k].0] = avg_rank;
+            let mut cov = 0.0f64;
+            let mut var_dr = 0.0f64;
+            for i in 0..n_train {
+                let ddr = dist_ranks[i] - mean_rank;
+                let dhr = human_ranks[i] - mean_rank;
+                cov += ddr * dhr;
+                var_dr += ddr * ddr;
             }
-            i = j;
-        }
-        let mut cov = 0.0f64;
-        let mut var_dr = 0.0f64;
-        for i in 0..n_train {
-            let ddr = dist_ranks[i] - mean_rank;
-            let dhr = human_ranks[i] - mean_rank;
-            cov += ddr * dhr;
-            var_dr += ddr * ddr;
-        }
-        if var_dr <= 0.0 || var_hr <= 0.0 {
-            return -1.0;
-        }
-        -(cov / (var_dr * var_hr).sqrt())
-    };
+            if var_dr <= 0.0 || var_hr <= 0.0 {
+                return -1.0;
+            }
+            -(cov / (var_dr * var_hr).sqrt())
+        };
 
     let mut best_weights = vec![1.0; n_features];
     let mut best_srocc = -1.0f64;
@@ -2442,8 +2440,7 @@ fn train_weights(
                 }
 
                 // Sort by Pearson descending, take top 4 unique weights
-                candidates
-                    .sort_by(|a, b| b.0.total_cmp(&a.0));
+                candidates.sort_by(|a, b| b.0.total_cmp(&a.0));
                 candidates.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-12);
                 candidates.truncate(4);
 

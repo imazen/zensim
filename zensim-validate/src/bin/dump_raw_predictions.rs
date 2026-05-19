@@ -1,18 +1,31 @@
-//! Score one (ref, dist) PNG pair against an arbitrary ZNPR v3 bake.
+//! Dump per-row RAW (uncalibrated) bake predictions for a corpus parquet.
+//!
+//! Used to fit affine α, β for V0_5 bakes that ship without
+//! score-range calibration. Reads a parquet (with `human_score` +
+//! `f0..fN-1` features), loads a ZNPR v3 bake, scores every row via
+//! the SAME `score_row` dispatch as `bake_verdict`, and writes TSV
+//! `human_score\traw_prediction` to stdout (or `--output <path>`).
 //!
 //! Usage:
-//!   score_pair_with_bake --bake PATH [--bake-post raw|clamp|mapped[:A,B]] \
-//!                        --ref REF.png --dist DIST.png
+//!     dump_raw_predictions --bake <bake.bin> --parquet <corpus.parquet>
+//!         [--target-column human_score] [--output <path.tsv>]
 //!
-//! Prints one float on stdout — the scored zensim value with the
-//! specified post-processing applied. Used by cross_codec_consistency.py
-//! to binary-search for the q value that matches a target zensim score.
+//! When fitting α, β: pair these raw outputs against the ssim2-
+//! aligned `human_score` column on a calibrated corpus (e.g., the
+//! safesyn training parquet's `mix_cv40_iw60` column).
 
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use zenpredict::{Model, Predictor};
-use zensim::{ZensimConfig, compute_zensim_with_config};
+
+use zensim_validate::parquet_loader;
+
+// Copy the score_row + extract functions inline to avoid wiring through
+// bake_verdict's module structure. These are bit-exact duplicates of
+// the corresponding functions in bake_verdict.rs.
 
 type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
 type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
@@ -72,50 +85,32 @@ fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
     Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
 }
 
-fn apply_post(raw: f64, mode: &str) -> f64 {
-    if raw.is_nan() {
-        return f64::NAN;
-    }
-    match mode {
-        "raw" => raw,
-        "clamp" => raw.clamp(0.0, 100.0),
-        m if m.starts_with("mapped") => {
-            let (a, b) = if let Some(rest) = m.strip_prefix("mapped:") {
-                let mut it = rest.splitn(2, ',');
-                let a: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(18.0);
-                let b: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0.7);
-                (a, b)
-            } else {
-                (18.0, 0.7)
-            };
-            let d = raw.max(0.0);
-            (100.0 - a * d.powf(b)).clamp(0.0, 100.0)
-        }
-        _ => raw.clamp(0.0, 100.0),
-    }
-}
-
-fn score_with_bake(
+fn score_row(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,
-    psa: Option<&PerSampleAlphaHeadDispatch>,
-    hyb: Option<&HybridHeadDispatch>,
-    n_inputs: usize,
-    features: &[f64],
+    per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
+    hybrid_head: Option<&HybridHeadDispatch>,
+    f32_features: &mut [f32],
+    row: &[f64],
 ) -> f64 {
-    let mut buf = vec![0.0f32; n_inputs];
-    let take = n_inputs.min(features.len());
+    let n_inputs = f32_features.len();
+    let take = n_inputs.min(row.len());
     for i in 0..take {
-        buf[i] = features[i] as f32;
+        f32_features[i] = row[i] as f32;
+    }
+    for f in &mut f32_features[take..] {
+        *f = 0.0;
     }
     let result = if has_transforms {
-        predictor.predict_transformed(&mut buf[..])
+        predictor.predict_transformed(f32_features)
     } else {
-        predictor.predict(&mut buf[..])
+        predictor.predict(f32_features)
     };
     match result {
         Ok(out) => {
-            if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) = psa {
+            if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
+                per_sample_alpha_head
+            {
                 let n = out.len() as f64;
                 if n <= 0.0 || out.len() != rank_w.len() || out.len() != w_alpha.len() {
                     return f64::NAN;
@@ -154,7 +149,9 @@ fn score_with_bake(
                     1.0 / (1.0 + (-xc).exp())
                 };
                 alpha * y_rank + (1.0 - alpha) * y_pool
-            } else if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) = hyb {
+            } else if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) =
+                hybrid_head
+            {
                 let n = out.len() as f64;
                 if n <= 0.0 || out.len() != rank_w.len() {
                     return f64::NAN;
@@ -191,70 +188,133 @@ fn score_with_bake(
                     1.0 / (1.0 + (-xc).exp())
                 };
                 alpha * y_rank + (1.0 - alpha) * y_pool
+            } else if out.len() == 1 {
+                out[0] as f64
             } else {
-                out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
+                out[0] as f64
             }
         }
         Err(_) => f64::NAN,
     }
 }
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
+struct Args {
+    bake: PathBuf,
+    parquet: PathBuf,
+    target_column: String,
+    output: Option<PathBuf>,
+}
+
+fn parse_args() -> Result<Args, String> {
     let mut bake: Option<PathBuf> = None;
-    let mut bake_post: String = "clamp".to_string();
-    let mut ref_path: Option<PathBuf> = None;
-    let mut dist_path: Option<PathBuf> = None;
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--bake" => bake = Some(args.next().expect("--bake VALUE").into()),
-            "--bake-post" => bake_post = args.next().expect("--bake-post VALUE"),
-            "--ref" => ref_path = Some(args.next().expect("--ref VALUE").into()),
-            "--dist" => dist_path = Some(args.next().expect("--dist VALUE").into()),
-            other => {
-                eprintln!("unknown arg: {other}");
-                return ExitCode::FAILURE;
+    let mut parquet: Option<PathBuf> = None;
+    let mut target_column: String = "human_score".to_string();
+    let mut output: Option<PathBuf> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--bake" => {
+                bake = Some(PathBuf::from(args.next().ok_or("--bake requires <path>")?));
             }
+            "--parquet" => {
+                parquet = Some(PathBuf::from(
+                    args.next().ok_or("--parquet requires <path>")?,
+                ));
+            }
+            "--target-column" => {
+                target_column = args.next().ok_or("--target-column requires <name>")?;
+            }
+            "--output" => {
+                output = Some(PathBuf::from(
+                    args.next().ok_or("--output requires <path>")?,
+                ));
+            }
+            "-h" | "--help" => {
+                eprintln!(
+                    "dump_raw_predictions --bake <path> --parquet <path> \
+[--target-column human_score] [--output <path.tsv>]"
+                );
+                std::process::exit(0);
+            }
+            other => return Err(format!("unknown arg: {other}")),
         }
     }
-    let bake = bake.expect("--bake REQUIRED");
-    let ref_path = ref_path.expect("--ref REQUIRED");
-    let dist_path = dist_path.expect("--dist REQUIRED");
+    let bake = bake.ok_or("--bake required")?;
+    let parquet = parquet.ok_or("--parquet required")?;
+    Ok(Args {
+        bake,
+        parquet,
+        target_column,
+        output,
+    })
+}
 
-    // Load images.
-    let src = image::open(&ref_path).expect("open ref").to_rgb8();
-    let dst = image::open(&dist_path).expect("open dist").to_rgb8();
-    let w = src.width() as usize;
-    let h = src.height() as usize;
-    let src_pixels: Vec<[u8; 3]> = src.pixels().map(|p| p.0).collect();
-    let dst_pixels: Vec<[u8; 3]> = dst.pixels().map(|p| p.0).collect();
-
-    // Compute features with both extended + IW pools (372-feat superset).
-    let mut config = ZensimConfig::default();
-    config.extended_features = true;
-    config.compute_iw_features = true;
-    let result =
-        compute_zensim_with_config(&src_pixels, &dst_pixels, w, h, config).expect("zensim compute");
-    let features: Vec<f64> = result.features().to_vec();
-
-    // Load bake.
-    let bake_bytes = std::fs::read(&bake).expect("read bake");
-    let model = Model::from_bytes(&bake_bytes).expect("parse ZNPR bake");
+fn main() -> ExitCode {
+    let args = match parse_args() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("dump_raw_predictions: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let bake_bytes = match std::fs::read(&args.bake) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("read bake: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let model = match Model::from_bytes(&bake_bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("parse bake: {e:?}");
+            return ExitCode::from(1);
+        }
+    };
     let n_inputs = model.n_inputs();
     let has_transforms = model.has_nontrivial_feature_transforms();
-    let psa = extract_per_sample_alpha_head(&model);
-    let hyb = extract_hybrid_head(&model);
+    let per_sample_alpha_head = extract_per_sample_alpha_head(&model);
+    let hybrid_head = extract_hybrid_head(&model);
+    eprintln!(
+        "dump_raw_predictions: bake n_inputs={n_inputs} has_transforms={has_transforms} \
+psalpha={} hybrid={}",
+        per_sample_alpha_head.is_some(),
+        hybrid_head.is_some()
+    );
+
+    let g = match parquet_loader::load_parquet(&args.parquet, "corpus", &args.target_column, 1.0) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("load parquet: {e}");
+            return ExitCode::from(1);
+        }
+    };
 
     let mut predictor = Predictor::new(&model);
-    let raw = score_with_bake(
-        &mut predictor,
-        has_transforms,
-        psa.as_ref(),
-        hyb.as_ref(),
-        n_inputs,
-        &features,
-    );
-    let score = apply_post(raw, &bake_post);
-    println!("{:.6}", score);
+    let mut scratch = vec![0.0f32; n_inputs];
+
+    let mut out: Box<dyn Write> = match &args.output {
+        Some(p) => match File::create(p) {
+            Ok(f) => Box::new(f),
+            Err(e) => {
+                eprintln!("create output {}: {e}", p.display());
+                return ExitCode::from(1);
+            }
+        },
+        None => Box::new(std::io::stdout()),
+    };
+    let _ = writeln!(out, "target\traw");
+    for (target, row) in g.human_scores.iter().zip(g.feature_rows.iter()) {
+        let raw = score_row(
+            &mut predictor,
+            has_transforms,
+            per_sample_alpha_head.as_ref(),
+            hybrid_head.as_ref(),
+            &mut scratch,
+            row,
+        );
+        let _ = writeln!(out, "{target}\t{raw}");
+    }
+    eprintln!("dump_raw_predictions: {} rows", g.human_scores.len());
     ExitCode::SUCCESS
 }

@@ -55,8 +55,8 @@
 //! (see the constant's docs).
 
 use crate::color::{
-    K_M00, K_M01, K_M02, K_M10, K_M11, K_M12, K_M20, K_M21, K_M22, K_B0,
-    cbrtf_fast, srgb_u8_to_linear,
+    K_B0, K_M00, K_M01, K_M02, K_M10, K_M11, K_M12, K_M20, K_M21, K_M22, cbrtf_fast,
+    srgb_u8_to_linear,
 };
 
 /// XYB biased cube-root nonlinearity offset — libjxl `enc_xyb.cc` `kB0`.

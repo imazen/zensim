@@ -111,7 +111,12 @@ fn run_comparison(ref_plane: &[f32], w: usize, h: usize, half: usize) -> Result<
     let stats_a = stats(&scalar);
     let stats_b = stats(&dir);
 
-    println!("## kernel_half = {} ({}×{} patch)", half, 2 * half + 1, 2 * half + 1);
+    println!(
+        "## kernel_half = {} ({}×{} patch)",
+        half,
+        2 * half + 1,
+        2 * half + 1
+    );
     println!(
         "{:25} {:>14} {:>14} {:>14}",
         "estimator", "min", "mean", "max"
@@ -132,7 +137,10 @@ fn run_comparison(ref_plane: &[f32], w: usize, h: usize, half: usize) -> Result<
 
     // Spearman / rank correlation
     let rho = spearman(&scalar, &dir);
-    println!("Spearman(LocalVariance, SteerablePyramidLogGsm) = {:.4}", rho);
+    println!(
+        "Spearman(LocalVariance, SteerablePyramidLogGsm) = {:.4}",
+        rho
+    );
 
     // Top-K overlap: of the K highest-weighted pixels under each method,
     // what fraction match? Reveals whether the salient-region selection

@@ -712,7 +712,10 @@ mod tests {
         let edge_w = w[3 * 6 + 2];
         // Pixel at x=0, y=0 (far corner, homogeneous patch) should not.
         let corner_w = w[0];
-        assert!(edge_w > 0.0, "edge should have nonzero weight, got {edge_w}");
+        assert!(
+            edge_w > 0.0,
+            "edge should have nonzero weight, got {edge_w}"
+        );
         assert!(
             edge_w > corner_w,
             "edge weight {edge_w} should exceed corner weight {corner_w}",
@@ -844,7 +847,10 @@ mod tests {
         let log_w = compute_iw_weights(&plane, w_img, h_img, w_img, log_cfg);
         let raw_max = raw_w.iter().copied().fold(0.0f32, f32::max);
         let log_max = log_w.iter().copied().fold(0.0f32, f32::max);
-        assert!(raw_max > 100.0, "step edge should produce large raw variance");
+        assert!(
+            raw_max > 100.0,
+            "step edge should produce large raw variance"
+        );
         assert!(log_max > 0.0);
         assert!(
             log_max < raw_max,

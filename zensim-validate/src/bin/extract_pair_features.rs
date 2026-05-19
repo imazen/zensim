@@ -77,14 +77,17 @@ fn main() -> Result<()> {
     let t_start = Instant::now();
 
     // --- read pairs TSV
-    let file = File::open(&args.pairs)
-        .with_context(|| format!("opening {:?}", args.pairs))?;
+    let file = File::open(&args.pairs).with_context(|| format!("opening {:?}", args.pairs))?;
     let mut lines = BufReader::new(file).lines();
     let header = lines.next().ok_or_else(|| anyhow!("empty pairs TSV"))??;
     let cols: Vec<&str> = header.split('\t').collect();
-    let ref_idx = cols.iter().position(|c| *c == "ref_path")
+    let ref_idx = cols
+        .iter()
+        .position(|c| *c == "ref_path")
         .ok_or_else(|| anyhow!("missing 'ref_path' column in header"))?;
-    let dist_idx = cols.iter().position(|c| *c == "dist_path")
+    let dist_idx = cols
+        .iter()
+        .position(|c| *c == "dist_path")
         .ok_or_else(|| anyhow!("missing 'dist_path' column in header"))?;
 
     let mut pairs: Vec<(String, String)> = Vec::new();
@@ -97,7 +100,11 @@ fn main() -> Result<()> {
         pairs.push((parts[ref_idx].to_string(), parts[dist_idx].to_string()));
     }
     let total = pairs.len();
-    eprintln!("  read {} pairs in {:.2}s", total, t_start.elapsed().as_secs_f64());
+    eprintln!(
+        "  read {} pairs in {:.2}s",
+        total,
+        t_start.elapsed().as_secs_f64()
+    );
 
     // --- precompute unique ref index for the cache (when enabled)
     let (unique_refs, row_ref_idx): (Vec<String>, Vec<u32>) = if args.cache_refs {
@@ -144,7 +151,10 @@ fn main() -> Result<()> {
         Vec::new()
     };
     if args.cache_refs {
-        eprintln!("  ref-load: done in {:.2}s", t_ref_load.elapsed().as_secs_f64());
+        eprintln!(
+            "  ref-load: done in {:.2}s",
+            t_ref_load.elapsed().as_secs_f64()
+        );
     }
 
     // --- extract features per pair (parallel)
@@ -167,28 +177,39 @@ fn main() -> Result<()> {
                     if rw == dw && rh == dh && rpx.len() == dpx.len() {
                         extract_cvvdp_features(&rpx, &dpx, rw as usize, rh as usize)
                     } else {
-                        eprintln!("  WARN: dim mismatch ref={}x{} dist={}x{} for row {}",
-                            rw, rh, dw, dh, i);
+                        eprintln!(
+                            "  WARN: dim mismatch ref={}x{} dist={}x{} for row {}",
+                            rw, rh, dw, dh, i
+                        );
                         vec![f32::NAN; CVVDP_FEATURE_COUNT]
                     }
                 }
                 _ => {
-                    eprintln!("  WARN: load failure for row {} (ref={:?} dist={:?})",
-                        i, ref_path, dist_path);
+                    eprintln!(
+                        "  WARN: load failure for row {} (ref={:?} dist={:?})",
+                        i, ref_path, dist_path
+                    );
                     vec![f32::NAN; CVVDP_FEATURE_COUNT]
                 }
             };
             let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if n % 500 == 0 || n == total {
-                eprintln!("  pair-features: {}/{} ({:.1}%) {:.1}s",
-                    n, total, 100.0 * n as f64 / total as f64,
-                    t_pair.elapsed().as_secs_f64());
+                eprintln!(
+                    "  pair-features: {}/{} ({:.1}%) {:.1}s",
+                    n,
+                    total,
+                    100.0 * n as f64 / total as f64,
+                    t_pair.elapsed().as_secs_f64()
+                );
             }
             result
         })
         .collect();
-    eprintln!("  pair-feature extract: {} rows in {:.2}s",
-        total, t_pair.elapsed().as_secs_f64());
+    eprintln!(
+        "  pair-feature extract: {} rows in {:.2}s",
+        total,
+        t_pair.elapsed().as_secs_f64()
+    );
 
     // --- write output parquet (f0..f<N-1>)
     let fields: Vec<Arc<Field>> = (0..CVVDP_FEATURE_COUNT)
@@ -204,13 +225,14 @@ fn main() -> Result<()> {
         }
     }
 
-    let arrays: Vec<ArrayRef> = cols.iter()
+    let arrays: Vec<ArrayRef> = cols
+        .iter()
         .map(|c| Arc::new(Float32Array::from_iter_values(c.iter().copied())) as ArrayRef)
         .collect();
     let batch = RecordBatch::try_new(out_schema.clone(), arrays)?;
 
-    let out_file = File::create(&args.output)
-        .with_context(|| format!("creating {:?}", args.output))?;
+    let out_file =
+        File::create(&args.output).with_context(|| format!("creating {:?}", args.output))?;
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(Default::default()))
         .build();
@@ -218,8 +240,10 @@ fn main() -> Result<()> {
     writer.write(&batch)?;
     writer.close()?;
 
-    eprintln!("  wrote {} rows × {} cols → {:?}",
-        total, CVVDP_FEATURE_COUNT, args.output);
+    eprintln!(
+        "  wrote {} rows × {} cols → {:?}",
+        total, CVVDP_FEATURE_COUNT, args.output
+    );
 
     // --- sanity stats
     eprintln!("\n=== per-pair feature distribution sanity ===");
@@ -233,10 +257,14 @@ fn main() -> Result<()> {
         }
         let n = valid.len() as f64;
         let mean = valid.iter().map(|&x| x as f64).sum::<f64>() / n;
-        let var = valid.iter().map(|&x| {
-            let d = x as f64 - mean;
-            d * d
-        }).sum::<f64>() / n;
+        let var = valid
+            .iter()
+            .map(|&x| {
+                let d = x as f64 - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / n;
         let std = var.sqrt();
         let min = valid.iter().copied().fold(f32::INFINITY, f32::min);
         let max = valid.iter().copied().fold(f32::NEG_INFINITY, f32::max);

@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Fixed (2026-05-19, zensim profile + runtime)
+
+- **V0_5 bakes now affine-calibrated to 0..100 score range.** The
+  three production V0_5 ships (`PreviewV0_5Balanced`,
+  `PreviewV0_5Compression`, `PreviewV0_5Ensemble`) shipped 2026-05-18
+  with distance-shaped raw output (low raw = high quality,
+  Spearman ≈ -0.99 against the trained-on `mix_cv40_iw60` target).
+  With `skip_score_mapping = true` + hard `clamp(0, 100)`, every
+  real-codec re-encode pair returned exactly 0 — V0_5-IDENTITY-FIX
+  report (commit `f47de21a`) observed V0_5Balanced raw = -6 at q=75
+  JPEG → score = 0, V0_5Compression raw = -22 at q=98 → score = 0.
+
+  Fix: add `affine_alpha / affine_beta` (and `_compression` variants
+  for the ensemble's per-route routing) to `ProfileParams`; apply
+  `score = α + β · raw` in `apply_mlp_scoring` AFTER the MLP forward
+  + per-sample-α / hybrid-head dispatch, BEFORE the score-mapping /
+  clamp. Fit on `canonical-2026-05-18/train/safesyn.parquet`
+  (n=196,086) against `ssim2_gpu`:
+
+  - Balanced:    α=45.0561, β=-2.6602 (R²_holdout=0.925, MAE=6.09)
+  - Compression: α=49.3380, β=-2.3967 (R²_holdout=0.853, MAE=9.06)
+  - Ensemble:    primary uses balanced fit; compression route uses compression fit
+
+  Post-fix on synthetic 64×64 gradient (per `v05_score_probe`
+  example): q=30 → 75 / 43 / 75; q=75 → 79 / 79 / 79; q=95 → 90 /
+  93 / 90 (all profiles in [60, 95] range). SROCC preserved on
+  every canonical val corpus (affine is rank-invariant). The
+  byte-identical short-circuit (commit `f47de21a`) is unchanged
+  — identity images still return score=100.
+
+  Regression coverage: `zensim/tests/v05_calibration.rs` (18 tests
+  across 3 profiles × q ∈ {30, 50, 70, 90} + monotonicity sweeps +
+  identity preservation). Methodology + per-corpus verification at
+  `benchmarks/v0_5_calibration_methodology_2026-05-19.md`.
+
+### Changed (2026-05-19, zensim-target)
+
+- **`zensim-target` CLI default profile bumped from `v0_3` to
+  `compression`.** Post-affine-fix, `PreviewV0_5Compression` wins
+  the 36-cell demo matrix at 34 / 36 (94 %) vs V0_3's 33 / 36
+  (92 %). The compression bake's per-sample-α dispatch is now
+  usable on the user-facing quality dial. V0_3 remains available
+  via `--profile v0_3` for callers depending on the legacy
+  default. `demo_matrix` example accepts a `ZENSIM_TARGET_PROFILE`
+  env var for profile selection.
+
 ### Fixed (2026-05-19, zensim runtime)
 
 - **`PreviewV0_5Balanced` / `PreviewV0_5Compression` / `PreviewV0_5Ensemble`

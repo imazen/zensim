@@ -402,6 +402,58 @@ pub struct ProfileParams {
     ///
     /// Added 2026-05-18.
     pub(crate) mlp_bytes_compression: Option<fn() -> &'static [u8]>,
+
+    /// **Affine post-MLP calibration α** in `score = α + β · raw`.
+    /// Applied AFTER the MLP forward pass and any per-sample-α /
+    /// hybrid-head / ensemble routing, BEFORE the [hard|soft]-clamp
+    /// to `[0, 100]`. Identity when `affine_alpha = 0.0` AND
+    /// `affine_beta = 1.0` (the default for V0_4 and earlier
+    /// profiles).
+    ///
+    /// Use this to score-calibrate bakes whose raw output is on a
+    /// non-MCOS scale (e.g. V0_5 bakes trained against
+    /// `mix_cv40_iw60` end up distance-shaped with β < 0; a runtime
+    /// affine with negative `affine_beta` flips them score-shaped).
+    /// Per-profile fit at
+    /// `benchmarks/v0_5_affine_calibration_2026-05-19.md` (each
+    /// profile carries its own α, β fit on the safesyn training
+    /// corpus against `ssim2_gpu`).
+    ///
+    /// **Skipped by the byte-identical short-circuit** —
+    /// `apply_mlp_scoring`'s identity guard returns before the affine
+    /// is applied, so identical inputs still return `score = 100.0`
+    /// regardless of α, β.
+    ///
+    /// Added 2026-05-19 to fix the V0_5 bakes' DISTANCE-shaped raw
+    /// output (clamped to 0 by `pre_bound.clamp(0.0, 100.0)` on real
+    /// codec re-encodes). See `benchmarks/v0_5_calibration_methodology_2026-05-19.md`.
+    pub affine_alpha: f64,
+
+    /// **Affine post-MLP calibration β** in `score = α + β · raw`.
+    /// See [`Self::affine_alpha`] for full semantics. Identity value
+    /// is `1.0` (the default for V0_4 and earlier profiles).
+    pub affine_beta: f64,
+
+    /// **Affine α for the compression-route bake** in the ensemble
+    /// path. Used only when `ensemble_classifier_bytes` is `Some` AND
+    /// the classifier routes a pair to the compression bake
+    /// (`logit > 0`). In that case the runtime applies
+    /// `score = affine_alpha_compression + affine_beta_compression · raw`
+    /// instead of the primary `affine_alpha / affine_beta`. Identity
+    /// when both are at their defaults (0.0 / 1.0).
+    ///
+    /// The compression and balanced sub-bakes have different raw
+    /// output distributions (balanced raw median ≈ -6 on safesyn,
+    /// compression raw median ≈ -4), so a single shared affine would
+    /// miscalibrate one of the two. Per-route affine keeps both well-
+    /// calibrated to the same target score range.
+    ///
+    /// Added 2026-05-19 alongside `affine_alpha / affine_beta`.
+    pub affine_alpha_compression: f64,
+
+    /// **Affine β for the compression-route bake** in the ensemble
+    /// path. See [`Self::affine_alpha_compression`].
+    pub affine_beta_compression: f64,
 }
 
 #[cfg(feature = "training")]
@@ -438,6 +490,13 @@ impl ProfileParams {
             soft_clamp_score: false,
             ensemble_classifier_bytes: None,
             mlp_bytes_compression: None,
+            // Identity affine — `custom` profiles inherit the legacy
+            // no-op semantics; V0_5+ ships override via static
+            // declarations below.
+            affine_alpha: 0.0,
+            affine_beta: 1.0,
+            affine_alpha_compression: 0.0,
+            affine_beta_compression: 1.0,
         }
     }
 }
@@ -460,6 +519,13 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
+    // Identity affine — V0_1 / V0_2 use the linear weight path,
+    // which has its own `score_mapping_a/b` pipeline; the post-MLP
+    // affine is a no-op when no MLP is loaded.
+    affine_alpha: 0.0,
+    affine_beta: 1.0,
+    affine_alpha_compression: 0.0,
+    affine_beta_compression: 1.0,
 };
 
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
@@ -478,6 +544,10 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
+    affine_alpha: 0.0,
+    affine_beta: 1.0,
+    affine_alpha_compression: 0.0,
+    affine_beta_compression: 1.0,
 };
 
 /// V0_4 trained MLP weights — 228 → 64 LeakyReLU → 1 final linear.
@@ -598,6 +668,13 @@ static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
+    // Identity affine — V0_3 bake was already affine-calibrated at
+    // bake time (α=28.04, β=-5.07 baked into the final layer), so the
+    // post-MLP affine is a no-op.
+    affine_alpha: 0.0,
+    affine_beta: 1.0,
+    affine_alpha_compression: 0.0,
+    affine_beta_compression: 1.0,
 };
 
 /// V_20 input-shaping seed=1 bake, **affine-calibrated** to V_18's
@@ -661,6 +738,12 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     soft_clamp_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
+    // Identity affine — both V0_4 sub-bakes (V_18 ship + V_20 IS) are
+    // affine-calibrated at bake time; the post-MLP affine is a no-op.
+    affine_alpha: 0.0,
+    affine_beta: 1.0,
+    affine_alpha_compression: 0.0,
+    affine_beta_compression: 1.0,
 };
 
 /// V_22-mix-LARGE+iwssim s3 packed (2026-05-18) — **balanced-trail
@@ -718,8 +801,9 @@ static PROFILE_PREVIEW_V0_5_BALANCED: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    // Score-shaped: the bake's raw output IS the final 0..100 score.
-    // Trained against `mix_cv40_iw60` already pre-scaled to that range.
+    // The bake's raw output is distance-shaped (negative correlation
+    // with quality; SROCC ≈ -0.99 against ssim2 on safesyn). The
+    // runtime affine below flips it score-shaped before the clamp.
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -729,11 +813,30 @@ static PROFILE_PREVIEW_V0_5_BALANCED: ProfileParams = ProfileParams {
     // 300-feature input = 228 standard + 72 masked (no IW pool).
     extended_features: true,
     compute_iw_features: false,
-    // Single-bake forward — predictions stay within [0, 100] for
-    // in-distribution inputs (training target was pre-scaled).
-    soft_clamp_score: false,
+    // Soft-clamp the post-affine output: KADID / TID heavy-distortion
+    // pairs land below 0 after affine (8 % below on KADID at -7, 9 %
+    // below on TID at -12). Hard clamp would pin those into ties and
+    // collapse the band SROCC; soft-clamp preserves rank ordering.
+    soft_clamp_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
+    // **Affine calibration** (2026-05-19). Fit on safesyn training
+    // corpus (n=196,086) against the `ssim2_gpu` 0..100 target:
+    //   score = 45.0561 + (-2.6602) · raw
+    // R²_fit=0.910, R²_holdout=0.925, MAE_holdout=6.09 score units.
+    // Holdout verification on canonical val:
+    //   CID22  SROCC 0.832, score p50=61.5 p95=85.1, none clipped
+    //   KADID  SROCC 0.968, score p50=35.7 p95=77.6 (8 % below 0 → soft-clamp)
+    //   TID    SROCC 0.973, score p50=39.8 p95=67.5 (9 % below 0 → soft-clamp)
+    //   KonJND SROCC 0.893, score p50=57.9 p95=68.1, none clipped
+    //   AIC-3  SROCC 0.785, score p50=60.1 p95=91.6, none clipped
+    // Methodology: `benchmarks/v0_5_calibration_methodology_2026-05-19.md`.
+    affine_alpha: 45.0561,
+    affine_beta: -2.6602,
+    // No ensemble routing in single-bake balanced — secondary affine
+    // unused (identity).
+    affine_alpha_compression: 0.0,
+    affine_beta_compression: 1.0,
 };
 
 static PROFILE_PREVIEW_V0_5_COMPRESSION: ProfileParams = ProfileParams {
@@ -755,12 +858,29 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION: ProfileParams = ProfileParams {
     // Soft-clamp the output: the per-sample-α bake is RankNet-trained
     // (only rank order constrained, raw values unbounded). Hard
     // [0, 100] clamp would pin many predictions at the boundaries
-    // and collapse SROCC to 0 via tie blocks. Soft logistic squash
+    // and collapse SROCC via tie blocks. Soft logistic squash
     // preserves rank ordering at the extremes (CLAUDE.md V_20 §
     // "Soft-clamp the multi-bake output").
     soft_clamp_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
+    // **Affine calibration** (2026-05-19). Fit on safesyn training
+    // corpus (n=196,086) against the `ssim2_gpu` 0..100 target:
+    //   score = 49.3380 + (-2.3967) · raw
+    // R²_fit=0.852, R²_holdout=0.853, MAE_holdout=9.06 score units.
+    // Holdout verification on canonical val:
+    //   CID22  SROCC 0.864, score p50=65.5 p95=90.4, < 1 % clipped
+    //   KADID  SROCC 0.932, score p50=27.8 p95=79.5 (15 % below 0 → soft-clamp)
+    //   TID    SROCC 0.889, score p50=32.1 p95=80.0 (12 % below 0 → soft-clamp)
+    //   KonJND SROCC 0.808, score p50=58.8 p95=68.1, none clipped
+    //   AIC-3  SROCC 0.818, score p50=60.9 p95=93.7, < 2 % clipped
+    // Methodology: `benchmarks/v0_5_calibration_methodology_2026-05-19.md`.
+    affine_alpha: 49.3380,
+    affine_beta: -2.3967,
+    // No ensemble routing in single-bake compression — secondary
+    // affine unused (identity).
+    affine_alpha_compression: 0.0,
+    affine_beta_compression: 1.0,
 };
 
 /// V05 ensemble routing classifier (2026-05-18). 300 → 64 → 1
@@ -820,6 +940,17 @@ static PROFILE_PREVIEW_V0_5_ENSEMBLE: ProfileParams = ProfileParams {
     soft_clamp_score: true,
     ensemble_classifier_bytes: Some(mlp_bake_preview_v0_5_ensemble_classifier),
     mlp_bytes_compression: Some(mlp_bake_preview_v0_5_compression),
+    // **Per-route affine calibration** (2026-05-19). The primary
+    // (balanced) route uses (45.0561, -2.6602); the compression
+    // route uses (49.3380, -2.3967). Both fits land predictions in
+    // [0, 100] for the bulk of canonical-corpus pairs; KADID / TID
+    // heavy-distortion tail falls below 0 by design (soft-clamp
+    // handles it). See
+    // `benchmarks/v0_5_calibration_methodology_2026-05-19.md`.
+    affine_alpha: 45.0561,
+    affine_beta: -2.6602,
+    affine_alpha_compression: 49.3380,
+    affine_beta_compression: -2.3967,
 };
 
 // --- Weight arrays ---

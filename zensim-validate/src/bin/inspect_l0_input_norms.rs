@@ -142,10 +142,7 @@ fn main() -> ExitCode {
         "- dead inputs (norm < 1% of max, < {dead_threshold:.4}): {dead_count}/{in_dim} ({:.1} %)",
         100.0 * dead_count as f32 / in_dim as f32
     );
-    println!(
-        "- live inputs: {}/{in_dim}",
-        in_dim - dead_count
-    );
+    println!("- live inputs: {}/{in_dim}", in_dim - dead_count);
 
     // Top-K and bottom-K.
     let mut idx_sorted: Vec<usize> = (0..in_dim).collect();

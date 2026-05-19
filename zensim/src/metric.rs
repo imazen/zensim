@@ -1647,20 +1647,24 @@ pub(crate) fn apply_mlp_scoring(
         // shape; the classifier runs over the same vector (its own
         // `n_inputs` selects the prefix). Documented in
         // `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
+        // Track whether the ensemble routed to the compression bake.
+        // The per-route affine (primary vs compression) needs to know
+        // which sub-bake produced `raw` so it can apply the matching
+        // calibration.
+        let mut routed_to_compression = false;
         let raw = if let (Some(clf_loader), Some(cmp_loader)) = (
             params.ensemble_classifier_bytes,
             params.mlp_bytes_compression,
         ) {
-            let logit =
-                forward_one_bake(clf_loader(), result.features(), width, height)?;
+            let logit = forward_one_bake(clf_loader(), result.features(), width, height)?;
             if logit > 0.0 {
+                routed_to_compression = true;
                 forward_one_bake(cmp_loader(), result.features(), width, height)?
             } else {
                 forward_one_bake(loader(), result.features(), width, height)?
             }
         } else {
-            let raw_primary =
-                forward_one_bake(loader(), result.features(), width, height)?;
+            let raw_primary = forward_one_bake(loader(), result.features(), width, height)?;
             // Optional secondary bake (D2 multi-output ensemble, e.g.
             // V_20 IS B3 specialist) — its forward path runs over the
             // SAME 228-feature vector but applies its own
@@ -1668,8 +1672,7 @@ pub(crate) fn apply_mlp_scoring(
             // are mixed linearly at `mlp_primary_mix` weight on the
             // primary.
             if let Some(b3_loader) = params.mlp_bytes_b3 {
-                let raw_b3 =
-                    forward_one_bake(b3_loader(), result.features(), width, height)?;
+                let raw_b3 = forward_one_bake(b3_loader(), result.features(), width, height)?;
                 let a = params.mlp_primary_mix as f64;
                 a * raw_primary + (1.0 - a) * raw_b3
             } else {
@@ -1677,14 +1680,38 @@ pub(crate) fn apply_mlp_scoring(
             }
         };
 
+        // **Affine post-MLP calibration** (V0_5+). Map the bake's raw
+        // output to the target 0-100 score range before the score-
+        // mapping / clamp steps. Identity when `affine_alpha = 0.0`
+        // AND `affine_beta = 1.0` (V0_4 and earlier profiles inherit
+        // this no-op default). For ensemble profiles, the affine
+        // depends on which sub-bake was routed to.
+        let (affine_a, affine_b) = if routed_to_compression {
+            (
+                params.affine_alpha_compression,
+                params.affine_beta_compression,
+            )
+        } else {
+            (params.affine_alpha, params.affine_beta)
+        };
+        let raw_calibrated = if affine_a == 0.0 && affine_b == 1.0 {
+            raw
+        } else {
+            affine_a + affine_b * raw
+        };
+
         let pre_bound = if params.skip_score_mapping {
             // The bake is already MCOS-calibrated (V0_8+); the raw
             // output IS the final score. Skipping the
             // `100 − A·d^B` transform avoids producing garbage
             // (e.g. raw=90 → mapped=-374).
-            raw
+            raw_calibrated
         } else {
-            distance_to_score_mapped(raw, params.score_mapping_a, params.score_mapping_b)
+            distance_to_score_mapped(
+                raw_calibrated,
+                params.score_mapping_a,
+                params.score_mapping_b,
+            )
         };
         // Bound the score to [0, 100] before handing it back. Two
         // policies exist:
@@ -2950,8 +2977,20 @@ mod tests {
         for i in 0..228 {
             let de = (r_ext.features[i] - r_both.features[i]).abs();
             let di = (r_iw.features[i] - r_both.features[i]).abs();
-            assert!(de < 1e-9, "basic feature {} disagrees: ext_only {} vs both {}", i, r_ext.features[i], r_both.features[i]);
-            assert!(di < 1e-9, "basic feature {} disagrees: iw_only {} vs both {}", i, r_iw.features[i], r_both.features[i]);
+            assert!(
+                de < 1e-9,
+                "basic feature {} disagrees: ext_only {} vs both {}",
+                i,
+                r_ext.features[i],
+                r_both.features[i]
+            );
+            assert!(
+                di < 1e-9,
+                "basic feature {} disagrees: iw_only {} vs both {}",
+                i,
+                r_iw.features[i],
+                r_both.features[i]
+            );
         }
 
         // Masked block (228..300 in r_ext, 228..300 in r_both) must agree
@@ -2992,7 +3031,11 @@ mod tests {
             );
         }
         // Sanity: not all zero
-        assert!(max_diff < 1e-4 && max_diff >= 0.0, "max_diff out of range: {}", max_diff);
+        assert!(
+            max_diff < 1e-4 && max_diff >= 0.0,
+            "max_diff out of range: {}",
+            max_diff
+        );
     }
 
     /// Extended features: default config produces same score as non-extended.

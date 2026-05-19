@@ -74,7 +74,9 @@ fn extract_per_sample_alpha_head(
     ];
     let reducer_b = floats[2 * n_hidden + 6];
     let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+    Some((
+        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -189,7 +191,10 @@ fn packed_bake_dispatch_round_trip_finite_and_bounded() {
     // distribution-like inputs, but at minimum must be finite.
     let model = Model::from_bytes(PACKED_BAKE).expect("load bake");
     let n_inputs = model.n_inputs();
-    assert_eq!(n_inputs, 300, "expected n_inputs=300 for the 300-feature recipe");
+    assert_eq!(
+        n_inputs, 300,
+        "expected n_inputs=300 for the 300-feature recipe"
+    );
 
     let head = extract_per_sample_alpha_head(&model).expect("per-sample-α head present");
     let has_transforms = model.has_nontrivial_feature_transforms();
@@ -205,13 +210,8 @@ fn packed_bake_dispatch_round_trip_finite_and_bounded() {
     let mut scores = Vec::new();
     for seed in [1u64, 2, 3, 42] {
         let row = synthetic_feature_row(n_inputs, seed);
-        let score = score_row_per_sample_alpha(
-            &mut predictor,
-            has_transforms,
-            &head,
-            &mut scratch,
-            &row,
-        );
+        let score =
+            score_row_per_sample_alpha(&mut predictor, has_transforms, &head, &mut scratch, &row);
         assert!(
             score.is_finite(),
             "per-sample-α score must be finite (seed={seed}, got {score})"
@@ -363,13 +363,9 @@ fn cid22_first_row_matches_bake_verdict_reference() {
         return;
     }
 
-    let groups = zensim_validate::parquet_loader::load_parquet(
-        &parquet_path,
-        "CID22",
-        "human_score",
-        1.0,
-    )
-    .expect("load CID22 parquet");
+    let groups =
+        zensim_validate::parquet_loader::load_parquet(&parquet_path, "CID22", "human_score", 1.0)
+            .expect("load CID22 parquet");
 
     let model = Model::from_bytes(PACKED_BAKE).expect("load bake");
     let head = extract_per_sample_alpha_head(&model).expect("per-sample-α head");
@@ -380,26 +376,19 @@ fn cid22_first_row_matches_bake_verdict_reference() {
 
     assert!(!groups.feature_rows.is_empty(), "CID22 parquet empty");
     let row0 = &groups.feature_rows[0];
-    let score0 = score_row_per_sample_alpha(
-        &mut predictor,
-        has_transforms,
-        &head,
-        &mut scratch,
-        row0,
+    let score0 =
+        score_row_per_sample_alpha(&mut predictor, has_transforms, &head, &mut scratch, row0);
+    assert!(
+        score0.is_finite(),
+        "row 0 score must be finite, got {score0}"
     );
-    assert!(score0.is_finite(), "row 0 score must be finite, got {score0}");
 
     // Cross-check: re-score the same row with a freshly-constructed
     // predictor. Bit-identical output.
     let mut predictor2 = Predictor::new(&model);
     let mut scratch2 = vec![0.0f32; n_inputs];
-    let score0_again = score_row_per_sample_alpha(
-        &mut predictor2,
-        has_transforms,
-        &head,
-        &mut scratch2,
-        row0,
-    );
+    let score0_again =
+        score_row_per_sample_alpha(&mut predictor2, has_transforms, &head, &mut scratch2, row0);
     assert!(
         (score0 - score0_again).abs() < 1e-9,
         "non-deterministic dispatch: {score0} vs {score0_again}"
@@ -416,16 +405,13 @@ fn cid22_first_row_matches_bake_verdict_reference() {
         .feature_rows
         .iter()
         .map(|row| {
-            score_row_per_sample_alpha(
-                &mut predictor,
-                has_transforms,
-                &head,
-                &mut scratch,
-                row,
-            )
+            score_row_per_sample_alpha(&mut predictor, has_transforms, &head, &mut scratch, row)
         })
         .collect();
-    assert!(scores.iter().all(|s| s.is_finite()), "some scores non-finite");
+    assert!(
+        scores.iter().all(|s| s.is_finite()),
+        "some scores non-finite"
+    );
     // bake_verdict reports |SROCC| (line 912 of bake_verdict.rs:
     // `spearman(humans, scores).abs()`) since bake output can be
     // distance-shaped (lower = better) or score-shaped (higher =

@@ -84,15 +84,12 @@ fn load_csv_reference(
                 fields.len()
             ));
         }
-        let score: f64 = fields[score_idx]
-            .parse::<f64>()
-            .map_err(|e| {
-                format!(
-                    "{path:?} line {}: bad target column {target_column:?}: {e}",
-                    lineno + 2
-                )
-            })?
-            * target_scale;
+        let score: f64 = fields[score_idx].parse::<f64>().map_err(|e| {
+            format!(
+                "{path:?} line {}: bad target column {target_column:?}: {e}",
+                lineno + 2
+            )
+        })? * target_scale;
         let mut row = Vec::with_capacity(n_features);
         for i in 0..n_features {
             row.push(
@@ -136,10 +133,10 @@ fn parquet_load_matches_csv_load() {
         "Parquet fixture missing at {PARQUET_PATH}; run `python3 scripts/convert_csv_to_parquet.py {CSV_PATH}` first",
     );
 
-    let parq = load_parquet(&pq, "tid_pq", TARGET_COLUMN, TARGET_SCALE)
-        .expect("parquet load failed");
-    let csv_g = load_csv_reference(&csv, "tid_csv", TARGET_COLUMN, TARGET_SCALE)
-        .expect("csv load failed");
+    let parq =
+        load_parquet(&pq, "tid_pq", TARGET_COLUMN, TARGET_SCALE).expect("parquet load failed");
+    let csv_g =
+        load_csv_reference(&csv, "tid_csv", TARGET_COLUMN, TARGET_SCALE).expect("csv load failed");
 
     assert_eq!(
         parq.n_features, csv_g.n_features,

@@ -45,9 +45,7 @@ use std::time::Instant;
 
 use zenpredict::{Model, Predictor};
 
-use zensim_validate::panel::{
-    Decision, DecisiveOutcome, PanelStats, compute_panel, decisive,
-};
+use zensim_validate::panel::{Decision, DecisiveOutcome, PanelStats, compute_panel, decisive};
 use zensim_validate::parquet_loader;
 
 // ============================================================================
@@ -157,11 +155,7 @@ fn parse_corpora_arg(arg: &str) -> Result<Vec<&'static Corpus>, String> {
             None => {
                 return Err(format!(
                     "unknown corpus {key:?} — known: {}",
-                    CORPORA
-                        .iter()
-                        .map(|c| c.name)
-                        .collect::<Vec<_>>()
-                        .join(",")
+                    CORPORA.iter().map(|c| c.name).collect::<Vec<_>>().join(",")
                 ));
             }
         }
@@ -224,9 +218,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--seed" => {
                 let v = args.next().ok_or("--seed requires u64")?;
-                seed = v
-                    .parse()
-                    .map_err(|_| "--seed must be a u64".to_string())?;
+                seed = v.parse().map_err(|_| "--seed must be a u64".to_string())?;
             }
             "-h" | "--help" => {
                 print_usage();
@@ -311,7 +303,9 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     ];
     let reducer_b = floats[2 * n_hidden + 6];
     let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+    Some((
+        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
+    ))
 }
 
 /// Read the `zentrain.hybrid_head` metadata payload, if any.
@@ -341,10 +335,7 @@ fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
     Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
 }
 
-fn score_corpus(
-    bake: &LoadedBake,
-    feature_rows: &[Vec<f64>],
-) -> Result<Vec<f64>, String> {
+fn score_corpus(bake: &LoadedBake, feature_rows: &[Vec<f64>]) -> Result<Vec<f64>, String> {
     // Construct a fresh Model + Predictor per corpus. Predictor's
     // scratch buffers are tied to the lifetime of Model, so we
     // cannot share across the threads — but a single-threaded
@@ -417,8 +408,14 @@ fn score_corpus(
                             1.0 / (1.0 + (-xc).exp())
                         };
                         alpha * y_rank + (1.0 - alpha) * y_pool
-                    } else if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) =
-                        hybrid_head.as_ref()
+                    } else if let Some((
+                        rank_w,
+                        rank_b,
+                        alpha_logit,
+                        reducer_w,
+                        reducer_b,
+                        p_norm,
+                    )) = hybrid_head.as_ref()
                     {
                         // Hybrid-head dispatch — out is the hidden vector h,
                         // α is a learned scalar (not per-sample).
@@ -610,14 +607,24 @@ fn render_corpus(
     let aggregate = decisive(&scores_a, &scores_b, &humans, bootstrap_resamples, seed);
 
     let mut body = String::new();
-    body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, scores_a.len()));
+    body.push_str(&format!(
+        "\n## {} (n={})\n\n",
+        corpus.display,
+        scores_a.len()
+    ));
 
     // Aggregate panel for both bakes.
     body.push_str("### Aggregate Mohammadi panel — A vs B\n\n");
     body.push_str("| Bake | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |\n");
     body.push_str("|---|--:|---:|---:|---:|---:|---:|---:|\n");
-    body.push_str(&panel_row(&format!("A: {}", bake_a.label), &aggregate.panel_a));
-    body.push_str(&panel_row(&format!("B: {}", bake_b.label), &aggregate.panel_b));
+    body.push_str(&panel_row(
+        &format!("A: {}", bake_a.label),
+        &aggregate.panel_a,
+    ));
+    body.push_str(&panel_row(
+        &format!("B: {}", bake_b.label),
+        &aggregate.panel_b,
+    ));
     body.push('\n');
 
     // Aggregate MRR / decisive row.
@@ -625,9 +632,7 @@ fn render_corpus(
     body.push_str(
         "| n_band | r_AB | h_SROCC | p_SROCC | h_Z-RMSE | p_Z-RMSE | PWRC_diff | agree_A | agree_B | DecScore | Decision |\n",
     );
-    body.push_str(
-        "|--:|---:|---:|---:|---:|---:|---:|--:|--:|---:|---|\n",
-    );
+    body.push_str("|--:|---:|---:|---:|---:|---:|---:|--:|--:|---:|---|\n");
     body.push_str(&format!(
         "| {} | {:.4} | {:.3} | {:.4} | {:.3} | {:.4} | {:+.4} | {} | {} | {:+.3} | {} |\n",
         aggregate.n_band,
@@ -736,9 +741,7 @@ fn render_corpus(
         body.push_str(
             "| Band | n | h_SROCC | p_SROCC | h_Z-RMSE | p_Z-RMSE | PWRC_diff | agree_A | agree_B | DecScore | Decision |\n",
         );
-        body.push_str(
-            "|---|--:|---:|---:|---:|---:|---:|--:|--:|---:|---|\n",
-        );
+        body.push_str("|---|--:|---:|---:|---:|---:|---:|--:|--:|---:|---|\n");
         for band in &bands {
             if band.indices.len() < 4 {
                 body.push_str(&format!(
@@ -751,8 +754,13 @@ fn render_corpus(
             let h_b: Vec<f64> = band.indices.iter().map(|&i| humans[i]).collect();
             let s_a: Vec<f64> = band.indices.iter().map(|&i| scores_a[i]).collect();
             let s_b: Vec<f64> = band.indices.iter().map(|&i| scores_b[i]).collect();
-            let out =
-                decisive(&s_a, &s_b, &h_b, bootstrap_resamples, seed ^ (band.label.len() as u64));
+            let out = decisive(
+                &s_a,
+                &s_b,
+                &h_b,
+                bootstrap_resamples,
+                seed ^ (band.label.len() as u64),
+            );
             let noisy = if band.indices.len() < 30 { " ⚠" } else { "" };
             body.push_str(&format!(
                 "| {}{noisy} | {} | {:.3} | {:.4} | {:.3} | {:.4} | {:+.4} | {} | {} | {:+.3} | {} |\n",
@@ -844,13 +852,7 @@ fn outcome_to_json(o: &DecisiveOutcome) -> String {
     let ci_pairs: Vec<String> = o
         .ci_delta
         .iter()
-        .map(|(lo, hi)| {
-            format!(
-                "[{},{}]",
-                finite_or_null(*lo),
-                finite_or_null(*hi)
-            )
-        })
+        .map(|(lo, hi)| format!("[{},{}]", finite_or_null(*lo), finite_or_null(*hi)))
         .collect();
     format!(
         "{{\"n_band\":{n},\"panel_a\":{a},\"panel_b\":{b},\"r_ab\":{r},\"h_srocc\":{hs},\"p_srocc\":{ps},\"h_z_rmse\":{hz},\"p_z_rmse\":{pz},\"pwrc_diff\":{pd},\"ci_delta\":[{ci}],\"agreement_a\":{aa},\"agreement_b\":{ab},\"decisive_score\":{ds},\"decision\":{dec}}}",
@@ -880,10 +882,22 @@ fn build_json_report(
 ) -> String {
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str(&format!("  \"a_bake\": {},\n", esc_json_str(&args.a.display().to_string())));
-    out.push_str(&format!("  \"a_label\": {},\n", esc_json_str(&bake_a.label)));
-    out.push_str(&format!("  \"b_bake\": {},\n", esc_json_str(&args.b.display().to_string())));
-    out.push_str(&format!("  \"b_label\": {},\n", esc_json_str(&bake_b.label)));
+    out.push_str(&format!(
+        "  \"a_bake\": {},\n",
+        esc_json_str(&args.a.display().to_string())
+    ));
+    out.push_str(&format!(
+        "  \"a_label\": {},\n",
+        esc_json_str(&bake_a.label)
+    ));
+    out.push_str(&format!(
+        "  \"b_bake\": {},\n",
+        esc_json_str(&args.b.display().to_string())
+    ));
+    out.push_str(&format!(
+        "  \"b_label\": {},\n",
+        esc_json_str(&bake_b.label)
+    ));
     out.push_str(&format!("  \"bands_mode\": {},\n", args.bands));
     out.push_str(&format!(
         "  \"bootstrap_resamples\": {},\n  \"seed\": {},\n",
@@ -893,16 +907,34 @@ fn build_json_report(
     for (i, r) in results.iter().enumerate() {
         out.push_str("    {\n");
         out.push_str(&format!("      \"name\": {},\n", esc_json_str(r.name)));
-        out.push_str(&format!("      \"display\": {},\n", esc_json_str(r.display)));
+        out.push_str(&format!(
+            "      \"display\": {},\n",
+            esc_json_str(r.display)
+        ));
         out.push_str(&format!("      \"n_total\": {},\n", r.n_total));
-        out.push_str(&format!("      \"enable_per_band\": {},\n", r.enable_per_band));
-        out.push_str(&format!("      \"aggregate\": {},\n", outcome_to_json(&r.aggregate)));
+        out.push_str(&format!(
+            "      \"enable_per_band\": {},\n",
+            r.enable_per_band
+        ));
+        out.push_str(&format!(
+            "      \"aggregate\": {},\n",
+            outcome_to_json(&r.aggregate)
+        ));
         out.push_str("      \"per_band\": [\n");
         for (j, (band, outcome)) in r.per_band.iter().enumerate() {
             out.push_str("        {\n");
-            out.push_str(&format!("          \"label\": {},\n", esc_json_str(&band.label)));
-            out.push_str(&format!("          \"range\": {},\n", esc_json_str(&band.range_label)));
-            out.push_str(&format!("          \"outcome\": {}\n", outcome_to_json(outcome)));
+            out.push_str(&format!(
+                "          \"label\": {},\n",
+                esc_json_str(&band.label)
+            ));
+            out.push_str(&format!(
+                "          \"range\": {},\n",
+                esc_json_str(&band.range_label)
+            ));
+            out.push_str(&format!(
+                "          \"outcome\": {}\n",
+                outcome_to_json(outcome)
+            ));
             out.push_str(if j + 1 == r.per_band.len() {
                 "        }\n"
             } else {
@@ -1026,9 +1058,20 @@ fn main() -> ExitCode {
 
     let mut buf = String::new();
     buf.push_str("# bake_compare — decisive A vs B verdict (§ A.9)\n\n");
-    buf.push_str(&format!("- **A**: `{}` (label: `{}`)\n", args.a.display(), bake_a.label));
-    buf.push_str(&format!("- **B**: `{}` (label: `{}`)\n", args.b.display(), bake_b.label));
-    buf.push_str(&format!("- Feature parquets: `{}`\n", args.features_root.display()));
+    buf.push_str(&format!(
+        "- **A**: `{}` (label: `{}`)\n",
+        args.a.display(),
+        bake_a.label
+    ));
+    buf.push_str(&format!(
+        "- **B**: `{}` (label: `{}`)\n",
+        args.b.display(),
+        bake_b.label
+    ));
+    buf.push_str(&format!(
+        "- Feature parquets: `{}`\n",
+        args.features_root.display()
+    ));
     buf.push_str(&format!(
         "- Bands: `{}-band`  Bootstrap resamples: `{}`  Seed: `{}`\n",
         args.bands, args.bootstrap_resamples, args.seed
@@ -1076,9 +1119,7 @@ fn main() -> ExitCode {
     buf.push_str(
         "| Corpus | n | SROCC_A | SROCC_B | Z_A | Z_B | PWRC_A | PWRC_B | h_SROCC | h_Z | DecScore | Aggregate |\n",
     );
-    buf.push_str(
-        "|---|--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n",
-    );
+    buf.push_str("|---|--:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n");
     for r in &results {
         let a = &r.aggregate.panel_a;
         let b = &r.aggregate.panel_b;
@@ -1117,10 +1158,12 @@ fn main() -> ExitCode {
         counts.b_wins
     ));
     if counts.a_wins == 0 && counts.b_wins == 0 {
-        buf.push_str("\n_No decisive cells in either direction — neither bake meets the \
+        buf.push_str(
+            "\n_No decisive cells in either direction — neither bake meets the \
         4-condition § A.9 rule on any (corpus × band) slice. The result is `promising` \
         / `tied` / `noisy` across the board. Treat as a ship-tie until a follow-up \
-        comparison breaks the deadlock (e.g., on a held-out corpus, with a larger n)._\n");
+        comparison breaks the deadlock (e.g., on a held-out corpus, with a larger n)._\n",
+        );
     }
 
     // Per-corpus details.
@@ -1175,7 +1218,10 @@ fn main() -> ExitCode {
                 eprintln!("wrote JSON report to {}", json_path.display());
             }
             Err(e) => {
-                eprintln!("bake_compare: failed to create {}: {e}", json_path.display());
+                eprintln!(
+                    "bake_compare: failed to create {}: {e}",
+                    json_path.display()
+                );
                 return ExitCode::from(1);
             }
         }

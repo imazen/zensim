@@ -705,10 +705,7 @@ fn load_auto_transforms_from_screen(
     let file = match File::open(tsv_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!(
-                "--auto-transforms: cannot open {}: {e}",
-                tsv_path.display()
-            );
+            eprintln!("--auto-transforms: cannot open {}: {e}", tsv_path.display());
             std::process::exit(2);
         }
     };
@@ -723,13 +720,16 @@ fn load_auto_transforms_from_screen(
     };
     let header: Vec<&str> = header_line.split('\t').collect();
     let col = |name: &str| -> usize {
-        header.iter().position(|c| c.trim() == name).unwrap_or_else(|| {
-            eprintln!(
-                "--auto-transforms: missing column {name:?} in TSV header {:?}",
-                header
-            );
-            std::process::exit(2);
-        })
+        header
+            .iter()
+            .position(|c| c.trim() == name)
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "--auto-transforms: missing column {name:?} in TSV header {:?}",
+                    header
+                );
+                std::process::exit(2);
+            })
     };
     let idx_col = col("feat_idx");
     let xform_col = col("best_transform");
@@ -863,15 +863,12 @@ fn load_csv_sequential(
         // The legacy default brought `human_score ∈ [0, 1]` to 0..100; new
         // target columns may already be in 0..100 (`--target-scale 1.0`) or
         // need a different multiplier (CVVDP JOD ∈ [0, 10] → 10.0).
-        let score: f64 = fields[score_idx]
-            .parse::<f64>()
-            .map_err(|e| {
-                format!(
-                    "{path:?} line {}: bad target column {target_column:?}: {e}",
-                    lineno + 2
-                )
-            })?
-            * target_scale;
+        let score: f64 = fields[score_idx].parse::<f64>().map_err(|e| {
+            format!(
+                "{path:?} line {}: bad target column {target_column:?}: {e}",
+                lineno + 2
+            )
+        })? * target_scale;
         let mut row = Vec::with_capacity(n_features);
         for i in 0..n_features {
             row.push(
@@ -917,8 +914,7 @@ pub(crate) fn load_csv(
     // SAFETY: We're reading a file that's not concurrently mutated by
     // any in-process writer; the trainer treats inputs as read-only.
     // mmap is the standard fast-CSV-load pattern.
-    let mmap = unsafe { memmap2::Mmap::map(&file) }
-        .map_err(|e| format!("mmap {path:?}: {e}"))?;
+    let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| format!("mmap {path:?}: {e}"))?;
     let bytes: &[u8] = &mmap;
 
     // 1) Find header end + parse header.
@@ -1619,10 +1615,9 @@ mod csv_load_equivalence_tests {
                 return;
             }
         };
-        let par =
-            load_csv(&path, "tid", "iwssim_log_norm", 1.0).expect("parallel loader");
-        let seq = load_csv_sequential(&path, "tid", "iwssim_log_norm", 1.0)
-            .expect("sequential loader");
+        let par = load_csv(&path, "tid", "iwssim_log_norm", 1.0).expect("parallel loader");
+        let seq =
+            load_csv_sequential(&path, "tid", "iwssim_log_norm", 1.0).expect("sequential loader");
         assert_groups_eq(&par, &seq);
     }
 

@@ -35,7 +35,29 @@ const CODECS: &[(&str, CodecKind)] = &[
 
 const TARGETS: &[f32] = &[30.0, 50.0, 70.0, 90.0];
 
+/// Pick the profile from the `ZENSIM_TARGET_PROFILE` env var. Defaults
+/// to `v0_3` (legacy production-grade fallback per the 2026-05-18
+/// demo). Accepts: `v0_2`, `v0_3`, `balanced`, `compression`,
+/// `ensemble`. The 2026-05-19 affine-calibration fix makes the v0_5
+/// variants usable; this knob lets the demo verify the new default.
+fn profile_from_env() -> ZensimProfile {
+    let raw = std::env::var("ZENSIM_TARGET_PROFILE").unwrap_or_else(|_| "v0_3".to_string());
+    match raw.to_ascii_lowercase().as_str() {
+        "v0_2" | "v02" | "preview-v0.2" => ZensimProfile::PreviewV0_2,
+        "v0_3" | "v03" | "preview-v0.3" | "default" => ZensimProfile::PreviewV0_3,
+        "balanced" | "v0_5_balanced" => ZensimProfile::balanced(),
+        "compression" | "v0_5_compression" => ZensimProfile::compression(),
+        "ensemble" | "v0_5_ensemble" => ZensimProfile::ensemble(),
+        other => {
+            eprintln!("unknown ZENSIM_TARGET_PROFILE={other}; falling back to v0_3");
+            ZensimProfile::PreviewV0_3
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
+    let profile = profile_from_env();
+    eprintln!("demo_matrix: profile = {profile:?}");
     // Header
     println!(
         "| image (class) | codec | target | achieved | Δ | knob | bytes | iters | converged |"
@@ -70,7 +92,7 @@ fn main() -> anyhow::Result<()> {
                     target,
                     tolerance: 1.5,
                     max_iterations: 8,
-                    profile: ZensimProfile::PreviewV0_3,
+                    profile,
                 };
                 match target_search(&rgb, w, h, *codec, spec) {
                     Ok(r) => {

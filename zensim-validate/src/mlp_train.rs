@@ -1734,24 +1734,10 @@ fn train_mlp_pool_head_with_tv(
             let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
 
             let (ya, ha_pre, ha, sa, max_a) = ph::forward_pool_head(
-                xa,
-                &w1,
-                &b1,
-                &reducer_w,
-                reducer_b,
-                n_features,
-                n_hidden,
-                alpha,
+                xa, &w1, &b1, &reducer_w, reducer_b, n_features, n_hidden, alpha,
             );
             let (yb, hb_pre, hb, sb, max_b) = ph::forward_pool_head(
-                xb,
-                &w1,
-                &b1,
-                &reducer_w,
-                reducer_b,
-                n_features,
-                n_hidden,
-                alpha,
+                xb, &w1, &b1, &reducer_w, reducer_b, n_features, n_hidden, alpha,
             );
 
             let mos_a = g.human_scores[ia];
@@ -1977,24 +1963,10 @@ fn train_mlp_pool_head_with_tv(
                     let xlo = &tv_buf[lo * n_features..(lo + 1) * n_features];
                     let xhi = &tv_buf[hi * n_features..(hi + 1) * n_features];
                     let (y_lo, h_lo_pre, h_lo, s_lo, max_lo) = ph::forward_pool_head(
-                        xlo,
-                        &w1,
-                        &b1,
-                        &reducer_w,
-                        reducer_b,
-                        n_features,
-                        n_hidden,
-                        alpha,
+                        xlo, &w1, &b1, &reducer_w, reducer_b, n_features, n_hidden, alpha,
                     );
                     let (y_hi, h_hi_pre, h_hi, s_hi, max_hi) = ph::forward_pool_head(
-                        xhi,
-                        &w1,
-                        &b1,
-                        &reducer_w,
-                        reducer_b,
-                        n_features,
-                        n_hidden,
-                        alpha,
+                        xhi, &w1, &b1, &reducer_w, reducer_b, n_features, n_hidden, alpha,
                     );
                     let viol = y_hi - y_lo;
                     if viol <= 0.0 {
@@ -2199,7 +2171,8 @@ fn train_mlp_pool_head_with_tv(
     }
 
     log_line(
-        &format!("MLP train (POOL-HEAD): best validation mean SROCC = {best_val_score:.4} | final reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] reducer_b={:.3}",
+        &format!(
+            "MLP train (POOL-HEAD): best validation mean SROCC = {best_val_score:.4} | final reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] reducer_b={:.3}",
             reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], reducer_b,
         ),
         log,
@@ -2307,7 +2280,10 @@ fn train_mlp_hybrid_head_with_tv(
     }
 
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
-    assert!(train_total > 0.0, "no training groups (all train_weight == 0)");
+    assert!(
+        train_total > 0.0,
+        "no training groups (all train_weight == 0)"
+    );
 
     let train_indices: Vec<usize> = groups
         .iter()
@@ -2367,8 +2343,7 @@ fn train_mlp_hybrid_head_with_tv(
             let mut buf = vec![0.0f64; g.features.len() * n_features];
             for (i, &f) in g.features.iter().enumerate() {
                 for d in 0..n_features {
-                    buf[i * n_features + d] =
-                        (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
                 }
             }
             buf
@@ -2385,8 +2360,7 @@ fn train_mlp_hybrid_head_with_tv(
         let mut buf = vec![0.0f64; n_rows * n_features];
         for (i, f) in t.features.iter().enumerate() {
             for d in 0..n_features {
-                buf[i * n_features + d] =
-                    (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
             }
         }
         buf
@@ -2495,37 +2469,36 @@ fn train_mlp_hybrid_head_with_tv(
 
     // Adam-step helper: pack/unpack our (rank_w, reducer_w, alpha_logit,
     // rank_b, reducer_b) into the Adam w2/b2 slots and step.
-    let do_adam_step =
-        |adam: &mut AdamState,
-         w1: &mut Vec<f64>,
-         b1: &mut Vec<f64>,
-         rank_w: &mut Vec<f64>,
-         rank_b: &mut f64,
-         reducer_w: &mut [f64; 4],
-         reducer_b: &mut f64,
-         alpha_logit: &mut f64,
-         lr: f64,
-         n_hidden: usize| {
-            let mut w2_vec = vec![0.0f64; n_hidden + 4 + 1];
-            for j in 0..n_hidden {
-                w2_vec[j] = rank_w[j];
-            }
-            for kk in 0..4 {
-                w2_vec[n_hidden + kk] = reducer_w[kk];
-            }
-            w2_vec[n_hidden + 4] = *alpha_logit;
-            let mut b2_vec = vec![*rank_b, *reducer_b];
-            adam.step(w1, b1, &mut w2_vec, &mut b2_vec, lr);
-            for j in 0..n_hidden {
-                rank_w[j] = w2_vec[j];
-            }
-            for kk in 0..4 {
-                reducer_w[kk] = w2_vec[n_hidden + kk];
-            }
-            *alpha_logit = w2_vec[n_hidden + 4];
-            *rank_b = b2_vec[0];
-            *reducer_b = b2_vec[1];
-        };
+    let do_adam_step = |adam: &mut AdamState,
+                        w1: &mut Vec<f64>,
+                        b1: &mut Vec<f64>,
+                        rank_w: &mut Vec<f64>,
+                        rank_b: &mut f64,
+                        reducer_w: &mut [f64; 4],
+                        reducer_b: &mut f64,
+                        alpha_logit: &mut f64,
+                        lr: f64,
+                        n_hidden: usize| {
+        let mut w2_vec = vec![0.0f64; n_hidden + 4 + 1];
+        for j in 0..n_hidden {
+            w2_vec[j] = rank_w[j];
+        }
+        for kk in 0..4 {
+            w2_vec[n_hidden + kk] = reducer_w[kk];
+        }
+        w2_vec[n_hidden + 4] = *alpha_logit;
+        let mut b2_vec = vec![*rank_b, *reducer_b];
+        adam.step(w1, b1, &mut w2_vec, &mut b2_vec, lr);
+        for j in 0..n_hidden {
+            rank_w[j] = w2_vec[j];
+        }
+        for kk in 0..4 {
+            reducer_w[kk] = w2_vec[n_hidden + kk];
+        }
+        *alpha_logit = w2_vec[n_hidden + 4];
+        *rank_b = b2_vec[0];
+        *reducer_b = b2_vec[1];
+    };
 
     // NiN buffer — accumulates K hybrid-head pair forwards (or None for
     // dropped pairs) when nin_on. Reset each epoch (final-flush at end).
@@ -2911,7 +2884,12 @@ fn train_mlp_hybrid_head_with_tv(
                         let xc = alpha_logit.clamp(-20.0, 20.0);
                         1.0 / (1.0 + (-xc).exp())
                     };
-                    let y_hi_rank = h_hi.iter().zip(rank_w.iter()).map(|(&h, &w)| h * w).sum::<f64>() + rank_b;
+                    let y_hi_rank = h_hi
+                        .iter()
+                        .zip(rank_w.iter())
+                        .map(|(&h, &w)| h * w)
+                        .sum::<f64>()
+                        + rank_b;
                     let y_hi_pool = s_hi[0] * reducer_w[0]
                         + s_hi[1] * reducer_w[1]
                         + s_hi[2] * reducer_w[2]
@@ -2941,7 +2919,12 @@ fn train_mlp_hybrid_head_with_tv(
                         leaky,
                     );
                     let alpha_lo_eff = alpha_hi_eff;
-                    let y_lo_rank = h_lo.iter().zip(rank_w.iter()).map(|(&h, &w)| h * w).sum::<f64>() + rank_b;
+                    let y_lo_rank = h_lo
+                        .iter()
+                        .zip(rank_w.iter())
+                        .map(|(&h, &w)| h * w)
+                        .sum::<f64>()
+                        + rank_b;
                     let y_lo_pool = s_lo[0] * reducer_w[0]
                         + s_lo[1] * reducer_w[1]
                         + s_lo[2] * reducer_w[2]
@@ -3210,8 +3193,17 @@ fn predict_group_hybrid_head(
         .map(|i| {
             let xi = &std_x[i * n_features..(i + 1) * n_features];
             let (y, _, _, _, _, _, _, _) = hh::forward_hybrid_head(
-                xi, w1, b1, rank_w, rank_b, reducer_w, reducer_b, alpha_logit, n_features,
-                n_hidden, leaky,
+                xi,
+                w1,
+                b1,
+                rank_w,
+                rank_b,
+                reducer_w,
+                reducer_b,
+                alpha_logit,
+                n_features,
+                n_hidden,
+                leaky,
             );
             y
         })
@@ -3290,9 +3282,7 @@ pub(crate) fn flush_pool_head_nin_batch(
         }
     }
     let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
-        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
-            &nin_preds, &nin_labels, nin_p, nin_q,
-        )
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(&nin_preds, &nin_labels, nin_p, nin_q)
     } else {
         (0.0, vec![0.0; nin_preds.len()])
     };
@@ -3490,9 +3480,7 @@ fn flush_hybrid_head_nin_batch<F>(
         }
     }
     let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
-        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
-            &nin_preds, &nin_labels, nin_p, nin_q,
-        )
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(&nin_preds, &nin_labels, nin_p, nin_q)
     } else {
         (0.0, vec![0.0; nin_preds.len()])
     };
@@ -3969,10 +3957,8 @@ fn run_parallel_minibatch(
                 let g_feats = &std_features[g_idx];
                 let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
                 let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
-                let (ya, ha_pre, ha) =
-                    forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
-                let (yb, hb_pre, hb) =
-                    forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
+                let (ya, ha_pre, ha) = forward(xa, w1, b1, w2, b2, n_features, n_hidden, alpha);
+                let (yb, hb_pre, hb) = forward(xb, w1, b1, w2, b2, n_features, n_hidden, alpha);
 
                 let mos_a = groups[g_idx].human_scores[ia];
                 let mos_b = groups[g_idx].human_scores[ib];
@@ -4250,9 +4236,7 @@ fn run_minibatch_with_nin(
         }
     }
     let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
-        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
-            &nin_preds, &nin_labels, nin_p, nin_q,
-        )
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(&nin_preds, &nin_labels, nin_p, nin_q)
     } else {
         (0.0, vec![0.0; nin_preds.len()])
     };
@@ -4666,8 +4650,7 @@ fn train_mlp_per_sample_alpha_head(
             let mut buf = vec![0.0f64; g.features.len() * n_features];
             for (i, &f) in g.features.iter().enumerate() {
                 for d in 0..n_features {
-                    buf[i * n_features + d] =
-                        (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                    buf[i * n_features + d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
                 }
             }
             buf
@@ -4872,14 +4855,26 @@ fn train_mlp_per_sample_alpha_head(
                     if nin_buffer.len() >= k {
                         flush_per_sample_alpha_nin_batch(
                             &mut nin_buffer,
-                            &mut w1, &mut b1, &mut rank_w, &mut rank_b,
-                            &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
-                            &mut adam, n_features, n_hidden, leaky,
+                            &mut w1,
+                            &mut b1,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            leaky,
                             hyperparams.l2_lambda,
                             hyperparams.norm_in_norm_weight,
                             hyperparams.norm_in_norm_p,
                             hyperparams.norm_in_norm_q,
-                            lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                            lr,
+                            &mut total_loss,
+                            &mut n_steps,
+                            &do_adam_step,
                         );
                     }
                 }
@@ -4894,14 +4889,26 @@ fn train_mlp_per_sample_alpha_head(
                     if nin_buffer.len() >= k {
                         flush_per_sample_alpha_nin_batch(
                             &mut nin_buffer,
-                            &mut w1, &mut b1, &mut rank_w, &mut rank_b,
-                            &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
-                            &mut adam, n_features, n_hidden, leaky,
+                            &mut w1,
+                            &mut b1,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            leaky,
                             hyperparams.l2_lambda,
                             hyperparams.norm_in_norm_weight,
                             hyperparams.norm_in_norm_p,
                             hyperparams.norm_in_norm_q,
-                            lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                            lr,
+                            &mut total_loss,
+                            &mut n_steps,
+                            &do_adam_step,
                         );
                     }
                 }
@@ -4949,9 +4956,8 @@ fn train_mlp_per_sample_alpha_head(
                 let scale = 2.0 * hyperparams.mse_weight / n_norm;
                 let da = scale * (ya - mos_a);
                 let db = scale * (yb - mos_b);
-                let l = hyperparams.mse_weight
-                    * ((ya - mos_a).powi(2) + (yb - mos_b).powi(2))
-                    / n_norm;
+                let l =
+                    hyperparams.mse_weight * ((ya - mos_a).powi(2) + (yb - mos_b).powi(2)) / n_norm;
                 (da, db, l)
             } else {
                 (0.0, 0.0, 0.0)
@@ -4991,24 +4997,52 @@ fn train_mlp_per_sample_alpha_head(
 
             if nin_on {
                 nin_buffer.push(Some(PerSampleAlphaPairForward {
-                    xa, xb, ya, yb,
-                    ya_rank, yb_rank, ya_pool, yb_pool,
-                    alpha_a, alpha_b,
-                    ha_pre, ha, hb_pre, hb,
-                    sa, sb, max_a, max_b,
-                    dl_dya_rn, dl_dyb_rn, mos_a, mos_b,
+                    xa,
+                    xb,
+                    ya,
+                    yb,
+                    ya_rank,
+                    yb_rank,
+                    ya_pool,
+                    yb_pool,
+                    alpha_a,
+                    alpha_b,
+                    ha_pre,
+                    ha,
+                    hb_pre,
+                    hb,
+                    sa,
+                    sb,
+                    max_a,
+                    max_b,
+                    dl_dya_rn,
+                    dl_dyb_rn,
+                    mos_a,
+                    mos_b,
                 }));
                 if nin_buffer.len() >= k {
                     flush_per_sample_alpha_nin_batch(
                         &mut nin_buffer,
-                        &mut w1, &mut b1, &mut rank_w, &mut rank_b,
-                        &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
-                        &mut adam, n_features, n_hidden, leaky,
+                        &mut w1,
+                        &mut b1,
+                        &mut rank_w,
+                        &mut rank_b,
+                        &mut reducer_w,
+                        &mut reducer_b,
+                        &mut w_alpha,
+                        &mut b_alpha,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        leaky,
                         hyperparams.l2_lambda,
                         hyperparams.norm_in_norm_weight,
                         hyperparams.norm_in_norm_p,
                         hyperparams.norm_in_norm_q,
-                        lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                        lr,
+                        &mut total_loss,
+                        &mut n_steps,
+                        &do_adam_step,
                     );
                 }
                 continue;
@@ -5030,22 +5064,54 @@ fn train_mlp_per_sample_alpha_head(
             let mut g_b_alpha: f64 = 0.0;
 
             psah::backprop_step_per_sample_alpha_head(
-                xa, &ha_pre, &ha, &sa, max_a, ya_rank, ya_pool, alpha_a, dl_dya,
-                &rank_w, &reducer_w, &w_alpha,
-                &mut adam.gw1, &mut adam.gb1,
-                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                &mut g_red_w, &mut g_red_b,
-                &mut g_w_alpha_buf, &mut g_b_alpha,
-                n_features, n_hidden, leaky,
+                xa,
+                &ha_pre,
+                &ha,
+                &sa,
+                max_a,
+                ya_rank,
+                ya_pool,
+                alpha_a,
+                dl_dya,
+                &rank_w,
+                &reducer_w,
+                &w_alpha,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha_buf,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden,
+                leaky,
             );
             psah::backprop_step_per_sample_alpha_head(
-                xb, &hb_pre, &hb, &sb, max_b, yb_rank, yb_pool, alpha_b, dl_dyb,
-                &rank_w, &reducer_w, &w_alpha,
-                &mut adam.gw1, &mut adam.gb1,
-                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                &mut g_red_w, &mut g_red_b,
-                &mut g_w_alpha_buf, &mut g_b_alpha,
-                n_features, n_hidden, leaky,
+                xb,
+                &hb_pre,
+                &hb,
+                &sb,
+                max_b,
+                yb_rank,
+                yb_pool,
+                alpha_b,
+                dl_dyb,
+                &rank_w,
+                &reducer_w,
+                &w_alpha,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha_buf,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden,
+                leaky,
             );
 
             if hyperparams.l2_lambda > 0.0 {
@@ -5078,11 +5144,17 @@ fn train_mlp_per_sample_alpha_head(
 
             if k == 1 || steps_since_adam >= k as u64 {
                 do_adam_step(
-                    &mut adam, &mut w1, &mut b1,
-                    &mut rank_w, &mut rank_b,
-                    &mut reducer_w, &mut reducer_b,
-                    &mut w_alpha, &mut b_alpha,
-                    lr, n_hidden,
+                    &mut adam,
+                    &mut w1,
+                    &mut b1,
+                    &mut rank_w,
+                    &mut rank_b,
+                    &mut reducer_w,
+                    &mut reducer_b,
+                    &mut w_alpha,
+                    &mut b_alpha,
+                    lr,
+                    n_hidden,
                 );
                 steps_since_adam = 0;
             }
@@ -5091,11 +5163,17 @@ fn train_mlp_per_sample_alpha_head(
         // Final-flush leftover K>1 (RankNet path).
         if k > 1 && !nin_on && steps_since_adam > 0 {
             do_adam_step(
-                &mut adam, &mut w1, &mut b1,
-                &mut rank_w, &mut rank_b,
-                &mut reducer_w, &mut reducer_b,
-                &mut w_alpha, &mut b_alpha,
-                lr, n_hidden,
+                &mut adam,
+                &mut w1,
+                &mut b1,
+                &mut rank_w,
+                &mut rank_b,
+                &mut reducer_w,
+                &mut reducer_b,
+                &mut w_alpha,
+                &mut b_alpha,
+                lr,
+                n_hidden,
             );
         }
         if nin_on && !nin_buffer.is_empty() {
@@ -5103,14 +5181,26 @@ fn train_mlp_per_sample_alpha_head(
             if surviving >= 16 {
                 flush_per_sample_alpha_nin_batch(
                     &mut nin_buffer,
-                    &mut w1, &mut b1, &mut rank_w, &mut rank_b,
-                    &mut reducer_w, &mut reducer_b, &mut w_alpha, &mut b_alpha,
-                    &mut adam, n_features, n_hidden, leaky,
+                    &mut w1,
+                    &mut b1,
+                    &mut rank_w,
+                    &mut rank_b,
+                    &mut reducer_w,
+                    &mut reducer_b,
+                    &mut w_alpha,
+                    &mut b_alpha,
+                    &mut adam,
+                    n_features,
+                    n_hidden,
+                    leaky,
                     hyperparams.l2_lambda,
                     hyperparams.norm_in_norm_weight,
                     hyperparams.norm_in_norm_p,
                     hyperparams.norm_in_norm_q,
-                    lr, &mut total_loss, &mut n_steps, &do_adam_step,
+                    lr,
+                    &mut total_loss,
+                    &mut n_steps,
+                    &do_adam_step,
                 );
             } else {
                 nin_buffer.clear();
@@ -5137,8 +5227,8 @@ fn train_mlp_per_sample_alpha_head(
                 while i < n && alpha_samples.len() < 512 {
                     let xi = &gfeats[i * n_features..(i + 1) * n_features];
                     let (_, _, _, alpha, _, _, _, _, _) = psah::forward_per_sample_alpha_head(
-                        xi, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
-                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
+                        xi, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                        n_features, n_hidden, leaky,
                     );
                     alpha_samples.push(alpha);
                     i += step;
@@ -5146,7 +5236,9 @@ fn train_mlp_per_sample_alpha_head(
             }
             let alpha_mean = alpha_samples.iter().sum::<f64>() / alpha_samples.len().max(1) as f64;
             let alpha_min = alpha_samples.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-            let alpha_max = alpha_samples.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let alpha_max = alpha_samples
+                .iter()
+                .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
             let group_srocc: Vec<f64> = groups
                 .iter()
@@ -5156,10 +5248,16 @@ fn train_mlp_per_sample_alpha_head(
                         &std_features[gi],
                         g.features.len(),
                         n_features,
-                        &w1, &b1, &rank_w, rank_b,
-                        &reducer_w, reducer_b,
-                        &w_alpha, b_alpha,
-                        n_hidden, leaky,
+                        &w1,
+                        &b1,
+                        &rank_w,
+                        rank_b,
+                        &reducer_w,
+                        reducer_b,
+                        &w_alpha,
+                        b_alpha,
+                        n_hidden,
+                        leaky,
                     );
                     // PreviewV0_5Tuner (2026-05-19): when MSE-only training
                     // (ranknet_weight=0) is in use, the bake is score-shaped
@@ -5298,8 +5396,8 @@ fn predict_group_per_sample_alpha_head(
         .map(|i| {
             let xi = &std_x[i * n_features..(i + 1) * n_features];
             let (y, _, _, _, _, _, _, _, _) = psah::forward_per_sample_alpha_head(
-                xi, w1, b1, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha,
-                n_features, n_hidden, leaky,
+                xi, w1, b1, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, n_features,
+                n_hidden, leaky,
             );
             y
         })
@@ -5366,9 +5464,7 @@ fn flush_per_sample_alpha_nin_batch<F>(
         }
     }
     let (nin_loss, nin_grad) = if nin_preds.len() >= 2 {
-        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(
-            &nin_preds, &nin_labels, nin_p, nin_q,
-        )
+        loss_norm_in_norm::compute_norm_in_norm_loss_and_grad(&nin_preds, &nin_labels, nin_p, nin_q)
     } else {
         (0.0, vec![0.0; nin_preds.len()])
     };
@@ -5391,27 +5487,57 @@ fn flush_per_sample_alpha_nin_batch<F>(
         if is_b {
             let dl_dy = p.dl_dyb_rn + nin_g;
             psah::backprop_step_per_sample_alpha_head(
-                p.xb, &p.hb_pre, &p.hb, &p.sb, p.max_b,
-                p.yb_rank, p.yb_pool, p.alpha_b, dl_dy,
-                rank_w, reducer_w, w_alpha,
-                &mut adam.gw1, &mut adam.gb1,
-                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                &mut g_red_w, &mut g_red_b,
-                &mut g_w_alpha_buf, &mut g_b_alpha,
-                n_features, n_hidden, leaky_alpha,
+                p.xb,
+                &p.hb_pre,
+                &p.hb,
+                &p.sb,
+                p.max_b,
+                p.yb_rank,
+                p.yb_pool,
+                p.alpha_b,
+                dl_dy,
+                rank_w,
+                reducer_w,
+                w_alpha,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha_buf,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden,
+                leaky_alpha,
             );
             steps_added += 1;
         } else {
             let dl_dy = p.dl_dya_rn + nin_g;
             psah::backprop_step_per_sample_alpha_head(
-                p.xa, &p.ha_pre, &p.ha, &p.sa, p.max_a,
-                p.ya_rank, p.ya_pool, p.alpha_a, dl_dy,
-                rank_w, reducer_w, w_alpha,
-                &mut adam.gw1, &mut adam.gb1,
-                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                &mut g_red_w, &mut g_red_b,
-                &mut g_w_alpha_buf, &mut g_b_alpha,
-                n_features, n_hidden, leaky_alpha,
+                p.xa,
+                &p.ha_pre,
+                &p.ha,
+                &p.sa,
+                p.max_a,
+                p.ya_rank,
+                p.ya_pool,
+                p.alpha_a,
+                dl_dy,
+                rank_w,
+                reducer_w,
+                w_alpha,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha_buf,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden,
+                leaky_alpha,
             );
         }
     }
@@ -5763,7 +5889,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_b = Vec::new();
-        let bake_explicit_1 = train_mlp(&[group_factory()], n_features, &hyper_explicit_1, &mut log_b);
+        let bake_explicit_1 = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_explicit_1,
+            &mut log_b,
+        );
 
         assert_eq!(
             bake_default, bake_explicit_1,
@@ -5779,7 +5910,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_c = Vec::new();
-        let bake_parallel_k1 = train_mlp(&[group_factory()], n_features, &hyper_parallel_k1, &mut log_c);
+        let bake_parallel_k1 = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_parallel_k1,
+            &mut log_c,
+        );
         assert_eq!(
             bake_default, bake_parallel_k1,
             "parallel_batch=true + K=1 should fall through to the sequential \
@@ -6005,7 +6141,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_b = Vec::new();
-        let bake_explicit_off = train_mlp(&[group_factory()], n_features, &hyper_explicit_off, &mut log_b);
+        let bake_explicit_off = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_explicit_off,
+            &mut log_b,
+        );
 
         assert_eq!(
             bake_default, bake_explicit_off,
@@ -6046,7 +6187,12 @@ mod tests {
         let mut log_d = Vec::new();
         let mut log_e = Vec::new();
         let bake_k8 = train_mlp(&[group_factory()], n_features, &hyper_k8, &mut log_d);
-        let bake_k8_off = train_mlp(&[group_factory()], n_features, &hyper_k8_pwrc_off, &mut log_e);
+        let bake_k8_off = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_k8_pwrc_off,
+            &mut log_e,
+        );
         assert_eq!(
             bake_k8, bake_k8_off,
             "K=8 + explicit pwrc_pair_weight=false produced different bake than K=8 + default — \
@@ -6086,7 +6232,7 @@ mod tests {
         // Note: NaN propagates through `max` per IEEE 754 but f64::max
         // in Rust uses total-cmp semantics; we clamp afterwards anyway.
         assert_eq!(pwrc_pair_weight(-10.0, -5.0, Some(&bands)), 5.0); // clamped to 0 -> band 0
-        assert_eq!(pwrc_pair_weight(150.0, 0.0, Some(&bands)), 1.0);  // clamped to 100 -> band 9
+        assert_eq!(pwrc_pair_weight(150.0, 0.0, Some(&bands)), 1.0); // clamped to 100 -> band 9
 
         // Single-element band vector: every MOS maps to index 0.
         let one = vec![7.0];
@@ -6170,7 +6316,12 @@ mod tests {
             ..base.clone()
         };
         let mut log_drop_all = Vec::new();
-        let bake_drop_all = train_mlp(&[group_factory()], n_features, &hyper_drop_all, &mut log_drop_all);
+        let bake_drop_all = train_mlp(
+            &[group_factory()],
+            n_features,
+            &hyper_drop_all,
+            &mut log_drop_all,
+        );
         // With every pair dropped, the trainer never updates weights
         // and bakes the random Xavier init. Different from baseline.
         assert_ne!(
@@ -6297,9 +6448,12 @@ mod tests {
         };
         let losses_w1 = parse_loss(&log_w1);
         let losses_w10 = parse_loss(&log_w10);
-        assert!(!losses_w1.is_empty() && !losses_w10.is_empty(),
+        assert!(
+            !losses_w1.is_empty() && !losses_w10.is_empty(),
             "log missing avg_loss= (w1: {}, w10: {})",
-            losses_w1.len(), losses_w10.len());
+            losses_w1.len(),
+            losses_w10.len()
+        );
         // First-epoch avg_loss at weight=10 must be substantially
         // larger than at weight=1 (the same pred_diff distribution
         // is scaled 10x).

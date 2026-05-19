@@ -33,10 +33,12 @@ struct Cli {
     codec: String,
 
     /// Zensim profile: v0_2 | v0_3 | balanced (v0.5) | compression (v0.5) |
-    /// ensemble (v0.5). Default is v0_3 — the v0.5 family currently
-    /// returns near-zero scores even for visually-perfect outputs and
-    /// breaks the search loop. v0_3 is the production-grade fallback.
-    #[arg(long, default_value = "v0_3")]
+    /// ensemble (v0.5). Default is `compression` (V0_5Compression) —
+    /// post 2026-05-19 affine calibration, V0_5 is usable on real-codec
+    /// re-encodes. Compression wins the zensim-target demo matrix at
+    /// 94 % (vs V0_3's 92 % baseline; see
+    /// `benchmarks/v0_5_calibration_methodology_2026-05-19.md`).
+    #[arg(long, default_value = "compression")]
     profile: String,
 
     /// Convergence tolerance — search stops when `|achieved - target| <= tolerance`.

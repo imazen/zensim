@@ -473,19 +473,84 @@ pub fn rescale_logistic(predicted: &[f64], target: &[f64]) -> Vec<f64> {
     let b3_high = p_max + 25.0 * p_std;
     let b3_low = p_min - 25.0 * p_std;
     let starts: [[f64; 4]; 13] = [
-        [t_max, t_min, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_max, t_min, mean_p, (p_std * 0.1 * b4_sign).copysign(b4_sign)],
-        [t_max, t_min, mean_p, (p_std * 10.0 * b4_sign).copysign(b4_sign)],
-        [t_max, t_min, mean_p + p_std, (p_std * b4_sign).copysign(b4_sign)],
-        [t_max, t_min, mean_p - p_std, (p_std * b4_sign).copysign(b4_sign)],
-        [-tail, t_max, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_max, -tail, mean_p, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [tail, t_min, mean_p, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_min, tail, mean_p, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [-tail, t_max, b3_high, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_max, -tail, b3_low, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [tail, t_min, b3_low, (p_std * b4_sign).max(1e-3).copysign(b4_sign)],
-        [t_min, tail, b3_high, (-p_std * b4_sign).max(1e-3).copysign(b4_sign)],
+        [
+            t_max,
+            t_min,
+            mean_p,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p,
+            (p_std * 0.1 * b4_sign).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p,
+            (p_std * 10.0 * b4_sign).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p + p_std,
+            (p_std * b4_sign).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            t_min,
+            mean_p - p_std,
+            (p_std * b4_sign).copysign(b4_sign),
+        ],
+        [
+            -tail,
+            t_max,
+            mean_p,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            -tail,
+            mean_p,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            tail,
+            t_min,
+            mean_p,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_min,
+            tail,
+            mean_p,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            -tail,
+            t_max,
+            b3_high,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_max,
+            -tail,
+            b3_low,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            tail,
+            t_min,
+            b3_low,
+            (p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
+        [
+            t_min,
+            tail,
+            b3_high,
+            (-p_std * b4_sign).max(1e-3).copysign(b4_sign),
+        ],
     ];
     let mut best_b: Option<[f64; 4]> = None;
     let mut best_cost = f64::INFINITY;
@@ -535,7 +600,14 @@ impl PanelStats {
     /// KROCC, OR, PWRC, Z-RMSE. Used by the "≥ 4 of 6" decisive-rule
     /// check.
     pub fn as_array(&self) -> [f64; 6] {
-        [self.srocc, self.plcc, self.krocc, self.or_ratio, self.pwrc, self.z_rmse]
+        [
+            self.srocc,
+            self.plcc,
+            self.krocc,
+            self.or_ratio,
+            self.pwrc,
+            self.z_rmse,
+        ]
     }
 }
 
@@ -574,7 +646,13 @@ pub fn compute_panel(scores: &[f64], humans: &[f64]) -> PanelStats {
 /// usually want `2 * (1 - phi(|h|.min(8)))` for the p-value.
 pub fn phi(z: f64) -> f64 {
     if !z.is_finite() {
-        return if z.is_nan() { f64::NAN } else if z > 0.0 { 1.0 } else { 0.0 };
+        return if z.is_nan() {
+            f64::NAN
+        } else if z > 0.0 {
+            1.0
+        } else {
+            0.0
+        };
     }
     // erf via Abramowitz & Stegun 7.1.26
     let sign = if z < 0.0 { -1.0 } else { 1.0 };
