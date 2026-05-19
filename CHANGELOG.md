@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Fixed (2026-05-19, zensim runtime)
+
+- **`PreviewV0_5Balanced` / `PreviewV0_5Compression` / `PreviewV0_5Ensemble`
+  (plus `PreviewV0_3` / `PreviewV0_4`) returned wrong scores for
+  byte-identical inputs.** `Zensim::compute` short-circuits to
+  `score=100.0, raw_distance=0.0, features=[0.0; N]` when inputs are
+  byte-identical (see `images_byte_identical` + the early-return at
+  `compute_with_config_inner`), but `apply_mlp_scoring` then ran the
+  MLP forward pass on the all-zero feature vector and OVERWROTE those
+  values via `set_mlp_score`. With `skip_score_mapping=true` (set on
+  every V0_3+ MCOS-calibrated profile), the bake's bias-dominated raw
+  output (`-23.6` for V0_5Balanced, `-27.1` for V0_5Compression /
+  V0_5Ensemble on a synthetic 64×64 RGB gradient) was returned
+  verbatim after clamping — yielding score=0 (V0_5Balanced /
+  V0_5Ensemble) or ~2 (V0_5Compression) instead of 100. Surfaced by
+  `zensim-target` (commits `5e3e6ce0` + `f0ea29fb`, 2026-05-18),
+  which defaulted the CLI to V0_3 as workaround.
+
+  Fix at `zensim/src/metric.rs`: `apply_mlp_scoring` now detects the
+  byte-identical short-circuit signature (`raw_distance == 0.0` AND
+  every feature exactly `0.0`) and early-returns without invoking the
+  MLP. The signature is unique to the short-circuit's output because
+  SSIM/edge/MSE on any pixel difference yields non-zero features, so
+  real (non-identical) input never hits this branch.
+
+  Regression coverage: `zensim/tests/v05_identity.rs` (7 tests across
+  PreviewV0_2 / V0_3 / V0_4 / V0_5 / V0_5Balanced / V0_5Compression
+  / V0_5Ensemble — every test fails on the prior commit, all pass
+  with the fix). `zensim-target`'s `smoke_check` example confirms
+  identity-image returns 100.00 across every profile post-fix.
+
+  Note: V0_5\* bakes still produce questionable score-shape on
+  non-identical inputs in this workspace (raw outputs in `[-22, 0]`
+  for normal JPEG re-encodes — the bake's training-target sign or
+  affine calibration is suspect). That's a separate bake-side
+  calibration issue, not the runtime short-circuit bug fixed here.
+
 ### Added (2026-05-18, zensim-target)
 
 - **New workspace member `zensim-target/`.** CLI + library that
@@ -21,12 +58,16 @@
   at target=30 on screen-content where the codec's effective q
   floor still produces a higher-than-30 score.
 - **Defaults to `ZensimProfile::PreviewV0_3`** because `PreviewV0_5*`
-  bakes return near-zero scores for visually-good outputs in this
-  workspace (identity image scored against itself yields ~0 under
-  V0_5Balanced; the `skip_score_mapping=true` path uses the bake's
-  raw MLP output verbatim, and that output evaluates to ~0 on the
-  all-zero feature vector). Documented as a known limitation pending
-  a zensim runtime fix.
+  bakes produce poorly-calibrated raw output on real images in this
+  workspace (raw `[-22, 0]` for JPEG re-encodes — the bake's
+  training-target sign or affine calibration appears wrong). The
+  separate **identity-image short-circuit bug** that originally
+  motivated this workaround was fixed 2026-05-19 (see Fixed
+  section above) — `PreviewV0_5*` now correctly returns 100 for
+  byte-identical inputs. The V0_3 default stays in place until the
+  V0_5 bake calibration is sorted; switch the default to
+  `PreviewV0_5Balanced` once the V0_5 bake produces score-shaped
+  output in the expected `[0, 100]` range.
 
 ### Control / Blocked (2026-05-18, EXP-MULTI-CODEC)
 

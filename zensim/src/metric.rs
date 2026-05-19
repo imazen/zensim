@@ -1610,6 +1610,30 @@ pub(crate) fn apply_mlp_scoring(
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
+    // **Identity-image short-circuit guard.** When the byte-identical
+    // short-circuit in `compute_with_config_inner` fires, it produces
+    // `(score=100.0, raw_distance=0.0, features=[0.0; N])`. Running the
+    // MLP forward pass on the all-zero feature vector then overwrites
+    // those values with garbage — typically ~0 on V0_5Balanced (MSE bake
+    // on z-scored zeros), ~2 on V0_5Compression / V0_5Ensemble — because
+    // the trained MLP has no signal anchoring "zero feature vector →
+    // score 100". The bake's biases dominate, producing an off-scale
+    // output that `skip_score_mapping=true` returns verbatim.
+    //
+    // Detect the post-short-circuit state by checking the unique
+    // signature: raw_distance is exactly 0.0 AND every feature is
+    // exactly 0.0. Real (non-identical) images never produce this
+    // signature because SSIM/edge/MSE on any pixel difference yields
+    // non-zero values per-feature; `combine_scores` then derives a
+    // non-zero `raw_distance` from the weighted feature vector.
+    //
+    // When detected, leave the result as `compute_with_config_inner`
+    // set it (score=100.0, raw_distance=0.0). This preserves the
+    // byte-identical invariant for every profile, regardless of which
+    // bake is loaded or what `skip_score_mapping` does.
+    if result.raw_distance() == 0.0 && result.features().iter().all(|&f| f == 0.0) {
+        return Ok(());
+    }
     {
         // **Ensemble routing path** (PreviewV0_5Ensemble) — when an
         // `ensemble_classifier_bytes` is present, run the classifier

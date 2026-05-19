@@ -18,17 +18,21 @@ fn main() -> anyhow::Result<()> {
     println!("loaded {}x{} ({} bytes)", w, h, rgb.len());
 
     let backend = zensim_target::codec::backend_for(zensim_target::CodecKind::Jpeg);
-    let (encoded, decoded) = backend.encode_decode(&rgb, w, h, 75.0)?;
-    println!(
-        "encoded {} bytes, decoded {} bytes",
-        encoded.len(),
-        decoded.len()
-    );
+    let qs = [75.0f32, 90.0, 95.0, 98.0];
+    let mut decoded_pairs = Vec::new();
+    for &q in &qs {
+        let (encoded, decoded) = backend.encode_decode(&rgb, w, h, q)?;
+        println!("q={q:>4.0} encoded {} bytes", encoded.len());
+        decoded_pairs.push((q, decoded));
+    }
 
     let src: &[[u8; 3]] = bytemuck::cast_slice(&rgb);
-    let dst: &[[u8; 3]] = bytemuck::cast_slice(&decoded);
 
-    println!("\n{:>40}  {:>9}  {:>9}", "profile", "identity", "q=75");
+    print!("\n{:>40}  {:>9}", "profile", "identity");
+    for &q in &qs {
+        print!("  q={:>5.0}", q);
+    }
+    println!();
     for profile in [
         ZensimProfile::PreviewV0_2,
         ZensimProfile::PreviewV0_3,
@@ -42,16 +46,16 @@ fn main() -> anyhow::Result<()> {
             &RgbSlice::try_new(src, w as usize, h as usize).unwrap(),
             &RgbSlice::try_new(src, w as usize, h as usize).unwrap(),
         )?;
-        let real = z.compute(
-            &RgbSlice::try_new(src, w as usize, h as usize).unwrap(),
-            &RgbSlice::try_new(dst, w as usize, h as usize).unwrap(),
-        )?;
-        println!(
-            "{:>40}  {:>9.2}  {:>9.2}",
-            profile.name(),
-            ident.score(),
-            real.score()
-        );
+        print!("{:>40}  {:>9.2}", profile.name(), ident.score());
+        for (_q, decoded) in &decoded_pairs {
+            let dst: &[[u8; 3]] = bytemuck::cast_slice(decoded);
+            let real = z.compute(
+                &RgbSlice::try_new(src, w as usize, h as usize).unwrap(),
+                &RgbSlice::try_new(dst, w as usize, h as usize).unwrap(),
+            )?;
+            print!("  {:>7.2}", real.score());
+        }
+        println!();
     }
     Ok(())
 }
