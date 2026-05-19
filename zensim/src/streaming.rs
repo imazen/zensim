@@ -16,6 +16,7 @@ use crate::color::{
 use crate::diffmap::PixelFeatureWeights;
 use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
+use crate::p2_quantile::P2Triplet;
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
     abs_diff_into, abs_diff_sum, build_iw_weight_and_mse, build_mask_weight_and_mse,
@@ -338,6 +339,13 @@ struct ScaleAccumulators {
     iw_art4: [f64; 3],
     iw_det4: [f64; 3],
     iw_mse: [f64; 3],
+    // EX-PERCENTILE-POOL (2026-05-18): true P² quantile estimators
+    // (p5/p50/p95) per stat per channel. Replaces L8-norm approximation
+    // in finalized features. Updated by a scalar post-pass; see
+    // `update_p2_for_strip` below.
+    ssim_p2: [P2Triplet; 3],
+    art_p2: [P2Triplet; 3],
+    det_p2: [P2Triplet; 3],
     // Total inner pixels processed
     n: usize,
 }
@@ -377,6 +385,9 @@ impl ScaleAccumulators {
             iw_art4: [0.0; 3],
             iw_det4: [0.0; 3],
             iw_mse: [0.0; 3],
+            ssim_p2: [P2Triplet::new(), P2Triplet::new(), P2Triplet::new()],
+            art_p2: [P2Triplet::new(), P2Triplet::new(), P2Triplet::new()],
+            det_p2: [P2Triplet::new(), P2Triplet::new(), P2Triplet::new()],
             n: 0,
         }
     }
@@ -416,11 +427,16 @@ impl ScaleAccumulators {
             self.iw_art4[c] += other.iw_art4[c];
             self.iw_det4[c] += other.iw_det4[c];
             self.iw_mse[c] += other.iw_mse[c];
+            // EX-PERCENTILE-POOL: merge P² estimators (approximate; see
+            // `p2_quantile.rs::P2Estimator::merge` for the merge model).
+            self.ssim_p2[c].merge(&other.ssim_p2[c]);
+            self.art_p2[c].merge(&other.art_p2[c]);
+            self.det_p2[c].merge(&other.det_p2[c]);
         }
         self.n += other.n;
     }
 
-    fn finalize(&self) -> ScaleStats {
+    fn finalize(&self, use_p2: bool) -> ScaleStats {
         let one_over_n = 1.0 / self.n as f64;
 
         let mut ssim = [0.0f64; 6];
@@ -479,13 +495,35 @@ impl ScaleAccumulators {
                 0.0
             };
 
-            // Extended: max and L8
+            // Extended: max and L8 — OR P² p95 when EX-PERCENTILE-POOL active.
             ssim_max[c] = self.ssim_max[c] as f64;
             art_max[c] = self.edge_art_max[c] as f64;
             det_max[c] = self.edge_det_max[c] as f64;
-            ssim_l8[c] = (self.ssim_d8[c] * one_over_n).powf(0.125);
-            art_l8[c] = (self.edge_art8[c] * one_over_n).powf(0.125);
-            det_l8[c] = (self.edge_det8[c] * one_over_n).powf(0.125);
+            if use_p2 {
+                // EX-PERCENTILE-POOL: replace L8 approximation with true
+                // P² p95 quantile estimator. Same field name preserves
+                // the 300-feature layout; downstream training reads
+                // `ssim_p95` etc. unchanged.
+                ssim_l8[c] = self.ssim_p2[c].p95();
+                art_l8[c] = self.art_p2[c].p95();
+                det_l8[c] = self.det_p2[c].p95();
+                if std::env::var("ZENSIM_P2_DBG").is_ok() {
+                    eprintln!(
+                        "P2DBG_FINAL c={} ssim_p95={:.4} (max={:.4}) art_p95={:.4} (max={:.4}) det_p95={:.4} (max={:.4})",
+                        c,
+                        ssim_l8[c],
+                        ssim_max[c],
+                        art_l8[c],
+                        art_max[c],
+                        det_l8[c],
+                        det_max[c],
+                    );
+                }
+            } else {
+                ssim_l8[c] = (self.ssim_d8[c] * one_over_n).powf(0.125);
+                art_l8[c] = (self.edge_art8[c] * one_over_n).powf(0.125);
+                det_l8[c] = (self.edge_det8[c] * one_over_n).powf(0.125);
+            }
 
             // Extended: masked features (normalize by N, matching full-image path)
             masked_ssim[c * 3] = self.masked_ssim_d[c] * one_over_n;
@@ -1069,6 +1107,204 @@ pub(crate) fn convert_source_to_xyb_into(
     }
 }
 
+/// EX-PERCENTILE-POOL: update P² estimators for one strip's inner band
+/// of one channel.
+///
+/// Does its own scalar H-blur + V-blur from `src_c`/`dst_c` (the strip-
+/// local source planes). This is independent of whatever the SIMD
+/// kernel did with the bufs — we just need ONCE-blurred mu1/mu2/ssq/s12
+/// for the inner band, computed deterministically.
+///
+/// Cost: ~1 scalar V-blur worth of work per strip per channel. For
+/// offline feature extraction this is acceptable; for the runtime hot
+/// path it's pure overhead — gated by config.compute_p2_pool.
+#[allow(clippy::too_many_arguments)]
+fn update_p2_for_strip(
+    src_c: &[f32],
+    dst_c: &[f32],
+    _unused_h_mu1: &[f32],
+    _unused_h_mu2: &[f32],
+    _unused_h_sigma_sq: &[f32],
+    _unused_h_sigma12: &[f32],
+    width: usize,
+    strip_h: usize,
+    inner_start: usize,
+    inner_h: usize,
+    radius: usize,
+    need_ssim: bool,
+    need_edge: bool,
+    ssim_p2: &mut P2Triplet,
+    art_p2: &mut P2Triplet,
+    det_p2: &mut P2Triplet,
+) {
+    if !need_ssim && !need_edge {
+        return;
+    }
+    let diam = 2 * radius + 1;
+    let inv = 1.0 / diam as f32;
+    let inner_end = inner_start + inner_h;
+    let r = radius;
+    const C2: f32 = 0.0009;
+
+    // Re-do H-blur internally so we don't depend on bufs state.
+    // h_mu1[row][col] = average over col-window of src_c[row][...]
+    let mut h_mu1_buf = vec![0.0f32; strip_h * width];
+    let mut h_mu2_buf = vec![0.0f32; strip_h * width];
+    let mut h_sq_buf = vec![0.0f32; strip_h * width];
+    let mut h_s12_buf = vec![0.0f32; strip_h * width];
+    for row in 0..strip_h {
+        let row_off = row * width;
+        // Initial column sum: window [-r..r] mirror-reflected.
+        let mut sum_s = 0.0f32;
+        let mut sum_d = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut sum_prod = 0.0f32;
+        for i in 0..diam {
+            let idx = if i <= r { (r - i).min(width - 1) } else { (i - r).min(width - 1) };
+            let s = src_c[row_off + idx];
+            let d = dst_c[row_off + idx];
+            sum_s += s;
+            sum_d += d;
+            sum_sq = s.mul_add(s, d.mul_add(d, sum_sq));
+            sum_prod = s.mul_add(d, sum_prod);
+        }
+        for x in 0..width {
+            h_mu1_buf[row_off + x] = sum_s * inv;
+            h_mu2_buf[row_off + x] = sum_d * inv;
+            h_sq_buf[row_off + x] = sum_sq * inv;
+            h_s12_buf[row_off + x] = sum_prod * inv;
+            // Slide
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                let reflected = 2 * (width as isize - 1) - add_raw as isize;
+                (reflected.unsigned_abs()).min(width - 1)
+            };
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let s_add = src_c[row_off + add_idx];
+            let d_add = dst_c[row_off + add_idx];
+            let s_rem = src_c[row_off + rem_idx];
+            let d_rem = dst_c[row_off + rem_idx];
+            sum_s += s_add - s_rem;
+            sum_d += d_add - d_rem;
+            // Match SIMD's FMA chain order to preserve precision:
+            // sum_sq = sa·sa + da·da + (-sr)·sr + (-dr)·dr + sum_sq
+            sum_sq = s_add.mul_add(
+                s_add,
+                d_add.mul_add(
+                    d_add,
+                    (-s_rem).mul_add(s_rem, (-d_rem).mul_add(d_rem, sum_sq)),
+                ),
+            );
+            sum_prod = s_add.mul_add(d_add, (-s_rem).mul_add(d_rem, sum_prod));
+        }
+    }
+    let h_mu1 = h_mu1_buf.as_slice();
+    let h_mu2 = h_mu2_buf.as_slice();
+    let h_sigma_sq = h_sq_buf.as_slice();
+    let h_sigma12 = h_s12_buf.as_slice();
+
+    // Column-major scalar loop, mirroring the kernel structure.
+    for x in 0..width {
+        // Initialize V-blur running sums for column x.
+        let mut sum_m1 = 0.0f32;
+        let mut sum_m2 = 0.0f32;
+        let mut sum_sq = 0.0f32;
+        let mut sum_s12 = 0.0f32;
+        for i in 0..diam {
+            let idx = mirror_idx_local(i, r, strip_h);
+            let off = idx * width + x;
+            sum_m1 += h_mu1[off];
+            sum_m2 += h_mu2[off];
+            if need_ssim {
+                sum_sq += h_sigma_sq[off];
+                sum_s12 += h_sigma12[off];
+            }
+        }
+        for y in 0..strip_h {
+            if y >= inner_start && y < inner_end {
+                let mu1 = sum_m1 * inv;
+                let mu2 = sum_m2 * inv;
+                let sv = src_c[y * width + x];
+                let dv = dst_c[y * width + x];
+
+                if need_ssim {
+                    let ssq = sum_sq * inv;
+                    let s12 = sum_s12 * inv;
+                    let mu_diff = mu1 - mu2;
+                    let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
+                    let num_s = 2.0f32.mul_add((-mu1).mul_add(mu2, s12), C2);
+                    let denom_raw =
+                        (-mu2).mul_add(mu2, (-mu1).mul_add(mu1, ssq)) + C2;
+                    // FP cancellation guard: denom_raw should be ≥ C2 in
+                    // theory but can dip below due to scalar-vs-SIMD
+                    // accumulation order. Clamp prevents division-by-near-
+                    // zero blowups that would corrupt the P² distribution.
+                    let denom_s = denom_raw.max(C2);
+                    let sd = (1.0f32 - (num_m * num_s) / denom_s).clamp(0.0f32, 1.0f32);
+                    ssim_p2.add(sd as f64);
+                }
+                if need_edge {
+                    let diff1 = (sv - mu1).abs();
+                    let diff2 = (dv - mu2).abs();
+                    let ed = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
+                    let artifact = ed.max(0.0f32);
+                    let detail_lost = (-ed).max(0.0f32);
+                    art_p2.add(artifact as f64);
+                    det_p2.add(detail_lost as f64);
+                }
+            }
+            // Slide the V-blur window via mirror-reflect indices.
+            let add_idx = vblur_add_idx_local(y, r, strip_h);
+            let rem_idx = vblur_rem_idx_local(y, r, strip_h);
+            sum_m1 += h_mu1[add_idx * width + x] - h_mu1[rem_idx * width + x];
+            sum_m2 += h_mu2[add_idx * width + x] - h_mu2[rem_idx * width + x];
+            if need_ssim {
+                sum_sq += h_sigma_sq[add_idx * width + x] - h_sigma_sq[rem_idx * width + x];
+                sum_s12 += h_sigma12[add_idx * width + x] - h_sigma12[rem_idx * width + x];
+            }
+        }
+    }
+}
+
+#[inline(always)]
+fn mirror_idx_local(i: usize, r: usize, height: usize) -> usize {
+    if i <= r {
+        (r - i).min(height - 1)
+    } else {
+        (i - r).min(height - 1)
+    }
+}
+
+#[inline(always)]
+fn vblur_add_idx_local(y: usize, r: usize, height: usize) -> usize {
+    let add_raw = y + r + 1;
+    if add_raw < height {
+        add_raw
+    } else {
+        let reflected = 2 * (height as isize - 1) - add_raw as isize;
+        reflected.unsigned_abs().min(height - 1)
+    }
+}
+
+#[inline(always)]
+fn vblur_rem_idx_local(y: usize, r: usize, height: usize) -> usize {
+    let rem_i = y as isize - r as isize;
+    let idx = if rem_i < 0 {
+        rem_i.unsigned_abs()
+    } else {
+        rem_i as usize
+    };
+    idx.min(height - 1)
+}
+
 /// Process one channel of one strip: blur, extract inner rows, accumulate features.
 ///
 /// Three paths based on what features the channel needs:
@@ -1249,6 +1485,46 @@ fn process_strip_channel(
         accum.edge_art_max[c] = accum.edge_art_max[c].max(strip_acc.edge_art_max);
         accum.edge_det8[c] += strip_acc.edge_det8;
         accum.edge_det_max[c] = accum.edge_det_max[c].max(strip_acc.edge_det_max);
+
+        // EX-PERCENTILE-POOL: feed inner-band samples into P² estimators.
+        // Uses the H-blurred buffers that are still resident (the fused
+        // kernel only reads from these). Cost ~1 scalar V-blur per
+        // channel; only enabled in feature-extraction builds.
+        //
+        // At this point bufs.mu1/bufs.mu2 still hold H-blurred values
+        // (the std::mem::swap below promotes V-blurred values into them
+        // only after this block runs). sigma1_sq/sigma12 are H-blurred
+        // throughout. The update_p2_for_strip helper does a scalar
+        // V-blur over these to derive per-pixel d/art/det values.
+        if config.compute_p2_pool {
+            // Split borrows: get disjoint &mut references to per-channel
+            // P² triplets via split_at_mut on each parallel array.
+            let (left_ssim, right_ssim) = accum.ssim_p2.split_at_mut(c + 1);
+            let (left_art, right_art) = accum.art_p2.split_at_mut(c + 1);
+            let (left_det, right_det) = accum.det_p2.split_at_mut(c + 1);
+            let _ = (right_ssim, right_art, right_det);
+            let ssim_p2_ref = left_ssim.last_mut().unwrap();
+            let art_p2_ref = left_art.last_mut().unwrap();
+            let det_p2_ref = left_det.last_mut().unwrap();
+            update_p2_for_strip(
+                src_c,
+                dst_c,
+                &bufs.mu1,
+                &bufs.mu2,
+                &bufs.sigma1_sq,
+                &bufs.sigma12,
+                width,
+                strip_h,
+                inner_start,
+                inner_h,
+                config.blur_radius,
+                need_ssim,
+                need_edge,
+                ssim_p2_ref,
+                art_p2_ref,
+                det_p2_ref,
+            );
+        }
 
         // Extended: masked features using stored V-blurred mu1/mu2.
         // The activity-map + blur work is shared between the
@@ -1815,7 +2091,7 @@ fn process_scale_bands(
             dm.extend_from_slice(&bdm);
         }
     }
-    (accum.finalize(), diffmap)
+    (accum.finalize(config.compute_p2_pool), diffmap)
 }
 
 /// Reusable scratch buffers for [`crate::Zensim::compute_with_ref_into`].

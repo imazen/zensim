@@ -209,6 +209,7 @@ mod metric;
 // Gated behind `__experimental_versions` so default builds drop the
 // AGPL-licensed `zenpredict` runtime and the bundled trained `.bin`.
 pub(crate) mod mlp;
+mod p2_quantile;
 mod pool;
 pub mod profile;
 mod simd_ops;

@@ -283,6 +283,16 @@ pub struct ZensimConfig {
 
     /// Enable multi-threaded computation via rayon (default: true).
     pub allow_multithreading: bool,
+
+    /// EX-PERCENTILE-POOL (2026-05-18): compute true P² quantile
+    /// estimators (p5/p50/p95) for SSIM/edge-art/edge-det per channel
+    /// per scale and emit them as the Block B "p95" feature slot in
+    /// place of the L8-norm approximation. Default: false (matches
+    /// shipped runtime). Feature-extraction tooling (e.g.
+    /// `extract_features_372col`, `extract_pair_features`) sets this
+    /// to true to bake P²-based features into training/validation
+    /// parquets for A/B testing the L8 → P² swap.
+    pub compute_p2_pool: bool,
 }
 
 impl Default for ZensimConfig {
@@ -301,6 +311,7 @@ impl Default for ZensimConfig {
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
             allow_multithreading: true,
+            compute_p2_pool: false,
         }
     }
 }
@@ -1544,6 +1555,10 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
+        // EX-PERCENTILE-POOL: shipped profiles do NOT use P²-pooled
+        // features (no shipped bake is trained on the swapped layout
+        // yet). Feature-extraction tooling toggles this explicitly.
+        compute_p2_pool: false,
     }
 }
 
@@ -2969,6 +2984,105 @@ mod tests {
         }
         // Sanity: not all zero
         assert!(max_diff < 1e-4 && max_diff >= 0.0, "max_diff out of range: {}", max_diff);
+    }
+
+    /// EX-PERCENTILE-POOL: enabling `compute_p2_pool` swaps the L8-pooled
+    /// p95 features for true P² p95 estimator output. The non-Block-B
+    /// features (basic + masked + IW) must remain identical between
+    /// `compute_p2_pool: false` and `true`; only the 3 p95 slots per
+    /// channel per scale (Block B positions 3-5) should change.
+    #[test]
+    fn p2_pool_only_changes_p95_features() {
+        let (w, h) = (128, 128);
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                let g = ((y * 255) / h) as u8;
+                let b = (((x + y) * 255) / (2 * w)) as u8;
+                let noise = if (x % 16) < 8 && (y % 16) < 8 { 32 } else { 0 };
+                src[y * w + x] = [r.saturating_add(noise), g, b];
+                dst[y * w + x] = [
+                    r.saturating_add(noise).saturating_add(5),
+                    g.saturating_sub(3),
+                    b.saturating_add(2),
+                ];
+            }
+        }
+        let cfg_l8 = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: true,
+            compute_all_features: true,
+            compute_p2_pool: false,
+            ..Default::default()
+        };
+        let cfg_p2 = ZensimConfig {
+            extended_features: true,
+            compute_iw_features: true,
+            compute_all_features: true,
+            compute_p2_pool: true,
+            ..Default::default()
+        };
+        let r_l8 = compute_zensim_with_config(&src, &dst, w, h, cfg_l8).unwrap();
+        let r_p2 = compute_zensim_with_config(&src, &dst, w, h, cfg_p2).unwrap();
+
+        assert_eq!(r_l8.features.len(), 372);
+        assert_eq!(r_p2.features.len(), 372);
+
+        let basic_total = 4 * 13 * 3; // 156 (4 scales × 13 features × 3 channels)
+        // Basic block (0..156) identical.
+        for i in 0..basic_total {
+            assert!(
+                (r_l8.features[i] - r_p2.features[i]).abs() < 1e-9,
+                "basic feature {} differs: L8 {} vs P2 {}",
+                i,
+                r_l8.features[i],
+                r_p2.features[i]
+            );
+        }
+        // Peak block (156..228): max (positions 0-2) must match exactly;
+        // p95 (positions 3-5) may differ.
+        let mut p95_diff_count = 0;
+        for s in 0..4 {
+            for c in 0..3 {
+                let base = basic_total + s * 18 + c * 6;
+                // Max features must match exactly.
+                for k in 0..3 {
+                    assert!(
+                        (r_l8.features[base + k] - r_p2.features[base + k]).abs() < 1e-9,
+                        "max feature s{}c{}k{} differs",
+                        s,
+                        c,
+                        k
+                    );
+                }
+                // p95 features may differ.
+                for k in 3..6 {
+                    let d = (r_l8.features[base + k] - r_p2.features[base + k]).abs();
+                    if d > 1e-6 {
+                        p95_diff_count += 1;
+                    }
+                }
+            }
+        }
+        // At least SOME p95 should differ (otherwise the swap isn't
+        // taking effect).
+        assert!(
+            p95_diff_count > 0,
+            "P² swap had no effect on p95 features"
+        );
+        // Masked + IW blocks (228..372) identical.
+        for i in 228..372 {
+            assert!(
+                (r_l8.features[i] - r_p2.features[i]).abs() < 1e-9,
+                "masked/IW feature {} differs: L8 {} vs P2 {}",
+                i,
+                r_l8.features[i],
+                r_p2.features[i]
+            );
+        }
     }
 
     /// Extended features: default config produces same score as non-extended.

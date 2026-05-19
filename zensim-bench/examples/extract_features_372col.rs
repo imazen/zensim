@@ -51,12 +51,14 @@ fn main() {
     let mut path: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
     let mut max_pairs: usize = usize::MAX;
+    let mut p2_pool = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--corpus" => corpus = Some(args.next().unwrap()),
             "--path" => path = Some(args.next().unwrap().into()),
             "--out" => out = Some(args.next().unwrap().into()),
             "--max-pairs" => max_pairs = args.next().unwrap().parse().unwrap(),
+            "--p2-pool" => p2_pool = true,
             other => {
                 eprintln!("unknown arg: {other}");
                 std::process::exit(1);
@@ -91,6 +93,7 @@ fn main() {
     let progress = AtomicUsize::new(0);
     let log_every = (n_total / 20).max(1);
 
+    eprintln!("extraction mode: p2_pool={p2_pool}");
     let scored: Vec<Option<(String, f64, Vec<(String, f64)>, Vec<f64>)>> = pairs
         .par_iter()
         .map(|kp| {
@@ -101,7 +104,7 @@ fn main() {
                 let eta = (n_total - p) as f64 / rate;
                 eprintln!("  {corpus} {p}/{n_total} ({rate:.1}/s, ETA {eta:.0}s)");
             }
-            extract_features(kp)
+            extract_features(kp, p2_pool)
         })
         .collect();
 
@@ -166,7 +169,7 @@ fn main() {
     );
 }
 
-fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<(String, f64)>, Vec<f64>)> {
+fn extract_features(kp: &Pair, p2_pool: bool) -> Option<(String, f64, Vec<(String, f64)>, Vec<f64>)> {
     let src_img = image::open(&kp.reference).ok()?.to_rgb8();
     let dst_img = image::open(&kp.distorted).ok()?.to_rgb8();
     let (w, h) = src_img.dimensions();
@@ -184,6 +187,7 @@ fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<(String, f64)>, Vec<f
     let mut config = ZensimConfig::default();
     config.extended_features = true;
     config.compute_iw_features = true;
+    config.compute_p2_pool = p2_pool;
     let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config).ok()?;
     let features: Vec<f64> = result.features().to_vec();
     Some((

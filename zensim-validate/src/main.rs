@@ -129,6 +129,14 @@ struct Args {
     #[arg(long, default_value = "4.0")]
     iw_strength: f32,
 
+    /// EX-PERCENTILE-POOL (2026-05-18): use true P² quantile estimator
+    /// for Block B p95 features instead of the L8-norm approximation
+    /// `(Σd⁸/N)^(1/8)`. Toggle via `ZensimConfig::compute_p2_pool`.
+    /// Cost: ~1 scalar V-blur per channel per strip; only intended
+    /// for feature-extraction tooling, not the runtime hot path.
+    #[arg(long, default_value = "false")]
+    p2_pool: bool,
+
     /// Downscale filter for pyramid construction: box, mitchell, lanczos
     #[arg(long, default_value = "box")]
     downscale_filter: String,
@@ -300,13 +308,22 @@ impl CacheConfig {
     /// Pack the feature-shape into a single byte:
     ///   bit 0 = extended_features (masked block present)
     ///   bit 1 = compute_iw_features (IW block present)
+    ///   bit 2 = p2_pool (Block B p95 uses P² estimator, not L8)
     pub fn pack_kind(extended: bool, iw: bool) -> u8 {
+        Self::pack_kind_full(extended, iw, false)
+    }
+
+    /// EX-PERCENTILE-POOL: extended packer that also encodes p2_pool.
+    pub fn pack_kind_full(extended: bool, iw: bool, p2_pool: bool) -> u8 {
         let mut k = 0u8;
         if extended {
             k |= 1;
         }
         if iw {
             k |= 2;
+        }
+        if p2_pool {
+            k |= 4;
         }
         k
     }
@@ -685,7 +702,7 @@ fn main() {
         num_scales: num_scales as u32,
         blur_passes,
         blur_radius: blur_radius as u32,
-        feature_kind: CacheConfig::pack_kind(extended_features, iw_features),
+        feature_kind: CacheConfig::pack_kind_full(extended_features, iw_features, args.p2_pool),
     };
 
     // Load and compute primary dataset (with optional caching)
@@ -989,6 +1006,7 @@ fn main() {
                     iw_features,
                     iw_strength,
                     downscale_filter,
+                    args.p2_pool,
                 );
                 if let Err(e) = save_feature_cache(&save_path, &ds, &valid_indices, &cache_config) {
                     eprintln!("Warning: failed to save feature cache: {}", e);
@@ -1014,6 +1032,7 @@ fn main() {
             iw_features,
             iw_strength,
             downscale_filter,
+            args.p2_pool,
         );
         if compute_all {
             let save_path = args
@@ -1165,6 +1184,7 @@ fn main() {
                             iw_features,
                             iw_strength,
                             downscale_filter,
+                            args.p2_pool,
                         );
                         if let Err(e) =
                             save_feature_cache(&also_save, &ds, &valid_indices, &cache_config)
@@ -1192,6 +1212,7 @@ fn main() {
                     iw_features,
                     iw_strength,
                     downscale_filter,
+                    args.p2_pool,
                 );
                 if compute_all {
                     if let Err(e) =
@@ -1594,6 +1615,7 @@ fn reference_key(pair: &ImagePair) -> String {
 
 /// Load a dataset and compute all features in parallel.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 fn load_and_compute(
     name: &str,
     format: DatasetFormat,
@@ -1609,6 +1631,7 @@ fn load_and_compute(
     iw_features: bool,
     iw_strength: f32,
     downscale_filter: zensim::DownscaleFilter,
+    p2_pool: bool,
 ) -> (DatasetWithFeatures, Vec<u32>) {
     let pairs = match format {
         DatasetFormat::Tid2013 => load_tid2013(path),
@@ -1659,6 +1682,7 @@ fn load_and_compute(
     config.blur_radius = blur_radius;
     config.num_scales = num_scales;
     config.downscale_filter = downscale_filter;
+    config.compute_p2_pool = p2_pool;
 
     // FPC is used for cache-key sizing. Extended adds 6/ch; IW adds 6/ch.
     let mut fpc = if config.extended_features {
