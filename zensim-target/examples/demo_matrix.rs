@@ -40,13 +40,12 @@ fn main() -> anyhow::Result<()> {
     println!(
         "| image (class) | codec | target | achieved | Δ | knob | bytes | iters | converged |"
     );
-    println!(
-        "|:---|:---|---:|---:|---:|---:|---:|---:|:---:|"
-    );
+    println!("|:---|:---|---:|---:|---:|---:|---:|---:|:---:|");
 
     let mut total = 0u32;
     let mut hits = 0u32;
-    let mut by_codec: std::collections::HashMap<&str, (u32, u32)> = std::collections::HashMap::new();
+    let mut by_codec: std::collections::HashMap<&str, (u32, u32)> =
+        std::collections::HashMap::new();
 
     for (class, label, path) in IMAGES {
         let path = PathBuf::from(path);
@@ -115,10 +114,7 @@ fn main() -> anyhow::Result<()> {
     codec_keys.sort();
     for k in codec_keys {
         let (n, ok) = by_codec[k];
-        println!(
-            "* `{k}`: {ok}/{n} ({:.0}%)",
-            100.0 * ok as f64 / n as f64
-        );
+        println!("* `{k}`: {ok}/{n} ({:.0}%)", 100.0 * ok as f64 / n as f64);
     }
 
     Ok(())
