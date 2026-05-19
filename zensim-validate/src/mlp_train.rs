@@ -399,6 +399,59 @@ pub struct MlpHyperparams {
     ///   the per-sample backprop to the TV gradient path).
     /// - Parallel-batch flag (sequential mini-batch only).
     pub per_sample_alpha_head: bool,
+
+    /// MSE-target weight (`PreviewV0_5Tuner` experiment, 2026-05-18).
+    ///
+    /// When `> 0`, an auxiliary per-prediction MSE loss
+    /// `(y_i - target_i)^2` is added on top of the RankNet pair loss.
+    /// Composes with the per-sample-α head path. The trainer treats
+    /// `human_score` as the regression target (not as a rank label
+    /// only). Setting `--ranknet-weight 0 --mse-weight 1` runs as
+    /// pure MSE; mixing both (e.g. `--ranknet-weight 0.5
+    /// --mse-weight 0.5`) hybridizes rank-honesty with calibration
+    /// honesty.
+    ///
+    /// Gradient: `dL/dy_i = 2 * mse_weight * (y_i - target_i) / N`
+    /// where `N = 2 * pairs_per_step` (one MSE term per ya AND yb).
+    /// Flows through the per-sample-α head's `(rank_w, reducer_w,
+    /// W_α, b_α, w1, b1)` backprop in the same scatter as the
+    /// RankNet ∂L/∂y. Active ONLY on the
+    /// `per_sample_alpha_head = true` path; trainer panics if set
+    /// on other heads.
+    pub mse_weight: f64,
+
+    /// RankNet pair-loss weight (`PreviewV0_5Tuner` experiment,
+    /// 2026-05-18). Default `1.0` matches legacy behavior. Setting
+    /// to `0.0` disables RankNet entirely — use with
+    /// `--mse-weight > 0` for pure-MSE training.
+    pub ranknet_weight: f64,
+
+    /// Monotonicity penalty weight (`PreviewV0_5Tuner` experiment,
+    /// 2026-05-18). When `> 0`, adds a per-pair quadratic-hinge
+    /// loss `(max(0, target_violation))^2` that penalizes the model
+    /// when its predicted ordering disagrees with the target's
+    /// ordering. For a pair `(xa, xb)` drawn from the same
+    /// `ref_basename` group with `target_a > target_b`:
+    ///
+    /// ```text
+    ///   violation = y_b - y_a + margin
+    ///   loss_mono = monotonicity_reg * max(0, violation)^2
+    ///   ∂loss/∂y_a = -2 * monotonicity_reg * max(0, violation)
+    ///   ∂loss/∂y_b = +2 * monotonicity_reg * max(0, violation)
+    /// ```
+    ///
+    /// `margin = 0.0` by default (active iff strict inversion).
+    /// Because pairs are drawn from per-image curves, "target_a >
+    /// target_b" includes the q↑→quality↑ structure that codec
+    /// auto-targeting depends on. Effective only on the
+    /// `per_sample_alpha_head = true` path.
+    pub monotonicity_reg: f64,
+
+    /// Margin for the monotonicity-reg hinge (default 0.0).
+    /// `target_a - target_b > monotonicity_margin` activates the
+    /// penalty; otherwise the pair contributes 0. Useful when you
+    /// want only "near-tied" pairs to participate.
+    pub monotonicity_margin: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -431,6 +484,10 @@ impl Default for MlpHyperparams {
             pool_head: false,
             hybrid_head: false,
             per_sample_alpha_head: false,
+            mse_weight: 0.0,
+            ranknet_weight: 1.0,
+            monotonicity_reg: 0.0,
+            monotonicity_margin: 0.0,
         }
     }
 }
@@ -4526,6 +4583,26 @@ fn train_mlp_per_sample_alpha_head(
             "per_sample_alpha_head + NiN: K (minibatch_size) must be ≥16; got {}",
             hyperparams.minibatch_size
         );
+        // PreviewV0_5Tuner auxiliary losses (mse_weight / monotonicity_reg)
+        // are wired only on the plain-RankNet path (the NiN flush helper
+        // packages its own forwards). Composing both requires extending
+        // flush_per_sample_alpha_nin_batch — queued for v1. Trainer
+        // panics here so a misconfigured run fails loud.
+        assert!(
+            hyperparams.mse_weight == 0.0 && hyperparams.monotonicity_reg == 0.0,
+            "per_sample_alpha_head + NiN: --mse-weight and --monotonicity-reg are not yet \
+             composed with NiN. Disable NiN (--norm-in-norm-weight 0) or these aux losses."
+        );
+    }
+    if (hyperparams.mse_weight > 0.0 || hyperparams.monotonicity_reg > 0.0)
+        && !hyperparams.per_sample_alpha_head
+    {
+        // Sanity: --mse-weight / --monotonicity-reg are tuner-specific
+        // and only wired on the per-sample-α path.
+        panic!(
+            "--mse-weight and --monotonicity-reg are only wired on the \
+             per_sample_alpha_head path (set --per-sample-alpha-head)."
+        );
     }
 
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
@@ -4848,9 +4925,69 @@ fn train_mlp_per_sample_alpha_head(
             n_steps += 1;
 
             let sig_z = 1.0 / (1.0 + (-z).exp());
-            let dl_d_pred_diff = -target * sig_z * pair_weight;
+            let dl_d_pred_diff = -target * sig_z * pair_weight * hyperparams.ranknet_weight;
             let dl_dya_rn = -dl_d_pred_diff;
             let dl_dyb_rn = dl_d_pred_diff;
+
+            // PreviewV0_5Tuner auxiliary losses (2026-05-18):
+            //   1. MSE per-prediction: 2·mse_weight·(y - target)/(2K). The
+            //      /(2K) factor (where K=pairs_per_epoch) normalizes the
+            //      total per-epoch MSE contribution to be comparable to a
+            //      single RankNet pair's gradient magnitude (~O(1)).
+            //   2. Monotonicity hinge: penalize y_low - y_high > -margin
+            //      among pairs drawn from the same ref_basename group.
+            //
+            // Both apply only on the plain-RankNet path (NiN composition
+            // is queued for a follow-up; the trainer asserts above when
+            // NiN + tuner auxes are both requested).
+            let (dl_dya_mse, dl_dyb_mse, mse_loss_pair) = if hyperparams.mse_weight > 0.0 {
+                // Predictions are score-shaped; targets are score-shaped
+                // (mos_a, mos_b live on the same axis as ya, yb when the
+                // user has chosen --target-column with a score-shaped
+                // value column like mix_cv40_iw60 or ssim2_log_norm).
+                let n_norm = (2.0 * hyperparams.pairs_per_epoch.max(1) as f64).max(1.0);
+                let scale = 2.0 * hyperparams.mse_weight / n_norm;
+                let da = scale * (ya - mos_a);
+                let db = scale * (yb - mos_b);
+                let l = hyperparams.mse_weight
+                    * ((ya - mos_a).powi(2) + (yb - mos_b).powi(2))
+                    / n_norm;
+                (da, db, l)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            total_loss += mse_loss_pair;
+
+            let (dl_dya_mono, dl_dyb_mono, mono_loss_pair) =
+                if hyperparams.monotonicity_reg > 0.0 && target != 0.0 {
+                    // target = signum(mos_a - mos_b); target > 0 means a is hi.
+                    let target_gap = (mos_a - mos_b).abs();
+                    if target_gap > hyperparams.monotonicity_margin {
+                        let (y_hi, y_lo, sign_hi_is_a) = if target > 0.0 {
+                            (ya, yb, true)
+                        } else {
+                            (yb, ya, false)
+                        };
+                        let violation = (y_lo - y_hi) + hyperparams.monotonicity_margin;
+                        if violation > 0.0 {
+                            let l = hyperparams.monotonicity_reg * violation * violation;
+                            let g_hi = -2.0 * hyperparams.monotonicity_reg * violation;
+                            let g_lo = 2.0 * hyperparams.monotonicity_reg * violation;
+                            if sign_hi_is_a {
+                                (g_hi, g_lo, l)
+                            } else {
+                                (g_lo, g_hi, l)
+                            }
+                        } else {
+                            (0.0, 0.0, 0.0)
+                        }
+                    } else {
+                        (0.0, 0.0, 0.0)
+                    }
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
+            total_loss += mono_loss_pair;
 
             if nin_on {
                 nin_buffer.push(Some(PerSampleAlphaPairForward {
@@ -4878,8 +5015,11 @@ fn train_mlp_per_sample_alpha_head(
             }
 
             // Plain RankNet path (no NiN).
-            let dl_dya = dl_dya_rn;
-            let dl_dyb = dl_dyb_rn;
+            // PreviewV0_5Tuner: fold MSE + monotonicity gradients into
+            // dl_dy* before the backprop. RankNet contribution is already
+            // weighted by hyperparams.ranknet_weight in dl_d_pred_diff.
+            let dl_dya = dl_dya_rn + dl_dya_mse + dl_dya_mono;
+            let dl_dyb = dl_dyb_rn + dl_dyb_mse + dl_dyb_mono;
             steps_since_adam += 1;
 
             let mut g_rank_w_buf = vec![0.0f64; n_hidden];

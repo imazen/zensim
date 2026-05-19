@@ -588,6 +588,37 @@ struct Args {
     /// (skipped on this path — V_22 recipe doesn't use TV).
     #[arg(long, default_value_t = false)]
     per_sample_alpha_head: bool,
+
+    /// `PreviewV0_5Tuner` MSE auxiliary loss weight (2026-05-18).
+    /// Default `0.0` = pure RankNet. When `> 0`, adds an auxiliary
+    /// regression loss `mse_weight·(y - target)²` (averaged across
+    /// the 2·pairs_per_epoch predictions per epoch) on top of the
+    /// RankNet pair gradient. Only wired on `--per-sample-alpha-head`;
+    /// not yet composed with `--norm-in-norm-weight > 0`.
+    #[arg(long, default_value_t = 0.0)]
+    mse_weight: f64,
+
+    /// `PreviewV0_5Tuner` RankNet pair-loss weight (2026-05-18).
+    /// Default `1.0` matches legacy behavior. Set to `0.0` to disable
+    /// the RankNet pair loss entirely — use with `--mse-weight > 0`
+    /// for pure-MSE training.
+    #[arg(long, default_value_t = 1.0)]
+    ranknet_weight: f64,
+
+    /// `PreviewV0_5Tuner` monotonicity-reg weight (2026-05-18). When
+    /// `> 0`, penalizes pairs whose predicted ordering disagrees
+    /// with the target ordering via a quadratic hinge
+    /// `w · max(0, y_low - y_high + margin)²`. Only wired on
+    /// `--per-sample-alpha-head`.
+    #[arg(long, default_value_t = 0.0)]
+    monotonicity_reg: f64,
+
+    /// `PreviewV0_5Tuner` monotonicity-reg margin (2026-05-18). The
+    /// penalty activates only when the predicted gap is below
+    /// `+margin` relative to perfect ordering. Default `0.0` =
+    /// activate on any strict inversion.
+    #[arg(long, default_value_t = 0.0)]
+    monotonicity_margin: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1378,6 +1409,10 @@ fn main() {
         pool_head: args.pool_head,
         hybrid_head: args.hybrid_head,
         per_sample_alpha_head: args.per_sample_alpha_head,
+        mse_weight: args.mse_weight,
+        ranknet_weight: args.ranknet_weight,
+        monotonicity_reg: args.monotonicity_reg,
+        monotonicity_margin: args.monotonicity_margin,
     };
 
     println!(
