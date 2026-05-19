@@ -501,6 +501,80 @@ pub struct MlpHyperparams {
     /// `anchor_step_p` but for the equivalence pool. Only effective
     /// when `cross_codec_eq_weight > 0`.
     pub cross_codec_eq_step_p: f64,
+
+    /// EXP-CROSS-CODEC-V3 (2026-05-19) rank-preserve regularizer
+    /// applied on equivalence pairs that have a non-zero
+    /// `butter_diff`. The cross-codec-eq MSE term `(y_a − y_b)²`
+    /// can collapse both outputs to a point mass when its weight is
+    /// loud enough to bind; rank-preserve pushes back proportionally
+    /// to `|butter_diff|` (the pivot-metric quality gap) so the
+    /// network can't satisfy the equivalence loss by predicting the
+    /// same value for both sides.
+    ///
+    /// Loss formulation (RankNet-style sigmoid):
+    /// `L_rp = w · |Δb| · −log(sigmoid(sign(Δb) · (y_a − y_b)))` where
+    /// `Δb = butter_a − butter_b`. Because butter is LOWER for higher
+    /// quality, `Δb > 0` means A is WORSE than B → we want `y_a > y_b`
+    /// (in distance-shape) OR `y_a < y_b` (in score-shape) depending
+    /// on training target. The orientation convention here uses the
+    /// per-sample-α head's own output sign-convention: the trainer
+    /// uses MSE against `mix_cv40_iw60` (score-shape, HIGHER = better
+    /// quality), so for `Δb > 0` (A worse) we want `y_a < y_b`. Hence
+    /// `sign(butter_diff) × (y_b − y_a)` is the score-shape rank-
+    /// preserve target; the implementation uses
+    /// `sign(Δb) × (y_b − y_a)` as the RankNet logit.
+    ///
+    /// Default `0.0` = off. Only wired on the per-sample-α head and
+    /// only effective when `cross_codec_eq_weight > 0` AND the equiv
+    /// pool has `butter_diff` populated.
+    pub cross_codec_rank_preserve_weight: f64,
+
+    /// EXP-CROSS-CODEC-V3 (2026-05-19) dynamic-range floor regularizer.
+    /// When `> 0`, every pair-step with probability
+    /// `dynamic_range_step_p` triggers a "q-sweep probe": sample
+    /// `dynamic_range_probe_n` random feature vectors from the equiv
+    /// pool's A-side (a proxy for the per-image q-sweep span), forward
+    /// each through the per-sample-α head, compute the observed σ
+    /// across the outputs, and penalize the network when
+    /// `σ_obs < dynamic_range_sigma_threshold`:
+    ///
+    /// `L_dr = w · max(0, σ_threshold − σ_obs)²`
+    ///
+    /// The gradient propagates through each forward as
+    /// `dL/dy_i = −2 · w · max(0, σ_threshold − σ_obs) · (y_i − μ) / (σ · N)`
+    /// where `μ` and `σ` are the batch mean and standard deviation.
+    /// All `N` per-row gradients accumulate into a single Adam step.
+    ///
+    /// This directly addresses the cc4v2 collapse failure mode where
+    /// the network minimized the cross-codec-eq + anchor losses by
+    /// predicting a constant ~63 score for every input. With a σ-floor
+    /// of e.g. 15, the network must spread its outputs by at least
+    /// that much across the probe to escape the penalty — which forces
+    /// it to retain dynamic range across quality levels.
+    ///
+    /// Default `0.0` = off. Only wired on the per-sample-α head and
+    /// requires equiv pool data (uses equiv-pool A-side as the probe).
+    pub dynamic_range_floor_weight: f64,
+
+    /// Target σ across the q-sweep probe outputs (default `15.0`
+    /// score units). Probes whose σ ≥ this contribute no penalty;
+    /// probes below incur quadratic penalty per
+    /// `dynamic_range_floor_weight`. Only effective when
+    /// `dynamic_range_floor_weight > 0`.
+    pub dynamic_range_sigma_threshold: f64,
+
+    /// Fraction of pair-steps that trigger a q-sweep probe
+    /// (default `0.05` = 5%, ~2500 probes per epoch at
+    /// `--pairs-per-epoch 50000`). Higher values give the
+    /// range-floor more gradient bandwidth at the cost of pair-loss
+    /// signal. Only effective when `dynamic_range_floor_weight > 0`.
+    pub dynamic_range_step_p: f64,
+
+    /// Number of feature vectors sampled per q-sweep probe
+    /// (default `40` = 8 refs × 5 q values conceptually). Affects
+    /// the σ estimator's variance — too few rows and σ becomes
+    /// noisy; too many and probe cost dominates per-step time.
+    pub dynamic_range_probe_n: usize,
 }
 
 impl Default for MlpHyperparams {
@@ -542,6 +616,11 @@ impl Default for MlpHyperparams {
             anchor_step_p: 0.10,
             cross_codec_eq_weight: 0.0,
             cross_codec_eq_step_p: 0.10,
+            cross_codec_rank_preserve_weight: 0.0,
+            dynamic_range_floor_weight: 0.0,
+            dynamic_range_sigma_threshold: 15.0,
+            dynamic_range_step_p: 0.05,
+            dynamic_range_probe_n: 40,
         }
     }
 }
@@ -639,12 +718,25 @@ pub struct AnchorRows<'a> {
 /// SHAPE-FREE supervision — the metric is free to choose ANY score for
 /// the equivalence class, as long as both members map to the same number.
 /// This is the core mechanism for intrinsic cross-codec consistency.
+///
+/// **EXP-CROSS-CODEC-V3 (2026-05-19): `butter_diff` field.** Optional per-
+/// pair `butter_a − butter_b` (in butteraugli-pnorm3 units). When the
+/// `cross_codec_rank_preserve_weight` hyperparameter is `> 0` and this
+/// slice has the same length as `features_a`, the training loop adds an
+/// auxiliary RankNet-style rank-preservation term whose magnitude scales
+/// with `|butter_diff|` — this prevents the equivalence-MSE term from
+/// collapsing the network's outputs to a constant. An empty slice
+/// disables rank-preserve regardless of the hyperparameter setting.
 #[derive(Debug)]
 pub struct EquivPairs<'a> {
     pub name: String,
     pub features_a: &'a [&'a [f64]],
     pub features_b: &'a [&'a [f64]],
     pub row_weights: &'a [f64],
+    /// Per-pair butter_a − butter_b (butteraugli-pnorm3 score units).
+    /// LOWER butter = HIGHER quality, so `butter_diff > 0` means A is
+    /// quality-WORSE than B. Empty slice = rank-preserve disabled.
+    pub butter_diff: &'a [f64],
 }
 
 /// Train a 2-layer MLP across multiple datasets via RankNet pairwise
@@ -5017,6 +5109,30 @@ fn train_mlp_per_sample_alpha_head(
             ),
             log,
         );
+        if hyperparams.cross_codec_rank_preserve_weight > 0.0 {
+            let butter_n = e.butter_diff.len();
+            log_line(
+                &format!(
+                    "cross-codec-rank-preserve: ENABLED — w={:.3} (butter_diff present for {}/{} pairs)",
+                    hyperparams.cross_codec_rank_preserve_weight,
+                    butter_n,
+                    e.features_a.len(),
+                ),
+                log,
+            );
+        }
+        if hyperparams.dynamic_range_floor_weight > 0.0 {
+            log_line(
+                &format!(
+                    "dynamic-range-floor: ENABLED — w={:.3} σ_thresh={:.2} step_p={:.3} probe_n={}",
+                    hyperparams.dynamic_range_floor_weight,
+                    hyperparams.dynamic_range_sigma_threshold,
+                    hyperparams.dynamic_range_step_p,
+                    hyperparams.dynamic_range_probe_n,
+                ),
+                log,
+            );
+        }
         (bufs_a, bufs_b, cdf, total)
     } else {
         if equiv.is_some() && !equiv_active {
@@ -5569,13 +5685,62 @@ fn train_mlp_per_sample_alpha_head(
                                 );
                             let row_w = e.row_weights[ei];
                             let diff = ya - yb;
-                            // L = w · row_w · diff²
-                            // dL/dy_a = 2 · w · row_w · diff
-                            // dL/dy_b = −2 · w · row_w · diff
+                            // L_eq = w · row_w · diff²
+                            // dL_eq/dy_a = 2 · w · row_w · diff
+                            // dL_eq/dy_b = −2 · w · row_w · diff
                             let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
-                            let dl_dya = scale * diff;
-                            let dl_dyb = -scale * diff;
-                            let loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
+                            let mut dl_dya = scale * diff;
+                            let mut dl_dyb = -scale * diff;
+                            let mut loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
+
+                            // EXP-CROSS-CODEC-V3 (2026-05-19): rank-preserve
+                            // regularizer on equiv pairs that have butter_diff.
+                            // Loss = w_rp · |Δb| · −log(sigmoid(s · (y_b − y_a)))
+                            // where s = sign(Δb) and Δb = butter_a − butter_b.
+                            // Δb > 0 → A is butter-worse than B → we want
+                            // y_a < y_b (score-shape, HIGHER quality = higher
+                            // output) → use logit s·(y_b − y_a) in the
+                            // sigmoid. This is the same RankNet derivation
+                            // used for the main pair loss above.
+                            //
+                            // Gradient (let u = s·(y_b − y_a), σ = sigmoid(u),
+                            // w = w_rp · |Δb|):
+                            //   dL/dy_b = -w · s · (1 − σ)
+                            //   dL/dy_a = +w · s · (1 − σ)
+                            if hyperparams.cross_codec_rank_preserve_weight > 0.0
+                                && !e.butter_diff.is_empty()
+                                && ei < e.butter_diff.len()
+                            {
+                                let db = e.butter_diff[ei];
+                                if db.is_finite() && db != 0.0 {
+                                    let s = if db > 0.0 { 1.0 } else { -1.0 };
+                                    let abs_db = db.abs();
+                                    let w_rp = hyperparams.cross_codec_rank_preserve_weight
+                                        * abs_db;
+                                    let u = s * (yb - ya);
+                                    // softplus(-u) = log(1 + exp(-u)) =
+                                    //   -log(sigmoid(u)). Stable form:
+                                    let softplus = if u >= 0.0 {
+                                        (-u).exp().ln_1p()
+                                    } else {
+                                        -u + u.exp().ln_1p()
+                                    };
+                                    let l_rp = w_rp * softplus;
+                                    // sigmoid(u) numerically stable:
+                                    let sig = if u >= 0.0 {
+                                        1.0 / (1.0 + (-u).exp())
+                                    } else {
+                                        let eu = u.exp();
+                                        eu / (1.0 + eu)
+                                    };
+                                    // dL/dy_b = -w · s · (1 − σ)
+                                    // dL/dy_a = +w · s · (1 − σ)
+                                    let g = w_rp * s * (1.0 - sig);
+                                    dl_dya += g;
+                                    dl_dyb -= g;
+                                    loss += l_rp;
+                                }
+                            }
                             total_loss += loss;
                             n_steps += 1;
 
@@ -5645,6 +5810,156 @@ fn train_mlp_per_sample_alpha_head(
                                 lr, n_hidden,
                             );
                         }
+                    }
+                }
+            }
+
+            // EXP-CROSS-CODEC-V3 (2026-05-19) dynamic-range floor probe.
+            // With probability `dynamic_range_step_p`, sample `probe_n`
+            // random A-side rows from the equiv pool, forward each, and
+            // penalize the network if the std deviation of the outputs
+            // falls below `sigma_threshold`. Penalty is quadratic:
+            //   L_dr = w · max(0, σ_threshold − σ_obs)²
+            // The gradient w.r.t. each per-row output `y_i` is:
+            //   dL_dr/dy_i = -2 · w · max(0, σ_threshold − σ_obs)
+            //                  · (y_i − μ) / (σ · N)
+            // All N per-row gradients accumulate into one Adam step.
+            //
+            // Requires equiv pool (uses A-side as the probe substrate);
+            // skipped silently if equiv pool empty.
+            if hyperparams.dynamic_range_floor_weight > 0.0
+                && k == 1
+                && !std_equiv_a.is_empty()
+            {
+                let u_take = rng.next_f64_unit();
+                if u_take < hyperparams.dynamic_range_step_p {
+                    let probe_n = hyperparams
+                        .dynamic_range_probe_n
+                        .max(2)
+                        .min(std_equiv_a.len());
+                    let sigma_thresh = hyperparams.dynamic_range_sigma_threshold;
+                    let w_dr = hyperparams.dynamic_range_floor_weight;
+
+                    // Sample probe_n distinct indices (with replacement is
+                    // fine — the σ estimator is approximately the same).
+                    let mut probe_idx: Vec<usize> = Vec::with_capacity(probe_n);
+                    let mut probe_y: Vec<f64> = Vec::with_capacity(probe_n);
+                    // Cache forward residuals so we can backprop after
+                    // computing the σ across all forwards.
+                    type ProbeFwd = (
+                        Vec<f64>,  // ha_pre
+                        Vec<f64>,  // ha
+                        [f64; 4],  // sa (reducer std-pool state)
+                        usize,     // max_a (argmax index for max-pool)
+                        f64,       // ya_rank
+                        f64,       // ya_pool
+                        f64,       // alpha
+                    );
+                    let mut probe_fwd: Vec<ProbeFwd> = Vec::with_capacity(probe_n);
+                    for _ in 0..probe_n {
+                        let u = rng.next_f64_unit();
+                        let pi = ((u * std_equiv_a.len() as f64) as usize)
+                            .min(std_equiv_a.len() - 1);
+                        probe_idx.push(pi);
+                        let xa = std_equiv_a[pi].as_slice();
+                        let (y, y_rank, y_pool, alpha, _, ha_pre, ha, sa, max_a) =
+                            psah::forward_per_sample_alpha_head(
+                                xa, &w1, &b1, &rank_w, rank_b,
+                                &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                n_features, n_hidden, leaky,
+                            );
+                        probe_y.push(y);
+                        probe_fwd.push((ha_pre, ha, sa, max_a, y_rank, y_pool, alpha));
+                    }
+
+                    let n_p = probe_n as f64;
+                    let mu: f64 = probe_y.iter().sum::<f64>() / n_p;
+                    let var: f64 = probe_y
+                        .iter()
+                        .map(|y| (y - mu).powi(2))
+                        .sum::<f64>()
+                        / n_p;
+                    let sigma_obs = var.sqrt();
+                    let viol = sigma_thresh - sigma_obs;
+                    if viol > 0.0 && sigma_obs > 1e-9 {
+                        let loss = w_dr * viol * viol;
+                        total_loss += loss;
+                        n_steps += 1;
+
+                        // dL/dσ_obs = -2 · w · viol
+                        // dσ/dy_i = (y_i − μ) / (σ · N)
+                        // → dL/dy_i = -2 · w · viol · (y_i − μ) / (σ · N)
+                        let grad_scale = -2.0 * w_dr * viol / (sigma_obs * n_p);
+
+                        let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                        let mut g_rank_b_buf = 0.0f64;
+                        let mut g_red_w: [f64; 4] = [0.0; 4];
+                        let mut g_red_b: f64 = 0.0;
+                        let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                        let mut g_b_alpha: f64 = 0.0;
+
+                        for i in 0..probe_n {
+                            let pi = probe_idx[i];
+                            let xa = std_equiv_a[pi].as_slice();
+                            let y_i = probe_y[i];
+                            let (ha_pre, ha, sa, max_a, y_rank, y_pool, alpha) =
+                                (
+                                    &probe_fwd[i].0,
+                                    &probe_fwd[i].1,
+                                    &probe_fwd[i].2,
+                                    probe_fwd[i].3,
+                                    probe_fwd[i].4,
+                                    probe_fwd[i].5,
+                                    probe_fwd[i].6,
+                                );
+                            let dl_dy = grad_scale * (y_i - mu);
+
+                            psah::backprop_step_per_sample_alpha_head(
+                                xa, ha_pre, ha, sa, max_a,
+                                y_rank, y_pool, alpha, dl_dy,
+                                &rank_w, &reducer_w, &w_alpha,
+                                &mut adam.gw1, &mut adam.gb1,
+                                &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                &mut g_red_w, &mut g_red_b,
+                                &mut g_w_alpha_buf, &mut g_b_alpha,
+                                n_features, n_hidden, leaky,
+                            );
+                        }
+
+                        if hyperparams.l2_lambda > 0.0 {
+                            let l2 = hyperparams.l2_lambda;
+                            for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                *g += l2 * w;
+                            }
+                            for j in 0..n_hidden {
+                                g_rank_w_buf[j] += l2 * rank_w[j];
+                                g_w_alpha_buf[j] += l2 * w_alpha[j];
+                            }
+                            for kk in 0..4 {
+                                g_red_w[kk] += l2 * reducer_w[kk];
+                            }
+                        }
+
+                        for j in 0..n_hidden {
+                            adam.gw2[j] += g_rank_w_buf[j];
+                        }
+                        for kk in 0..4 {
+                            adam.gw2[n_hidden + kk] += g_red_w[kk];
+                        }
+                        for j in 0..n_hidden {
+                            adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                        }
+                        adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                        adam.gb2[0] += g_rank_b_buf;
+                        adam.gb2[1] += g_red_b;
+
+                        do_adam_step(
+                            &mut adam, &mut w1, &mut b1,
+                            &mut rank_w, &mut rank_b,
+                            &mut reducer_w, &mut reducer_b,
+                            &mut w_alpha, &mut b_alpha,
+                            lr, n_hidden,
+                        );
                     }
                 }
             }

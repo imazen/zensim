@@ -679,6 +679,50 @@ struct Args {
     /// performs an equivalence step (2026-05-19). Default `0.10`.
     #[arg(long, default_value_t = 0.10)]
     cross_codec_eq_step_p: f64,
+
+    /// EXP-CROSS-CODEC-V3 rank-preserve regularizer weight (2026-05-19).
+    /// When `> 0` AND the equiv parquet supplies `butter_a` / `butter_b`,
+    /// each equivalence step adds a RankNet-style sigmoid loss weighted
+    /// by `|butter_a − butter_b|` that pushes the network to keep
+    /// `sign(score_a − score_b)` aligned with `sign(butter_b − butter_a)`
+    /// (since LOWER butter = HIGHER quality and the bake's `mix_cv40_iw60`
+    /// target is HIGHER = HIGHER quality). Prevents collapse of equiv
+    /// outputs to a point mass when `cross_codec_eq_weight` is high.
+    /// Default `0.0` = no rank-preserve.
+    #[arg(long, default_value_t = 0.0)]
+    cross_codec_rank_preserve_weight: f64,
+
+    /// EXP-CROSS-CODEC-V3 dynamic-range floor regularizer weight
+    /// (2026-05-19). When `> 0`, every pair-step with probability
+    /// `--dynamic-range-step-p` triggers a q-sweep probe: sample
+    /// `--dynamic-range-probe-n` random rows from the equiv pool's A-side,
+    /// forward each through the per-sample-α head, compute σ across the
+    /// outputs, and penalize the network if σ < threshold:
+    /// `L = w · max(0, σ_threshold − σ_obs)²`. Directly addresses the
+    /// "collapse to constant" failure mode by structurally requiring
+    /// per-batch output spread. Default `0.0` = off. Requires equiv
+    /// pool data (A-side acts as the q-sweep substrate).
+    #[arg(long, default_value_t = 0.0)]
+    dynamic_range_floor_weight: f64,
+
+    /// EXP-CROSS-CODEC-V3 dynamic-range floor σ threshold (score units).
+    /// Probes whose σ_obs ≥ threshold contribute 0 penalty; below
+    /// threshold the penalty is quadratic. Default `15.0` targets a
+    /// ~45-50 score-unit p25-p75 spread.
+    #[arg(long, default_value_t = 15.0)]
+    dynamic_range_sigma_threshold: f64,
+
+    /// EXP-CROSS-CODEC-V3 dynamic-range floor step probability per
+    /// pair-step. Default `0.05` = 5% of pair-steps trigger a probe,
+    /// ~2500 probes per epoch at `--pairs-per-epoch 50000`.
+    #[arg(long, default_value_t = 0.05)]
+    dynamic_range_step_p: f64,
+
+    /// EXP-CROSS-CODEC-V3 dynamic-range floor probe sample size.
+    /// Default `40` = 8 refs × 5 q values conceptually. Affects the
+    /// σ estimator's variance.
+    #[arg(long, default_value_t = 40)]
+    dynamic_range_probe_n: usize,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1153,11 +1197,15 @@ pub(crate) fn load_csv(
 ///
 /// Truncates each fa_*/fb_* feature row to `max_features` (matches the
 /// trainer's `--max-features`). Returns `(features_a, features_b,
-/// row_weights)` as owned Vec<Vec<f64>> + Vec<f64>.
+/// row_weights, butter_diff)` as owned vectors. `butter_diff[i] =
+/// butter_a[i] − butter_b[i]` (LOWER butter = HIGHER quality so a
+/// positive Δb means A is quality-worse than B). `butter_diff` is
+/// always populated when butter_a/butter_b columns are present; empty
+/// otherwise (callers detect via `butter_diff.is_empty()`).
 fn load_equiv_parquet(
     path: &PathBuf,
     max_features: usize,
-) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>), String> {
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<f64>), String> {
     use arrow::array::{Array, Float32Array, Float64Array};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -1174,6 +1222,16 @@ fn load_equiv_parquet(
         .iter()
         .position(|f| f.name() == "row_weight")
         .ok_or_else(|| format!("{path:?}: missing row_weight column"))?;
+
+    // EXP-CROSS-CODEC-V3: locate butter_a / butter_b for the
+    // rank-preserve regularizer. Optional — schema versions without
+    // them just return an empty butter_diff vec.
+    let butter_a_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "butter_a");
+    let butter_b_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "butter_b");
 
     // Locate fa_0 and count consecutive fa_i.
     let fa0_idx = arrow_fields
@@ -1225,6 +1283,26 @@ fn load_equiv_parquet(
     let mut features_a: Vec<Vec<f64>> = Vec::new();
     let mut features_b: Vec<Vec<f64>> = Vec::new();
     let mut row_weights: Vec<f64> = Vec::new();
+    let mut butter_diff: Vec<f64> = Vec::new();
+    let butter_avail = butter_a_idx.is_some() && butter_b_idx.is_some();
+
+    // Inline helper: read a f32/f64 column into Vec<f64>.
+    fn read_f64_col(
+        col: &dyn arrow::array::Array,
+        n_rows: usize,
+    ) -> Result<Vec<f64>, String> {
+        match col.data_type() {
+            arrow::datatypes::DataType::Float64 => {
+                let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i)).collect())
+            }
+            arrow::datatypes::DataType::Float32 => {
+                let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            other => Err(format!("col dtype {other:?} unsupported")),
+        }
+    }
 
     for batch_res in reader {
         let batch =
@@ -1252,6 +1330,19 @@ fn load_equiv_parquet(
             }
         };
         row_weights.extend(rw_vec);
+
+        // EXP-CROSS-CODEC-V3: butter_a / butter_b → butter_diff.
+        if butter_avail {
+            let ba_col = batch.column(butter_a_idx.unwrap());
+            let bb_col = batch.column(butter_b_idx.unwrap());
+            let ba = read_f64_col(ba_col.as_ref(), n_rows)
+                .map_err(|e| format!("{path:?}: butter_a {e}"))?;
+            let bb = read_f64_col(bb_col.as_ref(), n_rows)
+                .map_err(|e| format!("{path:?}: butter_b {e}"))?;
+            for i in 0..n_rows {
+                butter_diff.push(ba[i] - bb[i]);
+            }
+        }
 
         // fa_0..fa_<n_features-1>
         let mut a_per_col: Vec<Vec<f64>> = Vec::with_capacity(n_features);
@@ -1312,7 +1403,7 @@ fn load_equiv_parquet(
         }
     }
 
-    Ok((features_a, features_b, row_weights))
+    Ok((features_a, features_b, row_weights, butter_diff))
 }
 
 fn parse_band_weights(s: &str) -> Result<[f64; 4], String> {
@@ -1647,6 +1738,11 @@ fn main() {
         anchor_step_p: args.anchor_step_p,
         cross_codec_eq_weight: args.cross_codec_eq_weight,
         cross_codec_eq_step_p: args.cross_codec_eq_step_p,
+        cross_codec_rank_preserve_weight: args.cross_codec_rank_preserve_weight,
+        dynamic_range_floor_weight: args.dynamic_range_floor_weight,
+        dynamic_range_sigma_threshold: args.dynamic_range_sigma_threshold,
+        dynamic_range_step_p: args.dynamic_range_step_p,
+        dynamic_range_probe_n: args.dynamic_range_probe_n,
     };
 
     println!(
@@ -1809,9 +1905,10 @@ fn main() {
     //         butter_a, butter_b, row_weight, fa_0..fa_<M-1>, fb_0..fb_<M-1>
     // We discard the bookkeeping columns and just collect the standardized
     // (features_a, features_b) pairs + row_weight.
-    let (equiv_a_storage, equiv_b_storage, equiv_row_weights): (
+    let (equiv_a_storage, equiv_b_storage, equiv_row_weights, equiv_butter_diff): (
         Vec<Vec<f64>>,
         Vec<Vec<f64>>,
+        Vec<f64>,
         Vec<f64>,
     ) = if let Some(equiv_path) = &args.cross_codec_eq_parquet {
         if args.cross_codec_eq_weight <= 0.0 {
@@ -1821,15 +1918,16 @@ fn main() {
             );
         }
         match load_equiv_parquet(equiv_path, n_features) {
-            Ok((a, b, w)) => {
+            Ok((a, b, w, bd)) => {
                 eprintln!(
-                    "equiv parquet: loaded {} pairs from {:?} (weight={}, step_p={})",
+                    "equiv parquet: loaded {} pairs from {:?} (weight={}, step_p={}, butter_diff={})",
                     a.len(),
                     equiv_path,
                     args.cross_codec_eq_weight,
                     args.cross_codec_eq_step_p,
+                    if bd.is_empty() { "absent".to_string() } else { format!("{}", bd.len()) },
                 );
-                (a, b, w)
+                (a, b, w, bd)
             }
             Err(e) => {
                 eprintln!("equiv parquet load failed: {e}");
@@ -1837,7 +1935,7 @@ fn main() {
             }
         }
     } else {
-        (Vec::new(), Vec::new(), Vec::new())
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new())
     };
     let equiv_a_refs: Vec<&[f64]> = equiv_a_storage.iter().map(|r| r.as_slice()).collect();
     let equiv_b_refs: Vec<&[f64]> = equiv_b_storage.iter().map(|r| r.as_slice()).collect();
@@ -1849,6 +1947,7 @@ fn main() {
             features_a: equiv_a_refs.as_slice(),
             features_b: equiv_b_refs.as_slice(),
             row_weights: equiv_row_weights.as_slice(),
+            butter_diff: equiv_butter_diff.as_slice(),
         })
     } else {
         None
