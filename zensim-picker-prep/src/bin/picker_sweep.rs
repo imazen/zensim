@@ -178,7 +178,14 @@ fn encode_jxl(src: &Source, q: u32) -> Result<Vec<u8>> {
     use zenjxl::JxlEncoderConfig;
     use zenpixels::{PixelDescriptor, PixelSlice};
 
-    let cfg = JxlEncoderConfig::new().with_generic_quality(q as f32);
+    // Per picker-data-prep spec: map q ∈ [5, 95] → distance ∈ (15.0 → 0.0]
+    // via distance = (95 − q) / 95 * 15.0. At q=95 distance ≈ 0 (near-lossless),
+    // q=5 distance ≈ 14.2 (heavy compression). jxl-encoder 0.3.1 panics
+    // (divide-by-zero in vardct/ac_context.rs:231) when distance is
+    // exactly 0.0, so floor at 0.01 to keep the lossy VarDCT path alive.
+    let raw_distance = (95.0_f32 - q as f32) / 95.0 * 15.0;
+    let distance = raw_distance.max(0.01);
+    let cfg = JxlEncoderConfig::new().with_distance(distance);
     let stride = src.width as usize * 3;
     let slice = PixelSlice::new(
         &src.pixels,
@@ -307,6 +314,11 @@ fn main() -> Result<()> {
             .build_global()
             .map_err(|e| anyhow!("rayon init: {e}"))?;
     }
+
+    // Silence the default panic printer — jxl-encoder 0.3.1 panics
+    // on legitimate content + we catch them per-cell. Without this
+    // the stderr storm makes the progress log unreadable.
+    std::panic::set_hook(Box::new(|_info| {}));
 
     let q_grid = parse_q_grid(&args.q_grid)?;
     eprintln!("picker_sweep");
@@ -474,18 +486,36 @@ fn encode_and_score(
     src: &Source,
     q: u32,
 ) -> CellResult {
-    let bytes = match encode(codec, src, q) {
-        Ok(b) => b,
-        Err(e) => {
+    // Catch panics in the codec encoder (jxl-encoder 0.3.1 panics on
+    // some content + low-distance combos with "attempt to divide by
+    // zero" in vardct/ac_context.rs:231) so a single bad cell doesn't
+    // sink the whole sweep.
+    let encode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        encode(codec, src, q)
+    }));
+    let bytes = match encode_result {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => {
             eprintln!("  WARN: encode fail {} q={}: {e}", src.basename, q);
+            return CellResult { score: None, encoded_bytes: None, dims: None };
+        }
+        Err(_panic) => {
+            eprintln!("  WARN: encode PANIC {} q={}", src.basename, q);
             return CellResult { score: None, encoded_bytes: None, dims: None };
         }
     };
     let n_enc = bytes.len();
-    let (dpx, dw, dh) = match decode(codec, &bytes) {
-        Ok(t) => t,
-        Err(e) => {
+    let decode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        decode(codec, &bytes)
+    }));
+    let (dpx, dw, dh) = match decode_result {
+        Ok(Ok(t)) => t,
+        Ok(Err(e)) => {
             eprintln!("  WARN: decode fail {} q={}: {e}", src.basename, q);
+            return CellResult { score: None, encoded_bytes: Some(n_enc), dims: None };
+        }
+        Err(_panic) => {
+            eprintln!("  WARN: decode PANIC {} q={}", src.basename, q);
             return CellResult { score: None, encoded_bytes: Some(n_enc), dims: None };
         }
     };

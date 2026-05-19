@@ -3746,6 +3746,7 @@ dependencies = [
  "rayon",
  "rgb",
  "serde_json",
+ "zenanalyze",
  "zenavif",
  "zencodec",
  "zenjpeg",

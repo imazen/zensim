@@ -21,6 +21,7 @@ zenpng = { path = "../../zenpng" }
 zencodec = "0.1.20"
 zenpixels = "0.2.10"
 zenpixels-convert = "0.2.10"
+zenanalyze = { path = "../../zenanalyze" }
 almost-enough = "0.4.3"
 enough = { version = "0.4.4", default-features = false, features = ["std"] }
 imgref = "1"
