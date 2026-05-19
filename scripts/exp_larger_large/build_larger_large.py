@@ -166,9 +166,22 @@ def main():
         print("ERROR: no joined output", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\nStep 3: Concat all joined chunks → {out_path}")
+    print(f"\nStep 3: Concat all joined chunks")
     full = pa.concat_tables(out_chunks, promote_options='default')
+    print(f"  pre-filter: {full.num_rows} rows × {len(full.schema.names)} cols")
+
+    # Filter out rows with NaN target (cvvdp_score is NULL for ~38% of new
+    # v15r_zenjpeg rows because the upstream cvvdp sweep didn't cover them).
+    # NaN in mix_cv40_iw60 = NaN gradient = total trainer failure.
+    target = np.array(full['mix_cv40_iw60'].to_pylist())
+    keep_mask = np.isfinite(target)
+    n_drop = int((~keep_mask).sum())
+    if n_drop > 0:
+        print(f"  filtering {n_drop} rows with NaN target (NULL cvvdp_score)")
+        full = full.filter(pa.array(keep_mask))
     print(f"  final: {full.num_rows} rows × {len(full.schema.names)} cols")
+
+    print(f"\nStep 4: Write → {out_path}")
     pq.write_table(full, str(out_path), compression='zstd', compression_level=15)
     size_mb = os.path.getsize(out_path) / 1e6
     print(f"\nDONE. wrote {out_path} ({size_mb:.1f} MB)")
