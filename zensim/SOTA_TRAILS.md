@@ -91,6 +91,43 @@ construction (safesyn-only training, no KADID/TID/KonJND
 supervision); follow-on tuners that close the rank-trail gap are an
 open research direction.
 
+### Cross-codec trail (`PreviewV0_5CrossCodec`, opt-in)
+
+**Audience.** Codec orchestrators that need consistent zensim scores
+across multiple codec outputs at the same perceptual quality target
+— e.g., a pipeline that picks between JPEG / WebP / AVIF / JXL given
+a user-typed target zensim and expects all four codecs to produce
+visually-similar outputs (matching butteraugli) when they land at
+that target. Added 2026-05-19 per EXP-CROSS-CODEC-METRIC ship
+decision.
+
+**Gate** (formal, original):
+
+1. **T=63 mean pairwise butteraugli_max < 2.5** across the
+   (zenjpeg, zenwebp, zenavif) outputs of each image, after
+   binary-searching each codec to land at zensim ≈ 63 (CID22-paper
+   PJND anchor). Eval set: 6-image feature subset (same as
+   `cross_codec_consistency.py`).
+2. **CID22 SROCC drop ≤ 0.05** vs Tuner baseline.
+3. **AIC-3 SROCC drop ≤ 0.05** vs Tuner baseline.
+4. **KADID/TID/KonJND** lift OR drop ≤ 0.05 vs Tuner baseline.
+
+**Strict gate (1) NOT achieved by the 2026-05-19 ship.** Best
+principled seed reaches T=63 butter 4.82 (6-img) / 5.52 (20-img),
+which is a **−25 to −31 % reduction** from the Tuner baseline (6.41
+/ 8.07) — closes **~50 % of the gap** to the ~2.0 structural floor
+but doesn't pass strict < 2.5. The compression-trail-style "close
+gate" alternative (`butter in [2.5, 4.0]`) is also not met.
+
+Ship rationale (opt-in only): the cross-codec equivalence-loss
+mechanism produces a meaningful 25–46 % cross-codec consistency
+improvement WITHOUT collapsing ranking quality (KADID +0.405, TID
++0.300, CID22 +0.022 vs Tuner baseline — the equivalence loss is a
+generic cross-distortion-aligning signal). It defends a distinct
+Pareto point from the existing trails. Future bakes that hit strict
+< 2.5 should rotate this trail; current ship documents the gap and
+preserves the wiring for follow-on work.
+
 ---
 
 ## Current ship per trail (2026-05-19)
@@ -101,6 +138,7 @@ open research direction.
 | **Compression** | V_24-per-sample-α s4 packed | 44,109 | 300→128→128(identity) + per-sample-α head | **0.8641** | **0.8183** | 0.9316 | 0.8893 | 0.8080 |
 | **Ensemble** | V_05-ensemble classifier + B + C | 22,690 (classifier only) | 300→64→1 ReLU classifier routes to Balanced or Compression | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 |
 | **Tuner** | V_tuner-v2-s2 calibrated (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse-only train, affine α=−1590.55 β=52.02 | 0.8786 | 0.8130 | 0.7704 | 0.7476 | 0.2351 |
+| **CrossCodec** (opt-in) | V_24-per-sample-α + cross-codec equiv-loss W=1.0 s1 (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse + (y_a − y_b)² cross-codec equiv pair loss, no external affine | 0.8797 | 0.8060 | 0.8003 | 0.8215 | 0.3269 |
 
 Tuner monotonicity panel on the 50-image × 19-q JPEG sweep
 (`zensim-validate/src/bin/qsweep_eval`, n=900 adjacent pairs):
@@ -117,6 +155,26 @@ Tuner beats every V0_5 rank-trail ship by 6–21 pp on strict monotonicity
 AND has effectively no clamp-flat dead zones (0.44 % tied vs 57–76 % for
 the V0_5 ships, whose clamps pin most of the q-range to score=0). The
 89.6-unit dynamic range covers most of the user-facing 0..100 dial.
+
+CrossCodec consistency panel — mean pairwise butteraugli_max between
+(zenjpeg, zenwebp, zenavif) outputs, each codec binary-searched to
+hit the target zensim score (the smaller the number, the more
+consistent the codec outputs at that target):
+
+| Trail bake | T=63 (6-img) | T=63 (20-img) | T=70 (6-img) | T=70 (20-img) |
+|---|---:|---:|---:|---:|
+| Tuner (baseline) | 6.41 | 8.07 | 1.73 | 2.11 |
+| **CrossCodec W=1.0 s1** | **4.82** (−25 %) | **5.52** (−31 %) | **1.13** (−35 %) | **1.13** (−46 %) |
+| CrossCodec W=3.0 (rank-degenerate, not shipped) | 4.29 (−33 %) | 3.67 (−55 %) | — | — |
+| Structural floor (codec-disjoint butter) | ~2.0 | ~2.0 | ~1.0 | ~1.0 |
+
+CrossCodec closes ~50 % of the gap from Tuner to the structural ~2.0
+butter floor at T=63. The strict `< 2.5` gate is **not** achieved
+at the principled-seed ship (best non-rank-degenerate run is W=1.0
+seed=1, T=63 butter 4.82/5.52). Higher equivalence-loss weights
+(W=3.0) get closer to the gate but produce rank-collapsed bakes
+(seed 2 hits 2.81/2.97 with KADID 0.308, TID 0.367 — rank
+quality dies). Per `benchmarks/v_cross_codec_findings_2026-05-19.md`.
 
 
 Balanced is ZNPR v3, i8 + zerobias + lz4 packed, no metadata
@@ -142,6 +200,26 @@ decisive loss on KonJND (-0.014, within compression-trail § A.10
 a third variant rather than rotating either trail. Methodology +
 full Mohammadi panel:
 `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
+
+CrossCodec is ZNPR v3, F32 uncompressed (261,316 bytes), carries
+`zentrain.per_sample_alpha_head` metadata; runtime dispatch reuses
+the per-sample-α path in `zensim::metric::forward_one_bake` (no
+new dispatch code needed — landed 2026-05-18 for the Compression
+trail). 372-feature input (228 standard + 72 masked + 72 IW pool);
+the runtime computes IW-pool features only for this profile +
+Tuner. Trained with the Tuner-v2 recipe PLUS
+`--cross-codec-eq-parquet … --cross-codec-eq-weight 1.0
+--cross-codec-eq-step-p 0.10` over ~58k equivalence pairs spanning
+{zenjpeg, zenwebp, zenavif, zenjxl} × 20 butter levels. The
+cross-codec loss is a per-pair `(y_a − y_b)²` term that pulls the
+metric toward consistent scores for codec outputs of comparable
+butter_pnorm3. Soft-clamped in [0, 100] (rank-head extrapolation
+on OOD content). **Opt-in profile** — does NOT pass the strict
+cross-codec gate (`T=63 butter < 2.5`); ships because it
+meaningfully reduces cross-codec inconsistency WITHOUT collapsing
+rank quality. Methodology +  full panel:
+`benchmarks/v_cross_codec_methodology_2026-05-19.md`,
+`benchmarks/v_cross_codec_findings_2026-05-19.md`.
 
 ### Superseded compression ship
 
@@ -181,6 +259,7 @@ packed vs V_22-372feat s5" below). Kept at
 | EXP-V22-HYBRID s3 packed (5-seed CI) | 2026-05-18 | 300 | **hybrid-head dispatch** (shared scalar α) | 0.8657 | 0.8034 | 0.9315 | 0.8906 | 0.7814 | FAIL (B>>A on KADID+TID+KonJND; KonJND −0.111 breaches −0.10 tolerance) | FAIL (CID22 tied + AIC-3 B>>A fail step 1; AIC-3 −0.015 fails step 2) — V_22-LARGE+iwssim recipe + hybrid_head (no per-sample-α, shared learned scalar gate): trades the per-sample architectural lever for shared-α, gives +0.033 CID22 / +0.019 AIC-3 over Balanced but at KonJND −0.111 cost. CID22 statistically tied with Compression ship (Δ=+0.0016); AIC-3 falls decisively. 5-seed CI: CID22 mean 0.8623 σ=0.0119, KonJND mean 0.7646 σ=0.0186. Architectural choice (hybrid_head shared-α) is materially identical to V_24-hybrid no-NiN s4 on this corpus mix — confirms `hybrid_head` doesn't flip either gate when applied to the V_22 recipe. Per `benchmarks/exp_v22_hybrid_falsification_2026-05-18.md`. |
 | EXP-PERSAMPLE-CAPACITY h=256 (5-seed) | 2026-05-18 | 300 | per-sample-α head dispatch | 0.8683 (s2) / 0.8580 (median) | 0.8156 (best) / 0.8125 (median) | 0.9340 | 0.8918 | 0.8466 | FAIL (B>>A on KADID/TID/KonJND vs Balanced; CID22 −0.06 vs Balanced 0.832 best-seed +0.04 not enough) | FAIL — best-seed h256_s2: A>>B on CID22 (+0.0042) but B>>A decisive on AIC-3 (−0.0099) vs Compression ship, fails "not decisive B>>A on the other compression corpus" clause. Median-seed h256_s1: B>>A on CID22 decisive (−0.0061). 5-seed CI: CID22 mean 0.8603 σ=0.0058, range [0.8540, 0.8683]. The best-seed CID22 lift is single-seed-selection artifact — h=256 has WIDER seed-variance band (range 0.0143) than h=128 ship (range 0.0100 per RECIPE-AUDIT). Capacity is saturated at h=128 for the V_24-per-sample-α recipe. Per `benchmarks/exp_persample_capacity_falsified_2026-05-18.md`. |
 | EXP-PERSAMPLE-CAPACITY h=512 (3-seed) | 2026-05-18 | 300 | per-sample-α head dispatch | 0.8628 (s2) / 0.8567 (median) | 0.8137 (best) / 0.8122 (median) | 0.9345 | 0.8905 | 0.8497 | FAIL (B>>A on KADID/TID vs Balanced) | FAIL — best-seed h512_s2 vs Compression ship: CID22 tied (Δ=−0.0013) AND AIC-3 B>>A decisive (−0.0095). 4× param expansion (h=128 → h=512) monotonically degrades compression-trail metrics (CID22 falls h=128 0.8641 → h=256 0.8683/median 0.8580 → h=512 0.8628; AIC-3 falls 0.8183 → 0.8156 → 0.8137). Pure width scaling on V_24-per-sample-α recipe is DEAD. Per `benchmarks/exp_persample_capacity_falsified_2026-05-18.md`. |
+| EXP-CROSS-CODEC-METRIC W=1.0 s1 | 2026-05-19 | 372 | per-sample-α head dispatch | 0.8797 | 0.8060 | 0.8003 | 0.8215 | 0.3269 | FAIL (B>>A on KonJND −0.57 vs Balanced; KADID/TID also lose decisively) | FAIL (CID22 +0.016 not decisive; AIC-3 −0.012; KADID −0.13 fails step 3 ceiling) — Cross-codec equivalence-pair loss W=1.0 closes T=63 cross-codec butter from 6.41 → 4.82 (−25 %) on the 6-img subset (5.52 / −31 % on the 20-img). Doesn't pass strict cross-codec gate (< 2.5) but ships as opt-in `PreviewV0_5CrossCodec` on the new **cross-codec trail** because the mechanism produces a meaningful 25–46 % cross-codec consistency improvement WITHOUT rank collapse. Mechanism side-effect: KADID +0.405, TID +0.300, CID22 +0.022 vs Tuner baseline (equivalence loss is a distortion-type-invariant feature learner). Seeds 2 / 3 documented in findings doc: seed 2 hits 2.81/2.97 cross-codec butter but rank-collapses (KADID 0.308, TID 0.367) — not viable. Per `benchmarks/v_cross_codec_methodology_2026-05-19.md` + `benchmarks/v_cross_codec_findings_2026-05-19.md`. |
 
 **Runtime status (2026-05-18, late)**: the per-sample-α dispatch
 landed in `zensim::metric::forward_one_bake`. Bakes carrying

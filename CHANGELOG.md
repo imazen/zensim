@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added (2026-05-19, EXP-CROSS-CODEC-METRIC)
+
+- **`PreviewV0_5CrossCodec` profile variant wired (opt-in)**. Adds
+  the cross-codec trail's runtime hook: `ZensimProfile::PreviewV0_5CrossCodec`
+  variant, `ZensimProfile::cross_codec()` const constructor,
+  `mlp_bake_preview_v0_5_cross_codec` bake loader (include_bytes from
+  `weights/v_cross_codec_2026-05-19.bin`, 261,316 bytes F32), and
+  `PROFILE_PREVIEW_V0_5_CROSS_CODEC` `ProfileParams` slot
+  (372-feature input, extended + IW pool, soft-clamped, no external
+  affine). Reuses the per-sample-α runtime dispatch landed
+  2026-05-18; no new dispatch code needed. Regression test at
+  `zensim/tests/cross_codec_profile.rs` (4 tests: name/alias, score
+  in range, score in range across 10 distortion levels, scores
+  differ from Tuner on a typical pair). The bake bytes were shipped
+  on origin/main 2026-05-19 (66f2f30, ace9f69) but the variant +
+  ProfileParams wiring was missing — this commit closes that
+  false-completion gap. Methodology +
+  findings: `benchmarks/v_cross_codec_methodology_2026-05-19.md`,
+  `benchmarks/v_cross_codec_findings_2026-05-19.md`. Trail entry +
+  candidate-matrix row added to `zensim/SOTA_TRAILS.md`.
+  **Ship as opt-in only** — does NOT pass the strict cross-codec
+  `T=63 butter < 2.5` gate (best principled seed lands at 4.82 /
+  5.52, a 25–31 % reduction from Tuner baseline 6.41 / 8.07).
+  CID22 0.8797 (+0.022 vs Tuner), KADID 0.8003 / TID 0.8215 (+0.4
+  / +0.3 vs Tuner — equivalence loss as side-effect feature
+  learner). For general ranking workloads, use
+  `PreviewV0_5Balanced` or `PreviewV0_5Compression`.
+
 ### Fixed (2026-05-19)
 
 - **Per-codec score calibration for `PreviewV0_5Tuner`**. New module

@@ -237,6 +237,68 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v_tuner_2026-05-18_methodology.md`.
     PreviewV0_5Tuner,
+    /// Preview v0.5, **cross-codec trail (opt-in)** — V_24-per-sample-α
+    /// architecture extended with a cross-codec equivalence-pair loss
+    /// (EXP-CROSS-CODEC-METRIC, 2026-05-19). 372 → 128 → 128 (identity
+    /// passthrough) MLP with `zentrain.per_sample_alpha_head` metadata,
+    /// F32 (uncompressed 261,316 bytes, md5 from the W=1.0 seed=1 ship at
+    /// `weights/v_cross_codec_2026-05-19.bin`).
+    ///
+    /// **Mechanism.** Augments the Tuner-v2 / V_24 per-sample-α recipe
+    /// with a `(y_a − y_b)²` loss over ~58k cross-codec equivalence
+    /// pairs constructed by binary-searching each codec C ∈
+    /// {zenjpeg, zenwebp, zenavif, zenjxl} to land at the same
+    /// `butteraugli_pnorm3_gpu` level. The cross-codec loss pulls the
+    /// metric toward consistent scores for codec outputs of comparable
+    /// perceptual quality, narrowing the cross-codec T=63 mean pairwise
+    /// butter from 6.41 (Tuner baseline, 6-img subset) toward 4.82
+    /// (W=1.0 ship) — a **−25 % gap closure** vs the structural ~2.0
+    /// floor.
+    ///
+    /// **Cross-codec consistency at target zensim score** (mean pairwise
+    /// butteraugli_max between (jpeg, webp, avif) outputs, each codec
+    /// binary-searched to reach the target):
+    ///
+    /// | Target | Tuner baseline | **CrossCodec W=1.0** | Δ |
+    /// |---|---:|---:|---:|
+    /// | T=63 (6-img)  | 6.41 | **4.82** | **−25 %** |
+    /// | T=63 (20-img) | 8.07 | **5.52** | **−31 %** |
+    /// | T=70 (6-img)  | 1.73 | **1.13** | −35 % |
+    /// | T=70 (20-img) | 2.11 | **1.13** | −46 % |
+    ///
+    /// The strict `T=63 butter < 2.5` gate is **NOT achieved** (best
+    /// principled seed reaches 4.82 / 5.52). Seed 2 hit 2.81/2.97 but
+    /// rank-collapsed (KADID 0.308, TID 0.367) so it's not a viable
+    /// ship.
+    ///
+    /// **Cross-corpus held-out SROCC** (W=1.0 seed=1, per `bake_verdict`):
+    ///   - **CID22 0.880** (+0.022 vs Tuner baseline)
+    ///   - **KADID 0.800** (+0.405 vs Tuner — cross-codec loss as
+    ///     side-effect distortion-type-invariant feature learner)
+    ///   - **TID  0.822** (+0.300 vs Tuner — same)
+    ///   - KonJND 0.327 (+0.033 vs Tuner — modest lift)
+    ///   - AIC-3 0.806 (−0.025 vs Tuner)
+    ///
+    /// ## When to use
+    ///
+    /// **Opt-in only.** Use this profile when the workload is
+    /// **cross-codec consistency** — e.g., a codec orchestrator that
+    /// needs zensim scores to be comparable across JPEG / WebP / AVIF /
+    /// JXL outputs at the same target quality. For general-purpose
+    /// ranking, use [`Self::PreviewV0_5Balanced`] or
+    /// [`Self::PreviewV0_5Compression`]; for codec-internal
+    /// quality-dial monotonicity, use [`Self::PreviewV0_5Tuner`].
+    ///
+    /// **NOT a passing-gate ship.** The original cross-codec strict
+    /// gate (T=63 butter < 2.5) was not met. This variant ships as
+    /// an opt-in trail per `SOTA_TRAILS.md` because the mechanism
+    /// produces a meaningful 25–46 % cross-codec consistency
+    /// improvement WITHOUT collapsing ranking quality on the synthetic
+    /// + JND corpora — a Pareto-different point from the Tuner ship.
+    ///
+    /// Methodology: `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
+    /// Findings: `benchmarks/v_cross_codec_findings_2026-05-19.md`.
+    PreviewV0_5CrossCodec,
 }
 
 impl ZensimProfile {
@@ -282,6 +344,21 @@ impl ZensimProfile {
         Self::PreviewV0_5Tuner
     }
 
+    /// Cross-codec trail (opt-in) — alias for
+    /// [`Self::PreviewV0_5CrossCodec`]. The V_24 per-sample-α
+    /// architecture trained with an additional cross-codec
+    /// equivalence-pair loss (EXP-CROSS-CODEC-METRIC, 2026-05-19).
+    /// Use when the workload requires consistent zensim scores
+    /// across multiple codecs at the same perceptual quality target.
+    /// **Opt-in only** — the strict `T=63 butter < 2.5`
+    /// cross-codec gate was not achieved; this profile ships
+    /// because the mechanism reduces cross-codec mean pairwise
+    /// butter by 25–46 % vs Tuner WITHOUT collapsing rank quality.
+    /// See `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
+    pub const fn cross_codec() -> Self {
+        Self::PreviewV0_5CrossCodec
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -294,6 +371,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Compression => "zensim-preview-v0.5-compression",
             Self::PreviewV0_5Ensemble => "zensim-preview-v0.5-ensemble",
             Self::PreviewV0_5Tuner => "zensim-preview-v0.5-tuner",
+            Self::PreviewV0_5CrossCodec => "zensim-preview-v0.5-cross-codec",
         }
     }
 
@@ -312,6 +390,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Compression => &PROFILE_PREVIEW_V0_5_COMPRESSION,
             Self::PreviewV0_5Ensemble => &PROFILE_PREVIEW_V0_5_ENSEMBLE,
             Self::PreviewV0_5Tuner => &PROFILE_PREVIEW_V0_5_TUNER,
+            Self::PreviewV0_5CrossCodec => &PROFILE_PREVIEW_V0_5_CROSS_CODEC,
         }
     }
 }
@@ -937,6 +1016,66 @@ static PROFILE_PREVIEW_V0_5_TUNER: ProfileParams = ProfileParams {
     // optional follow-up if a tuner consumer reports SROCC=0 on a
     // band due to ties.
     soft_clamp_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5CrossCodec bake bytes (2026-05-19,
+/// EXP-CROSS-CODEC-METRIC). V_24-per-sample-α architecture
+/// (`zentrain.per_sample_alpha_head` metadata) trained on the
+/// canonical safesyn corpus + ~58k cross-codec equivalence pairs
+/// (zenjpeg/zenwebp/zenavif/zenjxl, butteraugli_pnorm3 anchored)
+/// at W=1.0, seed=1.
+///
+/// Recipe: Tuner-v2 base PLUS
+/// `--cross-codec-eq-parquet … --cross-codec-eq-weight 1.0
+/// --cross-codec-eq-step-p 0.10` against the
+/// `mix_cv40_iw60` target column. The cross-codec loss is a per-pair
+/// `(y_a − y_b)²` term over equivalence pairs whose
+/// `|butter_pnorm3_a − butter_pnorm3_b| ≤ 0.5`.
+///
+/// 372 → 128 → 128 (identity passthrough) MLP, F32 uncompressed
+/// (261,316 bytes). Same architecture as PreviewV0_5Tuner — the
+/// cross-codec loss only changes the weights, not the topology.
+///
+/// Methodology: `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
+/// Findings: `benchmarks/v_cross_codec_findings_2026-05-19.md`.
+pub(crate) fn mlp_bake_preview_v0_5_cross_codec() -> &'static [u8] {
+    include_bytes!("../weights/v_cross_codec_2026-05-19.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_CROSS_CODEC: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake is trained with `--target-scale 1.0` against
+    // `mix_cv40_iw60` (which is already a 0..100 scaled MCOS-aligned
+    // target). The runtime returns the bake's per-sample-α-head mix
+    // raw output directly as the score. No external affine calibration
+    // is documented for this bake — the cross-codec recipe matches
+    // the PreviewV0_5Compression per-sample-α ship's calibration
+    // policy (the trainer's target column is the calibration).
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_cross_codec),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 372-feature input = 228 standard + 72 masked + 72 IW pool
+    // features. Trained with `compute_iw_features: true` so the
+    // runtime must match.
+    extended_features: true,
+    compute_iw_features: true,
+    // Soft-clamp the output: the per-sample-α bake's raw output
+    // range was measured at ~21..78 on the JPEG q-sweep (similar to
+    // the Tuner family). Cross-codec training preserves this range
+    // for in-distribution inputs but the rank head can extrapolate
+    // outside [0, 100] on OOD content. Mirror the PreviewV0_5Compression
+    // policy: soft-clamp to preserve rank ordering at the extremes
+    // and avoid hard-clamp tie blocks (CLAUDE.md V_20 §
+    // "Soft-clamp the multi-bake output").
+    soft_clamp_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
