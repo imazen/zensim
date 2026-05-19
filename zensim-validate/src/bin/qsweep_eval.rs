@@ -96,11 +96,34 @@ fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
     Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
 }
 
+/// EXP-CROSS-CODEC-V4 (2026-05-19): `zentrain.tanh_output_head` metadata
+/// extractor. When present in the bake, the runtime wraps the final
+/// score as `100·σ(y_pre/scale)`, matching `zensim::metric::apply_tanh_output_pin`.
+fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
+    let md = model.metadata();
+    let entry = md.get("zentrain.tanh_output_head")?;
+    if entry.value.len() != 4 {
+        return None;
+    }
+    let scale = f32::from_le_bytes([
+        entry.value[0],
+        entry.value[1],
+        entry.value[2],
+        entry.value[3],
+    ]) as f64;
+    if scale.is_finite() && scale > 0.0 {
+        Some(scale)
+    } else {
+        None
+    }
+}
+
 fn score_row(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,
     per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
     hybrid_head: Option<&HybridHeadDispatch>,
+    tanh_pin_scale: Option<f64>,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
@@ -117,7 +140,7 @@ fn score_row(
     } else {
         predictor.predict(f32_features)
     };
-    match result {
+    let y_pre = match result {
         Ok(out) => {
             if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
                 per_sample_alpha_head
@@ -204,7 +227,17 @@ fn score_row(
             }
         }
         Err(_) => f64::NAN,
+    };
+    // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned [0, 100] output
+    // wrap. Bit-exact with `zensim::metric::apply_tanh_output_pin`.
+    if let Some(scale) = tanh_pin_scale {
+        if !y_pre.is_nan() {
+            let xc = (y_pre / scale).clamp(-30.0, 30.0);
+            let s = 1.0 / (1.0 + (-xc).exp());
+            return 100.0 * s;
+        }
     }
+    y_pre
 }
 
 /// Per-bake spec: (name, path, post_mode). `post_mode` is one of:
@@ -367,10 +400,12 @@ fn evaluate_bake(
     let has_transforms = model.has_nontrivial_feature_transforms();
     let per_sample_alpha = extract_per_sample_alpha_head(&model);
     let hybrid = extract_hybrid_head(&model);
+    let tanh_pin_scale = extract_tanh_output_head_scale(&model);
     eprintln!(
-        "{name}: n_inputs={n_inputs} transforms={has_transforms} per-α={} hybrid={}",
+        "{name}: n_inputs={n_inputs} transforms={has_transforms} per-α={} hybrid={} tanh-pin={}",
         if per_sample_alpha.is_some() { "yes" } else { "no" },
-        if hybrid.is_some() { "yes" } else { "no" }
+        if hybrid.is_some() { "yes" } else { "no" },
+        if let Some(s) = tanh_pin_scale { format!("scale={s:.3}") } else { "no".to_string() }
     );
 
     let mut predictor = Predictor::new(&model);
@@ -383,6 +418,7 @@ fn evaluate_bake(
                 has_transforms,
                 per_sample_alpha.as_ref(),
                 hybrid.as_ref(),
+                tanh_pin_scale,
                 &mut buf,
                 row,
             );

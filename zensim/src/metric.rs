@@ -1720,6 +1720,38 @@ pub(crate) fn apply_mlp_scoring(
 const PER_SAMPLE_ALPHA_HEAD_KEY: &str = "zentrain.per_sample_alpha_head";
 const PER_SAMPLE_ALPHA_POOL_STD_FLOOR: f64 = 0.0026;
 
+/// EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned output head metadata
+/// key. Payload is `[scale: f32 LE]` (4 bytes). When present, the
+/// runtime wraps the per-sample-α head's raw output as
+/// `y_score = 100 · σ(y_pre / scale)` — no post-hoc affine needed,
+/// output is natively pinned to [0, 100].
+const TANH_OUTPUT_HEAD_KEY: &str = "zentrain.tanh_output_head";
+
+/// Parse the `zentrain.tanh_output_head` payload — a single f32 LE
+/// (4 bytes) encoding the sigmoid pin scale. Returns `None` if the
+/// payload length is wrong or the scale is non-positive / non-finite.
+fn parse_tanh_output_head_scale(payload: &[u8]) -> Option<f64> {
+    if payload.len() != 4 {
+        return None;
+    }
+    let scale = f32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as f64;
+    if scale.is_finite() && scale > 0.0 {
+        Some(scale)
+    } else {
+        None
+    }
+}
+
+/// Apply the tanh-pinned [0, 100] sigmoid wrap: `y_score = 100 · σ(y_pre / scale)`.
+/// Matches `zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh`
+/// at training time and bit-exact with the train-time pin (single-precision sigmoid
+/// pin via clamp [−30, 30] in y_pre/scale, sigmoid in f64).
+fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
+    let xc = (y_pre / scale).clamp(-30.0, 30.0);
+    let s = 1.0 / (1.0 + (-xc).exp());
+    100.0 * s
+}
+
 /// Parsed per-sample α head metadata payload.
 struct PerSampleAlphaMeta {
     w_alpha: Vec<f32>,
@@ -1992,6 +2024,15 @@ fn forward_one_bake(
             .get(HYBRID_HEAD_KEY)
             .and_then(|entry| parse_hybrid_head_meta(entry.value, model.n_outputs()))
     };
+    // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned [0, 100] output
+    // head. Applies AFTER per-sample-α / hybrid-head mixing. Only
+    // active when the bake carries `zentrain.tanh_output_head` metadata.
+    let tanh_pin_scale: Option<f64> = {
+        let metadata = model.metadata();
+        metadata
+            .get(TANH_OUTPUT_HEAD_KEY)
+            .and_then(|entry| parse_tanh_output_head_scale(entry.value))
+    };
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
@@ -2000,7 +2041,7 @@ fn forward_one_bake(
         } else {
             p.predict(x).map_err(|_| ZensimError::InvalidDataLength)?
         };
-        if let Some(meta) = &per_sample_alpha {
+        let y_pre = if let Some(meta) = &per_sample_alpha {
             // `out` is the hidden vector h (n_hidden floats). Apply
             // the per-sample-α runtime formula.
             if out.len() != meta.rank_w.len() {
@@ -2008,17 +2049,22 @@ fn forward_one_bake(
                 // and bake's n_outputs — bake is malformed.
                 return Err(ZensimError::InvalidDataLength);
             }
-            Ok(apply_per_sample_alpha_runtime(out, meta))
+            apply_per_sample_alpha_runtime(out, meta)
         } else if let Some(meta) = &hybrid_head {
             // `out` is the hidden vector h. Apply the scalar-α
             // hybrid runtime formula.
             if out.len() != meta.rank_w.len() {
                 return Err(ZensimError::InvalidDataLength);
             }
-            Ok(apply_hybrid_head_runtime(out, meta))
+            apply_hybrid_head_runtime(out, meta)
         } else {
-            Ok(out[0] as f64)
-        }
+            out[0] as f64
+        };
+        Ok(if let Some(scale) = tanh_pin_scale {
+            apply_tanh_output_pin(y_pre, scale)
+        } else {
+            y_pre
+        })
     };
     if n_inputs == features.len() {
         let f32_features: Vec<f32> = features.iter().map(|&v| v as f32).collect();

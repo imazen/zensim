@@ -723,6 +723,21 @@ struct Args {
     /// σ estimator's variance.
     #[arg(long, default_value_t = 40)]
     dynamic_range_probe_n: usize,
+
+    /// EXP-CROSS-CODEC-V4 tanh-pinned [0, 100] output head scale
+    /// (2026-05-19). When `> 0`, wraps the per-sample-α head's raw
+    /// output `y_pre = α·y_rank + (1−α)·y_pool` in a sigmoid pin:
+    ///
+    /// `y_score = 100 · σ(y_pre / scale)`
+    ///
+    /// Default `0.0` = legacy linear output (post-hoc affine needed
+    /// to reach [0, 100]). Recommended `10.0` so active linear region
+    /// `y_pre ∈ [−30, 30]` maps to `[5, 95]` score units. The bake
+    /// receives a `zentrain.tanh_output_head` metadata entry; the
+    /// zensim runtime applies the matching sigmoid pin at inference.
+    /// Only wired on `--per-sample-alpha-head`. Requires `--minibatch-size 1`.
+    #[arg(long, default_value_t = 0.0)]
+    tanh_output_head_scale: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1743,6 +1758,7 @@ fn main() {
         dynamic_range_sigma_threshold: args.dynamic_range_sigma_threshold,
         dynamic_range_step_p: args.dynamic_range_step_p,
         dynamic_range_probe_n: args.dynamic_range_probe_n,
+        tanh_output_head_scale: args.tanh_output_head_scale,
     };
 
     println!(

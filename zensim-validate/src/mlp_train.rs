@@ -575,6 +575,34 @@ pub struct MlpHyperparams {
     /// the σ estimator's variance — too few rows and σ becomes
     /// noisy; too many and probe cost dominates per-step time.
     pub dynamic_range_probe_n: usize,
+
+    /// EXP-CROSS-CODEC-V4 tanh-pinned [0, 100] output head scale
+    /// (2026-05-19). When `> 0`, wraps the per-sample-α head's raw
+    /// output `y_pre = α·y_rank + (1−α)·y_pool` in a sigmoid pin:
+    ///
+    /// `y_score = 100 · σ(y_pre / scale)`
+    ///
+    /// where `scale` is this value (recommended `10.0` so the active
+    /// linear region spans `y_pre ∈ [−30, 30]` mapping to roughly
+    /// `[5, 95]` score units, with saturation past that).
+    ///
+    /// Backprop: `dL/dy_pre = dL/dy_score · (100/scale) · σ' = (100/scale)
+    /// · σ(y_pre/scale) · (1 − σ(y_pre/scale))`. The chain factor (100 ·
+    /// σ' / scale) is multiplied into every per-pair upstream gradient
+    /// computed for the per-sample-α head (RankNet, MSE, monotonicity,
+    /// anchor, cross-codec-eq, rank-preserve, range-floor probes).
+    ///
+    /// Bake-side: a `zentrain.tanh_output_head` metadata entry is
+    /// emitted with payload `[scale: f32]` (`u32 LE`); the runtime
+    /// recognizes the key and applies the matching sigmoid pin.
+    ///
+    /// Default `0.0` = off (legacy linear output, requires affine
+    /// post-hoc calibration to reach [0, 100]). Only wired on the
+    /// per-sample-α head. V3 falsification documented this as the
+    /// dominant mono-violation cause (post-affine β amplifies per-pair
+    /// jitter); pinning the output at training time eliminates the
+    /// β-amplification path entirely.
+    pub tanh_output_head_scale: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -621,6 +649,7 @@ impl Default for MlpHyperparams {
             dynamic_range_sigma_threshold: 15.0,
             dynamic_range_step_p: 0.05,
             dynamic_range_probe_n: 40,
+            tanh_output_head_scale: 0.0,
         }
     }
 }
@@ -4946,6 +4975,26 @@ fn train_mlp_per_sample_alpha_head(
         );
     }
 
+    // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-output-head sanity gates.
+    if hyperparams.tanh_output_head_scale > 0.0 {
+        assert!(
+            hyperparams.per_sample_alpha_head,
+            "--tanh-output-head-scale > 0 is only wired on the \
+             per_sample_alpha_head path (set --per-sample-alpha-head)."
+        );
+        assert!(
+            !nin_on,
+            "per_sample_alpha_head + NiN: --tanh-output-head-scale is not yet \
+             composed with NiN. Disable NiN (--norm-in-norm-weight 0) or set \
+             --tanh-output-head-scale 0."
+        );
+        assert_eq!(
+            hyperparams.minibatch_size, 1,
+            "--tanh-output-head-scale > 0 requires --minibatch-size 1; got {}",
+            hyperparams.minibatch_size
+        );
+    }
+
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(train_total > 0.0, "no training groups");
 
@@ -5240,6 +5289,44 @@ fn train_mlp_per_sample_alpha_head(
         log,
     );
 
+    // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned output head.
+    // When `tanh_output_head_scale > 0`, every raw `y_pre = α·y_rank +
+    // (1−α)·y_pool` from the per-sample-α forward is wrapped as
+    // `y_score = 100·σ(y_pre/scale)`, and every upstream gradient `dl_dy`
+    // (before being passed to `backprop_step_per_sample_alpha_head`)
+    // is multiplied by `(100/scale)·σ·(1−σ)`. This is the chain-rule
+    // pin: train losses see score-shaped outputs in [0, 100], so
+    // anchor MSE, monotonicity, range-floor, and rank-preserve losses
+    // all operate in the SAME units as the final score (eliminating
+    // V3's β-amplification mono-violation path).
+    let tanh_pin_active = hyperparams.tanh_output_head_scale > 0.0;
+    let tanh_scale = hyperparams.tanh_output_head_scale.max(1e-9);
+    if tanh_pin_active {
+        log_line(
+            &format!(
+                "tanh_output_head: ENABLED — y_score = 100·σ(y_pre/{tanh_scale:.3}) (active linear region y_pre∈[−3·scale, 3·scale])"
+            ),
+            log,
+        );
+    }
+    // Inline closures (capture tanh_scale + tanh_pin_active).
+    // `pin_forward(y_pre) → (y_score, dy_dy_pre)` so loss sites use
+    // `y_score` as the prediction and gradients are scaled by `dy_dy_pre`.
+    // When the pin is off, returns the identity (y_pre, 1.0) so the
+    // pair-loss path is unchanged.
+    let pin_forward = |y_pre: f64| -> (f64, f64) {
+        if !tanh_pin_active {
+            (y_pre, 1.0)
+        } else {
+            let xc = (y_pre / tanh_scale).clamp(-30.0, 30.0);
+            let s = 1.0 / (1.0 + (-xc).exp());
+            let y_score = 100.0 * s;
+            // dy_score/dy_pre = (100/scale) · σ · (1−σ)
+            let dy = (100.0 / tanh_scale) * s * (1.0 - s);
+            (y_score, dy)
+        }
+    };
+
     // Adam-step closure: pack/unpack our parameters into the Adam slots.
     let do_adam_step = |adam: &mut AdamState,
                         w1: &mut Vec<f64>,
@@ -5322,16 +5409,19 @@ fn train_mlp_per_sample_alpha_head(
             let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
             let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
 
-            let (ya, ya_rank, ya_pool, alpha_a, _ali_a, ha_pre, ha, sa, max_a) =
+            let (ya_pre, ya_rank, ya_pool, alpha_a, _ali_a, ha_pre, ha, sa, max_a) =
                 psah::forward_per_sample_alpha_head(
                     xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
                     n_features, n_hidden, leaky,
                 );
-            let (yb, yb_rank, yb_pool, alpha_b, _ali_b, hb_pre, hb, sb, max_b) =
+            let (yb_pre, yb_rank, yb_pool, alpha_b, _ali_b, hb_pre, hb, sb, max_b) =
                 psah::forward_per_sample_alpha_head(
                     xb, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
                     n_features, n_hidden, leaky,
                 );
+            // Tanh-pinned output (identity when --tanh-output-head-scale 0).
+            let (ya, dya_dpre) = pin_forward(ya_pre);
+            let (yb, dyb_dpre) = pin_forward(yb_pre);
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
@@ -5488,8 +5578,10 @@ fn train_mlp_per_sample_alpha_head(
             // PreviewV0_5Tuner: fold MSE + monotonicity gradients into
             // dl_dy* before the backprop. RankNet contribution is already
             // weighted by hyperparams.ranknet_weight in dl_d_pred_diff.
-            let dl_dya = dl_dya_rn + dl_dya_mse + dl_dya_mono;
-            let dl_dyb = dl_dyb_rn + dl_dyb_mse + dl_dyb_mono;
+            // V4 tanh pin: multiply dL/dy_score by dy_score/dy_pre to
+            // get dL/dy_pre for the per-sample-α backprop.
+            let dl_dya = (dl_dya_rn + dl_dya_mse + dl_dya_mono) * dya_dpre;
+            let dl_dyb = (dl_dyb_rn + dl_dyb_mse + dl_dyb_mono) * dyb_dpre;
             steps_since_adam += 1;
 
             let mut g_rank_w_buf = vec![0.0f64; n_hidden];
@@ -5578,19 +5670,21 @@ fn train_mlp_per_sample_alpha_head(
                                 .partition_point(|&c| c < u_row)
                                 .min(std_anchor_features.len() - 1);
                             let xa = std_anchor_features[ai].as_slice();
-                            let (ya, ya_rank_a, ya_pool_a, alpha_a_a, _, ha_pre_a, ha_a, sa_a, max_a_a) =
+                            let (ya_pre, ya_rank_a, ya_pool_a, alpha_a_a, _, ha_pre_a, ha_a, sa_a, max_a_a) =
                                 psah::forward_per_sample_alpha_head(
                                     xa, &w1, &b1, &rank_w, rank_b,
                                     &reducer_w, reducer_b, &w_alpha, b_alpha,
                                     n_features, n_hidden, leaky,
                                 );
+                            let (ya, dya_dpre) = pin_forward(ya_pre);
                             let target = hyperparams.anchor_target_score;
                             let row_w = a.row_weights[ai];
                             let err = ya - target;
                             // L = anchor_loss_weight · row_w · err²
-                            // dL/dy = 2 · anchor_loss_weight · row_w · err
+                            // dL/dy_score = 2 · anchor_loss_weight · row_w · err
+                            // dL/dy_pre = dL/dy_score · dy_score/dy_pre
                             let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
-                            let dl_dy = scale * err;
+                            let dl_dy = scale * err * dya_dpre;
                             let loss = hyperparams.anchor_loss_weight * row_w * err * err;
                             total_loss += loss;
                             n_steps += 1;
@@ -5671,26 +5765,31 @@ fn train_mlp_per_sample_alpha_head(
                             let xb = std_equiv_b[ei].as_slice();
 
                             // Forward both halves.
-                            let (ya, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
+                            let (ya_pre, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
                                 psah::forward_per_sample_alpha_head(
                                     xa, &w1, &b1, &rank_w, rank_b,
                                     &reducer_w, reducer_b, &w_alpha, b_alpha,
                                     n_features, n_hidden, leaky,
                                 );
-                            let (yb, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
+                            let (yb_pre, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
                                 psah::forward_per_sample_alpha_head(
                                     xb, &w1, &b1, &rank_w, rank_b,
                                     &reducer_w, reducer_b, &w_alpha, b_alpha,
                                     n_features, n_hidden, leaky,
                                 );
+                            // V4 tanh pin (identity when off).
+                            let (ya, dya_dpre) = pin_forward(ya_pre);
+                            let (yb, dyb_dpre) = pin_forward(yb_pre);
                             let row_w = e.row_weights[ei];
                             let diff = ya - yb;
                             // L_eq = w · row_w · diff²
-                            // dL_eq/dy_a = 2 · w · row_w · diff
-                            // dL_eq/dy_b = −2 · w · row_w · diff
+                            // dL_eq/dy_a (score) = 2 · w · row_w · diff
+                            // dL_eq/dy_b (score) = −2 · w · row_w · diff
+                            // Accumulate in score-space; chain-rule to y_pre
+                            // before backprop.
                             let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
-                            let mut dl_dya = scale * diff;
-                            let mut dl_dyb = -scale * diff;
+                            let mut dl_dya_score = scale * diff;
+                            let mut dl_dyb_score = -scale * diff;
                             let mut loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
 
                             // EXP-CROSS-CODEC-V3 (2026-05-19): rank-preserve
@@ -5736,13 +5835,17 @@ fn train_mlp_per_sample_alpha_head(
                                     // dL/dy_b = -w · s · (1 − σ)
                                     // dL/dy_a = +w · s · (1 − σ)
                                     let g = w_rp * s * (1.0 - sig);
-                                    dl_dya += g;
-                                    dl_dyb -= g;
+                                    dl_dya_score += g;
+                                    dl_dyb_score -= g;
                                     loss += l_rp;
                                 }
                             }
                             total_loss += loss;
                             n_steps += 1;
+
+                            // V4 tanh pin: chain-rule dL/dy_score → dL/dy_pre.
+                            let dl_dya = dl_dya_score * dya_dpre;
+                            let dl_dyb = dl_dyb_score * dyb_dpre;
 
                             // Backprop through A.
                             let mut g_rank_w_buf = vec![0.0f64; n_hidden];
@@ -5845,7 +5948,8 @@ fn train_mlp_per_sample_alpha_head(
                     let mut probe_idx: Vec<usize> = Vec::with_capacity(probe_n);
                     let mut probe_y: Vec<f64> = Vec::with_capacity(probe_n);
                     // Cache forward residuals so we can backprop after
-                    // computing the σ across all forwards.
+                    // computing the σ across all forwards. V4 adds a
+                    // `dy_dpre` slot to chain-rule through the tanh pin.
                     type ProbeFwd = (
                         Vec<f64>,  // ha_pre
                         Vec<f64>,  // ha
@@ -5854,6 +5958,7 @@ fn train_mlp_per_sample_alpha_head(
                         f64,       // ya_rank
                         f64,       // ya_pool
                         f64,       // alpha
+                        f64,       // dy_score/dy_pre (V4 tanh pin chain rule)
                     );
                     let mut probe_fwd: Vec<ProbeFwd> = Vec::with_capacity(probe_n);
                     for _ in 0..probe_n {
@@ -5862,14 +5967,15 @@ fn train_mlp_per_sample_alpha_head(
                             .min(std_equiv_a.len() - 1);
                         probe_idx.push(pi);
                         let xa = std_equiv_a[pi].as_slice();
-                        let (y, y_rank, y_pool, alpha, _, ha_pre, ha, sa, max_a) =
+                        let (y_pre, y_rank, y_pool, alpha, _, ha_pre, ha, sa, max_a) =
                             psah::forward_per_sample_alpha_head(
                                 xa, &w1, &b1, &rank_w, rank_b,
                                 &reducer_w, reducer_b, &w_alpha, b_alpha,
                                 n_features, n_hidden, leaky,
                             );
+                        let (y, dy_dpre) = pin_forward(y_pre);
                         probe_y.push(y);
-                        probe_fwd.push((ha_pre, ha, sa, max_a, y_rank, y_pool, alpha));
+                        probe_fwd.push((ha_pre, ha, sa, max_a, y_rank, y_pool, alpha, dy_dpre));
                     }
 
                     let n_p = probe_n as f64;
@@ -5902,7 +6008,7 @@ fn train_mlp_per_sample_alpha_head(
                             let pi = probe_idx[i];
                             let xa = std_equiv_a[pi].as_slice();
                             let y_i = probe_y[i];
-                            let (ha_pre, ha, sa, max_a, y_rank, y_pool, alpha) =
+                            let (ha_pre, ha, sa, max_a, y_rank, y_pool, alpha, dy_dpre) =
                                 (
                                     &probe_fwd[i].0,
                                     &probe_fwd[i].1,
@@ -5911,8 +6017,11 @@ fn train_mlp_per_sample_alpha_head(
                                     probe_fwd[i].4,
                                     probe_fwd[i].5,
                                     probe_fwd[i].6,
+                                    probe_fwd[i].7,
                                 );
-                            let dl_dy = grad_scale * (y_i - mu);
+                            // dL/dy_score = grad_scale · (y_i_score − μ_score)
+                            // dL/dy_pre = dL/dy_score · dy_score/dy_pre
+                            let dl_dy = grad_scale * (y_i - mu) * dy_dpre;
 
                             psah::backprop_step_per_sample_alpha_head(
                                 xa, ha_pre, ha, sa, max_a,
@@ -6043,6 +6152,9 @@ fn train_mlp_per_sample_alpha_head(
                     // — DON'T negate preds for SROCC. The legacy convention
                     // negated because RankNet's distance-shape output had
                     // low=good. Pure-MSE training produces high=good.
+                    //
+                    // V4 tanh pin: SROCC is rank-invariant under sigmoid, so
+                    // pinning doesn't affect this branch's ordering.
                     let mse_only =
                         hyperparams.mse_weight > 0.0 && hyperparams.ranknet_weight <= 0.0;
                     let signed_preds: Vec<f64> = if mse_only {
@@ -6108,7 +6220,11 @@ fn train_mlp_per_sample_alpha_head(
                     n_hidden,
                     n_features,
                 };
-                best_bake = Some(psah::bake_per_sample_alpha_head_v3(&model));
+                best_bake = Some(if tanh_pin_active {
+                    psah::bake_per_sample_alpha_head_v3_with_tanh(&model, tanh_scale)
+                } else {
+                    psah::bake_per_sample_alpha_head_v3(&model)
+                });
             } else {
                 stale_epochs += hyperparams.log_every;
                 if hyperparams.early_stop_patience > 0
@@ -6148,7 +6264,11 @@ fn train_mlp_per_sample_alpha_head(
             n_hidden,
             n_features,
         };
-        psah::bake_per_sample_alpha_head_v3(&model)
+        if tanh_pin_active {
+            psah::bake_per_sample_alpha_head_v3_with_tanh(&model, tanh_scale)
+        } else {
+            psah::bake_per_sample_alpha_head_v3(&model)
+        }
     })
 }
 

@@ -629,6 +629,32 @@ type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, 
 /// `(rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)`.
 type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
 
+/// Read the `zentrain.tanh_output_head` metadata payload, if any.
+/// Returns the sigmoid pin scale (`f32 LE`, single value) or `None`
+/// when the key is absent / payload malformed.
+///
+/// EXP-CROSS-CODEC-V4 (2026-05-19). When present, the final score
+/// returned from `score_row` is wrapped as `100·σ(y_pre/scale)`,
+/// matching `zensim::metric::apply_tanh_output_pin` bit-exactly.
+fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
+    let md = model.metadata();
+    let entry = md.get("zentrain.tanh_output_head")?;
+    if entry.value.len() != 4 {
+        return None;
+    }
+    let scale = f32::from_le_bytes([
+        entry.value[0],
+        entry.value[1],
+        entry.value[2],
+        entry.value[3],
+    ]) as f64;
+    if scale.is_finite() && scale > 0.0 {
+        Some(scale)
+    } else {
+        None
+    }
+}
+
 /// Read the `zentrain.per_sample_alpha_head` metadata payload, if any.
 /// Returns `Some((W_α, b_α, rank_w, rank_b, reducer_w, reducer_b, p_norm))`.
 fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDispatch> {
@@ -706,6 +732,7 @@ fn score_row(
     has_transforms: bool,
     per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
     hybrid_head: Option<&HybridHeadDispatch>,
+    tanh_pin_scale: Option<f64>,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
@@ -724,7 +751,7 @@ fn score_row(
     } else {
         predictor.predict(f32_features)
     };
-    match result {
+    let y_pre = match result {
         Ok(out) => {
             // Per-sample-α head dispatch — out is the hidden vector h.
             if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
@@ -814,7 +841,17 @@ fn score_row(
             }
         }
         Err(_) => f64::NAN,
+    };
+    // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned [0, 100] output
+    // wrap. Bit-exact with `zensim::metric::apply_tanh_output_pin`.
+    if let Some(scale) = tanh_pin_scale {
+        if !y_pre.is_nan() {
+            let xc = (y_pre / scale).clamp(-30.0, 30.0);
+            let s = 1.0 / (1.0 + (-xc).exp());
+            return 100.0 * s;
+        }
     }
+    y_pre
 }
 
 // ============================================================================
@@ -1013,6 +1050,7 @@ fn render_corpus(
     let humans = g.human_scores;
     let per_sample_alpha_head = extract_per_sample_alpha_head(model);
     let hybrid_head = extract_hybrid_head(model);
+    let tanh_pin_scale = extract_tanh_output_head_scale(model);
     let mut predictor = Predictor::new(model);
 
     // Score every row. f32 scratch buffer reused across all rows
@@ -1028,6 +1066,7 @@ fn render_corpus(
                 has_transforms,
                 per_sample_alpha_head.as_ref(),
                 hybrid_head.as_ref(),
+                tanh_pin_scale,
                 &mut scratch,
                 row,
             )

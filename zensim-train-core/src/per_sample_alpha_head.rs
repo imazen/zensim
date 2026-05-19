@@ -706,6 +706,104 @@ pub fn bake_per_sample_alpha_head_v3(model: &PerSampleAlphaHeadModel) -> Vec<u8>
     .expect("v3 bake of per-sample α head MLP")
 }
 
+/// EXP-CROSS-CODEC-V4 (2026-05-19): bake a per-sample-α head with the
+/// `zentrain.tanh_output_head` metadata entry, marking the bake as
+/// score-pinned via `y_score = 100 · σ(y_pre / scale)`.
+///
+/// Equivalent to `bake_per_sample_alpha_head_v3` plus a second
+/// metadata entry `zentrain.tanh_output_head` with payload `[scale: f32]`
+/// (4 bytes, little-endian). The runtime in zensim's `apply_mlp_scoring`
+/// recognizes the key and applies the matching sigmoid pin AT INFERENCE
+/// — no post-hoc affine needed.
+///
+/// `scale` must be `> 0`. The recommended value is `10.0` (active
+/// linear region `y_pre ∈ [−30, 30]` mapping to `[5, 95]` score units).
+pub fn bake_per_sample_alpha_head_v3_with_tanh(
+    model: &PerSampleAlphaHeadModel,
+    scale: f64,
+) -> Vec<u8> {
+    assert!(scale > 0.0, "tanh_output_head scale must be > 0; got {scale}");
+    let n_features = model.n_features;
+    let n_hidden = model.n_hidden;
+
+    let scaler_mean_f32: Vec<f32> = model.scaler_mean.iter().map(|&v| v as f32).collect();
+    let scaler_scale_f32: Vec<f32> = model.scaler_scale.iter().map(|&v| v as f32).collect();
+    let w1_f32: Vec<f32> = model.w1.iter().map(|&v| v as f32).collect();
+    let b1_f32: Vec<f32> = model.b1.iter().map(|&v| v as f32).collect();
+    let mut w2_f32 = vec![0.0f32; n_hidden * n_hidden];
+    for i in 0..n_hidden {
+        w2_f32[i * n_hidden + i] = 1.0;
+    }
+    let b2_f32 = vec![0.0f32; n_hidden];
+
+    let n_payload = 2 * n_hidden + 8;
+    let mut payload = Vec::with_capacity(n_payload * 4);
+    for v in &model.w_alpha {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.b_alpha as f32).to_le_bytes());
+    for v in &model.rank_w {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.rank_b as f32).to_le_bytes());
+    for v in &model.reducer_w {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.reducer_b as f32).to_le_bytes());
+    payload.extend_from_slice(&(POOL_P_NORM as f32).to_le_bytes());
+
+    // Tanh-output-head payload: [scale: f32 LE].
+    let tanh_payload: [u8; 4] = (scale as f32).to_le_bytes();
+
+    let layers = [
+        BakeLayer {
+            in_dim: n_features,
+            out_dim: n_hidden,
+            activation: Activation::LeakyRelu,
+            dtype: WeightDtype::F32,
+            weights: &w1_f32,
+            biases: &b1_f32,
+        },
+        BakeLayer {
+            in_dim: n_hidden,
+            out_dim: n_hidden,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w2_f32,
+            biases: &b2_f32,
+        },
+    ];
+    let metadata = [
+        BakeMetadataEntry {
+            key: "zentrain.per_sample_alpha_head",
+            kind: MetadataType::Numeric,
+            value: &payload,
+        },
+        BakeMetadataEntry {
+            key: "zentrain.tanh_output_head",
+            kind: MetadataType::Numeric,
+            value: &tanh_payload,
+        },
+    ];
+    bake(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: &scaler_mean_f32,
+        scaler_scale: &scaler_scale_f32,
+        layers: &layers,
+        feature_bounds: &[],
+        metadata: &metadata,
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
+        hu_permutations: None,
+    })
+    .expect("v3 bake of per-sample α head MLP with tanh output head")
+}
+
 /// Parsed per-sample α head metadata payload (runtime-side).
 #[derive(Clone, Debug)]
 pub struct PerSampleAlphaHeadMeta {
@@ -1027,6 +1125,32 @@ mod tests {
         let needle = b"zentrain.per_sample_alpha_head";
         let found = bytes.windows(needle.len()).any(|w| w == needle);
         assert!(found, "expected per_sample_alpha_head metadata in bake");
+        // V4: tanh metadata key must NOT appear in the non-tanh bake.
+        let tanh_needle = b"zentrain.tanh_output_head";
+        let tanh_found = bytes.windows(tanh_needle.len()).any(|w| w == tanh_needle);
+        assert!(!tanh_found, "did not expect tanh_output_head metadata in non-tanh bake");
+    }
+
+    #[test]
+    fn bake_per_sample_v3_with_tanh_has_both_metadata_keys() {
+        let model = PerSampleAlphaHeadModel::new(8, 4, 7);
+        let bytes = bake_per_sample_alpha_head_v3_with_tanh(&model, 10.0);
+        assert_eq!(&bytes[0..4], b"ZNPR", "expected ZNPR magic");
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        assert_eq!(version, 3, "expected v3");
+        let needle = b"zentrain.per_sample_alpha_head";
+        let found = bytes.windows(needle.len()).any(|w| w == needle);
+        assert!(found, "expected per_sample_alpha_head metadata in bake");
+        let tanh_needle = b"zentrain.tanh_output_head";
+        let tanh_found = bytes.windows(tanh_needle.len()).any(|w| w == tanh_needle);
+        assert!(tanh_found, "expected tanh_output_head metadata in tanh-wrapped bake");
+    }
+
+    #[test]
+    #[should_panic(expected = "tanh_output_head scale must be > 0")]
+    fn bake_per_sample_v3_with_tanh_rejects_zero_scale() {
+        let model = PerSampleAlphaHeadModel::new(8, 4, 7);
+        let _ = bake_per_sample_alpha_head_v3_with_tanh(&model, 0.0);
     }
 
     #[test]
