@@ -1,0 +1,39 @@
+build_cross_codec_equivalence
+  butter_dir: /mnt/v/zen/picker-training/2026-05-19/butter
+  out:        /mnt/v/zen/picker-training/2026-05-19-v2/cross_codec_equivalence_tight_v3.parquet
+  n_levels:   30
+  metric:     butter_pnorm3
+  pair_gap:   <=0.3
+  codecs: ['zenjpeg', 'zenwebp', 'zenavif', 'zenjxl']
+  loading /mnt/v/zen/picker-training/2026-05-19/butter/zenjpeg.parquet
+    rows=19000, cols=380
+  loading /mnt/v/zen/picker-training/2026-05-19/butter/zenwebp.parquet
+    rows=19000, cols=380
+  loading /mnt/v/zen/picker-training/2026-05-19/butter/zenavif.parquet
+    rows=19000, cols=380
+  loading /mnt/v/zen/picker-training/2026-05-19/butter/zenjxl.parquet
+    rows=19000, cols=380
+  common sources: 1000
+  butter levels: [0.3, 0.7034482758620689, 1.1068965517241378, 1.5103448275862068, 1.9137931034482758, 2.3172413793103446, 2.7206896551724133, 3.1241379310344826, 3.5275862068965513, 3.93103448275862, 4.334482758620689, 4.7379310344827585, 5.141379310344827, 5.544827586206896, 5.948275862068965, 6.351724137931034, 6.755172413793103, 7.158620689655172, 7.56206896551724, 7.96551724137931, 8.36896551724138, 8.772413793103448, 9.175862068965518, 9.579310344827586, 9.982758620689655, 10.386206896551725, 10.789655172413793, 11.193103448275862, 11.596551724137932, 12.0]
+    source 0/1000
+    source 100/1000
+    source 200/1000
+    source 300/1000
+    source 400/1000
+    source 500/1000
+    source 600/1000
+    source 700/1000
+    source 800/1000
+    source 900/1000
+  built 68788 equivalence pairs
+  wrote 68788 rows × 753 cols → /mnt/v/zen/picker-training/2026-05-19-v2/cross_codec_equivalence_tight_v3.parquet
+  stats:
+    gap: mean=0.114 p95=0.269
+    weight: mean=11.17 max=40.00
+    pair counts:
+       zenavif ↔ zenjpeg     8803
+       zenavif ↔ zenjxl      9309
+       zenavif ↔ zenwebp     7667
+       zenjpeg ↔ zenjxl     12327
+       zenjpeg ↔ zenwebp    15323
+        zenjxl ↔ zenwebp    15359

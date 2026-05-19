@@ -88,6 +88,17 @@ def parse_args():
         default=",".join(CODECS_DEFAULT),
         help="comma-separated codec list (default: zenjpeg,zenwebp,zenavif,zenjxl)",
     )
+    ap.add_argument(
+        "--avif-oversample",
+        type=float,
+        default=1.0,
+        help=(
+            "row-weight multiplier for any pair containing zenavif "
+            "(default 1.0 = no oversampling). Use 2.0 to compensate "
+            "for the avif↔X pool being ~50%% smaller than other pairs "
+            "(per EXP-CROSS-CODEC-V2 directive)."
+        ),
+    )
     return ap.parse_args()
 
 
@@ -214,6 +225,13 @@ def main():
                     weight = float(1.0 / (gap + 0.05))
                     if weight > 20.0:
                         weight = 20.0
+                    # Avif-oversample: multiply weight for pairs containing
+                    # zenavif (EXP-CROSS-CODEC-V2 rebalancing for the
+                    # ~50% smaller avif↔X pool).
+                    if args.avif_oversample != 1.0 and (
+                        ca == "zenavif" or cb == "zenavif"
+                    ):
+                        weight *= args.avif_oversample
                     rows_basename.append(basename)
                     rows_codec_a.append(ca)
                     rows_q_a.append(qa)
