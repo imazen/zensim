@@ -89,6 +89,32 @@
   `on` for `v0_5_tuner`, `off` for legacy profiles). Methodology:
   `benchmarks/per_codec_calibration_2026-05-19.md`.
 
+### Added (2026-05-18, zensim-target)
+
+- **New workspace member `zensim-target/`.** CLI + library that
+  picks codec encode params to hit a user-typed zensim score via
+  binary search over the codec's quality knob. Implements the
+  "user-facing quality dial" runtime documented in
+  [`zensim/CLAUDE.md`'s training goals](CLAUDE.md). `publish = false`
+  — internal AGPL crate (depends on AGPL codecs), keeps `zensim`
+  library MIT/Apache.
+- **Codecs**: zenjpeg / zenwebp / zenavif wired and demonstrated;
+  zenpng (lossless) + zenjxl (encode-only) scaffolded for follow-up.
+- **CLI**: `zensim-target <input.png> --target 70 --codec zenjpeg`.
+- **Demo** at `benchmarks/zensim_target_demo_2026-05-18.md` —
+  3 codecs × 3 images × 4 targets = 36 cells, **33 / 36 converged
+  within ±1.5 score units (92 %)**, median 5 iterations. zenavif
+  hit 12 / 12; zenjpeg 11 / 12; zenwebp 10 / 12. All 3 failures are
+  at target=30 on screen-content where the codec's effective q
+  floor still produces a higher-than-30 score.
+- **Defaults to `ZensimProfile::PreviewV0_3`** because `PreviewV0_5*`
+  bakes return near-zero scores for visually-good outputs in this
+  workspace (identity image scored against itself yields ~0 under
+  V0_5Balanced; the `skip_score_mapping=true` path uses the bake's
+  raw MLP output verbatim, and that output evaluates to ~0 on the
+  all-zero feature vector). Documented as a known limitation pending
+  a zensim runtime fix.
+
 ### Control / Blocked (2026-05-18, EXP-MULTI-CODEC)
 
 - **EXP-MULTI-CODEC control retrain reproduces V_24-per-sample-α
