@@ -5161,8 +5161,19 @@ fn train_mlp_per_sample_alpha_head(
                         &w_alpha, b_alpha,
                         n_hidden, leaky,
                     );
-                    let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    spearman_correlation(g.human_scores, &neg_preds)
+                    // PreviewV0_5Tuner (2026-05-19): when MSE-only training
+                    // (ranknet_weight=0) is in use, the bake is score-shaped
+                    // — DON'T negate preds for SROCC. The legacy convention
+                    // negated because RankNet's distance-shape output had
+                    // low=good. Pure-MSE training produces high=good.
+                    let mse_only =
+                        hyperparams.mse_weight > 0.0 && hyperparams.ranknet_weight <= 0.0;
+                    let signed_preds: Vec<f64> = if mse_only {
+                        preds.clone()
+                    } else {
+                        preds.iter().map(|&p| -p).collect()
+                    };
+                    spearman_correlation(g.human_scores, &signed_preds)
                 })
                 .collect();
 
