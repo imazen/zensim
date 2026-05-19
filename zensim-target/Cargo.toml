@@ -1,0 +1,44 @@
+[package]
+name = "zensim-target"
+version = "0.1.0"
+edition = "2024"
+description = "CLI that picks codec encode params to hit a user-typed zensim target score."
+# zensim itself is MIT/Apache, but this crate links AGPL codec dependencies
+# (zenjpeg, zenwebp, zenavif, zenjxl, zenpng — all AGPL-3.0-only OR Imazen
+# commercial). It is internal-only and not published.
+license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
+publish = false
+
+[features]
+default = ["zenjpeg", "zenwebp", "zenavif", "zenpng"]
+# Each codec is opt-in so a build that only needs one doesn't pull the rest.
+zenjpeg = ["dep:zenjpeg"]
+zenwebp = ["dep:zenwebp"]
+zenavif = ["dep:zenavif"]
+zenjxl  = ["dep:zenjxl"]
+zenpng  = ["dep:zenpng"]
+
+[dependencies]
+zensim = { path = "../zensim", features = ["imgref"] }
+image = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+enough = { workspace = true }
+almost-enough = "0.4"
+rgb = { workspace = true }
+imgref = { workspace = true }
+bytemuck = { workspace = true }
+# zenpixels is needed for AVIF decode (descriptor + buffer accessors).
+zenpixels = { workspace = true }
+
+# Codec deps — path refs to sibling worktrees per workspace policy.
+# All AGPL-3.0-only OR Imazen commercial.
+zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true, default-features = false, features = ["decoder"] }
+zenwebp = { path = "../../zenwebp",          optional = true, default-features = false, features = ["std"] }
+zenavif = { path = "../../zenavif",          optional = true, default-features = false, features = ["encode"] }
+zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["encode", "decode"] }
+zenpng  = { path = "../../zenpng",           optional = true, default-features = false }
+
+[[bin]]
+name = "zensim-target"
+path = "src/bin/zensim_target.rs"

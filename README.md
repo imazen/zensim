@@ -99,6 +99,28 @@ let result = Zensim::new(ZensimProfile::latest()).compute(&source, &distorted)?;
 
 Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un-premultiplied, color primaries are forwarded. HDR (PQ, HLG) and grayscale are rejected with `UnsupportedFormat`.
 
+## Target-score CLI (`zensim-target`)
+
+The [`zensim-target`](zensim-target/README.md) workspace crate is the
+runtime side of the "user-facing quality dial" goal. Given an input
+image and a target zensim score, it picks the codec quality knob via
+binary search:
+
+```bash
+cargo run --release -p zensim-target -- input.png \
+    --target 70 --codec zenjpeg --output out.jpg
+# codec=Jpeg  target=70.0  achieved=69.46  knob=78.44  bytes=62234  iters=5  converged=true
+```
+
+Supported codecs: `zenjpeg`, `zenwebp`, `zenavif` (wired and
+demonstrated); `zenpng` (lossless, single probe); `zenjxl`
+(encode-only in v0.1, decode plumbing pending). Demo matrix at
+[`benchmarks/zensim_target_demo_2026-05-18.md`](benchmarks/zensim_target_demo_2026-05-18.md):
+33 / 36 cells converged within ±1.5 score units, median 5 iterations.
+
+`zensim-target` is **AGPL-3.0-only** because it links the AGPL zen
+codec crates; the core `zensim` library stays MIT/Apache.
+
 ## What the score means
 
 100 = identical. Higher = more similar. The score is a compressive mapping (`100 - 18 × d^0.7`), giving more resolution at the high-quality end where it matters most.
