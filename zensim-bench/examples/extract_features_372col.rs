@@ -73,9 +73,10 @@ fn main() {
         "aic3" => load_aic3(&path, max_pairs),
         "safesyn" => load_safesyn(&path, max_pairs),
         "qsweep" => load_qsweep_tsv(&path, max_pairs),
+        "pairstsv" => load_pairs_tsv(&path, max_pairs),
         _ => {
             eprintln!(
-                "--corpus must be one of: konjnd, konjnd_full, aic3, safesyn, qsweep (got {corpus:?})"
+                "--corpus must be one of: konjnd, konjnd_full, aic3, safesyn, qsweep, pairstsv (got {corpus:?})"
             );
             std::process::exit(2);
         }
@@ -462,6 +463,59 @@ fn load_safesyn(csv_path: &Path, max: usize) -> Vec<Pair> {
             human_score: ssim2_raw / 100.0,
             ref_basename: basename,
             extra_targets: vec![("iwssim".to_string(), iwssim)],
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// Generic pairs-TSV loader for arbitrary (ref, dist) pair lists.
+///
+/// Reads a TSV with header `ref_path\tdist_path\tunique_id\thuman_score`.
+/// `unique_id` is emitted verbatim as `ref_basename` so callers can join
+/// the output CSV back to per-cell metadata (codec, q, knob, etc.) by
+/// matching this column. `human_score` is a freeform anchor (e.g.
+/// cvvdp_score, mix_target) — its meaning is corpus-defined.
+///
+/// Used 2026-05-21 to backfill the 372-feature LARGE rebuild for the
+/// canonical-2026-05-21 corpus (73,300 pairs, 200 unique source refs).
+fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    let f = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let r = BufReader::new(f);
+    let mut lines = r.lines();
+    let _header = match lines.next() {
+        Some(Ok(h)) => h,
+        _ => return Vec::new(),
+    };
+    let mut pairs = Vec::new();
+    for line in lines.flatten() {
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() < 4 {
+            continue;
+        }
+        let ref_path = cols[0];
+        let dist_path = cols[1];
+        let unique_id = cols[2];
+        let human_score: f64 = match cols[3].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        pairs.push(Pair {
+            reference: PathBuf::from(ref_path),
+            distorted: PathBuf::from(dist_path),
+            human_score,
+            ref_basename: unique_id.to_string(),
+            extra_targets: Vec::new(),
         });
         if pairs.len() >= max {
             break;
