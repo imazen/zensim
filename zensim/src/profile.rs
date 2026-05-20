@@ -460,6 +460,73 @@ pub enum ZensimProfile {
     /// Audit: `benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`.
     /// Design: `benchmarks/v_tuner_v9_anchor_design_2026-05-20.md`.
     PreviewV0_5TunerV3,
+    /// Preview v0.5, **balanced trail v2** — V_22-mix-LARGE+iwssim
+    /// (same Balanced bake as [`Self::PreviewV0_5Balanced`]) with
+    /// **post-network monotone PCHIP spline calibration** applied at
+    /// runtime via the new `zentrain.output_calibration_spline`
+    /// metadata key (EXP-CROSS-CODEC-V9 spline mechanism, ported to
+    /// Balanced 2026-05-20, task #176).
+    ///
+    /// **What changes vs PreviewV0_5Balanced**: the spline maps the
+    /// Balanced bake's raw distance-shaped output onto the dial-honest
+    /// score scale via 7 knots fitted on the V9 anchor parquet (target
+    /// band ∈ {0, 30, 50, 60, 80, 90, 100}; band 10 was dropped at
+    /// fit time due to the network putting target=10 above target=0
+    /// in raw output — see the calibration log). Underlying architecture
+    /// is preserved: same 300 → 128 → 1 i8 + zerobias + lz4 packed MLP
+    /// (`v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin`, md5
+    /// `b703c9cfc7e1908faf5b0e78dc823221`); only the metadata changes.
+    ///
+    /// **Cross-corpus SROCC (held-out)** — bit-exact preserved
+    /// (monotone spline is rank-invariant):
+    ///
+    /// | Corpus | Balanced base | **BalancedV2** | Δ SROCC |
+    /// |---|---:|---:|---:|
+    /// | CID22 | 0.8324 | **0.8324** | 0.0000 |
+    /// | KADID | 0.9677 | **0.9677** | 0.0000 |
+    /// | TID   | 0.9729 | **0.9729** | 0.0000 |
+    /// | KonJND | 0.8927 | **0.8927** | 0.0000 |
+    /// | AIC-3 | 0.7845 | **0.7845** | 0.0000 |
+    ///
+    /// **User-facing dial fixes** (the V2 ship rationale):
+    ///
+    /// - **JND lands at integer 60**: `butter_pnorm3 ≈ 1.50` →
+    ///   score = 60.000 (bit-exact at the knot; median over the V9
+    ///   anchor parquet's target_score=60 band).
+    /// - **JOD lands at integer 30**: `butter_pnorm3 ≈ 4.00` →
+    ///   score = 30.000 (bit-exact at the knot).
+    /// - **Round-number anchors** at `butter ∈ {0.05, 0.30, 0.60,
+    ///   1.50, 2.50, 4.00, 12.00}` ↔ `score ∈ {100, 90, 80, 60, 50,
+    ///   30, 0}` (band 10 dropped due to network direction-violation;
+    ///   the spline linearly extrapolates target=10 onto the segment
+    ///   between target=0 and target=30 surrounding knots).
+    /// - **[0, 100] dial range** — the underlying raw output was
+    ///   distance-shaped (high raw = low quality) and the production
+    ///   `clamp(0, 100)` was pinning 97 % of CID22 predictions to 0.
+    ///   With the spline, the dial spans the full [0, 100] range with
+    ///   no collapse at the boundaries.
+    ///
+    /// ## When to use
+    ///
+    /// **Same workloads as [`Self::PreviewV0_5Balanced`]** — general-
+    /// purpose multi-distortion ranking + best balanced-corpus coverage
+    /// (KADID 0.9677, TID 0.9729, KonJND 0.8927). Additionally suitable
+    /// for codec auto-targeting / quality-dial workloads where the
+    /// **clean integer anchors** matter (typing "score 60" lands at
+    /// PJND; typing "score 30" lands at JOD).
+    ///
+    /// ## Runtime
+    ///
+    /// The PCHIP spline runtime lives in
+    /// `zensim::metric::forward_one_bake` (landed 2026-05-20 in commit
+    /// `0829b51`). It activates ONLY when the bake carries
+    /// `zentrain.output_calibration_spline` metadata. For the Balanced
+    /// bake — which has no `tanh_output_head` — the spline applies
+    /// directly to the network's raw `out[0]` value. Cost: O(log n_knots)
+    /// per score (negligible vs the 300 → 128 → 1 forward pass).
+    ///
+    /// Methodology: `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
+    PreviewV0_5BalancedV2,
 }
 
 impl ZensimProfile {
@@ -533,6 +600,18 @@ impl ZensimProfile {
         Self::PreviewV0_5TunerV3
     }
 
+    /// Balanced trail v2 — alias for [`Self::PreviewV0_5BalancedV2`]
+    /// (task #176, 2026-05-20). Same Balanced bake bytes as
+    /// [`Self::PreviewV0_5Balanced`] with a post-network PCHIP spline
+    /// calibration that lands JND at integer 60, JOD at integer 30, and
+    /// extends the dial range to the full [0, 100] without sacrificing
+    /// rank quality (cross-corpus SROCC bit-exact preserved on all 5
+    /// eval corpora). See
+    /// `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
+    pub const fn balanced_v2() -> Self {
+        Self::PreviewV0_5BalancedV2
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -548,6 +627,7 @@ impl ZensimProfile {
             Self::PreviewV0_5CrossCodec => "zensim-preview-v0.5-cross-codec",
             Self::PreviewV0_5TunerV2 => "zensim-preview-v0.5-tuner-v2",
             Self::PreviewV0_5TunerV3 => "zensim-preview-v0.5-tuner-v3",
+            Self::PreviewV0_5BalancedV2 => "zensim-preview-v0.5-balanced-v2",
         }
     }
 
@@ -569,6 +649,7 @@ impl ZensimProfile {
             Self::PreviewV0_5CrossCodec => &PROFILE_PREVIEW_V0_5_CROSS_CODEC,
             Self::PreviewV0_5TunerV2 => &PROFILE_PREVIEW_V0_5_TUNER_V2,
             Self::PreviewV0_5TunerV3 => &PROFILE_PREVIEW_V0_5_TUNER_V3,
+            Self::PreviewV0_5BalancedV2 => &PROFILE_PREVIEW_V0_5_BALANCED_V2,
         }
     }
 }
@@ -1360,6 +1441,75 @@ static PROFILE_PREVIEW_V0_5_TUNER_V3: ProfileParams = ProfileParams {
     compute_iw_features: true,
     // The spline + tanh-pinned output is structurally bounded to
     // (0, 100); the hard clamp is a no-op safety net.
+    soft_clamp_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5BalancedV2 bake bytes (2026-05-20, task #176).
+///
+/// Same Balanced bake as
+/// [`mlp_bake_preview_v0_5_balanced`] / [`PROFILE_PREVIEW_V0_5_BALANCED`]
+/// (V_22-mix-LARGE+iwssim, 300 → 128 → 1 i8 + zerobias + lz4 MLP) plus
+/// a 7-knot **post-network PCHIP spline** in the new
+/// `zentrain.output_calibration_spline` metadata key. The spline is
+/// fit at calibration time on the V9 extended-range anchor parquet
+/// (target_score band ∈ {0, 30, 50, 60, 80, 90, 100} — band 10 was
+/// dropped at fit time due to network direction-violation between
+/// target=0 and target=10).
+///
+/// Network bytes are bit-identical to the Balanced ship; only the
+/// metadata section grows by ~71 bytes (7 knots × 8 bytes f32 pair +
+/// u32 count + lz4 overhead). 41,766 bytes on disk; md5 of the spline
+/// payload reproducible from
+/// `scripts/v_next/calibrate_balanced_v9_spline.py`.
+///
+/// **Cross-corpus SROCC** (held-out, vs Balanced base):
+///   - CID22 0.8324 → 0.8324 (Δ 0.0000)
+///   - KADID 0.9677 → 0.9677 (Δ 0.0000)
+///   - TID   0.9729 → 0.9729 (Δ 0.0000)
+///   - KonJND 0.8927 → 0.8927 (Δ 0.0000)
+///   - AIC-3 0.7845 → 0.7845 (Δ 0.0000)
+///
+/// SROCC bit-exact — monotone spline is rank-preserving.
+///
+/// **Anchor landing** (median over V9 anchor parquet target_score band):
+///   - target=60 (PJND / JND) → score=60.000 (bit-exact at knot)
+///   - target=30 (JOD)        → score=30.000 (bit-exact at knot)
+///   - target=100 (lossless)  → score=100.000
+///   - target=0   (worst-codec floor) → score=0.000
+///
+/// Methodology: `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
+pub(crate) fn mlp_bake_preview_v0_5_balanced_v2() -> &'static [u8] {
+    include_bytes!("../weights/v_balanced_v2_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_BALANCED_V2: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake's `zentrain.output_calibration_spline` metadata maps
+    // the network's raw distance-shaped output onto the dial-honest
+    // [0, 100] score scale via a 7-knot PCHIP spline. JND lands at
+    // integer 60, JOD lands at integer 30 (bit-exact knots). The
+    // spline output IS the final score; no `100 - A·d^B` transform.
+    // Runtime dispatch lives in `zensim::metric::forward_one_bake`
+    // (landed 2026-05-20 in commit 0829b51).
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_balanced_v2),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 300-feature input = 228 standard + 72 masked (no IW pool;
+    // LARGE schema matches PreviewV0_5Balanced).
+    extended_features: true,
+    compute_iw_features: false,
+    // The spline keeps the in-distribution dial range within (0, 100)
+    // for typical inputs; the hard clamp catches the tail extrapolation
+    // (the network's raw output can extend past the spline knot range
+    // on extreme out-of-distribution inputs).
     soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,

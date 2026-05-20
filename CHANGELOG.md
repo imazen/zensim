@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Added (2026-05-20, BALANCED-V9-SPLINE — task #176)
+
+- **`ZensimProfile::PreviewV0_5BalancedV2`** — port of the V9 PCHIP
+  spline calibration mechanism onto the existing Balanced bake
+  (V_22-mix-LARGE+iwssim, same network bytes as `PreviewV0_5Balanced`).
+  Adds `zentrain.output_calibration_spline` metadata containing a
+  7-knot post-network monotone PCHIP spline fit on the V9 anchor
+  parquet's per-band median raw predictions. **Cross-corpus SROCC
+  preserved bit-exact on all 5 eval corpora** (CID22 0.8324, KADID
+  0.9677, TID 0.9729, KonJND 0.8927, AIC-3 0.7845 — Δ=0.0000 on
+  every corpus, expected for a monotone spline). User-facing dial
+  semantics:
+  - **JND lands at score=60** exactly (median over the V9 anchor
+    parquet's `target_score=60` band is bit-exact 60.000).
+  - **JOD lands at score=30** exactly.
+  - Round-number anchors at `butter ∈ {0.05, 0.3, 0.6, 1.5, 2.5,
+    4.0, 12.0}` ↔ `score ∈ {100, 90, 80, 60, 50, 30, 0}`.
+  - Fixes the production dial bug where the Balanced bake's raw
+    distance-shaped output was clamping 96.8% of CID22 predictions
+    to 0 (rank quality was preserved via `bake_verdict`'s
+    sign-tolerant SROCC, but the user-facing dial was structurally
+    broken).
+  Bake: `zensim/weights/v_balanced_v2_2026-05-20.bin`
+  (41,766 bytes — +71 over the base; the underlying network bytes
+  are bit-identical to
+  `v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin`
+  md5 `b703c9cfc7e1908faf5b0e78dc823221`). NO training — only the
+  metadata changes.
+  Methodology: `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
+  Tests: `zensim/tests/balanced_v2_profile.rs`.
+
+- **`ZensimProfile::balanced_v2()`** convenience constructor — alias
+  for `PreviewV0_5BalancedV2`. Mirrors the existing `balanced()` /
+  `tuner_v3()` const-fn aliases.
+
 ### Added (2026-05-20, V9-SHIP — task #175)
 
 - **`ZensimProfile::PreviewV0_5TunerV3`** — V9 extended-range

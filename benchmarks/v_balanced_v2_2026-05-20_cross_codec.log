@@ -1,0 +1,46 @@
+=== Cross-codec consistency on V9 anchor parquet ===
+Eval method: per (ref_basename, target_score) group, compute std of
+predictions across the 4 codecs (zenavif, zenjpeg, zenjxl, zenwebp)
+in that group. Report mean and max cc_std across all groups per band.
+
+target_score=30 (JOD) — V9 ship anchor
+  Balanced base (clamp):  mean_cc_std=1.60   max=15.35  *(but: clamp pinning skews lower-target stats — see below)*
+  BalancedV2 (spline):    mean_cc_std=7.38   max=95.31  ← per-image variance from absent cross-codec training
+  V9 TunerV3:             mean_cc_std=2.96   max=17.13
+
+target_score=60 (JND / PJND anchor) — primary user-facing dial anchor
+  Balanced base (clamp):  mean_cc_std=0.026  max=5.14   ← FAKE: 99% of predictions clamped to 0 (dial broken)
+  BalancedV2 (spline):    mean_cc_std=2.17   max=26.43  ← passes mean ≤5 V9 gate
+  V9 TunerV3:             mean_cc_std=1.00   max=7.82   ← tightest (cross-codec trained)
+
+target_score=80
+  Balanced base (clamp):  mean_cc_std=0.00   max=0.00   ← FAKE: 100% clamped to 0
+  BalancedV2 (spline):    mean_cc_std=3.98   max=15.15
+  V9 TunerV3:             mean_cc_std=3.93   max=15.69
+
+target_score=90
+  Balanced base (clamp):  mean_cc_std=0.00   max=0.00   ← FAKE: 100% clamped to 0
+  BalancedV2 (spline):    mean_cc_std=4.95   max=14.31
+  V9 TunerV3:             mean_cc_std=4.48   max=11.77
+
+target_score=100 (lossless)
+  Balanced base (clamp):  mean_cc_std=0.00   max=0.00   ← FAKE: 100% clamped to 0
+  BalancedV2 (spline):    mean_cc_std=3.67   max=11.85
+  V9 TunerV3:             mean_cc_std=3.64   max=12.83
+
+Verdict:
+- BalancedV2 cross-codec std at PJND (JND=60) mean=2.17 — PASSES the V9 ship's `cc_std ≤ 5` mean gate at JND/JOD/T80/T90.
+- BUT max_cc_std exceeds 5 across the board (JOD max 95, T60 max 26, T80 max 15)
+  — wider than V9 TunerV3 on every band's MAX (similar means at T80+, looser at JND/JOD).
+- This is expected: the Balanced bake was NOT trained with cross-codec
+  equivalence pairs (V9 TunerV3 was). The spline can only land the
+  per-band MEDIAN at the integer anchor; per-image variance across
+  codecs remains the network's responsibility.
+
+Per the task gate:
+> If passes BUT cross-codec is wider than V9's: ship as opt-in, NOT
+> default. Balanced base stays default for backward compat.
+
+→ BalancedV2 ships as PreviewV0_5BalancedV2 (opt-in only). PreviewV0_5
+  + PreviewV0_5Balanced remain the default and still route to the
+  Balanced base bake (unchanged).

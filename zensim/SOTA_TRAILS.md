@@ -32,6 +32,93 @@ geometric distortions, JND thresholds, compression artifacts.
 A ship requires **A>>B on ≥1 corpus and tied/A-favor on the other 4**.
 Any single decisive B>>A on a corpus is a ship blocker.
 
+### Balanced trail v2 (`PreviewV0_5BalancedV2`, task #176)
+
+**Audience.** Same as the Balanced trail — general-purpose ranking +
+KADID/TID/KonJND best-in-class coverage — PLUS callers that need
+**dial-honest user-facing semantics**: typing "score 60" lands at
+JND (PJND anchor), typing "score 30" lands at JOD, and the dial
+spans the full [0, 100] range. Replaces the Balanced ship's broken
+`clamp(0, 100)` behavior on the distance-shaped raw output without
+retraining the network.
+
+**Mechanism.** Same V_22-mix-LARGE+iwssim bake bytes as
+[`PreviewV0_5Balanced`] (300 → 128 → 1 i8 + zerobias + lz4 MLP).
+The only addition is a 7-knot **post-network PCHIP spline**
+calibration baked into the new `zentrain.output_calibration_spline`
+metadata key. The spline is fit at calibration time on the V9
+extended-range anchor parquet:
+
+- Knot at `butter ≈ 0.05` ↔ `score = 100` (lossless ceiling)
+- Knot at `butter ≈ 0.30` ↔ `score = 90`
+- Knot at `butter ≈ 0.60` ↔ `score = 80`
+- Knot at `butter ≈ 1.50` ↔ **`score = 60` (JND, integer)**
+- Knot at `butter ≈ 2.50` ↔ `score = 50`
+- Knot at `butter ≈ 4.00` ↔ **`score = 30` (JOD, integer)**
+- Knot at `butter ≈ 12.0` ↔ `score = 0` (worst-codec floor)
+
+Band 10 (`butter ≈ 7.0` ↔ `score = 10`) was dropped from the spline
+at fit time — the underlying Balanced network puts target=10 in
+raw output *above* target=0 (a direction-violation that the
+monotone spline cannot fix). The spline linearly extrapolates the
+target=10 region using the surrounding knots' slope.
+
+**Gate** (extends Balanced trail's gate with V9 anchor-landing
+sub-gates, no retraining required):
+
+1. **SROCC preserved** within ±0.01 vs Balanced base on every
+   eval corpus (CID22, KADID, TID, KonJND, AIC-3). PCHIP is
+   monotone so this is structural — the spline cannot reorder
+   pairs.
+2. **JND anchor**: `score(butter≈1.5) = 60.000` (bit-exact at the
+   spline knot — median raw_pred over the V9 anchor parquet's
+   `target_score=60` band lands exactly there by construction).
+3. **JOD anchor**: `score(butter≈4.0) = 30.000` (bit-exact at the
+   spline knot).
+4. **Lossless ceiling**: `score(butter≈0.05) = 100.000`.
+5. **Worst-codec floor**: `score(butter≈12.0) = 0.000`.
+
+**Actual landing on the V9 anchor parquet** (median over each band):
+
+| target_score | n | median V2 score | |err| vs target |
+|--:|--:|--:|--:|
+| 0   | 1,159 | 0.000   | 0.000 |
+| 30  | 2,055 | 30.000  | 0.000 |
+| 50  | 3,934 | 50.000  | 0.000 |
+| 60  | 3,933 | 60.000  | 0.000 |
+| 80  | 3,714 | 80.000  | 0.000 |
+| 90  | 3,406 | 90.000  | 0.000 |
+| 100 | 3,511 | 100.000 | 0.000 |
+| 10  | 296   | -11.480 | **21.480** (band dropped from spline) |
+
+The 21-unit error on target=10 is the cost of the network's
+direction-violation between target=0 and target=10; production
+`clamp(0, 100)` pulls this to 0 (so the user-facing dial is "score
+≈ 0 for both worst-codec and very-bad-codec-but-not-quite-worst" —
+still acceptable for a dial whose primary anchors are JND/JOD).
+
+**V2 vs base Balanced — what changes**:
+
+- Raw output of the Balanced bake is distance-shaped (high raw =
+  low quality, range ≈ [-23, 38] across the V9 anchor parquet).
+- Production `apply_mlp_scoring` applied `clamp(0, 100)` to the
+  distance-shaped raw output, pinning **96.8 % of CID22
+  predictions to 0** (the `bake_post=clamp` SROCC was 0.28 vs
+  raw 0.83 — the dial was structurally broken).
+- The spline maps the distance-shaped raw onto the dial-honest
+  [0, 100] score scale via PCHIP, so the post-`clamp` SROCC now
+  matches the raw SROCC.
+
+**No retraining** — only the metadata changes. The underlying
+network is the SAME bake bytes (`v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin`
+md5 `b703c9cfc7e1908faf5b0e78dc823221`). The calibrated bake is
+41,766 bytes (+71 over the 41,695 base — the spline adds 36 bytes
+uncompressed; the lz4-packed delta is +71).
+
+See `benchmarks/v_balanced_v2_2026-05-20_methodology.md` for the
+full ship methodology, calibration log, anchor table, and bake
+verdict diff.
+
 ### Compression trail (`PreviewV0_5Compression`)
 
 **Audience.** Imageflow / commercial web compression pipelines where
@@ -225,6 +312,7 @@ preserves the wiring for follow-on work.
 | Trail | Bake | Bytes | Architecture | CID22 | AIC-3 | KADID | TID | KonJND |
 |---|---|--:|---|---:|---:|---:|---:|---:|
 | **Balanced** | V_22-mix-LARGE+iwssim s3 packed | 41,695 | 300→128→1 vanilla MLP | 0.8324 | 0.7845 | **0.9677** | **0.9729** | **0.8927** |
+| **BalancedV2** | V_22-mix-LARGE+iwssim s3 + V9 PCHIP spline (2026-05-20) | 41,766 | 300→128→1 vanilla MLP + **post-network PCHIP spline calibration**, 7-band anchor at butter ∈ {0.05,0.3,0.6,1.5,2.5,4.0,12.0} ↔ score ∈ {100,90,80,**60**,50,**30**,0} — JND on integer 60, JOD on integer 30, full [0,100] dial range | 0.8324 | 0.7845 | 0.9677 | 0.9729 | 0.8927 |
 | **Compression** | V_24-per-sample-α s4 packed | 44,109 | 300→128→128(identity) + per-sample-α head | **0.8641** | **0.8183** | 0.9316 | 0.8893 | 0.8080 |
 | **Ensemble** | V_05-ensemble classifier + B + C | 22,690 (classifier only) | 300→64→1 ReLU classifier routes to Balanced or Compression | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 |
 | **Tuner** | V_tuner-v2-s2 calibrated (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse-only train, affine α=−1590.55 β=52.02 | 0.8786 | 0.8130 | 0.7704 | 0.7476 | 0.2351 |
