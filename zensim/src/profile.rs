@@ -527,6 +527,76 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
     PreviewV0_5BalancedV2,
+    /// Preview v0.5, **compression trail v2** — V_24-per-sample-α s4
+    /// (same Compression bake as [`Self::PreviewV0_5Compression`]) with
+    /// **post-network monotone PCHIP spline calibration** applied at
+    /// runtime via the new `zentrain.output_calibration_spline`
+    /// metadata key (EXP-CROSS-CODEC-V9 spline mechanism, ported to
+    /// Compression 2026-05-20, task #177).
+    ///
+    /// **What changes vs PreviewV0_5Compression**: the spline maps the
+    /// Compression bake's raw distance-shaped per-sample-α-mixed output
+    /// onto the dial-honest score scale via 7 knots fitted on the V9
+    /// anchor parquet (target band ∈ {0, 30, 50, 60, 80, 90, 100};
+    /// band 10 was dropped at fit time due to the network putting
+    /// target=10 above target=0 in raw output — see the calibration
+    /// log). Underlying architecture is preserved: same 300 → 128 →
+    /// 128 (identity passthrough) i8 + zerobias + lz4 packed MLP
+    /// (`v_compression_persample_2026-05-18.bin`, md5
+    /// `f09a9abdce00805000c1d112c2421b2d`) plus the existing
+    /// `zentrain.per_sample_alpha_head` metadata — only the spline
+    /// metadata entry is added.
+    ///
+    /// **Cross-corpus SROCC (held-out)** — bit-exact preserved
+    /// (monotone spline is rank-invariant):
+    ///
+    /// | Corpus | Compression base | **CompressionV2** | Δ SROCC |
+    /// |---|---:|---:|---:|
+    /// | CID22 | 0.8641 | **0.8641** | 0.0000 |
+    /// | KADID | 0.9316 | **0.9316** | 0.0000 |
+    /// | TID   | 0.8893 | **0.8893** | 0.0000 |
+    /// | KonJND | 0.8080 | **0.8080** | 0.0000 |
+    /// | AIC-3 | 0.8183 | **0.8183** | 0.0000 |
+    ///
+    /// **User-facing dial fixes** (the V2 ship rationale):
+    ///
+    /// - **JND lands at integer 60**: `butter_pnorm3 ≈ 1.50` →
+    ///   score = 60.000 (bit-exact at the knot; median over the V9
+    ///   anchor parquet's target_score=60 band).
+    /// - **JOD lands at integer 30**: `butter_pnorm3 ≈ 4.00` →
+    ///   score = 30.000 (bit-exact at the knot).
+    /// - **Round-number anchors** at `butter ∈ {0.05, 0.30, 0.60,
+    ///   1.50, 2.50, 4.00, 12.00}` ↔ `score ∈ {100, 90, 80, 60, 50,
+    ///   30, 0}` (band 10 dropped due to network direction-violation;
+    ///   the spline linearly extrapolates target=10 onto the segment
+    ///   between target=0 and target=30 surrounding knots).
+    /// - **[0, 100] dial range** — the underlying raw output was
+    ///   distance-shaped (high raw = low quality, post-α-mix range
+    ///   ≈ [-27, 20] across the V9 anchor parquet) and the production
+    ///   `soft_clamp_score` was squashing the dial into ≈ [2, 18].
+    ///   With the spline, the dial spans the full [0, 100] range with
+    ///   no collapse at the boundaries.
+    ///
+    /// ## When to use
+    ///
+    /// **Same workloads as [`Self::PreviewV0_5Compression`]** — codec
+    /// selection + commercial web compression pipelines where CID22 +
+    /// AIC-3 rank fidelity is the priority. Additionally suitable for
+    /// `zensim-target` (codec quality-dial) flows where users type a
+    /// **clean integer anchor** ("score 60" → PJND; "score 30" → JOD).
+    ///
+    /// ## Runtime
+    ///
+    /// The PCHIP spline runtime lives in
+    /// `zensim::metric::forward_one_bake`. It activates ONLY when
+    /// the bake carries `zentrain.output_calibration_spline`
+    /// metadata. For the Compression bake, the spline applies AFTER
+    /// the per-sample-α head's rank+pool mix (and AFTER an optional
+    /// tanh-pin, which this bake does not carry). Cost: O(log n_knots)
+    /// per score (negligible vs the 300 → 128 forward pass + α mix).
+    ///
+    /// Methodology: `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
+    PreviewV0_5CompressionV2,
 }
 
 impl ZensimProfile {
@@ -612,6 +682,18 @@ impl ZensimProfile {
         Self::PreviewV0_5BalancedV2
     }
 
+    /// Compression trail v2 — alias for [`Self::PreviewV0_5CompressionV2`]
+    /// (task #177, 2026-05-20). Same Compression bake bytes (V_24-
+    /// per-sample-α s4) as [`Self::PreviewV0_5Compression`] with a
+    /// post-network PCHIP spline calibration that lands JND at
+    /// integer 60, JOD at integer 30, and extends the dial range to
+    /// the full [0, 100] without sacrificing rank quality (cross-
+    /// corpus SROCC bit-exact preserved on all 5 eval corpora). See
+    /// `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
+    pub const fn compression_v2() -> Self {
+        Self::PreviewV0_5CompressionV2
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -628,6 +710,7 @@ impl ZensimProfile {
             Self::PreviewV0_5TunerV2 => "zensim-preview-v0.5-tuner-v2",
             Self::PreviewV0_5TunerV3 => "zensim-preview-v0.5-tuner-v3",
             Self::PreviewV0_5BalancedV2 => "zensim-preview-v0.5-balanced-v2",
+            Self::PreviewV0_5CompressionV2 => "zensim-preview-v0.5-compression-v2",
         }
     }
 
@@ -650,6 +733,7 @@ impl ZensimProfile {
             Self::PreviewV0_5TunerV2 => &PROFILE_PREVIEW_V0_5_TUNER_V2,
             Self::PreviewV0_5TunerV3 => &PROFILE_PREVIEW_V0_5_TUNER_V3,
             Self::PreviewV0_5BalancedV2 => &PROFILE_PREVIEW_V0_5_BALANCED_V2,
+            Self::PreviewV0_5CompressionV2 => &PROFILE_PREVIEW_V0_5_COMPRESSION_V2,
         }
     }
 }
@@ -1510,6 +1594,89 @@ static PROFILE_PREVIEW_V0_5_BALANCED_V2: ProfileParams = ProfileParams {
     // for typical inputs; the hard clamp catches the tail extrapolation
     // (the network's raw output can extend past the spline knot range
     // on extreme out-of-distribution inputs).
+    soft_clamp_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5CompressionV2 bake bytes (2026-05-20, task #177).
+///
+/// Same Compression bake as
+/// [`mlp_bake_preview_v0_5_compression`] / [`PROFILE_PREVIEW_V0_5_COMPRESSION`]
+/// (V_24-per-sample-α s4, 300 → 128 → 128 (identity passthrough) i8 +
+/// zerobias + lz4 MLP with `zentrain.per_sample_alpha_head` metadata)
+/// plus a 7-knot **post-network PCHIP spline** in the new
+/// `zentrain.output_calibration_spline` metadata key. The spline is
+/// fit at calibration time on the V9 extended-range anchor parquet
+/// (target_score band ∈ {0, 30, 50, 60, 80, 90, 100} — band 10 was
+/// dropped at fit time due to network direction-violation between
+/// target=0 and target=10).
+///
+/// Network bytes are bit-identical to the Compression ship; only the
+/// metadata section grows by ~99 bytes (7 knots × 8 bytes f32 pair +
+/// u32 count + lz4 overhead). 44,208 bytes on disk; the spline payload
+/// is reproducible from
+/// `scripts/v_next/calibrate_balanced_v9_spline.py` against the
+/// Compression base bake (the script is bake-architecture-agnostic
+/// — it works on any 300-input bake whose raw output is monotone in
+/// quality, including this per-sample-α head bake).
+///
+/// **Cross-corpus SROCC** (held-out, vs Compression base):
+///   - CID22 0.8641 → 0.8641 (Δ 0.0000)
+///   - KADID 0.9316 → 0.9316 (Δ 0.0000)
+///   - TID   0.8893 → 0.8893 (Δ 0.0000)
+///   - KonJND 0.8080 → 0.8080 (Δ 0.0000)
+///   - AIC-3 0.8183 → 0.8183 (Δ 0.0000)
+///
+/// SROCC bit-exact — monotone spline is rank-preserving.
+///
+/// **Anchor landing** (median over V9 anchor parquet target_score band,
+/// post-α-mix + post-spline):
+///   - target=60 (PJND / JND) → score=60.000 (bit-exact at knot)
+///   - target=30 (JOD)        → score=30.000 (bit-exact at knot)
+///   - target=100 (lossless)  → score=100.000
+///   - target=0   (worst-codec floor) → score=0.000
+///
+/// Methodology: `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
+pub(crate) fn mlp_bake_preview_v0_5_compression_v2() -> &'static [u8] {
+    include_bytes!("../weights/v_compression_v2_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_COMPRESSION_V2: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake's `zentrain.output_calibration_spline` metadata maps
+    // the per-sample-α mixed output (distance-shaped, range ≈
+    // [-27, 20] across V9 anchor parquet) onto the dial-honest
+    // [0, 100] score scale via a 7-knot PCHIP spline. JND lands at
+    // integer 60, JOD lands at integer 30 (bit-exact knots). The
+    // spline output IS the final score; no `100 - A·d^B` transform.
+    // Runtime dispatch lives in `zensim::metric::forward_one_bake`
+    // (spline applies AFTER per-sample-α mix, AFTER any optional
+    // tanh-pin — this bake carries neither tanh_output_head nor
+    // feature_transforms).
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_compression_v2),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 300-feature input = 228 standard + 72 masked (no IW pool;
+    // LARGE schema matches PreviewV0_5Compression).
+    extended_features: true,
+    compute_iw_features: false,
+    // **No soft-clamp.** The Compression base profile uses
+    // `soft_clamp_score: true` to squash the per-sample-α RankNet's
+    // unbounded distance-shaped output into a soft logistic — but
+    // that squash maps the ≈ [-27, 20] raw range into roughly
+    // [2, 18], collapsing the user-facing dial. With the spline
+    // mapping raw onto [0, 100] integer anchors, the soft-clamp is
+    // not just unnecessary, it would re-squash the dial out of
+    // calibration. The production hard clamp `clamp(0, 100)` after
+    // the spline is a no-op for in-distribution inputs and catches
+    // only the OOD extrapolation tails.
     soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,

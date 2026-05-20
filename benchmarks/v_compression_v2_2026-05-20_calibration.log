@@ -1,0 +1,30 @@
+zenpredict-bake: wrote zensim/weights/v_compression_v2_2026-05-20.bin (44208 bytes) — n_inputs=300 n_outputs=128 n_layers=2 schema_hash=0x0000000000000000 metadata_entries=2
+=== loading anchor parquet /mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet ===
+  22008 rows × 300 features
+=== scoring zensim/weights/v_compression_persample_2026-05-18.bin on anchor features ===
+=== per-band median predicted (raw, pre-spline) ===
+  target=   0.0 n=  1159 med= 13.886 p25=  9.142 p75= 18.869 min= -7.299 max= 37.257
+  target=  10.0 n=   296 med= 17.547 p25= 10.299 p75= 20.321 min= -2.467 max= 37.257
+  target=  30.0 n=  2055 med= 10.313 p25=  5.970 p75= 13.156 min=-13.943 max= 27.513
+  target=  50.0 n=  3934 med=  3.847 p25=  1.079 p75=  6.398 min=-16.812 max= 20.588
+  target=  60.0 n=  3933 med= -3.580 p25= -5.996 p75= -1.697 min=-21.402 max= 19.445
+  target=  80.0 n=  3714 med=-16.927 p25=-18.269 p75=-15.384 min=-25.053 max= -1.573
+  target=  90.0 n=  3406 med=-20.207 p25=-21.817 p75=-18.319 min=-27.146 max= -9.571
+  target= 100.0 n=  3511 med=-26.888 p25=-27.078 p75=-21.990 min=-27.361 max=-10.547
+  inferred bake shape: distance-shaped (target=high raw_med=-26.89, target=low raw_med=13.89)
+=== building spline knots ===
+  WARN: dropped 1 band(s) (x-collision or direction-violation): [(10.0, 17.5473235)]
+  7 knots (xs ascending, ys following bake shape):
+    x=-26.8879 → y= 100.0
+    x=-20.2067 → y=  90.0
+    x=-16.9266 → y=  80.0
+    x= -3.5800 → y=  60.0
+    x=  3.8475 → y=  50.0
+    x= 10.3135 → y=  30.0
+    x= 13.8858 → y=   0.0
+  derivatives: [ -0.45580168  -2.08893628  -2.15782673  -1.41119221  -1.89326905
+  -4.73089599 -10.28576037]
+  monotone=True  max_drop=0.00e+00  direction=-1
+  wrote summary to benchmarks/v_compression_v2_2026-05-20_spline.csv
+=== writing calibrated bake to zensim/weights/v_compression_v2_2026-05-20.bin ===
+  bake size: 44109 → 44208 bytes (+99)

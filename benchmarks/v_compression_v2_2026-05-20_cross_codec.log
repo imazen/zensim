@@ -1,0 +1,52 @@
+=== Scoring Compression base (post=clamp) ===
+  done: 22008 preds, range [0.000, 37.257], median 0.000
+=== Scoring CompressionV2 (post=clamp) ===
+  done: 22008 preds, range [0.000, 100.000], median 68.833
+
+=== Cross-codec consistency on V9 anchor parquet ===
+Eval method: per (ref_basename, target_score) group, compute std of
+predictions across the codecs in that group. Report mean and max
+cc_std across all groups per band.
+Only groups with >=2 codecs counted.
+
+target_score=0
+  Compression base (clamp): mean_cc_std= 1.668   max=  9.895   n_groups= 332   pinned@0=0.041   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 4.309   max= 31.237   n_groups= 332   pinned@0=0.500   pinned@100=0.000
+
+target_score=10
+  Compression base (clamp): mean_cc_std= 2.375   max=  6.813   n_groups=  19   pinned@0=0.007   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std=10.500   max= 32.104   n_groups=  19   pinned@0=0.615   pinned@100=0.000
+
+target_score=30
+  Compression base (clamp): mean_cc_std= 1.273   max=  7.499   n_groups= 679   pinned@0=0.054   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 4.922   max= 29.606   n_groups= 679   pinned@0=0.204   pinned@100=0.000
+
+target_score=50
+  Compression base (clamp): mean_cc_std= 0.851   max=  6.680   n_groups= 999   pinned@0=0.207   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 3.100   max= 27.375   n_groups= 999   pinned@0=0.013   pinned@100=0.000
+
+target_score=60
+  Compression base (clamp): mean_cc_std= 0.130   max=  4.260   n_groups=1000   pinned@0=0.882   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 2.096   max= 12.020   n_groups=1000   pinned@0=0.001   pinned@100=0.000
+
+target_score=80
+  Compression base (clamp): mean_cc_std= 0.000   max=  0.000   n_groups= 982   pinned@0=1.000   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 3.783   max= 13.037   n_groups= 982   pinned@0=0.000   pinned@100=0.000
+
+target_score=90
+  Compression base (clamp): mean_cc_std= 0.000   max=  0.000   n_groups= 953   pinned@0=1.000   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 4.847   max= 13.814   n_groups= 953   pinned@0=0.000   pinned@100=0.010
+
+target_score=100
+  Compression base (clamp): mean_cc_std= 0.000   max=  0.000   n_groups=1000   pinned@0=1.000   pinned@100=0.000
+  CompressionV2 (spline):    mean_cc_std= 3.543   max= 13.279   n_groups=1000   pinned@0=0.000   pinned@100=0.500
+
+=== Anchor-landing on V9 anchor parquet (median over band) ===
+  target=   60  n= 3933  Compression base med=  0.000  CompressionV2 med= 60.000
+  target=   30  n= 2055  Compression base med= 10.313  CompressionV2 med= 30.000
+  target=    0  n= 1159  Compression base med= 13.886  CompressionV2 med=  0.000
+  target=  100  n= 3511  Compression base med=  0.000  CompressionV2 med=100.000
+  target=   80  n= 3714  Compression base med=  0.000  CompressionV2 med= 80.000
+  target=   90  n= 3406  Compression base med=  0.000  CompressionV2 med= 90.000
+  target=   50  n= 3934  Compression base med=  3.847  CompressionV2 med= 50.000
+  target=   10  n=  296  Compression base med= 17.547  CompressionV2 med=  0.000

@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Added (2026-05-20, COMPRESSION-V9-SPLINE — task #177)
+
+- **`ZensimProfile::PreviewV0_5CompressionV2`** — port of the V9 PCHIP
+  spline calibration mechanism onto the existing Compression bake
+  (V_24-per-sample-α s4, same network bytes + `per_sample_alpha_head`
+  metadata as `PreviewV0_5Compression`). Adds
+  `zentrain.output_calibration_spline` metadata containing a 7-knot
+  post-network monotone PCHIP spline fit on the V9 anchor parquet's
+  per-band median raw predictions (after per-sample-α mix).
+  **Cross-corpus SROCC preserved bit-exact on all 5 eval corpora**
+  (CID22 0.8641, KADID 0.9316, TID 0.8893, KonJND 0.8080, AIC-3
+  0.8183 — Δ=0.0000 on every corpus, expected for a monotone
+  spline). User-facing dial semantics:
+  - **JND lands at score=60** exactly (median over the V9 anchor
+    parquet's `target_score=60` band is bit-exact 60.000).
+  - **JOD lands at score=30** exactly.
+  - Round-number anchors at `butter ∈ {0.05, 0.3, 0.6, 1.5, 2.5,
+    4.0, 12.0}` ↔ `score ∈ {100, 90, 80, 60, 50, 30, 0}`.
+  - Fixes the production dial bug where the Compression bake's
+    per-sample-α-mixed distance-shaped output was being squashed
+    by `soft_clamp_score` into ≈ [2, 18], collapsing the
+    user-facing dial. Rank quality was preserved via
+    `bake_verdict`'s sign-tolerant SROCC, but the user-facing
+    dial was structurally broken — the same pattern BalancedV2
+    (task #176) caught on the Balanced ship.
+  Bake: `zensim/weights/v_compression_v2_2026-05-20.bin`
+  (44,208 bytes — +99 over the base; the underlying network bytes
+  are bit-identical to `v_compression_persample_2026-05-18.bin`
+  md5 `f09a9abdce00805000c1d112c2421b2d`). NO training — only
+  the metadata changes.
+  Cross-codec consistency at JND (mean cc_std over the V9 anchor
+  parquet) = 2.096 — passes the V9 ship's ≤5 gate. Max cc_std
+  wider than V9 TunerV3 (Compression bake was not cross-codec-
+  trained), so V2 ships as **opt-in** — `PreviewV0_5Compression`
+  remains the default for backward compat.
+  Methodology: `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
+  Tests: `zensim/tests/compression_v2_profile.rs`.
+
+- **`ZensimProfile::compression_v2()`** convenience constructor —
+  alias for `PreviewV0_5CompressionV2`. Mirrors the existing
+  `compression()` / `balanced_v2()` / `tuner_v3()` const-fn
+  aliases.
+
 ### Added (2026-05-20, BALANCED-V9-SPLINE — task #176)
 
 - **`ZensimProfile::PreviewV0_5BalancedV2`** — port of the V9 PCHIP
