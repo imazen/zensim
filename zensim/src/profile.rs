@@ -299,6 +299,77 @@ pub enum ZensimProfile {
     /// Methodology: `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
     /// Findings: `benchmarks/v_cross_codec_findings_2026-05-19.md`.
     PreviewV0_5CrossCodec,
+    /// Preview v0.5, **tuner trail v2** — EXP-CROSS-CODEC-V6
+    /// (2026-05-19). Same V_24-per-sample-α architecture as
+    /// [`Self::PreviewV0_5Tuner`] / [`Self::PreviewV0_5CrossCodec`]
+    /// (372 → 128 → 128 identity-passthrough MLP, `zentrain.per_sample_alpha_head`
+    /// + `zentrain.tanh_output_head` metadata, F32 uncompressed 261,351 bytes,
+    /// md5 `c5c32659b15b47e8a569464749cf7019`), trained with **higher anchor
+    /// pressure** to span the full [0, 100] output range while preserving
+    /// cross-codec parity at every anchor band.
+    ///
+    /// **Recipe.** Same as PreviewV0_5CrossCodec PLUS:
+    ///   - `--anchor-parquet anchors_multi_band_372col.parquet` (piecewise
+    ///     6-band anchor, butter ∈ {0.3, 0.8, 1.5, 2.5, 4.0, 6.0} with
+    ///     target_score ∈ {90, 75, 63, 45, 25, 10})
+    ///   - `--anchor-loss-weight 1.0` (V5 used 0.05; V6 raised 20×)
+    ///   - `--anchor-step-p 0.30` (V5 used 0.15; V6 doubled)
+    ///   - `--tanh-output-head-scale 15.0` (sigmoid pin to [0, 100])
+    ///   - `--dynamic-range-floor-weight 0.2` (σ ≥ 15 across q-sweep)
+    ///   - `--monotonicity-reg 1.0 --monotonicity-margin 0.0`
+    ///
+    /// **All 6 Tuner-trail ship gates PASS** (seed=1, anchor_w=1.0):
+    ///
+    /// | Gate | V5 best (range FAIL) | **V6 ship** | Threshold |
+    /// |---|---:|---:|---:|
+    /// | strict monotonicity | 0.9767 | **0.9522** | ≥ 0.9378 |
+    /// | tied rate | 0.0000 | **0.0000** | ≤ 0.05 |
+    /// | median range (q5..q95) | 30.73 FAIL | **78.17** | ≥ 50 |
+    /// | T=63 mean butter_pnorm3 | 1.53 | **1.731** | < 2.5 |
+    /// | PJND cc_std median | (small) | **0.91** | ≤ 5 |
+    /// | multi-band cc_std max | 1.04 | **1.68** | ≤ 5 at every band |
+    ///
+    /// **Per-band anchor achievement** (multi-band check, seed=1):
+    ///
+    /// | butter | target_score | V5 achieved | **V6 achieved** | gap to target |
+    /// |---:|---:|---:|---:|---:|
+    /// | 0.3 | 90.0 | 70.6 | **86.5** | −3.5 |
+    /// | 0.8 | 75.0 | 68.3 | **76.9** | +1.9 |
+    /// | 1.5 | 63.0 | 61.1 | **62.4** | −0.6 |
+    /// | 2.5 | 45.0 | 52.7 | **45.1** | +0.1 |
+    /// | 4.0 | 25.0 | 45.3 | **28.1** | +3.1 |
+    /// | 6.0 | 10.0 | 40.5 | **14.5** | +4.5 |
+    ///
+    /// V5's outputs clustered in [40, 70] regardless of band; V6
+    /// spans the full anchor band targets while preserving cross-codec
+    /// parity (cc_std_median 0.88–2.33 at every band).
+    ///
+    /// **Cross-corpus held-out SROCC** (per `bake_verdict`):
+    ///   - CID22 0.8770 (essentially tied with PreviewV0_5Tuner 0.8786)
+    ///   - KADID 0.7179
+    ///   - TID   0.7542
+    ///   - KonJND 0.1962
+    ///   - AIC-3 0.7961
+    ///
+    /// ## When to use
+    ///
+    /// **The codec auto-targeting / quality-dial workhorse** —
+    /// supersedes [`Self::PreviewV0_5Tuner`] for orchestrators that
+    /// need:
+    ///   - well-calibrated full-range output (typing "score 25" or
+    ///     "score 85" lands within ±5 of the target on the q-sweep),
+    ///   - strict monotonicity (95.22% on the JPEG q-sweep),
+    ///   - **cross-codec parity at every quality band** (V6's
+    ///     piecewise multi-band anchor is the V5/V6 distinguishing
+    ///     feature — V0_5Tuner has no cross-codec gate at all).
+    ///
+    /// **NOT for general ranking** — same caveat as PreviewV0_5Tuner.
+    /// KADID/TID/KonJND drop vs Balanced/Compression because training
+    /// was safesyn-only with multi-band anchor pressure.
+    ///
+    /// Methodology: `benchmarks/v_tuner_v6_methodology_2026-05-19.md`.
+    /// Falsification of V5 (predecessor): `benchmarks/v_tuner_v5_falsification_2026-05-19.md`.
+    PreviewV0_5TunerV2,
 }
 
 impl ZensimProfile {
@@ -372,6 +443,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Ensemble => "zensim-preview-v0.5-ensemble",
             Self::PreviewV0_5Tuner => "zensim-preview-v0.5-tuner",
             Self::PreviewV0_5CrossCodec => "zensim-preview-v0.5-cross-codec",
+            Self::PreviewV0_5TunerV2 => "zensim-preview-v0.5-tuner-v2",
         }
     }
 
@@ -391,6 +463,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Ensemble => &PROFILE_PREVIEW_V0_5_ENSEMBLE,
             Self::PreviewV0_5Tuner => &PROFILE_PREVIEW_V0_5_TUNER,
             Self::PreviewV0_5CrossCodec => &PROFILE_PREVIEW_V0_5_CROSS_CODEC,
+            Self::PreviewV0_5TunerV2 => &PROFILE_PREVIEW_V0_5_TUNER_V2,
         }
     }
 }
@@ -1076,6 +1149,57 @@ static PROFILE_PREVIEW_V0_5_CROSS_CODEC: ProfileParams = ProfileParams {
     // and avoid hard-clamp tie blocks (CLAUDE.md V_20 §
     // "Soft-clamp the multi-bake output").
     soft_clamp_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5TunerV2 bake bytes (2026-05-19,
+/// EXP-CROSS-CODEC-V6). V_24-per-sample-α architecture
+/// (`zentrain.per_sample_alpha_head` + `zentrain.tanh_output_head`
+/// metadata) trained on the canonical safesyn corpus with the
+/// piecewise multi-band anchor (6 bands × 4 codecs ×
+/// ~1000 sources) at `--anchor-loss-weight 1.0 --anchor-step-p 0.30`
+/// (20× anchor weight and 2× step probability vs V5), seed=1.
+///
+/// Recipe: Tuner-v2 base PLUS cross-codec equivalence-pair loss
+/// (W=1.0, step_p=0.10) PLUS multi-band anchor pressure (W=1.0,
+/// step_p=0.30) PLUS rank-preserve regularizer (W=0.2) PLUS
+/// dynamic-range floor (W=0.2, σ_threshold=15) PLUS monotonicity
+/// reg (W=1.0). Tanh-output-head scale=15.0 maps the per-sample-α
+/// head's raw output linearly into [0, 100] without an external
+/// affine calibration.
+///
+/// 372 → 128 → 128 (identity passthrough) MLP, F32 uncompressed
+/// (261,351 bytes, md5 `c5c32659b15b47e8a569464749cf7019`). Same
+/// topology as PreviewV0_5Tuner / PreviewV0_5CrossCodec — only the
+/// weights and the `zentrain.tanh_output_head` metadata payload differ.
+///
+/// Methodology: `benchmarks/v_tuner_v6_methodology_2026-05-19.md`.
+pub(crate) fn mlp_bake_preview_v0_5_tuner_v2() -> &'static [u8] {
+    include_bytes!("../weights/v_tuner_v6_2026-05-19.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_TUNER_V2: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake's `zentrain.tanh_output_head` metadata pins the raw
+    // output to [0, 100] via a sigmoid pin applied by the runtime
+    // dispatch in `forward_one_bake`. No external affine calibration.
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_tuner_v2),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 372-feature input = 228 standard + 72 masked + 72 IW pool.
+    extended_features: true,
+    compute_iw_features: true,
+    // The tanh-pinned output is structurally bounded to (0, 100);
+    // the hard clamp is a no-op safety net. q-sweep ties = 0 across
+    // all 6 V6 bakes.
+    soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
