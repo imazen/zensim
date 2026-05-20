@@ -15,7 +15,7 @@ default = ["zenjpeg", "zenwebp", "zenavif", "zenpng"]
 zenjpeg = ["dep:zenjpeg"]
 zenwebp = ["dep:zenwebp"]
 zenavif = ["dep:zenavif"]
-zenjxl  = ["dep:zenjxl"]
+zenjxl  = ["dep:zenjxl", "dep:zencodec"]
 zenpng  = ["dep:zenpng"]
 
 [dependencies]
@@ -36,8 +36,16 @@ zenpixels = { workspace = true }
 zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true, default-features = false, features = ["decoder"] }
 zenwebp = { path = "../../zenwebp",          optional = true, default-features = false, features = ["std"] }
 zenavif = { path = "../../zenavif",          optional = true, default-features = false, features = ["encode"] }
-zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["encode", "decode"] }
+zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["encode", "decode", "zencodec"] }
 zenpng  = { path = "../../zenpng",           optional = true, default-features = false }
+# zencodec traits are needed for the JXL encode path's `EncodeJob` / `Encoder`
+# / `EncoderConfig` trait bounds (zenjxl exposes the encoder via these traits
+# when the `zencodec` feature is enabled).
+zencodec = { version = "0.1.20", optional = true }
+
+[dev-dependencies]
+# CPU butteraugli for the cross-codec smoke test (sibling-worktree path).
+butteraugli = { path = "../../../butteraugli/butteraugli", default-features = false }
 
 [[bin]]
 name = "zensim-target"

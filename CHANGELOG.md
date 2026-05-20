@@ -126,6 +126,32 @@
   affine calibration is suspect). That's a separate bake-side
   calibration issue, not the runtime short-circuit bug fixed here.
 
+### Changed (2026-05-19, zensim-target × V6)
+
+- **`zensim-target` CLI default profile rotated to `PreviewV0_5TunerV2`**
+  (EXP-CROSS-CODEC-V6, bake at `zensim/weights/v_tuner_v6_2026-05-19.bin`,
+  md5 `c5c32659b15b47e8a569464749cf7019`). The legacy `v0_3` default
+  is still available via `--profile v0_3`; the prior `tuner` ship
+  via `--profile tuner`. `TargetSpec::default()` updated to match.
+- **JXL backend wired**. `zensim-target --codec zenjxl --features zenjxl`
+  now runs full encode + decode (was encode-only with `bail!` in v0.1).
+  Encode goes through `JxlEncoderConfig::new().with_distance(d)` via
+  the `zencodec::EncoderConfig` trait path; decode uses
+  `zenjxl::decode` and converts the resulting `PixelBuffer` to packed
+  RGB8 via the same RGB8/RGBA8 strided-row pattern the AVIF backend
+  uses.
+- **Cross-codec smoke test** at
+  `zensim-target/tests/cross_codec_target.rs`: picks 3 test images,
+  runs `target_search` at `target=63` across {jpeg, webp, avif}, and
+  asserts cross-codec zensim-score std ≤ 5 + butter_pnorm3 std ≤ 1
+  per image. Median observed: z_std=0.5, p_std=0.05.
+- **Cross-codec demo** at
+  `benchmarks/zensim_target_v6_cross_codec_2026-05-19.md`: 10 images ×
+  4 codecs at T=63. 37/40 cells converge in ≤ 8 iterations; median
+  z_std=0.64, median p_std=0.10. Three non-converged cells are
+  screen-content images where the codec's q-ceiling output already
+  exceeds T=63 — flagged as a v0.1 limitation in the README.
+
 ### Added (2026-05-18, zensim-target)
 
 - **New workspace member `zensim-target/`.** CLI + library that

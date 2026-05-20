@@ -33,10 +33,17 @@ struct Cli {
     codec: String,
 
     /// Zensim profile: v0_2 | v0_3 | balanced (v0.5) | compression (v0.5) |
-    /// ensemble (v0.5). Default is v0_3 — the v0.5 family currently
-    /// returns near-zero scores even for visually-perfect outputs and
-    /// breaks the search loop. v0_3 is the production-grade fallback.
-    #[arg(long, default_value = "v0_3")]
+    /// ensemble (v0.5) | tuner (v0.5) | tuner-v2 (v0.5). Default is
+    /// `tuner-v2` (PreviewV0_5TunerV2, EXP-CROSS-CODEC-V6 ship) — passes
+    /// every Tuner-trail gate and Pareto-dominates the prior `tuner` ship
+    /// on strict monotonicity (95.2 % vs 92.8 %), median range (78 vs 73),
+    /// and cross-codec PJND parity (cc_std_median 0.91 vs 0.95) while
+    /// holding CID22 SROCC at 0.877. Use `tuner` for the prior tuner ship
+    /// or `v0_3` for the legacy default. The `balanced` / `compression` /
+    /// `ensemble` ranking profiles are available for end-to-end
+    /// evaluation but are NOT calibrated for quality-dial use — they
+    /// produce non-monotonic scores in the target search loop.
+    #[arg(long, default_value = "tuner-v2")]
     profile: String,
 
     /// Convergence tolerance — search stops when `|achieved - target| <= tolerance`.
@@ -59,12 +66,18 @@ struct Cli {
 fn parse_profile(s: &str) -> Result<ZensimProfile> {
     match s.to_ascii_lowercase().as_str() {
         "v0_2" | "v02" | "preview-v0.2" => Ok(ZensimProfile::PreviewV0_2),
-        "v0_3" | "v03" | "preview-v0.3" | "default" => Ok(ZensimProfile::PreviewV0_3),
-        "balanced" | "v0_5_balanced" => Ok(ZensimProfile::balanced()),
-        "compression" | "v0_5_compression" => Ok(ZensimProfile::compression()),
-        "ensemble" | "v0_5_ensemble" => Ok(ZensimProfile::ensemble()),
+        "v0_3" | "v03" | "preview-v0.3" => Ok(ZensimProfile::PreviewV0_3),
+        "balanced" | "v0_5_balanced" | "preview-v0.5-balanced" => Ok(ZensimProfile::balanced()),
+        "compression" | "v0_5_compression" | "preview-v0.5-compression" => {
+            Ok(ZensimProfile::compression())
+        }
+        "ensemble" | "v0_5_ensemble" | "preview-v0.5-ensemble" => Ok(ZensimProfile::ensemble()),
+        "tuner" | "v0_5_tuner" | "preview-v0.5-tuner" => Ok(ZensimProfile::tuner()),
+        "tuner-v2" | "tuner_v2" | "v0_5_tuner_v2" | "preview-v0.5-tuner-v2" | "default" => {
+            Ok(ZensimProfile::PreviewV0_5TunerV2)
+        }
         other => bail!(
-            "unknown profile '{other}'; expected v0_2 | v0_3 | balanced | compression | ensemble"
+            "unknown profile '{other}'; expected v0_2 | v0_3 | balanced | compression | ensemble | tuner | tuner-v2"
         ),
     }
 }

@@ -97,12 +97,20 @@ impl Default for TargetSpec {
             target: 70.0,
             tolerance: 1.0,
             max_iterations: 8,
-            // Default to V0_3 — V0_5* profiles currently return ~0 on
-            // identity / near-identity inputs in this workspace
-            // (their bake's raw output for zero features doesn't map
-            // to 100, which breaks the search loop). Callers can still
-            // request V0_5* explicitly via the CLI / API.
-            profile: ZensimProfile::PreviewV0_3,
+            // Default to PreviewV0_5TunerV2 (EXP-CROSS-CODEC-V6 ship,
+            // 2026-05-19). Passes every Tuner-trail gate, Pareto-dominates
+            // the prior `tuner` ship on strict monotonicity (95.2 % vs
+            // 92.8 %), median range (78 vs 73), and cross-codec PJND
+            // parity (cc_std_median 0.91 vs 0.95). The legacy `V0_5*`
+            // ranking ships (Balanced / Compression / Ensemble) are NOT
+            // suited for quality-dial use — they were trained for ranking
+            // accuracy without a monotonicity constraint. The identity
+            // short-circuit fix (commit fdd1b8f, 2026-05-19) restored
+            // identity-image score=100 for every V0_5* profile, but the
+            // non-tuner V0_5 ranking bakes still produce non-monotonic
+            // q-step output. Use `tuner` for the prior `PreviewV0_5Tuner`
+            // ship or `v0_3` for the legacy default.
+            profile: ZensimProfile::PreviewV0_5TunerV2,
         }
     }
 }

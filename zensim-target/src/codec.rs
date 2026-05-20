@@ -264,13 +264,18 @@ pub mod avif {
 #[cfg(feature = "zenjxl")]
 pub mod jxl {
     use super::*;
+    use zencodec::encode::{EncodeJob as _, Encoder as _, EncoderConfig as _};
+    use zenjxl::JxlEncoderConfig;
+    use zenpixels::{PixelDescriptor, PixelSlice};
 
     pub struct Jxl;
 
     impl CodecBackend for Jxl {
         fn quality_range(&self) -> (f32, f32) {
             // jxl distance: 0.0 ≈ mathematically lossless, ~15 = very lossy.
-            (0.5, 15.0)
+            // Floor above 0 because jxl-encoder 0.3 panics at exactly 0.0
+            // (divide-by-zero in vardct/ac_context.rs).
+            (0.01, 15.0)
         }
 
         fn lower_quality_means_higher_score(&self) -> bool {
@@ -279,21 +284,73 @@ pub mod jxl {
 
         fn encode_decode(
             &self,
-            _rgb: &[u8],
-            _width: u32,
-            _height: u32,
-            _knob: f32,
+            rgb: &[u8],
+            width: u32,
+            height: u32,
+            knob: f32,
         ) -> Result<(Vec<u8>, Vec<u8>)> {
-            // Encode path exists via jxl-encoder convenience helpers
-            // (`zenjxl::encode_rgb8`); decode plumbing requires either a
-            // `zenjxl::decode` call with a typed pixel buffer accessor
-            // or pulling jxl-rs in directly. Both are reasonable
-            // follow-ups; v0.1 of zensim-target focuses on three
-            // working codecs (jpeg / webp / avif).
-            bail!(
-                "zenjxl backend is not yet wired in zensim-target v0.1; \
-                 use --codec zenjpeg, zenwebp, or zenavif."
-            )
+            let distance = knob.clamp(0.01, 25.0);
+            let cfg = JxlEncoderConfig::new().with_distance(distance);
+            let stride = width as usize * 3;
+            let slice = PixelSlice::new(rgb, width, height, stride, PixelDescriptor::RGB8_SRGB)
+                .map_err(|e| anyhow::anyhow!("zenjxl slice: {e}"))?;
+            let encoder = cfg
+                .job()
+                .encoder()
+                .map_err(|e| anyhow::anyhow!("zenjxl ctor: {e}"))?;
+            let output = encoder
+                .encode(slice)
+                .map_err(|e| anyhow::anyhow!("zenjxl encode: {e}"))?;
+            let encoded = output.into_vec();
+
+            let decoded = zenjxl::decode(&encoded, None, &[])
+                .map_err(|e| anyhow::anyhow!("zenjxl decode: {e:?}"))?;
+            let pb = &decoded.pixels;
+            if pb.width() != width || pb.height() != height {
+                bail!(
+                    "decoded jxl dimensions {}x{} != source {width}x{height}",
+                    pb.width(),
+                    pb.height()
+                );
+            }
+            let decoded_rgb = jxl_pixelbuffer_to_rgb8(pb)?;
+            Ok((encoded, decoded_rgb))
+        }
+    }
+
+    fn jxl_pixelbuffer_to_rgb8(pb: &zenpixels::PixelBuffer) -> Result<Vec<u8>> {
+        let desc = pb.descriptor();
+        let w = pb.width() as usize;
+        let h = pb.height() as usize;
+        let slice = pb.as_slice();
+        let stride = slice.stride();
+        let data = slice.as_strided_bytes();
+        if desc.layout_compatible(PixelDescriptor::RGB8_SRGB)
+            || desc.layout_compatible(PixelDescriptor::RGB8)
+        {
+            let bpr = w * 3;
+            let mut out = Vec::with_capacity(bpr * h);
+            for row in 0..h {
+                let start = row * stride;
+                out.extend_from_slice(&data[start..start + bpr]);
+            }
+            Ok(out)
+        } else if desc.layout_compatible(PixelDescriptor::RGBA8_SRGB)
+            || desc.layout_compatible(PixelDescriptor::RGBA8)
+        {
+            let bpr_in = w * 4;
+            let bpr_out = w * 3;
+            let mut out = Vec::with_capacity(bpr_out * h);
+            for row in 0..h {
+                let start = row * stride;
+                let row_slice = &data[start..start + bpr_in];
+                for px in row_slice.chunks_exact(4) {
+                    out.extend_from_slice(&px[..3]);
+                }
+            }
+            Ok(out)
+        } else {
+            bail!("zenjxl decoded pixel descriptor {desc:?} not RGB8 or RGBA8");
         }
     }
 }
