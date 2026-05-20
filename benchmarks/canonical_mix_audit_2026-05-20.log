@@ -1,0 +1,68 @@
+
+Auditing 5 training parquets in /mnt/v/zen/zensim-training/canonical-2026-05-18/train
+
+Reading cvvdp_iwssim_LARGE (73,300 rows, 22/22 target cols present)…
+Reading kadid (10,125 rows, 21/22 target cols present)…
+Reading konjnd-dense (20,160 rows, 22/22 target cols present)…
+Reading safesyn (196,086 rows, 21/22 target cols present)…
+Reading tid (3,000 rows, 21/22 target cols present)…
+
+| target_col | safesyn (196,086) | kadid (10,125) | tid (3,000) | konjnd-dense (20,160) | cvvdp_iwssim_LARGE (73,300) |
+|---|---|---|---|---|---|
+| human_score | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 73,300 (100.0%) |
+| cvvdp_score | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 73,300 (100.0%) |
+| cvvdp_log_norm | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 73,300 (100.0%) |
+| iwssim | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 73,300 (100.0%) |
+| iwssim_log_norm | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 73,300 (100.0%) |
+| ssim2_gpu | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 0 / 73,300 (ALL-NULL) |
+| ssim2_log_norm | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 0 / 73,300 (ALL-NULL) |
+| pjnd_target | 0 / 196,086 (ALL-NULL) | 0 / 10,125 (ALL-NULL) | 0 / 3,000 (ALL-NULL) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv25_iw75 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv30_iw70 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv35_iw65 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv40_iw60 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 73,300 (100.0%) |
+| mix_cv45_iw55 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv50_iw50 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv55_iw45 | MISSING | MISSING | MISSING | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv55_iw44 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 0 / 73,300 (ALL-NULL) |
+| mix_cv60_iw40 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv65_iw35 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv70_iw30 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv75_iw25 | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 20,160 (100.0%) | 0 / 73,300 (ALL-NULL) |
+| mix_cv33_iw33_sm33 | 0 / 196,086 (ALL-NULL) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 0 / 73,300 (ALL-NULL) |
+| mix_target | 196,086 (100.0%) | 10,125 (100.0%) | 3,000 (100.0%) | 0 / 20,160 (ALL-NULL) | 0 / 73,300 (ALL-NULL) |
+
+## Anomalies
+
+- konjnd-dense: column `cvvdp_score` is ALL-NULL (20,160 rows)
+- konjnd-dense: column `cvvdp_log_norm` is ALL-NULL (20,160 rows)
+- konjnd-dense: column `iwssim` is ALL-NULL (20,160 rows)
+- konjnd-dense: column `iwssim_log_norm` is ALL-NULL (20,160 rows)
+- konjnd-dense: column `ssim2_gpu` is ALL-NULL (20,160 rows)
+- cvvdp_iwssim_LARGE: column `ssim2_gpu` is ALL-NULL (73,300 rows)
+- konjnd-dense: column `ssim2_log_norm` is ALL-NULL (20,160 rows)
+- cvvdp_iwssim_LARGE: column `ssim2_log_norm` is ALL-NULL (73,300 rows)
+- safesyn: column `pjnd_target` is ALL-NULL (196,086 rows)
+- kadid: column `pjnd_target` is ALL-NULL (10,125 rows)
+- tid: column `pjnd_target` is ALL-NULL (3,000 rows)
+- cvvdp_iwssim_LARGE: column `pjnd_target` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv25_iw75` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv30_iw70` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv35_iw65` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv45_iw55` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv50_iw50` is ALL-NULL (73,300 rows)
+- safesyn: column `mix_cv55_iw45` is MISSING from schema
+- kadid: column `mix_cv55_iw45` is MISSING from schema
+- tid: column `mix_cv55_iw45` is MISSING from schema
+- cvvdp_iwssim_LARGE: column `mix_cv55_iw45` is ALL-NULL (73,300 rows)
+- konjnd-dense: column `mix_cv55_iw44` is ALL-NULL (20,160 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv55_iw44` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv60_iw40` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv65_iw35` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv70_iw30` is ALL-NULL (73,300 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv75_iw25` is ALL-NULL (73,300 rows)
+- safesyn: column `mix_cv33_iw33_sm33` is ALL-NULL (196,086 rows)
+- konjnd-dense: column `mix_cv33_iw33_sm33` is ALL-NULL (20,160 rows)
+- cvvdp_iwssim_LARGE: column `mix_cv33_iw33_sm33` is ALL-NULL (73,300 rows)
+- konjnd-dense: column `mix_target` is ALL-NULL (20,160 rows)
+- cvvdp_iwssim_LARGE: column `mix_target` is ALL-NULL (73,300 rows)
