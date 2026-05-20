@@ -298,6 +298,38 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
     /// Findings: `benchmarks/v_cross_codec_findings_2026-05-19.md`.
+    ///
+    /// # Deprecation (2026-05-20, task #179)
+    ///
+    /// **Dial-broken.** The cross-codec-equivalence training loss
+    /// compresses the network's raw output range to ~0.18 score units
+    /// across the full V9 anchor parquet quality range, leaving the
+    /// production runtime with no usable dial (raw output collapses to
+    /// `[60.7, 63.0]` across 1000 random anchor pairs). PCHIP spline
+    /// calibration was attempted in task #179 and falsified: 6 of 8
+    /// training bands' raw medians collapse to within 0.022 score units
+    /// of each other (target ∈ {30, 50, 60, 80, 90, 100} all map to
+    /// raw ∈ [62.985, 63.007]), and the surviving 2 knots map JND →
+    /// score 0 instead of 60. SROCC information is preserved
+    /// (|SROCC| = 0.934 vs MOS, bit-exact preserved under spline) but
+    /// is unrecoverable as a user-facing dial without retraining
+    /// against a rank-preserve / dynamic-range-floor counter-term.
+    ///
+    /// **Use [`Self::PreviewV0_5CompressionV2`] or
+    /// [`Self::PreviewV0_5BalancedV2`] for new code.** Both are
+    /// V9-PCHIP-spline-calibrated per-sample-α bakes with full
+    /// [0, 100] dial range and bit-exact-preserved SROCC.
+    ///
+    /// Falsification:
+    /// `benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
+    #[deprecated(
+        since = "0.5.0",
+        note = "dial-broken — cross-codec-equivalence loss compresses \
+            raw output range to ~0.18 score units; PCHIP spline \
+            calibration falsified 2026-05-20 (task #179). Use \
+            PreviewV0_5CompressionV2 or PreviewV0_5BalancedV2 instead. \
+            See benchmarks/v_cross_codec_v2_2026-05-20_falsification.md"
+    )]
     PreviewV0_5CrossCodec,
     /// Preview v0.5, **tuner trail v2** — EXP-CROSS-CODEC-V6
     /// (2026-05-19). Same V_24-per-sample-α architecture as
@@ -653,8 +685,21 @@ impl ZensimProfile {
     /// because the mechanism reduces cross-codec mean pairwise
     /// butter by 25–46 % vs Tuner WITHOUT collapsing rank quality.
     /// See `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
+    ///
+    /// **Deprecated 2026-05-20 (task #179).** The cross-codec variant
+    /// is dial-broken; PCHIP spline calibration was falsified. Use
+    /// [`Self::compression_v2`] or [`Self::balanced_v2`] for new code.
+    /// See
+    /// `benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
+    #[deprecated(
+        since = "0.5.0",
+        note = "dial-broken — use compression_v2() or balanced_v2()"
+    )]
     pub const fn cross_codec() -> Self {
-        Self::PreviewV0_5CrossCodec
+        #[allow(deprecated)]
+        {
+            Self::PreviewV0_5CrossCodec
+        }
     }
 
     /// Tuner trail v3 — alias for [`Self::PreviewV0_5TunerV3`]
@@ -706,6 +751,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Compression => "zensim-preview-v0.5-compression",
             Self::PreviewV0_5Ensemble => "zensim-preview-v0.5-ensemble",
             Self::PreviewV0_5Tuner => "zensim-preview-v0.5-tuner",
+            #[allow(deprecated)]
             Self::PreviewV0_5CrossCodec => "zensim-preview-v0.5-cross-codec",
             Self::PreviewV0_5TunerV2 => "zensim-preview-v0.5-tuner-v2",
             Self::PreviewV0_5TunerV3 => "zensim-preview-v0.5-tuner-v3",
@@ -729,6 +775,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Compression => &PROFILE_PREVIEW_V0_5_COMPRESSION,
             Self::PreviewV0_5Ensemble => &PROFILE_PREVIEW_V0_5_ENSEMBLE,
             Self::PreviewV0_5Tuner => &PROFILE_PREVIEW_V0_5_TUNER,
+            #[allow(deprecated)]
             Self::PreviewV0_5CrossCodec => &PROFILE_PREVIEW_V0_5_CROSS_CODEC,
             Self::PreviewV0_5TunerV2 => &PROFILE_PREVIEW_V0_5_TUNER_V2,
             Self::PreviewV0_5TunerV3 => &PROFILE_PREVIEW_V0_5_TUNER_V3,

@@ -373,15 +373,43 @@ PLUS:
 `benchmarks/v_tuner_v3_ship_2026-05-20.md` for the full ship
 methodology, anchor table, and cross-codec smoke demo.
 
-### Cross-codec trail (`PreviewV0_5CrossCodec`, opt-in)
+### Cross-codec trail — DEPRECATED 2026-05-20 (task #179)
 
-**Audience.** Codec orchestrators that need consistent zensim scores
-across multiple codec outputs at the same perceptual quality target
-— e.g., a pipeline that picks between JPEG / WebP / AVIF / JXL given
-a user-typed target zensim and expects all four codecs to produce
-visually-similar outputs (matching butteraugli) when they land at
-that target. Added 2026-05-19 per EXP-CROSS-CODEC-METRIC ship
-decision.
+**Status.** Originally shipped 2026-05-19 as `PreviewV0_5CrossCodec`
+(opt-in opt-in only — see "Ship rationale" below). The
+[2026-05-20 dial-bug audit (task #178, commit `28ed2552`)][cc-audit]
+caught the bake's raw output range collapsed to ~0.18 score units
+across the full V9 anchor parquet quality range; PCHIP spline
+calibration (task #179, which shipped successfully on Balanced + 
+Compression as `BalancedV2` / `CompressionV2`) was attempted and 
+**falsified** on this bake. Root cause is structural to the
+training objective — the `(y_codec_a − y_codec_b)²` cross-codec-eq
+loss minimizes inter-codec variance at every butter level, which
+collapses the network toward a near-constant function of the
+features. The cross-codec consistency the bake delivered was paid
+for with the user-facing dial; calibration cannot recover what the
+loss discarded.
+
+**Recommendation.** Use `PreviewV0_5CompressionV2` (codec selection
++ compression workloads) or `PreviewV0_5BalancedV2` (general
+purpose) for new code. The variant + alias are marked
+`#[deprecated(since = "0.5.0")]`; existing callers continue to
+compile but get a deprecation warning at use site.
+
+Falsification:
+`benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
+
+[cc-audit]: ../benchmarks/dial_bug_audit_2026-05-20.md
+
+#### Historical ship rationale (preserved for context)
+
+**Audience.** Codec orchestrators that need consistent zensim
+scores across multiple codec outputs at the same perceptual quality
+target — e.g., a pipeline that picks between JPEG / WebP / AVIF /
+JXL given a user-typed target zensim and expects all four codecs
+to produce visually-similar outputs (matching butteraugli) when
+they land at that target. Added 2026-05-19 per
+EXP-CROSS-CODEC-METRIC ship decision.
 
 **Gate** (formal, original):
 
@@ -401,14 +429,15 @@ which is a **−25 to −31 % reduction** from the Tuner baseline (6.41
 but doesn't pass strict < 2.5. The compression-trail-style "close
 gate" alternative (`butter in [2.5, 4.0]`) is also not met.
 
-Ship rationale (opt-in only): the cross-codec equivalence-loss
-mechanism produces a meaningful 25–46 % cross-codec consistency
-improvement WITHOUT collapsing ranking quality (KADID +0.405, TID
-+0.300, CID22 +0.022 vs Tuner baseline — the equivalence loss is a
-generic cross-distortion-aligning signal). It defends a distinct
-Pareto point from the existing trails. Future bakes that hit strict
-< 2.5 should rotate this trail; current ship documents the gap and
-preserves the wiring for follow-on work.
+Original ship rationale (now superseded by the dial-broken
+finding): the cross-codec equivalence-loss mechanism produces a
+meaningful 25–46 % cross-codec consistency improvement WITHOUT
+collapsing ranking quality on the Mohammadi panel (KADID +0.405,
+TID +0.300, CID22 +0.022 vs Tuner baseline — the equivalence loss
+is a generic cross-distortion-aligning signal). The post-2026-05-20
+audit reveals that this rank improvement was paid for with a
+user-facing dial collapse that the sign-tolerant SROCC stat did not
+surface.
 
 ---
 

@@ -1,4 +1,12 @@
+#![allow(deprecated)]
 //! Smoke test for `PreviewV0_5CrossCodec` runtime wiring.
+//!
+//! NOTE: `PreviewV0_5CrossCodec` was deprecated 2026-05-20 (task #179)
+//! as dial-broken. The variant remains alive for backward compat and
+//! the runtime wiring is still tested here, but the deprecation
+//! warnings are suppressed file-wide so new ships don't fight the
+//! lint. See
+//! `benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
 //!
 //! EXP-CROSS-CODEC-METRIC (2026-05-19) shipped a per-sample-α
 //! architecture bake trained with a cross-codec equivalence-pair

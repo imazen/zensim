@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Deprecated (2026-05-20, CROSS-CODEC-V9-SPLINE — task #179)
+
+- **`ZensimProfile::PreviewV0_5CrossCodec`** — dial-broken. The
+  cross-codec-equivalence training loss structurally compresses
+  the network's raw output range to ~0.18 score units across the
+  full V9 anchor parquet quality range (raw collapses to
+  [60.7, 63.0] on 1000 random anchor pairs, per the dial-bug audit
+  in task #178). PCHIP spline calibration was attempted in task
+  #179 (the same mechanism that shipped BalancedV2 + CompressionV2
+  successfully) and **falsified**: 6 of 8 training bands' raw
+  medians collapse to within 0.022 score units of each other
+  (target ∈ {30, 50, 60, 80, 90, 100} all map to raw ∈ [62.985,
+  63.007]), and the surviving 2 knots map JND → score 0 instead
+  of 60. SROCC information is preserved bit-exact under the spline
+  (CID22 0.8797, KADID 0.8003, TID 0.8215, KonJND 0.3269, AIC-3
+  0.8060 — Δ=0.0000 on every corpus) but is unrecoverable as a
+  user-facing dial without retraining the cross-codec recipe with
+  a `--rank-preserve-weight` or `--dynamic-range-floor`
+  counter-term. The candidate bake bytes are preserved at
+  `zensim/weights/v_cross_codec_v2_2026-05-20.bin` for provenance
+  but are NOT wired into any `ZensimProfile` variant.
+
+  The variant remains alive (no source-breaking removal — existing
+  callers continue to compile) but is marked
+  `#[deprecated(since = "0.5.0")]` and the alias
+  `ZensimProfile::cross_codec()` similarly. Use
+  `PreviewV0_5CompressionV2` (codec selection / dial-honest
+  compression) or `PreviewV0_5BalancedV2` (general purpose) for
+  new code. Falsification doc:
+  `benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
+
+  Root cause is structural to the training objective: the
+  `(y_codec_a − y_codec_b)²` cross-codec-eq loss term over ~58k
+  equivalence pairs minimizes inter-codec variance at every butter
+  level, which collapses the network toward a near-constant
+  function of the features (the only way to predict the same
+  value across 4 different codecs' feature distributions at the
+  same butter level). The cross-codec consistency the bake
+  delivered was paid for with the user-facing dial; PCHIP spline
+  calibration cannot recover what the loss discarded.
+
 ### Added (2026-05-20, COMPRESSION-V9-SPLINE — task #177)
 
 - **`ZensimProfile::PreviewV0_5CompressionV2`** — port of the V9 PCHIP

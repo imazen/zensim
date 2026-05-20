@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Smoke test for `PreviewV0_5TunerV2` runtime wiring.
 //!
 //! EXP-CROSS-CODEC-V6 (2026-05-19) shipped the V_24-per-sample-α

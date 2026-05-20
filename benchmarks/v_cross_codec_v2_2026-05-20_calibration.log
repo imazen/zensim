@@ -1,0 +1,24 @@
+zenpredict-bake: wrote zensim/weights/v_cross_codec_v2_2026-05-20.bin (197073 bytes) — n_inputs=372 n_outputs=128 n_layers=2 schema_hash=0x0000000000000000 metadata_entries=2
+=== loading anchor parquet /mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet ===
+  22008 rows × 372 features
+=== scoring zensim/weights/v_cross_codec_2026-05-19.bin on anchor features ===
+=== per-band median predicted (raw, pre-spline) ===
+  target=   0.0 n=  1159 med= 62.961 p25= 62.729 p75= 62.987 min= 60.071 max= 63.001
+  target=  10.0 n=   296 med= 62.829 p25= 62.569 p75= 62.984 min= 60.071 max= 62.999
+  target=  30.0 n=  2055 med= 62.985 p25= 62.978 p75= 62.992 min= 61.899 max= 63.003
+  target=  50.0 n=  3934 med= 62.995 p25= 62.992 p75= 62.998 min= 62.749 max= 63.006
+  target=  60.0 n=  3933 med= 63.002 p25= 63.000 p75= 63.003 min= 62.914 max= 63.009
+  target=  80.0 n=  3714 med= 63.006 p25= 63.006 p75= 63.006 min= 62.999 max= 63.008
+  target=  90.0 n=  3406 med= 63.007 p25= 63.006 p75= 63.007 min= 63.003 max= 63.008
+  target= 100.0 n=  3511 med= 63.007 p25= 63.007 p75= 63.007 min= 63.004 max= 63.008
+  inferred bake shape: score-shaped (target=high raw_med=63.01, target=low raw_med=62.96)
+=== building spline knots ===
+  WARN: dropped 6 band(s) (x-collision or direction-violation): [(30.0, 62.985236), (50.0, 62.995101500000004), (60.0, 63.001557), (80.0, 63.005984999999995), (90.0, 63.0065325), (100.0, 63.006979)]
+  2 knots (xs ascending, ys following bake shape):
+    x= 62.8289 → y=  10.0
+    x= 62.9609 → y=   0.0
+  derivatives: [-75.73605983 -75.73605983]
+  monotone=True  max_drop=0.00e+00  direction=-1
+  wrote summary to benchmarks/v_cross_codec_v2_2026-05-20_spline.csv
+=== writing calibrated bake to zensim/weights/v_cross_codec_v2_2026-05-20.bin ===
+  bake size: 261316 → 197073 bytes (+-64243)
