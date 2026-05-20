@@ -8,6 +8,13 @@ publish = false
 training = ["zensim/training"]
 # zenresize = ["zensim/zenresize"]
 
+# Enables the `extract_features_372col_omni` example. Uses only the
+# `image` crate's default decoders — supports JPEG, PNG, WebP. AVIF and
+# JXL encoded variants are SKIPPED with a logged error. A full-coverage
+# extractor would require zen-metrics-cli as a path dep, but that pulls
+# in a conflicting zenjxl path (zenjxl vs zenjxl--main). Documented gap.
+extract-omni = ["training", "dep:parquet", "dep:arrow"]
+
 [build-dependencies]
 cc = "1"
 
@@ -30,6 +37,14 @@ zenpredict-bake = { workspace = true }
 csv = "1"
 image = { workspace = true }
 rayon = { workspace = true }
+
+# Optional deps for the `extract-omni` feature. Uses image crate's
+# native JPEG/PNG/WebP support. AVIF + JXL not supported (image 0.25
+# only ships avif decode via dav1d system dep, no jxl); a future
+# session can add zen-metrics-cli once the zenjxl path conflict
+# (zenjxl vs zenjxl--main in the workspace dep graph) is resolved.
+parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"], optional = true }
+arrow = { version = "58.3.0", default-features = false, optional = true }
 
 [[bench]]
 name = "bench_compare"
