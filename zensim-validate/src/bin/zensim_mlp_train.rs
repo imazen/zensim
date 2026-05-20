@@ -738,6 +738,25 @@ struct Args {
     /// Only wired on `--per-sample-alpha-head`. Requires `--minibatch-size 1`.
     #[arg(long, default_value_t = 0.0)]
     tanh_output_head_scale: f64,
+
+    /// GPU trainer dispatch (task #166, 2026-05-19). When set to a value
+    /// other than `""` / `cpu`, routes the per-sample-α head training
+    /// loop through `zensim-train-gpu` instead of the CPU SIMD path.
+    /// Acceptable: `cuda`, `wgpu`, `gpucpu` (cubecl-cpu — parity only).
+    /// Requires the matching cargo feature (`--features gpu-cuda` etc).
+    ///
+    /// **Phase 1 restrictions** (panic-on-conflict at startup):
+    /// - `--per-sample-alpha-head` must be set
+    /// - Auxiliary losses must all be 0 (no `--anchor-loss-weight`,
+    ///   `--cross-codec-eq-weight`, `--cross-codec-rank-preserve-weight`,
+    ///   `--dynamic-range-floor-weight`, `--norm-in-norm-weight`)
+    /// - `--tv-pairs-file` must NOT be set
+    /// - PWRC band weights / boost flags ignored on the GPU path
+    /// - Empty = CPU (default).
+    ///
+    /// Phase 2 will lift these restrictions one by one.
+    #[arg(long, default_value = "")]
+    gpu_runtime: String,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -2018,15 +2037,109 @@ fn main() {
     };
 
     let mut log: Vec<String> = Vec::new();
-    let bake_bytes = train_mlp_with_tv_anchored_equiv(
-        &groups,
-        n_features,
-        &hyperparams,
-        &mut log,
-        tv_regularizer.as_ref(),
-        anchor_loaded.as_ref(),
-        equiv_loaded.as_ref(),
-    );
+
+    // GPU trainer dispatch (task #166, 2026-05-19). Only active when
+    // the user passes `--gpu-runtime <name>` AND the recipe is
+    // GPU-supported (per-sample-α head, no aux losses, no TV).
+    let gpu_runtime_str = args.gpu_runtime.trim().to_ascii_lowercase();
+    let want_gpu = !gpu_runtime_str.is_empty() && gpu_runtime_str != "cpu";
+    let bake_bytes = if want_gpu {
+        if !args.per_sample_alpha_head {
+            eprintln!(
+                "--gpu-runtime requires --per-sample-alpha-head (Phase 1 GPU MVP only ports the \
+                 per-sample-α head)."
+            );
+            std::process::exit(2);
+        }
+        if tv_regularizer.is_some() {
+            eprintln!("--gpu-runtime is incompatible with --tv-pairs-file (Phase 2 work).");
+            std::process::exit(2);
+        }
+        if hyperparams.anchor_loss_weight > 0.0
+            || hyperparams.cross_codec_eq_weight > 0.0
+            || hyperparams.cross_codec_rank_preserve_weight > 0.0
+            || hyperparams.dynamic_range_floor_weight > 0.0
+            || hyperparams.norm_in_norm_weight > 0.0
+        {
+            eprintln!(
+                "--gpu-runtime requires all auxiliary losses to be 0 in Phase 1 \
+                 (anchor/cross-codec-eq/rank-preserve/σ-floor/NiN). Run with the \
+                 default CPU path or wait for Phase 2."
+            );
+            std::process::exit(2);
+        }
+        let runtime = match gpu_runtime_str.as_str() {
+            "cuda" => zensim_train_gpu::GpuRuntime::Cuda,
+            "wgpu" => zensim_train_gpu::GpuRuntime::Wgpu,
+            "gpucpu" => zensim_train_gpu::GpuRuntime::Cpu,
+            other => {
+                eprintln!(
+                    "--gpu-runtime must be one of cuda / wgpu / gpucpu / cpu (empty), got {other:?}"
+                );
+                std::process::exit(2);
+            }
+        };
+        let gpu_hp = zensim_train_gpu::GpuHparams {
+            n_hidden: hyperparams.n_hidden,
+            n_epochs: hyperparams.n_epochs,
+            pairs_per_epoch: hyperparams.pairs_per_epoch,
+            minibatch_k: hyperparams.minibatch_size.max(512),
+            initial_lr: hyperparams.initial_lr,
+            leaky_alpha: hyperparams.leaky_alpha,
+            seed: hyperparams.seed,
+            l2_lambda: hyperparams.l2_lambda,
+            mse_weight: hyperparams.mse_weight,
+            ranknet_weight: hyperparams.ranknet_weight,
+            monotonicity_reg: hyperparams.monotonicity_reg,
+            monotonicity_margin: hyperparams.monotonicity_margin,
+            tanh_output_head_scale: hyperparams.tanh_output_head_scale,
+        };
+        log.push(format!(
+            "GPU trainer: runtime={gpu_runtime_str:?} hparams={gpu_hp:?}"
+        ));
+        // Remap `mlp_train::TrainingGroup` to `zensim_train_core::TrainingGroup`
+        // (same shape, different type identity per crate boundary).
+        let core_groups: Vec<zensim_train_core::TrainingGroup<'_>> = groups
+            .iter()
+            .map(|g| zensim_train_core::TrainingGroup {
+                name: g.name.clone(),
+                human_scores: g.human_scores,
+                features: g.features,
+                train_weight: g.train_weight,
+                validation_weight: g.validation_weight,
+            })
+            .collect();
+        let res = zensim_train_gpu::train_per_sample_alpha_head_gpu(
+            &core_groups,
+            &gpu_hp,
+            n_features,
+            runtime,
+        );
+        log.push(format!(
+            "GPU trainer: {} batches in {:.2} s ({:.1} batches/s)",
+            res.n_batches,
+            res.wall_seconds,
+            res.n_batches as f64 / res.wall_seconds
+        ));
+        if gpu_hp.tanh_output_head_scale > 0.0 {
+            zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh(
+                &res.model,
+                gpu_hp.tanh_output_head_scale,
+            )
+        } else {
+            zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3(&res.model)
+        }
+    } else {
+        train_mlp_with_tv_anchored_equiv(
+            &groups,
+            n_features,
+            &hyperparams,
+            &mut log,
+            tv_regularizer.as_ref(),
+            anchor_loaded.as_ref(),
+            equiv_loaded.as_ref(),
+        )
+    };
 
     std::fs::write(&args.out, &bake_bytes).unwrap_or_else(|e| {
         eprintln!("write {:?}: {e}", args.out);

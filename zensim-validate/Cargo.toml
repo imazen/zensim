@@ -10,9 +10,19 @@ publish = false
 default = []
 # zenresize = ["zensim/zenresize"]  # re-enable when zenresize published
 
+# GPU trainer dispatch (task #166). When enabled, `zensim_mlp_train`
+# accepts `--gpu-runtime cuda` and routes the per-sample-α head training
+# loop through `zensim-train-gpu`. Off by default so the existing CPU
+# code path stays bit-identical and machines without CUDA can still
+# build the validate crate.
+gpu-cuda = ["zensim-train-gpu/gpu-cuda"]
+gpu-wgpu = ["zensim-train-gpu/gpu-wgpu"]
+gpu-cpu  = ["zensim-train-gpu/gpu-cpu"]
+
 [dependencies]
 zensim = { path = "../zensim", features = ["training"] }
 zensim-train-core = { path = "../zensim-train-core" }
+zensim-train-gpu = { path = "../zensim-train-gpu" }
 zenpredict = { workspace = true }
 zenpredict-bake = { workspace = true }
 archmage = { workspace = true }
