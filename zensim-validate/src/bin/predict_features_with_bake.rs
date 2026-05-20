@@ -136,6 +136,7 @@ fn score_with_bake(
     psa: Option<&PerSampleAlphaHeadDispatch>,
     hyb: Option<&HybridHeadDispatch>,
     tanh_pin_scale: Option<f64>,
+    output_spline: Option<&zensim_validate::output_calibration_spline::OutputCalibrationSpline>,
     f32_scratch: &mut [f32],
     features_row: &[f32],
 ) -> f64 {
@@ -234,14 +235,24 @@ fn score_with_bake(
         }
         Err(_) => f64::NAN,
     };
-    if let Some(scale) = tanh_pin_scale {
+    let y_after_pin = if let Some(scale) = tanh_pin_scale {
         if !y_pre.is_nan() {
             let xc = (y_pre / scale).clamp(-30.0, 30.0);
             let s = 1.0 / (1.0 + (-xc).exp());
-            return 100.0 * s;
+            100.0 * s
+        } else {
+            y_pre
+        }
+    } else {
+        y_pre
+    };
+    // EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline.
+    if let Some(spline) = output_spline {
+        if !y_after_pin.is_nan() {
+            return zensim_validate::output_calibration_spline::apply(y_after_pin, spline);
         }
     }
-    y_pre
+    y_after_pin
 }
 
 fn parse_features_arg(s: &str) -> Result<(usize, usize, Vec<f32>), String> {
@@ -408,6 +419,7 @@ fn main() -> ExitCode {
     let psa = extract_per_sample_alpha_head(&model);
     let hyb = extract_hybrid_head(&model);
     let tanh_pin_scale = extract_tanh_output_head_scale(&model);
+    let output_spline = zensim_validate::output_calibration_spline::extract(&model);
 
     let mut predictor = Predictor::new(&model);
     let mut scratch = vec![0.0f32; n_inputs];
@@ -426,6 +438,7 @@ fn main() -> ExitCode {
             psa.as_ref(),
             hyb.as_ref(),
             tanh_pin_scale,
+            output_spline.as_ref(),
             &mut scratch,
             row,
         );

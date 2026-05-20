@@ -735,6 +735,7 @@ fn score_row(
     per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
     hybrid_head: Option<&HybridHeadDispatch>,
     tanh_pin_scale: Option<f64>,
+    output_spline: Option<&zensim_validate::output_calibration_spline::OutputCalibrationSpline>,
     f32_features: &mut [f32],
     row: &[f64],
 ) -> f64 {
@@ -846,14 +847,25 @@ fn score_row(
     };
     // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned [0, 100] output
     // wrap. Bit-exact with `zensim::metric::apply_tanh_output_pin`.
-    if let Some(scale) = tanh_pin_scale {
+    let y_after_pin = if let Some(scale) = tanh_pin_scale {
         if !y_pre.is_nan() {
             let xc = (y_pre / scale).clamp(-30.0, 30.0);
             let s = 1.0 / (1.0 + (-xc).exp());
-            return 100.0 * s;
+            100.0 * s
+        } else {
+            y_pre
+        }
+    } else {
+        y_pre
+    };
+    // EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline
+    // calibration. Bit-exact with `zensim::metric::apply_output_calibration_spline`.
+    if let Some(spline) = output_spline {
+        if !y_after_pin.is_nan() {
+            return zensim_validate::output_calibration_spline::apply(y_after_pin, spline);
         }
     }
-    y_pre
+    y_after_pin
 }
 
 // ============================================================================
@@ -1049,6 +1061,7 @@ fn render_corpus(
     let per_sample_alpha_head = extract_per_sample_alpha_head(model);
     let hybrid_head = extract_hybrid_head(model);
     let tanh_pin_scale = extract_tanh_output_head_scale(model);
+    let output_spline = zensim_validate::output_calibration_spline::extract(model);
     let mut predictor = Predictor::new(model);
 
     // Score every row. f32 scratch buffer reused across all rows
@@ -1065,6 +1078,7 @@ fn render_corpus(
                 per_sample_alpha_head.as_ref(),
                 hybrid_head.as_ref(),
                 tanh_pin_scale,
+                output_spline.as_ref(),
                 &mut scratch,
                 row,
             )

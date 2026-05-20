@@ -1773,6 +1773,159 @@ fn apply_tanh_output_pin(y_pre: f64, scale: f64) -> f64 {
     100.0 * s
 }
 
+/// EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline calibration
+/// metadata key. Payload is `[n_knots: u32 LE, n_knots × (x: f32 LE, y: f32 LE)]`,
+/// i.e. `4 + 8·n_knots` bytes. Knots must be sorted strictly increasing by x.
+/// When present, the runtime applies a monotone cubic Hermite (PCHIP)
+/// interpolation to the post-tanh-pin score: `y_calibrated = pchip(y_pinned)`.
+const OUTPUT_CALIBRATION_SPLINE_KEY: &str = "zentrain.output_calibration_spline";
+
+/// Parsed PCHIP spline payload: parallel `xs` and `ys` arrays plus the
+/// precomputed monotone-Hermite slopes per knot (Fritsch–Carlson).
+#[derive(Clone, Debug)]
+struct OutputCalibrationSpline {
+    xs: Vec<f64>,
+    ys: Vec<f64>,
+    /// Per-knot derivative (length == xs.len()).
+    derivs: Vec<f64>,
+}
+
+/// Parse the `zentrain.output_calibration_spline` payload. Returns
+/// `None` if the byte layout is wrong, knots are not strictly
+/// increasing in x, or n_knots < 2.
+fn parse_output_calibration_spline(payload: &[u8]) -> Option<OutputCalibrationSpline> {
+    if payload.len() < 4 {
+        return None;
+    }
+    let n = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
+    if n < 2 {
+        return None;
+    }
+    let expected = 4 + 8 * n;
+    if payload.len() != expected {
+        return None;
+    }
+    let mut xs = Vec::with_capacity(n);
+    let mut ys = Vec::with_capacity(n);
+    for i in 0..n {
+        let off = 4 + i * 8;
+        let x = f32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]) as f64;
+        let y = f32::from_le_bytes([
+            payload[off + 4],
+            payload[off + 5],
+            payload[off + 6],
+            payload[off + 7],
+        ]) as f64;
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        xs.push(x);
+        ys.push(y);
+    }
+    // Strictly increasing x.
+    for i in 1..n {
+        if !(xs[i] > xs[i - 1]) {
+            return None;
+        }
+    }
+    let derivs = pchip_compute_derivs(&xs, &ys);
+    Some(OutputCalibrationSpline { xs, ys, derivs })
+}
+
+/// Compute Fritsch–Carlson monotone-preserving derivatives at each
+/// knot. Standard PCHIP recipe: average of adjacent slopes harmonised
+/// to prevent overshoot; endpoint derivatives use the one-sided slope
+/// with a clamp to maintain monotonicity.
+fn pchip_compute_derivs(xs: &[f64], ys: &[f64]) -> Vec<f64> {
+    let n = xs.len();
+    debug_assert_eq!(ys.len(), n);
+    debug_assert!(n >= 2);
+    if n == 2 {
+        let s = (ys[1] - ys[0]) / (xs[1] - xs[0]);
+        return vec![s, s];
+    }
+    // Per-segment slopes h_k = (y_{k+1} - y_k) / (x_{k+1} - x_k).
+    let mut h = Vec::with_capacity(n - 1);
+    let mut s = Vec::with_capacity(n - 1);
+    for k in 0..n - 1 {
+        let hk = xs[k + 1] - xs[k];
+        h.push(hk);
+        s.push((ys[k + 1] - ys[k]) / hk);
+    }
+    let mut d = vec![0.0_f64; n];
+    // Interior: weighted harmonic mean when adjacent slopes share sign,
+    // else 0 (extremum).
+    for k in 1..n - 1 {
+        if s[k - 1] * s[k] <= 0.0 {
+            d[k] = 0.0;
+        } else {
+            let w1 = 2.0 * h[k] + h[k - 1];
+            let w2 = h[k] + 2.0 * h[k - 1];
+            d[k] = (w1 + w2) / (w1 / s[k - 1] + w2 / s[k]);
+        }
+    }
+    // Endpoints — three-point estimate, clamped to preserve mono.
+    d[0] = pchip_endpoint(h[0], h[1], s[0], s[1]);
+    d[n - 1] = pchip_endpoint(h[n - 2], h[n - 3], s[n - 2], s[n - 3]);
+    d
+}
+
+fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
+    let d = ((2.0 * h0 + h1) * s0 - h0 * s1) / (h0 + h1);
+    if d * s0 <= 0.0 {
+        0.0
+    } else if s0 * s1 <= 0.0 && d.abs() > 3.0 * s0.abs() {
+        3.0 * s0
+    } else {
+        d
+    }
+}
+
+/// Evaluate the PCHIP spline at `x`. Outside the knot range the
+/// evaluation extrapolates linearly using the endpoint slope (so the
+/// output stays monotone — crucial for the user-facing dial).
+fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> f64 {
+    let n = spline.xs.len();
+    debug_assert!(n >= 2);
+    let xs = spline.xs.as_slice();
+    let ys = spline.ys.as_slice();
+    let derivs = spline.derivs.as_slice();
+    if !x.is_finite() {
+        return x;
+    }
+    // Linear extrapolation outside the knot range.
+    if x <= xs[0] {
+        return ys[0] + derivs[0] * (x - xs[0]);
+    }
+    if x >= xs[n - 1] {
+        return ys[n - 1] + derivs[n - 1] * (x - xs[n - 1]);
+    }
+    // Find the segment via binary search.
+    let mut lo = 0usize;
+    let mut hi = n - 1;
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if xs[mid] <= x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let h = xs[hi] - xs[lo];
+    let t = (x - xs[lo]) / h;
+    // Cubic Hermite basis on [0, 1].
+    let h00 = (1.0 + 2.0 * t) * (1.0 - t).powi(2);
+    let h10 = t * (1.0 - t).powi(2);
+    let h01 = t.powi(2) * (3.0 - 2.0 * t);
+    let h11 = t.powi(2) * (t - 1.0);
+    h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]
+}
+
 /// Parsed per-sample α head metadata payload.
 struct PerSampleAlphaMeta {
     w_alpha: Vec<f32>,
@@ -2054,6 +2207,15 @@ fn forward_one_bake(
             .get(TANH_OUTPUT_HEAD_KEY)
             .and_then(|entry| parse_tanh_output_head_scale(entry.value))
     };
+    // EXP-CROSS-CODEC-V9 (2026-05-20): post-network monotone PCHIP
+    // spline calibration. Applies AFTER tanh-pin. Only active when
+    // the bake carries `zentrain.output_calibration_spline` metadata.
+    let output_spline: Option<OutputCalibrationSpline> = {
+        let metadata = model.metadata();
+        metadata
+            .get(OUTPUT_CALIBRATION_SPLINE_KEY)
+            .and_then(|entry| parse_output_calibration_spline(entry.value))
+    };
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
@@ -2081,10 +2243,15 @@ fn forward_one_bake(
         } else {
             out[0] as f64
         };
-        Ok(if let Some(scale) = tanh_pin_scale {
+        let y_after_pin = if let Some(scale) = tanh_pin_scale {
             apply_tanh_output_pin(y_pre, scale)
         } else {
             y_pre
+        };
+        Ok(if let Some(spline) = &output_spline {
+            apply_output_calibration_spline(y_after_pin, spline)
+        } else {
+            y_after_pin
         })
     };
     if n_inputs == features.len() {
