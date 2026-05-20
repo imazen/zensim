@@ -249,7 +249,8 @@ pub use metric::{
 };
 pub use profile::ZensimProfile;
 pub use source::{
-    AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
+    AlphaMode, ColorPrimaries, ColorTransferFunction, ImageSource, PixelFormat, RgbSlice,
+    RgbaSlice, StridedBytes,
 };
 
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
