@@ -33,17 +33,21 @@ struct Cli {
     codec: String,
 
     /// Zensim profile: v0_2 | v0_3 | balanced (v0.5) | compression (v0.5) |
-    /// ensemble (v0.5) | tuner (v0.5) | tuner-v2 (v0.5). Default is
-    /// `tuner-v2` (PreviewV0_5TunerV2, EXP-CROSS-CODEC-V6 ship) — passes
-    /// every Tuner-trail gate and Pareto-dominates the prior `tuner` ship
-    /// on strict monotonicity (95.2 % vs 92.8 %), median range (78 vs 73),
-    /// and cross-codec PJND parity (cc_std_median 0.91 vs 0.95) while
-    /// holding CID22 SROCC at 0.877. Use `tuner` for the prior tuner ship
-    /// or `v0_3` for the legacy default. The `balanced` / `compression` /
-    /// `ensemble` ranking profiles are available for end-to-end
-    /// evaluation but are NOT calibrated for quality-dial use — they
-    /// produce non-monotonic scores in the target search loop.
-    #[arg(long, default_value = "tuner-v2")]
+    /// ensemble (v0.5) | tuner (v0.5) | tuner-v2 (v0.5) | tuner-v3 (v0.5).
+    /// Default is `tuner-v3` (PreviewV0_5TunerV3, EXP-CROSS-CODEC-V9
+    /// ship, 2026-05-20) — passes every Tuner-trail gate apples-to-apples
+    /// vs V2 AND adds **clean user-facing dial semantics**: typing "score
+    /// 60" lands at JND (PJND anchor) exactly, "score 30" lands at JOD
+    /// exactly, "score 0" hits the worst-codec q=5 floor, "score 100"
+    /// hits near-lossless. V2's JND was 63 and dial range was [10, 90];
+    /// V3 extends to full [0, 100] via 8-band anchor + post-network
+    /// monotone PCHIP spline calibration. Use `tuner-v2` for the prior
+    /// tuner ship if back-compat scores are required; `tuner` for the
+    /// V_24 baseline; `v0_3` for the legacy default. The `balanced` /
+    /// `compression` / `ensemble` ranking profiles are available for
+    /// end-to-end evaluation but are NOT calibrated for quality-dial
+    /// use — they produce non-monotonic scores in the target search loop.
+    #[arg(long, default_value = "tuner-v3")]
     profile: String,
 
     /// Convergence tolerance — search stops when `|achieved - target| <= tolerance`.
@@ -73,11 +77,14 @@ fn parse_profile(s: &str) -> Result<ZensimProfile> {
         }
         "ensemble" | "v0_5_ensemble" | "preview-v0.5-ensemble" => Ok(ZensimProfile::ensemble()),
         "tuner" | "v0_5_tuner" | "preview-v0.5-tuner" => Ok(ZensimProfile::tuner()),
-        "tuner-v2" | "tuner_v2" | "v0_5_tuner_v2" | "preview-v0.5-tuner-v2" | "default" => {
+        "tuner-v2" | "tuner_v2" | "v0_5_tuner_v2" | "preview-v0.5-tuner-v2" => {
             Ok(ZensimProfile::PreviewV0_5TunerV2)
         }
+        "tuner-v3" | "tuner_v3" | "v0_5_tuner_v3" | "preview-v0.5-tuner-v3" | "default" => {
+            Ok(ZensimProfile::PreviewV0_5TunerV3)
+        }
         other => bail!(
-            "unknown profile '{other}'; expected v0_2 | v0_3 | balanced | compression | ensemble | tuner | tuner-v2"
+            "unknown profile '{other}'; expected v0_2 | v0_3 | balanced | compression | ensemble | tuner | tuner-v2 | tuner-v3"
         ),
     }
 }

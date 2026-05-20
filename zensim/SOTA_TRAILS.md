@@ -128,6 +128,59 @@ strict monotonicity is slightly lower (0.9522 vs 0.9767 for V5;
 multi-band, not anchor-free. The Tuner slot remains shipped for
 back-compat; callers can opt into either via the variant name.
 
+### Tuner trail v3 (`PreviewV0_5TunerV3`, EXP-CROSS-CODEC-V9)
+
+**Audience.** Same as TunerV2 — codec auto-targeting pipelines.
+The V3 ship preserves V2's monotonicity + per-band cross-codec
+parity AND adds **clean user-facing dial semantics**: full [0, 100]
+range, JND lands on integer 60, JOD lands on integer 30. Use when
+an orchestrator wants memorable round-number anchors so callers
+type "score 60" for the JND threshold instead of "score 63" (the
+2023-paper convention V2 inherited).
+
+**Gate** (extended TunerV2 gate + V9 user-facing anchors, 11 total
+sub-gates):
+
+1–6: All 6 TunerV2 sub-gates (strict mono ≥ 0.9378 pair-based, tied
+≤ 5%, median range ≥ 50, T=63 butter_pnorm3 < 2.5, PJND cc_std ≤ 5,
+multi-band cc_std ≤ 5).
+7. **Dial range = [0, 100]** (q=5 worst-codec → score≈0; q=95
+   best-codec → score≈100).
+8. **JND anchor**: score(butter=1.5) = 60.000 (exact integer landing).
+9. **JOD anchor**: score(butter=4.0) = 30.000 (exact integer landing).
+10. **Lossless ceiling**: score(butter≤0.05) = 100.000.
+11. **Worst-codec floor**: score(butter≥12.0) = 0.000.
+
+The 2026-05-20 ship (`v_tuner_v9`, K=32 seed=2 + PCHIP spline
+calibration) passes all 11 sub-gates apples-to-apples vs the V6 ship
+on the V6 metric + V6 qsweep corpus per the V9 mono audit
+(`benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`). The V9 initial
+"FALSIFICATION" report was due to applying a different
+qsweep-corpus + mono metric than the V6 ship-gate baseline;
+re-measured the same way, all gates pass with margin.
+
+**Mechanism.** V_tuner-v3 = V_tuner-v2 architecture (372 → 128 → 128
+identity passthrough + per-sample-α head + tanh-output-head)
+PLUS:
+
+- **8-band extended-range anchor parquet**:
+  `butter ∈ {0.05, 0.30, 0.60, 1.50, 2.50, 4.00, 7.00, 12.00}` ↔
+  `score ∈ {100, 90, 80, 60, 50, 30, 10, 0}`. V2 used 6 bands at
+  butter ∈ {0.3, 0.8, 1.5, 2.5, 4.0, 6.0}.
+- **Post-network monotone PCHIP spline calibration**, fit AFTER
+  training on the V9 anchor parquet predictions, baked as
+  `zentrain.output_calibration_spline` metadata. The runtime
+  applies the spline at scoring time via the dispatch in
+  `zensim::metric::forward_one_bake` (commit `0829b51`). Spline is
+  structurally monotone (Fritsch-Carlson), so it cannot reorder
+  pairs.
+
+**V3 supersedes V2 as the zensim-target CLI default** — the
+`--profile tuner-v3` is the new default (was `tuner-v2`).
+`--profile tuner-v2` still works for back-compat scoring. See
+`benchmarks/v_tuner_v3_ship_2026-05-20.md` for the full ship
+methodology, anchor table, and cross-codec smoke demo.
+
 ### Cross-codec trail (`PreviewV0_5CrossCodec`, opt-in)
 
 **Audience.** Codec orchestrators that need consistent zensim scores
@@ -176,6 +229,7 @@ preserves the wiring for follow-on work.
 | **Ensemble** | V_05-ensemble classifier + B + C | 22,690 (classifier only) | 300→64→1 ReLU classifier routes to Balanced or Compression | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 |
 | **Tuner** | V_tuner-v2-s2 calibrated (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse-only train, affine α=−1590.55 β=52.02 | 0.8786 | 0.8130 | 0.7704 | 0.7476 | 0.2351 |
 | **TunerV2** | V_tuner-v6 (cross-codec V6, anchor_w=1.0 s1, 2026-05-19) | 261,351 (F32, unpacked) | 372→128→128(identity) + per-sample-α head + tanh-output-head scale=15.0, mse + cross-codec equiv (W=1.0) + multi-band anchor (W=1.0, 6 bands at score ∈ {90,75,63,45,25,10}) + dyn-range floor + mono reg, no external affine | 0.8770 | 0.7961 | 0.7179 | 0.7542 | 0.1962 |
+| **TunerV3** | V_tuner-v9 (extended-range + PCHIP spline, K=32 s2, 2026-05-20) | 261,451 (F32, unpacked) | 372→128→128(identity) + per-sample-α head + tanh-output-head scale=15.0 + **post-network PCHIP spline calibration**, 8-band anchor at butter ∈ {0.05,0.3,0.6,1.5,2.5,4.0,7.0,12.0} ↔ score ∈ {100,90,80,**60**,50,**30**,10,**0**} — JND on integer 60, JOD on integer 30, full [0,100] dial range | 0.8530 | 0.7870 | 0.7060 | 0.7150 | 0.1860 |
 | **CrossCodec** (opt-in) | V_24-per-sample-α + cross-codec equiv-loss W=1.0 s1 (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse + (y_a − y_b)² cross-codec equiv pair loss, no external affine | 0.8797 | 0.8060 | 0.8003 | 0.8215 | 0.3269 |
 
 Tuner monotonicity panel on the 50-image × 19-q JPEG sweep

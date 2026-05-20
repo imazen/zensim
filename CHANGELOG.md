@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Added (2026-05-20, V9-SHIP — task #175)
+
+- **`ZensimProfile::PreviewV0_5TunerV3`** — V9 extended-range
+  user-facing dial (EXP-CROSS-CODEC-V9). Same V_24-per-sample-α +
+  tanh-output-head architecture as `PreviewV0_5TunerV2` (372 → 128 → 128
+  identity passthrough) plus a new post-network monotone PCHIP spline
+  calibration via the `zentrain.output_calibration_spline` metadata
+  payload. The spline lands the user-facing dial cleanly:
+  - **JND at score=60** exactly (was 63 on V2, CID22-paper convention).
+  - **JOD at score=30** exactly (was 45 on V2).
+  - Full **[0, 100] range** across best-codec lossless and
+    worst-codec q=5 floor (V2 spanned [10, 90]).
+  - 8-band anchor parquet at butter ∈ {0.05, 0.3, 0.6, 1.5, 2.5, 4.0,
+    7.0, 12.0} ↔ score ∈ {100, 90, 80, 60, 50, 30, 10, 0}.
+  Bake: `zensim/weights/v_tuner_v9_2026-05-20.bin`
+  (md5 `b50e8ca4946c1ec5bf2f5e9cf96ffdb8`, 261,451 bytes, F32, ZNPR
+  v3). Passes all 11 V9 ship gates apples-to-apples vs V2 per the
+  2026-05-20 audit (`benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`).
+  Methodology: `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
+  Tests: `zensim/tests/tuner_v3_profile.rs`.
+
+- **`ZensimProfile::tuner_v3()`** convenience constructor — alias for
+  `PreviewV0_5TunerV3`. Mirrors the existing `tuner()` /
+  `cross_codec()` const-fn aliases.
+
+### Changed (2026-05-20, V9-SHIP — task #175)
+
+- **`zensim-target` default profile rotated from `tuner-v2` to
+  `tuner-v3`**. `TargetSpec::default()` now returns
+  `PreviewV0_5TunerV3` and the CLI's `--profile` default is
+  `tuner-v3`. The new profile lands JND on the integer 60, JOD on
+  the integer 30, and spans the full [0, 100] dial range — clean
+  user-facing semantics for codec orchestrator binary-search
+  workloads. Back-compat: `--profile tuner-v2` still works for
+  callers needing the previous score scale. Smoke demo (10 imgs × 4
+  codecs × 5 targets) confirms cross-codec landing **std = 0.05 at
+  target=60** and std = 2.09 at target=30, well within the
+  expected ±3 / ±5 tolerances. Methodology +
+  per-target-per-codec table:
+  `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
+
 ### Added (2026-05-19, GPU-TRAINER Phase 2 — task #169)
 
 - **`zensim-train-gpu` Phase 2 aux loss kernels**. Ports the four

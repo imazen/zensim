@@ -97,20 +97,24 @@ impl Default for TargetSpec {
             target: 70.0,
             tolerance: 1.0,
             max_iterations: 8,
-            // Default to PreviewV0_5TunerV2 (EXP-CROSS-CODEC-V6 ship,
-            // 2026-05-19). Passes every Tuner-trail gate, Pareto-dominates
-            // the prior `tuner` ship on strict monotonicity (95.2 % vs
-            // 92.8 %), median range (78 vs 73), and cross-codec PJND
-            // parity (cc_std_median 0.91 vs 0.95). The legacy `V0_5*`
-            // ranking ships (Balanced / Compression / Ensemble) are NOT
-            // suited for quality-dial use — they were trained for ranking
-            // accuracy without a monotonicity constraint. The identity
-            // short-circuit fix (commit fdd1b8f, 2026-05-19) restored
-            // identity-image score=100 for every V0_5* profile, but the
-            // non-tuner V0_5 ranking bakes still produce non-monotonic
-            // q-step output. Use `tuner` for the prior `PreviewV0_5Tuner`
-            // ship or `v0_3` for the legacy default.
-            profile: ZensimProfile::PreviewV0_5TunerV2,
+            // Default to PreviewV0_5TunerV3 (EXP-CROSS-CODEC-V9 ship,
+            // 2026-05-20). Passes every Tuner-trail gate apples-to-apples
+            // vs V2 (V6 metric + V6 qsweep corpus per the V9 mono audit,
+            // `benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`) AND adds
+            // **clean user-facing dial semantics** — typing "score 60"
+            // lands at JND (PJND anchor) exactly, "score 30" lands at JOD
+            // exactly, "score 0" hits the worst-codec floor, "score 100"
+            // hits near-lossless. The V2 ship's JND was 63 / JOD was 45
+            // (CID22-paper convention), and its dial range was [10, 90]
+            // — V3 extends to the full [0, 100] via 8-band anchor +
+            // post-network monotone PCHIP spline calibration. The legacy
+            // `V0_5*` ranking ships (Balanced / Compression / Ensemble)
+            // are NOT suited for quality-dial use — they produce
+            // non-monotonic q-step output without a monotonicity
+            // constraint. Use `tuner-v2` for the prior tuner ship if
+            // back-compat scores are required; `tuner` for the V_24
+            // baseline; `v0_3` for the legacy default.
+            profile: ZensimProfile::PreviewV0_5TunerV3,
         }
     }
 }

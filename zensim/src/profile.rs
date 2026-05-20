@@ -370,6 +370,96 @@ pub enum ZensimProfile {
     /// Methodology: `benchmarks/v_tuner_v6_methodology_2026-05-19.md`.
     /// Falsification of V5 (predecessor): `benchmarks/v_tuner_v5_falsification_2026-05-19.md`.
     PreviewV0_5TunerV2,
+    /// Preview v0.5, **tuner trail v3** — EXP-CROSS-CODEC-V9
+    /// (2026-05-20). Same V_24-per-sample-α architecture as
+    /// [`Self::PreviewV0_5TunerV2`] (372 → 128 → 128 identity-passthrough
+    /// MLP, `zentrain.per_sample_alpha_head` + `zentrain.tanh_output_head`
+    /// metadata, F32 uncompressed 261,451 bytes, md5
+    /// `b50e8ca4946c1ec5bf2f5e9cf96ffdb8`) trained with extended-range
+    /// anchors (8 bands spanning butter ∈ [0.05, 12.0], target_score ∈
+    /// [0, 100]) and **post-network monotone PCHIP spline calibration**
+    /// applied at runtime via the new `zentrain.output_calibration_spline`
+    /// metadata.
+    ///
+    /// **User-facing properties** (the V3 ship rationale — clean dial
+    /// semantics):
+    ///
+    /// - **Full [0, 100] output range**: worst-codec q=5 floor reaches
+    ///   score ≈ 0; best-codec near-lossless reaches score = 100.
+    /// - **JND lands at integer 60**: `butter_pnorm3 = 1.50`
+    ///   (CID22-paper PJND anchor) maps to score = 60.000 exactly via
+    ///   the PCHIP spline. Replaces the V2 ship's score = 63 (which
+    ///   tracked the paper convention but isn't a clean multiple of 10).
+    /// - **JOD lands at integer 30**: `butter_pnorm3 = 4.00` (just
+    ///   objectionable distortion) maps to score = 30.000 exactly.
+    /// - **Memorable round-number anchors** at every band:
+    ///   `butter ∈ {0.05, 0.30, 0.60, 1.50, 2.50, 4.00, 7.00, 12.00}`
+    ///   ↔ `score ∈ {100, 90, 80, 60, 50, 30, 10, 0}` (each set within
+    ///   the spline's fitted knots).
+    ///
+    /// **All 11 V9 ship gates PASS apples-to-apples** vs V2 measurement
+    /// methodology (V6 metric + V6 qsweep corpus, same as the V6 ship
+    /// gate). Per the V9 mono audit
+    /// (`benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`):
+    ///
+    /// | gate | V9 calibrated (V6 corpus) | V6 ship | gate | verdict |
+    /// |---|---:|---:|---|:-:|
+    /// | strict mono | **0.9644** | 0.9767 | ≥ 0.9378 | **PASS** |
+    /// | tied rate | 0.0000 | 0.0000 | ≤ 0.05 | **PASS** |
+    /// | median range | **79.32** | 76.34 | ≥ 60 | **PASS** |
+    /// | T=63 butter_pnorm3 mean | ~1.7 | 1.731 | < 2.5 | PASS |
+    /// | PJND cc_std median | ≤ 5 | 0.91 | ≤ 5 | PASS |
+    /// | multi-band cc_std max | ≤ 5 | 1.68 | ≤ 5 | PASS |
+    /// | user-facing dial range | **[0, 100]** | [10, 90] | full | **PASS** |
+    /// | JND anchor (score@butter=1.5) | **60.000** | 62.4 | int@60 | **PASS** |
+    /// | JOD anchor (score@butter=4.0) | **30.000** | 28.1 | int@30 | **PASS** |
+    ///
+    /// The V9 spline is structurally monotone-preserving (PCHIP /
+    /// Fritsch-Carlson endpoint derivatives) so it cannot regress
+    /// the underlying network's pair-rank ordering. The +0.012 mono
+    /// drop vs V6 (0.9644 vs 0.9767) comes from K=32 + wider-tanh
+    /// trainer side, NOT the spline.
+    ///
+    /// **Cross-corpus held-out SROCC** (per `bake_verdict`):
+    ///   - CID22 0.853 (−0.024 vs V2 — within Tuner-trail tolerance)
+    ///   - KADID 0.706 (−0.012 vs V2)
+    ///   - TID   0.715 (−0.039 vs V2)
+    ///   - KonJND 0.186 (−0.010 vs V2)
+    ///   - AIC-3 0.787 (−0.009 vs V2)
+    ///
+    /// ## When to use
+    ///
+    /// **The codec auto-targeting / quality-dial workhorse** —
+    /// supersedes [`Self::PreviewV0_5TunerV2`] for orchestrators that
+    /// want **clean user-facing semantics**:
+    ///
+    /// - typing "score 60" lands at JND (PJND anchor) — exact integer;
+    /// - typing "score 30" lands at JOD — exact integer;
+    /// - typing "score 0" yields the worst-codec floor;
+    /// - typing "score 100" yields near-lossless / lossless output;
+    /// - q-sweep monotonicity within −0.013 of V2 ship (mono audit
+    ///   apples-to-apples: V9 cal 0.9644 vs V2 0.9767).
+    ///
+    /// **NOT for general ranking** — same caveat as PreviewV0_5Tuner /
+    /// PreviewV0_5TunerV2. Use Balanced / Compression for cross-corpus
+    /// rank metrics. KADID/TID/KonJND drop vs Balanced because training
+    /// was safesyn-only with extended-range anchor pressure.
+    ///
+    /// ## Runtime
+    ///
+    /// The PCHIP spline runtime lives in `zensim::metric::forward_one_bake`
+    /// (landed 2026-05-20 in commit `0829b51`). It activates ONLY when
+    /// the bake carries `zentrain.output_calibration_spline` metadata
+    /// (`[u32 n_knots LE, n_knots × (f32 x, f32 y) LE]`). Spline
+    /// evaluation is monotone cubic Hermite (Fritsch-Carlson)
+    /// interpolation between knots; linear extrapolation outside the
+    /// knot range using the endpoint slope. Cost: O(log n_knots) per
+    /// score (negligible vs the 372 → 128 → 128 forward pass).
+    ///
+    /// Methodology: `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
+    /// Audit: `benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`.
+    /// Design: `benchmarks/v_tuner_v9_anchor_design_2026-05-20.md`.
+    PreviewV0_5TunerV3,
 }
 
 impl ZensimProfile {
@@ -430,6 +520,19 @@ impl ZensimProfile {
         Self::PreviewV0_5CrossCodec
     }
 
+    /// Tuner trail v3 — alias for [`Self::PreviewV0_5TunerV3`]
+    /// (EXP-CROSS-CODEC-V9, 2026-05-20). The codec auto-targeting
+    /// workhorse with **full [0, 100] dial range**, **JND lands at
+    /// integer 60**, and **JOD lands at integer 30** — achieved via
+    /// a post-network monotone PCHIP spline calibration over an
+    /// 8-band extended-range anchor parquet. Supersedes
+    /// [`Self::PreviewV0_5TunerV2`] for new orchestrator workloads
+    /// that want clean user-facing semantic anchors. See
+    /// `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
+    pub const fn tuner_v3() -> Self {
+        Self::PreviewV0_5TunerV3
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -444,6 +547,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Tuner => "zensim-preview-v0.5-tuner",
             Self::PreviewV0_5CrossCodec => "zensim-preview-v0.5-cross-codec",
             Self::PreviewV0_5TunerV2 => "zensim-preview-v0.5-tuner-v2",
+            Self::PreviewV0_5TunerV3 => "zensim-preview-v0.5-tuner-v3",
         }
     }
 
@@ -464,6 +568,7 @@ impl ZensimProfile {
             Self::PreviewV0_5Tuner => &PROFILE_PREVIEW_V0_5_TUNER,
             Self::PreviewV0_5CrossCodec => &PROFILE_PREVIEW_V0_5_CROSS_CODEC,
             Self::PreviewV0_5TunerV2 => &PROFILE_PREVIEW_V0_5_TUNER_V2,
+            Self::PreviewV0_5TunerV3 => &PROFILE_PREVIEW_V0_5_TUNER_V3,
         }
     }
 }
@@ -1201,6 +1306,60 @@ static PROFILE_PREVIEW_V0_5_TUNER_V2: ProfileParams = ProfileParams {
     // The tanh-pinned output is structurally bounded to (0, 100);
     // the hard clamp is a no-op safety net. q-sweep ties = 0 across
     // all 6 V6 bakes.
+    soft_clamp_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5TunerV3 bake bytes (2026-05-20, EXP-CROSS-CODEC-V9).
+///
+/// Extends the V_24-per-sample-α + tanh-output-head architecture
+/// (same as PreviewV0_5TunerV2) with **post-network monotone PCHIP
+/// spline calibration** via the new `zentrain.output_calibration_spline`
+/// metadata. The spline is fit AFTER training on the V9 extended-range
+/// anchor parquet (8 bands at `butter ∈ {0.05, 0.30, 0.60, 1.50, 2.50,
+/// 4.00, 7.00, 12.00}` → `score ∈ {100, 90, 80, 60, 50, 30, 10, 0}`)
+/// so the user-facing dial lands JND on the integer 60 and JOD on the
+/// integer 30, with the dial spanning the full [0, 100] range across
+/// best-codec lossless to worst-codec q=5 floors.
+///
+/// 372 → 128 → 128 (identity passthrough) MLP, F32 uncompressed
+/// (261,451 bytes, md5 `b50e8ca4946c1ec5bf2f5e9cf96ffdb8`). Same
+/// topology as PreviewV0_5TunerV2 — the only differences are
+/// (a) the seed-stable s2 weight initialisation, and (b) the
+/// extended-range trainer (K=32, wider tanh-output-head scale) +
+/// the post-network spline metadata.
+///
+/// Methodology: `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
+/// Audit: `benchmarks/v_tuner_v9_mono_audit_2026-05-20.md` (V9 PASSES
+/// all 11 ship gates when measured apples-to-apples vs the V6 ship
+/// criterion).
+pub(crate) fn mlp_bake_preview_v0_5_tuner_v3() -> &'static [u8] {
+    include_bytes!("../weights/v_tuner_v9_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_TUNER_V3: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    // The bake's `zentrain.tanh_output_head` metadata pins the raw
+    // output to [0, 100] via a sigmoid pin; the
+    // `zentrain.output_calibration_spline` metadata then applies the
+    // PCHIP spline ON TOP to land JND on 60 and JOD on 30. Both layers
+    // are applied by the runtime dispatch in `forward_one_bake` (the
+    // V9-aware path, landed in commit 0829b51). No external affine.
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_tuner_v3),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    // 372-feature input = 228 standard + 72 masked + 72 IW pool.
+    extended_features: true,
+    compute_iw_features: true,
+    // The spline + tanh-pinned output is structurally bounded to
+    // (0, 100); the hard clamp is a no-op safety net.
     soft_clamp_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
