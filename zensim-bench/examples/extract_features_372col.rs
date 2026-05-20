@@ -74,9 +74,10 @@ fn main() {
         "aic4" => load_aic4(&path, max_pairs),
         "safesyn" => load_safesyn(&path, max_pairs),
         "qsweep" => load_qsweep_tsv(&path, max_pairs),
+        "cid22_train" => load_cid22_train_tsv(&path, max_pairs),
         _ => {
             eprintln!(
-                "--corpus must be one of: konjnd, konjnd_full, aic3, aic4, safesyn, qsweep (got {corpus:?})"
+                "--corpus must be one of: konjnd, konjnd_full, aic3, aic4, safesyn, qsweep, cid22_train (got {corpus:?})"
             );
             std::process::exit(2);
         }
@@ -585,6 +586,68 @@ fn load_safesyn(csv_path: &Path, max: usize) -> Vec<Pair> {
 /// becomes an extra target column. Monotonicity is measured
 /// downstream by sorting per (`ref_basename`, `codec`) by `human_score`
 /// (= q) and counting score(q+δ) ≤ score(q) inversions.
+/// V11 CID22 training-only-subset loader. Reads the workspace TSV produced
+/// by `scripts/canonical_corpus/v11_extract_cid22_train.py --build-pairs`
+/// with the schema:
+///
+/// ```text
+///   ref_path<TAB>dist_path<TAB>ref_basename<TAB>codec<TAB>q
+/// ```
+///
+/// The `ref_basename` field is REWRITTEN as a composite
+/// `"<ref_basename>|<codec>|<q>"` so each output CSV row carries its
+/// full (ref, codec, q) join key without needing a numeric-hash sidecar.
+/// `human_score` is set to NaN — the Python join step replaces it with
+/// the ssim2_gpu score. `extra_targets` is empty.
+///
+/// Output CSV schema: `composite_key, human_score(NaN), f0..f371`.
+/// Downstream Python split-by-'|' to recover the join key.
+fn load_cid22_train_tsv(path: &Path, max: usize) -> Vec<Pair> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    let f = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let r = BufReader::new(f);
+    let mut lines = r.lines();
+    let _header = match lines.next() {
+        Some(Ok(h)) => h,
+        _ => return Vec::new(),
+    };
+    let mut pairs = Vec::new();
+    for line in lines.flatten() {
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() < 5 {
+            continue;
+        }
+        let ref_path = cols[0];
+        let dist_path = cols[1];
+        let ref_basename = cols[2];
+        let codec = cols[3];
+        let q = cols[4];
+        // Composite join key encoded into ref_basename for downstream Python
+        // to split. The '|' delimiter is safe because CID22 basenames are
+        // pure digits, codec names are alphanumeric, and q strings are
+        // alphanumeric/underscore.
+        let composite = format!("{ref_basename}|{codec}|{q}");
+        pairs.push(Pair {
+            reference: PathBuf::from(ref_path),
+            distorted: PathBuf::from(dist_path),
+            human_score: f64::NAN,
+            ref_basename: composite,
+            extra_targets: Vec::new(),
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
 fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
