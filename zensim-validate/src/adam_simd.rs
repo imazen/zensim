@@ -478,7 +478,9 @@ mod tests {
     fn synth_state(n: usize, seed: u64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
         let mut state = seed;
         let mut nxt = || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((state >> 33) as u32) as f64 / u32::MAX as f64
         };
         let mut w = vec![0.0; n];
@@ -533,8 +535,7 @@ mod tests {
         // 47616 = w1 size in production (372 * 128).
         for &n in &[8usize, 16, 47616] {
             let (w0, g0, m0, v0) = synth_state(n, 0xA1B2);
-            let (mut wa, mut ga, mut ma, mut va) =
-                (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+            let (mut wa, mut ga, mut ma, mut va) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
             let (mut wb, mut gb, mut mb, mut vb) = (w0, g0, m0, v0);
 
             adam_update_scalar_ref(&mut make_args(&mut wa, &mut ga, &mut ma, &mut va, 5));
@@ -549,8 +550,7 @@ mod tests {
             for i in 0..n {
                 let ref_v = wa[i];
                 let got_v = wb[i];
-                let rel = (ref_v - got_v).abs()
-                    / (ref_v.abs().max(got_v.abs()).max(1e-30));
+                let rel = (ref_v - got_v).abs() / (ref_v.abs().max(got_v.abs()).max(1e-30));
                 assert!(
                     rel < 1e-12,
                     "w mismatch at i={}: ref={:e} got={:e} rel={:e} (n={})",
@@ -577,8 +577,7 @@ mod tests {
     fn dispatch_matches_scalar_misaligned() {
         for &n in &[1usize, 3, 5, 7, 9, 11, 13, 47873] {
             let (w0, g0, m0, v0) = synth_state(n, 0xDEAD);
-            let (mut wa, mut ga, mut ma, mut va) =
-                (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+            let (mut wa, mut ga, mut ma, mut va) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
             let (mut wb, mut gb, mut mb, mut vb) = (w0, g0, m0, v0);
 
             adam_update_scalar_ref(&mut make_args(&mut wa, &mut ga, &mut ma, &mut va, 100));
@@ -597,8 +596,7 @@ mod tests {
     fn late_training_step_matches() {
         let n = 47873;
         let (w0, g0, m0, v0) = synth_state(n, 0xBEEF);
-        let (mut wa, mut ga, mut ma, mut va) =
-            (w0.clone(), g0.clone(), m0.clone(), v0.clone());
+        let (mut wa, mut ga, mut ma, mut va) = (w0.clone(), g0.clone(), m0.clone(), v0.clone());
         let (mut wb, mut gb, mut mb, mut vb) = (w0, g0, m0, v0);
 
         adam_update_scalar_ref(&mut make_args(&mut wa, &mut ga, &mut ma, &mut va, 10_000));

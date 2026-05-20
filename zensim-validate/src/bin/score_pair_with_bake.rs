@@ -41,7 +41,9 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     ];
     let reducer_b = floats[2 * n_hidden + 6];
     let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+    Some((
+        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
+    ))
 }
 
 /// EXP-CROSS-CODEC-V4 tanh-pin scale extractor.

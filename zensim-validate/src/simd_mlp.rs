@@ -46,7 +46,8 @@
 
 #![allow(unsafe_code)]
 #![allow(clippy::too_many_arguments)]
-#![allow(clippy::needless_range_loop)] // SIMD loops index parallel arrays
+#![allow(clippy::needless_range_loop)]
+// SIMD loops index parallel arrays
 // Some intrinsics (set1_pd, setzero_pd) are marked safe; others
 // (loadu_pd, storeu_pd) are unsafe. We wrap all intrinsic calls in
 // `unsafe { ... }` blocks for visual uniformity at the cost of some
@@ -72,15 +73,11 @@ pub fn forward(
     {
         if std::is_x86_feature_detected!("avx512f") {
             // SAFETY: dispatch gated by `is_x86_feature_detected`.
-            return unsafe {
-                forward_avx512(x, w1, b1, w2, b2, n_features, n_hidden, alpha)
-            };
+            return unsafe { forward_avx512(x, w1, b1, w2, b2, n_features, n_hidden, alpha) };
         }
         if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             // SAFETY: dispatch gated by `is_x86_feature_detected`.
-            return unsafe {
-                forward_avx2(x, w1, b1, w2, b2, n_features, n_hidden, alpha)
-            };
+            return unsafe { forward_avx2(x, w1, b1, w2, b2, n_features, n_hidden, alpha) };
         }
     }
     forward_scalar(x, w1, b1, w2, b2, n_features, n_hidden, alpha)
@@ -226,8 +223,8 @@ unsafe fn forward_avx512(
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
     use std::arch::x86_64::{
-        _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd, _mm512_mul_pd,
-        _mm512_set1_pd, _mm512_storeu_pd, _CMP_GE_OQ,
+        _CMP_GE_OQ, _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd,
+        _mm512_mul_pd, _mm512_set1_pd, _mm512_storeu_pd,
     };
 
     // h_pre starts as a copy of b1 — matches scalar.
@@ -330,8 +327,8 @@ unsafe fn backprop_avx512(
     alpha: f64,
 ) {
     use std::arch::x86_64::{
-        _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd,
-        _mm512_mul_pd, _mm512_set1_pd, _mm512_storeu_pd, _CMP_GE_OQ,
+        _CMP_GE_OQ, _mm512_cmp_pd_mask, _mm512_fmadd_pd, _mm512_loadu_pd, _mm512_mask_blend_pd,
+        _mm512_mul_pd, _mm512_set1_pd, _mm512_storeu_pd,
     };
 
     let n_chunks = n_hidden / 8;
@@ -432,8 +429,8 @@ unsafe fn forward_avx2(
     alpha: f64,
 ) -> (f64, Vec<f64>, Vec<f64>) {
     use std::arch::x86_64::{
-        _mm256_blendv_pd, _mm256_cmp_pd, _mm256_fmadd_pd, _mm256_loadu_pd, _mm256_mul_pd,
-        _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd, _CMP_LT_OQ,
+        _CMP_LT_OQ, _mm256_blendv_pd, _mm256_cmp_pd, _mm256_fmadd_pd, _mm256_loadu_pd,
+        _mm256_mul_pd, _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd,
     };
 
     let mut h_pre = b1.to_vec();
@@ -526,8 +523,8 @@ unsafe fn backprop_avx2(
     alpha: f64,
 ) {
     use std::arch::x86_64::{
-        _mm256_add_pd, _mm256_blendv_pd, _mm256_cmp_pd, _mm256_fmadd_pd, _mm256_loadu_pd,
-        _mm256_mul_pd, _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd, _CMP_LT_OQ,
+        _CMP_LT_OQ, _mm256_add_pd, _mm256_blendv_pd, _mm256_cmp_pd, _mm256_fmadd_pd,
+        _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd, _mm256_setzero_pd, _mm256_storeu_pd,
     };
 
     let n_chunks = n_hidden / 4;
@@ -769,12 +766,12 @@ mod tests {
         let mut gb2_b = gb2_a.clone();
 
         backprop_scalar(
-            &x, &h_pre, &h, dl_dy, &mut gw1_a, &mut gb1_a, &w2, &mut gw2_a, &mut gb2_a,
-            n_features, n_hidden, alpha,
+            &x, &h_pre, &h, dl_dy, &mut gw1_a, &mut gb1_a, &w2, &mut gw2_a, &mut gb2_a, n_features,
+            n_hidden, alpha,
         );
         backprop_step(
-            &x, &h_pre, &h, dl_dy, &mut gw1_b, &mut gb1_b, &w2, &mut gw2_b, &mut gb2_b,
-            n_features, n_hidden, alpha,
+            &x, &h_pre, &h, dl_dy, &mut gw1_b, &mut gb1_b, &w2, &mut gw2_b, &mut gb2_b, n_features,
+            n_hidden, alpha,
         );
 
         for (i, (a, b)) in gw1_a.iter().zip(gw1_b.iter()).enumerate() {
@@ -843,10 +840,7 @@ mod tests {
             for (a, b) in gw1_a.iter().zip(gw1_b.iter()) {
                 let denom = a.abs().max(b.abs()).max(1.0);
                 let rel = (a - b).abs() / denom;
-                assert!(
-                    rel < 1e-12,
-                    "gw1 mismatch [{n_features},{n_hidden}]",
-                );
+                assert!(rel < 1e-12, "gw1 mismatch [{n_features},{n_hidden}]",);
             }
             for (a, b) in gb1_a.iter().zip(gb1_b.iter()) {
                 let denom = a.abs().max(b.abs()).max(1.0);

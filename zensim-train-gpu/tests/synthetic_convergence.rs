@@ -9,10 +9,10 @@
 
 #![cfg(feature = "gpu-cuda")]
 
+use zensim_train_core::TrainingGroup;
 use zensim_train_core::per_sample_alpha_head::{
     PerSampleAlphaHeadModel, forward_per_sample_alpha_head,
 };
-use zensim_train_core::TrainingGroup;
 use zensim_train_gpu::{GpuHparams, GpuRuntime, train_per_sample_alpha_head_gpu};
 
 #[test]
@@ -25,7 +25,9 @@ fn gpu_per_sample_alpha_recovers_synthetic_ranking_cuda() {
 
     let mut prng_state: u64 = 0xABCD_DEAD_BEEF_1234;
     let mut next = || {
-        prng_state = prng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        prng_state = prng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         prng_state
     };
     let mut next_f64 = || (next() as f64 / u64::MAX as f64) * 2.0 - 1.0;
@@ -66,8 +68,7 @@ fn gpu_per_sample_alpha_recovers_synthetic_ranking_cuda() {
         tanh_output_head_scale: 0.0,
     };
 
-    let result =
-        train_per_sample_alpha_head_gpu(&[group], &hp, n_features, GpuRuntime::Cuda);
+    let result = train_per_sample_alpha_head_gpu(&[group], &hp, n_features, GpuRuntime::Cuda);
 
     eprintln!(
         "GPU train: {} batches in {:.2} s ({:.1} batches/s)",
@@ -133,7 +134,10 @@ fn gpu_per_sample_alpha_recovers_synthetic_ranking_cuda() {
         rank_w_sum > 1e-3 || model.reducer_w.iter().map(|v| v.abs()).sum::<f64>() > 1e-3,
         "both heads collapsed"
     );
-    assert!(model.w1.iter().all(|v| v.is_finite()), "w1 contains NaN/Inf");
+    assert!(
+        model.w1.iter().all(|v| v.is_finite()),
+        "w1 contains NaN/Inf"
+    );
     assert!(model.rank_w.iter().all(|v| v.is_finite()));
     assert!(model.w_alpha.iter().all(|v| v.is_finite()));
 }

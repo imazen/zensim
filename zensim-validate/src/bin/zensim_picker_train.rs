@@ -164,9 +164,7 @@ fn load_parquet(path: &PathBuf) -> Result<(Vec<SourceCurve>, Vec<String>)> {
     let mut sorted_wanted = wanted.clone();
     sorted_wanted.sort_unstable();
 
-    let pos = |orig: usize| -> usize {
-        sorted_wanted.iter().position(|&i| i == orig).unwrap()
-    };
+    let pos = |orig: usize| -> usize { sorted_wanted.iter().position(|&i| i == orig).unwrap() };
     let proj_ref = pos(ref_idx);
     let proj_q = pos(q_idx);
     let proj_z = pos(z_idx);
@@ -389,11 +387,7 @@ impl Mlp3 {
 
     /// Forward pass returning y plus the activation buffers needed for backprop.
     #[allow(clippy::type_complexity)]
-    fn forward(
-        &self,
-        x: &[f64],
-        alpha: f64,
-    ) -> (f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    fn forward(&self, x: &[f64], alpha: f64) -> (f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
         debug_assert_eq!(x.len(), self.n_in);
         // h1_pre = b1 + w1 * x
         let mut h1_pre = self.b1.clone();
@@ -485,21 +479,114 @@ impl AdamMlp {
         }
     }
 
-    fn step(&mut self, model: &mut Mlp3, g_w1: &mut [f64], g_b1: &mut [f64], g_w2: &mut [f64], g_b2: &mut [f64], g_w3: &mut [f64], g_b3: &mut [f64]) {
+    fn step(
+        &mut self,
+        model: &mut Mlp3,
+        g_w1: &mut [f64],
+        g_b1: &mut [f64],
+        g_w2: &mut [f64],
+        g_b2: &mut [f64],
+        g_w3: &mut [f64],
+        g_b3: &mut [f64],
+    ) {
         self.t += 1;
         let bc1 = 1.0 - self.beta1.powi(self.t as i32);
         let bc2 = 1.0 - self.beta2.powi(self.t as i32);
-        update(&mut model.w1, g_w1, &mut self.m_w1, &mut self.v_w1, self.beta1, self.beta2, self.eps, bc1, bc2, self.lr, self.l2);
-        update(&mut model.b1, g_b1, &mut self.m_b1, &mut self.v_b1, self.beta1, self.beta2, self.eps, bc1, bc2, self.lr, 0.0);
-        update(&mut model.w2, g_w2, &mut self.m_w2, &mut self.v_w2, self.beta1, self.beta2, self.eps, bc1, bc2, self.lr, self.l2);
-        update(&mut model.b2, g_b2, &mut self.m_b2, &mut self.v_b2, self.beta1, self.beta2, self.eps, bc1, bc2, self.lr, 0.0);
-        update(&mut model.w3, g_w3, &mut self.m_w3, &mut self.v_w3, self.beta1, self.beta2, self.eps, bc1, bc2, self.lr, self.l2);
-        update(&mut model.b3, g_b3, &mut self.m_b3, &mut self.v_b3, self.beta1, self.beta2, self.eps, bc1, bc2, self.lr, 0.0);
+        update(
+            &mut model.w1,
+            g_w1,
+            &mut self.m_w1,
+            &mut self.v_w1,
+            self.beta1,
+            self.beta2,
+            self.eps,
+            bc1,
+            bc2,
+            self.lr,
+            self.l2,
+        );
+        update(
+            &mut model.b1,
+            g_b1,
+            &mut self.m_b1,
+            &mut self.v_b1,
+            self.beta1,
+            self.beta2,
+            self.eps,
+            bc1,
+            bc2,
+            self.lr,
+            0.0,
+        );
+        update(
+            &mut model.w2,
+            g_w2,
+            &mut self.m_w2,
+            &mut self.v_w2,
+            self.beta1,
+            self.beta2,
+            self.eps,
+            bc1,
+            bc2,
+            self.lr,
+            self.l2,
+        );
+        update(
+            &mut model.b2,
+            g_b2,
+            &mut self.m_b2,
+            &mut self.v_b2,
+            self.beta1,
+            self.beta2,
+            self.eps,
+            bc1,
+            bc2,
+            self.lr,
+            0.0,
+        );
+        update(
+            &mut model.w3,
+            g_w3,
+            &mut self.m_w3,
+            &mut self.v_w3,
+            self.beta1,
+            self.beta2,
+            self.eps,
+            bc1,
+            bc2,
+            self.lr,
+            self.l2,
+        );
+        update(
+            &mut model.b3,
+            g_b3,
+            &mut self.m_b3,
+            &mut self.v_b3,
+            self.beta1,
+            self.beta2,
+            self.eps,
+            bc1,
+            bc2,
+            self.lr,
+            0.0,
+        );
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn update(w: &mut [f64], g: &mut [f64], m: &mut [f64], v: &mut [f64], beta1: f64, beta2: f64, eps: f64, bc1: f64, bc2: f64, lr: f64, l2: f64) {
+fn update(
+    w: &mut [f64],
+    g: &mut [f64],
+    m: &mut [f64],
+    v: &mut [f64],
+    beta1: f64,
+    beta2: f64,
+    eps: f64,
+    bc1: f64,
+    bc2: f64,
+    lr: f64,
+    l2: f64,
+) {
     for i in 0..w.len() {
         let mut gi = g[i];
         if l2 > 0.0 {
@@ -625,14 +712,24 @@ fn main() -> Result<()> {
     println!("train: {:?}", args.train);
     println!("val:   {:?}", args.val);
     println!("out:   {:?}", args.out);
-    println!("arch:  in → {} → {} → 1, leaky α={}", args.hidden1, args.hidden2, args.leaky_alpha);
-    println!("opt:   Adam lr={} l2={} mb={} epochs={} patience={}", args.lr, args.l2, args.minibatch, args.epochs, args.patience);
+    println!(
+        "arch:  in → {} → {} → 1, leaky α={}",
+        args.hidden1, args.hidden2, args.leaky_alpha
+    );
+    println!(
+        "opt:   Adam lr={} l2={} mb={} epochs={} patience={}",
+        args.lr, args.l2, args.minibatch, args.epochs, args.patience
+    );
     println!("seed:  {}", args.seed);
 
     // 1. Load parquets.
     let (train_curves, feat_names) = load_parquet(&args.train)?;
     let (val_curves, _) = load_parquet(&args.val)?;
-    println!("train: {} sources × {} features", train_curves.len(), feat_names.len());
+    println!(
+        "train: {} sources × {} features",
+        train_curves.len(),
+        feat_names.len()
+    );
     println!("val:   {} sources", val_curves.len());
 
     // 2. Build (x, y) tuples.
@@ -643,7 +740,10 @@ fn main() -> Result<()> {
 
     // 3. Scaler (fit on train).
     let (mean, std) = compute_scaler(&x_train);
-    let x_train_std: Vec<Vec<f64>> = x_train.iter().map(|x| standardize(x, &mean, &std)).collect();
+    let x_train_std: Vec<Vec<f64>> = x_train
+        .iter()
+        .map(|x| standardize(x, &mean, &std))
+        .collect();
     let x_val_std: Vec<Vec<f64>> = x_val.iter().map(|x| standardize(x, &mean, &std)).collect();
 
     let n_in = x_train_std[0].len();
@@ -746,7 +846,9 @@ fn main() -> Result<()> {
             epoch_loss += batch_loss / bs;
             n_batches += 1;
 
-            adam.step(&mut model, &mut g_w1, &mut g_b1, &mut g_w2, &mut g_b2, &mut g_w3, &mut g_b3);
+            adam.step(
+                &mut model, &mut g_w1, &mut g_b1, &mut g_w2, &mut g_b2, &mut g_w3, &mut g_b3,
+            );
 
             cursor = end;
         }
@@ -835,17 +937,45 @@ fn main() -> Result<()> {
 
     // Metadata: provenance.
     let codec_md = args.codec.clone();
-    let t_grid_str: String = T_GRID.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(",");
-    let q_grid_str: String = Q_GRID.iter().map(|q| format!("{}", q)).collect::<Vec<_>>().join(",");
+    let t_grid_str: String = T_GRID
+        .iter()
+        .map(|t| format!("{}", t))
+        .collect::<Vec<_>>()
+        .join(",");
+    let q_grid_str: String = Q_GRID
+        .iter()
+        .map(|q| format!("{}", q))
+        .collect::<Vec<_>>()
+        .join(",");
     let mae_str = format!("{:.4}", best_val);
     let n_in_str = format!("{}", n_in);
 
     let metadata = [
-        BakeMetadataEntry { key: "picker.codec", kind: zenpredict::MetadataType::Utf8, value: codec_md.as_bytes() },
-        BakeMetadataEntry { key: "picker.t_grid", kind: zenpredict::MetadataType::Utf8, value: t_grid_str.as_bytes() },
-        BakeMetadataEntry { key: "picker.q_grid", kind: zenpredict::MetadataType::Utf8, value: q_grid_str.as_bytes() },
-        BakeMetadataEntry { key: "picker.val_mae_q", kind: zenpredict::MetadataType::Utf8, value: mae_str.as_bytes() },
-        BakeMetadataEntry { key: "picker.n_in", kind: zenpredict::MetadataType::Utf8, value: n_in_str.as_bytes() },
+        BakeMetadataEntry {
+            key: "picker.codec",
+            kind: zenpredict::MetadataType::Utf8,
+            value: codec_md.as_bytes(),
+        },
+        BakeMetadataEntry {
+            key: "picker.t_grid",
+            kind: zenpredict::MetadataType::Utf8,
+            value: t_grid_str.as_bytes(),
+        },
+        BakeMetadataEntry {
+            key: "picker.q_grid",
+            kind: zenpredict::MetadataType::Utf8,
+            value: q_grid_str.as_bytes(),
+        },
+        BakeMetadataEntry {
+            key: "picker.val_mae_q",
+            kind: zenpredict::MetadataType::Utf8,
+            value: mae_str.as_bytes(),
+        },
+        BakeMetadataEntry {
+            key: "picker.n_in",
+            kind: zenpredict::MetadataType::Utf8,
+            value: n_in_str.as_bytes(),
+        },
     ];
 
     let bake_bytes = bake(&BakeRequest {
@@ -869,9 +999,12 @@ fn main() -> Result<()> {
     if let Some(parent) = args.out.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::write(&args.out, &bake_bytes)
-        .with_context(|| format!("write {:?}", args.out))?;
-    println!("wrote ZNPR v3 bake: {:?} ({} bytes)", args.out, bake_bytes.len());
+    std::fs::write(&args.out, &bake_bytes).with_context(|| format!("write {:?}", args.out))?;
+    println!(
+        "wrote ZNPR v3 bake: {:?} ({} bytes)",
+        args.out,
+        bake_bytes.len()
+    );
 
     Ok(())
 }

@@ -681,7 +681,9 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     ];
     let reducer_b = floats[2 * n_hidden + 6];
     let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+    Some((
+        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
+    ))
 }
 
 /// Read the `zentrain.hybrid_head` metadata payload, if any.
@@ -926,11 +928,7 @@ fn parse_corpora_arg(arg: &str) -> Result<Vec<&'static Corpus>, String> {
             None => {
                 return Err(format!(
                     "unknown corpus {key:?} — known: {}",
-                    CORPORA
-                        .iter()
-                        .map(|c| c.name)
-                        .collect::<Vec<_>>()
-                        .join(",")
+                    CORPORA.iter().map(|c| c.name).collect::<Vec<_>>().join(",")
                 ));
             }
         }
@@ -1206,7 +1204,10 @@ fn main() -> ExitCode {
     let bake_bytes = match std::fs::read(&args.bake) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("bake_verdict: failed to read bake {}: {e}", args.bake.display());
+            eprintln!(
+                "bake_verdict: failed to read bake {}: {e}",
+                args.bake.display()
+            );
             return ExitCode::from(1);
         }
     };
@@ -1231,16 +1232,29 @@ fn main() -> ExitCode {
     let mut buf = String::new();
     buf.push_str("# bake_verdict — instant V_X eval\n\n");
     buf.push_str(&format!("- Bake: `{}`\n", args.bake.display()));
-    buf.push_str(&format!("- Feature parquets: `{}`\n", args.features_root.display()));
+    buf.push_str(&format!(
+        "- Feature parquets: `{}`\n",
+        args.features_root.display()
+    ));
     buf.push_str(&format!("- Bake n_inputs: {n_inputs}\n"));
     buf.push_str(&format!(
         "- Feature transforms: {}\n",
-        if has_transforms { "yes (uses predict_transformed)" } else { "no" }
+        if has_transforms {
+            "yes (uses predict_transformed)"
+        } else {
+            "no"
+        }
     ));
 
     let mut results: Vec<CorpusResult> = Vec::new();
     for corpus in &args.corpora {
-        match render_corpus(corpus, &args.features_root, has_transforms, n_inputs, &model) {
+        match render_corpus(
+            corpus,
+            &args.features_root,
+            has_transforms,
+            n_inputs,
+            &model,
+        ) {
             Ok(r) => results.push(r),
             Err(e) => {
                 eprintln!("bake_verdict: {e}");
@@ -1292,9 +1306,6 @@ fn main() -> ExitCode {
         print!("{buf}");
     }
 
-    eprintln!(
-        "bake_verdict: complete in {:.2}s",
-        elapsed.as_secs_f64()
-    );
+    eprintln!("bake_verdict: complete in {:.2}s", elapsed.as_secs_f64());
     ExitCode::SUCCESS
 }

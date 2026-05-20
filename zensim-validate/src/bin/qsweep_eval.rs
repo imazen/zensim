@@ -67,7 +67,9 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     ];
     let reducer_b = floats[2 * n_hidden + 6];
     let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+    Some((
+        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
+    ))
 }
 
 fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
@@ -249,7 +251,12 @@ fn score_row(
 /// The choice depends on the bake's runtime profile:
 ///   - v0_3 / V_18 ship: "mapped" (raw is distance, runtime maps it).
 ///   - V_22 + V_24 + tuner: "clamp" (raw IS score, `skip_score_mapping=true`).
-fn parse_args() -> (PathBuf, PathBuf, Vec<(String, PathBuf, String)>, Option<PathBuf>) {
+fn parse_args() -> (
+    PathBuf,
+    PathBuf,
+    Vec<(String, PathBuf, String)>,
+    Option<PathBuf>,
+) {
     let mut args = std::env::args().skip(1);
     let mut features: Option<PathBuf> = None;
     let mut manifest: Option<PathBuf> = None;
@@ -267,17 +274,16 @@ fn parse_args() -> (PathBuf, PathBuf, Vec<(String, PathBuf, String)>, Option<Pat
                 let rest = parts.next().expect("path[:mode]");
                 // The path may contain `:`; allow `:mode` only if rest
                 // ends in `:raw`, `:clamp`, or `:mapped[A,B]`.
-                let (path_str, mode) =
-                    if let Some(idx) = rest.rfind(":mapped") {
-                        (&rest[..idx], rest[idx + 1..].to_string())
-                    } else if let Some(idx) = rest.rfind(":clamp") {
-                        (&rest[..idx], rest[idx + 1..].to_string())
-                    } else if let Some(idx) = rest.rfind(":raw") {
-                        (&rest[..idx], rest[idx + 1..].to_string())
-                    } else {
-                        // No explicit mode: default to "clamp" (matches V_22/V_24/tuner).
-                        (rest, "clamp".to_string())
-                    };
+                let (path_str, mode) = if let Some(idx) = rest.rfind(":mapped") {
+                    (&rest[..idx], rest[idx + 1..].to_string())
+                } else if let Some(idx) = rest.rfind(":clamp") {
+                    (&rest[..idx], rest[idx + 1..].to_string())
+                } else if let Some(idx) = rest.rfind(":raw") {
+                    (&rest[..idx], rest[idx + 1..].to_string())
+                } else {
+                    // No explicit mode: default to "clamp" (matches V_22/V_24/tuner).
+                    (rest, "clamp".to_string())
+                };
                 bakes.push((name, PathBuf::from(path_str), mode));
             }
             "--out" => out = Some(args.next().expect("--out VALUE").into()),
@@ -329,8 +335,14 @@ fn load_features_csv(path: &PathBuf) -> (Vec<f64>, Vec<Vec<f64>>, Vec<String>) {
     for line in r.lines().map_while(|x| x.ok()) {
         if header.is_none() {
             let hdr: Vec<String> = line.split(',').map(|s| s.to_string()).collect();
-            ref_idx = hdr.iter().position(|c| c == "ref_basename").expect("ref_basename");
-            human_idx = hdr.iter().position(|c| c == "human_score").expect("human_score");
+            ref_idx = hdr
+                .iter()
+                .position(|c| c == "ref_basename")
+                .expect("ref_basename");
+            human_idx = hdr
+                .iter()
+                .position(|c| c == "human_score")
+                .expect("human_score");
             f0_idx = hdr.iter().position(|c| c == "f0").expect("f0");
             header = Some(hdr);
             continue;
@@ -403,9 +415,17 @@ fn evaluate_bake(
     let tanh_pin_scale = extract_tanh_output_head_scale(&model);
     eprintln!(
         "{name}: n_inputs={n_inputs} transforms={has_transforms} per-α={} hybrid={} tanh-pin={}",
-        if per_sample_alpha.is_some() { "yes" } else { "no" },
+        if per_sample_alpha.is_some() {
+            "yes"
+        } else {
+            "no"
+        },
         if hybrid.is_some() { "yes" } else { "no" },
-        if let Some(s) = tanh_pin_scale { format!("scale={s:.3}") } else { "no".to_string() }
+        if let Some(s) = tanh_pin_scale {
+            format!("scale={s:.3}")
+        } else {
+            "no".to_string()
+        }
     );
 
     let mut predictor = Predictor::new(&model);
@@ -425,7 +445,11 @@ fn evaluate_bake(
             apply_post(raw, post_mode)
         })
         .collect();
-    assert_eq!(scores.len(), manifest.len(), "feature rows / manifest length mismatch");
+    assert_eq!(
+        scores.len(),
+        manifest.len(),
+        "feature rows / manifest length mismatch"
+    );
 
     // Group by (image_id, codec); each group sorted by q.
     let mut curves: BTreeMap<(String, String), Vec<(f64, f64)>> = BTreeMap::new();
@@ -504,7 +528,11 @@ fn evaluate_bake(
             ss += (s - q).powi(2);
             n += 1;
         }
-        let rmse = if n > 0 { (ss / n as f64).sqrt() } else { f64::NAN };
+        let rmse = if n > 0 {
+            (ss / n as f64).sqrt()
+        } else {
+            f64::NAN
+        };
         band_rmse.push((lo, hi, n, rmse));
     }
 
@@ -538,8 +566,13 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
     for r in reports {
         s.push_str(&format!(
             "| {} | {} | {} | {} | {} | {:.4} | {:.4} |\n",
-            r.name, r.n_curves, r.n_pairs, r.n_violations, r.n_ties,
-            r.monotonicity_rate, r.tied_rate
+            r.name,
+            r.n_curves,
+            r.n_pairs,
+            r.n_violations,
+            r.n_ties,
+            r.monotonicity_rate,
+            r.tied_rate
         ));
     }
     s.push_str("\n");
@@ -560,7 +593,13 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
             };
             s.push_str(&format!(
                 "| {} | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |\n",
-                q, n, sorted[0], p(0.25), p(0.5), p(0.75), sorted[n - 1]
+                q,
+                n,
+                sorted[0],
+                p(0.25),
+                p(0.5),
+                p(0.75),
+                sorted[n - 1]
             ));
         }
         s.push_str("\n");
@@ -584,7 +623,10 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
     if let Some(first) = reports.first() {
         for b_idx in 0..first.band_rmse.len() {
             let (lo, hi, n, _) = first.band_rmse[b_idx];
-            s.push_str(&format!("| B{} | [{}, {}) | {} |", b_idx, lo as i32, hi as i32, n));
+            s.push_str(&format!(
+                "| B{} | [{}, {}) | {} |",
+                b_idx, lo as i32, hi as i32, n
+            ));
             for r in reports {
                 let v = r.band_rmse[b_idx].3;
                 if v.is_nan() {
@@ -619,7 +661,10 @@ fn main() -> ExitCode {
 
     let mut reports = Vec::new();
     for (name, path, mode) in &bakes {
-        eprintln!("evaluating bake '{name}' (mode={mode}) from {}", path.display());
+        eprintln!(
+            "evaluating bake '{name}' (mode={mode}) from {}",
+            path.display()
+        );
         let r = evaluate_bake(name, path, mode, &feature_rows, &manifest);
         eprintln!(
             "  {}: monotonicity={:.4} ({}/{} curves)",

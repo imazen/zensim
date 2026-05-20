@@ -2345,8 +2345,8 @@ mod tests {
             mu2.push(0.5 + 0.1 * x + 0.01 * (x - 0.5));
             sum_sq.push(0.25 + 0.02 * x);
             s12.push(0.24 + 0.02 * x);
-            mask_a.push(0.5 + 0.5 * x);          // smooth mask in [0.5, 1.0]
-            mask_b.push(1.0 + 2.0 * x);          // IW-style weight in [1.0, 3.0]
+            mask_a.push(0.5 + 0.5 * x); // smooth mask in [0.5, 1.0]
+            mask_b.push(1.0 + 2.0 * x); // IW-style weight in [1.0, 3.0]
         }
         (mu1, mu2, sum_sq, s12, mask_a, mask_b)
     }
@@ -2362,12 +2362,48 @@ mod tests {
             let ((da, d4a, d2a), (db, d4b, d2b)) =
                 ssim_channel_masked_2(&mu1, &mu2, &sum_sq, &s12, &mask_a, &mask_b);
             let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1e-9);
-            assert!(rel(da, da_ref) < 1e-5, "n={}: da {} vs ref {}", n, da, da_ref);
-            assert!(rel(d4a, d4a_ref) < 1e-5, "n={}: d4a {} vs ref {}", n, d4a, d4a_ref);
-            assert!(rel(d2a, d2a_ref) < 1e-5, "n={}: d2a {} vs ref {}", n, d2a, d2a_ref);
-            assert!(rel(db, db_ref) < 1e-5, "n={}: db {} vs ref {}", n, db, db_ref);
-            assert!(rel(d4b, d4b_ref) < 1e-5, "n={}: d4b {} vs ref {}", n, d4b, d4b_ref);
-            assert!(rel(d2b, d2b_ref) < 1e-5, "n={}: d2b {} vs ref {}", n, d2b, d2b_ref);
+            assert!(
+                rel(da, da_ref) < 1e-5,
+                "n={}: da {} vs ref {}",
+                n,
+                da,
+                da_ref
+            );
+            assert!(
+                rel(d4a, d4a_ref) < 1e-5,
+                "n={}: d4a {} vs ref {}",
+                n,
+                d4a,
+                d4a_ref
+            );
+            assert!(
+                rel(d2a, d2a_ref) < 1e-5,
+                "n={}: d2a {} vs ref {}",
+                n,
+                d2a,
+                d2a_ref
+            );
+            assert!(
+                rel(db, db_ref) < 1e-5,
+                "n={}: db {} vs ref {}",
+                n,
+                db,
+                db_ref
+            );
+            assert!(
+                rel(d4b, d4b_ref) < 1e-5,
+                "n={}: d4b {} vs ref {}",
+                n,
+                d4b,
+                d4b_ref
+            );
+            assert!(
+                rel(d2b, d2b_ref) < 1e-5,
+                "n={}: d2b {} vs ref {}",
+                n,
+                d2b,
+                d2b_ref
+            );
         }
     }
 
@@ -2396,10 +2432,34 @@ mod tests {
             let ((art4_a, det4_a), (art4_b, det4_b)) =
                 edge_diff_channel_masked_2_art4_det4(&img1, &img2, &mu1, &mu2, &mask_a, &mask_b);
             let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1e-9);
-            assert!(rel(art4_a, art4_a_ref) < 1e-5, "n={}: art4_a {} vs ref {}", n, art4_a, art4_a_ref);
-            assert!(rel(det4_a, det4_a_ref) < 1e-5, "n={}: det4_a {} vs ref {}", n, det4_a, det4_a_ref);
-            assert!(rel(art4_b, art4_b_ref) < 1e-5, "n={}: art4_b {} vs ref {}", n, art4_b, art4_b_ref);
-            assert!(rel(det4_b, det4_b_ref) < 1e-5, "n={}: det4_b {} vs ref {}", n, det4_b, det4_b_ref);
+            assert!(
+                rel(art4_a, art4_a_ref) < 1e-5,
+                "n={}: art4_a {} vs ref {}",
+                n,
+                art4_a,
+                art4_a_ref
+            );
+            assert!(
+                rel(det4_a, det4_a_ref) < 1e-5,
+                "n={}: det4_a {} vs ref {}",
+                n,
+                det4_a,
+                det4_a_ref
+            );
+            assert!(
+                rel(art4_b, art4_b_ref) < 1e-5,
+                "n={}: art4_b {} vs ref {}",
+                n,
+                art4_b,
+                art4_b_ref
+            );
+            assert!(
+                rel(det4_b, det4_b_ref) < 1e-5,
+                "n={}: det4_b {} vs ref {}",
+                n,
+                det4_b,
+                det4_b_ref
+            );
         }
     }
 
@@ -2434,21 +2494,47 @@ mod tests {
             let mut mask_out = vec![0f32; n];
             let mut iw_out = vec![0f32; n];
             let (mse_mask, mse_iw) = build_weights_and_mse(
-                &activity, k_mask, k_iw, &src, &dst, &mut mask_out, &mut iw_out,
+                &activity,
+                k_mask,
+                k_iw,
+                &src,
+                &dst,
+                &mut mask_out,
+                &mut iw_out,
             );
             let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1e-9);
             for i in 0..n {
                 assert!(
                     (mask_out[i] - mask_ref[i]).abs() < 1e-6,
-                    "n={}: mask[{}] {} vs ref {}", n, i, mask_out[i], mask_ref[i]
+                    "n={}: mask[{}] {} vs ref {}",
+                    n,
+                    i,
+                    mask_out[i],
+                    mask_ref[i]
                 );
                 assert!(
                     (iw_out[i] - iw_ref[i]).abs() < 1e-6,
-                    "n={}: iw[{}] {} vs ref {}", n, i, iw_out[i], iw_ref[i]
+                    "n={}: iw[{}] {} vs ref {}",
+                    n,
+                    i,
+                    iw_out[i],
+                    iw_ref[i]
                 );
             }
-            assert!(rel(mse_mask, mse_mask_ref) < 1e-5, "n={}: mse_mask {} vs ref {}", n, mse_mask, mse_mask_ref);
-            assert!(rel(mse_iw, mse_iw_ref) < 1e-5, "n={}: mse_iw {} vs ref {}", n, mse_iw, mse_iw_ref);
+            assert!(
+                rel(mse_mask, mse_mask_ref) < 1e-5,
+                "n={}: mse_mask {} vs ref {}",
+                n,
+                mse_mask,
+                mse_mask_ref
+            );
+            assert!(
+                rel(mse_iw, mse_iw_ref) < 1e-5,
+                "n={}: mse_iw {} vs ref {}",
+                n,
+                mse_iw,
+                mse_iw_ref
+            );
         }
     }
 
@@ -2480,10 +2566,20 @@ mod tests {
             for i in 0..n {
                 assert!(
                     (iw_out[i] - iw_ref[i]).abs() < 1e-6,
-                    "n={}: iw[{}] {} vs ref {}", n, i, iw_out[i], iw_ref[i]
+                    "n={}: iw[{}] {} vs ref {}",
+                    n,
+                    i,
+                    iw_out[i],
+                    iw_ref[i]
                 );
             }
-            assert!(rel(mse_iw, mse_iw_ref) < 1e-5, "n={}: mse_iw {} vs ref {}", n, mse_iw, mse_iw_ref);
+            assert!(
+                rel(mse_iw, mse_iw_ref) < 1e-5,
+                "n={}: mse_iw {} vs ref {}",
+                n,
+                mse_iw,
+                mse_iw_ref
+            );
         }
     }
 }

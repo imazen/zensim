@@ -56,7 +56,9 @@ fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDisp
     ];
     let reducer_b = floats[2 * n_hidden + 6];
     let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
+    Some((
+        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
+    ))
 }
 
 fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
@@ -254,13 +256,16 @@ fn parse_features_arg(s: &str) -> Result<(usize, usize, Vec<f32>), String> {
 fn read_features_file(path: &PathBuf) -> Result<(usize, usize, Vec<f32>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
     if bytes.len() < 8 {
-        return Err(format!("{path:?}: header too short ({} bytes)", bytes.len()));
+        return Err(format!(
+            "{path:?}: header too short ({} bytes)",
+            bytes.len()
+        ));
     }
     let n_features = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
     let n_rows = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
-    let expected_floats = n_rows.checked_mul(n_features).ok_or_else(|| {
-        format!("{path:?}: n_rows*n_features overflow ({n_rows} * {n_features})")
-    })?;
+    let expected_floats = n_rows
+        .checked_mul(n_features)
+        .ok_or_else(|| format!("{path:?}: n_rows*n_features overflow ({n_rows} * {n_features})"))?;
     let expected_bytes = 8 + expected_floats * 4;
     if bytes.len() != expected_bytes {
         return Err(format!(

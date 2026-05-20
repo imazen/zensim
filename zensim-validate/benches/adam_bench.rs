@@ -16,9 +16,9 @@
 #[path = "../src/adam_simd.rs"]
 mod adam_simd;
 
-use adam_simd::{AdamUpdateArgs, adam_update, adam_update_scalar_ref};
 #[cfg(target_arch = "x86_64")]
 use adam_simd::adam_update_rsqrt_v4;
+use adam_simd::{AdamUpdateArgs, adam_update, adam_update_scalar_ref};
 use zenbench::black_box;
 
 const N_W1: usize = 47_616;

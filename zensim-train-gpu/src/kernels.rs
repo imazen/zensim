@@ -348,7 +348,11 @@ pub fn backprop_heads_kernel(
         zero
     };
     let p6_floor_thresh = f32::new(1e-12);
-    let p6_floor = if p6 > p6_floor_thresh { p6 } else { p6_floor_thresh };
+    let p6_floor = if p6 > p6_floor_thresh {
+        p6
+    } else {
+        p6_floor_thresh
+    };
     let inv_p6_pow5_n = one / (n_h_f * p6_floor * p6_floor * p6_floor * p6_floor * p6_floor);
 
     let abs_hj = if hj >= zero { hj } else { -hj };

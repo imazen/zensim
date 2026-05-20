@@ -34,7 +34,9 @@ fn print_usage(arg0: &str) {
         "  PROFILE_NAME ∈ {{v0_2, v0_3, v0_4, v0_5, v0_5_balanced, v0_5_compression, v0_5_ensemble, v0_5_tuner, latest}}"
     );
     eprintln!("  --codec NAME — codec used for the distorted image (jpeg/webp/avif/jxl/png).");
-    eprintln!("  --per-codec-calibration on|off — explicitly toggle calibration (default ON for v0_5_tuner).");
+    eprintln!(
+        "  --per-codec-calibration on|off — explicitly toggle calibration (default ON for v0_5_tuner)."
+    );
 }
 
 fn main() -> ExitCode {
@@ -101,8 +103,8 @@ fn main() -> ExitCode {
     }
 
     // Default calibration policy: ON for PreviewV0_5Tuner only, OFF elsewhere.
-    let calibration_enabled = calibration_flag
-        .unwrap_or(matches!(profile, ZensimProfile::PreviewV0_5Tuner));
+    let calibration_enabled =
+        calibration_flag.unwrap_or(matches!(profile, ZensimProfile::PreviewV0_5Tuner));
 
     let img1 = image::open(ref_path).expect("open ref");
     let img2 = image::open(dist_path).expect("open dist");
@@ -144,9 +146,7 @@ fn main() -> ExitCode {
             match cal.lookup(codec) {
                 Some(affine) => affine.apply(raw as f32) as f64,
                 None => {
-                    eprintln!(
-                        "warning: unknown codec name `{codec}` — no calibration applied"
-                    );
+                    eprintln!("warning: unknown codec name `{codec}` — no calibration applied");
                     raw
                 }
             }

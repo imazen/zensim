@@ -824,10 +824,7 @@ fn load_auto_transforms_from_screen(
     let file = match File::open(tsv_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!(
-                "--auto-transforms: cannot open {}: {e}",
-                tsv_path.display()
-            );
+            eprintln!("--auto-transforms: cannot open {}: {e}", tsv_path.display());
             std::process::exit(2);
         }
     };
@@ -842,13 +839,16 @@ fn load_auto_transforms_from_screen(
     };
     let header: Vec<&str> = header_line.split('\t').collect();
     let col = |name: &str| -> usize {
-        header.iter().position(|c| c.trim() == name).unwrap_or_else(|| {
-            eprintln!(
-                "--auto-transforms: missing column {name:?} in TSV header {:?}",
-                header
-            );
-            std::process::exit(2);
-        })
+        header
+            .iter()
+            .position(|c| c.trim() == name)
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "--auto-transforms: missing column {name:?} in TSV header {:?}",
+                    header
+                );
+                std::process::exit(2);
+            })
     };
     let idx_col = col("feat_idx");
     let xform_col = col("best_transform");
@@ -982,15 +982,12 @@ fn load_csv_sequential(
         // The legacy default brought `human_score ∈ [0, 1]` to 0..100; new
         // target columns may already be in 0..100 (`--target-scale 1.0`) or
         // need a different multiplier (CVVDP JOD ∈ [0, 10] → 10.0).
-        let score: f64 = fields[score_idx]
-            .parse::<f64>()
-            .map_err(|e| {
-                format!(
-                    "{path:?} line {}: bad target column {target_column:?}: {e}",
-                    lineno + 2
-                )
-            })?
-            * target_scale;
+        let score: f64 = fields[score_idx].parse::<f64>().map_err(|e| {
+            format!(
+                "{path:?} line {}: bad target column {target_column:?}: {e}",
+                lineno + 2
+            )
+        })? * target_scale;
         let mut row = Vec::with_capacity(n_features);
         for i in 0..n_features {
             row.push(
@@ -1036,8 +1033,7 @@ pub(crate) fn load_csv(
     // SAFETY: We're reading a file that's not concurrently mutated by
     // any in-process writer; the trainer treats inputs as read-only.
     // mmap is the standard fast-CSV-load pattern.
-    let mmap = unsafe { memmap2::Mmap::map(&file) }
-        .map_err(|e| format!("mmap {path:?}: {e}"))?;
+    let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| format!("mmap {path:?}: {e}"))?;
     let bytes: &[u8] = &mmap;
 
     // 1) Find header end + parse header.
@@ -1241,12 +1237,8 @@ fn load_equiv_parquet(
     // EXP-CROSS-CODEC-V3: locate butter_a / butter_b for the
     // rank-preserve regularizer. Optional — schema versions without
     // them just return an empty butter_diff vec.
-    let butter_a_idx = arrow_fields
-        .iter()
-        .position(|f| f.name() == "butter_a");
-    let butter_b_idx = arrow_fields
-        .iter()
-        .position(|f| f.name() == "butter_b");
+    let butter_a_idx = arrow_fields.iter().position(|f| f.name() == "butter_a");
+    let butter_b_idx = arrow_fields.iter().position(|f| f.name() == "butter_b");
 
     // Locate fa_0 and count consecutive fa_i.
     let fa0_idx = arrow_fields
@@ -1279,10 +1271,7 @@ fn load_equiv_parquet(
         n_fb += 1;
     }
     if n_fb != n_fa {
-        return Err(format!(
-            "{path:?}: fa width {} != fb width {}",
-            n_fa, n_fb
-        ));
+        return Err(format!("{path:?}: fa width {} != fb width {}", n_fa, n_fb));
     }
 
     let n_features = n_fa.min(max_features);
@@ -1302,10 +1291,7 @@ fn load_equiv_parquet(
     let butter_avail = butter_a_idx.is_some() && butter_b_idx.is_some();
 
     // Inline helper: read a f32/f64 column into Vec<f64>.
-    fn read_f64_col(
-        col: &dyn arrow::array::Array,
-        n_rows: usize,
-    ) -> Result<Vec<f64>, String> {
+    fn read_f64_col(col: &dyn arrow::array::Array, n_rows: usize) -> Result<Vec<f64>, String> {
         match col.data_type() {
             arrow::datatypes::DataType::Float64 => {
                 let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
@@ -1320,8 +1306,7 @@ fn load_equiv_parquet(
     }
 
     for batch_res in reader {
-        let batch =
-            batch_res.map_err(|e| format!("{path:?}: read batch: {e}"))?;
+        let batch = batch_res.map_err(|e| format!("{path:?}: read batch: {e}"))?;
         let n_rows = batch.num_rows();
         if n_rows == 0 {
             continue;
@@ -1339,9 +1324,7 @@ fn load_equiv_parquet(
                 (0..n_rows).map(|i| a.value(i) as f64).collect()
             }
             other => {
-                return Err(format!(
-                    "{path:?}: row_weight dtype {other:?} unsupported"
-                ));
+                return Err(format!("{path:?}: row_weight dtype {other:?} unsupported"));
             }
         };
         row_weights.extend(rw_vec);
@@ -1373,9 +1356,7 @@ fn load_equiv_parquet(
                     (0..n_rows).map(|j| a.value(j) as f64).collect()
                 }
                 other => {
-                    return Err(format!(
-                        "{path:?}: fa_{i} dtype {other:?} unsupported"
-                    ));
+                    return Err(format!("{path:?}: fa_{i} dtype {other:?} unsupported"));
                 }
             };
             a_per_col.push(v);
@@ -1402,9 +1383,7 @@ fn load_equiv_parquet(
                     (0..n_rows).map(|j| a.value(j) as f64).collect()
                 }
                 other => {
-                    return Err(format!(
-                        "{path:?}: fb_{i} dtype {other:?} unsupported"
-                    ));
+                    return Err(format!("{path:?}: fb_{i} dtype {other:?} unsupported"));
                 }
             };
             b_per_col.push(v);
@@ -1888,9 +1867,7 @@ fn main() {
             for row in &mut feat {
                 for (i, t) in ts.iter().enumerate() {
                     if *t != zenpredict::FeatureTransform::Identity {
-                        let p = pp
-                            .map(|v| v[i].as_slice())
-                            .unwrap_or(&[][..]);
+                        let p = pp.map(|v| v[i].as_slice()).unwrap_or(&[][..]);
                         row[i] = t.apply_with_params(row[i] as f32, p) as f64;
                     }
                 }
@@ -1898,15 +1875,14 @@ fn main() {
         }
         // V5: optional per-row `target_score` column. Row ordering
         // matches `load_parquet` (same sequential batch scan).
-        let target_scores =
-            zensim_validate::parquet_loader::load_optional_scalar_column(
-                anchor_path,
-                "target_score",
-            )
-            .unwrap_or_else(|e| {
-                eprintln!("anchor target_score load failed: {e}");
-                std::process::exit(1);
-            });
+        let target_scores = zensim_validate::parquet_loader::load_optional_scalar_column(
+            anchor_path,
+            "target_score",
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("anchor target_score load failed: {e}");
+            std::process::exit(1);
+        });
         if let Some(ref ts) = target_scores {
             if ts.len() != feat.len() {
                 eprintln!(
@@ -1920,8 +1896,10 @@ fn main() {
             // Per-row target span summary.
             let mut ts_sorted = ts.clone();
             ts_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let (mn, mx) =
-                (ts_sorted.first().copied().unwrap_or(0.0), ts_sorted.last().copied().unwrap_or(0.0));
+            let (mn, mx) = (
+                ts_sorted.first().copied().unwrap_or(0.0),
+                ts_sorted.last().copied().unwrap_or(0.0),
+            );
             let med = ts_sorted[ts_sorted.len() / 2];
             eprintln!(
                 "anchor parquet: loaded {} rows from {:?} (PER-ROW target_score: min={:.1} median={:.1} max={:.1}, weight={}, step_p={})",
@@ -1947,22 +1925,18 @@ fn main() {
     } else {
         (Vec::new(), Vec::new(), None)
     };
-    let anchor_feat_refs: Vec<&[f64]> = anchor_feat_storage
-        .iter()
-        .map(|r| r.as_slice())
-        .collect();
-    let anchor_loaded: Option<AnchorRows<'_>> = if args.anchor_parquet.is_some()
-        && !anchor_feat_storage.is_empty()
-    {
-        Some(AnchorRows {
-            name: "jnd_anchor".to_string(),
-            features: anchor_feat_refs.as_slice(),
-            row_weights: anchor_row_weights.as_slice(),
-            target_scores: anchor_target_scores.as_deref(),
-        })
-    } else {
-        None
-    };
+    let anchor_feat_refs: Vec<&[f64]> = anchor_feat_storage.iter().map(|r| r.as_slice()).collect();
+    let anchor_loaded: Option<AnchorRows<'_>> =
+        if args.anchor_parquet.is_some() && !anchor_feat_storage.is_empty() {
+            Some(AnchorRows {
+                name: "jnd_anchor".to_string(),
+                features: anchor_feat_refs.as_slice(),
+                row_weights: anchor_row_weights.as_slice(),
+                target_scores: anchor_target_scores.as_deref(),
+            })
+        } else {
+            None
+        };
 
     // EXP-CROSS-CODEC-METRIC equivalence pair loader (2026-05-19).
     // Schema: ref_basename, codec_a, q_a, codec_b, q_b, butter_level,
@@ -1989,7 +1963,11 @@ fn main() {
                     equiv_path,
                     args.cross_codec_eq_weight,
                     args.cross_codec_eq_step_p,
-                    if bd.is_empty() { "absent".to_string() } else { format!("{}", bd.len()) },
+                    if bd.is_empty() {
+                        "absent".to_string()
+                    } else {
+                        format!("{}", bd.len())
+                    },
                 );
                 (a, b, w, bd)
             }
@@ -2003,19 +1981,18 @@ fn main() {
     };
     let equiv_a_refs: Vec<&[f64]> = equiv_a_storage.iter().map(|r| r.as_slice()).collect();
     let equiv_b_refs: Vec<&[f64]> = equiv_b_storage.iter().map(|r| r.as_slice()).collect();
-    let equiv_loaded: Option<EquivPairs<'_>> = if args.cross_codec_eq_parquet.is_some()
-        && !equiv_a_storage.is_empty()
-    {
-        Some(EquivPairs {
-            name: "cross_codec_eq".to_string(),
-            features_a: equiv_a_refs.as_slice(),
-            features_b: equiv_b_refs.as_slice(),
-            row_weights: equiv_row_weights.as_slice(),
-            butter_diff: equiv_butter_diff.as_slice(),
-        })
-    } else {
-        None
-    };
+    let equiv_loaded: Option<EquivPairs<'_>> =
+        if args.cross_codec_eq_parquet.is_some() && !equiv_a_storage.is_empty() {
+            Some(EquivPairs {
+                name: "cross_codec_eq".to_string(),
+                features_a: equiv_a_refs.as_slice(),
+                features_b: equiv_b_refs.as_slice(),
+                row_weights: equiv_row_weights.as_slice(),
+                butter_diff: equiv_butter_diff.as_slice(),
+            })
+        } else {
+            None
+        };
 
     let mut log: Vec<String> = Vec::new();
     let bake_bytes = train_mlp_with_tv_anchored_equiv(
@@ -2138,10 +2115,9 @@ mod csv_load_equivalence_tests {
                 return;
             }
         };
-        let par =
-            load_csv(&path, "tid", "iwssim_log_norm", 1.0).expect("parallel loader");
-        let seq = load_csv_sequential(&path, "tid", "iwssim_log_norm", 1.0)
-            .expect("sequential loader");
+        let par = load_csv(&path, "tid", "iwssim_log_norm", 1.0).expect("parallel loader");
+        let seq =
+            load_csv_sequential(&path, "tid", "iwssim_log_norm", 1.0).expect("sequential loader");
         assert_groups_eq(&par, &seq);
     }
 

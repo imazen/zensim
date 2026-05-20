@@ -19,7 +19,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use zensim::{compute_zensim_with_config, ZensimConfig};
+use zensim::{ZensimConfig, compute_zensim_with_config};
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -76,7 +76,10 @@ fn main() {
 
     println!("# Extended-features + IW runtime cost (4 permutations)");
     println!();
-    println!("Image: {w}×{h} ({} pixels), iters per config: {iters}", w * h);
+    println!(
+        "Image: {w}×{h} ({} pixels), iters per config: {iters}",
+        w * h
+    );
     if let (Some(r), Some(d)) = (&ref_path, &dist_path) {
         println!("Ref:  {}", r.display());
         println!("Dist: {}", d.display());
@@ -115,8 +118,8 @@ fn main() {
             cfg.compute_iw_features = iw;
             cfg.allow_multithreading = true;
             let t0 = Instant::now();
-            let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w, h, cfg)
-                .expect("compute");
+            let result =
+                compute_zensim_with_config(&src_pixels, &dst_pixels, w, h, cfg).expect("compute");
             let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
             times.push(elapsed);
             n_features = result.features().len();
@@ -132,11 +135,11 @@ fn main() {
         if baseline_mean_ms.is_none() {
             baseline_mean_ms = Some(mean);
         }
-        println!(
-            "| {label} | {n_features} | {min:.2} | {median:.2} | {mean:.2} | {rel:.2}× |"
-        );
+        println!("| {label} | {n_features} | {min:.2} | {median:.2} | {mean:.2} | {rel:.2}× |");
     }
 
     println!();
-    println!("_All times are wall-clock per `compute_zensim_with_config` call, single (ref, dist) pair, parallel=true (rayon)._");
+    println!(
+        "_All times are wall-clock per `compute_zensim_with_config` call, single (ref, dist) pair, parallel=true (rayon)._"
+    );
 }

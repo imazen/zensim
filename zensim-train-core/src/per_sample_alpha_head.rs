@@ -117,7 +117,17 @@ pub fn forward_per_sample_alpha_head(
     }
     let alpha = sigmoid(alpha_logit);
     let y = alpha * y_rank + (1.0 - alpha) * y_pool;
-    (y, y_rank, y_pool, alpha, alpha_logit, h_pre, h, stats, max_idx)
+    (
+        y,
+        y_rank,
+        y_pool,
+        alpha,
+        alpha_logit,
+        h_pre,
+        h,
+        stats,
+        max_idx,
+    )
 }
 
 /// Backprop ∂L/∂y through the per-sample α head to gradients on
@@ -722,7 +732,10 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh(
     model: &PerSampleAlphaHeadModel,
     scale: f64,
 ) -> Vec<u8> {
-    assert!(scale > 0.0, "tanh_output_head scale must be > 0; got {scale}");
+    assert!(
+        scale > 0.0,
+        "tanh_output_head scale must be > 0; got {scale}"
+    );
     let n_features = model.n_features;
     let n_hidden = model.n_hidden;
 
@@ -874,10 +887,7 @@ pub fn parse_per_sample_alpha_head_meta(
 /// - `α_logit = h · W_α + b_α`
 /// - `α = sigmoid(α_logit)`
 /// - `y = α · y_rank + (1 − α) · y_pool`
-pub fn apply_per_sample_alpha_head_runtime(
-    h: &[f32],
-    meta: &PerSampleAlphaHeadMeta,
-) -> (f64, f64) {
+pub fn apply_per_sample_alpha_head_runtime(h: &[f32], meta: &PerSampleAlphaHeadMeta) -> (f64, f64) {
     let n = h.len();
     debug_assert_eq!(meta.rank_w.len(), n);
     debug_assert_eq!(meta.w_alpha.len(), n);
@@ -976,7 +986,10 @@ mod tests {
         let (_, _, _, alpha_neg, _, _, _, _, _) = forward_per_sample_alpha_head(
             &x_neg, &w1, &b1, &rank_w, 0.0, &rw, 0.0, &w_alpha, 0.0, n_f, n_h, 0.01,
         );
-        assert!(alpha_neg < 0.5, "alpha for x=-1 must be < 0.5: got {alpha_neg}");
+        assert!(
+            alpha_neg < 0.5,
+            "alpha for x=-1 must be < 0.5: got {alpha_neg}"
+        );
     }
 
     #[test]
@@ -995,7 +1008,18 @@ mod tests {
         let b_alpha = 0.5;
 
         let (y, yr, yp, a, _, hp, h, stats, max_idx) = forward_per_sample_alpha_head(
-            &x, &w1, &b1, &rank_w, rank_b, &rw, rb, &w_alpha, b_alpha, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rank_w,
+            rank_b,
+            &rw,
+            rb,
+            &w_alpha,
+            b_alpha,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let dl_dy = 2.0 * (y - 1.0); // L = (y - 1)²
 
@@ -1044,7 +1068,18 @@ mod tests {
                    b_alpha: f64|
          -> f64 {
             let (y, _, _, _, _, _, _, _, _) = forward_per_sample_alpha_head(
-                &x, w1, &b1, rank_w, rank_b, rw, rb, w_alpha, b_alpha, n_f, n_h, alpha_leaky,
+                &x,
+                w1,
+                &b1,
+                rank_w,
+                rank_b,
+                rw,
+                rb,
+                w_alpha,
+                b_alpha,
+                n_f,
+                n_h,
+                alpha_leaky,
             );
             y
         };
@@ -1128,7 +1163,10 @@ mod tests {
         // V4: tanh metadata key must NOT appear in the non-tanh bake.
         let tanh_needle = b"zentrain.tanh_output_head";
         let tanh_found = bytes.windows(tanh_needle.len()).any(|w| w == tanh_needle);
-        assert!(!tanh_found, "did not expect tanh_output_head metadata in non-tanh bake");
+        assert!(
+            !tanh_found,
+            "did not expect tanh_output_head metadata in non-tanh bake"
+        );
     }
 
     #[test]
@@ -1143,7 +1181,10 @@ mod tests {
         assert!(found, "expected per_sample_alpha_head metadata in bake");
         let tanh_needle = b"zentrain.tanh_output_head";
         let tanh_found = bytes.windows(tanh_needle.len()).any(|w| w == tanh_needle);
-        assert!(tanh_found, "expected tanh_output_head metadata in tanh-wrapped bake");
+        assert!(
+            tanh_found,
+            "expected tanh_output_head metadata in tanh-wrapped bake"
+        );
     }
 
     #[test]
@@ -1203,7 +1244,18 @@ mod tests {
         let b_alpha = -0.3;
 
         let (y, _, _, _, _, _, h, _, _) = forward_per_sample_alpha_head(
-            &x, &w1, &b1, &rank_w, rank_b, &rw, rb, &w_alpha, b_alpha, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rank_w,
+            rank_b,
+            &rw,
+            rb,
+            &w_alpha,
+            b_alpha,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
 
         let h_f32: Vec<f32> = h.iter().map(|&v| v as f32).collect();

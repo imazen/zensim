@@ -438,8 +438,11 @@ fn load_safesyn(csv_path: &Path, max: usize) -> Vec<Pair> {
         let ssim2_raw: f64 = match record
             .get(cpu_ssim2_col)
             .and_then(|s| s.parse::<f64>().ok())
-            .or_else(|| record.get(gpu_ssim2_col).and_then(|s| s.parse::<f64>().ok()))
-        {
+            .or_else(|| {
+                record
+                    .get(gpu_ssim2_col)
+                    .and_then(|s| s.parse::<f64>().ok())
+            }) {
             Some(v) => v,
             None => continue,
         };
@@ -519,7 +522,13 @@ fn load_qsweep_tsv(path: &Path, max: usize) -> Vec<Pair> {
             distorted: PathBuf::from(dist_path),
             human_score: q,
             ref_basename: image_id.to_string(),
-            extra_targets: vec![("codec".to_string(), codec.bytes().fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64)) as f64)],
+            extra_targets: vec![(
+                "codec".to_string(),
+                codec
+                    .bytes()
+                    .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b as u64))
+                    as f64,
+            )],
         });
         if pairs.len() >= max {
             break;

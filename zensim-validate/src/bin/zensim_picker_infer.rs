@@ -39,7 +39,10 @@ struct Args {
     t_values: String,
 
     /// Comma-separated q grid for rounding (must match picker training).
-    #[arg(long, default_value = "5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95")]
+    #[arg(
+        long,
+        default_value = "5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95"
+    )]
     q_grid: String,
 
     /// Optional file with newline-separated ref_basenames to filter.
@@ -53,10 +56,9 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let bake_bytes = std::fs::read(&args.bake)
-        .with_context(|| format!("read bake {:?}", args.bake))?;
-    let model = Model::from_bytes(&bake_bytes)
-        .map_err(|e| anyhow!("load bake: {e:?}"))?;
+    let bake_bytes =
+        std::fs::read(&args.bake).with_context(|| format!("read bake {:?}", args.bake))?;
+    let model = Model::from_bytes(&bake_bytes).map_err(|e| anyhow!("load bake: {e:?}"))?;
     let mut predictor = Predictor::new(&model);
     let n_in = predictor.n_inputs();
     eprintln!("loaded bake, n_inputs={}", n_in);
@@ -74,7 +76,11 @@ fn main() -> Result<()> {
 
     let filter: Option<HashSet<String>> = if let Some(p) = &args.ref_basenames {
         let s = std::fs::read_to_string(p).with_context(|| format!("read {p:?}"))?;
-        let v: HashSet<String> = s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+        let v: HashSet<String> = s
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
         eprintln!("filtering to {} ref_basenames", v.len());
         Some(v)
     } else {
@@ -82,8 +88,7 @@ fn main() -> Result<()> {
     };
 
     // Load features parquet.
-    let file = File::open(&args.features)
-        .with_context(|| format!("open {:?}", args.features))?;
+    let file = File::open(&args.features).with_context(|| format!("open {:?}", args.features))?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
     let schema = builder.schema().clone();
     let parquet_schema = builder.parquet_schema().clone();
@@ -110,7 +115,8 @@ fn main() -> Result<()> {
     if n_features + 1 != n_in {
         return Err(anyhow!(
             "n_features ({}) + 1 ≠ bake n_inputs ({})",
-            n_features, n_in
+            n_features,
+            n_in
         ));
     }
 
@@ -180,7 +186,9 @@ fn main() -> Result<()> {
             for &t in &t_values {
                 let mut full = feats.clone();
                 full.push(t);
-                let pred = predictor.predict(&full).map_err(|e| anyhow!("predict: {e:?}"))?;
+                let pred = predictor
+                    .predict(&full)
+                    .map_err(|e| anyhow!("predict: {e:?}"))?;
                 let q_pred = pred[0];
                 // Round to nearest q in grid.
                 let mut best_q = q_grid[0];
@@ -192,7 +200,11 @@ fn main() -> Result<()> {
                         best_q = q;
                     }
                 }
-                writeln!(out_file, "{}\t{:.1}\t{:.3}\t{}", basename, t, q_pred, best_q as i32)?;
+                writeln!(
+                    out_file,
+                    "{}\t{:.1}\t{:.3}\t{}",
+                    basename, t, q_pred, best_q as i32
+                )?;
                 total_rows += 1;
             }
         }

@@ -222,9 +222,9 @@ mod streaming;
 // because they're only meaningful inside the feature-extract pipeline;
 // the metric hot path never calls them.
 #[cfg(feature = "training")]
-pub mod xyb_lms_features;
-#[cfg(feature = "training")]
 pub mod cvvdp_features;
+#[cfg(feature = "training")]
+pub mod xyb_lms_features;
 
 // --- Primary API ---
 pub use error::ZensimError;
@@ -232,6 +232,7 @@ pub use metric::{
     FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };
 
+pub use codec_calibration::{CalibrationAffine, CodecCalibration};
 /// Classification API — requires `features = ["classification"]`.
 ///
 /// Exposes `classify()`, error categorization, and per-pixel delta statistics
@@ -241,7 +242,6 @@ pub use metric::{
     AlphaStratifiedStats, ClassifiedResult, DeltaStats, ErrorCategory, ErrorClassification,
     RoundingBias,
 };
-pub use codec_calibration::{CalibrationAffine, CodecCalibration};
 pub use profile::ZensimProfile;
 pub use source::{
     AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
@@ -275,9 +275,7 @@ pub use metric::{
 /// Including the steerable-pyramid GSM approximation spike added
 /// 2026-05-15 — see `benchmarks/iw_pyramid_spike_methodology_2026-05-15.md`.
 #[cfg(feature = "training")]
-pub use iw_pool::{
-    IwSsimFeatures, IwWeightConfig, IwWeightKind, WeightedPool, compute_iw_weights,
-};
+pub use iw_pool::{IwSsimFeatures, IwWeightConfig, IwWeightKind, WeightedPool, compute_iw_weights};
 
 #[cfg(feature = "zenpixels")]
 mod zenpixels_compat;

@@ -306,11 +306,9 @@ fn box_pyramid(
                 let yy = (2 * y).min(h - 1);
                 let xx1 = (xx + 1).min(w - 1);
                 let yy1 = (yy + 1).min(h - 1);
-                let v = (cur[yy * w + xx]
-                    + cur[yy * w + xx1]
-                    + cur[yy1 * w + xx]
-                    + cur[yy1 * w + xx1])
-                    * 0.25;
+                let v =
+                    (cur[yy * w + xx] + cur[yy * w + xx1] + cur[yy1 * w + xx] + cur[yy1 * w + xx1])
+                        * 0.25;
                 next[y * new_w + x] = v;
             }
         }
@@ -327,12 +325,7 @@ fn box_pyramid(
 /// resolution before the difference. The output is one value per level
 /// (level 0 has no coarser parent → defined as the raw RMS of the
 /// finest plane, normalised by its mean).
-fn weber_contrast_bands(
-    plane: &[f32],
-    width: usize,
-    height: usize,
-    n_levels: usize,
-) -> Vec<f32> {
+fn weber_contrast_bands(plane: &[f32], width: usize, height: usize, n_levels: usize) -> Vec<f32> {
     let pyr = box_pyramid(plane, width, height, n_levels);
     let mut out = Vec::with_capacity(n_levels);
 
@@ -341,7 +334,11 @@ fn weber_contrast_bands(
     // the parent-relative bands. Empty-image guard for zero-pixel
     // shapes.
     let (mean0, std0) = mean_std(&pyr[0].2);
-    out.push(if mean0.abs() < 1e-6 { 0.0 } else { std0 / mean0.abs().max(1e-6) });
+    out.push(if mean0.abs() < 1e-6 {
+        0.0
+    } else {
+        std0 / mean0.abs().max(1e-6)
+    });
 
     for k in 1..n_levels {
         let (w_fine, h_fine, ref fine) = pyr[k - 1];
@@ -359,7 +356,11 @@ fn weber_contrast_bands(
                 count += 1;
             }
         }
-        let mean = if count > 0 { (sum / count as f64) as f32 } else { 0.0 };
+        let mean = if count > 0 {
+            (sum / count as f64) as f32
+        } else {
+            0.0
+        };
         out.push(mean);
     }
     debug_assert_eq!(out.len(), n_levels);

@@ -74,7 +74,10 @@ struct Args {
 
     /// Comma-separated list of integer qualities (0..=100).
     /// Default matches the picker design: q ∈ [5, 95] step 5.
-    #[arg(long, default_value = "5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95")]
+    #[arg(
+        long,
+        default_value = "5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95"
+    )]
     q_grid: String,
 
     /// Output parquet path.
@@ -105,8 +108,7 @@ fn parse_q_grid(s: &str) -> Result<Vec<u32>> {
         if t.is_empty() {
             continue;
         }
-        let q: u32 = t.parse()
-            .with_context(|| format!("parsing q '{t}'"))?;
+        let q: u32 = t.parse().with_context(|| format!("parsing q '{t}'"))?;
         if q > 100 {
             return Err(anyhow!("q '{q}' out of range 0..=100"));
         }
@@ -143,8 +145,13 @@ fn encode_jpeg(src: &Source, q: u32) -> Result<Vec<u8>> {
     )
     .map_err(|e| anyhow!("zenjpeg slice: {e}"))?;
 
-    let encoder = cfg.job().encoder().map_err(|e| anyhow!("zenjpeg ctor: {e}"))?;
-    let output = encoder.encode(slice).map_err(|e| anyhow!("zenjpeg encode: {e}"))?;
+    let encoder = cfg
+        .job()
+        .encoder()
+        .map_err(|e| anyhow!("zenjpeg ctor: {e}"))?;
+    let output = encoder
+        .encode(slice)
+        .map_err(|e| anyhow!("zenjpeg encode: {e}"))?;
     Ok(output.into_vec())
 }
 
@@ -195,8 +202,13 @@ fn encode_jxl(src: &Source, q: u32) -> Result<Vec<u8>> {
         PixelDescriptor::RGB8_SRGB,
     )
     .map_err(|e| anyhow!("zenjxl slice: {e}"))?;
-    let encoder = cfg.job().encoder().map_err(|e| anyhow!("zenjxl ctor: {e}"))?;
-    let output = encoder.encode(slice).map_err(|e| anyhow!("zenjxl encode: {e}"))?;
+    let encoder = cfg
+        .job()
+        .encoder()
+        .map_err(|e| anyhow!("zenjxl ctor: {e}"))?;
+    let output = encoder
+        .encode(slice)
+        .map_err(|e| anyhow!("zenjxl encode: {e}"))?;
     Ok(output.into_vec())
 }
 
@@ -221,7 +233,9 @@ fn bytemuck_cast_rgb(buf: &[u8]) -> &[rgb::Rgb<u8>] {
     // Required because rgb 0.8 doesn't expose a safe cast helper and
     // bytemuck doesn't cover external types by default.
     #[allow(unsafe_code)]
-    unsafe { std::slice::from_raw_parts(ptr, n) }
+    unsafe {
+        std::slice::from_raw_parts(ptr, n)
+    }
 }
 
 fn encode(codec: CodecKind, src: &Source, q: u32) -> Result<Vec<u8>> {
@@ -253,8 +267,8 @@ fn decode_jpeg_bytes(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 fn decode_webp_bytes(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
-    let (pixels, width, height) = zenwebp::decoder::decode_rgb(data)
-        .map_err(|e| anyhow!("zenwebp decode: {e}"))?;
+    let (pixels, width, height) =
+        zenwebp::decoder::decode_rgb(data).map_err(|e| anyhow!("zenwebp decode: {e}"))?;
     Ok((pixels, width, height))
 }
 
@@ -380,7 +394,8 @@ fn main() -> Result<()> {
                     let n_added = q_grid.len();
                     let n = progress.fetch_add(n_added, Ordering::Relaxed) + n_added;
                     log_progress(n, total, &t_score);
-                    return q_grid.iter()
+                    return q_grid
+                        .iter()
                         .map(|&q| (basename.clone(), q, None, None, None))
                         .collect();
                 }
@@ -396,7 +411,13 @@ fn main() -> Result<()> {
             let mut out: Vec<Row> = Vec::with_capacity(n_qs);
             for &q in &q_grid {
                 let cell = encode_and_score(&zensim, args.codec, &src, q);
-                out.push((basename.clone(), q, cell.score, cell.encoded_bytes, cell.dims));
+                out.push((
+                    basename.clone(),
+                    q,
+                    cell.score,
+                    cell.encoded_bytes,
+                    cell.dims,
+                ));
                 let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
                 if n % 500 == 0 || n == total {
                     log_progress(n, total, &t_score);
@@ -408,7 +429,9 @@ fn main() -> Result<()> {
 
     eprintln!(
         "  scoring: {} cells across {} sources in {:.1}s",
-        total, n_sources, t_score.elapsed().as_secs_f64()
+        total,
+        n_sources,
+        t_score.elapsed().as_secs_f64()
     );
 
     // ─── parquet output ──────────────────────────────────────────
@@ -468,7 +491,13 @@ fn main() -> Result<()> {
     };
     eprintln!(
         "  wrote {} rows → {:?}\n  achieved_zensim_tuner: min={:.2} mean={:.2} max={:.2} n_ok={} n_fail={}",
-        rows.len(), args.output, mn, mean, mx, n_score_ok, n_score_nan
+        rows.len(),
+        args.output,
+        mn,
+        mean,
+        mx,
+        n_score_ok,
+        n_score_nan
     );
     eprintln!("  total wall: {:.1}s", t_start.elapsed().as_secs_f64());
     Ok(())
@@ -480,43 +509,52 @@ struct CellResult {
     dims: Option<(u32, u32)>,
 }
 
-fn encode_and_score(
-    zensim: &Zensim,
-    codec: CodecKind,
-    src: &Source,
-    q: u32,
-) -> CellResult {
+fn encode_and_score(zensim: &Zensim, codec: CodecKind, src: &Source, q: u32) -> CellResult {
     // Catch panics in the codec encoder (jxl-encoder 0.3.1 panics on
     // some content + low-distance combos with "attempt to divide by
     // zero" in vardct/ac_context.rs:231) so a single bad cell doesn't
     // sink the whole sweep.
-    let encode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        encode(codec, src, q)
-    }));
+    let encode_result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| encode(codec, src, q)));
     let bytes = match encode_result {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => {
             eprintln!("  WARN: encode fail {} q={}: {e}", src.basename, q);
-            return CellResult { score: None, encoded_bytes: None, dims: None };
+            return CellResult {
+                score: None,
+                encoded_bytes: None,
+                dims: None,
+            };
         }
         Err(_panic) => {
             eprintln!("  WARN: encode PANIC {} q={}", src.basename, q);
-            return CellResult { score: None, encoded_bytes: None, dims: None };
+            return CellResult {
+                score: None,
+                encoded_bytes: None,
+                dims: None,
+            };
         }
     };
     let n_enc = bytes.len();
-    let decode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        decode(codec, &bytes)
-    }));
+    let decode_result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decode(codec, &bytes)));
     let (dpx, dw, dh) = match decode_result {
         Ok(Ok(t)) => t,
         Ok(Err(e)) => {
             eprintln!("  WARN: decode fail {} q={}: {e}", src.basename, q);
-            return CellResult { score: None, encoded_bytes: Some(n_enc), dims: None };
+            return CellResult {
+                score: None,
+                encoded_bytes: Some(n_enc),
+                dims: None,
+            };
         }
         Err(_panic) => {
             eprintln!("  WARN: decode PANIC {} q={}", src.basename, q);
-            return CellResult { score: None, encoded_bytes: Some(n_enc), dims: None };
+            return CellResult {
+                score: None,
+                encoded_bytes: Some(n_enc),
+                dims: None,
+            };
         }
     };
     if dw != src.width || dh != src.height || dpx.len() != src.pixels.len() {
@@ -524,7 +562,11 @@ fn encode_and_score(
             "  WARN: dim mismatch {} q={}: src={}x{} dec={}x{}",
             src.basename, q, src.width, src.height, dw, dh
         );
-        return CellResult { score: None, encoded_bytes: Some(n_enc), dims: Some((dw, dh)) };
+        return CellResult {
+            score: None,
+            encoded_bytes: Some(n_enc),
+            dims: Some((dw, dh)),
+        };
     }
 
     let w = src.width as usize;
@@ -534,14 +576,22 @@ fn encode_and_score(
         Ok(s) => s,
         Err(e) => {
             eprintln!("  WARN: src slice {} q={}: {e:?}", src.basename, q);
-            return CellResult { score: None, encoded_bytes: Some(n_enc), dims: Some((dw, dh)) };
+            return CellResult {
+                score: None,
+                encoded_bytes: Some(n_enc),
+                dims: Some((dw, dh)),
+            };
         }
     };
     let s_dst = match StridedBytes::try_new(&dpx, w, h, stride, PixelFormat::Srgb8Rgb) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("  WARN: dist slice {} q={}: {e:?}", src.basename, q);
-            return CellResult { score: None, encoded_bytes: Some(n_enc), dims: Some((dw, dh)) };
+            return CellResult {
+                score: None,
+                encoded_bytes: Some(n_enc),
+                dims: Some((dw, dh)),
+            };
         }
     };
     let score = match zensim.compute(&s_src, &s_dst) {
@@ -561,9 +611,18 @@ fn encode_and_score(
 fn log_progress(n: usize, total: usize, t_start: &Instant) {
     let elapsed = t_start.elapsed().as_secs_f64();
     let rate = n as f64 / elapsed;
-    let eta = if rate > 0.0 { (total - n) as f64 / rate } else { 0.0 };
+    let eta = if rate > 0.0 {
+        (total - n) as f64 / rate
+    } else {
+        0.0
+    };
     eprintln!(
         "  cells: {}/{} ({:.1}%) {:.1}s rate={:.2}/s eta={:.0}s",
-        n, total, 100.0 * n as f64 / total as f64, elapsed, rate, eta
+        n,
+        total,
+        100.0 * n as f64 / total as f64,
+        elapsed,
+        rate,
+        eta
     );
 }

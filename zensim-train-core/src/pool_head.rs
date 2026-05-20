@@ -534,13 +534,7 @@ pub fn train_pool_head(
             // mini-batch=1 reference policy).
             let mut r_w_vec: Vec<f64> = model.reducer_w.to_vec();
             let mut r_b_vec: Vec<f64> = vec![model.reducer_b];
-            adam.step(
-                &mut model.w1,
-                &mut model.b1,
-                &mut r_w_vec,
-                &mut r_b_vec,
-                lr,
-            );
+            adam.step(&mut model.w1, &mut model.b1, &mut r_w_vec, &mut r_b_vec, lr);
             model.reducer_w = [r_w_vec[0], r_w_vec[1], r_w_vec[2], r_w_vec[3]];
             model.reducer_b = r_b_vec[0];
         }
@@ -657,7 +651,10 @@ mod tests {
         assert!((mx - 3.0).abs() < 1e-12);
         let mean_p = (0f64.powf(6.0) + 1.0 + 64.0 + 729.0) / 4.0;
         let p_expect = mean_p.powf(1.0 / 6.0);
-        assert!((p6 - p_expect).abs() < 1e-9, "p_6 got {p6}, expect {p_expect}");
+        assert!(
+            (p6 - p_expect).abs() < 1e-9,
+            "p_6 got {p6}, expect {p_expect}"
+        );
     }
 
     #[test]
@@ -690,8 +687,7 @@ mod tests {
         let rw: [f64; 4] = [0.2, 0.8, 0.3, 0.1];
         let rb = 0.05;
 
-        let (y, hp, h, stats, max_idx) =
-            forward_pool_head(&x, &w1, &b1, &rw, rb, n_f, n_h, alpha);
+        let (y, hp, h, stats, max_idx) = forward_pool_head(&x, &w1, &b1, &rw, rb, n_f, n_h, alpha);
         let dl_dy = 2.0 * (y - 1.0); // ½(y − 1)² loss → ∂L/∂y = (y − 1) · 2
 
         let mut gw1 = vec![0.0; w1.len()];
@@ -699,32 +695,18 @@ mod tests {
         let mut g_rw: [f64; 4] = [0.0; 4];
         let mut g_rb: f64 = 0.0;
         backprop_step_pool_head(
-            &x,
-            &hp,
-            &h,
-            &stats,
-            max_idx,
-            dl_dy,
-            &rw,
-            &mut gw1,
-            &mut gb1,
-            &mut g_rw,
-            &mut g_rb,
-            n_f,
-            n_h,
-            alpha,
+            &x, &hp, &h, &stats, max_idx, dl_dy, &rw, &mut gw1, &mut gb1, &mut g_rw, &mut g_rb,
+            n_f, n_h, alpha,
         );
 
         let eps = 1e-5;
         // Check ∂L/∂w1[0].
         let mut w1_p = w1.clone();
         w1_p[0] += eps;
-        let (y_p, _, _, _, _) =
-            forward_pool_head(&x, &w1_p, &b1, &rw, rb, n_f, n_h, alpha);
+        let (y_p, _, _, _, _) = forward_pool_head(&x, &w1_p, &b1, &rw, rb, n_f, n_h, alpha);
         let mut w1_m = w1.clone();
         w1_m[0] -= eps;
-        let (y_m, _, _, _, _) =
-            forward_pool_head(&x, &w1_m, &b1, &rw, rb, n_f, n_h, alpha);
+        let (y_m, _, _, _, _) = forward_pool_head(&x, &w1_m, &b1, &rw, rb, n_f, n_h, alpha);
         let num_grad = ((y_p - 1.0).powi(2) - (y_m - 1.0).powi(2)) / (2.0 * eps);
         assert!(
             (gw1[0] - num_grad).abs() < 1e-3,
@@ -737,12 +719,10 @@ mod tests {
         // Check ∂L/∂reducer_w[1] (sigma weight).
         let mut rw_p = rw;
         rw_p[1] += eps;
-        let (yp, _, _, _, _) =
-            forward_pool_head(&x, &w1, &b1, &rw_p, rb, n_f, n_h, alpha);
+        let (yp, _, _, _, _) = forward_pool_head(&x, &w1, &b1, &rw_p, rb, n_f, n_h, alpha);
         let mut rw_m = rw;
         rw_m[1] -= eps;
-        let (ym, _, _, _, _) =
-            forward_pool_head(&x, &w1, &b1, &rw_m, rb, n_f, n_h, alpha);
+        let (ym, _, _, _, _) = forward_pool_head(&x, &w1, &b1, &rw_m, rb, n_f, n_h, alpha);
         let num_g_rw1 = ((yp - 1.0).powi(2) - (ym - 1.0).powi(2)) / (2.0 * eps);
         assert!(
             (g_rw[1] - num_g_rw1).abs() < 1e-4,

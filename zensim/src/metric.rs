@@ -1651,16 +1651,14 @@ pub(crate) fn apply_mlp_scoring(
             params.ensemble_classifier_bytes,
             params.mlp_bytes_compression,
         ) {
-            let logit =
-                forward_one_bake(clf_loader(), result.features(), width, height)?;
+            let logit = forward_one_bake(clf_loader(), result.features(), width, height)?;
             if logit > 0.0 {
                 forward_one_bake(cmp_loader(), result.features(), width, height)?
             } else {
                 forward_one_bake(loader(), result.features(), width, height)?
             }
         } else {
-            let raw_primary =
-                forward_one_bake(loader(), result.features(), width, height)?;
+            let raw_primary = forward_one_bake(loader(), result.features(), width, height)?;
             // Optional secondary bake (D2 multi-output ensemble, e.g.
             // V_20 IS B3 specialist) — its forward path runs over the
             // SAME 228-feature vector but applies its own
@@ -1668,8 +1666,7 @@ pub(crate) fn apply_mlp_scoring(
             // are mixed linearly at `mlp_primary_mix` weight on the
             // primary.
             if let Some(b3_loader) = params.mlp_bytes_b3 {
-                let raw_b3 =
-                    forward_one_bake(b3_loader(), result.features(), width, height)?;
+                let raw_b3 = forward_one_bake(b3_loader(), result.features(), width, height)?;
                 let a = params.mlp_primary_mix as f64;
                 a * raw_primary + (1.0 - a) * raw_b3
             } else {
@@ -2996,8 +2993,20 @@ mod tests {
         for i in 0..228 {
             let de = (r_ext.features[i] - r_both.features[i]).abs();
             let di = (r_iw.features[i] - r_both.features[i]).abs();
-            assert!(de < 1e-9, "basic feature {} disagrees: ext_only {} vs both {}", i, r_ext.features[i], r_both.features[i]);
-            assert!(di < 1e-9, "basic feature {} disagrees: iw_only {} vs both {}", i, r_iw.features[i], r_both.features[i]);
+            assert!(
+                de < 1e-9,
+                "basic feature {} disagrees: ext_only {} vs both {}",
+                i,
+                r_ext.features[i],
+                r_both.features[i]
+            );
+            assert!(
+                di < 1e-9,
+                "basic feature {} disagrees: iw_only {} vs both {}",
+                i,
+                r_iw.features[i],
+                r_both.features[i]
+            );
         }
 
         // Masked block (228..300 in r_ext, 228..300 in r_both) must agree
@@ -3038,7 +3047,11 @@ mod tests {
             );
         }
         // Sanity: not all zero
-        assert!(max_diff < 1e-4 && max_diff >= 0.0, "max_diff out of range: {}", max_diff);
+        assert!(
+            max_diff < 1e-4 && max_diff >= 0.0,
+            "max_diff out of range: {}",
+            max_diff
+        );
     }
 
     /// Extended features: default config produces same score as non-extended.

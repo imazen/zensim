@@ -36,7 +36,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
-use arrow::array::{Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array, UInt64Array};
+use arrow::array::{
+    Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
+    UInt64Array,
+};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use clap::Parser;
@@ -93,7 +96,10 @@ fn main() -> Result<()> {
     eprintln!("EX-4 feature extractor");
     eprintln!("  input:  {:?}", args.input);
     eprintln!("  output: {:?}", args.output);
-    eprintln!("  refs:   {:?} (suffix {:?})", args.refs_root, args.refs_suffix);
+    eprintln!(
+        "  refs:   {:?} (suffix {:?})",
+        args.refs_root, args.refs_suffix
+    );
     eprintln!("  per-pair: {}", args.pair_features);
 
     let t_start = Instant::now();
@@ -101,10 +107,9 @@ fn main() -> Result<()> {
     // ------------------------------------------------------------------
     // Phase 1 — read input parquet entirely into memory (Arrow batches).
     // ------------------------------------------------------------------
-    let file = File::open(&args.input)
-        .with_context(|| format!("opening {:?}", args.input))?;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
-        .context("creating parquet reader")?;
+    let file = File::open(&args.input).with_context(|| format!("opening {:?}", args.input))?;
+    let builder =
+        ParquetRecordBatchReaderBuilder::try_new(file).context("creating parquet reader")?;
     let in_schema = builder.schema().clone();
     let reader = builder
         .with_batch_size(16384)
@@ -118,8 +123,12 @@ fn main() -> Result<()> {
         total_rows += b.num_rows();
         in_batches.push(b);
     }
-    eprintln!("  read {} rows × {} cols in {:.2}s",
-        total_rows, in_schema.fields().len(), t_start.elapsed().as_secs_f64());
+    eprintln!(
+        "  read {} rows × {} cols in {:.2}s",
+        total_rows,
+        in_schema.fields().len(),
+        t_start.elapsed().as_secs_f64()
+    );
 
     // ------------------------------------------------------------------
     // Phase 2 — find ref_basename column + collect unique refs.
@@ -136,10 +145,9 @@ fn main() -> Result<()> {
         let mut seen: HashMap<String, u32> = HashMap::new();
         for batch in &in_batches {
             let col = batch.column(ref_col_idx);
-            let arr = col
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| anyhow!("ref_basename not StringArray (got {:?})", col.data_type()))?;
+            let arr = col.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                anyhow!("ref_basename not StringArray (got {:?})", col.data_type())
+            })?;
             for i in 0..arr.len() {
                 let s = arr.value(i);
                 if let Some(&idx) = seen.get(s) {
@@ -175,15 +183,22 @@ fn main() -> Result<()> {
             };
             let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if n % 25 == 0 || n == total_refs {
-                eprintln!("  per-ref: {}/{} ({:.1}%)",
-                    n, total_refs, 100.0 * n as f64 / total_refs as f64);
+                eprintln!(
+                    "  per-ref: {}/{} ({:.1}%)",
+                    n,
+                    total_refs,
+                    100.0 * n as f64 / total_refs as f64
+                );
             }
             result
         })
         .collect();
 
-    eprintln!("  XYB+LMS extract: {} refs in {:.2}s",
-        unique_refs.len(), t_extract.elapsed().as_secs_f64());
+    eprintln!(
+        "  XYB+LMS extract: {} refs in {:.2}s",
+        unique_refs.len(),
+        t_extract.elapsed().as_secs_f64()
+    );
 
     // ------------------------------------------------------------------
     // Phase 4 — optionally extract per-pair CVVDP features.
@@ -212,7 +227,11 @@ fn main() -> Result<()> {
     let max_existing_f: i64 = in_schema
         .fields()
         .iter()
-        .filter_map(|f| f.name().strip_prefix('f').and_then(|s| s.parse::<i64>().ok()))
+        .filter_map(|f| {
+            f.name()
+                .strip_prefix('f')
+                .and_then(|s| s.parse::<i64>().ok())
+        })
         .max()
         .unwrap_or(-1);
     let first_new_f = (max_existing_f + 1) as usize;
@@ -241,7 +260,8 @@ fn main() -> Result<()> {
 
     // Build columns for the new features (single concatenated batch).
     // Per-ref: XYB_LMS_FEATURE_COUNT columns; per-pair: CVVDP_FEATURE_COUNT.
-    let mut new_xyb_cols: Vec<Vec<f32>> = vec![Vec::with_capacity(total_rows); XYB_LMS_FEATURE_COUNT];
+    let mut new_xyb_cols: Vec<Vec<f32>> =
+        vec![Vec::with_capacity(total_rows); XYB_LMS_FEATURE_COUNT];
     for row in &new_per_row_xyb {
         for (i, &v) in row.iter().enumerate() {
             new_xyb_cols[i].push(v);
@@ -263,8 +283,8 @@ fn main() -> Result<()> {
     // ------------------------------------------------------------------
     // Phase 6 — write output parquet.
     // ------------------------------------------------------------------
-    let out_file = File::create(&args.output)
-        .with_context(|| format!("creating {:?}", args.output))?;
+    let out_file =
+        File::create(&args.output).with_context(|| format!("creating {:?}", args.output))?;
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(Default::default()))
         .build();
@@ -279,12 +299,16 @@ fn main() -> Result<()> {
         // Add new XYB+LMS columns (slice from full arrays).
         for col_data in &new_xyb_cols {
             let slice = &col_data[row_offset..row_offset + n];
-            cols.push(Arc::new(Float32Array::from_iter_values(slice.iter().copied())));
+            cols.push(Arc::new(Float32Array::from_iter_values(
+                slice.iter().copied(),
+            )));
         }
         if args.pair_features {
             for col_data in &new_pair_cols {
                 let slice = &col_data[row_offset..row_offset + n];
-                cols.push(Arc::new(Float32Array::from_iter_values(slice.iter().copied())));
+                cols.push(Arc::new(Float32Array::from_iter_values(
+                    slice.iter().copied(),
+                )));
             }
         }
         let out_batch = RecordBatch::try_new(out_schema.clone(), cols)
@@ -294,8 +318,12 @@ fn main() -> Result<()> {
     }
     writer.close().context("closing writer")?;
 
-    eprintln!("  wrote {} rows × {} cols → {:?}",
-        total_rows, out_schema.fields().len(), args.output);
+    eprintln!(
+        "  wrote {} rows × {} cols → {:?}",
+        total_rows,
+        out_schema.fields().len(),
+        args.output
+    );
     eprintln!("  total wall time: {:.2}s", t_start.elapsed().as_secs_f64());
 
     // ------------------------------------------------------------------
@@ -312,17 +340,28 @@ fn main() -> Result<()> {
         }
         let n = valid.len() as f64;
         let mean = valid.iter().map(|&x| x as f64).sum::<f64>() / n;
-        let var = valid.iter().map(|&x| {
-            let d = x as f64 - mean;
-            d * d
-        }).sum::<f64>() / n;
+        let var = valid
+            .iter()
+            .map(|&x| {
+                let d = x as f64 - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / n;
         let std = var.sqrt();
         let min = valid.iter().copied().fold(f32::INFINITY, f32::min);
         let max = valid.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let n_zero = col.iter().filter(|&&x| x == 0.0).count();
         eprintln!(
             "  f{} (xyb_lms[{:2}]): min={:.4} max={:.4} mean={:.4} std={:.4} nan={} zero={}",
-            first_new_f + i, i, min, max, mean, std, n_nan, n_zero
+            first_new_f + i,
+            i,
+            min,
+            max,
+            mean,
+            std,
+            n_nan,
+            n_zero
         );
     }
 
@@ -346,6 +385,11 @@ fn load_rgb8(p: &Path) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 #[allow(dead_code)]
-fn extract_cvvdp_pair(ref_pixels: &[u8], dist_pixels: &[u8], width: usize, height: usize) -> Vec<f32> {
+fn extract_cvvdp_pair(
+    ref_pixels: &[u8],
+    dist_pixels: &[u8],
+    width: usize,
+    height: usize,
+) -> Vec<f32> {
     extract_cvvdp_features(ref_pixels, dist_pixels, width, height)
 }

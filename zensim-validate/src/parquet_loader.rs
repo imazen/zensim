@@ -19,7 +19,9 @@
 use std::fs::File;
 use std::path::PathBuf;
 
-use arrow::array::{Array, Float32Array, Float64Array, Int32Array, Int64Array, UInt32Array, UInt64Array};
+use arrow::array::{
+    Array, Float32Array, Float64Array, Int32Array, Int64Array, UInt32Array, UInt64Array,
+};
 use arrow::datatypes::DataType;
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -141,8 +143,7 @@ pub fn load_parquet(
     let mut feature_rows: Vec<Vec<f64>> = Vec::new();
 
     for batch_res in reader {
-        let batch =
-            batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
         let n_rows = batch.num_rows();
         if n_rows == 0 {
             continue;
@@ -292,8 +293,7 @@ pub fn load_optional_scalar_column(
 
     let mut values: Vec<f64> = Vec::new();
     for batch_res in reader {
-        let batch =
-            batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
         let n_rows = batch.num_rows();
         if n_rows == 0 {
             continue;

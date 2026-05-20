@@ -688,7 +688,10 @@ pub struct HybridHeadMeta {
 ///
 /// Layout: `[rank_w[0..n_hidden]] [rank_b] [alpha_logit]
 /// [reducer_w[0..4]] [reducer_b] [p_norm]` — all f32 LE.
-pub fn parse_hybrid_head_meta(payload: &[u8], n_hidden: usize) -> Option<(Vec<f32>, HybridHeadMeta)> {
+pub fn parse_hybrid_head_meta(
+    payload: &[u8],
+    n_hidden: usize,
+) -> Option<(Vec<f32>, HybridHeadMeta)> {
     let expected = (n_hidden + 8) * 4;
     if payload.len() != expected {
         return None;
@@ -809,7 +812,10 @@ mod tests {
         let (y, y_rank, _, alpha, _, _, _, _) =
             forward_hybrid_head(&x, &w1, &b1, &rank_w, 0.1, &rw, 0.0, 10.0, 4, 8, 0.01);
         assert!((alpha - 1.0).abs() < 1e-3, "alpha = {alpha}, expected ~1");
-        assert!((y_rank - (4.0 * 0.5 + 0.1)).abs() < 1e-9, "y_rank = {y_rank}");
+        assert!(
+            (y_rank - (4.0 * 0.5 + 0.1)).abs() < 1e-9,
+            "y_rank = {y_rank}"
+        );
         assert!((y - y_rank).abs() < 1e-3, "y={y}, y_rank={y_rank}");
     }
 
@@ -829,7 +835,17 @@ mod tests {
         let alpha_logit = 0.5; // α ≈ 0.622
 
         let (y, yr, yp, a, hp, h, stats, max_idx) = forward_hybrid_head(
-            &x, &w1, &b1, &rank_w, rank_b, &rw, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rank_w,
+            rank_b,
+            &rw,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let dl_dy = 2.0 * (y - 1.0); // L = (y - 1)²
 
@@ -870,12 +886,32 @@ mod tests {
         let mut w1_p = w1.clone();
         w1_p[0] += eps;
         let (yp_p, _, _, _, _, _, _, _) = forward_hybrid_head(
-            &x, &w1_p, &b1, &rank_w, rank_b, &rw, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1_p,
+            &b1,
+            &rank_w,
+            rank_b,
+            &rw,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let mut w1_m = w1.clone();
         w1_m[0] -= eps;
         let (yp_m, _, _, _, _, _, _, _) = forward_hybrid_head(
-            &x, &w1_m, &b1, &rank_w, rank_b, &rw, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1_m,
+            &b1,
+            &rank_w,
+            rank_b,
+            &rw,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let num_grad = (loss(yp_p) - loss(yp_m)) / (2.0 * eps);
         assert!(
@@ -889,12 +925,32 @@ mod tests {
         let mut rw_p = rank_w.clone();
         rw_p[1] += eps;
         let (yp2_p, _, _, _, _, _, _, _) = forward_hybrid_head(
-            &x, &w1, &b1, &rw_p, rank_b, &rw, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rw_p,
+            rank_b,
+            &rw,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let mut rw_m = rank_w.clone();
         rw_m[1] -= eps;
         let (yp2_m, _, _, _, _, _, _, _) = forward_hybrid_head(
-            &x, &w1, &b1, &rw_m, rank_b, &rw, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rw_m,
+            rank_b,
+            &rw,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let num_g_rank1 = (loss(yp2_p) - loss(yp2_m)) / (2.0 * eps);
         assert!(
@@ -908,12 +964,32 @@ mod tests {
         let mut red_p = rw;
         red_p[1] += eps;
         let (yp3_p, _, _, _, _, _, _, _) = forward_hybrid_head(
-            &x, &w1, &b1, &rank_w, rank_b, &red_p, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rank_w,
+            rank_b,
+            &red_p,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let mut red_m = rw;
         red_m[1] -= eps;
         let (yp3_m, _, _, _, _, _, _, _) = forward_hybrid_head(
-            &x, &w1, &b1, &rank_w, rank_b, &red_m, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rank_w,
+            rank_b,
+            &red_m,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
         let num_g_red1 = (loss(yp3_p) - loss(yp3_m)) / (2.0 * eps);
         assert!(
@@ -1031,7 +1107,17 @@ mod tests {
         let alpha_logit = -0.8;
 
         let (y, _, _, _, _, h, _, _) = forward_hybrid_head(
-            &x, &w1, &b1, &rank_w, rank_b, &rw, rb, alpha_logit, n_f, n_h, alpha_leaky,
+            &x,
+            &w1,
+            &b1,
+            &rank_w,
+            rank_b,
+            &rw,
+            rb,
+            alpha_logit,
+            n_f,
+            n_h,
+            alpha_leaky,
         );
 
         // Convert to runtime types and compare.

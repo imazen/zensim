@@ -77,9 +77,7 @@ fn load_packed_bake() -> Option<Vec<u8>> {
 /// `zensim-validate::bake_verdict::score_row`. Re-implemented here so
 /// the regression test catches dispatch drift across all three call
 /// sites with one fixture.
-fn extract_hybrid_head(
-    model: &Model,
-) -> Option<(Vec<f32>, f32, f32, [f32; 4], f32, f32)> {
+fn extract_hybrid_head(model: &Model) -> Option<(Vec<f32>, f32, f32, [f32; 4], f32, f32)> {
     let md = model.metadata();
     let entry = md.get("zentrain.hybrid_head")?;
     let n_hidden = model.n_outputs();
@@ -201,7 +199,11 @@ fn packed_bake_has_hybrid_head_metadata() {
     );
     let (rank_w, _rank_b, _alpha_logit, _reducer_w, _reducer_b, p_norm) = meta.unwrap();
     let n_hidden = model.n_outputs();
-    assert_eq!(rank_w.len(), n_hidden, "rank_w should have n_hidden entries");
+    assert_eq!(
+        rank_w.len(),
+        n_hidden,
+        "rank_w should have n_hidden entries"
+    );
     assert!(
         (p_norm - 6.0).abs() < 1e-3,
         "p_norm should be 6.0 (POOL_P_NORM in zensim-train-core); got {p_norm}"
@@ -227,7 +229,10 @@ fn packed_bake_dispatch_round_trip_finite_and_varies() {
     };
     let model = Model::from_bytes(&bake_bytes).expect("load bake");
     let n_inputs = model.n_inputs();
-    assert_eq!(n_inputs, 300, "expected n_inputs=300 for the 300-feature recipe");
+    assert_eq!(
+        n_inputs, 300,
+        "expected n_inputs=300 for the 300-feature recipe"
+    );
 
     let head = extract_hybrid_head(&model).expect("hybrid head present");
     let has_transforms = model.has_nontrivial_feature_transforms();
@@ -241,13 +246,7 @@ fn packed_bake_dispatch_round_trip_finite_and_varies() {
     let mut scores = Vec::new();
     for seed in [1u64, 2, 3, 42] {
         let row = synthetic_feature_row(n_inputs, seed);
-        let score = score_row_hybrid(
-            &mut predictor,
-            has_transforms,
-            &head,
-            &mut scratch,
-            &row,
-        );
+        let score = score_row_hybrid(&mut predictor, has_transforms, &head, &mut scratch, &row);
         assert!(
             score.is_finite(),
             "hybrid score must be finite (seed={seed}, got {score})"
@@ -371,10 +370,7 @@ fn hybrid_head_formula_closed_form_matches_dispatch() {
         let xc = (*al2 as f64).clamp(-20.0, 20.0);
         1.0 / (1.0 + (-xc).exp())
     };
-    assert!(
-        alpha0 < 1e-7,
-        "sigmoid(-20) should be ~0, got {alpha0}"
-    );
+    assert!(alpha0 < 1e-7, "sigmoid(-20) should be ~0, got {alpha0}");
     let mut yr0 = *rb2 as f64;
     for (j, &hj) in h.iter().enumerate() {
         yr0 += hj as f64 * rw2[j] as f64;
@@ -426,13 +422,9 @@ fn cid22_aggregate_srocc_matches_audit_reference() {
         Some(b) => b,
         None => return,
     };
-    let groups = zensim_validate::parquet_loader::load_parquet(
-        &parquet_path,
-        "CID22",
-        "human_score",
-        1.0,
-    )
-    .expect("load CID22 parquet");
+    let groups =
+        zensim_validate::parquet_loader::load_parquet(&parquet_path, "CID22", "human_score", 1.0)
+            .expect("load CID22 parquet");
 
     let model = Model::from_bytes(&bake_bytes).expect("load bake");
     let head = extract_hybrid_head(&model).expect("hybrid head");
@@ -443,9 +435,11 @@ fn cid22_aggregate_srocc_matches_audit_reference() {
 
     assert!(!groups.feature_rows.is_empty(), "CID22 parquet empty");
     let row0 = &groups.feature_rows[0];
-    let score0 =
-        score_row_hybrid(&mut predictor, has_transforms, &head, &mut scratch, row0);
-    assert!(score0.is_finite(), "row 0 score must be finite, got {score0}");
+    let score0 = score_row_hybrid(&mut predictor, has_transforms, &head, &mut scratch, row0);
+    assert!(
+        score0.is_finite(),
+        "row 0 score must be finite, got {score0}"
+    );
 
     // Cross-check: re-score the same row with a freshly-constructed
     // predictor. Bit-identical output.
@@ -465,11 +459,12 @@ fn cid22_aggregate_srocc_matches_audit_reference() {
     let scores: Vec<f64> = groups
         .feature_rows
         .iter()
-        .map(|row| {
-            score_row_hybrid(&mut predictor, has_transforms, &head, &mut scratch, row)
-        })
+        .map(|row| score_row_hybrid(&mut predictor, has_transforms, &head, &mut scratch, row))
         .collect();
-    assert!(scores.iter().all(|s| s.is_finite()), "some scores non-finite");
+    assert!(
+        scores.iter().all(|s| s.is_finite()),
+        "some scores non-finite"
+    );
     let srocc = spearman_correlation(&scores, &groups.human_scores).abs();
     let expected_srocc = 0.8727_f64;
     assert!(

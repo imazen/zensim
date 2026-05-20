@@ -73,7 +73,10 @@ struct Args {
     sources: PathBuf,
 
     /// Comma-separated list of integer qualities (0..=100).
-    #[arg(long, default_value = "5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95")]
+    #[arg(
+        long,
+        default_value = "5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95"
+    )]
     q_grid: String,
 
     /// Output parquet path.
@@ -146,8 +149,13 @@ fn encode_jpeg(src: &Source, q: u32) -> Result<Vec<u8>> {
         PixelDescriptor::RGB8_SRGB,
     )
     .map_err(|e| anyhow!("zenjpeg slice: {e}"))?;
-    let encoder = cfg.job().encoder().map_err(|e| anyhow!("zenjpeg ctor: {e}"))?;
-    let output = encoder.encode(slice).map_err(|e| anyhow!("zenjpeg encode: {e}"))?;
+    let encoder = cfg
+        .job()
+        .encoder()
+        .map_err(|e| anyhow!("zenjpeg ctor: {e}"))?;
+    let output = encoder
+        .encode(slice)
+        .map_err(|e| anyhow!("zenjpeg encode: {e}"))?;
     Ok(output.into_vec())
 }
 
@@ -192,8 +200,13 @@ fn encode_jxl(src: &Source, q: u32) -> Result<Vec<u8>> {
         PixelDescriptor::RGB8_SRGB,
     )
     .map_err(|e| anyhow!("zenjxl slice: {e}"))?;
-    let encoder = cfg.job().encoder().map_err(|e| anyhow!("zenjxl ctor: {e}"))?;
-    let output = encoder.encode(slice).map_err(|e| anyhow!("zenjxl encode: {e}"))?;
+    let encoder = cfg
+        .job()
+        .encoder()
+        .map_err(|e| anyhow!("zenjxl ctor: {e}"))?;
+    let output = encoder
+        .encode(slice)
+        .map_err(|e| anyhow!("zenjxl encode: {e}"))?;
     Ok(output.into_vec())
 }
 
@@ -227,8 +240,8 @@ fn decode_jpeg_bytes(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
 }
 
 fn decode_webp_bytes(data: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
-    let (pixels, width, height) = zenwebp::decoder::decode_rgb(data)
-        .map_err(|e| anyhow!("zenwebp decode: {e}"))?;
+    let (pixels, width, height) =
+        zenwebp::decoder::decode_rgb(data).map_err(|e| anyhow!("zenwebp decode: {e}"))?;
     Ok((pixels, width, height))
 }
 
@@ -280,12 +293,7 @@ fn pixel_slice_to_rgb8(pixels: &zenpixels::PixelSlice<'_>) -> Result<(Vec<u8>, u
 // ── Scoring ─────────────────────────────────────────────────────────────────
 
 /// Compute butteraugli max + pnorm_3 on (ref, dist) RGB8 buffers.
-fn score_butter(
-    ref_rgb: &[u8],
-    dist_rgb: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<(f64, f64)> {
+fn score_butter(ref_rgb: &[u8], dist_rgb: &[u8], width: u32, height: u32) -> Result<(f64, f64)> {
     let w = width as usize;
     let h = height as usize;
     let n = w * h;
@@ -323,12 +331,7 @@ fn score_butter(
 }
 
 /// Compute 372-dim zensim feature vector on (ref, dist).
-fn score_features(
-    ref_rgb: &[u8],
-    dist_rgb: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<Vec<f32>> {
+fn score_features(ref_rgb: &[u8], dist_rgb: &[u8], width: u32, height: u32) -> Result<Vec<f32>> {
     let w = width as usize;
     let h = height as usize;
     let n = w * h;
@@ -373,14 +376,10 @@ struct CellRow {
     features: Option<Vec<f32>>,
 }
 
-fn encode_and_score(
-    codec: CodecKind,
-    src: &Source,
-    q: u32,
-    skip_features: bool,
-) -> CellRow {
+fn encode_and_score(codec: CodecKind, src: &Source, q: u32, skip_features: bool) -> CellRow {
     let basename = src.basename.clone();
-    let encode_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| encode(codec, src, q)));
+    let encode_result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| encode(codec, src, q)));
     let bytes = match encode_result {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => {
@@ -690,7 +689,10 @@ fn main() -> Result<()> {
         (f64::NAN, f64::NAN, f64::NAN)
     } else {
         let mn = butter_vals.iter().copied().fold(f64::INFINITY, f64::min);
-        let mx = butter_vals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let mx = butter_vals
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
         let mean: f64 = butter_vals.iter().sum::<f64>() / butter_vals.len() as f64;
         (mn, mx, mean)
     };

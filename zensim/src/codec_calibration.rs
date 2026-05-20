@@ -56,7 +56,10 @@ pub struct CalibrationAffine {
 
 impl CalibrationAffine {
     /// No-op calibration: `calibrated = raw`.
-    pub const IDENTITY: Self = Self { alpha: 0.0, beta: 1.0 };
+    pub const IDENTITY: Self = Self {
+        alpha: 0.0,
+        beta: 1.0,
+    };
 
     /// Apply the affine, clamping the output to `[0, 100]`.
     #[inline]
@@ -115,13 +118,25 @@ impl CodecCalibration {
     /// the three lossy codecs; zenpng is identity (lossless).
     pub const PREVIEW_V0_5_TUNER: Self = Self {
         // jpeg: n=190 R²=0.9453 MSE=56.500
-        jpeg: CalibrationAffine { alpha: -31.701_27, beta: 1.352_23 },
+        jpeg: CalibrationAffine {
+            alpha: -31.701_27,
+            beta: 1.352_23,
+        },
         // webp: n=190 R²=0.9348 MSE=23.907
-        webp: CalibrationAffine { alpha: -4.290_747, beta: 1.011_315 },
+        webp: CalibrationAffine {
+            alpha: -4.290_747,
+            beta: 1.011_315,
+        },
         // avif: n=190 R²=0.9495 MSE=53.807
-        avif: CalibrationAffine { alpha: -14.299_716, beta: 1.125_777 },
+        avif: CalibrationAffine {
+            alpha: -14.299_716,
+            beta: 1.125_777,
+        },
         // zenjxl: mean of {jpeg, webp, avif}
-        zenjxl: CalibrationAffine { alpha: -16.763_91, beta: 1.163_107 },
+        zenjxl: CalibrationAffine {
+            alpha: -16.763_91,
+            beta: 1.163_107,
+        },
         // zenpng: identity (lossless)
         zenpng: CalibrationAffine::IDENTITY,
     };
@@ -162,7 +177,10 @@ mod tests {
 
     #[test]
     fn affine_apply_and_clamp() {
-        let a = CalibrationAffine { alpha: -10.0, beta: 1.5 };
+        let a = CalibrationAffine {
+            alpha: -10.0,
+            beta: 1.5,
+        };
         // 50 * 1.5 - 10 = 65
         assert!((a.apply(50.0) - 65.0).abs() < 1e-5);
         // 80 * 1.5 - 10 = 110 -> clamped to 100
@@ -173,7 +191,10 @@ mod tests {
 
     #[test]
     fn invert_round_trips() {
-        let a = CalibrationAffine { alpha: -10.0, beta: 1.5 };
+        let a = CalibrationAffine {
+            alpha: -10.0,
+            beta: 1.5,
+        };
         let raw = 50.0;
         let cal = a.alpha + a.beta * raw;
         let back = a.invert(cal).unwrap();

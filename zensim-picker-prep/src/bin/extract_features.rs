@@ -100,26 +100,37 @@ fn main() -> Result<()> {
                     eprintln!("  WARN load {:?}: {e}", p);
                     let n_done = progress.fetch_add(1, Ordering::Relaxed) + 1;
                     if n_done % 50 == 0 {
-                        eprintln!("  {}/{} ({:.1}%)", n_done, n, 100.0 * n_done as f64 / n as f64);
+                        eprintln!(
+                            "  {}/{} ({:.1}%)",
+                            n_done,
+                            n,
+                            100.0 * n_done as f64 / n as f64
+                        );
                     }
                     return (basename, vec![None; features.len()]);
                 }
             };
 
             let res = zenanalyze::analyze_features_rgb8(&rgb, w, h, &query);
-            let vals: Vec<Option<f32>> = features
-                .iter()
-                .map(|&f| res.get_f32(f))
-                .collect();
+            let vals: Vec<Option<f32>> = features.iter().map(|&f| res.get_f32(f)).collect();
 
             let n_done = progress.fetch_add(1, Ordering::Relaxed) + 1;
             if n_done % 50 == 0 || n_done == n {
                 let elapsed = t_start.elapsed().as_secs_f64();
                 let rate = n_done as f64 / elapsed;
-                let eta = if rate > 0.0 { (n - n_done) as f64 / rate } else { 0.0 };
+                let eta = if rate > 0.0 {
+                    (n - n_done) as f64 / rate
+                } else {
+                    0.0
+                };
                 eprintln!(
                     "  {}/{} ({:.1}%) {:.1}s rate={:.2}/s eta={:.0}s",
-                    n_done, n, 100.0 * n_done as f64 / n as f64, elapsed, rate, eta
+                    n_done,
+                    n,
+                    100.0 * n_done as f64 / n as f64,
+                    elapsed,
+                    rate,
+                    eta
                 );
             }
             (basename, vals)
@@ -128,11 +139,14 @@ fn main() -> Result<()> {
 
     eprintln!(
         "  extracted {} sources in {:.1}s",
-        rows.len(), t_start.elapsed().as_secs_f64()
+        rows.len(),
+        t_start.elapsed().as_secs_f64()
     );
 
     // ── parquet output ─────────────────────────────────────────────
-    if let Some(parent) = args.output.parent() && !parent.as_os_str().is_empty() {
+    if let Some(parent) = args.output.parent()
+        && !parent.as_os_str().is_empty()
+    {
         fs::create_dir_all(parent).ok();
     }
 
@@ -157,8 +171,8 @@ fn main() -> Result<()> {
     }
 
     let batch = RecordBatch::try_new(schema.clone(), arrays)?;
-    let out_file = fs::File::create(&args.output)
-        .with_context(|| format!("creating {:?}", args.output))?;
+    let out_file =
+        fs::File::create(&args.output).with_context(|| format!("creating {:?}", args.output))?;
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(Default::default()))
         .build();
@@ -166,8 +180,12 @@ fn main() -> Result<()> {
     writer.write(&batch)?;
     writer.close()?;
 
-    eprintln!("  wrote {} rows × {} cols → {:?}",
-        rows.len(), features.len() + 1, args.output);
+    eprintln!(
+        "  wrote {} rows × {} cols → {:?}",
+        rows.len(),
+        features.len() + 1,
+        args.output
+    );
     eprintln!("  total wall: {:.1}s", t_start.elapsed().as_secs_f64());
     Ok(())
 }

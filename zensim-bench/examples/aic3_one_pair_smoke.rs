@@ -18,7 +18,11 @@ use zensim::{ZensimConfig, compute_zensim_with_config};
 
 fn main() {
     let info_csv = PathBuf::from("/mnt/v/dataset/aic3_ctc_epfl/decoded/info.csv");
-    let root = info_csv.parent().and_then(|p| p.parent()).unwrap().to_path_buf();
+    let root = info_csv
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap()
+        .to_path_buf();
     let original_dir = root.join("original");
     let decoded_dir = root.join("decoded");
 
@@ -47,35 +51,42 @@ fn main() {
     println!("Loaded {} AIC-3 pairs", pairs.len());
 
     // Process via rayon par_iter — matches dataset_metric_baseline exactly.
-    let results: Vec<Option<(usize, f64)>> = pairs.par_iter().enumerate().map(|(idx, (ref_path, dist_path, _img_name))| {
-        let src_img = image::open(ref_path).ok()?.to_rgb8();
-        let dst_img = image::open(dist_path).ok()?.to_rgb8();
-        let (w, h) = src_img.dimensions();
-        let (dw, dh) = dst_img.dimensions();
-        if w != dw || h != dh {
-            return None;
-        }
-        let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-        let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-        let w_us = w as usize;
-        let h_us = h as usize;
-        if w_us < 8 || h_us < 8 {
-            return None;
-        }
-        let mut cfg = ZensimConfig::default();
-        cfg.extended_features = true;
-        cfg.compute_iw_features = true;
-        let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, cfg).ok()?;
-        let s_img = Img::new(src_pixels.as_slice(), w_us, h_us);
-        let d_img = Img::new(dst_pixels.as_slice(), w_us, h_us);
-        let _ssim2 = fast_ssim2::compute_ssimulacra2(s_img, d_img).ok()?;
-        let src_rgb8: &[RGB8] = bytemuck::cast_slice(&src_pixels);
-        let dst_rgb8: &[RGB8] = bytemuck::cast_slice(&dst_pixels);
-        let s_b = Img::new(src_rgb8, w_us, h_us);
-        let d_b = Img::new(dst_rgb8, w_us, h_us);
-        let _butter = butteraugli::butteraugli(s_b, d_b, &ButteraugliParams::default()).ok()?;
-        Some((idx, result.score()))
-    }).collect();
+    let results: Vec<Option<(usize, f64)>> = pairs
+        .par_iter()
+        .enumerate()
+        .map(|(idx, (ref_path, dist_path, _img_name))| {
+            let src_img = image::open(ref_path).ok()?.to_rgb8();
+            let dst_img = image::open(dist_path).ok()?.to_rgb8();
+            let (w, h) = src_img.dimensions();
+            let (dw, dh) = dst_img.dimensions();
+            if w != dw || h != dh {
+                return None;
+            }
+            let src_pixels: Vec<[u8; 3]> =
+                src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+            let dst_pixels: Vec<[u8; 3]> =
+                dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+            let w_us = w as usize;
+            let h_us = h as usize;
+            if w_us < 8 || h_us < 8 {
+                return None;
+            }
+            let mut cfg = ZensimConfig::default();
+            cfg.extended_features = true;
+            cfg.compute_iw_features = true;
+            let result =
+                compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, cfg).ok()?;
+            let s_img = Img::new(src_pixels.as_slice(), w_us, h_us);
+            let d_img = Img::new(dst_pixels.as_slice(), w_us, h_us);
+            let _ssim2 = fast_ssim2::compute_ssimulacra2(s_img, d_img).ok()?;
+            let src_rgb8: &[RGB8] = bytemuck::cast_slice(&src_pixels);
+            let dst_rgb8: &[RGB8] = bytemuck::cast_slice(&dst_pixels);
+            let s_b = Img::new(src_rgb8, w_us, h_us);
+            let d_b = Img::new(dst_rgb8, w_us, h_us);
+            let _butter = butteraugli::butteraugli(s_b, d_b, &ButteraugliParams::default()).ok()?;
+            Some((idx, result.score()))
+        })
+        .collect();
     let n_valid = results.iter().filter(|r| r.is_some()).count();
     let n_none = results.iter().filter(|r| r.is_none()).count();
     println!("par_iter results: {n_valid} valid, {n_none} None");
@@ -134,10 +145,8 @@ fn main() {
         }
         dim_match_ok += 1;
 
-        let src_pixels: Vec<[u8; 3]> =
-            src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-        let dst_pixels: Vec<[u8; 3]> =
-            dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+        let src_pixels: Vec<[u8; 3]> = src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+        let dst_pixels: Vec<[u8; 3]> = dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
         let w_us = w as usize;
         let h_us = h as usize;
 
@@ -161,10 +170,7 @@ fn main() {
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "[fail compute] {} ({}x{}): {:?}",
-                    img_name, w, h, e
-                );
+                eprintln!("[fail compute] {} ({}x{}): {:?}", img_name, w, h, e);
                 continue;
             }
         }

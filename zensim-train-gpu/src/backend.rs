@@ -20,8 +20,7 @@ pub(crate) fn dispatch(
     match runtime {
         #[cfg(feature = "gpu-cuda")]
         GpuRuntime::Cuda => {
-            let client =
-                <cubecl::cuda::CudaRuntime as Runtime>::client(&Default::default());
+            let client = <cubecl::cuda::CudaRuntime as Runtime>::client(&Default::default());
             run::<cubecl::cuda::CudaRuntime>(client, groups, hp, n_features)
         }
         #[cfg(not(feature = "gpu-cuda"))]
@@ -30,8 +29,7 @@ pub(crate) fn dispatch(
         ),
         #[cfg(feature = "gpu-wgpu")]
         GpuRuntime::Wgpu => {
-            let client =
-                <cubecl::wgpu::WgpuRuntime as Runtime>::client(&Default::default());
+            let client = <cubecl::wgpu::WgpuRuntime as Runtime>::client(&Default::default());
             run::<cubecl::wgpu::WgpuRuntime>(client, groups, hp, n_features)
         }
         #[cfg(not(feature = "gpu-wgpu"))]
@@ -40,8 +38,7 @@ pub(crate) fn dispatch(
         ),
         #[cfg(feature = "gpu-cpu")]
         GpuRuntime::Cpu => {
-            let client =
-                <cubecl::cpu::CpuRuntime as Runtime>::client(&Default::default());
+            let client = <cubecl::cpu::CpuRuntime as Runtime>::client(&Default::default());
             run::<cubecl::cpu::CpuRuntime>(client, groups, hp, n_features)
         }
         #[cfg(not(feature = "gpu-cpu"))]
@@ -170,7 +167,10 @@ fn run<R: Runtime>(
     let n_hidden = hp.n_hidden;
     let k_batch = hp.minibatch_k;
     let two_k = 2 * k_batch;
-    assert!(n_hidden <= 1024, "n_hidden must be ≤ 1024 (CUDA cube limit); got {n_hidden}");
+    assert!(
+        n_hidden <= 1024,
+        "n_hidden must be ≤ 1024 (CUDA cube limit); got {n_hidden}"
+    );
     assert!(k_batch >= 1, "minibatch_k must be ≥ 1; got {k_batch}");
 
     let train_indices: Vec<usize> = (0..groups.len())
@@ -190,12 +190,10 @@ fn run<R: Runtime>(
 
     // ---------- GPU buffers ----------
     let f32_bytes = |data: &[f32]| -> Vec<u8> { f32::as_bytes(data).to_vec() };
-    let alloc_f32 = |data: &[f32]| -> cubecl::server::Handle {
-        client.create_from_slice(f32::as_bytes(data))
-    };
-    let alloc_u32 = |data: &[u32]| -> cubecl::server::Handle {
-        client.create_from_slice(u32::as_bytes(data))
-    };
+    let alloc_f32 =
+        |data: &[f32]| -> cubecl::server::Handle { client.create_from_slice(f32::as_bytes(data)) };
+    let alloc_u32 =
+        |data: &[u32]| -> cubecl::server::Handle { client.create_from_slice(u32::as_bytes(data)) };
     let zeros = |n: usize| vec![0.0_f32; n];
     let zeros_u32 = |n: usize| vec![0u32; n];
 
@@ -472,11 +470,7 @@ fn run<R: Runtime>(
             unsafe {
                 kernels::zero_f32_kernel::launch::<R>(
                     &client,
-                    CubeCount::Static(
-                        ceil_div((n_features * n_hidden) as u32, 256).max(1),
-                        1,
-                        1,
-                    ),
+                    CubeCount::Static(ceil_div((n_features * n_hidden) as u32, 256).max(1), 1, 1),
                     cube_dim_256,
                     ArrayArg::from_raw_parts(gw1.clone(), n_features * n_hidden),
                 );

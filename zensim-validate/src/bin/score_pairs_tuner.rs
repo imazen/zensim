@@ -97,8 +97,7 @@ fn main() -> Result<()> {
     let t_start = Instant::now();
 
     // --- read pairs TSV
-    let file = File::open(&args.pairs)
-        .with_context(|| format!("opening {:?}", args.pairs))?;
+    let file = File::open(&args.pairs).with_context(|| format!("opening {:?}", args.pairs))?;
     let mut lines = BufReader::new(file).lines();
     let header = lines.next().ok_or_else(|| anyhow!("empty pairs TSV"))??;
     let cols: Vec<&str> = header.split('\t').collect();
@@ -118,12 +117,23 @@ fn main() -> Result<()> {
     for (i, ln) in lines.enumerate() {
         let ln = ln?;
         let parts: Vec<&str> = ln.split('\t').collect();
-        let max_idx = [image_path_idx, codec_idx, q_idx, knob_idx, ref_idx, dist_idx]
-            .iter().copied().max().unwrap();
+        let max_idx = [
+            image_path_idx,
+            codec_idx,
+            q_idx,
+            knob_idx,
+            ref_idx,
+            dist_idx,
+        ]
+        .iter()
+        .copied()
+        .max()
+        .unwrap();
         if parts.len() <= max_idx {
             return Err(anyhow!("malformed line {}: {:?}", i + 2, ln));
         }
-        let q: i64 = parts[q_idx].parse()
+        let q: i64 = parts[q_idx]
+            .parse()
             .with_context(|| format!("parsing q on line {}: {:?}", i + 2, parts[q_idx]))?;
         pairs.push(PairRow {
             image_path: parts[image_path_idx].to_string(),
@@ -135,7 +145,11 @@ fn main() -> Result<()> {
         });
     }
     let total = pairs.len();
-    eprintln!("  read {} pairs in {:.2}s", total, t_start.elapsed().as_secs_f64());
+    eprintln!(
+        "  read {} pairs in {:.2}s",
+        total,
+        t_start.elapsed().as_secs_f64()
+    );
 
     // --- dedupe refs (essential — for 19 q × N sources, each ref repeated 19×)
     let mut seen: HashMap<String, u32> = HashMap::new();
@@ -151,7 +165,11 @@ fn main() -> Result<()> {
             row_ref_idx.push(idx);
         }
     }
-    eprintln!("  unique refs: {} (deduplicated from {} rows)", unique_refs.len(), total);
+    eprintln!(
+        "  unique refs: {} (deduplicated from {} rows)",
+        unique_refs.len(),
+        total
+    );
 
     // --- load each unique ref into RAM (parallel)
     let t_ref_load = Instant::now();
@@ -168,7 +186,10 @@ fn main() -> Result<()> {
             r
         })
         .collect();
-    eprintln!("  ref-load: done in {:.2}s", t_ref_load.elapsed().as_secs_f64());
+    eprintln!(
+        "  ref-load: done in {:.2}s",
+        t_ref_load.elapsed().as_secs_f64()
+    );
 
     // --- score each pair with PreviewV0_5Tuner
     let t_score = Instant::now();
@@ -192,14 +213,21 @@ fn main() -> Result<()> {
                         let w = *rw as usize;
                         let h = *rh as usize;
                         let stride = w * 3;
-                        let src = match StridedBytes::try_new(rpx, w, h, stride, PixelFormat::Srgb8Rgb) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                eprintln!("  WARN: ref slice fail row {}: {:?}", i, e);
-                                return f64::NAN;
-                            }
-                        };
-                        let dst = match StridedBytes::try_new(&dpx, w, h, stride, PixelFormat::Srgb8Rgb) {
+                        let src =
+                            match StridedBytes::try_new(rpx, w, h, stride, PixelFormat::Srgb8Rgb) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    eprintln!("  WARN: ref slice fail row {}: {:?}", i, e);
+                                    return f64::NAN;
+                                }
+                            };
+                        let dst = match StridedBytes::try_new(
+                            &dpx,
+                            w,
+                            h,
+                            stride,
+                            PixelFormat::Srgb8Rgb,
+                        ) {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("  WARN: dist slice fail row {}: {:?}", i, e);
@@ -216,8 +244,10 @@ fn main() -> Result<()> {
                     }
                 }
                 _ => {
-                    eprintln!("  WARN: load failure for row {} (ref={:?} dist={:?})",
-                        i, row.ref_path, row.dist_path);
+                    eprintln!(
+                        "  WARN: load failure for row {} (ref={:?} dist={:?})",
+                        i, row.ref_path, row.dist_path
+                    );
                     f64::NAN
                 }
             };
@@ -228,13 +258,22 @@ fn main() -> Result<()> {
                 let eta = (total - n) as f64 / rate;
                 eprintln!(
                     "  score: {}/{} ({:.1}%) {:.1}s rate={:.1}/s eta={:.0}s",
-                    n, total, 100.0 * n as f64 / total as f64, elapsed, rate, eta
+                    n,
+                    total,
+                    100.0 * n as f64 / total as f64,
+                    elapsed,
+                    rate,
+                    eta
                 );
             }
             result
         })
         .collect();
-    eprintln!("  score: {} rows in {:.2}s", total, t_score.elapsed().as_secs_f64());
+    eprintln!(
+        "  score: {} rows in {:.2}s",
+        total,
+        t_score.elapsed().as_secs_f64()
+    );
 
     // --- write parquet
     let fields: Vec<Arc<Field>> = vec![
@@ -263,8 +302,8 @@ fn main() -> Result<()> {
     ];
     let batch = RecordBatch::try_new(out_schema.clone(), arrays)?;
 
-    let out_file = File::create(&args.output)
-        .with_context(|| format!("creating {:?}", args.output))?;
+    let out_file =
+        File::create(&args.output).with_context(|| format!("creating {:?}", args.output))?;
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(Default::default()))
         .build();
