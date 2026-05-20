@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Investigated (2026-05-20, V11-B Compression-trail ship — FALSIFIED on all 3 gate criteria, task #191)
+
+- V11-SUBSTRATE-V2's 5 candidate bakes (`cc4v11a_v2clean_s{1..5}.bin`)
+  re-evaluated against the Compression-trail gate (looser than the
+  Balanced-trail gate the prior agent applied). Median by CID22 SROCC
+  = `cc4v11a_v2clean_s3.bin` (CID22 0.8754). Full Mohammadi panel vs
+  the actual V_24-per-sample-α s4 Compression ship
+  (`v_compression_persample_2026-05-18.bin`, md5
+  `f09a9abdce00805000c1d112c2421b2d`) on identical
+  `2026-05-15-full-features` parquet root, apples-to-apples:
+  Step 1 FAIL (CID22 ΔSROCC +0.0113 under +0.015 decisive cut +
+  PWRC +0.0082 under +0.010 → no decisive A>>B on either compression
+  corpus); Step 2 FAIL (AIC-3 ΔSROCC −0.0240 + PWRC −0.0163 + Z-RMSE
+  +0.026 all over decisive-B cuts → decisive B>>A on AIC-3); Step 3
+  FAIL (KonJND ΔSROCC −0.3453 vs −0.10 cap = 3.45× over,
+  triangulated by PWRC −0.2490 + Z-RMSE +0.410). 5-seed KonJND CI
+  range 0.29–0.46 confirms structural collapse, not seed-dependent.
+  No ship. Falsification doc at
+  `benchmarks/v11_compression_falsification_2026-05-20.md`.
+
 ### Added (2026-05-20, EXP-CROSS-CODEC-V10 — score-space reallocation, task #182)
 
 - **`ZensimProfile::PreviewV0_5TunerV4`** (alias
