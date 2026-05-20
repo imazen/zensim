@@ -1,7 +1,10 @@
 # PreviewV0_5TunerV3 (V7 empirical anchor target) methodology — 2026-05-19
 
-**Status:** _PENDING — bake selection awaits 3-seed training + eval._
-**Bake:** _TBD (see "ship selection" below)._
+**Status:** FALSIFIED (does NOT ship). See
+`benchmarks/v_tuner_v7_2026-05-19_verdict.md` for the full verdict.
+**Bake:** N/A — V6 ship retained as `PreviewV0_5TunerV2`. V7 bakes
+remain at `/mnt/v/zen/zensim-eval/exp_cross_codec_v7_2026-05-19/`
+for forensic reference.
 **Ship gate (per Tuner trail in `SOTA_TRAILS.md`):**
 1. strict monotonicity ≥ 1 pp better than every V0_5 rank-trail ship
    on the JPEG 50-image × 19-q sweep (V6 reference bar: 0.9522).
@@ -150,27 +153,52 @@ units lives in ~10-40 across the compression regime — structurally
 below ssim2's 0-100 range. Mixing them as a 50/50 joint would bias
 the anchor down for no good reason.
 
-## Per-bake gate results — TBD
+## Per-bake gate results
 
-Will populate once 3-seed training + eval completes.
+| Bake | mono ≥ 0.9522 | tied ≤ 5% | medRange ≥ 50 | T63 butter_p3 < 2.5 | PJND cc_std ≤ 5 | All-band cc_std ≤ 5 | per-band ±5 | passed |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---:|
+| cc4v7_s1 | PASS (0.9722) | PASS (0.0000) | PASS (60.58) | **FAIL (3.637)** | PASS (0.70) | PASS (max 4.22) | FAIL (b≥2.5) | 5/7 |
+| cc4v7_s2 | PASS (0.9611) | PASS (0.0000) | PASS (65.13) | **FAIL (3.355)** | PASS (0.73) | PASS (max 4.24) | FAIL (b≥2.5) | 5/7 |
+| cc4v7_s3 | PASS (0.9767) | PASS (0.0000) | PASS (67.47) | **FAIL (3.893)** | PASS (0.69) | PASS (max 4.56) | FAIL (b≥2.5) | 5/7 |
 
-| Bake | mono | tied | medRange | T63 butter_p3 | PJND cc_std | All-band cc_std | passed |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| cc4v7_s1 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| cc4v7_s2 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| cc4v7_s3 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+Two gate failures across all 3 seeds:
+1. Gate 4 (T=63 cross-codec): V7 outputs score=63 at butter≈2.5 instead
+   of V6's butter≈1.5, because V7's empirical PJND anchor is at
+   score=77.7-not-63. Cross-codec butter agreement at score=63 is
+   correspondingly worse (mean butter_p3 = 3.4–3.9 vs V6 ship 1.73).
+2. Gate 7 (V7-specific per-(codec, band) within ±5): at butter≥2.5,
+   per-codec empirical targets diverge by 30-70 score units (e.g.,
+   zenjxl=86 vs zenwebp=17 at butter=4.0). The trainer chose
+   cross-codec parity (cc_std ≤ 5) over per-codec target chasing —
+   the same prioritization V6 uses, just exposed because V7's anchor
+   targets MADE the conflict visible.
 
-## Per-(codec, band) achievement vs empirical target — TBD
+## Per-band achievement (codec-pooled, cc4v7_s3 representative)
 
-Will populate once eval completes. This is the V7-specific check:
-per-(codec, band) achieved_mean within ±5 of the empirical
-target (since V7's per-codec targets are specific, this is the
-relevant calibration sanity).
+| band | empirical target (med) | achieved_mean | Δ |
+|---:|---:|---:|---:|
+| 0.30 | 88.0 | 87.19 | -0.81 |
+| 0.80 | 87.4 | 85.03 | -2.37 |
+| 1.50 | 75.9 | 78.56 | +2.66 |
+| 2.50 | 66.2 | 67.24 | +1.04 |
+| 4.00 | 26.4 | 48.81 | **+22.41** |
+| 6.00 | 20.0 | 28.46 | **+8.46** |
 
-## Mohammadi panel — TBD
+## Mohammadi panel (held-out validation)
 
-Will populate once `bake_verdict` runs against the canonical val
-parquets.
+| Corpus | n | V6 ship (cc4v6_w1p0_p0p30_s1) | V7 s1 | V7 s2 | V7 s3 |
+|---|--:|---:|---:|---:|---:|
+| CID22 | 4292 | 0.8770 | 0.8729 | 0.8581 | 0.8600 |
+| KADIK10k | 10125 | 0.7179 | 0.5493 | 0.5519 | 0.6756 |
+| TID2013 | 3000 | 0.7542 | 0.6824 | 0.6354 | 0.7495 |
+| KonJND-1k | 1008 | 0.1962 | 0.4585 | 0.3205 | 0.3656 |
+| AIC-3 | 600 | 0.7961 | 0.7827 | 0.7761 | 0.7877 |
+
+Seed s1 has the largest KonJND improvement (+0.262 vs V6 ship) —
+the empirical anchor at butter=1.5 (score=77.7 vs V6's 63) pushes
+the PJND-region calibration toward where KonJND humans actually
+sit. But this comes at the cost of the V6 score=63-at-PJND
+convention that gate 4 measures.
 
 ## Open questions surfaced by V7 anchor build
 
