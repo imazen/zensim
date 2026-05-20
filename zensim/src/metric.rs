@@ -1202,6 +1202,7 @@ impl Zensim {
             return Err(ZensimError::ImageTooSmall);
         }
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
+        reject_hdr_input(source)?;
         Ok(crate::streaming::PrecomputedReference::new(
             source,
             params.num_scales,
@@ -1231,6 +1232,10 @@ impl Zensim {
         }
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
+        // The precomputed reference was built via `precompute_reference`,
+        // which already rejected HDR — so only check the distorted side
+        // here. Symmetry across the call path is preserved.
+        reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
         let mut result = crate::streaming::compute_zensim_streaming_with_ref(
             precomputed,
@@ -1451,6 +1456,7 @@ impl Zensim {
         }
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
+        reject_hdr_input(distorted)?;
         let config = config_from_params(params, self.parallel);
         let (stats, mean_offset) =
             crate::streaming::compute_multiscale_stats_streaming_with_ref_borrowed(
@@ -1749,6 +1755,29 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
     }
 }
 
+/// Reject HDR-signaled input (PQ/HLG) before it can silently flow
+/// through the SDR XYB pipeline and produce meaningless scores.
+///
+/// Every public entry point (compute, compute_with_ref,
+/// precompute_reference, compute_with_ref_into, compute_with_params,
+/// compute_extended_features, compute_all_features) calls this
+/// either directly or via [`validate_pair`]. The guard is centralised
+/// so a future HDR-aware code path can flip it in one place by
+/// dispatching to the PU-encoded XYB front-end instead of erroring.
+///
+/// See imazen/zensim#38 for the HDR roadmap. The
+/// [`ColorTransferFunction`](crate::ColorTransferFunction) enum
+/// exists specifically to make this refusal possible — without the
+/// signal, HDR pixels in a `LinearF32Rgba` source are
+/// indistinguishable from SDR and would be silently clamped.
+#[inline]
+pub(crate) fn reject_hdr_input(source: &impl ImageSource) -> Result<(), ZensimError> {
+    if source.color_transfer_function().is_hdr() {
+        return Err(ZensimError::HdrInputNotYetSupported);
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -1759,6 +1788,14 @@ pub(crate) fn validate_pair(
     if source.width() != distorted.width() || source.height() != distorted.height() {
         return Err(ZensimError::DimensionMismatch);
     }
+    // Refuse mismatched transfer functions — comparing across transfer
+    // spaces is undefined. Then refuse HDR transfers on either side
+    // until the PU-encoded path ships.
+    if source.color_transfer_function() != distorted.color_transfer_function() {
+        return Err(ZensimError::TransferFunctionMismatch);
+    }
+    reject_hdr_input(source)?;
+    reject_hdr_input(distorted)?;
     Ok(())
 }
 
