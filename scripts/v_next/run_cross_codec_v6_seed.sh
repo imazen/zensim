@@ -16,11 +16,17 @@
 #
 # Args: <seed> <anchor_loss_weight> <anchor_step_p>
 # Outputs: cc4v6_w<W>_p<P>_s<SEED>.bin + .log + .stdout in OUT_DIR
+# SPEED-B (2026-05-19, task #165): --minibatch-size 32 now WORKS but
+# produces DIFFERENT (worse) SROCC vs K=1 on held-out corpora at
+# this recipe's default lr. Default KBATCH=1 preserves the historical
+# quality. Set KBATCH=32 for ~2.2× wall-time speedup IF you've
+# re-tuned lr (try lr * sqrt(K)) or accept the bake-quality regression.
 set -euo pipefail
 
 SEED="${1:?usage: $0 <seed> <anchor_w> <anchor_p>}"
 ANCHOR_W="${2:?usage: $0 <seed> <anchor_w> <anchor_p>}"
 ANCHOR_P="${3:?usage: $0 <seed> <anchor_w> <anchor_p>}"
+KBATCH="${KBATCH:-1}"
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v6_2026-05-19"
 TRAINER="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/zensim_mlp_train"
@@ -45,7 +51,7 @@ echo "  out_bake: ${BAKE}"
     --group "safesyn:${PARQ_DIR}/safesyn.parquet:1.0:0.0" \
     --hidden 128 --epochs 300 --pairs-per-epoch 50000 --lr 1e-3 --l2 1e-5 \
     --leaky-alpha 0.01 --val-policy min --early-stop-patience 0 \
-    --max-features 372 --minibatch-size 1 \
+    --max-features 372 --minibatch-size "${KBATCH}" \
     --target-column mix_cv40_iw60 --target-scale 1.0 --out-dtype f32 \
     --per-sample-alpha-head \
     --tanh-output-head-scale 15.0 \

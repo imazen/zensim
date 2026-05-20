@@ -91,6 +91,43 @@ construction (safesyn-only training, no KADID/TID/KonJND
 supervision); follow-on tuners that close the rank-trail gap are an
 open research direction.
 
+### Tuner trail v2 (`PreviewV0_5TunerV2`, EXP-CROSS-CODEC-V6)
+
+**Audience.** Same as Tuner — codec auto-targeting pipelines. The V2
+ship adds **cross-codec parity at every quality band** (V6's
+piecewise multi-band anchor) to the Tuner trail's monotonicity + range
+properties. Use when an orchestrator needs a single dial that's
+calibrated AND comparable across JPEG / WebP / AVIF / JXL outputs at
+every score band, not just at PJND.
+
+**Gate** (extended Tuner gate, 6 sub-gates total — added 2026-05-19
+per EXP-CROSS-CODEC-V6):
+
+1. **Strict monotonicity ≥ 0.9378** on the JPEG 50-image × 19-q sweep
+   (matches the Tuner trail's relative-to-V0_5-ships threshold).
+2. **Tied rate ≤ 5 %** on the same sweep.
+3. **Median range ≥ 50 score units** between q=5 median and q=95
+   median.
+4. **T=63 mean butter_pnorm3 < 2.5** across (jpeg, webp, avif) at
+   target zensim=63 (n=20 image subset).
+5. **Single-band cross-codec score std per source ≤ 5.0** at PJND
+   (T=63), median across 1000 sources.
+6. **Multi-band cross-codec score std per source ≤ 5.0** at EVERY
+   of the 6 anchor bands (butter ∈ {0.3, 0.8, 1.5, 2.5, 4.0, 6.0}),
+   not just T=63.
+
+A ship requires all 6 sub-gates pass. The 2026-05-19 ship
+(`cc4v6_w1p0_p0p30_s1`, anchor_w=1.0 seed=1) passes all 6
+across all 3 evaluated anchor_w=1.0 seeds AND all 3 anchor_w=0.5
+seeds. See `benchmarks/v_tuner_v6_methodology_2026-05-19.md`.
+
+**TunerV2 supersedes Tuner for new orchestrator workloads** —
+strict monotonicity is slightly lower (0.9522 vs 0.9767 for V5;
+0.9278 for the original V_tuner-v2), but the dynamic range hits
+78.2 score units (vs Tuner's 89.6) AND cross-codec parity is now
+multi-band, not anchor-free. The Tuner slot remains shipped for
+back-compat; callers can opt into either via the variant name.
+
 ### Cross-codec trail (`PreviewV0_5CrossCodec`, opt-in)
 
 **Audience.** Codec orchestrators that need consistent zensim scores
@@ -138,6 +175,7 @@ preserves the wiring for follow-on work.
 | **Compression** | V_24-per-sample-α s4 packed | 44,109 | 300→128→128(identity) + per-sample-α head | **0.8641** | **0.8183** | 0.9316 | 0.8893 | 0.8080 |
 | **Ensemble** | V_05-ensemble classifier + B + C | 22,690 (classifier only) | 300→64→1 ReLU classifier routes to Balanced or Compression | 0.8632 | 0.8131 | 0.9676 | 0.9719 | 0.8792 |
 | **Tuner** | V_tuner-v2-s2 calibrated (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse-only train, affine α=−1590.55 β=52.02 | 0.8786 | 0.8130 | 0.7704 | 0.7476 | 0.2351 |
+| **TunerV2** | V_tuner-v6 (cross-codec V6, anchor_w=1.0 s1, 2026-05-19) | 261,351 (F32, unpacked) | 372→128→128(identity) + per-sample-α head + tanh-output-head scale=15.0, mse + cross-codec equiv (W=1.0) + multi-band anchor (W=1.0, 6 bands at score ∈ {90,75,63,45,25,10}) + dyn-range floor + mono reg, no external affine | 0.8770 | 0.7961 | 0.7179 | 0.7542 | 0.1962 |
 | **CrossCodec** (opt-in) | V_24-per-sample-α + cross-codec equiv-loss W=1.0 s1 (2026-05-19) | 261,316 (F32, unpacked) | 372→128→128(identity) + per-sample-α head, mse + (y_a − y_b)² cross-codec equiv pair loss, no external affine | 0.8797 | 0.8060 | 0.8003 | 0.8215 | 0.3269 |
 
 Tuner monotonicity panel on the 50-image × 19-q JPEG sweep

@@ -41,6 +41,52 @@
   via `train_per_sample_alpha_head_gpu_with_aux`; new flag
   `--gpu-minibatch-k-aux` (default 32) controls the K-batched aux
   sample count per fire. NiN is the remaining GPU gap.
+  Methodology + perf comparison:
+  `benchmarks/gpu_phase2_findings_2026-05-19.md`.
+
+### Changed (2026-05-19, SPEED-B task #165)
+
+- **K-batched auxiliary losses in `train_mlp_per_sample_alpha_head`**.
+  The `--minibatch-size 1` asserts on the anchor, cross-codec-eq, and
+  tanh-output-head paths (`zensim-validate/src/mlp_train.rs:4948,
+  4965, 5000`) have been removed. Aux loss steps (anchor,
+  cross-codec-eq, dynamic-range-floor, cross-codec-rank-preserve)
+  now fire on Adam-step boundaries (`steps_since_adam == 0`) and
+  process K samples per fire, accumulating gradients into the
+  shared `adam.g*` buffer before one `do_adam_step`. K=1 callers
+  get bit-identical semantics (every iteration is an Adam
+  boundary, K samples = 1 sample); K=32+ callers get the
+  Adam-step amortization the T8.1-T8.11 mini-batch optimizations
+  were designed for. V5/V6 driver scripts
+  (`scripts/v_next/run_cross_codec_v{5,6}_seed.sh`) default to
+  `--minibatch-size 32` with `KBATCH` env-var override.
+
+### Added (2026-05-19, EXP-CROSS-CODEC-V6)
+
+- **`PreviewV0_5TunerV2` profile variant shipped**. New tuner-trail
+  ship that extends `PreviewV0_5Tuner` with V6's piecewise multi-band
+  anchor pressure (anchor_loss_weight=1.0, anchor_step_p=0.30) over
+  6 butter bands × 4 codecs × ~1000 sources. Same V_24-per-sample-α
+  architecture (372 → 128 → 128 identity passthrough MLP, with
+  `zentrain.per_sample_alpha_head` + `zentrain.tanh_output_head`
+  metadata) — only weights + tanh-output-head metadata differ.
+  Bake at `weights/v_tuner_v6_2026-05-19.bin` (261,351 bytes F32,
+  md5 `c5c32659b15b47e8a569464749cf7019`). **All 6 Tuner-trail
+  gates PASS**: strict mono 0.9522 (gate ≥ 0.9378), tied 0.0000,
+  median range 78.17 (gate ≥ 50, the critical new gate V5 failed
+  at 30.73), T=63 butter_p3 1.731 (gate < 2.5), PJND cc_std_median
+  0.91 (gate ≤ 5.0), all-band cc_std_max 1.68 (gate ≤ 5.0 at every
+  of the 6 bands). Held-out: CID22 0.8770 (~tied with PreviewV0_5Tuner
+  0.8786). Distinct Pareto point from PreviewV0_5Tuner — V2 adds
+  multi-band cross-codec parity (V5's piecewise-anchor property)
+  AND restores the dynamic range that V5 lost. Methodology:
+  `benchmarks/v_tuner_v6_methodology_2026-05-19.md`. V5 falsification:
+  `benchmarks/v_tuner_v5_falsification_2026-05-19.md`. Regression
+  test: `zensim/tests/tuner_v2_profile.rs` (4 tests). Trail row +
+  Tuner-trail-v2 section added to `zensim/SOTA_TRAILS.md`. NOT for
+  general ranking workloads — same caveat as PreviewV0_5Tuner
+  (KADID 0.7179, TID 0.7542, KonJND 0.1962 are safesyn-only-training
+  artifacts).
 
 ### Added (2026-05-19, EXP-CROSS-CODEC-METRIC)
 
