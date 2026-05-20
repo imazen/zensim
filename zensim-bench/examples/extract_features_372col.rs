@@ -71,11 +71,12 @@ fn main() {
         "konjnd" => load_konjnd(&path, max_pairs),
         "konjnd_full" => load_konjnd_full(&path, max_pairs),
         "aic3" => load_aic3(&path, max_pairs),
+        "aic4" => load_aic4(&path, max_pairs),
         "safesyn" => load_safesyn(&path, max_pairs),
         "qsweep" => load_qsweep_tsv(&path, max_pairs),
         _ => {
             eprintln!(
-                "--corpus must be one of: konjnd, konjnd_full, aic3, safesyn, qsweep (got {corpus:?})"
+                "--corpus must be one of: konjnd, konjnd_full, aic3, aic4, safesyn, qsweep (got {corpus:?})"
             );
             std::process::exit(2);
         }
@@ -343,6 +344,103 @@ fn load_aic3(csv_path: &Path, max: usize) -> Vec<Pair> {
             distorted: dist_path,
             human_score: score_jnd,
             ref_basename: format!("{img_name}.png"),
+            extra_targets: Vec::new(),
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// AIC-4 sample dataset loader.
+///
+/// The AIC-4 dataset (Final Call for Proposals on Objective Quality
+/// Assessment, JPEG WG1, 2025) provides reconstructed JND scores for
+/// 5 source images × 6 codecs (AVIF, JPEG-1, JPEG-2000, JPEG-AI,
+/// JPEG-XL, VVC) × 10 distortion levels = 300 distorted pairs.
+///
+/// The CSV is at `/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv`:
+///
+/// ```text
+/// img_num,codec,dlevel,img_source,img_distorted,distortion,CI_min,CI_max
+/// 2,1,1,PTC_00002_0ref_00.png,PTC_00002_AVIF_01.png,0.12031473,0.09630131,0.14599248
+/// ```
+///
+/// `img_source` and `img_distorted` point at the **PTC (cropped)** image
+/// set used in the actual subjective study, NOT the full-resolution
+/// images. The PTC images are 620×800 RGB 8-bit PNGs that live under
+/// `<aic4_root>/PTC_images/<NNNNN>/<filename>` (zero-padded source id).
+///
+/// `--path` should point at the CSV. The image root is derived as
+/// `<csv-parent>/../../dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset` —
+/// but for portability we accept either:
+///   1. `--path /mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG_AIC_reconstructed_jnd_scores.csv`
+///      → looks for images under `/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset/PTC_images/`
+///   2. `--path <aic4_root>/JPEG_AIC_reconstructed_jnd_scores.csv` with the CSV
+///      copied into the dataset dir → looks for images under `<aic4_root>/PTC_images/`
+///
+/// `human_score = distortion` (signed JND units, AIC-3 CTC methodology
+/// applied to a higher-fidelity codec set). Matches AIC-3's
+/// `human_score = score.jnd` convention so downstream eval doesn't
+/// need a per-corpus rescale.
+fn load_aic4(csv_path: &Path, max: usize) -> Vec<Pair> {
+    let mut rdr = match csv::Reader::from_path(csv_path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", csv_path.display());
+            return Vec::new();
+        }
+    };
+    // Probe for the dataset root: either alongside the CSV OR at the
+    // canonical /mnt/v location.
+    let aic4_root: PathBuf = {
+        let canonical = PathBuf::from("/mnt/v/dataset/aic4_sample/JPEG_AIC-4_Sample_Dataset");
+        let csv_sibling = csv_path
+            .parent()
+            .map(|d| d.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        if csv_sibling.join("PTC_images").is_dir() {
+            csv_sibling
+        } else if canonical.join("PTC_images").is_dir() {
+            canonical
+        } else {
+            eprintln!(
+                "load_aic4: could not locate PTC_images under {} or {}",
+                csv_sibling.display(),
+                canonical.display()
+            );
+            return Vec::new();
+        }
+    };
+    let ptc_root = aic4_root.join("PTC_images");
+    let mut pairs = Vec::new();
+    for record in rdr.records().flatten() {
+        if record.len() < 6 {
+            continue;
+        }
+        let img_num_str = record.get(0).unwrap_or("");
+        let img_source = record.get(3).unwrap_or("");
+        let img_distorted = record.get(4).unwrap_or("");
+        let distortion: f64 = match record.get(5).and_then(|s| s.parse().ok()) {
+            Some(v) => v,
+            None => continue,
+        };
+        let img_num: u32 = match img_num_str.parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let img_dir = ptc_root.join(format!("{img_num:05}"));
+        let ref_path = img_dir.join(img_source);
+        let dist_path = img_dir.join(img_distorted);
+        if !ref_path.exists() || !dist_path.exists() {
+            continue;
+        }
+        pairs.push(Pair {
+            reference: ref_path,
+            distorted: dist_path,
+            human_score: distortion,
+            ref_basename: img_source.to_string(),
             extra_targets: Vec::new(),
         });
         if pairs.len() >= max {

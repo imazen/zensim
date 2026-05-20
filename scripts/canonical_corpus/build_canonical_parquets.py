@@ -15,6 +15,7 @@ Layout:
   val/tid.parquet                 - 3,000 rows x 372 features, TID MOS
   val/konjnd.parquet              - 1,008 rows x 372 features, KonJND PJND anchor
   val/aic3.parquet                - 600 rows x 372 features, AIC-3 CTC JND
+  val/aic4.parquet                - 300 rows x 372 features, AIC-4 sample reconstructed JND
   scores/cvvdp_imazen_v0_0_1.parquet  - 1,169,500 raw cvvdp scores
   scores/iwssim_imazen.parquet         - 75,300 raw iwssim scores
   scores/ssim2_imazen.parquet          - 55,000 raw ssim2 scores
@@ -253,6 +254,8 @@ def build_validations():
                      "human_score = mean PJND threshold (compression q). 1008 source-anchor pairs. konjnd-dense is the TRAINING densification of these.")
     build_val_corpus("aic3", feats / "aic3_features_372col_2026-05-15.parquet",
                      "human_score = score.jnd (signed JND units, AIC-3 CTC). HOLDOUT — never train.")
+    build_val_corpus("aic4", feats / "aic4_features_372col_2026-05-20.parquet",
+                     "human_score = reconstructed JND (signed, AIC-4 sample 5 src × 6 codecs × 10 dlevels = 300 pairs). HOLDOUT — never train.")
 
 def copy_score_sidecars():
     """Copy raw score sidecars to scores/ — preserved as input for any future re-mix."""

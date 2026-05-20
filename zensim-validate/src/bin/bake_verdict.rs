@@ -924,6 +924,16 @@ const CORPORA: &[Corpus] = &[
         // is misleading.
         enable_per_band: false,
     },
+    Corpus {
+        name: "aic4",
+        display: "AIC-4 sample",
+        // AIC-4 sample (5 source × 6 codecs × 10 dlevels = 300 pairs).
+        // `human_score` = reconstructed JND units (signed, ~0..6 range);
+        // same convention as AIC-3. Like AIC-3 this is a JND step grid
+        // so per-band aggregate on [0, 1] doesn't apply.
+        filename: "aic4_features_372col_2026-05-20.parquet",
+        enable_per_band: false,
+    },
 ];
 
 fn parse_corpora_arg(arg: &str) -> Result<Vec<&'static Corpus>, String> {
@@ -965,12 +975,12 @@ fn print_usage() {
 \n\
 USAGE:\n\
     bake_verdict --bake <path>\n\
-                 [--corpora cid22,kadid,tid,konjnd,aic3]\n\
+                 [--corpora cid22,kadid,tid,konjnd,aic3,aic4]\n\
                  [--output <path.md>]\n\
                  [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features]\n\
 \n\
 DEFAULTS:\n\
-    --corpora       all 5 (cid22,kadid,tid,konjnd,aic3)\n\
+    --corpora       all 6 (cid22,kadid,tid,konjnd,aic3,aic4)\n\
     --output        stdout\n\
     --features-root /mnt/v/zen/zensim-training/2026-05-15-full-features\n"
     );
