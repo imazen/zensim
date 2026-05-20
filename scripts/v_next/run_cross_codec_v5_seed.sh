@@ -21,18 +21,20 @@
 # The trainer auto-detects the `target_score` column on the parquet
 # and switches to per-row target. No CLI change for per-row mode.
 #
-# SPEED-B (2026-05-19, task #165): default --minibatch-size 32.
-# The K=1 asserts in mlp_train.rs aux loss steps were lifted; aux
-# steps now fire on Adam-step boundaries and process K samples per
-# fire, restoring the rayon parallel-batch speedup (T8.1-T8.11).
-# Override KBATCH env var if a recipe needs different K.
+# SPEED-B (2026-05-19, task #165): K=1 asserts in mlp_train.rs aux
+# loss steps were lifted; --minibatch-size 32 now WORKS but produces
+# DIFFERENT (worse) SROCC vs K=1 on held-out corpora at this recipe's
+# default lr (CID22 −0.05, KADID −0.17 in one-seed test). Default
+# KBATCH=1 preserves the historical recipe's quality. Set KBATCH=32
+# for ~2.2× wall-time speedup IF you've re-tuned lr (try lr * sqrt(K))
+# or accept the bake-quality regression.
 #
 # Args: <seed>
 # Outputs: bake + log in OUT_DIR with name cc4v5_s<SEED>.bin
 set -euo pipefail
 
 SEED="${1:?usage: $0 <seed>}"
-KBATCH="${KBATCH:-32}"
+KBATCH="${KBATCH:-1}"
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_cross_codec_v5_2026-05-19"
 TRAINER="/home/lilith/work/zen/zensim--cross-codec-metric/target/release/zensim_mlp_train"
