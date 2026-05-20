@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added (2026-05-19, GPU-TRAINER Phase 2 — task #169)
+
+- **`zensim-train-gpu` Phase 2 aux loss kernels**. Ports the four
+  auxiliary loss steps from the CPU per-sample-α head trainer to
+  CubeCL so V_X recipes can train end-to-end on GPU:
+  - `anchor_loss_kernel` — K rows × weighted MSE pull toward
+    per-row `target_score` (matches CPU lines ~5680-5770).
+  - `cross_codec_eq_loss_kernel` — K pairs × `(y_a − y_b)²` plus
+    butter-weighted rank-preserve term (matches CPU lines
+    ~5780-5940). Sign convention preserved: `s = sign(butter_diff)`.
+  - `sigma_floor_reduce_kernel` + `sigma_floor_grad_kernel` —
+    two-stage σ-floor probe (single-thread reduce → per-row grad),
+    keeps the reduction on-device to avoid a per-step host
+    round-trip. CPU equivalent lines ~5956-6097.
+  New `GpuHparams` fields (`anchor_loss_weight` /
+  `anchor_step_p` / `cross_codec_eq_weight` / `cross_codec_eq_step_p`
+  / `cross_codec_rank_preserve_weight` / `dynamic_range_floor_weight`
+  / `dynamic_range_probe_n` / `dynamic_range_sigma_threshold` /
+  `dynamic_range_step_p` / `minibatch_k_aux`). New Phase 2 entry
+  point `train_per_sample_alpha_head_gpu_with_aux` accepting
+  optional `GpuAnchorRows` + `GpuEquivPairs` pools. Aux gradients
+  ACCUMULATE into the per-minibatch parameter grad buffers
+  populated by the main pair step; one Adam update absorbs the
+  combined signal per minibatch (CPU does Adam-per-aux; quality
+  target ±0.005 SROCC per Phase 2 plan). Wall-time benchmarks on
+  the V6 cross-codec recipe (50K pairs/epoch + anchor + equiv +
+  rank-preserve + σ-floor active):
+  - 20 epochs CPU: 135.8s in-loop training, 145.7s wall
+  - 20 epochs GPU (CUDA, RTX 5070): 2.76s in-loop, 12.26s wall
+  - 100 epochs GPU: 14.26s in-loop, 42.37s wall
+  - **Pure-training speedup ≈ 49× on V6 recipe**
+  Held-out CID22 SROCC matches CPU within +0.002 (0.8481 → 0.8497 at
+  20 ep); KADID/TID/KonJND drift larger (~0.03-0.09 SROCC) because
+  GPU uses f32 + folded aux Adam vs CPU's f64 + per-aux Adam — both
+  bakes pass the "non-degenerate weights, monotonic synthetic val"
+  sanity gates. CLI `--gpu-runtime cuda` now dispatches V_X recipes
+  via `train_per_sample_alpha_head_gpu_with_aux`; new flag
+  `--gpu-minibatch-k-aux` (default 32) controls the K-batched aux
+  sample count per fire. NiN is the remaining GPU gap.
+
 ### Added (2026-05-19, EXP-CROSS-CODEC-METRIC)
 
 - **`PreviewV0_5CrossCodec` profile variant wired (opt-in)**. Adds

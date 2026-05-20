@@ -747,16 +747,23 @@ struct Args {
     ///
     /// **Phase 1 restrictions** (panic-on-conflict at startup):
     /// - `--per-sample-alpha-head` must be set
-    /// - Auxiliary losses must all be 0 (no `--anchor-loss-weight`,
-    ///   `--cross-codec-eq-weight`, `--cross-codec-rank-preserve-weight`,
-    ///   `--dynamic-range-floor-weight`, `--norm-in-norm-weight`)
     /// - `--tv-pairs-file` must NOT be set
+    /// - `--norm-in-norm-weight` must be 0 (Phase 3+ port)
     /// - PWRC band weights / boost flags ignored on the GPU path
     /// - Empty = CPU (default).
     ///
-    /// Phase 2 will lift these restrictions one by one.
+    /// Phase 2 (task #169, 2026-05-19): anchor + cross-codec-eq +
+    /// rank-preserve + σ-floor aux losses are GPU-ported. NiN is the
+    /// remaining gap.
     #[arg(long, default_value = "")]
     gpu_runtime: String,
+
+    /// K samples per aux-loss fire on GPU. Default 32. Higher = larger
+    /// kernel launches (better GPU saturation, more sampling variance
+    /// reduction); lower = closer to the CPU K=1 path. Ignored when
+    /// no aux losses are active.
+    #[arg(long, default_value_t = 32)]
+    gpu_minibatch_k_aux: usize,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -2055,19 +2062,17 @@ fn main() {
             eprintln!("--gpu-runtime is incompatible with --tv-pairs-file (Phase 2 work).");
             std::process::exit(2);
         }
-        if hyperparams.anchor_loss_weight > 0.0
-            || hyperparams.cross_codec_eq_weight > 0.0
-            || hyperparams.cross_codec_rank_preserve_weight > 0.0
-            || hyperparams.dynamic_range_floor_weight > 0.0
-            || hyperparams.norm_in_norm_weight > 0.0
-        {
+        if hyperparams.norm_in_norm_weight > 0.0 {
             eprintln!(
-                "--gpu-runtime requires all auxiliary losses to be 0 in Phase 1 \
-                 (anchor/cross-codec-eq/rank-preserve/σ-floor/NiN). Run with the \
-                 default CPU path or wait for Phase 2."
+                "--gpu-runtime is incompatible with --norm-in-norm-weight \
+                 (Phase 2+ work). Run with the default CPU path."
             );
             std::process::exit(2);
         }
+        // Phase 2 (2026-05-19, task #169): anchor, cross-codec-eq,
+        // rank-preserve, and σ-floor aux losses are GPU-supported via
+        // dedicated CubeCL kernels in `zensim-train-gpu`. We thread the
+        // anchor/equiv data through `train_per_sample_alpha_head_gpu_with_aux`.
         let runtime = match gpu_runtime_str.as_str() {
             "cuda" => zensim_train_gpu::GpuRuntime::Cuda,
             "wgpu" => zensim_train_gpu::GpuRuntime::Wgpu,
@@ -2093,6 +2098,16 @@ fn main() {
             monotonicity_reg: hyperparams.monotonicity_reg,
             monotonicity_margin: hyperparams.monotonicity_margin,
             tanh_output_head_scale: hyperparams.tanh_output_head_scale,
+            anchor_loss_weight: hyperparams.anchor_loss_weight,
+            anchor_step_p: hyperparams.anchor_step_p,
+            cross_codec_eq_weight: hyperparams.cross_codec_eq_weight,
+            cross_codec_eq_step_p: hyperparams.cross_codec_eq_step_p,
+            cross_codec_rank_preserve_weight: hyperparams.cross_codec_rank_preserve_weight,
+            dynamic_range_floor_weight: hyperparams.dynamic_range_floor_weight,
+            dynamic_range_probe_n: hyperparams.dynamic_range_probe_n,
+            dynamic_range_sigma_threshold: hyperparams.dynamic_range_sigma_threshold,
+            dynamic_range_step_p: hyperparams.dynamic_range_step_p,
+            minibatch_k_aux: args.gpu_minibatch_k_aux.max(1),
         };
         log.push(format!(
             "GPU trainer: runtime={gpu_runtime_str:?} hparams={gpu_hp:?}"
@@ -2109,11 +2124,47 @@ fn main() {
                 validation_weight: g.validation_weight,
             })
             .collect();
-        let res = zensim_train_gpu::train_per_sample_alpha_head_gpu(
+
+        // Phase 2 aux: rehydrate anchor + equiv as GpuAnchorRows / GpuEquivPairs.
+        // The CPU AnchorRows has `target_scores: Option<&[f64]>` (with a
+        // global fallback); the GPU variant requires per-row targets so
+        // we materialize a constant vector when the parquet didn't ship
+        // a `target_score` column.
+        let gpu_anchor_targets_owned: Option<Vec<f64>> = if let Some(a) =
+            anchor_loaded.as_ref()
+        {
+            if a.target_scores.is_some() {
+                None
+            } else {
+                Some(vec![args.anchor_target_score; a.features.len()])
+            }
+        } else {
+            None
+        };
+        let gpu_anchor: Option<zensim_train_gpu::GpuAnchorRows<'_>> =
+            anchor_loaded.as_ref().map(|a| zensim_train_gpu::GpuAnchorRows {
+                name: a.name.clone(),
+                features: a.features,
+                row_weights: a.row_weights,
+                target_scores: a
+                    .target_scores
+                    .unwrap_or(gpu_anchor_targets_owned.as_deref().unwrap_or(&[])),
+            });
+        let gpu_equiv: Option<zensim_train_gpu::GpuEquivPairs<'_>> =
+            equiv_loaded.as_ref().map(|e| zensim_train_gpu::GpuEquivPairs {
+                name: e.name.clone(),
+                features_a: e.features_a,
+                features_b: e.features_b,
+                row_weights: e.row_weights,
+                butter_diff: e.butter_diff,
+            });
+        let res = zensim_train_gpu::train_per_sample_alpha_head_gpu_with_aux(
             &core_groups,
             &gpu_hp,
             n_features,
             runtime,
+            gpu_anchor.as_ref(),
+            gpu_equiv.as_ref(),
         );
         log.push(format!(
             "GPU trainer: {} batches in {:.2} s ({:.1} batches/s)",

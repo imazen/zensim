@@ -83,8 +83,9 @@ impl GpuRuntime {
 /// Hyperparameters for the GPU per-sample-α trainer.
 ///
 /// A subset of the CPU [`zensim_train_core::per_sample_alpha_head::PerSampleAlphaHeadHparams`]
-/// plus the auxiliary loss weights that **are** supported in Phase 1
-/// (MSE pair loss, monotonicity hinge).
+/// plus the auxiliary loss weights supported in Phase 1
+/// (MSE pair loss, monotonicity hinge) and the **Phase 2** aux losses
+/// (anchor, cross-codec-eq, σ-floor, rank-preserve).
 #[derive(Clone, Debug)]
 pub struct GpuHparams {
     /// Hidden vector width. Power-of-2 (128, 256) recommended for kernel layout.
@@ -119,6 +120,37 @@ pub struct GpuHparams {
     /// `y_score = 100 · σ(y_pre / scale)`. Same semantics as the CPU
     /// `tanh_output_head_scale` flag. 0 = linear output.
     pub tanh_output_head_scale: f64,
+
+    // ---- Phase 2 aux loss hparams (task #169, 2026-05-19) ----
+    /// Anchor MSE loss weight. Per anchor row: `w · row_w · (y − target)²`.
+    /// 0 disables (anchor data is ignored even if supplied).
+    pub anchor_loss_weight: f64,
+    /// Probability per minibatch step that the anchor kernel fires.
+    /// Each fire processes `minibatch_k_aux` rows.
+    pub anchor_step_p: f64,
+    /// Cross-codec equivalence loss weight (`w · row_w · (y_a − y_b)²`).
+    /// 0 disables.
+    pub cross_codec_eq_weight: f64,
+    /// Probability per minibatch step that the eq kernel fires.
+    pub cross_codec_eq_step_p: f64,
+    /// Rank-preserve auxiliary on equivalence pairs (butter-weighted
+    /// RankNet-style log-loss). 0 disables.
+    pub cross_codec_rank_preserve_weight: f64,
+    /// Dynamic-range floor (σ-floor) weight. Penalizes the network when
+    /// the σ across `dynamic_range_probe_n` random equiv-A rows falls
+    /// below `dynamic_range_sigma_threshold`. 0 disables.
+    pub dynamic_range_floor_weight: f64,
+    /// σ-floor probe count per fire. Default 40 — match CPU.
+    pub dynamic_range_probe_n: usize,
+    /// σ threshold for the dynamic-range probe (score units).
+    pub dynamic_range_sigma_threshold: f64,
+    /// Probability per minibatch step that the σ-floor probe fires.
+    pub dynamic_range_step_p: f64,
+
+    /// K samples per aux-loss fire. Default 32 — K-batched semantics on
+    /// GPU. CPU is K=1 per fire; GPU amortizes across larger K so each
+    /// kernel launch is worth the overhead.
+    pub minibatch_k_aux: usize,
 }
 
 impl Default for GpuHparams {
@@ -137,8 +169,59 @@ impl Default for GpuHparams {
             monotonicity_reg: 0.0,
             monotonicity_margin: 1.0,
             tanh_output_head_scale: 0.0,
+            anchor_loss_weight: 0.0,
+            anchor_step_p: 0.10,
+            cross_codec_eq_weight: 0.0,
+            cross_codec_eq_step_p: 0.10,
+            cross_codec_rank_preserve_weight: 0.0,
+            dynamic_range_floor_weight: 0.0,
+            dynamic_range_probe_n: 40,
+            dynamic_range_sigma_threshold: 15.0,
+            dynamic_range_step_p: 0.10,
+            minibatch_k_aux: 32,
         }
     }
+}
+
+/// Per-row anchor pool — feature vectors + per-row weight + per-row
+/// target score. Phase 2 GPU mirror of the CPU `AnchorRows` struct.
+///
+/// `features.len() == row_weights.len() == target_scores.len()` and
+/// every inner feature slice has length `n_features`.
+#[derive(Clone, Debug)]
+pub struct GpuAnchorRows<'a> {
+    /// Human-readable pool name (used in trainer logs).
+    pub name: String,
+    /// One slice per anchor row, each `n_features` long.
+    pub features: &'a [&'a [f64]],
+    /// Per-row weight in the anchor MSE step.
+    pub row_weights: &'a [f64],
+    /// Per-row target score. CPU uses a global fallback when its
+    /// `target_scores` field is `None`; on GPU we always require a
+    /// per-row target (callers can pass a constant vector).
+    pub target_scores: &'a [f64],
+}
+
+/// Per-pair cross-codec equivalence pool — A-side + B-side features +
+/// per-pair weight + per-pair butter_diff. Phase 2 GPU mirror of the
+/// CPU `EquivPairs` struct.
+///
+/// `features_a.len() == features_b.len() == row_weights.len()`.
+/// `butter_diff` may be empty (rank-preserve disabled) or the same
+/// length as `features_a`.
+#[derive(Clone, Debug)]
+pub struct GpuEquivPairs<'a> {
+    /// Pool name (used in trainer logs).
+    pub name: String,
+    /// One feature slice per pair (A-side), each `n_features` long.
+    pub features_a: &'a [&'a [f64]],
+    /// One feature slice per pair (B-side), each `n_features` long.
+    pub features_b: &'a [&'a [f64]],
+    /// Per-pair weight in the equiv MSE step.
+    pub row_weights: &'a [f64],
+    /// Per-pair `butter_a - butter_b` (butteraugli-pnorm3 units).
+    /// Empty slice disables rank-preserve.
+    pub butter_diff: &'a [f64],
 }
 
 /// Result of a GPU training run.
@@ -169,11 +252,10 @@ pub struct GpuTrainResult {
 /// as the CPU path, but the actual pair sequence will differ because GPU
 /// minibatches sample K pairs at a time (CPU samples one).
 ///
-/// **Phase 1 limitation**: auxiliary losses (anchor, cross-codec-eq,
-/// σ-floor probe, rank-preserve) are NOT applied even if their CPU
-/// hparam values are set. Use the CPU trainer for those. The dispatch
-/// in `zensim_mlp_train` checks for this and refuses to route to GPU
-/// when an auxiliary loss is active.
+/// **Phase 1 entry**: auxiliary losses (anchor / cross-codec-eq /
+/// σ-floor / rank-preserve) are NOT applied even if their hparam
+/// values are set. Use [`train_per_sample_alpha_head_gpu_with_aux`]
+/// to opt into Phase 2 aux loss kernels.
 #[cfg(any(feature = "gpu-cuda", feature = "gpu-wgpu", feature = "gpu-cpu"))]
 pub fn train_per_sample_alpha_head_gpu(
     groups: &[TrainingGroup<'_>],
@@ -181,7 +263,32 @@ pub fn train_per_sample_alpha_head_gpu(
     n_features: usize,
     runtime: GpuRuntime,
 ) -> GpuTrainResult {
-    backend::dispatch(groups, hp, n_features, runtime)
+    backend::dispatch(groups, hp, n_features, runtime, None, None)
+}
+
+/// Phase 2 entry point — same as [`train_per_sample_alpha_head_gpu`]
+/// but accepts optional anchor + cross-codec-equivalence pools.
+///
+/// The σ-floor probe shares its sample substrate with the equiv pool's
+/// A-side (matching the CPU path's behavior), so it's gated on
+/// `equiv.is_some()` AND `hp.dynamic_range_floor_weight > 0`.
+///
+/// Per the K-batched semantics described in the Phase 2 plan: each
+/// minibatch step has a per-aux-kernel Bernoulli trial against
+/// `*_step_p`; on a hit, `hp.minibatch_k_aux` samples are drawn
+/// (`minibatch_k_aux × 2` for cross-codec-eq) and one forward +
+/// backprop pass adds gradients into the shared parameter grad
+/// buffers before the minibatch's single Adam step.
+#[cfg(any(feature = "gpu-cuda", feature = "gpu-wgpu", feature = "gpu-cpu"))]
+pub fn train_per_sample_alpha_head_gpu_with_aux(
+    groups: &[TrainingGroup<'_>],
+    hp: &GpuHparams,
+    n_features: usize,
+    runtime: GpuRuntime,
+    anchor: Option<&GpuAnchorRows<'_>>,
+    equiv: Option<&GpuEquivPairs<'_>>,
+) -> GpuTrainResult {
+    backend::dispatch(groups, hp, n_features, runtime, anchor, equiv)
 }
 
 /// Stub for builds without any `gpu-*` feature.
@@ -191,6 +298,22 @@ pub fn train_per_sample_alpha_head_gpu(
     _hp: &GpuHparams,
     _n_features: usize,
     _runtime: GpuRuntime,
+) -> GpuTrainResult {
+    panic!(
+        "zensim-train-gpu: no GPU backend compiled in. \
+         Rebuild with --features gpu-cuda (or gpu-wgpu / gpu-cpu)."
+    );
+}
+
+/// Stub for builds without any `gpu-*` feature (Phase 2 entry point).
+#[cfg(not(any(feature = "gpu-cuda", feature = "gpu-wgpu", feature = "gpu-cpu")))]
+pub fn train_per_sample_alpha_head_gpu_with_aux(
+    _groups: &[TrainingGroup<'_>],
+    _hp: &GpuHparams,
+    _n_features: usize,
+    _runtime: GpuRuntime,
+    _anchor: Option<&GpuAnchorRows<'_>>,
+    _equiv: Option<&GpuEquivPairs<'_>>,
 ) -> GpuTrainResult {
     panic!(
         "zensim-train-gpu: no GPU backend compiled in. \
