@@ -529,3 +529,271 @@ pub fn l2_add_atomic_kernel(grad: &mut Array<Atomic<f32>>, weight: &Array<f32>, 
     }
     grad[k].fetch_add(l2_two * weight[k]);
 }
+
+// ============================================================================
+// Phase 2 aux loss kernels (task #169, 2026-05-19)
+// ============================================================================
+
+/// Anchor loss kernel — one thread per row.
+///
+/// CPU equivalent (`zensim-validate::mlp_train::train_mlp_per_sample_alpha_head`
+/// lines ~5680-5770): per row, with probability `anchor_step_p`, sample one
+/// anchor feature vector + per-row target_score + per-row weight, forward
+/// through the MLP, and apply a weighted MSE pull toward the target.
+///
+/// We K-batch this on GPU: `K_anchor` rows are forwarded in a single pass,
+/// then this kernel writes `dl_dypre[k]` for each row. The same
+/// `backprop_heads_kernel` + `backprop_w1_kernel` used by the main pair
+/// step then chains gradients through the network. All aux gradients
+/// accumulate into the same parameter-gradient buffers as the main pair
+/// step; one Adam update absorbs the combined signal per minibatch.
+///
+/// Loss per row: `L = w · row_w · (y_score - target)^2`.
+/// Gradient: `dL/dy_score = 2 · w · row_w · (y_score - target)`.
+/// Chained through optional tanh-pin: `dL/dy_pre = dL/dy_score · dy/dy_pre`
+/// where `dy/dy_pre = (100/scale) · σ · (1 - σ)` and `σ = y_score / 100`.
+#[cube(launch)]
+#[allow(clippy::too_many_arguments)]
+pub fn anchor_loss_kernel(
+    y_score: &Array<f32>,
+    target_score: &Array<f32>,
+    row_weight: &Array<f32>,
+    dl_dypre_per_b: &mut Array<f32>,
+    w_anchor: f32,
+    tanh_scale: f32,
+) {
+    let k = ABSOLUTE_POS;
+    let n = y_score.len();
+    if k >= n {
+        terminate!();
+    }
+    let zero = f32::new(0.0);
+    let one = f32::new(1.0);
+    let two = f32::new(2.0);
+
+    let y_s = y_score[k];
+    let tgt = target_score[k];
+    let rw = row_weight[k];
+    let err = y_s - tgt;
+    let dl_dy_s = two * w_anchor * rw * err;
+
+    let dl_dypre = if tanh_scale > zero {
+        let s = y_s / f32::new(100.0);
+        let jac = (f32::new(100.0) / tanh_scale) * s * (one - s);
+        dl_dy_s * jac
+    } else {
+        dl_dy_s
+    };
+    dl_dypre_per_b[k] = dl_dypre;
+}
+
+/// Cross-codec equivalence loss kernel — one thread per pair (K).
+///
+/// Buffer layout: A-side rows are indices `0..K`, B-side rows are indices
+/// `K..2K`. The forward pass has already populated `y_score[0..2K]`.
+///
+/// CPU equivalent (lines ~5780-5940): per pair, with probability
+/// `cross_codec_eq_step_p`, forward both A and B, accumulate
+///   `L_eq = w · row_w · (y_a - y_b)^2`
+/// plus a butter-weighted rank-preserve term when |butter_diff| > 0:
+///   `L_rp = (w_rp · |Δb|) · softplus(-s · (y_b - y_a))`,
+///   `s = sign(butter_a - butter_b)`.
+/// Sign convention: Δb > 0 ⇒ A is butter-worse than B ⇒ we want y_a < y_b.
+/// `score_score` and `score_score_b` aren't separate inputs — the score
+/// pair lives in `y_score[k]` (A) and `y_score[k + K]` (B).
+#[cube(launch)]
+#[allow(clippy::too_many_arguments)]
+pub fn cross_codec_eq_loss_kernel(
+    y_score: &Array<f32>,
+    row_weight: &Array<f32>,
+    butter_diff: &Array<f32>,
+    dl_dypre_per_b: &mut Array<f32>,
+    k_pairs: u32,
+    w_eq: f32,
+    w_rp: f32,
+    tanh_scale: f32,
+) {
+    let k = ABSOLUTE_POS;
+    let kp_us = k_pairs as usize;
+    if k >= kp_us {
+        terminate!();
+    }
+    let zero = f32::new(0.0);
+    let one = f32::new(1.0);
+    let two = f32::new(2.0);
+    let clamp_pos = f32::new(20.0);
+    let clamp_neg = f32::new(-20.0);
+
+    let k_u = k;
+    let i_a = k_u;
+    let i_b = k_u + kp_us;
+
+    let ya = y_score[i_a];
+    let yb = y_score[i_b];
+    let rw = row_weight[k_u];
+    let diff = ya - yb;
+    // L_eq = w · row_w · diff²
+    // dL/dy_a (score) = 2 · w · row_w · diff
+    let scale_eq = two * w_eq * rw;
+    let mut dl_dya_s = scale_eq * diff;
+    let mut dl_dyb_s = -dl_dya_s;
+
+    // Rank-preserve term. Disabled when w_rp == 0 OR butter_diff[k] == 0.
+    if w_rp > zero {
+        let db = butter_diff[k_u];
+        // NaN guard: f32::is_finite isn't available in #[cube]; we rely
+        // on the |db| > 1e-12 check below, which also rejects NaN
+        // because NaN comparisons return false (so NaN > 1e-12 is false).
+        let abs_db = if db >= zero { db } else { -db };
+        if abs_db > f32::new(1e-12) {
+            let s = if db > zero { one } else { -one };
+            let w_rp_eff = w_rp * abs_db;
+            let u = s * (yb - ya);
+            // sigmoid(u) numerically stable via clamping.
+            let u_c = if u > clamp_pos {
+                clamp_pos
+            } else if u < clamp_neg {
+                clamp_neg
+            } else {
+                u
+            };
+            let sig = one / (one + f32::exp(-u_c));
+            // dL_rp/dy_b = -w · s · (1 - σ)
+            // dL_rp/dy_a = +w · s · (1 - σ)
+            let g = w_rp_eff * s * (one - sig);
+            dl_dya_s += g;
+            dl_dyb_s -= g;
+        }
+    }
+
+    // Chain through tanh-pin Jacobian per side.
+    let dl_dypre_a = if tanh_scale > zero {
+        let s_a = ya / f32::new(100.0);
+        let jac_a = (f32::new(100.0) / tanh_scale) * s_a * (one - s_a);
+        dl_dya_s * jac_a
+    } else {
+        dl_dya_s
+    };
+    let dl_dypre_b = if tanh_scale > zero {
+        let s_b = yb / f32::new(100.0);
+        let jac_b = (f32::new(100.0) / tanh_scale) * s_b * (one - s_b);
+        dl_dyb_s * jac_b
+    } else {
+        dl_dyb_s
+    };
+
+    dl_dypre_per_b[i_a] = dl_dypre_a;
+    dl_dypre_per_b[i_b] = dl_dypre_b;
+}
+
+/// σ-floor probe reduction — one thread, sequential scan.
+///
+/// `y_score[0..n_probe]` are the forward outputs of one σ-floor probe
+/// batch. This kernel computes mean μ and population σ, then emits a
+/// per-batch `grad_scale` scalar derived from the CPU formula:
+///
+///   viol = sigma_threshold - σ
+///   if viol > 0 AND σ > 1e-9:
+///       grad_scale = -2 · w_dr · viol / (σ · n_probe)
+///       loss      = w_dr · viol²
+///   else:
+///       grad_scale = 0
+///       loss      = 0
+///
+/// Outputs:
+/// - `out[0]` = μ
+/// - `out[1]` = σ_obs (the observed σ; only meaningful when grad_scale ≠ 0)
+/// - `out[2]` = grad_scale (0 when no violation)
+/// - `out[3]` = loss (for diagnostics)
+///
+/// `n_probe` is small (default 40) so a single-thread reduction is fine —
+/// avoids an extra round-trip to host.
+#[cube(launch)]
+pub fn sigma_floor_reduce_kernel(
+    y_score: &Array<f32>,
+    out: &mut Array<f32>,
+    n_probe: u32,
+    sigma_threshold: f32,
+    w_dr: f32,
+) {
+    let tid = ABSOLUTE_POS;
+    if tid > 0usize {
+        terminate!();
+    }
+    let zero = f32::new(0.0);
+    let n_f = f32::cast_from(n_probe);
+
+    let mut sum = zero;
+    let mut i = 0u32;
+    while i < n_probe {
+        sum += y_score[i as usize];
+        i += 1u32;
+    }
+    let mu = sum / n_f;
+
+    let mut sumsq = zero;
+    i = 0u32;
+    while i < n_probe {
+        let d = y_score[i as usize] - mu;
+        sumsq += d * d;
+        i += 1u32;
+    }
+    let var = sumsq / n_f;
+    let var_safe = if var > zero { var } else { zero };
+    let sigma_obs = f32::sqrt(var_safe);
+
+    let viol = sigma_threshold - sigma_obs;
+    let sigma_eps = f32::new(1e-9);
+    let (grad_scale, loss) = if viol > zero && sigma_obs > sigma_eps {
+        let g = -f32::new(2.0) * w_dr * viol / (sigma_obs * n_f);
+        let l = w_dr * viol * viol;
+        (g, l)
+    } else {
+        (zero, zero)
+    };
+
+    out[0] = mu;
+    out[1] = sigma_obs;
+    out[2] = grad_scale;
+    out[3] = loss;
+}
+
+/// σ-floor per-row gradient kernel — one thread per probe row.
+///
+/// Reads `mu`, `grad_scale` from `reduce_out[0]` and `reduce_out[2]`. If
+/// `grad_scale == 0` writes zero (no violation). Otherwise:
+///
+///   dL/dy_score[k] = grad_scale · (y_score[k] - μ)
+///
+/// chained through optional tanh-pin Jacobian.
+///
+/// CPU equivalent: lines ~6015-6060 (the per-probe-row loop computing
+/// `dl_dy = grad_scale * (y_i - mu) * dy_dpre`).
+#[cube(launch)]
+pub fn sigma_floor_grad_kernel(
+    y_score: &Array<f32>,
+    reduce_out: &Array<f32>,
+    dl_dypre_per_b: &mut Array<f32>,
+    tanh_scale: f32,
+) {
+    let k = ABSOLUTE_POS;
+    let n = y_score.len();
+    if k >= n {
+        terminate!();
+    }
+    let zero = f32::new(0.0);
+    let one = f32::new(1.0);
+    let mu = reduce_out[0];
+    let grad_scale = reduce_out[2];
+
+    let y_s = y_score[k];
+    let dl_dy_s = grad_scale * (y_s - mu);
+    let dl_dypre = if tanh_scale > zero {
+        let s = y_s / f32::new(100.0);
+        let jac = (f32::new(100.0) / tanh_scale) * s * (one - s);
+        dl_dy_s * jac
+    } else {
+        dl_dy_s
+    };
+    dl_dypre_per_b[k] = dl_dypre;
+}

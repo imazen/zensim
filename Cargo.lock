@@ -6514,6 +6514,7 @@ dependencies = [
  "zenpredict-bake",
  "zensim",
  "zensim-train-core",
+ "zensim-train-gpu",
 ]
 
 [[package]]

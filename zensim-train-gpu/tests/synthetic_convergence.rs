@@ -66,6 +66,7 @@ fn gpu_per_sample_alpha_recovers_synthetic_ranking_cuda() {
         monotonicity_reg: 0.0,
         monotonicity_margin: 1.0,
         tanh_output_head_scale: 0.0,
+        ..GpuHparams::default()
     };
 
     let result = train_per_sample_alpha_head_gpu(&[group], &hp, n_features, GpuRuntime::Cuda);

@@ -9,19 +9,21 @@ use zensim_train_core::TrainingGroup;
 use zensim_train_core::per_sample_alpha_head::PerSampleAlphaHeadModel;
 
 use crate::kernels;
-use crate::{GpuHparams, GpuRuntime, GpuTrainResult};
+use crate::{GpuAnchorRows, GpuEquivPairs, GpuHparams, GpuRuntime, GpuTrainResult};
 
 pub(crate) fn dispatch(
     groups: &[TrainingGroup<'_>],
     hp: &GpuHparams,
     n_features: usize,
     runtime: GpuRuntime,
+    anchor: Option<&GpuAnchorRows<'_>>,
+    equiv: Option<&GpuEquivPairs<'_>>,
 ) -> GpuTrainResult {
     match runtime {
         #[cfg(feature = "gpu-cuda")]
         GpuRuntime::Cuda => {
             let client = <cubecl::cuda::CudaRuntime as Runtime>::client(&Default::default());
-            run::<cubecl::cuda::CudaRuntime>(client, groups, hp, n_features)
+            run::<cubecl::cuda::CudaRuntime>(client, groups, hp, n_features, anchor, equiv)
         }
         #[cfg(not(feature = "gpu-cuda"))]
         GpuRuntime::Cuda => panic!(
@@ -30,7 +32,7 @@ pub(crate) fn dispatch(
         #[cfg(feature = "gpu-wgpu")]
         GpuRuntime::Wgpu => {
             let client = <cubecl::wgpu::WgpuRuntime as Runtime>::client(&Default::default());
-            run::<cubecl::wgpu::WgpuRuntime>(client, groups, hp, n_features)
+            run::<cubecl::wgpu::WgpuRuntime>(client, groups, hp, n_features, anchor, equiv)
         }
         #[cfg(not(feature = "gpu-wgpu"))]
         GpuRuntime::Wgpu => panic!(
@@ -39,7 +41,7 @@ pub(crate) fn dispatch(
         #[cfg(feature = "gpu-cpu")]
         GpuRuntime::Cpu => {
             let client = <cubecl::cpu::CpuRuntime as Runtime>::client(&Default::default());
-            run::<cubecl::cpu::CpuRuntime>(client, groups, hp, n_features)
+            run::<cubecl::cpu::CpuRuntime>(client, groups, hp, n_features, anchor, equiv)
         }
         #[cfg(not(feature = "gpu-cpu"))]
         GpuRuntime::Cpu => panic!(
@@ -110,6 +112,124 @@ struct StdData {
     weight_cdf: Vec<f64>,
 }
 
+/// Standardized anchor pool living on the host side. The kernel input
+/// is a flat `n_rows × n_features` f32 row-major matrix.
+struct StdAnchor {
+    /// `n_rows × n_features` row-major, pre-standardized.
+    rows: Vec<f32>,
+    n_rows: usize,
+    /// Per-row weight (f32).
+    weights: Vec<f32>,
+    /// Per-row target score (f32). When the caller supplies `None`,
+    /// every row gets the same global target (we always materialize
+    /// the constant vector for GPU upload).
+    targets: Vec<f32>,
+    /// CDF over row_weights for sampling.
+    row_cdf: Vec<f64>,
+    /// Sum of row weights (sanity gate).
+    total_weight: f64,
+}
+
+/// Standardized equiv pool — A-side + B-side rows in two flat matrices.
+struct StdEquiv {
+    n_rows: usize,
+    rows_a: Vec<f32>,
+    rows_b: Vec<f32>,
+    weights: Vec<f32>,
+    /// Per-pair butter_diff. Empty vec when rank-preserve disabled.
+    butter_diff: Vec<f32>,
+    row_cdf: Vec<f64>,
+    total_weight: f64,
+}
+
+fn standardize_aux_rows(
+    features: &[&[f64]],
+    weights: &[f64],
+    targets: Option<&[f64]>,
+    mean: &[f64],
+    scale: &[f64],
+    n_features: usize,
+) -> StdAnchor {
+    let n_rows = features.len();
+    let mut rows = vec![0.0_f32; n_rows * n_features];
+    for (r, f) in features.iter().enumerate() {
+        let off = r * n_features;
+        for d in 0..n_features {
+            let v = (f[d] - mean[d]) / scale[d].max(1e-12);
+            rows[off + d] = v as f32;
+        }
+    }
+    let weights_f32: Vec<f32> = weights.iter().map(|&w| w as f32).collect();
+    let targets_f32: Vec<f32> = if let Some(ts) = targets {
+        ts.iter().map(|&v| v as f32).collect()
+    } else {
+        vec![0.0_f32; n_rows]
+    };
+    let total: f64 = weights.iter().map(|&w| w.max(0.0)).sum();
+    let mut cum = 0.0_f64;
+    let row_cdf: Vec<f64> = weights
+        .iter()
+        .map(|&w| {
+            cum += w.max(0.0);
+            if total > 0.0 { cum / total } else { 0.0 }
+        })
+        .collect();
+    StdAnchor {
+        rows,
+        n_rows,
+        weights: weights_f32,
+        targets: targets_f32,
+        row_cdf,
+        total_weight: total,
+    }
+}
+
+fn standardize_aux_pairs(
+    features_a: &[&[f64]],
+    features_b: &[&[f64]],
+    weights: &[f64],
+    butter_diff: Option<&[f64]>,
+    mean: &[f64],
+    scale: &[f64],
+    n_features: usize,
+) -> StdEquiv {
+    let n_rows = features_a.len();
+    let mut rows_a = vec![0.0_f32; n_rows * n_features];
+    let mut rows_b = vec![0.0_f32; n_rows * n_features];
+    for r in 0..n_rows {
+        let off = r * n_features;
+        let fa = features_a[r];
+        let fb = features_b[r];
+        for d in 0..n_features {
+            let scl = scale[d].max(1e-12);
+            rows_a[off + d] = ((fa[d] - mean[d]) / scl) as f32;
+            rows_b[off + d] = ((fb[d] - mean[d]) / scl) as f32;
+        }
+    }
+    let weights_f32: Vec<f32> = weights.iter().map(|&w| w as f32).collect();
+    let butter_f32: Vec<f32> = butter_diff
+        .map(|bd| bd.iter().map(|&v| v as f32).collect())
+        .unwrap_or_default();
+    let total: f64 = weights.iter().map(|&w| w.max(0.0)).sum();
+    let mut cum = 0.0_f64;
+    let row_cdf: Vec<f64> = weights
+        .iter()
+        .map(|&w| {
+            cum += w.max(0.0);
+            if total > 0.0 { cum / total } else { 0.0 }
+        })
+        .collect();
+    StdEquiv {
+        n_rows,
+        rows_a,
+        rows_b,
+        weights: weights_f32,
+        butter_diff: butter_f32,
+        row_cdf,
+        total_weight: total,
+    }
+}
+
 fn standardize_groups(
     groups: &[TrainingGroup<'_>],
     train_indices: &[usize],
@@ -163,15 +283,28 @@ fn run<R: Runtime>(
     groups: &[TrainingGroup<'_>],
     hp: &GpuHparams,
     n_features: usize,
+    anchor: Option<&GpuAnchorRows<'_>>,
+    equiv: Option<&GpuEquivPairs<'_>>,
 ) -> GpuTrainResult {
     let n_hidden = hp.n_hidden;
     let k_batch = hp.minibatch_k;
     let two_k = 2 * k_batch;
+    let k_aux = hp.minibatch_k_aux.max(1);
+    let probe_n = hp.dynamic_range_probe_n.max(2);
     assert!(
         n_hidden <= 1024,
         "n_hidden must be ≤ 1024 (CUDA cube limit); got {n_hidden}"
     );
     assert!(k_batch >= 1, "minibatch_k must be ≥ 1; got {k_batch}");
+    // Aux uses the same scratch buffers as the main pair step. The
+    // worst-case aux batch is the cross-codec-eq pair (2 × k_aux rows)
+    // and the σ-floor probe (probe_n rows). Both must fit in `two_k`.
+    let max_aux_rows = (2 * k_aux).max(probe_n);
+    assert!(
+        max_aux_rows <= two_k,
+        "aux batch ({max_aux_rows} rows) exceeds main scratch capacity ({two_k}); \
+         reduce minibatch_k_aux/dynamic_range_probe_n or raise minibatch_k"
+    );
 
     let train_indices: Vec<usize> = (0..groups.len())
         .filter(|&i| groups[i].train_weight > 0.0)
@@ -183,6 +316,69 @@ fn run<R: Runtime>(
 
     let (mean, scale) = compute_scaler(groups, &train_indices, n_features);
     let std_data = standardize_groups(groups, &train_indices, &mean, &scale, n_features);
+
+    // ---- Phase 2 aux data: standardize anchor rows / equiv pairs ----
+    let anchor_active = anchor.is_some() && hp.anchor_loss_weight > 0.0;
+    let equiv_active = equiv.is_some() && hp.cross_codec_eq_weight > 0.0;
+    let rank_preserve_active = equiv_active && hp.cross_codec_rank_preserve_weight > 0.0;
+    let sigma_floor_active = equiv_active && hp.dynamic_range_floor_weight > 0.0 && probe_n >= 2;
+
+    let std_anchor = if anchor_active {
+        let a = anchor.unwrap();
+        assert_eq!(
+            a.features.len(),
+            a.row_weights.len(),
+            "anchor.features.len() != anchor.row_weights.len()"
+        );
+        assert_eq!(
+            a.features.len(),
+            a.target_scores.len(),
+            "anchor.features.len() != anchor.target_scores.len()"
+        );
+        Some(standardize_aux_rows(
+            a.features,
+            a.row_weights,
+            Some(a.target_scores),
+            &mean,
+            &scale,
+            n_features,
+        ))
+    } else {
+        None
+    };
+
+    let std_equiv = if equiv_active {
+        let e = equiv.unwrap();
+        assert_eq!(
+            e.features_a.len(),
+            e.features_b.len(),
+            "equiv.features_a.len() != equiv.features_b.len()"
+        );
+        assert_eq!(
+            e.features_a.len(),
+            e.row_weights.len(),
+            "equiv.features_a.len() != equiv.row_weights.len()"
+        );
+        let butter = if rank_preserve_active
+            && !e.butter_diff.is_empty()
+            && e.butter_diff.len() == e.features_a.len()
+        {
+            Some(e.butter_diff)
+        } else {
+            None
+        };
+        Some(standardize_aux_pairs(
+            e.features_a,
+            e.features_b,
+            e.row_weights,
+            butter,
+            &mean,
+            &scale,
+            n_features,
+        ))
+    } else {
+        None
+    };
 
     let mut model = PerSampleAlphaHeadModel::new(n_features, n_hidden, hp.seed);
     model.scaler_mean = mean.clone();
@@ -278,6 +474,20 @@ fn run<R: Runtime>(
     let mut pair_hi_host = vec![0u32; k_batch];
     let mut pair_lo_host = vec![0u32; k_batch];
     let mut delta_target_host = vec![0.0_f32; k_batch];
+
+    // ---- Phase 2 host scratch + persistent GPU handles ----
+    let mut aux_x_host = vec![0.0_f32; (2 * k_aux).max(probe_n) * n_features];
+    let mut aux_anchor_targets_host = vec![0.0_f32; k_aux];
+    let mut aux_anchor_weights_host = vec![0.0_f32; k_aux];
+    let mut aux_eq_weights_host = vec![0.0_f32; k_aux];
+    let mut aux_eq_butter_host = vec![0.0_f32; k_aux];
+    let anchor_w_f32 = hp.anchor_loss_weight as f32;
+    let eq_w_f32 = hp.cross_codec_eq_weight as f32;
+    let rp_w_f32 = hp.cross_codec_rank_preserve_weight as f32;
+    let dr_w_f32 = hp.dynamic_range_floor_weight as f32;
+    let dr_sigma_f32 = hp.dynamic_range_sigma_threshold as f32;
+    // 4-element reduce output: [μ, σ_obs, grad_scale, loss]
+    let sigma_reduce_h = alloc_f32(&zeros(4));
 
     for _epoch in 0..hp.n_epochs {
         for _step in 0..steps_per_epoch {
@@ -488,6 +698,185 @@ fn run<R: Runtime>(
                 );
             }
 
+            // ---------- 5b. Phase 2 aux losses ----------
+            //
+            // Each aux kernel fires with probability `*_step_p` per
+            // minibatch step. On a fire, K_aux samples are drawn and
+            // run through forward + backprop; the gradient buffers
+            // already populated by the main pair step ACCUMULATE the
+            // aux gradients (we do NOT re-zero them). One Adam step
+            // at the end of the minibatch consumes the combined
+            // signal.
+            //
+            // Implementation detail: forward_kernel + backprop kernels
+            // depend on `B = batch_rows`. Since the scratch buffers
+            // are sized for `two_k` and aux uses ≤ `2 * k_aux`, we
+            // can reuse them; we just have to launch with the right
+            // CubeCount and pass the correct `batch_rows` to
+            // backprop_w1.
+            if anchor_active && rng.next_f64_01() < hp.anchor_step_p {
+                if let Some(std_a) = std_anchor.as_ref() {
+                    if std_a.n_rows > 0 && std_a.total_weight > 0.0 {
+                        let ctx = AuxFireCtx::<R> {
+                            client: &client,
+                            cube_dim_h,
+                            cube_dim_256,
+                            n_features,
+                            n_hidden,
+                            two_k,
+                            tanh_scale,
+                            leaky_alpha,
+                            w1_h: &w1_h,
+                            b1_h: &b1_h,
+                            rank_w_h: &rank_w_h,
+                            reducer_w_h: &reducer_w_h,
+                            w_alpha_h: &w_alpha_h,
+                            rank_b_h: &rank_b_h,
+                            reducer_b_h: &reducer_b_h,
+                            b_alpha_h: &b_alpha_h,
+                            h_pre_h: &h_pre_h,
+                            h_h: &h_h,
+                            y_rank_h: &y_rank_h,
+                            y_pool_h: &y_pool_h,
+                            stats_h: &stats_h,
+                            max_idx_h: &max_idx_h,
+                            alpha_h: &alpha_h,
+                            y_pre_h: &y_pre_h,
+                            y_score_h: &y_score_h,
+                            dl_dypre_h: &dl_dypre_h,
+                            dh_pre_h: &dh_pre_h,
+                            gw1: &gw1,
+                            gb1: &gb1,
+                            g_rank_w: &g_rank_w,
+                            g_reducer_w: &g_reducer_w,
+                            g_w_alpha: &g_w_alpha,
+                            g_rank_b: &g_rank_b,
+                            g_reducer_b: &g_reducer_b,
+                            g_b_alpha: &g_b_alpha,
+                        };
+                        fire_anchor_aux::<R>(
+                            &ctx,
+                            &mut rng,
+                            std_a,
+                            &mut aux_x_host,
+                            &mut aux_anchor_targets_host,
+                            &mut aux_anchor_weights_host,
+                            k_aux,
+                            anchor_w_f32,
+                        );
+                    }
+                }
+            }
+
+            if equiv_active && rng.next_f64_01() < hp.cross_codec_eq_step_p {
+                if let Some(std_e) = std_equiv.as_ref() {
+                    if std_e.n_rows > 0 && std_e.total_weight > 0.0 {
+                        let ctx = AuxFireCtx::<R> {
+                            client: &client,
+                            cube_dim_h,
+                            cube_dim_256,
+                            n_features,
+                            n_hidden,
+                            two_k,
+                            tanh_scale,
+                            leaky_alpha,
+                            w1_h: &w1_h,
+                            b1_h: &b1_h,
+                            rank_w_h: &rank_w_h,
+                            reducer_w_h: &reducer_w_h,
+                            w_alpha_h: &w_alpha_h,
+                            rank_b_h: &rank_b_h,
+                            reducer_b_h: &reducer_b_h,
+                            b_alpha_h: &b_alpha_h,
+                            h_pre_h: &h_pre_h,
+                            h_h: &h_h,
+                            y_rank_h: &y_rank_h,
+                            y_pool_h: &y_pool_h,
+                            stats_h: &stats_h,
+                            max_idx_h: &max_idx_h,
+                            alpha_h: &alpha_h,
+                            y_pre_h: &y_pre_h,
+                            y_score_h: &y_score_h,
+                            dl_dypre_h: &dl_dypre_h,
+                            dh_pre_h: &dh_pre_h,
+                            gw1: &gw1,
+                            gb1: &gb1,
+                            g_rank_w: &g_rank_w,
+                            g_reducer_w: &g_reducer_w,
+                            g_w_alpha: &g_w_alpha,
+                            g_rank_b: &g_rank_b,
+                            g_reducer_b: &g_reducer_b,
+                            g_b_alpha: &g_b_alpha,
+                        };
+                        fire_equiv_aux::<R>(
+                            &ctx,
+                            &mut rng,
+                            std_e,
+                            &mut aux_x_host,
+                            &mut aux_eq_weights_host,
+                            &mut aux_eq_butter_host,
+                            k_aux,
+                            eq_w_f32,
+                            rp_w_f32,
+                        );
+                    }
+                }
+            }
+
+            if sigma_floor_active && rng.next_f64_01() < hp.dynamic_range_step_p {
+                if let Some(std_e) = std_equiv.as_ref() {
+                    if std_e.n_rows >= probe_n {
+                        let ctx = AuxFireCtx::<R> {
+                            client: &client,
+                            cube_dim_h,
+                            cube_dim_256,
+                            n_features,
+                            n_hidden,
+                            two_k,
+                            tanh_scale,
+                            leaky_alpha,
+                            w1_h: &w1_h,
+                            b1_h: &b1_h,
+                            rank_w_h: &rank_w_h,
+                            reducer_w_h: &reducer_w_h,
+                            w_alpha_h: &w_alpha_h,
+                            rank_b_h: &rank_b_h,
+                            reducer_b_h: &reducer_b_h,
+                            b_alpha_h: &b_alpha_h,
+                            h_pre_h: &h_pre_h,
+                            h_h: &h_h,
+                            y_rank_h: &y_rank_h,
+                            y_pool_h: &y_pool_h,
+                            stats_h: &stats_h,
+                            max_idx_h: &max_idx_h,
+                            alpha_h: &alpha_h,
+                            y_pre_h: &y_pre_h,
+                            y_score_h: &y_score_h,
+                            dl_dypre_h: &dl_dypre_h,
+                            dh_pre_h: &dh_pre_h,
+                            gw1: &gw1,
+                            gb1: &gb1,
+                            g_rank_w: &g_rank_w,
+                            g_reducer_w: &g_reducer_w,
+                            g_w_alpha: &g_w_alpha,
+                            g_rank_b: &g_rank_b,
+                            g_reducer_b: &g_reducer_b,
+                            g_b_alpha: &g_b_alpha,
+                        };
+                        fire_sigma_floor_aux::<R>(
+                            &ctx,
+                            &mut rng,
+                            std_e,
+                            &mut aux_x_host,
+                            probe_n,
+                            dr_w_f32,
+                            dr_sigma_f32,
+                            &sigma_reduce_h,
+                        );
+                    }
+                }
+            }
+
             // ---------- 6. L2 ----------
             if l2 > 0.0 {
                 l2_add_plain::<R>(&client, &gw1, &w1_h, l2, n_features * n_hidden);
@@ -690,4 +1079,355 @@ fn adam_atomic<R: Runtime>(
             bc2,
         );
     }
+}
+
+// ============================================================================
+// Phase 2 aux fire helpers (task #169, 2026-05-19)
+// ============================================================================
+
+/// Bundle of references threaded through every aux-fire helper. Keeps
+/// the call sites in the main training loop readable.
+struct AuxFireCtx<'a, R: Runtime> {
+    client: &'a ComputeClient<R>,
+    cube_dim_h: CubeDim,
+    cube_dim_256: CubeDim,
+    n_features: usize,
+    n_hidden: usize,
+    two_k: usize,
+    tanh_scale: f32,
+    leaky_alpha: f32,
+    // Model parameters (read).
+    w1_h: &'a cubecl::server::Handle,
+    b1_h: &'a cubecl::server::Handle,
+    rank_w_h: &'a cubecl::server::Handle,
+    reducer_w_h: &'a cubecl::server::Handle,
+    w_alpha_h: &'a cubecl::server::Handle,
+    rank_b_h: &'a cubecl::server::Handle,
+    reducer_b_h: &'a cubecl::server::Handle,
+    b_alpha_h: &'a cubecl::server::Handle,
+    // Per-batch scratch (reused — shared with main pair step).
+    h_pre_h: &'a cubecl::server::Handle,
+    h_h: &'a cubecl::server::Handle,
+    y_rank_h: &'a cubecl::server::Handle,
+    y_pool_h: &'a cubecl::server::Handle,
+    stats_h: &'a cubecl::server::Handle,
+    max_idx_h: &'a cubecl::server::Handle,
+    alpha_h: &'a cubecl::server::Handle,
+    y_pre_h: &'a cubecl::server::Handle,
+    y_score_h: &'a cubecl::server::Handle,
+    dl_dypre_h: &'a cubecl::server::Handle,
+    dh_pre_h: &'a cubecl::server::Handle,
+    // Gradient accumulators (write — main step already pre-zeroed
+    // these; aux ADDS to them).
+    gw1: &'a cubecl::server::Handle,
+    gb1: &'a cubecl::server::Handle,
+    g_rank_w: &'a cubecl::server::Handle,
+    g_reducer_w: &'a cubecl::server::Handle,
+    g_w_alpha: &'a cubecl::server::Handle,
+    g_rank_b: &'a cubecl::server::Handle,
+    g_reducer_b: &'a cubecl::server::Handle,
+    g_b_alpha: &'a cubecl::server::Handle,
+}
+
+/// Sample one row index per the cumulative weight CDF.
+fn sample_cdf(rng: &mut SplitMix64, cdf: &[f64]) -> usize {
+    let u = rng.next_f64_01();
+    let mut idx = cdf.partition_point(|&c| c < u);
+    if idx >= cdf.len() {
+        idx = cdf.len() - 1;
+    }
+    idx
+}
+
+/// Launch forward_kernel for `b_rows` rows reading from `x_batch_h`.
+/// Reuses the persistent scratch handles bound in `ctx`. The y_score
+/// output lives at `ctx.y_score_h[0..b_rows]` after the call.
+fn launch_forward_aux<R: Runtime>(
+    ctx: &AuxFireCtx<R>,
+    x_batch_h: &cubecl::server::Handle,
+    b_rows: usize,
+) {
+    unsafe {
+        kernels::forward_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(b_rows as u32, 1, 1),
+            ctx.cube_dim_h,
+            ArrayArg::from_raw_parts(x_batch_h.clone(), b_rows * ctx.n_features),
+            ArrayArg::from_raw_parts(ctx.w1_h.clone(), ctx.n_features * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.b1_h.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.rank_w_h.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.reducer_w_h.clone(), 4),
+            ArrayArg::from_raw_parts(ctx.w_alpha_h.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.rank_b_h.clone(), 1),
+            ArrayArg::from_raw_parts(ctx.reducer_b_h.clone(), 1),
+            ArrayArg::from_raw_parts(ctx.b_alpha_h.clone(), 1),
+            ArrayArg::from_raw_parts(ctx.h_pre_h.clone(), b_rows * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.h_h.clone(), b_rows * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.y_rank_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.y_pool_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.stats_h.clone(), b_rows * 4),
+            ArrayArg::from_raw_parts(ctx.max_idx_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.alpha_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.y_pre_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.y_score_h.clone(), b_rows),
+            ctx.n_features as u32,
+            ctx.leaky_alpha,
+            ctx.tanh_scale,
+            ctx.n_hidden as u32,
+        );
+    }
+}
+
+/// Launch backprop_heads then backprop_w1 for `b_rows` rows. Both
+/// kernels ADD to the gradient accumulators; aux fires after the
+/// main pair step (which pre-zeroed gw1) and the main step also
+/// pre-zeroed the atomic gradients via `zero_atomic_f32_kernel`, so
+/// we just keep accumulating.
+fn launch_backprop_aux<R: Runtime>(
+    ctx: &AuxFireCtx<R>,
+    x_batch_h: &cubecl::server::Handle,
+    b_rows: usize,
+) {
+    unsafe {
+        kernels::backprop_heads_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(b_rows as u32, 1, 1),
+            ctx.cube_dim_h,
+            ArrayArg::from_raw_parts(ctx.h_h.clone(), b_rows * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.h_pre_h.clone(), b_rows * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.stats_h.clone(), b_rows * 4),
+            ArrayArg::from_raw_parts(ctx.max_idx_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.y_rank_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.y_pool_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.alpha_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), b_rows),
+            ArrayArg::from_raw_parts(ctx.rank_w_h.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.reducer_w_h.clone(), 4),
+            ArrayArg::from_raw_parts(ctx.w_alpha_h.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.g_rank_w.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.g_reducer_w.clone(), 4),
+            ArrayArg::from_raw_parts(ctx.g_w_alpha.clone(), ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.g_rank_b.clone(), 1),
+            ArrayArg::from_raw_parts(ctx.g_reducer_b.clone(), 1),
+            ArrayArg::from_raw_parts(ctx.g_b_alpha.clone(), 1),
+            ArrayArg::from_raw_parts(ctx.dh_pre_h.clone(), b_rows * ctx.n_hidden),
+            ctx.leaky_alpha,
+            ctx.n_hidden as u32,
+        );
+        kernels::backprop_w1_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ctx.n_features as u32, 1, 1),
+            ctx.cube_dim_h,
+            ArrayArg::from_raw_parts(x_batch_h.clone(), b_rows * ctx.n_features),
+            ArrayArg::from_raw_parts(ctx.dh_pre_h.clone(), b_rows * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.gw1.clone(), ctx.n_features * ctx.n_hidden),
+            ArrayArg::from_raw_parts(ctx.gb1.clone(), ctx.n_hidden),
+            ctx.n_features as u32,
+            b_rows as u32,
+            ctx.n_hidden as u32,
+        );
+    }
+}
+
+/// Anchor MSE aux fire — K_aux rows.
+#[allow(clippy::too_many_arguments)]
+fn fire_anchor_aux<R: Runtime>(
+    ctx: &AuxFireCtx<R>,
+    rng: &mut SplitMix64,
+    std_a: &StdAnchor,
+    aux_x_host: &mut [f32],
+    aux_targets_host: &mut [f32],
+    aux_weights_host: &mut [f32],
+    k_aux: usize,
+    w_anchor: f32,
+) {
+    let nf = ctx.n_features;
+    let k = k_aux.min(std_a.n_rows);
+    if k == 0 {
+        return;
+    }
+    // Host-side sample: K rows from anchor pool by row_cdf.
+    for r in 0..k {
+        let ai = sample_cdf(rng, &std_a.row_cdf);
+        let src = &std_a.rows[ai * nf..(ai + 1) * nf];
+        aux_x_host[r * nf..(r + 1) * nf].copy_from_slice(src);
+        aux_targets_host[r] = std_a.targets[ai];
+        aux_weights_host[r] = std_a.weights[ai];
+    }
+    let x_batch_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_x_host[..k * nf]));
+    let targets_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_targets_host[..k]));
+    let weights_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_weights_host[..k]));
+
+    // Forward.
+    launch_forward_aux::<R>(ctx, &x_batch_h, k);
+    // dl_dypre[0..k] writeback. Zero the slot first (kernel writes
+    // directly per row but it's good hygiene since the buffer is
+    // shared with the main step).
+    unsafe {
+        kernels::zero_f32_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ceil_div(k as u32, 256).max(1), 1, 1),
+            ctx.cube_dim_256,
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), k),
+        );
+        kernels::anchor_loss_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ceil_div(k as u32, 256).max(1), 1, 1),
+            ctx.cube_dim_256,
+            ArrayArg::from_raw_parts(ctx.y_score_h.clone(), k),
+            ArrayArg::from_raw_parts(targets_h.clone(), k),
+            ArrayArg::from_raw_parts(weights_h.clone(), k),
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), k),
+            w_anchor,
+            ctx.tanh_scale,
+        );
+    }
+    // Backprop heads + W1 — ACCUMULATES into existing grad buffers.
+    launch_backprop_aux::<R>(ctx, &x_batch_h, k);
+    let _ = (ctx.two_k,); // sanity touch (silence unused warn on field)
+}
+
+/// Cross-codec equivalence aux fire — K_aux pairs (2*K_aux rows).
+#[allow(clippy::too_many_arguments)]
+fn fire_equiv_aux<R: Runtime>(
+    ctx: &AuxFireCtx<R>,
+    rng: &mut SplitMix64,
+    std_e: &StdEquiv,
+    aux_x_host: &mut [f32],
+    aux_weights_host: &mut [f32],
+    aux_butter_host: &mut [f32],
+    k_aux: usize,
+    w_eq: f32,
+    w_rp: f32,
+) {
+    let nf = ctx.n_features;
+    let k = k_aux.min(std_e.n_rows);
+    if k == 0 {
+        return;
+    }
+    let two_k_b = 2 * k;
+    let rp_enabled = w_rp > 0.0 && !std_e.butter_diff.is_empty();
+    // Host-side sample: K pairs. A-side rows 0..K, B-side rows K..2K.
+    for r in 0..k {
+        let ei = sample_cdf(rng, &std_e.row_cdf);
+        let src_a = &std_e.rows_a[ei * nf..(ei + 1) * nf];
+        let src_b = &std_e.rows_b[ei * nf..(ei + 1) * nf];
+        aux_x_host[r * nf..(r + 1) * nf].copy_from_slice(src_a);
+        let b_off = (r + k) * nf;
+        aux_x_host[b_off..b_off + nf].copy_from_slice(src_b);
+        aux_weights_host[r] = std_e.weights[ei];
+        aux_butter_host[r] = if rp_enabled {
+            std_e.butter_diff[ei]
+        } else {
+            0.0
+        };
+    }
+    let x_batch_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_x_host[..two_k_b * nf]));
+    let weights_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_weights_host[..k]));
+    let butter_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_butter_host[..k]));
+
+    // Forward 2K rows.
+    launch_forward_aux::<R>(ctx, &x_batch_h, two_k_b);
+    // Zero dl_dypre slot then run loss kernel (one thread per pair).
+    unsafe {
+        kernels::zero_f32_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ceil_div(two_k_b as u32, 256).max(1), 1, 1),
+            ctx.cube_dim_256,
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), two_k_b),
+        );
+        kernels::cross_codec_eq_loss_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ceil_div(k as u32, 256).max(1), 1, 1),
+            ctx.cube_dim_256,
+            ArrayArg::from_raw_parts(ctx.y_score_h.clone(), two_k_b),
+            ArrayArg::from_raw_parts(weights_h.clone(), k),
+            ArrayArg::from_raw_parts(butter_h.clone(), k),
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), two_k_b),
+            k as u32,
+            w_eq,
+            w_rp,
+            ctx.tanh_scale,
+        );
+    }
+    launch_backprop_aux::<R>(ctx, &x_batch_h, two_k_b);
+}
+
+/// σ-floor probe aux fire — N_probe rows from the equiv A-side pool.
+#[allow(clippy::too_many_arguments)]
+fn fire_sigma_floor_aux<R: Runtime>(
+    ctx: &AuxFireCtx<R>,
+    rng: &mut SplitMix64,
+    std_e: &StdEquiv,
+    aux_x_host: &mut [f32],
+    probe_n: usize,
+    w_dr: f32,
+    sigma_threshold: f32,
+    sigma_reduce_h: &cubecl::server::Handle,
+) {
+    let nf = ctx.n_features;
+    let n_probe = probe_n.min(std_e.n_rows);
+    if n_probe < 2 {
+        return;
+    }
+    // Sample N_probe distinct(-ish — with replacement is fine) A-side
+    // rows uniformly. CPU uses random unit per row.
+    for r in 0..n_probe {
+        let u = rng.next_f64_01();
+        let pi = ((u * std_e.n_rows as f64) as usize).min(std_e.n_rows - 1);
+        let src = &std_e.rows_a[pi * nf..(pi + 1) * nf];
+        aux_x_host[r * nf..(r + 1) * nf].copy_from_slice(src);
+    }
+    let x_batch_h = ctx
+        .client
+        .create_from_slice(f32::as_bytes(&aux_x_host[..n_probe * nf]));
+
+    launch_forward_aux::<R>(ctx, &x_batch_h, n_probe);
+
+    // Reduction kernel writes (μ, σ_obs, grad_scale, loss) into the
+    // 4-element reduce buffer. We always launch — the kernel handles
+    // the no-violation case by writing grad_scale=0. The subsequent
+    // sigma_floor_grad_kernel propagates that as a no-op via the
+    // per-row multiply.
+    unsafe {
+        kernels::sigma_floor_reduce_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(1, 1, 1),
+            CubeDim::new_1d(1),
+            ArrayArg::from_raw_parts(ctx.y_score_h.clone(), n_probe),
+            ArrayArg::from_raw_parts(sigma_reduce_h.clone(), 4),
+            n_probe as u32,
+            sigma_threshold,
+            w_dr,
+        );
+        // Zero dl_dypre slot for the probe range.
+        kernels::zero_f32_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ceil_div(n_probe as u32, 256).max(1), 1, 1),
+            ctx.cube_dim_256,
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), n_probe),
+        );
+        kernels::sigma_floor_grad_kernel::launch::<R>(
+            ctx.client,
+            CubeCount::Static(ceil_div(n_probe as u32, 256).max(1), 1, 1),
+            ctx.cube_dim_256,
+            ArrayArg::from_raw_parts(ctx.y_score_h.clone(), n_probe),
+            ArrayArg::from_raw_parts(sigma_reduce_h.clone(), 4),
+            ArrayArg::from_raw_parts(ctx.dl_dypre_h.clone(), n_probe),
+            ctx.tanh_scale,
+        );
+    }
+    launch_backprop_aux::<R>(ctx, &x_batch_h, n_probe);
 }
