@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed (2026-05-19, SPEED-B task #165)
+
+- **K-batched auxiliary losses in `train_mlp_per_sample_alpha_head`**.
+  The `--minibatch-size 1` asserts on the anchor, cross-codec-eq, and
+  tanh-output-head paths (`zensim-validate/src/mlp_train.rs:4948,
+  4965, 5000`) have been removed. Aux loss steps (anchor,
+  cross-codec-eq, dynamic-range-floor, cross-codec-rank-preserve)
+  now fire on Adam-step boundaries (`steps_since_adam == 0`) and
+  process K samples per fire, accumulating gradients into the
+  shared `adam.g*` buffer before one `do_adam_step`. K=1 callers
+  get bit-identical semantics (every iteration is an Adam
+  boundary, K samples = 1 sample); K=32+ callers get the
+  Adam-step amortization the T8.1-T8.11 mini-batch optimizations
+  were designed for. V5/V6 driver scripts
+  (`scripts/v_next/run_cross_codec_v{5,6}_seed.sh`) default to
+  `--minibatch-size 32` with `KBATCH` env-var override.
+
 ### Added (2026-05-19, EXP-CROSS-CODEC-METRIC)
 
 - **`PreviewV0_5CrossCodec` profile variant wired (opt-in)**. Adds

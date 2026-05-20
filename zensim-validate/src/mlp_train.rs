@@ -4936,18 +4936,20 @@ fn train_mlp_per_sample_alpha_head(
              composed with NiN. Disable NiN (--norm-in-norm-weight 0) or these aux losses."
         );
     }
-    // PreviewV0_5TunerV2: anchor stepping is only wired on K=1 (the
-    // tuner's recipe pins --minibatch-size 1 anyway). NiN incompatible.
+    // PreviewV0_5TunerV2: anchor + cross-codec-eq + dynamic-range +
+    // rank-preserve aux loss steps are NiN-incompatible (the NiN flush
+    // helper packages its own forwards). K-batching is supported via
+    // SPEED-B (2026-05-19): aux steps fire on Adam-step boundaries
+    // (steps_since_adam == 0) and each fire processes K samples into
+    // the shared adam.g* buffer before one do_adam_step. K=1 callers
+    // get bit-identical semantics (every iteration is an Adam boundary,
+    // K samples = 1 sample); K=32+ callers get the rayon parallel-batch
+    // speedup the T8.1-T8.11 optimizations were designed for.
     if hyperparams.anchor_loss_weight > 0.0 && anchor.is_some() {
         assert!(
             !nin_on,
             "per_sample_alpha_head + NiN: anchor loss is not yet composed with NiN. \
              Disable NiN (--norm-in-norm-weight 0) or set --anchor-loss-weight 0."
-        );
-        assert_eq!(
-            hyperparams.minibatch_size, 1,
-            "anchor loss requires --minibatch-size 1; got {}",
-            hyperparams.minibatch_size
         );
         assert!(
             (0.0..=1.0).contains(&hyperparams.anchor_step_p),
@@ -4960,11 +4962,6 @@ fn train_mlp_per_sample_alpha_head(
             !nin_on,
             "per_sample_alpha_head + NiN: cross-codec-eq loss is not yet composed with NiN. \
              Disable NiN (--norm-in-norm-weight 0) or set --cross-codec-eq-weight 0."
-        );
-        assert_eq!(
-            hyperparams.minibatch_size, 1,
-            "cross-codec-eq loss requires --minibatch-size 1; got {}",
-            hyperparams.minibatch_size
         );
         assert!(
             (0.0..=1.0).contains(&hyperparams.cross_codec_eq_step_p),
@@ -4984,6 +4981,8 @@ fn train_mlp_per_sample_alpha_head(
     }
 
     // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-output-head sanity gates.
+    // SPEED-B (2026-05-19): tanh-pin is per-prediction (pin_forward
+    // closure), works with any K. Removed K=1 assert.
     if hyperparams.tanh_output_head_scale > 0.0 {
         assert!(
             hyperparams.per_sample_alpha_head,
@@ -4995,11 +4994,6 @@ fn train_mlp_per_sample_alpha_head(
             "per_sample_alpha_head + NiN: --tanh-output-head-scale is not yet \
              composed with NiN. Disable NiN (--norm-in-norm-weight 0) or set \
              --tanh-output-head-scale 0."
-        );
-        assert_eq!(
-            hyperparams.minibatch_size, 1,
-            "--tanh-output-head-scale > 0 requires --minibatch-size 1; got {}",
-            hyperparams.minibatch_size
         );
     }
 
@@ -5668,102 +5662,114 @@ fn train_mlp_per_sample_alpha_head(
 
             // PreviewV0_5TunerV2 anchor step (2026-05-19).
             // After each pair Adam step, with probability anchor_step_p,
-            // sample one anchor row, forward, and apply
-            // w · (y - target)² MSE gradient via a single backprop step
-            // sharing the same Adam state. Supports K=1 only (asserted
-            // at the per-sample-α function head when anchor is given).
-            //
+            // sample K anchor rows, forward each, and apply
+            // w · (y - target)² MSE gradients via K backprop steps
+            // sharing the same Adam state (single Adam step at end).
             // The anchor row's weight scales BOTH the loss and the
             // gradient (so KonJND PJND rows pull harder than synthetic
             // rows). The implicit "scale across all anchors" is the
             // probability `anchor_step_p` itself.
-            if anchor_active && k == 1 {
+            //
+            // SPEED-B (2026-05-19): K-batched. At K=1 fires every
+            // iteration with 1 sample (bit-identical to pre-SPEED-B);
+            // at K=32 fires on Adam-step boundaries (post-flush) with
+            // 32 samples per fire. Per-pair aux work rate is preserved
+            // because the main pair-loop fires ~pairs_per_epoch/K
+            // boundaries while each aux fire processes K samples.
+            if anchor_active && steps_since_adam == 0 {
                 let u_take = rng.next_f64_unit();
                 if u_take < hyperparams.anchor_step_p {
                     if let Some(a) = anchor {
                         if !std_anchor_features.is_empty() && anchor_total_weight > 0.0 {
-                            let u_row = rng.next_f64_unit();
-                            let ai = anchor_row_cdf
-                                .partition_point(|&c| c < u_row)
-                                .min(std_anchor_features.len() - 1);
-                            let xa = std_anchor_features[ai].as_slice();
-                            let (ya_pre, ya_rank_a, ya_pool_a, alpha_a_a, _, ha_pre_a, ha_a, sa_a, max_a_a) =
-                                psah::forward_per_sample_alpha_head(
-                                    xa, &w1, &b1, &rank_w, rank_b,
-                                    &reducer_w, reducer_b, &w_alpha, b_alpha,
-                                    n_features, n_hidden, leaky,
-                                );
-                            let (ya, dya_dpre) = pin_forward(ya_pre);
-                            // V5: per-row target_score overrides the global
-                            // hyperparams.anchor_target_score when the
-                            // AnchorRows pool ships a per-row target column.
-                            let target = a
-                                .target_scores
-                                .and_then(|ts| ts.get(ai).copied())
-                                .unwrap_or(hyperparams.anchor_target_score);
-                            let row_w = a.row_weights[ai];
-                            let err = ya - target;
-                            // L = anchor_loss_weight · row_w · err²
-                            // dL/dy_score = 2 · anchor_loss_weight · row_w · err
-                            // dL/dy_pre = dL/dy_score · dy_score/dy_pre
-                            let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
-                            let dl_dy = scale * err * dya_dpre;
-                            let loss = hyperparams.anchor_loss_weight * row_w * err * err;
-                            total_loss += loss;
-                            n_steps += 1;
-
+                            let n_anchor = std_anchor_features.len();
                             let mut g_rank_w_buf = vec![0.0f64; n_hidden];
                             let mut g_rank_b_buf = 0.0f64;
                             let mut g_red_w: [f64; 4] = [0.0; 4];
                             let mut g_red_b: f64 = 0.0;
                             let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
                             let mut g_b_alpha: f64 = 0.0;
+                            let mut any_step = false;
 
-                            psah::backprop_step_per_sample_alpha_head(
-                                xa, &ha_pre_a, &ha_a, &sa_a, max_a_a,
-                                ya_rank_a, ya_pool_a, alpha_a_a, dl_dy,
-                                &rank_w, &reducer_w, &w_alpha,
-                                &mut adam.gw1, &mut adam.gb1,
-                                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                                &mut g_red_w, &mut g_red_b,
-                                &mut g_w_alpha_buf, &mut g_b_alpha,
-                                n_features, n_hidden, leaky,
-                            );
+                            for _ in 0..k {
+                                let u_row = rng.next_f64_unit();
+                                let ai = anchor_row_cdf
+                                    .partition_point(|&c| c < u_row)
+                                    .min(n_anchor - 1);
+                                let xa = std_anchor_features[ai].as_slice();
+                                let (ya_pre, ya_rank_a, ya_pool_a, alpha_a_a, _, ha_pre_a, ha_a, sa_a, max_a_a) =
+                                    psah::forward_per_sample_alpha_head(
+                                        xa, &w1, &b1, &rank_w, rank_b,
+                                        &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                        n_features, n_hidden, leaky,
+                                    );
+                                let (ya, dya_dpre) = pin_forward(ya_pre);
+                                // V5: per-row target_score overrides the global
+                                // hyperparams.anchor_target_score when the
+                                // AnchorRows pool ships a per-row target column.
+                                let target = a
+                                    .target_scores
+                                    .and_then(|ts| ts.get(ai).copied())
+                                    .unwrap_or(hyperparams.anchor_target_score);
+                                let row_w = a.row_weights[ai];
+                                let err = ya - target;
+                                // L = anchor_loss_weight · row_w · err²
+                                // dL/dy_score = 2 · anchor_loss_weight · row_w · err
+                                // dL/dy_pre = dL/dy_score · dy_score/dy_pre
+                                let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
+                                let dl_dy = scale * err * dya_dpre;
+                                let loss = hyperparams.anchor_loss_weight * row_w * err * err;
+                                total_loss += loss;
+                                n_steps += 1;
 
-                            if hyperparams.l2_lambda > 0.0 {
-                                let l2 = hyperparams.l2_lambda;
-                                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                                    *g += l2 * w;
+                                psah::backprop_step_per_sample_alpha_head(
+                                    xa, &ha_pre_a, &ha_a, &sa_a, max_a_a,
+                                    ya_rank_a, ya_pool_a, alpha_a_a, dl_dy,
+                                    &rank_w, &reducer_w, &w_alpha,
+                                    &mut adam.gw1, &mut adam.gb1,
+                                    &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                    &mut g_red_w, &mut g_red_b,
+                                    &mut g_w_alpha_buf, &mut g_b_alpha,
+                                    n_features, n_hidden, leaky,
+                                );
+                                any_step = true;
+                            }
+
+                            if any_step {
+                                if hyperparams.l2_lambda > 0.0 {
+                                    let l2 = hyperparams.l2_lambda;
+                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                        *g += l2 * w;
+                                    }
+                                    for j in 0..n_hidden {
+                                        g_rank_w_buf[j] += l2 * rank_w[j];
+                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                    }
+                                    for kk in 0..4 {
+                                        g_red_w[kk] += l2 * reducer_w[kk];
+                                    }
                                 }
+
                                 for j in 0..n_hidden {
-                                    g_rank_w_buf[j] += l2 * rank_w[j];
-                                    g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                    adam.gw2[j] += g_rank_w_buf[j];
                                 }
                                 for kk in 0..4 {
-                                    g_red_w[kk] += l2 * reducer_w[kk];
+                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
                                 }
-                            }
+                                for j in 0..n_hidden {
+                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                }
+                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gb2[0] += g_rank_b_buf;
+                                adam.gb2[1] += g_red_b;
 
-                            for j in 0..n_hidden {
-                                adam.gw2[j] += g_rank_w_buf[j];
+                                do_adam_step(
+                                    &mut adam, &mut w1, &mut b1,
+                                    &mut rank_w, &mut rank_b,
+                                    &mut reducer_w, &mut reducer_b,
+                                    &mut w_alpha, &mut b_alpha,
+                                    lr, n_hidden,
+                                );
                             }
-                            for kk in 0..4 {
-                                adam.gw2[n_hidden + kk] += g_red_w[kk];
-                            }
-                            for j in 0..n_hidden {
-                                adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
-                            }
-                            adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
-                            adam.gb2[0] += g_rank_b_buf;
-                            adam.gb2[1] += g_red_b;
-
-                            do_adam_step(
-                                &mut adam, &mut w1, &mut b1,
-                                &mut rank_w, &mut rank_b,
-                                &mut reducer_w, &mut reducer_b,
-                                &mut w_alpha, &mut b_alpha,
-                                lr, n_hidden,
-                            );
                         }
                     }
                 }
@@ -5771,170 +5777,183 @@ fn train_mlp_per_sample_alpha_head(
 
             // EXP-CROSS-CODEC-METRIC equivalence step (2026-05-19).
             // After each pair Adam step, with probability eq_step_p,
-            // sample one (A, B) equivalence pair, forward both, and
-            // apply w · (y_a - y_b)² MSE gradient via TWO backprops
-            // sharing the same Adam state (single Adam step at end).
-            // Supports K=1 only (asserted at setup when equiv supplied).
-            if equiv_active && k == 1 {
+            // sample K (A, B) equivalence pairs, forward both halves
+            // of each, and apply w · (y_a - y_b)² MSE gradient via
+            // 2K backprops sharing the same Adam state (single Adam
+            // step at end). Includes the optional rank-preserve
+            // regularizer driven by per-pair butter_diff.
+            //
+            // SPEED-B (2026-05-19): K-batched. At K=1 fires every
+            // iteration with 1 pair (bit-identical to pre-SPEED-B);
+            // at K=32 fires on Adam-step boundaries (post-flush) with
+            // 32 pairs per fire. Per-pair aux work rate is preserved.
+            if equiv_active && steps_since_adam == 0 {
                 let u_take = rng.next_f64_unit();
                 if u_take < hyperparams.cross_codec_eq_step_p {
                     if let Some(e) = equiv {
                         if !std_equiv_a.is_empty() && equiv_total_weight > 0.0 {
-                            let u_row = rng.next_f64_unit();
-                            let ei = equiv_row_cdf
-                                .partition_point(|&c| c < u_row)
-                                .min(std_equiv_a.len() - 1);
-                            let xa = std_equiv_a[ei].as_slice();
-                            let xb = std_equiv_b[ei].as_slice();
-
-                            // Forward both halves.
-                            let (ya_pre, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
-                                psah::forward_per_sample_alpha_head(
-                                    xa, &w1, &b1, &rank_w, rank_b,
-                                    &reducer_w, reducer_b, &w_alpha, b_alpha,
-                                    n_features, n_hidden, leaky,
-                                );
-                            let (yb_pre, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
-                                psah::forward_per_sample_alpha_head(
-                                    xb, &w1, &b1, &rank_w, rank_b,
-                                    &reducer_w, reducer_b, &w_alpha, b_alpha,
-                                    n_features, n_hidden, leaky,
-                                );
-                            // V4 tanh pin (identity when off).
-                            let (ya, dya_dpre) = pin_forward(ya_pre);
-                            let (yb, dyb_dpre) = pin_forward(yb_pre);
-                            let row_w = e.row_weights[ei];
-                            let diff = ya - yb;
-                            // L_eq = w · row_w · diff²
-                            // dL_eq/dy_a (score) = 2 · w · row_w · diff
-                            // dL_eq/dy_b (score) = −2 · w · row_w · diff
-                            // Accumulate in score-space; chain-rule to y_pre
-                            // before backprop.
-                            let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
-                            let mut dl_dya_score = scale * diff;
-                            let mut dl_dyb_score = -scale * diff;
-                            let mut loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
-
-                            // EXP-CROSS-CODEC-V3 (2026-05-19): rank-preserve
-                            // regularizer on equiv pairs that have butter_diff.
-                            // Loss = w_rp · |Δb| · −log(sigmoid(s · (y_b − y_a)))
-                            // where s = sign(Δb) and Δb = butter_a − butter_b.
-                            // Δb > 0 → A is butter-worse than B → we want
-                            // y_a < y_b (score-shape, HIGHER quality = higher
-                            // output) → use logit s·(y_b − y_a) in the
-                            // sigmoid. This is the same RankNet derivation
-                            // used for the main pair loss above.
-                            //
-                            // Gradient (let u = s·(y_b − y_a), σ = sigmoid(u),
-                            // w = w_rp · |Δb|):
-                            //   dL/dy_b = -w · s · (1 − σ)
-                            //   dL/dy_a = +w · s · (1 − σ)
-                            if hyperparams.cross_codec_rank_preserve_weight > 0.0
-                                && !e.butter_diff.is_empty()
-                                && ei < e.butter_diff.len()
-                            {
-                                let db = e.butter_diff[ei];
-                                if db.is_finite() && db != 0.0 {
-                                    let s = if db > 0.0 { 1.0 } else { -1.0 };
-                                    let abs_db = db.abs();
-                                    let w_rp = hyperparams.cross_codec_rank_preserve_weight
-                                        * abs_db;
-                                    let u = s * (yb - ya);
-                                    // softplus(-u) = log(1 + exp(-u)) =
-                                    //   -log(sigmoid(u)). Stable form:
-                                    let softplus = if u >= 0.0 {
-                                        (-u).exp().ln_1p()
-                                    } else {
-                                        -u + u.exp().ln_1p()
-                                    };
-                                    let l_rp = w_rp * softplus;
-                                    // sigmoid(u) numerically stable:
-                                    let sig = if u >= 0.0 {
-                                        1.0 / (1.0 + (-u).exp())
-                                    } else {
-                                        let eu = u.exp();
-                                        eu / (1.0 + eu)
-                                    };
-                                    // dL/dy_b = -w · s · (1 − σ)
-                                    // dL/dy_a = +w · s · (1 − σ)
-                                    let g = w_rp * s * (1.0 - sig);
-                                    dl_dya_score += g;
-                                    dl_dyb_score -= g;
-                                    loss += l_rp;
-                                }
-                            }
-                            total_loss += loss;
-                            n_steps += 1;
-
-                            // V4 tanh pin: chain-rule dL/dy_score → dL/dy_pre.
-                            let dl_dya = dl_dya_score * dya_dpre;
-                            let dl_dyb = dl_dyb_score * dyb_dpre;
-
-                            // Backprop through A.
+                            let n_equiv = std_equiv_a.len();
                             let mut g_rank_w_buf = vec![0.0f64; n_hidden];
                             let mut g_rank_b_buf = 0.0f64;
                             let mut g_red_w: [f64; 4] = [0.0; 4];
                             let mut g_red_b: f64 = 0.0;
                             let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
                             let mut g_b_alpha: f64 = 0.0;
+                            let mut any_step = false;
 
-                            psah::backprop_step_per_sample_alpha_head(
-                                xa, &ha_pre, &ha, &sa, max_a,
-                                ya_rank, ya_pool, alpha_a, dl_dya,
-                                &rank_w, &reducer_w, &w_alpha,
-                                &mut adam.gw1, &mut adam.gb1,
-                                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                                &mut g_red_w, &mut g_red_b,
-                                &mut g_w_alpha_buf, &mut g_b_alpha,
-                                n_features, n_hidden, leaky,
-                            );
+                            for _ in 0..k {
+                                let u_row = rng.next_f64_unit();
+                                let ei = equiv_row_cdf
+                                    .partition_point(|&c| c < u_row)
+                                    .min(n_equiv - 1);
+                                let xa = std_equiv_a[ei].as_slice();
+                                let xb = std_equiv_b[ei].as_slice();
 
-                            // Backprop through B (accumulates into same buffers).
-                            psah::backprop_step_per_sample_alpha_head(
-                                xb, &hb_pre, &hb, &sb, max_b,
-                                yb_rank, yb_pool, alpha_b, dl_dyb,
-                                &rank_w, &reducer_w, &w_alpha,
-                                &mut adam.gw1, &mut adam.gb1,
-                                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                                &mut g_red_w, &mut g_red_b,
-                                &mut g_w_alpha_buf, &mut g_b_alpha,
-                                n_features, n_hidden, leaky,
-                            );
+                                // Forward both halves.
+                                let (ya_pre, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
+                                    psah::forward_per_sample_alpha_head(
+                                        xa, &w1, &b1, &rank_w, rank_b,
+                                        &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                        n_features, n_hidden, leaky,
+                                    );
+                                let (yb_pre, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
+                                    psah::forward_per_sample_alpha_head(
+                                        xb, &w1, &b1, &rank_w, rank_b,
+                                        &reducer_w, reducer_b, &w_alpha, b_alpha,
+                                        n_features, n_hidden, leaky,
+                                    );
+                                // V4 tanh pin (identity when off).
+                                let (ya, dya_dpre) = pin_forward(ya_pre);
+                                let (yb, dyb_dpre) = pin_forward(yb_pre);
+                                let row_w = e.row_weights[ei];
+                                let diff = ya - yb;
+                                // L_eq = w · row_w · diff²
+                                // dL_eq/dy_a (score) = 2 · w · row_w · diff
+                                // dL_eq/dy_b (score) = −2 · w · row_w · diff
+                                // Accumulate in score-space; chain-rule to y_pre
+                                // before backprop.
+                                let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
+                                let mut dl_dya_score = scale * diff;
+                                let mut dl_dyb_score = -scale * diff;
+                                let mut loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
 
-                            if hyperparams.l2_lambda > 0.0 {
-                                let l2 = hyperparams.l2_lambda;
-                                for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                                    *g += l2 * w;
+                                // EXP-CROSS-CODEC-V3 (2026-05-19): rank-preserve
+                                // regularizer on equiv pairs that have butter_diff.
+                                // Loss = w_rp · |Δb| · −log(sigmoid(s · (y_b − y_a)))
+                                // where s = sign(Δb) and Δb = butter_a − butter_b.
+                                // Δb > 0 → A is butter-worse than B → we want
+                                // y_a < y_b (score-shape, HIGHER quality = higher
+                                // output) → use logit s·(y_b − y_a) in the
+                                // sigmoid. This is the same RankNet derivation
+                                // used for the main pair loss above.
+                                //
+                                // Gradient (let u = s·(y_b − y_a), σ = sigmoid(u),
+                                // w = w_rp · |Δb|):
+                                //   dL/dy_b = -w · s · (1 − σ)
+                                //   dL/dy_a = +w · s · (1 − σ)
+                                if hyperparams.cross_codec_rank_preserve_weight > 0.0
+                                    && !e.butter_diff.is_empty()
+                                    && ei < e.butter_diff.len()
+                                {
+                                    let db = e.butter_diff[ei];
+                                    if db.is_finite() && db != 0.0 {
+                                        let s = if db > 0.0 { 1.0 } else { -1.0 };
+                                        let abs_db = db.abs();
+                                        let w_rp = hyperparams.cross_codec_rank_preserve_weight
+                                            * abs_db;
+                                        let u = s * (yb - ya);
+                                        // softplus(-u) = log(1 + exp(-u)) =
+                                        //   -log(sigmoid(u)). Stable form:
+                                        let softplus = if u >= 0.0 {
+                                            (-u).exp().ln_1p()
+                                        } else {
+                                            -u + u.exp().ln_1p()
+                                        };
+                                        let l_rp = w_rp * softplus;
+                                        // sigmoid(u) numerically stable:
+                                        let sig = if u >= 0.0 {
+                                            1.0 / (1.0 + (-u).exp())
+                                        } else {
+                                            let eu = u.exp();
+                                            eu / (1.0 + eu)
+                                        };
+                                        // dL/dy_b = -w · s · (1 − σ)
+                                        // dL/dy_a = +w · s · (1 − σ)
+                                        let g = w_rp * s * (1.0 - sig);
+                                        dl_dya_score += g;
+                                        dl_dyb_score -= g;
+                                        loss += l_rp;
+                                    }
                                 }
+                                total_loss += loss;
+                                n_steps += 1;
+
+                                // V4 tanh pin: chain-rule dL/dy_score → dL/dy_pre.
+                                let dl_dya = dl_dya_score * dya_dpre;
+                                let dl_dyb = dl_dyb_score * dyb_dpre;
+
+                                // Backprop through A (accumulates into shared buffers).
+                                psah::backprop_step_per_sample_alpha_head(
+                                    xa, &ha_pre, &ha, &sa, max_a,
+                                    ya_rank, ya_pool, alpha_a, dl_dya,
+                                    &rank_w, &reducer_w, &w_alpha,
+                                    &mut adam.gw1, &mut adam.gb1,
+                                    &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                    &mut g_red_w, &mut g_red_b,
+                                    &mut g_w_alpha_buf, &mut g_b_alpha,
+                                    n_features, n_hidden, leaky,
+                                );
+
+                                // Backprop through B (accumulates into same buffers).
+                                psah::backprop_step_per_sample_alpha_head(
+                                    xb, &hb_pre, &hb, &sb, max_b,
+                                    yb_rank, yb_pool, alpha_b, dl_dyb,
+                                    &rank_w, &reducer_w, &w_alpha,
+                                    &mut adam.gw1, &mut adam.gb1,
+                                    &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                    &mut g_red_w, &mut g_red_b,
+                                    &mut g_w_alpha_buf, &mut g_b_alpha,
+                                    n_features, n_hidden, leaky,
+                                );
+                                any_step = true;
+                            }
+
+                            if any_step {
+                                if hyperparams.l2_lambda > 0.0 {
+                                    let l2 = hyperparams.l2_lambda;
+                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                        *g += l2 * w;
+                                    }
+                                    for j in 0..n_hidden {
+                                        g_rank_w_buf[j] += l2 * rank_w[j];
+                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                    }
+                                    for kk in 0..4 {
+                                        g_red_w[kk] += l2 * reducer_w[kk];
+                                    }
+                                }
+
                                 for j in 0..n_hidden {
-                                    g_rank_w_buf[j] += l2 * rank_w[j];
-                                    g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                    adam.gw2[j] += g_rank_w_buf[j];
                                 }
                                 for kk in 0..4 {
-                                    g_red_w[kk] += l2 * reducer_w[kk];
+                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
                                 }
-                            }
+                                for j in 0..n_hidden {
+                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                }
+                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gb2[0] += g_rank_b_buf;
+                                adam.gb2[1] += g_red_b;
 
-                            for j in 0..n_hidden {
-                                adam.gw2[j] += g_rank_w_buf[j];
+                                do_adam_step(
+                                    &mut adam, &mut w1, &mut b1,
+                                    &mut rank_w, &mut rank_b,
+                                    &mut reducer_w, &mut reducer_b,
+                                    &mut w_alpha, &mut b_alpha,
+                                    lr, n_hidden,
+                                );
                             }
-                            for kk in 0..4 {
-                                adam.gw2[n_hidden + kk] += g_red_w[kk];
-                            }
-                            for j in 0..n_hidden {
-                                adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
-                            }
-                            adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
-                            adam.gb2[0] += g_rank_b_buf;
-                            adam.gb2[1] += g_red_b;
-
-                            do_adam_step(
-                                &mut adam, &mut w1, &mut b1,
-                                &mut rank_w, &mut rank_b,
-                                &mut reducer_w, &mut reducer_b,
-                                &mut w_alpha, &mut b_alpha,
-                                lr, n_hidden,
-                            );
                         }
                     }
                 }
@@ -5953,8 +5972,13 @@ fn train_mlp_per_sample_alpha_head(
             //
             // Requires equiv pool (uses A-side as the probe substrate);
             // skipped silently if equiv pool empty.
+            // SPEED-B (2026-05-19): dyn-range step already uses
+            // probe_n samples in a batch internally, so we only
+            // need to gate on Adam-step boundaries (post-flush)
+            // to avoid polluting mid-batch accumulation. K=1 path
+            // is preserved (boundary fires every iteration).
             if hyperparams.dynamic_range_floor_weight > 0.0
-                && k == 1
+                && steps_since_adam == 0
                 && !std_equiv_a.is_empty()
             {
                 let u_take = rng.next_f64_unit();
