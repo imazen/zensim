@@ -629,6 +629,43 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
     PreviewV0_5CompressionV2,
+    /// Preview v0.5, **balanced trail v3** — EXP-CROSS-CODEC-V10 score-
+    /// space reallocation (2026-05-20). Same Balanced bake bytes as
+    /// [`Self::PreviewV0_5Balanced`] / [`Self::PreviewV0_5BalancedV2`] with
+    /// a fresh PCHIP spline calibrated on the V10 11-band anchor parquet
+    /// AND unclamped score extrapolation. **Lossless = 100, JND = 80,
+    /// JOD = 50, q=0 worst-codec floor = 0. Below 0 = pathological /
+    /// unreasonable** (linear extrapolation past the spline's worst-
+    /// anchor knot).
+    ///
+    /// See [`Self::PreviewV0_5BalancedV2`] for the runtime mechanism;
+    /// V3 differs only in (a) the V10 anchor band targets, (b) the
+    /// `extrapolate_score` flag on this profile letting the dial go
+    /// negative for pathological inputs.
+    ///
+    /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
+    /// `benchmarks/v10_splines/balanced_v3_spline_2026-05-20.csv`.
+    PreviewV0_5BalancedV3,
+    /// Preview v0.5, **compression trail v3** — EXP-CROSS-CODEC-V10
+    /// (2026-05-20). Same Compression bake bytes as
+    /// [`Self::PreviewV0_5Compression`] / [`Self::PreviewV0_5CompressionV2`]
+    /// with a fresh PCHIP spline calibrated on the V10 11-band anchor
+    /// parquet AND unclamped score extrapolation. **Lossless = 100,
+    /// JND = 80, JOD = 50, q=0 floor = 0, pathological < 0.**
+    ///
+    /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
+    /// `benchmarks/v10_splines/compression_v3_spline_2026-05-20.csv`.
+    PreviewV0_5CompressionV3,
+    /// Preview v0.5, **tuner trail v4** — EXP-CROSS-CODEC-V10
+    /// (2026-05-20). Same V_24-per-sample-α + tanh-output-head topology
+    /// as [`Self::PreviewV0_5TunerV3`] but with the V10 PCHIP spline
+    /// fitted against the 11-band anchor parquet AND unclamped score
+    /// extrapolation. **Lossless = 100, JND = 80, JOD = 50, q=0
+    /// floor = 0, pathological < 0.**
+    ///
+    /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
+    /// `benchmarks/v10_splines/tuner_v10_spline_2026-05-20.csv`.
+    PreviewV0_5TunerV4,
 }
 
 impl ZensimProfile {
@@ -739,6 +776,28 @@ impl ZensimProfile {
         Self::PreviewV0_5CompressionV2
     }
 
+    /// Balanced trail v3 — alias for [`Self::PreviewV0_5BalancedV3`]
+    /// (EXP-CROSS-CODEC-V10, 2026-05-20). Same balanced bake bytes as
+    /// [`Self::PreviewV0_5BalancedV2`] with the V10 reallocated score-
+    /// space spline (JND=80 / JOD=50 / lossless=100 / pathological<0).
+    /// See `benchmarks/v10_anchor_design_2026-05-20.md`.
+    pub const fn balanced_v3() -> Self {
+        Self::PreviewV0_5BalancedV3
+    }
+
+    /// Compression trail v3 — alias for
+    /// [`Self::PreviewV0_5CompressionV3`] (EXP-CROSS-CODEC-V10,
+    /// 2026-05-20). V10 reallocated score-space.
+    pub const fn compression_v3() -> Self {
+        Self::PreviewV0_5CompressionV3
+    }
+
+    /// Tuner trail v4 — alias for [`Self::PreviewV0_5TunerV4`]
+    /// (EXP-CROSS-CODEC-V10, 2026-05-20). V10 reallocated score-space.
+    pub const fn tuner_v4() -> Self {
+        Self::PreviewV0_5TunerV4
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
@@ -757,6 +816,9 @@ impl ZensimProfile {
             Self::PreviewV0_5TunerV3 => "zensim-preview-v0.5-tuner-v3",
             Self::PreviewV0_5BalancedV2 => "zensim-preview-v0.5-balanced-v2",
             Self::PreviewV0_5CompressionV2 => "zensim-preview-v0.5-compression-v2",
+            Self::PreviewV0_5BalancedV3 => "zensim-preview-v0.5-balanced-v3",
+            Self::PreviewV0_5CompressionV3 => "zensim-preview-v0.5-compression-v3",
+            Self::PreviewV0_5TunerV4 => "zensim-preview-v0.5-tuner-v4",
         }
     }
 
@@ -781,6 +843,9 @@ impl ZensimProfile {
             Self::PreviewV0_5TunerV3 => &PROFILE_PREVIEW_V0_5_TUNER_V3,
             Self::PreviewV0_5BalancedV2 => &PROFILE_PREVIEW_V0_5_BALANCED_V2,
             Self::PreviewV0_5CompressionV2 => &PROFILE_PREVIEW_V0_5_COMPRESSION_V2,
+            Self::PreviewV0_5BalancedV3 => &PROFILE_PREVIEW_V0_5_BALANCED_V3,
+            Self::PreviewV0_5CompressionV3 => &PROFILE_PREVIEW_V0_5_COMPRESSION_V3,
+            Self::PreviewV0_5TunerV4 => &PROFILE_PREVIEW_V0_5_TUNER_V4,
         }
     }
 }
@@ -906,6 +971,19 @@ pub struct ProfileParams {
     /// learnings > Soft-clamp the multi-bake output` for the design rationale.
     pub soft_clamp_score: bool,
 
+    /// EXP-CROSS-CODEC-V10 (2026-05-20): when `true`, the final score
+    /// is returned **without clamping or soft-clamping** — the
+    /// PCHIP spline's linear extrapolation past the knot endpoints
+    /// flows through to the user. V10 profiles set this so the
+    /// score-space dial can dip below 0 for "pathological /
+    /// unreasonable" codec output (worst codec at q=0, butter > 12)
+    /// rather than collapsing into a tie block at 0.
+    ///
+    /// When set, [`soft_clamp_score`] is ignored. Default `false`
+    /// preserves legacy [0, 100] semantics for V9 and earlier
+    /// profiles whose splines/anchors only span [0, 100].
+    pub extrapolate_score: bool,
+
     /// **Ensemble routing classifier** — when `Some`, the runtime
     /// loads the classifier bake, forwards the feature vector through
     /// it, and routes to either `mlp_bytes` (the balanced/primary
@@ -976,6 +1054,7 @@ impl ProfileParams {
             extended_features: false,
             compute_iw_features: false,
             soft_clamp_score: false,
+            extrapolate_score: false,
             ensemble_classifier_bytes: None,
             mlp_bytes_compression: None,
         }
@@ -998,6 +1077,7 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     extended_features: false,
     compute_iw_features: false,
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1016,6 +1096,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     extended_features: false,
     compute_iw_features: false,
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1136,6 +1217,7 @@ static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     // output rarely strays beyond [0, 100]; tail behavior matches the
     // V_18 ship in flight as of 2026-05-13.
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1199,6 +1281,7 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     // preserves rank ordering at the extremes — the 1-ns `exp` cost
     // is negligible.
     soft_clamp_score: true,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1272,6 +1355,7 @@ static PROFILE_PREVIEW_V0_5_BALANCED: ProfileParams = ProfileParams {
     // Single-bake forward — predictions stay within [0, 100] for
     // in-distribution inputs (training target was pre-scaled).
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1299,6 +1383,7 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION: ProfileParams = ProfileParams {
     // preserves rank ordering at the extremes (CLAUDE.md V_20 §
     // "Soft-clamp the multi-bake output").
     soft_clamp_score: true,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1358,6 +1443,7 @@ static PROFILE_PREVIEW_V0_5_ENSEMBLE: ProfileParams = ProfileParams {
     // the balanced bake's well-bounded output is a near-no-op
     // (<1.5-unit deviation in the [5, 95] interior).
     soft_clamp_score: true,
+    extrapolate_score: false,
     ensemble_classifier_bytes: Some(mlp_bake_preview_v0_5_ensemble_classifier),
     mlp_bytes_compression: Some(mlp_bake_preview_v0_5_compression),
 };
@@ -1406,6 +1492,7 @@ static PROFILE_PREVIEW_V0_5_TUNER: ProfileParams = ProfileParams {
     // optional follow-up if a tuner consumer reports SROCC=0 on a
     // band due to ties.
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1466,6 +1553,7 @@ static PROFILE_PREVIEW_V0_5_CROSS_CODEC: ProfileParams = ProfileParams {
     // and avoid hard-clamp tie blocks (CLAUDE.md V_20 §
     // "Soft-clamp the multi-bake output").
     soft_clamp_score: true,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1519,6 +1607,7 @@ static PROFILE_PREVIEW_V0_5_TUNER_V2: ProfileParams = ProfileParams {
     // the hard clamp is a no-op safety net. q-sweep ties = 0 across
     // all 6 V6 bakes.
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1573,6 +1662,7 @@ static PROFILE_PREVIEW_V0_5_TUNER_V3: ProfileParams = ProfileParams {
     // The spline + tanh-pinned output is structurally bounded to
     // (0, 100); the hard clamp is a no-op safety net.
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1642,6 +1732,7 @@ static PROFILE_PREVIEW_V0_5_BALANCED_V2: ProfileParams = ProfileParams {
     // (the network's raw output can extend past the spline knot range
     // on extreme out-of-distribution inputs).
     soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -1725,6 +1816,152 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION_V2: ProfileParams = ProfileParams {
     // the spline is a no-op for in-distribution inputs and catches
     // only the OOD extrapolation tails.
     soft_clamp_score: false,
+    extrapolate_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+// =============================================================================
+// EXP-CROSS-CODEC-V10 (2026-05-20): score-space reallocation
+// =============================================================================
+//
+// Per user direction 2026-05-20: the zensim score-space reallocates as
+// `lossless = 100, JND = 80, JOD = 50, q=0 floor = 0, pathological < 0`.
+// V10 replaces V9's `JND = 60 / JOD = 30 / clamp at 0` table.
+//
+// Three V10 ship rotations: BalancedV3, CompressionV3, TunerV4. Each
+// keeps the underlying V2/V3 network bytes verbatim and only refits
+// the `zentrain.output_calibration_spline` against the V10 11-band
+// anchor parquet. The `extrapolate_score: true` flag on each profile
+// removes the [0, 100] clamp so the spline's linear extrapolation past
+// the worst-anchor knot flows through (worst-q codec output maps to a
+// negative score, signalling "pathological / unreasonable" rather than
+// collapsing to a tie at 0).
+
+/// PreviewV0_5BalancedV3 bake bytes (2026-05-20, EXP-CROSS-CODEC-V10).
+///
+/// Same V_22-mix-LARGE+iwssim network as
+/// [`mlp_bake_preview_v0_5_balanced`] / [`mlp_bake_preview_v0_5_balanced_v2`]
+/// with a fresh PCHIP spline calibrated against the V10 11-band anchor
+/// parquet. The spline knots after dropping direction-violation bands
+/// (8 of 11 band targets survived):
+///
+/// ```text
+/// x= -23.05 → y= 100   (lossless)
+/// x= -18.93 → y=  95   (near-lossless)
+/// x= -16.45 → y=  90   (visually identical)
+/// x=  -5.46 → y=  80   (JND)
+/// x=   1.19 → y=  65   (mildly noticeable)
+/// x=   7.53 → y=  50   (JOD)
+/// x=  10.08 → y=  10   (clear artifacts at scale)
+/// x=  13.15 → y=   0   (worst-q floor)
+/// ```
+pub(crate) fn mlp_bake_preview_v0_5_balanced_v3() -> &'static [u8] {
+    include_bytes!("../weights/v_balanced_v3_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_BALANCED_V3: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_balanced_v3),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: false,
+    soft_clamp_score: false,
+    // V10 dial: spline output flows through unclamped so pathological
+    // input (butter >> 12) maps below 0.
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5CompressionV3 bake bytes (2026-05-20, EXP-CROSS-CODEC-V10).
+///
+/// Same V_24-per-sample-α s4 network as
+/// [`mlp_bake_preview_v0_5_compression`] / [`mlp_bake_preview_v0_5_compression_v2`]
+/// with a fresh PCHIP spline calibrated against the V10 11-band anchor
+/// parquet. The spline knots after dropping direction-violation bands
+/// (7 of 11 band targets survived):
+///
+/// ```text
+/// x= -26.26 → y= 100   (lossless)
+/// x= -20.19 → y=  95   (near-lossless)
+/// x= -16.95 → y=  90   (visually identical)
+/// x=  -3.58 → y=  80   (JND)
+/// x=   3.84 → y=  65   (mildly noticeable)
+/// x=   9.35 → y=  10   (clear artifacts at scale)
+/// x=  13.89 → y=   0   (worst-q floor)
+/// ```
+pub(crate) fn mlp_bake_preview_v0_5_compression_v3() -> &'static [u8] {
+    include_bytes!("../weights/v_compression_v3_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_COMPRESSION_V3: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_compression_v3),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: false,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5TunerV4 bake bytes (2026-05-20, EXP-CROSS-CODEC-V10).
+///
+/// V_24-per-sample-α + tanh-output-head topology (same network as
+/// [`mlp_bake_preview_v0_5_tuner_v3`]'s underlying V9 weights) with a
+/// fresh PCHIP spline calibrated against the V10 11-band anchor
+/// parquet. The V9 spline was stripped via
+/// `scripts/v_next/strip_spline_metadata.py` to recover the score-shaped
+/// network output, then the V10 spline was fit on top via
+/// `scripts/v_next/calibrate_v9_spline.py`. The spline knots after
+/// dropping direction-violation bands (9 of 11 band targets survived):
+///
+/// ```text
+/// x=   5.86 → y=   0   (worst-q floor)
+/// x=   8.10 → y=  10
+/// x=  17.56 → y=  35
+/// x=  35.86 → y=  50   (JOD)
+/// x=  48.78 → y=  65
+/// x=  60.38 → y=  80   (JND)
+/// x=  83.10 → y=  90
+/// x=  86.87 → y=  95
+/// x=  97.16 → y= 100   (lossless)
+/// ```
+pub(crate) fn mlp_bake_preview_v0_5_tuner_v4() -> &'static [u8] {
+    include_bytes!("../weights/v_tuner_v10_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_TUNER_V4: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_tuner_v4),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };

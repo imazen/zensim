@@ -1699,7 +1699,16 @@ pub(crate) fn apply_mlp_scoring(
         // The choice is per-profile via `ProfileParams::soft_clamp_score`.
         // PreviewV0_4 (V_18 + V_20 IS multi-bake) sets `true`;
         // PreviewV0_3 (V_18 ship single-bake) and earlier set `false`.
-        let score = if params.soft_clamp_score {
+        //
+        // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate_score` overrides
+        // both hard- and soft-clamp paths. The PCHIP spline's linear
+        // extrapolation past its endpoint knots flows through, so
+        // "pathological" codec output (worst codec at q=0, butter > 12)
+        // maps to a negative score instead of collapsing to a tie at 0.
+        // V10 profiles (BalancedV3 / CompressionV3 / TunerV4) set this.
+        let score = if params.extrapolate_score {
+            pre_bound
+        } else if params.soft_clamp_score {
             soft_clamp_score(pre_bound)
         } else {
             pre_bound.clamp(0.0, 100.0)

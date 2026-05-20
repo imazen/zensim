@@ -97,24 +97,19 @@ impl Default for TargetSpec {
             target: 70.0,
             tolerance: 1.0,
             max_iterations: 8,
-            // Default to PreviewV0_5TunerV3 (EXP-CROSS-CODEC-V9 ship,
-            // 2026-05-20). Passes every Tuner-trail gate apples-to-apples
-            // vs V2 (V6 metric + V6 qsweep corpus per the V9 mono audit,
-            // `benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`) AND adds
-            // **clean user-facing dial semantics** — typing "score 60"
-            // lands at JND (PJND anchor) exactly, "score 30" lands at JOD
-            // exactly, "score 0" hits the worst-codec floor, "score 100"
-            // hits near-lossless. The V2 ship's JND was 63 / JOD was 45
-            // (CID22-paper convention), and its dial range was [10, 90]
-            // — V3 extends to the full [0, 100] via 8-band anchor +
-            // post-network monotone PCHIP spline calibration. The legacy
-            // `V0_5*` ranking ships (Balanced / Compression / Ensemble)
-            // are NOT suited for quality-dial use — they produce
-            // non-monotonic q-step output without a monotonicity
-            // constraint. Use `tuner-v2` for the prior tuner ship if
-            // back-compat scores are required; `tuner` for the V_24
-            // baseline; `v0_3` for the legacy default.
-            profile: ZensimProfile::PreviewV0_5TunerV3,
+            // Default to PreviewV0_5TunerV4 (EXP-CROSS-CODEC-V10 ship,
+            // 2026-05-20). Reallocates the score-space per user direction:
+            // lossless = 100, JND = 80, JOD = 50, q=0 worst-codec floor = 0,
+            // pathological < 0 (unclamped linear extrapolation). The wider
+            // perceptibility band (50 score units between JOD and JND vs
+            // V3's 30) gives the dial more resolution where compression
+            // product decisions live. Use `tuner-v3` for the prior V9 JND=60
+            // / JOD=30 dial; `tuner-v2` for the V_24 ship; `v0_3` for the
+            // legacy default. The legacy `V0_5*` ranking ships (Balanced
+            // / Compression / Ensemble) are NOT suited for quality-dial
+            // use — they produce non-monotonic q-step output without a
+            // monotonicity constraint.
+            profile: ZensimProfile::PreviewV0_5TunerV4,
         }
     }
 }

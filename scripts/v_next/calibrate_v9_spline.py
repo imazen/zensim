@@ -40,7 +40,7 @@ V9_ANCHOR_PARQUET = Path(
     "/mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet"
 )
 PREDICT_BIN = Path(
-    "/home/lilith/work/zen/zensim--cross-codec-v9/target/release/"
+    "/home/lilith/work/zen/zensim--v10/target/release/"
     "predict_features_with_bake"
 )
 ZENPREDICT_BIN = Path("/home/lilith/work/zen/zenanalyze/target/release/zenpredict")
@@ -318,7 +318,8 @@ def add_spline_metadata(bake_path: Path, xs: np.ndarray, ys: np.ndarray, out_pat
 
     req = {
         "schema_hash": schema_hash,
-        "flags": inspected_w.get("flags", 0),
+        "flags": 0,
+        "compressed": True,
         "scaler_mean": scaler_mean,
         "scaler_scale": scaler_scale,
         "layers": out_layers,

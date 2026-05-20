@@ -112,6 +112,13 @@ fn apply_post(raw: f64, mode: &str) -> f64 {
     }
     match mode {
         "raw" => raw,
+        // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate` returns the
+        // (post-spline, post-pin, post-α-mix) value WITHOUT clamping
+        // to [0, 100]. Identical to `raw` from the perspective of the
+        // post-processing branch but kept as a separate name for clarity:
+        // V10 callers ask for `extrapolate` to make the no-clamp policy
+        // explicit at the call-site.
+        "extrapolate" => raw,
         "clamp" => raw.clamp(0.0, 100.0),
         m if m.starts_with("mapped") => {
             let (a, b) = if let Some(rest) = m.strip_prefix("mapped:") {

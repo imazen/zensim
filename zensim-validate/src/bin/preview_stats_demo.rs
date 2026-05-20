@@ -67,6 +67,13 @@ const BAKE_TUNER_V2: &[u8] =
     include_bytes!("../../../zensim/weights/v_tuner_v6_2026-05-19.bin");
 const BAKE_TUNER_V3: &[u8] =
     include_bytes!("../../../zensim/weights/v_tuner_v9_2026-05-20.bin");
+// EXP-CROSS-CODEC-V10 (2026-05-20): score-space reallocation
+const BAKE_BALANCED_V3: &[u8] =
+    include_bytes!("../../../zensim/weights/v_balanced_v3_2026-05-20.bin");
+const BAKE_COMPRESSION_V3: &[u8] =
+    include_bytes!("../../../zensim/weights/v_compression_v3_2026-05-20.bin");
+const BAKE_TUNER_V4: &[u8] =
+    include_bytes!("../../../zensim/weights/v_tuner_v10_2026-05-20.bin");
 
 // ============================================================================
 // Bake-side dispatch helpers (mirror of bake_verdict::score_row internals;
@@ -282,15 +289,27 @@ struct ProfileEntry {
 
 const SHIPPING_PROFILES: &[ProfileEntry] = &[
     ProfileEntry {
-        label: "PreviewV0_5TunerV3       (V9 anchor + PCHIP spline, default tuner)",
+        label: "PreviewV0_5TunerV4       (V10 anchor + PCHIP spline + extrapolate, default)",
+        bake_bytes: BAKE_TUNER_V4,
+    },
+    ProfileEntry {
+        label: "PreviewV0_5BalancedV3    (V_22-mix LARGE + iwssim + V10 spline + extrapolate)",
+        bake_bytes: BAKE_BALANCED_V3,
+    },
+    ProfileEntry {
+        label: "PreviewV0_5CompressionV3 (V_24-per-sample-α + V10 spline + extrapolate)",
+        bake_bytes: BAKE_COMPRESSION_V3,
+    },
+    ProfileEntry {
+        label: "PreviewV0_5TunerV3       (V9 anchor + PCHIP spline, JND=60/JOD=30)",
         bake_bytes: BAKE_TUNER_V3,
     },
     ProfileEntry {
-        label: "PreviewV0_5BalancedV2    (V_22-mix LARGE + iwssim + PCHIP spline)",
+        label: "PreviewV0_5BalancedV2    (V_22-mix LARGE + iwssim + V9 spline)",
         bake_bytes: BAKE_BALANCED_V2,
     },
     ProfileEntry {
-        label: "PreviewV0_5CompressionV2 (V_24-per-sample-α + PCHIP spline)",
+        label: "PreviewV0_5CompressionV2 (V_24-per-sample-α + V9 spline)",
         bake_bytes: BAKE_COMPRESSION_V2,
     },
     ProfileEntry {

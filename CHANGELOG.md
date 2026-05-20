@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+### Added (2026-05-20, EXP-CROSS-CODEC-V10 — score-space reallocation, task #182)
+
+- **`ZensimProfile::PreviewV0_5TunerV4`** (alias
+  `ZensimProfile::tuner_v4()`) — V_24-per-sample-α + tanh-pin network
+  (stripped V9 tuner) with the V10 PCHIP spline + unclamped score
+  extrapolation. **Lossless = 100, JND = 80, JOD = 50, q=0 floor = 0,
+  pathological < 0.** Anchor knots bit-exact at every band target
+  (verified offline). SROCC preservation vs TunerV3 within ±0.005 on
+  all 6 corpora (max |Δ|=0.0001). Ships as the new `zensim-target`
+  default. Bake at `zensim/weights/v_tuner_v10_2026-05-20.bin`
+  (197,227 bytes, LZ4-compressed F32). Methodology:
+  `benchmarks/v10_methodology_2026-05-20.md`.
+
+- **`ZensimProfile::PreviewV0_5BalancedV3`** (alias
+  `ZensimProfile::balanced_v3()`) — same V_22-mix-LARGE+iwssim
+  network bytes as BalancedV2 with the V10 PCHIP spline + unclamped
+  score extrapolation. Anchor knots bit-exact. SROCC preservation
+  within ±0.005 on all 6 corpora (max |Δ|=0.0017 on TID). Bake at
+  `zensim/weights/v_balanced_v3_2026-05-20.bin` (41,774 bytes).
+
+- **`ZensimProfile::PreviewV0_5CompressionV3`** (alias
+  `ZensimProfile::compression_v3()`) — same V_24-per-sample-α s4
+  network bytes as CompressionV2 with the V10 PCHIP spline +
+  unclamped score extrapolation. Anchor knots bit-exact. **SROCC
+  preservation FAILS** the ±0.005 gate on KADID (Δ=−0.0116) and TID
+  (Δ=−0.0095); the V10 anchor grid drops 4 low-q bands due to the
+  per-sample-α network's weak low-q rank discrimination, producing
+  a wider knot gap that compresses the i8-quantized output into
+  tie blocks. Shipped as a CANDIDATE variant; structural fix
+  requires retraining with a low-q-aware rank loss. Bake at
+  `zensim/weights/v_compression_v3_2026-05-20.bin` (44,208 bytes).
+
+- **`ProfileParams::extrapolate_score: bool`** field — when `true`,
+  `apply_mlp_scoring` skips both the hard `clamp(0, 100)` and the
+  `soft_clamp_score` branch; the PCHIP spline output flows through
+  to the caller unmodified. Default `false` preserves legacy
+  semantics for all pre-V10 profiles. Set to `true` for the V10
+  trio (BalancedV3 / CompressionV3 / TunerV4) so pathological
+  codec output can produce scores below 0.
+
+- **`--bake-post extrapolate` mode** added to
+  `predict_features_with_bake`, `score_pair_with_bake`, `qsweep_eval`
+  — explicit no-clamp pass-through (semantically identical to `raw`,
+  named for caller-side clarity that the V10 unclamped policy is
+  what's wanted).
+
+- **`zensim-target` CLI default** rotated from `tuner-v3` → `tuner-v4`.
+  New aliases: `tuner-v4`, `balanced-v2`, `balanced-v3`,
+  `compression-v2`, `compression-v3`. Earlier aliases preserved for
+  backward compat. `TargetSpec::default().profile` is now
+  `PreviewV0_5TunerV4`.
+
+- `scripts/v_next/build_v10_anchor_parquet.py` — V10 anchor parquet
+  builder (11 bands at butter ∈ {0.05, 0.30, 0.60, 1.50, 2.50, 4.00,
+  5.50, 7.00, 9.00, 12.0} ↔ score ∈ {100, 95, 90, 80, 65, 50, 35, 20,
+  10, 0}). Output at
+  `/mnt/v/zen/zensim-training/2026-05-20-v10-anchors/anchors_v10_372col.parquet`
+  (24,114 rows × 381 cols).
+
+- `scripts/v_next/strip_spline_metadata.py` — helper to re-emit a
+  ZNPR v3 bake without the `zentrain.output_calibration_spline`
+  metadata entry (used in V10 to recover the V9 tuner's score-shaped
+  raw network output before fitting the V10 spline on top).
+
+- `zensim/tests/v10_profiles.rs` — 11-test smoke suite for the V10
+  trio (name + alias, score finite across distortion levels, identity
+  short-circuit, score differs from V2/V3 ancestor on non-identity
+  pair). All passing.
+
 ### Deprecated (2026-05-20, CROSS-CODEC-V9-SPLINE — task #179)
 
 - **`ZensimProfile::PreviewV0_5CrossCodec`** — dial-broken. The

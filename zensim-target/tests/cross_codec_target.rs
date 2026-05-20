@@ -1,8 +1,8 @@
-//! Cross-codec consistency smoke test for the `PreviewV0_5TunerV3` default.
+//! Cross-codec consistency smoke test for the `PreviewV0_5TunerV4` default.
 //!
 //! Picks 3 small images from the codec-corpus, runs `target_search` at
-//! `target=60` (V3's JND anchor — exact integer landing) across
-//! {zenjpeg, zenwebp, zenavif}, and asserts:
+//! `target=80` (V4's JND anchor — exact integer landing, EXP-CROSS-CODEC-V10)
+//! across {zenjpeg, zenwebp, zenavif}, and asserts:
 //!
 //! - Cross-codec **std of achieved zensim scores** ≤ 5.0 per image
 //!   (the loose user-task gate; the V3 smoke demo shows the actual
@@ -11,8 +11,8 @@
 //! - Cross-codec **std of butter_pnorm3** ≤ 1.0 per image (matches
 //!   V6's butter_p3 1.73 mean at PJND; the gate is the loose ≤ 1).
 //!
-//! V3 lands JND on the integer 60 (vs V2's score=63 paper convention).
-//! When the default rotates back to V2 or forward to V4, update the
+//! V4 lands JND on the integer 80 (vs V3's score=60 / V2's score=63
+//! paper convention). When the default rotates again, update the
 //! TARGET constant accordingly.
 //!
 //! The test runs only when the test images are present on disk; on
@@ -53,10 +53,10 @@ const TEST_IMAGES: &[(&str, &str)] = &[
 ];
 
 const CODECS: &[CodecKind] = &[CodecKind::Jpeg, CodecKind::Webp, CodecKind::Avif];
-// V3 anchors JND at the integer 60 (V2 used 63 per the 2023 CID22-paper
-// convention). The cross-codec gate must use the V3 anchor so the test
-// exercises the spline-calibrated dial.
-const TARGET: f32 = 60.0;
+// V4 anchors JND at the integer 80 (V3 used 60, V2 used 63 per the
+// 2023 CID22-paper convention). The cross-codec gate uses the V4
+// anchor so the test exercises the spline-calibrated dial at its JND.
+const TARGET: f32 = 80.0;
 const TOLERANCE: f32 = 1.0;
 const MAX_ITER: u32 = 8;
 
@@ -94,7 +94,7 @@ fn butter_pnorm3(reference: &[u8], distorted: &[u8], width: u32, height: u32) ->
 }
 
 #[test]
-fn cross_codec_target_60_default_profile_meets_gates() {
+fn cross_codec_target_jnd_default_profile_meets_gates() {
     if !all_images_exist() {
         println!(
             "skipping cross_codec_target_60_default_profile_meets_gates: \
@@ -111,14 +111,14 @@ fn cross_codec_target_60_default_profile_meets_gates() {
         ..TargetSpec::default()
     };
 
-    // Default profile MUST be PreviewV0_5TunerV3 — the gate test is
+    // Default profile MUST be PreviewV0_5TunerV4 — the gate test is
     // calibrated for that profile only. Re-check here so a future
     // change to TargetSpec::default's `profile` field fails this
     // test loudly (not just by drifting numbers).
     assert_eq!(
         spec.profile,
-        zensim::ZensimProfile::PreviewV0_5TunerV3,
-        "default profile drifted from PreviewV0_5TunerV3 — re-run the cross-codec demo and update gate limits"
+        zensim::ZensimProfile::PreviewV0_5TunerV4,
+        "default profile drifted from PreviewV0_5TunerV4 — re-run the cross-codec demo and update gate limits"
     );
 
     for (label, path) in TEST_IMAGES {

@@ -315,6 +315,8 @@ fn apply_post(raw: f64, mode: &str) -> f64 {
     }
     match mode {
         "raw" => raw,
+        // EXP-CROSS-CODEC-V10 (2026-05-20): explicit no-clamp mode.
+        "extrapolate" => raw,
         "clamp" => raw.clamp(0.0, 100.0),
         m if m.starts_with("mapped") => {
             // mapped or mapped:A,B
