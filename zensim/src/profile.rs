@@ -304,7 +304,7 @@ pub enum ZensimProfile {
     /// [`Self::PreviewV0_5Tuner`] / [`Self::PreviewV0_5CrossCodec`]
     /// (372 → 128 → 128 identity-passthrough MLP, `zentrain.per_sample_alpha_head`
     /// + `zentrain.tanh_output_head` metadata, F32 uncompressed 261,351 bytes,
-    /// md5 `c5c32659b15b47e8a569464749cf7019`), trained with **higher anchor
+    /// md5 `5b69bb815e02d5393d81b4be65a1a8c0`, re-baked 2026-05-19 at K=32 lr=5.66e-3 seed-stable median), trained with **higher anchor
     /// pressure** to span the full [0, 100] output range while preserving
     /// cross-codec parity at every anchor band.
     ///
@@ -1170,7 +1170,9 @@ static PROFILE_PREVIEW_V0_5_CROSS_CODEC: ProfileParams = ProfileParams {
 /// affine calibration.
 ///
 /// 372 → 128 → 128 (identity passthrough) MLP, F32 uncompressed
-/// (261,351 bytes, md5 `c5c32659b15b47e8a569464749cf7019`). Same
+/// (261,351 bytes, md5 `5b69bb815e02d5393d81b4be65a1a8c0`; re-baked
+/// 2026-05-19 at K=32 lr=5.66e-3 with 5-seed CI, median selected for
+/// seed-stable ship — see `benchmarks/v_tuner_v6_reship_2026-05-19.md`). Same
 /// topology as PreviewV0_5Tuner / PreviewV0_5CrossCodec — only the
 /// weights and the `zentrain.tanh_output_head` metadata payload differ.
 ///
