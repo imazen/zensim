@@ -92,10 +92,28 @@ verify bake's 811s vs 1769s (2.18× on a clean box).
    K=32 CID22 SROCC ranges 0.797–0.861 (σ ≈ 0.020) and KADID ranges 0.548–0.656
    (σ ≈ 0.033). The K=32 path is *more stable*, but its basin centroid is below s1.
 
-3. **The α(x) head behavior diverges**. At K=32, the per-sample-α gate saturates
-   to 1.000 (full pool-head) across all swept lrs. At K=1, α(x) varies from 0
-   (full rank-head, seed 1) to 0.998 (mostly pool-head, seed 2). The two K values
-   land in qualitatively different model regimes; lr scaling doesn't bridge them.
+3. **The α(x) head behavior is highly lr-dependent at K=32**. Updated finding
+   after closer inspection of the full sweep's α(x) trajectories:
+
+   | lr | seed 1 α(x)_final | seed 2 | seed 3 | regime |
+   |---|---:|---:|---:|---|
+   | 1.0e-3 | 0.96 | 1.00 | 0.76 | pool-head dominant |
+   | 1.5e-3 | 1.00 | 1.00 | 1.00 | **full pool-head (saturated)** |
+   | 2.83e-3 | 1.00 | 1.00 | 1.00 | **full pool-head (saturated)** |
+   | 5.66e-3 (√K) | 0.66 | **0.00** | 0.54 | **MIXED / partial rank-head** |
+   | 8.0e-3 | **0.00** | **0.00** | **0.00** | **full rank-head (saturated)** |
+
+   The √K lr (5.66e-3) is in a **transition regime** where α(x) doesn't saturate
+   to either extreme — closer to K=1's mixed-gate behavior. lr=8e-3 swings to
+   the OTHER extreme: full rank-head (which is where K=1 s1 lives at α(x)=0).
+
+   **This invalidates an earlier claim that "K=32 always saturates α(x) to 1.0".**
+   Only lr ∈ [1.5e-3, 2.83e-3] saturates the pool-head. At the √K and K-linear
+   rules, the rank-head re-engages. **lr scaling DOES change the α(x) basin.**
+
+   The CID22 winner (lr=8e-3, CID22=0.859) lives in the α(x)=0 rank-head regime,
+   matching K=1 s1's α(x)=0 trajectory. But K=32 lr=8e-3 still can't reach
+   s1's CID22=0.877 — the rank-head landing point is different.
 
 ## Decision
 
@@ -161,13 +179,33 @@ default V5/V6 driver scripts to KBATCH=1` commit), and surface this falsificatio
 
 ## Key insight for future SPEED-B work
 
-The per-sample-α head is **NOT K-invariant** under the current K-batched aux-loss
-implementation. The pool-head pathway dominates at K=32 because the per-K-sample
-gradient accumulation amplifies whatever signal favors the pool head in the first
-few epochs, before the rank-head can compete. Restoring K=1's qualitative model
-behavior requires architectural changes to the α(x) head training dynamics, not
-just lr scaling.
+**Updated 2026-05-19 (post-sweep)**: lr scaling **does** change the α(x) basin —
+the pool-head saturation only occurs at lr ∈ [1.0e-3, 2.83e-3]. At lr=5.66e-3
+(√K rule) and lr=8e-3, the rank-head re-engages and the trainer lands in a
+qualitatively different model regime.
 
-The α(x) divergence between K=1 and K=32 was observed in epoch-0 already
-(K=32 α(x)≈0.91 vs K=1 α(x)≈0.36 at the same seed), and the curves never
-re-converge. This is the structural finding to chase next.
+This means SPEED-B's K-batched aux-loss path **IS sensitive to lr**, just not
+in the linear way needed to reproduce a specific K=1 seed's outcome. The
+basins available at K=32 are:
+
+- **Pool-head saturated** (lr ≤ 2.83e-3): α(x)=1.0, CID22 mid-0.82s, KonJND mid-0.07s.
+- **Mixed/transition** (lr ≈ 5.66e-3): α(x)=0.5-0.7, CID22 mid-0.85, **KonJND 0.27** (best).
+- **Rank-head saturated** (lr ≥ 8e-3): α(x)=0.0, CID22 mid-0.86, KonJND 0.10.
+
+K=1's three seeds spread across all three regimes:
+- s1 → rank-head (α(x)=0)
+- s2 → pool-head (α(x)=1)
+- s3 → mixed (α(x)≈0.76)
+
+K=32 reaches each regime via a different lr. But within each regime, K=32 lands
+at a different basin centroid than K=1's seed-equivalent regime. The
+**within-regime gap** (e.g., K=32 lr=8e-3 vs K=1 s1, both rank-head) is what
+the lr-retune cannot close. Closing that gap likely requires architectural
+changes to the K-batched gradient accumulation (per-loss lr decoupling,
+K-warmup schedule, or α(x) trust-region).
+
+**Practical takeaway**: a user who wants K=32 + K=1-style mixed-α(x) bake
+should use **lr=5.66e-3** (the √K rule). It produces the rough K=1 dynamics
+**and** wins KonJND vs K=1 median. A user who wants K=32 + K=1-style
+rank-head bake should use **lr=8e-3**. Both are 2× faster than K=1 with
+**no clear quality regression vs K=1 median** — only vs the K=1 s1 outlier.
