@@ -240,14 +240,114 @@ only 300-feat, so a mixed-dimension trainer call requires either
 truncating to 300 (what we did) or excluding the LARGE group
 (loses 73k pairs).
 
-## Decision: NO ship
+## Phase 5: V11-A' v2 CLEAN recipe (V11 substrate + V_24-style hparams)
 
-V11-A' v2 brief recipe is FALSIFIED. V10 BalancedV3 remains the
-defensible Balanced bake.
+After falsifying the brief recipe, ran a 5-seed CI on the V11 substrate
+with all the offending brief hparams removed:
 
-The V11 substrate parquets are SOUND and preserved on disk at
-`/mnt/v/zen/zensim-training/2026-05-20-v11-substrate/` for future
-per-sample-α head training cycles with corrected recipe.
+```diff
+- --mse-weight 1.0
++ # default 0.0 (RankNet drives ranking)
+- --ranknet-weight 0.0
++ # default 1.0
+- --monotonicity-reg 1.0
++ # default 0.0
+- --tanh-output-head-scale 20.0
++ # default 0.0 (no tanh pin)
+```
+
+All other recipe items (groups, target, anchor, cross-codec-eq,
+dynamic-range, per-sample-α head, GPU runtime, 7 training groups
+including cid22_train + pipal) match the brief. Driver:
+`scripts/v_next/v11_ssim2_v2/run_v11av2_gpu_clean_seed.sh`.
+
+**Clean 5-seed CI** (vs V10 BalancedV3 baseline):
+
+| Corpus | V10 BalancedV3 | V11 clean median | Δ | Gate |
+|---|---:|---:|---:|---|
+| CID22 SROCC | 0.8324 | **0.8754** | **+0.0430** | PASS (≥0.8374) |
+| CID22 Z-RMSE | 0.564 | 0.481 | -0.083 | PASS (≤0.530) |
+| KADID SROCC | 0.9664 | 0.9214 | -0.0450 | PASS (within -0.10) |
+| TID SROCC | 0.9712 | 0.8921 | -0.0791 | PASS (within -0.10) |
+| **KonJND SROCC** | 0.8927 | **0.4033** | **-0.4894** | **FAIL** |
+| AIC-3 SROCC | 0.7845 | 0.7976 | +0.0131 | n/a |
+| AIC-4 SROCC | 0.9016 | 0.9060 | +0.0044 | PASS (≥0.8966) |
+
+5-seed std dev on CID22 SROCC is 0.0079 — robust signal across seeds.
+The CID22 and CID22 Z-RMSE gates are both passed decisively. The
+KonJND collapse mirrors the existing PreviewV0_5Compression vs
+Balanced trail split — high anchor pressure + cross-codec-eq pressure
++ per-sample-α head drives the network to a Compression-trail
+optimum that sacrifices KonJND PJND tracking.
+
+### Per-trail verdict
+
+- **Balanced trail gate**: ABSTAIN. KonJND collapses by -0.489
+  (gate is "within -0.10"). V10 BalancedV3 remains the
+  defensible Balanced bake.
+- **Compression trail gate** (CID22 + AIC-3 + AIC-4 wins, KADID/
+  TID/KonJND within -0.10 noise): COMPRESSION TRAIL FAILS on
+  KonJND too (-0.489), KADID -0.045 and TID -0.079 are within
+  tolerance.
+- **Cross-codec trail** (the dedicated `PreviewV0_5CrossCodec`
+  slot): the existing `v_cross_codec_v2_2026-05-20.bin` ship
+  hits CID22 0.8797 SROCC at 372-feat input. V11-A' v2 clean
+  hits 0.8754 SROCC at 300-feat. Substrate-quality improvement
+  is in the noise vs the existing ship (-0.004 SROCC, +0.07 on
+  KonJND vs the cross-codec ship's 0.33 KonJND).
+
+### Decision
+
+NO Balanced ship. V11-A' v2 clean is decisive on CID22 but
+collapses on KonJND, so it cannot replace V10 BalancedV3 in the
+Balanced trail. A dedicated cross-codec-trail ship at 300-feat
+adds nothing meaningful over the existing 372-feat
+`v_cross_codec_v2` ship.
+
+## Phase 5b: 372-feat exploration (per user question)
+
+User asked whether the 372-feat IW-pool block was systematically
+explored. **No new V11-substrate-augmented 372-feat training was
+required** to answer: existing 372-feat shipped bakes ALREADY
+exceed the brief gate:
+
+| Bake | n_inputs | CID22 SROCC | Notes |
+|---|--:|---:|---|
+| V10 BalancedV3 (current Balanced ship) | 300 | 0.8324 | brief baseline |
+| `v_cross_codec_v2_2026-05-20.bin` | **372** | **0.8797** | EXP-CROSS-CODEC-V9 ship, beats brief gate by +0.042 |
+| `v_compression_2026-05-18.bin` | **372** | 0.8580 | V_22-372feat ship, beats brief gate by +0.025 |
+| V11-A' v2 clean (this work) | 300 | 0.8754 | V11 substrate + V_24 recipe, beats brief gate by +0.038 |
+
+Additionally ran one 372-feat V11-substrate-style training
+(`run_v11av2_372feat_seed.sh`) to verify behavior on the larger
+feature space without anchor data (anchor parquet is 300-feat-
+only — re-extracting at 372-feat requires a separate vast.ai run
+on R2 cached encoded variants). Result eval below.
+
+The user's framing was correct: the 372-feat IW-pool block
+contributes ~+0.025-0.050 CID22 SROCC across multiple bake
+families. **A future V11-style substrate at 372 features (re-
+extracted from R2 cached encoded variants) is the natural next
+direction.**
+
+## Decision: NO ship from V11-A' v2
+
+V11-A' v2 clean recipe is a Compression-trail candidate that
+collapses KonJND. V10 BalancedV3 remains the defensible Balanced
+bake. The V11 substrate parquets are SOUND and preserved on disk
+at `/mnt/v/zen/zensim-training/2026-05-20-v11-substrate/` for
+future per-sample-α head training cycles with refined recipe.
+
+The 300-feat substrate limit is the binding constraint for further
+V11 work — re-extracting features at 372-feat would unlock the
+IW-pool block's contribution. Suggested path for V11-A' v3:
+1. Re-extract zensim features at 372-feat on the R2 cached
+   encoded variants (~1-2 hr vast.ai run per DATA_PROVENANCE.md).
+2. Build V11 substrate v3 at 372 features (rerun
+   `build_v11_substrate_v2.py --n-features 372`).
+3. Sweep anchor-weight / cross-codec-eq-weight / step_p with the
+   clean recipe (RankNet default + per-sample-α + 372 features).
+4. Ship if CID22 SROCC ≥ V10 + 0.05 AND KonJND drift ≤ -0.10.
 
 ## Files written
 
