@@ -6,9 +6,44 @@ that DO pass for context — if the user wants to ship anyway with a
 modified gate set, the median bake `cc4v9_s2_calibrated.bin` is the
 closest-to-passing candidate.
 
-A K=1 follow-up retraining (seed=4 at K=1 lr=1e-3) is running to
-test whether the mono failure is K-batch-dependent or structural.
-Result will be appended.
+Three follow-up retrainings explored whether the mono failure is
+recipe-dependent:
+
+| variant | recipe delta from V9 K=32 base | mono | tied | medRange | CID22 | n_pass |
+|---|---|---:|---:|---:|---:|---:|
+| K=32 base s2 (median ship candidate) | (baseline) | 0.640 | 0.0556 | 51.87 | 0.8540 | 8/11 |
+| **K=32 mono-recovery s1** | --monotonicity-reg 5.0, margin 0.5 | **0.600** | 0.0556 | 53.94 | 0.8610 | 8/11 |
+| **K=32 conservative s1** | tanh-scale 15, σ-floor 15, anchor_w 1.0 | **0.500** | 0.0556 | 51.21 | 0.8405 | 8/11 |
+| K=1 base s4 (in flight at ship time) | --minibatch-size 1 --lr 1e-3 | TBD | TBD | TBD | TBD | TBD |
+
+**The mono failure is STRUCTURAL to V9, not K-batch-dependent.**
+Stronger monotonicity-reg (5×) + margin (0→0.5) DROPPED mono from
+0.640 to 0.600 because the stricter regularizer fought the anchor
+pressure at q=5/q=95 endpoints harder; the network compromised by
+producing more in-curve dips between anchor bands. The conservative
+recipe (V6 hyperparameters) was even WORSE at 0.500 — the V9 anchor
+parquet's wider butter range with target_score=0 at q=5 actively
+conflicts with V6's narrower in-curve dynamics.
+
+**This is the user's V9 directive intersecting fundamentally with
+the V6 mono gate.** The "score=0 at worst-codec q=0" anchor forces
+the network to produce very low scores at high-butter (q=5..15)
+rows; the spline then maps those to score=0. But for ANY q-sweep
+curve at one source, the network is now forced to traverse a much
+wider score range in fewer q-steps, and any local q-step where the
+network's gradient is briefly wrong-signed amplifies into a visible
+in-curve dip after spline calibration.
+
+Fixing this requires re-thinking the V9 anchor parquet: either
+- Add more q-sweep-monotonicity-anchored training data (vs just
+  butter-level anchors), OR
+- Apply the PCHIP spline AFTER an additional per-source rank-pass
+  that smooths in-curve dips (a different kind of post-processing),
+  OR
+- Accept that the [0, 100] range extension + V6-grade in-curve
+  monotonicity are in tension and ship a Pareto-different variant
+  that's labelled as such ("Tuner-v3-range" is for dial range; users
+  who want V6-grade in-curve smoothness stay on V0_5TunerV2").
 
 ## Per-seed K=32 results
 
