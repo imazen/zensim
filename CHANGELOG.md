@@ -2,6 +2,89 @@
 
 ## [Unreleased]
 
+### Added (2026-05-21, acumen foundation — feat/acumen-foundation, tracking #40)
+
+- **`zensim::acumen` module** — perceptual front-end primitives.
+  Naming chosen to *not* overload castleCSF / CVVDP / VDP / JND /
+  JOD; the composed approximation is "acumen", underlying
+  primitives keep their published names. All `#[doc(hidden)]`
+  until the algorithm slate stabilises (tracking
+  [imazen/zensim#40](https://github.com/imazen/zensim/issues/40)).
+- **`acumen::castle_csf`** — binary LUT loader
+  (`include_bytes!` + magic "ZACUMCSF" + crc32 + schema
+  versioning). 32×32×3 log10(S) table from gfxdisp/castleCSF MIT
+  MATLAB sampled through cvvdp v0.5.4's pipeline. Bilinear interp
+  in log-(rho, L_bkg) space, ~14 ns scalar query. (commits
+  `bffde2a` foundation + `d650a02` rest).
+- **`acumen::viewing::ViewingCondition`** — bundles ppd +
+  peak_luminance_nits + ambient_luminance_nits. Four presets:
+  LAB_REFERENCE (training anchor), DESKTOP_STANDARD,
+  MOBILE_RETINA, HDR_REFERENCE_1000. (`d650a02`)
+- **`acumen::band_weights`** — per-(channel × band) castleCSF
+  weights via Mode A image-mean L precompute. Functions
+  `compute_csf_band_weights` and `image_mean_luminance_nits`
+  (sRGB → linear BT.709 luma → cd/m²). (`d650a02`)
+- **`cvvdp_features::extract_cvvdp_features_with_csf_weights`** —
+  new public entry point taking caller-supplied per-band CSF
+  weights as `&[f32; N_LEVELS]`. Byte-identical to legacy
+  `extract_cvvdp_features` when passed `&CSF_BAND_WEIGHTS`.
+  Allows Gate A retraining without disturbing legacy V_22 path.
+  (`8d58093`)
+- **`extract_pair_features --acumen-mode-a`** + `--acumen-ppd` +
+  `--acumen-peak-nits` + `--acumen-ambient-nits` — CLI surface
+  for Gate A feature extraction. (`cf8dad3`)
+
+#### Validation findings
+
+- **LUT vs analytical castleCSF** (validation report at
+  `zensim/benchmarks/acumen_castle_csf_validation_2026-05-20.md`):
+  cvvdp-gpu's LUT mean log10(S) deviates from per-mechanism `S_c`
+  by 1.4 dB (A) / 0.5 dB (RG) / 7.4 dB (YV). Structural, not a
+  bug — cvvdp's LUT comes from full `sensitivity()` entry (DKL
+  projection + Eq. 12 energy pooling). Relative shape matches
+  published curves; fit-for-purpose as per-band weights. Vendor
+  with explicit `cvvdp` provenance label in filename + module.
+- **Two-anchor ppd lerp falsified** (2026-05-20, agent report):
+  per-ppd anchor lerp fails by 17-30× the 5% gate (max 168%
+  achromatic error). Achromatic CSF peak sits inside common
+  ppd=45-90 range — a straight line in log-ppd can't track a
+  hump. Minimum 7 anchors for 5% accuracy. Verdict: runtime LUT
+  lookup is the right shape; per-anchor training doesn't add
+  value.
+- **Hardcoded prior is mid-band peaked, castleCSF is low-pass**
+  at lab reference / mid-gray. Pinned in
+  `weights_diverge_from_hardcoded_prior` test. Gate A measures
+  whether replacing the prior with castleCSF Mode A improves the
+  trained metric.
+
+#### CPU smoke test (5 KADID pairs, 2026-05-21)
+
+End-to-end: legacy path band-ratio features f10-f13 ~0.5 / 1.0 /
+0.8 / 0.4 (matches prior); acumen-mode-a path ~7.8 / 41 / 134 /
+242 (castleCSF absolute sensitivities at lab reference). All
+other features byte-identical. Wall time 340 ms/pair
+single-threaded. Implication: Gate A requires full retraining
+(not just rescore) because feature scale shifts by ~280×; affine
+calibration alone can't recover this.
+
+#### Remaining work (next-session pickup)
+
+1. **Train Gate A bake** — extract 196k canonical safesyn pairs
+   with `--acumen-mode-a`, train 5-seed MLP via
+   `zensim_mlp_train`, evaluate on full Mohammadi panel. Expected
+   wall: ~2 hrs feature extract (16-core CPU + ref cache) + ~6
+   hrs train sweep.
+2. **zensim-gpu sync** — port `band_weights` primitive to
+   `zenmetrics/crates/zensim-gpu`. Smallest landable diff per
+   prior inventory (~150 LOC): import via existing `zensim`
+   workspace dep, add `acumen_mode_a: bool` to `ZensimParams`,
+   gate per-scale band weighting in `kernels/fused.rs` behind
+   compile-time feature flag. V_22-shipped path untouched.
+3. **Fleet launch** — once Gate A validates, build `zen-metrics`
+   binary with the new feature flag, push as v27 sweep image
+   (alongside v26), update launcher to use it for the
+   castleCSF Mode-A feature-extraction sweep.
+
 ### Added (2026-05-20, V11-E-PER-CODEC-AFFINE — runtime + opt-in variants, task #186)
 
 - **`zentrain.per_codec_calibration` bake metadata format.** Payload
