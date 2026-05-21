@@ -39,7 +39,16 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use rayon::prelude::*;
 
-use zensim::cvvdp_features::{CVVDP_FEATURE_COUNT, extract_cvvdp_features};
+use zensim::cvvdp_features::{
+    CVVDP_FEATURE_COUNT, extract_cvvdp_features, extract_cvvdp_features_with_csf_weights,
+};
+use zensim::acumen::band_weights::{
+    BandCsfWeights, compute_csf_band_weights, image_mean_luminance_nits,
+};
+use zensim::acumen::castle_csf::CastleCsfLut;
+use zensim::acumen::viewing::ViewingCondition;
+
+const LUT_BYTES: &[u8] = include_bytes!("../../../zensim/data/castle_csf_v0_5_4_cvvdp.lut");
 
 #[derive(Parser, Debug)]
 #[command(name = "extract_pair_features")]
@@ -59,6 +68,32 @@ struct Args {
     /// Cache reference images (saves I/O when many rows share a ref).
     #[arg(long, default_value_t = true)]
     cache_refs: bool,
+
+    /// Enable castleCSF Mode A: compute per-image achromatic CSF
+    /// weights from the reference's mean luminance and inject them
+    /// into the band-energy ratio features. Default off; on writes
+    /// a tagged-feature parquet for Gate A comparison vs the legacy
+    /// hardcoded `CSF_BAND_WEIGHTS` prior.
+    #[arg(long, default_value_t = false)]
+    acumen_mode_a: bool,
+
+    /// Pixels per visual degree at the assumed viewer's eye. Default
+    /// 56 (lab reference; the canonical training anchor). Only used
+    /// when `--acumen-mode-a` is on.
+    #[arg(long, default_value_t = 56.0)]
+    acumen_ppd: f32,
+
+    /// Display peak luminance in cd/m² (nits). Default 100 (SDR
+    /// sRGB-mastered display). Only used when `--acumen-mode-a` is
+    /// on; the image-mean luminance is computed as
+    /// `mean(linear(sRGB)) * peak_nits`.
+    #[arg(long, default_value_t = 100.0)]
+    acumen_peak_nits: f32,
+
+    /// Ambient surround luminance in cd/m². Default 5 (dim room).
+    /// Only used when `--acumen-mode-a` is on.
+    #[arg(long, default_value_t = 5.0)]
+    acumen_ambient_nits: f32,
 }
 
 fn main() -> Result<()> {
@@ -73,6 +108,27 @@ fn main() -> Result<()> {
     eprintln!("extract_pair_features (EX-4 Chunk C)");
     eprintln!("  pairs:  {:?}", args.pairs);
     eprintln!("  output: {:?}", args.output);
+    if args.acumen_mode_a {
+        eprintln!(
+            "  acumen-mode-a: ON (ppd={}, peak={} nits, ambient={} nits)",
+            args.acumen_ppd, args.acumen_peak_nits, args.acumen_ambient_nits,
+        );
+    } else {
+        eprintln!("  acumen-mode-a: OFF (legacy CSF_BAND_WEIGHTS prior)");
+    }
+
+    // Load LUT once per process. Cheap (single parse + crc check)
+    // and feeds into the per-image castleCSF lookup if mode A is on.
+    let acumen_lut = if args.acumen_mode_a {
+        Some(CastleCsfLut::from_bytes(LUT_BYTES).map_err(|e| anyhow!("LUT parse: {e:?}"))?)
+    } else {
+        None
+    };
+    let acumen_viewing = ViewingCondition::new(
+        args.acumen_ppd,
+        args.acumen_peak_nits,
+        args.acumen_ambient_nits,
+    );
 
     let t_start = Instant::now();
 
@@ -175,7 +231,29 @@ fn main() -> Result<()> {
             let result = match (ref_loaded, load_rgb8(Path::new(dist_path)).ok()) {
                 (Some((rpx, rw, rh)), Some((dpx, dw, dh))) => {
                     if rw == dw && rh == dh && rpx.len() == dpx.len() {
-                        extract_cvvdp_features(&rpx, &dpx, rw as usize, rh as usize)
+                        if let Some(lut) = &acumen_lut {
+                            // castleCSF Mode A: compute per-image
+                            // mean luminance from the *reference*
+                            // (the distorted image's L may be
+                            // shifted by the codec; we anchor on
+                            // ref so the same source produces the
+                            // same CSF weights across distortions).
+                            let mean_l = image_mean_luminance_nits(
+                                &rpx,
+                                args.acumen_peak_nits,
+                            );
+                            let weights: BandCsfWeights =
+                                compute_csf_band_weights(lut, acumen_viewing, mean_l);
+                            extract_cvvdp_features_with_csf_weights(
+                                &rpx,
+                                &dpx,
+                                rw as usize,
+                                rh as usize,
+                                weights.achromatic(),
+                            )
+                        } else {
+                            extract_cvvdp_features(&rpx, &dpx, rw as usize, rh as usize)
+                        }
                     } else {
                         eprintln!(
                             "  WARN: dim mismatch ref={}x{} dist={}x{} for row {}",
