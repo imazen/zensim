@@ -226,6 +226,13 @@ pub mod cvvdp_features;
 #[cfg(feature = "training")]
 pub mod xyb_lms_features;
 
+// `acumen` — perceptual front-end primitives (castleCSF LUT today,
+// DKL + per-band weighting + contrast masking + HDR enable to come).
+// See `imazen/zensim#40` for the algorithm slate and ship gates.
+// Doc-hidden; surface stabilises once the slate lands.
+#[doc(hidden)]
+pub mod acumen;
+
 // --- Primary API ---
 pub use error::ZensimError;
 pub use metric::{
