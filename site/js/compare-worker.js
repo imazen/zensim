@@ -20,14 +20,26 @@
 import { parseZnpr, predict } from "./mlp.js";
 
 let db = null;
+// dbReady: single-flight promise. Concurrent callers all await the same
+// instantiate() call. Without this, the 2nd caller saw `db` already
+// assigned (set before `await instantiate()` resolves) and proceeded to
+// `db.connect()`, which threw "duckdb is not initialized" because the
+// underlying WASM module wasn't loaded yet. Hit in production when a
+// corpus-list `change` event (which triggers `list_codecs`) and a Run
+// click landed within ~100 ms.
+let dbReady = null;
 let baseUrl = "";
 // bakeCache: bakeId → parsed ZNPR Model.
 const bakeCache = new Map();
 
 // Resolve a bake id ("v0_16" / "v0_4" / ...) to a URL. Bakes ship under
 // site/weights/<id>.bin so they're available on gh-pages without R2.
+// Worker `fetch()` uses the page's origin as the base for relative URLs
+// — but the worker is loaded via `new Worker("js/...")` so the relative
+// base is the worker URL's directory. Resolve against the site root so
+// `weights/<id>.bin` always lands at `<site>/weights/<id>.bin`.
 function bakeUrl(bakeId) {
-  return `weights/${bakeId}.bin`;
+  return absoluteSiteUrl(`weights/${bakeId}.bin`);
 }
 
 async function loadBake(bakeId) {
@@ -50,34 +62,69 @@ function bakeIdForMetric(metric) {
 }
 
 async function initDuckDB() {
-  if (db) return db;
-  postMessage({ type: "progress", data: "loading DuckDB-WASM…" });
-  // jsDelivr ESM build; pinned version chosen at commit time.
-  const duckdb = await import("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm");
-  const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
-  const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
-  const worker_url = URL.createObjectURL(
-    new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" }),
-  );
-  const ddbWorker = new Worker(worker_url);
-  const logger = new duckdb.ConsoleLogger();
-  db = new duckdb.AsyncDuckDB(logger, ddbWorker);
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-  URL.revokeObjectURL(worker_url);
-  postMessage({ type: "progress", data: "DuckDB-WASM ready" });
-  return db;
+  // Single-flight: all concurrent callers await the same in-flight init
+  // promise. Critical because `instantiate()` is async — without this,
+  // caller A sets `db = new AsyncDuckDB(...)` and then awaits `instantiate`;
+  // caller B sees `db` truthy, returns immediately, then `db.connect()`
+  // throws "duckdb is not initialized" because the WASM module isn't loaded.
+  if (dbReady) return dbReady;
+  dbReady = (async () => {
+    postMessage({ type: "progress", data: "loading DuckDB-WASM…" });
+    // jsDelivr ESM build; pinned version chosen at commit time.
+    const duckdb = await import("https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm");
+    const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+    const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+    const worker_url = URL.createObjectURL(
+      new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" }),
+    );
+    const ddbWorker = new Worker(worker_url);
+    const logger = new duckdb.ConsoleLogger();
+    const localDb = new duckdb.AsyncDuckDB(logger, ddbWorker);
+    await localDb.instantiate(bundle.mainModule, bundle.pthreadWorker);
+    URL.revokeObjectURL(worker_url);
+    db = localDb; // assign only after instantiate() resolves
+    postMessage({ type: "progress", data: "DuckDB-WASM ready" });
+    return db;
+  })();
+  return dbReady;
 }
 
 // Map corpus id → parquet URL (relative to site root). Stub manifest in
 // compare.js carries the authoritative list; this map is the fallback.
 const R2_BASE = "https://zentrain-r2.imazen.org/zensim-compare-site";
+
+// DuckDB-WASM's httpfs reader needs ABSOLUTE URLs. Worker-relative paths
+// like "data/parquet/x.parquet" fail with "No files found that match the
+// pattern" because DuckDB resolves the URL in its own internal worker
+// context. Resolve in-repo paths against the parent page's origin.
+// `self.location` in a worker is the worker script URL; strip the worker
+// script filename to get the site root.
+const SITE_BASE = (() => {
+  try {
+    // self.location.href = "http://host:port/js/compare-worker.js"
+    // We want "http://host:port/"
+    const u = new URL(self.location.href);
+    // Strip everything after the last "/js/" so site root sits one level up.
+    const i = u.pathname.lastIndexOf("/js/");
+    u.pathname = i >= 0 ? u.pathname.slice(0, i + 1) : "/";
+    u.search = ""; u.hash = "";
+    return u.toString();
+  } catch (_) {
+    return "/";
+  }
+})();
+function absoluteSiteUrl(relPath) {
+  if (/^https?:\/\//.test(relPath)) return relPath;
+  return SITE_BASE + relPath.replace(/^\//, "");
+}
+
 const CORPUS_URLS = {
   // In-repo human-rated parquets (small, gh-pages cap-OK).
-  aic3_ctc_epfl: "data/parquet/aic3_ctc_epfl.parquet",
-  aic4_sample:   "data/parquet/aic4_sample.parquet",
-  cid22:         "data/parquet/cid22.parquet",
-  kadid10k:      "data/parquet/kadid.parquet",
-  tid2013:       "data/parquet/tid.parquet",
+  aic3_ctc_epfl: absoluteSiteUrl("data/parquet/aic3_ctc_epfl.parquet"),
+  aic4_sample:   absoluteSiteUrl("data/parquet/aic4_sample.parquet"),
+  cid22:         absoluteSiteUrl("data/parquet/cid22.parquet"),
+  kadid10k:      absoluteSiteUrl("data/parquet/kadid.parquet"),
+  tid2013:       absoluteSiteUrl("data/parquet/tid.parquet"),
   // R2-hosted codec-sweep parquets — carry feat_0..feat_299 for JS-MLP.
   v12_zenavif: `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenavif.parquet`,
   v12_zenjxl:  `${R2_BASE}/parquets/codec-sweeps/unified_v12_zenjxl.parquet`,
@@ -131,20 +178,30 @@ async function runQuery(msg) {
     return cols;
   }
 
-  // The wishlist — every column the comparison-site UI might want to
-  // project. Per-corpus we intersect this with the parquet schema.
-  // Note: knob_tuple_json + image_name (or image_path) are needed to
-  // form per-curve groups for the soft-iso smoother applied below.
-  const allCols = ["codec", "q", "version", "image_name", "image_path",
-                   "knob_tuple_json",
-                   "human_jnd", "human_jnd_ci_lo", "human_jnd_ci_hi",
-                   "human_mos", "human_dmos", "human_dmos_var", "human_elo",
-                   "score_zensim", "score_ssim2_gpu", "score_dssim",
-                   "score_butter_max", "score_butter_p3", "score_ssim2_paper",
-                   "score_cvvdp", "score_iw_ssim", "score_ms_ssim",
-                   "score_psnr_y", "score_ssim", "score_vmaf_neg",
-                   "score_hdr_vdp_2", "score_hdr_vdp_3",
-                   "bpp", "quality_index", "dlevel", "encoded_bytes"];
+  // Identifier columns we want explicitly (need exact-name dispatch in JS).
+  // Every other "metric-shaped" column — anything starting with `score_`,
+  // `human_`, `feat_`, or matching `bpp`/`q`/`quality_index`/`dlevel`/
+  // `encoded_bytes` — is projected dynamically from the parquet schema.
+  //
+  // Previously this was a hard-coded `allCols` list; pre-computed score
+  // columns like `score_zensim_v0_16` (added per-bake to the cid22/aic3/
+  // aic4 parquets over time) were silently dropped because they weren't
+  // in the list, so `r.score_zensim_v0_16` was always undefined and the
+  // "kept 0 valid (x, y) rows" filter ate every row. Dynamic projection
+  // means new bake columns surface automatically as the parquets are
+  // updated.
+  const ID_COLS = ["codec", "q", "version", "image_name", "image_path",
+                   "knob_tuple_json", "ref_basename"];
+  const buildAllCols = (schemaCols) => {
+    const cols = new Set(ID_COLS.filter(c => schemaCols.has(c)));
+    for (const c of schemaCols) {
+      if (c.startsWith("score_") || c.startsWith("human_") || c.startsWith("feat_")
+          || c === "bpp" || c === "quality_index" || c === "dlevel" || c === "encoded_bytes") {
+        cols.add(c);
+      }
+    }
+    return Array.from(cols);
+  };
 
   let rows = [];
   for (const corpusId of usable) {
@@ -157,12 +214,15 @@ async function runQuery(msg) {
       postMessage({ type: "progress", data: `${corpusId} schema-fetch failed: ${e.message}` });
       continue;
     }
-    // Project only columns the parquet actually carries. Numeric ones get
-    // TRY_CAST to DOUBLE; codec / version / image_name stay text.
+    // Project columns the parquet actually carries (dynamic per-parquet —
+    // discovers new bake-pre-computed columns automatically without code
+    // changes). Numeric ones get TRY_CAST to DOUBLE; codec / version /
+    // image_name stay text.
     const numericPrefix = (c) => c.startsWith("score_") || c.startsWith("human_") ||
+                                  c.startsWith("feat_") ||
                                   c === "bpp" || c === "q" || c === "quality_index" ||
                                   c === "dlevel" || c === "encoded_bytes";
-    const projectCols = allCols.filter((c) => schemaCols.has(c));
+    const projectCols = buildAllCols(schemaCols);
     if (projectCols.length === 0) {
       postMessage({ type: "progress", data: `${corpusId} has no known columns; skipping` });
       continue;
@@ -256,14 +316,20 @@ async function runQuery(msg) {
     .sort((a, b) => a[0] - b[0])
     .map(([x, ys]) => ({ x: x + 2.5, median_y: median(ys) }));
 
-  // Per-band SROCC (aggregate, by Y-value bands per CID22 Table 5).
-  const bands = computeBandSrocc(dataPoints);
+  // Per-band SROCC. CLAUDE.md "Per-band reporting rule" (2026-05-14)
+  // mandates the 10-band width-10 grid as the primary release gate; the
+  // legacy 4-band CID22 Table 5 cuts are reported alongside for paper
+  // comparison continuity.
+  const { bands10, bandsLegacy } = computeBandSrocc(dataPoints);
+  // `bands` retains the legacy 4-band shape for back-compat with the
+  // existing #band-table renderer; `bands10` is the new 10-band table.
+  const bands = bandsLegacy;
 
   // Per-band box-plot stats (p5/p25/p50/p75/p95) for the candlestick mode.
   // Bins X axis into 5-unit steps and reports Y distribution per bin.
   const boxes = computeBoxes(dataPoints, 5);
 
-  postMessage({ type: "result", data: { rows: dataPoints, step5, bands, boxes } });
+  postMessage({ type: "result", data: { rows: dataPoints, step5, bands, bands10, boxes } });
 }
 
 function quantile(sorted, q) {
@@ -331,16 +397,35 @@ function spearman(xs, ys) {
   return num / Math.sqrt(dx2 * dy2);
 }
 
-function computeBandSrocc(points) {
-  // CID22 Table 5 bands on Y axis. (We use Y as the "quality" reference
-  // for binning, which is conventional; flip if X is the reference.)
-  const bands = [
-    { label: "B0 below medium",      range: "<50",       lo: -Infinity, hi: 50 },
-    { label: "B1 medium",            range: "[50,65)",   lo: 50, hi: 65 },
-    { label: "B2 high",              range: "[65,90)",   lo: 65, hi: 90 },
-    { label: "B3 visually-lossless", range: "≥90",       lo: 90, hi: Infinity },
-    { label: "Near-PJND",            range: "[58,68]",   lo: 58, hi: 68 },
-  ];
+// Width-10 grid mandated by zensim CLAUDE.md "Per-band reporting rule"
+// (2026-05-14). Tiles 0..100 in 10 buckets so band-level pathologies in
+// any 10-zq band are visible. Near-PJND (58..68) overlaps B5+B6 and is
+// reported as an extra sub-band because the KonJND PJND mean lands here.
+const BANDS_10 = [
+  { label: "B0",        range: "[0,10)",   lo: 0,  hi: 10 },
+  { label: "B1",        range: "[10,20)",  lo: 10, hi: 20 },
+  { label: "B2",        range: "[20,30)",  lo: 20, hi: 30 },
+  { label: "B3",        range: "[30,40)",  lo: 30, hi: 40 },
+  { label: "B4",        range: "[40,50)",  lo: 40, hi: 50 },
+  { label: "B5",        range: "[50,60)",  lo: 50, hi: 60 },
+  { label: "B6",        range: "[60,70)",  lo: 60, hi: 70 },
+  { label: "B7",        range: "[70,80)",  lo: 70, hi: 80 },
+  { label: "B8",        range: "[80,90)",  lo: 80, hi: 90 },
+  { label: "B9",        range: "[90,100]", lo: 90, hi: 100.0001 },
+  { label: "Near-PJND", range: "[58,68]",  lo: 58, hi: 68 },
+];
+
+// Legacy 4-band CID22 Table 5 cuts (Sneyers/Ben Baruch/Vaxman 2023).
+// Reported alongside the 10-band grid for paper-comparison continuity.
+const BANDS_LEGACY = [
+  { label: "B0 below medium",      range: "<50",       lo: -Infinity, hi: 50 },
+  { label: "B1 medium",            range: "[50,65)",   lo: 50, hi: 65 },
+  { label: "B2 high",              range: "[65,90)",   lo: 65, hi: 90 },
+  { label: "B3 visually-lossless", range: "≥90",       lo: 90, hi: Infinity },
+  { label: "Near-PJND",            range: "[58,68]",   lo: 58, hi: 68 },
+];
+
+function computeBandsForGrid(points, bands) {
   for (const b of bands) {
     const sub = points.filter((p) => p.y >= b.lo && p.y < b.hi);
     const xs = sub.map((p) => p.x);
@@ -367,6 +452,15 @@ function computeBandSrocc(points) {
     b.krocc = NaN; // Kendall TODO (more expensive O(n^2))
   }
   return bands;
+}
+
+function computeBandSrocc(points) {
+  // Deep-clone the band definitions per call so successive computations
+  // don't see stale .n/.srocc/.plcc from prior queries.
+  const clone = (arr) => arr.map(b => ({ ...b }));
+  const bands10 = computeBandsForGrid(points, clone(BANDS_10));
+  const bandsLegacy = computeBandsForGrid(points, clone(BANDS_LEGACY));
+  return { bands10, bandsLegacy };
 }
 
 function median(xs) {
@@ -449,6 +543,7 @@ async function runLookup(msg) {
     return;
   }
   postMessage({ type: "progress", data: `lookup: Y=${y_metric} target=${target_y} ±${tolerance}` });
+  await initDuckDB(); // ensure WASM is fully loaded before connect()
   const conn = await db.connect();
   // Group by (codec, knob_tuple_json), report n / median Y / median X /
   // median encoded_bytes for rows where |y - target| ≤ tolerance.
@@ -502,23 +597,43 @@ async function listCorpusCodecs(corpora) {
     postMessage({ type: "codecs", data: { codecs: [], versions: [] } });
     return;
   }
-  if (!db) await initDuckDB();
+  await initDuckDB(); // single-flight; safe to call concurrently
   const conn = await db.connect();
+  // Per-corpus schema cache lives on `self._schemaCache` (initialized in
+  // runQuery). Reuse so we don't fetch the schema twice for the same URL.
+  if (!self._schemaCache) self._schemaCache = new Map();
   const codecs = new Set();
   const versions = new Set();
   for (const corpusId of usable) {
     const url = CORPUS_URLS[corpusId];
     try {
-      const r1 = await conn.query(`SELECT DISTINCT codec FROM '${url}' WHERE codec IS NOT NULL`);
-      for (const row of r1.toArray()) codecs.add(String(row.toJSON().codec));
-      // knob_tuple_json may not exist on AIC parquets — try / catch.
-      try {
+      // Fetch schema first so we don't query columns that don't exist
+      // (the AIC parquets lack knob_tuple_json + version; the prior
+      // try/catch worked but still emitted Binder Error noise to console).
+      let schemaCols = self._schemaCache.get(url);
+      if (!schemaCols) {
+        const dr = await conn.query(`DESCRIBE SELECT * FROM '${url}' LIMIT 0`);
+        schemaCols = new Set();
+        for (const row of dr.toArray()) schemaCols.add(String(row.toJSON().column_name));
+        self._schemaCache.set(url, schemaCols);
+      }
+      if (schemaCols.has("codec")) {
+        const r1 = await conn.query(`SELECT DISTINCT codec FROM '${url}' WHERE codec IS NOT NULL`);
+        for (const row of r1.toArray()) codecs.add(String(row.toJSON().codec));
+      }
+      if (schemaCols.has("knob_tuple_json")) {
         const r2 = await conn.query(`SELECT DISTINCT knob_tuple_json FROM '${url}' WHERE knob_tuple_json IS NOT NULL`);
         for (const row of r2.toArray()) {
           const k = row.toJSON().knob_tuple_json;
           if (k && k !== "{}") versions.add(String(k));
         }
-      } catch (_) { /* knob_tuple_json absent — fine */ }
+      } else if (schemaCols.has("version")) {
+        const r2 = await conn.query(`SELECT DISTINCT version FROM '${url}' WHERE version IS NOT NULL`);
+        for (const row of r2.toArray()) {
+          const v = row.toJSON().version;
+          if (v) versions.add(String(v));
+        }
+      }
     } catch (e) {
       postMessage({ type: "progress", data: `codec-enum ${corpusId} failed: ${e.message}` });
     }
@@ -538,11 +653,11 @@ self.onmessage = async (e) => {
     } else if (msg.type === "list_codecs") {
       await listCorpusCodecs(msg.corpora || []);
     } else if (msg.type === "lookup") {
-      if (!db) await initDuckDB();
+      await initDuckDB(); // single-flight; safe to call concurrently
       await runLookup(msg);
     } else if (msg.type === "query") {
       // Lazy-load DuckDB only when the user hits Run.
-      if (!db) await initDuckDB();
+      await initDuckDB(); // single-flight; safe to call concurrently
       await runQuery(msg);
     }
   } catch (err) {

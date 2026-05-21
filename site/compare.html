@@ -95,10 +95,39 @@
       <h2>Scatter + step-5 line</h2>
       <div id="scatter" class="chart"></div>
 
-      <h2>Per-band SROCC</h2>
+      <h2>Per-band SROCC (10-band width-10 — primary)</h2>
+      <p class="small" style="margin: 4px 0 8px 0; color: #555;">
+        Per zensim CLAUDE.md "Per-band reporting rule" (2026-05-14):
+        the 10-band B0..B9 grid tiles 0..100 in width-10 buckets so
+        any 10-zq-band pathology surfaces. Near-PJND (58..68) overlaps
+        B5+B6 and is reported as a sub-band — KonJND PJND mean lands
+        here, so a regression here breaks visually-lossless calibration.
+        Bands with n &lt; 30 have SROCC CI widths &gt; ±0.3; rankings
+        between bakes are not statistically distinguishable at that n.
+      </p>
+      <table id="band-table-10">
+        <thead>
+          <tr><th>Band</th><th>Range (Y)</th>
+              <th class="num">n</th>
+              <th class="num">SROCC</th>
+              <th class="num">KROCC</th>
+              <th class="num">PLCC</th>
+              <th class="num">RMSE</th></tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" class="small">no data yet</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Per-band SROCC (legacy 4-band CID22 Table 5 cuts)</h2>
+      <p class="small" style="margin: 4px 0 8px 0; color: #555;">
+        Sneyers / Ben Baruch / Vaxman (2023) CID22 paper Table 5 band
+        cutoffs. Kept alongside the 10-band grid for paper-comparison
+        continuity; the 10-band table above is the primary release gate.
+      </p>
       <table id="band-table">
         <thead>
-          <tr><th>Band</th><th>Range (X)</th>
+          <tr><th>Band</th><th>Range (Y)</th>
               <th class="num">n</th>
               <th class="num">SROCC</th>
               <th class="num">KROCC</th>

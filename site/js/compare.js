@@ -49,10 +49,18 @@ const STUB_MANIFEST = {
       url: `${R2_BASE}/parquets/codec-sweeps/unified_v15rc_zenjpeg.parquet` },
   ],
   metrics: [
-    { id: "q",                        label: "q (codec quality)" },
-    { id: "score_ssim2",              label: "ssim2 (sweep-time)" },
-    { id: "score_butteraugli_max",    label: "butteraugli (max-norm)" },
-    { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm)" },
+    { id: "q",                        label: "q (codec quality, codec-sweep parquets)" },
+    { id: "quality_index",            label: "quality_index (AIC corpora)" },
+    // ssim2_gpu is the column name in the in-repo human-rated parquets;
+    // score_ssim2 is the column name in the R2 codec-sweep parquets. The
+    // worker projects whichever exists. Listing the parquet's exact column
+    // name keeps the row lookup `r[y_metric]` honest.
+    { id: "score_ssim2_gpu",          label: "ssim2 (eval-time, in-repo parquets)" },
+    { id: "score_ssim2",              label: "ssim2 (sweep-time, R2 codec-sweep parquets)" },
+    { id: "score_butter_max",         label: "butteraugli (max-norm, in-repo parquets)" },
+    { id: "score_butter_p3",          label: "butteraugli (3-norm, in-repo parquets)" },
+    { id: "score_butteraugli_max",    label: "butteraugli (max-norm, R2 codec-sweep)" },
+    { id: "score_butteraugli_pnorm3", label: "butteraugli (3-norm, R2 codec-sweep)" },
     // --- Current zensim ship ---
     { id: "score_zensim_v0_18",       label: "★ zensim V0_18 — CURRENT SHIP (2026-05-13; 228→384→1 I8, 93 KB; CID22 0.8934)" },
     // --- Stable linear profiles (always available) ---
@@ -82,8 +90,16 @@ const STUB_MANIFEST = {
     { id: "score_zensim_v0_20",       label: "zensim V0_20 (legacy JS-MLP, seed 123 — NOT a successor to V0_18)" },
     { id: "score_zensim_v0_22",       label: "zensim V0_22 (legacy JS-MLP, konjnd_w=1 — NOT a successor to V0_18)" },
     // Human-rated columns (corpus-dependent — only available when a
-    // human-rated corpus like AIC-3/AIC-4/CID22 is selected).
-    { id: "human_jnd",                label: "human JND / MOS (corpus-dependent)" },
+    // human-rated corpus like AIC-3/AIC-4/CID22 is selected). Each corpus
+    // uses its own native rating scale: CID22 stores MOS/DMOS/Elo, KADID
+    // stores DMOS, TID stores MOS, AIC-3/AIC-4 store reconstructed JND.
+    // Picking a `human_*` axis on a corpus that lacks that column yields
+    // 0 rows kept — the band table is empty.
+    { id: "human_mos",                label: "human MOS (CID22 / TID)" },
+    { id: "human_dmos",               label: "human DMOS (CID22 / KADID)" },
+    { id: "human_dmos_var",           label: "human DMOS variance (KADID)" },
+    { id: "human_elo",                label: "human Elo (CID22)" },
+    { id: "human_jnd",                label: "human JND (AIC-3 / AIC-4)" },
     { id: "human_jnd_ci_lo",          label: "human JND — CI lower (AIC-4 only)" },
     { id: "human_jnd_ci_hi",          label: "human JND — CI upper (AIC-4 only)" },
     { id: "encoded_bytes",            label: "encoded bytes" },
@@ -249,18 +265,34 @@ function renderResult(data) {
     }, { responsive: true });
   }
 
-  const tbody = document.querySelector("#band-table tbody");
-  tbody.innerHTML = "";
-  for (const b of (data.bands ?? [])) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${b.label}</td><td>${b.range}</td>
-      <td class="num">${b.n}</td>
-      <td class="num">${Number.isFinite(b.srocc) ? b.srocc.toFixed(4) : "—"}</td>
-      <td class="num">${Number.isFinite(b.krocc) ? b.krocc.toFixed(4) : "—"}</td>
-      <td class="num">${Number.isFinite(b.plcc)  ? b.plcc .toFixed(4) : "—"}</td>
-      <td class="num">${Number.isFinite(b.rmse)  ? b.rmse .toFixed(3) : "—"}</td>`;
-    tbody.appendChild(tr);
+  // Render both the legacy 4-band CID22 Table 5 cuts (#band-table) and
+  // the mandated 10-band width-10 grid (#band-table-10). The 10-band
+  // table is the primary; legacy is kept for paper comparison continuity.
+  function renderBandTable(selector, bands) {
+    const tbody = document.querySelector(`${selector} tbody`);
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    if (!bands || bands.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="small">no data</td></tr>`;
+      return;
+    }
+    for (const b of bands) {
+      const tr = document.createElement("tr");
+      // Annotate bands with n < 30 as "noisy" per CLAUDE.md per-band
+      // reporting rule — at that n the SROCC CI exceeds ±0.3 and
+      // rankings between bakes are not statistically distinguishable.
+      const noisy = (b.n != null && b.n < 30) ? ' <span class="small" style="color:#c66;">(noisy n&lt;30)</span>' : "";
+      tr.innerHTML = `<td>${b.label}${noisy}</td><td>${b.range}</td>
+        <td class="num">${b.n}</td>
+        <td class="num">${Number.isFinite(b.srocc) ? b.srocc.toFixed(4) : "—"}</td>
+        <td class="num">${Number.isFinite(b.krocc) ? b.krocc.toFixed(4) : "—"}</td>
+        <td class="num">${Number.isFinite(b.plcc)  ? b.plcc .toFixed(4) : "—"}</td>
+        <td class="num">${Number.isFinite(b.rmse)  ? b.rmse .toFixed(3) : "—"}</td>`;
+      tbody.appendChild(tr);
+    }
   }
+  renderBandTable("#band-table-10", data.bands10);
+  renderBandTable("#band-table",    data.bands);
 }
 
 function bindRun() {
