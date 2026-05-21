@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Investigated (2026-05-20, V11-A-CC-EQ-WEIGHT-SWEEP — cross-codec-eq frontier CLOSED, task #197)
+
+- 5 seeds × 4 cross_codec_eq_weight tiers {0.05, 0.10, 0.20, 0.50}
+  = 20 bakes on the V11-substrate 4-codec × 372-feat substrate. The
+  hypothesis (per task brief): at w << 1.0 the rank-preserve term
+  should dominate so KonJND survives. **Falsified at every tier.**
+  Per-tier medians:
+  - w=0.05: CID22 0.8935 / KonJND **0.3925** (vs V10 0.8927)
+  - w=0.10: CID22 0.8960 / KonJND **0.3916**
+  - w=0.20: CID22 0.8932 / KonJND **0.3875**
+  - w=0.50: CID22 0.8965 / KonJND **0.4312**
+  - w=1.00 (v4 ref): CID22 0.8944 / KonJND **0.3942**
+  KonJND collapses identically across all tiers — the mechanism is
+  binary (gradient applies or doesn't), not magnitude-dependent.
+  Cross-codec consistency (butter_p3 at JND ≈ 1.0) is essentially
+  flat across all w; the cross-codec-eq IS effective at convergence
+  but the KonJND price is paid in full regardless of weight.
+  CONCLUSION: the cross-codec-eq mechanism, as currently constructed
+  (q-invariance within butter-level bands), is structurally
+  KonJND-incompatible. V10 BalancedV3 remains the Balanced ship,
+  V_24-per-sample-α s4 remains the Compression ship. Next directions
+  (deferred — out of this task's scope): per-row KonJND PJND-anchor
+  passthrough loss with weight ≫ cross_codec_eq_weight; cross-codec-eq
+  band-gating to high-ssim2 anchor band only (≥75); substrate
+  redesign with PJND-matched cross-codec pairs instead of
+  butter-matched. Falsification doc at
+  `benchmarks/v11_cc_eq_weight_sweep_falsification_2026-05-20.md`.
+  20 bakes + 20 verdicts + 10 cross-codec consistency TSVs preserved
+  at `/mnt/v/zen/zensim-eval/exp_v11_cc_eq_sweep_2026-05-20/`.
+
 ### Investigated (2026-05-20, V11-A'-372 v4 retrain — FALSIFIED on Balanced + Compression gates, task #195)
 
 - V11-DECODER-FIX 372-feat 4-codec substrate retrain delivers
