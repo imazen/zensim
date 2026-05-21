@@ -8,12 +8,13 @@ publish = false
 training = ["zensim/training"]
 # zenresize = ["zensim/zenresize"]
 
-# Enables the `extract_features_372col_omni` example. Uses only the
-# `image` crate's default decoders — supports JPEG, PNG, WebP. AVIF and
-# JXL encoded variants are SKIPPED with a logged error. A full-coverage
-# extractor would require zen-metrics-cli as a path dep, but that pulls
-# in a conflicting zenjxl path (zenjxl vs zenjxl--main). Documented gap.
-extract-omni = ["training", "dep:parquet", "dep:arrow"]
+# Enables the `extract_features_372col_omni` example. As of V11-DECODER-FIX
+# (task #195, 2026-05-20) this feature pulls direct zenavif + zenjxl path
+# deps so AVIF + JXL encoded variants are decoded natively (previously
+# skipped under image-0.25's limited default decoders). Full 4-codec
+# coverage: zenjpeg + zenwebp via image crate; zenavif + zenjxl via
+# their native crates.
+extract-omni = ["training", "dep:parquet", "dep:arrow", "dep:zenavif", "dep:zenjxl", "dep:zenpixels"]
 
 [build-dependencies]
 cc = "1"
@@ -38,13 +39,26 @@ csv = "1"
 image = { workspace = true }
 rayon = { workspace = true }
 
-# Optional deps for the `extract-omni` feature. Uses image crate's
-# native JPEG/PNG/WebP support. AVIF + JXL not supported (image 0.25
-# only ships avif decode via dav1d system dep, no jxl); a future
-# session can add zen-metrics-cli once the zenjxl path conflict
-# (zenjxl vs zenjxl--main in the workspace dep graph) is resolved.
+# Optional deps for the `extract-omni` feature.
+#
+# V11-DECODER-FIX (task #195, 2026-05-20): we replaced `image::open` with
+# direct codec path-deps (zenavif + zenjxl), matching the pattern that
+# `zensim-target` already uses successfully. This unlocks AVIF + JXL
+# decoding for the 372-feature multi-codec extraction (4,000 zenavif
+# + 51,200 zenjxl cells previously skipped). The zencodecs unified
+# dispatch crate would have been ideal but pulling it as a workspace
+# member would require many [patch.crates-io] entries (zenpixels,
+# zencodec, zennode, etc.); using the same two AGPL codec crates that
+# `zensim-target` already depends on keeps the dependency surface
+# minimal while delivering the same 4-codec coverage.
 parquet = { version = "58.3.0", default-features = false, features = ["arrow", "zstd"], optional = true }
 arrow = { version = "58.3.0", default-features = false, optional = true }
+# Direct codec path-deps for V11-DECODER-FIX (AVIF + JXL decode).
+# Mirror the path policy used by zensim-target. AGPL-3.0-only OR
+# Imazen commercial — zensim-bench is internal-only and not published.
+zenavif = { path = "../../zenavif",          optional = true, default-features = false }
+zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["decode"] }
+zenpixels = { workspace = true, optional = true }
 
 [[bench]]
 name = "bench_compare"

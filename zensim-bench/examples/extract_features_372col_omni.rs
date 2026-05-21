@@ -44,6 +44,7 @@ use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 use rayon::prelude::*;
 use zensim::{ZensimConfig, compute_zensim_with_config};
+use zenpixels::PixelDescriptor;
 
 #[derive(Debug, Clone)]
 struct Cell {
@@ -192,47 +193,49 @@ fn extract_one(
     if !dist_path.exists() {
         return Err(format!("encoded image missing: {}", dist_path.display()).into());
     }
-    // Sniff format before opening — `image::open` will return a confusing
-    // error for AVIF / JXL (no decoder available in image 0.25 default
-    // features), so we short-circuit with a clearer "unsupported codec".
-    let ext = dist_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "avif" | "jxl" | "heic" | "heif" => {
-            return Err(format!(
-                "codec {ext} not supported by image-0.25 default features; skip"
-            )
-            .into());
-        }
-        _ => {}
+    // V11-DECODER-FIX (task #195): decode AVIF + JXL natively via zenavif
+    // and zenjxl path-deps; fall back to the image crate for JPEG / PNG /
+    // WebP. This unblocks the 55,200 multi-codec cells that were skipped
+    // when this binary used only `image::open`.
+    let (src_w, src_h, src_rgb) =
+        decode_to_rgb8(&ref_path).map_err(|e| format!("decode ref {}: {}", ref_path.display(), e))?;
+    let (dw, dh, dst_rgb) =
+        decode_to_rgb8(&dist_path).map_err(|e| format!("decode dist {}: {}", dist_path.display(), e))?;
+    if src_w != dw || src_h != dh {
+        return Err(format!("dim mismatch ref={src_w}x{src_h} dist={dw}x{dh}").into());
     }
-    let src_img = image::open(&ref_path)
-        .map_err(|e| format!("decode ref {}: {}", ref_path.display(), e))?
-        .to_rgb8();
-    let dst_img = image::open(&dist_path)
-        .map_err(|e| format!("decode dist {}: {}", dist_path.display(), e))?
-        .to_rgb8();
-    let (w, h) = src_img.dimensions();
-    let (dw, dh) = dst_img.dimensions();
-    if w != dw || h != dh {
-        return Err(format!("dim mismatch ref={w}x{h} dist={dw}x{dh}").into());
-    }
-    let w_us = w as usize;
-    let h_us = h as usize;
+    let w_us = src_w as usize;
+    let h_us = src_h as usize;
     if w_us < 8 || h_us < 8 {
         return Err("image too small (< 8 px)".into());
     }
-    let src_pixels: Vec<[u8; 3]> =
-        src_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
-    let dst_pixels: Vec<[u8; 3]> =
-        dst_img.pixels().map(|p| [p.0[0], p.0[1], p.0[2]]).collect();
+    // Reinterpret RGB8 byte vectors as `[u8; 3]` slices in-place — zero copy.
+    let expected_len = w_us
+        .checked_mul(h_us)
+        .and_then(|n| n.checked_mul(3))
+        .ok_or("pixel count overflow")?;
+    if src_rgb.len() != expected_len {
+        return Err(format!(
+            "ref rgb byte count {} != expected {}",
+            src_rgb.len(),
+            expected_len
+        )
+        .into());
+    }
+    if dst_rgb.len() != expected_len {
+        return Err(format!(
+            "dist rgb byte count {} != expected {}",
+            dst_rgb.len(),
+            expected_len
+        )
+        .into());
+    }
+    let src_pixels: &[[u8; 3]] = bytemuck::cast_slice(&src_rgb);
+    let dst_pixels: &[[u8; 3]] = bytemuck::cast_slice(&dst_rgb);
     let mut config = ZensimConfig::default();
     config.extended_features = true;
     config.compute_iw_features = true;
-    let result = compute_zensim_with_config(&src_pixels, &dst_pixels, w_us, h_us, config)
+    let result = compute_zensim_with_config(src_pixels, dst_pixels, w_us, h_us, config)
         .map_err(|e| format!("compute_zensim: {e:?}"))?;
     let features: Vec<f32> = result.features().iter().map(|&v| v as f32).collect();
     if features.len() != 372 {
@@ -243,6 +246,88 @@ fn extract_one(
         ref_basename,
         features,
     })
+}
+
+/// Decode an image at `path` into a `(width, height, packed RGB8 bytes)` tuple.
+///
+/// Dispatches by file extension: AVIF is decoded via the `zenavif` crate,
+/// JXL via the `zenjxl` crate, and JPEG / PNG / WebP / TIFF / BMP / etc.
+/// fall back to the `image` crate's default decoders.
+///
+/// This is the V11-DECODER-FIX (task #195) replacement for the previous
+/// `image::open(path).to_rgb8()` call, which silently lacked AVIF + JXL
+/// decoders and caused the omni multi-codec extraction to skip 53% of
+/// cells.
+fn decode_to_rgb8(path: &Path) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "avif" => decode_avif(path),
+        "jxl" => decode_jxl(path),
+        _ => {
+            let img = image::open(path)?.to_rgb8();
+            let (w, h) = img.dimensions();
+            Ok((w, h, img.into_raw()))
+        }
+    }
+}
+
+fn decode_avif(path: &Path) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(path)?;
+    let pb = zenavif::decode(&bytes).map_err(|e| format!("zenavif decode: {e:?}"))?;
+    pixelbuffer_to_rgb8(&pb)
+}
+
+fn decode_jxl(path: &Path) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(path)?;
+    let decoded = zenjxl::decode(&bytes, None, &[]).map_err(|e| format!("zenjxl decode: {e:?}"))?;
+    pixelbuffer_to_rgb8(&decoded.pixels)
+}
+
+/// Convert a `zenpixels::PixelBuffer` (RGB8 or RGBA8) into packed RGB8 bytes.
+///
+/// Lifted from `zensim-target::codec::avif::pixelbuffer_to_rgb8`. Handles
+/// arbitrary strides and either RGB8 or RGBA8 inputs (dropping the alpha
+/// channel for the latter). Errors if the buffer is in an unsupported
+/// pixel format (e.g., RGB16).
+fn pixelbuffer_to_rgb8(
+    pb: &zenpixels::PixelBuffer,
+) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+    let desc = pb.descriptor();
+    let w = pb.width();
+    let h = pb.height();
+    let w_us = w as usize;
+    let h_us = h as usize;
+    let slice = pb.as_slice();
+    let stride = slice.stride();
+    let data = slice.as_strided_bytes();
+
+    if desc.layout_compatible(PixelDescriptor::RGB8) || desc.layout_compatible(PixelDescriptor::RGB8_SRGB) {
+        let bpr = w_us * 3;
+        let mut out = Vec::with_capacity(bpr * h_us);
+        for row in 0..h_us {
+            let start = row * stride;
+            out.extend_from_slice(&data[start..start + bpr]);
+        }
+        Ok((w, h, out))
+    } else if desc.layout_compatible(PixelDescriptor::RGBA8) || desc.layout_compatible(PixelDescriptor::RGBA8_SRGB) {
+        let bpr_in = w_us * 4;
+        let bpr_out = w_us * 3;
+        let mut out = Vec::with_capacity(bpr_out * h_us);
+        for row in 0..h_us {
+            let start = row * stride;
+            let row_slice = &data[start..start + bpr_in];
+            for px in row_slice.chunks_exact(4) {
+                out.extend_from_slice(&px[..3]);
+            }
+        }
+        Ok((w, h, out))
+    } else {
+        Err(format!("decoded pixel descriptor {desc:?} not RGB8 or RGBA8").into())
+    }
 }
 
 fn load_omni_cells(omni_dir: &Path, max_cells: usize) -> Vec<Cell> {
