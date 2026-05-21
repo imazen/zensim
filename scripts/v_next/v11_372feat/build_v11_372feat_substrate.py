@@ -92,6 +92,13 @@ def main() -> None:
     parser.add_argument(
         "--skip-equivalence", action="store_true",
     )
+    parser.add_argument(
+        "--out-version",
+        default="v3",
+        help="version tag in output filenames: anchors_ssim2_372col_<TAG>.parquet etc."
+             " v3=partial-coverage from 62.6k cells (2026-05-20),"
+             " v4=full 4-codec-coverage from 117.8k cells after V11-DECODER-FIX.",
+    )
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -111,7 +118,7 @@ def main() -> None:
     )
     write_anchor_parquet(
         df_anchors,
-        args.out_dir / "anchors_ssim2_372col_v3.parquet",
+        args.out_dir / f"anchors_ssim2_372col_{args.out_version}.parquet",
         args.n_features,
     )
 
@@ -124,7 +131,7 @@ def main() -> None:
         )
         write_equivalence_parquet(
             df_pairs,
-            args.out_dir / "cross_codec_equivalence_ssim2_372col_v3.parquet",
+            args.out_dir / f"cross_codec_equivalence_ssim2_372col_{args.out_version}.parquet",
             args.n_features,
         )
 
