@@ -1,0 +1,118 @@
+Device: cuda
+Loading 3 train corpora + 3 val corpora...
+  train/safesyn: 196,086 rows, weight=1.0
+  train/kadid: 10,125 rows, weight=0.3
+  train/tid: 3,000 rows, weight=0.3
+  val/cid22: 4,292 rows
+  val/kadid: 10,125 rows
+  val/tid: 3,000 rows
+Config: TrainConfig(target_col='human_score', feature_prefix='f', n_features=372, hidden=(64,), epochs=100, batch_size=16384, lr=0.001, weight_decay=1e-05, rank_weight=0.5, tv_weight=0.0, magnitude_match_lambda=0.0, magnitude_match_alpha=30.0, low_band_oversample=1.0, low_band_cutoff=50.0, seed=2, val_policy='mean', loss_kind='mse_rank', init='kaiming', optimizer='adamw', lr_schedule='cosine')
+Train: 209,211 rows over 3 datasets, 3,324 groups
+Val: 17,417 rows over 3 datasets
+  epoch   0  train_loss=0.4830  sel=+0.5985  cid22=+0.3248  kadid=+0.7205  tid=+0.7502
+  epoch   1  train_loss=0.3040  sel=+0.5713  cid22=+0.5425  kadid=+0.5094  tid=+0.6620
+  epoch   2  train_loss=0.2906  sel=+0.6568  cid22=+0.5771  kadid=+0.6862  tid=+0.7072
+  epoch   3  train_loss=0.2822  sel=+0.7245  cid22=+0.7015  kadid=+0.7139  tid=+0.7580
+  epoch   4  train_loss=0.2807  sel=+0.7349  cid22=+0.6803  kadid=+0.7801  tid=+0.7444
+  epoch   5  train_loss=0.2789  sel=+0.7639  cid22=+0.7103  kadid=+0.8054  tid=+0.7760
+  epoch   6  train_loss=0.2764  sel=+0.7754  cid22=+0.7215  kadid=+0.8228  tid=+0.7819
+  epoch   7  train_loss=0.2762  sel=+0.7285  cid22=+0.7662  kadid=+0.7353  tid=+0.6840
+  epoch   8  train_loss=0.2764  sel=+0.7767  cid22=+0.7337  kadid=+0.8282  tid=+0.7683
+  epoch   9  train_loss=0.2728  sel=+0.7738  cid22=+0.7546  kadid=+0.8220  tid=+0.7448
+  epoch  10  train_loss=0.2744  sel=+0.7976  cid22=+0.7725  kadid=+0.8142  tid=+0.8062
+  epoch  11  train_loss=0.2741  sel=+0.8201  cid22=+0.7814  kadid=+0.8660  tid=+0.8127
+  epoch  12  train_loss=0.2726  sel=+0.8050  cid22=+0.8052  kadid=+0.8410  tid=+0.7688
+  epoch  13  train_loss=0.2738  sel=+0.8196  cid22=+0.8153  kadid=+0.8491  tid=+0.7943
+  epoch  14  train_loss=0.2717  sel=+0.8345  cid22=+0.8090  kadid=+0.8727  tid=+0.8217
+  epoch  15  train_loss=0.2730  sel=+0.8347  cid22=+0.8105  kadid=+0.8679  tid=+0.8259
+  epoch  16  train_loss=0.2707  sel=+0.8205  cid22=+0.8130  kadid=+0.8530  tid=+0.7955
+  epoch  17  train_loss=0.2733  sel=+0.8310  cid22=+0.8207  kadid=+0.8607  tid=+0.8117
+  epoch  18  train_loss=0.2734  sel=+0.8417  cid22=+0.8119  kadid=+0.8723  tid=+0.8408
+  epoch  19  train_loss=0.2697  sel=+0.8449  cid22=+0.8232  kadid=+0.8768  tid=+0.8348
+  epoch  20  train_loss=0.2742  sel=+0.8351  cid22=+0.8196  kadid=+0.8597  tid=+0.8261
+  epoch  21  train_loss=0.2721  sel=+0.8279  cid22=+0.7999  kadid=+0.8550  tid=+0.8289
+  epoch  22  train_loss=0.2723  sel=+0.8471  cid22=+0.8225  kadid=+0.8842  tid=+0.8346
+  epoch  23  train_loss=0.2719  sel=+0.8452  cid22=+0.8287  kadid=+0.8751  tid=+0.8319
+  epoch  24  train_loss=0.2699  sel=+0.8210  cid22=+0.8012  kadid=+0.8644  tid=+0.7974
+  epoch  25  train_loss=0.2731  sel=+0.8366  cid22=+0.8018  kadid=+0.8743  tid=+0.8339
+  epoch  26  train_loss=0.2711  sel=+0.8285  cid22=+0.7917  kadid=+0.8675  tid=+0.8264
+  epoch  27  train_loss=0.2695  sel=+0.8171  cid22=+0.7925  kadid=+0.8512  tid=+0.8075
+  epoch  28  train_loss=0.2705  sel=+0.8365  cid22=+0.8210  kadid=+0.8738  tid=+0.8147
+  epoch  29  train_loss=0.2744  sel=+0.8576  cid22=+0.8264  kadid=+0.8969  tid=+0.8496
+  epoch  30  train_loss=0.2699  sel=+0.8391  cid22=+0.8159  kadid=+0.8707  tid=+0.8308
+  epoch  31  train_loss=0.2694  sel=+0.8612  cid22=+0.8380  kadid=+0.8960  tid=+0.8496
+  epoch  32  train_loss=0.2709  sel=+0.8505  cid22=+0.8146  kadid=+0.8895  tid=+0.8473
+  epoch  33  train_loss=0.2736  sel=+0.8578  cid22=+0.8246  kadid=+0.8972  tid=+0.8517
+  epoch  34  train_loss=0.2681  sel=+0.8469  cid22=+0.8185  kadid=+0.8881  tid=+0.8343
+  epoch  35  train_loss=0.2711  sel=+0.8231  cid22=+0.8115  kadid=+0.8588  tid=+0.7989
+  epoch  36  train_loss=0.2727  sel=+0.8562  cid22=+0.8320  kadid=+0.8982  tid=+0.8385
+  epoch  37  train_loss=0.2678  sel=+0.8582  cid22=+0.8289  kadid=+0.8901  tid=+0.8558
+  epoch  38  train_loss=0.2690  sel=+0.8479  cid22=+0.8143  kadid=+0.8778  tid=+0.8517
+  epoch  39  train_loss=0.2728  sel=+0.8639  cid22=+0.8242  kadid=+0.8971  tid=+0.8705
+  epoch  40  train_loss=0.2707  sel=+0.8586  cid22=+0.8358  kadid=+0.8896  tid=+0.8502
+  epoch  41  train_loss=0.2673  sel=+0.8512  cid22=+0.8119  kadid=+0.8804  tid=+0.8613
+  epoch  42  train_loss=0.2692  sel=+0.8673  cid22=+0.8410  kadid=+0.8976  tid=+0.8634
+  epoch  43  train_loss=0.2703  sel=+0.8577  cid22=+0.8060  kadid=+0.8997  tid=+0.8673
+  epoch  44  train_loss=0.2696  sel=+0.8633  cid22=+0.8304  kadid=+0.8999  tid=+0.8596
+  epoch  45  train_loss=0.2712  sel=+0.8571  cid22=+0.8284  kadid=+0.8936  tid=+0.8493
+  epoch  46  train_loss=0.2706  sel=+0.8501  cid22=+0.8166  kadid=+0.8796  tid=+0.8539
+  epoch  47  train_loss=0.2680  sel=+0.8590  cid22=+0.8123  kadid=+0.9002  tid=+0.8646
+  epoch  48  train_loss=0.2677  sel=+0.8625  cid22=+0.8296  kadid=+0.8975  tid=+0.8604
+  epoch  49  train_loss=0.2693  sel=+0.8589  cid22=+0.8318  kadid=+0.8842  tid=+0.8608
+  epoch  50  train_loss=0.2695  sel=+0.8552  cid22=+0.8216  kadid=+0.8901  tid=+0.8541
+  epoch  51  train_loss=0.2679  sel=+0.8605  cid22=+0.8385  kadid=+0.8851  tid=+0.8579
+  epoch  52  train_loss=0.2703  sel=+0.8651  cid22=+0.8325  kadid=+0.8924  tid=+0.8704
+  epoch  53  train_loss=0.2690  sel=+0.8656  cid22=+0.8298  kadid=+0.9031  tid=+0.8639
+  epoch  54  train_loss=0.2703  sel=+0.8571  cid22=+0.8228  kadid=+0.8921  tid=+0.8564
+  epoch  55  train_loss=0.2696  sel=+0.8505  cid22=+0.8215  kadid=+0.8838  tid=+0.8461
+  epoch  56  train_loss=0.2686  sel=+0.8662  cid22=+0.8344  kadid=+0.8983  tid=+0.8658
+  epoch  57  train_loss=0.2686  sel=+0.8661  cid22=+0.8258  kadid=+0.9037  tid=+0.8687
+  epoch  58  train_loss=0.2680  sel=+0.8680  cid22=+0.8379  kadid=+0.9014  tid=+0.8649
+  epoch  59  train_loss=0.2706  sel=+0.8709  cid22=+0.8355  kadid=+0.9033  tid=+0.8738
+  epoch  60  train_loss=0.2721  sel=+0.8700  cid22=+0.8388  kadid=+0.9037  tid=+0.8677
+  epoch  61  train_loss=0.2701  sel=+0.8673  cid22=+0.8314  kadid=+0.8988  tid=+0.8717
+  epoch  62  train_loss=0.2656  sel=+0.8685  cid22=+0.8373  kadid=+0.8984  tid=+0.8697
+  epoch  63  train_loss=0.2679  sel=+0.8680  cid22=+0.8344  kadid=+0.9023  tid=+0.8674
+  epoch  64  train_loss=0.2678  sel=+0.8500  cid22=+0.8174  kadid=+0.8850  tid=+0.8476
+  epoch  65  train_loss=0.2679  sel=+0.8645  cid22=+0.8330  kadid=+0.8951  tid=+0.8654
+  epoch  66  train_loss=0.2672  sel=+0.8733  cid22=+0.8363  kadid=+0.9077  tid=+0.8760
+  epoch  67  train_loss=0.2678  sel=+0.8720  cid22=+0.8339  kadid=+0.9055  tid=+0.8765
+  epoch  68  train_loss=0.2693  sel=+0.8665  cid22=+0.8367  kadid=+0.8979  tid=+0.8648
+  epoch  69  train_loss=0.2685  sel=+0.8610  cid22=+0.8378  kadid=+0.8939  tid=+0.8511
+  epoch  70  train_loss=0.2688  sel=+0.8624  cid22=+0.8280  kadid=+0.8963  tid=+0.8628
+  epoch  71  train_loss=0.2684  sel=+0.8693  cid22=+0.8333  kadid=+0.9036  tid=+0.8709
+  epoch  72  train_loss=0.2676  sel=+0.8689  cid22=+0.8338  kadid=+0.9042  tid=+0.8687
+  epoch  73  train_loss=0.2681  sel=+0.8680  cid22=+0.8330  kadid=+0.9028  tid=+0.8683
+  epoch  74  train_loss=0.2680  sel=+0.8695  cid22=+0.8376  kadid=+0.9014  tid=+0.8694
+  epoch  75  train_loss=0.2663  sel=+0.8681  cid22=+0.8343  kadid=+0.9012  tid=+0.8688
+  epoch  76  train_loss=0.2704  sel=+0.8672  cid22=+0.8332  kadid=+0.8994  tid=+0.8689
+  epoch  77  train_loss=0.2666  sel=+0.8635  cid22=+0.8297  kadid=+0.8963  tid=+0.8645
+  epoch  78  train_loss=0.2679  sel=+0.8657  cid22=+0.8318  kadid=+0.9000  tid=+0.8653
+  epoch  79  train_loss=0.2675  sel=+0.8715  cid22=+0.8328  kadid=+0.9059  tid=+0.8759
+  epoch  80  train_loss=0.2663  sel=+0.8696  cid22=+0.8296  kadid=+0.9043  tid=+0.8749
+  epoch  81  train_loss=0.2702  sel=+0.8669  cid22=+0.8279  kadid=+0.9017  tid=+0.8711
+  epoch  82  train_loss=0.2704  sel=+0.8705  cid22=+0.8312  kadid=+0.9064  tid=+0.8741
+  epoch  83  train_loss=0.2682  sel=+0.8708  cid22=+0.8316  kadid=+0.9074  tid=+0.8733
+  epoch  84  train_loss=0.2657  sel=+0.8694  cid22=+0.8311  kadid=+0.9064  tid=+0.8707
+  epoch  85  train_loss=0.2684  sel=+0.8682  cid22=+0.8303  kadid=+0.9051  tid=+0.8694
+  epoch  86  train_loss=0.2681  sel=+0.8719  cid22=+0.8344  kadid=+0.9077  tid=+0.8736
+  epoch  87  train_loss=0.2690  sel=+0.8690  cid22=+0.8319  kadid=+0.9048  tid=+0.8701
+  epoch  88  train_loss=0.2660  sel=+0.8693  cid22=+0.8325  kadid=+0.9048  tid=+0.8705
+  epoch  89  train_loss=0.2688  sel=+0.8691  cid22=+0.8307  kadid=+0.9056  tid=+0.8709
+  epoch  90  train_loss=0.2662  sel=+0.8676  cid22=+0.8282  kadid=+0.9049  tid=+0.8697
+  epoch  91  train_loss=0.2666  sel=+0.8679  cid22=+0.8288  kadid=+0.9048  tid=+0.8700
+  epoch  92  train_loss=0.2669  sel=+0.8687  cid22=+0.8308  kadid=+0.9053  tid=+0.8700
+  epoch  93  train_loss=0.2671  sel=+0.8681  cid22=+0.8306  kadid=+0.9045  tid=+0.8692
+  epoch  94  train_loss=0.2693  sel=+0.8678  cid22=+0.8307  kadid=+0.9037  tid=+0.8689
+  epoch  95  train_loss=0.2661  sel=+0.8685  cid22=+0.8308  kadid=+0.9043  tid=+0.8705
+  epoch  96  train_loss=0.2682  sel=+0.8685  cid22=+0.8305  kadid=+0.9044  tid=+0.8706
+  epoch  97  train_loss=0.2668  sel=+0.8684  cid22=+0.8304  kadid=+0.9044  tid=+0.8705
+  epoch  98  train_loss=0.2700  sel=+0.8690  cid22=+0.8314  kadid=+0.9050  tid=+0.8707
+  epoch  99  train_loss=0.2715  sel=+0.8693  cid22=+0.8315  kadid=+0.9053  tid=+0.8710
+
+Best: epoch 66 sel_metric=+0.8733; per-ds val SROCC = {'cid22': '+0.8363', 'kadid': '+0.9077', 'tid': '+0.8760'}
+Wrote /mnt/v/output/zensim/exp_recovery_champion_2026-05-21/seeds/20260520T232233_meanpol_h64_s2/
+
+Baking to ZNPR v3 at /mnt/v/output/zensim/exp_recovery_champion_2026-05-21/seeds/cc4_recovery_meanpol_h64_s2.bin...
+  bake: BakeRequestJson at /tmp/tmp3gj79jcg.bake.json (546,642 bytes); calling /home/lilith/work/zen/zenanalyze/target/release/zenpredict-bake
+  bake: wrote /mnt/v/output/zensim/exp_recovery_champion_2026-05-21/seeds/cc4_recovery_meanpol_h64_s2.bin (99,215 bytes)

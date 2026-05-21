@@ -1,0 +1,132 @@
+bake_verdict — bake=/mnt/v/output/zensim/exp_recovery_champion_2026-05-21/seeds/cc4_recovery_meanpol_h64_s4.bin  features-root=/mnt/v/zen/zensim-training/2026-05-15-full-features  corpora=cid22,kadid,tid,konjnd,aic3
+bake: n_inputs=372  feature_transforms=no  per_sample_alpha_head=no  hybrid_head=no
+  CID22: loaded 4292 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+  KADIK10k: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet"
+  TID2013: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet"
+  KonJND-1k (full): loaded 1008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_features_372col_2026-05-15.parquet"
+  AIC-3 CTC: loaded 600 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic3_features_372col_2026-05-15.parquet"
+# bake_verdict — instant V_X eval
+
+- Bake: `/mnt/v/output/zensim/exp_recovery_champion_2026-05-21/seeds/cc4_recovery_meanpol_h64_s4.bin`
+- Feature parquets: `/mnt/v/zen/zensim-training/2026-05-15-full-features`
+- Bake n_inputs: 372
+- Feature transforms: no
+
+## Summary (one row per corpus)
+
+| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|--:|---:|---:|---:|---:|---:|---:|
+| CID22 | 4292 | 0.8585 | 0.8611 | 0.6655 | 0.0482 | 0.9131 | 0.508 |
+| KADIK10k | 10125 | 0.9125 | 0.9165 | 0.7395 | 0.0474 | 0.9447 | 0.400 |
+| TID2013 | 3000 | 0.8922 | 0.9044 | 0.7116 | 0.0467 | 0.9325 | 0.427 |
+| KonJND-1k (full) | 1008 | 0.4343 | 0.3864 | 0.3024 | 0.0347 | 0.5857 | 0.922 |
+| AIC-3 CTC | 600 | 0.7983 | 0.8082 | 0.6307 | 0.0650 | 0.8723 | 0.589 |
+
+## CID22 (n=4292)
+
+### Aggregate full Mohammadi panel (CLAUDE.md rigor mandate)
+
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| V_X bake | 0.8585 | 0.8611 | 0.6655 | 0.0482 | 0.9131 | 0.508 |
+
+_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable from parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because saturation regions dominate the residual._
+
+### CID22 10-band full Mohammadi panel (PRIMARY release gate)
+
+| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE |
+|---|---|--:|---:|---:|---:|---:|---:|---:|---:|
+| B0 | [0.00, 0.10) | 0 | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| B1 | [0.10, 0.20) | 0 | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| B2 | [0.20, 0.30) | 1 | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| B3 | [0.30, 0.40) | 57 | 0.1248 | 0.3236 | 0.0727 | 0.0351 | 0.2566 | 0.946 | 0.0202 |
+| B4 | [0.40, 0.50) | 266 | 0.2540 | 0.2557 | 0.1704 | 0.0602 | 0.2910 | 0.967 | 0.0219 |
+| B5 | [0.50, 0.60) | 615 | 0.3282 | 0.3317 | 0.2247 | 0.0472 | 0.3996 | 0.943 | 0.0224 |
+| B6 | [0.60, 0.70) | 836 | 0.3581 | 0.3612 | 0.2411 | 0.0383 | 0.4302 | 0.932 | 0.0231 |
+| B7 | [0.70, 0.80) | 1092 | 0.3389 | 0.3403 | 0.2301 | 0.0458 | 0.4107 | 0.940 | 0.0232 |
+| B8 | [0.80, 0.90) | 1382 | 0.4293 | 0.4295 | 0.2882 | 0.0478 | 0.5064 | 0.903 | 0.0204 |
+| B9 | [0.90, 1.00] | 43 | 0.0145 | 0.2439 | 0.0122 | 0.0465 | 0.0695 | 0.970 | 0.0050 |
+
+_⚠ marks bands with n < 30 — point estimates are noisy (CI widths exceed ±0.3 SROCC at n<30; rankings between bakes are not statistically distinguishable). MAE / Z-RMSE computed after 4-parameter logistic rescale per Mohammadi 2025._
+
+## KADIK10k (n=10125)
+
+### Aggregate full Mohammadi panel (CLAUDE.md rigor mandate)
+
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| V_X bake | 0.9125 | 0.9165 | 0.7395 | 0.0474 | 0.9447 | 0.400 |
+
+_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable from parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because saturation regions dominate the residual._
+
+### KADIK10k 10-band full Mohammadi panel (PRIMARY release gate)
+
+| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE |
+|---|---|--:|---:|---:|---:|---:|---:|---:|---:|
+| B0 | [0.00, 0.10) | 705 | 0.2816 | 0.2879 | 0.1966 | 0.0383 | 0.3462 | 0.958 | 0.0190 |
+| B1 | [0.10, 0.20) | 910 | 0.2931 | 0.3006 | 0.2047 | 0.0363 | 0.3573 | 0.954 | 0.0212 |
+| B2 | [0.20, 0.30) | 1111 | 0.2524 | 0.2659 | 0.1757 | 0.0423 | 0.3128 | 0.964 | 0.0239 |
+| B3 | [0.30, 0.40) | 1291 | 0.2583 | 0.2599 | 0.1792 | 0.0488 | 0.3166 | 0.966 | 0.0233 |
+| B4 | [0.40, 0.50) | 1013 | 0.2835 | 0.2924 | 0.1983 | 0.0385 | 0.3430 | 0.956 | 0.0239 |
+| B5 | [0.50, 0.60) | 919 | 0.2041 | 0.2085 | 0.1416 | 0.0403 | 0.2626 | 0.978 | 0.0243 |
+| B6 | [0.60, 0.70) | 936 | 0.1628 | 0.1781 | 0.1117 | 0.0449 | 0.2093 | 0.984 | 0.0248 |
+| B7 | [0.70, 0.80) | 985 | 0.1508 | 0.1595 | 0.1051 | 0.0416 | 0.1906 | 0.987 | 0.0222 |
+| B8 | [0.80, 0.90) | 1699 | 0.2128 | 0.2531 | 0.1481 | 0.0489 | 0.2579 | 0.967 | 0.0250 |
+| B9 | [0.90, 1.00] | 486 | 0.0811 | 0.1327 | 0.0603 | 0.0535 | 0.0780 | 0.991 | 0.0125 |
+
+_⚠ marks bands with n < 30 — point estimates are noisy (CI widths exceed ±0.3 SROCC at n<30; rankings between bakes are not statistically distinguishable). MAE / Z-RMSE computed after 4-parameter logistic rescale per Mohammadi 2025._
+
+## TID2013 (n=3000)
+
+### Aggregate full Mohammadi panel (CLAUDE.md rigor mandate)
+
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| V_X bake | 0.8922 | 0.9044 | 0.7116 | 0.0467 | 0.9325 | 0.427 |
+
+_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable from parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because saturation regions dominate the residual._
+
+### TID2013 10-band full Mohammadi panel (PRIMARY release gate)
+
+| Band | range | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | MAE |
+|---|---|--:|---:|---:|---:|---:|---:|---:|---:|
+| B0 ⚠ | [0.00, 0.10) | 29 | 0.0633 | 0.1428 | 0.0567 | 0.0345 | 0.1877 | 0.990 | 0.0200 |
+| B1 | [0.10, 0.20) | 34 | 0.5252 | 0.6636 | 0.3518 | 0.0588 | 0.6896 | 0.748 | 0.0205 |
+| B2 | [0.20, 0.30) | 185 | 0.3596 | 0.3925 | 0.2448 | 0.0324 | 0.4370 | 0.920 | 0.0216 |
+| B3 | [0.30, 0.40) | 493 | 0.4456 | 0.4558 | 0.3085 | 0.0426 | 0.5169 | 0.890 | 0.0208 |
+| B4 | [0.40, 0.50) | 677 | 0.4794 | 0.4821 | 0.3356 | 0.0532 | 0.5482 | 0.876 | 0.0211 |
+| B5 | [0.50, 0.60) | 705 | 0.4154 | 0.4210 | 0.2867 | 0.0397 | 0.4914 | 0.907 | 0.0227 |
+| B6 | [0.60, 0.70) | 809 | 0.2636 | 0.2728 | 0.1787 | 0.0420 | 0.3331 | 0.962 | 0.0207 |
+| B7 | [0.70, 0.80) | 67 | 0.1159 | 0.2608 | 0.0803 | 0.0299 | 0.1505 | 0.965 | 0.0177 |
+| B8 | [0.80, 0.90) | 1 | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| B9 | [0.90, 1.00] | 0 | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+
+_⚠ marks bands with n < 30 — point estimates are noisy (CI widths exceed ±0.3 SROCC at n<30; rankings between bakes are not statistically distinguishable). MAE / Z-RMSE computed after 4-parameter logistic rescale per Mohammadi 2025._
+
+## KonJND-1k (full) (n=1008)
+
+### Aggregate full Mohammadi panel (CLAUDE.md rigor mandate)
+
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| V_X bake | 0.4343 | 0.3864 | 0.3024 | 0.0347 | 0.5857 | 0.922 |
+
+_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable from parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because saturation regions dominate the residual._
+
+_Per-band breakdown skipped for KonJND-1k (full) — the corpus uses a JND step grid (AIC-3) or a raw threshold scale (KonJND) that doesn't partition cleanly into the CID22/KADID/TID-style 0..1 normalized bands. Aggregate panel is the load-bearing read on this corpus._
+
+## AIC-3 CTC (n=600)
+
+### Aggregate full Mohammadi panel (CLAUDE.md rigor mandate)
+
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| V_X bake | 0.7983 | 0.8082 | 0.6307 | 0.0650 | 0.8723 | 0.589 |
+
+_Z-RMSE column uses corpus-wide σ (per-stimulus σ unavailable from parquet sidecars). Rescale is 4-parameter logistic (Mohammadi 2025 convention), not affine — affine inflates Z-RMSE on nonlinear metrics by 30× because saturation regions dominate the residual._
+
+_Per-band breakdown skipped for AIC-3 CTC — the corpus uses a JND step grid (AIC-3) or a raw threshold scale (KonJND) that doesn't partition cleanly into the CID22/KADID/TID-style 0..1 normalized bands. Aggregate panel is the load-bearing read on this corpus._
+
+---
+Wall time: 2.68s (19025 pair rows scored across 5 corpora).
+bake_verdict: complete in 2.68s
