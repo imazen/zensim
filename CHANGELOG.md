@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Investigated (2026-05-20, V11-A'-372 v4 retrain — FALSIFIED on Balanced + Compression gates, task #195)
+
+- V11-DECODER-FIX 372-feat 4-codec substrate retrain delivers
+  CID22 SROCC 0.8944 (+0.062 over V10 BalancedV3 0.8324, +0.022 over
+  300-feat V11-A' v2 clean 0.8754) — confirming the 372-feat IW-pool
+  block contributes a measurable lift. But KonJND PJND tracking
+  collapses to 0.4390 (0.8927 → 0.4390 = −0.45 drift), structurally
+  blocking the Balanced trail (any decisive B>>A blocks ship) AND
+  the Compression trail (KonJND drift exceeds the −0.10 cap by
+  4.5×). vs the V_24-per-sample-α s4 Compression ship, the new bake
+  ties decisive-cell count 4-4 with A>>B on CID22 + TID, B>>A on
+  KADID + KonJND, AIC-3 tied. NO ship. The cross-codec-eq + anchor
+  aux-loss combination is structurally KonJND-incompatible
+  regardless of feature dimension — same failure mode the prior
+  agent identified at 300-feat. Future cross-codec-trail work needs
+  a different aux-loss design. Falsification doc at
+  `benchmarks/v11_a_372_falsification_2026-05-20.md`.
+
 ### Added (2026-05-20, V11-DECODER-FIX — native AVIF + JXL decode in 372-feat omni extractor, task #195)
 
 - `zensim-bench/examples/extract_features_372col_omni.rs` now decodes
