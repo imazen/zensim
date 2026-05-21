@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added (2026-05-20, V11-DECODER-FIX — native AVIF + JXL decode in 372-feat omni extractor, task #195)
+
+- `zensim-bench/examples/extract_features_372col_omni.rs` now decodes
+  AVIF via `zenavif::decode` and JXL via `zenjxl::decode` instead of
+  short-circuiting with "codec not supported by image-0.25". This
+  unblocks the 55,200 multi-codec cells (4,000 zenavif + 51,200
+  zenjxl) that were previously skipped, enabling full 4-codec
+  coverage for the V11 substrate at 372 features. Path-dep policy
+  mirrors `zensim-target`'s existing pattern (zenavif + zenjxl as
+  AGPL path-deps to sibling worktrees) so no new `[patch.crates-io]`
+  entries are required (commit `3bd88eca`).
+- `scripts/v_next/v11_372feat/build_v11_372feat_substrate.py` —
+  `--out-version` flag lets the builder emit `v4`-suffixed substrate
+  filenames (full 117,800-cell coverage) alongside the legacy
+  `v3`-suffixed files (partial 62,600-cell zenjpeg+zenwebp-only
+  coverage from 2026-05-20 morning). Default unchanged at `v3` for
+  back-compat (commit `13b2e261`).
+- `scripts/v_next/v11_372feat/run_v11a_372_v4_seed.sh` — driver for
+  the V11-A'-372 v4 retrain on the new 4-codec × 372-feat substrate.
+  Recipe matches the proven V11-A' v2 clean (300-feat) one-for-one
+  with `--max-features 372` to include the IW-pool feature block
+  (commit `13b2e261`).
+
 ### Investigated (2026-05-20, V11-B Compression-trail ship — FALSIFIED on all 3 gate criteria, task #191)
 
 - V11-SUBSTRATE-V2's 5 candidate bakes (`cc4v11a_v2clean_s{1..5}.bin`)

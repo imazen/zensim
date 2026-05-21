@@ -16,7 +16,9 @@
 set -euo pipefail
 
 SEED="${1:?usage: $0 <seed>}"
-KBATCH="${KBATCH:-1}"
+# Brief recipe specifies --minibatch-size 32. On GPU the trainer
+# auto-bumps to 512 (zensim-validate/src/bin/zensim_mlp_train.rs:2068).
+KBATCH="${KBATCH:-32}"
 USE_GPU="${USE_GPU:-cuda}"
 
 OUT_DIR="${OUT_DIR:-/mnt/v/zen/zensim-eval/exp_v11a_372_v4_2026-05-20}"
