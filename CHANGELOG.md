@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Investigated (2026-05-20, V13-CVVDP-DISTILL — FALSIFIED on both linear + log-norm cvvdp targets, task #200)
+
+- V13 tested cvvdp as a distillation teacher (pure MSE on
+  `cvvdp_score × 10`) per task #200's "biggest swing" brief. Hypothesis:
+  removing the cross-codec-eq pair-loss that traps V11/V12 in Basin B
+  should escape KonJND collapse. **Falsified across all 5 seeds with a
+  *different* mechanism than V11/V12 Basin B.** Median 5-seed CI: CID22
+  SROCC 0.8332 (gate ≥ 0.8374 FAIL by −0.0042), CID22 Z-RMSE 0.546
+  (gate ≤ 0.500 FAIL by +0.046), KonJND **0.0958** (catastrophic).
+  Root cause: training-corpus cvvdp distribution is right-skewed
+  (73 % of safesyn pairs at JOD ≥ 9.5, 27 % maxed at 10.0; 54 % of
+  cvvdp_iwssim_LARGE maxed). MSE drives predictions into the saturation
+  regime; tanh-output-head-scale 20.0 compresses the dynamic range to
+  ~21 score units (47-68); per-band median predictions are non-monotone
+  across 8 of 10 V10 anchor bands → PCHIP spline collapses to 2 knots.
+- V14 ablation tested `cvvdp_log_norm` (already 0..100, mean 27.8)
+  as a target with identical recipe. Median 5-seed: CID22 0.7480
+  (−0.085 vs V13, worse), KonJND 0.2754 (+0.18 vs V13, partial
+  recovery, still collapsed). The log transform avoids saturation but
+  doesn't track human MOS — Pearson `r(cvvdp_log_norm, human_score)
+  = 0.66` vs `r(cvvdp_score, human_score) = 0.96` on safesyn. Both
+  cvvdp target columns shape-fail in different ways.
+- Mechanism analysis: Basin B (V11/V12 cross-codec-eq pair loss)
+  and V13's saturation-collapse are DIFFERENT KonJND-collapse
+  mechanisms. V13 doesn't broaden Basin B — it reveals a second,
+  independent target-saturation failure mode. Direct cvvdp
+  distillation with current canonical corpus is a closed direction.
+  V15+ recovery requires NEW DATA (cvvdp backfill on subjective-IQA
+  groups) or trainer rework (multi-target `cvvdp:0.5,ssim2:0.5`).
+  Falsification doc: `benchmarks/v13_cvvdp_distill_falsification_2026-05-20.md`.
+  10 bakes (5×V13 + 5×V14) + 10 pre-spline verdicts + 1 calibrated
+  bake preserved at `/mnt/v/zen/zensim-eval/exp_v13_cvvdp_distill_2026-05-20/`
+  and `/mnt/v/zen/zensim-eval/exp_v14_cvvdp_lognorm_2026-05-20/`.
+- V10 BalancedV3 remains the Balanced ship. V_24-per-sample-α s4
+  remains the Compression ship. No SOTA_TRAILS.md changes.
+
 ### Added (2026-05-20, V11-E-PER-CODEC-AFFINE — runtime + opt-in variants, task #186)
 
 - **`zentrain.per_codec_calibration` bake metadata format.** Payload
