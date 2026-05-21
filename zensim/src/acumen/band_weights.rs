@@ -37,7 +37,7 @@
 //! LUT lookup is the right shape and what this module ships.
 //! See `benchmarks/acumen_castle_csf_validation_2026-05-20.md`.
 
-use super::castle_csf::{CastleCsfLut, Channel, N_L_BKG, N_RHO};
+use super::castle_csf::{CastleCsfLut, Channel};
 use super::viewing::ViewingCondition;
 
 /// Default pyramid level count, matching `cvvdp_features::N_LEVELS`.
@@ -399,6 +399,7 @@ mod tests {
 
     #[test]
     fn lut_axes_remain_visible() {
+        use super::super::castle_csf::{N_L_BKG, N_RHO};
         // Defensive sanity: callers can introspect the LUT
         // dimensions without depending on `castle_csf` internals.
         let lut = load_lut();
