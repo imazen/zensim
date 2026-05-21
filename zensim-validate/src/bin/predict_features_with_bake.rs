@@ -31,6 +31,68 @@ use zenpredict::{Model, Predictor};
 
 type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
 type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
+type PerCodecAffine = Option<(f32, f32)>;
+
+/// Parse the `zentrain.per_codec_calibration` payload and return the
+/// `(alpha, beta)` for the given codec name (case-insensitive,
+/// alias-aware). Returns `None` when the metadata is absent, the
+/// codec is unknown, or the payload is malformed.
+fn extract_per_codec_affine(model: &Model, codec_hint: Option<&str>) -> PerCodecAffine {
+    let hint = codec_hint?;
+    let lower = hint.to_ascii_lowercase();
+    let canon: &str = match lower.as_str() {
+        "jpeg" | "jpg" | "zenjpeg" | "mozjpeg" | "libjpeg" => "jpeg",
+        "webp" | "zenwebp" => "webp",
+        "avif" | "zenavif" => "avif",
+        "jxl" | "zenjxl" | "jpegxl" | "jpeg-xl" => "jxl",
+        "png" | "zenpng" => "png",
+        other => other,
+    };
+    let md = model.metadata();
+    let entry = md.get("zentrain.per_codec_calibration")?;
+    let payload = entry.value;
+    if payload.len() < 4 {
+        return None;
+    }
+    let n_codecs =
+        u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
+    let mut off = 4usize;
+    for _ in 0..n_codecs {
+        if off + 4 > payload.len() {
+            return None;
+        }
+        let name_len = u32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]) as usize;
+        off += 4;
+        if off + name_len + 8 > payload.len() {
+            return None;
+        }
+        let name = std::str::from_utf8(&payload[off..off + name_len]).ok()?.to_ascii_lowercase();
+        off += name_len;
+        let alpha = f32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]);
+        off += 4;
+        let beta = f32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]);
+        off += 4;
+        if name == canon && alpha.is_finite() && beta.is_finite() && beta > 0.0 {
+            return Some((alpha, beta));
+        }
+    }
+    None
+}
 
 fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDispatch> {
     let md = model.metadata();
@@ -144,6 +206,7 @@ fn score_with_bake(
     hyb: Option<&HybridHeadDispatch>,
     tanh_pin_scale: Option<f64>,
     output_spline: Option<&zensim_validate::output_calibration_spline::OutputCalibrationSpline>,
+    per_codec_affine: PerCodecAffine,
     f32_scratch: &mut [f32],
     features_row: &[f32],
 ) -> f64 {
@@ -254,12 +317,22 @@ fn score_with_bake(
         y_pre
     };
     // EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline.
-    if let Some(spline) = output_spline {
+    let y_after_spline = if let Some(spline) = output_spline {
         if !y_after_pin.is_nan() {
-            return zensim_validate::output_calibration_spline::apply(y_after_pin, spline);
+            zensim_validate::output_calibration_spline::apply(y_after_pin, spline)
+        } else {
+            y_after_pin
+        }
+    } else {
+        y_after_pin
+    };
+    // EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine.
+    if let Some((alpha, beta)) = per_codec_affine {
+        if !y_after_spline.is_nan() {
+            return (alpha as f64) + (beta as f64) * y_after_spline;
         }
     }
-    y_after_pin
+    y_after_spline
 }
 
 fn parse_features_arg(s: &str) -> Result<(usize, usize, Vec<f32>), String> {
@@ -324,8 +397,18 @@ fn main() -> ExitCode {
     let mut bake_post: String = "clamp".to_string();
     let mut features_arg: Option<String> = None;
     let mut features_file: Option<PathBuf> = None;
+    let mut codec_hint: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--codec" => {
+                codec_hint = match args.next() {
+                    Some(v) => Some(v),
+                    None => {
+                        eprintln!("--codec requires a value");
+                        return ExitCode::FAILURE;
+                    }
+                };
+            }
             "--bake" => {
                 let v = match args.next() {
                     Some(v) => v,
@@ -427,6 +510,7 @@ fn main() -> ExitCode {
     let hyb = extract_hybrid_head(&model);
     let tanh_pin_scale = extract_tanh_output_head_scale(&model);
     let output_spline = zensim_validate::output_calibration_spline::extract(&model);
+    let per_codec_affine = extract_per_codec_affine(&model, codec_hint.as_deref());
 
     let mut predictor = Predictor::new(&model);
     let mut scratch = vec![0.0f32; n_inputs];
@@ -446,6 +530,7 @@ fn main() -> ExitCode {
             hyb.as_ref(),
             tanh_pin_scale,
             output_spline.as_ref(),
+            per_codec_affine,
             &mut scratch,
             row,
         );

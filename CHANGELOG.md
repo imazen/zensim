@@ -2,6 +2,61 @@
 
 ## [Unreleased]
 
+### Added (2026-05-20, V11-E-PER-CODEC-AFFINE — runtime + opt-in variants, task #186)
+
+- **`zentrain.per_codec_calibration` bake metadata format.** Payload
+  layout `[u32 n_codecs, n_codecs × (u32 name_len, name_len utf8,
+  f32 alpha, f32 beta)]`. Applied at the runtime AFTER the PCHIP
+  spline as `score = α_c + β_c · spline(raw)`, gated on a codec
+  hint supplied by the caller. Identity-by-default — bakes without
+  the metadata, OR callers without a codec hint, OR codec hints
+  that don't match any entry, all pass through unchanged.
+- **`Zensim::compute_with_codec_hint(source, distorted, codec_hint)`
+  public API.** Threads an optional codec hint through the existing
+  `compute()` path. Hint aliases: jpeg / jpg / zenjpeg / mozjpeg /
+  libjpeg → "jpeg"; webp / zenwebp → "webp"; avif / zenavif → "avif";
+  jxl / zenjxl / jpegxl → "jxl"; png / zenpng → "png".
+  `compute()` is now a wrapper that calls
+  `compute_with_codec_hint(..., None)`.
+- **`predict_features_with_bake --codec <name>` CLI flag.** Threads
+  the codec hint into the offline scoring binary used by
+  cross-codec consistency tooling.
+- **Three opt-in `*_Calibrated` profile variants** corresponding to
+  the V10 ships, each carrying the `zentrain.per_codec_calibration`
+  metadata:
+  - `PreviewV0_5TunerV4Calibrated` (`v_tuner_v4_per_codec_2026-05-20.bin`)
+  - `PreviewV0_5BalancedV3Calibrated` (`v_balanced_v3_per_codec_2026-05-20.bin`)
+  - `PreviewV0_5CompressionV3Calibrated` (`v_compression_v3_per_codec_2026-05-20.bin`)
+  Each bake is **bit-exact** to its un-calibrated parent without a
+  codec hint (SROCC preservation gate trivially passed across all 6
+  `bake_verdict` eval corpora). With a codec hint, the per-codec
+  affine fires.
+
+### Investigated (2026-05-20, V11-E-PER-CODEC-AFFINE — cross-codec stddev FALSIFIED, task #186)
+
+- Fit per-codec affine on V11 cross-codec equivalence substrate
+  (1,739 pairs, 4 codecs, 6 ssim2 anchor levels). Both fit modes
+  tested: free (α, β) least-squares to ssim2 target, and pure
+  per-codec offset (α only, β = 1). Verdict on held-out
+  cross-codec stddev per (ref, ssim2_level) anchor:
+  - **TunerV4**: median 1.39 → 1.34 (−4 %). Marginal at best.
+  - **BalancedV3**: median 1.23 → 1.43 (+16 %). Regression.
+  - **CompressionV3**: median 1.05 → 1.49 (+43 %). Catastrophic.
+  Root cause: V10 PCHIP spline already calibrates per-codec; the
+  per-codec systematic offset that remains (0.7–3.0 score units)
+  is **dwarfed by within-codec content-driven residual stddev
+  (4.5–9.5 score units)**. Linear affine cannot compress content
+  noise. The 2026-05-19 CLI per-codec calibration succeeded
+  (Tuner butter 6.68 → 5.56 at T=63) because the V_tuner-v2-s2 dial
+  had NO spline; V10 ships have one. SROCC preserved bit-exact
+  across all 6 corpora in `bake_verdict` (the eval doesn't supply
+  codec hints, so per-codec affine never fires there).
+  Falsification doc: `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+  Fit table: `benchmarks/v11_e_per_codec_{tuner_v4,balanced_v3,compression_v3}_fit.csv`.
+  The runtime + metadata format ship anyway (zero-cost when unused)
+  so future bakes whose spline-less raw output would benefit can
+  inject metadata without re-implementing the dispatch.
+
 ### Investigated (2026-05-20, V11-A-CC-EQ-WEIGHT-SWEEP — cross-codec-eq frontier CLOSED, task #197)
 
 - 5 seeds × 4 cross_codec_eq_weight tiers {0.05, 0.10, 0.20, 0.50}

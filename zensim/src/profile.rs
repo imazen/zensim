@@ -666,6 +666,44 @@ pub enum ZensimProfile {
     /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
     /// `benchmarks/v10_splines/tuner_v10_spline_2026-05-20.csv`.
     PreviewV0_5TunerV4,
+    /// Preview v0.5, **tuner trail v4 + per-codec affine** —
+    /// EXP-CROSS-CODEC-V11-E (task #186, 2026-05-20). Same bake
+    /// bytes as [`Self::PreviewV0_5TunerV4`] with an additional
+    /// `zentrain.per_codec_calibration` metadata entry. The affine
+    /// is gated on a codec hint supplied via
+    /// [`crate::Zensim::compute_with_codec_hint`]; without the hint
+    /// the output is **bit-exact** to [`Self::PreviewV0_5TunerV4`].
+    ///
+    /// **Falsification note**: the V11-E calibration was fit on the
+    /// 1,739-pair V11 cross-codec equivalence substrate and tightened
+    /// holdout cross-codec stddev by < 5 % median on TunerV4 (insufficient
+    /// to justify replacing TunerV4 as the default ship). The variant
+    /// is retained as an opt-in research artifact for callers that
+    /// supply codec hints and prefer per-codec offset over identity.
+    /// See `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+    PreviewV0_5TunerV4Calibrated,
+    /// Preview v0.5, **balanced trail v3 + per-codec affine** —
+    /// EXP-CROSS-CODEC-V11-E (task #186, 2026-05-20). Same bake
+    /// bytes as [`Self::PreviewV0_5BalancedV3`] with
+    /// `zentrain.per_codec_calibration` metadata. Codec-hint-gated;
+    /// bit-exact to [`Self::PreviewV0_5BalancedV3`] without a hint.
+    ///
+    /// **Falsification note**: per-codec affine increased holdout
+    /// cross-codec stddev on BalancedV3 (median +0.20). Shipped as
+    /// opt-in research artifact. See
+    /// `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+    PreviewV0_5BalancedV3Calibrated,
+    /// Preview v0.5, **compression trail v3 + per-codec affine** —
+    /// EXP-CROSS-CODEC-V11-E (task #186, 2026-05-20). Same bake
+    /// bytes as [`Self::PreviewV0_5CompressionV3`] with
+    /// `zentrain.per_codec_calibration` metadata. Codec-hint-gated;
+    /// bit-exact to [`Self::PreviewV0_5CompressionV3`] without a hint.
+    ///
+    /// **Falsification note**: per-codec affine increased holdout
+    /// cross-codec stddev on CompressionV3 (median +0.45). Shipped as
+    /// opt-in research artifact. See
+    /// `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+    PreviewV0_5CompressionV3Calibrated,
 }
 
 impl ZensimProfile {
@@ -819,6 +857,15 @@ impl ZensimProfile {
             Self::PreviewV0_5BalancedV3 => "zensim-preview-v0.5-balanced-v3",
             Self::PreviewV0_5CompressionV3 => "zensim-preview-v0.5-compression-v3",
             Self::PreviewV0_5TunerV4 => "zensim-preview-v0.5-tuner-v4",
+            Self::PreviewV0_5TunerV4Calibrated => {
+                "zensim-preview-v0.5-tuner-v4-calibrated"
+            }
+            Self::PreviewV0_5BalancedV3Calibrated => {
+                "zensim-preview-v0.5-balanced-v3-calibrated"
+            }
+            Self::PreviewV0_5CompressionV3Calibrated => {
+                "zensim-preview-v0.5-compression-v3-calibrated"
+            }
         }
     }
 
@@ -846,6 +893,20 @@ impl ZensimProfile {
             Self::PreviewV0_5BalancedV3 => &PROFILE_PREVIEW_V0_5_BALANCED_V3,
             Self::PreviewV0_5CompressionV3 => &PROFILE_PREVIEW_V0_5_COMPRESSION_V3,
             Self::PreviewV0_5TunerV4 => &PROFILE_PREVIEW_V0_5_TUNER_V4,
+            // V11-E per-codec-affine variants (task #186, 2026-05-20).
+            // Same `ProfileParams` shape as the un-calibrated parent
+            // (they share `extrapolate_score`, `skip_score_mapping`, etc.);
+            // the only behavioral difference is the per-codec affine
+            // metadata blob in the underlying bake bytes.
+            Self::PreviewV0_5TunerV4Calibrated => {
+                &PROFILE_PREVIEW_V0_5_TUNER_V4_CALIBRATED
+            }
+            Self::PreviewV0_5BalancedV3Calibrated => {
+                &PROFILE_PREVIEW_V0_5_BALANCED_V3_CALIBRATED
+            }
+            Self::PreviewV0_5CompressionV3Calibrated => {
+                &PROFILE_PREVIEW_V0_5_COMPRESSION_V3_CALIBRATED
+            }
         }
     }
 }
@@ -1956,6 +2017,88 @@ static PROFILE_PREVIEW_V0_5_TUNER_V4: ProfileParams = ProfileParams {
     score_mapping_b: 0.7,
     skip_score_mapping: true,
     mlp_bytes: Some(mlp_bake_preview_v0_5_tuner_v4),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+// --- EXP-CROSS-CODEC-V11-E per-codec-affine variants (task #186, 2026-05-20) ---
+//
+// Each variant ships the same trained MLP + spline as the corresponding
+// V10 ship, with `zentrain.per_codec_calibration` metadata injected on
+// top. The metadata is GATED on a codec hint supplied via
+// `Zensim::compute_with_codec_hint`; without the hint the output is
+// bit-exact to the un-calibrated parent. See
+// `benchmarks/v11_e_per_codec_falsification_2026-05-20.md` for the fit
+// + falsification numbers.
+
+/// PreviewV0_5TunerV4Calibrated bake bytes (2026-05-20, EXP-CROSS-CODEC-V11-E).
+pub(crate) fn mlp_bake_preview_v0_5_tuner_v4_calibrated() -> &'static [u8] {
+    include_bytes!("../weights/v_tuner_v4_per_codec_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_TUNER_V4_CALIBRATED: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_tuner_v4_calibrated),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5BalancedV3Calibrated bake bytes (2026-05-20, EXP-CROSS-CODEC-V11-E).
+pub(crate) fn mlp_bake_preview_v0_5_balanced_v3_calibrated() -> &'static [u8] {
+    include_bytes!("../weights/v_balanced_v3_per_codec_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_BALANCED_V3_CALIBRATED: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_balanced_v3_calibrated),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// PreviewV0_5CompressionV3Calibrated bake bytes (2026-05-20, EXP-CROSS-CODEC-V11-E).
+pub(crate) fn mlp_bake_preview_v0_5_compression_v3_calibrated() -> &'static [u8] {
+    include_bytes!("../weights/v_compression_v3_per_codec_2026-05-20.bin")
+}
+
+static PROFILE_PREVIEW_V0_5_COMPRESSION_V3_CALIBRATED: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_preview_v0_5_compression_v3_calibrated),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
     extended_features: true,

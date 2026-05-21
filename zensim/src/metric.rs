@@ -920,16 +920,54 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
+        self.compute_with_codec_hint(source, distorted, None)
+    }
+
+    /// Compare source and distorted images, supplying an optional
+    /// codec hint that drives **per-codec post-spline affine**
+    /// calibration (EXP-CROSS-CODEC-V11-E, 2026-05-20).
+    ///
+    /// When the loaded profile's bake carries
+    /// `zentrain.per_codec_calibration` metadata AND `codec_hint`
+    /// names a registered codec, the runtime applies an extra
+    /// `score = α_c + β_c · spline(raw)` affine after the standard
+    /// scoring path. The affine is monotone within codec
+    /// (β > 0 by construction) so within-codec rank ordering is
+    /// bit-exact preserved; only the cross-codec systematic bias
+    /// is pulled toward consensus at JND landmarks.
+    ///
+    /// Accepted codec hint strings (case-insensitive):
+    /// `"jpeg"` / `"jpg"` / `"zenjpeg"` / `"mozjpeg"` / `"libjpeg"`,
+    /// `"webp"` / `"zenwebp"`,
+    /// `"avif"` / `"zenavif"`,
+    /// `"jxl"` / `"zenjxl"` / `"jpegxl"`,
+    /// `"png"` / `"zenpng"`. Any other hint is treated as unknown
+    /// (no affine applied — identical to calling
+    /// [`Self::compute`]).
+    ///
+    /// Profiles without the metadata silently ignore the hint
+    /// (output is identical to [`Self::compute`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too small.
+    pub fn compute_with_codec_hint(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        codec_hint: Option<&str>,
+    ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
         let mut result = compute_with_config_inner(source, distorted, &config, params.weights);
-        apply_mlp_scoring(
+        apply_mlp_scoring_with_codec(
             &mut result,
             params,
             source.width() as u32,
             source.height() as u32,
+            codec_hint,
         )?;
         Ok(result.with_profile(self.profile))
     }
@@ -1607,6 +1645,23 @@ pub(crate) fn apply_mlp_scoring(
     width: u32,
     height: u32,
 ) -> Result<(), ZensimError> {
+    apply_mlp_scoring_with_codec(result, params, width, height, None)
+}
+
+/// Same as [`apply_mlp_scoring`] but accepts an optional codec hint
+/// that drives the per-codec post-spline affine calibration
+/// (EXP-CROSS-CODEC-V11-E). The hint is threaded into every
+/// `forward_one_bake_with_codec` call below — both the
+/// ensemble-routing branches and the primary/b3 mix branch — so
+/// every loaded bake gets a chance to apply per-codec affine if
+/// it carries the metadata.
+pub(crate) fn apply_mlp_scoring_with_codec(
+    result: &mut ZensimResult,
+    params: &crate::profile::ProfileParams,
+    width: u32,
+    height: u32,
+    codec_hint: Option<&str>,
+) -> Result<(), ZensimError> {
     let Some(loader) = params.mlp_bytes else {
         return Ok(());
     };
@@ -1651,22 +1706,51 @@ pub(crate) fn apply_mlp_scoring(
             params.ensemble_classifier_bytes,
             params.mlp_bytes_compression,
         ) {
+            // Classifier dispatch — classifier bake is a router; it
+            // does NOT receive the per-codec hint (its output is a
+            // pre-sigmoid logit, not a score). The routed target bake
+            // (primary or compression) receives the hint and may apply
+            // the per-codec affine if its metadata is present.
             let logit = forward_one_bake(clf_loader(), result.features(), width, height)?;
             if logit > 0.0 {
-                forward_one_bake(cmp_loader(), result.features(), width, height)?
+                forward_one_bake_with_codec(
+                    cmp_loader(),
+                    result.features(),
+                    width,
+                    height,
+                    codec_hint,
+                )?
             } else {
-                forward_one_bake(loader(), result.features(), width, height)?
+                forward_one_bake_with_codec(
+                    loader(),
+                    result.features(),
+                    width,
+                    height,
+                    codec_hint,
+                )?
             }
         } else {
-            let raw_primary = forward_one_bake(loader(), result.features(), width, height)?;
+            let raw_primary = forward_one_bake_with_codec(
+                loader(),
+                result.features(),
+                width,
+                height,
+                codec_hint,
+            )?;
             // Optional secondary bake (D2 multi-output ensemble, e.g.
             // V_20 IS B3 specialist) — its forward path runs over the
             // SAME 228-feature vector but applies its own
             // `feature_transforms` metadata. Both bakes' raw outputs
             // are mixed linearly at `mlp_primary_mix` weight on the
-            // primary.
+            // primary. The codec hint is passed identically to both.
             if let Some(b3_loader) = params.mlp_bytes_b3 {
-                let raw_b3 = forward_one_bake(b3_loader(), result.features(), width, height)?;
+                let raw_b3 = forward_one_bake_with_codec(
+                    b3_loader(),
+                    result.features(),
+                    width,
+                    height,
+                    codec_hint,
+                )?;
                 let a = params.mlp_primary_mix as f64;
                 a * raw_primary + (1.0 - a) * raw_b3
             } else {
@@ -1935,6 +2019,118 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
     h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]
 }
 
+/// EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine
+/// calibration metadata key.
+///
+/// Payload layout (little-endian):
+///   `[u32 n_codecs, n_codecs × (u32 name_len, name_len utf8 bytes, f32 alpha, f32 beta)]`
+///
+/// Applied AFTER the PCHIP spline (post all network forward + tanh-pin
+/// + spline). For each entry, the runtime applies
+/// `score_c = alpha_c + beta_c · spline(raw)` whenever the caller
+/// supplies a matching codec name. Generic / unknown codec hint:
+/// identity (alpha=0, beta=1).
+///
+/// The transform is monotone within codec (beta > 0 by construction),
+/// so within-codec rank ordering is bit-exact preserved; only the
+/// cross-codec systematic bias is adjusted toward consensus at JND
+/// landmarks.
+const PER_CODEC_CALIBRATION_KEY: &str = "zentrain.per_codec_calibration";
+
+/// One per-codec affine entry parsed from the metadata payload.
+#[derive(Clone, Debug)]
+struct PerCodecAffineEntry {
+    /// Lowercase ASCII codec name (matched case-insensitively).
+    name: String,
+    /// `score = alpha + beta · raw`. Beta is positive by construction.
+    alpha: f32,
+    beta: f32,
+}
+
+/// Parsed per-codec calibration payload.
+#[derive(Clone, Debug)]
+struct PerCodecCalibration {
+    entries: Vec<PerCodecAffineEntry>,
+}
+
+/// Parse the `zentrain.per_codec_calibration` payload. Returns
+/// `None` if the payload is malformed (truncated header, ragged
+/// entry, non-utf8 name, beta ≤ 0, non-finite alpha/beta).
+fn parse_per_codec_calibration(payload: &[u8]) -> Option<PerCodecCalibration> {
+    if payload.len() < 4 {
+        return None;
+    }
+    let n_codecs =
+        u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
+    let mut off = 4usize;
+    let mut entries: Vec<PerCodecAffineEntry> = Vec::with_capacity(n_codecs);
+    for _ in 0..n_codecs {
+        if off + 4 > payload.len() {
+            return None;
+        }
+        let name_len = u32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]) as usize;
+        off += 4;
+        if off + name_len + 8 > payload.len() {
+            return None;
+        }
+        let name_bytes = &payload[off..off + name_len];
+        let name = std::str::from_utf8(name_bytes).ok()?.to_ascii_lowercase();
+        off += name_len;
+        let alpha = f32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]);
+        off += 4;
+        let beta = f32::from_le_bytes([
+            payload[off],
+            payload[off + 1],
+            payload[off + 2],
+            payload[off + 3],
+        ]);
+        off += 4;
+        if !alpha.is_finite() || !beta.is_finite() || beta <= 0.0 {
+            return None;
+        }
+        entries.push(PerCodecAffineEntry { name, alpha, beta });
+    }
+    Some(PerCodecCalibration { entries })
+}
+
+/// Look up the per-codec affine for the given codec hint. Returns
+/// `None` for unrecognized codecs (caller substitutes identity).
+///
+/// Match is case-insensitive and accepts common aliases (the table's
+/// own name plus standard codec-family aliases). The metadata stores
+/// canonical names (e.g. "jpeg", "webp", "avif", "jxl"); aliases like
+/// "zenjpeg" / "mozjpeg" / "libjpeg" / "jpg" all map to "jpeg" etc.
+fn lookup_per_codec_affine(
+    cal: &PerCodecCalibration,
+    codec_hint: &str,
+) -> Option<(f32, f32)> {
+    let lower = codec_hint.to_ascii_lowercase();
+    let canon: &str = match lower.as_str() {
+        "jpeg" | "jpg" | "zenjpeg" | "mozjpeg" | "libjpeg" => "jpeg",
+        "webp" | "zenwebp" => "webp",
+        "avif" | "zenavif" => "avif",
+        "jxl" | "zenjxl" | "jpegxl" | "jpeg-xl" => "jxl",
+        "png" | "zenpng" => "png",
+        other => other,
+    };
+    for entry in &cal.entries {
+        if entry.name == canon {
+            return Some((entry.alpha, entry.beta));
+        }
+    }
+    None
+}
+
 /// Parsed per-sample α head metadata payload.
 struct PerSampleAlphaMeta {
     w_alpha: Vec<f32>,
@@ -2177,6 +2373,23 @@ fn forward_one_bake(
     width: u32,
     height: u32,
 ) -> Result<f64, ZensimError> {
+    forward_one_bake_with_codec(bytes, features, width, height, None)
+}
+
+/// Same as [`forward_one_bake`] but accepts an optional codec hint
+/// that drives the per-codec post-spline affine calibration
+/// (EXP-CROSS-CODEC-V11-E). When `codec_hint` is `Some` and the
+/// bake carries `zentrain.per_codec_calibration` metadata, the
+/// matched codec's `(alpha, beta)` affine is applied AFTER the
+/// PCHIP spline; otherwise the score is returned identical to the
+/// hint-less path.
+fn forward_one_bake_with_codec(
+    bytes: &[u8],
+    features: &[f64],
+    width: u32,
+    height: u32,
+    codec_hint: Option<&str>,
+) -> Result<f64, ZensimError> {
     let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
     let n_inputs = model.n_inputs();
     let mut predictor = crate::mlp::Predictor::new(&model);
@@ -2225,6 +2438,22 @@ fn forward_one_bake(
             .get(OUTPUT_CALIBRATION_SPLINE_KEY)
             .and_then(|entry| parse_output_calibration_spline(entry.value))
     };
+    // EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine.
+    // Applies AFTER the PCHIP spline. Only active when the bake carries
+    // `zentrain.per_codec_calibration` metadata AND the caller supplied
+    // a codec hint that maps to a registered codec entry.
+    let per_codec_affine: Option<(f32, f32)> = {
+        let cal = {
+            let metadata = model.metadata();
+            metadata
+                .get(PER_CODEC_CALIBRATION_KEY)
+                .and_then(|entry| parse_per_codec_calibration(entry.value))
+        };
+        match (cal, codec_hint) {
+            (Some(cal), Some(hint)) => lookup_per_codec_affine(&cal, hint),
+            _ => None,
+        }
+    };
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
@@ -2257,10 +2486,21 @@ fn forward_one_bake(
         } else {
             y_pre
         };
-        Ok(if let Some(spline) = &output_spline {
+        let y_after_spline = if let Some(spline) = &output_spline {
             apply_output_calibration_spline(y_after_pin, spline)
         } else {
             y_after_pin
+        };
+        // EXP-CROSS-CODEC-V11-E: per-codec post-spline affine. When
+        // the metadata is present AND the caller supplied a known
+        // codec hint, pull the per-codec output toward consensus.
+        // Otherwise pass through unchanged. The affine is monotone
+        // (beta > 0 by parse) so within-codec rank ordering is
+        // preserved bit-exact.
+        Ok(if let Some((alpha, beta)) = per_codec_affine {
+            (alpha as f64) + (beta as f64) * y_after_spline
+        } else {
+            y_after_spline
         })
     };
     if n_inputs == features.len() {
