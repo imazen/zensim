@@ -38,7 +38,11 @@
 //! issue (`imazen/zensim#40`) governs the public API surface.
 
 #[doc(hidden)]
+pub mod band_weights;
+#[doc(hidden)]
 pub mod castle_csf;
+#[doc(hidden)]
+pub mod viewing;
 
 /// Relative perceptual scalar emitted by [`acumen`](crate::acumen)
 /// primitives. Not equivalent to JOD, JND, or any calibrated
