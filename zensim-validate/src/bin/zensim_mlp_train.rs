@@ -104,7 +104,7 @@ mod contamination_guard;
 
 use mlp_train::{
     AnchorRows, EquivPairs, MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy,
-    train_mlp_with_tv_anchored_equiv,
+    train_mlp_with_tv_anchored_equiv_pjnd,
 };
 
 #[derive(Parser)]
@@ -764,6 +764,35 @@ struct Args {
     /// no aux losses are active.
     #[arg(long, default_value_t = 32)]
     gpu_minibatch_k_aux: usize,
+
+    /// EXP-V11-D-PJND-DOMINANT (2026-05-20, task #198) KonJND-PJND
+    /// passthrough anchor parquet. Same schema as `--anchor-parquet`
+    /// (uses `f0..f<N-1>` features), but loaded with a constant
+    /// per-row weight of `1.0`; per-row target defaults to
+    /// `--pjnd-passthrough-target-score`. Intended for
+    /// `canonical-2026-05-21/train/konjnd-dense.parquet` (20,160
+    /// rows × 372 features). Empty = no second anchor pool.
+    #[arg(long)]
+    pjnd_passthrough_parquet: Option<PathBuf>,
+
+    /// EXP-V11-D-PJND-DOMINANT passthrough anchor loss weight. Default
+    /// `0.0` = off. When `> 0`, the PJND anchor fires alongside the
+    /// primary `--anchor-parquet` anchor at probability
+    /// `--pjnd-passthrough-step-p`. Only wired on the per-sample-α head.
+    #[arg(long, default_value_t = 0.0)]
+    pjnd_passthrough_weight: f64,
+
+    /// EXP-V11-D-PJND-DOMINANT step probability. Default `0.30` (per
+    /// V11-D spec: anchor fires often enough to dominate cross-codec-eq).
+    /// Only effective when `--pjnd-passthrough-weight > 0`.
+    #[arg(long, default_value_t = 0.30)]
+    pjnd_passthrough_step_p: f64,
+
+    /// EXP-V11-D-PJND-DOMINANT global target score every PJND-passthrough
+    /// row regresses to. Default `80.0` (V10 maps PJND ssim2≈63 to
+    /// score=80). Only effective when `--pjnd-passthrough-weight > 0`.
+    #[arg(long, default_value_t = 80.0)]
+    pjnd_passthrough_target_score: f64,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1764,6 +1793,9 @@ fn main() {
         dynamic_range_step_p: args.dynamic_range_step_p,
         dynamic_range_probe_n: args.dynamic_range_probe_n,
         tanh_output_head_scale: args.tanh_output_head_scale,
+        pjnd_passthrough_weight: args.pjnd_passthrough_weight,
+        pjnd_passthrough_step_p: args.pjnd_passthrough_step_p,
+        pjnd_passthrough_target_score: args.pjnd_passthrough_target_score,
     };
 
     println!(
@@ -2020,6 +2052,81 @@ fn main() {
             None
         };
 
+    // EXP-V11-D-PJND-DOMINANT (2026-05-20, task #198) — second anchor
+    // pool from konjnd-dense.parquet. The canonical konjnd-dense
+    // schema has `pjnd_target` (KonJND PJND threshold in ssim2 space)
+    // but the V11-D recipe uses a CONSTANT target=80.0 (the V10 PJND
+    // calibration point). Per-row weight is constant 1.0 (no
+    // preferential sampling on KonJND).
+    //
+    // We reuse `load_parquet` with `human_score` as the target column
+    // (any present score column works — it's discarded). After load
+    // we OVERRIDE row_weights to 1.0/row and drop the per-row
+    // target_scores so the global `--pjnd-passthrough-target-score`
+    // is used uniformly.
+    let (pjnd_feat_storage, pjnd_row_weights): (Vec<Vec<f64>>, Vec<f64>) = if let Some(pjnd_path) =
+        &args.pjnd_passthrough_parquet
+    {
+        if args.pjnd_passthrough_weight <= 0.0 {
+            eprintln!(
+                "WARNING: --pjnd-passthrough-parquet set but \
+                 --pjnd-passthrough-weight is 0; pjnd anchor data will be ignored."
+            );
+        }
+        let loader = zensim_validate::parquet_loader::load_parquet(
+            pjnd_path,
+            "pjnd_anchor",
+            "human_score",
+            1.0,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("pjnd-passthrough parquet load failed: {e}");
+            std::process::exit(1);
+        });
+        let cap = n_features;
+        let mut feat: Vec<Vec<f64>> = loader.feature_rows;
+        for row in &mut feat {
+            row.truncate(cap);
+        }
+        // Apply feature transforms in-place if active (same as groups).
+        if let Some(ts) = &feature_transforms {
+            let pp = feature_transform_params.as_ref();
+            for row in &mut feat {
+                for (i, t) in ts.iter().enumerate() {
+                    if *t != zenpredict::FeatureTransform::Identity {
+                        let p = pp.map(|v| v[i].as_slice()).unwrap_or(&[][..]);
+                        row[i] = t.apply_with_params(row[i] as f32, p) as f64;
+                    }
+                }
+            }
+        }
+        // V11-D: constant per-row weight 1.0 (no preferential sampling).
+        let weights = vec![1.0_f64; feat.len()];
+        eprintln!(
+            "pjnd-passthrough parquet: loaded {} rows from {:?} (CONSTANT row_weight=1.0, global target_score={}, weight={}, step_p={})",
+            feat.len(),
+            pjnd_path,
+            args.pjnd_passthrough_target_score,
+            args.pjnd_passthrough_weight,
+            args.pjnd_passthrough_step_p,
+        );
+        (feat, weights)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let pjnd_feat_refs: Vec<&[f64]> = pjnd_feat_storage.iter().map(|r| r.as_slice()).collect();
+    let pjnd_anchor_loaded: Option<AnchorRows<'_>> =
+        if args.pjnd_passthrough_parquet.is_some() && !pjnd_feat_storage.is_empty() {
+            Some(AnchorRows {
+                name: "pjnd_passthrough".to_string(),
+                features: pjnd_feat_refs.as_slice(),
+                row_weights: pjnd_row_weights.as_slice(),
+                target_scores: None, // global fallback to --pjnd-passthrough-target-score
+            })
+        } else {
+            None
+        };
+
     let mut log: Vec<String> = Vec::new();
 
     // GPU trainer dispatch (task #166, 2026-05-19). Only active when
@@ -2085,6 +2192,8 @@ fn main() {
             dynamic_range_sigma_threshold: hyperparams.dynamic_range_sigma_threshold,
             dynamic_range_step_p: hyperparams.dynamic_range_step_p,
             minibatch_k_aux: args.gpu_minibatch_k_aux.max(1),
+            pjnd_passthrough_weight: hyperparams.pjnd_passthrough_weight,
+            pjnd_passthrough_step_p: hyperparams.pjnd_passthrough_step_p,
         };
         log.push(format!(
             "GPU trainer: runtime={gpu_runtime_str:?} hparams={gpu_hp:?}"
@@ -2137,13 +2246,38 @@ fn main() {
                     row_weights: e.row_weights,
                     butter_diff: e.butter_diff,
                 });
-        let res = zensim_train_gpu::train_per_sample_alpha_head_gpu_with_aux(
+        // EXP-V11-D-PJND-DOMINANT — GPU needs per-row targets (no global
+        // fallback on the GPU side). Materialize from
+        // --pjnd-passthrough-target-score when pjnd_anchor_loaded
+        // ships no `target_scores` slice.
+        let gpu_pjnd_targets_owned: Option<Vec<f64>> =
+            if let Some(pa) = pjnd_anchor_loaded.as_ref() {
+                if pa.target_scores.is_some() {
+                    None
+                } else {
+                    Some(vec![args.pjnd_passthrough_target_score; pa.features.len()])
+                }
+            } else {
+                None
+            };
+        let gpu_pjnd_anchor: Option<zensim_train_gpu::GpuAnchorRows<'_>> = pjnd_anchor_loaded
+            .as_ref()
+            .map(|pa| zensim_train_gpu::GpuAnchorRows {
+                name: pa.name.clone(),
+                features: pa.features,
+                row_weights: pa.row_weights,
+                target_scores: pa
+                    .target_scores
+                    .unwrap_or(gpu_pjnd_targets_owned.as_deref().unwrap_or(&[])),
+            });
+        let res = zensim_train_gpu::train_per_sample_alpha_head_gpu_with_aux_pjnd(
             &core_groups,
             &gpu_hp,
             n_features,
             runtime,
             gpu_anchor.as_ref(),
             gpu_equiv.as_ref(),
+            gpu_pjnd_anchor.as_ref(),
         );
         log.push(format!(
             "GPU trainer: {} batches in {:.2} s ({:.1} batches/s)",
@@ -2160,7 +2294,7 @@ fn main() {
             zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3(&res.model)
         }
     } else {
-        train_mlp_with_tv_anchored_equiv(
+        train_mlp_with_tv_anchored_equiv_pjnd(
             &groups,
             n_features,
             &hyperparams,
@@ -2168,6 +2302,7 @@ fn main() {
             tv_regularizer.as_ref(),
             anchor_loaded.as_ref(),
             equiv_loaded.as_ref(),
+            pjnd_anchor_loaded.as_ref(),
         )
     };
 

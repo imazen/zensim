@@ -18,12 +18,21 @@ pub(crate) fn dispatch(
     runtime: GpuRuntime,
     anchor: Option<&GpuAnchorRows<'_>>,
     equiv: Option<&GpuEquivPairs<'_>>,
+    pjnd_anchor: Option<&GpuAnchorRows<'_>>,
 ) -> GpuTrainResult {
     match runtime {
         #[cfg(feature = "gpu-cuda")]
         GpuRuntime::Cuda => {
             let client = <cubecl::cuda::CudaRuntime as Runtime>::client(&Default::default());
-            run::<cubecl::cuda::CudaRuntime>(client, groups, hp, n_features, anchor, equiv)
+            run::<cubecl::cuda::CudaRuntime>(
+                client,
+                groups,
+                hp,
+                n_features,
+                anchor,
+                equiv,
+                pjnd_anchor,
+            )
         }
         #[cfg(not(feature = "gpu-cuda"))]
         GpuRuntime::Cuda => panic!(
@@ -32,7 +41,15 @@ pub(crate) fn dispatch(
         #[cfg(feature = "gpu-wgpu")]
         GpuRuntime::Wgpu => {
             let client = <cubecl::wgpu::WgpuRuntime as Runtime>::client(&Default::default());
-            run::<cubecl::wgpu::WgpuRuntime>(client, groups, hp, n_features, anchor, equiv)
+            run::<cubecl::wgpu::WgpuRuntime>(
+                client,
+                groups,
+                hp,
+                n_features,
+                anchor,
+                equiv,
+                pjnd_anchor,
+            )
         }
         #[cfg(not(feature = "gpu-wgpu"))]
         GpuRuntime::Wgpu => panic!(
@@ -41,7 +58,15 @@ pub(crate) fn dispatch(
         #[cfg(feature = "gpu-cpu")]
         GpuRuntime::Cpu => {
             let client = <cubecl::cpu::CpuRuntime as Runtime>::client(&Default::default());
-            run::<cubecl::cpu::CpuRuntime>(client, groups, hp, n_features, anchor, equiv)
+            run::<cubecl::cpu::CpuRuntime>(
+                client,
+                groups,
+                hp,
+                n_features,
+                anchor,
+                equiv,
+                pjnd_anchor,
+            )
         }
         #[cfg(not(feature = "gpu-cpu"))]
         GpuRuntime::Cpu => panic!(
@@ -285,6 +310,7 @@ fn run<R: Runtime>(
     n_features: usize,
     anchor: Option<&GpuAnchorRows<'_>>,
     equiv: Option<&GpuEquivPairs<'_>>,
+    pjnd_anchor: Option<&GpuAnchorRows<'_>>,
 ) -> GpuTrainResult {
     let n_hidden = hp.n_hidden;
     let k_batch = hp.minibatch_k;
@@ -322,6 +348,8 @@ fn run<R: Runtime>(
     let equiv_active = equiv.is_some() && hp.cross_codec_eq_weight > 0.0;
     let rank_preserve_active = equiv_active && hp.cross_codec_rank_preserve_weight > 0.0;
     let sigma_floor_active = equiv_active && hp.dynamic_range_floor_weight > 0.0 && probe_n >= 2;
+    // EXP-V11-D-PJND-DOMINANT (task #198) second anchor pool.
+    let pjnd_active = pjnd_anchor.is_some() && hp.pjnd_passthrough_weight > 0.0;
 
     let std_anchor = if anchor_active {
         let a = anchor.unwrap();
@@ -339,6 +367,30 @@ fn run<R: Runtime>(
             a.features,
             a.row_weights,
             Some(a.target_scores),
+            &mean,
+            &scale,
+            n_features,
+        ))
+    } else {
+        None
+    };
+
+    let std_pjnd = if pjnd_active {
+        let pa = pjnd_anchor.unwrap();
+        assert_eq!(
+            pa.features.len(),
+            pa.row_weights.len(),
+            "pjnd_anchor.features.len() != pjnd_anchor.row_weights.len()"
+        );
+        assert_eq!(
+            pa.features.len(),
+            pa.target_scores.len(),
+            "pjnd_anchor.features.len() != pjnd_anchor.target_scores.len()"
+        );
+        Some(standardize_aux_rows(
+            pa.features,
+            pa.row_weights,
+            Some(pa.target_scores),
             &mean,
             &scale,
             n_features,
@@ -481,11 +533,19 @@ fn run<R: Runtime>(
     let mut aux_anchor_weights_host = vec![0.0_f32; k_aux];
     let mut aux_eq_weights_host = vec![0.0_f32; k_aux];
     let mut aux_eq_butter_host = vec![0.0_f32; k_aux];
+    // EXP-V11-D-PJND-DOMINANT (task #198) — distinct host scratch
+    // for the second anchor pool. Reuses aux_x_host (anchor + pjnd
+    // never fire on the SAME aux kernel launch since each goes
+    // through its own fire_anchor_aux call; the host buffer is
+    // refilled before each launch).
+    let mut aux_pjnd_targets_host = vec![0.0_f32; k_aux];
+    let mut aux_pjnd_weights_host = vec![0.0_f32; k_aux];
     let anchor_w_f32 = hp.anchor_loss_weight as f32;
     let eq_w_f32 = hp.cross_codec_eq_weight as f32;
     let rp_w_f32 = hp.cross_codec_rank_preserve_weight as f32;
     let dr_w_f32 = hp.dynamic_range_floor_weight as f32;
     let dr_sigma_f32 = hp.dynamic_range_sigma_threshold as f32;
+    let pjnd_w_f32 = hp.pjnd_passthrough_weight as f32;
     // 4-element reduce output: [μ, σ_obs, grad_scale, loss]
     let sigma_reduce_h = alloc_f32(&zeros(4));
 
@@ -763,6 +823,65 @@ fn run<R: Runtime>(
                             &mut aux_anchor_weights_host,
                             k_aux,
                             anchor_w_f32,
+                        );
+                    }
+                }
+            }
+
+            // EXP-V11-D-PJND-DOMINANT (task #198) — PJND-passthrough
+            // anchor fires independently of the primary V11 anchor.
+            // Both pools may fire on the same minibatch step; their
+            // gradients accumulate into the shared adam.g* buffer
+            // before the single Adam step at end-of-step.
+            if pjnd_active && rng.next_f64_01() < hp.pjnd_passthrough_step_p {
+                if let Some(std_pa) = std_pjnd.as_ref() {
+                    if std_pa.n_rows > 0 && std_pa.total_weight > 0.0 {
+                        let ctx = AuxFireCtx::<R> {
+                            client: &client,
+                            cube_dim_h,
+                            cube_dim_256,
+                            n_features,
+                            n_hidden,
+                            two_k,
+                            tanh_scale,
+                            leaky_alpha,
+                            w1_h: &w1_h,
+                            b1_h: &b1_h,
+                            rank_w_h: &rank_w_h,
+                            reducer_w_h: &reducer_w_h,
+                            w_alpha_h: &w_alpha_h,
+                            rank_b_h: &rank_b_h,
+                            reducer_b_h: &reducer_b_h,
+                            b_alpha_h: &b_alpha_h,
+                            h_pre_h: &h_pre_h,
+                            h_h: &h_h,
+                            y_rank_h: &y_rank_h,
+                            y_pool_h: &y_pool_h,
+                            stats_h: &stats_h,
+                            max_idx_h: &max_idx_h,
+                            alpha_h: &alpha_h,
+                            y_pre_h: &y_pre_h,
+                            y_score_h: &y_score_h,
+                            dl_dypre_h: &dl_dypre_h,
+                            dh_pre_h: &dh_pre_h,
+                            gw1: &gw1,
+                            gb1: &gb1,
+                            g_rank_w: &g_rank_w,
+                            g_reducer_w: &g_reducer_w,
+                            g_w_alpha: &g_w_alpha,
+                            g_rank_b: &g_rank_b,
+                            g_reducer_b: &g_reducer_b,
+                            g_b_alpha: &g_b_alpha,
+                        };
+                        fire_anchor_aux::<R>(
+                            &ctx,
+                            &mut rng,
+                            std_pa,
+                            &mut aux_x_host,
+                            &mut aux_pjnd_targets_host,
+                            &mut aux_pjnd_weights_host,
+                            k_aux,
+                            pjnd_w_f32,
                         );
                     }
                 }

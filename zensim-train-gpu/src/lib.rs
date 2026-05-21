@@ -151,6 +151,15 @@ pub struct GpuHparams {
     /// GPU. CPU is K=1 per fire; GPU amortizes across larger K so each
     /// kernel launch is worth the overhead.
     pub minibatch_k_aux: usize,
+
+    // ---- EXP-V11-D-PJND-DOMINANT (2026-05-20, task #198) ----
+    /// PJND-passthrough anchor loss weight (second anchor pool, distinct
+    /// from `anchor_loss_weight`). Per row: `w · row_w · (y − target)²`.
+    /// 0 disables (data ignored even if supplied).
+    pub pjnd_passthrough_weight: f64,
+    /// Probability per minibatch step that the PJND-passthrough kernel
+    /// fires. Each fire processes `minibatch_k_aux` rows.
+    pub pjnd_passthrough_step_p: f64,
 }
 
 impl Default for GpuHparams {
@@ -179,6 +188,8 @@ impl Default for GpuHparams {
             dynamic_range_sigma_threshold: 15.0,
             dynamic_range_step_p: 0.10,
             minibatch_k_aux: 32,
+            pjnd_passthrough_weight: 0.0,
+            pjnd_passthrough_step_p: 0.30,
         }
     }
 }
@@ -263,7 +274,7 @@ pub fn train_per_sample_alpha_head_gpu(
     n_features: usize,
     runtime: GpuRuntime,
 ) -> GpuTrainResult {
-    backend::dispatch(groups, hp, n_features, runtime, None, None)
+    backend::dispatch(groups, hp, n_features, runtime, None, None, None)
 }
 
 /// Phase 2 entry point — same as [`train_per_sample_alpha_head_gpu`]
@@ -288,7 +299,27 @@ pub fn train_per_sample_alpha_head_gpu_with_aux(
     anchor: Option<&GpuAnchorRows<'_>>,
     equiv: Option<&GpuEquivPairs<'_>>,
 ) -> GpuTrainResult {
-    backend::dispatch(groups, hp, n_features, runtime, anchor, equiv)
+    backend::dispatch(groups, hp, n_features, runtime, anchor, equiv, None)
+}
+
+/// EXP-V11-D-PJND-DOMINANT (2026-05-20, task #198) entry — same as
+/// [`train_per_sample_alpha_head_gpu_with_aux`] but accepts a SECOND
+/// anchor pool (`pjnd_anchor`) for the KonJND-PJND passthrough loss.
+/// The pjnd pool fires independently with `hp.pjnd_passthrough_step_p`
+/// and `hp.pjnd_passthrough_weight`; both anchor pools may fire on the
+/// same minibatch step and contribute additively to the gradient buffer
+/// before the Adam update.
+#[cfg(any(feature = "gpu-cuda", feature = "gpu-wgpu", feature = "gpu-cpu"))]
+pub fn train_per_sample_alpha_head_gpu_with_aux_pjnd(
+    groups: &[TrainingGroup<'_>],
+    hp: &GpuHparams,
+    n_features: usize,
+    runtime: GpuRuntime,
+    anchor: Option<&GpuAnchorRows<'_>>,
+    equiv: Option<&GpuEquivPairs<'_>>,
+    pjnd_anchor: Option<&GpuAnchorRows<'_>>,
+) -> GpuTrainResult {
+    backend::dispatch(groups, hp, n_features, runtime, anchor, equiv, pjnd_anchor)
 }
 
 /// Stub for builds without any `gpu-*` feature.
@@ -314,6 +345,23 @@ pub fn train_per_sample_alpha_head_gpu_with_aux(
     _runtime: GpuRuntime,
     _anchor: Option<&GpuAnchorRows<'_>>,
     _equiv: Option<&GpuEquivPairs<'_>>,
+) -> GpuTrainResult {
+    panic!(
+        "zensim-train-gpu: no GPU backend compiled in. \
+         Rebuild with --features gpu-cuda (or gpu-wgpu / gpu-cpu)."
+    );
+}
+
+/// Stub for builds without any `gpu-*` feature (PJND-passthrough entry).
+#[cfg(not(any(feature = "gpu-cuda", feature = "gpu-wgpu", feature = "gpu-cpu")))]
+pub fn train_per_sample_alpha_head_gpu_with_aux_pjnd(
+    _groups: &[TrainingGroup<'_>],
+    _hp: &GpuHparams,
+    _n_features: usize,
+    _runtime: GpuRuntime,
+    _anchor: Option<&GpuAnchorRows<'_>>,
+    _equiv: Option<&GpuEquivPairs<'_>>,
+    _pjnd_anchor: Option<&GpuAnchorRows<'_>>,
 ) -> GpuTrainResult {
     panic!(
         "zensim-train-gpu: no GPU backend compiled in. \

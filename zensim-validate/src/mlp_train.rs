@@ -603,6 +603,37 @@ pub struct MlpHyperparams {
     /// jitter); pinning the output at training time eliminates the
     /// β-amplification path entirely.
     pub tanh_output_head_scale: f64,
+
+    /// EXP-V11-D-PJND-DOMINANT (2026-05-20, task #198) KonJND-PJND
+    /// passthrough anchor weight. Wires a SECOND anchor pool alongside
+    /// the existing `anchor_loss_weight` cross-codec-eq anchor. The pool
+    /// is drawn from `train/konjnd-dense.parquet`; every sampled row
+    /// regresses to `pjnd_passthrough_target_score` via
+    /// `w · (y_score − target)²`. Per-row weight is constant 1.0
+    /// (no per-row weighting on the KonJND PJND pool).
+    ///
+    /// Tested hypothesis: a PJND anchor passthrough at weight >>
+    /// `cross_codec_eq_weight` can break the cross-codec-eq + KonJND
+    /// bistability so that some w-band lets cc_eq fire without
+    /// catastrophic KonJND collapse. Either it breaks the basin
+    /// (KonJND survives) or it's overrun by cc_eq (KonJND still
+    /// collapses), and the result closes V11 with structural finality.
+    ///
+    /// Default `0.0` = off. Only wired on the per-sample-α head.
+    pub pjnd_passthrough_weight: f64,
+
+    /// EXP-V11-D-PJND-DOMINANT probability per pair-step that the
+    /// PJND-passthrough anchor fires. Default `0.30`. Higher values
+    /// give the PJND anchor more gradient bandwidth at the cost of
+    /// pair-loss + cross-codec-eq bandwidth. Only effective when
+    /// `pjnd_passthrough_weight > 0`.
+    pub pjnd_passthrough_step_p: f64,
+
+    /// EXP-V11-D-PJND-DOMINANT constant target score that every
+    /// PJND-passthrough row regresses to. Default `80.0` matches the
+    /// V10 PJND-anchored calibration (V10 maps PJND ssim2≈63 to
+    /// score=80). Only effective when `pjnd_passthrough_weight > 0`.
+    pub pjnd_passthrough_target_score: f64,
 }
 
 impl Default for MlpHyperparams {
@@ -650,6 +681,9 @@ impl Default for MlpHyperparams {
             dynamic_range_step_p: 0.05,
             dynamic_range_probe_n: 40,
             tanh_output_head_scale: 0.0,
+            pjnd_passthrough_weight: 0.0,
+            pjnd_passthrough_step_p: 0.30,
+            pjnd_passthrough_target_score: 80.0,
         }
     }
 }
@@ -884,6 +918,42 @@ pub fn train_mlp_with_tv_anchored_equiv(
     anchor: Option<&AnchorRows<'_>>,
     equiv: Option<&EquivPairs<'_>>,
 ) -> Vec<u8> {
+    train_mlp_with_tv_anchored_equiv_pjnd(
+        groups,
+        n_features,
+        hyperparams,
+        log,
+        tv,
+        anchor,
+        equiv,
+        None,
+    )
+}
+
+/// EXP-V11-D-PJND-DOMINANT entry point (2026-05-20, task #198) with
+/// optional SECOND anchor pool (`pjnd_anchor`) for the KonJND-PJND
+/// passthrough loss. Functions identically to the cross-codec-eq
+/// anchor pool, but fires with `hyperparams.pjnd_passthrough_step_p`
+/// and applies `pjnd_passthrough_weight · row_w · (y − target)²`
+/// where `target` is per-row from `pjnd_anchor.target_scores` if
+/// supplied, else `hyperparams.pjnd_passthrough_target_score`.
+///
+/// The pjnd pool is independent of the V11 cross-codec-eq anchor;
+/// both may be active simultaneously (this is the V11-D experimental
+/// setup — see CLAUDE.md task #198).
+///
+/// Only wired on the `per_sample_alpha_head = true` path; ignored
+/// elsewhere (with a warning).
+pub fn train_mlp_with_tv_anchored_equiv_pjnd(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+    anchor: Option<&AnchorRows<'_>>,
+    equiv: Option<&EquivPairs<'_>>,
+    pjnd_anchor: Option<&AnchorRows<'_>>,
+) -> Vec<u8> {
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
     // time for the architectural lift (GMSD's std-pooling +
@@ -911,12 +981,19 @@ pub fn train_mlp_with_tv_anchored_equiv(
             log,
             anchor,
             equiv,
+            pjnd_anchor,
         );
     }
     if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
         eprintln!(
             "WARNING: --anchor-loss-weight is only wired on the per-sample-α head; \
              anchor data ignored on this head."
+        );
+    }
+    if pjnd_anchor.is_some() && hyperparams.pjnd_passthrough_weight > 0.0 {
+        eprintln!(
+            "WARNING: --pjnd-passthrough-weight is only wired on the per-sample-α head; \
+             pjnd anchor data ignored on this head."
         );
     }
     if hyperparams.hybrid_head {
@@ -4826,6 +4903,7 @@ fn train_mlp_per_sample_alpha_head(
     log: &mut Vec<String>,
     anchor: Option<&AnchorRows<'_>>,
     equiv: Option<&EquivPairs<'_>>,
+    pjnd_anchor: Option<&AnchorRows<'_>>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
@@ -4852,6 +4930,39 @@ fn train_mlp_per_sample_alpha_head(
     // is provided AND anchor_loss_weight > 0; otherwise it's a no-op.
     let anchor_active = anchor.is_some() && hyperparams.anchor_loss_weight > 0.0;
     let equiv_active = equiv.is_some() && hyperparams.cross_codec_eq_weight > 0.0;
+    // EXP-V11-D-PJND-DOMINANT (task #198) — second anchor pool.
+    let pjnd_active = pjnd_anchor.is_some() && hyperparams.pjnd_passthrough_weight > 0.0;
+    if let Some(pa) = pjnd_anchor {
+        assert_eq!(
+            pa.features.len(),
+            pa.row_weights.len(),
+            "pjnd_anchor '{}': features/row_weights length mismatch",
+            pa.name
+        );
+        for (i, f) in pa.features.iter().enumerate() {
+            assert_eq!(
+                f.len(),
+                n_features,
+                "pjnd_anchor '{}' row {}: feature length {} != n_features {}",
+                pa.name,
+                i,
+                f.len(),
+                n_features
+            );
+        }
+    }
+    if pjnd_active {
+        assert!(
+            hyperparams.norm_in_norm_weight == 0.0,
+            "per_sample_alpha_head + NiN: pjnd-passthrough is not yet composed with NiN. \
+             Disable NiN (--norm-in-norm-weight 0) or set --pjnd-passthrough-weight 0."
+        );
+        assert!(
+            (0.0..=1.0).contains(&hyperparams.pjnd_passthrough_step_p),
+            "--pjnd-passthrough-step-p must be in [0, 1]; got {}",
+            hyperparams.pjnd_passthrough_step_p
+        );
+    }
     if let Some(e) = equiv {
         assert_eq!(
             e.features_a.len(),
@@ -5185,6 +5296,67 @@ fn train_mlp_per_sample_alpha_head(
             );
         }
         (Vec::new(), Vec::new(), Vec::new(), 0.0)
+    };
+
+    // EXP-V11-D-PJND-DOMINANT (2026-05-20, task #198) — second anchor
+    // pool (KonJND-PJND passthrough). Standardize against the SAME
+    // training-group scaler. Build a row-weight CDF mirroring the
+    // primary anchor pool's machinery.
+    let (
+        std_pjnd_features,
+        pjnd_row_cdf,
+        pjnd_total_weight,
+    ): (Vec<Vec<f64>>, Vec<f64>, f64) = if let (Some(pa), true) = (pjnd_anchor, pjnd_active) {
+        let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(pa.features.len());
+        for &f in pa.features.iter() {
+            let mut buf = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+            bufs.push(buf);
+        }
+        let total: f64 = pa.row_weights.iter().sum();
+        let mut cum = 0.0f64;
+        let cdf: Vec<f64> = pa
+            .row_weights
+            .iter()
+            .map(|&w| {
+                cum += w.max(0.0);
+                if total > 0.0 { cum / total } else { 0.0 }
+            })
+            .collect();
+        let target_mode = if pa
+            .target_scores
+            .map(|ts| ts.len() == pa.features.len())
+            .unwrap_or(false)
+        {
+            "PER-ROW".to_string()
+        } else {
+            format!(
+                "{:.2} (global)",
+                hyperparams.pjnd_passthrough_target_score
+            )
+        };
+        log_line(
+            &format!(
+                "pjnd-passthrough: ENABLED — '{}' n={} target_score={} step_p={:.3} weight={:.3}",
+                pa.name,
+                pa.features.len(),
+                target_mode,
+                hyperparams.pjnd_passthrough_step_p,
+                hyperparams.pjnd_passthrough_weight
+            ),
+            log,
+        );
+        (bufs, cdf, total)
+    } else {
+        if pjnd_anchor.is_some() && !pjnd_active {
+            log_line(
+                "pjnd-passthrough: data supplied but pjnd_passthrough_weight = 0 — ignored",
+                log,
+            );
+        }
+        (Vec::new(), Vec::new(), 0.0)
     };
 
     let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
@@ -5798,6 +5970,136 @@ fn train_mlp_per_sample_alpha_head(
                                 let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
                                 let dl_dy = scale * err * dya_dpre;
                                 let loss = hyperparams.anchor_loss_weight * row_w * err * err;
+                                total_loss += loss;
+                                n_steps += 1;
+
+                                psah::backprop_step_per_sample_alpha_head(
+                                    xa,
+                                    &ha_pre_a,
+                                    &ha_a,
+                                    &sa_a,
+                                    max_a_a,
+                                    ya_rank_a,
+                                    ya_pool_a,
+                                    alpha_a_a,
+                                    dl_dy,
+                                    &rank_w,
+                                    &reducer_w,
+                                    &w_alpha,
+                                    &mut adam.gw1,
+                                    &mut adam.gb1,
+                                    &mut g_rank_w_buf,
+                                    &mut g_rank_b_buf,
+                                    &mut g_red_w,
+                                    &mut g_red_b,
+                                    &mut g_w_alpha_buf,
+                                    &mut g_b_alpha,
+                                    n_features,
+                                    n_hidden,
+                                    leaky,
+                                );
+                                any_step = true;
+                            }
+
+                            if any_step {
+                                if hyperparams.l2_lambda > 0.0 {
+                                    let l2 = hyperparams.l2_lambda;
+                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                        *g += l2 * w;
+                                    }
+                                    for j in 0..n_hidden {
+                                        g_rank_w_buf[j] += l2 * rank_w[j];
+                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                    }
+                                    for kk in 0..4 {
+                                        g_red_w[kk] += l2 * reducer_w[kk];
+                                    }
+                                }
+
+                                for j in 0..n_hidden {
+                                    adam.gw2[j] += g_rank_w_buf[j];
+                                }
+                                for kk in 0..4 {
+                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
+                                }
+                                for j in 0..n_hidden {
+                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                }
+                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gb2[0] += g_rank_b_buf;
+                                adam.gb2[1] += g_red_b;
+
+                                do_adam_step(
+                                    &mut adam,
+                                    &mut w1,
+                                    &mut b1,
+                                    &mut rank_w,
+                                    &mut rank_b,
+                                    &mut reducer_w,
+                                    &mut reducer_b,
+                                    &mut w_alpha,
+                                    &mut b_alpha,
+                                    lr,
+                                    n_hidden,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // EXP-V11-D-PJND-DOMINANT PJND-passthrough step
+            // (2026-05-20, task #198). Structurally identical to the
+            // V11 cross-codec-eq anchor step above — second anchor
+            // pool with its own weight + step_p + target. Fires
+            // independently of the primary anchor; both may fire on
+            // the same Adam boundary so each contributes to the
+            // gradient accumulation pre-Adam-step.
+            if pjnd_active && steps_since_adam == 0 {
+                let u_take = rng.next_f64_unit();
+                if u_take < hyperparams.pjnd_passthrough_step_p {
+                    if let Some(pa) = pjnd_anchor {
+                        if !std_pjnd_features.is_empty() && pjnd_total_weight > 0.0 {
+                            let n_pjnd = std_pjnd_features.len();
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_b_buf = 0.0f64;
+                            let mut g_red_w: [f64; 4] = [0.0; 4];
+                            let mut g_red_b: f64 = 0.0;
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_b_alpha: f64 = 0.0;
+                            let mut any_step = false;
+
+                            for _ in 0..k {
+                                let u_row = rng.next_f64_unit();
+                                let pi = pjnd_row_cdf
+                                    .partition_point(|&c| c < u_row)
+                                    .min(n_pjnd - 1);
+                                let xa = std_pjnd_features[pi].as_slice();
+                                let (
+                                    ya_pre,
+                                    ya_rank_a,
+                                    ya_pool_a,
+                                    alpha_a_a,
+                                    _,
+                                    ha_pre_a,
+                                    ha_a,
+                                    sa_a,
+                                    max_a_a,
+                                ) = psah::forward_per_sample_alpha_head(
+                                    xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
+                                    b_alpha, n_features, n_hidden, leaky,
+                                );
+                                let (ya, dya_dpre) = pin_forward(ya_pre);
+                                let target = pa
+                                    .target_scores
+                                    .and_then(|ts| ts.get(pi).copied())
+                                    .unwrap_or(hyperparams.pjnd_passthrough_target_score);
+                                let row_w = pa.row_weights[pi];
+                                let err = ya - target;
+                                let scale = 2.0 * hyperparams.pjnd_passthrough_weight * row_w;
+                                let dl_dy = scale * err * dya_dpre;
+                                let loss =
+                                    hyperparams.pjnd_passthrough_weight * row_w * err * err;
                                 total_loss += loss;
                                 n_steps += 1;
 
