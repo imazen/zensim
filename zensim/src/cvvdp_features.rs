@@ -141,16 +141,11 @@ pub fn extract_cvvdp_features(
 }
 
 /// Extract CVVDP-shape features with caller-supplied per-band CSF
-/// weights — the entry point for castleCSF Mode A. See
-/// [`crate::acumen::band_weights::compute_csf_band_weights`] for
-/// the typical caller; pass the resulting
-/// `BandCsfWeights::achromatic()` slice in for the achromatic-only
-/// band-energy ratio feature group.
+/// weights. The default [`extract_cvvdp_features`] uses the
+/// hardcoded `CSF_BAND_WEIGHTS` prior; this variant lets callers
+/// override (e.g., for per-viewing-condition experiments).
 ///
 /// Behaviour is otherwise identical to [`extract_cvvdp_features`].
-/// Gate A in `imazen/zensim#40` uses this entry point to train a
-/// MLP head against castleCSF-weighted features for direct
-/// comparison with the legacy hardcoded prior.
 ///
 /// # Panics
 ///
@@ -403,9 +398,7 @@ fn weber_contrast_bands(plane: &[f32], width: usize, height: usize, n_levels: us
 ///
 /// For each level k: compute mean(plane²) for ref pyramid and dist
 /// pyramid, take dist/ref ratio, multiply by `csf_weights[k]`. The
-/// canonical caller passes `&CSF_BAND_WEIGHTS` (legacy prior); the
-/// acumen Mode A caller passes per-image weights from
-/// [`crate::acumen::band_weights::compute_csf_band_weights`].
+/// canonical caller passes `&CSF_BAND_WEIGHTS` (legacy prior).
 fn csf_weighted_band_ratios(
     a_ref: &[f32],
     a_dist: &[f32],
@@ -659,88 +652,10 @@ mod tests {
         }
     }
 
-    /// `extract_cvvdp_features_with_csf_weights` with castleCSF-
-    /// derived per-image weights produces DIFFERENT band-ratio
-    /// features than the legacy hardcoded prior. The other feature
-    /// blocks (DKL stats, Weber bands, mutual-masking, Minkowski)
-    /// stay byte-identical because they don't depend on
-    /// `csf_weights`.
-    #[test]
-    fn castle_csf_weights_diverge_only_at_band_ratios() {
-        use crate::acumen::band_weights::compute_csf_band_weights;
-        use crate::acumen::castle_csf::CastleCsfLut;
-        use crate::acumen::viewing::ViewingCondition;
-
-        const LUT_BYTES: &[u8] =
-            include_bytes!("../data/castle_csf_v0_5_4_cvvdp.lut");
-        let lut = CastleCsfLut::from_bytes(LUT_BYTES).expect("LUT parse");
-
-        let mut state = 0xDEAD_BEEF_u32;
-        let n_pix = 24 * 24;
-        let mut r_img = Vec::with_capacity(n_pix * 3);
-        let mut d_img = Vec::with_capacity(n_pix * 3);
-        for _ in 0..(n_pix * 3) {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            r_img.push((state & 0xFF) as u8);
-        }
-        for _ in 0..(n_pix * 3) {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            d_img.push((state & 0xFF) as u8);
-        }
-        // Image-mean L at lab reference using BT.709 luma; pick a
-        // mid-gray-ish value so we're well inside the LUT's
-        // valid L_bkg range.
-        let weights = compute_csf_band_weights(
-            &lut,
-            ViewingCondition::LAB_REFERENCE,
-            30.0,
-        );
-        let castle = weights.achromatic();
-        let default = extract_cvvdp_features(&r_img, &d_img, 24, 24);
-        let custom =
-            extract_cvvdp_features_with_csf_weights(&r_img, &d_img, 24, 24, castle);
-
-        // Feature blocks before band-ratios (offsets 0..14 = DKL
-        // stats + Weber bands) are byte-identical.
-        for i in 0..(N_DKL_STATS + N_WEBER_BANDS) {
-            assert_eq!(
-                default[i], custom[i],
-                "feature {i} should not depend on csf_weights"
-            );
-        }
-        // Band-ratio block differs by the same per-band factor.
-        let mut any_diff = false;
-        for k in 0..N_LEVELS {
-            let idx = N_DKL_STATS + N_WEBER_BANDS + k;
-            let d = default[idx];
-            let c = custom[idx];
-            if d.abs() > 1e-6 {
-                let observed_ratio = c / d;
-                let expected_ratio = castle[k] / CSF_BAND_WEIGHTS[k];
-                assert!(
-                    (observed_ratio - expected_ratio).abs() < 1e-3,
-                    "band {k}: observed scale {observed_ratio} vs expected {expected_ratio}"
-                );
-                if (default[idx] - custom[idx]).abs() > 1e-4 {
-                    any_diff = true;
-                }
-            }
-        }
-        assert!(
-            any_diff,
-            "expected at least one band-ratio to differ between default and castleCSF paths"
-        );
-
-        // Mutual-masking + Minkowski blocks are byte-identical.
-        for i in (N_DKL_STATS + N_WEBER_BANDS + N_CSF_RATIOS)..CVVDP_FEATURE_COUNT {
-            assert_eq!(
-                default[i], custom[i],
-                "feature {i} should not depend on csf_weights"
-            );
-        }
-    }
+    // (Removed test `castle_csf_weights_diverge_only_at_band_ratios`
+    // along with the castleCSF / acumen module on 2026-05-22 after
+    // the production-scale Mode B falsification. Preserved in
+    // `abandoned/feat-acumen-foundation`. The
+    // `extract_cvvdp_features_with_csf_weights` entry point itself
+    // remains tested by `custom_weights_match_default_when_passing_legacy_prior`.)
 }

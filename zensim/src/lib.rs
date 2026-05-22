@@ -226,15 +226,16 @@ pub mod cvvdp_features;
 #[cfg(feature = "training")]
 pub mod xyb_lms_features;
 
-// `acumen` — perceptual front-end primitives (castleCSF LUT today,
-// DKL + per-band weighting + contrast masking + HDR enable to come).
-// See `imazen/zensim#40` for the algorithm slate and ship gates.
-// Doc-hidden; surface stabilises once the slate lands.
-// Gated behind the `acumen` Cargo feature — non-acumen builds drop
-// the 132 KB embedded LUT and the entire module from the binary.
-#[cfg(feature = "acumen")]
+// `hdr_pu` — HDR / perceptually-uniform primitives. Single useful
+// artifact from the abandoned acumen / castleCSF Mode B exploration
+// (2026-05-21..22). Provides `ViewingCondition` + a simple adapted-
+// luminance estimator for future HDR-aware preprocessing.
+// The full castleCSF + Mode B work is preserved on the
+// `abandoned/feat-acumen-foundation` and `abandoned/feat-acumen-gpu`
+// branches; see `benchmarks/acumen_mode_b_production_recipe_2026-05-22.md`
+// for the NEGATIVE production-scale result that motivated stripping.
 #[doc(hidden)]
-pub mod acumen;
+pub mod hdr_pu;
 
 // --- Primary API ---
 pub use error::ZensimError;
