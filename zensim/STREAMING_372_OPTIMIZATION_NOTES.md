@@ -28,7 +28,7 @@ on the wall.
 
 ## Optimization 1: Zero-copy `PrecomputedReferenceView<'a>` (HIGHEST IMPACT)
 
-**Status**: queued
+**Status**: DONE — commit `15d3d70` ✓
 **Estimated win**: ~10–15% throughput at 80 MP, ~1 GB peak RSS reduction
 (eliminates the 65 MB strip copies × 16 rayon workers concurrent footprint),
 better L3 locality (parent pyramid stays in cache across strips).
@@ -94,7 +94,7 @@ mechanical change, ~30 lines across the file. No cross-module call sites
 
 ## Optimization 2: Per-rayon-worker scratch for `dst_planes`
 
-**Status**: queued
+**Status**: DONE — commit `a8d9c84` ✓
 **Estimated win**: ~640 MB allocation churn → ~48 MB resident (16 workers
 × 3 plane Vec). ~5-10% throughput on small-strip sizes where alloc
 overhead dominates.
@@ -189,15 +189,33 @@ Two test modes:
 
 Measured on safesyn 99-pair set, 16-core Zen 4:
 
+### Before Optimizations 1 + 2 (cherry-pick state, commit `ead257b`)
+
 | Geometry | Parallel (strip vs full) | Single-threaded |
 |---|---:|---:|
-| 256×1024 | **1.75×** | 0.87× |
+| 256×1024 | 1.75× | 0.87× |
 | 1024×2048 | 0.87× | 0.89× |
 
-Parallel target (≥ 1×) met at small sizes; single-threaded target
-(≥ 1.2×) not met. The plan doc says single-thread parity comes with
-Optimization 3 (streaming PrecomputedReference). Don't chase the 1.2×
-target before then.
+### After Optimizations 1 + 2 (view refactor + scratch reuse, commit `a8d9c84`)
+
+| Geometry | Parallel strip/full | Parallel buffered/full | 1T strip/full |
+|---|---:|---:|---:|
+| 256×1024 | 1.35× | 1.04× | **1.60×** ✓ |
+| 1024×2048 | 1.07× | 0.92× | **1.49×** ✓ |
+
+**Single-threaded target ≥ 1.2× MET on both geometries** — the
+1T throughput improvement directly proves the view refactor + scratch
+reuse eliminated the per-strip alloc + memcpy overhead that was
+the Phase 1 1T bottleneck. The plan doc had targeted Optimization 3
+(streaming PrecomputedReference) for this win, but it's already done
+with the simpler view + scratch combination.
+
+The parallel 256×1024 strip/full ratio moved from 1.75× → 1.35× —
+slight regression at very small workloads. Hypothesis: `map_init`'s
+per-worker scratch initialization cost is amortized poorly when each
+worker only processes 1–2 strips. Worth follow-up to detect-small +
+fall back to per-strip Vec::new (probably ~5% gain at this size; not
+worth doing until profiling confirms `map_init` is the cause).
 
 ## How to execute the next commit
 
