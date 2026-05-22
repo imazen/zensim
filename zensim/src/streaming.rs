@@ -1325,6 +1325,10 @@ fn process_strip_channel(
         let do_iw = config.compute_iw_features;
         let need_activity = do_ext || do_iw;
         if need_activity {
+            // Lazy-allocate the per-channel H-blur buffer — basic-only
+            // paths skipped this branch entirely and pay no allocation.
+            bufs.ensure_h_blur_src(strip_h * width);
+
             let inner_off = inner_start * width;
             let inner_n = inner_h * width;
             let strip_n = strip_h * width;
@@ -1564,6 +1568,13 @@ fn process_strip_channel(
             strip_h,
             config.blur_radius,
         );
+    }
+
+    // Lazy-allocate h_blur_src up-front (only when activity is needed) so
+    // the borrow lives outside the immutable-field-slice borrows below.
+    // Basic-only paths skip this entirely and pay no allocation cost.
+    if config.extended_features || config.compute_iw_features {
+        bufs.ensure_h_blur_src(strip_h * width);
     }
 
     let inner_off = inner_start * width;

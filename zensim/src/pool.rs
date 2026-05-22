@@ -1,6 +1,11 @@
 //! Buffer pool for reusable allocations across metric computation.
 
 /// Pre-allocated buffers for metric computation, reused across scales.
+///
+/// `h_blur_src` is **lazy-allocated** — basic-only paths (no extended
+/// or IW features) never touch it, paying no allocation cost. Callers
+/// in the `need_activity` branch must invoke `ensure_h_blur_src(size)`
+/// before any read/write to the field.
 pub(crate) struct ScaleBuffers {
     pub mul_buf: Vec<f32>,
     pub mu1: Vec<f32>,
@@ -13,10 +18,10 @@ pub(crate) struct ScaleBuffers {
     pub mask: Vec<f32>,
     /// Strip-local H-blur of the current channel's source. Used as the
     /// per-channel "local mean" reference for the masked/IW activity
-    /// computation (`activity = box_blur(|src - h_blur_src|)`). See
-    /// `docs/PRINCIPLED_ACTIVITY.md`. Decouples the activity signal
-    /// from cross-channel `bufs.mu1` reuse — every channel sees its
-    /// own H-blurred source at all strip rows (inner + overlap).
+    /// computation. **Lazy-allocated** — empty by default; call
+    /// `ensure_h_blur_src(strip_n)` before first use. Allocating only
+    /// when needed restores basic-path perf to the pre-2dab8f3 baseline
+    /// at large image sizes (TLB/cache pressure relief).
     pub h_blur_src: Vec<f32>,
 }
 
@@ -30,7 +35,7 @@ impl ScaleBuffers {
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
             mask: vec![0.0; size],
-            h_blur_src: vec![0.0; size],
+            h_blur_src: Vec::new(),
         }
     }
 
@@ -42,6 +47,17 @@ impl ScaleBuffers {
         self.sigma12.resize(size, 0.0);
         self.temp_blur.resize(size, 0.0);
         self.mask.resize(size, 0.0);
-        self.h_blur_src.resize(size, 0.0);
+        if !self.h_blur_src.is_empty() {
+            self.h_blur_src.resize(size, 0.0);
+        }
+    }
+
+    /// Lazy-grow `h_blur_src` to at least `size` elements. Called by the
+    /// activity-needing path before first use; basic-only paths skip
+    /// the allocation entirely.
+    pub fn ensure_h_blur_src(&mut self, size: usize) {
+        if self.h_blur_src.len() < size {
+            self.h_blur_src.resize(size, 0.0);
+        }
     }
 }
