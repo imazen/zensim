@@ -738,6 +738,399 @@ fn box_blur_h_inner(
     }
 }
 
+/// Phase 2 Lever 3 (2026-05-22): fused horizontal blur with abs-diff
+/// activity output. Computes `|src[i] - box_blur_h(src)[i]|` in one pass —
+/// the intermediate H-blur plane is never materialized.
+///
+/// Replaces `box_blur_h(src, h_blur_src) + abs_diff_into(src, h_blur_src,
+/// activity)` (two separate full-plane passes) with a single SIMD kernel.
+/// Saves one full plane read of src + one full plane write/read of
+/// h_blur_src per channel per scale on the activity path.
+pub(crate) fn box_blur_h_into_abs_diff(
+    src: &[f32],
+    out_activity: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    incant!(
+        box_blur_h_into_abs_diff_inner(src, out_activity, width, height, radius),
+        [v4, v3, neon, wasm128, scalar]
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn box_blur_h_into_abs_diff_inner_v4(
+    token: archmage::X64V4Token,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x16::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let row_groups = height / 16;
+
+    for rg in 0..row_groups {
+        let row_base = rg * 16;
+
+        let mut sum = f32x16::zero(token);
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut arr = [0.0f32; 16];
+            for ro in 0..16 {
+                arr[ro] = input[(row_base + ro) * width + idx];
+            }
+            sum = sum + f32x16::from_array(token, arr);
+        }
+
+        for x in 0..width {
+            // Gather src[col=x] for each of the 16 rows. These reads are
+            // shared with the running-sum updates below, so they're hot
+            // in L1 either way.
+            let mut src_arr = [0.0f32; 16];
+            for ro in 0..16 {
+                src_arr[ro] = input[(row_base + ro) * width + x];
+            }
+            let src_v = f32x16::from_array(token, src_arr);
+            let blur_v = sum * inv_v;
+            let act_v = (src_v - blur_v).abs();
+            let result = act_v.to_array();
+            for ro in 0..16 {
+                output[(row_base + ro) * width + x] = result[ro];
+            }
+
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+
+            let mut add_arr = [0.0f32; 16];
+            let mut rem_arr = [0.0f32; 16];
+            for ro in 0..16 {
+                let base = (row_base + ro) * width;
+                add_arr[ro] = input[base + add_idx];
+                rem_arr[ro] = input[base + rem_idx];
+            }
+            sum = sum + f32x16::from_array(token, add_arr) - f32x16::from_array(token, rem_arr);
+        }
+    }
+
+    // Remainder rows with v3 (f32x8)
+    let v3 = token.v3();
+    let inv_v8 = f32x8::splat(v3, 1.0 / diam as f32);
+    let remaining_start = row_groups * 16;
+    let remaining_8groups = (height - remaining_start) / 8;
+
+    for rg in 0..remaining_8groups {
+        let row_base = remaining_start + rg * 8;
+        let mut sum = f32x8::zero(v3);
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut arr = [0.0f32; 8];
+            for ro in 0..8 {
+                arr[ro] = input[(row_base + ro) * width + idx];
+            }
+            sum = sum + f32x8::from_array(v3, arr);
+        }
+        for x in 0..width {
+            let mut src_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                src_arr[ro] = input[(row_base + ro) * width + x];
+            }
+            let src_v = f32x8::from_array(v3, src_arr);
+            let act_v = (src_v - sum * inv_v8).abs();
+            let result = act_v.to_array();
+            for ro in 0..8 {
+                output[(row_base + ro) * width + x] = result[ro];
+            }
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let mut add_arr = [0.0f32; 8];
+            let mut rem_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width;
+                add_arr[ro] = input[base + add_idx];
+                rem_arr[ro] = input[base + rem_idx];
+            }
+            sum = sum + f32x8::from_array(v3, add_arr) - f32x8::from_array(v3, rem_arr);
+        }
+    }
+
+    // Scalar remainder
+    let inv = 1.0 / diam as f32;
+    for row in (remaining_start + remaining_8groups * 8)..height {
+        let row_off = row * width;
+        let inp = &input[row_off..row_off + width];
+        let out = &mut output[row_off..row_off + width];
+        let mut sum = 0.0f32;
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            sum += inp[idx];
+        }
+        for x in 0..width {
+            out[x] = (inp[x] - sum * inv).abs();
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            sum = sum + inp[add_idx] - inp[rem_idx];
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn box_blur_h_into_abs_diff_inner_v3(
+    token: archmage::X64V3Token,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    let diam = 2 * radius + 1;
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let row_groups = height / 8;
+
+    for rg in 0..row_groups {
+        let row_base = rg * 8;
+
+        let mut sum = f32x8::zero(token);
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut arr = [0.0f32; 8];
+            for ro in 0..8 {
+                arr[ro] = input[(row_base + ro) * width + idx];
+            }
+            sum = sum + f32x8::from_array(token, arr);
+        }
+        for x in 0..width {
+            let mut src_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                src_arr[ro] = input[(row_base + ro) * width + x];
+            }
+            let src_v = f32x8::from_array(token, src_arr);
+            let act_v = (src_v - sum * inv_v).abs();
+            let result = act_v.to_array();
+            for ro in 0..8 {
+                output[(row_base + ro) * width + x] = result[ro];
+            }
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let mut add_arr = [0.0f32; 8];
+            let mut rem_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width;
+                add_arr[ro] = input[base + add_idx];
+                rem_arr[ro] = input[base + rem_idx];
+            }
+            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+        }
+    }
+
+    // Scalar remainder
+    let inv = 1.0 / diam as f32;
+    for row in (row_groups * 8)..height {
+        let row_off = row * width;
+        let inp = &input[row_off..row_off + width];
+        let out = &mut output[row_off..row_off + width];
+        let mut sum = 0.0f32;
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            sum += inp[idx];
+        }
+        for x in 0..width {
+            out[x] = (inp[x] - sum * inv).abs();
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            sum = sum + inp[add_idx] - inp[rem_idx];
+        }
+    }
+}
+
+#[magetypes(neon, wasm128, scalar)]
+fn box_blur_h_into_abs_diff_inner(
+    token: Token,
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
+    let diam = 2 * radius + 1;
+    let inv_v = f32x8::splat(token, 1.0 / diam as f32);
+    let r = radius;
+    let row_groups = height / 8;
+
+    for rg in 0..row_groups {
+        let row_base = rg * 8;
+        let mut sum = f32x8::zero(token);
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            let mut arr = [0.0f32; 8];
+            for ro in 0..8 {
+                arr[ro] = input[(row_base + ro) * width + idx];
+            }
+            sum = sum + f32x8::from_array(token, arr);
+        }
+        for x in 0..width {
+            let mut src_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                src_arr[ro] = input[(row_base + ro) * width + x];
+            }
+            let src_v = f32x8::from_array(token, src_arr);
+            let act_v = (src_v - sum * inv_v).abs();
+            let result = act_v.to_array();
+            for ro in 0..8 {
+                output[(row_base + ro) * width + x] = result[ro];
+            }
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            let mut add_arr = [0.0f32; 8];
+            let mut rem_arr = [0.0f32; 8];
+            for ro in 0..8 {
+                let base = (row_base + ro) * width;
+                add_arr[ro] = input[base + add_idx];
+                rem_arr[ro] = input[base + rem_idx];
+            }
+            sum = sum + f32x8::from_array(token, add_arr) - f32x8::from_array(token, rem_arr);
+        }
+    }
+
+    let inv = 1.0 / diam as f32;
+    for row in (row_groups * 8)..height {
+        let row_off = row * width;
+        let inp = &input[row_off..row_off + width];
+        let out = &mut output[row_off..row_off + width];
+        let mut sum = 0.0f32;
+        for i in 0..diam {
+            let idx = if i <= r {
+                (r - i).min(width - 1)
+            } else {
+                (i - r).min(width - 1)
+            };
+            sum += inp[idx];
+        }
+        for x in 0..width {
+            out[x] = (inp[x] - sum * inv).abs();
+            let add_raw = x + r + 1;
+            let add_idx = if add_raw < width {
+                add_raw
+            } else {
+                2 * (width - 1) - add_raw
+            };
+            let add_idx = add_idx.min(width - 1);
+            let rem_i = x as isize - r as isize;
+            let rem_idx = if rem_i < 0 {
+                rem_i.unsigned_abs()
+            } else {
+                rem_i as usize
+            };
+            let rem_idx = rem_idx.min(width - 1);
+            sum = sum + inp[add_idx] - inp[rem_idx];
+        }
+    }
+}
+
 /// Fused horizontal blur for means: computes blur(src) and blur(dst) in a single pass.
 /// Reads each pixel of src/dst exactly once, replacing two separate box_blur_h calls.
 /// Used for edge-only channels that need mu1/mu2 but not sigma planes.
