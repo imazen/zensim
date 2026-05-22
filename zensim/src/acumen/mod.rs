@@ -41,6 +41,10 @@
 pub mod band_weights;
 #[doc(hidden)]
 pub mod castle_csf;
+/// Mode B-lite preprocessor — proven helpful pre-pyramid CSF
+/// weighting. See module docs.
+#[doc(hidden)]
+pub mod mode_b;
 #[doc(hidden)]
 pub mod viewing;
 

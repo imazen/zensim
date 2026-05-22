@@ -34,6 +34,12 @@ zenpixels = ["dep:zenpixels"]
 ## Uses zenresize for resampling — training/research feature.
 ## Commented out: zenresize not yet published to crates.io.
 # zenresize = ["dep:zenresize"]
+## castleCSF acumen primitives: LUT loader, ViewingCondition,
+## band_weights, Mode B-lite preprocessor. Adds ~132 KB embedded
+## LUT + ~600 lines of code. Gate non-acumen builds with
+## `--no-default-features` (or explicit feature list) to drop the
+## binary blob and code from the build. See `zensim::acumen`.
+acumen = []
 
 [dependencies]
 archmage = { workspace = true }

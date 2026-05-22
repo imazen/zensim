@@ -230,6 +230,9 @@ pub mod xyb_lms_features;
 // DKL + per-band weighting + contrast masking + HDR enable to come).
 // See `imazen/zensim#40` for the algorithm slate and ship gates.
 // Doc-hidden; surface stabilises once the slate lands.
+// Gated behind the `acumen` Cargo feature — non-acumen builds drop
+// the 132 KB embedded LUT and the entire module from the binary.
+#[cfg(feature = "acumen")]
 #[doc(hidden)]
 pub mod acumen;
 
