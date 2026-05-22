@@ -11,16 +11,6 @@ pub(crate) struct ScaleBuffers {
     pub temp_blur: Vec<f32>,
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
-    /// Information-content (IW) weights — texture-EMPHASISING counterpart
-    /// to `mask`. **No longer written or read by the hot path as of
-    /// 2026-05-22.** The IW weight (`1 + k_iw * blur(|src - mu|)`) is
-    /// now computed inline at every consumer (SSIM, edge-diff, MSE) via
-    /// the `*_iw_inline` SIMD kernels in `simd_ops.rs`, eliminating the
-    /// per-pixel plane round-trip. Field retained to avoid gating
-    /// `ScaleBuffers` through every constructor; allocation is cheap
-    /// and unused buffers don't get touched. Safe to remove once a
-    /// follow-up pass confirms no external consumer reads it.
-    pub iw_weight: Vec<f32>,
     /// Strip-local H-blur of the current channel's source. Used as the
     /// per-channel "local mean" reference for the masked/IW activity
     /// computation (`activity = box_blur(|src - h_blur_src|)`). See
@@ -40,7 +30,6 @@ impl ScaleBuffers {
             sigma12: vec![0.0; size],
             temp_blur: vec![0.0; size],
             mask: vec![0.0; size],
-            iw_weight: vec![0.0; size],
             h_blur_src: vec![0.0; size],
         }
     }
@@ -53,7 +42,6 @@ impl ScaleBuffers {
         self.sigma12.resize(size, 0.0);
         self.temp_blur.resize(size, 0.0);
         self.mask.resize(size, 0.0);
-        self.iw_weight.resize(size, 0.0);
         self.h_blur_src.resize(size, 0.0);
     }
 }
