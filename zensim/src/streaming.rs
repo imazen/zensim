@@ -658,6 +658,67 @@ pub(crate) fn compute_xyb_mean_offset(
     offset
 }
 
+/// Like [`compute_xyb_mean_offset`], but computes the per-channel mean
+/// over rows `[y0, y1)` only — used by the strip aggregator so each
+/// source row contributes to mean_offset exactly once across all strips.
+pub(crate) fn compute_xyb_mean_offset_range(
+    src_planes: &[Vec<f32>; 3],
+    dst_planes: &[Vec<f32>; 3],
+    width: usize,
+    y0: usize,
+    y1: usize,
+    padded_width: usize,
+) -> [f64; 3] {
+    let inner_h = y1.saturating_sub(y0);
+    if inner_h == 0 {
+        return [0.0; 3];
+    }
+    let n = (width * inner_h) as f64;
+
+    let chunk_rows = 64usize;
+    let row_indices: Vec<usize> = (y0..y1).step_by(chunk_rows).collect();
+
+    let per_chunk = |row_start: usize| -> [f64; 3] {
+        let row_end = (row_start + chunk_rows).min(y1);
+        let mut diff = [0.0f64; 3];
+        for c in 0..3 {
+            let mut acc = 0.0f64;
+            for y in row_start..row_end {
+                let s = &src_planes[c][y * padded_width..y * padded_width + width];
+                let d = &dst_planes[c][y * padded_width..y * padded_width + width];
+                let mut row_sum = 0.0f64;
+                for i in 0..width {
+                    row_sum += (s[i] - d[i]) as f64;
+                }
+                acc += row_sum;
+            }
+            diff[c] = acc;
+        }
+        diff
+    };
+
+    #[cfg(feature = "threads")]
+    let chunks: Vec<[f64; 3]> = if cfg!(feature = "threads") {
+        use rayon::prelude::*;
+        row_indices.into_par_iter().map(per_chunk).collect()
+    } else {
+        row_indices.into_iter().map(per_chunk).collect()
+    };
+    #[cfg(not(feature = "threads"))]
+    let chunks: Vec<[f64; 3]> = row_indices.into_iter().map(per_chunk).collect();
+
+    let mut offset = [0.0f64; 3];
+    for chunk_diff in &chunks {
+        for (o, &d) in offset.iter_mut().zip(chunk_diff.iter()) {
+            *o += d;
+        }
+    }
+    for o in &mut offset {
+        *o /= n;
+    }
+    offset
+}
+
 /// Streaming multi-scale stats: parallel XYB conversion, then band-parallel blur/features.
 ///
 /// Phase 1: Convert sRGB→XYB for the entire image (parallel over row chunks).
@@ -1703,6 +1764,8 @@ fn process_scale_bands(
         scale_idx,
         weights,
         diffmap_weights,
+        None,
+        None,
     );
     (accum.finalize(), diffmap)
 }
@@ -1714,6 +1777,26 @@ fn process_scale_bands(
 /// into a global per-scale accumulator, and finalize ONCE at the
 /// end. Lets large (e.g., 80 MP) images run with bounded memory
 /// without OOM.
+///
+/// `inner_y_filter`: when `Some((y0, y1))`, only rows in the half-open
+/// range `[y0, y1)` of the input plane contribute to the accumulator.
+/// Rows outside this range still get processed (their data feeds the
+/// blur stencil for inner rows) but their feature values are dropped.
+/// Used by the Y-strip aggregator to skip the strip's "outer margin"
+/// rows so that only the strip's "inner" rows are counted — yielding
+/// byte-exact equivalence to the full-image path on inner rows whose
+/// blur stencil fits entirely inside the strip.
+///
+/// `outer_layout`: when `Some((outer_h, plane_offset))`, the band tiling
+/// is computed against the OUTER plane height (`outer_h`), and each band
+/// is mapped into the strip's local coords via `plane_offset` (the
+/// strip's row 0 in outer/source coords at this scale). This makes the
+/// strip's bands align byte-exactly with the full-image's bands — the
+/// V-blur running sum within each band has the same init point and
+/// advance count as the full-image path, eliminating f32-accumulator
+/// history divergence at strip boundaries. For this to work, the strip
+/// must extend at least `overlap` rows past every aligned band boundary
+/// (i.e., `strip_margin >= blur_radius * blur_passes` at every scale).
 fn process_scale_bands_into_accum(
     src_planes: &[Vec<f32>; 3],
     dst_planes: &[Vec<f32>; 3],
@@ -1723,14 +1806,27 @@ fn process_scale_bands_into_accum(
     scale_idx: usize,
     weights: &[f64],
     diffmap_weights: Option<[PixelFeatureWeights; 3]>,
+    inner_y_filter: Option<(usize, usize)>,
+    outer_layout: Option<(usize, usize)>,
 ) -> (ScaleAccumulators, Option<Vec<f32>>) {
     let r = config.blur_radius;
     let passes = config.blur_passes as usize;
     let overlap = passes * r;
     let scale_active = active_channels(scale_idx, config.num_scales, config, weights);
 
+    let (filter_y0, filter_y1) = match inner_y_filter {
+        Some((y0, y1)) => (y0.min(height), y1.min(height)),
+        None => (0, height),
+    };
+
+    // Outer layout for band tiling. When None, the bands tile against
+    // the strip's local plane (the existing behavior). When Some, they
+    // tile against the outer (full-image) plane and we map each band
+    // into the strip's local coords.
+    let (layout_h, plane_offset) = outer_layout.unwrap_or((height, 0));
+
     let parallel = config.allow_multithreading && cfg!(feature = "threads");
-    let total_strips = height.div_ceil(STRIP_INNER);
+    let total_strips = layout_h.div_ceil(STRIP_INNER);
     let num_bands = if parallel {
         #[cfg(feature = "threads")]
         {
@@ -1745,14 +1841,26 @@ fn process_scale_bands_into_accum(
     };
     let strips_per_band = total_strips.div_ceil(num_bands);
 
-    let max_strip_h = STRIP_INNER + 2 * overlap;
+    let max_strip_h = STRIP_INNER * strips_per_band + 2 * overlap;
     let max_strip_n = max_strip_h * width;
 
-    let process_band = |band_idx: usize| {
-        let band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(height);
-        let band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(height);
+    // Strip's source-row range in outer coords:
+    let strip_outer_y0 = plane_offset;
+    let strip_outer_y1 = plane_offset + height;
 
-        if band_first_y >= height {
+    let process_band = |band_idx: usize| {
+        // Band in OUTER (full-image) coords:
+        let outer_band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(layout_h);
+        let outer_band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(layout_h);
+        // Skip bands that don't overlap the strip:
+        if outer_band_end_y <= strip_outer_y0 || outer_band_first_y >= strip_outer_y1 {
+            return (ScaleAccumulators::new(), None);
+        }
+        // Map band-inner to strip-local coords:
+        let band_first_y = outer_band_first_y.saturating_sub(strip_outer_y0);
+        let band_end_y = (outer_band_end_y - strip_outer_y0).min(height);
+
+        if band_first_y >= band_end_y {
             return (ScaleAccumulators::new(), None);
         }
 
@@ -1762,23 +1870,74 @@ fn process_scale_bands_into_accum(
         let mut accum = ScaleAccumulators::new();
         let mut bufs = ScaleBuffers::new(max_strip_n);
 
-        let mut y = band_first_y;
-        while y < band_end_y {
-            let inner_end = (y + STRIP_INNER).min(height);
-            let inner_h = inner_end - y;
+        // We iterate through the band's source-row inner positions in
+        // OUTER coordinates, advancing by STRIP_INNER. Each inner chunk
+        // is mapped to strip-local coords for the V-blur kernel.
+        let mut outer_y = outer_band_first_y.max(strip_outer_y0);
+        while outer_y < outer_band_end_y.min(strip_outer_y1) {
+            let outer_inner_end = (outer_y + STRIP_INNER)
+                .min(outer_band_end_y)
+                .min(strip_outer_y1);
+            let inner_h_full = outer_inner_end - outer_y;
 
-            let strip_top = y.saturating_sub(overlap);
-            let strip_bot = (inner_end + overlap).min(height);
+            // Strip-local mapping for THIS sub-strip's processing:
+            let strip_local_inner_y = outer_y - strip_outer_y0;
+            let strip_local_inner_end = outer_inner_end - strip_outer_y0;
+
+            // Overlap reads in OUTER coords (consistent with full-image
+            // path's band behavior). Mirror-clamp against the OUTER
+            // plane bounds, NOT the strip bounds — this is what makes
+            // the V-blur running-sum init point match the full-image
+            // path.
+            let outer_strip_top = outer_y.saturating_sub(overlap);
+            let outer_strip_bot = (outer_inner_end + overlap).min(layout_h);
+
+            // For the strip's V-blur kernel, the overlap reads must
+            // land within the strip's data. This requires
+            // `strip_margin >= overlap` at every scale.
+            //
+            // If `outer_strip_top < strip_outer_y0`, the strip doesn't
+            // contain those rows — that's OK for the FIRST strip
+            // (strip_outer_y0 == 0, so saturating_sub gives the same
+            // mirror behavior as full-image path at image top). For
+            // interior strips, this is a precondition violation.
+            //
+            // Similarly at the bottom.
+            let strip_top = outer_strip_top.saturating_sub(strip_outer_y0);
+            let strip_bot = (outer_strip_bot - strip_outer_y0).min(height);
             let strip_h = strip_bot - strip_top;
-            let inner_start = y - strip_top;
+            let inner_start_full = strip_local_inner_y - strip_top;
 
             let strip_n = width * strip_h;
             bufs.resize(strip_n);
 
+            // Apply the inner_y_filter: only rows in [filter_y0, filter_y1)
+            // of the plane contribute to the accumulator. We process the
+            // full band-inner range so the blur stencil is correct, but
+            // hand the kernel a clipped (inner_start, inner_h) so it
+            // skips accumulation outside the filter.
+            let acc_y0 = strip_local_inner_y.max(filter_y0);
+            let acc_y1 = strip_local_inner_end.min(filter_y1);
+            if acc_y0 >= acc_y1 {
+                // Entire band-inner is outside the filter — skip.
+                outer_y = outer_inner_end;
+                continue;
+            }
+            let inner_start = acc_y0 - strip_top;
+            let inner_h = acc_y1 - acc_y0;
+            // Sanity: inner_start..inner_start+inner_h must lie within
+            // the band-inner and within [0..strip_h].
+            debug_assert!(inner_start >= inner_start_full);
+            debug_assert!(inner_start + inner_h <= inner_start_full + inner_h_full);
+            debug_assert!(inner_start + inner_h <= strip_h);
+            let _ = (inner_start_full, inner_h_full);
+
             accum.n += inner_h * width;
 
-            // Diffmap slice for this strip's inner rows (band-local offset)
-            let dm_start = (y - band_first_y) * width;
+            // Diffmap slice for the accumulated rows (band-local offset).
+            // The diffmap is allocated for the full band, so we offset
+            // into it by (acc_y0 - band_first_y) rows.
+            let dm_start = (acc_y0 - band_first_y) * width;
             let dm_n = inner_h * width;
 
             for entry in &scale_active {
@@ -1809,7 +1968,7 @@ fn process_scale_bands_into_accum(
                 );
             }
 
-            y = inner_end;
+            outer_y = outer_inner_end;
         }
 
         (accum, band_dm)
@@ -2166,6 +2325,8 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         dst_planes,
         config,
         weights,
+        None,
+        None,
     );
     let stats: Vec<ScaleStats> = accums.iter().map(|a| a.finalize()).collect();
     let mean_offset = if pixel_count == 0 {
@@ -2183,12 +2344,25 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
 /// [`compute_multiscale_stats_streaming_strips`] to merge accumulators
 /// across strips before a single finalize pass — eliminates the
 /// per-strip finalize+re-pool precision loss.
+///
+/// `inner_y_filter`: when `Some((y0, y1))`, only rows in the half-open
+/// range `[y0, y1)` of the SCALE-0 plane contribute to the per-scale
+/// accumulators. At each pyramid level the filter is halved (with
+/// half-open semantics) — so the same SOURCE-coordinate inner rows
+/// are accumulated at every scale. The filter range MUST be aligned
+/// to `2^(num_scales-1)` for byte-exact equivalence (otherwise the
+/// pyramid downscale at strip boundaries will produce a different
+/// row count than the full-image path). Returns the mean-offset SUMS
+/// computed over the filter range only; if `inner_y_filter` is `None`,
+/// the entire plane contributes (matching the non-streaming path).
 pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
     precomputed: &PrecomputedReference,
     distorted: &impl ImageSource,
     dst_planes: &mut [Vec<f32>; 3],
     config: &ZensimConfig,
     weights: &[f64],
+    inner_y_filter: Option<(usize, usize)>,
+    outer_layout_scale_0: Option<(usize, usize)>,
 ) -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
     let width = distorted.width();
     let height = distorted.height();
@@ -2208,20 +2382,56 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
     convert_source_to_xyb_into(distorted, dst_planes, padded_width, parallel);
 
     let (ref src_planes_s0, _, _) = precomputed.scales[0];
-    let mean_offset =
-        compute_xyb_mean_offset(src_planes_s0, dst_planes, width, height, padded_width);
-    // Reverse to sums for later merging.
-    let pixel_count = width * height;
-    let n_f = pixel_count as f64;
-    let offset_sums = [
-        mean_offset[0] * n_f,
-        mean_offset[1] * n_f,
-        mean_offset[2] * n_f,
-    ];
+    // Mean offset is computed over the inner_y_filter rows (inner rows
+    // of the strip), so each source row is counted exactly once across
+    // all strips.
+    let (offset_sums, pixel_count) = match inner_y_filter {
+        Some((y0, y1)) => {
+            let inner_h = y1.saturating_sub(y0);
+            if inner_h == 0 {
+                ([0.0; 3], 0)
+            } else {
+                let inner_offset = compute_xyb_mean_offset_range(
+                    src_planes_s0,
+                    dst_planes,
+                    width,
+                    y0,
+                    y1,
+                    padded_width,
+                );
+                let inner_count = width * inner_h;
+                let cn = inner_count as f64;
+                (
+                    [
+                        inner_offset[0] * cn,
+                        inner_offset[1] * cn,
+                        inner_offset[2] * cn,
+                    ],
+                    inner_count,
+                )
+            }
+        }
+        None => {
+            let mean_offset =
+                compute_xyb_mean_offset(src_planes_s0, dst_planes, width, height, padded_width);
+            let pc = width * height;
+            let cn = pc as f64;
+            (
+                [mean_offset[0] * cn, mean_offset[1] * cn, mean_offset[2] * cn],
+                pc,
+            )
+        }
+    };
 
     let mut accums = Vec::with_capacity(num_scales);
     let mut w = padded_width;
     let mut h = height;
+    // Filter halves at each scale (pyramid downscale is 2:1).
+    // Half-open: (y0, y1) → (y0/2, y1/2). For byte-exact equivalence,
+    // y0 and y1 must be even at every scale (i.e., aligned to
+    // 2^(num_scales-1) at scale 0).
+    let mut scale_filter = inner_y_filter;
+    let mut scale_outer = outer_layout_scale_0;
 
     for scale in 0..num_scales {
         if w < 8 || h < 8 {
@@ -2240,6 +2450,8 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
             scale,
             weights,
             None,
+            scale_filter,
+            scale_outer,
         );
         accums.push(accum);
 
@@ -2247,6 +2459,9 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
             let (nw, nh) = downscale_3_planes(dst_planes, w, h, parallel);
             w = nw;
             h = nh;
+            // Halve the filter and outer-layout for the next scale.
+            scale_filter = scale_filter.map(|(y0, y1)| (y0 / 2, y1 / 2));
+            scale_outer = scale_outer.map(|(outer_h, offset)| (outer_h / 2, offset / 2));
         }
     }
 
@@ -2342,6 +2557,16 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
         let strip_y0 = inner_y0.saturating_sub(strip_margin);
         let strip_y1 = (inner_y1 + strip_margin).min(height);
 
+        // Strip-local Y range for accumulation (the inner rows). Rows
+        // outside this range still get processed (they feed the blur
+        // stencil for inner rows) but their feature values are dropped
+        // — preventing strip-margin rows from being double-counted
+        // across adjacent strips, and preventing edge-clamped blur
+        // output (at the strip's top/bottom margin rows) from polluting
+        // the accumulator.
+        let inner_filter_strip_y0 = inner_y0 - strip_y0;
+        let inner_filter_strip_y1 = inner_y1 - strip_y0;
+
         // Sub-views into the source and distorted images.
         let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
         let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
@@ -2349,7 +2574,14 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
         // Build the ref pyramid for this strip ONLY.
         let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
 
-        // Run the raw-accumulator pipeline on this strip.
+        // Run the raw-accumulator pipeline on this strip, accumulating
+        // only the inner rows.
+        //
+        // `outer_layout_scale_0`: tell the band processor to tile its
+        // bands against the FULL-image plane (height = `height`) with
+        // the strip's offset (`strip_y0`). This makes the strip's V-blur
+        // bands land at the same source rows as the full-image path's
+        // bands, yielding byte-exact equivalence.
         let (strip_accums, strip_offset_sums, strip_pixel_count) =
             compute_multiscale_accums_streaming_with_ref_borrowed(
                 &precomp,
@@ -2357,6 +2589,8 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
                 &mut dst_planes,
                 config,
                 weights,
+                Some((inner_filter_strip_y0, inner_filter_strip_y1)),
+                Some((height, strip_y0)),
             );
 
         // Merge raw accumulators directly — exact aggregation, no
@@ -2365,10 +2599,9 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
             global_accums[s].merge(strip_accum);
         }
 
-        // Mean offset sums are linear in pixel count — sum them.
-        // NOTE: strip overlap means margin rows are double-counted
-        // across adjacent strips. Phase 2 will compute mean_offset
-        // over INNER rows only.
+        // Mean offset sums are now inner-only (computed over the
+        // strip's inner Y range), so each source row is counted
+        // exactly once across all strips.
         for c in 0..3 {
             mean_offset_sums[c] += strip_offset_sums[c];
         }
@@ -3170,6 +3403,130 @@ mod tests {
                 strip_offset[c]
             );
         }
+    }
+
+    /// Byte-exact equivalence test for the strip aggregator on a single
+    /// 256×1024 pair with well-aligned geometry.
+    ///
+    /// Validates the `1e-6` relative-error gate on per-scale stats —
+    /// the load-bearing precision claim for Phase 1 of the Y-strip
+    /// aggregator. The strip path passes `outer_layout` to the band
+    /// processor so the strip's bands tile against the FULL-image's
+    /// plane (rather than the strip's local plane), making each band's
+    /// V-blur init point and advance count byte-identical between the
+    /// strip path and the full-image path.
+    #[test]
+    fn strip_aggregator_byte_exact_single_pair() {
+        let w = 256;
+        let h = 1024; // 4 strips at strip_inner=256.
+        let n = w * h;
+        let mut src = vec![[0u8, 0, 0]; n];
+        let mut dst = vec![[0u8, 0, 0]; n];
+        // Procedural-but-rich content: each row gets a slightly
+        // different gradient plus banded noise. This activates
+        // SSIM, edge, HF energy/magnitude, and IW features across
+        // all scales.
+        for y in 0..h {
+            for x in 0..w {
+                let r = (((x * 251) + y * 7) & 0xFF) as u8;
+                let g = (((y * 241) + x * 11) & 0xFF) as u8;
+                let b = ((x + y) & 0xFF) as u8;
+                src[y * w + x] = [r, g, b];
+                dst[y * w + x] = [
+                    r.saturating_add((x & 3) as u8),
+                    g.saturating_sub((y & 3) as u8),
+                    b.saturating_add(((x + y) & 1) as u8),
+                ];
+            }
+        }
+        let src_img = RgbSlice::new(&src, w, h);
+        let dst_img = RgbSlice::new(&dst, w, h);
+
+        // Use compute_all_features-equivalent config so the 372-feature
+        // path is exercised (extended + IW features both on).
+        let config = ZensimConfig {
+            compute_all_features: true,
+            extended_features: true,
+            compute_iw_features: true,
+            ..Default::default()
+        };
+        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+
+        let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+        let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
+            &precomp, &dst_img, &config, &weights,
+        );
+
+        let (strip_stats, strip_offset) = compute_multiscale_stats_streaming_strips(
+            &src_img, &dst_img, &config, &weights, 256, 128,
+        );
+
+        assert_eq!(full_stats.len(), strip_stats.len());
+
+        let mut worst_rel = 0.0f64;
+        let mut worst_label = String::new();
+        let compare = |a: f64, b: f64, label: &str, worst_rel: &mut f64, worst_label: &mut String| {
+            let diff = (a - b).abs();
+            let scale = a.abs().max(b.abs()).max(1e-12);
+            let rel = diff / scale;
+            // Skip near-zero comparisons (no signal to compare).
+            if scale > 1e-6 && rel > *worst_rel {
+                *worst_rel = rel;
+                *worst_label = label.to_string();
+            }
+            assert!(
+                rel < 1e-6 || diff < 1e-9,
+                "{label}: full={a:.10} strip={b:.10} diff={diff:.2e} rel={rel:.2e}"
+            );
+        };
+
+        for (s, (full, strip)) in full_stats.iter().zip(strip_stats.iter()).enumerate() {
+            for c in 0..3 {
+                let lbl = |name: &str| format!("scale {s} ch {c} {name}");
+                compare(full.ssim[c * 2], strip.ssim[c * 2], &lbl("ssim_mean"), &mut worst_rel, &mut worst_label);
+                compare(full.ssim[c * 2 + 1], strip.ssim[c * 2 + 1], &lbl("ssim_4th"), &mut worst_rel, &mut worst_label);
+                compare(full.ssim_2nd[c], strip.ssim_2nd[c], &lbl("ssim_2nd"), &mut worst_rel, &mut worst_label);
+                for k in 0..4 {
+                    let names = ["art_mean", "art_4th", "det_mean", "det_4th"];
+                    compare(full.edge[c * 4 + k], strip.edge[c * 4 + k], &lbl(names[k]), &mut worst_rel, &mut worst_label);
+                }
+                compare(full.edge_2nd[c * 2], strip.edge_2nd[c * 2], &lbl("art_2nd"), &mut worst_rel, &mut worst_label);
+                compare(full.edge_2nd[c * 2 + 1], strip.edge_2nd[c * 2 + 1], &lbl("det_2nd"), &mut worst_rel, &mut worst_label);
+                compare(full.mse[c], strip.mse[c], &lbl("mse"), &mut worst_rel, &mut worst_label);
+                compare(full.hf_energy_loss[c], strip.hf_energy_loss[c], &lbl("hf_energy_loss"), &mut worst_rel, &mut worst_label);
+                compare(full.hf_mag_loss[c], strip.hf_mag_loss[c], &lbl("hf_mag_loss"), &mut worst_rel, &mut worst_label);
+                compare(full.hf_energy_gain[c], strip.hf_energy_gain[c], &lbl("hf_energy_gain"), &mut worst_rel, &mut worst_label);
+                compare(full.ssim_max[c], strip.ssim_max[c], &lbl("ssim_max"), &mut worst_rel, &mut worst_label);
+                compare(full.art_max[c], strip.art_max[c], &lbl("art_max"), &mut worst_rel, &mut worst_label);
+                compare(full.det_max[c], strip.det_max[c], &lbl("det_max"), &mut worst_rel, &mut worst_label);
+                compare(full.ssim_p95[c], strip.ssim_p95[c], &lbl("ssim_l8"), &mut worst_rel, &mut worst_label);
+                compare(full.art_p95[c], strip.art_p95[c], &lbl("art_l8"), &mut worst_rel, &mut worst_label);
+                compare(full.det_p95[c], strip.det_p95[c], &lbl("det_l8"), &mut worst_rel, &mut worst_label);
+                for k in 0..3 {
+                    let names = ["masked_ssim_mean", "masked_ssim_4th", "masked_ssim_2nd"];
+                    compare(full.masked_ssim[c * 3 + k], strip.masked_ssim[c * 3 + k], &lbl(names[k]), &mut worst_rel, &mut worst_label);
+                }
+                compare(full.masked_art_4th[c], strip.masked_art_4th[c], &lbl("masked_art_4th"), &mut worst_rel, &mut worst_label);
+                compare(full.masked_det_4th[c], strip.masked_det_4th[c], &lbl("masked_det_4th"), &mut worst_rel, &mut worst_label);
+                compare(full.masked_mse[c], strip.masked_mse[c], &lbl("masked_mse"), &mut worst_rel, &mut worst_label);
+                for k in 0..3 {
+                    let names = ["iw_ssim_mean", "iw_ssim_4th", "iw_ssim_2nd"];
+                    compare(full.iw_ssim[c * 3 + k], strip.iw_ssim[c * 3 + k], &lbl(names[k]), &mut worst_rel, &mut worst_label);
+                }
+                compare(full.iw_art_4th[c], strip.iw_art_4th[c], &lbl("iw_art_4th"), &mut worst_rel, &mut worst_label);
+                compare(full.iw_det_4th[c], strip.iw_det_4th[c], &lbl("iw_det_4th"), &mut worst_rel, &mut worst_label);
+                compare(full.iw_mse[c], strip.iw_mse[c], &lbl("iw_mse"), &mut worst_rel, &mut worst_label);
+            }
+        }
+
+        for c in 0..3 {
+            let lbl = format!("mean_offset[{c}]");
+            compare(full_offset[c], strip_offset[c], &lbl, &mut worst_rel, &mut worst_label);
+        }
+        eprintln!(
+            "strip_aggregator_byte_exact_single_pair: worst rel = {:.3e} ({})",
+            worst_rel, worst_label,
+        );
     }
 
     /// Verify streaming produces equivalent results to full-image processing.
