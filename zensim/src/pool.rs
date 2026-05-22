@@ -12,10 +12,14 @@ pub(crate) struct ScaleBuffers {
     /// Local contrast masking weights (when masking enabled).
     pub mask: Vec<f32>,
     /// Information-content (IW) weights — texture-EMPHASISING counterpart
-    /// to `mask`. Populated when `ZensimConfig::compute_iw_features` is
-    /// true. Same per-pixel layout; reuses the same blurred-activity
-    /// signal but with inverted polarity (`1 + k_iw * blur(|src - mu|)`
-    /// instead of `1 / (1 + k_mask * blur(|src - mu|))`).
+    /// to `mask`. **No longer written or read by the hot path as of
+    /// 2026-05-22.** The IW weight (`1 + k_iw * blur(|src - mu|)`) is
+    /// now computed inline at every consumer (SSIM, edge-diff, MSE) via
+    /// the `*_iw_inline` SIMD kernels in `simd_ops.rs`, eliminating the
+    /// per-pixel plane round-trip. Field retained to avoid gating
+    /// `ScaleBuffers` through every constructor; allocation is cheap
+    /// and unused buffers don't get touched. Safe to remove once a
+    /// follow-up pass confirms no external consumer reads it.
     pub iw_weight: Vec<f32>,
     /// Strip-local H-blur of the current channel's source. Used as the
     /// per-channel "local mean" reference for the masked/IW activity
