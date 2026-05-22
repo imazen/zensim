@@ -2,8 +2,30 @@
 
 **Date**: 2026-05-22
 **Tracking**: imazen/zensim#40 (Gate A acumen)
-**Status**: NEGATIVE — Mode B-lite preprocessing does NOT improve over the
-shipped V_24-per-sample-α at production scale.
+**Status**: NEGATIVE — Mode B-lite preprocessing is CATASTROPHIC at the
+V_24 production recipe. **CID22 SROCC drops from 0.9004 (baseline) to
+0.5745 (Mode B), Δ = −0.33.**
+
+## Pipeline soundness control (run AFTER Mode B failure)
+
+Re-ran V_24-per-sample-α on **canonical safesyn (no Mode B)** with
+identical hyperparams. Result reproduces and slightly beats the
+shipped V_24-per-sample-α s4 (CID22 = 0.8641):
+
+| Epoch | safesyn | kadid | tid | aic3 | **CID22** |
+|---:|--:|--:|--:|--:|--:|
+| 0 | 0.987 | 0.963 | 0.980 | 0.288 | **0.8551** |
+| 30 (best val) | 0.994 | 0.977 | 0.990 | 0.298 | 0.8798 |
+| **60 (best CID22)** | 0.987 | 0.973 | 0.985 | 0.295 | **0.9004** |
+| 80 (early stop) | 0.993 | 0.976 | 0.989 | 0.286 | 0.8702 |
+
+Pipeline is sound. The Mode B failure is NOT a config issue.
+
+Note: AIC-3 stays at ~0.29 — the canonical val AIC-3 `human_score`
+column is signed `score.jnd` (lower = better; needs sign-flip or
+scale fix vs the ssim2-mix target). This affects only the
+val_mean policy; CID22 SROCC is computed against MCOS/100 which is
+sign-aligned, so the CID22 result is the trustworthy metric.
 
 ## Setup
 
@@ -26,16 +48,16 @@ SROCC) transfers. The production-recipe pipeline:
   lr=0.001, seed=1, early-stop patience 50, val_policy=Min,
   per_sample_alpha_head=true
 
-## Result
+## Result (Mode B vs Baseline V_24 — true apples-to-apples)
 
-| Metric | This run (Mode B) | Shipped V_24-per-sample-α s4 | Δ |
+| Metric | **Mode B-lite** | **Baseline V_24** | Δ (Mode B vs baseline) |
 |---|--:|--:|--:|
-| Best val SROCC | **0.2337** | ~0.81 | **−0.58** |
-| CID22 SROCC | **0.5745** | **0.8641** | **−0.2896** |
-| AIC-3 SROCC | 0.2337 | 0.8183 | -0.5846 |
-| safesyn SROCC (train) | 0.99 | 0.99 | tied |
-| KADID SROCC (train) | 0.92 | 0.93 | tied |
-| TID SROCC (train) | 0.37 | 0.89 | -0.52 |
+| Best val SROCC | 0.2337 | 0.2976 | -0.06 |
+| **CID22 SROCC** | **0.5745** | **0.9004** | **−0.3259** |
+| AIC-3 SROCC | 0.2337 | 0.2976 | -0.06 (both broken, see note above) |
+| safesyn SROCC (train) | 0.9904 | 0.9937 | tied |
+| KADID SROCC (train) | 0.9212 | **0.9772** | -0.06 |
+| TID SROCC (train) | 0.3735 | **0.9897** | **−0.62** |
 
 Best CID22 = 0.5745 at epoch 100; trainer stopped at epoch 150
 with patience=50 expired (no val improvement since e100). Network
