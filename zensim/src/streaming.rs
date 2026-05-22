@@ -294,7 +294,7 @@ fn dealloc_planes(p1: [Vec<f32>; 3], p2: Option<[Vec<f32>; 3]>) {
 
 /// Per-scale feature accumulators. Collects raw sums across strips,
 /// finalized to ScaleStats at the end.
-struct ScaleAccumulators {
+pub(crate) struct ScaleAccumulators {
     // SSIM: sum_d, sum_d^4, sum_d^2 per channel
     ssim_d: [f64; 3],
     ssim_d4: [f64; 3],
@@ -1825,9 +1825,22 @@ fn process_scale_bands_into_accum(
     // into the strip's local coords.
     let (layout_h, plane_offset) = outer_layout.unwrap_or((height, 0));
 
-    let parallel = config.allow_multithreading && cfg!(feature = "threads");
+    // Whether to RUN bands in parallel via rayon. This is separate from
+    // the band LAYOUT computation: when called from a strip aggregator
+    // that already runs strips in parallel, `config.allow_multithreading`
+    // is `false` (to avoid rayon oversubscription), but we still want
+    // bands to be LAID OUT as if the full-image processed with threads
+    // — otherwise the strip's bands tile against a single-band layout
+    // and break V-blur byte-exactness vs the full-image path.
+    let run_parallel = config.allow_multithreading && cfg!(feature = "threads");
     let total_strips = layout_h.div_ceil(STRIP_INNER);
-    let num_bands = if parallel {
+    // When outer_layout is provided, lay out bands as if a parallel
+    // call were made on the FULL image; this keeps the per-band
+    // V-blur init points byte-identical between the strip and full
+    // paths. When outer_layout is None (the full path itself), the
+    // existing semantics apply.
+    let layout_parallel = run_parallel || outer_layout.is_some();
+    let num_bands = if layout_parallel {
         #[cfg(feature = "threads")]
         {
             rayon::current_num_threads().min(total_strips).max(1)
@@ -1977,7 +1990,7 @@ fn process_scale_bands_into_accum(
     #[allow(clippy::redundant_closure)]
     let band_results: Vec<_> = {
         #[cfg(feature = "threads")]
-        if parallel {
+        if run_parallel {
             (0..num_bands)
                 .into_par_iter()
                 .map(|i| process_band(i))
@@ -2531,7 +2544,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
 /// per-strip so per-pair peak memory stays bounded.
 pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     precomputed: &PrecomputedReference,
-    distorted: &impl ImageSource,
+    distorted: &(impl ImageSource + Sync),
     config: &ZensimConfig,
     weights: &[f64],
     strip_inner: usize,
@@ -2556,51 +2569,66 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let n_strips = height.div_ceil(strip_inner);
 
+    let strip_meta: Vec<(usize, usize, usize, usize)> = (0..n_strips)
+        .filter_map(|strip_idx| {
+            let inner_y0 = strip_idx * strip_inner;
+            let inner_y1 = ((strip_idx + 1) * strip_inner).min(height);
+            if inner_y0 >= height {
+                return None;
+            }
+            let strip_y0 = inner_y0.saturating_sub(strip_margin);
+            let strip_y1 = (inner_y1 + strip_margin).min(height);
+            let inner_filter_strip_y0 = inner_y0 - strip_y0;
+            let inner_filter_strip_y1 = inner_y1 - strip_y0;
+            Some((strip_y0, strip_y1, inner_filter_strip_y0, inner_filter_strip_y1))
+        })
+        .collect();
+
+    let strip_config = {
+        let mut c = config.clone();
+        c.allow_multithreading = false;
+        c
+    };
+    let process_strip = |(strip_y0, strip_y1, fy0, fy1): (usize, usize, usize, usize)| -> (
+        Vec<ScaleAccumulators>,
+        [f64; 3],
+        usize,
+    ) {
+        let dst_strip =
+            crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
+        let strip_precomp = precomputed_ref_slice_rows(precomputed, strip_y0, strip_y1);
+        let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
+        compute_multiscale_accums_streaming_with_ref_borrowed(
+            &strip_precomp,
+            &dst_strip,
+            &mut dst_planes,
+            &strip_config,
+            weights,
+            Some((fy0, fy1)),
+            Some((height, strip_y0)),
+        )
+    };
+
+    let parallel_strips = config.allow_multithreading && cfg!(feature = "threads");
+    #[cfg(feature = "threads")]
+    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = if parallel_strips {
+        use rayon::prelude::*;
+        strip_meta.par_iter().copied().map(process_strip).collect()
+    } else {
+        strip_meta.iter().copied().map(process_strip).collect()
+    };
+    #[cfg(not(feature = "threads"))]
+    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> =
+        strip_meta.iter().copied().map(process_strip).collect();
+
     let mut global_accums: Vec<ScaleAccumulators> =
         (0..num_scales).map(|_| ScaleAccumulators::new()).collect();
     let mut mean_offset_sums: [f64; 3] = [0.0; 3];
     let mut mean_offset_pixel_count: usize = 0;
-
-    let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
-
-    for strip_idx in 0..n_strips {
-        let inner_y0 = strip_idx * strip_inner;
-        let inner_y1 = ((strip_idx + 1) * strip_inner).min(height);
-        if inner_y0 >= height {
-            break;
-        }
-        let strip_y0 = inner_y0.saturating_sub(strip_margin);
-        let strip_y1 = (inner_y1 + strip_margin).min(height);
-        let strip_h = strip_y1 - strip_y0;
-
-        let inner_filter_strip_y0 = inner_y0 - strip_y0;
-        let inner_filter_strip_y1 = inner_y1 - strip_y0;
-
-        let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_h);
-
-        // Build a per-strip PrecomputedReference by slicing rows out
-        // of the full precomputed ref's per-scale planes. This copies
-        // ~strip_h × width × 4 bytes × 3 channels × 1.33 (pyramid sum)
-        // — typically 1-50 MB per strip; negligible vs the kernel work.
-        // What's SAVED: the XYB conversion + pyramid downscale on the
-        // ref side (which would otherwise repeat per strip per call).
-        let strip_precomp = precomputed_ref_slice_rows(precomputed, strip_y0, strip_y1);
-
-        let (strip_accums, strip_offset_sums, strip_pixel_count) =
-            compute_multiscale_accums_streaming_with_ref_borrowed(
-                &strip_precomp,
-                &dst_strip,
-                &mut dst_planes,
-                config,
-                weights,
-                Some((inner_filter_strip_y0, inner_filter_strip_y1)),
-                Some((height, strip_y0)),
-            );
-
+    for (strip_accums, strip_offset_sums, strip_pixel_count) in strip_results {
         for (s, strip_accum) in strip_accums.iter().enumerate() {
             global_accums[s].merge(strip_accum);
         }
-
         for c in 0..3 {
             mean_offset_sums[c] += strip_offset_sums[c];
         }
@@ -2655,8 +2683,8 @@ fn precomputed_ref_slice_rows(
 }
 
 pub(crate) fn compute_multiscale_stats_streaming_strips(
-    source: &impl ImageSource,
-    distorted: &impl ImageSource,
+    source: &(impl ImageSource + Sync),
+    distorted: &(impl ImageSource + Sync),
     config: &ZensimConfig,
     weights: &[f64],
     strip_inner: usize,
@@ -2682,71 +2710,90 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
     let num_scales = config.num_scales;
     let n_strips = height.div_ceil(strip_inner);
 
-    // Per-scale accumulators that survive across all strips.
+    // Collect strip metadata so we can iterate (sequentially or in
+    // parallel) over a fixed set of strips. Each strip rebuilds its
+    // PrecomputedReference and dst-planes independently — strips are
+    // embarassingly parallel.
+    let strip_meta: Vec<(usize, usize, usize, usize, usize, usize)> = (0..n_strips)
+        .filter_map(|strip_idx| {
+            let inner_y0 = strip_idx * strip_inner;
+            let inner_y1 = ((strip_idx + 1) * strip_inner).min(height);
+            if inner_y0 >= height {
+                return None;
+            }
+            let strip_y0 = inner_y0.saturating_sub(strip_margin);
+            let strip_y1 = (inner_y1 + strip_margin).min(height);
+            let inner_filter_strip_y0 = inner_y0 - strip_y0;
+            let inner_filter_strip_y1 = inner_y1 - strip_y0;
+            Some((
+                strip_y0,
+                strip_y1,
+                inner_filter_strip_y0,
+                inner_filter_strip_y1,
+                inner_y0,
+                inner_y1,
+            ))
+        })
+        .collect();
+
+    // Per-strip processor. Returns (per-scale ScaleAccumulators,
+    // mean-offset-sums, mean-offset-pixel-count).
+    //
+    // Each call DISABLES inner band-level rayon parallelism (the strip
+    // is small enough that the gain is marginal, and oversubscription
+    // would hurt outer-strip parallelism). Strips parallelize at the
+    // OUTER level — much higher throughput on multi-core hosts than
+    // sequential strips × inner bands.
+    let strip_config = {
+        let mut c = config.clone();
+        c.allow_multithreading = false;
+        c
+    };
+    let process_strip = |(strip_y0, strip_y1, fy0, fy1, _, _): (
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+    )| -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
+        let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
+        let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
+        let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
+        let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
+        compute_multiscale_accums_streaming_with_ref_borrowed(
+            &precomp,
+            &dst_strip,
+            &mut dst_planes,
+            &strip_config,
+            weights,
+            Some((fy0, fy1)),
+            Some((height, strip_y0)),
+        )
+    };
+
+    // Per-strip results (collected, then merged).
+    let parallel_strips = config.allow_multithreading && cfg!(feature = "threads");
+    #[cfg(feature = "threads")]
+    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = if parallel_strips {
+        use rayon::prelude::*;
+        strip_meta.par_iter().copied().map(process_strip).collect()
+    } else {
+        strip_meta.iter().copied().map(process_strip).collect()
+    };
+    #[cfg(not(feature = "threads"))]
+    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> =
+        strip_meta.iter().copied().map(process_strip).collect();
+
+    // Merge raw accumulators across strips.
     let mut global_accums: Vec<ScaleAccumulators> =
         (0..num_scales).map(|_| ScaleAccumulators::new()).collect();
     let mut mean_offset_sums: [f64; 3] = [0.0; 3];
     let mut mean_offset_pixel_count: usize = 0;
-
-    // Per-strip dst-planes scratch (resized per strip's dims).
-    let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
-
-    for strip_idx in 0..n_strips {
-        let inner_y0 = strip_idx * strip_inner;
-        let inner_y1 = ((strip_idx + 1) * strip_inner).min(height);
-        if inner_y0 >= height {
-            break;
-        }
-        // Pad each strip with `strip_margin` rows on each side for the
-        // blur stencil. Clamp to image bounds.
-        let strip_y0 = inner_y0.saturating_sub(strip_margin);
-        let strip_y1 = (inner_y1 + strip_margin).min(height);
-
-        // Strip-local Y range for accumulation (the inner rows). Rows
-        // outside this range still get processed (they feed the blur
-        // stencil for inner rows) but their feature values are dropped
-        // — preventing strip-margin rows from being double-counted
-        // across adjacent strips, and preventing edge-clamped blur
-        // output (at the strip's top/bottom margin rows) from polluting
-        // the accumulator.
-        let inner_filter_strip_y0 = inner_y0 - strip_y0;
-        let inner_filter_strip_y1 = inner_y1 - strip_y0;
-
-        // Sub-views into the source and distorted images.
-        let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
-        let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
-
-        // Build the ref pyramid for this strip ONLY.
-        let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
-
-        // Run the raw-accumulator pipeline on this strip, accumulating
-        // only the inner rows.
-        //
-        // `outer_layout_scale_0`: tell the band processor to tile its
-        // bands against the FULL-image plane (height = `height`) with
-        // the strip's offset (`strip_y0`). This makes the strip's V-blur
-        // bands land at the same source rows as the full-image path's
-        // bands, yielding byte-exact equivalence.
-        let (strip_accums, strip_offset_sums, strip_pixel_count) =
-            compute_multiscale_accums_streaming_with_ref_borrowed(
-                &precomp,
-                &dst_strip,
-                &mut dst_planes,
-                config,
-                weights,
-                Some((inner_filter_strip_y0, inner_filter_strip_y1)),
-                Some((height, strip_y0)),
-            );
-
-        // Merge raw accumulators directly — exact aggregation, no
-        // per-strip finalize precision loss.
+    for (strip_accums, strip_offset_sums, strip_pixel_count) in strip_results {
         for (s, strip_accum) in strip_accums.iter().enumerate() {
             global_accums[s].merge(strip_accum);
         }
-
-        // Mean offset sums are now inner-only (computed over the
-        // strip's inner Y range), so each source row is counted
-        // exactly once across all strips.
         for c in 0..3 {
             mean_offset_sums[c] += strip_offset_sums[c];
         }

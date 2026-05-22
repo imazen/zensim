@@ -34,6 +34,10 @@ zenpixels = ["dep:zenpixels"]
 ## Uses zenresize for resampling — training/research feature.
 ## Commented out: zenresize not yet published to crates.io.
 # zenresize = ["dep:zenresize"]
+## Enable the 80 MP OOM-relief integration test (`streaming_strips_oom_80mp`).
+## Off by default because the test allocates ~500 MB of input pixels which
+## is disruptive in default `cargo test --all` runs.
+streaming_strips_oom = []
 
 [dependencies]
 archmage = { workspace = true }
@@ -63,4 +67,4 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom"))']  # zenresize kept in check-cfg for gated code
