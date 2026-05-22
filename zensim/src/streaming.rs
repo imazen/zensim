@@ -2544,7 +2544,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
 /// per-strip so per-pair peak memory stays bounded.
 pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     precomputed: &PrecomputedReference,
-    distorted: &(impl ImageSource + Sync),
+    distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
     strip_inner: usize,
@@ -2584,10 +2584,9 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
         })
         .collect();
 
-    let strip_config = {
-        let mut c = config.clone();
-        c.allow_multithreading = false;
-        c
+    let strip_config = ZensimConfig {
+        allow_multithreading: false,
+        ..*config
     };
     let process_strip = |(strip_y0, strip_y1, fy0, fy1): (usize, usize, usize, usize)| -> (
         Vec<ScaleAccumulators>,
@@ -2683,8 +2682,8 @@ fn precomputed_ref_slice_rows(
 }
 
 pub(crate) fn compute_multiscale_stats_streaming_strips(
-    source: &(impl ImageSource + Sync),
-    distorted: &(impl ImageSource + Sync),
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
     config: &ZensimConfig,
     weights: &[f64],
     strip_inner: usize,
@@ -2744,10 +2743,9 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
     // would hurt outer-strip parallelism). Strips parallelize at the
     // OUTER level — much higher throughput on multi-core hosts than
     // sequential strips × inner bands.
-    let strip_config = {
-        let mut c = config.clone();
-        c.allow_multithreading = false;
-        c
+    let strip_config = ZensimConfig {
+        allow_multithreading: false,
+        ..*config
     };
     let process_strip = |(strip_y0, strip_y1, fy0, fy1, _, _): (
         usize,
