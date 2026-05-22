@@ -1679,7 +1679,14 @@ overlap). The cleanup was REVERTED — see
 ### Safe synthetic dataset (V0_18 ship corpus)
 
 - File: `/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv`
-  (218,089 pairs).
+  (218,089 pairs; sha256
+  `659982b3ce8d26184eca835a85f8d66c8550d945d659559c499b5670cd5d8589`).
+- R2 mirror (2026-05-22):
+  `s3://zentrain/synthetic-v2/training_safe_synthetic.csv`.
+  Source distortion variants under `/mnt/v/input/zensim/images/` mirrored
+  to `s3://codec-corpus/synthetic-v2/<ref>/<codec_dir>/q<X>.png`.
+- Tower mirror:
+  `/mnt/tower/output/zensim-archive-2026-05-20/synthetic-v2-{tables,images}/`.
 - Created from `training_concordant.csv` minus all 49 CID22 validation
   image sources.
 - 475 CID22-contaminated pairs removed.
@@ -1808,8 +1815,9 @@ sampler bias).
   /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv`
   (visible on the v04-mlp jj branch).
 - The 21k missing pairs are stored as encoded files on disk
-  (`/mnt/v/input/zensim/images/<src>/zenjpeg-420-e1/qXX.png`) but
-  weren't scored before the generator died. Re-running the generator
+  (`/mnt/v/input/zensim/images/<src>/zenjpeg-420-e1/qXX.png`; mirrored
+  2026-05-22 to `s3://codec-corpus/synthetic-v2/<src>/zenjpeg-420-e1/qXX.png`)
+  but weren't scored before the generator died. Re-running the generator
   with the same args picks them up and re-emits a fresh CSV at
   `/mnt/v/output/zensim/training.csv`. Best done after a reboot
   (CUDA context is clean) or on vast.ai (next section).
