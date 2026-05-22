@@ -601,8 +601,8 @@ fn active_channels(
 /// Only iterates `width` pixels per row (skipping padding), so the count
 /// is exactly `width * height`.
 pub(crate) fn compute_xyb_mean_offset(
-    src_planes: &[Vec<f32>; 3],
-    dst_planes: &[Vec<f32>; 3],
+    src_planes: [&[f32]; 3],
+    dst_planes: [&[f32]; 3],
     width: usize,
     height: usize,
     padded_width: usize,
@@ -662,8 +662,8 @@ pub(crate) fn compute_xyb_mean_offset(
 /// over rows `[y0, y1)` only — used by the strip aggregator so each
 /// source row contributes to mean_offset exactly once across all strips.
 pub(crate) fn compute_xyb_mean_offset_range(
-    src_planes: &[Vec<f32>; 3],
-    dst_planes: &[Vec<f32>; 3],
+    src_planes: [&[f32]; 3],
+    dst_planes: [&[f32]; 3],
     width: usize,
     y0: usize,
     y1: usize,
@@ -742,8 +742,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let mut dst_planes = convert_source_to_xyb(distorted, padded_width, parallel);
 
     // Compute mean_offset while XYB planes are cache-hot
+    let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
+    let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
     let mean_offset =
-        compute_xyb_mean_offset(&src_planes, &dst_planes, width, height, padded_width);
+        compute_xyb_mean_offset(src_view, dst_view, width, height, padded_width);
 
     // Phase 2: Process all scales with band processing.
     let mut stats = Vec::with_capacity(num_scales);
@@ -755,8 +757,10 @@ pub(crate) fn compute_multiscale_stats_streaming(
             break;
         }
 
+        let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
+        let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
         let (scale_stat, _) =
-            process_scale_bands(&src_planes, &dst_planes, w, h, config, scale, weights, None);
+            process_scale_bands(src_view, dst_view, w, h, config, scale, weights, None);
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {
@@ -1746,8 +1750,8 @@ fn process_strip_channel(
 /// Each band runs on a separate thread via rayon.
 #[allow(clippy::too_many_arguments)]
 fn process_scale_bands(
-    src_planes: &[Vec<f32>; 3],
-    dst_planes: &[Vec<f32>; 3],
+    src_planes: [&[f32]; 3],
+    dst_planes: [&[f32]; 3],
     width: usize,
     height: usize,
     config: &ZensimConfig,
@@ -1798,8 +1802,8 @@ fn process_scale_bands(
 /// must extend at least `overlap` rows past every aligned band boundary
 /// (i.e., `strip_margin >= blur_radius * blur_passes` at every scale).
 fn process_scale_bands_into_accum(
-    src_planes: &[Vec<f32>; 3],
-    dst_planes: &[Vec<f32>; 3],
+    src_planes: [&[f32]; 3],
+    dst_planes: [&[f32]; 3],
     width: usize,
     height: usize,
     config: &ZensimConfig,
@@ -2060,6 +2064,9 @@ impl ZensimScratch {
 /// Created via [`Zensim::precompute_reference`](crate::Zensim::precompute_reference).
 pub struct PrecomputedReference {
     pub(crate) scales: Vec<([Vec<f32>; 3], usize, usize)>,
+    // INVARIANT: scales[i].0[0..3].len() == scales[i].1 * scales[i].2
+    // (padded_width × height per plane). Enforced at construction.
+    // Both PrecomputedReference and PrecomputedReferenceView rely on this.
     /// Reference image width in pixels (unpadded). Used to validate that
     /// distorted images passed to `compute_with_ref*` match the dimensions
     /// the precomputed pyramid was built for.
@@ -2207,6 +2214,113 @@ impl PrecomputedReference {
             convert_linear_planar_to_xyb_into(planes, width, height, stride, padded_width, scale0);
         })
         .with_ref_dims(width, height)
+    }
+
+    /// Build a zero-copy view of a Y-row range of this reference's pyramid.
+    ///
+    /// Returns slices into the owned plane Vecs without allocating fresh
+    /// per-plane buffers. Used by the streaming-strip aggregator to avoid
+    /// the ~2.6 GB of per-pair memcpy that `to_vec()`-based slicing
+    /// produces at 80 MP. See `STREAMING_372_OPTIMIZATION_NOTES.md`.
+    ///
+    /// The returned view's `ref_width` matches `self.ref_width`; its
+    /// `ref_height` is set to the requested row count at scale 0.
+    pub(crate) fn slice_rows_view(&self, src_y0: usize, src_y1: usize) -> PrecomputedReferenceView<'_> {
+        let mut scales = Vec::with_capacity(self.scales.len());
+        for (scale_idx, (planes, plane_w, plane_h)) in self.scales.iter().enumerate() {
+            let factor = 1usize << scale_idx;
+            let y0_scale = src_y0 / factor;
+            let y1_scale = src_y1.div_ceil(factor);
+            let y1_scale = y1_scale.min(*plane_h);
+            let y0_scale = y0_scale.min(y1_scale);
+            let rows = y1_scale - y0_scale;
+            let start_off = y0_scale * plane_w;
+            let end_off = y1_scale * plane_w;
+            scales.push((
+                [
+                    &planes[0][start_off..end_off],
+                    &planes[1][start_off..end_off],
+                    &planes[2][start_off..end_off],
+                ],
+                *plane_w,
+                rows,
+            ));
+        }
+        PrecomputedReferenceView {
+            scales,
+            ref_width: self.ref_width,
+            ref_height: src_y1 - src_y0,
+        }
+    }
+}
+
+/// Zero-copy view of a Y-row range of a [`PrecomputedReference`].
+///
+/// Holds borrowed slices into the parent reference's plane Vecs. Built
+/// via [`PrecomputedReference::slice_rows_view`]; never directly
+/// constructed by callers.
+///
+/// The strip-aggregator hot path uses this to avoid 12 fresh `Vec<f32>`
+/// allocations + memcpy per strip per pair (see optimization notes).
+pub(crate) struct PrecomputedReferenceView<'a> {
+    /// Per scale: `(planes, padded_width, height)`.
+    pub(crate) scales: Vec<([&'a [f32]; 3], usize, usize)>,
+    pub(crate) ref_width: usize,
+    pub(crate) ref_height: usize,
+}
+
+/// Trait the strip kernel uses to access an arbitrary multi-scale
+/// reference pyramid — either an owned [`PrecomputedReference`] or a
+/// borrowed [`PrecomputedReferenceView`].
+///
+/// Returning planes as `[&[f32]; 3]` lets both owned (Vec-backed) and
+/// borrowed (slice-backed) representations satisfy the same kernel
+/// signature without copies.
+pub(crate) trait MultiScaleRef {
+    fn num_scales(&self) -> usize;
+    fn ref_width(&self) -> usize;
+    fn ref_height(&self) -> usize;
+    /// `(planes, padded_width, height)` at the given scale.
+    fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize);
+}
+
+impl MultiScaleRef for PrecomputedReference {
+    #[inline]
+    fn num_scales(&self) -> usize {
+        self.scales.len()
+    }
+    #[inline]
+    fn ref_width(&self) -> usize {
+        self.ref_width
+    }
+    #[inline]
+    fn ref_height(&self) -> usize {
+        self.ref_height
+    }
+    #[inline]
+    fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize) {
+        let (planes, w, h) = &self.scales[idx];
+        ([&planes[0], &planes[1], &planes[2]], *w, *h)
+    }
+}
+
+impl<'a> MultiScaleRef for PrecomputedReferenceView<'a> {
+    #[inline]
+    fn num_scales(&self) -> usize {
+        self.scales.len()
+    }
+    #[inline]
+    fn ref_width(&self) -> usize {
+        self.ref_width
+    }
+    #[inline]
+    fn ref_height(&self) -> usize {
+        self.ref_height
+    }
+    #[inline]
+    fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize) {
+        let (planes, w, h) = &self.scales[idx];
+        (*planes, *w, *h)
     }
 }
 
@@ -2368,8 +2482,8 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
 /// row count than the full-image path). Returns the mean-offset SUMS
 /// computed over the filter range only; if `inner_y_filter` is `None`,
 /// the entire plane contributes (matching the non-streaming path).
-pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
-    precomputed: &PrecomputedReference,
+pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScaleRef>(
+    precomputed: &R,
     distorted: &impl ImageSource,
     dst_planes: &mut [Vec<f32>; 3],
     config: &ZensimConfig,
@@ -2380,7 +2494,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
     let width = distorted.width();
     let height = distorted.height();
     let padded_width = simd_padded_width(width);
-    let num_scales = config.num_scales.min(precomputed.scales.len());
+    let num_scales = config.num_scales.min(precomputed.num_scales());
     let parallel = config.allow_multithreading;
     let n = padded_width * height;
 
@@ -2394,7 +2508,9 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
 
     convert_source_to_xyb_into(distorted, dst_planes, padded_width, parallel);
 
-    let (ref src_planes_s0, _, _) = precomputed.scales[0];
+    // Borrow scale-0 planes from the abstract reference (owned or view).
+    let (src_planes_s0, _, _) = precomputed.scale(0);
+    let dst_planes_s0: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
     // Mean offset is computed over the inner_y_filter rows (inner rows
     // of the strip), so each source row is counted exactly once across
     // all strips.
@@ -2406,7 +2522,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
             } else {
                 let inner_offset = compute_xyb_mean_offset_range(
                     src_planes_s0,
-                    dst_planes,
+                    dst_planes_s0,
                     width,
                     y0,
                     y1,
@@ -2426,7 +2542,7 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
         }
         None => {
             let mean_offset =
-                compute_xyb_mean_offset(src_planes_s0, dst_planes, width, height, padded_width);
+                compute_xyb_mean_offset(src_planes_s0, dst_planes_s0, width, height, padded_width);
             let pc = width * height;
             let cn = pc as f64;
             (
@@ -2450,13 +2566,14 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
         if w < 8 || h < 8 {
             break;
         }
-        let (ref src_planes, src_w, src_h) = precomputed.scales[scale];
+        let (src_planes, src_w, src_h) = precomputed.scale(scale);
         assert_eq!(w, src_w, "scale {scale} width mismatch");
         assert_eq!(h, src_h, "scale {scale} height mismatch");
+        let dst_planes_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
 
         let (accum, _) = process_scale_bands_into_accum(
             src_planes,
-            dst_planes,
+            dst_planes_view,
             w,
             h,
             config,
@@ -2595,7 +2712,10 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     ) {
         let dst_strip =
             crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
-        let strip_precomp = precomputed_ref_slice_rows(precomputed, strip_y0, strip_y1);
+        // Zero-copy: borrow this strip's rows from the parent precomputed ref.
+        // Eliminates the ~65 MB per-strip memcpy that the prior to_vec()-based
+        // slicer incurred. See STREAMING_372_OPTIMIZATION_NOTES.md.
+        let strip_precomp = precomputed.slice_rows_view(strip_y0, strip_y1);
         let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
         compute_multiscale_accums_streaming_with_ref_borrowed(
             &strip_precomp,
@@ -2649,37 +2769,11 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     (final_stats, final_mean_offset)
 }
 
-/// Build a per-strip [`PrecomputedReference`] by slicing rows out of
-/// a full precomputed ref at every pyramid scale. Used by
-/// [`compute_multiscale_stats_streaming_strips_with_ref`].
-fn precomputed_ref_slice_rows(
-    full: &PrecomputedReference,
-    src_y0: usize,
-    src_y1: usize,
-) -> PrecomputedReference {
-    let mut scales = Vec::with_capacity(full.scales.len());
-    for (scale_idx, (planes, plane_w, plane_h)) in full.scales.iter().enumerate() {
-        let factor = 1usize << scale_idx;
-        let y0_scale = src_y0 / factor;
-        let y1_scale = (src_y1 + factor - 1) / factor;
-        let y1_scale = y1_scale.min(*plane_h);
-        let y0_scale = y0_scale.min(y1_scale);
-        let rows = y1_scale - y0_scale;
-        let start_off = y0_scale * plane_w;
-        let end_off = y1_scale * plane_w;
-        let sliced: [Vec<f32>; 3] = [
-            planes[0][start_off..end_off].to_vec(),
-            planes[1][start_off..end_off].to_vec(),
-            planes[2][start_off..end_off].to_vec(),
-        ];
-        scales.push((sliced, *plane_w, rows));
-    }
-    PrecomputedReference {
-        scales,
-        ref_width: full.ref_width,
-        ref_height: src_y1 - src_y0,
-    }
-}
+// `precomputed_ref_slice_rows` removed — superseded by
+// `PrecomputedReference::slice_rows_view` which returns a zero-copy
+// borrowed `PrecomputedReferenceView<'_>` instead of allocating 12
+// fresh Vec<f32> + memcpy per strip. See `STREAMING_372_OPTIMIZATION_NOTES.md`
+// (Optimization 1) for the cost model.
 
 pub(crate) fn compute_multiscale_stats_streaming_strips(
     source: &impl ImageSource,
@@ -2906,9 +3000,10 @@ fn compute_diffmap_from_xyb(
     let num_scales = config.num_scales.min(precomputed.scales.len());
     let parallel = config.allow_multithreading;
 
-    let (ref src_planes_s0, _, _) = precomputed.scales[0];
+    let (src_planes_s0, _, _) = precomputed.scale(0);
+    let dst_view_s0: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
     let mean_offset =
-        compute_xyb_mean_offset(src_planes_s0, &dst_planes, width, height, padded_width);
+        compute_xyb_mean_offset(src_planes_s0, dst_view_s0, width, height, padded_width);
 
     let mut stats = Vec::with_capacity(num_scales);
     // Collect per-scale diffmaps with their dimensions
@@ -2921,7 +3016,7 @@ fn compute_diffmap_from_xyb(
             break;
         }
 
-        let (ref src_planes, src_w, src_h) = precomputed.scales[scale];
+        let (src_planes, src_w, src_h) = precomputed.scale(scale);
         // Internal invariant: dims match because the public API
         // (Zensim::compute_with_ref*) validates distorted dims against
         // PrecomputedReference dims before reaching this code, and both
@@ -2944,9 +3039,10 @@ fn compute_diffmap_from_xyb(
             .get(scale)
             .copied()
             .unwrap_or([eq; 3]);
+        let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
         let (scale_stat, dm) = process_scale_bands(
             src_planes,
-            &dst_planes,
+            dst_view,
             w,
             h,
             config,
