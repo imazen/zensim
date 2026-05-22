@@ -33,6 +33,11 @@ pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
 }
 
 /// Element-wise absolute difference: out[i] = |a[i] - b[i]|
+///
+/// **Deprecated for the streaming hot path (Phase 2 Lever 3, 2026-05-22)**
+/// — the activity path uses [`crate::blur::box_blur_h_into_abs_diff`]
+/// which fuses the blur with the abs-diff. Kept for API stability.
+#[allow(dead_code)]
 pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(
         abs_diff_into_inner(a, b, out),

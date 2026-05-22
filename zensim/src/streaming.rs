@@ -5,8 +5,8 @@
 //!   Strip-based H-blur → fused V-blur+features (parallel bands via rayon).
 
 use crate::blur::{
-    box_blur_1pass_into, box_blur_h, box_blur_v_from_copy, downscale_2x_inplace, fused_blur_h_mu,
-    fused_blur_h_ssim, simd_padded_width,
+    box_blur_1pass_into, box_blur_h_into_abs_diff, box_blur_v_from_copy, downscale_2x_inplace,
+    fused_blur_h_mu, fused_blur_h_ssim, simd_padded_width,
 };
 use crate::color::{
     apply_gamut_matrix, composite_linear_f32_rgba, composite_srgb8_bgra_to_linear,
@@ -18,7 +18,7 @@ use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
-    abs_diff_into, abs_diff_sum, build_inline_mask_mse, build_inline_mse, build_iw_mse_only,
+    abs_diff_sum, build_inline_mask_mse, build_inline_mse, build_iw_mse_only,
     edge_diff_channel_extended, edge_diff_channel_inline_both, edge_diff_channel_inline_mask,
     edge_diff_channel_iw_inline, mul_into, sq_diff_sum, sq_sum_into, ssim_channel_extended,
     ssim_channel_inline_both, ssim_channel_inline_mask, ssim_channel_iw_inline,
@@ -1324,10 +1324,6 @@ fn process_strip_channel(
         let do_iw = config.compute_iw_features;
         let need_activity = do_ext || do_iw;
         if need_activity {
-            // Lazy-allocate the per-channel H-blur buffer — basic-only
-            // paths skipped this branch entirely and pay no allocation.
-            bufs.ensure_h_blur_src(strip_h * width);
-
             let inner_off = inner_start * width;
             let inner_n = inner_h * width;
             let strip_n = strip_h * width;
@@ -1336,30 +1332,23 @@ fn process_strip_channel(
             let inner_src = &src_c[inner_off..inner_off + inner_n];
             let inner_dst = &dst_c[inner_off..inner_off + inner_n];
 
-            // Step 0 (principled per-channel H-blur, 2026-05-17): compute
-            // a strip-local H-blur of the CURRENT channel's source into
-            // `h_blur_src` at ALL strip rows (inner + overlap). This is
-            // the per-channel "local mean" reference for the activity
-            // computation. Prior behavior reused `bufs.mu1` which at
-            // overlap rows held arbitrary cross-channel stale state
-            // (X channel: zero; Y channel: src_X; B channel: |src_Y-src_X|)
-            // — an accidental cascade, not a designed algorithm.
-            // See `docs/PRINCIPLED_ACTIVITY.md`.
-            box_blur_h(
+            // Phase 2 Lever 3 (2026-05-22): fused H-blur + abs-diff. The
+            // h_blur_src plane is no longer materialized — `bufs.mask`
+            // receives `|src - H_blur(src)|` directly. Saves one full
+            // plane write + one full plane read of src per channel per
+            // scale on the activity path.
+            //
+            // Per-channel H-blur reference (principled, 2026-05-17): the
+            // current channel's strip-local H_blur(src) is the activity-
+            // map reference. Prior multi-pass V-blurred bufs.mu1 carried
+            // arbitrary cross-channel stale state at overlap rows. See
+            // `docs/PRINCIPLED_ACTIVITY.md`.
+            box_blur_h_into_abs_diff(
                 &src_c[..strip_n],
-                &mut bufs.h_blur_src[..strip_n],
+                &mut bufs.mask[..strip_n],
                 width,
                 strip_h,
                 config.blur_radius,
-            );
-
-            // Step 1: |src - h_blur_src| → mask (full strip for blur context).
-            // The buffer is named `mask` for legacy reasons but at this
-            // point it holds the raw activity = |src - H_blur(src)|.
-            abs_diff_into(
-                &src_c[..strip_n],
-                &bufs.h_blur_src[..strip_n],
-                &mut bufs.mask[..strip_n],
             );
 
             // Step 2: blur the activity map → mul_buf. After this,
@@ -1557,13 +1546,6 @@ fn process_strip_channel(
         );
     }
 
-    // Lazy-allocate h_blur_src up-front (only when activity is needed) so
-    // the borrow lives outside the immutable-field-slice borrows below.
-    // Basic-only paths skip this entirely and pay no allocation cost.
-    if config.extended_features || config.compute_iw_features {
-        bufs.ensure_h_blur_src(strip_h * width);
-    }
-
     let inner_off = inner_start * width;
     let inner_n = inner_h * width;
     let inner_src = &src_c[inner_off..inner_off + inner_n];
@@ -1614,23 +1596,14 @@ fn process_strip_channel(
         let k = config.extended_masking_strength;
         let k_iw = config.iw_strength;
 
-        // Principled per-channel H-blur reference (2026-05-17). Use the
-        // current channel's strip-local H_blur(src) as the activity-map
-        // reference instead of the multi-pass V-blurred bufs.mu1, which
-        // would otherwise carry cross-channel stale state at strip
-        // overlap rows. See `docs/PRINCIPLED_ACTIVITY.md`.
-        box_blur_h(
+        // Phase 2 Lever 3 (2026-05-22): fused H-blur + abs-diff. See the
+        // 1-pass-blur call site for the design rationale.
+        box_blur_h_into_abs_diff(
             &src_c[..strip_n],
-            &mut bufs.h_blur_src[..strip_n],
+            &mut bufs.mask[..strip_n],
             width,
             strip_h,
             config.blur_radius,
-        );
-
-        abs_diff_into(
-            &src_c[..strip_n],
-            &bufs.h_blur_src[..strip_n],
-            &mut bufs.mask[..strip_n],
         );
 
         blur_fn(
