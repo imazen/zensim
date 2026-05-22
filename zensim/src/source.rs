@@ -459,6 +459,79 @@ impl ImageSource for StridedBytes<'_> {
     }
 }
 
+// ============================================================================
+// SubsetView — zero-copy Y-range slice of any ImageSource.
+// ============================================================================
+
+/// Zero-copy adapter exposing a Y-range `[y_start, y_end)` of an underlying
+/// [`ImageSource`] as a new [`ImageSource`] with `height() = y_end - y_start`.
+///
+/// Used by the strip-aggregating 372-feature path: split a large image into
+/// horizontal strips (with overlap rows for the blur stencil), wrap each
+/// strip in a `SubsetView`, run the existing pipeline on the strip
+/// per-strip, then aggregate per-scale `ScaleStats` across strips. Peak
+/// memory per pair drops from `O(full_image_size)` to
+/// `O(strip_size + pyramid_factor × strip_size)`.
+///
+/// Width is unchanged; pixel format / alpha / primaries pass through.
+/// `row_bytes(y)` delegates to `parent.row_bytes(y + y_start)`.
+#[derive(Clone, Copy, Debug)]
+pub struct SubsetView<'a, S: ImageSource + ?Sized> {
+    parent: &'a S,
+    y_start: usize,
+    height: usize,
+}
+
+impl<'a, S: ImageSource + ?Sized> SubsetView<'a, S> {
+    /// Wrap `[y_start, y_start + height)` of `parent`. Caller must ensure
+    /// `y_start + height <= parent.height()`.
+    pub fn new(parent: &'a S, y_start: usize, height: usize) -> Self {
+        debug_assert!(
+            y_start.saturating_add(height) <= parent.height(),
+            "SubsetView out of parent bounds"
+        );
+        Self {
+            parent,
+            y_start,
+            height,
+        }
+    }
+
+    /// Y offset within the parent.
+    #[inline]
+    pub fn y_start(&self) -> usize {
+        self.y_start
+    }
+}
+
+impl<S: ImageSource + ?Sized> ImageSource for SubsetView<'_, S> {
+    #[inline]
+    fn width(&self) -> usize {
+        self.parent.width()
+    }
+    #[inline]
+    fn height(&self) -> usize {
+        self.height
+    }
+    #[inline]
+    fn pixel_format(&self) -> PixelFormat {
+        self.parent.pixel_format()
+    }
+    #[inline]
+    fn alpha_mode(&self) -> AlphaMode {
+        self.parent.alpha_mode()
+    }
+    #[inline]
+    fn color_primaries(&self) -> ColorPrimaries {
+        self.parent.color_primaries()
+    }
+    #[inline]
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        debug_assert!(y < self.height);
+        self.parent.row_bytes(self.y_start + y)
+    }
+}
+
 // --- Feature-gated impls ---
 
 #[cfg(feature = "imgref")]
