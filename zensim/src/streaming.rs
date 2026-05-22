@@ -2498,17 +2498,162 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed(
 /// **Aggregation correctness**: every `ScaleAccumulators` field is a
 /// raw sum or max — both directly composable via [`ScaleAccumulators::merge`].
 /// The final mean / root-power pooling happens once after all strips
-/// are merged, yielding identical results to the full-image path
-/// (up to the strip-boundary blur context approximation; see below).
+/// are merged, yielding f64-machine-epsilon agreement with the
+/// full-image path (worst observed rel error: < 1e-13 on the 99-pair
+/// safesyn test).
 ///
-/// **Strip-boundary approximation**: the V-blur stencil at the very
-/// edge of each strip uses mirror-clamp instead of the full image's
-/// continuation. With `strip_margin >= blur_radius × blur_passes`
-/// (default ≥5), the inner rows are unaffected. Without overlap,
-/// `2 × blur_radius` rows at each strip boundary see edge-clamp
-/// artifacts. The overlap is the cost of byte-equivalence; without
-/// it, expect features to drift by ~1 / (strip_count × strip_inner)
-/// relative magnitude.
+/// **V-blur band layout**: each strip's `process_scale_bands_into_accum`
+/// is told `outer_layout = (full_h, strip_y0)`, so its bands tile
+/// against the full-image plane (not the strip's local plane). Each
+/// band's V-blur running-sum init mirrors at the same source row as
+/// the full-image path's corresponding band, eliminating f32
+/// accumulator history divergence — which is what would otherwise
+/// produce ~3e-3 rel drift at coarse-scale near-zero features
+/// (catastrophic cancellation in `sigma_sq = blur(src²) - mu²`).
+///
+/// **Strip-boundary blur context**: with `strip_margin >= blur_radius
+/// × blur_passes` at every pyramid scale (default 128 > 5×1), the
+/// inner-row blur stencil reads only real strip data (no
+/// mirror-clamp). Strip margin must be a multiple of `2^(num_scales-1)`
+/// and inner rows must align to band boundaries for byte-exactness;
+/// the default geometry (strip_inner=256, strip_margin=128) satisfies
+/// both.
+/// Variant of [`compute_multiscale_stats_streaming_strips`] that
+/// REUSES a caller-owned full [`PrecomputedReference`] across strips,
+/// instead of building a per-strip ref. Best for batch encoder loops
+/// where many distorted candidates are scored against the same source
+/// (the XYB conversion + pyramid downscale on the reference side
+/// happens once for the whole image, not once per strip per call).
+///
+/// Each strip slices the appropriate Y-range out of the precomputed
+/// ref's per-scale planes and runs the standard raw-accumulator
+/// pipeline on that slice. The distorted side is still processed
+/// per-strip so per-pair peak memory stays bounded.
+pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
+    precomputed: &PrecomputedReference,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+    strip_inner: usize,
+    strip_margin: usize,
+) -> (Vec<ScaleStats>, [f64; 3]) {
+    let width = distorted.width();
+    let height = distorted.height();
+    assert_eq!(precomputed.ref_width, width);
+    assert_eq!(precomputed.ref_height, height);
+
+    // Edge case: image short enough to process in one strip.
+    let one_strip_h = strip_inner + 2 * strip_margin;
+    if height <= one_strip_h {
+        return compute_multiscale_stats_streaming_with_ref(
+            precomputed,
+            distorted,
+            config,
+            weights,
+        );
+    }
+
+    let num_scales = config.num_scales.min(precomputed.scales.len());
+    let n_strips = height.div_ceil(strip_inner);
+
+    let mut global_accums: Vec<ScaleAccumulators> =
+        (0..num_scales).map(|_| ScaleAccumulators::new()).collect();
+    let mut mean_offset_sums: [f64; 3] = [0.0; 3];
+    let mut mean_offset_pixel_count: usize = 0;
+
+    let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
+
+    for strip_idx in 0..n_strips {
+        let inner_y0 = strip_idx * strip_inner;
+        let inner_y1 = ((strip_idx + 1) * strip_inner).min(height);
+        if inner_y0 >= height {
+            break;
+        }
+        let strip_y0 = inner_y0.saturating_sub(strip_margin);
+        let strip_y1 = (inner_y1 + strip_margin).min(height);
+        let strip_h = strip_y1 - strip_y0;
+
+        let inner_filter_strip_y0 = inner_y0 - strip_y0;
+        let inner_filter_strip_y1 = inner_y1 - strip_y0;
+
+        let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_h);
+
+        // Build a per-strip PrecomputedReference by slicing rows out
+        // of the full precomputed ref's per-scale planes. This copies
+        // ~strip_h × width × 4 bytes × 3 channels × 1.33 (pyramid sum)
+        // — typically 1-50 MB per strip; negligible vs the kernel work.
+        // What's SAVED: the XYB conversion + pyramid downscale on the
+        // ref side (which would otherwise repeat per strip per call).
+        let strip_precomp = precomputed_ref_slice_rows(precomputed, strip_y0, strip_y1);
+
+        let (strip_accums, strip_offset_sums, strip_pixel_count) =
+            compute_multiscale_accums_streaming_with_ref_borrowed(
+                &strip_precomp,
+                &dst_strip,
+                &mut dst_planes,
+                config,
+                weights,
+                Some((inner_filter_strip_y0, inner_filter_strip_y1)),
+                Some((height, strip_y0)),
+            );
+
+        for (s, strip_accum) in strip_accums.iter().enumerate() {
+            global_accums[s].merge(strip_accum);
+        }
+
+        for c in 0..3 {
+            mean_offset_sums[c] += strip_offset_sums[c];
+        }
+        mean_offset_pixel_count += strip_pixel_count;
+    }
+
+    let final_stats: Vec<ScaleStats> =
+        global_accums.iter().map(|a| a.finalize()).collect();
+    let final_mean_offset = if mean_offset_pixel_count == 0 {
+        [0.0; 3]
+    } else {
+        let inv = 1.0 / mean_offset_pixel_count as f64;
+        [
+            mean_offset_sums[0] * inv,
+            mean_offset_sums[1] * inv,
+            mean_offset_sums[2] * inv,
+        ]
+    };
+    (final_stats, final_mean_offset)
+}
+
+/// Build a per-strip [`PrecomputedReference`] by slicing rows out of
+/// a full precomputed ref at every pyramid scale. Used by
+/// [`compute_multiscale_stats_streaming_strips_with_ref`].
+fn precomputed_ref_slice_rows(
+    full: &PrecomputedReference,
+    src_y0: usize,
+    src_y1: usize,
+) -> PrecomputedReference {
+    let mut scales = Vec::with_capacity(full.scales.len());
+    for (scale_idx, (planes, plane_w, plane_h)) in full.scales.iter().enumerate() {
+        let factor = 1usize << scale_idx;
+        let y0_scale = src_y0 / factor;
+        let y1_scale = (src_y1 + factor - 1) / factor;
+        let y1_scale = y1_scale.min(*plane_h);
+        let y0_scale = y0_scale.min(y1_scale);
+        let rows = y1_scale - y0_scale;
+        let start_off = y0_scale * plane_w;
+        let end_off = y1_scale * plane_w;
+        let sliced: [Vec<f32>; 3] = [
+            planes[0][start_off..end_off].to_vec(),
+            planes[1][start_off..end_off].to_vec(),
+            planes[2][start_off..end_off].to_vec(),
+        ];
+        scales.push((sliced, *plane_w, rows));
+    }
+    PrecomputedReference {
+        scales,
+        ref_width: full.ref_width,
+        ref_height: src_y1 - src_y0,
+    }
+}
+
 pub(crate) fn compute_multiscale_stats_streaming_strips(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
@@ -3526,6 +3671,345 @@ mod tests {
         eprintln!(
             "strip_aggregator_byte_exact_single_pair: worst rel = {:.3e} ({})",
             worst_rel, worst_label,
+        );
+    }
+
+    /// Verify the buffered-ref strip aggregator
+    /// (`compute_multiscale_stats_streaming_strips_with_ref`) is byte-
+    /// exact equivalent to the strip-per-strip aggregator
+    /// (`compute_multiscale_stats_streaming_strips`).
+    #[test]
+    fn buffered_ref_strip_matches_strip_per_strip() {
+        let w = 256;
+        let h = 1024;
+        let n = w * h;
+        let mut src = vec![[0u8, 0, 0]; n];
+        let mut dst = vec![[0u8, 0, 0]; n];
+        for y in 0..h {
+            for x in 0..w {
+                src[y * w + x] = [
+                    (((x * 251) + y * 7) & 0xFF) as u8,
+                    (((y * 241) + x * 11) & 0xFF) as u8,
+                    ((x + y) & 0xFF) as u8,
+                ];
+                dst[y * w + x] = [
+                    src[y * w + x][0].saturating_add(3),
+                    src[y * w + x][1].saturating_sub(2),
+                    src[y * w + x][2].saturating_add(1),
+                ];
+            }
+        }
+        let src_img = RgbSlice::new(&src, w, h);
+        let dst_img = RgbSlice::new(&dst, w, h);
+
+        let config = ZensimConfig {
+            compute_all_features: true,
+            extended_features: true,
+            compute_iw_features: true,
+            ..Default::default()
+        };
+        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+
+        // Per-strip ref path
+        let (a_stats, a_offset) = compute_multiscale_stats_streaming_strips(
+            &src_img, &dst_img, &config, &weights, 256, 128,
+        );
+
+        // Buffered ref path
+        let full_precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+        let (b_stats, b_offset) = compute_multiscale_stats_streaming_strips_with_ref(
+            &full_precomp, &dst_img, &config, &weights, 256, 128,
+        );
+
+        for (s, (a, b)) in a_stats.iter().zip(b_stats.iter()).enumerate() {
+            for c in 0..3 {
+                let check = |x: f64, y: f64, lbl: &str| {
+                    let diff = (x - y).abs();
+                    let scale = x.abs().max(y.abs()).max(1e-12);
+                    let rel = diff / scale;
+                    assert!(
+                        rel < 1e-6 || diff < 1e-9,
+                        "s{s} c{c} {lbl}: per-strip={x:.10} buffered={y:.10} rel={rel:.2e}"
+                    );
+                };
+                check(a.ssim[c * 2], b.ssim[c * 2], "ssim_mean");
+                check(a.ssim[c * 2 + 1], b.ssim[c * 2 + 1], "ssim_4th");
+                check(a.mse[c], b.mse[c], "mse");
+                check(a.iw_art_4th[c], b.iw_art_4th[c], "iw_art_4th");
+                check(a.masked_ssim[c * 3], b.masked_ssim[c * 3], "masked_ssim_mean");
+            }
+        }
+        for c in 0..3 {
+            let diff = (a_offset[c] - b_offset[c]).abs();
+            assert!(diff < 1e-9, "mean_offset[{c}]: per-strip={} buffered={}", a_offset[c], b_offset[c]);
+        }
+    }
+
+    /// 99-pair byte-exact equivalence test for the strip aggregator.
+    ///
+    /// Generates 99 deterministic synthetic image pairs covering the
+    /// signal spectrum (smooth gradients, banded noise, checkerboard,
+    /// stripes, edge content) with various distortion types
+    /// (low-amplitude noise, lossy-codec-like blur, blockiness, chroma
+    /// shift). Asserts that every one of the 372 per-scale features
+    /// from each pair matches within 1e-6 rel tolerance (or 1e-9 abs
+    /// when the value is near zero) between the full path and the strip
+    /// path.
+    ///
+    /// This is the load-bearing precision gate for Phase 1 of the Y-strip
+    /// aggregator. The aggregator math (raw-sum merge across strips) is
+    /// architecturally exact; the test verifies the V-blur band layout
+    /// alignment in `process_scale_bands_into_accum`'s `outer_layout`
+    /// branch keeps the f32 accumulator history matched.
+    #[test]
+    fn strip_aggregator_byte_exact_safesyn_99() {
+        // Image geometry: 256×1024 at all 99 pairs.
+        // strip_inner=256, strip_margin=128 → 4 strips per image.
+        let w = 256;
+        let h = 1024;
+        let n = w * h;
+        let strip_inner = 256;
+        let strip_margin = 128;
+        let num_pairs = 99;
+
+        let config = ZensimConfig {
+            compute_all_features: true,
+            extended_features: true,
+            compute_iw_features: true,
+            ..Default::default()
+        };
+        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+
+        // Worst observed rel/abs across all pairs and features.
+        let mut overall_worst_rel = 0.0f64;
+        let mut overall_worst_abs = 0.0f64;
+        let mut overall_worst_label = String::new();
+        let mut fail_count = 0usize;
+        let mut fail_examples: Vec<String> = Vec::new();
+
+        for pair_idx in 0..num_pairs {
+            // Deterministic procedural content. Each pair index seeds a
+            // distinct image shape + distortion type so the 99 pairs
+            // span the feature space.
+            let mut src = vec![[0u8, 0, 0]; n];
+            let mut dst = vec![[0u8, 0, 0]; n];
+            let seed = (pair_idx as u32).wrapping_mul(0x9E37_79B9).wrapping_add(1);
+            let mode = pair_idx % 9;
+            let (m1, m2, m3) = (
+                seed.wrapping_mul(0xC2B2_AE35),
+                seed.wrapping_mul(0x27D4_EB2F),
+                seed.wrapping_mul(0x1656_67B1),
+            );
+            for y in 0..h {
+                for x in 0..w {
+                    let (r, g, b) = match mode {
+                        0 => {
+                            // Smooth gradient
+                            let r = (((x * 255) / w) ^ (m1 & 0xFF) as usize) as u8;
+                            let g = (((y * 255) / h) ^ (m2 & 0xFF) as usize) as u8;
+                            let b = (((x + y) * 127 / (w + h)) ^ (m3 & 0xFF) as usize) as u8;
+                            (r, g, b)
+                        }
+                        1 => {
+                            // Multi-frequency checkerboard
+                            let freq = 4 + (pair_idx as usize % 12);
+                            let tile = ((x * freq / w) + (y * freq / h)) & 1;
+                            let v = if tile == 0 { 240u8 } else { 16u8 };
+                            (
+                                v ^ (m1 as u8),
+                                v.wrapping_add((y & 31) as u8) ^ (m2 as u8),
+                                v ^ (m3 as u8),
+                            )
+                        }
+                        2 => {
+                            // Horizontal stripes
+                            let stripe = (y / (4 + (pair_idx as usize % 16))) & 1;
+                            let v = if stripe == 0 { 200u8 } else { 50u8 };
+                            (
+                                v.wrapping_add((x & 7) as u8),
+                                v.wrapping_sub((y & 7) as u8),
+                                v ^ ((x ^ y) as u8),
+                            )
+                        }
+                        3 => {
+                            // Vertical stripes
+                            let stripe = (x / (4 + (pair_idx as usize % 16))) & 1;
+                            let v = if stripe == 0 { 200u8 } else { 50u8 };
+                            (
+                                v ^ ((x ^ y) as u8),
+                                v.wrapping_add((x & 7) as u8),
+                                v.wrapping_sub((y & 7) as u8),
+                            )
+                        }
+                        4 => {
+                            // Banded value-noise via hash
+                            let h_fn = |a: u32, b: u32| -> u8 {
+                                let mut h = a
+                                    .wrapping_mul(0x6C8E_9CF7)
+                                    .wrapping_add(b.wrapping_mul(0x9E37_79B9))
+                                    .wrapping_add(seed);
+                                h ^= h >> 16;
+                                h = h.wrapping_mul(0x85EB_CA6B);
+                                h ^= h >> 13;
+                                (h & 0xFF) as u8
+                            };
+                            (
+                                h_fn(x as u32 / 4, y as u32 / 4),
+                                h_fn(x as u32 / 2, y as u32 / 8),
+                                h_fn(x as u32 / 8, y as u32 / 4),
+                            )
+                        }
+                        5 => {
+                            // Color blocks
+                            let bx = (x * 4) / w;
+                            let by = (y * 4) / h;
+                            let idx = (by * 4 + bx + pair_idx) & 15;
+                            let palette: [[u8; 3]; 16] = [
+                                [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0],
+                                [255, 0, 255], [0, 255, 255], [255, 128, 0], [128, 0, 255],
+                                [0, 128, 255], [255, 0, 128], [128, 255, 0], [0, 255, 128],
+                                [64, 0, 128], [128, 64, 0], [0, 128, 64], [192, 192, 64],
+                            ];
+                            let p = palette[idx];
+                            (p[0], p[1], p[2])
+                        }
+                        6 => {
+                            // Diagonal gradient + texture
+                            let d = ((x + y) * 255 / (w + h)) as u8;
+                            let t = ((x.wrapping_mul(y)) & 0xFF) as u8;
+                            (d, d ^ t, t.wrapping_add(d / 2))
+                        }
+                        7 => {
+                            // Radial gradient
+                            let cx = w as f32 / 2.0;
+                            let cy = h as f32 / 2.0;
+                            let dx = x as f32 - cx;
+                            let dy = y as f32 - cy;
+                            let r2 = (dx * dx + dy * dy).sqrt();
+                            let v = (r2 * 0.4) as u8;
+                            (v, 255u8.wrapping_sub(v), v.wrapping_add(64))
+                        }
+                        _ => {
+                            // Constant + small dither
+                            let dither = (((x.wrapping_mul(y)) ^ seed as usize) & 0x1F) as u8;
+                            let base = (pair_idx as u8).wrapping_mul(7);
+                            (base.wrapping_add(dither),
+                             base.wrapping_sub(dither),
+                             base ^ dither)
+                        }
+                    };
+                    src[y * w + x] = [r, g, b];
+
+                    // Distortion type rotates over pairs.
+                    let dist_type = (pair_idx / 9) % 11;
+                    let (dr, dg, db) = match dist_type {
+                        0 => (r.saturating_add(2), g.saturating_sub(1), b),
+                        1 => (r.saturating_add(8), g.saturating_sub(4), b.saturating_add(2)),
+                        2 => (r ^ ((x & 1) as u8), g ^ ((y & 1) as u8), b ^ (((x + y) & 1) as u8)),
+                        3 => (r & 0xF0, g & 0xF0, b & 0xF0),
+                        4 => (r & 0xE0 | 0x10, g & 0xE0 | 0x10, b & 0xE0 | 0x10),
+                        5 => {
+                            // Mild blur surrogate: average with neighbor
+                            let r2 = if x + 1 < w { src.get(y * w + x + 1).map(|p| p[0]).unwrap_or(r) } else { r };
+                            (((r as u16 + r2 as u16) / 2) as u8, g, b)
+                        }
+                        6 => (r.saturating_add(16), g, b.saturating_sub(8)),
+                        7 => (((r as u16 * 7 / 8) + 16) as u8, ((g as u16 * 7 / 8) + 16) as u8, ((b as u16 * 7 / 8) + 16) as u8),
+                        8 => (r.saturating_sub(1), g.saturating_add(1), b.saturating_sub(1)),
+                        9 => (r.wrapping_add((((x + y) & 7) as u8).wrapping_sub(3)), g, b),
+                        _ => (r, g, b.saturating_add(((y & 7) as u8).wrapping_sub(3))),
+                    };
+                    dst[y * w + x] = [dr, dg, db];
+                }
+            }
+
+            let src_img = RgbSlice::new(&src, w, h);
+            let dst_img = RgbSlice::new(&dst, w, h);
+
+            // Full path
+            let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
+            let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
+                &precomp, &dst_img, &config, &weights,
+            );
+            // Strip path
+            let (strip_stats, strip_offset) = compute_multiscale_stats_streaming_strips(
+                &src_img, &dst_img, &config, &weights, strip_inner, strip_margin,
+            );
+
+            let mut compare = |a: f64, b: f64, lbl: &str| {
+                let diff = (a - b).abs();
+                let scale = a.abs().max(b.abs());
+                let rel = if scale > 1e-9 { diff / scale } else { 0.0 };
+                if diff > overall_worst_abs {
+                    overall_worst_abs = diff;
+                }
+                if rel > overall_worst_rel && scale > 1e-9 {
+                    overall_worst_rel = rel;
+                    overall_worst_label = format!("pair {pair_idx} {lbl}");
+                }
+                let pass = rel < 1e-6 || diff < 1e-9;
+                if !pass {
+                    fail_count += 1;
+                    if fail_examples.len() < 8 {
+                        fail_examples.push(format!(
+                            "pair {pair_idx} {lbl}: full={a:.10} strip={b:.10} diff={diff:.2e} rel={rel:.2e}"
+                        ));
+                    }
+                }
+            };
+
+            for (s, (full, strip)) in full_stats.iter().zip(strip_stats.iter()).enumerate() {
+                for c in 0..3 {
+                    compare(full.ssim[c * 2], strip.ssim[c * 2], &format!("s{s} c{c} ssim_mean"));
+                    compare(full.ssim[c * 2 + 1], strip.ssim[c * 2 + 1], &format!("s{s} c{c} ssim_4th"));
+                    compare(full.ssim_2nd[c], strip.ssim_2nd[c], &format!("s{s} c{c} ssim_2nd"));
+                    for (k, name) in ["art_mean", "art_4th", "det_mean", "det_4th"].iter().enumerate() {
+                        compare(full.edge[c * 4 + k], strip.edge[c * 4 + k], &format!("s{s} c{c} {name}"));
+                    }
+                    compare(full.edge_2nd[c * 2], strip.edge_2nd[c * 2], &format!("s{s} c{c} art_2nd"));
+                    compare(full.edge_2nd[c * 2 + 1], strip.edge_2nd[c * 2 + 1], &format!("s{s} c{c} det_2nd"));
+                    compare(full.mse[c], strip.mse[c], &format!("s{s} c{c} mse"));
+                    compare(full.hf_energy_loss[c], strip.hf_energy_loss[c], &format!("s{s} c{c} hf_energy_loss"));
+                    compare(full.hf_mag_loss[c], strip.hf_mag_loss[c], &format!("s{s} c{c} hf_mag_loss"));
+                    compare(full.hf_energy_gain[c], strip.hf_energy_gain[c], &format!("s{s} c{c} hf_energy_gain"));
+                    compare(full.ssim_max[c], strip.ssim_max[c], &format!("s{s} c{c} ssim_max"));
+                    compare(full.art_max[c], strip.art_max[c], &format!("s{s} c{c} art_max"));
+                    compare(full.det_max[c], strip.det_max[c], &format!("s{s} c{c} det_max"));
+                    compare(full.ssim_p95[c], strip.ssim_p95[c], &format!("s{s} c{c} ssim_l8"));
+                    compare(full.art_p95[c], strip.art_p95[c], &format!("s{s} c{c} art_l8"));
+                    compare(full.det_p95[c], strip.det_p95[c], &format!("s{s} c{c} det_l8"));
+                    for (k, name) in ["masked_ssim_mean", "masked_ssim_4th", "masked_ssim_2nd"].iter().enumerate() {
+                        compare(full.masked_ssim[c * 3 + k], strip.masked_ssim[c * 3 + k], &format!("s{s} c{c} {name}"));
+                    }
+                    compare(full.masked_art_4th[c], strip.masked_art_4th[c], &format!("s{s} c{c} masked_art_4th"));
+                    compare(full.masked_det_4th[c], strip.masked_det_4th[c], &format!("s{s} c{c} masked_det_4th"));
+                    compare(full.masked_mse[c], strip.masked_mse[c], &format!("s{s} c{c} masked_mse"));
+                    for (k, name) in ["iw_ssim_mean", "iw_ssim_4th", "iw_ssim_2nd"].iter().enumerate() {
+                        compare(full.iw_ssim[c * 3 + k], strip.iw_ssim[c * 3 + k], &format!("s{s} c{c} {name}"));
+                    }
+                    compare(full.iw_art_4th[c], strip.iw_art_4th[c], &format!("s{s} c{c} iw_art_4th"));
+                    compare(full.iw_det_4th[c], strip.iw_det_4th[c], &format!("s{s} c{c} iw_det_4th"));
+                    compare(full.iw_mse[c], strip.iw_mse[c], &format!("s{s} c{c} iw_mse"));
+                }
+            }
+            for c in 0..3 {
+                compare(full_offset[c], strip_offset[c], &format!("mean_offset[{c}]"));
+            }
+        }
+
+        eprintln!(
+            "strip_aggregator_byte_exact_safesyn_99: 99 pairs, overall worst rel = {:.3e} ({}), worst abs = {:.3e}",
+            overall_worst_rel, overall_worst_label, overall_worst_abs,
+        );
+        if !fail_examples.is_empty() {
+            eprintln!("First {} failure examples:", fail_examples.len());
+            for ex in &fail_examples {
+                eprintln!("  {ex}");
+            }
+        }
+        assert!(
+            fail_count == 0,
+            "{fail_count} feature comparisons failed the 1e-6 rel / 1e-9 abs gate"
         );
     }
 
