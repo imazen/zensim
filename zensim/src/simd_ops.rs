@@ -7,7 +7,6 @@ use archmage::magetypes;
 #[cfg(target_arch = "x86_64")]
 use magetypes::simd::f32x8;
 use magetypes::simd::generic::f32x8 as GenericF32x8;
-#[cfg(target_arch = "x86_64")]
 use magetypes::simd::generic::f32x16;
 
 /// Element-wise multiply: out[i] = a[i] * b[i]
@@ -2472,10 +2471,9 @@ pub(crate) fn edge_diff_channel_iw_inline(
 
 // --- build_mask_and_iw_mse_inline ---
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn build_mask_and_iw_mse_inline_inner_v4(
-    token: archmage::X64V4Token,
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn build_mask_and_iw_mse_inline_inner(
+    token: Token,
     activity: &[f32],
     k_mask: f32,
     k_iw: f32,
@@ -2487,16 +2485,18 @@ fn build_mask_and_iw_mse_inline_inner_v4(
     let kmv = f32x16::splat(token, k_mask);
     let kiv = f32x16::splat(token, k_iw);
 
-    let n = activity.len();
-    let chunks = n / 16;
+    let (a_chunks, a_tail) = activity.as_chunks::<16>();
+    let (s_chunks, _) = src.as_chunks::<16>();
+    let (d_chunks, _) = dst.as_chunks::<16>();
+    let (mo_chunks, mo_tail) = mask_out.as_chunks_mut::<16>();
+
     let mut mse_mask = 0.0f64;
     let mut mse_iw = 0.0f64;
 
-    for c in 0..chunks {
-        let base = c * 16;
-        let av = f32x16::from_array(token, activity[base..][..16].try_into().unwrap());
-        let sv = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
-        let dv = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
+    for (((ac, sc), dc), mo) in a_chunks.iter().zip(s_chunks).zip(d_chunks).zip(mo_chunks) {
+        let av = f32x16::from_array(token, *ac);
+        let sv = f32x16::from_array(token, *sc);
+        let dv = f32x16::from_array(token, *dc);
 
         let mask = one / kmv.mul_add(av, one);
         // IW weight computed inline — bit-identical to `kiv.mul_add(av, one)`
@@ -2506,111 +2506,10 @@ fn build_mask_and_iw_mse_inline_inner_v4(
         let d2 = diff * diff;
         mse_mask += (d2 * mask).reduce_add() as f64;
         mse_iw += (d2 * iw).reduce_add() as f64;
-        mask_out[base..base + 16].copy_from_slice(&mask.to_array());
-    }
-
-    for i in (chunks * 16)..n {
-        let a = activity[i];
-        let mask = 1.0f32 / (1.0f32 + k_mask * a);
-        let iw = 1.0f32 + k_iw * a;
-        mask_out[i] = mask;
-        let d = src[i] - dst[i];
-        let d2 = d * d;
-        mse_mask += (d2 * mask) as f64;
-        mse_iw += (d2 * iw) as f64;
-    }
-
-    (mse_mask, mse_iw)
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn build_mask_and_iw_mse_inline_inner_v3(
-    token: archmage::X64V3Token,
-    activity: &[f32],
-    k_mask: f32,
-    k_iw: f32,
-    src: &[f32],
-    dst: &[f32],
-    mask_out: &mut [f32],
-) -> (f64, f64) {
-    let one = f32x8::splat(token, 1.0);
-    let kmv = f32x8::splat(token, k_mask);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let n = activity.len();
-    let chunks = n / 8;
-    let mut mse_mask = 0.0f64;
-    let mut mse_iw = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 8;
-        let av = f32x8::from_array(token, activity[base..][..8].try_into().unwrap());
-        let sv = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
-        let dv = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
-
-        let mask = one / kmv.mul_add(av, one);
-        let iw = kiv.mul_add(av, one);
-        let diff = sv - dv;
-        let d2 = diff * diff;
-        mse_mask += (d2 * mask).reduce_add() as f64;
-        mse_iw += (d2 * iw).reduce_add() as f64;
-        mask_out[base..base + 8].copy_from_slice(&mask.to_array());
-    }
-
-    for i in (chunks * 8)..n {
-        let a = activity[i];
-        let mask = 1.0f32 / (1.0f32 + k_mask * a);
-        let iw = 1.0f32 + k_iw * a;
-        mask_out[i] = mask;
-        let d = src[i] - dst[i];
-        let d2 = d * d;
-        mse_mask += (d2 * mask) as f64;
-        mse_iw += (d2 * iw) as f64;
-    }
-
-    (mse_mask, mse_iw)
-}
-
-#[magetypes(neon, wasm128, scalar)]
-fn build_mask_and_iw_mse_inline_inner(
-    token: Token,
-    activity: &[f32],
-    k_mask: f32,
-    k_iw: f32,
-    src: &[f32],
-    dst: &[f32],
-    mask_out: &mut [f32],
-) -> (f64, f64) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    let one = f32x8::splat(token, 1.0);
-    let kmv = f32x8::splat(token, k_mask);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let (a_chunks, a_tail) = activity.as_chunks::<8>();
-    let (s_chunks, _) = src.as_chunks::<8>();
-    let (d_chunks, _) = dst.as_chunks::<8>();
-    let (mo_chunks, mo_tail) = mask_out.as_chunks_mut::<8>();
-
-    let mut mse_mask = 0.0f64;
-    let mut mse_iw = 0.0f64;
-
-    for (((ac, sc), dc), mo) in a_chunks.iter().zip(s_chunks).zip(d_chunks).zip(mo_chunks) {
-        let av = f32x8::from_array(token, *ac);
-        let sv = f32x8::from_array(token, *sc);
-        let dv = f32x8::from_array(token, *dc);
-
-        let mask = one / kmv.mul_add(av, one);
-        let iw = kiv.mul_add(av, one);
-        let diff = sv - dv;
-        let d2 = diff * diff;
-        mse_mask += (d2 * mask).reduce_add() as f64;
-        mse_iw += (d2 * iw).reduce_add() as f64;
         mask.store(mo);
     }
 
-    let off = a_chunks.len() * 8;
+    let off = a_chunks.len() * 16;
     for ((i, &a), mo) in a_tail.iter().enumerate().zip(mo_tail.iter_mut()) {
         let j = off + i;
         let mask = 1.0f32 / (1.0f32 + k_mask * a);
@@ -2627,73 +2526,7 @@ fn build_mask_and_iw_mse_inline_inner(
 
 // --- build_iw_mse_only ---
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn build_iw_mse_only_inner_v4(
-    token: archmage::X64V4Token,
-    activity: &[f32],
-    k_iw: f32,
-    src: &[f32],
-    dst: &[f32],
-) -> f64 {
-    let one = f32x16::splat(token, 1.0);
-    let kiv = f32x16::splat(token, k_iw);
-    let n = activity.len();
-    let chunks = n / 16;
-    let mut mse = 0.0f64;
-    for c in 0..chunks {
-        let base = c * 16;
-        let av = f32x16::from_array(token, activity[base..][..16].try_into().unwrap());
-        let sv = f32x16::from_array(token, src[base..][..16].try_into().unwrap());
-        let dv = f32x16::from_array(token, dst[base..][..16].try_into().unwrap());
-        let iw = kiv.mul_add(av, one);
-        let diff = sv - dv;
-        let d2 = diff * diff;
-        mse += (d2 * iw).reduce_add() as f64;
-    }
-    for i in (chunks * 16)..n {
-        let a = activity[i];
-        let iw = 1.0f32 + k_iw * a;
-        let d = src[i] - dst[i];
-        mse += (d * d * iw) as f64;
-    }
-    mse
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn build_iw_mse_only_inner_v3(
-    token: archmage::X64V3Token,
-    activity: &[f32],
-    k_iw: f32,
-    src: &[f32],
-    dst: &[f32],
-) -> f64 {
-    let one = f32x8::splat(token, 1.0);
-    let kiv = f32x8::splat(token, k_iw);
-    let n = activity.len();
-    let chunks = n / 8;
-    let mut mse = 0.0f64;
-    for c in 0..chunks {
-        let base = c * 8;
-        let av = f32x8::from_array(token, activity[base..][..8].try_into().unwrap());
-        let sv = f32x8::from_array(token, src[base..][..8].try_into().unwrap());
-        let dv = f32x8::from_array(token, dst[base..][..8].try_into().unwrap());
-        let iw = kiv.mul_add(av, one);
-        let diff = sv - dv;
-        let d2 = diff * diff;
-        mse += (d2 * iw).reduce_add() as f64;
-    }
-    for i in (chunks * 8)..n {
-        let a = activity[i];
-        let iw = 1.0f32 + k_iw * a;
-        let d = src[i] - dst[i];
-        mse += (d * d * iw) as f64;
-    }
-    mse
-}
-
-#[magetypes(neon, wasm128, scalar)]
+#[magetypes(v4, v3, neon, wasm128, scalar)]
 fn build_iw_mse_only_inner(
     token: Token,
     activity: &[f32],
@@ -2701,24 +2534,22 @@ fn build_iw_mse_only_inner(
     src: &[f32],
     dst: &[f32],
 ) -> f64 {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    let one = f32x8::splat(token, 1.0);
-    let kiv = f32x8::splat(token, k_iw);
-    let (a_chunks, a_tail) = activity.as_chunks::<8>();
-    let (s_chunks, _) = src.as_chunks::<8>();
-    let (d_chunks, _) = dst.as_chunks::<8>();
+    let one = f32x16::splat(token, 1.0);
+    let kiv = f32x16::splat(token, k_iw);
+    let (a_chunks, a_tail) = activity.as_chunks::<16>();
+    let (s_chunks, _) = src.as_chunks::<16>();
+    let (d_chunks, _) = dst.as_chunks::<16>();
     let mut mse = 0.0f64;
     for ((ac, sc), dc) in a_chunks.iter().zip(s_chunks).zip(d_chunks) {
-        let av = f32x8::from_array(token, *ac);
-        let sv = f32x8::from_array(token, *sc);
-        let dv = f32x8::from_array(token, *dc);
+        let av = f32x16::from_array(token, *ac);
+        let sv = f32x16::from_array(token, *sc);
+        let dv = f32x16::from_array(token, *dc);
         let iw = kiv.mul_add(av, one);
         let diff = sv - dv;
         let d2 = diff * diff;
         mse += (d2 * iw).reduce_add() as f64;
     }
-    let off = a_chunks.len() * 8;
+    let off = a_chunks.len() * 16;
     for (i, &a) in a_tail.iter().enumerate() {
         let j = off + i;
         let iw = 1.0f32 + k_iw * a;
@@ -2730,10 +2561,9 @@ fn build_iw_mse_only_inner(
 
 // --- ssim_channel_masked_with_iw_inline ---
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn ssim_channel_masked_with_iw_inline_inner_v4(
-    token: archmage::X64V4Token,
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_channel_masked_with_iw_inline_inner(
+    token: Token,
     mu1: &[f32],
     mu2: &[f32],
     sum_sq: &[f32],
@@ -2748,8 +2578,13 @@ fn ssim_channel_masked_with_iw_inline_inner_v4(
     let zero = f32x16::zero(token);
     let kiv = f32x16::splat(token, k_iw);
 
-    let n = mu1.len();
-    let chunks = n / 16;
+    let (mu1_chunks, mu1_tail) = mu1.as_chunks::<16>();
+    let (mu2_chunks, _) = mu2.as_chunks::<16>();
+    let (ssq_chunks, _) = sum_sq.as_chunks::<16>();
+    let (s12_chunks, _) = s12.as_chunks::<16>();
+    let (mask_chunks, _) = mask.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
+
     let mut sum_da = 0.0f64;
     let mut sum_d4a = 0.0f64;
     let mut sum_d2a = 0.0f64;
@@ -2757,14 +2592,20 @@ fn ssim_channel_masked_with_iw_inline_inner_v4(
     let mut sum_d4b = 0.0f64;
     let mut sum_d2b = 0.0f64;
 
-    for c in 0..chunks {
-        let base = c * 16;
-        let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
-        let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
-        let ssq = f32x16::from_array(token, sum_sq[base..][..16].try_into().unwrap());
-        let s12v = f32x16::from_array(token, s12[base..][..16].try_into().unwrap());
-        let mva = f32x16::from_array(token, mask[base..][..16].try_into().unwrap());
-        let av = f32x16::from_array(token, activity[base..][..16].try_into().unwrap());
+    for (((((m1c, m2c), ssqc), s12c), mac), ac) in mu1_chunks
+        .iter()
+        .zip(mu2_chunks)
+        .zip(ssq_chunks)
+        .zip(s12_chunks)
+        .zip(mask_chunks)
+        .zip(act_chunks)
+    {
+        let m1 = f32x16::from_array(token, *m1c);
+        let m2 = f32x16::from_array(token, *m2c);
+        let ssq = f32x16::from_array(token, *ssqc);
+        let s12v = f32x16::from_array(token, *s12c);
+        let mva = f32x16::from_array(token, *mac);
+        let av = f32x16::from_array(token, *ac);
         let mvb = kiv.mul_add(av, one); // IW weight inline
 
         let mu_diff = m1 - m2;
@@ -2788,179 +2629,7 @@ fn ssim_channel_masked_with_iw_inline_inner_v4(
         sum_d4b += d4b.reduce_add() as f64;
     }
 
-    for i in (chunks * 16)..n {
-        let mu_diff = mu1[i] - mu2[i];
-        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
-        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
-        let d_raw = 1.0f32 - (num_m * num_s) / denom_s;
-        let iw = 1.0f32 + k_iw * activity[i];
-        let da = (d_raw * mask[i]).max(0.0f32);
-        let d2a = da * da;
-        let db = (d_raw * iw).max(0.0f32);
-        let d2b = db * db;
-        sum_da += da as f64;
-        sum_d2a += d2a as f64;
-        sum_d4a += (d2a * d2a) as f64;
-        sum_db += db as f64;
-        sum_d2b += d2b as f64;
-        sum_d4b += (d2b * d2b) as f64;
-    }
-
-    ((sum_da, sum_d4a, sum_d2a), (sum_db, sum_d4b, sum_d2b))
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn ssim_channel_masked_with_iw_inline_inner_v3(
-    token: archmage::X64V3Token,
-    mu1: &[f32],
-    mu2: &[f32],
-    sum_sq: &[f32],
-    s12: &[f32],
-    mask: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> ((f64, f64, f64), (f64, f64, f64)) {
-    let c2v = f32x8::splat(token, C2);
-    let one = f32x8::splat(token, 1.0);
-    let two = f32x8::splat(token, 2.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let n = mu1.len();
-    let chunks = n / 8;
-    let mut sum_da = 0.0f64;
-    let mut sum_d4a = 0.0f64;
-    let mut sum_d2a = 0.0f64;
-    let mut sum_db = 0.0f64;
-    let mut sum_d4b = 0.0f64;
-    let mut sum_d2b = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 8;
-        let m1 = f32x8::from_array(token, mu1[base..][..8].try_into().unwrap());
-        let m2 = f32x8::from_array(token, mu2[base..][..8].try_into().unwrap());
-        let ssq = f32x8::from_array(token, sum_sq[base..][..8].try_into().unwrap());
-        let s12v = f32x8::from_array(token, s12[base..][..8].try_into().unwrap());
-        let mva = f32x8::from_array(token, mask[base..][..8].try_into().unwrap());
-        let av = f32x8::from_array(token, activity[base..][..8].try_into().unwrap());
-        let mvb = kiv.mul_add(av, one);
-
-        let mu_diff = m1 - m2;
-        let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
-        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
-        let d_raw = one - (num_m * num_s) / denom_s;
-
-        let da = (d_raw * mva).max(zero);
-        let d2a = da * da;
-        let d4a = d2a * d2a;
-        let db = (d_raw * mvb).max(zero);
-        let d2b = db * db;
-        let d4b = d2b * d2b;
-
-        sum_da += da.reduce_add() as f64;
-        sum_d2a += d2a.reduce_add() as f64;
-        sum_d4a += d4a.reduce_add() as f64;
-        sum_db += db.reduce_add() as f64;
-        sum_d2b += d2b.reduce_add() as f64;
-        sum_d4b += d4b.reduce_add() as f64;
-    }
-
-    for i in (chunks * 8)..n {
-        let mu_diff = mu1[i] - mu2[i];
-        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
-        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
-        let d_raw = 1.0f32 - (num_m * num_s) / denom_s;
-        let iw = 1.0f32 + k_iw * activity[i];
-        let da = (d_raw * mask[i]).max(0.0f32);
-        let d2a = da * da;
-        let db = (d_raw * iw).max(0.0f32);
-        let d2b = db * db;
-        sum_da += da as f64;
-        sum_d2a += d2a as f64;
-        sum_d4a += (d2a * d2a) as f64;
-        sum_db += db as f64;
-        sum_d2b += d2b as f64;
-        sum_d4b += (d2b * d2b) as f64;
-    }
-
-    ((sum_da, sum_d4a, sum_d2a), (sum_db, sum_d4b, sum_d2b))
-}
-
-#[magetypes(neon, wasm128, scalar)]
-fn ssim_channel_masked_with_iw_inline_inner(
-    token: Token,
-    mu1: &[f32],
-    mu2: &[f32],
-    sum_sq: &[f32],
-    s12: &[f32],
-    mask: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> ((f64, f64, f64), (f64, f64, f64)) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    let c2v = f32x8::splat(token, C2);
-    let one = f32x8::splat(token, 1.0);
-    let two = f32x8::splat(token, 2.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let (mu1_chunks, mu1_tail) = mu1.as_chunks::<8>();
-    let (mu2_chunks, _) = mu2.as_chunks::<8>();
-    let (ssq_chunks, _) = sum_sq.as_chunks::<8>();
-    let (s12_chunks, _) = s12.as_chunks::<8>();
-    let (mask_chunks, _) = mask.as_chunks::<8>();
-    let (act_chunks, _) = activity.as_chunks::<8>();
-
-    let mut sum_da = 0.0f64;
-    let mut sum_d4a = 0.0f64;
-    let mut sum_d2a = 0.0f64;
-    let mut sum_db = 0.0f64;
-    let mut sum_d4b = 0.0f64;
-    let mut sum_d2b = 0.0f64;
-
-    for (((((m1c, m2c), ssqc), s12c), mac), ac) in mu1_chunks
-        .iter()
-        .zip(mu2_chunks)
-        .zip(ssq_chunks)
-        .zip(s12_chunks)
-        .zip(mask_chunks)
-        .zip(act_chunks)
-    {
-        let m1 = f32x8::from_array(token, *m1c);
-        let m2 = f32x8::from_array(token, *m2c);
-        let ssq = f32x8::from_array(token, *ssqc);
-        let s12v = f32x8::from_array(token, *s12c);
-        let mva = f32x8::from_array(token, *mac);
-        let av = f32x8::from_array(token, *ac);
-        let mvb = kiv.mul_add(av, one);
-
-        let mu_diff = m1 - m2;
-        let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
-        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
-        let d_raw = one - (num_m * num_s) / denom_s;
-
-        let da = (d_raw * mva).max(zero);
-        let d2a = da * da;
-        let d4a = d2a * d2a;
-        let db = (d_raw * mvb).max(zero);
-        let d2b = db * db;
-        let d4b = d2b * d2b;
-
-        sum_da += da.reduce_add() as f64;
-        sum_d2a += d2a.reduce_add() as f64;
-        sum_d4a += d4a.reduce_add() as f64;
-        sum_db += db.reduce_add() as f64;
-        sum_d2b += d2b.reduce_add() as f64;
-        sum_d4b += d4b.reduce_add() as f64;
-    }
-
-    let off = mu1_chunks.len() * 8;
+    let off = mu1_chunks.len() * 16;
     for (i, &m1v) in mu1_tail.iter().enumerate() {
         let j = off + i;
         let mu_diff = m1v - mu2[j];
@@ -2986,10 +2655,9 @@ fn ssim_channel_masked_with_iw_inline_inner(
 
 // --- ssim_channel_iw_inline ---
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn ssim_channel_iw_inline_inner_v4(
-    token: archmage::X64V4Token,
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn ssim_channel_iw_inline_inner(
+    token: Token,
     mu1: &[f32],
     mu2: &[f32],
     sum_sq: &[f32],
@@ -3003,134 +2671,11 @@ fn ssim_channel_iw_inline_inner_v4(
     let zero = f32x16::zero(token);
     let kiv = f32x16::splat(token, k_iw);
 
-    let n = mu1.len();
-    let chunks = n / 16;
-    let mut sum_d = 0.0f64;
-    let mut sum_d4 = 0.0f64;
-    let mut sum_d2 = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 16;
-        let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
-        let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
-        let ssq = f32x16::from_array(token, sum_sq[base..][..16].try_into().unwrap());
-        let s12v = f32x16::from_array(token, s12[base..][..16].try_into().unwrap());
-        let av = f32x16::from_array(token, activity[base..][..16].try_into().unwrap());
-        let mv = kiv.mul_add(av, one);
-
-        let mu_diff = m1 - m2;
-        let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
-        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
-        let d = ((one - (num_m * num_s) / denom_s) * mv).max(zero);
-        let d2 = d * d;
-        let d4 = d2 * d2;
-
-        sum_d += d.reduce_add() as f64;
-        sum_d2 += d2.reduce_add() as f64;
-        sum_d4 += d4.reduce_add() as f64;
-    }
-
-    for i in (chunks * 16)..n {
-        let mu_diff = mu1[i] - mu2[i];
-        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
-        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
-        let iw = 1.0f32 + k_iw * activity[i];
-        let d = ((1.0f32 - (num_m * num_s) / denom_s) * iw).max(0.0f32);
-        let d2 = d * d;
-        sum_d += d as f64;
-        sum_d2 += d2 as f64;
-        sum_d4 += (d2 * d2) as f64;
-    }
-
-    (sum_d, sum_d4, sum_d2)
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn ssim_channel_iw_inline_inner_v3(
-    token: archmage::X64V3Token,
-    mu1: &[f32],
-    mu2: &[f32],
-    sum_sq: &[f32],
-    s12: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> (f64, f64, f64) {
-    let c2v = f32x8::splat(token, C2);
-    let one = f32x8::splat(token, 1.0);
-    let two = f32x8::splat(token, 2.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let n = mu1.len();
-    let chunks = n / 8;
-    let mut sum_d = 0.0f64;
-    let mut sum_d4 = 0.0f64;
-    let mut sum_d2 = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 8;
-        let m1 = f32x8::from_array(token, mu1[base..][..8].try_into().unwrap());
-        let m2 = f32x8::from_array(token, mu2[base..][..8].try_into().unwrap());
-        let ssq = f32x8::from_array(token, sum_sq[base..][..8].try_into().unwrap());
-        let s12v = f32x8::from_array(token, s12[base..][..8].try_into().unwrap());
-        let av = f32x8::from_array(token, activity[base..][..8].try_into().unwrap());
-        let mv = kiv.mul_add(av, one);
-
-        let mu_diff = m1 - m2;
-        let num_m = mu_diff.mul_add(-mu_diff, one);
-        let num_s = two.mul_add((-m1).mul_add(m2, s12v), c2v);
-        let denom_s = (-m2).mul_add(m2, (-m1).mul_add(m1, ssq)) + c2v;
-        let d = ((one - (num_m * num_s) / denom_s) * mv).max(zero);
-        let d2 = d * d;
-        let d4 = d2 * d2;
-
-        sum_d += d.reduce_add() as f64;
-        sum_d2 += d2.reduce_add() as f64;
-        sum_d4 += d4.reduce_add() as f64;
-    }
-
-    for i in (chunks * 8)..n {
-        let mu_diff = mu1[i] - mu2[i];
-        let num_m = mu_diff.mul_add(-mu_diff, 1.0f32);
-        let num_s = 2.0f32.mul_add((-mu1[i]).mul_add(mu2[i], s12[i]), C2);
-        let denom_s = (-mu2[i]).mul_add(mu2[i], (-mu1[i]).mul_add(mu1[i], sum_sq[i])) + C2;
-        let iw = 1.0f32 + k_iw * activity[i];
-        let d = ((1.0f32 - (num_m * num_s) / denom_s) * iw).max(0.0f32);
-        let d2 = d * d;
-        sum_d += d as f64;
-        sum_d2 += d2 as f64;
-        sum_d4 += (d2 * d2) as f64;
-    }
-
-    (sum_d, sum_d4, sum_d2)
-}
-
-#[magetypes(neon, wasm128, scalar)]
-fn ssim_channel_iw_inline_inner(
-    token: Token,
-    mu1: &[f32],
-    mu2: &[f32],
-    sum_sq: &[f32],
-    s12: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> (f64, f64, f64) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    let c2v = f32x8::splat(token, C2);
-    let one = f32x8::splat(token, 1.0);
-    let two = f32x8::splat(token, 2.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let (mu1_chunks, mu1_tail) = mu1.as_chunks::<8>();
-    let (mu2_chunks, _) = mu2.as_chunks::<8>();
-    let (ssq_chunks, _) = sum_sq.as_chunks::<8>();
-    let (s12_chunks, _) = s12.as_chunks::<8>();
-    let (act_chunks, _) = activity.as_chunks::<8>();
+    let (mu1_chunks, mu1_tail) = mu1.as_chunks::<16>();
+    let (mu2_chunks, _) = mu2.as_chunks::<16>();
+    let (ssq_chunks, _) = sum_sq.as_chunks::<16>();
+    let (s12_chunks, _) = s12.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
 
     let mut sum_d = 0.0f64;
     let mut sum_d4 = 0.0f64;
@@ -3143,11 +2688,11 @@ fn ssim_channel_iw_inline_inner(
         .zip(s12_chunks)
         .zip(act_chunks)
     {
-        let m1 = f32x8::from_array(token, *m1c);
-        let m2 = f32x8::from_array(token, *m2c);
-        let ssq = f32x8::from_array(token, *ssqc);
-        let s12v = f32x8::from_array(token, *s12c);
-        let av = f32x8::from_array(token, *ac);
+        let m1 = f32x16::from_array(token, *m1c);
+        let m2 = f32x16::from_array(token, *m2c);
+        let ssq = f32x16::from_array(token, *ssqc);
+        let s12v = f32x16::from_array(token, *s12c);
+        let av = f32x16::from_array(token, *ac);
         let mv = kiv.mul_add(av, one);
 
         let mu_diff = m1 - m2;
@@ -3163,7 +2708,7 @@ fn ssim_channel_iw_inline_inner(
         sum_d4 += d4.reduce_add() as f64;
     }
 
-    let off = mu1_chunks.len() * 8;
+    let off = mu1_chunks.len() * 16;
     for (i, &m1v) in mu1_tail.iter().enumerate() {
         let j = off + i;
         let mu_diff = m1v - mu2[j];
@@ -3183,10 +2728,9 @@ fn ssim_channel_iw_inline_inner(
 
 // --- edge_diff_channel_masked_with_iw_inline ---
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn edge_diff_channel_masked_with_iw_inline_inner_v4(
-    token: archmage::X64V4Token,
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn edge_diff_channel_masked_with_iw_inline_inner(
+    token: Token,
     img1: &[f32],
     img2: &[f32],
     mu1: &[f32],
@@ -3199,173 +2743,12 @@ fn edge_diff_channel_masked_with_iw_inline_inner_v4(
     let zero = f32x16::zero(token);
     let kiv = f32x16::splat(token, k_iw);
 
-    let n = img1.len();
-    let chunks = n / 16;
-    let mut sum_art4a = 0.0f64;
-    let mut sum_det4a = 0.0f64;
-    let mut sum_art4b = 0.0f64;
-    let mut sum_det4b = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 16;
-        let i1 = f32x16::from_array(token, img1[base..][..16].try_into().unwrap());
-        let i2 = f32x16::from_array(token, img2[base..][..16].try_into().unwrap());
-        let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
-        let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
-        let mva = f32x16::from_array(token, mask[base..][..16].try_into().unwrap());
-        let av = f32x16::from_array(token, activity[base..][..16].try_into().unwrap());
-        let mvb = kiv.mul_add(av, one);
-
-        let diff1 = (i1 - m1).abs();
-        let diff2 = (i2 - m2).abs();
-        let d_raw = (one + diff2) / (one + diff1) - one;
-
-        let da = d_raw * mva;
-        let artifact_a = da.max(zero);
-        let detail_a = (-da).max(zero);
-        let a2a = artifact_a * artifact_a;
-        let dl2a = detail_a * detail_a;
-        sum_art4a += (a2a * a2a).reduce_add() as f64;
-        sum_det4a += (dl2a * dl2a).reduce_add() as f64;
-
-        let db = d_raw * mvb;
-        let artifact_b = db.max(zero);
-        let detail_b = (-db).max(zero);
-        let a2b = artifact_b * artifact_b;
-        let dl2b = detail_b * detail_b;
-        sum_art4b += (a2b * a2b).reduce_add() as f64;
-        sum_det4b += (dl2b * dl2b).reduce_add() as f64;
-    }
-
-    for i in (chunks * 16)..n {
-        let diff1 = (img1[i] - mu1[i]).abs();
-        let diff2 = (img2[i] - mu2[i]).abs();
-        let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        let iw = 1.0f32 + k_iw * activity[i];
-
-        let da = d_raw * mask[i];
-        let aa = da.max(0.0f32);
-        let dla = (-da).max(0.0f32);
-        let a2a = aa * aa;
-        let dl2a = dla * dla;
-        sum_art4a += (a2a * a2a) as f64;
-        sum_det4a += (dl2a * dl2a) as f64;
-
-        let db = d_raw * iw;
-        let ab = db.max(0.0f32);
-        let dlb = (-db).max(0.0f32);
-        let a2b = ab * ab;
-        let dl2b = dlb * dlb;
-        sum_art4b += (a2b * a2b) as f64;
-        sum_det4b += (dl2b * dl2b) as f64;
-    }
-
-    ((sum_art4a, sum_det4a), (sum_art4b, sum_det4b))
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn edge_diff_channel_masked_with_iw_inline_inner_v3(
-    token: archmage::X64V3Token,
-    img1: &[f32],
-    img2: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    mask: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> ((f64, f64), (f64, f64)) {
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let n = img1.len();
-    let chunks = n / 8;
-    let mut sum_art4a = 0.0f64;
-    let mut sum_det4a = 0.0f64;
-    let mut sum_art4b = 0.0f64;
-    let mut sum_det4b = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 8;
-        let i1 = f32x8::from_array(token, img1[base..][..8].try_into().unwrap());
-        let i2 = f32x8::from_array(token, img2[base..][..8].try_into().unwrap());
-        let m1 = f32x8::from_array(token, mu1[base..][..8].try_into().unwrap());
-        let m2 = f32x8::from_array(token, mu2[base..][..8].try_into().unwrap());
-        let mva = f32x8::from_array(token, mask[base..][..8].try_into().unwrap());
-        let av = f32x8::from_array(token, activity[base..][..8].try_into().unwrap());
-        let mvb = kiv.mul_add(av, one);
-
-        let diff1 = (i1 - m1).abs();
-        let diff2 = (i2 - m2).abs();
-        let d_raw = (one + diff2) / (one + diff1) - one;
-
-        let da = d_raw * mva;
-        let artifact_a = da.max(zero);
-        let detail_a = (-da).max(zero);
-        let a2a = artifact_a * artifact_a;
-        let dl2a = detail_a * detail_a;
-        sum_art4a += (a2a * a2a).reduce_add() as f64;
-        sum_det4a += (dl2a * dl2a).reduce_add() as f64;
-
-        let db = d_raw * mvb;
-        let artifact_b = db.max(zero);
-        let detail_b = (-db).max(zero);
-        let a2b = artifact_b * artifact_b;
-        let dl2b = detail_b * detail_b;
-        sum_art4b += (a2b * a2b).reduce_add() as f64;
-        sum_det4b += (dl2b * dl2b).reduce_add() as f64;
-    }
-
-    for i in (chunks * 8)..n {
-        let diff1 = (img1[i] - mu1[i]).abs();
-        let diff2 = (img2[i] - mu2[i]).abs();
-        let d_raw = (1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32;
-        let iw = 1.0f32 + k_iw * activity[i];
-
-        let da = d_raw * mask[i];
-        let aa = da.max(0.0f32);
-        let dla = (-da).max(0.0f32);
-        let a2a = aa * aa;
-        let dl2a = dla * dla;
-        sum_art4a += (a2a * a2a) as f64;
-        sum_det4a += (dl2a * dl2a) as f64;
-
-        let db = d_raw * iw;
-        let ab = db.max(0.0f32);
-        let dlb = (-db).max(0.0f32);
-        let a2b = ab * ab;
-        let dl2b = dlb * dlb;
-        sum_art4b += (a2b * a2b) as f64;
-        sum_det4b += (dl2b * dl2b) as f64;
-    }
-
-    ((sum_art4a, sum_det4a), (sum_art4b, sum_det4b))
-}
-
-#[magetypes(neon, wasm128, scalar)]
-fn edge_diff_channel_masked_with_iw_inline_inner(
-    token: Token,
-    img1: &[f32],
-    img2: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    mask: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> ((f64, f64), (f64, f64)) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let (i1_chunks, i1_tail) = img1.as_chunks::<8>();
-    let (i2_chunks, _) = img2.as_chunks::<8>();
-    let (m1_chunks, _) = mu1.as_chunks::<8>();
-    let (m2_chunks, _) = mu2.as_chunks::<8>();
-    let (mask_chunks, _) = mask.as_chunks::<8>();
-    let (act_chunks, _) = activity.as_chunks::<8>();
+    let (i1_chunks, i1_tail) = img1.as_chunks::<16>();
+    let (i2_chunks, _) = img2.as_chunks::<16>();
+    let (m1_chunks, _) = mu1.as_chunks::<16>();
+    let (m2_chunks, _) = mu2.as_chunks::<16>();
+    let (mask_chunks, _) = mask.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
 
     let mut sum_art4a = 0.0f64;
     let mut sum_det4a = 0.0f64;
@@ -3380,12 +2763,12 @@ fn edge_diff_channel_masked_with_iw_inline_inner(
         .zip(mask_chunks)
         .zip(act_chunks)
     {
-        let i1 = f32x8::from_array(token, *i1c);
-        let i2 = f32x8::from_array(token, *i2c);
-        let m1 = f32x8::from_array(token, *m1c);
-        let m2 = f32x8::from_array(token, *m2c);
-        let mva = f32x8::from_array(token, *mac);
-        let av = f32x8::from_array(token, *ac);
+        let i1 = f32x16::from_array(token, *i1c);
+        let i2 = f32x16::from_array(token, *i2c);
+        let m1 = f32x16::from_array(token, *m1c);
+        let m2 = f32x16::from_array(token, *m2c);
+        let mva = f32x16::from_array(token, *mac);
+        let av = f32x16::from_array(token, *ac);
         let mvb = kiv.mul_add(av, one);
 
         let diff1 = (i1 - m1).abs();
@@ -3409,7 +2792,7 @@ fn edge_diff_channel_masked_with_iw_inline_inner(
         sum_det4b += (dl2b * dl2b).reduce_add() as f64;
     }
 
-    let off = i1_chunks.len() * 8;
+    let off = i1_chunks.len() * 16;
     for (i, _) in i1_tail.iter().enumerate() {
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
@@ -3439,10 +2822,9 @@ fn edge_diff_channel_masked_with_iw_inline_inner(
 
 // --- edge_diff_channel_iw_inline ---
 
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn edge_diff_channel_iw_inline_inner_v4(
-    token: archmage::X64V4Token,
+#[magetypes(v4, v3, neon, wasm128, scalar)]
+fn edge_diff_channel_iw_inline_inner(
+    token: Token,
     img1: &[f32],
     img2: &[f32],
     mu1: &[f32],
@@ -3454,156 +2836,11 @@ fn edge_diff_channel_iw_inline_inner_v4(
     let zero = f32x16::zero(token);
     let kiv = f32x16::splat(token, k_iw);
 
-    let n = img1.len();
-    let chunks = n / 16;
-    let mut sum_art = 0.0f64;
-    let mut sum_art4 = 0.0f64;
-    let mut sum_art2 = 0.0f64;
-    let mut sum_det = 0.0f64;
-    let mut sum_det4 = 0.0f64;
-    let mut sum_det2 = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 16;
-        let i1 = f32x16::from_array(token, img1[base..][..16].try_into().unwrap());
-        let i2 = f32x16::from_array(token, img2[base..][..16].try_into().unwrap());
-        let m1 = f32x16::from_array(token, mu1[base..][..16].try_into().unwrap());
-        let m2 = f32x16::from_array(token, mu2[base..][..16].try_into().unwrap());
-        let av = f32x16::from_array(token, activity[base..][..16].try_into().unwrap());
-        let mv = kiv.mul_add(av, one);
-
-        let diff1 = (i1 - m1).abs();
-        let diff2 = (i2 - m2).abs();
-        let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-
-        let artifact = d1.max(zero);
-        let detail_lost = (-d1).max(zero);
-
-        let a2 = artifact * artifact;
-        let dl2 = detail_lost * detail_lost;
-
-        sum_art += artifact.reduce_add() as f64;
-        sum_art2 += a2.reduce_add() as f64;
-        sum_art4 += (a2 * a2).reduce_add() as f64;
-        sum_det += detail_lost.reduce_add() as f64;
-        sum_det2 += dl2.reduce_add() as f64;
-        sum_det4 += (dl2 * dl2).reduce_add() as f64;
-    }
-
-    for i in (chunks * 16)..n {
-        let diff1 = (img1[i] - mu1[i]).abs();
-        let diff2 = (img2[i] - mu2[i]).abs();
-        let iw = 1.0f32 + k_iw * activity[i];
-        let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * iw;
-
-        let artifact = d1.max(0.0f32);
-        let detail_lost = (-d1).max(0.0f32);
-        let a2 = artifact * artifact;
-        let dl2 = detail_lost * detail_lost;
-        sum_art += artifact as f64;
-        sum_art2 += a2 as f64;
-        sum_art4 += (a2 * a2) as f64;
-        sum_det += detail_lost as f64;
-        sum_det2 += dl2 as f64;
-        sum_det4 += (dl2 * dl2) as f64;
-    }
-
-    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn edge_diff_channel_iw_inline_inner_v3(
-    token: archmage::X64V3Token,
-    img1: &[f32],
-    img2: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> (f64, f64, f64, f64, f64, f64) {
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let n = img1.len();
-    let chunks = n / 8;
-    let mut sum_art = 0.0f64;
-    let mut sum_art4 = 0.0f64;
-    let mut sum_art2 = 0.0f64;
-    let mut sum_det = 0.0f64;
-    let mut sum_det4 = 0.0f64;
-    let mut sum_det2 = 0.0f64;
-
-    for c in 0..chunks {
-        let base = c * 8;
-        let i1 = f32x8::from_array(token, img1[base..][..8].try_into().unwrap());
-        let i2 = f32x8::from_array(token, img2[base..][..8].try_into().unwrap());
-        let m1 = f32x8::from_array(token, mu1[base..][..8].try_into().unwrap());
-        let m2 = f32x8::from_array(token, mu2[base..][..8].try_into().unwrap());
-        let av = f32x8::from_array(token, activity[base..][..8].try_into().unwrap());
-        let mv = kiv.mul_add(av, one);
-
-        let diff1 = (i1 - m1).abs();
-        let diff2 = (i2 - m2).abs();
-        let d1 = ((one + diff2) / (one + diff1) - one) * mv;
-
-        let artifact = d1.max(zero);
-        let detail_lost = (-d1).max(zero);
-
-        let a2 = artifact * artifact;
-        let dl2 = detail_lost * detail_lost;
-
-        sum_art += artifact.reduce_add() as f64;
-        sum_art2 += a2.reduce_add() as f64;
-        sum_art4 += (a2 * a2).reduce_add() as f64;
-        sum_det += detail_lost.reduce_add() as f64;
-        sum_det2 += dl2.reduce_add() as f64;
-        sum_det4 += (dl2 * dl2).reduce_add() as f64;
-    }
-
-    for i in (chunks * 8)..n {
-        let diff1 = (img1[i] - mu1[i]).abs();
-        let diff2 = (img2[i] - mu2[i]).abs();
-        let iw = 1.0f32 + k_iw * activity[i];
-        let d1 = ((1.0f32 + diff2) / (1.0f32 + diff1) - 1.0f32) * iw;
-
-        let artifact = d1.max(0.0f32);
-        let detail_lost = (-d1).max(0.0f32);
-        let a2 = artifact * artifact;
-        let dl2 = detail_lost * detail_lost;
-        sum_art += artifact as f64;
-        sum_art2 += a2 as f64;
-        sum_art4 += (a2 * a2) as f64;
-        sum_det += detail_lost as f64;
-        sum_det2 += dl2 as f64;
-        sum_det4 += (dl2 * dl2) as f64;
-    }
-
-    (sum_art, sum_art4, sum_det, sum_det4, sum_art2, sum_det2)
-}
-
-#[magetypes(neon, wasm128, scalar)]
-fn edge_diff_channel_iw_inline_inner(
-    token: Token,
-    img1: &[f32],
-    img2: &[f32],
-    mu1: &[f32],
-    mu2: &[f32],
-    activity: &[f32],
-    k_iw: f32,
-) -> (f64, f64, f64, f64, f64, f64) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-    let one = f32x8::splat(token, 1.0);
-    let zero = f32x8::zero(token);
-    let kiv = f32x8::splat(token, k_iw);
-
-    let (i1_chunks, i1_tail) = img1.as_chunks::<8>();
-    let (i2_chunks, _) = img2.as_chunks::<8>();
-    let (m1_chunks, _) = mu1.as_chunks::<8>();
-    let (m2_chunks, _) = mu2.as_chunks::<8>();
-    let (act_chunks, _) = activity.as_chunks::<8>();
+    let (i1_chunks, i1_tail) = img1.as_chunks::<16>();
+    let (i2_chunks, _) = img2.as_chunks::<16>();
+    let (m1_chunks, _) = mu1.as_chunks::<16>();
+    let (m2_chunks, _) = mu2.as_chunks::<16>();
+    let (act_chunks, _) = activity.as_chunks::<16>();
 
     let mut sum_art = 0.0f64;
     let mut sum_art4 = 0.0f64;
@@ -3619,11 +2856,11 @@ fn edge_diff_channel_iw_inline_inner(
         .zip(m2_chunks)
         .zip(act_chunks)
     {
-        let i1 = f32x8::from_array(token, *i1c);
-        let i2 = f32x8::from_array(token, *i2c);
-        let m1 = f32x8::from_array(token, *m1c);
-        let m2 = f32x8::from_array(token, *m2c);
-        let av = f32x8::from_array(token, *ac);
+        let i1 = f32x16::from_array(token, *i1c);
+        let i2 = f32x16::from_array(token, *i2c);
+        let m1 = f32x16::from_array(token, *m1c);
+        let m2 = f32x16::from_array(token, *m2c);
+        let av = f32x16::from_array(token, *ac);
         let mv = kiv.mul_add(av, one);
 
         let diff1 = (i1 - m1).abs();
@@ -3644,7 +2881,7 @@ fn edge_diff_channel_iw_inline_inner(
         sum_det4 += (dl2 * dl2).reduce_add() as f64;
     }
 
-    let off = i1_chunks.len() * 8;
+    let off = i1_chunks.len() * 16;
     for (i, _) in i1_tail.iter().enumerate() {
         let j = off + i;
         let diff1 = (img1[j] - mu1[j]).abs();
