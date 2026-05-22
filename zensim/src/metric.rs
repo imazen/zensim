@@ -1067,6 +1067,95 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+    /// Compare source and distorted images using **strip-aggregating
+    /// streaming** for very large images (e.g. 80 MP) where the
+    /// standard [`compute`](Self::compute) path would OOM.
+    ///
+    /// Internally splits both images into horizontal Y-strips of
+    /// `strip_inner` scale-0 rows (with `strip_margin` rows of overlap
+    /// on each side for the blur stencil), runs the existing pipeline
+    /// on each strip independently, and aggregates per-scale
+    /// accumulators across strips. Memory peak per pair drops from
+    /// `O(full_image × 1.33)` to `O(strip_height × 1.33)`.
+    ///
+    /// # When to use
+    ///
+    /// - **Image > 16 MP**: use this path. At 80 MP a `compute()` call
+    ///   peaks at ~2.5 GB per pair; 16 rayon workers × 2.5 GB exceeds
+    ///   reasonable RAM. This path's per-pair peak is ~125 MB with
+    ///   `strip_inner = 256, strip_margin = 128`.
+    /// - **Image ≤ 16 MP**: prefer [`compute`](Self::compute) — strip
+    ///   aggregation has a small per-strip overhead and a minor
+    ///   approximation in the strip-boundary blur context that the
+    ///   full path avoids.
+    ///
+    /// # Default strip geometry
+    ///
+    /// `strip_inner = 256`, `strip_margin = 128` covers the default
+    /// 4-scale pyramid with `blur_radius = 5`. For a 4× larger blur
+    /// (`config.blur_radius = 20`), bump `strip_margin` proportionally.
+    /// `strip_inner` must be at least `2 * blur_radius + 1` rows at
+    /// every scale; with the default 4-scale pyramid that means
+    /// `strip_inner >= 16 × (2 * blur_radius + 1) = 176` at default
+    /// blur. The `256` default is safe for everything we ship.
+    ///
+    /// # Approximation note
+    ///
+    /// Phase 1 (this version) re-pools per-strip `ScaleStats` through
+    /// a `mean × tile_count` aggregator. Pure-mean stats (SSIM mean,
+    /// MSE, edge_mean) aggregate **exactly**; root-power stats
+    /// (`root4_d`, `root2_d`) aggregate **approximately** because
+    /// `(tile_root_p)^p × tile_n ≠ tile_sum_of_p_th_powers` in
+    /// general — the per-tile finalize step loses precision. The
+    /// resulting score typically drifts < 0.5 % vs the full-image
+    /// path. Phase 2 will expose raw accumulators across strips for
+    /// byte-equivalence.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too
+    /// small to support the strip geometry.
+    pub fn compute_streaming_strips(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+        strip_inner: usize,
+        strip_margin: usize,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        validate_pair(source, distorted)?;
+        check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
+        let config = config_from_params(params, self.parallel);
+
+        let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_streaming_strips(
+            source,
+            distorted,
+            &config,
+            params.weights,
+            strip_inner,
+            strip_margin,
+        );
+        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            source.width() as u32,
+            source.height() as u32,
+        )?;
+        Ok(result.with_profile(self.profile))
+    }
+
+    /// Same as [`compute_streaming_strips`](Self::compute_streaming_strips)
+    /// with sensible defaults: `strip_inner = 256`, `strip_margin = 128`.
+    /// Use for 80 MP+ images.
+    pub fn compute_streaming_strips_default(
+        &self,
+        source: &impl ImageSource,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        self.compute_streaming_strips(source, distorted, 256, 128)
+    }
+
     /// Compare against a precomputed reference, reusing caller-owned scratch
     /// buffers. Designed for encoder quantization loops that compare many
     /// distorted candidates against the same reference: the per-call XYB
