@@ -2705,22 +2705,27 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
         allow_multithreading: false,
         ..*config
     };
-    let process_strip = |(strip_y0, strip_y1, fy0, fy1): (usize, usize, usize, usize)| -> (
-        Vec<ScaleAccumulators>,
-        [f64; 3],
-        usize,
-    ) {
+    // Per-worker scratch for dst XYB planes — reused across strips on the
+    // same rayon worker. First strip on each worker allocates ~250 MB at
+    // 80 MP (3 planes × padded_width × strip_height × 4 bytes); subsequent
+    // strips of the same dims skip the realloc (the kernel's resize is a
+    // no-op when capacity is already ≥ n). The strips' actual data is
+    // overwritten by convert_source_to_xyb_into so prior contents are
+    // irrelevant.
+    let init_dst_scratch = || -> [Vec<f32>; 3] { std::array::from_fn(|_| Vec::new()) };
+    let process_strip = |dst_planes: &mut [Vec<f32>; 3],
+                         (strip_y0, strip_y1, fy0, fy1): (usize, usize, usize, usize)|
+     -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
         let dst_strip =
             crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
         // Zero-copy: borrow this strip's rows from the parent precomputed ref.
         // Eliminates the ~65 MB per-strip memcpy that the prior to_vec()-based
         // slicer incurred. See STREAMING_372_OPTIMIZATION_NOTES.md.
         let strip_precomp = precomputed.slice_rows_view(strip_y0, strip_y1);
-        let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
         compute_multiscale_accums_streaming_with_ref_borrowed(
             &strip_precomp,
             &dst_strip,
-            &mut dst_planes,
+            dst_planes,
             &strip_config,
             weights,
             Some((fy0, fy1)),
@@ -2732,13 +2737,28 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     #[cfg(feature = "threads")]
     let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = if parallel_strips {
         use rayon::prelude::*;
-        strip_meta.par_iter().copied().map(process_strip).collect()
+        strip_meta
+            .par_iter()
+            .copied()
+            .map_init(init_dst_scratch, process_strip)
+            .collect()
     } else {
-        strip_meta.iter().copied().map(process_strip).collect()
+        let mut scratch = init_dst_scratch();
+        strip_meta
+            .iter()
+            .copied()
+            .map(|m| process_strip(&mut scratch, m))
+            .collect()
     };
     #[cfg(not(feature = "threads"))]
-    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> =
-        strip_meta.iter().copied().map(process_strip).collect();
+    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = {
+        let mut scratch = init_dst_scratch();
+        strip_meta
+            .iter()
+            .copied()
+            .map(|m| process_strip(&mut scratch, m))
+            .collect()
+    };
 
     let mut global_accums: Vec<ScaleAccumulators> =
         (0..num_scales).map(|_| ScaleAccumulators::new()).collect();
@@ -2841,22 +2861,29 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
         allow_multithreading: false,
         ..*config
     };
-    let process_strip = |(strip_y0, strip_y1, fy0, fy1, _, _): (
+    // Per-worker scratch for dst XYB planes — same pattern as the
+    // with-ref variant. Saves one Vec alloc + munmap per strip on this
+    // worker after the first. The strip-per-strip path also rebuilds
+    // a fresh PrecomputedReference per strip (this path doesn't have a
+    // parent ref to slice from); Phase 4 of the plan eliminates that.
+    let init_dst_scratch = || -> [Vec<f32>; 3] { std::array::from_fn(|_| Vec::new()) };
+    let process_strip = |dst_planes: &mut [Vec<f32>; 3],
+                         (strip_y0, strip_y1, fy0, fy1, _, _): (
         usize,
         usize,
         usize,
         usize,
         usize,
         usize,
-    )| -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
+    )|
+     -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
         let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
         let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
         let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
-        let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
         compute_multiscale_accums_streaming_with_ref_borrowed(
             &precomp,
             &dst_strip,
-            &mut dst_planes,
+            dst_planes,
             &strip_config,
             weights,
             Some((fy0, fy1)),
@@ -2869,13 +2896,28 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
     #[cfg(feature = "threads")]
     let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = if parallel_strips {
         use rayon::prelude::*;
-        strip_meta.par_iter().copied().map(process_strip).collect()
+        strip_meta
+            .par_iter()
+            .copied()
+            .map_init(init_dst_scratch, process_strip)
+            .collect()
     } else {
-        strip_meta.iter().copied().map(process_strip).collect()
+        let mut scratch = init_dst_scratch();
+        strip_meta
+            .iter()
+            .copied()
+            .map(|m| process_strip(&mut scratch, m))
+            .collect()
     };
     #[cfg(not(feature = "threads"))]
-    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> =
-        strip_meta.iter().copied().map(process_strip).collect();
+    let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = {
+        let mut scratch = init_dst_scratch();
+        strip_meta
+            .iter()
+            .copied()
+            .map(|m| process_strip(&mut scratch, m))
+            .collect()
+    };
 
     // Merge raw accumulators across strips.
     let mut global_accums: Vec<ScaleAccumulators> =
