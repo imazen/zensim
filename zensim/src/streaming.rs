@@ -18,11 +18,10 @@ use crate::fused::{fused_vblur_features_edge, fused_vblur_features_ssim};
 use crate::metric::{FEATURES_PER_CHANNEL_BASIC, ScaleStats, ZensimConfig, combine_scores};
 use crate::pool::ScaleBuffers;
 use crate::simd_ops::{
-    abs_diff_into, abs_diff_sum, build_iw_mse_only, build_mask_and_iw_mse_inline,
-    build_mask_weight_and_mse, edge_diff_channel_extended, edge_diff_channel_iw_inline,
-    edge_diff_channel_masked, edge_diff_channel_masked_with_iw_inline, mul_into, sq_diff_sum,
-    sq_sum_into, ssim_channel_extended, ssim_channel_iw_inline, ssim_channel_masked,
-    ssim_channel_masked_with_iw_inline,
+    abs_diff_into, abs_diff_sum, build_inline_mask_mse, build_inline_mse, build_iw_mse_only,
+    edge_diff_channel_extended, edge_diff_channel_inline_both, edge_diff_channel_inline_mask,
+    edge_diff_channel_iw_inline, mul_into, sq_diff_sum, sq_sum_into, ssim_channel_extended,
+    ssim_channel_inline_both, ssim_channel_inline_mask, ssim_channel_iw_inline,
 };
 use crate::source::{AlphaMode, ColorPrimaries, ImageSource, PixelFormat};
 use archmage::autoversion;
@@ -1375,34 +1374,21 @@ fn process_strip_channel(
                 config.blur_radius,
             );
 
-            // Step 3 (fused): build masked weight from the blurred
-            // activity AND accumulate Σ(src-dst)² · weight for the MSE
-            // feature in the same SIMD pass. IW weight is computed inline
-            // (1 + k_iw · a) at every consumer — no plane round-trip.
-            // Single load of `mul_buf` serves both MSE accumulators when
-            // both flags are on.
+            // Step 3 (Phase 2, 2026-05-22): all weights derived inline from
+            // activity. Mask plane is NEVER materialized — saves 1 plane
+            // write + up to 3 plane reads per channel per scale.
             let activity_inner = &bufs.mul_buf[inner_off..inner_off + inner_n];
             if do_ext && do_iw {
-                let mask_out = &mut bufs.mask[inner_off..inner_off + inner_n];
-                let (mse_m, mse_i) = build_mask_and_iw_mse_inline(
-                    activity_inner,
-                    k,
-                    k_iw,
-                    inner_src,
-                    inner_dst,
-                    mask_out,
-                );
+                let (mse_m, mse_i) =
+                    build_inline_mse(activity_inner, k, k_iw, inner_src, inner_dst);
                 accum.masked_mse[c] += mse_m;
                 accum.iw_mse[c] += mse_i;
             } else if do_ext {
-                let mask_out = &mut bufs.mask[inner_off..inner_off + inner_n];
-                let mse_m =
-                    build_mask_weight_and_mse(activity_inner, k, inner_src, inner_dst, mask_out);
+                let mse_m = build_inline_mask_mse(activity_inner, k, inner_src, inner_dst);
                 accum.masked_mse[c] += mse_m;
             } else {
                 // do_iw only — no plane writes; IW weight folded into MSE inline.
-                let mse_i =
-                    build_iw_mse_only(activity_inner, k_iw, inner_src, inner_dst);
+                let mse_i = build_iw_mse_only(activity_inner, k_iw, inner_src, inner_dst);
                 accum.iw_mse[c] += mse_i;
             }
 
@@ -1441,15 +1427,14 @@ fn process_strip_channel(
                 let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
 
                 if do_ext && do_iw {
-                    let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
                     let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
-                        ssim_channel_masked_with_iw_inline(
+                        ssim_channel_inline_both(
                             inner_mu1,
                             inner_mu2,
                             inner_sig_sq,
                             inner_sig12,
-                            inner_mask,
                             activity_inner,
+                            k,
                             k_iw,
                         );
                     accum.masked_ssim_d[c] += sd_m;
@@ -1459,13 +1444,13 @@ fn process_strip_channel(
                     accum.iw_ssim_d4[c] += sd4_i;
                     accum.iw_ssim_d2[c] += sd2_i;
                 } else if do_ext {
-                    let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                    let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                    let (sum_d, sum_d4, sum_d2) = ssim_channel_inline_mask(
                         inner_mu1,
                         inner_mu2,
                         inner_sig_sq,
                         inner_sig12,
-                        inner_mask,
+                        activity_inner,
+                        k,
                     );
                     accum.masked_ssim_d[c] += sum_d;
                     accum.masked_ssim_d4[c] += sum_d4;
@@ -1490,25 +1475,27 @@ fn process_strip_channel(
                 let inner_mu1 = &bufs.mu1[inner_off..inner_off + inner_n];
                 let inner_mu2 = &bufs.mu2[inner_off..inner_off + inner_n];
                 if do_ext && do_iw {
-                    let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                    let ((art4_m, det4_m), (art4_i, det4_i)) =
-                        edge_diff_channel_masked_with_iw_inline(
-                            inner_src,
-                            inner_dst,
-                            inner_mu1,
-                            inner_mu2,
-                            inner_mask,
-                            activity_inner,
-                            k_iw,
-                        );
+                    let ((art4_m, det4_m), (art4_i, det4_i)) = edge_diff_channel_inline_both(
+                        inner_src,
+                        inner_dst,
+                        inner_mu1,
+                        inner_mu2,
+                        activity_inner,
+                        k,
+                        k_iw,
+                    );
                     accum.masked_art4[c] += art4_m;
                     accum.masked_det4[c] += det4_m;
                     accum.iw_art4[c] += art4_i;
                     accum.iw_det4[c] += det4_i;
                 } else if do_ext {
-                    let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                    let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
-                        inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask,
+                    let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_inline_mask(
+                        inner_src,
+                        inner_dst,
+                        inner_mu1,
+                        inner_mu2,
+                        activity_inner,
+                        k,
                     );
                     accum.masked_art4[c] += art4;
                     accum.masked_det4[c] += det4;
@@ -1655,26 +1642,15 @@ fn process_strip_channel(
             config.blur_radius,
         );
 
-        // Fused weight-build + MSE in one SIMD pass per active config.
-        // IW weight (1 + k_iw · a) is computed inline at each consumer
-        // (SSIM / edge / MSE) — no plane round-trip via bufs.iw_weight.
+        // Phase 2 (2026-05-22): all weights derived inline from activity.
+        // Mask plane is NEVER materialized.
         let activity_inner = &bufs.mul_buf[inner_off..inner_off + inner_n];
         if do_ext && do_iw {
-            let mask_out = &mut bufs.mask[inner_off..inner_off + inner_n];
-            let (mse_m, mse_i) = build_mask_and_iw_mse_inline(
-                activity_inner,
-                k,
-                k_iw,
-                inner_src,
-                inner_dst,
-                mask_out,
-            );
+            let (mse_m, mse_i) = build_inline_mse(activity_inner, k, k_iw, inner_src, inner_dst);
             accum.masked_mse[c] += mse_m;
             accum.iw_mse[c] += mse_i;
         } else if do_ext {
-            let mask_out = &mut bufs.mask[inner_off..inner_off + inner_n];
-            let mse_m =
-                build_mask_weight_and_mse(activity_inner, k, inner_src, inner_dst, mask_out);
+            let mse_m = build_inline_mask_mse(activity_inner, k, inner_src, inner_dst);
             accum.masked_mse[c] += mse_m;
         } else {
             // do_iw only — no plane writes; IW weight folded into MSE inline.
@@ -1689,17 +1665,15 @@ fn process_strip_channel(
             let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
 
             if do_ext && do_iw {
-                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
-                    ssim_channel_masked_with_iw_inline(
-                        inner_mu1,
-                        inner_mu2,
-                        inner_sig_sq,
-                        inner_sig12,
-                        inner_mask,
-                        activity_inner,
-                        k_iw,
-                    );
+                let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = ssim_channel_inline_both(
+                    inner_mu1,
+                    inner_mu2,
+                    inner_sig_sq,
+                    inner_sig12,
+                    activity_inner,
+                    k,
+                    k_iw,
+                );
                 accum.masked_ssim_d[c] += sd_m;
                 accum.masked_ssim_d4[c] += sd4_m;
                 accum.masked_ssim_d2[c] += sd2_m;
@@ -1707,13 +1681,13 @@ fn process_strip_channel(
                 accum.iw_ssim_d4[c] += sd4_i;
                 accum.iw_ssim_d2[c] += sd2_i;
             } else if do_ext {
-                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                let (sum_d, sum_d4, sum_d2) = ssim_channel_masked(
+                let (sum_d, sum_d4, sum_d2) = ssim_channel_inline_mask(
                     inner_mu1,
                     inner_mu2,
                     inner_sig_sq,
                     inner_sig12,
-                    inner_mask,
+                    activity_inner,
+                    k,
                 );
                 accum.masked_ssim_d[c] += sum_d;
                 accum.masked_ssim_d4[c] += sum_d4;
@@ -1735,25 +1709,27 @@ fn process_strip_channel(
 
         if need_edge {
             if do_ext && do_iw {
-                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                let ((art4_m, det4_m), (art4_i, det4_i)) =
-                    edge_diff_channel_masked_with_iw_inline(
-                        inner_src,
-                        inner_dst,
-                        inner_mu1,
-                        inner_mu2,
-                        inner_mask,
-                        activity_inner,
-                        k_iw,
-                    );
+                let ((art4_m, det4_m), (art4_i, det4_i)) = edge_diff_channel_inline_both(
+                    inner_src,
+                    inner_dst,
+                    inner_mu1,
+                    inner_mu2,
+                    activity_inner,
+                    k,
+                    k_iw,
+                );
                 accum.masked_art4[c] += art4_m;
                 accum.masked_det4[c] += det4_m;
                 accum.iw_art4[c] += art4_i;
                 accum.iw_det4[c] += det4_i;
             } else if do_ext {
-                let inner_mask = &bufs.mask[inner_off..inner_off + inner_n];
-                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_masked(
-                    inner_src, inner_dst, inner_mu1, inner_mu2, inner_mask,
+                let (_art, art4, _det, det4, _art2, _det2) = edge_diff_channel_inline_mask(
+                    inner_src,
+                    inner_dst,
+                    inner_mu1,
+                    inner_mu2,
+                    activity_inner,
+                    k,
                 );
                 accum.masked_art4[c] += art4;
                 accum.masked_det4[c] += det4;
