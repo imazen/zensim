@@ -1099,17 +1099,30 @@ impl Zensim {
     /// `strip_inner >= 16 × (2 * blur_radius + 1) = 176` at default
     /// blur. The `256` default is safe for everything we ship.
     ///
-    /// # Approximation note
+    /// # Precision
     ///
-    /// Phase 1 (this version) re-pools per-strip `ScaleStats` through
-    /// a `mean × tile_count` aggregator. Pure-mean stats (SSIM mean,
-    /// MSE, edge_mean) aggregate **exactly**; root-power stats
-    /// (`root4_d`, `root2_d`) aggregate **approximately** because
-    /// `(tile_root_p)^p × tile_n ≠ tile_sum_of_p_th_powers` in
-    /// general — the per-tile finalize step loses precision. The
-    /// resulting score typically drifts < 0.5 % vs the full-image
-    /// path. Phase 2 will expose raw accumulators across strips for
-    /// byte-equivalence.
+    /// Byte-exact equivalent to the full-image [`compute`](Self::compute)
+    /// path (within f64 machine epsilon, < 1e-13 rel). Strip-internal
+    /// bands tile against the full-image plane layout so each band's
+    /// V-blur running-sum init point and advance count match the
+    /// full-image path exactly. Per-strip accumulators sum directly
+    /// (raw `ScaleAccumulators::merge`) with no per-strip finalize
+    /// precision loss.
+    ///
+    /// # Reference data: strip-per-strip (one-off pair) mode
+    ///
+    /// This entry builds the reference XYB pyramid per strip — each
+    /// strip's `PrecomputedReference` covers JUST that strip's source
+    /// rows + margin. Peak per-pair memory is `O(strip_h × width)`,
+    /// at the cost of converting + downscaling the reference for each
+    /// strip. **Best for one-off pairs** where the reference is not
+    /// reused (each call sees a different source/distorted pair).
+    ///
+    /// For batch quantization loops where many distorted candidates
+    /// are scored against the same reference, use
+    /// [`Self::compute_with_ref_streaming_strips`] instead — that
+    /// variant pre-builds the FULL reference pyramid once and reuses
+    /// it across strips (and across calls).
     ///
     /// # Errors
     ///
@@ -1154,6 +1167,84 @@ impl Zensim {
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
         self.compute_streaming_strips(source, distorted, 256, 128)
+    }
+
+    /// Strip-aggregating variant that REUSES a full pre-built reference
+    /// pyramid across strips — best for batch encoder loops where many
+    /// distorted candidates are scored against the same source.
+    ///
+    /// Unlike [`Self::compute_streaming_strips`] (which builds a fresh
+    /// per-strip [`crate::streaming::PrecomputedReference`] on each call,
+    /// saving memory but redoing reference XYB conversion + pyramid
+    /// downscale for every strip), this entry takes a caller-owned full
+    /// `PrecomputedReference` and slices the appropriate Y-range out of
+    /// it per strip. The distorted side is still processed per-strip so
+    /// the distorted-side memory peak stays bounded.
+    ///
+    /// # Memory tradeoff
+    ///
+    /// - **`compute_streaming_strips`** (strip-per-strip ref): peak
+    ///   `O(strip_h × width × 4 bytes × 3 channels × 2 sides × 1.33)`
+    ///   per pair. ~125 MB at 80 MP with default strip geometry. Best
+    ///   for memory-constrained one-off pairs.
+    /// - **`compute_with_ref_streaming_strips`** (buffered ref): the
+    ///   `PrecomputedReference` holds the FULL ref pyramid (~1.28 GB
+    ///   at 80 MP). Per-call overhead is just the distorted side
+    ///   (~960 MB at 80 MP), but amortized across N distorted
+    ///   candidates the per-call cost drops to one distorted-side
+    ///   pass. Best for encoder quantization loops.
+    ///
+    /// # Precision
+    ///
+    /// Byte-exact equivalent to [`Self::compute_with_ref`] (within f64
+    /// machine epsilon).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ZensimError`] if dimensions are mismatched or too
+    /// small to support the strip geometry.
+    pub fn compute_with_ref_streaming_strips(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+        strip_inner: usize,
+        strip_margin: usize,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        if distorted.width() < 8 || distorted.height() < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        validate_ref_match(precomputed, distorted)?;
+        check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
+        let config = config_from_params(params, self.parallel);
+
+        let (stats, mean_offset) =
+            crate::streaming::compute_multiscale_stats_streaming_strips_with_ref(
+                precomputed,
+                distorted,
+                &config,
+                params.weights,
+                strip_inner,
+                strip_margin,
+            );
+        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        apply_mlp_scoring(
+            &mut result,
+            params,
+            distorted.width() as u32,
+            distorted.height() as u32,
+        )?;
+        Ok(result.with_profile(self.profile))
+    }
+
+    /// Same as [`Self::compute_with_ref_streaming_strips`] with default
+    /// strip geometry (`strip_inner = 256`, `strip_margin = 128`).
+    pub fn compute_with_ref_streaming_strips_default(
+        &self,
+        precomputed: &crate::streaming::PrecomputedReference,
+        distorted: &impl ImageSource,
+    ) -> Result<ZensimResult, ZensimError> {
+        self.compute_with_ref_streaming_strips(precomputed, distorted, 256, 128)
     }
 
     /// Compare against a precomputed reference, reusing caller-owned scratch
