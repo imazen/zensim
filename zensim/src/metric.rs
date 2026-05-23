@@ -513,6 +513,20 @@ pub struct ZensimResult {
     features: Vec<f64>,
     profile: crate::profile::ZensimProfile,
     mean_offset: [f64; 3],
+    /// Set by the identity-image short-circuit in
+    /// `compute_with_config_inner` / `compute_zensim_streaming`. When
+    /// true, the post-network MLP scoring path in
+    /// `apply_mlp_scoring_with_codec` MUST NOT overwrite the result —
+    /// running the trained MLP on the all-zero feature vector
+    /// produces garbage (the bake has no signal anchoring
+    /// "zero feature vector → score 100").
+    ///
+    /// Replaces the pre-0.3.0 sentinel check
+    /// `raw_distance == 0.0 && features.iter().all(== 0.0)` which was
+    /// brittle (any future profile that legitimately produces
+    /// raw_distance=0.0 + all-zero features on a real image would
+    /// silently skip MLP scoring).
+    is_identical: bool,
 }
 
 impl ZensimResult {
@@ -530,7 +544,27 @@ impl ZensimResult {
             features,
             profile,
             mean_offset,
+            is_identical: false,
         }
+    }
+
+    /// Mark this result as the byte-identical short-circuit output.
+    /// `apply_mlp_scoring_with_codec` reads this flag to skip the
+    /// MLP forward pass (which would overwrite the (100, 0, zeros)
+    /// payload with garbage).
+    #[inline]
+    pub(crate) fn mark_identical(mut self) -> Self {
+        self.is_identical = true;
+        self
+    }
+
+    /// True iff this result was produced by the byte-identical
+    /// short-circuit. Used by `apply_mlp_scoring_with_codec` to
+    /// preserve the (score=100, raw_distance=0, zero-features)
+    /// invariant regardless of which bake is loaded.
+    #[inline]
+    pub(crate) fn is_identical(&self) -> bool {
+        self.is_identical
     }
 
     /// Set the profile on this result (builder pattern). Internal use only.
@@ -561,6 +595,7 @@ impl ZensimResult {
             features: vec![],
             profile: crate::profile::ZensimProfile::PreviewV0_1,
             mean_offset: [f64::NAN; 3],
+            is_identical: false,
         }
     }
 
@@ -1744,7 +1779,8 @@ fn compute_with_config_inner(
             vec![0.0; num_features],
             ZensimProfile::latest(),
             [0.0; 3],
-        );
+        )
+        .mark_identical();
     }
 
     crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
@@ -1853,27 +1889,24 @@ pub(crate) fn apply_mlp_scoring_with_codec(
         return Ok(());
     };
     // **Identity-image short-circuit guard.** When the byte-identical
-    // short-circuit in `compute_with_config_inner` fires, it produces
-    // `(score=100.0, raw_distance=0.0, features=[0.0; N])`. Running the
-    // MLP forward pass on the all-zero feature vector then overwrites
-    // those values with garbage — typically ~0 on V0_5Balanced (MSE bake
-    // on z-scored zeros), ~2 on V0_5Compression / V0_5Ensemble — because
-    // the trained MLP has no signal anchoring "zero feature vector →
-    // score 100". The bake's biases dominate, producing an off-scale
-    // output that `skip_score_mapping=true` returns verbatim.
+    // short-circuit in `compute_with_config_inner` /
+    // `compute_zensim_with_config` fires, it produces
+    // `(score=100.0, raw_distance=0.0, features=[0.0; N])`. Running
+    // the MLP forward pass on the all-zero feature vector then
+    // overwrites those values with garbage — typically ~0 on
+    // V0_5Balanced (MSE bake on z-scored zeros), ~2 on
+    // V0_5Compression / V0_5Ensemble — because the trained MLP has
+    // no signal anchoring "zero feature vector → score 100". The
+    // bake's biases dominate, producing an off-scale output that
+    // `skip_score_mapping=true` returns verbatim.
     //
-    // Detect the post-short-circuit state by checking the unique
-    // signature: raw_distance is exactly 0.0 AND every feature is
-    // exactly 0.0. Real (non-identical) images never produce this
-    // signature because SSIM/edge/MSE on any pixel difference yields
-    // non-zero values per-feature; `combine_scores` then derives a
-    // non-zero `raw_distance` from the weighted feature vector.
-    //
-    // When detected, leave the result as `compute_with_config_inner`
-    // set it (score=100.0, raw_distance=0.0). This preserves the
-    // byte-identical invariant for every profile, regardless of which
-    // bake is loaded or what `skip_score_mapping` does.
-    if result.raw_distance() == 0.0 && result.features().iter().all(|&f| f == 0.0) {
+    // We detect the post-short-circuit state via the explicit
+    // `is_identical` flag set by `mark_identical`. The pre-0.3.0 code
+    // used a sentinel check (`raw_distance == 0.0 && features.all
+    // (== 0.0)`); the flag is robust against any future profile that
+    // legitimately produces an all-zero feature vector on a real
+    // image.
+    if result.is_identical() {
         return Ok(());
     }
     {
@@ -2563,6 +2596,101 @@ fn forward_one_bake(
     forward_one_bake_with_codec(bytes, features, width, height, None)
 }
 
+/// Lazily-parsed bake metadata bundle. One instance per distinct
+/// bake-bytes pointer, cached in [`bake_metadata_cache`] so the
+/// per-sample-α, hybrid-head, tanh-pin, PCHIP-spline, and per-codec
+/// calibration payloads only parse once.
+///
+/// Hot-loop motivation: encoder workloads call
+/// `forward_one_bake_with_codec` once per distorted candidate against
+/// a fixed `ProfileParams::mlp_bytes` slot. Re-parsing five metadata
+/// blobs every call burned a constant ~µs that this cache reclaims.
+///
+/// Each field is `Option<Arc<T>>` so cloning the bundle (to release
+/// the cache lock before forward dispatch) is cheap.
+struct CachedBakeMetadata {
+    per_sample_alpha: Option<std::sync::Arc<PerSampleAlphaMeta>>,
+    hybrid_head: Option<std::sync::Arc<HybridHeadMeta>>,
+    tanh_pin_scale: Option<f64>,
+    output_spline: Option<std::sync::Arc<OutputCalibrationSpline>>,
+    per_codec_calibration: Option<std::sync::Arc<PerCodecCalibration>>,
+}
+
+/// Lookup the parsed metadata for `bytes` from the static interner,
+/// or parse it on first sight and cache. Keyed by the bytes' data
+/// pointer (bake byte slices always come from `&'static` slots via
+/// `ProfileParams::mlp_bytes`, so the pointer is stable and unique
+/// per slot).
+///
+/// Returns an `Arc<CachedBakeMetadata>` — the caller drops the cache
+/// lock before doing the forward pass.
+fn cached_bake_metadata(
+    bytes: &[u8],
+    model: &crate::mlp::Model,
+) -> std::sync::Arc<CachedBakeMetadata> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, OnceLock, RwLock};
+
+    static CACHE: OnceLock<RwLock<HashMap<usize, Arc<CachedBakeMetadata>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = bytes.as_ptr() as usize;
+
+    // Fast path: read-only lookup. Multiple readers can pass through
+    // simultaneously — only the first-sight parse holds the write lock.
+    if let Ok(read) = cache.read()
+        && let Some(entry) = read.get(&key)
+    {
+        return Arc::clone(entry);
+    }
+
+    // Slow path: parse + insert. Re-check after acquiring the write
+    // lock — another thread may have raced ahead of us.
+    let n_hidden = model.n_outputs();
+    let metadata = model.metadata();
+    let per_sample_alpha = metadata
+        .get(PER_SAMPLE_ALPHA_HEAD_KEY)
+        .and_then(|entry| parse_per_sample_alpha_meta(entry.value, n_hidden))
+        .map(Arc::new);
+    let hybrid_head = if per_sample_alpha.is_some() {
+        None
+    } else {
+        metadata
+            .get(HYBRID_HEAD_KEY)
+            .and_then(|entry| parse_hybrid_head_meta(entry.value, n_hidden))
+            .map(Arc::new)
+    };
+    let tanh_pin_scale = metadata
+        .get(TANH_OUTPUT_HEAD_KEY)
+        .and_then(|entry| parse_tanh_output_head_scale(entry.value));
+    let output_spline = metadata
+        .get(OUTPUT_CALIBRATION_SPLINE_KEY)
+        .and_then(|entry| parse_output_calibration_spline(entry.value))
+        .map(Arc::new);
+    let per_codec_calibration = metadata
+        .get(PER_CODEC_CALIBRATION_KEY)
+        .and_then(|entry| parse_per_codec_calibration(entry.value))
+        .map(Arc::new);
+
+    let parsed = Arc::new(CachedBakeMetadata {
+        per_sample_alpha,
+        hybrid_head,
+        tanh_pin_scale,
+        output_spline,
+        per_codec_calibration,
+    });
+
+    if let Ok(mut write) = cache.write() {
+        // Idempotent: another thread's parse for the same key is also
+        // valid; we just keep whichever Arc landed first.
+        let entry = write.entry(key).or_insert_with(|| Arc::clone(&parsed));
+        return Arc::clone(entry);
+    }
+    // Poisoned lock — return the freshly parsed bundle without
+    // caching. Forward correctness is preserved at the cost of one
+    // re-parse next call.
+    parsed
+}
+
 /// Same as [`forward_one_bake`] but accepts an optional codec hint
 /// that drives the per-codec post-spline affine calibration
 /// (EXP-CROSS-CODEC-V11-E). When `codec_hint` is `Some` and the
@@ -2584,64 +2712,25 @@ fn forward_one_bake_with_codec(
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
 
-    // Per-sample-α and hybrid-head metadata + parsed payload. When
-    // present, the forward output is treated as the hidden vector h
-    // (length = `n_hidden`); otherwise the legacy `out[0]` path is
-    // taken. Per-sample-α takes precedence over hybrid-head if both
-    // are somehow present (the two heads are alternative
-    // architectures; a bake should only carry one).
-    //
-    // The metadata blob is owned by the model bytes — the returned
-    // `MetadataEntry` borrows from `&model`. We copy the value bytes
-    // into an owned Vec so the lifetime is independent of `predictor`
-    // (which also borrows `&model`).
-    let per_sample_alpha: Option<PerSampleAlphaMeta> = {
-        let metadata = model.metadata();
-        metadata
-            .get(PER_SAMPLE_ALPHA_HEAD_KEY)
-            .and_then(|entry| parse_per_sample_alpha_meta(entry.value, model.n_outputs()))
-    };
-    let hybrid_head: Option<HybridHeadMeta> = if per_sample_alpha.is_some() {
-        None
-    } else {
-        let metadata = model.metadata();
-        metadata
-            .get(HYBRID_HEAD_KEY)
-            .and_then(|entry| parse_hybrid_head_meta(entry.value, model.n_outputs()))
-    };
-    // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned [0, 100] output
-    // head. Applies AFTER per-sample-α / hybrid-head mixing. Only
-    // active when the bake carries `zentrain.tanh_output_head` metadata.
-    let tanh_pin_scale: Option<f64> = {
-        let metadata = model.metadata();
-        metadata
-            .get(TANH_OUTPUT_HEAD_KEY)
-            .and_then(|entry| parse_tanh_output_head_scale(entry.value))
-    };
-    // EXP-CROSS-CODEC-V9 (2026-05-20): post-network monotone PCHIP
-    // spline calibration. Applies AFTER tanh-pin. Only active when
-    // the bake carries `zentrain.output_calibration_spline` metadata.
-    let output_spline: Option<OutputCalibrationSpline> = {
-        let metadata = model.metadata();
-        metadata
-            .get(OUTPUT_CALIBRATION_SPLINE_KEY)
-            .and_then(|entry| parse_output_calibration_spline(entry.value))
-    };
+    // Lazy-parse the bake's metadata bundle (per-sample-α, hybrid
+    // head, tanh-pin, PCHIP spline, per-codec calibration). Cached
+    // by bake-bytes pointer in `cached_bake_metadata` so encoder
+    // hot loops over a fixed `ProfileParams::mlp_bytes` slot don't
+    // re-parse every call.
+    let bundle = cached_bake_metadata(bytes, &model);
+    let per_sample_alpha = bundle.per_sample_alpha.as_deref();
+    let hybrid_head = bundle.hybrid_head.as_deref();
+    let tanh_pin_scale = bundle.tanh_pin_scale;
+    let output_spline = bundle.output_spline.as_deref();
     // EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine.
     // Applies AFTER the PCHIP spline. Only active when the bake carries
     // `zentrain.per_codec_calibration` metadata AND the caller supplied
-    // a codec hint that maps to a registered codec entry.
-    let per_codec_affine: Option<(f32, f32)> = {
-        let cal = {
-            let metadata = model.metadata();
-            metadata
-                .get(PER_CODEC_CALIBRATION_KEY)
-                .and_then(|entry| parse_per_codec_calibration(entry.value))
-        };
-        match (cal, codec_hint) {
-            (Some(cal), Some(hint)) => lookup_per_codec_affine(&cal, hint),
-            _ => None,
-        }
+    // a codec hint that maps to a registered codec entry. The
+    // calibration table itself is cached; only the codec-hint lookup
+    // runs per call.
+    let per_codec_affine: Option<(f32, f32)> = match (&bundle.per_codec_calibration, codec_hint) {
+        (Some(cal), Some(hint)) => lookup_per_codec_affine(cal, hint),
+        _ => None,
     };
 
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
@@ -2655,7 +2744,7 @@ fn forward_one_bake_with_codec(
                 reason: "Predictor::predict failed",
             })?
         };
-        let y_pre = if let Some(meta) = &per_sample_alpha {
+        let y_pre = if let Some(meta) = per_sample_alpha {
             // `out` is the hidden vector h (n_hidden floats). Apply
             // the per-sample-α runtime formula.
             if out.len() != meta.rank_w.len() {
@@ -2666,7 +2755,7 @@ fn forward_one_bake_with_codec(
                 });
             }
             apply_per_sample_alpha_runtime(out, meta)
-        } else if let Some(meta) = &hybrid_head {
+        } else if let Some(meta) = hybrid_head {
             // `out` is the hidden vector h. Apply the scalar-α
             // hybrid runtime formula.
             if out.len() != meta.rank_w.len() {
@@ -2683,7 +2772,7 @@ fn forward_one_bake_with_codec(
         } else {
             y_pre
         };
-        let y_after_spline = if let Some(spline) = &output_spline {
+        let y_after_spline = if let Some(spline) = output_spline {
             apply_output_calibration_spline(y_after_pin, spline)
         } else {
             y_after_pin
@@ -3098,7 +3187,8 @@ pub fn compute_zensim_with_config(
             vec![0.0; num_features],
             ZensimProfile::latest(),
             [0.0; 3],
-        ));
+        )
+        .mark_identical());
     }
 
     let src_img = crate::source::RgbSlice::new(source, width, height);
