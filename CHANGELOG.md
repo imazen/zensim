@@ -2,6 +2,117 @@
 
 ## [Unreleased]
 
+### Fixed (2026-05-22, numeric robustness vs GPU)
+
+- Defensive `.max(0.0)` clamp before every `.powf(0.25) / .sqrt() /
+  .powf(0.125)` finalize call in `streaming::ScaleAccumulators::finalize`.
+  f64 sums of per-pixel non-negative values can drift slightly negative
+  under f32→f64 round-off, which would turn the subsequent powf/sqrt
+  into NaN. Aligns CPU behavior with the existing GPU `zensim_gpu`
+  defensive clamp. (commit d8a80e6)
+- Non-finite feature guard at `metric::combine_scores` — sweeps the
+  372-feature vector with `is_finite()` → 0 fallback before scoring
+  + MLP. One corpus pair (2048×1365 JPEG q60) reproducibly produced
+  Inf at masked-ssim_mean B-channel scale 0; this prevents Inf/NaN
+  poisoning the MLP forward pass or the dot-product score.
+- Replaced `partial_cmp(...).unwrap()` in classification with NaN-safe
+  `total_cmp` (commit 7e180a6); replaced `panic!` on unknown
+  `PixelFormat` in delta-stats path with new
+  `ZensimError::UnsupportedPixelFormat` (commit 34ce140);
+  disambiguated bake-load failures via new
+  `ZensimError::ModelLoadFailed { reason }` and `ModelForwardFailed`
+  variants (commit 4f75d5e). All three panic / unwrap sites that a
+  reviewer would block on are now typed-error paths.
+
+### Performance (2026-05-22, full 372-feature pipeline optimization)
+
+vs commit `8baa8e4` (2026-05-15 baseline on `origin/main`), measured
+on AMD Ryzen 9 7950X (Zen 4, 16-core):
+
+| Size       | basic before → after | both before → after |
+|------------|----------------------|---------------------|
+| 1024×1024  | 12.42 → 11.77 ms (−5.2%) | 15.53 → 14.08 ms (−9.3%) |
+| 2048×1024  | 23.53 → 21.63 ms (−8.1%) | 40.50 → 34.02 ms (−16.0%) |
+
+- `perf(basic)`: lazy-allocate `h_blur_src` (commit ec47399). The
+  field added by `2dab8f3` (principled per-channel H-blur activity)
+  was unconditionally allocated by `ScaleBuffers::new`, costing TLB
+  pressure on the basic path that never touches it. `Vec::new()` +
+  `ensure_h_blur_src(strip_n)` on first use.
+- `perf(iw)`: eliminate the iw_weight plane round-trip (commit
+  0825a6c). The IW weight `1 + k_iw * activity[i]` is a single FMA;
+  6 new `pub(crate)` SIMD kernels (`build_mask_and_iw_mse_inline`,
+  `build_iw_mse_only`, `ssim_channel_masked_with_iw_inline`,
+  `ssim_channel_iw_inline`, `edge_diff_channel_masked_with_iw_inline`,
+  `edge_diff_channel_iw_inline`) compute it inline in registers
+  instead of materializing a plane. Eliminates ~12 MB of bandwidth
+  per scale per channel at 1024².
+- `refactor(iw)`: collapse hand-v4+v3 kernels into single
+  `#[magetypes(v4, v3, neon, wasm128, scalar)]` over `f32x16`
+  (commit 065cca3, −763 LOC). v4 native AVX-512, v3 polyfills
+  f32x16 → 2× f32x8, neon polyfills → 4× f32x4. Same assembly as
+  hand-written, ⅓ the LOC.
+- `perf(iw)`: eliminate the mask plane via inline-weight kernels
+  (commit 4fe9d5b). Mirror of the iw_weight elimination — mask
+  weight `1/(1 + k_mask * activity)` now computed inline at every
+  SSIM/edge/MSE consumer.
+- `perf(streaming)`: fuse H-blur + abs-diff into one streaming kernel
+  (commit f15d446). `box_blur_h_into_abs_diff` emits `|src - H_blur(src)|`
+  directly from the box-blur running-sum kernel; `h_blur_src` field
+  deleted entirely from `ScaleBuffers`. One plane write + 2 plane
+  reads eliminated per channel per scale.
+- `perf(mlp)`: `CachedBakeMetadata` interner + explicit `is_identical`
+  flag (commit 1b010e0). Bake metadata (per-sample-α, hybrid-head,
+  tanh-pin, PCHIP spline, per-codec calibration) is parsed once on
+  Predictor construction instead of every `forward_one_bake_with_codec`
+  call. Small-image basic dropped 8-13% from this alone.
+- All changes preserve the byte-exact streaming gate
+  (`strip_aggregator_byte_exact_safesyn_99`) at 6.8e-14 worst rel
+  (gate 1e-6).
+
+### Changed — API surface hygiene (2026-05-22, commit d92c6fa)
+
+Pre-0.3.0 cleanup. Items demoted to `pub(crate)` or deleted; none
+removed an item used by any sibling workspace crate (`zensim-validate`,
+`zensim-regress`, `zensim-bench`) or external consumer.
+
+- Demoted to `pub(crate)`:
+  - `iw_pool::WeightedPool::{mean, l2, l4}` and
+    `iw_pool::IwSsimFeatures::{FEATURES_PER_CALL, as_array,
+    pool_from_maps}` — research-only types with zero external callers
+  - Implementation-tuning constants in `cvvdp_features`
+    (`SRGB_LINEAR_TO_DKL`, `DISPLAY_Y_PEAK`, `DISPLAY_Y_BLACK`,
+    `DISPLAY_Y_REFL`, `N_LEVELS`, `MINKOWSKI_BETA`,
+    `CSF_BAND_WEIGHTS`) — kept `extract_cvvdp_features` +
+    `CVVDP_FEATURE_COUNT` public
+  - Implementation constants in `xyb_lms_features` (`XYB_CBRT_BIAS`,
+    `LMS_BIASED_LOG_OFFSET`, `STATS_PER_CHANNEL`, `CHANNELS`,
+    `FRONT_ENDS`) — kept `extract_xyb_lms_features` +
+    `XYB_LMS_FEATURE_COUNT` public
+  - `source::SubsetView` (and `lib.rs` re-export) — internal strip
+    path consumer only
+  - `simd_ops::abs_diff_into / ssim_channel_masked /
+    edge_diff_channel_masked` — all explicitly "deprecated for
+    streaming hot path"; tests reference them but they're not
+    public-API stable
+- Deleted: `score_from_features` (deprecated since 0.2.9 — superseded
+  by `try_score_from_features -> Result<...>`); `color::make_positive_xyb`
+  + its 2 SIMD inner kernels (truly dead, replaced by the fused
+  `srgb_to_positive_xyb_planar_into`).
+- Stale-state removal (commit aa16a65): dropped `__experimental_versions`
+  feature reference in `lib.rs` (was never declared in `Cargo.toml
+  [features]`), stale "AGPL zenpredict" docstring (zenpredict is now
+  MIT/Apache and an unconditional dep), stale `#[allow(dead_code)]`
+  markers on `color::srgb_to_positive_xyb_planar_into` (it IS called
+  from streaming) and `color::make_positive_xyb` (truly dead).
+
+Public training/research API (e.g., `compute_zensim_with_config`,
+`try_score_from_features`, `compute_iw_features`, `WEIGHTS`,
+`FEATURES_PER_SCALE`, etc.) kept gated behind `feature = "training"`
+with no change — preserves the feature-extraction-to-parquet +
+rescoring-from-features workflows used by `zensim-validate`,
+`bake_verdict`, `dataset_metric_baseline`, picker training.
+
 ### Investigated (2026-05-20, V13-CVVDP-DISTILL — FALSIFIED on both linear + log-norm cvvdp targets, task #200)
 
 - V13 tested cvvdp as a distillation teacher (pure MSE on
