@@ -331,24 +331,6 @@ fn distance_to_score_mapped(raw_distance: f64, a: f64, b: f64) -> f64 {
 
 /// Compute score from raw features using custom weights.
 ///
-/// # Panics
-///
-/// Panics if `features.len() != weights.len()`. Prefer
-/// [`try_score_from_features`] for caller-supplied lengths — this thin
-/// wrapper exists for backwards compatibility and will be removed in a
-/// future major release.
-#[cfg_attr(not(feature = "training"), allow(dead_code))]
-#[deprecated(
-    since = "0.2.9",
-    note = "use `try_score_from_features` which returns a Result instead of panicking on length mismatch"
-)]
-pub fn score_from_features(features: &[f64], weights: &[f64]) -> (f64, f64) {
-    try_score_from_features(features, weights)
-        .expect("score_from_features: features and weights must have same length")
-}
-
-/// Compute score from raw features using custom weights.
-///
 /// `features`: raw features from `ZensimResult::features()`.
 /// `weights`: one weight per feature; `weights.len()` must equal
 /// `features.len()`.
@@ -392,6 +374,14 @@ pub fn try_score_from_features(
 /// Use this when calling [`compute_zensim_with_ref_and_config`] with a non-default
 /// `num_scales`. The precomputed data must have at least as many scales as the config
 /// requests.
+///
+/// **Research / feature-extraction API; not stable.** The
+/// `ZensimConfig` knobs that this entry exposes (blur kernel, scale
+/// count, masking) change metric internals whose outputs are
+/// incomparable with the default trained weights. Used by the
+/// zensim-validate feature-extraction binaries; not part of the
+/// 0-100 score surface.
+#[doc(hidden)]
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
 pub fn precompute_reference_with_scales(
     source: &[[u8; 3]],
@@ -419,8 +409,13 @@ pub fn precompute_reference_with_scales(
 
 /// Compute zensim with a precomputed reference and custom configuration.
 ///
-/// Training/research variant. The `config.num_scales`
-/// must not exceed the number of scales in `precomputed`.
+/// **Research / feature-extraction API; not stable.** The
+/// `ZensimConfig` knobs that this entry exposes change metric
+/// internals whose outputs are incomparable with the default trained
+/// weights. The `config.num_scales` must not exceed the number of
+/// scales in `precomputed`. Used by the zensim-validate
+/// feature-extraction binaries.
+#[doc(hidden)]
 #[cfg(feature = "training")]
 pub fn compute_zensim_with_ref_and_config(
     precomputed: &crate::streaming::PrecomputedReference,
@@ -553,6 +548,12 @@ impl ZensimResult {
     }
 
     /// Create a NaN sentinel result (for error/placeholder paths).
+    ///
+    /// Research / sibling-tooling helper. Used by zensim-validate's
+    /// per-pair eval pipeline when a row's image can't be decoded —
+    /// the NaN propagates downstream without crashing the sweep. Not
+    /// part of the stable public surface.
+    #[doc(hidden)]
     pub fn nan() -> Self {
         Self {
             score: f64::NAN,
@@ -3044,6 +3045,12 @@ impl<'a> FeatureView<'a> {
 /// Compute zensim with custom configuration (training API).
 ///
 /// Uses the v0.2 weights (latest general-purpose profile).
+///
+/// **Research / feature-extraction API; not stable.** Used by the
+/// zensim-validate feature-extraction binaries and inline tests; the
+/// `ZensimConfig` knobs change metric internals whose outputs are
+/// incomparable with the default trained weights.
+#[doc(hidden)]
 #[cfg(any(feature = "training", test))]
 pub fn compute_zensim_with_config(
     source: &[[u8; 3]],

@@ -476,7 +476,7 @@ impl ImageSource for StridedBytes<'_> {
 /// Width is unchanged; pixel format / alpha / primaries pass through.
 /// `row_bytes(y)` delegates to `parent.row_bytes(y + y_start)`.
 #[derive(Clone, Copy, Debug)]
-pub struct SubsetView<'a, S: ImageSource + ?Sized> {
+pub(crate) struct SubsetView<'a, S: ImageSource + ?Sized> {
     parent: &'a S,
     y_start: usize,
     height: usize,
@@ -485,7 +485,7 @@ pub struct SubsetView<'a, S: ImageSource + ?Sized> {
 impl<'a, S: ImageSource + ?Sized> SubsetView<'a, S> {
     /// Wrap `[y_start, y_start + height)` of `parent`. Caller must ensure
     /// `y_start + height <= parent.height()`.
-    pub fn new(parent: &'a S, y_start: usize, height: usize) -> Self {
+    pub(crate) fn new(parent: &'a S, y_start: usize, height: usize) -> Self {
         debug_assert!(
             y_start.saturating_add(height) <= parent.height(),
             "SubsetView out of parent bounds"
@@ -499,7 +499,8 @@ impl<'a, S: ImageSource + ?Sized> SubsetView<'a, S> {
 
     /// Y offset within the parent.
     #[inline]
-    pub fn y_start(&self) -> usize {
+    #[allow(dead_code)] // accessor for tooling / debugging — not currently called by streaming
+    pub(crate) fn y_start(&self) -> usize {
         self.y_start
     }
 }

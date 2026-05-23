@@ -61,7 +61,7 @@ use crate::color::srgb_u8_to_linear;
 /// al. 2024 CVVDP paper appendix (public). Re-deriving from the
 /// Smith-Pokorny LMS cone fundamentals + sRGB primaries gives the
 /// same numbers to f32 precision.
-pub const SRGB_LINEAR_TO_DKL: [[f32; 3]; 3] = [
+pub(crate) const SRGB_LINEAR_TO_DKL: [[f32; 3]; 3] = [
     [0.233_201_2, 0.728_830_8, 0.088_995_87],
     [0.127_620_77, -0.087_068_09, -0.036_777_39],
     [-0.214_822_5, -0.626_253_7, 0.851_403_3],
@@ -69,15 +69,15 @@ pub const SRGB_LINEAR_TO_DKL: [[f32; 3]; 3] = [
 
 /// Display preset constants: peak luminance, black luminance, and
 /// reflected ambient (in cd/m²). cvvdp v0.5.4 `standard_4k` numbers.
-pub const DISPLAY_Y_PEAK: f32 = 200.0;
+pub(crate) const DISPLAY_Y_PEAK: f32 = 200.0;
 /// Display black point in cd/m². Combined with reflected ambient for
 /// the linear → emitted-luminance map.
-pub const DISPLAY_Y_BLACK: f32 = 0.2;
+pub(crate) const DISPLAY_Y_BLACK: f32 = 0.2;
 /// Reflected ambient luminance in cd/m² (250 lux × 0.005 / π).
-pub const DISPLAY_Y_REFL: f32 = 0.397_887_36;
+pub(crate) const DISPLAY_Y_REFL: f32 = 0.397_887_36;
 
 /// Number of pyramid levels — matches existing zensim 4-scale layout.
-pub const N_LEVELS: usize = 4;
+pub(crate) const N_LEVELS: usize = 4;
 
 /// Minkowski β for spatial pool (doc § 3 Table; cvvdp uses 2.0 but
 /// the doc highlights 3.0 as the "Minkowski-β=3 pooled luminance
@@ -85,7 +85,7 @@ pub const N_LEVELS: usize = 4;
 /// though cvvdp itself runs β=2 for spatial pool — the point of this
 /// feature is to provide a *different shape* than mean pooling, and
 /// β=3 is what the doc asks for.
-pub const MINKOWSKI_BETA: f32 = 3.0;
+pub(crate) const MINKOWSKI_BETA: f32 = 3.0;
 
 /// Tiny ε to keep mutual-masking residual divisions stable on flat
 /// regions. `(R + T)` can be near zero on identical low-luminance
@@ -99,7 +99,7 @@ const MASK_EPS: f32 = 1e-3;
 /// band 1 / 2; bands 0 and 3 are deprioritised. These weights are
 /// used only to bias the band-energy ratio features — the MLP can
 /// learn a different shape if it wants.
-pub const CSF_BAND_WEIGHTS: [f32; N_LEVELS] = [0.5, 1.0, 0.8, 0.4];
+pub(crate) const CSF_BAND_WEIGHTS: [f32; N_LEVELS] = [0.5, 1.0, 0.8, 0.4];
 
 /// Feature counts per block (see module docs).
 const N_DKL_STATS: usize = 6;

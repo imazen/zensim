@@ -16,9 +16,10 @@ default = ["avx512", "imgref", "threads"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
-## Exposes training/research API: ZensimConfig, score_from_features, WEIGHTS,
-## FEATURES_PER_SCALE. These items control metric internals (blur kernel,
-## scale count) whose outputs are incomparable with the default trained weights.
+## Exposes training/research API: ZensimConfig, try_score_from_features,
+## WEIGHTS, FEATURES_PER_SCALE. These items control metric internals (blur
+## kernel, scale count) whose outputs are incomparable with the default
+## trained weights.
 training = []
 ## Exposes classification API: classify(), ClassifiedResult, ErrorClassification,
 ## DeltaStats, AlphaStratifiedStats. Used by zensim-regress for regression testing.

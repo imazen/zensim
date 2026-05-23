@@ -256,9 +256,9 @@ pub use streaming::{PrecomputedReference, ZensimScratch};
 /// masking, weight vectors) that change metric behavior. Scores produced
 /// with non-default `ZensimConfig` are **not comparable** to the default
 /// trained weights or the 0-100 score scale.
-#[cfg(feature = "training")]
-#[allow(deprecated)]
-pub use metric::score_from_features;
+///
+/// The historical `score_from_features` (the panicking variant) was
+/// removed in 0.3.0; use [`try_score_from_features`] instead.
 #[cfg(feature = "training")]
 pub use metric::{
     BlurKernel, CH_B, CH_X, CH_Y, DownscaleFilter, FEATURES_PER_CHANNEL_BASIC,
@@ -274,8 +274,14 @@ pub use metric::{
 /// `compute_iw_weights` entry point used for research experiments.
 /// Including the steerable-pyramid GSM approximation spike added
 /// 2026-05-15 — see `benchmarks/iw_pyramid_spike_methodology_2026-05-15.md`.
+///
+/// `WeightedPool` and `IwSsimFeatures` (the offline-experiment pool +
+/// pooled-feature struct) are crate-internal as of 0.3.0 — the
+/// streaming hot path emits the same numbers directly via
+/// `streaming::process_strip_into_accum`, and no external workspace
+/// caller used them.
 #[cfg(feature = "training")]
-pub use iw_pool::{IwSsimFeatures, IwWeightConfig, IwWeightKind, WeightedPool, compute_iw_weights};
+pub use iw_pool::{IwWeightConfig, IwWeightKind, compute_iw_weights};
 
 #[cfg(feature = "zenpixels")]
 mod zenpixels_compat;

@@ -377,12 +377,18 @@ fn compute_gradient(
 /// is multiplied by the corresponding weight from
 /// [`compute_iw_weights`]. Normalisation divides by the sum of weights
 /// (which equals N for unit weights, recovering the standard mean).
-pub struct WeightedPool;
+///
+/// **Crate-internal as of 0.3.0.** No external caller in the workspace
+/// uses these helpers. The streaming hot path fuses the same math into
+/// `streaming::process_strip_into_accum`.
+#[allow(dead_code)] // used only by iw_pool's #[cfg(test)] tests as a reference implementation
+pub(crate) struct WeightedPool;
 
+#[allow(dead_code)] // tests-only reference implementation; hot path is fused into streaming
 impl WeightedPool {
     /// Weighted mean: `(Σ w_i v_i) / Σ w_i`. Returns 0 if weight sum
     /// is below 1e-12.
-    pub fn mean(values: &[f32], weights: &[f32]) -> f64 {
+    pub(crate) fn mean(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
         let mut den = 0.0f64;
@@ -396,7 +402,7 @@ impl WeightedPool {
     /// Weighted L2 norm: `√((Σ w_i v_i²) / Σ w_i)`. Square-root taken
     /// after weighted mean of squares so units match the underlying
     /// signal.
-    pub fn l2(values: &[f32], weights: &[f32]) -> f64 {
+    pub(crate) fn l2(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
         let mut den = 0.0f64;
@@ -410,7 +416,7 @@ impl WeightedPool {
     /// Weighted L4 norm: `((Σ w_i v_i⁴) / Σ w_i)^(1/4)`. Matches the
     /// basic feature block's L4 ("`ssim_4th`") which emphasises peak
     /// errors.
-    pub fn l4(values: &[f32], weights: &[f32]) -> f64 {
+    pub(crate) fn l4(values: &[f32], weights: &[f32]) -> f64 {
         assert_eq!(values.len(), weights.len());
         let mut num = 0.0f64;
         let mut den = 0.0f64;
@@ -433,8 +439,14 @@ impl WeightedPool {
 /// in the existing extended profile but with the weight direction
 /// inverted (high info content gets MORE weight, not less). Shipped
 /// in the PreviewV0_5Balanced bake's f300..f371 input block.
+///
+/// **Crate-internal as of 0.3.0.** The streaming hot path emits the
+/// same 6 numbers via `streaming::process_strip_into_accum`; this
+/// type is kept for the offline-experiment entry point
+/// [`Self::pool_from_maps`] and the iw_pool unit tests.
 #[derive(Debug, Clone, Copy)]
-pub struct IwSsimFeatures {
+#[allow(dead_code)] // type is built only by the crate-internal pool_from_maps; tests construct it via that path
+pub(crate) struct IwSsimFeatures {
     /// Weighted mean of per-pixel SSIM(src, dst) at this scale & channel.
     pub iw_ssim_mean: f64,
     /// Weighted L2 of SSIM.
@@ -449,12 +461,13 @@ pub struct IwSsimFeatures {
     pub iw_mse: f64,
 }
 
+#[allow(dead_code)] // tests-only reference implementation; hot path is fused into streaming
 impl IwSsimFeatures {
     /// Number of features per call — matches `FEATURES_PER_CHANNEL_*_MASKED` in `metric.rs`.
-    pub const FEATURES_PER_CALL: usize = 6;
+    pub(crate) const FEATURES_PER_CALL: usize = 6;
 
     /// Flatten into the wire-order indices used by the trainer.
-    pub fn as_array(&self) -> [f64; 6] {
+    pub(crate) fn as_array(&self) -> [f64; 6] {
         [
             self.iw_ssim_mean,
             self.iw_ssim_2nd,
@@ -476,7 +489,7 @@ impl IwSsimFeatures {
     /// diffmap, weight by reference info-content, output 6 features.
     /// The streaming hot path fuses this into the SIMD inner loop —
     /// see `streaming::process_strip_into_accum`.
-    pub fn pool_from_maps(
+    pub(crate) fn pool_from_maps(
         ref_plane: &[f32],
         width: usize,
         height: usize,

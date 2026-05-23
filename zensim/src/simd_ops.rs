@@ -36,9 +36,10 @@ pub fn abs_diff_sum(a: &[f32], b: &[f32]) -> f64 {
 ///
 /// **Deprecated for the streaming hot path (Phase 2 Lever 3, 2026-05-22)**
 /// — the activity path uses [`crate::blur::box_blur_h_into_abs_diff`]
-/// which fuses the blur with the abs-diff. Kept for API stability.
+/// which fuses the blur with the abs-diff. Kept as a reference
+/// implementation for the SIMD dispatch trio (v4/v3/scalar).
 #[allow(dead_code)]
-pub fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
+pub(crate) fn abs_diff_into(a: &[f32], b: &[f32], out: &mut [f32]) {
     incant!(
         abs_diff_into_inner(a, b, out),
         [v4, v3, neon, wasm128, scalar]
@@ -79,10 +80,11 @@ pub fn edge_diff_channel_extended(
 ///
 /// **Deprecated for the streaming hot path (Phase 2, 2026-05-22)** — the
 /// mask-plane variant is superseded by [`ssim_channel_inline_mask`]
-/// which derives the mask weight inline from activity. Kept for API
-/// stability and unit-test coverage.
+/// which derives the mask weight inline from activity. Kept as a
+/// reference implementation for the SIMD dispatch trio and unit-test
+/// coverage; crate-internal.
 #[allow(dead_code)]
-pub fn ssim_channel_masked(
+pub(crate) fn ssim_channel_masked(
     mu1: &[f32],
     mu2: &[f32],
     sum_sq: &[f32],
@@ -130,9 +132,10 @@ pub fn ssim_channel_masked_2(
 ///
 /// **Deprecated for the streaming hot path (Phase 2, 2026-05-22)** — see
 /// [`edge_diff_channel_inline_mask`] for the activity-inline replacement.
-/// Kept for API stability and unit-test coverage.
+/// Kept as a reference implementation for the SIMD dispatch trio and
+/// unit-test coverage; crate-internal.
 #[allow(dead_code)]
-pub fn edge_diff_channel_masked(
+pub(crate) fn edge_diff_channel_masked(
     img1: &[f32],
     img2: &[f32],
     mu1: &[f32],

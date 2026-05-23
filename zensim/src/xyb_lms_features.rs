@@ -65,23 +65,24 @@ use crate::color::{
 /// module that consumes it. Both definitions share the same source
 /// value; if [`crate::color::K_B0`] is ever bumped the link above is
 /// the authoritative source and this re-export must follow.
-pub const XYB_CBRT_BIAS: f32 = K_B0;
+#[allow(dead_code)] // discoverability constant; the feature extractor uses K_B0 directly
+pub(crate) const XYB_CBRT_BIAS: f32 = K_B0;
 
 /// LMS-biased-log offset `b` — Guetzli §3.1 / Butteraugli code.
 ///
 /// `f(lms) = log(lms + b)`. Keeps shadows highly resolved while
 /// compressing highlights; the inverse function is recoverable but the
 /// metric uses one-way.
-pub const LMS_BIASED_LOG_OFFSET: f32 = 0.01;
+pub(crate) const LMS_BIASED_LOG_OFFSET: f32 = 0.01;
 
 /// Number of statistics emitted per channel: mean, std, p5, p95.
-pub const STATS_PER_CHANNEL: usize = 4;
+pub(crate) const STATS_PER_CHANNEL: usize = 4;
 
 /// Channels in each front-end (X, Y, B for XYB; L, M, S for LMS).
-pub const CHANNELS: usize = 3;
+pub(crate) const CHANNELS: usize = 3;
 
 /// Number of distinct front-ends: XYB cube-root + LMS biased-log.
-pub const FRONT_ENDS: usize = 2;
+pub(crate) const FRONT_ENDS: usize = 2;
 
 /// Total feature count from this module.
 ///
