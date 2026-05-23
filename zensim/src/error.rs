@@ -48,6 +48,27 @@ pub enum ZensimError {
     /// alongside a `_` arm if you handle it.
     #[error("pixel format is not supported by this code path")]
     UnsupportedPixelFormat,
+
+    /// Loading a trained MLP bake's bytes failed.
+    ///
+    /// Distinct from [`Self::InvalidDataLength`] — covers
+    /// header / version / structural parse failures, not feature-length
+    /// mismatches. `reason` is a `&'static str` describing the parse
+    /// stage that failed (kept static so the error type stays `Copy`).
+    #[error("failed to load MLP bake: {reason}")]
+    ModelLoadFailed { reason: &'static str },
+
+    /// Running an MLP forward pass on a loaded bake failed.
+    ///
+    /// Covers shape mismatches between the bake's declared layers, the
+    /// supplied features, and any per-sample-α / hybrid-head metadata
+    /// (e.g. metadata declares `n_hidden=32` but the bake's final layer
+    /// outputs 16 values). Distinct from [`Self::ModelLoadFailed`] —
+    /// the bake parsed cleanly but the forward call could not produce
+    /// a score. `reason` is a `&'static str` describing the failure
+    /// site.
+    #[error("MLP forward failed: {reason}")]
+    ModelForwardFailed { reason: &'static str },
 }
 
 /// Pixel format conversion error from the zenpixels adapter.

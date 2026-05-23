@@ -2576,7 +2576,9 @@ fn forward_one_bake_with_codec(
     height: u32,
     codec_hint: Option<&str>,
 ) -> Result<f64, ZensimError> {
-    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::InvalidDataLength)?;
+    let model = crate::mlp::Model::from_bytes(bytes).map_err(|_| ZensimError::ModelLoadFailed {
+        reason: "Model::from_bytes failed to parse the bake header or layer table",
+    })?;
     let n_inputs = model.n_inputs();
     let mut predictor = crate::mlp::Predictor::new(&model);
     let needs_transforms = model.has_nontrivial_feature_transforms();
@@ -2644,9 +2646,13 @@ fn forward_one_bake_with_codec(
     let dispatch = |p: &mut crate::mlp::Predictor<'_>, x: &[f32]| -> Result<f64, ZensimError> {
         let out = if needs_transforms {
             p.predict_transformed(x)
-                .map_err(|_| ZensimError::InvalidDataLength)?
+                .map_err(|_| ZensimError::ModelForwardFailed {
+                    reason: "Predictor::predict_transformed failed",
+                })?
         } else {
-            p.predict(x).map_err(|_| ZensimError::InvalidDataLength)?
+            p.predict(x).map_err(|_| ZensimError::ModelForwardFailed {
+                reason: "Predictor::predict failed",
+            })?
         };
         let y_pre = if let Some(meta) = &per_sample_alpha {
             // `out` is the hidden vector h (n_hidden floats). Apply
@@ -2654,14 +2660,18 @@ fn forward_one_bake_with_codec(
             if out.len() != meta.rank_w.len() {
                 // Shape mismatch between metadata's declared n_hidden
                 // and bake's n_outputs — bake is malformed.
-                return Err(ZensimError::InvalidDataLength);
+                return Err(ZensimError::ModelForwardFailed {
+                    reason: "per-sample-α metadata n_hidden does not match bake output length",
+                });
             }
             apply_per_sample_alpha_runtime(out, meta)
         } else if let Some(meta) = &hybrid_head {
             // `out` is the hidden vector h. Apply the scalar-α
             // hybrid runtime formula.
             if out.len() != meta.rank_w.len() {
-                return Err(ZensimError::InvalidDataLength);
+                return Err(ZensimError::ModelForwardFailed {
+                    reason: "hybrid-head metadata n_hidden does not match bake output length",
+                });
             }
             apply_hybrid_head_runtime(out, meta)
         } else {
@@ -2701,7 +2711,12 @@ fn forward_one_bake_with_codec(
         let f32_features: Vec<f32> = features[..n_inputs].iter().map(|&v| v as f32).collect();
         dispatch(&mut predictor, &f32_features)
     } else {
-        Err(ZensimError::InvalidDataLength)
+        // n_inputs > features.len() + 4 — bake expects more features than
+        // the caller supplied, including the optional 4 size axes. This
+        // is a feature-shape mismatch on a successfully-loaded bake.
+        Err(ZensimError::ModelForwardFailed {
+            reason: "bake declares more input features than the caller supplied",
+        })
     }
 }
 
