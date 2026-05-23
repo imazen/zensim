@@ -38,6 +38,16 @@ pub enum ZensimError {
     /// slices must have the same length (one weight per feature).
     #[error("features and weights must have the same length")]
     FeatureWeightsLengthMismatch,
+
+    /// A pixel format reached a code path that does not yet handle it.
+    ///
+    /// This currently fires from the optional `classification` feature's
+    /// delta-stats pass when a format other than sRGB-8 (RGB/RGBA/BGRA),
+    /// sRGB-16 (RGBA), or linear-F32 (RGBA) is presented. The enum is
+    /// `#[non_exhaustive]`, so this variant is non-breaking — match it
+    /// alongside a `_` arm if you handle it.
+    #[error("pixel format is not supported by this code path")]
+    UnsupportedPixelFormat,
 }
 
 /// Pixel format conversion error from the zenpixels adapter.

@@ -3249,13 +3249,21 @@ fn native_max_for_format(format: PixelFormat) -> f64 {
 pub(crate) fn compute_delta_stats(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
-) -> DeltaStats {
+) -> Result<DeltaStats, crate::ZensimError> {
     let width = source.width();
     let height = source.height();
     let src_format = source.pixel_format();
     let dst_format = distorted.pixel_format();
     let has_alpha = src_format.has_alpha() && dst_format.has_alpha();
     let native_max = native_max_for_format(src_format).max(native_max_for_format(dst_format));
+
+    // Up-front check: both formats must be in the supported set for the
+    // per-pixel extractor. `PixelFormat` is `#[non_exhaustive]`; if a new
+    // variant lands without a matching arm in `extract_pixel_normalized`,
+    // surface a real error instead of panicking in the inner loop.
+    if !is_supported_delta_format(src_format) || !is_supported_delta_format(dst_format) {
+        return Err(crate::ZensimError::UnsupportedPixelFormat);
+    }
 
     let chunk_rows = 64usize;
     let num_chunks = height.div_ceil(chunk_rows);
@@ -3409,7 +3417,27 @@ pub(crate) fn compute_delta_stats(
             a
         });
 
-    finalize_delta_stats(accum, has_alpha, native_max)
+    Ok(finalize_delta_stats(accum, has_alpha, native_max))
+}
+
+/// Returns true if `format` has a matching arm in
+/// [`extract_pixel_normalized`]. `PixelFormat` is `#[non_exhaustive]` so a
+/// future variant added to the enum without a matching extractor arm
+/// would otherwise reach the catch-all and panic; the up-front check in
+/// [`compute_delta_stats`] uses this to bail with
+/// [`ZensimError::UnsupportedPixelFormat`](crate::ZensimError::UnsupportedPixelFormat)
+/// instead.
+#[cfg(feature = "classification")]
+#[inline]
+fn is_supported_delta_format(format: PixelFormat) -> bool {
+    matches!(
+        format,
+        PixelFormat::Srgb8Rgb
+            | PixelFormat::Srgb8Rgba
+            | PixelFormat::Srgb8Bgra
+            | PixelFormat::Srgb16Rgba
+            | PixelFormat::LinearF32Rgba
+    )
 }
 
 #[cfg(feature = "classification")]
@@ -3472,7 +3500,14 @@ fn extract_pixel_normalized(
             (rgb, Some(a))
         }
         #[allow(unreachable_patterns)]
-        _ => panic!("unsupported pixel format for delta stats: {:?}", format),
+        _ => {
+            // Unreachable in practice: `compute_delta_stats` guards both
+            // input formats via `is_supported_delta_format` before any
+            // call into this extractor. If a new `PixelFormat` variant
+            // lands without a matching arm here, update the guard too.
+            debug_assert!(false, "unsupported pixel format for delta stats: {:?}", format);
+            ([0.0; 3], None)
+        }
     }
 }
 
@@ -4747,7 +4782,7 @@ mod tests {
             crate::source::AlphaMode::Opaque,
         );
 
-        let ds = compute_delta_stats(&src, &dst);
+        let ds = compute_delta_stats(&src, &dst).expect("supported format");
 
         assert_eq!(
             ds.native_max, 65535.0,
@@ -4820,7 +4855,7 @@ mod tests {
             crate::source::AlphaMode::Opaque,
         );
 
-        let ds = compute_delta_stats(&src, &dst);
+        let ds = compute_delta_stats(&src, &dst).expect("supported format");
 
         assert_eq!(ds.native_max, 1.0, "native_max should be 1.0 for f32");
         // With native_max=1.0, a delta of 0.001 is 0.001/1.0 = 0.001
@@ -4833,5 +4868,30 @@ mod tests {
             "f32 delta stats: max_abs_delta={:?}, native_max={}, pixels_differing={}",
             ds.max_abs_delta, ds.native_max, ds.pixels_differing,
         );
+    }
+
+    /// Regression: every currently-declared `PixelFormat` variant must
+    /// be recognized by `is_supported_delta_format`. If a new variant
+    /// is added to `source::PixelFormat` without updating the guard,
+    /// this test catches the gap before users hit
+    /// [`ZensimError::UnsupportedPixelFormat`](crate::ZensimError::UnsupportedPixelFormat)
+    /// at runtime.
+    #[cfg(feature = "classification")]
+    #[test]
+    fn supported_delta_format_covers_all_current_variants() {
+        use crate::source::PixelFormat;
+        for fmt in [
+            PixelFormat::Srgb8Rgb,
+            PixelFormat::Srgb8Rgba,
+            PixelFormat::Srgb8Bgra,
+            PixelFormat::Srgb16Rgba,
+            PixelFormat::LinearF32Rgba,
+        ] {
+            assert!(
+                is_supported_delta_format(fmt),
+                "format {:?} declared by PixelFormat but not recognized by the delta-stats guard",
+                fmt,
+            );
+        }
     }
 }

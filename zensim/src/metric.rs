@@ -1371,8 +1371,10 @@ impl Zensim {
     ) -> Result<ClassifiedResult, ZensimError> {
         validate_pair(source, distorted)?;
 
-        // Compute delta stats (pixel-level analysis in sRGB space)
-        let delta_stats = crate::streaming::compute_delta_stats(source, distorted);
+        // Compute delta stats (pixel-level analysis in sRGB space).
+        // Returns `ZensimError::UnsupportedPixelFormat` if either input
+        // uses a `PixelFormat` the delta-stats extractor doesn't handle.
+        let delta_stats = crate::streaming::compute_delta_stats(source, distorted)?;
 
         // Compute the standard zensim score
         let result = self.compute(source, distorted)?;
