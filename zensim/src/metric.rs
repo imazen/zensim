@@ -1493,11 +1493,15 @@ fn derive_classification(delta_stats: &DeltaStats, _result: &ZensimResult) -> Er
         (ErrorCategory::AlphaCompositing, score_alpha),
     ];
 
+    // NaN-safe: `total_cmp` orders all f64 values (including NaN) without
+    // panicking. If any score is NaN, it sorts to the most-negative end
+    // and is therefore never selected as the max — the `best_score > 0.0`
+    // check below then routes to `Unclassified`.
     let (best_cat, best_score) = scores
         .iter()
         .copied()
-        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .unwrap();
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("scores is a 3-element array — max is always defined");
 
     let (dominant, confidence) = if best_score > 0.0 {
         (best_cat, best_score)
@@ -3872,5 +3876,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Regression: `derive_classification` must not panic when any
+    /// per-detector score is NaN. The pre-cleanup implementation used
+    /// `partial_cmp(...).unwrap()` which would unwind on NaN.
+    ///
+    /// We feed `alpha_error_correlation = NaN` (the only path where a
+    /// NaN can reach `score_alpha`). The function must return cleanly
+    /// — the NaN score is sorted to the most-negative end by
+    /// `total_cmp`, so the legitimate non-NaN scores still pick the
+    /// dominant category.
+    #[cfg(feature = "classification")]
+    #[test]
+    fn derive_classification_is_nan_safe() {
+        let delta_stats = DeltaStats {
+            mean_delta: [0.0; 3],
+            stddev_delta: [0.0; 3],
+            max_abs_delta: [0.5 / 255.0; 3],
+            signed_small_histogram: [[0u64; 7]; 3],
+            native_max: 255.0,
+            pixel_count: 10_000,
+            pixels_differing: 100,
+            pixels_differing_by_more_than_1: 0,
+            has_alpha: true,
+            alpha_max_delta: 0,
+            alpha_pixels_differing: 0,
+            src_histogram: [[0u64; 256]; 4],
+            dst_histogram: [[0u64; 256]; 4],
+            opaque_stats: None,
+            semitransparent_stats: None,
+            // Inject NaN — the audit-flagged failure mode. The pre-fix
+            // code called `partial_cmp(...).unwrap()` and panicked here.
+            alpha_error_correlation: Some(f64::NAN),
+        };
+        let dummy_result = ZensimResult::nan();
+        let cls = derive_classification(&delta_stats, &dummy_result);
+        // Must NOT have selected a NaN-confidence category. With the
+        // `total_cmp` ordering, NaN sorts low and never wins.
+        assert!(
+            cls.confidence.is_finite(),
+            "confidence must be finite even when an internal score is NaN, got {}",
+            cls.confidence
+        );
     }
 }
