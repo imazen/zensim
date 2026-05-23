@@ -3311,6 +3311,18 @@ pub(crate) fn combine_scores(
         }
     }
 
+    // Sanitize non-finite values (NaN/Inf) before scoring + MLP. A
+    // single bad feature would otherwise poison the MLP forward pass
+    // (NaN cascades through every weighted-sum) or the dot-product
+    // score (Inf swamps the result). Replacing with 0 matches GPU
+    // zensim_gpu defensive behavior on degenerate inputs (one corpus
+    // pair, 2048×1365 JPEG q60, hit Inf at masked-ssim_mean B-channel).
+    for f in features.iter_mut() {
+        if !f.is_finite() {
+            *f = 0.0;
+        }
+    }
+
     // Apply weights — basic + peak features are scored
     let scored_total = basic_total + peak_total;
     let n_score = scored_total.min(weights.len());
