@@ -132,7 +132,9 @@ fn cbrtf_initial(x: f32) -> f32 {
 
 /// Convert interleaved sRGB u8 to planar positive XYB, writing into pre-allocated buffers.
 /// Each output slice must be at least `pixels.len()` long.
-#[allow(dead_code)] // For future streaming optimization (avoids per-strip allocations)
+///
+/// Used by the streaming pipeline in `streaming.rs` — avoids per-strip
+/// allocations by reusing caller-owned XYB plane buffers.
 pub fn srgb_to_positive_xyb_planar_into(
     pixels: &[[u8; 3]],
     x_out: &mut [f32],
@@ -175,18 +177,11 @@ pub fn srgb_to_xyb_planar_into(
     );
 }
 
-/// Make XYB values positive (required for SSIM-like comparisons).
-/// X: multiply by 14, add 0.42
-/// Y: add 0.01
-/// B: B = B - Y + 0.55
-#[inline(always)]
-#[allow(dead_code)]
-pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
-    incant!(
-        make_positive_xyb_inner(x, y, b),
-        [v3, neon, wasm128, scalar]
-    );
-}
+// Note: the standalone `make_positive_xyb` post-process function was
+// removed in 0.3.0. The streaming pipeline now fuses the conversion +
+// positive shift in `srgb_to_positive_xyb_planar_into` and
+// `linear_to_positive_xyb_planar_into`, so the separate shift had no
+// remaining callers.
 
 // --- SIMD implementations ---
 
@@ -782,88 +777,6 @@ fn srgb_to_xyb_planar_inner(
         x_out[i] = 0.5 * (mixed0 - mixed1);
         y_out[i] = 0.5 * (mixed0 + mixed1);
         b_out[i] = mixed2;
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[arcane]
-fn make_positive_xyb_inner_v3(
-    token: archmage::X64V3Token,
-    x: &mut [f32],
-    y: &mut [f32],
-    b: &mut [f32],
-) {
-    let fourteen = f32x8::splat(token, 14.0);
-    let x_bias = f32x8::splat(token, 0.42);
-    let y_bias = f32x8::splat(token, 0.01);
-    let b_bias = f32x8::splat(token, 0.55);
-
-    let n = x.len();
-    let chunks = n / 8;
-
-    for chunk in 0..chunks {
-        let base = chunk * 8;
-
-        let xv = f32x8::from_array(token, x[base..][..8].try_into().unwrap());
-        let yv = f32x8::from_array(token, y[base..][..8].try_into().unwrap());
-        let bv = f32x8::from_array(token, b[base..][..8].try_into().unwrap());
-
-        let x_pos = xv.mul_add(fourteen, x_bias);
-        let y_pos = yv + y_bias;
-        let b_pos = (bv - yv) + b_bias;
-
-        x[base..base + 8].copy_from_slice(&x_pos.to_array());
-        y[base..base + 8].copy_from_slice(&y_pos.to_array());
-        b[base..base + 8].copy_from_slice(&b_pos.to_array());
-    }
-
-    for i in (chunks * 8)..n {
-        let xv = x[i];
-        let yv = y[i];
-        let bv = b[i];
-        x[i] = xv.mul_add(14.0, 0.42);
-        y[i] = yv + 0.01;
-        b[i] = (bv - yv) + 0.55;
-    }
-}
-
-/// Generic make_positive_xyb: positive shift of XYB planes.
-#[magetypes(neon, wasm128, scalar)]
-fn make_positive_xyb_inner(token: Token, x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
-    #[allow(non_camel_case_types)]
-    type f32x8 = GenericF32x8<Token>;
-
-    let fourteen = f32x8::splat(token, 14.0);
-    let x_bias_v = f32x8::splat(token, 0.42);
-    let y_bias_v = f32x8::splat(token, 0.01);
-    let b_bias_v = f32x8::splat(token, 0.55);
-
-    let n = x.len();
-    let chunks = n / 8;
-
-    for chunk in 0..chunks {
-        let base = chunk * 8;
-
-        let xv = f32x8::from_array(token, x[base..][..8].try_into().unwrap());
-        let yv = f32x8::from_array(token, y[base..][..8].try_into().unwrap());
-        let bv = f32x8::from_array(token, b[base..][..8].try_into().unwrap());
-
-        let x_pos = xv.mul_add(fourteen, x_bias_v);
-        let y_pos = yv + y_bias_v;
-        let b_pos = (bv - yv) + b_bias_v;
-
-        x[base..base + 8].copy_from_slice(&x_pos.to_array());
-        y[base..base + 8].copy_from_slice(&y_pos.to_array());
-        b[base..base + 8].copy_from_slice(&b_pos.to_array());
-    }
-
-    for i in (chunks * 8)..n {
-        let xv = x[i];
-        let yv = y[i];
-        let bv = b[i];
-        x[i] = xv.mul_add(14.0, 0.42);
-        y[i] = yv + 0.01;
-        b[i] = (bv - yv) + 0.55;
     }
 }
 

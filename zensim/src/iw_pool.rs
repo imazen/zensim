@@ -26,13 +26,14 @@
 //! normalised here — the [`WeightedPool`] helper handles normalisation
 //! at aggregate time.
 //!
-//! ## Status (V0_20a, 2026-05-14)
+//! ## Status (2026-05-22)
 //!
-//! Initial implementation. Designed for offline experimentation —
-//! correctness over performance. Once the V0_20a sweep shows the
-//! Wang 2011 paper claim is reproduced for our corpus, the pool
-//! integration migrates into the SIMD streaming loop at
-//! `streaming::process_scale_bands`.
+//! The IW-pool block shipped in the V_22-mix-LARGE+iwssim Balanced
+//! recipe (PreviewV0_5Balanced) and contributes features
+//! f300..f371. Implementation is fused into the SIMD streaming loop
+//! via `streaming::process_scale_bands` and `process_strip_into_accum`;
+//! the standalone helpers below are kept for offline experimentation
+//! and for the legacy non-streaming code path.
 
 /// Choice of per-pixel info-content estimator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -426,10 +427,12 @@ impl WeightedPool {
     }
 }
 
-/// Per-channel IW-pooled SSIM block emitted in the V0_20a feature
-/// extension. Mirrors the 6 "masked" features in the existing extended
-/// profile but with the weight direction inverted (high info content
-/// gets MORE weight, not less).
+/// Per-channel IW-pooled SSIM block — 6 features at
+/// `f228+72*ch+0..f228+72*ch+5` for each scale (see `metric.rs`
+/// `FEATURES_PER_CHANNEL_*_MASKED`). Mirrors the 6 "masked" features
+/// in the existing extended profile but with the weight direction
+/// inverted (high info content gets MORE weight, not less). Shipped
+/// in the PreviewV0_5Balanced bake's f300..f371 input block.
 #[derive(Debug, Clone, Copy)]
 pub struct IwSsimFeatures {
     /// Weighted mean of per-pixel SSIM(src, dst) at this scale & channel.
@@ -469,8 +472,10 @@ impl IwSsimFeatures {
     /// `det_map` / `mse_map` are pre-computed per-pixel diffmaps from
     /// the basic feature pipeline.
     ///
-    /// Designed for the V0_20a sweep: take an existing reference +
+    /// Offline-experiment entry point: take an existing reference +
     /// diffmap, weight by reference info-content, output 6 features.
+    /// The streaming hot path fuses this into the SIMD inner loop —
+    /// see `streaming::process_strip_into_accum`.
     pub fn pool_from_maps(
         ref_plane: &[f32],
         width: usize,

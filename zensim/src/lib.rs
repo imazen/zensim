@@ -204,11 +204,11 @@ mod fused;
 mod iw_pool;
 pub mod mapping;
 mod metric;
-// MLP runtime is internal — V0_4 dispatch is exposed only through
-// `ZensimProfile::PreviewV0_3`. Consumers wanting to bake/load custom
-// MLP weights should depend on the `zenpredict` crate directly.
-// Gated behind `__experimental_versions` so default builds drop the
-// AGPL-licensed `zenpredict` runtime and the bundled trained `.bin`.
+// MLP runtime is internal — V0_4+ dispatch is exposed only through
+// `ZensimProfile::PreviewV0_*` variants. Consumers wanting to bake or
+// load custom MLP weights should depend on the `zenpredict` crate
+// directly. zenpredict is MIT/Apache-2.0 (matching zensim), so the
+// runtime is an unconditional dependency in 0.3.0+.
 pub(crate) mod mlp;
 mod pool;
 pub mod profile;
