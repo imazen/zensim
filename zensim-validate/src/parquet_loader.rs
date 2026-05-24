@@ -20,7 +20,8 @@ use std::fs::File;
 use std::path::PathBuf;
 
 use arrow::array::{
-    Array, Float32Array, Float64Array, Int32Array, Int64Array, UInt32Array, UInt64Array,
+    Array, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
+    UInt64Array,
 };
 use arrow::datatypes::DataType;
 use parquet::arrow::ProjectionMask;
@@ -317,4 +318,271 @@ pub fn load_optional_scalar_column(
     }
 
     Ok(Some(values))
+}
+
+/// KONJND-AGGREGATION-HEAD owned data pool (task #4, 2026-05-24).
+///
+/// Same row-major feature layout as [`OwnedLoadedGroup`] plus the
+/// per-ref grouping metadata needed by the aggregation training step:
+/// `ref_ranges[i] = (start_row, n_rows)` into `feature_rows` for ref i,
+/// `ref_pjnd_target[i]` is that ref's per-source-constant target.
+///
+/// Constructed by [`load_konjnd_aggregation_pool`]. The trainer wraps
+/// this in a `KonjndAggregationPool<'_>` (in `mlp_train.rs`) with
+/// borrowed slices for the training-step hot path.
+#[derive(Debug)]
+pub struct OwnedKonjndAggregationPool {
+    pub name: String,
+    /// Flat row storage, one entry per (ref, distortion-level) pair.
+    /// Length: `Σ ref_ranges[i].1`. Aligned with `ref_ranges`.
+    pub feature_rows: Vec<Vec<f64>>,
+    pub n_features: usize,
+    /// Per-ref slice into `feature_rows`: `(start_row, n_rows)`.
+    /// Length: n_refs.
+    pub ref_ranges: Vec<(usize, usize)>,
+    /// Per-ref pjnd_target (per-source-constant value). Length: n_refs.
+    pub ref_pjnd_target: Vec<f64>,
+    /// Per-ref training weight (defaults to 1.0). Length: n_refs.
+    pub ref_weight: Vec<f64>,
+}
+
+/// Load konjnd-dense into a per-source-grouped aggregation pool.
+///
+/// Requires the parquet to carry `ref_basename` (utf8) and
+/// `pjnd_target` (Float32/Float64) columns in addition to `f0..fN`.
+/// Rows with the same `ref_basename` are grouped together; the
+/// per-ref `pjnd_target` is taken from the first row in each group
+/// (and asserted to be uniform across the group, since canonical
+/// konjnd-dense always satisfies this — see
+/// `benchmarks/recovery_phase3b_falsification_2026-05-21.md`).
+///
+/// Output rows are concatenated in ref-sorted order so the
+/// per-ref ranges are contiguous and dense.
+///
+/// Errors:
+/// - missing `ref_basename` column → `"<path>: missing ref_basename column"`
+/// - missing `pjnd_target` column  → `"<path>: missing pjnd_target column"`
+/// - non-uniform `pjnd_target` within a ref → returns the offending ref.
+pub fn load_konjnd_aggregation_pool(
+    path: &PathBuf,
+    name: &str,
+) -> Result<OwnedKonjndAggregationPool, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let parquet_schema = builder.parquet_schema().clone();
+    let arrow_fields = schema.fields();
+    let n_arrow_cols = arrow_fields.len();
+
+    let ref_arrow_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "ref_basename")
+        .ok_or_else(|| format!("{path:?}: missing ref_basename column"))?;
+    let pjnd_arrow_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "pjnd_target")
+        .ok_or_else(|| format!("{path:?}: missing pjnd_target column"))?;
+    let f0_arrow_idx = arrow_fields
+        .iter()
+        .position(|f| f.name() == "f0")
+        .ok_or_else(|| format!("{path:?}: missing f0 column"))?;
+
+    let mut n_features = 0usize;
+    while f0_arrow_idx + n_features < n_arrow_cols {
+        let expected = format!("f{}", n_features);
+        if arrow_fields[f0_arrow_idx + n_features].name() != &expected {
+            break;
+        }
+        n_features += 1;
+    }
+    if n_features == 0 {
+        return Err(format!("{path:?}: no fN columns found"));
+    }
+
+    let mut wanted: Vec<usize> = Vec::with_capacity(n_features + 2);
+    wanted.push(ref_arrow_idx);
+    wanted.push(pjnd_arrow_idx);
+    for i in 0..n_features {
+        wanted.push(f0_arrow_idx + i);
+    }
+    let mask = ProjectionMask::leaves(&parquet_schema, wanted.iter().copied());
+
+    let reader = builder
+        .with_projection(mask)
+        .with_batch_size(16384)
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    let mut sorted_wanted = wanted.clone();
+    sorted_wanted.sort_unstable();
+    let proj_ref_idx = sorted_wanted
+        .iter()
+        .position(|&i| i == ref_arrow_idx)
+        .expect("ref idx must be in projection");
+    let proj_pjnd_idx = sorted_wanted
+        .iter()
+        .position(|&i| i == pjnd_arrow_idx)
+        .expect("pjnd idx must be in projection");
+    let proj_feature_indices: Vec<usize> = (0..n_features)
+        .map(|i| {
+            sorted_wanted
+                .iter()
+                .position(|&p| p == f0_arrow_idx + i)
+                .expect("feature idx must be in projection")
+        })
+        .collect();
+
+    // Flat per-row accumulators. After full scan we group by ref_basename
+    // and emit ref_ranges in sorted order.
+    let mut all_refs: Vec<String> = Vec::new();
+    let mut all_pjnd: Vec<f64> = Vec::new();
+    let mut all_rows: Vec<Vec<f64>> = Vec::new();
+
+    for batch_res in reader {
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+
+        let ref_col = batch.column(proj_ref_idx);
+        let ref_arr = ref_col
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| {
+                format!(
+                    "{path:?}: ref_basename column has unsupported dtype {:?} (need Utf8)",
+                    ref_col.data_type()
+                )
+            })?;
+        for i in 0..n_rows {
+            all_refs.push(ref_arr.value(i).to_string());
+        }
+
+        let pjnd_col = batch.column(proj_pjnd_idx);
+        match pjnd_col.data_type() {
+            DataType::Float64 => {
+                let a = pjnd_col.as_any().downcast_ref::<Float64Array>().unwrap();
+                all_pjnd.extend((0..n_rows).map(|i| a.value(i)));
+            }
+            DataType::Float32 => {
+                let a = pjnd_col.as_any().downcast_ref::<Float32Array>().unwrap();
+                all_pjnd.extend((0..n_rows).map(|i| a.value(i) as f64));
+            }
+            other => {
+                return Err(format!(
+                    "{path:?}: pjnd_target column has unsupported dtype {other:?} (need Float32/Float64)",
+                ));
+            }
+        }
+
+        // Per-batch feature transpose, same shape as load_parquet.
+        let mut per_col_f64: Vec<Vec<f64>> = Vec::with_capacity(n_features);
+        for &pi in &proj_feature_indices {
+            let col = batch.column(pi);
+            let v: Vec<f64> = match col.data_type() {
+                DataType::Float64 => {
+                    let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i)).collect()
+                }
+                DataType::Float32 => {
+                    let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::Int64 => {
+                    let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::Int32 => {
+                    let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::UInt64 => {
+                    let a = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                DataType::UInt32 => {
+                    let a = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                    (0..n_rows).map(|i| a.value(i) as f64).collect()
+                }
+                other => {
+                    return Err(format!(
+                        "{path:?}: feature column has unsupported dtype {other:?}",
+                    ));
+                }
+            };
+            per_col_f64.push(v);
+        }
+        for row_i in 0..n_rows {
+            let mut row = Vec::with_capacity(n_features);
+            for col in &per_col_f64 {
+                row.push(col[row_i]);
+            }
+            all_rows.push(row);
+        }
+    }
+
+    if all_rows.is_empty() {
+        return Err(format!("{path:?}: empty file / no rows"));
+    }
+    if all_refs.len() != all_rows.len() || all_pjnd.len() != all_rows.len() {
+        return Err(format!(
+            "{path:?}: column length mismatch — refs={} pjnd={} rows={}",
+            all_refs.len(),
+            all_pjnd.len(),
+            all_rows.len()
+        ));
+    }
+
+    // Group by ref_basename in sort order (deterministic across runs).
+    // Build per-ref index lists then concatenate rows in that order.
+    let mut sorted_indices: Vec<usize> = (0..all_rows.len()).collect();
+    sorted_indices.sort_by(|&a, &b| all_refs[a].cmp(&all_refs[b]));
+
+    let mut feature_rows: Vec<Vec<f64>> = Vec::with_capacity(all_rows.len());
+    let mut ref_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut ref_pjnd_target: Vec<f64> = Vec::new();
+    let mut cursor = 0usize;
+    let mut i = 0usize;
+    while i < sorted_indices.len() {
+        let ref_name = &all_refs[sorted_indices[i]];
+        let start = cursor;
+        let mut count = 0usize;
+        let group_pjnd = all_pjnd[sorted_indices[i]];
+        while i < sorted_indices.len() && all_refs[sorted_indices[i]] == *ref_name {
+            // Assert pjnd_target is uniform within the ref group.
+            let p = all_pjnd[sorted_indices[i]];
+            if (p - group_pjnd).abs() > 1e-9 {
+                return Err(format!(
+                    "{path:?}: non-uniform pjnd_target within ref {ref_name:?} ({group_pjnd} vs {p})",
+                ));
+            }
+            // Move the row into feature_rows. We mem::take to avoid clones.
+            let row = std::mem::take(&mut all_rows[sorted_indices[i]]);
+            feature_rows.push(row);
+            cursor += 1;
+            count += 1;
+            i += 1;
+        }
+        ref_ranges.push((start, count));
+        ref_pjnd_target.push(group_pjnd);
+    }
+
+    let ref_weight = vec![1.0_f64; ref_ranges.len()];
+
+    println!(
+        "  {name}: konjnd-aggregation loaded {} rows × {n_features} features grouped into {} refs from {path:?}",
+        feature_rows.len(),
+        ref_ranges.len()
+    );
+
+    Ok(OwnedKonjndAggregationPool {
+        name: name.to_string(),
+        feature_rows,
+        n_features,
+        ref_ranges,
+        ref_pjnd_target,
+        ref_weight,
+    })
 }

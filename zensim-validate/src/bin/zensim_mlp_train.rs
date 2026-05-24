@@ -793,6 +793,43 @@ struct Args {
     /// score=80). Only effective when `--pjnd-passthrough-weight > 0`.
     #[arg(long, default_value_t = 80.0)]
     pjnd_passthrough_target_score: f64,
+
+    /// KONJND-AGGREGATION-HEAD (2026-05-24, task #4) konjnd-dense
+    /// parquet path. Requires the parquet to carry `ref_basename`,
+    /// `pjnd_target`, and `f0..fN` columns — the canonical
+    /// `canonical-2026-05-21/train/konjnd-dense.parquet` does.
+    /// Loaded with per-ref grouping; the aggregation step samples K
+    /// refs per fire, S rows per ref, forwards K·S times, computes K
+    /// aggregate means, and applies MSE against the per-ref
+    /// pjnd_target. Empty = no aggregation pool. See
+    /// `docs/KONJND_AGGREGATION_HEAD_DESIGN_2026-05-24.md`.
+    #[arg(long)]
+    konjnd_aggregation_parquet: Option<PathBuf>,
+
+    /// KONJND-AGGREGATION-HEAD loss weight. Default `0.0` = off.
+    /// When `> 0`, the aggregation step fires per pair-step with
+    /// probability `--konjnd-aggregation-step-p`. Only wired on the
+    /// per-sample-α head. Structurally different from
+    /// `--pjnd-passthrough-weight`: regresses the pooled per-ref
+    /// mean against pjnd_target, not each row independently.
+    #[arg(long, default_value_t = 0.0)]
+    konjnd_aggregation_weight: f64,
+
+    /// KONJND-AGGREGATION-HEAD step probability. Default `0.30`.
+    /// Only effective when `--konjnd-aggregation-weight > 0`.
+    #[arg(long, default_value_t = 0.30)]
+    konjnd_aggregation_step_p: f64,
+
+    /// KONJND-AGGREGATION-HEAD rows-per-ref (S). Number of distortion
+    /// levels sampled per ref per aggregation step. Default `5`.
+    /// Total forwards per aggregation step = K·S.
+    #[arg(long, default_value_t = 5)]
+    konjnd_aggregation_samples_per_ref: usize,
+
+    /// KONJND-AGGREGATION-HEAD refs-per-step (K). Number of refs
+    /// picked per aggregation step. Default `8`.
+    #[arg(long, default_value_t = 8)]
+    konjnd_aggregation_refs_per_step: usize,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1796,6 +1833,10 @@ fn main() {
         pjnd_passthrough_weight: args.pjnd_passthrough_weight,
         pjnd_passthrough_step_p: args.pjnd_passthrough_step_p,
         pjnd_passthrough_target_score: args.pjnd_passthrough_target_score,
+        konjnd_aggregation_weight: args.konjnd_aggregation_weight,
+        konjnd_aggregation_step_p: args.konjnd_aggregation_step_p,
+        konjnd_aggregation_samples_per_ref: args.konjnd_aggregation_samples_per_ref,
+        konjnd_aggregation_refs_per_step: args.konjnd_aggregation_refs_per_step,
     };
 
     println!(

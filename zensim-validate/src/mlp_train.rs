@@ -634,6 +634,62 @@ pub struct MlpHyperparams {
     /// V10 PJND-anchored calibration (V10 maps PJND ssim2≈63 to
     /// score=80). Only effective when `pjnd_passthrough_weight > 0`.
     pub pjnd_passthrough_target_score: f64,
+
+    /// KONJND-AGGREGATION-HEAD (2026-05-24, task #4) — per-source
+    /// aggregation training-time loss for konjnd-dense.
+    ///
+    /// Structurally different from `pjnd_passthrough_weight`: rather
+    /// than regressing each row's prediction against a (per-row or
+    /// constant) target, pools predictions across a ref's distortion
+    /// levels BEFORE computing the loss:
+    ///
+    /// ```text
+    /// For each gradient step:
+    ///   Sample K refs from konjnd-dense pool.
+    ///   For each ref r:
+    ///     Sample S rows from r's distortion-level pool.
+    ///     Forward S × MLP passes → y_{r,1}..y_{r,S}.
+    ///     agg_r = (1/S) · Σ y_{r,i}
+    ///   Loss = w · Σ_r (agg_r − pjnd_target_r)²
+    ///   Backprop: ∂L/∂y_{r,i} = (2w/S) · (agg_r − pjnd_target_r)
+    /// ```
+    ///
+    /// Critical property: the within-ref residual `(agg − t)` is
+    /// non-zero in general, so gradient flows uniformly to all S rows
+    /// — fixing the zero-gradient pathology that pjnd_passthrough hit
+    /// at V11-D (per-pair MSE against per-source-constant target
+    /// produces no useful learning signal; recovery_phase3b root
+    /// cause).
+    ///
+    /// Runtime unchanged — this is purely a training-time augmentation.
+    /// The bake's network is a normal per-sample MLP; aggregation only
+    /// constrains the *mean* across the 20 distortion levels per ref.
+    /// No new bake metadata key.
+    ///
+    /// Default `0.0` = off. Only wired on the per-sample-α head.
+    /// Implementation gated on
+    /// [`Self::konjnd_aggregation_parquet`] being supplied.
+    /// See `docs/KONJND_AGGREGATION_HEAD_DESIGN_2026-05-24.md`.
+    pub konjnd_aggregation_weight: f64,
+
+    /// KONJND-AGGREGATION-HEAD step probability — every pair-step,
+    /// fire an aggregation step with this probability (alongside the
+    /// primary RankNet/MSE step). Default `0.30`. Only effective when
+    /// `konjnd_aggregation_weight > 0`.
+    pub konjnd_aggregation_step_p: f64,
+
+    /// KONJND-AGGREGATION-HEAD: number of rows to sample per ref per
+    /// aggregation step (the `S` parameter). The aggregate is the mean
+    /// over these S predictions; variance ≈ σ²(y_{r,*})/S. Default `5`.
+    /// Higher = better aggregate estimate but more compute per step.
+    /// Only effective when `konjnd_aggregation_weight > 0`.
+    pub konjnd_aggregation_samples_per_ref: usize,
+
+    /// KONJND-AGGREGATION-HEAD: number of refs to sample per
+    /// aggregation step (the `K` parameter). Total forwards per step =
+    /// K × S. Default `8`. Only effective when
+    /// `konjnd_aggregation_weight > 0`.
+    pub konjnd_aggregation_refs_per_step: usize,
 }
 
 impl Default for MlpHyperparams {
@@ -684,6 +740,10 @@ impl Default for MlpHyperparams {
             pjnd_passthrough_weight: 0.0,
             pjnd_passthrough_step_p: 0.30,
             pjnd_passthrough_target_score: 80.0,
+            konjnd_aggregation_weight: 0.0,
+            konjnd_aggregation_step_p: 0.30,
+            konjnd_aggregation_samples_per_ref: 5,
+            konjnd_aggregation_refs_per_step: 8,
         }
     }
 }
@@ -773,6 +833,46 @@ pub struct AnchorRows<'a> {
     /// score=63 at butter=1.5, etc.). When `None` or empty, the trainer
     /// falls back to `hyperparams.anchor_target_score` as in V4.
     pub target_scores: Option<&'a [f64]>,
+}
+
+/// KONJND-AGGREGATION-HEAD (2026-05-24, task #4) — per-source-grouped
+/// feature pool for the konjnd-dense aggregation training step.
+///
+/// Each ref carries N (typically 20) standardized feature rows + ONE
+/// per-ref scalar `pjnd_target`. The aggregation step samples K refs
+/// per fire, S rows per ref, forwards K·S times, computes K aggregate
+/// scalars (the mean per ref), and applies MSE against `pjnd_target`
+/// per ref. Backprop scales the residual `(agg − t)` by `(2w/S)`
+/// uniformly to all S rows of that ref before flowing through the
+/// existing per-sample-α head gradient plumbing.
+///
+/// Unlike [`AnchorRows`] (per-row MSE against a constant or per-row
+/// target), this struct's loss is computed on the *aggregate of S
+/// predictions per ref*. The within-ref gradient is non-zero in
+/// general — this is what fixes the per-pair-MSE zero-gradient
+/// pathology that pjnd_passthrough hit at V11-D.
+///
+/// Memory: `Vec<Vec<f64>>` of all standardized rows + per-ref slice
+/// indices. We keep the row-features layout to share the same feature
+/// scaler and SIMD-friendly contiguous representation as the primary
+/// stream; the per-ref grouping is expressed as `(start_row, n_rows)`
+/// in a sidecar table.
+#[derive(Debug)]
+pub struct KonjndAggregationPool<'a> {
+    pub name: String,
+    /// Flat row storage: one Vec<f64> per row, n_features long.
+    /// Equivalent to AnchorRows.features layout for SIMD-friendly access.
+    pub features: &'a [&'a [f64]],
+    /// Per-ref ranges into `features`: `(start_row, n_rows)` per ref.
+    /// `n_refs = ref_ranges.len()`. Sum of `n_rows` across all refs
+    /// equals `features.len()`.
+    pub ref_ranges: &'a [(usize, usize)],
+    /// Per-ref pjnd_target (the constant value shared across all rows
+    /// of that ref). `ref_pjnd_target.len() == ref_ranges.len()`.
+    pub ref_pjnd_target: &'a [f64],
+    /// Per-ref training weight (defaults to 1.0). Allows future
+    /// preferential ref sampling without changing the API.
+    pub ref_weight: &'a [f64],
 }
 
 /// Cross-codec equivalence pairs (2026-05-19, EXP-CROSS-CODEC-METRIC).
