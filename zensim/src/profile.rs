@@ -836,6 +836,51 @@ impl ZensimProfile {
         Self::PreviewV0_5TunerV4
     }
 
+    /// **Canonical codec-target metric.** The stable, version-independent
+    /// alias for "the bake all zen codecs train and target to." Wraps
+    /// whichever Tuner-trail variant is currently the production ship —
+    /// at present [`Self::PreviewV0_5TunerV4`] (i.e. `tuner_v4()`).
+    ///
+    /// Codec crates (`zenjpeg`, `zenwebp`, `zenjxl`, `zenavif`, ...)
+    /// should construct their `Zensim` instance via
+    /// `Zensim::new(ZensimProfile::codec_target())` so that bake rotations
+    /// (Tuner v5, v6, ...) flow through automatically without per-codec
+    /// version edits.
+    ///
+    /// **Use cases this is purpose-built for:**
+    /// - **Quality-target dial** — `Zensim::compute(source, distorted)`
+    ///   inside an iterative encode-rescore-adjust outer loop
+    ///   (see `zenwebp::EncodeConfig::target_zensim` for the reference
+    ///   pattern; pattern is ~100 LOC per codec).
+    /// - **Picker training** — train cross-codec pickers against this
+    ///   bake's per-codec score parquets at
+    ///   `/mnt/v/zen/picker-training/2026-05-19/butter/*.parquet`.
+    ///
+    /// **What this is NOT for:**
+    /// - General-purpose ranking across heterogeneous distortion
+    ///   families (KADID/TID/KonJND SROCC is poor by design — those
+    ///   constraints were relaxed to gain monotonic dial behavior).
+    ///   For general ranking, use [`Self::balanced_v3`].
+    /// - In-encoder per-block RDO distortion term. zensim is per-image
+    ///   (~14 ms at 1024² × 5–20k RDO calls = 70–280 s/image, infeasible).
+    ///   See `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md`.
+    ///
+    /// **Measured cross-codec consistency** (`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`):
+    /// at matched-perceptual-quality anchors, median |Δ| = 1.18 score
+    /// units, p90 = 3.58 across {JPEG, WebP, AVIF, JXL}.
+    /// In the score 60–90 band (where codec consumers operate), median
+    /// |Δ| drops to 0.6–1.5 — tight enough for production dial use.
+    /// **Known gap**: scores below 55 are clamped flat (low-q dial
+    /// dead zone); production code targeting `score < 55` should
+    /// expect non-monotonic codec output until task #6 (Tuner v11)
+    /// ships.
+    ///
+    /// See [`docs/CODEC_TARGET_METRIC.md`] in the zensim repo for the
+    /// integration guide.
+    pub const fn codec_target() -> Self {
+        Self::PreviewV0_5TunerV4
+    }
+
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
