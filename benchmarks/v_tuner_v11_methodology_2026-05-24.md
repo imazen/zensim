@@ -137,7 +137,57 @@ Driver script: `scripts/v_next/run_tuner_v11_seed.sh <seed>`.
 Training binary: target/release/zensim_mlp_train at commit TBD
 (post-task #4 ebf5f2e, includes the konjnd-aggregation flags).
 
-## Results (5-seed CI)
+## Iteration history
+
+### Attempt 1: konjnd_aggregation_weight=0.3 — FALSIFIED on seed 1
+
+First pass with the original brief recipe (w=0.3, step_p=0.30). Seed
+1 finished at 03:30 UTC; the 5-seed CI was killed at this point
+because the result was decisive.
+
+| Corpus | v_tuner_v10 | v11_w0.3_s1 | Δ |
+|---|--:|--:|--:|
+| CID22 | 0.8540 | **0.5075** | **−0.347** |
+| KADID | 0.4831 | 0.3260 | −0.157 |
+| TID | 0.6636 | 0.3506 | −0.313 |
+| **KonJND** | 0.2317 | **0.7579** | **+0.526** |
+| AIC-3 | 0.7865 | 0.6637 | −0.123 |
+| AIC-4 | 0.9240 | 0.9070 | −0.017 |
+| Monotonicity | 96.44% | 92.89% | −0.036 |
+
+**The aggregation head WORKS mechanically** — KonJND lifted +0.53,
+breaking the V11-D zero-gradient pathology. But w=0.3 is too high;
+the aggregation step's per-fire gradient overwhelms the per-pair
+rank signal, collapsing CID22 by 0.34. Net effect: rank corpora
+ruined for a KonJND win.
+
+The α(x) gate also collapses to 0 within 10 epochs (already noted),
+meaning the network reduces to pool-head only — consistent with the
+aggregation gradient flowing primarily through the pool reducer.
+
+Evidence preserved at
+`/mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24/tuner_v11_w0.3_s1_*`.
+
+### Attempt 2: konjnd_aggregation_weight=0.05 — IN FLIGHT
+
+Recipe deltas vs attempt 1:
+- `--konjnd-aggregation-weight 0.05` (was 0.3, 6× reduction)
+- `--konjnd-aggregation-step-p 0.10` (was 0.30, 3× reduction)
+- Effective gradient rate = 0.005 vs 0.09 = ~5.5% of original
+
+Hypothesis: at ~5% of the original effective rate, the aggregation
+gradient escapes the V11-D zero-gradient pathology (KonJND > v10's
+0.23) but doesn't overwhelm the rank gradient (CID22/KADID/TID
+stay near v10 baseline). All other hyperparams identical.
+
+If this also fails:
+- KonJND lift but rank collapse → drop further to w=0.01.
+- No KonJND lift → bump to w=0.10 or 0.15.
+- Both fail → aggregation step needs a different mechanism (e.g.,
+  fire only every N pair-steps, or normalize the gradient by the
+  rank-step gradient magnitude).
+
+## Results (5-seed CI, w=0.05 step_p=0.10)
 
 | Seed | CID22 | KADID | TID | KonJND | AIC-3 | AIC-4 |
 |---|--:|--:|--:|--:|--:|--:|
