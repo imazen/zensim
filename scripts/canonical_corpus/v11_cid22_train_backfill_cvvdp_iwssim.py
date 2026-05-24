@@ -18,9 +18,15 @@ Outputs:
   - canonical-2026-05-21/train/cid22_train.parquet  (in-place update — backed up to .bak first)
   - _MANIFEST.json updated with new sha256 + canonical_metadata note
 
-Join key: (ref_basename, codec, q) — the composite from cid22_train_pairs.tsv.
-The parquet's `ref_basename` column is actually a composite `"<basename>|<codec>|<q>"`
-per extract_features_372col --corpus cid22_train; we split on '|' to join.
+Join strategy: row-by-row alignment between cid22_train_pairs.tsv and
+the parquet. The original v11_extract_cid22_train.py loaded
+`cid22_train_features.csv` (composite "<ref>|<codec>|<q>" key), joined
+ssim2 scores by that composite, then STRIPPED ref_basename to just
+"<ref>" for the canonical schema. Pairs.tsv preserves the original
+(ref, codec, q) per row in the same order. Provided no rows were
+dropped in the ssim2 join (verified by row count: 17,611 in both
+parquet and pairs.tsv), row i in the parquet corresponds to row i
+in pairs.tsv.
 
 Mix-target columns rebuilt (consistent with canonical-2026-05-18 anchors):
   - cvvdp_log_norm   = clamp((cvvdp + 2.1188) / 15.93, 0, 1) · 100
@@ -51,6 +57,7 @@ TRAIN_PARQUET = CANONICAL / "train" / "cid22_train.parquet"
 MANIFEST_PATH = CANONICAL / "_MANIFEST.json"
 WORKSPACE = CANONICAL / "_workspace"
 PAIRS_TSV = WORKSPACE / "cid22_train_pairs.tsv"
+FEATURES_CSV = WORKSPACE / "cid22_train_features.csv"
 CVVDP_TSV = WORKSPACE / "cid22_train_cvvdp.tsv"
 IWSSIM_TSV = WORKSPACE / "cid22_train_iwssim.tsv"
 
@@ -84,23 +91,62 @@ def load_tsv_join_keyed(path: Path, score_col: str) -> dict:
     (basename, codec, q) → score."""
     out = {}
     n = 0
+    skipped = 0
     with open(path) as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
-            basename = row["ref_basename"]
-            codec = row["codec"]
-            q = row["q"]
+            basename = row.get("ref_basename")
+            codec = row.get("codec")
+            q = row.get("q")
+            raw = row.get(score_col)
+            if raw is None or raw == "" or basename is None:
+                skipped += 1
+                continue
             try:
-                score = float(row[score_col])
-            except (KeyError, ValueError) as e:
-                raise RuntimeError(
-                    f"{path}: row missing/malformed {score_col!r}: {row} ({e})"
-                )
+                score = float(raw)
+            except ValueError:
+                skipped += 1
+                continue
             if not np.isfinite(score):
-                continue  # silently drop NaN/Inf — these become nulls in the merge
+                skipped += 1
+                continue
             out[(basename, codec, q)] = score
             n += 1
-    print(f"  loaded {n:,} rows from {path.name} (col={score_col})")
+    print(f"  loaded {n:,} rows from {path.name} (col={score_col}, skipped {skipped})")
+    return out
+
+
+def load_features_csv_composite_keys(path: Path) -> list:
+    """Return ordered list of (basename, codec, q) tuples from
+    cid22_train_features.csv's first column. The features.csv is what
+    fed v11_extract_cid22_train.py — its row order matches the parquet
+    1:1, and each row's column 0 is the composite "<basename>|<codec>|<q>"
+    key (per extract_features_372col --corpus cid22_train, see
+    `zensim-bench/examples/extract_features_372col.rs:load_cid22_train_tsv`).
+
+    Streams only column 0 — the file has 17,611 rows × 374 cols and is
+    ~100 MB. csv-module DictReader without `restkey`/`restval` would
+    materialize every column."""
+    out = []
+    with open(path) as f:
+        header = f.readline()
+        if not header.startswith("ref_basename,"):
+            raise RuntimeError(
+                f"{path}: unexpected header {header!r:.80}"
+            )
+        for line in f:
+            # Composite is column 0, terminated by ','. Avoid splitting
+            # the rest of the row.
+            comma = line.find(",")
+            if comma < 0:
+                raise RuntimeError(f"{path}: row missing comma: {line!r:.80}")
+            composite = line[:comma]
+            parts = composite.split("|")
+            if len(parts) != 3:
+                raise RuntimeError(
+                    f"{path}: row composite key has != 3 parts: {composite!r}"
+                )
+            out.append((parts[0], parts[1], parts[2]))
     return out
 
 
@@ -123,19 +169,34 @@ def main() -> int:
     n_cols = tbl_in.num_columns
     print(f"      {n_rows:,} rows × {n_cols} cols")
 
-    composite_arr = tbl_in.column("ref_basename").to_pylist()
-    # ref_basename has composite "<basename>|<codec>|<q>" — split.
-    split_keys = []
-    bad = 0
-    for s in composite_arr:
-        parts = s.split("|")
-        if len(parts) != 3:
-            bad += 1
-            split_keys.append(None)
-        else:
-            split_keys.append((parts[0], parts[1], parts[2]))
-    if bad:
-        print(f"  WARNING: {bad} composite keys with split errors")
+    print(f"      loading features.csv composite keys for row-order alignment …")
+    ordered_keys = load_features_csv_composite_keys(FEATURES_CSV)
+    print(f"      features.csv has {len(ordered_keys):,} rows")
+    if len(ordered_keys) != n_rows:
+        print(
+            f"ERROR: parquet has {n_rows:,} rows but features.csv has "
+            f"{len(ordered_keys):,}; row-order join is unsafe. Aborting.",
+            file=sys.stderr,
+        )
+        return 2
+    # Sanity-check: every parquet ref_basename should match its
+    # features.csv basename (column 1 of the triple).
+    pq_basenames = tbl_in.column("ref_basename").to_pylist()
+    mismatches = 0
+    for i, (pb, (kb, _, _)) in enumerate(zip(pq_basenames, ordered_keys)):
+        if pb != kb:
+            mismatches += 1
+            if mismatches <= 3:
+                print(f"      MISMATCH row {i}: parquet={pb!r} features={kb!r}")
+    if mismatches:
+        print(
+            f"ERROR: {mismatches} parquet/features.csv basename mismatches — "
+            f"row order does not align. Aborting.",
+            file=sys.stderr,
+        )
+        return 3
+    print(f"      row-order alignment verified ({n_rows:,} rows match)")
+    split_keys = ordered_keys
 
     print(f"[2/5] loading cvvdp + iwssim score TSVs …")
     cvvdp_map = load_tsv_join_keyed(CVVDP_TSV, "cvvdp_imazen_v0_0_1")
