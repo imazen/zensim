@@ -168,19 +168,65 @@ aggregation gradient flowing primarily through the pool reducer.
 Evidence preserved at
 `/mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24/tuner_v11_w0.3_s1_*`.
 
-### Attempt 2: konjnd_aggregation_weight=0.05 — IN FLIGHT
+### Attempt 2: konjnd_aggregation_weight=0.05 — FALSIFIED on seed 1
 
-Recipe deltas vs attempt 1:
-- `--konjnd-aggregation-weight 0.05` (was 0.3, 6× reduction)
-- `--konjnd-aggregation-step-p 0.10` (was 0.30, 3× reduction)
-- Effective gradient rate = 0.005 vs 0.09 = ~5.5% of original
+Seed 1 finished at 03:46 UTC. Pipeline killed after seed 1 because
+the failure was in the opposite direction from attempt 1:
 
-Hypothesis: at ~5% of the original effective rate, the aggregation
-gradient escapes the V11-D zero-gradient pathology (KonJND > v10's
-0.23) but doesn't overwhelm the rank gradient (CID22/KADID/TID
-stay near v10 baseline). All other hyperparams identical.
+| Corpus | v10 | attempt1 (w=0.3) | attempt2 (w=0.05) | attempt2 Δ vs v10 |
+|---|--:|--:|--:|--:|
+| CID22 | 0.854 | 0.508 | **0.742** | −0.112 |
+| KADID | 0.483 | 0.326 | **0.598** | **+0.115** |
+| TID | 0.664 | 0.351 | 0.610 | −0.054 |
+| **KonJND** | 0.232 | 0.758 | **0.066** | **−0.166** |
+| AIC-3 | 0.787 | 0.664 | 0.793 | +0.006 |
+| Monotonicity | 96.4% | 92.9% | 95.1% | −1.3% |
 
-### Attempt 3 plan: konjnd-dense as both training group AND aggregation pool
+Pattern: at w=0.05 the aggregation gradient is too weak to bend the
+network toward PJND structure (KonJND collapses BELOW v10's 0.23!)
+but strong enough to disrupt the rank head (CID22 drops 0.11). The
+α gate ends up dynamic [0, 1] with μ=0.78 — neither extreme. KADID
+unexpectedly LIFTS by 0.115 — the aggregation may be acting as a
+regularizer on synthetic-distortion ranking.
+
+**The (w=0.05, w=0.3) sweep maps both ends of the failure mode:**
+- w=0.3 → α=0 collapse, KonJND wins +0.53, rank corpora collapse
+- w=0.05 → α dynamic, KonJND collapses MORE, rank moderate degradation
+
+There's no obvious stable middle along the (weight, step_p) axis at
+these settings. The structural issue is that konjnd-dense is not in
+the regular training group — so the aggregation pool is the network's
+ONLY exposure to konjnd-dense features. That's qualitatively different
+from how v10 sees safesyn (feature-driven per-pair MSE).
+
+Evidence preserved at
+`tuner_v11_w0.05_s1_evidence.bin` + verdict + qsweep.
+
+### Attempt 3: konjnd-dense as BOTH training group AND aggregation — IN FLIGHT
+
+Recipe deltas vs attempt 2:
+- `--group konjnd_dense:konjnd-dense.parquet:0.3:0.0` (NEW — regular
+  per-pair MSE against mix_cv40_iw60)
+- `--konjnd-aggregation-weight 0.1 --konjnd-aggregation-step-p 0.10`
+  (moderate aggregation aux loss)
+- All other hyperparams identical to attempts 1+2.
+
+Pipeline started 03:50 UTC. Early signal (epoch 0):
+- val=0.9196 (above attempts 1+2 at epoch 0)
+- konjnd_dense train SROCC = 0.9925 already — the per-pair MSE on
+  mix_cv40_iw60 IS giving feature-driven gradient (no zero-gradient
+  pathology). This is the structural fix attempts 1+2 were missing.
+
+Expected outcome (3 hypotheses):
+- (A) The per-pair konjnd training group lifts KonJND val to ≥ 0.6
+  (between v10's 0.23 and attempt 1's 0.76), CID22 stays near v10's
+  0.85. Ship-grade. → 5-seed CI on this recipe.
+- (B) KonJND moderate (0.4-0.6), CID22 slight drop (0.80-0.85).
+  Partial pass — drop konjnd train_w to 0.1 + bump agg weight.
+- (C) Same failure pattern as attempts 1/2. → Mechanism change
+  required (drop per-sample-α, use pool_head directly, OR add
+  gradient normalization to aggregation step).
+
 
 If attempt 2 fails (likely if α=1 stays pinned — early signal at
 epoch 50 shows α=1.000 across the network, indicating the
