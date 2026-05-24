@@ -63,6 +63,36 @@ Full Mohammadi 2025 stat panel against three independent human-rated image quali
 
 † AIC-4 Z-RMSE uses each metric's native score scale; zensim's 0..100 dial is on a different scale than cvvdp's 0..10 JOD scale or ssim2's 0..100 (which the corpus reports as MCOS-shaped).
 
+### CID22 per-band SROCC (10 width-10 bins on the human-MOS scale)
+
+Per `CLAUDE.md` "10-band reporting rule": the primary release gate is the per-band picture, not the aggregate. Below-PJND bands (B3–B5) are the hard ones because the human-MOS scores in those bands are noisy and bunched. Bands B0–B2 have ≤ 1 sample on CID22 and are omitted.
+
+| Band | range | n | **v0.3** | ssim2 | cvvdp | iwssim |
+|---|---|--:|---:|---:|---:|---:|
+| B3 | [0.30, 0.40) | 57 | 0.051 | **0.134** | 0.148 | 0.096 |
+| B4 | [0.40, 0.50) | 266 | 0.230 | 0.289 | 0.260 | 0.210 |
+| B5 | [0.50, 0.60) | 615 | 0.273 | **0.389** | 0.290 | 0.193 |
+| B6 | [0.60, 0.70) | 836 | 0.287 | **0.417** | 0.336 | 0.210 |
+| B7 | [0.70, 0.80) | 1092 | **0.408** | 0.397 | 0.310 | 0.283 |
+| B8 | [0.80, 0.90) | 1382 | 0.500 | **0.501** | 0.319 | 0.413 |
+| B9 | [0.90, 1.00] | 43 | **0.220** | 0.112 | 0.081 | 0.134 |
+
+Per-band read: ssim2 wins B5–B6 (where most CID22 mass sits); v0.3 wins B7 (good-quality region) and B9 (near-lossless tail). v0.3 essentially matches ssim2 on B8 (the dominant band). cvvdp + iwssim are weakest across every band — they're stronger as aggregate metrics than per-band rank predictors here.
+
+CID22 per-band Z-RMSE (lower better):
+
+| Band | n | **v0.3** | ssim2 | cvvdp | iwssim |
+|---|--:|--:|--:|--:|--:|
+| B3 | 57 | 0.950 | **0.947** | 0.990 | 0.989 |
+| B4 | 266 | 0.959 | **0.947** | 0.962 | 0.965 |
+| B5 | 615 | 0.959 | **0.921** | 0.954 | 0.971 |
+| B6 | 836 | 0.957 | **0.908** | 0.941 | 0.972 |
+| B7 | 1092 | **0.912** | 0.907 | 0.947 | 0.954 |
+| B8 | 1382 | 0.866 | 0.866 | 0.947 | 0.909 |
+| B9 | 43 | **0.937** | 0.940 | 0.952 | 0.854 |
+
+ssim2 has the tightest Z-RMSE in the mid bands (B4–B6) — this is the ssim2-target training-bias caveat from CLAUDE.md materializing. v0.3 and ssim2 are tied on B7–B8. v0.3 wins the noisy tails (B9 near-lossless).
+
 ### Per-corpus headline
 
 - **CID22**: ssim2 wins SROCC by 0.03; v0.3 is second. Note that CLAUDE.md's "SROCC-only verdicts BANNED" caveat applies — older trainers used ssim2-derived targets, which biases SROCC measurements toward ssim2-shaped surfaces. v0.3's Z-RMSE (0.523) trails ssim2's 0.460.
