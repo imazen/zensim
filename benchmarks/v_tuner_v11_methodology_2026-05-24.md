@@ -263,15 +263,48 @@ Trajectory shows monotonic KonJND lift via aggregation weight
 (a3 w=0.1 → KonJND 0.11, a4 w=0.3 → KonJND 0.62). The next
 iteration (attempt 5, w=0.5) should push KonJND higher.
 
-### Attempt 5: a4 + aggregation pushed to w=0.5 — IN FLIGHT
+### Attempt 5: a4 + aggregation w=0.5 — TRAJECTORY REVERSES; a4 is the local optimum
 
-Hypothesis: aggregation weight monotonically lifts KonJND while
-CID22 cost stays bounded by per-pair konjnd-dense training group.
-Push w from 0.3 to 0.5 (1.67× a4's strength). Test whether
-KonJND ≥ 0.85 is reachable without rank corpora collapsing.
+Seed 1 finished at 04:32 UTC. **The trajectory is non-monotonic** —
+KonJND peaks at w=0.3 (a4) and DROPS at w=0.5:
 
-Pipeline started 04:17 UTC. Bake lands ~04:32 UTC. Watcher
-`buq6s56g9` fires on completion.
+| Corpus | v10 | a3 w=0.1 | **a4 w=0.3** | a5 w=0.5 |
+|---|--:|--:|--:|--:|
+| CID22 | 0.854 | 0.814 | **0.769** | 0.707 |
+| KADID | 0.483 | 0.586 | 0.561 | **0.752** |
+| TID | 0.664 | 0.688 | 0.614 | **0.751** |
+| KonJND | 0.232 | 0.113 | **0.615** | 0.568 |
+| AIC-3 | 0.787 | 0.797 | 0.771 | 0.714 |
+| Mono | 0.964 | 0.960 | **0.938** | 0.940 |
+
+Interpretation: at w=0.5 the aggregation gradient over-pulls
+predictions toward per-source means, which adds noise to BOTH the
+per-pair feature learning (CID22/AIC-3 drop) AND the per-ref
+calibration (KonJND drops because per-ref signal becomes noisy).
+KADID and TID lift because their distortion families happen to
+align with smoothed predictions.
+
+**a4 (w=0.3 step_p=0.30) is the sweet spot.** Committing to this
+recipe for the 5-seed CI to get a median estimate.
+
+### Attempt 6 (a4-5seed-CI): 5 seeds of a4 settings — IN FLIGHT
+
+Pipeline started 04:35 UTC. ~70 min total wall.
+
+If median holds at a4's seed-1 numbers (KonJND 0.62, CID22 0.77):
+- Criterion 1 (KonJND ≥ 0.85): FAIL by 0.23 (but +0.39 vs v10)
+- Criterion 2 (CID22 ≥ 0.864): FAIL by 0.10
+- Criterion 3 (Mono ≥ 92.78%): PASS at 0.94
+- Criterion 4 (cross-codec): TBD post-spline calibration
+- Criterion 5 (score 0-55 dial): TBD
+
+Decision after 5-seed CI:
+- If median KonJND ≥ 0.70 AND CID22 ≥ 0.80: **ship as
+  PreviewV0_5TunerV5** with documented trade (codec-target gets
+  +0.39 KonJND lift, costs −0.07 CID22). This is the structural
+  fix recovery has been chasing since V11-D.
+- If median KonJND < 0.55 OR CID22 < 0.75: don't ship; try
+  w=0.4 step_p=0.20 (between a4 and a5).
 
 Recipe deltas vs attempt 2:
 - `--group konjnd_dense:konjnd-dense.parquet:0.3:0.0` (NEW — regular
