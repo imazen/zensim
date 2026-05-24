@@ -56,45 +56,61 @@ Canonical-2026-05-21 manifest sha256 updated (54.04 MB, sha256
 `523a96c0cd93…`). Enables Tuner v11 retrain with mix_cv40_iw60 target
 on the new corpus.
 
-### D. Tuner v11 retrain — IN FLIGHT (attempt 2 of N)
+### D. Tuner v11 retrain — COMPLETE (no ship; v10 stays canonical)
 
-The 5-criterion ship gate (per
-`benchmarks/v_tuner_v11_methodology_2026-05-24.md`):
-1. KonJND val SROCC ≥ 0.85 (v10 floor 0.2317)
-2. CID22 SROCC ≥ 0.864
-3. Monotonicity ≥ 92.78%
-4. Cross-codec p50 |Δ| ≤ 1.0 in score 60-90
-5. Score 0-55 dial recovers from v10 floor pathology
+5 attempts run, all FALSIFIED on the 5-criterion ship gate.
+Architectural breakthrough but trade-off doesn't clear gate.
 
-**Attempt 1 (`konjnd_aggregation_weight=0.3`) FALSIFIED 03:30 UTC.**
-Seed 1 result: KonJND +0.53 (0.23→0.76, aggregation head WORKS) but
-CID22 -0.35 (0.85→0.51). Weight too high — aggregation gradient
-overwhelms rank signal, α gate collapses to 0 (pool-only). Evidence
-preserved at `tuner_v11_w0.3_s1_evidence.bin`.
+| Attempt | Recipe | CID22 | KonJND | Verdict |
+|---|---|--:|--:|---|
+| v10 baseline | (canonical ship) | 0.854 | **0.232** | reference |
+| a1 (w=0.3, 2 groups) | agg w=0.3 step_p=0.30, no konjnd training group | 0.508 | **0.758** | α=0 collapse — rank corpora destroyed |
+| a2 (w=0.05) | 5.5 % effective rate | 0.742 | 0.066 | too weak — KonJND worse than v10 |
+| a3 (3 groups, w=0.1) | konjnd_dense as training group + light agg | **0.814** | 0.113 | rank-stable but no KonJND |
+| **a4 (3 groups, w=0.3)** | konjnd_dense as training group + a1 agg | 0.769 | **0.615** | BEST balance; spline-calibrated still fails gate |
+| a5 (3 groups, w=0.5) | strong agg pressure | 0.707 | 0.568 | over-aggregation — non-monotonic |
 
-**Attempt 2 (`w=0.05 step_p=0.10`, ~5.5% of original effective rate)
-in flight.** Pipeline running in background as task `bch7n3mzp`.
-Early signal: α(x) dynamic [0, 1] with μ=0.84 — network finds
-per-sample blend. Final verdict landing ~04:00 UTC.
+**Architectural breakthrough proven**: per-source aggregation head
+DOES escape V11-D zero-gradient pathology (a4 KonJND +0.38 over
+v10). The mechanism works mechanically. But the trade-off curve
+peaks at a4 — KonJND 0.62 vs ship-gate 0.85, CID22 0.77 vs gate
+0.86. 3 of 5 criteria fail.
 
-**Attempt 3 plan** (if attempt 2 also fails): konjnd-dense as BOTH
-training group (--target-column mix_cv40_iw60, train_w=0.3) AND
-aggregation pool (--konjnd-aggregation-weight 0.1). Script at
-`scripts/v_next/run_tuner_v11_attempt3_seed.sh`. Hypothesis: the
-per-pair MSE on konjnd-dense (which v10 never trained on) is the
-missing signal — aggregation alone gives only per-ref hints.
+**v10 (PreviewV0_5TunerV4) remains the canonical codec-target.**
+`ZensimProfile::codec_target()` unchanged.
+
+What's preserved for the next iteration:
+- a4 best bake: `tuner_v11_a4_s1.bin` + spline-calibrated variant
+- All 5 attempt-evidence bakes + verdicts + qsweep reports at
+  `/mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24/`
+- CID22-train substrate (17,611 pairs) in canonical-2026-05-21
+- All scripts: run_tuner_v11_{seed,attempt3_seed}.sh,
+  tuner_v11_hparam_sweep.sh, calibrate_v9_spline.py, etc.
+
+Recovery phase 4 hypotheses (next session):
+1. **Per-pair PJND-anchored data** (the missing per-pair signal).
+   Either derive PJND-per-pair from konjnd-dense or train on
+   KonJND-1k val (compromises holdout).
+2. **Pool-head-only architecture** (drop --per-sample-α). Tests
+   whether the α gate is the noise source.
+3. **Multi-target supervision** (pjnd_target + mix_cv40_iw60
+   simultaneously, with trainer flag `--per-row-multi-target`).
+   Closest to what attempt 4 was trying to do via separate
+   training group + aggregation; might be more efficient as a
+   single multi-target loss.
+4. **vast.ai trainer infra build** — every iteration is ~14 min
+   CPU on the local 7950X. vast.ai parallel-across-seeds would
+   make the inner-loop ~14 min wall instead of 70 min.
 
 ### E. Hparam sweep tool
 
 `scripts/v_next/tuner_v11_hparam_sweep.sh` maps the
-(weight, step_p) surface across 6 cells in ~90 min. Use this if
-attempts 2 and 3 both fail to find the right balance.
+(weight, step_p) surface across 6 cells in ~90 min. Not run in
+this session — superseded by the iterative attempts.
 
 ## Outstanding tasks (per TaskList)
 
-- **#6 in progress**: Tuner v11 retrain. Attempt 2 in flight; attempt
-  3 queued if needed.
-- All other tasks completed (#1–#5, #7).
+ALL TASKS COMPLETE: #1, #2, #3, #4, #5, #6, #7.
 
 ## What's PROHIBITED (per CLAUDE.md sharpened 2026-05-24)
 
