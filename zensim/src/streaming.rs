@@ -1848,7 +1848,7 @@ fn process_scale_bands_into_accum(
     let strip_outer_y0 = plane_offset;
     let strip_outer_y1 = plane_offset + height;
 
-    let process_band = |band_idx: usize| {
+    let process_band = |bufs: &mut ScaleBuffers, band_idx: usize| {
         // Band in OUTER (full-image) coords:
         let outer_band_first_y = (band_idx * strips_per_band * STRIP_INNER).min(layout_h);
         let outer_band_end_y = (((band_idx + 1) * strips_per_band) * STRIP_INNER).min(layout_h);
@@ -1868,7 +1868,11 @@ fn process_scale_bands_into_accum(
         let mut band_dm = diffmap_weights.map(|_| vec![0.0f32; band_rows * width]);
 
         let mut accum = ScaleAccumulators::new();
-        let mut bufs = ScaleBuffers::new(max_strip_n);
+        // bufs is provided externally (per-rayon-worker via map_init);
+        // first use grows to max_strip_n; subsequent uses reuse the
+        // existing allocation. Eliminates the per-band ScaleBuffers::new
+        // memset overhead (~9 % of wall time at 1080p pre-opt).
+        bufs.ensure_capacity(max_strip_n);
 
         // We iterate through the band's source-row inner positions in
         // OUTER coordinates, advancing by STRIP_INNER. Each inner chunk
@@ -1962,7 +1966,7 @@ fn process_scale_bands_into_accum(
                     c,
                     need_ssim,
                     need_edge,
-                    &mut bufs,
+                    bufs,
                     &mut accum,
                     dm_info,
                 );
@@ -1976,18 +1980,28 @@ fn process_scale_bands_into_accum(
 
     #[allow(clippy::redundant_closure)]
     let band_results: Vec<_> = {
+        // Per-rayon-worker scratch — first band on each worker grows
+        // ScaleBuffers to max_strip_n; subsequent bands reuse with
+        // zero memset cost. Eliminates the ~9 % wall-time spent in
+        // __memset_avx512_unaligned_erms on 1080p strip path
+        // (post-AVX-512 profile, this was the largest non-SIMD hotspot).
+        let init_bufs = || ScaleBuffers::empty();
+
         #[cfg(feature = "threads")]
         if run_parallel {
+            use rayon::prelude::*;
             (0..num_bands)
                 .into_par_iter()
-                .map(|i| process_band(i))
+                .map_init(init_bufs, |bufs, i| process_band(bufs, i))
                 .collect()
         } else {
-            (0..num_bands).map(|i| process_band(i)).collect()
+            let mut bufs = init_bufs();
+            (0..num_bands).map(|i| process_band(&mut bufs, i)).collect()
         }
         #[cfg(not(feature = "threads"))]
         {
-            (0..num_bands).map(|i| process_band(i)).collect()
+            let mut bufs = init_bufs();
+            (0..num_bands).map(|i| process_band(&mut bufs, i)).collect()
         }
     };
 
