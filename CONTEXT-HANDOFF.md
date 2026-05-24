@@ -8,7 +8,9 @@ and [CLAUDE.md](CLAUDE.md).
 
 `ZensimProfile::codec_target()` is the **stable alias every zen
 codec uses** for the quality dial + picker training. Currently
-routes to `PreviewV0_5TunerV4` (`v_tuner_v10_2026-05-20.bin`).
+routes to **`PreviewV0_5TunerV5` (`v_tuner_v11_2026-05-24.bin`,
+shipped 2026-05-24 PM)** — rotated from TunerV4 after recovery
+phase 4 fixed the 0-55 score-floor pathology.
 See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md)
 for the integration guide.
 

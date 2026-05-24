@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Shipped (2026-05-24 PM, Tuner v5 — codec_target rotation)
+
+- **`ZensimProfile::PreviewV0_5TunerV5`** ships as the new
+  `ZensimProfile::codec_target()` (bake: `v_tuner_v11_2026-05-24.bin`,
+  md5 `8adc2c4858cbf3c0b0aa02494e85bdd8`, 197 KB).
+- **Recovery phase 4** fixes v10's 0-55 score-floor pathology.
+  v10 was clamped at mean ~55 for butter ≥ 3; v5 produces
+  differentiated scores across the full 0-100 range
+  (mean=37 at butter=3.5, mean=37 at butter=6.8). p5 score
+  drops from 48 → 28; JND now lands at score 60 bit-exact (was
+  79 on v10).
+- 5-seed CI median (s2 of 5; range 0.855-0.869) vs v10:
+  - CID22 SROCC: 0.860 vs 0.854 (+0.006)
+  - KonJND val SROCC: 0.285 vs 0.232 (+0.053)
+  - AIC-4 SROCC: 0.929 vs 0.924 (+0.005)
+  - AIC-3 SROCC: 0.776 vs 0.787 (−0.011)
+  - Monotonicity: 0.948 vs 0.964 (−0.016; above 0.93 gate)
+  - Cross-codec p50 |Δ|: 1.37 vs 1.18; but normalized as % of
+    dial span, **v5 is TIGHTER (2.36 % vs v10's 2.63 %)** —
+    same per-unit accuracy + 30 % more usable dial range.
+- Recipe deltas vs v_tuner_v10:
+  - 5 training groups (was 1): safesyn:1.0 + cid22_train:0.5 +
+    kadid:0.5 + tid:0.5 + konjnd_dense:0.3
+  - `tanh_output_head_scale = 30.0` (was 20.0)
+  - `konjnd_aggregation_weight = 0.05 step_p = 0.10` (new task #4
+    aggregation head)
+- v10 (`PreviewV0_5TunerV4`) remains accessible by explicit name
+  for reproducibility per the versioning policy in
+  `docs/CODEC_TARGET_METRIC.md`.
+- Methodology + 5-seed CI: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
+
 ### Added (2026-05-24, codec-target metric designation + Tuner v11 substrate)
 
 - **`ZensimProfile::codec_target()`** — stable alias pointing at the

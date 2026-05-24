@@ -190,7 +190,9 @@ Reports Standard / Extended-only / IW-only / Both per-pair compute cost. Combine
 ### Codec-target metric (canonical, 2026-05-24)
 
 `ZensimProfile::codec_target()` → currently
-`PreviewV0_5TunerV4` (`v_tuner_v10_2026-05-20.bin`). This is the
+`PreviewV0_5TunerV5` (`v_tuner_v11_2026-05-24.bin`,
+rotated from TunerV4/v_tuner_v10 on 2026-05-24 PM after recovery
+phase 4 fixed the 0-55 score-floor pathology). This is the
 stable alias every zen codec calls when training / dialing /
 picking. See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md)
 for the integration guide and
@@ -205,7 +207,8 @@ for reproducibility.
 
 | Trail | Profile | Bake | Audience |
 |---|---|---|---|
-| **Tuner** (codec dial) | `PreviewV0_5TunerV4` | `v_tuner_v10_2026-05-20.bin` | Codec target / picker training / quality dial. Monotonic q-sweep, JND=60, JOD=30, AIC-4 0.9240. |
+| **Tuner v5** (codec dial — current ship) | `PreviewV0_5TunerV5` | `v_tuner_v11_2026-05-24.bin` | Codec target. Multi-dataset trainer (5 groups) + wider tanh. Full 0-100 dial coverage (p5=28 vs v10's p5=48), JND@60 bit-exact, CID22=0.860, AIC-4=0.929. |
+| Tuner v4 (codec dial — prior ship, retained) | `PreviewV0_5TunerV4` | `v_tuner_v10_2026-05-20.bin` | Single-group trainer, 0-55 dial floor pathology. CID22=0.854, AIC-4=0.924. Accessible by explicit name for reproducibility. |
 | **Balanced** (general perceptual) | `PreviewV0_5BalancedV3` | `v_balanced_v3_2026-05-20.bin` | KADID/TID/KonJND rank-best (0.967/0.971/0.893). CID22 0.832. |
 | **Compression** (codec output rank) | `PreviewV0_5CompressionV3` | `v_compression_v3_2026-05-20.bin` | CID22+AIC-3 rank-best (0.864/0.818). KADID/TID drop 0.03-0.08. |
 

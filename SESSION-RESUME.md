@@ -18,8 +18,10 @@ that isn't blocked.
 
 ### What's the canonical codec-target metric
 
-`ZensimProfile::codec_target()` → currently `PreviewV0_5TunerV4`
-(`zensim/weights/v_tuner_v10_2026-05-20.bin`). This is the stable
+`ZensimProfile::codec_target()` → currently `PreviewV0_5TunerV5`
+(`zensim/weights/v_tuner_v11_2026-05-24.bin`, rotated 2026-05-24 PM
+from TunerV4 after recovery phase 4 fixed the 0-55 score-floor).
+This is the stable
 alias every zen codec uses for the quality dial + picker training.
 See `docs/CODEC_TARGET_METRIC.md` for the integration guide and
 `benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md` for the
@@ -29,7 +31,8 @@ is a flat dead zone pending Tuner v11).
 
 ### Three-trail production ships (all 2026-05-20)
 
-- **Tuner** (codec dial): `PreviewV0_5TunerV4` (v_tuner_v10)
+- **Tuner v5** (codec dial — current ship): `PreviewV0_5TunerV5` (v_tuner_v11_2026-05-24)
+- Tuner v4 (prior, retained by explicit name): `PreviewV0_5TunerV4` (v_tuner_v10)
 - **Balanced** (general perceptual): `PreviewV0_5BalancedV3` (v_balanced_v3)
 - **Compression** (codec output rank): `PreviewV0_5CompressionV3` (v_compression_v3)
 

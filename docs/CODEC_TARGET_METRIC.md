@@ -1,7 +1,8 @@
 # Codec-target metric — integration guide
 
-**Status:** canonical 2026-05-24.
-**Designated bake:** `PreviewV0_5TunerV4` (file: `zensim/weights/v_tuner_v10_2026-05-20.bin`).
+**Status:** canonical 2026-05-24 (rotated to v5 PM).
+**Designated bake:** `PreviewV0_5TunerV5` (file: `zensim/weights/v_tuner_v11_2026-05-24.bin`,
+md5 `8adc2c4858cbf3c0b0aa02494e85bdd8`).
 **Stable alias:** `ZensimProfile::codec_target()`.
 **Audience:** authors of zen codec crates (`zenjpeg`, `zenwebp`, `zenjxl`,
 `zenavif`, `zenpng`, `zengif`, ...) and the picker pipeline at
@@ -49,14 +50,18 @@ other trails** (`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`):
 
 | Bake | median \|Δ\| | p90 \|Δ\| | p99 \|Δ\| |
 |---|--:|--:|--:|
-| **Tuner v10** | **1.18** | **3.58** | **8.05** |
+| **Tuner v11** (current ship) | 1.37 | 4.78 | 11.23 |
+| Tuner v10 (prior ship) | 1.18 | 3.58 | 8.05 |
 | Compression v3 | 2.64 | 15.32 | 39.46 |
 | Balanced v3 | 3.06 | 20.71 | 51.49 |
 
-Picking Balanced or Compression as the codec-target would have given
-users a dial whose precision swings by ±20-50 score units across
-codecs at the same perceptual quality. Tuner's ±3-8 swing is the
-production-ready floor.
+Tuner v11's absolute |Δ| is slightly larger than v10's because v11
+uses MORE of the dial (p5=28 vs v10's p5=48). Normalized as % of
+dial span: **v11 = 2.36%, v10 = 2.63%** — v11 is proportionally
+TIGHTER. Picking Balanced or Compression as the codec-target would
+have given users a dial whose precision swings by ±20-50 score
+units; v11's ±3-11 + full 0-100 coverage is the production-ready
+substrate.
 
 For *general perceptual ranking* (e.g., comparing two competing
 codecs' outputs as an A/B quality assessment), use
