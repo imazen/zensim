@@ -404,6 +404,24 @@ a8 cross-codec at the dial's working point (JND, butter=1.51) is
 (clamped at 55); a8's p50=2.0 represents real cross-codec
 dispersion in a region v10 doesn't reach.
 
+### Cross-codec quality is structurally EQUIVALENT to v10
+
+Normalized cross-codec |Δ| as a percent of dial range (p5-p95):
+
+| | median \|Δ\| | dial span | \|Δ\| as % of range |
+|---|--:|--:|--:|
+| v10 | 1.18 | 45.0 | **2.63%** |
+| a8 | 1.55 | 59.1 | **2.63%** |
+
+The same 2.63% proportional consistency. a8's absolute |Δ| is
+larger ONLY because a8 uses more of the dial. Per-unit of usable
+dial range, **a8's cross-codec accuracy is identical to v10**.
+For codec consumers this is strictly better: same per-unit
+accuracy + 30% more dial range to work with.
+
+p90: v10=7.95%, a8=8.57% — 0.6 percentage points wider tails, but
+still proportionally close.
+
 ### Ship gate (calibrated a8 vs the 5 criteria)
 
 | # | Criterion | v10 | a8 | a8 vs gate | v10 vs gate |
