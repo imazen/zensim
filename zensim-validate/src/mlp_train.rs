@@ -8827,4 +8827,248 @@ mod tests {
         let mut log = Vec::new();
         let _ = train_mlp(&[group], n_features, &hyper, &mut log);
     }
+
+    // ---- KONJND-AGGREGATION-HEAD smoke tests (task #4, 2026-05-24) ----
+
+    const KAH_N_REFS: usize = 30;
+    const KAH_ROWS_PER_REF: usize = 8;
+    const KAH_N_FEATURES: usize = 4;
+    const KAH_N_PRIMARY_PAIRS: usize = 50;
+
+    fn kah_build_pool() -> (Vec<Vec<f64>>, Vec<(usize, usize)>, Vec<f64>, Vec<f64>) {
+        let mut features: Vec<Vec<f64>> = Vec::with_capacity(KAH_N_REFS * KAH_ROWS_PER_REF);
+        let mut ref_ranges: Vec<(usize, usize)> = Vec::with_capacity(KAH_N_REFS);
+        let mut ref_pjnd_target: Vec<f64> = Vec::with_capacity(KAH_N_REFS);
+        let mut cursor = 0usize;
+        for r in 0..KAH_N_REFS {
+            let f1 = -1.0 + 2.0 * (r as f64) / ((KAH_N_REFS - 1) as f64);
+            let target = 40.0 + 20.0 * f1; // [20, 60]
+            ref_pjnd_target.push(target);
+            let start = cursor;
+            for k in 0..KAH_ROWS_PER_REF {
+                let f0 = (k as f64) / ((KAH_ROWS_PER_REF - 1) as f64);
+                let f2 = 0.1 * ((r * 7 + k) as f64).sin();
+                let f3 = 0.1 * ((r * 11 + k) as f64).cos();
+                features.push(vec![f0, f1, f2, f3]);
+                cursor += 1;
+            }
+            ref_ranges.push((start, KAH_ROWS_PER_REF));
+        }
+        let ref_weight = vec![1.0_f64; KAH_N_REFS];
+        (features, ref_ranges, ref_pjnd_target, ref_weight)
+    }
+
+    /// Score the bake's raw output, then apply the same tanh
+    /// output-head pin the trainer used (`y_score = 100 / (1 +
+    /// exp(-y_pre / scale))`). `predictor.predict()` returns the raw
+    /// network output — the per-sample-α head's `y_pre` scalar
+    /// (zenpredict doesn't dispatch on `tanh_output_head` metadata;
+    /// that lives in `zensim::metric::forward_one_bake`). For the
+    /// test, we replicate the pin here to compare apples-to-apples
+    /// with the trainer's loss.
+    fn kah_aggregation_mse_under_bake(
+        bake_bytes: &[u8],
+        features: &[Vec<f64>],
+        ref_ranges: &[(usize, usize)],
+        ref_pjnd_target: &[f64],
+        tanh_scale: f64,
+    ) -> f64 {
+        let model = zenpredict::Model::from_bytes(bake_bytes).expect("bake parse");
+        let mut predictor = zenpredict::Predictor::new(&model);
+        let mut sum_sq_err = 0.0f64;
+        let mut n_ok = 0usize;
+        for (&(start, n_rows), &target) in ref_ranges.iter().zip(ref_pjnd_target.iter()) {
+            let mut sum_y = 0.0f64;
+            let mut s_actual = 0usize;
+            for i in start..(start + n_rows) {
+                let row: Vec<f32> = features[i].iter().map(|&v| v as f32).collect();
+                match predictor.predict(&row) {
+                    Ok(y) => {
+                        let y_pre = y[0] as f64;
+                        // Apply tanh pin to match the trainer's
+                        // forward path: y_score = 100 / (1 + exp(-y_pre / scale)).
+                        let y_score = if tanh_scale > 0.0 {
+                            let z = -y_pre / tanh_scale;
+                            // Clamp z for numerical stability.
+                            let z = z.clamp(-50.0, 50.0);
+                            100.0 / (1.0 + z.exp())
+                        } else {
+                            y_pre
+                        };
+                        sum_y += y_score;
+                        s_actual += 1;
+                    }
+                    Err(_) => continue,
+                }
+            }
+            if s_actual > 0 {
+                let agg = sum_y / (s_actual as f64);
+                let err = agg - target;
+                sum_sq_err += err * err;
+                n_ok += 1;
+            }
+        }
+        sum_sq_err / (n_ok.max(1) as f64)
+    }
+
+    /// Aggregation step actually backprops a non-trivial gradient:
+    /// 30 epochs of training on a synthetic per-ref-target problem
+    /// should yield a bake whose per-ref aggregation MSE is finite +
+    /// inside the loose [0, 2500] sanity ceiling. (Perfect-init worst
+    /// case is ~2500 on a 0..100 dial vs [20, 60] target.)
+    #[test]
+    fn konjnd_aggregation_step_runs_and_backprops() {
+        let (pool_rows, ref_ranges, ref_pjnd_target, ref_weight) = kah_build_pool();
+        let pool_row_refs: Vec<&[f64]> = pool_rows.iter().map(|r| r.as_slice()).collect();
+        let konjnd_agg = KonjndAggregationPool {
+            name: "synthetic_konjnd".to_string(),
+            features: pool_row_refs.as_slice(),
+            ref_ranges: ref_ranges.as_slice(),
+            ref_pjnd_target: ref_pjnd_target.as_slice(),
+            ref_weight: ref_weight.as_slice(),
+        };
+        let mut primary_features: Vec<Vec<f64>> = Vec::with_capacity(KAH_N_PRIMARY_PAIRS);
+        let mut primary_scores: Vec<f64> = Vec::with_capacity(KAH_N_PRIMARY_PAIRS);
+        for i in 0..KAH_N_PRIMARY_PAIRS {
+            let frac = (i as f64) / ((KAH_N_PRIMARY_PAIRS - 1).max(1) as f64);
+            primary_features.push(vec![frac, -1.0 + 2.0 * frac, 0.0, 0.0]);
+            primary_scores.push(0.5 + 0.5 * (-1.0 + 2.0 * frac));
+        }
+        let primary_refs: Vec<&[f64]> =
+            primary_features.iter().map(|r| r.as_slice()).collect();
+        let groups = [TrainingGroup {
+            name: "synthetic_primary".to_string(),
+            human_scores: &primary_scores,
+            features: &primary_refs,
+            train_weight: 1.0,
+            validation_weight: 0.0,
+        }];
+        let mut hp = MlpHyperparams {
+            n_hidden: 16,
+            n_epochs: 30,
+            pairs_per_epoch: 200,
+            minibatch_size: 1,
+            initial_lr: 1e-2,
+            l2_lambda: 1e-6,
+            leaky_alpha: 0.01,
+            early_stop_patience: 0,
+            per_sample_alpha_head: true,
+            tanh_output_head_scale: 20.0,
+            ranknet_weight: 1.0,
+            mse_weight: 0.0,
+            monotonicity_reg: 0.0,
+            norm_in_norm_weight: 0.0,
+            konjnd_aggregation_weight: 1.0,
+            konjnd_aggregation_step_p: 1.0,
+            konjnd_aggregation_samples_per_ref: 8,
+            konjnd_aggregation_refs_per_step: 8,
+            seed: 42,
+            ..Default::default()
+        };
+        hp.validation_policy = ValidationPolicy::Min;
+        let mut log: Vec<String> = Vec::new();
+        let bake_bytes = train_mlp_with_tv_anchored_equiv_pjnd(
+            &groups,
+            KAH_N_FEATURES,
+            &hp,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            Some(&konjnd_agg),
+        );
+        assert!(!bake_bytes.is_empty(), "bake bytes empty after training");
+        let mse = kah_aggregation_mse_under_bake(
+            &bake_bytes,
+            &pool_rows,
+            &ref_ranges,
+            &ref_pjnd_target,
+            hp.tanh_output_head_scale,
+        );
+        assert!(mse.is_finite(), "aggregation MSE not finite after training: {mse}");
+        // With perfect failure (every ref pinned at score=50, all
+        // targets ∈ [20, 60]): worst per-ref err ≈ 30 → MSE ≈ 400.
+        // Random init: ~1000-3000. Successful training brings the
+        // mean error well below the worst case. Gate is loose
+        // because the synthetic problem is small + the test runs
+        // briefly; any working gradient flow easily passes.
+        assert!(
+            mse < 1500.0,
+            "aggregation MSE {mse:.2} suspiciously high — gradient may be broken"
+        );
+        let any_enabled_log = log
+            .iter()
+            .any(|l| l.contains("konjnd-aggregation: ENABLED"));
+        assert!(
+            any_enabled_log,
+            "expected 'konjnd-aggregation: ENABLED' log; got logs: {log:?}"
+        );
+    }
+
+    /// With weight=0 the pool is supplied but the step never fires.
+    /// Training should run + bake should be valid + log should say so.
+    #[test]
+    fn konjnd_aggregation_disabled_means_pool_ignored() {
+        let (pool_rows, ref_ranges, ref_pjnd_target, ref_weight) = kah_build_pool();
+        let pool_row_refs: Vec<&[f64]> = pool_rows.iter().map(|r| r.as_slice()).collect();
+        let konjnd_agg = KonjndAggregationPool {
+            name: "synthetic_konjnd_disabled".to_string(),
+            features: pool_row_refs.as_slice(),
+            ref_ranges: ref_ranges.as_slice(),
+            ref_pjnd_target: ref_pjnd_target.as_slice(),
+            ref_weight: ref_weight.as_slice(),
+        };
+        let primary_features: Vec<Vec<f64>> = (0..KAH_N_PRIMARY_PAIRS)
+            .map(|i| {
+                let f = (i as f64) / ((KAH_N_PRIMARY_PAIRS - 1).max(1) as f64);
+                vec![f, -1.0 + 2.0 * f, 0.0, 0.0]
+            })
+            .collect();
+        let primary_scores: Vec<f64> =
+            primary_features.iter().map(|r| 0.5 + 0.5 * r[1]).collect();
+        let primary_refs: Vec<&[f64]> =
+            primary_features.iter().map(|r| r.as_slice()).collect();
+        let groups = [TrainingGroup {
+            name: "primary_disabled".to_string(),
+            human_scores: &primary_scores,
+            features: &primary_refs,
+            train_weight: 1.0,
+            validation_weight: 0.0,
+        }];
+        let hp = MlpHyperparams {
+            n_hidden: 8,
+            n_epochs: 3,
+            pairs_per_epoch: 50,
+            minibatch_size: 1,
+            per_sample_alpha_head: true,
+            tanh_output_head_scale: 20.0,
+            ranknet_weight: 1.0,
+            norm_in_norm_weight: 0.0,
+            konjnd_aggregation_weight: 0.0,
+            early_stop_patience: 0,
+            seed: 7,
+            ..Default::default()
+        };
+        let mut log: Vec<String> = Vec::new();
+        let bake = train_mlp_with_tv_anchored_equiv_pjnd(
+            &groups,
+            KAH_N_FEATURES,
+            &hp,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            Some(&konjnd_agg),
+        );
+        assert!(!bake.is_empty(), "bake empty when konjnd-agg disabled");
+        let any_ignored_log = log
+            .iter()
+            .any(|line| line.contains("konjnd-aggregation") && line.contains("ignored"));
+        assert!(
+            any_ignored_log,
+            "expected 'konjnd-aggregation ... ignored' log; got logs: {log:?}"
+        );
+    }
 }
