@@ -188,6 +188,70 @@ pub(crate) fn make_positive_xyb(x: &mut [f32], y: &mut [f32], b: &mut [f32]) {
     );
 }
 
+/// Strided variant of [`srgb_to_positive_xyb_planar_into`].
+///
+/// Convert N rows of `width`-pixel sRGB input — supplied as an iterator of
+/// per-row `&[[u8; 3]]` slices — into tight planar XYB output (`width * N`
+/// elements each, all rows contiguous). The per-row slices may come from any
+/// strided source (e.g. an `ImageSource`'s `row_bytes` view): the kernel reads
+/// only the first `width` elements of each row, so source row padding is
+/// ignored for free.
+///
+/// When the source is already tightly packed the caller can still prefer
+/// [`srgb_to_positive_xyb_planar_into`] — a single SIMD invocation across the
+/// whole buffer avoids the per-row dispatch (which is small, but not zero:
+/// each row pays the splat/setup at the top of the inner `_v4`/`_v3` kernel).
+pub fn srgb_to_positive_xyb_planar_rows<'a, I>(
+    rows: I,
+    width: usize,
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) where
+    I: IntoIterator<Item = &'a [[u8; 3]]>,
+{
+    let mut offset = 0;
+    for row in rows {
+        let row = &row[..width];
+        srgb_to_positive_xyb_planar_into(
+            row,
+            &mut x_out[offset..offset + width],
+            &mut y_out[offset..offset + width],
+            &mut b_out[offset..offset + width],
+        );
+        offset += width;
+    }
+    debug_assert_eq!(offset, x_out.len());
+}
+
+/// Strided variant of [`linear_to_positive_xyb_planar_into`].
+///
+/// Same row-iterator contract as [`srgb_to_positive_xyb_planar_rows`], but
+/// the per-row input is already linear-light f32 (e.g. RGBA un-premultiplied
+/// or wide-gamut converted upstream).
+pub fn linear_to_positive_xyb_planar_rows<'a, I>(
+    rows: I,
+    width: usize,
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) where
+    I: IntoIterator<Item = &'a [[f32; 3]]>,
+{
+    let mut offset = 0;
+    for row in rows {
+        let row = &row[..width];
+        linear_to_positive_xyb_planar_into(
+            row,
+            &mut x_out[offset..offset + width],
+            &mut y_out[offset..offset + width],
+            &mut b_out[offset..offset + width],
+        );
+        offset += width;
+    }
+    debug_assert_eq!(offset, x_out.len());
+}
+
 // --- SIMD implementations ---
 
 /// AVX-512 fused sRGB → XYB + make_positive: 16 pixels at a time.
