@@ -2,6 +2,61 @@
 
 ## [Unreleased]
 
+### Added (2026-05-24, codec-target metric designation + Tuner v11 substrate)
+
+- **`ZensimProfile::codec_target()`** — stable alias pointing at the
+  current canonical codec-target bake. zen codec crates (zenjpeg,
+  zenwebp, zenjxl, zenavif, ...) should construct their `Zensim`
+  instance via this alias for the quality-target outer loop +
+  picker training. Currently routes to `PreviewV0_5TunerV4` (the
+  V_tuner_v10 ship). When future Tuner rotations land (v5, v6, ...),
+  flipping the alias body is the only zensim-side change required.
+  See `docs/CODEC_TARGET_METRIC.md` for the integration guide.
+  (commit 5ca977c)
+- **Per-source aggregation head** for konjnd-dense in the
+  zensim-validate trainer (task #4, Phase 1-3 commits d1ac861 →
+  a08151d → ebf5f2e). Trainer flags:
+  `--konjnd-aggregation-{parquet,weight,step-p,samples-per-ref,refs-per-step}`.
+  Mechanism: sample K refs × S rows per fire, forward K·S times,
+  compute K per-ref aggregate means, MSE against per-ref pjnd_target,
+  backprop with `(2w/S)·residual` per row. Fixes the V11-D zero-
+  gradient pathology that capped konjnd training-weight at 0.02.
+  RUNTIME UNCHANGED — this is purely a training-time augmentation;
+  no zensim-side dispatch or bake metadata. 2 new tests in
+  `zensim-validate/src/mlp_train.rs::tests` validate gradient flow
+  on a synthetic 30-ref pool.
+- **CVVDP + IW-SSIM backfill** on the canonical cid22-train parquet
+  (task #7, 17,611 pairs × 372 features × 201 non-validation refs).
+  cvvdp_score + iwssim columns now populated alongside the existing
+  ssim2_gpu; mix_cv40_iw60 / mix_target derived per safesyn anchor
+  constants. Enables Tuner v11 to train against the same mix target
+  as the current ships. canonical-2026-05-21 manifest sha256 updated.
+
+### Measurements (2026-05-24)
+
+- **Cross-codec consistency baseline** for V_tuner_v10
+  (`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`):
+  median |Δ| = 1.18 score units across 68,788 matched-anchor pairs,
+  p90 = 3.58, p99 = 8.05. In the score 60-90 band median |Δ|
+  drops to 0.6-1.5 — production-ready for codec dial use. Known
+  gap: scores below 55 are clamped flat (low-q dial dead zone)
+  pending the Tuner v11 retrain.
+
+### Docs (2026-05-24)
+
+- `docs/CODEC_TARGET_METRIC.md` — codec-author integration guide
+  for the three Pattern A/B/C use cases.
+- `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md` — in-encoder RDO loss
+  (Pattern C) is infeasible at codec-RDO cadence with the current
+  per-image zensim; three deferred paths documented (differentiable
+  end-to-end, fast proxy net, or skip and use output-only zensim).
+  Recommendation: skip — every production codec already does this.
+- `docs/KONJND_AGGREGATION_HEAD_DESIGN_2026-05-24.md` — task #4
+  design doc, written before implementation.
+- `benchmarks/v_tuner_v11_methodology_2026-05-24.md` — task #6 ship
+  methodology + 5-criterion gate. SKELETON; fills in once 5-seed CI
+  completes.
+
 ### Fixed (2026-05-22, numeric robustness vs GPU)
 
 - Defensive `.max(0.0)` clamp before every `.powf(0.25) / .sqrt() /
