@@ -187,6 +187,30 @@ Reports Standard / Extended-only / IW-only / Both per-pair compute cost. Combine
 
 ## Bakes inventory
 
+### Codec-target metric (canonical, 2026-05-24)
+
+`ZensimProfile::codec_target()` → currently
+`PreviewV0_5TunerV4` (`v_tuner_v10_2026-05-20.bin`). This is the
+stable alias every zen codec calls when training / dialing /
+picking. See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md)
+for the integration guide and
+[`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`](benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md)
+for measured cross-codec consistency (p50 |Δ| = 1.18 overall,
+0.6–1.5 in score 60–90 band; score 0–55 is a flat dead zone
+pending Tuner v11). Codec target is **rotated** by edit to
+`profile.rs::codec_target()`; old variants stay accessible by name
+for reproducibility.
+
+### Three-trail production ships (2026-05-20)
+
+| Trail | Profile | Bake | Audience |
+|---|---|---|---|
+| **Tuner** (codec dial) | `PreviewV0_5TunerV4` | `v_tuner_v10_2026-05-20.bin` | Codec target / picker training / quality dial. Monotonic q-sweep, JND=60, JOD=30, AIC-4 0.9240. |
+| **Balanced** (general perceptual) | `PreviewV0_5BalancedV3` | `v_balanced_v3_2026-05-20.bin` | KADID/TID/KonJND rank-best (0.967/0.971/0.893). CID22 0.832. |
+| **Compression** (codec output rank) | `PreviewV0_5CompressionV3` | `v_compression_v3_2026-05-20.bin` | CID22+AIC-3 rank-best (0.864/0.818). KADID/TID drop 0.03-0.08. |
+
+### Legacy ships (still in profile.rs, not the canonical codec-target)
+
 | Bake | Path | Status | Notes |
 |---|---|---|---|
 | **PreviewV0_3 (V_18 ship)** | `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin` | LIVE | 3-way concat, h=128, V_16 + cycle-14 components. 228-input ZNPR v3 I8. CID22 SROCC 0.8933 (note: inflated by ssim2-target training bias per CLAUDE.md "SROCC-only verdicts BANNED"). |
