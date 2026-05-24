@@ -143,7 +143,7 @@ pub fn srgb_to_positive_xyb_planar_into(
 ) {
     incant!(
         srgb_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
-        [v4, v3, neon, wasm128, scalar]
+        [v4x, v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -190,6 +190,180 @@ pub fn srgb_to_xyb_planar_into(
 #[arcane]
 fn srgb_to_positive_xyb_planar_inner_v4(
     token: archmage::X64V4Token,
+    pixels: &[[u8; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    let m00 = f32x16::splat(token, K_M00);
+    let m01 = f32x16::splat(token, K_M01);
+    let m02 = f32x16::splat(token, K_M02);
+    let m10 = f32x16::splat(token, K_M10);
+    let m11 = f32x16::splat(token, K_M11);
+    let m12 = f32x16::splat(token, K_M12);
+    let m20 = f32x16::splat(token, K_M20);
+    let m21 = f32x16::splat(token, K_M21);
+    let m22 = f32x16::splat(token, K_M22);
+    let bias = f32x16::splat(token, K_B0);
+    let zero = f32x16::zero(token);
+    let ab = f32x16::splat(token, absorbance_bias);
+    let half = f32x16::splat(token, 0.5);
+    let fourteen = f32x16::splat(token, 14.0);
+    let x_bias = f32x16::splat(token, 0.42);
+    let y_bias = f32x16::splat(token, 0.01);
+    let b_bias = f32x16::splat(token, 0.55);
+
+    let n = pixels.len();
+    let chunks = n / 16;
+
+    for chunk in 0..chunks {
+        let base = chunk * 16;
+
+        let mut r_arr = [0.0f32; 16];
+        let mut g_arr = [0.0f32; 16];
+        let mut b_arr = [0.0f32; 16];
+        for i in 0..16 {
+            let p = pixels[base + i];
+            r_arr[i] = srgb_u8_to_linear(p[0]);
+            g_arr[i] = srgb_u8_to_linear(p[1]);
+            b_arr[i] = srgb_u8_to_linear(p[2]);
+        }
+
+        let r = f32x16::from_array(token, r_arr);
+        let g = f32x16::from_array(token, g_arr);
+        let b = f32x16::from_array(token, b_arr);
+
+        let mixed0 = m00
+            .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
+            .max(zero);
+        let mixed1 = m10
+            .mul_add(r, m11.mul_add(g, m12.mul_add(b, bias)))
+            .max(zero);
+        let mixed2 = m20
+            .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
+            .max(zero);
+
+        // SIMD cube root (~15 bits, single Halley iteration; safe because
+        // mixed >= K_B0 ≈ 0.0038 — no zeros, denormals, NaN, or infinities).
+        let t0 = mixed0.cbrt_midp();
+        let t1 = mixed1.cbrt_midp();
+        let t2 = mixed2.cbrt_midp();
+
+        let c0 = t0 + ab;
+        let c1 = t1 + ab;
+
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+
+        let x_pos = x.mul_add(fourteen, x_bias);
+        let y_pos = y + y_bias;
+        let b_pos = (t2 - y) + b_bias;
+
+        x_out[base..base + 16].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 16].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 16].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Remainder with AVX2 (f32x8)
+    let v3 = token.v3();
+    let absorbance_bias_neg = absorbance_bias;
+    let ab8 = f32x8::splat(v3, absorbance_bias);
+    let half8 = f32x8::splat(v3, 0.5);
+    let zero8 = f32x8::zero(v3);
+    let m00_8 = f32x8::splat(v3, K_M00);
+    let m01_8 = f32x8::splat(v3, K_M01);
+    let m02_8 = f32x8::splat(v3, K_M02);
+    let m10_8 = f32x8::splat(v3, K_M10);
+    let m11_8 = f32x8::splat(v3, K_M11);
+    let m12_8 = f32x8::splat(v3, K_M12);
+    let m20_8 = f32x8::splat(v3, K_M20);
+    let m21_8 = f32x8::splat(v3, K_M21);
+    let m22_8 = f32x8::splat(v3, K_M22);
+    let bias8 = f32x8::splat(v3, K_B0);
+    let fourteen8 = f32x8::splat(v3, 14.0);
+    let x_bias8 = f32x8::splat(v3, 0.42);
+    let y_bias8 = f32x8::splat(v3, 0.01);
+    let b_bias8 = f32x8::splat(v3, 0.55);
+
+    let rem_start = chunks * 16;
+    let rem_chunks = (n - rem_start) / 8;
+    for chunk in 0..rem_chunks {
+        let base = rem_start + chunk * 8;
+        let mut r_arr = [0.0f32; 8];
+        let mut g_arr = [0.0f32; 8];
+        let mut b_arr = [0.0f32; 8];
+        for i in 0..8 {
+            let p = pixels[base + i];
+            r_arr[i] = srgb_u8_to_linear(p[0]);
+            g_arr[i] = srgb_u8_to_linear(p[1]);
+            b_arr[i] = srgb_u8_to_linear(p[2]);
+        }
+        let r = f32x8::from_array(v3, r_arr);
+        let g = f32x8::from_array(v3, g_arr);
+        let b = f32x8::from_array(v3, b_arr);
+
+        let mixed0 = m00_8
+            .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed1 = m10_8
+            .mul_add(r, m11_8.mul_add(g, m12_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed2 = m20_8
+            .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
+            .max(zero8);
+
+        let t0 = mixed0.cbrt_midp();
+        let t1 = mixed1.cbrt_midp();
+        let t2 = mixed2.cbrt_midp();
+
+        let c0 = t0 + ab8;
+        let c1 = t1 + ab8;
+        let x = half8 * (c0 - c1);
+        let y = half8 * (c0 + c1);
+        let x_pos = x.mul_add(fourteen8, x_bias8);
+        let y_pos = y + y_bias8;
+        let b_pos = (t2 - y) + b_bias8;
+
+        x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 8].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 8].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Scalar remainder
+    for i in (rem_start + rem_chunks * 8)..n {
+        let p = pixels[i];
+        let r = srgb_u8_to_linear(p[0]);
+        let g = srgb_u8_to_linear(p[1]);
+        let b = srgb_u8_to_linear(p[2]);
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn srgb_to_positive_xyb_planar_inner_v4x(
+    token: archmage::X64V4xToken,
     pixels: &[[u8; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
@@ -800,7 +974,7 @@ pub fn linear_to_positive_xyb_planar_into(
 ) {
     incant!(
         linear_to_positive_xyb_planar_inner(pixels, x_out, y_out, b_out),
-        [v4, v3, neon, wasm128, scalar]
+        [v4x, v4, v3, neon, wasm128, scalar]
     );
 }
 
@@ -809,6 +983,184 @@ pub fn linear_to_positive_xyb_planar_into(
 #[arcane]
 fn linear_to_positive_xyb_planar_inner_v4(
     token: archmage::X64V4Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    let absorbance_bias = -cbrtf_fast(K_B0);
+
+    let m00 = f32x16::splat(token, K_M00);
+    let m01 = f32x16::splat(token, K_M01);
+    let m02 = f32x16::splat(token, K_M02);
+    let m10 = f32x16::splat(token, K_M10);
+    let m11 = f32x16::splat(token, K_M11);
+    let m12 = f32x16::splat(token, K_M12);
+    let m20 = f32x16::splat(token, K_M20);
+    let m21 = f32x16::splat(token, K_M21);
+    let m22 = f32x16::splat(token, K_M22);
+    let bias = f32x16::splat(token, K_B0);
+    let zero = f32x16::zero(token);
+    let ab = f32x16::splat(token, absorbance_bias);
+    let half = f32x16::splat(token, 0.5);
+    let fourteen = f32x16::splat(token, 14.0);
+    let x_bias = f32x16::splat(token, 0.42);
+    let y_bias = f32x16::splat(token, 0.01);
+    let b_bias = f32x16::splat(token, 0.55);
+
+    let one = f32x16::splat(token, 1.0);
+
+    let n = pixels.len();
+    let chunks = n / 16;
+
+    for chunk in 0..chunks {
+        let base = chunk * 16;
+
+        let mut r_arr = [0.0f32; 16];
+        let mut g_arr = [0.0f32; 16];
+        let mut b_arr = [0.0f32; 16];
+        for i in 0..16 {
+            let p = pixels[base + i];
+            r_arr[i] = p[0];
+            g_arr[i] = p[1];
+            b_arr[i] = p[2];
+        }
+
+        // Clamp to display gamut [0, 1]
+        let r = f32x16::from_array(token, r_arr).max(zero).min(one);
+        let g = f32x16::from_array(token, g_arr).max(zero).min(one);
+        let b = f32x16::from_array(token, b_arr).max(zero).min(one);
+
+        let mixed0 = m00
+            .mul_add(r, m01.mul_add(g, m02.mul_add(b, bias)))
+            .max(zero);
+        let mixed1 = m10
+            .mul_add(r, m11.mul_add(g, m12.mul_add(b, bias)))
+            .max(zero);
+        let mixed2 = m20
+            .mul_add(r, m21.mul_add(g, m22.mul_add(b, bias)))
+            .max(zero);
+
+        let t0 = mixed0.cbrt_midp();
+        let t1 = mixed1.cbrt_midp();
+        let t2 = mixed2.cbrt_midp();
+
+        let c0 = t0 + ab;
+        let c1 = t1 + ab;
+
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+
+        let x_pos = x.mul_add(fourteen, x_bias);
+        let y_pos = y + y_bias;
+        let b_pos = (t2 - y) + b_bias;
+
+        x_out[base..base + 16].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 16].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 16].copy_from_slice(&b_pos.to_array());
+    }
+
+    // AVX2 remainder
+    let v3 = token.v3();
+    let ab8 = f32x8::splat(v3, absorbance_bias);
+    let half8 = f32x8::splat(v3, 0.5);
+    let zero8 = f32x8::zero(v3);
+    let m00_8 = f32x8::splat(v3, K_M00);
+    let m01_8 = f32x8::splat(v3, K_M01);
+    let m02_8 = f32x8::splat(v3, K_M02);
+    let m10_8 = f32x8::splat(v3, K_M10);
+    let m11_8 = f32x8::splat(v3, K_M11);
+    let m12_8 = f32x8::splat(v3, K_M12);
+    let m20_8 = f32x8::splat(v3, K_M20);
+    let m21_8 = f32x8::splat(v3, K_M21);
+    let m22_8 = f32x8::splat(v3, K_M22);
+    let bias8 = f32x8::splat(v3, K_B0);
+    let fourteen8 = f32x8::splat(v3, 14.0);
+    let x_bias8 = f32x8::splat(v3, 0.42);
+    let y_bias8 = f32x8::splat(v3, 0.01);
+    let b_bias8 = f32x8::splat(v3, 0.55);
+
+    let one8 = f32x8::splat(v3, 1.0);
+
+    let rem_start = chunks * 16;
+    let rem_chunks = (n - rem_start) / 8;
+    for chunk in 0..rem_chunks {
+        let base = rem_start + chunk * 8;
+        let mut r_arr = [0.0f32; 8];
+        let mut g_arr = [0.0f32; 8];
+        let mut b_arr = [0.0f32; 8];
+        for i in 0..8 {
+            let p = pixels[base + i];
+            r_arr[i] = p[0];
+            g_arr[i] = p[1];
+            b_arr[i] = p[2];
+        }
+        // Clamp to display gamut [0, 1]
+        let r = f32x8::from_array(v3, r_arr).max(zero8).min(one8);
+        let g = f32x8::from_array(v3, g_arr).max(zero8).min(one8);
+        let b = f32x8::from_array(v3, b_arr).max(zero8).min(one8);
+
+        let mixed0 = m00_8
+            .mul_add(r, m01_8.mul_add(g, m02_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed1 = m10_8
+            .mul_add(r, m11_8.mul_add(g, m12_8.mul_add(b, bias8)))
+            .max(zero8);
+        let mixed2 = m20_8
+            .mul_add(r, m21_8.mul_add(g, m22_8.mul_add(b, bias8)))
+            .max(zero8);
+
+        let t0 = mixed0.cbrt_midp();
+        let t1 = mixed1.cbrt_midp();
+        let t2 = mixed2.cbrt_midp();
+
+        let c0 = t0 + ab8;
+        let c1 = t1 + ab8;
+        let x = half8 * (c0 - c1);
+        let y = half8 * (c0 + c1);
+        let x_pos = x.mul_add(fourteen8, x_bias8);
+        let y_pos = y + y_bias8;
+        let b_pos = (t2 - y) + b_bias8;
+
+        x_out[base..base + 8].copy_from_slice(&x_pos.to_array());
+        y_out[base..base + 8].copy_from_slice(&y_pos.to_array());
+        b_out[base..base + 8].copy_from_slice(&b_pos.to_array());
+    }
+
+    // Scalar remainder
+    let absorbance_bias_neg = absorbance_bias;
+    for i in (rem_start + rem_chunks * 8)..n {
+        let p = pixels[i];
+        let r = p[0].clamp(0.0, 1.0);
+        let g = p[1].clamp(0.0, 1.0);
+        let b = p[2].clamp(0.0, 1.0);
+
+        let mixed0 = K_M00
+            .mul_add(r, K_M01.mul_add(g, K_M02.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(r, K_M11.mul_add(g, K_M12.mul_add(b, K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(r, K_M21.mul_add(g, K_M22.mul_add(b, K_B0)))
+            .max(0.0);
+
+        let c0 = cbrtf_fast(mixed0) + absorbance_bias_neg;
+        let c1 = cbrtf_fast(mixed1) + absorbance_bias_neg;
+        let c2 = cbrtf_fast(mixed2);
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        x_out[i] = x.mul_add(14.0, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+#[cfg(target_arch = "x86_64")]
+#[arcane]
+fn linear_to_positive_xyb_planar_inner_v4x(
+    token: archmage::X64V4xToken,
     pixels: &[[f32; 3]],
     x_out: &mut [f32],
     y_out: &mut [f32],
