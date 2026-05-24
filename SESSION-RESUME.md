@@ -14,9 +14,53 @@ post-compaction resume. Read in this order:
 Then: `TaskList` to see open tasks. Work on the lowest available ID
 that isn't blocked.
 
-## Where we are (2026-05-16 evening)
+## Where we are (2026-05-24)
 
-### What's live in production
+### What's the canonical codec-target metric
+
+`ZensimProfile::codec_target()` → currently `PreviewV0_5TunerV4`
+(`zensim/weights/v_tuner_v10_2026-05-20.bin`). This is the stable
+alias every zen codec uses for the quality dial + picker training.
+See `docs/CODEC_TARGET_METRIC.md` for the integration guide and
+`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md` for the
+measured cross-codec consistency (median |Δ| = 1.18 score units,
+p90 = 3.58; score 60-90 band is tight at p50 0.6-1.5; score 0-55
+is a flat dead zone pending Tuner v11).
+
+### Three-trail production ships (all 2026-05-20)
+
+- **Tuner** (codec dial): `PreviewV0_5TunerV4` (v_tuner_v10)
+- **Balanced** (general perceptual): `PreviewV0_5BalancedV3` (v_balanced_v3)
+- **Compression** (codec output rank): `PreviewV0_5CompressionV3` (v_compression_v3)
+
+### Tuner v11 retrain in flight (task #6, 2026-05-24)
+
+In-flight branch: `feat/streaming-372-phase1`. The 8+ commits of
+2026-05-24 work add:
+
+1. **`ZensimProfile::codec_target()`** stable alias (commit 5ca977c)
+2. **Per-source aggregation head** for konjnd-dense — runtime is
+   unchanged, but trainer can now raise the konjnd training-weight
+   from 0.02 to 0.3 without the V11-D zero-gradient pathology
+   (commits d1ac861, a08151d, ebf5f2e).
+3. **CVVDP + IW-SSIM backfill** on the 17,611-pair cid22_train
+   parquet — populates the mix_cv40_iw60 column so Tuner v11 can
+   train against the same target column as the existing ships
+   (task #7, in flight; backfill script at
+   `scripts/canonical_corpus/v11_cid22_train_backfill_cvvdp_iwssim.py`).
+4. **Full Tuner v11 pipeline** at
+   `scripts/v_next/tuner_v11_full_pipeline.sh` — 5-seed CI + median
+   pick + cross-codec measurement + verdict matrix vs v10.
+
+Ship gate (≥4/5 criteria — see
+`benchmarks/v_tuner_v11_methodology_2026-05-24.md`):
+- KonJND val SROCC ≥ 0.85
+- CID22 SROCC ≥ 0.864
+- Monotonicity ≥ 92.78%
+- Cross-codec p50 |Δ| ≤ 1.0 in score 60-90
+- Score 0-55 dial recovers from v10 floor pathology
+
+### Legacy ships still in profile.rs
 
 - **Shipped bake**: `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin`
   (V_18 3-way concat, CID22 SROCC 0.8933 — but **note the methodology
