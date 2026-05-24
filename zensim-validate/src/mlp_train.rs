@@ -1053,6 +1053,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
     anchor: Option<&AnchorRows<'_>>,
     equiv: Option<&EquivPairs<'_>>,
     pjnd_anchor: Option<&AnchorRows<'_>>,
+    konjnd_agg: Option<&KonjndAggregationPool<'_>>,
 ) -> Vec<u8> {
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
@@ -1082,6 +1083,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
             anchor,
             equiv,
             pjnd_anchor,
+            konjnd_agg,
         );
     }
     if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
@@ -1094,6 +1096,12 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
         eprintln!(
             "WARNING: --pjnd-passthrough-weight is only wired on the per-sample-α head; \
              pjnd anchor data ignored on this head."
+        );
+    }
+    if konjnd_agg.is_some() && hyperparams.konjnd_aggregation_weight > 0.0 {
+        eprintln!(
+            "WARNING: --konjnd-aggregation-weight is only wired on the per-sample-α head; \
+             konjnd-aggregation pool ignored on this head."
         );
     }
     if hyperparams.hybrid_head {
@@ -5004,6 +5012,7 @@ fn train_mlp_per_sample_alpha_head(
     anchor: Option<&AnchorRows<'_>>,
     equiv: Option<&EquivPairs<'_>>,
     pjnd_anchor: Option<&AnchorRows<'_>>,
+    konjnd_agg: Option<&KonjndAggregationPool<'_>>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
