@@ -139,7 +139,7 @@ def main() -> int:
 
     print(f"[2/5] loading cvvdp + iwssim score TSVs …")
     cvvdp_map = load_tsv_join_keyed(CVVDP_TSV, "cvvdp_imazen_v0_0_1")
-    iwssim_map = load_tsv_join_keyed(IWSSIM_TSV, "iwssim_imazen_v0_0_1")
+    iwssim_map = load_tsv_join_keyed(IWSSIM_TSV, "iwssim_gpu")
 
     cvvdp_vals = np.full(n_rows, np.nan, dtype=np.float64)
     iwssim_vals = np.full(n_rows, np.nan, dtype=np.float64)
