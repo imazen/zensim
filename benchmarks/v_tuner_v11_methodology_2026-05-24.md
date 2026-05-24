@@ -180,12 +180,47 @@ gradient escapes the V11-D zero-gradient pathology (KonJND > v10's
 0.23) but doesn't overwhelm the rank gradient (CID22/KADID/TID
 stay near v10 baseline). All other hyperparams identical.
 
-If this also fails:
-- KonJND lift but rank collapse → drop further to w=0.01.
-- No KonJND lift → bump to w=0.10 or 0.15.
-- Both fail → aggregation step needs a different mechanism (e.g.,
-  fire only every N pair-steps, or normalize the gradient by the
-  rank-step gradient magnitude).
+### Attempt 3 plan: konjnd-dense as both training group AND aggregation pool
+
+If attempt 2 fails (likely if α=1 stays pinned — early signal at
+epoch 50 shows α=1.000 across the network, indicating the
+aggregation gradient is too small to displace rank-head dominance):
+
+The root cause is that v11 currently only includes konjnd-dense via
+the aggregation pool, NOT as a regular training group. konjnd-dense
+has TWO targets populated:
+- `mix_cv40_iw60` PER-ROW (range -66 to +96, median 68) — feature-driven per-pair target.
+- `pjnd_target` PER-REF (range 22-70, median 32) — per-source-constant aggregation target.
+
+V_tuner_v9 trained ONLY on safesyn — it never saw konjnd-dense
+feature → score mappings at the per-pair level. That's why v10
+KonJND val SROCC is 0.23: no per-pair konjnd training signal at all.
+
+**Attempt 3 recipe** (use BOTH konjnd-dense slots):
+- `--group konjnd_dense:konjnd-dense.parquet:0.3:0.0` (regular MSE
+  against mix_cv40_iw60; train weight 0.3 — same as cid22_train)
+- `--konjnd-aggregation-weight 0.1 --konjnd-aggregation-step-p 0.10`
+  (aggregation aux loss at moderate weight)
+- All other v11 hyperparams identical.
+
+Rationale: regular per-pair MSE gives feature-driven gradient on
+konjnd-dense (no per-source constant collapse since each row has
+its own mix_cv40_iw60 value). Aggregation MSE adds soft per-source
+PJND calibration. Combination should produce a network that ranks
+konjnd-dense pairs correctly AND lands per-ref mean near pjnd_target.
+
+If attempt 2 ALSO fails (i.e. neither rank nor aggregation lifts
+KonJND beyond v10):
+- Skip to attempt 3 (the per-pair MSE on konjnd-dense is the
+  missing signal, not the aggregation weight).
+
+Backup mechanism options if attempts 2 + 3 both fail:
+- Aggregation step gradient normalization (divide by rank-step
+  gradient L2 norm)
+- Per-ref weighted sampling (currently uniform over 1008 refs)
+- Skip per-sample-α head — use pool_head + aggregation directly
+  (current trainer requires per-sample-α; would need to extend
+  pool_head to accept konjnd_agg pool).
 
 ## Results (5-seed CI, w=0.05 step_p=0.10)
 
