@@ -151,6 +151,35 @@ the `ZensimProfile::codec_target()` → `PreviewV0_5TunerV4` choice
 
 Raw scores: `/mnt/v/output/zensim/cross_codec_compare_2026-05-24/{balanced,compression}_v3.parquet`.
 
+### JPEG q-sweep monotonicity (within-codec dial precision)
+
+Cross-codec consistency above measures inter-codec agreement at
+matched perceptual quality. A complementary dial-precision view is
+**within-codec monotonicity**: does the JPEG q dial monotonically
+increase the zensim score? Measured via `qsweep_eval` on the
+canonical 50-image × 19-q JPEG sweep
+(`/mnt/v/output/zensim/exp_tuner_2026-05-18/qsweep_features.csv`):
+
+| Bake | strict-mono % | strict violations | clamp-flat ties |
+|---|--:|--:|--:|
+| **Tuner v10** | **96.44%** | 32 / 900 | **0** |
+| Compression v3 | 91.89% | 73 / 900 | 13 |
+| Balanced v3 | 88.00% | 108 / 900 | 7 |
+
+**Tuner v10 has ZERO tied-score regions** — every JPEG q step
+produces a distinct score. Balanced and Compression have 7-13
+clamp-flat dead zones where the dial can't disambiguate adjacent
+q values; binary-search-to-target would stall at those points.
+
+Combined picture: Tuner is the best codec-target metric on both
+the cross-codec consistency axis (matched anchors land at the
+same score) AND the within-codec monotonicity axis (q sweeps
+yield monotone score progressions). Picking it for the canonical
+codec-target metric is decisively the right call.
+
+qsweep raw report:
+`/mnt/v/output/zensim/cross_codec_compare_2026-05-24/qsweep_3trails.md`.
+
 ## Implications for codec-target ship
 
 **Verdict: Tuner v10 is ship-ready as the canonical codec-target metric
