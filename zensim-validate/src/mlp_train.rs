@@ -1027,6 +1027,7 @@ pub fn train_mlp_with_tv_anchored_equiv(
         anchor,
         equiv,
         None,
+        None,
     )
 }
 
@@ -1053,6 +1054,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
     anchor: Option<&AnchorRows<'_>>,
     equiv: Option<&EquivPairs<'_>>,
     pjnd_anchor: Option<&AnchorRows<'_>>,
+    konjnd_agg: Option<&KonjndAggregationPool<'_>>,
 ) -> Vec<u8> {
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
@@ -1082,6 +1084,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
             anchor,
             equiv,
             pjnd_anchor,
+            konjnd_agg,
         );
     }
     if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
@@ -1094,6 +1097,12 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
         eprintln!(
             "WARNING: --pjnd-passthrough-weight is only wired on the per-sample-α head; \
              pjnd anchor data ignored on this head."
+        );
+    }
+    if konjnd_agg.is_some() && hyperparams.konjnd_aggregation_weight > 0.0 {
+        eprintln!(
+            "WARNING: --konjnd-aggregation-weight is only wired on the per-sample-α head; \
+             konjnd-aggregation pool ignored on this head."
         );
     }
     if hyperparams.hybrid_head {
@@ -5004,6 +5013,7 @@ fn train_mlp_per_sample_alpha_head(
     anchor: Option<&AnchorRows<'_>>,
     equiv: Option<&EquivPairs<'_>>,
     pjnd_anchor: Option<&AnchorRows<'_>>,
+    konjnd_agg: Option<&KonjndAggregationPool<'_>>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
@@ -5050,6 +5060,67 @@ fn train_mlp_per_sample_alpha_head(
                 n_features
             );
         }
+    }
+    // KONJND-AGGREGATION-HEAD (task #4) — per-source pool with per-ref
+    // grouping. Validate shape invariants up-front so the training step
+    // can index without bounds checks.
+    let konjnd_agg_active =
+        konjnd_agg.is_some() && hyperparams.konjnd_aggregation_weight > 0.0;
+    if let Some(ka) = konjnd_agg {
+        assert_eq!(
+            ka.ref_ranges.len(),
+            ka.ref_pjnd_target.len(),
+            "konjnd_agg '{}': ref_ranges/ref_pjnd_target length mismatch",
+            ka.name
+        );
+        assert_eq!(
+            ka.ref_ranges.len(),
+            ka.ref_weight.len(),
+            "konjnd_agg '{}': ref_ranges/ref_weight length mismatch",
+            ka.name
+        );
+        let total_rows: usize = ka.ref_ranges.iter().map(|&(_, n)| n).sum();
+        assert_eq!(
+            total_rows,
+            ka.features.len(),
+            "konjnd_agg '{}': Σ ref_ranges.n_rows={} != features.len()={}",
+            ka.name,
+            total_rows,
+            ka.features.len()
+        );
+        for (i, f) in ka.features.iter().enumerate() {
+            assert_eq!(
+                f.len(),
+                n_features,
+                "konjnd_agg '{}' row {}: feature length {} != n_features {}",
+                ka.name,
+                i,
+                f.len(),
+                n_features
+            );
+        }
+    }
+    if konjnd_agg_active {
+        assert!(
+            hyperparams.norm_in_norm_weight == 0.0,
+            "per_sample_alpha_head + NiN: konjnd-aggregation is not yet composed with NiN. \
+             Disable NiN or set --konjnd-aggregation-weight 0."
+        );
+        assert!(
+            (0.0..=1.0).contains(&hyperparams.konjnd_aggregation_step_p),
+            "--konjnd-aggregation-step-p must be in [0, 1]; got {}",
+            hyperparams.konjnd_aggregation_step_p
+        );
+        assert!(
+            hyperparams.konjnd_aggregation_samples_per_ref >= 1,
+            "--konjnd-aggregation-samples-per-ref must be ≥ 1; got {}",
+            hyperparams.konjnd_aggregation_samples_per_ref
+        );
+        assert!(
+            hyperparams.konjnd_aggregation_refs_per_step >= 1,
+            "--konjnd-aggregation-refs-per-step must be ≥ 1; got {}",
+            hyperparams.konjnd_aggregation_refs_per_step
+        );
     }
     if pjnd_active {
         assert!(
@@ -5458,6 +5529,44 @@ fn train_mlp_per_sample_alpha_head(
         }
         (Vec::new(), Vec::new(), 0.0)
     };
+
+    // KONJND-AGGREGATION-HEAD (task #4, 2026-05-24) — standardize the
+    // per-ref-grouped pool with the SAME training-group scaler.
+    // Output `std_konjnd_agg_features` is flat (preserves the input
+    // ref_ranges layout); the training step indexes via ref_ranges.
+    let std_konjnd_agg_features: Vec<Vec<f64>> =
+        if let (Some(ka), true) = (konjnd_agg, konjnd_agg_active) {
+            let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(ka.features.len());
+            for &f in ka.features.iter() {
+                let mut buf = vec![0.0f64; n_features];
+                for d in 0..n_features {
+                    buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                }
+                bufs.push(buf);
+            }
+            log_line(
+                &format!(
+                    "konjnd-aggregation: ENABLED — '{}' rows={} refs={} S={} K={} step_p={:.3} weight={:.3}",
+                    ka.name,
+                    ka.features.len(),
+                    ka.ref_ranges.len(),
+                    hyperparams.konjnd_aggregation_samples_per_ref,
+                    hyperparams.konjnd_aggregation_refs_per_step,
+                    hyperparams.konjnd_aggregation_step_p,
+                    hyperparams.konjnd_aggregation_weight,
+                ),
+                log,
+            );
+            bufs
+        } else {
+            if konjnd_agg.is_some() && !konjnd_agg_active {
+                log_line(
+                    "konjnd-aggregation: data supplied but konjnd_aggregation_weight = 0 — ignored",
+                    log,
+                );
+            }
+            Vec::new()
+        };
 
     let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
     let mut w1 = init_model.w1.clone();
@@ -6229,6 +6338,200 @@ fn train_mlp_per_sample_alpha_head(
                                     leaky,
                                 );
                                 any_step = true;
+                            }
+
+                            if any_step {
+                                if hyperparams.l2_lambda > 0.0 {
+                                    let l2 = hyperparams.l2_lambda;
+                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                        *g += l2 * w;
+                                    }
+                                    for j in 0..n_hidden {
+                                        g_rank_w_buf[j] += l2 * rank_w[j];
+                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
+                                    }
+                                    for kk in 0..4 {
+                                        g_red_w[kk] += l2 * reducer_w[kk];
+                                    }
+                                }
+
+                                for j in 0..n_hidden {
+                                    adam.gw2[j] += g_rank_w_buf[j];
+                                }
+                                for kk in 0..4 {
+                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
+                                }
+                                for j in 0..n_hidden {
+                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                }
+                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gb2[0] += g_rank_b_buf;
+                                adam.gb2[1] += g_red_b;
+
+                                do_adam_step(
+                                    &mut adam,
+                                    &mut w1,
+                                    &mut b1,
+                                    &mut rank_w,
+                                    &mut rank_b,
+                                    &mut reducer_w,
+                                    &mut reducer_b,
+                                    &mut w_alpha,
+                                    &mut b_alpha,
+                                    lr,
+                                    n_hidden,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // KONJND-AGGREGATION-HEAD step (task #4, 2026-05-24).
+            // For each fire: sample K refs uniformly from
+            // konjnd-dense's ref_ranges; for each ref, sample S of its
+            // distortion-level rows; forward all K·S; compute K
+            // per-ref aggregates (mean over S); apply MSE against the
+            // per-ref pjnd_target; backprop each row's contribution
+            // with gradient (2w/S)·residual scaled by tanh-pin Jacobian.
+            //
+            // Mechanism rationale: the existing pjnd_passthrough fires
+            // a per-row regression, which V11-D proved is structurally
+            // incompatible with the per-source-constant pjnd_target
+            // (zero-gradient pathology + per-source-mean collapse).
+            // Aggregating predictions before computing the loss
+            // restores a non-zero within-ref gradient and decouples
+            // the per-pair feature → distortion-level mapping from
+            // the per-ref target constraint. See
+            // `docs/KONJND_AGGREGATION_HEAD_DESIGN_2026-05-24.md`.
+            if konjnd_agg_active && steps_since_adam == 0 {
+                let u_take = rng.next_f64_unit();
+                if u_take < hyperparams.konjnd_aggregation_step_p {
+                    if let Some(ka) = konjnd_agg {
+                        if !std_konjnd_agg_features.is_empty() && !ka.ref_ranges.is_empty() {
+                            let n_refs = ka.ref_ranges.len();
+                            let s_per_ref =
+                                hyperparams.konjnd_aggregation_samples_per_ref.max(1);
+                            let k_refs = hyperparams.konjnd_aggregation_refs_per_step.max(1);
+                            let inv_s = 1.0 / (s_per_ref as f64);
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_b_buf = 0.0f64;
+                            let mut g_red_w: [f64; 4] = [0.0; 4];
+                            let mut g_red_b: f64 = 0.0;
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_b_alpha: f64 = 0.0;
+                            let mut any_step = false;
+
+                            // Stash forward-pass intermediates per (ref, s).
+                            // psah::backprop_step_per_sample_alpha_head
+                            // needs ha_pre / ha / sa / max_a / ya_rank /
+                            // ya_pool / alpha for backprop, plus the
+                            // standardized xa slice.
+                            #[allow(clippy::type_complexity)]
+                            let mut fw_cache: Vec<(
+                                usize, // row index into std_konjnd_agg_features
+                                f64,   // ya (post-pin score)
+                                f64,   // dya_dpre (pin Jacobian)
+                                f64,   // ya_rank
+                                f64,   // ya_pool
+                                f64,   // alpha
+                                Vec<f64>, // ha_pre
+                                Vec<f64>, // ha
+                                [f64; 4], // sa (4-slot pool reducer state)
+                                usize, // max_a (argmax index into pool reducer)
+                            )> = Vec::with_capacity(k_refs * s_per_ref);
+
+                            // For each picked ref: sample S rows + forward all S.
+                            // (fw_cache_start_idx, S_actual, sum_y, target)
+                            let mut ref_sums: Vec<(usize, usize, f64, f64)> =
+                                Vec::with_capacity(k_refs);
+
+                            for _ in 0..k_refs {
+                                let u_ref = rng.next_f64_unit();
+                                let ri = ((u_ref * (n_refs as f64)) as usize).min(n_refs - 1);
+                                let (row_start, n_rows_in_ref) = ka.ref_ranges[ri];
+                                if n_rows_in_ref == 0 {
+                                    continue;
+                                }
+                                let target = ka.ref_pjnd_target[ri];
+                                let cache_start = fw_cache.len();
+                                let mut sum_y = 0.0f64;
+                                let s_actual = s_per_ref.min(n_rows_in_ref);
+                                for _ in 0..s_actual {
+                                    let u_row = rng.next_f64_unit();
+                                    let off = ((u_row * (n_rows_in_ref as f64)) as usize)
+                                        .min(n_rows_in_ref - 1);
+                                    let ri_global = row_start + off;
+                                    let xa = std_konjnd_agg_features[ri_global].as_slice();
+                                    let (
+                                        ya_pre, ya_rank, ya_pool, alpha, _, ha_pre, ha, sa, max_a,
+                                    ) = psah::forward_per_sample_alpha_head(
+                                        xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
+                                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
+                                    );
+                                    let (ya, dya_dpre) = pin_forward(ya_pre);
+                                    sum_y += ya;
+                                    fw_cache.push((
+                                        ri_global, ya, dya_dpre, ya_rank, ya_pool, alpha, ha_pre,
+                                        ha, sa, max_a,
+                                    ));
+                                }
+                                ref_sums.push((cache_start, s_actual, sum_y, target));
+                            }
+
+                            // Backprop: each ref's residual contributes
+                            // (2w/S)·residual to every cached row in
+                            // that ref. Loss = w · Σ_r (agg_r − t_r)².
+                            for &(cache_start, s_actual, sum_y, target) in &ref_sums {
+                                if s_actual == 0 {
+                                    continue;
+                                }
+                                let inv_s_actual = 1.0 / (s_actual as f64);
+                                let agg = sum_y * inv_s_actual;
+                                let err = agg - target;
+                                let scale = 2.0 * hyperparams.konjnd_aggregation_weight
+                                    * inv_s_actual;
+                                let loss = hyperparams.konjnd_aggregation_weight * err * err;
+                                total_loss += loss;
+                                n_steps += 1;
+                                for j in 0..s_actual {
+                                    let entry = &fw_cache[cache_start + j];
+                                    let ri_global = entry.0;
+                                    let dya_dpre = entry.2;
+                                    let ya_rank = entry.3;
+                                    let ya_pool = entry.4;
+                                    let alpha = entry.5;
+                                    let max_a = entry.9;
+                                    let xa = std_konjnd_agg_features[ri_global].as_slice();
+                                    let dl_dy = scale * err * dya_dpre;
+                                    psah::backprop_step_per_sample_alpha_head(
+                                        xa,
+                                        &entry.6,
+                                        &entry.7,
+                                        &entry.8,
+                                        max_a,
+                                        ya_rank,
+                                        ya_pool,
+                                        alpha,
+                                        dl_dy,
+                                        &rank_w,
+                                        &reducer_w,
+                                        &w_alpha,
+                                        &mut adam.gw1,
+                                        &mut adam.gb1,
+                                        &mut g_rank_w_buf,
+                                        &mut g_rank_b_buf,
+                                        &mut g_red_w,
+                                        &mut g_red_b,
+                                        &mut g_w_alpha_buf,
+                                        &mut g_b_alpha,
+                                        n_features,
+                                        n_hidden,
+                                        leaky,
+                                    );
+                                    any_step = true;
+                                }
+                                let _ = inv_s; // reserved for variants where S is fixed across refs
                             }
 
                             if any_step {

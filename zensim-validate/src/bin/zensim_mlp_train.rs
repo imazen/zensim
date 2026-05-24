@@ -103,8 +103,8 @@ mod simd_mlp;
 mod contamination_guard;
 
 use mlp_train::{
-    AnchorRows, EquivPairs, MlpHyperparams, TrainingGroup, TvRegularizer, ValidationPolicy,
-    train_mlp_with_tv_anchored_equiv_pjnd,
+    AnchorRows, EquivPairs, KonjndAggregationPool, MlpHyperparams, TrainingGroup, TvRegularizer,
+    ValidationPolicy, train_mlp_with_tv_anchored_equiv_pjnd,
 };
 
 #[derive(Parser)]
@@ -2168,6 +2168,75 @@ fn main() {
             None
         };
 
+    // KONJND-AGGREGATION-HEAD (task #4, 2026-05-24) — load the
+    // per-source-grouped konjnd-dense pool. Same canonical parquet as
+    // pjnd_passthrough but read via the aggregation-aware loader so
+    // we get the per-ref grouping metadata. Applies feature transforms
+    // in-place; standardization happens inside the trainer using the
+    // primary-stream scaler (same invariant as anchor + pjnd anchors).
+    let konjnd_agg_owned: Option<zensim_validate::parquet_loader::OwnedKonjndAggregationPool> =
+        if let Some(p) = &args.konjnd_aggregation_parquet {
+            if args.konjnd_aggregation_weight <= 0.0 {
+                eprintln!(
+                    "WARNING: --konjnd-aggregation-parquet set but \
+                     --konjnd-aggregation-weight is 0; aggregation pool will be ignored."
+                );
+            }
+            let mut pool = zensim_validate::parquet_loader::load_konjnd_aggregation_pool(
+                p,
+                "konjnd_aggregation",
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("konjnd-aggregation parquet load failed: {e}");
+                std::process::exit(1);
+            });
+            // Truncate to current --max-features.
+            let cap = n_features;
+            for row in &mut pool.feature_rows {
+                row.truncate(cap);
+            }
+            // Apply feature transforms in-place (same as groups + pjnd).
+            if let Some(ts) = &feature_transforms {
+                let pp = feature_transform_params.as_ref();
+                for row in &mut pool.feature_rows {
+                    for (i, t) in ts.iter().enumerate() {
+                        if *t != zenpredict::FeatureTransform::Identity {
+                            let p = pp.map(|v| v[i].as_slice()).unwrap_or(&[][..]);
+                            row[i] = t.apply_with_params(row[i] as f32, p) as f64;
+                        }
+                    }
+                }
+            }
+            eprintln!(
+                "konjnd-aggregation parquet: loaded {} rows / {} refs (weight={}, step_p={}, S={}, K={})",
+                pool.feature_rows.len(),
+                pool.ref_ranges.len(),
+                args.konjnd_aggregation_weight,
+                args.konjnd_aggregation_step_p,
+                args.konjnd_aggregation_samples_per_ref,
+                args.konjnd_aggregation_refs_per_step,
+            );
+            Some(pool)
+        } else {
+            None
+        };
+    // Build the borrowing-view that the trainer consumes. We must
+    // build feature row-refs in a separately-named slot so the
+    // borrows stay live across the train_mlp call.
+    let konjnd_agg_feat_refs: Vec<&[f64]> = konjnd_agg_owned
+        .as_ref()
+        .map(|p| p.feature_rows.iter().map(|r| r.as_slice()).collect())
+        .unwrap_or_default();
+    let konjnd_agg_loaded: Option<KonjndAggregationPool<'_>> = konjnd_agg_owned.as_ref().map(|p| {
+        KonjndAggregationPool {
+            name: p.name.clone(),
+            features: konjnd_agg_feat_refs.as_slice(),
+            ref_ranges: p.ref_ranges.as_slice(),
+            ref_pjnd_target: p.ref_pjnd_target.as_slice(),
+            ref_weight: p.ref_weight.as_slice(),
+        }
+    });
+
     let mut log: Vec<String> = Vec::new();
 
     // GPU trainer dispatch (task #166, 2026-05-19). Only active when
@@ -2344,6 +2413,7 @@ fn main() {
             anchor_loaded.as_ref(),
             equiv_loaded.as_ref(),
             pjnd_anchor_loaded.as_ref(),
+            konjnd_agg_loaded.as_ref(),
         )
     };
 
