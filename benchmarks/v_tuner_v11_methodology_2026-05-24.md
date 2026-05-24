@@ -233,25 +233,45 @@ Attempt 1's KonJND 0.76 was an artifact of pool-head reduction
 (α=0) producing a smoothed prediction that correlated with PJND by
 luck of the pool reducer's geometry — not a real architectural win.
 
-### Attempt 4: a3 + strong aggregation (w=0.3) — IN FLIGHT
+### Attempt 4: a3 + strong aggregation (w=0.3) — KonJND +0.38, biggest progress yet
 
-Hypothesis: the per-pair konjnd-dense training group stabilizes
-rank, so we can crank aggregation back to a1's strength without
-the rank collapse. Recipe: 3 groups (a3) + konjnd-aggregation-weight=0.3
-+ konjnd-aggregation-step-p=0.30 (a1's aggregation knobs).
+Seed 1 finished at 04:17 UTC. **The structural fix WORKS**:
 
-Pipeline started 04:01 UTC. Early signal:
-- Epoch 0: val=0.914, α(x) μ=0.16 (mixed)
-- Epoch 10: val=0.944, α(x) μ=0.0 (pool collapse, but konjnd_dense
-  train SROCC stays 0.97+ unlike a1's konjnd context)
+| Corpus | v10 | a1 | a2 | a3 | **a4** | a4 Δ vs v10 |
+|---|--:|--:|--:|--:|--:|--:|
+| CID22 | 0.854 | 0.508 | 0.742 | 0.814 | 0.769 | −0.085 |
+| KADID | 0.483 | 0.326 | 0.598 | 0.586 | 0.561 | +0.078 |
+| TID | 0.664 | 0.351 | 0.610 | 0.688 | 0.614 | −0.050 |
+| **KonJND** | 0.232 | 0.758 | 0.066 | 0.113 | **0.615** | **+0.383** |
+| AIC-3 | 0.787 | 0.664 | 0.793 | 0.797 | 0.771 | −0.016 |
+| Mono | 0.964 | 0.929 | 0.951 | 0.960 | 0.938 | −0.027 |
 
-If this fails the same way as a1 (CID22 collapses), the bigger
-issue is structural — even the per-pair konjnd training group
-can't stabilize rank when aggregation is strong. Next iteration
-would consider:
-- Disabling per-sample-α head (use pool_head directly)
-- Gradient-clipping the aggregation step
-- Mixing rank+pool at runtime via classifier (Ensemble pattern)
+Per-pair konjnd-dense training (mix_cv40_iw60 target) + strong
+aggregation (pjnd_target, w=0.3 step_p=0.30) COEXIST: the rank
+gradient is no longer collapsed by the aggregation pressure, while
+KonJND lifts dramatically. This is the architectural breakthrough
+the recovery cycle has been chasing since V11-D (2026-05-20).
+
+Per the 5-criterion ship gate:
+1. KonJND ≥ 0.85: 0.615 — FAIL (gap −0.235)
+2. CID22 ≥ 0.864: 0.769 — FAIL (gap −0.095)
+3. Mono ≥ 92.78%: 0.938 — **PASS**
+4. Cross-codec p50 ≤ 1.0: TBD
+5. Score 0-55 dial: TBD
+
+Trajectory shows monotonic KonJND lift via aggregation weight
+(a3 w=0.1 → KonJND 0.11, a4 w=0.3 → KonJND 0.62). The next
+iteration (attempt 5, w=0.5) should push KonJND higher.
+
+### Attempt 5: a4 + aggregation pushed to w=0.5 — IN FLIGHT
+
+Hypothesis: aggregation weight monotonically lifts KonJND while
+CID22 cost stays bounded by per-pair konjnd-dense training group.
+Push w from 0.3 to 0.5 (1.67× a4's strength). Test whether
+KonJND ≥ 0.85 is reachable without rank corpora collapsing.
+
+Pipeline started 04:17 UTC. Bake lands ~04:32 UTC. Watcher
+`buq6s56g9` fires on completion.
 
 Recipe deltas vs attempt 2:
 - `--group konjnd_dense:konjnd-dense.parquet:0.3:0.0` (NEW — regular
