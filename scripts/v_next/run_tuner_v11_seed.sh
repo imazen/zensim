@@ -31,7 +31,15 @@ set -euo pipefail
 SEED="${1:?usage: $0 <seed>}"
 KBATCH="${KBATCH:-32}"
 LR="${LR_OVERRIDE:-5.66e-3}"
-KONJND_AGG_WEIGHT="${KONJND_AGG_WEIGHT:-0.3}"
+# 2026-05-24 falsification: w=0.3 collapses rank corpora (CID22
+# 0.85→0.51, KADID 0.48→0.33, TID 0.66→0.35) while lifting
+# KonJND +0.53 (0.23→0.76). The aggregation gradient overwhelms
+# the per-pair rank signal. Default lowered to 0.05 + step_p 0.10
+# (~5.5% of original effective rate) per task #6 iteration plan.
+# Saved evidence: /mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24/
+# tuner_v11_w0.3_s1_evidence.bin + qsweep + verdict.
+KONJND_AGG_WEIGHT="${KONJND_AGG_WEIGHT:-0.05}"
+KONJND_AGG_STEP_P="${KONJND_AGG_STEP_P:-0.10}"
 
 OUT_DIR="/mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24"
 REPO="/home/lilith/work/zen/zensim"
@@ -56,7 +64,7 @@ if [[ ! -x "${TRAINER}" ]]; then
     exit 2
 fi
 
-echo "Tuner v11: seed=${SEED} KBATCH=${KBATCH} LR=${LR} konjnd_agg_w=${KONJND_AGG_WEIGHT}"
+echo "Tuner v11: seed=${SEED} KBATCH=${KBATCH} LR=${LR} konjnd_agg_w=${KONJND_AGG_WEIGHT} step_p=${KONJND_AGG_STEP_P}"
 echo "  trainer:           ${TRAINER}"
 echo "  anchor (V10):      ${ANCHOR}"
 echo "  cross-codec-eq:    ${EQUIV}"
@@ -92,7 +100,7 @@ echo
     --dynamic-range-probe-n 40 \
     --konjnd-aggregation-parquet "${PARQ_DIR}/konjnd-dense.parquet" \
     --konjnd-aggregation-weight "${KONJND_AGG_WEIGHT}" \
-    --konjnd-aggregation-step-p 0.30 \
+    --konjnd-aggregation-step-p "${KONJND_AGG_STEP_P}" \
     --konjnd-aggregation-samples-per-ref 5 \
     --konjnd-aggregation-refs-per-step 8 \
     --seed "${SEED}" --out "${BAKE}" --log-path "${LOG}" \
