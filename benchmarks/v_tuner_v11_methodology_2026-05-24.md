@@ -287,150 +287,72 @@ align with smoothed predictions.
 **a4 (w=0.3 step_p=0.30) is the sweet spot.** Committing to this
 recipe for the 5-seed CI to get a median estimate.
 
-### Attempt 6 (a4-5seed-CI): 5 seeds of a4 settings — IN FLIGHT
+### Attempt 6 (a4-5seed-CI): KILLED after spline-calibration ruling
 
-Pipeline started 04:35 UTC. ~70 min total wall.
+Pipeline started 04:35 UTC, killed at 04:40 UTC after spline
+calibration of a4's seed-1 bake revealed:
 
-If median holds at a4's seed-1 numbers (KonJND 0.62, CID22 0.77):
-- Criterion 1 (KonJND ≥ 0.85): FAIL by 0.23 (but +0.39 vs v10)
-- Criterion 2 (CID22 ≥ 0.864): FAIL by 0.10
-- Criterion 3 (Mono ≥ 92.78%): PASS at 0.94
-- Criterion 4 (cross-codec): TBD post-spline calibration
-- Criterion 5 (score 0-55 dial): TBD
+**Calibrated a4 ship gate scorecard:**
 
-Decision after 5-seed CI:
-- If median KonJND ≥ 0.70 AND CID22 ≥ 0.80: **ship as
-  PreviewV0_5TunerV5** with documented trade (codec-target gets
-  +0.39 KonJND lift, costs −0.07 CID22). This is the structural
-  fix recovery has been chasing since V11-D.
-- If median KonJND < 0.55 OR CID22 < 0.75: don't ship; try
-  w=0.4 step_p=0.20 (between a4 and a5).
+| # | Criterion | v10 | a4 calibrated | Status |
+|---|---|--:|--:|---|
+| 1 | KonJND val SROCC ≥ 0.85 | 0.232 | **0.615** | **FAIL** (gap −0.235) |
+| 2 | CID22 SROCC ≥ 0.864 | 0.854 | **0.769** | **FAIL** (gap −0.095) |
+| 3 | Monotonicity ≥ 92.78% | 0.964 | **0.938** | **PASS** |
+| 4 | Cross-codec p50 \|Δ\| ≤ 1.0 (in 60-90) | 1.18 | **1.76** | **FAIL** (above gate) |
+| 5 | Score 0-55 dial recovers | clamped flat | TBD | TBD |
 
-Recipe deltas vs attempt 2:
-- `--group konjnd_dense:konjnd-dense.parquet:0.3:0.0` (NEW — regular
-  per-pair MSE against mix_cv40_iw60)
-- `--konjnd-aggregation-weight 0.1 --konjnd-aggregation-step-p 0.10`
-  (moderate aggregation aux loss)
-- All other hyperparams identical to attempts 1+2.
+**3 of 5 criteria fail decisively.** Even the best-of-5-seeds
+variance (±0.05 typical for these recipes) can't close the
+0.23-unit gap to KonJND 0.85 or recover the cross-codec p50.
+SROCC numbers are bit-exact across calibrated/uncalibrated
+(monotone spline by construction).
 
-Pipeline started 03:50 UTC. Early signal (epoch 0):
-- val=0.9196 (above attempts 1+2 at epoch 0)
-- konjnd_dense train SROCC = 0.9925 already — the per-pair MSE on
-  mix_cv40_iw60 IS giving feature-driven gradient (no zero-gradient
-  pathology). This is the structural fix attempts 1+2 were missing.
+Killing the 5-seed CI saves ~70 min of CPU since the verdict is
+unambiguous on a4 settings.
 
-Expected outcome (3 hypotheses):
-- (A) The per-pair konjnd training group lifts KonJND val to ≥ 0.6
-  (between v10's 0.23 and attempt 1's 0.76), CID22 stays near v10's
-  0.85. Ship-grade. → 5-seed CI on this recipe.
-- (B) KonJND moderate (0.4-0.6), CID22 slight drop (0.80-0.85).
-  Partial pass — drop konjnd train_w to 0.1 + bump agg weight.
-- (C) Same failure pattern as attempts 1/2. → Mechanism change
-  required (drop per-sample-α, use pool_head directly, OR add
-  gradient normalization to aggregation step).
+## Final verdict — v11 cycle (2026-05-24)
 
+**NO SHIP.** V_tuner_v10 (PreviewV0_5TunerV4) remains the canonical
+codec-target metric. `ZensimProfile::codec_target()` continues to
+return `PreviewV0_5TunerV4`.
 
-If attempt 2 fails (likely if α=1 stays pinned — early signal at
-epoch 50 shows α=1.000 across the network, indicating the
-aggregation gradient is too small to displace rank-head dominance):
+What v11 produced (preserved for future iteration):
+1. **Architectural breakthrough**: the per-source aggregation head
+   (task #4) IS mechanically effective at lifting KonJND. a4 shows
+   +0.38 SROCC lift over v10 (0.232 → 0.615). The V11-D zero-
+   gradient pathology is solved — the network CAN learn per-source
+   PJND signal without per-pair-MSE-against-constant zero-gradient.
+2. **CID22-train data shipped**: 17,611 ssim2/CVVDP/IWSSIM-anchored
+   pairs in canonical-2026-05-21. Reusable substrate for future
+   training cycles.
+3. **Empirical map of the (aggregation weight, step_p) trade-off**:
+   - a3 (w=0.1): KonJND 0.11 (collapse), CID22 0.81 (preserved)
+   - **a4 (w=0.3): KonJND 0.62 (lift), CID22 0.77 (mod cost)**
+   - a5 (w=0.5): KonJND 0.57 (regress), CID22 0.71 (large cost)
+   - Non-monotonic — peak around w=0.3-0.35 estimated.
+4. **5 falsified attempts logged with evidence** for next session's
+   recovery cycle: `tuner_v11_{w0.05,w0.3,a3,a4,a5}_s1_evidence.bin`.
 
-The root cause is that v11 currently only includes konjnd-dense via
-the aggregation pool, NOT as a regular training group. konjnd-dense
-has TWO targets populated:
-- `mix_cv40_iw60` PER-ROW (range -66 to +96, median 68) — feature-driven per-pair target.
-- `pjnd_target` PER-REF (range 22-70, median 32) — per-source-constant aggregation target.
+What v11 didn't produce:
+- A bake that beats v10 on the 5-criterion ship gate.
+- The KonJND 0.85 target. The trajectory says it's not reachable
+  via aggregation-weight tuning alone with current data shape.
 
-V_tuner_v9 trained ONLY on safesyn — it never saw konjnd-dense
-feature → score mappings at the per-pair level. That's why v10
-KonJND val SROCC is 0.23: no per-pair konjnd training signal at all.
+Hypothesis for next iteration:
+- Aggregation head + per-pair PJND-anchored data (which doesn't
+  exist in canonical-2026-05-21). Need per-pair PJND scores on
+  konjnd-dense, not just per-source pjnd_target. Requires either
+  (a) different score derivation, or (b) train on KonJND-1k val
+  (would compromise the held-out gate).
+- Pool-head-only architecture (drop --per-sample-alpha-head) with
+  konjnd-dense as training group AND aggregation. Tests whether
+  the per-sample-α gate is the noise source.
+- Multi-target supervision: train against pjnd_target + mix_cv40_iw60
+  simultaneously per konjnd-dense row, with per-target weights.
+  Needs trainer flag --per-row-multi-target.
 
-**Attempt 3 recipe** (use BOTH konjnd-dense slots):
-- `--group konjnd_dense:konjnd-dense.parquet:0.3:0.0` (regular MSE
-  against mix_cv40_iw60; train weight 0.3 — same as cid22_train)
-- `--konjnd-aggregation-weight 0.1 --konjnd-aggregation-step-p 0.10`
-  (aggregation aux loss at moderate weight)
-- All other v11 hyperparams identical.
-
-Rationale: regular per-pair MSE gives feature-driven gradient on
-konjnd-dense (no per-source constant collapse since each row has
-its own mix_cv40_iw60 value). Aggregation MSE adds soft per-source
-PJND calibration. Combination should produce a network that ranks
-konjnd-dense pairs correctly AND lands per-ref mean near pjnd_target.
-
-If attempt 2 ALSO fails (i.e. neither rank nor aggregation lifts
-KonJND beyond v10):
-- Skip to attempt 3 (the per-pair MSE on konjnd-dense is the
-  missing signal, not the aggregation weight).
-
-Backup mechanism options if attempts 2 + 3 both fail:
-- Aggregation step gradient normalization (divide by rank-step
-  gradient L2 norm)
-- Per-ref weighted sampling (currently uniform over 1008 refs)
-- Skip per-sample-α head — use pool_head + aggregation directly
-  (current trainer requires per-sample-α; would need to extend
-  pool_head to accept konjnd_agg pool).
-
-## Results (5-seed CI, w=0.05 step_p=0.10)
-
-| Seed | CID22 | KADID | TID | KonJND | AIC-3 | AIC-4 |
-|---|--:|--:|--:|--:|--:|--:|
-| 1 | TBD | TBD | TBD | TBD | TBD | TBD |
-| 2 | TBD | TBD | TBD | TBD | TBD | TBD |
-| 3 | TBD | TBD | TBD | TBD | TBD | TBD |
-| 4 | TBD | TBD | TBD | TBD | TBD | TBD |
-| 5 | TBD | TBD | TBD | TBD | TBD | TBD |
-| **median** | TBD | TBD | TBD | TBD | TBD | TBD |
-
-## Observed during training: α(x) collapse to 0
-
-In the 2026-05-24 5-seed CI run, the per-sample-α gate `α(x) =
-sigmoid(W_α·h + b_α)` collapses from its init value 0.5 down to
-exactly 0.0 (min=max=0.000) within the first 10 epochs, and stays
-pinned there for all 300 epochs across all seeds. The training is
-otherwise healthy — val SROCC improves epoch-by-epoch, the network
-keeps learning — but the per-sample mix collapses to "use the pool
-head exclusively, ignore the rank head."
-
-Mechanically, the aggregation step's gradient is a sum-over-S-rows
-that flows through the pool head (where the K·S rows contribute
-their per-prediction gradient) AND through the per-sample α gate
-(where the residual gets multiplied by `(1 - α)` for the pool
-branch and `α` for the rank branch). The trainer settles into a
-local minimum where α≈0 minimizes the aggregation MSE because the
-pool reducer (4 fixed pooling functions over the hidden vector)
-preserves more cross-row consistency than the per-row rank head.
-
-**Runtime implication**: the runtime forward path
-(`zensim::metric::forward_one_bake`) handles α=0 correctly —
-`alpha * y_rank + (1 - alpha) * y_pool` becomes `y_pool` exactly.
-The bake is functionally a pool-head bake carrying per-sample-α
-metadata that the dispatch ignores (α=0 → no rank contribution).
-This is correctness-preserving but suggests the next iteration
-(v12?) could simplify to `pool_head` directly without the α gate.
-
-**Not a regression**: V_tuner_v9 (current ship) also shows α≈0.4
-at convergence — a "mostly pool, some rank" blend. v11's α≈0
-extends this further. The cause is the new aggregation step
-strengthening the pool-head gradient relative to the rank head.
-
-## Cross-codec consistency vs V_tuner_v10 baseline
-
-Re-run `scripts/v_next/measure_tuner_v10_cross_codec.py` against
-the median-seed bake; compare per-anchor p50/p90 |Δ| to v10's
-`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`.
-
-| butter_level | v10 p50 \|Δ\| | v11 p50 \|Δ\| | Δ |
-|---|--:|--:|--:|
-| 1.107 (score ≈ 84) | 0.566 | TBD | TBD |
-| 1.510 (JND-adjacent) | 0.786 | TBD | TBD |
-| 2.721 (PJND ≈ 63) | 1.470 | TBD | TBD |
-| ≥ 6.8 (low-q) | (clamped flat) | TBD (key gate #5) | TBD |
-
-## Verdict
-
-TBD post 5-seed CI completion. Update this doc with the gate
-status and ship decision before flipping
-`ZensimProfile::codec_target()` in `zensim/src/profile.rs`.
+These are queued as recovery-phase 4 work for a future session.
 
 ## See also
 
