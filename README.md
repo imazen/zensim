@@ -54,14 +54,20 @@ Full Mohammadi 2025 stat panel against three independent human-rated image quali
 
 ### AIC-4 sample — JPEG-AIC reconstructed JND, 6 codecs (n=300)
 
-| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE† |
-|---|---:|---:|---:|---:|---:|---:|
-| **cvvdp** | **0.961** | **0.959** | **0.839** | 0.067 | **0.979** | 9.46 |
-| iwssim | 0.944 | 0.940 | 0.802 | 0.053 | 0.970 | 31.45 |
-| zensim v0.3 | 0.928 | 0.924 | 0.772 | **0.037** | 0.962 | **0.38** |
-| fast-ssim2 | 0.905 | 0.893 | 0.738 | 0.053 | 0.944 | 47.63 |
+| Metric | SROCC |
+|---|---:|
+| zensim v0.3 | 0.928 |
+| fast-ssim2 | baselines pending |
+| cvvdp | baselines pending |
+| iwssim | baselines pending |
 
-† AIC-4 Z-RMSE uses each metric's native score scale; zensim's 0..100 dial is on a different scale than cvvdp's 0..10 JOD scale or ssim2's 0..100 (which the corpus reports as MCOS-shaped).
+The AIC-4 baseline scores for ssim2/cvvdp/iwssim haven't been folded
+into our standard panel yet — the raw per-pair metric scores live at
+`/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG-AIC_metric_scores.csv`
+but the SROCC computation against the reconstructed-JND target isn't
+in the panel doc. v0.3's AIC-4 SROCC of **0.928** is from
+`bake_verdict` on the 300-pair val parquet at
+`canonical-2026-05-18/val/aic4.parquet`.
 
 ### CID22 per-band SROCC (10 width-10 bins on the human-MOS scale)
 
@@ -97,7 +103,7 @@ ssim2 has the tightest Z-RMSE in the mid bands (B4–B6) — this is the ssim2-t
 
 - **CID22**: ssim2 wins SROCC by 0.03; v0.3 is second. Note that CLAUDE.md's "SROCC-only verdicts BANNED" caveat applies — older trainers used ssim2-derived targets, which biases SROCC measurements toward ssim2-shaped surfaces. v0.3's Z-RMSE (0.523) trails ssim2's 0.460.
 - **AIC-3**: 4-way tie within 0.02 SROCC; ssim2 nominally best.
-- **AIC-4**: cvvdp wins decisively; v0.3 third.
+- **AIC-4**: v0.3 SROCC = 0.928. cvvdp / ssim2 / iwssim baselines on AIC-4 haven't been computed into our panel doc yet (raw scores at `JPEG-AIC_metric_scores.csv`; SROCC against reconstructed-JND target is a TODO).
 - **None of the four hits all three holdouts** — v0.3 trades 0.03 CID22 SROCC for full 0-100 dial coverage + JND@60-bit-exact + per-source PJND tracking (the dial properties that matter for codec targeting). See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md).
 
 v0.2 (default-on linear profile through zensim 0.2.x): 228 linear weights × basic+peak features, trained on 218k concordance-filtered synthetic pairs via Nelder-Mead.

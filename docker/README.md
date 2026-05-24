@@ -1,4 +1,59 @@
-# zensim V_X reproducibility container
+# zensim Docker images
+
+Two images live here:
+
+1. **`zensim-stats`** (`Dockerfile.stats`) — slim eval image (~210 MB)
+   that runs the full Mohammadi panel + per-band tables + JPEG q-sweep
+   monotonicity on the shipped `PreviewV0_3` bake and pretty-prints
+   the report. **Start here** for "how good is the metric?"
+2. **`zensim-repro`** (`Dockerfile`) — heavyweight reproducibility
+   container (scaffolded, stubbed) that rebuilds the bake end-to-end
+   from raw corpora.
+
+## `zensim-stats` — runtime evaluation image
+
+```sh
+# Build:
+bash docker/build_stats.sh
+
+# Run (ANSI-coloured terminal report):
+docker run --rm zensim-stats:latest
+
+# Machine-readable JSON:
+docker run --rm zensim-stats:latest --json > stats.json
+
+# Markdown report (paste-able into GitHub):
+docker run --rm zensim-stats:latest --md > stats.md
+```
+
+What it runs:
+- **bake_verdict** on canonical val parquets — full Mohammadi panel
+  (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) per corpus
+- **per-band CID22** SROCC + Z-RMSE side-by-side with ssim2 / cvvdp /
+  iwssim baselines (10-band MOS grid)
+- **qsweep_eval** on the canonical JPEG q-sweep fixture — strict
+  monotonicity rate (gate: ≥ 0.928)
+
+Image layout (per CLAUDE.md "BAKE EVERYTHING, NEVER APT AT BOOT"):
+```
+/usr/local/bin/{bake_verdict,qsweep_eval,predict_features_with_bake}
+/app/weights/codec_target.bin          # 54 KB packed bake
+/app/val_parquets/                     # canonical val features
+/app/qsweep/qsweep_features.csv        # JPEG q-sweep fixture
+/app/baseline_panels.md                # ssim2/cvvdp/iwssim baselines
+/app/run_all_stats.py                  # orchestrator (entrypoint)
+```
+
+Fair-holdout taxonomy (the report colour-codes green vs yellow):
+- **Green** = CID22, AIC-3, AIC-4 (NOT in v0.3 training, fair anchors)
+- **Yellow** = KADID, TID, KonJND-1k (in v0.3 training mix, NOT fair
+  but reported for completeness)
+
+The image builds from prebuilt Linux binaries — no `cargo build`
+runs during `docker build`. Update the image when the bake or
+binaries rotate via `bash docker/build_stats.sh`.
+
+## `zensim-repro` — reproducibility container (heavyweight, scaffolded)
 
 Goal: any future agent or external auditor can `docker build && docker
 run` and end up with the same canonical clean training corpus +

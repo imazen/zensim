@@ -1,0 +1,72 @@
+# zensim — stats / evaluation image (2026-05-24)
+#
+# Slim runtime image that runs the full Mohammadi panel + per-band
+# tables + monotonicity + cross-codec consistency on the shipped
+# `PreviewV0_3` bake (Tuner v5, `v_tuner_v11_2026-05-24.bin`) and
+# pretty-prints the results.
+#
+# Per CLAUDE.md "Remote / Fleet Images: BAKE EVERYTHING, NEVER
+# APT-INSTALL AT BOOT" — Rust binaries are pre-built on the host
+# and COPIED in. The val parquets ship inside the image. No `cargo
+# build` happens during `docker build`.
+#
+# Build:
+#   bash docker/build_stats.sh                  # builds binaries + image
+#
+# Run:
+#   docker run --rm zensim-stats                # full report to stdout
+#   docker run --rm zensim-stats --json         # machine-readable
+#
+# Image layers (cache-friendly: base → libs → bake → parquets → script):
+#   ~80 MB base + ~50 MB python deps + ~20 MB binaries + 54 KB bake
+#   + ~60 MB val parquets = ~210 MB total.
+
+FROM ubuntu:24.04 AS runtime
+
+LABEL org.opencontainers.image.title="zensim-stats"
+LABEL org.opencontainers.image.description="Run the full Mohammadi panel + per-band + monotonicity + cross-codec eval on the shipped zensim PreviewV0_3 bake."
+LABEL org.opencontainers.image.source="https://github.com/imazen/zensim"
+LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Layer 1: stable apt packages (changes monthly at most). Single
+# RUN per CLAUDE.md "BAKE EVERYTHING" — no apt at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3 \
+        libssl3 \
+ && rm -rf /var/lib/apt/lists/*
+
+# Layer 2: pre-built binaries (changes on code edits). Built on host
+# by docker/build_stats.sh.
+COPY docker/build_artifacts/bake_verdict /usr/local/bin/bake_verdict
+COPY docker/build_artifacts/qsweep_eval /usr/local/bin/qsweep_eval
+COPY docker/build_artifacts/predict_features_with_bake /usr/local/bin/predict_features_with_bake
+
+# Layer 3: shipped bake (54 KB; changes per ship rotation).
+COPY zensim/weights/v_tuner_v11_2026-05-24.bin /app/weights/codec_target.bin
+
+# Layer 4: val parquets + qsweep fixture (~60 MB; changes when
+# canonical-corpus rotates).
+COPY docker/build_artifacts/val_parquets/ /app/val_parquets/
+COPY docker/build_artifacts/qsweep_features.csv /app/qsweep/qsweep_features.csv
+COPY docker/build_artifacts/qsweep_manifest.tsv /app/qsweep/qsweep_manifest.tsv
+
+# Layer 5: orchestrator + baseline panels (small, changes per script edit).
+COPY docker/run_all_stats.py /app/run_all_stats.py
+COPY benchmarks/baseline_panels_2026-05-18.md /app/baseline_panels.md
+
+WORKDIR /app
+
+# Sanity check: binaries + bake are accessible. Pass the val_parquets
+# path so bake_verdict finds the canonical feature files.
+RUN /usr/local/bin/bake_verdict \
+        --bake /app/weights/codec_target.bin \
+        --features-root /app/val_parquets \
+        --output /tmp/_smoke.md > /dev/null 2>&1 \
+ || (echo "ERROR: bake_verdict smoke check failed" >&2 && \
+     /usr/local/bin/bake_verdict --bake /app/weights/codec_target.bin --features-root /app/val_parquets --output /tmp/_smoke.md ; exit 1)
+
+ENTRYPOINT ["python3", "/app/run_all_stats.py"]
