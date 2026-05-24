@@ -116,10 +116,31 @@ subsequent strips reuse via `.truncate()` + `.resize()`.
 
 ## Optimization 3: Phase 4 — streaming `PrecomputedReference`
 
-**Status**: documented in `STREAMING_372_PLAN.md` as Phase 4
-**Estimated win**: ~70% peak RSS reduction at 80 MP — drops from 5.7 GB
-to ~1.7 GB. Unlocks single-threaded 1.2× target from the original plan
-(currently 0.87–0.89×) by eliminating the per-pair pyramid build entirely.
+**Status**: NOT shipping — analysis shows it's the wrong fix.
+
+**Estimated win on inspection**: ~10% peak RSS at 80 MP (1.28 GB pyramid
+→ ~800 MB strip-pyramid × 16 workers). For 1080p the ref pyramid is
+~16 MB; per-strip pyramid × 16 workers is ~256 MB — actually WORSE.
+
+The two strip paths already cover the use cases cleanly:
+- `compute_with_ref_streaming_strips` — batched encoder loop (1 ref × N
+  distorted): builds the full pyramid once, scores N distorted against
+  it via zero-copy strip views (Optimization 1 covered this).
+- `compute_streaming_strips` — single-pair memory-bounded: builds a
+  per-strip pyramid from the source SubsetView, never materializes the
+  full pyramid. THIS is what the 80 MP OOM test uses.
+
+Phase 4 would converge these — make the with-ref path also build
+strip-by-strip. But that means the BATCH case rebuilds the pyramid per
+distorted candidate, losing the amortization across calls. Net: slower
+for batches, only saves peak RSS for unusual single-call workloads
+that would call the with-ref path with N=1.
+
+If you have a workload that truly needs both batched reuse AND
+bounded peak (very large image, very many distorted), the fix is a
+caller-side discipline: process strips of the corpus in batches, with
+each batch building its own per-strip pyramid. That's a caller-side
+pattern, not a metric-side architectural change.
 
 Currently `PrecomputedReference::new` builds the full ref XYB pyramid up
 front (1.28 GB at 80 MP). With strip aggregation, we only need each
@@ -139,8 +160,44 @@ batched scoring, not single 80 MP one-offs).
 
 ## Optimization 4: SIMD-tier audit of inner kernels
 
-**Status**: documented in `STREAMING_372_PLAN.md` as Phase 3
-**Estimated win**: TBD — needs profiling first.
+**Status**: DONE — commits `0fb528e` (AVX-512 v4x siblings) + `148c65c`
+(per-rayon-worker ScaleBuffers reuse) ✓
+
+**Measured wins**: 1.5-2.7× wall-time speedup across all geometries.
+On safesyn 99-pair, 16-core Zen 4 (AVX-512 host):
+
+| Geometry | Pre-Opt 4 | Post-Opt 4 | Speedup |
+|---|---:|---:|---:|
+| Small  256×1024 1T full      | 3.34s | 1.47s | **2.28×** |
+| Small  256×1024 par strip    | 1.10s | 0.40s | **2.75×** |
+| Medium 1024×2048 1T full     | 2.03s | 0.98s | **2.08×** |
+| Medium 1024×2048 par buff    | 0.48s | 0.18s | **2.67×** |
+
+What landed:
+
+1. **AVX-512 v4x siblings for 10 hot inner kernels**. Hand-rolled
+   `_v4` kernels already used `f32x16` ops (16-wide), which polyfill
+   as 2× AVX2 256-bit on V4 hardware. Adding sibling `_v4x` functions
+   with `X64V4xToken` makes the same source compile to single AVX-512
+   512-bit ops — halving instruction count + reducing register
+   pressure. Touched files: `blur.rs`, `color.rs`, `fused.rs`. The
+   `incant!` dispatcher tier lists now include `v4x` before `v4`.
+
+2. **Per-rayon-worker `ScaleBuffers` reuse**. `process_band` closure
+   inside `process_scale_bands_into_accum` was creating fresh
+   `ScaleBuffers` (7 × `Vec<f32>` zero-fill) per call. Post-v4x the
+   memset cost rose to 9.24% (was 5.06% — fixed compute got 2×
+   faster, making memset a larger share). The fix: map_init pattern
+   gives each rayon worker its own `ScaleBuffers::empty()`; the first
+   band call grows via new `ensure_capacity` method; subsequent calls
+   are no-ops. Memset post-fix dropped to 3.74%.
+
+3. **Profile-driven**: identified hot loops via `cargo flamegraph` on
+   a 1080p strip-path bench harness (`zensim/examples/streaming_bench.rs`).
+   Top 6 symbols now collectively ~96% of wall-time, all `_v4x` SIMD
+   kernels. Remaining non-SIMD time is rayon coordination (~4.4%) and
+   memset for initial allocations (~3.7%) — both at the threshold
+   where further optimization needs harder structural changes.
 
 `cargo read magetypes` confirmed the kernel idiom: `#[magetypes(define(...),
 v4, v3, neon, wasm128, scalar)]` for one-source-many-platforms SIMD. The
