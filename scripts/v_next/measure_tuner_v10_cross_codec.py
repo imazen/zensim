@@ -187,7 +187,11 @@ def main() -> int:
     md = []
     md.append(f"# Tuner v10 cross-codec consistency baseline — 2026-05-24")
     md.append("")
-    md.append(f"- **Bake:** `{args.bake.relative_to(ROOT)}`")
+    try:
+        bake_disp = args.bake.resolve().relative_to(ROOT)
+    except ValueError:
+        bake_disp = args.bake
+    md.append(f"- **Bake:** `{bake_disp}`")
     md.append(f"- **Eq parquet:** `{args.parquet}`")
     md.append(f"- **n pairs:** {overall['n']:,}")
     md.append(f"- **bake-post:** `{args.bake_post}` (raw output, before any clamp/spline)")

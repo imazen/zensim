@@ -125,6 +125,32 @@ analog: same perceptual quality → same score, p90 = 3.58. This is
 consistent with the per-codec finding (small offset) + larger
 within-codec content noise.
 
+## Cross-trail comparison (2026-05-24)
+
+Ran the same eval on the other two trail ships for context. Tuner
+is decisively the most cross-codec-consistent of the three:
+
+| Bake | median \|Δ\| | p90 \|Δ\| | p99 \|Δ\| | n |
+|---|--:|--:|--:|--:|
+| **Tuner v10** (`v_tuner_v10_2026-05-20.bin`) | **1.183** | **3.577** | **8.049** | 68,788 |
+| Compression v3 (`v_compression_v3_2026-05-20.bin`) | 2.637 | 15.317 | 39.460 | 68,788 |
+| Balanced v3 (`v_balanced_v3_2026-05-20.bin`) | 3.055 | 20.709 | 51.487 | 68,788 |
+
+**Tuner v10 is 3-6× tighter cross-codec than the other trails:**
+- vs Balanced: 2.6× tighter at p50, 5.8× tighter at p90, 6.4× tighter at p99
+- vs Compression: 2.2× tighter at p50, 4.3× tighter at p90, 4.9× tighter at p99
+
+This is structural — Tuner's training mix explicitly includes
+cross-codec equivalence pair-loss (`--cross-codec-eq-weight 1.0`)
+plus the V_22 multi-band anchor parquet, while Balanced/Compression
+optimize for within-codec rank fidelity. **Picking Balanced or
+Compression as the codec-target metric would have given users
+3-6× worse cross-codec dial precision** — concrete validation of
+the `ZensimProfile::codec_target()` → `PreviewV0_5TunerV4` choice
+(per `docs/CODEC_TARGET_METRIC.md`).
+
+Raw scores: `/mnt/v/output/zensim/cross_codec_compare_2026-05-24/{balanced,compression}_v3.parquet`.
+
 ## Implications for codec-target ship
 
 **Verdict: Tuner v10 is ship-ready as the canonical codec-target metric

@@ -44,6 +44,20 @@ codecs care about ordering within their own q-sweep (monotonic) and
 about cross-codec equivalence at quality targets (Tuner is best),
 not about ranking synthetic-distortion families.
 
+**Measured 2026-05-24 — Tuner is 3-6× tighter cross-codec than the
+other trails** (`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`):
+
+| Bake | median \|Δ\| | p90 \|Δ\| | p99 \|Δ\| |
+|---|--:|--:|--:|
+| **Tuner v10** | **1.18** | **3.58** | **8.05** |
+| Compression v3 | 2.64 | 15.32 | 39.46 |
+| Balanced v3 | 3.06 | 20.71 | 51.49 |
+
+Picking Balanced or Compression as the codec-target would have given
+users a dial whose precision swings by ±20-50 score units across
+codecs at the same perceptual quality. Tuner's ±3-8 swing is the
+production-ready floor.
+
 For *general perceptual ranking* (e.g., comparing two competing
 codecs' outputs as an A/B quality assessment), use
 `ZensimProfile::balanced_v3()` or `compression_v3()` instead.
