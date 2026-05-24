@@ -14,6 +14,8 @@ These are the docs to read first for a given purpose:
 
 | Purpose | Doc |
 |---|---|
+| **Canonical codec-target metric** (2026-05-24) | [`tuner_v10_cross_codec_baseline_2026-05-24.md`](tuner_v10_cross_codec_baseline_2026-05-24.md) + [`../docs/CODEC_TARGET_METRIC.md`](../docs/CODEC_TARGET_METRIC.md) |
+| **Tuner v11 in-flight retrain** (task #6) | [`v_tuner_v11_methodology_2026-05-24.md`](v_tuner_v11_methodology_2026-05-24.md) |
 | **Most recent full-stat panel comparison across all bakes** | [`v0_20_all_bakes_stat_comparison_2026-05-15.md`](v0_20_all_bakes_stat_comparison_2026-05-15.md) |
 | **Currently-shipped bake methodology** | [`v0_18_methodology_2026-05-13.md`](v0_18_methodology_2026-05-13.md) + [`v0_18_ship_reference_card_2026-05-14.md`](v0_18_ship_reference_card_2026-05-14.md) |
 | **Runtime cost of extended + IW features** | [`extended_iw_runtime_perf_optimized_2026-05-15.md`](extended_iw_runtime_perf_optimized_2026-05-15.md) |
