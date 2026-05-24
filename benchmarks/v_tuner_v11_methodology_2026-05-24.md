@@ -311,11 +311,74 @@ SROCC numbers are bit-exact across calibrated/uncalibrated
 Killing the 5-seed CI saves ~70 min of CPU since the verdict is
 unambiguous on a4 settings.
 
-## Final verdict — v11 cycle (2026-05-24)
+## Final verdict — v11 cycle (2026-05-24, SUPERSEDED by attempt 7)
 
-**NO SHIP.** V_tuner_v10 (PreviewV0_5TunerV4) remains the canonical
-codec-target metric. `ZensimProfile::codec_target()` continues to
-return `PreviewV0_5TunerV4`.
+This section described the verdict AFTER attempts 1-5. Attempt 7
+re-opened ship eligibility — see "Attempt 7" below.
+
+**ORIGINAL VERDICT (a1-a5 only): NO SHIP.** v10 stays canonical.
+
+## Attempt 7 — multi-dataset + wider tanh CHANGES THE SHIP CALCULUS
+
+Per user directive 2026-05-24: "you can train on multiple data
+sets incl synth." a7 adds kadid + tid as training groups + widens
+tanh_output_head_scale 20 → 30.
+
+### a7 SROCC results
+
+| Corpus | v10 | a4 | **a7** | a7 Δ vs v10 |
+|---|--:|--:|--:|--:|
+| CID22 | 0.854 | 0.769 | **0.745** | −0.109 |
+| KADID | 0.483 | 0.561 | 0.906 | +0.422 (now train; unfair) |
+| TID | 0.664 | 0.614 | 0.873 | +0.209 (now train; unfair) |
+| **KonJND** | 0.232 | 0.615 | **0.522** | +0.290 |
+| AIC-3 | 0.787 | 0.771 | 0.771 | −0.016 |
+| Mono | 0.964 | 0.938 | 0.940 | −0.024 |
+
+### THE 0-100 DIAL FINDING
+
+| | v10 | **a7 calibrated** | meaning |
+|---|--:|--:|---|
+| min predicted score | -27 | -2 | similar tail |
+| **p5 score** | **48** | **26** | a7 reaches low-q region |
+| p50 score | 65 | 50 | a7 median at true center |
+| p95 score | 93 | 85 | similar high tail |
+| Mean at butter=4.3 | 53 (flat floor) | **35** | a7 differentiates low-q |
+| Mean at butter=6.8 | 55 (flat floor) | 37 | a7 still discriminates |
+| **JND landing** | mean 79 | **mean 60 (bit-exact)** | a7 dial-honest at JND |
+| Cross-codec p50 at butter=1.5 (JND) | 0.79 | 0.94 | a7 0.15 unit wider |
+| Cross-codec p50 overall | 1.18 | 1.63 | a7 0.45 unit wider |
+
+**The score-floor pathology is GONE in a7.** For codec consumers
+binary-searching "score 30" or "score 50", v10 returns the flat
+floor; a7 returns differentiated scores. This is exactly the
+user's question: "do better in 0-100 range with cross-codec
+consistency" — answered YES, at modest cross-codec cost.
+
+### Trade-off
+
+- **a7 wins**: 0-100 dial coverage, JND@60 bit-exact, KonJND +0.29
+- **a7 loses**: CID22 −0.11 (gold holdout), kadid/tid as val
+  anchors (now train), cross-codec p50 +0.45 overall (+0.15 at JND)
+
+### Attempt 8 — IN FLIGHT (a7 with lighter aggregation)
+
+Tests whether the konjnd_aggregation_weight=0.3 is the CID22 drain.
+a8 = a7 recipe with `--konjnd-aggregation-weight 0.05
+--konjnd-aggregation-step-p 0.10` (a3's settings on the
+multi-dataset substrate). Hypothesis: kadid+tid+wider tanh give
+the dial coverage, while light aggregation gives modest KonJND
+lift without sacrificing CID22.
+
+Decision after a8:
+- If a8 has CID22 ≥ 0.83 AND dial coverage similar to a7 AND
+  KonJND ≥ 0.35: **SHIP as PreviewV0_5TunerV5**. This is the
+  recovery phase 4 win.
+- If a8 CID22 < 0.80: stay with v10, document a7 as research
+  artifact ("how to get 0-100 dial but at CID22 cost").
+- If a8 dial coverage collapses back to v10-like clamp: the
+  konjnd aggregation IS load-bearing for the dial. Then a7 is
+  the actual ship candidate, accepting the CID22 −0.11 trade.
 
 What v11 produced (preserved for future iteration):
 1. **Architectural breakthrough**: the per-source aggregation head
