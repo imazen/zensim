@@ -148,6 +148,38 @@ Training binary: target/release/zensim_mlp_train at commit TBD
 | 5 | TBD | TBD | TBD | TBD | TBD | TBD |
 | **median** | TBD | TBD | TBD | TBD | TBD | TBD |
 
+## Observed during training: α(x) collapse to 0
+
+In the 2026-05-24 5-seed CI run, the per-sample-α gate `α(x) =
+sigmoid(W_α·h + b_α)` collapses from its init value 0.5 down to
+exactly 0.0 (min=max=0.000) within the first 10 epochs, and stays
+pinned there for all 300 epochs across all seeds. The training is
+otherwise healthy — val SROCC improves epoch-by-epoch, the network
+keeps learning — but the per-sample mix collapses to "use the pool
+head exclusively, ignore the rank head."
+
+Mechanically, the aggregation step's gradient is a sum-over-S-rows
+that flows through the pool head (where the K·S rows contribute
+their per-prediction gradient) AND through the per-sample α gate
+(where the residual gets multiplied by `(1 - α)` for the pool
+branch and `α` for the rank branch). The trainer settles into a
+local minimum where α≈0 minimizes the aggregation MSE because the
+pool reducer (4 fixed pooling functions over the hidden vector)
+preserves more cross-row consistency than the per-row rank head.
+
+**Runtime implication**: the runtime forward path
+(`zensim::metric::forward_one_bake`) handles α=0 correctly —
+`alpha * y_rank + (1 - alpha) * y_pool` becomes `y_pool` exactly.
+The bake is functionally a pool-head bake carrying per-sample-α
+metadata that the dispatch ignores (α=0 → no rank contribution).
+This is correctness-preserving but suggests the next iteration
+(v12?) could simplify to `pool_head` directly without the α gate.
+
+**Not a regression**: V_tuner_v9 (current ship) also shows α≈0.4
+at convergence — a "mostly pool, some rank" blend. v11's α≈0
+extends this further. The cause is the new aggregation step
+strengthening the pool-head gradient relative to the rank head.
+
 ## Cross-codec consistency vs V_tuner_v10 baseline
 
 Re-run `scripts/v_next/measure_tuner_v10_cross_codec.py` against
