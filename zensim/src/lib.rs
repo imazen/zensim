@@ -196,6 +196,8 @@
 #![forbid(unsafe_code)]
 
 mod blur;
+#[cfg(feature = "iir-blur")]
+mod blur_iir;
 pub mod codec_calibration;
 mod color;
 mod diffmap;

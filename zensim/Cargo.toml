@@ -30,6 +30,10 @@ imgref = ["dep:imgref", "dep:rgb"]
 ## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
 ## alpha (un-premultiplied on the fly).
 zenpixels = ["dep:zenpixels"]
+## EXPERIMENTAL: replace the box-blur 1-pass path with an IIR Gaussian
+## (Charalampidis 2016). Compat-breaking — scores differ from the box-blur
+## reference by ~1-3% on real photographs.
+iir-blur = []
 ## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
 ## Uses zenresize for resampling — training/research feature.
 ## Commented out: zenresize not yet published to crates.io.
@@ -63,4 +67,4 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "iir-blur"))']  # zenresize kept in check-cfg for gated code

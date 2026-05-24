@@ -28,8 +28,15 @@ pub fn box_blur_1pass_into(
     height: usize,
     radius: usize,
 ) {
-    box_blur_h(input, temp, width, height, radius);
-    box_blur_v_from_copy(temp, output, width, height, radius);
+    #[cfg(feature = "iir-blur")]
+    {
+        crate::blur_iir::iir_blur_1pass_into(input, output, temp, width, height, radius);
+    }
+    #[cfg(not(feature = "iir-blur"))]
+    {
+        box_blur_h(input, temp, width, height, radius);
+        box_blur_v_from_copy(temp, output, width, height, radius);
+    }
 }
 
 /// Vertical box blur: read from `src`, write to `dst`.
