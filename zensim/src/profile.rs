@@ -875,6 +875,16 @@ impl ZensimProfile {
     /// expect non-monotonic codec output until task #6 (Tuner v11)
     /// ships.
     ///
+    /// **Why not Balanced or Compression?** Measured on the same
+    /// 68,788 matched-anchor pairs (2026-05-24): Balanced v3 yields
+    /// median |Δ| = 3.06 (p90 20.71), Compression v3 yields median
+    /// |Δ| = 2.64 (p90 15.32). Tuner is **3-6× tighter cross-codec**,
+    /// because Tuner trains with explicit cross-codec equivalence
+    /// pair-loss while the other trails optimize within-codec rank
+    /// fidelity at the cost of cross-codec spread. Picking either
+    /// of those as the codec-target dial would give users ±20-50
+    /// score-unit precision swings across codecs.
+    ///
     /// See [`docs/CODEC_TARGET_METRIC.md`] in the zensim repo for the
     /// integration guide.
     pub const fn codec_target() -> Self {
