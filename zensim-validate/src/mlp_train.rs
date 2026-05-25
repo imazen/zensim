@@ -545,6 +545,20 @@ pub struct MlpHyperparams {
     /// - Parallel-batch flag (sequential mini-batch only).
     pub per_sample_alpha_head: bool,
 
+    /// Add a learned 372→1 linear skip connection alongside the MLP.
+    /// The final output is `y_mlp + w_skip · x + b_skip`. This lets
+    /// features with a direct linear relationship to quality bypass
+    /// the hidden-layer bottleneck. ~375 extra params. Composes with
+    /// any head type. Default `false`.
+    pub skip_connection: bool,
+
+    /// Number of hidden layers. Default 1 (372→128→heads). Setting
+    /// to 2 adds a second hidden layer: 372→128→64→heads. The
+    /// second layer uses the same LeakyReLU activation. The
+    /// n_hidden field controls the FIRST hidden layer width; the
+    /// second is always n_hidden/2 (clamped to ≥8).
+    pub n_hidden_layers: usize,
+
     /// MSE-target weight (`PreviewV0_5Tuner` experiment, 2026-05-18).
     ///
     /// When `> 0`, an auxiliary per-prediction MSE loss
@@ -868,6 +882,8 @@ impl Default for MlpHyperparams {
             pool_head: false,
             hybrid_head: false,
             per_sample_alpha_head: false,
+            skip_connection: false,
+            n_hidden_layers: 1,
             mse_weight: 0.0,
             ranknet_weight: 1.0,
             monotonicity_reg: 0.0,

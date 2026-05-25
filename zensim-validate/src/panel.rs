@@ -215,6 +215,46 @@ pub fn z_rmse(predicted: &[f64], target: &[f64]) -> f64 {
     (sum_sq / count as f64).sqrt()
 }
 
+/// Per-sample Z-RMSE (Mohammadi 2025 Equation 6):
+///
+/// ```text
+/// Z-RMSE = √( (1/n) Σᵢ ((S_trans,i − S_subj,i) / σᵢ)² )
+/// ```
+///
+/// Each residual is scaled by the per-stimulus σᵢ (observer standard
+/// deviation from bootstrap). Stimuli with high observer consensus
+/// (low σ) contribute MORE to Z-RMSE — a miss on a "humans agree"
+/// stimulus is penalized more than a miss on an ambiguous one.
+///
+/// Minimizing Z-RMSE is equivalent to maximizing the log-likelihood
+/// of the predictions under a Gaussian observer model (Eq. 10-11).
+///
+/// `sigma[i]` must be > 0 and finite. Rows where σ is NaN, ≤ 0, or
+/// the residual is non-finite are skipped.
+pub fn z_rmse_per_sample(predicted: &[f64], target: &[f64], sigma: &[f64]) -> f64 {
+    let n = predicted.len().min(target.len()).min(sigma.len());
+    if n < 2 {
+        return f64::NAN;
+    }
+    let mut sum_sq = 0.0f64;
+    let mut count = 0;
+    for i in 0..n {
+        let s = sigma[i];
+        if !s.is_finite() || s <= 0.0 {
+            continue;
+        }
+        let z = (predicted[i] - target[i]) / s;
+        if z.is_finite() {
+            sum_sq += z * z;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return f64::NAN;
+    }
+    (sum_sq / count as f64).sqrt()
+}
+
 // ----------------------------------------------------------------------
 // 4-parameter logistic rescale (Mohammadi 2025 convention)
 // ----------------------------------------------------------------------
@@ -1375,5 +1415,47 @@ mod tests {
             let agg: ValAggregate = name.parse().unwrap();
             assert_eq!(&agg.to_string(), *name);
         }
+    }
+
+    #[test]
+    fn z_rmse_per_sample_penalizes_high_consensus() {
+        // Stimulus A: low σ (high consensus), large error → heavily penalized.
+        // Stimulus B: high σ (ambiguous), same absolute error → lightly penalized.
+        let predicted = vec![5.0, 5.0];
+        let target = vec![3.0, 3.0];
+        let sigma_tight = vec![0.1, 0.1];
+        let sigma_loose = vec![10.0, 10.0];
+        let z_tight = z_rmse_per_sample(&predicted, &target, &sigma_tight);
+        let z_loose = z_rmse_per_sample(&predicted, &target, &sigma_loose);
+        assert!(z_tight > 10.0, "tight σ should produce large Z-RMSE: {z_tight}");
+        assert!(z_loose < 1.0, "loose σ should produce small Z-RMSE: {z_loose}");
+    }
+
+    #[test]
+    fn z_rmse_per_sample_skips_bad_sigma() {
+        let predicted = vec![1.0, 2.0, 3.0];
+        let target = vec![1.0, 2.0, 3.0];
+        let sigma = vec![0.1, f64::NAN, 0.0];
+        let z = z_rmse_per_sample(&predicted, &target, &sigma);
+        // Only row 0 contributes (σ=0.1, error=0). Z-RMSE should be 0.
+        assert!(z.is_finite() && z < 1e-12, "expected ~0 for perfect match: {z}");
+    }
+
+    #[test]
+    fn z_rmse_per_sample_matches_global_when_sigma_uniform() {
+        let predicted: Vec<f64> = (0..50).map(|i| i as f64 * 0.5 + 1.0).collect();
+        let target: Vec<f64> = (0..50).map(|i| i as f64 * 0.5).collect();
+        let global = z_rmse(&predicted, &target);
+        // Uniform σ = global σ of target → per-sample should match global.
+        let mean_t: f64 = target.iter().sum::<f64>() / target.len() as f64;
+        let var_t: f64 = target.iter().map(|x| (x - mean_t).powi(2)).sum::<f64>()
+            / target.len() as f64;
+        let sigma_global = var_t.sqrt();
+        let sigma_uniform = vec![sigma_global; 50];
+        let per_sample = z_rmse_per_sample(&predicted, &target, &sigma_uniform);
+        assert!(
+            (global - per_sample).abs() < 1e-10,
+            "uniform σ should match global: {global} vs {per_sample}"
+        );
     }
 }

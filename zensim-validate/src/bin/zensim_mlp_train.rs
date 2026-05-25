@@ -603,6 +603,18 @@ struct Args {
     #[arg(long, default_value_t = false)]
     per_sample_alpha_head: bool,
 
+    /// Add a learned input→output skip connection (372→1 linear)
+    /// alongside the MLP. Output = MLP(x) + skip(x). Lets features
+    /// with a direct linear relationship to quality bypass the
+    /// hidden-layer bottleneck. ~375 extra params.
+    #[arg(long, default_value_t = false)]
+    skip_connection: bool,
+
+    /// Number of hidden layers. 1 = 372→128→heads (default).
+    /// 2 = 372→128→64→heads (second layer width = n_hidden/2).
+    #[arg(long, default_value_t = 1)]
+    n_hidden_layers: usize,
+
     /// `PreviewV0_5Tuner` MSE auxiliary loss weight (2026-05-18).
     /// Default `0.0` = pure RankNet. When `> 0`, adds an auxiliary
     /// regression loss `mse_weight·(y - target)²` (averaged across
@@ -1843,6 +1855,8 @@ fn main() {
         pool_head: args.pool_head,
         hybrid_head: args.hybrid_head,
         per_sample_alpha_head: args.per_sample_alpha_head,
+        skip_connection: args.skip_connection,
+        n_hidden_layers: args.n_hidden_layers,
         mse_weight: args.mse_weight,
         ranknet_weight: args.ranknet_weight,
         monotonicity_reg: args.monotonicity_reg,
