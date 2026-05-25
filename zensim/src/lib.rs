@@ -250,6 +250,16 @@ pub use source::{
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
 
+/// Score a precomputed feature vector under a [`ZensimProfile`] —
+/// the entry point alternative feature backends (e.g. `zensim-gpu`)
+/// use to produce a bit-exact CPU-equivalent `0..100` score.
+///
+/// Runs the full bake forward pass (per-sample-α / hybrid head,
+/// tanh-pin, PCHIP spline, per-codec affine, clamp / soft-clamp /
+/// extrapolate disposition) — same dispatch the canonical
+/// `Zensim::compute(...)` flow applies after feature extraction.
+pub use metric::{score_features_with_profile, score_features_with_profile_and_codec};
+
 /// Training/research API — requires `features = ["training"]`.
 ///
 /// These items expose metric internals (blur kernel shape, scale count,
