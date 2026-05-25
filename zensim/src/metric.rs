@@ -369,6 +369,106 @@ pub fn try_score_from_features(
     Ok((distance_to_score(raw_distance), raw_distance))
 }
 
+/// Score a precomputed feature vector under a [`ZensimProfile`].
+///
+/// **Bit-exact match with `Zensim::new(profile).compute(...)` post-feature-extraction.**
+///
+/// This is the entry point used by alternative feature backends (e.g.
+/// `zensim-gpu`'s CubeCL pipeline) to produce a `0..100` score with
+/// the same calibration the CPU path applies — runs the same bake
+/// forward pass, per-sample-α / hybrid head, tanh-pin, PCHIP spline,
+/// per-codec affine, and clamp / soft-clamp / extrapolate-score
+/// disposition the canonical CPU `compute` flow uses.
+///
+/// `features` must match the profile's MLP input width (228 / 300 /
+/// 372 for the V_18 / V_20-extended / V_22-IW families respectively,
+/// or +4 if the bake declares size axes). For linear V0_1 / V0_2
+/// profiles (no `mlp_bytes`), falls back to the legacy
+/// `dot(features, weights)` + `100 − A·d^B` path.
+///
+/// `width` / `height` are passed through to the bake forward pass
+/// for the optional `--mlp-size-axes` feature expansion (4 trailing
+/// floats appended to the feature vector when the bake's `n_inputs
+/// == features.len() + 4`).
+///
+/// # Errors
+///
+/// - [`ZensimError::ModelLoadFailed`] if the bake bytes fail to parse.
+/// - [`ZensimError::ModelForwardFailed`] if the bake's input width
+///   doesn't match the supplied feature vector (modulo the +4 size-axis
+///   convention).
+/// - [`ZensimError::FeatureWeightsLengthMismatch`] if the profile is
+///   linear (no MLP) and `features.len() != weights.len()`.
+pub fn score_features_with_profile(
+    profile: crate::profile::ZensimProfile,
+    features: &[f64],
+    width: u32,
+    height: u32,
+) -> Result<f64, ZensimError> {
+    score_features_with_profile_and_codec(profile, features, width, height, None)
+}
+
+/// Same as [`score_features_with_profile`] but accepts an optional
+/// codec hint that drives the per-codec post-spline affine calibration
+/// (EXP-CROSS-CODEC-V11-E). Pass `Some("jpeg")` / `Some("webp")` /
+/// `Some("avif")` / `Some("jxl")` (or their `zenfoo` aliases) when the
+/// caller knows which codec produced the distorted image and the
+/// profile carries `zentrain.per_codec_calibration` metadata.
+pub fn score_features_with_profile_and_codec(
+    profile: crate::profile::ZensimProfile,
+    features: &[f64],
+    width: u32,
+    height: u32,
+    codec_hint: Option<&str>,
+) -> Result<f64, ZensimError> {
+    let params = profile.params();
+
+    // Linear (no-MLP) profiles — V0_1 / V0_2. Run the classic
+    // `dot(features, weights)` + `100 − A·d^B` path.
+    if params.mlp_bytes.is_none() {
+        if features.len() != params.weights.len() {
+            return Err(ZensimError::FeatureWeightsLengthMismatch);
+        }
+        let raw_distance: f64 = features
+            .iter()
+            .zip(params.weights.iter())
+            .map(|(&f, &w)| w * f)
+            .sum();
+        let raw_per_scale = raw_distance / params.num_scales.max(1) as f64;
+        let score =
+            distance_to_score_mapped(raw_per_scale, params.score_mapping_a, params.score_mapping_b);
+        // V0_1 / V0_2 are not on the extrapolate / soft-clamp paths
+        // (their `ProfileParams` defaults are both `false`), so a hard
+        // [0, 100] clamp matches the canonical `apply_mlp_scoring`
+        // disposition.
+        return Ok(score.clamp(0.0, 100.0));
+    }
+
+    // MLP-scored profile. Mirror `apply_mlp_scoring_with_codec`
+    // exactly so the calibration disposition (raw / hard clamp /
+    // soft clamp / extrapolate) matches the canonical CPU flow.
+    //
+    // Build a placeholder ZensimResult to thread through
+    // `apply_mlp_scoring_with_codec` — that function reads
+    // `result.features()`, calls `forward_one_bake_with_codec`, and
+    // writes `set_mlp_score(raw, score)`. We then return the score.
+    //
+    // (We could also call `forward_one_bake_with_codec` directly +
+    // duplicate the post-network dispatch here, but threading through
+    // `apply_mlp_scoring_with_codec` ensures every future calibration
+    // tweak — ensemble routing, b3 mix, extrapolate-score — flows
+    // through this entry point automatically.)
+    let mut result = ZensimResult::new(
+        f64::NAN,
+        f64::NAN,
+        features.to_vec(),
+        profile,
+        [0.0; 3],
+    );
+    apply_mlp_scoring_with_codec(&mut result, params, width, height, codec_hint)?;
+    Ok(result.score())
+}
+
 /// Pre-compute reference with a custom number of pyramid scales.
 ///
 /// Use this when calling [`compute_zensim_with_ref_and_config`] with a non-default
