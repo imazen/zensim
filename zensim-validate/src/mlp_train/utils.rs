@@ -1,6 +1,6 @@
 use zenpredict::FeatureTransform;
 
-pub(crate) fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
+pub fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len();
     if n < 2 {
         return 0.0;
@@ -23,7 +23,7 @@ pub(crate) fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
     if den < 1e-12 { 0.0 } else { num / den }
 }
 
-pub(crate) fn ranks(v: &[f64]) -> Vec<f64> {
+pub fn ranks(v: &[f64]) -> Vec<f64> {
     let n = v.len();
     let mut idx: Vec<usize> = (0..n).collect();
     idx.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
@@ -54,7 +54,7 @@ pub(crate) fn ranks(v: &[f64]) -> Vec<f64> {
 /// post-transform features propagates to the scaler (poisoning mean/std),
 /// the forward pass (NaN activations), and the loss (NaN gradients) —
 /// the entire training run is unrecoverable.
-pub(crate) fn sweep_nan_inf(
+pub fn sweep_nan_inf(
     rows: &[Vec<f64>],
     transforms: &[FeatureTransform],
     source_name: &str,

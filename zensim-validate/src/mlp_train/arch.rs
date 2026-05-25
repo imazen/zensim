@@ -1,4 +1,4 @@
-pub(crate) struct ArchForward {
+pub struct ArchForward {
     pub(crate) y: f64,
     pub(crate) y_rank: f64,
     pub(crate) y_pool: f64,
@@ -14,7 +14,7 @@ pub(crate) struct ArchForward {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn arch_forward(
+pub fn arch_forward(
     x: &[f64],
     w1: &[f64],
     b1: &[f64],
@@ -73,7 +73,7 @@ pub(crate) fn arch_forward(
 ///   [w1_grads | w2_enc_grads | w_skip_grads] for gw1
 ///   [b1_grads | b2_enc_grads | b_skip_grad ] for gb1
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn arch_backward(
+pub fn arch_backward(
     x: &[f64],
     fwd: &ArchForward,
     dl_dy: f64,

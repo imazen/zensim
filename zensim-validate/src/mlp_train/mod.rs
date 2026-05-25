@@ -48,7 +48,7 @@ use crate::adam_simd;
 mod loss_norm_in_norm;
 
 mod goals;
-pub(crate) use goals::{ValidationPolicy, GoalScores, compute_goal_scores};
+pub use goals::{ValidationPolicy, GoalScores, compute_goal_scores};
 
 /// Knobs for [`train_mlp`]. Defaults match the V0_4 placeholder
 /// architecture (228 → 32 → 1) with `Min` validation gating.
@@ -4873,7 +4873,7 @@ fn predict_group(
 }
 
 mod utils;
-pub(crate) use utils::{spearman_correlation, ranks, sweep_nan_inf};
+pub use utils::{spearman_correlation, ranks, sweep_nan_inf};
 
 
 struct AdamState {
@@ -7499,7 +7499,7 @@ fn predict_group_per_sample_alpha_head(
 /// needed for exact backward — including optional layer-1 intermediates
 /// for the 2-layer encoder.
 mod arch;
-pub(crate) use arch::{ArchForward, arch_forward, arch_backward};
+pub use arch::{ArchForward, arch_forward, arch_backward};
 
 /// NiN-aware flush for the per-sample α head. Computes NiN over the
 /// 2N surviving predictions and routes per-prediction grad through

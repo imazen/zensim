@@ -1,7 +1,7 @@
 use super::TrainingGroup;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ValidationPolicy {
+pub enum ValidationPolicy {
     /// Weighted mean of per-group aggregate scores.
     Mean,
     /// Worst per-group aggregate score (conservative).
@@ -21,7 +21,7 @@ pub(crate) enum ValidationPolicy {
 /// Per-epoch goal check result. Each field is 0.0-1.0 (soft gate:
 /// linear ramp from floor to aspiration threshold).
 #[derive(Clone, Debug, Default)]
-pub(crate) struct GoalScores {
+pub struct GoalScores {
     /// G2: JND semantic anchor (|mean_pred - 60| ≤ 5).
     pub g2_jnd_anchor: f64,
     /// G5: HF rank fidelity (konjnd SROCC ≥ 0.70).
@@ -89,7 +89,7 @@ pub(super) fn soft_gate(value: f64, floor: f64, target: f64, higher_is_better: b
 /// prediction at KonJND PJND pairs (None if no anchor loaded).
 /// `konjnd_group_idx` identifies which group (if any) is the KonJND
 /// holdout for G5 HF rank checking. `cid22_group_idx` similarly for G7.
-pub(crate) fn compute_goal_scores(
+pub fn compute_goal_scores(
     group_panels: &[crate::panel::LightPanel],
     groups: &[TrainingGroup<'_>],
     anchor_mean_pred: Option<f64>,
