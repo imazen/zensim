@@ -39,5 +39,5 @@ enough = { version = "0.4.2", default-features = false, features = ["std"] }
 #     zenpredict      = { path = "../zenanalyze/zenpredict" }
 #     zenpredict-bake = { path = "../zenanalyze/zenpredict-bake" }
 # Bump the rev deliberately when a zenanalyze fix zensim needs lands.
-zenpredict      = { git = "https://github.com/imazen/zenanalyze", rev = "8025953e0b4119a0a3fb3e1d330d52138506f45c" }
-zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "8025953e0b4119a0a3fb3e1d330d52138506f45c" }
+zenpredict      = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }

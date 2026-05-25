@@ -2396,9 +2396,11 @@ fn main() {
             res.n_batches as f64 / res.wall_seconds
         ));
         if gpu_hp.tanh_output_head_scale > 0.0 {
-            zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh(
+            zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
                 &res.model,
                 gpu_hp.tanh_output_head_scale,
+                feature_transforms.as_deref(),
+                feature_transform_params.as_deref(),
             )
         } else {
             zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3(&res.model)

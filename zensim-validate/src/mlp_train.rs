@@ -7150,7 +7150,12 @@ fn train_mlp_per_sample_alpha_head(
                     n_features,
                 };
                 best_bake = Some(if tanh_pin_active {
-                    psah::bake_per_sample_alpha_head_v3_with_tanh(&model, tanh_scale)
+                    psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+                        &model,
+                        tanh_scale,
+                        hyperparams.feature_transforms.as_deref(),
+                        hyperparams.feature_transform_params.as_deref(),
+                    )
                 } else {
                     psah::bake_per_sample_alpha_head_v3(&model)
                 });
@@ -7194,7 +7199,12 @@ fn train_mlp_per_sample_alpha_head(
             n_features,
         };
         if tanh_pin_active {
-            psah::bake_per_sample_alpha_head_v3_with_tanh(&model, tanh_scale)
+            psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+                &model,
+                tanh_scale,
+                hyperparams.feature_transforms.as_deref(),
+                hyperparams.feature_transform_params.as_deref(),
+            )
         } else {
             psah::bake_per_sample_alpha_head_v3(&model)
         }

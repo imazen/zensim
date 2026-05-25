@@ -46,7 +46,7 @@ use crate::adam::AdamState;
 use crate::mlp::compute_scaler_from_groups;
 use crate::pool_head::{POOL_P_NORM, POOL_STD_FLOOR, pool_stats};
 use crate::rng::SplitMix64;
-use zenpredict::{Activation, MetadataType, WeightDtype};
+use zenpredict::{Activation, FeatureTransform, MetadataType, WeightDtype};
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
 #[inline]
@@ -815,6 +815,190 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh(
         hu_permutations: None,
     })
     .expect("v3 bake of per-sample α head MLP with tanh output head")
+}
+
+/// Bake a per-sample-α head with the tanh-output-head metadata PLUS
+/// `zentrain.feature_transforms` + (optional) `zentrain.feature_transform_params`.
+///
+/// Equivalent to [`bake_per_sample_alpha_head_v3_with_tanh`] but
+/// additionally writes the feature-transform spec so runtime / verdict
+/// tools can apply the same transforms the trainer applied. Without
+/// this metadata, a bake trained via `--auto-transforms` produces
+/// silently-wrong predictions on raw input features (verified
+/// 2026-05-25, task #214 Phase 2: v11 + auto-transforms with no
+/// metadata gave CID22 SROCC 0.215 vs the v11 ship's 0.860).
+///
+/// Empty `feature_transforms` (or all-Identity) emits no metadata
+/// keys — matches the [`bake_per_sample_alpha_head_v3_with_tanh`]
+/// behaviour. `feature_transform_params` may be `None` even when
+/// `feature_transforms` is set, for the case where every transform
+/// is unparameterized (the non-parameterized variants).
+///
+/// Added 2026-05-25 (task #214 Phase 2).
+pub fn bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+    model: &PerSampleAlphaHeadModel,
+    scale: f64,
+    feature_transforms: Option<&[FeatureTransform]>,
+    feature_transform_params: Option<&[Vec<f32>]>,
+) -> Vec<u8> {
+    assert!(
+        scale > 0.0,
+        "tanh_output_head scale must be > 0; got {scale}"
+    );
+    let n_features = model.n_features;
+    let n_hidden = model.n_hidden;
+
+    // Build the feature_transforms text + transform_params text if
+    // provided AND non-trivial. All-Identity transforms are equivalent
+    // to absence, so skip the metadata in that case.
+    let nontrivial = feature_transforms.is_some_and(|ts| {
+        ts.iter().any(|&t| t != FeatureTransform::Identity)
+    });
+
+    let transforms_text = if nontrivial {
+        let ts = feature_transforms.unwrap();
+        assert_eq!(
+            ts.len(),
+            n_features,
+            "feature_transforms length {} != n_features {}",
+            ts.len(),
+            n_features
+        );
+        let mut s = String::new();
+        for (i, t) in ts.iter().enumerate() {
+            if i > 0 {
+                s.push('\n');
+            }
+            s.push_str(t.as_token());
+        }
+        Some(s)
+    } else {
+        None
+    };
+
+    // Only emit params if any transform actually has parameters.
+    let params_text = if let Some(params) = feature_transform_params {
+        if nontrivial && params.iter().any(|p| !p.is_empty()) {
+            assert_eq!(
+                params.len(),
+                n_features,
+                "feature_transform_params length {} != n_features {}",
+                params.len(),
+                n_features
+            );
+            let mut s = String::new();
+            for (i, p) in params.iter().enumerate() {
+                if i > 0 {
+                    s.push('\n');
+                }
+                for (j, &v) in p.iter().enumerate() {
+                    if j > 0 {
+                        s.push(',');
+                    }
+                    // Use 9-digit precision — preserves f32 round-trip.
+                    s.push_str(&format!("{v:.9}"));
+                }
+            }
+            Some(s)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let scaler_mean_f32: Vec<f32> = model.scaler_mean.iter().map(|&v| v as f32).collect();
+    let scaler_scale_f32: Vec<f32> = model.scaler_scale.iter().map(|&v| v as f32).collect();
+    let w1_f32: Vec<f32> = model.w1.iter().map(|&v| v as f32).collect();
+    let b1_f32: Vec<f32> = model.b1.iter().map(|&v| v as f32).collect();
+    let mut w2_f32 = vec![0.0f32; n_hidden * n_hidden];
+    for i in 0..n_hidden {
+        w2_f32[i * n_hidden + i] = 1.0;
+    }
+    let b2_f32 = vec![0.0f32; n_hidden];
+
+    let n_payload = 2 * n_hidden + 8;
+    let mut payload = Vec::with_capacity(n_payload * 4);
+    for v in &model.w_alpha {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.b_alpha as f32).to_le_bytes());
+    for v in &model.rank_w {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.rank_b as f32).to_le_bytes());
+    for v in &model.reducer_w {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.reducer_b as f32).to_le_bytes());
+    payload.extend_from_slice(&(POOL_P_NORM as f32).to_le_bytes());
+
+    let tanh_payload: [u8; 4] = (scale as f32).to_le_bytes();
+
+    let layers = [
+        BakeLayer {
+            in_dim: n_features,
+            out_dim: n_hidden,
+            activation: Activation::LeakyRelu,
+            dtype: WeightDtype::F32,
+            weights: &w1_f32,
+            biases: &b1_f32,
+        },
+        BakeLayer {
+            in_dim: n_hidden,
+            out_dim: n_hidden,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w2_f32,
+            biases: &b2_f32,
+        },
+    ];
+
+    // Build metadata array dynamically — required two entries plus
+    // optional 0/1/2 entries for transforms + params.
+    let mut metadata: Vec<BakeMetadataEntry<'_>> = Vec::with_capacity(4);
+    metadata.push(BakeMetadataEntry {
+        key: "zentrain.per_sample_alpha_head",
+        kind: MetadataType::Numeric,
+        value: &payload,
+    });
+    metadata.push(BakeMetadataEntry {
+        key: "zentrain.tanh_output_head",
+        kind: MetadataType::Numeric,
+        value: &tanh_payload,
+    });
+    if let Some(t) = &transforms_text {
+        metadata.push(BakeMetadataEntry {
+            key: "zentrain.feature_transforms",
+            kind: MetadataType::Utf8,
+            value: t.as_bytes(),
+        });
+    }
+    if let Some(p) = &params_text {
+        metadata.push(BakeMetadataEntry {
+            key: "zentrain.feature_transform_params",
+            kind: MetadataType::Utf8,
+            value: p.as_bytes(),
+        });
+    }
+
+    bake(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: &scaler_mean_f32,
+        scaler_scale: &scaler_scale_f32,
+        layers: &layers,
+        feature_bounds: &[],
+        metadata: &metadata,
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
+        hu_permutations: None,
+    })
+    .expect("v3 bake of per-sample α head MLP with tanh output head + feature transforms")
 }
 
 /// Parsed per-sample α head metadata payload (runtime-side).
