@@ -1,0 +1,37 @@
+YJ λ grid: [-5.0, 5.0]
+loaded safesyn.parquet: n=196086 rows × 372 features (target='mix_cv40_iw60') in 2.5s
+screened 372 features in 145.2s
+wrote 3720 per-transform rows to benchmarks/yeo_johnson_screen_wide_2026-05-25/per_transform.tsv
+wrote 372 rows to benchmarks/yeo_johnson_screen_wide_2026-05-25/screen_results.tsv; 371 features clear --min-lift 0.005
+
+per-block: feature counts where best_transform != identity:
+block     | total | any_transform_wins | yj_wins
+basic     |   156 |                156 |       4
+peak      |    72 |                 72 |       4
+masked    |    72 |                 72 |       0
+iw_pool   |    72 |                 72 |       0
+
+yeo_johnson lift across 372 features: mean=0.0393, median=0.0233, max=0.2620, n>=0.005=289, n>=0.02=190, n>=0.05=124
+
+top 20 by lift:
+feat | transform        | params                       | base_p | tx_p   | lift
+f275 | log              |                              | 0.0712 | 0.9311 | +0.8599
+f100 | log              |                              | 0.0766 | 0.9233 | +0.8467
+f293 | log              |                              | 0.0445 | 0.8805 | +0.8360
+f347 | log              |                              | 0.0827 | 0.9127 | +0.8301
+f139 | log              |                              | 0.0463 | 0.8748 | +0.8285
+f365 | log              |                              | 0.0483 | 0.8671 | +0.8188
+f257 | log              |                              | 0.1345 | 0.9403 | +0.8058
+f61  | log              |                              | 0.1481 | 0.9303 | +0.7822
+f329 | log              |                              | 0.1623 | 0.9176 | +0.7554
+f239 | log              |                              | 0.2091 | 0.8962 | +0.6870
+f22  | log              |                              | 0.2261 | 0.8823 | +0.6561
+f311 | log              |                              | 0.2373 | 0.8661 | +0.6288
+f288 | log              |                              | 0.3468 | 0.8688 | +0.5219
+f130 | log              |                              | 0.3509 | 0.8726 | +0.5217
+f360 | log              |                              | 0.3544 | 0.8754 | +0.5210
+f362 | log              |                              | 0.3410 | 0.8521 | +0.5111
+f132 | log              |                              | 0.3406 | 0.8510 | +0.5104
+f290 | log              |                              | 0.3392 | 0.8483 | +0.5090
+f361 | log              |                              | 0.3406 | 0.8315 | +0.4909
+f131 | log              |                              | 0.3424 | 0.8329 | +0.4905

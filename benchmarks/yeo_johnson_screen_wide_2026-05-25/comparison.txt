@@ -1,0 +1,76 @@
+n_features: 372
+
+=== λ distribution ===
+prior (n=372): min=-2.0000, max=-1.7225, median=-2.0000
+wide  (n=372): min=-5.0000, max=-1.7225, median=-5.0000
+
+prior pinning: at -2.0: 370, interior: 2, at +2.0: 0
+wide pinning:  at -5.0: 361, interior: 11, at +5.0: 0
+
+=== λ histogram ===
+bucket          | prior   | wide
+----------------+---------+--------
+[-5, -4)       |     0   |   364
+[-4, -3)       |     0   |     4
+[-3, -2)       |     0   |     2
+[-2, -1)       |   372   |     2
+[-1, +0)       |     0   |     0
+[+0, +1)       |     0   |     0
+[+1, +2)       |     0   |     0
+[+2, +3)       |     0   |     0
+[+3, +4)       |     0   |     0
+[+4, +5)       |     0   |     0
+
+=== Outright YJ wins (best_transform == 'yeo_johnson') ===
+prior: 3 / 372
+wide:  8 / 372
+
+=== best_transform tally ===
+transform        | prior | wide
+clip_then_log1p  |     4 |     4
+log              |   111 |   111
+log1p            |     1 |     1
+quantile_bins    |    18 |    18
+signed_cbrt      |     2 |     2
+winsor_p99       |   233 |   228
+yeo_johnson      |     3 |     8
+
+=== YJ lift over identity ===
+threshold | prior | wide
+>= 0.005  |   242 |   289
+>= 0.020  |   169 |   190
+>= 0.050  |    51 |   124
+>= 0.100  |     9 |    37
+>= 0.200  |     4 |     4
+
+=== YJ beats log (|corr| diff >= 0.02, or log is N/A) ===
+prior: 238
+wide:  243
+
+=== Per-block YJ lift (median/p25/p75 over features) ===
+block    | range       | prior_median | prior_p25 | prior_p75 | wide_median | wide_p25 | wide_p75 | Δ_median
+---------+-------------+--------------+-----------+-----------+-------------+----------+----------+---------
+basic    | f  0..f155 |       0.0076 |    0.0020 |    0.0335 |      0.0116 |   0.0038 |   0.0539 |  +0.0040
+peaks    | f156..f227 |       0.0161 |    0.0072 |    0.0441 |      0.0290 |   0.0130 |   0.0724 |  +0.0129
+masked   | f228..f299 |       0.0194 |    0.0025 |    0.0302 |      0.0354 |   0.0049 |   0.0520 |  +0.0161
+iw_pool  | f300..f371 |       0.0243 |    0.0038 |    0.0402 |      0.0438 |   0.0071 |   0.0673 |  +0.0195
+
+=== Per-block outright YJ wins ===
+block    | prior | wide
+basic    |     2 |     4
+peaks    |     1 |     4
+masked   |     0 |     0
+iw_pool  |     0 |     0
+
+=== Features pinned at ±5 (potentially want even wider grid) ===
+n_pinned_at_extreme: 361
+  at -5.0: 361
+  at +5.0: 0
+  first 20 feat idx pinned at -5: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+
+=== Tracking features pinned at -2 in prior (n=370) ===
+  re-pinned at -5.0:       361
+  landed in (-5.0, -3.0]:  7
+  landed in (-3.0, -2.0]:  2
+  landed > -2.0 (escape):  0
+  median wide λ for prior-pinned: -5.0000

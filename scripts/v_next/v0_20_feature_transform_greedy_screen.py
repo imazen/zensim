@@ -172,7 +172,14 @@ def t_yeo_johnson(x: np.ndarray, params: list[float]) -> np.ndarray:
     return out
 
 
-def fit_yj_lambda(col: np.ndarray, lo: float = -2.0, hi: float = 2.0,
+# Module-level YJ λ search bounds. main() overrides via --grid-min / --grid-max.
+# Defaults match scipy's documented [-2, 2] for backwards-compatibility with
+# the 2026-05-25 initial screen.
+_YJ_GRID_LO: float = -2.0
+_YJ_GRID_HI: float = 2.0
+
+
+def fit_yj_lambda(col: np.ndarray, lo: float | None = None, hi: float | None = None,
                   tol: float = 1e-5) -> float:
     """Golden-section search for the MLE Yeo-Johnson λ on `col`.
 
@@ -180,7 +187,14 @@ def fit_yj_lambda(col: np.ndarray, lo: float = -2.0, hi: float = 2.0,
     `~/work/zen/zenanalyze/target/release/fit_yeo_johnson` —
     bound-clamped [-2, 2] is scipy's documented default. Converges
     to ~1e-5 in ~50 evaluations; cheap per-feature.
+
+    `lo` / `hi` default to module-level `_YJ_GRID_LO` / `_YJ_GRID_HI`,
+    which `main()` configures from `--grid-min` / `--grid-max`.
     """
+    if lo is None:
+        lo = _YJ_GRID_LO
+    if hi is None:
+        hi = _YJ_GRID_HI
     finite = col[np.isfinite(col)]
     if finite.size < 2:
         return 1.0  # YJ identity at λ=1
@@ -562,7 +576,41 @@ def main() -> int:
             "candidate-level winners (e.g. YJ-specific lift)."
         ),
     )
+    ap.add_argument(
+        "--grid-min",
+        type=float,
+        default=-2.0,
+        help=(
+            "Lower bound for Yeo-Johnson λ search (golden-section). "
+            "Default -2.0 matches scipy's documented default. Widen "
+            "(e.g. -5) when many features pin at the boundary — heavy-"
+            "positive-tailed features can want λ ≈ -2.7 or beyond."
+        ),
+    )
+    ap.add_argument(
+        "--grid-max",
+        type=float,
+        default=2.0,
+        help=(
+            "Upper bound for Yeo-Johnson λ search. Default 2.0 matches "
+            "scipy. Widen (e.g. 5) if features want positive λ above "
+            "the boundary."
+        ),
+    )
     args = ap.parse_args()
+    if args.grid_min >= args.grid_max:
+        print(
+            f"ERROR: --grid-min ({args.grid_min}) must be < --grid-max ({args.grid_max})",
+            file=sys.stderr,
+        )
+        return 2
+    global _YJ_GRID_LO, _YJ_GRID_HI
+    _YJ_GRID_LO = float(args.grid_min)
+    _YJ_GRID_HI = float(args.grid_max)
+    print(
+        f"YJ λ grid: [{_YJ_GRID_LO}, {_YJ_GRID_HI}]",
+        file=sys.stderr,
+    )
     if not args.features_parquet and not args.features_csv:
         print("ERROR: pass --features-parquet or --features-csv", file=sys.stderr)
         return 2
