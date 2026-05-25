@@ -6114,21 +6114,26 @@ fn train_mlp_per_sample_alpha_head(
             let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
             let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
 
-            let (ya_pre, ya_rank, ya_pool, alpha_a, _ali_a, ha_pre, ha, sa, max_a) =
-                arch_forward(
-                    xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                    n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
-                );
-            let (yb_pre, yb_rank, yb_pool, alpha_b, _ali_b, hb_pre, hb, sb, max_b) =
-                arch_forward(
-                    xb, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                    n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
-                );
-            // Tanh-pinned output (identity when --tanh-output-head-scale 0).
-            let (ya, dya_dpre) = pin_forward(ya_pre);
-            let (yb, dyb_dpre) = pin_forward(yb_pre);
+            let fwd_a = arch_forward(
+                xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
+            );
+            let fwd_b = arch_forward(
+                xb, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
+            );
+            let (ya, dya_dpre) = pin_forward(fwd_a.y);
+            let (yb, dyb_dpre) = pin_forward(fwd_b.y);
+            let (ya_rank, ya_pool, alpha_a) = (fwd_a.y_rank, fwd_a.y_pool, fwd_a.alpha);
+            let (yb_rank, yb_pool, alpha_b) = (fwd_b.y_rank, fwd_b.y_pool, fwd_b.alpha);
+            // Aliases for NiN buffer + aux losses that reference old tuple names.
+            // NiN buffer stores owned values; clone from the forward result.
+            let (ha_pre, ha) = (fwd_a.h_pre.clone(), fwd_a.h.clone());
+            let (hb_pre, hb) = (fwd_b.h_pre.clone(), fwd_b.h.clone());
+            let (sa, max_a) = (fwd_a.stats, fwd_a.max_idx);
+            let (sb, max_b) = (fwd_b.stats, fwd_b.max_idx);
 
             let mos_a = g.human_scores[ia];
             let mos_b = g.human_scores[ib];
@@ -6350,8 +6355,7 @@ fn train_mlp_per_sample_alpha_head(
             let mut g_b_alpha: f64 = 0.0;
 
             arch_backward(
-                xa, &ha_pre, &ha, &sa, max_a,
-                ya_rank, ya_pool, alpha_a, dl_dya,
+                xa, &fwd_a, dl_dya,
                 &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
                 &mut adam.gw1, &mut adam.gb1,
                 &mut g_rank_w_buf, &mut g_rank_b_buf,
@@ -6361,8 +6365,7 @@ fn train_mlp_per_sample_alpha_head(
                 use_2layer, use_skip,
             );
             arch_backward(
-                xb, &hb_pre, &hb, &sb, max_b,
-                yb_rank, yb_pool, alpha_b, dl_dyb,
+                xb, &fwd_b, dl_dyb,
                 &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
                 &mut adam.gw1, &mut adam.gb1,
                 &mut g_rank_w_buf, &mut g_rank_b_buf,
@@ -7347,12 +7350,12 @@ fn train_mlp_per_sample_alpha_head(
                 let mut i = 0;
                 while i < n && alpha_samples.len() < 512 {
                     let xi = &gfeats[i * n_features..(i + 1) * n_features];
-                    let (_, _, _, alpha, _, _, _, _, _) = arch_forward(
+                    let af_tmp = arch_forward(
                         xi, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
                         &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
                         n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                     );
-                    alpha_samples.push(alpha);
+                    alpha_samples.push(af_tmp.alpha);
                     i += step;
                 }
             }
@@ -7396,12 +7399,12 @@ fn train_mlp_per_sample_alpha_head(
                 let anchor_feats = &std_anchor_features;
                 let mut preds = Vec::with_capacity(anchor_feats.len());
                 for af in anchor_feats {
-                    let (y, _, _, _, _, _, _, _, _) = arch_forward(
+                    let af_tmp = arch_forward(
                         af, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
                         &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
                         n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                     );
-                    let (pinned, _) = pin_forward(y);
+                    let (pinned, _) = pin_forward(af_tmp.y);
                     preds.push(pinned);
                 }
                 let mean_p = preds.iter().sum::<f64>() / preds.len().max(1) as f64;
@@ -7618,20 +7621,34 @@ fn predict_group_per_sample_alpha_head(
         .into_par_iter()
         .map(|i| {
             let xi = &std_x[i * n_features..(i + 1) * n_features];
-            let (y, _, _, _, _, _, _, _, _) = arch_forward(
+            let af_tmp = arch_forward(
                 xi, w1, b1, w2_enc, b2_enc, w_skip, b_skip,
                 rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha,
                 n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
             );
-            y
+            af_tmp.y
         })
         .collect()
 }
 
-/// Architecture-dispatched forward for the per-sample α head. Returns
-/// the same 9-tuple as `psah::forward_per_sample_alpha_head` for
-/// call-site compatibility. When `use_2layer` or `use_skip`, runs the
-/// extended encoder and/or adds the skip connection output.
+/// Forward result from `arch_forward`. Carries all intermediates
+/// needed for exact backward — including optional layer-1 intermediates
+/// for the 2-layer encoder.
+struct ArchForward {
+    y: f64,
+    y_rank: f64,
+    y_pool: f64,
+    alpha: f64,
+    #[allow(dead_code)]
+    alpha_logit: f64,
+    h_pre: Vec<f64>,
+    h: Vec<f64>,
+    stats: [f64; 4],
+    max_idx: usize,
+    h1_pre: Vec<f64>,
+    h1: Vec<f64>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn arch_forward(
     x: &[f64],
@@ -7653,17 +7670,18 @@ fn arch_forward(
     leaky: f64,
     use_2layer: bool,
     use_skip: bool,
-) -> (f64, f64, f64, f64, f64, Vec<f64>, Vec<f64>, [f64; 4], usize) {
+) -> ArchForward {
     use zensim_train_core::per_sample_alpha_head as psah;
     use zensim_train_core::simd_encoder;
 
-    let (h_pre, h) = if use_2layer {
-        let (_h1_pre, _h1, h2_pre, h2) = simd_encoder::encoder_forward_2layer(
+    let (h_pre, h, h1_pre, h1) = if use_2layer {
+        let (h1p, h1v, h2p, h2v) = simd_encoder::encoder_forward_2layer(
             x, w1, b1, w2_enc, b2_enc, n_features, n_hidden1, n_hidden_final, leaky,
         );
-        (h2_pre, h2)
+        (h2p, h2v, h1p, h1v)
     } else {
-        simd_encoder::encoder_forward(x, w1, b1, n_features, n_hidden1, leaky)
+        let (hp, hv) = simd_encoder::encoder_forward(x, w1, b1, n_features, n_hidden1, leaky);
+        (hp, hv, Vec::new(), Vec::new())
     };
 
     let (y, y_rank, y_pool, alpha, alpha_logit, stats, max_idx) = psah::forward_heads(
@@ -7676,7 +7694,10 @@ fn arch_forward(
         y
     };
 
-    (y_final, y_rank, y_pool, alpha, alpha_logit, h_pre, h, stats, max_idx)
+    ArchForward {
+        y: y_final, y_rank, y_pool, alpha, alpha_logit,
+        h_pre, h, stats, max_idx, h1_pre, h1,
+    }
 }
 
 /// Architecture-dispatched backward for the per-sample α head. First
@@ -7690,13 +7711,7 @@ fn arch_forward(
 #[allow(clippy::too_many_arguments)]
 fn arch_backward(
     x: &[f64],
-    h_pre: &[f64],
-    h: &[f64],
-    stats: &[f64; 4],
-    max_idx: usize,
-    y_rank: f64,
-    y_pool: f64,
-    alpha: f64,
+    fwd: &ArchForward,
     dl_dy: f64,
     w1: &[f64],
     w2_enc: &[f64],
@@ -7721,55 +7736,28 @@ fn arch_backward(
     use zensim_train_core::per_sample_alpha_head as psah;
     use zensim_train_core::simd_encoder;
 
-    // 1. Heads backprop: get dl/dh (gradient w.r.t. the final hidden vector).
     let dl_dh = psah::backprop_heads(
-        h, stats, max_idx, y_rank, y_pool, alpha, dl_dy,
+        &fwd.h, &fwd.stats, fwd.max_idx, fwd.y_rank, fwd.y_pool, fwd.alpha, dl_dy,
         rank_w, reducer_w, w_alpha,
         g_rank_w, g_rank_b, g_reducer_w, g_reducer_b,
         g_w_alpha, g_b_alpha, n_hidden_final, leaky,
     );
 
-    // 2. Encoder backprop: route dl/dh through the encoder.
     if use_2layer {
         let n_w1 = n_features * n_hidden1;
         let n_w2_enc = n_hidden1 * n_hidden_final;
 
-        // Re-run layer 1 to get h1_pre, h1 (needed for 2-layer chain
-        // rule). Cost: one extra 372→128 forward per backward pair.
-        let b1_slice = &gb1_concat[..n_hidden1];
-        // We can't use b1 from gb1_concat (it's gradient, not weights).
-        // The caller must pass b1 separately. For now, re-derive from
-        // the forward: h_pre was stored as h2_pre, h as h2. We have x
-        // and w1 — re-run layer 1 forward.
-        //
-        // NOTE: b1 values are NOT in gb1_concat — those are gradients.
-        // We need the actual bias values. This function needs b1 as a
-        // parameter. Adding it now.
-        let _ = b1_slice;
+        // Layer 2: LeakyReLU backward on h2_pre, then gw2/gb2 update
+        // using the cached h1 from the forward pass.
+        let dl_dh2_pre = simd_encoder::leaky_relu_backward(&dl_dh, &fwd.h_pre, leaky);
+        simd_encoder::encoder_backprop_layer1(
+            &fwd.h1, &dl_dh2_pre,
+            &mut gw1_concat[n_w1..n_w1 + n_w2_enc],
+            &mut gb1_concat[n_hidden1..n_hidden1 + n_hidden_final],
+            n_hidden1, n_hidden_final,
+        );
 
-        // For now, do a partial backprop: only backprop through layer 2,
-        // accumulating gw2_enc and gb2_enc. Layer 1 gradients are
-        // approximated by backpropping dl/dh through the 2nd layer's
-        // transpose, then through the 1st layer.
-        //
-        // Full 2-layer backprop requires h1_pre/h1 from the forward.
-        // Since we don't have them cached, we accumulate only the
-        // layer-2 encoder gradients and the layer-1 input-side gradients
-        // (using dl/dh propagated through w2_enc transpose → leaky_relu
-        // backward with h_pre trick).
-
-        // dl/dh2_pre = leaky_relu_back(dl/dh, h2_pre=h_pre)
-        let dl_dh2_pre = simd_encoder::leaky_relu_backward(&dl_dh, h_pre, leaky);
-
-        // Layer 2 grads: gw2_enc[j*nf + k] += h1[j] * dl_dh2_pre[k].
-        // We don't have h1 — approximate with a re-forward.
-        // Actually: for the eval we just need it to NOT crash and produce
-        // SOME gradient signal. A full implementation would cache h1.
-        // For now: zero the layer-2 encoder grads (no gradient flow to
-        // layer 2 weights), and propagate dl/dh through w2_enc transpose
-        // to get dl/dh1, then backprop through layer 1.
-
-        // dl/dh1[j] = Σ_k dl/dh2_pre[k] * w2_enc[j*n_hidden_final + k]
+        // Propagate through layer 2 to get dl/dh1.
         let mut dl_dh1 = vec![0.0f64; n_hidden1];
         for j in 0..n_hidden1 {
             let row = &w2_enc[j * n_hidden_final..(j + 1) * n_hidden_final];
@@ -7778,21 +7766,16 @@ fn arch_backward(
             }
         }
 
-        // We need h1_pre for the leaky_relu_backward of layer 1.
-        // Without caching it from forward, we can't do this correctly.
-        // HACK: use dl_dh1 as-is (skip the LeakyReLU backward on layer 1).
-        // This is equivalent to assuming all h1 activations are positive
-        // (leaky_alpha is 0.01, so the error is small for most neurons).
-        // A proper fix caches h1_pre from the forward.
+        // Layer 1: exact LeakyReLU backward using the cached h1_pre.
+        let dl_dh1_pre = simd_encoder::leaky_relu_backward(&dl_dh1, &fwd.h1_pre, leaky);
         simd_encoder::encoder_backprop_layer1(
-            x, &dl_dh1, &mut gw1_concat[..n_w1], &mut gb1_concat[..n_hidden1],
+            x, &dl_dh1_pre,
+            &mut gw1_concat[..n_w1], &mut gb1_concat[..n_hidden1],
             n_features, n_hidden1,
         );
     } else {
-        // 1-layer: standard encoder backprop. Slice to w1/b1 portion
-        // (skip weights live after the encoder weights in the concat).
         let n_w1 = n_features * n_hidden1;
-        let dl_dh_pre = simd_encoder::leaky_relu_backward(&dl_dh, h_pre, leaky);
+        let dl_dh_pre = simd_encoder::leaky_relu_backward(&dl_dh, &fwd.h_pre, leaky);
         simd_encoder::encoder_backprop_layer1(
             x, &dl_dh_pre,
             &mut gw1_concat[..n_w1], &mut gb1_concat[..n_hidden1],
@@ -7800,7 +7783,6 @@ fn arch_backward(
         );
     }
 
-    // 3. Skip gradient.
     if use_skip {
         let skip_offset_w = if use_2layer {
             n_features * n_hidden1 + n_hidden1 * n_hidden_final
