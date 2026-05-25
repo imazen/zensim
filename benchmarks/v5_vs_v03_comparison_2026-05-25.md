@@ -68,3 +68,22 @@ RankNet fixes the training divergence but produces an overfit model:
 **Verdict:** RankNet-dominant (w=1.0) overfits to training corpora.
 V5's MSE-only approach generalizes better. Sweeping MSE/RankNet
 balance in v8 (MSE=2.0, RN=0.3) and v9 (MSE=1.0, RN=0.1).
+
+## Training regression (2026-05-25)
+
+MSE-only 5-group 2-layer training diverges after epoch 0 in all
+current builds. The v5 production bake was produced by a binary from
+earlier in this session (before σ-weighted MSE infrastructure was
+added). That binary is lost to context compaction.
+
+Working training paths:
+- RankNet-dominant (w≥0.5): converges but overfits to training groups
+- 1-group MSE-only with RankNet: converges (CVVDP-proxy bake)
+- 2-group (safesyn+kadid) MSE-only: converges
+
+Broken paths:
+- 5-group MSE-only (ranknet_weight=0): diverges at epoch 1
+- 3-group MSE-only: diverges at epoch 1
+
+Root cause unknown. Not in σ-weighted code (disabled and tested).
+Likely in validation-loop interaction with multi-group min-policy.
