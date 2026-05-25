@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Shipped (2026-05-25, v5 production 2-layer + PCHIP spline)
+
+- **`PreviewV0_3` upgraded** to v5 production bake
+  (`v5_prod_2layer_spline_2026-05-25.bin`, 258 KB, F32).
+- Architecture: 372→128→64 MLP with per-sample-α head, 2 hidden
+  layers, tanh output pin (scale=30), native PCHIP output
+  calibration spline baked into ZNPR v3 metadata.
+- Bake verdict vs prior V0_3 (tuner v11):
+  - CID22: 0.8798 vs 0.8604 (+0.019 SROCC)
+  - KonJND: 0.4523 vs 0.2888 (+0.164 SROCC)
+  - AIC-3: 0.8180 vs 0.7761 (+0.042 SROCC)
+  - KADIK10k/TID2013/AIC-4: within noise (±0.003)
+- Old bake archived at `weights/archive/v_tuner_v11_2026-05-24.bin`.
+- Comparison: `benchmarks/v5_vs_v03_comparison_2026-05-25.md`.
+
+### Added (2026-05-25)
+
+- **σ-weighted MSE loss** (`--sigma-weighted-mse` CLI flag):
+  per-row metric disagreement (std of cvvdp, iwssim, ssim2)
+  auto-computed at parquet load; MSE loss weighted by
+  `median(σ_group)/max(σ_i, ε)` clamped to [0.2, 5.0].
+  Infrastructure is sound but experimental results show
+  training instability — needs further research.
+- **`OwnedLoadedGroup.metric_sigmas`**: auto-computed from
+  parquet columns (cvvdp_score + iwssim + ssim2_gpu).
+- **`TrainingGroup.metric_sigmas`**: propagated through all
+  construction sites for future σ-aware training experiments.
+
 ### Shipped (2026-05-24 PM, Tuner v5 — codec_target rotation)
 
 - **`ZensimProfile::PreviewV0_5TunerV5`** ships as the new
