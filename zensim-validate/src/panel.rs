@@ -637,6 +637,122 @@ pub fn compute_panel(scores: &[f64], humans: &[f64]) -> PanelStats {
 }
 
 // ----------------------------------------------------------------------
+// Light panel — O(n log n) subset for per-epoch checkpoint selection.
+//
+// Mohammadi 2025 (Table 2) shows PLCC, SROCC, KT exhibit strong mutual
+// correlation while PWRC provides complementary signal. The light panel
+// computes SROCC + PLCC + PWRC (all O(n log n) or cheaper), skipping
+// O(n²) Kendall. This is the per-epoch checkpoint-selection basis;
+// full 6-stat panel is computed at log intervals.
+// ----------------------------------------------------------------------
+
+/// Per-group validation statistics for per-epoch checkpoint selection.
+/// Skips Kendall τ (O(n²)) and OR / Z-RMSE to keep per-epoch cost low.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LightPanel {
+    /// Spearman rank-order correlation (rank accuracy).
+    pub srocc: f64,
+    /// Pearson on 4-parameter logistic rescaled scores (calibration).
+    pub plcc: f64,
+    /// Perceptually Weighted Rank Correlation (HF-emphasis ranking).
+    pub pwrc: f64,
+    /// Sample count.
+    pub n: usize,
+}
+
+/// How to aggregate the 3 light-panel stats into a single checkpoint
+/// score. Applied per group; the existing `--val-policy min|mean` then
+/// aggregates across groups.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValAggregate {
+    /// Legacy: bare SROCC (backward compat with pre-panel trainer).
+    Srocc,
+    /// Geometric mean of (SROCC, PLCC, PWRC). Recommended default.
+    /// Penalizes single-axis collapse (e.g., PLCC = 0.3 while SROCC
+    /// = 0.9 → 0.63) more than arithmetic mean (0.73).
+    GeomeanSPP,
+    /// Harmonic mean — more sensitive to the lowest stat.
+    HarmeanSPP,
+    /// Conservative gate: min of the three.
+    MinSPP,
+}
+
+impl LightPanel {
+    /// Aggregate the three stats into a single score using the chosen
+    /// mode. All stats are expected in [0, 1]; values ≤ 0 are clamped
+    /// to 1e-12 before log/reciprocal to avoid NaN.
+    pub fn aggregate(&self, mode: ValAggregate) -> f64 {
+        match mode {
+            ValAggregate::Srocc => self.srocc,
+            ValAggregate::GeomeanSPP => {
+                let a = self.srocc.max(1e-12);
+                let b = self.plcc.max(1e-12);
+                let c = self.pwrc.max(1e-12);
+                (a * b * c).cbrt()
+            }
+            ValAggregate::HarmeanSPP => {
+                let a = self.srocc.max(1e-12);
+                let b = self.plcc.max(1e-12);
+                let c = self.pwrc.max(1e-12);
+                3.0 / (1.0 / a + 1.0 / b + 1.0 / c)
+            }
+            ValAggregate::MinSPP => self
+                .srocc
+                .min(self.plcc)
+                .min(self.pwrc),
+        }
+    }
+}
+
+impl std::str::FromStr for ValAggregate {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "srocc" => Ok(Self::Srocc),
+            "geomean3" => Ok(Self::GeomeanSPP),
+            "harmean3" => Ok(Self::HarmeanSPP),
+            "min3" => Ok(Self::MinSPP),
+            other => Err(format!(
+                "unknown val-aggregate '{other}'; expected srocc|geomean3|harmean3|min3"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for ValAggregate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Srocc => "srocc",
+            Self::GeomeanSPP => "geomean3",
+            Self::HarmeanSPP => "harmean3",
+            Self::MinSPP => "min3",
+        })
+    }
+}
+
+/// Compute the light panel (SROCC + PLCC + PWRC) for a single
+/// (scores, humans) pair. Same polarity convention as `compute_panel`:
+/// SROCC and PWRC are `.abs()`, PLCC is after 4-param logistic rescale.
+///
+/// Cost: 3× O(n log n) — rank operations dominate. Sub-second on 196 k rows.
+pub fn compute_light_panel(scores: &[f64], humans: &[f64]) -> LightPanel {
+    let n = scores.len().min(humans.len());
+    if n == 0 {
+        return LightPanel::default();
+    }
+    let srocc = spearman(humans, scores).abs();
+    let pw = pwrc(humans, scores).abs();
+    let rescaled = rescale_logistic(scores, humans);
+    let plcc = pearson(&rescaled, humans).abs();
+    LightPanel {
+        srocc,
+        plcc,
+        pwrc: pw,
+        n,
+    }
+}
+
+// ----------------------------------------------------------------------
 // MRR (Meng-Rosenthal-Rubin) paired-correlation z-test
 // ----------------------------------------------------------------------
 
@@ -1208,5 +1324,56 @@ mod tests {
         let arr = p.as_array();
         assert_eq!(arr[0], 0.9);
         assert_eq!(arr[5], 0.2);
+    }
+
+    #[test]
+    fn light_panel_srocc_matches_full_panel() {
+        let scores: Vec<f64> = (0..200).map(|i| (i as f64 * 0.37).sin() * 40.0 + 50.0).collect();
+        let humans: Vec<f64> = (0..200).map(|i| (i as f64 * 0.37).sin() * 38.0 + 52.0).collect();
+        let full = compute_panel(&scores, &humans);
+        let light = compute_light_panel(&scores, &humans);
+        assert!(
+            (full.srocc - light.srocc).abs() < 1e-12,
+            "srocc mismatch: full={} light={}",
+            full.srocc,
+            light.srocc
+        );
+        assert!(
+            (full.plcc - light.plcc).abs() < 1e-12,
+            "plcc mismatch: full={} light={}",
+            full.plcc,
+            light.plcc
+        );
+        assert!(
+            (full.pwrc - light.pwrc).abs() < 1e-12,
+            "pwrc mismatch: full={} light={}",
+            full.pwrc,
+            light.pwrc
+        );
+    }
+
+    #[test]
+    fn val_aggregate_geomean_penalizes_collapse() {
+        let good = LightPanel { srocc: 0.9, plcc: 0.9, pwrc: 0.9, n: 100 };
+        let collapse = LightPanel { srocc: 0.9, plcc: 0.3, pwrc: 0.9, n: 100 };
+        let g = good.aggregate(ValAggregate::GeomeanSPP);
+        let c = collapse.aggregate(ValAggregate::GeomeanSPP);
+        assert!(g > 0.89 && g < 0.91, "good geomean should be ~0.9, got {g}");
+        assert!(c < 0.7, "collapse geomean should be < 0.7, got {c}");
+    }
+
+    #[test]
+    fn val_aggregate_srocc_ignores_plcc_pwrc() {
+        let p = LightPanel { srocc: 0.95, plcc: 0.1, pwrc: 0.1, n: 100 };
+        let s = p.aggregate(ValAggregate::Srocc);
+        assert!((s - 0.95).abs() < 1e-12);
+    }
+
+    #[test]
+    fn val_aggregate_round_trip_parse() {
+        for name in &["srocc", "geomean3", "harmean3", "min3"] {
+            let agg: ValAggregate = name.parse().unwrap();
+            assert_eq!(&agg.to_string(), *name);
+        }
     }
 }

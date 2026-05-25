@@ -79,6 +79,10 @@ pub struct MlpHyperparams {
     /// 0 disables early stopping.
     pub early_stop_patience: usize,
     pub validation_policy: ValidationPolicy,
+    /// Per-group stat aggregation for checkpoint selection. See
+    /// `panel::ValAggregate` for options. Default `GeomeanSPP` per
+    /// Mohammadi 2025's finding that multi-stat evaluation is required.
+    pub val_aggregate: zensim_validate::panel::ValAggregate,
     /// Cycle-9 row-weight boost for B0 + B1 (low-quality) rows.
     /// When > 1.0, biases per-step pair sampling within each training
     /// group toward rows whose `human_score` (0-100 scale) is below 50
@@ -705,6 +709,7 @@ impl Default for MlpHyperparams {
             l2_lambda: 1e-5,
             early_stop_patience: 50,
             validation_policy: ValidationPolicy::Min,
+            val_aggregate: zensim_validate::panel::ValAggregate::GeomeanSPP,
             low_q_boost: 1.0,
             mid_q_boost: 1.0,
             high_q_boost: 1.0,
@@ -1793,7 +1798,8 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
             // similar). They're anti-correlated by design, so we
             // compute SROCC against `-predictions` to surface positive
             // numbers that match V0_2's reporting convention.
-            let group_srocc: Vec<f64> = groups
+            let agg_mode = hyperparams.val_aggregate;
+            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -1809,15 +1815,15 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
                         hyperparams.leaky_alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    spearman_correlation(g.human_scores, &neg_preds)
+                    zensim_validate::panel::compute_light_panel(&neg_preds, g.human_scores)
                 })
                 .collect();
 
-            // Validation score across val groups (validation_weight > 0).
-            // If no val groups configured, fall back to mean across
-            // all groups so the trainer still has a checkpoint signal.
+            let group_scores: Vec<f64> =
+                group_panels.iter().map(|p| p.aggregate(agg_mode)).collect();
+
             let val_score = if val_indices.is_empty() {
-                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+                group_scores.iter().sum::<f64>() / group_scores.len() as f64
             } else {
                 match hyperparams.validation_policy {
                     ValidationPolicy::Mean => {
@@ -1827,27 +1833,32 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
                             .sum();
                         val_indices
                             .iter()
-                            .map(|&i| group_srocc[i] * groups[i].validation_weight)
+                            .map(|&i| group_scores[i] * groups[i].validation_weight)
                             .sum::<f64>()
                             / total
                     }
                     ValidationPolicy::Min => val_indices
                         .iter()
-                        .map(|&i| group_srocc[i])
+                        .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
                 }
             };
 
             let elapsed = start.elapsed().as_secs_f64();
-            let per_group = group_srocc
+            let per_group = group_panels
                 .iter()
                 .zip(groups.iter())
-                .map(|(s, g)| format!("{}={s:.4}", g.name))
+                .map(|(p, g)| {
+                    format!(
+                        "{}: srocc={:.4} plcc={:.4} pwrc={:.4}",
+                        g.name, p.srocc, p.plcc, p.pwrc
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join(" | ");
             log_line(
                 &format!(
-                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val_mean={val_score:.4} (best={best_val_score:.4}) | {per_group} | t={elapsed:.1}s"
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val({agg_mode})={val_score:.4} (best={best_val_score:.4}) | {per_group} | t={elapsed:.1}s"
                 ),
                 log,
             );
@@ -2552,7 +2563,8 @@ fn train_mlp_pool_head_with_tv(
             // SROCC magnitude is unchanged — only the sign is reported
             // negative; the bake at inference is consumed via runtime
             // pool-head dispatch which doesn't apply this negation.)
-            let group_srocc: Vec<f64> = groups
+            let agg_mode = hyperparams.val_aggregate;
+            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -2568,12 +2580,15 @@ fn train_mlp_pool_head_with_tv(
                         alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    spearman_correlation(g.human_scores, &neg_preds)
+                    zensim_validate::panel::compute_light_panel(&neg_preds, g.human_scores)
                 })
                 .collect();
 
+            let group_scores: Vec<f64> =
+                group_panels.iter().map(|p| p.aggregate(agg_mode)).collect();
+
             let val_score = if val_indices.is_empty() {
-                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+                group_scores.iter().sum::<f64>() / group_scores.len() as f64
             } else {
                 match hyperparams.validation_policy {
                     ValidationPolicy::Mean => {
@@ -2583,27 +2598,32 @@ fn train_mlp_pool_head_with_tv(
                             .sum();
                         val_indices
                             .iter()
-                            .map(|&i| group_srocc[i] * groups[i].validation_weight)
+                            .map(|&i| group_scores[i] * groups[i].validation_weight)
                             .sum::<f64>()
                             / total
                     }
                     ValidationPolicy::Min => val_indices
                         .iter()
-                        .map(|&i| group_srocc[i])
+                        .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
                 }
             };
 
             let elapsed = start.elapsed().as_secs_f64();
-            let per_group = group_srocc
+            let per_group = group_panels
                 .iter()
                 .zip(groups.iter())
-                .map(|(s, g)| format!("{}={s:.4}", g.name))
+                .map(|(p, g)| {
+                    format!(
+                        "{}: srocc={:.4} plcc={:.4} pwrc={:.4}",
+                        g.name, p.srocc, p.plcc, p.pwrc
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join(" | ");
             log_line(
                 &format!(
-                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val_mean={val_score:.4} (best={best_val_score:.4}) | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] reducer_b={:.3} | {per_group} | t={elapsed:.1}s",
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val({agg_mode})={val_score:.4} (best={best_val_score:.4}) | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] reducer_b={:.3} | {per_group} | t={elapsed:.1}s",
                     reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3], reducer_b,
                 ),
                 log,
@@ -3518,7 +3538,8 @@ fn train_mlp_hybrid_head_with_tv(
                 let xc = alpha_logit.clamp(-20.0, 20.0);
                 1.0 / (1.0 + (-xc).exp())
             };
-            let group_srocc: Vec<f64> = groups
+            let agg_mode = hyperparams.val_aggregate;
+            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -3537,12 +3558,15 @@ fn train_mlp_hybrid_head_with_tv(
                         leaky,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    spearman_correlation(g.human_scores, &neg_preds)
+                    zensim_validate::panel::compute_light_panel(&neg_preds, g.human_scores)
                 })
                 .collect();
 
+            let group_scores: Vec<f64> =
+                group_panels.iter().map(|p| p.aggregate(agg_mode)).collect();
+
             let val_score = if val_indices.is_empty() {
-                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+                group_scores.iter().sum::<f64>() / group_scores.len() as f64
             } else {
                 match hyperparams.validation_policy {
                     ValidationPolicy::Mean => {
@@ -3552,27 +3576,32 @@ fn train_mlp_hybrid_head_with_tv(
                             .sum();
                         val_indices
                             .iter()
-                            .map(|&i| group_srocc[i] * groups[i].validation_weight)
+                            .map(|&i| group_scores[i] * groups[i].validation_weight)
                             .sum::<f64>()
                             / total
                     }
                     ValidationPolicy::Min => val_indices
                         .iter()
-                        .map(|&i| group_srocc[i])
+                        .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
                 }
             };
 
             let elapsed = start.elapsed().as_secs_f64();
-            let per_group = group_srocc
+            let per_group = group_panels
                 .iter()
                 .zip(groups.iter())
-                .map(|(s, g)| format!("{}={s:.4}", g.name))
+                .map(|(p, g)| {
+                    format!(
+                        "{}: srocc={:.4} plcc={:.4} pwrc={:.4}",
+                        g.name, p.srocc, p.plcc, p.pwrc
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join(" | ");
             log_line(
                 &format!(
-                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val={val_score:.4} (best={best_val_score:.4}) | α={alpha_eff:.3} (logit={alpha_logit:+.3}) reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val({agg_mode})={val_score:.4} (best={best_val_score:.4}) | α={alpha_eff:.3} (logit={alpha_logit:+.3}) reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
                     reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3],
                 ),
                 log,
@@ -4868,6 +4897,53 @@ fn ranks(v: &[f64]) -> Vec<f64> {
         i = j;
     }
     r
+}
+
+/// Post-transform NaN/inf sweep. Call after applying auto-transforms
+/// to any feature pool (training groups, anchor parquet, pjnd
+/// passthrough, konjnd aggregation). Returns `Err` listing every
+/// poisoned `(feature_idx, count, transform_name)` triple so the
+/// caller can exit with a clear diagnostic.
+///
+/// **Strict by default**: the trainer binary should propagate the error
+/// and exit nonzero rather than silently clamping NaN to 0. A NaN in
+/// post-transform features propagates to the scaler (poisoning mean/std),
+/// the forward pass (NaN activations), and the loss (NaN gradients) —
+/// the entire training run is unrecoverable.
+pub fn sweep_nan_inf(
+    rows: &[Vec<f64>],
+    transforms: &[FeatureTransform],
+    source_name: &str,
+) -> Result<(), String> {
+    let n_features = transforms.len();
+    let mut poisoned: Vec<(usize, usize, &str)> = Vec::new();
+    for fi in 0..n_features {
+        let t = transforms[fi];
+        if matches!(t, FeatureTransform::Identity) {
+            continue;
+        }
+        let mut bad = 0usize;
+        for row in rows {
+            if fi < row.len() && !row[fi].is_finite() {
+                bad += 1;
+            }
+        }
+        if bad > 0 {
+            poisoned.push((fi, bad, t.as_token()));
+        }
+    }
+    if poisoned.is_empty() {
+        Ok(())
+    } else {
+        let details: Vec<String> = poisoned
+            .iter()
+            .map(|&(fi, count, tname)| format!("f{fi} ({tname}): {count} NaN/inf"))
+            .collect();
+        Err(format!(
+            "NaN/inf in {source_name} after auto-transforms: {}",
+            details.join(", ")
+        ))
+    }
 }
 
 struct AdamState {
@@ -7065,7 +7141,9 @@ fn train_mlp_per_sample_alpha_head(
                 .iter()
                 .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
-            let group_srocc: Vec<f64> = groups
+            let agg_mode = hyperparams.val_aggregate;
+            let mse_only = hyperparams.mse_weight > 0.0 && hyperparams.ranknet_weight <= 0.0;
+            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -7084,27 +7162,20 @@ fn train_mlp_per_sample_alpha_head(
                         n_hidden,
                         leaky,
                     );
-                    // PreviewV0_5Tuner (2026-05-19): when MSE-only training
-                    // (ranknet_weight=0) is in use, the bake is score-shaped
-                    // — DON'T negate preds for SROCC. The legacy convention
-                    // negated because RankNet's distance-shape output had
-                    // low=good. Pure-MSE training produces high=good.
-                    //
-                    // V4 tanh pin: SROCC is rank-invariant under sigmoid, so
-                    // pinning doesn't affect this branch's ordering.
-                    let mse_only =
-                        hyperparams.mse_weight > 0.0 && hyperparams.ranknet_weight <= 0.0;
                     let signed_preds: Vec<f64> = if mse_only {
                         preds.clone()
                     } else {
                         preds.iter().map(|&p| -p).collect()
                     };
-                    spearman_correlation(g.human_scores, &signed_preds)
+                    zensim_validate::panel::compute_light_panel(&signed_preds, g.human_scores)
                 })
                 .collect();
 
+            let group_scores: Vec<f64> =
+                group_panels.iter().map(|p| p.aggregate(agg_mode)).collect();
+
             let val_score = if val_indices.is_empty() {
-                group_srocc.iter().sum::<f64>() / group_srocc.len() as f64
+                group_scores.iter().sum::<f64>() / group_scores.len() as f64
             } else {
                 match hyperparams.validation_policy {
                     ValidationPolicy::Mean => {
@@ -7114,27 +7185,32 @@ fn train_mlp_per_sample_alpha_head(
                             .sum();
                         val_indices
                             .iter()
-                            .map(|&i| group_srocc[i] * groups[i].validation_weight)
+                            .map(|&i| group_scores[i] * groups[i].validation_weight)
                             .sum::<f64>()
                             / total
                     }
                     ValidationPolicy::Min => val_indices
                         .iter()
-                        .map(|&i| group_srocc[i])
+                        .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
                 }
             };
 
             let elapsed = start.elapsed().as_secs_f64();
-            let per_group = group_srocc
+            let per_group = group_panels
                 .iter()
                 .zip(groups.iter())
-                .map(|(s, g)| format!("{}={s:.4}", g.name))
+                .map(|(p, g)| {
+                    format!(
+                        "{}: srocc={:.4} plcc={:.4} pwrc={:.4}",
+                        g.name, p.srocc, p.plcc, p.pwrc
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join(" | ");
             log_line(
                 &format!(
-                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val={val_score:.4} (best={best_val_score:.4}) | α(x): μ={alpha_mean:.3} [min={alpha_min:.3}, max={alpha_max:.3}] | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val({agg_mode})={val_score:.4} (best={best_val_score:.4}) | α(x): μ={alpha_mean:.3} [min={alpha_min:.3}, max={alpha_max:.3}] | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
                     reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3],
                 ),
                 log,
@@ -7583,15 +7659,15 @@ mod tests {
             val_srocc > 0.85,
             "validation-tracking trainer failed to generalize: val SROCC={val_srocc:.4}",
         );
-        // Spot-check the log: should mention val= per group and report
-        // val_mean as part of every epoch line.
+        // Spot-check the log: epoch lines contain the multi-stat
+        // val aggregate and per-group panel stats.
         assert!(
-            log.iter().any(|line| line.contains("val_mean=")),
-            "log missing val_mean= reporting"
+            log.iter().any(|line| line.contains("val(")),
+            "log missing val(aggregate)= reporting"
         );
         assert!(
-            log.iter().any(|line| line.contains("val=")),
-            "log missing per-group val= field"
+            log.iter().any(|line| line.contains("srocc=")),
+            "log missing per-group srocc= field"
         );
     }
 

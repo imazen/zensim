@@ -148,10 +148,23 @@ struct Args {
     #[arg(long, default_value_t = 0.01)]
     leaky_alpha: f64,
 
-    /// Validation policy: "min" (worst per-group SROCC, V0_5 default)
-    /// or "mean".
+    /// Validation policy: "min" (worst per-group score, V0_5 default)
+    /// or "mean". Applied AFTER per-group multi-stat aggregation.
     #[arg(long, default_value = "min")]
     val_policy: String,
+
+    /// Per-group stat aggregation for checkpoint selection:
+    ///   srocc    — legacy single-stat (backward compat)
+    ///   geomean3 — geometric mean of (SROCC, PLCC, PWRC) [DEFAULT]
+    ///   harmean3 — harmonic mean of same
+    ///   min3     — min of (SROCC, PLCC, PWRC)
+    ///
+    /// Mohammadi 2025 shows SROCC alone is "the single most misleading
+    /// practice" in IQA evaluation. geomean3 captures rank accuracy,
+    /// calibration linearity, and perceptual weighting — the three
+    /// cheaply-computable axes — in a single checkpoint score.
+    #[arg(long, default_value = "geomean3")]
+    val_aggregate: String,
 
     /// Random seed. Default 1 matches V0_16 ship.
     #[arg(long, default_value_t = 1)]
@@ -1522,6 +1535,12 @@ fn main() {
         }
     };
 
+    let val_aggregate: zensim_validate::panel::ValAggregate =
+        args.val_aggregate.parse().unwrap_or_else(|e| {
+            eprintln!("--val-aggregate: {e}");
+            std::process::exit(2);
+        });
+
     // Load all groups, infer n_features from the first.
     let mut loaded: Vec<LoadedGroup> = Vec::new();
     let mut n_features = 0usize;
@@ -1752,6 +1771,13 @@ fn main() {
                     }
                 }
             }
+            let refs: Vec<Vec<f64>> = g.feature_rows.iter().map(|r| r.clone()).collect();
+            if let Err(e) =
+                mlp_train::sweep_nan_inf(&refs, &transforms, &format!("group '{}'", g.name))
+            {
+                eprintln!("FATAL: {e}");
+                std::process::exit(1);
+            }
         }
         let any_params = params.iter().any(|p| !p.is_empty());
         (
@@ -1798,6 +1824,7 @@ fn main() {
         l2_lambda: args.l2,
         early_stop_patience: args.early_stop_patience,
         validation_policy: val_policy,
+        val_aggregate,
         low_q_boost: args.low_q_boost,
         mid_q_boost: args.mid_q_boost,
         high_q_boost: args.high_q_boost,
@@ -1971,6 +1998,10 @@ fn main() {
                     }
                 }
             }
+            if let Err(e) = mlp_train::sweep_nan_inf(&feat, ts, "anchor parquet") {
+                eprintln!("FATAL: {e}");
+                std::process::exit(1);
+            }
         }
         // V5: optional per-row `target_score` column. Row ordering
         // matches `load_parquet` (same sequential batch scan).
@@ -2140,6 +2171,10 @@ fn main() {
                     }
                 }
             }
+            if let Err(e) = mlp_train::sweep_nan_inf(&feat, ts, "pjnd-passthrough parquet") {
+                eprintln!("FATAL: {e}");
+                std::process::exit(1);
+            }
         }
         // V11-D: constant per-row weight 1.0 (no preferential sampling).
         let weights = vec![1.0_f64; feat.len()];
@@ -2205,6 +2240,12 @@ fn main() {
                             row[i] = t.apply_with_params(row[i] as f32, p) as f64;
                         }
                     }
+                }
+                if let Err(e) =
+                    mlp_train::sweep_nan_inf(&pool.feature_rows, ts, "konjnd-aggregation parquet")
+                {
+                    eprintln!("FATAL: {e}");
+                    std::process::exit(1);
                 }
             }
             eprintln!(
