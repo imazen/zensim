@@ -10,6 +10,8 @@
 //! their own `mod foo;` via `#[path = "../foo.rs"]` and should not be
 //! touched as part of changes that add library surface.
 
+pub mod adam_simd;
 pub mod output_calibration_spline;
 pub mod panel;
 pub mod parquet_loader;
+pub mod simd_mlp;
