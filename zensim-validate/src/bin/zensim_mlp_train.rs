@@ -1529,8 +1529,9 @@ fn main() {
     let val_policy = match args.val_policy.to_lowercase().as_str() {
         "min" => ValidationPolicy::Min,
         "mean" => ValidationPolicy::Mean,
+        "goals" => ValidationPolicy::Goals,
         other => {
-            eprintln!("--val-policy must be 'min' or 'mean', got {other:?}");
+            eprintln!("--val-policy must be 'min', 'mean', or 'goals'; got {other:?}");
             std::process::exit(2);
         }
     };

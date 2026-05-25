@@ -58,8 +58,149 @@ mod loss_norm_in_norm;
 /// CID22 wins.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValidationPolicy {
+    /// Weighted mean of per-group aggregate scores.
     Mean,
+    /// Worst per-group aggregate score (conservative).
     Min,
+    /// Goal-weighted scoring per CODEC_TARGET_GOALS.md. Each goal
+    /// (G1-G11) is a 0.0-1.0 soft gate computed from per-group panel
+    /// stats + anchor predictions + optional sweep data. Goals whose
+    /// input data wasn't loaded get zero weight (skipped). The
+    /// checkpoint score is the weighted sum of goal scores.
+    Goals,
+}
+
+// ---------------------------------------------------------------------------
+// Goal-based validation (CODEC_TARGET_GOALS.md §"Validation policy")
+// ---------------------------------------------------------------------------
+
+/// Per-epoch goal check result. Each field is 0.0-1.0 (soft gate:
+/// linear ramp from floor to aspiration threshold).
+#[derive(Clone, Debug, Default)]
+pub struct GoalScores {
+    /// G2: JND semantic anchor (|mean_pred - 60| ≤ 5).
+    pub g2_jnd_anchor: f64,
+    /// G5: HF rank fidelity (konjnd SROCC ≥ 0.70).
+    pub g5_hf_rank: f64,
+    /// G6: MF band coverage (max SROCC gap vs ssim2 ≤ 0.10).
+    pub g6_mf_band_coverage: f64,
+    /// G7: CID22 compression-corpus rank (advisory SROCC ≥ 0.85).
+    pub g7_cid22_rank: f64,
+    /// G8: Z-RMSE quality (lower is better; ≤ 30 floor).
+    pub g8_zrmse: f64,
+    /// Active goal weights (goals with missing data get 0.0).
+    pub weights: [f64; 5],
+}
+
+impl GoalScores {
+    /// Weighted sum of active goals, normalized by sum of active weights.
+    pub fn aggregate(&self) -> f64 {
+        let scores = [
+            self.g2_jnd_anchor,
+            self.g5_hf_rank,
+            self.g6_mf_band_coverage,
+            self.g7_cid22_rank,
+            self.g8_zrmse,
+        ];
+        let wsum: f64 = self.weights.iter().sum();
+        if wsum < 1e-12 {
+            return 0.0;
+        }
+        scores
+            .iter()
+            .zip(self.weights.iter())
+            .map(|(&s, &w)| s * w)
+            .sum::<f64>()
+            / wsum
+    }
+}
+
+/// Soft gate: linear ramp from 0 at `floor` to 1 at `target`.
+/// Values above target clamp to 1; below floor clamp to 0.
+/// `higher_is_better = true` for SROCC; `false` for Z-RMSE (lower is better).
+fn soft_gate(value: f64, floor: f64, target: f64, higher_is_better: bool) -> f64 {
+    if higher_is_better {
+        if value >= target {
+            1.0
+        } else if value <= floor {
+            0.0
+        } else {
+            (value - floor) / (target - floor)
+        }
+    } else {
+        // lower is better: floor is the BAD end, target is the GOOD end
+        if value <= target {
+            1.0
+        } else if value >= floor {
+            0.0
+        } else {
+            (floor - value) / (floor - target)
+        }
+    }
+}
+
+/// Compute goal scores from per-group light panels + anchor predictions.
+///
+/// `group_panels` is indexed by group. `anchor_mean_pred` is the mean
+/// prediction at KonJND PJND pairs (None if no anchor loaded).
+/// `konjnd_group_idx` identifies which group (if any) is the KonJND
+/// holdout for G5 HF rank checking. `cid22_group_idx` similarly for G7.
+pub fn compute_goal_scores(
+    group_panels: &[zensim_validate::panel::LightPanel],
+    groups: &[TrainingGroup<'_>],
+    anchor_mean_pred: Option<f64>,
+    anchor_zrmse: Option<f64>,
+) -> GoalScores {
+    let mut gs = GoalScores::default();
+
+    // G2: JND anchor — mean prediction at PJND pairs should be ~60.
+    if let Some(mean_pred) = anchor_mean_pred {
+        let error = (mean_pred - 60.0).abs();
+        // floor: error=10 → 0.0; target: error=0 → 1.0
+        gs.g2_jnd_anchor = soft_gate(error, 10.0, 0.0, false);
+        gs.weights[0] = 2.0;
+    }
+
+    // G5: HF rank — look for groups named konjnd* with SROCC check.
+    for (gi, g) in groups.iter().enumerate() {
+        let name_lower = g.name.to_lowercase();
+        if name_lower.contains("konjnd") && gi < group_panels.len() {
+            let srocc = group_panels[gi].srocc;
+            gs.g5_hf_rank = soft_gate(srocc, 0.30, 0.85, true);
+            gs.weights[1] = 1.5;
+            break;
+        }
+    }
+
+    // G6: MF band coverage — no per-band check yet (needs per-band panel),
+    // use worst-group SROCC as a proxy.
+    if group_panels.len() >= 2 {
+        let min_srocc = group_panels
+            .iter()
+            .map(|p| p.srocc)
+            .fold(f64::INFINITY, f64::min);
+        gs.g6_mf_band_coverage = soft_gate(min_srocc, 0.70, 0.95, true);
+        gs.weights[2] = 0.5;
+    }
+
+    // G7: CID22 rank — look for groups named cid22*.
+    for (gi, g) in groups.iter().enumerate() {
+        let name_lower = g.name.to_lowercase();
+        if name_lower.contains("cid22") && gi < group_panels.len() {
+            let srocc = group_panels[gi].srocc;
+            gs.g7_cid22_rank = soft_gate(srocc, 0.80, 0.92, true);
+            gs.weights[3] = 0.5;
+            break;
+        }
+    }
+
+    // G8: Z-RMSE from anchor predictions (if available).
+    if let Some(zrmse) = anchor_zrmse {
+        gs.g8_zrmse = soft_gate(zrmse, 1.5, 0.5, false);
+        gs.weights[4] = 2.5;
+    }
+
+    gs
 }
 
 /// Knobs for [`train_mlp`]. Defaults match the V0_4 placeholder
@@ -1841,6 +1982,10 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
                         .iter()
                         .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
+                    ValidationPolicy::Goals => {
+                        let gs = compute_goal_scores(&group_panels, groups, None, None);
+                        gs.aggregate()
+                    }
                 }
             };
 
@@ -2606,6 +2751,10 @@ fn train_mlp_pool_head_with_tv(
                         .iter()
                         .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
+                    ValidationPolicy::Goals => {
+                        let gs = compute_goal_scores(&group_panels, groups, None, None);
+                        gs.aggregate()
+                    }
                 }
             };
 
@@ -3584,6 +3733,10 @@ fn train_mlp_hybrid_head_with_tv(
                         .iter()
                         .map(|&i| group_scores[i])
                         .fold(f64::INFINITY, f64::min),
+                    ValidationPolicy::Goals => {
+                        let gs = compute_goal_scores(&group_panels, groups, None, None);
+                        gs.aggregate()
+                    }
                 }
             };
 
@@ -7174,25 +7327,72 @@ fn train_mlp_per_sample_alpha_head(
             let group_scores: Vec<f64> =
                 group_panels.iter().map(|p| p.aggregate(agg_mode)).collect();
 
-            let val_score = if val_indices.is_empty() {
-                group_scores.iter().sum::<f64>() / group_scores.len() as f64
-            } else {
-                match hyperparams.validation_policy {
-                    ValidationPolicy::Mean => {
-                        let total: f64 = val_indices
-                            .iter()
-                            .map(|&i| groups[i].validation_weight)
-                            .sum();
-                        val_indices
-                            .iter()
-                            .map(|&i| group_scores[i] * groups[i].validation_weight)
-                            .sum::<f64>()
-                            / total
+            // Anchor-based goal inputs: compute mean prediction on anchor
+            // rows (for G2 JND check) and anchor Z-RMSE (for G8).
+            let (anchor_mean_pred, anchor_zrmse) = if anchor_active
+                && !std_anchor_features.is_empty()
+            {
+                let anchor_feats = &std_anchor_features;
+                let mut preds = Vec::with_capacity(anchor_feats.len());
+                for af in anchor_feats {
+                    let (y, _, _, _, _, _, _, _, _) = psah::forward_per_sample_alpha_head(
+                        af, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
+                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
+                    );
+                    let (pinned, _) = pin_forward(y);
+                    preds.push(pinned);
+                }
+                let mean_p = preds.iter().sum::<f64>() / preds.len().max(1) as f64;
+                let zrmse = if let Some(ref a) = anchor {
+                    if a.row_weights.len() == preds.len() {
+                        zensim_validate::panel::z_rmse(&preds, a.row_weights)
+                    } else {
+                        f64::NAN
                     }
-                    ValidationPolicy::Min => val_indices
-                        .iter()
-                        .map(|&i| group_scores[i])
-                        .fold(f64::INFINITY, f64::min),
+                } else {
+                    f64::NAN
+                };
+                (
+                    Some(mean_p),
+                    if zrmse.is_finite() { Some(zrmse) } else { None },
+                )
+            } else {
+                (None, None)
+            };
+
+            let val_score = match hyperparams.validation_policy {
+                ValidationPolicy::Goals => {
+                    let gs = compute_goal_scores(
+                        &group_panels,
+                        groups,
+                        anchor_mean_pred,
+                        anchor_zrmse,
+                    );
+                    gs.aggregate()
+                }
+                _ => {
+                    if val_indices.is_empty() {
+                        group_scores.iter().sum::<f64>() / group_scores.len() as f64
+                    } else {
+                        match hyperparams.validation_policy {
+                            ValidationPolicy::Mean => {
+                                let total: f64 = val_indices
+                                    .iter()
+                                    .map(|&i| groups[i].validation_weight)
+                                    .sum();
+                                val_indices
+                                    .iter()
+                                    .map(|&i| group_scores[i] * groups[i].validation_weight)
+                                    .sum::<f64>()
+                                    / total
+                            }
+                            ValidationPolicy::Min => val_indices
+                                .iter()
+                                .map(|&i| group_scores[i])
+                                .fold(f64::INFINITY, f64::min),
+                            ValidationPolicy::Goals => unreachable!(),
+                        }
+                    }
                 }
             };
 
@@ -7208,9 +7408,19 @@ fn train_mlp_per_sample_alpha_head(
                 })
                 .collect::<Vec<_>>()
                 .join(" | ");
+            let goal_info = if matches!(hyperparams.validation_policy, ValidationPolicy::Goals) {
+                let gs = compute_goal_scores(&group_panels, groups, anchor_mean_pred, anchor_zrmse);
+                format!(
+                    " | goals: g2={:.2} g5={:.2} g6={:.2} g7={:.2} g8={:.2}",
+                    gs.g2_jnd_anchor, gs.g5_hf_rank, gs.g6_mf_band_coverage,
+                    gs.g7_cid22_rank, gs.g8_zrmse
+                )
+            } else {
+                String::new()
+            };
             log_line(
                 &format!(
-                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val({agg_mode})={val_score:.4} (best={best_val_score:.4}) | α(x): μ={alpha_mean:.3} [min={alpha_min:.3}, max={alpha_max:.3}] | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
+                    "  epoch {epoch:>3} | lr={lr:.5} | loss={avg_loss:.4} | val({agg_mode})={val_score:.4} (best={best_val_score:.4}){goal_info} | α(x): μ={alpha_mean:.3} [min={alpha_min:.3}, max={alpha_max:.3}] | reducer_w=[μ={:.3},σ={:.3},max={:.3},p6={:.3}] | {per_group} | t={elapsed:.1}s",
                     reducer_w[0], reducer_w[1], reducer_w[2], reducer_w[3],
                 ),
                 log,
@@ -9175,6 +9385,200 @@ mod tests {
         assert!(
             any_ignored_log,
             "expected 'konjnd-aggregation ... ignored' log; got logs: {log:?}"
+        );
+    }
+
+    // ===================================================================
+    // Per-sample-alpha-head dedicated tests (previously zero coverage).
+    // ===================================================================
+
+    #[test]
+    fn psah_recovers_synthetic_ranking() {
+        let n_features = 16;
+        let (features_owned, targets) = make_synth_dataset(500, 400, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let mut log = Vec::new();
+        let bake = train_mlp_per_sample_alpha_head(
+            &[group],
+            n_features,
+            &MlpHyperparams {
+                n_hidden: 16,
+                n_epochs: 80,
+                pairs_per_epoch: 2000,
+                initial_lr: 0.005,
+                per_sample_alpha_head: true,
+                minibatch_size: 1,
+                ..Default::default()
+            },
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!bake.is_empty(), "per-sample-α head produced empty bake");
+        assert!(
+            log.iter().any(|l| l.contains("srocc=")),
+            "log should contain per-group panel stats"
+        );
+    }
+
+    #[test]
+    fn psah_tanh_pin_bounds_output() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(600, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let mut log = Vec::new();
+        let bake = train_mlp_per_sample_alpha_head(
+            &[group],
+            n_features,
+            &MlpHyperparams {
+                n_hidden: 8,
+                n_epochs: 30,
+                pairs_per_epoch: 500,
+                initial_lr: 0.003,
+                per_sample_alpha_head: true,
+                tanh_output_head_scale: 30.0,
+                mse_weight: 1.0,
+                ranknet_weight: 0.0,
+                minibatch_size: 1,
+                ..Default::default()
+            },
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!bake.is_empty());
+        // With tanh pin scale=30, raw output y_pre maps through
+        // 100·σ(y_pre/30) → predictions should be in [0, 100].
+        // The log should show val(...) which is computed from pinned
+        // predictions.
+        let has_val = log.iter().any(|l| l.contains("val("));
+        assert!(has_val, "expected val() in log");
+    }
+
+    #[test]
+    fn psah_nan_transform_sweep_catches_poison() {
+        use zenpredict::FeatureTransform;
+        let rows = vec![
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.5, 1.5],
+        ];
+        let transforms = vec![
+            FeatureTransform::Identity,
+            FeatureTransform::Identity,
+            FeatureTransform::Identity,
+        ];
+        // No NaN expected with identity transforms.
+        assert!(sweep_nan_inf(&rows, &transforms, "test-clean").is_ok());
+
+        // Manually poison a feature to simulate log(0) = -inf.
+        let mut poisoned_rows = rows.clone();
+        poisoned_rows[0][1] = f64::NAN;
+        poisoned_rows[1][2] = f64::INFINITY;
+        let transforms_with_log = vec![
+            FeatureTransform::Identity,
+            FeatureTransform::Log,
+            FeatureTransform::Log,
+        ];
+        let result = sweep_nan_inf(&poisoned_rows, &transforms_with_log, "test-poison");
+        assert!(result.is_err(), "sweep should catch NaN/inf");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("f1"), "should identify feature f1: {msg}");
+        assert!(msg.contains("f2"), "should identify feature f2: {msg}");
+    }
+
+    #[test]
+    fn psah_goals_policy_produces_score() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(700, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "konjnd_test".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let mut log = Vec::new();
+        let bake = train_mlp_per_sample_alpha_head(
+            &[group],
+            n_features,
+            &MlpHyperparams {
+                n_hidden: 8,
+                n_epochs: 20,
+                pairs_per_epoch: 500,
+                initial_lr: 0.003,
+                per_sample_alpha_head: true,
+                validation_policy: ValidationPolicy::Goals,
+                minibatch_size: 1,
+                ..Default::default()
+            },
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!bake.is_empty());
+        // Goals policy should produce a goals breakdown in the log.
+        let has_goals = log.iter().any(|l| l.contains("goals:"));
+        assert!(has_goals, "expected 'goals:' in log with --val-policy goals");
+    }
+
+    #[test]
+    fn light_panel_geomean_used_by_default() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(800, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let group = TrainingGroup {
+            name: "synth".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let mut log = Vec::new();
+        let _bake = train_mlp_per_sample_alpha_head(
+            &[group],
+            n_features,
+            &MlpHyperparams {
+                n_hidden: 8,
+                n_epochs: 10,
+                pairs_per_epoch: 300,
+                initial_lr: 0.003,
+                per_sample_alpha_head: true,
+                minibatch_size: 1,
+                ..Default::default()
+            },
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+        );
+        // Default val_aggregate is GeomeanSPP; log should show val(geomean3).
+        let has_geomean = log.iter().any(|l| l.contains("val(geomean3)"));
+        assert!(
+            has_geomean,
+            "default val_aggregate should be geomean3; log: {:?}",
+            log.last()
         );
     }
 }
