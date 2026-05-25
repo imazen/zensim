@@ -85,6 +85,90 @@ impl DisplayProfile {
     };
 }
 
+/// Display target for CVVDP-calibrated bakes.
+///
+/// Each variant corresponds to a bake trained on CVVDP scores computed
+/// at that display's viewing conditions. The naming convention is
+/// `zensim-{gen}-{display}` where `gen` is a generation letter (b =
+/// current) and `display` is the viewing condition.
+///
+/// # Examples
+/// ```
+/// use zensim::display::DisplayTarget;
+/// let target = DisplayTarget::Phone; // zensim-b-phone (iPhone 14 Pro PPD=67)
+/// let profile = target.display_profile();
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DisplayTarget {
+    /// Desktop monitor at typical desk distance (PPD ≈ 53, ~1080p at 60cm).
+    /// This is the default when no display is specified.
+    /// Bake name: `zensim-b-desktop` (or just `zensim-b`).
+    Desktop,
+    /// Smartphone at arm's length (PPD ≈ 67, iPhone 14 Pro at 25cm).
+    /// Bake name: `zensim-b-phone`.
+    Phone,
+    /// Living-room TV at couch distance (PPD ≈ 56, 55" 4K at 3m).
+    /// Bake name: `zensim-b-tv`.
+    Tv,
+}
+
+impl DisplayTarget {
+    /// The display profile (PPD, luminance, ambient) for this target.
+    pub fn display_profile(self) -> DisplayProfile {
+        match self {
+            Self::Desktop => DisplayProfile::DESKTOP_1080P,
+            Self::Phone => DisplayProfile::IPHONE_14_PRO,
+            Self::Tv => DisplayProfile::TV_4K_55_3M,
+        }
+    }
+
+    /// Canonical bake name string: `zensim-b-{suffix}`.
+    pub fn bake_name(self) -> &'static str {
+        match self {
+            Self::Desktop => "zensim-b-desktop",
+            Self::Phone => "zensim-b-phone",
+            Self::Tv => "zensim-b-tv",
+        }
+    }
+
+    /// Short suffix for filenames and CLI.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::Desktop => "desktop",
+            Self::Phone => "phone",
+            Self::Tv => "tv",
+        }
+    }
+
+    /// CVVDP-trained bake bytes for this display target.
+    /// Returns `None` for targets whose CVVDP backfill hasn't landed yet.
+    pub fn bake_bytes(self) -> Option<&'static [u8]> {
+        match self {
+            Self::Desktop => Some(crate::profile::mlp_bake_cvvdp_desktop()),
+            Self::Phone => None,  // awaiting CVVDP phone backfill
+            Self::Tv => None,     // awaiting CVVDP TV backfill
+        }
+    }
+}
+
+impl core::fmt::Display for DisplayTarget {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.bake_name())
+    }
+}
+
+impl core::str::FromStr for DisplayTarget {
+    type Err = &'static str;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "desktop" | "zensim-b-desktop" | "zensim-b" => Ok(Self::Desktop),
+            "phone" | "zensim-b-phone" => Ok(Self::Phone),
+            "tv" | "zensim-b-tv" => Ok(Self::Tv),
+            _ => Err("expected one of: desktop, phone, tv"),
+        }
+    }
+}
+
 /// Per-display affine calibration coefficients.
 ///
 /// `score_display = alpha + beta * score_agnostic`

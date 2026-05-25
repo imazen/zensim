@@ -1268,6 +1268,13 @@ pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
     include_bytes!("../weights/v5_prod_2layer_spline_2026-05-25.bin")
 }
 
+/// CVVDP-trained bake for desktop viewing conditions (PPD ≈ 53).
+/// Trained on safesyn cvvdp_log_norm target with RankNet + MSE.
+/// SROCC 0.9941 on safesyn (predicts CVVDP desktop rankings).
+pub(crate) fn mlp_bake_cvvdp_desktop() -> &'static [u8] {
+    include_bytes!("../weights/zensim_b_desktop_2026-05-25.bin")
+}
+
 static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
