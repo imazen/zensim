@@ -11,6 +11,8 @@
 //! touched as part of changes that add library surface.
 
 pub mod adam_simd;
+#[allow(clippy::all)]
+pub mod mlp_train;
 pub mod output_calibration_spline;
 pub mod panel;
 pub mod parquet_loader;

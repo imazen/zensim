@@ -37,8 +37,7 @@ use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 // / scalar dispatched kernel. Math is bit-identical to the scalar
 // reference (hardware `sqrt`, FMA fusion only where LLVM would already
 // fuse the scalar version).
-#[path = "adam_simd.rs"]
-mod adam_simd;
+use crate::adam_simd;
 
 // Norm-in-Norm + RankNet hybrid loss (Li, Jiang, Jiang 2020,
 // arXiv:2008.03889). Opt-in via `MlpHyperparams::norm_in_norm_weight >
@@ -146,7 +145,7 @@ fn soft_gate(value: f64, floor: f64, target: f64, higher_is_better: bool) -> f64
 /// `konjnd_group_idx` identifies which group (if any) is the KonJND
 /// holdout for G5 HF rank checking. `cid22_group_idx` similarly for G7.
 pub fn compute_goal_scores(
-    group_panels: &[zensim_validate::panel::LightPanel],
+    group_panels: &[crate::panel::LightPanel],
     groups: &[TrainingGroup<'_>],
     anchor_mean_pred: Option<f64>,
     anchor_zrmse: Option<f64>,
@@ -223,7 +222,7 @@ pub struct MlpHyperparams {
     /// Per-group stat aggregation for checkpoint selection. See
     /// `panel::ValAggregate` for options. Default `GeomeanSPP` per
     /// Mohammadi 2025's finding that multi-stat evaluation is required.
-    pub val_aggregate: zensim_validate::panel::ValAggregate,
+    pub val_aggregate: crate::panel::ValAggregate,
     /// Cycle-9 row-weight boost for B0 + B1 (low-quality) rows.
     /// When > 1.0, biases per-step pair sampling within each training
     /// group toward rows whose `human_score` (0-100 scale) is below 50
@@ -864,7 +863,7 @@ impl Default for MlpHyperparams {
             l2_lambda: 1e-5,
             early_stop_patience: 50,
             validation_policy: ValidationPolicy::Min,
-            val_aggregate: zensim_validate::panel::ValAggregate::GeomeanSPP,
+            val_aggregate: crate::panel::ValAggregate::GeomeanSPP,
             low_q_boost: 1.0,
             mid_q_boost: 1.0,
             high_q_boost: 1.0,
@@ -1956,7 +1955,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
             // compute SROCC against `-predictions` to surface positive
             // numbers that match V0_2's reporting convention.
             let agg_mode = hyperparams.val_aggregate;
-            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
+            let group_panels: Vec<crate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -1972,7 +1971,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
                         hyperparams.leaky_alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    zensim_validate::panel::compute_light_panel(&neg_preds, g.human_scores)
+                    crate::panel::compute_light_panel(&neg_preds, g.human_scores)
                 })
                 .collect();
 
@@ -2725,7 +2724,7 @@ fn train_mlp_pool_head_with_tv(
             // negative; the bake at inference is consumed via runtime
             // pool-head dispatch which doesn't apply this negation.)
             let agg_mode = hyperparams.val_aggregate;
-            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
+            let group_panels: Vec<crate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -2741,7 +2740,7 @@ fn train_mlp_pool_head_with_tv(
                         alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    zensim_validate::panel::compute_light_panel(&neg_preds, g.human_scores)
+                    crate::panel::compute_light_panel(&neg_preds, g.human_scores)
                 })
                 .collect();
 
@@ -3704,7 +3703,7 @@ fn train_mlp_hybrid_head_with_tv(
                 1.0 / (1.0 + (-xc).exp())
             };
             let agg_mode = hyperparams.val_aggregate;
-            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
+            let group_panels: Vec<crate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -3723,7 +3722,7 @@ fn train_mlp_hybrid_head_with_tv(
                         leaky,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    zensim_validate::panel::compute_light_panel(&neg_preds, g.human_scores)
+                    crate::panel::compute_light_panel(&neg_preds, g.human_scores)
                 })
                 .collect();
 
@@ -7449,7 +7448,7 @@ fn train_mlp_per_sample_alpha_head(
 
             let agg_mode = hyperparams.val_aggregate;
             let mse_only = hyperparams.mse_weight > 0.0 && hyperparams.ranknet_weight <= 0.0;
-            let group_panels: Vec<zensim_validate::panel::LightPanel> = groups
+            let group_panels: Vec<crate::panel::LightPanel> = groups
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
@@ -7466,7 +7465,7 @@ fn train_mlp_per_sample_alpha_head(
                     } else {
                         preds.iter().map(|&p| -p).collect()
                     };
-                    zensim_validate::panel::compute_light_panel(&signed_preds, g.human_scores)
+                    crate::panel::compute_light_panel(&signed_preds, g.human_scores)
                 })
                 .collect();
 
@@ -7492,7 +7491,7 @@ fn train_mlp_per_sample_alpha_head(
                 let mean_p = preds.iter().sum::<f64>() / preds.len().max(1) as f64;
                 let zrmse = if let Some(ref a) = anchor {
                     if a.row_weights.len() == preds.len() {
-                        zensim_validate::panel::z_rmse(&preds, a.row_weights)
+                        crate::panel::z_rmse(&preds, a.row_weights)
                     } else {
                         f64::NAN
                     }
