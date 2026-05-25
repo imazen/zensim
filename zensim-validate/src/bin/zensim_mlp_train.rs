@@ -2451,6 +2451,7 @@ fn main() {
                 gpu_hp.tanh_output_head_scale,
                 feature_transforms.as_deref(),
                 feature_transform_params.as_deref(),
+                None, // spline fitted by the Rust trainer's post-training step
             )
         } else {
             zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3(&res.model)
