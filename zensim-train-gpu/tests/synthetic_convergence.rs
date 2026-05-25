@@ -48,6 +48,7 @@ fn gpu_per_sample_alpha_recovers_synthetic_ranking_cuda() {
         name: "synth".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };
@@ -158,6 +159,7 @@ fn gpu_smoke_minimal_config_does_not_panic_cuda() {
         name: "tiny".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };

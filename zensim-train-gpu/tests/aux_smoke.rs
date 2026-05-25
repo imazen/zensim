@@ -51,6 +51,7 @@ fn aux_anchor_only_does_not_crash() {
         name: "synth".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };
@@ -105,6 +106,7 @@ fn aux_eq_only_does_not_crash() {
         name: "synth".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };
@@ -165,6 +167,7 @@ fn aux_sigma_floor_only_does_not_crash() {
         name: "synth".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };
@@ -222,6 +225,7 @@ fn aux_sigma_floor_only_does_not_crash() {
         name: "synth".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };
@@ -253,6 +257,7 @@ fn aux_all_three_combined_does_not_crash() {
         name: "synth".into(),
         human_scores: &scores,
         features: &feat_refs,
+            metric_sigmas: None,
         train_weight: 1.0,
         validation_weight: 0.0,
     };

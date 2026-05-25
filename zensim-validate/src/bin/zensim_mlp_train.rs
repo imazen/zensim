@@ -618,6 +618,13 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     mse_weight: f64,
 
+    /// Weight MSE loss by 1/max(σ, 0.05)² where σ is per-row metric
+    /// disagreement (std of normalized cvvdp, iwssim, ssim2). Directly
+    /// optimizes Z-RMSE — errors on high-consensus stimuli cost more.
+    /// Requires parquet inputs with cvvdp_score + iwssim + ssim2_gpu columns.
+    #[arg(long, default_value_t = false)]
+    sigma_weighted_mse: bool,
+
     /// `PreviewV0_5Tuner` RankNet pair-loss weight (2026-05-18).
     /// Default `1.0` matches legacy behavior. Set to `0.0` to disable
     /// the RankNet pair loss entirely — use with `--mse-weight > 0`
@@ -878,6 +885,7 @@ struct LoadedGroup {
     val_w: f64,
     human_scores: Vec<f64>,
     feature_rows: Vec<Vec<f64>>,
+    metric_sigmas: Option<Vec<f64>>,
     n_features: usize,
 }
 
@@ -889,6 +897,7 @@ impl From<zensim_validate::parquet_loader::OwnedLoadedGroup> for LoadedGroup {
             val_w: o.val_w,
             human_scores: o.human_scores,
             feature_rows: o.feature_rows,
+            metric_sigmas: o.metric_sigmas,
             n_features: o.n_features,
         }
     }
@@ -1120,6 +1129,7 @@ fn load_csv_sequential(
         val_w: 0.0,
         human_scores,
         feature_rows,
+        metric_sigmas: None,
         n_features,
     })
 }
@@ -1308,6 +1318,7 @@ pub(crate) fn load_csv(
         val_w: 0.0,
         human_scores,
         feature_rows,
+        metric_sigmas: None,
         n_features,
     })
 }
@@ -1805,6 +1816,7 @@ fn main() {
             name: g.name.clone(),
             human_scores: &g.human_scores,
             features: fr.as_slice(),
+            metric_sigmas: g.metric_sigmas.as_deref(),
             train_weight: g.train_w,
             validation_weight: g.val_w,
         })
@@ -1852,6 +1864,7 @@ fn main() {
         skip_connection: args.skip_connection,
         n_hidden_layers: args.n_hidden_layers,
         mse_weight: args.mse_weight,
+        sigma_weighted_mse: args.sigma_weighted_mse,
         ranknet_weight: args.ranknet_weight,
         monotonicity_reg: args.monotonicity_reg,
         monotonicity_margin: args.monotonicity_margin,
@@ -2366,6 +2379,7 @@ fn main() {
                 name: g.name.clone(),
                 human_scores: g.human_scores,
                 features: g.features,
+                metric_sigmas: g.metric_sigmas,
                 train_weight: g.train_weight,
                 validation_weight: g.validation_weight,
             })

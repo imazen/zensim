@@ -767,6 +767,7 @@ mod tests {
             name: "synth".into(),
             human_scores: &scores,
             features: &row_refs,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
         };

@@ -241,6 +241,7 @@ mod tests {
             name: "uniform".into(),
             human_scores: &scores,
             features: &refs,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
         };
@@ -270,6 +271,7 @@ mod tests {
                 name: "A".into(),
                 human_scores: &sa,
                 features: &rar,
+            metric_sigmas: None,
                 train_weight: 1.0,
                 validation_weight: 0.0,
             },
@@ -277,6 +279,7 @@ mod tests {
                 name: "B".into(),
                 human_scores: &sb,
                 features: &rbr,
+            metric_sigmas: None,
                 train_weight: 1.0,
                 validation_weight: 0.0,
             },

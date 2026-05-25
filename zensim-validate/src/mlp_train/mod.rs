@@ -426,6 +426,12 @@ pub struct MlpHyperparams {
     /// on other heads.
     pub mse_weight: f64,
 
+    /// When true AND groups have `metric_sigmas`, per-pair MSE loss
+    /// is weighted by `1 / max(σ, 0.05)²` — directly optimizing Z-RMSE
+    /// (Mohammadi 2025 Eq. 6). Errors on high-consensus stimuli (where
+    /// cvvdp, iwssim, and ssim2 agree) are penalized more.
+    pub sigma_weighted_mse: bool,
+
     /// RankNet pair-loss weight (`PreviewV0_5Tuner` experiment,
     /// 2026-05-18). Default `1.0` matches legacy behavior. Setting
     /// to `0.0` disables RankNet entirely — use with
@@ -732,6 +738,7 @@ impl Default for MlpHyperparams {
             skip_connection: false,
             n_hidden_layers: 1,
             mse_weight: 0.0,
+            sigma_weighted_mse: false,
             ranknet_weight: 1.0,
             monotonicity_reg: 0.0,
             monotonicity_margin: 0.0,
@@ -804,6 +811,11 @@ pub struct TrainingGroup<'a> {
     pub name: String,
     pub human_scores: &'a [f64],
     pub features: &'a [&'a [f64]],
+    /// Per-row metric-disagreement σ (from parquet_loader's
+    /// auto-computation). When present and σ-weighted MSE is enabled,
+    /// the MSE loss divides by max(σ, ε) per pair — errors on
+    /// high-consensus stimuli (low σ) are penalized more.
+    pub metric_sigmas: Option<&'a [f64]>,
     /// Weight in the per-step group selection distribution. The
     /// per-pair sampling probability is `train_weight / total_weight`,
     /// so doubling `train_weight` doubles the sampling rate.
@@ -5768,6 +5780,17 @@ fn train_mlp_per_sample_alpha_head(
         log,
     );
 
+    if hyperparams.sigma_weighted_mse && hyperparams.mse_weight > 0.0 {
+        let n_with = groups.iter().filter(|g| g.metric_sigmas.is_some()).count();
+        log_line(
+            &format!(
+                "σ-weighted MSE ACTIVE — {n_with}/{} groups have metric_sigmas, ε=0.05",
+                groups.len()
+            ),
+            log,
+        );
+    }
+
     // EXP-CROSS-CODEC-V4 (2026-05-19): tanh-pinned output head.
     // When `tanh_output_head_scale > 0`, every raw `y_pre = α·y_rank +
     // (1−α)·y_pool` from the per-sample-α forward is wrapped as
@@ -6073,16 +6096,27 @@ fn train_mlp_per_sample_alpha_head(
             // is queued for a follow-up; the trainer asserts above when
             // NiN + tuner auxes are both requested).
             let (dl_dya_mse, dl_dyb_mse, mse_loss_pair) = if hyperparams.mse_weight > 0.0 {
-                // Predictions are score-shaped; targets are score-shaped
-                // (mos_a, mos_b live on the same axis as ya, yb when the
-                // user has chosen --target-column with a score-shaped
-                // value column like mix_cv40_iw60 or ssim2_log_norm).
                 let n_norm = (2.0 * hyperparams.pairs_per_epoch.max(1) as f64).max(1.0);
-                let scale = 2.0 * hyperparams.mse_weight / n_norm;
-                let da = scale * (ya - mos_a);
-                let db = scale * (yb - mos_b);
-                let l =
-                    hyperparams.mse_weight * ((ya - mos_a).powi(2) + (yb - mos_b).powi(2)) / n_norm;
+                let base_scale = 2.0 * hyperparams.mse_weight / n_norm;
+                // σ-weighted MSE: divide residual by max(σ, ε) when metric_sigmas
+                // are available. High-consensus stimuli (low σ) get amplified;
+                // ambiguous ones (high σ) get down-weighted. Optimizes Z-RMSE.
+                let (inv_sa, inv_sb) = if hyperparams.sigma_weighted_mse {
+                    if let Some(sigmas) = g.metric_sigmas {
+                        let eps = 0.05;
+                        (1.0 / sigmas[ia].max(eps), 1.0 / sigmas[ib].max(eps))
+                    } else {
+                        (1.0, 1.0)
+                    }
+                } else {
+                    (1.0, 1.0)
+                };
+                let da = base_scale * (ya - mos_a) * inv_sa * inv_sa;
+                let db = base_scale * (yb - mos_b) * inv_sb * inv_sb;
+                let l = hyperparams.mse_weight
+                    * ((ya - mos_a).powi(2) * inv_sa * inv_sa
+                        + (yb - mos_b).powi(2) * inv_sb * inv_sb)
+                    / n_norm;
                 (da, db, l)
             } else {
                 (0.0, 0.0, 0.0)
@@ -7840,6 +7874,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -7907,6 +7942,7 @@ mod tests {
                 name: "train".to_string(),
                 human_scores: &train_scores,
                 features: &train_refs,
+            metric_sigmas: None,
                 train_weight: 1.0,
                 validation_weight: 0.0,
             },
@@ -7914,6 +7950,7 @@ mod tests {
                 name: "val".to_string(),
                 human_scores: &val_scores,
                 features: &val_refs,
+            metric_sigmas: None,
                 train_weight: 0.0,
                 validation_weight: 1.0,
             },
@@ -7993,6 +8030,7 @@ mod tests {
             name: "boost-test".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8086,6 +8124,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8162,6 +8201,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8229,6 +8269,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8337,6 +8378,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &scaled_targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8488,6 +8530,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8618,6 +8661,7 @@ mod tests {
             name: "lowq".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8724,6 +8768,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &scaled,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8776,6 +8821,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8866,6 +8912,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -8966,6 +9013,7 @@ mod tests {
             name: "calib".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9057,6 +9105,7 @@ mod tests {
             name: "tiny".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9090,6 +9139,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9131,6 +9181,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9163,6 +9214,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9205,6 +9257,7 @@ mod tests {
             name: "tiny".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9335,6 +9388,7 @@ mod tests {
             name: "synthetic_primary".to_string(),
             human_scores: &primary_scores,
             features: &primary_refs,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
         }];
@@ -9428,6 +9482,7 @@ mod tests {
             name: "primary_disabled".to_string(),
             human_scores: &primary_scores,
             features: &primary_refs,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
         }];
@@ -9480,6 +9535,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9518,6 +9574,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9592,6 +9649,7 @@ mod tests {
             name: "konjnd_test".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9630,6 +9688,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9670,6 +9729,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9706,6 +9766,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9738,6 +9799,7 @@ mod tests {
             name: "synth".to_string(),
             human_scores: &targets,
             features: &feats_ref,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 1.0,
         };
@@ -9760,5 +9822,46 @@ mod tests {
             None, None, None, None,
         );
         assert!(!bake.is_empty(), "2-layer+skip produced empty bake");
+    }
+
+    #[test]
+    fn psah_sigma_weighted_mse_trains() {
+        let n_features = 12;
+        let (features_owned, targets) = make_synth_dataset(600, 200, n_features);
+        let feats_ref: Vec<&[f64]> = features_owned.iter().map(|v| v.as_slice()).collect();
+        let n = targets.len();
+        // Synthetic σ: low for first half (high confidence), high for second half.
+        let sigmas: Vec<f64> = (0..n).map(|i| if i < n / 2 { 0.1 } else { 0.8 }).collect();
+        let group = TrainingGroup {
+            name: "sigma_test".to_string(),
+            human_scores: &targets,
+            features: &feats_ref,
+            metric_sigmas: Some(&sigmas),
+            train_weight: 1.0,
+            validation_weight: 1.0,
+        };
+        let mut log = Vec::new();
+        let bake = train_mlp_per_sample_alpha_head(
+            &[group],
+            n_features,
+            &MlpHyperparams {
+                n_hidden: 8,
+                n_epochs: 30,
+                pairs_per_epoch: 500,
+                initial_lr: 0.003,
+                per_sample_alpha_head: true,
+                mse_weight: 1.0,
+                sigma_weighted_mse: true,
+                ranknet_weight: 0.5,
+                minibatch_size: 1,
+                ..Default::default()
+            },
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!bake.is_empty(), "σ-weighted MSE should produce a bake");
     }
 }

@@ -164,6 +164,9 @@ pub struct TrainingGroup<'a> {
     /// and every inner slice has length `n_features` (checked by
     /// `train_mlp` callers).
     pub features: &'a [&'a [f64]],
+    /// Per-row metric-disagreement σ. When present and σ-weighted MSE
+    /// is enabled, MSE loss divides by max(σ, ε) per pair.
+    pub metric_sigmas: Option<&'a [f64]>,
     /// Weight in the per-step group selection distribution. The
     /// per-pair sampling probability is `train_weight / total_weight`,
     /// so doubling `train_weight` doubles the sampling rate.
@@ -254,6 +257,7 @@ mod tests {
             name: "synth-test".into(),
             human_scores: &scores,
             features: &feat_refs,
+            metric_sigmas: None,
             train_weight: 1.0,
             validation_weight: 0.0,
         };

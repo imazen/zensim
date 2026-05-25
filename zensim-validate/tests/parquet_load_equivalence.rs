@@ -107,6 +107,7 @@ fn load_csv_reference(
         val_w: 0.0,
         human_scores,
         feature_rows,
+        metric_sigmas: None,
         n_features,
     })
 }
