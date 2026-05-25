@@ -7391,7 +7391,7 @@ fn train_mlp_per_sample_alpha_head(
                 &mut w_alpha,
                 &mut b_alpha,
                 lr,
-                n_hidden,
+                n_hidden_final,
             );
         }
         if nin_on && !nin_buffer.is_empty() {
