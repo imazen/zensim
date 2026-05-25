@@ -7361,6 +7361,7 @@ fn train_mlp_per_sample_alpha_head(
                         if tanh_pin_active { Some(tanh_scale) } else { None },
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
+                        None, // spline added post-training
                     ));
                 } else if use_skip {
                     // Skip-only: the bake format is standard 1-layer; skip
@@ -7388,6 +7389,7 @@ fn train_mlp_per_sample_alpha_head(
                         tanh_scale,
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
+                        None, // spline added post-training
                     )
                 } else {
                     psah::bake_per_sample_alpha_head_v3(&model)
@@ -7438,6 +7440,7 @@ fn train_mlp_per_sample_alpha_head(
                 tanh_scale,
                 hyperparams.feature_transforms.as_deref(),
                 hyperparams.feature_transform_params.as_deref(),
+                        None, // spline added post-training
             )
         } else {
             psah::bake_per_sample_alpha_head_v3(&model)
@@ -7504,7 +7507,7 @@ fn train_mlp_per_sample_alpha_head(
                     log_line(&format!("  pred={x:.2} → target={y:.1}"), log);
                 }
 
-                // Encode payload: u32 n_knots + n_knots × (f32 x, f32 y)
+                // Encode payload and RE-BAKE with the spline metadata.
                 let mut payload = Vec::with_capacity(4 + 8 * knots.len());
                 payload.extend_from_slice(&(knots.len() as u32).to_le_bytes());
                 for &(x, y) in &knots {
@@ -7512,13 +7515,46 @@ fn train_mlp_per_sample_alpha_head(
                     payload.extend_from_slice(&(y as f32).to_le_bytes());
                 }
 
-                if let Ok(out_path) = std::env::var("ZENSIM_SPLINE_SIDECAR") {
-                    if let Ok(mut f) = std::fs::File::create(&out_path) {
-                        use std::io::Write;
-                        let _ = f.write_all(&payload);
-                        log_line(&format!("spline sidecar: {out_path}"), log);
-                    }
-                }
+                // Re-bake the model with the spline included.
+                let model = psah::PerSampleAlphaHeadModel {
+                    scaler_mean: scaler_mean.clone(),
+                    scaler_scale: scaler_scale.clone(),
+                    w1: w1.clone(),
+                    b1: b1.clone(),
+                    rank_w: rank_w.clone(),
+                    rank_b,
+                    reducer_w,
+                    reducer_b,
+                    w_alpha: w_alpha.clone(),
+                    b_alpha,
+                    n_hidden: n_hidden_final,
+                    n_features,
+                };
+                let rebaked = if use_2layer {
+                    psah::bake_per_sample_alpha_head_v3_2layer(
+                        &model, &w2_enc, &b2_enc,
+                        n_hidden, n_hidden_final,
+                        if tanh_pin_active { Some(tanh_scale) } else { None },
+                        hyperparams.feature_transforms.as_deref(),
+                        hyperparams.feature_transform_params.as_deref(),
+                        Some(&payload),
+                    )
+                } else if tanh_pin_active {
+                    psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+                        &model, tanh_scale,
+                        hyperparams.feature_transforms.as_deref(),
+                        hyperparams.feature_transform_params.as_deref(),
+                        Some(&payload),
+                    )
+                } else {
+                    // No spline for non-tanh bakes (V0_1/V0_2 path)
+                    return bake_bytes;
+                };
+                log_line(
+                    &format!("re-baked with output calibration spline ({} bytes)", rebaked.len()),
+                    log,
+                );
+                return rebaked;
             }
         }
     }

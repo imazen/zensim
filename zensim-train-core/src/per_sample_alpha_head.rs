@@ -944,6 +944,7 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
     scale: f64,
     feature_transforms: Option<&[FeatureTransform]>,
     feature_transform_params: Option<&[Vec<f32>]>,
+    output_spline_payload: Option<&[u8]>,
 ) -> Vec<u8> {
     assert!(
         scale > 0.0,
@@ -1083,6 +1084,14 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
             key: "zentrain.feature_transform_params",
             kind: MetadataType::Utf8,
             value: p.as_bytes(),
+        });
+    }
+
+    if let Some(spline) = output_spline_payload {
+        metadata.push(BakeMetadataEntry {
+            key: "zentrain.output_calibration_spline",
+            kind: MetadataType::Numeric,
+            value: spline,
         });
     }
 
@@ -1238,6 +1247,7 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
     tanh_scale: Option<f64>,
     feature_transforms: Option<&[zenpredict::FeatureTransform]>,
     feature_transform_params: Option<&[Vec<f32>]>,
+    output_spline_payload: Option<&[u8]>,
 ) -> Vec<u8> {
     let n_features = model.n_features;
 
@@ -1355,6 +1365,14 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
                 });
             }
         }
+    }
+
+    if let Some(spline) = output_spline_payload {
+        metadata_entries.push(BakeMetadataEntry {
+            key: "zentrain.output_calibration_spline",
+            kind: MetadataType::Numeric,
+            value: spline,
+        });
     }
 
     bake(&BakeRequest {
