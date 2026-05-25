@@ -14,7 +14,7 @@ use common::generators::*;
 use zensim::{ColorPrimaries, PixelFormat, StridedBytes, Zensim, ZensimProfile};
 
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::latest())
+    Zensim::new(ZensimProfile::PreviewV0_3)
 }
 
 /// Helper: create StridedBytes from RGB u8 pixels with given primaries.

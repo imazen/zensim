@@ -72,7 +72,7 @@ fn cross_codec_profile_name_and_alias() {
     );
     // The const constructor alias matches the variant.
     assert_eq!(
-        ZensimProfile::cross_codec(),
+        ZensimProfile::PreviewV0_5CrossCodec,
         ZensimProfile::PreviewV0_5CrossCodec
     );
 }

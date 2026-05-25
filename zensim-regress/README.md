@@ -493,7 +493,7 @@ If you don't need persistent checksum files — you have two images and want to 
 use zensim::{Zensim, ZensimProfile};
 use zensim_regress::{RegressionTolerance, check_regression};
 
-let z = Zensim::new(ZensimProfile::latest());
+let z = Zensim::new(ZensimProfile::PreviewV0_3);
 let tolerance = RegressionTolerance::off_by_one();
 
 let report = check_regression(&z, &expected_img, &actual_img, &tolerance).unwrap();

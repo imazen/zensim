@@ -19,7 +19,7 @@ fn bench_zensim_512x512(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(10), g.saturating_add(5), b])
         .collect();
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     c.bench_function("zensim_512x512", |b| {
         b.iter(|| {
             let s = RgbSlice::new(std::hint::black_box(&src), width, height);
@@ -47,7 +47,7 @@ fn bench_zensim_256x256(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(20), g.saturating_add(10), b])
         .collect();
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     c.bench_function("zensim_256x256", |b| {
         b.iter(|| {
             let s = RgbSlice::new(std::hint::black_box(&src), width, height);
@@ -75,7 +75,7 @@ fn bench_zensim_320x240(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(15), g.saturating_add(8), b])
         .collect();
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     c.bench_function("zensim_320x240", |b| {
         b.iter(|| {
             let s = RgbSlice::new(std::hint::black_box(&src), width, height);
@@ -103,7 +103,7 @@ fn bench_zensim_1920x1080(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(8), g.saturating_add(4), b])
         .collect();
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     c.bench_function("zensim_1920x1080", |b| {
         b.iter(|| {
             let s = RgbSlice::new(std::hint::black_box(&src), width, height);
@@ -131,7 +131,7 @@ fn bench_zensim_3840x2160(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(5), g.saturating_add(3), b])
         .collect();
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     c.bench_function("zensim_3840x2160", |b| {
         b.iter(|| {
             let s = RgbSlice::new(std::hint::black_box(&src), width, height);
@@ -159,7 +159,7 @@ fn bench_zensim_500x375(c: &mut Criterion) {
         .map(|&[r, g, b]| [r.saturating_add(12), g.saturating_add(6), b])
         .collect();
 
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     c.bench_function("zensim_500x375", |b| {
         b.iter(|| {
             let s = RgbSlice::new(std::hint::black_box(&src), width, height);
@@ -187,7 +187,7 @@ fn make_test_images(width: usize, height: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>)
 
 fn bench_precomputed_512x512(c: &mut Criterion) {
     let (src, dst) = make_test_images(512, 512);
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
 
     c.bench_function("precompute_ref_512x512", |b| {
         let s = RgbSlice::new(&src, 512, 512);
@@ -207,7 +207,7 @@ fn bench_precomputed_512x512(c: &mut Criterion) {
 
 fn bench_precomputed_1280x720(c: &mut Criterion) {
     let (src, dst) = make_test_images(1280, 720);
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
 
     c.bench_function("zensim_1280x720", |b| {
         let s = RgbSlice::new(&src, 1280, 720);
@@ -236,7 +236,7 @@ fn bench_precomputed_1280x720(c: &mut Criterion) {
 
 fn bench_precomputed_1920x1080(c: &mut Criterion) {
     let (src, dst) = make_test_images(1920, 1080);
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
 
     c.bench_function("precompute_ref_1920x1080", |b| {
         let s = RgbSlice::new(&src, 1920, 1080);
@@ -256,7 +256,7 @@ fn bench_precomputed_1920x1080(c: &mut Criterion) {
 
 fn bench_precomputed_3840x2160(c: &mut Criterion) {
     let (src, dst) = make_test_images(3840, 2160);
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
 
     c.bench_function("precompute_ref_3840x2160", |b| {
         let s = RgbSlice::new(&src, 3840, 2160);
@@ -276,7 +276,7 @@ fn bench_precomputed_3840x2160(c: &mut Criterion) {
 
 fn bench_precomputed_7680x4320(c: &mut Criterion) {
     let (src, dst) = make_test_images(7680, 4320);
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
 
     c.bench_function("zensim_7680x4320", |b| {
         let s = RgbSlice::new(&src, 7680, 4320);

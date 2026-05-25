@@ -107,7 +107,7 @@ fn should_skip() -> bool {
 }
 
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::latest())
+    Zensim::new(ZensimProfile::PreviewV0_3)
 }
 
 // ─── Wide-gamut corpus tests ─────────────────────────────────────────

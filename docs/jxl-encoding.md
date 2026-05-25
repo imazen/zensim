@@ -186,7 +186,7 @@ Zensim loop is feature-gated (`--features zensim-loop`) and can stack after butt
 ### Precomputed Reference Pattern
 
 ```rust
-let zensim = Zensim::new(ZensimProfile::latest());
+let zensim = Zensim::new(ZensimProfile::PreviewV0_3);
 
 // Precompute once from source (linear RGB planes)
 let precomputed = zensim.precompute_reference_linear_planar(

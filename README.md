@@ -154,7 +154,11 @@ Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SR
 ```rust
 use zensim::{Zensim, ZensimProfile, RgbSlice};
 
-let z = Zensim::new(ZensimProfile::latest());
+// Pick a version explicitly for pinned reproducibility:
+let z = Zensim::new(ZensimProfile::PreviewV0_3);
+// Or use `ZensimProfile::latest_preview()` for whatever current preview
+// ships (rotates as new previews land), or `ZensimProfile::codec_target()`
+// for the stable codec-target contract.
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
 let result = z.compute(&source, &distorted)?;
@@ -177,7 +181,7 @@ use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
 
 let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-let result = Zensim::new(ZensimProfile::latest()).compute(&source, &distorted)?;
+let result = Zensim::new(ZensimProfile::PreviewV0_3).compute(&source, &distorted)?;
 ```
 
 Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un-premultiplied, color primaries are forwarded. HDR (PQ, HLG) and grayscale are rejected with `UnsupportedFormat`.
@@ -279,7 +283,7 @@ Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a
 | `PreviewV0_2` | ✓ | 218k concordance-filtered, Nelder-Mead | 0.87 | linear weights |
 | `PreviewV0_3` | ✓ | 144k clean safe-synth + KADID + TID + KonJND | **0.89** | 93 KB I8 MLP |
 
-`ZensimProfile::latest()` returns `PreviewV0_3` in zensim 0.3.x. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+`ZensimProfile::latest_preview()` returns `PreviewV0_3` in zensim 0.3.x — use it when you want "whatever the current preview is" (the returned variant rotates as new previews ship). For pinned reproducibility, name a variant directly (`PreviewV0_3`). For the stable codec-target contract, use `ZensimProfile::codec_target()`. The deprecated `latest()` still exists for back-compat. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
 **`PreviewV0_3`** is the MLP profile, shipped 2026-05-13 with zensim 0.3.0. Variant name tracks the crate's minor version that introduced it; the underlying bake bytes inside the variant are V0_18 today (228→384→1 LeakyReLU MLP, I8 quantized, MCOS-aligned 0–100 output) and may rotate to score-stable variants during 0.3.x patches. zenpredict is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 

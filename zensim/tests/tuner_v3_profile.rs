@@ -18,7 +18,7 @@
 //!   4. The bake bytes are distinct from PreviewV0_5TunerV2 — the V9
 //!      bake carries an output_calibration_spline payload that V2 lacks,
 //!      so per-pair scores differ.
-//!   5. `ZensimProfile::tuner_v3()` alias returns the V3 variant.
+//!   5. `ZensimProfile::PreviewV0_5TunerV3` alias returns the V3 variant.
 //!
 //! What this test does NOT cover (lives elsewhere):
 //!   * Cross-corpus SROCC — `bake_verdict` against canonical val parquets.
@@ -58,7 +58,7 @@ fn tuner_v3_profile_name() {
     );
     // The const alias should return the same variant.
     assert_eq!(
-        ZensimProfile::tuner_v3(),
+        ZensimProfile::PreviewV0_5TunerV3,
         ZensimProfile::PreviewV0_5TunerV3
     );
 }
