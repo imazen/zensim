@@ -118,6 +118,136 @@ pub fn forward_per_sample_alpha_head(
     )
 }
 
+/// Heads-only forward: given a pre-computed hidden vector `h` (from any
+/// encoder — 1-layer, 2-layer, skip, etc.), compute the rank head, pool
+/// head, per-sample α gate, and combined output.
+///
+/// This is the same math as `forward_per_sample_alpha_head` but without
+/// the encoder forward — the caller provides `h` and `h_pre` directly.
+/// Used by mlp_train.rs when it wants to choose the encoder externally
+/// (e.g., 2-layer or skip variants).
+#[allow(clippy::too_many_arguments)]
+pub fn forward_heads(
+    h: &[f64],
+    rank_w: &[f64],
+    rank_b: f64,
+    reducer_w: &[f64; 4],
+    reducer_b: f64,
+    w_alpha: &[f64],
+    b_alpha: f64,
+    n_hidden: usize,
+) -> (f64, f64, f64, f64, f64, [f64; 4], usize) {
+    debug_assert_eq!(h.len(), n_hidden);
+    debug_assert_eq!(rank_w.len(), n_hidden);
+    debug_assert_eq!(w_alpha.len(), n_hidden);
+
+    let y_rank = simd_encoder::dot_bias(h, rank_w, rank_b);
+    let (stats, max_idx) = pool_stats(h);
+    let y_pool = stats[0] * reducer_w[0]
+        + stats[1] * reducer_w[1]
+        + stats[2] * reducer_w[2]
+        + stats[3] * reducer_w[3]
+        + reducer_b;
+    let alpha_logit = simd_encoder::dot_bias(h, w_alpha, b_alpha);
+    let alpha = sigmoid(alpha_logit);
+    let y = alpha * y_rank + (1.0 - alpha) * y_pool;
+    (y, y_rank, y_pool, alpha, alpha_logit, stats, max_idx)
+}
+
+/// Heads-only backprop: given dl/dy and the forward intermediates,
+/// compute gradients for the head weights AND dl/dh (the gradient
+/// that flows back into the encoder). The caller then routes dl/dh
+/// through whichever encoder backprop it used.
+///
+/// Returns `dl_dh` (length `n_hidden`) — the gradient to propagate
+/// into the encoder backward pass.
+#[allow(clippy::too_many_arguments)]
+pub fn backprop_heads(
+    h: &[f64],
+    stats: &[f64; 4],
+    max_idx: usize,
+    y_rank: f64,
+    y_pool: f64,
+    alpha: f64,
+    dl_dy: f64,
+    rank_w: &[f64],
+    reducer_w: &[f64; 4],
+    w_alpha: &[f64],
+    g_rank_w: &mut [f64],
+    g_rank_b: &mut f64,
+    g_reducer_w: &mut [f64; 4],
+    g_reducer_b: &mut f64,
+    g_w_alpha: &mut [f64],
+    g_b_alpha: &mut f64,
+    n_hidden: usize,
+    leaky_alpha: f64,
+) -> Vec<f64> {
+    debug_assert_eq!(rank_w.len(), n_hidden);
+    debug_assert_eq!(g_rank_w.len(), n_hidden);
+    debug_assert_eq!(w_alpha.len(), n_hidden);
+    debug_assert_eq!(g_w_alpha.len(), n_hidden);
+
+    let dl_dy_rank = dl_dy * alpha;
+    let dl_dy_pool = dl_dy * (1.0 - alpha);
+    let dl_dalpha = dl_dy * (y_rank - y_pool);
+    let dl_dalpha_logit = dl_dalpha * alpha * (1.0 - alpha);
+
+    for j in 0..n_hidden {
+        g_rank_w[j] += dl_dy_rank * h[j];
+    }
+    *g_rank_b += dl_dy_rank;
+
+    for k in 0..4 {
+        g_reducer_w[k] += dl_dy_pool * stats[k];
+    }
+    *g_reducer_b += dl_dy_pool;
+
+    for j in 0..n_hidden {
+        g_w_alpha[j] += dl_dalpha_logit * h[j];
+    }
+    *g_b_alpha += dl_dalpha_logit;
+
+    // dl/dh = rank + pool + α-head contributions.
+    let mut dl_dh = vec![0.0f64; n_hidden];
+    for j in 0..n_hidden {
+        dl_dh[j] += dl_dy_rank * rank_w[j];
+        dl_dh[j] += dl_dalpha_logit * w_alpha[j];
+    }
+
+    let n = n_hidden as f64;
+    let mu = stats[0];
+    let sigma = stats[1];
+    let p6 = stats[3];
+    let inv_sigma_n = if sigma > POOL_STD_FLOOR + 1e-12 {
+        1.0 / (n * sigma)
+    } else {
+        0.0
+    };
+    let p6_floor = p6.max(1e-12);
+    let inv_p6_pow5_n = 1.0 / (n * p6_floor.powi(5));
+    let dl_dstat: [f64; 4] = [
+        dl_dy_pool * reducer_w[0],
+        dl_dy_pool * reducer_w[1],
+        dl_dy_pool * reducer_w[2],
+        dl_dy_pool * reducer_w[3],
+    ];
+    for j in 0..n_hidden {
+        let hj = h[j];
+        dl_dh[j] += dl_dstat[0] / n;
+        dl_dh[j] += dl_dstat[1] * (hj - mu) * inv_sigma_n;
+        if j == max_idx {
+            dl_dh[j] += dl_dstat[2];
+        }
+        let abs_hj = hj.abs();
+        let sign_hj = if hj >= 0.0 { 1.0 } else { -1.0 };
+        let abs_pow5 = abs_hj * abs_hj * abs_hj * abs_hj * abs_hj;
+        dl_dh[j] += dl_dstat[3] * sign_hj * abs_pow5 * inv_p6_pow5_n;
+    }
+
+    let _ = leaky_alpha; // used by the caller for encoder backprop
+    dl_dh
+}
+
 /// Backprop ∂L/∂y through the per-sample α head to gradients on
 /// (w1, b1, rank_w, rank_b, reducer_w, reducer_b, W_α, b_α).
 ///

@@ -128,6 +128,104 @@ pub fn dot_bias(h: &[f64], w: &[f64], bias: f64) -> f64 {
 }
 
 // =============================================================================
+// 2-layer encoder: x → h1 (n_hidden1) → h2 (n_hidden2) with LeakyReLU
+// between each layer. Used when --n-hidden-layers 2.
+// =============================================================================
+
+/// 2-layer encoder forward: x → W1 → LeakyReLU → W2 → LeakyReLU.
+///
+/// Returns `(h1_pre, h1, h2_pre, h2)` — all intermediates needed for
+/// backprop. `h1` has length `n_hidden1`, `h2` has length `n_hidden2`.
+#[inline]
+pub fn encoder_forward_2layer(
+    x: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2: &[f64],
+    b2: &[f64],
+    n_features: usize,
+    n_hidden1: usize,
+    n_hidden2: usize,
+    leaky_alpha: f64,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    let (h1_pre, h1) = encoder_forward(x, w1, b1, n_features, n_hidden1, leaky_alpha);
+    let (h2_pre, h2) = encoder_forward(&h1, w2, b2, n_hidden1, n_hidden2, leaky_alpha);
+    (h1_pre, h1, h2_pre, h2)
+}
+
+/// 2-layer encoder backprop. Given dl/dh2_pre (from the head backprop),
+/// computes gradients for both layers.
+///
+/// The caller provides pre-zeroed gradient buffers; this function
+/// ACCUMULATES into them (+=).
+#[inline]
+pub fn encoder_backprop_2layer(
+    x: &[f64],
+    h1_pre: &[f64],
+    h1: &[f64],
+    h2_pre: &[f64],
+    dl_dh2: &[f64],
+    w2: &[f64],
+    gw1: &mut [f64],
+    gb1: &mut [f64],
+    gw2: &mut [f64],
+    gb2: &mut [f64],
+    n_features: usize,
+    n_hidden1: usize,
+    n_hidden2: usize,
+    leaky_alpha: f64,
+) {
+    // Layer 2 backprop: dl/dh2_pre → gw2, gb2, dl/dh1.
+    let dl_dh2_pre = leaky_relu_backward(dl_dh2, h2_pre, leaky_alpha);
+    encoder_backprop_layer1(h1, &dl_dh2_pre, gw2, gb2, n_hidden1, n_hidden2);
+
+    // Propagate to h1: dl/dh1[j] = Σ_k dl/dh2_pre[k] * w2[j*n2 + k].
+    let mut dl_dh1 = vec![0.0f64; n_hidden1];
+    for j in 0..n_hidden1 {
+        let row = &w2[j * n_hidden2..(j + 1) * n_hidden2];
+        let mut sum = 0.0f64;
+        for k in 0..n_hidden2 {
+            sum += dl_dh2_pre[k] * row[k];
+        }
+        dl_dh1[j] = sum;
+    }
+
+    // Layer 1 backprop: dl/dh1 → dl/dh1_pre → gw1, gb1.
+    let dl_dh1_pre = leaky_relu_backward(&dl_dh1, h1_pre, leaky_alpha);
+    encoder_backprop_layer1(x, &dl_dh1_pre, gw1, gb1, n_features, n_hidden1);
+}
+
+// =============================================================================
+// Skip connection: x → w_skip · x + b_skip (372→1 linear bypass).
+// Adds to the MLP output so the network learns a residual on top of
+// a linear baseline.
+// =============================================================================
+
+/// Skip connection forward: `b_skip + Σ_i x[i] · w_skip[i]`.
+/// Same as `dot_bias` but named distinctly for clarity.
+#[inline]
+pub fn skip_forward(x: &[f64], w_skip: &[f64], b_skip: f64) -> f64 {
+    dot_bias(x, w_skip, b_skip)
+}
+
+/// Skip connection backward: given `dl_dy_skip` (the gradient flowing
+/// through the skip path), accumulate into `gw_skip` and `gb_skip`.
+///
+/// `gw_skip[i] += dl_dy_skip * x[i]`, `gb_skip += dl_dy_skip`.
+#[inline]
+pub fn skip_backward(
+    x: &[f64],
+    dl_dy_skip: f64,
+    gw_skip: &mut [f64],
+    gb_skip: &mut f64,
+) {
+    for (g, &xi) in gw_skip.iter_mut().zip(x.iter()) {
+        *g += dl_dy_skip * xi;
+    }
+    *gb_skip += dl_dy_skip;
+}
+
+// =============================================================================
 // Scalar reference paths — bit-identity oracle for the test suite.
 //
 // These are compiled only under `#[cfg(test)]` so they don't add
@@ -1035,5 +1133,181 @@ mod tests {
             simd_ns_per / 1e3,
             speedup,
         );
+    }
+
+    // ===================================================================
+    // 2-layer encoder + skip connection tests.
+    // ===================================================================
+
+    #[test]
+    fn encoder_forward_2layer_basic_shape() {
+        let n_features = 32;
+        let n_hidden1 = 16;
+        let n_hidden2 = 8;
+        let alpha = 0.01;
+        let mut rng = Xs64::new(0xABCD);
+        let x = random_sparse(&mut rng, n_features, 0.3);
+        let w1 = random_vec(&mut rng, n_features * n_hidden1);
+        let b1 = random_vec(&mut rng, n_hidden1);
+        let w2 = random_vec(&mut rng, n_hidden1 * n_hidden2);
+        let b2 = random_vec(&mut rng, n_hidden2);
+
+        let (h1_pre, h1, h2_pre, h2) = encoder_forward_2layer(
+            &x, &w1, &b1, &w2, &b2, n_features, n_hidden1, n_hidden2, alpha,
+        );
+        assert_eq!(h1_pre.len(), n_hidden1);
+        assert_eq!(h1.len(), n_hidden1);
+        assert_eq!(h2_pre.len(), n_hidden2);
+        assert_eq!(h2.len(), n_hidden2);
+
+        // Verify h2 is the composition of two encoder_forward calls.
+        let (h1_pre_ref, h1_ref) =
+            encoder_forward(&x, &w1, &b1, n_features, n_hidden1, alpha);
+        let (h2_pre_ref, h2_ref) =
+            encoder_forward(&h1_ref, &w2, &b2, n_hidden1, n_hidden2, alpha);
+        assert_close(&h1_pre, &h1_pre_ref, 1e-15, "h1_pre");
+        assert_close(&h2_pre, &h2_pre_ref, 1e-15, "h2_pre");
+        assert_close(&h2, &h2_ref, 1e-15, "h2");
+    }
+
+    #[test]
+    fn encoder_forward_2layer_production_shape() {
+        let n_features = 372;
+        let n_hidden1 = 128;
+        let n_hidden2 = 64;
+        let alpha = 0.01;
+        let mut rng = Xs64::new(0xBEEF_1234);
+        let x = random_sparse(&mut rng, n_features, 0.3);
+        let w1 = random_vec(&mut rng, n_features * n_hidden1);
+        let b1 = random_vec(&mut rng, n_hidden1);
+        let w2 = random_vec(&mut rng, n_hidden1 * n_hidden2);
+        let b2 = random_vec(&mut rng, n_hidden2);
+
+        let (_, _, _, h2) = encoder_forward_2layer(
+            &x, &w1, &b1, &w2, &b2, n_features, n_hidden1, n_hidden2, alpha,
+        );
+        assert_eq!(h2.len(), n_hidden2);
+        assert!(h2.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn encoder_backprop_2layer_gradients_finite() {
+        let n_features = 16;
+        let n_hidden1 = 8;
+        let n_hidden2 = 4;
+        let alpha = 0.01;
+        let mut rng = Xs64::new(0xFEED);
+        let x = random_sparse(&mut rng, n_features, 0.3);
+        let w1 = random_vec(&mut rng, n_features * n_hidden1);
+        let b1 = random_vec(&mut rng, n_hidden1);
+        let w2 = random_vec(&mut rng, n_hidden1 * n_hidden2);
+        let b2 = random_vec(&mut rng, n_hidden2);
+
+        let (h1_pre, h1, h2_pre, _h2) = encoder_forward_2layer(
+            &x, &w1, &b1, &w2, &b2, n_features, n_hidden1, n_hidden2, alpha,
+        );
+
+        let dl_dh2 = random_vec(&mut rng, n_hidden2);
+        let mut gw1 = vec![0.0; n_features * n_hidden1];
+        let mut gb1 = vec![0.0; n_hidden1];
+        let mut gw2 = vec![0.0; n_hidden1 * n_hidden2];
+        let mut gb2 = vec![0.0; n_hidden2];
+
+        encoder_backprop_2layer(
+            &x, &h1_pre, &h1, &h2_pre, &dl_dh2, &w2,
+            &mut gw1, &mut gb1, &mut gw2, &mut gb2,
+            n_features, n_hidden1, n_hidden2, alpha,
+        );
+
+        assert!(gw1.iter().all(|v| v.is_finite()), "gw1 has non-finite");
+        assert!(gb1.iter().all(|v| v.is_finite()), "gb1 has non-finite");
+        assert!(gw2.iter().all(|v| v.is_finite()), "gw2 has non-finite");
+        assert!(gb2.iter().all(|v| v.is_finite()), "gb2 has non-finite");
+        // At least some gradients should be non-zero.
+        assert!(gw1.iter().any(|&v| v.abs() > 1e-15), "gw1 all zero");
+        assert!(gw2.iter().any(|&v| v.abs() > 1e-15), "gw2 all zero");
+    }
+
+    #[test]
+    fn skip_forward_backward_basic() {
+        let n = 16;
+        let mut rng = Xs64::new(0x1234);
+        let x = random_vec(&mut rng, n);
+        let w_skip = random_vec(&mut rng, n);
+        let b_skip = rng.next_unit();
+
+        let y = skip_forward(&x, &w_skip, b_skip);
+        let y_ref = b_skip + x.iter().zip(w_skip.iter()).map(|(&a, &b)| a * b).sum::<f64>();
+        assert!((y - y_ref).abs() < 1e-12, "skip forward mismatch");
+
+        let dl_dy = 1.0;
+        let mut gw = vec![0.0; n];
+        let mut gb = 0.0;
+        skip_backward(&x, dl_dy, &mut gw, &mut gb);
+        assert!((gb - 1.0).abs() < 1e-15, "gb_skip should be dl_dy");
+        for i in 0..n {
+            assert!(
+                (gw[i] - x[i]).abs() < 1e-15,
+                "gw_skip[{i}] should be x[{i}]: {} vs {}",
+                gw[i],
+                x[i]
+            );
+        }
+    }
+
+    /// Numerical gradient check for the 2-layer encoder via finite
+    /// differences. Verifies that the analytical backward matches
+    /// a numerical `(f(w+ε) - f(w-ε)) / 2ε` approximation.
+    #[test]
+    fn encoder_backprop_2layer_numerical_gradient_check() {
+        let n_features = 8;
+        let n_h1 = 6;
+        let n_h2 = 4;
+        let alpha = 0.01;
+        let eps = 1e-5;
+        let mut rng = Xs64::new(0xDEAD_BEEF);
+        let x = random_sparse(&mut rng, n_features, 0.2);
+        let mut w1 = random_vec(&mut rng, n_features * n_h1);
+        let b1 = random_vec(&mut rng, n_h1);
+        let w2 = random_vec(&mut rng, n_h1 * n_h2);
+        let b2 = random_vec(&mut rng, n_h2);
+        let target_w = random_vec(&mut rng, n_h2);
+
+        // Forward: scalar output = Σ h2[k] * target_w[k] (so dl/dh2 = target_w).
+        let fwd = |w1: &[f64]| -> f64 {
+            let (_, _, _, h2) =
+                encoder_forward_2layer(&x, w1, &b1, &w2, &b2, n_features, n_h1, n_h2, alpha);
+            h2.iter().zip(target_w.iter()).map(|(&h, &w)| h * w).sum::<f64>()
+        };
+
+        let (h1_pre, h1, h2_pre, _) =
+            encoder_forward_2layer(&x, &w1, &b1, &w2, &b2, n_features, n_h1, n_h2, alpha);
+        let mut gw1 = vec![0.0; n_features * n_h1];
+        let mut gb1 = vec![0.0; n_h1];
+        let mut gw2 = vec![0.0; n_h1 * n_h2];
+        let mut gb2 = vec![0.0; n_h2];
+        encoder_backprop_2layer(
+            &x, &h1_pre, &h1, &h2_pre, &target_w, &w2,
+            &mut gw1, &mut gb1, &mut gw2, &mut gb2,
+            n_features, n_h1, n_h2, alpha,
+        );
+
+        // Spot-check 10 random w1 elements via finite differences.
+        for idx in (0..n_features * n_h1).step_by((n_features * n_h1 / 10).max(1)) {
+            let orig = w1[idx];
+            w1[idx] = orig + eps;
+            let fp = fwd(&w1);
+            w1[idx] = orig - eps;
+            let fm = fwd(&w1);
+            w1[idx] = orig;
+            let numerical = (fp - fm) / (2.0 * eps);
+            let analytical = gw1[idx];
+            let denom = numerical.abs().max(analytical.abs()).max(1e-8);
+            let rel = (numerical - analytical).abs() / denom;
+            assert!(
+                rel < 1e-4,
+                "gw1[{idx}] numerical={numerical:.8} analytical={analytical:.8} rel={rel:.2e}"
+            );
+        }
     }
 }
