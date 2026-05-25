@@ -152,6 +152,90 @@ fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
     }
 }
 
+/// Fit a monotone PCHIP spline mapping `predictions` → `targets`.
+///
+/// The spline maps the model's raw output scale to a target scale
+/// (e.g., AIC-3 JND units). Knots are placed at quantile bins of the
+/// predictions; within each bin the median (prediction, target) pair
+/// becomes a knot. Monotonicity is enforced by removing knots that
+/// break the trend (determined by the sign of the overall correlation).
+///
+/// Returns the binary payload for the `zentrain.output_calibration_spline`
+/// metadata entry, or `None` if there are fewer than 2 valid knots.
+pub fn fit_monotone_spline(predictions: &[f64], targets: &[f64], n_bins: usize) -> Option<Vec<u8>> {
+    let n = predictions.len().min(targets.len());
+    if n < 4 || n_bins < 2 {
+        return None;
+    }
+
+    // Determine direction: is the mapping increasing or decreasing?
+    let mean_p: f64 = predictions.iter().take(n).sum::<f64>() / n as f64;
+    let mean_t: f64 = targets.iter().take(n).sum::<f64>() / n as f64;
+    let cov: f64 = predictions.iter().zip(targets.iter()).take(n)
+        .map(|(&p, &t)| (p - mean_p) * (t - mean_t))
+        .sum();
+    let decreasing = cov < 0.0;
+
+    // Sort indices by prediction value.
+    let mut indices: Vec<usize> = (0..n).collect();
+    indices.sort_by(|&a, &b| predictions[a].total_cmp(&predictions[b]));
+
+    // Split into n_bins quantile bins.
+    let bin_size = (n + n_bins - 1) / n_bins;
+    let mut raw_knots: Vec<(f64, f64)> = Vec::with_capacity(n_bins);
+    for start in (0..n).step_by(bin_size) {
+        let end = (start + bin_size).min(n);
+        let bin_indices = &indices[start..end];
+        if bin_indices.is_empty() {
+            continue;
+        }
+        // Median prediction and target within the bin.
+        let mut preds_bin: Vec<f64> = bin_indices.iter().map(|&i| predictions[i]).collect();
+        let mut targs_bin: Vec<f64> = bin_indices.iter().map(|&i| targets[i]).collect();
+        preds_bin.sort_by(|a, b| a.total_cmp(b));
+        targs_bin.sort_by(|a, b| a.total_cmp(b));
+        let mid = preds_bin.len() / 2;
+        raw_knots.push((preds_bin[mid], targs_bin[mid]));
+    }
+
+    // Enforce strict monotonicity by removing violating knots.
+    // Keep only knots where x is strictly increasing AND y follows
+    // the expected direction (decreasing for negative correlation,
+    // increasing for positive).
+    let mut knots: Vec<(f64, f64)> = Vec::with_capacity(raw_knots.len());
+    knots.push(raw_knots[0]);
+    for &(x, y) in &raw_knots[1..] {
+        let (last_x, last_y) = *knots.last().unwrap();
+        if x <= last_x + 1e-6 {
+            continue;
+        }
+        let y_ok = if decreasing { y < last_y } else { y > last_y };
+        if y_ok {
+            knots.push((x, y));
+        }
+    }
+
+    if knots.len() < 2 {
+        return None;
+    }
+
+    // Serialize payload: u32 n_knots + n_knots × (f32 x, f32 y)
+    let nk = knots.len();
+    let mut payload = Vec::with_capacity(4 + 8 * nk);
+    payload.extend_from_slice(&(nk as u32).to_le_bytes());
+    for &(x, y) in &knots {
+        payload.extend_from_slice(&(x as f32).to_le_bytes());
+        payload.extend_from_slice(&(y as f32).to_le_bytes());
+    }
+
+    // Verify the payload parses correctly.
+    if parse_payload(&payload).is_none() {
+        return None;
+    }
+
+    Some(payload)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
