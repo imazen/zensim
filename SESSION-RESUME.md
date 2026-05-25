@@ -1,211 +1,65 @@
 # SESSION-RESUME — read this first after every compact
 
-This is the **canonical entry point** for a session restart or
-post-compaction resume. Read in this order:
+**Last updated:** 2026-05-25T14:00Z (marathon session)
 
-1. **This doc** — current state in ~2 minutes.
-2. **`CLAUDE.md`** — methodology + workflow + gotchas (load-bearing rules).
-3. **`CONTEXT-HANDOFF.md`** — yesterday's state if today's hasn't been
-   written yet.
-4. **`RESEARCH.md`** — corpus map + workflow recipes + sibling-repo map.
-5. **`benchmarks/INDEX.md`** — find any prior experiment by theme.
-6. **`scripts/v_next/README.md`** — find any helper script.
+## Current state
 
-Then: `TaskList` to see open tasks. Work on the lowest available ID
-that isn't blocked.
+**Champion bake:** `prod_2layer_v3_anchor_2026-05-25.bin` (258 KB)
+- Architecture: 372→128→64→heads (2-layer, per-sample α, tanh pin)
+- Training: mix_cv40_iw60 target, 5 groups, anchor, LR=1e-3, L2=1e-4
+- AIC-3 held-out SROCC: **0.885** (Mohammadi 2025 methodology)
+- Located: `/mnt/v/output/zensim/bakes/prod_2layer_v3_anchor_2026-05-25.bin`
+- Also: `benchmarks/prod_2layer_v3_anchor_2026-05-25.bin`
 
-## Where we are (2026-05-24)
+**Architecture ceiling confirmed at 0.885 AIC-3 SROCC** across 10
+experiments. Gap to BUTTERAUGLI (0.893): 0.008. Gap to CVVDP (0.960):
+0.075. The CVVDP gap requires CSF-aware feature engineering.
 
-### What's the canonical codec-target metric
+## Read order on resume
 
-`ZensimProfile::codec_target()` → currently `PreviewV0_5TunerV5`
-(`zensim/weights/v_tuner_v11_2026-05-24.bin`, rotated 2026-05-24 PM
-from TunerV4 after recovery phase 4 fixed the 0-55 score-floor).
-This is the stable
-alias every zen codec uses for the quality dial + picker training.
-See `docs/CODEC_TARGET_METRIC.md` for the integration guide and
-`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md` for the
-measured cross-codec consistency (median |Δ| = 1.18 score units,
-p90 = 3.58; score 60-90 band is tight at p50 0.6-1.5; score 0-55
-is a flat dead zone pending Tuner v11).
+1. This doc (`SESSION-RESUME.md`) — current state, ~2 min
+2. `CLAUDE.md` — methodology + workflow + gotchas
+3. `docs/CODEC_TARGET_GOALS.md` — the goal set (G1-G11)
+4. `benchmarks/marathon_results_2026-05-25.tsv` — experiment results
+5. `RESEARCH.md` — corpus map + workflow recipes
 
-### Three-trail production ships (all 2026-05-20)
+## What shipped (29 commits, 2026-05-25)
 
-- **Tuner v5** (codec dial — current ship): `PreviewV0_5TunerV5` (v_tuner_v11_2026-05-24)
-- Tuner v4 (prior, retained by explicit name): `PreviewV0_5TunerV4` (v_tuner_v10)
-- **Balanced** (general perceptual): `PreviewV0_5BalancedV3` (v_balanced_v3)
-- **Compression** (codec output rank): `PreviewV0_5CompressionV3` (v_compression_v3)
+### Speed
+- 9× per-epoch training speedup (SIMD encoder + parallel validation)
+- f32 SIMD encoder ready (`simd_encoder_f32.rs`, 1.36× over f64)
 
-### Tuner v11 retrain in flight (task #6, 2026-05-24)
+### Architecture
+- 2-layer MLP (372→128→64→heads) + skip connection
+- Full forward/backward with exact h1_pre caching
+- 2-layer bake format (3 BakeLayer entries in ZNPR v3)
 
-In-flight branch: `feat/streaming-372-phase1`. The 8+ commits of
-2026-05-24 work add:
+### Validation
+- Mohammadi 2025 exact-methodology eval (`scripts/mohammadi_eval.py`)
+- Multi-stat panel (SROCC+PLCC+PWRC), `--val-policy goals`
+- NaN safety gate, per-sample Z-RMSE, output spline fitting
+- DisplayProfile struct + iPhone 14 Tier 1 calibration
 
-1. **`ZensimProfile::codec_target()`** stable alias (commit 5ca977c)
-2. **Per-source aggregation head** for konjnd-dense — runtime is
-   unchanged, but trainer can now raise the konjnd training-weight
-   from 0.02 to 0.3 without the V11-D zero-gradient pathology
-   (commits d1ac861, a08151d, ebf5f2e).
-3. **CVVDP + IW-SSIM backfill** on the 17,611-pair cid22_train
-   parquet — populates the mix_cv40_iw60 column so Tuner v11 can
-   train against the same target column as the existing ships
-   (task #7, in flight; backfill script at
-   `scripts/canonical_corpus/v11_cid22_train_backfill_cvvdp_iwssim.py`).
-4. **Full Tuner v11 pipeline** at
-   `scripts/v_next/tuner_v11_full_pipeline.sh` — 5-seed CI + median
-   pick + cross-codec measurement + verdict matrix vs v10.
+### Tests: 111+ across 3 crates
 
-Ship gate (≥4/5 criteria — see
-`benchmarks/v_tuner_v11_methodology_2026-05-24.md`):
-- KonJND val SROCC ≥ 0.85
-- CID22 SROCC ≥ 0.864
-- Monotonicity ≥ 92.78%
-- Cross-codec p50 |Δ| ≤ 1.0 in score 60-90
-- Score 0-55 dial recovers from v10 floor pathology
+## What to do next (priority order)
 
-### Legacy ships still in profile.rs
+1. **σ-weighted MSE loss** — per-row σ for Z-RMSE optimization
+2. **Modular refactor** — mlp_train.rs 10k lines → library modules
+3. **Display-aware features (Tier 2)** — PPD as 373rd input
+4. **f32 training pipeline** — wire f32 encoder into training loop
+5. **Multi-bake ensemble** — combine v3 + codec-only bake strengths
 
-- **Shipped bake**: `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin`
-  (V_18 3-way concat, CID22 SROCC 0.8933 — but **note the methodology
-  caveat below**).
-- **Multi-bake runtime**: `PreviewV0_4` = V_18 ship + V_20 IS
-  calibrated at α=0.4 raw space. CID22 B3 +0.080 lift at agg −0.008.
-- **Crate**: zensim 0.3.0, never published. Swap bake bytes in place.
+## Key files
 
-### What landed today (2026-05-16)
-
-5 commits to zensim main + 5 commits to zenanalyze main:
-
-**zensim** — pit-of-success docs + tightening:
-- `ec27122e` RESEARCH.md (corpus map, workflow recipes, bakes
-  inventory, sibling-repo map)
-- `49f8ed1b` scripts/v_next/README.md (39-script index)
-- `3d14b2bb` benchmarks/INDEX.md (TOC for 76 methodology docs)
-- `ba67ff8c` CONTEXT-HANDOFF.md + CHANGELOG.md refresh
-- `0fedd8ac` 8 rustdoc fixes → zero zensim-side rustdoc warnings
-
-**zenanalyze** — same audit pattern applied to sibling repos:
-- `c6458d6` preserve pre-existing whitespace in feature_transform.rs
-- `0b5c1bf` zenpredict cfg(advanced) gating (5 dead-code warnings)
-- `e852388` zenpredict clippy + rustdoc (5 warnings)
-- `1cea505` zenpredict-bake clippy + rustdoc (16 warnings)
-- `4574c9b` zenpicker API update for zenpredict 0.2.0+
-
-Total: 26 warnings cleared across zenpredict + zenpredict-bake +
-zenpicker now builds at HEAD again.
-
-### What landed on 2026-05-15 (the methodology shift)
-
-Bigger picture changes — read CLAUDE.md sections by name:
-
-1. **"SROCC-only verdicts BANNED + ssim2-target training bias"** —
-   every ship call requires the full Mohammadi 2025 panel
-   (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE). Prior "falsified
-   on SROCC" labels in `benchmarks/v0_20*` are PROVISIONAL.
-2. **"CID22 is VALIDATION-ONLY"** — never use CID22 human MOS as
-   a training target.
-3. **"ZNPR v2 PROHIBITED"** — new bakes must be v3
-   (header byte 4 = `0x03`).
-4. **"Bash readonly variable gotcha"** — `$GROUPS` / `$EUID` etc.
-   silently fail to assign in bash scripts.
-
-### Two parallel critical-path tracks
-
-The session goal is **train a V_22 bake that escapes the
-ssim2-target training bias** documented in (1) above. Two parallel
-target candidates:
-
-#### Track A — IW-SSIM (Wang & Li 2011)
-
-The IW-SSIM target corpus **completed today**:
-`/mnt/v/output/zensim/synthetic-v2/iwssim_targets_safesyn_2026-05-16.parquet`
-(196,086 rows, 0 errors, 3.7 hr GPU compute via `piq.information_weighted_ssim`).
-
-Critical-path tasks (in order):
-- **T1.1** (#50): Trainer `--target-column NAME` flag
-- **T1.2** (#51): IW-SSIM merge script (parquet → features CSV)
-- **T1.3** (#52): Train V_22-IW seed=1 against IW-SSIM target
-
-#### Track B — CVVDP (Mantiuk et al.) — 60–77 % done via vast.ai
-
-zenmetrics CVVDP infrastructure: 8 of 11 PINNED TASK items done
-(per `~/work/zen/zenmetrics/CLAUDE.md`):
-
-- ✓ Inventory + zen-metrics-cli wiring + versioned column name +
-  schema doc + pycvvdp worker + score-pairs CLI + encoder driver
-  + dual-impl chunk runner
-- **PARTIAL**: vast.ai fan-out + verification GATE (blocked on a
-  real-GPU smoke; local WSL2 can't satisfy the dual_impl_chunk.sh
-  parity gate)
-- **TODO**: production sweep over 2.37M-row safesyn store +
-  parquet write-back to `/mnt/v/zen/zensim-training/<date>/unified/`
-
-Critical-path tasks (in order):
-- **T2.1** (#53): Push CVVDP dual-image to GHCR after real-GPU smoke
-- **T2.2** (#54): CVVDP production sweep across all zensim training corpora
-- **T2.3** (#55): CVVDP write-back to unified store
-- **T2.4** (#56): Train V_22-CVVDP seed=1 against CVVDP target
-
-CVVDP is psychophysically the strongest target — display
-calibration model + HDR-aware + trained on authentic distortions.
-Expected to outperform IW-SSIM as the V_22 training target if both
-land cleanly.
-
-## How to keep working (loop discipline)
-
-This session's user directive: *"set goal and loop to continue
-work, make sure messages are reread after every compact"*.
-
-Concrete shape:
-
-- **`/loop` is active** (dynamic mode, user-arm cadence). Each tick
-  re-enters with full context. The loop's prompt is verbatim
-  preserved.
-- **On each tick**: run `TaskList`, work on the lowest pending +
-  unblocked task, mark in_progress when starting, completed when
-  done (per the `TaskUpdate` rules in the tool docs).
-- **Before any non-trivial work**: re-read this doc, CLAUDE.md, and
-  the relevant section of RESEARCH.md / benchmarks/INDEX.md /
-  scripts/v_next/README.md.
-- **After a compact**: ALL the above docs survive (committed +
-  pushed to main). Re-read them in the order at the top of this
-  doc, then resume.
-
-## Background tasks running outside this session
-
-- **Vast.ai IW-SSIM agent** (another session): scripts at
-  `scripts/v_next/vastai_iwssim/` ready to launch. Deployment
-  plan: `benchmarks/iwssim_vastai_deployment_plan_2026-05-15.md`.
-  Local IW-SSIM run already completed (output above) so vast.ai
-  is now optional / parallel-iteration-only.
-
-## What NOT to do
-
-- Don't ship a bake without a methodology doc per CLAUDE.md
-  "Shipping policy".
-- Don't use CID22 human MOS as a training target. Period.
-- Don't produce ZNPR v2 bakes. Use `bake()` from `zenpredict-bake`,
-  not `bake_v2`.
-- Don't use SROCC alone as a verdict gate. Full Mohammadi panel.
-- Don't relax test expectations to silence failures.
-- Don't touch sibling repos under `~/work/zen/` without explicit
-  user permission (today's session was explicitly permitted to
-  touch zenpredict / zenpredict-bake / zenpicker; that grant
-  carries forward).
-
-## Pointers (canonical paths)
-
-| What | Where |
-|---|---|
-| Pit-of-success entry | `RESEARCH.md` |
-| AI-agent operational guide | `CLAUDE.md` |
-| Yesterday's state | `CONTEXT-HANDOFF.md` |
-| Methodology docs index | `benchmarks/INDEX.md` |
-| Python helper script index | `scripts/v_next/README.md` |
-| zenmetrics CVVDP state | `~/work/zen/zenmetrics/CLAUDE.md` (PINNED TASK) |
-| Shipped bake | `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin` |
-| IW-SSIM corpus | `/mnt/v/output/zensim/synthetic-v2/iwssim_targets_safesyn_2026-05-16.parquet` |
-| Safesyn training corpus | `/mnt/v/zen/zensim-training/2026-05-14-clean/safe_synth_v19_clean_features.csv` |
-| Held-out corpora | `/mnt/v/dataset/{kadid10k,tid2013,cid22,konjnd-1k,aic3_ctc_epfl,aic4_sample}/` |
-| Full 372-feat CSVs | `/mnt/v/zen/zensim-training/2026-05-15-full-features/*.csv` |
-| Unified V_X parquet store | `/mnt/v/zen/zensim-training/2026-05-07/unified/` (7 parquets, 2.37M rows × 351 cols) |
+| File | What |
+|------|------|
+| `zensim-train-core/src/simd_encoder.rs` | SIMD f64 encoder (production) |
+| `zensim-train-core/src/simd_encoder_f32.rs` | SIMD f32 encoder (ready) |
+| `zensim-train-core/src/per_sample_alpha_head.rs` | Head forward/backward + bake |
+| `zensim-validate/src/mlp_train.rs` | 10k-line trainer (needs refactor) |
+| `zensim-validate/src/panel.rs` | LightPanel + ValAggregate + stats |
+| `zensim/src/display.rs` | DisplayProfile struct |
+| `scripts/mohammadi_eval.py` | Held-out AIC-3 evaluation |
+| `scripts/arch_eval_matrix.sh` | Architecture comparison |
+| `docs/CODEC_TARGET_GOALS.md` | Goal set (G1-G11) |
