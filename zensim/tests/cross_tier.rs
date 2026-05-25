@@ -115,7 +115,7 @@ fn score_reproducibility_across_tiers() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let z = Zensim::new(ZensimProfile::latest());
+        let z = Zensim::new(ZensimProfile::PreviewV0_3);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let result = z.compute(&s, &d).expect("compute failed");
@@ -290,7 +290,7 @@ fn score_reproducibility_512x512() {
     let mut results: Vec<(String, Vec<String>, ZensimResult)> = Vec::new();
 
     let report = for_each_token_permutation(CompileTimePolicy::Warn, |perm| {
-        let z = Zensim::new(ZensimProfile::latest());
+        let z = Zensim::new(ZensimProfile::PreviewV0_3);
         let s = RgbSlice::new(&src, w, h);
         let d = RgbSlice::new(&dst, w, h);
         let result = z.compute(&s, &d).expect("compute failed");

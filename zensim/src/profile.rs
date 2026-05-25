@@ -744,133 +744,27 @@ pub enum ZensimProfile {
 }
 
 impl ZensimProfile {
-    /// Latest recommended general-purpose profile.
-    /// Returns [`Self::PreviewV0_3`] in zensim 0.3.x.
-    pub fn latest() -> Self {
+    /// Current preview-stable profile. Returns [`Self::PreviewV0_3`] in
+    /// zensim 0.3.x.
+    ///
+    /// Use this only when you explicitly want "whatever the current
+    /// preview is" — the returned variant will rotate as new previews
+    /// ship. For pinned reproducibility, name the variant directly
+    /// (`ZensimProfile::PreviewV0_3`). For the stable codec-target
+    /// contract that codec crates should target, use [`Self::codec_target`].
+    pub const fn latest_preview() -> Self {
         Self::PreviewV0_3
     }
 
-    /// Balanced-trail ship — alias for [`Self::PreviewV0_5Balanced`].
-    /// Equivalent to [`Self::PreviewV0_5`], the back-compat name.
-    /// See `zensim/SOTA_TRAILS.md` for the two-trail framework.
-    pub const fn balanced() -> Self {
-        Self::PreviewV0_5Balanced
-    }
-
-    /// Compression-trail ship — alias for [`Self::PreviewV0_5Compression`].
-    /// Use for codec-selection / quality-dial workloads where CID22 +
-    /// AIC-3 rank fidelity is the priority over KADID/TID/KonJND.
-    /// See `zensim/SOTA_TRAILS.md` for the two-trail framework.
-    pub const fn compression() -> Self {
-        Self::PreviewV0_5Compression
-    }
-
-    /// Runtime ensemble — alias for [`Self::PreviewV0_5Ensemble`].
-    /// Routes per-pair between the Balanced and Compression ships via
-    /// a small classifier; tracks `max(balanced, compression)` per
-    /// canonical corpus. Use when a single profile must defend BOTH
-    /// compression rank fidelity (CID22, AIC-3) AND synthetic
-    /// distortion rank fidelity (KADID, TID, KonJND) without picking
-    /// a single trail. See `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
-    pub const fn ensemble() -> Self {
-        Self::PreviewV0_5Ensemble
-    }
-
-    /// Tuner trail — alias for [`Self::PreviewV0_5Tuner`]. Designed
-    /// for codec auto-targeting: a monotonic, well-calibrated dial
-    /// across the JPEG q range. **NOT a general-purpose ranking
-    /// metric** — see the variant doc for the cross-corpus SROCC
-    /// caveat. Use only when the workload is "type a target score,
-    /// have a codec hit it." See `benchmarks/v_tuner_2026-05-18_methodology.md`.
-    pub const fn tuner() -> Self {
-        Self::PreviewV0_5Tuner
-    }
-
-    /// Cross-codec trail (opt-in) — alias for
-    /// [`Self::PreviewV0_5CrossCodec`]. The V_24 per-sample-α
-    /// architecture trained with an additional cross-codec
-    /// equivalence-pair loss (EXP-CROSS-CODEC-METRIC, 2026-05-19).
-    /// Use when the workload requires consistent zensim scores
-    /// across multiple codecs at the same perceptual quality target.
-    /// **Opt-in only** — the strict `T=63 butter < 2.5`
-    /// cross-codec gate was not achieved; this profile ships
-    /// because the mechanism reduces cross-codec mean pairwise
-    /// butter by 25–46 % vs Tuner WITHOUT collapsing rank quality.
-    /// See `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
-    ///
-    /// **Deprecated 2026-05-20 (task #179).** The cross-codec variant
-    /// is dial-broken; PCHIP spline calibration was falsified. Use
-    /// [`Self::compression_v2`] or [`Self::balanced_v2`] for new code.
-    /// See
-    /// `benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
+    /// Deprecated. Use [`Self::latest_preview`] for the rotating-preview
+    /// alias, [`Self::codec_target`] for the stable codec contract, or
+    /// name a `PreviewV0_X` variant directly for pinned reproducibility.
     #[deprecated(
-        since = "0.5.0",
-        note = "dial-broken — use compression_v2() or balanced_v2()"
+        since = "0.3.0",
+        note = "use latest_preview() or codec_target() or name a Preview variant directly"
     )]
-    pub const fn cross_codec() -> Self {
-        #[allow(deprecated)]
-        {
-            Self::PreviewV0_5CrossCodec
-        }
-    }
-
-    /// Tuner trail v3 — alias for [`Self::PreviewV0_5TunerV3`]
-    /// (EXP-CROSS-CODEC-V9, 2026-05-20). The codec auto-targeting
-    /// workhorse with **full [0, 100] dial range**, **JND lands at
-    /// integer 60**, and **JOD lands at integer 30** — achieved via
-    /// a post-network monotone PCHIP spline calibration over an
-    /// 8-band extended-range anchor parquet. Supersedes
-    /// [`Self::PreviewV0_5TunerV2`] for new orchestrator workloads
-    /// that want clean user-facing semantic anchors. See
-    /// `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
-    pub const fn tuner_v3() -> Self {
-        Self::PreviewV0_5TunerV3
-    }
-
-    /// Balanced trail v2 — alias for [`Self::PreviewV0_5BalancedV2`]
-    /// (task #176, 2026-05-20). Same Balanced bake bytes as
-    /// [`Self::PreviewV0_5Balanced`] with a post-network PCHIP spline
-    /// calibration that lands JND at integer 60, JOD at integer 30, and
-    /// extends the dial range to the full [0, 100] without sacrificing
-    /// rank quality (cross-corpus SROCC bit-exact preserved on all 5
-    /// eval corpora). See
-    /// `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
-    pub const fn balanced_v2() -> Self {
-        Self::PreviewV0_5BalancedV2
-    }
-
-    /// Compression trail v2 — alias for [`Self::PreviewV0_5CompressionV2`]
-    /// (task #177, 2026-05-20). Same Compression bake bytes (V_24-
-    /// per-sample-α s4) as [`Self::PreviewV0_5Compression`] with a
-    /// post-network PCHIP spline calibration that lands JND at
-    /// integer 60, JOD at integer 30, and extends the dial range to
-    /// the full [0, 100] without sacrificing rank quality (cross-
-    /// corpus SROCC bit-exact preserved on all 5 eval corpora). See
-    /// `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
-    pub const fn compression_v2() -> Self {
-        Self::PreviewV0_5CompressionV2
-    }
-
-    /// Balanced trail v3 — alias for [`Self::PreviewV0_5BalancedV3`]
-    /// (EXP-CROSS-CODEC-V10, 2026-05-20). Same balanced bake bytes as
-    /// [`Self::PreviewV0_5BalancedV2`] with the V10 reallocated score-
-    /// space spline (JND=80 / JOD=50 / lossless=100 / pathological<0).
-    /// See `benchmarks/v10_anchor_design_2026-05-20.md`.
-    pub const fn balanced_v3() -> Self {
-        Self::PreviewV0_5BalancedV3
-    }
-
-    /// Compression trail v3 — alias for
-    /// [`Self::PreviewV0_5CompressionV3`] (EXP-CROSS-CODEC-V10,
-    /// 2026-05-20). V10 reallocated score-space.
-    pub const fn compression_v3() -> Self {
-        Self::PreviewV0_5CompressionV3
-    }
-
-    /// Tuner trail v4 — alias for [`Self::PreviewV0_5TunerV4`]
-    /// (EXP-CROSS-CODEC-V10, 2026-05-20). V10 reallocated score-space.
-    pub const fn tuner_v4() -> Self {
-        Self::PreviewV0_5TunerV4
+    pub fn latest() -> Self {
+        Self::PreviewV0_3
     }
 
     /// **Canonical codec-target metric.** The stable, version-independent

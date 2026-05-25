@@ -149,7 +149,7 @@ fn imageflow_checksum_analysis() {
             .into_owned()
     });
 
-    let zensim = Zensim::new(ZensimProfile::latest());
+    let zensim = Zensim::new(ZensimProfile::PreviewV0_3);
     let commits = manifest["commits"].as_array().expect("commits array");
 
     let mut tsv = String::new();

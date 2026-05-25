@@ -20,7 +20,7 @@
 //!      produces a different score; sanity check that `include_bytes!`
 //!      is pointed at the correct file AND that the spline runtime
 //!      dispatch is active for a per-sample-α-head bake).
-//!   5. `ZensimProfile::compression_v2()` alias returns the V2 variant.
+//!   5. `ZensimProfile::PreviewV0_5CompressionV2` alias returns the V2 variant.
 //!
 //! What this test does NOT cover (lives elsewhere):
 //!   * Cross-corpus SROCC — `bake_verdict` against canonical val parquets,
@@ -63,7 +63,7 @@ fn compression_v2_profile_name() {
         "zensim-preview-v0.5-compression-v2"
     );
     assert_eq!(
-        ZensimProfile::compression_v2(),
+        ZensimProfile::PreviewV0_5CompressionV2,
         ZensimProfile::PreviewV0_5CompressionV2
     );
 }

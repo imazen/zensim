@@ -976,7 +976,7 @@ use crate::source::ImageSource;
 /// ```no_run
 /// use zensim::{Zensim, ZensimProfile, RgbSlice};
 /// # let (src, dst) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-/// let z = Zensim::new(ZensimProfile::latest());
+/// let z = Zensim::new(ZensimProfile::PreviewV0_3);
 /// let source = RgbSlice::new(&src, 8, 8);
 /// let distorted = RgbSlice::new(&dst, 8, 8);
 /// let result = z.compute(&source, &distorted).unwrap();
@@ -1877,7 +1877,7 @@ fn compute_with_config_inner(
             100.0,
             0.0,
             vec![0.0; num_features],
-            ZensimProfile::latest(),
+            ZensimProfile::PreviewV0_3,
             [0.0; 3],
         )
         .mark_identical();
@@ -3285,7 +3285,7 @@ pub fn compute_zensim_with_config(
             100.0,
             0.0,
             vec![0.0; num_features],
-            ZensimProfile::latest(),
+            ZensimProfile::PreviewV0_3,
             [0.0; 3],
         )
         .mark_identical());
