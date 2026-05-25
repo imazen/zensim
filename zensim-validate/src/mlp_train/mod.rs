@@ -45,7 +45,6 @@ use crate::adam_simd;
 // produced by K mini-batch pair forwards, with closed-form gradient
 // added to the RankNet per-prediction backprop direction. See module
 // docs for the exact formula and gradient derivation.
-#[path = "loss_norm_in_norm.rs"]
 mod loss_norm_in_norm;
 
 /// How to aggregate per-group SROCC into the single value used for
