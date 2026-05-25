@@ -42,6 +42,13 @@ pub struct OwnedLoadedGroup {
     pub human_scores: Vec<f64>,
     pub feature_rows: Vec<Vec<f64>>,
     pub n_features: usize,
+    /// Per-row metric-disagreement σ, computed from the normalized std
+    /// of available metric columns (cvvdp_score, iwssim, ssim2_gpu).
+    /// When all three are present and non-null, σ = std([norm_cvvdp,
+    /// norm_iwssim, norm_ssim2]) per row. The trainer can use this as
+    /// a per-pair weight in the MSE loss: loss = ((pred - target) / σ)².
+    /// None if the metric columns are not available.
+    pub metric_sigmas: Option<Vec<f64>>,
 }
 
 /// Load a zensim training feature parquet file.
@@ -242,6 +249,48 @@ pub fn load_parquet(
         return Err(format!("{path:?}: empty file / no rows"));
     }
 
+    // Compute per-row metric-disagreement σ from available metric columns.
+    // Uses the normalized std of (cvvdp_score, iwssim, ssim2_gpu) when
+    // all three are present. This is the natural per-pair "confidence"
+    // signal: where metrics agree, the quality judgment is easy (low σ);
+    // where they disagree, it's ambiguous (high σ).
+    let metric_sigmas = {
+        let cv_col = load_optional_scalar_column(path, "cvvdp_score").ok().flatten();
+        let iw_col = load_optional_scalar_column(path, "iwssim").ok().flatten();
+        let s2_col = load_optional_scalar_column(path, "ssim2_gpu").ok().flatten();
+        match (cv_col, iw_col, s2_col) {
+            (Some(cv), Some(iw), Some(s2)) if cv.len() == human_scores.len() => {
+                let cv_min = cv.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let cv_max = cv.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let iw_min = iw.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let iw_max = iw.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let s2_min = s2.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let s2_max = s2.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let cv_range = (cv_max - cv_min).max(1e-9);
+                let iw_range = (iw_max - iw_min).max(1e-9);
+                let s2_range = (s2_max - s2_min).max(1e-9);
+                let sigmas: Vec<f64> = (0..cv.len())
+                    .map(|i| {
+                        let cn = (cv[i] - cv_min) / cv_range;
+                        let in_ = (iw[i] - iw_min) / iw_range;
+                        let sn = (s2[i] - s2_min) / s2_range;
+                        let mean = (cn + in_ + sn) / 3.0;
+                        let var = ((cn - mean).powi(2) + (in_ - mean).powi(2) + (sn - mean).powi(2)) / 3.0;
+                        var.sqrt()
+                    })
+                    .collect();
+                eprintln!(
+                    "  {name}: metric_sigmas computed from cvvdp/iwssim/ssim2 (mean={:.4}, p5={:.4}, p95={:.4})",
+                    sigmas.iter().sum::<f64>() / sigmas.len() as f64,
+                    {let mut s = sigmas.clone(); s.sort_by(|a,b| a.total_cmp(b)); s[s.len()/20]},
+                    {let mut s = sigmas.clone(); s.sort_by(|a,b| a.total_cmp(b)); s[s.len()*19/20]},
+                );
+                Some(sigmas)
+            }
+            _ => None,
+        }
+    };
+
     println!(
         "  {name}: loaded {} pairs × {n_features} features from {path:?}",
         human_scores.len()
@@ -254,6 +303,7 @@ pub fn load_parquet(
         human_scores,
         feature_rows,
         n_features,
+        metric_sigmas,
     })
 }
 
