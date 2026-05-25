@@ -5536,6 +5536,26 @@ fn train_mlp_per_sample_alpha_head(
                  Set --cross-codec-eq-weight 0."
             );
         }
+        if hyperparams.anchor_loss_weight > 0.0 {
+            panic!(
+                "multi-layer / skip + anchor_loss: anchor backward not yet wired \
+                 through arch_backward. Set --anchor-loss-weight 0 for arch eval. \
+                 The anchor forward works (predictions are correct); only the \
+                 anchor's gradient contribution to encoder weights is missing."
+            );
+        }
+        if hyperparams.pjnd_passthrough_weight > 0.0 {
+            panic!(
+                "multi-layer / skip + pjnd_passthrough: not yet wired. \
+                 Set --pjnd-passthrough-weight 0."
+            );
+        }
+        if hyperparams.konjnd_aggregation_weight > 0.0 {
+            panic!(
+                "multi-layer / skip + konjnd_aggregation: not yet wired. \
+                 Set --konjnd-aggregation-weight 0."
+            );
+        }
     }
 
     let n_hidden_final = if use_2layer {
