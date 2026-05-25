@@ -269,6 +269,135 @@ sources.
 **Trainer lever:** per-source loss weighting (upweight sources
 where the residual is large). Not yet implemented.
 
+## G11 — Display-dependent quality (display profiles)
+
+CVVDP's structural advantage over every other metric in
+Mohammadi 2025 is its **display model**: it takes display
+parameters (pixels per degree, peak luminance, ambient light,
+contrast ratio) as input and modulates sensitivity functions
+accordingly. The same compression artifact is MORE visible on
+an iPhone 14 Pro at arm's length (460 PPI, ~25 cm → ~67 PPD,
+2000 nits peak) than on a 1080p desktop at desk distance
+(92 PPI, ~60 cm → ~53 PPD, 350 nits).
+
+For a codec-target metric, this means: **"score 70" should mean
+different byte budgets for different displays.** An image
+encoded for Retina mobile needs fewer bytes to look identical
+than the same image for a 1080p desktop — because the desktop
+viewer literally cannot see the fine-grained artifacts that the
+Retina viewer can.
+
+### Display profile parameters
+
+The minimum viable display model needs three numbers:
+
+| Parameter | Definition | Example: iPhone 14 Pro | Example: 1080p desktop |
+|---|---|---|---|
+| **PPD** (pixels per degree) | PPI × (π/180) × viewing_distance_cm / 2.54 | ~67 | ~53 |
+| **peak_nits** | Peak display luminance | 2000 | 350 |
+| **ambient_lux** | Typical ambient light | 500 (indoor) | 200 (office) |
+
+PPD is the load-bearing parameter. At higher PPD, the human
+visual system resolves finer spatial frequencies → more
+compression artifacts become visible → the JND threshold shifts
+toward lower distortion → "score 60" means a tighter encode.
+
+### Implementation strategy (three tiers)
+
+**Tier 1 (immediate, no retraining):** post-network PPD-dependent
+score shift. The v0.3 MLP produces a display-agnostic score.
+A per-display-profile affine `score_display = α(ppd) + β(ppd) ·
+score_agnostic` shifts the output based on PPD. The α/β
+coefficients are fit from a CVVDP-anchored sweep: for N images
+× M quality levels, compute both zensim and CVVDP-at-PPD,
+regress the affine per PPD bracket.
+
+This is architecturally identical to the existing
+`zentrain.per_codec_calibration` metadata — the bake carries a
+`zentrain.per_display_calibration` payload mapping PPD brackets
+to (α, β) pairs, and the runtime applies the shift when the
+caller provides a display hint.
+
+```rust
+let z = Zensim::new(ZensimProfile::codec_target())
+    .with_display(DisplayProfile::iphone_14_pro());
+let score = z.compute(&source, &distorted)?;
+// score accounts for Retina PPD — tighter than desktop
+```
+
+**Tier 2 (medium-term, retraining):** PPD as an input feature.
+Add PPD (or log2(PPD)) as the 373rd input feature to the MLP.
+Train on a corpus that includes the same (ref, dist) pair
+scored at multiple PPD values (from CVVDP). The network learns
+to modulate its sensitivity at different viewing conditions.
+This is a richer model than the Tier 1 affine because the
+PPD interaction with specific feature types (e.g., high-freq
+artifact detection features are PPD-sensitive; color shift
+features are not) can be learned.
+
+**Tier 3 (long-term, architectural):** multi-scale feature
+extraction conditioned on PPD. The blur kernel widths in
+zensim's 4-scale Gaussian pyramid are currently fixed at 5px
+radius × 1 pass. On a 67 PPD display, a 5px blur corresponds
+to ~0.075° of visual angle; on a 53 PPD display, the same blur
+is ~0.094°. Making the blur radii PPD-dependent (so they always
+correspond to the same angular extent) would let the feature
+extraction itself be display-aware. This requires changes to
+`zensim/src/metric.rs::compute_with_config_inner` and would
+invalidate existing bakes (new feature schema).
+
+### Named display profiles
+
+Ship a set of named profiles as `const` in the `zensim` crate:
+
+```rust
+pub struct DisplayProfile {
+    pub ppd: f32,
+    pub peak_nits: f32,
+    pub ambient_lux: f32,
+}
+
+impl DisplayProfile {
+    pub const DESKTOP_1080P: Self = Self { ppd: 53.0, peak_nits: 350.0, ambient_lux: 200.0 };
+    pub const DESKTOP_4K_27: Self = Self { ppd: 93.0, peak_nits: 600.0, ambient_lux: 200.0 };
+    pub const MACBOOK_RETINA: Self = Self { ppd: 99.0, peak_nits: 500.0, ambient_lux: 300.0 };
+    pub const IPHONE_14_PRO: Self = Self { ppd: 67.0, peak_nits: 2000.0, ambient_lux: 500.0 };
+    pub const IPHONE_16_PRO: Self = Self { ppd: 69.0, peak_nits: 2000.0, ambient_lux: 500.0 };
+    pub const IPAD_PRO_M4: Self = Self { ppd: 80.0, peak_nits: 1600.0, ambient_lux: 400.0 };
+    pub const TV_4K_55_3M: Self = Self { ppd: 56.0, peak_nits: 1000.0, ambient_lux: 50.0 };
+    pub const PRINT_300DPI_30CM: Self = Self { ppd: 115.0, peak_nits: 100.0, ambient_lux: 500.0 };
+    pub const WEB_GENERIC: Self = Self { ppd: 60.0, peak_nits: 350.0, ambient_lux: 200.0 };
+}
+```
+
+Codecs default to `WEB_GENERIC` (the current display-agnostic
+behavior). When a caller provides a specific profile, the score
+shifts accordingly:
+- Higher PPD → stricter scores (same distortion is MORE visible)
+- "Score 60 (visually lossless)" at 67 PPD (iPhone) requires
+  a higher-quality encode than "score 60" at 53 PPD (desktop)
+
+### Measurement
+
+| Measure | Threshold |
+|---|---|
+| Cross-PPD consistency: same (ref, dist) at PPD 53 vs 67 → score delta | ≥ 3 points (distortion IS more visible on mobile) |
+| Cross-PPD rank preservation: rank order of quality levels at PPD X matches rank order at PPD Y | SROCC ≥ 0.99 (ranks should not invert) |
+| CVVDP-anchor fit R² per PPD bracket | ≥ 0.90 for Tier 1 affine |
+
+**Current gap:** zensim has zero display awareness. Every score
+assumes the same implicit viewing condition. CVVDP's Mohammadi
+paper numbers (0.960 SROCC, 9.45 Z-RMSE) are for `ccfl lcd,
+64.27 ppd` — a specific display model. Our eval numbers are
+display-agnostic. Comparing directly is slightly unfair to
+zensim (display-agnostic metric vs display-tuned metric), but
+it's also the gap we need to close.
+
+**Trainer lever:** Tier 1 needs no trainer changes — just a
+CVVDP-anchored calibration sweep. Tier 2 needs PPD as a 373rd
+feature + multi-PPD training corpus (each pair scored at 3-5
+PPD values via CVVDP). Tier 3 is architectural.
+
 ---
 
 ## Priority order
@@ -281,10 +410,17 @@ When goals conflict, resolve in this order:
 4. **G8 (Z-RMSE)** — the probabilistic accuracy anchor
 5. **G4 (cross-codec)** — the picker contract
 6. **G5 (HF rank)** — the visually-lossless range
-7. **G9 (DS-AUC)** — same-vs-different classification
-8. **G10 (per-source stability)** — worst-case guard
-9. **G6 (MF band coverage)** — the "no dead zones" guard
-10. **G7 (CID22 rank)** — advisory generalization check
+7. **G11 (display profiles)** — the display-dependent quality
+8. **G9 (DS-AUC)** — same-vs-different classification
+9. **G10 (per-source stability)** — worst-case guard
+10. **G6 (MF band coverage)** — the "no dead zones" guard
+11. **G7 (CID22 rank)** — advisory generalization check
+
+G11 is ranked above G9/G10 because display-dependent scoring is
+the structural feature that differentiates a codec-target metric
+from a generic IQA metric. CVVDP does this; we should too. The
+Tier 1 implementation (post-network affine, no retraining) is
+achievable within the current architecture.
 
 G8 (Z-RMSE) is ranked 4th — above G4 (cross-codec) — because
 Z-RMSE is the paper's key finding: it's the only stat that
@@ -313,7 +449,9 @@ to select the "best epoch" checkpoint. This is wrong:
   through epoch 299.
 
 **Replace with `--val-policy goals`:** at each validation
-checkpoint, compute a weighted score against G1–G10:
+checkpoint, compute a weighted score against G1–G11 (G11 is
+display-dependent and only activates when the trainer carries
+multi-PPD anchors — zero-cost when absent):
 
 ```
 goal_score = (
@@ -363,6 +501,7 @@ for 300 epochs (15 min overhead across full training).
 | G5 HF rank | 1.5 | Visually-lossless range (our biggest gap) |
 | G9 DS-AUC | 1.0 | Same-vs-different gate |
 | G10 per-source stability | 0.5 | Worst-case guard |
+| G11 display profiles | 0.5 | Display-dependent (Tier 1: CVVDP-anchored affine; 0 cost when absent) |
 | G6 MF band coverage | 0.5 | Guard rail |
 | G7 CID22 rank | 0.5 | Advisory |
 
@@ -488,13 +627,17 @@ invocation should emit all of the above.
 | G9 DS-AUC ≥ 0.70 | TBD | TBD | ? |
 | G10 max/med ≤ 2 | TBD | TBD | ? |
 
-v11 passes 3/10 cleanly, marginal on 2, fails G5 decisively,
-4 unmeasured (G6/G8/G9/G10 — pipeline doesn't compute them yet).
+v11 passes 3/11 cleanly, marginal on 2, fails G5 decisively,
+5 unmeasured (G6/G8/G9/G10/G11 — pipeline doesn't compute them).
 
-**First-order priority for the pipeline:** implement G8 (Z-RMSE)
-+ G9 (DS-AUC) in `bake_verdict` so we can score existing bakes.
-These are both < 100 LOC additions. Then score v11 + YJ-AT on
-the full G1-G10 table before deciding the next retrain.
+**First-order priority for the pipeline:**
+1. Implement G8 (Z-RMSE) + G9 (DS-AUC) in `bake_verdict`
+   (< 100 LOC each)
+2. Score v11 + YJ-AT on the full G1-G11 table
+3. Tier 1 display calibration (G11): run a CVVDP-anchored sweep
+   at 3 PPD values on the safesyn corpus, fit per-PPD (α, β),
+   bake as `zentrain.per_display_calibration` metadata
+4. THEN decide the next retrain direction
 
 ---
 
