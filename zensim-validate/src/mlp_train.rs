@@ -6033,9 +6033,16 @@ fn train_mlp_per_sample_alpha_head(
     };
 
     // Adam-step closure: pack/unpack our parameters into the Adam slots.
+    // Adam step closure — packs all weight vectors into the concatenated
+    // adam slots, runs one step, then unpacks. For multi-layer / skip,
+    // the w1 slot holds [w1 | w2_enc | w_skip] concatenated.
     let do_adam_step = |adam: &mut AdamState,
                         w1: &mut Vec<f64>,
                         b1: &mut Vec<f64>,
+                        w2_enc: &mut Vec<f64>,
+                        b2_enc: &mut Vec<f64>,
+                        w_skip: &mut Vec<f64>,
+                        b_skip: &mut f64,
                         rank_w: &mut Vec<f64>,
                         rank_b: &mut f64,
                         reducer_w: &mut [f64; 4],
@@ -6043,30 +6050,77 @@ fn train_mlp_per_sample_alpha_head(
                         w_alpha: &mut Vec<f64>,
                         b_alpha: &mut f64,
                         lr: f64,
-                        n_hidden: usize| {
-        let mut w2_vec = vec![0.0f64; n_hidden + 4 + n_hidden + 1];
-        for j in 0..n_hidden {
+                        nh_final: usize| {
+        // Concatenate encoder weights into a single buffer matching adam.gw1.
+        let mut w1_concat: Vec<f64> = Vec::with_capacity(w1.len() + w2_enc.len() + w_skip.len());
+        w1_concat.extend_from_slice(w1);
+        w1_concat.extend_from_slice(w2_enc);
+        w1_concat.extend_from_slice(w_skip);
+
+        let mut b1_concat: Vec<f64> = Vec::with_capacity(b1.len() + b2_enc.len() + if !w_skip.is_empty() { 1 } else { 0 });
+        b1_concat.extend_from_slice(b1);
+        b1_concat.extend_from_slice(b2_enc);
+        if !w_skip.is_empty() {
+            b1_concat.push(*b_skip);
+        }
+
+        // Pack head weights into w2 slot.
+        let mut w2_vec = vec![0.0f64; nh_final + 4 + nh_final + 1];
+        for j in 0..nh_final {
             w2_vec[j] = rank_w[j];
         }
         for kk in 0..4 {
-            w2_vec[n_hidden + kk] = reducer_w[kk];
+            w2_vec[nh_final + kk] = reducer_w[kk];
         }
-        for j in 0..n_hidden {
-            w2_vec[n_hidden + 4 + j] = w_alpha[j];
+        for j in 0..nh_final {
+            w2_vec[nh_final + 4 + j] = w_alpha[j];
         }
-        w2_vec[n_hidden + 4 + n_hidden] = *b_alpha;
+        w2_vec[nh_final + 4 + nh_final] = *b_alpha;
         let mut b2_vec = vec![*rank_b, *reducer_b];
-        adam.step(w1, b1, &mut w2_vec, &mut b2_vec, lr);
-        for j in 0..n_hidden {
+
+        adam.step(&mut w1_concat, &mut b1_concat, &mut w2_vec, &mut b2_vec, lr);
+
+        // Unpack encoder weights back. Pre-compute lengths to avoid
+        // overlapping borrows.
+        let w1_len = w1.len();
+        let w2_len = w2_enc.len();
+        let ws_len = w_skip.len();
+        let b1_len = b1.len();
+        let b2_len = b2_enc.len();
+
+        let mut off = 0;
+        w1.copy_from_slice(&w1_concat[off..off + w1_len]);
+        off += w1_len;
+        if w2_len > 0 {
+            w2_enc.copy_from_slice(&w1_concat[off..off + w2_len]);
+            off += w2_len;
+        }
+        if ws_len > 0 {
+            w_skip.copy_from_slice(&w1_concat[off..off + ws_len]);
+        }
+
+        let mut boff = 0;
+        b1.copy_from_slice(&b1_concat[boff..boff + b1_len]);
+        boff += b1_len;
+        if b2_len > 0 {
+            b2_enc.copy_from_slice(&b1_concat[boff..boff + b2_len]);
+            boff += b2_enc.len();
+        }
+        if !w_skip.is_empty() {
+            *b_skip = b1_concat[boff];
+        }
+
+        // Unpack head weights.
+        for j in 0..nh_final {
             rank_w[j] = w2_vec[j];
         }
         for kk in 0..4 {
-            reducer_w[kk] = w2_vec[n_hidden + kk];
+            reducer_w[kk] = w2_vec[nh_final + kk];
         }
-        for j in 0..n_hidden {
-            w_alpha[j] = w2_vec[n_hidden + 4 + j];
+        for j in 0..nh_final {
+            w_alpha[j] = w2_vec[nh_final + 4 + j];
         }
-        *b_alpha = w2_vec[n_hidden + 4 + n_hidden];
+        *b_alpha = w2_vec[nh_final + 4 + nh_final];
         *rank_b = b2_vec[0];
         *reducer_b = b2_vec[1];
     };
@@ -6146,6 +6200,10 @@ fn train_mlp_per_sample_alpha_head(
                             &mut nin_buffer,
                             &mut w1,
                             &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
                             &mut rank_w,
                             &mut rank_b,
                             &mut reducer_w,
@@ -6180,6 +6238,10 @@ fn train_mlp_per_sample_alpha_head(
                             &mut nin_buffer,
                             &mut w1,
                             &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
                             &mut rank_w,
                             &mut rank_b,
                             &mut reducer_w,
@@ -6314,6 +6376,10 @@ fn train_mlp_per_sample_alpha_head(
                         &mut nin_buffer,
                         &mut w1,
                         &mut b1,
+                        &mut w2_enc,
+                        &mut b2_enc,
+                        &mut w_skip,
+                        &mut b_skip,
                         &mut rank_w,
                         &mut rank_b,
                         &mut reducer_w,
@@ -6408,6 +6474,10 @@ fn train_mlp_per_sample_alpha_head(
                     &mut adam,
                     &mut w1,
                     &mut b1,
+                    &mut w2_enc,
+                    &mut b2_enc,
+                    &mut w_skip,
+                    &mut b_skip,
                     &mut rank_w,
                     &mut rank_b,
                     &mut reducer_w,
@@ -6549,6 +6619,10 @@ fn train_mlp_per_sample_alpha_head(
                                     &mut adam,
                                     &mut w1,
                                     &mut b1,
+                                    &mut w2_enc,
+                                    &mut b2_enc,
+                                    &mut w_skip,
+                                    &mut b_skip,
                                     &mut rank_w,
                                     &mut rank_b,
                                     &mut reducer_w,
@@ -6679,6 +6753,10 @@ fn train_mlp_per_sample_alpha_head(
                                     &mut adam,
                                     &mut w1,
                                     &mut b1,
+                                    &mut w2_enc,
+                                    &mut b2_enc,
+                                    &mut w_skip,
+                                    &mut b_skip,
                                     &mut rank_w,
                                     &mut rank_b,
                                     &mut reducer_w,
@@ -6873,6 +6951,10 @@ fn train_mlp_per_sample_alpha_head(
                                     &mut adam,
                                     &mut w1,
                                     &mut b1,
+                                    &mut w2_enc,
+                                    &mut b2_enc,
+                                    &mut w_skip,
+                                    &mut b_skip,
                                     &mut rank_w,
                                     &mut rank_b,
                                     &mut reducer_w,
@@ -7092,6 +7174,10 @@ fn train_mlp_per_sample_alpha_head(
                                     &mut adam,
                                     &mut w1,
                                     &mut b1,
+                                    &mut w2_enc,
+                                    &mut b2_enc,
+                                    &mut w_skip,
+                                    &mut b_skip,
                                     &mut rank_w,
                                     &mut rank_b,
                                     &mut reducer_w,
@@ -7270,6 +7356,10 @@ fn train_mlp_per_sample_alpha_head(
                             &mut adam,
                             &mut w1,
                             &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
                             &mut rank_w,
                             &mut rank_b,
                             &mut reducer_w,
@@ -7290,6 +7380,10 @@ fn train_mlp_per_sample_alpha_head(
                 &mut adam,
                 &mut w1,
                 &mut b1,
+                &mut w2_enc,
+                &mut b2_enc,
+                &mut w_skip,
+                &mut b_skip,
                 &mut rank_w,
                 &mut rank_b,
                 &mut reducer_w,
@@ -7307,6 +7401,10 @@ fn train_mlp_per_sample_alpha_head(
                     &mut nin_buffer,
                     &mut w1,
                     &mut b1,
+                    &mut w2_enc,
+                    &mut b2_enc,
+                    &mut w_skip,
+                    &mut b_skip,
                     &mut rank_w,
                     &mut rank_b,
                     &mut reducer_w,
@@ -7811,6 +7909,10 @@ fn flush_per_sample_alpha_nin_batch<F>(
     nin_buffer: &mut Vec<Option<PerSampleAlphaPairForward<'_>>>,
     w1: &mut Vec<f64>,
     b1: &mut Vec<f64>,
+    w2_enc: &mut Vec<f64>,
+    b2_enc: &mut Vec<f64>,
+    w_skip: &mut Vec<f64>,
+    b_skip: &mut f64,
     rank_w: &mut Vec<f64>,
     rank_b: &mut f64,
     reducer_w: &mut [f64; 4],
@@ -7834,6 +7936,10 @@ fn flush_per_sample_alpha_nin_batch<F>(
         &mut AdamState,
         &mut Vec<f64>,
         &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut f64,
         &mut Vec<f64>,
         &mut f64,
         &mut [f64; 4],
@@ -7967,7 +8073,8 @@ fn flush_per_sample_alpha_nin_batch<F>(
 
     if steps_added > 0 {
         do_adam_step(
-            adam, w1, b1, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, lr, n_hidden,
+            adam, w1, b1, w2_enc, b2_enc, w_skip, b_skip,
+            rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, lr, n_hidden,
         );
         *n_steps += steps_added;
     }
