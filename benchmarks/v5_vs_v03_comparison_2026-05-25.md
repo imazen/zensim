@@ -50,3 +50,21 @@ MLP architecture has no CSF-aware features.
 - Output: PCHIP spline calibration baked into ZNPR v3 metadata
 - Groups: safesyn(1.0/0.5) + cid22_train(0.5/1.0) + kadid(0.5/1.0) +
   tid(0.5/1.0) + konjnd_dense(0.3/0.5)
+
+## V7 (RankNet=1.0 + MSE=0.5, 5 groups) — 2026-05-25
+
+Training: 200 epochs, val(geomean3)=0.9305 at epoch 199.
+RankNet fixes the training divergence but produces an overfit model:
+
+| Corpus | V5 SROCC | V7 SROCC | Δ | Notes |
+|---|---|---|---|---|
+| CID22 | 0.8798 | 0.8176 | -0.062 | Overfit to training groups |
+| KADIK10k | 0.9227 | 0.9207 | -0.002 | Tied |
+| TID2013 | 0.8834 | 0.9352 | +0.052 | Big win (TID in training) |
+| KonJND | 0.4523 | 0.2796 | -0.173 | Regression (MSE too weak) |
+| AIC-3 | 0.8180 | 0.7387 | -0.079 | Holdout regression |
+| AIC-4 | 0.9258 | 0.8461 | -0.080 | Holdout regression |
+
+**Verdict:** RankNet-dominant (w=1.0) overfits to training corpora.
+V5's MSE-only approach generalizes better. Sweeping MSE/RankNet
+balance in v8 (MSE=2.0, RN=0.3) and v9 (MSE=1.0, RN=0.1).

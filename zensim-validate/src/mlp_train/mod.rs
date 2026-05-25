@@ -5928,23 +5928,29 @@ fn train_mlp_per_sample_alpha_head(
         Vec::new()
     };
 
-    // Pre-compute per-group σ medians for σ-weighted MSE normalization.
-    let sigma_medians: Vec<f64> = groups
-        .iter()
-        .map(|g| {
-            g.metric_sigmas
-                .map(|sigmas| {
-                    let mut sorted: Vec<f64> = sigmas.to_vec();
-                    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                    if sorted.is_empty() {
-                        1.0
-                    } else {
-                        sorted[sorted.len() / 2]
-                    }
-                })
-                .unwrap_or(1.0)
-        })
-        .collect();
+    // Pre-compute per-group σ medians (only when σ-weighted MSE is active).
+    let sigma_medians: Vec<f64> = if hyperparams.sigma_weighted_mse {
+        groups
+            .iter()
+            .map(|g| {
+                g.metric_sigmas
+                    .map(|sigmas| {
+                        let mut sorted: Vec<f64> = sigmas.to_vec();
+                        sorted.sort_by(|a, b| {
+                            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        if sorted.is_empty() {
+                            1.0
+                        } else {
+                            sorted[sorted.len() / 2]
+                        }
+                    })
+                    .unwrap_or(1.0)
+            })
+            .collect()
+    } else {
+        vec![1.0; groups.len()]
+    };
 
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
