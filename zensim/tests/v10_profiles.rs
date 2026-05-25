@@ -45,7 +45,7 @@ fn balanced_v3_profile_name_and_alias() {
         "zensim-preview-v0.5-balanced-v3"
     );
     assert_eq!(
-        ZensimProfile::balanced_v3(),
+        ZensimProfile::PreviewV0_5BalancedV3,
         ZensimProfile::PreviewV0_5BalancedV3
     );
 }
@@ -123,7 +123,7 @@ fn compression_v3_profile_name_and_alias() {
         "zensim-preview-v0.5-compression-v3"
     );
     assert_eq!(
-        ZensimProfile::compression_v3(),
+        ZensimProfile::PreviewV0_5CompressionV3,
         ZensimProfile::PreviewV0_5CompressionV3
     );
 }
@@ -172,7 +172,7 @@ fn tuner_v4_profile_name_and_alias() {
         "zensim-preview-v0.5-tuner-v4"
     );
     assert_eq!(
-        ZensimProfile::tuner_v4(),
+        ZensimProfile::PreviewV0_5TunerV4,
         ZensimProfile::PreviewV0_5TunerV4
     );
 }

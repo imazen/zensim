@@ -110,7 +110,7 @@ fn checksums_truncate_lsb() {
 
 #[test]
 fn identical_images_score_100() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let rgba = generators::mandelbrot(W, H);
     let pixels = px(&rgba);
     let src = RgbaSlice::new(&pixels, W as usize, H as usize);
@@ -124,7 +124,7 @@ fn identical_images_score_100() {
 
 #[test]
 fn slight_distortion_scores_high() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let base = generators::mandelbrot(128, 128);
     let distorted = distortions::truncate_lsb(&base);
     let base_px = px(&base);
@@ -141,7 +141,7 @@ fn slight_distortion_scores_high() {
 
 #[test]
 fn channel_swap_scores_low() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let base = generators::color_blocks(64, 64);
     let swapped = distortions::channel_swap_rb(&base);
     let base_px = px(&base);
@@ -158,7 +158,7 @@ fn channel_swap_scores_low() {
 
 #[test]
 fn inversion_scores_very_low() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let base = generators::gradient(64, 64);
     let inverted = distortions::invert(&base);
     let base_px = px(&base);
@@ -175,7 +175,7 @@ fn inversion_scores_very_low() {
 
 #[test]
 fn uniform_shift_scores_proportionally() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let base = generators::value_noise(128, 128, 7);
     let shift_small = distortions::uniform_shift(&base, 2);
     let shift_large = distortions::uniform_shift(&base, 20);
@@ -208,7 +208,7 @@ fn uniform_shift_scores_proportionally() {
 
 #[test]
 fn regression_off_by_one_passes() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let tol = RegressionTolerance::off_by_one();
     let base = generators::mandelbrot(128, 128);
     let distorted = generators::off_by_n(&base, 1, 1);
@@ -225,7 +225,7 @@ fn regression_off_by_one_passes() {
 
 #[test]
 fn regression_large_delta_fails_exact() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let tol = RegressionTolerance::exact();
     let base = generators::gradient(64, 64);
     let distorted = distortions::uniform_shift(&base, 10);
@@ -245,7 +245,7 @@ fn regression_large_delta_fails_exact() {
 
 #[test]
 fn large_image_identical() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let rgba = generators::mandelbrot(256, 256);
     let pixels = px(&rgba);
     let src = RgbaSlice::new(&pixels, 256, 256);
@@ -255,7 +255,7 @@ fn large_image_identical() {
 
 #[test]
 fn large_image_noise_distortion() {
-    let z = Zensim::new(ZensimProfile::latest());
+    let z = Zensim::new(ZensimProfile::PreviewV0_3);
     let base = generators::value_noise(256, 256, 99);
     let distorted = distortions::truncate_lsb(&base);
     let base_px = px(&base);

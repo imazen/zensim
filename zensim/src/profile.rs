@@ -30,22 +30,42 @@ pub enum ZensimProfile {
     /// Linear-weights profile, no MLP forward pass. The historical
     /// stable default — `latest()` returned this through zensim 0.2.x.
     PreviewV0_2,
-    /// Preview v0.3. MLP-scored profile, shipped 2026-05-13 with
-    /// zensim 0.3.0. Underlying bake at crate version 0.3.0 is **V0_18**:
-    /// 228→384→1 LeakyReLU MLP, I8 quantized with per-output f32 scales,
-    /// 93 KB bake (md5 `2cc537470e68f7379e759811ddd22900`). Built by
-    /// 3-way concat construction over V0_16 + cycle-14-s1 + cycle-14-s42
-    /// (mathematically equivalent to averaging three 228→128→1 MLPs).
+    /// Preview v0.3 — **canonical shipping profile (recovery phase 4,
+    /// 2026-05-24 PM)**. Multi-dataset Tuner v5 bake (file
+    /// `v_tuner_v11_2026-05-24.bin`, 54 KB packed i8 + zerobias + lz4,
+    /// md5 `cac9416124a5e5f8ff577bc78e15ea1f`).
     ///
-    /// Cross-corpus SROCC (held-out): CID22 0.8934, KADID 0.9427, TID 0.9525,
-    /// AIC-3 0.7998, AIC-4 0.9153.
+    /// 372-input MLP (372 → 128 → 128 identity passthrough) with
+    /// per_sample_alpha_head + tanh_output_head + 7-knot PCHIP spline
+    /// calibration. Trained on 5 groups (safesyn 196k + cid22_train
+    /// 17.6k + kadid 10.1k + tid 3k + konjnd_dense 20.2k) with
+    /// `tanh_output_head_scale = 30.0` and a konjnd-aggregation aux
+    /// loss for per-source PJND calibration.
     ///
-    /// Methodology: `benchmarks/v0_18_methodology_2026-05-13.md`.
+    /// Cross-corpus SROCC (held-out, 5-seed CI median):
+    /// CID22 0.860, KonJND 0.285, AIC-3 0.776, AIC-4 0.929,
+    /// monotonicity (JPEG q-sweep) 0.948.
     ///
-    /// The bake bytes inside this variant may be swapped during 0.3.x
-    /// patches (e.g. to a zero-biased + LZ4-compressed V0_18 once that
-    /// path lands per the `zenpredict` roadmap). Cross-patch score
-    /// stability is the contract; bit-identity is not.
+    /// **Full 0-100 dial coverage** — score p5 = 28 (was 48 in the
+    /// V_18 lineage), JND lands at score 60 bit-exact (was 79).
+    /// Mean score at butter=3.5 (low-q) = 37 (was 55 flat floor).
+    /// Per-unit cross-codec consistency 2.36 % of dial span
+    /// (proportionally tighter than the V_18 ship's 2.63 %).
+    ///
+    /// **66/72 adjacent q-pairs discretely targetable** at ±1 score
+    /// unit across {zenjpeg, zenwebp, zenavif, zenjxl}. AVIF and JXL
+    /// reach all 18/18 pairs. Byte-identical short-circuit returns
+    /// score = 100 exactly for any codec's lossless mode.
+    ///
+    /// Methodology: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
+    /// Per-codec q-range: `benchmarks/v_tuner_v5_per_codec_q_range_2026-05-24.md`.
+    /// Integration guide: `docs/CODEC_TARGET_METRIC.md`.
+    ///
+    /// The prior V_18 lineage bake (used by zensim 0.3.0-0.3.x) lives
+    /// on disk at `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin`
+    /// for reproducibility. The 0.3.x → next-patch rotation is per
+    /// the variant doc's promise: "score stability is the contract;
+    /// bit-identity is not."
     PreviewV0_3,
     /// Preview v0.4. **Multi-bake D2 α=0.7 ensemble (2026-05-15)**:
     /// V_18 ship as the primary (228 → 384 → 1, no feature transforms,
@@ -64,6 +84,7 @@ pub enum ZensimProfile {
     /// run on the same 228-feature vector). Bakes embed via
     /// `include_bytes!`; no extra heap allocations beyond the second
     /// Predictor's scratch buffer.
+    #[doc(hidden)]
     PreviewV0_4,
     /// Preview v0.5 — **balanced-trail ship**.
     ///
@@ -78,6 +99,7 @@ pub enum ZensimProfile {
     /// **balanced trail** (Pareto-better across all 5 eval corpora).
     /// For a compression-specialist alternative, see
     /// [`Self::PreviewV0_5Compression`].
+    #[doc(hidden)]
     PreviewV0_5,
     /// Preview v0.5, **balanced trail** — V_22-mix-LARGE+iwssim s3
     /// packed (2026-05-18). 300 → 128 → 1 vanilla LeakyReLU MLP,
@@ -104,6 +126,7 @@ pub enum ZensimProfile {
     /// workloads, see [`Self::PreviewV0_5Compression`].
     ///
     /// Methodology: `benchmarks/v22_mix_LARGE_iwssim_methodology_2026-05-18.md`.
+    #[doc(hidden)]
     PreviewV0_5Balanced,
     /// Preview v0.5, **compression trail** — V_22-372feat s5 packed
     /// (2026-05-18). 372 → 128 → 1 vanilla LeakyReLU MLP, i8 +
@@ -140,6 +163,7 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v22_372feat_methodology_2026-05-18.md`.
     /// Bake_compare A.9 verdict: `/tmp/two_trail_372feat_vs_baseline.md`.
+    #[doc(hidden)]
     PreviewV0_5Compression,
     /// Preview v0.5, **runtime ensemble (EXP-ENSEMBLE-V05)** — routes
     /// per-pair between [`Self::PreviewV0_5Balanced`] and
@@ -177,6 +201,7 @@ pub enum ZensimProfile {
     /// use `extended_features: true, compute_iw_features: false`.
     ///
     /// Methodology: `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
+    #[doc(hidden)]
     PreviewV0_5Ensemble,
     /// Preview v0.5, **tuner trail** — V_24-per-sample-α s2 trained
     /// with `--mse-weight 1.0 --ranknet-weight 0 --monotonicity-reg 1.0`
@@ -236,6 +261,7 @@ pub enum ZensimProfile {
     /// AND a "not for general ranking" doc note is attached. This is it.
     ///
     /// Methodology: `benchmarks/v_tuner_2026-05-18_methodology.md`.
+    #[doc(hidden)]
     PreviewV0_5Tuner,
     /// Preview v0.5, **cross-codec trail (opt-in)** — V_24-per-sample-α
     /// architecture extended with a cross-codec equivalence-pair loss
@@ -330,6 +356,7 @@ pub enum ZensimProfile {
             PreviewV0_5CompressionV2 or PreviewV0_5BalancedV2 instead. \
             See benchmarks/v_cross_codec_v2_2026-05-20_falsification.md"
     )]
+    #[doc(hidden)]
     PreviewV0_5CrossCodec,
     /// Preview v0.5, **tuner trail v2** — EXP-CROSS-CODEC-V6
     /// (2026-05-19). Same V_24-per-sample-α architecture as
@@ -401,6 +428,7 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v_tuner_v6_methodology_2026-05-19.md`.
     /// Falsification of V5 (predecessor): `benchmarks/v_tuner_v5_falsification_2026-05-19.md`.
+    #[doc(hidden)]
     PreviewV0_5TunerV2,
     /// Preview v0.5, **tuner trail v3** — EXP-CROSS-CODEC-V9
     /// (2026-05-20). Same V_24-per-sample-α architecture as
@@ -491,6 +519,7 @@ pub enum ZensimProfile {
     /// Methodology: `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
     /// Audit: `benchmarks/v_tuner_v9_mono_audit_2026-05-20.md`.
     /// Design: `benchmarks/v_tuner_v9_anchor_design_2026-05-20.md`.
+    #[doc(hidden)]
     PreviewV0_5TunerV3,
     /// Preview v0.5, **balanced trail v2** — V_22-mix-LARGE+iwssim
     /// (same Balanced bake as [`Self::PreviewV0_5Balanced`]) with
@@ -558,6 +587,7 @@ pub enum ZensimProfile {
     /// per score (negligible vs the 300 → 128 → 1 forward pass).
     ///
     /// Methodology: `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
+    #[doc(hidden)]
     PreviewV0_5BalancedV2,
     /// Preview v0.5, **compression trail v2** — V_24-per-sample-α s4
     /// (same Compression bake as [`Self::PreviewV0_5Compression`]) with
@@ -628,6 +658,7 @@ pub enum ZensimProfile {
     /// per score (negligible vs the 300 → 128 forward pass + α mix).
     ///
     /// Methodology: `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
+    #[doc(hidden)]
     PreviewV0_5CompressionV2,
     /// Preview v0.5, **balanced trail v3** — EXP-CROSS-CODEC-V10 score-
     /// space reallocation (2026-05-20). Same Balanced bake bytes as
@@ -645,6 +676,7 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
     /// `benchmarks/v10_splines/balanced_v3_spline_2026-05-20.csv`.
+    #[doc(hidden)]
     PreviewV0_5BalancedV3,
     /// Preview v0.5, **compression trail v3** — EXP-CROSS-CODEC-V10
     /// (2026-05-20). Same Compression bake bytes as
@@ -655,6 +687,7 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
     /// `benchmarks/v10_splines/compression_v3_spline_2026-05-20.csv`.
+    #[doc(hidden)]
     PreviewV0_5CompressionV3,
     /// Preview v0.5, **tuner trail v4** — EXP-CROSS-CODEC-V10
     /// (2026-05-20). Same V_24-per-sample-α + tanh-output-head topology
@@ -665,40 +698,8 @@ pub enum ZensimProfile {
     ///
     /// Methodology: `benchmarks/v10_anchor_design_2026-05-20.md` +
     /// `benchmarks/v10_splines/tuner_v10_spline_2026-05-20.csv`.
+    #[doc(hidden)]
     PreviewV0_5TunerV4,
-    /// Preview v0.5, **tuner trail v5** — recovery phase 4
-    /// (2026-05-24, task #8). Multi-dataset trainer + wider tanh pin
-    /// + light konjnd aggregation. Recipe deltas vs v_tuner_v10:
-    /// - 5 training groups (was 1): safesyn:1.0 + cid22_train:0.5 +
-    ///   kadid:0.5 + tid:0.5 + konjnd_dense:0.3
-    /// - `tanh_output_head_scale = 30.0` (was 20.0) — wider dial
-    /// - konjnd-aggregation head (task #4) at `weight=0.05
-    ///   step_p=0.10` — soft per-source PJND calibration
-    /// - All other hyperparams identical to v_tuner_v10
-    ///
-    /// What this ships (user directive 2026-05-24: "better in
-    /// 0-100 range with cross-codec consistency"):
-    ///
-    /// | | v10 (TunerV4) | v11 (TunerV5) |
-    /// |---|--:|--:|
-    /// | CID22 SROCC | 0.854 | **0.860** |
-    /// | KonJND val SROCC | 0.232 | **0.285** |
-    /// | AIC-4 SROCC | 0.924 | **0.929** |
-    /// | Score p5 | 48 | **28** (full dial) |
-    /// | JND landing (raw) | mean 79 | **mean 60 bit-exact** |
-    /// | Mean score at butter=3.5 | 55 (flat floor) | **37** (works) |
-    /// | Cross-codec p50 \|Δ\| | 1.18 | 1.37 (+0.19) |
-    /// | Cross-codec \|Δ\|/span | 2.63% | **2.36%** (TIGHTER) |
-    ///
-    /// **The score-floor pathology is fixed.** v10 was clamped at
-    /// ~55 below butter=3; v5 produces differentiated scores across
-    /// the full 0-100 range. Per-unit cross-codec consistency is
-    /// proportionally TIGHTER than v10 (2.36% vs 2.63% of dial
-    /// span). Trade: AIC-3 -0.017, Mono -0.016 (still > 92.78% gate).
-    ///
-    /// Methodology: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
-    /// Median seed s2 of a 5-seed CI (range CID22 0.855-0.869).
-    PreviewV0_5TunerV5,
     /// Preview v0.5, **tuner trail v4 + per-codec affine** —
     /// EXP-CROSS-CODEC-V11-E (task #186, 2026-05-20). Same bake
     /// bytes as [`Self::PreviewV0_5TunerV4`] with an additional
@@ -714,6 +715,7 @@ pub enum ZensimProfile {
     /// is retained as an opt-in research artifact for callers that
     /// supply codec hints and prefer per-codec offset over identity.
     /// See `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+    #[doc(hidden)]
     PreviewV0_5TunerV4Calibrated,
     /// Preview v0.5, **balanced trail v3 + per-codec affine** —
     /// EXP-CROSS-CODEC-V11-E (task #186, 2026-05-20). Same bake
@@ -725,6 +727,7 @@ pub enum ZensimProfile {
     /// cross-codec stddev on BalancedV3 (median +0.20). Shipped as
     /// opt-in research artifact. See
     /// `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+    #[doc(hidden)]
     PreviewV0_5BalancedV3Calibrated,
     /// Preview v0.5, **compression trail v3 + per-codec affine** —
     /// EXP-CROSS-CODEC-V11-E (task #186, 2026-05-20). Same bake
@@ -736,148 +739,32 @@ pub enum ZensimProfile {
     /// cross-codec stddev on CompressionV3 (median +0.45). Shipped as
     /// opt-in research artifact. See
     /// `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
+    #[doc(hidden)]
     PreviewV0_5CompressionV3Calibrated,
 }
 
 impl ZensimProfile {
-    /// Latest recommended general-purpose profile.
-    /// Returns [`Self::PreviewV0_3`] in zensim 0.3.x.
-    pub fn latest() -> Self {
+    /// Current preview-stable profile. Returns [`Self::PreviewV0_3`] in
+    /// zensim 0.3.x.
+    ///
+    /// Use this only when you explicitly want "whatever the current
+    /// preview is" — the returned variant will rotate as new previews
+    /// ship. For pinned reproducibility, name the variant directly
+    /// (`ZensimProfile::PreviewV0_3`). For the stable codec-target
+    /// contract that codec crates should target, use [`Self::codec_target`].
+    pub const fn latest_preview() -> Self {
         Self::PreviewV0_3
     }
 
-    /// Balanced-trail ship — alias for [`Self::PreviewV0_5Balanced`].
-    /// Equivalent to [`Self::PreviewV0_5`], the back-compat name.
-    /// See `zensim/SOTA_TRAILS.md` for the two-trail framework.
-    pub const fn balanced() -> Self {
-        Self::PreviewV0_5Balanced
-    }
-
-    /// Compression-trail ship — alias for [`Self::PreviewV0_5Compression`].
-    /// Use for codec-selection / quality-dial workloads where CID22 +
-    /// AIC-3 rank fidelity is the priority over KADID/TID/KonJND.
-    /// See `zensim/SOTA_TRAILS.md` for the two-trail framework.
-    pub const fn compression() -> Self {
-        Self::PreviewV0_5Compression
-    }
-
-    /// Runtime ensemble — alias for [`Self::PreviewV0_5Ensemble`].
-    /// Routes per-pair between the Balanced and Compression ships via
-    /// a small classifier; tracks `max(balanced, compression)` per
-    /// canonical corpus. Use when a single profile must defend BOTH
-    /// compression rank fidelity (CID22, AIC-3) AND synthetic
-    /// distortion rank fidelity (KADID, TID, KonJND) without picking
-    /// a single trail. See `benchmarks/exp_ensemble_v05_eval_2026-05-18.md`.
-    pub const fn ensemble() -> Self {
-        Self::PreviewV0_5Ensemble
-    }
-
-    /// Tuner trail — alias for [`Self::PreviewV0_5Tuner`]. Designed
-    /// for codec auto-targeting: a monotonic, well-calibrated dial
-    /// across the JPEG q range. **NOT a general-purpose ranking
-    /// metric** — see the variant doc for the cross-corpus SROCC
-    /// caveat. Use only when the workload is "type a target score,
-    /// have a codec hit it." See `benchmarks/v_tuner_2026-05-18_methodology.md`.
-    pub const fn tuner() -> Self {
-        Self::PreviewV0_5Tuner
-    }
-
-    /// Cross-codec trail (opt-in) — alias for
-    /// [`Self::PreviewV0_5CrossCodec`]. The V_24 per-sample-α
-    /// architecture trained with an additional cross-codec
-    /// equivalence-pair loss (EXP-CROSS-CODEC-METRIC, 2026-05-19).
-    /// Use when the workload requires consistent zensim scores
-    /// across multiple codecs at the same perceptual quality target.
-    /// **Opt-in only** — the strict `T=63 butter < 2.5`
-    /// cross-codec gate was not achieved; this profile ships
-    /// because the mechanism reduces cross-codec mean pairwise
-    /// butter by 25–46 % vs Tuner WITHOUT collapsing rank quality.
-    /// See `benchmarks/v_cross_codec_methodology_2026-05-19.md`.
-    ///
-    /// **Deprecated 2026-05-20 (task #179).** The cross-codec variant
-    /// is dial-broken; PCHIP spline calibration was falsified. Use
-    /// [`Self::compression_v2`] or [`Self::balanced_v2`] for new code.
-    /// See
-    /// `benchmarks/v_cross_codec_v2_2026-05-20_falsification.md`.
+    /// Deprecated. Use [`Self::latest_preview`] for the rotating-preview
+    /// alias, [`Self::codec_target`] for the stable codec contract, or
+    /// name a `PreviewV0_X` variant directly for pinned reproducibility.
     #[deprecated(
-        since = "0.5.0",
-        note = "dial-broken — use compression_v2() or balanced_v2()"
+        since = "0.3.0",
+        note = "use latest_preview() or codec_target() or name a Preview variant directly"
     )]
-    pub const fn cross_codec() -> Self {
-        #[allow(deprecated)]
-        {
-            Self::PreviewV0_5CrossCodec
-        }
-    }
-
-    /// Tuner trail v3 — alias for [`Self::PreviewV0_5TunerV3`]
-    /// (EXP-CROSS-CODEC-V9, 2026-05-20). The codec auto-targeting
-    /// workhorse with **full [0, 100] dial range**, **JND lands at
-    /// integer 60**, and **JOD lands at integer 30** — achieved via
-    /// a post-network monotone PCHIP spline calibration over an
-    /// 8-band extended-range anchor parquet. Supersedes
-    /// [`Self::PreviewV0_5TunerV2`] for new orchestrator workloads
-    /// that want clean user-facing semantic anchors. See
-    /// `benchmarks/v_tuner_v3_ship_2026-05-20.md`.
-    pub const fn tuner_v3() -> Self {
-        Self::PreviewV0_5TunerV3
-    }
-
-    /// Balanced trail v2 — alias for [`Self::PreviewV0_5BalancedV2`]
-    /// (task #176, 2026-05-20). Same Balanced bake bytes as
-    /// [`Self::PreviewV0_5Balanced`] with a post-network PCHIP spline
-    /// calibration that lands JND at integer 60, JOD at integer 30, and
-    /// extends the dial range to the full [0, 100] without sacrificing
-    /// rank quality (cross-corpus SROCC bit-exact preserved on all 5
-    /// eval corpora). See
-    /// `benchmarks/v_balanced_v2_2026-05-20_methodology.md`.
-    pub const fn balanced_v2() -> Self {
-        Self::PreviewV0_5BalancedV2
-    }
-
-    /// Compression trail v2 — alias for [`Self::PreviewV0_5CompressionV2`]
-    /// (task #177, 2026-05-20). Same Compression bake bytes (V_24-
-    /// per-sample-α s4) as [`Self::PreviewV0_5Compression`] with a
-    /// post-network PCHIP spline calibration that lands JND at
-    /// integer 60, JOD at integer 30, and extends the dial range to
-    /// the full [0, 100] without sacrificing rank quality (cross-
-    /// corpus SROCC bit-exact preserved on all 5 eval corpora). See
-    /// `benchmarks/v_compression_v2_2026-05-20_methodology.md`.
-    pub const fn compression_v2() -> Self {
-        Self::PreviewV0_5CompressionV2
-    }
-
-    /// Balanced trail v3 — alias for [`Self::PreviewV0_5BalancedV3`]
-    /// (EXP-CROSS-CODEC-V10, 2026-05-20). Same balanced bake bytes as
-    /// [`Self::PreviewV0_5BalancedV2`] with the V10 reallocated score-
-    /// space spline (JND=80 / JOD=50 / lossless=100 / pathological<0).
-    /// See `benchmarks/v10_anchor_design_2026-05-20.md`.
-    pub const fn balanced_v3() -> Self {
-        Self::PreviewV0_5BalancedV3
-    }
-
-    /// Compression trail v3 — alias for
-    /// [`Self::PreviewV0_5CompressionV3`] (EXP-CROSS-CODEC-V10,
-    /// 2026-05-20). V10 reallocated score-space.
-    pub const fn compression_v3() -> Self {
-        Self::PreviewV0_5CompressionV3
-    }
-
-    /// Tuner trail v4 — alias for [`Self::PreviewV0_5TunerV4`]
-    /// (EXP-CROSS-CODEC-V10, 2026-05-20). V10 reallocated score-space.
-    pub const fn tuner_v4() -> Self {
-        Self::PreviewV0_5TunerV4
-    }
-
-    /// Tuner trail v5 — alias for [`Self::PreviewV0_5TunerV5`]
-    /// (recovery phase 4, 2026-05-24). Multi-dataset + wider tanh
-    /// pin. Fixes v10's score-floor pathology — dial covers the
-    /// full 0-100 range with JND landing at score 60 bit-exact.
-    /// Per-unit cross-codec consistency is proportionally TIGHTER
-    /// than v10 (2.36 % vs 2.63 % of dial span). This is the
-    /// current ship target of [`Self::codec_target`].
-    pub const fn tuner_v5() -> Self {
-        Self::PreviewV0_5TunerV5
+    pub fn latest() -> Self {
+        Self::PreviewV0_3
     }
 
     /// **Canonical codec-target metric.** The stable, version-independent
@@ -932,14 +819,14 @@ impl ZensimProfile {
     /// See [`docs/CODEC_TARGET_METRIC.md`] in the zensim repo for the
     /// integration guide.
     ///
-    /// **2026-05-24 ship:** rotated from `PreviewV0_5TunerV4`
-    /// (`v_tuner_v10`) to `PreviewV0_5TunerV5` (`v_tuner_v11`).
-    /// Recovery phase 4 retrain fixes v10's 0-55 score-floor
-    /// pathology while keeping CID22 + AIC-4 SROCC and per-unit
-    /// cross-codec consistency. See
+    /// **2026-05-24 ship:** the canonical codec-target bake is now
+    /// the public [`Self::PreviewV0_3`] (file `v_tuner_v11_2026-05-24.bin`),
+    /// rotated from the prior PreviewV0_3 (V_18 lineage) which is
+    /// preserved on disk for reproducibility but no longer the
+    /// shipping bake. See
     /// `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
     pub const fn codec_target() -> Self {
-        Self::PreviewV0_5TunerV5
+        Self::PreviewV0_3
     }
 
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
@@ -963,7 +850,6 @@ impl ZensimProfile {
             Self::PreviewV0_5BalancedV3 => "zensim-preview-v0.5-balanced-v3",
             Self::PreviewV0_5CompressionV3 => "zensim-preview-v0.5-compression-v3",
             Self::PreviewV0_5TunerV4 => "zensim-preview-v0.5-tuner-v4",
-            Self::PreviewV0_5TunerV5 => "zensim-preview-v0.5-tuner-v5",
             Self::PreviewV0_5TunerV4Calibrated => {
                 "zensim-preview-v0.5-tuner-v4-calibrated"
             }
@@ -1000,7 +886,6 @@ impl ZensimProfile {
             Self::PreviewV0_5BalancedV3 => &PROFILE_PREVIEW_V0_5_BALANCED_V3,
             Self::PreviewV0_5CompressionV3 => &PROFILE_PREVIEW_V0_5_COMPRESSION_V3,
             Self::PreviewV0_5TunerV4 => &PROFILE_PREVIEW_V0_5_TUNER_V4,
-            Self::PreviewV0_5TunerV5 => &PROFILE_PREVIEW_V0_5_TUNER_V5,
             // V11-E per-codec-affine variants (task #186, 2026-05-20).
             // Same `ProfileParams` shape as the un-calibrated parent
             // (they share `extrapolate_score`, `skip_score_mapping`, etc.);
@@ -1356,8 +1241,31 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// LZ4 decompression unconditionally so no consumer-facing feature
 /// flag is needed. The raw 93 KB variant lives at
 /// `zensim/weights/v0_18_2026-05-13.bin` for reproduction reference.
+/// PreviewV0_3 bake bytes (2026-05-24 PM: rotated to recovery phase 4
+/// Tuner v5, file `v_tuner_v11_2026-05-24.bin`, 54 KB packed i8 +
+/// zerobias + lz4, md5 `cac9416124a5e5f8ff577bc78e15ea1f`).
+///
+/// 372-input MLP (372 → 128 → 128 identity passthrough) with
+/// per_sample_alpha_head + tanh_output_head + 7-knot PCHIP spline.
+/// Trained on 5 groups (safesyn + cid22_train + kadid + tid +
+/// konjnd_dense) with konjnd-aggregation aux loss.
+///
+/// **Why V0_3 was rotated** (was: V_18 3-way concat, 228-input):
+/// the new bake achieves the full 0-100 dial range — p5 = 28
+/// (was 48), JND lands at score 60 bit-exact (was 79), score
+/// floor pathology below 55 is fixed. Per-unit cross-codec
+/// consistency is proportionally TIGHTER (2.36 % of dial span
+/// vs the old bake's 2.63 %). CID22 SROCC = 0.860 (was 0.854),
+/// AIC-4 = 0.929 (was 0.924).
+///
+/// The pre-rotation V_18 bake bytes live on disk at
+/// `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin` for
+/// reproducibility.
+///
+/// Methodology: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
+/// Per-codec q-range: `benchmarks/v_tuner_v5_per_codec_q_range_2026-05-24.md`.
 pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
-    include_bytes!("../weights/v0_18_zerobiased_lz4_2026-05-13.bin")
+    include_bytes!("../weights/v_tuner_v11_2026-05-24.bin")
 }
 
 static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
@@ -1369,24 +1277,23 @@ static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
-    // V0_18 bake is already MCOS-calibrated (affine α=28.04 β=-5.07
-    // inherited from V0_16). The runtime returns the bake's raw output
-    // directly as the score — applying the V0_2 `100 - 18·d^0.7` on
-    // top of an MCOS-aligned value would produce garbage. Set
-    // `skip_score_mapping = true` to bypass the transform.
+    // Tuner v5 bake carries its own PCHIP spline calibration via the
+    // `zentrain.output_calibration_spline` metadata — the raw MLP
+    // output is dial-honest after the spline applies. No legacy
+    // `100 - 18·d^0.7` transform needed.
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
     mlp_bytes: Some(mlp_bake_preview_v0_3),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
-    extended_features: false,
-    compute_iw_features: false,
-    // V0_18 ship: hard clamp preserves legacy semantics. The single-bake
-    // output rarely strays beyond [0, 100]; tail behavior matches the
-    // V_18 ship in flight as of 2026-05-13.
+    // Tuner v5 is a 372-feature bake (extended + IW-pool features).
+    extended_features: true,
+    compute_iw_features: true,
+    // Hard clamp at [0, 100] post-spline (spline output is already
+    // calibrated into the dial range; clamp catches numerical drift).
     soft_clamp_score: false,
-    extrapolate_score: false,
+    extrapolate_score: true,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
@@ -2135,40 +2042,10 @@ static PROFILE_PREVIEW_V0_5_TUNER_V4: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// PreviewV0_5TunerV5 bake bytes (2026-05-24, recovery phase 4).
-///
-/// Median seed s2 of the a8 5-seed CI: multi-dataset trainer
-/// (safesyn + cid22_train + kadid + tid + konjnd_dense) with
-/// `tanh_output_head_scale = 30.0`, `konjnd_aggregation_weight =
-/// 0.05`, V9 PCHIP spline calibration.
-///
-/// Bake structure: 372 → 128 → 128 (identity passthrough) MLP,
-/// per_sample_alpha_head + tanh_output_head + output_calibration_spline
-/// metadata. 197,163 bytes uncompressed F32.
-///
-/// Methodology: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
-pub(crate) fn mlp_bake_preview_v0_5_tuner_v5() -> &'static [u8] {
-    include_bytes!("../weights/v_tuner_v11_2026-05-24.bin")
-}
-
-static PROFILE_PREVIEW_V0_5_TUNER_V5: ProfileParams = ProfileParams {
-    weights: &WEIGHTS_PREVIEW_V0_2,
-    blur_radius: 5,
-    blur_passes: 1,
-    num_scales: 4,
-    score_mapping_a: 18.0,
-    score_mapping_b: 0.7,
-    skip_score_mapping: true,
-    mlp_bytes: Some(mlp_bake_preview_v0_5_tuner_v5),
-    mlp_bytes_b3: None,
-    mlp_primary_mix: 1.0,
-    extended_features: true,
-    compute_iw_features: true,
-    soft_clamp_score: false,
-    extrapolate_score: true,
-    ensemble_classifier_bytes: None,
-    mlp_bytes_compression: None,
-};
+// PreviewV0_5TunerV5 was absorbed into PreviewV0_3 on 2026-05-24 PM
+// (the new public canonical bake). The bake bytes live at
+// `mlp_bake_preview_v0_3` above; the V_18 lineage bake bytes are
+// preserved at `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin`.
 
 // --- EXP-CROSS-CODEC-V11-E per-codec-affine variants (task #186, 2026-05-20) ---
 //

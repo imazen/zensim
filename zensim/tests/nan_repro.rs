@@ -27,7 +27,7 @@ fn diffmap_nan_from_negative_linear_rgb() {
         dst_b[i] = -0.1;
     }
 
-    let z = zensim::Zensim::new(zensim::ZensimProfile::latest()).with_parallel(false);
+    let z = zensim::Zensim::new(zensim::ZensimProfile::PreviewV0_3).with_parallel(false);
     let precomputed = z
         .precompute_reference_linear_planar([&src_r, &src_g, &src_b], width, height, width)
         .unwrap();
@@ -125,7 +125,7 @@ fn diffmap_nan_from_realistic_encoder_output() {
         dst_g[i] = 1.3;
     }
 
-    let z = zensim::Zensim::new(zensim::ZensimProfile::latest()).with_parallel(false);
+    let z = zensim::Zensim::new(zensim::ZensimProfile::PreviewV0_3).with_parallel(false);
     let precomputed = z
         .precompute_reference_linear_planar([&src_r, &src_g, &src_b], width, height, width)
         .unwrap();

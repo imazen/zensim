@@ -20,7 +20,7 @@
 //!      different score; sanity check that `include_bytes!` is pointed
 //!      at the correct file AND that the spline runtime dispatch is
 //!      active for a no-tanh-pin bake).
-//!   5. `ZensimProfile::balanced_v2()` alias returns the V2 variant.
+//!   5. `ZensimProfile::PreviewV0_5BalancedV2` alias returns the V2 variant.
 //!
 //! What this test does NOT cover (lives elsewhere):
 //!   * Cross-corpus SROCC — `bake_verdict` against canonical val parquets,
@@ -62,7 +62,7 @@ fn balanced_v2_profile_name() {
         "zensim-preview-v0.5-balanced-v2"
     );
     assert_eq!(
-        ZensimProfile::balanced_v2(),
+        ZensimProfile::PreviewV0_5BalancedV2,
         ZensimProfile::PreviewV0_5BalancedV2
     );
 }

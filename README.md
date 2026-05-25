@@ -32,19 +32,102 @@ Reproduce: `cargo bench -p zensim-bench --bench bench_compare` (C++ libjxl FFI r
 
 ## Correlation with human perception
 
-Spearman rank-order correlation (SROCC) against three independent human-rated image quality databases. Higher is better; 1.0 = perfect agreement with human rankings. None of these datasets were used for training of either profile.
+Full Mohammadi 2025 stat panel against three independent human-rated image quality databases that v0.3 did NOT train on. KADID-10k and TID2013 are excluded because v0.3's recovery-phase-4 retrain included them as training groups — they're no longer fair holdouts. Higher SROCC + PLCC + KROCC + PWRC is better; lower OR + Z-RMSE is better.
 
-| Dataset | Pairs | V0_2 (linear) | V0_3 (MLP, default) | fast-ssim2 |
-|---------|------:|----------------------:|--------------------------------------:|-----------:|
-| [CID22](https://cloudinary.com/labs/cid22) — compression artifacts | 4,292 | 0.8676 | **0.8934** | 0.8895 |
-| [TID2013](https://www.ponomarenko.info/tid2013.htm) — 24 distortion types | 3,000 | 0.8427 | **0.9525** | 0.8460 |
-| [KADID-10k](https://database.mmsp-kn.de/kadid-10k-database.html) — 25 distortion types | 10,125 | 0.8192 | **0.9427** | 0.8133 |
-| AIC-3 CTC (codec compression, EPFL) | 600 | 0.7962 | **0.8006** | 0.7965 |
-| AIC-4 sample (reconstructed JND, EPFL) | 300 | 0.9107 | **0.9163** | 0.9127 |
+### CID22 — codec compression artifacts (n=4,292, sacred holdout)
 
-V0_2 (default-on linear profile): 218k concordance-filtered synthetic pairs, Nelder-Mead.
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| **zensim v0.3** | 0.860 | 0.853 | 0.673 | 0.045 | 0.909 | 0.523 |
+| fast-ssim2 (SSIMULACRA2) | **0.890** | **0.888** | **0.706** | 0.042 | **0.935** | **0.460** |
+| cvvdp (ColorVideoVDP) | 0.821 | 0.825 | 0.624 | 0.042 | 0.884 | 0.565 |
+| iwssim (Wang & Li 2011) | 0.784 | 0.793 | 0.594 | 0.052 | 0.853 | 0.610 |
 
-`PreviewV0_3` (the MLP profile, default-on in zensim 0.3.0+): 228→384→1 LeakyReLU with I8 quantization, 93 KB bake (md5 `2cc537470e68f7379e759811ddd22900`). Built by 3-way concat construction over V0_16 + cycle-14 variants, mathematically equivalent to a 3-bake output ensemble (internal weights commonly called "V0_18"). Trained on 144k clean safe-synthetic + KADID + TID + KonJND-aligned pairs (CID22 / AIC corpora held out across both training and validation). Methodology: [`benchmarks/v0_18_methodology_2026-05-13.md`](benchmarks/v0_18_methodology_2026-05-13.md).
+### AIC-3 CTC — JPEG-AIC compression at JND levels (n=600)
+
+| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
+|---|---:|---:|---:|---:|---:|---:|
+| zensim v0.3 | 0.776 | 0.788 | 0.607 | 0.042 | 0.854 | 0.616 |
+| fast-ssim2 | **0.797** | **0.809** | **0.629** | 0.057 | **0.872** | 0.588 |
+| cvvdp | 0.792 | 0.803 | 0.626 | 0.042 | 0.866 | **0.595** |
+| iwssim | 0.774 | 0.791 | 0.606 | 0.045 | 0.854 | 0.612 |
+
+### AIC-4 sample — JPEG-AIC reconstructed JND, 6 codecs (n=300)
+
+| Metric | SROCC |
+|---|---:|
+| zensim v0.3 | 0.928 |
+| fast-ssim2 | baselines pending |
+| cvvdp | baselines pending |
+| iwssim | baselines pending |
+
+The AIC-4 baseline scores for ssim2/cvvdp/iwssim haven't been folded
+into our standard panel yet — the raw per-pair metric scores live at
+`/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG-AIC_metric_scores.csv`
+but the SROCC computation against the reconstructed-JND target isn't
+in the panel doc. v0.3's AIC-4 SROCC of **0.928** is from
+`bake_verdict` on the 300-pair val parquet at
+`canonical-2026-05-18/val/aic4.parquet`.
+
+### CID22 per-band SROCC (10 width-10 bins on the human-MOS scale)
+
+Per `CLAUDE.md` "10-band reporting rule": the primary release gate is the per-band picture, not the aggregate. Below-PJND bands (B3–B5) are the hard ones because the human-MOS scores in those bands are noisy and bunched. Bands B0–B2 have ≤ 1 sample on CID22 and are omitted.
+
+| Band | range | n | **v0.3** | ssim2 | cvvdp | iwssim |
+|---|---|--:|---:|---:|---:|---:|
+| B3 | [0.30, 0.40) | 57 | 0.051 | **0.134** | 0.148 | 0.096 |
+| B4 | [0.40, 0.50) | 266 | 0.230 | 0.289 | 0.260 | 0.210 |
+| B5 | [0.50, 0.60) | 615 | 0.273 | **0.389** | 0.290 | 0.193 |
+| B6 | [0.60, 0.70) | 836 | 0.287 | **0.417** | 0.336 | 0.210 |
+| B7 | [0.70, 0.80) | 1092 | **0.408** | 0.397 | 0.310 | 0.283 |
+| B8 | [0.80, 0.90) | 1382 | 0.500 | **0.501** | 0.319 | 0.413 |
+| B9 | [0.90, 1.00] | 43 | **0.220** | 0.112 | 0.081 | 0.134 |
+
+Per-band read: ssim2 wins B5–B6 (where most CID22 mass sits); v0.3 wins B7 (good-quality region) and B9 (near-lossless tail). v0.3 essentially matches ssim2 on B8 (the dominant band). cvvdp + iwssim are weakest across every band — they're stronger as aggregate metrics than per-band rank predictors here.
+
+CID22 per-band Z-RMSE (lower better):
+
+| Band | n | **v0.3** | ssim2 | cvvdp | iwssim |
+|---|--:|--:|--:|--:|--:|
+| B3 | 57 | 0.950 | **0.947** | 0.990 | 0.989 |
+| B4 | 266 | 0.959 | **0.947** | 0.962 | 0.965 |
+| B5 | 615 | 0.959 | **0.921** | 0.954 | 0.971 |
+| B6 | 836 | 0.957 | **0.908** | 0.941 | 0.972 |
+| B7 | 1092 | **0.912** | 0.907 | 0.947 | 0.954 |
+| B8 | 1382 | 0.866 | 0.866 | 0.947 | 0.909 |
+| B9 | 43 | **0.937** | 0.940 | 0.952 | 0.854 |
+
+ssim2 has the tightest Z-RMSE in the mid bands (B4–B6) — this is the ssim2-target training-bias caveat from CLAUDE.md materializing. v0.3 and ssim2 are tied on B7–B8. v0.3 wins the noisy tails (B9 near-lossless).
+
+### Per-corpus headline
+
+- **CID22**: ssim2 wins SROCC by 0.03; v0.3 is second. Note that CLAUDE.md's "SROCC-only verdicts BANNED" caveat applies — older trainers used ssim2-derived targets, which biases SROCC measurements toward ssim2-shaped surfaces. v0.3's Z-RMSE (0.523) trails ssim2's 0.460.
+- **AIC-3**: 4-way tie within 0.02 SROCC; ssim2 nominally best.
+- **AIC-4**: v0.3 SROCC = 0.928. cvvdp / ssim2 / iwssim baselines on AIC-4 haven't been computed into our panel doc yet (raw scores at `JPEG-AIC_metric_scores.csv`; SROCC against reconstructed-JND target is a TODO).
+- **None of the four hits all three holdouts** — v0.3 trades 0.03 CID22 SROCC for full 0-100 dial coverage + JND@60-bit-exact + per-source PJND tracking (the dial properties that matter for codec targeting). See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md).
+
+v0.2 (default-on linear profile through zensim 0.2.x): 228 linear weights × basic+peak features, trained on 218k concordance-filtered synthetic pairs via Nelder-Mead.
+
+`PreviewV0_3` (the MLP profile shipping in zensim 0.3.x and now the canonical [`codec_target()`](docs/CODEC_TARGET_METRIC.md)): 372-input MLP (372 → 128 → 128 identity passthrough) with per-sample-α head + tanh-output pin + 7-knot PCHIP spline. 54 KB packed bake (i8 + zerobias + lz4, md5 `cac9416124a5e5f8ff577bc78e15ea1f`, file `zensim/weights/v_tuner_v11_2026-05-24.bin`). Trained on 5 groups (safesyn 196k + cid22_train 17.6k + kadid 10.1k + tid 3k + konjnd_dense 20.2k) with a konjnd-aggregation aux loss for per-source PJND calibration. Methodology: [`benchmarks/v_tuner_v11_methodology_2026-05-24.md`](benchmarks/v_tuner_v11_methodology_2026-05-24.md).
+
+### v0.2 → v0.3 rough score equivalence
+
+Both profiles span 0..100 but use the dial differently. v0.2's linear formula `100 − 18·|d|^0.7` floor-clamps below moderate distortion (38k of 68k cross-codec pairs land at v0.2 ≤ 5, while v0.3 spreads them across 28..50). v0.3 uses the full 0-100 dial with JND landing at exactly score 60. Rough lookup on 68,788 matched cross-codec pairs (Spearman v0.2 ↔ v0.3 = 0.88):
+
+| v0.2 target | v0.3 median (p25 → p75) | rough quality region |
+|--:|--:|---|
+| 10 | 52.6 (47.8 → 55.6) | low-q, dial floor |
+| 20 | 55.2 (52.4 → 58.2) | sub-PJND |
+| 30 | 58.9 (55.0 → 60.5) | approaching JND |
+| 40 | 61.0 (58.9 → 63.6) | just past JND |
+| 50 | 65.8 (64.3 → 66.9) | mid-PJND |
+| 60 | 68.8 (66.4 → 72.5) | comfortable quality |
+| 70 | 78.4 (76.5 → 80.3) | good compression |
+| 80 | 90.0 (87.6 → 91.1) | near-lossless |
+| 90 | 96.6 (95.1 → 97.3) | visually lossless |
+| 100 | 100 (exact, byte-identical short-circuit) | lossless |
+
+The mapping is non-linear because v0.2's clamp at low quality compresses the 0-30 range into a single floor; v0.3 differentiates that region. For users targeting "score 70" in v0.2 code, the v0.3 equivalent is roughly **score 78**.
 
 <details>
 <summary>Reproduce these numbers</summary>
@@ -71,7 +154,11 @@ Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SR
 ```rust
 use zensim::{Zensim, ZensimProfile, RgbSlice};
 
-let z = Zensim::new(ZensimProfile::latest());
+// Pick a version explicitly for pinned reproducibility:
+let z = Zensim::new(ZensimProfile::PreviewV0_3);
+// Or use `ZensimProfile::latest_preview()` for whatever current preview
+// ships (rotates as new previews land), or `ZensimProfile::codec_target()`
+// for the stable codec-target contract.
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
 let result = z.compute(&source, &distorted)?;
@@ -94,7 +181,7 @@ use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
 
 let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-let result = Zensim::new(ZensimProfile::latest()).compute(&source, &distorted)?;
+let result = Zensim::new(ZensimProfile::PreviewV0_3).compute(&source, &distorted)?;
 ```
 
 Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un-premultiplied, color primaries are forwarded. HDR (PQ, HLG) and grayscale are rejected with `UnsupportedFormat`.
@@ -196,7 +283,7 @@ Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a
 | `PreviewV0_2` | ✓ | 218k concordance-filtered, Nelder-Mead | 0.87 | linear weights |
 | `PreviewV0_3` | ✓ | 144k clean safe-synth + KADID + TID + KonJND | **0.89** | 93 KB I8 MLP |
 
-`ZensimProfile::latest()` returns `PreviewV0_3` in zensim 0.3.x. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+`ZensimProfile::latest_preview()` returns `PreviewV0_3` in zensim 0.3.x — use it when you want "whatever the current preview is" (the returned variant rotates as new previews ship). For pinned reproducibility, name a variant directly (`PreviewV0_3`). For the stable codec-target contract, use `ZensimProfile::codec_target()`. The deprecated `latest()` still exists for back-compat. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
 **`PreviewV0_3`** is the MLP profile, shipped 2026-05-13 with zensim 0.3.0. Variant name tracks the crate's minor version that introduced it; the underlying bake bytes inside the variant are V0_18 today (228→384→1 LeakyReLU MLP, I8 quantized, MCOS-aligned 0–100 output) and may rotate to score-stable variants during 0.3.x patches. zenpredict is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 

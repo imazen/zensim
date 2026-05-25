@@ -9,7 +9,7 @@
 //! ```
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (src_pixels, dst_pixels) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-//! let z = Zensim::new(ZensimProfile::latest());
+//! let z = Zensim::new(ZensimProfile::PreviewV0_3);
 //! let source = RgbSlice::new(&src_pixels, 8, 8);
 //! let distorted = RgbSlice::new(&dst_pixels, 8, 8);
 //! let result = z.compute(&source, &distorted)?;
@@ -23,7 +23,7 @@
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (ref_pixels, width, height) = (vec![[0u8; 3]; 64], 8usize, 8usize);
 //! # let distorted_images: Vec<Vec<[u8; 3]>> = vec![];
-//! let z = Zensim::new(ZensimProfile::latest());
+//! let z = Zensim::new(ZensimProfile::PreviewV0_3);
 //! let source = RgbSlice::new(&ref_pixels, width, height);
 //! let precomputed = z.precompute_reference(&source)?;
 //! for dst_pixels in &distorted_images {
@@ -47,7 +47,7 @@
 //! use zensim::{Zensim, ZensimProfile, RgbSlice, ZensimScratch};
 //! # let (source_pixels, width, height) = (vec![[0u8; 3]; 16 * 8], 16usize, 8usize);
 //! # const WINDOW_ROWS: usize = 4;
-//! let z = Zensim::new(ZensimProfile::latest());
+//! let z = Zensim::new(ZensimProfile::PreviewV0_3);
 //!
 //! // Up front: pre-slice the source into row-windows. Build one
 //! // PrecomputedReference per window (each is small — only that
@@ -117,7 +117,7 @@
 //! ```
 //! use zensim::{Zensim, ZensimProfile, RgbaSlice};
 //! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
-//! let z = Zensim::new(ZensimProfile::latest());
+//! let z = Zensim::new(ZensimProfile::PreviewV0_3);
 //! let source = RgbaSlice::new(&src_rgba, 8, 8);
 //! let distorted = RgbaSlice::new(&dst_rgba, 8, 8);
 //! let result = z.compute(&source, &distorted)?;
@@ -134,7 +134,7 @@
 //!
 //! let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 //! let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-//! let result = Zensim::new(ZensimProfile::latest()).compute(&source, &distorted)?;
+//! let result = Zensim::new(ZensimProfile::PreviewV0_3).compute(&source, &distorted)?;
 //! ```
 //!
 //! Supported: Rgb8, Rgba8, Bgra8, Rgbx8, Bgrx8, Rgba16, RgbaF32 (sRGB/BT.709/linear).
@@ -249,6 +249,16 @@ pub use source::{
 
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
+
+/// Score a precomputed feature vector under a [`ZensimProfile`] —
+/// the entry point alternative feature backends (e.g. `zensim-gpu`)
+/// use to produce a bit-exact CPU-equivalent `0..100` score.
+///
+/// Runs the full bake forward pass (per-sample-α / hybrid head,
+/// tanh-pin, PCHIP spline, per-codec affine, clamp / soft-clamp /
+/// extrapolate disposition) — same dispatch the canonical
+/// `Zensim::compute(...)` flow applies after feature extraction.
+pub use metric::{score_features_with_profile, score_features_with_profile_and_codec};
 
 /// Training/research API — requires `features = ["training"]`.
 ///

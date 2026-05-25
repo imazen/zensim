@@ -55,7 +55,7 @@ fn main() -> ExitCode {
         "v0_5_compression" => ZensimProfile::PreviewV0_5Compression,
         "v0_5_ensemble" => ZensimProfile::PreviewV0_5Ensemble,
         "v0_5_tuner" => ZensimProfile::PreviewV0_5Tuner,
-        "latest" => ZensimProfile::latest(),
+        "latest" => ZensimProfile::PreviewV0_3,
         other => {
             eprintln!("unknown profile: {other}");
             print_usage(&args[0]);
