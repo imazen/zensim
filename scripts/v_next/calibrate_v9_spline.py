@@ -39,9 +39,12 @@ import pyarrow.parquet as pq
 V9_ANCHOR_PARQUET = Path(
     "/mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet"
 )
+import os as _os
 PREDICT_BIN = Path(
-    "/home/lilith/work/zen/zensim--v10/target/release/"
-    "predict_features_with_bake"
+    _os.environ.get(
+        "PREDICT_BIN",
+        "/home/lilith/work/zen/zensim/target/release/predict_features_with_bake",
+    )
 )
 ZENPREDICT_BIN = Path("/home/lilith/work/zen/zenanalyze/target/release/zenpredict")
 
