@@ -5536,14 +5536,7 @@ fn train_mlp_per_sample_alpha_head(
                  Set --cross-codec-eq-weight 0."
             );
         }
-        if hyperparams.anchor_loss_weight > 0.0 {
-            panic!(
-                "multi-layer / skip + anchor_loss: anchor backward not yet wired \
-                 through arch_backward. Set --anchor-loss-weight 0 for arch eval. \
-                 The anchor forward works (predictions are correct); only the \
-                 anchor's gradient contribution to encoder weights is missing."
-            );
-        }
+        // Anchor loss is now wired through arch_backward for 2-layer.
         if hyperparams.pjnd_passthrough_weight > 0.0 {
             panic!(
                 "multi-layer / skip + pjnd_passthrough: not yet wired. \
@@ -6532,11 +6525,11 @@ fn train_mlp_per_sample_alpha_head(
                     if let Some(a) = anchor {
                         if !std_anchor_features.is_empty() && anchor_total_weight > 0.0 {
                             let n_anchor = std_anchor_features.len();
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
                             let mut g_rank_b_buf = 0.0f64;
                             let mut g_red_w: [f64; 4] = [0.0; 4];
                             let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
                             let mut g_b_alpha: f64 = 0.0;
                             let mut any_step = false;
 
@@ -6546,63 +6539,34 @@ fn train_mlp_per_sample_alpha_head(
                                     .partition_point(|&c| c < u_row)
                                     .min(n_anchor - 1);
                                 let xa = std_anchor_features[ai].as_slice();
-                                let (
-                                    ya_pre,
-                                    ya_rank_a,
-                                    ya_pool_a,
-                                    alpha_a_a,
-                                    _,
-                                    ha_pre_a,
-                                    ha_a,
-                                    sa_a,
-                                    max_a_a,
-                                ) = psah::forward_per_sample_alpha_head(
-                                    xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
-                                    b_alpha, n_features, n_hidden, leaky,
+                                let fwd_anc = arch_forward(
+                                    xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
+                                    b_alpha, n_features, n_hidden, n_hidden_final, leaky,
+                                    use_2layer, use_skip,
                                 );
-                                let (ya, dya_dpre) = pin_forward(ya_pre);
-                                // V5: per-row target_score overrides the global
-                                // hyperparams.anchor_target_score when the
-                                // AnchorRows pool ships a per-row target column.
+                                let (ya, dya_dpre) = pin_forward(fwd_anc.y);
                                 let target = a
                                     .target_scores
                                     .and_then(|ts| ts.get(ai).copied())
                                     .unwrap_or(hyperparams.anchor_target_score);
                                 let row_w = a.row_weights[ai];
                                 let err = ya - target;
-                                // L = anchor_loss_weight · row_w · err²
-                                // dL/dy_score = 2 · anchor_loss_weight · row_w · err
-                                // dL/dy_pre = dL/dy_score · dy_score/dy_pre
                                 let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
                                 let dl_dy = scale * err * dya_dpre;
                                 let loss = hyperparams.anchor_loss_weight * row_w * err * err;
                                 total_loss += loss;
                                 n_steps += 1;
 
-                                psah::backprop_step_per_sample_alpha_head(
-                                    xa,
-                                    &ha_pre_a,
-                                    &ha_a,
-                                    &sa_a,
-                                    max_a_a,
-                                    ya_rank_a,
-                                    ya_pool_a,
-                                    alpha_a_a,
-                                    dl_dy,
-                                    &rank_w,
-                                    &reducer_w,
-                                    &w_alpha,
-                                    &mut adam.gw1,
-                                    &mut adam.gb1,
-                                    &mut g_rank_w_buf,
-                                    &mut g_rank_b_buf,
-                                    &mut g_red_w,
-                                    &mut g_red_b,
-                                    &mut g_w_alpha_buf,
-                                    &mut g_b_alpha,
-                                    n_features,
-                                    n_hidden,
-                                    leaky,
+                                arch_backward(
+                                    xa, &fwd_anc, dl_dy,
+                                    &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
+                                    &mut adam.gw1, &mut adam.gb1,
+                                    &mut g_rank_w_buf, &mut g_rank_b_buf,
+                                    &mut g_red_w, &mut g_red_b,
+                                    &mut g_w_alpha_buf, &mut g_b_alpha,
+                                    n_features, n_hidden, n_hidden_final, leaky,
+                                    use_2layer, use_skip,
                                 );
                                 any_step = true;
                             }
@@ -6650,7 +6614,7 @@ fn train_mlp_per_sample_alpha_head(
                                     &mut w_alpha,
                                     &mut b_alpha,
                                     lr,
-                                    n_hidden,
+                                    n_hidden_final,
                                 );
                             }
                         }
