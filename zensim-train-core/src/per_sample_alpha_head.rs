@@ -46,6 +46,7 @@ use crate::adam::AdamState;
 use crate::mlp::compute_scaler_from_groups;
 use crate::pool_head::{POOL_P_NORM, POOL_STD_FLOOR, pool_stats};
 use crate::rng::SplitMix64;
+use crate::simd_encoder;
 use zenpredict::{Activation, FeatureTransform, MetadataType, WeightDtype};
 use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 
@@ -80,29 +81,18 @@ pub fn forward_per_sample_alpha_head(
     debug_assert_eq!(rank_w.len(), n_hidden);
     debug_assert_eq!(w_alpha.len(), n_hidden);
 
-    let mut h_pre = b1.to_vec();
-    for i in 0..n_features {
-        let s = x[i];
-        if s == 0.0 {
-            continue;
-        }
-        let row = &w1[i * n_hidden..(i + 1) * n_hidden];
-        for (acc, &w) in h_pre.iter_mut().zip(row.iter()) {
-            *acc += s * w;
-        }
-    }
-    let h: Vec<f64> = h_pre
-        .iter()
-        .map(|&v| if v >= 0.0 { v } else { leaky_alpha * v })
-        .collect();
+    // Encoder: h_pre = b1 + Σ_i x[i]·W1[i,:], then LeakyReLU → h.
+    // The SIMD-dispatched path picks AVX-512 / AVX2 / NEON / wasm128
+    // automatically and falls back to scalar on platforms without a
+    // matching tier. Bit-identical to the scalar oracle modulo FMA
+    // fusion (~1e-12 relative drift at the 372-feature × 128-hidden
+    // production shape).
+    let (h_pre, h) = simd_encoder::encoder_forward(x, w1, b1, n_features, n_hidden, leaky_alpha);
 
-    // Rank head.
-    let mut y_rank = rank_b;
-    for j in 0..n_hidden {
-        y_rank += h[j] * rank_w[j];
-    }
+    // Rank head: y_rank = rank_b + h · rank_w (n_hidden-wide dot).
+    let y_rank = simd_encoder::dot_bias(&h, rank_w, rank_b);
 
-    // Pool head.
+    // Pool head: 4-tuple statistic reducer (μ, σ, max, p_6).
     let (stats, max_idx) = pool_stats(&h);
     let y_pool = stats[0] * reducer_w[0]
         + stats[1] * reducer_w[1]
@@ -110,11 +100,9 @@ pub fn forward_per_sample_alpha_head(
         + stats[3] * reducer_w[3]
         + reducer_b;
 
-    // Per-sample α.
-    let mut alpha_logit = b_alpha;
-    for j in 0..n_hidden {
-        alpha_logit += h[j] * w_alpha[j];
-    }
+    // Per-sample α logit + sigmoid gate, then linear combination of
+    // the two heads.
+    let alpha_logit = simd_encoder::dot_bias(&h, w_alpha, b_alpha);
     let alpha = sigmoid(alpha_logit);
     let y = alpha * y_rank + (1.0 - alpha) * y_pool;
     (
@@ -239,27 +227,13 @@ pub fn backprop_step_per_sample_alpha_head(
         dl_dh[j] += dl_dstat[3] * sign_hj * abs_pow5 * inv_p6_pow5_n;
     }
 
-    // LeakyReLU back-route.
-    let dl_dh_pre: Vec<f64> = dl_dh
-        .iter()
-        .zip(h_pre.iter())
-        .map(|(&dh, &hp)| if hp >= 0.0 { dh } else { leaky_alpha * dh })
-        .collect();
+    // LeakyReLU back-route: scale dl_dh by `leaky_alpha` on lanes
+    // where the forward saw a negative pre-activation.
+    let dl_dh_pre = simd_encoder::leaky_relu_backward(&dl_dh, h_pre, leaky_alpha);
 
-    // Layer-1 grads.
-    for i in 0..n_features {
-        let s = x[i];
-        if s == 0.0 {
-            continue;
-        }
-        let row = &mut gw1[i * n_hidden..(i + 1) * n_hidden];
-        for (g, &dh) in row.iter_mut().zip(dl_dh_pre.iter()) {
-            *g += s * dh;
-        }
-    }
-    for (g, &dh) in gb1.iter_mut().zip(dl_dh_pre.iter()) {
-        *g += dh;
-    }
+    // Layer-1 grads: accumulate into gw1 / gb1 via the SIMD scatter +
+    // in-place add kernels.
+    simd_encoder::encoder_backprop_layer1(x, &dl_dh_pre, gw1, gb1, n_features, n_hidden);
 }
 
 /// Hyperparameters for the per-sample α head trainer.

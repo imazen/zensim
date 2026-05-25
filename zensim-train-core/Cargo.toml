@@ -27,6 +27,12 @@ zenpredict-bake = { workspace = true }
 # Cross-platform monotonic clock: std on native, performance.now() on WASM.
 web-time = "1"
 rayon = { workspace = true, optional = true }
+# Safe SIMD dispatch (compiles to a scalar polyfill on WASM and any
+# CPU lacking the tier's intrinsics — used by `simd_encoder` to feed
+# AVX-512 / AVX2 / NEON / wasm128 on platforms that have them and
+# graceful scalar fallback elsewhere).
+archmage = { workspace = true }
+magetypes = { workspace = true }
 
 [dev-dependencies]
 # Seed-stable bit-exact reproduction tests vs the canonical
