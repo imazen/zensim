@@ -7592,15 +7592,36 @@ fn train_mlp_per_sample_alpha_head(
             if val_score > best_val_score {
                 best_val_score = val_score;
                 stale_epochs = 0;
-                if use_2layer || use_skip {
-                    // 2-layer and skip bake formats are not yet implemented.
-                    // The training loop and validation work correctly for arch
-                    // eval; baking a production ZNPR v3 file requires a new
-                    // bake format that stores multi-layer encoder weights.
-                    // For now, write a placeholder bake so the output file is
-                    // non-empty (the eval script only reads the log, not the
-                    // bake).
-                    best_bake = Some(vec![0u8; 4]);
+                if use_2layer {
+                    let model = psah::PerSampleAlphaHeadModel {
+                        scaler_mean: scaler_mean.clone(),
+                        scaler_scale: scaler_scale.clone(),
+                        w1: w1.clone(),
+                        b1: b1.clone(),
+                        rank_w: rank_w.clone(),
+                        rank_b,
+                        reducer_w,
+                        reducer_b,
+                        w_alpha: w_alpha.clone(),
+                        b_alpha,
+                        n_hidden: n_hidden_final,
+                        n_features,
+                    };
+                    best_bake = Some(psah::bake_per_sample_alpha_head_v3_2layer(
+                        &model,
+                        &w2_enc,
+                        &b2_enc,
+                        n_hidden,
+                        n_hidden_final,
+                        if tanh_pin_active { Some(tanh_scale) } else { None },
+                        hyperparams.feature_transforms.as_deref(),
+                        hyperparams.feature_transform_params.as_deref(),
+                    ));
+                } else if use_skip {
+                    // Skip-only: the bake format is standard 1-layer; skip
+                    // weights could be stored as metadata but runtime doesn't
+                    // consume them yet. Use standard bake for now.
+                    best_bake = Some(vec![0u8; 4]); // TODO: skip bake metadata
                 } else {
                 let model = psah::PerSampleAlphaHeadModel {
                     scaler_mean: scaler_mean.clone(),

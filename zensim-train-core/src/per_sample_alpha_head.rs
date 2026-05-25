@@ -1221,6 +1221,155 @@ pub fn apply_per_sample_alpha_head_runtime(h: &[f32], meta: &PerSampleAlphaHeadM
     (y, alpha)
 }
 
+/// Bake a 2-layer per-sample α head with optional tanh pin and
+/// feature transforms. Emits 3 BakeLayer entries:
+///   1. n_features → n_hidden1 (LeakyReLU)
+///   2. n_hidden1 → n_hidden_final (LeakyReLU)
+///   3. n_hidden_final → n_hidden_final (Identity pass-through)
+///
+/// Head metadata payload uses n_hidden_final for weight dims.
+#[allow(clippy::too_many_arguments)]
+pub fn bake_per_sample_alpha_head_v3_2layer(
+    model: &PerSampleAlphaHeadModel,
+    w2_enc: &[f64],
+    b2_enc: &[f64],
+    n_hidden1: usize,
+    n_hidden_final: usize,
+    tanh_scale: Option<f64>,
+    feature_transforms: Option<&[zenpredict::FeatureTransform]>,
+    feature_transform_params: Option<&[Vec<f32>]>,
+) -> Vec<u8> {
+    let n_features = model.n_features;
+
+    let scaler_mean_f32: Vec<f32> = model.scaler_mean.iter().map(|&v| v as f32).collect();
+    let scaler_scale_f32: Vec<f32> = model.scaler_scale.iter().map(|&v| v as f32).collect();
+    let w1_f32: Vec<f32> = model.w1.iter().map(|&v| v as f32).collect();
+    let b1_f32: Vec<f32> = model.b1.iter().map(|&v| v as f32).collect();
+    let w2_enc_f32: Vec<f32> = w2_enc.iter().map(|&v| v as f32).collect();
+    let b2_enc_f32: Vec<f32> = b2_enc.iter().map(|&v| v as f32).collect();
+
+    // Identity pass-through for layer 3.
+    let mut w3_f32 = vec![0.0f32; n_hidden_final * n_hidden_final];
+    for i in 0..n_hidden_final {
+        w3_f32[i * n_hidden_final + i] = 1.0;
+    }
+    let b3_f32 = vec![0.0f32; n_hidden_final];
+
+    // Head metadata payload (same format as 1-layer, but sized for n_hidden_final).
+    let n_payload = 2 * n_hidden_final + 8;
+    let mut payload = Vec::with_capacity(n_payload * 4);
+    for v in &model.w_alpha {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.b_alpha as f32).to_le_bytes());
+    for v in &model.rank_w {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.rank_b as f32).to_le_bytes());
+    for v in &model.reducer_w {
+        payload.extend_from_slice(&(*v as f32).to_le_bytes());
+    }
+    payload.extend_from_slice(&(model.reducer_b as f32).to_le_bytes());
+    payload.extend_from_slice(&(POOL_P_NORM as f32).to_le_bytes());
+
+    let layers = [
+        BakeLayer {
+            in_dim: n_features,
+            out_dim: n_hidden1,
+            activation: Activation::LeakyRelu,
+            dtype: WeightDtype::F32,
+            weights: &w1_f32,
+            biases: &b1_f32,
+        },
+        BakeLayer {
+            in_dim: n_hidden1,
+            out_dim: n_hidden_final,
+            activation: Activation::LeakyRelu,
+            dtype: WeightDtype::F32,
+            weights: &w2_enc_f32,
+            biases: &b2_enc_f32,
+        },
+        BakeLayer {
+            in_dim: n_hidden_final,
+            out_dim: n_hidden_final,
+            activation: Activation::Identity,
+            dtype: WeightDtype::F32,
+            weights: &w3_f32,
+            biases: &b3_f32,
+        },
+    ];
+
+    let mut metadata_entries = vec![BakeMetadataEntry {
+        key: "zentrain.per_sample_alpha_head",
+        kind: MetadataType::Numeric,
+        value: &payload,
+    }];
+
+    let tanh_payload;
+    if let Some(scale) = tanh_scale {
+        tanh_payload = (scale as f32).to_le_bytes().to_vec();
+        metadata_entries.push(BakeMetadataEntry {
+            key: "zentrain.tanh_output_head",
+            kind: MetadataType::Numeric,
+            value: &tanh_payload,
+        });
+    }
+
+    let ft_token_payload;
+    let ft_param_payload;
+    if let Some(transforms) = feature_transforms {
+        let has_nontrivial = transforms
+            .iter()
+            .any(|t| !matches!(t, zenpredict::FeatureTransform::Identity));
+        if has_nontrivial {
+            let tokens: String = transforms
+                .iter()
+                .map(|t| t.as_token())
+                .collect::<Vec<_>>()
+                .join(",");
+            ft_token_payload = tokens.into_bytes();
+            metadata_entries.push(BakeMetadataEntry {
+                key: "zentrain.feature_transforms",
+                kind: MetadataType::Utf8,
+                value: &ft_token_payload,
+            });
+            if let Some(params) = feature_transform_params {
+                let mut param_buf = Vec::new();
+                for p in params {
+                    param_buf.extend_from_slice(&(p.len() as u32).to_le_bytes());
+                    for &v in p {
+                        param_buf.extend_from_slice(&v.to_le_bytes());
+                    }
+                }
+                ft_param_payload = param_buf;
+                metadata_entries.push(BakeMetadataEntry {
+                    key: "zentrain.feature_transform_params",
+                    kind: MetadataType::Bytes,
+                    value: &ft_param_payload,
+                });
+            }
+        }
+    }
+
+    bake(&BakeRequest {
+        schema_hash: 0,
+        flags: 0,
+        scaler_mean: &scaler_mean_f32,
+        scaler_scale: &scaler_scale_f32,
+        layers: &layers,
+        feature_bounds: &[],
+        metadata: &metadata_entries,
+        output_specs: &[],
+        discrete_sets: &[],
+        sparse_overrides: &[],
+        feature_order: None,
+        output_order: None,
+        compressed: false,
+        hu_permutations: None,
+    })
+    .expect("v3 bake of 2-layer per-sample α head MLP")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
