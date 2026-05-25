@@ -987,12 +987,25 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
   AND silently drops KADID rows on image-decode failures. Use
   `bake_verdict` instead.
 
-## Canonical training/validation corpora (2026-05-18)
+## Canonical training/validation corpora (2026-05-18, R2-verified 2026-05-25)
 
 **This is the single canonical training/validation parquet set. All
 new V_X training recipes use these. Old per-experiment parquet dirs
 in `/mnt/v/zen/zensim-training/2026-05-{15,17,18}-*/` are FROZEN;
 rebuilds and new joins go here.**
+
+> **CURRENT canonical (2026-05-25):** the working set is
+> `canonical-2026-05-21/`. The 2026-05-18 layout below is preserved
+> for archaeology; the 2026-05-21 set is the one v11 was trained on,
+> mirrored to R2 at `s3://zentrain/canonical-2026-05-21/` (26 objects,
+> 1.32 GB, all sizes byte-equivalent to local as of 2026-05-25). The
+> 5 v11 training inputs (`safesyn.parquet`, `cid22_train.parquet`,
+> `kadid.parquet`, `tid.parquet`, `konjnd-dense.parquet`) live under
+> `canonical-2026-05-21/train/`. The full v11 reproduction kit (bake
+> + recipe + commit-pinned input sha256s) is at
+> `s3://zentrain/v11-reproduction-kit-2026-05-25/`. All shipped bakes
+> (41 files, 4.6 MB) are mirrored at `s3://zentrain/bakes-2026-05-25/`
+> for cold-start independence from the zensim git repo.
 
 ### Local + R2 locations
 
