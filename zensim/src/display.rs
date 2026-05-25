@@ -145,8 +145,8 @@ impl DisplayTarget {
     pub fn bake_bytes(self) -> Option<&'static [u8]> {
         match self {
             Self::Desktop => Some(crate::profile::mlp_bake_cvvdp_desktop()),
-            Self::Phone => None,  // awaiting CVVDP phone backfill
-            Self::Tv => None,     // awaiting CVVDP TV backfill
+            Self::Phone => Some(crate::profile::mlp_bake_cvvdp_phone_interim()),
+            Self::Tv => None, // awaiting CVVDP TV backfill
         }
     }
 }

@@ -1275,6 +1275,13 @@ pub(crate) fn mlp_bake_cvvdp_desktop() -> &'static [u8] {
     include_bytes!("../weights/zensim_b_desktop_2026-05-25.bin")
 }
 
+/// CVVDP-trained bake for phone viewing conditions (PPD ≈ 67).
+/// INTERIM: trained on desktop CVVDP scores (same bake as desktop).
+/// Will be retrained on phone-specific CVVDP scores when backfill lands.
+pub(crate) fn mlp_bake_cvvdp_phone_interim() -> &'static [u8] {
+    include_bytes!("../weights/zensim_b_phone_interim_2026-05-25.bin")
+}
+
 static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
