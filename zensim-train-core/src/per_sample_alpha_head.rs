@@ -1334,17 +1334,23 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
                 value: &ft_token_payload,
             });
             if let Some(params) = feature_transform_params {
-                let mut param_buf = Vec::new();
-                for p in params {
-                    param_buf.extend_from_slice(&(p.len() as u32).to_le_bytes());
-                    for &v in p {
-                        param_buf.extend_from_slice(&v.to_le_bytes());
+                let mut s = String::new();
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 {
+                        s.push('\n');
+                    }
+                    for (j, &v) in p.iter().enumerate() {
+                        if j > 0 {
+                            s.push(',');
+                        }
+                        use std::fmt::Write;
+                        let _ = write!(s, "{v:.9}");
                     }
                 }
-                ft_param_payload = param_buf;
+                ft_param_payload = s.into_bytes();
                 metadata_entries.push(BakeMetadataEntry {
                     key: "zentrain.feature_transform_params",
-                    kind: MetadataType::Bytes,
+                    kind: MetadataType::Utf8,
                     value: &ft_param_payload,
                 });
             }
