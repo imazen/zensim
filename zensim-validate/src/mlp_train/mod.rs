@@ -5928,6 +5928,24 @@ fn train_mlp_per_sample_alpha_head(
         Vec::new()
     };
 
+    // Pre-compute per-group σ medians for σ-weighted MSE normalization.
+    let sigma_medians: Vec<f64> = groups
+        .iter()
+        .map(|g| {
+            g.metric_sigmas
+                .map(|sigmas| {
+                    let mut sorted: Vec<f64> = sigmas.to_vec();
+                    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    if sorted.is_empty() {
+                        1.0
+                    } else {
+                        sorted[sorted.len() / 2]
+                    }
+                })
+                .unwrap_or(1.0)
+        })
+        .collect();
+
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
             * 0.5
@@ -6098,24 +6116,30 @@ fn train_mlp_per_sample_alpha_head(
             let (dl_dya_mse, dl_dyb_mse, mse_loss_pair) = if hyperparams.mse_weight > 0.0 {
                 let n_norm = (2.0 * hyperparams.pairs_per_epoch.max(1) as f64).max(1.0);
                 let base_scale = 2.0 * hyperparams.mse_weight / n_norm;
-                // σ-weighted MSE: divide residual by max(σ, ε) when metric_sigmas
-                // are available. High-consensus stimuli (low σ) get amplified;
-                // ambiguous ones (high σ) get down-weighted. Optimizes Z-RMSE.
-                let (inv_sa, inv_sb) = if hyperparams.sigma_weighted_mse {
+                // σ-weighted MSE: weight = median(σ_group)/max(σ_i, ε).
+                // Within each group, rows where metrics agree (low σ) get
+                // up-weighted; rows where metrics disagree (high σ) get
+                // down-weighted. Normalizing by median keeps the total
+                // gradient magnitude stable across groups with different
+                // σ distributions (safesyn σ~0.01 vs KADID σ~0.2).
+                let (wa, wb) = if hyperparams.sigma_weighted_mse {
                     if let Some(sigmas) = g.metric_sigmas {
-                        let eps = 0.05;
-                        (1.0 / sigmas[ia].max(eps), 1.0 / sigmas[ib].max(eps))
+                        let eps = 1e-4;
+                        let sigma_med = sigma_medians[g_idx];
+                        let sa = sigma_med / sigmas[ia].max(eps);
+                        let sb = sigma_med / sigmas[ib].max(eps);
+                        // Clamp to [0.2, 5.0] to avoid extreme amplification
+                        (sa.clamp(0.2, 5.0), sb.clamp(0.2, 5.0))
                     } else {
                         (1.0, 1.0)
                     }
                 } else {
                     (1.0, 1.0)
                 };
-                let da = base_scale * (ya - mos_a) * inv_sa * inv_sa;
-                let db = base_scale * (yb - mos_b) * inv_sb * inv_sb;
+                let da = base_scale * (ya - mos_a) * wa;
+                let db = base_scale * (yb - mos_b) * wb;
                 let l = hyperparams.mse_weight
-                    * ((ya - mos_a).powi(2) * inv_sa * inv_sa
-                        + (yb - mos_b).powi(2) * inv_sb * inv_sb)
+                    * ((ya - mos_a).powi(2) * wa + (yb - mos_b).powi(2) * wb)
                     / n_norm;
                 (da, db, l)
             } else {
