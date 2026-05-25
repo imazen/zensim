@@ -6577,7 +6577,7 @@ fn train_mlp_per_sample_alpha_head(
                                     for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
                                         *g += l2 * w;
                                     }
-                                    for j in 0..n_hidden {
+                                    for j in 0..n_hidden_final {
                                         g_rank_w_buf[j] += l2 * rank_w[j];
                                         g_w_alpha_buf[j] += l2 * w_alpha[j];
                                     }
@@ -6586,16 +6586,16 @@ fn train_mlp_per_sample_alpha_head(
                                     }
                                 }
 
-                                for j in 0..n_hidden {
+                                for j in 0..n_hidden_final {
                                     adam.gw2[j] += g_rank_w_buf[j];
                                 }
                                 for kk in 0..4 {
-                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
+                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
                                 }
-                                for j in 0..n_hidden {
-                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                for j in 0..n_hidden_final {
+                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
                                 }
-                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
                                 adam.gb2[0] += g_rank_b_buf;
                                 adam.gb2[1] += g_red_b;
 
@@ -6635,11 +6635,11 @@ fn train_mlp_per_sample_alpha_head(
                     if let Some(pa) = pjnd_anchor {
                         if !std_pjnd_features.is_empty() && pjnd_total_weight > 0.0 {
                             let n_pjnd = std_pjnd_features.len();
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
                             let mut g_rank_b_buf = 0.0f64;
                             let mut g_red_w: [f64; 4] = [0.0; 4];
                             let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
                             let mut g_b_alpha: f64 = 0.0;
                             let mut any_step = false;
 
@@ -6711,7 +6711,7 @@ fn train_mlp_per_sample_alpha_head(
                                     for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
                                         *g += l2 * w;
                                     }
-                                    for j in 0..n_hidden {
+                                    for j in 0..n_hidden_final {
                                         g_rank_w_buf[j] += l2 * rank_w[j];
                                         g_w_alpha_buf[j] += l2 * w_alpha[j];
                                     }
@@ -6720,16 +6720,16 @@ fn train_mlp_per_sample_alpha_head(
                                     }
                                 }
 
-                                for j in 0..n_hidden {
+                                for j in 0..n_hidden_final {
                                     adam.gw2[j] += g_rank_w_buf[j];
                                 }
                                 for kk in 0..4 {
-                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
+                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
                                 }
-                                for j in 0..n_hidden {
-                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                for j in 0..n_hidden_final {
+                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
                                 }
-                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
                                 adam.gb2[0] += g_rank_b_buf;
                                 adam.gb2[1] += g_red_b;
 
@@ -6783,11 +6783,11 @@ fn train_mlp_per_sample_alpha_head(
                                 hyperparams.konjnd_aggregation_samples_per_ref.max(1);
                             let k_refs = hyperparams.konjnd_aggregation_refs_per_step.max(1);
                             let inv_s = 1.0 / (s_per_ref as f64);
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
                             let mut g_rank_b_buf = 0.0f64;
                             let mut g_red_w: [f64; 4] = [0.0; 4];
                             let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
                             let mut g_b_alpha: f64 = 0.0;
                             let mut any_step = false;
 
@@ -6909,7 +6909,7 @@ fn train_mlp_per_sample_alpha_head(
                                     for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
                                         *g += l2 * w;
                                     }
-                                    for j in 0..n_hidden {
+                                    for j in 0..n_hidden_final {
                                         g_rank_w_buf[j] += l2 * rank_w[j];
                                         g_w_alpha_buf[j] += l2 * w_alpha[j];
                                     }
@@ -6918,16 +6918,16 @@ fn train_mlp_per_sample_alpha_head(
                                     }
                                 }
 
-                                for j in 0..n_hidden {
+                                for j in 0..n_hidden_final {
                                     adam.gw2[j] += g_rank_w_buf[j];
                                 }
                                 for kk in 0..4 {
-                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
+                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
                                 }
-                                for j in 0..n_hidden {
-                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                for j in 0..n_hidden_final {
+                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
                                 }
-                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
                                 adam.gb2[0] += g_rank_b_buf;
                                 adam.gb2[1] += g_red_b;
 
@@ -6972,11 +6972,11 @@ fn train_mlp_per_sample_alpha_head(
                     if let Some(e) = equiv {
                         if !std_equiv_a.is_empty() && equiv_total_weight > 0.0 {
                             let n_equiv = std_equiv_a.len();
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
                             let mut g_rank_b_buf = 0.0f64;
                             let mut g_red_w: [f64; 4] = [0.0; 4];
                             let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
                             let mut g_b_alpha: f64 = 0.0;
                             let mut any_step = false;
 
@@ -7132,7 +7132,7 @@ fn train_mlp_per_sample_alpha_head(
                                     for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
                                         *g += l2 * w;
                                     }
-                                    for j in 0..n_hidden {
+                                    for j in 0..n_hidden_final {
                                         g_rank_w_buf[j] += l2 * rank_w[j];
                                         g_w_alpha_buf[j] += l2 * w_alpha[j];
                                     }
@@ -7141,16 +7141,16 @@ fn train_mlp_per_sample_alpha_head(
                                     }
                                 }
 
-                                for j in 0..n_hidden {
+                                for j in 0..n_hidden_final {
                                     adam.gw2[j] += g_rank_w_buf[j];
                                 }
                                 for kk in 0..4 {
-                                    adam.gw2[n_hidden + kk] += g_red_w[kk];
+                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
                                 }
-                                for j in 0..n_hidden {
-                                    adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+                                for j in 0..n_hidden_final {
+                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
                                 }
-                                adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
+                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
                                 adam.gb2[0] += g_rank_b_buf;
                                 adam.gb2[1] += g_red_b;
 
@@ -7257,11 +7257,11 @@ fn train_mlp_per_sample_alpha_head(
                         // → dL/dy_i = -2 · w · viol · (y_i − μ) / (σ · N)
                         let grad_scale = -2.0 * w_dr * viol / (sigma_obs * n_p);
 
-                        let mut g_rank_w_buf = vec![0.0f64; n_hidden];
+                        let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
                         let mut g_rank_b_buf = 0.0f64;
                         let mut g_red_w: [f64; 4] = [0.0; 4];
                         let mut g_red_b: f64 = 0.0;
-                        let mut g_w_alpha_buf = vec![0.0f64; n_hidden];
+                        let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
                         let mut g_b_alpha: f64 = 0.0;
 
                         for i in 0..probe_n {
