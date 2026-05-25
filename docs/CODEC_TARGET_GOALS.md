@@ -7,6 +7,14 @@ derives from that use case. Rank correlation with human MOS
 and still be a broken dial (clamped range, non-monotone, codec-
 dependent).
 
+**Reference:** Mohammadi, Jenadeleh, Sneyers, Saupe & Ascenso,
+"Evaluation of Objective Image Quality Metrics for High-Fidelity
+Image Compression" (IEEE Access 2026, DOI 10.1109/ACCESS.2026.3669417).
+This paper's findings directly shape goals G5, G6, G8, G9, G10,
+the HF/MF split, and the validation pipeline.
+
+---
+
 ## G1 — Full-dial dynamic range
 
 The score distribution on a representative multi-codec corpus
@@ -34,10 +42,15 @@ a declared integer:
 |---|---|
 | Mean score at KonJND PJND pairs | 60 ± 5 |
 | Std across KonJND refs at PJND | ≤ 10 |
+| Z-RMSE at KonJND PJND pairs (σ-normalized) | ≤ 0.80 |
 
 **Why:** "score 60 = just-noticeable difference" is the user-
 facing semantic contract. Codecs targeting "visually lossless"
-binary-search to score ≥ 60.
+binary-search to score ≥ 60. The Z-RMSE gate (from Mohammadi
+2025 § VIII) penalizes anchor errors proportional to how
+CONFIDENT humans are about that stimulus's quality — an anchor
+miss on a low-σ (high-consensus) PJND pair is far worse than
+the same absolute miss on a high-σ pair.
 
 **Trainer lever:** anchor loss at score 60
 (`--anchor-parquet`, `--anchor-loss-weight`), konjnd aggregation
@@ -72,77 +85,217 @@ score. Measured on matched-quality (butter ≤ 2.5) pairs across
 
 **Why:** "score 70 from JPEG" should mean the same as "score 70
 from JXL." A picker that routes between codecs based on score
-needs this.
+needs this. Mohammadi Figure 9 shows that even CVVDP has
+per-source-per-codec scatter — no metric achieves perfect cross-
+codec equivalence. Our threshold accounts for this.
 
 **Trainer lever:** `--cross-codec-eq-weight`,
 `--cross-codec-rank-preserve-weight`.
 
-## G5 — KonJND rank fidelity
+## G5 — High-fidelity rank fidelity (HF: ≤ 1 JND)
 
-The metric must rank visually-lossless pairs correctly:
+Rank quality in the near-lossless range where compression
+artifacts are at or below the visibility threshold. This is the
+range Mohammadi 2025 calls **HF** (High Fidelity, 115 AIC-3
+scores with perceived impairment ≤ 1 JND). Learning-based
+metrics systematically underperform conventional metrics here
+because their training data rarely includes near-lossless pairs
+(Mohammadi § X-A-1). This is our KonJND failure zone.
 
-| Measure | Threshold |
-|---|---|
-| KonJND-1k validation SROCC | ≥ 0.70 |
-| KonJND-1k PWRC | ≥ 0.65 |
+| Measure | Floor | Aspiration |
+|---|---|---|
+| AIC-3 HF-subset SROCC | ≥ 0.70 | ≥ 0.85 (CVVDP=0.851) |
+| AIC-3 HF-subset PWRC | ≥ 4.0 | ≥ 5.5 (CVVDP=5.92) |
+| AIC-3 HF-subset Z-RMSE | ≤ 15.0 | ≤ 10.0 (CVVDP=9.45) |
+| KonJND-1k val SROCC | ≥ 0.70 | ≥ 0.85 |
+| KonJND-1k PWRC | ≥ 0.65 | ≥ 0.75 |
 
-**Why:** KonJND is the only corpus measuring PJND thresholds.
-v11 ship scores 0.285 (broken); YJ-AT retrain scores 0.666
-(better). Target 0.70 is the floor for "dial works at the
-lossless boundary." 0.85 is aspirational.
+**Why:** Mohammadi Table 2-3 shows CVVDP at 0.851 HF SROCC
+and 0.826 MF SROCC — the HF range is HARDER for every metric.
+SSIMULACRA2 scores 0.806 HF / 0.657 MF SROCC. IW-SSIM 0.867
+HF / 0.825 MF. Our v11 ship's KonJND SROCC 0.285 means we're
+failing catastrophically in the HF range. The 0.70 floor is the
+"codec can target visually lossless" bar; 0.85 is "competitive
+with CVVDP in HF."
 
-**Trainer lever:** `--konjnd-aggregation-weight`,
-`--konjnd-aggregation-step-p`.
+**Trainer lever:** konjnd aggregation head, HF-weighted training
+pairs (pairs with ground-truth ≤ 1 JND get higher loss weight),
+input feature transforms (YJ finding: transforms unlock IW-pool
+features that carry HF signal).
 
-## G6 — Band coverage vs ssim2
+## G6 — Medium-fidelity band coverage (MF: > 1 JND)
 
 No 10-band bin (B0..B9, width-10 on the 0-100 scale) where the
 metric loses to ssim2 by more than 0.10 SROCC on any held-out
-corpus:
+corpus. This covers the **MF** (Medium Fidelity, > 1 JND) range
+— the "visible distortion" regime where most codecs operate at
+web-delivery quality settings.
 
 | Measure | Threshold |
 |---|---|
-| max(ssim2_srocc − zensim_srocc) across (corpus, band) | ≤ 0.10 |
+| max(ssim2_srocc − zensim_srocc) across (corpus, band) in MF range | ≤ 0.10 |
+| max gap in HF range (B7-B9) | ≤ 0.15 (relaxed — HF is structurally harder) |
 
-**Why:** the original training goal (CLAUDE.md 2026-05-10) was
-"match-or-exceed fast-ssim2 across all quality bands." A metric
-that wins aggregate but loses B1 by 0.15 creates a dead zone.
+**Why:** Mohammadi Table 2 shows that even the best metrics
+(CVVDP, IW-SSIM) have lower HF scores than MF. Holding HF to
+the same 0.10 threshold as MF would block every bake. The
+relaxed 0.15 HF threshold is achievable by IW-SSIM-class
+metrics.
 
 **Trainer lever:** per-band weighting (not yet implemented —
-the trainer applies uniform loss across the score range). Future
-work: stratified sampling or per-band loss weighting.
+the trainer applies uniform loss across the score range). Future:
+stratified sampling with HF pairs upweighted 2-3×.
 
 ## G7 — Compression-corpus rank (advisory)
 
-CID22 aggregate SROCC is the gold-standard generalization check.
-This goal is **advisory, not blocking** (per CLAUDE.md 2026-05-14
-ship policy):
+CID22 aggregate SROCC is the gold-standard generalization check
+for the codec-compression use case. **Advisory, not blocking**
+(per CLAUDE.md 2026-05-14 ship policy):
 
 | Measure | Threshold |
 |---|---|
 | CID22 aggregate SROCC | ≥ 0.85 (advisory) |
-| CID22 PWRC | ≥ 0.88 (advisory) |
+| CID22 PWRC | ≥ 4.5 (advisory) |
+| CID22 Z-RMSE | ≤ 30.0 (advisory) |
 
 **Why:** a bake that drops CID22 by 0.005 while gaining +0.05
-on B0/B1 IS the winning trade. CID22 is informative, not
-determinative.
+on HF IS the winning trade. CID22 is informative, not
+determinative. Note: CID22's ground truth uses pairwise
+comparison (Thurstone model) not absolute MOS — its σ-per-stimulus
+is derived from bootstrapping, not from direct observer variance.
+Z-RMSE on CID22 is therefore an approximation.
 
 **Trainer lever:** training-target choice (mix_cv40_iw60 vs pure
-ssim2 vs other), input feature transforms (this session's YJ
-finding), CID22-train subset weighting.
+ssim2 vs other), input feature transforms, CID22-train subset
+weighting.
+
+## G8 — Z-RMSE (σ-normalized prediction accuracy)
+
+Z-RMSE (Mohammadi 2025 § VIII, Equation 6) is:
+
+```
+Z-RMSE = √( (1/n) Σᵢ ((S_trans,i − S_subj,i) / σᵢ)² )
+```
+
+where σᵢ is the per-stimulus standard deviation of subjective
+scores (from bootstrap on AIC-3, from direct observer variance
+on KonJND/TID/KADID). Z-RMSE is **the single best stat for "does
+this metric track the consensus when there IS one"** — it
+penalizes errors on high-consensus stimuli (low σ) more than on
+ambiguous ones (high σ).
+
+Crucially, Z-RMSE is proportional to the negative log-likelihood
+of the predictions under a Gaussian model of observer noise
+(Equation 10-11): minimizing Z-RMSE is equivalent to maximizing
+the probability that the metric IS the generative model of human
+judgment. This is a stronger claim than "metric ranks correctly"
+(SROCC).
+
+| Measure | Floor | Aspiration |
+|---|---|---|
+| AIC-3 All Z-RMSE | ≤ 30.0 | ≤ 10.0 (CVVDP=9.45) |
+| AIC-3 HF Z-RMSE | ≤ 20.0 | ≤ 10.0 (CVVDP HF best) |
+| AIC-3 MF Z-RMSE | ≤ 8.0 | ≤ 4.0 (CVVDP MF ~4.60) |
+| KonJND Z-RMSE | ≤ 0.80 | ≤ 0.50 |
+
+**Why (matters for codec-target):** a codec binary-searching to
+hit "score=70" needs the metric to be RIGHT on stimuli where
+humans agree about quality. Z-RMSE measures exactly that.
+SROCC + PLCC only measure RELATIVE ordering / linearity —
+the metric could be perfectly ranked but consistently wrong
+by +5 points on high-consensus stimuli.
+
+**Trainer lever:** σ-weighted MSE loss: `loss = (1/n) Σ
+((predicted − target) / σ_target)²` where σ_target is either
+the observer σ from the corpus (KonJND, AIC-3) or a
+target-derived proxy (bootstrap σ on synthetic pairs). This
+directly optimizes Z-RMSE at training time. NOT yet implemented.
+
+## G9 — DS-AUC (same-vs-different classification)
+
+DS-AUC (Mohammadi 2025 § VII): Area Under the ROC curve for
+classifying stimulus pairs as "same" vs "different" perceptual
+quality. Ground-truth labels from a 2AFC binomial hypothesis
+test on subjective data (p < 0.05 → "different").
+
+| Measure | Floor | Aspiration |
+|---|---|---|
+| AIC-3 DS-AUC | ≥ 0.70 | ≥ 0.85 (CVVDP=0.846) |
+
+**Why (matters for codec-target):** a codec targeting "visually
+lossless" needs the metric to answer a BINARY question: "is
+this encode perceptibly different from the reference?" DS-AUC
+measures exactly this. SSIMULACRA2's DS-AUC is 0.571 — barely
+better than a coin flip. This means ssim2-based training
+targets cannot teach a metric when to STOP compressing.
+
+**Current gap:** we don't compute DS-AUC anywhere in the
+pipeline. AIC-3 provides the 2AFC response data needed to
+derive ground-truth labels. Implementation: add a
+`ds_auc(metric_scores, ground_truth_labels)` function to
+`bake_verdict`.
+
+**Trainer lever:** none directly (DS-AUC is a binary
+classification measure; the metric produces a continuous score).
+Indirectly: Z-RMSE optimization in the HF range should improve
+DS-AUC because correctly predicting per-stimulus quality in
+the near-threshold range improves the threshold-crossing
+accuracy that DS-AUC measures.
+
+## G10 — Per-source-per-codec stability
+
+Mohammadi Figure 9 shows that metric performance varies wildly
+by source image AND by codec. A metric that scores 0.95 SROCC
+aggregate but has one source image where JPEG scores land 2 JND
+away from the identity line is broken for that source.
+
+| Measure | Threshold |
+|---|---|
+| Max per-source RMSE (across all codecs + quality levels) | ≤ 2× median per-source RMSE |
+| Per-codec bias (mean residual per codec) | ≤ 0.3 JND |
+
+**Why:** the cross-codec equivalence goal (G4) measures the
+AVERAGE cross-codec spread. G10 measures the WORST-CASE
+per-source-per-codec failure. A picker that routes images to
+codecs based on score needs both.
+
+**Current gap:** `bake_verdict` computes per-corpus aggregates,
+not per-source-per-codec scatter. Need: for each (source,
+codec, quality) triple in the AIC-3 dataset, compute the
+residual against the logistic-transformed subjective score.
+Report the per-source RMSE distribution and flag outlier
+sources.
+
+**Trainer lever:** per-source loss weighting (upweight sources
+where the residual is large). Not yet implemented.
+
+---
 
 ## Priority order
 
-When goals conflict (e.g., cross-codec equivalence trades
-against monotonicity), resolve in this order:
+When goals conflict, resolve in this order:
 
 1. **G1 (dynamic range)** — a clamped dial is unusable
 2. **G3 (monotonicity)** — a non-monotone dial is unreliable
 3. **G2 (JND anchor)** — the semantic contract
-4. **G4 (cross-codec)** — the picker contract
-5. **G5 (KonJND rank)** — the calibration anchor
-6. **G6 (band coverage)** — the "no dead zones" guard
-7. **G7 (CID22 rank)** — advisory generalization check
+4. **G8 (Z-RMSE)** — the probabilistic accuracy anchor
+5. **G4 (cross-codec)** — the picker contract
+6. **G5 (HF rank)** — the visually-lossless range
+7. **G9 (DS-AUC)** — same-vs-different classification
+8. **G10 (per-source stability)** — worst-case guard
+9. **G6 (MF band coverage)** — the "no dead zones" guard
+10. **G7 (CID22 rank)** — advisory generalization check
+
+G8 (Z-RMSE) is ranked 4th — above G4 (cross-codec) — because
+Z-RMSE is the paper's key finding: it's the only stat that
+accounts for observer uncertainty, and it's the correct
+optimization objective under the Gaussian observer model
+(Mohammadi Equation 7-11). A metric with good SROCC but bad
+Z-RMSE is a metric that ranks stimuli correctly but gives wrong
+absolute scores — useless for a codec binary-searching to a
+target.
+
+---
 
 ## Validation policy — `--val-policy goals`
 
@@ -153,83 +306,217 @@ to select the "best epoch" checkpoint. This is wrong:
   (whichever is worst, usually konjnd_dense which oscillates
   with cyclic LR) — violating the "SROCC-only verdicts BANNED"
   principle.
-- It ignores G1 (dynamic range), G2 (JND anchor), G3 (mono),
-  G4 (cross-codec) entirely — these are never measured during
-  training, only post-hoc.
+- It ignores G1, G2, G3, G4, G8, G9, G10 entirely — these are
+  never measured during training, only post-hoc.
 - The YJ-AT retrain showed the pathology: best val_min was
   epoch 10 (transient post-init) while every corpus improved
-  through epoch 299 — except konjnd_dense which oscillated
-  and dragged the min-policy down.
+  through epoch 299.
 
 **Replace with `--val-policy goals`:** at each validation
-checkpoint, compute a weighted pass/fail score against G1–G7:
+checkpoint, compute a weighted score against G1–G10:
 
 ```
 goal_score = (
-    w1 * dial_range_ok(features, sweep)     # G1: p5 ≤ 25 ∧ p95 ≥ 85
-  + w2 * jnd_anchor_ok(konjnd_preds)        # G2: |mean - 60| ≤ 5
-  + w3 * mono_rate(sweep)                   # G3: strict_mono ≥ 0.93
-  + w4 * cross_codec_ok(eq_pairs)           # G4: p50|Δ| ≤ 1.5
-  + w5 * konjnd_srocc(konjnd_preds)         # G5: SROCC ≥ 0.70
-  + w6 * band_coverage(val_corpora)         # G6: max gap ≤ 0.10
-  + w7 * cid22_srocc(cid22_preds)           # G7: advisory ≥ 0.85
+    w1  * dial_range_ok(sweep)              # G1: p5 ≤ 25 ∧ p95 ≥ 85
+  + w2  * jnd_anchor_ok(konjnd_preds)       # G2: |mean - 60| ≤ 5 ∧ Z-RMSE ≤ 0.80
+  + w3  * mono_rate(sweep)                  # G3: strict_mono ≥ 0.93
+  + w4  * cross_codec_ok(eq_pairs)          # G4: p50|Δ| ≤ 1.5
+  + w5  * hf_rank(aic3_hf_preds)            # G5: HF SROCC ≥ 0.70
+  + w6  * mf_band_coverage(val_corpora)     # G6: max band gap ≤ 0.10
+  + w7  * cid22_rank(cid22_preds)           # G7: advisory SROCC ≥ 0.85
+  + w8  * zrmse_quality(aic3_preds, sigmas) # G8: Z-RMSE ≤ 30 (All)
+  + w9  * ds_auc(aic3_preds, gt_labels)     # G9: DS-AUC ≥ 0.70
+  + w10 * source_stability(per_src_rmse)    # G10: max/median ≤ 2
 )
 ```
 
 Each term is 0.0–1.0 (soft gate: linear ramp from threshold to
-target). Weights follow the priority order: w1 > w3 > w2 > w4 >
-w5 > w6 > w7. The trainer selects the epoch with the highest
-`goal_score`, not the epoch with the best worst-corpus SROCC.
+target). Weights follow the priority order.
 
-**Why this is better:**
-- Validates the actual properties the dial needs (range, mono,
-  anchors) during training, not just rank correlation
-- A konjnd_dense oscillation doesn't kill the checkpoint if
-  mono + range + cross-codec are all passing
-- The epoch-10 artifact disappears: early epochs have bad mono
-  and no dial range, so goal_score is low even if SROCC peaks
+**Implementation cost per val checkpoint (~3s total):**
 
-**Implementation shape** (in `zensim-validate/src/mlp_train.rs`):
-- At each val checkpoint, score the current weights against a
-  small held-out q-sweep fixture (50 images × 19 q, ~1000
-  forward passes, <1s on CPU) for G1/G3.
-- Score against the existing val corpora for G5/G7.
-- Score against the anchor parquet for G2.
-- Score against the cross-codec-eq parquet for G4.
-- The per-epoch cost is ~2s (vs ~0.5s for the current SROCC-
-  only val). Acceptable for 300 epochs.
+| Check | Forward passes | Wall time |
+|---|---:|---|
+| G1/G3: q-sweep 50 img × 19 q | 950 | ~0.5s |
+| G2: KonJND anchor forward | ~200 | ~0.1s |
+| G4: cross-codec-eq parquet | ~500 | ~0.3s |
+| G5: AIC-3 HF subset forward | ~115 | ~0.1s |
+| G6: per-band SROCC on val corpora | 0 (reuses val preds) | ~0.1s |
+| G7: CID22 SROCC | 0 (reuses val preds) | ~0.1s |
+| G8: Z-RMSE on AIC-3 | 0 (reuses G5 preds + stored σ) | ~0.1s |
+| G9: DS-AUC on AIC-3 | 0 (reuses preds + stored 2AFC labels) | ~0.1s |
+| G10: per-source RMSE from AIC-3 | 0 (reuses preds) | ~0.1s |
+
+Incremental cost vs current val: +~1700 forward passes per
+epoch (~1.5s on 7950X). Total val cost ~3s/epoch. Acceptable
+for 300 epochs (15 min overhead across full training).
 
 **Starter weights** (tunable per experiment):
 
 | Goal | Weight | Rationale |
 |---|---:|---|
-| G1 dynamic range | 3.0 | Broken dial is unusable; highest priority |
+| G1 dynamic range | 3.0 | Broken dial is unusable |
 | G3 monotonicity | 2.5 | Non-monotone dial is unreliable |
+| G8 Z-RMSE | 2.5 | Probabilistic accuracy (Mohammadi key finding) |
 | G2 JND anchor | 2.0 | Semantic contract |
 | G4 cross-codec | 1.5 | Picker contract |
-| G5 KonJND rank | 1.0 | Calibration anchor |
-| G6 band coverage | 0.5 | Guard rail |
+| G5 HF rank | 1.5 | Visually-lossless range (our biggest gap) |
+| G9 DS-AUC | 1.0 | Same-vs-different gate |
+| G10 per-source stability | 0.5 | Worst-case guard |
+| G6 MF band coverage | 0.5 | Guard rail |
 | G7 CID22 rank | 0.5 | Advisory |
+
+---
+
+## Statistical significance — MRR + Wilcoxon
+
+Per Mohammadi § IX: when comparing two bakes, SROCC deltas
+alone are insufficient. Two stats:
+
+1. **Meng-Rosenthal-Rubin (MRR) test** for paired SROCC
+   comparison: accounts for the shared subjective scores
+   between the two metrics being compared. Reports Z-statistic
+   + p-value. Mohammadi Table 4 shows that SROCC 0.907 vs 0.917
+   can be statistically indistinguishable (gray cell).
+
+2. **Pairwise Wilcoxon Signed-Rank test** on residuals: non-
+   parametric, tests whether the median paired residual
+   difference is zero. Reports direction + p-value + effect
+   size r = Z/√N.
+
+**Policy:** any ship-or-no-ship verdict must cite BOTH tests.
+"CID22 SROCC dropped 0.045" is not a verdict — "MRR p=0.003,
+Wilcoxon p=0.008 r=0.12" is. If MRR p > 0.05, the delta is
+not statistically significant regardless of its magnitude.
+
+**Implementation:** add `mrr_test(srocc_a, srocc_b, n)` and
+`wilcoxon_signed_rank(residuals_a, residuals_b)` to
+`bake_verdict`. Emit p-values + effect sizes in every comparison
+table. This is ~50 LOC of pure Rust stats (Equation 12-16 from
+the paper).
+
+---
+
+## 4-parameter logistic transform
+
+Per Mohammadi § VI (Equation 1): before computing PLCC, RMSE,
+OR, Z-RMSE, and DS-AUC, raw metric scores are mapped through
+a 4-parameter logistic:
+
+```
+S_trans = B2 + (B1 - B2) / (1 + exp(-(s_obj - B3) / B4))
+```
+
+fitted globally across ALL stimuli for each metric via nonlinear
+least-squares (minimize RMSE between S_trans and S_subj). This
+is more principled than our current per-corpus affine calibration
+because:
+
+- It handles the sigmoid saturation at both ends of the scale
+- It's fit once, globally — not per-corpus (avoids overfitting
+  to individual corpus structure)
+- SROCC and KT are unaffected (rank-invariant under monotone
+  transforms) but PLCC, RMSE, OR, Z-RMSE, and DS-AUC all
+  depend on the transform
+
+**Policy:** `bake_verdict` should fit the 4-parameter logistic
+ONCE per bake across all validation stimuli (CID22 + AIC-3 +
+KonJND pooled), then compute PLCC / RMSE / OR / Z-RMSE / DS-AUC
+on the transformed scores. Current approach (per-corpus affine)
+is kept as a secondary report for back-compat.
+
+---
+
+## SA-ST curves (PWRC visualization)
+
+Per Mohammadi § VII and Figure 4: the SA-ST (Sorting Accuracy
+vs Sensory Threshold) curve plots how well a metric ranks
+stimulus pairs as a function of the JND threshold at which pairs
+are considered "perceptually different." A metric with high SA
+at high ST is good at distinguishing stimuli that are HARD to
+tell apart (the HF range). Figure 4 shows CVVDP dominating at
+all ST thresholds; most learning-based metrics collapse at high
+ST.
+
+**What to implement:**
+1. For each pair (i, j) where quality(i) ≠ quality(j):
+   - ST(i,j) = |MOS(i) - MOS(j)| / σ_pooled(i,j)
+   - SA(metric, θ) = fraction of pairs with ST ≥ θ where the
+     metric correctly ranks them
+2. Plot SA vs θ for θ ∈ [0, 4] (0 = all pairs, 4 = only pairs
+   where quality difference is > 4σ)
+3. Report AUC of the SA-ST curve (= PWRC) + SA at specific
+   thresholds: θ=0 (All), θ=0 to 1 (HF range), θ=1+ (MF range)
+
+**Where:** add to `bake_verdict` output; render in the zenpredict-
+viz compare panel so two bakes' SA-ST curves overlay.
+
+---
 
 ## Measurement
 
-All goals are measured by `bake_verdict` + the 50-image × 19-q
-JPEG sweep (`qsweep_eval`). A single "ship-readiness" command
-should emit a pass/fail table for G1–G7.
+All goals are measured by an enhanced `bake_verdict` that
+computes:
+
+1. Full Mohammadi panel (SROCC, PLCC, KROCC, OR, PWRC, Z-RMSE)
+   at aggregate + 10-band + HF/MF split
+2. DS-AUC on AIC-3
+3. Per-source-per-codec scatter + outlier flagging
+4. MRR + Wilcoxon when comparing two bakes
+5. SA-ST curve + AUC
+6. 4-parameter logistic fit (global)
+7. G1-G10 pass/fail table with soft scores
+
+A single `bake_verdict --full-mohammadi --compare <baseline.bin>`
+invocation should emit all of the above.
+
+---
 
 ## Current v11 ship scorecard
 
-| Goal | v11 ship | Pass? |
-|---|---|---|
-| G1 p5 ≤ 25 | p5 = 28 | ✗ marginal |
-| G1 p95 ≥ 85 | p95 ≈ 93 | ✓ |
-| G2 JND = 60 ± 5 | mean 60 | ✓ |
-| G3 mono ≥ 93% | 92.78% | ✗ marginal |
-| G4 p50 \|Δ\| ≤ 1.5 | 1.37 | ✓ |
-| G5 KonJND SROCC ≥ 0.70 | 0.285 | ✗ |
-| G6 max band gap ≤ 0.10 | TBD | ? |
-| G7 CID22 ≥ 0.85 | 0.860 | ✓ |
+| Goal | v11 ship | YJ-AT retrain | Pass? (v11) |
+|---|---|---|---|
+| G1 p5 ≤ 25 | p5 = 28 | TBD | ✗ marginal |
+| G1 p95 ≥ 85 | p95 ≈ 93 | TBD | ✓ |
+| G2 JND = 60 ± 5 | mean 60 | TBD | ✓ |
+| G3 mono ≥ 93% | 92.78% | TBD | ✗ marginal |
+| G4 p50 \|Δ\| ≤ 1.5 | 1.37 | TBD | ✓ |
+| G5 HF SROCC ≥ 0.70 | KonJND 0.285 | KonJND 0.666 | ✗ |
+| G6 MF max gap ≤ 0.10 | TBD | TBD | ? |
+| G7 CID22 ≥ 0.85 | 0.860 | 0.816 | ✓ |
+| G8 Z-RMSE ≤ 30 | TBD | TBD | ? |
+| G9 DS-AUC ≥ 0.70 | TBD | TBD | ? |
+| G10 max/med ≤ 2 | TBD | TBD | ? |
 
-v11 passes 3/7 cleanly, marginal on 2, fails G5 decisively.
-The YJ-AT retrain lifts G5 from 0.285 → 0.666 (closer to the
-0.70 floor) but drops G7 to 0.816.
+v11 passes 3/10 cleanly, marginal on 2, fails G5 decisively,
+4 unmeasured (G6/G8/G9/G10 — pipeline doesn't compute them yet).
+
+**First-order priority for the pipeline:** implement G8 (Z-RMSE)
++ G9 (DS-AUC) in `bake_verdict` so we can score existing bakes.
+These are both < 100 LOC additions. Then score v11 + YJ-AT on
+the full G1-G10 table before deciding the next retrain.
+
+---
+
+## Appendix: paper reference numbers (SOTA targets)
+
+From Mohammadi 2025 Table 2-3 (AIC-3 full-resolution,
+300 stimuli, sorted by SROCC):
+
+| Metric | SROCC All | SROCC HF | SROCC MF | Z-RMSE All | Z-RMSE HF | DS-AUC |
+|---|---:|---:|---:|---:|---:|---:|
+| **CVVDP** | **0.960** | **0.852** | **0.893** | **9.45** | **14.50** | **0.846** |
+| IW-SSIM | 0.944 | 0.867 | 0.825 | 10.48 | — | 0.836 |
+| HDR-VDP-3 | 0.929 | 0.873 | 0.768 | 10.62 | — | 0.836 |
+| MS-SSIM | 0.927 | 0.855 | 0.763 | 10.26 | — | 0.836 |
+| SSIMULACRA1 | 0.907 | 0.854 | 0.691 | 10.19 | — | 0.831 |
+| SSIMULACRA2 | 0.905 | 0.831 | 0.687 | 10.06 | — | 0.806 |
+| VIF | 0.905 | 0.839 | 0.684 | 10.29 | — | 0.856 |
+| BUTTERAUGLI | 0.893 | 0.857 | 0.640 | 9.92 | — | 0.806 |
+
+Our v11 ship's CID22 SROCC (0.860) positions us between
+BUTTERAUGLI and SSIMULACRA2 in the "All" column. On the AIC-3
+corpus (which we hold out), we score 0.776 — below BUTTERAUGLI's
+0.893 and well below CVVDP's 0.960. The gap is largest in the
+HF range, matching the paper's finding that learning-based
+metrics fail near-lossless.
