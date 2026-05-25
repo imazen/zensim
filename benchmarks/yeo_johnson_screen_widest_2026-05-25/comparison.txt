@@ -1,0 +1,71 @@
+====================================================================================================
+YJ feature-transform screen — narrow/wide/widest comparison
+====================================================================================================
+
+Configurations:
+  narrow       : in-process golden-section, λ ∈ [-2, 2]
+  wide         : in-process golden-section, λ ∈ [-5, 5]
+  hardgrid10   : in-process golden-section, λ ∈ [-10, 10]
+  widest_scipy : scipy.stats.yeojohnson_normmax (data-driven bounds, effectively unconstrained)
+
+Boundary pinning at each grid edge:
+Run            | pinned (lo) | pinned (hi) |  interior
+narrow         |         370 |           0 |         2
+wide           |         361 |           0 |        11
+hardgrid10     |         349 |           0 |        23
+widest_scipy   | n/a (unbound) |         n/a |       372
+               (scipy min λ=-1062.62, max λ=-1.72)
+
+Outright YJ wins (best_transform == yeo_johnson):
+Block      |  narrow |    wide | hardgrid10 |   widest_scipy
+basic      |       2 |       4 |          4 |             17
+peak       |       1 |       4 |          6 |             13
+masked     |       0 |       0 |          0 |             12
+iw_pool    |       0 |       0 |          0 |             11
+total      |       3 |       8 |         10 |             53
+
+YJ lift over identity, median (p25 / p75) per block:
+Block      |                 narrow |                   wide |             hardgrid10 |           widest_scipy
+basic      | 0.0076 (0.0019 / 0.0327) | 0.0116 (0.0037 / 0.0537) | 0.0156 (0.0055 / 0.0766) | 0.1081 (0.0279 / 0.1765)
+peak       | 0.0161 (0.0070 / 0.0424) | 0.0290 (0.0127 / 0.0711) | 0.0397 (0.0194 / 0.0876) | 0.0668 (0.0290 / 0.1628)
+masked     | 0.0194 (0.0025 / 0.0296) | 0.0354 (0.0049 / 0.0508) | 0.0547 (0.0087 / 0.0769) | 0.1149 (0.0839 / 0.1853)
+iw_pool    | 0.0243 (0.0037 / 0.0398) | 0.0438 (0.0070 / 0.0671) | 0.0718 (0.0119 / 0.0948) | 0.1225 (0.0916 / 0.1954)
+
+YJ lift >= threshold — count of features:
+Thresh     |  narrow |    wide | hardgrid10 |   widest_scipy
+0.005      |     242 |     289 |        329 |            354
+0.02       |     169 |     190 |        219 |            320
+0.05       |      51 |     124 |        170 |            262
+0.1        |       9 |      37 |         71 |            215
+0.2        |       4 |       4 |          4 |             58
+
+Best-transform-by-feature count (top-7):
+Transform        |  narrow |    wide | hardgrid10 |   widest_scipy
+winsor_p99       |     233 |     228 |        226 |            183
+log              |     111 |     111 |        111 |            111
+yeo_johnson      |       3 |       8 |         10 |             53
+quantile_bins    |      18 |      18 |         18 |             18
+clip_then_log1p  |       4 |       4 |          4 |              4
+signed_cbrt      |       2 |       2 |          2 |              2
+log1p            |       1 |       1 |          1 |              1
+
+Widest (scipy) λ distribution per block:
+Block      | count |        min |        p25 |     median |        p75 |        max
+basic      |   156 |   -1062.62 |    -317.31 |    -121.46 |     -31.26 |      -1.72
+peak       |    72 |    -187.14 |     -80.11 |     -32.98 |     -17.73 |      -1.74
+masked     |    72 |    -661.96 |    -222.75 |     -97.45 |     -47.45 |     -10.08
+iw_pool    |    72 |    -554.21 |    -165.69 |     -72.67 |     -33.01 |      -7.57
+
+Boundary pinning tracking (feature stays pinned across runs):
+  pinned at -2: 370
+  pinned at -5: 361
+  pinned at -10: 349
+  pinned at -2 AND -5: 361
+  pinned at -5 AND -10: 349
+  pinned at all three: 349
+
+  scipy λ for the 349 features pinned at -10:
+    min=-1062.62, median=-85.67, max=-10.05
+    count λ < -100: 161
+    count λ < -300: 57
+    count λ < -1000: 1
