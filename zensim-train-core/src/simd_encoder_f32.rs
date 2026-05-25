@@ -278,6 +278,47 @@ fn dot_product_f32(token: Token, h: &[f32], w: &[f32]) -> f32 {
     lane_sum + tail_sum
 }
 
+/// f32 encoder backprop: accumulate gw1/gb1 from dl_dh_pre.
+#[inline]
+pub fn encoder_backprop_layer1_f32(
+    x: &[f32],
+    dl_dh_pre: &[f32],
+    gw1: &mut [f32],
+    gb1: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
+) {
+    debug_assert_eq!(x.len(), n_features);
+    debug_assert_eq!(dl_dh_pre.len(), n_hidden);
+    debug_assert_eq!(gw1.len(), n_features * n_hidden);
+    debug_assert_eq!(gb1.len(), n_hidden);
+
+    for i in 0..n_features {
+        let s = x[i];
+        if s == 0.0 {
+            continue;
+        }
+        let row = &mut gw1[i * n_hidden..(i + 1) * n_hidden];
+        for (g, &dh) in row.iter_mut().zip(dl_dh_pre.iter()) {
+            *g += s * dh;
+        }
+    }
+    for (g, &dh) in gb1.iter_mut().zip(dl_dh_pre.iter()) {
+        *g += dh;
+    }
+}
+
+/// f32 LeakyReLU backward.
+#[inline]
+pub fn leaky_relu_backward_f32(dl_dh: &[f32], h_pre: &[f32], leaky_alpha: f32) -> Vec<f32> {
+    debug_assert_eq!(dl_dh.len(), h_pre.len());
+    dl_dh
+        .iter()
+        .zip(h_pre.iter())
+        .map(|(&dh, &hp)| if hp >= 0.0 { dh } else { leaky_alpha * dh })
+        .collect()
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
