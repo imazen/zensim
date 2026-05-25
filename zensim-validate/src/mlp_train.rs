@@ -5521,6 +5521,29 @@ fn train_mlp_per_sample_alpha_head(
         );
     }
 
+    // Architecture flags — gate aux losses that haven't been wired
+    // for multi-layer / skip yet.
+    let use_2layer = hyperparams.n_hidden_layers >= 2;
+    let use_skip = hyperparams.skip_connection;
+    if use_2layer || use_skip {
+        assert!(
+            !nin_on,
+            "multi-layer / skip + NiN: not yet composed. Disable NiN."
+        );
+        if hyperparams.cross_codec_eq_weight > 0.0 {
+            panic!(
+                "multi-layer / skip + cross_codec_eq: aux loss not yet wired. \
+                 Set --cross-codec-eq-weight 0."
+            );
+        }
+    }
+
+    let n_hidden_final = if use_2layer {
+        (n_hidden / 2).max(8)
+    } else {
+        n_hidden
+    };
+
     let train_total: f64 = groups.iter().map(|g| g.train_weight).sum();
     assert!(train_total > 0.0, "no training groups");
 
@@ -5821,14 +5844,63 @@ fn train_mlp_per_sample_alpha_head(
             Vec::new()
         };
 
+    // For 2-layer: heads use n_hidden_final, so init model with that.
+    // For 1-layer: n_hidden_final == n_hidden, so unchanged.
     let init_model = psah::PerSampleAlphaHeadModel::new(n_features, n_hidden, hyperparams.seed);
     let mut w1 = init_model.w1.clone();
     let mut b1 = init_model.b1.clone();
-    let mut rank_w = init_model.rank_w.clone();
+
+    // 2nd encoder layer (n_hidden → n_hidden_final), initialized if 2-layer.
+    let mut w2_enc: Vec<f64> = if use_2layer {
+        let scale = (2.0 / n_hidden as f64).sqrt();
+        let mut rng2 = SplitMix64::new(hyperparams.seed ^ 0xDEAD_2222_0000_0000);
+        (0..n_hidden * n_hidden_final)
+            .map(|_| {
+                let u1 = ((rng2.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)).max(1e-12);
+                let u2 = (rng2.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+                (-2.0 * u1.ln()).sqrt() * (2.0 * core::f64::consts::PI * u2).cos() * scale
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut b2_enc: Vec<f64> = if use_2layer {
+        vec![0.0; n_hidden_final]
+    } else {
+        Vec::new()
+    };
+
+    // Skip connection (n_features → 1), initialized to zero so the
+    // network starts as the pure MLP.
+    let mut w_skip: Vec<f64> = if use_skip {
+        vec![0.0; n_features]
+    } else {
+        Vec::new()
+    };
+    let mut b_skip: f64 = 0.0;
+
+    // Head weights use n_hidden_final for 2-layer, n_hidden for 1-layer.
+    let mut rank_w: Vec<f64> = if use_2layer {
+        let scale = 1.0 / (n_hidden_final as f64).sqrt();
+        let mut rng3 = SplitMix64::new(hyperparams.seed ^ 0xBEEF_0000_DEAD_0000);
+        (0..n_hidden_final)
+            .map(|_| {
+                let u1 = ((rng3.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)).max(1e-12);
+                let u2 = (rng3.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+                (-2.0 * u1.ln()).sqrt() * (2.0 * core::f64::consts::PI * u2).cos() * scale
+            })
+            .collect()
+    } else {
+        init_model.rank_w.clone()
+    };
     let mut rank_b = init_model.rank_b;
     let mut reducer_w = init_model.reducer_w;
     let mut reducer_b = init_model.reducer_b;
-    let mut w_alpha = init_model.w_alpha.clone();
+    let mut w_alpha: Vec<f64> = if use_2layer {
+        vec![0.0; n_hidden_final]
+    } else {
+        init_model.w_alpha.clone()
+    };
     let mut b_alpha = init_model.b_alpha;
 
     let mut rng = SplitMix64::new(
@@ -5838,12 +5910,17 @@ fn train_mlp_per_sample_alpha_head(
             .wrapping_add(0x0123456789ABCDEF),
     );
 
-    // Adam slot sizes: w2 = n_hidden (rank_w) + 4 (reducer_w)
-    //                       + n_hidden (W_α) + 1 (b_α).
-    // b2 = 2 (rank_b, reducer_b).
-    let n_w2 = n_hidden + 4 + n_hidden + 1;
+    // Adam slot sizes:
+    //   w1 slot: n_features × n_hidden (+ optional n_hidden × n_hidden_final for 2-layer
+    //            + optional n_features for skip)
+    //   b1 slot: n_hidden (+ optional n_hidden_final for 2-layer + optional 1 for skip)
+    //   w2 slot: n_hidden_final (rank_w) + 4 (reducer_w) + n_hidden_final (W_α) + 1 (b_α)
+    //   b2 slot: 2 (rank_b, reducer_b)
+    let n_w1_total = w1.len() + w2_enc.len() + w_skip.len();
+    let n_b1_total = b1.len() + b2_enc.len() + if use_skip { 1 } else { 0 };
+    let n_w2 = n_hidden_final + 4 + n_hidden_final + 1;
     let n_b2 = 2;
-    let mut adam = AdamState::new(w1.len(), b1.len(), n_w2, n_b2);
+    let mut adam = AdamState::new(n_w1_total, n_b1_total, n_w2, n_b2);
 
     let start = Instant::now();
     let mut best_val_score = f64::NEG_INFINITY;
@@ -6038,14 +6115,16 @@ fn train_mlp_per_sample_alpha_head(
             let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
 
             let (ya_pre, ya_rank, ya_pool, alpha_a, _ali_a, ha_pre, ha, sa, max_a) =
-                psah::forward_per_sample_alpha_head(
-                    xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                    n_features, n_hidden, leaky,
+                arch_forward(
+                    xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                 );
             let (yb_pre, yb_rank, yb_pool, alpha_b, _ali_b, hb_pre, hb, sb, max_b) =
-                psah::forward_per_sample_alpha_head(
-                    xb, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                    n_features, n_hidden, leaky,
+                arch_forward(
+                    xb, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                 );
             // Tanh-pinned output (identity when --tanh-output-head-scale 0).
             let (ya, dya_dpre) = pin_forward(ya_pre);
@@ -7320,16 +7399,9 @@ fn train_mlp_per_sample_alpha_head(
                         &std_features[gi],
                         g.features.len(),
                         n_features,
-                        &w1,
-                        &b1,
-                        &rank_w,
-                        rank_b,
-                        &reducer_w,
-                        reducer_b,
-                        &w_alpha,
-                        b_alpha,
-                        n_hidden,
-                        leaky,
+                        &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                        n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                     );
                     let signed_preds: Vec<f64> = if mse_only {
                         preds.clone()
@@ -7541,27 +7613,85 @@ fn predict_group_per_sample_alpha_head(
     n_features: usize,
     w1: &[f64],
     b1: &[f64],
+    w2_enc: &[f64],
+    b2_enc: &[f64],
+    w_skip: &[f64],
+    b_skip: f64,
     rank_w: &[f64],
     rank_b: f64,
     reducer_w: &[f64; 4],
     reducer_b: f64,
     w_alpha: &[f64],
     b_alpha: f64,
-    n_hidden: usize,
+    n_hidden1: usize,
+    n_hidden_final: usize,
     leaky: f64,
+    use_2layer: bool,
+    use_skip: bool,
 ) -> Vec<f64> {
-    use zensim_train_core::per_sample_alpha_head as psah;
     (0..n_pairs)
         .into_par_iter()
         .map(|i| {
             let xi = &std_x[i * n_features..(i + 1) * n_features];
-            let (y, _, _, _, _, _, _, _, _) = psah::forward_per_sample_alpha_head(
-                xi, w1, b1, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, n_features,
-                n_hidden, leaky,
+            let (y, _, _, _, _, _, _, _, _) = arch_forward(
+                xi, w1, b1, w2_enc, b2_enc, w_skip, b_skip,
+                rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha,
+                n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
             );
             y
         })
         .collect()
+}
+
+/// Architecture-dispatched forward for the per-sample α head. Returns
+/// the same 9-tuple as `psah::forward_per_sample_alpha_head` for
+/// call-site compatibility. When `use_2layer` or `use_skip`, runs the
+/// extended encoder and/or adds the skip connection output.
+#[allow(clippy::too_many_arguments)]
+fn arch_forward(
+    x: &[f64],
+    w1: &[f64],
+    b1: &[f64],
+    w2_enc: &[f64],
+    b2_enc: &[f64],
+    w_skip: &[f64],
+    b_skip: f64,
+    rank_w: &[f64],
+    rank_b: f64,
+    reducer_w: &[f64; 4],
+    reducer_b: f64,
+    w_alpha: &[f64],
+    b_alpha: f64,
+    n_features: usize,
+    n_hidden1: usize,
+    n_hidden_final: usize,
+    leaky: f64,
+    use_2layer: bool,
+    use_skip: bool,
+) -> (f64, f64, f64, f64, f64, Vec<f64>, Vec<f64>, [f64; 4], usize) {
+    use zensim_train_core::per_sample_alpha_head as psah;
+    use zensim_train_core::simd_encoder;
+
+    let (h_pre, h) = if use_2layer {
+        let (_h1_pre, _h1, h2_pre, h2) = simd_encoder::encoder_forward_2layer(
+            x, w1, b1, w2_enc, b2_enc, n_features, n_hidden1, n_hidden_final, leaky,
+        );
+        (h2_pre, h2)
+    } else {
+        simd_encoder::encoder_forward(x, w1, b1, n_features, n_hidden1, leaky)
+    };
+
+    let (y, y_rank, y_pool, alpha, alpha_logit, stats, max_idx) = psah::forward_heads(
+        &h, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, n_hidden_final,
+    );
+
+    let y_final = if use_skip {
+        y + simd_encoder::skip_forward(x, w_skip, b_skip)
+    } else {
+        y
+    };
+
+    (y_final, y_rank, y_pool, alpha, alpha_logit, h_pre, h, stats, max_idx)
 }
 
 /// NiN-aware flush for the per-sample α head. Computes NiN over the
