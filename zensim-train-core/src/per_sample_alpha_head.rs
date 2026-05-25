@@ -1326,7 +1326,7 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
                 .iter()
                 .map(|t| t.as_token())
                 .collect::<Vec<_>>()
-                .join(",");
+                .join("\n");
             ft_token_payload = tokens.into_bytes();
             metadata_entries.push(BakeMetadataEntry {
                 key: "zentrain.feature_transforms",
