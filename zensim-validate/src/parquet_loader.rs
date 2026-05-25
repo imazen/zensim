@@ -254,7 +254,10 @@ pub fn load_parquet(
     // all three are present. This is the natural per-pair "confidence"
     // signal: where metrics agree, the quality judgment is easy (low σ);
     // where they disagree, it's ambiguous (high σ).
-    let metric_sigmas = {
+    let metric_sigmas: Option<Vec<f64>> = None;
+    #[allow(unreachable_code)]
+    if false {
+    let _metric_sigmas_disabled = {
         let cv_col = load_optional_scalar_column(path, "cvvdp_score").ok().flatten();
         let iw_col = load_optional_scalar_column(path, "iwssim").ok().flatten();
         let s2_col = load_optional_scalar_column(path, "ssim2_gpu").ok().flatten();
@@ -290,6 +293,7 @@ pub fn load_parquet(
             _ => None,
         }
     };
+    } // end of disabled block
 
     println!(
         "  {name}: loaded {} pairs × {n_features} features from {path:?}",

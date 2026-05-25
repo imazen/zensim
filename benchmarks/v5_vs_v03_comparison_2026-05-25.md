@@ -87,3 +87,24 @@ Broken paths:
 
 Root cause unknown. Not in σ-weighted code (disabled and tested).
 Likely in validation-loop interaction with multi-group min-policy.
+
+## ROOT CAUSE FOUND (2026-05-25 17:20)
+
+The training regression was caused by **mismatched human_score scales**:
+- safesyn: [-7.4, +1.0] (distance-like)
+- cid22_train: [3.0, 94.2] (raw MCOS — should be /100)
+- kadid: [0.0, 1.0] (normalized DMOS)
+- tid: [0.03, 0.8] (normalized MOS)
+- konjnd_dense: [-65.7, 96.2] (mixed training target)
+
+With tanh_output_head_scale=30, the model outputs in [0, 100].
+The MSE loss creates opposing gradients when targets span [-66, 94]
+across groups while the model predicts in [0, 100].
+
+**Fix: normalize all group targets to [0, 1] before training.**
+- cid22_train: human_score / 100
+- konjnd_dense: min-max normalization to [0, 1]
+
+V12 (normalized, seed=1): CID22 0.8815, TID 0.9083, KADIK 0.9194.
+Beats V5 on CID22 (+0.002) and TID (+0.025). Training converges
+stably with MSE-only (val 0.8631 → 0.9205 over 200 epochs).
