@@ -7417,7 +7417,7 @@ fn train_mlp_per_sample_alpha_head(
         ),
         log,
     );
-    best_bake.unwrap_or_else(|| {
+    let bake_bytes = best_bake.unwrap_or_else(|| {
         let model = psah::PerSampleAlphaHeadModel {
             scaler_mean: scaler_mean.clone(),
             scaler_scale: scaler_scale.clone(),
@@ -7442,7 +7442,88 @@ fn train_mlp_per_sample_alpha_head(
         } else {
             psah::bake_per_sample_alpha_head_v3(&model)
         }
-    })
+    });
+
+    // Post-training output calibration spline (V9-style, matching
+    // scripts/v_next/calibrate_v9_spline.py). When anchor data is
+    // available, forward the anchor rows through the best weights,
+    // group by target_score, take median prediction per band, build
+    // strictly-increasing PCHIP knots. The spline payload is saved
+    // as a sidecar file via ZENSIM_SPLINE_SIDECAR env var.
+    //
+    // The actual injection into the bake requires zenpredict-bake's
+    // JSON pipeline (the existing Python script calls `zenpredict bake`
+    // on a modified JSON). The sidecar approach lets the caller script
+    // handle the injection.
+    if anchor_active && !std_anchor_features.is_empty() {
+        if let Some(a) = anchor {
+            let mut band_preds: std::collections::HashMap<i64, Vec<f64>> =
+                std::collections::HashMap::new();
+            for (i, af) in std_anchor_features.iter().enumerate() {
+                let fwd = arch_forward(
+                    af, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
+                );
+                let (pinned, _) = pin_forward(fwd.y);
+                let target = a.target_scores
+                    .and_then(|ts| ts.get(i).copied())
+                    .unwrap_or(hyperparams.anchor_target_score);
+                let key = (target * 100.0) as i64;
+                band_preds.entry(key).or_default().push(pinned);
+            }
+
+            let mut knots: Vec<(f64, f64)> = Vec::new();
+            let mut bands: Vec<(f64, f64)> = band_preds.iter()
+                .map(|(&key, preds)| {
+                    let target = key as f64 / 100.0;
+                    let mut sorted = preds.clone();
+                    sorted.sort_by(|a, b| a.total_cmp(b));
+                    let median = sorted[sorted.len() / 2];
+                    (target, median)
+                })
+                .collect();
+            bands.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+            // Enforce strict monotonicity in x (median_pred)
+            for (target, median_pred) in &bands {
+                if knots.is_empty() || *median_pred > knots.last().unwrap().0 + 0.01 {
+                    knots.push((*median_pred, *target));
+                }
+            }
+
+            if knots.len() >= 2 {
+                log_line(
+                    &format!(
+                        "output calibration spline: {} knots from {} anchor bands",
+                        knots.len(), bands.len()
+                    ),
+                    log,
+                );
+                for &(x, y) in &knots {
+                    log_line(&format!("  pred={x:.2} → target={y:.1}"), log);
+                }
+
+                // Encode payload: u32 n_knots + n_knots × (f32 x, f32 y)
+                let mut payload = Vec::with_capacity(4 + 8 * knots.len());
+                payload.extend_from_slice(&(knots.len() as u32).to_le_bytes());
+                for &(x, y) in &knots {
+                    payload.extend_from_slice(&(x as f32).to_le_bytes());
+                    payload.extend_from_slice(&(y as f32).to_le_bytes());
+                }
+
+                if let Ok(out_path) = std::env::var("ZENSIM_SPLINE_SIDECAR") {
+                    if let Ok(mut f) = std::fs::File::create(&out_path) {
+                        use std::io::Write;
+                        let _ = f.write_all(&payload);
+                        log_line(&format!("spline sidecar: {out_path}"), log);
+                    }
+                }
+            }
+        }
+    }
+
+    bake_bytes
 }
 
 /// Predict per-sample α head outputs for every row in a flat
