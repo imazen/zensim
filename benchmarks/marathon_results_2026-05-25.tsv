@@ -1,0 +1,9 @@
+name	config	val_geomean3	aic3_srocc_all	aic3_srocc_hf	aic3_srocc_mf	aic3_zrmse_mf
+v3_anchor	5grp cid22=0.5 anchor	0.9859	0.8850	0.6483	0.7888	4.90
+expA_cid22_heavy	5grp cid22=2.0 anchor	0.9873	0.8752	0.6342	0.7871	5.03
+exp1_cvvdp_target	cvvdp_score×10 no anchor	0.6784	-	-	-	-
+exp2_cvvdp_anchor	cvvdp_score×10 anchor	0.7324	-	-	-	-
+exp3_mix_short	4grp mix 100ep×10k	0.9863	0.8632	0.6609	0.7151	5.47
+CVVDP_reference	Mohammadi Table 2	-	0.960	0.852	0.893	-
+SSIMULACRA2_ref	Mohammadi Table 2	-	0.905	-	-	-
+BUTTERAUGLI_ref	Mohammadi Table 2	-	0.893	-	-	-
