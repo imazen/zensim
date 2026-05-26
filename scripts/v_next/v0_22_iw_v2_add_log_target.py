@@ -38,22 +38,40 @@ import math
 from pathlib import Path
 
 
+# The safesyn source carries the REAL IW-SSIM in `iwssim`; the KADID/TID
+# validation mocks carry the human_score copy in `iwssim_MOCK_VAL_ONLY`
+# (renamed 2026-05-25 so a mock can never masquerade as a real metric).
+IWSSIM_SRC_COLS = ("iwssim", "iwssim_MOCK_VAL_ONLY")
+
+
+def _iwssim_src_col(fieldnames) -> str:
+    col = next((c for c in IWSSIM_SRC_COLS if c in (fieldnames or [])), None)
+    if col is None:
+        raise SystemExit(
+            f"missing iwssim source column (looked for {IWSSIM_SRC_COLS})"
+        )
+    return col
+
+
 def transform_iwssim_to_log_norm(input_csv: Path, output_csv: Path, max_log: float) -> int:
     """Add iwssim_log_norm column = (-log(1 - iwssim + 1e-6)) / max_log * 100.
 
-    Preserves all other columns. Returns row count written.
+    Reads the IW-SSIM source from `iwssim` (real, safesyn) or
+    `iwssim_MOCK_VAL_ONLY` (validation mock). The OUTPUT target column is always
+    `iwssim_log_norm`; a mock source therefore yields a mock log-norm target,
+    which is fine for validation-only groups (train_weight=0). Preserves all
+    other columns. Returns row count written.
     """
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with input_csv.open() as fin, output_csv.open("w", newline="") as fout:
         reader = csv.DictReader(fin)
-        if reader.fieldnames is None or "iwssim" not in reader.fieldnames:
-            raise SystemExit(f"{input_csv}: missing iwssim column")
+        src_col = _iwssim_src_col(reader.fieldnames)
         out_fields = list(reader.fieldnames) + ["iwssim_log_norm"]
         writer = csv.DictWriter(fout, fieldnames=out_fields)
         writer.writeheader()
         for row in reader:
-            iw = float(row["iwssim"])
+            iw = float(row[src_col])
             # Clamp to avoid -log(0) at iw = 1.0 exactly
             iw_clamped = min(iw, 0.9999999)
             log_val = -math.log(1.0 - iw_clamped + 1e-6)
@@ -63,13 +81,14 @@ def transform_iwssim_to_log_norm(input_csv: Path, output_csv: Path, max_log: flo
     return n
 
 
-def compute_max_log(input_csv: Path, col: str = "iwssim") -> float:
+def compute_max_log(input_csv: Path, col: str | None = None) -> float:
     """Find max(-log(1 - col + 1e-6)) across the CSV."""
     max_log = 0.0
     with input_csv.open() as fin:
         reader = csv.DictReader(fin)
+        resolved = col or _iwssim_src_col(reader.fieldnames)
         for row in reader:
-            iw = float(row[col])
+            iw = float(row[resolved])
             iw_clamped = min(iw, 0.9999999)
             log_val = -math.log(1.0 - iw_clamped + 1e-6)
             if log_val > max_log:

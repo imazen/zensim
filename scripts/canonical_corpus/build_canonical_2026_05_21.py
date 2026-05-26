@@ -37,6 +37,12 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from join_safety import (  # noqa: E402
+    JoinSafetyError,
+    assert_no_leaked_metric_columns,
+)
+
 OLD_ROOT = Path("/mnt/v/zen/zensim-training/canonical-2026-05-18")
 NEW_ROOT = Path("/mnt/v/zen/zensim-training/canonical-2026-05-21")
 
@@ -79,6 +85,14 @@ def _validate_metric_columns(label: str, tbl: pa.Table):
     is real and/or ssim2_gpu is null) and pass cleanly.
     """
     import numpy as np
+
+    # Generic guard: forbid mock columns and any metric column that is a
+    # bit-identical / perfect-rank copy of human_score (Mode A target leak),
+    # across ALL metric prefixes — not just iwssim. Raises JoinSafetyError.
+    try:
+        assert_no_leaked_metric_columns(label, tbl.schema.names, tbl)
+    except JoinSafetyError as e:
+        raise RuntimeError(str(e)) from e
 
     names = set(tbl.schema.names)
     if "human_score" not in names:
