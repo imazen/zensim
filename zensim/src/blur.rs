@@ -81,10 +81,19 @@ fn box_blur_v_copy_inner_v4(
             dst[base..base + 16].copy_from_slice(&(sum * inv_v).to_array());
 
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -125,10 +134,19 @@ fn box_blur_v_copy_inner_v4(
             let base = y * width + col_base;
             dst[base..base + 8].copy_from_slice(&(sum * inv_v8).to_array());
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -160,10 +178,19 @@ fn box_blur_v_copy_inner_v4(
         for y in 0..height {
             dst[y * width + x] = sum * inv;
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -211,10 +238,19 @@ fn box_blur_v_copy_inner_v4x(
             dst[base..base + 16].copy_from_slice(&(sum * inv_v).to_array());
 
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -255,10 +291,19 @@ fn box_blur_v_copy_inner_v4x(
             let base = y * width + col_base;
             dst[base..base + 8].copy_from_slice(&(sum * inv_v8).to_array());
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -290,10 +335,19 @@ fn box_blur_v_copy_inner_v4x(
         for y in 0..height {
             dst[y * width + x] = sum * inv;
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -345,10 +399,19 @@ fn box_blur_v_copy_inner_v3(
             dst[base..base + 8].copy_from_slice(&(sum * inv_v).to_array());
 
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -383,10 +446,19 @@ fn box_blur_v_copy_inner_v3(
         for y in 0..height {
             dst[y * width + x] = sum * inv;
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -437,10 +509,19 @@ fn box_blur_v_copy_inner(
             dst[base..base + 8].copy_from_slice(&(sum * inv_v).to_array());
 
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
@@ -475,10 +556,19 @@ fn box_blur_v_copy_inner(
         for y in 0..height {
             dst[y * width + x] = sum * inv;
             let add_raw = y + r + 1;
+            // Boundary mirror: at the bottom edge, reflect the index
+            // back into the image (`2*(height-1) - add_raw`). When the
+            // mirror would itself go negative (i.e. `add_raw` exceeds
+            // `2*(height-1)` — only possible with `height < r + 2`,
+            // e.g. `r = 5` on `height = 6`), the row is clamped to 0
+            // via the `saturating_sub`. The final `.min(height - 1)`
+            // still caps above. Without the `saturating_sub`, the
+            // expression panics on `attempt to subtract with overflow`
+            // when used at very small pyramid scales.
             let add_idx = if add_raw < height {
                 add_raw
             } else {
-                2 * (height - 1) - add_raw
+                (2 * (height - 1)).saturating_sub(add_raw)
             };
             let add_idx = add_idx.min(height - 1);
             let rem_i = y as isize - r as isize;
