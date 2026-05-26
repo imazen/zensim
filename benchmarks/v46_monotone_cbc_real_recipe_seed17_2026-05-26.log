@@ -1,13 +1,3 @@
-contamination_guard: /mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet blocklist empty — row scan skipped
-  safesyn: loaded 196086 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet"
-contamination_guard: /mnt/v/zen/zensim-training/canonical-2026-05-21/train/cid22_train.parquet blocklist empty — row scan skipped
-  cid22_train: loaded 17611 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/cid22_train.parquet"
-Training: 2 groups, 372 features, MlpHyperparams { n_hidden: 128, n_epochs: 300, pairs_per_epoch: 50000, initial_lr: 0.00566, leaky_alpha: 0.01, seed: 17, log_every: 10, l2_lambda: 1e-5, early_stop_patience: 0, validation_policy: Min, val_aggregate: GeomeanSPP, low_q_boost: 1.0, mid_q_boost: 1.0, high_q_boost: 1.0, out_dtype: F32, feature_transforms: None, feature_transform_params: None, minibatch_size: 32, parallel_batch: true, pwrc_pair_weight: false, pwrc_sensory_threshold: 5.0, pwrc_band_weights: None, norm_in_norm_weight: 0.0, norm_in_norm_p: 1.0, norm_in_norm_q: 2.0, pool_head: false, hybrid_head: false, per_sample_alpha_head: true, skip_connection: false, n_hidden_layers: 1, mse_weight: 0.6, sigma_weighted_mse: false, ranknet_weight: 0.6, monotonicity_reg: 1.0, monotone_cbc: true, monotonicity_margin: 0.0, anchor_loss_weight: 0.5, anchor_target_score: 60.0, anchor_step_p: 0.3, cross_codec_eq_weight: 1.0, cross_codec_eq_step_p: 0.1, cross_codec_rank_preserve_weight: 0.2, dynamic_range_floor_weight: 0.3, dynamic_range_sigma_threshold: 25.0, dynamic_range_step_p: 0.05, dynamic_range_probe_n: 40, tanh_output_head_scale: 20.0, pjnd_passthrough_weight: 0.0, pjnd_passthrough_step_p: 0.3, pjnd_passthrough_target_score: 80.0, konjnd_aggregation_weight: 0.05, konjnd_aggregation_step_p: 0.1, konjnd_aggregation_samples_per_ref: 5, konjnd_aggregation_refs_per_step: 8 }
-  jnd_anchor: loaded 22008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet"
-anchor parquet: loaded 22008 rows from "/mnt/v/zen/zensim-training/2026-05-20-v9-anchors/anchors_v9_372col.parquet" (PER-ROW target_score: min=0.0 median=60.0 max=100.0, weight=0.5, step_p=0.3)
-equiv parquet: loaded 68788 pairs from "/mnt/v/zen/picker-training/2026-05-19-v2/cross_codec_equivalence_tight_v3.parquet" (weight=1, step_p=0.1, butter_diff=68788)
-  konjnd_aggregation: konjnd-aggregation loaded 20160 rows × 372 features grouped into 1008 refs from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/konjnd-dense.parquet"
-konjnd-aggregation parquet: loaded 20160 rows / 1008 refs (weight=0.05, step_p=0.1, S=5, K=8)
 MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy=Min
       train group 0: 'safesyn' n=196086 train_w=1.000 val_w=0.000
       train group 1: 'cid22_train' n=17611 train_w=0.500 val_w=0.000
@@ -60,18 +50,3 @@ output calibration spline: 7 knots from 8 anchor bands
   pred=84.98 → target=90.0
   pred=90.31 → target=100.0
 re-baked with output calibration spline (261451 bytes)
-Wrote 261451 bytes to "/mnt/v/output/zensim/bakes/v46_monotone_cbc_real_recipe_seed17_2026-05-26.bin"
-Wrote log (52 lines) to "/home/lilith/work/zen/zensim/benchmarks/v46_monotone_cbc_real_recipe_seed17_2026-05-26.log"
-
---- bake_verdict (auto-eval) ---
-bake_verdict — bake=/mnt/v/output/zensim/bakes/v46_monotone_cbc_real_recipe_seed17_2026-05-26.bin  features-root=/mnt/v/zen/zensim-training/2026-05-15-full-features  corpora=cid22,kadid,tid,konjnd,aic3,aic4
-bake: n_inputs=372  feature_transforms=no  per_sample_alpha_head=yes  hybrid_head=no
-  CID22: loaded 4292 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
-  KADIK10k: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet"
-  TID2013: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet"
-  KonJND-1k (full): loaded 1008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_features_372col_2026-05-15.parquet"
-  AIC-3 CTC: loaded 600 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic3_features_372col_2026-05-15.parquet"
-  AIC-4 sample: loaded 300 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic4_features_372col_2026-05-20.parquet"
-wrote verdict to /mnt/v/output/zensim/bakes/v46_monotone_cbc_real_recipe_seed17_2026-05-26.verdict.md
-bake_verdict: complete in 13.55s
-Verdict written to "/mnt/v/output/zensim/bakes/v46_monotone_cbc_real_recipe_seed17_2026-05-26.verdict.md"
