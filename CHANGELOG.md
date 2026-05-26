@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Refactor — dedup-M: 6 zensim-validate bins routed through new `bake_runtime` module (2026-05-26)
+
+Tier-1 #1 cleanup from the cross-repo VERIFIED synthesis. Six bins
+(`bake_verdict`, `qsweep_eval`, `preview_stats_demo`, `ensemble_score_rows`,
+`score_pair_with_bake`, `predict_features_with_bake`) each re-rolled the
+same per-row bake-scoring helpers — `score_row` (or `score_with_bake`)
+plus `extract_per_sample_alpha_head`, `extract_hybrid_head`,
+`extract_tanh_output_head_scale`. ~90-95 % of the per-bin code was
+shared.
+
+Factored the dispatch (per-sample-α head + hybrid head + tanh output
+pin + EXP-CROSS-CODEC-V9 PCHIP spline) into a new
+`zensim_validate::bake_runtime` library module. All six bins now
+delegate. `predict_features_with_bake`'s EXP-CROSS-CODEC-V11-E
+per-codec affine post-step (unique to that bin) stays local and wraps
+the shared call.
+
+**Numerical evidence**: bit-exact f32 ±1e-6. Existing integration tests
+`cid22_first_row_matches_bake_verdict_reference` (CID22 SROCC=0.8641
+anchor, independent reimpl) and `cid22_aggregate_srocc_matches_audit_reference`
+(hybrid head) PASS post-migration — those are the load-bearing
+regression gates. 7 new `bake_runtime::tests` unit tests cover the
+edge cases (empty output, size mismatch, NaN propagation, sigmoid
+identity at 0).
+
+Net LOC: ~1,290 deleted across 6 bins; ~370 added in `bake_runtime`
++ unit tests = **~920 LOC net deletion**.
+
 ### Refactor — dedup-K: 5 more in-tree Rust stat re-rolls + 1 Python panel routed through `zenstats` (2026-05-26)
 
 Follow-on cleanup to the 2026-05-26 `zenstats`-extraction + `panel.rs` shim

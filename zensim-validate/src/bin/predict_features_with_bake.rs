@@ -29,8 +29,15 @@ use std::process::ExitCode;
 
 use zenpredict::{Model, Predictor};
 
-type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
-type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
+// DEDUP-M (2026-05-26): per-row dispatch + extract_per_sample_alpha_head /
+// extract_hybrid_head / extract_tanh_output_head_scale moved to
+// `zensim_validate::bake_runtime`. The EXP-CROSS-CODEC-V11-E per-codec
+// affine step (alpha + beta * y) is unique to this bin and stays here.
+use zensim_validate::bake_runtime::{
+    HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
+    extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_with_bake_alloc,
+};
+
 type PerCodecAffine = Option<(f32, f32)>;
 
 /// Parse the `zentrain.per_codec_calibration` payload and return the
@@ -54,8 +61,7 @@ fn extract_per_codec_affine(model: &Model, codec_hint: Option<&str>) -> PerCodec
     if payload.len() < 4 {
         return None;
     }
-    let n_codecs =
-        u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
+    let n_codecs = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
     let mut off = 4usize;
     for _ in 0..n_codecs {
         if off + 4 > payload.len() {
@@ -71,7 +77,9 @@ fn extract_per_codec_affine(model: &Model, codec_hint: Option<&str>) -> PerCodec
         if off + name_len + 8 > payload.len() {
             return None;
         }
-        let name = std::str::from_utf8(&payload[off..off + name_len]).ok()?.to_ascii_lowercase();
+        let name = std::str::from_utf8(&payload[off..off + name_len])
+            .ok()?
+            .to_ascii_lowercase();
         off += name_len;
         let alpha = f32::from_le_bytes([
             payload[off],
@@ -94,79 +102,8 @@ fn extract_per_codec_affine(model: &Model, codec_hint: Option<&str>) -> PerCodec
     None
 }
 
-fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDispatch> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.per_sample_alpha_head")?;
-    let n_hidden = model.n_outputs();
-    let expected = (2 * n_hidden + 8) * 4;
-    if entry.value.len() != expected {
-        return None;
-    }
-    let mut floats = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-    }
-    let w_alpha = floats[..n_hidden].to_vec();
-    let b_alpha = floats[n_hidden];
-    let rank_w = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
-    let rank_b = floats[2 * n_hidden + 1];
-    let reducer_w = [
-        floats[2 * n_hidden + 2],
-        floats[2 * n_hidden + 3],
-        floats[2 * n_hidden + 4],
-        floats[2 * n_hidden + 5],
-    ];
-    let reducer_b = floats[2 * n_hidden + 6];
-    let p_norm = floats[2 * n_hidden + 7];
-    Some((
-        w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm,
-    ))
-}
-
-fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.tanh_output_head")?;
-    if entry.value.len() != 4 {
-        return None;
-    }
-    let scale = f32::from_le_bytes([
-        entry.value[0],
-        entry.value[1],
-        entry.value[2],
-        entry.value[3],
-    ]) as f64;
-    if scale.is_finite() && scale > 0.0 {
-        Some(scale)
-    } else {
-        None
-    }
-}
-
-fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.hybrid_head")?;
-    let n_hidden = model.n_outputs();
-    let expected = (n_hidden + 8) * 4;
-    if entry.value.len() != expected {
-        return None;
-    }
-    let mut floats = Vec::with_capacity(n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-    }
-    let rank_w = floats[..n_hidden].to_vec();
-    let rank_b = floats[n_hidden];
-    let alpha_logit = floats[n_hidden + 1];
-    let reducer_w = [
-        floats[n_hidden + 2],
-        floats[n_hidden + 3],
-        floats[n_hidden + 4],
-        floats[n_hidden + 5],
-    ];
-    let reducer_b = floats[n_hidden + 6];
-    let p_norm = floats[n_hidden + 7];
-    Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
-}
+// DEDUP-M (2026-05-26): extract_per_sample_alpha_head, extract_hybrid_head,
+// extract_tanh_output_head_scale now imported from bake_runtime above.
 
 fn apply_post(raw: f64, mode: &str) -> f64 {
     if raw.is_nan() {
@@ -198,6 +135,9 @@ fn apply_post(raw: f64, mode: &str) -> f64 {
     }
 }
 
+/// DEDUP-M (2026-05-26): delegates head/pin/spline dispatch to the shared
+/// `score_with_bake_alloc`, then applies the EXP-CROSS-CODEC-V11-E
+/// per-codec affine (unique to this bin). Bit-exact f32 ±1e-6.
 #[allow(clippy::too_many_arguments)]
 fn score_with_bake(
     predictor: &mut Predictor<'_>,
@@ -210,127 +150,31 @@ fn score_with_bake(
     f32_scratch: &mut [f32],
     features_row: &[f32],
 ) -> f64 {
+    // Replicate the per-row pre-fill (this bin's input is &[f32] not &[f64];
+    // the shared helper takes &[f64], so widen one row at a time).
     let n_inputs = f32_scratch.len();
     let take = n_inputs.min(features_row.len());
-    f32_scratch[..take].copy_from_slice(&features_row[..take]);
-    for f in &mut f32_scratch[take..] {
-        *f = 0.0;
-    }
-    let result = if has_transforms {
-        predictor.predict_transformed(f32_scratch)
-    } else {
-        predictor.predict(f32_scratch)
-    };
-    let y_pre = match result {
-        Ok(out) => {
-            if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) = psa {
-                let n = out.len() as f64;
-                if n <= 0.0 || out.len() != rank_w.len() || out.len() != w_alpha.len() {
-                    return f64::NAN;
-                }
-                let mut y_rank = *rank_b as f64;
-                let mut alpha_logit = *b_alpha as f64;
-                let mut sum = 0.0f64;
-                let mut max_v = f64::NEG_INFINITY;
-                let mut sum_p = 0.0f64;
-                let p = *p_norm as f64;
-                for (j, &h) in out.iter().enumerate() {
-                    let hf = h as f64;
-                    y_rank += hf * rank_w[j] as f64;
-                    alpha_logit += hf * w_alpha[j] as f64;
-                    sum += hf;
-                    if hf > max_v {
-                        max_v = hf;
-                    }
-                    sum_p += hf.abs().powf(p);
-                }
-                let mu = sum / n;
-                let mut var = 0.0f64;
-                for &h in out.iter() {
-                    let d = h as f64 - mu;
-                    var += d * d;
-                }
-                let sigma = (var / n).sqrt().max(0.0026);
-                let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                let y_pool = mu * reducer_w[0] as f64
-                    + sigma * reducer_w[1] as f64
-                    + max_v * reducer_w[2] as f64
-                    + p_norm_stat * reducer_w[3] as f64
-                    + *reducer_b as f64;
-                let alpha = {
-                    let xc = alpha_logit.clamp(-20.0, 20.0);
-                    1.0 / (1.0 + (-xc).exp())
-                };
-                alpha * y_rank + (1.0 - alpha) * y_pool
-            } else if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) = hyb {
-                let n = out.len() as f64;
-                if n <= 0.0 || out.len() != rank_w.len() {
-                    return f64::NAN;
-                }
-                let mut y_rank = *rank_b as f64;
-                let mut sum = 0.0f64;
-                let mut max_v = f64::NEG_INFINITY;
-                let mut sum_p = 0.0f64;
-                let p = *p_norm as f64;
-                for (j, &h) in out.iter().enumerate() {
-                    let hf = h as f64;
-                    y_rank += hf * rank_w[j] as f64;
-                    sum += hf;
-                    if hf > max_v {
-                        max_v = hf;
-                    }
-                    sum_p += hf.abs().powf(p);
-                }
-                let mu = sum / n;
-                let mut var = 0.0f64;
-                for &h in out.iter() {
-                    let d = h as f64 - mu;
-                    var += d * d;
-                }
-                let sigma = (var / n).sqrt().max(0.0026);
-                let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                let y_pool = mu * reducer_w[0] as f64
-                    + sigma * reducer_w[1] as f64
-                    + max_v * reducer_w[2] as f64
-                    + p_norm_stat * reducer_w[3] as f64
-                    + *reducer_b as f64;
-                let alpha = {
-                    let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
-                    1.0 / (1.0 + (-xc).exp())
-                };
-                alpha * y_rank + (1.0 - alpha) * y_pool
-            } else {
-                out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
-            }
-        }
-        Err(_) => f64::NAN,
-    };
-    let y_after_pin = if let Some(scale) = tanh_pin_scale {
-        if !y_pre.is_nan() {
-            let xc = (y_pre / scale).clamp(-30.0, 30.0);
-            let s = 1.0 / (1.0 + (-xc).exp());
-            100.0 * s
-        } else {
-            y_pre
-        }
-    } else {
-        y_pre
-    };
-    // EXP-CROSS-CODEC-V9 (2026-05-20): post-network PCHIP spline.
-    let y_after_spline = if let Some(spline) = output_spline {
-        if !y_after_pin.is_nan() {
-            zensim_validate::output_calibration_spline::apply(y_after_pin, spline)
-        } else {
-            y_after_pin
-        }
-    } else {
-        y_after_pin
-    };
+    // Use the shared score_with_bake_alloc which allocates its own
+    // f32 buffer; here we widen the source to f64 in-place once.
+    let row_f64: Vec<f64> = features_row[..take].iter().map(|&v| v as f64).collect();
+    let y_after_spline = score_with_bake_alloc(
+        predictor,
+        has_transforms,
+        psa,
+        hyb,
+        tanh_pin_scale,
+        output_spline,
+        n_inputs,
+        &row_f64,
+    );
+    // Suppress unused-scratch warning — kept in the signature for
+    // call-site compatibility with the pre-DEDUP-M plumbing in main.
+    let _ = f32_scratch;
     // EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine.
-    if let Some((alpha, beta)) = per_codec_affine {
-        if !y_after_spline.is_nan() {
-            return (alpha as f64) + (beta as f64) * y_after_spline;
-        }
+    if let Some((alpha, beta)) = per_codec_affine
+        && !y_after_spline.is_nan()
+    {
+        return (alpha as f64) + (beta as f64) * y_after_spline;
     }
     y_after_spline
 }

@@ -14,11 +14,11 @@
 
 use std::path::{Path, PathBuf};
 
-use parquet::arrow::ProjectionMask;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use arrow::array::{
     Array, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
 };
+use parquet::arrow::ProjectionMask;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 /// Deterministic xorshift64* RNG so we can sample subsets reproducibly
 /// without pulling in `rand` as a workspace dependency.
@@ -28,9 +28,7 @@ struct Xs64 {
 
 impl Xs64 {
     fn new(seed: u64) -> Self {
-        Self {
-            state: seed.max(1),
-        }
+        Self { state: seed.max(1) }
     }
     fn next_u64(&mut self) -> u64 {
         let mut x = self.state;
@@ -63,220 +61,24 @@ const BAKE_BALANCED_V2: &[u8] =
     include_bytes!("../../../zensim/weights/v_balanced_v2_2026-05-20.bin");
 const BAKE_COMPRESSION_V2: &[u8] =
     include_bytes!("../../../zensim/weights/v_compression_v2_2026-05-20.bin");
-const BAKE_TUNER_V2: &[u8] =
-    include_bytes!("../../../zensim/weights/v_tuner_v6_2026-05-19.bin");
-const BAKE_TUNER_V3: &[u8] =
-    include_bytes!("../../../zensim/weights/v_tuner_v9_2026-05-20.bin");
+const BAKE_TUNER_V2: &[u8] = include_bytes!("../../../zensim/weights/v_tuner_v6_2026-05-19.bin");
+const BAKE_TUNER_V3: &[u8] = include_bytes!("../../../zensim/weights/v_tuner_v9_2026-05-20.bin");
 // EXP-CROSS-CODEC-V10 (2026-05-20): score-space reallocation
 const BAKE_BALANCED_V3: &[u8] =
     include_bytes!("../../../zensim/weights/v_balanced_v3_2026-05-20.bin");
 const BAKE_COMPRESSION_V3: &[u8] =
     include_bytes!("../../../zensim/weights/v_compression_v3_2026-05-20.bin");
-const BAKE_TUNER_V4: &[u8] =
-    include_bytes!("../../../zensim/weights/v_tuner_v10_2026-05-20.bin");
+const BAKE_TUNER_V4: &[u8] = include_bytes!("../../../zensim/weights/v_tuner_v10_2026-05-20.bin");
 
 // ============================================================================
-// Bake-side dispatch helpers (mirror of bake_verdict::score_row internals;
-// duplicated here intentionally so the demo binary has zero touch on
-// bake_verdict source — both binaries use bit-exact code paths).
+// Bake-side dispatch helpers — DEDUP-M (2026-05-26): moved to
+// `zensim_validate::bake_runtime`. Bit-exact, f32 ±1e-6.
 // ============================================================================
 
-type PerSampleAlphaHeadDispatch = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
-type HybridHeadDispatch = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
-
-fn extract_tanh_output_head_scale(model: &Model) -> Option<f64> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.tanh_output_head")?;
-    if entry.value.len() != 4 {
-        return None;
-    }
-    let scale = f32::from_le_bytes([
-        entry.value[0],
-        entry.value[1],
-        entry.value[2],
-        entry.value[3],
-    ]) as f64;
-    (scale.is_finite() && scale > 0.0).then_some(scale)
-}
-
-fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleAlphaHeadDispatch> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.per_sample_alpha_head")?;
-    let n_hidden = model.n_outputs();
-    let expected = (2 * n_hidden + 8) * 4;
-    if entry.value.len() != expected {
-        return None;
-    }
-    let mut floats = Vec::with_capacity(2 * n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-    }
-    let w_alpha = floats[..n_hidden].to_vec();
-    let b_alpha = floats[n_hidden];
-    let rank_w = floats[n_hidden + 1..2 * n_hidden + 1].to_vec();
-    let rank_b = floats[2 * n_hidden + 1];
-    let reducer_w = [
-        floats[2 * n_hidden + 2],
-        floats[2 * n_hidden + 3],
-        floats[2 * n_hidden + 4],
-        floats[2 * n_hidden + 5],
-    ];
-    let reducer_b = floats[2 * n_hidden + 6];
-    let p_norm = floats[2 * n_hidden + 7];
-    Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm))
-}
-
-fn extract_hybrid_head(model: &Model) -> Option<HybridHeadDispatch> {
-    let md = model.metadata();
-    let entry = md.get("zentrain.hybrid_head")?;
-    let n_hidden = model.n_outputs();
-    let expected = (n_hidden + 8) * 4;
-    if entry.value.len() != expected {
-        return None;
-    }
-    let mut floats = Vec::with_capacity(n_hidden + 8);
-    for chunk in entry.value.chunks_exact(4) {
-        floats.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-    }
-    let rank_w = floats[..n_hidden].to_vec();
-    let rank_b = floats[n_hidden];
-    let alpha_logit = floats[n_hidden + 1];
-    let reducer_w = [
-        floats[n_hidden + 2],
-        floats[n_hidden + 3],
-        floats[n_hidden + 4],
-        floats[n_hidden + 5],
-    ];
-    let reducer_b = floats[n_hidden + 6];
-    let p_norm = floats[n_hidden + 7];
-    Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm))
-}
-
-fn score_row(
-    predictor: &mut Predictor<'_>,
-    has_transforms: bool,
-    per_sample_alpha_head: Option<&PerSampleAlphaHeadDispatch>,
-    hybrid_head: Option<&HybridHeadDispatch>,
-    tanh_pin_scale: Option<f64>,
-    output_spline: Option<&OutputCalibrationSpline>,
-    f32_features: &mut [f32],
-    row: &[f64],
-) -> f64 {
-    let n_inputs = f32_features.len();
-    let take = n_inputs.min(row.len());
-    for i in 0..take {
-        f32_features[i] = row[i] as f32;
-    }
-    for f in &mut f32_features[take..] {
-        *f = 0.0;
-    }
-    let result = if has_transforms {
-        predictor.predict_transformed(f32_features)
-    } else {
-        predictor.predict(f32_features)
-    };
-    let y_pre = match result {
-        Ok(out) => {
-            if let Some((w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)) =
-                per_sample_alpha_head
-            {
-                let n = out.len() as f64;
-                if n <= 0.0 || out.len() != rank_w.len() || out.len() != w_alpha.len() {
-                    return f64::NAN;
-                }
-                let mut y_rank = *rank_b as f64;
-                let mut alpha_logit = *b_alpha as f64;
-                let mut sum = 0.0f64;
-                let mut max_v = f64::NEG_INFINITY;
-                let mut sum_p = 0.0f64;
-                let p = *p_norm as f64;
-                for (j, &h) in out.iter().enumerate() {
-                    let hf = h as f64;
-                    y_rank += hf * rank_w[j] as f64;
-                    alpha_logit += hf * w_alpha[j] as f64;
-                    sum += hf;
-                    if hf > max_v {
-                        max_v = hf;
-                    }
-                    sum_p += hf.abs().powf(p);
-                }
-                let mu = sum / n;
-                let mut var = 0.0f64;
-                for &h in out.iter() {
-                    let d = h as f64 - mu;
-                    var += d * d;
-                }
-                let sigma = (var / n).sqrt().max(0.0026);
-                let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                let y_pool = mu * reducer_w[0] as f64
-                    + sigma * reducer_w[1] as f64
-                    + max_v * reducer_w[2] as f64
-                    + p_norm_stat * reducer_w[3] as f64
-                    + *reducer_b as f64;
-                let xc = alpha_logit.clamp(-20.0, 20.0);
-                let alpha = 1.0 / (1.0 + (-xc).exp());
-                alpha * y_rank + (1.0 - alpha) * y_pool
-            } else if let Some((rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)) =
-                hybrid_head
-            {
-                let n = out.len() as f64;
-                if n <= 0.0 || out.len() != rank_w.len() {
-                    return f64::NAN;
-                }
-                let mut y_rank = *rank_b as f64;
-                let mut sum = 0.0f64;
-                let mut max_v = f64::NEG_INFINITY;
-                let mut sum_p = 0.0f64;
-                let p = *p_norm as f64;
-                for (j, &h) in out.iter().enumerate() {
-                    let hf = h as f64;
-                    y_rank += hf * rank_w[j] as f64;
-                    sum += hf;
-                    if hf > max_v {
-                        max_v = hf;
-                    }
-                    sum_p += hf.abs().powf(p);
-                }
-                let mu = sum / n;
-                let mut var = 0.0f64;
-                for &h in out.iter() {
-                    let d = h as f64 - mu;
-                    var += d * d;
-                }
-                let sigma = (var / n).sqrt().max(0.0026);
-                let p_norm_stat = (sum_p / n).powf(1.0 / p);
-                let y_pool = mu * reducer_w[0] as f64
-                    + sigma * reducer_w[1] as f64
-                    + max_v * reducer_w[2] as f64
-                    + p_norm_stat * reducer_w[3] as f64
-                    + *reducer_b as f64;
-                let xc = (*alpha_logit as f64).clamp(-20.0, 20.0);
-                let alpha = 1.0 / (1.0 + (-xc).exp());
-                alpha * y_rank + (1.0 - alpha) * y_pool
-            } else {
-                out.first().copied().map(|v| v as f64).unwrap_or(f64::NAN)
-            }
-        }
-        Err(_) => f64::NAN,
-    };
-    let y_after_pin = if let Some(scale) = tanh_pin_scale {
-        if !y_pre.is_nan() {
-            let xc = (y_pre / scale).clamp(-30.0, 30.0);
-            let s = 1.0 / (1.0 + (-xc).exp());
-            100.0 * s
-        } else {
-            y_pre
-        }
-    } else {
-        y_pre
-    };
-    if let Some(spline) = output_spline {
-        if !y_after_pin.is_nan() {
-            return zensim_validate::output_calibration_spline::apply(y_after_pin, spline);
-        }
-    }
-    y_after_pin
-}
+use zensim_validate::bake_runtime::{
+    HybridHeadDispatch, PerSampleAlphaHeadDispatch, extract_hybrid_head,
+    extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_row,
+};
 
 // ============================================================================
 // Profile catalogue
@@ -464,7 +266,10 @@ struct LoadedCorpus<'a> {
     feature_rows: Vec<Vec<f64>>,
 }
 
-fn load_corpus_once<'a>(corpus: &'a Corpus, features_root: &Path) -> Result<LoadedCorpus<'a>, String> {
+fn load_corpus_once<'a>(
+    corpus: &'a Corpus,
+    features_root: &Path,
+) -> Result<LoadedCorpus<'a>, String> {
     let path = PathBuf::from(features_root).join(corpus.parquet);
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
         .map_err(|e| format!("load {} parquet: {e}", corpus.display))?;
@@ -520,12 +325,7 @@ fn render_corpus_panel(
                 let s_b: Vec<f64> = idxs.iter().map(|&i| scores[i]).collect();
                 let r = panel::spearman(&s_b, &h_b).abs();
                 let mark = if idxs.len() < 30 { "⚠" } else { " " };
-                band_line.push_str(&format!(
-                    " B{band_idx}:{}{:.3}(n={})",
-                    mark,
-                    r,
-                    idxs.len()
-                ));
+                band_line.push_str(&format!(" B{band_idx}:{}{:.3}(n={})", mark, r, idxs.len()));
             }
         }
         out.push_str(&band_line);
@@ -577,7 +377,13 @@ fn dynamic_range(
         let idx = ((scores.len() - 1) as f64 * p).round() as usize;
         scores[idx]
     };
-    Ok((scores[0], q(0.05), q(0.50), q(0.95), *scores.last().unwrap()))
+    Ok((
+        scores[0],
+        q(0.05),
+        q(0.50),
+        q(0.95),
+        *scores.last().unwrap(),
+    ))
 }
 
 // ============================================================================
@@ -718,10 +524,7 @@ fn percentile(values: &mut Vec<f64>, p: f64) -> f64 {
     values[idx]
 }
 
-fn build_qsweep_table(
-    bakes: &[LoadedBake],
-    out: &mut String,
-) -> Result<(), String> {
+fn build_qsweep_table(bakes: &[LoadedBake], out: &mut String) -> Result<(), String> {
     // For each codec parquet: pick the same N_DEMO_IMAGES ref_basenames
     // (intersected across all 4 codecs to ensure overlap), then for
     // each (profile × codec × q) compute median + p25 + p75 of the
@@ -754,7 +557,9 @@ fn build_qsweep_table(
 
     // For each profile, per-codec table.
     for bake in bakes {
-        out.push_str("\n────────────────────────────────────────────────────────────────────────\n");
+        out.push_str(
+            "\n────────────────────────────────────────────────────────────────────────\n",
+        );
         out.push_str(&format!("Profile: {}\n", bake.label));
         out.push_str("────────────────────────────────────────────────────────────────────────\n");
         out.push_str(&format!(
@@ -827,16 +632,15 @@ fn main() {
 
     // Pre-load each corpus once (parquet I/O is the bulk of the wall
     // time; reading 4 × identical parquets per profile is wasted).
-    eprintln!("preview_stats_demo: pre-loading {} corpora...", CORPORA.len());
+    eprintln!(
+        "preview_stats_demo: pre-loading {} corpora...",
+        CORPORA.len()
+    );
     let loaded_corpora: Vec<LoadedCorpus> = CORPORA
         .iter()
         .filter_map(|c| match load_corpus_once(c, &features_root) {
             Ok(lc) => {
-                eprintln!(
-                    "  loaded {} ({} pairs)",
-                    c.display,
-                    lc.feature_rows.len()
-                );
+                eprintln!("  loaded {} ({} pairs)", c.display, lc.feature_rows.len());
                 Some(lc)
             }
             Err(e) => {
@@ -858,15 +662,19 @@ fn main() {
         } else {
             "plain-MLP"
         };
-        let tanh = if bake.tanh_pin_scale.is_some() { "tanh-pin " } else { "" };
-        let spline = if bake.output_spline.is_some() { "PCHIP-spline" } else { "" };
+        let tanh = if bake.tanh_pin_scale.is_some() {
+            "tanh-pin "
+        } else {
+            ""
+        };
+        let spline = if bake.output_spline.is_some() {
+            "PCHIP-spline"
+        } else {
+            ""
+        };
         println!(
             "║ n_inputs={}  head={}  feature_transforms={}  {}{}",
-            bake.n_inputs,
-            head_kind,
-            bake.has_transforms,
-            tanh,
-            spline
+            bake.n_inputs, head_kind, bake.has_transforms, tanh, spline
         );
         println!("╚════════════════════════════════════════════════════════════════════════");
         let mut panel_out = String::new();
@@ -889,7 +697,10 @@ fn main() {
         "{:<58} │ {:>7} │ {:>7} │ {:>7} │ {:>7} │ {:>7} │ {:>7}",
         "profile", "min", "p5", "p50", "p95", "max", "range"
     );
-    println!("{:─<58}┼{:─>9}┼{:─>9}┼{:─>9}┼{:─>9}┼{:─>9}┼{:─>9}", "", "", "", "", "", "", "");
+    println!(
+        "{:─<58}┼{:─>9}┼{:─>9}┼{:─>9}┼{:─>9}┼{:─>9}┼{:─>9}",
+        "", "", "", "", "", "", ""
+    );
     // Re-use the pre-loaded CID22 corpus for dynamic range computation.
     let cid22 = loaded_corpora.iter().find(|lc| lc.corpus.name == "cid22");
     for bake in &bakes {
@@ -931,5 +742,8 @@ fn main() {
 
     println!();
     println!("────────────────────────────────────────────────────────────────────────");
-    println!("preview_stats_demo: complete in {:.2}s", t0.elapsed().as_secs_f64());
+    println!(
+        "preview_stats_demo: complete in {:.2}s",
+        t0.elapsed().as_secs_f64()
+    );
 }

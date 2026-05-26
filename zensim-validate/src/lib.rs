@@ -11,6 +11,7 @@
 //! touched as part of changes that add library surface.
 
 pub mod adam_simd;
+pub mod bake_runtime;
 #[allow(clippy::all)]
 pub mod mlp_train;
 pub mod output_calibration_spline;
