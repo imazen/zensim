@@ -324,6 +324,74 @@ without giving up nonlinear expressivity.
   on `g` (or pre-squash) where gradients are well-scaled, with the squash
   only at output.
 
+## §7 — Executable spec: making `Profile::A` correct-by-construction (2026-05-26)
+
+Goal: `A` itself satisfies the invariant gate AND the codec goals
+(`docs/CODEC_TARGET_GOALS.md`). The two highest-priority goals — **G1
+(bounded dial)** and **G3 (monotonicity ≥93%)** — ARE the
+correct-by-construction criteria, so this is aligned, not opposed.
+
+### Architecture (monotone-by-construction MLP)
+Features `x ∈ ℝ_{≥0}^{372}` are all non-negative dissimilarities (`x=0`
+iff identical, ↑ with distortion — verified). Then:
+
+- **Monotone encoder:** `h = LeakyReLU(W₂·LeakyReLU(W₁x + b₁) + b₂)` with
+  **all `W ≥ 0`** (biases free). LeakyReLU is monotone↑; non-negative
+  weights ⟹ `h` is monotone non-decreasing in every `xᵢ`.
+- **Distortion head (drop per-sample-α):** `g = w_g·h + b_g`, `w_g ≥ 0`.
+  `g` monotone non-decreasing in `x`. The α-gated head
+  (`α·y_rank+(1−α)·y_pool`, `α=σ(w_α·h)`) is a product of input-dependent
+  terms → NOT monotone even with `W≥0`, so the CbC mode forces a single
+  monotone head (`α≡1`).
+- **Decreasing bounded pin:** `score = 100·σ(−(g)/s)` (note the **minus** —
+  the shipped pin is `100·σ(+y/30)`, which would make score ↑ with
+  distortion under `W≥0`). Decreasing-σ ⟹ `score ↓` in `g` ⟹ `↓` in
+  distortion. Bounded `(0,100)`.
+- **Self-identity = unique max:** the byte-identical short-circuit already
+  returns exactly 100; for non-identical pairs `g > g(0)` ⟹ `score < 100`.
+- **Bounded calibration:** if a dial-shaping spline is used, fit it
+  **monotone with CLAMPED (constant) extrapolation** — never the current
+  linear-unbounded extrapolation. Stays in `[0,100]` by construction.
+
+Result: **bounded + self-identity-maximal + degradation-monotone by
+construction, on the whole domain.** These hold regardless of training
+quality (they're architectural). Only the *codec goals* (G2/G7/G8…)
+depend on training — and the monotone class strictly contains the linear
+metric (`W` rank-1, identity activations), so CID22 SROCC ≥ V0_2's ~0.86
+is the floor → G7 (≥0.85) is reachable. The open empirical question is
+how much of V39's 0.879 the monotone constraint costs.
+
+### Trainer changes (`zensim-validate/src/mlp_train/`, `zensim_mlp_train` bin)
+1. `--monotone-cbc` hyperparam flag.
+2. `arch.rs::arch_forward`: when set, force `α = 1` (single rank head;
+   skip the pool/α path) and use the decreasing pin sign.
+3. Weight-update site (`mod.rs` ~1475/1512 `adam.step`): after the step,
+   **project** `w1`, `w2_enc`, `rank_w` to `≥ 0` (`w = w.max(0)`).
+   Projected-gradient = the simplest sound monotone constraint;
+   `softplus` reparam is the alternative if projection slows convergence.
+4. Pin sign + RankNet target orientation: higher-quality target ⟹ lower
+   `g` ⟹ higher score.
+5. Bake spline: clamped-extrapolation (and the runtime
+   `apply_output_calibration_spline` already supports adding the clamp
+   guard for CbC bakes).
+
+### Validation (must pass BOTH before promoting to A)
+- `cargo test -p zensim --test metric_invariants` green with `A` promoted
+  into the CbC gate (delete `v39_known_limit_violations` once A is fixed).
+- `bake_verdict` goals scorecard: G1 dial, G3 mono ≥93%, G2 anchor 60±5,
+  G7 CID22 ≥0.85, G8 Z-RMSE. Promote only if the gate passes AND goals
+  hold (per CLAUDE.md ship policy: advisory goals reported, G1/G3 are the
+  by-construction wins).
+
+### Status of §7
+Spec complete + path verified (trainer builds; construction math sound).
+Execution is multi-step (trainer surgery in a 5.8k-line file, then
+train/tune/validate); being done incrementally with compile + smoke-test
+gates rather than shipped as a rushed unvalidated bake. **No bake is
+promoted to `A` until it passes the invariant gate AND the goals
+scorecard** — until then `A` remains the V39 bake with its tracked
+known-limit.
+
 ## Status / next
 
 **SHIPPED (2026-05-26, commit `caf82c48`): the correct-by-construction
