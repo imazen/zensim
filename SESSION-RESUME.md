@@ -32,6 +32,24 @@ FALSIFIED** (see Findings below). The AIC-3 "gap" was a measurement
 artifact; per-ref we already beat raw CVVDP. The real lever is
 cross-ref absolute-scale calibration (the dial), not features.
 
+## ROOT CAUSE unifying the 2 unmet goals (2026-05-26) — it's TRAINING DATA
+
+The two unsolved deliverables share ONE cause: **the training distribution
+doesn't cover the regimes they test.** Training = conventional codecs
+(mozjpeg/jpegli/webp/JPEG/BPG) + synthetic analytic distortions
+(kadid/tid). NOT covered: (a) **neural-codec artifacts (JPEG-AI = AIC-4)**
+→ V39-vs-V0_3 on AIC-4 is a generalization LOTTERY we can't steer without
+JPEG-AI training data (and AIC-4 is HOLDOUT-ONLY, so steering = fishing);
+(b) **dense near-lossless JND (KonJND-HF = G5)** → underrepresented, so the
+HF specialist can't rank it without cratering mid-fidelity.
+Falsified in-session that it's NOT closable by recipe/architecture alone:
+single-MLP (v42 Pareto), 2-bake ensemble (v43 overlap), {V39,V0_3} MoE
+(v44 anti-corr + AIC-4 not route-separable). **The real unblock for BOTH
+is acquiring a JPEG-AI + near-lossless training corpus** (the goals doc's
+own flagged-unstarted work). Without it: lottery/research. Decision for
+the user: acquire that corpus, accept V39(5/6)+phone-bake, or explicitly
+relax the AIC-4 holdout rule.
+
 ## Findings & falsifications (2026-05-25 evening) — READ BEFORE RE-TRYING
 
 1. **Broken dial from SROCC-chasing (the big one).** Bakes trained
