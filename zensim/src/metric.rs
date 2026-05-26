@@ -283,6 +283,13 @@ pub struct ZensimConfig {
 
     /// Enable multi-threaded computation via rayon (default: true).
     pub allow_multithreading: bool,
+
+    /// Correct-by-construction bounded squash for the linear score
+    /// (mirrors [`ProfileParams::bounded_squash`](crate::profile::ProfileParams)).
+    /// When `true`, `combine_scores` maps the non-negative feature
+    /// distance through `100·exp(−(a/100)·d^b)` instead of `100 − a·d^b`,
+    /// guaranteeing a bounded `[0, 100]` output. Default `false`.
+    pub(crate) bounded_squash: bool,
 }
 
 impl Default for ZensimConfig {
@@ -301,6 +308,7 @@ impl Default for ZensimConfig {
             score_mapping_a: 18.0,
             score_mapping_b: 0.7,
             allow_multithreading: true,
+            bounded_squash: false,
         }
     }
 }
@@ -314,6 +322,41 @@ impl Default for ZensimConfig {
 /// `score_mapping_a` and `score_mapping_b` automatically.
 pub(crate) fn distance_to_score(raw_distance: f64) -> f64 {
     distance_to_score_mapped(raw_distance, 18.0, 0.7)
+}
+
+/// Map a raw weighted distance to the quality score with custom parameters.
+///
+/// `score = 100 - a * d^b`. Nominally 0–100 but can go negative for
+/// extreme distortions (the magnitude below zero is informative —
+/// it distinguishes "slightly wrong" from "completely wrong").
+/// Correct-by-construction bounded squash: `score = 100 · exp(−(a/100) · d^b)`.
+///
+/// For a non-negative distance `d ≥ 0` (guaranteed when the profile's
+/// weights are non-negative and every feature is a non-negative
+/// dissimilarity), this maps `d → (0, 100]` strictly-decreasingly, with
+/// `score = 100` iff `d = 0` (its unique maximum) and `score → 0` as
+/// `d → ∞`. It is a strictly-monotone transform of `d`, so it preserves
+/// the *rank* of [`distance_to_score_mapped`] (identical SROCC) while
+/// being **bounded `[0, 100]` by construction** — unlike `100 − a·d^b`,
+/// which is unbounded below.
+///
+/// The `a/100` scaling makes the squash agree with `100 − a·d^b` to
+/// first order at `d = 0` (`100·e^{−(a/100)·d^b} ≈ 100 − a·d^b` for
+/// small `d^b`), so the near-identical regime matches the legacy dial.
+/// See `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md` §4.
+fn bounded_score_squash(raw_distance: f64, a: f64, b: f64) -> f64 {
+    if raw_distance <= 0.0 {
+        return 100.0;
+    }
+    let exponent = (a / 100.0) * raw_distance.powf(b);
+    // exp(−x) ∈ (0, 1]; ×100 ∈ (0, 100]. Finite for all finite x ≥ 0;
+    // for x = +inf, exp(−inf) = 0. Defensive clamp catches NaN only.
+    let s = 100.0 * (-exponent).exp();
+    if s.is_finite() {
+        s
+    } else {
+        0.0
+    }
 }
 
 /// Map a raw weighted distance to the quality score with custom parameters.
@@ -435,8 +478,11 @@ pub fn score_features_with_profile_and_codec(
             .map(|(&f, &w)| w * f)
             .sum();
         let raw_per_scale = raw_distance / params.num_scales.max(1) as f64;
-        let score =
-            distance_to_score_mapped(raw_per_scale, params.score_mapping_a, params.score_mapping_b);
+        let score = if params.bounded_squash {
+            bounded_score_squash(raw_per_scale, params.score_mapping_a, params.score_mapping_b)
+        } else {
+            distance_to_score_mapped(raw_per_scale, params.score_mapping_a, params.score_mapping_b)
+        };
         // V0_1 / V0_2 are not on the extrapolate / soft-clamp paths
         // (their `ProfileParams` defaults are both `false`), so a hard
         // [0, 100] clamp matches the canonical `apply_mlp_scoring`
@@ -1905,6 +1951,7 @@ pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> Zens
         score_mapping_a: params.score_mapping_a,
         score_mapping_b: params.score_mapping_b,
         allow_multithreading: parallel,
+        bounded_squash: params.bounded_squash,
     }
 }
 
@@ -3433,8 +3480,17 @@ pub(crate) fn combine_scores(
     // Normalize by number of scales
     raw_distance /= scale_stats.len().max(1) as f64;
 
-    let score =
-        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b);
+    // Correct-by-construction bounded squash (linear profiles that opt
+    // in) vs. the legacy unbounded `100 − a·d^b`. The squash is a
+    // strictly-monotone transform of the same `raw_distance`, so the
+    // *rank* is identical; only boundedness differs. See
+    // `bounded_score_squash` and
+    // `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+    let score = if config.bounded_squash {
+        bounded_score_squash(raw_distance, config.score_mapping_a, config.score_mapping_b)
+    } else {
+        distance_to_score_mapped(raw_distance, config.score_mapping_a, config.score_mapping_b)
+    };
 
     ZensimResult::new(
         score,

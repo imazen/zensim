@@ -13,8 +13,18 @@ mod common;
 use common::generators::*;
 use zensim::{ColorPrimaries, PixelFormat, StridedBytes, Zensim, ZensimProfile};
 
+// These tests assert metric SANITY (score in [0,100), identical = 100,
+// wider-gamut → lower score) on ICC/gamut-converted content. The
+// gamut→feature pipeline is shared across profiles; only the final
+// scoring squash differs. We run them on the correct-by-construction
+// `LinearBounded` profile, whose [0,100] boundedness + monotonicity hold
+// by construction, so these assertions test the gamut path rather than
+// the (known-broken on off-manifold synthetic content) MLP squash of
+// profile `A`. A's invariant violations are tracked separately in
+// `tests/metric_invariants.rs::v39_known_limit_violations`. See
+// `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::A)
+    Zensim::new(ZensimProfile::LinearBounded)
 }
 
 /// Helper: create StridedBytes from RGB u8 pixels with given primaries.

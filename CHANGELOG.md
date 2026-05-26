@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added — `ZensimProfile::LinearBounded`: correct-by-construction metric (2026-05-26)
+
+- New `ZensimProfile::LinearBounded` (external name `zensim-linear-bounded`):
+  V0_2's non-negative weights over non-negative dissimilarity features,
+  scored through a **bounded saturating squash** `100·exp(−(a/100)·d^b)`
+  (`bounded_score_squash` in `metric.rs`). Because `d = Σ wᵢfᵢ ≥ 0` with
+  `d = 0` iff identical (weights ≥ 0, every feature is a `.max(0)`-clamped
+  error), the score is **bounded `[0,100]`, equals 100 iff identical (its
+  unique maximum), and monotone non-increasing in every error feature —
+  all by construction, on the entire input domain** (incl. content far
+  off any training manifold). SROCC is identical to `PreviewV0_2` (the
+  squash is a strictly-monotone transform of the same distance). Intended
+  as the guaranteed-safe metric / OOD fallback.
+- New `bounded_squash` disposition flag on `ProfileParams` + `ZensimConfig`
+  (default `false`; ignored on MLP profiles). Routed through `combine_scores`
+  and `score_features_with_profile` — all other profiles are byte-identical.
+- New invariant gate `tests/metric_invariants.rs`: asserts boundedness,
+  self-identity-maximality, and degradation-monotonicity for `LinearBounded`
+  across synthetic content (fractal/checker/noise/smooth), plus a
+  rank-equivalence guard vs `PreviewV0_2` and a tracked
+  `v39_known_limit_violations` characterization of profile `A`'s violations.
+- `score_sanity_checks` (cross_platform) and the `icc_coverage` helper now
+  assert their sanity/gamut invariants on `LinearBounded` (the metric that
+  satisfies them by construction); profile `A`'s violations stay loud in
+  the gate. Background + math:
+  `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`,
+  `benchmarks/ROOT_CAUSE_v39_invariant_violations_2026-05-26.md`.
+
 ### Added — konjnd-aggregation head wired for 2-layer/skip (2026-05-26, G5 lever)
 
 - `zensim_mlp_train`: removed the 2-layer/skip guard panic on

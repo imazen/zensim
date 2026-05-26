@@ -48,6 +48,20 @@ pub enum ZensimProfile {
     /// Linear-weights profile, no MLP forward pass. The historical
     /// stable default — `latest()` returned this through zensim 0.2.x.
     PreviewV0_2,
+    /// **Correct-by-construction linear metric.** V0_2's non-negative
+    /// weights over non-negative dissimilarity features, scored through
+    /// a bounded saturating squash `100·exp(−(a/100)·d^b)`. Guarantees —
+    /// *by construction, on the entire input domain* — that the score is
+    /// bounded `[0, 100]`, equals 100 iff identical (its unique maximum),
+    /// and is monotone non-increasing in every error feature. SROCC is
+    /// identical to [`Self::PreviewV0_2`] (the squash is a
+    /// strictly-monotone transform of the same distance). Use as the
+    /// guaranteed-safe metric / OOD fallback — unlike the MLP profiles
+    /// ([`Self::A`]), it cannot return out-of-range scores or rank a
+    /// degraded image above its source, even on synthetic content far
+    /// off the training manifold. See
+    /// `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+    LinearBounded,
     /// Preview v0.3 — **canonical shipping profile (recovery phase 4,
     /// 2026-05-24 PM)**. Multi-dataset Tuner v5 bake (file
     /// `v_tuner_v11_2026-05-24.bin`, 54 KB packed i8 + zerobias + lz4,
@@ -852,6 +866,7 @@ impl ZensimProfile {
             Self::A_Phone => "zensim-a-phone",
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
+            Self::LinearBounded => "zensim-linear-bounded",
             #[allow(deprecated)]
             Self::PreviewV0_3 => "zensim-preview-v0.3",
             Self::PreviewV0_4 => "zensim-preview-v0.4",
@@ -891,6 +906,7 @@ impl ZensimProfile {
             Self::A_Phone => &PROFILE_A_PHONE,
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
+            Self::LinearBounded => &PROFILE_LINEAR_BOUNDED,
             Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
             // PreviewV0_5 + PreviewV0_5Balanced are the same balanced-trail
             // ship — same bake bytes, same params. The split exists at the
@@ -1061,6 +1077,31 @@ pub struct ProfileParams {
     /// profiles whose splines/anchors only span [0, 100].
     pub extrapolate_score: bool,
 
+    /// **Correct-by-construction bounded squash** for *linear*
+    /// (`mlp_bytes == None`) profiles. When `true`, the final score is
+    /// `100 · exp(−(a/100) · d^b)` of the non-negative-weight feature
+    /// distance `d = Σ wᵢ fᵢ` (with `a = score_mapping_a`, `b =
+    /// score_mapping_b`), instead of the legacy `100 − a·d^b`.
+    ///
+    /// Because every feature is a non-negative dissimilarity
+    /// (`fᵢ ≥ 0`, `= 0` iff locally identical) and the V0_2 weights are
+    /// all non-negative, `d ≥ 0` with `d = 0` iff identical. The squash
+    /// `S(d) = exp(−k·d^b)` is strictly decreasing on `[0, ∞)`,
+    /// `S(0) = 1`, `S → 0`. Composing them gives a score that is
+    /// **bounded `[0, 100]`, equal to 100 iff identical (its unique
+    /// global maximum), and monotone non-increasing in every error
+    /// feature — all by construction, on the entire input domain**
+    /// (including content far off the training manifold). It is a
+    /// strictly-monotone transform of `d`, so SROCC is identical to the
+    /// legacy `100 − a·d^b` mapping; only the unbounded-below tail and
+    /// mid-range scale differ. See
+    /// `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md` §4.
+    ///
+    /// Ignored on MLP profiles (`mlp_bytes.is_some()`), whose
+    /// correct-by-construction form requires a monotone architecture
+    /// (the larger follow-on in §5 of that doc). Default `false`.
+    pub bounded_squash: bool,
+
     /// **Ensemble routing classifier** — when `Some`, the runtime
     /// loads the classifier bake, forwards the feature vector through
     /// it, and routes to either `mlp_bytes` (the balanced/primary
@@ -1132,6 +1173,7 @@ impl ProfileParams {
             compute_iw_features: false,
             soft_clamp_score: false,
             extrapolate_score: false,
+            bounded_squash: false,
             ensemble_classifier_bytes: None,
             mlp_bytes_compression: None,
         }
@@ -1145,6 +1187,7 @@ static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: false,
@@ -1164,6 +1207,37 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: false,
+    mlp_bytes: None,
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: false,
+    compute_iw_features: false,
+    soft_clamp_score: false,
+    extrapolate_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// Correct-by-construction linear profile: V0_2's non-negative weights
+/// over non-negative dissimilarity features, scored through the bounded
+/// saturating squash `100·exp(−(a/100)·d^b)`. By construction it is
+/// bounded `[0, 100]`, equals 100 iff identical (its unique maximum),
+/// and is monotone non-increasing in every error feature — on the
+/// ENTIRE input domain, including content far off any training
+/// manifold. SROCC is identical to `PreviewV0_2` (the squash is a
+/// strictly-monotone transform of the same distance). This is the
+/// guaranteed-safe metric / OOD fallback per
+/// `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+static PROFILE_LINEAR_BOUNDED: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: true,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: false,
@@ -1322,6 +1396,7 @@ static PROFILE_A_PHONE: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -1348,6 +1423,7 @@ static PROFILE_A: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     // Tuner v5 bake carries its own PCHIP spline calibration via the
     // `zentrain.output_calibration_spline` metadata — the raw MLP
     // output is dial-honest after the spline applies. No legacy
@@ -1391,6 +1467,7 @@ static PROFILE_PREVIEW_V0_4: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     // Both bakes are affine-calibrated to MCOS 0..100 already.
     // skip_score_mapping returns the raw mix directly as the score.
     score_mapping_a: 18.0,
@@ -1488,6 +1565,7 @@ static PROFILE_PREVIEW_V0_5_BALANCED: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     // Score-shaped: the bake's raw output IS the final 0..100 score.
     // Trained against `mix_cv40_iw60` already pre-scaled to that range.
     score_mapping_a: 18.0,
@@ -1512,6 +1590,7 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -1564,6 +1643,7 @@ static PROFILE_PREVIEW_V0_5_ENSEMBLE: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // Both balanced and compression bakes are score-shaped (the
@@ -1616,6 +1696,7 @@ static PROFILE_PREVIEW_V0_5_TUNER: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // The bake is affine-calibrated to MCOS 0..100 — the runtime
@@ -1673,6 +1754,7 @@ static PROFILE_PREVIEW_V0_5_CROSS_CODEC: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // The bake is trained with `--target-scale 1.0` against
@@ -1738,6 +1820,7 @@ static PROFILE_PREVIEW_V0_5_TUNER_V2: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // The bake's `zentrain.tanh_output_head` metadata pins the raw
@@ -1791,6 +1874,7 @@ static PROFILE_PREVIEW_V0_5_TUNER_V3: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // The bake's `zentrain.tanh_output_head` metadata pins the raw
@@ -1857,6 +1941,7 @@ static PROFILE_PREVIEW_V0_5_BALANCED_V2: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // The bake's `zentrain.output_calibration_spline` metadata maps
@@ -1932,6 +2017,7 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION_V2: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     // The bake's `zentrain.output_calibration_spline` metadata maps
@@ -2012,6 +2098,7 @@ static PROFILE_PREVIEW_V0_5_BALANCED_V3: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -2054,6 +2141,7 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION_V3: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -2099,6 +2187,7 @@ static PROFILE_PREVIEW_V0_5_TUNER_V4: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -2138,6 +2227,7 @@ static PROFILE_PREVIEW_V0_5_TUNER_V4_CALIBRATED: ProfileParams = ProfileParams {
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -2162,6 +2252,7 @@ static PROFILE_PREVIEW_V0_5_BALANCED_V3_CALIBRATED: ProfileParams = ProfileParam
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
@@ -2186,6 +2277,7 @@ static PROFILE_PREVIEW_V0_5_COMPRESSION_V3_CALIBRATED: ProfileParams = ProfilePa
     blur_radius: 5,
     blur_passes: 1,
     num_scales: 4,
+    bounded_squash: false,
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
