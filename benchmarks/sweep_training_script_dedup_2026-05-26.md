@@ -39,7 +39,7 @@ N copies, no parity, drift ships silently), reach second.
 | 2 | **IQA-stat function re-implementations (`srocc`/`plcc`/`krocc`/`z_rmse`/`pwrc`/`outlier_ratio`/`mohammadi_panel`)** | 14 files, ≥25 `def`s | **HIGH** — a metric verdict is only as trustworthy as its stat impl. Hand-rolled `spearman` with a tie-handling or NaN-drop difference silently changes ship/no-ship calls. CLAUDE.md mandates the full Mohammadi panel everywhere — 14 forks guarantee they're *not* identical. | One mirrored `zen_stats.py` (Python) — the canonical Mohammadi panel — imported by every eval `.py`. Rust side already centralizes; mirror it. |
 | 3 | **R2/S3 endpoint + creds-export + `aws s3 sync` block** (`R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"` verbatim) | 55 primary files | **MEDIUM-HIGH** — a creds-export or endpoint typo in one fork uploads to the wrong bucket or fails silently mid-fleet; the verdict gate (CLAUDE.md "verify artifacts landed") is itself copy-pasted and drifts. | One sourced `zen-r2.sh` exporting `R2_ENDPOINT` + helper fns (`r2_sync`, `r2_cp`, `r2_ls`); a Python `zen_r2.py` for the builders. |
 | 4 | **`run_cross_codec_v*_seed.sh` / `run_tuner_v*_seed.sh` / `eval_v*_pjnd_check.py` version-forks** — recipe per experiment-version | 60 recipes in zensim alone; `eval_v6/v7/v8_pjnd_check.py` **byte-identical** mod version-string (same md5) | **MEDIUM-HIGH** — when a trainer flag must change, you must edit N forks; the ones you miss run stale args and produce mislabeled bakes. `janitor_w44_216/219/229.sh` already **drifted** (13/222 lines differ after normalizing sweep-id — not the intended diff). | One parameterized recipe + a per-experiment config file (env block or TOML). Proven model already in-repo: `_picker_lib.py` + thin wrappers. |
-| 5 | **vast.ai/cloud orchestration forked two ways** — coefficient `src/cloud/` Rust (vastai 867 LOC + dispatch/worker 782 LOC) **vs** zenmetrics `scripts/sweep/` shell (15 vastai scripts, 10 `onstart_*.sh` = 2,454 LOC) | 2 parallel stacks + 10 onstart forks | **MEDIUM** — fleet-spin / claim-chunk / upload-result / janitor logic exists twice with no shared core; a fix to chunk-claim races lands in one and not the other. The 10 `onstart_*` scripts each re-implement env-hydrate + verify-baked-tools + R2-fetch + worker-loop. | Extract a shared `zen-fleet.sh` (hydrate + verify + claim + heartbeat) sourced by every onstart; longer-term pick one orchestration core. |
+| 5 | **`onstart_*.sh` boot-glue boilerplate** — ~10 boot scripts each re-implement env-hydrate-from-`/proc/1/environ` + verify-baked-tools + R2-fetch + heartbeat + worker-loop | ~10 onstart scripts | **LOW** (corrected from MEDIUM 2026-05-26). NOTE: the original "cloud orchestration forked two ways" claim here was a **category error** — zenmetrics orchestration is the tested 4957-LOC Rust crate `crates/vastai-fleet`, not shell; the coefficient↔zenmetrics Rust overlap is a LIB dedup tracked in the master doc, not here. Only the onstart boot-glue is an in-scope script-layer dup. | `scripts/lib/zen-fleet.sh` (hydrate + verify + claim + heartbeat) sourced by every onstart. |
 
 **Single highest bug-risk-reduction action:** **Cluster #1** — force every
 parquet builder through `join_safety.safe_merge` and gate bare `pd.merge(` in
@@ -140,18 +140,41 @@ The tested guard exists and is good — it just isn't used.
 
 ### Class 5 — Sweep launchers + cloud orchestration
 
-- **Two parallel stacks for one job:**
-  - coefficient Rust: `src/cloud/vastai.rs` (867), `src/cloud/do_droplet.rs`,
-    `src/cloud/batch.rs`, `src/bin/{vastai_dispatch,vastai_worker,do_worker,
-    cloud_worker,batch_cli}.rs` (≈1,650 LOC orchestration).
-  - zenmetrics shell: `scripts/sweep/` — 15 vastai-touching `.sh`,
-    `dispatch.sh`, `sweep_janitor.py`, `fleet_status.sh`, plus the
-    `zenjxl-tuning-sweep/launch_*_fleet.sh`+`janitor_*`+`finalize_*` mirror in
-    jxl-encoder.
-- **`onstart_*.sh` boilerplate:** 10 scripts, 2,454 LOC, each re-implementing
-  env-hydrate-from-`/proc/1/environ` (14 scripts do this), verify-baked-tools,
-  R2-fetch-chunks, heartbeat, worker-loop.
-- **Risk:** MEDIUM — chunk-claim-race / heartbeat fixes land in one stack only.
+> **CORRECTION 2026-05-26 (verified by direct read):** the original
+> entry below mischaracterized this cluster. zenmetrics orchestration
+> is **NOT** primarily shell — it is a **4957-LOC tested Rust crate**
+> `zenmetrics/crates/vastai-fleet` (worker: claim/r2/chunk-io/
+> sweep-runner/feature-backfill + `tests/cli.rs`), and the
+> `scripts/sweep/*.sh` are migrating ONTO it (`launch_backfill.sh:9`:
+> "no more bash+python"). So:
+>
+> 1. **The coefficient `src/cloud` (4440 LOC, multi-provider: vastai +
+>    GCP Batch + DO) ↔ zenmetrics `vastai-fleet` (4957 LOC, vast.ai
+>    only) overlap is a RUST-LIBRARY dedup** — a shared `zen-vastai`
+>    crate that both depend on, coefficient keeping GCP/DO on top.
+>    That belongs in the lib-dedup master doc
+>    (`dedup_inventory_master_2026-05-26.md`), **NOT this script-layer
+>    doc.** Removed from the script-layer scope.
+> 2. **`onstart_*.sh` boot scripts MUST be shell** (they run on the
+>    vast.ai box at boot, per CLAUDE.md "bake everything"). Their
+>    shared hydrate/verify/R2-fetch boilerplate IS a legitimate
+>    script-layer dedup (the `zen-fleet.sh` extraction below), but the
+>    "2,454 LOC of duplicate orchestration" framing was wrong — that
+>    LOC is boot glue, not duplicated fleet logic.
+>
+> The ONLY in-scope script-layer item here is the onstart-boilerplate
+> extraction. The orchestration-core dedup is a lib concern.
+
+~~Two parallel stacks for one job:~~ (see correction — this was a
+category error; the Rust orchestration crate was not read.)
+
+- **`onstart_*.sh` boilerplate (IN SCOPE):** ~10 boot scripts each
+  re-implementing env-hydrate-from-`/proc/1/environ` (14 scripts do
+  this), verify-baked-tools, R2-fetch-chunks, heartbeat, worker-loop.
+  These are legitimately shell (boot-time). Shared boilerplate →
+  `zen-fleet.sh`.
+- **Risk:** LOW (was mislabeled MEDIUM) — the orchestration core is
+  already a tested Rust crate; only boot-glue boilerplate is duplicated.
 - **Consolidation:** `scripts/lib/zen-fleet.sh` (hydrate+verify+claim+
   heartbeat) sourced by every onstart; medium-term converge on one
   orchestration core (the master doc Tier-2 already flags the
