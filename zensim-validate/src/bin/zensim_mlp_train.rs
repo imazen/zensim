@@ -2507,6 +2507,41 @@ fn main() {
             println!("{line}");
         }
     }
+
+    // Auto-evaluate: run bake_verdict on the output bake after every training run.
+    // Produces the full Mohammadi panel (SROCC+PLCC+KROCC+OR+PWRC+Z-RMSE)
+    // on all held-out corpora so every bake gets an honest verdict.
+    let self_exe = std::env::current_exe().ok();
+    let verdict_bin = self_exe
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(|dir| dir.join("bake_verdict"));
+    if let Some(ref vb) = verdict_bin {
+        if vb.exists() {
+            println!("\n--- bake_verdict (auto-eval) ---");
+            let mut cmd = std::process::Command::new(vb);
+            cmd.arg("--bake").arg(&args.out);
+            // Always write verdict file alongside the bake
+            let verdict_path = args.out.with_extension("verdict.md");
+            cmd.arg("--output").arg(&verdict_path);
+            // Inherit stdout/stderr so user sees the eval live
+            cmd.stdout(std::process::Stdio::inherit());
+            cmd.stderr(std::process::Stdio::inherit());
+            match cmd.status() {
+                Ok(s) if s.success() => {
+                    println!("Verdict written to {:?}", verdict_path);
+                }
+                Ok(s) => eprintln!("bake_verdict exited with {s}"),
+                Err(e) => eprintln!("bake_verdict failed to run: {e}"),
+            }
+        } else {
+            eprintln!(
+                "bake_verdict not found at {:?} — build with: \
+                 cargo build --release --bin bake_verdict -p zensim-validate",
+                vb
+            );
+        }
+    }
 }
 
 #[cfg(test)]
