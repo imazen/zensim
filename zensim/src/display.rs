@@ -46,6 +46,18 @@ impl DisplayProfile {
         peak_nits: 2000.0,
         ambient_lux: 500.0,
     };
+    /// Modern OLED phone, everyday indoor SDR viewing — the
+    /// `modern_oled_phone_indoor` zenmetrics display the
+    /// `zensim-b-phone` bake was trained on (6.1" 2532×1170 at 0.35 m
+    /// → 109.97 ppd; 400 nit indoor SDR auto-brightness setpoint, not
+    /// the panel's 1000–2000 nit HDR/sunlight peak; ~1000:1 effective
+    /// contrast once the OLED's sub-milli-nit black is washed out by
+    /// 250 lux ambient reflection).
+    pub const PHONE_OLED_INDOOR: Self = Self {
+        ppd: 109.97,
+        peak_nits: 400.0,
+        ambient_lux: 250.0,
+    };
     /// iPhone 16 Pro at ~25 cm.
     pub const IPHONE_16_PRO: Self = Self {
         ppd: 69.0,
@@ -95,7 +107,7 @@ impl DisplayProfile {
 /// # Examples
 /// ```
 /// use zensim::display::DisplayTarget;
-/// let target = DisplayTarget::Phone; // zensim-b-phone (iPhone 14 Pro PPD=67)
+/// let target = DisplayTarget::Phone; // zensim-b-phone (modern OLED phone, ~110 PPD)
 /// let profile = target.display_profile();
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -104,7 +116,9 @@ pub enum DisplayTarget {
     /// This is the default when no display is specified.
     /// Bake name: `zensim-b-desktop` (or just `zensim-b`).
     Desktop,
-    /// Smartphone at arm's length (PPD ≈ 67, iPhone 14 Pro at 25cm).
+    /// Smartphone, modern OLED at hand-held distance (PPD ≈ 110,
+    /// `modern_oled_phone_indoor`: 6.1" 2532×1170 at 0.35 m, 400 nit
+    /// indoor SDR setpoint, ~1000:1 effective contrast under 250 lux).
     /// Bake name: `zensim-b-phone`.
     Phone,
     /// Living-room TV at couch distance (PPD ≈ 56, 55" 4K at 3m).
@@ -117,7 +131,7 @@ impl DisplayTarget {
     pub fn display_profile(self) -> DisplayProfile {
         match self {
             Self::Desktop => DisplayProfile::DESKTOP_1080P,
-            Self::Phone => DisplayProfile::IPHONE_14_PRO,
+            Self::Phone => DisplayProfile::PHONE_OLED_INDOOR,
             Self::Tv => DisplayProfile::TV_4K_55_3M,
         }
     }

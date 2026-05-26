@@ -1275,11 +1275,19 @@ pub(crate) fn mlp_bake_cvvdp_desktop() -> &'static [u8] {
     include_bytes!("../weights/zensim_b_desktop_2026-05-25.bin")
 }
 
-/// CVVDP-trained bake for phone viewing conditions (PPD ≈ 67).
-/// INTERIM: trained on desktop CVVDP scores (same bake as desktop).
-/// Will be retrained on phone-specific CVVDP scores when backfill lands.
+/// CVVDP-trained bake for modern-phone viewing conditions
+/// (`modern_oled_phone_indoor`: 109.97 ppd, 400 nit indoor SDR
+/// auto-brightness setpoint, OLED native black washed to ~1000:1 by
+/// 250 lux ambient). Trained on phone-CVVDP scores — KADID + TID
+/// scored under the `modern_oled_phone_indoor` zenmetrics display
+/// model — with the V39 rank-then-spline recipe. The output
+/// calibration spline is fit from the phone-CVVDP-derived multi-band
+/// anchor itself, so the dial spans the full 0..100 range (held-out
+/// G1 p5=17.7 p95=96.6, score 1.00) and tracks held-out phone-CVVDP
+/// at SROCC ≈ 0.934. See
+/// `benchmarks/zensim_b_phone_oled_methodology_2026-05-26.md`.
 pub(crate) fn mlp_bake_cvvdp_phone_interim() -> &'static [u8] {
-    include_bytes!("../weights/zensim_b_phone_interim_2026-05-25.bin")
+    include_bytes!("../weights/zensim_b_phone_oled_2026-05-26.bin")
 }
 
 static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
