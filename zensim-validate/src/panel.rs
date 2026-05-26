@@ -126,41 +126,125 @@ pub fn kendall_tau(a: &[f64], b: &[f64]) -> f64 {
     }
 }
 
-pub fn outlier_ratio(predicted: &[f64], target: &[f64]) -> f64 {
-    let n = predicted.len();
+/// Outlier Ratio per ITU-T P.1401 / Mohammadi 2025 Equations 2-4.
+///
+/// `transformed_predicted` MUST already be on the subjective scale —
+/// pass the output of [`rescale_logistic`] (the 4-parameter logistic
+/// of Eq. 1), NOT the raw metric scores. `target` is the subjective
+/// score (MOS / DMOS / MCOS) per stimulus.
+///
+/// Definition (Mohammadi 2025 § VII, Eq. 2-4):
+///
+/// ```text
+/// τ   = z · σ_target,  z = 1.96 (95% confidence)
+/// δᵢ  = 1 if |S_trans,i − S_subj,i| > τ  else  0
+/// OR  = (1/N) Σ δᵢ
+/// ```
+///
+/// This corpus-σ form uses a single `σ` = std(target) over all
+/// stimuli — appropriate when per-stimulus subjective σ is not
+/// available (e.g., KADID / TID single-MOS corpora). On AIC-3 /
+/// CID22 where bootstrap σ per stimulus is available, prefer
+/// [`outlier_ratio_per_sample`].
+///
+/// Returns the fraction of outliers in `[0, 1]`. NaN if `n < 4`.
+///
+/// History: prior to 2026-05-26 this function computed a different
+/// two-level z-score residual outlier; the current body matches the
+/// paper. Saved scorecards from before that date used the old
+/// definition — they are NOT comparable to current OR numbers.
+pub fn outlier_ratio(transformed_predicted: &[f64], target: &[f64]) -> f64 {
+    let n = transformed_predicted.len().min(target.len());
     if n < 4 {
         return f64::NAN;
     }
-    let mean_p: f64 = predicted.iter().sum::<f64>() / n as f64;
-    let mean_t: f64 = target.iter().sum::<f64>() / n as f64;
-    let var_p: f64 = predicted.iter().map(|x| (x - mean_p).powi(2)).sum::<f64>() / n as f64;
-    let var_t: f64 = target.iter().map(|x| (x - mean_t).powi(2)).sum::<f64>() / n as f64;
-    let sd_p = var_p.sqrt().max(1e-12);
-    let sd_t = var_t.sqrt().max(1e-12);
-    let polarity = if pearson(predicted, target) < 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let residuals: Vec<f64> = (0..n)
-        .map(|i| {
-            let zp = polarity * (predicted[i] - mean_p) / sd_p;
-            let zt = (target[i] - mean_t) / sd_t;
-            (zp - zt).abs()
-        })
-        .collect();
-    let mean_r: f64 = residuals.iter().sum::<f64>() / n as f64;
-    let sd_r: f64 = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>() / n as f64)
-        .sqrt()
-        .max(1e-12);
-    residuals
+    // Corpus σ — std of subjective scores.
+    let mean_t: f64 = target.iter().take(n).sum::<f64>() / n as f64;
+    let var_t: f64 = target
         .iter()
-        .filter(|r| (**r - mean_r).abs() > 2.0 * sd_r)
-        .count() as f64
-        / n as f64
+        .take(n)
+        .map(|x| (x - mean_t).powi(2))
+        .sum::<f64>()
+        / n as f64;
+    let sigma = var_t.sqrt().max(1e-12);
+    let tau = 1.96 * sigma;
+    let mut outliers = 0usize;
+    let mut counted = 0usize;
+    for i in 0..n {
+        let r = (transformed_predicted[i] - target[i]).abs();
+        if r.is_finite() {
+            counted += 1;
+            if r > tau {
+                outliers += 1;
+            }
+        }
+    }
+    if counted == 0 {
+        return f64::NAN;
+    }
+    outliers as f64 / counted as f64
 }
 
-pub fn pwrc(a: &[f64], b: &[f64]) -> f64 {
+/// Per-stimulus σ variant of [`outlier_ratio`] (Mohammadi 2025
+/// Eq. 2-4 with σᵢ rather than corpus σ). Each stimulus uses its OWN
+/// `sigma[i]` as the threshold base: `τᵢ = 1.96 · σᵢ`.
+///
+/// Use on AIC-3 / CID22 / KonJND where bootstrap σ per stimulus is
+/// known (the paper's intended form). Length-mismatch → NaN.
+pub fn outlier_ratio_per_sample(
+    transformed_predicted: &[f64],
+    target: &[f64],
+    sigma: &[f64],
+) -> f64 {
+    let n = transformed_predicted.len().min(target.len()).min(sigma.len());
+    if n < 4 {
+        return f64::NAN;
+    }
+    let mut outliers = 0usize;
+    let mut counted = 0usize;
+    for i in 0..n {
+        if !sigma[i].is_finite() || sigma[i] <= 0.0 {
+            continue;
+        }
+        let r = (transformed_predicted[i] - target[i]).abs();
+        if !r.is_finite() {
+            continue;
+        }
+        counted += 1;
+        let tau = 1.96 * sigma[i];
+        if r > tau {
+            outliers += 1;
+        }
+    }
+    if counted == 0 {
+        return f64::NAN;
+    }
+    outliers as f64 / counted as f64
+}
+
+/// Weighted-rank-Pearson **proxy** for PWRC.
+///
+/// **THIS IS NOT THE PAPER'S PWRC.** Mohammadi 2025 § VII defines PWRC
+/// as the area under the SA-ST (Sorting Accuracy vs Sensory Threshold)
+/// curve — see [`pwrc_sa_st_auc`]. This function computes a weighted
+/// Pearson on the ranks of `a` and `b`, with weights `|rank(a) − mid|`
+/// (rank-extremity of the FIRST argument).
+///
+/// It is kept for back-compat: prior to 2026-05-26, `PanelStats.pwrc`
+/// was computed by this function. Saved scorecards from before that
+/// date used these values. Going forward, [`pwrc_sa_st_auc`] is the
+/// paper-correct PWRC and the value placed into `PanelStats.pwrc` by
+/// [`compute_panel`] / [`compute_light_panel`].
+///
+/// If you genuinely want a weighted-rank correlation (which IS a
+/// defensible statistic, just not paper-PWRC), call this directly
+/// — but don't compare its numbers to CVVDP=5.92 / IW-SSIM=5.76 from
+/// Mohammadi Table 2; those are SA-ST AUC values.
+///
+/// Convention: pass HUMAN ranks as `a` so the weighting emphasizes
+/// extreme human-quality stimuli (the paper's "quality level"
+/// weighting intent).
+pub fn pwrc_proxy_weighted_rank(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len();
     if n < 4 {
         return 0.0;
@@ -188,6 +272,114 @@ pub fn pwrc(a: &[f64], b: &[f64]) -> f64 {
     }
     let den = (da * db).sqrt();
     if den < 1e-12 { 0.0 } else { num / den }
+}
+
+/// SA-ST curve points: `(sensory_threshold, sorting_accuracy)`.
+///
+/// Per Mohammadi 2025 § VII + Figure 4: for each Sensory Threshold ST
+/// on the SUBJECTIVE-side scale, the Sorting Accuracy SA(ST) is the
+/// fraction of stimulus pairs whose subjective-score gap exceeds ST
+/// AND which the objective metric ranks correctly. As ST increases
+/// (only progressively more "obvious" pairs counted), SA approaches
+/// 1.0 for a competent metric.
+///
+/// `scores`  — objective metric output.
+/// `humans`  — subjective MOS / DMOS / MCOS.
+/// `n_points` — number of ST samples (uniformly spaced in
+///   `[0, max_subj_gap]`). 64–256 is typical for plotting; 128 is the
+///   default in [`pwrc_sa_st_auc`].
+pub fn sa_st_curve(scores: &[f64], humans: &[f64], n_points: usize) -> Vec<(f64, f64)> {
+    let n = scores.len().min(humans.len());
+    if n < 2 || n_points < 2 {
+        return Vec::new();
+    }
+    // All N·(N−1)/2 pairs with their subjective-gap + correctness sign.
+    let mut pairs: Vec<(f64, bool)> = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dh = humans[j] - humans[i];
+            let ds = scores[j] - scores[i];
+            // Skip pairs that are tied in human OR predicted (no
+            // unambiguous direction to score against).
+            if !dh.is_finite() || !ds.is_finite() || dh == 0.0 || ds == 0.0 {
+                continue;
+            }
+            // Correct if metric agrees on direction.
+            let correct = dh.signum() == ds.signum();
+            pairs.push((dh.abs(), correct));
+        }
+    }
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    // ST domain: 0 .. max subjective gap.
+    let st_max = pairs.iter().map(|(g, _)| *g).fold(0.0_f64, f64::max);
+    if st_max <= 0.0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(n_points);
+    for k in 0..n_points {
+        let t = k as f64 / (n_points - 1) as f64;
+        let st = t * st_max;
+        let mut active = 0usize;
+        let mut correct = 0usize;
+        for (gap, ok) in &pairs {
+            if *gap > st {
+                active += 1;
+                if *ok {
+                    correct += 1;
+                }
+            }
+        }
+        let sa = if active == 0 {
+            // Once no active pairs remain, treat SA as undefined →
+            // propagate the last finite value (a step-flat tail) so
+            // AUC integration is well-defined. We approximate by
+            // re-using the previous point's SA when available, else 0.
+            out.last().map(|(_, sa)| *sa).unwrap_or(0.0)
+        } else {
+            correct as f64 / active as f64
+        };
+        out.push((st, sa));
+    }
+    out
+}
+
+/// **PWRC (paper-correct)** — AUC of the SA-ST curve per Mohammadi
+/// 2025 § VII + Figure 4.
+///
+/// Normalised so that a perfect metric (SA = 1 at every ST) returns
+/// 1.0. Returns 0.0 when there are no rankable pairs, NaN if both
+/// inputs have fewer than 2 finite entries.
+///
+/// Computed via trapezoidal integration of the SA-ST curve from
+/// [`sa_st_curve`] over `[0, max_subjective_gap]`, then divided by
+/// `max_subjective_gap` (the area of the SA = 1 plateau).
+///
+/// `scores`  — objective metric output.
+/// `humans`  — subjective MOS / DMOS / MCOS.
+pub fn pwrc_sa_st_auc(scores: &[f64], humans: &[f64]) -> f64 {
+    let curve = sa_st_curve(scores, humans, 128);
+    if curve.len() < 2 {
+        return 0.0;
+    }
+    // Trapezoidal AUC over ST.
+    let mut auc = 0.0_f64;
+    let mut last_st = curve[0].0;
+    let mut last_sa = curve[0].1;
+    for (st, sa) in curve.iter().skip(1) {
+        let dst = st - last_st;
+        if dst > 0.0 {
+            auc += 0.5 * (sa + last_sa) * dst;
+        }
+        last_st = *st;
+        last_sa = *sa;
+    }
+    let st_max = curve.last().map(|(s, _)| *s).unwrap_or(0.0);
+    if st_max <= 0.0 {
+        return 0.0;
+    }
+    auc / st_max
 }
 
 pub fn z_rmse(predicted: &[f64], target: &[f64]) -> f64 {
@@ -660,9 +852,17 @@ pub fn compute_panel(scores: &[f64], humans: &[f64]) -> PanelStats {
     }
     let srocc = spearman(humans, scores).abs();
     let krocc = kendall_tau(humans, scores).abs();
-    let pw = pwrc(humans, scores).abs();
-    let or_ = outlier_ratio(scores, humans);
+    // Paper-correct PWRC (SA-ST AUC, Mohammadi 2025 § VII + Figure 4).
+    // Naturally in [0, 1]; no .abs() needed since correctness is sign-
+    // based. We DO need polarity-correct ordering between scores and
+    // humans, but sa_st_curve checks sign-agreement of (Δscore, Δhuman)
+    // which is polarity-invariant when both are flipped.
+    let pw = pwrc_sa_st_auc(scores, humans);
+    // OR per ITU-T P.1401 / Mohammadi Eq. 2-4 needs the 4-param
+    // logistic-rescaled prediction. We compute it once and reuse for
+    // PLCC and Z-RMSE.
     let rescaled = rescale_logistic(scores, humans);
+    let or_ = outlier_ratio(&rescaled, humans);
     let plcc = pearson(&rescaled, humans).abs();
     let z = z_rmse(&rescaled, humans);
     PanelStats {
@@ -781,7 +981,7 @@ pub fn compute_light_panel(scores: &[f64], humans: &[f64]) -> LightPanel {
         return LightPanel::default();
     }
     let srocc = spearman(humans, scores).abs();
-    let pw = pwrc(humans, scores).abs();
+    let pw = pwrc_sa_st_auc(scores, humans);
     let rescaled = rescale_logistic(scores, humans);
     let plcc = pearson(&rescaled, humans).abs();
     LightPanel {

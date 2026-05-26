@@ -320,6 +320,73 @@ pub fn leaky_relu_backward_f32(dl_dh: &[f32], h_pre: &[f32], leaky_alpha: f32) -
 }
 
 // =============================================================================
+// 2-layer encoder (f32) — wrapper around the 1-layer f32 fns. Mirrors the
+// f64 `encoder_forward_2layer` / `encoder_backprop_2layer` in `simd_encoder`.
+// This closes the perf gap on the per-sample-α 2-layer training path which
+// was forced onto the f64 fns because the f32 module previously only had
+// 1-layer fns (the documented "1.36× over f64" speedup never reached
+// real training).
+// =============================================================================
+
+/// 2-layer f32 forward: `x → LeakyReLU(W₁x+b₁) → LeakyReLU(W₂h₁+b₂)`.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn encoder_forward_2layer_f32(
+    x: &[f32],
+    w1: &[f32],
+    b1: &[f32],
+    w2: &[f32],
+    b2: &[f32],
+    n_features: usize,
+    n_hidden1: usize,
+    n_hidden2: usize,
+    leaky_alpha: f32,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let (h1_pre, h1) = encoder_forward_f32(x, w1, b1, n_features, n_hidden1, leaky_alpha);
+    let (h2_pre, h2) =
+        encoder_forward_f32(&h1, w2, b2, n_hidden1, n_hidden2, leaky_alpha);
+    (h1_pre, h1, h2_pre, h2)
+}
+
+/// 2-layer f32 backprop. Given `dl/dh2_pre` from the head, accumulates
+/// gradients into both layers' (gw, gb) buffers.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn encoder_backprop_2layer_f32(
+    x: &[f32],
+    h1_pre: &[f32],
+    h1: &[f32],
+    h2_pre: &[f32],
+    dl_dh2: &[f32],
+    w2: &[f32],
+    gw1: &mut [f32],
+    gb1: &mut [f32],
+    gw2: &mut [f32],
+    gb2: &mut [f32],
+    n_features: usize,
+    n_hidden1: usize,
+    n_hidden2: usize,
+    leaky_alpha: f32,
+) {
+    // Layer 2 backprop: dl/dh2 → dl/dh2_pre → gw2, gb2.
+    let dl_dh2_pre = leaky_relu_backward_f32(dl_dh2, h2_pre, leaky_alpha);
+    encoder_backprop_layer1_f32(h1, &dl_dh2_pre, gw2, gb2, n_hidden1, n_hidden2);
+    // Propagate to h1: dl/dh1[j] = Σ_k dl/dh2_pre[k] · w2[j*n2 + k].
+    let mut dl_dh1 = vec![0.0f32; n_hidden1];
+    for j in 0..n_hidden1 {
+        let row = &w2[j * n_hidden2..(j + 1) * n_hidden2];
+        let mut sum = 0.0f32;
+        for k in 0..n_hidden2 {
+            sum += dl_dh2_pre[k] * row[k];
+        }
+        dl_dh1[j] = sum;
+    }
+    // Layer 1 backprop: dl/dh1 → dl/dh1_pre → gw1, gb1.
+    let dl_dh1_pre = leaky_relu_backward_f32(&dl_dh1, h1_pre, leaky_alpha);
+    encoder_backprop_layer1_f32(x, &dl_dh1_pre, gw1, gb1, n_features, n_hidden1);
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -375,6 +442,77 @@ mod tests {
         let simd = dot_bias_f32(&h, &w, bias);
         let rel = (scalar - simd).abs() / scalar.abs().max(1e-6);
         assert!(rel < 1e-5, "scalar={scalar} simd={simd} rel={rel:e}");
+    }
+
+    /// f32 2-layer forward + backward must agree with the f64 versions to
+    /// f32 precision — the trainer's per-sample-α path runs 2-layer, so
+    /// this parity is what gates wiring f32 into real training.
+    #[test]
+    fn encoder_2layer_f32_matches_f64() {
+        use crate::simd_encoder;
+        let n_features = 372;
+        let n_hidden1 = 128;
+        let n_hidden2 = 64;
+        let alpha32 = 0.01f32;
+        let alpha64 = 0.01f64;
+        let mut rng = Xs32::new(0xC0FFEE);
+        let x32 = random_sparse_f32(&mut rng, n_features, 0.3);
+        let w1_32 = random_vec_f32(&mut rng, n_features * n_hidden1);
+        let b1_32 = random_vec_f32(&mut rng, n_hidden1);
+        let w2_32 = random_vec_f32(&mut rng, n_hidden1 * n_hidden2);
+        let b2_32 = random_vec_f32(&mut rng, n_hidden2);
+        let cast = |v: &[f32]| -> Vec<f64> { v.iter().map(|&a| a as f64).collect() };
+        let x64 = cast(&x32);
+        let w1_64 = cast(&w1_32);
+        let b1_64 = cast(&b1_32);
+        let w2_64 = cast(&w2_32);
+        let b2_64 = cast(&b2_32);
+
+        let (h1_pre_32, h1_32, h2_pre_32, h2_32) = encoder_forward_2layer_f32(
+            &x32, &w1_32, &b1_32, &w2_32, &b2_32,
+            n_features, n_hidden1, n_hidden2, alpha32,
+        );
+        let (h1_pre_64, h1_64, h2_pre_64, h2_64) = simd_encoder::encoder_forward_2layer(
+            &x64, &w1_64, &b1_64, &w2_64, &b2_64,
+            n_features, n_hidden1, n_hidden2, alpha64,
+        );
+        // f32 forward must agree with f64 within f32 precision (sub-ulp drift
+        // accumulates across the 47k+8k MAC chain; allow ~1e-3 relative).
+        let max_rel_err = |a32: &[f32], a64: &[f64]| -> f64 {
+            a32.iter().zip(a64.iter())
+                .map(|(&a, &b)| ((a as f64) - b).abs() / b.abs().max(1e-6))
+                .fold(0.0_f64, f64::max)
+        };
+        let e_h1 = max_rel_err(&h1_32, &h1_64);
+        let e_h2 = max_rel_err(&h2_32, &h2_64);
+        assert!(e_h1 < 1e-3, "h1 max rel err {e_h1:e} too large");
+        assert!(e_h2 < 1e-3, "h2 max rel err {e_h2:e} too large");
+
+        // Backward parity: zero grad buffers and verify gw1/gw2 match.
+        let mut gw1_32 = vec![0.0f32; w1_32.len()];
+        let mut gb1_32 = vec![0.0f32; b1_32.len()];
+        let mut gw2_32 = vec![0.0f32; w2_32.len()];
+        let mut gb2_32 = vec![0.0f32; b2_32.len()];
+        let dl_dh2_32 = random_vec_f32(&mut rng, n_hidden2);
+        encoder_backprop_2layer_f32(
+            &x32, &h1_pre_32, &h1_32, &h2_pre_32, &dl_dh2_32, &w2_32,
+            &mut gw1_32, &mut gb1_32, &mut gw2_32, &mut gb2_32,
+            n_features, n_hidden1, n_hidden2, alpha32,
+        );
+        let mut gw1_64 = vec![0.0f64; w1_64.len()];
+        let mut gb1_64 = vec![0.0f64; b1_64.len()];
+        let mut gw2_64 = vec![0.0f64; w2_64.len()];
+        let mut gb2_64 = vec![0.0f64; b2_64.len()];
+        let dl_dh2_64 = cast(&dl_dh2_32);
+        simd_encoder::encoder_backprop_2layer(
+            &x64, &h1_pre_64, &h1_64, &h2_pre_64, &dl_dh2_64, &w2_64,
+            &mut gw1_64, &mut gb1_64, &mut gw2_64, &mut gb2_64,
+            n_features, n_hidden1, n_hidden2, alpha64,
+        );
+        let e_gw1 = max_rel_err(&gw1_32, &gw1_64);
+        let e_gw2 = max_rel_err(&gw2_32, &gw2_64);
+        assert!(e_gw1 < 1e-3, "gw1 max rel err {e_gw1:e} too large");
+        assert!(e_gw2 < 1e-3, "gw2 max rel err {e_gw2:e} too large");
     }
 
     #[test]
