@@ -21,6 +21,8 @@ from join_safety import (  # noqa: E402
     assert_metric_not_constant_per_ref,
     assert_no_leaked_metric_columns,
     attach_metric_positional,
+    attach_per_source_features,
+    guard_metric_table,
     safe_metric_join,
 )
 
@@ -169,6 +171,104 @@ def test_linear_rescale_not_flagged():
     hs = s2 / 100.0  # exact linear rescale → corr 1.0, identical% 0
     tbl = _tbl({"human_score": list(hs), "ssim2_gpu": list(s2)})
     assert_no_leaked_metric_columns("safesyn", tbl.schema.names, tbl)  # no raise
+
+
+def test_attach_per_source_features_ok():
+    """1-to-many per-source attach (image_basename → distortions) succeeds."""
+    target = pd.DataFrame({
+        "image_basename": ["a", "a", "b"],
+        "codec": ["x", "y", "x"],
+        "q": [50, 60, 50],
+    })
+    source = pd.DataFrame({
+        "image_basename": ["a", "b"],
+        "width": [100, 200],
+        "content_class": ["photo", "screenshot"],
+    })
+    out = attach_per_source_features(target, source, "image_basename")
+    assert list(out["width"]) == [100, 100, 200]
+    assert list(out["content_class"]) == ["photo", "photo", "screenshot"]
+
+
+def test_attach_per_source_features_duplicate_source_raises():
+    """Duplicate rows in source on the ref key MUST raise (silent broadcast risk)."""
+    target = pd.DataFrame({"image_basename": ["a", "b"]})
+    source = pd.DataFrame({
+        "image_basename": ["a", "a", "b"],
+        "width": [100, 999, 200],
+    })
+    _expect_raise(
+        lambda: attach_per_source_features(target, source, "image_basename"),
+        contains="duplicate",
+    )
+
+
+def test_attach_per_source_features_missing_key_raises():
+    """Missing key on either side must raise, not silently produce NaN."""
+    target = pd.DataFrame({"other_col": ["a", "b"]})
+    source = pd.DataFrame({"image_basename": ["a", "b"], "width": [100, 200]})
+    _expect_raise(
+        lambda: attach_per_source_features(target, source, "image_basename"),
+        contains="target lacks",
+    )
+    target2 = pd.DataFrame({"image_basename": ["a", "b"]})
+    source2 = pd.DataFrame({"other_col": ["a", "b"], "width": [100, 200]})
+    _expect_raise(
+        lambda: attach_per_source_features(target2, source2, "image_basename"),
+        contains="source lacks",
+    )
+
+
+def test_guard_metric_table_passes_clean():
+    rng = np.random.default_rng(6)
+    hs = rng.uniform(0, 100, 200)
+    tbl = _tbl({
+        "human_score": list(hs),
+        "ssim2_gpu": list(hs + rng.normal(0, 5, 200)),
+    })
+    guard_metric_table("clean", tbl)  # no raise
+
+
+def test_guard_metric_table_rejects_mock_via_wrapper():
+    rng = np.random.default_rng(7)
+    hs = rng.uniform(0, 100, 200)
+    tbl = _tbl({
+        "human_score": list(hs),
+        "iwssim_mock_val": list(hs),
+    })
+    _expect_raise(lambda: guard_metric_table("kadid", tbl), contains="MOCK")
+
+
+def test_guard_metric_table_detects_ref_broadcast():
+    """When source_key is supplied, the wrapper catches constant-per-ref.
+
+    Need >= 100 finite samples to clear the assert_metric_not_constant_per_ref
+    sample-size gate; use 20 refs × 10 distortions = 200 samples.
+    """
+    refs = [f"r{i}" for i in range(20) for _ in range(10)]
+    hs = list(np.random.default_rng(8).uniform(0, 100, 200))
+    # ssim2 constant within each ref group → broadcast signature.
+    ssim2_vals = list(np.repeat(np.arange(20, dtype=float) * 5, 10))
+    tbl = _tbl({
+        "image_basename": refs,
+        "human_score": hs,
+        "ssim2_gpu": ssim2_vals,
+    })
+    _expect_raise(
+        lambda: guard_metric_table("broadcast", tbl, source_key="image_basename"),
+        contains="constant within every",
+    )
+
+
+def test_guard_metric_table_pandas_input():
+    """pandas.DataFrame input is accepted (auto-converted to pyarrow)."""
+    rng = np.random.default_rng(9)
+    hs = rng.uniform(0, 100, 200)
+    df = pd.DataFrame({
+        "human_score": hs,
+        "ssim2_gpu": hs + rng.normal(0, 5, 200),
+    })
+    guard_metric_table("clean-pd", df)  # no raise
 
 
 def main() -> int:

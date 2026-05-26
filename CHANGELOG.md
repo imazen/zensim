@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+### Security / Changed — `join_safety.py` adopted by every metric-join builder + CI grep-gate (2026-05-26)
+
+The 2026-05-25 kadid/tid corpus corruption (ref-only `pd.merge` broadcasting a
+per-pair metric onto a per-source features table) shipped because the post-
+incident shared safety module `scripts/canonical_corpus/join_safety.py` was
+adopted by exactly 1 of 36 metric-join builders. Per the VERIFIED synthesis
+this was the single highest-leverage correctness action.
+
+This release:
+
+1. **Adds two new helpers to `join_safety.py`** — `attach_per_source_features`
+   (the legitimate 1-to-many per-source case the original lib refused) and
+   `guard_metric_table` (one-call post-join Mode-A + Mode-B wrapper that
+   works on pyarrow.Table or pandas.DataFrame). 6 new self-tests, total 18.
+2. **Migrates 3 in-tree builders** through the lib:
+   - `scripts/v_next/build_unified_parquet.py` (2 unguarded merges — the
+     literal Mode-B `image_basename`-only broadcast shape + a per-pair
+     full-key merge that lacked a uniqueness assert)
+   - `scripts/v_next/v11_ssim2_v2/build_v11_substrate_v2.py` (full per-pair
+     key, but no uniqueness/leak guards — both added)
+3. **Ships a CI grep-gate workflow** (`.github/workflows/joinsafety.yml`)
+   that scans `scripts/` for any bare `pd.merge(` / `.merge(` outside
+   `join_safety.py` / `test_join_safety.py` / `joinsafety_gate.py`.
+   New builders must either route through the lib or annotate with
+   `# joinsafety-ok: <reason>` on the same line.
+4. **Adds `setup.py` + `zen_corpus_join.py`** so zenmetrics + zenanalyze
+   can `pip install -e` the lib (or keep using the existing
+   `sys.path.insert` pattern — both work).
+
+Reference: `benchmarks/joinsafety-migration-2026-05-26/MIGRATION_EVIDENCE.md`.
+
+Cross-repo siblings shipping at the same time:
+- `zenanalyze/zentrain/tools/zensim_metric_train.py` — `ref_basename`-only
+  merge replaced with `attach_per_source_features` + post-attach guard.
+- `zenmetrics/scripts/sweep/build_per_codec_training{,_extended}.py` —
+  pre-write `guard_metric_table` calls added (DuckDB joins already use
+  the correct per-pair key + dedup).
+
 ### Refactor — `panel.rs` is now a thin re-export shim from `zenstats` (2026-05-26)
 
 The 1773-line `zensim-validate/src/panel.rs` body was extracted into a new

@@ -133,6 +133,100 @@ def attach_metric_positional(target, metric_values, metric_col: str):
     return out
 
 
+def attach_per_source_features(target, source, source_key: str, *,
+                               how: str = "left", suffixes=("", "_src")):
+    """Attach per-SOURCE features (one row per `source_key`) onto a per-pair
+    `target` table by broadcasting the source row to every pair sharing
+    `source_key`.
+
+    Use this — NOT ``safe_metric_join`` — for the legitimate 1-to-many shape
+    where the columns being attached describe the REFERENCE image (e.g. width /
+    height / content_class / zenanalyze tier-1 features), so every distortion
+    of one reference should see the same value.
+
+    Refuses if `source` has duplicate rows on `source_key` (the metric-side
+    uniqueness check from ``safe_metric_join`` — averaging duplicates would
+    silently corrupt the broadcast).
+
+    `source_key` is allowed to be a single REF_ONLY_KEY (e.g. ``"image_basename"``);
+    this is the difference from ``safe_metric_join``, which refuses ref-only
+    joins because they would silently broadcast a per-pair metric.
+
+    Pass ``how="inner"`` if every target row MUST have a matching source row.
+    Default ``how="left"`` keeps target rows whose source is missing (the
+    columns become NaN), mirroring the original ``df.merge(..., how="left")``
+    behaviour of the migrated builders.
+    """
+    if source_key not in target.columns:
+        raise JoinSafetyError(
+            f"attach_per_source_features({source_key!r}): target lacks the source "
+            f"key column. Carry it on the target or recompute the source key."
+        )
+    if source_key not in source.columns:
+        raise JoinSafetyError(
+            f"attach_per_source_features({source_key!r}): source lacks the source "
+            f"key column. Cannot attach."
+        )
+    dupes = int(source.duplicated(subset=[source_key]).sum())
+    if dupes:
+        raise JoinSafetyError(
+            f"attach_per_source_features({source_key!r}): source has {dupes} duplicate "
+            f"rows on {source_key!r} — broadcasting would silently corrupt the "
+            f"per-source attach. De-duplicate the source first (drop_duplicates "
+            f"or a canonical pick rule)."
+        )
+    return target.merge(source, on=source_key, how=how, suffixes=suffixes)
+
+
+def guard_metric_table(label: str, table, *, source_key: str | None = None):
+    """One-call post-join guard for a metric-attach output.
+
+    Wraps ``assert_no_leaked_metric_columns`` (Mode A — mock / human-copy leak)
+    plus, when `source_key` names a ref-only column on the table, the Mode B
+    constant-per-ref check for any metric column that survived the join. Use
+    after EVERY metric or per-source attach to a corpus / training table.
+
+    Accepts either a `pyarrow.Table` or a `pandas.DataFrame` (the latter is
+    converted on the fly).
+    """
+    try:
+        import pyarrow as pa
+    except ImportError as e:  # pragma: no cover
+        raise JoinSafetyError(f"guard_metric_table needs pyarrow: {e}") from e
+
+    if not isinstance(table, pa.Table):
+        # pandas.DataFrame path — convert without copying when possible.
+        try:
+            tbl = pa.Table.from_pandas(table, preserve_index=False)
+        except Exception as e:
+            raise JoinSafetyError(
+                f"guard_metric_table({label!r}): could not convert to pyarrow.Table: {e}"
+            ) from e
+    else:
+        tbl = table
+
+    names = list(tbl.schema.names)
+    assert_no_leaked_metric_columns(label, names, tbl)
+
+    if source_key is not None and source_key in names:
+        refs = tbl.column(source_key).to_pylist()
+        # Mode B check: any metric column constant within every ref group is
+        # the broadcast signature. Skip non-numeric / sparse columns silently.
+        metric_prefixes = ("iwssim", "ssim2", "cvvdp", "butter", "dssim")
+        for n in names:
+            ln = n.lower()
+            if not any(ln.startswith(p) or p in ln for p in metric_prefixes):
+                continue
+            try:
+                vals = np.asarray(tbl.column(n).to_numpy(zero_copy_only=False),
+                                   dtype=float)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(vals).sum() < 100:
+                continue
+            assert_metric_not_constant_per_ref(label, refs, vals, n)
+
+
 def assert_metric_not_constant_per_ref(label: str, refs: Iterable, vals,
                                        metric_col: str = "metric",
                                        min_groups: int = 5,

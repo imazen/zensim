@@ -1,0 +1,32 @@
+name: Join-Safety Gate
+
+# CI grep-gate enforcing that every Python `pd.merge` / `df.merge` call in
+# the scripts/ tree routes through scripts/canonical_corpus/join_safety.py
+# (or is explicitly allow-listed with a `# joinsafety-ok: <reason>` comment).
+#
+# This is the forcing function preventing recurrence of the 2026-05-25
+# kadid/tid metric corruption (see benchmarks/DATA_INTEGRITY_root_cause_*.md).
+# Adoption history + new-helper additions: CLAUDE.md "Investigation Notes".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  no-unguarded-merge:
+    name: No unguarded pd.merge in scripts/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: grep-gate — `.merge(` and `pd.merge(`
+        run: python3 scripts/canonical_corpus/joinsafety_gate.py
+
+      - name: Run join_safety self-tests
+        run: |
+          python3 -m pip install --user numpy pandas pyarrow
+          python3 scripts/canonical_corpus/test_join_safety.py

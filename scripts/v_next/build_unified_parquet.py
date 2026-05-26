@@ -29,6 +29,19 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+# Route every join through join_safety — see zensim/scripts/canonical_corpus/.
+# The two pre-W44 raw `tsv.merge(...)` + `df.merge(corpus_features, on=
+# "image_basename")` sites were the literal Mode-B "ref-only broadcast" shape
+# that produced the 2026-05-25 kadid/tid metric corruption.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "scripts" / "canonical_corpus")
+)
+from join_safety import (  # noqa: E402
+    attach_per_source_features,
+    guard_metric_table,
+    safe_metric_join,
+)
+
 ROOT = Path("/mnt/v/zen/zensim-training/2026-05-07")
 DEFAULT_OUT = ROOT / "unified" / "training_unified.parquet"
 CORPUS_FEATURES_TSV = ROOT / "v15r-prep" / "features_v15r_combined.tsv"
@@ -142,7 +155,21 @@ def join_pair(tsv_path: Path, parquet_path: Path) -> pd.DataFrame | None:
     feat = pq.read_table(parquet_path).to_pandas()
 
     key = ["image_path", "codec", "q", "knob_tuple_json"]
-    merged = tsv.merge(feat, on=key, how="inner", suffixes=("", "_feat"))
+    # The features table is keyed on the full per-pair key; we merge that
+    # alongside whatever metric columns came in via the TSV. Use a raw
+    # `target.merge(source, on=key)` here (NOT safe_metric_join, which is
+    # for a SINGLE metric column at a time) because `feat` carries many
+    # feat_* columns — but assert metric-side uniqueness on the full key
+    # so a duplicated feature row can't silently broadcast.
+    feat_dupes = int(feat.duplicated(subset=key).sum())
+    if feat_dupes:
+        raise RuntimeError(
+            f"join_pair({tsv_path.name}): features parquet has {feat_dupes} "
+            f"rows duplicated on {key} — averaging or first-wins broadcast "
+            f"would silently corrupt the per-pair attach. Re-emit the "
+            f"features parquet de-duplicated."
+        )
+    merged = tsv.merge(feat, on=key, how="inner", suffixes=("", "_feat"))  # joinsafety-ok: per-pair full-key merge with explicit uniqueness guard above
     if "zensim_score" in merged.columns and "score_zensim" in merged.columns:
         merged = merged.drop(columns=["zensim_score"])
     merged = coalesce_gpu_metrics(merged)
@@ -192,8 +219,21 @@ def write_sweep_parquet(out_path: Path, sweep_id: str, codec: str,
             df["sweep_id"] = sweep_id
             df["image_basename"] = df["image_path"].map(normalize_basename)
             if not corpus_features.empty:
-                df = df.merge(corpus_features, on="image_basename", how="left")
+                # Legitimate per-source attach (image_basename → many
+                # distortions per ref). attach_per_source_features enforces
+                # source-side uniqueness on image_basename so a duplicated
+                # source row cannot silently broadcast different feature
+                # values onto the same ref's distortions.
+                df = attach_per_source_features(
+                    df, corpus_features, "image_basename", how="left"
+                )
             tbl = pa.Table.from_pandas(df, preserve_index=False)
+            # Post-attach guard: catches mock leak (Mode A) + any ssim2/cvvdp/
+            # butter/dssim column constant-per-ref (Mode B broadcast signature).
+            guard_metric_table(
+                f"build_unified[{sweep_id}/{codec}]", tbl,
+                source_key="image_basename",
+            )
             if writer is None:
                 writer = pq.ParquetWriter(out_path, tbl.schema,
                                           compression="zstd",

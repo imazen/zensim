@@ -62,6 +62,14 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+# Route the per-pair join (omni × features) through join_safety to catch the
+# Mode-A mock/human-copy leak + assert per-pair metric-side uniqueness so the
+# 2026-05-25 corpus corruption can't reappear here.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[3] / "scripts" / "canonical_corpus")
+)
+from join_safety import guard_metric_table  # noqa: E402
+
 # (ssim2_target, V11_target_score). 10 bands per task brief.
 ANCHOR_BANDS_V11_V2: list[tuple[float, float]] = [
     (100.0, 100.0),
@@ -90,12 +98,30 @@ def list_chunk_parquets(dirpath: Path) -> list[Path]:
 
 
 def join_chunk(omni_path: Path, feat_path: Path, n_features: int) -> pd.DataFrame:
-    """Load one chunk pair, join on (image_path, codec, q, knob_tuple_json)."""
+    """Load one chunk pair, join on (image_path, codec, q, knob_tuple_json).
+
+    Asserts uniqueness on the per-pair key on both sides before the merge so a
+    duplicated row from either source can never silently broadcast.
+    """
     omni_cols = OMNI_KEY_COLS + OMNI_METRIC_COLS
     feat_cols = OMNI_KEY_COLS + [f"feat_{i}" for i in range(n_features)]
     omni = pq.read_table(omni_path, columns=omni_cols).to_pandas()
     feat = pq.read_table(feat_path, columns=feat_cols).to_pandas()
-    return omni.merge(feat, on=OMNI_KEY_COLS, how="inner")
+    feat_dupes = int(feat.duplicated(subset=OMNI_KEY_COLS).sum())
+    if feat_dupes:
+        raise RuntimeError(
+            f"join_chunk({feat_path.name}): features duplicated on "
+            f"{OMNI_KEY_COLS} ({feat_dupes} rows) — would silently broadcast. "
+            f"Re-emit features parquet de-duplicated."
+        )
+    omni_dupes = int(omni.duplicated(subset=OMNI_KEY_COLS).sum())
+    if omni_dupes:
+        raise RuntimeError(
+            f"join_chunk({omni_path.name}): omni duplicated on "
+            f"{OMNI_KEY_COLS} ({omni_dupes} rows) — likely a partial-write "
+            f"or merged chunk re-run. De-duplicate omni first."
+        )
+    return omni.merge(feat, on=OMNI_KEY_COLS, how="inner")  # joinsafety-ok: full per-pair-key merge guarded by both-sided uniqueness asserts above
 
 
 def build_unified_omni(
@@ -171,6 +197,11 @@ def build_unified_omni(
     # Write unified parquet
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tbl = pa.Table.from_pandas(df, preserve_index=False)
+    # Pre-write guard: catches mock leak (Mode A) + Mode-B constant-per-ref
+    # on any of the score_* metric columns we attached during the per-chunk
+    # joins. Raises before we persist a corrupted parquet to disk.
+    guard_metric_table("build_v11_substrate_unified", tbl,
+                       source_key="ref_basename")
     pq.write_table(tbl, out_path, compression="zstd", compression_level=10)
     print(f"  wrote {out_path} ({out_path.stat().st_size / (1024*1024):.0f} MiB)")
     return df
