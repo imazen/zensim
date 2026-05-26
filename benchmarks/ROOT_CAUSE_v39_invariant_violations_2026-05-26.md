@@ -91,7 +91,31 @@ axioms, and nothing else checked them.
    "SROCC-only verdicts BANNED" rule — extended from stats panels to
    structural invariants).
 
+## Mechanism confirmed (2026-05-26) — see deep-dive doc
+Quantified in `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+Three compounding factors, all measured:
+1. **Off-manifold inputs:** synthetic+blur drives features to **up to
+   106–135σ** from the training mean (rms 12–18σ across all 372);
+   identical content stays at max|z|=3.8. The MLP is evaluated 100σ
+   outside anything it trained on.
+2. **Unconstrained MLP inverts there** — LeakyReLU net has no global
+   shape constraint; off-manifold it ranks more-blur as higher-pinned
+   (provable: the spline is monotone, so the observed score inversion
+   must originate pre-spline). Linear V0_2 on the same features stays
+   monotone — defect is in the net, not the features.
+3. **~1000× extrapolating spline:** 3 knots in a 0.033-wide input window,
+   endpoint derivative ≈1024 score/unit, **linear (unbounded)
+   extrapolation**. The whole [0,100] dial is manufactured from a
+   ~0.13-wide post-pin band — narrower than the net's off-manifold
+   excursion — so off-distribution the spline runs entirely in its
+   unbounded regime.
+
 ## Status
-Investigation only — shipped V39 untouched per the user's accept
-decision. No clamp applied (would mask defect 1). Awaiting decision on
-implementing the invariant gate + MLP-monotonicity dig.
+Investigation + redesign analysis complete; shipped V39 untouched per the
+user's accept decision. No clamp applied (would mask defect 1). The
+redesign doc specifies principled detection (metamorphic tests, OOD
+z-score/Mahalanobis flag, static gain analysis, IBP/MILP certification)
+and a guarantee-by-construction architecture (non-negative dissimilarity
+features → partial-monotone net → bounded squash → clamped-extrapolation
+calibration). Lowest-risk first increment: the invariant gate
+(`tests/metric_invariants.rs` + `bake_verdict --invariants`).
