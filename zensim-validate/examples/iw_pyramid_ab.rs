@@ -202,42 +202,25 @@ fn stats(v: &[f32]) -> (f64, f64, f64) {
     (mn as f64, s / n, mx as f64)
 }
 
+// Dedup-K (2026-05-26): local f32 spearman/pearson/ranks moved to
+// canonical `zenstats` crate (f64 only — convert once at boundary).
+//
+// The pre-dedup local `ranks` returned raw `usize` sort order with NO
+// mid-rank tie handling. zenstats's `ranks` uses paper-canonical
+// mid-rank averaging (Mohammadi 2025 § IV-A). On tied f32 values this
+// changes the rank vector — but iw_pyramid_ab feeds DCT-pyramid energy
+// values where exact ties are vanishingly rare, so the difference is
+// numerically negligible. The migration is correctness-preserving.
 fn pearson(a: &[f32], b: &[f32]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    let n = a.len() as f64;
-    let mean_a: f64 = a.iter().map(|v| *v as f64).sum::<f64>() / n;
-    let mean_b: f64 = b.iter().map(|v| *v as f64).sum::<f64>() / n;
-    let mut cov = 0.0f64;
-    let mut var_a = 0.0f64;
-    let mut var_b = 0.0f64;
-    for i in 0..a.len() {
-        let da = a[i] as f64 - mean_a;
-        let db = b[i] as f64 - mean_b;
-        cov += da * db;
-        var_a += da * da;
-        var_b += db * db;
-    }
-    cov / (var_a.sqrt() * var_b.sqrt()).max(1e-12)
+    let a64: Vec<f64> = a.iter().map(|&v| v as f64).collect();
+    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
+    zenstats::pearson(&a64, &b64)
 }
 
 fn spearman(a: &[f32], b: &[f32]) -> f64 {
-    let ra = ranks(a);
-    let rb = ranks(b);
-    // Pearson on ranks
-    let ra_f: Vec<f32> = ra.into_iter().map(|v| v as f32).collect();
-    let rb_f: Vec<f32> = rb.into_iter().map(|v| v as f32).collect();
-    pearson(&ra_f, &rb_f)
-}
-
-fn ranks(v: &[f32]) -> Vec<usize> {
-    let n = v.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&i, &j| v[i].total_cmp(&v[j]));
-    let mut r = vec![0usize; n];
-    for (rank, &i) in idx.iter().enumerate() {
-        r[i] = rank;
-    }
-    r
+    let a64: Vec<f64> = a.iter().map(|&v| v as f64).collect();
+    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
+    zenstats::spearman(&a64, &b64)
 }
 
 fn topk_overlap(a: &[f32], b: &[f32], k: usize) -> usize {

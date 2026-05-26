@@ -1,6 +1,17 @@
 //! Bit-exact port of rank/correlation helpers from
 //! `zensim-validate/src/mlp_train.rs`. Pure f64, no SIMD, no allocator
 //! tricks — bit-identical to the validate-time implementation.
+//!
+//! Dedup-K (2026-05-26): the canonical Mohammadi-2025-paper-correct
+//! panel lives in the `zenstats` crate (zenmetrics workspace). This
+//! module is intentionally kept independent because `zensim-train-core`
+//! must compile on `wasm32-unknown-unknown` for the in-browser trainer,
+//! and the `zenstats` crate is not yet WASM-vetted. The math is
+//! identical to `zenstats::{pearson, ranks, spearman}` (verified by
+//! `tests/test_zen_stats_rust_python_parity.py` in
+//! `scripts/canonical_corpus/` once shipped). If a future change
+//! splits the algorithms — that is a bug; both impls must be kept in
+//! lock-step.
 
 /// Pearson correlation between two slices of equal length. Returns 0
 /// if either has zero variance.

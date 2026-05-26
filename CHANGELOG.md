@@ -2,6 +2,93 @@
 
 ## [Unreleased]
 
+### Refactor — dedup-K: 5 more in-tree Rust stat re-rolls + 1 Python panel routed through `zenstats` (2026-05-26)
+
+Follow-on cleanup to the 2026-05-26 `zenstats`-extraction + `panel.rs` shim
+work. The first round migrated the canonical-home callers
+(`bake_verdict`, `ensemble_mix`, `eval_bake_per_band`, `mlp_train/utils`).
+This round migrates the 5 remaining in-tree Rust sites and the most-
+representative Python G5 panel:
+
+1. **`zensim-validate/src/main.rs`** — `spearman_correlation`,
+   `pearson_correlation`, `ranks` (3 functions, ~50 LOC) now thin
+   wrappers over `zenstats::{spearman, pearson, ranks}`. 12 call sites
+   in the file (SROCC reporting, RankNet training, ablation drivers)
+   pick up the canonical impl. Documented divergence: main.rs's local
+   `ranks` used `(i+j)/2+0.5` offset vs zenstats's `(i+j-1)/2`; both
+   yield identical Pearson-on-ranks because Pearson is shift-invariant.
+2. **`zensim-bench/examples/profile_compat_report.rs`** —
+   `spearman`/`pearson`/`kendall_tau` (~95 LOC) now use canonical
+   zenstats. The local `kendall_tau` used `da == 0.0` exact-tie
+   detection vs zenstats's `da.abs() < 1e-12` epsilon-tie — measurably
+   different on near-tied f64 data; zenstats is the paper-canonical
+   (Mohammadi 2025) reference for ship/no-ship decisions.
+3. **`zensim-validate/examples/iw_pyramid_ab.rs`** — `pearson`/`spearman`/
+   `ranks` on `&[f32]` (~40 LOC) replaced with f32→f64 conversion at
+   the boundary + zenstats calls. Local `ranks` returned raw `usize`
+   sort order with NO mid-rank tie handling; now uses paper-canonical
+   mid-rank averaging. On DCT-pyramid energy values exact ties are
+   vanishingly rare so the numerical impact is negligible.
+4. **`zensim-validate/tests/{hybrid_head_runtime,per_sample_alpha_runtime}.rs`**
+   — two near-identical `spearman_correlation`/`average_ranks` test-side
+   re-rolls replaced with `zenstats::spearman` wrappers (~50 LOC each).
+   Preserves the `NaN`-on-`n<2` policy the original integration tests
+   asserted on.
+
+Untouched (deliberately):
+
+- **`zensim-train-core/src/stats.rs`** — kept as a sibling bit-exact
+  port because the crate must compile on `wasm32-unknown-unknown` for
+  the in-browser trainer; `zenstats` is not yet WASM-vetted. Docstring
+  updated to point at the canonical home and call out the lock-step
+  invariant. Same algorithm, same numerics — if the two ever diverge
+  that is a bug.
+- **`zensim-validate/src/bin/bake_verdict.rs::ds_auc`** — `ds_auc`
+  (decisive-separation AUC) is NOT in `zenstats`'s panel; it's a
+  separate metric measured per-pair with a `diff_threshold`. Audit
+  didn't flag it as duplicated.
+- **`zensim-validate/src/main.rs::pearson_value_and_gradient`** —
+  this is a Pearson VALUE-AND-GRADIENT helper for proximal trainer
+  back-prop, not a correlation stat. Stays local.
+- **`docs/phase4_reference/mlp_train_rust_e3f8748.rs`** — archival
+  reference, frozen by design.
+
+Python-side:
+
+5. **`scripts/v_next/g5_regime_gate_ensemble_2026-05-26.py`** — full
+   Mohammadi 6-stat panel (`srocc` + `krocc` + `plcc` + `z_rmse` +
+   `pwrc` + `panel`, 6 functions, ~85 LOC) now routed through
+   `scripts.lib.zen_stats.panel` (which shells the Rust `panel` binary
+   — the same code path `bake_verdict` uses). Same script's
+   `combine` + sweep grid + driver unchanged. Net: -65 LOC + 1 boundary
+   key translation (`z_rmse` → `z` for downstream compat).
+
+Counts:
+
+- Rust sites migrated this round: 5 (5 of 5 remaining live consumers).
+- Python sites already migrated to `scripts/lib/zen_stats.py`: 9 (pre-K)
+  + 1 this round = 10 / ~25 (40%). Eight live Python sites still use
+  scipy `spearmanr`/`pearsonr`/`kendalltau` directly — those are
+  validation / ground-truth scripts where scipy IS the reference; the
+  audit doesn't require those to migrate.
+- Python ↔ Rust cross-check test: `zensim-validate/tests/panel_parity.rs`
+  pre-existed and asserts ≤1e-9 agreement vs scipy on a 12-point
+  fixture; the new round preserves it (still passes green).
+
+Out of scope, queued as follow-on:
+
+- **PCHIP dedup (Phase 3)** — two near-identical Fritsch–Carlson
+  `pchip_compute_derivs` impls (`zensim/src/metric.rs:2304` runtime,
+  `zensim-validate/src/output_calibration_spline.rs:114` validate-side)
+  could share a `zen-pchip` module or be folded into `zenstats`. Both
+  serve the calibration-spline path so numerical agreement matters
+  load-bearingly. Multi-hour port-and-verify; deferred to a
+  dedicated chunk.
+
+References: `benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md` Tier-1
+#2 + Tier-2 #7; `benchmarks/dedup_inventory_master_2026-05-26.md`
+Cluster A.13 + §A.2 Class 2.
+
 ### Security / Changed — `join_safety.py` adopted by every metric-join builder + CI grep-gate (2026-05-26)
 
 The 2026-05-25 kadid/tid corpus corruption (ref-only `pd.merge` broadcasting a

@@ -936,93 +936,25 @@ fn load_konjnd(base: &Path, max: usize) -> Vec<Pair> {
 }
 
 // ---- statistics ----
+//
+// Dedup-K (2026-05-26): local spearman/pearson/kendall_tau/ranks moved
+// to canonical `zenstats` crate. Old local impls differed from
+// `zenstats::kendall_tau` in tie detection (used `da == 0.0` exact-zero
+// vs zenstats's `da.abs() < 1e-12`) — measurably different on near-tied
+// data. zenstats values are paper-canonical (Mohammadi 2025) and the
+// reference for ship/no-ship decisions; we adopt those here.
+// See `zensim/CHANGELOG.md` Unreleased / Changed.
 
 fn spearman(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let ra = ranks(a);
-    let rb = ranks(b);
-    pearson(&ra, &rb)
-}
-
-fn ranks(v: &[f64]) -> Vec<f64> {
-    let n = v.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
-    let mut r = vec![0.0_f64; n];
-    let mut i = 0;
-    while i < n {
-        let mut j = i + 1;
-        while j < n && (v[idx[j]] - v[idx[i]]).abs() < 1e-12 {
-            j += 1;
-        }
-        let avg = (i + j - 1) as f64 / 2.0;
-        for k in i..j {
-            r[idx[k]] = avg;
-        }
-        i = j;
-    }
-    r
+    zenstats::spearman(a, b)
 }
 
 fn pearson(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let ma = mean(a);
-    let mb = mean(b);
-    let mut num = 0.0f64;
-    let mut da = 0.0f64;
-    let mut db = 0.0f64;
-    for i in 0..n {
-        let xa = a[i] - ma;
-        let xb = b[i] - mb;
-        num += xa * xb;
-        da += xa * xa;
-        db += xb * xb;
-    }
-    let den = (da * db).sqrt();
-    if den < 1e-12 { 0.0 } else { num / den }
+    zenstats::pearson(a, b)
 }
 
 fn kendall_tau(a: &[f64], b: &[f64]) -> f64 {
-    // O(n²) — fine for n up to ~30k. Concordance over all pairs.
-    let n = a.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let mut concordant: i64 = 0;
-    let mut discordant: i64 = 0;
-    let mut tied_a: i64 = 0;
-    let mut tied_b: i64 = 0;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let da = a[j] - a[i];
-            let db = b[j] - b[i];
-            if da == 0.0 && db == 0.0 {
-                continue;
-            } else if da == 0.0 {
-                tied_a += 1;
-            } else if db == 0.0 {
-                tied_b += 1;
-            } else if da.signum() == db.signum() {
-                concordant += 1;
-            } else {
-                discordant += 1;
-            }
-        }
-    }
-    let denom_a = (concordant + discordant + tied_a) as f64;
-    let denom_b = (concordant + discordant + tied_b) as f64;
-    let den = (denom_a * denom_b).sqrt();
-    if den < 1e-12 {
-        0.0
-    } else {
-        (concordant - discordant) as f64 / den
-    }
+    zenstats::kendall_tau(a, b)
 }
 
 fn mean(v: &[f64]) -> f64 {

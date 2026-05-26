@@ -4524,55 +4524,25 @@ fn load_synthetic(csv_path: &Path, target_metric: Option<TargetMetric>) -> Vec<I
 }
 
 // ===== Correlation statistics =====
+//
+// Dedup-K (2026-05-26): the local spearman/pearson/ranks impls (each
+// ~25-50 LOC) were thin partial re-rolls of the canonical Mohammadi
+// panel. Migrated to `zenstats::{spearman, pearson, ranks}`. The
+// only API difference is panel.rs's `ranks` uses `(i+j-1)/2` while
+// main.rs used `(i+j)/2 + 0.5` — both correctly emit mid-rank averages
+// and produce identical Pearson-on-ranks (shift-invariant). The local
+// `pearson_correlation` `var == 0.0` exact-zero guard becomes
+// `zenstats::pearson`'s `< 1e-12` guard (both reject same values in
+// practice). See `zensim/CHANGELOG.md` Unreleased / Changed.
 
 fn spearman_correlation(x: &[f64], y: &[f64]) -> f64 {
-    let rx = ranks(x);
-    let ry = ranks(y);
-    pearson_correlation(&rx, &ry)
+    zenstats::spearman(x, y)
 }
 
 fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
-    let n = x.len() as f64;
-    let mean_x: f64 = x.iter().sum::<f64>() / n;
-    let mean_y: f64 = y.iter().sum::<f64>() / n;
-
-    let mut cov = 0.0f64;
-    let mut var_x = 0.0f64;
-    let mut var_y = 0.0f64;
-
-    for i in 0..x.len() {
-        let dx = x[i] - mean_x;
-        let dy = y[i] - mean_y;
-        cov += dx * dy;
-        var_x += dx * dx;
-        var_y += dy * dy;
-    }
-
-    if var_x == 0.0 || var_y == 0.0 {
-        return 0.0;
-    }
-
-    cov / (var_x.sqrt() * var_y.sqrt())
+    zenstats::pearson(x, y)
 }
 
 fn ranks(data: &[f64]) -> Vec<f64> {
-    let n = data.len();
-    let mut indexed: Vec<(usize, f64)> = data.iter().copied().enumerate().collect();
-    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
-
-    let mut result = vec![0.0f64; n];
-    let mut i = 0;
-    while i < n {
-        let mut j = i + 1;
-        while j < n && indexed[j].1 == indexed[i].1 {
-            j += 1;
-        }
-        // Average rank for ties
-        let avg_rank = (i + j) as f64 / 2.0 + 0.5;
-        for k in i..j {
-            result[indexed[k].0] = avg_rank;
-        }
-        i = j;
-    }
-    result
+    zenstats::ranks(data)
 }

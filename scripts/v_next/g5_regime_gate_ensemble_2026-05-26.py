@@ -35,8 +35,20 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import curve_fit
-from scipy.stats import kendalltau, pearsonr, spearmanr
+
+# Dedup-K (2026-05-26): the local srocc/krocc/plcc/z_rmse/pwrc/panel
+# implementations (each a small scipy/np-only re-roll) are replaced
+# with the canonical `scripts.lib.zen_stats.panel` shim, which calls
+# the Rust `panel` binary — same code path as `bake_verdict` /
+# `bake_compare`. This eliminates 5+1 duplicate stat impls and
+# guarantees this script's ship/no-ship verdicts agree bit-exactly
+# (≤1e-9) with the canonical IQA-stats home.
+import sys as _sys
+from pathlib import Path as _Path
+_REPO = _Path(__file__).resolve().parents[2]
+if str(_REPO) not in _sys.path:
+    _sys.path.insert(0, str(_REPO))
+from scripts.lib import zen_stats as _zs  # noqa: E402
 
 SCORES = Path("/mnt/v/output/zensim/g5_ensemble_2026-05-26/scores")
 CORPORA = ["cid22", "kadid", "tid", "konjnd", "aic3", "aic4"]
@@ -47,83 +59,48 @@ def load(corpus, which):
     return pd.read_csv(SCORES / f"{corpus}_{which}.tsv", sep="\t")
 
 
-def srocc(h, p):
+def _drop_nonfinite(h, p):
+    h = np.asarray(h, float)
+    p = np.asarray(p, float)
     valid = np.isfinite(h) & np.isfinite(p)
-    if valid.sum() < 3:
-        return float("nan")
-    return abs(spearmanr(h[valid], p[valid])[0])
-
-
-def krocc(h, p):
-    valid = np.isfinite(h) & np.isfinite(p)
-    if valid.sum() < 3:
-        return float("nan")
-    return abs(kendalltau(h[valid], p[valid])[0])
-
-
-def rescale_logistic(pred, target):
-    pred = np.asarray(pred, float)
-    target = np.asarray(target, float)
-    valid = np.isfinite(pred) & np.isfinite(target)
-    p, t = pred[valid], target[valid]
-    if len(p) < 6:
-        a, b = np.polyfit(p, t, 1)
-        return a * pred + b
-
-    def logistic(x, b1, b2, b3, b4):
-        return b1 / (1.0 + np.exp(-b2 * (x - b3))) + b4
-
-    b0 = [t.max() - t.min(), 1.0 / (p.max() - p.min() + 1e-9), (p.min() + p.max()) / 2, t.min()]
-    try:
-        popt, _ = curve_fit(logistic, p, t, p0=b0, maxfev=4000)
-        return logistic(pred, *popt)
-    except Exception:
-        a, b = np.polyfit(p, t, 1)
-        return a * pred + b
-
-
-def plcc(pred, human):
-    pr = rescale_logistic(pred, human)
-    valid = np.isfinite(pr) & np.isfinite(human)
-    if valid.sum() < 3:
-        return float("nan")
-    return abs(pearsonr(pr[valid], human[valid])[0])
-
-
-def z_rmse(pred, human):
-    pr = rescale_logistic(pred, human)
-    d = pr - human
-    f = np.isfinite(d)
-    if f.sum() == 0:
-        return float("nan")
-    sigma = float(np.std(human[np.isfinite(human)]))
-    if sigma <= 0:
-        return float("nan")
-    return float(np.sqrt(np.mean((d[f] / sigma) ** 2)))
-
-
-def pwrc(human, pred):
-    h = np.asarray(human, float)
-    p = np.asarray(pred, float)
-    valid = np.isfinite(h) & np.isfinite(p)
-    if valid.sum() < 3:
-        return float("nan")
-    tr = pd.Series(h[valid]).rank().values
-    pr = pd.Series(p[valid]).rank().values
-    return abs(pearsonr(tr, pr)[0])
+    return h[valid], p[valid]
 
 
 def panel(pred, human):
-    pred = np.asarray(pred, float)
-    human = np.asarray(human, float)
-    return dict(
-        n=int(np.isfinite(pred).sum()),
-        srocc=srocc(human, pred),
-        plcc=plcc(pred, human),
-        krocc=krocc(human, pred),
-        pwrc=pwrc(human, pred),
-        z=z_rmse(pred, human),
-    )
+    """Full Mohammadi panel via the canonical Rust shim.
+
+    Returns dict with keys {n, srocc, plcc, krocc, pwrc, z}.
+    """
+    h, p = _drop_nonfinite(human, pred)
+    if len(p) < 3:
+        return dict(n=0, srocc=float("nan"), plcc=float("nan"),
+                    krocc=float("nan"), pwrc=float("nan"), z=float("nan"))
+    s = _zs.panel(p.tolist(), h.tolist())
+    # zen_stats.panel returns 'z_rmse'; this script's downstream code
+    # uses key 'z'. Translate at the boundary to keep callers stable.
+    return dict(n=int(len(p)), srocc=s["srocc"], plcc=s["plcc"],
+                krocc=s["krocc"], pwrc=s["pwrc"], z=s["z_rmse"])
+
+
+# Single-stat convenience shims, used by 1-2 call-sites elsewhere.
+def srocc(h, p):
+    return panel(p, h)["srocc"]
+
+
+def krocc(h, p):
+    return panel(p, h)["krocc"]
+
+
+def plcc(pred, human):
+    return panel(pred, human)["plcc"]
+
+
+def z_rmse(pred, human):
+    return panel(pred, human)["z"]
+
+
+def pwrc(human, pred):
+    return panel(pred, human)["pwrc"]
 
 
 def combine(v39, spec, mode, center, width):

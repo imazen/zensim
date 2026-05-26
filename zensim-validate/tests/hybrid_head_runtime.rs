@@ -474,52 +474,17 @@ fn cid22_aggregate_srocc_matches_audit_reference() {
 }
 
 /// Spearman rank correlation. Uses average-ranks for ties.
+///
+/// Dedup-K (2026-05-26): thin wrapper over canonical `zenstats::spearman`
+/// (paper-correct, mid-rank tie handling per Mohammadi 2025 § IV-A).
+/// The pre-dedup local impl used `(i+j+1)/2` rank offset vs zenstats's
+/// `(i+j-1)/2` — both yield identical Pearson-on-ranks because Pearson
+/// is shift-invariant. Returns NaN on n < 2 to preserve existing
+/// test assertions (zenstats returns 0.0 in that case).
 fn spearman_correlation(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len());
-    let n = a.len();
-    if n < 2 {
+    if a.len() < 2 {
         return f64::NAN;
     }
-    let rank_a = average_ranks(a);
-    let rank_b = average_ranks(b);
-    let mean_a: f64 = rank_a.iter().sum::<f64>() / n as f64;
-    let mean_b: f64 = rank_b.iter().sum::<f64>() / n as f64;
-    let mut num = 0.0_f64;
-    let mut den_a = 0.0_f64;
-    let mut den_b = 0.0_f64;
-    for i in 0..n {
-        let da = rank_a[i] - mean_a;
-        let db = rank_b[i] - mean_b;
-        num += da * db;
-        den_a += da * da;
-        den_b += db * db;
-    }
-    if den_a == 0.0 || den_b == 0.0 {
-        return 0.0;
-    }
-    num / (den_a.sqrt() * den_b.sqrt())
-}
-
-fn average_ranks(values: &[f64]) -> Vec<f64> {
-    let n = values.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&i, &j| {
-        values[i]
-            .partial_cmp(&values[j])
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let mut ranks = vec![0.0_f64; n];
-    let mut i = 0;
-    while i < n {
-        let mut j = i + 1;
-        while j < n && values[idx[j]] == values[idx[i]] {
-            j += 1;
-        }
-        let avg = (i as f64 + j as f64 + 1.0) / 2.0;
-        for k in i..j {
-            ranks[idx[k]] = avg;
-        }
-        i = j;
-    }
-    ranks
+    zenstats::spearman(a, b)
 }

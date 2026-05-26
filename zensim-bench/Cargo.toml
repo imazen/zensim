@@ -22,6 +22,9 @@ cc = "1"
 [dependencies]
 # zensim-bench is internal tooling (not published).
 zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
+# Dedup-K (2026-05-26): profile_compat_report example routes
+# spearman/pearson/kendall_tau through canonical zenstats.
+zenstats = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
