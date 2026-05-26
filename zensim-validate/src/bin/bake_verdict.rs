@@ -1036,6 +1036,10 @@ struct Args {
     corpora: Vec<&'static Corpus>,
     output: Option<PathBuf>,
     features_root: PathBuf,
+    /// Diagnostic: dump per-row `human<TAB>pred` (parquet row order) to this
+    /// path. Used by the AIC-3 CVVDP-feature spike to compute per-ref SROCC
+    /// (which the aggregate panel does not split out).
+    per_pair_output: Option<PathBuf>,
 }
 
 fn print_usage() {
@@ -1059,6 +1063,7 @@ fn parse_args() -> Result<Args, String> {
     let mut bake: Option<PathBuf> = None;
     let mut corpora: Option<Vec<&'static Corpus>> = None;
     let mut output: Option<PathBuf> = None;
+    let mut per_pair_output: Option<PathBuf> = None;
     let mut features_root: PathBuf =
         PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
     let mut args = std::env::args().skip(1);
@@ -1080,6 +1085,10 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().ok_or("--features-root requires <path>")?;
                 features_root = PathBuf::from(v);
             }
+            "--per-pair-output" => {
+                let v = args.next().ok_or("--per-pair-output requires <path>")?;
+                per_pair_output = Some(PathBuf::from(v));
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -1096,6 +1105,7 @@ fn parse_args() -> Result<Args, String> {
         corpora,
         output,
         features_root,
+        per_pair_output,
     })
 }
 
@@ -1147,6 +1157,7 @@ fn render_corpus(
     has_transforms: bool,
     n_inputs: usize,
     model: &Model,
+    per_pair_output: Option<&Path>,
 ) -> Result<CorpusResult, String> {
     let path = features_root.join(corpus.filename);
     let g = parquet_loader::load_parquet(&path, corpus.display, "human_score", 1.0)
@@ -1180,6 +1191,17 @@ fn render_corpus(
         .collect();
 
     let n = scores.len();
+
+    // Diagnostic per-pair dump (parquet row order): `human<TAB>pred`.
+    if let Some(path) = per_pair_output {
+        let mut s = String::from("human\tpred\n");
+        for (h, p) in humans.iter().zip(scores.iter()) {
+            s.push_str(&format!("{h}\t{p}\n"));
+        }
+        std::fs::write(path, s).map_err(|e| format!("write per-pair output: {e}"))?;
+        eprintln!("  wrote per-pair predictions to {}", path.display());
+    }
+
     let (srocc, plcc, krocc, or_, pw, z, ds) = aggregate_panel(&scores, &humans);
 
     let mut body = String::new();
@@ -1239,8 +1261,7 @@ saturation regions dominate the residual._\n",
             }
             let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
             let s_b: Vec<f64> = idxs.iter().map(|&i| scores[i]).collect();
-            let (b_srocc, b_plcc, b_krocc, b_or, b_pwrc, b_z, _b_ds) =
-                aggregate_panel(&s_b, &h_b);
+            let (b_srocc, b_plcc, b_krocc, b_or, b_pwrc, b_z, _b_ds) = aggregate_panel(&s_b, &h_b);
             let rescaled = rescale_logistic(&s_b, &h_b);
             let mae: f64 = rescaled
                 .iter()
@@ -1387,12 +1408,15 @@ fn main() -> ExitCode {
 
     let mut results: Vec<CorpusResult> = Vec::new();
     for corpus in &args.corpora {
+        // Per-pair dump only meaningful when a single corpus is selected
+        // (one output path → one corpus); pass through for all, last wins.
         match render_corpus(
             corpus,
             &args.features_root,
             has_transforms,
             n_inputs,
             &model,
+            args.per_pair_output.as_deref(),
         ) {
             Ok(r) => results.push(r),
             Err(e) => {
@@ -1404,14 +1428,15 @@ fn main() -> ExitCode {
 
     // One-row summary across all corpora at the top.
     buf.push_str("\n## Summary (one row per corpus)\n\n");
-    buf.push_str("| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | DS-AUC | geomean3 |\n");
+    buf.push_str(
+        "| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | DS-AUC | geomean3 |\n",
+    );
     buf.push_str("|---|--:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for r in &results {
         let g3 = (r.srocc * r.plcc * r.pwrc).cbrt();
         buf.push_str(&format!(
             "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} |\n",
-            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse,
-            r.ds_auc, g3
+            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse, r.ds_auc, g3
         ));
     }
     // ── CODEC_TARGET_GOALS.md scorecard ──────────────────────────────
@@ -1439,7 +1464,9 @@ fn main() -> ExitCode {
         let g1 = soft_gate(p5, 50.0, 25.0).min(soft_gate(p95, 50.0, 85.0));
 
         // G5: HF rank — KonJND SROCC (floor 0.70, target 0.85) + AIC-3.
-        let g5_konjnd = konjnd.map(|r| soft_gate(r.srocc, 0.70, 0.85)).unwrap_or(0.0);
+        let g5_konjnd = konjnd
+            .map(|r| soft_gate(r.srocc, 0.70, 0.85))
+            .unwrap_or(0.0);
         let g5_aic3 = aic3.map(|r| soft_gate(r.srocc, 0.70, 0.85)).unwrap_or(0.0);
         let g5 = (g5_konjnd + g5_aic3) / 2.0;
 
@@ -1477,8 +1504,8 @@ fn main() -> ExitCode {
         ));
         // Weighted composite per the doc's priority order (G1=3, G8=2.5,
         // G5=1.5, G9=1, G7=0.5). G2/G3/G4/G6/G10/G11 need external data.
-        let weighted = (3.0 * g1 + 2.5 * g8 + 1.5 * g5 + 1.0 * g9 + 0.5 * g7)
-            / (3.0 + 2.5 + 1.5 + 1.0 + 0.5);
+        let weighted =
+            (3.0 * g1 + 2.5 * g8 + 1.5 * g5 + 1.0 * g9 + 0.5 * g7) / (3.0 + 2.5 + 1.5 + 1.0 + 0.5);
         buf.push_str(&format!(
             "\n**Weighted goal score (measurable subset): {weighted:.3}**\n\n"
         ));
@@ -1537,7 +1564,10 @@ mod tests {
         let human = vec![0.0, 0.0, 1.0, 1.0];
         let pred = vec![0.0, 0.0, 1.0, 1.0];
         let auc = ds_auc(&pred, &human, 0.5);
-        assert!(auc > 0.95, "perfect separation should give AUC≈1, got {auc}");
+        assert!(
+            auc > 0.95,
+            "perfect separation should give AUC≈1, got {auc}"
+        );
     }
 
     #[test]
@@ -1559,6 +1589,9 @@ mod tests {
         let human = vec![0.5; 5];
         let pred = vec![0.1, 0.2, 0.3, 0.4, 0.5];
         let auc = ds_auc(&pred, &human, 0.4);
-        assert!(auc.is_nan(), "no different-pairs should give NaN, got {auc}");
+        assert!(
+            auc.is_nan(),
+            "no different-pairs should give NaN, got {auc}"
+        );
     }
 }
