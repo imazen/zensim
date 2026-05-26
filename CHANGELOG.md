@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+### Data integrity — structural fixes (2026-05-25, task #215)
+
+Code-side fixes so the kadid/tid `iwssim` + `ssim2_gpu` corruption
+(root-caused in `benchmarks/DATA_INTEGRITY_root_cause_2026-05-25.md`)
+cannot recur. No canonical parquet DATA changed; the `*_fixed_2026-05-25`
+siblings remain unpromoted (user's call).
+
+- **Kill the ref-only join codepath**: new
+  `scripts/canonical_corpus/join_safety.py` — `safe_metric_join` raises
+  loudly when a per-pair metric would be joined on `ref_basename` alone
+  (the ssim2_gpu broadcast bug); it has NO `groupby(ref_basename).mean()`
+  fallback. `attach_metric_positional` is the supported alternative when
+  a per-pair key genuinely can't be carried. Wired into
+  `build_canonical_parquets.py` (which had NO guard) and the
+  `build_canonical_2026_05_21.py` guard, which now also rejects mock and
+  human_score-identical raw-metric columns.
+- **Forbid silent mock columns**: `v0_22_iw_make_mock_val_csvs.sh` now
+  emits `iwssim_MOCK_VAL_ONLY` (was `iwssim`); canonical builders +
+  `zensim_mlp_train` reject any `*mock*` column / `--target-column`
+  (training gradient on a mock target now exits 2). Consumer
+  `v0_22_iw_v2_add_log_target.py` reads either the real or mock source
+  column. A raw metric (`iwssim`/`ssim2`/`cvvdp`) bit-identical to
+  `human_score` is rejected; legitimate `mix_*`==anchor and
+  linear-rescale (safesyn ssim2) cases are not.
+- **CI census gate**: `audit_metric_columns.py --fail-on-corruption`
+  exits nonzero on any HUMAN-COPY / REF-MISJOIN column. New CI jobs
+  `metric-census` (against committed tiny fixtures in
+  `scripts/canonical_corpus/test_fixtures/`, since `/mnt/v`+R2 aren't in
+  CI) and `join-safety` (`test_join_safety.py`, 11 unit tests).
+- **Per-pair key end-to-end (Fix 4 — assessed, cheap part done)**: the
+  feature extractors (`extract_features_372col*`) emit only
+  `ref_basename,human_score,…,f0..fN` — they drop `codec/q/knob`, so a
+  correct join is impossible downstream and the canonical guard now forces
+  positional alignment instead. Carrying the per-pair key through the
+  extractors is documented as a follow-up (not a multi-day refactor done
+  here); the build-script guards make the cheap path safe today.
+
 ### Shipped (2026-05-25 PM, V39 — universally beats V0_3 on SROCC + dial)
 
 - **`PreviewV0_3` → V39 bake** (`v39_v32plus_spline_seed17_2026-05-25.bin`).
