@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### Changed — `panel.rs` OR + PWRC now paper-correct (2026-05-26, BREAKING semantics)
+
+After tracing both stats to their source — Mohammadi 2025 IEEE Access
+"Evaluation of Objective Image Quality Metrics for High-Fidelity Image
+Compression" (DOI 10.1109/ACCESS.2026.3669417) — the prior `panel.rs`
+implementations of OR and PWRC were found NOT to match the paper:
+
+- **OR** was a two-level z-score residual outlier rate; the paper's OR
+  (§ VII, Equations 2-4 + ITU-T P.1401) is `τ = 1.96·σ`,
+  `δᵢ = 1[|S_trans,i − S_subj,i| > τ]`, on the 4-parameter-logistic-
+  rescaled prediction. Implementation replaced. Now uses corpus σ by
+  default (`outlier_ratio`) with a per-stimulus σ variant
+  (`outlier_ratio_per_sample`) for AIC-3 / CID22 / KonJND where bootstrap
+  σ is available.
+- **PWRC** was a weighted-rank-Pearson proxy (weighted by first-arg
+  rank-extremity); the paper's PWRC (§ VII + Figure 4) is the **AUC of
+  the SA-ST curve** — Sorting Accuracy as a function of Sensory
+  Threshold on the subjective scale. Brand-new `pwrc_sa_st_auc` + a
+  `sa_st_curve` helper for visualisation. The old proxy is preserved as
+  `pwrc_proxy_weighted_rank` for back-compat callers that want
+  specifically the weighted-rank statistic.
+
+`compute_panel` and `compute_light_panel` now compute the paper-correct
+versions. `PanelStats.pwrc` and `PanelStats.or_ratio` therefore hold
+different numerical values than they did before 2026-05-26 — saved
+scorecards from before this date are NOT numerically comparable to
+those produced after, even though the field names are unchanged. The
+old values were not Mohammadi-paper PWRC / OR; the new values are.
+
+Concrete implication: numerical comparisons of past zensim panel values
+to CVVDP=5.92 / IW-SSIM=5.76 / SSIMULACRA2=5.43 PWRC (Mohammadi Table 2)
+were NOT apples-to-apples; they now are. Same for OR.
+
+Tests added in `panel.rs`: 8 new unit tests covering OR on perfect
+match, OR counting residuals above 1.96·σ, per-stimulus σ
+discrimination, SA-ST PWRC on perfect-rank (= 1.0), anti-rank (= 0.0),
+hand-computed adjacent-swap (= 0.980 ± 0.005), curve shape, and the
+proxy's preserved semantics. All 22 panel unit tests pass.
+
 ### Added — `panel` subcommand: canonical IQA-stats entry point (2026-05-26)
 
 - New `zensim-validate` binary `panel` (`zensim-validate/src/bin/panel.rs`):
