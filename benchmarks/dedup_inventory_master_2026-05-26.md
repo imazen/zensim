@@ -10,6 +10,72 @@ All file:line references are on each repo's main checkout. Worktree copies under
 
 ---
 
+## Executive summary (cross-cluster synthesis, 2026-05-26)
+
+Synthesized from Cluster A (ML/data/sweep + coefficient) and Cluster B
+(codecs + products). Ranked by **correctness risk first, reach second** —
+because the incident that triggered this audit (the kadid/tid parquet
+corruption) was a *silent divergence* bug, and the highest-priority
+duplication clusters are the ones that can silently diverge with no
+cross-check.
+
+### Tier 0 — Silent-divergence correctness risks (fix first)
+
+These are the same bug class as the parquet corruption: N
+implementations of one thing, no parity test, divergence ships silently.
+
+| Rank | Cluster | What | Risk | Single home |
+|---|---|---|---|---|
+| 1 | B | **3 independent RGB↔YCbCr/YUV color-math impls** — `zenjpeg/zenyuv` (5363 LOC) + `zenavif/src/yuv_convert*` (3718 LOC, no zenyuv dep) + `zenjxl-decoder/.../ycbcr.rs` | **Color-precision divergence = shipping bug** per CLAUDE.md "ZERO TOLERANCE for image corruption". Three matrix+gamma impls, no cross-check. | promote `zenyuv` to a shared crate; zenavif + zenjxl-decoder depend on it |
+| 2 | A | **2 GPU perceptual-metric backends** — zenmetrics CubeCL (`ssim2/butteraugli/dssim-gpu`) vs coefficient cudarse (`src/gpu.rs:92`) | Same metric, two impls, **no parity test** — could score differently and nobody knows. (We just fixed a *join* of ssim2; a 2nd *impl* is the same risk one layer down.) | parity test gate first; then pick one backend or a shared `zen-gpu-metrics` |
+| 3 | A | **3-way `CodecFamily` enum order** — zenpicker (canonical) vs coefficient `constraints.rs:30` (different order) vs a CSV that matches zenpicker not its own Rust | **Silent bake-mislabel** — a picker bake tagged with the wrong family. The "safety marker drifted" shape from the iwssim mock leak. | single `CodecFamily` in zenpicker; coefficient depends on it; delete the local enum |
+| 4 | A | **IQA stats reimplemented 36×** — 11 Rust + 25 Python across 4 repos, all computing ship-gate verdicts (SROCC/PLCC/Z-RMSE/DS-AUC/KROCC) | A stat bug in one copy gives a wrong ship verdict; copies drift | **`zen-iqa-stats` crate + mirrored `zen_stats.py`** with a ±1e-9 CI cross-check. **Highest-reach extraction in the whole workspace** (spans both clusters). |
+| 5 | A | **39 ad-hoc metric→feature joins**, only 2 use `join_safety.py` | The exact corruption shape; 37 unguarded sites remain | route all corpus *builders* through `join_safety.py` (cluster #1 of task #220) |
+
+### Tier 1 — Correctness GAPS found incidentally (cheap, do soon)
+
+| Cluster | Gap | Fix |
+|---|---|---|
+| B | **`zenraw/ci.yml` missing i686 + cross entirely** — violates CLAUDE.md CI mandate | add the matrix (subsumed by the reusable-workflow extraction below) |
+| B | **`fuzz_regression.rs` shipped to only 1 of 10 fuzz-bearing codecs** (zenwebp) | template it to the other 9 |
+
+### Tier 2 — High-reach maintenance (big LOC, low correctness risk)
+
+| Cluster | What | Reach | Single home |
+|---|---|---|---|
+| B | **Target-quality iterate/rescore loop** — zenjpeg `zq.rs` (1038 LOC) + zenwebp `zensim_target.rs` (1765 LOC, says "mirrors zenjpeg") + zenavif `auto_tune.rs` (504 LOC) | 3 codecs, the user's codec-target work depends on it | **new `zentarget` crate** over a pluggable `Scorer` trait — unify the *control loop* now (picker integration is only 1 prod copy, unify pre-emptively) |
+| B | **~17 near-identical `ci.yml`** (win-arm/macos-intel/i686/cross matrix, ~65% identical) | every codec repo | **org reusable workflow** `zen-ci/rust-matrix.yml`; callers shrink to ~20 lines; fixes the zenraw gap by construction |
+| B | **zencodec `EncodeJob`/`EncoderConfig` builder boilerplate** — 10-14 mechanical methods × 4 codecs | 4 codecs | shared builder macro or default-impls in `zencodec` |
+| A | **R2/S3 boilerplate** — 26 `.sh` build the endpoint, ~8 carry full creds, 5 redefine `S3()` | all sweep scripts | `zen-r2-lib.sh` sourced everywhere |
+| A | **2 cloud-orchestration stacks** — coefficient `src/cloud/` (vastai+GCP+DO) vs zenmetrics `vastai-fleet` | 2 systems | pick one; out of scope for a quick win |
+| A+B | **`panel.rs` vs `bake_verdict.rs` byte-identical stat copy** (subset of Tier-0 #4) | folded into `zen-iqa-stats` | — |
+
+### The one extraction that does the most
+
+**`zen-iqa-stats` (Rust crate + mirrored `zen_stats.py`, CI-cross-checked).**
+It is the only item that appears in BOTH clusters (ML verdict gates +
+codec target-loop scoring), it's reimplemented 36×, and a bug in any
+copy produces a wrong ship decision. It also dissolves the
+`panel.rs`/`bake_verdict.rs` duplication for free. Medium effort, highest
+blast-radius reduction.
+
+**The one most-urgent for correctness:** promote `zenyuv` to a shared
+crate (Tier-0 #1) — three independent color-math implementations is a
+latent image-corruption shipping bug per the project's zero-tolerance
+rule, and there is no cross-check today.
+
+### Suggested sequencing
+
+1. **Parity-test the two GPU metric backends** (Tier-0 #2) — cheapest way to
+   convert a silent risk into a known quantity; may reveal they already agree.
+2. **`zen-iqa-stats`** (Tier-0 #4) — highest reach, dissolves several sub-dups.
+3. **`zenyuv` shared crate** (Tier-0 #1) — highest correctness urgency.
+4. **Single `CodecFamily`** (Tier-0 #3) — small, kills a silent-mislabel risk.
+5. **Reusable CI workflow** (Tier-2) — fixes the zenraw gap, big LOC win.
+6. Everything else as capacity allows.
+
+---
+
 ## Cluster A — ML / data / sweep (zensim, zenanalyze, zenmetrics, coefficient, zensally, zenpipe)
 
 ### A.0 Scope verdict per repo
