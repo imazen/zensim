@@ -190,3 +190,33 @@ G9 DS-AUC **0.26** (AIC-3 0.739 ≥ 0.70 floor, < 0.85 aspiration).
 Full goal achievement is NOT reached — G5 (KonJND HF rank) is the
 structural learning-metric failure the doc itself flags; it needs the
 unstarted HF training-corpus acquisition, not a recipe tweak.
+
+## AIC-4 significance + G5 final verdict (2026-05-26)
+
+**AIC-4 is a REAL V0_3 win, not noise.** Paired bootstrap (10k resamples,
+same 300 images/scores) on the SROCC difference:
+- V39 0.9051, V0_3 0.9284, Δ(V0_3−V39) = **+0.0233**
+- 95% CI **[+0.0088, +0.0403]**, 2-sided **p=0.001** → significant.
+The paired test is far tighter than the single-SROCC CI (±0.063) because
+it cancels the shared per-image variance. So "universally better than V0_3"
+is **FALSE** — V39 wins 5/6, V0_3 significantly wins AIC-4.
+
+**Why we will NOT chase AIC-4: it's a HOLDOUT.** Per CLAUDE.md, AIC-3/AIC-4
+are HOLDOUT-ONLY. Tuning the recipe (seeds/weights) until V39 also wins
+AIC-4 would be holdout-fishing — it destroys AIC-4's value as a
+generalization check. The honest position: V0_3 happens to fit AIC-4's
+300 JPEG-AI pairs better; V39 fits the other 5 corpora better; we do not
+overfit a holdout to manufacture "universal."
+
+**G5 (KonJND HF ≥0.70) falsified across TWO architectures:**
+1. Single 2-layer MLP + konjnd-aggregation head (wired + gradient-verified
+   this session): Pareto tension — clears 0.70 at agg-weight≥0.05 but
+   craters CID22/KADIK/TID/AIC-3 (`v42_konjnd_agg_2layer_G5_sweep`).
+2. 2-bake regime-routed ensemble (V39 + HF-specialist): best case KonJND
+   0.7014 but CID22 −0.0276 — the regimes OVERLAP in feature space
+   (CID22's near-lossless tail routes to the specialist, which can't rank
+   CID22). `v43_g5_regime_routed_ensemble` — FALSIFIED.
+The binding constraint is the SPECIALIST's inability to rank CID22's HF
+pairs, not the router. Closing G5 needs a genuinely better HF feature
+representation (not more training) — a multi-session research effort, and
+NOT the CSF direction (the AIC-3 spike already falsified that).

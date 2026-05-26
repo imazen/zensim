@@ -13,12 +13,18 @@
   (full panel) AND the G1 dial:
   CID22 0.8793 / KADIK 0.9251 / TID 0.9317 / KonJND 0.4197 / AIC-3 0.8023;
   G1 dial 1.00 (prior 0.69). **AIC-4 (n=300) is the exception** —
-  V0_3 wins SROCC 0.9284 vs V39 0.9051 (V39 wins AIC-4 DS-AUC). Not
-  literally "universal"; accurate for the 5 compression holdouts.
+  V0_3 wins SROCC 0.9284 vs V39 0.9051 — and it's STATISTICALLY REAL
+  (paired bootstrap p=0.001, CI [+0.009,+0.040]), not noise. So
+  "universally better" is FALSE. AIC-4 is HOLDOUT-ONLY — chasing it by
+  recipe search = holdout-fishing (forbidden). V39 wins the other 5.
 - **Goal status:** PASSES G1 + G7; soft-passes G8/G9; **FAILS G5**
-  (KonJND HF-rank 0.42 < 0.70 — the acknowledged learning-metric HF
-  zone). Full CODEC_TARGET_GOALS.md achievement NOT done; needs the
-  unstarted HF-corpus acquisition.
+  (KonJND HF-rank 0.42 < 0.70). G5 is now a CHARACTERIZED Pareto limit,
+  not a data gap: the konjnd-aggregation lever (wired+gradient-verified
+  this session) CAN reach KonJND 0.85 but craters CID22/KADIK/TID/AIC-3;
+  a 2-bake regime-routed ensemble also fails (CID22's near-lossless tail
+  overlaps the KonJND regime in feature space). Closing G5 needs a
+  better HF feature REPRESENTATION (not more data — KonJND already in
+  training; not CSF — falsified). Multi-session research.
 - Bake bytes carry both `tanh_output_head` + `output_calibration_spline`.
 
 **⚠ The old "0.885 AIC-3 ceiling / CVVDP gap needs CSF features" claim is
@@ -103,13 +109,22 @@ cross-ref absolute-scale calibration (the dial), not features.
    pre-clamp). More anchor bands surviving the strict-mono filter → a
    smoother dial. The dynamic-range-floor lever overshot (Finding 4);
    needs tuning, not abandonment.
-4. **iPhone 14 / phone CVVDP bake** — BLOCKED on data: no phone/TV/PPD
-   CVVDP columns exist anywhere on disk. When the backfill lands:
-   `--target-column cvvdp_phone_log_norm` + V39's spline recipe.
-   `DisplayTarget` enum + profiles already shipped.
-5. **Wire cross-codec-eq aux loss for 2-layer** — currently "not yet
-   wired" for multi-layer/skip mode (blocks the G4 cross-codec goal
-   and the dynamic-range-floor's eq-pool substrate at 2-layer).
+4. **G5 HF representation research** — the only path to clearing G5
+   (KonJND≥0.70 with the rest intact): a better HF feature
+   representation so an HF-specialist can rank CID22's near-lossless
+   tail too (the ensemble blocker). Single-MLP + 2-bake-ensemble both
+   falsified (`v42_*`, `v43_*`). Not data, not CSF — representation.
+5. **Wire cross-codec-eq + pjnd-passthrough aux losses for 2-layer** —
+   still gated off for multi-layer/skip (konjnd-aggregation IS now
+   wired; same arch_backward pattern applies to the other two). Blocks
+   the G4 cross-codec goal at 2-layer.
+
+DONE since (don't redo): zensim-b-phone CVVDP bake at
+modern_oled_phone_indoor (≈110 ppd, SROCC 0.9342 phone-CVVDP tracking,
+working dial, wired to DisplayTarget::Phone); zen-metrics `--display-model`
+flag; konjnd-aggregation 2-layer wiring + gradient test; kadid/tid
+data-bug fix (`*_fixed_2026-05-25.parquet`, pending promotion); G11 doc
+physics correction (higher PPD → LESS visible, was backwards).
 
 DONE this session (don't redo): σ-weighted MSE infra, modular refactor
 (mlp_train → arch.rs/goals.rs/utils.rs), f32 encoder, DisplayTarget +

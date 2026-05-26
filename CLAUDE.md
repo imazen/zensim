@@ -793,6 +793,27 @@ codec-target bake):
    `*_fixed_2026-05-25.parquet` siblings written; build script now has
    `_validate_metric_columns()` guard. Detail:
    `benchmarks/DATA_INTEGRITY_kadid_tid_metric_columns_2026-05-25.md`.
+9. **G5 (KonJND HF ≥0.70) is a CHARACTERIZED Pareto limit — falsified
+   across two architectures (2026-05-26).** (a) Single 2-layer MLP +
+   konjnd-aggregation head (now wired + gradient-verified): clears 0.70
+   at agg-weight≥0.05 but craters CID22/KADIK/TID/AIC-3 — Pareto
+   tension (`v42_konjnd_agg_2layer_G5_sweep`). (b) 2-bake regime-routed
+   ensemble {V39 + HF-specialist}: best KonJND 0.7014 but CID22 −0.028
+   — CID22's near-lossless tail OVERLAPS the KonJND regime in feature
+   space, so the router can't separate them and the specialist can't
+   rank CID22 (`v43_g5_regime_routed_ensemble`). **Don't retry single-MLP
+   weight tuning or naive ensembles for G5** — both are dead. Closing it
+   needs a better HF feature REPRESENTATION (not data: KonJND is already
+   in training; not CSF: AIC-3 spike falsified it). Also: raw bake output
+   is a ~0.2-wide flat band (the dial lives in the spline) — so any
+   soft/continuous blend of two bakes scrambles rank; only a HARD
+   per-pair switch preserves it.
+10. **"Universally better than V0_3" is FALSE — V39 wins 5/6, V0_3
+   significantly wins AIC-4** (paired bootstrap Δ+0.023, p=0.001). AIC-4
+   is HOLDOUT-ONLY — do NOT recipe-search to win it (holdout-fishing).
+   Use the FULL panel + paired significance for any A/B verdict, never a
+   raw SROCC point estimate (a 0.023 gap at n=300 looked like noise by
+   the single-SROCC CI ±0.063 but is real under the paired test).
 
 ## JSON pipeline mandate for ZNPR v3 bakes (2026-05-15)
 
