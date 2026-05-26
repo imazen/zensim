@@ -1265,7 +1265,7 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// Methodology: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
 /// Per-codec q-range: `benchmarks/v_tuner_v5_per_codec_q_range_2026-05-24.md`.
 pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
-    include_bytes!("../weights/v27_hybrid_seed42_2026-05-25.bin")
+    include_bytes!("../weights/v29_hybrid_seed17_2026-05-25.bin")
 }
 
 /// CVVDP-trained bake for desktop viewing conditions (PPD ≈ 53).
