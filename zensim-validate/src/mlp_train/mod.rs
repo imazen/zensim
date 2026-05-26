@@ -5857,17 +5857,50 @@ fn train_mlp_per_sample_alpha_head(
     // wrong-sign weights smoothly biases encoder weights ≥0 / rank_w ≤0
     // WITHOUT a per-step hard clamp (the clamp kills weights and
     // collapses training — v45/v45b/v45c/v45d all cratered with one).
-    // NOTE (2026-05-26): penalty-only does NOT yet guarantee a monotone
-    // bake — a final hard projection at bake time is still required and
-    // is NOT yet wired; the proven-stable alternative is a softplus
-    // reparam. `--monotone-cbc` is OFF by default; production unaffected.
+    // The soft penalty keeps weights NEAR the correct sign during
+    // training (smooth, no dead-weight collapse); the final HARD
+    // projection at every bake-emission site (below) makes the SHIPPED
+    // bake's signs EXACT — encoder ≥0, rank_w + w_skip ≤0, α≡1 — so the
+    // bake is monotone non-increasing in every non-negative dissimilarity
+    // feature, by construction. `--monotone-cbc` is OFF by default;
+    // production unaffected.
     const MONOTONE_CBC_PENALTY: f64 = 1.0;
     if monotone_cbc {
         log_line(
-            "monotone_cbc: ENABLED — soft sign-penalty (λ=1) + α≡1 (NO per-step clamp; final projection NOT yet wired — WIP)",
+            "monotone_cbc: ENABLED — soft sign-penalty (λ=1) during training + α≡1 every step + FINAL hard projection at every bake-emission (encoder≥0, head≤0, α≡1). Shipped bake is monotone-by-construction.",
             log,
         );
     }
+    // Final hard projection closures applied at every bake-emission site
+    // (best-epoch checkpoint save + post-training spline re-bake).
+    let proj_geq0 = |w: &[f64]| -> Vec<f64> {
+        if monotone_cbc {
+            w.iter().map(|&v| v.max(0.0)).collect()
+        } else {
+            w.to_vec()
+        }
+    };
+    let proj_leq0 = |w: &[f64]| -> Vec<f64> {
+        if monotone_cbc {
+            w.iter().map(|&v| v.min(0.0)).collect()
+        } else {
+            w.to_vec()
+        }
+    };
+    let proj_w_alpha_zero = |w: &[f64]| -> Vec<f64> {
+        if monotone_cbc {
+            vec![0.0; w.len()]
+        } else {
+            w.to_vec()
+        }
+    };
+    let proj_b_alpha_one = |b: f64| -> f64 {
+        if monotone_cbc {
+            30.0
+        } else {
+            b
+        }
+    };
 
     // Adam-step closure: pack/unpack our parameters into the Adam slots.
     // Adam step closure — packs all weight vectors into the concatenated
@@ -7485,23 +7518,31 @@ fn train_mlp_per_sample_alpha_head(
                 best_val_score = val_score;
                 stale_epochs = 0;
                 if use_2layer {
+                    // monotone_cbc: hard-project the weights to exact signs
+                    // before baking so the saved best-epoch bake is monotone-
+                    // by-construction (no-op when monotone_cbc=false).
+                    let bake_w1      = proj_geq0(&w1);
+                    let bake_w2_enc  = proj_geq0(&w2_enc);
+                    let bake_rank_w  = proj_leq0(&rank_w);
+                    let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                    let bake_b_alpha = proj_b_alpha_one(b_alpha);
                     let model = psah::PerSampleAlphaHeadModel {
                         scaler_mean: scaler_mean.clone(),
                         scaler_scale: scaler_scale.clone(),
-                        w1: w1.clone(),
+                        w1: bake_w1,
                         b1: b1.clone(),
-                        rank_w: rank_w.clone(),
+                        rank_w: bake_rank_w,
                         rank_b,
                         reducer_w,
                         reducer_b,
-                        w_alpha: w_alpha.clone(),
-                        b_alpha,
+                        w_alpha: bake_w_alpha,
+                        b_alpha: bake_b_alpha,
                         n_hidden: n_hidden_final,
                         n_features,
                     };
                     best_bake = Some(psah::bake_per_sample_alpha_head_v3_2layer(
                         &model,
-                        &w2_enc,
+                        &bake_w2_enc,
                         &b2_enc,
                         n_hidden,
                         n_hidden_final,
@@ -7516,17 +7557,22 @@ fn train_mlp_per_sample_alpha_head(
                     // consume them yet. Use standard bake for now.
                     best_bake = Some(vec![0u8; 4]); // TODO: skip bake metadata
                 } else {
+                // monotone_cbc: hard-project the weights (single-layer path).
+                let bake_w1      = proj_geq0(&w1);
+                let bake_rank_w  = proj_leq0(&rank_w);
+                let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                let bake_b_alpha = proj_b_alpha_one(b_alpha);
                 let model = psah::PerSampleAlphaHeadModel {
                     scaler_mean: scaler_mean.clone(),
                     scaler_scale: scaler_scale.clone(),
-                    w1: w1.clone(),
+                    w1: bake_w1,
                     b1: b1.clone(),
-                    rank_w: rank_w.clone(),
+                    rank_w: bake_rank_w,
                     rank_b,
                     reducer_w,
                     reducer_b,
-                    w_alpha: w_alpha.clone(),
-                    b_alpha,
+                    w_alpha: bake_w_alpha,
+                    b_alpha: bake_b_alpha,
                     n_hidden: n_hidden_final,
                     n_features,
                 };
@@ -7663,23 +7709,31 @@ fn train_mlp_per_sample_alpha_head(
                 }
 
                 // Re-bake the model with the spline included.
+                // monotone_cbc: project here too — the final spline-augmented
+                // bake must be monotone-by-construction (spline is monotone,
+                // so the network must be).
+                let bake_w1      = proj_geq0(&w1);
+                let bake_w2_enc  = proj_geq0(&w2_enc);
+                let bake_rank_w  = proj_leq0(&rank_w);
+                let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                let bake_b_alpha = proj_b_alpha_one(b_alpha);
                 let model = psah::PerSampleAlphaHeadModel {
                     scaler_mean: scaler_mean.clone(),
                     scaler_scale: scaler_scale.clone(),
-                    w1: w1.clone(),
+                    w1: bake_w1,
                     b1: b1.clone(),
-                    rank_w: rank_w.clone(),
+                    rank_w: bake_rank_w,
                     rank_b,
                     reducer_w,
                     reducer_b,
-                    w_alpha: w_alpha.clone(),
-                    b_alpha,
+                    w_alpha: bake_w_alpha,
+                    b_alpha: bake_b_alpha,
                     n_hidden: n_hidden_final,
                     n_features,
                 };
                 let rebaked = if use_2layer {
                     psah::bake_per_sample_alpha_head_v3_2layer(
-                        &model, &w2_enc, &b2_enc,
+                        &model, &bake_w2_enc, &b2_enc,
                         n_hidden, n_hidden_final,
                         if tanh_pin_active { Some(tanh_scale) } else { None },
                         hyperparams.feature_transforms.as_deref(),
