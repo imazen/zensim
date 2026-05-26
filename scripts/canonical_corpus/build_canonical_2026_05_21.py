@@ -68,11 +68,70 @@ def sha256_file(p: Path) -> str:
     return h.hexdigest()
 
 
+def _validate_metric_columns(label: str, tbl: pa.Table):
+    """Refuse to propagate the kadid/tid iwssim-leak + ssim2-misjoin bug.
+
+    Checks (only fire when the columns are populated, i.e. for kadid/tid):
+      - iwssim must NOT be a near-copy of human_score (target leak).
+      - ssim2_gpu must vary within a reference group (not constant per ref).
+    Raises RuntimeError on detection so a rebuild can't silently re-ship the
+    corrupt columns. safesyn/konjnd-dense/LARGE are unaffected (their iwssim
+    is real and/or ssim2_gpu is null) and pass cleanly.
+    """
+    import numpy as np
+
+    names = set(tbl.schema.names)
+    if "human_score" not in names:
+        return
+    hs = np.asarray(tbl.column("human_score").to_numpy(zero_copy_only=False), dtype=float)
+
+    if "iwssim" in names:
+        iw = np.asarray(tbl.column("iwssim").to_numpy(zero_copy_only=False), dtype=float)
+        m = np.isfinite(iw) & np.isfinite(hs)
+        if m.sum() > 100 and np.mean(np.isclose(hs[m], iw[m])) > 0.5:
+            raise RuntimeError(
+                f"DATA-INTEGRITY: {label} `iwssim` is a copy of `human_score` "
+                f"(target leak). Recompute via fix_kadid_tid_*.py and point the "
+                f"source at the corrected parquet before rebuilding."
+            )
+
+    if "ssim2_gpu" in names and "ref_basename" in names:
+        s2 = np.asarray(tbl.column("ssim2_gpu").to_numpy(zero_copy_only=False), dtype=float)
+        if np.isfinite(s2).sum() > 100:
+            refs = tbl.column("ref_basename").to_pylist()
+            by_ref: dict[str, set] = {}
+            for r, v in zip(refs, s2):
+                if v == v:  # not NaN
+                    by_ref.setdefault(r, set()).add(round(float(v), 4))
+            multi = [r for r, vs in by_ref.items() if len(vs) > 1]
+            if len(by_ref) >= 5 and len(multi) == 0:
+                raise RuntimeError(
+                    f"DATA-INTEGRITY: {label} `ssim2_gpu` is constant within every "
+                    f"reference group ({len(by_ref)} refs, each 1 unique value) — "
+                    f"joined on ref_basename only (ref-vs-ref). Recompute on the "
+                    f"correct (ref,dist) pairs via fix_kadid_tid_*.py."
+                )
+
+
 def rename_typo_columns(src: Path, dest: Path):
     """Read source parquet, rename TYPO_RENAME columns, write to dest with
     the canonical schema metadata preserved + a new 'schema_note' added."""
     print(f"\n--- rename_typo_columns {src.name} → {dest.name}")
     tbl = pq.read_table(str(src))
+
+    # DATA-INTEGRITY GUARD (added 2026-05-25).
+    # The upstream 2026-05-18-v24/{kadid,tid}_4target_372col.parquet build
+    # produced a corrupt `iwssim` column (literal copy of human_score —
+    # target leak) and a corrupt `ssim2_gpu` column (joined on ref_basename
+    # ALONE, so every distorted variant of a ref got the same ssim2 value →
+    # ~0 corr with MOS). This guard refuses to silently propagate either.
+    # The corrected columns are produced by scripts/canonical_corpus/
+    # fix_kadid_tid_build_pairs.py + fix_kadid_tid_apply_scores.py (recompute
+    # IW-SSIM + SSIMULACRA2 on the correct (ref,dist) pairs). When the
+    # *_fixed_2026-05-25.parquet siblings have been reviewed + promoted,
+    # point this builder's source at them.
+    _validate_metric_columns(src.name, tbl)
+
     new_names = []
     renamed = False
     for n in tbl.schema.names:
