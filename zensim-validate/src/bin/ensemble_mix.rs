@@ -24,47 +24,11 @@ use std::process::ExitCode;
 
 use zenpredict::{Model, Predictor};
 
-fn ranks(v: &[f64]) -> Vec<f64> {
-    let n = v.len();
-    let mut idx: Vec<usize> = (0..n).collect();
-    idx.sort_by(|&a, &b| v[a].total_cmp(&v[b]));
-    let mut r = vec![0.0; n];
-    let mut i = 0;
-    while i < n {
-        let mut j = i + 1;
-        while j < n && (v[idx[j]] - v[idx[i]]).abs() < 1e-12 {
-            j += 1;
-        }
-        let avg = (i + j - 1) as f64 / 2.0;
-        for k in i..j {
-            r[idx[k]] = avg;
-        }
-        i = j;
-    }
-    r
-}
-
-fn spearman(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let ra = ranks(a);
-    let rb = ranks(b);
-    let mean = (n as f64 - 1.0) / 2.0;
-    let mut num = 0.0;
-    let mut da = 0.0;
-    let mut db = 0.0;
-    for i in 0..n {
-        let xa = ra[i] - mean;
-        let xb = rb[i] - mean;
-        num += xa * xb;
-        da += xa * xa;
-        db += xb * xb;
-    }
-    let den = (da * db).sqrt();
-    if den < 1e-12 { 0.0 } else { num / den }
-}
+// Canonical `spearman` lives in `zenstats::panel` (re-exported via
+// `zensim_validate::panel`). Pre-2026-05-26 this binary carried a
+// byte-identical inline copy; now routed through the shared home so
+// future ties / NaN-handling / panel-API changes propagate uniformly.
+use zensim_validate::panel::spearman;
 
 fn load_csv(path: &PathBuf) -> std::io::Result<(Vec<f64>, Vec<Vec<f32>>)> {
     let f = BufReader::new(File::open(path)?);
