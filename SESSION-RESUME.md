@@ -60,6 +60,47 @@ own flagged-unstarted work). Without it: lottery/research. Decision for
 the user: acquire that corpus, accept V39(5/6)+phone-bake, or explicitly
 relax the AIC-4 holdout rule.
 
+## Monotone-by-construction `A` retrain — BLOCKED on 2 obstacles (2026-05-26 PM)
+
+Goal: make shipped `A` itself correct-by-construction (≤100 + monotone +
+self-identity, **negative allowed below** per user — "worse than a simple
+lq encode → negative") while retaining V39's Mohammadi panel.
+
+**DONE:** the **bounds half is shipped** — `apply_output_calibration_spline`
+now clamps **≤100 (upper only)**, keeping the negative lower tail
+(commit `24f93462`). So `A`/V39 no longer exceeds 100; `>100` bug fixed in
+production. The remaining gap is **monotonicity** (the OOD inversion).
+
+**BLOCKER 1 — monotone training collapses.** `--monotone-cbc` added
+(`fa5c699d`, flag OFF by default). FIVE attempts to train a non-neg-weight
+encoder all collapsed after a healthy epoch 0:
+`v45` hard clamp; `v45b` clamp+lr1e-4; `v45c` clamp+momentum-reset;
+`v45d` penalty λ10 + clamp (fully dead); penalty-only untested-for-monotonicity.
+Unconstrained baseline (`v45base`) is STABLE (train val 0.92). → the hard
+sign-clamp drives dead weights. **Fix = softplus reparam** `w=±softplus(θ)`
+(weights→0 without dying, gradients always flow) — NOT yet implemented
+(invasive: forward call sites + θ shadow vectors, OR keep w=w_eff and update
+θ in `do_adam_step` only). Scripts: `scripts/v_next/run_v45*.sh`.
+
+**BLOCKER 2 — can't reproduce V39/V32's panel unconstrained.** V32 commit
+`2f12a27` documents seed=17/MSE=0.6/RN=0.6/cid22 1.5:2.0/konjnd 1.2:1.5 →
+**CID22 0.8879 held-out**. My reconstruction with those same settings
+(target `human_score`, YJ auto-transforms, anchor 0.01, dropped konjnd-agg)
+gets **CID22 0.295** (overfit — train-group val 0.92 but held-out craters).
+V32's exact command is NOT in repo scripts. **Next session must FIRST
+reproduce V32's 0.88 unconstrained** (likely a target-column / checkpoint-
+selection / konjnd-agg difference) before any monotone work — can't
+constrain a recipe that doesn't generalize.
+
+**HAZARD:** a concurrent agent edited `mlp_train/mod.rs` (panel-subcommand
+work), clobbering my const + breaking main once (fixed `e507cf84`). Claim
+the `.workongoing` marker before editing that file.
+
+**Path:** (1) reproduce V32 0.88 unconstrained; (2) implement softplus
+reparam; (3) train monotone, measure panel + invariant gate; (4) promote
+to `A` only if panel retained AND gate passes. `LinearBounded` remains the
+fully-monotone guaranteed alternate now (CID22 ~0.86).
+
 ## SHIPPED (2026-05-26): `ZensimProfile::LinearBounded` — correct-by-construction metric
 
 First correct-by-construction zensim metric (commit `caf82c48`). V0_2's
