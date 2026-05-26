@@ -726,6 +726,64 @@ affected bands. Replace with a soft saturation
 (e.g., `100 / (1 + exp(-(raw - 50) / 10))`) or per-bake
 recalibration so raw outputs stay within [0, 100].
 
+## V39 ship + dial/spline/anchor learnings (added 2026-05-25)
+
+The 2026-05-25 evening session shipped **V39** as `PreviewV0_3`
+(`zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin`) — the
+first bake that beats the prior V0_3 on ALL 5 held-out corpora's
+SROCC AND the G1 dial. Full lineage + numbers:
+`benchmarks/v5_vs_v03_comparison_2026-05-25.md`. Hard-won learnings
+(re-read before training or evaluating a codec-target bake):
+
+1. **SROCC-only verdicts hide a BROKEN DIAL — always run the
+   `bake_verdict` goals scorecard (G1 dynamic range).** Bakes trained
+   without an output calibration spline collapse the dial to a
+   near-constant (~65 score, G1=0.00) even at SROCC 0.88. A codec
+   binary-searching for "score=30" can never find it. This was
+   invisible under SROCC-only comparison; the scorecard (added this
+   session, auto-runs after every train) catches it. G1 is goal #1
+   for a reason.
+2. **The output calibration spline is MANDATORY for a codec-target
+   bake, and SROCC is rank-invariant under it.** A monotone PCHIP
+   spline stretches a compressed-but-well-ranked output to the full
+   [0,100] dial WITHOUT changing rank order. So the recipe is: train
+   for rank (V32-style hybrid MSE+RankNet), then fit a spline from a
+   multi-band anchor. That's V39.
+3. **The anchor is for SPLINE FITTING ONLY — use `--anchor-loss-weight
+   ≤ 0.01`.** V37 used 0.5 and the anchor MSE fought RankNet, collapsing
+   held-out CID22 SROCC 0.88→0.55. Any meaningful anchor weight
+   destroys rank. The anchor parquet needs a per-row `target_score`
+   column spanning 0–100 (NOT the constant `--anchor-target-score`)
+   so the spline gets multi-band knots.
+4. **Normalize all group `human_score` targets to a common scale.**
+   5-group MSE-only training diverges after epoch 0 when scales differ
+   (cid22_train raw MCOS [3-94], konjnd [-66,96], others [0,1]). This
+   was the "training regression" that blocked reproduction for hours.
+5. **CVVDP-emulator training is a DEAD END** (V41). Training toward
+   CVVDP scores gives WORSE human-MOS (CID22 0.66 vs 0.88). Emulating
+   CVVDP's OUTPUT ≠ having its CSF mechanism.
+6. **The AIC-3 "0.80 vs 0.96 CVVDP gap" is a measurement artifact, NOT
+   a feature limit.** CVVDP's 0.96 was a 5-image subset; on the full
+   600-pair/10-ref set CVVDP is 0.79 pooled / 0.93 per-ref, and our
+   bake scores 0.9475 per-ref — ABOVE raw CVVDP. Mixing real CVVDP in
+   as an input feature adds +0.004 (noise). **Do NOT invest in
+   CSF-approximating features to "close the CVVDP gap"** — the residual
+   pooled number is a cross-ref absolute-scale-calibration problem (the
+   dial), not missing feature information. Spike:
+   `benchmarks/aic3_cvvdp_feature_spike_2026-05-25.md`. This SUPERSEDES
+   any earlier "CVVDP gap requires CSF feature engineering" claim.
+7. **dynamic-range-floor regularizer overshoots** (V40, weight 0.3 →
+   output >100, saturated top). Promising for forcing spread but needs
+   careful tuning + the eq-pool substrate; the cross-codec-eq aux loss
+   is "not yet wired" for 2-layer/skip mode.
+8. **DATA BUG (fixed, pending promotion): kadid/tid `iwssim` =
+   human_score copy (target leak), `ssim2_gpu` = ref-vs-ref misjoin.**
+   Shipped bakes SAFE (trained on `human_score`); any multi-target
+   `iwssim` bake on kadid/tid is INVALID. Corrected
+   `*_fixed_2026-05-25.parquet` siblings written; build script now has
+   `_validate_metric_columns()` guard. Detail:
+   `benchmarks/DATA_INTEGRITY_kadid_tid_metric_columns_2026-05-25.md`.
+
 ## JSON pipeline mandate for ZNPR v3 bakes (2026-05-15)
 
 **Ad-hoc Python emitters for ZNPR v3 wire format are BANNED.** All
