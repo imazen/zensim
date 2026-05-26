@@ -1301,6 +1301,125 @@ impl SignumOrZero for f64 {
 mod tests {
     use super::*;
 
+    // ----- OR (P.1401, Eq. 2-4) -----
+
+    #[test]
+    fn outlier_ratio_zero_on_perfect_match() {
+        // S_trans == target → residual 0 → all under τ=1.96·σ → OR = 0.
+        let t = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let p = t.clone();
+        let or = outlier_ratio(&p, &t);
+        assert!(or.abs() < 1e-12, "OR perfect-match should be 0, got {or}");
+    }
+
+    #[test]
+    fn outlier_ratio_counts_residuals_above_1_96_sigma() {
+        // Hand-built: σ_target = std of target, τ = 1.96·σ. Construct
+        // residuals so EXACTLY 2 of 10 exceed τ.
+        let t: Vec<f64> = (0..10).map(|i| i as f64).collect(); // 0..9
+        let mean = 4.5;
+        let var: f64 = t.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / 10.0;
+        let sigma = var.sqrt();
+        let tau = 1.96 * sigma;
+        // 8 residuals tiny, 2 residuals just above τ.
+        let mut p = t.clone();
+        p[3] = t[3] + tau * 1.1; // outlier
+        p[7] = t[7] + tau * 1.1; // outlier
+        let or = outlier_ratio(&p, &t);
+        assert!(
+            (or - 0.2).abs() < 1e-12,
+            "OR should count 2/10 = 0.2 outliers, got {or} (τ={tau}, σ={sigma})"
+        );
+    }
+
+    #[test]
+    fn outlier_ratio_per_sample_uses_per_stimulus_sigma() {
+        // Two stimuli: same residual magnitude, different σ. Only the
+        // low-σ one is an outlier (its τ is tighter).
+        let t = vec![1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let p = vec![1.0_f64, 2.0, 3.0 + 1.0, 4.0 + 1.0, 5.0, 6.0]; // 2 residuals = 1.0
+        // σ_2 (idx 2) is small (0.3) so τ=0.588 — residual 1.0 IS outlier.
+        // σ_3 (idx 3) is large (1.0) so τ=1.96 — residual 1.0 is NOT outlier.
+        let sigma = vec![1.0, 1.0, 0.3, 1.0, 1.0, 1.0];
+        let or = outlier_ratio_per_sample(&p, &t, &sigma);
+        assert!(
+            (or - (1.0 / 6.0)).abs() < 1e-12,
+            "OR should be 1/6 (only idx 2 exceeds τ), got {or}"
+        );
+    }
+
+    // ----- PWRC (SA-ST AUC, paper-correct) -----
+
+    #[test]
+    fn pwrc_sa_st_perfect_rank_is_one() {
+        // Strictly monotonic prediction → every pair correctly ranked
+        // at every ST → SA(ST) = 1 everywhere → AUC = 1.
+        let humans: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let scores: Vec<f64> = humans.iter().map(|x| 10.0 * x + 0.5).collect();
+        let pw = pwrc_sa_st_auc(&scores, &humans);
+        assert!((pw - 1.0).abs() < 1e-12, "perfect rank → PWRC=1, got {pw}");
+    }
+
+    #[test]
+    fn pwrc_sa_st_anti_rank_is_zero() {
+        // Perfectly anti-correlated prediction → every pair wrong → SA=0
+        // at every ST → PWRC = 0.
+        let humans: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let scores: Vec<f64> = humans.iter().rev().copied().collect();
+        let pw = pwrc_sa_st_auc(&scores, &humans);
+        assert!(pw.abs() < 1e-12, "anti-rank → PWRC=0, got {pw}");
+    }
+
+    #[test]
+    fn pwrc_sa_st_adjacent_swap_high_but_under_one() {
+        // humans = 0..7, scores swap adjacent pairs. Only the 4 gap=1
+        // pairs are wrong (4/28 = 14.3% of pairs); the 24 farther-apart
+        // pairs rank correctly. So SA(ST=0) = 0.857, SA(ST≥1) = 1.0.
+        // PWRC = (0.857·1 + 1.0·6)/7 ≈ 0.980. Tight: a perfect ranking
+        // (PWRC = 1) and this imperfect one must be distinguishable.
+        let humans: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let scores = vec![1.0, 0.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0];
+        let pw = pwrc_sa_st_auc(&scores, &humans);
+        assert!(
+            (pw - 0.980).abs() < 0.005,
+            "adjacent-swap → PWRC ≈ 0.980 (computable by hand), got {pw}"
+        );
+        assert!(pw < 1.0, "imperfect ranking must give PWRC < 1, got {pw}");
+    }
+
+    #[test]
+    fn sa_st_curve_has_correct_shape() {
+        let humans: Vec<f64> = (0..6).map(|i| i as f64).collect();
+        let scores = humans.clone();
+        let curve = sa_st_curve(&scores, &humans, 16);
+        assert_eq!(curve.len(), 16);
+        // Perfect ranking: SA = 1 at every ST.
+        for (st, sa) in &curve {
+            assert!(
+                (*sa - 1.0).abs() < 1e-12,
+                "perfect ranking: SA(ST={st}) should be 1, got {sa}"
+            );
+        }
+        // First ST is 0, last is max subjective gap (= 5.0 here).
+        assert!((curve[0].0 - 0.0).abs() < 1e-12);
+        assert!((curve[15].0 - 5.0).abs() < 1e-12);
+    }
+
+    // ----- Proxy still callable + named correctly -----
+
+    #[test]
+    fn pwrc_proxy_weighted_rank_matches_old_pwrc_semantics() {
+        // The proxy preserves the pre-2026-05-26 pwrc() body. On
+        // perfect rank, both produce 1.0.
+        let humans: Vec<f64> = (0..8).map(|i| i as f64).collect();
+        let scores: Vec<f64> = humans.iter().map(|x| 10.0 * x).collect();
+        let proxy = pwrc_proxy_weighted_rank(&humans, &scores);
+        assert!(
+            (proxy - 1.0).abs() < 1e-12,
+            "proxy on perfect rank should be 1, got {proxy}"
+        );
+    }
+
     #[test]
     fn spearman_perfect_rank() {
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0];
