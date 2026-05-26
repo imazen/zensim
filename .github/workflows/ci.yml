@@ -206,6 +206,61 @@ jobs:
             exit 1
           fi
 
+  metric-census:
+    name: Metric-column corruption census
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install census deps
+        run: pip install --quiet "pyarrow>=15" "numpy>=1.26"
+      - name: Census must FAIL on the known-corrupt fixtures
+        run: |
+          set +e
+          python3 scripts/canonical_corpus/audit_metric_columns.py \
+            --fail-on-corruption \
+            --paths \
+              scripts/canonical_corpus/test_fixtures/corrupt_human_copy.parquet \
+              scripts/canonical_corpus/test_fixtures/corrupt_ref_misjoin.parquet
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::census did NOT detect corruption in the known-corrupt fixtures"
+            exit 1
+          fi
+          echo "census correctly flagged the corrupt fixtures (exit $rc)"
+      - name: Census must PASS on the clean fixture
+        run: |
+          python3 scripts/canonical_corpus/audit_metric_columns.py \
+            --fail-on-corruption \
+            --paths scripts/canonical_corpus/test_fixtures/clean.parquet
+      - name: Census of canonical train parquets (if mounted)
+        run: |
+          # CI runners do NOT have /mnt/v or R2 — this gate runs against the
+          # committed fixtures above. When the canonical parquets ARE present
+          # (e.g. a self-hosted runner with /mnt/v mounted), also census them.
+          CANON=/mnt/v/zen/zensim-training/canonical-2026-05-21/train
+          if [ -d "$CANON" ]; then
+            python3 scripts/canonical_corpus/audit_metric_columns.py \
+              --fail-on-corruption --root "$CANON"
+          else
+            echo "canonical train parquets not mounted ($CANON) — fixture gate only."
+          fi
+
+  join-safety:
+    name: join_safety unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install --quiet "pyarrow>=15" "numpy>=1.26" "pandas>=2"
+      - name: Run join_safety self-tests
+        run: python3 scripts/canonical_corpus/test_join_safety.py
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

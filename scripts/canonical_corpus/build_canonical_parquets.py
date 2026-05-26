@@ -47,6 +47,13 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from join_safety import (  # noqa: E402
+    JoinSafetyError,
+    assert_metric_not_constant_per_ref,
+    assert_no_leaked_metric_columns,
+)
+
 SRC_ROOT = Path("/mnt/v/zen/zensim-training")
 CANONICAL_ROOT = Path("/mnt/v/zen/zensim-training/canonical-2026-05-18")
 DRY = "--dry" in sys.argv
@@ -76,6 +83,34 @@ def sha256_file(p: Path) -> str:
                 break
             h.update(chunk)
     return h.hexdigest()
+
+def validate_metric_columns(label: str, tbl: pa.Table):
+    """DATA-INTEGRITY GUARD (added 2026-05-25, structural fix for task #215).
+
+    Refuse to bake the kadid/tid iwssim-leak + ssim2-misjoin bug into the
+    canonical set. Fires on:
+      - any MOCK column (mock metric columns must never enter a corpus),
+      - any metric column that is a bit-identical/perfect copy of human_score
+        (Mode A target leak),
+      - ssim2_gpu constant within every reference group (Mode B ref-misjoin).
+    safesyn/konjnd-dense/LARGE pass cleanly (real iwssim and/or null ssim2).
+    Raises RuntimeError so a rebuild cannot silently re-ship corrupt columns.
+    The corrected columns are produced by fix_kadid_tid_apply_scores.py; point
+    the source paths at the *_fixed_2026-05-25.parquet siblings once promoted.
+    """
+    import numpy as np
+
+    names = list(tbl.schema.names)
+    try:
+        assert_no_leaked_metric_columns(label, names, tbl)
+        if "ssim2_gpu" in names and "ref_basename" in names:
+            s2 = np.asarray(tbl.column("ssim2_gpu").to_numpy(zero_copy_only=False), dtype=float)
+            if np.isfinite(s2).sum() > 100:
+                refs = tbl.column("ref_basename").to_pylist()
+                assert_metric_not_constant_per_ref(label, refs, s2, "ssim2_gpu")
+    except JoinSafetyError as e:
+        raise RuntimeError(str(e)) from e
+
 
 def add_null_columns(tbl: pa.Table, columns: list[str], dtype=pa.float64()) -> pa.Table:
     """Add specified columns as all-null if they don't already exist."""
@@ -116,6 +151,7 @@ def build_safesyn():
     src = SRC_ROOT / "2026-05-18-v24" / "safesyn_4target_372col.parquet"
     print(f"\n--- build_safesyn from {src}")
     tbl = pq.read_table(str(src))
+    validate_metric_columns(src.name, tbl)
     # Add missing mix_cv33_iw33_sm33 column (only kadid/tid have it)
     tbl = add_null_columns(tbl, ["mix_cv33_iw33_sm33", "pjnd_target"])
     tbl = select_canonical_schema(tbl, NUM_FEATURES_FULL)
@@ -133,6 +169,7 @@ def build_kadid():
     src = SRC_ROOT / "2026-05-18-v24" / "kadid_4target_372col.parquet"
     print(f"\n--- build_kadid from {src}")
     tbl = pq.read_table(str(src))
+    validate_metric_columns(src.name, tbl)
     tbl = add_null_columns(tbl, ["pjnd_target"])
     tbl = select_canonical_schema(tbl, NUM_FEATURES_FULL)
     out = CANONICAL_ROOT / "train" / "kadid.parquet"
@@ -149,6 +186,7 @@ def build_tid():
     src = SRC_ROOT / "2026-05-18-v24" / "tid_4target_372col.parquet"
     print(f"\n--- build_tid from {src}")
     tbl = pq.read_table(str(src))
+    validate_metric_columns(src.name, tbl)
     tbl = add_null_columns(tbl, ["pjnd_target"])
     tbl = select_canonical_schema(tbl, NUM_FEATURES_FULL)
     out = CANONICAL_ROOT / "train" / "tid.parquet"

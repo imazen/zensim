@@ -1559,6 +1559,32 @@ fn main() {
             std::process::exit(2);
         });
 
+    // DATA-INTEGRITY GUARD (2026-05-25, task #215): refuse to TRAIN on a mock
+    // target column. The kadid/tid iwssim corruption happened because a
+    // validation-only mock column (a verbatim copy of human_score) leaked into
+    // training parquets after its "mock" filename qualifier was renamed away.
+    // Mock columns are now suffixed `_MOCK_VAL_ONLY`; any `--target-column`
+    // matching `*mock*` (case-insensitive) is a validation-only signal and
+    // must never carry training gradient.
+    if args.target_column.to_ascii_lowercase().contains("mock") {
+        let any_train = args
+            .group
+            .iter()
+            .filter_map(|s| parse_group_spec(s).ok())
+            .any(|(_, _, train_w, _)| train_w > 0.0);
+        if any_train {
+            eprintln!(
+                "DATA-INTEGRITY: --target-column {:?} is a MOCK (validation-only) column \
+                 but at least one --group has train_weight > 0. A mock target is a copy of \
+                 human_score and must never carry training gradient (this is the 2026-05-25 \
+                 iwssim leak). Set all training groups' train_weight to 0.0, or pick a real \
+                 target column.",
+                args.target_column
+            );
+            std::process::exit(2);
+        }
+    }
+
     // Load all groups, infer n_features from the first.
     let mut loaded: Vec<LoadedGroup> = Vec::new();
     let mut n_features = 0usize;
