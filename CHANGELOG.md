@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Docs — DEDUP-M2: HONEST-STOP on delegating `bake_runtime::score_row` to `zensim::metric::apply_mlp_scoring_with_codec` (2026-05-26)
+
+Follow-on to DEDUP-M (`d1309c91`). The task spec proposed promoting
+`apply_mlp_scoring_with_codec` to `pub` so `bake_runtime::score_row` could
+delegate to the canonical zensim helper and shed ~150 LOC. **Ruled out by
+type-shape analysis** (no production source change).
+
+Reasons (documented in detail at the top of
+`zensim-validate/src/bake_runtime.rs`):
+
+1. **Input shape mismatch**: `apply_mlp_scoring_with_codec` takes
+   `(&mut ZensimResult, &ProfileParams, w, h, codec_hint)`. `ZensimResult`
+   carries a fully-computed feature vector from real image processing +
+   exposes `pub(crate)` mutators. `score_row` takes a parquet row of f64
+   features + a long-lived `Predictor<'_>` + pre-allocated scratch.
+2. **Compile-time vs runtime bake bytes**: `ProfileParams::mlp_bytes` is
+   `Option<fn() -> &'static [u8]>` (compile-time function pointer); bake-eval
+   tooling loads bake bytes at runtime from CLI args — can't satisfy the
+   `fn() -> &'static` signature.
+3. **Scope mismatch on post-processing**: `apply_mlp_scoring_with_codec` runs
+   the FULL canonical pipeline (ensemble classifier routing, B3 primary mix,
+   `score_mapping_a/b`, soft/hard/extrapolate clamping, per-codec affine);
+   `score_row` runs only the per-sample-α / hybrid-head / tanh-pin /
+   output-spline subset because the bake-eval sites need raw pre-clamp
+   output for diagnostic dumps and the ensemble knobs live one level up.
+4. **Predictor reuse incompatible**: the canonical helper constructs a fresh
+   `Predictor::new(&model)` per call; `score_row` reuses one Predictor
+   across ≥10k parquet rows in hot loops (`bake_verdict`, `qsweep_eval`).
+
+Both code paths ARE bit-exact on the shared math (per-sample-α, hybrid
+head, tanh-pin, output spline) — verified by the
+`cid22_aggregate_srocc_matches_audit_reference` and
+`cid22_first_row_matches_bake_verdict_reference` regression gates which
+re-implement the math independently against the shared module.
+
+No `apply_mlp_scoring_with_codec` promotion to `pub`. No zensim version
+bump. Production source unchanged. Future **M3** candidates documented in
+`bake_runtime.rs` (extract `forward_one_bake_with_codec` into a runtime-bytes
+API, or introduce a thin `BakeForwardOps` trait shared between the two
+sites).
+
 ### Refactor — dedup-M: 6 zensim-validate bins routed through new `bake_runtime` module (2026-05-26)
 
 Tier-1 #1 cleanup from the cross-repo VERIFIED synthesis. Six bins

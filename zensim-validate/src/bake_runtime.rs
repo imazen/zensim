@@ -28,6 +28,83 @@
 //! NO ALGORITHM CHANGE. The same formulas, the same floor (`0.0026`), the
 //! same `clamp(-20.0, 20.0)` / `clamp(-30.0, 30.0)` bounds, the same
 //! NaN-propagation. Bit-exact.
+//!
+//! # DEDUP-M2 (2026-05-26): HONEST-STOP — delegation to canonical zensim helper INFEASIBLE
+//!
+//! The DEDUP-M2 follow-on chunk attempted to remove this module's ~150 LOC of
+//! per-row dispatch by promoting `zensim::metric::apply_mlp_scoring_with_codec`
+//! to `pub` and having [`score_row`] delegate to it. **Analysis ruled out the
+//! delegation; this module stays as the canonical bake-runtime path.** Reasons:
+//!
+//! 1. **Type-shape mismatch on inputs.** `apply_mlp_scoring_with_codec` takes
+//!    `(&mut ZensimResult, &ProfileParams, w, h, codec_hint)`. `ZensimResult`
+//!    carries a fully-computed feature vector from a real image-processing
+//!    pipeline and exposes `pub(crate)` mutators (`set_mlp_score`,
+//!    `mark_identical`). The bake-runtime path consumes a **single parquet row
+//!    of f64 features** + a **long-lived `Predictor<'_>` + pre-allocated f32
+//!    scratch** (re-used across ≥10k rows in hot loops like `bake_verdict`).
+//!    Forcing parquet rows through `ZensimResult` would mean fabricating an
+//!    instance per row + leaking `pub` on every mutator — not a localized API
+//!    addition.
+//!
+//! 2. **Compile-time vs runtime bake bytes.** `ProfileParams::mlp_bytes` is
+//!    `Option<fn() -> &'static [u8]>` — a function pointer returning a
+//!    `&'static [u8]`. Every shipped profile loads its bake at compile time.
+//!    The bake-runtime path takes runtime-loaded bake bytes from CLI args
+//!    (e.g., `bake_verdict --bake /path/to/some.bin`), which cannot satisfy
+//!    the `fn() -> &'static` signature without leaking the bytes into a
+//!    static slot — an unbounded heap leak per CLI invocation.
+//!
+//! 3. **Scope mismatch on post-processing.** `apply_mlp_scoring_with_codec`
+//!    runs the FULL canonical pipeline: ensemble classifier routing
+//!    (`ensemble_classifier_bytes`), primary/B3 mix (`mlp_bytes_b3 +
+//!    mlp_primary_mix`), `score_mapping_a/b` (`100 − A·d^B`),
+//!    soft/hard/`extrapolate_score` clamping, per-codec post-spline affine
+//!    calibration. [`score_row`] runs ONLY the per-sample-α / hybrid-head /
+//!    tanh-pin / output-spline subset — the bake-eval tooling needs raw
+//!    pre-clamp output for diagnostic dumps, and the ensemble/primary-mix
+//!    knobs live one level up in `ensemble_score_rows`. Forcing the bake-eval
+//!    sites through the full pipeline would lose the diagnostic-dump
+//!    surface area + double-apply the post-spline calibration in
+//!    `predict_features_with_bake`.
+//!
+//! 4. **Predictor reuse is structurally incompatible.** `forward_one_bake_with_codec`
+//!    (called from inside `apply_mlp_scoring_with_codec`) constructs a fresh
+//!    `Predictor::new(&model)` on every call. The bake-runtime path hot-loops
+//!    over parquet rows with a single long-lived `Predictor` — the ~µs
+//!    per-row Predictor construction would dominate wall time on 10k-row
+//!    corpora (KADID, CID22) for the same forward math.
+//!
+//! **The two functions serve different purposes**: `apply_mlp_scoring_with_codec`
+//! is the **encoder-side** full-pipeline ZensimResult mutator (one call per
+//! distorted candidate against a compile-time profile); [`score_row`] is the
+//! **eval-tooling** per-parquet-row helper (millions of calls against a
+//! runtime-loaded bake). Both ARE bit-exact on the shared math (per-sample-α,
+//! hybrid head, tanh-pin, output spline) — verified by the
+//! `cid22_aggregate_srocc_matches_audit_reference` /
+//! `cid22_first_row_matches_bake_verdict_reference` regression gates.
+//!
+//! **Future M3 candidates** (not in M2 scope):
+//!
+//! - **M3a — extract `forward_one_bake_with_codec` into a runtime-bytes API
+//!   on `zensim::mlp` or new `zensim::scoring`**: would accept `&[u8]` bake
+//!   bytes + an owned `Predictor` constructor knob (or a borrowed
+//!   `&mut Predictor`). Then [`score_row`] could delegate the inner forward +
+//!   metadata dispatch and keep its own scratch/Predictor reuse around it.
+//!   Costs ~2-3 days: needs to factor out the bake-metadata cache (currently
+//!   keyed on bake bytes pointer, which assumes `&'static [u8]`), the
+//!   per-codec affine wiring, and the `Predictor::predict_transformed` vs
+//!   `predict` choice. Bit-exact regression gates above MUST stay green.
+//! - **M3b — propose a thin trait `BakeForwardOps`** that abstracts the
+//!   shared math so `apply_mlp_scoring_with_codec` and [`score_row`] both
+//!   delegate to one trait impl, leaving each function's
+//!   bytes-loading/Predictor-reuse policy local. Lower-risk alternative to
+//!   M3a; same regression gate.
+//!
+//! Until M3 lands, this module remains the canonical per-row bake-runtime
+//! dispatch. No `apply_mlp_scoring_with_codec` promotion to `pub`; the
+//! `pub(crate)` boundary continues to protect the encoder-side full pipeline
+//! from being accidentally driven by parquet-row tooling.
 
 use zenpredict::{Model, Predictor};
 
