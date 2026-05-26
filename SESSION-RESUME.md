@@ -82,15 +82,24 @@ sign-clamp drives dead weights. **Fix = softplus reparam** `w=±softplus(θ)`
 (invasive: forward call sites + θ shadow vectors, OR keep w=w_eff and update
 θ in `do_adam_step` only). Scripts: `scripts/v_next/run_v45*.sh`.
 
-**BLOCKER 2 — can't reproduce V39/V32's panel unconstrained.** V32 commit
-`2f12a27` documents seed=17/MSE=0.6/RN=0.6/cid22 1.5:2.0/konjnd 1.2:1.5 →
-**CID22 0.8879 held-out**. My reconstruction with those same settings
-(target `human_score`, YJ auto-transforms, anchor 0.01, dropped konjnd-agg)
-gets **CID22 0.295** (overfit — train-group val 0.92 but held-out craters).
-V32's exact command is NOT in repo scripts. **Next session must FIRST
-reproduce V32's 0.88 unconstrained** (likely a target-column / checkpoint-
-selection / konjnd-agg difference) before any monotone work — can't
-constrain a recipe that doesn't generalize.
+**BLOCKER 2 — RESOLVED: recipe recovered from prior-session transcript.**
+My CID22 0.295 reconstruction used the WRONG recipe (reconstructed from
+the g5 konjnd-agg script). The REAL zensim-a/V39-lineage command (from
+session `133ab28d`, `scripts/v_next/repro_zensim_a_recipe_2026-05-26.sh`):
+- **`--target-column mix_cv40_iw60`** (ONE consistent cvvdp×iwssim metric
+  across all groups) — NOT `human_score` (per-group-inconsistent:
+  safesyn=ssim2 / cid22=MCOS / kadid=DMOS → the overfit cause).
+- **Only 2 `--group` inputs**: `safesyn:1.0:0.0` + `cid22_train:0.5:0.0`
+  (cid22_train.parquet, NOT _norm) — NOT 5 explicit human-MOS groups.
+- konjnd via `--konjnd-aggregation-weight 0.05` (not a --group), plus
+  `--cross-codec-eq-*` + `--dynamic-range-floor-weight 0.3`.
+- `--lr 5.66e-3 --tanh-output-head-scale 20.0 --anchor-loss-weight 0.5
+  --anchor-target-score 60 --epochs 300 --hidden 128 --per-sample-alpha-head`.
+- tuner_v11/V0_3 = `--mse 1.0 --ranknet 0.0 --seed 1` (CID22 0.860).
+  V32/V39 = `--mse 0.6 --ranknet 0.6 --seed 17` (+ spline injection via
+  `scripts/inject_spline.sh`) → CID22 0.8879/0.8793.
+Reproduction running 2026-05-26; expect CID22 ~0.86 (seed-1 tuner_v11).
+→ the monotone retrain (Blocker 1) must use THIS recipe, not human_score.
 
 **HAZARD:** a concurrent agent edited `mlp_train/mod.rs` (panel-subcommand
 work), clobbering my const + breaking main once (fixed `e507cf84`). Claim
