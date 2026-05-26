@@ -137,3 +137,28 @@ Core lesson: SROCC is rank-invariant under a monotone calibration spline.
 A well-ranking compressed bake (V32) + multi-band-anchor spline = both
 good rank AND working dial. The bake_verdict scorecard (auto-runs after
 every train) catches the broken-dial regression that SROCC-only hides.
+
+## V41 CVVDP-emulator (2026-05-25) — negative result
+
+Trained V39's recipe but with cvvdp_log_norm as the target (safesyn+kadid+tid)
++ continuous CVVDP anchor for spline. Goal: a bake "close to CVVDP" by
+training toward CVVDP scores directly.
+
+Result — human-MOS SROCC DROPPED vs V39:
+  CID22  0.6599 (V39: 0.8793)
+  KADIK  0.5256 (V39: 0.9251)
+  TID    0.6819 (V39: 0.9317)
+  AIC-3  0.7464 (V39: 0.8023)
+
+Lesson: emulating CVVDP's OUTPUT ≠ having CVVDP's ACCURACY. Training toward
+CVVDP scores makes the bake inherit CVVDP's systematic deviations from human
+MOS WITHOUT the CSF/display mechanism that earns CVVDP its 0.96. For the
+codec-target use case (track human quality), V39 (trained on human-MOS-derived
+targets) is strictly better. The CVVDP-proxy direction is a dead end for a
+shipped metric.
+
+EMPIRICAL VERDICT on "close to cvvdp": the 0.79-0.81 AIC-3 ceiling is
+feature-limited (no CSF-aware spatial-frequency features), CONFIRMED by:
+- 40 bakes across recipes all hitting ~0.80 AIC-3
+- V41 CVVDP-target emulator NOT helping (0.75)
+Closing the gap requires new input features (architectural), not training.
