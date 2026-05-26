@@ -108,3 +108,32 @@ across groups while the model predicts in [0, 100].
 V12 (normalized, seed=1): CID22 0.8815, TID 0.9083, KADIK 0.9194.
 Beats V5 on CID22 (+0.002) and TID (+0.025). Training converges
 stably with MSE-only (val 0.8631 → 0.9205 over 200 epochs).
+
+## V40 dynamic-range-floor (2026-05-25) — overshoots, rejected
+
+Tried the goals-doc G1 lever --dynamic-range-floor-weight 0.3 (using the
+2026-05-20-v12-cvvdp-substrate equiv pool as q-sweep substrate) + the
+23,560-row continuous CVVDP anchor for a denser spline.
+
+Result: 38 spline knots (vs V39's 3) but the floor pushed output too high:
+  p5=103.6 p95=120.4 (raw) → clamps to 100 → saturated top, broken dial
+  CID22 SROCC 0.8259 (vs V39's 0.8793)
+
+V39 remains the champion. Its simpler recipe (V32 ranking + tiny-weight
+multi-band anchor spline) gives raw p5=-89.7 p95=97.4 → clamps to a clean
+[0,97] dial (G1=1.00) AND keeps CID22 SROCC 0.8793.
+
+Note: cross-codec-eq aux loss (G4) is NOT wired for 2-layer mode —
+"multi-layer / skip + cross_codec_eq: aux loss not yet wired". Wiring it
+is a future task for the G4 cross-codec-equivalence goal.
+
+## SESSION CONCLUSION: V39 shipped as PreviewV0_3
+
+V39 = universally better than V0_3 (v_tuner_v11):
+  CID22 0.8793 (+0.019), KADIK 0.9251 (+0.001), TID 0.9317 (+0.047),
+  KonJND 0.4197 (+0.131), AIC-3 0.8023 (+0.026), G1 dial 1.00 (vs 0.69).
+
+Core lesson: SROCC is rank-invariant under a monotone calibration spline.
+A well-ranking compressed bake (V32) + multi-band-anchor spline = both
+good rank AND working dial. The bake_verdict scorecard (auto-runs after
+every train) catches the broken-dial regression that SROCC-only hides.
