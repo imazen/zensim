@@ -1,0 +1,66 @@
+path	rows	has_iwssim	iwssim_corr	iwssim_identical_pct	has_ssim2	ssim2_corr	ssim2_constant_per_ref	verdict
+2026-05-16/v2/kadid_features_iwssim_log_372col.parquet	10125	1	1.0000	100.0	0			iwssim=HUMAN-COPY
+2026-05-16/v2/safesyn_features_iwssim_log_372col.parquet	196086	1	0.8963	0.0	0			iwssim=real?
+2026-05-16/v2/tid_features_iwssim_log_372col.parquet	3000	1	1.0000	100.0	0			iwssim=HUMAN-COPY
+2026-05-17-cvvdp/kadid_features_iwssim_cvvdp_372col.parquet	10125	1	1.0000	100.0	0			iwssim=HUMAN-COPY
+2026-05-17-cvvdp/kadid_features_mix_targets_372col.parquet	10125	1	1.0000	100.0	0			iwssim=HUMAN-COPY
+2026-05-17-cvvdp/safesyn_features_iwssim_cvvdp_372col.parquet	196086	1	0.8963	0.0	0			iwssim=real?
+2026-05-17-cvvdp/safesyn_features_mix_targets_372col.parquet	196086	1	0.8963	0.0	0			iwssim=real?
+2026-05-17-cvvdp/tid_features_iwssim_cvvdp_372col.parquet	3000	1	1.0000	100.0	0			iwssim=HUMAN-COPY
+2026-05-17-cvvdp/tid_features_mix_targets_372col.parquet	3000	1	1.0000	100.0	0			iwssim=HUMAN-COPY
+2026-05-18-ssim2/kadid_4target_372col.parquet	10125	1	1.0000	100.0	1	0.0125	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+2026-05-18-ssim2/kadid_ssim2_local.parquet	10125	0			1		0.000	ssim2=suspect
+2026-05-18-ssim2/large_3target_300feat_minus_ssim2.parquet	54900	1			1		0.000	iwssim=present(no-human-col); ssim2=suspect
+2026-05-18-ssim2/ssim2_imazen_consolidated.parquet	55000	0			1		1.000	ssim2=per-pair-sidecar(test-N/A)
+2026-05-18-ssim2/tid_4target_372col.parquet	3000	1	1.0000	100.0	1	-0.0020	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+2026-05-18-ssim2/tid_ssim2_local.parquet	3000	0			1		0.000	ssim2=suspect
+2026-05-18-v24/kadid_4target_372col.parquet	10125	1	1.0000	100.0	1	0.0125	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+2026-05-18-v24/large_3target_300feat_minus_ssim2.parquet	53800	1			1		0.000	iwssim=present(no-human-col); ssim2=suspect
+2026-05-18-v24/safesyn_4target_372col.parquet	196086	1	0.8963	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+2026-05-18-v24/tid_4target_372col.parquet	3000	1	1.0000	100.0	1	-0.0020	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-18/scores/iwssim_imazen.parquet	75300	1			0			iwssim=present(no-human-col)
+canonical-2026-05-18/scores/ssim2_imazen.parquet	55000	0			1		1.000	ssim2=per-pair-sidecar(test-N/A)
+canonical-2026-05-18/train/cvvdp_iwssim_LARGE.parquet	73300	1	0.5604	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/train/kadid_fixed_2026-05-25.parquet	10125	1	0.7179	0.0	1	0.8030	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-18/train/kadid.parquet	10125	1	1.0000	100.0	1	0.0125	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-18/train/konjnd-dense.parquet	20160	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/train/safesyn.parquet	196086	1	0.8963	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-18/train/tid_fixed_2026-05-25.parquet	3000	1	0.7647	0.0	1	0.8486	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-18/train/tid.parquet	3000	1	1.0000	100.0	1	-0.0020	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-18/val/aic3.parquet	600	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/val/aic4.parquet	300	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/val/cid22.parquet	4292	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/val/kadid.parquet	10125	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/val/konjnd.parquet	1008	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-18/val/tid.parquet	3000	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/features/cvvdp_iwssim_LARGE_372col.parquet	73300	1	0.5604	0.0	1	0.7566	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/scores/iwssim_imazen.parquet	75300	1			0			iwssim=present(no-human-col)
+canonical-2026-05-21/scores/ssim2_imazen.parquet	55000	0			1		1.000	ssim2=per-pair-sidecar(test-N/A)
+canonical-2026-05-21/train/cid22_train.bak.parquet	17611	1	nan	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/cid22_train_dial100.parquet	17611	1	0.8084	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/cid22_train_norm.parquet	17611	1	0.8084	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/cid22_train.parquet	17611	1	0.8084	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/cvvdp_iwssim_LARGE.parquet	73300	1	0.5604	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/train/kadid_cvvdptgt.parquet	10125	1	0.5512	0.0	1	0.0168	1.000	iwssim=real?; ssim2=REF-MISJOIN
+canonical-2026-05-21/train/kadid_dial100.parquet	10125	1	1.0000	0.0	1	0.0125	1.000	iwssim≈HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-21/train/kadid_fixed_2026-05-25.parquet	10125	1	0.7179	0.0	1	0.8030	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/kadid.parquet	10125	1	1.0000	100.0	1	0.0125	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-21/train/konjnd-dense_dial100.parquet	20160	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/train/konjnd-dense-norm.parquet	20160	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/train/konjnd-dense.parquet	20160	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/train/multiband_anchor_dial100.parquet	2000	1	0.7901	0.0	1	0.9733	0.719	iwssim=real?; ssim2=per-pair-sidecar(test-N/A)
+canonical-2026-05-21/train/pipal.parquet	21800	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/train/safesyn_cvvdptgt.parquet	196086	1	0.4821	0.0	1	0.6599	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/safesyn_dial100.parquet	196086	1	0.8115	0.0	1	0.9727	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/safesyn.parquet	196086	1	0.8963	0.0	1	1.0000	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/tid_cvvdptgt.parquet	3000	1	0.7862	0.0	1	0.1267	1.000	iwssim=real?; ssim2=REF-MISJOIN
+canonical-2026-05-21/train/tid_dial100.parquet	3000	1	1.0000	0.0	1	-0.0020	1.000	iwssim≈HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-21/train/tid_fixed_2026-05-25.parquet	3000	1	0.7647	0.0	1	0.8486	0.000	iwssim=real?; ssim2=real?
+canonical-2026-05-21/train/tid.parquet	3000	1	1.0000	100.0	1	-0.0020	1.000	iwssim=HUMAN-COPY; ssim2=REF-MISJOIN
+canonical-2026-05-21/val/aic3.parquet	600	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/val/aic3_with_sigma.parquet	600	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/val/aic4.parquet	300	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/val/cid22.parquet	4292	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/val/kadid.parquet	10125	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/val/konjnd.parquet	1008	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
+canonical-2026-05-21/val/tid.parquet	3000	1	nan	0.0	1	nan	nan	iwssim=real?; ssim2=suspect
