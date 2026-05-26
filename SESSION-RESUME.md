@@ -32,6 +32,16 @@ FALSIFIED** (see Findings below). The AIC-3 "gap" was a measurement
 artifact; per-ref we already beat raw CVVDP. The real lever is
 cross-ref absolute-scale calibration (the dial), not features.
 
+## DECISION (user, 2026-05-26): ACCEPT V39 + phone bake; AIC-4/G5 are known-limits
+
+The user accepted the shipped state as the deliverable: **V39** (PreviewV0_3,
+beats V0_3 on 5/6 corpora + better dial/Z-RMSE) + **zensim-b-phone** (CVVDP
+iPhone, shipped). **AIC-4 (V0_3's lone win) and G5 (KonJND HF) are accepted
+KNOWN-LIMITS — do NOT re-grind them.** They are not closable by recipe or
+architecture (v42/v43/v44 falsified); the only unblock is new JPEG-AI +
+near-lossless training data (root cause below). Revisit ONLY if/when that
+data is acquired.
+
 ## ROOT CAUSE unifying the 2 unmet goals (2026-05-26) — it's TRAINING DATA
 
 The two unsolved deliverables share ONE cause: **the training distribution
