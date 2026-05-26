@@ -8,10 +8,12 @@
 // epoch in <1s on CPU; the Python version does ~14 batches per epoch
 // at ~3s on the same GPU. The Adam-update frequency difference is
 // the bulk of the remaining gap.
-#[allow(dead_code)] // Used by mlp_train when norm_in_norm_weight > 0
-mod loss_norm_in_norm;
+#[allow(dead_code)] // SIMD-Adam used by mlp_train
+mod adam_simd;
 #[allow(dead_code)] // CLI dispatch wired in a follow-up tick
 mod mlp_train;
+#[allow(dead_code)] // Light-panel + ValAggregate referenced by mlp_train
+mod panel;
 mod scale_invariance;
 #[allow(dead_code)] // SIMD kernels exposed via mlp_train::forward/backprop_step
 mod simd_mlp;
