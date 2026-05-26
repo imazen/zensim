@@ -2346,9 +2346,18 @@ fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
     }
 }
 
-/// Evaluate the PCHIP spline at `x`. Outside the knot range the
-/// evaluation extrapolates linearly using the endpoint slope (so the
-/// output stays monotone — crucial for the user-facing dial).
+/// Evaluate the PCHIP spline at `x`, clamped to `≤ 100` on the UPPER
+/// side only.
+///
+/// A perceptual score can never exceed 100 (nothing is more similar than
+/// identical), so the upper extrapolation is clamped at 100 — this is the
+/// correct-by-construction upper bound that fixes the `> 100` defect
+/// (root cause: V39's degenerate spline linearly extrapolated past 100).
+/// The LOWER extrapolation is deliberately left UNBOUNDED so that inputs
+/// more dissimilar than a simple low-quality encode score **negative**
+/// (a desired property of the codec-target dial — "worse than the worst
+/// codec output" is meaningful signal, not a tie at 0). The result stays
+/// monotone (min with a constant preserves order).
 fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> f64 {
     let n = spline.xs.len();
     debug_assert!(n >= 2);
@@ -2358,12 +2367,14 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
     if !x.is_finite() {
         return x;
     }
-    // Linear extrapolation outside the knot range.
+    // Lower extrapolation: UNBOUNDED (negative scores are intended for
+    // very-dissimilar inputs).
     if x <= xs[0] {
         return ys[0] + derivs[0] * (x - xs[0]);
     }
+    // Upper extrapolation: clamped at ≤100 (no score exceeds identical).
     if x >= xs[n - 1] {
-        return ys[n - 1] + derivs[n - 1] * (x - xs[n - 1]);
+        return (ys[n - 1] + derivs[n - 1] * (x - xs[n - 1])).min(100.0);
     }
     // Find the segment via binary search.
     let mut lo = 0usize;
@@ -2383,7 +2394,7 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
     let h10 = t * (1.0 - t).powi(2);
     let h01 = t.powi(2) * (3.0 - 2.0 * t);
     let h11 = t.powi(2) * (t - 1.0);
-    h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]
+    (h00 * ys[lo] + h10 * h * derivs[lo] + h01 * ys[hi] + h11 * h * derivs[hi]).min(100.0)
 }
 
 /// EXP-CROSS-CODEC-V11-E (2026-05-20): per-codec post-spline affine
