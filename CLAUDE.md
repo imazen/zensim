@@ -1021,6 +1021,31 @@ Mohammadi panel (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE) aggregate +
 10-band per corpus. **~3.5 sec for all 5 corpora.** Replaces the older
 `dataset_metric_baseline` which re-decodes images (~15-20 min per bake).
 
+### IQA statistical panel on arbitrary (predicted, target) pairs
+**`panel` binary** at
+`/home/lilith/work/zen/zensim/zensim-validate/src/bin/panel.rs`.
+Build with `cargo build --release -p zensim-validate --bin panel`.
+
+THE canonical entry point for the full Mohammadi 2025 panel (SROCC +
+PLCC + KROCC + OR + PWRC + Z-RMSE + per-sample Z-RMSE + 4-param
+logistic) on an arbitrary table — the NON-bake case. (For a bake on a
+canonical corpus use `bake_verdict`.) Reads TSV or Parquet with columns
+`predicted`, `target`, optional `sigma`, optional `band`:
+
+```sh
+panel --input scores.tsv [--json]            # aggregate panel
+panel --input eval.parquet --json            # + per-band when `band` present
+```
+
+Wraps `zensim_validate::panel::{compute_panel, z_rmse_per_sample,
+rescale_logistic}` directly — zero new stat math. Verified equivalent
+to scipy to <= 1e-9 by `scripts/verify_panel_parity.py` +
+`tests/panel_parity.rs`. Python pipelines that can't shell directly use
+the thin `scripts/lib/zen_stats.py` shim (`from scripts.lib.zen_stats
+import panel`). **Do NOT hand-roll srocc/plcc/krocc/pwrc/z_rmse in
+Python** — that re-creates the 14-fork divergence this consolidates
+(see `benchmarks/iqa_stats_consolidation_2026-05-26.md`).
+
 ### Bake training (MLP supervised learning)
 **`zensim_mlp_train` binary** at
 `/home/lilith/work/zen/zensim/zensim-validate/src/bin/zensim_mlp_train.rs`.

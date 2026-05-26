@@ -32,6 +32,14 @@ weights. Phase 4 (`bake_v3.py`) converts to ZNPR v3.
 - val_mean = min per-group SROCC, same as Rust trainer
 
 When `--freeze-encoder` is false, encoder learns at lr/10 alongside.
+
+MIGRATION CANDIDATE (stat math): the inline `spearman_abs` is a per-epoch
+in-loop monitor, so it can't shell to the Rust `panel` bin mid-training
+without per-epoch subprocess overhead. The canonical stat home is
+zensim_validate::panel (zensim-validate/src/bin/panel.rs); for the FINAL
+held-out report this script should use `from scripts.lib.zen_stats import
+panel` (or `bake_verdict` once the head is baked). Keep the in-loop monitor
+lightweight but treat its number as indicative, not a ship verdict.
 """
 from __future__ import annotations
 

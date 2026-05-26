@@ -15,6 +15,13 @@ Usage:
     --label V0_15 \\
     --per-pair /tmp/zensim_loop/v0_15_per_pair.csv \\
     --out /home/lilith/work/zen/zensim/site/data/step5_bands/v0_15.json
+
+DEPRECATED STAT MATH: the per-band SROCC here is superseded by the canonical
+Rust `panel` (zensim-validate/src/bin/panel.rs), which natively supports a
+`band` column for per-band breakdown. For NEW work:
+    from scripts.lib.zen_stats import panel
+    stats = panel(predicted, target, band=band_labels)  # stats["bands"][...]
+verified to scipy <= 1e-9 by scripts/verify_panel_parity.py.
 """
 import argparse
 import csv

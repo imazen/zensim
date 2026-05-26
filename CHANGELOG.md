@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Added — `panel` subcommand: canonical IQA-stats entry point (2026-05-26)
+
+- New `zensim-validate` binary `panel` (`zensim-validate/src/bin/panel.rs`):
+  THE canonical entry point for the full Mohammadi 2025 statistical panel
+  (SROCC + PLCC + KROCC + OR + PWRC + Z-RMSE, plus per-sample Z-RMSE and the
+  4-param logistic rescale) on an arbitrary table of `(predicted, target[,
+  sigma, band])` pairs — the non-bake case (`bake_verdict` covers bakes on
+  canonical corpora). Reads TSV or Parquet (columns located by name), emits
+  text or `--json`. Wraps `zensim_validate::panel::compute_panel`
+  (`panel.rs:656`), `z_rmse_per_sample` (`panel.rs:234`), and
+  `rescale_logistic` (`panel.rs:458`) directly — **zero new stat math**.
+- New mandatory cross-check gate `scripts/verify_panel_parity.py` +
+  `zensim-validate/tests/panel_parity.rs`: proves the canonical Rust panel
+  agrees with the scipy reference (`spearmanr`/`kendalltau`/`pearsonr` +
+  `scipy.optimize` logistic) to **<= 1e-9** on SROCC/PLCC/KROCC/PWRC across
+  36 synthetic cases before any py reimpl is retired. Measured max
+  divergence ~5e-11 per gated stat. (OR and Z-RMSE are intentionally
+  definition-dependent — the script documents the difference.)
+- New `scripts/lib/zen_stats.py`: thin Python shim that shells to the Rust
+  `panel` bin, for pipelines that can't restructure to call the binary
+  directly — one stat code path workspace-wide.
+- Retired the ~14 scattered Python IQA-stat reimplementations
+  (`benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md` Tier-1 #2): the 9
+  zensim-local scripts get DEPRECATED-stat-math banners pointing at `panel`
+  / `bake_verdict` / `zen_stats`; cross-repo callers (zenanalyze /
+  coefficient / jxl-encoder) documented as migration candidates in
+  `benchmarks/iqa_stats_consolidation_2026-05-26.md`. Two genuine
+  algorithmic differences surfaced: (1) `mohammadi_eval.py`'s PWRC weights
+  by predicted ranks while panel.rs weights by human ranks (PWRC is
+  asymmetric); (2) `eval_ensemble`'s "pwrc" is Pearson-on-rank-transforms,
+  a different statistic entirely.
+
 ### Added — `ZensimProfile::LinearBounded`: correct-by-construction metric (2026-05-26)
 
 - New `ZensimProfile::LinearBounded` (external name `zensim-linear-bounded`):

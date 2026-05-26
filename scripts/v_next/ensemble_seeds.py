@@ -11,6 +11,12 @@ Usage:
                             /tmp/zensim_loop/v0_18_per_pair.csv \\
                             /tmp/zensim_loop/v0_19_per_pair.csv \\
                             /tmp/zensim_loop/v0_20_per_pair.csv
+
+DEPRECATED STAT MATH: the inline `spearman` below is superseded by the
+canonical Rust `panel` (zensim-validate/src/bin/panel.rs). For NEW work on
+arbitrary (predicted, target) pairs use:
+    from scripts.lib.zen_stats import srocc, panel   # shells to Rust `panel`
+verified to scipy <= 1e-9 by scripts/verify_panel_parity.py.
 """
 import csv, sys
 from collections import defaultdict

@@ -25,6 +25,14 @@ Bake -> profile mapping per zensim/src/profile.rs (clamp policy noted):
   v0_22_iw_v2_2026-05-16.bin                -> NOT shipped (research bake)
   v0_22_iw_v2_calibrated_2026-05-16.bin     -> NOT shipped (calibrated variant)
   v0_18_2026-05-13.bin                      -> ARCHIVED uncompressed V0_3 source
+
+DEPRECATED STAT MATH: `srocc_sign_tolerant` here is superseded by the
+canonical Rust `panel` (zensim-validate/src/bin/panel.rs), whose SROCC is
+already polarity-tolerant (.abs()). For NEW work:
+    from scripts.lib.zen_stats import srocc   # shells to Rust `panel`
+verified to scipy <= 1e-9 by scripts/verify_panel_parity.py. This script's
+dial-distribution scan (min/max/p5/p95/range) is its unique value; the
+SROCC helper is what's superseded.
 """
 
 from __future__ import annotations

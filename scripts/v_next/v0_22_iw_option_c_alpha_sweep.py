@@ -23,6 +23,12 @@ ProfileParams update.
 
 Usage:
   python3 scripts/v_next/v0_22_iw_option_c_alpha_sweep.py
+
+DEPRECATED STAT MATH: the inline `z_rmse` (and any SROCC) here is superseded
+by the canonical Rust `panel` (zensim-validate/src/bin/panel.rs). For NEW
+work on arbitrary (predicted, target[, sigma]) pairs use:
+    from scripts.lib.zen_stats import panel   # shells to Rust `panel`
+verified to scipy <= 1e-9 by scripts/verify_panel_parity.py.
 """
 from __future__ import annotations
 

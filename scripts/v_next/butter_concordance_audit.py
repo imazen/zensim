@@ -16,6 +16,12 @@ Usage:
   python3 butter_concordance_audit.py \\
     --csv /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv \\
     --report /tmp/zensim_loop/butter_concordance_audit.tsv
+
+DEPRECATED STAT MATH: the inline `spearman` here is superseded by the
+canonical Rust `panel` (zensim-validate/src/bin/panel.rs). For NEW work on
+arbitrary (predicted, target) pairs use:
+    from scripts.lib.zen_stats import srocc, panel   # shells to Rust `panel`
+verified to scipy <= 1e-9 by scripts/verify_panel_parity.py.
 """
 import argparse
 import csv

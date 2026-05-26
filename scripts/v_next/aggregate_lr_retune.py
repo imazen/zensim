@@ -6,6 +6,12 @@ into one summary table: per-lr SROCC (median across seeds) on each corpus,
 compared to the K=1 V6 baseline.
 
 Usage: python3 aggregate_lr_retune.py [SWEEP_DIR]
+
+NOTE: this aggregator already shells to `bake_verdict` (the canonical
+bake-on-corpus eval) and only re-parses its SROCC; it does NOT compute any
+panel stat itself. The `srocc_only` regex/parse below reads bake_verdict's
+output — no hand-rolled stat math. (If you ever need the panel on arbitrary
+pairs here, use `from scripts.lib.zen_stats import panel`.)
 """
 from __future__ import annotations
 

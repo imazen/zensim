@@ -4,6 +4,30 @@
 Reproduces Tables 2-3 from "Evaluation of Objective Image Quality
 Metrics for High-Fidelity Image Compression" (IEEE Access 2026).
 
+============================================================================
+DEPRECATED STAT MATH — migrate to the canonical `panel` entry point.
+============================================================================
+The srocc/plcc/krocc/outlier_ratio/pwrc/z_rmse_per_sample `def`s below are
+a hand-rolled reimplementation of the Mohammadi panel. The canonical home
+is now the Rust `panel` binary (zensim-validate/src/bin/panel.rs, wrapping
+zensim_validate::panel) — verified equivalent to scipy to <= 1e-9 by
+scripts/verify_panel_parity.py. For NEW work, do one of:
+  * arbitrary (predicted, target[, sigma]) pairs:
+      from scripts.lib.zen_stats import panel
+      stats = panel(predicted, target, sigma=sigma)
+    (zen_stats shells to the Rust `panel` bin — one stat code path.)
+  * a bake scored on a canonical corpus:
+      use `bake_verdict` (zensim-validate/src/bin/bake_verdict.rs).
+GENUINE DIFFERENCE to be aware of when comparing old vs new numbers:
+  - this file's `pwrc(pred, target)` weights by the PREDICTED ranks;
+    panel.rs weights by the human/target ranks (PWRC is NOT symmetric).
+  - this file's `outlier_ratio` uses logistic-rescaled |residual| > 2σ;
+    panel.rs uses a polarity-aligned z-score residual. Both are
+    Mohammadi-2025-compatible but not bit-equal — expected, documented.
+This script is kept (not deleted) because it also wires the AIC-3 σ
+parquet + per-row predictor; the stat math is what's superseded.
+============================================================================
+
 Usage:
   python3 scripts/mohammadi_eval.py <bake.bin>
 

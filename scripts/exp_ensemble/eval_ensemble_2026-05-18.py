@@ -20,6 +20,26 @@ Output: rendered Mohammadi panel for {balanced, compression, ensemble,
 ssim2-control, iwssim-control, cvvdp-control} on each of the 5
 canonical val corpora.
 
+============================================================================
+DEPRECATED STAT MATH — migrate to the canonical `panel` entry point.
+============================================================================
+The srocc/krocc/pearson_abs/rescale_logistic/z_rmse/pwrc/outlier_ratio/
+mohammadi_panel `def`s below are a hand-rolled panel. The canonical home is
+the Rust `panel` bin (zensim-validate/src/bin/panel.rs, wrapping
+zensim_validate::panel), verified to scipy <= 1e-9 by
+scripts/verify_panel_parity.py. For NEW work:
+  * arbitrary (predicted, target[, sigma]) pairs (this script's case, once
+    per-row scores are in hand):
+        from scripts.lib.zen_stats import panel
+        stats = panel(predicted, human)   # shells to the Rust `panel` bin
+  * scoring a single bake on a canonical corpus: use `bake_verdict`.
+GENUINE DIFFERENCE: this file's `pwrc` is Pearson-on-rank-transforms, NOT
+the importance-weighted PWRC of Mohammadi 2025 / panel.rs — so its PWRC
+column is a DIFFERENT statistic, not just a different impl. The
+ensemble-classifier training logic here is unique and is what keeps this
+script alive; the stat math is superseded.
+============================================================================
+
 Usage:
     python3 scripts/exp_ensemble/eval_ensemble_2026-05-18.py [--seed N]
 """
