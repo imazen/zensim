@@ -126,41 +126,207 @@ pub fn kendall_tau(a: &[f64], b: &[f64]) -> f64 {
     }
 }
 
+/// **Outlier Ratio per ITU-T P.1401 § C.4 / Mohammadi 2025 Eq 2-4.**
+///
+/// Fraction of stimuli where the absolute residual `|predicted - target|`
+/// exceeds the outlier threshold `τ = 1.96 · σ_target`, where `σ_target`
+/// is the corpus standard deviation of the human / MOS column.
+///
+/// **Polarity convention:** `predicted` MUST already be on the same
+/// scale as `target`. The canonical entry path is via
+/// [`compute_panel`], which 4-parameter-logistic-rescales `scores`
+/// before calling this. Passing raw distance- or score-shaped bake
+/// output without rescale will produce a spurious 100 % outlier ratio.
+///
+/// When per-stimulus observer σ is available, prefer
+/// [`outlier_ratio_per_sample`] — corpus-σ is the defensive fallback
+/// when the bootstrap σ column isn't joined onto the eval set.
 pub fn outlier_ratio(predicted: &[f64], target: &[f64]) -> f64 {
-    let n = predicted.len();
-    if n < 4 {
+    let n = predicted.len().min(target.len());
+    if n < 2 {
         return f64::NAN;
     }
-    let mean_p: f64 = predicted.iter().sum::<f64>() / n as f64;
-    let mean_t: f64 = target.iter().sum::<f64>() / n as f64;
-    let var_p: f64 = predicted.iter().map(|x| (x - mean_p).powi(2)).sum::<f64>() / n as f64;
-    let var_t: f64 = target.iter().map(|x| (x - mean_t).powi(2)).sum::<f64>() / n as f64;
-    let sd_p = var_p.sqrt().max(1e-12);
-    let sd_t = var_t.sqrt().max(1e-12);
-    let polarity = if pearson(predicted, target) < 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let residuals: Vec<f64> = (0..n)
-        .map(|i| {
-            let zp = polarity * (predicted[i] - mean_p) / sd_p;
-            let zt = (target[i] - mean_t) / sd_t;
-            (zp - zt).abs()
-        })
-        .collect();
-    let mean_r: f64 = residuals.iter().sum::<f64>() / n as f64;
-    let sd_r: f64 = (residuals.iter().map(|r| (r - mean_r).powi(2)).sum::<f64>() / n as f64)
-        .sqrt()
-        .max(1e-12);
-    residuals
+    let mean_t: f64 = target.iter().take(n).sum::<f64>() / n as f64;
+    let var_t: f64 = target
         .iter()
-        .filter(|r| (**r - mean_r).abs() > 2.0 * sd_r)
-        .count() as f64
-        / n as f64
+        .take(n)
+        .map(|x| (x - mean_t).powi(2))
+        .sum::<f64>()
+        / n as f64;
+    let sigma = var_t.sqrt().max(1e-12);
+    let tau = 1.96 * sigma;
+    let mut outliers = 0usize;
+    let mut counted = 0usize;
+    for i in 0..n {
+        let r = predicted[i] - target[i];
+        if !r.is_finite() {
+            continue;
+        }
+        if r.abs() > tau {
+            outliers += 1;
+        }
+        counted += 1;
+    }
+    if counted == 0 {
+        return f64::NAN;
+    }
+    outliers as f64 / counted as f64
 }
 
-pub fn pwrc(a: &[f64], b: &[f64]) -> f64 {
+/// Per-stimulus σ variant of [`outlier_ratio`]: outlier threshold is
+/// `τᵢ = 1.96 · σᵢ` per the bootstrap observer σ of each stimulus
+/// (Mohammadi 2025 § IV-B). Stimuli with `σᵢ` NaN, ≤ 0, or non-finite
+/// `predicted - target` are skipped from both the numerator and
+/// denominator (so the ratio is over the validly-σ-tagged subset).
+///
+/// `predicted` MUST already be on `target`'s scale (same caller
+/// convention as [`outlier_ratio`]).
+pub fn outlier_ratio_per_sample(predicted: &[f64], target: &[f64], sigma: &[f64]) -> f64 {
+    let n = predicted.len().min(target.len()).min(sigma.len());
+    if n == 0 {
+        return f64::NAN;
+    }
+    let mut outliers = 0usize;
+    let mut counted = 0usize;
+    for i in 0..n {
+        let s = sigma[i];
+        if !s.is_finite() || s <= 0.0 {
+            continue;
+        }
+        let r = predicted[i] - target[i];
+        if !r.is_finite() {
+            continue;
+        }
+        let tau = 1.96 * s;
+        if r.abs() > tau {
+            outliers += 1;
+        }
+        counted += 1;
+    }
+    if counted == 0 {
+        return f64::NAN;
+    }
+    outliers as f64 / counted as f64
+}
+
+/// **PWRC (Perceptually Weighted Rank Correlation) — Mohammadi 2025
+/// § VII Sorting-Accuracy AUC.**
+///
+/// For each Sensory Threshold ST ∈ `[0, max_subj_gap]`, compute
+/// `SA(ST) =` fraction of (i,j) pairs with `|humans[i] − humans[j]| >
+/// ST` that the objective metric ranks correctly — i.e., where
+/// `sign(humans[j] − humans[i]) == sign(scores[j] − scores[i])`. The
+/// returned scalar is the trapezoidal area under that curve,
+/// **normalised** so a perfect ranker returns `1.0` and a perfectly
+/// anti-ranked one returns `0.0`.
+///
+/// Wu et al. 2017 (arXiv:1705.05126) is the upstream signed PWRC
+/// definition; Mohammadi 2025 (IEEE Access) simplifies to this
+/// concordant-fraction SA-ST AUC form, which is what the paper's
+/// Table 3 / Figure 4 actually report (their "PWRC" entries —
+/// CVVDP=5.92, IW-SSIM=5.76 — are the Wu Eq 19 *unnormalised* AUC_ca
+/// over `[T_min, T_max] = [min{2σ̂}, max{2σ̂}]`; multiply our [0, 1]
+/// SA-ST AUC by `T_max − T_min` to recover that scale when
+/// reproducing Mohammadi tables. The SA-ST AUC is range-stable so we
+/// expose the normalised form as the canonical PWRC).
+///
+/// **Polarity convention:** as with [`outlier_ratio`], the canonical
+/// caller is [`compute_panel`], which rescales `scores` via 4-param
+/// logistic so the rescaled output correlates positively with
+/// `humans`. Anti-correlated input (without prior rescale) yields
+/// PWRC = 0, NOT 1 — the function is sign-aware, not magnitude-only.
+/// Use [`pwrc_proxy_weighted_rank`] (the pre-2026-05-26 body) if you
+/// want the symmetric-after-`.abs()` weighted-rank-Pearson proxy.
+pub fn pwrc_sa_st_auc(scores: &[f64], humans: &[f64]) -> f64 {
+    let curve = sa_st_curve(scores, humans, 128);
+    if curve.len() < 2 {
+        return 0.0;
+    }
+    let mut auc = 0.0_f64;
+    for w in curve.windows(2) {
+        let (st0, sa0) = w[0];
+        let (st1, sa1) = w[1];
+        let dt = st1 - st0;
+        if dt > 0.0 {
+            auc += 0.5 * (sa0 + sa1) * dt;
+        }
+    }
+    let st_max = curve.last().map(|&(s, _)| s).unwrap_or(0.0);
+    if st_max <= 0.0 {
+        return 0.0;
+    }
+    auc / st_max
+}
+
+/// Sample the SA-ST curve at `n_points` Sensory Thresholds uniformly
+/// spaced in `[0, max_subj_gap]`. Returns `(ST, SA(ST))` pairs.
+///
+/// Pairs with zero `humans`-gap OR zero `scores`-gap are dropped (no
+/// unambiguous direction). When `ST > max_subj_gap` no pairs remain
+/// active and `SA(ST)` propagates the last finite value (step-flat
+/// tail) so the trapezoidal AUC is well-defined.
+pub fn sa_st_curve(scores: &[f64], humans: &[f64], n_points: usize) -> Vec<(f64, f64)> {
+    let n = scores.len().min(humans.len());
+    if n < 2 || n_points < 2 {
+        return Vec::new();
+    }
+    let mut pairs: Vec<(f64, bool)> = Vec::with_capacity(n.saturating_mul(n) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dh = humans[j] - humans[i];
+            let ds = scores[j] - scores[i];
+            if !dh.is_finite() || !ds.is_finite() || dh == 0.0 || ds == 0.0 {
+                continue;
+            }
+            let correct = dh.signum() == ds.signum();
+            pairs.push((dh.abs(), correct));
+        }
+    }
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    let st_max = pairs.iter().map(|(g, _)| *g).fold(0.0_f64, f64::max);
+    if st_max <= 0.0 {
+        return Vec::new();
+    }
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(n_points);
+    for k in 0..n_points {
+        let frac = k as f64 / (n_points - 1) as f64;
+        let st = frac * st_max;
+        // Count pairs whose subjective-gap STRICTLY exceeds ST. At
+        // ST=0 every gap-bearing pair counts; at ST=st_max the
+        // count is empty (no gap can exceed its own max).
+        let mut active = 0usize;
+        let mut correct = 0usize;
+        for (gap, ok) in &pairs {
+            if *gap > st {
+                active += 1;
+                if *ok {
+                    correct += 1;
+                }
+            }
+        }
+        let sa = if active == 0 {
+            out.last().map(|&(_, s)| s).unwrap_or(0.0)
+        } else {
+            correct as f64 / active as f64
+        };
+        out.push((st, sa));
+    }
+    out
+}
+
+/// **Proxy PWRC** — the pre-2026-05-26 panel.rs `pwrc()` body,
+/// preserved verbatim under the more honest name. This is the
+/// weighted-rank-Pearson proxy: `ranks` weighted by `|r − mid|` of
+/// the FIRST argument, then weighted Pearson of (rank_a, rank_b).
+///
+/// **Not the paper-correct PWRC** — the SA-ST AUC ([`pwrc_sa_st_auc`])
+/// matches Mohammadi 2025 § VII. The proxy is retained for forensic
+/// comparison against older bench outputs and for cheap drop-in
+/// replacement in any non-canonical caller that wants the same
+/// [0, 1] shape under `.abs()` without the O(n²) SA-ST pair sweep.
+pub fn pwrc_proxy_weighted_rank(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len();
     if n < 4 {
         return 0.0;
@@ -660,10 +826,16 @@ pub fn compute_panel(scores: &[f64], humans: &[f64]) -> PanelStats {
     }
     let srocc = spearman(humans, scores).abs();
     let krocc = kendall_tau(humans, scores).abs();
-    let pw = pwrc(humans, scores).abs();
-    let or_ = outlier_ratio(scores, humans);
+    // PLCC / OR / PWRC are computed on the logistic-rescaled prediction
+    // — that absorbs polarity AND saturation, which is the Mohammadi
+    // 2025 § IV-A convention. `outlier_ratio` (Eq 2-4) and
+    // `pwrc_sa_st_auc` (§ VII) both require the rescale; passing raw
+    // distance-shaped bake output gives wrong numbers (spurious 100 %
+    // OR, PWRC ≈ 0 from sign-flip).
     let rescaled = rescale_logistic(scores, humans);
     let plcc = pearson(&rescaled, humans).abs();
+    let or_ = outlier_ratio(&rescaled, humans);
+    let pw = pwrc_sa_st_auc(&rescaled, humans);
     let z = z_rmse(&rescaled, humans);
     PanelStats {
         srocc,
@@ -781,9 +953,9 @@ pub fn compute_light_panel(scores: &[f64], humans: &[f64]) -> LightPanel {
         return LightPanel::default();
     }
     let srocc = spearman(humans, scores).abs();
-    let pw = pwrc(humans, scores).abs();
     let rescaled = rescale_logistic(scores, humans);
     let plcc = pearson(&rescaled, humans).abs();
+    let pw = pwrc_sa_st_auc(&rescaled, humans);
     LightPanel {
         srocc,
         plcc,

@@ -93,16 +93,16 @@ def scipy_ref(pred, target, sigma, rescaled_rust=None):
     # them so the gate isolates the stat math from the optimizer.
     rescaled = np.asarray(rescaled_rust, float) if rescaled_rust is not None else _fit_logistic(pred, target)
     p, _ = pearsonr(rescaled, target)
-    # PWRC weights by the FIRST argument's ranks (it is NOT symmetric).
-    # panel.rs `compute_panel` calls pwrc(humans, scores) — i.e. it
-    # weights by the human/target ranks — so the reference must too.
-    # (mohammadi_eval.py:62 weights by `pred` ranks instead; that is the
-    # documented definitional difference — see the report footer.)
-    pw = _pwrc(target, pred)
-    # OR (logistic-residual rule, mohammadi_eval.py:56)
-    resid = np.abs(rescaled - target)
-    sig_r = max(float(np.std(resid)), 1e-9)
-    out = float(np.mean(resid > 2 * sig_r))
+    # PWRC = SA-ST AUC (Mohammadi 2025 § VII), computed on the
+    # logistic-rescaled prediction so anti-correlated raw pred is
+    # polarity-handled by the rescale (perfect anti-rank → rescaled is
+    # positively correlated → SA-ST AUC = 1).
+    pw = _pwrc_sa_st_auc_panel(list(rescaled), list(target))
+    # OR = P.1401 / Mohammadi Eq 2-4: τ = 1.96·σ_target on the rescaled
+    # residual. (mohammadi_eval.py:56 used 2σ on the residual STD —
+    # close but not identical. The paper text gives 1.96·σ on the
+    # target column; we follow the paper.)
+    out = _outlier_ratio_panel(list(rescaled), list(target))
     # Z-RMSE per-sample (mohammadi_eval.py:82)
     if sigma is not None:
         sg = np.asarray(sigma, float)
@@ -119,27 +119,6 @@ def scipy_ref(pred, target, sigma, rescaled_rust=None):
         "pwrc": pw,
         "z_rmse_scipy": zr,
     }
-
-
-def _pwrc(a, b):
-    n = len(a)
-    if n < 4:
-        return 0.0
-    ra = np.argsort(np.argsort(a)).astype(float)
-    rb = np.argsort(np.argsort(b)).astype(float)
-    mid = (n - 1) / 2.0
-    max_dev = max(mid, 1e-12)
-    w = np.abs(ra - mid) / max_dev
-    wsum = w.sum()
-    if wsum < 1e-12:
-        return 0.0
-    mean_a = np.average(ra, weights=w)
-    mean_b = np.average(rb, weights=w)
-    num = np.sum(w * (ra - mean_a) * (rb - mean_b))
-    da = np.sum(w * (ra - mean_a) ** 2)
-    db = np.sum(w * (rb - mean_b) ** 2)
-    den = math.sqrt(da * db)
-    return abs(num / den) if den > 1e-12 else 0.0
 
 
 # ----------------------------------------------------------------------
@@ -225,50 +204,84 @@ def _kendall(a, b):
     return 0.0 if den < 1e-12 else (c - d) / den
 
 
-def _pwrc_panel(a, b):
-    # panel.rs pwrc uses panel.rs `ranks` (average-tie), NOT numpy's
-    # argsort-argsort (which breaks ties arbitrarily). For tie-free
-    # synthetic data they coincide; we use the panel.rs definition here.
-    n = len(a)
-    if n < 4:
+def _pwrc_sa_st_auc_panel(scores, humans, n_points=128):
+    """Mirror panel.rs `pwrc_sa_st_auc` — Mohammadi 2025 § VII SA-ST
+    Sorting-Accuracy AUC.
+
+    For each Sensory Threshold ST ∈ [0, max_subj_gap], count the
+    fraction of (i,j) pairs with |humans_gap| > ST that the metric
+    ranks correctly (sign(humans_diff) == sign(scores_diff)). The
+    return value is the trapezoidal AUC normalised by max_subj_gap,
+    so perfect rank → 1 and perfect anti-rank → 0.
+    """
+    n = min(len(scores), len(humans))
+    if n < 2 or n_points < 2:
         return 0.0
-    ra, rb = _ranks(a), _ranks(b)
-    mid = (n - 1) / 2.0
-    max_dev = max(mid, 1e-12)
-    w = [abs(r - mid) / max_dev for r in ra]
-    wsum = sum(w)
-    if wsum < 1e-12:
-        return 0.0
-    mean_a = sum(w[i] * ra[i] for i in range(n)) / wsum
-    mean_b = sum(w[i] * rb[i] for i in range(n)) / wsum
-    num = da = db = 0.0
+    pairs = []  # (gap, correct)
     for i in range(n):
-        xa = ra[i] - mean_a
-        xb = rb[i] - mean_b
-        num += w[i] * xa * xb
-        da += w[i] * xa * xa
-        db += w[i] * xb * xb
-    den = math.sqrt(da * db)
-    return 0.0 if den < 1e-12 else num / den
+        for j in range(i + 1, n):
+            dh = humans[j] - humans[i]
+            ds = scores[j] - scores[i]
+            if not math.isfinite(dh) or not math.isfinite(ds) or dh == 0.0 or ds == 0.0:
+                continue
+            correct = (dh > 0.0) == (ds > 0.0)
+            pairs.append((abs(dh), correct))
+    if not pairs:
+        return 0.0
+    st_max = max(g for g, _ in pairs)
+    if st_max <= 0.0:
+        return 0.0
+    curve = []
+    for k in range(n_points):
+        frac = k / (n_points - 1)
+        st = frac * st_max
+        active = 0
+        correct = 0
+        for gap, ok in pairs:
+            if gap > st:
+                active += 1
+                if ok:
+                    correct += 1
+        if active == 0:
+            sa = curve[-1][1] if curve else 0.0
+        else:
+            sa = correct / active
+        curve.append((st, sa))
+    # Trapezoidal AUC, normalise by st_max.
+    auc = 0.0
+    for (st0, sa0), (st1, sa1) in zip(curve[:-1], curve[1:]):
+        dt = st1 - st0
+        if dt > 0.0:
+            auc += 0.5 * (sa0 + sa1) * dt
+    return auc / st_max
 
 
 def _outlier_ratio_panel(pred, target):
-    # Mirror panel.rs:129 — polarity-aligned z-score residual, 2σ on the
-    # residual distribution.
-    n = len(pred)
-    if n < 4:
+    """Mirror panel.rs `outlier_ratio` — ITU-T P.1401 § C.4 / Mohammadi
+    2025 Eq 2-4. Fraction of stimuli where |pred - target| > 1.96·σ_target.
+
+    Caller MUST pass `pred` already on `target`'s scale (i.e., 4-param-
+    logistic-rescaled). panel.rs `compute_panel` does this internally.
+    """
+    n = min(len(pred), len(target))
+    if n < 2:
         return float("nan")
-    mp = sum(pred) / n
     mt = sum(target) / n
-    vp = sum((x - mp) ** 2 for x in pred) / n
     vt = sum((x - mt) ** 2 for x in target) / n
-    sp = max(math.sqrt(vp), 1e-12)
-    st = max(math.sqrt(vt), 1e-12)
-    polarity = -1.0 if _pearson(pred, target) < 0.0 else 1.0
-    resid = [abs(polarity * (pred[i] - mp) / sp - (target[i] - mt) / st) for i in range(n)]
-    mr = sum(resid) / n
-    sr = max(math.sqrt(sum((r - mr) ** 2 for r in resid) / n), 1e-12)
-    return sum(1 for r in resid if abs(r - mr) > 2.0 * sr) / n
+    sigma = max(math.sqrt(vt), 1e-12)
+    tau = 1.96 * sigma
+    outliers = 0
+    counted = 0
+    for i in range(n):
+        r = pred[i] - target[i]
+        if not math.isfinite(r):
+            continue
+        if abs(r) > tau:
+            outliers += 1
+        counted += 1
+    if counted == 0:
+        return float("nan")
+    return outliers / counted
 
 
 def _z_rmse_global_panel(pred, target):
@@ -322,11 +335,15 @@ def panel_def_ref(pred, target, sigma, rescaled_rust=None):
     """
     s = abs(_spearman(target, pred))
     k = abs(_kendall(target, pred))
-    pw = abs(_pwrc_panel(target, pred))
-    out = _outlier_ratio_panel(pred, target)
     rescaled = list(rescaled_rust) if rescaled_rust is not None \
         else list(_fit_logistic(np.asarray(pred, float), np.asarray(target, float)))
     plcc = abs(_pearson(rescaled, list(target)))
+    # PWRC + OR are computed on the LOGISTIC-RESCALED prediction —
+    # both depend on having pred on target's scale (panel.rs `compute_panel`
+    # convention). Anti-correlated raw pred + rescaled → positively-
+    # correlated rescaled → SA-ST AUC = 1 (paper-correct polarity).
+    pw = _pwrc_sa_st_auc_panel(rescaled, list(target))
+    out = _outlier_ratio_panel(rescaled, list(target))
     zr_global = _z_rmse_global_panel(rescaled, list(target))
     return {
         "srocc": s,

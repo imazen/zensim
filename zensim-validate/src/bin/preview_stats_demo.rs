@@ -536,12 +536,15 @@ fn render_corpus_panel(
 }
 
 fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64) {
+    // Match `panel::compute_panel`: PLCC / OR / PWRC are computed on
+    // the 4-param-logistic-rescaled prediction (Mohammadi 2025 § IV-A
+    // convention; absorbs polarity AND saturation).
     let srocc = panel::spearman(scores, humans).abs();
     let krocc = panel::kendall_tau(scores, humans).abs();
-    let pw = panel::pwrc(scores, humans).abs();
-    let or_ = panel::outlier_ratio(scores, humans);
     let rescaled = panel::rescale_logistic(scores, humans);
     let plcc = panel::pearson(&rescaled, humans).abs();
+    let pw = panel::pwrc_sa_st_auc(&rescaled, humans);
+    let or_ = panel::outlier_ratio(&rescaled, humans);
     let z = panel::z_rmse(&rescaled, humans);
     (srocc, plcc, krocc, or_, pw, z)
 }
