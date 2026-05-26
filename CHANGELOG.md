@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Refactor — `panel.rs` is now a thin re-export shim from `zenstats` (2026-05-26)
+
+The 1773-line `zensim-validate/src/panel.rs` body was extracted into a new
+`zenstats` crate at `imazen/zenmetrics@36d71ca33711`. The same statistical
+math had been reimplemented across zensim, zenanalyze, coefficient,
+zenmetrics, and jxl-encoder — see
+`benchmarks/dedup_VERIFIED_synthesis_2026-05-26.md` Tier-2 #7 for the
+deep-read audit. The single canonical home (`zenstats::panel`) now
+carries the paper-correct OR + PWRC (see entry below), Z-RMSE, 4-param
+logistic rescale, MRR significance, bootstrap CI delta, and decisive
+A-vs-B rule. zensim depends on `zenstats` via path dep
+(`../zenmetrics/crates/zenstats`); zenmetrics already depends on zensim,
+but the cycle is broken because `zenstats` is a self-contained workspace
+member with zero zenmetrics-root deps. Verified by building both
+ways. `zenstats` ships under MIT OR Apache-2.0 with a `parallel`
+feature flag (default-on, rayon-optional) and is publishable to
+crates.io once external consumers have migrated.
+
+The shim is `pub use zenstats::panel::*;` plus the historical
+docstring; every external `zensim_validate::panel::*` import continues
+to work without source-level changes.
+
+**Companion follow-on commits in the same session:**
+- `fix(bake_verdict)` — `bake_verdict.rs` carried a byte-identical
+  inline copy of panel.rs's stat machinery that the 2026-05-26
+  paper-correct OR + PWRC rewrite never touched. Every bake_verdict
+  output between the rewrite and this commit reported the OLDER proxy
+  OR + PWRC despite the `panel` binary's output being paper-correct.
+  Inline copy deleted (~527 LOC); `aggregate_panel` routes through
+  `compute_panel`. V39 panel numbers in
+  `benchmarks/v39_paper_correct_panel_2026-05-26.md` corrected
+  in-place: OR 0.04→0.00, PWRC 0.92→0.98 on CID22, similar across
+  all 6 corpora. SROCC / PLCC / KROCC / Z-RMSE unchanged (those
+  were correct in the inline copy).
+- `refactor(ensemble_mix + eval_bake_per_band)` — two more inline
+  ranks/spearman/pearson copies, ~85 LOC each, now `use
+  zensim_validate::panel::{...}`. Neither bin computes OR / PWRC so
+  they weren't on the silently-wrong path.
+- `refactor(mlp_train/utils)` — `spearman_correlation` and `ranks`
+  now alias `panel::spearman` / `panel::ranks` via `pub use`. Net
+  -45 LOC; zero call-site changes thanks to the name-preserving
+  alias.
+
 ### Changed — `panel.rs` OR + PWRC now paper-correct (2026-05-26, BREAKING semantics)
 
 After tracing both stats to their source — Mohammadi 2025 IEEE Access
