@@ -154,15 +154,39 @@ def audit_one(path: str) -> dict | None:
     return out
 
 
+# Verdict substrings that mean a training/canonical parquet is CORRUPT.
+# (per-pair-sidecar + "real?" + "OK" are clean; mock/human-copy/misjoin are not)
+CORRUPT_VERDICT_MARKERS = (
+    "HUMAN-COPY",
+    "REF-MISJOIN",
+)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", default=ROOT)
     ap.add_argument("--out", default=None, help="write TSV here too")
+    ap.add_argument(
+        "--fail-on-corruption",
+        action="store_true",
+        help="exit nonzero if any audited parquet carries a HUMAN-COPY iwssim "
+        "or REF-MISJOIN ssim2_gpu column. Use as a CI / pre-train gate.",
+    )
+    ap.add_argument(
+        "--paths",
+        nargs="*",
+        default=None,
+        help="explicit parquet paths to audit (overrides --root glob). Use for "
+        "CI fixtures or a targeted train-set census.",
+    )
     args = ap.parse_args()
 
-    paths = sorted(
-        p for p in glob(os.path.join(args.root, "**", "*.parquet"), recursive=True)
-    )
+    if args.paths:
+        paths = sorted(args.paths)
+    else:
+        paths = sorted(
+            p for p in glob(os.path.join(args.root, "**", "*.parquet"), recursive=True)
+        )
     cols = [
         "path",
         "rows",
@@ -192,6 +216,32 @@ def main() -> int:
         with open(args.out, "w") as f:
             f.write(text + "\n")
         print(f"\n[wrote {len(rows)} relevant parquets to {args.out}]", file=sys.stderr)
+
+    corrupt = [
+        r for r in rows
+        if any(m in str(r.get("verdict", "")) for m in CORRUPT_VERDICT_MARKERS)
+    ]
+    if corrupt:
+        print(
+            f"\n[CORRUPTION CENSUS] {len(corrupt)} parquet(s) carry a leaked / "
+            f"misjoined metric column:",
+            file=sys.stderr,
+        )
+        for r in corrupt:
+            print(f"  - {r['path']}: {r['verdict']}", file=sys.stderr)
+        if args.fail_on_corruption:
+            print(
+                "\nERROR: --fail-on-corruption set and corruption detected. "
+                "Recompute the affected columns (fix_kadid_tid_*.py) before training.",
+                file=sys.stderr,
+            )
+            return 1
+    elif args.fail_on_corruption:
+        print(
+            f"\n[CORRUPTION CENSUS] clean — {len(rows)} audited parquet(s), no "
+            f"HUMAN-COPY / REF-MISJOIN columns.",
+            file=sys.stderr,
+        )
     return 0
 
 
