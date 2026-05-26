@@ -1,0 +1,51 @@
+MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy=Min
+      train group 0: 'safesyn' n=196086 train_w=1.000 val_w=0.000
+      train group 1: 'cid22_train' n=17611 train_w=0.500 val_w=0.000
+anchor: ENABLED — 'jnd_anchor' n=22008 target_score=PER-ROW (V5 multi-band) step_p=0.300 weight=0.500
+cross-codec-eq: ENABLED — 'cross_codec_eq' n=68788 step_p=0.100 weight=1.000
+cross-codec-rank-preserve: ENABLED — w=0.200 (butter_diff present for 68788/68788 pairs)
+dynamic-range-floor: ENABLED — w=0.300 σ_thresh=25.00 step_p=0.050 probe_n=40
+konjnd-aggregation: ENABLED — 'konjnd_aggregation' rows=20160 refs=1008 S=5 K=8 step_p=0.100 weight=0.050
+per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
+tanh_output_head: ENABLED — y_score = 100·σ(y_pre/20.000) (active linear region y_pre∈[−3·scale, 3·scale])
+  epoch   0 | lr=0.00566 | loss=43.1189 | val(geomean3)=0.9054 (best=-inf) | α(x): μ=0.999 [min=0.918, max=1.000] | reducer_w=[μ=0.127,σ=1.012,max=0.045,p6=0.056] | safesyn: srocc=0.9713 plcc=0.9285 pwrc=0.9855 | cid22_train: srocc=0.8379 plcc=0.8196 pwrc=0.8919 | t=11.6s
+  epoch  10 | lr=0.00512 | loss=32.7026 | val(geomean3)=0.9306 (best=0.9054) | α(x): μ=1.000 [min=0.999, max=1.000] | reducer_w=[μ=-0.047,σ=0.803,max=-0.148,p6=-0.148] | safesyn: srocc=0.9824 plcc=0.9457 pwrc=0.9912 | cid22_train: srocc=0.8811 plcc=0.8601 pwrc=0.9247 | t=35.3s
+  epoch  20 | lr=0.00370 | loss=31.0883 | val(geomean3)=0.9388 (best=0.9306) | α(x): μ=1.000 [min=0.981, max=1.000] | reducer_w=[μ=-0.099,σ=0.782,max=-0.137,p6=-0.131] | safesyn: srocc=0.9812 plcc=0.9531 pwrc=0.9904 | cid22_train: srocc=0.8975 plcc=0.8758 pwrc=0.9364 | t=64.8s
+  epoch  30 | lr=0.00196 | loss=27.5197 | val(geomean3)=0.9441 (best=0.9388) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.451,σ=0.567,max=-0.263,p6=-0.287] | safesyn: srocc=0.9840 plcc=0.9498 pwrc=0.9914 | cid22_train: srocc=0.9102 plcc=0.8866 pwrc=0.9443 | t=91.0s
+  epoch  40 | lr=0.00054 | loss=24.7407 | val(geomean3)=0.9511 (best=0.9441) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.413,σ=0.591,max=-0.230,p6=-0.250] | safesyn: srocc=0.9873 plcc=0.9637 pwrc=0.9931 | cid22_train: srocc=0.9176 plcc=0.8948 pwrc=0.9511 | t=129.8s
+  epoch  50 | lr=0.00566 | loss=34.3422 | val(geomean3)=0.9294 (best=0.9511) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.512,σ=0.684,max=-0.029,p6=-0.063] | safesyn: srocc=0.9651 plcc=0.9387 pwrc=0.9830 | cid22_train: srocc=0.8862 plcc=0.8718 pwrc=0.9332 | t=153.9s
+  epoch  60 | lr=0.00512 | loss=31.0039 | val(geomean3)=0.7618 (best=0.9511) | α(x): μ=0.845 [min=0.000, max=1.000] | reducer_w=[μ=-1.087,σ=0.682,max=0.222,p6=0.119] | safesyn: srocc=0.7587 plcc=0.6493 pwrc=0.7907 | cid22_train: srocc=0.7735 plcc=0.7618 pwrc=0.8471 | t=178.5s
+  epoch  70 | lr=0.00370 | loss=29.4963 | val(geomean3)=0.9455 (best=0.9511) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.620,σ=0.201,max=0.010,p6=-0.181] | safesyn: srocc=0.9845 plcc=0.9542 pwrc=0.9918 | cid22_train: srocc=0.9100 plcc=0.8892 pwrc=0.9444 | t=202.4s
+  epoch  80 | lr=0.00196 | loss=25.7872 | val(geomean3)=0.9497 (best=0.9511) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.509,σ=0.156,max=-0.081,p6=-0.256] | safesyn: srocc=0.9855 plcc=0.9573 pwrc=0.9921 | cid22_train: srocc=0.9176 plcc=0.8964 pwrc=0.9504 | t=227.5s
+  epoch  90 | lr=0.00054 | loss=23.4194 | val(geomean3)=0.9542 (best=0.9511) | α(x): μ=0.992 [min=0.000, max=1.000] | reducer_w=[μ=-1.677,σ=0.117,max=-0.067,p6=-0.255] | safesyn: srocc=0.9870 plcc=0.9623 pwrc=0.9929 | cid22_train: srocc=0.9250 plcc=0.9026 pwrc=0.9566 | t=258.7s
+  epoch 100 | lr=0.00566 | loss=31.4178 | val(geomean3)=0.9350 (best=0.9542) | α(x): μ=0.992 [min=0.000, max=1.000] | reducer_w=[μ=-1.643,σ=0.101,max=0.034,p6=-0.189] | safesyn: srocc=0.9732 plcc=0.9222 pwrc=0.9853 | cid22_train: srocc=0.9066 plcc=0.8812 pwrc=0.9435 | t=284.7s
+  epoch 110 | lr=0.00512 | loss=29.0957 | val(geomean3)=0.9460 (best=0.9542) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.807,σ=0.079,max=0.090,p6=-0.151] | safesyn: srocc=0.9832 plcc=0.9613 pwrc=0.9915 | cid22_train: srocc=0.9084 plcc=0.8872 pwrc=0.9453 | t=315.1s
+  epoch 120 | lr=0.00370 | loss=27.3085 | val(geomean3)=0.9294 (best=0.9542) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.280,σ=0.064,max=-0.035,p6=-0.298] | safesyn: srocc=0.9805 plcc=0.9518 pwrc=0.9894 | cid22_train: srocc=0.8716 plcc=0.8576 pwrc=0.9273 | t=343.0s
+  epoch 130 | lr=0.00196 | loss=24.7186 | val(geomean3)=0.9532 (best=0.9542) | α(x): μ=0.977 [min=0.000, max=1.000] | reducer_w=[μ=-1.393,σ=-0.093,max=-0.025,p6=-0.330] | safesyn: srocc=0.9875 plcc=0.9675 pwrc=0.9932 | cid22_train: srocc=0.9206 plcc=0.8983 pwrc=0.9529 | t=372.5s
+  epoch 140 | lr=0.00054 | loss=23.0184 | val(geomean3)=0.9549 (best=0.9542) | α(x): μ=0.992 [min=0.000, max=1.000] | reducer_w=[μ=-1.404,σ=-0.126,max=0.000,p6=-0.316] | safesyn: srocc=0.9868 plcc=0.9655 pwrc=0.9929 | cid22_train: srocc=0.9253 plcc=0.9038 pwrc=0.9564 | t=401.7s
+  epoch 150 | lr=0.00566 | loss=33.4338 | val(geomean3)=0.9126 (best=0.9549) | α(x): μ=0.969 [min=0.000, max=1.000] | reducer_w=[μ=-1.327,σ=-0.242,max=0.048,p6=-0.310] | safesyn: srocc=0.9704 plcc=0.9467 pwrc=0.9841 | cid22_train: srocc=0.8454 plcc=0.8267 pwrc=0.9047 | t=429.7s
+  epoch 160 | lr=0.00512 | loss=27.5352 | val(geomean3)=0.9529 (best=0.9549) | α(x): μ=0.992 [min=0.000, max=1.000] | reducer_w=[μ=-0.703,σ=-0.654,max=0.082,p6=-0.362] | safesyn: srocc=0.9849 plcc=0.9610 pwrc=0.9922 | cid22_train: srocc=0.9229 plcc=0.9016 pwrc=0.9556 | t=454.1s
+  epoch 170 | lr=0.00370 | loss=25.9474 | val(geomean3)=0.9518 (best=0.9549) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.522,σ=-0.721,max=0.083,p6=-0.357] | safesyn: srocc=0.9854 plcc=0.9651 pwrc=0.9924 | cid22_train: srocc=0.9194 plcc=0.8956 pwrc=0.9542 | t=482.2s
+  epoch 180 | lr=0.00196 | loss=23.4767 | val(geomean3)=0.9577 (best=0.9549) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.810,σ=-0.802,max=0.058,p6=-0.383] | safesyn: srocc=0.9872 plcc=0.9703 pwrc=0.9933 | cid22_train: srocc=0.9299 plcc=0.9073 pwrc=0.9593 | t=509.8s
+  epoch 190 | lr=0.00054 | loss=22.7532 | val(geomean3)=0.9577 (best=0.9577) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.966,σ=-0.891,max=-0.011,p6=-0.457] | safesyn: srocc=0.9874 plcc=0.9674 pwrc=0.9931 | cid22_train: srocc=0.9302 plcc=0.9083 pwrc=0.9605 | t=534.9s
+  epoch 200 | lr=0.00566 | loss=30.3599 | val(geomean3)=0.9586 (best=0.9577) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.965,σ=-0.764,max=0.152,p6=-0.299] | safesyn: srocc=0.9866 plcc=0.9685 pwrc=0.9930 | cid22_train: srocc=0.9340 plcc=0.9092 pwrc=0.9608 | t=566.7s
+  epoch 210 | lr=0.00512 | loss=27.1720 | val(geomean3)=0.9438 (best=0.9586) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.094,σ=-0.736,max=0.041,p6=-0.320] | safesyn: srocc=0.9836 plcc=0.9524 pwrc=0.9913 | cid22_train: srocc=0.9077 plcc=0.8846 pwrc=0.9444 | t=598.1s
+  epoch 220 | lr=0.00370 | loss=25.7889 | val(geomean3)=0.9525 (best=0.9586) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.197,σ=-0.796,max=0.103,p6=-0.277] | safesyn: srocc=0.9869 plcc=0.9672 pwrc=0.9928 | cid22_train: srocc=0.9183 plcc=0.8980 pwrc=0.9527 | t=658.3s
+  epoch 230 | lr=0.00196 | loss=23.2287 | val(geomean3)=0.9514 (best=0.9586) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.560,σ=-0.845,max=0.057,p6=-0.306] | safesyn: srocc=0.9844 plcc=0.9588 pwrc=0.9913 | cid22_train: srocc=0.9216 plcc=0.8988 pwrc=0.9547 | t=698.1s
+  epoch 240 | lr=0.00054 | loss=22.5635 | val(geomean3)=0.9554 (best=0.9586) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-1.622,σ=-0.810,max=0.101,p6=-0.262] | safesyn: srocc=0.9870 plcc=0.9656 pwrc=0.9929 | cid22_train: srocc=0.9262 plcc=0.9040 pwrc=0.9575 | t=723.0s
+  epoch 250 | lr=0.00566 | loss=38.3153 | val(geomean3)=0.8950 (best=0.9586) | α(x): μ=0.715 [min=0.000, max=1.000] | reducer_w=[μ=-1.037,σ=-0.513,max=0.154,p6=-0.068] | safesyn: srocc=0.9718 plcc=0.9425 pwrc=0.9850 | cid22_train: srocc=0.7985 plcc=0.8047 pwrc=0.8698 | t=749.4s
+  epoch 260 | lr=0.00512 | loss=30.3386 | val(geomean3)=0.9353 (best=0.9586) | α(x): μ=0.769 [min=0.000, max=1.000] | reducer_w=[μ=-0.960,σ=-0.624,max=0.011,p6=0.093] | safesyn: srocc=0.9728 plcc=0.9495 pwrc=0.9865 | cid22_train: srocc=0.8928 plcc=0.8739 pwrc=0.9377 | t=778.8s
+  epoch 270 | lr=0.00370 | loss=27.9250 | val(geomean3)=0.9506 (best=0.9586) | α(x): μ=0.786 [min=0.000, max=1.000] | reducer_w=[μ=-1.187,σ=-0.868,max=0.007,p6=0.208] | safesyn: srocc=0.9833 plcc=0.9579 pwrc=0.9913 | cid22_train: srocc=0.9176 plcc=0.9018 pwrc=0.9528 | t=802.1s
+  epoch 280 | lr=0.00196 | loss=24.6510 | val(geomean3)=0.9506 (best=0.9586) | α(x): μ=0.793 [min=0.000, max=1.000] | reducer_w=[μ=-1.462,σ=-0.942,max=0.049,p6=0.250] | safesyn: srocc=0.9823 plcc=0.9626 pwrc=0.9907 | cid22_train: srocc=0.9174 plcc=0.8973 pwrc=0.9545 | t=825.3s
+  epoch 290 | lr=0.00054 | loss=23.3892 | val(geomean3)=0.9597 (best=0.9586) | α(x): μ=0.831 [min=0.000, max=1.000] | reducer_w=[μ=-1.633,σ=-1.050,max=0.056,p6=0.249] | safesyn: srocc=0.9867 plcc=0.9643 pwrc=0.9928 | cid22_train: srocc=0.9353 plcc=0.9155 pwrc=0.9642 | t=849.7s
+  epoch 299 | lr=0.00001 | loss=22.9772 | val(geomean3)=0.9595 (best=0.9597) | α(x): μ=0.823 [min=0.000, max=1.000] | reducer_w=[μ=-1.662,σ=-1.068,max=0.061,p6=0.249] | safesyn: srocc=0.9866 plcc=0.9652 pwrc=0.9928 | cid22_train: srocc=0.9347 plcc=0.9149 pwrc=0.9639 | t=872.0s
+MLP train (PER-SAMPLE-α): best val SROCC = 0.9597 | final reducer_w=[μ=-1.662,σ=-1.068,max=0.061,p6=0.249] b_α=7.420
+output calibration spline: 7 knots from 8 anchor bands
+  pred=9.53 → target=0.0
+  pred=35.29 → target=30.0
+  pred=49.56 → target=50.0
+  pred=60.06 → target=60.0
+  pred=82.16 → target=80.0
+  pred=86.94 → target=90.0
+  pred=96.68 → target=100.0
+re-baked with output calibration spline (261451 bytes)
