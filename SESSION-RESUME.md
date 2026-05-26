@@ -60,6 +60,26 @@ own flagged-unstarted work). Without it: lottery/research. Decision for
 the user: acquire that corpus, accept V39(5/6)+phone-bake, or explicitly
 relax the AIC-4 holdout rule.
 
+## Finding (2026-05-26): V39 violates metric invariants — process flaw, not corner case
+
+V39 (`ZensimProfile::A`) returns scores **>100** and ranks **heavier
+degradation as higher quality** on ALL synthetic content (mandelbrot,
+checker, noise, smooth color_blocks). Localized: linear V0_2 (shared
+feature extraction, no MLP) stays monotone+bounded; the **trained MLP
+itself inverts off its natural-photo training manifold**, and
+`extrapolate_score:true` (metric.rs:2113) unbounds it. The fundamental
+flaw is **process**: bake acceptance was optimized+gated solely on SROCC
+(rank-only, scale-invariant) over narrow natural-photo MOS corpora, with
+NO invariant gate (bounds / self-identity / degradation-monotonicity).
+SROCC is mathematically blind to all three; the one invariant test
+(`score_sanity_checks`) was outside the acceptance loop and silently red
+since V39 shipped. **Fix = an invariant gate (`tests/metric_invariants.rs`
++ bake_verdict), NOT a clamp** (clamp hides bounds but leaves the
+inversion). Full writeup + evidence table:
+`benchmarks/ROOT_CAUSE_v39_invariant_violations_2026-05-26.md`. Open
+decision: implement the gate (red until MLP fixed) vs dig the MLP
+inversion mechanism vs leave documented.
+
 ## Findings & falsifications (2026-05-25 evening) — READ BEFORE RE-TRYING
 
 1. **Broken dial from SROCC-chasing (the big one).** Bakes trained
