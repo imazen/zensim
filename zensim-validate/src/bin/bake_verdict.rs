@@ -1113,6 +1113,8 @@ struct CorpusResult {
     pwrc: f64,
     z_rmse: f64,
     ds_auc: f64,
+    /// Logistic-rescaled scores in [0,100] dial space (for G1 range check).
+    rescaled_scores: Vec<f64>,
     body: String,
 }
 
@@ -1280,8 +1282,37 @@ read on this corpus._\n",
         pwrc: pw,
         z_rmse: z,
         ds_auc: ds,
+        rescaled_scores: scores.clone(),
         body,
     })
+}
+
+/// Soft gate: linear ramp from `floor` (score 0.0) to `target` (score 1.0).
+/// Direction-aware: if `target < floor`, lower values score higher.
+fn soft_gate(value: f64, floor: f64, target: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    if (target - floor).abs() < 1e-12 {
+        return if value >= target { 1.0 } else { 0.0 };
+    }
+    ((value - floor) / (target - floor)).clamp(0.0, 1.0)
+}
+
+/// Percentile of a slice (linear interpolation, p in [0,100]).
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
+    let rank = (p / 100.0) * (sorted.len() - 1) as f64;
+    let lo = rank.floor() as usize;
+    let hi = rank.ceil() as usize;
+    if lo == hi {
+        sorted[lo]
+    } else {
+        let frac = rank - lo as f64;
+        sorted[lo] * (1.0 - frac) + sorted[hi] * frac
+    }
 }
 
 // ============================================================================
@@ -1383,6 +1414,82 @@ fn main() -> ExitCode {
             r.ds_auc, g3
         ));
     }
+    // ── CODEC_TARGET_GOALS.md scorecard ──────────────────────────────
+    // Measurable from held-out corpus scores alone. Goals needing
+    // external q-sweep / cross-codec data (G3, G4, G10) are flagged.
+    {
+        let find = |name: &str| results.iter().find(|r| r.display.contains(name));
+        let cid22 = find("CID22");
+        let konjnd = find("KonJND");
+        let aic3 = find("AIC-3");
+
+        // G1: dynamic range — pool all dial-space scores, check p5/p95.
+        let mut pooled: Vec<f64> = results
+            .iter()
+            .flat_map(|r| r.rescaled_scores.iter().copied())
+            .filter(|x| x.is_finite())
+            .collect();
+        pooled.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let (p5, p95) = if pooled.is_empty() {
+            (f64::NAN, f64::NAN)
+        } else {
+            (percentile(&pooled, 5.0), percentile(&pooled, 95.0))
+        };
+        // Scores are 0-100 dial; goal: p5 ≤ 25, p95 ≥ 85.
+        let g1 = soft_gate(p5, 50.0, 25.0).min(soft_gate(p95, 50.0, 85.0));
+
+        // G5: HF rank — KonJND SROCC (floor 0.70, target 0.85) + AIC-3.
+        let g5_konjnd = konjnd.map(|r| soft_gate(r.srocc, 0.70, 0.85)).unwrap_or(0.0);
+        let g5_aic3 = aic3.map(|r| soft_gate(r.srocc, 0.70, 0.85)).unwrap_or(0.0);
+        let g5 = (g5_konjnd + g5_aic3) / 2.0;
+
+        // G7: CID22 SROCC ≥ 0.85 (advisory).
+        let g7 = cid22.map(|r| soft_gate(r.srocc, 0.80, 0.85)).unwrap_or(0.0);
+
+        // G8: Z-RMSE — lower is better. AIC-3 floor 0.80, target 0.50.
+        let g8 = aic3.map(|r| soft_gate(r.z_rmse, 0.80, 0.50)).unwrap_or(0.0);
+
+        // G9: DS-AUC — AIC-3 floor 0.70, target 0.85.
+        let g9 = aic3.map(|r| soft_gate(r.ds_auc, 0.70, 0.85)).unwrap_or(0.0);
+
+        buf.push_str("\n## CODEC_TARGET_GOALS.md scorecard (measurable subset)\n\n");
+        buf.push_str("| Goal | Measure | Value | Soft score |\n");
+        buf.push_str("|---|---|---:|---:|\n");
+        buf.push_str(&format!(
+            "| G1 dynamic range | pooled p5≤25 ∧ p95≥85 | p5={p5:.1} p95={p95:.1} | {g1:.2} |\n"
+        ));
+        buf.push_str(&format!(
+            "| G5 HF rank | KonJND+AIC-3 SROCC ≥0.70 | {:.3} / {:.3} | {g5:.2} |\n",
+            konjnd.map(|r| r.srocc).unwrap_or(f64::NAN),
+            aic3.map(|r| r.srocc).unwrap_or(f64::NAN),
+        ));
+        buf.push_str(&format!(
+            "| G7 CID22 rank | SROCC ≥0.85 (advisory) | {:.4} | {g7:.2} |\n",
+            cid22.map(|r| r.srocc).unwrap_or(f64::NAN),
+        ));
+        buf.push_str(&format!(
+            "| G8 Z-RMSE | AIC-3 ≤0.80 | {:.3} | {g8:.2} |\n",
+            aic3.map(|r| r.z_rmse).unwrap_or(f64::NAN),
+        ));
+        buf.push_str(&format!(
+            "| G9 DS-AUC | AIC-3 ≥0.70 | {:.4} | {g9:.2} |\n",
+            aic3.map(|r| r.ds_auc).unwrap_or(f64::NAN),
+        ));
+        // Weighted composite per the doc's priority order (G1=3, G8=2.5,
+        // G5=1.5, G9=1, G7=0.5). G2/G3/G4/G6/G10/G11 need external data.
+        let weighted = (3.0 * g1 + 2.5 * g8 + 1.5 * g5 + 1.0 * g9 + 0.5 * g7)
+            / (3.0 + 2.5 + 1.5 + 1.0 + 0.5);
+        buf.push_str(&format!(
+            "\n**Weighted goal score (measurable subset): {weighted:.3}**\n\n"
+        ));
+        buf.push_str(
+            "_G2 (JND anchor), G3 (monotonicity), G4 (cross-codec), G6 (MF \
+band coverage), G10 (per-source), G11 (display) require external q-sweep / \
+cross-codec / multi-PPD data not present in the held-out feature parquets. \
+Run the dedicated q-sweep harness for those._\n",
+        );
+    }
+
     for r in &results {
         buf.push_str(&r.body);
     }
