@@ -5853,18 +5853,9 @@ fn train_mlp_per_sample_alpha_head(
     // every non-negative dissimilarity feature: encoder ≥0, head ≤0,
     // α-gate forced to ≈1. See `MlpHyperparams::monotone_cbc`.
     let monotone_cbc = hyperparams.monotone_cbc;
-    // Soft sign-penalty strength (λ). The per-step penalty `±2λw` on
-    // wrong-sign weights smoothly biases encoder weights ≥0 / rank_w ≤0
-    // WITHOUT a per-step hard clamp (the clamp kills weights and
-    // collapses training — v45/v45b/v45c/v45d all cratered with one).
-    // NOTE (2026-05-26): penalty-only does NOT yet guarantee a monotone
-    // bake — a final hard projection at bake time is still required and
-    // is NOT yet wired; the proven-stable alternative is a softplus
-    // reparam. `--monotone-cbc` is OFF by default; production unaffected.
-    const MONOTONE_CBC_PENALTY: f64 = 1.0;
     if monotone_cbc {
         log_line(
-            "monotone_cbc: ENABLED — soft sign-penalty (λ=1) + α≡1 (NO per-step clamp; final projection NOT yet wired — WIP)",
+            "monotone_cbc: ENABLED — projecting w1,w2_enc≥0; rank_w,w_skip≤0; α≡1 (w_alpha=0,b_alpha=30) after every Adam step (bounded+monotone by construction)",
             log,
         );
     }
