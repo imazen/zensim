@@ -387,6 +387,31 @@ pub fn encoder_backprop_2layer_f32(
 }
 
 // =============================================================================
+// Skip connection (f32) — mirrors the f64 versions in `simd_encoder`.
+// =============================================================================
+
+/// Skip connection forward (f32): `b_skip + Σ_i x[i] · w_skip[i]`.
+#[inline]
+pub fn skip_forward_f32(x: &[f32], w_skip: &[f32], b_skip: f32) -> f32 {
+    dot_bias_f32(x, w_skip, b_skip)
+}
+
+/// Skip connection backward (f32): accumulate `dl_dy_skip · x[i]` into
+/// `gw_skip[i]` and `dl_dy_skip` into `gb_skip`.
+#[inline]
+pub fn skip_backward_f32(
+    x: &[f32],
+    dl_dy_skip: f32,
+    gw_skip: &mut [f32],
+    gb_skip: &mut f32,
+) {
+    for (g, &xi) in gw_skip.iter_mut().zip(x.iter()) {
+        *g += dl_dy_skip * xi;
+    }
+    *gb_skip += dl_dy_skip;
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
