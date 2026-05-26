@@ -53,7 +53,7 @@ fn classify_rgb(src_name: &str, dst_name: &str) -> ClassifiedResult {
         (dw, dh),
         "dimension mismatch: {src_name} vs {dst_name}"
     );
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let src_img = RgbSlice::new(&src, w, h);
     let dst_img = RgbSlice::new(&dst, w, h);
     z.classify(&src_img, &dst_img).expect("classify failed")
@@ -67,7 +67,7 @@ fn classify_rgba(src_name: &str, dst_name: &str) -> ClassifiedResult {
         (dw, dh),
         "dimension mismatch: {src_name} vs {dst_name}"
     );
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let src_img = RgbaSlice::new(&src, w, h);
     let dst_img = RgbaSlice::new(&dst, w, h);
     z.classify(&src_img, &dst_img).expect("classify failed")
@@ -135,7 +135,7 @@ fn print_delta_stats(name: &str, cr: &ClassifiedResult) {
 /// classify().result.score() must be bit-identical to compute().score().
 #[test]
 fn classify_score_matches_compute() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let (src, w, h) = load_rgb("gradient.png");
     let (dst, _, _) = load_rgb("gradient_gamma22.png");
     let src_img = RgbSlice::new(&src, w, h);
@@ -164,7 +164,7 @@ fn classify_score_matches_compute() {
 #[test]
 fn identical_images_classified_as_identical() {
     let (src, w, h) = load_rgb("gradient.png");
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let src_img = RgbSlice::new(&src, w, h);
     let copy = src.clone();
     let dst_img = RgbSlice::new(&copy, w, h);
@@ -577,7 +577,7 @@ fn high_noise_is_unclassified() {
 fn delta_stats_deterministic() {
     let (src, w, h) = load_rgb("gradient.png");
     let (dst, _, _) = load_rgb("gradient_gamma22.png");
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let src_img = RgbSlice::new(&src, w, h);
     let dst_img = RgbSlice::new(&dst, w, h);
 
@@ -682,7 +682,7 @@ fn round_half_up_detected_as_rounding_error() {
 #[test]
 fn gray_ramp_self_identical() {
     let (src, w, h) = load_rgb("gray_ramp.png");
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let src_img = RgbSlice::new(&src, w, h);
     let copy = src.clone();
     let dst_img = RgbSlice::new(&copy, w, h);

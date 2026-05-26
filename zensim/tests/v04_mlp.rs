@@ -33,7 +33,7 @@ fn v04_score_is_in_unit_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::A).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -41,7 +41,7 @@ fn v04_score_is_in_unit_range() {
         (0.0..=100.0).contains(&score),
         "v0_4 score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_3);
+    assert_eq!(r.profile(), ZensimProfile::A);
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn v04_identical_inputs_near_perfect() {
     let (src, _) = make_test_pair(32, 32);
     let s = RgbSlice::new(&src, 32, 32);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::A).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
 
     // Trained MLP + scaler: identical inputs produce all-zero raw
@@ -92,7 +92,7 @@ fn v04_degraded_does_not_exceed_identical() {
         .collect();
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::A).with_parallel(false);
     let r_self = z.compute(&s, &s).unwrap();
     let r_diff = z.compute(&s, &d).unwrap();
 
@@ -110,7 +110,7 @@ fn v04_compute_with_ref_matches_compute() {
     let s = RgbSlice::new(&src, 96, 64);
     let d = RgbSlice::new(&dst, 96, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z = Zensim::new(ZensimProfile::A).with_parallel(false);
 
     let r_direct = z.compute(&s, &d).unwrap();
     let pre = z.precompute_reference(&s).unwrap();
@@ -127,7 +127,28 @@ fn v04_compute_with_ref_matches_compute() {
 
 #[test]
 fn v04_profile_name() {
+    assert_eq!(ZensimProfile::A.name(), "zensim-a");
+}
+
+/// The deprecated `PreviewV0_3` alias must keep its own name AND score
+/// identically to `A` (same backing bake).
+#[test]
+#[allow(deprecated)]
+fn preview_v0_3_is_deprecated_alias_of_a() {
     assert_eq!(ZensimProfile::PreviewV0_3.name(), "zensim-preview-v0.3");
+    // Identical params ⇒ identical scores under both names.
+    let (src, dst) = make_test_pair(32, 32);
+    let s = RgbSlice::new(&src, 32, 32);
+    let d = RgbSlice::new(&dst, 32, 32);
+    let a = Zensim::new(ZensimProfile::A)
+        .with_parallel(false)
+        .compute(&s, &d)
+        .unwrap();
+    let p = Zensim::new(ZensimProfile::PreviewV0_3)
+        .with_parallel(false)
+        .compute(&s, &d)
+        .unwrap();
+    assert_eq!(a.score(), p.score());
 }
 
 #[test]
@@ -144,7 +165,7 @@ fn v04_profile_name_and_score() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z3 = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+    let z3 = Zensim::new(ZensimProfile::A).with_parallel(false);
     let z4 = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
     let r3 = z3.compute(&s, &d).unwrap();
     let r4 = z4.compute(&s, &d).unwrap();

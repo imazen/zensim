@@ -19,7 +19,7 @@ fn main() {
     let s = RgbSlice::new(&src, w, h);
     let d = RgbSlice::new(&dst, w, h);
     for (name, p) in [
-        ("v0_3 (latest)", ZensimProfile::PreviewV0_3),
+        ("v0_3 (latest)", ZensimProfile::A),
         ("v0_5_balanced", ZensimProfile::PreviewV0_5Balanced),
         ("v0_5_compression", ZensimProfile::PreviewV0_5Compression),
         ("v0_5_tuner", ZensimProfile::PreviewV0_5Tuner),

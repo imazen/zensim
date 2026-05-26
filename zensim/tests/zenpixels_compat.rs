@@ -13,7 +13,7 @@ use zensim::{
 };
 
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::PreviewV0_3)
+    Zensim::new(ZensimProfile::A)
 }
 
 /// Generate deterministic 16x16 test pixels (gradient pattern).

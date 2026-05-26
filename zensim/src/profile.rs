@@ -23,6 +23,24 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ZensimProfile {
+    /// **`A` — the canonical generation-A profile (external name
+    /// `zensim-a`).** The default general-purpose perceptual metric.
+    ///
+    /// Naming convention (see `docs/NAMING_CONVENTION.md`): EXTERNAL
+    /// variant names are `A`, `A_Phone`, … (generation letter +
+    /// optional display suffix) — a STABLE behavioral contract. The
+    /// INTERNAL bake backing this variant rotates freely; its identity
+    /// (currently the `v39_v32plus_spline` bake) is recorded in the
+    /// mapping table in `docs/CODEC_TARGET_METRIC.md`, NOT inlined here
+    /// (so this doc can't go stale on rotation).
+    A,
+    /// **`A_Phone` — generation-A, modern-phone display (external name
+    /// `zensim-a-phone`).** Emulates CVVDP at `modern_oled_phone_indoor`
+    /// (~110 PPD, 400 nit indoor SDR, OLED). A display is a DIFFERENT
+    /// bake, so it's its own variant — there is no orthogonal
+    /// display-target axis. (No `A_Tv` yet — no TV bake exists.)
+    /// Backing bake recorded in the mapping table.
+    A_Phone,
     /// Preview v0.1. Trained on 344k synthetic pairs, 5-fold CV SROCC=0.9936.
     /// Linear-weights profile, no MLP forward pass.
     PreviewV0_1,
@@ -61,11 +79,11 @@ pub enum ZensimProfile {
     /// Per-codec q-range: `benchmarks/v_tuner_v5_per_codec_q_range_2026-05-24.md`.
     /// Integration guide: `docs/CODEC_TARGET_METRIC.md`.
     ///
-    /// The prior V_18 lineage bake (used by zensim 0.3.0-0.3.x) lives
-    /// on disk at `zensim/weights/v0_18_zerobiased_lz4_2026-05-13.bin`
-    /// for reproducibility. The 0.3.x → next-patch rotation is per
-    /// the variant doc's promise: "score stability is the contract;
-    /// bit-identity is not."
+    /// **Deprecated alias of [`Self::A`]** — behaves identically (same
+    /// bake, same scores). Kept until internal call sites migrate off
+    /// the `PreviewV0_3` name. Prefer `ZensimProfile::A` /
+    /// `ZensimProfile::codec_target()`.
+    #[deprecated(note = "use ZensimProfile::A (PreviewV0_3 is a deprecated alias)")]
     PreviewV0_3,
     /// Preview v0.4. **Multi-bake D2 α=0.7 ensemble (2026-05-15)**:
     /// V_18 ship as the primary (228 → 384 → 1, no feature transforms,
@@ -744,16 +762,15 @@ pub enum ZensimProfile {
 }
 
 impl ZensimProfile {
-    /// Current preview-stable profile. Returns [`Self::PreviewV0_3`] in
-    /// zensim 0.3.x.
+    /// Current preview-stable profile. Returns [`Self::A`].
     ///
     /// Use this only when you explicitly want "whatever the current
     /// preview is" — the returned variant will rotate as new previews
     /// ship. For pinned reproducibility, name the variant directly
-    /// (`ZensimProfile::PreviewV0_3`). For the stable codec-target
+    /// (`ZensimProfile::A`). For the stable codec-target
     /// contract that codec crates should target, use [`Self::codec_target`].
     pub const fn latest_preview() -> Self {
-        Self::PreviewV0_3
+        Self::A
     }
 
     /// Deprecated. Use [`Self::latest_preview`] for the rotating-preview
@@ -764,7 +781,7 @@ impl ZensimProfile {
         note = "use latest_preview() or codec_target() or name a Preview variant directly"
     )]
     pub fn latest() -> Self {
-        Self::PreviewV0_3
+        Self::A
     }
 
     /// **Canonical codec-target metric.** The stable, version-independent
@@ -819,21 +836,23 @@ impl ZensimProfile {
     /// See [`docs/CODEC_TARGET_METRIC.md`] in the zensim repo for the
     /// integration guide.
     ///
-    /// **2026-05-24 ship:** the canonical codec-target bake is now
-    /// the public [`Self::PreviewV0_3`] (file `v_tuner_v11_2026-05-24.bin`),
-    /// rotated from the prior PreviewV0_3 (V_18 lineage) which is
-    /// preserved on disk for reproducibility but no longer the
-    /// shipping bake. See
-    /// `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
+    /// Returns [`Self::A`]. The backing bake (and any future rotation)
+    /// is recorded in the variant→bake mapping table in
+    /// `docs/CODEC_TARGET_METRIC.md` — not inlined here, so this doc
+    /// can't go stale when the bake rotates (see
+    /// `docs/NAMING_CONVENTION.md`).
     pub const fn codec_target() -> Self {
-        Self::PreviewV0_3
+        Self::A
     }
 
     /// Canonical name string, e.g. `"zensim-preview-v0.1"`.
     pub fn name(&self) -> &'static str {
         match self {
+            Self::A => "zensim-a",
+            Self::A_Phone => "zensim-a-phone",
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
+            #[allow(deprecated)]
             Self::PreviewV0_3 => "zensim-preview-v0.3",
             Self::PreviewV0_4 => "zensim-preview-v0.4",
             Self::PreviewV0_5 => "zensim-preview-v0.5",
@@ -865,9 +884,13 @@ impl ZensimProfile {
     /// Internal parameters for this profile.
     pub(crate) fn params(&self) -> &'static ProfileParams {
         match self {
+            // `A` is canonical; `PreviewV0_3` is its deprecated alias —
+            // identical params, identical scores.
+            #[allow(deprecated)]
+            Self::A | Self::PreviewV0_3 => &PROFILE_A,
+            Self::A_Phone => &PROFILE_A_PHONE,
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
-            Self::PreviewV0_3 => &PROFILE_PREVIEW_V0_3,
             Self::PreviewV0_4 => &PROFILE_PREVIEW_V0_4,
             // PreviewV0_5 + PreviewV0_5Balanced are the same balanced-trail
             // ship — same bake bytes, same params. The split exists at the
@@ -1286,11 +1309,37 @@ pub(crate) fn mlp_bake_cvvdp_desktop() -> &'static [u8] {
 /// G1 p5=17.7 p95=96.6, score 1.00) and tracks held-out phone-CVVDP
 /// at SROCC ≈ 0.934. See
 /// `benchmarks/zensim_b_phone_oled_methodology_2026-05-26.md`.
-pub(crate) fn mlp_bake_cvvdp_phone_interim() -> &'static [u8] {
+pub(crate) fn mlp_bake_a_phone() -> &'static [u8] {
     include_bytes!("../weights/zensim_b_phone_oled_2026-05-26.bin")
 }
 
-static PROFILE_PREVIEW_V0_3: ProfileParams = ProfileParams {
+/// Generation-A phone profile params (external `ZensimProfile::A_Phone`).
+/// Same architecture as [`PROFILE_A`] (372-feat, per-sample-α, tanh pin,
+/// PCHIP spline) — only the backing bake differs (trained on
+/// phone-CVVDP at `modern_oled_phone_indoor` conditions).
+static PROFILE_A_PHONE: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_a_phone),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// Generation-A profile params (external `ZensimProfile::A`, and the
+/// deprecated `PreviewV0_3` alias). Backing bake recorded in the
+/// mapping table in `docs/CODEC_TARGET_METRIC.md`.
+static PROFILE_A: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
     // checking `mlp_bytes.is_some()` sees a sensible (V0_2-equivalent)

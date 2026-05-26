@@ -148,7 +148,7 @@ fn hardcoded_reference_scores() {
 fn pixel_format_equivalence() {
     const W: usize = 128;
     const H: usize = 128;
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let src_pixels = gen_mandelbrot(W, H);
     let dst_pixels = distort_blur(&src_pixels, W, H, 3);
 
@@ -237,7 +237,7 @@ fn feature_coverage() {
     const NUM_SCORED: usize = 156; // 13 × 3 × 4
     const NUM_PEAKS: usize = 72; // 6 × 3 × 4
     const NUM_FEATURES: usize = NUM_SCORED + NUM_PEAKS; // 228
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let pairs = generate_test_pairs(W, H);
 
     let mut max_per_feature = vec![0.0f64; NUM_FEATURES];
@@ -320,7 +320,7 @@ fn feature_coverage() {
 fn score_sanity_checks() {
     const W: usize = 128;
     const H: usize = 128;
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let source = gen_mandelbrot(W, H);
 
     // Identical images must score exactly 100.0
@@ -383,7 +383,7 @@ fn score_sanity_checks() {
 fn determinism_same_platform() {
     const W: usize = 128;
     const H: usize = 128;
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let pairs = generate_test_pairs(W, H);
 
     for pair in &pairs {
@@ -532,7 +532,7 @@ fn identical_images_score_100() {
 fn mean_offset_color_shift() {
     const W: usize = 128;
     const H: usize = 128;
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let source = gen_mandelbrot(W, H);
     let shifted = distort_color_shift(&source, W, H);
 
@@ -563,7 +563,7 @@ fn mean_offset_color_shift() {
 fn mean_offset_precomputed_ref() {
     const W: usize = 128;
     const H: usize = 128;
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let source = gen_mandelbrot(W, H);
     let shifted = distort_color_shift(&source, W, H);
 
@@ -597,7 +597,7 @@ fn mean_offset_precomputed_ref() {
 
 #[test]
 fn error_image_too_small() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     // 4×4 is below 8×8 minimum
     let small = vec![[128u8; 3]; 4 * 4];
     let src = RgbSlice::new(&small, 4, 4);
@@ -614,7 +614,7 @@ fn error_image_too_small() {
 
 #[test]
 fn error_dimension_mismatch() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let a = vec![[128u8; 3]; 16 * 16];
     let b = vec![[128u8; 3]; 32 * 8];
     let src = RgbSlice::new(&a, 16, 16);

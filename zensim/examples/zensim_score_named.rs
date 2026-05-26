@@ -48,14 +48,14 @@ fn main() -> ExitCode {
 
     let profile = match args[1].as_str() {
         "v0_2" => ZensimProfile::PreviewV0_2,
-        "v0_3" => ZensimProfile::PreviewV0_3,
+        "v0_3" => ZensimProfile::A,
         "v0_4" => ZensimProfile::PreviewV0_4,
         "v0_5" => ZensimProfile::PreviewV0_5,
         "v0_5_balanced" => ZensimProfile::PreviewV0_5Balanced,
         "v0_5_compression" => ZensimProfile::PreviewV0_5Compression,
         "v0_5_ensemble" => ZensimProfile::PreviewV0_5Ensemble,
         "v0_5_tuner" => ZensimProfile::PreviewV0_5Tuner,
-        "latest" => ZensimProfile::PreviewV0_3,
+        "latest" => ZensimProfile::A,
         other => {
             eprintln!("unknown profile: {other}");
             print_usage(&args[0]);

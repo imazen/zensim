@@ -1,9 +1,22 @@
 # Codec-target metric — integration guide
 
-**Status:** canonical 2026-05-24 (rotated to v5 PM).
-**Designated bake:** `PreviewV0_5TunerV5` (file: `zensim/weights/v_tuner_v11_2026-05-24.bin`,
-md5 `8adc2c4858cbf3c0b0aa02494e85bdd8`).
-**Stable alias:** `ZensimProfile::codec_target()`.
+**Stable alias:** `ZensimProfile::codec_target()` → `ZensimProfile::A`.
+
+## Variant → backing bake mapping (THE single source of truth)
+
+Naming convention: `docs/NAMING_CONVENTION.md` (external `ZensimProfile`
+names are a stable contract; internal bakes rotate; update THIS table
+on every rotation — never inline bake identity into variant rustdocs).
+
+| External variant (`name()`) | Backing bake (internal) | Methodology |
+|---|---|---|
+| `A` (`zensim-a`) — general default; `codec_target()`/`latest()` | `zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin` (exp **V39**) | `benchmarks/v5_vs_v03_comparison_2026-05-25.md` |
+| `A_Phone` (`zensim-a-phone`) — modern OLED phone (~110 PPD, CVVDP-trained) | `zensim/weights/zensim_b_phone_oled_2026-05-26.bin` | `benchmarks/zensim_b_phone_oled_methodology_2026-05-26.md` |
+| `PreviewV0_3` (`zensim-preview-v0.3`) — **deprecated alias of `A`** | same as `A` | — |
+
+Prior bakes (`v_tuner_v11_2026-05-24.bin`, V_18 lineage, etc.) are kept
+on disk under `zensim/weights/archive/` for reproducibility but are no
+longer wired to any shipped variant.
 **Audience:** authors of zen codec crates (`zenjpeg`, `zenwebp`, `zenjxl`,
 `zenavif`, `zenpng`, `zengif`, ...) and the picker pipeline at
 `~/work/zen/zenanalyze/zenpicker/`.

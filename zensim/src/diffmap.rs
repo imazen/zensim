@@ -825,7 +825,7 @@ mod tests {
         let pixels: Vec<[u8; 3]> = (0..64)
             .map(|i| [i as u8 * 4, 128, 255 - i as u8 * 4])
             .collect();
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let src = RgbSlice::new(&pixels, 8, 8);
         let result = z
             .compute_with_diffmap(&src, &src, DiffmapWeighting::default())
@@ -856,7 +856,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
         let result = z
@@ -910,7 +910,7 @@ mod tests {
             })
             .collect();
 
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -960,7 +960,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -998,7 +998,7 @@ mod tests {
     #[test]
     fn test_diffmap_weighting_into_options() {
         // Verify backward compatibility: DiffmapWeighting converts to DiffmapOptions
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let pixels: Vec<[u8; 3]> = vec![[100, 150, 200]; 8 * 8];
         let src = RgbSlice::new(&pixels, 8, 8);
 
@@ -1026,7 +1026,7 @@ mod tests {
             }
         }
 
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1080,7 +1080,7 @@ mod tests {
             p[0] = p[0].wrapping_add(40);
         }
 
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let src = RgbSlice::new(&src_pixels, 16, 16);
         let dst = RgbSlice::new(&dst_pixels, 16, 16);
 
@@ -1146,7 +1146,7 @@ mod tests {
     /// Stress-test diffmap for NaN/Inf with adversarial inputs at realistic sizes.
     #[test]
     fn test_diffmap_no_nan() {
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = crate::Zensim::new(ZensimProfile::A);
         let weightings = [
             DiffmapWeighting::Trained,
             DiffmapWeighting::Balanced,

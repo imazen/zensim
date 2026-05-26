@@ -17,7 +17,7 @@ fn main() {
     let src: Vec<[u8; 3]> = img1.pixels().map(|p| p.0).collect();
     let dst: Vec<[u8; 3]> = img2.pixels().map(|p| p.0).collect();
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_3);
+    let z = Zensim::new(ZensimProfile::A);
     let s = RgbSlice::new(&src, w, h);
     let d = RgbSlice::new(&dst, w, h);
     let result = z.compute(&s, &d).unwrap();
