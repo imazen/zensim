@@ -5853,9 +5853,18 @@ fn train_mlp_per_sample_alpha_head(
     // every non-negative dissimilarity feature: encoder ≥0, head ≤0,
     // α-gate forced to ≈1. See `MlpHyperparams::monotone_cbc`.
     let monotone_cbc = hyperparams.monotone_cbc;
+    // Soft sign-penalty strength (λ). The per-step penalty `±2λw` on
+    // wrong-sign weights smoothly biases encoder weights ≥0 / rank_w ≤0
+    // WITHOUT a per-step hard clamp (the clamp kills weights and
+    // collapses training — v45/v45b/v45c/v45d all cratered with one).
+    // NOTE (2026-05-26): penalty-only does NOT yet guarantee a monotone
+    // bake — a final hard projection at bake time is still required and
+    // is NOT yet wired; the proven-stable alternative is a softplus
+    // reparam. `--monotone-cbc` is OFF by default; production unaffected.
+    const MONOTONE_CBC_PENALTY: f64 = 1.0;
     if monotone_cbc {
         log_line(
-            "monotone_cbc: ENABLED — projecting w1,w2_enc≥0; rank_w,w_skip≤0; α≡1 (w_alpha=0,b_alpha=30) after every Adam step (bounded+monotone by construction)",
+            "monotone_cbc: ENABLED — soft sign-penalty (λ=1) + α≡1 (NO per-step clamp; final projection NOT yet wired — WIP)",
             log,
         );
     }
@@ -5906,6 +5915,39 @@ fn train_mlp_per_sample_alpha_head(
         w2_vec[nh_final + 4 + nh_final] = *b_alpha;
         let mut b2_vec = vec![*rank_b, *reducer_b];
 
+        // monotone_cbc: SOFT sign-penalty added to the gradient (NO
+        // per-step hard clamp — that collapses training via dead weights:
+        // v45/v45b/v45c all cratered SROCC 0.94→0.30 by epoch 25). A
+        // one-sided quadratic penalty `λ·max(0,∓w)²` nudges encoder
+        // weights toward ≥0 and rank_w toward ≤0; its gradient `±2λw` is
+        // added to the wrong-sign entries. The final hard projection
+        // (after training, before the bake) makes the SHIPPED bake
+        // monotone-by-construction; the penalty keeps weights near the
+        // correct sign so that projection is gentle and preserves the fit.
+        if monotone_cbc {
+            let two_lam = 2.0 * MONOTONE_CBC_PENALTY;
+            let w1_len = w1.len();
+            let w2_len = w2_enc.len();
+            // encoder w1 + w2_enc → ≥0: penalize negative entries.
+            for i in 0..(w1_len + w2_len) {
+                if w1_concat[i] < 0.0 {
+                    adam.gw1[i] += two_lam * w1_concat[i];
+                }
+            }
+            // w_skip → ≤0: penalize positive entries.
+            for i in (w1_len + w2_len)..w1_concat.len() {
+                if w1_concat[i] > 0.0 {
+                    adam.gw1[i] += two_lam * w1_concat[i];
+                }
+            }
+            // rank_w (w2 slot [0, nh_final)) → ≤0: penalize positives.
+            for j in 0..nh_final {
+                if w2_vec[j] > 0.0 {
+                    adam.gw2[j] += two_lam * w2_vec[j];
+                }
+            }
+        }
+
         adam.step(&mut w1_concat, &mut b1_concat, &mut w2_vec, &mut b2_vec, lr);
 
         // Unpack encoder weights back. Pre-compute lengths to avoid
@@ -5952,37 +5994,24 @@ fn train_mlp_per_sample_alpha_head(
         *rank_b = b2_vec[0];
         *reducer_b = b2_vec[1];
 
-        // Correct-by-construction projection (monotone_cbc). Applied
-        // AFTER the unpack so the next forward sees the projected sign
-        // pattern. Encoder weights ≥0 (LeakyReLU monotone ⟹ hidden ↑ in
-        // each feature); rank_w + w_skip ≤0 (y ↓ in distortion); α≡1.
+        // monotone_cbc: force the per-sample-α gate to ≈1 every step so
+        // y = y_rank (a single monotone head — the α-gated mix of two
+        // functions is not monotone). σ(30) ≈ 1 − 9.4e-14. Reset their
+        // Adam state so the optimizer doesn't fight the forced values.
+        // (The encoder/rank SIGN constraint is enforced softly via the
+        // pre-step penalty above + a final hard projection before baking,
+        // NOT by a per-step hard clamp here — that collapses training.)
         if monotone_cbc {
-            for w in w1.iter_mut() {
-                if *w < 0.0 {
-                    *w = 0.0;
-                }
-            }
-            for w in w2_enc.iter_mut() {
-                if *w < 0.0 {
-                    *w = 0.0;
-                }
-            }
-            for w in rank_w.iter_mut() {
-                if *w > 0.0 {
-                    *w = 0.0;
-                }
-            }
-            for w in w_skip.iter_mut() {
-                if *w > 0.0 {
-                    *w = 0.0;
-                }
-            }
-            // Force the per-sample-α gate to ≈1 so y = y_rank (a single
-            // monotone head). σ(30) ≈ 1 − 9.4e-14.
-            for w in w_alpha.iter_mut() {
-                *w = 0.0;
+            for j in 0..nh_final {
+                w_alpha[j] = 0.0;
+                let a = nh_final + 4 + j;
+                adam.mw2[a] = 0.0;
+                adam.vw2[a] = 0.0;
             }
             *b_alpha = 30.0;
+            let ba = nh_final + 4 + nh_final;
+            adam.mw2[ba] = 0.0;
+            adam.vw2[ba] = 0.0;
         }
     };
 
