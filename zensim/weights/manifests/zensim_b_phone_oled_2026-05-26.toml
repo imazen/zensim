@@ -1,0 +1,101 @@
+# Manifest for the shipped `zensim-a-phone` (modern OLED phone) bake.
+# Schema: zensim/weights/manifests/README.md
+
+[bake]
+name              = "zensim-a-phone"
+internal_version  = "b-phone-oled"
+file              = "../zensim_b_phone_oled_2026-05-26.bin"
+sha256            = "338d85f24a700d27e080c57659446b84cb48717b51377f62c7c7a31846656164"
+file_bytes        = 236122
+n_inputs          = 372
+arch              = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30) (no post-hoc spline — target is the phone-CVVDP dial directly)"
+output_disposition = "extrapolate_score"
+date              = "2026-05-26"
+ship_commit       = "1453e8c"   # ZensimProfile::A_Phone gen-letter naming commit
+
+[training]
+trainer            = "zensim_mlp_train"
+trainer_commit     = "(session pre-43b92ae)"
+seed               = 17
+mse_weight         = 0.6
+ranknet_weight     = 0.6
+monotonicity_reg   = 1.0
+tanh_output_head_scale = 30.0
+anchor_loss_weight = 0.01
+anchor_step_p      = 0.05
+hidden             = 128
+n_hidden_layers    = 2
+per_sample_alpha_head = true
+epochs             = 200
+lr                 = 0.001
+l2                 = 0.0001
+target_column      = "human_score"   # phone-CVVDP-derived per-row target in *_phone_cvvdptgt_train.parquet
+target_scale       = 100.0
+max_features       = 372
+minibatch_size     = 32
+out_dtype          = "f32"
+
+# Only kadid + tid here — the phone-CVVDP retarget is content-distortion-driven (no synthetic safesyn, no held-out human MOS).
+groups = [
+    { name = "kadid_ph", path = "{dial_dir}/kadid_phone_cvvdptgt_train.parquet", train_w = 1.0, val_w = 0.0 },
+    { name = "tid_ph",   path = "{dial_dir}/tid_phone_cvvdptgt_train.parquet",   train_w = 1.0, val_w = 0.0 },
+]
+
+auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+anchor_parquet  = "{dial_dir}/modern_oled_anchor.parquet"
+
+command = """
+$TRAINER \\
+  --group kadid_ph:$DIAL_DIR/kadid_phone_cvvdptgt_train.parquet:1.0:0.0 \\
+  --group tid_ph:$DIAL_DIR/tid_phone_cvvdptgt_train.parquet:1.0:0.0 \\
+  --hidden 128 --n-hidden-layers 2 --per-sample-alpha-head \\
+  --epochs 200 --lr 0.001 --l2 0.0001 --seed 17 --max-features 372 \\
+  --mse-weight 0.6 --ranknet-weight 0.6 --monotonicity-reg 1.0 \\
+  --tanh-output-head-scale 30.0 --minibatch-size 32 \\
+  --auto-transforms $AUTOTRANS \\
+  --anchor-parquet $ANCHOR --anchor-loss-weight 0.01 --anchor-step-p 0.05 \\
+  --target-column human_score --target-scale 100.0 --out-dtype f32 \\
+  --out $BAKE --log-path $LOG
+"""
+
+steps = [
+    "1. CVVDP scoring at modern_oled_phone_indoor (≈110 PPD, 400 nit, OLED) produced kadid_phone_cvvdptgt_train.parquet + tid_phone_cvvdptgt_train.parquet",
+    "2. zensim_mlp_train (above) trains the bake against those targets",
+    "3. Bake shipped via ZensimProfile::A_Phone (gen-letter rename in commit 1453e8c)",
+]
+
+[inputs.dial_dir]
+local = "/mnt/v/output/zensim/iphone14-cvvdp-2026-05-25"
+
+[inputs.kadid_ph]
+path = "{dial_dir}/kadid_phone_cvvdptgt_train.parquet"
+notes = "CVVDP scores computed at modern_oled_phone_indoor display geometry/photometry."
+
+[inputs.tid_ph]
+path = "{dial_dir}/tid_phone_cvvdptgt_train.parquet"
+
+[inputs.anchor]
+path = "{dial_dir}/modern_oled_anchor.parquet"
+notes = "Phone-CVVDP-derived stratified target_score (CORRECTION 2 — was display-agnostic anchor before)."
+
+[inputs.auto_transforms]
+path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
+
+[urls]
+bake_r2 = "s3://zentrain/bakes-2026-05-25/zensim_b_phone_oled_2026-05-26.bin"
+
+[eval]
+# Phone display: 6.1" 2532×1170 OLED, ~140 PPD at 0.35m, 400 nit indoor, 250 lux, sRGB.
+display_profile = "modern_oled_phone_indoor"
+ppd             = 140.0
+peak_nits       = 400.0
+ambient_lux     = 250.0
+contrast_ratio  = 1000.0   # effective at indoor lighting
+# Tracking-correlation vs raw phone-CVVDP (informal; bake_verdict run separately).
+phone_cvvdp_srocc = 0.9342
+
+[promotion]
+profile          = "ZensimProfile::A_Phone"
+shipped_in_commit = "1453e8c"
+notes = "Display-specific bake. A separate bake per display target — there is no orthogonal display-axis at runtime; pick the variant whose calibration matches your display."

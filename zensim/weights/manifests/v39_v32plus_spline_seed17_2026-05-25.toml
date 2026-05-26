@@ -1,0 +1,168 @@
+# Manifest for the shipped `zensim-a` (V39) bake.
+# Schema: zensim/weights/manifests/README.md
+
+[bake]
+name              = "zensim-a"
+internal_version  = "v39"
+file              = "../v39_v32plus_spline_seed17_2026-05-25.bin"
+sha256            = "72820d662e0b35d109fa4a1403eadea4cf3a551964a1a4113ec0f2ad7ecced63"
+file_bytes        = 257955
+n_inputs          = 372
+arch              = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30) + PCHIP spline (3-knot, injected post-training)"
+output_disposition = "extrapolate_score"  # spline output passed through unclamped at the metric layer; runtime spline ≤100 upper-clamps (negative-below allowed per the corrected spec)
+date              = "2026-05-25"
+ship_commit       = "a109680"
+
+[training]
+trainer            = "zensim_mlp_train"
+trainer_commit     = "pre-43b92ae (session 133ab28d)"
+seed               = 17
+mse_weight         = 0.6
+ranknet_weight     = 0.6
+monotonicity_reg   = 1.0
+monotonicity_margin = 0.0
+tanh_output_head_scale = 30.0
+anchor_loss_weight = 0.01        # post-training spline-fit weight; NOT a training target
+anchor_target_score = "PER-ROW (multi-band)"
+anchor_step_p      = 0.05
+hidden             = 128
+n_hidden_layers    = 2
+per_sample_alpha_head = true
+epochs             = 200
+pairs_per_epoch    = 50000
+lr                 = 0.001
+l2                 = 0.0001
+leaky_alpha        = 0.01
+target_column      = "human_score"   # per-group normalized to [0,1] — see V32 commit 2f12a27
+target_scale       = 1.0
+max_features       = 372
+minibatch_size     = 32
+val_aggregate      = "geomean3"
+out_dtype          = "f32"
+
+# Group weights are train_w:val_w. cid22:1.5/2.0 and konjnd:1.2/1.5 are
+# the values explicitly documented in the V32 ship commit 2f12a27.
+groups = [
+    { name = "safesyn",      path = "{canonical}/safesyn.parquet",          train_w = 1.0, val_w = 0.5 },
+    { name = "cid22_train",  path = "{canonical}/cid22_train_norm.parquet", train_w = 1.5, val_w = 2.0 },
+    { name = "kadid",        path = "{canonical}/kadid.parquet",            train_w = 0.5, val_w = 1.0 },
+    { name = "tid",          path = "{canonical}/tid.parquet",              train_w = 0.5, val_w = 1.0 },
+    { name = "konjnd_dense", path = "{canonical}/konjnd-dense-norm.parquet", train_w = 1.2, val_w = 1.5 },
+]
+
+auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
+
+command = """
+$TRAIN \\
+  --group safesyn:$CANON/safesyn.parquet:1.0:0.5 \\
+  --group cid22_train:$CANON/cid22_train_norm.parquet:1.5:2.0 \\
+  --group kadid:$CANON/kadid.parquet:0.5:1.0 \\
+  --group tid:$CANON/tid.parquet:0.5:1.0 \\
+  --group konjnd_dense:$CANON/konjnd-dense-norm.parquet:1.2:1.5 \\
+  --hidden 128 --n-hidden-layers 2 --per-sample-alpha-head --epochs 200 \\
+  --lr 0.001 --l2 0.0001 --seed 17 --target-column human_score --max-features 372 \\
+  --auto-transforms $TXFORM \\
+  --val-aggregate geomean3 --out-dtype f32 \\
+  --mse-weight 0.6 --ranknet-weight 0.6 --monotonicity-reg 1.0 \\
+  --tanh-output-head-scale 30.0 \\
+  --anchor-parquet $CANON/multiband_anchor_dial100.parquet \\
+  --anchor-loss-weight 0.01 --anchor-step-p 0.05 \\
+  --minibatch-size 32 --log-every 25 --out $OUT_V32
+"""
+
+steps = [
+    "1. zensim_mlp_train (command above) produces v32_cidmax_rn06_seed17_2026-05-25.bin (sha256 fde3b53a…)",
+    "2. scripts/inject_spline.sh injects `zentrain.output_calibration_spline` (PCHIP 3-knot) producing the final v39 bake",
+]
+
+[inputs.canonical_root]
+local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
+r2    = "s3://zentrain/canonical-2026-05-21/train"
+tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
+
+[inputs.safesyn]
+path   = "{canonical}/safesyn.parquet"
+sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
+rows   = 196086
+columns = 372
+
+[inputs.cid22_train]
+path   = "{canonical}/cid22_train_norm.parquet"
+sha256 = "59c9888ae3141545082fb58eafb19d1e964154cf79060b3d033e72ba8227c3ca"
+rows   = 17611
+columns = 372
+notes  = "TRAINING-ONLY subset of the broader CID22 image library — NOT the 49-ref held-out validation set. human_score normalized to [0,1] (MCOS / 100)."
+
+[inputs.kadid]
+path   = "{canonical}/kadid.parquet"
+sha256 = "83356f034dc83e50495ec3cf7d5c5d6df9588f4e39ba3f4af1208a12a1bdacee"
+rows   = 10125
+columns = 372
+
+[inputs.tid]
+path   = "{canonical}/tid.parquet"
+sha256 = "6704de0c7dcec3a1b9e57495c410c91aee1945cd4411fcdb217688af2d5c0e4f"
+rows   = 3000
+columns = 372
+
+[inputs.konjnd_dense]
+path   = "{canonical}/konjnd-dense-norm.parquet"
+sha256 = "5595a922b076e7e3fd6d1d8cfcdfbf37a92e3e1603324889cf8ac2e077323898"
+rows   = 20160
+columns = 372
+
+[inputs.multiband_anchor]
+path   = "{canonical}/multiband_anchor_dial100.parquet"
+sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
+notes  = "Per-row anchor for post-training PCHIP spline fitting (NOT a training target — weight 0.01)."
+
+[inputs.auto_transforms]
+path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
+notes  = "Per-feature Yeo-Johnson + winsorize + signed-cbrt transforms applied before standardization. Monotone-increasing in every feature (preserves degradation-monotonicity assumptions)."
+
+[urls]
+bake_r2     = "s3://zentrain/bakes-2026-05-25/v39_v32plus_spline_seed17_2026-05-25.bin"
+base_v32_r2 = "s3://zentrain/bakes-2026-05-25/v32_cidmax_rn06_seed17_2026-05-25.bin"
+
+[eval]
+verdict_date  = "2026-05-26"
+verdict_file  = "../../../benchmarks/v39_goals_and_mohammadi_panel_2026-05-26.md"
+cid22_srocc   = 0.8793
+cid22_plcc    = 0.8702
+cid22_pwrc    = 0.9264
+cid22_zrmse   = 0.493
+cid22_dsauc   = 0.8168
+kadid_srocc   = 0.9251
+tid_srocc     = 0.9317
+konjnd_srocc  = 0.4197
+aic3_srocc    = 0.8023
+aic3_zrmse    = 0.584
+aic3_dsauc    = 0.7385
+aic4_srocc    = 0.9051
+goals_weighted_score = 0.714
+g1_p5         = -89.7         # negative-below intended per the corrected spec
+g1_p95        = 97.4
+g1_pass       = true          # range usable for the dial; the negative tail is expected
+g5_konjnd_hf_rank = 0.420     # FAIL — characterized Pareto limit, multi-session
+g7_cid22_pass = true          # ≥0.85
+g8_zrmse_aic3_pass = true     # ≤0.80 (soft)
+g9_dsauc_aic3_pass = true     # ≥0.70 (soft / marginal)
+
+[promotion]
+profile           = "ZensimProfile::A"
+deprecated_alias  = "ZensimProfile::PreviewV0_3"
+shipped_in_commit = "a109680"
+notes = """
+KNOWN LIMITS (intentional / accepted; tracked in metric_invariants.rs):
+- V39's MLP is non-monotone off its natural-photo training manifold;
+  on heavily-OOD synthetic content (mandelbrot, checker, smooth gradients
+  with large distortion), heavier degradation can produce a HIGHER pinned
+  output → score ties at the upper clamp (100) for degraded/identical.
+  Asserted in tests/metric_invariants.rs::v39_known_limit_violations.
+- G5 (KonJND HF-rank) FAILS the 0.70 floor — characterized Pareto limit
+  (single-MLP v42, 2-bake-ensemble v43, MoE v44 all falsified).
+- AIC-4 lone win by V0_3 (paired bootstrap p=0.001) is a holdout-only
+  generalization lottery; not closable by recipe alone.
+"""
