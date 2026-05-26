@@ -1,0 +1,3 @@
+contamination_guard: /mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet blocklist empty — row scan skipped
+  safesyn: loaded 196086 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet"
+contamination_guard: /mnt/v/zen/zensim-training/canonical-2026-05-21/train/cid22_train_norm.parquet blocklist empty — row scan skipped
