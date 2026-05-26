@@ -24,3 +24,36 @@ per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_
 tanh_output_head: ENABLED — y_score = 100·σ(y_pre/30.000) (active linear region y_pre∈[−3·scale, 3·scale])
 monotone_cbc: ENABLED — projecting w1,w2_enc≥0; rank_w,w_skip≤0; α≡1 (w_alpha=0,b_alpha=30) after every Adam step (bounded+monotone by construction)
   epoch   0 | lr=0.00010 | loss=33.5996 | val(geomean3)=0.8380 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.048,σ=0.983,max=0.049,p6=0.049] | safesyn: srocc=0.9742 plcc=0.8972 pwrc=0.9849 | cid22_train: srocc=0.9548 plcc=0.8967 pwrc=0.9777 | kadid: srocc=0.8254 plcc=0.8200 pwrc=0.8878 | tid: srocc=0.8191 plcc=0.8243 pwrc=0.8714 | konjnd_dense: srocc=0.9908 plcc=0.9646 pwrc=0.9945 | t=16.7s
+  epoch  25 | lr=0.00005 | loss=1.0806 | val(geomean3)=0.0310 (best=0.8380) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=-0.000,max=-0.000,p6=0.000] | safesyn: srocc=0.3042 plcc=0.2903 pwrc=0.3657 | cid22_train: srocc=0.1737 plcc=0.1555 pwrc=0.2184 | kadid: srocc=0.0505 plcc=0.1496 pwrc=0.0639 | tid: srocc=0.0078 plcc=0.1000 pwrc=0.0384 | konjnd_dense: srocc=0.0555 plcc=0.1225 pwrc=0.0503 | t=172.1s
+  epoch  50 | lr=0.00010 | loss=1.0869 | val(geomean3)=0.0657 (best=0.8380) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=-0.000,max=0.000,p6=-0.000] | safesyn: srocc=0.5937 plcc=0.1857 pwrc=0.5859 | cid22_train: srocc=0.4420 plcc=0.1467 pwrc=0.5525 | kadid: srocc=0.0507 plcc=0.1495 pwrc=0.0811 | tid: srocc=0.0480 plcc=0.1000 pwrc=0.0590 | konjnd_dense: srocc=0.4100 plcc=0.1225 pwrc=0.4723 | t=348.0s
+  early stop at epoch 50 (no val improvement for 50 epochs)
+MLP train (PER-SAMPLE-α): best val SROCC = 0.8380 | final reducer_w=[μ=-0.000,σ=-0.000,max=0.000,p6=-0.000] b_α=30.000
+Wrote 257887 bytes to "/mnt/v/output/zensim/bakes/v45b_monotone_cbc_lr1e4_seed17_2026-05-26.bin"
+MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy=Min
+  train+val group 0: 'safesyn' n=196086 train_w=1.000 val_w=0.500
+  train+val group 1: 'cid22_train' n=17611 train_w=1.500 val_w=2.000
+  train+val group 2: 'kadid' n=10125 train_w=0.500 val_w=1.000
+  train+val group 3: 'tid' n=3000 train_w=0.500 val_w=1.000
+  train+val group 4: 'konjnd_dense' n=20160 train_w=1.200 val_w=1.500
+anchor: ENABLED — 'jnd_anchor' n=2000 target_score=PER-ROW (V5 multi-band) step_p=0.050 weight=0.010
+per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
+tanh_output_head: ENABLED — y_score = 100·σ(y_pre/30.000) (active linear region y_pre∈[−3·scale, 3·scale])
+monotone_cbc: ENABLED — projecting w1,w2_enc≥0; rank_w,w_skip≤0; α≡1 (w_alpha=0,b_alpha=30) after every Adam step (bounded+monotone by construction)
+  epoch   0 | lr=0.00010 | loss=33.5996 | val(geomean3)=0.8380 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.048,σ=0.983,max=0.049,p6=0.049] | safesyn: srocc=0.9742 plcc=0.8972 pwrc=0.9849 | cid22_train: srocc=0.9548 plcc=0.8967 pwrc=0.9777 | kadid: srocc=0.8254 plcc=0.8200 pwrc=0.8878 | tid: srocc=0.8191 plcc=0.8243 pwrc=0.8714 | konjnd_dense: srocc=0.9908 plcc=0.9646 pwrc=0.9945 | t=16.7s
+  epoch  25 | lr=0.00005 | loss=1.0806 | val(geomean3)=0.0310 (best=0.8380) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=-0.000,max=-0.000,p6=0.000] | safesyn: srocc=0.3042 plcc=0.2903 pwrc=0.3657 | cid22_train: srocc=0.1737 plcc=0.1555 pwrc=0.2184 | kadid: srocc=0.0505 plcc=0.1496 pwrc=0.0639 | tid: srocc=0.0078 plcc=0.1000 pwrc=0.0384 | konjnd_dense: srocc=0.0555 plcc=0.1225 pwrc=0.0503 | t=172.1s
+  epoch  50 | lr=0.00010 | loss=1.0869 | val(geomean3)=0.0657 (best=0.8380) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=-0.000,max=0.000,p6=-0.000] | safesyn: srocc=0.5937 plcc=0.1857 pwrc=0.5859 | cid22_train: srocc=0.4420 plcc=0.1467 pwrc=0.5525 | kadid: srocc=0.0507 plcc=0.1495 pwrc=0.0811 | tid: srocc=0.0480 plcc=0.1000 pwrc=0.0590 | konjnd_dense: srocc=0.4100 plcc=0.1225 pwrc=0.4723 | t=348.0s
+  early stop at epoch 50 (no val improvement for 50 epochs)
+MLP train (PER-SAMPLE-α): best val SROCC = 0.8380 | final reducer_w=[μ=-0.000,σ=-0.000,max=0.000,p6=-0.000] b_α=30.000
+
+--- bake_verdict (auto-eval) ---
+bake_verdict — bake=/mnt/v/output/zensim/bakes/v45b_monotone_cbc_lr1e4_seed17_2026-05-26.bin  features-root=/mnt/v/zen/zensim-training/2026-05-15-full-features  corpora=cid22,kadid,tid,konjnd,aic3,aic4
+bake: n_inputs=372  feature_transforms=yes  per_sample_alpha_head=yes  hybrid_head=no
+  CID22: loaded 4292 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+  KADIK10k: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet"
+  TID2013: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet"
+  KonJND-1k (full): loaded 1008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_features_372col_2026-05-15.parquet"
+  AIC-3 CTC: loaded 600 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic3_features_372col_2026-05-15.parquet"
+  AIC-4 sample: loaded 300 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic4_features_372col_2026-05-20.parquet"
+wrote verdict to /mnt/v/output/zensim/bakes/v45b_monotone_cbc_lr1e4_seed17_2026-05-26.verdict.md
+bake_verdict: complete in 5.80s
+Verdict written to "/mnt/v/output/zensim/bakes/v45b_monotone_cbc_lr1e4_seed17_2026-05-26.verdict.md"
