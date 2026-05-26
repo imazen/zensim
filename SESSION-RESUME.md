@@ -60,6 +60,28 @@ own flagged-unstarted work). Without it: lottery/research. Decision for
 the user: acquire that corpus, accept V39(5/6)+phone-bake, or explicitly
 relax the AIC-4 holdout rule.
 
+## SHIPPED (2026-05-26): `ZensimProfile::LinearBounded` — correct-by-construction metric
+
+First correct-by-construction zensim metric (commit `caf82c48`). V0_2's
+non-negative weights × non-negative dissimilarity features → distance
+`d ≥ 0` (`=0` iff identical), mapped by the bounded squash
+`100·exp(−(a/100)·d^b)`. **Bounded `[0,100]`, self-identity = 100 = unique
+max, monotone non-increasing in every error feature — by construction, on
+the ENTIRE domain** (incl. 100σ-off-manifold synthetic content where V39
+inverts). SROCC identical to `PreviewV0_2` (monotone transform of the same
+`d`). New `bounded_squash` disposition flag (ProfileParams + ZensimConfig,
+default false, ignored on MLP profiles). Invariant gate
+`tests/metric_invariants.rs` verifies it + tracks A's violations. Use as
+the guaranteed-safe metric / OOD fallback. The expressive member
+(partial-monotone MLP per the redesign doc §5.1–5.4) is the multi-session
+follow-on; swapping shipped champion `A` to a CbC MLP is a separate call.
+Doc: `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+
+> ⚠ `zensim-validate` does NOT compile at HEAD (pre-existing, not from the
+> CbC work): `main.rs` has a stale `mod loss_norm_in_norm;` (file moved to
+> `mlp_train/` in `226aab3`) + `crate::adam_simd`/`panel` main-vs-lib path
+> confusion. `bake_verdict`/trainer won't build until fixed.
+
 ## Finding (2026-05-26): V39 violates metric invariants — process flaw, not corner case
 
 V39 (`ZensimProfile::A`) returns scores **>100** and ranks **heavier

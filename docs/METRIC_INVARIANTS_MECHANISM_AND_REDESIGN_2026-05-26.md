@@ -325,8 +325,24 @@ without giving up nonlinear expressivity.
   only at output.
 
 ## Status / next
-Analysis + design only; shipped V39 untouched (accepted known-limit). The
-lowest-risk first increment is the **process fix (§5.5 invariant gate)** —
-it's independent of any retrain, would have blocked V39, and turns the
-red `score_sanity_checks` into a first-class, content-broad gate.
-Architecture work (§5.1–5.4) is the larger follow-on.
+
+**SHIPPED (2026-05-26, commit `caf82c48`): the correct-by-construction
+increment.** `ZensimProfile::LinearBounded` realizes §4's `f = 100·S(g(φ))`
+for the linear-`g` case: `g(d) = Σ wᵢ dᵢ` with non-negative weights over
+non-negative dissimilarity features (`d ≥ 0`, `= 0` iff identical) and
+`S(d) = exp(−(a/100)·d^b)` the bounded squash. It is bounded `[0,100]`,
+self-identity-maximal, and degradation-monotone **by construction on the
+entire domain**, SROCC-identical to `PreviewV0_2`. The §5.5 invariant
+gate (`tests/metric_invariants.rs`) verifies it across synthetic content
+and tracks `A`'s violations (`v39_known_limit_violations`). This is the
+guaranteed-safe metric / OOD fallback.
+
+**What's proven vs. what remains.** LinearBounded proves the *linear-g*
+member of the §4.6 theorem. The open work is the **expressive** member:
+§5.1–5.4's partial-monotone network (`g` monotone in distortion features,
+free on content descriptors — Deep Lattice / non-neg-weight + softplus
+gating) trained to beat linear's SROCC *within* the monotone class, with
+a bounded squash replacing the tanh-pin+extrapolating-spline. That is the
+larger multi-session follow-on; LinearBounded is the safe substrate and
+the gate it must also pass. Swapping the shipped champion `A` to a
+correct-by-construction MLP is a separate decision (SROCC/dial tradeoffs).
