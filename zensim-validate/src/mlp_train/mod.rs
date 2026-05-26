@@ -5316,12 +5316,10 @@ fn train_mlp_per_sample_alpha_head(
                  Set --pjnd-passthrough-weight 0."
             );
         }
-        if hyperparams.konjnd_aggregation_weight > 0.0 {
-            panic!(
-                "multi-layer / skip + konjnd_aggregation: not yet wired. \
-                 Set --konjnd-aggregation-weight 0."
-            );
-        }
+        // konjnd_aggregation is now wired through arch_forward /
+        // arch_backward for 2-layer / skip (task #4 follow-on,
+        // G5 lever). The aggregation step below dispatches on
+        // use_2layer / use_skip just like the anchor step.
     }
 
     let n_hidden_final = if use_2layer {
@@ -6617,22 +6615,19 @@ fn train_mlp_per_sample_alpha_head(
                             let mut any_step = false;
 
                             // Stash forward-pass intermediates per (ref, s).
-                            // psah::backprop_step_per_sample_alpha_head
-                            // needs ha_pre / ha / sa / max_a / ya_rank /
-                            // ya_pool / alpha for backprop, plus the
-                            // standardized xa slice.
-                            #[allow(clippy::type_complexity)]
+                            // arch_backward consumes the full ArchForward
+                            // struct (which carries h_pre / h / stats /
+                            // max_idx + the 2-layer h1_pre / h1 + skip
+                            // state), so we cache (ri_global, ya, dya_dpre,
+                            // ArchForward) per row and replay it in the
+                            // backprop pass. This is the 2-layer / skip
+                            // generalization of the prior 1-layer-only
+                            // psah cache.
                             let mut fw_cache: Vec<(
-                                usize, // row index into std_konjnd_agg_features
-                                f64,   // ya (post-pin score)
-                                f64,   // dya_dpre (pin Jacobian)
-                                f64,   // ya_rank
-                                f64,   // ya_pool
-                                f64,   // alpha
-                                Vec<f64>, // ha_pre
-                                Vec<f64>, // ha
-                                [f64; 4], // sa (4-slot pool reducer state)
-                                usize, // max_a (argmax index into pool reducer)
+                                usize,       // row index into std_konjnd_agg_features
+                                f64,         // ya (post-pin score)
+                                f64,         // dya_dpre (pin Jacobian)
+                                ArchForward, // full forward intermediates
                             )> = Vec::with_capacity(k_refs * s_per_ref);
 
                             // For each picked ref: sample S rows + forward all S.
@@ -6657,18 +6652,15 @@ fn train_mlp_per_sample_alpha_head(
                                         .min(n_rows_in_ref - 1);
                                     let ri_global = row_start + off;
                                     let xa = std_konjnd_agg_features[ri_global].as_slice();
-                                    let (
-                                        ya_pre, ya_rank, ya_pool, alpha, _, ha_pre, ha, sa, max_a,
-                                    ) = psah::forward_per_sample_alpha_head(
-                                        xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
-                                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
+                                    let fwd_kah = arch_forward(
+                                        xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
+                                        b_alpha, n_features, n_hidden, n_hidden_final, leaky,
+                                        use_2layer, use_skip,
                                     );
-                                    let (ya, dya_dpre) = pin_forward(ya_pre);
+                                    let (ya, dya_dpre) = pin_forward(fwd_kah.y);
                                     sum_y += ya;
-                                    fw_cache.push((
-                                        ri_global, ya, dya_dpre, ya_rank, ya_pool, alpha, ha_pre,
-                                        ha, sa, max_a,
-                                    ));
+                                    fw_cache.push((ri_global, ya, dya_dpre, fwd_kah));
                                 }
                                 ref_sums.push((cache_start, s_actual, sum_y, target));
                             }
@@ -6692,22 +6684,15 @@ fn train_mlp_per_sample_alpha_head(
                                     let entry = &fw_cache[cache_start + j];
                                     let ri_global = entry.0;
                                     let dya_dpre = entry.2;
-                                    let ya_rank = entry.3;
-                                    let ya_pool = entry.4;
-                                    let alpha = entry.5;
-                                    let max_a = entry.9;
+                                    let fwd_kah = &entry.3;
                                     let xa = std_konjnd_agg_features[ri_global].as_slice();
                                     let dl_dy = scale * err * dya_dpre;
-                                    psah::backprop_step_per_sample_alpha_head(
+                                    arch_backward(
                                         xa,
-                                        &entry.6,
-                                        &entry.7,
-                                        &entry.8,
-                                        max_a,
-                                        ya_rank,
-                                        ya_pool,
-                                        alpha,
+                                        fwd_kah,
                                         dl_dy,
+                                        &w1,
+                                        &w2_enc,
                                         &rank_w,
                                         &reducer_w,
                                         &w_alpha,
@@ -6721,7 +6706,10 @@ fn train_mlp_per_sample_alpha_head(
                                         &mut g_b_alpha,
                                         n_features,
                                         n_hidden,
+                                        n_hidden_final,
                                         leaky,
+                                        use_2layer,
+                                        use_skip,
                                     );
                                     any_step = true;
                                 }
@@ -6771,7 +6759,7 @@ fn train_mlp_per_sample_alpha_head(
                                     &mut w_alpha,
                                     &mut b_alpha,
                                     lr,
-                                    n_hidden,
+                                    n_hidden_final,
                                 );
                             }
                         }
@@ -9394,8 +9382,11 @@ mod tests {
     /// should yield a bake whose per-ref aggregation MSE is finite +
     /// inside the loose [0, 2500] sanity ceiling. (Perfect-init worst
     /// case is ~2500 on a 0..100 dial vs [20, 60] target.)
-    #[test]
-    fn konjnd_aggregation_step_runs_and_backprops() {
+    /// Body shared by the 1-layer and 2-layer aggregation-step tests.
+    /// `n_hidden_layers` selects the architecture; both must train
+    /// without NaN and produce a non-empty bake whose per-ref
+    /// aggregation MSE stays inside the loose sanity ceiling.
+    fn kah_run_train_and_check(n_hidden_layers: usize) {
         let (pool_rows, ref_ranges, ref_pjnd_target, ref_weight) = kah_build_pool();
         let pool_row_refs: Vec<&[f64]> = pool_rows.iter().map(|r| r.as_slice()).collect();
         let konjnd_agg = KonjndAggregationPool {
@@ -9424,6 +9415,7 @@ mod tests {
         }];
         let mut hp = MlpHyperparams {
             n_hidden: 16,
+            n_hidden_layers,
             n_epochs: 30,
             pairs_per_epoch: 200,
             minibatch_size: 1,
@@ -9457,7 +9449,10 @@ mod tests {
             None,
             Some(&konjnd_agg),
         );
-        assert!(!bake_bytes.is_empty(), "bake bytes empty after training");
+        assert!(
+            !bake_bytes.is_empty(),
+            "bake bytes empty after training ({n_hidden_layers}-layer)"
+        );
         let mse = kah_aggregation_mse_under_bake(
             &bake_bytes,
             &pool_rows,
@@ -9465,7 +9460,10 @@ mod tests {
             &ref_pjnd_target,
             hp.tanh_output_head_scale,
         );
-        assert!(mse.is_finite(), "aggregation MSE not finite after training: {mse}");
+        assert!(
+            mse.is_finite(),
+            "aggregation MSE not finite after training ({n_hidden_layers}-layer): {mse}"
+        );
         // With perfect failure (every ref pinned at score=50, all
         // targets ∈ [20, 60]): worst per-ref err ≈ 30 → MSE ≈ 400.
         // Random init: ~1000-3000. Successful training brings the
@@ -9474,15 +9472,31 @@ mod tests {
         // briefly; any working gradient flow easily passes.
         assert!(
             mse < 1500.0,
-            "aggregation MSE {mse:.2} suspiciously high — gradient may be broken"
+            "aggregation MSE {mse:.2} suspiciously high ({n_hidden_layers}-layer) — gradient may be broken"
         );
         let any_enabled_log = log
             .iter()
             .any(|l| l.contains("konjnd-aggregation: ENABLED"));
         assert!(
             any_enabled_log,
-            "expected 'konjnd-aggregation: ENABLED' log; got logs: {log:?}"
+            "expected 'konjnd-aggregation: ENABLED' log ({n_hidden_layers}-layer); got logs: {log:?}"
         );
+    }
+
+    #[test]
+    fn konjnd_aggregation_step_runs_and_backprops() {
+        // 1-layer (legacy path through arch_forward/arch_backward
+        // with use_2layer=false).
+        kah_run_train_and_check(1);
+    }
+
+    /// 2-layer is the production architecture (shipped V39 is
+    /// 2-layer). This guards the G5 lever (konjnd-aggregation head)
+    /// against the previously-gated 2-layer panic — it must now
+    /// train through arch_forward / arch_backward without NaN.
+    #[test]
+    fn konjnd_aggregation_step_runs_and_backprops_2layer() {
+        kah_run_train_and_check(2);
     }
 
     /// With weight=0 the pool is supplied but the step never fires.
@@ -9550,6 +9564,146 @@ mod tests {
             any_ignored_log,
             "expected 'konjnd-aggregation ... ignored' log; got logs: {log:?}"
         );
+    }
+
+    /// Numerical-gradient check for the 2-layer konjnd-aggregation
+    /// path. Builds a single-ref pool of S rows, forwards every row
+    /// through `arch_forward` (use_2layer=true), aggregates the pinned
+    /// scores into `agg = mean(y)`, and checks the analytic w1
+    /// gradient produced by `arch_backward` — accumulated exactly the
+    /// way the trainer's aggregation step accumulates it
+    /// (`dl_dy = (2w/S)·(agg − t)·dya_dpre` per row) — against a
+    /// centered finite difference of the per-ref loss
+    /// `L = w·(agg − t)²`. This is the delicate chain: the 2-layer
+    /// encoder backward (`w1` through layer-1 → leaky → layer-2 →
+    /// heads → pin → aggregate). Matching to ~1e-3 relative confirms
+    /// `arch_backward` is correct on the aggregation loss in 2-layer
+    /// mode.
+    #[test]
+    fn konjnd_aggregation_2layer_w1_gradient_matches_finite_difference() {
+        let n_features = 4usize;
+        let n_hidden1 = 6usize;
+        let n_hidden_final = (n_hidden1 / 2).max(8); // matches trainer
+        let leaky = 0.01f64;
+        let use_2layer = true;
+        let use_skip = false;
+        let tanh_scale = 20.0f64;
+        let weight = 0.7f64; // konjnd_aggregation_weight
+        let target = 42.0f64; // per-ref pjnd_target
+        let s_rows = 5usize;
+
+        // Deterministic LCG so the test is reproducible without
+        // pulling a test-only RNG into the validate crate.
+        let mut state = 0x1234_5678_9abc_def0u64;
+        let mut nxt = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            // map to [-0.5, 0.5)
+            ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+        };
+
+        let mut w1: Vec<f64> = (0..n_features * n_hidden1).map(|_| nxt()).collect();
+        let b1: Vec<f64> = (0..n_hidden1).map(|_| nxt()).collect();
+        let w2_enc: Vec<f64> = (0..n_hidden1 * n_hidden_final).map(|_| nxt()).collect();
+        let b2_enc: Vec<f64> = (0..n_hidden_final).map(|_| nxt()).collect();
+        let w_skip: Vec<f64> = Vec::new();
+        let b_skip = 0.0f64;
+        let rank_w: Vec<f64> = (0..n_hidden_final).map(|_| nxt()).collect();
+        let rank_b = nxt();
+        let reducer_w: [f64; 4] = [nxt(), nxt(), nxt(), nxt()];
+        let reducer_b = nxt();
+        let w_alpha: Vec<f64> = (0..n_hidden_final).map(|_| nxt()).collect();
+        let b_alpha = nxt();
+
+        let rows: Vec<Vec<f64>> = (0..s_rows)
+            .map(|_| (0..n_features).map(|_| nxt()).collect())
+            .collect();
+
+        // tanh pin used by the trainer (tanh_output_head_scale > 0).
+        let pin = |y_pre: f64| -> (f64, f64) {
+            let xc = (y_pre / tanh_scale).clamp(-30.0, 30.0);
+            let s = 1.0 / (1.0 + (-xc).exp());
+            let y_score = 100.0 * s;
+            let dy = (100.0 / tanh_scale) * s * (1.0 - s);
+            (y_score, dy)
+        };
+
+        // Per-ref loss as a pure function of w1 (everything else fixed).
+        let loss_fn = |w1v: &[f64]| -> f64 {
+            let mut sum_y = 0.0f64;
+            for row in &rows {
+                let fwd = arch_forward(
+                    row, w1v, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                );
+                let (y, _) = pin(fwd.y);
+                sum_y += y;
+            }
+            let agg = sum_y / (s_rows as f64);
+            let err = agg - target;
+            weight * err * err
+        };
+
+        // Analytic gradient via arch_backward — mirror the trainer's
+        // two-pass aggregation accumulation exactly.
+        let n_w1_concat = n_features * n_hidden1 + n_hidden1 * n_hidden_final;
+        let mut gw1 = vec![0.0f64; n_w1_concat];
+        let mut gb1 = vec![0.0f64; n_hidden1 + n_hidden_final];
+        let mut g_rank_w = vec![0.0f64; n_hidden_final];
+        let mut g_rank_b = 0.0f64;
+        let mut g_red_w: [f64; 4] = [0.0; 4];
+        let mut g_red_b = 0.0f64;
+        let mut g_w_alpha = vec![0.0f64; n_hidden_final];
+        let mut g_b_alpha = 0.0f64;
+
+        // Pass 1: forward all rows, cache (dya_dpre, ArchForward), sum y.
+        let mut cache: Vec<(f64, ArchForward)> = Vec::with_capacity(s_rows);
+        let mut sum_y = 0.0f64;
+        for row in &rows {
+            let fwd = arch_forward(
+                row, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+                &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+            );
+            let (y, dya_dpre) = pin(fwd.y);
+            sum_y += y;
+            cache.push((dya_dpre, fwd));
+        }
+        let agg = sum_y / (s_rows as f64);
+        let err = agg - target;
+        let scale = 2.0 * weight / (s_rows as f64);
+        // Pass 2: backprop each row with dl_dy = scale·err·dya_dpre.
+        for (i, (dya_dpre, fwd)) in cache.iter().enumerate() {
+            let dl_dy = scale * err * dya_dpre;
+            arch_backward(
+                &rows[i], fwd, dl_dy, &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
+                &mut gw1, &mut gb1, &mut g_rank_w, &mut g_rank_b,
+                &mut g_red_w, &mut g_red_b, &mut g_w_alpha, &mut g_b_alpha,
+                n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+            );
+        }
+
+        // FD-check the first-layer w1 entries (the deepest part of the
+        // 2-layer chain). Check several spread across the matrix.
+        let eps = 1e-6;
+        let n_w1_first = n_features * n_hidden1;
+        for idx in (0..n_w1_first).step_by((n_w1_first / 6).max(1)) {
+            let orig = w1[idx];
+            w1[idx] = orig + eps;
+            let fp = loss_fn(&w1);
+            w1[idx] = orig - eps;
+            let fm = loss_fn(&w1);
+            w1[idx] = orig;
+            let numerical = (fp - fm) / (2.0 * eps);
+            let analytical = gw1[idx];
+            let denom = numerical.abs().max(analytical.abs()).max(1e-6);
+            let rel = (numerical - analytical).abs() / denom;
+            assert!(
+                rel < 1e-3,
+                "2-layer konjnd-agg gw1[{idx}] numerical={numerical:.8} \
+                 analytical={analytical:.8} rel={rel:.2e}"
+            );
+        }
     }
 
     // ===================================================================
