@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Shipped (2026-05-25 PM, V39 — universally beats V0_3 on SROCC + dial)
+
+- **`PreviewV0_3` → V39 bake** (`v39_v32plus_spline_seed17_2026-05-25.bin`).
+  Universally better than the prior V0_3 (v_tuner_v11) on every
+  held-out corpus AND on the dynamic-range dial (G1):
+
+  | Corpus | V0_3 | V39 |
+  |---|---|---|
+  | CID22 SROCC | 0.8604 | 0.8793 |
+  | KADIK SROCC | 0.9237 | 0.9251 |
+  | TID SROCC | 0.8849 | 0.9317 |
+  | KonJND SROCC | 0.2888 | 0.4197 |
+  | AIC-3 SROCC | 0.7761 | 0.8023 |
+  | G1 dynamic range | 0.69 | 1.00 |
+
+- Recipe: V32's hybrid MSE(0.6)+RankNet(0.6) on normalized [0,1]
+  group targets (the ranking that works) + a 2000-row multi-band
+  anchor (target_score spanning 0-100) at weight 0.01 for
+  post-training spline calibration. The monotone PCHIP spline
+  stretches the compressed tanh output to the full dial without
+  changing rank order (SROCC is rank-invariant under monotone maps).
+- Carries both `tanh_output_head` and `output_calibration_spline`.
+- Old v_tuner_v11 archived at `weights/archive/`.
+
+### Added (2026-05-25 PM, evaluation infrastructure)
+
+- **Auto-eval after every train**: `zensim_mlp_train` now runs
+  `bake_verdict` on the output bake, printing the full Mohammadi
+  panel and writing a `.verdict.md` sidecar.
+- **bake_verdict scorecard**: per-corpus DS-AUC (G9, Mann-Whitney U) +
+  geomean3 composite + a CODEC_TARGET_GOALS.md G1/G5/G7/G8/G9
+  pass/fail table with a weighted score. This exposed the
+  broken-dial regression that SROCC-only comparison hid: bakes
+  trained without the calibration spline collapse the dial to a
+  near-constant ~65 (G1=0.00) despite high SROCC.
+
+### Root cause fixes (2026-05-25)
+
+- **Training divergence**: 5-group MSE-only training diverged because
+  group `human_score` scales were mismatched (cid22_train raw MCOS
+  [3-94], konjnd-dense [-66,96], others [0,1]). Normalizing all
+  targets to a common scale fixes it.
+- **Broken dial**: SROCC-chasing without the output calibration
+  spline produces an unusable dial. The spline (fit from a multi-band
+  anchor) is mandatory for a codec-target bake.
+
 ### Shipped (2026-05-25, v5 production 2-layer + PCHIP spline)
 
 - **`PreviewV0_3` upgraded** to v5 production bake
