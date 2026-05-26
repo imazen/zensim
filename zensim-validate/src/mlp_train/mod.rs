@@ -1851,7 +1851,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
                         hyperparams.leaky_alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    crate::panel::compute_light_panel(&neg_preds, g.human_scores)
+                    crate::panel::compute_light_panel_subsampled(&neg_preds, g.human_scores)
                 })
                 .collect();
 
@@ -2620,7 +2620,7 @@ fn train_mlp_pool_head_with_tv(
                         alpha,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    crate::panel::compute_light_panel(&neg_preds, g.human_scores)
+                    crate::panel::compute_light_panel_subsampled(&neg_preds, g.human_scores)
                 })
                 .collect();
 
@@ -3602,7 +3602,7 @@ fn train_mlp_hybrid_head_with_tv(
                         leaky,
                     );
                     let neg_preds: Vec<f64> = preds.iter().map(|&p| -p).collect();
-                    crate::panel::compute_light_panel(&neg_preds, g.human_scores)
+                    crate::panel::compute_light_panel_subsampled(&neg_preds, g.human_scores)
                 })
                 .collect();
 
@@ -7407,7 +7407,7 @@ fn train_mlp_per_sample_alpha_head(
                     } else {
                         preds.iter().map(|&p| -p).collect()
                     };
-                    crate::panel::compute_light_panel(&signed_preds, g.human_scores)
+                    crate::panel::compute_light_panel_subsampled(&signed_preds, g.human_scores)
                 })
                 .collect();
 

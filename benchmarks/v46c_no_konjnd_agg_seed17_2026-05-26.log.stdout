@@ -9,5 +9,5 @@ MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_
 per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
 tanh_output_head: ENABLED — y_score = 100·σ(y_pre/20.000) (active linear region y_pre∈[−3·scale, 3·scale])
 monotone_cbc: ENABLED — soft sign-penalty (λ=1) during training + α≡1 every step + FINAL hard projection at every bake-emission (encoder≥0, head≤0, α≡1). Shipped bake is monotone-by-construction.
-memory allocation of 307597755168 bytes failed
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+  epoch   0 | lr=0.00566 | loss=1.0081 | val(geomean3)=0.8771 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.016,σ=0.961,max=0.016,p6=0.016] | safesyn: srocc=0.8956 plcc=0.8593 pwrc=0.9628 | cid22_train: srocc=0.8004 plcc=0.7848 pwrc=0.9754 | t=4.1s
+  epoch  10 | lr=0.00512 | loss=1.3626 | val(geomean3)=0.4445 (best=0.8771) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=0.000,max=-0.000,p6=0.000] | safesyn: srocc=0.2746 plcc=0.3212 pwrc=0.5347 | cid22_train: srocc=0.4081 plcc=0.4083 pwrc=0.8819 | t=30.9s

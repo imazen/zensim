@@ -19,5 +19,5 @@ konjnd-aggregation: ENABLED — 'konjnd_aggregation' rows=20160 refs=1008 S=5 K=
 per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
 tanh_output_head: ENABLED — y_score = 100·σ(y_pre/20.000) (active linear region y_pre∈[−3·scale, 3·scale])
 monotone_cbc: ENABLED — soft sign-penalty (λ=1) during training + α≡1 every step + FINAL hard projection at every bake-emission (encoder≥0, head≤0, α≡1). Shipped bake is monotone-by-construction.
-memory allocation of 307597755168 bytes failed
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+  epoch   0 | lr=0.00566 | loss=44.6396 | val(geomean3)=0.9124 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.016,σ=0.959,max=0.016,p6=0.016] | safesyn: srocc=0.9658 plcc=0.9331 pwrc=0.9970 | cid22_train: srocc=0.8151 plcc=0.7987 pwrc=0.9768 | t=5.3s
+  epoch  10 | lr=0.00512 | loss=33.1860 | val(geomean3)=0.9154 (best=0.9124) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.001,σ=-0.001,max=-0.000,p6=0.001] | safesyn: srocc=0.9694 plcc=0.9401 pwrc=0.9973 | cid22_train: srocc=0.8211 plcc=0.7993 pwrc=0.9765 | t=41.8s
