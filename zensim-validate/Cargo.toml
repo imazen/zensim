@@ -25,6 +25,7 @@ zensim-train-core = { path = "../zensim-train-core" }
 zensim-train-gpu = { path = "../zensim-train-gpu" }
 zenpredict = { workspace = true }
 zenpredict-bake = { workspace = true }
+zenstats = { workspace = true }
 archmage = { workspace = true }
 magetypes = { workspace = true }
 image = { workspace = true }

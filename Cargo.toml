@@ -41,3 +41,13 @@ enough = { version = "0.4.2", default-features = false, features = ["std"] }
 # Bump the rev deliberately when a zenanalyze fix zensim needs lands.
 zenpredict      = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
 zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
+
+# zenstats — canonical IQA-stats home extracted on 2026-05-26 from the
+# pre-existing `zensim-validate/src/panel.rs`. Lives in the zenmetrics
+# repo as a self-contained workspace member (zenmetrics already depends
+# on zensim, so the dep direction is zensim → zenmetrics/crates/zenstats
+# only — no cycle, the zenmetrics workspace root is NOT pulled in).
+# Local developers wanting auto-sync with the sibling worktree use the
+# path dep below; CI portability would need a git ref the day this is
+# published, but until then we rely on the sibling clone being present.
+zenstats = { path = "../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }

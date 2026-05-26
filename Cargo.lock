@@ -6524,6 +6524,7 @@ dependencies = [
  "zensim",
  "zensim-train-core",
  "zensim-train-gpu",
+ "zenstats",
 ]
 
 [[package]]
@@ -6532,6 +6533,13 @@ version = "0.0.0"
 dependencies = [
  "zensim",
  "zensim-regress",
+]
+
+[[package]]
+name = "zenstats"
+version = "0.1.0"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
