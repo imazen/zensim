@@ -152,3 +152,27 @@ cclass per-content-class shifts are also flat, that's the **negative
 finding** the user asked us to be honest about. Report it directly:
 "V0_6+cclass does not benefit from content rebalance; the model
 architecture cannot leverage cclass signal even with diverse content."
+
+---
+
+## 2026-05-26 update: encode-pipeline shells retained
+
+Per user direction, the encode-orchestration shells were added to this commit
+alongside the generators so the full (ref, distorted) pair set is reproducible
+end-to-end, not just the source-PNG side:
+
+- `encode_synth_via_zenjpeg.sh` -- bridges synth_nonphoto.py output to
+  coefficient's `generate_zensim_training` encoder. **Working on main with
+  caveats** (see header in the file).
+- `build_rebalanced_csv.sh` -- concordance-filter + concatenate per-codec
+  encoded CSVs. **Historical reference only**; does not run on main
+  (depends on `build_extended_safe_csv.py` which was not salvaged).
+  Documented as a recipe; current-main equivalent uses the
+  zensim-validate trainer's `--group` flags directly + the
+  contamination_guard.rs trainer-startup check.
+
+The analysis utilities from the original v06_cclass/ dir
+(`build_cclass_tsv.py`, `compare_v06.py`, `per_class_srocc.py`) were
+intentionally skipped -- their stats snapshots are 3 weeks out of date
+and they referenced `dataset_metric_baseline.rs` which was deleted from
+main in commit `34f796f` (2026-05-20 cleanup).
