@@ -96,7 +96,6 @@ pub mod hybrid_head;
 pub mod per_sample_alpha_head;
 
 pub mod simd_encoder;
-pub mod simd_encoder_f32;
 
 /// TV (total-variation) regularizer for adjacent-quality monotonicity.
 ///
