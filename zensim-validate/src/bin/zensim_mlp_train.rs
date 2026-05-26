@@ -640,6 +640,15 @@ struct Args {
     #[arg(long, default_value_t = 0.0)]
     monotonicity_reg: f64,
 
+    /// **Correct-by-construction monotone mode.** Projects encoder
+    /// weights ≥0 and head weights ≤0 + forces α≡1 after every Adam step
+    /// so the bake is bounded `[0,100]` + monotone↓ in distortion BY
+    /// CONSTRUCTION (codec goals G1+G3). Only on `--per-sample-alpha-head`
+    /// with `--tanh-output-head-scale > 0`. Pair with
+    /// `--skip-connection false`. Default off.
+    #[arg(long, default_value_t = false)]
+    monotone_cbc: bool,
+
     /// `PreviewV0_5Tuner` monotonicity-reg margin (2026-05-18). The
     /// penalty activates only when the predicted gap is below
     /// `+margin` relative to perfect ordering. Default `0.0` =
@@ -1893,6 +1902,7 @@ fn main() {
         sigma_weighted_mse: args.sigma_weighted_mse,
         ranknet_weight: args.ranknet_weight,
         monotonicity_reg: args.monotonicity_reg,
+        monotone_cbc: args.monotone_cbc,
         monotonicity_margin: args.monotonicity_margin,
         anchor_loss_weight: args.anchor_loss_weight,
         anchor_target_score: args.anchor_target_score,

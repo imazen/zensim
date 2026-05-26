@@ -459,6 +459,25 @@ pub struct MlpHyperparams {
     /// `per_sample_alpha_head = true` path.
     pub monotonicity_reg: f64,
 
+    /// **Correct-by-construction monotone mode.** When `true` (only on
+    /// the `per_sample_alpha_head` path), after every Adam step the
+    /// trainer PROJECTS weights to a sign pattern that makes the bake
+    /// monotone-by-construction in every (non-negative dissimilarity)
+    /// feature:
+    ///   - encoder `w1`, `w2_enc` → clamped `≥ 0` (LeakyReLU monotone ⟹
+    ///     hidden activations monotone↑ in each feature),
+    ///   - `rank_w`, `w_skip` → clamped `≤ 0` (so `y_rank` is monotone↓
+    ///     in distortion),
+    ///   - the per-sample-α gate is forced to ≈1 (`w_alpha = 0`,
+    ///     `b_alpha = 30`) so `y = y_rank` (the α-gated mix of two
+    ///     functions is not monotone, so a single head is required).
+    /// Combined with the increasing tanh pin `100·σ(y/scale)`, the score
+    /// is bounded `[0,100]` AND monotone non-increasing in distortion on
+    /// the ENTIRE input domain — the G1+G3 codec goals by construction.
+    /// Requires `tanh_output_head_scale > 0`; pairs best with
+    /// `skip_connection = false`. Default `false`.
+    pub monotone_cbc: bool,
+
     /// Margin for the monotonicity-reg hinge (default 0.0).
     /// `target_a - target_b > monotonicity_margin` activates the
     /// penalty; otherwise the pair contributes 0. Useful when you
@@ -741,6 +760,7 @@ impl Default for MlpHyperparams {
             sigma_weighted_mse: false,
             ranknet_weight: 1.0,
             monotonicity_reg: 0.0,
+            monotone_cbc: false,
             monotonicity_margin: 0.0,
             anchor_loss_weight: 0.0,
             anchor_target_score: 63.0,
@@ -5827,6 +5847,19 @@ fn train_mlp_per_sample_alpha_head(
         }
     };
 
+    // Correct-by-construction monotone projection (captured by the Adam
+    // closure below). When set, after every step the weights are
+    // projected onto the sign pattern that makes the bake monotone↓ in
+    // every non-negative dissimilarity feature: encoder ≥0, head ≤0,
+    // α-gate forced to ≈1. See `MlpHyperparams::monotone_cbc`.
+    let monotone_cbc = hyperparams.monotone_cbc;
+    if monotone_cbc {
+        log_line(
+            "monotone_cbc: ENABLED — projecting w1,w2_enc≥0; rank_w,w_skip≤0; α≡1 (w_alpha=0,b_alpha=30) after every Adam step (bounded+monotone by construction)",
+            log,
+        );
+    }
+
     // Adam-step closure: pack/unpack our parameters into the Adam slots.
     // Adam step closure — packs all weight vectors into the concatenated
     // adam slots, runs one step, then unpacks. For multi-layer / skip,
@@ -5918,6 +5951,39 @@ fn train_mlp_per_sample_alpha_head(
         *b_alpha = w2_vec[nh_final + 4 + nh_final];
         *rank_b = b2_vec[0];
         *reducer_b = b2_vec[1];
+
+        // Correct-by-construction projection (monotone_cbc). Applied
+        // AFTER the unpack so the next forward sees the projected sign
+        // pattern. Encoder weights ≥0 (LeakyReLU monotone ⟹ hidden ↑ in
+        // each feature); rank_w + w_skip ≤0 (y ↓ in distortion); α≡1.
+        if monotone_cbc {
+            for w in w1.iter_mut() {
+                if *w < 0.0 {
+                    *w = 0.0;
+                }
+            }
+            for w in w2_enc.iter_mut() {
+                if *w < 0.0 {
+                    *w = 0.0;
+                }
+            }
+            for w in rank_w.iter_mut() {
+                if *w > 0.0 {
+                    *w = 0.0;
+                }
+            }
+            for w in w_skip.iter_mut() {
+                if *w > 0.0 {
+                    *w = 0.0;
+                }
+            }
+            // Force the per-sample-α gate to ≈1 so y = y_rank (a single
+            // monotone head). σ(30) ≈ 1 − 9.4e-14.
+            for w in w_alpha.iter_mut() {
+                *w = 0.0;
+            }
+            *b_alpha = 30.0;
+        }
     };
 
     let mut nin_buffer: Vec<Option<PerSampleAlphaPairForward<'_>>> = if nin_on {
