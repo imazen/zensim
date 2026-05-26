@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added — konjnd-aggregation head wired for 2-layer/skip (2026-05-26, G5 lever)
+
+- `zensim_mlp_train`: removed the 2-layer/skip guard panic on
+  `--konjnd-aggregation-weight` and rewired the aggregation step to
+  dispatch through `arch_forward`/`arch_backward` (matching the anchor
+  step) instead of the 1-layer-only `psah` forward/backprop (a923383).
+  The two-pass aggregation structure is preserved; also fixed a latent
+  `do_adam_step` slot-dim bug (`n_hidden` → `n_hidden_final`) that would
+  mis-unpack head weights in 2-layer mode. Shipped V39 is 2-layer, so
+  this makes the purpose-built G5 (KonJND HF-rank) lever usable on the
+  production architecture. New tests: parametrized 1-/2-layer
+  aggregation-step run + a 2-layer `w1` finite-difference gradient check
+  (rel < 1e-3) against `arch_backward`.
+
 ### Data integrity — structural fixes (2026-05-25, task #215)
 
 Code-side fixes so the kadid/tid `iwssim` + `ssim2_gpu` corruption
