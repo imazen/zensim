@@ -729,11 +729,21 @@ recalibration so raw outputs stay within [0, 100].
 ## V39 ship + dial/spline/anchor learnings (added 2026-05-25)
 
 The 2026-05-25 evening session shipped **V39** as `PreviewV0_3`
-(`zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin`) — the
-first bake that beats the prior V0_3 on ALL 5 held-out corpora's
-SROCC AND the G1 dial. Full lineage + numbers:
-`benchmarks/v5_vs_v03_comparison_2026-05-25.md`. Hard-won learnings
-(re-read before training or evaluating a codec-target bake):
+(`zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin`). It beats
+the prior V0_3 (v_tuner_v11) on **5 of 6** held-out corpora across the
+full panel (SROCC/PLCC/Z-RMSE/DS-AUC) AND the G1 dial — CID22, KADIK,
+TID, KonJND, AIC-3 all improve. **AIC-4 (n=300) is the exception**:
+V0_3 wins its SROCC 0.9284 vs V39 0.9051 (V39 still wins AIC-4 DS-AUC).
+So "universally better" is accurate for the 5 compression-focused
+holdouts, NOT literally all 6 — don't overclaim it.
+**Goal status (CODEC_TARGET_GOALS.md):** V39 PASSES G1 (dial 1.00) +
+G7 (CID22 0.879 ≥ 0.85), soft-passes G8 (AIC-3 Z-RMSE 0.584) + G9
+(DS-AUC 0.739), but **FAILS G5** (KonJND HF-rank 0.42 < 0.70 floor) —
+the structural learning-metric HF-failure zone the doc itself flags;
+full goal achievement needs the unstarted HF-corpus acquisition.
+Full lineage + numbers: `benchmarks/v5_vs_v03_comparison_2026-05-25.md`.
+Hard-won learnings (re-read before training or evaluating a
+codec-target bake):
 
 1. **SROCC-only verdicts hide a BROKEN DIAL — always run the
    `bake_verdict` goals scorecard (G1 dynamic range).** Bakes trained

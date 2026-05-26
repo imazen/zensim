@@ -275,17 +275,30 @@ CVVDP's structural advantage over every other metric in
 Mohammadi 2025 is its **display model**: it takes display
 parameters (pixels per degree, peak luminance, ambient light,
 contrast ratio) as input and modulates sensitivity functions
-accordingly. The same compression artifact is MORE visible on
-an iPhone 14 Pro at arm's length (460 PPI, ~25 cm → ~67 PPD,
-2000 nits peak) than on a 1080p desktop at desk distance
-(92 PPI, ~60 cm → ~53 PPD, 350 nits).
+accordingly.
 
-For a codec-target metric, this means: **"score 70" should mean
-different byte budgets for different displays.** An image
-encoded for Retina mobile needs fewer bytes to look identical
-than the same image for a 1080p desktop — because the desktop
-viewer literally cannot see the fine-grained artifacts that the
-Retina viewer can.
+**CORRECTED 2026-05-26 (measured, was backwards):** an earlier
+version of this section claimed compression artifacts are "MORE
+visible on a phone." The CVVDP physics says the opposite for the
+pixel-density axis, and we MEASURED it: scoring the same KADID
+pairs at `modern_oled_phone_indoor` (≈110 PPD) vs `standard_4k`
+(≈75 PPD) gives **higher** JOD (artifacts LESS visible) at the
+higher PPD. Reason: a fixed pixel-scale artifact subtends a
+SMALLER visual angle at higher PPD → higher spatial frequency →
+deeper CSF rolloff → less visible. So **higher PPD → pixel-level
+artifacts LESS visible, not more.** The "more visible on a phone"
+intuition comes from the *other* axes — phones are often held
+CLOSER (which LOWERS effective PPD and raises visibility) and run
+brighter (higher contrast sensitivity). The net per-display
+direction is not assumable from one parameter; it must be
+**measured by running CVVDP at that display's actual
+(geometry + photometry)** — which is exactly what the
+`zensim-b-phone` bake does.
+
+For a codec-target metric, this still means: **"score 70" should
+mean different byte budgets for different displays** — but the
+sign and magnitude of the shift are an empirical CVVDP-at-display
+output, not a fixed "mobile is stricter" rule.
 
 ### Display profile parameters
 
@@ -372,16 +385,18 @@ impl DisplayProfile {
 
 Codecs default to `WEB_GENERIC` (the current display-agnostic
 behavior). When a caller provides a specific profile, the score
-shifts accordingly:
-- Higher PPD → stricter scores (same distortion is MORE visible)
-- "Score 60 (visually lossless)" at 67 PPD (iPhone) requires
-  a higher-quality encode than "score 60" at 53 PPD (desktop)
+shifts by the MEASURED CVVDP-at-display delta (see the corrected
+physics note above — do NOT assume "higher PPD = stricter"; at
+fixed distance higher PPD makes pixel-scale artifacts LESS visible
+via CSF rolloff). The sign/magnitude per profile comes from
+running CVVDP at that display's geometry + photometry, not a
+fixed rule.
 
 ### Measurement
 
 | Measure | Threshold |
 |---|---|
-| Cross-PPD consistency: same (ref, dist) at PPD 53 vs 67 → score delta | ≥ 3 points (distortion IS more visible on mobile) |
+| Cross-PPD consistency: same (ref, dist) at PPD 53 vs 110 → score delta | non-zero + sign matches measured CVVDP-at-display (NOT assumed "more visible on mobile" — see corrected physics note) |
 | Cross-PPD rank preservation: rank order of quality levels at PPD X matches rank order at PPD Y | SROCC ≥ 0.99 (ranks should not invert) |
 | CVVDP-anchor fit R² per PPD bracket | ≥ 0.90 for Tier 1 affine |
 

@@ -9,10 +9,16 @@
 - Recipe: V32 ranking (normalized [0,1] group targets, hybrid MSE 0.6 +
   RankNet 0.6) + multi-band anchor at weight 0.01 for post-training
   spline calibration. seed=17.
-- **Universally better than the prior V0_3 (v_tuner_v11)** on ALL 5
-  held-out corpora's SROCC AND the G1 dial:
+- Beats prior V0_3 (v_tuner_v11) on **5 of 6** held-out corpora
+  (full panel) AND the G1 dial:
   CID22 0.8793 / KADIK 0.9251 / TID 0.9317 / KonJND 0.4197 / AIC-3 0.8023;
-  G1 dial 1.00 (prior 0.69).
+  G1 dial 1.00 (prior 0.69). **AIC-4 (n=300) is the exception** —
+  V0_3 wins SROCC 0.9284 vs V39 0.9051 (V39 wins AIC-4 DS-AUC). Not
+  literally "universal"; accurate for the 5 compression holdouts.
+- **Goal status:** PASSES G1 + G7; soft-passes G8/G9; **FAILS G5**
+  (KonJND HF-rank 0.42 < 0.70 — the acknowledged learning-metric HF
+  zone). Full CODEC_TARGET_GOALS.md achievement NOT done; needs the
+  unstarted HF-corpus acquisition.
 - Bake bytes carry both `tanh_output_head` + `output_calibration_spline`.
 
 **⚠ The old "0.885 AIC-3 ceiling / CVVDP gap needs CSF features" claim is

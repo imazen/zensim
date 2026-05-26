@@ -162,3 +162,31 @@ feature-limited (no CSF-aware spatial-frequency features), CONFIRMED by:
 - 40 bakes across recipes all hitting ~0.80 AIC-3
 - V41 CVVDP-target emulator NOT helping (0.75)
 Closing the gap requires new input features (architectural), not training.
+
+## FRESH full-panel verification (2026-05-26) — V39 vs V0_3, honest 5/6
+
+Re-ran both bakes through `bake_verdict` on all 6 held-out corpora:
+
+| Corpus | n | V0_3 SROCC | V39 SROCC | V0_3 Z-RMSE | V39 Z-RMSE | V0_3 DS-AUC | V39 DS-AUC | V39 wins SROCC? |
+|---|--:|--:|--:|--:|--:|--:|--:|:--:|
+| CID22 | 4292 | 0.8604 | 0.8793 | 0.523 | 0.493 | 0.7791 | 0.8168 | ✓ |
+| KADIK10k | 10125 | 0.9237 | 0.9251 | 0.385 | 0.377 | 0.8700 | 0.8881 | ✓ |
+| TID2013 | 3000 | 0.8849 | 0.9317 | 0.459 | 0.377 | 0.8534 | 0.9076 | ✓ |
+| KonJND | 1008 | 0.2888 | 0.4197 | 0.966 | 0.929 | 0.5164 | 0.5398 | ✓ |
+| AIC-3 | 600 | 0.7761 | 0.8023 | 0.616 | 0.584 | 0.6990 | 0.7385 | ✓ |
+| **AIC-4** | 300 | **0.9284** | 0.9051 | **0.383** | 0.450 | 0.8432 | 0.8486 | **✗ (V0_3)** |
+
+**Honest verdict: V39 wins 5 of 6 corpora on the full panel** (the five
+compression-focused holdouts), losing only AIC-4 SROCC/Z-RMSE (n=300,
+the smallest set; V39 still wins AIC-4 DS-AUC). Earlier "universally
+better on ALL corpora" was an overclaim that omitted AIC-4 — corrected.
+
+**V39 CODEC_TARGET_GOALS.md scorecard (measurable subset):**
+G1 dynamic range **1.00 PASS** (p5=-89.7→clamp-0, p95=97.4) ·
+G5 HF rank **0.34 FAIL** (KonJND 0.420 < 0.70 floor; AIC-3 0.802 ✓) ·
+G7 CID22 **1.00 PASS** (0.8793 ≥ 0.85) ·
+G8 Z-RMSE **0.72** (AIC-3 0.584 ≤ 0.80) ·
+G9 DS-AUC **0.26** (AIC-3 0.739 ≥ 0.70 floor, < 0.85 aspiration).
+Full goal achievement is NOT reached — G5 (KonJND HF rank) is the
+structural learning-metric failure the doc itself flags; it needs the
+unstarted HF training-corpus acquisition, not a recipe tweak.
