@@ -223,6 +223,75 @@ fn pwrc(a: &[f64], b: &[f64]) -> f64 {
     if den < 1e-12 { 0.0 } else { num / den }
 }
 
+/// DS-AUC (G9, Mohammadi 2025 § VII): Area Under the ROC curve for
+/// classifying stimulus pairs as "same" vs "different" perceptual quality.
+///
+/// Without parsed 2AFC response data, we use a practical proxy: a pair
+/// (i, j) is labeled "different" when |human[i] − human[j]| exceeds
+/// `diff_threshold` (in human-score units), "same" otherwise. The metric's
+/// |score[i] − score[j]| is the classifier score. AUC measures how well
+/// the metric's score-gap separates the same/different pairs.
+///
+/// Returns AUC in [0, 1]; 0.5 = chance. Subsamples pairs when n is large
+/// to keep the O(n²) pair enumeration tractable.
+fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
+    let n = predicted.len();
+    if n < 4 || human.len() != n {
+        return f64::NAN;
+    }
+    // Cap pair count: with n up to ~10k, full O(n²) is 100M pairs.
+    // Subsample to ~200k pairs deterministically via stride.
+    let max_pairs = 200_000usize;
+    let total_pairs = n * (n - 1) / 2;
+    let stride = (total_pairs / max_pairs).max(1);
+
+    // Collect (metric_gap, is_different) labels.
+    let mut samples: Vec<(f64, bool)> = Vec::new();
+    let mut pair_idx = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if pair_idx % stride == 0 {
+                let metric_gap = (predicted[i] - predicted[j]).abs();
+                let human_gap = (human[i] - human[j]).abs();
+                if metric_gap.is_finite() && human_gap.is_finite() {
+                    samples.push((metric_gap, human_gap > diff_threshold));
+                }
+            }
+            pair_idx += 1;
+        }
+    }
+    if samples.len() < 2 {
+        return f64::NAN;
+    }
+    // AUC via rank-sum (Mann-Whitney U). Sort by metric_gap, sum ranks
+    // of the "different" class.
+    samples.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let n_diff = samples.iter().filter(|s| s.1).count();
+    let n_same = samples.len() - n_diff;
+    if n_diff == 0 || n_same == 0 {
+        return f64::NAN;
+    }
+    // Average-rank for ties, then U-statistic.
+    let mut rank_sum_diff = 0.0f64;
+    let mut k = 0usize;
+    while k < samples.len() {
+        let mut m = k;
+        while m + 1 < samples.len() && samples[m + 1].0 == samples[k].0 {
+            m += 1;
+        }
+        // ranks k+1 .. m+1 (1-based), average:
+        let avg_rank = ((k + 1) + (m + 1)) as f64 / 2.0;
+        for s in &samples[k..=m] {
+            if s.1 {
+                rank_sum_diff += avg_rank;
+            }
+        }
+        k = m + 1;
+    }
+    let u = rank_sum_diff - (n_diff * (n_diff + 1)) as f64 / 2.0;
+    u / (n_diff as f64 * n_same as f64)
+}
+
 // ============================================================================
 // Z-RMSE: σ-normalized RMSE after a 4-parameter logistic rescale.
 // Ported from dataset_metric_baseline.rs. The logistic absorbs the
@@ -1043,10 +1112,11 @@ struct CorpusResult {
     or_ratio: f64,
     pwrc: f64,
     z_rmse: f64,
+    ds_auc: f64,
     body: String,
 }
 
-fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64) {
+fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64) {
     let srocc = spearman(humans, scores).abs();
     let krocc = kendall_tau(humans, scores).abs();
     let pw = pwrc(humans, scores).abs();
@@ -1054,7 +1124,19 @@ fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, 
     let rescaled = rescale_logistic(scores, humans);
     let plcc = pearson(&rescaled, humans).abs();
     let z = z_rmse(&rescaled, humans);
-    (srocc, plcc, krocc, or_, pw, z)
+    // DS-AUC threshold: 1 std of human scores marks "perceptually different".
+    let h_mean: f64 = humans.iter().sum::<f64>() / humans.len().max(1) as f64;
+    let h_std = (humans.iter().map(|x| (x - h_mean).powi(2)).sum::<f64>()
+        / humans.len().max(1) as f64)
+        .sqrt();
+    let ds_raw = ds_auc(scores, humans, h_std);
+    // Orientation-correct: larger metric-gap should mean "more different".
+    let ds = if ds_raw.is_finite() {
+        ds_raw.max(1.0 - ds_raw)
+    } else {
+        ds_raw
+    };
+    (srocc, plcc, krocc, or_, pw, z, ds)
 }
 
 fn render_corpus(
@@ -1096,15 +1178,15 @@ fn render_corpus(
         .collect();
 
     let n = scores.len();
-    let (srocc, plcc, krocc, or_, pw, z) = aggregate_panel(&scores, &humans);
+    let (srocc, plcc, krocc, or_, pw, z, ds) = aggregate_panel(&scores, &humans);
 
     let mut body = String::new();
     body.push_str(&format!("\n## {} (n={})\n\n", corpus.display, n));
     body.push_str("### Aggregate full Mohammadi panel (CLAUDE.md rigor mandate)\n\n");
-    body.push_str("| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |\n");
-    body.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+    body.push_str("| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | DS-AUC |\n");
+    body.push_str("|---|---:|---:|---:|---:|---:|---:|---:|\n");
     body.push_str(&format!(
-        "| V_X bake | {srocc:.4} | {plcc:.4} | {krocc:.4} | {or_:.4} | {pw:.4} | {z:.3} |\n"
+        "| V_X bake | {srocc:.4} | {plcc:.4} | {krocc:.4} | {or_:.4} | {pw:.4} | {z:.3} | {ds:.4} |\n"
     ));
     body.push('\n');
     body.push_str(
@@ -1155,7 +1237,8 @@ saturation regions dominate the residual._\n",
             }
             let h_b: Vec<f64> = idxs.iter().map(|&i| humans[i]).collect();
             let s_b: Vec<f64> = idxs.iter().map(|&i| scores[i]).collect();
-            let (b_srocc, b_plcc, b_krocc, b_or, b_pwrc, b_z) = aggregate_panel(&s_b, &h_b);
+            let (b_srocc, b_plcc, b_krocc, b_or, b_pwrc, b_z, _b_ds) =
+                aggregate_panel(&s_b, &h_b);
             let rescaled = rescale_logistic(&s_b, &h_b);
             let mae: f64 = rescaled
                 .iter()
@@ -1196,6 +1279,7 @@ read on this corpus._\n",
         or_ratio: or_,
         pwrc: pw,
         z_rmse: z,
+        ds_auc: ds,
         body,
     })
 }
@@ -1289,12 +1373,14 @@ fn main() -> ExitCode {
 
     // One-row summary across all corpora at the top.
     buf.push_str("\n## Summary (one row per corpus)\n\n");
-    buf.push_str("| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |\n");
-    buf.push_str("|---|--:|---:|---:|---:|---:|---:|---:|\n");
+    buf.push_str("| Corpus | n | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE | DS-AUC | geomean3 |\n");
+    buf.push_str("|---|--:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for r in &results {
+        let g3 = (r.srocc * r.plcc * r.pwrc).cbrt();
         buf.push_str(&format!(
-            "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} |\n",
-            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse
+            "| {} | {} | {:.4} | {:.4} | {:.4} | {:.4} | {:.4} | {:.3} | {:.4} | {:.4} |\n",
+            r.display, r.n, r.srocc, r.plcc, r.krocc, r.or_ratio, r.pwrc, r.z_rmse,
+            r.ds_auc, g3
         ));
     }
     for r in &results {
@@ -1332,4 +1418,40 @@ fn main() -> ExitCode {
 
     eprintln!("bake_verdict: complete in {:.2}s", elapsed.as_secs_f64());
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ds_auc_perfect_separation() {
+        // Metric gap perfectly tracks human gap → AUC = 1.0
+        let human = vec![0.0, 0.0, 1.0, 1.0];
+        let pred = vec![0.0, 0.0, 1.0, 1.0];
+        let auc = ds_auc(&pred, &human, 0.5);
+        assert!(auc > 0.95, "perfect separation should give AUC≈1, got {auc}");
+    }
+
+    #[test]
+    fn ds_auc_random_is_chance() {
+        // Constant metric → can't separate → AUC ≈ 0.5
+        let human = vec![0.0, 0.3, 0.6, 0.9, 0.2, 0.7];
+        let pred = vec![0.5; 6];
+        let auc = ds_auc(&pred, &human, 0.4);
+        // Constant predictions: all gaps are 0, ties → AUC = 0.5
+        assert!(
+            (auc - 0.5).abs() < 0.01 || auc.is_nan(),
+            "constant metric should give AUC≈0.5, got {auc}"
+        );
+    }
+
+    #[test]
+    fn ds_auc_handles_degenerate() {
+        // All same human score → no "different" pairs → NaN
+        let human = vec![0.5; 5];
+        let pred = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        let auc = ds_auc(&pred, &human, 0.4);
+        assert!(auc.is_nan(), "no different-pairs should give NaN, got {auc}");
+    }
 }
