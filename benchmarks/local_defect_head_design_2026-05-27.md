@@ -88,6 +88,31 @@ tile craters. identity min 97.7; chan_invert WHOLE min 0.0.
    absolute threshold (min_tile < ~20 catches channel/block, excludes q20's
    31). The corruption corpus is the calibration grid.
 
+## Multi-content (2026-05-27): tile-min is CONTENT-DEPENDENT
+
+Re-ran on screen content (gb82-sc/codec_wiki.png, text/UI):
+
+| | gb82/dog (photo) | codec_wiki (screen) |
+|---|--:|--:|
+| gate global | 17% | 24% |
+| gate tile-min (tile=64) | 37% | 24% (no gain) |
+
+Tile-min doubled the PHOTO gate but gave NO gain on SCREEN. Cause: screen
+content's q20 anchor has LOCALLY-bad tiles (text edges / flat-region ringing
+compress poorly → a 64×64 tile craters), so the honest q20's min-tile is
+already low → the min-to-min bar is too low for localized corruptions to beat.
+On continuous-tone photo, q20 degrades uniformly → min-tile stays moderate →
+the bar works.
+
+**Implication:** the min-to-min(q20) gate is fragile across content. The
+shipped local-defect head should use a CONTENT-ROBUST gate — min-tile <
+absolute threshold T (calibrated so honest-lq's min-tile > T across content),
+or min-tile(corruption) vs GLOBAL(honest) — NOT min-to-min. The corpus
+(multi-content) is the calibration set for T.
+
+V39-broken-at-identity (scores 0) and QAT-identity-correct (97.7) BOTH
+generalize across photo + screen (+ 8 refs) — robust.
+
 ## Next (shipped head)
 
 - Promote tile-min into a first-class Rust API (a `ZensimLocal` profile or a

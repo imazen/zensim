@@ -1,138 +1,88 @@
-# zensim — context handoff (2026-05-24)
+# Context handoff — 2026-05-27 (QAT native packing + correctness-defect ship candidates)
 
-Written for the next session reset. Read this first, then
-[SESSION-RESUME.md](SESSION-RESUME.md), [RESEARCH.md](RESEARCH.md),
-and [CLAUDE.md](CLAUDE.md).
+Read this first, then [SESSION-RESUME.md](SESSION-RESUME.md),
+[RESEARCH.md](RESEARCH.md), [CLAUDE.md](CLAUDE.md). (The 2026-05-24 Tuner-v11
+handoff is superseded; see git history if needed.)
 
-## TL;DR — codec-target metric is shipped + canonical
+## What shipped to main this session (all committed + pushed)
 
-`ZensimProfile::codec_target()` is the **stable alias every zen
-codec uses** for the quality dial + picker training. Currently
-routes to **`PreviewV0_5TunerV5` (`v_tuner_v11_2026-05-24.bin`,
-shipped 2026-05-24 PM)** — rotated from TunerV4 after recovery
-phase 4 fixed the 0-55 score-floor pathology.
-See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md)
-for the integration guide.
+1. **Structural-corruption corpus** (codec-corpus): issue #7 (40 mined real
+   decoder/render bugs) + PR #8 (10 synthetic distortion-family generators).
+   Spec: `docs/structural_corruption_corpus_spec_2026-05-27.md`.
 
-**Measured cross-trail advantage (2026-05-24)**: Tuner v10 is
-**3-6× tighter cross-codec** than the other two trail ships
-(Balanced/Compression) — measured on 68,788 matched-anchor pairs.
-Tuner is **also the only trail with zero clamp-flat tied regions**
-on the JPEG q-sweep, vs 7-13 dead zones in Balanced/Compression.
-Picking either of those as the codec dial would have given users
-±20-50 score-unit precision swings; Tuner's ±3-8 is the production
-floor. See
-[`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`](benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md).
+2. **QAT fine-tune in the trainer (task #34, DONE+VERIFIED)** — the "rust
+   workflow handles packing" deliverable. `--qat-fine-tune-epochs N` +
+   `--out-dtype f16`: last N epochs train quantization-aware (f16+zerobias
+   STE), the dial spline fits on the PROJECTED+QUANTIZED (shipped) net, the
+   2-layer bake stores f16+compressed. ONE `zensim_mlp_train --manifest` pass
+   → **27 KB** bake, identity 97.7 (max), 0 above-identity, CID22 **0.8657**.
+   No Python post-step. STANDARD packing path in CLAUDE.md (opt-in).
+   `benchmarks/qat_fine_tune_2026-05-27.md`.
 
-## What happened on 2026-05-24 (today's session)
+3. **TOML recipes** cover masked-monotone + QAT (`zensim/weights/manifests/
+   v47_strict.toml`, `v47_strict_qat.toml`) — retired the 25-flag bash script.
 
-### A. Three-trail SOTA framework — codec_target() alias landed
+4. **Standard pack-then-calibrate** (non-QAT fallback): `scripts/v_next/
+   pack_and_calibrate.py`. Rule (both paths): quantize-then-calibrate, fit the
+   spline on the projected+quantized net.
+   `benchmarks/standard_bake_packing_2026-05-27.md`.
 
-- `ZensimProfile::codec_target()` (commit `5ca977c`) — stable alias
-  pointing at the current Tuner ship. Rotates via single-line edit
-  when next Tuner variant ships.
-- `docs/CODEC_TARGET_METRIC.md` — integration guide for Patterns
-  A (quality-target dial, e.g. zenwebp's `target_zensim`),
-  B (picker training), C (in-encoder RDO — DEFERRED per
-  `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md`; output-only zensim is
-  the current SOTA pattern for all production codecs).
+5. **Task #33 tile-min local-defect scorer**: `score_tiles_with_bake` +
+   `corruption_gate_eval.py TILE_MIN=1`. tile-min (tile=64) doubles the
+   corruption gate on PHOTO (17%→37%), fixes channel/block 8×8 localized
+   defects. CONTENT-DEPENDENT (no gain on screen — q20's own tiles crater).
+   `benchmarks/local_defect_head_design_2026-05-27.md`.
 
-### B. Per-source aggregation head for konjnd-dense — TRAINER LANDED
+## SHIP CANDIDATES (both validated; the choice is the USER's call)
 
-Architectural fix for the V11-D zero-gradient pathology. New trainer
-flags: `--konjnd-aggregation-{parquet,weight,step-p,samples-per-ref,refs-per-step}`.
+| | QAT-native | non-QAT recal-negtail | V39 (current ship) |
+|---|--:|--:|--:|
+| CID22 SROCC | **0.8657** | 0.8564 | 0.8793 |
+| CID22 Z-RMSE | 0.512 | 0.541 | 0.493 |
+| KonJND | 0.418 | 0.485 | 0.420 |
+| KADID / TID | 0.79 / 0.79 | 0.80 / 0.80 | 0.93 / 0.93 |
+| identity | 97.7 ✓ | 97.8 ✓ | **0.0 (BROKEN)** |
+| blur>identity | FIXED (0 above-id) | FIXED | VIOLATED (31 above-id) |
+| dial monotonicity (q-sweep) | (QAT, monotone) | 94% | 68% |
+| size | **27 KB native** | 30 KB (2 post-steps) | 257 KB f32 |
 
-Mechanism: sample K refs × S rows per fire, forward K·S times,
-aggregate per-ref mean, MSE against per-ref pjnd_target, backprop
-`(2w/S)·residual` per row. RUNTIME UNCHANGED.
+Bakes on `/mnt/v/output/zensim/bakes/`:
+`v47_strict_qat_native_2026-05-27.bin` (md5 802f0c46),
+`v47_strict_recal_negtail_packed30k_2026-05-27.bin` (md5 4c6cfc67).
 
-- Phase 1 (commit `d1ac861`): hyperparams + struct + parquet loader.
-- Phase 2 (commit `a08151d`): wire aggregation step.
-- Phase 3 (commit `ebf5f2e`): synthetic gradient-flow tests (2 pass).
+## TWO USER-GATED DECISIONS (could not do autonomously)
 
-### C. CVVDP + IW-SSIM backfill on cid22_train.parquet — DONE
+1. **Ship-form**: replace V39 at `Profile::A` vs add a sibling
+   `Profile::A_Strict`. Strongly indicated to REPLACE — V39 scores a perfect
+   decode at 0 (broken at identity, confirmed across photo+screen+8 refs); the
+   candidates fix blur>identity + give a monotone dial. Cost: KADID/TID rank
+   (−0.12/−0.14, the strict-monotonicity price; integrity guards, not the
+   compression target). Recommend QAT-native (27 KB, best CID22, native).
+   Needs: commit the weight to `zensim/weights/` + `include_bytes!` flip in
+   `profile.rs` + archive V39 + CHANGELOG + a methodology doc (template:
+   `benchmarks/v47_strict_recal_methodology_2026-05-27.md`). Weight <30 KB so
+   under the binary gate, but a user-facing default change → needs your OK.
+2. **#33 public API**: a `ZensimLocal` profile / `compute_local` (global +
+   min-tile) + zensim-regress wiring. Public API → needs approval. Use a
+   content-robust gate (min-tile < absolute T, NOT min-to-min — fragile on
+   screen). Internal tile-min scorer is ready.
 
-17,611 pairs / 201 non-validation CID22 refs now have cvvdp + iwssim
-+ mix_cv40_iw60 populated alongside the existing ssim2_gpu anchor.
-Canonical-2026-05-21 manifest sha256 updated (54.04 MB, sha256
-`523a96c0cd93…`). Enables Tuner v11 retrain with mix_cv40_iw60 target
-on the new corpus.
+## Key findings / lessons
 
-### D. Tuner v11 retrain — COMPLETE (no ship; v10 stays canonical)
+- **V39 is BROKEN at identity** (scores 0 on every ref) — 0.879 CID22 is
+  rank-only; absolute dial broken at the near-identity regime regression tests
+  live in. Strong replace signal.
+- **QAT trade is intrinsic** (not tau-tunable): +CID22/+Z-RMSE, −KonJND (f16
+  removes PJND precision). Both candidates fail G5's 0.70 (HF Pareto limit).
+- **Quantize-then-calibrate**: fit the dial spline on the projected+quantized
+  SHIPPED net, else it inverts (blur scored 2184) or identity drops 97.8→93.4.
+- **Probe arc (V1/V2/V3) was recipe-confounded** — hand-rolled f64 probe can't
+  train unconstrained (diverges); use the production recipe for real numbers.
+- Localized-defect detection needs a LOCAL signal (tile-min); global
+  perceptual metrics structurally can't rank an 8×8 defect below honest q20.
 
-5 attempts run, all FALSIFIED on the 5-criterion ship gate.
-Architectural breakthrough but trade-off doesn't clear gate.
+## Open / next (not user-gated)
 
-| Attempt | Recipe | CID22 | KonJND | Verdict |
-|---|---|--:|--:|---|
-| v10 baseline | (canonical ship) | 0.854 | **0.232** | reference |
-| a1 (w=0.3, 2 groups) | agg w=0.3 step_p=0.30, no konjnd training group | 0.508 | **0.758** | α=0 collapse — rank corpora destroyed |
-| a2 (w=0.05) | 5.5 % effective rate | 0.742 | 0.066 | too weak — KonJND worse than v10 |
-| a3 (3 groups, w=0.1) | konjnd_dense as training group + light agg | **0.814** | 0.113 | rank-stable but no KonJND |
-| **a4 (3 groups, w=0.3)** | konjnd_dense as training group + a1 agg | 0.769 | **0.615** | BEST balance; spline-calibrated still fails gate |
-| a5 (3 groups, w=0.5) | strong agg pressure | 0.707 | 0.568 | over-aggregation — non-monotonic |
-
-**Architectural breakthrough proven**: per-source aggregation head
-DOES escape V11-D zero-gradient pathology (a4 KonJND +0.38 over
-v10). The mechanism works mechanically. But the trade-off curve
-peaks at a4 — KonJND 0.62 vs ship-gate 0.85, CID22 0.77 vs gate
-0.86. 3 of 5 criteria fail.
-
-**v10 (PreviewV0_5TunerV4) remains the canonical codec-target.**
-`ZensimProfile::codec_target()` unchanged.
-
-What's preserved for the next iteration:
-- a4 best bake: `tuner_v11_a4_s1.bin` + spline-calibrated variant
-- All 5 attempt-evidence bakes + verdicts + qsweep reports at
-  `/mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24/`
-- CID22-train substrate (17,611 pairs) in canonical-2026-05-21
-- All scripts: run_tuner_v11_{seed,attempt3_seed}.sh,
-  tuner_v11_hparam_sweep.sh, calibrate_v9_spline.py, etc.
-
-Recovery phase 4 hypotheses (next session):
-1. **Per-pair PJND-anchored data** (the missing per-pair signal).
-   Either derive PJND-per-pair from konjnd-dense or train on
-   KonJND-1k val (compromises holdout).
-2. **Pool-head-only architecture** (drop --per-sample-α). Tests
-   whether the α gate is the noise source.
-3. **Multi-target supervision** (pjnd_target + mix_cv40_iw60
-   simultaneously, with trainer flag `--per-row-multi-target`).
-   Closest to what attempt 4 was trying to do via separate
-   training group + aggregation; might be more efficient as a
-   single multi-target loss.
-4. **vast.ai trainer infra build** — every iteration is ~14 min
-   CPU on the local 7950X. vast.ai parallel-across-seeds would
-   make the inner-loop ~14 min wall instead of 70 min.
-
-### E. Hparam sweep tool
-
-`scripts/v_next/tuner_v11_hparam_sweep.sh` maps the
-(weight, step_p) surface across 6 cells in ~90 min. Not run in
-this session — superseded by the iterative attempts.
-
-## Outstanding tasks (per TaskList)
-
-ALL TASKS COMPLETE: #1, #2, #3, #4, #5, #6, #7.
-
-## What's PROHIBITED (per CLAUDE.md sharpened 2026-05-24)
-
-The "pausing is prohibited" rule got sharpened today after I drafted
-a "natural milestone" pause framing. Rule body now at the bottom of
-`NEVER PAUSE LAZILY` in `~/work/claudehints/CLAUDE.md`. Re-read
-before drafting any end-of-chunk message.
-
-## Pointers (canonical)
-
-| What | Where |
-|---|---|
-| Codec-target integration guide | `docs/CODEC_TARGET_METRIC.md` |
-| Cross-codec baseline (v10 + cross-trail) | `benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md` |
-| Tuner v11 methodology + iteration history | `benchmarks/v_tuner_v11_methodology_2026-05-24.md` |
-| Aggregation head design | `docs/KONJND_AGGREGATION_HEAD_DESIGN_2026-05-24.md` |
-| RDO loss scoping | `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md` |
-| 5-seed CI pipeline driver | `scripts/v_next/tuner_v11_full_pipeline.sh` |
-| Per-seed runner | `scripts/v_next/run_tuner_v11_seed.sh` |
-| Attempt 3 runner (konjnd as group + agg) | `scripts/v_next/run_tuner_v11_attempt3_seed.sh` |
-| Hparam sweep driver | `scripts/v_next/tuner_v11_hparam_sweep.sh` |
-| Canonical training data | `/mnt/v/zen/zensim-training/canonical-2026-05-21/` |
-| Eval out dir | `/mnt/v/zen/zensim-eval/exp_tuner_v11_2026-05-24/` |
+- Multi-content tile-min calibration (content-robust threshold T).
+- Re-pack the other `zensim/weights/` F32 bakes to f16 (SROCC-neutral cleanup).
+- Close G5 (KonJND HF) — characterized Pareto limit, needs HF representation.
