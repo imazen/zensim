@@ -216,7 +216,13 @@ fn main() {
     eprintln!("mask: {} mono / {} free", mono.len(), free.len());
 
     eprintln!("loading train…");
+    // V2 probe: ADD safesyn (196k rows — the bulk of the corpus the V1 probe
+    // omitted). Hypothesis under test: the V1 0.61 CID22 is data-starvation,
+    // not an architecture ceiling. safesyn target is ssim2-derived (synthetic,
+    // CID22-leak-purged) → weight 1.0 so it shapes rank without swamping the
+    // human sets' calibration.
     let specs = [
+        (format!("{CANON}/safesyn.parquet"), "safesyn", 1.0),
         (format!("{CANON}/cid22_train_norm.parquet"), "cid22_train", 1.5),
         (format!("{CANON}/kadid.parquet"), "kadid", 1.0),
         (format!("{CANON}/tid.parquet"), "tid", 1.0),
@@ -298,7 +304,7 @@ fn main() {
     };
 
     let epochs = 140;
-    let ppe = 30000;
+    let ppe = 60000; // doubled: safesyn adds 196k rows to the sampling pool
     let totw: f64 = groups.iter().map(|g| g.2).sum();
     let cdf: Vec<f64> = {
         let mut c = 0.0;

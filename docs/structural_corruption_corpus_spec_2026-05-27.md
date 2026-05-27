@@ -72,6 +72,23 @@ screen/UI, line-art, text, gradient — reuse codec-corpus references).
     (or vice-versa); composite onto the wrong background color (black vs
     white vs gray). Models the alpha-handling bugs in `tests/common/
     distortions.rs` (`premul_as_straight`, `wrong_bg_black`).
+11. **Global off-by-one / bit-depth rounding** — image-wide, max_diff = 1 but
+    systematic: u16→u8 truncation (`>>8`) vs round, 10-bit→8-bit roundtrip
+    LSB drift, unpremultiply truncation, missing U/V chroma rounding, a
+    uniform ±1 added to every pixel. This is the **saturating-metric worst
+    case** — a tiny per-pixel error spread over the whole image is exactly
+    what a metric with a saturated near-lossless tail will wrongly rank as
+    "perfect," yet it's a real shipped-bug class (zenpng `d88325c`/`838cad7`,
+    zenavif `4509713`/`42d06a7`, zenwebp `11465dd`). Sweep the rounding
+    magnitude (±1, ±2) and the conversion (truncate vs round vs round-half-
+    even). Unlike families 1–10 this is NOT region-localized — the region
+    axis is fixed at whole-image; severity is the per-pixel error magnitude
+    and the fraction of pixels affected (truncation hits a deterministic
+    subset, e.g. odd LSBs). The gate is the hard one: this must still rank
+    below an honest q20 encode even though its max per-pixel delta is far
+    smaller — because the *honest* encode is structurally faithful while
+    this is a correctness bug. (Mined gap, surfaced by the historical-bug
+    audit → codec-corpus#7.)
 
 ## Real-bug reproductions (mined, mandatory)
 
