@@ -499,6 +499,18 @@ pub struct MlpHyperparams {
     /// `monotone_cbc = true` and `monotone_feature_pin` is `Some`.
     pub monotone_strict: bool,
 
+    /// **Quantization-aware fine-tune (QAT).** When `> 0`, the LAST
+    /// `qat_fine_tune_epochs` epochs train with a straight-through
+    /// estimator: the forward uses f16-rounded + zerobiased weights while
+    /// Adam updates the f32 master. The network learns weights robust to
+    /// the f16+zerobias packing, so the shipped packed bake == the
+    /// validated network (no post-hoc identity/dial surprise). 0 = off
+    /// (default; production-safe — pure f32 as before).
+    pub qat_fine_tune_epochs: usize,
+    /// Zerobias threshold during QAT (relative to per-layer max, matching
+    /// the bake-time `apply_zero_bias_per_layer`). Default 0.005.
+    pub qat_tau: f64,
+
     /// Margin for the monotonicity-reg hinge (default 0.0).
     /// `target_a - target_b > monotonicity_margin` activates the
     /// penalty; otherwise the pair contributes 0. Useful when you
@@ -784,6 +796,8 @@ impl Default for MlpHyperparams {
             monotone_cbc: false,
             monotone_feature_pin: None,
             monotone_strict: false,
+            qat_fine_tune_epochs: 0,
+            qat_tau: 0.005,
             monotonicity_margin: 0.0,
             anchor_loss_weight: 0.0,
             anchor_target_score: 63.0,
@@ -5057,6 +5071,22 @@ pub(crate) struct PerSampleAlphaPairForward<'a> {
     pub(crate) mos_b: f64,
 }
 
+/// QAT straight-through quantize: per-layer zerobias (relative to the
+/// layer's max, matching `apply_zero_bias_per_layer_in_place`) + f16
+/// round-trip, on the trainer's f64 weight buffer. Matches the bake-time
+/// f16+zerobias packing so the QAT forward sees exactly what the shipped
+/// bake will store. Returns a quantized COPY (master is left untouched).
+fn qat_quantize_copy(w: &[f64], tau: f64) -> Vec<f64> {
+    if w.is_empty() {
+        return Vec::new();
+    }
+    let mut f: Vec<f32> = w.iter().map(|&x| x as f32).collect();
+    zenpredict_bake::apply_zero_bias_per_layer_in_place(&mut f, tau as f32);
+    f.iter()
+        .map(|&x| zenpredict::f16_bits_to_f32(zenpredict_bake::composer::f32_to_f16_bits(x)) as f64)
+        .collect()
+}
+
 /// Production trainer for the per-sample α head. Mirrors
 /// `train_mlp_hybrid_head_with_tv` but routes through
 /// `backprop_step_per_sample_alpha_head` and packs the per-sample
@@ -5984,6 +6014,17 @@ fn train_mlp_per_sample_alpha_head(
     // Adam step closure — packs all weight vectors into the concatenated
     // adam slots, runs one step, then unpacks. For multi-layer / skip,
     // the w1 slot holds [w1 | w2_enc | w_skip] concatenated.
+    //
+    // QAT fine-tune state. `qat_active` flips true for the last
+    // `qat_fine_tune_epochs` epochs (set in the epoch loop). When active,
+    // do_adam_step refreshes the f32 forward scratch from f16+zerobiased
+    // COPIES of the (f32 master) weights — straight-through estimator:
+    // forward/loss see the quantized weights, Adam keeps updating the f32
+    // master, so the net learns weights robust to the bake-time packing.
+    let qat_fine_tune_epochs = hyperparams.qat_fine_tune_epochs;
+    let qat_tau = hyperparams.qat_tau;
+    let qat_active = std::cell::Cell::new(false);
+
     let do_adam_step = |adam: &mut AdamState,
                         w1: &mut Vec<f64>,
                         b1: &mut Vec<f64>,
@@ -6145,10 +6186,24 @@ fn train_mlp_per_sample_alpha_head(
         // RefCell mutable borrow is safe here because arch_forward_f32
         // callers only hold immutable borrows during their own scope,
         // which is disjoint from this closure's invocation.
-        scratch_f32.borrow_mut().refresh(
-            w1, b1, w2_enc, b2_enc, w_skip, *b_skip,
-            rank_w, *rank_b, reducer_w, *reducer_b, w_alpha, *b_alpha,
-        );
+        if qat_active.get() {
+            // STE: forward scratch holds f16+zerobias COPIES; the master
+            // weight buffers (w1 … w_alpha) stay f32 for the next Adam step.
+            let qw1 = qat_quantize_copy(w1, qat_tau);
+            let qw2 = qat_quantize_copy(w2_enc, qat_tau);
+            let qws = qat_quantize_copy(w_skip, qat_tau);
+            let qrw = qat_quantize_copy(rank_w, qat_tau);
+            let qwa = qat_quantize_copy(w_alpha, qat_tau);
+            scratch_f32.borrow_mut().refresh(
+                &qw1, b1, &qw2, b2_enc, &qws, *b_skip,
+                &qrw, *rank_b, reducer_w, *reducer_b, &qwa, *b_alpha,
+            );
+        } else {
+            scratch_f32.borrow_mut().refresh(
+                w1, b1, w2_enc, b2_enc, w_skip, *b_skip,
+                rank_w, *rank_b, reducer_w, *reducer_b, w_alpha, *b_alpha,
+            );
+        }
     };
 
     // Initial cast (before any Adam step has fired).
@@ -6191,6 +6246,24 @@ fn train_mlp_per_sample_alpha_head(
         let lr = hyperparams.initial_lr
             * 0.5
             * (1.0 + (std::f64::consts::PI * (epoch % 50) as f64 / 50.0).cos());
+
+        // QAT fine-tune: activate the straight-through quantized forward for
+        // the last `qat_fine_tune_epochs` epochs. Refresh the scratch from
+        // quantized copies NOW so even this epoch's first minibatch (before
+        // the first do_adam_step) sees the f16+zerobias weights.
+        qat_active
+            .set(qat_fine_tune_epochs > 0 && epoch + qat_fine_tune_epochs >= hyperparams.n_epochs);
+        if qat_active.get() {
+            let qw1 = qat_quantize_copy(&w1, qat_tau);
+            let qw2 = qat_quantize_copy(&w2_enc, qat_tau);
+            let qws = qat_quantize_copy(&w_skip, qat_tau);
+            let qrw = qat_quantize_copy(&rank_w, qat_tau);
+            let qwa = qat_quantize_copy(&w_alpha, qat_tau);
+            scratch_f32.borrow_mut().refresh(
+                &qw1, &b1, &qw2, &b2_enc, &qws, b_skip, &qrw, rank_b, &reducer_w, reducer_b, &qwa,
+                b_alpha,
+            );
+        }
 
         let mut total_loss = 0.0f64;
         let mut n_steps = 0u64;
@@ -7640,11 +7713,21 @@ fn train_mlp_per_sample_alpha_head(
                     // monotone_cbc: hard-project the weights to exact signs
                     // before baking so the saved best-epoch bake is monotone-
                     // by-construction (no-op when monotone_cbc=false).
-                    let bake_w1      = proj_w1_masked(&w1);
-                    let bake_w2_enc  = proj_geq0(&w2_enc);
-                    let bake_rank_w  = proj_leq0(&rank_w);
-                    let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                    let mut bake_w1      = proj_w1_masked(&w1);
+                    let mut bake_w2_enc  = proj_geq0(&w2_enc);
+                    let mut bake_rank_w  = proj_leq0(&rank_w);
+                    let mut bake_w_alpha = proj_w_alpha_zero(&w_alpha);
                     let bake_b_alpha = proj_b_alpha_one(b_alpha);
+                    if qat_fine_tune_epochs > 0 {
+                        // QAT: ship the f16+zerobias weights the forward was
+                        // trained against (quantize AFTER the hard sign
+                        // projection). With --out-dtype f16 + compression the
+                        // bake is small AND == the validated net.
+                        bake_w1 = qat_quantize_copy(&bake_w1, qat_tau);
+                        bake_w2_enc = qat_quantize_copy(&bake_w2_enc, qat_tau);
+                        bake_rank_w = qat_quantize_copy(&bake_rank_w, qat_tau);
+                        bake_w_alpha = qat_quantize_copy(&bake_w_alpha, qat_tau);
+                    }
                     let model = psah::PerSampleAlphaHeadModel {
                         scaler_mean: scaler_mean.clone(),
                         scaler_scale: scaler_scale.clone(),

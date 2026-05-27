@@ -673,6 +673,19 @@ struct Args {
     #[arg(long, default_value_t = false)]
     monotone_strict: bool,
 
+    /// Quantization-aware FINE-TUNE: train the LAST N epochs with a
+    /// straight-through estimator (forward uses f16-rounded + zerobiased
+    /// weights, Adam updates the f32 master) so the shipped packed bake ==
+    /// the validated net. 0 = off (default; pure f32). Pairs with
+    /// `--out-dtype f16`. Recipe field: `qat_fine_tune_epochs`.
+    #[arg(long, default_value_t = 0)]
+    qat_fine_tune_epochs: usize,
+
+    /// QAT zerobias threshold (relative to per-layer max, matching the
+    /// bake-time zerobias). Default 0.005.
+    #[arg(long, default_value_t = 0.005)]
+    qat_tau: f64,
+
     /// `PreviewV0_5Tuner` monotonicity-reg margin (2026-05-18). The
     /// penalty activates only when the predicted gap is below
     /// `+margin` relative to perfect ordering. Default `0.0` =
@@ -1689,6 +1702,12 @@ fn apply_manifest_to_args(
     // Masked-monotone recipe fields (bools + the mask path).
     set_if_default!(monotone_cbc, "monotone_cbc", cfg.monotone_cbc);
     set_if_default!(monotone_strict, "monotone_strict", cfg.monotone_strict);
+    set_if_default!(
+        qat_fine_tune_epochs,
+        "qat_fine_tune_epochs",
+        cfg.qat_fine_tune_epochs
+    );
+    set_if_default!(qat_tau, "qat_tau", cfg.qat_tau);
 
     // Path-valued options (already resolved to absolute/relative-to-manifest).
     if !explicit(matches, "auto_transforms") && cfg.auto_transforms.is_some() {
@@ -2152,6 +2171,8 @@ fn main() {
         monotone_cbc: args.monotone_cbc,
         monotone_feature_pin,
         monotone_strict: args.monotone_strict,
+        qat_fine_tune_epochs: args.qat_fine_tune_epochs,
+        qat_tau: args.qat_tau,
         monotonicity_margin: args.monotonicity_margin,
         anchor_loss_weight: args.anchor_loss_weight,
         anchor_target_score: args.anchor_target_score,

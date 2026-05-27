@@ -136,6 +136,11 @@ pub struct ManifestConfig {
     /// `--monotone-strict`: drop the non-pinned (sign-flip) features
     /// instead of leaving them free.
     pub monotone_strict: Option<bool>,
+    /// `--qat-fine-tune-epochs`: train the last N epochs quantization-aware
+    /// (f16+zerobias STE) so the packed bake == the validated net.
+    pub qat_fine_tune_epochs: Option<usize>,
+    /// `--qat-tau`: QAT zerobias threshold (relative to per-layer max).
+    pub qat_tau: Option<f64>,
 
     /// Ordered post-training `steps` (spline injection etc.). Recorded
     /// here so the binary can surface them — the trainer cannot run them
@@ -229,6 +234,8 @@ struct RawTraining {
     monotone_cbc: Option<bool>,
     monotone_feature_mask: Option<String>,
     monotone_strict: Option<bool>,
+    qat_fine_tune_epochs: Option<usize>,
+    qat_tau: Option<f64>,
     #[serde(default)]
     steps: Vec<String>,
 }
@@ -455,6 +462,8 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
                 Some(resolve_path(&mm, manifest_dir, canonical_root, dial_dir)?);
         }
         cfg.monotone_strict = t.monotone_strict;
+        cfg.qat_fine_tune_epochs = t.qat_fine_tune_epochs;
+        cfg.qat_tau = t.qat_tau;
     }
 
     // Collect every [inputs.<name>] table that carries a sha256 — those
