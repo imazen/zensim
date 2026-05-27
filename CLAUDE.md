@@ -1004,6 +1004,36 @@ The JSON pipeline is still mandated for any new bake-producing tool
 (per "JSON pipeline mandate" section below). See template at
 `zensim/scripts/v_next/v0_20b/bake_znpr_v3.py`.
 
+### STANDARD bake packing — pack-then-calibrate (2026-05-27)
+
+**Every bake is packed before ship via `scripts/v_next/pack_and_calibrate.py`,
+NOT raw `zenpredict repack`.** Standard invocation:
+
+```sh
+python3 scripts/v_next/pack_and_calibrate.py IN.bin OUT.bin \
+    --dtype f16 --zerobias-bulk 0.005 --neg-tail
+```
+
+**Load-bearing rule: QUANTIZE, then CALIBRATE.** zerobias/f16/i8 preserve
+RANK (signs intact) but SHIFT the network's raw outputs, so a spline fit on
+the f32 net maps the PACKED net's identity output to the wrong dial value →
+identity drops (97.8 → 93.4 observed). `pack_and_calibrate.py` refits the
+output spline ON THE PACKED network (strip → zerobias+dtype → refit spline on
+packed → re-inject), which re-anchors identity exactly. SROCC is rank-invariant
+under the monotone spline. This makes plain GLOBAL zerobias safe — `repack`'s
+naive global `--zerobias` (calibrate-then-quantize order) drops identity; do
+NOT use it for a spline-bearing bake.
+
+Result on the per-sample-α arch: f32 198 KB → **30 KB**, identity 97.5 (exact),
+CID22 0.8564 (≈ f32), 0 above-identity — 6.6× smaller, below the old 41–54 KB
+convention, zero quality cost. Per-layer (`--protect-last`) is available but
+USUALLY UNNECESSARY (refit recovers identity even with the last layer 98%
+zerobiased). Full method + numbers: `benchmarks/standard_bake_packing_2026-05-27.md`.
+
+The V39-era workflow regressed on packing (V39 ships raw F32 257 KB); re-pack
+existing `zensim/weights/` F32 bakes through this path when rotating each
+profile (SROCC-neutral by construction).
+
 ### Bake evaluation (per-bake instant verdict from parquet sidecars)
 **`bake_verdict` binary** at
 `/home/lilith/work/zen/zensim/zensim-validate/src/bin/bake_verdict.rs`.

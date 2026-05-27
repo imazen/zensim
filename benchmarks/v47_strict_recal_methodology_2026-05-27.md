@@ -25,11 +25,17 @@ Two-step construction, both rank-invariant from the base network:
    multiband anchor → fit a 17-knot monotone PCHIP `tanh-pin → target_score`
    → inject via `zenpredict bake`. Monotone spline ⇒ **SROCC unchanged**.
 
-- **Bake**: `/mnt/v/output/zensim/bakes/v47_strict_recal_negtail_2026-05-27.bin`
-  (198,520 bytes, md5 `1792624baeebd5ed1868403becbd34e0`). NOT in git
-  (>30 KB binary on /mnt/v). The clean-[0,100] variant (flat-0 below the
-  anchor) is `v47_strict_recal_2026-05-27.bin`
-  (md5 `9f58881a52771290c2ae024dbc370e63`).
+- **Ship artifact (packed)**: `v47_strict_recal_negtail_packed30k_2026-05-27.bin`
+  (29,995 bytes, md5 `4c6cfc67769132f01bc8cca81cc6d597`) — f16 + global
+  zerobias 0.005 + lz4 + spline refit on the packed net, via the standard
+  `pack_and_calibrate.py` path (`benchmarks/standard_bake_packing_2026-05-27.md`).
+  f32-equivalent on the full panel (CID22 0.8564), identity 97.5, 0
+  above-identity, 6.6× smaller. **This is the bake to ship.**
+- **f32 reference**: `v47_strict_recal_negtail_2026-05-27.bin`
+  (198,520 bytes, md5 `1792624baeebd5ed1868403becbd34e0`). The clean-[0,100]
+  variant (flat-0 below the anchor, no negative tail) is
+  `v47_strict_recal_2026-05-27.bin` (md5 `9f58881a52771290c2ae024dbc370e63`).
+  All on /mnt/v (>30 KB binaries).
 - **Architecture**: 372→…→64 per-sample-α head + tanh output pin +
   feature_transforms, ZNPR v3, `n_layers=3`.
 
