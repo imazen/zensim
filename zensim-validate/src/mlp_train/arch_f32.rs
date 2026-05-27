@@ -203,7 +203,19 @@ fn pool_stats_f32(h: &[f32]) -> ([f32; 4], usize) {
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal))
         .expect("non-empty hidden vector");
-    let sum_p: f32 = h.iter().map(|&v| v.abs().powf(POOL_P_NORM)).sum();
+    // |v|^6 = (v^2)^3 — exact for the even POOL_P_NORM=6, no per-element
+    // transcendental (see pool_head::pool_stats for the f64 twin).
+    debug_assert!(
+        (POOL_P_NORM - 6.0).abs() < 1e-6,
+        "fast |h|^6 path assumes POOL_P_NORM == 6.0"
+    );
+    let sum_p: f32 = h
+        .iter()
+        .map(|&v| {
+            let v2 = v * v;
+            v2 * v2 * v2
+        })
+        .sum();
     let mean_p = sum_p / n;
     let p_norm = mean_p.powf(1.0 / POOL_P_NORM);
     ([mean, std, max_val, p_norm], max_idx)

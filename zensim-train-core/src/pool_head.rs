@@ -75,7 +75,21 @@ pub fn pool_stats(h: &[f64]) -> ([f64; 4], usize) {
         .expect("non-empty hidden vector");
     // p_6 = (mean(|h|^6))^(1/6); operating on |h| keeps it well-defined
     // and matches Butteraugli's intent (sensitivity to peak error).
-    let sum_p: f64 = h.iter().map(|&v| v.abs().powf(POOL_P_NORM)).sum();
+    // |v|^6 = (v^2)^3 — exact for the even POOL_P_NORM=6 and free of the
+    // per-element pow/log/exp transcendental (12.8 M of them per epoch on
+    // the 128-hidden × 50 k-pair × 2-forward shape). LLVM auto-vectorizes
+    // the multiply form; powf does not.
+    debug_assert!(
+        (POOL_P_NORM - 6.0).abs() < 1e-9,
+        "fast |h|^6 path assumes POOL_P_NORM == 6.0"
+    );
+    let sum_p: f64 = h
+        .iter()
+        .map(|&v| {
+            let v2 = v * v;
+            v2 * v2 * v2
+        })
+        .sum();
     let mean_p = sum_p / n;
     let p_norm = mean_p.powf(1.0 / POOL_P_NORM);
     ([mean, std, max_val, p_norm], max_idx)
