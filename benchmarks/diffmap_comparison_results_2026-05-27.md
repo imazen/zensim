@@ -23,31 +23,46 @@ Bjøntegaard **BD-rate** (% bytes at equal quality, integrated over the
 overlapping range) shows the three loops are essentially **TIED** on the
 independent dssim axis:
 
-**BD-rate vs zensim-v47 (negative = challenger uses FEWER bytes at equal
-quality = better than v47):**
+**BD-rate vs zensim-v47, THREE independent judges** (negative = challenger uses
+FEWER bytes at equal quality = better than v47; `C` = circular for that loop,
+discount):
 
-| | dssim axis (mean) | butteraugli axis (mean) |
+| judge axis | cvvdp-loop | butteraugli-loop |
 |---|--:|--:|
-| cvvdp | −1.0% | −3.9% |
-| butteraugli-loop | −1.3% | −10.2%* |
+| dssim | −1.0% | −1.3% |
+| butteraugli | −3.9% | −10.2% `C` |
+| **cvvdp** | −10.7% `C` | **−16.2%** |
 
-(*butteraugli-loop judged by butteraugli is circular — discount.)
+**The original eval used butteraugli + dssim as the RD authority — NOT cvvdp
+and NOT zensim** (zensim would be circular for the zensim loop). Adding cvvdp
+(the strongest authority; circular only for the cvvdp loop) shifts the verdict.
 
-On the common independent axis (dssim) all three are within ~1% BD-rate —
-inside n=3 noise (per-image spread is ±6%). **There is no global Pareto
-winner.** The robust signal is a **content crossing**:
+The judges DISAGREE, which is the signal:
+- **dssim**: all three within ~1% → ~tied.
+- **cvvdp** (non-circular cell: butteraugli-loop vs zensim = **−16.2%**): the
+  zensim-v47 diffmap is the **weakest**, driven by **codec_wiki screen
+  −46.9%** — zensim over-spends bits on text/UI without cvvdp-perceived gain
+  (zensim spent 115,910 B on codec_wiki d1 vs butteraugli's 98,694).
 
-| image | cvvdp BD-rate (dssim) | cvvdp BD-rate (butteraugli) |
+Per-image content split (consistent direction across strong authorities):
+
+| image | cvvdp-loop vs zensim (dssim / butter) | butteraugli-loop vs zensim (cvvdp) |
 |---|--:|--:|
-| 1025469 (photo) | +6.4% (zensim better) | +5.4% (zensim better) |
-| 1418519 (photo) | −3.6% | +4.0% (mixed) |
-| **codec_wiki (screen)** | **−5.8%** (cvvdp better) | **−21.1%** (cvvdp much better) |
+| 1025469 (photo) | +6.4% / +5.4% (zensim better) | −1.0% (cvvdp range saturated*) |
+| 1418519 (photo) | −3.6% / +4.0% (mixed) | −0.8% (saturated*) |
+| **codec_wiki (screen)** | **−5.8% / −21.1%** (challenger better) | **−46.9%** (zensim much worse) |
 
-**cvvdp Pareto-dominates screen content** (consistent + large across BOTH
-independent axes), zensim holds the photos. The Pareto-optimal strategy is
-therefore **content-adaptive diffmap routing** (cvvdp for screen/text,
-zensim for photo) — NOT a single global winner. The earlier "v47 wins"
-single-point read masked this.
+(*photos scored cvvdp ≈ 9.99 JOD = near-lossless/saturated → photo cvvdp
+BD-rates are on a near-flat range, unreliable; the robust cvvdp signal is the
+screen result.)
+
+**Corrected verdict: NOT a clean global winner, and NOT a symmetric crossing —
+the zensim-v47 diffmap is competitive on PHOTOS but clearly LOSES on SCREEN
+content across BOTH strong independent authorities (butteraugli + cvvdp).** The
+Pareto-optimal play is **content-adaptive routing — use butteraugli or cvvdp
+for screen/text, zensim for photo.** The single-point matched-bytes read ("v47
+wins") and even the dssim-only BD-rate ("~tied") both masked the screen
+weakness that cvvdp exposes.
 
 ## Avenue-by-avenue
 
@@ -79,22 +94,22 @@ Worst aggregate dssim (0.00060) but **wins screen content** (codec_wiki dssim
 text/UI but not on continuous-tone photos. (Note: this is cvvdp's *actual*
 diffmap used directly — NOT the falsified cvvdp-scalar-trained metric of #37.)
 
-## Choice + recommendation (BD-rate, corrected)
+## Choice + recommendation (3-judge BD-rate, corrected)
 
-**There is no global Pareto winner** — on the independent dssim BD-rate the
-three loops are within ~1% (n=3 noise). So "keep v47-default" stands by
-*default* (it's shipped, tied-or-better, and already embodies #33's
-activity-relative mechanism via tuned masking) — but NOT because it Pareto-
-dominates; it doesn't.
+**No global Pareto winner, and the zensim-v47 diffmap has a SCREEN weakness
+exposed only when cvvdp is added as a judge.** With dssim+butteraugli alone it
+looked ~tied; the strongest authority (cvvdp) shows butteraugli-loop −16.2%
+better than zensim (independent), driven by screen −46.9%. So "keep v47" holds
+for PHOTOS (competitive there), but it is NOT the best diffmap for screen/text.
 
-**The Pareto-optimal play is content-adaptive routing**, which the BD-rate
-makes the headline (not a footnote): **cvvdp Pareto-dominates screen content**
-(codec_wiki −5.8% dssim / −21% butteraugli, consistent + large across both
-independent axes), **zensim holds photos** (+5–6% on 1025469). A router that
-picks cvvdp for screen/text and zensim for photo beats either alone on this
-smoke. jxl-encoder already has both loops behind `PerceptualMetric`, so the
-routing is a content classifier away (the existing screen-content detection in
-the encoder could gate it).
+**The Pareto-optimal play is content-adaptive routing** — use butteraugli or
+cvvdp for screen/text, zensim for photo. jxl-encoder already has all three
+loops behind `PerceptualMetric`, so it's a content-classifier gate away (the
+encoder's existing screen-content detection could drive it). On screen,
+BOTH the cvvdp loop (−21% butteraugli, −5.8% dssim) AND the plain butteraugli
+loop (−46.9% per cvvdp) beat the zensim diffmap — so the screen fix doesn't
+even require cvvdp; routing screen content to the butteraugli loop already
+helps.
 
 Bigger-corpus follow-up (the smoke is n=3, high-q, so none of this is
 shippable yet):

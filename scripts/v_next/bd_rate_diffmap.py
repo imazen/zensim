@@ -48,17 +48,27 @@ def bd_rate(rate_a, q_a, rate_b, q_b):
 
 def main():
     ba, ds = load("butteraugli"), load("dssim")
+    # cvvdp axis is optional (needs loops_cvvdp.tsv). JOD higher=better → use
+    # (10 - jod) so lower=better like dssim/butteraugli. Circular for the cvvdp
+    # loop; independent for zensim + butteraugli.
+    try:
+        cv = load("cvvdp"); have_cv = True
+    except FileNotFoundError:
+        have_cv = False
     D = collections.defaultdict(list)
     for k, r in ba.items():
         dcol = [c for c in ds[k] if "dssim" in c.lower()][0]
+        cvq = (10.0 - float(cv[k][[c for c in cv[k] if "cvvdp" in c.lower()][0]])) if have_cv else None
         D[(r["label"], r["image"])].append(
-            (int(r["bytes"]), float(ds[k][dcol]), float(r["butteraugli_pnorm3"])))
+            (int(r["bytes"]), float(ds[k][dcol]), float(r["butteraugli_pnorm3"]), cvq))
     for k in D:
         D[k].sort()
     images = sorted({im for (_, im) in D})
 
-    print("BD-rate vs zensim_default (NEG = challenger fewer bytes at equal quality = better):")
-    for qaxis, idx in [("dssim", 1), ("butteraugli", 2)]:
+    axes = [("dssim", 1), ("butteraugli", 2)] + ([("cvvdp", 3)] if have_cv else [])
+    print("BD-rate vs zensim_default (NEG = challenger fewer bytes at equal quality = better).")
+    print("[C] = circular for that loop (butteraugli axis↔butteraugli loop, cvvdp axis↔cvvdp loop) — discount.")
+    for qaxis, idx in axes:
         print(f"\n  axis={qaxis}:   {'image':12s}" + "".join(f"{c:>12s}" for c in CHALLENGERS))
         agg = collections.defaultdict(list)
         for im in images:
@@ -68,13 +78,14 @@ def main():
             for chal in CHALLENGERS:
                 c = D[(chal, im)]
                 bd = bd_rate(rb, qb, [p[0] for p in c], [p[idx] for p in c])
+                circ = (qaxis == "butteraugli" and chal == "butteraugli") or (qaxis == "cvvdp" and chal == "cvvdp")
                 if bd is not None:
                     agg[chal].append(bd)
-                    row += f"{bd:+11.1f}%"
+                    row += f"{bd:+10.1f}%{'C' if circ else ' '}"
                 else:
                     row += f"{'n/a':>12s}"
             print(row)
-        print(f"             {'MEAN':12s}" + "".join(f"{np.mean(agg[c]):+11.1f}%" for c in CHALLENGERS))
+        print(f"             {'MEAN':12s}" + "".join(f"{np.mean(agg[c]):+10.1f}% " for c in CHALLENGERS))
 
 
 if __name__ == "__main__":
