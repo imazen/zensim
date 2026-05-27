@@ -1,0 +1,41 @@
+loading train…
+  safesyn: loaded 196086 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet"
+  safesyn: 196086 rows
+  cid22_train: loaded 17611 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/cid22_train_norm.parquet"
+  cid22_train: 17611 rows
+  kadid: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/kadid.parquet"
+  kadid: 10125 rows
+  tid: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/tid.parquet"
+  tid: 3000 rows
+  konjnd: loaded 20160 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/konjnd-dense-norm.parquet"
+  konjnd: 20160 rows
+epoch   0 lr=0.0010 loss=0.8783 λ=0.693
+epoch  20 lr=0.0007 loss=1.1053 λ=0.696
+epoch  40 lr=0.0001 loss=1.3688 λ=0.701
+epoch  60 lr=0.0009 loss=1.9521 λ=0.708
+epoch  80 lr=0.0003 loss=3.2225 λ=0.719
+epoch 100 lr=0.0010 loss=3.6586 λ=0.722
+epoch 120 lr=0.0007 loss=6.7843 λ=0.739
+epoch 140 lr=0.0001 loss=8.4802 λ=0.746
+epoch 159 lr=0.0009 loss=11.4345 λ=0.757
+
+=== PANEL (SROCC, embedding-distance) ===
+  cid22: loaded 4292 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+  cid22    SROCC=0.0826  range=[-30.1,99.6]  n=4292
+  kadid: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet"
+  kadid    SROCC=-0.0595  range=[-266.5,100.0]  n=10125
+  tid: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet"
+  tid      SROCC=-0.2025  range=[-340.4,99.8]  n=3000
+  konjnd: loaded 1008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_features_372col_2026-05-15.parquet"
+  konjnd   SROCC=-0.2245  range=[-34.3,99.2]  n=1008
+  aic3: loaded 600 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic3_features_372col_2026-05-15.parquet"
+  aic3     SROCC=-0.0008  range=[47.7,99.6]  n=600
+
+=== BLUR-LADDER (A2: above_id MUST be 0 by construction) ===
+  color_blocks  [100.0 41.1 37.9 51.5 59.4 63.3 64.5 65.4 65.2]  inv=5 above_id=0
+  checker       [100.0 74.6 78.5 78.9 79.3 80.6 82.7 85.1 87.2]  inv=7 above_id=0
+  mandelbrot    [100.0 6.0 12.6 40.4 65.8 78.2 79.7 80.4 80.7]  inv=7 above_id=0
+  value_noise   [100.0 95.8 93.8 90.5 90.6 93.8 94.7 93.5 91.9]  inv=3 above_id=0
+
+(A1+A2-defect-half hold by construction: above_id=0 always.
+ inv may be >0 — A3 is intentionally dropped. Resolution → wide negative range.)
