@@ -1,8 +1,60 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated:** 2026-05-25T (evening — V39 ship + dial/spline findings)
+**Last updated:** 2026-05-27 (axiom-clean QAT-native ship candidate staged;
+#33 Approach-B validated; #35 resolved)
 
-## Current state
+## 2026-05-27 session — what changed (read this, then the older state below)
+
+**The axiom-clean metric line (v47-strict) now has a fully-staged ship
+candidate that fixes V39's correctness defects.** V39 (still the shipped
+`Profile::A`) is BROKEN at the dial/identity regime: it scores identity=0 on
+every ref and its codec dial is non-invertible (53.6% tied q-steps, median
+score collapses to 0.00 for q55–q95). The replacement candidate:
+
+- **`v47_strict_qat_native_2026-05-27.bin`** (27 KB, sha256 `d0ef7a30…`),
+  produced by ONE `zensim_mlp_train --manifest
+  zensim/weights/manifests/v47_strict_qat.toml` pass (QAT-native f16+zerobias,
+  no Python post-step — the "rust workflow handles packing" deliverable).
+- Masked-monotone-by-construction (0 inversions, identity=max=97.69), fixes
+  the blur>identity AND identity=0 V39 defects.
+- **Best codec dial measured**: q-sweep monotonicity 94.33% / 0.33% tied
+  (V39 67.7% / 53.6%), clean monotone median q5→q95 (1.40→88.50).
+- CID22 0.8657 (best of the v47 axiom-clean candidates). Costs vs V39 are
+  rank-SROCC on KADID/TID (0.79 vs 0.93 — non-compression analytic
+  distortions, integrity guards) + KonJND (f16 removes PJND precision).
+- **Methodology doc** (the required pre-ship artifact, all 8 sub-points):
+  `benchmarks/v0_qat_native_methodology_2026-05-27.md`. q-sweep:
+  `benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`.
+
+**⇒ USER-GATED ship-form decision (#32):** replace V39 at `Profile::A` (bake
+rotation, permitted by shipping policy; recommended — V39 is broken) vs add a
+sibling profile (new public enum variant, needs API approval) vs hold. The
+swap is a one-line `include_bytes!` in `zensim/src/profile.rs` once decided.
+The non-QAT `recal_negtail` (30 KB, KonJND 0.485) is the HF-priority alt.
+
+**QAT/packing is the standard recipe path** (`qat_fine_tune_epochs` kept CLI-opt-in,
+default 0 — the KonJND trade shouldn't be forced on HF bakes; the ship recipe
+opts in). `out_dtype` CLI default stays f32; the canonical recipe sets f16.
+
+**#33 (localized-defect detection) — Approach-B VALIDATED.** Perceptual
+tile-min failed on screen content; a content-robust signal (per-tile error
+RELATIVE to the source's own local activity, 3 channels mean/maxpix/chroma,
+multi-scale 64∧16) catches **op100 (full-strength) 92.5% photo / 81.2%
+screen** (~97% / ~85.5% excluding two corpus no-op families). Beats tile-min
+(37%/24%) and is content-robust. Spike:
+`scripts/v_next/structural_signature_spike.py`; findings:
+`benchmarks/approach_b_structural_signal_spike_2026-05-27.md`. Next (non-gated):
+Rust port → wire into zensim-regress, THEN propose the `ZensimLocal` public API
+(gated). Surfaced 2 corpus generator bugs: **codec-corpus#9**
+(chroma_boundary + block_repeat_neighbor are no-ops — change ~0 pixels).
+
+**#35 RESOLVED:** the konjnd-agg "2× gradient bug" was a malformed FD test
+(f32 forward + eps=1e-6 swamped by f32 noise + pure-relative gate on near-zero
+gradients). Gradients are correct; ships unaffected. Fixed with eps=1e-2 +
+atol+rtol gradcheck. New `backprop_heads_dl_dh` train-core test isolates +
+confirms the head gradient.
+
+## Current state (pre-2026-05-27 — V39 is still the shipped Profile::A)
 
 **Shipped champion:** `PreviewV0_3` = `zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
 - Architecture: 372→128→64→heads (2-layer, per-sample α, tanh pin, PCHIP spline)
