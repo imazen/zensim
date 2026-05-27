@@ -4,21 +4,29 @@ Workspace with three crates: `zensim` (library), `zensim-regress` (regression te
 
 ## Known Bugs
 
-- **`mlp_train::tests::konjnd_aggregation_2layer_w1_gradient_matches_finite_difference`
-  FAILS** (pre-existing, found 2026-05-27). The konjnd-aggregation **2-layer**
-  W1 analytical gradient is ~2× off the finite-difference numerical
-  (`gw1[0] numerical=-0.0738 analytical=-0.0384, rel=0.48`). Confirmed
-  identical at pre-QAT commit `39121ab7` → NOT introduced by the QAT work;
-  a latent bug in the head gradient
-  (`zensim-validate/src/mlp_train/mod.rs:~10068`). **Refined 2026-05-27:**
-  the bug is the **pooling-head gradient** (`y_pool→h` in
-  `zensim_train_core::per_sample_alpha_head::backprop_heads`) — isolation
-  (a w2_enc FD diagnostic in the test) showed BOTH gw2_enc and gw1 wrong, and
-  forcing α≈1 (gating the pool head) drops the w1 error 48%→10.5%. **SHIPPED
-  BAKES ARE UNAFFECTED**: v47/QAT use `--monotone-cbc` (α≈1, y=y_rank, pool
-  gated out), so the pool-head gradient never enters shipped monotone
-  training. The bug only affects NON-monotone (α-active) per_sample_alpha
-  training. Fix plan: task #35.
+_(none open)_
+
+### Resolved
+
+- **konjnd-agg 2-layer w1 gradient "bug" — RESOLVED 2026-05-27 as a
+  malformed test, NOT a gradient error.** The
+  `konjnd_aggregation_2layer_w1_gradient_matches_finite_difference` test
+  reported ~2–3% (and at one point 48%) relative error vs the analytical
+  gradient. The gradients are **correct**; two compounding test defects
+  produced the spurious failure: (1) the forward computes in **f32**
+  (`dot_bias` casts f64→f32), so a central difference is floor-limited —
+  at ε=1e-6 the rounding noise in `(f₊−f₋)` (~1e-7) swamps the signal
+  (~2·ε·grad), giving O(1) relative error; (2) a **pure relative gate**
+  is unbounded as the true gradient → 0 (near-zero entries like
+  `gw1[4]≈-9e-4` have abs diff ~6e-6 = a correct gradient). Fixed by
+  ε=1e-2 + the standard `|num−ana| < atol + rtol·max(|·|)` gradcheck
+  criterion. The earlier "α≈1 drops error 48%→10.5%" observation was
+  itself an artifact of the f32 floor manifesting differently across α
+  regimes — debunked by a new train-core test
+  (`per_sample_alpha_head::tests::backprop_heads_dl_dh_matches_finite_difference`)
+  that FD-checks the head/encoder gradient directly (L=y, dl_dy=1) and
+  passes cleanly. Shipped bakes were never affected. Commit: see
+  `fix(#35)`.
 
 ## Canonical training data + indexes (added 2026-05-20)
 

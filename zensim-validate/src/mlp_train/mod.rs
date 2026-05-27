@@ -10050,14 +10050,20 @@ mod tests {
             );
         }
 
-        let eps = 1e-6;
+        // The forward computes in f32 (arch_forward → dot_bias casts f64→f32),
+        // so a central difference is floor-limited: rounding noise in (f₊−f₋)
+        // is ~ε_f32·|L| while the signal is 2·ε·|∂L|, so the relative error of
+        // the numeric derivative is ~ε_f32/(2·ε·|∂L|/|L|). At ε=1e-6 that floor
+        // is O(1) — the original "~2× gradient bug" was entirely this f32 floor,
+        // NOT a gradient bug (confirmed by the train-core backprop_heads FD test
+        // which isolates the encoder gradient and passes cleanly). ε=1e-2 pushes
+        // the floor to ~1e-4 while O(ε²) truncation stays small; 2e-3 gates both.
+        let eps = 1e-2;
         let n_w1_first = n_features * n_hidden1;
 
-        // ISOLATION DIAGNOSTIC: FD-check the SECOND-layer w2_enc gradient
-        // (analytical = gw1[n_w1_first + idx], concat = [w1|w2_enc|w_skip]).
-        // If w2_enc matches but w1 is ~½ → bug is the layer-1 propagation
-        // (dl_dh1 via w2_enc^T, or layer-1 leaky/backprop). If w2_enc is also
-        // ~½ → bug is in backprop_heads/dl_dh2 (shared, would hit 1-layer too).
+        // FD-check the SECOND-layer w2_enc gradient too (analytical =
+        // gw1[n_w1_first + idx], concat = [w1|w2_enc|w_skip]) — strengthens the
+        // test to both layers of the 2-layer chain.
         {
             let loss_fn_w2 = |w2v: &[f64]| -> f64 {
                 let mut sum_y = 0.0f64;
@@ -10083,10 +10089,15 @@ mod tests {
                 w2m[idx2] = orig;
                 let numerical = (fp - fm) / (2.0 * eps);
                 let analytical = gw1[n_w1_first + idx2];
-                let rel = (numerical - analytical).abs()
-                    / numerical.abs().max(analytical.abs()).max(1e-6);
-                eprintln!(
-                    "ISOLATION w2_enc[{idx2}] numerical={numerical:.8} analytical={analytical:.8} rel={rel:.2e}"
+                // Combined atol+rtol (numpy/jax/pytorch gradcheck form): a pure
+                // relative gate is unbounded as the true gradient → 0, and the
+                // f32-forward FD floor (~1e-5 abs at ε=1e-2) dominates there.
+                let abs_err = (numerical - analytical).abs();
+                let tol = 2e-5 + 2e-3 * numerical.abs().max(analytical.abs());
+                assert!(
+                    abs_err < tol,
+                    "2-layer konjnd-agg gw2_enc[{idx2}] numerical={numerical:.8} \
+                     analytical={analytical:.8} abs_err={abs_err:.2e} tol={tol:.2e}"
                 );
             }
         }
@@ -10102,12 +10113,15 @@ mod tests {
             w1[idx] = orig;
             let numerical = (fp - fm) / (2.0 * eps);
             let analytical = gw1[idx];
-            let denom = numerical.abs().max(analytical.abs()).max(1e-6);
-            let rel = (numerical - analytical).abs() / denom;
+            // Combined atol+rtol — many w1 entries have near-zero true gradient
+            // (e.g. gw1[4]≈-9e-4) where a pure relative gate is meaningless and
+            // the f32-forward FD floor (~1e-5 abs at ε=1e-2) sets the scale.
+            let abs_err = (numerical - analytical).abs();
+            let tol = 2e-5 + 2e-3 * numerical.abs().max(analytical.abs());
             assert!(
-                rel < 1e-3,
+                abs_err < tol,
                 "2-layer konjnd-agg gw1[{idx}] numerical={numerical:.8} \
-                 analytical={analytical:.8} rel={rel:.2e}"
+                 analytical={analytical:.8} abs_err={abs_err:.2e} tol={tol:.2e}"
             );
         }
     }

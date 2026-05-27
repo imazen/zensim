@@ -1856,7 +1856,15 @@ mod tests {
             &mut g_rank_w, &mut g_rank_b, &mut g_red_w, &mut g_red_b, &mut g_w_alpha,
             &mut g_b_alpha, nh, 0.01,
         );
-        let eps = 1e-6;
+        // The forward computes in f32 (dot_bias casts f64→f32). A central
+        // difference of an f32-valued forward is floor-limited: the rounding
+        // noise in (f₊−f₋) is ~ε_f32·|y| ≈ 1e-7, while the signal is
+        // 2·ε·|∂y|, so the relative error of the numeric derivative is
+        // ~1e-7/(2·ε·|∂y|). At ε=1e-6 that floor is O(1) — the original test's
+        // "~2× gradient bug" was entirely this f32 floor, NOT a gradient bug.
+        // ε=1e-2 pushes the floor to ~5e-5 while O(ε²) truncation stays ~1e-4;
+        // 2e-3 is a safe gate above both error sources.
+        let eps = 1e-2;
         for j in 0..nh {
             let mut hp = h.clone();
             hp[j] += eps;
@@ -1864,10 +1872,14 @@ mod tests {
             hm[j] -= eps;
             let num = (fwd(&hp) - fwd(&hm)) / (2.0 * eps);
             let ana = dl_dh[j];
-            let rel = (num - ana).abs() / num.abs().max(ana.abs()).max(1e-6);
+            // Combined atol+rtol (numpy/jax/pytorch gradcheck form) — robust for
+            // near-zero gradient entries where a pure relative gate is unbounded
+            // and the f32-forward FD floor (~1e-5 abs at ε=1e-2) dominates.
+            let abs_err = (num - ana).abs();
+            let tol = 2e-5 + 2e-3 * num.abs().max(ana.abs());
             assert!(
-                rel < 1e-4,
-                "backprop_heads dl_dh[{j}] num={num:.8} ana={ana:.8} rel={rel:.2e}"
+                abs_err < tol,
+                "backprop_heads dl_dh[{j}] num={num:.8} ana={ana:.8} abs_err={abs_err:.2e} tol={tol:.2e}"
             );
         }
     }
