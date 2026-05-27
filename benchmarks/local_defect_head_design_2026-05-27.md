@@ -53,6 +53,50 @@ across families × regions × severities, including the subtle end.
   push `min_tile` negative (the corrupted tile's score), giving the
   regression-test "broken < honest-lq < identity" ordering the use case needs.
 
-## Status: design only (the corpus + gate harness are ready:
-scripts/v_next/corruption_gate_eval.py, /mnt/v/output/zensim/corruption_gate,
-codec-corpus PR#8). Implementation deferred behind the QAT verification.
+## VALIDATION (2026-05-27, tile-min scorer built + run)
+
+Built `zensim-validate/src/bin/score_tiles_with_bake.rs` (in-process: load
+ref+dist once, tile, score each tile via the bake, report global/min/p2/p5/
+median). `corruption_gate_eval.py` gained a `TILE_MIN=1` mode (+ `TILE_SIZE`).
+Run on the QAT-native bake + gb82/dog corpus:
+
+| | global metric | **tile-min, tile=64** | tile-min, tile=32 |
+|---|--:|--:|--:|
+| overall gate (corruption<q20) | 17.3% | **36.9%** | 0.0% |
+| sq8 localized | 0% | 11% | 0% |
+| whole | 35.6% | 47% | 0% |
+
+Spot-check (tile=64): channel_invert sq8 global 71.9 (FAILED) → **min 11.1**
+(PASS, < q20-min 31.1); block_zero sq8 75.3 → **14.7** (PASS). The corrupted
+tile craters. identity min 97.7; chan_invert WHOLE min 0.0.
+
+**Findings:**
+1. **Tile-min fixes structurally-significant localized defects** (channel
+   swap, block zero/garbage — the real decoder bugs): the corrupted tile
+   craters far below honest content. 17%→37% overall, sq8 0%→pass for these.
+2. **tile=64 is the granularity sweet spot.** tile=32 → 0% because the honest
+   q20 anchor's OWN worst 32×32 tile craters to ~0 → the min-to-min bar
+   becomes impossible. Honest compression has locally-bad tiles too; the tile
+   must be large enough that honest content's worst tile stays moderate
+   (q20-min ~31 at tile=64).
+3. **Subtle / sub-perceptual stay high** (1-px bit-flip min 94.8; low-opacity
+   overlay; tiny tone shift) — arguably correct (near-imperceptible even
+   locally), or needs a different signal than perceptual tiling.
+4. **Gate definition is a calibration choice.** min-to-min(q20) at tile=64
+   gives 37%. Alternatives to evaluate: min-to-GLOBAL(q20) (compare the
+   broken decode's worst tile to the honest decode's overall score), or an
+   absolute threshold (min_tile < ~20 catches channel/block, excludes q20's
+   31). The corruption corpus is the calibration grid.
+
+## Next (shipped head)
+
+- Promote tile-min into a first-class Rust API (a `ZensimLocal` profile or a
+  `zensim::compute_local` returning global + min-tile), wired into
+  zensim-regress so a broken decode's tile-min gates the test.
+- Tune tile size (48–96) + the gate definition on the full corpus + multiple
+  refs. Optionally Approach B (a defect classifier trained on the corpus) for
+  the subtle families tile-min can't catch.
+
+Scorer + gate harness ready: `score_tiles_with_bake`,
+`corruption_gate_eval.py TILE_MIN=1`, results in
+`benchmarks/corruption_gate_tilemin_2026-05-27.md`.

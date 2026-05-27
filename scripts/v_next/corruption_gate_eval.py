@@ -14,9 +14,23 @@ import sys, os, glob, subprocess, re
 from concurrent.futures import ThreadPoolExecutor
 
 SCORE = "./target/release/score_pair_with_bake"
+TILE = "./target/release/score_tiles_with_bake"
+TILE_MIN = os.environ.get("TILE_MIN") == "1"  # task #33: tile-min pooling
 
 
 def score(bake, ref, dist):
+    if TILE_MIN:
+        # tile-min: localized-defect signal. Output cols: global min p2 p5 median n.
+        r = subprocess.run([TILE, "--bake", bake, "--bake-post", "clamp", "--ref", ref,
+                            "--dist", dist, "--tile", os.environ.get("TILE_SIZE", "64"),
+                            "--overlap", "0.5"],
+                           capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            return None
+        try:
+            return float(r.stdout.strip().split()[1])  # min tile
+        except (ValueError, IndexError):
+            return None
     r = subprocess.run([SCORE, "--bake", bake, "--bake-post", "raw", "--ref", ref, "--dist", dist],
                        capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
