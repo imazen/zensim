@@ -126,6 +126,17 @@ pub struct ManifestConfig {
     /// Resolved `--anchor-parquet` path.
     pub anchor_parquet: Option<PathBuf>,
 
+    /// Masked-monotone (`--monotone-cbc`): soft sign-penalty during
+    /// training + hard sign projection at bake → bake monotone↓ in every
+    /// sign-safe error feature (the V39 blur>identity fix).
+    pub monotone_cbc: Option<bool>,
+    /// `--monotone-feature-mask`: per-feature sign mask TSV (pin_geq0 /
+    /// free). Required for the masked-monotone recipe.
+    pub monotone_feature_mask: Option<PathBuf>,
+    /// `--monotone-strict`: drop the non-pinned (sign-flip) features
+    /// instead of leaving them free.
+    pub monotone_strict: Option<bool>,
+
     /// Ordered post-training `steps` (spline injection etc.). Recorded
     /// here so the binary can surface them — the trainer cannot run them
     /// itself (they shell to external scripts), but a reproduce run must
@@ -215,6 +226,9 @@ struct RawTraining {
     auto_transforms: Option<String>,
     #[serde(default)]
     anchor_parquet: Option<String>,
+    monotone_cbc: Option<bool>,
+    monotone_feature_mask: Option<String>,
+    monotone_strict: Option<bool>,
     #[serde(default)]
     steps: Vec<String>,
 }
@@ -435,6 +449,12 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
         if let Some(ap) = t.anchor_parquet {
             cfg.anchor_parquet = Some(resolve_path(&ap, manifest_dir, canonical_root, dial_dir)?);
         }
+        cfg.monotone_cbc = t.monotone_cbc;
+        if let Some(mm) = t.monotone_feature_mask {
+            cfg.monotone_feature_mask =
+                Some(resolve_path(&mm, manifest_dir, canonical_root, dial_dir)?);
+        }
+        cfg.monotone_strict = t.monotone_strict;
     }
 
     // Collect every [inputs.<name>] table that carries a sha256 — those

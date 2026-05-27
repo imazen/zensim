@@ -1686,12 +1686,19 @@ fn apply_manifest_to_args(
         cfg.anchor_target_score
     );
 
+    // Masked-monotone recipe fields (bools + the mask path).
+    set_if_default!(monotone_cbc, "monotone_cbc", cfg.monotone_cbc);
+    set_if_default!(monotone_strict, "monotone_strict", cfg.monotone_strict);
+
     // Path-valued options (already resolved to absolute/relative-to-manifest).
     if !explicit(matches, "auto_transforms") && cfg.auto_transforms.is_some() {
         args.auto_transforms = cfg.auto_transforms.clone();
     }
     if !explicit(matches, "anchor_parquet") && cfg.anchor_parquet.is_some() {
         args.anchor_parquet = cfg.anchor_parquet.clone();
+    }
+    if !explicit(matches, "monotone_feature_mask") && cfg.monotone_feature_mask.is_some() {
+        args.monotone_feature_mask = cfg.monotone_feature_mask.clone();
     }
     // --out: clap makes it required-unless-manifest, but with --manifest
     // we supply it from [bake].file when not given explicitly.
