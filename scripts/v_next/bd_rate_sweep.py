@@ -20,7 +20,7 @@ import numpy as np
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "/mnt/v/output/zensim/diffmap-sweep-2026-05-27"
 BASE = "zensim_v47"
-CHAL = "butteraugli"
+CHALLENGERS = ["cvvdp", "butteraugli"]
 
 
 def load(m):
@@ -61,26 +61,30 @@ def main():
     images = sorted({im for (_, im) in D})
     classes = sorted(set(cls.values()))
 
-    print(f"BD-rate: {CHAL} loop vs {BASE} (NEG = {CHAL} better / fewer bytes at equal quality).")
-    print("axes: ssim2 (SEMI-circular for zensim — caveat), butteraugli + cvvdp (independent).\n")
+    print(f"BD-rate vs {BASE} (NEG = challenger fewer bytes at equal quality = better).")
+    print("[C] = circular (butteraugli axis↔butteraugli loop, cvvdp axis↔cvvdp loop) — discount.")
+    print("ssim2 is SEMI-circular for the zensim base (v47 trained on ssim2-derived targets).\n")
     for qaxis, idx in [("ssim2", 1), ("butteraugli", 2), ("cvvdp", 3)]:
-        print(f"  axis={qaxis}:")
-        per_class = collections.defaultdict(list)
-        for im in images:
-            base = D.get((BASE, im)); chal = D.get((CHAL, im))
-            if not base or not chal:
-                continue
-            v = bd_rate([p[0] for p in base], [p[idx] for p in base],
-                        [p[0] for p in chal], [p[idx] for p in chal])
-            if v is not None:
-                per_class[cls[im]].append(v)
-        for c in classes:
-            xs = per_class[c]
-            if xs:
-                print(f"    {c:8s} n={len(xs):2d}  mean {np.mean(xs):+7.1f}%  median {np.median(xs):+7.1f}%")
-        allx = [v for c in classes for v in per_class[c]]
-        if allx:
-            print(f"    {'ALL':8s} n={len(allx):2d}  mean {np.mean(allx):+7.1f}%  median {np.median(allx):+7.1f}%")
+        print(f"  === axis={qaxis} ===")
+        for chal_name in CHALLENGERS:
+            circ = (qaxis == "butteraugli" and chal_name == "butteraugli") or (qaxis == "cvvdp" and chal_name == "cvvdp")
+            per_class = collections.defaultdict(list)
+            for im in images:
+                base = D.get((BASE, im)); chal = D.get((chal_name, im))
+                if not base or not chal:
+                    continue
+                v = bd_rate([p[0] for p in base], [p[idx] for p in base],
+                            [p[0] for p in chal], [p[idx] for p in chal])
+                if v is not None:
+                    per_class[cls[im]].append(v)
+            line = f"    {chal_name + (' [C]' if circ else ''):18s}"
+            for c in classes:
+                if per_class[c]:
+                    line += f"  {c}: {np.mean(per_class[c]):+6.1f}% (n{len(per_class[c])})"
+            allx = [v for c in classes for v in per_class[c]]
+            if allx:
+                line += f"  ALL: {np.mean(allx):+6.1f}%"
+            print(line)
         print()
 
 

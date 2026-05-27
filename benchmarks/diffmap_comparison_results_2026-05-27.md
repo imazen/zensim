@@ -1,5 +1,46 @@
 # Diffmap comparison — all three avenues, results (#38, 2026-05-27)
 
+## ⇒⇒ FINAL VERDICT — FULL SWEEP (supersedes all smoke conclusions below)
+
+After fixing jxl-encoder's build (zenmetrics cvvdp-cpu→cvvdp rename, commit
+`8bd78081`), ran the real sweep: **3 loops (zensim-v47, cvvdp, butteraugli)
+× 11 images (6 photo + 5 screen, 640²–2560²) × 6 distances {1,2,3,4,6,8}**,
+judged by **ssim2 + butteraugli + cvvdp** (dssim dropped per user). BD-rate vs
+zensim-v47 (positive = challenger needs MORE bytes at equal quality = zensim
+BETTER; `C` = circular, discount):
+
+| judge | cvvdp-loop | butteraugli-loop |
+|---|--:|--:|
+| ssim2 | +1.3% | +2.1% |
+| butteraugli | **+4.9%** (indep) | +2.9% `C` |
+| cvvdp | +2.3% `C` | **+3.1%** (indep) |
+
+**The full sweep REVERSES the n=3 smoke.** On a representative multi-content ×
+wide-q corpus, **zensim-v47 is the best/competitive diffmap**: both cvvdp and
+butteraugli loops need +1 to +5% MORE bytes at equal quality, across ALL three
+judges, on BOTH photo and screen aggregate. zensim wins ~9/11 images on the
+independent judges.
+
+**Why the smoke (n=3, d=1,2,3) misled — on BOTH axes:** it was 3 images AND
+high-q only. The single 2560px `codec_wiki` screen at d=1–3 favored cvvdp
+(−46.9%); but over the full q-range (adding low-q d=4,6,8) codec_wiki *favors
+zensim* (+5.4%). So the smoke was unrepresentative in corpus AND distance
+range — exactly why the sweep was necessary. Per-image variance is high and
+the judges disagree per-image (e.g. `graph`: cvvdp-loop +20% but butt-loop
+−3.7%); trust the aggregate.
+
+**Conclusion: KEEP the shipped v47 zensim diffmap — it is the best of the three
+on a real sweep.** This vindicates the shipped Profile::A for the RD use case
+too (not just the dial). The earlier "ssim2 flips it, zensim worst" was a smoke
+artifact; the sweep is the trustworthy answer. (Caveat: n=11 images / 6 dist —
+better than n=3 but still short of the 50/class ideal; the direction is solid,
+magnitude modest. Data: `/mnt/v/output/zensim/diffmap-sweep-2026-05-27/`.)
+
+---
+
+# (Below: the earlier n=3 SMOKE analysis — SUPERSEDED by the full sweep above)
+
+
 User: "do all three [diffmap avenues] in sequence and choose the best."
 Harness: `jxl-encoder/examples/zensim_diffmap_rd.rs` (encode corpus with each
 perceptual-loop metric, iters≥1 so the diffmap drives per-tile redistribution,
