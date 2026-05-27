@@ -2,6 +2,20 @@
 
 Workspace with three crates: `zensim` (library), `zensim-regress` (regression testing binary), `zensim-validate` (validation binary).
 
+## Known Bugs
+
+- **`mlp_train::tests::konjnd_aggregation_2layer_w1_gradient_matches_finite_difference`
+  FAILS** (pre-existing, found 2026-05-27). The konjnd-aggregation **2-layer**
+  W1 analytical gradient is ~2× off the finite-difference numerical
+  (`gw1[0] numerical=-0.0738 analytical=-0.0384, rel=0.48`). Confirmed
+  identical at pre-QAT commit `39121ab7` → NOT introduced by the QAT work;
+  a latent factor-of-2 bug in the 2-layer konjnd-aggregation backprop
+  (`zensim-validate/src/mlp_train/mod.rs:~10068`). The konjnd-aggregation
+  head is NOT used by the QAT / v47 / shipped recipes, so it doesn't affect
+  shipped bakes — but the 2-layer agg gradient should be fixed before any
+  konjnd-aggregation 2-layer training is trusted. (The 1-layer agg gradient
+  test passes.)
+
 ## Canonical training data + indexes (added 2026-05-20)
 
 **The canonical index for all ML data lives at `~/work/zen/DATA_PROVENANCE.md`.**
