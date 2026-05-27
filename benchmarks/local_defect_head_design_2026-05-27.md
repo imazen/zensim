@@ -173,14 +173,16 @@ activity** (honest compression error tracks activity; a structural defect
 breaks that correlation) is decisively better than perceptual tiling AND
 content-robust:
 
-| gate | photo | screen |
+| gate | photo (all / op100) | screen (all / op100) |
 |---|--:|--:|
-| tile-min (perceptual) | 37% | 24% |
-| **activity-decorrelation, combined** | **68.8%** | **47.5%** |
+| tile-min (perceptual) | 37% / — | 24% / — |
+| **activity-decorrelation, 3-channel** | **71.2% / 90.0%** | **55.8% / 72.5%** |
 
-The mean-excess signal ~2×'s tile-min on screen (the content type that
-defeated tiling); a max-pixel-excess signal complements it on photo (53→69%).
-Remaining misses are dominated by op20 faint blends (arguably correct misses)
-+ invisible swap-on-gray + chroma_boundary. Next chunks (none gated):
-chroma-only channel, op-level-stratified gate, then a Rust scorer binary
+3 content-robust channels (mean / maxpix / chroma, each vs the source's own
+local activity). At full defect strength (op100) it catches 90% photo /
+72.5% screen — the flat overall % is dragged down by op20/op50 faint blends
+that are near-imperceptible by construction. Remaining op100 misses:
+8×8-defect-vs-64px-tile scale mismatch (→ multi-scale tiling), invisible
+swap-on-neutral, chroma_boundary (signal zero → likely imperceptible). Next
+chunks (none gated): multi-scale 64∧16 tiling, then a Rust scorer binary
 before proposing the `ZensimLocal` public API.
