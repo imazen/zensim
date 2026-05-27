@@ -73,3 +73,65 @@ gradient-accumulation layout (sharded/atomic adam.gw1), both of which
 warrant their own design + convergence validation. Not a tail-of-session
 change. Sequential + f32 forward (2.5 s/epoch, 1.44× over the f64
 baseline) is the shipped state.
+
+---
+
+# GEMM-style batched forward — ALSO FALSIFIED (w1 already L2-resident)
+
+Follow-on to the above: if the encoder forward were memory-bound on the
+190 KB w1 matrix, a GEMM-style batched forward (stream w1 once per
+minibatch, reuse across the 64 rows) would win. Prototyped + measured —
+**both variants 10–16× SLOWER than per-row.** Reverted.
+
+Bench (n_rows=64, 372→128, 2000 iters, AVX-512 v4, release):
+
+| Variant | ns/batch | vs per-row |
+|---|--:|--:|
+| per-row (shipped `encoder_forward_f32` ×64) | 177,479 | 1.0× |
+| GEMM naive (loop-swap `for feat { for row }`) | 2,801,406 | 0.06× |
+| GEMM register-blocked R_TILE=2 (fixed [f32x16;8]) | 1,783,057 | 0.10× |
+
+Equivalence asserted (<1e-3 max abs diff) — the math is identical; only
+the schedule differs.
+
+## Root cause: w1 fits L2, so per-row is ALREADY cache-optimal
+
+w1 = 372 × 128 × 4 = **186 KB**. Zen 4 L2 = **1 MB/core** → fits with
+838 KB to spare. So the per-row path does NOT stream w1 from main memory
+per row: after row 0 loads it, w1 stays L2-resident and is reused across
+all 64 rows of the minibatch at L2 bandwidth (~68 GB/s observed). There
+is **no main-memory w1 traffic for GEMM blocking to amortize** — the
+premise that the forward is memory-bound on w1 was wrong.
+
+The GEMM variants are slower because they add scheduling overhead with
+zero cache benefit:
+- **Naive loop-swap** keeps the 32 KB `h_pre` block in memory and sweeps
+  it 372× (once per feature) — it trades the (already-cached) w1 reuse
+  for 11.9 MB of strided h_pre traffic. Strictly worse.
+- **R_TILE=2 register-blocked** (even with fixed `[f32x16; 8]` stack
+  arrays so the accumulators promote to zmm registers) only halves w1
+  *reads* — but those reads were already L1/L2 hits, so halving them
+  saves nothing, while the 2-row tiling + from_fn setup + odd-tail
+  handling add overhead. A `Vec<f32x16>` accumulator (first attempt)
+  was even worse — heap, not registers.
+
+## Takeaway
+
+The encoder forward is **compute-bound, single-core, with weights
+L2-resident and FMA-vectorized** (`s_v.mul_add(w_v, h_v)` → `vfmadd231ps`
+on AVX-512 via archmage). It is already near-optimal for one core. The
+2.5 s/epoch is genuine single-core compute (50k pairs × 4 GEMVs ×
+372×128 FMA), not a memory or vectorization deficiency.
+
+Levers that remain (all real work, none a drop-in):
+- **GPU** — the only path to a large speedup; the matmul is embarrassingly
+  parallel across pairs but the host trainer is CPU-bound by design.
+- **Coarser training batch** (more pairs per Adam step) — would make the
+  K-batch parallelism (above) viable, but changes convergence; needs its
+  own recipe + validation study.
+- **Lower epoch/pair budget** — a recipe tradeoff, not an optimization.
+
+NOT levers (measured/verified dead): fine-grained K=32 rayon parallelism
+(380 KB grad-buffer churn), GEMM blocking (w1 already L2-resident),
+"adding FMA/ML intrinsics" (already present — `mul_add` on every
+magetypes backend; encoder already uses `vfmadd`).
