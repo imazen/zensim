@@ -132,27 +132,68 @@ fn linear_bounded_preserves_v0_2_ranking() {
     }
 }
 
-/// Tracked known-limit (NOT a relaxation): the shipped MLP profile `A`
-/// (V39) violates the invariants on off-manifold synthetic content —
-/// it returns scores > 100 and ranks heavier blur above lighter. This
-/// test asserts the violation STILL EXISTS so that if a future
-/// monotone-by-construction retrain fixes `A`, this test flips and
-/// prompts promoting `A` into the gate above. Root cause + redesign:
-/// `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+/// Axioms 1 + 2 for `ZensimProfile::A` — promoted into the gate 2026-05-27
+/// when A was rotated to the masked-monotone-by-construction
+/// `v47-strict-QAT-native` bake (this replaced the prior V39
+/// `v39_known_limit_violations` characterization test, which asserted A
+/// VIOLATED the axioms; V39 scored identity=0 and ranked heavier blur higher).
+///
+/// Differences from the `LinearBounded` gate: (1) A's self-identity is the
+/// spline's top knot (~97.7), NOT exactly 100 — the axiom is that identity is
+/// the unique *maximum*, not a fixed constant; (2) A has an INTENTIONAL
+/// negative tail (a badly-corrupted pair scores well below 0 — the signal the
+/// codec-regression / diffmap use case relies on), so there is NO [0, _] floor
+/// — only the upper bound `≤ 100` and "no distortion exceeds identity".
 #[test]
-fn v39_known_limit_violations() {
+fn a_v47_is_bounded_above_and_self_identity_maximal() {
     let z = Zensim::new(ZensimProfile::A).with_parallel(false);
-    let src = gen_mandelbrot(W, H);
-    let blur1 = distort_blur(&src, W, H, 1);
-    let blur5 = distort_blur(&src, W, H, 5);
-    let s1 = score(&z, &src, &blur1);
-    let s5 = score(&z, &src, &blur5);
-    let violates_bound = s1 > 100.0 || s5 > 100.0;
-    let violates_mono = s5 >= s1; // heavier blur scored >= lighter
-    assert!(
-        violates_bound || violates_mono,
-        "A (V39) unexpectedly satisfies the invariants (blur1={s1}, blur5={s5}). \
-         If this is from a monotone-by-construction retrain, promote A into the \
-         correct-by-construction gate and delete this characterization test."
-    );
+    for (name, src) in contents() {
+        let s_id = score(&z, &src, &src);
+        assert!(
+            s_id <= 100.0 + 1e-9,
+            "{name}: self-identity {s_id} exceeds the upper bound 100"
+        );
+        let distortions: Vec<(&str, Vec<[u8; 3]>)> = vec![
+            ("blur1", distort_blur(&src, W, H, 1)),
+            ("blur5", distort_blur(&src, W, H, 5)),
+            ("sharpen", distort_sharpen(&src, W, H)),
+            ("color_shift", distort_color_shift(&src, W, H)),
+            ("block", distort_block_artifacts(&src, W, H)),
+        ];
+        for (dname, dst) in &distortions {
+            let s = score(&z, &src, dst);
+            assert!(
+                s <= 100.0 + 1e-9,
+                "{name}/{dname}: score {s} exceeds the upper bound 100"
+            );
+            assert!(
+                s <= s_id + 1e-9,
+                "{name}/{dname}: distorted score {s} exceeds self-identity {s_id}"
+            );
+        }
+    }
+}
+
+/// Axiom 3 for `ZensimProfile::A`: along an increasing blur ladder the score
+/// is non-increasing (degradation never raises the score). The score may go
+/// negative (intentional corruption tail); only the ordering is gated.
+#[test]
+fn a_v47_is_degradation_monotone() {
+    let z = Zensim::new(ZensimProfile::A).with_parallel(false);
+    for (name, src) in contents() {
+        let mut prev = score(&z, &src, &src); // identity (the maximum)
+        for r in 1..=6usize {
+            let dst = distort_blur(&src, W, H, r);
+            let s = score(&z, &src, &dst);
+            assert!(
+                s <= 100.0 + 1e-9,
+                "{name}: blur r={r} score {s} exceeds the upper bound 100"
+            );
+            assert!(
+                s <= prev + MONO_EPS,
+                "{name}: blur r={r} score {s} > previous {prev} (degradation must not raise the score)"
+            );
+            prev = s;
+        }
+    }
 }

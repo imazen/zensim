@@ -1365,6 +1365,45 @@ pub(crate) fn mlp_bake_preview_v0_3() -> &'static [u8] {
     include_bytes!("../weights/v39_v32plus_spline_seed17_2026-05-25.bin")
 }
 
+/// `ZensimProfile::A` (PreviewV0_3) bake bytes — **rotated 2026-05-27 to
+/// `v47-strict-QAT-native`** (`v47_strict_qat_native_2026-05-27.bin`, 27 KB,
+/// sha256 `d0ef7a30…`). This is a bake rotation of the `Profile::A` slot, not
+/// an API change — the `PreviewV0_3` name and the metric architecture are
+/// unchanged.
+///
+/// **Why rotated:** the prior V39 bake (`v39_v32plus_spline…`, still backing
+/// `PreviewV0_4`) is *not a correct similarity metric* — it scores
+/// `identity = 0` on every reference and its codec dial is non-invertible
+/// (q-sweep 67.7 % monotone / 53.6 % tied; high-quality encodes collapse to
+/// score 0). v47-strict is **masked-monotone-by-construction** (W1 ≥ 0 on the
+/// 300 sign-safe features, rank_w ≤ 0, α ≡ 1): 0 inversions, 0 above-identity,
+/// `identity = 97.69` (the dial max). Best codec dial measured — q-sweep
+/// **94.33 % monotone / 0.33 % tied**, clean monotone median q5→q95
+/// (1.40→88.50). Global ordering verified: identity 97.69 > honest-q20 40.36
+/// > channel-invert 12.21 > block-zero 0.00 (the regression-test ordering V39
+/// inverts).
+///
+/// 372-input MLP (372 → 128 → 64 + per-sample-α + tanh pin), f16+zerobias
+/// encoder + f32 identity passthrough, with a monotone PCHIP dial spline
+/// (`zentrain.output_calibration_spline`, fit in-pass on the projected+
+/// quantized net). Produced by ONE `zensim_mlp_train --manifest
+/// zensim/weights/manifests/v47_strict_qat.toml` pass (QAT-native, no Python
+/// post-step).
+///
+/// **Held-out panel** (vs the prior V39, which it replaces): CID22 0.8657,
+/// KADID 0.7933, TID 0.7927, KonJND 0.4185, AIC-3 0.7680, AIC-4 0.8854.
+/// Costs vs V39 are rank-SROCC on the non-compression analytic-distortion
+/// corpora (KADID/TID −0.13, integrity guards) + KonJND (f16 drops PJND
+/// precision) — V39's higher rank there is moot because its dial is
+/// non-invertible. Methodology (all 8 sub-points):
+/// `benchmarks/v0_qat_native_methodology_2026-05-27.md`. q-sweep:
+/// `benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`. The prior V39 bytes
+/// remain on disk at `zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
+/// (still backing `PreviewV0_4`) for reproducibility.
+pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
+    include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin")
+}
+
 /// CVVDP-trained bake for desktop viewing conditions (PPD ≈ 53).
 /// Trained on safesyn cvvdp_log_norm target with RankNet + MSE.
 /// SROCC 0.9941 on safesyn (predicts CVVDP desktop rankings).
@@ -1424,17 +1463,17 @@ static PROFILE_A: ProfileParams = ProfileParams {
     blur_passes: 1,
     num_scales: 4,
     bounded_squash: false,
-    // Tuner v5 bake carries its own PCHIP spline calibration via the
-    // `zentrain.output_calibration_spline` metadata — the raw MLP
+    // v47-strict-QAT bake carries its own monotone PCHIP spline calibration
+    // via the `zentrain.output_calibration_spline` metadata — the raw MLP
     // output is dial-honest after the spline applies. No legacy
     // `100 - 18·d^0.7` transform needed.
     score_mapping_a: 18.0,
     score_mapping_b: 0.7,
     skip_score_mapping: true,
-    mlp_bytes: Some(mlp_bake_preview_v0_3),
+    mlp_bytes: Some(mlp_bake_a_v47_qat),
     mlp_bytes_b3: None,
     mlp_primary_mix: 1.0,
-    // Tuner v5 is a 372-feature bake (extended + IW-pool features).
+    // v47-strict is a 372-feature bake (extended + IW-pool features).
     extended_features: true,
     compute_iw_features: true,
     // Hard clamp at [0, 100] post-spline (spline output is already
