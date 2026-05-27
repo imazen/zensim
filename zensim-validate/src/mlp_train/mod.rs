@@ -10050,10 +10050,49 @@ mod tests {
             );
         }
 
-        // FD-check the first-layer w1 entries (the deepest part of the
-        // 2-layer chain). Check several spread across the matrix.
         let eps = 1e-6;
         let n_w1_first = n_features * n_hidden1;
+
+        // ISOLATION DIAGNOSTIC: FD-check the SECOND-layer w2_enc gradient
+        // (analytical = gw1[n_w1_first + idx], concat = [w1|w2_enc|w_skip]).
+        // If w2_enc matches but w1 is ~½ → bug is the layer-1 propagation
+        // (dl_dh1 via w2_enc^T, or layer-1 leaky/backprop). If w2_enc is also
+        // ~½ → bug is in backprop_heads/dl_dh2 (shared, would hit 1-layer too).
+        {
+            let loss_fn_w2 = |w2v: &[f64]| -> f64 {
+                let mut sum_y = 0.0f64;
+                for row in &rows {
+                    let fwd = arch_forward(
+                        row, &w1, &b1, w2v, &b2_enc, &w_skip, b_skip,
+                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                        n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                    );
+                    let (y, _) = pin(fwd.y);
+                    sum_y += y;
+                }
+                let e = sum_y / (s_rows as f64) - target;
+                weight * e * e
+            };
+            let mut w2m = w2_enc.clone();
+            for idx2 in [0usize, (n_hidden1 * n_hidden_final) / 2] {
+                let orig = w2m[idx2];
+                w2m[idx2] = orig + eps;
+                let fp = loss_fn_w2(&w2m);
+                w2m[idx2] = orig - eps;
+                let fm = loss_fn_w2(&w2m);
+                w2m[idx2] = orig;
+                let numerical = (fp - fm) / (2.0 * eps);
+                let analytical = gw1[n_w1_first + idx2];
+                let rel = (numerical - analytical).abs()
+                    / numerical.abs().max(analytical.abs()).max(1e-6);
+                eprintln!(
+                    "ISOLATION w2_enc[{idx2}] numerical={numerical:.8} analytical={analytical:.8} rel={rel:.2e}"
+                );
+            }
+        }
+
+        // FD-check the first-layer w1 entries (the deepest part of the
+        // 2-layer chain). Check several spread across the matrix.
         for idx in (0..n_w1_first).step_by((n_w1_first / 6).max(1)) {
             let orig = w1[idx];
             w1[idx] = orig + eps;

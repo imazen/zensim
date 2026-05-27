@@ -9,12 +9,16 @@ Workspace with three crates: `zensim` (library), `zensim-regress` (regression te
   W1 analytical gradient is ~2× off the finite-difference numerical
   (`gw1[0] numerical=-0.0738 analytical=-0.0384, rel=0.48`). Confirmed
   identical at pre-QAT commit `39121ab7` → NOT introduced by the QAT work;
-  a latent factor-of-2 bug in the 2-layer konjnd-aggregation backprop
-  (`zensim-validate/src/mlp_train/mod.rs:~10068`). The konjnd-aggregation
-  head is NOT used by the QAT / v47 / shipped recipes, so it doesn't affect
-  shipped bakes — but the 2-layer agg gradient should be fixed before any
-  konjnd-aggregation 2-layer training is trusted. (The 1-layer agg gradient
-  test passes.)
+  a latent bug in the head gradient
+  (`zensim-validate/src/mlp_train/mod.rs:~10068`). **Refined 2026-05-27:**
+  the bug is the **pooling-head gradient** (`y_pool→h` in
+  `zensim_train_core::per_sample_alpha_head::backprop_heads`) — isolation
+  (a w2_enc FD diagnostic in the test) showed BOTH gw2_enc and gw1 wrong, and
+  forcing α≈1 (gating the pool head) drops the w1 error 48%→10.5%. **SHIPPED
+  BAKES ARE UNAFFECTED**: v47/QAT use `--monotone-cbc` (α≈1, y=y_rank, pool
+  gated out), so the pool-head gradient never enters shipped monotone
+  training. The bug only affects NON-monotone (α-active) per_sample_alpha
+  training. Fix plan: task #35.
 
 ## Canonical training data + indexes (added 2026-05-20)
 
