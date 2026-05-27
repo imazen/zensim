@@ -478,6 +478,27 @@ pub struct MlpHyperparams {
     /// `skip_connection = false`. Default `false`.
     pub monotone_cbc: bool,
 
+    /// Per-feature sign mask for `monotone_cbc` (length `n_features`).
+    /// `Some(pin)` where `pin[j] == true` means W1's column for input
+    /// feature `j` is constrained `≥ 0`; `false` means feature `j` is
+    /// NOT sign-safe (it flips correlation with distortion across
+    /// distortion types — see `benchmarks/feature_sign_mask_2026-05-26.tsv`)
+    /// and is left free (partial) or dropped (strict). `None` → all
+    /// features pinned `≥ 0` (the original whole-encoder behavior, which
+    /// collapses the dial because it mis-constrains the ~72 sign-flip
+    /// features). Only consulted when `monotone_cbc = true`.
+    pub monotone_feature_pin: Option<Vec<bool>>,
+
+    /// When `true` AND a `monotone_feature_pin` is set, the non-pinned
+    /// (sign-flip) features are DROPPED — their W1 columns are driven to
+    /// 0 (soft penalty toward 0 during training + zeroed at bake) so the
+    /// shipped bake is STRICTLY monotone (depends only on sign-safe
+    /// features). When `false` (partial), the non-pinned features stay
+    /// free — the bake keeps their signal but is monotone only in the
+    /// sign-safe subset (no strict guarantee). Only consulted when
+    /// `monotone_cbc = true` and `monotone_feature_pin` is `Some`.
+    pub monotone_strict: bool,
+
     /// Margin for the monotonicity-reg hinge (default 0.0).
     /// `target_a - target_b > monotonicity_margin` activates the
     /// penalty; otherwise the pair contributes 0. Useful when you
@@ -761,6 +782,8 @@ impl Default for MlpHyperparams {
             ranknet_weight: 1.0,
             monotonicity_reg: 0.0,
             monotone_cbc: false,
+            monotone_feature_pin: None,
+            monotone_strict: false,
             monotonicity_margin: 0.0,
             anchor_loss_weight: 0.0,
             anchor_target_score: 63.0,
@@ -5865,9 +5888,30 @@ fn train_mlp_per_sample_alpha_head(
     // feature, by construction. `--monotone-cbc` is OFF by default;
     // production unaffected.
     const MONOTONE_CBC_PENALTY: f64 = 1.0;
+    // Per-feature sign mask for the W1 (feature→hidden) layer. `pin[j]`
+    // ⇒ feature j's W1 column is constrained ≥0 (sign-safe). Defaults to
+    // all-pinned when no mask is supplied (original behavior). Features
+    // NOT pinned are dropped (strict) or left free (partial).
+    let feature_pin: Vec<bool> = hyperparams
+        .monotone_feature_pin
+        .clone()
+        .unwrap_or_else(|| vec![true; n_features]);
+    assert!(
+        !monotone_cbc || feature_pin.len() == n_features,
+        "monotone_feature_pin length {} != n_features {}",
+        feature_pin.len(),
+        n_features
+    );
+    let monotone_strict = hyperparams.monotone_strict;
     if monotone_cbc {
+        let n_pinned = feature_pin.iter().filter(|&&p| p).count();
         log_line(
-            "monotone_cbc: ENABLED — soft sign-penalty (λ=1) during training + α≡1 every step + FINAL hard projection at every bake-emission (encoder≥0, head≤0, α≡1). Shipped bake is monotone-by-construction.",
+            &format!(
+                "monotone_cbc: ENABLED — W1 per-feature mask: {n_pinned}/{n_features} pinned ≥0, \
+                 {} {} ; w2_enc≥0, rank_w≤0, α≡1. Soft penalty (λ=1) + final projection at bake.",
+                n_features - n_pinned,
+                if monotone_strict { "DROPPED (strict)" } else { "free (partial)" },
+            ),
             log,
         );
     }
@@ -5879,6 +5923,28 @@ fn train_mlp_per_sample_alpha_head(
         } else {
             w.to_vec()
         }
+    };
+    // Per-feature W1 projection: pinned features clamped ≥0, sign-flip
+    // features zeroed (strict) or left as-is (partial). W1 is row-major
+    // [feature][hidden] so feature j owns block [j*n_hidden, (j+1)*n_hidden).
+    let proj_w1_masked = |w: &[f64]| -> Vec<f64> {
+        if !monotone_cbc {
+            return w.to_vec();
+        }
+        let mut out = w.to_vec();
+        for j in 0..n_features {
+            let block = &mut out[j * n_hidden..(j + 1) * n_hidden];
+            if feature_pin[j] {
+                for v in block.iter_mut() {
+                    *v = v.max(0.0);
+                }
+            } else if monotone_strict {
+                for v in block.iter_mut() {
+                    *v = 0.0;
+                }
+            }
+        }
+        out
     };
     let proj_leq0 = |w: &[f64]| -> Vec<f64> {
         if monotone_cbc {
@@ -5973,8 +6039,24 @@ fn train_mlp_per_sample_alpha_head(
             let two_lam = 2.0 * MONOTONE_CBC_PENALTY;
             let w1_len = w1.len();
             let w2_len = w2_enc.len();
-            // encoder w1 + w2_enc → ≥0: penalize negative entries.
-            for i in 0..(w1_len + w2_len) {
+            // W1 (feature→hidden), PER-FEATURE: pinned features → ≥0
+            // (penalize negatives); sign-flip features → 0 in strict mode
+            // (penalize BOTH signs, L2-toward-0 so they drop out cleanly),
+            // or untouched in partial mode. W1 is row-major [feature][hidden]
+            // so index i belongs to feature i / n_hidden.
+            for i in 0..w1_len {
+                let feat = i / n_hidden;
+                if feature_pin[feat] {
+                    if w1_concat[i] < 0.0 {
+                        adam.gw1[i] += two_lam * w1_concat[i];
+                    }
+                } else if monotone_strict {
+                    adam.gw1[i] += two_lam * w1_concat[i];
+                }
+            }
+            // w2_enc (hidden→hidden) → ≥0: hidden is already monotone↑ in
+            // distortion, so the 2nd layer must preserve the direction.
+            for i in w1_len..(w1_len + w2_len) {
                 if w1_concat[i] < 0.0 {
                     adam.gw1[i] += two_lam * w1_concat[i];
                 }
@@ -7558,7 +7640,7 @@ fn train_mlp_per_sample_alpha_head(
                     // monotone_cbc: hard-project the weights to exact signs
                     // before baking so the saved best-epoch bake is monotone-
                     // by-construction (no-op when monotone_cbc=false).
-                    let bake_w1      = proj_geq0(&w1);
+                    let bake_w1      = proj_w1_masked(&w1);
                     let bake_w2_enc  = proj_geq0(&w2_enc);
                     let bake_rank_w  = proj_leq0(&rank_w);
                     let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
@@ -7595,7 +7677,7 @@ fn train_mlp_per_sample_alpha_head(
                     best_bake = Some(vec![0u8; 4]); // TODO: skip bake metadata
                 } else {
                 // monotone_cbc: hard-project the weights (single-layer path).
-                let bake_w1      = proj_geq0(&w1);
+                let bake_w1      = proj_w1_masked(&w1);
                 let bake_rank_w  = proj_leq0(&rank_w);
                 let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
                 let bake_b_alpha = proj_b_alpha_one(b_alpha);
@@ -7749,7 +7831,7 @@ fn train_mlp_per_sample_alpha_head(
                 // monotone_cbc: project here too — the final spline-augmented
                 // bake must be monotone-by-construction (spline is monotone,
                 // so the network must be).
-                let bake_w1      = proj_geq0(&w1);
+                let bake_w1      = proj_w1_masked(&w1);
                 let bake_w2_enc  = proj_geq0(&w2_enc);
                 let bake_rank_w  = proj_leq0(&rank_w);
                 let bake_w_alpha = proj_w_alpha_zero(&w_alpha);

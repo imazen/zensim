@@ -649,6 +649,23 @@ struct Args {
     #[arg(long, default_value_t = false)]
     monotone_cbc: bool,
 
+    /// Per-feature sign mask TSV for `--monotone-cbc`: columns
+    /// `feat_idx, sign_mask` where `sign_mask == "pin_geq0"` pins that
+    /// input feature's W1 column ≥0 and anything else leaves it
+    /// free/dropped. Produced by `tests/feature_distortion_direction.rs`
+    /// (`benchmarks/feature_sign_mask_2026-05-26.tsv`). Without this,
+    /// `--monotone-cbc` pins ALL features ≥0 (collapses the dial by
+    /// mis-constraining the ~72 sign-flip features). Default: none.
+    #[arg(long)]
+    monotone_feature_mask: Option<PathBuf>,
+
+    /// With `--monotone-feature-mask`: DROP the non-pinned (sign-flip)
+    /// features (W1 columns → 0) so the bake is STRICTLY monotone in the
+    /// sign-safe subset only. Without it (partial), non-pinned features
+    /// stay free — full signal but monotone only in the safe subset.
+    #[arg(long, default_value_t = false)]
+    monotone_strict: bool,
+
     /// `PreviewV0_5Tuner` monotonicity-reg margin (2026-05-18). The
     /// penalty activates only when the predicted gap is below
     /// `+margin` relative to perfect ordering. Default `0.0` =
@@ -1867,6 +1884,38 @@ fn main() {
         }
     };
 
+    // Parse the per-feature monotone sign mask (if supplied).
+    let monotone_feature_pin: Option<Vec<bool>> =
+        args.monotone_feature_mask.as_ref().map(|path| {
+            let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
+                eprintln!("--monotone-feature-mask read error {}: {e}", path.display());
+                std::process::exit(2);
+            });
+            let mut pin = vec![true; n_features];
+            for (li, line) in txt.lines().enumerate() {
+                if li == 0 {
+                    continue; // header
+                }
+                let mut cols = line.split('\t');
+                let idx: usize = match cols.next().and_then(|s| s.trim().parse().ok()) {
+                    Some(i) => i,
+                    None => continue,
+                };
+                let mask = cols.next().unwrap_or("").trim();
+                if idx < n_features {
+                    pin[idx] = mask == "pin_geq0";
+                }
+            }
+            let n_pin = pin.iter().filter(|&&p| p).count();
+            eprintln!(
+                "monotone-feature-mask: {n_pin} pinned ≥0 / {} {} of {n_features} (from {})",
+                n_features - n_pin,
+                if args.monotone_strict { "DROPPED" } else { "free" },
+                path.display()
+            );
+            pin
+        });
+
     let hyperparams = MlpHyperparams {
         n_hidden: args.hidden,
         n_epochs: args.epochs,
@@ -1903,6 +1952,8 @@ fn main() {
         ranknet_weight: args.ranknet_weight,
         monotonicity_reg: args.monotonicity_reg,
         monotone_cbc: args.monotone_cbc,
+        monotone_feature_pin,
+        monotone_strict: args.monotone_strict,
         monotonicity_margin: args.monotonicity_margin,
         anchor_loss_weight: args.anchor_loss_weight,
         anchor_target_score: args.anchor_target_score,

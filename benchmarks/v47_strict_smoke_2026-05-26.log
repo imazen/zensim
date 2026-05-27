@@ -1,0 +1,17 @@
+MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy=Min
+  train+val group 0: 'safesyn' n=196086 train_w=1.000 val_w=0.500
+  train+val group 1: 'cid22_train' n=17611 train_w=1.500 val_w=2.000
+  train+val group 2: 'kadid' n=10125 train_w=0.500 val_w=1.000
+  train+val group 3: 'tid' n=3000 train_w=0.500 val_w=1.000
+  train+val group 4: 'konjnd_dense' n=20160 train_w=1.200 val_w=1.500
+anchor: ENABLED — 'jnd_anchor' n=2000 target_score=PER-ROW (V5 multi-band) step_p=0.050 weight=0.010
+per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
+tanh_output_head: ENABLED — y_score = 100·σ(y_pre/30.000) (active linear region y_pre∈[−3·scale, 3·scale])
+monotone_cbc: ENABLED — W1 per-feature mask: 300/372 pinned ≥0, 72 DROPPED (strict) ; w2_enc≥0, rank_w≤0, α≡1. Soft penalty (λ=1) + final projection at bake.
+  epoch   0 | lr=0.00100 | loss=1.0896 | val(geomean3)=0.3379 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.035,σ=0.843,max=0.042,p6=0.041] | safesyn: srocc=0.3439 plcc=0.2616 pwrc=0.4290 | cid22_train: srocc=0.3921 plcc=0.3128 pwrc=0.7545 | kadid: srocc=0.3961 plcc=0.4285 pwrc=0.7453 | tid: srocc=0.3963 plcc=0.4438 pwrc=0.7885 | konjnd_dense: srocc=0.4614 plcc=0.7801 pwrc=0.8782 | t=8.6s
+  epoch   9 | lr=0.00092 | loss=1.0797 | val(geomean3)=0.8724 (best=0.3379) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=-0.000,max=0.000,p6=0.000] | safesyn: srocc=0.9763 plcc=0.9176 pwrc=0.9942 | cid22_train: srocc=0.9831 plcc=0.9706 pwrc=0.9986 | kadid: srocc=0.8335 plcc=0.8299 pwrc=0.9599 | tid: srocc=0.8505 plcc=0.8728 pwrc=0.9804 | konjnd_dense: srocc=0.9789 plcc=0.9729 pwrc=0.9960 | t=73.0s
+MLP train (PER-SAMPLE-α): best val SROCC = 0.8724 | final reducer_w=[μ=0.000,σ=-0.000,max=0.000,p6=0.000] b_α=30.000
+output calibration spline: 2 knots from 1679 anchor bands
+  pred=50.18 → target=0.0
+  pred=50.20 → target=1.7
+re-baked with output calibration spline (257947 bytes)

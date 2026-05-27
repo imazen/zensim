@@ -121,11 +121,15 @@ fn feature_distortion_direction_analysis() {
     let mut per_feat_corrs: Vec<Vec<f64>> = vec![Vec::new(); NF];
     let mut identity_feats: Vec<Vec<f64>> = vec![Vec::new(); NF];
 
-    for (_cname, src) in &contents {
+    for (cname, src) in &contents {
         // Blur ladder (radius 0 = identity → 8). "detail loss".
         let blur_lvls: Vec<usize> = (0..=8).collect();
         let blur_xs: Vec<f64> = blur_lvls.iter().map(|&r| r as f64).collect();
         let mut blur_feats: Vec<Vec<f64>> = vec![Vec::new(); NF];
+        // Per-level full feature rows (level → 372 feats), emitted in the
+        // predict_features_with_bake wire format so any bake can be scored
+        // along this blur ladder to check degradation-monotonicity.
+        let mut blur_rows: Vec<Vec<f64>> = Vec::with_capacity(blur_lvls.len());
         for &r in &blur_lvls {
             let dst = if r == 0 { src.clone() } else { distort_blur(src, W, H, r) };
             let f = extract_372(src, &dst);
@@ -137,10 +141,21 @@ fn feature_distortion_direction_analysis() {
             for j in 0..NF {
                 blur_feats[j].push(f[j]);
             }
+            blur_rows.push(f);
         }
         for j in 0..NF {
             per_feat_corrs[j].push(spearman(&blur_xs, &blur_feats[j]));
         }
+        // Emit wire format: u32 LE n_features, u32 LE n_rows, f32 matrix.
+        let mut wire: Vec<u8> = Vec::new();
+        wire.extend_from_slice(&(NF as u32).to_le_bytes());
+        wire.extend_from_slice(&(blur_rows.len() as u32).to_le_bytes());
+        for row in &blur_rows {
+            for &v in row {
+                wire.extend_from_slice(&(v as f32).to_le_bytes());
+            }
+        }
+        let _ = std::fs::write(format!("/tmp/blur_ladder_{cname}.featmat"), &wire);
 
         // Posterize ladder (bits 8→1; distortion level = 8 − bits). "banding".
         let post_bits: Vec<u32> = vec![8, 7, 6, 5, 4, 3, 2, 1];
