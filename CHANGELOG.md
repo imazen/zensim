@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Fixed — FD gradient tests use f32-appropriate ε + atol+rtol gate (2026-05-27)
+
+The konjnd-agg 2-layer `w1` finite-difference gradient check (`rel < 1e-3` at
+ε=1e-6, added 2026-05-25) was reported as a "~2× gradient bug." It is NOT — the
+gradients are correct; the TEST was malformed. The forward computes in f32
+(`dot_bias` casts f64→f32), so a central difference is floor-limited: at ε=1e-6
+the rounding noise in `(f₊−f₋)` (~1e-7) swamps the signal, and a pure-relative
+gate is unbounded as the true gradient → 0. Fixed with ε=1e-2 + the standard
+`|num−ana| < atol + rtol·max(|·|)` gradcheck criterion (8be6b9c). Added a
+`backprop_heads_dl_dh` train-core test that isolates the head/encoder gradient
+(L=y, dl_dy=1) and passes cleanly, confirming the backprop is correct.
+Shipped bakes were never affected.
+
+### Docs — v47-strict QAT-native ship candidate staged (2026-05-27)
+
+The axiom-clean metric line has a fully-staged ship candidate for `Profile::A`
+(`v47_strict_qat_native_2026-05-27.bin`, 27 KB, one-pass QAT f16+zerobias):
+consolidated ship-methodology doc (`benchmarks/v0_qat_native_methodology_2026-05-27.md`,
+all 8 required sub-points), decisive q-sweep dial comparison vs V39
+(`benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`: 94.33% monotone / 0.33%
+tied vs V39 67.7% / 53.6%), and verified global corruption ordering
+(identity 97.69 > q20 40.36 > broken-decode). Fixed `v47_strict_qat.toml`'s
+`[bake]` block which pointed at a 257 KB pre-pack intermediate (95b49f1, 97c4c96).
+Ship-form (replace V39 vs sibling) is the user's call; no `Profile::A` flip yet.
+
 ### Added — `zensim_mlp_train --manifest <path.toml>` reproduce-this input mode (2026-05-27)
 
 Flips bake manifests (`zensim/weights/manifests/*.toml`) from output-only
