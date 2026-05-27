@@ -1816,4 +1816,59 @@ mod tests {
             "train_per_sample_alpha_head: Spearman {s} < 0.85"
         );
     }
+
+    // Task #35 isolation: FD-check backprop_heads' dl_dh (the gradient that
+    // flows into the encoder) against numerical dL/dh with L=y (dl_dy=1).
+    // Splits the konjnd-agg 2-layer gradient failure into head-vs-encoder.
+    // Small, non-saturating h so the tanh pin (absent here) / pool floors
+    // don't confound the FD.
+    #[test]
+    fn backprop_heads_dl_dh_matches_finite_difference() {
+        let nh = 8usize;
+        let mut st = 0x2468_ace0_1357_9bdfu64;
+        let mut nxt = || {
+            st ^= st << 13;
+            st ^= st >> 7;
+            st ^= st << 17;
+            ((st >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+        };
+        let h: Vec<f64> = (0..nh).map(|_| nxt() * 2.0).collect();
+        let rank_w: Vec<f64> = (0..nh).map(|_| nxt()).collect();
+        let rank_b = nxt();
+        let reducer_w: [f64; 4] = [nxt(), nxt(), nxt(), nxt()];
+        let reducer_b = nxt();
+        let w_alpha: Vec<f64> = (0..nh).map(|_| nxt()).collect();
+        let b_alpha = nxt();
+
+        let fwd = |hv: &[f64]| -> f64 {
+            forward_heads(hv, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha, nh).0
+        };
+        let (_, y_rank, y_pool, alpha, _, stats, max_idx) =
+            forward_heads(&h, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha, nh);
+        let mut g_rank_w = vec![0.0; nh];
+        let mut g_rank_b = 0.0;
+        let mut g_red_w = [0.0; 4];
+        let mut g_red_b = 0.0;
+        let mut g_w_alpha = vec![0.0; nh];
+        let mut g_b_alpha = 0.0;
+        let dl_dh = backprop_heads(
+            &h, &stats, max_idx, y_rank, y_pool, alpha, 1.0, &rank_w, &reducer_w, &w_alpha,
+            &mut g_rank_w, &mut g_rank_b, &mut g_red_w, &mut g_red_b, &mut g_w_alpha,
+            &mut g_b_alpha, nh, 0.01,
+        );
+        let eps = 1e-6;
+        for j in 0..nh {
+            let mut hp = h.clone();
+            hp[j] += eps;
+            let mut hm = h.clone();
+            hm[j] -= eps;
+            let num = (fwd(&hp) - fwd(&hm)) / (2.0 * eps);
+            let ana = dl_dh[j];
+            let rel = (num - ana).abs() / num.abs().max(ana.abs()).max(1e-6);
+            assert!(
+                rel < 1e-4,
+                "backprop_heads dl_dh[{j}] num={num:.8} ana={ana:.8} rel={rel:.2e}"
+            );
+        }
+    }
 }
