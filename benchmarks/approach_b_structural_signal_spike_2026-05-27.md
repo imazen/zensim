@@ -90,8 +90,17 @@ differs from the ref by >1. Photo sq8/sq16: `px>1=14/38`. Even the whole-image
 variant (screen chroma_rmse 0.93, photo 0.87) is far below honest q20
 (chroma_rmse ~2.2–2.9). So the signal's "chroma_boundary 0%" is **correct** —
 there is nothing to detect; the generator's localized chroma_boundary is
-effectively identity. This is a **codec-corpus#7 generator bug**, filed
-separately. Excluding chroma_boundary, the clean op100 headline is:
+effectively identity. This is a **codec-corpus generator bug** (filed: codec-corpus#9).
+
+**`block_repeat_neighbor` has the same no-op pattern** (also in #9): screen
+op100 changes ZERO pixels at every region INCLUDING whole-image; photo
+whole-image is also zero (`px>1=0`), localized is weak (sq64 luma_rmse 2.63).
+Its working analog `block_copy_wrong` produces real error (whole luma_rmse
+48–61) — so the "copy a block" mechanic is fine; specifically copying the
+*adjacent* (identical) block degenerates to identity. Both no-op families
+should be excluded from detection-rate denominators.
+
+Excluding chroma_boundary, the clean op100 headline is:
 
 | | PHOTO op100 | SCREEN op100 |
 |---|--:|--:|
