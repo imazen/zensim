@@ -7856,7 +7856,7 @@ fn predict_group_per_sample_alpha_head(
 mod arch;
 mod arch_f32;
 pub use arch::{ArchForward, arch_forward, arch_backward};
-pub use arch_f32::{ArchForwardF32, WeightScratchF32, arch_forward_f32, arch_backward_f32};
+pub use arch_f32::{ArchForwardF32, WeightScratchF32, arch_forward_f32};
 
 /// NiN-aware flush for the per-sample α head. Computes NiN over the
 /// 2N surviving predictions and routes per-prediction grad through

@@ -25,8 +25,7 @@
 
 use std::cell::RefCell;
 use zensim_train_core::simd_encoder::{
-    dot_bias_f32, encoder_backprop_layer1_f32, encoder_forward_2layer_f32,
-    encoder_forward_f32, leaky_relu_backward_f32, skip_backward_f32, skip_forward_f32,
+    dot_bias_f32, encoder_forward_2layer_f32, encoder_forward_f32, skip_forward_f32,
 };
 
 use super::arch::ArchForward;
@@ -278,17 +277,16 @@ pub fn arch_forward_f32(
     })
 }
 
-// Thread-local f32 scratch for backward grad accumulation + per-pair
-// feature cast. SIMD kernels write into these; we then cast-add into
-// the f64 Adam accumulators in a single linear pass. Reused across
-// pair-steps per worker thread (Rayon workers each see their own).
+
+// Thread-local f32 scratch for the per-pair feature cast (x: f64 → f32).
+// Reused across pair-steps per worker thread so the hot loop does no
+// per-pair malloc. (The f32 *backward* path — arch_backward_f32 + its
+// grad scratch — was prototyped here but reverted: it measured net
+// slower than the f64 wrapper's in-place accumulate. It will return
+// when the parallel K-batch driver lands, which needs per-thread grad
+// buffers anyway. See task: parallel PSAH batch.)
 thread_local! {
     static SCRATCH_X_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static SCRATCH_GW1_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static SCRATCH_GB1_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static SCRATCH_GW2_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static SCRATCH_GB2_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static SCRATCH_DLDH1_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
 }
 
 fn with_x_f32<R>(x: &[f64], body: impl FnOnce(&[f32]) -> R) -> R {
@@ -302,262 +300,4 @@ fn with_x_f32<R>(x: &[f64], body: impl FnOnce(&[f32]) -> R) -> R {
         }
         body(&buf)
     })
-}
-
-fn with_scratch_grad<R>(
-    n_grad_w1: usize,
-    n_grad_b1: usize,
-    n_grad_w2: usize,
-    n_grad_b2: usize,
-    n_dldh1: usize,
-    body: impl FnOnce(&mut [f32], &mut [f32], &mut [f32], &mut [f32], &mut [f32]) -> R,
-) -> R {
-    SCRATCH_GW1_F32.with(|gw1| {
-        SCRATCH_GB1_F32.with(|gb1| {
-            SCRATCH_GW2_F32.with(|gw2| {
-                SCRATCH_GB2_F32.with(|gb2| {
-                    SCRATCH_DLDH1_F32.with(|dldh1| {
-                        let mut gw1_b = gw1.borrow_mut();
-                        let mut gb1_b = gb1.borrow_mut();
-                        let mut gw2_b = gw2.borrow_mut();
-                        let mut gb2_b = gb2.borrow_mut();
-                        let mut dldh1_b = dldh1.borrow_mut();
-                        ensure_zeroed(&mut gw1_b, n_grad_w1);
-                        ensure_zeroed(&mut gb1_b, n_grad_b1);
-                        ensure_zeroed(&mut gw2_b, n_grad_w2);
-                        ensure_zeroed(&mut gb2_b, n_grad_b2);
-                        ensure_zeroed(&mut dldh1_b, n_dldh1);
-                        body(
-                            &mut gw1_b,
-                            &mut gb1_b,
-                            &mut gw2_b,
-                            &mut gb2_b,
-                            &mut dldh1_b,
-                        )
-                    })
-                })
-            })
-        })
-    })
-}
-
-fn ensure_zeroed(buf: &mut Vec<f32>, n: usize) {
-    if buf.len() < n {
-        buf.resize(n, 0.0);
-    }
-    for v in buf[..n].iter_mut() {
-        *v = 0.0;
-    }
-}
-
-/// Cast-and-add: `dst[i] += src[i] as f64`. Single linear pass.
-#[inline]
-fn add_f32_to_f64(dst: &mut [f64], src: &[f32]) {
-    debug_assert_eq!(dst.len(), src.len());
-    for (d, &s) in dst.iter_mut().zip(src.iter()) {
-        *d += s as f64;
-    }
-}
-
-/// Architecture-dispatched backward (1-layer or 2-layer, ± skip),
-/// f32-native compute. f64 Adam grad accumulators receive
-/// `f32 → f64` cast-add at the end of the pass. `x` is cast into
-/// the thread-local scratch on entry.
-#[allow(clippy::too_many_arguments)]
-pub fn arch_backward_f32(
-    x: &[f64],
-    fwd: &ArchForwardF32,
-    dl_dy: f64,
-    s: &WeightScratchF32,
-    gw1_concat: &mut [f64],
-    gb1_concat: &mut [f64],
-    g_rank_w: &mut [f64],
-    g_rank_b: &mut f64,
-    g_reducer_w: &mut [f64; 4],
-    g_reducer_b: &mut f64,
-    g_w_alpha: &mut [f64],
-    g_b_alpha: &mut f64,
-    n_features: usize,
-    n_hidden1: usize,
-    n_hidden_final: usize,
-    leaky: f32,
-    use_2layer: bool,
-    use_skip: bool,
-) {
-    with_x_f32(x, |x_f32| arch_backward_f32_inner(
-        x_f32, fwd, dl_dy, s,
-        gw1_concat, gb1_concat,
-        g_rank_w, g_rank_b, g_reducer_w, g_reducer_b, g_w_alpha, g_b_alpha,
-        n_features, n_hidden1, n_hidden_final,
-        leaky, use_2layer, use_skip,
-    ))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn arch_backward_f32_inner(
-    x: &[f32],
-    fwd: &ArchForwardF32,
-    dl_dy: f64,
-    s: &WeightScratchF32,
-    gw1_concat: &mut [f64],
-    gb1_concat: &mut [f64],
-    g_rank_w: &mut [f64],
-    g_rank_b: &mut f64,
-    g_reducer_w: &mut [f64; 4],
-    g_reducer_b: &mut f64,
-    g_w_alpha: &mut [f64],
-    g_b_alpha: &mut f64,
-    n_features: usize,
-    n_hidden1: usize,
-    n_hidden_final: usize,
-    leaky: f32,
-    use_2layer: bool,
-    use_skip: bool,
-) {
-    // Heads backward (computed in f64 for grad-accumulator precision,
-    // but reads f32 forward intermediates with on-the-fly promotion).
-    let dl_dy_rank = dl_dy * fwd.alpha as f64;
-    let dl_dy_pool = dl_dy * (1.0 - fwd.alpha as f64);
-    let dl_dalpha = dl_dy * (fwd.y_rank as f64 - fwd.y_pool as f64);
-    let dl_dalpha_logit = dl_dalpha * fwd.alpha as f64 * (1.0 - fwd.alpha as f64);
-
-    for j in 0..n_hidden_final {
-        g_rank_w[j] += dl_dy_rank * fwd.h[j] as f64;
-    }
-    *g_rank_b += dl_dy_rank;
-    for k in 0..4 {
-        g_reducer_w[k] += dl_dy_pool * fwd.stats[k] as f64;
-    }
-    *g_reducer_b += dl_dy_pool;
-    for j in 0..n_hidden_final {
-        g_w_alpha[j] += dl_dalpha_logit * fwd.h[j] as f64;
-    }
-    *g_b_alpha += dl_dalpha_logit;
-
-    // dl_dh assembly (f32 to feed the f32 encoder backprop).
-    let mut dl_dh_f32 = vec![0.0f32; n_hidden_final];
-    let dl_dy_rank_f32 = dl_dy_rank as f32;
-    let dl_dalpha_logit_f32 = dl_dalpha_logit as f32;
-    for j in 0..n_hidden_final {
-        dl_dh_f32[j] += dl_dy_rank_f32 * s.rank_w[j];
-        dl_dh_f32[j] += dl_dalpha_logit_f32 * s.w_alpha[j];
-    }
-    let n_f = n_hidden_final as f32;
-    let mu = fwd.stats[0];
-    let sigma = fwd.stats[1];
-    let p6 = fwd.stats[3];
-    let inv_sigma_n = if sigma > POOL_STD_FLOOR + 1e-6 {
-        1.0 / (n_f * sigma)
-    } else {
-        0.0
-    };
-    let p6_floor = p6.max(1e-6);
-    let inv_p6_pow5_n = 1.0 / (n_f * p6_floor.powi(5));
-    let dl_dstat_f32: [f32; 4] = [
-        dl_dy_pool as f32 * s.reducer_w[0],
-        dl_dy_pool as f32 * s.reducer_w[1],
-        dl_dy_pool as f32 * s.reducer_w[2],
-        dl_dy_pool as f32 * s.reducer_w[3],
-    ];
-    for j in 0..n_hidden_final {
-        let hj = fwd.h[j];
-        dl_dh_f32[j] += dl_dstat_f32[0] / n_f;
-        dl_dh_f32[j] += dl_dstat_f32[1] * (hj - mu) * inv_sigma_n;
-        if j == fwd.max_idx {
-            dl_dh_f32[j] += dl_dstat_f32[2];
-        }
-        let abs_hj = hj.abs();
-        let sign_hj = if hj >= 0.0 { 1.0 } else { -1.0 };
-        let abs_pow5 = abs_hj * abs_hj * abs_hj * abs_hj * abs_hj;
-        dl_dh_f32[j] += dl_dstat_f32[3] * sign_hj * abs_pow5 * inv_p6_pow5_n;
-    }
-
-    // Encoder backward — compute in f32 scratch, then cast-add to f64.
-    let n_w1 = n_features * n_hidden1;
-    let n_w2_enc = n_hidden1 * n_hidden_final;
-
-    with_scratch_grad(
-        n_w1,
-        n_hidden1,
-        n_w2_enc,
-        n_hidden_final,
-        n_hidden1,
-        |gw1_f32, gb1_f32, gw2_f32, gb2_f32, dldh1_f32| {
-            if use_2layer {
-                // Layer 2.
-                let dl_dh2_pre = leaky_relu_backward_f32(&dl_dh_f32, &fwd.h_pre, leaky);
-                encoder_backprop_layer1_f32(
-                    &fwd.h1,
-                    &dl_dh2_pre,
-                    gw2_f32,
-                    gb2_f32,
-                    n_hidden1,
-                    n_hidden_final,
-                );
-
-                // Propagate to layer-1 (dl_dh1 = w2_enc · dl_dh2_pre).
-                for j in 0..n_hidden1 {
-                    let row = &s.w2_enc[j * n_hidden_final..(j + 1) * n_hidden_final];
-                    let mut acc = 0.0f32;
-                    for k in 0..n_hidden_final {
-                        acc += dl_dh2_pre[k] * row[k];
-                    }
-                    dldh1_f32[j] = acc;
-                }
-
-                // Layer 1.
-                let dl_dh1_pre = leaky_relu_backward_f32(dldh1_f32, &fwd.h1_pre, leaky);
-                encoder_backprop_layer1_f32(
-                    x,
-                    &dl_dh1_pre,
-                    gw1_f32,
-                    gb1_f32,
-                    n_features,
-                    n_hidden1,
-                );
-
-                // Cast-add the f32 grads into the f64 accumulators.
-                add_f32_to_f64(&mut gw1_concat[..n_w1], gw1_f32);
-                add_f32_to_f64(&mut gb1_concat[..n_hidden1], gb1_f32);
-                add_f32_to_f64(&mut gw1_concat[n_w1..n_w1 + n_w2_enc], gw2_f32);
-                add_f32_to_f64(
-                    &mut gb1_concat[n_hidden1..n_hidden1 + n_hidden_final],
-                    gb2_f32,
-                );
-            } else {
-                let dl_dh_pre = leaky_relu_backward_f32(&dl_dh_f32, &fwd.h_pre, leaky);
-                encoder_backprop_layer1_f32(
-                    x,
-                    &dl_dh_pre,
-                    gw1_f32,
-                    gb1_f32,
-                    n_features,
-                    n_hidden1,
-                );
-                add_f32_to_f64(&mut gw1_concat[..n_w1], gw1_f32);
-                add_f32_to_f64(&mut gb1_concat[..n_hidden1], gb1_f32);
-            }
-        },
-    );
-
-    if use_skip {
-        let skip_offset_w = if use_2layer {
-            n_features * n_hidden1 + n_hidden1 * n_hidden_final
-        } else {
-            n_features * n_hidden1
-        };
-        let skip_offset_b = if use_2layer {
-            n_hidden1 + n_hidden_final
-        } else {
-            n_hidden1
-        };
-        let mut gw_skip_f32 = vec![0.0f32; n_features];
-        let mut gb_skip_f32 = 0.0f32;
-        skip_backward_f32(x, dl_dy as f32, &mut gw_skip_f32, &mut gb_skip_f32);
-        add_f32_to_f64(
-            &mut gw1_concat[skip_offset_w..skip_offset_w + n_features],
-            &gw_skip_f32,
-        );
-        gb1_concat[skip_offset_b] += gb_skip_f32 as f64;
-    }
 }
