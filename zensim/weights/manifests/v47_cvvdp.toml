@@ -118,14 +118,14 @@ path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_c
 sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
 
 [eval]
-verdict_file  = "../../../benchmarks/v0_qat_native_methodology_2026-05-27.md"
-cid22_srocc   = 0.8657   # QAT-native (bake_verdict), best of the v47 axiom-clean candidates
-kadid_srocc   = 0.7933
-tid_srocc     = 0.7927
-konjnd_srocc  = 0.4185   # f16+zerobias removes fine-weight PJND precision (intrinsic; non-QAT recal keeps 0.485)
-aic3_srocc    = 0.7680
-aic4_srocc    = 0.8854
-qsweep_monotonicity = 0.9433  # JPEG 50img×19q, vs V39 0.6767 (V39 dial broken: median→0 q55–q95)
-identity      = 97.69    # the dial max; V39 BROKEN (identity=0 on every ref)
-blur_above_identity = 0  # the V39 defect, FIXED by construction
-notes = "Costs vs V39 (rank only): CID22 -0.014, KADID -0.132, TID -0.139, KonJND -0.001, AIC-3/4 -0.034/-0.020 — the 72 dropped sign-flip features' analytic-distortion signal + f16 PJND precision. Gains: blur>identity FIXED, identity=max FIXED (V39 scores 0), monotone codec dial (q-sweep 94.3% vs V39 67.7%, 0.33% vs 53.6% tied), 27 KB vs 257 KB, native one-pass packing. V39's higher KADID/TID rank is moot for the dial use case (its dial is non-invertible). Ship decision (replace V39 at Profile::A vs add sibling) USER-GATED — see methodology doc."
+verdict_file  = "../../../benchmarks/v47_cvvdp_target_FALSIFIED_2026-05-27.md"
+# FALSIFIED — worse than the shipped v47-ssim2 on EVERY corpus + EVERY panel
+# stat (reproduces the V41 scalar-CVVDP dead end). DO NOT SHIP.
+cid22_srocc   = 0.6963   # vs ssim2-target 0.8657 (−0.169)
+kadid_srocc   = 0.7101   # vs 0.7933
+tid_srocc     = 0.6799   # vs 0.7927
+konjnd_srocc  = 0.3288   # vs 0.4185
+aic3_srocc    = 0.6098   # vs 0.7680
+aic4_srocc    = 0.5810   # vs 0.8854 (−0.304)
+g1_dial       = 0.58     # vs ssim2-target 0.97 (p5=−47.1 p95=70.3 — dial doesn't reach top)
+notes = "FALSIFIED. Scalar-CVVDP-target produces a strictly worse metric than ssim2-target on all 6 held-out corpora across the full Mohammadi panel — emulating CVVDP's scalar OUTPUT != having its CSF mechanism (V41 reproduced: CID22 0.696 ~ V41's 0.66). The diffmap use case would need SPATIAL cvvdp-diffmap supervision (data we don't have), NOT scalar-target. See benchmarks/v47_cvvdp_target_FALSIFIED_2026-05-27.md."
