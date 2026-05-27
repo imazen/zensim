@@ -29,6 +29,22 @@ range — exactly why the sweep was necessary. Per-image variance is high and
 the judges disagree per-image (e.g. `graph`: cvvdp-loop +20% but butt-loop
 −3.7%); trust the aggregate.
 
+### Same data, re-referenced to the butteraugli loop (zensim as a visible column)
+
+The table above uses zensim as the baseline (so it has no column). Re-referenced
+to the **butteraugli loop** (the default encoder = 0%), all loops are peers
+(NEG = fewer bytes at equal quality = better than default; `C` = circular):
+
+| judge | zensim-v47 vs default | cvvdp vs default |
+|---|--:|--:|
+| ssim2 | **−2.0%** (photo −0.5, screen −3.7) | −1.1% |
+| cvvdp | **−2.8%** (photo −0.9, screen −5.1) | −1.0% `C` |
+
+(butteraugli axis circular for the butteraugli base — omitted.) Ranking of the
+diffmaps, best→worst: **zensim-v47** (−2 to −3% vs default, most on screen) >
+**cvvdp** (~−1%) > **butteraugli** (default). So the zensim-v47 diffmap is a
+real ~2–3% RD improvement over the stock butteraugli loop on this sweep.
+
 **Conclusion: KEEP the shipped v47 zensim diffmap — it is the best of the three
 on a real sweep.** This vindicates the shipped Profile::A for the RD use case
 too (not just the dial). The earlier "ssim2 flips it, zensim worst" was a smoke
