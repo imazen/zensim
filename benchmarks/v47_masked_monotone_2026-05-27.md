@@ -57,3 +57,59 @@ ship as A: (1) dial calibration (v48 tanh-scale), (2) the KADID/TID rank
 cost (−0.12/−0.14) is the price of strict monotonicity — a user call,
 since CID22 (the compression gold standard) stays competitive and KADID/
 TID are integrity guards, not the primary compression target.
+
+## v48 (tanh=5) — FALSIFIED; dial is structural, not a tanh-scale knob
+
+Hypothesis: a smaller `--tanh-output-head-scale` (30→5) would amplify the
+compressed real-content `y_pre` spread across [0,100]. Result: WORSE.
+Monotonicity held (0 inversions) but the panel cratered — CID22
+0.855→0.574, KonJND 0.485→0.030, all corpora down — and the dial got
+NARROWER ([−33,−6.7]). A steeper sigmoid saturates + vanishing-gradients
+the encoder. Smaller tanh scale is the wrong lever.
+
+### Root cause (characterized)
+
+The monotone bake has `y_pre = rank_w·h + rank_b ≤ rank_b` (rank_w ≤ 0,
+h ≥ 0). Real distorted content has SMALL error features (subtle
+artifacts) → small h → `y_pre ≈ rank_b ≈ 0` → tanh-pin ≈ 50. The rank
+signal lives in a ~0.05-wide pred band around 50. The auto-spline
+forwards the anchor, takes median-pred per target band — but every band
+maps to ~49.9, so the "strictly increasing in pred" filter keeps only
+2 knots and the spline degenerates (maps the 0.05 band → [0,1.7], val
+content extrapolates to negatives → G1 fail).
+
+This is a TRAINING-TIME dial-spread problem, not a calibration or
+tanh-scale one:
+- auto-spline: degenerate on the compressed distribution (can't fix).
+- tanh-scale: smaller saturates (v48 falsified); larger narrows further.
+- dynamic-range-floor (the G1 lever): rides the cross-codec-eq substrate,
+  which PANICS on 2-layer (`multi-layer/skip + cross_codec_eq: not yet
+  wired`). Not a drop-in for the 2-layer V32-faithful recipe.
+
+Candidate fixes (each a distinct experiment):
+1. **1-layer + dynamic-range-floor** — drop to 1-layer (where cross-codec-eq
+   / dynamic-range-floor ARE wired) + add the dial-spread regularizer.
+2. **rank_b spread incentive** — force/init rank_b large positive so the
+   identity case anchors at 100 and distortion spreads down.
+3. **Calibration refit on a real corpus** — fit the spline on CID22 preds
+   (not the degenerate anchor); but the bake's 0.05 real-content band
+   means a ~2000× gain → hypersensitive dial.
+
+## Decision framing
+
+The CORRECTNESS goal is ACHIEVED: v47-strict is monotone-by-construction
+(0 inversions, identity=max), competitive with ssim2/cvvdp on CID22/AIC-3,
+and BEST-of-field on KonJND (0.485 vs cvvdp 0.048, iwssim 0.186, V39 0.420).
+Its only deficits are KADID/TID (the benchmark V39 is the outlier-high
+there vs the conventional baselines) and the structurally-compressed dial.
+
+Two paths:
+- **Ship v47-strict as a sibling profile** (e.g. Profile::A_Strict / a
+  "monotone similarity" profile) for the regression-test / general-
+  similarity use case where monotonicity > dial range; keep V39 as
+  Profile::A for the codec quality-dial (good range, accepts OOD
+  inversion). Different use cases, different profiles. (User anticipated
+  this: "ships as a sibling profile for users that need the guarantee.")
+- **Pursue the dial fix** (1-layer + dynamic-range-floor is the most
+  promising) to get ONE bake that is both monotone AND full-dial — then
+  it could replace V39 at Profile::A outright.

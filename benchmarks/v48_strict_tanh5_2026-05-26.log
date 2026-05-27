@@ -1,0 +1,20 @@
+MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy=Min
+  train+val group 0: 'safesyn' n=196086 train_w=1.000 val_w=0.500
+  train+val group 1: 'cid22_train' n=17611 train_w=1.500 val_w=2.000
+  train+val group 2: 'kadid' n=10125 train_w=0.500 val_w=1.000
+  train+val group 3: 'tid' n=3000 train_w=0.500 val_w=1.000
+  train+val group 4: 'konjnd_dense' n=20160 train_w=1.200 val_w=1.500
+anchor: ENABLED — 'jnd_anchor' n=2000 target_score=PER-ROW (V5 multi-band) step_p=0.050 weight=0.010
+per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
+tanh_output_head: ENABLED — y_score = 100·σ(y_pre/5.000) (active linear region y_pre∈[−3·scale, 3·scale])
+monotone_cbc: ENABLED — W1 per-feature mask: 300/372 pinned ≥0, 72 DROPPED (strict) ; w2_enc≥0, rank_w≤0, α≡1. Soft penalty (λ=1) + final projection at bake.
+  epoch   0 | lr=0.00100 | loss=1.3417 | val(geomean3)=0.4048 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.044,σ=0.991,max=0.044,p6=0.044] | safesyn: srocc=0.7013 plcc=0.5925 pwrc=0.6336 | cid22_train: srocc=0.6893 plcc=0.6688 pwrc=0.9382 | kadid: srocc=0.3036 plcc=0.3008 pwrc=0.7261 | tid: srocc=0.3566 plcc=0.4069 pwrc=0.8477 | konjnd_dense: srocc=0.7320 plcc=0.6660 pwrc=0.8792 | t=8.2s
+  epoch  25 | lr=0.00050 | loss=1.0581 | val(geomean3)=0.8961 (best=0.4048) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=-0.000,max=0.000,p6=0.000] | safesyn: srocc=0.9617 plcc=0.9084 pwrc=0.9936 | cid22_train: srocc=0.9784 plcc=0.9571 pwrc=0.9977 | kadid: srocc=0.8626 plcc=0.8608 pwrc=0.9691 | tid: srocc=0.8676 plcc=0.8856 pwrc=0.9835 | konjnd_dense: srocc=0.9804 plcc=0.9763 pwrc=0.9966 | t=136.8s
+  epoch  50 | lr=0.00100 | loss=1.0650 | val(geomean3)=0.8940 (best=0.8961) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=-0.000,max=0.000,p6=0.000] | safesyn: srocc=0.9742 plcc=0.9140 pwrc=0.9946 | cid22_train: srocc=0.9779 plcc=0.9586 pwrc=0.9977 | kadid: srocc=0.8600 plcc=0.8582 pwrc=0.9681 | tid: srocc=0.8644 plcc=0.8865 pwrc=0.9828 | konjnd_dense: srocc=0.9817 plcc=0.9772 pwrc=0.9970 | t=279.4s
+  epoch  75 | lr=0.00050 | loss=1.0977 | val(geomean3)=0.8918 (best=0.8961) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=0.000,max=-0.000,p6=-0.000] | safesyn: srocc=0.9567 plcc=0.8932 pwrc=0.9920 | cid22_train: srocc=0.9807 plcc=0.9543 pwrc=0.9976 | kadid: srocc=0.8569 plcc=0.8558 pwrc=0.9673 | tid: srocc=0.8642 plcc=0.8849 pwrc=0.9834 | konjnd_dense: srocc=0.9825 plcc=0.9776 pwrc=0.9970 | t=390.3s
+  early stop at epoch 75 (no val improvement for 50 epochs)
+MLP train (PER-SAMPLE-α): best val SROCC = 0.8961 | final reducer_w=[μ=0.000,σ=0.000,max=-0.000,p6=-0.000] b_α=30.000
+output calibration spline: 2 knots from 1679 anchor bands
+  pred=49.92 → target=0.0
+  pred=49.97 → target=1.7
+re-baked with output calibration spline (257947 bytes)
