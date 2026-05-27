@@ -81,6 +81,22 @@ generated), screen op100 → ~85.5% and photo → ~97.4%.
   rescues thin/hard defects on photo (honest photo has zero pixel spikes),
   chroma lifts both (screen 47.5→55.8%, photo 68.8→71.2%).
 
+### chroma_boundary is a CORPUS no-op, not a metric gap (diagnosed)
+
+Direct check (`/tmp/chroma-boundary-check.log`): chroma_boundary's localized
+variants change **zero pixels**. Screen sq8/sq16/sq64 op100:
+`luma_rmse=0.00 chroma_rmse=0.00 maxpix=0.0 px>1=0` — literally no pixel
+differs from the ref by >1. Photo sq8/sq16: `px>1=14/38`. Even the whole-image
+variant (screen chroma_rmse 0.93, photo 0.87) is far below honest q20
+(chroma_rmse ~2.2–2.9). So the signal's "chroma_boundary 0%" is **correct** —
+there is nothing to detect; the generator's localized chroma_boundary is
+effectively identity. This is a **codec-corpus#7 generator bug**, filed
+separately. Excluding chroma_boundary, the clean op100 headline is:
+
+| | PHOTO op100 | SCREEN op100 |
+|---|--:|--:|
+| **real localized defects (chroma_boundary excluded)** | **97.4% (74/76)** | **85.5% (65/76)** |
+
 ## Honest gaps — the op100 residual (faint blends excluded)
 
 Only **8 photo / 22 screen** op100 defects go undetected:
