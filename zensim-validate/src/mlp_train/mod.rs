@@ -7855,70 +7855,78 @@ fn train_mlp_per_sample_alpha_head(
     // handle the injection.
     if anchor_active && !std_anchor_features.is_empty() {
         if let Some(a) = anchor {
-            let mut band_preds: std::collections::HashMap<i64, Vec<f64>> =
-                std::collections::HashMap::new();
+            // Forward the anchor through the net the bake will SHIP — when
+            // QAT is on, that's the f16+zerobias-quantized net, so the dial
+            // spline calibrates exactly what ships (quantize-then-calibrate
+            // in ONE pass; no post-hoc identity/dial surprise). Then fit a
+            // quantile-binned monotone PCHIP. This REPLACES the old
+            // band-by-target + 0.01-pred-filter, which collapsed to 2
+            // degenerate knots on the narrow (~0.4-wide) tanh-pin band and
+            // shipped a broken (all-negative / identity=0) dial.
+            let (cqw1, cqw2, cqws, cqrw, cqwa);
+            let (sw1, sw2, sws, srw, swa): (&[f64], &[f64], &[f64], &[f64], &[f64]) =
+                if qat_fine_tune_epochs > 0 {
+                    cqw1 = qat_quantize_copy(&w1, qat_tau);
+                    cqw2 = qat_quantize_copy(&w2_enc, qat_tau);
+                    cqws = qat_quantize_copy(&w_skip, qat_tau);
+                    cqrw = qat_quantize_copy(&rank_w, qat_tau);
+                    cqwa = qat_quantize_copy(&w_alpha, qat_tau);
+                    (&cqw1, &cqw2, &cqws, &cqrw, &cqwa)
+                } else {
+                    (
+                        w1.as_slice(),
+                        w2_enc.as_slice(),
+                        w_skip.as_slice(),
+                        rank_w.as_slice(),
+                        w_alpha.as_slice(),
+                    )
+                };
+            let mut sp_preds: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
+            let mut sp_targets: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
             for (i, af) in std_anchor_features.iter().enumerate() {
                 let fwd = arch_forward(
-                    af, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+                    af, sw1, &b1, sw2, &b2_enc, sws, b_skip,
+                    srw, rank_b, &reducer_w, reducer_b, swa, b_alpha,
                     n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                 );
                 let (pinned, _) = pin_forward(fwd.y);
                 let target = a.target_scores
                     .and_then(|ts| ts.get(i).copied())
                     .unwrap_or(hyperparams.anchor_target_score);
-                let key = (target * 100.0) as i64;
-                band_preds.entry(key).or_default().push(pinned);
+                sp_preds.push(pinned);
+                sp_targets.push(target);
             }
 
-            let mut knots: Vec<(f64, f64)> = Vec::new();
-            let mut bands: Vec<(f64, f64)> = band_preds.iter()
-                .map(|(&key, preds)| {
-                    let target = key as f64 / 100.0;
-                    let mut sorted = preds.clone();
-                    sorted.sort_by(|a, b| a.total_cmp(b));
-                    let median = sorted[sorted.len() / 2];
-                    (target, median)
-                })
-                .collect();
-            bands.sort_by(|a, b| a.0.total_cmp(&b.0));
-
-            // Enforce strict monotonicity in x (median_pred)
-            for (target, median_pred) in &bands {
-                if knots.is_empty() || *median_pred > knots.last().unwrap().0 + 0.01 {
-                    knots.push((*median_pred, *target));
-                }
-            }
-
-            if knots.len() >= 2 {
+            if let Some(payload) =
+                crate::output_calibration_spline::fit_monotone_spline(&sp_preds, &sp_targets, 18)
+            {
                 log_line(
                     &format!(
-                        "output calibration spline: {} knots from {} anchor bands",
-                        knots.len(), bands.len()
+                        "output calibration spline: fit_monotone_spline on {} anchor rows (qat={})",
+                        sp_preds.len(),
+                        qat_fine_tune_epochs > 0
                     ),
                     log,
                 );
-                for &(x, y) in &knots {
-                    log_line(&format!("  pred={x:.2} → target={y:.1}"), log);
-                }
-
-                // Encode payload and RE-BAKE with the spline metadata.
-                let mut payload = Vec::with_capacity(4 + 8 * knots.len());
-                payload.extend_from_slice(&(knots.len() as u32).to_le_bytes());
-                for &(x, y) in &knots {
-                    payload.extend_from_slice(&(x as f32).to_le_bytes());
-                    payload.extend_from_slice(&(y as f32).to_le_bytes());
-                }
 
                 // Re-bake the model with the spline included.
                 // monotone_cbc: project here too — the final spline-augmented
                 // bake must be monotone-by-construction (spline is monotone,
                 // so the network must be).
-                let bake_w1      = proj_w1_masked(&w1);
-                let bake_w2_enc  = proj_geq0(&w2_enc);
-                let bake_rank_w  = proj_leq0(&rank_w);
-                let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                let mut bake_w1      = proj_w1_masked(&w1);
+                let mut bake_w2_enc  = proj_geq0(&w2_enc);
+                let mut bake_rank_w  = proj_leq0(&rank_w);
+                let mut bake_w_alpha = proj_w_alpha_zero(&w_alpha);
                 let bake_b_alpha = proj_b_alpha_one(b_alpha);
+                if qat_fine_tune_epochs > 0 {
+                    // QAT: ship the f16+zerobias weights the forward + the
+                    // spline-fit above were calibrated against (quantize
+                    // AFTER the hard sign projection).
+                    bake_w1 = qat_quantize_copy(&bake_w1, qat_tau);
+                    bake_w2_enc = qat_quantize_copy(&bake_w2_enc, qat_tau);
+                    bake_rank_w = qat_quantize_copy(&bake_rank_w, qat_tau);
+                    bake_w_alpha = qat_quantize_copy(&bake_w_alpha, qat_tau);
+                }
                 let model = psah::PerSampleAlphaHeadModel {
                     scaler_mean: scaler_mean.clone(),
                     scaler_scale: scaler_scale.clone(),
