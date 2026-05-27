@@ -5902,6 +5902,18 @@ fn train_mlp_per_sample_alpha_head(
         }
     };
 
+    // F32 weight scratch for arch_forward_f32 hot path. Refreshed at
+    // the END of every do_adam_step (the only point where weights
+    // change). Held in a RefCell so the closure can borrow_mut()
+    // it without changing the closure's parameter list.
+    let scratch_f32 = std::cell::RefCell::new(arch_f32::WeightScratchF32::new(
+        n_features,
+        n_hidden,
+        n_hidden_final,
+        use_2layer,
+        use_skip,
+    ));
+
     // Adam-step closure: pack/unpack our parameters into the Adam slots.
     // Adam step closure — packs all weight vectors into the concatenated
     // adam slots, runs one step, then unpacks. For multi-layer / skip,
@@ -6046,7 +6058,22 @@ fn train_mlp_per_sample_alpha_head(
             adam.mw2[ba] = 0.0;
             adam.vw2[ba] = 0.0;
         }
+
+        // Refresh the f32 weight scratch — weights just changed.
+        // RefCell mutable borrow is safe here because arch_forward_f32
+        // callers only hold immutable borrows during their own scope,
+        // which is disjoint from this closure's invocation.
+        scratch_f32.borrow_mut().refresh(
+            w1, b1, w2_enc, b2_enc, w_skip, *b_skip,
+            rank_w, *rank_b, reducer_w, *reducer_b, w_alpha, *b_alpha,
+        );
     };
+
+    // Initial cast (before any Adam step has fired).
+    scratch_f32.borrow_mut().refresh(
+        &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
+        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+    );
 
     let mut nin_buffer: Vec<Option<PerSampleAlphaPairForward<'_>>> = if nin_on {
         Vec::with_capacity(k)
@@ -6115,16 +6142,26 @@ fn train_mlp_per_sample_alpha_head(
             let xa = &g_feats[ia * n_features..(ia + 1) * n_features];
             let xb = &g_feats[ib * n_features..(ib + 1) * n_features];
 
-            let fwd_a = arch_forward(
-                xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
-            );
-            let fwd_b = arch_forward(
-                xb, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
-            );
+            // F32-native forward: weights pre-cast in scratch_f32 (refreshed
+            // by do_adam_step), x cast once into thread-local buffer.
+            // Eliminates ~190 KB of per-pair weight cast + 5 Vec allocs.
+            // (Backward stays on the f64 wrapper: arch_backward_f32 added a
+            // redundant grad-buffer zero + cast-add pass that measured net
+            // slower than the f64 wrapper's in-place accumulate.)
+            let fwd_a = {
+                let s = scratch_f32.borrow();
+                arch_f32::arch_forward_f32(
+                    xa, &s, n_features, n_hidden, n_hidden_final,
+                    leaky as f32, use_2layer, use_skip,
+                ).to_archforward()
+            };
+            let fwd_b = {
+                let s = scratch_f32.borrow();
+                arch_f32::arch_forward_f32(
+                    xb, &s, n_features, n_hidden, n_hidden_final,
+                    leaky as f32, use_2layer, use_skip,
+                ).to_archforward()
+            };
             let (ya, dya_dpre) = pin_forward(fwd_a.y);
             let (yb, dyb_dpre) = pin_forward(fwd_b.y);
             let (ya_rank, ya_pool, alpha_a) = (fwd_a.y_rank, fwd_a.y_pool, fwd_a.alpha);
@@ -7817,7 +7854,9 @@ fn predict_group_per_sample_alpha_head(
 /// needed for exact backward — including optional layer-1 intermediates
 /// for the 2-layer encoder.
 mod arch;
+mod arch_f32;
 pub use arch::{ArchForward, arch_forward, arch_backward};
+pub use arch_f32::{ArchForwardF32, WeightScratchF32, arch_forward_f32, arch_backward_f32};
 
 /// NiN-aware flush for the per-sample α head. Computes NiN over the
 /// 2N surviving predictions and routes per-prediction grad through

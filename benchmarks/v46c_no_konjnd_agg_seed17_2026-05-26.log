@@ -1,0 +1,9 @@
+MLP train (PER-SAMPLE-α): arch=[372 → 128 (LeakyReLU α=0.01) → (h · rank_w + rank_b) ⊕α(x) (pool[μ,σ,max,p_6] · reducer + b)], val_policy=Min
+      train group 0: 'safesyn' n=196086 train_w=1.000 val_w=0.000
+      train group 1: 'cid22_train' n=17611 train_w=0.500 val_w=0.000
+per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_α=0 → α=0.5 ∀x, K=32 sequential, NiN=off
+tanh_output_head: ENABLED — y_score = 100·σ(y_pre/20.000) (active linear region y_pre∈[−3·scale, 3·scale])
+monotone_cbc: ENABLED — soft sign-penalty (λ=1) during training + α≡1 every step + FINAL hard projection at every bake-emission (encoder≥0, head≤0, α≡1). Shipped bake is monotone-by-construction.
+  epoch   0 | lr=0.00566 | loss=1.6835 | val(geomean3)=0.1547 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.016,σ=0.966,max=0.016,p6=0.016] | safesyn: srocc=0.0027 plcc=0.4059 pwrc=0.4811 | cid22_train: srocc=0.0642 plcc=0.3124 pwrc=0.5918 | t=4.7s
+  epoch   9 | lr=0.00522 | loss=0.7687 | val(geomean3)=0.8128 (best=0.1547) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.016,σ=0.948,max=0.016,p6=0.016] | safesyn: srocc=0.8503 plcc=0.8164 pwrc=0.8929 | cid22_train: srocc=0.6956 plcc=0.6892 pwrc=0.9635 | t=12.4s
+MLP train (PER-SAMPLE-α): best val SROCC = 0.8128 | final reducer_w=[μ=0.016,σ=0.948,max=0.016,p6=0.016] b_α=30.000
