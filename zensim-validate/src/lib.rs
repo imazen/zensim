@@ -18,3 +18,4 @@ pub mod output_calibration_spline;
 pub mod panel;
 pub mod parquet_loader;
 pub mod simd_mlp;
+pub mod train_manifest;

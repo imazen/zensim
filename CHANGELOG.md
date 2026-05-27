@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added — `zensim_mlp_train --manifest <path.toml>` reproduce-this input mode (2026-05-27)
+
+Flips bake manifests (`zensim/weights/manifests/*.toml`) from output-only
+provenance into a reproduce-this INPUT, per §3 of the
+`ZEN_CLOUD_AND_CONSOLIDATION_SPEC_2026-05-26`. New
+`zensim-validate::train_manifest` module + two trainer flags:
+
+- `--manifest <path.toml>` parses the manifest's structured `[training]`
+  fields, `groups` array, `auto_transforms` / `anchor_parquet` paths, and
+  `--out` (from `[bake].file`) into the trainer's `Args`. `{canonical}` /
+  `{dial_dir}` placeholders resolve against the manifest's `[inputs.*]`
+  root tables; bare `benchmarks/...` paths resolve from the repo root.
+  The structured fields are mapped (NOT the recorded `command` shell
+  string — env-var placeholders make it non-machine-stable).
+- **Precedence**: manifest = defaults, explicit CLI flags WIN (detected via
+  clap `ValueSource::CommandLine`). `--group` is replace-not-merge.
+- **Load-bearing sha gate**: every `[inputs.<name>]` file's sha256 is
+  verified against on-disk bytes BEFORE training; drift FAILS LOUD with
+  expected/actual. `--manifest-allow-sha-drift` (off by default) downgrades
+  drift to a warning; missing files always error and point at the recorded
+  R2/Tower mirror.
+- Verified end-to-end against the shipped V39 manifest (7 inputs verify,
+  post-training spline step surfaced). 12 tests (7 lib + 5 integration).
+  `--out` and `--group` made `required_unless_present = "manifest"`.
+
 ### Docs — DEDUP-M2: HONEST-STOP on delegating `bake_runtime::score_row` to `zensim::metric::apply_mlp_scoring_with_codec` (2026-05-26)
 
 Follow-on to DEDUP-M (`d1309c91`). The task spec proposed promoting

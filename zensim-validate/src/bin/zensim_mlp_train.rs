@@ -85,13 +85,15 @@
 //! `benchmarks/v0_18_methodology_2026-05-13.md` for the canonical
 //! per-bake methodology + reproduction.
 
-use clap::Parser;
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser};
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use zensim_validate::mlp_train;
+use zensim_validate::train_manifest;
 
 #[path = "../contamination_guard.rs"]
 mod contamination_guard;
@@ -111,7 +113,11 @@ struct Args {
     /// each dataset. CSV header must include `ref_basename`,
     /// `human_score`, and `f0..f<N-1>`. `human_score` is in [0, 1] and
     /// is multiplied by 100 internally to match `score_zensim` scale.
-    #[arg(long, required = true)]
+    ///
+    /// Required unless `--manifest` is given (the manifest's `groups`
+    /// array supplies the group set). Passing any explicit `--group`
+    /// alongside `--manifest` REPLACES the manifest's groups entirely.
+    #[arg(long, required_unless_present = "manifest")]
     group: Vec<String>,
 
     /// Number of hidden units in the single hidden layer. Default 128
@@ -172,9 +178,10 @@ struct Args {
     #[arg(long, default_value_t = 50)]
     early_stop_patience: usize,
 
-    /// Output path for the trained ZNPR v2 bake.
-    #[arg(long)]
-    out: PathBuf,
+    /// Output path for the trained ZNPR v3 bake. Required unless
+    /// `--manifest` is given (the manifest supplies it from `[bake].file`).
+    #[arg(long, required_unless_present = "manifest")]
+    out: Option<PathBuf>,
 
     /// Cap features at the first N columns. Default 228 matches the
     /// V0_4 zensim runtime input width. CSVs may include extended
@@ -882,6 +889,38 @@ struct Args {
     /// picked per aggregation step. Default `8`.
     #[arg(long, default_value_t = 8)]
     konjnd_aggregation_refs_per_step: usize,
+
+    /// Reproduce-this input: load a shipped bake's TOML manifest
+    /// (`zensim/weights/manifests/*.toml`) and reconstruct the training
+    /// run it records. The manifest's structured `[training]` fields,
+    /// `groups` array, `auto_transforms` / `anchor_parquet` paths, and
+    /// `--out` (from `[bake].file`) become the run config; every
+    /// referenced `[inputs.<name>]` file is sha256-verified before
+    /// training begins (FAILS LOUD on drift — that is the whole point of
+    /// reproduce-exactly).
+    ///
+    /// **Precedence**: the manifest provides DEFAULTS; any flag you also
+    /// pass explicitly on the command line OVERRIDES the manifest value.
+    /// So `--manifest foo.toml --seed 99` reproduces foo's recipe but
+    /// with seed 99. `--group` is special: if you pass any explicit
+    /// `--group`, your groups fully replace the manifest's group set
+    /// (they don't merge).
+    ///
+    /// Post-training `steps` recorded in the manifest (spline injection,
+    /// affine calibration, etc.) are PRINTED but NOT executed — they
+    /// shell to external scripts the trainer doesn't run; apply them by
+    /// hand after the bake is produced.
+    #[arg(long, value_name = "PATH")]
+    manifest: Option<PathBuf>,
+
+    /// Escape hatch for `--manifest`: downgrade input-file sha256
+    /// mismatches from a hard error to a warning. OFF by default. With
+    /// this set, a reproduce run proceeds even if a referenced input
+    /// drifted — but the produced bake will NOT match the shipped one,
+    /// so only use it when you knowingly intend to retrain on changed
+    /// data. Missing input files still error regardless.
+    #[arg(long, default_value_t = false)]
+    manifest_allow_sha_drift: bool,
 }
 
 /// CLI parser for `--pwrc-band-weights W0,W1,...` — accepts any
@@ -1566,8 +1605,160 @@ fn parse_band_weights(s: &str) -> Result<[f64; 4], String> {
     Ok(out)
 }
 
+/// `true` when the user passed `--<id>` explicitly on the command line
+/// (as opposed to clap supplying its default). Explicit flags take
+/// precedence over manifest values.
+fn explicit(matches: &clap::ArgMatches, id: &str) -> bool {
+    matches.value_source(id) == Some(ValueSource::CommandLine)
+}
+
+/// Overlay a parsed manifest onto `args` as DEFAULTS: a manifest field
+/// is applied only when the corresponding flag was NOT given explicitly
+/// on the command line (per `matches`). `--group` is replace-not-merge:
+/// any explicit `--group` keeps the CLI groups; otherwise the manifest's
+/// groups become `args.group`.
+///
+/// Returns the manifest's post-training `steps` so `main` can surface
+/// them (the trainer cannot run them — they shell to external scripts).
+fn apply_manifest_to_args(
+    args: &mut Args,
+    matches: &clap::ArgMatches,
+    cfg: &train_manifest::ManifestConfig,
+) -> Vec<String> {
+    // --group: replace-not-merge. Only adopt manifest groups when the
+    // user passed none explicitly.
+    if !explicit(matches, "group") && !cfg.groups.is_empty() {
+        args.group = cfg.groups.iter().map(|g| g.to_group_spec()).collect();
+    }
+
+    macro_rules! set_if_default {
+        ($field:ident, $id:literal, $val:expr) => {
+            if !explicit(matches, $id) {
+                if let Some(v) = $val {
+                    args.$field = v;
+                }
+            }
+        };
+    }
+
+    set_if_default!(hidden, "hidden", cfg.hidden);
+    set_if_default!(epochs, "epochs", cfg.epochs);
+    set_if_default!(pairs_per_epoch, "pairs_per_epoch", cfg.pairs_per_epoch);
+    set_if_default!(lr, "lr", cfg.lr);
+    set_if_default!(l2, "l2", cfg.l2);
+    set_if_default!(leaky_alpha, "leaky_alpha", cfg.leaky_alpha);
+    set_if_default!(seed, "seed", cfg.seed);
+    set_if_default!(val_policy, "val_policy", cfg.val_policy.clone());
+    set_if_default!(val_aggregate, "val_aggregate", cfg.val_aggregate.clone());
+    set_if_default!(max_features, "max_features", cfg.max_features);
+    set_if_default!(minibatch_size, "minibatch_size", cfg.minibatch_size);
+    set_if_default!(out_dtype, "out_dtype", cfg.out_dtype.clone());
+    set_if_default!(target_column, "target_column", cfg.target_column.clone());
+    set_if_default!(target_scale, "target_scale", cfg.target_scale);
+    set_if_default!(n_hidden_layers, "n_hidden_layers", cfg.n_hidden_layers);
+    set_if_default!(
+        per_sample_alpha_head,
+        "per_sample_alpha_head",
+        cfg.per_sample_alpha_head
+    );
+    set_if_default!(mse_weight, "mse_weight", cfg.mse_weight);
+    set_if_default!(ranknet_weight, "ranknet_weight", cfg.ranknet_weight);
+    set_if_default!(monotonicity_reg, "monotonicity_reg", cfg.monotonicity_reg);
+    set_if_default!(
+        monotonicity_margin,
+        "monotonicity_margin",
+        cfg.monotonicity_margin
+    );
+    set_if_default!(
+        tanh_output_head_scale,
+        "tanh_output_head_scale",
+        cfg.tanh_output_head_scale
+    );
+    set_if_default!(
+        anchor_loss_weight,
+        "anchor_loss_weight",
+        cfg.anchor_loss_weight
+    );
+    set_if_default!(anchor_step_p, "anchor_step_p", cfg.anchor_step_p);
+    set_if_default!(
+        anchor_target_score,
+        "anchor_target_score",
+        cfg.anchor_target_score
+    );
+
+    // Path-valued options (already resolved to absolute/relative-to-manifest).
+    if !explicit(matches, "auto_transforms") && cfg.auto_transforms.is_some() {
+        args.auto_transforms = cfg.auto_transforms.clone();
+    }
+    if !explicit(matches, "anchor_parquet") && cfg.anchor_parquet.is_some() {
+        args.anchor_parquet = cfg.anchor_parquet.clone();
+    }
+    // --out: clap makes it required-unless-manifest, but with --manifest
+    // we supply it from [bake].file when not given explicitly.
+    if !explicit(matches, "out") && cfg.out.is_some() {
+        args.out = cfg.out.clone();
+    }
+
+    cfg.post_training_steps.clone()
+}
+
 fn main() {
-    let args = Args::parse();
+    // We parse via ArgMatches (not Args::parse) so --manifest can apply
+    // its recorded fields as DEFAULTS while letting explicit CLI flags
+    // win. `value_source(id) == CommandLine` tells us which flags the
+    // user actually typed.
+    let matches = Args::command().get_matches();
+    let mut args = Args::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+
+    if let Some(manifest_path) = args.manifest.clone() {
+        let cfg = train_manifest::parse_manifest(&manifest_path).unwrap_or_else(|e| {
+            eprintln!("--manifest {}: {e}", manifest_path.display());
+            std::process::exit(2);
+        });
+
+        // Load-bearing reproduce-exactly gate: verify every recorded
+        // input file's sha256 BEFORE we touch the trainer. A drift means
+        // the produced bake won't match the shipped one — fail loud.
+        match train_manifest::verify_inputs(&cfg.inputs, args.manifest_allow_sha_drift) {
+            Ok(warnings) => {
+                for w in &warnings {
+                    eprintln!("[manifest] WARNING: {w}");
+                }
+                eprintln!(
+                    "[manifest] verified {} input file(s) from {}",
+                    cfg.inputs.len(),
+                    manifest_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("[manifest] {e}");
+                std::process::exit(2);
+            }
+        }
+
+        let steps = apply_manifest_to_args(&mut args, &matches, &cfg);
+        if !steps.is_empty() {
+            eprintln!(
+                "[manifest] {} post-training step(s) recorded — NOT executed by the trainer; \
+                 apply them by hand after the bake is produced:",
+                steps.len()
+            );
+            for s in &steps {
+                eprintln!("[manifest]   - {s}");
+            }
+        }
+    }
+
+    // Resolve the output path now that the manifest (if any) has been
+    // applied. clap's `required_unless_present = "manifest"` guarantees
+    // an explicit `--out` whenever `--manifest` is absent; when present,
+    // the manifest's `[bake].file` should have filled it in.
+    let out_path: PathBuf = args.out.clone().unwrap_or_else(|| {
+        eprintln!(
+            "--out is required: neither an explicit --out nor a manifest [bake].file was provided"
+        );
+        std::process::exit(2);
+    });
 
     let val_policy = match args.val_policy.to_lowercase().as_str() {
         "min" => ValidationPolicy::Min,
@@ -2571,11 +2762,11 @@ fn main() {
         )
     };
 
-    std::fs::write(&args.out, &bake_bytes).unwrap_or_else(|e| {
-        eprintln!("write {:?}: {e}", args.out);
+    std::fs::write(&out_path, &bake_bytes).unwrap_or_else(|e| {
+        eprintln!("write {out_path:?}: {e}");
         std::process::exit(1);
     });
-    println!("Wrote {} bytes to {:?}", bake_bytes.len(), args.out);
+    println!("Wrote {} bytes to {out_path:?}", bake_bytes.len());
 
     if let Some(log_path) = &args.log_path {
         let mut f = File::create(log_path).unwrap_or_else(|e| {
@@ -2607,9 +2798,9 @@ fn main() {
         if vb.exists() {
             println!("\n--- bake_verdict (auto-eval) ---");
             let mut cmd = std::process::Command::new(vb);
-            cmd.arg("--bake").arg(&args.out);
+            cmd.arg("--bake").arg(&out_path);
             // Always write verdict file alongside the bake
-            let verdict_path = args.out.with_extension("verdict.md");
+            let verdict_path = out_path.with_extension("verdict.md");
             cmd.arg("--output").arg(&verdict_path);
             // Inherit stdout/stderr so user sees the eval live
             cmd.stdout(std::process::Stdio::inherit());

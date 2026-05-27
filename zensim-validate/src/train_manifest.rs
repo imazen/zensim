@@ -1,0 +1,705 @@
+//! `--manifest <path.toml>` reproduce-this input mode for
+//! `zensim_mlp_train`.
+//!
+//! A shipped bake's TOML manifest (`zensim/weights/manifests/*.toml`,
+//! schema documented in `zensim/weights/manifests/README.md`) records
+//! everything needed to reproduce its training run: the structured
+//! `[training]` hyperparameters, the `groups` array, the
+//! `auto_transforms` / `anchor_parquet` paths, the post-training
+//! `steps`, and one `[inputs.<name>]` block per input file carrying its
+//! `sha256` + `rows` + R2/Tower mirror URLs.
+//!
+//! This module flips the manifest from OUTPUT-only provenance into a
+//! reproduce-this INPUT: parse the structured fields into a
+//! [`ManifestConfig`], verify every referenced input file's sha256
+//! before training, and let the binary map the config onto its `Args`
+//! (manifest = defaults, explicit CLI flags override).
+//!
+//! ## Why structured fields, not the recorded command string
+//!
+//! The manifest carries BOTH a literal `command = """..."""` shell
+//! string (with `$TRAIN` / `$CANON` env-var placeholders) AND the
+//! equivalent structured fields (`seed`, `hidden`, `groups = [...]`,
+//! etc.). We map the **structured fields**: the command string is
+//! free-form shell with per-manifest env-var conventions that are not
+//! machine-stable, whereas the structured fields are a fixed schema.
+//! The manifest README's own schema makes the structured fields the
+//! source of truth and the command a human-pasteable convenience. If
+//! the two ever disagree, that is a manifest bug to catch in review —
+//! not something this loader should silently reconcile.
+//!
+//! ## Path placeholder resolution
+//!
+//! `groups[].path`, `auto_transforms`, and `anchor_parquet` may use
+//! `{canonical}` (resolved from `[inputs.canonical_root].local`) or
+//! `{dial_dir}` (resolved from `[inputs.dial_dir].local`). Placeholders
+//! are substituted against the manifest's own `[inputs.*]` root tables.
+//! `auto_transforms` paths that are repo-relative (start with `../` or
+//! `benchmarks/`) are resolved relative to the manifest file's parent
+//! directory so a manifest under `zensim/weights/manifests/` can point
+//! at `../../../benchmarks/...`.
+
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+
+/// One training group resolved from the manifest's `groups` array.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManifestGroup {
+    pub name: String,
+    /// Fully-resolved filesystem path (placeholders substituted).
+    pub path: PathBuf,
+    pub train_w: f64,
+    pub val_w: f64,
+}
+
+impl ManifestGroup {
+    /// Render as the `NAME:PATH:TRAIN_W:VAL_W` spec the trainer's
+    /// `--group` flag accepts. Mirrors `parse_group_spec`'s inverse.
+    pub fn to_group_spec(&self) -> String {
+        format!(
+            "{}:{}:{}:{}",
+            self.name,
+            self.path.display(),
+            self.train_w,
+            self.val_w
+        )
+    }
+}
+
+/// One input-file record from an `[inputs.<name>]` table that carries a
+/// sha256 to verify.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManifestInput {
+    /// The `[inputs.<name>]` table key (for error messages).
+    pub key: String,
+    /// Fully-resolved local filesystem path.
+    pub path: PathBuf,
+    /// Recorded sha256 (lowercase hex).
+    pub sha256: String,
+    /// Recorded row count, if present.
+    pub rows: Option<u64>,
+    /// R2 mirror URI for this input (from its root table), if known.
+    pub r2: Option<String>,
+    /// Tower mirror path for this input (from its root table), if known.
+    pub tower: Option<String>,
+}
+
+/// The subset of a manifest this loader maps onto the trainer's `Args`,
+/// plus the input records to sha-verify. Fields are `Option` where the
+/// manifest may omit them; the binary applies present values as
+/// defaults beneath explicit CLI flags.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ManifestConfig {
+    pub groups: Vec<ManifestGroup>,
+    pub inputs: Vec<ManifestInput>,
+
+    // [training] structured fields → Args.
+    pub hidden: Option<usize>,
+    pub epochs: Option<usize>,
+    pub pairs_per_epoch: Option<usize>,
+    pub lr: Option<f64>,
+    pub l2: Option<f64>,
+    pub leaky_alpha: Option<f64>,
+    pub seed: Option<u64>,
+    pub val_policy: Option<String>,
+    pub val_aggregate: Option<String>,
+    pub max_features: Option<usize>,
+    pub minibatch_size: Option<usize>,
+    pub out_dtype: Option<String>,
+    pub target_column: Option<String>,
+    pub target_scale: Option<f64>,
+    pub n_hidden_layers: Option<usize>,
+    pub per_sample_alpha_head: Option<bool>,
+    pub mse_weight: Option<f64>,
+    pub ranknet_weight: Option<f64>,
+    pub monotonicity_reg: Option<f64>,
+    pub monotonicity_margin: Option<f64>,
+    pub tanh_output_head_scale: Option<f64>,
+    pub anchor_loss_weight: Option<f64>,
+    pub anchor_step_p: Option<f64>,
+    pub anchor_target_score: Option<f64>,
+
+    /// Resolved `--auto-transforms` path.
+    pub auto_transforms: Option<PathBuf>,
+    /// Resolved `--anchor-parquet` path.
+    pub anchor_parquet: Option<PathBuf>,
+
+    /// Ordered post-training `steps` (spline injection etc.). Recorded
+    /// here so the binary can surface them — the trainer cannot run them
+    /// itself (they shell to external scripts), but a reproduce run must
+    /// remind the operator they exist.
+    pub post_training_steps: Vec<String>,
+
+    /// `[bake].file` resolved to an output path, if the manifest carries
+    /// one. Maps to `--out` (the manifest's bake filename).
+    pub out: Option<PathBuf>,
+}
+
+// ---- serde wire types (a subset of the full manifest schema) ----
+
+#[derive(Debug, Deserialize)]
+struct RawManifest {
+    #[serde(default)]
+    bake: Option<RawBake>,
+    #[serde(default)]
+    training: Option<RawTraining>,
+    #[serde(default)]
+    inputs: Option<toml::Table>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawBake {
+    /// `[bake].file` — relative to the manifest's parent dir.
+    #[serde(default)]
+    file: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTraining {
+    #[serde(default)]
+    hidden: Option<usize>,
+    #[serde(default)]
+    epochs: Option<usize>,
+    #[serde(default)]
+    pairs_per_epoch: Option<usize>,
+    #[serde(default)]
+    lr: Option<f64>,
+    #[serde(default)]
+    l2: Option<f64>,
+    #[serde(default)]
+    leaky_alpha: Option<f64>,
+    #[serde(default)]
+    seed: Option<u64>,
+    #[serde(default)]
+    val_policy: Option<String>,
+    #[serde(default)]
+    val_aggregate: Option<String>,
+    #[serde(default)]
+    max_features: Option<usize>,
+    #[serde(default)]
+    minibatch_size: Option<usize>,
+    #[serde(default)]
+    out_dtype: Option<String>,
+    #[serde(default)]
+    target_column: Option<String>,
+    #[serde(default)]
+    target_scale: Option<f64>,
+    #[serde(default)]
+    n_hidden_layers: Option<usize>,
+    #[serde(default)]
+    per_sample_alpha_head: Option<bool>,
+    #[serde(default)]
+    mse_weight: Option<f64>,
+    #[serde(default)]
+    ranknet_weight: Option<f64>,
+    #[serde(default)]
+    monotonicity_reg: Option<f64>,
+    #[serde(default)]
+    monotonicity_margin: Option<f64>,
+    #[serde(default)]
+    tanh_output_head_scale: Option<f64>,
+    #[serde(default)]
+    anchor_loss_weight: Option<f64>,
+    #[serde(default)]
+    anchor_step_p: Option<f64>,
+    /// `anchor_target_score` may be a numeric OR the literal string
+    /// `"PER-ROW (multi-band)"` when the anchor is per-row. We only map
+    /// the numeric form (the per-row form is driven by `anchor_parquet`).
+    #[serde(default)]
+    anchor_target_score: Option<toml::Value>,
+    #[serde(default)]
+    groups: Vec<RawGroup>,
+    #[serde(default)]
+    auto_transforms: Option<String>,
+    #[serde(default)]
+    anchor_parquet: Option<String>,
+    #[serde(default)]
+    steps: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawGroup {
+    name: String,
+    path: String,
+    train_w: f64,
+    val_w: f64,
+}
+
+/// Error type for manifest loading + sha verification.
+#[derive(Debug)]
+pub enum ManifestError {
+    Io(String),
+    Parse(String),
+    Schema(String),
+    /// An input file's on-disk sha256 disagreed with the manifest.
+    ShaMismatch {
+        key: String,
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
+    /// An input file referenced by the manifest is not present locally;
+    /// `mirror` points the operator at where to fetch it.
+    MissingInput {
+        key: String,
+        path: PathBuf,
+        mirror: Option<String>,
+    },
+}
+
+impl std::fmt::Display for ManifestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ManifestError::Io(m) => write!(f, "manifest io error: {m}"),
+            ManifestError::Parse(m) => write!(f, "manifest parse error: {m}"),
+            ManifestError::Schema(m) => write!(f, "manifest schema error: {m}"),
+            ManifestError::ShaMismatch {
+                key,
+                path,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "manifest input {key:?} sha256 MISMATCH for {}:\n  expected (manifest): {expected}\n  actual   (on disk):  {actual}\nThe input file drifted from the recorded bake — reproduce-exactly cannot proceed. \
+                 Pass --manifest-allow-sha-drift to override (NOT recommended; the produced bake will not match the shipped one).",
+                path.display()
+            ),
+            ManifestError::MissingInput { key, path, mirror } => {
+                write!(
+                    f,
+                    "manifest input {key:?} not found locally at {}",
+                    path.display()
+                )?;
+                if let Some(m) = mirror {
+                    write!(f, "\n  fetch it from the recorded mirror: {m}")?;
+                } else {
+                    write!(
+                        f,
+                        "\n  no R2/Tower mirror recorded in the manifest for this input"
+                    )?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for ManifestError {}
+
+/// Substitute `{canonical}` / `{dial_dir}` placeholders in a manifest
+/// path against the resolved root strings, then resolve repo-relative
+/// paths against `manifest_dir`.
+///
+/// Resolution rules:
+/// - `{canonical}/foo` → `<canonical_root>/foo` (root from
+///   `[inputs.canonical_root].local`).
+/// - `{dial_dir}/foo` → `<dial_dir>/foo` (root from `[inputs.dial_dir].local`).
+/// - absolute paths (`/...`) pass through unchanged.
+/// - a relative path whose first component is a known repo-top dir
+///   (`benchmarks/`, `scripts/`, `docs/`, `weights/`) is resolved from
+///   the repo root (`manifest_dir/../../..`).
+/// - everything else is treated as relative to `manifest_dir`.
+fn resolve_path(
+    raw: &str,
+    manifest_dir: &Path,
+    canonical_root: Option<&str>,
+    dial_dir: Option<&str>,
+) -> Result<PathBuf, ManifestError> {
+    if let Some(rest) = raw.strip_prefix("{canonical}") {
+        let root = canonical_root.ok_or_else(|| {
+            ManifestError::Schema(format!(
+                "path {raw:?} uses {{canonical}} but [inputs.canonical_root].local is missing"
+            ))
+        })?;
+        let rest = rest.trim_start_matches('/');
+        return Ok(Path::new(root).join(rest));
+    }
+    if let Some(rest) = raw.strip_prefix("{dial_dir}") {
+        let root = dial_dir.ok_or_else(|| {
+            ManifestError::Schema(format!(
+                "path {raw:?} uses {{dial_dir}} but [inputs.dial_dir].local is missing"
+            ))
+        })?;
+        let rest = rest.trim_start_matches('/');
+        return Ok(Path::new(root).join(rest));
+    }
+    let p = Path::new(raw);
+    if p.is_absolute() {
+        return Ok(p.to_path_buf());
+    }
+    // Repo-root-relative convention: the real manifests record some
+    // paths from the repo root (e.g. `benchmarks/...`) and others
+    // manifest-relative (e.g. `../../../benchmarks/...`). Manifests live
+    // at `<repo>/zensim/weights/manifests/`, so the repo root is three
+    // levels up. A relative path whose FIRST component is a known
+    // repo-top directory is resolved from the repo root; everything else
+    // is manifest-relative. This reconciles the two conventions the
+    // shipped manifests use for the SAME files without a filesystem probe.
+    const REPO_TOP_DIRS: [&str; 4] = ["benchmarks", "scripts", "docs", "weights"];
+    if let Some(std::path::Component::Normal(first)) = p.components().next()
+        && REPO_TOP_DIRS
+            .iter()
+            .any(|d| first == std::ffi::OsStr::new(d))
+    {
+        // repo root = manifest_dir/../../..
+        return Ok(manifest_dir.join("../../..").join(p));
+    }
+    Ok(manifest_dir.join(p))
+}
+
+/// Pull a `local` string out of an `[inputs.<root>]` table, if present.
+fn root_local<'a>(inputs: Option<&'a toml::Table>, root: &str) -> Option<&'a str> {
+    inputs?.get(root)?.as_table()?.get("local")?.as_str()
+}
+
+/// Parse a manifest TOML file into a [`ManifestConfig`].
+///
+/// Maps the structured `[training]` fields, the `groups` array, and the
+/// `[inputs.<name>]` blocks (those carrying a `sha256`) into resolved
+/// filesystem paths. Does NOT touch the filesystem beyond reading the
+/// manifest itself — sha verification is a separate, explicit step
+/// ([`verify_inputs`]).
+pub fn parse_manifest(path: &Path) -> Result<ManifestConfig, ManifestError> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| ManifestError::Io(format!("read {}: {e}", path.display())))?;
+    parse_manifest_str(&text, path)
+}
+
+/// Parse a manifest from an in-memory string + the manifest's path (used
+/// for `manifest_dir` resolution + error messages). Split out from
+/// [`parse_manifest`] so tests can drive it with synthetic content.
+pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, ManifestError> {
+    let raw: RawManifest = toml::from_str(text)
+        .map_err(|e| ManifestError::Parse(format!("{}: {e}", path.display())))?;
+    let manifest_dir = path.parent().unwrap_or_else(|| Path::new("."));
+
+    let inputs_tbl = raw.inputs.as_ref();
+    let canonical_root = root_local(inputs_tbl, "canonical_root");
+    let dial_dir = root_local(inputs_tbl, "dial_dir");
+
+    let mut cfg = ManifestConfig::default();
+
+    if let Some(file) = raw.bake.as_ref().and_then(|b| b.file.as_ref()) {
+        cfg.out = Some(resolve_path(file, manifest_dir, canonical_root, dial_dir)?);
+    }
+
+    if let Some(t) = raw.training {
+        cfg.hidden = t.hidden;
+        cfg.epochs = t.epochs;
+        cfg.pairs_per_epoch = t.pairs_per_epoch;
+        cfg.lr = t.lr;
+        cfg.l2 = t.l2;
+        cfg.leaky_alpha = t.leaky_alpha;
+        cfg.seed = t.seed;
+        cfg.val_policy = t.val_policy;
+        cfg.val_aggregate = t.val_aggregate;
+        cfg.max_features = t.max_features;
+        cfg.minibatch_size = t.minibatch_size;
+        cfg.out_dtype = t.out_dtype;
+        cfg.target_column = t.target_column;
+        cfg.target_scale = t.target_scale;
+        cfg.n_hidden_layers = t.n_hidden_layers;
+        cfg.per_sample_alpha_head = t.per_sample_alpha_head;
+        cfg.mse_weight = t.mse_weight;
+        cfg.ranknet_weight = t.ranknet_weight;
+        cfg.monotonicity_reg = t.monotonicity_reg;
+        cfg.monotonicity_margin = t.monotonicity_margin;
+        cfg.tanh_output_head_scale = t.tanh_output_head_scale;
+        cfg.anchor_loss_weight = t.anchor_loss_weight;
+        cfg.anchor_step_p = t.anchor_step_p;
+        // anchor_target_score: only map the numeric form. The
+        // "PER-ROW (multi-band)" string means the anchor is per-row
+        // (driven by anchor_parquet), so there is no scalar to apply.
+        cfg.anchor_target_score = t.anchor_target_score.and_then(|v| match v {
+            toml::Value::Integer(i) => Some(i as f64),
+            toml::Value::Float(fl) => Some(fl),
+            _ => None,
+        });
+        cfg.post_training_steps = t.steps;
+
+        for g in t.groups {
+            let path = resolve_path(&g.path, manifest_dir, canonical_root, dial_dir)?;
+            cfg.groups.push(ManifestGroup {
+                name: g.name,
+                path,
+                train_w: g.train_w,
+                val_w: g.val_w,
+            });
+        }
+
+        if let Some(at) = t.auto_transforms {
+            cfg.auto_transforms = Some(resolve_path(&at, manifest_dir, canonical_root, dial_dir)?);
+        }
+        if let Some(ap) = t.anchor_parquet {
+            cfg.anchor_parquet = Some(resolve_path(&ap, manifest_dir, canonical_root, dial_dir)?);
+        }
+    }
+
+    // Collect every [inputs.<name>] table that carries a sha256 — those
+    // are the files reproduce-exactly must verify. Root tables
+    // (canonical_root / dial_dir) carry no sha256 and are skipped.
+    if let Some(tbl) = inputs_tbl {
+        for (key, val) in tbl.iter() {
+            let Some(t) = val.as_table() else { continue };
+            let Some(sha) = t.get("sha256").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(raw_path) = t.get("path").and_then(|v| v.as_str()) else {
+                return Err(ManifestError::Schema(format!(
+                    "[inputs.{key}] has sha256 but no path"
+                )));
+            };
+            let resolved = resolve_path(raw_path, manifest_dir, canonical_root, dial_dir)?;
+            // Mirror hints: prefer this table's own r2/tower, else the
+            // canonical_root's (since {canonical} paths live under it).
+            let r2 = t
+                .get("r2")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| {
+                    if raw_path.starts_with("{canonical}") {
+                        inputs_tbl?
+                            .get("canonical_root")?
+                            .as_table()?
+                            .get("r2")?
+                            .as_str()
+                            .map(str::to_string)
+                    } else {
+                        None
+                    }
+                });
+            let tower = t
+                .get("tower")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| {
+                    if raw_path.starts_with("{canonical}") {
+                        inputs_tbl?
+                            .get("canonical_root")?
+                            .as_table()?
+                            .get("tower")?
+                            .as_str()
+                            .map(str::to_string)
+                    } else {
+                        None
+                    }
+                });
+            cfg.inputs.push(ManifestInput {
+                key: key.clone(),
+                path: resolved,
+                sha256: sha.to_ascii_lowercase(),
+                rows: t.get("rows").and_then(|v| v.as_integer()).map(|i| i as u64),
+                r2,
+                tower,
+            });
+        }
+        // Deterministic order for stable error messages + tests.
+        cfg.inputs.sort_by(|a, b| a.key.cmp(&b.key));
+    }
+
+    Ok(cfg)
+}
+
+/// Compute the lowercase-hex sha256 of a file's bytes.
+pub fn sha256_file(path: &Path) -> Result<String, ManifestError> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| ManifestError::Io(format!("read {}: {e}", path.display())))?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hex_lower(&hasher.finalize()))
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(char::from_digit((b >> 4) as u32, 16).unwrap());
+        s.push(char::from_digit((b & 0x0f) as u32, 16).unwrap());
+    }
+    s
+}
+
+/// Verify every manifest input file's sha256 against its on-disk bytes.
+///
+/// This is the load-bearing reproduce-exactly check: if a referenced
+/// file drifted, the produced bake will NOT match the shipped one, so we
+/// FAIL LOUD with the mismatch. Missing local files produce a
+/// [`ManifestError::MissingInput`] pointing at the recorded mirror.
+///
+/// When `allow_sha_drift` is `true` (the `--manifest-allow-sha-drift`
+/// escape hatch — OFF by default), mismatches are downgraded to the
+/// returned `warnings` vec instead of erroring; missing files still
+/// error (we can't train on a file that isn't there).
+pub fn verify_inputs(
+    inputs: &[ManifestInput],
+    allow_sha_drift: bool,
+) -> Result<Vec<String>, ManifestError> {
+    let mut warnings = Vec::new();
+    for inp in inputs {
+        if !inp.path.exists() {
+            return Err(ManifestError::MissingInput {
+                key: inp.key.clone(),
+                path: inp.path.clone(),
+                mirror: inp.r2.clone().or_else(|| inp.tower.clone()),
+            });
+        }
+        let actual = sha256_file(&inp.path)?;
+        if actual != inp.sha256 {
+            if allow_sha_drift {
+                warnings.push(format!(
+                    "input {:?} sha256 drift ALLOWED via --manifest-allow-sha-drift: \
+                     expected {} got {} for {}",
+                    inp.key,
+                    inp.sha256,
+                    actual,
+                    inp.path.display()
+                ));
+            } else {
+                return Err(ManifestError::ShaMismatch {
+                    key: inp.key.clone(),
+                    path: inp.path.clone(),
+                    expected: inp.sha256.clone(),
+                    actual,
+                });
+            }
+        }
+    }
+    Ok(warnings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_tmp(name: &str, contents: &[u8]) -> PathBuf {
+        // Per project rules /tmp is fine for one-shot test scratch.
+        let dir = std::env::temp_dir().join(format!(
+            "zensim_manifest_test_{}_{}",
+            std::process::id(),
+            name
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(contents).unwrap();
+        p
+    }
+
+    #[test]
+    fn resolve_canonical_placeholder() {
+        let dir = Path::new("/repo/zensim/weights/manifests");
+        let got = resolve_path(
+            "{canonical}/safesyn.parquet",
+            dir,
+            Some("/mnt/v/train"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(got, PathBuf::from("/mnt/v/train/safesyn.parquet"));
+    }
+
+    #[test]
+    fn resolve_repo_relative_against_manifest_dir() {
+        let dir = Path::new("/repo/zensim/weights/manifests");
+        // `../...` is a ParentDir-led path → stays manifest-relative.
+        let got = resolve_path("../../../benchmarks/x.tsv", dir, None, None).unwrap();
+        assert_eq!(
+            got,
+            PathBuf::from("/repo/zensim/weights/manifests/../../../benchmarks/x.tsv")
+        );
+    }
+
+    #[test]
+    fn resolve_repo_top_dir_from_repo_root() {
+        // A bare `benchmarks/...` (the convention the [inputs.*] blocks
+        // use) resolves from the repo root (manifest_dir/../../..) so it
+        // points at the SAME file as the [training] field's
+        // `../../../benchmarks/...`.
+        let dir = Path::new("/repo/zensim/weights/manifests");
+        let got = resolve_path("benchmarks/screen.tsv", dir, None, None).unwrap();
+        assert_eq!(
+            got,
+            PathBuf::from("/repo/zensim/weights/manifests/../../../benchmarks/screen.tsv")
+        );
+        // A non-repo-top relative path stays manifest-relative.
+        let local = resolve_path("sibling.bin", dir, None, None).unwrap();
+        assert_eq!(
+            local,
+            PathBuf::from("/repo/zensim/weights/manifests/sibling.bin")
+        );
+    }
+
+    #[test]
+    fn missing_canonical_root_for_placeholder_errors() {
+        let dir = Path::new("/repo");
+        let err = resolve_path("{canonical}/x.parquet", dir, None, None).unwrap_err();
+        assert!(matches!(err, ManifestError::Schema(_)));
+    }
+
+    #[test]
+    fn sha256_matches_known_vector() {
+        // sha256("") is the well-known empty-input digest.
+        let p = write_tmp("empty.bin", b"");
+        let got = sha256_file(&p).unwrap();
+        assert_eq!(
+            got,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn verify_inputs_passes_on_match_fails_on_drift() {
+        let p = write_tmp("data.parquet", b"hello world");
+        let real_sha = sha256_file(&p).unwrap();
+        let good = vec![ManifestInput {
+            key: "data".into(),
+            path: p.clone(),
+            sha256: real_sha.clone(),
+            rows: Some(3),
+            r2: None,
+            tower: None,
+        }];
+        assert!(verify_inputs(&good, false).unwrap().is_empty());
+
+        let bad = vec![ManifestInput {
+            key: "data".into(),
+            path: p.clone(),
+            sha256: "0".repeat(64),
+            rows: Some(3),
+            r2: Some("s3://bucket/data.parquet".into()),
+            tower: None,
+        }];
+        // Hard check rejects drift...
+        let err = verify_inputs(&bad, false).unwrap_err();
+        assert!(matches!(err, ManifestError::ShaMismatch { .. }));
+        // ...escape hatch downgrades to a warning.
+        let warns = verify_inputs(&bad, true).unwrap();
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("drift ALLOWED"));
+    }
+
+    #[test]
+    fn verify_inputs_missing_file_points_at_mirror() {
+        let missing = vec![ManifestInput {
+            key: "safesyn".into(),
+            path: PathBuf::from("/nonexistent/zensim/safesyn.parquet"),
+            sha256: "0".repeat(64),
+            rows: None,
+            r2: Some("s3://zentrain/canonical/safesyn.parquet".into()),
+            tower: None,
+        }];
+        // Missing files error even with drift allowed.
+        let err = verify_inputs(&missing, true).unwrap_err();
+        match err {
+            ManifestError::MissingInput { mirror, .. } => {
+                assert_eq!(
+                    mirror.as_deref(),
+                    Some("s3://zentrain/canonical/safesyn.parquet")
+                );
+            }
+            other => panic!("expected MissingInput, got {other:?}"),
+        }
+    }
+}
