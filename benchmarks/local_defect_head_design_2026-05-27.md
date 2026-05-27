@@ -113,6 +113,44 @@ or min-tile(corruption) vs GLOBAL(honest) — NOT min-to-min. The corpus
 V39-broken-at-identity (scores 0) and QAT-identity-correct (97.7) BOTH
 generalize across photo + screen (+ 8 refs) — robust.
 
+## gap = global − min_tile signal (2026-05-27) — works on photo, FAILS on screen
+
+Tried `gap = global − min_tile` as a content-robust localized-defect signal
+(a localized defect → high global + low min → large gap; relative to the
+image's own global). On PHOTO (gb82/dog) it cleanly separates:
+
+| photo case | global | min | gap |
+|---|--:|--:|--:|
+| q20 honest | 40.4 | 31.1 | 9.2 |
+| chan_invert WHOLE | 12.2 | 0.0 | 12.2 |
+| chan_invert sq8 LOCAL | 71.9 | 11.1 | **60.8** |
+| block_zero sq8 LOCAL | 75.3 | 14.7 | **60.6** |
+| bitflip sq8 (sub-perceptual) | 95.5 | 94.8 | 0.8 |
+
+Localized defects gap 46–61; honest/whole/sub-perceptual <13. Clean.
+
+But on SCREEN (codec_wiki, text/UI) it FAILS:
+
+| screen case | global | min | gap |
+|---|--:|--:|--:|
+| q20 honest | 57.5 | 27.4 | **30.0** |
+| chan_invert sq8 LOCAL | 84.2 | 57.0 | 27.2 |
+| block_zero sq16 LOCAL | 85.2 | 40.8 | 44.4 |
+
+Honest q20 of screen content ALREADY has a locally-bad tile (text-edge
+ringing / flat-region artifacts compress poorly → that 64×64 tile craters),
+so its gap (30) equals a localized defect's. Perceptual tiling (min OR gap)
+cannot distinguish a BROKEN localized defect from HONEST text ringing on
+screen content — honest screen compression IS locally-artifacted.
+
+**Conclusion:** perceptual-tiling (tile-min / gap) is a PARTIAL solution —
+it catches localized structural defects on continuous-tone (photo) content
+but not on screen/text. The content-robust solution is **Approach B**: a
+STRUCTURAL-SIGNATURE classifier trained on the corruption corpus
+(channel-swap / block-zero / chroma-boundary signatures vs honest ringing) —
+recognizing the DEFECT PATTERN, not just localized perceptual difference.
+Tile-min/gap can be the cheap photo-content first line; B handles the rest.
+
 ## Next (shipped head)
 
 - Promote tile-min into a first-class Rust API (a `ZensimLocal` profile or a
