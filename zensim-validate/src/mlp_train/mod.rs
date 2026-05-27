@@ -7752,6 +7752,7 @@ fn train_mlp_per_sample_alpha_head(
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
                         None, // spline added post-training
+                        hyperparams.out_dtype,
                     ));
                 } else if use_skip {
                     // Skip-only: the bake format is standard 1-layer; skip
@@ -7949,6 +7950,7 @@ fn train_mlp_per_sample_alpha_head(
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
                         Some(&payload),
+                        hyperparams.out_dtype,
                     )
                 } else if tanh_pin_active {
                     psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(

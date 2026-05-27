@@ -1248,6 +1248,7 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
     feature_transforms: Option<&[zenpredict::FeatureTransform]>,
     feature_transform_params: Option<&[Vec<f32>]>,
     output_spline_payload: Option<&[u8]>,
+    out_dtype: WeightDtype,
 ) -> Vec<u8> {
     let n_features = model.n_features;
 
@@ -1287,7 +1288,7 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
             in_dim: n_features,
             out_dim: n_hidden1,
             activation: Activation::LeakyRelu,
-            dtype: WeightDtype::F32,
+            dtype: out_dtype,
             weights: &w1_f32,
             biases: &b1_f32,
         },
@@ -1295,10 +1296,13 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
             in_dim: n_hidden1,
             out_dim: n_hidden_final,
             activation: Activation::LeakyRelu,
-            dtype: WeightDtype::F32,
+            dtype: out_dtype,
             weights: &w2_enc_f32,
             biases: &b2_enc_f32,
         },
+        // Identity passthrough kept F32: it's tiny (n_hidden_final², ~8 KB)
+        // and the per-sample-α runtime dispatch reads it as the exact
+        // identity — quantizing it buys ~nothing and risks the passthrough.
         BakeLayer {
             in_dim: n_hidden_final,
             out_dim: n_hidden_final,
@@ -1388,7 +1392,9 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
         sparse_overrides: &[],
         feature_order: None,
         output_order: None,
-        compressed: false,
+        // Compress when quantizing (f16/i8) — lz4 over the zerobias zeros +
+        // the smaller weights is where the size win lands.
+        compressed: !matches!(out_dtype, WeightDtype::F32),
         hu_permutations: None,
     })
     .expect("v3 bake of 2-layer per-sample α head MLP")
