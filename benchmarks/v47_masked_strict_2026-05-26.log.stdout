@@ -25,3 +25,29 @@ per_sample_alpha_head: ENABLED — α(x)=sigmoid(W_α·h + b_α), init W_α=0 b_
 tanh_output_head: ENABLED — y_score = 100·σ(y_pre/30.000) (active linear region y_pre∈[−3·scale, 3·scale])
 monotone_cbc: ENABLED — W1 per-feature mask: 300/372 pinned ≥0, 72 DROPPED (strict) ; w2_enc≥0, rank_w≤0, α≡1. Soft penalty (λ=1) + final projection at bake.
   epoch   0 | lr=0.00100 | loss=1.0896 | val(geomean3)=0.3379 (best=-inf) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.035,σ=0.843,max=0.042,p6=0.041] | safesyn: srocc=0.3439 plcc=0.2616 pwrc=0.4290 | cid22_train: srocc=0.3921 plcc=0.3128 pwrc=0.7545 | kadid: srocc=0.3961 plcc=0.4285 pwrc=0.7453 | tid: srocc=0.3963 plcc=0.4438 pwrc=0.7885 | konjnd_dense: srocc=0.4614 plcc=0.7801 pwrc=0.8782 | t=19.7s
+  epoch  25 | lr=0.00050 | loss=1.0583 | val(geomean3)=0.8850 (best=0.3379) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=-0.000,max=0.000,p6=0.000] | safesyn: srocc=0.9660 plcc=0.8942 pwrc=0.9923 | cid22_train: srocc=0.9781 plcc=0.9536 pwrc=0.9976 | kadid: srocc=0.8484 plcc=0.8471 pwrc=0.9644 | tid: srocc=0.8692 plcc=0.8862 pwrc=0.9836 | konjnd_dense: srocc=0.9823 plcc=0.9768 pwrc=0.9967 | t=192.7s
+  epoch  50 | lr=0.00100 | loss=1.0645 | val(geomean3)=0.8928 (best=0.8850) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=-0.000,max=-0.000,p6=0.000] | safesyn: srocc=0.9785 plcc=0.9246 pwrc=0.9952 | cid22_train: srocc=0.9808 plcc=0.9646 pwrc=0.9982 | kadid: srocc=0.8582 plcc=0.8573 pwrc=0.9674 | tid: srocc=0.8628 plcc=0.8824 pwrc=0.9828 | konjnd_dense: srocc=0.9869 plcc=0.9807 pwrc=0.9980 | t=303.0s
+  epoch  75 | lr=0.00050 | loss=1.0976 | val(geomean3)=0.8984 (best=0.8928) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=0.000,max=0.000,p6=0.000] | safesyn: srocc=0.9589 plcc=0.8768 pwrc=0.9899 | cid22_train: srocc=0.9819 plcc=0.9526 pwrc=0.9978 | kadid: srocc=0.8656 plcc=0.8640 pwrc=0.9698 | tid: srocc=0.8720 plcc=0.8914 pwrc=0.9844 | konjnd_dense: srocc=0.9840 plcc=0.9742 pwrc=0.9969 | t=409.1s
+  epoch 100 | lr=0.00100 | loss=1.0365 | val(geomean3)=0.8886 (best=0.8984) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=-0.000,σ=0.000,max=0.000,p6=-0.000] | safesyn: srocc=0.9598 plcc=0.8913 pwrc=0.9905 | cid22_train: srocc=0.9796 plcc=0.9453 pwrc=0.9971 | kadid: srocc=0.8528 plcc=0.8514 pwrc=0.9663 | tid: srocc=0.8634 plcc=0.8730 pwrc=0.9824 | konjnd_dense: srocc=0.9831 plcc=0.9809 pwrc=0.9969 | t=516.3s
+  epoch 125 | lr=0.00050 | loss=1.0745 | val(geomean3)=0.8965 (best=0.8984) | α(x): μ=1.000 [min=1.000, max=1.000] | reducer_w=[μ=0.000,σ=-0.000,max=-0.000,p6=0.000] | safesyn: srocc=0.9672 plcc=0.9140 pwrc=0.9934 | cid22_train: srocc=0.9815 plcc=0.9545 pwrc=0.9977 | kadid: srocc=0.8631 plcc=0.8617 pwrc=0.9688 | tid: srocc=0.8723 plcc=0.8947 pwrc=0.9846 | konjnd_dense: srocc=0.9866 plcc=0.9857 pwrc=0.9978 | t=627.1s
+  early stop at epoch 125 (no val improvement for 50 epochs)
+MLP train (PER-SAMPLE-α): best val SROCC = 0.8984 | final reducer_w=[μ=0.000,σ=-0.000,max=-0.000,p6=0.000] b_α=30.000
+output calibration spline: 2 knots from 1679 anchor bands
+  pred=49.97 → target=0.0
+  pred=49.99 → target=1.7
+re-baked with output calibration spline (257947 bytes)
+Wrote 257947 bytes to "/mnt/v/output/zensim/bakes/v47_masked_strict_2026-05-26.bin"
+Wrote log (22 lines) to "/home/lilith/work/zen/zensim/benchmarks/v47_masked_strict_2026-05-26.log"
+
+--- bake_verdict (auto-eval) ---
+bake_verdict — bake=/mnt/v/output/zensim/bakes/v47_masked_strict_2026-05-26.bin  features-root=/mnt/v/zen/zensim-training/2026-05-15-full-features  corpora=cid22,kadid,tid,konjnd,aic3,aic4
+bake: n_inputs=372  feature_transforms=yes  per_sample_alpha_head=yes  hybrid_head=no
+  CID22: loaded 4292 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+  KADIK10k: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet"
+  TID2013: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet"
+  KonJND-1k (full): loaded 1008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_features_372col_2026-05-15.parquet"
+  AIC-3 CTC: loaded 600 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic3_features_372col_2026-05-15.parquet"
+  AIC-4 sample: loaded 300 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic4_features_372col_2026-05-20.parquet"
+wrote verdict to /mnt/v/output/zensim/bakes/v47_masked_strict_2026-05-26.verdict.md
+bake_verdict: complete in 14.34s
+Verdict written to "/mnt/v/output/zensim/bakes/v47_masked_strict_2026-05-26.verdict.md"
