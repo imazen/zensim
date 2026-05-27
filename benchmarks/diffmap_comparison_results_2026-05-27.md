@@ -64,6 +64,42 @@ for screen/text, zensim for photo.** The single-point matched-bytes read ("v47
 wins") and even the dssim-only BD-rate ("~tied") both masked the screen
 weakness that cvvdp exposes.
 
+## ⇒ ssim2-as-judge UPDATE (2026-05-27, user: "use ssim2 not dssim")
+
+Swapping the weak **dssim** judge for the strong **ssim2** flips the verdict.
+3-judge BD-rate, challenger vs zensim-v47 loop (NEG = challenger better; `C` =
+circular, discount):
+
+| judge | cvvdp-loop | butteraugli-loop |
+|---|--:|--:|
+| **ssim2** | **−4.0%** | **−3.3%** |
+| butteraugli | −3.9% | −10.2% `C` |
+| cvvdp | −10.7% `C` | −16.2% |
+
+All THREE strong authorities now agree: **the zensim-v47 diffmap is the worst
+of the three loops** — both the plain butteraugli loop and the cvvdp loop drive
+better RD. ssim2 is *semi*-circular for zensim (v47 trained on ssim2-derived
+targets) so it should FAVOR zensim, yet it still scores zensim −4.0% behind
+cvvdp — and now on photos too (1418519 −4.7% per ssim2), not only screen. The
+earlier dssim-based "no winner / v47 ties" read was an artifact of dssim being
+a weak judge; with strong judges the zensim diffmap clearly loses.
+
+**Corrected bottom line:** the zensim-v47 *diffmap* is not the best signal for
+jxl-encoder RD redistribution — butteraugli (default) and cvvdp both beat it.
+zensim's value is the user-facing **dial** (score targeting) and the **metric
+ranking**, NOT diffmap-driven bit redistribution. For RD, keep the butteraugli
+loop (or cvvdp for screen).
+
+**SWEEP STATUS — blocked.** The bigger multi-content + full-q sweep (the next
+step) is blocked: a concurrent agent renamed the zenmetrics crate
+`cvvdp-cpu` → `cvvdp`, which breaks jxl-encoder's `[patch.crates-io]
+cvvdp-cpu` entry (a patch can't rename a package), so jxl-encoder won't build
+until that rename lands in jxl-encoder's manifests too (the other agent's
+deliverable). The numbers above are the n=3 high-q smoke, re-judged with
+ssim2 — directional and now CONSISTENT across 3 strong judges, but not a
+shipping calibration. Resume the sweep once the cvvdp-cpu→cvvdp rename
+settles.
+
 ## Avenue-by-avenue
 
 ### Avenue 1 — DiffmapOptions tuning (env sweep on the v47 diffmap)
