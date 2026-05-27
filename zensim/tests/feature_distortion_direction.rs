@@ -23,6 +23,11 @@
 //! Writes the per-feature classification TSV to
 //! `benchmarks/feature_distortion_direction_2026-05-26.tsv`.
 
+// Uses the training-feature-gated config API (ZensimConfig /
+// compute_zensim_with_config). Compile-time gate so `cargo test -p zensim`
+// (default features) builds cleanly; run via `cargo test -p zensim --features training`.
+#![cfg(feature = "training")]
+
 mod common;
 
 use common::generators::*;

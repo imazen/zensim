@@ -12,6 +12,8 @@
 mod adam_simd;
 #[allow(dead_code)] // CLI dispatch wired in a follow-up tick
 mod mlp_train;
+#[allow(dead_code)] // output calibration spline (fit/apply) referenced by mlp_train's QAT spline fit
+mod output_calibration_spline;
 #[allow(dead_code)] // Light-panel + ValAggregate referenced by mlp_train
 mod panel;
 mod scale_invariance;
