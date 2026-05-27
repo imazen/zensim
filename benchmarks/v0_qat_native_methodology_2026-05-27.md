@@ -85,6 +85,13 @@ pred↔target correlation because projection flips signs → blur scored UP;
 fixed in commit `742e8a7`, corr now +0.88.) Result: identity = 97.69 (the
 dial max), 0 inversions, 0 above-identity, negative tail to −131.
 
+**Global corruption-gate ordering verified on the ship bake** (gb82/dog,
+clamp post): identity **97.69** > honest-q20 **40.36** > channel-invert-whole
+**12.21** > block-zero-whole **0.00** — the regression-test ordering
+(identity > honest-lq > broken decode) that V39 inverts (V39 identity = 0 on
+every ref). Localized 8×8 defects are a separate global-metric limit → #33
+(Approach-B local signal validated, op100 92.5%/81.2%).
+
 ## (e) Held-out panel (bake_verdict, full Mohammadi panel)
 
 Aggregate per corpus (10-band + 4-band CID22 + step-5 tables in
