@@ -113,3 +113,45 @@ Two paths:
 - **Pursue the dial fix** (1-layer + dynamic-range-floor is the most
   promising) to get ONE bake that is both monotone AND full-dial — then
   it could replace V39 at Profile::A outright.
+
+## v49 (target-scale) — NO-OP; dial compression is constraint-vs-MSE, not scale
+
+Hypothesis: the recipe fed [0,1] targets against a [0,100] output (scale
+mismatch). FALSIFIED — v49 came out BIT-IDENTICAL to v47-strict (CID22
+0.8547, same spline knots, same blur ladder). Root: the V47/V46b recipe
+has NO `--target-scale` flag → it used the DEFAULT (100.0), so targets
+were already `human_score × 100 = [0,100]`, matching the pinned output.
+load_parquet applies target_scale (parquet_loader.rs:170); the recipe
+never overrode it. My "recipe used 1.0" premise (from the V39 manifest)
+was wrong for V46b/V47.
+
+So the MSE (weight 0.6) ALREADY pushes the output toward the [0,100]
+targets. The dial still compresses because the **monotone constraint
+(W1≥0 on the sign-safe set, rank_w≤0, tanh pin) fights that pressure**:
+y_pre ≤ rank_b, real content has small error features → small h-swing →
+narrow y_pre → compressed pinned output. Raising MSE weight to push
+harder fights RankNet (V37 falsified: CID22 0.88→0.55).
+
+### Falsified dial levers (all measured)
+- target-scale (v49): no-op — already 100.
+- tanh-scale smaller (v48): saturates, panel craters.
+- auto-spline: degenerate on the compressed pred band (2 knots).
+- more MSE weight: fights RankNet (V37, prior).
+- dynamic-range-floor: rides cross-codec-eq, panics on 2-layer.
+
+### Conclusion: a fundamental tension of THIS monotone parameterization
+Strict monotonicity (W1≥0 + tanh pin) + full real-content dial
+resolution are in tension for the per-sample-α arch. A unified
+monotone+full-dial single bake needs a DIFFERENT monotone output
+architecture (research): e.g. a monotone-but-unbounded head + a separate
+learnable monotone calibration, or injected identity-anchor pairs to pin
+the top + a 1-layer dynamic-range-floor substrate. Not a quick flag.
+
+### What ships
+v47-strict is the deliverable for the CORRECTNESS goal: monotone-by-
+construction (0 inversions), competitive with ssim2/cvvdp (CID22 0.855,
+KonJND 0.485 best-of-field). It is sibling-shippable as a "monotone
+similarity" profile for the regression-test / general-similarity use
+case (rank + monotonicity matter, absolute dial resolution does not).
+V39 stays Profile::A for the codec quality-dial (full range, accepts the
+OOD inversion). Unifying them is open architecture research.
