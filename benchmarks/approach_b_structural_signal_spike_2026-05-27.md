@@ -56,6 +56,24 @@ are faint-to-imperceptible by construction:
 | op50 | 75.0% | 56.2% | half-opacity blend |
 | op20 | 48.8% | 38.8% | 20%-opacity — near-imperceptible |
 
+### Multi-scale (64 ∧ 16) — closes the sq8 gap (`SCALES=64,16`)
+
+Adding a 16px tile pass (defect flagged if any channel at EITHER scale clears
+that scale's own honest bar — each scale keeps its activity-relative
+content-robustness) lifts op100 further:
+
+| op level | PHOTO | SCREEN |
+|---|--:|--:|
+| **op100** | **92.5%** | **81.2%** |
+| op50 | 80.0% | 72.5% |
+| op20 | 58.8% | 51.2% |
+
+The 16px scale catches sq8 defects the 64px tile diluted (channel_zero_b/r
+sq8, block_copy_wrong sq8, …) while the 64px scale keeps honest screen
+text-ringing from flooding the bar. **Excluding chroma_boundary** (see gaps
+— it produces zero signal at both scales, i.e. likely imperceptible as
+generated), screen op100 → ~85.5% and photo → ~97.4%.
+
 - **Content-robust**: comparable photo/screen at every op level, unlike
   tile-min's lopsided 37/24. The activity-relative bar is what makes it work
   on screen where perceptual tile-min collapsed.
@@ -101,18 +119,22 @@ activity), multi-scale tiling, and op-aware calibration is the path to ≥90%
 on screen too.
 
 Concrete next chunks (none ship a public API — all measurement/infra):
-1. ✅ **chroma channel** — DONE this spike (lifts screen 47.5→55.8%, photo
-   68.8→71.2%; op100 now 90/72.5).
+1. ✅ **chroma channel** — DONE (lifts screen 47.5→55.8%, photo 68.8→71.2%).
 2. ✅ **op-level stratification** — DONE; reveals the real op100 detection rate.
-3. **Multi-scale tiling** (64 ∧ 16): the dominant screen op100 miss is sq8,
-   which a 64px tile dilutes. Add a 16px pass and take the max excess across
-   scales — but rebuild the honest bar per scale (16px hits honest-ringing).
-4. **Generator spot-check chroma_boundary**: chroma signal is literally zero
-   → confirm the defect is actually visible at these severities before
-   chasing it.
-5. If 3 pushes screen op100 ≥85%, promote the 3-channel signal into a Rust
-   `score_tiles_with_bake`-style binary (still no public zensim API change),
-   then propose the `ZensimLocal` API to the user.
+3. ✅ **Multi-scale tiling (64 ∧ 16)** — DONE; op100 → photo 92.5% / screen
+   81.2% (~97% / ~85% excluding chroma_boundary). Per-scale activity-relative
+   bars keep honest-screen-ringing in check at 16px.
+4. **Generator spot-check chroma_boundary** (the one clear remaining gap):
+   signal is zero at BOTH scales on BOTH content types → the defect is almost
+   certainly sub-threshold/imperceptible as generated. Confirm before treating
+   it as a metric gap (it's likely a corpus-severity issue, codec-corpus#7).
+5. The signal is now strong enough to **promote into a Rust
+   `score_tiles_with_bake`-style binary** (multi-scale, 3-channel,
+   activity-relative bars; still no public zensim API change), wire into
+   `zensim-regress`, then propose the `ZensimLocal` public API to the user.
+   The remaining non-chroma_boundary misses (swap-on-achromatic-small-region,
+   block_repeat_neighbor) are near-imperceptible by construction — an honest
+   ceiling, not a blocker.
 
 Spike: `scripts/v_next/structural_signature_spike.py`. Log:
 `/tmp/struct-sig-3ch.log` (this run). Corpus:

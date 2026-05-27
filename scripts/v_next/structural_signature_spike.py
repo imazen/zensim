@@ -49,28 +49,26 @@ def rgb_ycc(im):
     return y, cb, cr
 
 
-def _block_reduce_rmse(sq):
-    """mean over non-overlapping TILExTILE blocks of a squared-error map → sqrt."""
-    h, w = sq.shape
-    hh, ww = (h // TILE) * TILE, (w // TILE) * TILE
-    sq = sq[:hh, :ww].reshape(hh // TILE, TILE, ww // TILE, TILE)
-    return np.sqrt(sq.mean(axis=(1, 3)))  # (nty, ntx)
-
-
-def _block_reduce_max(a):
-    """max over non-overlapping TILExTILE blocks. Catches thin/hard defects
-    (a 1px line) that tile-MEAN dilutes away."""
+def _blocks(a, t):
     h, w = a.shape
-    hh, ww = (h // TILE) * TILE, (w // TILE) * TILE
-    a = a[:hh, :ww].reshape(hh // TILE, TILE, ww // TILE, TILE)
-    return a.max(axis=(1, 3))
+    hh, ww = (h // t) * t, (w // t) * t
+    return a[:hh, :ww].reshape(hh // t, t, ww // t, t)
 
 
-def _block_reduce_std(y):
-    """per-block std of luma over non-overlapping TILExTILE blocks."""
-    h, w = y.shape
-    hh, ww = (h // TILE) * TILE, (w // TILE) * TILE
-    yb = y[:hh, :ww].reshape(hh // TILE, TILE, ww // TILE, TILE)
+def _block_reduce_rmse(sq, t):
+    """mean over non-overlapping txt blocks of a squared-error map → sqrt."""
+    return np.sqrt(_blocks(sq, t).mean(axis=(1, 3)))
+
+
+def _block_reduce_max(a, t):
+    """max over non-overlapping txt blocks. Catches thin/hard defects
+    (a 1px line) that tile-MEAN dilutes away."""
+    return _blocks(a, t).max(axis=(1, 3))
+
+
+def _block_reduce_std(y, t):
+    """per-block std of luma over non-overlapping txt blocks."""
+    yb = _blocks(y, t)
     m = yb.mean(axis=(1, 3), keepdims=True)
     return np.sqrt(((yb - m) ** 2).mean(axis=(1, 3)))
 
@@ -83,8 +81,8 @@ _REF_CACHE = {}
 C_LUMA, C_CHROMA, C_SLSTD, C_MAXPIX, C_SCSTD = range(5)
 
 
-def tile_stats(ref_path, dist_path):
-    """Vectorized per-(non-overlapping 64x64)-tile stats. Returns array
+def tile_stats(ref_path, dist_path, tile=TILE):
+    """Vectorized per-(non-overlapping tile×tile)-tile stats. Returns array
     (n_tiles, 5): luma_rmse, chroma_rmse, src_luma_std, maxpix_err,
     src_chroma_std.
     - maxpix_err = max over tile pixels of (|Δluma| + |Δchroma|) — the
@@ -99,13 +97,13 @@ def tile_stats(ref_path, dist_path):
     if ry.shape != dy.shape:
         return np.empty((0, 5))
     chroma_e = np.sqrt(((rcb - dcb) ** 2 + (rcr - dcr) ** 2) / 2)
-    luma = _block_reduce_rmse((ry - dy) ** 2)
-    chroma = _block_reduce_rmse(chroma_e ** 2)
-    std = _block_reduce_std(ry)
-    maxpix = _block_reduce_max(np.abs(ry - dy) + chroma_e)
+    luma = _block_reduce_rmse((ry - dy) ** 2, tile)
+    chroma = _block_reduce_rmse(chroma_e ** 2, tile)
+    std = _block_reduce_std(ry, tile)
+    maxpix = _block_reduce_max(np.abs(ry - dy) + chroma_e, tile)
     # source chroma activity: std of source chroma magnitude relative to neutral
     src_chroma_mag = np.sqrt(((rcb - 128) ** 2 + (rcr - 128) ** 2) / 2)
-    scstd = _block_reduce_std(src_chroma_mag)
+    scstd = _block_reduce_std(src_chroma_mag, tile)
     return np.column_stack([luma.ravel(), chroma.ravel(), std.ravel(),
                             maxpix.ravel(), scstd.ravel()])
 
@@ -118,114 +116,120 @@ def parse_name(path):
     return name, name, "?", "?"
 
 
-def main():
-    out_dir, ref = sys.argv[1], sys.argv[2]
-    label = sys.argv[3] if len(sys.argv) > 3 else os.path.basename(out_dir)
-    corruptions = sorted(glob.glob(os.path.join(out_dir, "*__corruption.png")))
+def make_bins(vals):
+    b = np.quantile(vals, np.linspace(0, 1, 9))
+    b[-1] += 1e-6
+    return b
 
-    # 1) Build the HONEST error-vs-activity cloud from a sample of q20 anchors'
-    #    tiles. Decode each sampled q20 ONCE and reuse for both the cloud and
-    #    the per-image bar distribution. For each activity bin, the honest p95
-    #    luma+chroma error is the bar a structural defect must exceed.
-    q20s = sorted(glob.glob(os.path.join(out_dir, "*__q20.png")))
-    sample = q20s[::8]  # spike sample for the cloud + bar
-    honest = [tile_stats(ref, q) for q in sample]
+
+def build_scale(ref, honest_paths, tile):
+    """For one tile size: build the per-activity-bin honest p95 bars and return
+    a `sig(dist_path) -> (me, pe, ce)` excess function + the (mean,maxpix,chroma)
+    bars. me/pe binned by source LUMA activity; ce by source CHROMA activity."""
+    honest = [tile_stats(ref, q, tile) for q in honest_paths]
     ha = np.vstack([h for h in honest if h.size])
-    if ha.size == 0:
-        print("no honest tiles", file=sys.stderr); return
-    # Two activity axes: src LUMA std (for the luma+maxpix channels) and src
-    # CHROMA std (for the chroma channel — a chroma defect in a chroma-flat
-    # source region is the anomaly to catch). Each gets its own quantile bins.
-    def make_bins(vals):
-        b = np.quantile(vals, np.linspace(0, 1, 9))
-        b[-1] += 1e-6
-        return b
-
-    lbins = make_bins(ha[:, C_SLSTD])
-    cbins = make_bins(ha[:, C_SCSTD])
-    lidx = np.clip(np.digitize(ha[:, C_SLSTD], lbins) - 1, 0, len(lbins) - 2)
-    cidx = np.clip(np.digitize(ha[:, C_SCSTD], cbins) - 1, 0, len(cbins) - 2)
-
-    def per_bin_p95(vals, idx, n):
-        return np.array([
-            np.quantile(vals[idx == b], 0.95) if np.any(idx == b) else np.inf
-            for b in range(n)
-        ])
-
+    lbins, cbins = make_bins(ha[:, C_SLSTD]), make_bins(ha[:, C_SCSTD])
     nlb, ncb = len(lbins) - 1, len(cbins) - 1
-    mean_p95 = per_bin_p95(ha[:, C_LUMA] + ha[:, C_CHROMA], lidx, nlb)  # luma+chroma rmse
-    maxp_p95 = per_bin_p95(ha[:, C_MAXPIX], lidx, nlb)                  # max-pixel
-    chrm_p95 = per_bin_p95(ha[:, C_CHROMA], cidx, ncb)                  # chroma-only rmse
+    lidx = np.clip(np.digitize(ha[:, C_SLSTD], lbins) - 1, 0, nlb - 1)
+    cidx = np.clip(np.digitize(ha[:, C_SCSTD], cbins) - 1, 0, ncb - 1)
 
-    def signals(ts):
-        """(mean-excess, maxpix-excess, chroma-excess) = max over tiles of each
-        channel's (value − honest p95 for that tile's activity bin). Each bar is
-        relative to the source's own local activity → content-robust."""
+    def p95(vals, idx, n):
+        return np.array([np.quantile(vals[idx == b], 0.95) if np.any(idx == b)
+                         else np.inf for b in range(n)])
+
+    mean_p95 = p95(ha[:, C_LUMA] + ha[:, C_CHROMA], lidx, nlb)
+    maxp_p95 = p95(ha[:, C_MAXPIX], lidx, nlb)
+    chrm_p95 = p95(ha[:, C_CHROMA], cidx, ncb)
+
+    def sig_arr(ts):
         if ts.size == 0:
             return None
         lb = np.clip(np.digitize(ts[:, C_SLSTD], lbins) - 1, 0, nlb - 1)
         cb = np.clip(np.digitize(ts[:, C_SCSTD], cbins) - 1, 0, ncb - 1)
-        me = ((ts[:, C_LUMA] + ts[:, C_CHROMA]) - mean_p95[lb]).max()
-        pe = (ts[:, C_MAXPIX] - maxp_p95[lb]).max()
-        ce = (ts[:, C_CHROMA] - chrm_p95[cb]).max()
-        return float(me), float(pe), float(ce)
+        return (float(((ts[:, C_LUMA] + ts[:, C_CHROMA]) - mean_p95[lb]).max()),
+                float((ts[:, C_MAXPIX] - maxp_p95[lb]).max()),
+                float((ts[:, C_CHROMA] - chrm_p95[cb]).max()))
 
-    # honest q20 bars: p95 of each signal across the honest sample (reuse tiles).
-    hsig = [s for s in (signals(h) for h in honest) if s is not None]
-    def bar95(i):
-        v = sorted(s[i] for s in hsig)
-        return v[int(len(v) * 0.95)]
-    mean_bar, maxp_bar, chrm_bar = bar95(0), bar95(1), bar95(2)
-    print(f"[{label}] honest-q20 bars: mean={mean_bar:.2f}  maxpix={maxp_bar:.2f}  "
-          f"chroma={chrm_bar:.2f}  (defect clears ANY → flagged)")
+    hsig = [s for s in (sig_arr(h) for h in honest) if s is not None]
+    bars = tuple(sorted(s[i] for s in hsig)[int(len(hsig) * 0.95)] for i in range(3))
+    return (lambda dist: sig_arr(tile_stats(ref, dist, tile))), bars
 
-    # 2) Score localized structural defects on all THREE signals.
+
+def main():
+    out_dir, ref = sys.argv[1], sys.argv[2]
+    label = sys.argv[3] if len(sys.argv) > 3 else os.path.basename(out_dir)
+    scales = [int(x) for x in os.environ.get("SCALES", "64,16").split(",")]
+    corruptions = sorted(glob.glob(os.path.join(out_dir, "*__corruption.png")))
+
+    # Build per-scale honest bars (the defect-vs-honest bar is relative to the
+    # source's own local activity at that scale → content-robust). Multi-scale
+    # closes the 8x8-defect-vs-64px-tile dilution: 16px catches small defects,
+    # 64px keeps honest screen text-ringing from flooding the bar.
+    q20s = sorted(glob.glob(os.path.join(out_dir, "*__q20.png")))
+    honest_paths = q20s[::10]
+    scale_fns = {}
+    for t in scales:
+        sig, bars = build_scale(ref, honest_paths, t)
+        scale_fns[t] = (sig, bars)
+        print(f"[{label}] scale {t:3d} honest-q20 bars: "
+              f"mean={bars[0]:.2f} maxpix={bars[1]:.2f} chroma={bars[2]:.2f}")
+
+    # Score each defect at every scale; a defect is FLAGGED if any channel at
+    # any scale clears that scale's honest bar.
     rows = []
     for c in corruptions:
         name, fam, region, op = parse_name(c)
         if fam not in STRUCTURAL or region not in LOCAL_REGIONS:
             continue
-        s = signals(tile_stats(ref, c))
-        if s is None:
-            continue
-        rows.append((fam, region, op, s[0], s[1], s[2]))
+        per_scale = {}
+        for t in scales:
+            sig, bars = scale_fns[t]
+            s = sig(c)
+            if s is None:
+                break
+            per_scale[t] = (s, bars)
+        else:
+            rows.append((fam, region, op, per_scale))
 
-    def gate(r, which):
-        me, pe, ce = r[3], r[4], r[5]
-        return {
-            "mean": me > mean_bar,
-            "maxpix": pe > maxp_bar,
-            "chroma": ce > chrm_bar,
-            "any": me > mean_bar or pe > maxp_bar or ce > chrm_bar,
-        }[which]
+    def flagged_at(per_scale, t):
+        s, bars = per_scale[t]
+        return any(s[i] > bars[i] for i in range(3))
 
-    for which in ("mean", "maxpix", "chroma", "any"):
-        p = [r for r in rows if gate(r, which)]
-        print(f"[{label}] gate ({which:6s}): {len(p):3d}/{len(rows)} = "
+    def flagged(per_scale):
+        return any(flagged_at(per_scale, t) for t in scales)
+
+    # per-scale and combined gate
+    for t in scales:
+        p = [r for r in rows if flagged_at(r[3], t)]
+        print(f"[{label}] gate scale {t:3d}: {len(p):3d}/{len(rows)} = "
               f"{len(p)/max(len(rows),1)*100:5.1f}%")
+    pc = [r for r in rows if flagged(r[3])]
+    print(f"[{label}] gate MULTI-SCALE {scales}: {len(pc):3d}/{len(rows)} = "
+          f"{len(pc)/max(len(rows),1)*100:5.1f}%")
 
-    # op-level stratified on the combined gate: op100 = full-strength defect
-    # (the number that matters); op20 = 20%-opacity faint blend (near-imperceptible).
-    print(f"[{label}] op-stratified (combined 'any' gate):")
+    # op-level stratified on the multi-scale gate.
+    print(f"[{label}] op-stratified (multi-scale gate):")
     for op in ("op100", "op50", "op20"):
-        v = [gate(r, "any") for r in rows if r[2] == op]
+        v = [flagged(r[3]) for r in rows if r[2] == op]
         if v:
             print(f"  {op:6s} {sum(v):3d}/{len(v):3d}  {sum(v)/len(v)*100:5.1f}%")
 
-    # per-family on the combined gate
+    # per-family on the multi-scale gate
     fams = {}
     for r in rows:
-        fams.setdefault(r[0], []).append(gate(r, "any"))
-    print("per-family pass (localized regions, combined gate):")
+        fams.setdefault(r[0], []).append(flagged(r[3]))
+    print("per-family pass (localized regions, multi-scale gate):")
     for fam in sorted(fams):
         v = fams[fam]
         print(f"  {fam:32s} {sum(v):2d}/{len(v):2d}  {sum(v)/len(v)*100:5.1f}%")
 
     # op100 misses only — the real residual gaps (faint blends excluded)
-    miss100 = [r for r in rows if r[2] == "op100" and not gate(r, "any")]
+    miss100 = [r for r in rows if r[2] == "op100" and not flagged(r[3])]
     print(f"\n{len(miss100)} op100 misses (full-strength defect undetected) — the real gaps:")
-    for fam, region, op, me, pe, ce in sorted(miss100, key=lambda r: (r[0], r[1])):
-        print(f"  {fam:28s} {region:6s}  mean={me:7.2f} maxpix={pe:7.2f} chroma={ce:7.2f}")
+    for fam, region, op, per_scale in sorted(miss100, key=lambda r: (r[0], r[1])):
+        detail = " ".join(f"t{t}({per_scale[t][0][0]:.1f},{per_scale[t][0][1]:.1f},"
+                          f"{per_scale[t][0][2]:.1f})" for t in scales)
+        print(f"  {fam:26s} {region:6s}  {detail}")
 
 
 if __name__ == "__main__":
