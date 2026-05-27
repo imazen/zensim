@@ -1,0 +1,40 @@
+mask: 300 mono / 72 free
+loading train…
+  safesyn: loaded 196086 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet"
+  safesyn: 196086 rows
+  cid22_train: loaded 17611 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/cid22_train_norm.parquet"
+  cid22_train: 17611 rows
+  kadid: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/kadid.parquet"
+  kadid: 10125 rows
+  tid: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/tid.parquet"
+  tid: 3000 rows
+  konjnd: loaded 20160 pairs × 372 features from "/mnt/v/zen/zensim-training/canonical-2026-05-21/train/konjnd-dense-norm.parquet"
+  konjnd: 20160 rows
+epoch   0 lr=0.0010 loss=153.7962 λm=0.314
+epoch  20 lr=0.0006 loss=182.0361 λm=0.318
+epoch  40 lr=0.0000 loss=194.3202 λm=0.320
+epoch  60 lr=0.0008 loss=220.1891 λm=0.324
+epoch  80 lr=0.0001 loss=238.7665 λm=0.327
+epoch 100 lr=0.0009 loss=259.5137 λm=0.331
+epoch 120 lr=0.0003 loss=283.3520 λm=0.335
+epoch 139 lr=0.0010 loss=292.6683 λm=0.337
+
+=== PANEL (SROCC, partial-monotone residual) ===
+  cid22: loaded 4292 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet"
+  cid22    SROCC=0.6254  range=[-1151.8,99.5]  n=4292
+  kadid: loaded 10125 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/kadid_features_372col_2026-05-15.parquet"
+  kadid    SROCC=0.7392  range=[-11206.8,100.0]  n=10125
+  tid: loaded 3000 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/tid_features_372col_2026-05-15.parquet"
+  tid      SROCC=0.7424  range=[-4120.1,99.8]  n=3000
+  konjnd: loaded 1008 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/konjnd_features_372col_2026-05-15.parquet"
+  konjnd   SROCC=-0.3487  range=[-1044.7,99.6]  n=1008
+  aic3: loaded 600 pairs × 372 features from "/mnt/v/zen/zensim-training/2026-05-15-full-features/aic3_features_372col_2026-05-15.parquet"
+  aic3     SROCC=0.5646  range=[-436.5,99.7]  n=600
+
+=== BLUR-LADDER monotonicity ===
+  color_blocks  [100.0 -1116.4 -2157.5 -2955.6 -3710.9 -4333.3 -4916.4 -5462.9 -6001.2]  inv=0 above_id=0
+  checker       [100.0 -915.6 -1920.4 -2705.3 -3484.9 -4129.6 -4735.5 -5296.5 -5861.4]  inv=0 above_id=0
+  mandelbrot    [100.0 -805.3 -1270.6 -1622.7 -1901.9 -2136.3 -2350.2 -2535.9 -2702.9]  inv=0 above_id=0
+  value_noise   [100.0 98.5 96.5 -85.8 -408.1 -759.5 -1133.3 -1527.3 -1937.9]  inv=0 above_id=0
+
+(A2 → above_id=0 by construction; A3 → inv ≤ bounded-δ slack; resolution → wide negative range)
