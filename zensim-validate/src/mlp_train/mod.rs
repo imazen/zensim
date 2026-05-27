@@ -7864,30 +7864,34 @@ fn train_mlp_per_sample_alpha_head(
             // band-by-target + 0.01-pred-filter, which collapsed to 2
             // degenerate knots on the narrow (~0.4-wide) tanh-pin band and
             // shipped a broken (all-negative / identity=0) dial.
-            let (cqw1, cqw2, cqws, cqrw, cqwa);
-            let (sw1, sw2, sws, srw, swa): (&[f64], &[f64], &[f64], &[f64], &[f64]) =
-                if qat_fine_tune_epochs > 0 {
-                    cqw1 = qat_quantize_copy(&w1, qat_tau);
-                    cqw2 = qat_quantize_copy(&w2_enc, qat_tau);
-                    cqws = qat_quantize_copy(&w_skip, qat_tau);
-                    cqrw = qat_quantize_copy(&rank_w, qat_tau);
-                    cqwa = qat_quantize_copy(&w_alpha, qat_tau);
-                    (&cqw1, &cqw2, &cqws, &cqrw, &cqwa)
-                } else {
-                    (
-                        w1.as_slice(),
-                        w2_enc.as_slice(),
-                        w_skip.as_slice(),
-                        rank_w.as_slice(),
-                        w_alpha.as_slice(),
-                    )
-                };
+            // Forward the SHIPPED net EXACTLY: the bake applies the hard sign
+            // projection (encoder ≥0, rank_w ≤0, α≡1) THEN — when QAT —
+            // f16+zerobias quantize. Forwarding the UN-projected net here
+            // inverts the pred↔target correlation (the projection flips
+            // signs), so the spline gets fit on a different net than ships
+            // and its direction comes out wrong. Project (+ quantize) so the
+            // dial calibrates the actual shipped net.
+            let pw1 = proj_w1_masked(&w1);
+            let pw2 = proj_geq0(&w2_enc);
+            let prw = proj_leq0(&rank_w);
+            let pwa = proj_w_alpha_zero(&w_alpha);
+            let sba = proj_b_alpha_one(b_alpha);
+            let (sw1, sw2, srw, swa) = if qat_fine_tune_epochs > 0 {
+                (
+                    qat_quantize_copy(&pw1, qat_tau),
+                    qat_quantize_copy(&pw2, qat_tau),
+                    qat_quantize_copy(&prw, qat_tau),
+                    qat_quantize_copy(&pwa, qat_tau),
+                )
+            } else {
+                (pw1, pw2, prw, pwa)
+            };
             let mut sp_preds: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
             let mut sp_targets: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
             for (i, af) in std_anchor_features.iter().enumerate() {
                 let fwd = arch_forward(
-                    af, sw1, &b1, sw2, &b2_enc, sws, b_skip,
-                    srw, rank_b, &reducer_w, reducer_b, swa, b_alpha,
+                    af, &sw1, &b1, &sw2, &b2_enc, &w_skip, b_skip,
+                    &srw, rank_b, &reducer_w, reducer_b, &swa, sba,
                     n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
                 );
                 let (pinned, _) = pin_forward(fwd.y);
