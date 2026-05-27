@@ -1004,15 +1004,36 @@ The JSON pipeline is still mandated for any new bake-producing tool
 (per "JSON pipeline mandate" section below). See template at
 `zensim/scripts/v_next/v0_20b/bake_znpr_v3.py`.
 
-### STANDARD bake packing — pack-then-calibrate (2026-05-27)
+### STANDARD bake packing — QAT-native (2026-05-27)
 
-**Every bake is packed before ship via `scripts/v_next/pack_and_calibrate.py`,
-NOT raw `zenpredict repack`.** Standard invocation:
+**The trainer emits the packed + calibrated bake NATIVELY — no Python
+post-step.** Use `--qat-fine-tune-epochs N` (recipe field `qat_fine_tune_epochs`)
++ `--out-dtype f16`: the last N epochs train quantization-aware (f16+zerobias
+straight-through estimator), the post-training dial spline is fit on the
+PROJECTED+QUANTIZED (shipped) net, and the 2-layer bake stores f16
+(encoder) + compressed. One `zensim_mlp_train --manifest v47_strict_qat.toml`
+pass → a ~27 KB bake, identity 97.7 (exact), 0 above-identity, correct dial.
+VERIFIED 2026-05-27 (`benchmarks/qat_fine_tune_2026-05-27.md`): CID22 0.8657
+(> the non-QAT recal 0.8564), Z-RMSE 0.512.
 
-```sh
-python3 scripts/v_next/pack_and_calibrate.py IN.bin OUT.bin \
-    --dtype f16 --zerobias-bulk 0.005 --neg-tail
-```
+**Load-bearing rule (BOTH paths): fit the dial spline on the SHIPPED net —
+projected (encoder≥0, rank_w≤0, α≡1) AND quantized.** Fitting on the
+un-projected/f32 net inverts the pred↔target correlation → the spline picks
+the wrong direction (blur scored UP to 2184) or identity drops (97.8→93.4).
+QUANTIZE-then-CALIBRATE, on the projected net.
+
+**QAT trade (intrinsic, not tau-tunable):** QAT improves CID22 + Z-RMSE but
+regresses KonJND (0.485→0.418 — f16 removes the fine-weight precision PJND
+discrimination needs; both fail G5's 0.70 floor regardless). So QAT is kept
+OPT-IN (`qat_fine_tune_epochs` default 0): the codec-dial ship recipe opts in
+(CID22 + native packing win); an HF/PJND-focused bake stays non-QAT.
+
+**Non-QAT fallback** (existing f32 bakes, or HF-focused bakes that can't take
+the KonJND trade): `scripts/v_next/pack_and_calibrate.py IN.bin OUT.bin
+--dtype f16 --zerobias-bulk 0.005 --neg-tail` — pack-then-calibrate as a
+post-step (strip → zerobias+dtype → refit spline on packed → re-inject).
+
+#### pack_and_calibrate.py (non-QAT post-step) details
 
 **Load-bearing rule: QUANTIZE, then CALIBRATE.** zerobias/f16/i8 preserve
 RANK (signs intact) but SHIFT the network's raw outputs, so a spline fit on
