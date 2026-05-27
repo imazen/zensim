@@ -56,10 +56,11 @@ auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/scre
 anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
 
 steps = [
-    "1. zensim_mlp_train --manifest (this file) produces v47_masked_strict_2026-05-26.bin (f32, degenerate auto-spline)",
-    "2. scripts/v_next/recal_v47_dial.py (NEG_TAIL) refits the dial spline on the anchor → v47_strict_recal_negtail (f32)",
-    "3. STANDARD pack: f16 + zerobias 0.005 + lz4 + spline-refit-on-packed → v47_strict_recal_negtail_packed30k (30 KB, identity-exact). See standard_bake_packing_2026-05-27.md.",
-    "QUEUED: fold steps 2-3 into the Rust trainer via QAT fine-tune (f16+zerobias in the last N epochs) so the trainer emits the packed+calibrated bake natively — removes the Python post-steps.",
+    "1. zensim_mlp_train --manifest (this file) produces the FINAL packed+calibrated bake in ONE pass — no Python post-steps:",
+    "   - last 40 epochs train quantization-aware (f16+zerobias STE) → net robust to packing",
+    "   - post-training spline fit (fit_monotone_spline) on the QUANTIZED net over the multiband anchor → dial calibrated to exactly what ships",
+    "   - bake stores f16 (encoder) + compressed → ~30 KB, identity-exact, monotone-by-construction",
+    "   recal_v47_dial.py + pack_and_calibrate.py are OBSOLETE for this recipe (kept only for non-QAT bakes).",
 ]
 
 [inputs.canonical_root]
