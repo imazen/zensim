@@ -5,11 +5,18 @@
 
 ## 2026-05-27 session — what changed (read this, then the older state below)
 
-**The axiom-clean metric line (v47-strict) now has a fully-staged ship
-candidate that fixes V39's correctness defects.** V39 (still the shipped
-`Profile::A`) is BROKEN at the dial/identity regime: it scores identity=0 on
-every ref and its codec dial is non-invertible (53.6% tied q-steps, median
-score collapses to 0.00 for q55–q95). The replacement candidate:
+**SHIPPED (commit 1fd645a7): `ZensimProfile::A` is now v47-strict-QAT-native**,
+replacing the broken V39 bake (user-approved replace-at-Profile::A, 2026-05-27).
+`zensim/weights/v47_strict_qat_native_2026-05-27.bin` is `include_bytes!`'d via
+`mlp_bake_a_v47_qat()`; V39 bytes stay on disk (still back `PreviewV0_4`). The
+metric_invariants `v39_known_limit_violations` test flipped → replaced by the
+positive A gate (`a_v47_is_bounded_above_and_self_identity_maximal`,
+`a_v47_is_degradation_monotone`). **The #1 non-speed goal is DONE**: Profile::A
+is bounded-above + self-identity-maximal + degradation-monotone on all content.
+Full workspace green. **Next per user**: (1) retune jxl-encoder's zensim loop
+for the new Profile::A; (2) iterate on #33 as a diffmap candidate vs #32; (3) try
+CVVDP-target training instead of ssim2 (note the V41 scalar-CVVDP dead-end —
+diffmap-target may differ). The candidate that shipped:
 
 - **`v47_strict_qat_native_2026-05-27.bin`** (27 KB, sha256 `d0ef7a30…`),
   produced by ONE `zensim_mlp_train --manifest

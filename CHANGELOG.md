@@ -15,17 +15,26 @@ gate is unbounded as the true gradient → 0. Fixed with ε=1e-2 + the standard
 (L=y, dl_dy=1) and passes cleanly, confirming the backprop is correct.
 Shipped bakes were never affected.
 
-### Docs — v47-strict QAT-native ship candidate staged (2026-05-27)
+### Changed — `ZensimProfile::A` rotated to v47-strict-QAT-native (2026-05-27)
 
-The axiom-clean metric line has a fully-staged ship candidate for `Profile::A`
-(`v47_strict_qat_native_2026-05-27.bin`, 27 KB, one-pass QAT f16+zerobias):
-consolidated ship-methodology doc (`benchmarks/v0_qat_native_methodology_2026-05-27.md`,
-all 8 required sub-points), decisive q-sweep dial comparison vs V39
-(`benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`: 94.33% monotone / 0.33%
-tied vs V39 67.7% / 53.6%), and verified global corruption ordering
-(identity 97.69 > q20 40.36 > broken-decode). Fixed `v47_strict_qat.toml`'s
-`[bake]` block which pointed at a 257 KB pre-pack intermediate (95b49f1, 97c4c96).
-Ship-form (replace V39 vs sibling) is the user's call; no `Profile::A` flip yet.
+**Replaced the broken V39 bake at `Profile::A` (PreviewV0_3)** with
+`v47_strict_qat_native_2026-05-27.bin` (27 KB, sha256 `d0ef7a30…`, one-pass
+QAT f16+zerobias). Bake rotation, NOT an API change (1fd645a7). The prior V39
+is *not a correct similarity metric* — identity=0 on every ref, non-invertible
+dial (q-sweep 67.7% monotone / 53.6% tied). v47-strict is masked-monotone-by-
+construction: 0 inversions, 0 above-identity, identity=97.69 (dial max), best
+dial measured (94.33% monotone / 0.33% tied, monotone median q5→q95 1.40→88.50),
+global ordering identity 97.69 > q20 40.36 > channel-invert 12.21 > block-zero 0.00.
+**Fixes the #1 non-speed goal**: `Profile::A` is now bounded-above +
+self-identity-maximal + degradation-monotone on ALL content. The
+`v39_known_limit_violations` test flipped (V39 violated; v47 satisfies) → replaced
+by the positive A invariant gate (`a_v47_is_bounded_above_and_self_identity_maximal`,
+`a_v47_is_degradation_monotone`). Held-out panel: CID22 0.8657, KADID 0.793,
+TID 0.793, KonJND 0.418, AIC-3 0.768, AIC-4 0.885. V39 bytes remain on disk
+(still back `PreviewV0_4`). Methodology:
+`benchmarks/v0_qat_native_methodology_2026-05-27.md`; q-sweep:
+`benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`. Recipe `v47_strict_qat.toml`
+`[bake]`-block accuracy fix in 95b49f1/97c4c96.
 
 ### Added — `zensim_mlp_train --manifest <path.toml>` reproduce-this input mode (2026-05-27)
 
