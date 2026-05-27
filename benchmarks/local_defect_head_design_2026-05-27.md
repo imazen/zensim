@@ -163,3 +163,24 @@ Tile-min/gap can be the cheap photo-content first line; B handles the rest.
 Scorer + gate harness ready: `score_tiles_with_bake`,
 `corruption_gate_eval.py TILE_MIN=1`, results in
 `benchmarks/corruption_gate_tilemin_2026-05-27.md`.
+
+## Approach B VALIDATED (2026-05-27) — content-robust activity-decorrelation
+
+Spiked the Approach-B direction (`scripts/v_next/structural_signature_spike.py`,
+findings `benchmarks/approach_b_structural_signal_spike_2026-05-27.md`). Key
+result: measuring per-tile error **relative to the source's own local
+activity** (honest compression error tracks activity; a structural defect
+breaks that correlation) is decisively better than perceptual tiling AND
+content-robust:
+
+| gate | photo | screen |
+|---|--:|--:|
+| tile-min (perceptual) | 37% | 24% |
+| **activity-decorrelation, combined** | **68.8%** | **47.5%** |
+
+The mean-excess signal ~2×'s tile-min on screen (the content type that
+defeated tiling); a max-pixel-excess signal complements it on photo (53→69%).
+Remaining misses are dominated by op20 faint blends (arguably correct misses)
++ invisible swap-on-gray + chroma_boundary. Next chunks (none gated):
+chroma-only channel, op-level-stratified gate, then a Rust scorer binary
+before proposing the `ZensimLocal` public API.
