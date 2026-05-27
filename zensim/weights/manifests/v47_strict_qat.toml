@@ -8,13 +8,13 @@
 # Schema: zensim/weights/manifests/README.md
 
 [bake]
-name              = "v47-strict-QAT (masked-monotone + quantization-aware fine-tune)"
+name              = "v47-strict-QAT-native (masked-monotone + quantization-aware fine-tune, one-pass packed)"
 internal_version  = "v47-strict-qat"
-file              = "/mnt/v/output/zensim/bakes/v47_strict_qat_2026-05-27.bin"
-sha256            = "c71b2060023638b1a5d57341997b81e9aac55666abb9e14f3347cb0b00846470"
-file_bytes        = 257947
+file              = "/mnt/v/output/zensim/bakes/v47_strict_qat_native_2026-05-27.bin"
+sha256            = "d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc"
+file_bytes        = 27316
 n_inputs          = 372
-arch              = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30), masked-monotone (W1≥0 on sign-safe set, rank_w≤0); spline + pack applied post-training"
+arch              = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30), masked-monotone (W1≥0 on sign-safe set, rank_w≤0); f16+zerobias encoder + f32 identity passthrough; spline + pack done IN-PASS (QAT-native, no post-step)"
 date              = "2026-05-27"
 
 [training]
@@ -109,12 +109,14 @@ path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_c
 sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
 
 [eval]
-verdict_file  = "../../../benchmarks/v47_strict_recal_methodology_2026-05-27.md"
-cid22_srocc   = 0.8547   # packed-recal: 0.8564
-kadid_srocc   = 0.8030
-tid_srocc     = 0.7965
-konjnd_srocc  = 0.4850   # best-of-field (> V39 0.420)
-aic3_srocc    = 0.7700
-aic4_srocc    = 0.8902
+verdict_file  = "../../../benchmarks/v0_qat_native_methodology_2026-05-27.md"
+cid22_srocc   = 0.8657   # QAT-native (bake_verdict), best of the v47 axiom-clean candidates
+kadid_srocc   = 0.7933
+tid_srocc     = 0.7927
+konjnd_srocc  = 0.4185   # f16+zerobias removes fine-weight PJND precision (intrinsic; non-QAT recal keeps 0.485)
+aic3_srocc    = 0.7680
+aic4_srocc    = 0.8854
+qsweep_monotonicity = 0.9433  # JPEG 50img×19q, vs V39 0.6767 (V39 dial broken: median→0 q55–q95)
+identity      = 97.69    # the dial max; V39 BROKEN (identity=0 on every ref)
 blur_above_identity = 0  # the V39 defect, FIXED by construction
-notes = "Costs vs V39: CID22 -0.024, KADID -0.122, TID -0.135 (the 72 dropped sign-flip features' analytic-distortion signal). Gains: blur>identity FIXED, monotone dial (q-sweep 94% vs V39 68%), KonJND +0.065, better CID22 calibration. Ship decision (replace V39 at Profile::A vs sibling) PENDING."
+notes = "Costs vs V39 (rank only): CID22 -0.014, KADID -0.132, TID -0.139, KonJND -0.001, AIC-3/4 -0.034/-0.020 — the 72 dropped sign-flip features' analytic-distortion signal + f16 PJND precision. Gains: blur>identity FIXED, identity=max FIXED (V39 scores 0), monotone codec dial (q-sweep 94.3% vs V39 67.7%, 0.33% vs 53.6% tied), 27 KB vs 257 KB, native one-pass packing. V39's higher KADID/TID rank is moot for the dial use case (its dial is non-invertible). Ship decision (replace V39 at Profile::A vs add sibling) USER-GATED — see methodology doc."
