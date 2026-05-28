@@ -100,7 +100,7 @@ rows   = 3000
 
 [inputs.konjnd_dense]
 path   = "{canonical}/konjnd-dense-norm.parquet"
-sha256 = "5595a922b076e7e3fd6d1d8cfcdfbf37a92e3e1603324889cf8ac2e077323898"
+sha256 = "49b65c4890fb9a8f910c5cbf873d75714d47407b5babcf6e8f7fb0df67684c85"
 rows   = 20160
 
 [inputs.multiband_anchor]

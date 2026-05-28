@@ -1236,6 +1236,18 @@ canonical-2026-05-18/
 
 ### Canonical schema (training + validation parquets)
 
+⚠ **2026-05-28 column rename**: `konjnd-dense-norm.parquet` and
+`konjnd-dense.parquet` gained `active_mix_norm` / `active_mix_raw`
+columns as aliases of their respective `human_score` columns. The
+`human_score` column on these parquets carries the per-pair active mix
+output — NOT the per-ref mean PJND. val/konjnd's `human_score` column
+DOES carry the mean PJND (and equals train's `pjnd_target` per ref).
+New recipes should use:
+- `active_mix_norm` (in train, [0,1]) for per-pair training on active mix
+- `pjnd_target` (in train) when targeting val/konjnd's `human_score` directly
+Old recipes pinning `--target-column human_score` are PRESERVED via
+the legacy `human_score` column on both train parquets.
+
 Every train/* and val/* parquet uses the same column ordering so
 trainers can switch corpus paths without touching schema-handling
 code:
@@ -1246,17 +1258,32 @@ human_score  : float64               per-corpus native anchor
   - safesyn:       synthetic ssim2-derived target
   - kadid:         DMOS (1-5, lower=better)
   - tid:           MOS (0-9, higher=better)
-  - konjnd-dense:  the active mix output (NOT PJND — use pjnd_target column for PJND)
+  - konjnd-dense:  the active mix output (NOT PJND — use pjnd_target column for PJND).
+                   ⚠ 2026-05-28: ALSO available as `active_mix_norm` (in
+                   konjnd-dense-norm) / `active_mix_raw` (in konjnd-dense), added
+                   as clearer aliases of `human_score` to disambiguate from
+                   val/konjnd's `human_score` = mean PJND. New recipes should use
+                   `active_mix_norm` / `active_mix_raw` for explicit intent;
+                   `human_score` retained for backward compat with shipped V_X recipes.
   - cvvdp_LARGE:   ssim2-derived training anchor
   - val/cid22:     MCOS / 100 (validation-only)
   - val/kadid:     DMOS
   - val/tid:       MOS
-  - val/konjnd:    mean PJND threshold
+  - val/konjnd:    mean PJND threshold (= train's `pjnd_target` column for same ref)
   - val/aic3:      score.jnd (signed JND units, AIC-3 CTC)
+active_mix_norm                       : f64 (konjnd-dense-norm ONLY; alias of
+                                         `human_score`, added 2026-05-28). Per-pair
+                                         active mix normalized to [0, 1].
+active_mix_raw                        : f64 (konjnd-dense ONLY; alias of
+                                         `human_score`, added 2026-05-28). Per-pair
+                                         active mix on the raw [-66, 96] scale.
 cvvdp_score, cvvdp_log_norm           : f64 (null if not available)
 iwssim, iwssim_log_norm                : f64 (null if not available)
 ssim2_gpu, ssim2_log_norm              : f64 (null if not available)
-pjnd_target                            : f64 (KonJND PJND threshold; null except for konjnd-dense)
+pjnd_target                            : f64 (KonJND PJND threshold; null except for konjnd-dense).
+                                         Per-ref constant (replicated across all 20
+                                         distortion levels per ref). EQUALS val/konjnd's
+                                         `human_score` for the same ref.
 mix_cv25_iw75 … mix_cv75_iw25          : 10 cvvdp×iwssim mix variants
 mix_cv33_iw33_sm33                     : 3-way mix with ssim2 (only kadid + tid have non-null)
 mix_target                             : alias for active --target-column at consumer's choice
@@ -1275,7 +1302,8 @@ sees a stable schema across corpora.
 | `train/safesyn.parquet` | 196,086 | 372 | cvvdp_score, cvvdp_log_norm, iwssim, iwssim_log_norm, ssim2_gpu, ssim2_log_norm, mix_cv25..cv75 grid (no `mix_cv33_iw33_sm33`) | 590.5 MB | `1ee0565fb6cb` |
 | `train/kadid.parquet` | 10,125 | 372 | all of the above + `mix_cv33_iw33_sm33` | 31.5 MB | `037685df82f5` |
 | `train/tid.parquet` | 3,000 | 372 | all of the above + `mix_cv33_iw33_sm33` | 9.4 MB | `9d6b6b78b987` |
-| `train/konjnd-dense.parquet` | 20,160 | 372 | `pjnd_target` + mix_cv25..cv75 grid (cvvdp/iwssim/ssim2 are all null) | 67.1 MB | `87e196ba88ba` |
+| `train/konjnd-dense.parquet` | 20,160 | 372 | `human_score` + `active_mix_raw` (2026-05-28 alias) + `pjnd_target` + mix_cv25..cv75 grid (cvvdp/iwssim/ssim2 are all null) | 67.3 MB | `803f1f571032` |
+| `train/konjnd-dense-norm.parquet` | 20,160 | 372 | `human_score` + `active_mix_norm` (2026-05-28 alias, both [0,1]) + `pjnd_target` + mix_cv25..cv75 grid | 67.3 MB | `49b65c4890fb` |
 | `train/cvvdp_iwssim_LARGE.parquet` | 73,300 | **300** | cvvdp_score, cvvdp_log_norm, iwssim, iwssim_log_norm, mix_cv40_iw60 (no ssim2, no full mix grid) | 43.7 MB | `289d45cc3169` |
 | `val/cid22.parquet` | 4,292 | 372 | `human_score` only (MCOS / 100) | 13.0 MB | `6eea08253fa2` |
 | `val/kadid.parquet` | 10,125 | 372 | `human_score` only (DMOS) | 30.1 MB | `04a8d5b0b5f1` |

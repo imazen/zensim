@@ -162,7 +162,7 @@
         "mix_target"
       ],
       "byte_size": 67080101,
-      "sha256": "87e196ba88baceea4429c1839c0c6042576ca5ed2b994e47c2b0f8b01b8b4fdf",
+      "sha256": "803f1f571032c507b341bc27f84aed42e3ff39332a1f22611013a9ce0ccfe75c",
       "canonical_metadata": {
         "canonical_corpus": "konjnd-dense",
         "canonical_date": "2026-05-18",

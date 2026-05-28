@@ -72,22 +72,23 @@ GROUPS_DEFAULT = [
 
 GROUPS_WITH_KONJND = GROUPS_DEFAULT + [
     # konjnd-dense-norm: train on `pjnd_target` (per-ref PJND threshold,
-    # replicated across the 20 distortion levels per ref) — NOT `human_score`.
+    # replicated across the 20 distortion levels per ref). Matches
+    # val/konjnd.parquet's `human_score` (= mean PJND) — literally the
+    # same value per ref (verified: SRC0001 has pjnd_target=30.79 in train
+    # AND human_score=30.79 in val).
     #
-    # Why: the val/konjnd.parquet's `human_score` is *also* the per-ref mean
-    # PJND threshold (range 22..70). It's literally the same column as
-    # train's `pjnd_target`, just under a different name. SRC0001 has
-    # pjnd_target=30.79 in train AND human_score=30.79 in val.
+    # DO NOT train on konjnd-dense-norm's `human_score` (or its 2026-05-28
+    # alias `active_mix_norm`): both carry the per-pair active mix output
+    # normalized to [0, 1], which is a DIFFERENT QUANTITY from val/konjnd's
+    # `human_score`. Training on it doesn't break SROCC magnitude (it
+    # would be ~0.578 instead of 0.594) but it's the wrong direction
+    # conceptually.
     #
-    # The train parquet's `human_score` column is something else entirely —
-    # the "active mix output normalized to [0, 1]" (per-pair, range 0..1,
-    # mean 0.73). That column anti-correlates with `pjnd_target` at
-    # ref-level SROCC −0.21 (verified 2026-05-28). Training on it pulls
-    # the model in the OPPOSITE direction of the val target, flipping
-    # KonJND val SROCC from +0.594 to −0.578.
-    #
-    # The fix: use `pjnd_target` as the training column. After per-group
-    # minmax01 normalization, it's scaled to [0, 1] like the other groups.
+    # NEITHER target actually helps BVLS val |SROCC|: empirically the
+    # no-konjnd baseline (0.594) beats both human_score (0.578) and
+    # pjnd_target (0.436) on the val/konjnd corpus. konjnd_dense is
+    # included here for completeness; the recommended ship recipe leaves
+    # --with-konjnd off.
     ("konjnd_dense", "konjnd-dense-norm",  0.3, "pjnd_target"),
 ]
 
