@@ -62,12 +62,22 @@ MASK_TSV = REPO / "benchmarks/feature_sign_mask_2026-05-26.tsv"
 TRANSFORM_TSV = REPO / "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
 ANCHOR_PQ = TRAIN_DIR / "multiband_anchor_dial100.parquet"
 
-GROUPS = [
+GROUPS_DEFAULT = [
     # (name, parquet basename, train_w, target_column)
-    ("safesyn",      "safesyn",          1.0, "human_score"),
-    ("cid22_train",  "cid22_train_norm", 1.5, "human_score"),
-    ("kadid",        "kadid",            0.5, "human_score"),
-    ("tid",          "tid",              0.5, "human_score"),
+    ("safesyn",      "safesyn",            1.0, "human_score"),
+    ("cid22_train",  "cid22_train_norm",   1.5, "human_score"),
+    ("kadid",        "kadid",              0.5, "human_score"),
+    ("tid",          "tid",                0.5, "human_score"),
+]
+
+GROUPS_WITH_KONJND = GROUPS_DEFAULT + [
+    # konjnd-dense-norm's `human_score` is the active mix output normalized
+    # to [0, 1] on a MOS-equivalent scale (verified 2026-05-28: min=0.0,
+    # max=1.0, mean=0.73, n=20,160). Earlier scripts excluded the older
+    # konjnd_dense parquet (raw PJND) for scale-mismatch reasons; the
+    # normalized variant is safe to include. Low weight (0.3) so it doesn't
+    # dominate but adds the visually-lossless boundary signal.
+    ("konjnd_dense", "konjnd-dense-norm",  0.3, "human_score"),
 ]
 
 HOLDOUTS = ["cid22", "kadid", "tid", "konjnd", "aic3", "aic4"]
@@ -295,6 +305,20 @@ def main() -> int:
         action="store_true",
         help="Skip per-feature transforms (control — should reproduce MVP).",
     )
+    ap.add_argument(
+        "--with-konjnd",
+        action="store_true",
+        help="Include konjnd-dense-norm training group at weight 0.3. "
+        "Earlier scripts excluded it; the normalized variant has a "
+        "MOS-scaled `human_score` column that's safe to mix.",
+    )
+    ap.add_argument(
+        "--cid22-weight",
+        type=float,
+        default=None,
+        help="Override cid22_train group weight (default 1.5). Raising to "
+        "3.0+ trades held-out KADID/TID for CID22 rank.",
+    )
     args = ap.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -319,9 +343,15 @@ def main() -> int:
         )
 
     # ----- Load training groups, apply shaping, weight by group -----
+    groups = GROUPS_WITH_KONJND if args.with_konjnd else GROUPS_DEFAULT
+    if args.cid22_weight is not None:
+        groups = [
+            (n, b, args.cid22_weight if n == "cid22_train" else w, tc)
+            for (n, b, w, tc) in groups
+        ]
     print()
     Xs, ys, ws = [], [], []
-    for name, base, gw, tcol in GROUPS:
+    for name, base, gw, tcol in groups:
         X, y = load_group(base, tcol)
         # Standardize MOS-style targets to [0,1] per group for the LS fit.
         y01 = minmax01(y)
