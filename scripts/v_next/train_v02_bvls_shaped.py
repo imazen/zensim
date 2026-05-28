@@ -71,13 +71,24 @@ GROUPS_DEFAULT = [
 ]
 
 GROUPS_WITH_KONJND = GROUPS_DEFAULT + [
-    # konjnd-dense-norm's `human_score` is the active mix output normalized
-    # to [0, 1] on a MOS-equivalent scale (verified 2026-05-28: min=0.0,
-    # max=1.0, mean=0.73, n=20,160). Earlier scripts excluded the older
-    # konjnd_dense parquet (raw PJND) for scale-mismatch reasons; the
-    # normalized variant is safe to include. Low weight (0.3) so it doesn't
-    # dominate but adds the visually-lossless boundary signal.
-    ("konjnd_dense", "konjnd-dense-norm",  0.3, "human_score"),
+    # konjnd-dense-norm: train on `pjnd_target` (per-ref PJND threshold,
+    # replicated across the 20 distortion levels per ref) — NOT `human_score`.
+    #
+    # Why: the val/konjnd.parquet's `human_score` is *also* the per-ref mean
+    # PJND threshold (range 22..70). It's literally the same column as
+    # train's `pjnd_target`, just under a different name. SRC0001 has
+    # pjnd_target=30.79 in train AND human_score=30.79 in val.
+    #
+    # The train parquet's `human_score` column is something else entirely —
+    # the "active mix output normalized to [0, 1]" (per-pair, range 0..1,
+    # mean 0.73). That column anti-correlates with `pjnd_target` at
+    # ref-level SROCC −0.21 (verified 2026-05-28). Training on it pulls
+    # the model in the OPPOSITE direction of the val target, flipping
+    # KonJND val SROCC from +0.594 to −0.578.
+    #
+    # The fix: use `pjnd_target` as the training column. After per-group
+    # minmax01 normalization, it's scaled to [0, 1] like the other groups.
+    ("konjnd_dense", "konjnd-dense-norm",  0.3, "pjnd_target"),
 ]
 
 HOLDOUTS = ["cid22", "kadid", "tid", "konjnd", "aic3", "aic4"]
