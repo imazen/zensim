@@ -428,6 +428,26 @@ pub struct PerSampleAlphaHeadModel {
     pub n_hidden: usize,
     /// Input dim.
     pub n_features: usize,
+    /// LeakyReLU α the model was TRAINED with. Bake-emit uses this to pick
+    /// the activation in the bake: if α ≈ 1.0 we emit `Activation::Identity`
+    /// (the runtime's `LeakyRelu` has a hardcoded α = 0.01, so emitting it
+    /// would mismatch the trained forward pass — collapsing hidden=1
+    /// configurations entirely; see #40). Default 0.01 keeps the existing
+    /// behavior; the trainer sets this from `hparams.leaky_alpha`.
+    pub leaky_alpha: f64,
+}
+
+/// Pick the bake-time activation that matches the trained `leaky_alpha`.
+/// The runtime's LeakyRelu has a fixed α = 0.01, so emitting LeakyRelu when
+/// the trainer used α = 1.0 gives a different forward at inference than at
+/// training. Identity is the right wire-format activation for α = 1.0.
+#[inline]
+fn activation_for_leaky(leaky_alpha: f64) -> Activation {
+    if (leaky_alpha - 1.0).abs() < 1e-9 {
+        Activation::Identity
+    } else {
+        Activation::LeakyRelu
+    }
 }
 
 impl PerSampleAlphaHeadModel {
@@ -470,6 +490,7 @@ impl PerSampleAlphaHeadModel {
             b_alpha: 0.0,
             n_hidden,
             n_features,
+            leaky_alpha: 0.01, // matches the runtime's hardcoded LEAKY_RELU_ALPHA; trainer overrides from hparams
         }
     }
 }
@@ -496,6 +517,7 @@ pub fn train_per_sample_alpha_head(
     let mut model = PerSampleAlphaHeadModel::new(n_features, hparams.n_hidden, hparams.seed);
     model.scaler_mean = mean;
     model.scaler_scale = scale;
+    model.leaky_alpha = hparams.leaky_alpha;
 
     let std_groups: Vec<Vec<Vec<f64>>> = train_indices
         .iter()
@@ -782,7 +804,7 @@ pub fn bake_per_sample_alpha_head_v3(model: &PerSampleAlphaHeadModel) -> Vec<u8>
         BakeLayer {
             in_dim: n_features,
             out_dim: n_hidden,
-            activation: Activation::LeakyRelu,
+            activation: activation_for_leaky(model.leaky_alpha),
             dtype: WeightDtype::F32,
             weights: &w1_f32,
             biases: &b1_f32,
@@ -876,7 +898,7 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh(
         BakeLayer {
             in_dim: n_features,
             out_dim: n_hidden,
-            activation: Activation::LeakyRelu,
+            activation: activation_for_leaky(model.leaky_alpha),
             dtype: WeightDtype::F32,
             weights: &w1_f32,
             biases: &b1_f32,
@@ -1044,7 +1066,7 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
         BakeLayer {
             in_dim: n_features,
             out_dim: n_hidden,
-            activation: Activation::LeakyRelu,
+            activation: activation_for_leaky(model.leaky_alpha),
             dtype: WeightDtype::F32,
             weights: &w1_f32,
             biases: &b1_f32,
@@ -1287,7 +1309,7 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
         BakeLayer {
             in_dim: n_features,
             out_dim: n_hidden1,
-            activation: Activation::LeakyRelu,
+            activation: activation_for_leaky(model.leaky_alpha),
             dtype: out_dtype,
             weights: &w1_f32,
             biases: &b1_f32,
@@ -1295,7 +1317,7 @@ pub fn bake_per_sample_alpha_head_v3_2layer(
         BakeLayer {
             in_dim: n_hidden1,
             out_dim: n_hidden_final,
-            activation: Activation::LeakyRelu,
+            activation: activation_for_leaky(model.leaky_alpha),
             dtype: out_dtype,
             weights: &w2_enc_f32,
             biases: &b2_enc_f32,

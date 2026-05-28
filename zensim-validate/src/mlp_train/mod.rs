@@ -5750,6 +5750,23 @@ fn train_mlp_per_sample_alpha_head(
     } else {
         init_model.rank_w.clone()
     };
+    // monotone_cbc with strict mode requires rank_w ≤ 0 at bake time
+    // (proj_leq0 clips positives to 0). With h=1, the SINGLE rank_w
+    // weight has a 50/50 chance of starting positive under random
+    // init; the soft penalty (`λ·max(0, rank_w)²`, λ=0.5) is too weak
+    // to flip its sign reliably in 200 epochs, so the projection
+    // zeros it → constant-output bake. Issue #40 root cause for h=1.
+    //
+    // Fix: at monotone_strict, init rank_w to -|N(0, scale)| so the
+    // soft penalty's job is "stay negative" (one-sided gentle pull)
+    // rather than "flip sign" (cross-zero). Larger h is unaffected:
+    // the |·| applied to N(0, scale) preserves magnitude statistics
+    // and the soft penalty is unchanged.
+    if hyperparams.monotone_cbc && hyperparams.monotone_strict {
+        for v in rank_w.iter_mut() {
+            *v = -v.abs();
+        }
+    }
     let mut rank_b = init_model.rank_b;
     let mut reducer_w = init_model.reducer_w;
     let mut reducer_b = init_model.reducer_b;
@@ -7741,6 +7758,7 @@ fn train_mlp_per_sample_alpha_head(
                         b_alpha: bake_b_alpha,
                         n_hidden: n_hidden_final,
                         n_features,
+                        leaky_alpha: hyperparams.leaky_alpha,
                     };
                     best_bake = Some(psah::bake_per_sample_alpha_head_v3_2layer(
                         &model,
@@ -7778,6 +7796,7 @@ fn train_mlp_per_sample_alpha_head(
                     b_alpha: bake_b_alpha,
                     n_hidden: n_hidden_final,
                     n_features,
+                    leaky_alpha: hyperparams.leaky_alpha,
                 };
                 best_bake = Some(if tanh_pin_active {
                     psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
@@ -7829,6 +7848,7 @@ fn train_mlp_per_sample_alpha_head(
             b_alpha,
             n_hidden,
             n_features,
+            leaky_alpha: hyperparams.leaky_alpha,
         };
         if tanh_pin_active {
             psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
@@ -7902,9 +7922,36 @@ fn train_mlp_per_sample_alpha_head(
                 sp_targets.push(target);
             }
 
-            if let Some(payload) =
-                crate::output_calibration_spline::fit_monotone_spline(&sp_preds, &sp_targets, 18)
-            {
+            // Diagnostic: log the SHIPPED net's anchor-output range BEFORE
+            // attempting spline fit. When the spline fit fails (too few
+            // distinct knots, non-monotone bin medians, etc.) without this
+            // log we silently ship a bake with no dial calibration — issue
+            // #40 (hidden=1 case) revealed this gap.
+            let (sp_min, sp_max) = sp_preds.iter().fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(mn, mx), &v| (mn.min(v), mx.max(v)),
+            );
+            let (st_min, st_max) = sp_targets.iter().fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(mn, mx), &v| (mn.min(v), mx.max(v)),
+            );
+            log_line(
+                &format!(
+                    "output calibration spline: anchor n={} pred [{:.4}, {:.4}] target [{:.4}, {:.4}]",
+                    sp_preds.len(), sp_min, sp_max, st_min, st_max
+                ),
+                log,
+            );
+
+            let spline_attempt =
+                crate::output_calibration_spline::fit_monotone_spline(&sp_preds, &sp_targets, 18);
+            if spline_attempt.is_none() {
+                log_line(
+                    "output calibration spline: fit_monotone_spline RETURNED None — bake will ship WITHOUT a dial spline (pred→score on raw net output). Check anchor pred range + monotonicity vs target.",
+                    log,
+                );
+            }
+            if let Some(payload) = spline_attempt {
                 log_line(
                     &format!(
                         "output calibration spline: fit_monotone_spline on {} anchor rows (qat={})",
@@ -7945,6 +7992,7 @@ fn train_mlp_per_sample_alpha_head(
                     b_alpha: bake_b_alpha,
                     n_hidden: n_hidden_final,
                     n_features,
+                    leaky_alpha: hyperparams.leaky_alpha,
                 };
                 let rebaked = if use_2layer {
                     psah::bake_per_sample_alpha_head_v3_2layer(
