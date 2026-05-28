@@ -39,15 +39,23 @@ and verifies the result on the held-out panel.
    (CID22 ≈ 0.8657, KADID ≈ 0.793, TID ≈ 0.793, KonJND ≈ 0.418, AIC-3 ≈ 0.768,
    AIC-4 ≈ 0.885; dial G1 ≈ 0.97).
 
-## Honest caveat — numeric, not bit-exact
+## Reproducibility — verified BIT-EXACT on equivalent hardware
 
-Training runs in **f32 with rayon parallelism**, so a fresh run on different
-hardware reproduces the v47 **results** (held-out panel within noise) but **not
-necessarily a byte-identical bake sha256**. The sha256 gate guarantees you
-trained on the EXACT inputs; `bake_verdict` confirms the held-out numbers
-match. For a bit-identical artifact, use the committed bake at
-`zensim/weights/v47_strict_qat_native_2026-05-27.bin`
-(sha256 `d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc`).
+A fresh end-to-end run (2026-05-27) produced a **byte-identical** bake —
+sha256 `d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc`
+(same as the shipped artifact) — and a held-out panel matching the recipe
+`[eval]` to 4 decimals (CID22 0.8657, KADID 0.7933, TID 0.7927, KonJND 0.4185,
+AIC-3 0.7680, AIC-4 0.8854). Training is deterministic here (seed=17 + a
+deterministic reduction order).
+
+**Cross-hardware caveat:** training is f32 with rayon parallelism, so on
+*different* CPUs the reduction order / f32 rounding *could* drift the bake
+sha256 (the held-out numbers would still match within noise). It reproduced
+bit-exact on this machine; treat byte-identity as guaranteed only on
+equivalent hardware. Either way the recipe's per-input sha256 gate guarantees
+you trained on the EXACT inputs, and `bake_verdict` confirms the panel. The
+committed `zensim/weights/v47_strict_qat_native_2026-05-27.bin` is the
+canonical bit-identical artifact.
 
 ## Provenance
 
