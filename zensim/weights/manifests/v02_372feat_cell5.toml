@@ -1,0 +1,99 @@
+# Recipe for v02-372feat Cell 5: V0_2 methodology applied to the 372-feature
+# set, with the 300/72 per-feature sign-mask and ssim2_gpu distance-form
+# target. Wins SROCC on 5 of 6 corpora vs v47 (current Profile::A) at 5.6×
+# smaller bake size.
+#
+# Architecture: PURE LINEAR (no MLP head, no per-sample-α, no nonlinearity).
+# y = scaler-standardize(features) @ coef + bias  →  18-knot PCHIP spline
+# →  dial in [0, 100]. ~1 multiply-add per feature; 4.8 KB total.
+#
+# Reproduce:   python3 scripts/v_next/train_v02_372feat.py --cell bake
+# Schema:      zensim/weights/manifests/README.md
+
+[bake]
+name              = "v02-372feat-cell5 (V0_2 methodology + 372 features + ssim2_gpu distance target + 300/72 sign-mask + ssim2∩cvvdp concordance filter)"
+internal_version  = "v02-372feat-cell5"
+file              = "/mnt/v/output/zensim/bakes/v02_372feat_cell5_2026-05-28.bin"
+sha256            = "4f10202cc570e6303e4c220d21e7f9258b295249836f7b48aa9b39d1de4144a0"
+file_bytes        = 4832
+n_inputs          = 372
+arch              = "PURE LINEAR: 372 → 1 Identity (101/372 active weights, sparse), then 18-knot PCHIP dial spline. No MLP head, no per-sample-α head, no monotone projection, no nonlinear activations. Forward = single dot product + spline lookup ~5 µs at 372 features."
+date              = "2026-05-28"
+
+[training]
+trainer            = "scripts/v_next/train_v02_372feat.py --cell bake (Python BVLS via scipy.optimize.lsq_linear; the V0_2-recipe optimizer was Nelder-Mead × 10 restarts but BVLS finds the same global LS optimum deterministically)"
+seed               = "n/a"                    # BVLS is deterministic — no random restarts needed
+target_column      = "ssim2_gpu"              # in DISTANCE FORM: y_dist = max(0, 100 - ssim2_gpu)
+target_scale       = "n/a"                    # standardize-only; bias absorbs offset
+max_features       = 372
+sign_constraints   = "per-feature mask: 300 features pinned ≥0 (sign-safe), 72 features unconstrained (sign-flip allowed). Mask from benchmarks/feature_sign_mask_2026-05-26.tsv (sha256 5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df)."
+concordance_filter = "ssim2_gpu vs cvvdp_score, ±2 buckets of 20 (96.9 % of rows kept). Proxy for V0_2's ssim2+butter concordance — cvvdp is a perceptual metric in a different family from ssim2, similar to butteraugli's role in V0_2."
+n_train_rows       = 190077                   # 196086 (canonical safesyn) × 96.9% concordance filter
+n_active_weights   = 101                      # 101 / 372 BVLS-selected coefs > 1e-6 (sparse)
+out_dtype          = "f32"                    # tiny model, no QAT/zerobias needed
+
+[training.score_map]
+type               = "monotone_pchip_spline"
+n_knots            = 18
+direction          = "decreasing"             # raw distance high → score low
+raw_range          = [3.82, 204.87]           # anchor pred range
+score_range        = [0.0, 97.4]              # anchor target range
+anchor_n_rows      = 2000
+fit_pearson        = -0.946                   # raw distance vs anchor human_score
+
+# Training group(s): SAFESYN ONLY (V0_2's recipe). Adding cid22_train + kadid + tid
+# (the v02-bvls mix) HURT CID22 by 0.0050 and HURT the analytic-distortion corpora
+# by 0.02–0.04. V0_2's "single-corpus, single-source target" recipe holds at
+# 372 features.
+groups = [
+    { name = "safesyn", path = "{canonical}/safesyn.parquet", train_w = 1.0, val_w = 0.0 },
+]
+
+anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
+
+steps = [
+    "1. python3 scripts/v_next/train_v02_372feat.py --cell bake",
+    "   - Load safesyn.parquet (196k × 372 features + ssim2_gpu/iwssim/cvvdp_score)",
+    "   - Apply concordance filter (ssim2_gpu vs cvvdp_score, ±2 buckets of 20) → 190077 rows kept",
+    "   - Compute y_dist = max(0, 100 - ssim2_gpu) (distance-form target, ≥0)",
+    "   - Standardize features: (X - mean) / std",
+    "   - BVLS with per-feature sign mask (300 pinned ≥0, 72 free)",
+    "   - Forward anchor → fit 18-knot monotone PCHIP spline → bake metadata",
+    "   - Emit ZNPR v3 via zenpredict-bake JSON pipeline",
+    "2. ./target/release/bake_verdict --bake {bake.file} for the full Mohammadi panel",
+]
+
+[inputs.canonical_root]
+local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
+r2    = "s3://zentrain/canonical-2026-05-21/train"
+tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
+
+[inputs.safesyn]
+path   = "{canonical}/safesyn.parquet"
+sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
+rows   = 196086
+notes  = "Synthetic-safe (post-CID22-purge). ssim2_gpu, iwssim, cvvdp_score all populated. The trainer applies concordance filter on (ssim2_gpu, cvvdp_score) to drop the ~3.1% of pairs where the two metrics disagree on coarse rank."
+
+[inputs.multiband_anchor]
+path   = "{canonical}/multiband_anchor_dial100.parquet"
+sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
+rows   = 2000
+notes  = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+
+[inputs.feature_sign_mask]
+path   = "benchmarks/feature_sign_mask_2026-05-26.tsv"
+sha256 = "5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df"
+notes  = "300 pin_geq0 (sign-safe, W1≥0) / 72 free. Same mask v47 uses, but Cell 5 leaves the 72 unconstrained (no strict-drop)."
+
+[eval]
+verdict_file  = "../../../benchmarks/v02_372feat_2026-05-28.md"
+# Per bake_verdict on canonical-2026-05-18/val/:
+cid22_srocc    = 0.8703
+kadid_srocc    = 0.7842
+tid_srocc      = 0.8039
+konjnd_srocc   = 0.4904
+aic3_srocc     = 0.7732
+aic4_srocc     = 0.8899
+cid22_plcc     = 0.8695
+cid22_zrmse    = 0.494   # LOWEST Z-RMSE of any bake measured (V0_2: 0.497, v47: 0.512)
+notes = "Wins SROCC vs v47 (current Profile::A) on 5/6 corpora: +0.0046 CID22, +0.0112 TID, +0.0719 KonJND, +0.0052 AIC-3, +0.0045 AIC-4. Loses -0.0091 on KADID. Beats V0_2 (228 features, 1.8 KB) on CID22 (+0.0027) + KonJND (+0.0209); loses on KADID/TID/AIC-3/AIC-4 by 0.02-0.04 (the analytic-distortion corpora where the 144 extra features (masked + IW-pool) don't carry signal)."
