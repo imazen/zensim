@@ -1,0 +1,132 @@
+# Recipe for the masked-monotone v47-strict bake — the production-recipe
+# axiom-clean metric that fixes the V39 blur>identity defect (monotone-by-
+# construction: 0 inversions, identity=max). v47-strict = the V39/V32 recipe
+# + masked-monotone (--monotone-cbc + per-feature sign mask + strict).
+#
+# Reproduce:  zensim_mlp_train --manifest zensim/weights/manifests/v47_strict.toml
+# (TOML recipe replaces the 25-flag scripts/v_next/run_v47_masked_strict_*.sh.)
+# Schema: zensim/weights/manifests/README.md
+
+[bake]
+name              = "v47-LINEAR (0-hidden-equivalent weights table, masked-monotone, full auto-transforms — codec/corruption robustness variant 2026-05-27)"
+internal_version  = "v47-linear"
+file              = "/mnt/v/output/zensim/bakes/v47_linear_2026-05-27.bin"
+# sha256/file_bytes filled after the run.
+n_inputs          = 372
+arch              = "EFFECTIVELY LINEAR via the existing 1-layer trainer: hidden=1 + leaky_alpha=1.0 (identity) collapses the chain `rank_w · LeakyReLU_id(W1·x + b)` to a true 372→1 linear projection. monotone_cbc+strict gives masked-monotone (W1≥0 on sign-safe, rank_w≤0, α≡1). Tanh-pin scale wide (100) → near-linear in the active range. f32 (small model, no need to pack). Same auto_transforms (Yeo-Johnson + Winsor + …) and PCHIP dial spline v47 uses."
+date              = "2026-05-27"
+
+[training]
+trainer            = "zensim_mlp_train"
+seed               = 17
+mse_weight         = 0.6
+ranknet_weight     = 0.6
+monotonicity_reg   = 1.0
+tanh_output_head_scale = 100.0       # wide tanh range → near-linear in the active output region
+anchor_loss_weight = 0.01            # spline-fit only; NOT a training target
+anchor_step_p      = 0.05
+hidden             = 8               # leaky_alpha=1.0 makes the W1→W2 chain a composition of linear maps = still a LINEAR projection (hidden=1 hit a bake-emit edge case in the per_sample_alpha_head path; hidden=8 is the smallest dim where the trainer's pool reducer is well-tested + the math stays linear)
+n_hidden_layers    = 1
+leaky_alpha        = 1.0             # identity LeakyReLU → all layer composition stays linear
+per_sample_alpha_head = true
+epochs             = 200
+lr                 = 0.001
+l2                 = 0.0001
+target_column      = "human_score"
+target_scale       = 1.0
+max_features       = 372
+minibatch_size     = 32
+val_aggregate      = "geomean3"
+out_dtype          = "f32"           # tiny model, no QAT/zerobias needed
+monotone_cbc       = true            # masked-monotone soft penalty
+monotone_strict    = true            # STRICT enforces W1≥0 from the start (better than soft for the final bake — soft lets training go negative then bake-projection kills the signal). Costs 72 dropped unconstrained features (linear-capacity trade) but the surviving 300-feature model rank-orders better than the soft version (CID22 0.658 vs 0.614).
+qat_fine_tune_epochs = 0             # no QAT — full precision on a ~372-weight model is already small
+qat_tau            = 0.005
+monotone_feature_mask = "../../../benchmarks/feature_sign_mask_2026-05-26.tsv"
+
+# konjnd_dense INTENTIONALLY excluded — its pjnd_target is uncorrelated with
+# the MOS direction the other 4 groups share (corr ≈ −0.03 with human_score),
+# and a single linear weight vector can't bridge MOS↔PJND (v47's nonlinear
+# head can). The linear variant is a codec+corruption tool, not a PJND tool.
+# (MVP confirmed: including konjnd_dense w/ pjnd_target drags CID22 by −0.20.)
+groups = [
+    { name = "safesyn",      path = "{canonical}/safesyn.parquet",          train_w = 1.0, val_w = 0.5 },
+    { name = "cid22_train",  path = "{canonical}/cid22_train_norm.parquet", train_w = 1.5, val_w = 2.0 },
+    { name = "kadid",        path = "{canonical}/kadid.parquet",            train_w = 0.5, val_w = 1.0 },
+    { name = "tid",          path = "{canonical}/tid.parquet",              train_w = 0.5, val_w = 1.0 },
+]
+
+# auto_transforms DISABLED for this run (probe whether they help a linear model).
+# v47-MVP (Python, raw features + standardize, no auto_transforms) gave CID22 0.824.
+# Trainer with auto_transforms (h=8 strict) gave CID22 0.658. Bigger gap than
+# strict-drop-of-72 can explain — likely the YJ/Winsor/SignedCbrt/QuantileBins
+# transforms reduce linear-projection capacity (they were tuned for the MLP's
+# nonlinear use of feature space). Disable and re-measure.
+# auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
+
+steps = [
+    "1. zensim_mlp_train --manifest (this file) produces the FINAL packed+calibrated bake in ONE pass — no Python post-steps:",
+    "   - last 40 epochs train quantization-aware (f16+zerobias STE) → net robust to packing",
+    "   - post-training spline fit (fit_monotone_spline) on the QUANTIZED net over the multiband anchor → dial calibrated to exactly what ships",
+    "   - bake stores f16 (encoder) + compressed → ~30 KB, identity-exact, monotone-by-construction",
+    "   recal_v47_dial.py + pack_and_calibrate.py are OBSOLETE for this recipe (kept only for non-QAT bakes).",
+]
+
+[inputs.canonical_root]
+local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
+r2    = "s3://zentrain/canonical-2026-05-21/train"
+tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
+
+[inputs.safesyn]
+path   = "{canonical}/safesyn.parquet"
+sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
+rows   = 196086
+
+[inputs.cid22_train]
+path   = "{canonical}/cid22_train_norm.parquet"
+sha256 = "59c9888ae3141545082fb58eafb19d1e964154cf79060b3d033e72ba8227c3ca"
+rows   = 17611
+notes  = "TRAINING-ONLY subset of the broader CID22 library — NOT the 49-ref held-out validation set. human_score = MCOS/100."
+
+[inputs.kadid]
+path   = "{canonical}/kadid.parquet"
+sha256 = "83356f034dc83e50495ec3cf7d5c5d6df9588f4e39ba3f4af1208a12a1bdacee"
+rows   = 10125
+
+[inputs.tid]
+path   = "{canonical}/tid.parquet"
+sha256 = "6704de0c7dcec3a1b9e57495c410c91aee1945cd4411fcdb217688af2d5c0e4f"
+rows   = 3000
+
+[inputs.konjnd_dense]
+path   = "{canonical}/konjnd-dense-norm.parquet"
+sha256 = "5595a922b076e7e3fd6d1d8cfcdfbf37a92e3e1603324889cf8ac2e077323898"
+rows   = 20160
+
+[inputs.multiband_anchor]
+path   = "{canonical}/multiband_anchor_dial100.parquet"
+sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
+notes  = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+
+[inputs.feature_sign_mask]
+path   = "benchmarks/feature_sign_mask_2026-05-26.tsv"
+sha256 = "5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df"
+notes  = "Per-feature sign mask: 300 pin_geq0 (sign-safe, W1≥0) / 72 free. Drives --monotone-cbc + --monotone-strict."
+
+[inputs.auto_transforms]
+path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
+
+[eval]
+verdict_file  = "../../../benchmarks/v0_qat_native_methodology_2026-05-27.md"
+cid22_srocc   = 0.8657   # QAT-native (bake_verdict), best of the v47 axiom-clean candidates
+kadid_srocc   = 0.7933
+tid_srocc     = 0.7927
+konjnd_srocc  = 0.4185   # f16+zerobias removes fine-weight PJND precision (intrinsic; non-QAT recal keeps 0.485)
+aic3_srocc    = 0.7680
+aic4_srocc    = 0.8854
+qsweep_monotonicity = 0.9433  # JPEG 50img×19q, vs V39 0.6767 (V39 dial broken: median→0 q55–q95)
+identity      = 97.69    # the dial max; V39 BROKEN (identity=0 on every ref)
+blur_above_identity = 0  # the V39 defect, FIXED by construction
+notes = "Costs vs V39 (rank only): CID22 -0.014, KADID -0.132, TID -0.139, KonJND -0.001, AIC-3/4 -0.034/-0.020 — the 72 dropped sign-flip features' analytic-distortion signal + f16 PJND precision. Gains: blur>identity FIXED, identity=max FIXED (V39 scores 0), monotone codec dial (q-sweep 94.3% vs V39 67.7%, 0.33% vs 53.6% tied), 27 KB vs 257 KB, native one-pass packing. V39's higher KADID/TID rank is moot for the dial use case (its dial is non-invertible). Ship decision (replace V39 at Profile::A vs add sibling) USER-GATED — see methodology doc."
