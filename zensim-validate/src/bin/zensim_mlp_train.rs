@@ -673,6 +673,21 @@ struct Args {
     #[arg(long, default_value_t = false)]
     monotone_strict: bool,
 
+    /// Soft-monotone-keep-72 mode (#39 followup #2, 2026-05-28):
+    /// HARD-project the pinned-feature W1 columns to ≥0 after every Adam
+    /// step (matches the final bake projection exactly), while leaving
+    /// the unpinned ("sign-flip") features FREE throughout training and
+    /// bake. This replicates the MVP-Python BVLS bounds behavior in the
+    /// Rust trainer.
+    ///
+    /// Orthogonal to `--monotone-strict` — when this flag is set,
+    /// `--monotone-strict`'s "drop the 72 unpinned" behavior is
+    /// SUPPRESSED (the 72 stay free regardless).
+    ///
+    /// Recipe field: `monotone_pin_during_training` (TOML). Default off.
+    #[arg(long, default_value_t = false)]
+    monotone_pin_during_training: bool,
+
     /// Quantization-aware FINE-TUNE: train the LAST N epochs with a
     /// straight-through estimator (forward uses f16-rounded + zerobiased
     /// weights, Adam updates the f32 master) so the shipped packed bake ==
@@ -1703,6 +1718,11 @@ fn apply_manifest_to_args(
     set_if_default!(monotone_cbc, "monotone_cbc", cfg.monotone_cbc);
     set_if_default!(monotone_strict, "monotone_strict", cfg.monotone_strict);
     set_if_default!(
+        monotone_pin_during_training,
+        "monotone_pin_during_training",
+        cfg.monotone_pin_during_training
+    );
+    set_if_default!(
         qat_fine_tune_epochs,
         "qat_fine_tune_epochs",
         cfg.qat_fine_tune_epochs
@@ -2171,6 +2191,7 @@ fn main() {
         monotone_cbc: args.monotone_cbc,
         monotone_feature_pin,
         monotone_strict: args.monotone_strict,
+        monotone_pin_during_training: args.monotone_pin_during_training,
         qat_fine_tune_epochs: args.qat_fine_tune_epochs,
         qat_tau: args.qat_tau,
         monotonicity_margin: args.monotonicity_margin,

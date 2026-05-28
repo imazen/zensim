@@ -499,6 +499,40 @@ pub struct MlpHyperparams {
     /// `monotone_cbc = true` and `monotone_feature_pin` is `Some`.
     pub monotone_strict: bool,
 
+    /// "Soft-monotone-keep-72" mode (#39 followup #2, 2026-05-28). When
+    /// `true` AND `monotone_cbc = true` AND `monotone_feature_pin = Some`:
+    ///   - The PINNED features' W1 columns are HARD-projected to `≥ 0`
+    ///     after every Adam step (matching the final bake projection
+    ///     exactly — no train/bake sign drift).
+    ///   - The UNPINNED ("sign-flip") features stay FREE throughout
+    ///     training and bake (no soft penalty, no projection).
+    ///   - Rank head still projected `≤ 0` at bake; encoder ≥0 + α≡1
+    ///     unchanged.
+    ///
+    /// Replicates the MVP-Python `scipy.optimize.lsq_linear` BVLS
+    /// behavior: bounds enforced THROUGHOUT optimization (not via soft
+    /// penalty), unpinned features kept free. MVP measured CID22 0.824
+    /// SROCC; the Rust soft-only `monotone_strict=true` mode dropped
+    /// the same 72 features and got 0.658, soft-only partial got 0.614.
+    ///
+    /// **Orthogonal to `monotone_strict`.** When this flag is `true`
+    /// the value of `monotone_strict` is IGNORED (the 72 unpinned stay
+    /// free regardless). The flag is intentionally orthogonal so callers
+    /// can layer it onto existing recipes without changing
+    /// `monotone_strict`'s docs / defaults.
+    ///
+    /// Why this isn't "per-step hard clamp" (which v45 falsified): the
+    /// v45 collapse came from clamping ALL weights — including sign-flip
+    /// features whose information lives in the negative half-plane.
+    /// Here we only hard-project the 300 sign-safe features (which the
+    /// soft penalty is already trying to keep ≥0), and leave the 72
+    /// sign-flip features untouched. The model retains full expressivity
+    /// on the 72; only the 300 are constrained.
+    ///
+    /// Only consulted when `monotone_cbc = true` and
+    /// `monotone_feature_pin = Some`. Default `false`.
+    pub monotone_pin_during_training: bool,
+
     /// **Quantization-aware fine-tune (QAT).** When `> 0`, the LAST
     /// `qat_fine_tune_epochs` epochs train with a straight-through
     /// estimator: the forward uses f16-rounded + zerobiased weights while
@@ -795,6 +829,7 @@ impl Default for MlpHyperparams {
             monotonicity_reg: 0.0,
             monotone_cbc: false,
             monotone_feature_pin: None,
+            monotone_pin_during_training: false,
             monotone_strict: false,
             qat_fine_tune_epochs: 0,
             qat_tau: 0.005,
@@ -5952,12 +5987,18 @@ fn train_mlp_per_sample_alpha_head(
     let monotone_strict = hyperparams.monotone_strict;
     if monotone_cbc {
         let n_pinned = feature_pin.iter().filter(|&&p| p).count();
+        let mode = if hyperparams.monotone_pin_during_training {
+            "free (KEEP-72: pinned hard-projected during training + at bake; unpinned untouched throughout)"
+        } else if monotone_strict {
+            "DROPPED (strict)"
+        } else {
+            "free (partial)"
+        };
         log_line(
             &format!(
                 "monotone_cbc: ENABLED — W1 per-feature mask: {n_pinned}/{n_features} pinned ≥0, \
                  {} {} ; w2_enc≥0, rank_w≤0, α≡1. Soft penalty (λ=1) + final projection at bake.",
-                n_features - n_pinned,
-                if monotone_strict { "DROPPED (strict)" } else { "free (partial)" },
+                n_features - n_pinned, mode,
             ),
             log,
         );
@@ -5974,6 +6015,12 @@ fn train_mlp_per_sample_alpha_head(
     // Per-feature W1 projection: pinned features clamped ≥0, sign-flip
     // features zeroed (strict) or left as-is (partial). W1 is row-major
     // [feature][hidden] so feature j owns block [j*n_hidden, (j+1)*n_hidden).
+    // When monotone_pin_during_training is set, monotone_strict's
+    // "zero the 72 unpinned at bake" branch is SUPPRESSED — the 72
+    // stay free at bake too, matching the train-time treatment
+    // (#39 followup #2).
+    let strict_drop_unpinned_at_bake = monotone_strict
+        && !hyperparams.monotone_pin_during_training;
     let proj_w1_masked = |w: &[f64]| -> Vec<f64> {
         if !monotone_cbc {
             return w.to_vec();
@@ -5985,7 +6032,7 @@ fn train_mlp_per_sample_alpha_head(
                 for v in block.iter_mut() {
                     *v = v.max(0.0);
                 }
-            } else if monotone_strict {
+            } else if strict_drop_unpinned_at_bake {
                 for v in block.iter_mut() {
                     *v = 0.0;
                 }
@@ -6102,13 +6149,23 @@ fn train_mlp_per_sample_alpha_head(
             // (penalize BOTH signs, L2-toward-0 so they drop out cleanly),
             // or untouched in partial mode. W1 is row-major [feature][hidden]
             // so index i belongs to feature i / n_hidden.
+            //
+            // Soft-monotone-keep-72 (#39 followup #2): the new
+            // `monotone_pin_during_training` flag SUPPRESSES the
+            // "drive unpinned to 0" branch — the 72 sign-flips stay
+            // free regardless of monotone_strict. The 300 pinned still
+            // get the negative-side soft penalty (cheap nudge toward ≥0)
+            // AND the hard-projection-after-step that the flag triggers
+            // below.
+            let strict_drop_unpinned = monotone_strict
+                && !hyperparams.monotone_pin_during_training;
             for i in 0..w1_len {
                 let feat = i / n_hidden;
                 if feature_pin[feat] {
                     if w1_concat[i] < 0.0 {
                         adam.gw1[i] += two_lam * w1_concat[i];
                     }
-                } else if monotone_strict {
+                } else if strict_drop_unpinned {
                     adam.gw1[i] += two_lam * w1_concat[i];
                 }
             }
@@ -6134,6 +6191,28 @@ fn train_mlp_per_sample_alpha_head(
         }
 
         adam.step(&mut w1_concat, &mut b1_concat, &mut w2_vec, &mut b2_vec, lr);
+
+        // Soft-monotone-keep-72 mode (#39 followup #2): after the Adam
+        // step, HARD-project the pinned features' W1 columns to ≥0 in
+        // place (matching the final bake projection exactly). The
+        // unpinned 72 features stay free — no projection, no penalty.
+        // This eliminates the train/bake sign-drift that the soft-only
+        // monotone_strict=false (partial) path suffered from. Rank head
+        // + w2_enc + w_skip + b_alpha projections are deferred to the
+        // bake step as before; only the W1 pinned columns are
+        // hard-projected during training (the 300 features the soft
+        // penalty is already trying to keep ≥0; cf. v45 collapse incident
+        // where clamping ALL weights — including the 72 sign-flips —
+        // killed expressivity).
+        if hyperparams.monotone_pin_during_training && monotone_cbc {
+            let w1_len_pre = w1.len();
+            for i in 0..w1_len_pre {
+                let feat = i / n_hidden;
+                if feature_pin[feat] && w1_concat[i] < 0.0 {
+                    w1_concat[i] = 0.0;
+                }
+            }
+        }
 
         // Unpack encoder weights back. Pre-compute lengths to avoid
         // overlapping borrows.

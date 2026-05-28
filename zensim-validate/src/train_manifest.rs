@@ -136,6 +136,13 @@ pub struct ManifestConfig {
     /// `--monotone-strict`: drop the non-pinned (sign-flip) features
     /// instead of leaving them free.
     pub monotone_strict: Option<bool>,
+    /// `--monotone-pin-during-training`: soft-monotone-keep-72 mode
+    /// (#39 followup #2). Hard-projects the 300 pinned-feature W1
+    /// columns to ≥0 during training (matches the bake projection
+    /// exactly); leaves the 72 unpinned features FREE. Orthogonal to
+    /// `monotone_strict` — when set, the "drop unpinned" branch of
+    /// `monotone_strict` is suppressed.
+    pub monotone_pin_during_training: Option<bool>,
     /// `--qat-fine-tune-epochs`: train the last N epochs quantization-aware
     /// (f16+zerobias STE) so the packed bake == the validated net.
     pub qat_fine_tune_epochs: Option<usize>,
@@ -234,6 +241,7 @@ struct RawTraining {
     monotone_cbc: Option<bool>,
     monotone_feature_mask: Option<String>,
     monotone_strict: Option<bool>,
+    monotone_pin_during_training: Option<bool>,
     qat_fine_tune_epochs: Option<usize>,
     qat_tau: Option<f64>,
     #[serde(default)]
@@ -462,6 +470,7 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
                 Some(resolve_path(&mm, manifest_dir, canonical_root, dial_dir)?);
         }
         cfg.monotone_strict = t.monotone_strict;
+        cfg.monotone_pin_during_training = t.monotone_pin_during_training;
         cfg.qat_fine_tune_epochs = t.qat_fine_tune_epochs;
         cfg.qat_tau = t.qat_tau;
     }

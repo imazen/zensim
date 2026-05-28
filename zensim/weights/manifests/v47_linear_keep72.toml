@@ -1,0 +1,108 @@
+# Recipe for v47-LINEAR-keep72: same masked-monotone-by-construction as
+# v47_linear.toml, but uses the NEW soft-monotone-keep-72 trainer mode
+# (#39 followup #2 — `--monotone-pin-during-training`).
+#
+# The 300 pinned features are HARD-projected to ≥0 after every Adam step
+# (matching the bake projection exactly — no train/bake sign drift). The
+# 72 unpinned ("sign-flip") features stay FREE throughout. Replicates
+# scipy.optimize.lsq_linear BVLS bounds behavior in the Rust trainer.
+#
+# Hypothesis: closes the gap between MVP-Python (CID22 0.824) and the
+# Rust trainer with soft-only `monotone_strict=true` (CID22 0.658) — i.e.
+# the 72 free features are worth ~0.16 CID22 SROCC.
+#
+# Reproduce:  zensim_mlp_train --manifest zensim/weights/manifests/v47_linear_keep72.toml
+# Schema: zensim/weights/manifests/README.md
+
+[bake]
+name              = "v47-LINEAR-keep72 (masked-monotone-by-construction at training-time AND bake — 300 pinned hard-projected, 72 unpinned FREE; #39 followup #2 / 2026-05-28)"
+internal_version  = "v47-linear-keep72"
+file              = "/mnt/v/output/zensim/bakes/v47_linear_keep72_2026-05-28.bin"
+n_inputs          = 372
+arch              = "EFFECTIVELY LINEAR: hidden=8 + leaky_alpha=1.0 (identity) collapses the chain `rank_w · LeakyReLU_id(W1·x + b)` to a true 372→1 linear projection. NEW: monotone_pin_during_training=true → 300 pinned features hard-projected to ≥0 EVERY ADAM STEP (matches bake exactly); 72 unpinned features stay free in both training AND bake. Replicates scipy.optimize.lsq_linear BVLS behavior in Rust. f32 (small model, no need to pack)."
+date              = "2026-05-28"
+
+[training]
+trainer            = "zensim_mlp_train"
+seed               = 17
+mse_weight         = 0.6
+ranknet_weight     = 0.6
+monotonicity_reg   = 1.0
+tanh_output_head_scale = 100.0
+anchor_loss_weight = 0.01
+anchor_step_p      = 0.05
+hidden             = 8
+n_hidden_layers    = 1
+leaky_alpha        = 1.0
+per_sample_alpha_head = true
+epochs             = 200
+lr                 = 0.001
+l2                 = 0.0001
+target_column      = "human_score"
+target_scale       = 1.0
+max_features       = 372
+minibatch_size     = 32
+val_aggregate      = "geomean3"
+out_dtype          = "f32"
+monotone_cbc       = true
+monotone_strict    = false                    # IGNORED when monotone_pin_during_training=true (the 72 stay free regardless)
+monotone_pin_during_training = true           # NEW (#39 followup #2): hard-project the 300 pinned during training; leave 72 free.
+qat_fine_tune_epochs = 0
+qat_tau            = 0.005
+monotone_feature_mask = "../../../benchmarks/feature_sign_mask_2026-05-26.tsv"
+
+# konjnd_dense excluded — same rationale as v47_linear.toml (PJND ≠ MOS scale).
+groups = [
+    { name = "safesyn",      path = "{canonical}/safesyn.parquet",          train_w = 1.0, val_w = 0.5 },
+    { name = "cid22_train",  path = "{canonical}/cid22_train_norm.parquet", train_w = 1.5, val_w = 2.0 },
+    { name = "kadid",        path = "{canonical}/kadid.parquet",            train_w = 0.5, val_w = 1.0 },
+    { name = "tid",          path = "{canonical}/tid.parquet",              train_w = 0.5, val_w = 1.0 },
+]
+
+anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
+
+steps = [
+    "1. zensim_mlp_train --manifest (this file) produces the FINAL packed+calibrated bake in ONE pass.",
+    "   - 300 pinned features hard-projected to ≥0 EVERY Adam step (train==bake)",
+    "   - 72 unpinned features stay free THROUGHOUT (no penalty, no projection)",
+    "   - post-training spline fit on the projected net over the multiband anchor → dial calibration",
+]
+
+[inputs.canonical_root]
+local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
+r2    = "s3://zentrain/canonical-2026-05-21/train"
+tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
+
+[inputs.safesyn]
+path   = "{canonical}/safesyn.parquet"
+sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
+rows   = 196086
+
+[inputs.cid22_train]
+path   = "{canonical}/cid22_train_norm.parquet"
+sha256 = "59c9888ae3141545082fb58eafb19d1e964154cf79060b3d033e72ba8227c3ca"
+rows   = 17611
+
+[inputs.kadid]
+path   = "{canonical}/kadid.parquet"
+sha256 = "83356f034dc83e50495ec3cf7d5c5d6df9588f4e39ba3f4af1208a12a1bdacee"
+rows   = 10125
+
+[inputs.tid]
+path   = "{canonical}/tid.parquet"
+sha256 = "6704de0c7dcec3a1b9e57495c410c91aee1945cd4411fcdb217688af2d5c0e4f"
+rows   = 3000
+
+[inputs.multiband_anchor]
+path   = "{canonical}/multiband_anchor_dial100.parquet"
+sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
+notes  = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+
+[inputs.feature_sign_mask]
+path   = "benchmarks/feature_sign_mask_2026-05-26.tsv"
+sha256 = "5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df"
+notes  = "Per-feature sign mask: 300 pin_geq0 (sign-safe, W1≥0) / 72 free."
+
+[eval]
+verdict_file  = "../../../benchmarks/v0_qat_native_methodology_2026-05-27.md"
+notes = "To compare: MVP-Python (BVLS, raw features) gave CID22 0.824. Rust soft-only strict=true gave 0.658. Rust soft-only partial gave 0.614. Target with keep-72 mode: > 0.700 (closes ~60% of the gap)."
