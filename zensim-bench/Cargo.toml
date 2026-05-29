@@ -71,6 +71,15 @@ harness = false
 name = "bench_zensim"
 harness = false
 
+# `extract_features_372col` uses `zensim::{ZensimConfig,
+# compute_zensim_with_config}` which are gated behind zensim's `training`
+# feature. Declaring `required-features` here lets a plain
+# `cargo build --example extract_features_372col` auto-enable it instead
+# of failing with unresolved-import errors (the 2026-05-28 build break).
+[[example]]
+name = "extract_features_372col"
+required-features = ["training"]
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("zenresize", "training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']

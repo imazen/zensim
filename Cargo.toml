@@ -51,3 +51,14 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be82
 # path dep below; CI portability would need a git ref the day this is
 # published, but until then we rely on the sibling clone being present.
 zenstats = { path = "../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
+
+# jxl-encoder 0.3.2 (lossy-JPEG recompression API) is required by the sibling
+# `zenjxl` path-dep that `zensim-bench`'s optional `extract-omni` feature
+# pulls in, but 0.3.2 is not yet published to crates.io (max published 0.3.1).
+# zenjxl carries its OWN `[patch.crates-io] jxl-encoder = path` — but a
+# dependency's patch table is ignored; only the workspace ROOT's patch
+# applies. So we re-declare it here. The local jxl-encoder sibling is 0.3.2.
+# This matches the existing "extract-omni builds require sibling checkouts"
+# contract (zensim already needs sibling clones for zenstats above).
+[patch.crates-io]
+jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }

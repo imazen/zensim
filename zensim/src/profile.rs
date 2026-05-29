@@ -773,6 +773,34 @@ pub enum ZensimProfile {
     /// `benchmarks/v11_e_per_codec_falsification_2026-05-20.md`.
     #[doc(hidden)]
     PreviewV0_5CompressionV3Calibrated,
+    /// Preview v0.5, **linear "Cell 5" bake** — V0_2's training
+    /// methodology applied to the 372-feature set (2026-05-28). A pure
+    /// 372→1 BVLS linear fit (101/372 active weights) + 18-knot PCHIP
+    /// dial spline, 4.8 KB. Trained on safesyn-only with an `ssim2_gpu`
+    /// distance-form target, the 300/72 per-feature sign mask, and an
+    /// ssim2∩cvvdp concordance filter.
+    ///
+    /// Full Mohammadi panel on the canonical val corpora (held-out):
+    ///
+    /// | Corpus | SROCC | PLCC | KROCC | PWRC | Z-RMSE |
+    /// |---|---:|---:|---:|---:|---:|
+    /// | CID22  | 0.8703 | 0.8695 | 0.6789 | 0.9797 | **0.494** |
+    /// | KADID  | 0.7842 | 0.7548 | 0.6115 | 0.9553 | 0.656 |
+    /// | TID    | 0.8039 | 0.7710 | 0.6256 | 0.9775 | 0.637 |
+    /// | KonJND | 0.4904 | 0.4488 | 0.3425 | 0.8239 | 0.894 |
+    /// | AIC-3  | 0.7732 | 0.7879 | 0.6056 | 0.9347 | 0.616 |
+    /// | AIC-4  | 0.8899 | 0.8785 | 0.7174 | 0.9771 | 0.478 |
+    ///
+    /// Wins the panel on CID22 (every stat) — the lowest CID22 Z-RMSE of
+    /// any zensim bake — and is the best all-rounder by mean geomean3
+    /// (0.815) across the 6 corpora, at 5.6× smaller than the
+    /// [`Self::A`] MLP. Use for SROCC-honest ranking and tiny-footprint
+    /// embedding. NOT a [`Self::A`] replacement for the user-facing dial:
+    /// its score range is narrower than A's G1-dial-honest output (the
+    /// linear model + spline cover [0,100] but cluster mid-band on some
+    /// corpora). Recipe: `zensim/weights/manifests/v02_372feat_cell5.toml`.
+    /// Methodology: `benchmarks/v02_372feat_2026-05-28.md`.
+    PreviewV0_5Linear,
 }
 
 impl ZensimProfile {
@@ -884,15 +912,12 @@ impl ZensimProfile {
             Self::PreviewV0_5BalancedV3 => "zensim-preview-v0.5-balanced-v3",
             Self::PreviewV0_5CompressionV3 => "zensim-preview-v0.5-compression-v3",
             Self::PreviewV0_5TunerV4 => "zensim-preview-v0.5-tuner-v4",
-            Self::PreviewV0_5TunerV4Calibrated => {
-                "zensim-preview-v0.5-tuner-v4-calibrated"
-            }
-            Self::PreviewV0_5BalancedV3Calibrated => {
-                "zensim-preview-v0.5-balanced-v3-calibrated"
-            }
+            Self::PreviewV0_5TunerV4Calibrated => "zensim-preview-v0.5-tuner-v4-calibrated",
+            Self::PreviewV0_5BalancedV3Calibrated => "zensim-preview-v0.5-balanced-v3-calibrated",
             Self::PreviewV0_5CompressionV3Calibrated => {
                 "zensim-preview-v0.5-compression-v3-calibrated"
             }
+            Self::PreviewV0_5Linear => "zensim-preview-v0.5-linear",
         }
     }
 
@@ -930,15 +955,12 @@ impl ZensimProfile {
             // (they share `extrapolate_score`, `skip_score_mapping`, etc.);
             // the only behavioral difference is the per-codec affine
             // metadata blob in the underlying bake bytes.
-            Self::PreviewV0_5TunerV4Calibrated => {
-                &PROFILE_PREVIEW_V0_5_TUNER_V4_CALIBRATED
-            }
-            Self::PreviewV0_5BalancedV3Calibrated => {
-                &PROFILE_PREVIEW_V0_5_BALANCED_V3_CALIBRATED
-            }
+            Self::PreviewV0_5TunerV4Calibrated => &PROFILE_PREVIEW_V0_5_TUNER_V4_CALIBRATED,
+            Self::PreviewV0_5BalancedV3Calibrated => &PROFILE_PREVIEW_V0_5_BALANCED_V3_CALIBRATED,
             Self::PreviewV0_5CompressionV3Calibrated => {
                 &PROFILE_PREVIEW_V0_5_COMPRESSION_V3_CALIBRATED
             }
+            Self::PreviewV0_5Linear => &PROFILE_CELL5_LINEAR,
         }
     }
 }
@@ -1404,6 +1426,21 @@ pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
     include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin")
 }
 
+/// V0_2-methodology-372 "Cell 5" bake (external `ZensimProfile::PreviewV0_5Linear`).
+/// Pure-linear 372→1 BVLS fit (101/372 active weights) + 18-knot PCHIP dial
+/// spline; 4.8 KB. Trained on safesyn-only with `ssim2_gpu` distance-form
+/// target, the 300/72 per-feature sign mask, and an ssim2∩cvvdp concordance
+/// filter — V0_2's recipe applied to the 372-feature set. Wins the full
+/// Mohammadi panel on CID22 (0.8703 SROCC, 0.494 Z-RMSE — the lowest
+/// calibration error of any zensim bake) and is the best all-rounder by mean
+/// geomean3 across the 6 canonical val corpora. NO feature transforms (raw
+/// features → standardize → linear → spline). Recipe:
+/// `zensim/weights/manifests/v02_372feat_cell5.toml`. Methodology:
+/// `benchmarks/v02_372feat_2026-05-28.md`.
+pub(crate) fn mlp_bake_cell5_linear() -> &'static [u8] {
+    include_bytes!("../weights/v02_372feat_cell5_2026-05-28.bin")
+}
+
 /// CVVDP-trained bake for desktop viewing conditions (PPD ≈ 53).
 /// Trained on safesyn cvvdp_log_norm target with RankNet + MSE.
 /// SROCC 0.9941 on safesyn (predicts CVVDP desktop rankings).
@@ -1478,6 +1515,33 @@ static PROFILE_A: ProfileParams = ProfileParams {
     compute_iw_features: true,
     // Hard clamp at [0, 100] post-spline (spline output is already
     // calibrated into the dial range; clamp catches numerical drift).
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// V0_2-methodology-372 "Cell 5" profile params (external
+/// `ZensimProfile::PreviewV0_5Linear`). Pure-linear 372→1 BVLS bake +
+/// PCHIP dial spline. Same 372-feature input path as [`PROFILE_A`]
+/// (extended + IW-pool features); the difference is the bake — a single
+/// linear layer instead of the 372→128→64 MLP, and no per-sample-α head.
+/// The PCHIP spline in the bake metadata makes the raw output dial-honest,
+/// so `skip_score_mapping = true` (no legacy `100 - 18·d^0.7`).
+static PROFILE_CELL5_LINEAR: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(mlp_bake_cell5_linear),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
     soft_clamp_score: false,
     extrapolate_score: true,
     ensemble_classifier_bytes: None,

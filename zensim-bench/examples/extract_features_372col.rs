@@ -75,9 +75,10 @@ fn main() {
         "safesyn" => load_safesyn(&path, max_pairs),
         "qsweep" => load_qsweep_tsv(&path, max_pairs),
         "cid22_train" => load_cid22_train_tsv(&path, max_pairs),
+        "pairs" => load_pairs_tsv(&path, max_pairs),
         _ => {
             eprintln!(
-                "--corpus must be one of: konjnd, konjnd_full, aic3, aic4, safesyn, qsweep, cid22_train (got {corpus:?})"
+                "--corpus must be one of: konjnd, konjnd_full, aic3, aic4, safesyn, qsweep, cid22_train, pairs (got {corpus:?})"
             );
             std::process::exit(2);
         }
@@ -640,6 +641,79 @@ fn load_cid22_train_tsv(path: &Path, max: usize) -> Vec<Pair> {
             human_score: f64::NAN,
             ref_basename: composite,
             extra_targets: Vec::new(),
+        });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
+/// Generic (ref, dist, target[, extra…]) pairs TSV loader. The most
+/// flexible mode — used to extract 372 features for ANY corpus that
+/// can be expressed as image pairs, e.g. the structural-corruption
+/// corpus (codec-corpus#7) for training a corruption-detection bake.
+///
+/// TSV format (header REQUIRED; column names free, positions fixed):
+///   col 0: ref_path      (absolute or cwd-relative path to reference PNG)
+///   col 1: dist_path     (path to distorted/corruption PNG)
+///   col 2: target        (f64 regression target → `human_score` column)
+///   col 3: ref_basename  (OPTIONAL; defaults to ref file stem)
+///   col 4+: extra_target columns, each `name=value` → emitted between
+///           human_score and f0 (the trainer's --target-column can pick them)
+///
+/// Example header + row:
+///   ref_path<TAB>dist_path<TAB>target<TAB>ref_basename<TAB>butter_max=51.4
+fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    let f = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let r = BufReader::new(f);
+    let mut lines = r.lines();
+    let _header = match lines.next() {
+        Some(Ok(h)) => h,
+        _ => return Vec::new(),
+    };
+    let mut pairs = Vec::new();
+    for line in lines.flatten() {
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() < 3 {
+            continue;
+        }
+        let reference = PathBuf::from(cols[0]);
+        let distorted = PathBuf::from(cols[1]);
+        let human_score: f64 = match cols[2].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let ref_basename = if cols.len() > 3 && !cols[3].is_empty() {
+            cols[3].to_string()
+        } else {
+            reference
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        let mut extra_targets = Vec::new();
+        for extra in cols.iter().skip(4) {
+            if let Some((name, val)) = extra.split_once('=') {
+                if let Ok(v) = val.parse::<f64>() {
+                    extra_targets.push((name.to_string(), v));
+                }
+            }
+        }
+        pairs.push(Pair {
+            reference,
+            distorted,
+            human_score,
+            ref_basename,
+            extra_targets,
         });
         if pairs.len() >= max {
             break;
