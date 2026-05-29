@@ -40,7 +40,15 @@ pub fn arch_forward(
 
     let (h_pre, h, h1_pre, h1) = if use_2layer {
         let (h1p, h1v, h2p, h2v) = simd_encoder::encoder_forward_2layer(
-            x, w1, b1, w2_enc, b2_enc, n_features, n_hidden1, n_hidden_final, leaky,
+            x,
+            w1,
+            b1,
+            w2_enc,
+            b2_enc,
+            n_features,
+            n_hidden1,
+            n_hidden_final,
+            leaky,
         );
         (h2p, h2v, h1p, h1v)
     } else {
@@ -49,7 +57,14 @@ pub fn arch_forward(
     };
 
     let (y, y_rank, y_pool, alpha, alpha_logit, stats, max_idx) = psah::forward_heads(
-        &h, rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, n_hidden_final,
+        &h,
+        rank_w,
+        rank_b,
+        reducer_w,
+        reducer_b,
+        w_alpha,
+        b_alpha,
+        n_hidden_final,
     );
 
     let y_final = if use_skip {
@@ -59,8 +74,17 @@ pub fn arch_forward(
     };
 
     ArchForward {
-        y: y_final, y_rank, y_pool, alpha, alpha_logit,
-        h_pre, h, stats, max_idx, h1_pre, h1,
+        y: y_final,
+        y_rank,
+        y_pool,
+        alpha,
+        alpha_logit,
+        h_pre,
+        h,
+        stats,
+        max_idx,
+        h1_pre,
+        h1,
     }
 }
 
@@ -101,10 +125,24 @@ pub fn arch_backward(
     use zensim_train_core::simd_encoder;
 
     let dl_dh = psah::backprop_heads(
-        &fwd.h, &fwd.stats, fwd.max_idx, fwd.y_rank, fwd.y_pool, fwd.alpha, dl_dy,
-        rank_w, reducer_w, w_alpha,
-        g_rank_w, g_rank_b, g_reducer_w, g_reducer_b,
-        g_w_alpha, g_b_alpha, n_hidden_final, leaky,
+        &fwd.h,
+        &fwd.stats,
+        fwd.max_idx,
+        fwd.y_rank,
+        fwd.y_pool,
+        fwd.alpha,
+        dl_dy,
+        rank_w,
+        reducer_w,
+        w_alpha,
+        g_rank_w,
+        g_rank_b,
+        g_reducer_w,
+        g_reducer_b,
+        g_w_alpha,
+        g_b_alpha,
+        n_hidden_final,
+        leaky,
     );
 
     if use_2layer {
@@ -115,10 +153,12 @@ pub fn arch_backward(
         // using the cached h1 from the forward pass.
         let dl_dh2_pre = simd_encoder::leaky_relu_backward(&dl_dh, &fwd.h_pre, leaky);
         simd_encoder::encoder_backprop_layer1(
-            &fwd.h1, &dl_dh2_pre,
+            &fwd.h1,
+            &dl_dh2_pre,
             &mut gw1_concat[n_w1..n_w1 + n_w2_enc],
             &mut gb1_concat[n_hidden1..n_hidden1 + n_hidden_final],
-            n_hidden1, n_hidden_final,
+            n_hidden1,
+            n_hidden_final,
         );
 
         // Propagate through layer 2 to get dl/dh1.
@@ -133,17 +173,23 @@ pub fn arch_backward(
         // Layer 1: exact LeakyReLU backward using the cached h1_pre.
         let dl_dh1_pre = simd_encoder::leaky_relu_backward(&dl_dh1, &fwd.h1_pre, leaky);
         simd_encoder::encoder_backprop_layer1(
-            x, &dl_dh1_pre,
-            &mut gw1_concat[..n_w1], &mut gb1_concat[..n_hidden1],
-            n_features, n_hidden1,
+            x,
+            &dl_dh1_pre,
+            &mut gw1_concat[..n_w1],
+            &mut gb1_concat[..n_hidden1],
+            n_features,
+            n_hidden1,
         );
     } else {
         let n_w1 = n_features * n_hidden1;
         let dl_dh_pre = simd_encoder::leaky_relu_backward(&dl_dh, &fwd.h_pre, leaky);
         simd_encoder::encoder_backprop_layer1(
-            x, &dl_dh_pre,
-            &mut gw1_concat[..n_w1], &mut gb1_concat[..n_hidden1],
-            n_features, n_hidden1,
+            x,
+            &dl_dh_pre,
+            &mut gw1_concat[..n_w1],
+            &mut gb1_concat[..n_hidden1],
+            n_features,
+            n_hidden1,
         );
     }
 
@@ -163,4 +209,3 @@ pub fn arch_backward(
         simd_encoder::skip_backward(x, dl_dy, gw_skip, &mut gb_skip[0]);
     }
 }
-

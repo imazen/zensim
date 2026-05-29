@@ -2418,12 +2418,7 @@ pub(crate) fn build_mask_and_iw_mse_inline(
 
 /// IW-only fused MSE — no plane writes at all. Computes
 /// `Σ (src-dst)² · (1 + k_iw * activity[i])` directly.
-pub(crate) fn build_iw_mse_only(
-    activity: &[f32],
-    k_iw: f32,
-    src: &[f32],
-    dst: &[f32],
-) -> f64 {
+pub(crate) fn build_iw_mse_only(activity: &[f32], k_iw: f32, src: &[f32], dst: &[f32]) -> f64 {
     incant!(
         build_iw_mse_only_inner(activity, k_iw, src, dst),
         [v4, v3, neon, wasm128, scalar]
@@ -2486,9 +2481,7 @@ pub(crate) fn edge_diff_channel_masked_with_iw_inline(
     k_iw: f32,
 ) -> ((f64, f64), (f64, f64)) {
     incant!(
-        edge_diff_channel_masked_with_iw_inline_inner(
-            img1, img2, mu1, mu2, mask, activity, k_iw
-        ),
+        edge_diff_channel_masked_with_iw_inline_inner(img1, img2, mu1, mu2, mask, activity, k_iw),
         [v4, v3, neon, wasm128, scalar]
     )
 }

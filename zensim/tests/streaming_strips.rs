@@ -48,7 +48,11 @@ fn make_pair(w: usize, h: usize, seed: u32) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
                 2 => {
                     let stripe = (y / (4 + ((seed as usize) & 7))) & 1;
                     let v = if stripe == 0 { 200u8 } else { 50u8 };
-                    (v.wrapping_add((x & 7) as u8), v.wrapping_sub((y & 7) as u8), v)
+                    (
+                        v.wrapping_add((x & 7) as u8),
+                        v.wrapping_sub((y & 7) as u8),
+                        v,
+                    )
                 }
                 3 => {
                     let d = ((x + y) * 255 / (w + h)) as u8;
@@ -121,7 +125,12 @@ fn peak_rss_bytes() -> Option<u64> {
 fn streaming_strips_oom_80mp() {
     let w = 8000;
     let h = 10000;
-    eprintln!("Generating {}×{} pair ({} MP)...", w, h, (w * h) / 1_000_000);
+    eprintln!(
+        "Generating {}×{} pair ({} MP)...",
+        w,
+        h,
+        (w * h) / 1_000_000
+    );
     let t0 = Instant::now();
     let (src, dst) = make_pair(w, h, 1);
     eprintln!("Generated in {:.2}s", t0.elapsed().as_secs_f64());
@@ -198,8 +207,9 @@ fn streaming_strips_throughput_report() {
 
     for (label, w, h, n_pairs) in configs {
         eprintln!("\n=== {label}, {n_pairs} pairs ===");
-        let pairs: Vec<(Vec<[u8; 3]>, Vec<[u8; 3]>)> =
-            (0..n_pairs).map(|i| make_pair(w, h, i as u32 + 1)).collect();
+        let pairs: Vec<(Vec<[u8; 3]>, Vec<[u8; 3]>)> = (0..n_pairs)
+            .map(|i| make_pair(w, h, i as u32 + 1))
+            .collect();
 
         let z = Zensim::new(ZensimProfile::PreviewV0_2);
 
@@ -231,7 +241,9 @@ fn streaming_strips_throughput_report() {
         let t_strip = time_path("strip    ", &|(s, d)| {
             let src_img = RgbSlice::new(s, w, h);
             let dst_img = RgbSlice::new(d, w, h);
-            z.compute_streaming_strips_default(&src_img, &dst_img).unwrap().score()
+            z.compute_streaming_strips_default(&src_img, &dst_img)
+                .unwrap()
+                .score()
         });
 
         // Buffered-ref: precompute per pair (mimics "build ref once per
@@ -254,16 +266,17 @@ fn streaming_strips_throughput_report() {
 
         // Single-threaded
         let z_st = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
-        let time_path_st = |name: &str, run: &dyn Fn(&(Vec<[u8; 3]>, Vec<[u8; 3]>)) -> f64| -> f64 {
-            let t = Instant::now();
-            let mut acc = 0.0f64;
-            for p in &pairs {
-                acc += run(p);
-            }
-            let secs = t.elapsed().as_secs_f64();
-            eprintln!("  [1T] {name}: {:.3}s (acc={acc:.2})", secs);
-            secs
-        };
+        let time_path_st =
+            |name: &str, run: &dyn Fn(&(Vec<[u8; 3]>, Vec<[u8; 3]>)) -> f64| -> f64 {
+                let t = Instant::now();
+                let mut acc = 0.0f64;
+                for p in &pairs {
+                    acc += run(p);
+                }
+                let secs = t.elapsed().as_secs_f64();
+                eprintln!("  [1T] {name}: {:.3}s (acc={acc:.2})", secs);
+                secs
+            };
         let t_full_st = time_path_st("full     ", &|(s, d)| {
             let src_img = RgbSlice::new(s, w, h);
             let dst_img = RgbSlice::new(d, w, h);
@@ -272,12 +285,11 @@ fn streaming_strips_throughput_report() {
         let t_strip_st = time_path_st("strip    ", &|(s, d)| {
             let src_img = RgbSlice::new(s, w, h);
             let dst_img = RgbSlice::new(d, w, h);
-            z_st.compute_streaming_strips_default(&src_img, &dst_img).unwrap().score()
+            z_st.compute_streaming_strips_default(&src_img, &dst_img)
+                .unwrap()
+                .score()
         });
-        eprintln!(
-            "  [1T] ratios: strip/full = {:.3}",
-            t_full_st / t_strip_st
-        );
+        eprintln!("  [1T] ratios: strip/full = {:.3}", t_full_st / t_strip_st);
 
         // Sanity gate: strip path must complete without catastrophic
         // regression. The strip aggregator is meant to unlock 80 MP
@@ -294,12 +306,14 @@ fn streaming_strips_throughput_report() {
         assert!(
             t_strip <= t_full * 6.0,
             "{label}: strip path {:.3}s is more than 6× slower than full {:.3}s — likely a regression",
-            t_strip, t_full
+            t_strip,
+            t_full
         );
         assert!(
             t_buffered <= t_full * 6.0,
             "{label}: buffered-ref strip path {:.3}s is more than 6× slower than full {:.3}s",
-            t_buffered, t_full
+            t_buffered,
+            t_full
         );
     }
 }

@@ -171,7 +171,10 @@ pub fn fit_monotone_spline(predictions: &[f64], targets: &[f64], n_bins: usize) 
     // Determine direction: is the mapping increasing or decreasing?
     let mean_p: f64 = predictions.iter().take(n).sum::<f64>() / n as f64;
     let mean_t: f64 = targets.iter().take(n).sum::<f64>() / n as f64;
-    let cov: f64 = predictions.iter().zip(targets.iter()).take(n)
+    let cov: f64 = predictions
+        .iter()
+        .zip(targets.iter())
+        .take(n)
         .map(|(&p, &t)| (p - mean_p) * (t - mean_t))
         .sum();
     let decreasing = cov < 0.0;

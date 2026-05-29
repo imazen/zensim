@@ -146,4 +146,3 @@ pub fn compute_goal_scores(
 
     gs
 }
-

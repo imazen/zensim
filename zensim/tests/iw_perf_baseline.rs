@@ -67,16 +67,16 @@ fn paired_round_robin(
     // Warmup all configs to fault in pages + warm the dispatch tables.
     for _ in 0..2 {
         let _ = run_one(src, dst, w, h, false, false);
-        let _ = run_one(src, dst, w, h, true,  false);
+        let _ = run_one(src, dst, w, h, true, false);
         let _ = run_one(src, dst, w, h, false, true);
-        let _ = run_one(src, dst, w, h, true,  true);
+        let _ = run_one(src, dst, w, h, true, true);
     }
     let mut out = Vec::with_capacity(rounds);
     for _ in 0..rounds {
         let t_basic = run_one(src, dst, w, h, false, false);
-        let t_ext   = run_one(src, dst, w, h, true,  false);
-        let t_iw    = run_one(src, dst, w, h, false, true);
-        let t_both  = run_one(src, dst, w, h, true,  true);
+        let t_ext = run_one(src, dst, w, h, true, false);
+        let t_iw = run_one(src, dst, w, h, false, true);
+        let t_both = run_one(src, dst, w, h, true, true);
         out.push([t_basic, t_ext, t_iw, t_both]);
     }
     out
@@ -85,7 +85,11 @@ fn paired_round_robin(
 fn median(xs: &mut [f64]) -> f64 {
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = xs.len();
-    if n % 2 == 0 { (xs[n/2 - 1] + xs[n/2]) / 2.0 } else { xs[n/2] }
+    if n % 2 == 0 {
+        (xs[n / 2 - 1] + xs[n / 2]) / 2.0
+    } else {
+        xs[n / 2]
+    }
 }
 
 fn mad(xs: &[f64], med: f64) -> f64 {
@@ -98,15 +102,15 @@ fn run_geometry(name: &str, w: usize, h: usize, rounds: usize) {
     let samples = paired_round_robin(&src, &dst, w, h, rounds);
 
     // Paired per-round ratios = robust to whole-run thermal drift.
-    let mut ratios_ext:  Vec<f64> = samples.iter().map(|s| s[1] / s[0]).collect();
-    let mut ratios_iw:   Vec<f64> = samples.iter().map(|s| s[2] / s[0]).collect();
+    let mut ratios_ext: Vec<f64> = samples.iter().map(|s| s[1] / s[0]).collect();
+    let mut ratios_iw: Vec<f64> = samples.iter().map(|s| s[2] / s[0]).collect();
     let mut ratios_both: Vec<f64> = samples.iter().map(|s| s[3] / s[0]).collect();
 
-    let med_ext  = median(&mut ratios_ext);
-    let med_iw   = median(&mut ratios_iw);
+    let med_ext = median(&mut ratios_ext);
+    let med_iw = median(&mut ratios_iw);
     let med_both = median(&mut ratios_both);
-    let mad_ext  = mad(&ratios_ext, med_ext);
-    let mad_iw   = mad(&ratios_iw, med_iw);
+    let mad_ext = mad(&ratios_ext, med_ext);
+    let mad_iw = mad(&ratios_iw, med_iw);
     let mad_both = mad(&ratios_both, med_both);
 
     let mut basics: Vec<f64> = samples.iter().map(|s| s[0]).collect();
@@ -114,20 +118,28 @@ fn run_geometry(name: &str, w: usize, h: usize, rounds: usize) {
 
     eprintln!(
         "{name:>12} basic={mb:>7.3}ms  ext={me:.3}±{xe:.3}x  iw={mi:.3}±{xi:.3}x  both={mb2:.3}±{xb:.3}x",
-        mb = med_basic * 1000.0, me = med_ext, xe = mad_ext,
-        mi = med_iw, xi = mad_iw, mb2 = med_both, xb = mad_both,
+        mb = med_basic * 1000.0,
+        me = med_ext,
+        xe = mad_ext,
+        mi = med_iw,
+        xi = mad_iw,
+        mb2 = med_both,
+        xb = mad_both,
     );
 
-    assert!(med_both < 4.0, "WithIw>4x Basic at {name}: median {med_both:.2}x");
+    assert!(
+        med_both < 4.0,
+        "WithIw>4x Basic at {name}: median {med_both:.2}x"
+    );
 }
 
 #[test]
 fn iw_overhead_report() {
     eprintln!("\nIW overhead report — paired round-robin median (1.4826*MAD)");
     eprintln!("====================================================================");
-    run_geometry("256x256",   256,  256, 50);
-    run_geometry("512x512",   512,  512, 30);
-    run_geometry("1024x1024",1024, 1024, 15);
-    run_geometry("2048x1024",2048, 1024, 10);
+    run_geometry("256x256", 256, 256, 50);
+    run_geometry("512x512", 512, 512, 30);
+    run_geometry("1024x1024", 1024, 1024, 15);
+    run_geometry("2048x1024", 2048, 1024, 10);
     eprintln!("====================================================================");
 }

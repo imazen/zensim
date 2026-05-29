@@ -86,16 +86,25 @@ fn measure_peak(
 fn run_geometry(name: &str, w: usize, h: usize) {
     let (src, dst) = make_pair(w, h);
     // Warm everything once
-    let _ = compute_zensim_with_config(src.as_slice(), dst.as_slice(), w, h, ZensimConfig::default());
+    let _ = compute_zensim_with_config(
+        src.as_slice(),
+        dst.as_slice(),
+        w,
+        h,
+        ZensimConfig::default(),
+    );
 
     let m_basic = measure_peak(&src, &dst, w, h, false, false);
-    let m_ext   = measure_peak(&src, &dst, w, h, true,  false);
-    let m_iw    = measure_peak(&src, &dst, w, h, false, true);
-    let m_both  = measure_peak(&src, &dst, w, h, true,  true);
+    let m_ext = measure_peak(&src, &dst, w, h, true, false);
+    let m_iw = measure_peak(&src, &dst, w, h, false, true);
+    let m_both = measure_peak(&src, &dst, w, h, true, true);
 
     eprintln!(
         "{name:>12}  basic +{b:>5} KiB  ext +{e:>5} KiB  iw +{i:>5} KiB  both +{bo:>5} KiB",
-        b = m_basic, e = m_ext, i = m_iw, bo = m_both,
+        b = m_basic,
+        e = m_ext,
+        i = m_iw,
+        bo = m_both,
     );
 }
 
@@ -103,8 +112,8 @@ fn run_geometry(name: &str, w: usize, h: usize) {
 fn iw_memory_report() {
     eprintln!("\nIW + ext memory cost — Δ peak RSS per call (kB)");
     eprintln!("================================================================");
-    run_geometry("256x256",     256, 256);
-    run_geometry("512x512",     512, 512);
+    run_geometry("256x256", 256, 256);
+    run_geometry("512x512", 512, 512);
     run_geometry("1024x1024", 1024, 1024);
     run_geometry("2048x1024", 2048, 1024);
     run_geometry("4096x2048", 4096, 2048);

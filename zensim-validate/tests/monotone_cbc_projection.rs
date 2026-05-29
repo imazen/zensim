@@ -23,9 +23,7 @@
 //! (off-manifold inversion) closed structurally.
 
 use zenpredict::{Model, WeightStorage};
-use zensim_validate::mlp_train::{
-    MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp,
-};
+use zensim_validate::mlp_train::{MlpHyperparams, TrainingGroup, ValidationPolicy, train_mlp};
 
 fn synthetic_group<'a>(
     n_rows: usize,
@@ -137,10 +135,7 @@ fn monotone_cbc_projection_signs_exact() {
         max_rank <= 1e-6,
         "monotone_cbc=true: rank_w must be ≤ 0; max={max_rank}"
     );
-    let max_alpha = w_alpha
-        .iter()
-        .map(|v| v.abs())
-        .fold(0.0f32, f32::max);
+    let max_alpha = w_alpha.iter().map(|v| v.abs()).fold(0.0f32, f32::max);
     assert!(
         max_alpha <= 1e-6,
         "monotone_cbc=true: w_alpha must be exactly 0; |max|={max_alpha}"

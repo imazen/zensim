@@ -158,9 +158,7 @@ fn parse_args() -> Result<Args, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--input" | "-i" => {
-                input = Some(PathBuf::from(
-                    it.next().ok_or("--input requires a value")?,
-                ));
+                input = Some(PathBuf::from(it.next().ok_or("--input requires a value")?));
             }
             "--json" => json = true,
             // Hidden — see Args::emit_rescaled.
@@ -326,19 +324,37 @@ fn load_parquet_columns(args: &Args) -> Result<Columns, String> {
             DataType::Float32 => {
                 let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
                 Ok((0..n)
-                    .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+                    .map(|i| {
+                        if a.is_null(i) {
+                            f64::NAN
+                        } else {
+                            a.value(i) as f64
+                        }
+                    })
                     .collect())
             }
             DataType::Int64 => {
                 let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
                 Ok((0..n)
-                    .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+                    .map(|i| {
+                        if a.is_null(i) {
+                            f64::NAN
+                        } else {
+                            a.value(i) as f64
+                        }
+                    })
                     .collect())
             }
             DataType::Int32 => {
                 let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
                 Ok((0..n)
-                    .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+                    .map(|i| {
+                        if a.is_null(i) {
+                            f64::NAN
+                        } else {
+                            a.value(i) as f64
+                        }
+                    })
                     .collect())
             }
             other => Err(format!(
@@ -369,7 +385,9 @@ fn load_parquet_columns(args: &Args) -> Result<Columns, String> {
                     .map(|v| format!("{v}"))
                     .collect())
             }
-            other => Err(format!("band column {name:?} has unsupported dtype {other:?}")),
+            other => Err(format!(
+                "band column {name:?} has unsupported dtype {other:?}"
+            )),
         }
     }
 
@@ -686,8 +704,16 @@ mod tests {
         let predicted: Vec<f64> = (0..50).map(|i| i as f64).collect();
         let target: Vec<f64> = (0..50).map(|i| i as f64 * 2.0 + 3.0).collect();
         let r = report_group("t", &predicted, &target, None);
-        assert!((r.panel.srocc - 1.0).abs() < 1e-9, "srocc={}", r.panel.srocc);
-        assert!((r.panel.krocc - 1.0).abs() < 1e-9, "krocc={}", r.panel.krocc);
+        assert!(
+            (r.panel.srocc - 1.0).abs() < 1e-9,
+            "srocc={}",
+            r.panel.srocc
+        );
+        assert!(
+            (r.panel.krocc - 1.0).abs() < 1e-9,
+            "krocc={}",
+            r.panel.krocc
+        );
     }
 
     #[test]

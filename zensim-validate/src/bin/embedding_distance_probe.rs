@@ -104,7 +104,11 @@ fn spearman(a: &[f64], b: &[f64]) -> f64 {
         da += x * x;
         db += y * y;
     }
-    if da == 0.0 || db == 0.0 { 0.0 } else { num / (da.sqrt() * db.sqrt()) }
+    if da == 0.0 || db == 0.0 {
+        0.0
+    } else {
+        num / (da.sqrt() * db.sqrt())
+    }
 }
 
 fn load(path: &str, name: &str) -> Option<(Vec<Vec<f64>>, Vec<f64>)> {
@@ -150,7 +154,10 @@ impl Model {
                 hp[j] += xi * row[j];
             }
         }
-        let h: Vec<f64> = hp.iter().map(|&v| if v >= 0.0 { v } else { self.leaky * v }).collect();
+        let h: Vec<f64> = hp
+            .iter()
+            .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
+            .collect();
         let mut e = self.b2.clone();
         for j in 0..H {
             let hj = h[j];
@@ -172,7 +179,11 @@ fn main() {
     eprintln!("loading train…");
     let specs = [
         (format!("{CANON}/safesyn.parquet"), "safesyn", 1.0),
-        (format!("{CANON}/cid22_train_norm.parquet"), "cid22_train", 1.5),
+        (
+            format!("{CANON}/cid22_train_norm.parquet"),
+            "cid22_train",
+            1.5,
+        ),
         (format!("{CANON}/kadid.parquet"), "kadid", 1.0),
         (format!("{CANON}/tid.parquet"), "tid", 1.0),
         (format!("{CANON}/konjnd-dense-norm.parquet"), "konjnd", 1.2),
@@ -302,7 +313,13 @@ fn main() {
             // RankNet + Huber-clamped MSE (margin bounded so the unbounded
             // distance can't explode the gradient).
             let z = -target * (sb - sa);
-            let lrk = if z > 40.0 { z } else if z < -40.0 { 0.0 } else { (z.exp() + 1.0).ln() };
+            let lrk = if z > 40.0 {
+                z
+            } else if z < -40.0 {
+                0.0
+            } else {
+                (z.exp() + 1.0).ln()
+            };
             let s = sig(-z);
             let rn = 0.7;
             let mse = 0.5;
@@ -382,7 +399,11 @@ fn main() {
             v_lm = vv[0];
         }
         if epoch % 20 == 0 || epoch == epochs - 1 {
-            eprintln!("epoch {epoch:3} lr={lr:.4} loss={:.4} λ={:.3}", tot / steps.max(1) as f64, sp(m.lam));
+            eprintln!(
+                "epoch {epoch:3} lr={lr:.4} loss={:.4} λ={:.3}",
+                tot / steps.max(1) as f64,
+                sp(m.lam)
+            );
         }
     }
 
@@ -404,7 +425,10 @@ fn main() {
             let sr = spearman(&preds, &hs);
             let pmin = preds.iter().cloned().fold(f64::INFINITY, f64::min);
             let pmax = preds.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            eprintln!("  {name:8} SROCC={sr:.4}  range=[{pmin:.1},{pmax:.1}]  n={}", hs.len());
+            eprintln!(
+                "  {name:8} SROCC={sr:.4}  range=[{pmin:.1},{pmax:.1}]  n={}",
+                hs.len()
+            );
         }
     }
 

@@ -2122,36 +2122,39 @@ fn main() {
     };
 
     // Parse the per-feature monotone sign mask (if supplied).
-    let monotone_feature_pin: Option<Vec<bool>> =
-        args.monotone_feature_mask.as_ref().map(|path| {
-            let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
-                eprintln!("--monotone-feature-mask read error {}: {e}", path.display());
-                std::process::exit(2);
-            });
-            let mut pin = vec![true; n_features];
-            for (li, line) in txt.lines().enumerate() {
-                if li == 0 {
-                    continue; // header
-                }
-                let mut cols = line.split('\t');
-                let idx: usize = match cols.next().and_then(|s| s.trim().parse().ok()) {
-                    Some(i) => i,
-                    None => continue,
-                };
-                let mask = cols.next().unwrap_or("").trim();
-                if idx < n_features {
-                    pin[idx] = mask == "pin_geq0";
-                }
-            }
-            let n_pin = pin.iter().filter(|&&p| p).count();
-            eprintln!(
-                "monotone-feature-mask: {n_pin} pinned ≥0 / {} {} of {n_features} (from {})",
-                n_features - n_pin,
-                if args.monotone_strict { "DROPPED" } else { "free" },
-                path.display()
-            );
-            pin
+    let monotone_feature_pin: Option<Vec<bool>> = args.monotone_feature_mask.as_ref().map(|path| {
+        let txt = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            eprintln!("--monotone-feature-mask read error {}: {e}", path.display());
+            std::process::exit(2);
         });
+        let mut pin = vec![true; n_features];
+        for (li, line) in txt.lines().enumerate() {
+            if li == 0 {
+                continue; // header
+            }
+            let mut cols = line.split('\t');
+            let idx: usize = match cols.next().and_then(|s| s.trim().parse().ok()) {
+                Some(i) => i,
+                None => continue,
+            };
+            let mask = cols.next().unwrap_or("").trim();
+            if idx < n_features {
+                pin[idx] = mask == "pin_geq0";
+            }
+        }
+        let n_pin = pin.iter().filter(|&&p| p).count();
+        eprintln!(
+            "monotone-feature-mask: {n_pin} pinned ≥0 / {} {} of {n_features} (from {})",
+            n_features - n_pin,
+            if args.monotone_strict {
+                "DROPPED"
+            } else {
+                "free"
+            },
+            path.display()
+        );
+        pin
+    });
 
     let hyperparams = MlpHyperparams {
         n_hidden: args.hidden,
@@ -2617,15 +2620,14 @@ fn main() {
         .as_ref()
         .map(|p| p.feature_rows.iter().map(|r| r.as_slice()).collect())
         .unwrap_or_default();
-    let konjnd_agg_loaded: Option<KonjndAggregationPool<'_>> = konjnd_agg_owned.as_ref().map(|p| {
-        KonjndAggregationPool {
+    let konjnd_agg_loaded: Option<KonjndAggregationPool<'_>> =
+        konjnd_agg_owned.as_ref().map(|p| KonjndAggregationPool {
             name: p.name.clone(),
             features: konjnd_agg_feat_refs.as_slice(),
             ref_ranges: p.ref_ranges.as_slice(),
             ref_pjnd_target: p.ref_pjnd_target.as_slice(),
             ref_weight: p.ref_weight.as_slice(),
-        }
-    });
+        });
 
     let mut log: Vec<String> = Vec::new();
 
@@ -2751,16 +2753,16 @@ fn main() {
         // fallback on the GPU side). Materialize from
         // --pjnd-passthrough-target-score when pjnd_anchor_loaded
         // ships no `target_scores` slice.
-        let gpu_pjnd_targets_owned: Option<Vec<f64>> =
-            if let Some(pa) = pjnd_anchor_loaded.as_ref() {
-                if pa.target_scores.is_some() {
-                    None
-                } else {
-                    Some(vec![args.pjnd_passthrough_target_score; pa.features.len()])
-                }
-            } else {
+        let gpu_pjnd_targets_owned: Option<Vec<f64>> = if let Some(pa) = pjnd_anchor_loaded.as_ref()
+        {
+            if pa.target_scores.is_some() {
                 None
-            };
+            } else {
+                Some(vec![args.pjnd_passthrough_target_score; pa.features.len()])
+            }
+        } else {
+            None
+        };
         let gpu_pjnd_anchor: Option<zensim_train_gpu::GpuAnchorRows<'_>> = pjnd_anchor_loaded
             .as_ref()
             .map(|pa| zensim_train_gpu::GpuAnchorRows {

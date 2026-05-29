@@ -118,7 +118,11 @@ fn spearman(a: &[f64], b: &[f64]) -> f64 {
         da += x * x;
         db += y * y;
     }
-    if da == 0.0 || db == 0.0 { 0.0 } else { num / (da.sqrt() * db.sqrt()) }
+    if da == 0.0 || db == 0.0 {
+        0.0
+    } else {
+        num / (da.sqrt() * db.sqrt())
+    }
 }
 
 fn load(path: &str, name: &str) -> Option<(Vec<Vec<f64>>, Vec<f64>)> {
@@ -181,7 +185,10 @@ impl Model {
             }
         }
         let _ = nm;
-        let h: Vec<f64> = hp.iter().map(|&v| if v >= 0.0 { v } else { self.leaky * v }).collect();
+        let h: Vec<f64> = hp
+            .iter()
+            .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
+            .collect();
         let mut d = 0.0;
         for j in 0..HM {
             d += sp(self.cm[j]) * h[j];
@@ -201,7 +208,10 @@ impl Model {
                 hp[j] += xi * row[j];
             }
         }
-        let h: Vec<f64> = hp.iter().map(|&v| if v >= 0.0 { v } else { self.leaky * v }).collect();
+        let h: Vec<f64> = hp
+            .iter()
+            .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
+            .collect();
         let mut m = 0.0;
         for j in 0..HF {
             m += self.vf[j] * h[j];
@@ -223,7 +233,11 @@ fn main() {
     // human sets' calibration.
     let specs = [
         (format!("{CANON}/safesyn.parquet"), "safesyn", 1.0),
-        (format!("{CANON}/cid22_train_norm.parquet"), "cid22_train", 1.5),
+        (
+            format!("{CANON}/cid22_train_norm.parquet"),
+            "cid22_train",
+            1.5,
+        ),
         (format!("{CANON}/kadid.parquet"), "kadid", 1.0),
         (format!("{CANON}/tid.parquet"), "tid", 1.0),
         (format!("{CANON}/konjnd-dense-norm.parquet"), "konjnd", 1.2),
@@ -354,7 +368,13 @@ fn main() {
 
             // RankNet + MSE
             let z = -target * (sb - sa);
-            let lrk = if z > 40.0 { z } else if z < -40.0 { 0.0 } else { (z.exp() + 1.0).ln() };
+            let lrk = if z > 40.0 {
+                z
+            } else if z < -40.0 {
+                0.0
+            } else {
+                (z.exp() + 1.0).ln()
+            };
             let s = sig(-z);
             let rn = 0.6;
             let mse = 0.6;
@@ -381,7 +401,11 @@ fn main() {
                     let cj = sp(m.cm[j]);
                     // dL/dh_m_j = ds * dscore_ddm * cj
                     let dl_dh = ds * dscore_ddm * cj;
-                    let dl_dhp = if hp_m[j] >= 0.0 { dl_dh } else { dl_dh * m.leaky };
+                    let dl_dhp = if hp_m[j] >= 0.0 {
+                        dl_dh
+                    } else {
+                        dl_dh * m.leaky
+                    };
                     g_bm[j] += dl_dhp;
                     // dL/dc_j (sp' = sigmoid)
                     g_cm[j] += ds * dscore_ddm * h_m[j] * sig(m.cm[j]);
@@ -403,7 +427,11 @@ fn main() {
                     let (_m, hp_f, h_f) = m.mf(x);
                     for j in 0..HF {
                         let dl_dh = ds * dscore_dM * m.vf[j];
-                        let dl_dhp = if hp_f[j] >= 0.0 { dl_dh } else { dl_dh * m.leaky };
+                        let dl_dhp = if hp_f[j] >= 0.0 {
+                            dl_dh
+                        } else {
+                            dl_dh * m.leaky
+                        };
                         g_bf[j] += dl_dhp;
                         g_vf[j] += ds * dscore_dM * h_f[j];
                         for (fi2, &fi) in m.free.iter().enumerate() {
@@ -453,7 +481,11 @@ fn main() {
             v_lm = vv[0];
         }
         if epoch % 20 == 0 || epoch == epochs - 1 {
-            eprintln!("epoch {epoch:3} lr={lr:.4} loss={:.4} λm={:.3}", tot / steps.max(1) as f64, sp(m.lam_m));
+            eprintln!(
+                "epoch {epoch:3} lr={lr:.4} loss={:.4} λm={:.3}",
+                tot / steps.max(1) as f64,
+                sp(m.lam_m)
+            );
         }
     }
 
@@ -476,7 +508,10 @@ fn main() {
             let sr = spearman(&preds, &hs);
             let pmin = preds.iter().cloned().fold(f64::INFINITY, f64::min);
             let pmax = preds.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            eprintln!("  {name:8} SROCC={sr:.4}  range=[{pmin:.1},{pmax:.1}]  n={}", hs.len());
+            eprintln!(
+                "  {name:8} SROCC={sr:.4}  range=[{pmin:.1},{pmax:.1}]  n={}",
+                hs.len()
+            );
         }
     }
 
@@ -511,7 +546,9 @@ fn main() {
         let s: Vec<String> = sc.iter().map(|v| format!("{v:.1}")).collect();
         eprintln!("  {c:13} [{}]  inv={inv} above_id={ab}", s.join(" "));
     }
-    eprintln!("\n(A2 → above_id=0 by construction; A3 → inv ≤ bounded-δ slack; resolution → wide negative range)");
+    eprintln!(
+        "\n(A2 → above_id=0 by construction; A3 → inv ≤ bounded-δ slack; resolution → wide negative range)"
+    );
 }
 
 fn m_lr_idx(rng: &mut Rng, n: usize) -> usize {

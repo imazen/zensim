@@ -84,7 +84,13 @@ fn main() -> ExitCode {
         let res = compute_zensim_with_config(s, d, rw, rh, cfg()).ok()?;
         let feats = res.features().to_vec();
         let raw = score_with_bake_alloc(
-            &mut predictor, has_tx, psa.as_ref(), hyb.as_ref(), pin, spline.as_ref(), n_inputs,
+            &mut predictor,
+            has_tx,
+            psa.as_ref(),
+            hyb.as_ref(),
+            pin,
+            spline.as_ref(),
+            n_inputs,
             &feats,
         );
         Some(apply_post(raw, &bake_post))

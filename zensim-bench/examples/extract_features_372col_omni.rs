@@ -43,8 +43,8 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 use rayon::prelude::*;
-use zensim::{ZensimConfig, compute_zensim_with_config};
 use zenpixels::PixelDescriptor;
+use zensim::{ZensimConfig, compute_zensim_with_config};
 
 #[derive(Debug, Clone)]
 struct Cell {
@@ -123,8 +123,8 @@ fn main() {
     let props = WriterProperties::builder()
         .set_compression(Compression::ZSTD(ZstdLevel::try_new(15).unwrap()))
         .build();
-    let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))
-        .expect("init parquet writer");
+    let mut writer =
+        ArrowWriter::try_new(file, schema.clone(), Some(props)).expect("init parquet writer");
 
     for chunk in cells.chunks(shard_size) {
         shard_idx += 1;
@@ -162,7 +162,10 @@ fn main() {
         }
         let batch = build_record_batch(&schema, &extracted);
         writer.write(&batch).expect("write parquet batch");
-        eprintln!("  shard {shard_idx}/{total_shards}: wrote {} rows", extracted.len());
+        eprintln!(
+            "  shard {shard_idx}/{total_shards}: wrote {} rows",
+            extracted.len()
+        );
     }
 
     writer.close().expect("close parquet writer");
@@ -186,7 +189,9 @@ fn extract_one(
         .to_string_lossy()
         .to_string();
     let ref_path = sources_dir.join(&ref_basename);
-    let dist_path = encoded_dir.join(&cell.chunk_id).join(&cell.encoded_filename);
+    let dist_path = encoded_dir
+        .join(&cell.chunk_id)
+        .join(&cell.encoded_filename);
     if !ref_path.exists() {
         return Err(format!("reference image missing: {}", ref_path.display()).into());
     }
@@ -197,10 +202,10 @@ fn extract_one(
     // and zenjxl path-deps; fall back to the image crate for JPEG / PNG /
     // WebP. This unblocks the 55,200 multi-codec cells that were skipped
     // when this binary used only `image::open`.
-    let (src_w, src_h, src_rgb) =
-        decode_to_rgb8(&ref_path).map_err(|e| format!("decode ref {}: {}", ref_path.display(), e))?;
-    let (dw, dh, dst_rgb) =
-        decode_to_rgb8(&dist_path).map_err(|e| format!("decode dist {}: {}", dist_path.display(), e))?;
+    let (src_w, src_h, src_rgb) = decode_to_rgb8(&ref_path)
+        .map_err(|e| format!("decode ref {}: {}", ref_path.display(), e))?;
+    let (dw, dh, dst_rgb) = decode_to_rgb8(&dist_path)
+        .map_err(|e| format!("decode dist {}: {}", dist_path.display(), e))?;
     if src_w != dw || src_h != dh {
         return Err(format!("dim mismatch ref={src_w}x{src_h} dist={dw}x{dh}").into());
     }
@@ -305,7 +310,9 @@ fn pixelbuffer_to_rgb8(
     let stride = slice.stride();
     let data = slice.as_strided_bytes();
 
-    if desc.layout_compatible(PixelDescriptor::RGB8) || desc.layout_compatible(PixelDescriptor::RGB8_SRGB) {
+    if desc.layout_compatible(PixelDescriptor::RGB8)
+        || desc.layout_compatible(PixelDescriptor::RGB8_SRGB)
+    {
         let bpr = w_us * 3;
         let mut out = Vec::with_capacity(bpr * h_us);
         for row in 0..h_us {
@@ -313,7 +320,9 @@ fn pixelbuffer_to_rgb8(
             out.extend_from_slice(&data[start..start + bpr]);
         }
         Ok((w, h, out))
-    } else if desc.layout_compatible(PixelDescriptor::RGBA8) || desc.layout_compatible(PixelDescriptor::RGBA8_SRGB) {
+    } else if desc.layout_compatible(PixelDescriptor::RGBA8)
+        || desc.layout_compatible(PixelDescriptor::RGBA8_SRGB)
+    {
         let bpr_in = w_us * 4;
         let bpr_out = w_us * 3;
         let mut out = Vec::with_capacity(bpr_out * h_us);
@@ -416,9 +425,17 @@ fn load_omni_cells(omni_dir: &Path, max_cells: usize) -> Vec<Cell> {
                     } else {
                         let c = batch.column(idx);
                         if let Some(a) = c.as_any().downcast_ref::<Float64Array>() {
-                            if a.is_null($row) { f64::NAN } else { a.value($row) }
+                            if a.is_null($row) {
+                                f64::NAN
+                            } else {
+                                a.value($row)
+                            }
                         } else if let Some(a) = c.as_any().downcast_ref::<Float32Array>() {
-                            if a.is_null($row) { f64::NAN } else { a.value($row) as f64 }
+                            if a.is_null($row) {
+                                f64::NAN
+                            } else {
+                                a.value($row) as f64
+                            }
                         } else {
                             f64::NAN
                         }
@@ -439,10 +456,7 @@ fn load_omni_cells(omni_dir: &Path, max_cells: usize) -> Vec<Cell> {
                     score_zensim_gpu: col_f64!("score_zensim_gpu", row),
                     score_ssim2_gpu: col_f64!("score_ssim2_gpu", row),
                     score_butteraugli_max_gpu: col_f64!("score_butteraugli_max_gpu", row),
-                    score_butteraugli_pnorm3_gpu: col_f64!(
-                        "score_butteraugli_pnorm3_gpu",
-                        row
-                    ),
+                    score_butteraugli_pnorm3_gpu: col_f64!("score_butteraugli_pnorm3_gpu", row),
                     score_cvvdp_imazen_v0_0_1: col_f64!("score_cvvdp_imazen_v0_0_1", row),
                     score_dssim_gpu: col_f64!("score_dssim_gpu", row),
                     score_iwssim_gpu: col_f64!("score_iwssim_gpu", row),
@@ -468,9 +482,21 @@ fn output_schema() -> Arc<Schema> {
     fields.push(Field::new("ref_basename", DataType::Utf8, false));
     fields.push(Field::new("score_zensim_gpu", DataType::Float64, true));
     fields.push(Field::new("score_ssim2_gpu", DataType::Float64, true));
-    fields.push(Field::new("score_butteraugli_max_gpu", DataType::Float64, true));
-    fields.push(Field::new("score_butteraugli_pnorm3_gpu", DataType::Float64, true));
-    fields.push(Field::new("score_cvvdp_imazen_v0_0_1", DataType::Float64, true));
+    fields.push(Field::new(
+        "score_butteraugli_max_gpu",
+        DataType::Float64,
+        true,
+    ));
+    fields.push(Field::new(
+        "score_butteraugli_pnorm3_gpu",
+        DataType::Float64,
+        true,
+    ));
+    fields.push(Field::new(
+        "score_cvvdp_imazen_v0_0_1",
+        DataType::Float64,
+        true,
+    ));
     fields.push(Field::new("score_dssim_gpu", DataType::Float64, true));
     fields.push(Field::new("score_iwssim_gpu", DataType::Float64, true));
     for i in 0..372 {
@@ -487,9 +513,7 @@ fn build_record_batch(schema: &Arc<Schema>, rows: &[ExtractedRow]) -> RecordBatc
     let codec: ArrayRef = Arc::new(StringArray::from_iter_values(
         rows.iter().map(|r| r.cell.codec.as_str()),
     ));
-    let q: ArrayRef = Arc::new(Int32Array::from_iter_values(
-        rows.iter().map(|r| r.cell.q),
-    ));
+    let q: ArrayRef = Arc::new(Int32Array::from_iter_values(rows.iter().map(|r| r.cell.q)));
     let knob: ArrayRef = Arc::new(StringArray::from_iter_values(
         rows.iter().map(|r| r.cell.knob_tuple_json.as_str()),
     ));

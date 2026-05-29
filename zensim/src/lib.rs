@@ -198,8 +198,8 @@
 mod blur;
 pub mod codec_calibration;
 mod color;
-pub mod display;
 mod diffmap;
+pub mod display;
 mod error;
 mod fused;
 mod iw_pool;

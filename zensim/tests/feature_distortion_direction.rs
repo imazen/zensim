@@ -31,9 +31,7 @@
 mod common;
 
 use common::generators::*;
-use zensim::{
-    RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config,
-};
+use zensim::{RgbSlice, Zensim, ZensimConfig, ZensimProfile, compute_zensim_with_config};
 
 const W: usize = 128;
 const H: usize = 128;
@@ -136,7 +134,11 @@ fn feature_distortion_direction_analysis() {
         // along this blur ladder to check degradation-monotonicity.
         let mut blur_rows: Vec<Vec<f64>> = Vec::with_capacity(blur_lvls.len());
         for &r in &blur_lvls {
-            let dst = if r == 0 { src.clone() } else { distort_blur(src, W, H, r) };
+            let dst = if r == 0 {
+                src.clone()
+            } else {
+                distort_blur(src, W, H, r)
+            };
             let f = extract_372(src, &dst);
             if r == 0 {
                 for j in 0..NF {
@@ -182,7 +184,11 @@ fn feature_distortion_direction_analysis() {
         let noise_xs: Vec<f64> = noise_amps.iter().map(|&a| a as f64).collect();
         let mut noise_feats: Vec<Vec<f64>> = vec![Vec::new(); NF];
         for &a in &noise_amps {
-            let dst = if a == 0 { src.clone() } else { distort_noise(src, a, 7) };
+            let dst = if a == 0 {
+                src.clone()
+            } else {
+                distort_noise(src, a, 7)
+            };
             let f = extract_372(src, &dst);
             for j in 0..NF {
                 noise_feats[j].push(f[j]);
@@ -214,7 +220,11 @@ fn feature_distortion_direction_analysis() {
     }
 
     // Identity-feature magnitude: error features should be ≈0 at identity.
-    let id_mean = identity_feats.iter().flatten().map(|v| v.abs()).sum::<f64>()
+    let id_mean = identity_feats
+        .iter()
+        .flatten()
+        .map(|v| v.abs())
+        .sum::<f64>()
         / (NF * contents.len()) as f64;
     let id_max = identity_feats
         .iter()
@@ -234,7 +244,11 @@ fn feature_distortion_direction_analysis() {
         let mut lb_prev = f64::INFINITY;
         let mut a_id = 0.0;
         for r in 0..=6usize {
-            let dst = if r == 0 { src.clone() } else { distort_blur(src, W, H, r) };
+            let dst = if r == 0 {
+                src.clone()
+            } else {
+                distort_blur(src, W, H, r)
+            };
             let sa = z_a
                 .compute(&RgbSlice::new(src, W, H), &RgbSlice::new(&dst, W, H))
                 .unwrap()
@@ -280,7 +294,9 @@ fn feature_distortion_direction_analysis() {
         .join("../benchmarks/feature_distortion_direction_2026-05-26.tsv");
     let _ = std::fs::write(&out, &tsv);
 
-    eprintln!("\n=== Per-feature distortion-direction (NF={NF}, 4 contents × 3 ladders = 12 corrs/feat) ===");
+    eprintln!(
+        "\n=== Per-feature distortion-direction (NF={NF}, 4 contents × 3 ladders = 12 corrs/feat) ==="
+    );
     eprintln!("  monotone-UP   (pin W1 ≥ 0): {n_up}");
     eprintln!("  monotone-DOWN (pin W1 ≤ 0): {n_down}");
     eprintln!("  AMBIGUOUS (leave unconstrained / route to offset): {n_ambig}");

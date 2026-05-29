@@ -28,7 +28,7 @@ fn v9_eight_knot_spline_monotone() {
     // raw predicted-score distribution mapped to the 8 V9 anchor
     // bands.
     let knots = [
-        (4.5f32, 0.0f32),    // network puts worstfloor at ~4.5
+        (4.5f32, 0.0f32), // network puts worstfloor at ~4.5
         (7.2, 10.0),
         (15.3, 30.0),
         (28.1, 50.0),
@@ -62,10 +62,16 @@ fn v9_eight_knot_spline_monotone() {
     }
     // PCHIP linear extrapolation below first knot.
     let y_low = ocs::apply(0.0, &spline);
-    assert!(y_low < 0.0, "extrapolation below first knot should be <0: got {y_low}");
+    assert!(
+        y_low < 0.0,
+        "extrapolation below first knot should be <0: got {y_low}"
+    );
     // Linear extrapolation above last knot.
     let y_high = ocs::apply(95.0, &spline);
-    assert!(y_high > 100.0, "extrapolation above last knot should be >100: got {y_high}");
+    assert!(
+        y_high > 100.0,
+        "extrapolation above last knot should be >100: got {y_high}"
+    );
 }
 
 #[test]

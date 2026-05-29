@@ -114,9 +114,7 @@ fn linear_bounded_preserves_v0_2_ranking() {
     let z_bounded = Zensim::new(ZensimProfile::LinearBounded).with_parallel(false);
     let z_legacy = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
     let src = gen_mandelbrot(W, H);
-    let dists: Vec<Vec<[u8; 3]>> = (1..=6)
-        .map(|r| distort_blur(&src, W, H, r))
-        .collect();
+    let dists: Vec<Vec<[u8; 3]>> = (1..=6).map(|r| distort_blur(&src, W, H, r)).collect();
     let bounded: Vec<f64> = dists.iter().map(|d| score(&z_bounded, &src, d)).collect();
     let legacy: Vec<f64> = dists.iter().map(|d| score(&z_legacy, &src, d)).collect();
     // Same order: for every pair (i, j), the sign of the difference agrees.

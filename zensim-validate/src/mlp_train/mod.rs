@@ -48,7 +48,7 @@ use crate::adam_simd;
 mod loss_norm_in_norm;
 
 mod goals;
-pub use goals::{ValidationPolicy, GoalScores, compute_goal_scores};
+pub use goals::{GoalScores, ValidationPolicy, compute_goal_scores};
 
 /// Knobs for [`train_mlp`]. Defaults match the V0_4 placeholder
 /// architecture (228 → 32 → 1) with `Min` validation gating.
@@ -4977,8 +4977,7 @@ fn predict_group(
 }
 
 mod utils;
-pub use utils::{spearman_correlation, ranks, sweep_nan_inf};
-
+pub use utils::{ranks, spearman_correlation, sweep_nan_inf};
 
 struct AdamState {
     gw1: Vec<f64>,
@@ -5198,8 +5197,7 @@ fn train_mlp_per_sample_alpha_head(
     // KONJND-AGGREGATION-HEAD (task #4) — per-source pool with per-ref
     // grouping. Validate shape invariants up-front so the training step
     // can index without bounds checks.
-    let konjnd_agg_active =
-        konjnd_agg.is_some() && hyperparams.konjnd_aggregation_weight > 0.0;
+    let konjnd_agg_active = konjnd_agg.is_some() && hyperparams.konjnd_aggregation_weight > 0.0;
     if let Some(ka) = konjnd_agg {
         assert_eq!(
             ka.ref_ranges.len(),
@@ -5641,100 +5639,95 @@ fn train_mlp_per_sample_alpha_head(
     // pool (KonJND-PJND passthrough). Standardize against the SAME
     // training-group scaler. Build a row-weight CDF mirroring the
     // primary anchor pool's machinery.
-    let (
-        std_pjnd_features,
-        pjnd_row_cdf,
-        pjnd_total_weight,
-    ): (Vec<Vec<f64>>, Vec<f64>, f64) = if let (Some(pa), true) = (pjnd_anchor, pjnd_active) {
-        let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(pa.features.len());
-        for &f in pa.features.iter() {
-            let mut buf = vec![0.0f64; n_features];
-            for d in 0..n_features {
-                buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
-            }
-            bufs.push(buf);
-        }
-        let total: f64 = pa.row_weights.iter().sum();
-        let mut cum = 0.0f64;
-        let cdf: Vec<f64> = pa
-            .row_weights
-            .iter()
-            .map(|&w| {
-                cum += w.max(0.0);
-                if total > 0.0 { cum / total } else { 0.0 }
-            })
-            .collect();
-        let target_mode = if pa
-            .target_scores
-            .map(|ts| ts.len() == pa.features.len())
-            .unwrap_or(false)
-        {
-            "PER-ROW".to_string()
-        } else {
-            format!(
-                "{:.2} (global)",
-                hyperparams.pjnd_passthrough_target_score
-            )
-        };
-        log_line(
-            &format!(
-                "pjnd-passthrough: ENABLED — '{}' n={} target_score={} step_p={:.3} weight={:.3}",
-                pa.name,
-                pa.features.len(),
-                target_mode,
-                hyperparams.pjnd_passthrough_step_p,
-                hyperparams.pjnd_passthrough_weight
-            ),
-            log,
-        );
-        (bufs, cdf, total)
-    } else {
-        if pjnd_anchor.is_some() && !pjnd_active {
-            log_line(
-                "pjnd-passthrough: data supplied but pjnd_passthrough_weight = 0 — ignored",
-                log,
-            );
-        }
-        (Vec::new(), Vec::new(), 0.0)
-    };
-
-    // KONJND-AGGREGATION-HEAD (task #4, 2026-05-24) — standardize the
-    // per-ref-grouped pool with the SAME training-group scaler.
-    // Output `std_konjnd_agg_features` is flat (preserves the input
-    // ref_ranges layout); the training step indexes via ref_ranges.
-    let std_konjnd_agg_features: Vec<Vec<f64>> =
-        if let (Some(ka), true) = (konjnd_agg, konjnd_agg_active) {
-            let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(ka.features.len());
-            for &f in ka.features.iter() {
+    let (std_pjnd_features, pjnd_row_cdf, pjnd_total_weight): (Vec<Vec<f64>>, Vec<f64>, f64) =
+        if let (Some(pa), true) = (pjnd_anchor, pjnd_active) {
+            let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(pa.features.len());
+            for &f in pa.features.iter() {
                 let mut buf = vec![0.0f64; n_features];
                 for d in 0..n_features {
                     buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
                 }
                 bufs.push(buf);
             }
+            let total: f64 = pa.row_weights.iter().sum();
+            let mut cum = 0.0f64;
+            let cdf: Vec<f64> = pa
+                .row_weights
+                .iter()
+                .map(|&w| {
+                    cum += w.max(0.0);
+                    if total > 0.0 { cum / total } else { 0.0 }
+                })
+                .collect();
+            let target_mode = if pa
+                .target_scores
+                .map(|ts| ts.len() == pa.features.len())
+                .unwrap_or(false)
+            {
+                "PER-ROW".to_string()
+            } else {
+                format!("{:.2} (global)", hyperparams.pjnd_passthrough_target_score)
+            };
             log_line(
                 &format!(
-                    "konjnd-aggregation: ENABLED — '{}' rows={} refs={} S={} K={} step_p={:.3} weight={:.3}",
-                    ka.name,
-                    ka.features.len(),
-                    ka.ref_ranges.len(),
-                    hyperparams.konjnd_aggregation_samples_per_ref,
-                    hyperparams.konjnd_aggregation_refs_per_step,
-                    hyperparams.konjnd_aggregation_step_p,
-                    hyperparams.konjnd_aggregation_weight,
+                    "pjnd-passthrough: ENABLED — '{}' n={} target_score={} step_p={:.3} weight={:.3}",
+                    pa.name,
+                    pa.features.len(),
+                    target_mode,
+                    hyperparams.pjnd_passthrough_step_p,
+                    hyperparams.pjnd_passthrough_weight
                 ),
                 log,
             );
-            bufs
+            (bufs, cdf, total)
         } else {
-            if konjnd_agg.is_some() && !konjnd_agg_active {
+            if pjnd_anchor.is_some() && !pjnd_active {
                 log_line(
-                    "konjnd-aggregation: data supplied but konjnd_aggregation_weight = 0 — ignored",
+                    "pjnd-passthrough: data supplied but pjnd_passthrough_weight = 0 — ignored",
                     log,
                 );
             }
-            Vec::new()
+            (Vec::new(), Vec::new(), 0.0)
         };
+
+    // KONJND-AGGREGATION-HEAD (task #4, 2026-05-24) — standardize the
+    // per-ref-grouped pool with the SAME training-group scaler.
+    // Output `std_konjnd_agg_features` is flat (preserves the input
+    // ref_ranges layout); the training step indexes via ref_ranges.
+    let std_konjnd_agg_features: Vec<Vec<f64>> = if let (Some(ka), true) =
+        (konjnd_agg, konjnd_agg_active)
+    {
+        let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(ka.features.len());
+        for &f in ka.features.iter() {
+            let mut buf = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+            bufs.push(buf);
+        }
+        log_line(
+            &format!(
+                "konjnd-aggregation: ENABLED — '{}' rows={} refs={} S={} K={} step_p={:.3} weight={:.3}",
+                ka.name,
+                ka.features.len(),
+                ka.ref_ranges.len(),
+                hyperparams.konjnd_aggregation_samples_per_ref,
+                hyperparams.konjnd_aggregation_refs_per_step,
+                hyperparams.konjnd_aggregation_step_p,
+                hyperparams.konjnd_aggregation_weight,
+            ),
+            log,
+        );
+        bufs
+    } else {
+        if konjnd_agg.is_some() && !konjnd_agg_active {
+            log_line(
+                "konjnd-aggregation: data supplied but konjnd_aggregation_weight = 0 — ignored",
+                log,
+            );
+        }
+        Vec::new()
+    };
 
     // For 2-layer: heads use n_hidden_final, so init model with that.
     // For 1-layer: n_hidden_final == n_hidden, so unchanged.
@@ -5998,7 +5991,8 @@ fn train_mlp_per_sample_alpha_head(
             &format!(
                 "monotone_cbc: ENABLED — W1 per-feature mask: {n_pinned}/{n_features} pinned ≥0, \
                  {} {} ; w2_enc≥0, rank_w≤0, α≡1. Soft penalty (λ=1) + final projection at bake.",
-                n_features - n_pinned, mode,
+                n_features - n_pinned,
+                mode,
             ),
             log,
         );
@@ -6019,8 +6013,7 @@ fn train_mlp_per_sample_alpha_head(
     // "zero the 72 unpinned at bake" branch is SUPPRESSED — the 72
     // stay free at bake too, matching the train-time treatment
     // (#39 followup #2).
-    let strict_drop_unpinned_at_bake = monotone_strict
-        && !hyperparams.monotone_pin_during_training;
+    let strict_drop_unpinned_at_bake = monotone_strict && !hyperparams.monotone_pin_during_training;
     let proj_w1_masked = |w: &[f64]| -> Vec<f64> {
         if !monotone_cbc {
             return w.to_vec();
@@ -6054,13 +6047,7 @@ fn train_mlp_per_sample_alpha_head(
             w.to_vec()
         }
     };
-    let proj_b_alpha_one = |b: f64| -> f64 {
-        if monotone_cbc {
-            30.0
-        } else {
-            b
-        }
-    };
+    let proj_b_alpha_one = |b: f64| -> f64 { if monotone_cbc { 30.0 } else { b } };
 
     // F32 weight scratch for arch_forward_f32 hot path. Refreshed at
     // the END of every do_adam_step (the only point where weights
@@ -6110,7 +6097,8 @@ fn train_mlp_per_sample_alpha_head(
         w1_concat.extend_from_slice(w2_enc);
         w1_concat.extend_from_slice(w_skip);
 
-        let mut b1_concat: Vec<f64> = Vec::with_capacity(b1.len() + b2_enc.len() + if !w_skip.is_empty() { 1 } else { 0 });
+        let mut b1_concat: Vec<f64> =
+            Vec::with_capacity(b1.len() + b2_enc.len() + if !w_skip.is_empty() { 1 } else { 0 });
         b1_concat.extend_from_slice(b1);
         b1_concat.extend_from_slice(b2_enc);
         if !w_skip.is_empty() {
@@ -6157,8 +6145,7 @@ fn train_mlp_per_sample_alpha_head(
             // get the negative-side soft penalty (cheap nudge toward ≥0)
             // AND the hard-projection-after-step that the flag triggers
             // below.
-            let strict_drop_unpinned = monotone_strict
-                && !hyperparams.monotone_pin_during_training;
+            let strict_drop_unpinned = monotone_strict && !hyperparams.monotone_pin_during_training;
             for i in 0..w1_len {
                 let feat = i / n_hidden;
                 if feature_pin[feat] {
@@ -6291,21 +6278,21 @@ fn train_mlp_per_sample_alpha_head(
             let qrw = qat_quantize_copy(rank_w, qat_tau);
             let qwa = qat_quantize_copy(w_alpha, qat_tau);
             scratch_f32.borrow_mut().refresh(
-                &qw1, b1, &qw2, b2_enc, &qws, *b_skip,
-                &qrw, *rank_b, reducer_w, *reducer_b, &qwa, *b_alpha,
+                &qw1, b1, &qw2, b2_enc, &qws, *b_skip, &qrw, *rank_b, reducer_w, *reducer_b, &qwa,
+                *b_alpha,
             );
         } else {
             scratch_f32.borrow_mut().refresh(
-                w1, b1, w2_enc, b2_enc, w_skip, *b_skip,
-                rank_w, *rank_b, reducer_w, *reducer_b, w_alpha, *b_alpha,
+                w1, b1, w2_enc, b2_enc, w_skip, *b_skip, rank_w, *rank_b, reducer_w, *reducer_b,
+                w_alpha, *b_alpha,
             );
         }
     };
 
     // Initial cast (before any Adam step has fired).
     scratch_f32.borrow_mut().refresh(
-        &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
+        &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip, &rank_w, rank_b, &reducer_w, reducer_b,
+        &w_alpha, b_alpha,
     );
 
     let mut nin_buffer: Vec<Option<PerSampleAlphaPairForward<'_>>> = if nin_on {
@@ -6322,9 +6309,8 @@ fn train_mlp_per_sample_alpha_head(
                 g.metric_sigmas
                     .map(|sigmas| {
                         let mut sorted: Vec<f64> = sigmas.to_vec();
-                        sorted.sort_by(|a, b| {
-                            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                        });
+                        sorted
+                            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                         if sorted.is_empty() {
                             1.0
                         } else {
@@ -6402,16 +6388,30 @@ fn train_mlp_per_sample_alpha_head(
             let fwd_a = {
                 let s = scratch_f32.borrow();
                 arch_f32::arch_forward_f32(
-                    xa, &s, n_features, n_hidden, n_hidden_final,
-                    leaky as f32, use_2layer, use_skip,
-                ).to_archforward()
+                    xa,
+                    &s,
+                    n_features,
+                    n_hidden,
+                    n_hidden_final,
+                    leaky as f32,
+                    use_2layer,
+                    use_skip,
+                )
+                .to_archforward()
             };
             let fwd_b = {
                 let s = scratch_f32.borrow();
                 arch_f32::arch_forward_f32(
-                    xb, &s, n_features, n_hidden, n_hidden_final,
-                    leaky as f32, use_2layer, use_skip,
-                ).to_archforward()
+                    xb,
+                    &s,
+                    n_features,
+                    n_hidden,
+                    n_hidden_final,
+                    leaky as f32,
+                    use_2layer,
+                    use_skip,
+                )
+                .to_archforward()
             };
             let (ya, dya_dpre) = pin_forward(fwd_a.y);
             let (yb, dyb_dpre) = pin_forward(fwd_b.y);
@@ -6673,24 +6673,52 @@ fn train_mlp_per_sample_alpha_head(
             let mut g_b_alpha: f64 = 0.0;
 
             arch_backward(
-                xa, &fwd_a, dl_dya,
-                &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
-                &mut adam.gw1, &mut adam.gb1,
-                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                &mut g_red_w, &mut g_red_b,
-                &mut g_w_alpha_buf, &mut g_b_alpha,
-                n_features, n_hidden, n_hidden_final, leaky,
-                use_2layer, use_skip,
+                xa,
+                &fwd_a,
+                dl_dya,
+                &w1,
+                &w2_enc,
+                &rank_w,
+                &reducer_w,
+                &w_alpha,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha_buf,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden,
+                n_hidden_final,
+                leaky,
+                use_2layer,
+                use_skip,
             );
             arch_backward(
-                xb, &fwd_b, dl_dyb,
-                &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
-                &mut adam.gw1, &mut adam.gb1,
-                &mut g_rank_w_buf, &mut g_rank_b_buf,
-                &mut g_red_w, &mut g_red_b,
-                &mut g_w_alpha_buf, &mut g_b_alpha,
-                n_features, n_hidden, n_hidden_final, leaky,
-                use_2layer, use_skip,
+                xb,
+                &fwd_b,
+                dl_dyb,
+                &w1,
+                &w2_enc,
+                &rank_w,
+                &reducer_w,
+                &w_alpha,
+                &mut adam.gw1,
+                &mut adam.gb1,
+                &mut g_rank_w_buf,
+                &mut g_rank_b_buf,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha_buf,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden,
+                n_hidden_final,
+                leaky,
+                use_2layer,
+                use_skip,
             );
 
             if hyperparams.l2_lambda > 0.0 {
@@ -6779,10 +6807,25 @@ fn train_mlp_per_sample_alpha_head(
                                     .min(n_anchor - 1);
                                 let xa = std_anchor_features[ai].as_slice();
                                 let fwd_anc = arch_forward(
-                                    xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
-                                    b_alpha, n_features, n_hidden, n_hidden_final, leaky,
-                                    use_2layer, use_skip,
+                                    xa,
+                                    &w1,
+                                    &b1,
+                                    &w2_enc,
+                                    &b2_enc,
+                                    &w_skip,
+                                    b_skip,
+                                    &rank_w,
+                                    rank_b,
+                                    &reducer_w,
+                                    reducer_b,
+                                    &w_alpha,
+                                    b_alpha,
+                                    n_features,
+                                    n_hidden,
+                                    n_hidden_final,
+                                    leaky,
+                                    use_2layer,
+                                    use_skip,
                                 );
                                 let (ya, dya_dpre) = pin_forward(fwd_anc.y);
                                 let target = a
@@ -6798,14 +6841,28 @@ fn train_mlp_per_sample_alpha_head(
                                 n_steps += 1;
 
                                 arch_backward(
-                                    xa, &fwd_anc, dl_dy,
-                                    &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
-                                    &mut adam.gw1, &mut adam.gb1,
-                                    &mut g_rank_w_buf, &mut g_rank_b_buf,
-                                    &mut g_red_w, &mut g_red_b,
-                                    &mut g_w_alpha_buf, &mut g_b_alpha,
-                                    n_features, n_hidden, n_hidden_final, leaky,
-                                    use_2layer, use_skip,
+                                    xa,
+                                    &fwd_anc,
+                                    dl_dy,
+                                    &w1,
+                                    &w2_enc,
+                                    &rank_w,
+                                    &reducer_w,
+                                    &w_alpha,
+                                    &mut adam.gw1,
+                                    &mut adam.gb1,
+                                    &mut g_rank_w_buf,
+                                    &mut g_rank_b_buf,
+                                    &mut g_red_w,
+                                    &mut g_red_b,
+                                    &mut g_w_alpha_buf,
+                                    &mut g_b_alpha,
+                                    n_features,
+                                    n_hidden,
+                                    n_hidden_final,
+                                    leaky,
+                                    use_2layer,
+                                    use_skip,
                                 );
                                 any_step = true;
                             }
@@ -6884,9 +6941,8 @@ fn train_mlp_per_sample_alpha_head(
 
                             for _ in 0..k {
                                 let u_row = rng.next_f64_unit();
-                                let pi = pjnd_row_cdf
-                                    .partition_point(|&c| c < u_row)
-                                    .min(n_pjnd - 1);
+                                let pi =
+                                    pjnd_row_cdf.partition_point(|&c| c < u_row).min(n_pjnd - 1);
                                 let xa = std_pjnd_features[pi].as_slice();
                                 let (
                                     ya_pre,
@@ -6911,8 +6967,7 @@ fn train_mlp_per_sample_alpha_head(
                                 let err = ya - target;
                                 let scale = 2.0 * hyperparams.pjnd_passthrough_weight * row_w;
                                 let dl_dy = scale * err * dya_dpre;
-                                let loss =
-                                    hyperparams.pjnd_passthrough_weight * row_w * err * err;
+                                let loss = hyperparams.pjnd_passthrough_weight * row_w * err * err;
                                 total_loss += loss;
                                 n_steps += 1;
 
@@ -7018,8 +7073,7 @@ fn train_mlp_per_sample_alpha_head(
                     if let Some(ka) = konjnd_agg {
                         if !std_konjnd_agg_features.is_empty() && !ka.ref_ranges.is_empty() {
                             let n_refs = ka.ref_ranges.len();
-                            let s_per_ref =
-                                hyperparams.konjnd_aggregation_samples_per_ref.max(1);
+                            let s_per_ref = hyperparams.konjnd_aggregation_samples_per_ref.max(1);
                             let k_refs = hyperparams.konjnd_aggregation_refs_per_step.max(1);
                             let inv_s = 1.0 / (s_per_ref as f64);
                             let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
@@ -7069,10 +7123,25 @@ fn train_mlp_per_sample_alpha_head(
                                     let ri_global = row_start + off;
                                     let xa = std_konjnd_agg_features[ri_global].as_slice();
                                     let fwd_kah = arch_forward(
-                                        xa, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
-                                        b_alpha, n_features, n_hidden, n_hidden_final, leaky,
-                                        use_2layer, use_skip,
+                                        xa,
+                                        &w1,
+                                        &b1,
+                                        &w2_enc,
+                                        &b2_enc,
+                                        &w_skip,
+                                        b_skip,
+                                        &rank_w,
+                                        rank_b,
+                                        &reducer_w,
+                                        reducer_b,
+                                        &w_alpha,
+                                        b_alpha,
+                                        n_features,
+                                        n_hidden,
+                                        n_hidden_final,
+                                        leaky,
+                                        use_2layer,
+                                        use_skip,
                                     );
                                     let (ya, dya_dpre) = pin_forward(fwd_kah.y);
                                     sum_y += ya;
@@ -7091,8 +7160,8 @@ fn train_mlp_per_sample_alpha_head(
                                 let inv_s_actual = 1.0 / (s_actual as f64);
                                 let agg = sum_y * inv_s_actual;
                                 let err = agg - target;
-                                let scale = 2.0 * hyperparams.konjnd_aggregation_weight
-                                    * inv_s_actual;
+                                let scale =
+                                    2.0 * hyperparams.konjnd_aggregation_weight * inv_s_actual;
                                 let loss = hyperparams.konjnd_aggregation_weight * err * err;
                                 total_loss += loss;
                                 n_steps += 1;
@@ -7662,9 +7731,25 @@ fn train_mlp_per_sample_alpha_head(
                 while i < n && alpha_samples.len() < 512 {
                     let xi = &gfeats[i * n_features..(i + 1) * n_features];
                     let af_tmp = arch_forward(
-                        xi, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                        n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
+                        xi,
+                        &w1,
+                        &b1,
+                        &w2_enc,
+                        &b2_enc,
+                        &w_skip,
+                        b_skip,
+                        &rank_w,
+                        rank_b,
+                        &reducer_w,
+                        reducer_b,
+                        &w_alpha,
+                        b_alpha,
+                        n_features,
+                        n_hidden,
+                        n_hidden_final,
+                        leaky,
+                        use_2layer,
+                        use_skip,
                     );
                     alpha_samples.push(af_tmp.alpha);
                     i += step;
@@ -7686,9 +7771,23 @@ fn train_mlp_per_sample_alpha_head(
                         &std_features[gi],
                         g.features.len(),
                         n_features,
-                        &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                        n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
+                        &w1,
+                        &b1,
+                        &w2_enc,
+                        &b2_enc,
+                        &w_skip,
+                        b_skip,
+                        &rank_w,
+                        rank_b,
+                        &reducer_w,
+                        reducer_b,
+                        &w_alpha,
+                        b_alpha,
+                        n_hidden,
+                        n_hidden_final,
+                        leaky,
+                        use_2layer,
+                        use_skip,
                     );
                     let signed_preds: Vec<f64> = if mse_only {
                         preds.clone()
@@ -7704,46 +7803,57 @@ fn train_mlp_per_sample_alpha_head(
 
             // Anchor-based goal inputs: compute mean prediction on anchor
             // rows (for G2 JND check) and anchor Z-RMSE (for G8).
-            let (anchor_mean_pred, anchor_zrmse) = if anchor_active
-                && !std_anchor_features.is_empty()
-            {
-                let anchor_feats = &std_anchor_features;
-                let mut preds = Vec::with_capacity(anchor_feats.len());
-                for af in anchor_feats {
-                    let af_tmp = arch_forward(
-                        af, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                        n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
-                    );
-                    let (pinned, _) = pin_forward(af_tmp.y);
-                    preds.push(pinned);
-                }
-                let mean_p = preds.iter().sum::<f64>() / preds.len().max(1) as f64;
-                let zrmse = if let Some(ref a) = anchor {
-                    if a.row_weights.len() == preds.len() {
-                        crate::panel::z_rmse(&preds, a.row_weights)
+            let (anchor_mean_pred, anchor_zrmse) =
+                if anchor_active && !std_anchor_features.is_empty() {
+                    let anchor_feats = &std_anchor_features;
+                    let mut preds = Vec::with_capacity(anchor_feats.len());
+                    for af in anchor_feats {
+                        let af_tmp = arch_forward(
+                            af,
+                            &w1,
+                            &b1,
+                            &w2_enc,
+                            &b2_enc,
+                            &w_skip,
+                            b_skip,
+                            &rank_w,
+                            rank_b,
+                            &reducer_w,
+                            reducer_b,
+                            &w_alpha,
+                            b_alpha,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky,
+                            use_2layer,
+                            use_skip,
+                        );
+                        let (pinned, _) = pin_forward(af_tmp.y);
+                        preds.push(pinned);
+                    }
+                    let mean_p = preds.iter().sum::<f64>() / preds.len().max(1) as f64;
+                    let zrmse = if let Some(ref a) = anchor {
+                        if a.row_weights.len() == preds.len() {
+                            crate::panel::z_rmse(&preds, a.row_weights)
+                        } else {
+                            f64::NAN
+                        }
                     } else {
                         f64::NAN
-                    }
+                    };
+                    (
+                        Some(mean_p),
+                        if zrmse.is_finite() { Some(zrmse) } else { None },
+                    )
                 } else {
-                    f64::NAN
+                    (None, None)
                 };
-                (
-                    Some(mean_p),
-                    if zrmse.is_finite() { Some(zrmse) } else { None },
-                )
-            } else {
-                (None, None)
-            };
 
             let val_score = match hyperparams.validation_policy {
                 ValidationPolicy::Goals => {
-                    let gs = compute_goal_scores(
-                        &group_panels,
-                        groups,
-                        anchor_mean_pred,
-                        anchor_zrmse,
-                    );
+                    let gs =
+                        compute_goal_scores(&group_panels, groups, anchor_mean_pred, anchor_zrmse);
                     gs.aggregate()
                 }
                 _ => {
@@ -7788,8 +7898,11 @@ fn train_mlp_per_sample_alpha_head(
                 let gs = compute_goal_scores(&group_panels, groups, anchor_mean_pred, anchor_zrmse);
                 format!(
                     " | goals: g2={:.2} g5={:.2} g6={:.2} g7={:.2} g8={:.2}",
-                    gs.g2_jnd_anchor, gs.g5_hf_rank, gs.g6_mf_band_coverage,
-                    gs.g7_cid22_rank, gs.g8_zrmse
+                    gs.g2_jnd_anchor,
+                    gs.g5_hf_rank,
+                    gs.g6_mf_band_coverage,
+                    gs.g7_cid22_rank,
+                    gs.g8_zrmse
                 )
             } else {
                 String::new()
@@ -7809,9 +7922,9 @@ fn train_mlp_per_sample_alpha_head(
                     // monotone_cbc: hard-project the weights to exact signs
                     // before baking so the saved best-epoch bake is monotone-
                     // by-construction (no-op when monotone_cbc=false).
-                    let mut bake_w1      = proj_w1_masked(&w1);
-                    let mut bake_w2_enc  = proj_geq0(&w2_enc);
-                    let mut bake_rank_w  = proj_leq0(&rank_w);
+                    let mut bake_w1 = proj_w1_masked(&w1);
+                    let mut bake_w2_enc = proj_geq0(&w2_enc);
+                    let mut bake_rank_w = proj_leq0(&rank_w);
                     let mut bake_w_alpha = proj_w_alpha_zero(&w_alpha);
                     let bake_b_alpha = proj_b_alpha_one(b_alpha);
                     if qat_fine_tune_epochs > 0 {
@@ -7845,7 +7958,11 @@ fn train_mlp_per_sample_alpha_head(
                         &b2_enc,
                         n_hidden,
                         n_hidden_final,
-                        if tanh_pin_active { Some(tanh_scale) } else { None },
+                        if tanh_pin_active {
+                            Some(tanh_scale)
+                        } else {
+                            None
+                        },
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
                         None, // spline added post-training
@@ -7857,37 +7974,37 @@ fn train_mlp_per_sample_alpha_head(
                     // consume them yet. Use standard bake for now.
                     best_bake = Some(vec![0u8; 4]); // TODO: skip bake metadata
                 } else {
-                // monotone_cbc: hard-project the weights (single-layer path).
-                let bake_w1      = proj_w1_masked(&w1);
-                let bake_rank_w  = proj_leq0(&rank_w);
-                let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
-                let bake_b_alpha = proj_b_alpha_one(b_alpha);
-                let model = psah::PerSampleAlphaHeadModel {
-                    scaler_mean: scaler_mean.clone(),
-                    scaler_scale: scaler_scale.clone(),
-                    w1: bake_w1,
-                    b1: b1.clone(),
-                    rank_w: bake_rank_w,
-                    rank_b,
-                    reducer_w,
-                    reducer_b,
-                    w_alpha: bake_w_alpha,
-                    b_alpha: bake_b_alpha,
-                    n_hidden: n_hidden_final,
-                    n_features,
-                    leaky_alpha: hyperparams.leaky_alpha,
-                };
-                best_bake = Some(if tanh_pin_active {
-                    psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
-                        &model,
-                        tanh_scale,
-                        hyperparams.feature_transforms.as_deref(),
-                        hyperparams.feature_transform_params.as_deref(),
-                        None, // spline added post-training
-                    )
-                } else {
-                    psah::bake_per_sample_alpha_head_v3(&model)
-                });
+                    // monotone_cbc: hard-project the weights (single-layer path).
+                    let bake_w1 = proj_w1_masked(&w1);
+                    let bake_rank_w = proj_leq0(&rank_w);
+                    let bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+                    let bake_b_alpha = proj_b_alpha_one(b_alpha);
+                    let model = psah::PerSampleAlphaHeadModel {
+                        scaler_mean: scaler_mean.clone(),
+                        scaler_scale: scaler_scale.clone(),
+                        w1: bake_w1,
+                        b1: b1.clone(),
+                        rank_w: bake_rank_w,
+                        rank_b,
+                        reducer_w,
+                        reducer_b,
+                        w_alpha: bake_w_alpha,
+                        b_alpha: bake_b_alpha,
+                        n_hidden: n_hidden_final,
+                        n_features,
+                        leaky_alpha: hyperparams.leaky_alpha,
+                    };
+                    best_bake = Some(if tanh_pin_active {
+                        psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+                            &model,
+                            tanh_scale,
+                            hyperparams.feature_transforms.as_deref(),
+                            hyperparams.feature_transform_params.as_deref(),
+                            None, // spline added post-training
+                        )
+                    } else {
+                        psah::bake_per_sample_alpha_head_v3(&model)
+                    });
                 } // end else !use_2layer && !use_skip
             } else {
                 stale_epochs += hyperparams.log_every;
@@ -7935,7 +8052,7 @@ fn train_mlp_per_sample_alpha_head(
                 tanh_scale,
                 hyperparams.feature_transforms.as_deref(),
                 hyperparams.feature_transform_params.as_deref(),
-                        None, // spline added post-training
+                None, // spline added post-training
             )
         } else {
             psah::bake_per_sample_alpha_head_v3(&model)
@@ -7989,12 +8106,29 @@ fn train_mlp_per_sample_alpha_head(
             let mut sp_targets: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
             for (i, af) in std_anchor_features.iter().enumerate() {
                 let fwd = arch_forward(
-                    af, &sw1, &b1, &sw2, &b2_enc, &w_skip, b_skip,
-                    &srw, rank_b, &reducer_w, reducer_b, &swa, sba,
-                    n_features, n_hidden, n_hidden_final, leaky, use_2layer, use_skip,
+                    af,
+                    &sw1,
+                    &b1,
+                    &sw2,
+                    &b2_enc,
+                    &w_skip,
+                    b_skip,
+                    &srw,
+                    rank_b,
+                    &reducer_w,
+                    reducer_b,
+                    &swa,
+                    sba,
+                    n_features,
+                    n_hidden,
+                    n_hidden_final,
+                    leaky,
+                    use_2layer,
+                    use_skip,
                 );
                 let (pinned, _) = pin_forward(fwd.y);
-                let target = a.target_scores
+                let target = a
+                    .target_scores
                     .and_then(|ts| ts.get(i).copied())
                     .unwrap_or(hyperparams.anchor_target_score);
                 sp_preds.push(pinned);
@@ -8006,18 +8140,24 @@ fn train_mlp_per_sample_alpha_head(
             // distinct knots, non-monotone bin medians, etc.) without this
             // log we silently ship a bake with no dial calibration — issue
             // #40 (hidden=1 case) revealed this gap.
-            let (sp_min, sp_max) = sp_preds.iter().fold(
-                (f64::INFINITY, f64::NEG_INFINITY),
-                |(mn, mx), &v| (mn.min(v), mx.max(v)),
-            );
-            let (st_min, st_max) = sp_targets.iter().fold(
-                (f64::INFINITY, f64::NEG_INFINITY),
-                |(mn, mx), &v| (mn.min(v), mx.max(v)),
-            );
+            let (sp_min, sp_max) = sp_preds
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                    (mn.min(v), mx.max(v))
+                });
+            let (st_min, st_max) = sp_targets
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                    (mn.min(v), mx.max(v))
+                });
             log_line(
                 &format!(
                     "output calibration spline: anchor n={} pred [{:.4}, {:.4}] target [{:.4}, {:.4}]",
-                    sp_preds.len(), sp_min, sp_max, st_min, st_max
+                    sp_preds.len(),
+                    sp_min,
+                    sp_max,
+                    st_min,
+                    st_max
                 ),
                 log,
             );
@@ -8044,9 +8184,9 @@ fn train_mlp_per_sample_alpha_head(
                 // monotone_cbc: project here too — the final spline-augmented
                 // bake must be monotone-by-construction (spline is monotone,
                 // so the network must be).
-                let mut bake_w1      = proj_w1_masked(&w1);
-                let mut bake_w2_enc  = proj_geq0(&w2_enc);
-                let mut bake_rank_w  = proj_leq0(&rank_w);
+                let mut bake_w1 = proj_w1_masked(&w1);
+                let mut bake_w2_enc = proj_geq0(&w2_enc);
+                let mut bake_rank_w = proj_leq0(&rank_w);
                 let mut bake_w_alpha = proj_w_alpha_zero(&w_alpha);
                 let bake_b_alpha = proj_b_alpha_one(b_alpha);
                 if qat_fine_tune_epochs > 0 {
@@ -8075,9 +8215,16 @@ fn train_mlp_per_sample_alpha_head(
                 };
                 let rebaked = if use_2layer {
                     psah::bake_per_sample_alpha_head_v3_2layer(
-                        &model, &bake_w2_enc, &b2_enc,
-                        n_hidden, n_hidden_final,
-                        if tanh_pin_active { Some(tanh_scale) } else { None },
+                        &model,
+                        &bake_w2_enc,
+                        &b2_enc,
+                        n_hidden,
+                        n_hidden_final,
+                        if tanh_pin_active {
+                            Some(tanh_scale)
+                        } else {
+                            None
+                        },
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
                         Some(&payload),
@@ -8085,7 +8232,8 @@ fn train_mlp_per_sample_alpha_head(
                     )
                 } else if tanh_pin_active {
                     psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
-                        &model, tanh_scale,
+                        &model,
+                        tanh_scale,
                         hyperparams.feature_transforms.as_deref(),
                         hyperparams.feature_transform_params.as_deref(),
                         Some(&payload),
@@ -8095,7 +8243,10 @@ fn train_mlp_per_sample_alpha_head(
                     return bake_bytes;
                 };
                 log_line(
-                    &format!("re-baked with output calibration spline ({} bytes)", rebaked.len()),
+                    &format!(
+                        "re-baked with output calibration spline ({} bytes)",
+                        rebaked.len()
+                    ),
                     log,
                 );
                 return rebaked;
@@ -8147,9 +8298,25 @@ fn predict_group_per_sample_alpha_head(
         .map(|i| {
             let xi = &std_x[i * n_features..(i + 1) * n_features];
             let af_tmp = arch_forward(
-                xi, w1, b1, w2_enc, b2_enc, w_skip, b_skip,
-                rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha,
-                n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                xi,
+                w1,
+                b1,
+                w2_enc,
+                b2_enc,
+                w_skip,
+                b_skip,
+                rank_w,
+                rank_b,
+                reducer_w,
+                reducer_b,
+                w_alpha,
+                b_alpha,
+                n_features,
+                n_hidden1,
+                n_hidden_final,
+                leaky,
+                use_2layer,
+                use_skip,
             );
             af_tmp.y
         })
@@ -8161,7 +8328,7 @@ fn predict_group_per_sample_alpha_head(
 /// for the 2-layer encoder.
 mod arch;
 mod arch_f32;
-pub use arch::{ArchForward, arch_forward, arch_backward};
+pub use arch::{ArchForward, arch_backward, arch_forward};
 pub use arch_f32::{ArchForwardF32, WeightScratchF32, arch_forward_f32};
 
 /// NiN-aware flush for the per-sample α head. Computes NiN over the
@@ -8339,8 +8506,8 @@ fn flush_per_sample_alpha_nin_batch<F>(
 
     if steps_added > 0 {
         do_adam_step(
-            adam, w1, b1, w2_enc, b2_enc, w_skip, b_skip,
-            rank_w, rank_b, reducer_w, reducer_b, w_alpha, b_alpha, lr, n_hidden,
+            adam, w1, b1, w2_enc, b2_enc, w_skip, b_skip, rank_w, rank_b, reducer_w, reducer_b,
+            w_alpha, b_alpha, lr, n_hidden,
         );
         *n_steps += steps_added;
     }
@@ -8454,7 +8621,7 @@ mod tests {
                 name: "train".to_string(),
                 human_scores: &train_scores,
                 features: &train_refs,
-            metric_sigmas: None,
+                metric_sigmas: None,
                 train_weight: 1.0,
                 validation_weight: 0.0,
             },
@@ -8462,7 +8629,7 @@ mod tests {
                 name: "val".to_string(),
                 human_scores: &val_scores,
                 features: &val_refs,
-            metric_sigmas: None,
+                metric_sigmas: None,
                 train_weight: 0.0,
                 validation_weight: 1.0,
             },
@@ -9897,8 +10064,7 @@ mod tests {
             primary_features.push(vec![frac, -1.0 + 2.0 * frac, 0.0, 0.0]);
             primary_scores.push(0.5 + 0.5 * (-1.0 + 2.0 * frac));
         }
-        let primary_refs: Vec<&[f64]> =
-            primary_features.iter().map(|r| r.as_slice()).collect();
+        let primary_refs: Vec<&[f64]> = primary_features.iter().map(|r| r.as_slice()).collect();
         let groups = [TrainingGroup {
             name: "synthetic_primary".to_string(),
             human_scores: &primary_scores,
@@ -10012,10 +10178,8 @@ mod tests {
                 vec![f, -1.0 + 2.0 * f, 0.0, 0.0]
             })
             .collect();
-        let primary_scores: Vec<f64> =
-            primary_features.iter().map(|r| 0.5 + 0.5 * r[1]).collect();
-        let primary_refs: Vec<&[f64]> =
-            primary_features.iter().map(|r| r.as_slice()).collect();
+        let primary_scores: Vec<f64> = primary_features.iter().map(|r| 0.5 + 0.5 * r[1]).collect();
+        let primary_refs: Vec<&[f64]> = primary_features.iter().map(|r| r.as_slice()).collect();
         let groups = [TrainingGroup {
             name: "primary_disabled".to_string(),
             human_scores: &primary_scores,
@@ -10090,7 +10254,9 @@ mod tests {
         // pulling a test-only RNG into the validate crate.
         let mut state = 0x1234_5678_9abc_def0u64;
         let mut nxt = || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             // map to [-0.5, 0.5)
             ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.5
         };
@@ -10126,9 +10292,25 @@ mod tests {
             let mut sum_y = 0.0f64;
             for row in &rows {
                 let fwd = arch_forward(
-                    row, w1v, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                    &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                    n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                    row,
+                    w1v,
+                    &b1,
+                    &w2_enc,
+                    &b2_enc,
+                    &w_skip,
+                    b_skip,
+                    &rank_w,
+                    rank_b,
+                    &reducer_w,
+                    reducer_b,
+                    &w_alpha,
+                    b_alpha,
+                    n_features,
+                    n_hidden1,
+                    n_hidden_final,
+                    leaky,
+                    use_2layer,
+                    use_skip,
                 );
                 let (y, _) = pin(fwd.y);
                 sum_y += y;
@@ -10155,9 +10337,25 @@ mod tests {
         let mut sum_y = 0.0f64;
         for row in &rows {
             let fwd = arch_forward(
-                row, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip,
-                &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                row,
+                &w1,
+                &b1,
+                &w2_enc,
+                &b2_enc,
+                &w_skip,
+                b_skip,
+                &rank_w,
+                rank_b,
+                &reducer_w,
+                reducer_b,
+                &w_alpha,
+                b_alpha,
+                n_features,
+                n_hidden1,
+                n_hidden_final,
+                leaky,
+                use_2layer,
+                use_skip,
             );
             let (y, dya_dpre) = pin(fwd.y);
             sum_y += y;
@@ -10170,10 +10368,28 @@ mod tests {
         for (i, (dya_dpre, fwd)) in cache.iter().enumerate() {
             let dl_dy = scale * err * dya_dpre;
             arch_backward(
-                &rows[i], fwd, dl_dy, &w1, &w2_enc, &rank_w, &reducer_w, &w_alpha,
-                &mut gw1, &mut gb1, &mut g_rank_w, &mut g_rank_b,
-                &mut g_red_w, &mut g_red_b, &mut g_w_alpha, &mut g_b_alpha,
-                n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                &rows[i],
+                fwd,
+                dl_dy,
+                &w1,
+                &w2_enc,
+                &rank_w,
+                &reducer_w,
+                &w_alpha,
+                &mut gw1,
+                &mut gb1,
+                &mut g_rank_w,
+                &mut g_rank_b,
+                &mut g_red_w,
+                &mut g_red_b,
+                &mut g_w_alpha,
+                &mut g_b_alpha,
+                n_features,
+                n_hidden1,
+                n_hidden_final,
+                leaky,
+                use_2layer,
+                use_skip,
             );
         }
 
@@ -10196,9 +10412,25 @@ mod tests {
                 let mut sum_y = 0.0f64;
                 for row in &rows {
                     let fwd = arch_forward(
-                        row, &w1, &b1, w2v, &b2_enc, &w_skip, b_skip,
-                        &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha,
-                        n_features, n_hidden1, n_hidden_final, leaky, use_2layer, use_skip,
+                        row,
+                        &w1,
+                        &b1,
+                        w2v,
+                        &b2_enc,
+                        &w_skip,
+                        b_skip,
+                        &rank_w,
+                        rank_b,
+                        &reducer_w,
+                        reducer_b,
+                        &w_alpha,
+                        b_alpha,
+                        n_features,
+                        n_hidden1,
+                        n_hidden_final,
+                        leaky,
+                        use_2layer,
+                        use_skip,
                     );
                     let (y, _) = pin(fwd.y);
                     sum_y += y;
@@ -10343,10 +10575,7 @@ mod tests {
     #[test]
     fn psah_nan_transform_sweep_catches_poison() {
         use zenpredict::FeatureTransform;
-        let rows = vec![
-            vec![0.0, 1.0, 2.0],
-            vec![0.0, 0.5, 1.5],
-        ];
+        let rows = vec![vec![0.0, 1.0, 2.0], vec![0.0, 0.5, 1.5]];
         let transforms = vec![
             FeatureTransform::Identity,
             FeatureTransform::Identity,
@@ -10407,7 +10636,10 @@ mod tests {
         assert!(!bake.is_empty());
         // Goals policy should produce a goals breakdown in the log.
         let has_goals = log.iter().any(|l| l.contains("goals:"));
-        assert!(has_goals, "expected 'goals:' in log with --val-policy goals");
+        assert!(
+            has_goals,
+            "expected 'goals:' in log with --val-policy goals"
+        );
     }
 
     #[test]
@@ -10479,7 +10711,10 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         assert!(!bake.is_empty(), "2-layer variant produced empty bake");
         assert!(
@@ -10516,7 +10751,10 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         assert!(!bake.is_empty(), "skip variant produced empty bake");
     }
@@ -10550,7 +10788,10 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         assert!(!bake.is_empty(), "2-layer+skip produced empty bake");
     }

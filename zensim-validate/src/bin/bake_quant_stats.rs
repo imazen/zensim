@@ -93,8 +93,8 @@ fn pick_l0_index(model: &Model) -> Option<usize> {
     let layers: Vec<_> = model.layers().collect();
     for (idx, l) in layers.iter().enumerate() {
         if l.in_dim == n_in {
-            let is_passthrough = l.in_dim == l.out_dim
-                && matches!(l.activation, zenpredict::Activation::Identity);
+            let is_passthrough =
+                l.in_dim == l.out_dim && matches!(l.activation, zenpredict::Activation::Identity);
             if !is_passthrough {
                 return Some(idx);
             }
@@ -436,7 +436,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(OUT_DIR)?;
 
     let bakes = discover_bakes(&weights_dir);
-    eprintln!("found {} .bin files under {}", bakes.len(), weights_dir.display());
+    eprintln!(
+        "found {} .bin files under {}",
+        bakes.len(),
+        weights_dir.display()
+    );
 
     let mut records: Vec<BakeRecord> = Vec::new();
     let mut all_features: Vec<FeatureRow> = Vec::new();
@@ -453,7 +457,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 all_features.extend(feats);
             }
             Err(e) => {
-                let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 eprintln!("  SKIP {}: {}", name, e);
                 skipped.push((name, e.to_string()));
             }
@@ -611,12 +619,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     s.push_str("## Method\n\n");
-    s.push_str("For each ZNPR v3 bake, the L0 layer (`in_dim == n_inputs`) is loaded. \
+    s.push_str(
+        "For each ZNPR v3 bake, the L0 layer (`in_dim == n_inputs`) is loaded. \
 For I8 bakes the per-feature zero count is the actual count of `weights[i, o] == 0` over \
 the `out_dim` output columns. For F32 / F16 bakes the **same** scheme \
 `scale[o] = max_i |W[i, o]| / 127.0; q = round(W[i, o] / scale[o]).clamp(-128, 127)` is \
 simulated on the f32 / f16 weights so f32 / f16 / i8 columns are comparable. \
-A feature is **fully_zeroed** when zero_fraction == 1.0, **mostly_zeroed** when ≥ 0.5.\n\n");
+A feature is **fully_zeroed** when zero_fraction == 1.0, **mostly_zeroed** when ≥ 0.5.\n\n",
+    );
 
     s.push_str("## Headline numbers\n\n");
     let total_features_seen: usize = records.iter().map(|r| r.total_features).sum();
@@ -639,7 +649,9 @@ A feature is **fully_zeroed** when zero_fraction == 1.0, **mostly_zeroed** when 
     ));
 
     s.push_str("## Per-bake totals\n\n");
-    s.push_str("| Bake | n_in | L0 dims | dtype | family | fully_zeroed | mostly_zeroed | L1_sum |\n");
+    s.push_str(
+        "| Bake | n_in | L0 dims | dtype | family | fully_zeroed | mostly_zeroed | L1_sum |\n",
+    );
     s.push_str("|---|---:|---|---|---|---:|---:|---:|\n");
     for r in &records {
         s.push_str(&format!(
@@ -667,7 +679,11 @@ fully-zeroed in more of the bakes that share its n_inputs.\n\n",
     by_zeroed.sort_by(|a, b| {
         b.n_fully_zeroed
             .cmp(&a.n_fully_zeroed)
-            .then(b.mean_zero_fraction.partial_cmp(&a.mean_zero_fraction).unwrap())
+            .then(
+                b.mean_zero_fraction
+                    .partial_cmp(&a.mean_zero_fraction)
+                    .unwrap(),
+            )
             .then(a.mean_importance.partial_cmp(&b.mean_importance).unwrap())
     });
     for row in by_zeroed.iter().take(30) {
@@ -693,10 +709,7 @@ ranked by mean importance (descending).\n\n",
     );
     s.push_str("| n_in | f | label | block | n_seen | mean_zero_frac | mean_imp |\n");
     s.push_str("|---:|---:|---|---|---:|---:|---:|\n");
-    let mut survivors: Vec<&AggRow> = agg_rows
-        .iter()
-        .filter(|r| r.n_fully_zeroed == 0)
-        .collect();
+    let mut survivors: Vec<&AggRow> = agg_rows.iter().filter(|r| r.n_fully_zeroed == 0).collect();
     survivors.sort_by(|a, b| b.mean_importance.partial_cmp(&a.mean_importance).unwrap());
     for row in survivors.iter().take(30) {
         s.push_str(&format!(
@@ -756,7 +769,10 @@ ranked by mean importance (descending).\n\n",
     // Add a specific note about v_tuner_v11 — the v0.3 ship — and its
     // "L0 dominator" feature f129.
     s.push_str("\n## Spot-check: v_tuner_v11_2026-05-24 (v0.3 ship)\n\n");
-    if let Some(v11) = records.iter().find(|r| r.name == "v_tuner_v11_2026-05-24.bin") {
+    if let Some(v11) = records
+        .iter()
+        .find(|r| r.name == "v_tuner_v11_2026-05-24.bin")
+    {
         s.push_str(&format!(
             "- dtype: `{}`, n_inputs: {}, L0: {}×{}\n",
             v11.dtype, v11.n_inputs, v11.layer_in_dim, v11.layer_out_dim
@@ -809,4 +825,3 @@ ranked by mean importance (descending).\n\n",
 
     Ok(())
 }
-

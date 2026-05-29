@@ -55,11 +55,7 @@ impl Rng {
 
 #[inline]
 fn softplus(x: f64) -> f64 {
-    if x > 20.0 {
-        x
-    } else {
-        (x.exp() + 1.0).ln()
-    }
+    if x > 20.0 { x } else { (x.exp() + 1.0).ln() }
 }
 #[inline]
 fn sigmoid(x: f64) -> f64 {
@@ -67,8 +63,8 @@ fn sigmoid(x: f64) -> f64 {
 }
 
 struct Model {
-    w1: Vec<f64>, // [NF*NH] row-major [feature][hidden]
-    b1: Vec<f64>, // [NH]
+    w1: Vec<f64>,      // [NF*NH] row-major [feature][hidden]
+    b1: Vec<f64>,      // [NH]
     theta_w: Vec<f64>, // [NH] → w_j = softplus
     theta_lam: f64,    // λ = softplus
     leaky: f64,
@@ -168,7 +164,11 @@ fn main() {
     // --- Load training groups (skip the 196k safesyn for probe speed) ---
     eprintln!("loading train groups…");
     let train_specs = [
-        (format!("{CANON}/cid22_train_norm.parquet"), "cid22_train", 1.5),
+        (
+            format!("{CANON}/cid22_train_norm.parquet"),
+            "cid22_train",
+            1.5,
+        ),
         (format!("{CANON}/kadid.parquet"), "kadid", 1.0),
         (format!("{CANON}/tid.parquet"), "tid", 1.0),
         (format!("{CANON}/konjnd-dense-norm.parquet"), "konjnd", 1.2),
@@ -350,8 +350,12 @@ fn main() {
                 let sp_l = sigmoid(m.theta_lam);
                 *gtl += ds * (-g_side * s) * sp_l;
             };
-            backprop_side(dsa, sa, &ha, &hpa, &rows[ia], &mut gw1, &mut gb1, &mut gtw, &mut gtl);
-            backprop_side(dsb, sb, &hb, &hpb, &rows[ib], &mut gw1, &mut gb1, &mut gtw, &mut gtl);
+            backprop_side(
+                dsa, sa, &ha, &hpa, &rows[ia], &mut gw1, &mut gb1, &mut gtw, &mut gtl,
+            );
+            backprop_side(
+                dsb, sb, &hb, &hpb, &rows[ib], &mut gw1, &mut gb1, &mut gtw, &mut gtl,
+            );
         }
 
         // Adam update
@@ -411,7 +415,10 @@ fn main() {
             let sr = spearman(&preds, &hs);
             let pmin = preds.iter().cloned().fold(f64::INFINITY, f64::min);
             let pmax = preds.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            eprintln!("  {name:8} SROCC={sr:.4}  score_range=[{pmin:.1}, {pmax:.1}]  n={}", hs.len());
+            eprintln!(
+                "  {name:8} SROCC={sr:.4}  score_range=[{pmin:.1}, {pmax:.1}]  n={}",
+                hs.len()
+            );
         }
     }
 
@@ -448,7 +455,12 @@ fn main() {
             }
         }
         let s: Vec<String> = scores.iter().map(|v| format!("{v:.1}")).collect();
-        eprintln!("  {c:13} [{}]  inversions={inv} above_identity={above}", s.join(" "));
+        eprintln!(
+            "  {c:13} [{}]  inversions={inv} above_identity={above}",
+            s.join(" ")
+        );
     }
-    eprintln!("\n(correct-by-axioms → 0 above_identity by construction; inversions>0 = A3 NOT guaranteed)");
+    eprintln!(
+        "\n(correct-by-axioms → 0 above_identity by construction; inversions>0 = A3 NOT guaranteed)"
+    );
 }

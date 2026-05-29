@@ -749,8 +749,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
     // Compute mean_offset while XYB planes are cache-hot
     let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
     let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
-    let mean_offset =
-        compute_xyb_mean_offset(src_view, dst_view, width, height, padded_width);
+    let mean_offset = compute_xyb_mean_offset(src_view, dst_view, width, height, padded_width);
 
     // Phase 2: Process all scales with band processing.
     let mut stats = Vec::with_capacity(num_scales);
@@ -1421,16 +1420,15 @@ fn process_strip_channel(
                 let inner_sig12 = &bufs.sigma12[inner_off..inner_off + inner_n];
 
                 if do_ext && do_iw {
-                    let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) =
-                        ssim_channel_inline_both(
-                            inner_mu1,
-                            inner_mu2,
-                            inner_sig_sq,
-                            inner_sig12,
-                            activity_inner,
-                            k,
-                            k_iw,
-                        );
+                    let ((sd_m, sd4_m, sd2_m), (sd_i, sd4_i, sd2_i)) = ssim_channel_inline_both(
+                        inner_mu1,
+                        inner_mu2,
+                        inner_sig_sq,
+                        inner_sig12,
+                        activity_inner,
+                        k,
+                        k_iw,
+                    );
                     accum.masked_ssim_d[c] += sd_m;
                     accum.masked_ssim_d4[c] += sd4_m;
                     accum.masked_ssim_d2[c] += sd2_m;
@@ -2222,7 +2220,11 @@ impl PrecomputedReference {
     ///
     /// The returned view's `ref_width` matches `self.ref_width`; its
     /// `ref_height` is set to the requested row count at scale 0.
-    pub(crate) fn slice_rows_view(&self, src_y0: usize, src_y1: usize) -> PrecomputedReferenceView<'_> {
+    pub(crate) fn slice_rows_view(
+        &self,
+        src_y0: usize,
+        src_y1: usize,
+    ) -> PrecomputedReferenceView<'_> {
         let mut scales = Vec::with_capacity(self.scales.len());
         for (scale_idx, (planes, plane_w, plane_h)) in self.scales.iter().enumerate() {
             let factor = 1usize << scale_idx;
@@ -2457,7 +2459,11 @@ pub(crate) fn compute_multiscale_stats_streaming_with_ref_borrowed(
         [0.0; 3]
     } else {
         let inv = 1.0 / pixel_count as f64;
-        [offset_sums[0] * inv, offset_sums[1] * inv, offset_sums[2] * inv]
+        [
+            offset_sums[0] * inv,
+            offset_sums[1] * inv,
+            offset_sums[2] * inv,
+        ]
     };
     (stats, mean_offset)
 }
@@ -2543,7 +2549,11 @@ pub(crate) fn compute_multiscale_accums_streaming_with_ref_borrowed<R: MultiScal
             let pc = width * height;
             let cn = pc as f64;
             (
-                [mean_offset[0] * cn, mean_offset[1] * cn, mean_offset[2] * cn],
+                [
+                    mean_offset[0] * cn,
+                    mean_offset[1] * cn,
+                    mean_offset[2] * cn,
+                ],
                 pc,
             )
         }
@@ -2694,7 +2704,12 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
             let strip_y1 = (inner_y1 + strip_margin).min(height);
             let inner_filter_strip_y0 = inner_y0 - strip_y0;
             let inner_filter_strip_y1 = inner_y1 - strip_y0;
-            Some((strip_y0, strip_y1, inner_filter_strip_y0, inner_filter_strip_y1))
+            Some((
+                strip_y0,
+                strip_y1,
+                inner_filter_strip_y0,
+                inner_filter_strip_y1,
+            ))
         })
         .collect();
 
@@ -2713,8 +2728,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
     let process_strip = |dst_planes: &mut [Vec<f32>; 3],
                          (strip_y0, strip_y1, fy0, fy1): (usize, usize, usize, usize)|
      -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
-        let dst_strip =
-            crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
+        let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
         // Zero-copy: borrow this strip's rows from the parent precomputed ref.
         // Eliminates the ~65 MB per-strip memcpy that the prior to_vec()-based
         // slicer incurred. See STREAMING_372_OPTIMIZATION_NOTES.md.
@@ -2771,8 +2785,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
         mean_offset_pixel_count += strip_pixel_count;
     }
 
-    let final_stats: Vec<ScaleStats> =
-        global_accums.iter().map(|a| a.finalize()).collect();
+    let final_stats: Vec<ScaleStats> = global_accums.iter().map(|a| a.finalize()).collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
     } else {
@@ -2864,29 +2877,24 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
     // a fresh PrecomputedReference per strip (this path doesn't have a
     // parent ref to slice from); Phase 4 of the plan eliminates that.
     let init_dst_scratch = || -> [Vec<f32>; 3] { std::array::from_fn(|_| Vec::new()) };
-    let process_strip = |dst_planes: &mut [Vec<f32>; 3],
-                         (strip_y0, strip_y1, fy0, fy1, _, _): (
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-    )|
-     -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
-        let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
-        let dst_strip = crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
-        let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
-        compute_multiscale_accums_streaming_with_ref_borrowed(
-            &precomp,
-            &dst_strip,
-            dst_planes,
-            &strip_config,
-            weights,
-            Some((fy0, fy1)),
-            Some((height, strip_y0)),
-        )
-    };
+    let process_strip =
+        |dst_planes: &mut [Vec<f32>; 3],
+         (strip_y0, strip_y1, fy0, fy1, _, _): (usize, usize, usize, usize, usize, usize)|
+         -> (Vec<ScaleAccumulators>, [f64; 3], usize) {
+            let src_strip = crate::source::SubsetView::new(source, strip_y0, strip_y1 - strip_y0);
+            let dst_strip =
+                crate::source::SubsetView::new(distorted, strip_y0, strip_y1 - strip_y0);
+            let precomp = PrecomputedReference::new(&src_strip, num_scales, false);
+            compute_multiscale_accums_streaming_with_ref_borrowed(
+                &precomp,
+                &dst_strip,
+                dst_planes,
+                &strip_config,
+                weights,
+                Some((fy0, fy1)),
+                Some((height, strip_y0)),
+            )
+        };
 
     // Per-strip results (collected, then merged).
     let parallel_strips = config.allow_multithreading && cfg!(feature = "threads");
@@ -2931,8 +2939,7 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
         mean_offset_pixel_count += strip_pixel_count;
     }
 
-    let final_stats: Vec<ScaleStats> =
-        global_accums.iter().map(|a| a.finalize()).collect();
+    let final_stats: Vec<ScaleStats> = global_accums.iter().map(|a| a.finalize()).collect();
     let final_mean_offset = if mean_offset_pixel_count == 0 {
         [0.0; 3]
     } else {
@@ -3524,7 +3531,11 @@ fn extract_pixel_normalized(
             // input formats via `is_supported_delta_format` before any
             // call into this extractor. If a new `PixelFormat` variant
             // lands without a matching arm here, update the guard too.
-            debug_assert!(false, "unsupported pixel format for delta stats: {:?}", format);
+            debug_assert!(
+                false,
+                "unsupported pixel format for delta stats: {:?}",
+                format
+            );
             ([0.0; 3], None)
         }
     }
@@ -3711,9 +3722,8 @@ mod tests {
 
         // Full-image stats.
         let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
-        let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
-            &precomp, &dst_img, &config, &weights,
-        );
+        let (full_stats, full_offset) =
+            compute_multiscale_stats_streaming_with_ref(&precomp, &dst_img, &config, &weights);
 
         // Strip-aggregated stats with strip_inner=64, margin=16
         // (4 strips of 64-row inner each).
@@ -3743,10 +3753,22 @@ mod tests {
         for (s, (full, strip)) in full_stats.iter().zip(strip_stats.iter()).enumerate() {
             for c in 0..3 {
                 let label = format!("scale {s} ch {c}");
-                close_enough(full.ssim[c * 2], strip.ssim[c * 2], &format!("{label} ssim mean"));
+                close_enough(
+                    full.ssim[c * 2],
+                    strip.ssim[c * 2],
+                    &format!("{label} ssim mean"),
+                );
                 close_enough(full.mse[c], strip.mse[c], &format!("{label} mse"));
-                close_enough(full.edge[c * 4], strip.edge[c * 4], &format!("{label} edge art"));
-                close_enough(full.edge[c * 4 + 2], strip.edge[c * 4 + 2], &format!("{label} edge det"));
+                close_enough(
+                    full.edge[c * 4],
+                    strip.edge[c * 4],
+                    &format!("{label} edge art"),
+                );
+                close_enough(
+                    full.edge[c * 4 + 2],
+                    strip.edge[c * 4 + 2],
+                    &format!("{label} edge det"),
+                );
             }
         }
 
@@ -3813,9 +3835,8 @@ mod tests {
         let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
 
         let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
-        let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
-            &precomp, &dst_img, &config, &weights,
-        );
+        let (full_stats, full_offset) =
+            compute_multiscale_stats_streaming_with_ref(&precomp, &dst_img, &config, &weights);
 
         let (strip_stats, strip_offset) = compute_multiscale_stats_streaming_strips(
             &src_img, &dst_img, &config, &weights, 256, 128,
@@ -3825,63 +3846,214 @@ mod tests {
 
         let mut worst_rel = 0.0f64;
         let mut worst_label = String::new();
-        let compare = |a: f64, b: f64, label: &str, worst_rel: &mut f64, worst_label: &mut String| {
-            let diff = (a - b).abs();
-            let scale = a.abs().max(b.abs()).max(1e-12);
-            let rel = diff / scale;
-            // Skip near-zero comparisons (no signal to compare).
-            if scale > 1e-6 && rel > *worst_rel {
-                *worst_rel = rel;
-                *worst_label = label.to_string();
-            }
-            assert!(
-                rel < 1e-6 || diff < 1e-9,
-                "{label}: full={a:.10} strip={b:.10} diff={diff:.2e} rel={rel:.2e}"
-            );
-        };
+        let compare =
+            |a: f64, b: f64, label: &str, worst_rel: &mut f64, worst_label: &mut String| {
+                let diff = (a - b).abs();
+                let scale = a.abs().max(b.abs()).max(1e-12);
+                let rel = diff / scale;
+                // Skip near-zero comparisons (no signal to compare).
+                if scale > 1e-6 && rel > *worst_rel {
+                    *worst_rel = rel;
+                    *worst_label = label.to_string();
+                }
+                assert!(
+                    rel < 1e-6 || diff < 1e-9,
+                    "{label}: full={a:.10} strip={b:.10} diff={diff:.2e} rel={rel:.2e}"
+                );
+            };
 
         for (s, (full, strip)) in full_stats.iter().zip(strip_stats.iter()).enumerate() {
             for c in 0..3 {
                 let lbl = |name: &str| format!("scale {s} ch {c} {name}");
-                compare(full.ssim[c * 2], strip.ssim[c * 2], &lbl("ssim_mean"), &mut worst_rel, &mut worst_label);
-                compare(full.ssim[c * 2 + 1], strip.ssim[c * 2 + 1], &lbl("ssim_4th"), &mut worst_rel, &mut worst_label);
-                compare(full.ssim_2nd[c], strip.ssim_2nd[c], &lbl("ssim_2nd"), &mut worst_rel, &mut worst_label);
+                compare(
+                    full.ssim[c * 2],
+                    strip.ssim[c * 2],
+                    &lbl("ssim_mean"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.ssim[c * 2 + 1],
+                    strip.ssim[c * 2 + 1],
+                    &lbl("ssim_4th"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.ssim_2nd[c],
+                    strip.ssim_2nd[c],
+                    &lbl("ssim_2nd"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
                 for k in 0..4 {
                     let names = ["art_mean", "art_4th", "det_mean", "det_4th"];
-                    compare(full.edge[c * 4 + k], strip.edge[c * 4 + k], &lbl(names[k]), &mut worst_rel, &mut worst_label);
+                    compare(
+                        full.edge[c * 4 + k],
+                        strip.edge[c * 4 + k],
+                        &lbl(names[k]),
+                        &mut worst_rel,
+                        &mut worst_label,
+                    );
                 }
-                compare(full.edge_2nd[c * 2], strip.edge_2nd[c * 2], &lbl("art_2nd"), &mut worst_rel, &mut worst_label);
-                compare(full.edge_2nd[c * 2 + 1], strip.edge_2nd[c * 2 + 1], &lbl("det_2nd"), &mut worst_rel, &mut worst_label);
-                compare(full.mse[c], strip.mse[c], &lbl("mse"), &mut worst_rel, &mut worst_label);
-                compare(full.hf_energy_loss[c], strip.hf_energy_loss[c], &lbl("hf_energy_loss"), &mut worst_rel, &mut worst_label);
-                compare(full.hf_mag_loss[c], strip.hf_mag_loss[c], &lbl("hf_mag_loss"), &mut worst_rel, &mut worst_label);
-                compare(full.hf_energy_gain[c], strip.hf_energy_gain[c], &lbl("hf_energy_gain"), &mut worst_rel, &mut worst_label);
-                compare(full.ssim_max[c], strip.ssim_max[c], &lbl("ssim_max"), &mut worst_rel, &mut worst_label);
-                compare(full.art_max[c], strip.art_max[c], &lbl("art_max"), &mut worst_rel, &mut worst_label);
-                compare(full.det_max[c], strip.det_max[c], &lbl("det_max"), &mut worst_rel, &mut worst_label);
-                compare(full.ssim_p95[c], strip.ssim_p95[c], &lbl("ssim_l8"), &mut worst_rel, &mut worst_label);
-                compare(full.art_p95[c], strip.art_p95[c], &lbl("art_l8"), &mut worst_rel, &mut worst_label);
-                compare(full.det_p95[c], strip.det_p95[c], &lbl("det_l8"), &mut worst_rel, &mut worst_label);
+                compare(
+                    full.edge_2nd[c * 2],
+                    strip.edge_2nd[c * 2],
+                    &lbl("art_2nd"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.edge_2nd[c * 2 + 1],
+                    strip.edge_2nd[c * 2 + 1],
+                    &lbl("det_2nd"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.mse[c],
+                    strip.mse[c],
+                    &lbl("mse"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.hf_energy_loss[c],
+                    strip.hf_energy_loss[c],
+                    &lbl("hf_energy_loss"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.hf_mag_loss[c],
+                    strip.hf_mag_loss[c],
+                    &lbl("hf_mag_loss"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.hf_energy_gain[c],
+                    strip.hf_energy_gain[c],
+                    &lbl("hf_energy_gain"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.ssim_max[c],
+                    strip.ssim_max[c],
+                    &lbl("ssim_max"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.art_max[c],
+                    strip.art_max[c],
+                    &lbl("art_max"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.det_max[c],
+                    strip.det_max[c],
+                    &lbl("det_max"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.ssim_p95[c],
+                    strip.ssim_p95[c],
+                    &lbl("ssim_l8"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.art_p95[c],
+                    strip.art_p95[c],
+                    &lbl("art_l8"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.det_p95[c],
+                    strip.det_p95[c],
+                    &lbl("det_l8"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
                 for k in 0..3 {
                     let names = ["masked_ssim_mean", "masked_ssim_4th", "masked_ssim_2nd"];
-                    compare(full.masked_ssim[c * 3 + k], strip.masked_ssim[c * 3 + k], &lbl(names[k]), &mut worst_rel, &mut worst_label);
+                    compare(
+                        full.masked_ssim[c * 3 + k],
+                        strip.masked_ssim[c * 3 + k],
+                        &lbl(names[k]),
+                        &mut worst_rel,
+                        &mut worst_label,
+                    );
                 }
-                compare(full.masked_art_4th[c], strip.masked_art_4th[c], &lbl("masked_art_4th"), &mut worst_rel, &mut worst_label);
-                compare(full.masked_det_4th[c], strip.masked_det_4th[c], &lbl("masked_det_4th"), &mut worst_rel, &mut worst_label);
-                compare(full.masked_mse[c], strip.masked_mse[c], &lbl("masked_mse"), &mut worst_rel, &mut worst_label);
+                compare(
+                    full.masked_art_4th[c],
+                    strip.masked_art_4th[c],
+                    &lbl("masked_art_4th"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.masked_det_4th[c],
+                    strip.masked_det_4th[c],
+                    &lbl("masked_det_4th"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.masked_mse[c],
+                    strip.masked_mse[c],
+                    &lbl("masked_mse"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
                 for k in 0..3 {
                     let names = ["iw_ssim_mean", "iw_ssim_4th", "iw_ssim_2nd"];
-                    compare(full.iw_ssim[c * 3 + k], strip.iw_ssim[c * 3 + k], &lbl(names[k]), &mut worst_rel, &mut worst_label);
+                    compare(
+                        full.iw_ssim[c * 3 + k],
+                        strip.iw_ssim[c * 3 + k],
+                        &lbl(names[k]),
+                        &mut worst_rel,
+                        &mut worst_label,
+                    );
                 }
-                compare(full.iw_art_4th[c], strip.iw_art_4th[c], &lbl("iw_art_4th"), &mut worst_rel, &mut worst_label);
-                compare(full.iw_det_4th[c], strip.iw_det_4th[c], &lbl("iw_det_4th"), &mut worst_rel, &mut worst_label);
-                compare(full.iw_mse[c], strip.iw_mse[c], &lbl("iw_mse"), &mut worst_rel, &mut worst_label);
+                compare(
+                    full.iw_art_4th[c],
+                    strip.iw_art_4th[c],
+                    &lbl("iw_art_4th"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.iw_det_4th[c],
+                    strip.iw_det_4th[c],
+                    &lbl("iw_det_4th"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
+                compare(
+                    full.iw_mse[c],
+                    strip.iw_mse[c],
+                    &lbl("iw_mse"),
+                    &mut worst_rel,
+                    &mut worst_label,
+                );
             }
         }
 
         for c in 0..3 {
             let lbl = format!("mean_offset[{c}]");
-            compare(full_offset[c], strip_offset[c], &lbl, &mut worst_rel, &mut worst_label);
+            compare(
+                full_offset[c],
+                strip_offset[c],
+                &lbl,
+                &mut worst_rel,
+                &mut worst_label,
+            );
         }
         eprintln!(
             "strip_aggregator_byte_exact_single_pair: worst rel = {:.3e} ({})",
@@ -3933,7 +4105,12 @@ mod tests {
         // Buffered ref path
         let full_precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
         let (b_stats, b_offset) = compute_multiscale_stats_streaming_strips_with_ref(
-            &full_precomp, &dst_img, &config, &weights, 256, 128,
+            &full_precomp,
+            &dst_img,
+            &config,
+            &weights,
+            256,
+            128,
         );
 
         for (s, (a, b)) in a_stats.iter().zip(b_stats.iter()).enumerate() {
@@ -3951,12 +4128,21 @@ mod tests {
                 check(a.ssim[c * 2 + 1], b.ssim[c * 2 + 1], "ssim_4th");
                 check(a.mse[c], b.mse[c], "mse");
                 check(a.iw_art_4th[c], b.iw_art_4th[c], "iw_art_4th");
-                check(a.masked_ssim[c * 3], b.masked_ssim[c * 3], "masked_ssim_mean");
+                check(
+                    a.masked_ssim[c * 3],
+                    b.masked_ssim[c * 3],
+                    "masked_ssim_mean",
+                );
             }
         }
         for c in 0..3 {
             let diff = (a_offset[c] - b_offset[c]).abs();
-            assert!(diff < 1e-9, "mean_offset[{c}]: per-strip={} buffered={}", a_offset[c], b_offset[c]);
+            assert!(
+                diff < 1e-9,
+                "mean_offset[{c}]: per-strip={} buffered={}",
+                a_offset[c],
+                b_offset[c]
+            );
         }
     }
 
@@ -4080,10 +4266,22 @@ mod tests {
                             let by = (y * 4) / h;
                             let idx = (by * 4 + bx + pair_idx) & 15;
                             let palette: [[u8; 3]; 16] = [
-                                [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0],
-                                [255, 0, 255], [0, 255, 255], [255, 128, 0], [128, 0, 255],
-                                [0, 128, 255], [255, 0, 128], [128, 255, 0], [0, 255, 128],
-                                [64, 0, 128], [128, 64, 0], [0, 128, 64], [192, 192, 64],
+                                [255, 0, 0],
+                                [0, 255, 0],
+                                [0, 0, 255],
+                                [255, 255, 0],
+                                [255, 0, 255],
+                                [0, 255, 255],
+                                [255, 128, 0],
+                                [128, 0, 255],
+                                [0, 128, 255],
+                                [255, 0, 128],
+                                [128, 255, 0],
+                                [0, 255, 128],
+                                [64, 0, 128],
+                                [128, 64, 0],
+                                [0, 128, 64],
+                                [192, 192, 64],
                             ];
                             let p = palette[idx];
                             (p[0], p[1], p[2])
@@ -4108,9 +4306,11 @@ mod tests {
                             // Constant + small dither
                             let dither = (((x.wrapping_mul(y)) ^ seed as usize) & 0x1F) as u8;
                             let base = (pair_idx as u8).wrapping_mul(7);
-                            (base.wrapping_add(dither),
-                             base.wrapping_sub(dither),
-                             base ^ dither)
+                            (
+                                base.wrapping_add(dither),
+                                base.wrapping_sub(dither),
+                                base ^ dither,
+                            )
                         }
                     };
                     src[y * w + x] = [r, g, b];
@@ -4119,18 +4319,38 @@ mod tests {
                     let dist_type = (pair_idx / 9) % 11;
                     let (dr, dg, db) = match dist_type {
                         0 => (r.saturating_add(2), g.saturating_sub(1), b),
-                        1 => (r.saturating_add(8), g.saturating_sub(4), b.saturating_add(2)),
-                        2 => (r ^ ((x & 1) as u8), g ^ ((y & 1) as u8), b ^ (((x + y) & 1) as u8)),
+                        1 => (
+                            r.saturating_add(8),
+                            g.saturating_sub(4),
+                            b.saturating_add(2),
+                        ),
+                        2 => (
+                            r ^ ((x & 1) as u8),
+                            g ^ ((y & 1) as u8),
+                            b ^ (((x + y) & 1) as u8),
+                        ),
                         3 => (r & 0xF0, g & 0xF0, b & 0xF0),
                         4 => (r & 0xE0 | 0x10, g & 0xE0 | 0x10, b & 0xE0 | 0x10),
                         5 => {
                             // Mild blur surrogate: average with neighbor
-                            let r2 = if x + 1 < w { src.get(y * w + x + 1).map(|p| p[0]).unwrap_or(r) } else { r };
+                            let r2 = if x + 1 < w {
+                                src.get(y * w + x + 1).map(|p| p[0]).unwrap_or(r)
+                            } else {
+                                r
+                            };
                             (((r as u16 + r2 as u16) / 2) as u8, g, b)
                         }
                         6 => (r.saturating_add(16), g, b.saturating_sub(8)),
-                        7 => (((r as u16 * 7 / 8) + 16) as u8, ((g as u16 * 7 / 8) + 16) as u8, ((b as u16 * 7 / 8) + 16) as u8),
-                        8 => (r.saturating_sub(1), g.saturating_add(1), b.saturating_sub(1)),
+                        7 => (
+                            ((r as u16 * 7 / 8) + 16) as u8,
+                            ((g as u16 * 7 / 8) + 16) as u8,
+                            ((b as u16 * 7 / 8) + 16) as u8,
+                        ),
+                        8 => (
+                            r.saturating_sub(1),
+                            g.saturating_add(1),
+                            b.saturating_sub(1),
+                        ),
                         9 => (r.wrapping_add((((x + y) & 7) as u8).wrapping_sub(3)), g, b),
                         _ => (r, g, b.saturating_add(((y & 7) as u8).wrapping_sub(3))),
                     };
@@ -4143,12 +4363,16 @@ mod tests {
 
             // Full path
             let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
-            let (full_stats, full_offset) = compute_multiscale_stats_streaming_with_ref(
-                &precomp, &dst_img, &config, &weights,
-            );
+            let (full_stats, full_offset) =
+                compute_multiscale_stats_streaming_with_ref(&precomp, &dst_img, &config, &weights);
             // Strip path
             let (strip_stats, strip_offset) = compute_multiscale_stats_streaming_strips(
-                &src_img, &dst_img, &config, &weights, strip_inner, strip_margin,
+                &src_img,
+                &dst_img,
+                &config,
+                &weights,
+                strip_inner,
+                strip_margin,
             );
 
             let mut compare = |a: f64, b: f64, lbl: &str| {
@@ -4175,40 +4399,145 @@ mod tests {
 
             for (s, (full, strip)) in full_stats.iter().zip(strip_stats.iter()).enumerate() {
                 for c in 0..3 {
-                    compare(full.ssim[c * 2], strip.ssim[c * 2], &format!("s{s} c{c} ssim_mean"));
-                    compare(full.ssim[c * 2 + 1], strip.ssim[c * 2 + 1], &format!("s{s} c{c} ssim_4th"));
-                    compare(full.ssim_2nd[c], strip.ssim_2nd[c], &format!("s{s} c{c} ssim_2nd"));
-                    for (k, name) in ["art_mean", "art_4th", "det_mean", "det_4th"].iter().enumerate() {
-                        compare(full.edge[c * 4 + k], strip.edge[c * 4 + k], &format!("s{s} c{c} {name}"));
+                    compare(
+                        full.ssim[c * 2],
+                        strip.ssim[c * 2],
+                        &format!("s{s} c{c} ssim_mean"),
+                    );
+                    compare(
+                        full.ssim[c * 2 + 1],
+                        strip.ssim[c * 2 + 1],
+                        &format!("s{s} c{c} ssim_4th"),
+                    );
+                    compare(
+                        full.ssim_2nd[c],
+                        strip.ssim_2nd[c],
+                        &format!("s{s} c{c} ssim_2nd"),
+                    );
+                    for (k, name) in ["art_mean", "art_4th", "det_mean", "det_4th"]
+                        .iter()
+                        .enumerate()
+                    {
+                        compare(
+                            full.edge[c * 4 + k],
+                            strip.edge[c * 4 + k],
+                            &format!("s{s} c{c} {name}"),
+                        );
                     }
-                    compare(full.edge_2nd[c * 2], strip.edge_2nd[c * 2], &format!("s{s} c{c} art_2nd"));
-                    compare(full.edge_2nd[c * 2 + 1], strip.edge_2nd[c * 2 + 1], &format!("s{s} c{c} det_2nd"));
+                    compare(
+                        full.edge_2nd[c * 2],
+                        strip.edge_2nd[c * 2],
+                        &format!("s{s} c{c} art_2nd"),
+                    );
+                    compare(
+                        full.edge_2nd[c * 2 + 1],
+                        strip.edge_2nd[c * 2 + 1],
+                        &format!("s{s} c{c} det_2nd"),
+                    );
                     compare(full.mse[c], strip.mse[c], &format!("s{s} c{c} mse"));
-                    compare(full.hf_energy_loss[c], strip.hf_energy_loss[c], &format!("s{s} c{c} hf_energy_loss"));
-                    compare(full.hf_mag_loss[c], strip.hf_mag_loss[c], &format!("s{s} c{c} hf_mag_loss"));
-                    compare(full.hf_energy_gain[c], strip.hf_energy_gain[c], &format!("s{s} c{c} hf_energy_gain"));
-                    compare(full.ssim_max[c], strip.ssim_max[c], &format!("s{s} c{c} ssim_max"));
-                    compare(full.art_max[c], strip.art_max[c], &format!("s{s} c{c} art_max"));
-                    compare(full.det_max[c], strip.det_max[c], &format!("s{s} c{c} det_max"));
-                    compare(full.ssim_p95[c], strip.ssim_p95[c], &format!("s{s} c{c} ssim_l8"));
-                    compare(full.art_p95[c], strip.art_p95[c], &format!("s{s} c{c} art_l8"));
-                    compare(full.det_p95[c], strip.det_p95[c], &format!("s{s} c{c} det_l8"));
-                    for (k, name) in ["masked_ssim_mean", "masked_ssim_4th", "masked_ssim_2nd"].iter().enumerate() {
-                        compare(full.masked_ssim[c * 3 + k], strip.masked_ssim[c * 3 + k], &format!("s{s} c{c} {name}"));
+                    compare(
+                        full.hf_energy_loss[c],
+                        strip.hf_energy_loss[c],
+                        &format!("s{s} c{c} hf_energy_loss"),
+                    );
+                    compare(
+                        full.hf_mag_loss[c],
+                        strip.hf_mag_loss[c],
+                        &format!("s{s} c{c} hf_mag_loss"),
+                    );
+                    compare(
+                        full.hf_energy_gain[c],
+                        strip.hf_energy_gain[c],
+                        &format!("s{s} c{c} hf_energy_gain"),
+                    );
+                    compare(
+                        full.ssim_max[c],
+                        strip.ssim_max[c],
+                        &format!("s{s} c{c} ssim_max"),
+                    );
+                    compare(
+                        full.art_max[c],
+                        strip.art_max[c],
+                        &format!("s{s} c{c} art_max"),
+                    );
+                    compare(
+                        full.det_max[c],
+                        strip.det_max[c],
+                        &format!("s{s} c{c} det_max"),
+                    );
+                    compare(
+                        full.ssim_p95[c],
+                        strip.ssim_p95[c],
+                        &format!("s{s} c{c} ssim_l8"),
+                    );
+                    compare(
+                        full.art_p95[c],
+                        strip.art_p95[c],
+                        &format!("s{s} c{c} art_l8"),
+                    );
+                    compare(
+                        full.det_p95[c],
+                        strip.det_p95[c],
+                        &format!("s{s} c{c} det_l8"),
+                    );
+                    for (k, name) in ["masked_ssim_mean", "masked_ssim_4th", "masked_ssim_2nd"]
+                        .iter()
+                        .enumerate()
+                    {
+                        compare(
+                            full.masked_ssim[c * 3 + k],
+                            strip.masked_ssim[c * 3 + k],
+                            &format!("s{s} c{c} {name}"),
+                        );
                     }
-                    compare(full.masked_art_4th[c], strip.masked_art_4th[c], &format!("s{s} c{c} masked_art_4th"));
-                    compare(full.masked_det_4th[c], strip.masked_det_4th[c], &format!("s{s} c{c} masked_det_4th"));
-                    compare(full.masked_mse[c], strip.masked_mse[c], &format!("s{s} c{c} masked_mse"));
-                    for (k, name) in ["iw_ssim_mean", "iw_ssim_4th", "iw_ssim_2nd"].iter().enumerate() {
-                        compare(full.iw_ssim[c * 3 + k], strip.iw_ssim[c * 3 + k], &format!("s{s} c{c} {name}"));
+                    compare(
+                        full.masked_art_4th[c],
+                        strip.masked_art_4th[c],
+                        &format!("s{s} c{c} masked_art_4th"),
+                    );
+                    compare(
+                        full.masked_det_4th[c],
+                        strip.masked_det_4th[c],
+                        &format!("s{s} c{c} masked_det_4th"),
+                    );
+                    compare(
+                        full.masked_mse[c],
+                        strip.masked_mse[c],
+                        &format!("s{s} c{c} masked_mse"),
+                    );
+                    for (k, name) in ["iw_ssim_mean", "iw_ssim_4th", "iw_ssim_2nd"]
+                        .iter()
+                        .enumerate()
+                    {
+                        compare(
+                            full.iw_ssim[c * 3 + k],
+                            strip.iw_ssim[c * 3 + k],
+                            &format!("s{s} c{c} {name}"),
+                        );
                     }
-                    compare(full.iw_art_4th[c], strip.iw_art_4th[c], &format!("s{s} c{c} iw_art_4th"));
-                    compare(full.iw_det_4th[c], strip.iw_det_4th[c], &format!("s{s} c{c} iw_det_4th"));
-                    compare(full.iw_mse[c], strip.iw_mse[c], &format!("s{s} c{c} iw_mse"));
+                    compare(
+                        full.iw_art_4th[c],
+                        strip.iw_art_4th[c],
+                        &format!("s{s} c{c} iw_art_4th"),
+                    );
+                    compare(
+                        full.iw_det_4th[c],
+                        strip.iw_det_4th[c],
+                        &format!("s{s} c{c} iw_det_4th"),
+                    );
+                    compare(
+                        full.iw_mse[c],
+                        strip.iw_mse[c],
+                        &format!("s{s} c{c} iw_mse"),
+                    );
                 }
             }
             for c in 0..3 {
-                compare(full_offset[c], strip_offset[c], &format!("mean_offset[{c}]"));
+                compare(
+                    full_offset[c],
+                    strip_offset[c],
+                    &format!("mean_offset[{c}]"),
+                );
             }
         }
 

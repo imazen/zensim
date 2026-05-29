@@ -50,14 +50,19 @@ pub fn dot_bias_f32(h: &[f32], w: &[f32], bias: f32) -> f32 {
 #[archmage::arcane]
 fn accumulate_rows_f32_v4(
     token: archmage::X64V4Token,
-    x: &[f32], w1: &[f32], h_pre: &mut [f32],
-    n_features: usize, n_hidden: usize,
+    x: &[f32],
+    w1: &[f32],
+    h_pre: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
 ) {
     let chunks = n_hidden / 16;
     let tail = chunks * 16;
     for i in 0..n_features {
         let s = x[i];
-        if s == 0.0 { continue; }
+        if s == 0.0 {
+            continue;
+        }
         let s_v = GenericF32x16::splat(token, s);
         let row = &w1[i * n_hidden..(i + 1) * n_hidden];
         for c in 0..chunks {
@@ -76,7 +81,11 @@ fn accumulate_rows_f32_v4(
 
 #[cfg(target_arch = "x86_64")]
 #[archmage::arcane]
-fn apply_leaky_relu_f32_v4(token: archmage::X64V4Token, h_pre: &[f32], leaky_alpha: f32) -> Vec<f32> {
+fn apply_leaky_relu_f32_v4(
+    token: archmage::X64V4Token,
+    h_pre: &[f32],
+    leaky_alpha: f32,
+) -> Vec<f32> {
     let mut h = vec![0.0f32; h_pre.len()];
     let chunks = h_pre.len() / 16;
     let tail = chunks * 16;
@@ -115,9 +124,13 @@ fn dot_product_f32_v4(token: archmage::X64V4Token, h: &[f32], w: &[f32]) -> f32 
     let mut lanes = [0.0f32; 16];
     acc.store(&mut lanes);
     let mut lane_sum = 0.0f32;
-    for &l in &lanes { lane_sum += l; }
+    for &l in &lanes {
+        lane_sum += l;
+    }
     let mut tail_sum = 0.0f32;
-    for j in tail..h.len() { tail_sum += h[j] * w[j]; }
+    for j in tail..h.len() {
+        tail_sum += h[j] * w[j];
+    }
     lane_sum + tail_sum
 }
 
@@ -129,14 +142,19 @@ fn dot_product_f32_v4(token: archmage::X64V4Token, h: &[f32], w: &[f32]) -> f32 
 #[archmage::arcane]
 fn accumulate_rows_f32_v3(
     token: archmage::X64V3Token,
-    x: &[f32], w1: &[f32], h_pre: &mut [f32],
-    n_features: usize, n_hidden: usize,
+    x: &[f32],
+    w1: &[f32],
+    h_pre: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
 ) {
     let chunks = n_hidden / 8;
     let tail = chunks * 8;
     for i in 0..n_features {
         let s = x[i];
-        if s == 0.0 { continue; }
+        if s == 0.0 {
+            continue;
+        }
         let s_v = GenericF32x8::splat(token, s);
         let row = &w1[i * n_hidden..(i + 1) * n_hidden];
         for c in 0..chunks {
@@ -147,13 +165,19 @@ fn accumulate_rows_f32_v3(
             let w_v = GenericF32x8::load(token, w_block);
             s_v.mul_add(w_v, h_v).store(h_block);
         }
-        for j in tail..n_hidden { h_pre[j] += s * row[j]; }
+        for j in tail..n_hidden {
+            h_pre[j] += s * row[j];
+        }
     }
 }
 
 #[cfg(target_arch = "x86_64")]
 #[archmage::arcane]
-fn apply_leaky_relu_f32_v3(token: archmage::X64V3Token, h_pre: &[f32], leaky_alpha: f32) -> Vec<f32> {
+fn apply_leaky_relu_f32_v3(
+    token: archmage::X64V3Token,
+    h_pre: &[f32],
+    leaky_alpha: f32,
+) -> Vec<f32> {
     let mut h = vec![0.0f32; h_pre.len()];
     let chunks = h_pre.len() / 8;
     let tail = chunks * 8;
@@ -191,10 +215,13 @@ fn dot_product_f32_v3(token: archmage::X64V3Token, h: &[f32], w: &[f32]) -> f32 
     }
     let mut lanes = [0.0f32; 8];
     acc.store(&mut lanes);
-    let lane_sum = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
+    let lane_sum = (lanes[0] + lanes[1])
+        + (lanes[2] + lanes[3])
         + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
     let mut tail_sum = 0.0f32;
-    for j in tail..h.len() { tail_sum += h[j] * w[j]; }
+    for j in tail..h.len() {
+        tail_sum += h[j] * w[j];
+    }
     lane_sum + tail_sum
 }
 
@@ -205,8 +232,11 @@ fn dot_product_f32_v3(token: archmage::X64V3Token, h: &[f32], w: &[f32]) -> f32 
 #[magetypes(neon, wasm128, scalar)]
 fn accumulate_rows_f32(
     token: Token,
-    x: &[f32], w1: &[f32], h_pre: &mut [f32],
-    n_features: usize, n_hidden: usize,
+    x: &[f32],
+    w1: &[f32],
+    h_pre: &mut [f32],
+    n_features: usize,
+    n_hidden: usize,
 ) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
@@ -214,7 +244,9 @@ fn accumulate_rows_f32(
     let tail = chunks * 8;
     for i in 0..n_features {
         let s = x[i];
-        if s == 0.0 { continue; }
+        if s == 0.0 {
+            continue;
+        }
         let s_v = f32x8::splat(token, s);
         let row = &w1[i * n_hidden..(i + 1) * n_hidden];
         for c in 0..chunks {
@@ -225,7 +257,9 @@ fn accumulate_rows_f32(
             let w_v = f32x8::load(token, w_block);
             s_v.mul_add(w_v, h_v).store(h_block);
         }
-        for j in tail..n_hidden { h_pre[j] += s * row[j]; }
+        for j in tail..n_hidden {
+            h_pre[j] += s * row[j];
+        }
     }
 }
 
@@ -271,10 +305,13 @@ fn dot_product_f32(token: Token, h: &[f32], w: &[f32]) -> f32 {
     }
     let mut lanes = [0.0f32; 8];
     acc.store(&mut lanes);
-    let lane_sum = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
+    let lane_sum = (lanes[0] + lanes[1])
+        + (lanes[2] + lanes[3])
         + ((lanes[4] + lanes[5]) + (lanes[6] + lanes[7]));
     let mut tail_sum = 0.0f32;
-    for j in tail..h.len() { tail_sum += h[j] * w[j]; }
+    for j in tail..h.len() {
+        tail_sum += h[j] * w[j];
+    }
     lane_sum + tail_sum
 }
 
@@ -343,8 +380,7 @@ pub fn encoder_forward_2layer_f32(
     leaky_alpha: f32,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     let (h1_pre, h1) = encoder_forward_f32(x, w1, b1, n_features, n_hidden1, leaky_alpha);
-    let (h2_pre, h2) =
-        encoder_forward_f32(&h1, w2, b2, n_hidden1, n_hidden2, leaky_alpha);
+    let (h2_pre, h2) = encoder_forward_f32(&h1, w2, b2, n_hidden1, n_hidden2, leaky_alpha);
     (h1_pre, h1, h2_pre, h2)
 }
 
@@ -401,12 +437,7 @@ pub fn skip_forward_f32(x: &[f32], w_skip: &[f32], b_skip: f32) -> f32 {
 /// Skip-connection backward (f32): accumulate `dl_dy_skip · x[i]` into
 /// `gw_skip[i]`, and `dl_dy_skip` into `*gb_skip`.
 #[inline]
-pub fn skip_backward_f32(
-    x: &[f32],
-    dl_dy_skip: f32,
-    gw_skip: &mut [f32],
-    gb_skip: &mut f32,
-) {
+pub fn skip_backward_f32(x: &[f32], dl_dy_skip: f32, gw_skip: &mut [f32], gb_skip: &mut f32) {
     for (g, &xi) in gw_skip.iter_mut().zip(x.iter()) {
         *g += dl_dy_skip * xi;
     }
@@ -616,11 +647,16 @@ mod tests {
 
     struct Xs32(u64);
     impl Xs32 {
-        fn new(seed: u64) -> Self { Self(seed | 1) }
+        fn new(seed: u64) -> Self {
+            Self(seed | 1)
+        }
         fn next_u64(&mut self) -> u64 {
             let mut x = self.0;
-            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
-            self.0 = x; x
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
         }
         fn next_unit(&mut self) -> f32 {
             (self.next_u64() as f64 / u64::MAX as f64 * 2.0 - 1.0) as f32
@@ -633,7 +669,15 @@ mod tests {
 
     fn random_sparse_f32(rng: &mut Xs32, n: usize, zero_frac: f64) -> Vec<f32> {
         let thresh = (2.0 * zero_frac - 1.0) as f32;
-        (0..n).map(|_| if rng.next_unit() < thresh { 0.0 } else { rng.next_unit() }).collect()
+        (0..n)
+            .map(|_| {
+                if rng.next_unit() < thresh {
+                    0.0
+                } else {
+                    rng.next_unit()
+                }
+            })
+            .collect()
     }
 
     #[test]
@@ -689,17 +733,16 @@ mod tests {
         let b2_64 = cast(&b2_32);
 
         let (h1_pre_32, h1_32, h2_pre_32, h2_32) = encoder_forward_2layer_f32(
-            &x32, &w1_32, &b1_32, &w2_32, &b2_32,
-            n_features, n_hidden1, n_hidden2, alpha32,
+            &x32, &w1_32, &b1_32, &w2_32, &b2_32, n_features, n_hidden1, n_hidden2, alpha32,
         );
         let (h1_pre_64, h1_64, h2_pre_64, h2_64) = simd_encoder::encoder_forward_2layer(
-            &x64, &w1_64, &b1_64, &w2_64, &b2_64,
-            n_features, n_hidden1, n_hidden2, alpha64,
+            &x64, &w1_64, &b1_64, &w2_64, &b2_64, n_features, n_hidden1, n_hidden2, alpha64,
         );
         // f32 forward must agree with f64 within f32 precision (sub-ulp drift
         // accumulates across the 47k+8k MAC chain; allow ~1e-3 relative).
         let max_rel_err = |a32: &[f32], a64: &[f64]| -> f64 {
-            a32.iter().zip(a64.iter())
+            a32.iter()
+                .zip(a64.iter())
                 .map(|(&a, &b)| ((a as f64) - b).abs() / b.abs().max(1e-6))
                 .fold(0.0_f64, f64::max)
         };
@@ -715,9 +758,20 @@ mod tests {
         let mut gb2_32 = vec![0.0f32; b2_32.len()];
         let dl_dh2_32 = random_vec_f32(&mut rng, n_hidden2);
         encoder_backprop_2layer_f32(
-            &x32, &h1_pre_32, &h1_32, &h2_pre_32, &dl_dh2_32, &w2_32,
-            &mut gw1_32, &mut gb1_32, &mut gw2_32, &mut gb2_32,
-            n_features, n_hidden1, n_hidden2, alpha32,
+            &x32,
+            &h1_pre_32,
+            &h1_32,
+            &h2_pre_32,
+            &dl_dh2_32,
+            &w2_32,
+            &mut gw1_32,
+            &mut gb1_32,
+            &mut gw2_32,
+            &mut gb2_32,
+            n_features,
+            n_hidden1,
+            n_hidden2,
+            alpha32,
         );
         let mut gw1_64 = vec![0.0f64; w1_64.len()];
         let mut gb1_64 = vec![0.0f64; b1_64.len()];
@@ -725,9 +779,20 @@ mod tests {
         let mut gb2_64 = vec![0.0f64; b2_64.len()];
         let dl_dh2_64 = cast(&dl_dh2_32);
         simd_encoder::encoder_backprop_2layer(
-            &x64, &h1_pre_64, &h1_64, &h2_pre_64, &dl_dh2_64, &w2_64,
-            &mut gw1_64, &mut gb1_64, &mut gw2_64, &mut gb2_64,
-            n_features, n_hidden1, n_hidden2, alpha64,
+            &x64,
+            &h1_pre_64,
+            &h1_64,
+            &h2_pre_64,
+            &dl_dh2_64,
+            &w2_64,
+            &mut gw1_64,
+            &mut gb1_64,
+            &mut gw2_64,
+            &mut gb2_64,
+            n_features,
+            n_hidden1,
+            n_hidden2,
+            alpha64,
         );
         let e_gw1 = max_rel_err(&gw1_32, &gw1_64);
         let e_gw2 = max_rel_err(&gw2_32, &gw2_64);
@@ -738,8 +803,8 @@ mod tests {
     #[test]
     #[ignore = "performance microbench"]
     fn encoder_f32_speedup_vs_f64() {
-        use std::time::Instant;
         use crate::simd_encoder;
+        use std::time::Instant;
         let n_features = 372;
         let n_hidden = 128;
         let n_iters = 5000;
@@ -751,22 +816,38 @@ mod tests {
         let w64: Vec<f64> = w32.iter().map(|&v| v as f64).collect();
         let b64: Vec<f64> = b32.iter().map(|&v| v as f64).collect();
 
-        for _ in 0..200 { std::hint::black_box(encoder_forward_f32(&x32, &w32, &b32, n_features, n_hidden, 0.01)); }
-        for _ in 0..200 { std::hint::black_box(simd_encoder::encoder_forward(&x64, &w64, &b64, n_features, n_hidden, 0.01)); }
+        for _ in 0..200 {
+            std::hint::black_box(encoder_forward_f32(
+                &x32, &w32, &b32, n_features, n_hidden, 0.01,
+            ));
+        }
+        for _ in 0..200 {
+            std::hint::black_box(simd_encoder::encoder_forward(
+                &x64, &w64, &b64, n_features, n_hidden, 0.01,
+            ));
+        }
 
         let t0 = Instant::now();
         for _ in 0..n_iters {
-            std::hint::black_box(simd_encoder::encoder_forward(&x64, &w64, &b64, n_features, n_hidden, 0.01));
+            std::hint::black_box(simd_encoder::encoder_forward(
+                &x64, &w64, &b64, n_features, n_hidden, 0.01,
+            ));
         }
         let f64_ns = t0.elapsed().as_nanos() as f64 / n_iters as f64;
 
         let t1 = Instant::now();
         for _ in 0..n_iters {
-            std::hint::black_box(encoder_forward_f32(&x32, &w32, &b32, n_features, n_hidden, 0.01));
+            std::hint::black_box(encoder_forward_f32(
+                &x32, &w32, &b32, n_features, n_hidden, 0.01,
+            ));
         }
         let f32_ns = t1.elapsed().as_nanos() as f64 / n_iters as f64;
 
-        eprintln!("encoder_forward @ 372×128:\n  f64: {:.2} µs\n  f32: {:.2} µs\n  speedup: {:.2}×",
-            f64_ns / 1e3, f32_ns / 1e3, f64_ns / f32_ns);
+        eprintln!(
+            "encoder_forward @ 372×128:\n  f64: {:.2} µs\n  f32: {:.2} µs\n  speedup: {:.2}×",
+            f64_ns / 1e3,
+            f32_ns / 1e3,
+            f64_ns / f32_ns
+        );
     }
 }

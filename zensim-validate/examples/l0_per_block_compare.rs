@@ -41,11 +41,7 @@ fn l0_importance(bake_path: &Path) -> Vec<f64> {
     let bytes = std::fs::read(bake_path).expect("read bake");
     let model = Model::from_bytes_with_schema(&bytes, 0).expect("parse bake");
     let n_inputs = model.n_inputs();
-    let scaler_scale: Vec<f64> = model
-        .scaler_scale()
-        .iter()
-        .map(|&s| s as f64)
-        .collect();
+    let scaler_scale: Vec<f64> = model.scaler_scale().iter().map(|&s| s as f64).collect();
     assert_eq!(scaler_scale.len(), n_inputs);
 
     // Layer 0 weights, dequantized to f32 if needed.
@@ -80,7 +76,11 @@ fn l0_importance(bake_path: &Path) -> Vec<f64> {
                         s * m * 2.0_f32.powi(-14)
                     } else if exp == 31 {
                         if mant == 0 {
-                            if sign == 0 { f32::INFINITY } else { f32::NEG_INFINITY }
+                            if sign == 0 {
+                                f32::INFINITY
+                            } else {
+                                f32::NEG_INFINITY
+                            }
                         } else {
                             f32::NAN
                         }
@@ -194,7 +194,9 @@ fn main() {
             std::fs::create_dir_all(parent).expect("mkdir");
         }
         let mut tsv = String::new();
-        tsv.push_str("block\tship_mass\tcand_mass\tdelta_abs\tship_share_pct\tcand_share_pct\tdelta_pp\n");
+        tsv.push_str(
+            "block\tship_mass\tcand_mass\tdelta_abs\tship_share_pct\tcand_share_pct\tdelta_pp\n",
+        );
         for (bi, b) in blocks.iter().enumerate() {
             let sp = ship_block[bi] / ship_total * 100.0;
             let cp = cand_block[bi] / cand_total * 100.0;

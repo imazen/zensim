@@ -978,9 +978,8 @@ pub fn bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
     // Build the feature_transforms text + transform_params text if
     // provided AND non-trivial. All-Identity transforms are equivalent
     // to absence, so skip the metadata in that case.
-    let nontrivial = feature_transforms.is_some_and(|ts| {
-        ts.iter().any(|&t| t != FeatureTransform::Identity)
-    });
+    let nontrivial =
+        feature_transforms.is_some_and(|ts| ts.iter().any(|&t| t != FeatureTransform::Identity));
 
     let transforms_text = if nontrivial {
         let ts = feature_transforms.unwrap();
@@ -1863,10 +1862,14 @@ mod tests {
         let b_alpha = nxt();
 
         let fwd = |hv: &[f64]| -> f64 {
-            forward_heads(hv, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha, nh).0
+            forward_heads(
+                hv, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha, nh,
+            )
+            .0
         };
-        let (_, y_rank, y_pool, alpha, _, stats, max_idx) =
-            forward_heads(&h, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha, nh);
+        let (_, y_rank, y_pool, alpha, _, stats, max_idx) = forward_heads(
+            &h, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha, b_alpha, nh,
+        );
         let mut g_rank_w = vec![0.0; nh];
         let mut g_rank_b = 0.0;
         let mut g_red_w = [0.0; 4];
@@ -1874,9 +1877,24 @@ mod tests {
         let mut g_w_alpha = vec![0.0; nh];
         let mut g_b_alpha = 0.0;
         let dl_dh = backprop_heads(
-            &h, &stats, max_idx, y_rank, y_pool, alpha, 1.0, &rank_w, &reducer_w, &w_alpha,
-            &mut g_rank_w, &mut g_rank_b, &mut g_red_w, &mut g_red_b, &mut g_w_alpha,
-            &mut g_b_alpha, nh, 0.01,
+            &h,
+            &stats,
+            max_idx,
+            y_rank,
+            y_pool,
+            alpha,
+            1.0,
+            &rank_w,
+            &reducer_w,
+            &w_alpha,
+            &mut g_rank_w,
+            &mut g_rank_b,
+            &mut g_red_w,
+            &mut g_red_b,
+            &mut g_w_alpha,
+            &mut g_b_alpha,
+            nh,
+            0.01,
         );
         // The forward computes in f32 (dot_bias casts f64→f32). A central
         // difference of an f32-valued forward is floor-limited: the rounding

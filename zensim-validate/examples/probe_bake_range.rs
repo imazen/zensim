@@ -6,7 +6,9 @@ use parquet::file::reader::{FileReader, SerializedFileReader};
 use zenpredict::{Model, Predictor};
 
 fn main() {
-    let bake = std::env::args().nth(1).expect("usage: probe_bake_range BAKE [PARQUET]");
+    let bake = std::env::args()
+        .nth(1)
+        .expect("usage: probe_bake_range BAKE [PARQUET]");
     let pq_path = std::env::args().nth(2).unwrap_or_else(|| {
         "/mnt/v/zen/zensim-training/2026-05-15-full-features/cid22_features_372col_2026-05-15.parquet".to_string()
     });
@@ -51,11 +53,19 @@ fn main() {
     let p = |frac: f64| sorted[((n as f64 - 1.0) * frac).floor() as usize];
     println!(
         "n={} pred range: p1={:.4} p25={:.4} p50={:.4} p75={:.4} p99={:.4} span={:.4}",
-        n, p(0.01), p(0.25), p(0.5), p(0.75), p(0.99), p(0.99) - p(0.01)
+        n,
+        p(0.01),
+        p(0.25),
+        p(0.5),
+        p(0.75),
+        p(0.99),
+        p(0.99) - p(0.01)
     );
-    println!("human_score range: min={:.4} max={:.4}",
+    println!(
+        "human_score range: min={:.4} max={:.4}",
         humans.iter().cloned().fold(f64::INFINITY, f64::min),
-        humans.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        humans.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+    );
     println!("First 10: pred,human");
     for i in 0..10.min(n) {
         println!("  {:.4}  {:.4}", preds[i], humans[i]);

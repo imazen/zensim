@@ -251,8 +251,7 @@ pub fn arch_forward_f32(
             );
             (h2p, h2v, h1p, h1v)
         } else {
-            let (hp, hv) =
-                encoder_forward_f32(x_f32, &s.w1, &s.b1, n_features, n_hidden1, leaky);
+            let (hp, hv) = encoder_forward_f32(x_f32, &s.w1, &s.b1, n_features, n_hidden1, leaky);
             (hp, hv, Vec::new(), Vec::new())
         };
 
@@ -288,7 +287,6 @@ pub fn arch_forward_f32(
         }
     })
 }
-
 
 // Thread-local f32 scratch for the per-pair feature cast (x: f64 → f32).
 // Reused across pair-steps per worker thread so the hot loop does no

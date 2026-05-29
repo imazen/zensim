@@ -352,11 +352,7 @@ fn bounded_score_squash(raw_distance: f64, a: f64, b: f64) -> f64 {
     // exp(−x) ∈ (0, 1]; ×100 ∈ (0, 100]. Finite for all finite x ≥ 0;
     // for x = +inf, exp(−inf) = 0. Defensive clamp catches NaN only.
     let s = 100.0 * (-exponent).exp();
-    if s.is_finite() {
-        s
-    } else {
-        0.0
-    }
+    if s.is_finite() { s } else { 0.0 }
 }
 
 /// Map a raw weighted distance to the quality score with custom parameters.
@@ -479,9 +475,17 @@ pub fn score_features_with_profile_and_codec(
             .sum();
         let raw_per_scale = raw_distance / params.num_scales.max(1) as f64;
         let score = if params.bounded_squash {
-            bounded_score_squash(raw_per_scale, params.score_mapping_a, params.score_mapping_b)
+            bounded_score_squash(
+                raw_per_scale,
+                params.score_mapping_a,
+                params.score_mapping_b,
+            )
         } else {
-            distance_to_score_mapped(raw_per_scale, params.score_mapping_a, params.score_mapping_b)
+            distance_to_score_mapped(
+                raw_per_scale,
+                params.score_mapping_a,
+                params.score_mapping_b,
+            )
         };
         // V0_1 / V0_2 are not on the extrapolate / soft-clamp paths
         // (their `ProfileParams` defaults are both `false`), so a hard
@@ -504,13 +508,7 @@ pub fn score_features_with_profile_and_codec(
     // `apply_mlp_scoring_with_codec` ensures every future calibration
     // tweak — ensemble routing, b3 mix, extrapolate-score — flows
     // through this entry point automatically.)
-    let mut result = ZensimResult::new(
-        f64::NAN,
-        f64::NAN,
-        features.to_vec(),
-        profile,
-        [0.0; 3],
-    );
+    let mut result = ZensimResult::new(f64::NAN, f64::NAN, features.to_vec(), profile, [0.0; 3]);
     apply_mlp_scoring_with_codec(&mut result, params, width, height, codec_hint)?;
     Ok(result.score())
 }
@@ -2088,13 +2086,7 @@ pub(crate) fn apply_mlp_scoring_with_codec(
                     codec_hint,
                 )?
             } else {
-                forward_one_bake_with_codec(
-                    loader(),
-                    result.features(),
-                    width,
-                    height,
-                    codec_hint,
-                )?
+                forward_one_bake_with_codec(loader(), result.features(), width, height, codec_hint)?
             }
         } else {
             let raw_primary = forward_one_bake_with_codec(
@@ -2438,8 +2430,7 @@ fn parse_per_codec_calibration(payload: &[u8]) -> Option<PerCodecCalibration> {
     if payload.len() < 4 {
         return None;
     }
-    let n_codecs =
-        u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
+    let n_codecs = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
     let mut off = 4usize;
     let mut entries: Vec<PerCodecAffineEntry> = Vec::with_capacity(n_codecs);
     for _ in 0..n_codecs {
@@ -2488,10 +2479,7 @@ fn parse_per_codec_calibration(payload: &[u8]) -> Option<PerCodecCalibration> {
 /// own name plus standard codec-family aliases). The metadata stores
 /// canonical names (e.g. "jpeg", "webp", "avif", "jxl"); aliases like
 /// "zenjpeg" / "mozjpeg" / "libjpeg" / "jpg" all map to "jpeg" etc.
-fn lookup_per_codec_affine(
-    cal: &PerCodecCalibration,
-    codec_hint: &str,
-) -> Option<(f32, f32)> {
+fn lookup_per_codec_affine(cal: &PerCodecCalibration, codec_hint: &str) -> Option<(f32, f32)> {
     let lower = codec_hint.to_ascii_lowercase();
     let canon: &str = match lower.as_str() {
         "jpeg" | "jpg" | "zenjpeg" | "mozjpeg" | "libjpeg" => "jpeg",

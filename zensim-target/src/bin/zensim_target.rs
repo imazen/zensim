@@ -94,9 +94,13 @@ fn parse_profile(s: &str) -> Result<ZensimProfile> {
         "balanced-v3" | "balanced_v3" | "v0_5_balanced_v3" | "preview-v0.5-balanced-v3" => {
             Ok(ZensimProfile::PreviewV0_5BalancedV3)
         }
-        "compression-v2" | "compression_v2" | "v0_5_compression_v2"
+        "compression-v2"
+        | "compression_v2"
+        | "v0_5_compression_v2"
         | "preview-v0.5-compression-v2" => Ok(ZensimProfile::PreviewV0_5CompressionV2),
-        "compression-v3" | "compression_v3" | "v0_5_compression_v3"
+        "compression-v3"
+        | "compression_v3"
+        | "v0_5_compression_v3"
         | "preview-v0.5-compression-v3" => Ok(ZensimProfile::PreviewV0_5CompressionV3),
         other => bail!(
             "unknown profile '{other}'; expected v0_2 | v0_3 | balanced | compression | ensemble | tuner | tuner-v2 | tuner-v3 | tuner-v4 | balanced-v2 | balanced-v3 | compression-v2 | compression-v3"
