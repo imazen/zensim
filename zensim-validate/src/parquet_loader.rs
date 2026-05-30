@@ -335,6 +335,13 @@ pub struct DialGrid {
     pub image_id: Vec<String>,
     pub codec: Vec<String>,
     pub q: Vec<f64>,
+    /// Native codec-config parameter: integer quality for q-codecs, or
+    /// butteraugli distance for distance-parameterized codecs (JXL).
+    /// Falls back to `q` if the parquet predates the column.
+    pub codec_param: Vec<f64>,
+    /// Per-row label for `codec_param`: "q" or "distance". Falls back to
+    /// "q" if the parquet predates the column.
+    pub param_kind: Vec<String>,
     pub feature_rows: Vec<Vec<f64>>,
     pub n_features: usize,
 }
@@ -354,6 +361,9 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
     let img_i = idx("image_id").ok_or_else(|| format!("{path:?}: missing image_id column"))?;
     let codec_i = idx("codec").ok_or_else(|| format!("{path:?}: missing codec column"))?;
     let q_i = idx("q").ok_or_else(|| format!("{path:?}: missing q column"))?;
+    // Optional native codec-param columns (added 2026-05-29). Fall back to q.
+    let cp_i = idx("codec_param");
+    let pk_i = idx("param_kind");
     let mut feat_idx = Vec::new();
     let mut fi = 0usize;
     while let Some(p) = idx(&format!("f{fi}")) {
@@ -393,6 +403,8 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
     let mut image_id = Vec::new();
     let mut codec = Vec::new();
     let mut q = Vec::new();
+    let mut codec_param = Vec::new();
+    let mut param_kind = Vec::new();
     let mut feature_rows = Vec::new();
     for batch_res in reader {
         let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
@@ -412,6 +424,19 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
             .ok_or_else(|| format!("{path:?}: codec not Utf8"))?;
         let q_v = col_f64(batch.column(q_i).as_ref(), n_rows)
             .map_err(|e| format!("{path:?}: q column {e}"))?;
+        // Native codec param: read codec_param column if present, else fall
+        // back to q (older grids). param_kind likewise defaults to "q".
+        let cp_v = match cp_i {
+            Some(i) => col_f64(batch.column(i).as_ref(), n_rows)
+                .map_err(|e| format!("{path:?}: codec_param column {e}"))?,
+            None => q_v.clone(),
+        };
+        let pk_v: Vec<String> = match pk_i.and_then(|i| {
+            batch.column(i).as_any().downcast_ref::<StringArray>()
+        }) {
+            Some(a) => (0..n_rows).map(|r| a.value(r).to_string()).collect(),
+            None => vec!["q".to_string(); n_rows],
+        };
         let per_col: Vec<Vec<f64>> = feat_idx
             .iter()
             .map(|&pi| col_f64(batch.column(pi).as_ref(), n_rows))
@@ -421,6 +446,8 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
             image_id.push(img_arr.value(r).to_string());
             codec.push(codec_arr.value(r).to_string());
             q.push(q_v[r]);
+            codec_param.push(cp_v[r]);
+            param_kind.push(pk_v[r].clone());
             feature_rows.push((0..n_features).map(|c| per_col[c][r]).collect());
         }
     }
@@ -428,6 +455,8 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
         image_id,
         codec,
         q,
+        codec_param,
+        param_kind,
         feature_rows,
         n_features,
     })

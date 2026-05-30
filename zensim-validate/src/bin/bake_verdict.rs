@@ -440,6 +440,61 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
             .push((grid.q[i], scores[i]));
     }
 
+    // Per-codec native-param extremes + dial score at the representable
+    // min/max codec config. `codec_param` is integer quality for q-codecs,
+    // butteraugli distance for JXL (`param_kind` labels which). We report
+    // the score at the LOWEST-quality and HIGHEST-quality representable
+    // config (note: for distance, HIGHER distance = LOWER quality), so the
+    // table shows the dial's reach at each codec's quality endpoints.
+    struct ParamExtremes {
+        kind: String,
+        lo_param: f64,
+        hi_param: f64,
+        // median score at the worst-quality and best-quality endpoints
+        score_at_worst: Vec<f64>,
+        score_at_best: Vec<f64>,
+    }
+    let mut pext: BTreeMap<String, ParamExtremes> = BTreeMap::new();
+    for c in grid.codec.iter() {
+        pext.entry(c.clone()).or_insert_with(|| ParamExtremes {
+            kind: "q".to_string(),
+            lo_param: f64::INFINITY,
+            hi_param: f64::NEG_INFINITY,
+            score_at_worst: Vec::new(),
+            score_at_best: Vec::new(),
+        });
+    }
+    for i in 0..scores.len() {
+        let e = pext.get_mut(&grid.codec[i]).unwrap();
+        e.kind = grid.param_kind[i].clone();
+        e.lo_param = e.lo_param.min(grid.codec_param[i]);
+        e.hi_param = e.hi_param.max(grid.codec_param[i]);
+    }
+    // second pass: collect scores at the param extremes per codec
+    for i in 0..scores.len() {
+        let e = pext.get_mut(&grid.codec[i]).unwrap();
+        let p = grid.codec_param[i];
+        // worst quality = highest distance OR lowest q; best = the opposite
+        let (worst_param, best_param) = if e.kind == "distance" {
+            (e.hi_param, e.lo_param)
+        } else {
+            (e.lo_param, e.hi_param)
+        };
+        if (p - worst_param).abs() <= 1e-9 {
+            e.score_at_worst.push(scores[i]);
+        }
+        if (p - best_param).abs() <= 1e-9 {
+            e.score_at_best.push(scores[i]);
+        }
+    }
+    let median = |v: &mut Vec<f64>| -> f64 {
+        if v.is_empty() {
+            return f64::NAN;
+        }
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v[v.len() / 2]
+    };
+
     // Per-curve adjacent-q analysis (strict decrease = violation, equal = tie),
     // plus per-codec aggregation.
     let mut tot_pairs = 0usize;
@@ -512,17 +567,42 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     s.push_str(&format!(
         "| G1 soft / G3 soft | {g1:.2} / {g3:.2} | (1.0 = full pass) | |\n\n"
     ));
-    s.push_str("Per-codec strict monotonicity / tied:\n\n");
-    s.push_str("| codec | n_curves | n_pairs | monotonicity | tied |\n|---|--:|--:|--:|--:|\n");
+    s.push_str("Per-codec strict monotonicity / tied + representable config range:\n\n");
+    s.push_str(
+        "| codec | param | min..max | n_curves | n_pairs | monotonicity | tied | score @worst→@best |\n",
+    );
+    s.push_str("|---|---|---|--:|--:|--:|--:|---|\n");
     for (codec, c) in &per_codec {
         let m = if c[0] > 0 { 1.0 - c[1] as f64 / c[0] as f64 } else { f64::NAN };
         let t = if c[0] > 0 { c[2] as f64 / c[0] as f64 } else { f64::NAN };
-        s.push_str(&format!("| {codec} | {} | {} | {m:.4} | {t:.4} |\n", c[3], c[0]));
+        let e = pext.get_mut(codec);
+        let (kind, range, dial) = match e {
+            Some(e) => {
+                let w = median(&mut e.score_at_worst);
+                let b = median(&mut e.score_at_best);
+                let rng = if e.kind == "distance" {
+                    // distance: report the full representable distance span
+                    format!("{:.2}..{:.2}", e.lo_param, e.hi_param)
+                } else {
+                    format!("{:.0}..{:.0}", e.lo_param, e.hi_param)
+                };
+                (e.kind.clone(), rng, format!("{w:.1} → {b:.1}"))
+            }
+            None => ("q".to_string(), "—".to_string(), "—".to_string()),
+        };
+        s.push_str(&format!(
+            "| {codec} | {kind} | {range} | {} | {} | {m:.4} | {t:.4} | {dial} |\n",
+            c[3], c[0]
+        ));
     }
     s.push_str(
-        "\n_Monotonicity = fraction of adjacent-q pairs without a strict score decrease; \
-         tied = fraction with equal score (dial dead-zones a binary search can't target). \
-         Densified grid: q0 + step-1 q90→100 + JND zone + jxl-in-butteraugli-distance._\n",
+        "\n_`param`/`min..max` = the native codec config axis and its representable range \
+         in the grid (integer quality for q-codecs; butteraugli distance for JXL — lower \
+         distance = higher quality). `score @worst→@best` = median dial score at the \
+         lowest- and highest-quality representable config (for distance, worst = max \
+         distance). Monotonicity = fraction of adjacent-q pairs without a strict score \
+         decrease; tied = fraction with equal score (dial dead-zones a binary search can't \
+         target). Densified grid: q0 + step-1 q90→100 + JND zone + jxl-in-butteraugli-distance._\n",
     );
     s
 }

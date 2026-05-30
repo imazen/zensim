@@ -77,7 +77,8 @@ def main():
             q = float(row["q"])
             feats = [float(row[f"feat_{i}"]) for i in range(372)]
             if all(np.isfinite(feats)):
-                merged_rows.append((img, fam, q, feats))
+                # codec_param = native quality; param_kind = "q"
+                merged_rows.append((img, fam, q, q, "q", feats))
 
     # JXL by distance (single dummy q=50, distance knob ladder)
     knob = json.dumps({"distance": JXL_DISTANCES})
@@ -97,27 +98,42 @@ def main():
             q_equiv = max(0.0, min(100.0, round(100.0 - 7.0 * float(d))))
             feats = [float(row[f"feat_{i}"]) for i in range(372)]
             if all(np.isfinite(feats)):
-                merged_rows.append((img, "jxl", q_equiv, feats))
+                # codec_param = native butteraugli distance; param_kind = "distance".
+                # q (monotone axis) = q_equiv so the sweep sorts by quality.
+                merged_rows.append((img, "jxl", q_equiv, float(d), "distance", feats))
 
     print(f"\nmerged valid rows: {len(merged_rows)}", file=sys.stderr)
     from collections import Counter
     print("  per-codec:", dict(Counter(r[1] for r in merged_rows)), file=sys.stderr)
 
-    # Emit features CSV (ref_basename, human_score=q, f0..f371) + manifest TSV
-    # (ref_path, dist_path, image_id, codec, q) in matching row order for qsweep_eval.
-    feat_csv = f"{OUTDIR}/expanded_features.csv"
-    manifest = f"{OUTDIR}/expanded_manifest.tsv"
-    with open(feat_csv, "w") as fc, open(manifest, "w") as mf:
-        fc.write("ref_basename,human_score," + ",".join(f"f{i}" for i in range(372)) + "\n")
-        mf.write("ref_path\tdist_path\timage_id\tcodec\tq\n")
-        for img, codec, q, feats in merged_rows:
-            fc.write(f"{img},{q}," + ",".join(f"{v:.6g}" for v in feats) + "\n")
-            mf.write(f"-\t-\t{img}\t{codec}\t{q}\n")
-    print(f"wrote {feat_csv} + {manifest}", file=sys.stderr)
-    print(f"\nNext: ./target/release/qsweep_eval --features {feat_csv} --manifest {manifest} \\", file=sys.stderr)
-    print(f"        --bake A_v47=zensim/weights/v47_strict_qat_native_2026-05-27.bin:clamp \\", file=sys.stderr)
-    print(f"        --bake Cell5=zensim/weights/v02_372feat_cell5_2026-05-28.bin:clamp \\", file=sys.stderr)
-    print(f"        --out {OUTDIR}/dialreach_expanded.md", file=sys.stderr)
+    # Consolidated dial-grid parquet (the canonical artifact bake_verdict reads):
+    # image_id, codec, q (monotone axis), codec_param (native q/distance),
+    # param_kind, f0..f371.
+    import pyarrow as pa
+    cols = {"image_id": [], "codec": [], "q": [], "codec_param": [], "param_kind": []}
+    for i in range(372):
+        cols[f"f{i}"] = []
+    for img, codec, q, param, kind, feats in merged_rows:
+        cols["image_id"].append(img); cols["codec"].append(codec)
+        cols["q"].append(float(q)); cols["codec_param"].append(float(param))
+        cols["param_kind"].append(kind)
+        for i in range(372):
+            cols[f"f{i}"].append(float(feats[i]))
+    sc = {}
+    for k, v in cols.items():
+        if k in ("image_id", "codec", "param_kind"):
+            sc[k] = pa.array(v)
+        elif k in ("q", "codec_param"):
+            sc[k] = pa.array(v, type=pa.float64())
+        else:
+            sc[k] = pa.array(v, type=pa.float32())
+    grid_out = f"{OUTDIR}/dial_grid_372col.parquet"
+    pq.write_table(pa.table(sc), grid_out, compression="zstd", compression_level=15)
+    print(f"wrote {grid_out} ({len(merged_rows)} rows)", file=sys.stderr)
+    print("Upload to R2 + point bake_verdict at it (--dial-grid / ZENSIM_DIAL_GRID):",
+          file=sys.stderr)
+    print("  aws s3 cp <grid> s3://zentrain/eval-grids/dial_grid_372col_<date>.parquet --endpoint-url <ep>",
+          file=sys.stderr)
 
 
 if __name__ == "__main__":

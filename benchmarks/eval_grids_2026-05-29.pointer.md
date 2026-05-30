@@ -9,7 +9,7 @@ emits the DIAL panel alongside the rank panel on every run. See
 
 | grid | rows | schema | purpose | bytes | sha256 |
 |---|--:|---|---|--:|---|
-| `dial_grid_372col_2026-05-29.parquet` | 3,230 | `image_id, codec, q, f0..f371` | DIAL panel — densified multi-codec q-sweep (q0 + step-1 q90→100 + JND zone + jxl-in-butter-distance) over JPEG/WebP/JXL/AVIF | 5,809,998 | `0fe14e82a3ef304a58709f28b4ad37ae0382cf394de989ede78e2aab84798de5` |
+| `dial_grid_372col_2026-05-29.parquet` | 3,230 | `image_id, codec, q, codec_param, param_kind, f0..f371` | DIAL panel — densified multi-codec q-sweep (q0 + step-1 q90→100 + JND zone + jxl-in-butter-distance) over JPEG/WebP/JXL/AVIF | 5,786,570 | `a749f81a3fc4bd177fc2e6af1475da5387ce075c20133fe23758ec009c9924a1` |
 | `corruption_grid_372col_2026-05-28.parquet` | 2,016 | `entry, f0..f371` | regression-gate rescoring — codec-corpus#7 structural corruption (gb82_dog × 44 families × region × severity × {corruption,q20,q10}) | 1,308,224 | `cff99045c375fd37...` |
 
 `entry` in the corruption grid encodes `<ref>__<family>__<region>__<severity>__<kind>`
