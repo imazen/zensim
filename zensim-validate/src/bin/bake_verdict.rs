@@ -430,15 +430,34 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         })
         .collect();
 
-    // Group rows into (image_id, codec) curves, carry (q, score).
+    // Group rows into (image_id, codec) curves, carrying (q, score, row_idx).
+    // row_idx lets us compare adjacent cells' feature vectors: when a codec
+    // SATURATES (e.g. zenjpeg/webp produce byte-identical encodes for q99.25
+    // vs q99.9), the features are identical and the bake MUST score them
+    // identically — that is the codec's quality ceiling, not a bake dead-zone,
+    // so it must not count against the bake's flat/clamp gate.
     use std::collections::BTreeMap;
-    let mut curves: BTreeMap<(String, String), Vec<(f64, f64)>> = BTreeMap::new();
+    let mut curves: BTreeMap<(String, String), Vec<(f64, f64, usize)>> = BTreeMap::new();
     for i in 0..scores.len() {
         curves
             .entry((grid.image_id[i].clone(), grid.codec[i].clone()))
             .or_default()
-            .push((grid.q[i], scores[i]));
+            .push((grid.q[i], scores[i], i));
     }
+    // Adjacent cells are "codec-saturated" when their 372-feature vectors are
+    // near-identical (the codec emitted the same image at two different q) —
+    // detected by L-inf distance below FEAT_EPS (small margin for GPU-extract
+    // ULP noise).
+    let feat_eq = |a: usize, b: usize| -> bool {
+        const FEAT_EPS: f64 = 1e-5;
+        let ra = &grid.feature_rows[a];
+        let rb = &grid.feature_rows[b];
+        ra.len() == rb.len()
+            && ra
+                .iter()
+                .zip(rb.iter())
+                .all(|(x, y)| (x - y).abs() <= FEAT_EPS)
+    };
 
     // Per-codec native-param extremes + dial score at the representable
     // min/max codec config. `codec_param` is integer quality for q-codecs,
@@ -495,23 +514,22 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         v[v.len() / 2]
     };
 
-    // Per-curve adjacent-q analysis. Three DISTINCT outcomes per pair as q
-    // (quality) rises: forward strict increase (good), tie (dead-zone), or
-    // INVERSION (score went backwards — the metric ranked higher quality
-    // lower). Inversions are reported separately from ties: a tie is a
-    // resolution gap, an inversion is an outright ranking error.
-    // Four DISTINCT outcomes per adjacent-q pair (as quality rises), so we
-    // don't conflate three different things the way a single threshold does:
-    //   1. forward      — Δ >  MATERIAL_INV : clear quality increase (good)
-    //   2. inversion    — Δ < -MATERIAL_INV : the dial ran BACKWARDS by a
-    //                       user-visible amount — a real ranking error. GATED.
-    //   3. flat/clamp   — |Δ| ≤ 1e-9        : literally identical output — a
-    //                       saturation/clamp dead-zone (what V0_5-Balanced
-    //                       suffered: 60% flat above q50). GATED.
-    //   4. sub-resolution — the rest (0 < |Δ| ≤ MATERIAL_INV) : the dial moved
-    //                       but by < half a score-point. EXPECTED on the
-    //                       densified near-lossless grid (adjacent configs are
-    //                       sub-JND apart); NOT a defect, NOT gated.
+    // FIVE mutually-exclusive outcomes per adjacent-q pair (as quality rises),
+    // so we never conflate a codec limitation, a metric dead-zone, sub-JND
+    // noise, and a real ranking error:
+    //   1. forward         — Δ >  MATERIAL_INV : clear quality increase (good)
+    //   2. inversion       — Δ < -MATERIAL_INV : dial ran BACKWARDS by a
+    //                          user-visible amount — a real ranking error. GATED.
+    //   3. codec-saturated — adjacent features near-identical : the CODEC emitted
+    //                          the same image at two different q (zenjpeg/webp
+    //                          quality ceiling). The bake MUST score identical
+    //                          inputs identically — NOT a bake defect, NOT gated.
+    //   4. flat/clamp      — features DIFFER but |Δ| ≤ 1e-9 : the bake collapsed
+    //                          distinct inputs to one score — a real metric
+    //                          dead-zone (what V0_5-Balanced suffered). GATED.
+    //   5. sub-resolution  — the rest (0 < |Δ| ≤ MATERIAL_INV, distinct features):
+    //                          dial moved < half a point. EXPECTED on the dense
+    //                          near-lossless grid (sub-JND configs); NOT gated.
     // MATERIAL_INV = 0.5 score-pt, below any user-targetable dial precision.
     const MATERIAL_INV: f64 = 0.5;
     // per-codec: [pairs, material_inversions, flat_clamp, n_curves]
@@ -519,7 +537,8 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     let mut tot_fwd = 0usize; // Δ > MATERIAL_INV — clear quality increase
     let mut tot_inv = 0usize; // strict (any backwards > 1e-9) — diagnostic
     let mut tot_inv_material = 0usize; // backwards by > MATERIAL_INV — gate
-    let mut tot_flat = 0usize; // |Δ| ≤ 1e-9 — clamp/saturation dead-zone — gate
+    let mut tot_flat = 0usize; // distinct features, |Δ| ≤ 1e-9 — metric dead-zone — gate
+    let mut tot_codec_sat = 0usize; // identical features — codec quality ceiling — not gated
     let mut tot_subres = 0usize; // 1e-9 < |Δ| ≤ MATERIAL_INV — expected oversampling
     let mut inv_mags: Vec<f64> = Vec::new(); // magnitudes of strict inversions
     let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
@@ -528,8 +547,8 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         let entry = per_codec.entry(codec.clone()).or_default();
         entry[3] += 1;
         for w in pts.windows(2) {
-            let (_, s0) = w[0];
-            let (_, s1) = w[1];
+            let (_, s0, i0) = w[0];
+            let (_, s1, i1) = w[1];
             tot_pairs += 1;
             entry[0] += 1;
             let delta = s1 - s0;
@@ -537,14 +556,16 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
                 tot_inv += 1; // strict backwards (diagnostic, all magnitudes)
                 inv_mags.push(-delta);
             }
-            // four mutually-exclusive buckets summing to tot_pairs:
+            // five mutually-exclusive buckets summing to tot_pairs:
             if delta > MATERIAL_INV {
                 tot_fwd += 1; // clear quality increase
             } else if delta < -MATERIAL_INV {
                 tot_inv_material += 1; // material backwards (gate)
                 entry[1] += 1;
+            } else if feat_eq(i0, i1) {
+                tot_codec_sat += 1; // codec emitted identical image — not the bake's fault
             } else if delta.abs() <= 1e-9 {
-                tot_flat += 1; // literal clamp/saturation dead-zone (gate)
+                tot_flat += 1; // distinct inputs, identical score — metric dead-zone (gate)
                 entry[2] += 1;
             } else {
                 tot_subres += 1; // 1e-9 < |Δ| ≤ MATERIAL_INV (expected; not gated)
@@ -579,6 +600,13 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     // dependent, not gated.
     let subres = if tot_pairs > 0 {
         tot_subres as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+    // codec-saturated pairs (adjacent features identical — codec quality
+    // ceiling) — informational, NOT gated against the bake.
+    let codec_sat = if tot_pairs > 0 {
+        tot_codec_sat as f64 / tot_pairs as f64
     } else {
         f64::NAN
     };
@@ -639,7 +667,10 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         "| ↳ backwards-step magnitude med / p90 | {inv_mag_med:.2} / {inv_mag_p90:.2} | score-pts | |\n"
     ));
     s.push_str(&format!(
-        "| flat / clamp dead-zone (\\|Δ\\|≤1e-9) | {flat:.4} | G3 ≤ 0.05 | {} |\n",
+        "| codec-saturated (identical encode) | {codec_sat:.4} | — (codec ceiling) | |\n"
+    ));
+    s.push_str(&format!(
+        "| flat / clamp dead-zone (distinct feats, \\|Δ\\|≤1e-9) | {flat:.4} | G3 ≤ 0.05 | {} |\n",
         if flat <= 0.05 { "✓" } else { "✗" }
     ));
     s.push_str(&format!(
@@ -689,15 +720,18 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
          lowest- and highest-quality representable config (for distance, worst = max \
          distance). **inversions** = fraction of adjacent-q pairs where the score went \
          BACKWARDS by more than 0.5 score-pt (higher quality scored materially lower — a \
-         real ranking error; the gated metric); **flat** = fraction with literally \
-         identical output (\\|Δ\\|≤1e-9 — a clamp/saturation dead-zone). The aggregate \
-         table additionally breaks out the strict (any-backwards) rate and the \
-         backwards-step magnitude distribution, plus a sub-resolution bucket (0<\\|Δ\\|≤0.5 \
-         pt) that is EXPECTED on the densified near-lossless grid (adjacent configs are \
-         sub-JND apart, so the dial correctly barely moves) and is NOT gated. monotonicity \
-         = 1 − inversions. Densified grid: q0 + step-1 \
-         q90→100 + JND zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step \
-         .05, 1→3 step .2, 13→25 step 2; q-equiv = 100 − 4·distance)._\n",
+         real ranking error; the gated metric); **flat** = distinct-feature pairs with \
+         identical output (\\|Δ\\|≤1e-9 — a metric dead-zone). Pairs where the CODEC emitted \
+         an identical image at two q (near-identical features — zenjpeg/webp quality \
+         ceiling) are split into a separate **codec-saturated** bucket and are NOT counted \
+         as a bake dead-zone. The aggregate table additionally breaks out the strict \
+         (any-backwards) rate and the backwards-step magnitude distribution, plus a \
+         sub-resolution bucket (0<\\|Δ\\|≤0.5 pt) that is EXPECTED on the densified \
+         near-lossless grid (adjacent configs are sub-JND apart, so the dial correctly \
+         barely moves) and is NOT gated. monotonicity = 1 − inversions. Densified grid: \
+         q0 + step-1 q90→100 + fractional near-lossless q for q-codecs (96.5..99.9) + JND \
+         zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step .05, 1→3 step .2, \
+         13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
     s
 }

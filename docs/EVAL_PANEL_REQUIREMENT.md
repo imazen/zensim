@@ -18,21 +18,26 @@ not held-out skill. The genuinely held-out corpora are **CID22 + AIC-3 + AIC-4**
 guards.
 
 ### 2. DIAL panel — densified multi-codec grid (native in `bake_verdict`)
-Per codec curve, every adjacent-quality step lands in ONE of **four
+Per codec curve, every adjacent-quality step lands in ONE of **five
 mutually-exclusive buckets** (they sum to 1) — so a real ranking error is
-never conflated with sub-JND noise or dense-grid oversampling, the
-codec-target axis (G1 dynamic range, G3 monotonicity, G4 cross-codec reach):
+never conflated with sub-JND noise, dense-grid oversampling, or a *codec*
+quality ceiling. The codec-target axis (G1 dynamic range, G3 monotonicity,
+G4 cross-codec reach):
 - **forward** — Δ > 0.5 score-pt: a clear, user-visible quality increase.
-- **forward sub-resolution** — 1e-9 < \|Δ\| ≤ 0.5 pt: the dial moved but by
-  less than half a score-point. **EXPECTED on the densified near-lossless
-  grid** (adjacent configs are sub-JND apart, so the dial correctly barely
-  moves) — informational, NOT gated.
+- **forward sub-resolution** — 1e-9 < \|Δ\| ≤ 0.5 pt (distinct features): the
+  dial moved but by less than half a score-point. **EXPECTED on the densified
+  near-lossless grid** (adjacent configs are sub-JND apart) — NOT gated.
 - **inversions** — Δ < −0.5 pt: the dial ran *backwards* by a user-visible
   amount. A real ranking bug (targeting "score 70" lands on the wrong
   config). **The gated metric; monotonicity = 1 − inversions.**
-- **flat / clamp** — \|Δ\| ≤ 1e-9: literally identical output — a
-  saturation/clamp dead-zone (what V0_5-Balanced suffered: 60% flat above
-  q50). Gated separately.
+- **codec-saturated** — adjacent features near-identical (L-inf < 1e-5): the
+  *codec* emitted the same image at two different q (zenjpeg/webp quality
+  ceiling — fractional q above ~q98 produces byte-identical encodes). The bake
+  MUST score identical inputs identically — this is the codec's limit, NOT a
+  bake defect, so it is **NOT gated against the bake**. Reported on its own line.
+- **flat / clamp** — features DIFFER but \|Δ\| ≤ 1e-9: the bake collapsed
+  distinct inputs to one score — a real metric dead-zone (what V0_5-Balanced
+  suffered: 60% flat above q50). Gated separately. (v47=0.000, Cell5=0.074.)
 
 **Why a 0.5pt material threshold:** the strict "any backwards > 1e-9" rate
 runs ~5% on a clean bake, but the median backwards step is ~0.3 pt — sub-JND
