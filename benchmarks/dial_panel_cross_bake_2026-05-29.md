@@ -15,23 +15,47 @@ ZENSIM_DIAL_GRID=/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_20
   ./target/release/bake_verdict --bake zensim/weights/<bake>.bin --output <out>.md
 ```
 
-## Aggregate dial (lower inversions + lower ties = better dial)
+## Aggregate dial (four buckets summing to 1; lower inv + flat = better)
 
-| bake | profile slot | inversions | ties | monotonicity | dial p5 / p95 | verdict |
-|---|---|--:|--:|--:|---|---|
-| **v47_strict_qat_native** | **Profile::A (shipped)** | **0.0501** | **0.0163** | 0.9499 | 15.0 / 94.4 | **best balance — lowest ties, bounded** |
-| v_balanced_v3 | (sibling) | 0.0444 | 0.1193 | 0.9556 | 0.0 / 99.7 | low inversions but 7× ties (dead-zones), overshoots 100 |
-| v02_372feat_cell5 | PreviewV0_5Linear | 0.0555 | 0.1059 | 0.9445 | 0.0 / 93.7 | good all-rounder; high ties from coarse low-q |
-| v_tuner_v11 | (sibling) | 0.0709 | 0.0279 | 0.9291 | 14.3 / 104.2 | fails G3 mono; overshoots 104 |
-| v39_v32plus_spline | (prior Profile::A) | **0.7932** | 0.0163 | 0.2068 | −125.4 / 91.8 | **BROKEN — see below** |
+The panel splits adjacent-quality-step outcomes into FOUR distinct
+buckets so a real ranking error isn't conflated with sub-JND noise or
+dense-grid oversampling:
 
-**v47 wins the shipped-profile decision.** It has the lowest tied rate
-(0.0163, 7× better than v_balanced_v3's 0.1193), the 2nd-lowest
-inversions (0.0501), and is the only candidate whose output stays
-*bounded* (p5/p95 15.0/94.4 — no negative excursion, no >100 overshoot).
-v_balanced_v3's marginally-lower inversions (0.0444) come with a 7× worse
-dead-zone rate and a 99.7 overshoot; v_tuner_v11 fails G3 monotonicity
-and overshoots to 104.
+| bake | profile slot | inv (>0.5pt) | inv (strict) | mag med | flat/clamp | mono | p5/p95 | G3 |
+|---|---|--:|--:|--:|--:|--:|---|:--:|
+| **v47_strict_qat_native** | **Profile::A (shipped)** | **0.0208** | 0.0501 | 0.34 | **0.0163** | 0.9792 | 15.0 / 94.4 | **✓✓** |
+| v_balanced_v3 | (sibling) | 0.0224 | 0.0444 | 0.50 | 0.1193 | 0.9776 | 0.0 / 99.7 | mono✓ flat✗ |
+| v02_372feat_cell5 | PreviewV0_5Linear | 0.0258 | 0.0555 | 0.39 | 0.1059 | 0.9742 | 0.0 / 93.7 | mono✓ flat✗ |
+| v_tuner_v11 | (sibling) | 0.0258 | 0.0709 | 0.23 | 0.0279 | 0.9742 | 14.3 / 104.2 | ✓✓ (overshoots) |
+| v39_v32plus_spline | (prior Profile::A) | **0.7349** | 0.7932 | **3.34** | 0.0163 | 0.2651 | −125.4 / 91.8 | **BROKEN** |
+
+- **inv (>0.5pt)** = material inversions: adjacent steps where the dial
+  ran backwards by more than half a score-point — the real ranking-error
+  rate (the gated metric, G3 ≤ 0.07).
+- **inv (strict)** = any backwards move > 1e-9 — a diagnostic that
+  INCLUDES sub-JND noise. **mag med** = the median backwards-step
+  magnitude.
+- **flat/clamp** = adjacent steps with literally identical output
+  (\|Δ\|≤1e-9) — a saturation/clamp dead-zone (the other G3 sub-gate,
+  ≤ 0.05).
+
+**The 5% "inversion rate" is mostly noise.** On the good bakes the strict
+any-backwards rate is ~5%, but the **median backwards step is 0.23–0.50
+score-points** — sub-JND wiggles from the densified near-lossless grid
+(adjacent configs are perceptually indistinguishable, so score noise
+alone produces tiny reversals). Requiring a user-visible (>0.5pt)
+backwards move drops the real inversion rate to **~2%**. v39 is the
+exception that proves the rule: its median backwards step is **3.34
+points** and material inversions are **73%** — a genuine catastrophe, not
+noise.
+
+**v47 wins the shipped-profile decision — it is the ONLY candidate that
+passes both G3 sub-gates.** Lowest material inversions (0.0208), lowest
+flat/clamp dead-zone rate (0.0163, 7× better than v_balanced_v3 /
+Cell5), and the only bake whose output stays *bounded* (p5/p95 15.0/94.4
+— no negative excursion, no >100 overshoot). v_balanced_v3 and Cell5
+have low inversions but 6–7× worse clamp dead-zones (fail flat ≤ 0.05);
+v_tuner_v11 passes both gates but overshoots to 104.
 
 ## The panel independently reproduces the v39 defect that motivated v47
 
@@ -77,11 +101,16 @@ perceptual quality equivalently across codecs. The avif inversions
 signal — avif's q→quality mapping is the least monotone in feature
 space.
 
-## Per-codec detail (v47 / Profile::A)
+## Per-codec detail (v47 / Profile::A) — material inversions
 
-| codec | param | min..max | inversions | ties | monotonicity | score @worst→@best |
+| codec | param | min..max | inv (>0.5pt) | flat/clamp | monotonicity | score @worst→@best |
 |---|---|---|--:|--:|--:|---|
-| avif | q | 0..100 | 0.0754 | 0.0000 | 0.9246 | 9.5 → 94.4 |
-| jpeg | q | 0..100 | 0.0285 | 0.0938 | 0.9715 | 17.9 → 92.6 |
-| jxl | distance | 0.03..25.00 | 0.0407 | 0.0000 | 0.9593 | 29.0 → 74.9 |
-| webp | q | 0..100 | 0.0557 | 0.0000 | 0.9443 | 8.3 → 89.3 |
+| avif | q | 0..100 | 0.0349 | 0.0000 | 0.9651 | 9.5 → 94.4 |
+| jpeg | q | 0..100 | 0.0068 | 0.0938 | 0.9932 | 17.9 → 92.6 |
+| jxl | distance | 0.03..25.00 | 0.0209 | 0.0000 | 0.9791 | 29.0 → 74.9 |
+| webp | q | 0..100 | 0.0136 | 0.0000 | 0.9864 | 8.3 → 89.3 |
+
+avif has the highest material inversions (0.035) of the q-codecs across
+every bake — its q→quality mapping is the least monotone in feature
+space. jpeg's flat/clamp 0.094 is the near-lossless q97–q100 plateau (the
+dial genuinely saturates where JPEG quality stops improving).

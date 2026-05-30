@@ -18,22 +18,34 @@ not held-out skill. The genuinely held-out corpora are **CID22 + AIC-3 + AIC-4**
 guards.
 
 ### 2. DIAL panel — densified multi-codec grid (native in `bake_verdict`)
-Three distinct rates per codec curve, plus per-q dial span across codec
-configurations — the codec-target axis (G1 dynamic range, G3 strict
-monotonicity, G4 cross-codec reach). This is what the rank panel does NOT
-capture. The three rates are reported **separately** because they are different
-failures:
-- **forward** — strict-increase rate (score goes up as quality goes up).
-- **inversions** — adjacent steps where the score runs *backwards*
-  (s₁ < s₀−1e-9). A real dial bug: targeting "score 70" lands on the wrong
-  config. Reported as its own rate; **monotonicity = 1 − inversions**.
-- **ties** — adjacent steps within ±1e-9 (flat dead-zones). A coarse
-  precision/saturation problem, not a backwards dial — kept separate from
-  inversions.
+Per codec curve, every adjacent-quality step lands in ONE of **four
+mutually-exclusive buckets** (they sum to 1) — so a real ranking error is
+never conflated with sub-JND noise or dense-grid oversampling, the
+codec-target axis (G1 dynamic range, G3 monotonicity, G4 cross-codec reach):
+- **forward** — Δ > 0.5 score-pt: a clear, user-visible quality increase.
+- **forward sub-resolution** — 1e-9 < \|Δ\| ≤ 0.5 pt: the dial moved but by
+  less than half a score-point. **EXPECTED on the densified near-lossless
+  grid** (adjacent configs are sub-JND apart, so the dial correctly barely
+  moves) — informational, NOT gated.
+- **inversions** — Δ < −0.5 pt: the dial ran *backwards* by a user-visible
+  amount. A real ranking bug (targeting "score 70" lands on the wrong
+  config). **The gated metric; monotonicity = 1 − inversions.**
+- **flat / clamp** — \|Δ\| ≤ 1e-9: literally identical output — a
+  saturation/clamp dead-zone (what V0_5-Balanced suffered: 60% flat above
+  q50). Gated separately.
 
-**Gates:** G3 monotonicity (1−inversions) ≥ 93%, tied ≤ 5%; G1 dial span
-p5 ≤ 25 / p95 ≥ 85. The panel also prints each codec's min..max representable
-param and score@worst→@best so cross-codec reach (G4) is visible.
+**Why a 0.5pt material threshold:** the strict "any backwards > 1e-9" rate
+runs ~5% on a clean bake, but the median backwards step is ~0.3 pt — sub-JND
+noise from densely sampling near-lossless, not ranking errors. The panel
+prints the strict rate + backwards-step magnitude med/p90 as a diagnostic so
+the split is visible; the gate uses material (>0.5pt) inversions. v39 (the
+defective prior ship) is the contrast: median backwards step 3.3 pt, 73%
+material inversions — a genuine catastrophe the magnitude split exposes.
+
+**Gates:** G3 monotonicity (1 − material inversions) ≥ 93% AND flat/clamp
+≤ 5%; G1 dial span p5 ≤ 25 / p95 ≥ 85. The panel also prints each codec's
+min..max representable param and score@worst→@best so cross-codec reach (G4)
+is visible.
 
 The dial grid is **densified where dial precision matters most**:
 - **q0** (dial floor)

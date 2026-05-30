@@ -500,10 +500,28 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     // INVERSION (score went backwards — the metric ranked higher quality
     // lower). Inversions are reported separately from ties: a tie is a
     // resolution gap, an inversion is an outright ranking error.
-    // per-codec: [pairs, inversions, ties, n_curves]
+    // Four DISTINCT outcomes per adjacent-q pair (as quality rises), so we
+    // don't conflate three different things the way a single threshold does:
+    //   1. forward      — Δ >  MATERIAL_INV : clear quality increase (good)
+    //   2. inversion    — Δ < -MATERIAL_INV : the dial ran BACKWARDS by a
+    //                       user-visible amount — a real ranking error. GATED.
+    //   3. flat/clamp   — |Δ| ≤ 1e-9        : literally identical output — a
+    //                       saturation/clamp dead-zone (what V0_5-Balanced
+    //                       suffered: 60% flat above q50). GATED.
+    //   4. sub-resolution — the rest (0 < |Δ| ≤ MATERIAL_INV) : the dial moved
+    //                       but by < half a score-point. EXPECTED on the
+    //                       densified near-lossless grid (adjacent configs are
+    //                       sub-JND apart); NOT a defect, NOT gated.
+    // MATERIAL_INV = 0.5 score-pt, below any user-targetable dial precision.
+    const MATERIAL_INV: f64 = 0.5;
+    // per-codec: [pairs, material_inversions, flat_clamp, n_curves]
     let mut tot_pairs = 0usize;
-    let mut tot_inv = 0usize;
-    let mut tot_tied = 0usize;
+    let mut tot_fwd = 0usize; // Δ > MATERIAL_INV — clear quality increase
+    let mut tot_inv = 0usize; // strict (any backwards > 1e-9) — diagnostic
+    let mut tot_inv_material = 0usize; // backwards by > MATERIAL_INV — gate
+    let mut tot_flat = 0usize; // |Δ| ≤ 1e-9 — clamp/saturation dead-zone — gate
+    let mut tot_subres = 0usize; // 1e-9 < |Δ| ≤ MATERIAL_INV — expected oversampling
+    let mut inv_mags: Vec<f64> = Vec::new(); // magnitudes of strict inversions
     let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
     for ((_img, codec), pts) in curves.iter_mut() {
         pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -514,33 +532,73 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
             let (_, s1) = w[1];
             tot_pairs += 1;
             entry[0] += 1;
-            if s1 < s0 - 1e-9 {
-                tot_inv += 1; // backwards
+            let delta = s1 - s0;
+            if delta < -1e-9 {
+                tot_inv += 1; // strict backwards (diagnostic, all magnitudes)
+                inv_mags.push(-delta);
+            }
+            // four mutually-exclusive buckets summing to tot_pairs:
+            if delta > MATERIAL_INV {
+                tot_fwd += 1; // clear quality increase
+            } else if delta < -MATERIAL_INV {
+                tot_inv_material += 1; // material backwards (gate)
                 entry[1] += 1;
-            } else if (s1 - s0).abs() <= 1e-9 {
-                tot_tied += 1; // dead-zone
+            } else if delta.abs() <= 1e-9 {
+                tot_flat += 1; // literal clamp/saturation dead-zone (gate)
                 entry[2] += 1;
+            } else {
+                tot_subres += 1; // 1e-9 < |Δ| ≤ MATERIAL_INV (expected; not gated)
             }
         }
     }
     // forward strict-increase rate; inversion rate; tied rate — three rates
     // that sum to 1. "monotonicity" (G3) = 1 - inversion rate (ties are not
-    // inversions but are reported on their own line).
+    // inversions but are reported on their own line). The gate uses the
+    // MATERIAL inversion count (backwards by > MATERIAL_INV score units);
+    // sub-MATERIAL backwards wiggles fold into the tied/dead-zone bucket.
     let inv_rate = if tot_pairs > 0 {
+        tot_inv_material as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+    // strict (any backwards > 1e-9) — diagnostic only, shows how much of the
+    // strict count is sub-MATERIAL noise.
+    let inv_rate_strict = if tot_pairs > 0 {
         tot_inv as f64 / tot_pairs as f64
     } else {
         f64::NAN
     };
     let mono = 1.0 - inv_rate;
-    let tied = if tot_pairs > 0 {
-        tot_tied as f64 / tot_pairs as f64
+    // flat/clamp dead-zone rate (literal |Δ|≤1e-9) — the gated tie metric.
+    let flat = if tot_pairs > 0 {
+        tot_flat as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+    // sub-resolution moves (0 < |Δ| ≤ MATERIAL) — informational, grid-density
+    // dependent, not gated.
+    let subres = if tot_pairs > 0 {
+        tot_subres as f64 / tot_pairs as f64
     } else {
         f64::NAN
     };
     let forward = if tot_pairs > 0 {
-        (tot_pairs - tot_inv - tot_tied) as f64 / tot_pairs as f64
+        tot_fwd as f64 / tot_pairs as f64
     } else {
         f64::NAN
+    };
+    // median + p90 magnitude of strict backwards steps — characterizes whether
+    // the strict inversions are noise wiggles or real reversals.
+    inv_mags.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let inv_mag_med = if inv_mags.is_empty() {
+        0.0
+    } else {
+        inv_mags[inv_mags.len() / 2]
+    };
+    let inv_mag_p90 = if inv_mags.is_empty() {
+        0.0
+    } else {
+        percentile(&inv_mags, 90.0)
     };
 
     // G1 dynamic range on the codec grid: pool all scores, p5/p95.
@@ -552,7 +610,7 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         (percentile(&pooled, 5.0), percentile(&pooled, 95.0))
     };
     let g1 = soft_gate(p5, 50.0, 25.0).min(soft_gate(p95, 50.0, 85.0));
-    let g3 = soft_gate(mono, 0.90, 0.93).min(soft_gate(tied, 0.10, 0.05));
+    let g3 = soft_gate(mono, 0.90, 0.93).min(soft_gate(flat, 0.10, 0.05));
 
     let mut s = String::new();
     s.push_str("\n## DIAL panel (codec-target G1/G3 — densified multi-codec q-sweep)\n\n");
@@ -568,12 +626,21 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         "| forward strict-increase | {forward:.4} | — | |\n"
     ));
     s.push_str(&format!(
-        "| **inversions** (backwards) | {inv_rate:.4} | G3 ≤ 0.07 | {} |\n",
+        "| forward sub-resolution (≤{MATERIAL_INV}pt move) | {subres:.4} | — (dense-grid) | |\n"
+    ));
+    s.push_str(&format!(
+        "| **inversions** (backwards > {MATERIAL_INV}pt) | {inv_rate:.4} | G3 ≤ 0.07 | {} |\n",
         if inv_rate <= 0.07 { "✓" } else { "✗" }
     ));
     s.push_str(&format!(
-        "| ties (dead-zones) | {tied:.4} | G3 ≤ 0.05 | {} |\n",
-        if tied <= 0.05 { "✓" } else { "✗" }
+        "| ↳ strict backwards (any > 1e-9) | {inv_rate_strict:.4} | — (noise diag) | |\n"
+    ));
+    s.push_str(&format!(
+        "| ↳ backwards-step magnitude med / p90 | {inv_mag_med:.2} / {inv_mag_p90:.2} | score-pts | |\n"
+    ));
+    s.push_str(&format!(
+        "| flat / clamp dead-zone (\\|Δ\\|≤1e-9) | {flat:.4} | G3 ≤ 0.05 | {} |\n",
+        if flat <= 0.05 { "✓" } else { "✗" }
     ));
     s.push_str(&format!(
         "| monotonicity (1 − inversions) | {mono:.4} | G3 ≥ 0.93 | {} |\n",
@@ -586,9 +653,9 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     s.push_str(&format!(
         "| G1 soft / G3 soft | {g1:.2} / {g3:.2} | (1.0 = full pass) | |\n\n"
     ));
-    s.push_str("Per-codec inversions / ties + representable config range:\n\n");
+    s.push_str("Per-codec inversions / flat-clamp + representable config range:\n\n");
     s.push_str(
-        "| codec | param | min..max | n_curves | n_pairs | inversions | ties | monotonicity | score @worst→@best |\n",
+        "| codec | param | min..max | n_curves | n_pairs | inversions | flat | monotonicity | score @worst→@best |\n",
     );
     s.push_str("|---|---|---|--:|--:|--:|--:|--:|---|\n");
     for (codec, c) in &per_codec {
@@ -621,9 +688,14 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
          distance = higher quality). `score @worst→@best` = median dial score at the \
          lowest- and highest-quality representable config (for distance, worst = max \
          distance). **inversions** = fraction of adjacent-q pairs where the score went \
-         BACKWARDS (higher quality scored lower — an outright ranking error); **ties** = \
-         fraction with equal score (a resolution dead-zone, not an error); monotonicity = \
-         1 − inversions. forward + ties + inversions = 1. Densified grid: q0 + step-1 \
+         BACKWARDS by more than 0.5 score-pt (higher quality scored materially lower — a \
+         real ranking error; the gated metric); **flat** = fraction with literally \
+         identical output (\\|Δ\\|≤1e-9 — a clamp/saturation dead-zone). The aggregate \
+         table additionally breaks out the strict (any-backwards) rate and the \
+         backwards-step magnitude distribution, plus a sub-resolution bucket (0<\\|Δ\\|≤0.5 \
+         pt) that is EXPECTED on the densified near-lossless grid (adjacent configs are \
+         sub-JND apart, so the dial correctly barely moves) and is NOT gated. monotonicity \
+         = 1 − inversions. Densified grid: q0 + step-1 \
          q90→100 + JND zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step \
          .05, 1→3 step .2, 13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
