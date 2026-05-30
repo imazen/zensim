@@ -73,12 +73,16 @@ fn parse_profile(s: &str) -> Result<ZensimProfile> {
     match s.to_ascii_lowercase().as_str() {
         "v0_2" | "v02" | "preview-v0.2" => Ok(ZensimProfile::PreviewV0_2),
         "v0_3" | "v03" | "preview-v0.3" => Ok(ZensimProfile::PreviewV0_3),
-        "balanced" | "v0_5_balanced" | "preview-v0.5-balanced" => Ok(ZensimProfile::balanced()),
-        "compression" | "v0_5_compression" | "preview-v0.5-compression" => {
-            Ok(ZensimProfile::compression())
+        "balanced" | "v0_5_balanced" | "preview-v0.5-balanced" => {
+            Ok(ZensimProfile::PreviewV0_5Balanced)
         }
-        "ensemble" | "v0_5_ensemble" | "preview-v0.5-ensemble" => Ok(ZensimProfile::ensemble()),
-        "tuner" | "v0_5_tuner" | "preview-v0.5-tuner" => Ok(ZensimProfile::tuner()),
+        "compression" | "v0_5_compression" | "preview-v0.5-compression" => {
+            Ok(ZensimProfile::PreviewV0_5Compression)
+        }
+        "ensemble" | "v0_5_ensemble" | "preview-v0.5-ensemble" => {
+            Ok(ZensimProfile::PreviewV0_5Ensemble)
+        }
+        "tuner" | "v0_5_tuner" | "preview-v0.5-tuner" => Ok(ZensimProfile::PreviewV0_5Tuner),
         "tuner-v2" | "tuner_v2" | "v0_5_tuner_v2" | "preview-v0.5-tuner-v2" => {
             Ok(ZensimProfile::PreviewV0_5TunerV2)
         }
