@@ -54,4 +54,43 @@ whether the existing JXL data closes the near-lossless JXL dial underscoring
 without regressing held-out CID22 / AIC-3 / AIC-4. Result + verdict appended
 below when training + the two-panel eval complete.
 
-<!-- RESULT (pending): jxl @best dial, per-codec dial, held-out rank deltas vs v47 -->
+## RESULT — FALSIFIED (2026-05-30)
+
+Adding LARGE as a 6th group made things **worse**, not better:
+
+| metric | v47 | v47+LARGE | Δ |
+|---|--:|--:|--:|
+| **JXL dial @best** (the target) | 74.9 | **66.2** | **−8.7 (WORSE)** |
+| CID22 SROCC (gold holdout) | 0.866 | 0.732 | **−0.134** |
+| AIC-3 SROCC | 0.768 | 0.638 | **−0.130** |
+| AIC-4 SROCC | 0.885 | 0.683 | **−0.202** |
+| TID SROCC | 0.793 | 0.807 | +0.015 |
+| KonJND SROCC | 0.419 | 0.435 | +0.017 |
+
+Dial structure stayed clean (flat/clamp 0.000, monotonicity 0.977, G3 1.00),
+but JXL reach **regressed** (74.9 → 66.2) and the three **compression
+holdouts cratered** (−0.13 to −0.20) while the synthetic-distortion guards
+(TID/KonJND) nudged up.
+
+**Mechanism — the CVVDP-emulator dead-end (V41), reproduced.** LARGE's
+`human_score` is the cvvdp/iwssim-derived target, NOT ssim2. Training toward
+it pulls the metric toward CVVDP-shaped output, which CLAUDE.md already
+documents as a dead end for human-MOS (CID22 0.66 vs 0.88). The
+compression-down / synthetic-up split is its fingerprint. LARGE's
+near-lossless skew (iwssim p5=0.995) compounds it — 73k high-q rows pull the
+calibration toward the top, compressing the low/mid range CID22/AIC live in,
+which is *also* why JXL near-lossless reach got worse.
+
+**The recipe-gap hypothesis is FALSIFIED for LARGE-as-is.** The JXL data
+exists, but in the WRONG SHAPE: cvvdp/iwssim target + near-lossless-only.
+
+**Correct next experiment (the steelman, not yet run):** score the
+**full-range** on-disk JXL (q5–q100, 3,288 src × 16 q) with **ssim2** (the
+ship-recipe target) — and butteraugli/dssim for completeness — build a
+balanced-quality, ssim2-targeted `jxl.parquet`, and retrain. That tests
+"JXL in training, RIGHT target + RIGHT distribution" — distinct from this
+falsified "LARGE-as-is" run. This is the "run all metrics on full-range JXL"
+work; the falsification now concretely motivates it.
+
+Experiment bake: `/mnt/v/output/zensim/bakes/v47_plus_large_2026-05-30.bin`
+(28,334 B, best val SROCC 0.9054). NOT a ship candidate.
