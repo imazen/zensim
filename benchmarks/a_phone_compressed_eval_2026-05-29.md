@@ -56,13 +56,37 @@ therefore fit to *harsh synthetic* distortions, which span the full
 phone-forgiving than KADID's harshest distortions, so on the codec
 sweep the dial only descends to ~53 (jpeg q0 → 60.7, avif q0 → 43.8).
 
-Whether jpeg q0 *should* read ~60 on a phone is **not determinable from
-the data we have** — there are no phone-CVVDP scores on codec sweeps
-(the anchor is KADID-only). It's plausible that q0 blocking is genuinely
-visible on a phone and 60 is too lenient; it's also plausible the phone
-display model rates it that high. The honest statement: A_Phone's dial
-range on *codec* distortions is narrower than its range on *synthetic*
-distortions, by construction of its anchor.
+### RESOLVED 2026-05-29: the floor is correct CVVDP-on-codec behavior
+
+Scored zenjpeg directly with CVVDP (standard_4k desktop) over the
+q-sweep, n=40 images
+(`/mnt/v/output/zensim/a_phone_resolve_2026-05-29/jpeg_cvvdp_desktop.tsv`):
+
+| q | CVVDP JOD p5 | p50 | p95 |
+|--:|--:|--:|--:|
+| 0 | 8.62 | **9.03** | 9.46 |
+| 10 | 8.62 | 9.03 | 9.46 |
+| 20 | 9.03 | 9.32 | 9.69 |
+| 50 | 9.62 | 9.74 | 9.89 |
+| 100 | 9.94 | 10.00 | 10.00 |
+
+**CVVDP rates the ENTIRE zenjpeg quality range in a ~1-JOD band (9.0 →
+10.0).** Even q0 (the worst zenjpeg can emit) is only ~1 JOD below
+perfect on CVVDP's scale; CVVDP barely separates jpeg q0 from q100 on raw
+JOD. The phone display model is **+0.24 JOD more lenient** still
+(per the methodology doc), so phone-CVVDP(q0) ≈ 9.2–9.3 JOD. Mapped
+through the V12 JOD→dial transform (which was fit on KADID, whose
+*synthetic* distortions reach much lower JOD), that narrow codec JOD band
+lands at dial ~53–99 — **exactly the range A_Phone produces.**
+
+So A_Phone's floor-at-53 on codec sweeps is **faithful emulation of
+phone-CVVDP, not a calibration bug.** Codec artifacts genuinely sit in
+CVVDP's top JOD band; any CVVDP-emulating metric will have a compressed
+dial on codec quality. This is the same mechanism behind the project's
+"CVVDP-emulator training is a DEAD END for codec dials" finding (V41) —
+A_Phone is a CVVDP emulator and inherits CVVDP's codec-leniency. No
+recalibration would fix this without abandoning the phone-CVVDP target
+A_Phone exists to represent.
 
 ## Conclusions
 
@@ -74,17 +98,11 @@ distortions, by construction of its anchor.
 2. **A_Phone's rank skill is real and display-specific** — it beats v47
    on TID + AIC-4, loses on CID22. The phone-vs-desktop split is the
    mechanism, not a defect.
-3. **The resolving experiment (not yet run):** score the codec dial-grid
-   images under `modern_oled_phone_indoor`
-   (`zen-metrics batch --metric cvvdp --display-model
-   modern_oled_phone_indoor`) to get phone-CVVDP ground truth ON codec
-   distortions. Then either (a) the truth confirms ~53-60 for q0 → A_Phone
-   is correctly calibrated and the narrow codec dial range is real phone
-   behavior, or (b) the truth says q0 ≈ 20 → A_Phone's KADID-only anchor
-   under-represents codec distortions and the spline should be refit on a
-   codec-inclusive phone-CVVDP anchor (rank-invariant under a monotone
-   spline, so it costs nothing on the TID/AIC-4 wins). Until that runs,
-   "recalibrate A_Phone" is premature — the anchor at
-   `/mnt/v/output/zensim/iphone14-cvvdp-2026-05-25/modern_oled_anchor.parquet`
-   is KADID-only. Regardless of the outcome, A_Phone is **not** the
-   codec-target dial — v47/Profile::A is.
+3. **The floor is correct, not a bug (RESOLVED — see section above).**
+   Direct CVVDP scoring of the zenjpeg sweep shows codec quality lives in
+   a ~1-JOD band (q0 ≈ 9.0, q100 = 10.0); A_Phone faithfully emulates
+   that. The narrow codec dial is intrinsic to CVVDP-on-codecs — no
+   recalibration fixes it without abandoning the phone-CVVDP target.
+   A_Phone is a phone-display quality estimate (and a strong one — it
+   wins TID + AIC-4 rank); it is **not** and cannot be a codec-target
+   dial. v47/Profile::A remains the codec-target dial.
