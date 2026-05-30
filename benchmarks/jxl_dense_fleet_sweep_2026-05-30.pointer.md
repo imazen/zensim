@@ -40,3 +40,26 @@ Isolated from the `claude-jobdash-ui` agent's jobsys work by using own
 `<RUN_ID>` namespace + the old chunk-sweep path. Cost ~$10–30 (88k cells,
 6 metrics, GPU). Use scoped per-sweep R2 creds for the fleet workers
 (`~/work/claudehints/topics/r2-credentials.md`), never the root key.
+
+## ⛔ LAUNCH BLOCKED (2026-05-30): no known-good GPU sweep image
+
+The `sweep-image.yml` CI (Dockerfile.sweep.v26) is **failing** — all 5 most
+recent runs today are red (latest run `26686766753` at 14:49Z,
+"fix(deps): point zenjxl path dep at ../zenjxl", still failed). A concurrent
+agent is actively fixing the v26/v27 image build (sibling-clone / path-dep CI
+issues). The launcher default `ghcr.io/imazen/zen-metrics-sweep:v15` is the
+zenjpeg-era image and lacks JXL + the 6-metric GPU `zen-metrics` the omni
+worker needs.
+
+**Do NOT launch paid boxes until a green v26/v27 image is published** (would
+waste box-minutes on a broken/stale image, per CLAUDE.md). The data side is
+100% ready (88k chunks built). Fire the smoke launch the moment the image CI
+goes green:
+```
+ZEN_METRICS_IMAGE=ghcr.io/imazen/zen-metrics-sweep:<green-tag> \
+launch_single_instance.sh --run-id jxl-dense-20260530 \
+  --chunks s3://coefficient/jobs/jxl-dense-20260530/chunks.jsonl \
+  --onstart scripts/sweep/onstart_omni_backfill.sh
+```
+then verify R2 artifacts (encoded `.jxl` + diffmaps + scored parquet) before
+`launch_backfill.sh` scales.
