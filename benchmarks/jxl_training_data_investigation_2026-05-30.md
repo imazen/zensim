@@ -94,3 +94,44 @@ work; the falsification now concretely motivates it.
 
 Experiment bake: `/mnt/v/output/zensim/bakes/v47_plus_large_2026-05-30.bin`
 (28,334 B, best val SROCC 0.9054). NOT a ship candidate.
+
+## CONTROL — ssim2 target + low weight ALSO fails (isolates the cause)
+
+To test whether the cvvdp target shape was the culprit, reran with LARGE's
+**`ssim2_gpu/100` target** (53,800 rows with non-null ssim2) at **train_w 0.2**
+(manifest `v47_plus_large_ssim2_2026-05-30.toml`):
+
+| | v47 | LARGE cvvdp-tgt tw0.6 | LARGE **ssim2-tgt tw0.2** |
+|---|--:|--:|--:|
+| JXL dial @best | 74.9 | 66.2 | **74.5** (≈v47 — NOT fixed) |
+| CID22 SROCC | 0.866 | 0.732 | **0.699** |
+| AIC-3 SROCC | 0.768 | 0.638 | **0.595** |
+| AIC-4 SROCC | 0.885 | 0.683 | **0.484** |
+| TID SROCC | 0.793 | 0.807 | 0.784 |
+| KonJND SROCC | 0.419 | 0.435 | 0.477 |
+
+**The ssim2 target did NOT recover held-out — it cratered just as hard (worse
+on AIC-4: 0.484).** This isolates the cause: it is **NOT the target shape**,
+it is **LARGE's near-lossless-only distribution** (iwssim ≥ 0.935). Adding
+~50–70k near-lossless rows — any target, any weight — pulls the metric's
+calibration toward the top and destroys the low/mid-q discrimination
+CID22/AIC-3/AIC-4 depend on. And neither variant lifts the JXL dial.
+
+**"Add the existing LARGE JXL data" is FALSIFIED on both target variants.**
+The data is unusable as-is — it lacks the low-q JXL.
+
+## Two redirections (both still open)
+
+1. **Full-range JXL is mandatory, not optional.** The fix needs JXL spanning
+   q5→q100 (balanced), with ssim2 target. The low-q JXL (q5–q60) encodes are
+   on disk but **unscored** — that is the genuinely-missing data. Without it,
+   adding JXL skews calibration (proven twice here).
+2. **The JXL dial underscoring may be a SPLINE-ANCHOR problem, not (only) a
+   training-data problem** (task #42). The dial value lives in the post-train
+   PCHIP spline, fit on `multiband_anchor_dial100.parquet` — which has no JXL.
+   Even with near-lossless JXL in *training* (the ssim2 control had it), the
+   JXL @best stayed 74.5, because the codec-agnostic spline maps JXL's raw
+   output to wherever the (non-JXL) anchor says. A JXL-inclusive spline anchor
+   is the cheaper thing to test (no retrain), and may be the actual lever.
+
+Control bake: `v47_plus_large_ssim2_2026-05-30.bin`. NOT a ship candidate.
