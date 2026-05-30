@@ -249,6 +249,12 @@ struct Args {
     /// path. Used by the AIC-3 CVVDP-feature spike to compute per-ref SROCC
     /// (which the aggregate panel does not split out).
     per_pair_output: Option<PathBuf>,
+    /// DIAL-panel grid parquet (`image_id, codec, q, f0..f371`). Default
+    /// is the canonical densified multi-codec grid; override with
+    /// `--dial-grid` or `ZENSIM_DIAL_GRID`. When the file is absent the
+    /// dial panel is skipped with a loud note (it cannot be recomputed
+    /// without the stored feature grid — fetch from R2 eval-grids/).
+    dial_grid: PathBuf,
 }
 
 fn print_usage() {
@@ -275,6 +281,13 @@ fn parse_args() -> Result<Args, String> {
     let mut per_pair_output: Option<PathBuf> = None;
     let mut features_root: PathBuf =
         PathBuf::from("/mnt/v/zen/zensim-training/2026-05-15-full-features");
+    let mut dial_grid: PathBuf = std::env::var("ZENSIM_DIAL_GRID")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(
+                "/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29.parquet",
+            )
+        });
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -293,6 +306,10 @@ fn parse_args() -> Result<Args, String> {
             "--features-root" => {
                 let v = args.next().ok_or("--features-root requires <path>")?;
                 features_root = PathBuf::from(v);
+            }
+            "--dial-grid" => {
+                let v = args.next().ok_or("--dial-grid requires <path>")?;
+                dial_grid = PathBuf::from(v);
             }
             "--per-pair-output" => {
                 let v = args.next().ok_or("--per-pair-output requires <path>")?;
@@ -315,6 +332,7 @@ fn parse_args() -> Result<Args, String> {
         output,
         features_root,
         per_pair_output,
+        dial_grid,
     })
 }
 
@@ -361,6 +379,152 @@ fn aggregate_panel(scores: &[f64], humans: &[f64]) -> (f64, f64, f64, f64, f64, 
         ds_raw
     };
     (p.srocc, p.plcc, p.krocc, p.or_ratio, p.pwrc, p.z_rmse, ds)
+}
+
+/// DIAL panel — the codec-target half of the eval, run on the densified
+/// multi-codec q-sweep grid. For each `(image_id, codec)` curve sorted by
+/// `q`, counts strict-decrease violations + ties → monotonicity / tied
+/// rate (G3); pools dial-space scores → p5/p95 (G1). This is the metric
+/// `bake_verdict` previously lacked — a bake can win the rank panel and
+/// still be a broken dial. Returns the markdown section, or a loud SKIPPED
+/// note when the stored grid is absent (it can't be recomputed without the
+/// feature grid — see docs/EVAL_PANEL_REQUIREMENT.md).
+fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &Path) -> String {
+    if !grid_path.exists() {
+        return format!(
+            "\n## DIAL panel — ⚠ SKIPPED (grid not found)\n\n\
+             Dial grid `{}` is absent. The DIAL panel (G1 range / G3 monotonicity\n\
+             / codec reach) is MANDATORY per docs/EVAL_PANEL_REQUIREMENT.md — fetch\n\
+             the stored feature grid from `s3://zentrain/eval-grids/` (or set\n\
+             `--dial-grid` / `ZENSIM_DIAL_GRID`) and re-run. A rank-only verdict is\n\
+             a regression.\n",
+            grid_path.display()
+        );
+    }
+    let grid = match parquet_loader::load_dial_grid(&grid_path.to_path_buf()) {
+        Ok(g) => g,
+        Err(e) => return format!("\n## DIAL panel — ⚠ FAILED to load grid\n\n`{e}`\n"),
+    };
+
+    // Score every grid row through the SAME dispatch path render_corpus uses.
+    let per_sample_alpha_head = extract_per_sample_alpha_head(model);
+    let hybrid_head = extract_hybrid_head(model);
+    let tanh_pin_scale = extract_tanh_output_head_scale(model);
+    let output_spline = zensim_validate::output_calibration_spline::extract(model);
+    let mut predictor = Predictor::new(model);
+    let mut scratch = vec![0.0f32; n_inputs];
+    let scores: Vec<f64> = grid
+        .feature_rows
+        .iter()
+        .map(|row| {
+            score_row(
+                &mut predictor,
+                has_transforms,
+                per_sample_alpha_head.as_ref(),
+                hybrid_head.as_ref(),
+                tanh_pin_scale,
+                output_spline.as_ref(),
+                &mut scratch,
+                row,
+            )
+        })
+        .collect();
+
+    // Group rows into (image_id, codec) curves, carry (q, score).
+    use std::collections::BTreeMap;
+    let mut curves: BTreeMap<(String, String), Vec<(f64, f64)>> = BTreeMap::new();
+    for i in 0..scores.len() {
+        curves
+            .entry((grid.image_id[i].clone(), grid.codec[i].clone()))
+            .or_default()
+            .push((grid.q[i], scores[i]));
+    }
+
+    // Per-curve adjacent-q analysis (strict decrease = violation, equal = tie),
+    // plus per-codec aggregation.
+    let mut tot_pairs = 0usize;
+    let mut tot_viol = 0usize;
+    let mut tot_tied = 0usize;
+    // per-codec: (pairs, viol, tied, n_curves)
+    let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    for ((_img, codec), pts) in curves.iter_mut() {
+        pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let entry = per_codec.entry(codec.clone()).or_default();
+        entry[3] += 1;
+        for w in pts.windows(2) {
+            let (_, s0) = w[0];
+            let (_, s1) = w[1];
+            tot_pairs += 1;
+            entry[0] += 1;
+            if s1 < s0 - 1e-9 {
+                tot_viol += 1;
+                entry[1] += 1;
+            } else if (s1 - s0).abs() <= 1e-9 {
+                tot_tied += 1;
+                entry[2] += 1;
+            }
+        }
+    }
+    let mono = if tot_pairs > 0 {
+        1.0 - tot_viol as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+    let tied = if tot_pairs > 0 {
+        tot_tied as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+
+    // G1 dynamic range on the codec grid: pool all scores, p5/p95.
+    let mut pooled: Vec<f64> = scores.iter().copied().filter(|x| x.is_finite()).collect();
+    pooled.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let (p5, p95) = if pooled.is_empty() {
+        (f64::NAN, f64::NAN)
+    } else {
+        (percentile(&pooled, 5.0), percentile(&pooled, 95.0))
+    };
+    let g1 = soft_gate(p5, 50.0, 25.0).min(soft_gate(p95, 50.0, 85.0));
+    let g3 = soft_gate(mono, 0.90, 0.93).min(soft_gate(tied, 0.10, 0.05));
+
+    let mut s = String::new();
+    s.push_str("\n## DIAL panel (codec-target G1/G3 — densified multi-codec q-sweep)\n\n");
+    s.push_str(&format!(
+        "Grid: `{}` — {} rows, {} curves across {} codec families.\n\n",
+        grid_path.display(),
+        scores.len(),
+        curves.len(),
+        per_codec.len()
+    ));
+    s.push_str("| metric | value | gate | pass |\n|---|--:|---|:--:|\n");
+    s.push_str(&format!(
+        "| strict monotonicity | {mono:.4} | G3 ≥ 0.93 | {} |\n",
+        if mono >= 0.93 { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "| tied rate | {tied:.4} | G3 ≤ 0.05 | {} |\n",
+        if tied <= 0.05 { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "| dial p5 / p95 | {p5:.1} / {p95:.1} | G1 p5≤25 ∧ p95≥85 | {} |\n",
+        if p5 <= 25.0 && p95 >= 85.0 { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "| G1 soft / G3 soft | {g1:.2} / {g3:.2} | (1.0 = full pass) | |\n\n"
+    ));
+    s.push_str("Per-codec strict monotonicity / tied:\n\n");
+    s.push_str("| codec | n_curves | n_pairs | monotonicity | tied |\n|---|--:|--:|--:|--:|\n");
+    for (codec, c) in &per_codec {
+        let m = if c[0] > 0 { 1.0 - c[1] as f64 / c[0] as f64 } else { f64::NAN };
+        let t = if c[0] > 0 { c[2] as f64 / c[0] as f64 } else { f64::NAN };
+        s.push_str(&format!("| {codec} | {} | {} | {m:.4} | {t:.4} |\n", c[3], c[0]));
+    }
+    s.push_str(
+        "\n_Monotonicity = fraction of adjacent-q pairs without a strict score decrease; \
+         tied = fraction with equal score (dial dead-zones a binary search can't target). \
+         Densified grid: q0 + step-1 q90→100 + JND zone + jxl-in-butteraugli-distance._\n",
+    );
+    s
 }
 
 fn render_corpus(
@@ -728,6 +892,11 @@ cross-codec / multi-PPD data not present in the held-out feature parquets. \
 Run the dedicated q-sweep harness for those._\n",
         );
     }
+
+    // ── DIAL panel (codec-target G1/G3) — runs every time, native Rust ──
+    // The second mandatory half of the eval (docs/EVAL_PANEL_REQUIREMENT.md):
+    // monotonicity + tied + dial range on the densified multi-codec grid.
+    buf.push_str(&dial_panel(&model, has_transforms, n_inputs, &args.dial_grid));
 
     for r in &results {
         buf.push_str(&r.body);

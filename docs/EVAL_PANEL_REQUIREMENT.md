@@ -33,16 +33,34 @@ The dial grid is **densified where dial precision matters most**:
 
 Built across 4 codec families (JPEG/WebP/JXL/AVIF) at 372 features.
 
-## How to run (one command)
+## How to run — `bake_verdict` does BOTH panels natively
+
+The DIAL panel is **built into `bake_verdict`** (Rust): every run that computes
+SROCCs of a bake also emits the dial panel — there is no separate step or
+wrapper to remember.
 
 ```bash
-scripts/eval_panel.sh <bake.bin> [label] [post_mode]
-# post_mode: clamp (default) | mapped (distance bakes) | raw
+bake_verdict --bake <bake.bin> [--output panel.md] [--dial-grid <parquet>]
 ```
 
-It runs both panels, downloading the dial grid from R2 on demand, and prints
-the headline rank-SROCC + dial-monotonicity/tied. Outputs land in
-`$OUT_DIR/{rank_panel,dial_panel}.md` (default `/tmp/eval_panel_<label>/`).
+The output `.md` carries the RANK panel (per-corpus Mohammadi), the
+CODEC_TARGET_GOALS scorecard, AND a `## DIAL panel` section (strict
+monotonicity, tied rate, per-q dial range, per-codec breakdown, G1/G3 gates).
+
+The dial grid defaults to the canonical path
+(`/mnt/v/output/zensim/eval_panels_2026-05-29/dial_grid_372col_2026-05-29.parquet`);
+override with `--dial-grid <path>` or the `ZENSIM_DIAL_GRID` env var. If the
+grid file is absent, `bake_verdict` emits a **loud SKIPPED note** (it is
+pure-Rust and does not do network) — fetch the stored grid once:
+
+```bash
+aws s3 cp s3://zentrain/eval-grids/dial_grid_372col_2026-05-29.parquet \
+  /mnt/v/output/zensim/eval_panels_2026-05-29/ \
+  --endpoint-url https://338ad3b06716695d6e2c81c864e387d8.r2.cloudflarestorage.com
+```
+
+The standalone `qsweep_eval` binary still exists for multi-bake side-by-side
+dial comparisons, but the mandatory single-bake panel is `bake_verdict` alone.
 
 ## Stored feature sets (R2 — download on demand)
 

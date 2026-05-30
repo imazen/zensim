@@ -1,7 +1,8 @@
 # Pointer: stored eval-panel feature grids (R2 + block storage)
 
-The standing feature sets the two-panel eval (`scripts/eval_panel.sh`) rescores
-any bake against — no re-encoding, no re-extraction. See
+The standing feature sets `bake_verdict` rescores any bake against — no
+re-encoding, no re-extraction. `bake_verdict` reads the dial grid natively and
+emits the DIAL panel alongside the rank panel on every run. See
 `docs/EVAL_PANEL_REQUIREMENT.md`.
 
 ## Grids

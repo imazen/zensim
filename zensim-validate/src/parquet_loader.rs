@@ -325,6 +325,114 @@ pub fn load_parquet(
     })
 }
 
+/// A multi-codec q-sweep grid for the DIAL panel: per row, the source
+/// `image_id`, the `codec` family, the quality `q` (or q-equivalent for
+/// distance-parameterized codecs), and the 372-feature vector. Rows are
+/// grouped by `(image_id, codec)` and sorted by `q` to measure dial
+/// monotonicity / tied-rate / per-q span across codec configurations.
+#[derive(Debug)]
+pub struct DialGrid {
+    pub image_id: Vec<String>,
+    pub codec: Vec<String>,
+    pub q: Vec<f64>,
+    pub feature_rows: Vec<Vec<f64>>,
+    pub n_features: usize,
+}
+
+/// Load the dial-grid parquet (`image_id`, `codec`, `q`, `f0..f<N-1>`)
+/// produced by `scripts/v_next/build_qsweep_expanded.py` and consolidated
+/// to `eval-grids/dial_grid_372col_*.parquet`. Columns are located by
+/// name (order-free); `q` may be Float32/Float64/Int. Powers the
+/// `bake_verdict` DIAL panel (codec-target G1/G3/G4).
+pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
+    let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
+    let schema = builder.schema().clone();
+    let names: Vec<String> = schema.fields().iter().map(|f| f.name().to_string()).collect();
+    let idx = |n: &str| names.iter().position(|x| x == n);
+    let img_i = idx("image_id").ok_or_else(|| format!("{path:?}: missing image_id column"))?;
+    let codec_i = idx("codec").ok_or_else(|| format!("{path:?}: missing codec column"))?;
+    let q_i = idx("q").ok_or_else(|| format!("{path:?}: missing q column"))?;
+    let mut feat_idx = Vec::new();
+    let mut fi = 0usize;
+    while let Some(p) = idx(&format!("f{fi}")) {
+        feat_idx.push(p);
+        fi += 1;
+    }
+    let n_features = feat_idx.len();
+    if n_features == 0 {
+        return Err(format!("{path:?}: no fN feature columns found"));
+    }
+    let reader = builder
+        .build()
+        .map_err(|e| format!("{path:?}: parquet build reader: {e}"))?;
+
+    let col_f64 = |col: &dyn Array, n_rows: usize| -> Result<Vec<f64>, String> {
+        match col.data_type() {
+            DataType::Float64 => {
+                let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i)).collect())
+            }
+            DataType::Float32 => {
+                let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            DataType::Int64 => {
+                let a = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            DataType::Int32 => {
+                let a = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                Ok((0..n_rows).map(|i| a.value(i) as f64).collect())
+            }
+            other => Err(format!("unsupported numeric dtype {other:?}")),
+        }
+    };
+
+    let mut image_id = Vec::new();
+    let mut codec = Vec::new();
+    let mut q = Vec::new();
+    let mut feature_rows = Vec::new();
+    for batch_res in reader {
+        let batch = batch_res.map_err(|e| format!("{path:?}: parquet read batch: {e}"))?;
+        let n_rows = batch.num_rows();
+        if n_rows == 0 {
+            continue;
+        }
+        let img_arr = batch
+            .column(img_i)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| format!("{path:?}: image_id not Utf8"))?;
+        let codec_arr = batch
+            .column(codec_i)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or_else(|| format!("{path:?}: codec not Utf8"))?;
+        let q_v = col_f64(batch.column(q_i).as_ref(), n_rows)
+            .map_err(|e| format!("{path:?}: q column {e}"))?;
+        let per_col: Vec<Vec<f64>> = feat_idx
+            .iter()
+            .map(|&pi| col_f64(batch.column(pi).as_ref(), n_rows))
+            .collect::<Result<_, _>>()
+            .map_err(|e| format!("{path:?}: feature column {e}"))?;
+        for r in 0..n_rows {
+            image_id.push(img_arr.value(r).to_string());
+            codec.push(codec_arr.value(r).to_string());
+            q.push(q_v[r]);
+            feature_rows.push((0..n_features).map(|c| per_col[c][r]).collect());
+        }
+    }
+    Ok(DialGrid {
+        image_id,
+        codec,
+        q,
+        feature_rows,
+        n_features,
+    })
+}
+
 /// Load an optional scalar f64 column from a parquet file by name.
 ///
 /// Returns `Ok(None)` if the column doesn't exist in the schema. Returns

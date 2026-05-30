@@ -363,8 +363,9 @@ forward, the priorities are:
 
 ## TWO-PANEL EVAL MANDATORY — rank + dial, every ship-grade bake (added 2026-05-29)
 
-**Every ship/no-ship or A/B bake verdict MUST run BOTH panels via
-`scripts/eval_panel.sh <bake.bin>`** — never the rank panel alone:
+**`bake_verdict` runs BOTH panels natively (Rust) on every invocation** —
+the DIAL panel is built in, so any time you compute a bake's SROCCs you
+also get its dial metrics. Never accept a rank-only verdict:
 
 1. **RANK panel** (`bake_verdict`) — full Mohammadi 2025 stats on the 6
    canonical val parquets. Held-out corpora are CID22 + AIC-3 + AIC-4
@@ -386,10 +387,13 @@ are a regression — do not accept them.**
 
 **Stored feature sets live on R2** (`s3://zentrain/eval-grids/`:
 `dial_grid_372col_2026-05-29.parquet`,
-`corruption_grid_372col_2026-05-28.parquet`); `eval_panel.sh` downloads
-on demand and forwards the bake over the stored 372-feature vectors —
-**rescore any model with no re-encode/re-extract.** Full spec +
-gates + refresh procedure: `docs/EVAL_PANEL_REQUIREMENT.md`. Pointer:
+`corruption_grid_372col_2026-05-28.parquet`). `bake_verdict` reads the
+dial grid directly (default path or `--dial-grid` / `ZENSIM_DIAL_GRID`)
+and forwards the bake over the stored 372-feature vectors —
+**rescore any model with no re-encode/re-extract.** If the grid isn't
+local, `bake_verdict` emits a loud SKIPPED note; fetch it once with
+`aws s3 cp s3://zentrain/eval-grids/...`. Full spec + gates + refresh:
+`docs/EVAL_PANEL_REQUIREMENT.md`. Pointer:
 `benchmarks/eval_grids_2026-05-29.pointer.md`.
 
 ## SROCC-only verdicts BANNED + ssim2-target training bias (added 2026-05-15)
