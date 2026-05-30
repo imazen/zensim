@@ -361,6 +361,37 @@ forward, the priorities are:
 - 2026-05-10 champion + recipe + Phase 4 plan: `benchmarks/champion_2026-05-10.md`,
   `docs/phase4_reference/README.md`
 
+## TWO-PANEL EVAL MANDATORY — rank + dial, every ship-grade bake (added 2026-05-29)
+
+**Every ship/no-ship or A/B bake verdict MUST run BOTH panels via
+`scripts/eval_panel.sh <bake.bin>`** — never the rank panel alone:
+
+1. **RANK panel** (`bake_verdict`) — full Mohammadi 2025 stats on the 6
+   canonical val parquets. Held-out corpora are CID22 + AIC-3 + AIC-4
+   (+ KonJND semi); **KADID/TID are 100% train==val pair-overlap** so
+   their numbers reward memorization, not skill — treat as integrity
+   guards, not ranking signal.
+2. **DIAL panel** (`qsweep_eval` on the densified multi-codec grid) —
+   monotonicity + tied-rate + per-q dial span across codec configs
+   (G1 dynamic range, G3 monotonicity ≥93% / tied ≤5%, G4 reach). The
+   grid is densified where dial precision matters: **q0 + step-1
+   q90→q100 + JND-zone (q70→90 step2) + JXL-in-butteraugli-distance**,
+   4 codec families, 372 features.
+
+A bake can win the rank panel and be a broken dial (V0_5 Balanced:
+panel-best by meanG3, 60% tied / collapses to 0 above q50). A bake can
+pass a coarse dial and fail near-lossless step-1 (Cell5: 0.8% tied on
+the 16-q grid → 13.1% on the densified grid). **Single-panel verdicts
+are a regression — do not accept them.**
+
+**Stored feature sets live on R2** (`s3://zentrain/eval-grids/`:
+`dial_grid_372col_2026-05-29.parquet`,
+`corruption_grid_372col_2026-05-28.parquet`); `eval_panel.sh` downloads
+on demand and forwards the bake over the stored 372-feature vectors —
+**rescore any model with no re-encode/re-extract.** Full spec +
+gates + refresh procedure: `docs/EVAL_PANEL_REQUIREMENT.md`. Pointer:
+`benchmarks/eval_grids_2026-05-29.pointer.md`.
+
 ## SROCC-only verdicts BANNED + ssim2-target training bias (added 2026-05-15)
 
 **STOP USING SROCC ALONE AS A VERDICT GATE.** Every ship/no-ship,
