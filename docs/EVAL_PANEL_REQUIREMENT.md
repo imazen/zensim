@@ -17,19 +17,35 @@ not held-out skill. The genuinely held-out corpora are **CID22 + AIC-3 + AIC-4**
 (+ KonJND, semi-held-out). Rank a bake on those; treat KADID/TID as integrity
 guards.
 
-### 2. DIAL panel — `qsweep_eval` on the densified multi-codec grid
-Monotonicity rate + tied rate + per-q dial span across codec configurations —
-the codec-target axis (G1 dynamic range, G3 strict monotonicity, G4 cross-codec
-reach). This is what `bake_verdict` does NOT capture. **Gates:** G3 strict
-monotonicity ≥ 93%, tied ≤ 5%; G1 dial span p5 ≤ 25 / p95 ≥ 85.
+### 2. DIAL panel — densified multi-codec grid (native in `bake_verdict`)
+Three distinct rates per codec curve, plus per-q dial span across codec
+configurations — the codec-target axis (G1 dynamic range, G3 strict
+monotonicity, G4 cross-codec reach). This is what the rank panel does NOT
+capture. The three rates are reported **separately** because they are different
+failures:
+- **forward** — strict-increase rate (score goes up as quality goes up).
+- **inversions** — adjacent steps where the score runs *backwards*
+  (s₁ < s₀−1e-9). A real dial bug: targeting "score 70" lands on the wrong
+  config. Reported as its own rate; **monotonicity = 1 − inversions**.
+- **ties** — adjacent steps within ±1e-9 (flat dead-zones). A coarse
+  precision/saturation problem, not a backwards dial — kept separate from
+  inversions.
+
+**Gates:** G3 monotonicity (1−inversions) ≥ 93%, tied ≤ 5%; G1 dial span
+p5 ≤ 25 / p95 ≥ 85. The panel also prints each codec's min..max representable
+param and score@worst→@best so cross-codec reach (G4) is visible.
 
 The dial grid is **densified where dial precision matters most**:
 - **q0** (dial floor)
 - **step-1 across q90→q100** for q-parameterized codecs (near-lossless — where
   dials saturate; coarse grids hide tied dead-zones here)
 - **JND zone densified** (q70→q90 step 2 — the visually-lossless band)
-- **JXL swept in butteraugli distance** (its native near-lossless axis),
-  relabeled to a monotone q-equivalent
+- **JXL swept in butteraugli distance** (its native axis), at a variable-density
+  ladder finest near lossless: **0→0.3 step 0.025, 0.3→1 step 0.05, 1→3 step 0.2,
+  mid 3.5..10, low-q tail 13→25 step 2** (49 distinct distances). Relabeled to a
+  monotone q-equivalent **q = 100 − 4·distance** (unrounded), so d=0→100,
+  d=0.025→99.9, d=25→0 — the dial axis sorts by quality and the full
+  representable distance range maps onto [0,100].
 
 Built across 4 codec families (JPEG/WebP/JXL/AVIF) at 372 features.
 

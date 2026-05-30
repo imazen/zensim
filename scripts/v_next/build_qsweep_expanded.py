@@ -39,8 +39,30 @@ QGRID = sorted(set(
 ))
 QGRID_STR = ",".join(str(q) for q in QGRID)
 
-# JXL butteraugli-distance ladder (near-lossless dense → low quality coarse).
-JXL_DISTANCES = [0.3, 0.5, 0.7, 0.9, 1.0, 1.2, 1.5, 1.8, 2.2, 2.6, 3.0, 3.5, 4.0, 5.0, 6.5, 8.0, 10.0, 13.0]
+# JXL butteraugli-distance ladder — variable density, finest near lossless:
+#   - 0.0 → 0.3  step 0.025  (near-lossless, where the dial must resolve steps)
+#   - 0.3 → 1.0  step 0.05   (high fidelity)
+#   - 1.0 → 3.0  step 0.2    (mid fidelity)
+#   - 3.5 → 10              (coarse mid)
+#   - 13 → 25    step 2      (low-quality tail)
+JXL_DISTANCES = sorted({
+    round(d, 3)
+    for d in (
+        [i * 0.025 for i in range(0, 13)]          # 0.000 .. 0.300
+        + [0.3 + i * 0.05 for i in range(1, 15)]   # 0.350 .. 1.000
+        + [1.0 + i * 0.2 for i in range(1, 11)]    # 1.200 .. 3.000
+        + [3.5, 4.0, 5.0, 6.5, 8.0, 10.0]
+        + [13.0, 15.0, 17.0, 19.0, 21.0, 23.0, 25.0]
+    )
+})
+# JXL q-equivalent (monotone axis): UNROUNDED float, k=4 so the full
+# representable distance range [0, 25] maps to q [100, 0] — d=0→100,
+# d=0.025→99.9, d=25→0. Unrounded preserves the 0.025-distance granularity
+# (0.1 q apart) the old rounded k=7 map collapsed.
+JXL_Q_K = 4.0
+
+def jxl_q_equiv(d: float) -> float:
+    return max(0.0, min(100.0, 100.0 - JXL_Q_K * float(d)))
 
 Q_CODECS = [("zenjpeg", "jpeg"), ("zenwebp", "webp"), ("zenavif", "avif")]
 
@@ -95,7 +117,7 @@ def main():
                 d = None
             if d is None:
                 continue
-            q_equiv = max(0.0, min(100.0, round(100.0 - 7.0 * float(d))))
+            q_equiv = jxl_q_equiv(float(d))
             feats = [float(row[f"feat_{i}"]) for i in range(372)]
             if all(np.isfinite(feats)):
                 # codec_param = native butteraugli distance; param_kind = "distance".

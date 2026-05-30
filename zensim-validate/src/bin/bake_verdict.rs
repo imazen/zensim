@@ -495,12 +495,15 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         v[v.len() / 2]
     };
 
-    // Per-curve adjacent-q analysis (strict decrease = violation, equal = tie),
-    // plus per-codec aggregation.
+    // Per-curve adjacent-q analysis. Three DISTINCT outcomes per pair as q
+    // (quality) rises: forward strict increase (good), tie (dead-zone), or
+    // INVERSION (score went backwards — the metric ranked higher quality
+    // lower). Inversions are reported separately from ties: a tie is a
+    // resolution gap, an inversion is an outright ranking error.
+    // per-codec: [pairs, inversions, ties, n_curves]
     let mut tot_pairs = 0usize;
-    let mut tot_viol = 0usize;
+    let mut tot_inv = 0usize;
     let mut tot_tied = 0usize;
-    // per-codec: (pairs, viol, tied, n_curves)
     let mut per_codec: BTreeMap<String, [usize; 4]> = BTreeMap::new();
     for ((_img, codec), pts) in curves.iter_mut() {
         pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -512,21 +515,30 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
             tot_pairs += 1;
             entry[0] += 1;
             if s1 < s0 - 1e-9 {
-                tot_viol += 1;
+                tot_inv += 1; // backwards
                 entry[1] += 1;
             } else if (s1 - s0).abs() <= 1e-9 {
-                tot_tied += 1;
+                tot_tied += 1; // dead-zone
                 entry[2] += 1;
             }
         }
     }
-    let mono = if tot_pairs > 0 {
-        1.0 - tot_viol as f64 / tot_pairs as f64
+    // forward strict-increase rate; inversion rate; tied rate — three rates
+    // that sum to 1. "monotonicity" (G3) = 1 - inversion rate (ties are not
+    // inversions but are reported on their own line).
+    let inv_rate = if tot_pairs > 0 {
+        tot_inv as f64 / tot_pairs as f64
     } else {
         f64::NAN
     };
+    let mono = 1.0 - inv_rate;
     let tied = if tot_pairs > 0 {
         tot_tied as f64 / tot_pairs as f64
+    } else {
+        f64::NAN
+    };
+    let forward = if tot_pairs > 0 {
+        (tot_pairs - tot_inv - tot_tied) as f64 / tot_pairs as f64
     } else {
         f64::NAN
     };
@@ -553,12 +565,19 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     ));
     s.push_str("| metric | value | gate | pass |\n|---|--:|---|:--:|\n");
     s.push_str(&format!(
-        "| strict monotonicity | {mono:.4} | G3 ≥ 0.93 | {} |\n",
-        if mono >= 0.93 { "✓" } else { "✗" }
+        "| forward strict-increase | {forward:.4} | — | |\n"
     ));
     s.push_str(&format!(
-        "| tied rate | {tied:.4} | G3 ≤ 0.05 | {} |\n",
+        "| **inversions** (backwards) | {inv_rate:.4} | G3 ≤ 0.07 | {} |\n",
+        if inv_rate <= 0.07 { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "| ties (dead-zones) | {tied:.4} | G3 ≤ 0.05 | {} |\n",
         if tied <= 0.05 { "✓" } else { "✗" }
+    ));
+    s.push_str(&format!(
+        "| monotonicity (1 − inversions) | {mono:.4} | G3 ≥ 0.93 | {} |\n",
+        if mono >= 0.93 { "✓" } else { "✗" }
     ));
     s.push_str(&format!(
         "| dial p5 / p95 | {p5:.1} / {p95:.1} | G1 p5≤25 ∧ p95≥85 | {} |\n",
@@ -567,12 +586,13 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     s.push_str(&format!(
         "| G1 soft / G3 soft | {g1:.2} / {g3:.2} | (1.0 = full pass) | |\n\n"
     ));
-    s.push_str("Per-codec strict monotonicity / tied + representable config range:\n\n");
+    s.push_str("Per-codec inversions / ties + representable config range:\n\n");
     s.push_str(
-        "| codec | param | min..max | n_curves | n_pairs | monotonicity | tied | score @worst→@best |\n",
+        "| codec | param | min..max | n_curves | n_pairs | inversions | ties | monotonicity | score @worst→@best |\n",
     );
-    s.push_str("|---|---|---|--:|--:|--:|--:|---|\n");
+    s.push_str("|---|---|---|--:|--:|--:|--:|--:|---|\n");
     for (codec, c) in &per_codec {
+        let inv = if c[0] > 0 { c[1] as f64 / c[0] as f64 } else { f64::NAN };
         let m = if c[0] > 0 { 1.0 - c[1] as f64 / c[0] as f64 } else { f64::NAN };
         let t = if c[0] > 0 { c[2] as f64 / c[0] as f64 } else { f64::NAN };
         let e = pext.get_mut(codec);
@@ -591,7 +611,7 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
             None => ("q".to_string(), "—".to_string(), "—".to_string()),
         };
         s.push_str(&format!(
-            "| {codec} | {kind} | {range} | {} | {} | {m:.4} | {t:.4} | {dial} |\n",
+            "| {codec} | {kind} | {range} | {} | {} | {inv:.4} | {t:.4} | {m:.4} | {dial} |\n",
             c[3], c[0]
         ));
     }
@@ -600,9 +620,12 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
          in the grid (integer quality for q-codecs; butteraugli distance for JXL — lower \
          distance = higher quality). `score @worst→@best` = median dial score at the \
          lowest- and highest-quality representable config (for distance, worst = max \
-         distance). Monotonicity = fraction of adjacent-q pairs without a strict score \
-         decrease; tied = fraction with equal score (dial dead-zones a binary search can't \
-         target). Densified grid: q0 + step-1 q90→100 + JND zone + jxl-in-butteraugli-distance._\n",
+         distance). **inversions** = fraction of adjacent-q pairs where the score went \
+         BACKWARDS (higher quality scored lower — an outright ranking error); **ties** = \
+         fraction with equal score (a resolution dead-zone, not an error); monotonicity = \
+         1 − inversions. forward + ties + inversions = 1. Densified grid: q0 + step-1 \
+         q90→100 + JND zone + jxl-in-butteraugli-distance (0→0.3 step .025, 0.3→1 step \
+         .05, 1→3 step .2, 13→25 step 2; q-equiv = 100 − 4·distance)._\n",
     );
     s
 }
