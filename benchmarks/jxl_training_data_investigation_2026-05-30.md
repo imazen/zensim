@@ -126,12 +126,26 @@ The data is unusable as-is — it lacks the low-q JXL.
    q5→q100 (balanced), with ssim2 target. The low-q JXL (q5–q60) encodes are
    on disk but **unscored** — that is the genuinely-missing data. Without it,
    adding JXL skews calibration (proven twice here).
-2. **The JXL dial underscoring may be a SPLINE-ANCHOR problem, not (only) a
-   training-data problem** (task #42). The dial value lives in the post-train
-   PCHIP spline, fit on `multiband_anchor_dial100.parquet` — which has no JXL.
-   Even with near-lossless JXL in *training* (the ssim2 control had it), the
-   JXL @best stayed 74.5, because the codec-agnostic spline maps JXL's raw
-   output to wherever the (non-JXL) anchor says. A JXL-inclusive spline anchor
-   is the cheaper thing to test (no retrain), and may be the actual lever.
+2. **A spline-anchor refit (task #42) will NOT fix it.** The dial spline is a
+   *monotone 1D function of raw net output* — it is rank-preserving. JXL @best
+   reads 74.5 < jpeg's 92.6 *only because the net's raw output ranks
+   near-lossless JXL below jpeg q100* (feature L2(jxl@d0.025, jpeg@q100)=4.85,
+   ~24× a real jpeg q-step). A spline refit can globally rescale the
+   near-lossless region (lifting ALL codecs, which would over-score jpeg q100)
+   but **cannot selectively lift JXL** without contradicting jpeg at the same
+   raw value. The underscoring is in the *net's learned ranking*, which only
+   training changes.
+
+### Conclusion: only full-range JXL training can fix it
+
+Both LARGE variants fail (near-lossless skew craters held-out, never lifts the
+dial); the spline angle can't selectively fix a codec. The single viable path:
+**score the full-range on-disk JXL (q5→q100, balanced) with ssim2, retrain at a
+moderate weight** — the balanced distribution avoids the skew-crater while
+giving enough JXL signal to shift the net's ranking of near-lossless JXL toward
+jpeg-q100-equivalent. The low-q JXL (q5–q60), unscored on disk, is the
+load-bearing missing data. (Risk acknowledged: even balanced full-range JXL may
+not fully close it if the OOD features are intrinsically hard — but it is the
+only mechanism that *can*, and it's a clean experiment.)
 
 Control bake: `v47_plus_large_ssim2_2026-05-30.bin`. NOT a ship candidate.
