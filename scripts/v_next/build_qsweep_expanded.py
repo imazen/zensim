@@ -24,19 +24,29 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import numpy as np
 
-ZM = "/home/lilith/work/zen/zenmetrics/target/release/zen-metrics"
+# Binary path overridable via ZM_BIN — the f64 fractional-q-grid support
+# (zenmetrics commit 759ab501) must be present, so during rollout point this
+# at the workspace build that has it.
+ZM = os.environ.get("ZM_BIN", "/home/lilith/work/zen/zenmetrics/target/release/zen-metrics")
 SOURCES = "/tmp/qsweep_sources"
 OUTDIR = "/mnt/v/output/zensim/qsweep_expanded_2026-05-29"
 os.makedirs(OUTDIR, exist_ok=True)
 
-# Expanded q-grid for q-parameterized codecs (jpeg/webp/avif):
-# low (existing) + JND-zone densified (70..90 step ~2) + near-lossless step-1 (90..100) + q0.
+# Expanded q-grid for q-parameterized codecs (jpeg/webp/avif). zenjpeg/webp/avif
+# all take a FLOAT quality (with_generic_quality(f32) / with_quality(f32) /
+# quality(f32)); the zen-metrics sweep --q-grid now threads f64 (was u32), so the
+# near-lossless band can be sampled at fractional q to match JXL's distance ladder
+# resolution (JXL resolves q-equiv 99.9 at d=0.025). Grid:
+#   low/mid coarse + JND-zone (70..90 step 2) + near-lossless integer (90..96)
+#   + fractional near-lossless (96..100, down to 0.1 q) + q0.
 QGRID = sorted(set(
     [0, 5, 10, 15, 20, 25, 30, 40, 50, 60]            # low/mid (existing coarse)
     + list(range(70, 91, 2))                          # JND zone: 70,72,...,90 (step 2)
-    + list(range(90, 101, 1))                         # near-lossless: 90..100 (step 1)
+    + list(range(90, 97, 1))                          # near-lossless integer: 90..96
+    + [96.5, 97, 97.5, 98, 98.5, 99, 99.25, 99.5, 99.75, 99.9, 100]  # fractional near-lossless
     + [87, 89]                                        # keep prior near-JND points
 ))
+# str() keeps ints as "90" and floats as "99.5"; Python dedupes 90==90.0 in the set.
 QGRID_STR = ",".join(str(q) for q in QGRID)
 
 # JXL butteraugli-distance ladder — variable density, finest near lossless:
