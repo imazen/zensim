@@ -70,3 +70,17 @@ These carry the durable knowledge — what was tried and why it failed.
 b57b98dc badd1815 b4fe218f c1d25f60 21a79118 a82e63e4 a7a39e23 65a7a728 38b4b0e6 e15a9a89 f5ad1b23 
 65f89fc9 31d62af9 a217a4d2 b09de6bd fd332aea f7000848 ee997bee 8b091ff0 fa88a7ad 21ea5adf 1154ec2b 
 a0e8e828 38c7d60f 
+## Salvage rebase evaluation (2026-06-01) — none landed
+
+Each of the 4 salvaged commits (the genuinely-unique work) was rebased onto current
+`origin/main` and evaluated for whether it improves main. **None was landed** — current
+main has independently evolved past all four.
+
+| Salvaged piece | Tag | Rebase onto main | Verdict |
+|---|---|---|---|
+| stride-aware sRGB/linear→XYB planar conversion | `salvage/…/xyb-planar` | clean cherry-pick, builds, 7 color tests pass | **DEAD CODE** — adds `srgb/linear_to_positive_xyb_planar_rows` (a stride-aware `_rows` API main lacks; main has `_into`/`_planar`) but unused/untested ("never used" warnings). Not landed: public-API addition with no caller. |
+| `simd_encoder_f32` 2-layer encoder | `salvage/…/simd-encoder-f32` | conflicts | **REDUNDANT** — main already has the identical `encoder_forward_2layer_f32`/`encoder_backprop_2layer_f32` in `simd_encoder.rs` + `arch_f32.rs`. Reimplemented & merged elsewhere. |
+| σ-plane-elimination streaming kernel | `salvage/…/sigma-elim-kernel` | conflicts (`streaming.rs`/`lib.rs`) | **ALREADY IN MAIN** — its mechanism (fused H-blur producing `sigma1_sq`/`sigma12` inline + separable 1D V-blur + strip-local cache-resident σ planes + `h_blur_src` elimination) landed 2026-05-15 / 05-22, weeks after σ-elim was abandoned (2026-04-29). The working-set lever was already tuned (`STRIP_INNER` sweep → 32). Original measured win was only −2.8% @ 1080p-MT vs a *worse* whole-image baseline; author: "σ planes mostly already L3-resident." The only genuinely-missing piece (an 11-row σ ring buffer) is marginal/uncertain and not worth the byte-exact-kernel rewrite risk (11 streaming correctness tests, incl. byte-exact, pass). |
+| extended V0_5 calibration test harness | `salvage/…/v05-calibration-tests` | conflicts (13 files) | **STALE** — the `v05_*` monotone/positivity/identity harness is genuinely missing from main, but a month of API drift means re-deriving against the current API, not a cherry-pick. Core affine-calibration already shipped (`assert_identity_returns_100`, `v04_calibrate_mapping.rs` on main). |
+
+**Conclusion:** all genuinely-unique work is preserved under `salvage/principled-activity-2026-06-01/*` (everything else under `abandoned/principled-activity-2026-06-01`), but none improves current main — it independently re-derived or superseded each. Nothing landed. `zensim--principled-activity` is fully safe to retire.
