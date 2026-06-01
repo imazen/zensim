@@ -1,6 +1,8 @@
-//! Per-codec score calibration for [`crate::ZensimProfile::PreviewV0_5Tuner`].
+//! Per-codec score calibration for codec-target profiles (applied via a
+//! per-bake `zentrain.per_codec_calibration` affine when present).
 //!
-//! The Tuner profile is the dial-honest variant designed for codec
+//! Historically this was developed for the dial-honest Tuner profile
+//! (now preserved in the `zensim-experimental` crate). The Tuner profile
 //! auto-targeting (user types `score=70`, codec binary-searches the q
 //! yielding zensim ≈ 70). On the 2026-05-19 cross-codec consistency
 //! eval (10 images × 19 q × 3 codecs, see

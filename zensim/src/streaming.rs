@@ -3658,7 +3658,7 @@ mod tests {
         let src_img = RgbSlice::new(&src, w, h);
         let dst_img = RgbSlice::new(&dst, w, h);
 
-        let z = Zensim::new(ZensimProfile::PreviewV0_1);
+        let z = Zensim::new(ZensimProfile::PreviewV0_2);
         let full = z.compute(&src_img, &dst_img).unwrap();
         let strip = z
             .compute_streaming_strips(&src_img, &dst_img, 64, 16)

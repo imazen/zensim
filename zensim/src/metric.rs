@@ -737,7 +737,7 @@ impl ZensimResult {
             score: f64::NAN,
             raw_distance: f64::NAN,
             features: vec![],
-            profile: crate::profile::ZensimProfile::PreviewV0_1,
+            profile: crate::profile::ZensimProfile::A,
             mean_offset: [f64::NAN; 3],
             is_identical: false,
         }
@@ -3495,7 +3495,7 @@ pub(crate) fn combine_scores(
         score,
         raw_distance,
         features,
-        ZensimProfile::PreviewV0_1,
+        ZensimProfile::PreviewV0_2,
         mean_offset,
     )
 }
