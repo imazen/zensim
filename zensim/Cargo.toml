@@ -9,7 +9,17 @@ readme = "../README.md"
 rust-version = "1.93.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
-exclude = ["benches/", "tests/", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", ".claude/", ".superwork/", ".zenbench/", "copter-report/", ".github/", "Cross.toml", "justfile", "Cargo.toml.original.txt", "fuzz/"]
+# Ship ONLY the source + the single embedded bake (v47-strict-QAT, the `A`
+# profile) + its recipe. The rest of `weights/` (archive bakes, picker
+# checkpoints, historical/experimental bakes, other manifests) stays on disk
+# for the workspace's research tooling but is NOT shipped to crates.io —
+# every experimental bake now lives in the unpublished `zensim-experimental`
+# crate. `Cargo.toml`, the `readme`, and license metadata are always included.
+include = [
+    "src/**/*.rs",
+    "weights/v47_strict_qat_native_2026-05-27.bin",
+    "weights/manifests/v47_strict_qat.toml",
+]
 
 [features]
 default = ["avx512", "imgref", "threads"]

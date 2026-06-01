@@ -172,7 +172,7 @@ impl ZensimProfile {
     /// of those as the codec-target dial would give users ±20-50
     /// score-unit precision swings across codecs.
     ///
-    /// See [`docs/CODEC_TARGET_METRIC.md`] in the zensim repo for the
+    /// See `docs/CODEC_TARGET_METRIC.md` in the zensim repo for the
     /// integration guide.
     ///
     /// Returns [`Self::A`]. The backing bake (and any future rotation)
@@ -377,7 +377,7 @@ pub struct ProfileParams {
     /// unreasonable" codec output (worst codec at q=0, butter > 12)
     /// rather than collapsing into a tie block at 0.
     ///
-    /// When set, [`soft_clamp_score`] is ignored. Default `false`
+    /// When set, `soft_clamp_score` is ignored. Default `false`
     /// preserves legacy [0, 100] semantics for V9 and earlier
     /// profiles whose splines/anchors only span [0, 100].
     pub extrapolate_score: bool,
@@ -996,6 +996,6 @@ pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
 // compatibility with code written against zensim 0.2.x and earlier.
 
 /// Alias for [`WEIGHTS_PREVIEW_V0_2`]. Linear scoring weights for the
-/// V0_2 profile. See [`LINEAR_WEIGHTS_PREVIEW_V0_1`] for naming
-/// rationale.
+/// V0_2 profile. The `LINEAR_` prefix disambiguates these linear
+/// coefficients from MLP bake bytes.
 pub use self::WEIGHTS_PREVIEW_V0_2 as LINEAR_WEIGHTS_PREVIEW_V0_2;

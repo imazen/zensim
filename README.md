@@ -275,17 +275,16 @@ Computed in XYB (cube-root LMS) with O(1)-per-pixel box blur and fused AVX2/AVX-
 
 ## Profiles
 
-Each `ZensimProfile` bundles weights and score mapping parameters. Scores from a given profile stay stable across crate versions.
+Each `ZensimProfile` bundles weights and score-mapping parameters. Scores from a given profile stay stable across crate versions. The published crate ships three profiles; the historical / experimental research profiles are preserved (bit-identically) in the unpublished `zensim-experimental` crate.
 
-| Profile | Default-on | Training | CID22 SROCC | Bake size |
-|---------|:---------:|----------|------:|:---------:|
-| `PreviewV0_1` | ✓ | 344k synthetic, 5-fold CV | 0.86 | linear weights |
-| `PreviewV0_2` | ✓ | 218k concordance-filtered, Nelder-Mead | 0.87 | linear weights |
-| `PreviewV0_3` | ✓ | 144k clean safe-synth + KADID + TID + KonJND | **0.89** | 93 KB I8 MLP |
+| Profile | Kind | CID22 SROCC | Bake |
+|---------|------|------:|------|
+| `A` (alias: deprecated `PreviewV0_3`) | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.87** | 27 KB v47-strict-QAT |
+| `PreviewV0_2` | linear, 228 Nelder-Mead weights | 0.87 | none (linear) |
 
-`ZensimProfile::latest_preview()` returns `PreviewV0_3` in zensim 0.3.x — use it when you want "whatever the current preview is" (the returned variant rotates as new previews ship). For pinned reproducibility, name a variant directly (`PreviewV0_3`). For the stable codec-target contract, use `ZensimProfile::codec_target()`. The deprecated `latest()` still exists for back-compat. Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+`ZensimProfile::codec_target()` and `latest_preview()` both return `A` — the canonical production codec-target the zen codecs dial against. The deprecated `latest()` also returns `A`. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
-**`PreviewV0_3`** is the MLP profile, shipped 2026-05-13 with zensim 0.3.0. Variant name tracks the crate's minor version that introduced it; the underlying bake bytes inside the variant are V0_18 today (228→384→1 LeakyReLU MLP, I8 quantized, MCOS-aligned 0–100 output) and may rotate to score-stable variants during 0.3.x patches. zenpredict is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
+The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, `PreviewV0_1`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 
 ## Feature flags
 

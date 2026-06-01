@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Changed — experimental/historical profiles relocated to `zensim-experimental` (2026-06-01)
+
+**BREAKING (absorbed by the 0.2.x → 0.3.0 minor bump): `ZensimProfile` now
+exposes only the shipping profiles** — `A`, `PreviewV0_2`, the deprecated
+`PreviewV0_3` alias, and the new `Custom` escape hatch. The 21 experimental /
+historical research profiles (`A_Phone`, `PreviewV0_1`, `LinearBounded`,
+`PreviewV0_4`, and the entire `PreviewV0_5*` SOTA-trail matrix incl. the
+`*Calibrated` variants and `PreviewV0_5Linear`) moved to the new **unpublished**
+`zensim-experimental` crate, where each is reconstructed **bit-identically** via
+the builder + `Custom` extension point. Names are preserved (e.g.
+`zensim_experimental::preview_v0_5_tuner_v4()` returns a `Custom` whose
+`name()` is `"zensim-preview-v0.5-tuner-v4"`). Codec crates should target
+`ZensimProfile::codec_target()` (= `A`) (e0008fe1, 39957f71, a2e0234d, 82ea1f46).
+
+### Added — `ZensimProfile::Custom` + `ProfileParams::builder()` extension point
+
+A single generic hinge for externally-defined profiles:
+`ZensimProfile::Custom { params, name }` drives the full scoring runtime from a
+`&'static ProfileParams`, and `ProfileParams::builder()` constructs one from a
+bake's bytes + dispositions (MLP / secondary / ensemble slots + the
+skip-mapping / soft-clamp / extrapolate / extended-features / iw dispositions).
+This is how `zensim-experimental` rebuilds the historical bakes, and the
+sanctioned way for any consumer to load a custom bake (e0008fe1).
+
+### Removed — embedded-bake bloat trimmed from the published package
+
+Only the `v47-strict-QAT` bake backing `A` stays embedded. The published
+tarball drops from 37 `.bin` files (~5.1 MB of archive / picker / historical
+weights) to 1, via an explicit `include` list. Historical bakes live in
+`zensim-experimental`; archive / picker / training bakes stay on disk for
+workspace tooling but no longer ship to crates.io.
+
 ### Fixed — FD gradient tests use f32-appropriate ε + atol+rtol gate (2026-05-27)
 
 The konjnd-agg 2-layer `w1` finite-difference gradient check (`rel < 1e-3` at
