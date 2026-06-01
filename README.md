@@ -108,7 +108,7 @@ ssim2 has the tightest Z-RMSE in the mid bands (B4–B6) — this is the ssim2-t
 
 v0.2 (default-on linear profile through zensim 0.2.x): 228 linear weights × basic+peak features, trained on 218k concordance-filtered synthetic pairs via Nelder-Mead.
 
-`PreviewV0_3` (the MLP profile shipping in zensim 0.3.x and now the canonical [`codec_target()`](docs/CODEC_TARGET_METRIC.md)): 372-input MLP (372 → 128 → 128 identity passthrough) with per-sample-α head + tanh-output pin + 7-knot PCHIP spline. 54 KB packed bake (i8 + zerobias + lz4, md5 `cac9416124a5e5f8ff577bc78e15ea1f`, file `zensim/weights/v_tuner_v11_2026-05-24.bin`). Trained on 5 groups (safesyn 196k + cid22_train 17.6k + kadid 10.1k + tid 3k + konjnd_dense 20.2k) with a konjnd-aggregation aux loss for per-source PJND calibration. Methodology: [`benchmarks/v_tuner_v11_methodology_2026-05-24.md`](benchmarks/v_tuner_v11_methodology_2026-05-24.md).
+`A` (the MLP profile shipping in zensim 0.3.x and the canonical [`codec_target()`](docs/CODEC_TARGET_METRIC.md)): 372-input MLP (372 → 128 → 64 + per-sample-α head + tanh-output pin) with a monotone 7-knot PCHIP dial spline. 27 KB packed bake (`v47-strict-QAT`, f16 + zerobias, file `zensim/weights/v47_strict_qat_native_2026-05-27.bin`). Masked-monotone by construction (W1 ≥ 0 on the 300 sign-safe features, rank_w ≤ 0, α ≡ 1): 0 inversions, 0 above-identity, identity = 97.69. Trained on 5 groups (safesyn 196k + cid22_train 17.6k + kadid 10.1k + tid 3k + konjnd_dense 20.2k) via one QAT-native pass. Held-out SROCC: CID22 0.866, KADID 0.793, TID 0.793, KonJND 0.419, AIC-3 0.768, AIC-4 0.885. Methodology: [`benchmarks/v0_qat_native_methodology_2026-05-27.md`](benchmarks/v0_qat_native_methodology_2026-05-27.md).
 
 ### v0.2 → v0.3 rough score equivalence
 
@@ -154,11 +154,12 @@ Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SR
 ```rust
 use zensim::{Zensim, ZensimProfile, RgbSlice};
 
-// Pick a version explicitly for pinned reproducibility:
-let z = Zensim::new(ZensimProfile::PreviewV0_3);
+// Pick a profile explicitly for pinned reproducibility:
+let z = Zensim::new(ZensimProfile::A);
 // Or use `ZensimProfile::latest_preview()` for whatever current preview
 // ships (rotates as new previews land), or `ZensimProfile::codec_target()`
-// for the stable codec-target contract.
+// for the stable codec-target contract. `PreviewV0_2` is the linear
+// general-ranking profile; `PreviewV0_1` is the 0.2.x-compatible linear one.
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
 let result = z.compute(&source, &distorted)?;
@@ -173,7 +174,7 @@ With the `zenpixels` feature, pass any `PixelSlice` or `PixelBuffer` directly:
 
 ```toml
 [dependencies]
-zensim = { version = "0.2", features = ["zenpixels"] }
+zensim = { version = "0.3", features = ["zenpixels"] }
 ```
 
 ```rust
@@ -181,7 +182,7 @@ use zensim::{Zensim, ZensimProfile, ZenpixelsSource};
 
 let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-let result = Zensim::new(ZensimProfile::PreviewV0_3).compute(&source, &distorted)?;
+let result = Zensim::new(ZensimProfile::A).compute(&source, &distorted)?;
 ```
 
 Format mapping is automatic: RGBX/BGRX becomes opaque, premultiplied alpha is un-premultiplied, color primaries are forwarded. HDR (PQ, HLG) and grayscale are rejected with `UnsupportedFormat`.
@@ -279,12 +280,13 @@ Each `ZensimProfile` bundles weights and score-mapping parameters. Scores from a
 
 | Profile | Kind | CID22 SROCC | Bake |
 |---------|------|------:|------|
-| `A` (alias: deprecated `PreviewV0_3`) | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.87** | 27 KB v47-strict-QAT |
+| `A` | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.87** | 27 KB v47-strict-QAT |
 | `PreviewV0_2` | linear, 228 Nelder-Mead weights | 0.87 | none (linear) |
+| `PreviewV0_1` | linear, 228 weights (0.2.x back-compat) | 0.86 | none (linear) |
 
 `ZensimProfile::codec_target()` and `latest_preview()` both return `A` — the canonical production codec-target the zen codecs dial against. The deprecated `latest()` also returns `A`. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
 
-The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, `PreviewV0_1`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
+The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 
 ## Feature flags
 

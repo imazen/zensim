@@ -2,24 +2,44 @@
 
 ## [Unreleased]
 
+### Changed — `PreviewV0_1` restored as a built-in profile; never-published `PreviewV0_3` alias removed (2026-06-01)
+
+Compatibility correction to the profile relocation below:
+
+- **`ZensimProfile::PreviewV0_1` is restored as a first-class built-in
+  profile.** It shipped in the published 0.1.x / 0.2.x line, so removing it
+  was a gratuitous break; it now scores **bit-identically** to those releases
+  (linear `WEIGHTS_PREVIEW_V0_1` + the classic `100 − 18·d^0.7` mapping). The
+  duplicate `zensim_experimental::preview_v0_1()` reconstruction is dropped.
+- **`ZensimProfile::PreviewV0_3` is removed.** It was a deprecated-from-birth
+  alias for `A` that was **never published to crates.io** (last published:
+  0.2.7), so it carried no compatibility obligation. Code that named it should
+  use `ZensimProfile::A` (identical bake/scores), `codec_target()`, or
+  `latest_preview()`. The `zensim-target` CLI still accepts the `"v0.3"`
+  string, resolving it to `A`.
+
+Net public `ZensimProfile` surface: `A`, `PreviewV0_1`, `PreviewV0_2`, and the
+`custom-profiles`-gated `Custom`.
+
 ### Changed — `Custom`/builder gated behind `custom-profiles`; V0_1 weights kept in zensim (2026-06-01)
 
 `ZensimProfile::Custom`, `ProfileParams::builder()`, and `ProfileParamsBuilder`
 are now behind the **non-default `custom-profiles` feature** — the
 `zensim-experimental` crate enables it; default consumers no longer carry that
 surface. `WEIGHTS_PREVIEW_V0_1` (+ the `LINEAR_WEIGHTS_PREVIEW_V0_1` alias) is
-**restored as a public array in zensim** — only the `PreviewV0_1` *profile*
-lives in `zensim-experimental` (it references zensim's array).
+a public array in zensim, backing the restored `PreviewV0_1` built-in profile.
 
 ### Changed — experimental/historical profiles relocated to `zensim-experimental` (2026-06-01)
 
 **BREAKING (absorbed by the 0.2.x → 0.3.0 minor bump): `ZensimProfile` now
-exposes only the shipping profiles** — `A`, `PreviewV0_2`, the deprecated
-`PreviewV0_3` alias, and the new `Custom` escape hatch. The 21 experimental /
-historical research profiles (`A_Phone`, `PreviewV0_1`, `LinearBounded`,
-`PreviewV0_4`, and the entire `PreviewV0_5*` SOTA-trail matrix incl. the
-`*Calibrated` variants and `PreviewV0_5Linear`) moved to the new **unpublished**
-`zensim-experimental` crate, where each is reconstructed **bit-identically** via
+exposes only the shipping profiles** — `A`, `PreviewV0_1`, `PreviewV0_2`, and
+the new `Custom` escape hatch (see the compatibility correction above:
+`PreviewV0_1` is retained as a built-in and `PreviewV0_3` is removed rather
+than shipped as a deprecated alias). The 20 experimental / historical research
+profiles (`A_Phone`, `LinearBounded`, `PreviewV0_4`, and the entire
+`PreviewV0_5*` SOTA-trail matrix incl. the `*Calibrated` variants and
+`PreviewV0_5Linear`) moved to the new **unpublished** `zensim-experimental`
+crate, where each is reconstructed **bit-identically** via
 the builder + `Custom` extension point. Names are preserved (e.g.
 `zensim_experimental::preview_v0_5_tuner_v4()` returns a `Custom` whose
 `name()` is `"zensim-preview-v0.5-tuner-v4"`). Codec crates should target

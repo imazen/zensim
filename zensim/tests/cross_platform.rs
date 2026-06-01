@@ -89,7 +89,7 @@ fn generate_test_pairs(w: usize, h: usize) -> Vec<TestPair> {
 ///
 /// Pinned to `PreviewV0_2` rather than `latest()` because the reference
 /// scores below are V0_2-specific (228-weight linear profile, SROCC=0.9942).
-/// `latest()` returns the MLP `PreviewV0_3` in zensim 0.3.x — its scores
+/// `latest()` returns the MLP profile `A` in zensim 0.3.x — its scores
 /// for the same inputs are unrelated to the V0_2 calibration.
 #[test]
 fn hardcoded_reference_scores() {
@@ -237,7 +237,10 @@ fn feature_coverage() {
     const NUM_SCORED: usize = 156; // 13 × 3 × 4
     const NUM_PEAKS: usize = 72; // 6 × 3 × 4
     const NUM_FEATURES: usize = NUM_SCORED + NUM_PEAKS; // 228
-    let z = Zensim::new(ZensimProfile::A);
+    // This test validates the base 228-feature scored+peaks layout, so it
+    // must run on a 228-feature profile. `A` is the 372-feature MLP profile
+    // (extended + IW-pool blocks) — use the linear `PreviewV0_2` instead.
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
     let pairs = generate_test_pairs(W, H);
 
     let mut max_per_feature = vec![0.0f64; NUM_FEATURES];
@@ -405,7 +408,7 @@ fn determinism_same_platform() {
 /// "raw_distance == 0.0 for identical input" invariant is V0_2-specific:
 /// V0_2 is a linear-weighted sum of feature distances, so all-zero
 /// features → 0 distance → score 100 by the `100 − 18·d^0.7` mapping.
-/// The MLP profile `PreviewV0_3` evaluates a LeakyReLU forward pass
+/// The MLP profile `A` evaluates a LeakyReLU forward pass
 /// on the (all-zero) feature vector; its biases produce a non-zero raw
 /// output, which the runtime clamps to 100 at the score level.
 /// Different invariant, different test surface.
@@ -461,6 +464,38 @@ fn identical_images_score_100() {
             "{name}: identical images must have zero mean_offset",
         );
     }
+}
+
+/// `PreviewV0_1` is the restored 0.2.x-compatible linear profile. Guard its
+/// basic contract: correct name, identical images score exactly 100, and a
+/// distorted pair scores below 100 (the profile is wired and non-trivial).
+#[test]
+fn preview_v0_1_compat_profile() {
+    const W: usize = 128;
+    const H: usize = 128;
+    assert_eq!(ZensimProfile::PreviewV0_1.name(), "zensim-preview-v0.1");
+
+    let z = Zensim::new(ZensimProfile::PreviewV0_1);
+    let pixels = gen_mandelbrot(W, H);
+    let copy = pixels.clone();
+    let src = RgbSlice::new(&pixels, W, H);
+    let dst = RgbSlice::new(&copy, W, H);
+    let identical = z.compute(&src, &dst).expect("compute failed");
+    assert_eq!(
+        identical.score(),
+        100.0,
+        "PreviewV0_1: identical images must score 100.0, got {:.6}",
+        identical.score(),
+    );
+
+    let distorted_px = distort_blur(&pixels, W, H, 3);
+    let dist = RgbSlice::new(&distorted_px, W, H);
+    let blurred = z.compute(&src, &dist).expect("compute failed");
+    assert!(
+        blurred.score() < 100.0,
+        "PreviewV0_1: blurred pair must score below 100, got {:.6}",
+        blurred.score(),
+    );
 }
 
 /// mean_offset must reflect XYB channel shifts for color-shifted images.

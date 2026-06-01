@@ -90,7 +90,7 @@ fn v05_ensemble_identity_returns_100() {
 
 #[test]
 fn v03_identity_returns_100() {
-    // V0_3 (the prior MLP-based ship at PreviewV0_3) also has the same
+    // A (the MLP-based ship) also has the same
     // bug — the MLP runs after the byte-identical short-circuit and
     // overwrites the 100. Lock in the fix for it too.
     assert_identity_returns_100(ZensimProfile::A, "A");

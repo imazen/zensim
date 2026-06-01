@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
                     target,
                     tolerance: 1.5,
                     max_iterations: 8,
-                    profile: ZensimProfile::PreviewV0_3,
+                    profile: ZensimProfile::A,
                 };
                 match target_search(&rgb, w, h, *codec, spec) {
                     Ok(r) => {

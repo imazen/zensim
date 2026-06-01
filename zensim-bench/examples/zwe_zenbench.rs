@@ -49,10 +49,10 @@ fn main() {
     .map(|(label, w, h)| {
         let (src, dst) = make_test_images(w, h);
         let z_mt = Box::leak(Box::new(
-            Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(true),
+            Zensim::new(ZensimProfile::A).with_parallel(true),
         ));
         let z_st = Box::leak(Box::new(
-            Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false),
+            Zensim::new(ZensimProfile::A).with_parallel(false),
         ));
         let s_view = RgbSlice::new(&src, w, h);
         let pre_mt = Box::leak(Box::new(z_mt.precompute_reference(&s_view).unwrap()));

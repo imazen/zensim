@@ -6,10 +6,10 @@
 //! These profiles and their trained MLP bakes were moved out of the
 //! published `zensim` crate (2026-06-01) to keep its download size and
 //! permanent API surface minimal. The published `zensim` keeps only the
-//! shipping profiles (`A`, `PreviewV0_2`, the deprecated `PreviewV0_3`
-//! alias). Everything else — the `PreviewV0_4` D2 ensemble, the whole
-//! `PreviewV0_5*` SOTA-trail matrix, `A_Phone`, `PreviewV0_1`,
-//! `LinearBounded`, and `PreviewV0_5Linear` — lives here.
+//! shipping profiles (`A`, the back-compat linear `PreviewV0_1` /
+//! `PreviewV0_2`). Everything else — the `PreviewV0_4` D2 ensemble, the
+//! whole `PreviewV0_5*` SOTA-trail matrix, `A_Phone`, `LinearBounded`,
+//! and `PreviewV0_5Linear` — lives here.
 //!
 //! Every profile is reconstructed through zensim's stable
 //! [`zensim::profile::ProfileParams::builder`] +
@@ -142,17 +142,9 @@ profile_fn!(
         .build()
 );
 
-profile_fn!(
-    /// Preview v0.1 — linear-weights profile (no MLP). 344k synthetic
-    /// pairs, 5-fold CV SROCC = 0.9936. Uses the relocated
-    /// `WEIGHTS_PREVIEW_V0_1` coefficients + the classic `100 − 18·d^0.7`
-    /// score mapping.
-    preview_v0_1,
-    "zensim-preview-v0.1",
-    ProfileParams::builder()
-        .weights(&zensim::profile::WEIGHTS_PREVIEW_V0_1)
-        .build()
-);
+// `PreviewV0_1` is now a first-class built-in profile again
+// (`zensim::ZensimProfile::PreviewV0_1`) — restored to the published crate
+// for 0.2.x backwards-compatibility — so it is no longer reconstructed here.
 
 profile_fn!(
     /// `LinearBounded` — correct-by-construction bounded squash

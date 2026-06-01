@@ -2141,7 +2141,7 @@ pub(crate) fn apply_mlp_scoring_with_codec(
         //     score (~1 ns).
         // The choice is per-profile via `ProfileParams::soft_clamp_score`.
         // PreviewV0_4 (V_18 + V_20 IS multi-bake) sets `true`;
-        // PreviewV0_3 (V_18 ship single-bake) and earlier set `false`.
+        // the V_18 ship single-bake and earlier set `false`.
         //
         // EXP-CROSS-CODEC-V10 (2026-05-20): `extrapolate_score` overrides
         // both hard- and soft-clamp paths. The PCHIP spline's linear
@@ -3750,7 +3750,7 @@ mod tests {
         // Linear-profile-specific test: the score-equality assertion
         // only holds for profiles whose scoring is linear-weighted on
         // the 228 features (the extended 300 features just have
-        // weight=0 in those slots). MLP profiles (PreviewV0_3 +) score
+        // weight=0 in those slots). MLP profiles (A +) score
         // via a forward pass — extended features change the input
         // shape and break the equality. Pin to V0_2.
         let z = crate::Zensim::new(crate::ZensimProfile::PreviewV0_2);

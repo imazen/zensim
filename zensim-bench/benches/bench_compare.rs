@@ -91,7 +91,7 @@ fn bench_compute(c: &mut Criterion) {
         let (src, dst) = make_test_images(w, h);
 
         // zensim (multi-threaded, default)
-        let z = Zensim::new(ZensimProfile::PreviewV0_3);
+        let z = Zensim::new(ZensimProfile::A);
         group.bench_function(format!("zensim/{label}"), |b| {
             b.iter(|| {
                 let s = RgbSlice::new(std::hint::black_box(&src), w, h);
@@ -101,7 +101,7 @@ fn bench_compute(c: &mut Criterion) {
         });
 
         // zensim (single-threaded)
-        let z_st = Zensim::new(ZensimProfile::PreviewV0_3).with_parallel(false);
+        let z_st = Zensim::new(ZensimProfile::A).with_parallel(false);
         group.bench_function(format!("zensim_st/{label}"), |b| {
             b.iter(|| {
                 let s = RgbSlice::new(std::hint::black_box(&src), w, h);

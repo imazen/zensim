@@ -139,31 +139,6 @@ fn v04_profile_name() {
     assert_eq!(ZensimProfile::A.name(), "zensim-a");
 }
 
-/// The deprecated `PreviewV0_3` alias must keep its own name AND score
-/// identically to `A` (same backing bake).
-#[test]
-#[allow(deprecated)]
-fn preview_v0_3_is_deprecated_alias_of_a() {
-    assert_eq!(ZensimProfile::PreviewV0_3.name(), "zensim-preview-v0.3");
-    // Identical params ⇒ identical scores under both names. Use 64×64
-    // (not 32×32) — A's bake requires the full 372-feature vector, and
-    // the IW-pool block degenerates at smaller scales on 32×32 inputs
-    // (ModelForwardFailed: "bake declares more input features than the
-    // caller supplied"). 64×64 has enough resolution for all 4 scales.
-    let (src, dst) = make_test_pair(64, 64);
-    let s = RgbSlice::new(&src, 64, 64);
-    let d = RgbSlice::new(&dst, 64, 64);
-    let a = Zensim::new(ZensimProfile::A)
-        .with_parallel(false)
-        .compute(&s, &d)
-        .unwrap();
-    let p = Zensim::new(ZensimProfile::PreviewV0_3)
-        .with_parallel(false)
-        .compute(&s, &d)
-        .unwrap();
-    assert_eq!(a.score(), p.score());
-}
-
 /// PreviewV0_4 (V_18 + V_20-IS multi-bake ensemble) currently fails to
 /// load on every standard test content size we've tried — its bake's
 /// declared `n_inputs` exceeds what the 372-feature extraction supplies.

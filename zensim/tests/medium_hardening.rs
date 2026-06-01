@@ -11,7 +11,7 @@ use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError
 fn z() -> Zensim {
     // Use V0_2 (linear): these tests poke API mechanics on tiny
     // 16x16 / 32x16 inputs that are below the MLP profile's minimum
-    // input size (PreviewV0_3 needs the full 228-feature multi-scale
+    // input size (the MLP profile A needs the full multi-scale
     // pyramid which only computes cleanly on larger images).
     Zensim::new(ZensimProfile::PreviewV0_2)
 }

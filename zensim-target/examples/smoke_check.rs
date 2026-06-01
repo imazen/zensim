@@ -35,7 +35,7 @@ fn main() -> anyhow::Result<()> {
     println!();
     for profile in [
         ZensimProfile::PreviewV0_2,
-        ZensimProfile::PreviewV0_3,
+        ZensimProfile::A,
         zensim_experimental::preview_v0_5(),
         zensim_experimental::preview_v0_5_balanced(),
         zensim_experimental::preview_v0_5_compression(),

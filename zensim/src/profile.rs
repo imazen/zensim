@@ -2,14 +2,13 @@
 //!
 //! Each [`ZensimProfile`] variant bundles weights and parameters that affect
 //! score output. A given profile produces approximately the same scores
-//! across crate patch versions. Variant names track the crate's minor
-//! version that introduced them — `PreviewV0_3` is the variant shipped
-//! by zensim 0.3.x; the underlying bake bytes inside the variant may
-//! be swapped during 0.3.x patches as long as scores stay approximately
+//! across crate patch versions. The canonical shipping profile is
+//! [`ZensimProfile::A`]; the underlying bake bytes inside a variant may
+//! be swapped during patch releases as long as scores stay approximately
 //! stable (per the [`zensim::CLAUDE.md`] shipping policy).
 //!
 //! Profile names and crate-version names are **two different things**:
-//! - **Profile name** (`PreviewV0_3`) is the API surface — what
+//! - **Profile name** (`A`, `PreviewV0_2`) is the API surface — what
 //!   downstream code matches on or constructs.
 //! - **Bake-bytes version** (V0_18, V0_18-zerobiased, ...) is the
 //!   implementation detail recorded in the methodology doc paired
@@ -39,47 +38,19 @@ pub enum ZensimProfile {
     /// mapping table in `docs/CODEC_TARGET_METRIC.md`, NOT inlined here
     /// (so this doc can't go stale on rotation).
     A,
+    /// Preview v0.1 — linear-weights profile (no MLP). 344k synthetic
+    /// pairs, 5-fold CV SROCC = 0.9936. Uses the [`WEIGHTS_PREVIEW_V0_1`]
+    /// coefficients with the classic `100 − 18·d^0.7` score mapping.
+    ///
+    /// Retained for backwards-compatibility: this variant shipped in the
+    /// published zensim 0.1.x / 0.2.x line and scores bit-identically to
+    /// those releases. For new code prefer [`Self::A`] (codec target) or
+    /// [`Self::PreviewV0_2`] (linear general-ranking).
+    PreviewV0_1,
     /// Preview v0.2. Concordance-filtered 218k pairs, Nelder-Mead SROCC=0.9960.
     /// Linear-weights profile, no MLP forward pass. The historical
     /// stable default — `latest()` returned this through zensim 0.2.x.
     PreviewV0_2,
-    /// Preview v0.3 — **canonical shipping profile (recovery phase 4,
-    /// 2026-05-24 PM)**. Multi-dataset Tuner v5 bake (file
-    /// `v_tuner_v11_2026-05-24.bin`, 54 KB packed i8 + zerobias + lz4,
-    /// md5 `cac9416124a5e5f8ff577bc78e15ea1f`).
-    ///
-    /// 372-input MLP (372 → 128 → 128 identity passthrough) with
-    /// per_sample_alpha_head + tanh_output_head + 7-knot PCHIP spline
-    /// calibration. Trained on 5 groups (safesyn 196k + cid22_train
-    /// 17.6k + kadid 10.1k + tid 3k + konjnd_dense 20.2k) with
-    /// `tanh_output_head_scale = 30.0` and a konjnd-aggregation aux
-    /// loss for per-source PJND calibration.
-    ///
-    /// Cross-corpus SROCC (held-out, 5-seed CI median):
-    /// CID22 0.860, KonJND 0.285, AIC-3 0.776, AIC-4 0.929,
-    /// monotonicity (JPEG q-sweep) 0.948.
-    ///
-    /// **Full 0-100 dial coverage** — score p5 = 28 (was 48 in the
-    /// V_18 lineage), JND lands at score 60 bit-exact (was 79).
-    /// Mean score at butter=3.5 (low-q) = 37 (was 55 flat floor).
-    /// Per-unit cross-codec consistency 2.36 % of dial span
-    /// (proportionally tighter than the V_18 ship's 2.63 %).
-    ///
-    /// **66/72 adjacent q-pairs discretely targetable** at ±1 score
-    /// unit across {zenjpeg, zenwebp, zenavif, zenjxl}. AVIF and JXL
-    /// reach all 18/18 pairs. Byte-identical short-circuit returns
-    /// score = 100 exactly for any codec's lossless mode.
-    ///
-    /// Methodology: `benchmarks/v_tuner_v11_methodology_2026-05-24.md`.
-    /// Per-codec q-range: `benchmarks/v_tuner_v5_per_codec_q_range_2026-05-24.md`.
-    /// Integration guide: `docs/CODEC_TARGET_METRIC.md`.
-    ///
-    /// **Deprecated alias of [`Self::A`]** — behaves identically (same
-    /// bake, same scores). Kept until internal call sites migrate off
-    /// the `PreviewV0_3` name. Prefer `ZensimProfile::A` /
-    /// `ZensimProfile::codec_target()`.
-    #[deprecated(note = "use ZensimProfile::A (PreviewV0_3 is a deprecated alias)")]
-    PreviewV0_3,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
     /// `zensim-experimental` crate, which preserves the historical
@@ -193,9 +164,8 @@ impl ZensimProfile {
     pub fn name(&self) -> &'static str {
         match self {
             Self::A => "zensim-a",
+            Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
-            #[allow(deprecated)]
-            Self::PreviewV0_3 => "zensim-preview-v0.3",
             // Experimental / historical profiles live in `zensim-experimental`
             // and surface here as `Custom` with their original name string.
             #[cfg(feature = "custom-profiles")]
@@ -206,10 +176,8 @@ impl ZensimProfile {
     /// Internal parameters for this profile.
     pub(crate) fn params(&self) -> &'static ProfileParams {
         match self {
-            // `A` is canonical; `PreviewV0_3` is its deprecated alias —
-            // identical params, identical scores.
-            #[allow(deprecated)]
-            Self::A | Self::PreviewV0_3 => &PROFILE_A,
+            Self::A => &PROFILE_A,
+            Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             // Experimental / historical profiles carry their own
             // `&'static ProfileParams` built in `zensim-experimental`.
@@ -373,7 +341,7 @@ pub struct ProfileParams {
     /// that collapsed SROCC to 0 on TID B0/B1 pairs.
     ///
     /// Default `false` keeps the hard-clamp legacy semantics for
-    /// V_18 ship (PreviewV0_3) and earlier profiles.
+    /// the V_18 ship lineage and earlier profiles.
     ///
     /// Added 2026-05-16 (T3.2). See zensim/CLAUDE.md `V_20 input-shaping
     /// learnings > Soft-clamp the multi-bake output` for the design rationale.
@@ -666,6 +634,29 @@ impl ProfileParamsBuilder {
 
 // --- Profile definitions ---
 
+// `PreviewV0_1` is the linear V0.1 profile published through zensim
+// 0.1.x / 0.2.x. Identical to `PROFILE_PREVIEW_V0_2` except for the
+// weight vector, so scores match those releases bit-for-bit.
+static PROFILE_PREVIEW_V0_1: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_1,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: false,
+    mlp_bytes: None,
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: false,
+    compute_iw_features: false,
+    soft_clamp_score: false,
+    extrapolate_score: false,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
 static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     weights: &WEIGHTS_PREVIEW_V0_2,
     blur_radius: 5,
@@ -686,10 +677,10 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::A` (PreviewV0_3) bake bytes — **rotated 2026-05-27 to
+/// `ZensimProfile::A` bake bytes — **rotated 2026-05-27 to
 /// `v47-strict-QAT-native`** (`v47_strict_qat_native_2026-05-27.bin`, 27 KB,
 /// sha256 `d0ef7a30…`). This is a bake rotation of the `Profile::A` slot, not
-/// an API change — the `PreviewV0_3` name and the metric architecture are
+/// an API change — the `A` name and the metric architecture are
 /// unchanged.
 ///
 /// **Why rotated:** the prior V39 bake (`v39_v32plus_spline…`, still backing
@@ -726,9 +717,8 @@ pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
     include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin")
 }
 
-/// Generation-A profile params (external `ZensimProfile::A`, and the
-/// deprecated `PreviewV0_3` alias). Backing bake recorded in the
-/// mapping table in `docs/CODEC_TARGET_METRIC.md`.
+/// Generation-A profile params (external `ZensimProfile::A`). Backing
+/// bake recorded in the mapping table in `docs/CODEC_TARGET_METRIC.md`.
 static PROFILE_A: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
@@ -763,9 +753,8 @@ static PROFILE_A: ProfileParams = ProfileParams {
 // --- Weight arrays ---
 
 /// Preview v0.1 linear weights (344k synthetic pairs, 5-fold CV SROCC=0.9936).
-/// 228 entries = 4 scales × 3 channels × 19 features. Kept as the canonical
-/// V0.1 coefficient vector; the `PreviewV0_1` *profile* lives in
-/// `zensim-experimental` but references this array.
+/// 228 entries = 4 scales × 3 channels × 19 features. The canonical V0.1
+/// coefficient vector backing [`ZensimProfile::PreviewV0_1`].
 #[allow(clippy::excessive_precision)]
 pub static WEIGHTS_PREVIEW_V0_1: [f64; 228] = [
     // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
