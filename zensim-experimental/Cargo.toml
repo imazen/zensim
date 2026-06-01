@@ -1,0 +1,24 @@
+[package]
+name = "zensim-experimental"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93.0"
+license = "MIT OR Apache-2.0"
+description = "Historical and experimental zensim metric profiles, preserved for research reference. Not published."
+publish = false
+
+# All historical research bakes (the PreviewV0_4 / PreviewV0_5* trail
+# variants, A_Phone, PreviewV0_1, LinearBounded, PreviewV0_5Linear) live
+# here so they stay runnable from the workspace without bloating the
+# published `zensim` crate's download size or permanent API surface.
+# Every profile is rebuilt through zensim's stable
+# `ProfileParams::builder()` + `ZensimProfile::Custom` extension point.
+
+[dependencies]
+zensim = { workspace = true }
+
+[dev-dependencies]
+image = { workspace = true }
+
+[lints.clippy]
+uninlined_format_args = "allow"

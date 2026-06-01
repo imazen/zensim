@@ -6480,6 +6480,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zensim-experimental"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "zensim",
+]
+
+[[package]]
 name = "zensim-picker-prep"
 version = "0.1.0"
 dependencies = [
