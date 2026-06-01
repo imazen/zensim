@@ -174,9 +174,16 @@ in PU/PQ space.
 - **Chunk 1 — display-model foundation** (`transfer.rs`: PQ/HLG/sRGB → cd/m² +
   reference-parity tests). **✅ DONE 2026-06-01** — 6 tests green, decision-
   independent, zero SDR regression, internal (`pub(crate)`).
-- **Chunk 0/3-data — UPIQ validation harness** (extract the EXR zip, reproduce
-  PU-SSIM/PU-FSIM/HDR-VDP-2 baselines, wire pycvvdp rank-parity + the
-  Mohammadi/JOD panel). **In progress** — every later change must be *measured*.
+- **Chunk 0 — UPIQ validation harness** (`scripts/upiq_eval.py`: joins the UPIQ
+  JOD truth + objective scores, runs the canonical `panel` binary stratified
+  ALL/HDR/SDR; no stat math reimplemented). **✅ DONE 2026-06-01** — reproduces
+  the published baselines to <0.001 (`benchmarks/upiq_baselines_2026-06-01.md`:
+  PU-PieAPP 0.945, PU-FSIM 0.841, HDR-VDP-2 0.815, PU-SSIM 0.696). It also
+  reproduces the **PU-encoding payoff** on our own data: FSIM's HDR-band SROCC
+  0.457 → PU-FSIM 0.719 (+0.26 from PU-encoding the same metric) — the empirical
+  case for chunk 2. Needs only the two CSVs (no 2.4 GB EXR extraction). The
+  `--scores` flag is the plug-in point for zensim-HDR scores once chunk 2 lands;
+  EXR extraction + pycvvdp rank-parity is the remaining (image-side) half.
 - **Chunk 2 — PU21 front-end**: fetch `gfxdisp/pu21` coefficients; swap
   cube-root→PU21 on the absolute-luminance path; lift PR #39's guard for that
   path; validate PU-zensim on UPIQ vs PU-SSIM/PU-FSIM. Add the public HDR API
