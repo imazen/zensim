@@ -20,8 +20,13 @@
 /// Named metric profile. Scores for a given profile stay approximately
 /// stable across crate versions. Variants may be removed in future
 /// major (or minor-for-0.x) version bumps.
+// `PartialEq`/`Eq`/`Hash` are hand-written below (not derived): the
+// `Custom` variant holds `&'static ProfileParams`, and `ProfileParams`
+// contains `f64` fields (not `Eq`) plus fn-pointer bake slots, so a
+// derive would not compile. The manual impls compare named variants by
+// discriminant and `Custom` profiles by `(params-pointer, name)` identity.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug)]
 pub enum ZensimProfile {
     /// **`A` — the canonical generation-A profile (external name
     /// `zensim-a`).** The default general-purpose perceptual metric.
@@ -801,6 +806,24 @@ pub enum ZensimProfile {
     /// corpora). Recipe: `zensim/weights/manifests/v02_372feat_cell5.toml`.
     /// Methodology: `benchmarks/v02_372feat_2026-05-28.md`.
     PreviewV0_5Linear,
+    /// **Externally-defined profile** — an escape hatch for profiles
+    /// constructed outside this crate (for example the unpublished
+    /// `zensim-experimental` crate, which preserves the historical
+    /// research bakes off the published download). Build the parameters
+    /// with [`ProfileParams::builder`] from a bake's bytes, promote them
+    /// to `'static` (e.g. via a `OnceLock`), then wrap them here.
+    ///
+    /// `params` drives the full scoring runtime exactly as a built-in
+    /// variant's does — every head / spline / per-codec-calibration
+    /// behaviour lives in the bake bytes, so a `Custom` profile is
+    /// bit-identical to the equivalent built-in. `name` is the display
+    /// string returned by [`Self::name`] / [`Display`](core::fmt::Display).
+    Custom {
+        /// Profile parameters: weights, bake bytes, and dispositions.
+        params: &'static ProfileParams,
+        /// Display name, e.g. `"zensim-experimental-tuner-v4"`.
+        name: &'static str,
+    },
 }
 
 impl ZensimProfile {
@@ -918,6 +941,7 @@ impl ZensimProfile {
                 "zensim-preview-v0.5-compression-v3-calibrated"
             }
             Self::PreviewV0_5Linear => "zensim-preview-v0.5-linear",
+            Self::Custom { name, .. } => name,
         }
     }
 
@@ -961,6 +985,7 @@ impl ZensimProfile {
                 &PROFILE_PREVIEW_V0_5_COMPRESSION_V3_CALIBRATED
             }
             Self::PreviewV0_5Linear => &PROFILE_CELL5_LINEAR,
+            Self::Custom { params, .. } => params,
         }
     }
 }
@@ -971,11 +996,41 @@ impl core::fmt::Display for ZensimProfile {
     }
 }
 
+// Hand-written equality/hashing (see the note on the enum). Named
+// (fieldless) variants compare by discriminant; a `Custom` profile is
+// equal only to another `Custom` with the same `params` pointer AND the
+// same `name`, and is never equal to a named variant.
+impl PartialEq for ZensimProfile {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                ZensimProfile::Custom { params: a, name: na },
+                ZensimProfile::Custom { params: b, name: nb },
+            ) => core::ptr::eq(*a, *b) && na == nb,
+            (ZensimProfile::Custom { .. }, _) | (_, ZensimProfile::Custom { .. }) => false,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for ZensimProfile {}
+
+impl core::hash::Hash for ZensimProfile {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        if let ZensimProfile::Custom { params, name } = self {
+            (*params as *const ProfileParams as usize).hash(state);
+            name.hash(state);
+        }
+    }
+}
+
 /// Internal struct holding everything needed to compute scores for a profile.
 ///
 /// Each parameter's effect on computation path and performance is documented
 /// on the corresponding field of `ZensimConfig` in `metric.rs`.
 #[cfg_attr(not(feature = "training"), allow(dead_code))]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct ProfileParams {
     /// Scoring weights (one per feature, length = `FEATURES_PER_SCALE * num_scales`).
@@ -1199,6 +1254,172 @@ impl ProfileParams {
             ensemble_classifier_bytes: None,
             mlp_bytes_compression: None,
         }
+    }
+}
+
+impl ProfileParams {
+    /// Start building a custom [`ProfileParams`] for use with
+    /// [`ZensimProfile::Custom`].
+    ///
+    /// This is the supported extension point for profiles defined outside
+    /// this crate (e.g. the unpublished `zensim-experimental` crate, which
+    /// preserves the historical research bakes). Defaults match the linear
+    /// `PreviewV0_2` baseline (`blur_radius = 5`, `blur_passes = 1`,
+    /// `num_scales = 4`, score mapping `100 − 18·d^0.7`, all dispositions
+    /// off, no MLP). Override only what differs:
+    ///
+    /// ```
+    /// use zensim::profile::ProfileParams;
+    /// fn my_bake() -> &'static [u8] { include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin") }
+    /// let params = ProfileParams::builder()
+    ///     .mlp(my_bake)
+    ///     .extended_features(true)
+    ///     .compute_iw_features(true)
+    ///     .skip_score_mapping(true)
+    ///     .extrapolate_score(true)
+    ///     .build();
+    /// # let _ = params;
+    /// ```
+    pub fn builder() -> ProfileParamsBuilder {
+        ProfileParamsBuilder {
+            inner: ProfileParams {
+                weights: &WEIGHTS_PREVIEW_V0_2,
+                blur_radius: 5,
+                blur_passes: 1,
+                num_scales: 4,
+                bounded_squash: false,
+                score_mapping_a: 18.0,
+                score_mapping_b: 0.7,
+                skip_score_mapping: false,
+                mlp_bytes: None,
+                mlp_bytes_b3: None,
+                mlp_primary_mix: 1.0,
+                extended_features: false,
+                compute_iw_features: false,
+                soft_clamp_score: false,
+                extrapolate_score: false,
+                ensemble_classifier_bytes: None,
+                mlp_bytes_compression: None,
+            },
+        }
+    }
+}
+
+/// Builder for a custom [`ProfileParams`]. See [`ProfileParams::builder`].
+///
+/// Every method takes and returns `self` for chaining; finish with
+/// [`build`](Self::build). The bake slots take a `fn() -> &'static [u8]`
+/// (typically a tiny wrapper around `include_bytes!`) so the bytes can be
+/// embedded by the defining crate and resolved lazily.
+#[derive(Debug)]
+pub struct ProfileParamsBuilder {
+    inner: ProfileParams,
+}
+
+impl ProfileParamsBuilder {
+    /// Linear scoring weights (one per feature). Defaults to the
+    /// `PreviewV0_2` weight vector; unused on the MLP path but kept
+    /// sensible for callers that introspect `params.weights`.
+    pub fn weights(mut self, weights: &'static [f64]) -> Self {
+        self.inner.weights = weights;
+        self
+    }
+
+    /// Box-blur radius at scale 0 and the number of iterated passes
+    /// (1 = rectangular, 3 ≈ Gaussian). Defaults to `(5, 1)`.
+    pub fn blur(mut self, radius: usize, passes: u8) -> Self {
+        self.inner.blur_radius = radius;
+        self.inner.blur_passes = passes;
+        self
+    }
+
+    /// Number of pyramid scales. Defaults to 4.
+    pub fn num_scales(mut self, num_scales: usize) -> Self {
+        self.inner.num_scales = num_scales;
+        self
+    }
+
+    /// Score-mapping coefficients `A`, `B` in `100 − A·d^B`. Ignored when
+    /// [`skip_score_mapping`](Self::skip_score_mapping) is set. Defaults to
+    /// `(18.0, 0.7)`.
+    pub fn score_mapping(mut self, a: f64, b: f64) -> Self {
+        self.inner.score_mapping_a = a;
+        self.inner.score_mapping_b = b;
+        self
+    }
+
+    /// Return the bake's raw (already-calibrated) output directly instead
+    /// of applying `100 − A·d^B`. Correct for MCOS/spline-calibrated bakes.
+    pub fn skip_score_mapping(mut self, v: bool) -> Self {
+        self.inner.skip_score_mapping = v;
+        self
+    }
+
+    /// Use the bounded saturating squash `100·exp(−(A/100)·d^B)` for a
+    /// linear (non-MLP) profile. Ignored when an MLP bake is set.
+    pub fn bounded_squash(mut self, v: bool) -> Self {
+        self.inner.bounded_squash = v;
+        self
+    }
+
+    /// Primary MLP bake. Switches scoring from the linear dot-product to a
+    /// forward pass through the loaded network.
+    pub fn mlp(mut self, bytes: fn() -> &'static [u8]) -> Self {
+        self.inner.mlp_bytes = Some(bytes);
+        self
+    }
+
+    /// Secondary (D2-style) MLP bake mixed with the primary at
+    /// `primary_mix` weight in raw-output space before score mapping.
+    pub fn mlp_secondary(mut self, bytes: fn() -> &'static [u8], primary_mix: f32) -> Self {
+        self.inner.mlp_bytes_b3 = Some(bytes);
+        self.inner.mlp_primary_mix = primary_mix;
+        self
+    }
+
+    /// Ensemble routing: a classifier bake whose sign selects between the
+    /// primary [`mlp`](Self::mlp) bake (negative logit) and the
+    /// `compression` bake (positive logit).
+    pub fn ensemble(
+        mut self,
+        classifier: fn() -> &'static [u8],
+        compression: fn() -> &'static [u8],
+    ) -> Self {
+        self.inner.ensemble_classifier_bytes = Some(classifier);
+        self.inner.mlp_bytes_compression = Some(compression);
+        self
+    }
+
+    /// Compute the extended (228 → 300) masked-feature block. Required for
+    /// any bake whose input width exceeds 228.
+    pub fn extended_features(mut self, v: bool) -> Self {
+        self.inner.extended_features = v;
+        self
+    }
+
+    /// Compute the IW-pool (300 → 372) feature block (implies extended).
+    pub fn compute_iw_features(mut self, v: bool) -> Self {
+        self.inner.compute_iw_features = v;
+        self
+    }
+
+    /// Wrap the final score in a logistic soft-clamp instead of a hard
+    /// `clamp(0, 100)` (preserves rank order at the extremes).
+    pub fn soft_clamp_score(mut self, v: bool) -> Self {
+        self.inner.soft_clamp_score = v;
+        self
+    }
+
+    /// Return the (spline-extrapolated) score without any clamp, allowing
+    /// values below 0 / above 100. Overrides `soft_clamp_score`.
+    pub fn extrapolate_score(mut self, v: bool) -> Self {
+        self.inner.extrapolate_score = v;
+        self
+    }
+
+    /// Finish building.
+    pub fn build(self) -> ProfileParams {
+        self.inner
     }
 }
 
