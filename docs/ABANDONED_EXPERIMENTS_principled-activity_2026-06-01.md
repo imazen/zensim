@@ -6,12 +6,12 @@ audited 2026-06-01 (patch-id + tree-id + symbol-grep vs `origin/main`).
 
 **Nothing is deleted.** Every commit below is preserved on origin and resurrectable by hash:
 
-- **Salvaged (genuinely-unique, valuable)** — full commits under tags:
-  - `salvage/principled-activity-2026-06-01/xyb-planar` (stride-aware sRGB/linear→XYB planar conversion)
-  - `salvage/principled-activity-2026-06-01/simd-encoder-f32` (2-layer f32 encoder + parity test + PWRC metrics)
-  - `salvage/principled-activity-2026-06-01/sigma-elim-kernel` (full 2026-04-29 perf series: σ-plane-elimination streaming/ring-buffer kernel, cbrt_lowp experiment, pruned-V0_2 bench)
-  - `salvage/principled-activity-2026-06-01/v05-calibration-tests` (extended V0_5 validation harness)
-- **Graveyard (everything else)** — all 119 commits anchored under tag `abandoned/principled-activity-2026-06-01` (octopus-merge of all op-store heads).
+- **Genuinely-unique commits (evaluated 2026-06-01 — none improved main, none landed)** — full commits under tags:
+  - `abandoned/principled-activity-2026-06-01/xyb-planar` (stride-aware sRGB/linear→XYB planar conversion)
+  - `abandoned/principled-activity-2026-06-01/simd-encoder-f32` (2-layer f32 encoder + parity test + PWRC metrics)
+  - `abandoned/principled-activity-2026-06-01/sigma-elim-kernel` (full 2026-04-29 perf series: σ-plane-elimination streaming/ring-buffer kernel, cbrt_lowp experiment, pruned-V0_2 bench)
+  - `abandoned/principled-activity-2026-06-01/v05-calibration-tests` (extended V0_5 validation harness)
+- **Graveyard (everything else)** — all 119 commits anchored under tag `abandoned/principled-activity-2026-06-01/graveyard` (octopus-merge of all op-store heads).
 
 Resurrect any commit: `git checkout <hash>` or `git cherry-pick <hash>` (objects are on origin via the tags above).
 
@@ -64,7 +64,7 @@ These carry the durable knowledge — what was tried and why it failed.
 
 ## Untitled working-copy snapshots
 
-46 commits had no description (intermediate working-copy snapshots). They are preserved under `abandoned/principled-activity-2026-06-01` but carry no findings. Hashes: 
+46 commits had no description (intermediate working-copy snapshots). They are preserved under `abandoned/principled-activity-2026-06-01/graveyard` but carry no findings. Hashes: 
 7d5aeef5 7d7aaee6 aa4d732a 6cb71c5f 6c60927c e74ad166 beb75930 176d0f9c 19420815 0d009e50 c2c53bc4 
 5dcd0f8a 31c78b77 beb87faf 405f9d27 4f3be492 ebcf78b9 d9cb310a 328de52a 24385126 37542f0f cfd091cb 
 b57b98dc badd1815 b4fe218f c1d25f60 21a79118 a82e63e4 a7a39e23 65a7a728 38b4b0e6 e15a9a89 f5ad1b23 
@@ -72,15 +72,15 @@ b57b98dc badd1815 b4fe218f c1d25f60 21a79118 a82e63e4 a7a39e23 65a7a728 38b4b0e6
 a0e8e828 38c7d60f 
 ## Salvage rebase evaluation (2026-06-01) — none landed
 
-Each of the 4 salvaged commits (the genuinely-unique work) was rebased onto current
+Each of the 4 preserved commits (the genuinely-unique work) was rebased onto current
 `origin/main` and evaluated for whether it improves main. **None was landed** — current
 main has independently evolved past all four.
 
 | Salvaged piece | Tag | Rebase onto main | Verdict |
 |---|---|---|---|
-| stride-aware sRGB/linear→XYB planar conversion | `salvage/…/xyb-planar` | clean cherry-pick, builds, 7 color tests pass | **DEAD CODE** — adds `srgb/linear_to_positive_xyb_planar_rows` (a stride-aware `_rows` API main lacks; main has `_into`/`_planar`) but unused/untested ("never used" warnings). Not landed: public-API addition with no caller. |
-| `simd_encoder_f32` 2-layer encoder | `salvage/…/simd-encoder-f32` | conflicts | **REDUNDANT** — main already has the identical `encoder_forward_2layer_f32`/`encoder_backprop_2layer_f32` in `simd_encoder.rs` + `arch_f32.rs`. Reimplemented & merged elsewhere. |
-| σ-plane-elimination streaming kernel | `salvage/…/sigma-elim-kernel` | conflicts (`streaming.rs`/`lib.rs`) | **ALREADY IN MAIN** — its mechanism (fused H-blur producing `sigma1_sq`/`sigma12` inline + separable 1D V-blur + strip-local cache-resident σ planes + `h_blur_src` elimination) landed 2026-05-15 / 05-22, weeks after σ-elim was abandoned (2026-04-29). The working-set lever was already tuned (`STRIP_INNER` sweep → 32). Original measured win was only −2.8% @ 1080p-MT vs a *worse* whole-image baseline; author: "σ planes mostly already L3-resident." The only genuinely-missing piece (an 11-row σ ring buffer) is marginal/uncertain and not worth the byte-exact-kernel rewrite risk (11 streaming correctness tests, incl. byte-exact, pass). |
-| extended V0_5 calibration test harness | `salvage/…/v05-calibration-tests` | conflicts (13 files) | **STALE** — the `v05_*` monotone/positivity/identity harness is genuinely missing from main, but a month of API drift means re-deriving against the current API, not a cherry-pick. Core affine-calibration already shipped (`assert_identity_returns_100`, `v04_calibrate_mapping.rs` on main). |
+| stride-aware sRGB/linear→XYB planar conversion | `abandoned/…/xyb-planar` | clean cherry-pick, builds, 7 color tests pass | **DEAD CODE** — adds `srgb/linear_to_positive_xyb_planar_rows` (a stride-aware `_rows` API main lacks; main has `_into`/`_planar`) but unused/untested ("never used" warnings). Not landed: public-API addition with no caller. |
+| `simd_encoder_f32` 2-layer encoder | `abandoned/…/simd-encoder-f32` | conflicts | **REDUNDANT** — main already has the identical `encoder_forward_2layer_f32`/`encoder_backprop_2layer_f32` in `simd_encoder.rs` + `arch_f32.rs`. Reimplemented & merged elsewhere. |
+| σ-plane-elimination streaming kernel | `abandoned/…/sigma-elim-kernel` | conflicts (`streaming.rs`/`lib.rs`) | **ALREADY IN MAIN** — its mechanism (fused H-blur producing `sigma1_sq`/`sigma12` inline + separable 1D V-blur + strip-local cache-resident σ planes + `h_blur_src` elimination) landed 2026-05-15 / 05-22, weeks after σ-elim was abandoned (2026-04-29). The working-set lever was already tuned (`STRIP_INNER` sweep → 32). Original measured win was only −2.8% @ 1080p-MT vs a *worse* whole-image baseline; author: "σ planes mostly already L3-resident." The only genuinely-missing piece (an 11-row σ ring buffer) is marginal/uncertain and not worth the byte-exact-kernel rewrite risk (11 streaming correctness tests, incl. byte-exact, pass). |
+| extended V0_5 calibration test harness | `abandoned/…/v05-calibration-tests` | conflicts (13 files) | **STALE** — the `v05_*` monotone/positivity/identity harness is genuinely missing from main, but a month of API drift means re-deriving against the current API, not a cherry-pick. Core affine-calibration already shipped (`assert_identity_returns_100`, `v04_calibrate_mapping.rs` on main). |
 
-**Conclusion:** all genuinely-unique work is preserved under `salvage/principled-activity-2026-06-01/*` (everything else under `abandoned/principled-activity-2026-06-01`), but none improves current main — it independently re-derived or superseded each. Nothing landed. `zensim--principled-activity` is fully safe to retire.
+**Conclusion:** all genuinely-unique work is preserved under `abandoned/principled-activity-2026-06-01/*` (everything else under `abandoned/principled-activity-2026-06-01/graveyard`), but none improves current main — it independently re-derived or superseded each. Nothing landed. `zensim--principled-activity` is fully safe to retire.
