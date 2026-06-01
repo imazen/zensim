@@ -15,7 +15,8 @@
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = "/home/lilith/work/zen/zensim/zensim-experimental/weights/archive/v0_16_2026-05-12.bin";
+    let path =
+        "/home/lilith/work/zen/zensim/zensim-experimental/weights/archive/v0_16_2026-05-12.bin";
     let bytes = fs::read(path)?;
     println!("loaded {path} ({} bytes)", bytes.len());
 

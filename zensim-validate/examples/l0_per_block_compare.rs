@@ -116,7 +116,9 @@ fn l0_importance(bake_path: &Path) -> Vec<f64> {
 }
 
 fn main() {
-    let ship = Path::new("/home/lilith/work/zen/zensim/zensim-experimental/weights/v_tuner_v11_2026-05-24.bin");
+    let ship = Path::new(
+        "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_tuner_v11_2026-05-24.bin",
+    );
     let cand = Path::new(
         "/home/lilith/work/zen/zensim/zensim-experimental/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin",
     );
