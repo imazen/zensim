@@ -787,6 +787,60 @@ pub(crate) fn compute_multiscale_stats_streaming(
     (stats, mean_offset)
 }
 
+/// HDR PU-path multiscale stats from two sets of **absolute-luminance** linear
+/// planes (ref + dist, cd/m²). Mirrors [`compute_multiscale_stats_streaming`]
+/// but converts both sides via PU21 ([`convert_linear_planar_to_pu_xyb_into`])
+/// rather than the sRGB/cube-root path. Reused by the `hdr`-gated public API.
+#[cfg(feature = "hdr")]
+pub(crate) fn compute_multiscale_stats_pu_linear_planar(
+    ref_planes: [&[f32]; 3],
+    dist_planes: [&[f32]; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+    config: &ZensimConfig,
+    variant: crate::pu21::Pu21Variant,
+    weights: &[f64],
+) -> (Vec<ScaleStats>, [f64; 3]) {
+    let padded_width = simd_padded_width(width);
+    let num_scales = config.num_scales;
+    let parallel = config.allow_multithreading;
+    let n = padded_width * height;
+
+    let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    convert_linear_planar_to_pu_xyb_into(
+        ref_planes, width, height, stride, padded_width, variant, &mut src_planes,
+    );
+    convert_linear_planar_to_pu_xyb_into(
+        dist_planes, width, height, stride, padded_width, variant, &mut dst_planes,
+    );
+
+    let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
+    let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
+    let mean_offset = compute_xyb_mean_offset(src_view, dst_view, width, height, padded_width);
+
+    let mut stats = Vec::with_capacity(num_scales);
+    let mut w = padded_width;
+    let mut h = height;
+    for scale in 0..num_scales {
+        if w < 8 || h < 8 {
+            break;
+        }
+        let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
+        let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
+        let (scale_stat, _) =
+            process_scale_bands(src_view, dst_view, w, h, config, scale, weights, None);
+        stats.push(scale_stat);
+        if scale < num_scales - 1 {
+            let (nw, nh) = downscale_6_planes(&mut src_planes, &mut dst_planes, w, h, parallel);
+            w = nw;
+            h = nh;
+        }
+    }
+    (stats, mean_offset)
+}
+
 /// Convert an ImageSource to planar XYB at padded width, parallelized over row chunks.
 ///
 /// Handles both RGB and RGBA sources row-by-row. RGBA is composited over a noise background.
@@ -2394,6 +2448,68 @@ pub(crate) fn convert_linear_planar_to_xyb_into(
             })
             .collect();
 
+        for y in 0..height {
+            let row_off = y * padded_width;
+            for (i, &src_x) in mirror_offsets.iter().enumerate() {
+                o0[row_off + width + i] = o0[row_off + src_x];
+                o1[row_off + width + i] = o1[row_off + src_x];
+                o2[row_off + width + i] = o2[row_off + src_x];
+            }
+        }
+    }
+}
+
+/// HDR sibling of [`convert_linear_planar_to_xyb_into`]: **absolute-luminance**
+/// linear RGB planes (cd/m²) → PU-encoded XYB planes. Unlike the SDR path it
+/// does NOT clamp to `[0,1]` (HDR luminance exceeds 1) and applies PU21 via
+/// [`crate::color::linear_to_pu_xyb_planar_into`] instead of the cube root.
+/// See `docs/HDR_PLAN.md` §2b.
+#[cfg(feature = "hdr")]
+pub(crate) fn convert_linear_planar_to_pu_xyb_into(
+    planes: [&[f32]; 3],
+    width: usize,
+    height: usize,
+    stride: usize,
+    padded_width: usize,
+    variant: crate::pu21::Pu21Variant,
+    out: &mut [Vec<f32>; 3],
+) {
+    use crate::color::linear_to_pu_xyb_planar_into;
+
+    let mut rgb_row: Vec<[f32; 3]> = vec![[0.0; 3]; width];
+    let [ref mut o0, ref mut o1, ref mut o2] = *out;
+
+    for y in 0..height {
+        let row_off = y * stride;
+        for x in 0..width {
+            // No [0,1] clamp: HDR absolute luminance is unbounded above. The
+            // PU conversion clamps to PU21's valid luminance domain instead.
+            rgb_row[x] = [
+                planes[0][row_off + x],
+                planes[1][row_off + x],
+                planes[2][row_off + x],
+            ];
+        }
+        let out_off = y * padded_width;
+        linear_to_pu_xyb_planar_into(
+            &rgb_row[..width],
+            variant,
+            &mut o0[out_off..out_off + width],
+            &mut o1[out_off..out_off + width],
+            &mut o2[out_off..out_off + width],
+        );
+    }
+
+    // Mirror-pad columns (identical to the SDR path).
+    let pad_count = padded_width - width;
+    if pad_count > 0 {
+        let period = 2 * (width - 1).max(1);
+        let mirror_offsets: Vec<usize> = (0..pad_count)
+            .map(|i| {
+                let m = (width + i) % period;
+                if m < width { m } else { period - m }
+            })
+            .collect();
         for y in 0..height {
             let row_off = y * padded_width;
             for (i, &src_x) in mirror_offsets.iter().enumerate() {

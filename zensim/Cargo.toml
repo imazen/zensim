@@ -34,6 +34,10 @@ training = []
 ## Exposes classification API: classify(), ClassifiedResult, ErrorClassification,
 ## DeltaStats, AlphaStratifiedStats. Used by zensim-regress for regression testing.
 classification = []
+## EXPERIMENTAL HDR scoring path: exposes Zensim::compute_pu_linear_planar (PU21
+## perceptually-uniform front-end on absolute-luminance input) + Pu21Variant.
+## Off by default — the SDR API and behavior are unchanged. See docs/HDR_PLAN.md.
+hdr = []
 ## Enable ImageSource impls for imgref::ImgRef<Rgb<u8>> and ImgRef<Rgba<u8>>.
 imgref = ["dep:imgref", "dep:rgb"]
 ## Enable ImageSource adapter for zenpixels PixelSlice/PixelBuffer types.
@@ -83,4 +87,4 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles", "hdr"))']  # zenresize kept in check-cfg for gated code

@@ -20,7 +20,7 @@ gpu-wgpu = ["zensim-train-gpu/gpu-wgpu"]
 gpu-cpu  = ["zensim-train-gpu/gpu-cpu"]
 
 [dependencies]
-zensim = { path = "../zensim", features = ["training"] }
+zensim = { path = "../zensim", features = ["training", "hdr"] }
 zensim-experimental = { path = "../zensim-experimental" }
 zensim-train-core = { path = "../zensim-train-core" }
 zensim-train-gpu = { path = "../zensim-train-gpu" }

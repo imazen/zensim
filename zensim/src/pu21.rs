@@ -27,7 +27,7 @@ pub(crate) const PU21_L_MAX: f32 = 10000.0;
 /// PU21 parameter sets. `BandingGlare` is the recommended default (it models
 /// display glare and is least prone to banding artifacts inflating the score).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub(crate) enum Pu21Variant {
+pub enum Pu21Variant {
     /// Minimizes visible banding; no glare model.
     Banding,
     /// Banding + display glare. **Recommended default** (gfxdisp/pu21 default).

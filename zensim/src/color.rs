@@ -1563,6 +1563,57 @@ fn linear_to_positive_xyb_planar_inner(
     }
 }
 
+/// HDR PU-XYB conversion (scalar): **absolute-luminance** linear RGB (cd/m²,
+/// NOT clamped to `[0,1]`) → PU-encoded XYB-like planes.
+///
+/// The HDR-path analog of [`linear_to_positive_xyb_planar_into`]: identical
+/// opsin mix + opponent structure, but each opsin-mixed channel goes through
+/// **PU21** (normalized so 100 cd/m² → ~1.0, matching the cube-root white
+/// point) instead of the cube root. The cube-root-domain absorbance centering
+/// (`-cbrt(K_B0)`) is dropped — in PU space `K_B0` clamps below `PU21_L_MIN`,
+/// so its contribution is ~0. See `docs/HDR_PLAN.md` §2b for the design
+/// rationale and the validation gate. Scalar only (HDR is a minority path;
+/// SIMD is a later optimization).
+#[cfg(feature = "hdr")]
+pub(crate) fn linear_to_pu_xyb_planar_into(
+    pixels: &[[f32; 3]],
+    variant: crate::pu21::Pu21Variant,
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    use crate::pu21::{PU21_L_MAX, PU21_L_MIN, pu21_encode};
+    // PU21(100 cd/m²) ≈ 256.3; normalize so a 100-nit reference white maps to
+    // ~1.0 — the same range the cube-root XYB white point sits in, so the
+    // downstream opponent biases + feature kernels stay in calibration.
+    const PU_WHITE: f32 = 256.3;
+
+    for (i, p) in pixels.iter().enumerate() {
+        // Opsin LMS mix on absolute luminance — no [0,1] clamp (HDR > 1).
+        let mixed0 = K_M00.mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0))).max(0.0);
+        let mixed1 = K_M10.mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0))).max(0.0);
+        let mixed2 = K_M20.mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0))).max(0.0);
+
+        let c0 = pu21_encode(mixed0.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
+        let c1 = pu21_encode(mixed1.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
+        let c2 = pu21_encode(mixed2.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
+
+        let x = 0.5 * (c0 - c1);
+        let y = 0.5 * (c0 + c1);
+
+        // The cube-root path amplifies X by 14× to make the tiny red-green
+        // cube-root difference visible. In PU space the opsin-channel
+        // differences are already in a larger range, so 14× over-amplifies
+        // chroma; HDR validation favors a luminance-dominant weighting (the
+        // strongest HDR baseline, PU-SSIM, is luminance-only). See the §2b
+        // validation gate in docs/HDR_PLAN.md.
+        const PU_X_SCALE: f32 = 4.0;
+        x_out[i] = x.mul_add(PU_X_SCALE, 0.42);
+        y_out[i] = y + 0.01;
+        b_out[i] = (c2 - y) + 0.55;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // RGBA/BGRA compositing helpers — all produce linear f32 RGB output
 // ---------------------------------------------------------------------------
