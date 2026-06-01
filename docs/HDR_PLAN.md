@@ -184,10 +184,44 @@ in PU/PQ space.
   case for chunk 2. Needs only the two CSVs (no 2.4 GB EXR extraction). The
   `--scores` flag is the plug-in point for zensim-HDR scores once chunk 2 lands;
   EXR extraction + pycvvdp rank-parity is the remaining (image-side) half.
-- **Chunk 2 — PU21 front-end**: fetch `gfxdisp/pu21` coefficients; swap
-  cube-root→PU21 on the absolute-luminance path; lift PR #39's guard for that
-  path; validate PU-zensim on UPIQ vs PU-SSIM/PU-FSIM. Add the public HDR API
-  (`ColorTransferFunction` → display model selection).
+- **Chunk 2 — PU21 front-end** (stacked PR on #39). **2a ✅ DONE 2026-06-01**:
+  `pu21.rs` — `pu21_encode`/`decode` with the verified `gfxdisp/pu21`
+  `banding_glare` coefficients (100 cd/m² → ~256), 6 reference-parity tests.
+  **2b/2c wiring SPEC'd below — not yet wired** (needs deliberate bias/clamp
+  design + harness validation, not a compile-only change).
+
+  ### Chunk 2b/2c — PU-XYB wiring spec (do this next)
+
+  **2b — the PU-XYB conversion** (`zensim/src/color.rs`). Add a scalar
+  `linear_abs_to_pu_xyb_planar_into(pixels_cdm2: &[[f32;3]], display:
+  DisplayModel, variant: Pu21Variant, x_out, y_out, b_out)` mirroring
+  `linear_to_positive_xyb_planar_inner` (color.rs:1454) with three changes:
+  1. **No `[0,1]` clamp** (HDR exceeds 1) — clamp instead to `[PU21_L_MIN,
+     display.y_peak]` after scaling relative→absolute via
+     `DisplayModel::sdr_linear_to_luminance` (or `pq_to_luminance` for PQ).
+  2. **Replace `cbrt_midp()` (color.rs:1517-1519) with `pu21_encode(·, variant)`**
+     applied to each opsin-mixed channel.
+  3. **DESIGN DECISIONS to make explicit (then validate on the harness, not by
+     eye):** (a) the `K_B0` absorbance bias + `-cbrt(K_B0)` term (color.rs:1464)
+     — PU already encodes absolute light, so the absorbance offset likely drops;
+     (b) the opponent centering biases `0.42/0.01/0.55` (color.rs:1481-1483) are
+     tuned to cube-root XYB ranges and will need re-centering for PU's `[0,~600]`
+     range. Start scalar-only (HDR is rare; SIMD later); keep the SDR path
+     byte-identical (separate function, separate dispatch).
+
+  **2c — dispatch + guard lift** (`source.rs`, `metric.rs`, `streaming.rs`).
+  When `source.color_transfer_function().is_hdr()` (PR #39's signal), route to a
+  PQ/HLG composite (decode via `transfer.rs` → absolute luminance) → 2b's
+  PU-XYB conversion, and **lift `reject_hdr_input` for that path only** (PR #39's
+  guard stays for the un-wired transfers). Add the public HDR API
+  (`ColorTransferFunction` → `DisplayModel` selection; promote `transfer`/`pu21`
+  surface as needed).
+
+  **GATE (mandatory before merge):** the wired PU path MUST be scored on the
+  UPIQ HDR subset via `scripts/upiq_eval.py --scores` and **clear PU-SSIM
+  (HDR-band SROCC 0.74) — ideally approach PU-FSIM (0.72) / PU-PieAPP**. A
+  PU-XYB that compiles + "doesn't error" but doesn't beat PU-SSIM on the HDR
+  band is wrong color math, not a feature. Do not merge on a compile.
 - **Chunk 3 — luminance-dependent per-channel CSF** (also lifts SDR — the
   standing P0 from `vdp-csf-perceptual-math.md`). Seed `s_ch=[1.0,1.7,0.237]`;
   CSF *shape* from castleCSF (exact coeffs are OCR-garbled → `gfxdisp/castleCSF`

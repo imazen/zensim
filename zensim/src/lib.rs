@@ -220,6 +220,9 @@ mod streaming;
 // luminance). Internal until the HDR scoring path that consumes it lands.
 // See `docs/HDR_PLAN.md`.
 mod transfer;
+// HDR foundation: PU21 perceptually-uniform encoding (the HDR-path replacement
+// for the cube-root nonlinearity). Internal until the scoring path lands.
+mod pu21;
 
 // EX-4 extended feature modules — XYB/LMS front-end stats + CVVDP-shape
 // per-pair signals (DKL, Weber-contrast band ratios, mutual-masking
