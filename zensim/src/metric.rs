@@ -1545,6 +1545,80 @@ impl Zensim {
         ))
     }
 
+    /// **HDR (experimental, `hdr` feature).** Score a pair supplied as
+    /// **absolute-luminance** linear RGB planes (cd/m²), using the PU21
+    /// perceptually-uniform front-end instead of the SDR cube-root
+    /// nonlinearity. This is the HDR scoring path described in
+    /// `docs/HDR_PLAN.md`; the inputs are display-emitted luminance (e.g. from
+    /// an absolute-photometric EXR, or after a [`crate::transfer`]-style display
+    /// model maps PQ/HLG code values to cd/m²).
+    ///
+    /// `ref_planes` / `dist_planes` are `[R, G, B]`, each ≥ `stride * height`
+    /// f32. Uses the default `BandingGlare` PU21 variant; for an explicit
+    /// variant use [`Self::compute_pu_linear_planar_variant`].
+    ///
+    /// # Errors
+    /// [`ZensimError::ImageTooSmall`] (< 8×8), [`ZensimError::ImageTooLarge`]
+    /// (overflow), or [`ZensimError::InvalidDataLength`] (short plane).
+    #[cfg(feature = "hdr")]
+    pub fn compute_pu_linear_planar(
+        &self,
+        ref_planes: [&[f32]; 3],
+        dist_planes: [&[f32]; 3],
+        width: usize,
+        height: usize,
+        stride: usize,
+    ) -> Result<ZensimResult, ZensimError> {
+        self.compute_pu_linear_planar_variant(
+            ref_planes,
+            dist_planes,
+            width,
+            height,
+            stride,
+            crate::pu21::Pu21Variant::BandingGlare,
+        )
+    }
+
+    /// [`Self::compute_pu_linear_planar`] with an explicit PU21 variant.
+    #[cfg(feature = "hdr")]
+    pub fn compute_pu_linear_planar_variant(
+        &self,
+        ref_planes: [&[f32]; 3],
+        dist_planes: [&[f32]; 3],
+        width: usize,
+        height: usize,
+        stride: usize,
+        variant: crate::pu21::Pu21Variant,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        if width < 8 || height < 8 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        check_within_max_pixels(width, height, self.max_pixels)?;
+        let row_capacity = stride
+            .checked_mul(height)
+            .ok_or(ZensimError::ImageTooLarge)?;
+        for plane in ref_planes.iter().chain(dist_planes.iter()) {
+            if plane.len() < row_capacity {
+                return Err(ZensimError::InvalidDataLength);
+            }
+        }
+        let config = config_from_params(params, self.parallel);
+        let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_pu_linear_planar(
+            ref_planes,
+            dist_planes,
+            width,
+            height,
+            stride,
+            &config,
+            variant,
+            params.weights,
+        );
+        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
+        Ok(result.with_profile(self.profile))
+    }
+
     /// Like `compute`, but always computes all features regardless of
     /// zero weights (forces every channel active). For training/research.
     #[cfg(feature = "training")]

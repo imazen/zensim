@@ -223,6 +223,9 @@ mod transfer;
 // HDR foundation: PU21 perceptually-uniform encoding (the HDR-path replacement
 // for the cube-root nonlinearity). Internal until the scoring path lands.
 mod pu21;
+/// PU21 variant selector for the `hdr` scoring path.
+#[cfg(feature = "hdr")]
+pub use pu21::Pu21Variant;
 
 // EX-4 extended feature modules — XYB/LMS front-end stats + CVVDP-shape
 // per-pair signals (DKL, Weber-contrast band ratios, mutual-masking

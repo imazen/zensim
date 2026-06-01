@@ -187,8 +187,21 @@ in PU/PQ space.
 - **Chunk 2 — PU21 front-end** (stacked PR on #39). **2a ✅ DONE 2026-06-01**:
   `pu21.rs` — `pu21_encode`/`decode` with the verified `gfxdisp/pu21`
   `banding_glare` coefficients (100 cd/m² → ~256), 6 reference-parity tests.
-  **2b/2c wiring SPEC'd below — not yet wired** (needs deliberate bias/clamp
-  design + harness validation, not a compile-only change).
+  **2b/2c ✅ WIRED + VALIDATED 2026-06-01 (partial pass).** The PU-XYB path is
+  live behind the non-default `hdr` feature: `Zensim::compute_pu_linear_planar`
+  (absolute-luminance planes → opsin → PU21 → XYB → existing pyramid/features),
+  `color::linear_to_pu_xyb_planar_into`, `streaming::compute_multiscale_stats_pu_linear_planar`.
+  SDR path byte-identical (separate functions; default API unchanged). Validated
+  end-to-end on the 380-pair UPIQ HDR subset
+  (`zensim-validate/src/bin/upiq_pu_score.rs` → `scripts/upiq_eval.py`):
+  **HDR-band SROCC 0.694 (best config)** vs PU-SSIM 0.740 / PU-FSIM 0.719 — far
+  above the no-PU SDR baselines (FSIM 0.457) but ~0.05 short of the bar. It's the
+  *representation* not the weights (linear + MLP all cluster 0.63–0.69); chroma
+  de-emphasis (X 14→4) helped +0.01. Further formulation tuning is **not** done
+  on UPIQ (held-out — would overfit); clearing the bar needs an HDR *training*
+  corpus (chunk 4), which is data-blocked per §5. Full numbers:
+  `benchmarks/upiq_pu_validation_2026-06-01.md`. Original design spec retained
+  below for reference.
 
   ### Chunk 2b/2c — PU-XYB wiring spec (do this next)
 
