@@ -92,6 +92,11 @@ pub enum ZensimProfile {
     /// behaviour lives in the bake bytes, so a `Custom` profile is
     /// bit-identical to the equivalent built-in. `name` is the display
     /// string returned by [`Self::name`] / [`Display`](core::fmt::Display).
+    ///
+    /// Gated behind the non-default `custom-profiles` feature — the
+    /// `zensim-experimental` crate enables it; default builds don't carry
+    /// this variant (or the [`ProfileParams::builder`] machinery).
+    #[cfg(feature = "custom-profiles")]
     Custom {
         /// Profile parameters: weights, bake bytes, and dispositions.
         params: &'static ProfileParams,
@@ -193,6 +198,7 @@ impl ZensimProfile {
             Self::PreviewV0_3 => "zensim-preview-v0.3",
             // Experimental / historical profiles live in `zensim-experimental`
             // and surface here as `Custom` with their original name string.
+            #[cfg(feature = "custom-profiles")]
             Self::Custom { name, .. } => name,
         }
     }
@@ -207,6 +213,7 @@ impl ZensimProfile {
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
             // Experimental / historical profiles carry their own
             // `&'static ProfileParams` built in `zensim-experimental`.
+            #[cfg(feature = "custom-profiles")]
             Self::Custom { params, .. } => params,
         }
     }
@@ -225,6 +232,7 @@ impl core::fmt::Display for ZensimProfile {
 impl PartialEq for ZensimProfile {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            #[cfg(feature = "custom-profiles")]
             (
                 ZensimProfile::Custom {
                     params: a,
@@ -235,6 +243,7 @@ impl PartialEq for ZensimProfile {
                     name: nb,
                 },
             ) => core::ptr::eq(*a, *b) && na == nb,
+            #[cfg(feature = "custom-profiles")]
             (ZensimProfile::Custom { .. }, _) | (_, ZensimProfile::Custom { .. }) => false,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
@@ -246,6 +255,7 @@ impl Eq for ZensimProfile {}
 impl core::hash::Hash for ZensimProfile {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
+        #[cfg(feature = "custom-profiles")]
         if let ZensimProfile::Custom { params, name } = self {
             (*params as *const ProfileParams as usize).hash(state);
             name.hash(state);
@@ -485,6 +495,7 @@ impl ProfileParams {
     }
 }
 
+#[cfg(feature = "custom-profiles")]
 impl ProfileParams {
     /// Start building a custom [`ProfileParams`] for use with
     /// [`ZensimProfile::Custom`].
@@ -539,11 +550,13 @@ impl ProfileParams {
 /// [`build`](Self::build). The bake slots take a `fn() -> &'static [u8]`
 /// (typically a tiny wrapper around `include_bytes!`) so the bytes can be
 /// embedded by the defining crate and resolved lazily.
+#[cfg(feature = "custom-profiles")]
 #[derive(Debug)]
 pub struct ProfileParamsBuilder {
     inner: ProfileParams,
 }
 
+#[cfg(feature = "custom-profiles")]
 impl ProfileParamsBuilder {
     /// Linear scoring weights (one per feature). Defaults to the
     /// `PreviewV0_2` weight vector; unused on the MLP path but kept
@@ -748,6 +761,244 @@ static PROFILE_A: ProfileParams = ProfileParams {
 };
 
 // --- Weight arrays ---
+
+/// Preview v0.1 linear weights (344k synthetic pairs, 5-fold CV SROCC=0.9936).
+/// 228 entries = 4 scales × 3 channels × 19 features. Kept as the canonical
+/// V0.1 coefficient vector; the `PreviewV0_1` *profile* lives in
+/// `zensim-experimental` but references this array.
+#[allow(clippy::excessive_precision)]
+pub static WEIGHTS_PREVIEW_V0_1: [f64; 228] = [
+    // --- Basic features (13/ch × 3ch × 4 scales = 156) ---
+    0.0000000000,
+    0.1391674808,
+    0.0000000000,
+    0.0055172171,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0010650645,
+    0.0071194723,
+    69.6110793540,
+    0.0106660235,
+    0.0076379521,
+    0.0051069220, // Scale 0 Channel X
+    17.8445125125,
+    1.9157888513,
+    0.0109886875,
+    0.0048996910,
+    0.0000000000,
+    0.0018418193,
+    0.0000000000,
+    1.5940983560,
+    0.0072914879,
+    0.0000000000,
+    0.2695940535,
+    0.5232582347,
+    0.1101639205, // Scale 0 Channel Y
+    0.0000000000,
+    0.0097680540,
+    0.0075408094,
+    4.2314204599,
+    0.0082993863,
+    0.0060063585,
+    0.0000000000,
+    0.0000000000,
+    0.0076442067,
+    0.4127212154,
+    0.0000000000,
+    0.0000000000,
+    0.0061137647, // Scale 0 Channel B
+    0.0027028659,
+    0.1421516497,
+    0.0000000000,
+    0.0000000000,
+    0.0006394302,
+    0.0004174259,
+    0.0084670378,
+    0.0000000000,
+    0.0102579245,
+    0.0000000000,
+    0.0097535151,
+    0.0000000000,
+    0.0000000091, // Scale 1 Channel X
+    22.0713261440,
+    52.8548074123,
+    87.4350424152,
+    5.5343470971,
+    8.5458130239,
+    0.0026243365,
+    0.0000000000,
+    0.6444438326,
+    0.0000000000,
+    0.0000000000,
+    0.4690274655,
+    0.0111775837,
+    0.0000000000, // Scale 1 Channel Y
+    0.7853068895,
+    0.5804301701,
+    0.0000000000,
+    241.7223774962,
+    0.0852474584,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0046043128,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0092126667, // Scale 1 Channel B
+    0.1907664071,
+    1.1388072940,
+    0.0069950673,
+    0.0000000000,
+    3.2949756637,
+    0.0097480604,
+    0.0114461871,
+    0.0101092121,
+    0.0120198795,
+    0.0000000000,
+    0.0102984460,
+    0.0000000000,
+    0.0003411392, // Scale 2 Channel X
+    77.8638757528,
+    4.9774136371,
+    5.7998312546,
+    0.0000000000,
+    32.6107435348,
+    0.0000000000,
+    0.0000000000,
+    7.3147158634,
+    0.0000000000,
+    112.3320506295,
+    6.5803001760,
+    0.9144713387,
+    0.0800661074, // Scale 2 Channel Y
+    0.6380873029,
+    3.4344996615,
+    0.0000000000,
+    7.9969790535,
+    4.0547889928,
+    1.2673476404,
+    7.9809497222,
+    8.8252344733,
+    0.0000000000,
+    190.1707930678,
+    0.0000000000,
+    0.0042434316,
+    0.0000117426, // Scale 2 Channel B
+    42.4928921475,
+    1.8499402382,
+    18.0908263404,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0022710707,
+    0.0000000000,
+    0.0000000000,
+    0.0068807271,
+    0.1494089476,
+    0.0001752242, // Scale 3 Channel X
+    396.2394144642,
+    33.6112684912,
+    0.0053195470,
+    331.9368790619,
+    437.6418006190,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    15.5115983050,
+    0.0052803584,
+    0.0703659816, // Scale 3 Channel Y
+    112.4036508580,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0073096632,
+    0.0000000000,
+    0.0091600012,
+    0.0000000000,
+    0.0000000000,
+    0.0072861510,
+    0.0493312705,
+    0.0049937361, // Scale 3 Channel B
+    // --- Peak features (6/ch × 3ch × 4 scales = 72) ---
+    1.6405231709,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 0 Channel X
+    1.8173590152,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    28.5681479205, // Scale 0 Channel Y
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 0 Channel B
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 1 Channel X
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    1.7833707251,
+    0.0000000000, // Scale 1 Channel Y
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    17.5252532711,
+    0.0000000000, // Scale 1 Channel B
+    0.0000000000,
+    31.1123311855,
+    0.0000000000,
+    0.0000000000,
+    3.4969161675,
+    0.0000000000, // Scale 2 Channel X
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 2 Channel Y
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    3.4593661665,
+    0.0000000000, // Scale 2 Channel B
+    56.7768222287,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    5.3758924006,
+    0.0000000000, // Scale 3 Channel X
+    0.0000000000,
+    1.6125342576,
+    47.2133536610,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 3 Channel Y
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000,
+    0.0000000000, // Scale 3 Channel B
+];
 
 /// Preview v0.2 weights (concordance-filtered 218k synthetic pairs, Nelder-Mead).
 /// SROCC = 0.9942 on full 344k synthetic dataset.
@@ -998,4 +1249,7 @@ pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
 /// Alias for [`WEIGHTS_PREVIEW_V0_2`]. Linear scoring weights for the
 /// V0_2 profile. The `LINEAR_` prefix disambiguates these linear
 /// coefficients from MLP bake bytes.
+/// Alias for [`WEIGHTS_PREVIEW_V0_1`]. Linear V0.1 coefficients (228).
+pub use self::WEIGHTS_PREVIEW_V0_1 as LINEAR_WEIGHTS_PREVIEW_V0_1;
+
 pub use self::WEIGHTS_PREVIEW_V0_2 as LINEAR_WEIGHTS_PREVIEW_V0_2;

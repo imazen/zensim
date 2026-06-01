@@ -49,6 +49,11 @@ zenpixels = ["dep:zenpixels"]
 ## Off by default because the test allocates ~500 MB of input pixels which
 ## is disruptive in default `cargo test --all` runs.
 streaming_strips_oom = []
+## Exposes the custom-profile extension point: `ZensimProfile::Custom`,
+## `ProfileParams::builder()`, and `ProfileParamsBuilder`. Off by default —
+## the `zensim-experimental` crate enables it to rebuild the historical
+## research profiles; default consumers don't carry this surface.
+custom-profiles = []
 
 [dependencies]
 archmage = { workspace = true }
@@ -78,4 +83,4 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles"))']  # zenresize kept in check-cfg for gated code

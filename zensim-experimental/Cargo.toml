@@ -24,7 +24,7 @@ training = ["zensim/training"]
 classification = ["zensim/classification"]
 
 [dependencies]
-zensim = { workspace = true, features = ["imgref", "threads"] }
+zensim = { workspace = true, features = ["imgref", "threads", "custom-profiles"] }
 
 [dev-dependencies]
 image = { workspace = true }

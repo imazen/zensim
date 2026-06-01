@@ -42,8 +42,6 @@ use std::sync::OnceLock;
 use zensim::ZensimProfile;
 use zensim::profile::ProfileParams;
 
-mod weights_v0_1;
-
 /// Embedded historical bakes. Each is a thin `include_bytes!` wrapper so
 /// the bytes resolve lazily through the `fn() -> &'static [u8]` builder
 /// slots. The byte files live in `zensim-experimental/weights/`.
@@ -152,7 +150,7 @@ profile_fn!(
     preview_v0_1,
     "zensim-preview-v0.1",
     ProfileParams::builder()
-        .weights(&weights_v0_1::WEIGHTS_PREVIEW_V0_1)
+        .weights(&zensim::profile::WEIGHTS_PREVIEW_V0_1)
         .build()
 );
 

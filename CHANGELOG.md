@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed — `Custom`/builder gated behind `custom-profiles`; V0_1 weights kept in zensim (2026-06-01)
+
+`ZensimProfile::Custom`, `ProfileParams::builder()`, and `ProfileParamsBuilder`
+are now behind the **non-default `custom-profiles` feature** — the
+`zensim-experimental` crate enables it; default consumers no longer carry that
+surface. `WEIGHTS_PREVIEW_V0_1` (+ the `LINEAR_WEIGHTS_PREVIEW_V0_1` alias) is
+**restored as a public array in zensim** — only the `PreviewV0_1` *profile*
+lives in `zensim-experimental` (it references zensim's array).
+
 ### Changed — experimental/historical profiles relocated to `zensim-experimental` (2026-06-01)
 
 **BREAKING (absorbed by the 0.2.x → 0.3.0 minor bump): `ZensimProfile` now
