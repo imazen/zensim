@@ -20,7 +20,7 @@
 //!      produces a different score; sanity check that `include_bytes!`
 //!      is pointed at the correct file AND that the spline runtime
 //!      dispatch is active for a per-sample-α-head bake).
-//!   5. `ZensimProfile::PreviewV0_5CompressionV2` alias returns the V2 variant.
+//!   5. `zensim_experimental::preview_v0_5_compression_v2()` alias returns the V2 variant.
 //!
 //! What this test does NOT cover (lives elsewhere):
 //!   * Cross-corpus SROCC — `bake_verdict` against canonical val parquets,
@@ -32,7 +32,7 @@
 //!     Compression trail was not trained with cross-codec equivalence
 //!     pairs, so this is not a primary gate.
 
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     let n = w * h;
@@ -59,12 +59,12 @@ fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8
 #[test]
 fn compression_v2_profile_name() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5CompressionV2.name(),
+        zensim_experimental::preview_v0_5_compression_v2().name(),
         "zensim-preview-v0.5-compression-v2"
     );
     assert_eq!(
-        ZensimProfile::PreviewV0_5CompressionV2,
-        ZensimProfile::PreviewV0_5CompressionV2
+        zensim_experimental::preview_v0_5_compression_v2(),
+        zensim_experimental::preview_v0_5_compression_v2()
     );
 }
 
@@ -74,7 +74,7 @@ fn compression_v2_score_in_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CompressionV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_compression_v2()).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -88,12 +88,15 @@ fn compression_v2_score_in_range() {
         (0.0..=100.0).contains(&score),
         "compression-v2 score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5CompressionV2);
+    assert_eq!(
+        r.profile(),
+        zensim_experimental::preview_v0_5_compression_v2()
+    );
 }
 
 #[test]
 fn compression_v2_score_in_range_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CompressionV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_compression_v2()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -122,8 +125,8 @@ fn compression_v2_differs_from_compression_base() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z_v2 = Zensim::new(ZensimProfile::PreviewV0_5CompressionV2).with_parallel(false);
-    let z_base = Zensim::new(ZensimProfile::PreviewV0_5Compression).with_parallel(false);
+    let z_v2 = Zensim::new(zensim_experimental::preview_v0_5_compression_v2()).with_parallel(false);
+    let z_base = Zensim::new(zensim_experimental::preview_v0_5_compression()).with_parallel(false);
     let s_v2 = z_v2.compute(&s, &d).unwrap().score();
     let s_base = z_base.compute(&s, &d).unwrap().score();
     assert!(
@@ -148,7 +151,7 @@ fn compression_v2_identity_short_circuit_preserved() {
     // forward_one_bake dispatching through the per-sample-α head).
     let (src, _dst) = make_pair_with_delta(64, 64, 0);
     let s = RgbSlice::new(&src, 64, 64);
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CompressionV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_compression_v2()).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
     assert_eq!(
         r.score(),

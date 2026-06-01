@@ -38,7 +38,7 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use rayon::prelude::*;
 
-use zensim::{PixelFormat, StridedBytes, Zensim, ZensimProfile};
+use zensim::{PixelFormat, StridedBytes, Zensim};
 
 #[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
 enum CodecKind {
@@ -373,7 +373,7 @@ fn main() -> Result<()> {
     let progress = AtomicUsize::new(0);
     let t_score = Instant::now();
 
-    let zensim = Zensim::new(ZensimProfile::PreviewV0_5Tuner).with_parallel(false);
+    let zensim = Zensim::new(zensim_experimental::preview_v0_5_tuner()).with_parallel(false);
 
     type Row = (String, u32, Option<f64>, Option<usize>, Option<(u32, u32)>);
     // (ref_basename, q, score, encoded_bytes, (w,h))

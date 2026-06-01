@@ -6484,6 +6484,7 @@ name = "zensim-experimental"
 version = "0.1.0"
 dependencies = [
  "image",
+ "serde_json",
  "zensim",
 ]
 
@@ -6512,6 +6513,7 @@ dependencies = [
  "zenpixels-convert",
  "zenpng 0.1.4",
  "zensim",
+ "zensim-experimental",
  "zenwebp",
 ]
 
@@ -6560,6 +6562,7 @@ dependencies = [
  "zenpixels",
  "zenpng 0.1.4",
  "zensim",
+ "zensim-experimental",
  "zenwebp",
 ]
 
@@ -6610,6 +6613,7 @@ dependencies = [
  "zenpredict",
  "zenpredict-bake",
  "zensim",
+ "zensim-experimental",
  "zensim-train-core",
  "zensim-train-gpu",
  "zenstats",

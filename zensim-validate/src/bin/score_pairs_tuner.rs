@@ -33,7 +33,7 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use rayon::prelude::*;
 
-use zensim::{PixelFormat, StridedBytes, Zensim, ZensimProfile};
+use zensim::{PixelFormat, StridedBytes, Zensim};
 
 #[derive(Parser, Debug)]
 #[command(name = "score_pairs_tuner")]
@@ -193,7 +193,7 @@ fn main() -> Result<()> {
 
     // --- score each pair with PreviewV0_5Tuner
     let t_score = Instant::now();
-    let zensim = Zensim::new(ZensimProfile::PreviewV0_5Tuner).with_parallel(false);
+    let zensim = Zensim::new(zensim_experimental::preview_v0_5_tuner()).with_parallel(false);
     let progress = AtomicUsize::new(0);
     let scores: Vec<f64> = (0..total)
         .into_par_iter()

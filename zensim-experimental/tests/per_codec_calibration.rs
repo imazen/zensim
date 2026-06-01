@@ -74,7 +74,7 @@ fn score_with_profile(
 fn per_codec_calibration_dispatch_identity_without_hint() {
     // No codec hint → bake's per-codec affine is silently skipped.
     // The score equals what the un-calibrated bake would produce.
-    let profile = ZensimProfile::PreviewV0_5TunerV4Calibrated;
+    let profile = zensim_experimental::preview_v0_5_tuner_v4_calibrated();
     let s_no_hint = score_with_profile(profile, 64, 64, 30, None);
     let s_unknown = score_with_profile(profile, 64, 64, 30, Some("not_a_codec"));
     let diff = (s_no_hint - s_unknown).abs();
@@ -91,9 +91,15 @@ fn per_codec_calibration_calibrated_matches_base_without_hint() {
     // identical to the un-calibrated parent profile. This is the
     // load-bearing invariant: bake_verdict and any other tool that
     // doesn't supply a codec hint sees the same SROCC.
-    let s_base = score_with_profile(ZensimProfile::PreviewV0_5TunerV4, 64, 64, 30, None);
+    let s_base = score_with_profile(
+        zensim_experimental::preview_v0_5_tuner_v4(),
+        64,
+        64,
+        30,
+        None,
+    );
     let s_calib = score_with_profile(
-        ZensimProfile::PreviewV0_5TunerV4Calibrated,
+        zensim_experimental::preview_v0_5_tuner_v4_calibrated(),
         64,
         64,
         30,
@@ -113,7 +119,7 @@ fn per_codec_calibration_dispatch_jpeg_hint_changes_score_tuner() {
     // baseline. The fit's α was ~-5 on TunerV4 (post-spline raw output
     // is ~5 score units higher than the ssim2 target on average), so the
     // calibrated score is lower.
-    let profile = ZensimProfile::PreviewV0_5TunerV4Calibrated;
+    let profile = zensim_experimental::preview_v0_5_tuner_v4_calibrated();
     let s_no_hint = score_with_profile(profile, 64, 64, 30, None);
     let s_jpeg = score_with_profile(profile, 64, 64, 30, Some("jpeg"));
     let s_jpeg_2 = score_with_profile(profile, 64, 64, 30, Some("zenjpeg"));
@@ -139,7 +145,7 @@ fn per_codec_calibration_dispatch_jpeg_hint_changes_score_tuner() {
 
 #[test]
 fn per_codec_calibration_dispatch_balanced_v3_jpeg_changes_score() {
-    let profile = ZensimProfile::PreviewV0_5BalancedV3Calibrated;
+    let profile = zensim_experimental::preview_v0_5_balanced_v3_calibrated();
     let s_no_hint = score_with_profile(profile, 64, 64, 30, None);
     let s_jpeg = score_with_profile(profile, 64, 64, 30, Some("jpeg"));
     assert!(
@@ -151,7 +157,7 @@ fn per_codec_calibration_dispatch_balanced_v3_jpeg_changes_score() {
 
 #[test]
 fn per_codec_calibration_dispatch_compression_v3_jpeg_changes_score() {
-    let profile = ZensimProfile::PreviewV0_5CompressionV3Calibrated;
+    let profile = zensim_experimental::preview_v0_5_compression_v3_calibrated();
     let s_no_hint = score_with_profile(profile, 64, 64, 30, None);
     let s_jpeg = score_with_profile(profile, 64, 64, 30, Some("jpeg"));
     assert!(
@@ -164,7 +170,7 @@ fn per_codec_calibration_dispatch_compression_v3_jpeg_changes_score() {
 #[test]
 fn per_codec_calibration_dispatch_deterministic() {
     // Same hint, same input → identical score across calls.
-    let profile = ZensimProfile::PreviewV0_5TunerV4Calibrated;
+    let profile = zensim_experimental::preview_v0_5_tuner_v4_calibrated();
     let s1 = score_with_profile(profile, 64, 64, 30, Some("jpeg"));
     let s2 = score_with_profile(profile, 64, 64, 30, Some("jpeg"));
     let s3 = score_with_profile(profile, 64, 64, 30, Some("JPEG"));
@@ -181,7 +187,7 @@ fn per_codec_calibration_no_metadata_profile_ignores_hint() {
     // with or without a codec hint — the runtime parses the metadata
     // and only applies the affine when the metadata + matching codec
     // are BOTH present.
-    let profile = ZensimProfile::PreviewV0_5TunerV4;
+    let profile = zensim_experimental::preview_v0_5_tuner_v4();
     let s_no_hint = score_with_profile(profile, 64, 64, 30, None);
     let s_jpeg = score_with_profile(profile, 64, 64, 30, Some("jpeg"));
     let s_webp = score_with_profile(profile, 64, 64, 30, Some("webp"));
@@ -203,7 +209,8 @@ fn per_codec_calibration_identity_image_short_circuit() {
     // must fire BEFORE the MLP forward path (including per-codec
     // affine). When source == distorted, score = 100.0 regardless
     // of codec hint or per-codec metadata.
-    let zen = Zensim::new(ZensimProfile::PreviewV0_5TunerV4Calibrated).with_parallel(false);
+    let zen =
+        Zensim::new(zensim_experimental::preview_v0_5_tuner_v4_calibrated()).with_parallel(false);
     let (src, _) = make_pair_with_delta(64, 64, 0);
     let src_slice = RgbSlice::new(&src, 64, 64);
     let result_no_hint = zen

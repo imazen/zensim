@@ -58,17 +58,20 @@ use zensim_validate::parquet_loader;
 // Single source of truth so the demo runs against the exact bytes
 // shipped to users.
 const BAKE_BALANCED_V2: &[u8] =
-    include_bytes!("../../../zensim/weights/v_balanced_v2_2026-05-20.bin");
+    include_bytes!("../../../zensim-experimental/weights/v_balanced_v2_2026-05-20.bin");
 const BAKE_COMPRESSION_V2: &[u8] =
-    include_bytes!("../../../zensim/weights/v_compression_v2_2026-05-20.bin");
-const BAKE_TUNER_V2: &[u8] = include_bytes!("../../../zensim/weights/v_tuner_v6_2026-05-19.bin");
-const BAKE_TUNER_V3: &[u8] = include_bytes!("../../../zensim/weights/v_tuner_v9_2026-05-20.bin");
+    include_bytes!("../../../zensim-experimental/weights/v_compression_v2_2026-05-20.bin");
+const BAKE_TUNER_V2: &[u8] =
+    include_bytes!("../../../zensim-experimental/weights/v_tuner_v6_2026-05-19.bin");
+const BAKE_TUNER_V3: &[u8] =
+    include_bytes!("../../../zensim-experimental/weights/v_tuner_v9_2026-05-20.bin");
 // EXP-CROSS-CODEC-V10 (2026-05-20): score-space reallocation
 const BAKE_BALANCED_V3: &[u8] =
-    include_bytes!("../../../zensim/weights/v_balanced_v3_2026-05-20.bin");
+    include_bytes!("../../../zensim-experimental/weights/v_balanced_v3_2026-05-20.bin");
 const BAKE_COMPRESSION_V3: &[u8] =
-    include_bytes!("../../../zensim/weights/v_compression_v3_2026-05-20.bin");
-const BAKE_TUNER_V4: &[u8] = include_bytes!("../../../zensim/weights/v_tuner_v10_2026-05-20.bin");
+    include_bytes!("../../../zensim-experimental/weights/v_compression_v3_2026-05-20.bin");
+const BAKE_TUNER_V4: &[u8] =
+    include_bytes!("../../../zensim-experimental/weights/v_tuner_v10_2026-05-20.bin");
 
 // ============================================================================
 // Bake-side dispatch helpers — DEDUP-M (2026-05-26): moved to

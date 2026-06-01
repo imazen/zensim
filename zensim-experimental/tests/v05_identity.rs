@@ -58,7 +58,10 @@ fn assert_identity_returns_100(profile: ZensimProfile, label: &str) {
 
 #[test]
 fn v05_balanced_identity_returns_100() {
-    assert_identity_returns_100(ZensimProfile::PreviewV0_5Balanced, "PreviewV0_5Balanced");
+    assert_identity_returns_100(
+        zensim_experimental::preview_v0_5_balanced(),
+        "PreviewV0_5Balanced",
+    );
 }
 
 #[test]
@@ -66,20 +69,23 @@ fn v05_alias_identity_returns_100() {
     // PreviewV0_5 is the back-compat alias for PreviewV0_5Balanced. Same
     // params; the test guards against accidental drift in the alias
     // mapping.
-    assert_identity_returns_100(ZensimProfile::PreviewV0_5, "PreviewV0_5");
+    assert_identity_returns_100(zensim_experimental::preview_v0_5(), "PreviewV0_5");
 }
 
 #[test]
 fn v05_compression_identity_returns_100() {
     assert_identity_returns_100(
-        ZensimProfile::PreviewV0_5Compression,
+        zensim_experimental::preview_v0_5_compression(),
         "PreviewV0_5Compression",
     );
 }
 
 #[test]
 fn v05_ensemble_identity_returns_100() {
-    assert_identity_returns_100(ZensimProfile::PreviewV0_5Ensemble, "PreviewV0_5Ensemble");
+    assert_identity_returns_100(
+        zensim_experimental::preview_v0_5_ensemble(),
+        "PreviewV0_5Ensemble",
+    );
 }
 
 #[test]
@@ -95,7 +101,7 @@ fn v04_identity_returns_100() {
     // V0_4 (D2 multi-bake) has the same bug since it routes through
     // apply_mlp_scoring too. The pre-fix v04_mlp.rs test only asserted
     // `score >= 90`; this test pins the invariant tighter.
-    assert_identity_returns_100(ZensimProfile::PreviewV0_4, "PreviewV0_4");
+    assert_identity_returns_100(zensim_experimental::preview_v0_4(), "PreviewV0_4");
 }
 
 #[test]

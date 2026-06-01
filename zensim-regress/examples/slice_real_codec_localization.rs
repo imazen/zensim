@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use zensim::{
     DiffmapOptions, DiffmapWeighting, RgbSlice, Zensim, ZensimProfile, ZensimScratch,
-    profile::WEIGHTS_PREVIEW_V0_1,
+    profile::WEIGHTS_PREVIEW_V0_2,
 };
 
 const CSV_PATH: &str = "/mnt/v/output/zensim/synthetic-v2/training_safe_synthetic.csv";
@@ -93,7 +93,7 @@ fn scale0_proxy(features: &[f64]) -> f64 {
     features
         .iter()
         .take(SCALE0_BASIC_LEN)
-        .zip(WEIGHTS_PREVIEW_V0_1.iter().take(SCALE0_BASIC_LEN))
+        .zip(WEIGHTS_PREVIEW_V0_2.iter().take(SCALE0_BASIC_LEN))
         .map(|(f, w)| f * w)
         .sum()
 }

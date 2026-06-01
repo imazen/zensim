@@ -111,14 +111,15 @@ fn cross_codec_target_jnd_default_profile_meets_gates() {
         ..TargetSpec::default()
     };
 
-    // Default profile MUST be PreviewV0_5TunerV4 — the gate test is
+    // Default profile MUST be the canonical production codec-target
+    // (`ZensimProfile::codec_target()` == `A`) — the gate test is
     // calibrated for that profile only. Re-check here so a future
     // change to TargetSpec::default's `profile` field fails this
     // test loudly (not just by drifting numbers).
     assert_eq!(
         spec.profile,
-        zensim::ZensimProfile::PreviewV0_5TunerV4,
-        "default profile drifted from PreviewV0_5TunerV4 — re-run the cross-codec demo and update gate limits"
+        zensim::ZensimProfile::codec_target(),
+        "default profile drifted from the canonical codec-target — re-run the cross-codec demo and update gate limits"
     );
 
     for (label, path) in TEST_IMAGES {

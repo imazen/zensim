@@ -1,6 +1,6 @@
 //! Cross-validate `site/js/mlp.js` against the Rust `zenpredict` runtime.
 //!
-//! Loads V0_16 (`zensim/weights/v0_16_2026-05-12.bin`, ZNPR v2), runs
+//! Loads V0_16 (`zensim/weights/archive/v0_16_2026-05-12.bin`, ZNPR v2), runs
 //! the forward pass on two known feature vectors, and prints the
 //! outputs. The JS `predict()` should produce identical numbers
 //! (within float-precision noise) for the same inputs.
@@ -15,7 +15,7 @@
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = "/home/lilith/work/zen/zensim/zensim/weights/v0_16_2026-05-12.bin";
+    let path = "/home/lilith/work/zen/zensim/zensim/weights/archive/v0_16_2026-05-12.bin";
     let bytes = fs::read(path)?;
     println!("loaded {path} ({} bytes)", bytes.len());
 

@@ -101,7 +101,7 @@ fn v04_degraded_does_not_exceed_identical() {
     // training distribution), where the spline's upper clamp can tie
     // degraded with identical at 100; that violation is asserted
     // separately in `tests/metric_invariants.rs::v39_known_limit_violations`.
-    let z = Zensim::new(ZensimProfile::LinearBounded).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::linear_bounded()).with_parallel(false);
     let r_self = z.compute(&s, &s).unwrap();
     let r_diff = z.compute(&s, &d).unwrap();
 
@@ -174,11 +174,14 @@ fn preview_v0_3_is_deprecated_alias_of_a() {
 /// Pattern matches `metric_invariants.rs::v39_known_limit_violations`.
 #[test]
 fn v04_profile_name_and_score_KNOWN_LIMIT() {
-    assert_eq!(ZensimProfile::PreviewV0_4.name(), "zensim-preview-v0.4");
+    assert_eq!(
+        zensim_experimental::preview_v0_4().name(),
+        "zensim-preview-v0.4"
+    );
     let (src, dst) = make_test_pair(128, 128);
     let s = RgbSlice::new(&src, 128, 128);
     let d = RgbSlice::new(&dst, 128, 128);
-    let z4 = Zensim::new(ZensimProfile::PreviewV0_4).with_parallel(false);
+    let z4 = Zensim::new(zensim_experimental::preview_v0_4()).with_parallel(false);
     let result = z4.compute(&s, &d);
     let err = match result {
         Err(e) => e,
@@ -211,13 +214,16 @@ fn v05_two_trail_profile_smoke() {
     //   3. PreviewV0_5Compression produces a measurably DIFFERENT score
     //      (different bake, different feature width).
     //   4. All scores are in [0, 100] — both bakes ship score-shaped.
-    assert_eq!(ZensimProfile::PreviewV0_5.name(), "zensim-preview-v0.5");
     assert_eq!(
-        ZensimProfile::PreviewV0_5Balanced.name(),
+        zensim_experimental::preview_v0_5().name(),
+        "zensim-preview-v0.5"
+    );
+    assert_eq!(
+        zensim_experimental::preview_v0_5_balanced().name(),
         "zensim-preview-v0.5-balanced"
     );
     assert_eq!(
-        ZensimProfile::PreviewV0_5Compression.name(),
+        zensim_experimental::preview_v0_5_compression().name(),
         "zensim-preview-v0.5-compression"
     );
 
@@ -225,9 +231,9 @@ fn v05_two_trail_profile_smoke() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z5 = Zensim::new(ZensimProfile::PreviewV0_5).with_parallel(false);
-    let z5b = Zensim::new(ZensimProfile::PreviewV0_5Balanced).with_parallel(false);
-    let z5c = Zensim::new(ZensimProfile::PreviewV0_5Compression).with_parallel(false);
+    let z5 = Zensim::new(zensim_experimental::preview_v0_5()).with_parallel(false);
+    let z5b = Zensim::new(zensim_experimental::preview_v0_5_balanced()).with_parallel(false);
+    let z5c = Zensim::new(zensim_experimental::preview_v0_5_compression()).with_parallel(false);
     let r5 = z5.compute(&s, &d).unwrap();
     let r5b = z5b.compute(&s, &d).unwrap();
     let r5c = z5c.compute(&s, &d).unwrap();
@@ -244,9 +250,12 @@ fn v05_two_trail_profile_smoke() {
         (0.0..=100.0).contains(&s5c),
         "v0.5-compression score out of range: {s5c}"
     );
-    assert_eq!(r5.profile(), ZensimProfile::PreviewV0_5);
-    assert_eq!(r5b.profile(), ZensimProfile::PreviewV0_5Balanced);
-    assert_eq!(r5c.profile(), ZensimProfile::PreviewV0_5Compression);
+    assert_eq!(r5.profile(), zensim_experimental::preview_v0_5());
+    assert_eq!(r5b.profile(), zensim_experimental::preview_v0_5_balanced());
+    assert_eq!(
+        r5c.profile(),
+        zensim_experimental::preview_v0_5_compression()
+    );
     // PreviewV0_5 and PreviewV0_5Balanced share params → same score.
     assert!(
         (s5 - s5b).abs() < 1e-9,
@@ -287,7 +296,7 @@ fn v05_ensemble_profile_smoke() {
     // — running it requires the canonical val parquets at
     // `/mnt/v/zen/zensim-training/canonical-2026-05-18/val/`.
     assert_eq!(
-        ZensimProfile::PreviewV0_5Ensemble.name(),
+        zensim_experimental::preview_v0_5_ensemble().name(),
         "zensim-preview-v0.5-ensemble"
     );
 
@@ -295,19 +304,19 @@ fn v05_ensemble_profile_smoke() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_5Ensemble).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_ensemble()).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
     let score = r.score();
     assert!(
         (0.0..=100.0).contains(&score),
         "v0.5-ensemble score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5Ensemble);
+    assert_eq!(r.profile(), zensim_experimental::preview_v0_5_ensemble());
 
     // Verify the ensemble produces ONE OF the two target bakes' output —
     // the routing decision is deterministic per-pair (classifier sign).
-    let z_bal = Zensim::new(ZensimProfile::PreviewV0_5Balanced).with_parallel(false);
-    let z_cmp = Zensim::new(ZensimProfile::PreviewV0_5Compression).with_parallel(false);
+    let z_bal = Zensim::new(zensim_experimental::preview_v0_5_balanced()).with_parallel(false);
+    let z_cmp = Zensim::new(zensim_experimental::preview_v0_5_compression()).with_parallel(false);
     let s_bal = z_bal.compute(&s, &d).unwrap().score();
     let s_cmp = z_cmp.compute(&s, &d).unwrap().score();
     // The ensemble's score MUST equal one of the two (the chosen bake's

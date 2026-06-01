@@ -234,7 +234,7 @@ fn feature_distortion_direction_analysis() {
 
     // V39 inversion diagnosis: blur-ladder scores for A (V39) vs LinearBounded.
     let z_a = Zensim::new(ZensimProfile::A);
-    let z_lb = Zensim::new(ZensimProfile::LinearBounded);
+    let z_lb = Zensim::new(zensim_experimental::linear_bounded());
     let mut a_inversions = 0usize;
     let mut a_above_identity = 0usize;
     let mut lb_inversions = 0usize;

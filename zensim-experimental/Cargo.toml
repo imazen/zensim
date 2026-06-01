@@ -14,11 +14,21 @@ publish = false
 # Every profile is rebuilt through zensim's stable
 # `ProfileParams::builder()` + `ZensimProfile::Custom` extension point.
 
+[features]
+# Passthrough features so the relocated profile tests' `#[cfg(feature =
+# "training")]` guards stay ACTIVE by default (no silent runtime skip) and
+# chain to zensim's research APIs. The library itself only needs the core
+# metric API (imgref/threads) to build the profiles.
+default = ["training", "classification"]
+training = ["zensim/training"]
+classification = ["zensim/classification"]
+
 [dependencies]
-zensim = { workspace = true }
+zensim = { workspace = true, features = ["imgref", "threads"] }
 
 [dev-dependencies]
 image = { workspace = true }
+serde_json = "1"
 
 [lints.clippy]
 uninlined_format_args = "allow"

@@ -7,8 +7,10 @@ license = "MIT"
 publish = false
 
 [dependencies]
-# Local zensim with PreviewV0_5Tuner profile
 zensim = { path = "../zensim", features = ["training"] }
+# Experimental trail profiles — the picker sweep scores against the
+# PreviewV0_5Tuner trail, now relocated here. Unpublished.
+zensim-experimental = { path = "../zensim-experimental" }
 
 # Codec crates — local sibling paths (user directive: no crates.io versions)
 zenjpeg = { path = "../../zenjpeg/zenjpeg", default-features = false, features = ["zencodec", "decoder", "__expert", "trellis"] }

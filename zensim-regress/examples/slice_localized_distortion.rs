@@ -23,7 +23,7 @@
 use std::path::PathBuf;
 use zensim::{
     PrecomputedReference, RgbSlice, Zensim, ZensimProfile, ZensimScratch,
-    profile::WEIGHTS_PREVIEW_V0_1,
+    profile::WEIGHTS_PREVIEW_V0_2,
 };
 
 const SCALE0_BASIC_LEN: usize = 13 * 3;
@@ -71,7 +71,7 @@ fn scale0_proxy(features: &[f64]) -> f64 {
     features
         .iter()
         .take(SCALE0_BASIC_LEN)
-        .zip(WEIGHTS_PREVIEW_V0_1.iter().take(SCALE0_BASIC_LEN))
+        .zip(WEIGHTS_PREVIEW_V0_2.iter().take(SCALE0_BASIC_LEN))
         .map(|(f, w)| f * w)
         .sum()
 }

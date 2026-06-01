@@ -10,7 +10,7 @@
 //! below 0 for "pathological" codec output (butter >> 12) instead of
 //! collapsing to a tie at 0. This is the V10 dial-design intent.
 
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     let n = w * h;
@@ -41,18 +41,18 @@ fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8
 #[test]
 fn balanced_v3_profile_name_and_alias() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5BalancedV3.name(),
+        zensim_experimental::preview_v0_5_balanced_v3().name(),
         "zensim-preview-v0.5-balanced-v3"
     );
     assert_eq!(
-        ZensimProfile::PreviewV0_5BalancedV3,
-        ZensimProfile::PreviewV0_5BalancedV3
+        zensim_experimental::preview_v0_5_balanced_v3(),
+        zensim_experimental::preview_v0_5_balanced_v3()
     );
 }
 
 #[test]
 fn balanced_v3_score_is_finite_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5BalancedV3).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_balanced_v3()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -79,12 +79,12 @@ fn balanced_v3_differs_from_balanced_v2() {
     let (src, dst) = make_pair_with_delta(64, 64, 16);
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
-    let s_v3 = Zensim::new(ZensimProfile::PreviewV0_5BalancedV3)
+    let s_v3 = Zensim::new(zensim_experimental::preview_v0_5_balanced_v3())
         .with_parallel(false)
         .compute(&s, &d)
         .unwrap()
         .score();
-    let s_v2 = Zensim::new(ZensimProfile::PreviewV0_5BalancedV2)
+    let s_v2 = Zensim::new(zensim_experimental::preview_v0_5_balanced_v2())
         .with_parallel(false)
         .compute(&s, &d)
         .unwrap()
@@ -102,7 +102,7 @@ fn balanced_v3_differs_from_balanced_v2() {
 fn balanced_v3_identity_short_circuit() {
     let (src, _dst) = make_pair_with_delta(64, 64, 0);
     let s = RgbSlice::new(&src, 64, 64);
-    let z = Zensim::new(ZensimProfile::PreviewV0_5BalancedV3).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_balanced_v3()).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
     assert_eq!(
         r.score(),
@@ -119,18 +119,18 @@ fn balanced_v3_identity_short_circuit() {
 #[test]
 fn compression_v3_profile_name_and_alias() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5CompressionV3.name(),
+        zensim_experimental::preview_v0_5_compression_v3().name(),
         "zensim-preview-v0.5-compression-v3"
     );
     assert_eq!(
-        ZensimProfile::PreviewV0_5CompressionV3,
-        ZensimProfile::PreviewV0_5CompressionV3
+        zensim_experimental::preview_v0_5_compression_v3(),
+        zensim_experimental::preview_v0_5_compression_v3()
     );
 }
 
 #[test]
 fn compression_v3_score_is_finite_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CompressionV3).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_compression_v3()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -151,7 +151,7 @@ fn compression_v3_score_is_finite_across_distortion_levels() {
 fn compression_v3_identity_short_circuit() {
     let (src, _dst) = make_pair_with_delta(64, 64, 0);
     let s = RgbSlice::new(&src, 64, 64);
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CompressionV3).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_compression_v3()).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
     assert_eq!(
         r.score(),
@@ -168,18 +168,18 @@ fn compression_v3_identity_short_circuit() {
 #[test]
 fn tuner_v4_profile_name_and_alias() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5TunerV4.name(),
+        zensim_experimental::preview_v0_5_tuner_v4().name(),
         "zensim-preview-v0.5-tuner-v4"
     );
     assert_eq!(
-        ZensimProfile::PreviewV0_5TunerV4,
-        ZensimProfile::PreviewV0_5TunerV4
+        zensim_experimental::preview_v0_5_tuner_v4(),
+        zensim_experimental::preview_v0_5_tuner_v4()
     );
 }
 
 #[test]
 fn tuner_v4_score_is_finite_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5TunerV4).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_tuner_v4()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -200,7 +200,7 @@ fn tuner_v4_score_is_finite_across_distortion_levels() {
 fn tuner_v4_identity_short_circuit() {
     let (src, _dst) = make_pair_with_delta(64, 64, 0);
     let s = RgbSlice::new(&src, 64, 64);
-    let z = Zensim::new(ZensimProfile::PreviewV0_5TunerV4).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_tuner_v4()).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
     assert_eq!(
         r.score(),
@@ -218,12 +218,12 @@ fn tuner_v4_differs_from_tuner_v3() {
     let (src, dst) = make_pair_with_delta(64, 64, 16);
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
-    let s_v4 = Zensim::new(ZensimProfile::PreviewV0_5TunerV4)
+    let s_v4 = Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())
         .with_parallel(false)
         .compute(&s, &d)
         .unwrap()
         .score();
-    let s_v3 = Zensim::new(ZensimProfile::PreviewV0_5TunerV3)
+    let s_v3 = Zensim::new(zensim_experimental::preview_v0_5_tuner_v3())
         .with_parallel(false)
         .compute(&s, &d)
         .unwrap()

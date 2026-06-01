@@ -146,7 +146,8 @@ impl ZensimProfile {
     /// - General-purpose ranking across heterogeneous distortion
     ///   families (KADID/TID/KonJND SROCC is poor by design — those
     ///   constraints were relaxed to gain monotonic dial behavior).
-    ///   For general ranking, use [`Self::balanced_v3`].
+    ///   For general ranking, use [`Self::PreviewV0_2`] (or one of the
+    ///   historical trail bakes in the `zensim-experimental` crate).
     /// - In-encoder per-block RDO distortion term. zensim is per-image
     ///   (~14 ms at 1024² × 5–20k RDO calls = 70–280 s/image, infeasible).
     ///   See `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md`.
@@ -225,8 +226,14 @@ impl PartialEq for ZensimProfile {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                ZensimProfile::Custom { params: a, name: na },
-                ZensimProfile::Custom { params: b, name: nb },
+                ZensimProfile::Custom {
+                    params: a,
+                    name: na,
+                },
+                ZensimProfile::Custom {
+                    params: b,
+                    name: nb,
+                },
             ) => core::ptr::eq(*a, *b) && na == nb,
             (ZensimProfile::Custom { .. }, _) | (_, ZensimProfile::Custom { .. }) => false,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
@@ -699,8 +706,9 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// non-invertible. Methodology (all 8 sub-points):
 /// `benchmarks/v0_qat_native_methodology_2026-05-27.md`. q-sweep:
 /// `benchmarks/qsweep_qat_native_vs_v39_2026-05-27.md`. The prior V39 bytes
-/// remain on disk at `zensim/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
-/// (still backing `PreviewV0_4`) for reproducibility.
+/// were relocated to
+/// `zensim-experimental/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
+/// (backing `zensim_experimental::preview_v0_4()`) for reproducibility.
 pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
     include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin")
 }

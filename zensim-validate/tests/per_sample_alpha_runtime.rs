@@ -1,7 +1,7 @@
 //! Regression test for per-sample-α head runtime dispatch.
 //!
 //! The V_24-per-sample-α s4 packed bake at
-//! `zensim/weights/v_compression_persample_2026-05-18.bin` requires
+//! `zensim-experimental/weights/v_compression_persample_2026-05-18.bin` requires
 //! a custom runtime dispatch beyond `Predictor::predict()`. The bake
 //! ships a `zentrain.per_sample_alpha_head` metadata payload (per
 //! `zensim-train-core::per_sample_alpha_head::bake_per_sample_alpha_head_v3`);
@@ -41,7 +41,7 @@ use std::path::PathBuf;
 use zenpredict::{Model, Predictor};
 
 const PACKED_BAKE: &[u8] =
-    include_bytes!("../../zensim/weights/v_compression_persample_2026-05-18.bin");
+    include_bytes!("../../zensim-experimental/weights/v_compression_persample_2026-05-18.bin");
 
 /// Per-sample α head dispatch payload — bit-exact copy of the
 /// runtime path used by `zensim::metric::forward_one_bake` and

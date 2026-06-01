@@ -20,7 +20,7 @@
 //!      different score; sanity check that `include_bytes!` is pointed
 //!      at the correct file AND that the spline runtime dispatch is
 //!      active for a no-tanh-pin bake).
-//!   5. `ZensimProfile::PreviewV0_5BalancedV2` alias returns the V2 variant.
+//!   5. `zensim_experimental::preview_v0_5_balanced_v2()` alias returns the V2 variant.
 //!
 //! What this test does NOT cover (lives elsewhere):
 //!   * Cross-corpus SROCC — `bake_verdict` against canonical val parquets,
@@ -31,7 +31,7 @@
 //!     trail was not trained with cross-codec equivalence pairs, so
 //!     this is not a primary gate.
 
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     let n = w * h;
@@ -58,12 +58,12 @@ fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8
 #[test]
 fn balanced_v2_profile_name() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5BalancedV2.name(),
+        zensim_experimental::preview_v0_5_balanced_v2().name(),
         "zensim-preview-v0.5-balanced-v2"
     );
     assert_eq!(
-        ZensimProfile::PreviewV0_5BalancedV2,
-        ZensimProfile::PreviewV0_5BalancedV2
+        zensim_experimental::preview_v0_5_balanced_v2(),
+        zensim_experimental::preview_v0_5_balanced_v2()
     );
 }
 
@@ -73,7 +73,7 @@ fn balanced_v2_score_in_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_5BalancedV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_balanced_v2()).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -86,12 +86,12 @@ fn balanced_v2_score_in_range() {
         (0.0..=100.0).contains(&score),
         "balanced-v2 score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5BalancedV2);
+    assert_eq!(r.profile(), zensim_experimental::preview_v0_5_balanced_v2());
 }
 
 #[test]
 fn balanced_v2_score_in_range_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5BalancedV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_balanced_v2()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -117,8 +117,8 @@ fn balanced_v2_differs_from_balanced_base() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z_v2 = Zensim::new(ZensimProfile::PreviewV0_5BalancedV2).with_parallel(false);
-    let z_base = Zensim::new(ZensimProfile::PreviewV0_5Balanced).with_parallel(false);
+    let z_v2 = Zensim::new(zensim_experimental::preview_v0_5_balanced_v2()).with_parallel(false);
+    let z_base = Zensim::new(zensim_experimental::preview_v0_5_balanced()).with_parallel(false);
     let s_v2 = z_v2.compute(&s, &d).unwrap().score();
     let s_base = z_base.compute(&s, &d).unwrap().score();
     assert!(
@@ -143,7 +143,7 @@ fn balanced_v2_identity_short_circuit_preserved() {
     // forward_one_bake).
     let (src, _dst) = make_pair_with_delta(64, 64, 0);
     let s = RgbSlice::new(&src, 64, 64);
-    let z = Zensim::new(ZensimProfile::PreviewV0_5BalancedV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_balanced_v2()).with_parallel(false);
     let r = z.compute(&s, &s).unwrap();
     assert_eq!(
         r.score(),

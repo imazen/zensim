@@ -679,7 +679,11 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     ));
     s.push_str(&format!(
         "| dial p5 / p95 | {p5:.1} / {p95:.1} | G1 p5≤25 ∧ p95≥85 | {} |\n",
-        if p5 <= 25.0 && p95 >= 85.0 { "✓" } else { "✗" }
+        if p5 <= 25.0 && p95 >= 85.0 {
+            "✓"
+        } else {
+            "✗"
+        }
     ));
     s.push_str(&format!(
         "| G1 soft / G3 soft | {g1:.2} / {g3:.2} | (1.0 = full pass) | |\n\n"
@@ -690,9 +694,21 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     );
     s.push_str("|---|---|---|--:|--:|--:|--:|--:|---|\n");
     for (codec, c) in &per_codec {
-        let inv = if c[0] > 0 { c[1] as f64 / c[0] as f64 } else { f64::NAN };
-        let m = if c[0] > 0 { 1.0 - c[1] as f64 / c[0] as f64 } else { f64::NAN };
-        let t = if c[0] > 0 { c[2] as f64 / c[0] as f64 } else { f64::NAN };
+        let inv = if c[0] > 0 {
+            c[1] as f64 / c[0] as f64
+        } else {
+            f64::NAN
+        };
+        let m = if c[0] > 0 {
+            1.0 - c[1] as f64 / c[0] as f64
+        } else {
+            f64::NAN
+        };
+        let t = if c[0] > 0 {
+            c[2] as f64 / c[0] as f64
+        } else {
+            f64::NAN
+        };
         let e = pext.get_mut(codec);
         let (kind, range, dial) = match e {
             Some(e) => {
@@ -1105,7 +1121,12 @@ Run the dedicated q-sweep harness for those._\n",
     // ── DIAL panel (codec-target G1/G3) — runs every time, native Rust ──
     // The second mandatory half of the eval (docs/EVAL_PANEL_REQUIREMENT.md):
     // monotonicity + tied + dial range on the densified multi-codec grid.
-    buf.push_str(&dial_panel(&model, has_transforms, n_inputs, &args.dial_grid));
+    buf.push_str(&dial_panel(
+        &model,
+        has_transforms,
+        n_inputs,
+        &args.dial_grid,
+    ));
 
     for r in &results {
         buf.push_str(&r.body);

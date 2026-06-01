@@ -49,12 +49,12 @@ fn main() -> ExitCode {
     let profile = match args[1].as_str() {
         "v0_2" => ZensimProfile::PreviewV0_2,
         "v0_3" => ZensimProfile::A,
-        "v0_4" => ZensimProfile::PreviewV0_4,
-        "v0_5" => ZensimProfile::PreviewV0_5,
-        "v0_5_balanced" => ZensimProfile::PreviewV0_5Balanced,
-        "v0_5_compression" => ZensimProfile::PreviewV0_5Compression,
-        "v0_5_ensemble" => ZensimProfile::PreviewV0_5Ensemble,
-        "v0_5_tuner" => ZensimProfile::PreviewV0_5Tuner,
+        "v0_4" => zensim_experimental::preview_v0_4(),
+        "v0_5" => zensim_experimental::preview_v0_5(),
+        "v0_5_balanced" => zensim_experimental::preview_v0_5_balanced(),
+        "v0_5_compression" => zensim_experimental::preview_v0_5_compression(),
+        "v0_5_ensemble" => zensim_experimental::preview_v0_5_ensemble(),
+        "v0_5_tuner" => zensim_experimental::preview_v0_5_tuner(),
         "latest" => ZensimProfile::A,
         other => {
             eprintln!("unknown profile: {other}");
@@ -104,7 +104,7 @@ fn main() -> ExitCode {
 
     // Default calibration policy: ON for PreviewV0_5Tuner only, OFF elsewhere.
     let calibration_enabled =
-        calibration_flag.unwrap_or(matches!(profile, ZensimProfile::PreviewV0_5Tuner));
+        calibration_flag.unwrap_or(profile == zensim_experimental::preview_v0_5_tuner());
 
     let img1 = image::open(ref_path).expect("open ref");
     let img2 = image::open(dist_path).expect("open dist");
@@ -140,7 +140,8 @@ fn main() -> ExitCode {
     // Compression / Ensemble — see CLAUDE.md "tied-rate dead zone")
     // or pre-date the per-codec fit; passing the flag with them is a
     // no-op so caller code can stay uniform.
-    let calibrated = if calibration_enabled && matches!(profile, ZensimProfile::PreviewV0_5Tuner) {
+    let calibrated = if calibration_enabled && profile == zensim_experimental::preview_v0_5_tuner()
+    {
         if let Some(codec) = &codec_name {
             let cal = CodecCalibration::PREVIEW_V0_5_TUNER;
             match cal.lookup(codec) {

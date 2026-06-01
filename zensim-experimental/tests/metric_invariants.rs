@@ -16,7 +16,7 @@
 //! checker, noise, smooth) — exactly the off-manifold region where an
 //! unconstrained MLP misbehaves.
 //!
-//! [`ZensimProfile::LinearBounded`] satisfies all three **by
+//! [`zensim_experimental::linear_bounded()`] satisfies all three **by
 //! construction** (non-negative weights × non-negative dissimilarity
 //! features → distance `d ≥ 0`, mapped by the strictly-decreasing
 //! bounded squash `100·exp(−(a/100)·d^b)`), so this gate passes for it.
@@ -53,7 +53,7 @@ fn score(z: &Zensim, src: &[[u8; 3]], dst: &[[u8; 3]]) -> f64 {
 /// content class and a spread of distortion kinds.
 #[test]
 fn linear_bounded_is_bounded_and_self_identity_maximal() {
-    let z = Zensim::new(ZensimProfile::LinearBounded).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::linear_bounded()).with_parallel(false);
     for (name, src) in contents() {
         let s_id = score(&z, &src, &src);
         assert!(
@@ -86,7 +86,7 @@ fn linear_bounded_is_bounded_and_self_identity_maximal() {
 /// less-degraded one.
 #[test]
 fn linear_bounded_is_degradation_monotone() {
-    let z = Zensim::new(ZensimProfile::LinearBounded).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::linear_bounded()).with_parallel(false);
     for (name, src) in contents() {
         // t = 0 is the identity (score 100); t = 1..=6 is increasing blur.
         let mut prev = 100.0_f64;
@@ -111,7 +111,7 @@ fn linear_bounded_is_degradation_monotone() {
 /// content the two profiles must rank a set of distortions identically.
 #[test]
 fn linear_bounded_preserves_v0_2_ranking() {
-    let z_bounded = Zensim::new(ZensimProfile::LinearBounded).with_parallel(false);
+    let z_bounded = Zensim::new(zensim_experimental::linear_bounded()).with_parallel(false);
     let z_legacy = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
     let src = gen_mandelbrot(W, H);
     let dists: Vec<Vec<[u8; 3]>> = (1..=6).map(|r| distort_blur(&src, W, H, r)).collect();

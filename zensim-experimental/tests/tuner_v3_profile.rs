@@ -18,7 +18,7 @@
 //!   4. The bake bytes are distinct from PreviewV0_5TunerV2 — the V9
 //!      bake carries an output_calibration_spline payload that V2 lacks,
 //!      so per-pair scores differ.
-//!   5. `ZensimProfile::PreviewV0_5TunerV3` alias returns the V3 variant.
+//!   5. `zensim_experimental::preview_v0_5_tuner_v3()` alias returns the V3 variant.
 //!
 //! What this test does NOT cover (lives elsewhere):
 //!   * Cross-corpus SROCC — `bake_verdict` against canonical val parquets.
@@ -26,7 +26,7 @@
 //!   * Anchor-band landing (JND@60, JOD@30, range [0, 100]) — the
 //!     methodology doc + the zensim-target smoke demo cover these.
 
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     let n = w * h;
@@ -53,13 +53,13 @@ fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8
 #[test]
 fn tuner_v3_profile_name() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5TunerV3.name(),
+        zensim_experimental::preview_v0_5_tuner_v3().name(),
         "zensim-preview-v0.5-tuner-v3"
     );
     // The const alias should return the same variant.
     assert_eq!(
-        ZensimProfile::PreviewV0_5TunerV3,
-        ZensimProfile::PreviewV0_5TunerV3
+        zensim_experimental::preview_v0_5_tuner_v3(),
+        zensim_experimental::preview_v0_5_tuner_v3()
     );
 }
 
@@ -69,7 +69,7 @@ fn tuner_v3_score_in_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_5TunerV3).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_tuner_v3()).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -82,12 +82,12 @@ fn tuner_v3_score_in_range() {
         (0.0..=100.0).contains(&score),
         "tuner-v3 score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5TunerV3);
+    assert_eq!(r.profile(), zensim_experimental::preview_v0_5_tuner_v3());
 }
 
 #[test]
 fn tuner_v3_score_in_range_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5TunerV3).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_tuner_v3()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -114,8 +114,8 @@ fn tuner_v3_differs_from_tuner_v2_on_typical_pair() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z_v3 = Zensim::new(ZensimProfile::PreviewV0_5TunerV3).with_parallel(false);
-    let z_v2 = Zensim::new(ZensimProfile::PreviewV0_5TunerV2).with_parallel(false);
+    let z_v3 = Zensim::new(zensim_experimental::preview_v0_5_tuner_v3()).with_parallel(false);
+    let z_v2 = Zensim::new(zensim_experimental::preview_v0_5_tuner_v2()).with_parallel(false);
     let s_v3 = z_v3.compute(&s, &d).unwrap().score();
     let s_v2 = z_v2.compute(&s, &d).unwrap().score();
     assert!(

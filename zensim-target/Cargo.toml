@@ -20,6 +20,9 @@ zenpng  = ["dep:zenpng"]
 
 [dependencies]
 zensim = { path = "../zensim", features = ["imgref"] }
+# Historical/experimental trail profiles (PreviewV0_5* / tuner variants),
+# enumerated by the `--profile` CLI parser for evaluation. Unpublished.
+zensim-experimental = { path = "../zensim-experimental" }
 image = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

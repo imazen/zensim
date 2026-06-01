@@ -38,7 +38,7 @@
 //! gradient patterns are NOT — those would require natural-image
 //! fixtures or the held-out corpus tooling.
 
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 /// Build a deterministic (ref, distorted) pair with adjustable
 /// distortion strength. Higher `delta` → more visible difference.
@@ -67,13 +67,13 @@ fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8
 #[test]
 fn cross_codec_profile_name_and_alias() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5CrossCodec.name(),
+        zensim_experimental::preview_v0_5_cross_codec().name(),
         "zensim-preview-v0.5-cross-codec"
     );
     // The const constructor alias matches the variant.
     assert_eq!(
-        ZensimProfile::PreviewV0_5CrossCodec,
-        ZensimProfile::PreviewV0_5CrossCodec
+        zensim_experimental::preview_v0_5_cross_codec(),
+        zensim_experimental::preview_v0_5_cross_codec()
     );
 }
 
@@ -83,7 +83,7 @@ fn cross_codec_score_in_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CrossCodec).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_cross_codec()).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -95,7 +95,7 @@ fn cross_codec_score_in_range() {
         (0.0..=100.0).contains(&score),
         "cross-codec score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5CrossCodec);
+    assert_eq!(r.profile(), zensim_experimental::preview_v0_5_cross_codec());
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn cross_codec_score_in_range_across_distortion_levels() {
     // (the bake's per-sample-α output compresses heavily on OOD
     // synthetic gradient patterns; spread-or-monotonicity assertions
     // would be brittle without natural-image fixtures).
-    let z = Zensim::new(ZensimProfile::PreviewV0_5CrossCodec).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_cross_codec()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -139,8 +139,8 @@ fn cross_codec_differs_from_tuner_on_typical_pair() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z_cc = Zensim::new(ZensimProfile::PreviewV0_5CrossCodec).with_parallel(false);
-    let z_t = Zensim::new(ZensimProfile::PreviewV0_5Tuner).with_parallel(false);
+    let z_cc = Zensim::new(zensim_experimental::preview_v0_5_cross_codec()).with_parallel(false);
+    let z_t = Zensim::new(zensim_experimental::preview_v0_5_tuner()).with_parallel(false);
     let s_cc = z_cc.compute(&s, &d).unwrap().score();
     let s_t = z_t.compute(&s, &d).unwrap().score();
     assert!(

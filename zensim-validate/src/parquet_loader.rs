@@ -356,7 +356,11 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)
         .map_err(|e| format!("{path:?}: parquet open: {e}"))?;
     let schema = builder.schema().clone();
-    let names: Vec<String> = schema.fields().iter().map(|f| f.name().to_string()).collect();
+    let names: Vec<String> = schema
+        .fields()
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect();
     let idx = |n: &str| names.iter().position(|x| x == n);
     let img_i = idx("image_id").ok_or_else(|| format!("{path:?}: missing image_id column"))?;
     let codec_i = idx("codec").ok_or_else(|| format!("{path:?}: missing codec column"))?;
@@ -431,12 +435,11 @@ pub fn load_dial_grid(path: &PathBuf) -> Result<DialGrid, String> {
                 .map_err(|e| format!("{path:?}: codec_param column {e}"))?,
             None => q_v.clone(),
         };
-        let pk_v: Vec<String> = match pk_i.and_then(|i| {
-            batch.column(i).as_any().downcast_ref::<StringArray>()
-        }) {
-            Some(a) => (0..n_rows).map(|r| a.value(r).to_string()).collect(),
-            None => vec!["q".to_string(); n_rows],
-        };
+        let pk_v: Vec<String> =
+            match pk_i.and_then(|i| batch.column(i).as_any().downcast_ref::<StringArray>()) {
+                Some(a) => (0..n_rows).map(|r| a.value(r).to_string()).collect(),
+                None => vec!["q".to_string(); n_rows],
+            };
         let per_col: Vec<Vec<f64>> = feat_idx
             .iter()
             .map(|&pi| col_f64(batch.column(pi).as_ref(), n_rows))

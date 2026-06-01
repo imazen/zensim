@@ -70,44 +70,53 @@ struct Cli {
 }
 
 fn parse_profile(s: &str) -> Result<ZensimProfile> {
+    // The named experimental "trail" variants now live in the unpublished
+    // `zensim-experimental` crate as free functions returning bit-identical
+    // `ZensimProfile::Custom` values. This CLI enumerates every trail by name
+    // for evaluation, so it depends on that crate. `codec_target` /
+    // `latest_preview` resolve to the canonical shipped production profile.
     match s.to_ascii_lowercase().as_str() {
         "v0_2" | "v02" | "preview-v0.2" => Ok(ZensimProfile::PreviewV0_2),
         "v0_3" | "v03" | "preview-v0.3" => Ok(ZensimProfile::PreviewV0_3),
+        "codec-target" | "codec_target" => Ok(ZensimProfile::codec_target()),
+        "latest" | "latest-preview" | "latest_preview" => Ok(ZensimProfile::latest_preview()),
         "balanced" | "v0_5_balanced" | "preview-v0.5-balanced" => {
-            Ok(ZensimProfile::PreviewV0_5Balanced)
+            Ok(zensim_experimental::preview_v0_5_balanced())
         }
         "compression" | "v0_5_compression" | "preview-v0.5-compression" => {
-            Ok(ZensimProfile::PreviewV0_5Compression)
+            Ok(zensim_experimental::preview_v0_5_compression())
         }
         "ensemble" | "v0_5_ensemble" | "preview-v0.5-ensemble" => {
-            Ok(ZensimProfile::PreviewV0_5Ensemble)
+            Ok(zensim_experimental::preview_v0_5_ensemble())
         }
-        "tuner" | "v0_5_tuner" | "preview-v0.5-tuner" => Ok(ZensimProfile::PreviewV0_5Tuner),
+        "tuner" | "v0_5_tuner" | "preview-v0.5-tuner" => {
+            Ok(zensim_experimental::preview_v0_5_tuner())
+        }
         "tuner-v2" | "tuner_v2" | "v0_5_tuner_v2" | "preview-v0.5-tuner-v2" => {
-            Ok(ZensimProfile::PreviewV0_5TunerV2)
+            Ok(zensim_experimental::preview_v0_5_tuner_v2())
         }
         "tuner-v3" | "tuner_v3" | "v0_5_tuner_v3" | "preview-v0.5-tuner-v3" => {
-            Ok(ZensimProfile::PreviewV0_5TunerV3)
+            Ok(zensim_experimental::preview_v0_5_tuner_v3())
         }
         "tuner-v4" | "tuner_v4" | "v0_5_tuner_v4" | "preview-v0.5-tuner-v4" | "default" => {
-            Ok(ZensimProfile::PreviewV0_5TunerV4)
+            Ok(zensim_experimental::preview_v0_5_tuner_v4())
         }
         "balanced-v2" | "balanced_v2" | "v0_5_balanced_v2" | "preview-v0.5-balanced-v2" => {
-            Ok(ZensimProfile::PreviewV0_5BalancedV2)
+            Ok(zensim_experimental::preview_v0_5_balanced_v2())
         }
         "balanced-v3" | "balanced_v3" | "v0_5_balanced_v3" | "preview-v0.5-balanced-v3" => {
-            Ok(ZensimProfile::PreviewV0_5BalancedV3)
+            Ok(zensim_experimental::preview_v0_5_balanced_v3())
         }
         "compression-v2"
         | "compression_v2"
         | "v0_5_compression_v2"
-        | "preview-v0.5-compression-v2" => Ok(ZensimProfile::PreviewV0_5CompressionV2),
+        | "preview-v0.5-compression-v2" => Ok(zensim_experimental::preview_v0_5_compression_v2()),
         "compression-v3"
         | "compression_v3"
         | "v0_5_compression_v3"
-        | "preview-v0.5-compression-v3" => Ok(ZensimProfile::PreviewV0_5CompressionV3),
+        | "preview-v0.5-compression-v3" => Ok(zensim_experimental::preview_v0_5_compression_v3()),
         other => bail!(
-            "unknown profile '{other}'; expected v0_2 | v0_3 | balanced | compression | ensemble | tuner | tuner-v2 | tuner-v3 | tuner-v4 | balanced-v2 | balanced-v3 | compression-v2 | compression-v3"
+            "unknown profile '{other}'; expected v0_2 | v0_3 | codec-target | balanced | compression | ensemble | tuner | tuner-v2 | tuner-v3 | tuner-v4 | balanced-v2 | balanced-v3 | compression-v2 | compression-v3"
         ),
     }
 }

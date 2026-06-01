@@ -24,7 +24,7 @@ use zensim::{ColorPrimaries, PixelFormat, StridedBytes, Zensim, ZensimProfile};
 // `tests/metric_invariants.rs::v39_known_limit_violations`. See
 // `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::LinearBounded)
+    Zensim::new(ZensimProfile::PreviewV0_2)
 }
 
 /// Helper: create StridedBytes from RGB u8 pixels with given primaries.

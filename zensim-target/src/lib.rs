@@ -97,19 +97,16 @@ impl Default for TargetSpec {
             target: 70.0,
             tolerance: 1.0,
             max_iterations: 8,
-            // Default to PreviewV0_5TunerV4 (EXP-CROSS-CODEC-V10 ship,
-            // 2026-05-20). Reallocates the score-space per user direction:
-            // lossless = 100, JND = 80, JOD = 50, q=0 worst-codec floor = 0,
-            // pathological < 0 (unclamped linear extrapolation). The wider
-            // perceptibility band (50 score units between JOD and JND vs
-            // V3's 30) gives the dial more resolution where compression
-            // product decisions live. Use `tuner-v3` for the prior V9 JND=60
-            // / JOD=30 dial; `tuner-v2` for the V_24 ship; `v0_3` for the
-            // legacy default. The legacy `V0_5*` ranking ships (Balanced
-            // / Compression / Ensemble) are NOT suited for quality-dial
-            // use — they produce non-monotonic q-step output without a
-            // monotonicity constraint.
-            profile: ZensimProfile::PreviewV0_5TunerV4,
+            // Default to the canonical production codec-target profile
+            // (`ZensimProfile::codec_target()` == `A`, the shipped 2026-05-27
+            // v47-strict-QAT-native bake). This is the profile a codec dials
+            // against in production; it is bounded, identity-max, and monotone
+            // on all content. The historical trail variants (TunerV4 /
+            // Balanced / Compression / Ensemble etc.) now live in the
+            // unpublished `zensim-experimental` crate — use the CLI
+            // `--profile` flag (which still parses every named trail) when
+            // you need a specific experimental trail for evaluation.
+            profile: ZensimProfile::codec_target(),
         }
     }
 }

@@ -36,10 +36,10 @@ fn main() -> anyhow::Result<()> {
     for profile in [
         ZensimProfile::PreviewV0_2,
         ZensimProfile::PreviewV0_3,
-        ZensimProfile::PreviewV0_5,
-        ZensimProfile::PreviewV0_5Balanced,
-        ZensimProfile::PreviewV0_5Compression,
-        ZensimProfile::PreviewV0_5Ensemble,
+        zensim_experimental::preview_v0_5(),
+        zensim_experimental::preview_v0_5_balanced(),
+        zensim_experimental::preview_v0_5_compression(),
+        zensim_experimental::preview_v0_5_ensemble(),
     ] {
         let z = Zensim::new(profile);
         let ident = z.compute(

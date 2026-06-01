@@ -80,6 +80,23 @@ harness = false
 name = "extract_features_372col"
 required-features = ["training"]
 
+# `aic3_one_pair_smoke` and `extended_iw_perf` likewise use zensim's
+# `training`-gated research API; guard them so a default `--all-targets`
+# build doesn't try (and fail) to compile them.
+[[example]]
+name = "aic3_one_pair_smoke"
+required-features = ["training"]
+
+[[example]]
+name = "extended_iw_perf"
+required-features = ["training"]
+
+# `extract_features_372col_omni` pulls the optional sibling codec crates via
+# the `extract-omni` feature; gate it so the default build skips it.
+[[example]]
+name = "extract_features_372col_omni"
+required-features = ["extract-omni"]
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("zenresize", "training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']

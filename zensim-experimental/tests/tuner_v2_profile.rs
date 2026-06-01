@@ -20,7 +20,7 @@
 //!   * Per-band cross-codec parity — `eval_v6_multi_band_check.py`.
 //!   * JPEG q-sweep monotonicity — `qsweep_eval`.
 
-use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim};
 
 fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
     let n = w * h;
@@ -47,7 +47,7 @@ fn make_pair_with_delta(w: usize, h: usize, delta: u8) -> (Vec<[u8; 3]>, Vec<[u8
 #[test]
 fn tuner_v2_profile_name() {
     assert_eq!(
-        ZensimProfile::PreviewV0_5TunerV2.name(),
+        zensim_experimental::preview_v0_5_tuner_v2().name(),
         "zensim-preview-v0.5-tuner-v2"
     );
 }
@@ -58,7 +58,7 @@ fn tuner_v2_score_in_range() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_5TunerV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_tuner_v2()).with_parallel(false);
     let r = z.compute(&s, &d).unwrap();
 
     let score = r.score();
@@ -70,12 +70,12 @@ fn tuner_v2_score_in_range() {
         (0.0..=100.0).contains(&score),
         "tuner-v2 score out of range: {score}"
     );
-    assert_eq!(r.profile(), ZensimProfile::PreviewV0_5TunerV2);
+    assert_eq!(r.profile(), zensim_experimental::preview_v0_5_tuner_v2());
 }
 
 #[test]
 fn tuner_v2_score_in_range_across_distortion_levels() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_5TunerV2).with_parallel(false);
+    let z = Zensim::new(zensim_experimental::preview_v0_5_tuner_v2()).with_parallel(false);
     for delta in (0..50).step_by(5) {
         let (src, dst) = make_pair_with_delta(64, 64, delta as u8);
         let s = RgbSlice::new(&src, 64, 64);
@@ -100,9 +100,9 @@ fn tuner_v2_differs_from_tuner_and_cross_codec_on_typical_pair() {
     let s = RgbSlice::new(&src, 64, 64);
     let d = RgbSlice::new(&dst, 64, 64);
 
-    let z_v2 = Zensim::new(ZensimProfile::PreviewV0_5TunerV2).with_parallel(false);
-    let z_t = Zensim::new(ZensimProfile::PreviewV0_5Tuner).with_parallel(false);
-    let z_cc = Zensim::new(ZensimProfile::PreviewV0_5CrossCodec).with_parallel(false);
+    let z_v2 = Zensim::new(zensim_experimental::preview_v0_5_tuner_v2()).with_parallel(false);
+    let z_t = Zensim::new(zensim_experimental::preview_v0_5_tuner()).with_parallel(false);
+    let z_cc = Zensim::new(zensim_experimental::preview_v0_5_cross_codec()).with_parallel(false);
     let s_v2 = z_v2.compute(&s, &d).unwrap().score();
     let s_t = z_t.compute(&s, &d).unwrap().score();
     let s_cc = z_cc.compute(&s, &d).unwrap().score();
