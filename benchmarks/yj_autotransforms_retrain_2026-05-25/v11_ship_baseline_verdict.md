@@ -1,6 +1,6 @@
 # bake_verdict — instant V_X eval
 
-- Bake: `zensim/weights/v_tuner_v11_2026-05-24.bin`
+- Bake: `zensim-experimental/weights/v_tuner_v11_2026-05-24.bin`
 - Feature parquets: `/mnt/v/zen/zensim-training/2026-05-15-full-features`
 - Bake n_inputs: 372
 - Feature transforms: no

@@ -107,7 +107,7 @@ the next-priority work for actual B0..B5 lift per
 ```sh
 cargo run --release -p zensim-validate --bin ensemble_mix -- \
   --csv "cid22:/mnt/v/zen/zensim-training/2026-05-07/v06-features/cid22_features.csv" \
-  --bake "v0_18_ship=zensim/weights/v0_18_2026-05-13.bin" \
+  --bake "v0_18_ship=zensim-experimental/weights/v0_18_2026-05-13.bin" \
   --bake "baseline_hq=/tmp/v0_20a_tv_train/baseline_228_hq_s1.bin" \
   --band-edges 10,20,30,40,50,60,70,80,90
 ```

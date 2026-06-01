@@ -126,7 +126,7 @@ trail even with relaxed step-3 tolerance.
   (+0.023), KADID 0.9475 (−0.020), TID 0.9617 (−0.011), KonJND
   n/a. Fails compression-trail step 2 (decisive B>>A on CID22 vs
   baseline — the "other compression corpus" loss). Bake still on
-  disk at `/home/lilith/work/zen/zensim/zensim/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`.
+  disk at `/home/lilith/work/zen/zensim/zensim-experimental/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`.
 - **V_20a IW + ext + transforms / V_20b distortion manifold**:
   CID22 SROCC 0.4632 / negative on synth pre-train transfer. Per
   CLAUDE.md "structurally rigged SROCC-on-CID22 verdict" — but the

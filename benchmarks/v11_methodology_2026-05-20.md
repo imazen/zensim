@@ -191,7 +191,7 @@ bake's source network (`v22_mix_cv40_konjnd_002_LARGE_iwssim_2026-05-18.bin`)
 using the new V11 ssim2-anchored parquet. This isolates the substrate
 swap: same network, different spline calibration.
 
-Output: `zensim/weights/v11_candidates/v_balanced_v11_2026-05-20.bin`
+Output: `zensim-experimental/weights/v11_candidates/v_balanced_v11_2026-05-20.bin`
 
 ### V11 spline knots (10, sorted by raw_pred)
 
@@ -308,8 +308,8 @@ defensible Balanced bake.
   - `benchmarks/v11_verdicts/v11a_s1_plainmlp.md` (V11-A' s1 plain MLP)
   - `benchmarks/v11_verdicts/v11a_s1_with_spline.md` (V11-A' s1 + V11 spline)
 - Candidate bakes (NOT shipped):
-  - `zensim/weights/v11_candidates/v_balanced_v11_2026-05-20.bin`
-  - `zensim/weights/v11_candidates/v_balanced_v11a_s1_spline_2026-05-20.bin`
+  - `zensim-experimental/weights/v11_candidates/v_balanced_v11_2026-05-20.bin`
+  - `zensim-experimental/weights/v11_candidates/v_balanced_v11a_s1_spline_2026-05-20.bin`
 
 ## Substrate files on /mnt/v (preserved for future use)
 

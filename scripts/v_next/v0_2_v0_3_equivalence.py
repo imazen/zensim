@@ -21,7 +21,7 @@ import pyarrow.parquet as pq
 
 REPO = Path("/home/lilith/work/zen/zensim")
 PROFILE_RS = REPO / "zensim/src/profile.rs"
-BAKE_V03 = REPO / "zensim/weights/v_tuner_v11_2026-05-24.bin"
+BAKE_V03 = REPO / "zensim-experimental/weights/v_tuner_v11_2026-05-24.bin"
 PREDICT = REPO / "target/release/predict_features_with_bake"
 PARQUET = Path("/mnt/v/zen/picker-training/2026-05-19-v2/cross_codec_equivalence_tight_v3.parquet")
 

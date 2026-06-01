@@ -69,5 +69,5 @@ Partly yes. The IW block was added to expose **IW-SSIM**'s information-content g
 
 - `/tmp/iw_pool_corr_analysis.log` — full per-feature correlation + redundancy log (this session).
 - `/mnt/v/zen/zensim-training/canonical-2026-05-21/train/safesyn.parquet` columns `f300..f371` vs `f0..f227`.
-- `zensim/weights/v_tuner_v11_2026-05-24.bin` L0 dump via `cargo run -p zensim-validate --release --example v11_importance`.
+- `zensim-experimental/weights/v_tuner_v11_2026-05-24.bin` L0 dump via `cargo run -p zensim-validate --release --example v11_importance`.
 - Cross-bake L0 importance pattern in the table above — reproduce via the same example pointed at each bake.

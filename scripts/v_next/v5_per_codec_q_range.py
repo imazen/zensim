@@ -22,7 +22,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 REPO = Path("/home/lilith/work/zen/zensim")
-BAKE = REPO / "zensim/weights/v_tuner_v11_2026-05-24.bin"
+BAKE = REPO / "zensim-experimental/weights/v_tuner_v11_2026-05-24.bin"
 PREDICT = REPO / "target/release/predict_features_with_bake"
 PARQ_ROOT = Path("/mnt/v/zen/picker-training/2026-05-19/butter")
 OUT_MD = REPO / "benchmarks/v_tuner_v5_per_codec_q_range_2026-05-24.md"

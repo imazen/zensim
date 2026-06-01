@@ -32,7 +32,7 @@ Exit codes: 0 = pass, 1 = fail (median out of target window),
 
   cargo run --release -p zensim-bench --example dataset_metric_baseline -- \\
     --pairs-tsv 'AIC-3:/tmp/aic3_anchor_pairs.tsv' \\
-    --v04-bake zensim/weights/v0_18_2026-05-13.bin \\
+    --v04-bake zensim-experimental/weights/v0_18_2026-05-13.bin \\
     --max-pairs 500 \\
     --per-pair-output benchmarks/per_pair_v0_18_aic3_anchor_<date>.csv
 

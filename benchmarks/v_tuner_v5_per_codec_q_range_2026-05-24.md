@@ -1,6 +1,6 @@
 # V_tuner_v5 per-codec q-range analysis (2026-05-24 PM)
 
-- **Bake:** `zensim/weights/v_tuner_v11_2026-05-24.bin` (packed i8 + zerobias + lz4, 54 KB)
+- **Bake:** `zensim-experimental/weights/v_tuner_v11_2026-05-24.bin` (packed i8 + zerobias + lz4, 54 KB)
 - **Per-codec parquets:** `/mnt/v/zen/picker-training/2026-05-19/butter` (1000 refs × 19 q each)
 - **Discrete-targetability tolerance:** 1.0 score unit (adjacent-q median scores must differ by ≥ TOL)
 

@@ -60,7 +60,7 @@ Command:
 ```sh
 python3 scripts/v_next/calibrate_balanced_v9_spline.py \
     --bake zensim/weights/v_cross_codec_2026-05-19.bin \
-    --out zensim/weights/v_cross_codec_v2_2026-05-20.bin \
+    --out zensim-experimental/weights/v_cross_codec_v2_2026-05-20.bin \
     --n-features 372 \
     --predict-bin ./target/release/predict_features_with_bake \
     --zenpredict-bin /home/lilith/work/zen/zenanalyze/target/release/zenpredict \
@@ -230,7 +230,7 @@ step that can be done on the existing bake bytes.
 ## Ship decision
 
 **Do not ship `PreviewV0_5CrossCodecV2`.** The candidate bake at
-`zensim/weights/v_cross_codec_v2_2026-05-20.bin` is preserved for
+`zensim-experimental/weights/v_cross_codec_v2_2026-05-20.bin` is preserved for
 provenance but not wired into any `ZensimProfile` variant.
 
 **Deprecate `PreviewV0_5CrossCodec` from public-facing surfaces:**
@@ -259,7 +259,7 @@ falsification doc is the prerequisite artifact.
 - bake_verdict on CrossCodecV2 candidate:
   `benchmarks/v_cross_codec_v2_2026-05-20_verdict.md`
 - Candidate bake (preserved for provenance):
-  `zensim/weights/v_cross_codec_v2_2026-05-20.bin` (197,073 bytes)
+  `zensim-experimental/weights/v_cross_codec_v2_2026-05-20.bin` (197,073 bytes)
 
 ## Provenance
 

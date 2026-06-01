@@ -2,7 +2,7 @@
 
 Bake verdict comparison on all 6 validation corpora.
 
-- V0_3: `zensim/weights/v_tuner_v11_2026-05-24.bin` (currently shipped as PreviewV0_3)
+- V0_3: `zensim-experimental/weights/v_tuner_v11_2026-05-24.bin` (currently shipped as PreviewV0_3)
 - V5: `/mnt/v/output/zensim/bakes/prod_2layer_v5_spline_2026-05-25.bin`
 
 ## Aggregate Mohammadi Panel Comparison

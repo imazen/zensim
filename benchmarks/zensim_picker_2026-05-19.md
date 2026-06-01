@@ -131,10 +131,10 @@ per-source RD curve but doesn't help cross-codec.
 
 | Path | Description |
 |---|---|
-| `zensim/weights/picker_zenjpeg_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 3.00 |
-| `zensim/weights/picker_zenwebp_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 2.95 |
-| `zensim/weights/picker_zenavif_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 2.11 |
-| `zensim/weights/picker_zenjxl_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 3.09 |
+| `zensim-experimental/weights/picker_zenjpeg_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 3.00 |
+| `zensim-experimental/weights/picker_zenwebp_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 2.95 |
+| `zensim-experimental/weights/picker_zenavif_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 2.11 |
+| `zensim-experimental/weights/picker_zenjxl_2026-05-19.bin` | ZNPR v3, 38 KB, val MAE 3.09 |
 | `zensim-validate/src/bin/zensim_picker_train.rs` | Trainer (109→64→32→1 MLP) |
 | `zensim-validate/src/bin/zensim_picker_infer.rs` | Inference CLI (bake → q) |
 | `scripts/v_next/cross_codec_jnd_picker_eval.py` | Cross-codec eval driver |

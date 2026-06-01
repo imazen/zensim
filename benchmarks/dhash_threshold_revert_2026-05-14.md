@@ -38,7 +38,7 @@ drove:
 - A "cross-corpus" claim that 8 of 81 KADID refs (I02, I08, I24, I25,
   I28, I30, I34, I61) overlap with 3 of 49 CID22 refs (`2887497.png`,
   `373965.png`, `792079.png`) at d ≤ 16.
-- The V0_19 ship swap of `zensim/weights/v0_18_2026-05-13.bin` →
+- The V0_19 ship swap of `zensim-experimental/weights/v0_18_2026-05-13.bin` →
   `v0_19_2026-05-14.bin` in `profile.rs` (commit `f8a3280`).
 
 User reviewed the 8 side-by-side montages in
@@ -72,7 +72,7 @@ matches the dHash of any other all-zero block).
 
 1. `zensim/src/profile.rs` `include_bytes!` reverted to
    `v0_18_2026-05-13.bin`. V0_19 bake moved to
-   `zensim/weights/archive/v0_19_overcleaned_2026-05-14.bin` for
+   `zensim-experimental/weights/archive/v0_19_overcleaned_2026-05-14.bin` for
    reference.
 2. The following docs were renamed to `*_REVERTED_*` to signal their
    claims are RETRACTED:
@@ -102,7 +102,7 @@ the side-by-side montage** before any training source is dropped.
 
 ## V0_18 status: UNCHANGED
 
-V0_18 (`zensim/weights/v0_18_2026-05-13.bin`, md5
+V0_18 (`zensim-experimental/weights/v0_18_2026-05-13.bin`, md5
 `c94e93607390d0b6704e95f3851d421e`, CID22 SROCC 0.8934, KADID 0.9427,
 TID 0.9525) is the shipped weight again. No contamination has been
 demonstrated against V0_18 at any threshold the user has signed off on.

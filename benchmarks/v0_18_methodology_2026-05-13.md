@@ -1,7 +1,7 @@
 # V0_18 methodology + reproducible recipe
 
 **Ship date**: 2026-05-13
-**Bin**: `zensim/weights/v0_18_2026-05-13.bin` (93,064 B, md5
+**Bin**: `zensim-experimental/weights/v0_18_2026-05-13.bin` (93,064 B, md5
 `2cc537470e68f7379e759811ddd22900`)
 **Architecture**: 228→384→1 LeakyReLU MLP, I8 weights with per-output
 f32 scales (zenpredict v3 wire format, `WeightDtype::I8`)
@@ -98,7 +98,7 @@ Affine calibration applied post-training via
 ```sh
 python3 scripts/v_next/affine_calibrate_znpr_v2.py \
   --in-bake  /tmp/zensim_loop/v0_16_purged_tv20_seed1.bin \
-  --out-bake zensim/weights/archive/v0_16_2026-05-12.bin \
+  --out-bake zensim-experimental/weights/archive/v0_16_2026-05-12.bin \
   --alpha 31.1041 --beta -4.3882
 ```
 
@@ -196,10 +196,10 @@ Final V0_17 bake: `benchmarks/rust_v0_X_2026-05-13_concat_3way_65_30_5.bin`
 
 ```sh
 cargo run --release -p zensim-bench --example quant_compare -- \
-  zensim/weights/archive/v0_17_2026-05-13.bin /tmp/quant
+  zensim-experimental/weights/archive/v0_17_2026-05-13.bin /tmp/quant
 # Output: /tmp/quant/v0_17_2026-05-13_i8.bin (93,064 B)
 
-cp /tmp/quant/v0_17_2026-05-13_i8.bin zensim/weights/v0_18_2026-05-13.bin
+cp /tmp/quant/v0_17_2026-05-13_i8.bin zensim-experimental/weights/v0_18_2026-05-13.bin
 ```
 
 The `quant_compare.rs` tool reads V0_17's f32 weights, dequantizes
@@ -225,7 +225,7 @@ cargo run --release -p zensim-bench --example dataset_metric_baseline -- \
   --aic3 /tmp/zensim_loop/aic3_ctc_pairs.csv \
   --pairs-tsv AIC4:/tmp/aic4_pairs.tsv \
   --konjnd /mnt/v/datasets/KonJND-1k/KonJND-1k \
-  --v04-bake zensim/weights/v0_18_2026-05-13.bin \
+  --v04-bake zensim-experimental/weights/v0_18_2026-05-13.bin \
   --max-pairs 20000
 ```
 
@@ -237,7 +237,7 @@ Non-monotonic q-step rate measured by:
 
 ```sh
 python3 scripts/v_next/score_unified_with_bake.py \
-  --bake zensim/weights/v0_18_2026-05-13.bin \
+  --bake zensim-experimental/weights/v0_18_2026-05-13.bin \
   --parquet /mnt/v/zen/zensim-training/2026-05-07/unified/unified_v15r_zenjpeg.parquet
 ```
 

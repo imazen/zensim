@@ -35,9 +35,9 @@ WORK_DIR = Path("/mnt/v/output/zensim/cross_codec_consistency_2026-05-19/work")
 FEATURES_PARQUET = Path("/mnt/v/zen/picker-training/2026-05-19/sources_zenanalyze_features.parquet")
 PICKER_INFER = ROOT / "target/release/zensim_picker_infer"
 BAKES = {
-    "jpeg": ROOT / "zensim/weights/picker_zenjpeg_2026-05-19.bin",
-    "webp": ROOT / "zensim/weights/picker_zenwebp_2026-05-19.bin",
-    "avif": ROOT / "zensim/weights/picker_zenavif_2026-05-19.bin",
+    "jpeg": ROOT / "zensim-experimental/weights/picker_zenjpeg_2026-05-19.bin",
+    "webp": ROOT / "zensim-experimental/weights/picker_zenwebp_2026-05-19.bin",
+    "avif": ROOT / "zensim-experimental/weights/picker_zenavif_2026-05-19.bin",
 }
 OUT_DIR = Path("/mnt/v/output/zensim/picker_cross_codec_2026-05-19")
 BASELINE_SUMMARY = Path("/mnt/v/output/zensim/per_codec_calibration_2026-05-19/eval/summary_2026-05-19.json")

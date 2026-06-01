@@ -25,7 +25,7 @@ suite, the trainer naturally uses the previously-collinear pool
 features more.
 
 Phase 1 commit: `b78d3a09` (already on main).
-Phase 2 bake: `zensim/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin`
+Phase 2 bake: `zensim-experimental/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin`
 (274,735 bytes, md5 `bfb109563f6f9ca6e88eaa1921d331f4`).
 
 ## 1. Phase 1 — widest-grid YJ screen (recap)
@@ -235,7 +235,7 @@ Phase 1 artifacts: `../yeo_johnson_screen_widest_2026-05-25/`.
 ## 8. Bake metadata
 
 ```
-$ zenpredict inspect zensim/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin
+$ zenpredict inspect zensim-experimental/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin
 n_inputs: 372
 layers: [372→128 (LeakyReLU, f32), 128→128 (Identity, f32)]
 metadata:
@@ -251,7 +251,7 @@ metadata:
 cd ~/work/zen/zensim
 bash scripts/v_next/run_tuner_v11_yj_autotransforms_2026-05-25.sh 1
 ./target/release/bake_verdict \
-  --bake zensim/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin \
+  --bake zensim-experimental/weights/v_tuner_v11_yj_autotransforms_2026-05-25.bin \
   --output benchmarks/yj_autotransforms_retrain_2026-05-25/v11_yj_at_verdict.md
 python3 scripts/v_next/yj_at_phase2_diff.py \
   --ship-md benchmarks/yj_autotransforms_retrain_2026-05-25/v11_ship_baseline_verdict.md \

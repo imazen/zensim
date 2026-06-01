@@ -33,7 +33,7 @@
 //!                  [--features-root /mnt/v/zen/zensim-training/2026-05-15-full-features]
 //!
 //! Verification: when invoked with the V_22-IW v2 calibrated bake
-//! (`zensim/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`), the
+//! (`zensim-experimental/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`), the
 //! aggregate SROCC values match the dataset_metric_baseline log at
 //! `benchmarks/v0_22_iw_v2_seed1_2026-05-16_eval_full.log` to within
 //! 1e-3. The full numbers come from the SAME features that the

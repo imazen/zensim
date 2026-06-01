@@ -3,7 +3,7 @@
 //!
 //! Usage:
 //!   zensim_picker_infer \
-//!       --bake zensim/weights/picker_zenjpeg_2026-05-19.bin \
+//!       --bake zensim-experimental/weights/picker_zenjpeg_2026-05-19.bin \
 //!       --features /mnt/v/zen/picker-training/2026-05-19/sources_zenanalyze_features.parquet \
 //!       --t-values 30,50,63,70,80,90 \
 //!       --q-grid 5,10,15,...,95 \

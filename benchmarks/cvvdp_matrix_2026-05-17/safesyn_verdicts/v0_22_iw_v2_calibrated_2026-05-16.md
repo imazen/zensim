@@ -1,6 +1,6 @@
 # bake_verdict — instant V_X eval
 
-- Bake: `zensim/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`
+- Bake: `zensim-experimental/weights/v0_22_iw_v2_calibrated_2026-05-16.bin`
 - Feature parquets: `/mnt/v/zen/zensim-training/2026-05-15-full-features`
 - Bake n_inputs: 372
 - Feature transforms: yes (uses predict_transformed)

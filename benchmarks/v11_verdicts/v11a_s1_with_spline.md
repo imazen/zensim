@@ -1,6 +1,6 @@
 # bake_verdict — instant V_X eval
 
-- Bake: `/home/lilith/work/zen/zensim--cross-codec-v8/zensim/weights/v11_candidates/v_balanced_v11a_s1_spline_2026-05-20.bin`
+- Bake: `/home/lilith/work/zen/zensim--cross-codec-v8/zensim-experimental/weights/v11_candidates/v_balanced_v11a_s1_spline_2026-05-20.bin`
 - Feature parquets: `/mnt/v/zen/zensim-training/2026-05-15-full-features`
 - Bake n_inputs: 300
 - Feature transforms: no

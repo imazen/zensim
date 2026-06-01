@@ -1,6 +1,6 @@
 # V_18 ship reference card — canonical V_X comparison baseline
 
-**Bake**: `zensim/weights/v0_18_2026-05-13.bin`
+**Bake**: `zensim-experimental/weights/v0_18_2026-05-13.bin`
   (md5 `c94e93607390d0b6704e95f3851d421e`, 93,064 bytes)
 **Date**: 2026-05-14 eve
 **Full eval log**: `benchmarks/v0_18_ship_reference_card_2026-05-14.log`
@@ -121,7 +121,7 @@ cargo run --release -p zensim-bench --example dataset_metric_baseline -- \
   --kadid /mnt/v/dataset/kadid10k \
   --tid /mnt/v/dataset/tid2013 \
   --cid22 /mnt/v/dataset/cid22/CID22_validation_set \
-  --v04-bake zensim/weights/v0_18_2026-05-13.bin \
+  --v04-bake zensim-experimental/weights/v0_18_2026-05-13.bin \
   --max-pairs 50000 \
   --per-pair-output /tmp/per_pair_v0_18_ship_<date>.csv \
   2>&1 | tee benchmarks/v0_18_ship_reference_card_<date>.log
