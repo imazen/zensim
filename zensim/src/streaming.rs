@@ -757,10 +757,6 @@ pub(crate) fn compute_multiscale_stats_streaming(
     let mut h = height;
 
     for scale in 0..num_scales {
-        if w < 8 || h < 8 {
-            break;
-        }
-
         let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
         let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
         let (scale_stat, _) =
@@ -768,9 +764,18 @@ pub(crate) fn compute_multiscale_stats_streaming(
         stats.push(scale_stat);
 
         if scale < num_scales - 1 {
-            let (nw, nh) = downscale_6_planes(&mut src_planes, &mut dst_planes, w, h, parallel);
-            w = nw;
-            h = nh;
+            // Only downscale when the next scale is a real (≥8) level. When the
+            // image is too small to halve `num_scales` times (min_dim < 64 at
+            // the default 4 scales), keep the coarsest planes so the next
+            // iteration re-processes them — a repeated scale that pads the
+            // feature vector to the bake's fixed `num_scales` length. This is a
+            // NO-OP for images large enough to produce every scale naturally
+            // (they never hit the guard), so their scores stay bit-identical.
+            if w / 2 >= 8 && h / 2 >= 8 {
+                let (nw, nh) = downscale_6_planes(&mut src_planes, &mut dst_planes, w, h, parallel);
+                w = nw;
+                h = nh;
+            }
         }
     }
 
