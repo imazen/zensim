@@ -568,16 +568,29 @@ fn mean_offset_precomputed_ref() {
 // ─── Error condition tests ───────────────────────────────────────────────────
 
 #[test]
-fn error_image_too_small() {
+fn small_images_score_via_reflect_pad() {
+    // 2026-06-06: sub-64px images are reflect(mirror)-padded to the 4-scale
+    // pyramid minimum inside `compute`, so they now SCORE (down to 1×1)
+    // rather than erroring. See tests/size_invariance.rs for the invariance
+    // gate. The precomputed-reference REUSE path does not reflect-pad and
+    // retains the 8×8 minimum (the direct `compute` path is the small path).
     let z = Zensim::new(ZensimProfile::A);
-    // 4×4 is below 8×8 minimum
     let small = vec![[128u8; 3]; 4 * 4];
     let src = RgbSlice::new(&small, 4, 4);
     let dst = RgbSlice::new(&small, 4, 4);
+    let s = z
+        .compute(&src, &dst)
+        .expect("4x4 now scores via reflect-pad")
+        .score();
+    assert!(s.is_finite() && (0.0..=100.0).contains(&s), "4x4 score {s}");
+    // Empty images are still unscoreable.
+    let empty: Vec<[u8; 3]> = Vec::new();
     assert_eq!(
-        z.compute(&src, &dst).unwrap_err(),
+        z.compute(&RgbSlice::new(&empty, 0, 0), &RgbSlice::new(&empty, 0, 0))
+            .unwrap_err(),
         ZensimError::ImageTooSmall
     );
+    // Precomputed-reference reuse path keeps the 8×8 minimum.
     assert!(matches!(
         z.precompute_reference(&src),
         Err(ZensimError::ImageTooSmall)

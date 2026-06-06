@@ -1753,7 +1753,10 @@ pub(crate) fn validate_pair(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
 ) -> Result<(), ZensimError> {
-    if source.width() < 8 || source.height() < 8 {
+    // Empty images are unscoreable; sub-64px images are now handled by
+    // reflect-padding in `compute_with_config_inner` (scores down to 1×1),
+    // so they are NOT rejected here anymore.
+    if source.width() == 0 || source.height() == 0 {
         return Err(ZensimError::ImageTooSmall);
     }
     if source.width() != distorted.width() || source.height() != distorted.height() {
@@ -1892,7 +1895,103 @@ fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource
     true
 }
 
+/// Minimum per-dimension size for the full 4-scale pyramid (8·2³ = 64).
+const MIN_PYRAMID_DIM: usize = 64;
+
+/// Owned, tightly-packed image presenting a reflect(mirror)-padded view of a
+/// sub-64px input so the multi-scale pyramid always forms. This is the
+/// bake-/metric-agnostic small-image fix: the pipeline computes genuine scales
+/// over reflected content (a constant difference scores identically at every
+/// size; scores down to 1×1 with no error) instead of synthesizing a feature
+/// vector. NO-OP for images already ≥ 64px in both dims.
+struct OwnedImage {
+    data: Vec<u8>,
+    width: usize,
+    height: usize,
+    format: crate::source::PixelFormat,
+    alpha: crate::source::AlphaMode,
+    primaries: crate::source::ColorPrimaries,
+}
+
+impl ImageSource for OwnedImage {
+    fn width(&self) -> usize {
+        self.width
+    }
+    fn height(&self) -> usize {
+        self.height
+    }
+    fn pixel_format(&self) -> crate::source::PixelFormat {
+        self.format
+    }
+    fn alpha_mode(&self) -> crate::source::AlphaMode {
+        self.alpha
+    }
+    fn color_primaries(&self) -> crate::source::ColorPrimaries {
+        self.primaries
+    }
+    fn row_bytes(&self, y: usize) -> &[u8] {
+        let stride = self.width * self.format.bytes_per_pixel();
+        &self.data[y * stride..y * stride + stride]
+    }
+}
+
+/// reflect-101 index map (mirror without repeating the edge); `n == 1` → 0.
+#[inline]
+fn reflect_index(i: usize, n: usize) -> usize {
+    if n <= 1 {
+        return 0;
+    }
+    let period = 2 * (n - 1);
+    let mut k = i % period;
+    if k >= n {
+        k = period - k;
+    }
+    k
+}
+
+/// Reflect(mirror)-pad `src` up to at least [`MIN_PYRAMID_DIM`] in each dim.
+fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
+    let (w, h) = (src.width(), src.height());
+    let bpp = src.pixel_format().bytes_per_pixel();
+    let (bw, bh) = (w.max(MIN_PYRAMID_DIM), h.max(MIN_PYRAMID_DIM));
+    let mut data = vec![0u8; bw * bh * bpp];
+    for y in 0..bh {
+        let srow = src.row_bytes(reflect_index(y, h));
+        for x in 0..bw {
+            let sx = reflect_index(x, w) * bpp;
+            let dx = (y * bw + x) * bpp;
+            data[dx..dx + bpp].copy_from_slice(&srow[sx..sx + bpp]);
+        }
+    }
+    OwnedImage {
+        data,
+        width: bw,
+        height: bh,
+        format: src.pixel_format(),
+        alpha: src.alpha_mode(),
+        primaries: src.color_primaries(),
+    }
+}
+
 fn compute_with_config_inner(
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+    config: &ZensimConfig,
+    weights: &[f64],
+) -> ZensimResult {
+    // Sub-64px inputs can't form the 4-scale pyramid. Reflect-pad both sides
+    // to the pyramid minimum so every metric/bake gets 4 genuinely-computed
+    // scales. NO-OP at ≥ 64px in both dims (the common path is untouched).
+    let (w, h) = (source.width(), source.height());
+    if w > 0 && h > 0 && (w < MIN_PYRAMID_DIM || h < MIN_PYRAMID_DIM) {
+        let s = reflect_pad_to_min(source);
+        let d = reflect_pad_to_min(distorted);
+        return compute_with_config_core(&s, &d, config, weights);
+    }
+    compute_with_config_core(source, distorted, config, weights)
+}
+
+fn compute_with_config_core(
     source: &impl ImageSource,
     distorted: &impl ImageSource,
     config: &ZensimConfig,
