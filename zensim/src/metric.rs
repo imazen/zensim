@@ -1198,9 +1198,11 @@ impl Zensim {
         source: &impl ImageSource,
     ) -> Result<crate::streaming::PrecomputedReference, ZensimError> {
         let params = self.profile.params();
-        if source.width() < 8 || source.height() < 8 {
+        if source.width() == 0 || source.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
+        // Sub-64px sources are reflect-padded inside `PrecomputedReference::new`
+        // (matching the buffered path), so no 8px floor here.
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         Ok(crate::streaming::PrecomputedReference::new(
             source,
@@ -1226,24 +1228,35 @@ impl Zensim {
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
-        if distorted.width() < 8 || distorted.height() < 8 {
+        if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
+        // Contract: distorted must match the reference's ORIGINAL (unpadded)
+        // dims (`PrecomputedReference` keeps those even when its pyramid was
+        // built on a reflect-padded source).
         validate_ref_match(precomputed, distorted)?;
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
-        let mut result = crate::streaming::compute_zensim_streaming_with_ref(
-            precomputed,
-            distorted,
-            &config,
-            params.weights,
-        );
-        apply_mlp_scoring(
-            &mut result,
-            params,
-            distorted.width() as u32,
-            distorted.height() as u32,
-        )?;
+        let (ow, oh) = (distorted.width(), distorted.height());
+        // Pad a sub-64px distorted to the pyramid minimum so it aligns with the
+        // (also-padded) reference pyramid; score with the original dims.
+        let mut result = if ow < MIN_PYRAMID_DIM || oh < MIN_PYRAMID_DIM {
+            let d = reflect_pad_to_min(distorted);
+            crate::streaming::compute_zensim_streaming_with_ref(
+                precomputed,
+                &d,
+                &config,
+                params.weights,
+            )
+        } else {
+            crate::streaming::compute_zensim_streaming_with_ref(
+                precomputed,
+                distorted,
+                &config,
+                params.weights,
+            )
+        };
+        apply_mlp_scoring(&mut result, params, ow as u32, oh as u32)?;
         Ok(result.with_profile(self.profile))
     }
 
@@ -1317,6 +1330,12 @@ impl Zensim {
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
         validate_pair(source, distorted)?;
+        // Sub-64px images can't form the pyramid the strip geometry assumes and
+        // don't need streaming (they fit in memory) — route them to the
+        // buffered path, which reflect-pads to the pyramid minimum.
+        if source.width() < MIN_PYRAMID_DIM || source.height() < MIN_PYRAMID_DIM {
+            return self.compute(source, distorted);
+        }
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
 
@@ -1391,10 +1410,16 @@ impl Zensim {
         strip_margin: usize,
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
-        if distorted.width() < 8 || distorted.height() < 8 {
+        if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
         validate_ref_match(precomputed, distorted)?;
+        // Sub-64px distorted doesn't need streaming and can't form the strip
+        // pyramid — route to the buffered ref path (which pads to align with
+        // the also-padded reference).
+        if distorted.width() < MIN_PYRAMID_DIM || distorted.height() < MIN_PYRAMID_DIM {
+            return self.compute_with_ref(precomputed, distorted);
+        }
         check_within_max_pixels(distorted.width(), distorted.height(), self.max_pixels)?;
         let config = config_from_params(params, self.parallel);
 
@@ -1896,7 +1921,7 @@ fn images_byte_identical(source: &impl ImageSource, distorted: &impl ImageSource
 }
 
 /// Minimum per-dimension size for the full 4-scale pyramid (8·2³ = 64).
-const MIN_PYRAMID_DIM: usize = 64;
+pub(crate) const MIN_PYRAMID_DIM: usize = 64;
 
 /// Owned, tightly-packed image presenting a reflect(mirror)-padded view of a
 /// sub-64px input so the multi-scale pyramid always forms. This is the
@@ -1904,7 +1929,7 @@ const MIN_PYRAMID_DIM: usize = 64;
 /// over reflected content (a constant difference scores identically at every
 /// size; scores down to 1×1 with no error) instead of synthesizing a feature
 /// vector. NO-OP for images already ≥ 64px in both dims.
-struct OwnedImage {
+pub(crate) struct OwnedImage {
     data: Vec<u8>,
     width: usize,
     height: usize,
@@ -1937,7 +1962,7 @@ impl ImageSource for OwnedImage {
 
 /// reflect-101 index map (mirror without repeating the edge); `n == 1` → 0.
 #[inline]
-fn reflect_index(i: usize, n: usize) -> usize {
+pub(crate) fn reflect_index(i: usize, n: usize) -> usize {
     if n <= 1 {
         return 0;
     }
@@ -1950,7 +1975,7 @@ fn reflect_index(i: usize, n: usize) -> usize {
 }
 
 /// Reflect(mirror)-pad `src` up to at least [`MIN_PYRAMID_DIM`] in each dim.
-fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
+pub(crate) fn reflect_pad_to_min(src: &impl ImageSource) -> OwnedImage {
     let (w, h) = (src.width(), src.height());
     let bpp = src.pixel_format().bytes_per_pixel();
     let (bw, bh) = (w.max(MIN_PYRAMID_DIM), h.max(MIN_PYRAMID_DIM));

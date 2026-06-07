@@ -572,8 +572,8 @@ fn small_images_score_via_reflect_pad() {
     // 2026-06-06: sub-64px images are reflect(mirror)-padded to the 4-scale
     // pyramid minimum inside `compute`, so they now SCORE (down to 1×1)
     // rather than erroring. See tests/size_invariance.rs for the invariance
-    // gate. The precomputed-reference REUSE path does not reflect-pad and
-    // retains the 8×8 minimum (the direct `compute` path is the small path).
+    // gate. The precomputed-reference and strip-streaming paths now reflect-pad
+    // sub-64px inputs too (consistent with the direct `compute` path).
     let z = Zensim::new(ZensimProfile::A);
     let small = vec![[128u8; 3]; 4 * 4];
     let src = RgbSlice::new(&small, 4, 4);
@@ -590,11 +590,25 @@ fn small_images_score_via_reflect_pad() {
             .unwrap_err(),
         ZensimError::ImageTooSmall
     );
-    // Precomputed-reference reuse path keeps the 8×8 minimum.
-    assert!(matches!(
-        z.precompute_reference(&src),
-        Err(ZensimError::ImageTooSmall)
-    ));
+    // Precomputed-reference reuse now ALSO reflect-pads sub-64px sources to the
+    // pyramid minimum (consistent with the direct `compute` path), so the whole
+    // streaming family scores small images.
+    let pref = z
+        .precompute_reference(&src)
+        .expect("4x4 reference now reflect-pads");
+    let rs = z
+        .compute_with_ref(&pref, &dst)
+        .expect("4x4 compute_with_ref now scores")
+        .score();
+    assert!(
+        rs.is_finite() && (0.0..=100.0).contains(&rs),
+        "4x4 ref score {rs}"
+    );
+    // ...and the strip-streaming paths too.
+    assert!(
+        z.compute_streaming_strips(&src, &dst, 256, 128).is_ok(),
+        "4x4 strip-streaming now scores"
+    );
 }
 
 #[test]

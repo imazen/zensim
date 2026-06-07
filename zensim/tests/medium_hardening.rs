@@ -109,6 +109,43 @@ fn m1_diffmap_with_ref_linear_planar_dim_mismatch_returns_err() {
     }
 }
 
+#[test]
+fn m1_diffmap_with_ref_linear_planar_sub64_scores() {
+    use zensim::DiffmapOptions;
+    // A sub-64px reference + a matching sub-64px planar-f32 distorted must now
+    // score (both reflect-padded to the pyramid minimum), not panic — the
+    // diffmap is trimmed back to the original size.
+    let (w, h) = (16usize, 16usize);
+    let ref_pixels = vec![[10u8, 20, 30]; w * h];
+    let zensim = z();
+    let pre = zensim
+        .precompute_reference(&RgbSlice::new(&ref_pixels, w, h))
+        .unwrap();
+    let r = vec![0.04f32; w * h];
+    let g = vec![0.08f32; w * h];
+    let b = vec![0.12f32; w * h];
+    let res = zensim
+        .compute_with_ref_and_diffmap_linear_planar(
+            &pre,
+            [&r, &g, &b],
+            w,
+            h,
+            w,
+            DiffmapOptions::default(),
+        )
+        .expect("sub-64 planar diffmap must score");
+    let s = res.score();
+    assert!(
+        s.is_finite() && (0.0..=100.0).contains(&s),
+        "sub-64 planar score {s}"
+    );
+    assert_eq!(
+        res.diffmap().len(),
+        w * h,
+        "diffmap trimmed to original dims"
+    );
+}
+
 // ─── M2: integer overflow rejection ────────────────────────────────────────
 
 #[test]

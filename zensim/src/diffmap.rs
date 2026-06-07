@@ -344,6 +344,37 @@ fn trained_multiscale_weights(
     (per_scale, blend)
 }
 
+/// Reflect(mirror)-pad linear-f32 RGB planes up to at least `MIN_PYRAMID_DIM`
+/// per dim, returning tightly-packed `(planes, padded_width, padded_height)`.
+/// The planar-f32 analogue of `crate::metric::reflect_pad_to_min`; keeps the
+/// original image in the top-left so the diffmap can be trimmed back.
+fn reflect_pad_planes_f32(
+    planes: [&[f32]; 3],
+    w: usize,
+    h: usize,
+    stride: usize,
+) -> ([Vec<f32>; 3], usize, usize) {
+    use crate::metric::{MIN_PYRAMID_DIM, reflect_index};
+    let (bw, bh) = (w.max(MIN_PYRAMID_DIM), h.max(MIN_PYRAMID_DIM));
+    let mut out = [
+        vec![0f32; bw * bh],
+        vec![0f32; bw * bh],
+        vec![0f32; bw * bh],
+    ];
+    for y in 0..bh {
+        let sy = reflect_index(y, h);
+        for x in 0..bw {
+            let sx = reflect_index(x, w);
+            let si = sy * stride + sx;
+            let di = y * bw + x;
+            out[0][di] = planes[0][si];
+            out[1][di] = planes[1][si];
+            out[2][di] = planes[2][si];
+        }
+    }
+    (out, bw, bh)
+}
+
 /// Apply contrast masking to the diffmap using source luminance variance.
 ///
 /// Divides each diffmap value by `1 + strength * local_variance(Y_src)`,
@@ -613,7 +644,7 @@ impl crate::metric::Zensim {
     ) -> Result<DiffmapResult, ZensimError> {
         let options = options.into();
         let params = self.profile().params();
-        if distorted.width() < 8 || distorted.height() < 8 {
+        if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
         crate::metric::validate_ref_match(precomputed, distorted)?;
@@ -636,44 +667,85 @@ impl crate::metric::Zensim {
         // Fused: compute the full zensim score AND the multi-scale diffmap in a
         // single pipeline. Each scale's SSIM error is collected, then coarser
         // scales are upsampled and blended with trained scale weights.
-        let (result, diffmap_padded, padded_width) =
-            crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
-                precomputed,
-                distorted,
-                &config,
-                params.weights,
-                &per_scale_ch,
-                &scale_blend,
-            );
+        // Sub-64px distorted is reflect-padded to align with the (padded)
+        // reference pyramid; the reflect-pad keeps the original image in the
+        // top-left, so the diffmap trim below recovers it via `width`/`height`.
+        let (result, mut diffmap_padded, padded_width) =
+            if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
+                let d = crate::metric::reflect_pad_to_min(distorted);
+                crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
+                    precomputed,
+                    &d,
+                    &config,
+                    params.weights,
+                    &per_scale_ch,
+                    &scale_blend,
+                )
+            } else {
+                crate::streaming::compute_zensim_streaming_with_ref_and_diffmap(
+                    precomputed,
+                    distorted,
+                    &config,
+                    params.weights,
+                    &per_scale_ch,
+                    &scale_blend,
+                )
+            };
         let result = result.with_profile(self.profile());
 
-        // Trim padded-width diffmap to actual width
-        let mut diffmap = if padded_width == width {
-            diffmap_padded
+        // `precomputed.scales[0]` is `(padded_width, comp_h)`. For a ≥64px
+        // distorted `comp_h == height` (original flow: trim to logical width,
+        // then mask). For a reflect-padded sub-64px distorted the diffmap is
+        // computed at the padded reference dims, so mask + sqrt there (the
+        // masking reads the ref Y-plane at scale 0) then trim the original
+        // top-left width×height (reflect-pad keeps the original there).
+        let comp_h = precomputed.scales[0].2;
+        let diffmap = if comp_h == height {
+            let mut diffmap = if padded_width == width {
+                diffmap_padded
+            } else {
+                let mut out = Vec::with_capacity(width * height);
+                for y in 0..height {
+                    out.extend_from_slice(
+                        &diffmap_padded[y * padded_width..y * padded_width + width],
+                    );
+                }
+                out
+            };
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap,
+                    precomputed,
+                    width,
+                    height,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap);
+            }
+            diffmap
         } else {
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap_padded,
+                    precomputed,
+                    padded_width,
+                    comp_h,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap_padded);
+            }
             let mut out = Vec::with_capacity(width * height);
             for y in 0..height {
                 out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
             }
             out
         };
-
-        // Post-processing: contrast masking
-        if let Some(strength) = options.masking_strength {
-            apply_contrast_masking(
-                &mut diffmap,
-                precomputed,
-                width,
-                height,
-                padded_width,
-                strength,
-            );
-        }
-
-        // Post-processing: sqrt for distance-like calibration
-        if options.sqrt {
-            sqrt_inplace(&mut diffmap);
-        }
 
         Ok(DiffmapResult {
             result,
@@ -714,7 +786,7 @@ impl crate::metric::Zensim {
     ) -> Result<DiffmapResult, ZensimError> {
         let options = options.into();
         let params = self.profile().params();
-        if width < 8 || height < 8 {
+        if width == 0 || height == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
         if precomputed.width() != width || precomputed.height() != height {
@@ -743,48 +815,93 @@ impl crate::metric::Zensim {
             options.include_hf,
         );
 
-        let padded_width = crate::blur::simd_padded_width(width);
-        let (result, diffmap_padded, _) =
-            crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
-                precomputed,
-                planes,
-                width,
-                height,
-                stride,
-                &config,
-                params.weights,
-                &per_scale_ch,
-                &scale_blend,
-            );
+        // Sub-64px planes are reflect-padded to the pyramid minimum (matching
+        // the also-padded reference). The reflect-pad keeps the original in the
+        // top-left, recovered by the trim below.
+        let (result, mut diffmap_padded, padded_width) =
+            if width < crate::metric::MIN_PYRAMID_DIM || height < crate::metric::MIN_PYRAMID_DIM {
+                let (pp, pw, ph) = reflect_pad_planes_f32(planes, width, height, stride);
+                let padded_width = crate::blur::simd_padded_width(pw);
+                let (result, dm, _) =
+                    crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
+                        precomputed,
+                        [&pp[0], &pp[1], &pp[2]],
+                        pw,
+                        ph,
+                        pw,
+                        &config,
+                        params.weights,
+                        &per_scale_ch,
+                        &scale_blend,
+                    );
+                (result, dm, padded_width)
+            } else {
+                let padded_width = crate::blur::simd_padded_width(width);
+                let (result, dm, _) =
+                    crate::streaming::compute_zensim_streaming_with_ref_and_diffmap_linear_planar(
+                        precomputed,
+                        planes,
+                        width,
+                        height,
+                        stride,
+                        &config,
+                        params.weights,
+                        &per_scale_ch,
+                        &scale_blend,
+                    );
+                (result, dm, padded_width)
+            };
         let result = result.with_profile(self.profile());
 
-        // Trim padded-width diffmap to actual width
-        let mut diffmap = if padded_width == width {
-            diffmap_padded
+        // Mask + sqrt at the compute dims, then trim to the original (same
+        // padded-vs-original branch as the RGB `compute_with_ref_and_diffmap`).
+        let comp_h = precomputed.scales[0].2;
+        let diffmap = if comp_h == height {
+            let mut diffmap = if padded_width == width {
+                diffmap_padded
+            } else {
+                let mut out = Vec::with_capacity(width * height);
+                for y in 0..height {
+                    out.extend_from_slice(
+                        &diffmap_padded[y * padded_width..y * padded_width + width],
+                    );
+                }
+                out
+            };
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap,
+                    precomputed,
+                    width,
+                    height,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap);
+            }
+            diffmap
         } else {
+            if let Some(strength) = options.masking_strength {
+                apply_contrast_masking(
+                    &mut diffmap_padded,
+                    precomputed,
+                    padded_width,
+                    comp_h,
+                    padded_width,
+                    strength,
+                );
+            }
+            if options.sqrt {
+                sqrt_inplace(&mut diffmap_padded);
+            }
             let mut out = Vec::with_capacity(width * height);
             for y in 0..height {
                 out.extend_from_slice(&diffmap_padded[y * padded_width..y * padded_width + width]);
             }
             out
         };
-
-        // Post-processing: contrast masking
-        if let Some(strength) = options.masking_strength {
-            apply_contrast_masking(
-                &mut diffmap,
-                precomputed,
-                width,
-                height,
-                padded_width,
-                strength,
-            );
-        }
-
-        // Post-processing: sqrt for distance-like calibration
-        if options.sqrt {
-            sqrt_inplace(&mut diffmap);
-        }
 
         Ok(DiffmapResult {
             result,

@@ -2092,6 +2092,27 @@ impl PrecomputedReference {
     ///
     /// Converts to XYB and builds the downscale pyramid, storing planes at each level.
     pub(crate) fn new(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
+        // Sub-64px sources can't form the 4-scale pyramid; reflect-pad to the
+        // minimum (matching the buffered `compute_with_config_inner` path) so the
+        // reference holds 4 genuinely-computed scales. The contract dims
+        // (`ref_width`/`ref_height`) stay the ORIGINAL size so `compute_with_ref*`
+        // still validates the distorted image against the caller's dimensions.
+        let (orig_w, orig_h) = (source.width(), source.height());
+        if orig_w > 0
+            && orig_h > 0
+            && (orig_w < crate::metric::MIN_PYRAMID_DIM || orig_h < crate::metric::MIN_PYRAMID_DIM)
+        {
+            let padded = crate::metric::reflect_pad_to_min(source);
+            let mut r = Self::new_inner(&padded, num_scales, parallel);
+            r.ref_width = orig_w;
+            r.ref_height = orig_h;
+            r
+        } else {
+            Self::new_inner(source, num_scales, parallel)
+        }
+    }
+
+    fn new_inner(source: &impl ImageSource, num_scales: usize, parallel: bool) -> Self {
         let width = source.width();
         let height = source.height();
         let padded_width = simd_padded_width(width);

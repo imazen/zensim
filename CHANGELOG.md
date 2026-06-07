@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Fixed — sub-64px images score on the streaming + diffmap paths too (2026-06-07)
+
+The 2026-06-06 reflect-pad fix only covered the buffered `compute()` path; the
+precomputed-reference, strip-streaming, and diffmap paths retained an 8px pyramid
+floor (silently truncating the multi-scale pyramid / panicking). They now handle
+sub-64px inputs consistently:
+
+- `PrecomputedReference::new` reflect-pads sub-64px sources to the 64px pyramid
+  minimum (keeping `ref_width`/`ref_height` as the original dims for the
+  distorted-match contract).
+- `compute_with_ref` / `compute_with_ref_and_diffmap` /
+  `compute_with_ref_and_diffmap_linear_planar` reflect-pad a sub-64px distorted
+  to align with the (also-padded) reference, score with the original dims, and
+  trim the diffmap back to the original top-left region.
+- `compute_streaming_strips` / `compute_with_ref_streaming_strips` route sub-64px
+  inputs to the buffered path (they fit in memory; no streaming needed).
+- A constant colour difference now scores identically at every size through the
+  precomputed-reference path too. Tests: `size_invariance::streaming_*`,
+  `cross_platform::small_images_score_via_reflect_pad`,
+  `medium_hardening::m1_diffmap_with_ref_linear_planar_sub64_scores`.
+
 ### Changed — `PreviewV0_1` restored as a built-in profile; never-published `PreviewV0_3` alias removed (2026-06-01)
 
 Compatibility correction to the profile relocation below:
