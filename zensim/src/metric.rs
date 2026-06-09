@@ -1414,6 +1414,7 @@ impl Zensim {
         strip_inner: usize,
         strip_margin: usize,
     ) -> Result<ZensimResult, ZensimError> {
+        reject_hdr_input(distorted)?;
         let params = self.profile.params();
         if distorted.width() == 0 || distorted.height() == 0 {
             return Err(ZensimError::ImageTooSmall);

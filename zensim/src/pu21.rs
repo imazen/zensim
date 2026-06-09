@@ -41,6 +41,9 @@ pub enum Pu21Variant {
 
 impl Pu21Variant {
     /// The 7 fitted parameters `[p1..p7]` (gfxdisp/pu21, updated 2020-02-06).
+    // Literals carry the full published gfxdisp precision for provenance; f32
+    // rounds the trailing digits (the parity test pins the resulting values).
+    #[allow(clippy::excessive_precision, clippy::inconsistent_digit_grouping)]
     #[inline]
     const fn params(self) -> [f32; 7] {
         match self {
@@ -181,5 +184,59 @@ mod tests {
         let v = pu21_encode(PU21_L_MAX, Pu21Variant::BandingGlare);
         assert!((256.0..1000.0).contains(&v), "encode(L_max) = {v}");
         assert!(v > pu21_encode(100.0, Pu21Variant::BandingGlare));
+    }
+
+    /// Cross-crate reference-parity drift-guard. The golden `V` values below are
+    /// computed *independently in float64* from the published gfxdisp/pu21
+    /// coefficients + formula (not from this Rust code). The IDENTICAL table is
+    /// asserted in `zenmetrics`'s `hdr.rs` tests, so the two PU21 copies cannot
+    /// silently drift from each other or from the gfxdisp reference — a single
+    /// changed coefficient breaks this test in whichever copy diverged. If the
+    /// reference coefficients ever legitimately change, regenerate the table in
+    /// BOTH places. Generator: `scripts/pu21_golden.py` (gfxdisp float64).
+    #[test]
+    fn reference_parity_gfxdisp_goldens() {
+        // Y sample points (cd/m²), spanning PU21_L_MIN..PU21_L_MAX.
+        const YS: [f32; 7] = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0];
+        // (variant, golden encoded V at each YS point) — gfxdisp float64 reference.
+        let goldens: [(Pu21Variant, [f64; 7]); 4] = [
+            (
+                Pu21Variant::Banding,
+                [
+                    6.3053, 36.0057, 84.4045, 158.5061, 261.7517, 388.1423, 520.4673,
+                ],
+            ),
+            (
+                Pu21Variant::BandingGlare,
+                [
+                    0.3722, 5.7171, 36.5439, 123.6475, 256.3839, 420.0969, 595.3939,
+                ],
+            ),
+            (
+                Pu21Variant::Peaks,
+                [
+                    5.0060, 32.6568, 85.5420, 167.5246, 260.7250, 335.6947, 380.9853,
+                ],
+            ),
+            (
+                Pu21Variant::PeaksGlare,
+                [
+                    0.5133, 8.0104, 47.0090, 136.2603, 252.2985, 359.6225, 407.5066,
+                ],
+            ),
+        ];
+        for (variant, expected) in goldens {
+            for (&y, &want) in YS.iter().zip(expected.iter()) {
+                let got = pu21_encode(y, variant) as f64;
+                // abs term covers f32 cancellation near the p6 subtraction at low
+                // Y; rel term covers power-chain error at high Y. A coefficient
+                // typo shifts values far beyond this — the guard still fires.
+                let tol = 0.1 + 5e-3 * want;
+                assert!(
+                    (got - want).abs() <= tol,
+                    "{variant:?} encode({y}) = {got}, gfxdisp ref {want} (tol {tol})"
+                );
+            }
+        }
     }
 }

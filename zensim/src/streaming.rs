@@ -810,10 +810,22 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     convert_linear_planar_to_pu_xyb_into(
-        ref_planes, width, height, stride, padded_width, variant, &mut src_planes,
+        ref_planes,
+        width,
+        height,
+        stride,
+        padded_width,
+        variant,
+        &mut src_planes,
     );
     convert_linear_planar_to_pu_xyb_into(
-        dist_planes, width, height, stride, padded_width, variant, &mut dst_planes,
+        dist_planes,
+        width,
+        height,
+        stride,
+        padded_width,
+        variant,
+        &mut dst_planes,
     );
 
     let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];

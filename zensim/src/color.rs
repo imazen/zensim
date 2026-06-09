@@ -1590,9 +1590,15 @@ pub(crate) fn linear_to_pu_xyb_planar_into(
 
     for (i, p) in pixels.iter().enumerate() {
         // Opsin LMS mix on absolute luminance — no [0,1] clamp (HDR > 1).
-        let mixed0 = K_M00.mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0))).max(0.0);
-        let mixed1 = K_M10.mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0))).max(0.0);
-        let mixed2 = K_M20.mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0))).max(0.0);
+        let mixed0 = K_M00
+            .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
+            .max(0.0);
+        let mixed1 = K_M10
+            .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
+            .max(0.0);
+        let mixed2 = K_M20
+            .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
+            .max(0.0);
 
         let c0 = pu21_encode(mixed0.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
         let c1 = pu21_encode(mixed1.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
