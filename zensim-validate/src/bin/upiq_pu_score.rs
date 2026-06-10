@@ -46,7 +46,9 @@ fn load_exr_rgb(path: &Path) -> Result<Rgb, String> {
 }
 
 fn arg(args: &[String], key: &str) -> Option<String> {
-    args.iter().position(|a| a == key).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == key)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn main() {
@@ -59,7 +61,9 @@ fn main() {
     let corpora: Vec<String> = arg(&args, "--corpus")
         .map(|s| s.split(',').map(str::to_string).collect())
         .unwrap_or_else(|| vec!["narwaria".into(), "korshunov".into()]);
-    let hdr_only = args.iter().any(|a| a == "--hdr-only") || true; // default HDR subset
+    // HDR subset is currently always on (the former `--hdr-only` flag was a
+    // no-op: `... || true`); a future `--sdr` toggle can reintroduce a parse.
+    let hdr_only = true;
 
     // Score each pair under several profiles in one EXR-decode pass (decode is
     // the bottleneck). PreviewV0_2 = linear cube-root-tuned weights;
@@ -130,7 +134,8 @@ fn main() {
         let mut scores = Vec::with_capacity(profiles.len());
         let mut failed = false;
         for (_, z) in &profiles {
-            match z.compute_pu_linear_planar([&r.r, &r.g, &r.b], [&d.r, &d.g, &d.b], r.w, r.h, r.w) {
+            match z.compute_pu_linear_planar([&r.r, &r.g, &r.b], [&d.r, &d.g, &d.b], r.w, r.h, r.w)
+            {
                 Ok(res) => scores.push(res.score()),
                 Err(e) => {
                     eprintln!("SCORE FAIL {cid}: {e:?}");
