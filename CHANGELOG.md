@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### ⚠ SCORE-CHANGING NOTES for the next release (0.2.7 → 0.3.0)
+
+zensim is a user-facing quality dial; releases that change scores need
+explicit notes. Relative to the last published 0.2.7, **every profile's
+scores move**:
+
+1. **The recommended profile is a new metric generation.** 0.2.7's
+   `latest()` returned the linear `PreviewV0_2`; 0.3.0 deprecates
+   `latest()` and the new `latest_preview()` / `codec_target()` return
+   `ZensimProfile::A` — a 372-feature MLP + monotone PCHIP dial spline
+   (v47-strict-QAT bake). Scores are NOT comparable to 0.2.x values;
+   a 0.2.x target of ~70 corresponds to roughly 78 under `A` (see the
+   README "v0.2 → v0.3 rough score equivalence" table) (c11db603,
+   1fd645a7, a7451c14).
+2. **Sub-64px inputs score differently on every profile.** Inputs from
+   8..63px previously scored on a truncated pyramid; they now
+   reflect-pad to the 64px pyramid minimum (solid-color Δ scores are
+   now size-stable; textured images shift by a few points). Inputs
+   1..7px previously returned `ImageTooSmall` and now score. Applies
+   to buffered, with-ref, streaming, and diffmap paths (2ff8c882,
+   dbc456b9, 6af83b60).
+3. **Linear profiles (`PreviewV0_1`/`PreviewV0_2`) drift ~1e-3..1.5e-2
+   score units at ≥ 64px vs 0.2.7** from kernel fusion and
+   summation-order changes (STRIP_INNER / parallel mean / fused
+   SSIM-edge kernels — 65facf43, 4fe9d5b0, f15d4465). Measured
+   2026-06-10 against crates.io 0.2.7 on synthetic probes; the
+   "PreviewV0_1 is 0.2.x-compatible" guarantee is *approximate*, not
+   bit-exact.
+4. **Premultiplied-alpha inputs (zenpixels feature) un-premultiply with
+   round-to-nearest** instead of truncation — up to 1 LSB per channel,
+   slightly different scores on premultiplied sources (6af83b60).
+5. **Streaming-strips scores now equal buffered scores exactly** (the
+   band-layout geometry fix made strip results byte-identical to
+   `compute()`); pre-fix streaming results from unpublished mains are
+   not comparable (6af83b60).
+6. **`A`-profile dial outputs are spline-extrapolated**: scores can go
+   below 0 on pathological inputs; the output spline clamps at ≤ 100
+   on the upper end only (24f93462, 34ce1401).
+
 ### Fixed — CI green: bare-checkout workspace resolution, census pandas, lint debt (2026-06-10)
 
 CI had been red on every job for weeks (imazen/zensim#43): `cargo metadata`
@@ -58,9 +97,13 @@ Compatibility correction to the profile relocation below:
 
 - **`ZensimProfile::PreviewV0_1` is restored as a first-class built-in
   profile.** It shipped in the published 0.1.x / 0.2.x line, so removing it
-  was a gratuitous break; it now scores **bit-identically** to those releases
-  (linear `WEIGHTS_PREVIEW_V0_1` + the classic `100 − 18·d^0.7` mapping). The
-  duplicate `zensim_experimental::preview_v0_1()` reconstruction is dropped.
+  was a gratuitous break; it keeps the same linear `WEIGHTS_PREVIEW_V0_1` +
+  classic `100 − 18·d^0.7` mapping. Scores match 0.2.7 closely but **not
+  bit-exactly** (verified 2026-06-10 against crates.io 0.2.7): shared-pipeline
+  kernel-fusion/summation-order changes shift ≥ 64px scores by
+  ~1e-3..1.5e-2 units, and sub-64px inputs now reflect-pad (substantially
+  different scores below 64px — see the score-changing notes at the top).
+  The duplicate `zensim_experimental::preview_v0_1()` reconstruction is dropped.
 - **`ZensimProfile::PreviewV0_3` is removed.** It was a deprecated-from-birth
   alias for `A` that was **never published to crates.io** (last published:
   0.2.7), so it carried no compatibility obligation. Code that named it should
@@ -2027,7 +2070,14 @@ rescoring-from-features workflows used by `zensim-validate`,
   (zerobiased+LZ4 measured 2026-05-14, with 0.003 SROCC trade we
   declined). See zenpredict CHANGELOG for vendor / runtime details.
 
-## [0.3.0] - 2026-05-13
+## [0.3.0-unpublished] - 2026-05-13
+
+> **Never published.** The 0.3.0 version bump landed in-tree on
+> 2026-05-13 (c11db603) but was not tagged or pushed to crates.io —
+> the last published release remains 0.2.7. Everything below is part
+> of the upcoming release together with the `[Unreleased]` section
+> above; entries that mention `PreviewV0_3` describe an interim alias
+> that was later removed (the profile shipped as `ZensimProfile::A`).
 
 ### Changed (breaking)
 

@@ -56,7 +56,7 @@
 //! let mut y = 0;
 //! while y < height {
 //!     let h = (height - y).min(WINDOW_ROWS);
-//!     if h < 8 { break; }  // zensim's minimum dim
+//!     if h < 8 { break; }  // skip tail slivers (they'd reflect-pad, costing accuracy)
 //!     let start = y * width;
 //!     let end = start + h * width;
 //!     let win = RgbSlice::new(&source_pixels[start..end], width, h);
@@ -158,14 +158,23 @@
 //! - **Alpha:** RGBA inputs are composited over a deterministic noise
 //!   background so alpha differences are detected without the structured-pattern
 //!   amplification of a checkerboard. Supports `Straight` and `Opaque` alpha modes.
-//! - **Dimensions:** Both images must be the same width × height, minimum 8×8.
+//! - **Dimensions:** Both images must be the same width × height. Any
+//!   non-zero size scores: sub-64px inputs (down to 1×1) are reflect-padded
+//!   to the pyramid minimum internally.
 //!
 //! ## Score semantics
 //!
-//! 100 = identical, higher = more similar. Score mapping:
-//! `100 - 18 × d^0.7` where `d` is the per-scale weighted feature distance.
-//! Calibrated from 0–100 on 344k training pairs; extreme distortions can
-//! score below 0 (uncalibrated outside the training range).
+//! 100 = identical, higher = more similar. How a raw result becomes a
+//! score depends on the profile:
+//!
+//! - [`ZensimProfile::A`] (default recommendation): MLP forward pass +
+//!   monotone PCHIP dial spline, calibrated so the dial is monotone in
+//!   degradation with identity at ≈ 97.7. The spline extrapolates past
+//!   its knots, so pathological inputs can score below 0.
+//! - [`ZensimProfile::PreviewV0_1`] / [`ZensimProfile::PreviewV0_2`]
+//!   (linear profiles): `100 - 18 × d^0.7` where `d` is the per-scale
+//!   weighted feature distance. Calibrated from 0–100 on 344k training
+//!   pairs; extreme distortions can score below 0.
 //!
 //! [`ZensimResult`] also provides [`approx_ssim2()`](ZensimResult::approx_ssim2),
 //! [`approx_dssim()`](ZensimResult::approx_dssim), and

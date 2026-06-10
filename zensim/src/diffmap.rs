@@ -635,7 +635,7 @@ impl crate::metric::Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn compute_with_ref_and_diffmap(
         &self,
         precomputed: &PrecomputedReference,
@@ -767,7 +767,7 @@ impl crate::metric::Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     /// Returns [`ZensimError::DimensionMismatch`] if `width` / `height`
     /// differ from the precomputed reference's recorded dimensions.
     /// Returns [`ZensimError::ImageTooLarge`] if `width × height` exceeds

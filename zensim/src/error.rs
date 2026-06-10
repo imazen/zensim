@@ -12,9 +12,10 @@ pub enum ZensimError {
     #[error("Source and distorted images must have the same dimensions")]
     DimensionMismatch,
 
-    /// Width or height is less than 8. The multi-scale pyramid requires
-    /// at least 8×8 pixels to produce meaningful results.
-    #[error("Images must be at least 8x8 pixels")]
+    /// Width or height is zero. Since 0.3.0, sub-64px images (down to
+    /// 1×1) are reflect-padded to the pyramid minimum and score normally;
+    /// only empty (zero-dimension) inputs are rejected.
+    #[error("Images must have non-zero width and height")]
     ImageTooSmall,
 
     /// `pixels.len()` does not equal `width * height`.

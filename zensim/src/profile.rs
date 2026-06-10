@@ -43,9 +43,14 @@ pub enum ZensimProfile {
     /// coefficients with the classic `100 − 18·d^0.7` score mapping.
     ///
     /// Retained for backwards-compatibility: this variant shipped in the
-    /// published zensim 0.1.x / 0.2.x line and scores bit-identically to
-    /// those releases. For new code prefer [`Self::A`] (codec target) or
-    /// [`Self::PreviewV0_2`] (linear general-ranking).
+    /// published zensim 0.1.x / 0.2.x line with the same weights and
+    /// mapping. Scores match those releases closely but not bit-exactly:
+    /// kernel-fusion and summation-order changes since 0.2.7 shift
+    /// ≥ 64px scores by ~1e-3..1.5e-2 units (measured, synthetic probes),
+    /// and sub-64px inputs now reflect-pad (substantially different — and
+    /// better-behaved — scores below 64px). For new code prefer
+    /// [`Self::A`] (codec target) or [`Self::PreviewV0_2`] (linear
+    /// general-ranking).
     PreviewV0_1,
     /// Preview v0.2. Concordance-filtered 218k pairs, Nelder-Mead SROCC=0.9960.
     /// Linear-weights profile, no MLP forward pass. The historical
