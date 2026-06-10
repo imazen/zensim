@@ -86,3 +86,10 @@ too_many_arguments = "allow"
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles"))']  # zenresize kept in check-cfg for gated code
+
+[dev-dependencies.zenbench]
+version = "0.1.8"
+
+[[bench]]
+name = "pu21_bench"
+harness = false

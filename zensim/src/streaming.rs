@@ -798,7 +798,6 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     height: usize,
     stride: usize,
     config: &ZensimConfig,
-    variant: crate::pu21::Pu21Variant,
     weights: &[f64],
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let padded_width = simd_padded_width(width);
@@ -814,7 +813,6 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
         height,
         stride,
         padded_width,
-        variant,
         &mut src_planes,
     );
     convert_linear_planar_to_pu_xyb_into(
@@ -823,7 +821,6 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
         height,
         stride,
         padded_width,
-        variant,
         &mut dst_planes,
     );
 
@@ -2479,7 +2476,6 @@ pub(crate) fn convert_linear_planar_to_pu_xyb_into(
     height: usize,
     stride: usize,
     padded_width: usize,
-    variant: crate::pu21::Pu21Variant,
     out: &mut [Vec<f32>; 3],
 ) {
     use crate::color::linear_to_pu_xyb_planar_into;
@@ -2501,7 +2497,6 @@ pub(crate) fn convert_linear_planar_to_pu_xyb_into(
         let out_off = y * padded_width;
         linear_to_pu_xyb_planar_into(
             &rgb_row[..width],
-            variant,
             &mut o0[out_off..out_off + width],
             &mut o1[out_off..out_off + width],
             &mut o2[out_off..out_off + width],

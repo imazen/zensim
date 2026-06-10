@@ -222,9 +222,7 @@ mod streaming;
 mod transfer;
 // HDR foundation: PU21 perceptually-uniform encoding (the HDR-path replacement
 // for the cube-root nonlinearity). Internal until the scoring path lands.
-mod pu21;
 /// PU21 variant selector for the `hdr` scoring path.
-pub use pu21::Pu21Variant;
 
 // EX-4 extended feature modules — XYB/LMS front-end stats + CVVDP-shape
 // per-pair signals (DKL, Weber-contrast band ratios, mutual-masking
@@ -233,6 +231,7 @@ pub use pu21::Pu21Variant;
 // the metric hot path never calls them.
 #[cfg(feature = "training")]
 pub mod cvvdp_features;
+mod pu21;
 #[cfg(feature = "training")]
 pub mod xyb_lms_features;
 
@@ -243,6 +242,8 @@ pub use metric::{
 };
 
 pub use codec_calibration::{CalibrationAffine, CodecCalibration};
+#[doc(hidden)]
+pub use color::{bench_pu_xyb_dispatch, bench_pu_xyb_scalar};
 /// Classification API — requires `features = ["classification"]`.
 ///
 /// Exposes `classify()`, error categorization, and per-pixel delta statistics

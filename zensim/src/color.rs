@@ -1574,48 +1574,139 @@ fn linear_to_positive_xyb_planar_inner(
 /// so its contribution is ~0. See `docs/HDR_PLAN.md` §2b for the design
 /// rationale and the validation gate. Scalar only (HDR is a minority path;
 /// SIMD is a later optimization).
+/// PU21(100 cd/m²) ≈ 256.3 — normalizes a 100-nit reference white to ~1.0,
+/// the range the cube-root XYB white point sits in, so the downstream
+/// opponent biases + feature kernels stay in calibration.
+const PU_WHITE: f32 = 256.3;
+/// Opponent X amplification in PU space. The cube-root path uses 14× to make
+/// the tiny red-green cube-root difference visible; PU-space opsin
+/// differences are already large, and HDR validation favors
+/// luminance-dominant weighting (see docs/HDR_PLAN.md §2b).
+const PU_X_SCALE: f32 = 4.0;
+
+/// Scalar per-pixel PU-XYB (also the SIMD kernels' tail path and the
+/// parity-test reference).
+#[inline]
+fn pu_xyb_pixel(p: [f32; 3]) -> (f32, f32, f32) {
+    use crate::pu21::pu21_encode;
+    let mixed0 = K_M00
+        .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
+        .max(0.0);
+    let mixed1 = K_M10
+        .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
+        .max(0.0);
+    let mixed2 = K_M20
+        .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
+        .max(0.0);
+    let c0 = pu21_encode(mixed0) / PU_WHITE;
+    let c1 = pu21_encode(mixed1) / PU_WHITE;
+    let c2 = pu21_encode(mixed2) / PU_WHITE;
+    let x = 0.5 * (c0 - c1);
+    let y = 0.5 * (c0 + c1);
+    (x.mul_add(PU_X_SCALE, 0.42), y + 0.01, (c2 - y) + 0.55)
+}
+
+/// Absolute-luminance linear RGB → positive PU-XYB planes, SIMD-dispatched
+/// (8 px/iter via the generic magetypes tiers; `x^p = exp2_midp_precise(p·log2_midp_precise(x))`
+/// — the midp_precise transcendentals hold the scalar↔SIMD divergence well inside the
+/// gfxdisp golden tolerance; the parity test pins it).
 pub(crate) fn linear_to_pu_xyb_planar_into(
     pixels: &[[f32; 3]],
-    variant: crate::pu21::Pu21Variant,
     x_out: &mut [f32],
     y_out: &mut [f32],
     b_out: &mut [f32],
 ) {
-    use crate::pu21::{PU21_L_MAX, PU21_L_MIN, pu21_encode};
-    // PU21(100 cd/m²) ≈ 256.3; normalize so a 100-nit reference white maps to
-    // ~1.0 — the same range the cube-root XYB white point sits in, so the
-    // downstream opponent biases + feature kernels stay in calibration.
-    const PU_WHITE: f32 = 256.3;
+    incant!(
+        pu_xyb_rows_inner(pixels, x_out, y_out, b_out),
+        [v3, neon, wasm128, scalar]
+    );
+}
 
-    for (i, p) in pixels.iter().enumerate() {
-        // Opsin LMS mix on absolute luminance — no [0,1] clamp (HDR > 1).
-        let mixed0 = K_M00
-            .mul_add(p[0], K_M01.mul_add(p[1], K_M02.mul_add(p[2], K_B0)))
-            .max(0.0);
-        let mixed1 = K_M10
-            .mul_add(p[0], K_M11.mul_add(p[1], K_M12.mul_add(p[2], K_B0)))
-            .max(0.0);
-        let mixed2 = K_M20
-            .mul_add(p[0], K_M21.mul_add(p[1], K_M22.mul_add(p[2], K_B0)))
-            .max(0.0);
+#[magetypes(v3, neon, wasm128, scalar)]
+fn pu_xyb_rows_inner(
+    token: Token,
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    #[allow(non_camel_case_types)]
+    type f32x8 = GenericF32x8<Token>;
+    // PU21 banding_glare parameters (same constants as `pu21::P`).
+    const P0: f32 = 0.353_487_9;
+    const P1: f32 = 0.373_465_86;
+    const P2: f32 = 8.277_049e-5;
+    const P3: f32 = 0.906_256_26;
+    const P4: f32 = 0.091_503_03;
+    const P5: f32 = 0.909_951_7;
+    const P6: f32 = 596.314_8;
+    let l_min = f32x8::splat(token, crate::pu21::PU21_L_MIN);
+    let l_max = f32x8::splat(token, crate::pu21::PU21_L_MAX);
+    let zero = f32x8::splat(token, 0.0);
+    let one = f32x8::splat(token, 1.0);
+    let p0 = f32x8::splat(token, P0);
+    let p1 = f32x8::splat(token, P1);
+    let p2 = f32x8::splat(token, P2);
+    let p3 = f32x8::splat(token, P3);
+    let p4 = f32x8::splat(token, P4);
+    let p5 = f32x8::splat(token, P5);
+    let p6 = f32x8::splat(token, P6);
+    let inv_white = f32x8::splat(token, 1.0 / PU_WHITE);
+    let pu = |v: f32x8| -> f32x8 {
+        let y = v.max(l_min).min(l_max);
+        let yp = (p3 * y.log2_midp_precise()).exp2_midp_precise();
+        let inner = (p0 + p1 * yp) / (one + p2 * yp);
+        (p6 * ((p4 * inner.log2_midp_precise()).exp2_midp_precise() - p5)).max(zero)
+    };
 
-        let c0 = pu21_encode(mixed0.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
-        let c1 = pu21_encode(mixed1.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
-        let c2 = pu21_encode(mixed2.clamp(PU21_L_MIN, PU21_L_MAX), variant) / PU_WHITE;
-
-        let x = 0.5 * (c0 - c1);
-        let y = 0.5 * (c0 + c1);
-
-        // The cube-root path amplifies X by 14× to make the tiny red-green
-        // cube-root difference visible. In PU space the opsin-channel
-        // differences are already in a larger range, so 14× over-amplifies
-        // chroma; HDR validation favors a luminance-dominant weighting (the
-        // strongest HDR baseline, PU-SSIM, is luminance-only). See the §2b
-        // validation gate in docs/HDR_PLAN.md.
-        const PU_X_SCALE: f32 = 4.0;
-        x_out[i] = x.mul_add(PU_X_SCALE, 0.42);
-        y_out[i] = y + 0.01;
-        b_out[i] = (c2 - y) + 0.55;
+    let n = pixels.len();
+    let chunks = n / 8;
+    let mut r = [0.0f32; 8];
+    let mut g = [0.0f32; 8];
+    let mut b = [0.0f32; 8];
+    for c in 0..chunks {
+        let base = c * 8;
+        for (j, px) in pixels[base..base + 8].iter().enumerate() {
+            r[j] = px[0];
+            g[j] = px[1];
+            b[j] = px[2];
+        }
+        let vr = f32x8::from_array(token, r);
+        let vg = f32x8::from_array(token, g);
+        let vb = f32x8::from_array(token, b);
+        let kb0 = f32x8::splat(token, K_B0);
+        let m0 = (f32x8::splat(token, K_M00) * vr
+            + f32x8::splat(token, K_M01) * vg
+            + f32x8::splat(token, K_M02) * vb
+            + kb0)
+            .max(zero);
+        let m1 = (f32x8::splat(token, K_M10) * vr
+            + f32x8::splat(token, K_M11) * vg
+            + f32x8::splat(token, K_M12) * vb
+            + kb0)
+            .max(zero);
+        let m2 = (f32x8::splat(token, K_M20) * vr
+            + f32x8::splat(token, K_M21) * vg
+            + f32x8::splat(token, K_M22) * vb
+            + kb0)
+            .max(zero);
+        let c0 = pu(m0) * inv_white;
+        let c1 = pu(m1) * inv_white;
+        let c2 = pu(m2) * inv_white;
+        let half = f32x8::splat(token, 0.5);
+        let x = half * (c0 - c1);
+        let y = half * (c0 + c1);
+        (x * f32x8::splat(token, PU_X_SCALE) + f32x8::splat(token, 0.42))
+            .store((&mut x_out[base..base + 8]).try_into().unwrap());
+        (y + f32x8::splat(token, 0.01)).store((&mut y_out[base..base + 8]).try_into().unwrap());
+        ((c2 - y) + f32x8::splat(token, 0.55))
+            .store((&mut b_out[base..base + 8]).try_into().unwrap());
+    }
+    for i in (chunks * 8)..n {
+        let (x, y, bb) = pu_xyb_pixel(pixels[i]);
+        x_out[i] = x;
+        y_out[i] = y;
+        b_out[i] = bb;
     }
 }
 
@@ -1871,5 +1962,73 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// Bench-only hooks (`benches/pu21_bench.rs`) — not public API.
+#[doc(hidden)]
+pub fn bench_pu_xyb_dispatch(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    linear_to_pu_xyb_planar_into(pixels, x_out, y_out, b_out);
+}
+
+/// Bench-only scalar reference — see [`bench_pu_xyb_dispatch`].
+#[doc(hidden)]
+pub fn bench_pu_xyb_scalar(
+    pixels: &[[f32; 3]],
+    x_out: &mut [f32],
+    y_out: &mut [f32],
+    b_out: &mut [f32],
+) {
+    for (i, p) in pixels.iter().enumerate() {
+        let (x, y, b) = pu_xyb_pixel(*p);
+        x_out[i] = x;
+        y_out[i] = y;
+        b_out[i] = b;
+    }
+}
+
+#[cfg(test)]
+mod pu_simd_parity_tests {
+    use super::*;
+
+    /// SIMD (incant-dispatched) vs scalar per-pixel PU-XYB: the lowp
+    /// transcendentals must stay within a tight band of the scalar powf
+    /// path across the full luminance range (incl. HDR extremes), so the
+    /// dispatched conversion cannot shift scores between machines.
+    #[test]
+    fn simd_matches_scalar_within_band() {
+        // 1031 px (not a multiple of 8 — exercises the tail) spanning
+        // 0.001..12000 nits log-spaced with chroma variation.
+        let n = 1031;
+        let pixels: Vec<[f32; 3]> = (0..n)
+            .map(|i| {
+                let t = i as f32 / (n - 1) as f32;
+                let y = 0.001 * (12_000.0f32 / 0.001).powf(t);
+                [y * 1.2, y, y * 0.7]
+            })
+            .collect();
+        let mut xs = vec![0.0f32; n];
+        let mut ys = vec![0.0f32; n];
+        let mut bs = vec![0.0f32; n];
+        linear_to_pu_xyb_planar_into(&pixels, &mut xs, &mut ys, &mut bs);
+        let mut max_d = 0.0f32;
+        for (i, p) in pixels.iter().enumerate() {
+            let (x, y, b) = pu_xyb_pixel(*p);
+            for (got, want) in [(xs[i], x), (ys[i], y), (bs[i], b)] {
+                let d = (got - want).abs();
+                if d > max_d {
+                    max_d = d;
+                }
+            }
+        }
+        // Outputs live in ~[0, 2.5]; 2e-3 abs keeps score impact negligible
+        // while leaving room for the midp_precise transcendental error budget
+        // compounding through two pow chains.
+        assert!(max_d <= 2e-3, "SIMD vs scalar max |delta| = {max_d}");
     }
 }
