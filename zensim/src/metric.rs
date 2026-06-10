@@ -1841,7 +1841,9 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// so a future HDR-aware code path can flip it in one place by
 /// dispatching to the PU-encoded XYB front-end instead of erroring.
 ///
-/// See imazen/zensim#38 for the HDR roadmap. The
+/// HDR pairs are scored via [`Zensim::compute_pu_linear_planar`]
+/// (absolute-luminance linear planes); trained-bake calibration is
+/// tracked in imazen/zensim#38. The
 /// [`TransferFunction`](crate::TransferFunction) enum
 /// exists specifically to make this refusal possible — without the
 /// signal, HDR pixels in a `LinearF32Rgba` source are
@@ -1849,7 +1851,7 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 #[inline]
 pub(crate) fn reject_hdr_input(source: &impl ImageSource) -> Result<(), ZensimError> {
     if crate::source::transfer_is_hdr(source.color_transfer_function()) {
-        return Err(ZensimError::HdrInputNotYetSupported);
+        return Err(ZensimError::HdrInputRequiresPuPath);
     }
     Ok(())
 }
@@ -1869,7 +1871,6 @@ pub(crate) fn validate_pair(
     }
     // Refuse mismatched transfer functions — comparing across transfer
     // spaces is undefined. Then refuse HDR transfers on either side
-    // until the PU-encoded path ships.
     if source.color_transfer_function() != distorted.color_transfer_function() {
         return Err(ZensimError::TransferFunctionMismatch);
     }

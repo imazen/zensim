@@ -38,7 +38,7 @@ pub use zenpixels::TransferFunction;
 /// True if `tf` describes HDR-luminance content (`Pq` or `Hlg`).
 ///
 /// HDR transfer functions encode absolute luminance; zensim's SDR path
-/// refuses them (see [`crate::ZensimError::HdrInputNotYetSupported`]) and the
+/// refuses them (see [`crate::ZensimError::HdrInputRequiresPuPath`]) and the
 /// PU front-end (`compute_pu_linear_planar`) scores them from linear
 /// absolute-luminance planes.
 #[inline]
@@ -142,7 +142,8 @@ pub trait ImageSource: Sync {
     ///
     /// Defaults to [`TransferFunction::Srgb`]. Override to signal
     /// HDR transfer (PQ or HLG) — see [`TransferFunction`] for the
-    /// roadmap on HDR-aware scoring (issue #38). SDR pipelines need not
+    /// PU scoring path for HDR ([`Zensim::compute_pu_linear_planar`](crate::Zensim::compute_pu_linear_planar);
+    /// trained-bake calibration tracked in issue #38). SDR pipelines need not
     /// implement this method.
     fn color_transfer_function(&self) -> TransferFunction {
         TransferFunction::Srgb
@@ -682,7 +683,8 @@ mod transfer_function_tests {
     /// HDR-aware ImageSource override smoke test: confirms a custom
     /// implementor can signal PQ without touching anything else in the
     /// trait. The dispatch this enables is downstream — zensim's
-    /// own scoring path still needs the trained HDR bake (issue #38).
+    /// PU scoring path accepts them via linear planes; the trained HDR
+    /// bake calibration is tracked in issue #38.
     #[test]
     fn custom_impl_can_signal_pq_transfer() {
         let data = vec![0u8; 2 * 2 * 16]; // LinearF32Rgba = 16 bytes/pixel
@@ -732,7 +734,7 @@ mod hdr_refusal_tests {
         let src = hdr_8x8_pq_linearf32();
         let dst = hdr_8x8_pq_linearf32();
         let err = z.compute(&src, &dst).unwrap_err();
-        assert_eq!(err, ZensimError::HdrInputNotYetSupported);
+        assert_eq!(err, ZensimError::HdrInputRequiresPuPath);
     }
 
     #[test]
@@ -756,8 +758,8 @@ mod hdr_refusal_tests {
         // (variant equality covered for the `compute` paths above where
         // the OK type IS Debug).
         match z.precompute_reference(&src) {
-            Ok(_) => panic!("expected HdrInputNotYetSupported, got Ok"),
-            Err(e) => assert_eq!(e, ZensimError::HdrInputNotYetSupported),
+            Ok(_) => panic!("expected HdrInputRequiresPuPath, got Ok"),
+            Err(e) => assert_eq!(e, ZensimError::HdrInputRequiresPuPath),
         }
     }
 
@@ -778,8 +780,8 @@ mod hdr_refusal_tests {
         // explicitly; today the SDR-only precompute guard makes this
         // a 1-bit invariant.)
         assert!(
-            matches!(err, ZensimError::HdrInputNotYetSupported),
-            "expected HdrInputNotYetSupported, got {err:?}"
+            matches!(err, ZensimError::HdrInputRequiresPuPath),
+            "expected HdrInputRequiresPuPath, got {err:?}"
         );
     }
 

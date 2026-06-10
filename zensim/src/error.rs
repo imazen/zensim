@@ -73,19 +73,21 @@ pub enum ZensimError {
     /// An [`ImageSource`](crate::ImageSource) signaled an HDR transfer
     /// function ([`TransferFunction::Pq`](crate::TransferFunction::Pq)
     /// or [`TransferFunction::Hlg`](crate::TransferFunction::Hlg)),
-    /// but zensim does not yet ship a validated HDR scoring path. Running
-    /// the SDR pipeline on HDR-coded values would silently produce
-    /// meaningless scores — we refuse the input instead.
+    /// which the SDR entry points cannot score: they expect display-encoded
+    /// SDR data, and running the SDR pipeline on HDR-coded values would
+    /// silently produce meaningless scores — we refuse instead.
     ///
-    /// See [imazen/zensim#38](https://github.com/imazen/zensim/issues/38)
-    /// for the HDR roadmap (PU-encoded XYB front-end + trained HDR profile
-    /// against UPIQ + AIC-HDR2025). Until that lands, callers wanting to
-    /// score HDR pairs must invert the transfer themselves and pass
-    /// linear-light pixels with `TransferFunction::Linear` (and accept
-    /// that the score is still SDR-trained — values outside [0, 1] are
-    /// clamped by downstream XYB math).
-    #[error("HDR transfer functions (PQ/HLG) are not yet supported — see imazen/zensim#38")]
-    HdrInputNotYetSupported,
+    /// HDR pairs ARE scorable: decode to **absolute-luminance linear RGB
+    /// planes (cd/m²)** and call
+    /// [`Zensim::compute_pu_linear_planar`](crate::Zensim::compute_pu_linear_planar)
+    /// (the PU21 front-end). Its output calibration against a trained HDR
+    /// bake is still open — see
+    /// [imazen/zensim#38](https://github.com/imazen/zensim/issues/38).
+    #[error(
+        "HDR-signaled input (PQ/HLG) cannot be scored by the SDR entry points — \
+         decode to absolute-luminance linear planes and use compute_pu_linear_planar"
+    )]
+    HdrInputRequiresPuPath,
 
     /// Source and distorted images signaled different transfer functions.
     /// Comparing across transfer spaces is undefined — caller must convert

@@ -188,7 +188,7 @@ in PU/PQ space.
   `pu21.rs` — `pu21_encode`/`decode` with the verified `gfxdisp/pu21`
   `banding_glare` coefficients (100 cd/m² → ~256), 6 reference-parity tests.
   **2b/2c ✅ WIRED + VALIDATED 2026-06-01 (partial pass).** The PU-XYB path is
-  live behind the non-default `hdr` feature: `Zensim::compute_pu_linear_planar`
+  are always compiled (the `hdr` feature gate was removed): `Zensim::compute_pu_linear_planar`
   (absolute-luminance planes → opsin → PU21 → XYB → existing pyramid/features),
   `color::linear_to_pu_xyb_planar_into`, `streaming::compute_multiscale_stats_pu_linear_planar`.
   SDR path byte-identical (separate functions; default API unchanged). Validated
