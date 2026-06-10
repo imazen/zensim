@@ -1608,8 +1608,8 @@ fn pu_xyb_pixel(p: [f32; 3]) -> (f32, f32, f32) {
 
 /// Absolute-luminance linear RGB → positive PU-XYB planes, SIMD-dispatched
 /// (8 px/iter via the generic magetypes tiers; `x^p = exp2_midp_precise(p·log2_midp_precise(x))`
-/// — the midp_precise transcendentals hold the scalar↔SIMD divergence well inside the
-/// gfxdisp golden tolerance; the parity test pins it).
+/// — the midp_precise transcendentals hold the scalar↔SIMD divergence to
+/// ≤ 2e-3 per channel; `simd_matches_scalar_within_band` pins it).
 pub(crate) fn linear_to_pu_xyb_planar_into(
     pixels: &[[f32; 3]],
     x_out: &mut [f32],

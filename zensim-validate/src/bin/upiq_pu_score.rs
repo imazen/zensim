@@ -10,7 +10,7 @@
 //!     --images /mnt/v/datasets/upiq_extracted/upiq_dataset/images \
 //!     --subjective /mnt/v/datasets/upiq/upiq_subjective_scores.csv \
 //!     --out /tmp/zensim_hdr_scores.csv \
-//!     [--corpus narwaria,korshunov] [--hdr-only]
+//!     [--corpus narwaria,korshunov]
 
 use std::collections::HashMap;
 use std::path::Path;

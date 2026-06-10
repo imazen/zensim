@@ -790,7 +790,7 @@ pub(crate) fn compute_multiscale_stats_streaming(
 /// HDR PU-path multiscale stats from two sets of **absolute-luminance** linear
 /// planes (ref + dist, cd/m²). Mirrors [`compute_multiscale_stats_streaming`]
 /// but converts both sides via PU21 ([`convert_linear_planar_to_pu_xyb_into`])
-/// rather than the sRGB/cube-root path. Reused by the `hdr`-gated public API.
+/// rather than the sRGB/cube-root path. Backs `Zensim::compute_pu_linear_planar`.
 pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     ref_planes: [&[f32]; 3],
     dist_planes: [&[f32]; 3],
@@ -801,10 +801,7 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     weights: &[f64],
 ) -> (Vec<ScaleStats>, [f64; 3]) {
     let padded_width = simd_padded_width(width);
-    let num_scales = config.num_scales;
-    let parallel = config.allow_multithreading;
     let n = padded_width * height;
-
     let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
     convert_linear_planar_to_pu_xyb_into(
@@ -823,6 +820,114 @@ pub(crate) fn compute_multiscale_stats_pu_linear_planar(
         padded_width,
         &mut dst_planes,
     );
+    multiscale_stats_over_pu_xyb(
+        src_planes,
+        dst_planes,
+        width,
+        height,
+        padded_width,
+        config,
+        weights,
+    )
+}
+
+/// Interleaved-input sibling of [`compute_multiscale_stats_pu_linear_planar`]:
+/// each image is one `[R, G, B, R, G, B, …]` f32 slice with its own row
+/// stride (f32 elements). Backs `Zensim::compute_pu_linear`.
+pub(crate) fn compute_multiscale_stats_pu_linear_interleaved(
+    ref_rgb: &[f32],
+    dist_rgb: &[f32],
+    width: usize,
+    height: usize,
+    ref_stride: usize,
+    dist_stride: usize,
+    config: &ZensimConfig,
+    weights: &[f64],
+) -> (Vec<ScaleStats>, [f64; 3]) {
+    let padded_width = simd_padded_width(width);
+    let n = padded_width * height;
+    let mut src_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    let mut dst_planes: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; n]);
+    convert_linear_interleaved_to_pu_xyb_into(
+        ref_rgb,
+        width,
+        height,
+        ref_stride,
+        padded_width,
+        &mut src_planes,
+    );
+    convert_linear_interleaved_to_pu_xyb_into(
+        dist_rgb,
+        width,
+        height,
+        dist_stride,
+        padded_width,
+        &mut dst_planes,
+    );
+    multiscale_stats_over_pu_xyb(
+        src_planes,
+        dst_planes,
+        width,
+        height,
+        padded_width,
+        config,
+        weights,
+    )
+}
+
+/// Reflect-pad already-converted PU-XYB planes from `(width, height)` up to
+/// the pyramid minimum — the post-conversion analogue of
+/// [`crate::metric::reflect_pad_to_min`]. The PU conversion is pointwise, so
+/// padding the converted planes is identical to converting reflect-padded
+/// input; doing it here keeps both PU entry layouts (interleaved/planar) on
+/// one pad path. No-op when both dims are ≥ the minimum.
+fn reflect_pad_pu_planes(
+    planes: [Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    padded_width: usize,
+) -> ([Vec<f32>; 3], usize, usize, usize) {
+    use crate::metric::{MIN_PYRAMID_DIM, reflect_index};
+    if width >= MIN_PYRAMID_DIM && height >= MIN_PYRAMID_DIM {
+        return (planes, width, height, padded_width);
+    }
+    let bw = width.max(MIN_PYRAMID_DIM);
+    let bh = height.max(MIN_PYRAMID_DIM);
+    let bpw = simd_padded_width(bw);
+    let mut out: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0f32; bpw * bh]);
+    for (src, dst) in planes.iter().zip(out.iter_mut()) {
+        for y in 0..bh {
+            let sy = reflect_index(y, height);
+            for x in 0..bw {
+                dst[y * bpw + x] = src[sy * padded_width + reflect_index(x, width)];
+            }
+        }
+    }
+    mirror_pad_columns(&mut out, bw, bh, bpw);
+    (out, bw, bh, bpw)
+}
+
+/// Shared tail of the two PU entry conversions: reflect-pad to the pyramid
+/// minimum, then mean offset + the per-scale band loop over already-PU-encoded
+/// XYB planes.
+fn multiscale_stats_over_pu_xyb(
+    src_planes: [Vec<f32>; 3],
+    dst_planes: [Vec<f32>; 3],
+    width: usize,
+    height: usize,
+    padded_width: usize,
+    config: &ZensimConfig,
+    weights: &[f64],
+) -> (Vec<ScaleStats>, [f64; 3]) {
+    // Sub-pyramid-minimum inputs reflect-pad up, exactly like the SDR funnel
+    // (`compute_with_config_inner`); scores stay comparable down to 1×1.
+    let (mut src_planes, w2, h2, pw2) =
+        reflect_pad_pu_planes(src_planes, width, height, padded_width);
+    let (mut dst_planes, ..) = reflect_pad_pu_planes(dst_planes, width, height, padded_width);
+    let (width, height, padded_width) = (w2, h2, pw2);
+
+    let num_scales = config.num_scales;
+    let parallel = config.allow_multithreading;
 
     let src_view: [&[f32]; 3] = [&src_planes[0], &src_planes[1], &src_planes[2]];
     let dst_view: [&[f32]; 3] = [&dst_planes[0], &dst_planes[1], &dst_planes[2]];
@@ -2503,23 +2608,62 @@ pub(crate) fn convert_linear_planar_to_pu_xyb_into(
         );
     }
 
-    // Mirror-pad columns (identical to the SDR path).
+    mirror_pad_columns(out, width, height, padded_width);
+}
+
+/// Interleaved-input sibling of [`convert_linear_planar_to_pu_xyb_into`]:
+/// each row is `width` `[R, G, B]` f32 triples starting at `y * stride`
+/// elements. The row slice reinterprets directly as `&[[f32; 3]]` — no
+/// per-pixel gather, which makes interleaved the cheaper input layout here.
+pub(crate) fn convert_linear_interleaved_to_pu_xyb_into(
+    rgb: &[f32],
+    width: usize,
+    height: usize,
+    stride: usize,
+    padded_width: usize,
+    out: &mut [Vec<f32>; 3],
+) {
+    use crate::color::linear_to_pu_xyb_planar_into;
+
+    let [ref mut o0, ref mut o1, ref mut o2] = *out;
+    for y in 0..height {
+        let row_off = y * stride;
+        // No [0,1] clamp here either — see the planar sibling.
+        let row: &[[f32; 3]] = bytemuck::cast_slice(&rgb[row_off..row_off + 3 * width]);
+        let out_off = y * padded_width;
+        linear_to_pu_xyb_planar_into(
+            row,
+            &mut o0[out_off..out_off + width],
+            &mut o1[out_off..out_off + width],
+            &mut o2[out_off..out_off + width],
+        );
+    }
+
+    mirror_pad_columns(out, width, height, padded_width);
+}
+
+/// Mirror-pad columns `width..padded_width` of three planes in place,
+/// identical to the SDR conversion's column padding so every downstream
+/// kernel sees the same layout regardless of input path.
+fn mirror_pad_columns(out: &mut [Vec<f32>; 3], width: usize, height: usize, padded_width: usize) {
     let pad_count = padded_width - width;
-    if pad_count > 0 {
-        let period = 2 * (width - 1).max(1);
-        let mirror_offsets: Vec<usize> = (0..pad_count)
-            .map(|i| {
-                let m = (width + i) % period;
-                if m < width { m } else { period - m }
-            })
-            .collect();
-        for y in 0..height {
-            let row_off = y * padded_width;
-            for (i, &src_x) in mirror_offsets.iter().enumerate() {
-                o0[row_off + width + i] = o0[row_off + src_x];
-                o1[row_off + width + i] = o1[row_off + src_x];
-                o2[row_off + width + i] = o2[row_off + src_x];
-            }
+    if pad_count == 0 {
+        return;
+    }
+    let period = 2 * (width - 1).max(1);
+    let mirror_offsets: Vec<usize> = (0..pad_count)
+        .map(|i| {
+            let m = (width + i) % period;
+            if m < width { m } else { period - m }
+        })
+        .collect();
+    let [ref mut o0, ref mut o1, ref mut o2] = *out;
+    for y in 0..height {
+        let row_off = y * padded_width;
+        for (i, &src_x) in mirror_offsets.iter().enumerate() {
+            o0[row_off + width + i] = o0[row_off + src_x];
+            o1[row_off + width + i] = o1[row_off + src_x];
+            o2[row_off + width + i] = o2[row_off + src_x];
         }
     }
 }

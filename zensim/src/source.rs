@@ -10,9 +10,9 @@
 /// stage — the opsin matrix and SIMD kernels remain untouched.
 ///
 /// **SDR pixel range:** All primaries assume input values in `[0, 1]` after
-/// linearization. HDR transfer functions are signaled via
-/// [`TransferFunction`] — see that type for the path that handles
-/// absolute-luminance PQ / HLG content via PU encoding.
+/// linearization. HDR content is scored through the PU entry points
+/// ([`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear)) instead;
+/// sources carrying HDR-coded pixels signal it via [`ImageSource::is_hdr`].
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ColorPrimaries {
@@ -31,19 +31,6 @@ pub enum ColorPrimaries {
     /// (approximately gamma 2.4), which differs from sRGB by ~2% in mid-tones.
     /// For exact results, linearize externally and use `LinearF32Rgba`.
     Bt2020,
-}
-
-pub use zenpixels::TransferFunction;
-
-/// True if `tf` describes HDR-luminance content (`Pq` or `Hlg`).
-///
-/// HDR transfer functions encode absolute luminance; zensim's SDR path
-/// refuses them (see [`crate::ZensimError::HdrInputRequiresPuPath`]) and the
-/// PU front-end (`compute_pu_linear_planar`) scores them from linear
-/// absolute-luminance planes.
-#[inline]
-pub fn transfer_is_hdr(tf: TransferFunction) -> bool {
-    matches!(tf, TransferFunction::Pq | TransferFunction::Hlg)
 }
 
 /// Pixel format describing the channel layout, bit depth, and transfer function.
@@ -138,15 +125,20 @@ pub trait ImageSource: Sync {
     fn color_primaries(&self) -> ColorPrimaries {
         ColorPrimaries::Srgb
     }
-    /// Encoding transfer function of the image data.
+    /// True if the pixel data is HDR-coded (PQ/HLG code values, or linear
+    /// absolute luminance). Defaults to `false`; SDR pipelines never need to
+    /// implement this.
     ///
-    /// Defaults to [`TransferFunction::Srgb`]. Override to signal
-    /// HDR transfer (PQ or HLG) — see [`TransferFunction`] for the
-    /// PU scoring path for HDR ([`Zensim::compute_pu_linear_planar`](crate::Zensim::compute_pu_linear_planar);
-    /// trained-bake calibration tracked in issue #38). SDR pipelines need not
-    /// implement this method.
-    fn color_transfer_function(&self) -> TransferFunction {
-        TransferFunction::Srgb
+    /// The SDR entry points refuse HDR-flagged sources with
+    /// [`ZensimError::HdrInputRequiresPuPath`](crate::ZensimError::HdrInputRequiresPuPath)
+    /// rather than silently scoring HDR-coded values on the SDR pipeline —
+    /// without this flag, HDR pixels in a `LinearF32Rgba` source are
+    /// indistinguishable from SDR and would be silently clamped to `[0, 1]`.
+    /// Score HDR pairs via
+    /// [`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear) (or
+    /// its planar variant) after decoding to absolute-luminance nits.
+    fn is_hdr(&self) -> bool {
+        false
     }
     /// Raw bytes for row `y`. Length must be at least `width() * pixel_format().bytes_per_pixel()`.
     fn row_bytes(&self, y: usize) -> &[u8];
@@ -619,34 +611,20 @@ mod imgref_impls {
 }
 
 #[cfg(test)]
-mod transfer_function_tests {
+mod hdr_flag_tests {
     use super::*;
 
     #[test]
-    fn default_is_srgb() {
-        assert_eq!(TransferFunction::Srgb, TransferFunction::Srgb);
+    fn built_in_sources_default_sdr() {
+        // The built-in sources are SDR by construction and must inherit
+        // the default `is_hdr() == false` so they pass the SDR guard.
+        let rgb = [[255u8, 0, 0]; 4];
+        assert!(!RgbSlice::new(&rgb, 2, 2).is_hdr());
+        let rgba = [[255u8, 0, 0, 255]; 4];
+        assert!(!RgbaSlice::new(&rgba, 2, 2).is_hdr());
     }
 
-    #[test]
-    fn is_hdr_correctly_classifies() {
-        assert!(!transfer_is_hdr(TransferFunction::Srgb));
-        assert!(!transfer_is_hdr(TransferFunction::Linear));
-        assert!(!transfer_is_hdr(TransferFunction::Bt709));
-        assert!(transfer_is_hdr(TransferFunction::Pq));
-        assert!(transfer_is_hdr(TransferFunction::Hlg));
-    }
-
-    #[test]
-    fn rgb_slice_defaults_to_srgb_transfer() {
-        // Concrete ImageSource implementations should pick up the
-        // default-Srgb trait method until they opt into a different
-        // transfer.
-        let pixels = [[255u8, 0, 0]; 4];
-        let src = RgbSlice::new(&pixels, 2, 2);
-        assert_eq!(src.color_transfer_function(), TransferFunction::Srgb);
-    }
-
-    /// Define a minimal HDR-signaling source so the metric-level
+    /// Define a minimal HDR-flagged source so the metric-level
     /// refusal tests below can build one without re-declaring the
     /// boilerplate impl.
     pub(super) struct PqHdrSource<'a> {
@@ -670,8 +648,8 @@ mod transfer_function_tests {
         fn color_primaries(&self) -> ColorPrimaries {
             ColorPrimaries::Bt2020
         }
-        fn color_transfer_function(&self) -> TransferFunction {
-            TransferFunction::Pq
+        fn is_hdr(&self) -> bool {
+            true
         }
         fn row_bytes(&self, y: usize) -> &[u8] {
             let bpp = self.pixel_format().bytes_per_pixel();
@@ -680,22 +658,18 @@ mod transfer_function_tests {
         }
     }
 
-    /// HDR-aware ImageSource override smoke test: confirms a custom
-    /// implementor can signal PQ without touching anything else in the
-    /// trait. The dispatch this enables is downstream — zensim's
-    /// PU scoring path accepts them via linear planes; the trained HDR
-    /// bake calibration is tracked in issue #38.
+    /// A custom implementor flags HDR with one method override and
+    /// nothing else in the trait changes.
     #[test]
-    fn custom_impl_can_signal_pq_transfer() {
+    fn custom_impl_can_flag_hdr() {
         let data = vec![0u8; 2 * 2 * 16]; // LinearF32Rgba = 16 bytes/pixel
         let src = PqHdrSource {
             data: &data,
             width: 2,
             height: 2,
         };
-        assert_eq!(src.color_transfer_function(), TransferFunction::Pq);
+        assert!(src.is_hdr());
         assert_eq!(src.color_primaries(), ColorPrimaries::Bt2020);
-        assert!(transfer_is_hdr(src.color_transfer_function()));
     }
 }
 
@@ -705,7 +679,7 @@ mod hdr_refusal_tests {
     //! input (PQ/HLG) rather than silently run the SDR pipeline on
     //! HDR-coded values. These tests pin the contract so a future
     //! refactor can't accidentally remove the guard.
-    use super::transfer_function_tests::PqHdrSource;
+    use super::hdr_flag_tests::PqHdrSource;
     use super::*;
     use crate::{Zensim, ZensimError};
 
@@ -738,15 +712,15 @@ mod hdr_refusal_tests {
     }
 
     #[test]
-    fn compute_refuses_transfer_function_mismatch() {
-        // SDR source, HDR distorted → mismatch error fires before the
-        // HDR refusal (mismatch is checked first to surface the more
-        // specific failure mode).
+    fn compute_refuses_mixed_sdr_hdr_pair() {
+        // SDR source, HDR distorted: the guard fires when EITHER side is
+        // HDR-flagged — a mixed pair can't be scored by the SDR pipeline
+        // any more than an all-HDR one.
         let z = Zensim::new(crate::ZensimProfile::codec_target());
         let src = sdr_8x8_rgba();
         let dst = hdr_8x8_pq_linearf32();
         let err = z.compute(&src, &dst).unwrap_err();
-        assert_eq!(err, ZensimError::TransferFunctionMismatch);
+        assert_eq!(err, ZensimError::HdrInputRequiresPuPath);
     }
 
     #[test]
@@ -772,13 +746,6 @@ mod hdr_refusal_tests {
         let pre = z.precompute_reference(&sdr_src).expect("SDR precompute ok");
         let hdr_dst = hdr_8x8_pq_linearf32();
         let err = z.compute_with_ref(&pre, &hdr_dst).unwrap_err();
-        // Mismatch fires before HDR-refusal because the precomputed
-        // reference effectively carries Srgb (the SDR source's default)
-        // — semantically this is the right error, since the user has
-        // a transfer-mismatch problem at the API boundary.
-        // (Future: PrecomputedReference could carry its transfer
-        // explicitly; today the SDR-only precompute guard makes this
-        // a 1-bit invariant.)
         assert!(
             matches!(err, ZensimError::HdrInputRequiresPuPath),
             "expected HdrInputRequiresPuPath, got {err:?}"

@@ -61,3 +61,13 @@ the scorer, and the harness all work end-to-end.
 Reproduce: `cargo build --release -p zensim-validate --bin upiq_pu_score &&
 ./target/release/upiq_pu_score --out /tmp/s.csv && python3 scripts/upiq_eval.py
 --scores /tmp/s.csv --score-col zensim_a`.
+
+---
+
+**API note (2026-06-10, post-run):** the `hdr` feature gate described above
+was removed (the PU path is always compiled), and the primary public entry
+is now `Zensim::compute_pu_linear` (interleaved absolute-luminance RGB,
+per-image row stride); `compute_pu_linear_planar` remains as the planar
+variant and is what `upiq_pu_score` (EXR planes) calls. Scores are
+bit-identical across the two layouts (`zensim/tests/pu_entry.rs`), so the
+numbers in this record are unaffected.

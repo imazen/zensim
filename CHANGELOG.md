@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Added — HDR scoring via the PU21 front-end (#44)
+
+- `Zensim::compute_pu_linear` — score HDR pairs supplied as **interleaved**
+  absolute-luminance linear RGB f32 (cd/m², per-image row stride; the primary
+  HDR entry) — and `Zensim::compute_pu_linear_planar` for planar pipelines.
+  Both replace the SDR cube-root nonlinearity with PU21 (banding_glare),
+  reflect-pad sub-64px inputs like the SDR funnel, share its
+  identical-pair → 100.0 short-circuit, and agree bit-for-bit across layouts
+  (magetypes SIMD conversion, ~3.3× scalar). UPIQ HDR validation:
+  SROCC 0.694 (`benchmarks/upiq_pu_validation_2026-06-01.md`); trained-bake
+  calibration tracked in #38.
+- `ImageSource::is_hdr` (default `false`): HDR-flagged sources are refused
+  by the SDR entry points with the new `ZensimError::HdrInputRequiresPuPath`
+  instead of silently clamping HDR-coded values.
+
+### Changed
+
+- The `zenpixels` dependency is optional again — it is only needed by the
+  feature-gated `ZenpixelsSource` adapter (#44).
+
 ### Fixed — CI green: bare-checkout workspace resolution, census pandas, lint debt (2026-06-10)
 
 CI had been red on every job for weeks (imazen/zensim#43): `cargo metadata`

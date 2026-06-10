@@ -70,30 +70,26 @@ pub enum ZensimError {
     #[error("MLP forward failed: {reason}")]
     ModelForwardFailed { reason: &'static str },
 
-    /// An [`ImageSource`](crate::ImageSource) signaled an HDR transfer
-    /// function ([`TransferFunction::Pq`](crate::TransferFunction::Pq)
-    /// or [`TransferFunction::Hlg`](crate::TransferFunction::Hlg)),
-    /// which the SDR entry points cannot score: they expect display-encoded
-    /// SDR data, and running the SDR pipeline on HDR-coded values would
-    /// silently produce meaningless scores — we refuse instead.
+    /// An [`ImageSource`](crate::ImageSource) flagged itself HDR
+    /// ([`ImageSource::is_hdr`](crate::ImageSource::is_hdr)), which the SDR
+    /// entry points cannot score: they expect display-encoded SDR data, and
+    /// running the SDR pipeline on HDR-coded values would silently produce
+    /// meaningless scores — we refuse instead. Fires when either side of a
+    /// pair is HDR-flagged.
     ///
     /// HDR pairs ARE scorable: decode to **absolute-luminance linear RGB
-    /// planes (cd/m²)** and call
-    /// [`Zensim::compute_pu_linear_planar`](crate::Zensim::compute_pu_linear_planar)
-    /// (the PU21 front-end). Its output calibration against a trained HDR
+    /// (cd/m²)** and call
+    /// [`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear)
+    /// (interleaved; planar variant
+    /// [`compute_pu_linear_planar`](crate::Zensim::compute_pu_linear_planar)) —
+    /// the PU21 front-end. Its output calibration against a trained HDR
     /// bake is still open — see
     /// [imazen/zensim#38](https://github.com/imazen/zensim/issues/38).
     #[error(
-        "HDR-signaled input (PQ/HLG) cannot be scored by the SDR entry points — \
-         decode to absolute-luminance linear planes and use compute_pu_linear_planar"
+        "HDR input cannot be scored by the SDR entry points — decode to \
+         absolute-luminance linear RGB and use compute_pu_linear"
     )]
     HdrInputRequiresPuPath,
-
-    /// Source and distorted images signaled different transfer functions.
-    /// Comparing across transfer spaces is undefined — caller must convert
-    /// to a common transfer before scoring.
-    #[error("Source and distorted transfer functions must match")]
-    TransferFunctionMismatch,
 }
 
 /// Pixel format conversion error from the zenpixels adapter.

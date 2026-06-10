@@ -7,17 +7,17 @@
 //! SDR metric was tuned on. On zensim's HDR path PU21 replaces the cube-root
 //! nonlinearity (see `docs/HDR_PLAN.md` §2).
 //!
-//! Only the **banding_glare** parameter set ships: it is the gfxdisp-
-//! recommended and paper-measured-best variant (banding model + glare), and
-//! the only one any zen scoring path uses. The other three published sets
-//! (banding, peaks, peaks_glare) remain available — with full 4-row float64
-//! reference goldens — in `zenmetrics-api::hdr`, which is the drift-guard
-//! home for the cross-crate coefficient table.
+//! Only the **banding_glare** parameter set ships — the gfxdisp-recommended
+//! and paper-measured-best variant (banding model + glare), and the only one
+//! any zen scoring path uses (`zenmetrics-api::hdr` carries the same single
+//! set). The other three published sets (banding, peaks, peaks_glare) live
+//! upstream in `gfxdisp/pu21` if ever needed.
 //!
 //! Coefficients are the published `gfxdisp/pu21` values (BSD-3-Clause,
-//! © Rafal Mantiuk); reimplemented from the specification. The reference-
-//! parity test pins them to float64 goldens (generator:
-//! `scripts/pu21_golden.py`).
+//! © Rafal Mantiuk); reimplemented from the specification. The tests below
+//! pin behavior (white-point anchor, monotonicity, encode∘decode
+//! round-trip); end-to-end validity is pinned by the UPIQ validation run
+//! (`benchmarks/upiq_pu_validation_2026-06-01.md`).
 
 /// Minimum absolute luminance the encoding is defined over (cd/m²).
 pub(crate) const PU21_L_MIN: f32 = 0.005;

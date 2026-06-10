@@ -1546,20 +1546,104 @@ impl Zensim {
         ))
     }
 
-    /// **HDR (experimental, `hdr` feature).** Score a pair supplied as
-    /// **absolute-luminance** linear RGB planes (cd/m²), using the PU21
-    /// perceptually-uniform front-end instead of the SDR cube-root
-    /// nonlinearity. This is the HDR scoring path described in
-    /// `docs/HDR_PLAN.md`; the inputs are display-emitted luminance (e.g. from
-    /// an absolute-photometric EXR, or after a [`crate::transfer`]-style display
-    /// model maps PQ/HLG code values to cd/m²).
+    /// **HDR.** Score a pair supplied as **interleaved** absolute-luminance
+    /// linear RGB (`[R, G, B, R, G, B, …]` f32, cd/m²), using the PU21
+    /// perceptually-uniform front-end (banding_glare) in place of the SDR
+    /// cube-root nonlinearity. This is the primary HDR entry point —
+    /// interleaved rows are how HDR pixels normally arrive (decoder output,
+    /// EXR readers, GPU readbacks), and they feed the PU conversion with no
+    /// per-row gather. See `docs/HDR_PLAN.md` §2b; validation:
+    /// `benchmarks/upiq_pu_validation_2026-06-01.md`.
     ///
-    /// `ref_planes` / `dist_planes` are `[R, G, B]`, each ≥ `stride * height`
-    /// f32. Uses the default `BandingGlare` PU21 variant; for an explicit
+    /// Inputs are display-emitted luminance. PQ/HLG **code values** must
+    /// first be mapped to cd/m² by a display model (PQ: EOTF × peak nits;
+    /// HLG: OOTF at display peak) — that conversion lives in the caller
+    /// (e.g. zenpixels-convert), not here. Absolute-score calibration
+    /// against a trained HDR bake is tracked in
+    /// [imazen/zensim#38](https://github.com/imazen/zensim/issues/38).
+    ///
+    /// `ref_stride` / `dist_stride` count f32 elements between row starts
+    /// (≥ `3 * width`; tightly packed = `3 * width`). Row padding beyond
+    /// `3 * width` is ignored, so strided buffers (SIMD-aligned rows,
+    /// sub-rect views) score without repacking.
+    ///
+    /// Sub-64px inputs reflect-pad up to the pyramid minimum exactly like the
+    /// SDR entry points — scores stay defined down to 1×1.
     ///
     /// # Errors
-    /// [`ZensimError::ImageTooSmall`] (< 8×8), [`ZensimError::ImageTooLarge`]
-    /// (overflow), or [`ZensimError::InvalidDataLength`] (short plane).
+    /// [`ZensimError::ImageTooSmall`] (zero-sized),
+    /// [`ZensimError::InvalidStride`] (stride < `3 * width`),
+    /// [`ZensimError::ImageTooLarge`] (arithmetic overflow), or
+    /// [`ZensimError::InvalidDataLength`] (slice too short).
+    pub fn compute_pu_linear(
+        &self,
+        ref_rgb: &[f32],
+        dist_rgb: &[f32],
+        width: usize,
+        height: usize,
+        ref_stride: usize,
+        dist_stride: usize,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        if width == 0 || height == 0 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        check_within_max_pixels(width, height, self.max_pixels)?;
+        let min_stride = width.checked_mul(3).ok_or(ZensimError::ImageTooLarge)?;
+        for (slice, stride) in [(ref_rgb, ref_stride), (dist_rgb, dist_stride)] {
+            if stride < min_stride {
+                return Err(ZensimError::InvalidStride);
+            }
+            // The last row only needs `3 * width` elements, not a full
+            // stride — same convention as `StridedBytes`.
+            let required = (height - 1)
+                .checked_mul(stride)
+                .and_then(|v| v.checked_add(min_stride))
+                .ok_or(ZensimError::ImageTooLarge)?;
+            if slice.len() < required {
+                return Err(ZensimError::InvalidDataLength);
+            }
+        }
+        let config = config_from_params(params, self.parallel);
+        // Identical inputs must score exactly 100.0 through the same
+        // `mark_identical` contract the SDR path uses (compares only the
+        // valid `3 * width` of each row, so stride padding is ignored here
+        // too).
+        let identical = (0..height).all(|y| {
+            ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
+                == dist_rgb[y * dist_stride..y * dist_stride + 3 * width]
+        });
+        let mut result = if identical {
+            identical_result(&config)
+        } else {
+            let (stats, mean_offset) =
+                crate::streaming::compute_multiscale_stats_pu_linear_interleaved(
+                    ref_rgb,
+                    dist_rgb,
+                    width,
+                    height,
+                    ref_stride,
+                    dist_stride,
+                    &config,
+                    params.weights,
+                );
+            combine_scores(&stats, params.weights, &config, mean_offset)
+        };
+        apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
+        Ok(result.with_profile(self.profile))
+    }
+
+    /// Planar variant of [`compute_pu_linear`](Self::compute_pu_linear): the
+    /// same PU21 HDR scoring with each image supplied as `[R, G, B]` planes,
+    /// each ≥ `stride * height` f32 (`stride` in f32 elements per plane row,
+    /// shared by all six planes). For pipelines that already keep channels
+    /// separate; scores are identical to the interleaved entry, including the
+    /// sub-64px reflect-padding.
+    ///
+    /// # Errors
+    /// [`ZensimError::ImageTooSmall`] (zero-sized),
+    /// [`ZensimError::ImageTooLarge`] (overflow), or
+    /// [`ZensimError::InvalidDataLength`] (short plane).
     pub fn compute_pu_linear_planar(
         &self,
         ref_planes: [&[f32]; 3],
@@ -1569,7 +1653,7 @@ impl Zensim {
         stride: usize,
     ) -> Result<ZensimResult, ZensimError> {
         let params = self.profile.params();
-        if width < 8 || height < 8 {
+        if width == 0 || height == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
         check_within_max_pixels(width, height, self.max_pixels)?;
@@ -1582,16 +1666,26 @@ impl Zensim {
             }
         }
         let config = config_from_params(params, self.parallel);
-        let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_pu_linear_planar(
-            ref_planes,
-            dist_planes,
-            width,
-            height,
-            stride,
-            &config,
-            params.weights,
-        );
-        let mut result = combine_scores(&stats, params.weights, &config, mean_offset);
+        // Same identity short-circuit as the interleaved entry (valid
+        // `width` of each plane row only).
+        let identical = ref_planes.iter().zip(dist_planes.iter()).all(|(r, d)| {
+            (0..height)
+                .all(|y| r[y * stride..y * stride + width] == d[y * stride..y * stride + width])
+        });
+        let mut result = if identical {
+            identical_result(&config)
+        } else {
+            let (stats, mean_offset) = crate::streaming::compute_multiscale_stats_pu_linear_planar(
+                ref_planes,
+                dist_planes,
+                width,
+                height,
+                stride,
+                &config,
+                params.weights,
+            );
+            combine_scores(&stats, params.weights, &config, mean_offset)
+        };
         apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
         Ok(result.with_profile(self.profile))
     }
@@ -1831,8 +1925,8 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
     }
 }
 
-/// Reject HDR-signaled input (PQ/HLG) before it can silently flow
-/// through the SDR XYB pipeline and produce meaningless scores.
+/// Reject HDR-flagged input before it can silently flow through the
+/// SDR XYB pipeline and produce meaningless scores.
 ///
 /// Every public entry point (compute, compute_with_ref,
 /// precompute_reference, compute_with_ref_into, compute_with_params,
@@ -1841,16 +1935,15 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// so a future HDR-aware code path can flip it in one place by
 /// dispatching to the PU-encoded XYB front-end instead of erroring.
 ///
-/// HDR pairs are scored via [`Zensim::compute_pu_linear_planar`]
-/// (absolute-luminance linear planes); trained-bake calibration is
-/// tracked in imazen/zensim#38. The
-/// [`TransferFunction`](crate::TransferFunction) enum
-/// exists specifically to make this refusal possible — without the
-/// signal, HDR pixels in a `LinearF32Rgba` source are
-/// indistinguishable from SDR and would be silently clamped.
+/// HDR pairs are scored via [`Zensim::compute_pu_linear`]
+/// (absolute-luminance linear RGB); trained-bake calibration is
+/// tracked in imazen/zensim#38. [`ImageSource::is_hdr`] exists
+/// specifically to make this refusal possible — without the signal,
+/// HDR pixels in a `LinearF32Rgba` source are indistinguishable from
+/// SDR and would be silently clamped.
 #[inline]
 pub(crate) fn reject_hdr_input(source: &impl ImageSource) -> Result<(), ZensimError> {
-    if crate::source::transfer_is_hdr(source.color_transfer_function()) {
+    if source.is_hdr() {
         return Err(ZensimError::HdrInputRequiresPuPath);
     }
     Ok(())
@@ -1869,11 +1962,8 @@ pub(crate) fn validate_pair(
     if source.width() != distorted.width() || source.height() != distorted.height() {
         return Err(ZensimError::DimensionMismatch);
     }
-    // Refuse mismatched transfer functions — comparing across transfer
-    // spaces is undefined. Then refuse HDR transfers on either side
-    if source.color_transfer_function() != distorted.color_transfer_function() {
-        return Err(ZensimError::TransferFunctionMismatch);
-    }
+    // Refuse HDR-flagged input on either side — a mixed SDR/HDR pair is
+    // just as unscorable by the SDR pipeline as an all-HDR one.
     reject_hdr_input(source)?;
     reject_hdr_input(distorted)?;
     Ok(())
@@ -2114,33 +2204,42 @@ fn compute_with_config_core(
     // Identical images must score exactly 100.0 — short-circuit before
     // floating-point arithmetic introduces sub-ULP noise in SSIM/edge features.
     if images_byte_identical(source, distorted) {
-        // The feature width depends on which flags are enabled:
-        //   - basic (228 = 4 × 3 × 19) is always present
-        //   - extended adds 72 masked features (300 total)
-        //   - compute_iw_features adds 72 IW-pool features (372 total)
-        // On identical inputs every feature is zero (all error metrics
-        // are 0). PreviewV0_5Compression (V_22-372feat) needs the full
-        // 372-width vector; PreviewV0_5 / PreviewV0_5Balanced
-        // (V_22-mix-LARGE+iwssim, 300-input) needs only the extended
-        // 300-width vector. A missing block triggers InvalidDataLength
-        // downstream when the bake's MLP runs.
-        let fpc = match (config.extended_features, config.compute_iw_features) {
-            (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
-            (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
-            (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
-        };
-        let num_features = config.num_scales * 3 * fpc;
-        return ZensimResult::new(
-            100.0,
-            0.0,
-            vec![0.0; num_features],
-            ZensimProfile::A,
-            [0.0; 3],
-        )
-        .mark_identical();
+        return identical_result(config);
     }
 
     crate::streaming::compute_zensim_streaming(source, distorted, config, weights)
+}
+
+/// The identical-pair short-circuit payload, shared by the SDR byte-identical
+/// check and the PU entries' element-identical checks: `(score=100,
+/// raw_distance=0, all-zero features)`, flagged via `mark_identical` so
+/// `apply_mlp_scoring_with_codec` skips the MLP forward pass (which has no
+/// signal anchoring "zero feature vector → 100" and would overwrite the
+/// payload with garbage).
+///
+/// The feature width depends on which flags are enabled: basic
+/// (228 = 4 × 3 × 19) is always present, extended adds 72 masked features
+/// (300 total), and compute_iw_features adds 72 IW-pool features (372
+/// total). On identical inputs every feature is zero (all error metrics
+/// are 0). PreviewV0_5Compression (V_22-372feat) needs the full 372-width
+/// vector; PreviewV0_5 / PreviewV0_5Balanced (V_22-mix-LARGE+iwssim,
+/// 300-input) needs only the extended 300-width vector. A missing block
+/// triggers InvalidDataLength downstream when the bake's MLP runs.
+fn identical_result(config: &ZensimConfig) -> ZensimResult {
+    let fpc = match (config.extended_features, config.compute_iw_features) {
+        (true, true) => FEATURES_PER_CHANNEL_EXTENDED + FEATURES_PER_CHANNEL_IW,
+        (true, false) => FEATURES_PER_CHANNEL_EXTENDED,
+        (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
+    };
+    let num_features = config.num_scales * 3 * fpc;
+    ZensimResult::new(
+        100.0,
+        0.0,
+        vec![0.0; num_features],
+        ZensimProfile::A,
+        [0.0; 3],
+    )
+    .mark_identical()
 }
 
 pub(crate) fn config_from_params(params: &ProfileParams, parallel: bool) -> ZensimConfig {
