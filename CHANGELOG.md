@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Fixed — CI green: bare-checkout workspace resolution, census pandas, lint debt (2026-06-10)
+
+CI had been red on every job for weeks (imazen/zensim#43): `cargo metadata`
+failed on every bare checkout before a single crate compiled, because
+workspace members path-dep'd sibling repos that only exist in the full
+dev layout.
+
+- **Workspace resolves on bare checkouts.** `zenstats` is now a pinned git
+  dep (`imazen/zenmetrics @ de2ced69`, same contract as the zenpredict pin).
+  `zensim-bench`, `zensim-picker-prep`, and `zensim-target` — internal
+  sibling-required research tooling (AGPL codec siblings, zenanalyze, local
+  butteraugli fork) — moved from `members` to `exclude` and are each their
+  own standalone workspace root; build them via
+  `cargo <cmd> --manifest-path <crate>/Cargo.toml`. The root
+  `[patch.crates-io] jxl-encoder` moved into those standalone roots.
+- **Metric-column census job**: installed `pandas` (the audit script imports
+  it; every fixture errored `No module named 'pandas'`, tripping the
+  must-FAIL gate from the wrong side).
+- **Test-all-features + Coverage jobs**: gpu crates now run on the CubeCL
+  CPU backend (`gpu-cpu`) — `--all-features` hardwired the CUDA backend
+  into zensim-train-gpu's tests, which can never pass on GPU-less hosted
+  runners. CUDA/WGPU backends stay compile-checked via the Clippy job.
+- **Lint debt**: `cargo clippy --workspace --all-targets --all-features
+  -- -D warnings` and all 22 zensim feature permutations are clean; cargo
+  fmt drift fixed. No test expectations, thresholds, or assertions were
+  relaxed; dead code was removed where genuinely dead and `#[allow]`'d
+  with justification where intentionally kept (iw_pool research estimators,
+  paper-reference constants, multi-target `#[path]`-included helpers).
+
 ### Fixed — sub-64px images score on the streaming + diffmap paths too (2026-06-07)
 
 The 2026-06-06 reflect-pad fix only covered the buffered `compute()` path; the
