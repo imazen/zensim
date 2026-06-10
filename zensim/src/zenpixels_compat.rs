@@ -251,9 +251,13 @@ fn unpremultiply(
                         out[off + 2] = 0;
                     } else if a < 255 {
                         let inv = 255.0 / a as f32;
-                        out[off] = (out[off] as f32 * inv).min(255.0) as u8;
-                        out[off + 1] = (out[off + 1] as f32 * inv).min(255.0) as u8;
-                        out[off + 2] = (out[off + 2] as f32 * inv).min(255.0) as u8;
+                        // Round-to-nearest: premultiplied stores are already
+                        // quantized, so truncating here would compound the
+                        // loss (up to ~2 LSB at mid alpha). Rounding is the
+                        // closest reconstruction of the straight value.
+                        out[off] = (out[off] as f32 * inv).round().min(255.0) as u8;
+                        out[off + 1] = (out[off + 1] as f32 * inv).round().min(255.0) as u8;
+                        out[off + 2] = (out[off + 2] as f32 * inv).round().min(255.0) as u8;
                     }
                 }
             }
@@ -271,7 +275,7 @@ fn unpremultiply(
                         for c in 0..3 {
                             let co = off + c * 2;
                             let v = u16::from_ne_bytes([out[co], out[co + 1]]);
-                            let unpremul = (v as f32 * inv).min(65535.0) as u16;
+                            let unpremul = (v as f32 * inv).round().min(65535.0) as u16;
                             out[co..co + 2].copy_from_slice(&unpremul.to_ne_bytes());
                         }
                     }
@@ -372,8 +376,8 @@ mod tests {
         let data = vec![100u8, 50, 25, 200];
         let result = unpremultiply(&data, 1, 1, 4, &PixelDescriptor::RGBA8_SRGB);
         assert_eq!(result[3], 200); // alpha unchanged
-        assert_eq!(result[0], 127); // 100 * 255/200 = 127.5 → 127
-        assert_eq!(result[1], 63); // 50 * 255/200 = 63.75 → 63
+        assert_eq!(result[0], 128); // 100 * 255/200 = 127.5 → 128 (round-to-nearest)
+        assert_eq!(result[1], 64); // 50 * 255/200 = 63.75 → 64 (round-to-nearest)
     }
 
     #[test]

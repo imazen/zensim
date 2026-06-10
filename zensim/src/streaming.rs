@@ -1817,26 +1817,27 @@ fn process_scale_bands_into_accum(
     // bands to be LAID OUT as if the full-image processed with threads
     // — otherwise the strip's bands tile against a single-band layout
     // and break V-blur byte-exactness vs the full-image path.
-    let run_parallel = config.allow_multithreading && cfg!(feature = "threads");
+    #[cfg(feature = "threads")]
+    let run_parallel = config.allow_multithreading;
     let total_strips = layout_h.div_ceil(STRIP_INNER);
     // When outer_layout is provided, lay out bands as if a parallel
     // call were made on the FULL image; this keeps the per-band
     // V-blur init points byte-identical between the strip and full
     // paths. When outer_layout is None (the full path itself), the
     // existing semantics apply.
-    let layout_parallel = run_parallel || outer_layout.is_some();
-    let num_bands = if layout_parallel {
-        #[cfg(feature = "threads")]
-        {
-            rayon::current_num_threads().min(total_strips).max(1)
-        }
-        #[cfg(not(feature = "threads"))]
-        {
-            1
-        }
-    } else {
-        1
-    };
+    // Band layout is part of the numerics contract: the strip path and the
+    // full path must tile IDENTICAL bands, or their per-band V-blur init
+    // points diverge (the 1e-6 strip-parity gate) — and a strip can only
+    // honor band boundaries that fall inside its own overlap window, so
+    // bands must never span strips. The layout is therefore GEOMETRY-ONLY:
+    // one band per strip, on every path, regardless of thread count or the
+    // `threads` feature. (The previous thread-count-derived layout equalled
+    // band-per-strip whenever rayon had >= total_strips threads — i.e. on
+    // every dev box — but silently broke parity on smaller machines, e.g.
+    // the 3-core macos-latest runner, and made streaming numerics depend on
+    // core count.) Execution parallelism stays a separate, rayon-scheduled
+    // concern (`run_parallel`).
+    let num_bands = total_strips.max(1);
     let strips_per_band = total_strips.div_ceil(num_bands);
 
     let max_strip_h = STRIP_INNER * strips_per_band + 2 * overlap;
