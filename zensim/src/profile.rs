@@ -1240,10 +1240,12 @@ pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
 // `WEIGHTS_PREVIEW_V0_X` names are kept indefinitely for source
 // compatibility with code written against zensim 0.2.x and earlier.
 
+/// Alias for [`WEIGHTS_PREVIEW_V0_1`]. Linear V0.1 coefficients (228).
+/// The `LINEAR_` prefix disambiguates these linear coefficients from
+/// MLP bake bytes.
+pub use self::WEIGHTS_PREVIEW_V0_1 as LINEAR_WEIGHTS_PREVIEW_V0_1;
+
 /// Alias for [`WEIGHTS_PREVIEW_V0_2`]. Linear scoring weights for the
 /// V0_2 profile. The `LINEAR_` prefix disambiguates these linear
 /// coefficients from MLP bake bytes.
-/// Alias for [`WEIGHTS_PREVIEW_V0_1`]. Linear V0.1 coefficients (228).
-pub use self::WEIGHTS_PREVIEW_V0_1 as LINEAR_WEIGHTS_PREVIEW_V0_1;
-
 pub use self::WEIGHTS_PREVIEW_V0_2 as LINEAR_WEIGHTS_PREVIEW_V0_2;
