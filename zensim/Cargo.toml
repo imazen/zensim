@@ -21,6 +21,11 @@ include = [
     "weights/manifests/v47_strict_qat.toml",
 ]
 
+[package.metadata.docs.rs]
+# Document the full opt-in surface (training / classification / zenpixels /
+# custom-profiles). Default-feature docs would hide those APIs.
+all-features = true
+
 [features]
 default = ["avx512", "imgref", "threads"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]

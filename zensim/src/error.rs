@@ -35,7 +35,7 @@ pub enum ZensimError {
     ImageTooLarge,
 
     /// `features.len()` does not equal `weights.len()` in
-    /// [`try_score_from_features`](crate::try_score_from_features). Both
+    /// `try_score_from_features` (a `training`-feature API). Both
     /// slices must have the same length (one weight per feature).
     #[error("features and weights must have the same length")]
     FeatureWeightsLengthMismatch,
