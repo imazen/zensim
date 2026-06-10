@@ -791,7 +791,6 @@ pub(crate) fn compute_multiscale_stats_streaming(
 /// planes (ref + dist, cd/m²). Mirrors [`compute_multiscale_stats_streaming`]
 /// but converts both sides via PU21 ([`convert_linear_planar_to_pu_xyb_into`])
 /// rather than the sRGB/cube-root path. Reused by the `hdr`-gated public API.
-#[cfg(feature = "hdr")]
 pub(crate) fn compute_multiscale_stats_pu_linear_planar(
     ref_planes: [&[f32]; 3],
     dist_planes: [&[f32]; 3],
@@ -2474,7 +2473,6 @@ pub(crate) fn convert_linear_planar_to_xyb_into(
 /// does NOT clamp to `[0,1]` (HDR luminance exceeds 1) and applies PU21 via
 /// [`crate::color::linear_to_pu_xyb_planar_into`] instead of the cube root.
 /// See `docs/HDR_PLAN.md` §2b.
-#[cfg(feature = "hdr")]
 pub(crate) fn convert_linear_planar_to_pu_xyb_into(
     planes: [&[f32]; 3],
     width: usize,

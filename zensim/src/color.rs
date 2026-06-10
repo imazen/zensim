@@ -1574,7 +1574,6 @@ fn linear_to_positive_xyb_planar_inner(
 /// so its contribution is ~0. See `docs/HDR_PLAN.md` §2b for the design
 /// rationale and the validation gate. Scalar only (HDR is a minority path;
 /// SIMD is a later optimization).
-#[cfg(feature = "hdr")]
 pub(crate) fn linear_to_pu_xyb_planar_into(
     pixels: &[[f32; 3]],
     variant: crate::pu21::Pu21Variant,

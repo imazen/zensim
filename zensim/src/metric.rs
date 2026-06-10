@@ -1561,7 +1561,6 @@ impl Zensim {
     /// # Errors
     /// [`ZensimError::ImageTooSmall`] (< 8×8), [`ZensimError::ImageTooLarge`]
     /// (overflow), or [`ZensimError::InvalidDataLength`] (short plane).
-    #[cfg(feature = "hdr")]
     pub fn compute_pu_linear_planar(
         &self,
         ref_planes: [&[f32]; 3],
@@ -1581,7 +1580,6 @@ impl Zensim {
     }
 
     /// [`Self::compute_pu_linear_planar`] with an explicit PU21 variant.
-    #[cfg(feature = "hdr")]
     pub fn compute_pu_linear_planar_variant(
         &self,
         ref_planes: [&[f32]; 3],
@@ -1866,13 +1864,13 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// dispatching to the PU-encoded XYB front-end instead of erroring.
 ///
 /// See imazen/zensim#38 for the HDR roadmap. The
-/// [`ColorTransferFunction`](crate::ColorTransferFunction) enum
+/// [`TransferFunction`](crate::TransferFunction) enum
 /// exists specifically to make this refusal possible — without the
 /// signal, HDR pixels in a `LinearF32Rgba` source are
 /// indistinguishable from SDR and would be silently clamped.
 #[inline]
 pub(crate) fn reject_hdr_input(source: &impl ImageSource) -> Result<(), ZensimError> {
-    if source.color_transfer_function().is_hdr() {
+    if crate::source::transfer_is_hdr(source.color_transfer_function()) {
         return Err(ZensimError::HdrInputNotYetSupported);
     }
     Ok(())

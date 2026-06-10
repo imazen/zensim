@@ -224,7 +224,6 @@ mod transfer;
 // for the cube-root nonlinearity). Internal until the scoring path lands.
 mod pu21;
 /// PU21 variant selector for the `hdr` scoring path.
-#[cfg(feature = "hdr")]
 pub use pu21::Pu21Variant;
 
 // EX-4 extended feature modules — XYB/LMS front-end stats + CVVDP-shape
@@ -255,8 +254,8 @@ pub use metric::{
 };
 pub use profile::ZensimProfile;
 pub use source::{
-    AlphaMode, ColorPrimaries, ColorTransferFunction, ImageSource, PixelFormat, RgbSlice,
-    RgbaSlice, StridedBytes,
+    AlphaMode, ColorPrimaries, ImageSource, PixelFormat, RgbSlice, RgbaSlice, StridedBytes,
+    TransferFunction, transfer_is_hdr,
 };
 
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};

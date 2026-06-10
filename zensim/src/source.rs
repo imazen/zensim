@@ -11,7 +11,7 @@
 ///
 /// **SDR pixel range:** All primaries assume input values in `[0, 1]` after
 /// linearization. HDR transfer functions are signaled via
-/// [`ColorTransferFunction`] — see that type for the path that handles
+/// [`TransferFunction`] — see that type for the path that handles
 /// absolute-luminance PQ / HLG content via PU encoding.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -33,54 +33,17 @@ pub enum ColorPrimaries {
     Bt2020,
 }
 
-/// Encoding transfer function describing how scene-linear light was
-/// encoded into the pixel values.
-///
-/// SDR variants (`Srgb`, `Bt709`, `Linear`) preserve zensim's existing
-/// SDR-trained metric machinery — values are interpreted as linear in
-/// `[0, 1]` after decoding.
-///
-/// HDR variants (`Pq`, `Hlg`) signal absolute-luminance content. zensim
-/// does not yet ship a trained HDR profile (see issue #38 for the
-/// roadmap: UPIQ + AIC-HDR2025 training, PU-encoded XYB front-end,
-/// `PreviewV0_5Hdr` profile slot). Today, passing `Pq` or `Hlg` is a
-/// *signal* — downstream tooling (zenmetrics) reads it to dispatch to
-/// the appropriate HDR-aware metric path. zensim itself will surface
-/// HDR support once the trained bake lands.
-///
-/// This enum mirrors [`zenpixels::TransferFunction`]'s coding so callers
-/// converting from CICP can map directly.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum ColorTransferFunction {
-    /// IEC 61966-2-1 sRGB curve. Default for web content.
-    #[default]
-    Srgb,
-    /// Linear light. Used with `LinearF32Rgba` pixel formats.
-    Linear,
-    /// ITU-R BT.709 transfer. Used for SDR HDTV / Rec.709.
-    Bt709,
-    /// SMPTE ST 2084 Perceptual Quantizer (HDR10). Signal `1.0` represents
-    /// 10 000 cd/m² absolute luminance.
-    Pq,
-    /// ARIB STD-B67 Hybrid Log-Gamma (BT.2100). Signal `1.0` represents
-    /// the display reference peak (nominally 1 000 cd/m² per BT.2100).
-    Hlg,
-}
+pub use zenpixels::TransferFunction;
 
-impl ColorTransferFunction {
-    /// True if this transfer function describes HDR-luminance content
-    /// (`Pq` or `Hlg`).
-    ///
-    /// HDR transfer functions encode absolute luminance and require
-    /// PU-encoded front-ends to be scored correctly by SDR-trained
-    /// metrics. zensim's HDR-aware scoring path is tracked in issue #38;
-    /// callers may use this predicate to dispatch their own HDR handling
-    /// until the trained HDR profile ships.
-    #[inline]
-    pub fn is_hdr(self) -> bool {
-        matches!(self, Self::Pq | Self::Hlg)
-    }
+/// True if `tf` describes HDR-luminance content (`Pq` or `Hlg`).
+///
+/// HDR transfer functions encode absolute luminance; zensim's SDR path
+/// refuses them (see [`crate::ZensimError::HdrInputNotYetSupported`]) and the
+/// PU front-end (`compute_pu_linear_planar`) scores them from linear
+/// absolute-luminance planes.
+#[inline]
+pub fn transfer_is_hdr(tf: TransferFunction) -> bool {
+    matches!(tf, TransferFunction::Pq | TransferFunction::Hlg)
 }
 
 /// Pixel format describing the channel layout, bit depth, and transfer function.
@@ -177,12 +140,12 @@ pub trait ImageSource: Sync {
     }
     /// Encoding transfer function of the image data.
     ///
-    /// Defaults to [`ColorTransferFunction::Srgb`]. Override to signal
-    /// HDR transfer (PQ or HLG) — see [`ColorTransferFunction`] for the
+    /// Defaults to [`TransferFunction::Srgb`]. Override to signal
+    /// HDR transfer (PQ or HLG) — see [`TransferFunction`] for the
     /// roadmap on HDR-aware scoring (issue #38). SDR pipelines need not
     /// implement this method.
-    fn color_transfer_function(&self) -> ColorTransferFunction {
-        ColorTransferFunction::Srgb
+    fn color_transfer_function(&self) -> TransferFunction {
+        TransferFunction::Srgb
     }
     /// Raw bytes for row `y`. Length must be at least `width() * pixel_format().bytes_per_pixel()`.
     fn row_bytes(&self, y: usize) -> &[u8];
@@ -660,19 +623,16 @@ mod transfer_function_tests {
 
     #[test]
     fn default_is_srgb() {
-        assert_eq!(
-            ColorTransferFunction::default(),
-            ColorTransferFunction::Srgb
-        );
+        assert_eq!(TransferFunction::Srgb, TransferFunction::Srgb);
     }
 
     #[test]
     fn is_hdr_correctly_classifies() {
-        assert!(!ColorTransferFunction::Srgb.is_hdr());
-        assert!(!ColorTransferFunction::Linear.is_hdr());
-        assert!(!ColorTransferFunction::Bt709.is_hdr());
-        assert!(ColorTransferFunction::Pq.is_hdr());
-        assert!(ColorTransferFunction::Hlg.is_hdr());
+        assert!(!transfer_is_hdr(TransferFunction::Srgb));
+        assert!(!transfer_is_hdr(TransferFunction::Linear));
+        assert!(!transfer_is_hdr(TransferFunction::Bt709));
+        assert!(transfer_is_hdr(TransferFunction::Pq));
+        assert!(transfer_is_hdr(TransferFunction::Hlg));
     }
 
     #[test]
@@ -682,7 +642,7 @@ mod transfer_function_tests {
         // transfer.
         let pixels = [[255u8, 0, 0]; 4];
         let src = RgbSlice::new(&pixels, 2, 2);
-        assert_eq!(src.color_transfer_function(), ColorTransferFunction::Srgb);
+        assert_eq!(src.color_transfer_function(), TransferFunction::Srgb);
     }
 
     /// Define a minimal HDR-signaling source so the metric-level
@@ -709,8 +669,8 @@ mod transfer_function_tests {
         fn color_primaries(&self) -> ColorPrimaries {
             ColorPrimaries::Bt2020
         }
-        fn color_transfer_function(&self) -> ColorTransferFunction {
-            ColorTransferFunction::Pq
+        fn color_transfer_function(&self) -> TransferFunction {
+            TransferFunction::Pq
         }
         fn row_bytes(&self, y: usize) -> &[u8] {
             let bpp = self.pixel_format().bytes_per_pixel();
@@ -731,9 +691,9 @@ mod transfer_function_tests {
             width: 2,
             height: 2,
         };
-        assert_eq!(src.color_transfer_function(), ColorTransferFunction::Pq);
+        assert_eq!(src.color_transfer_function(), TransferFunction::Pq);
         assert_eq!(src.color_primaries(), ColorPrimaries::Bt2020);
-        assert!(src.color_transfer_function().is_hdr());
+        assert!(transfer_is_hdr(src.color_transfer_function()));
     }
 }
 
