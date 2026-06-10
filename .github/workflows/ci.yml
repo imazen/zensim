@@ -155,7 +155,7 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
       - name: Check MSRV
-        run: cargo hack check --rust-version --workspace --exclude zensim-validate --exclude zensim-bench --exclude zensim-wasm-tests
+        run: cargo hack check --rust-version --workspace --exclude zensim-validate --exclude zensim-wasm-tests
 
   no-leakage:
     name: zensim-regress public API leakage check
@@ -215,7 +215,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install census deps
-        run: pip install --quiet "pyarrow>=15" "numpy>=1.26"
+        run: pip install --quiet "pyarrow>=15" "numpy>=1.26" "pandas>=2"
       - name: Census must FAIL on the known-corrupt fixtures
         run: |
           set +e
