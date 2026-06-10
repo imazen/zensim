@@ -14,9 +14,14 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+/// One snapshot section: (label, extra cargo-public-api args).
+type SectionCfg = (&'static str, &'static [&'static str]);
+/// One published crate: (package name, sections).
+type CrateCfg = (&'static str, &'static [SectionCfg]);
+
 /// Published crates in this workspace (zensim-validate & friends are
-/// internal). Per crate: (package, [(section label, extra args)]).
-const CRATES: &[(&str, &[(&str, &[&str])])] = &[
+/// internal).
+const CRATES: &[CrateCfg] = &[
     (
         "zensim",
         &[
