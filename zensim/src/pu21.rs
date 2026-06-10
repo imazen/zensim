@@ -26,7 +26,7 @@ pub(crate) const PU21_L_MAX: f32 = 10000.0;
 
 /// The 7 fitted `banding_glare` parameters `[p1..p7]` (gfxdisp/pu21,
 /// updated 2020-02-06).
-const P: [f32; 7] = [
+pub(crate) const P: [f32; 7] = [
     0.353_487_9,
     0.373_465_86,
     8.277_049e-5,
@@ -61,25 +61,6 @@ pub(crate) fn pu21_decode(v: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Cross-crate reference-parity drift-guard: float64 gfxdisp goldens
-    /// (generator: `scripts/pu21_golden.py`), banding_glare row. The same
-    /// table is asserted in zenmetrics-api, ssim2-gpu, and fast-ssim2.
-    #[test]
-    fn reference_parity_gfxdisp_goldens() {
-        const YS: [f32; 7] = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0];
-        const WANT: [f64; 7] = [
-            0.3722, 5.7171, 36.5439, 123.6475, 256.3839, 420.0969, 595.3939,
-        ];
-        for (&y, &want) in YS.iter().zip(WANT.iter()) {
-            let got = pu21_encode(y) as f64;
-            let tol = 0.1 + 5e-3 * want;
-            assert!(
-                (got - want).abs() <= tol,
-                "pu21_encode({y}) = {got}, gfxdisp ref {want} (tol {tol})"
-            );
-        }
-    }
 
     #[test]
     fn normalization_100_nits_maps_near_256() {

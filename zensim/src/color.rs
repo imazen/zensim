@@ -1632,14 +1632,14 @@ fn pu_xyb_rows_inner(
 ) {
     #[allow(non_camel_case_types)]
     type f32x8 = GenericF32x8<Token>;
-    // PU21 banding_glare parameters (same constants as `pu21::P`).
-    const P0: f32 = 0.353_487_9;
-    const P1: f32 = 0.373_465_86;
-    const P2: f32 = 8.277_049e-5;
-    const P3: f32 = 0.906_256_26;
-    const P4: f32 = 0.091_503_03;
-    const P5: f32 = 0.909_951_7;
-    const P6: f32 = 596.314_8;
+    // PU21 banding_glare parameters — single source: `pu21::P`.
+    const P0: f32 = crate::pu21::P[0];
+    const P1: f32 = crate::pu21::P[1];
+    const P2: f32 = crate::pu21::P[2];
+    const P3: f32 = crate::pu21::P[3];
+    const P4: f32 = crate::pu21::P[4];
+    const P5: f32 = crate::pu21::P[5];
+    const P6: f32 = crate::pu21::P[6];
     let l_min = f32x8::splat(token, crate::pu21::PU21_L_MIN);
     let l_max = f32x8::splat(token, crate::pu21::PU21_L_MAX);
     let zero = f32x8::splat(token, 0.0);
