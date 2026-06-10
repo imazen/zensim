@@ -362,7 +362,7 @@ impl Mlp3 {
         let s3 = (2.0 / n_h2 as f64).sqrt();
         let mut w1 = vec![0.0; n_h1 * n_in];
         let mut w2 = vec![0.0; n_h2 * n_h1];
-        let mut w3 = vec![0.0; 1 * n_h2];
+        let mut w3 = vec![0.0; n_h2];
         for w in w1.iter_mut() {
             *w = rng.gauss() * s1;
         }
@@ -391,32 +391,33 @@ impl Mlp3 {
         debug_assert_eq!(x.len(), self.n_in);
         // h1_pre = b1 + w1 * x
         let mut h1_pre = self.b1.clone();
-        for j in 0..self.n_h1 {
+        for (j, hp) in h1_pre.iter_mut().enumerate() {
             let row = &self.w1[j * self.n_in..(j + 1) * self.n_in];
             let mut s = 0.0;
             for i in 0..self.n_in {
                 s += row[i] * x[i];
             }
-            h1_pre[j] += s;
+            *hp += s;
         }
         let h1: Vec<f64> = h1_pre.iter().map(|&z| leaky(z, alpha)).collect();
 
         // h2_pre = b2 + w2 * h1
         let mut h2_pre = self.b2.clone();
-        for j in 0..self.n_h2 {
+        debug_assert_eq!(h2_pre.len(), self.n_h2);
+        for (j, hp) in h2_pre.iter_mut().enumerate() {
             let row = &self.w2[j * self.n_h1..(j + 1) * self.n_h1];
             let mut s = 0.0;
             for i in 0..self.n_h1 {
                 s += row[i] * h1[i];
             }
-            h2_pre[j] += s;
+            *hp += s;
         }
         let h2: Vec<f64> = h2_pre.iter().map(|&z| leaky(z, alpha)).collect();
 
         // y = b3 + w3 * h2
         let mut y = self.b3[0];
-        for i in 0..self.n_h2 {
-            y += self.w3[i] * h2[i];
+        for (&w, &hv) in self.w3.iter().zip(h2.iter()) {
+            y += w * hv;
         }
         (y, h1_pre, h1, h2_pre, h2)
     }
@@ -479,6 +480,7 @@ impl AdamMlp {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // one grad buffer per parameter tensor
     fn step(
         &mut self,
         model: &mut Mlp3,
@@ -828,8 +830,8 @@ fn main() -> Result<()> {
                 let mut dh1_pre = vec![0.0; n_h1];
                 for i in 0..n_h1 {
                     let mut s = 0.0;
-                    for j in 0..n_h2 {
-                        s += model.w2[j * n_h1 + i] * dh2_pre[j];
+                    for (j, &d) in dh2_pre.iter().enumerate() {
+                        s += model.w2[j * n_h1 + i] * d;
                     }
                     dh1_pre[i] = s * leaky_deriv(h1_pre[i], args.leaky_alpha);
                 }

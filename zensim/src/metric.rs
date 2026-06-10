@@ -2285,11 +2285,6 @@ pub(crate) fn apply_mlp_scoring_with_codec(
     Ok(())
 }
 
-/// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed
-/// log2(max/min))` to a feature vector. Mirrors the trainer-side
-/// `append_size_axes` in `zensim-validate/src/main.rs` so a model
-/// trained with `--mlp-size-axes` produces the same input layout
-/// at runtime.
 // ============================================================================
 // Per-sample-α head runtime dispatch (V_24-per-sample-α bakes)
 // ============================================================================
@@ -2403,9 +2398,10 @@ fn parse_output_calibration_spline(payload: &[u8]) -> Option<OutputCalibrationSp
         xs.push(x);
         ys.push(y);
     }
-    // Strictly increasing x.
+    // Strictly increasing x. (All values were verified finite above, so
+    // `<=` is an exact rewrite of the previous NaN-aware `!(a > b)`.)
     for i in 1..n {
-        if !(xs[i] > xs[i - 1]) {
+        if xs[i] <= xs[i - 1] {
             return None;
         }
     }
@@ -2519,8 +2515,8 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
 /// Payload layout (little-endian):
 ///   `[u32 n_codecs, n_codecs × (u32 name_len, name_len utf8 bytes, f32 alpha, f32 beta)]`
 ///
-/// Applied AFTER the PCHIP spline (post all network forward + tanh-pin
-/// + spline). For each entry, the runtime applies
+/// Applied AFTER the PCHIP spline (post all network forward + tanh-pin +
+/// spline). For each entry, the runtime applies
 /// `score_c = alpha_c + beta_c · spline(raw)` whenever the caller
 /// supplies a matching codec name. Generic / unknown codec hint:
 /// identity (alpha=0, beta=1).
@@ -3080,6 +3076,11 @@ fn forward_one_bake_with_codec(
     }
 }
 
+/// Append `(log2(pixels), log2(min_dim), log2(max_dim), signed
+/// log2(max/min))` to a feature vector. Mirrors the trainer-side
+/// `append_size_axes` in `zensim-validate/src/main.rs` so a model
+/// trained with `--mlp-size-axes` produces the same input layout
+/// at runtime.
 fn append_mlp_size_axes(features: &mut Vec<f64>, width: u32, height: u32) {
     if width == 0 || height == 0 {
         features.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]);
@@ -4053,7 +4054,7 @@ mod tests {
         }
         // Sanity: not all zero
         assert!(
-            max_diff < 1e-4 && max_diff >= 0.0,
+            (0.0..1e-4).contains(&max_diff),
             "max_diff out of range: {}",
             max_diff
         );

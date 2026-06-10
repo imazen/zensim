@@ -36,6 +36,11 @@
 //! and for the legacy non-streaming code path.
 
 /// Choice of per-pixel info-content estimator.
+// dead_code: the non-default estimators are research knobs selected through
+// `IwWeightConfig` by offline/training experiments (see
+// `benchmarks/iw_pyramid_spike_methodology_2026-05-15.md`); they are kept in
+// every feature set so the config surface stays feature-stable.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IwWeightKind {
     /// Local variance in a square window (kernel size set by config).

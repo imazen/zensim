@@ -90,7 +90,7 @@ fn ds_auc(predicted: &[f64], human: &[f64], diff_threshold: f64) -> f64 {
     let mut pair_idx = 0usize;
     for i in 0..n {
         for j in (i + 1)..n {
-            if pair_idx % stride == 0 {
+            if pair_idx.is_multiple_of(stride) {
                 let metric_gap = (predicted[i] - predicted[j]).abs();
                 let human_gap = (human[i] - human[j]).abs();
                 if metric_gap.is_finite() && human_gap.is_finite() {
@@ -437,12 +437,14 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
     // identically — that is the codec's quality ceiling, not a bake dead-zone,
     // so it must not count against the bake's flat/clamp gate.
     use std::collections::BTreeMap;
-    let mut curves: BTreeMap<(String, String), Vec<(f64, f64, usize)>> = BTreeMap::new();
-    for i in 0..scores.len() {
+    /// Per `(image, codec)` curve: `(q, score, row_idx)` cells.
+    type CurveMap = BTreeMap<(String, String), Vec<(f64, f64, usize)>>;
+    let mut curves: CurveMap = BTreeMap::new();
+    for (i, &score) in scores.iter().enumerate() {
         curves
             .entry((grid.image_id[i].clone(), grid.codec[i].clone()))
             .or_default()
-            .push((grid.q[i], scores[i], i));
+            .push((grid.q[i], score, i));
     }
     // Adjacent cells are "codec-saturated" when their 372-feature vectors are
     // near-identical (the codec emitted the same image at two different q) —
@@ -490,7 +492,7 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         e.hi_param = e.hi_param.max(grid.codec_param[i]);
     }
     // second pass: collect scores at the param extremes per codec
-    for i in 0..scores.len() {
+    for (i, &score) in scores.iter().enumerate() {
         let e = pext.get_mut(&grid.codec[i]).unwrap();
         let p = grid.codec_param[i];
         // worst quality = highest distance OR lowest q; best = the opposite
@@ -500,10 +502,10 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
             (e.lo_param, e.hi_param)
         };
         if (p - worst_param).abs() <= 1e-9 {
-            e.score_at_worst.push(scores[i]);
+            e.score_at_worst.push(score);
         }
         if (p - best_param).abs() <= 1e-9 {
-            e.score_at_best.push(scores[i]);
+            e.score_at_best.push(score);
         }
     }
     let median = |v: &mut Vec<f64>| -> f64 {

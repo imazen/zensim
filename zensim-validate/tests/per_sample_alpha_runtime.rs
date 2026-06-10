@@ -48,9 +48,10 @@ const PACKED_BAKE: &[u8] =
 /// `zensim-validate::bake_verdict::score_row`. Re-implemented here
 /// so the regression test catches dispatch drift across all three
 /// call sites with one fixture.
-fn extract_per_sample_alpha_head(
-    model: &Model,
-) -> Option<(Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32)> {
+/// `(w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)` payload.
+type PerSampleHeadPayload = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
+
+fn extract_per_sample_alpha_head(model: &Model) -> Option<PerSampleHeadPayload> {
     let md = model.metadata();
     let entry = md.get("zentrain.per_sample_alpha_head")?;
     let n_hidden = model.n_outputs();

@@ -1,7 +1,7 @@
 //! CONTROL for the V3 embedding-distance probe.
 //!
-//! Identical 372→H→K trunk + identical data/recipe (safesyn + cid22_train
-//! + kadid + tid + konjnd, 60k pairs/epoch, RankNet+MSE, Adam, L2) — but
+//! Identical 372→H→K trunk + identical data/recipe (safesyn + cid22_train +
+//! kadid + tid + konjnd, 60k pairs/epoch, RankNet+MSE, Adam, L2) — but
 //! the head is a FREE linear readout `score = w_out·φ(x) + b_out`, with NO
 //! identity anchoring and NO axiom (unbounded both ways).
 //!
@@ -140,8 +140,7 @@ impl Model {
             .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
             .collect();
         let mut e = self.b2.clone();
-        for j in 0..H {
-            let hj = h[j];
+        for (j, &hj) in h.iter().enumerate() {
             if hj == 0.0 {
                 continue;
             }
@@ -155,8 +154,8 @@ impl Model {
     fn score(&self, x: &[f64]) -> (f64, Vec<f64>, Vec<f64>, Vec<f64>) {
         let (e, hp, h) = self.embed(x);
         let mut s = self.bout;
-        for d in 0..K {
-            s += self.wout[d] * e[d];
+        for (&w, &ev) in self.wout.iter().zip(e.iter()) {
+            s += w * ev;
         }
         (s, e, hp, h)
     }
@@ -335,7 +334,7 @@ fn main() {
         t += 1;
         let bc1 = 1.0 - b1c.powi(t);
         let bc2 = 1.0 - b2c.powi(t);
-        let mut upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64], decay: bool| {
+        let upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64], decay: bool| {
             for i in 0..w.len() {
                 let gi = if decay { g[i] + L2 * w[i] } else { g[i] };
                 mm[i] = b1c * mm[i] + (1.0 - b1c) * gi;

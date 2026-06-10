@@ -23,8 +23,9 @@ fn make_ref(n: usize) -> Vec<u8> {
         for x in 0..n {
             let fx = x as f32 / n.max(1) as f32;
             let fy = y as f32 / n.max(1) as f32;
-            let base = 0.5 + 0.25 * (fx + fy)
-                + 0.15 * (fx * 6.2831).sin()
+            let base = 0.5
+                + 0.25 * (fx + fy)
+                + 0.15 * (fx * core::f32::consts::TAU).sin()
                 + 0.10 * (fy * 18.8496).cos()
                 + 0.08 * ((fx + fy) * 50.265).sin();
             let h = ((x.wrapping_mul(2654435761)) ^ (y.wrapping_mul(40503))) as f32;
@@ -147,11 +148,15 @@ fn score(z: &Zensim, r: &[u8], d: &[u8], n: usize, strategy: Pad) -> Result<f64,
     let dp = to_px(&dd);
     let s = RgbSlice::new(&rp, w, w);
     let ds = RgbSlice::new(&dp, w, w);
-    z.compute(&s, &ds).map(|res| res.score()).map_err(|e| format!("{e:?}"))
+    z.compute(&s, &ds)
+        .map(|res| res.score())
+        .map_err(|e| format!("{e:?}"))
 }
 
 fn fluct(v: &[(usize, f64)]) -> (f64, f64, f64) {
-    let (mn, mx) = v.iter().fold((f64::MAX, f64::MIN), |(a, b), &(_, s)| (a.min(s), b.max(s)));
+    let (mn, mx) = v
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), &(_, s)| (a.min(s), b.max(s)));
     (mx - mn, mn, mx)
 }
 
@@ -198,7 +203,8 @@ fn main() {
                 }
                 let (f, mn, mx) = fluct(&ok);
                 // small-regime (8px+) fluctuation: the part we care about
-                let small: Vec<(usize, f64)> = ok.iter().cloned().filter(|(n, _)| *n >= 8).collect();
+                let small: Vec<(usize, f64)> =
+                    ok.iter().cloned().filter(|(n, _)| *n >= 8).collect();
                 let (f8, _, _) = fluct(&small);
                 print!(
                     "  {mname:22} {label}: {:>3} ok, {errs} err; fluct(all) {f:6.3} fluct(≥8px) {f8:6.3} [{mn:.2}..{mx:.2}]",

@@ -38,20 +38,6 @@ impl ScaleBuffers {
         }
     }
 
-    /// Alloc-and-fill version (legacy entry point). Prefer
-    /// [`Self::empty`] + [`Self::ensure_capacity`] in hot loops.
-    pub fn new(size: usize) -> Self {
-        Self {
-            mul_buf: vec![0.0; size],
-            mu1: vec![0.0; size],
-            mu2: vec![0.0; size],
-            sigma1_sq: vec![0.0; size],
-            sigma12: vec![0.0; size],
-            temp_blur: vec![0.0; size],
-            mask: vec![0.0; size],
-        }
-    }
-
     /// Grow every buffer to at least `size` if it isn't already.
     /// Zero-fills new entries; existing entries are untouched. Cheap
     /// no-op when buffers are already large enough.

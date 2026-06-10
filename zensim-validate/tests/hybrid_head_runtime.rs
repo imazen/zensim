@@ -77,7 +77,10 @@ fn load_packed_bake() -> Option<Vec<u8>> {
 /// `zensim-validate::bake_verdict::score_row`. Re-implemented here so
 /// the regression test catches dispatch drift across all three call
 /// sites with one fixture.
-fn extract_hybrid_head(model: &Model) -> Option<(Vec<f32>, f32, f32, [f32; 4], f32, f32)> {
+/// `(rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)` payload.
+type HybridHeadPayload = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
+
+fn extract_hybrid_head(model: &Model) -> Option<HybridHeadPayload> {
     let md = model.metadata();
     let entry = md.get("zentrain.hybrid_head")?;
     let n_hidden = model.n_outputs();

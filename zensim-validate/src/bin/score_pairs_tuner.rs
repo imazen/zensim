@@ -180,7 +180,7 @@ fn main() -> Result<()> {
         .map(|p| {
             let r = load_rgb8(Path::new(p)).ok();
             let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 100 == 0 || n == n_refs {
+            if n.is_multiple_of(100) || n == n_refs {
                 eprintln!("  ref-load: {}/{}", n, n_refs);
             }
             r
@@ -252,7 +252,7 @@ fn main() -> Result<()> {
                 }
             };
             let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 500 == 0 || n == total {
+            if n.is_multiple_of(500) || n == total {
                 let elapsed = t_score.elapsed().as_secs_f64();
                 let rate = n as f64 / elapsed;
                 let eta = (total - n) as f64 / rate;

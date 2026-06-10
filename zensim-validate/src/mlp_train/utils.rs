@@ -1,11 +1,10 @@
 use zenpredict::FeatureTransform;
 
-// `spearman_correlation` and `ranks` were byte-identical copies of
-// `panel::spearman` / `panel::ranks` (which now live in zenstats via
-// the panel re-export shim). Alias the panel functions to preserve
-// the historical `utils::spearman_correlation` name across 5+ mlp_train
-// call sites without renaming any caller.
-pub use crate::panel::{ranks, spearman as spearman_correlation};
+// `spearman_correlation` was a byte-identical copy of `panel::spearman`
+// (which now lives in zenstats via the panel re-export shim). Alias the
+// panel function to preserve the historical `utils::spearman_correlation`
+// name across 5+ mlp_train call sites without renaming any caller.
+pub use crate::panel::spearman as spearman_correlation;
 
 /// Post-transform NaN/inf sweep. Call after applying auto-transforms
 /// to any feature pool (training groups, anchor parquet, pjnd

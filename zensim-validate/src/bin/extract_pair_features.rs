@@ -140,7 +140,7 @@ fn main() -> Result<()> {
             .map(|p| {
                 let r = load_rgb8(Path::new(p)).ok();
                 let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
-                if n % 50 == 0 || n == n_refs {
+                if n.is_multiple_of(50) || n == n_refs {
                     eprintln!("  ref-load: {}/{}", n, n_refs);
                 }
                 r
@@ -193,7 +193,7 @@ fn main() -> Result<()> {
                 }
             };
             let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 500 == 0 || n == total {
+            if n.is_multiple_of(500) || n == total {
                 eprintln!(
                     "  pair-features: {}/{} ({:.1}%) {:.1}s",
                     n,
@@ -218,7 +218,9 @@ fn main() -> Result<()> {
     let out_schema = Arc::new(Schema::new(fields));
 
     // transpose pair_features into per-column vectors
-    let mut cols: Vec<Vec<f32>> = vec![Vec::with_capacity(total); CVVDP_FEATURE_COUNT];
+    let mut cols: Vec<Vec<f32>> = (0..CVVDP_FEATURE_COUNT)
+        .map(|_| Vec::with_capacity(total))
+        .collect();
     for row in &pair_features {
         for (i, &v) in row.iter().enumerate() {
             cols[i].push(v);
@@ -247,8 +249,7 @@ fn main() -> Result<()> {
 
     // --- sanity stats
     eprintln!("\n=== per-pair feature distribution sanity ===");
-    for i in 0..CVVDP_FEATURE_COUNT {
-        let col = &cols[i];
+    for (i, col) in cols.iter().enumerate() {
         let n_nan = col.iter().filter(|x| x.is_nan()).count();
         let valid: Vec<f32> = col.iter().copied().filter(|x| x.is_finite()).collect();
         if valid.is_empty() {

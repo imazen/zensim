@@ -152,11 +152,10 @@ pub fn forward_pool_head(
 ///
 /// - ∂μ/∂h_j   = 1/n
 /// - ∂σ/∂h_j   = (h_j − μ) / (n · σ)     (with σ floored — zero gradient
-///                                         contribution when σ == floor)
+///   contribution when σ == floor)
 /// - ∂max/∂h_j = 1 if j == max_idx else 0
 /// - ∂p_6/∂h_j = sign(h_j) · (|h_j|^5) / (n · p_6^5)   (with p_6 floored
-///                                                      at 1e-12 to
-///                                                      avoid div-by-0)
+///   at 1e-12 to avoid div-by-0)
 ///
 /// `dl_dy` is `∂L/∂y` from upstream (RankNet). Per stat:
 /// `∂L/∂stat_k = dl_dy · reducer_w[k]`.
@@ -539,8 +538,8 @@ pub fn train_pool_head(
             // Accumulate reducer grads into Adam's "w2"/"b2" slots
             // (sized 4 + 1). The Adam step then updates reducer_w and
             // reducer_b alongside w1 and b1 in one call.
-            for k in 0..4 {
-                adam.gw2[k] += g_red_w[k];
+            for (g, &v) in adam.gw2.iter_mut().zip(g_red_w.iter()) {
+                *g += v;
             }
             adam.gb2[0] += g_red_b;
 

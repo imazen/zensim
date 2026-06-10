@@ -36,8 +36,8 @@ fn gpu_per_sample_alpha_recovers_synthetic_ranking_cuda() {
         let target = (i as f64 / n_rows as f64) * 100.0; // 0..100
         let mut row = vec![0.0_f64; n_features];
         row[0] = target * 0.5 + next_f64() * 1.0; // strong signal in feat 0
-        for d in 1..n_features {
-            row[d] = next_f64() * 0.5; // noise
+        for r in row.iter_mut().skip(1) {
+            *r = next_f64() * 0.5; // noise
         }
         feature_storage.push(row);
         scores.push(target);

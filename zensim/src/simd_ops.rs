@@ -3485,7 +3485,10 @@ fn edge_diff_channel_inline_mask_inner(
 mod tests {
     use super::*;
 
-    fn mk_test_data(n: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    /// `(mu1, mu2, sum_sq, s12, mask_a, mask_b)` synthetic plane stats.
+    type TestData = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
+
+    fn mk_test_data(n: usize) -> TestData {
         let mut mu1 = Vec::with_capacity(n);
         let mut mu2 = Vec::with_capacity(n);
         let mut sum_sq = Vec::with_capacity(n);

@@ -56,6 +56,10 @@ fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-xc).exp())
 }
 
+/// `(y, y_rank, y_pool, alpha, alpha_logit, h_pre, h, stats, max_idx)` —
+/// the forward-pass intermediates of [`forward_per_sample_alpha_head`].
+pub type PerSampleAlphaForward = (f64, f64, f64, f64, f64, Vec<f64>, Vec<f64>, [f64; 4], usize);
+
 /// Full forward pass for the per-sample α head.
 ///
 /// Returns `(y, y_rank, y_pool, alpha, alpha_logit, h_pre, h, stats,
@@ -77,7 +81,7 @@ pub fn forward_per_sample_alpha_head(
     n_features: usize,
     n_hidden: usize,
     leaky_alpha: f64,
-) -> (f64, f64, f64, f64, f64, Vec<f64>, Vec<f64>, [f64; 4], usize) {
+) -> PerSampleAlphaForward {
     debug_assert_eq!(rank_w.len(), n_hidden);
     debug_assert_eq!(w_alpha.len(), n_hidden);
 
@@ -259,7 +263,7 @@ pub fn backprop_heads(
 /// - `∂L/∂W_α[j]  = ∂L/∂α_logit · h[j]`
 /// - `∂L/∂b_α     = ∂L/∂α_logit`
 /// - `∂L/∂h_j     += ∂L/∂α_logit · W_α[j]`   (W_α path into the
-///                                            encoder)
+///   encoder)
 ///
 /// The remaining rank + pool contributions to `∂L/∂h_j` and
 /// `∂L/∂w1` are identical to `hybrid_head::backprop_step_hybrid_head`.
@@ -699,21 +703,27 @@ pub fn train_per_sample_alpha_head(
                     g_rank_w_buf[j] += 2.0 * l2 * model.rank_w[j];
                     g_w_alpha_buf[j] += 2.0 * l2 * model.w_alpha[j];
                 }
-                for k in 0..4 {
-                    g_red_w[k] += 2.0 * l2 * model.reducer_w[k];
+                for (g, &w) in g_red_w.iter_mut().zip(model.reducer_w.iter()) {
+                    *g += 2.0 * l2 * w;
                 }
                 // b_α unregularized.
             }
 
             // Pack into Adam w2/b2 slots.
-            for j in 0..n_hidden {
-                adam.gw2[j] += g_rank_w_buf[j];
+            for (g, &v) in adam.gw2.iter_mut().zip(g_rank_w_buf.iter()) {
+                *g += v;
             }
-            for k in 0..4 {
-                adam.gw2[n_hidden + k] += g_red_w[k];
+            for (g, &v) in adam.gw2[n_hidden..n_hidden + 4]
+                .iter_mut()
+                .zip(g_red_w.iter())
+            {
+                *g += v;
             }
-            for j in 0..n_hidden {
-                adam.gw2[n_hidden + 4 + j] += g_w_alpha_buf[j];
+            for (g, &v) in adam.gw2[n_hidden + 4..n_hidden + 4 + n_hidden]
+                .iter_mut()
+                .zip(g_w_alpha_buf.iter())
+            {
+                *g += v;
             }
             adam.gw2[n_hidden + 4 + n_hidden] += g_b_alpha;
             adam.gb2[0] += g_rank_b_buf;
@@ -721,27 +731,19 @@ pub fn train_per_sample_alpha_head(
 
             // Adam step: pack/unpack into w2.
             let mut w2_vec = vec![0.0f64; n_w2];
-            for j in 0..n_hidden {
-                w2_vec[j] = model.rank_w[j];
-            }
-            for k in 0..4 {
-                w2_vec[n_hidden + k] = model.reducer_w[k];
-            }
-            for j in 0..n_hidden {
-                w2_vec[n_hidden + 4 + j] = model.w_alpha[j];
-            }
+            w2_vec[..n_hidden].copy_from_slice(&model.rank_w);
+            w2_vec[n_hidden..n_hidden + 4].copy_from_slice(&model.reducer_w);
+            w2_vec[n_hidden + 4..n_hidden + 4 + n_hidden].copy_from_slice(&model.w_alpha);
             w2_vec[n_hidden + 4 + n_hidden] = model.b_alpha;
             let mut b2_vec = vec![model.rank_b, model.reducer_b];
             adam.step(&mut model.w1, &mut model.b1, &mut w2_vec, &mut b2_vec, lr);
-            for j in 0..n_hidden {
-                model.rank_w[j] = w2_vec[j];
-            }
-            for k in 0..4 {
-                model.reducer_w[k] = w2_vec[n_hidden + k];
-            }
-            for j in 0..n_hidden {
-                model.w_alpha[j] = w2_vec[n_hidden + 4 + j];
-            }
+            model.rank_w.copy_from_slice(&w2_vec[..n_hidden]);
+            model
+                .reducer_w
+                .copy_from_slice(&w2_vec[n_hidden..n_hidden + 4]);
+            model
+                .w_alpha
+                .copy_from_slice(&w2_vec[n_hidden + 4..n_hidden + 4 + n_hidden]);
             model.b_alpha = w2_vec[n_hidden + 4 + n_hidden];
             model.rank_b = b2_vec[0];
             model.reducer_b = b2_vec[1];

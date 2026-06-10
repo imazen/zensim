@@ -159,8 +159,7 @@ impl Model {
             .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
             .collect();
         let mut e = self.b2.clone();
-        for j in 0..H {
-            let hj = h[j];
+        for (j, &hj) in h.iter().enumerate() {
             if hj == 0.0 {
                 continue;
             }
@@ -376,7 +375,7 @@ fn main() {
         t += 1;
         let bc1 = 1.0 - b1c.powi(t);
         let bc2 = 1.0 - b2c.powi(t);
-        let mut upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64], decay: bool| {
+        let upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64], decay: bool| {
             for i in 0..w.len() {
                 let gi = if decay { g[i] + L2 * w[i] } else { g[i] };
                 mm[i] = b1c * mm[i] + (1.0 - b1c) * gi;

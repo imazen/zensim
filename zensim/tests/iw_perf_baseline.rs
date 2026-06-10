@@ -85,7 +85,7 @@ fn paired_round_robin(
 fn median(xs: &mut [f64]) -> f64 {
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = xs.len();
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         (xs[n / 2 - 1] + xs[n / 2]) / 2.0
     } else {
         xs[n / 2]

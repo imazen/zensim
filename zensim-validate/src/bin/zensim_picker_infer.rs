@@ -173,10 +173,10 @@ fn main() -> Result<()> {
 
         for row in 0..n_rows {
             let basename = ref_col.value(row);
-            if let Some(f) = &filter {
-                if !f.contains(basename) {
-                    continue;
-                }
+            if let Some(f) = &filter
+                && !f.contains(basename)
+            {
+                continue;
             }
             // Build feature vector.
             let mut feats = Vec::with_capacity(n_in);

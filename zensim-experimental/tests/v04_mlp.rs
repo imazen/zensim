@@ -148,7 +148,7 @@ fn v04_profile_name() {
 /// succeed) and forces an update of the proper behavior assertions.
 /// Pattern matches `metric_invariants.rs::v39_known_limit_violations`.
 #[test]
-fn v04_profile_name_and_score_KNOWN_LIMIT() {
+fn v04_profile_name_and_score_known_limit() {
     assert_eq!(
         zensim_experimental::preview_v0_4().name(),
         "zensim-preview-v0.4"
@@ -162,7 +162,7 @@ fn v04_profile_name_and_score_KNOWN_LIMIT() {
         Err(e) => e,
         Ok(_) => panic!(
             "PreviewV0_4 unexpectedly loaded — the multi-bake ensemble must \
-             have been fixed. Remove the _KNOWN_LIMIT suffix and re-add the \
+             have been fixed. Remove the _known_limit suffix and re-add the \
              real behavior assertions (score ≤100, differs from A's score)."
         ),
     };

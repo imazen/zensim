@@ -691,9 +691,9 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// 300 sign-safe features, rank_w ≤ 0, α ≡ 1): 0 inversions, 0 above-identity,
 /// `identity = 97.69` (the dial max). Best codec dial measured — q-sweep
 /// **94.33 % monotone / 0.33 % tied**, clean monotone median q5→q95
-/// (1.40→88.50). Global ordering verified: identity 97.69 > honest-q20 40.36
-/// > channel-invert 12.21 > block-zero 0.00 (the regression-test ordering V39
-/// inverts).
+/// (1.40→88.50). Global ordering verified: identity 97.69 > honest-q20
+/// 40.36 > channel-invert 12.21 > block-zero 0.00 (the regression-test
+/// ordering V39 inverts).
 ///
 /// 372-input MLP (372 → 128 → 64 + per-sample-α + tanh pin), f16+zerobias
 /// encoder + f32 identity passthrough, with a monotone PCHIP dial spline

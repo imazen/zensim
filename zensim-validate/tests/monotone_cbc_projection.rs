@@ -70,21 +70,23 @@ fn run_train(monotone_cbc: bool) -> Vec<u8> {
         &mut feat_refs,
     );
 
-    let mut hp = MlpHyperparams::default();
-    hp.n_hidden = 8;
-    hp.n_epochs = 5;
-    hp.pairs_per_epoch = 200;
-    hp.initial_lr = 1e-2;
-    hp.seed = 42;
-    hp.per_sample_alpha_head = true;
-    hp.mse_weight = 1.0;
-    hp.ranknet_weight = 1.0;
-    hp.tanh_output_head_scale = 20.0;
-    hp.minibatch_size = 8;
-    hp.validation_policy = ValidationPolicy::Min;
-    hp.monotone_cbc = monotone_cbc;
-    hp.log_every = 100;
-    hp.parallel_batch = false;
+    let hp = MlpHyperparams {
+        n_hidden: 8,
+        n_epochs: 5,
+        pairs_per_epoch: 200,
+        initial_lr: 1e-2,
+        seed: 42,
+        per_sample_alpha_head: true,
+        mse_weight: 1.0,
+        ranknet_weight: 1.0,
+        tanh_output_head_scale: 20.0,
+        minibatch_size: 8,
+        validation_policy: ValidationPolicy::Min,
+        monotone_cbc,
+        log_every: 100,
+        parallel_batch: false,
+        ..Default::default()
+    };
 
     let mut log: Vec<String> = Vec::new();
     train_mlp(std::slice::from_ref(&group), n_features, &hp, &mut log)
@@ -100,7 +102,7 @@ fn monotone_cbc_projection_signs_exact() {
     let n_hidden = model.n_outputs();
     let layer_views: Vec<_> = model.layers().collect();
     assert!(
-        layer_views.len() >= 1,
+        !layer_views.is_empty(),
         "bake has at least one layer; got {}",
         layer_views.len()
     );

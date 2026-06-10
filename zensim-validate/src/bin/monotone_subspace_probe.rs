@@ -190,8 +190,8 @@ impl Model {
             .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
             .collect();
         let mut d = 0.0;
-        for j in 0..HM {
-            d += sp(self.cm[j]) * h[j];
+        for (&c, &hv) in self.cm.iter().zip(h.iter()) {
+            d += sp(c) * hv;
         }
         (d, hp, h)
     }
@@ -213,8 +213,8 @@ impl Model {
             .map(|&v| if v >= 0.0 { v } else { self.leaky * v })
             .collect();
         let mut m = 0.0;
-        for j in 0..HF {
-            m += self.vf[j] * h[j];
+        for (&v, &hv) in self.vf.iter().zip(h.iter()) {
+            m += v * hv;
         }
         (m, hp, h)
     }
@@ -423,17 +423,17 @@ fn main() {
                 if free_arg > 0.0 {
                     let th = (free_arg / DELTA).tanh();
                     let dfb_darg = 1.0 - th * th; // d(DELTA*tanh(a/DELTA))/da
-                    let dscore_dM = -dfb_darg; // since free_arg=relu(M-M_id), d/dM=1 when >0
+                    let dscore_dm = -dfb_darg; // since free_arg=relu(M-M_id), d/dM=1 when >0
                     let (_m, hp_f, h_f) = m.mf(x);
                     for j in 0..HF {
-                        let dl_dh = ds * dscore_dM * m.vf[j];
+                        let dl_dh = ds * dscore_dm * m.vf[j];
                         let dl_dhp = if hp_f[j] >= 0.0 {
                             dl_dh
                         } else {
                             dl_dh * m.leaky
                         };
                         g_bf[j] += dl_dhp;
-                        g_vf[j] += ds * dscore_dM * h_f[j];
+                        g_vf[j] += ds * dscore_dm * h_f[j];
                         for (fi2, &fi) in m.free.iter().enumerate() {
                             let xi = x[fi];
                             if xi != 0.0 {
@@ -450,7 +450,7 @@ fn main() {
         t += 1;
         let bc1 = 1.0 - b1.powi(t);
         let bc2 = 1.0 - b2.powi(t);
-        let mut upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64]| {
+        let upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64]| {
             for i in 0..w.len() {
                 mm[i] = b1 * mm[i] + (1.0 - b1) * g[i];
                 vv[i] = b2 * vv[i] + (1.0 - b2) * g[i] * g[i];

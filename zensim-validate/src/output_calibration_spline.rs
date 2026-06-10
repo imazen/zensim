@@ -66,8 +66,10 @@ pub fn parse_payload(payload: &[u8]) -> Option<OutputCalibrationSpline> {
         xs.push(x);
         ys.push(y);
     }
+    // Strictly increasing x. (All values were verified finite above, so
+    // `<=` is an exact rewrite of the previous NaN-aware `!(a > b)`.)
     for i in 1..n {
-        if !(xs[i] > xs[i - 1]) {
+        if xs[i] <= xs[i - 1] {
             return None;
         }
     }
@@ -184,7 +186,7 @@ pub fn fit_monotone_spline(predictions: &[f64], targets: &[f64], n_bins: usize) 
     indices.sort_by(|&a, &b| predictions[a].total_cmp(&predictions[b]));
 
     // Split into n_bins quantile bins.
-    let bin_size = (n + n_bins - 1) / n_bins;
+    let bin_size = n.div_ceil(n_bins);
     let mut raw_knots: Vec<(f64, f64)> = Vec::with_capacity(n_bins);
     for start in (0..n).step_by(bin_size) {
         let end = (start + bin_size).min(n);
@@ -232,9 +234,7 @@ pub fn fit_monotone_spline(predictions: &[f64], targets: &[f64], n_bins: usize) 
     }
 
     // Verify the payload parses correctly.
-    if parse_payload(&payload).is_none() {
-        return None;
-    }
+    parse_payload(&payload)?;
 
     Some(payload)
 }

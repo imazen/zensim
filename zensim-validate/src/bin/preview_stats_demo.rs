@@ -491,7 +491,7 @@ fn load_butter_parquet(path: &Path) -> Result<Vec<ButterRow>, String> {
                 }
             })
             .collect();
-        for i in 0..n_rows {
+        for (i, &q) in q_vals.iter().enumerate() {
             let feats: Vec<f64> = feat_cols
                 .iter()
                 .map(|fc| match fc {
@@ -502,7 +502,7 @@ fn load_butter_parquet(path: &Path) -> Result<Vec<ButterRow>, String> {
             rows.push(ButterRow {
                 ref_basename: ref_col.value(i).to_string(),
                 codec: codec_col.value(i).to_string(),
-                q: q_vals[i],
+                q,
                 features: feats,
             });
         }
@@ -518,7 +518,7 @@ struct ButterRow {
     features: Vec<f64>,
 }
 
-fn percentile(values: &mut Vec<f64>, p: f64) -> f64 {
+fn percentile(values: &mut [f64], p: f64) -> f64 {
     if values.is_empty() {
         return f64::NAN;
     }

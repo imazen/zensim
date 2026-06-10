@@ -36,10 +36,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
-use arrow::array::{
-    Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
-    UInt64Array,
-};
+use arrow::array::{Array, ArrayRef, Float32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use clap::Parser;
@@ -182,7 +179,7 @@ fn main() -> Result<()> {
                 }
             };
             let n = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if n % 25 == 0 || n == total_refs {
+            if n.is_multiple_of(25) || n == total_refs {
                 eprintln!(
                     "  per-ref: {}/{} ({:.1}%)",
                     n,
@@ -260,15 +257,18 @@ fn main() -> Result<()> {
 
     // Build columns for the new features (single concatenated batch).
     // Per-ref: XYB_LMS_FEATURE_COUNT columns; per-pair: CVVDP_FEATURE_COUNT.
-    let mut new_xyb_cols: Vec<Vec<f32>> =
-        vec![Vec::with_capacity(total_rows); XYB_LMS_FEATURE_COUNT];
+    let mut new_xyb_cols: Vec<Vec<f32>> = (0..XYB_LMS_FEATURE_COUNT)
+        .map(|_| Vec::with_capacity(total_rows))
+        .collect();
     for row in &new_per_row_xyb {
         for (i, &v) in row.iter().enumerate() {
             new_xyb_cols[i].push(v);
         }
     }
     let mut new_pair_cols: Vec<Vec<f32>> = if args.pair_features {
-        vec![Vec::with_capacity(total_rows); CVVDP_FEATURE_COUNT]
+        (0..CVVDP_FEATURE_COUNT)
+            .map(|_| Vec::with_capacity(total_rows))
+            .collect()
     } else {
         Vec::new()
     };
@@ -330,8 +330,7 @@ fn main() -> Result<()> {
     // Phase 7 — sanity stats on new feature columns (per-ref only).
     // ------------------------------------------------------------------
     eprintln!("\n=== New feature distribution sanity ===");
-    for i in 0..XYB_LMS_FEATURE_COUNT {
-        let col = &new_xyb_cols[i];
+    for (i, col) in new_xyb_cols.iter().enumerate() {
         let n_nan = col.iter().filter(|x| x.is_nan()).count();
         let valid: Vec<f32> = col.iter().copied().filter(|x| x.is_finite()).collect();
         if valid.is_empty() {

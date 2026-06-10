@@ -570,10 +570,7 @@ mod tests {
         let w = 24;
         let h = 24;
         let grey = vec![128u8; w * h * 3];
-        let mut dark = Vec::with_capacity(w * h * 3);
-        for _ in 0..(w * h * 3) {
-            dark.push(64);
-        }
+        let dark = vec![64u8; w * h * 3];
         let f1 = extract_cvvdp_features(&grey, &dark, w, h);
         let f2 = extract_cvvdp_features(&dark, &grey, w, h);
         // Δmean(A) flips sign.

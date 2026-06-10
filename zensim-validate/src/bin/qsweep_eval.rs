@@ -47,7 +47,8 @@ use zensim_validate::bake_runtime::{
     extract_hybrid_head, extract_per_sample_alpha_head, extract_tanh_output_head_scale, score_row,
 };
 
-/// Per-bake spec: (name, path, post_mode). `post_mode` is one of:
+/// `(features, manifest, bakes, out)` CLI args, where each bake is a
+/// per-bake spec `(name, path, post_mode)`. `post_mode` is one of:
 ///   - "raw"        — emit the bake's raw output (no clamp).
 ///   - "clamp"      — clamp(raw, 0, 100).
 ///   - "mapped"     — score = 100 - 18 * max(raw,0)^0.7  (distance bakes).
@@ -56,12 +57,14 @@ use zensim_validate::bake_runtime::{
 /// The choice depends on the bake's runtime profile:
 ///   - v0_3 / V_18 ship: "mapped" (raw is distance, runtime maps it).
 ///   - V_22 + V_24 + tuner: "clamp" (raw IS score, `skip_score_mapping=true`).
-fn parse_args() -> (
+type ParsedArgs = (
     PathBuf,
     PathBuf,
     Vec<(String, PathBuf, String)>,
     Option<PathBuf>,
-) {
+);
+
+fn parse_args() -> ParsedArgs {
     let mut args = std::env::args().skip(1);
     let mut features: Option<PathBuf> = None;
     let mut manifest: Option<PathBuf> = None;
@@ -389,7 +392,7 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
             r.tied_rate
         ));
     }
-    s.push_str("\n");
+    s.push('\n');
 
     s.push_str("## Score-per-q histogram (median / p25 / p75)\n\n");
     s.push_str("Each row: q value → (median, p25, p75, min, max).\n\n");
@@ -416,7 +419,7 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
                 sorted[n - 1]
             ));
         }
-        s.push_str("\n");
+        s.push('\n');
     }
 
     s.push_str("## Calibration linearity (RMSE per band, target = q)\n\n");
@@ -432,7 +435,7 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
     for _ in reports {
         s.push_str("---:|");
     }
-    s.push_str("\n");
+    s.push('\n');
     // All reports share the same 10 bands; iterate using the first report's band list.
     if let Some(first) = reports.first() {
         for b_idx in 0..first.band_rmse.len() {
@@ -449,10 +452,10 @@ fn render_report(reports: &[BakeReport], n_total_pairs: usize) -> String {
                     s.push_str(&format!(" {:.2} |", v));
                 }
             }
-            s.push_str("\n");
+            s.push('\n');
         }
     }
-    s.push_str("\n");
+    s.push('\n');
 
     s
 }

@@ -101,7 +101,7 @@ pub fn arch_backward(
     x: &[f64],
     fwd: &ArchForward,
     dl_dy: f64,
-    w1: &[f64],
+    _w1: &[f64],
     w2_enc: &[f64],
     rank_w: &[f64],
     reducer_w: &[f64; 4],

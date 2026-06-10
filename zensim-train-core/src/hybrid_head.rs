@@ -45,6 +45,10 @@ fn sigmoid(x: f64) -> f64 {
     1.0 / (1.0 + (-xc).exp())
 }
 
+/// `(y, y_rank, y_pool, alpha, h_pre, h, stats, max_idx)` — every
+/// intermediate [`forward_hybrid_head`]'s backprop step needs.
+pub type HybridForward = (f64, f64, f64, f64, Vec<f64>, Vec<f64>, [f64; 4], usize);
+
 /// Full forward pass for the hybrid head.
 ///
 /// Returns `(y, y_rank, y_pool, alpha, h_pre, h, stats, max_idx)` —
@@ -63,7 +67,7 @@ pub fn forward_hybrid_head(
     n_features: usize,
     n_hidden: usize,
     leaky_alpha: f64,
-) -> (f64, f64, f64, f64, Vec<f64>, Vec<f64>, [f64; 4], usize) {
+) -> HybridForward {
     debug_assert_eq!(rank_w.len(), n_hidden);
     let mut h_pre = b1.to_vec();
     for i in 0..n_features {
@@ -534,21 +538,24 @@ pub fn train_hybrid_head(
                 for (g, &w) in adam.gw1.iter_mut().zip(model.w1.iter()) {
                     *g += 2.0 * l2 * w;
                 }
-                for j in 0..n_hidden {
-                    g_rank_w_buf[j] += 2.0 * l2 * model.rank_w[j];
+                for (g, &w) in g_rank_w_buf.iter_mut().zip(model.rank_w.iter()) {
+                    *g += 2.0 * l2 * w;
                 }
-                for k in 0..4 {
-                    g_red_w[k] += 2.0 * l2 * model.reducer_w[k];
+                for (g, &w) in g_red_w.iter_mut().zip(model.reducer_w.iter()) {
+                    *g += 2.0 * l2 * w;
                 }
                 // alpha_logit is unregularized.
             }
 
             // Pack into Adam w2/b2 slots: w2 = [rank_w | reducer_w | alpha_logit].
-            for j in 0..n_hidden {
-                adam.gw2[j] += g_rank_w_buf[j];
+            for (g, &v) in adam.gw2.iter_mut().zip(g_rank_w_buf.iter()) {
+                *g += v;
             }
-            for k in 0..4 {
-                adam.gw2[n_hidden + k] += g_red_w[k];
+            for (g, &v) in adam.gw2[n_hidden..n_hidden + 4]
+                .iter_mut()
+                .zip(g_red_w.iter())
+            {
+                *g += v;
             }
             adam.gw2[n_hidden + 4] += g_alpha_logit;
             // b2 = [rank_b, reducer_b].
@@ -557,21 +564,15 @@ pub fn train_hybrid_head(
 
             // Adam step: pack/unpack via temp vectors.
             let mut w2_vec = vec![0.0f64; n_w2];
-            for j in 0..n_hidden {
-                w2_vec[j] = model.rank_w[j];
-            }
-            for k in 0..4 {
-                w2_vec[n_hidden + k] = model.reducer_w[k];
-            }
+            w2_vec[..n_hidden].copy_from_slice(&model.rank_w);
+            w2_vec[n_hidden..n_hidden + 4].copy_from_slice(&model.reducer_w);
             w2_vec[n_hidden + 4] = model.alpha_logit;
             let mut b2_vec = vec![model.rank_b, model.reducer_b];
             adam.step(&mut model.w1, &mut model.b1, &mut w2_vec, &mut b2_vec, lr);
-            for j in 0..n_hidden {
-                model.rank_w[j] = w2_vec[j];
-            }
-            for k in 0..4 {
-                model.reducer_w[k] = w2_vec[n_hidden + k];
-            }
+            model.rank_w.copy_from_slice(&w2_vec[..n_hidden]);
+            model
+                .reducer_w
+                .copy_from_slice(&w2_vec[n_hidden..n_hidden + 4]);
             model.alpha_logit = w2_vec[n_hidden + 4];
             model.rank_b = b2_vec[0];
             model.reducer_b = b2_vec[1];

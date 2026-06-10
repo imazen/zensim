@@ -1076,7 +1076,7 @@ fn main() -> ExitCode {
         "- Bands: `{}-band`  Bootstrap resamples: `{}`  Seed: `{}`\n",
         args.bands, args.bootstrap_resamples, args.seed
     ));
-    buf.push_str("\n");
+    buf.push('\n');
     buf.push_str(
         "Implements § A.9 of PSYCHOVISUAL_LEARNINGS_FOR_ZENSIM.md. Decisive rule \
         (verbatim): `DECISIVE_FOR_BAND(A beats B) ⟺ n_band ≥ 30 ∧ |h_SROCC| > 1.96 ∧ \

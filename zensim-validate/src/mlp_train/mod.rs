@@ -48,7 +48,7 @@ use crate::adam_simd;
 mod loss_norm_in_norm;
 
 mod goals;
-pub use goals::{GoalScores, ValidationPolicy, compute_goal_scores};
+pub use goals::{ValidationPolicy, compute_goal_scores};
 
 /// Knobs for [`train_mlp`]. Defaults match the V0_4 placeholder
 /// architecture (228 → 32 → 1) with `Min` validation gating.
@@ -471,6 +471,7 @@ pub struct MlpHyperparams {
     ///   - the per-sample-α gate is forced to ≈1 (`w_alpha = 0`,
     ///     `b_alpha = 30`) so `y = y_rank` (the α-gated mix of two
     ///     functions is not monotone, so a single head is required).
+    ///
     /// Combined with the increasing tanh pin `100·σ(y/scale)`, the score
     /// is bounded `[0,100]` AND monotone non-increasing in distortion on
     /// the ENTIRE input domain — the G1+G3 codec goals by construction.
@@ -1158,6 +1159,7 @@ pub fn train_mlp_with_tv_anchored_equiv(
 ///
 /// Only wired on the `per_sample_alpha_head = true` path; ignored
 /// elsewhere (with a warning).
+#[allow(clippy::too_many_arguments)] // one optional research-pool input per aux loss
 pub fn train_mlp_with_tv_anchored_equiv_pjnd(
     groups: &[TrainingGroup<'_>],
     n_features: usize,
@@ -3086,21 +3088,13 @@ fn train_mlp_hybrid_head_with_tv(
                         lr: f64,
                         n_hidden: usize| {
         let mut w2_vec = vec![0.0f64; n_hidden + 4 + 1];
-        for j in 0..n_hidden {
-            w2_vec[j] = rank_w[j];
-        }
-        for kk in 0..4 {
-            w2_vec[n_hidden + kk] = reducer_w[kk];
-        }
+        w2_vec[..n_hidden].copy_from_slice(&rank_w[..n_hidden]);
+        w2_vec[n_hidden..n_hidden + 4].copy_from_slice(&reducer_w[..]);
         w2_vec[n_hidden + 4] = *alpha_logit;
         let mut b2_vec = vec![*rank_b, *reducer_b];
         adam.step(w1, b1, &mut w2_vec, &mut b2_vec, lr);
-        for j in 0..n_hidden {
-            rank_w[j] = w2_vec[j];
-        }
-        for kk in 0..4 {
-            reducer_w[kk] = w2_vec[n_hidden + kk];
-        }
+        rank_w[..n_hidden].copy_from_slice(&w2_vec[..n_hidden]);
+        reducer_w.copy_from_slice(&w2_vec[n_hidden..n_hidden + 4]);
         *alpha_logit = w2_vec[n_hidden + 4];
         *rank_b = b2_vec[0];
         *reducer_b = b2_vec[1];
@@ -4502,8 +4496,8 @@ impl LocalGrads {
 /// order. Allocation drops from O(K) per batch to O(num_threads).
 ///
 /// **Determinism**: chunk-source-order is preserved by `par_chunks`
-/// → `collect::<Vec<_>>` (rayon docs guarantee this for `par_chunks`
-/// + `map` + `collect`). Within each chunk, the sequential
+/// → `collect::<Vec<_>>` (rayon docs guarantee this for `par_chunks` +
+/// `map` + `collect`). Within each chunk, the sequential
 /// `backprop_into` ordering is identical between runs. Across
 /// chunks, the final sequential `fold` runs in chunk-index order. So
 /// the FP reduce sequence is fully determined by `K + samples`,
@@ -4977,7 +4971,10 @@ fn predict_group(
 }
 
 mod utils;
-pub use utils::{ranks, spearman_correlation, sweep_nan_inf};
+#[allow(unused_imports)] // used by mod-internal (partly cfg(test)) callers and
+// re-exported to the zensim_mlp_train bin; some target/feature combinations
+// under --all-targets see the re-export as unused.
+pub use utils::{spearman_correlation, sweep_nan_inf};
 
 struct AdamState {
     gw1: Vec<f64>,
@@ -5138,6 +5135,7 @@ fn qat_quantize_copy(w: &[f64], tau: f64) -> Vec<f64> {
 /// doesn't use TV). NiN composes via `flush_per_sample_alpha_nin_batch`
 /// in the same per-pair grad-scatter pattern as the hybrid path.
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)] // one optional research-pool input per aux loss
 fn train_mlp_per_sample_alpha_head(
     groups: &[TrainingGroup<'_>],
     n_features: usize,
@@ -5562,12 +5560,13 @@ fn train_mlp_per_sample_alpha_head(
     // EXP-CROSS-CODEC-METRIC equiv data: standardize each pair's A/B
     // feature vectors against the SAME training-group scaler. Row CDF
     // mirrors AnchorRows for per-row weight sampling.
-    let (std_equiv_a, std_equiv_b, equiv_row_cdf, equiv_total_weight): (
-        Vec<Vec<f64>>,
-        Vec<Vec<f64>>,
-        Vec<f64>,
-        f64,
-    ) = if let (Some(e), true) = (equiv, equiv_active) {
+    type EquivPool = (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, f64);
+    let (std_equiv_a, std_equiv_b, equiv_row_cdf, equiv_total_weight): EquivPool = if let (
+        Some(e),
+        true,
+    ) =
+        (equiv, equiv_active)
+    {
         let mut bufs_a: Vec<Vec<f64>> = Vec::with_capacity(e.features_a.len());
         let mut bufs_b: Vec<Vec<f64>> = Vec::with_capacity(e.features_b.len());
         for (&fa, &fb) in e.features_a.iter().zip(e.features_b.iter()) {
@@ -6107,12 +6106,8 @@ fn train_mlp_per_sample_alpha_head(
 
         // Pack head weights into w2 slot.
         let mut w2_vec = vec![0.0f64; nh_final + 4 + nh_final + 1];
-        for j in 0..nh_final {
-            w2_vec[j] = rank_w[j];
-        }
-        for kk in 0..4 {
-            w2_vec[nh_final + kk] = reducer_w[kk];
-        }
+        w2_vec[..nh_final].copy_from_slice(&rank_w[..nh_final]);
+        w2_vec[nh_final..nh_final + 4].copy_from_slice(&reducer_w[..]);
         for j in 0..nh_final {
             w2_vec[nh_final + 4 + j] = w_alpha[j];
         }
@@ -6232,12 +6227,8 @@ fn train_mlp_per_sample_alpha_head(
         }
 
         // Unpack head weights.
-        for j in 0..nh_final {
-            rank_w[j] = w2_vec[j];
-        }
-        for kk in 0..4 {
-            reducer_w[kk] = w2_vec[nh_final + kk];
-        }
+        rank_w[..nh_final].copy_from_slice(&w2_vec[..nh_final]);
+        reducer_w.copy_from_slice(&w2_vec[nh_final..nh_final + 4]);
         for j in 0..nh_final {
             w_alpha[j] = w2_vec[nh_final + 4 + j];
         }
@@ -6788,132 +6779,132 @@ fn train_mlp_per_sample_alpha_head(
             // boundaries while each aux fire processes K samples.
             if anchor_active && steps_since_adam == 0 {
                 let u_take = rng.next_f64_unit();
-                if u_take < hyperparams.anchor_step_p {
-                    if let Some(a) = anchor {
-                        if !std_anchor_features.is_empty() && anchor_total_weight > 0.0 {
-                            let n_anchor = std_anchor_features.len();
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_rank_b_buf = 0.0f64;
-                            let mut g_red_w: [f64; 4] = [0.0; 4];
-                            let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_b_alpha: f64 = 0.0;
-                            let mut any_step = false;
+                if u_take < hyperparams.anchor_step_p
+                    && let Some(a) = anchor
+                    && !std_anchor_features.is_empty()
+                    && anchor_total_weight > 0.0
+                {
+                    let n_anchor = std_anchor_features.len();
+                    let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_rank_b_buf = 0.0f64;
+                    let mut g_red_w: [f64; 4] = [0.0; 4];
+                    let mut g_red_b: f64 = 0.0;
+                    let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_b_alpha: f64 = 0.0;
+                    let mut any_step = false;
 
-                            for _ in 0..k {
-                                let u_row = rng.next_f64_unit();
-                                let ai = anchor_row_cdf
-                                    .partition_point(|&c| c < u_row)
-                                    .min(n_anchor - 1);
-                                let xa = std_anchor_features[ai].as_slice();
-                                let fwd_anc = arch_forward(
-                                    xa,
-                                    &w1,
-                                    &b1,
-                                    &w2_enc,
-                                    &b2_enc,
-                                    &w_skip,
-                                    b_skip,
-                                    &rank_w,
-                                    rank_b,
-                                    &reducer_w,
-                                    reducer_b,
-                                    &w_alpha,
-                                    b_alpha,
-                                    n_features,
-                                    n_hidden,
-                                    n_hidden_final,
-                                    leaky,
-                                    use_2layer,
-                                    use_skip,
-                                );
-                                let (ya, dya_dpre) = pin_forward(fwd_anc.y);
-                                let target = a
-                                    .target_scores
-                                    .and_then(|ts| ts.get(ai).copied())
-                                    .unwrap_or(hyperparams.anchor_target_score);
-                                let row_w = a.row_weights[ai];
-                                let err = ya - target;
-                                let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
-                                let dl_dy = scale * err * dya_dpre;
-                                let loss = hyperparams.anchor_loss_weight * row_w * err * err;
-                                total_loss += loss;
-                                n_steps += 1;
+                    for _ in 0..k {
+                        let u_row = rng.next_f64_unit();
+                        let ai = anchor_row_cdf
+                            .partition_point(|&c| c < u_row)
+                            .min(n_anchor - 1);
+                        let xa = std_anchor_features[ai].as_slice();
+                        let fwd_anc = arch_forward(
+                            xa,
+                            &w1,
+                            &b1,
+                            &w2_enc,
+                            &b2_enc,
+                            &w_skip,
+                            b_skip,
+                            &rank_w,
+                            rank_b,
+                            &reducer_w,
+                            reducer_b,
+                            &w_alpha,
+                            b_alpha,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky,
+                            use_2layer,
+                            use_skip,
+                        );
+                        let (ya, dya_dpre) = pin_forward(fwd_anc.y);
+                        let target = a
+                            .target_scores
+                            .and_then(|ts| ts.get(ai).copied())
+                            .unwrap_or(hyperparams.anchor_target_score);
+                        let row_w = a.row_weights[ai];
+                        let err = ya - target;
+                        let scale = 2.0 * hyperparams.anchor_loss_weight * row_w;
+                        let dl_dy = scale * err * dya_dpre;
+                        let loss = hyperparams.anchor_loss_weight * row_w * err * err;
+                        total_loss += loss;
+                        n_steps += 1;
 
-                                arch_backward(
-                                    xa,
-                                    &fwd_anc,
-                                    dl_dy,
-                                    &w1,
-                                    &w2_enc,
-                                    &rank_w,
-                                    &reducer_w,
-                                    &w_alpha,
-                                    &mut adam.gw1,
-                                    &mut adam.gb1,
-                                    &mut g_rank_w_buf,
-                                    &mut g_rank_b_buf,
-                                    &mut g_red_w,
-                                    &mut g_red_b,
-                                    &mut g_w_alpha_buf,
-                                    &mut g_b_alpha,
-                                    n_features,
-                                    n_hidden,
-                                    n_hidden_final,
-                                    leaky,
-                                    use_2layer,
-                                    use_skip,
-                                );
-                                any_step = true;
+                        arch_backward(
+                            xa,
+                            &fwd_anc,
+                            dl_dy,
+                            &w1,
+                            &w2_enc,
+                            &rank_w,
+                            &reducer_w,
+                            &w_alpha,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_rank_w_buf,
+                            &mut g_rank_b_buf,
+                            &mut g_red_w,
+                            &mut g_red_b,
+                            &mut g_w_alpha_buf,
+                            &mut g_b_alpha,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky,
+                            use_2layer,
+                            use_skip,
+                        );
+                        any_step = true;
+                    }
+
+                    if any_step {
+                        if hyperparams.l2_lambda > 0.0 {
+                            let l2 = hyperparams.l2_lambda;
+                            for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                *g += l2 * w;
                             }
-
-                            if any_step {
-                                if hyperparams.l2_lambda > 0.0 {
-                                    let l2 = hyperparams.l2_lambda;
-                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                                        *g += l2 * w;
-                                    }
-                                    for j in 0..n_hidden_final {
-                                        g_rank_w_buf[j] += l2 * rank_w[j];
-                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
-                                    }
-                                    for kk in 0..4 {
-                                        g_red_w[kk] += l2 * reducer_w[kk];
-                                    }
-                                }
-
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[j] += g_rank_w_buf[j];
-                                }
-                                for kk in 0..4 {
-                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
-                                }
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
-                                }
-                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
-                                adam.gb2[0] += g_rank_b_buf;
-                                adam.gb2[1] += g_red_b;
-
-                                do_adam_step(
-                                    &mut adam,
-                                    &mut w1,
-                                    &mut b1,
-                                    &mut w2_enc,
-                                    &mut b2_enc,
-                                    &mut w_skip,
-                                    &mut b_skip,
-                                    &mut rank_w,
-                                    &mut rank_b,
-                                    &mut reducer_w,
-                                    &mut reducer_b,
-                                    &mut w_alpha,
-                                    &mut b_alpha,
-                                    lr,
-                                    n_hidden_final,
-                                );
+                            for j in 0..n_hidden_final {
+                                g_rank_w_buf[j] += l2 * rank_w[j];
+                                g_w_alpha_buf[j] += l2 * w_alpha[j];
+                            }
+                            for kk in 0..4 {
+                                g_red_w[kk] += l2 * reducer_w[kk];
                             }
                         }
+
+                        for j in 0..n_hidden_final {
+                            adam.gw2[j] += g_rank_w_buf[j];
+                        }
+                        for kk in 0..4 {
+                            adam.gw2[n_hidden_final + kk] += g_red_w[kk];
+                        }
+                        for j in 0..n_hidden_final {
+                            adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
+                        }
+                        adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
+                        adam.gb2[0] += g_rank_b_buf;
+                        adam.gb2[1] += g_red_b;
+
+                        do_adam_step(
+                            &mut adam,
+                            &mut w1,
+                            &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            lr,
+                            n_hidden_final,
+                        );
                     }
                 }
             }
@@ -6927,125 +6918,124 @@ fn train_mlp_per_sample_alpha_head(
             // gradient accumulation pre-Adam-step.
             if pjnd_active && steps_since_adam == 0 {
                 let u_take = rng.next_f64_unit();
-                if u_take < hyperparams.pjnd_passthrough_step_p {
-                    if let Some(pa) = pjnd_anchor {
-                        if !std_pjnd_features.is_empty() && pjnd_total_weight > 0.0 {
-                            let n_pjnd = std_pjnd_features.len();
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_rank_b_buf = 0.0f64;
-                            let mut g_red_w: [f64; 4] = [0.0; 4];
-                            let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_b_alpha: f64 = 0.0;
-                            let mut any_step = false;
+                if u_take < hyperparams.pjnd_passthrough_step_p
+                    && let Some(pa) = pjnd_anchor
+                    && !std_pjnd_features.is_empty()
+                    && pjnd_total_weight > 0.0
+                {
+                    let n_pjnd = std_pjnd_features.len();
+                    let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_rank_b_buf = 0.0f64;
+                    let mut g_red_w: [f64; 4] = [0.0; 4];
+                    let mut g_red_b: f64 = 0.0;
+                    let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_b_alpha: f64 = 0.0;
+                    let mut any_step = false;
 
-                            for _ in 0..k {
-                                let u_row = rng.next_f64_unit();
-                                let pi =
-                                    pjnd_row_cdf.partition_point(|&c| c < u_row).min(n_pjnd - 1);
-                                let xa = std_pjnd_features[pi].as_slice();
-                                let (
-                                    ya_pre,
-                                    ya_rank_a,
-                                    ya_pool_a,
-                                    alpha_a_a,
-                                    _,
-                                    ha_pre_a,
-                                    ha_a,
-                                    sa_a,
-                                    max_a_a,
-                                ) = psah::forward_per_sample_alpha_head(
-                                    xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
-                                    b_alpha, n_features, n_hidden, leaky,
-                                );
-                                let (ya, dya_dpre) = pin_forward(ya_pre);
-                                let target = pa
-                                    .target_scores
-                                    .and_then(|ts| ts.get(pi).copied())
-                                    .unwrap_or(hyperparams.pjnd_passthrough_target_score);
-                                let row_w = pa.row_weights[pi];
-                                let err = ya - target;
-                                let scale = 2.0 * hyperparams.pjnd_passthrough_weight * row_w;
-                                let dl_dy = scale * err * dya_dpre;
-                                let loss = hyperparams.pjnd_passthrough_weight * row_w * err * err;
-                                total_loss += loss;
-                                n_steps += 1;
+                    for _ in 0..k {
+                        let u_row = rng.next_f64_unit();
+                        let pi = pjnd_row_cdf.partition_point(|&c| c < u_row).min(n_pjnd - 1);
+                        let xa = std_pjnd_features[pi].as_slice();
+                        let (
+                            ya_pre,
+                            ya_rank_a,
+                            ya_pool_a,
+                            alpha_a_a,
+                            _,
+                            ha_pre_a,
+                            ha_a,
+                            sa_a,
+                            max_a_a,
+                        ) = psah::forward_per_sample_alpha_head(
+                            xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
+                            b_alpha, n_features, n_hidden, leaky,
+                        );
+                        let (ya, dya_dpre) = pin_forward(ya_pre);
+                        let target = pa
+                            .target_scores
+                            .and_then(|ts| ts.get(pi).copied())
+                            .unwrap_or(hyperparams.pjnd_passthrough_target_score);
+                        let row_w = pa.row_weights[pi];
+                        let err = ya - target;
+                        let scale = 2.0 * hyperparams.pjnd_passthrough_weight * row_w;
+                        let dl_dy = scale * err * dya_dpre;
+                        let loss = hyperparams.pjnd_passthrough_weight * row_w * err * err;
+                        total_loss += loss;
+                        n_steps += 1;
 
-                                psah::backprop_step_per_sample_alpha_head(
-                                    xa,
-                                    &ha_pre_a,
-                                    &ha_a,
-                                    &sa_a,
-                                    max_a_a,
-                                    ya_rank_a,
-                                    ya_pool_a,
-                                    alpha_a_a,
-                                    dl_dy,
-                                    &rank_w,
-                                    &reducer_w,
-                                    &w_alpha,
-                                    &mut adam.gw1,
-                                    &mut adam.gb1,
-                                    &mut g_rank_w_buf,
-                                    &mut g_rank_b_buf,
-                                    &mut g_red_w,
-                                    &mut g_red_b,
-                                    &mut g_w_alpha_buf,
-                                    &mut g_b_alpha,
-                                    n_features,
-                                    n_hidden,
-                                    leaky,
-                                );
-                                any_step = true;
+                        psah::backprop_step_per_sample_alpha_head(
+                            xa,
+                            &ha_pre_a,
+                            &ha_a,
+                            &sa_a,
+                            max_a_a,
+                            ya_rank_a,
+                            ya_pool_a,
+                            alpha_a_a,
+                            dl_dy,
+                            &rank_w,
+                            &reducer_w,
+                            &w_alpha,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_rank_w_buf,
+                            &mut g_rank_b_buf,
+                            &mut g_red_w,
+                            &mut g_red_b,
+                            &mut g_w_alpha_buf,
+                            &mut g_b_alpha,
+                            n_features,
+                            n_hidden,
+                            leaky,
+                        );
+                        any_step = true;
+                    }
+
+                    if any_step {
+                        if hyperparams.l2_lambda > 0.0 {
+                            let l2 = hyperparams.l2_lambda;
+                            for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                *g += l2 * w;
                             }
-
-                            if any_step {
-                                if hyperparams.l2_lambda > 0.0 {
-                                    let l2 = hyperparams.l2_lambda;
-                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                                        *g += l2 * w;
-                                    }
-                                    for j in 0..n_hidden_final {
-                                        g_rank_w_buf[j] += l2 * rank_w[j];
-                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
-                                    }
-                                    for kk in 0..4 {
-                                        g_red_w[kk] += l2 * reducer_w[kk];
-                                    }
-                                }
-
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[j] += g_rank_w_buf[j];
-                                }
-                                for kk in 0..4 {
-                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
-                                }
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
-                                }
-                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
-                                adam.gb2[0] += g_rank_b_buf;
-                                adam.gb2[1] += g_red_b;
-
-                                do_adam_step(
-                                    &mut adam,
-                                    &mut w1,
-                                    &mut b1,
-                                    &mut w2_enc,
-                                    &mut b2_enc,
-                                    &mut w_skip,
-                                    &mut b_skip,
-                                    &mut rank_w,
-                                    &mut rank_b,
-                                    &mut reducer_w,
-                                    &mut reducer_b,
-                                    &mut w_alpha,
-                                    &mut b_alpha,
-                                    lr,
-                                    n_hidden,
-                                );
+                            for j in 0..n_hidden_final {
+                                g_rank_w_buf[j] += l2 * rank_w[j];
+                                g_w_alpha_buf[j] += l2 * w_alpha[j];
+                            }
+                            for kk in 0..4 {
+                                g_red_w[kk] += l2 * reducer_w[kk];
                             }
                         }
+
+                        for j in 0..n_hidden_final {
+                            adam.gw2[j] += g_rank_w_buf[j];
+                        }
+                        for kk in 0..4 {
+                            adam.gw2[n_hidden_final + kk] += g_red_w[kk];
+                        }
+                        for j in 0..n_hidden_final {
+                            adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
+                        }
+                        adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
+                        adam.gb2[0] += g_rank_b_buf;
+                        adam.gb2[1] += g_red_b;
+
+                        do_adam_step(
+                            &mut adam,
+                            &mut w1,
+                            &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            lr,
+                            n_hidden,
+                        );
                     }
                 }
             }
@@ -7069,185 +7059,183 @@ fn train_mlp_per_sample_alpha_head(
             // `docs/KONJND_AGGREGATION_HEAD_DESIGN_2026-05-24.md`.
             if konjnd_agg_active && steps_since_adam == 0 {
                 let u_take = rng.next_f64_unit();
-                if u_take < hyperparams.konjnd_aggregation_step_p {
-                    if let Some(ka) = konjnd_agg {
-                        if !std_konjnd_agg_features.is_empty() && !ka.ref_ranges.is_empty() {
-                            let n_refs = ka.ref_ranges.len();
-                            let s_per_ref = hyperparams.konjnd_aggregation_samples_per_ref.max(1);
-                            let k_refs = hyperparams.konjnd_aggregation_refs_per_step.max(1);
-                            let inv_s = 1.0 / (s_per_ref as f64);
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_rank_b_buf = 0.0f64;
-                            let mut g_red_w: [f64; 4] = [0.0; 4];
-                            let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_b_alpha: f64 = 0.0;
-                            let mut any_step = false;
+                if u_take < hyperparams.konjnd_aggregation_step_p
+                    && let Some(ka) = konjnd_agg
+                    && !std_konjnd_agg_features.is_empty()
+                    && !ka.ref_ranges.is_empty()
+                {
+                    let n_refs = ka.ref_ranges.len();
+                    let s_per_ref = hyperparams.konjnd_aggregation_samples_per_ref.max(1);
+                    let k_refs = hyperparams.konjnd_aggregation_refs_per_step.max(1);
+                    let inv_s = 1.0 / (s_per_ref as f64);
+                    let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_rank_b_buf = 0.0f64;
+                    let mut g_red_w: [f64; 4] = [0.0; 4];
+                    let mut g_red_b: f64 = 0.0;
+                    let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_b_alpha: f64 = 0.0;
+                    let mut any_step = false;
 
-                            // Stash forward-pass intermediates per (ref, s).
-                            // arch_backward consumes the full ArchForward
-                            // struct (which carries h_pre / h / stats /
-                            // max_idx + the 2-layer h1_pre / h1 + skip
-                            // state), so we cache (ri_global, ya, dya_dpre,
-                            // ArchForward) per row and replay it in the
-                            // backprop pass. This is the 2-layer / skip
-                            // generalization of the prior 1-layer-only
-                            // psah cache.
-                            let mut fw_cache: Vec<(
-                                usize,       // row index into std_konjnd_agg_features
-                                f64,         // ya (post-pin score)
-                                f64,         // dya_dpre (pin Jacobian)
-                                ArchForward, // full forward intermediates
-                            )> = Vec::with_capacity(k_refs * s_per_ref);
+                    // Stash forward-pass intermediates per (ref, s).
+                    // arch_backward consumes the full ArchForward
+                    // struct (which carries h_pre / h / stats /
+                    // max_idx + the 2-layer h1_pre / h1 + skip
+                    // state), so we cache (ri_global, ya, dya_dpre,
+                    // ArchForward) per row and replay it in the
+                    // backprop pass. This is the 2-layer / skip
+                    // generalization of the prior 1-layer-only
+                    // psah cache.
+                    let mut fw_cache: Vec<(
+                        usize,       // row index into std_konjnd_agg_features
+                        f64,         // ya (post-pin score)
+                        f64,         // dya_dpre (pin Jacobian)
+                        ArchForward, // full forward intermediates
+                    )> = Vec::with_capacity(k_refs * s_per_ref);
 
-                            // For each picked ref: sample S rows + forward all S.
-                            // (fw_cache_start_idx, S_actual, sum_y, target)
-                            let mut ref_sums: Vec<(usize, usize, f64, f64)> =
-                                Vec::with_capacity(k_refs);
+                    // For each picked ref: sample S rows + forward all S.
+                    // (fw_cache_start_idx, S_actual, sum_y, target)
+                    let mut ref_sums: Vec<(usize, usize, f64, f64)> = Vec::with_capacity(k_refs);
 
-                            for _ in 0..k_refs {
-                                let u_ref = rng.next_f64_unit();
-                                let ri = ((u_ref * (n_refs as f64)) as usize).min(n_refs - 1);
-                                let (row_start, n_rows_in_ref) = ka.ref_ranges[ri];
-                                if n_rows_in_ref == 0 {
-                                    continue;
-                                }
-                                let target = ka.ref_pjnd_target[ri];
-                                let cache_start = fw_cache.len();
-                                let mut sum_y = 0.0f64;
-                                let s_actual = s_per_ref.min(n_rows_in_ref);
-                                for _ in 0..s_actual {
-                                    let u_row = rng.next_f64_unit();
-                                    let off = ((u_row * (n_rows_in_ref as f64)) as usize)
-                                        .min(n_rows_in_ref - 1);
-                                    let ri_global = row_start + off;
-                                    let xa = std_konjnd_agg_features[ri_global].as_slice();
-                                    let fwd_kah = arch_forward(
-                                        xa,
-                                        &w1,
-                                        &b1,
-                                        &w2_enc,
-                                        &b2_enc,
-                                        &w_skip,
-                                        b_skip,
-                                        &rank_w,
-                                        rank_b,
-                                        &reducer_w,
-                                        reducer_b,
-                                        &w_alpha,
-                                        b_alpha,
-                                        n_features,
-                                        n_hidden,
-                                        n_hidden_final,
-                                        leaky,
-                                        use_2layer,
-                                        use_skip,
-                                    );
-                                    let (ya, dya_dpre) = pin_forward(fwd_kah.y);
-                                    sum_y += ya;
-                                    fw_cache.push((ri_global, ya, dya_dpre, fwd_kah));
-                                }
-                                ref_sums.push((cache_start, s_actual, sum_y, target));
+                    for _ in 0..k_refs {
+                        let u_ref = rng.next_f64_unit();
+                        let ri = ((u_ref * (n_refs as f64)) as usize).min(n_refs - 1);
+                        let (row_start, n_rows_in_ref) = ka.ref_ranges[ri];
+                        if n_rows_in_ref == 0 {
+                            continue;
+                        }
+                        let target = ka.ref_pjnd_target[ri];
+                        let cache_start = fw_cache.len();
+                        let mut sum_y = 0.0f64;
+                        let s_actual = s_per_ref.min(n_rows_in_ref);
+                        for _ in 0..s_actual {
+                            let u_row = rng.next_f64_unit();
+                            let off =
+                                ((u_row * (n_rows_in_ref as f64)) as usize).min(n_rows_in_ref - 1);
+                            let ri_global = row_start + off;
+                            let xa = std_konjnd_agg_features[ri_global].as_slice();
+                            let fwd_kah = arch_forward(
+                                xa,
+                                &w1,
+                                &b1,
+                                &w2_enc,
+                                &b2_enc,
+                                &w_skip,
+                                b_skip,
+                                &rank_w,
+                                rank_b,
+                                &reducer_w,
+                                reducer_b,
+                                &w_alpha,
+                                b_alpha,
+                                n_features,
+                                n_hidden,
+                                n_hidden_final,
+                                leaky,
+                                use_2layer,
+                                use_skip,
+                            );
+                            let (ya, dya_dpre) = pin_forward(fwd_kah.y);
+                            sum_y += ya;
+                            fw_cache.push((ri_global, ya, dya_dpre, fwd_kah));
+                        }
+                        ref_sums.push((cache_start, s_actual, sum_y, target));
+                    }
+
+                    // Backprop: each ref's residual contributes
+                    // (2w/S)·residual to every cached row in
+                    // that ref. Loss = w · Σ_r (agg_r − t_r)².
+                    for &(cache_start, s_actual, sum_y, target) in &ref_sums {
+                        if s_actual == 0 {
+                            continue;
+                        }
+                        let inv_s_actual = 1.0 / (s_actual as f64);
+                        let agg = sum_y * inv_s_actual;
+                        let err = agg - target;
+                        let scale = 2.0 * hyperparams.konjnd_aggregation_weight * inv_s_actual;
+                        let loss = hyperparams.konjnd_aggregation_weight * err * err;
+                        total_loss += loss;
+                        n_steps += 1;
+                        for j in 0..s_actual {
+                            let entry = &fw_cache[cache_start + j];
+                            let ri_global = entry.0;
+                            let dya_dpre = entry.2;
+                            let fwd_kah = &entry.3;
+                            let xa = std_konjnd_agg_features[ri_global].as_slice();
+                            let dl_dy = scale * err * dya_dpre;
+                            arch_backward(
+                                xa,
+                                fwd_kah,
+                                dl_dy,
+                                &w1,
+                                &w2_enc,
+                                &rank_w,
+                                &reducer_w,
+                                &w_alpha,
+                                &mut adam.gw1,
+                                &mut adam.gb1,
+                                &mut g_rank_w_buf,
+                                &mut g_rank_b_buf,
+                                &mut g_red_w,
+                                &mut g_red_b,
+                                &mut g_w_alpha_buf,
+                                &mut g_b_alpha,
+                                n_features,
+                                n_hidden,
+                                n_hidden_final,
+                                leaky,
+                                use_2layer,
+                                use_skip,
+                            );
+                            any_step = true;
+                        }
+                        let _ = inv_s; // reserved for variants where S is fixed across refs
+                    }
+
+                    if any_step {
+                        if hyperparams.l2_lambda > 0.0 {
+                            let l2 = hyperparams.l2_lambda;
+                            for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                *g += l2 * w;
                             }
-
-                            // Backprop: each ref's residual contributes
-                            // (2w/S)·residual to every cached row in
-                            // that ref. Loss = w · Σ_r (agg_r − t_r)².
-                            for &(cache_start, s_actual, sum_y, target) in &ref_sums {
-                                if s_actual == 0 {
-                                    continue;
-                                }
-                                let inv_s_actual = 1.0 / (s_actual as f64);
-                                let agg = sum_y * inv_s_actual;
-                                let err = agg - target;
-                                let scale =
-                                    2.0 * hyperparams.konjnd_aggregation_weight * inv_s_actual;
-                                let loss = hyperparams.konjnd_aggregation_weight * err * err;
-                                total_loss += loss;
-                                n_steps += 1;
-                                for j in 0..s_actual {
-                                    let entry = &fw_cache[cache_start + j];
-                                    let ri_global = entry.0;
-                                    let dya_dpre = entry.2;
-                                    let fwd_kah = &entry.3;
-                                    let xa = std_konjnd_agg_features[ri_global].as_slice();
-                                    let dl_dy = scale * err * dya_dpre;
-                                    arch_backward(
-                                        xa,
-                                        fwd_kah,
-                                        dl_dy,
-                                        &w1,
-                                        &w2_enc,
-                                        &rank_w,
-                                        &reducer_w,
-                                        &w_alpha,
-                                        &mut adam.gw1,
-                                        &mut adam.gb1,
-                                        &mut g_rank_w_buf,
-                                        &mut g_rank_b_buf,
-                                        &mut g_red_w,
-                                        &mut g_red_b,
-                                        &mut g_w_alpha_buf,
-                                        &mut g_b_alpha,
-                                        n_features,
-                                        n_hidden,
-                                        n_hidden_final,
-                                        leaky,
-                                        use_2layer,
-                                        use_skip,
-                                    );
-                                    any_step = true;
-                                }
-                                let _ = inv_s; // reserved for variants where S is fixed across refs
+                            for j in 0..n_hidden_final {
+                                g_rank_w_buf[j] += l2 * rank_w[j];
+                                g_w_alpha_buf[j] += l2 * w_alpha[j];
                             }
-
-                            if any_step {
-                                if hyperparams.l2_lambda > 0.0 {
-                                    let l2 = hyperparams.l2_lambda;
-                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                                        *g += l2 * w;
-                                    }
-                                    for j in 0..n_hidden_final {
-                                        g_rank_w_buf[j] += l2 * rank_w[j];
-                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
-                                    }
-                                    for kk in 0..4 {
-                                        g_red_w[kk] += l2 * reducer_w[kk];
-                                    }
-                                }
-
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[j] += g_rank_w_buf[j];
-                                }
-                                for kk in 0..4 {
-                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
-                                }
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
-                                }
-                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
-                                adam.gb2[0] += g_rank_b_buf;
-                                adam.gb2[1] += g_red_b;
-
-                                do_adam_step(
-                                    &mut adam,
-                                    &mut w1,
-                                    &mut b1,
-                                    &mut w2_enc,
-                                    &mut b2_enc,
-                                    &mut w_skip,
-                                    &mut b_skip,
-                                    &mut rank_w,
-                                    &mut rank_b,
-                                    &mut reducer_w,
-                                    &mut reducer_b,
-                                    &mut w_alpha,
-                                    &mut b_alpha,
-                                    lr,
-                                    n_hidden_final,
-                                );
+                            for kk in 0..4 {
+                                g_red_w[kk] += l2 * reducer_w[kk];
                             }
                         }
+
+                        for j in 0..n_hidden_final {
+                            adam.gw2[j] += g_rank_w_buf[j];
+                        }
+                        for kk in 0..4 {
+                            adam.gw2[n_hidden_final + kk] += g_red_w[kk];
+                        }
+                        for j in 0..n_hidden_final {
+                            adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
+                        }
+                        adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
+                        adam.gb2[0] += g_rank_b_buf;
+                        adam.gb2[1] += g_red_b;
+
+                        do_adam_step(
+                            &mut adam,
+                            &mut w1,
+                            &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            lr,
+                            n_hidden_final,
+                        );
                     }
                 }
             }
@@ -7266,211 +7254,209 @@ fn train_mlp_per_sample_alpha_head(
             // 32 pairs per fire. Per-pair aux work rate is preserved.
             if equiv_active && steps_since_adam == 0 {
                 let u_take = rng.next_f64_unit();
-                if u_take < hyperparams.cross_codec_eq_step_p {
-                    if let Some(e) = equiv {
-                        if !std_equiv_a.is_empty() && equiv_total_weight > 0.0 {
-                            let n_equiv = std_equiv_a.len();
-                            let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_rank_b_buf = 0.0f64;
-                            let mut g_red_w: [f64; 4] = [0.0; 4];
-                            let mut g_red_b: f64 = 0.0;
-                            let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
-                            let mut g_b_alpha: f64 = 0.0;
-                            let mut any_step = false;
+                if u_take < hyperparams.cross_codec_eq_step_p
+                    && let Some(e) = equiv
+                    && !std_equiv_a.is_empty()
+                    && equiv_total_weight > 0.0
+                {
+                    let n_equiv = std_equiv_a.len();
+                    let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_rank_b_buf = 0.0f64;
+                    let mut g_red_w: [f64; 4] = [0.0; 4];
+                    let mut g_red_b: f64 = 0.0;
+                    let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
+                    let mut g_b_alpha: f64 = 0.0;
+                    let mut any_step = false;
 
-                            for _ in 0..k {
-                                let u_row = rng.next_f64_unit();
-                                let ei = equiv_row_cdf
-                                    .partition_point(|&c| c < u_row)
-                                    .min(n_equiv - 1);
-                                let xa = std_equiv_a[ei].as_slice();
-                                let xb = std_equiv_b[ei].as_slice();
+                    for _ in 0..k {
+                        let u_row = rng.next_f64_unit();
+                        let ei = equiv_row_cdf
+                            .partition_point(|&c| c < u_row)
+                            .min(n_equiv - 1);
+                        let xa = std_equiv_a[ei].as_slice();
+                        let xb = std_equiv_b[ei].as_slice();
 
-                                // Forward both halves.
-                                let (ya_pre, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
-                                    psah::forward_per_sample_alpha_head(
-                                        xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
-                                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
-                                    );
-                                let (yb_pre, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
-                                    psah::forward_per_sample_alpha_head(
-                                        xb, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b,
-                                        &w_alpha, b_alpha, n_features, n_hidden, leaky,
-                                    );
-                                // V4 tanh pin (identity when off).
-                                let (ya, dya_dpre) = pin_forward(ya_pre);
-                                let (yb, dyb_dpre) = pin_forward(yb_pre);
-                                let row_w = e.row_weights[ei];
-                                let diff = ya - yb;
-                                // L_eq = w · row_w · diff²
-                                // dL_eq/dy_a (score) = 2 · w · row_w · diff
-                                // dL_eq/dy_b (score) = −2 · w · row_w · diff
-                                // Accumulate in score-space; chain-rule to y_pre
-                                // before backprop.
-                                let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
-                                let mut dl_dya_score = scale * diff;
-                                let mut dl_dyb_score = -scale * diff;
-                                let mut loss =
-                                    hyperparams.cross_codec_eq_weight * row_w * diff * diff;
+                        // Forward both halves.
+                        let (ya_pre, ya_rank, ya_pool, alpha_a, _, ha_pre, ha, sa, max_a) =
+                            psah::forward_per_sample_alpha_head(
+                                xa, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
+                                b_alpha, n_features, n_hidden, leaky,
+                            );
+                        let (yb_pre, yb_rank, yb_pool, alpha_b, _, hb_pre, hb, sb, max_b) =
+                            psah::forward_per_sample_alpha_head(
+                                xb, &w1, &b1, &rank_w, rank_b, &reducer_w, reducer_b, &w_alpha,
+                                b_alpha, n_features, n_hidden, leaky,
+                            );
+                        // V4 tanh pin (identity when off).
+                        let (ya, dya_dpre) = pin_forward(ya_pre);
+                        let (yb, dyb_dpre) = pin_forward(yb_pre);
+                        let row_w = e.row_weights[ei];
+                        let diff = ya - yb;
+                        // L_eq = w · row_w · diff²
+                        // dL_eq/dy_a (score) = 2 · w · row_w · diff
+                        // dL_eq/dy_b (score) = −2 · w · row_w · diff
+                        // Accumulate in score-space; chain-rule to y_pre
+                        // before backprop.
+                        let scale = 2.0 * hyperparams.cross_codec_eq_weight * row_w;
+                        let mut dl_dya_score = scale * diff;
+                        let mut dl_dyb_score = -scale * diff;
+                        let mut loss = hyperparams.cross_codec_eq_weight * row_w * diff * diff;
 
-                                // EXP-CROSS-CODEC-V3 (2026-05-19): rank-preserve
-                                // regularizer on equiv pairs that have butter_diff.
-                                // Loss = w_rp · |Δb| · −log(sigmoid(s · (y_b − y_a)))
-                                // where s = sign(Δb) and Δb = butter_a − butter_b.
-                                // Δb > 0 → A is butter-worse than B → we want
-                                // y_a < y_b (score-shape, HIGHER quality = higher
-                                // output) → use logit s·(y_b − y_a) in the
-                                // sigmoid. This is the same RankNet derivation
-                                // used for the main pair loss above.
-                                //
-                                // Gradient (let u = s·(y_b − y_a), σ = sigmoid(u),
-                                // w = w_rp · |Δb|):
-                                //   dL/dy_b = -w · s · (1 − σ)
-                                //   dL/dy_a = +w · s · (1 − σ)
-                                if hyperparams.cross_codec_rank_preserve_weight > 0.0
-                                    && !e.butter_diff.is_empty()
-                                    && ei < e.butter_diff.len()
-                                {
-                                    let db = e.butter_diff[ei];
-                                    if db.is_finite() && db != 0.0 {
-                                        let s = if db > 0.0 { 1.0 } else { -1.0 };
-                                        let abs_db = db.abs();
-                                        let w_rp =
-                                            hyperparams.cross_codec_rank_preserve_weight * abs_db;
-                                        let u = s * (yb - ya);
-                                        // softplus(-u) = log(1 + exp(-u)) =
-                                        //   -log(sigmoid(u)). Stable form:
-                                        let softplus = if u >= 0.0 {
-                                            (-u).exp().ln_1p()
-                                        } else {
-                                            -u + u.exp().ln_1p()
-                                        };
-                                        let l_rp = w_rp * softplus;
-                                        // sigmoid(u) numerically stable:
-                                        let sig = if u >= 0.0 {
-                                            1.0 / (1.0 + (-u).exp())
-                                        } else {
-                                            let eu = u.exp();
-                                            eu / (1.0 + eu)
-                                        };
-                                        // dL/dy_b = -w · s · (1 − σ)
-                                        // dL/dy_a = +w · s · (1 − σ)
-                                        let g = w_rp * s * (1.0 - sig);
-                                        dl_dya_score += g;
-                                        dl_dyb_score -= g;
-                                        loss += l_rp;
-                                    }
-                                }
-                                total_loss += loss;
-                                n_steps += 1;
-
-                                // V4 tanh pin: chain-rule dL/dy_score → dL/dy_pre.
-                                let dl_dya = dl_dya_score * dya_dpre;
-                                let dl_dyb = dl_dyb_score * dyb_dpre;
-
-                                // Backprop through A (accumulates into shared buffers).
-                                psah::backprop_step_per_sample_alpha_head(
-                                    xa,
-                                    &ha_pre,
-                                    &ha,
-                                    &sa,
-                                    max_a,
-                                    ya_rank,
-                                    ya_pool,
-                                    alpha_a,
-                                    dl_dya,
-                                    &rank_w,
-                                    &reducer_w,
-                                    &w_alpha,
-                                    &mut adam.gw1,
-                                    &mut adam.gb1,
-                                    &mut g_rank_w_buf,
-                                    &mut g_rank_b_buf,
-                                    &mut g_red_w,
-                                    &mut g_red_b,
-                                    &mut g_w_alpha_buf,
-                                    &mut g_b_alpha,
-                                    n_features,
-                                    n_hidden,
-                                    leaky,
-                                );
-
-                                // Backprop through B (accumulates into same buffers).
-                                psah::backprop_step_per_sample_alpha_head(
-                                    xb,
-                                    &hb_pre,
-                                    &hb,
-                                    &sb,
-                                    max_b,
-                                    yb_rank,
-                                    yb_pool,
-                                    alpha_b,
-                                    dl_dyb,
-                                    &rank_w,
-                                    &reducer_w,
-                                    &w_alpha,
-                                    &mut adam.gw1,
-                                    &mut adam.gb1,
-                                    &mut g_rank_w_buf,
-                                    &mut g_rank_b_buf,
-                                    &mut g_red_w,
-                                    &mut g_red_b,
-                                    &mut g_w_alpha_buf,
-                                    &mut g_b_alpha,
-                                    n_features,
-                                    n_hidden,
-                                    leaky,
-                                );
-                                any_step = true;
-                            }
-
-                            if any_step {
-                                if hyperparams.l2_lambda > 0.0 {
-                                    let l2 = hyperparams.l2_lambda;
-                                    for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
-                                        *g += l2 * w;
-                                    }
-                                    for j in 0..n_hidden_final {
-                                        g_rank_w_buf[j] += l2 * rank_w[j];
-                                        g_w_alpha_buf[j] += l2 * w_alpha[j];
-                                    }
-                                    for kk in 0..4 {
-                                        g_red_w[kk] += l2 * reducer_w[kk];
-                                    }
-                                }
-
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[j] += g_rank_w_buf[j];
-                                }
-                                for kk in 0..4 {
-                                    adam.gw2[n_hidden_final + kk] += g_red_w[kk];
-                                }
-                                for j in 0..n_hidden_final {
-                                    adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
-                                }
-                                adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
-                                adam.gb2[0] += g_rank_b_buf;
-                                adam.gb2[1] += g_red_b;
-
-                                do_adam_step(
-                                    &mut adam,
-                                    &mut w1,
-                                    &mut b1,
-                                    &mut w2_enc,
-                                    &mut b2_enc,
-                                    &mut w_skip,
-                                    &mut b_skip,
-                                    &mut rank_w,
-                                    &mut rank_b,
-                                    &mut reducer_w,
-                                    &mut reducer_b,
-                                    &mut w_alpha,
-                                    &mut b_alpha,
-                                    lr,
-                                    n_hidden,
-                                );
+                        // EXP-CROSS-CODEC-V3 (2026-05-19): rank-preserve
+                        // regularizer on equiv pairs that have butter_diff.
+                        // Loss = w_rp · |Δb| · −log(sigmoid(s · (y_b − y_a)))
+                        // where s = sign(Δb) and Δb = butter_a − butter_b.
+                        // Δb > 0 → A is butter-worse than B → we want
+                        // y_a < y_b (score-shape, HIGHER quality = higher
+                        // output) → use logit s·(y_b − y_a) in the
+                        // sigmoid. This is the same RankNet derivation
+                        // used for the main pair loss above.
+                        //
+                        // Gradient (let u = s·(y_b − y_a), σ = sigmoid(u),
+                        // w = w_rp · |Δb|):
+                        //   dL/dy_b = -w · s · (1 − σ)
+                        //   dL/dy_a = +w · s · (1 − σ)
+                        if hyperparams.cross_codec_rank_preserve_weight > 0.0
+                            && !e.butter_diff.is_empty()
+                            && ei < e.butter_diff.len()
+                        {
+                            let db = e.butter_diff[ei];
+                            if db.is_finite() && db != 0.0 {
+                                let s = if db > 0.0 { 1.0 } else { -1.0 };
+                                let abs_db = db.abs();
+                                let w_rp = hyperparams.cross_codec_rank_preserve_weight * abs_db;
+                                let u = s * (yb - ya);
+                                // softplus(-u) = log(1 + exp(-u)) =
+                                //   -log(sigmoid(u)). Stable form:
+                                let softplus = if u >= 0.0 {
+                                    (-u).exp().ln_1p()
+                                } else {
+                                    -u + u.exp().ln_1p()
+                                };
+                                let l_rp = w_rp * softplus;
+                                // sigmoid(u) numerically stable:
+                                let sig = if u >= 0.0 {
+                                    1.0 / (1.0 + (-u).exp())
+                                } else {
+                                    let eu = u.exp();
+                                    eu / (1.0 + eu)
+                                };
+                                // dL/dy_b = -w · s · (1 − σ)
+                                // dL/dy_a = +w · s · (1 − σ)
+                                let g = w_rp * s * (1.0 - sig);
+                                dl_dya_score += g;
+                                dl_dyb_score -= g;
+                                loss += l_rp;
                             }
                         }
+                        total_loss += loss;
+                        n_steps += 1;
+
+                        // V4 tanh pin: chain-rule dL/dy_score → dL/dy_pre.
+                        let dl_dya = dl_dya_score * dya_dpre;
+                        let dl_dyb = dl_dyb_score * dyb_dpre;
+
+                        // Backprop through A (accumulates into shared buffers).
+                        psah::backprop_step_per_sample_alpha_head(
+                            xa,
+                            &ha_pre,
+                            &ha,
+                            &sa,
+                            max_a,
+                            ya_rank,
+                            ya_pool,
+                            alpha_a,
+                            dl_dya,
+                            &rank_w,
+                            &reducer_w,
+                            &w_alpha,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_rank_w_buf,
+                            &mut g_rank_b_buf,
+                            &mut g_red_w,
+                            &mut g_red_b,
+                            &mut g_w_alpha_buf,
+                            &mut g_b_alpha,
+                            n_features,
+                            n_hidden,
+                            leaky,
+                        );
+
+                        // Backprop through B (accumulates into same buffers).
+                        psah::backprop_step_per_sample_alpha_head(
+                            xb,
+                            &hb_pre,
+                            &hb,
+                            &sb,
+                            max_b,
+                            yb_rank,
+                            yb_pool,
+                            alpha_b,
+                            dl_dyb,
+                            &rank_w,
+                            &reducer_w,
+                            &w_alpha,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_rank_w_buf,
+                            &mut g_rank_b_buf,
+                            &mut g_red_w,
+                            &mut g_red_b,
+                            &mut g_w_alpha_buf,
+                            &mut g_b_alpha,
+                            n_features,
+                            n_hidden,
+                            leaky,
+                        );
+                        any_step = true;
+                    }
+
+                    if any_step {
+                        if hyperparams.l2_lambda > 0.0 {
+                            let l2 = hyperparams.l2_lambda;
+                            for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+                                *g += l2 * w;
+                            }
+                            for j in 0..n_hidden_final {
+                                g_rank_w_buf[j] += l2 * rank_w[j];
+                                g_w_alpha_buf[j] += l2 * w_alpha[j];
+                            }
+                            for kk in 0..4 {
+                                g_red_w[kk] += l2 * reducer_w[kk];
+                            }
+                        }
+
+                        for j in 0..n_hidden_final {
+                            adam.gw2[j] += g_rank_w_buf[j];
+                        }
+                        for kk in 0..4 {
+                            adam.gw2[n_hidden_final + kk] += g_red_w[kk];
+                        }
+                        for j in 0..n_hidden_final {
+                            adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
+                        }
+                        adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
+                        adam.gb2[0] += g_rank_b_buf;
+                        adam.gb2[1] += g_red_b;
+
+                        do_adam_step(
+                            &mut adam,
+                            &mut w1,
+                            &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            lr,
+                            n_hidden,
+                        );
                     }
                 }
             }
@@ -7833,7 +7819,7 @@ fn train_mlp_per_sample_alpha_head(
                         preds.push(pinned);
                     }
                     let mean_p = preds.iter().sum::<f64>() / preds.len().max(1) as f64;
-                    let zrmse = if let Some(ref a) = anchor {
+                    let zrmse = if let Some(a) = anchor {
                         if a.row_weights.len() == preds.len() {
                             crate::panel::z_rmse(&preds, a.row_weights)
                         } else {
@@ -8070,187 +8056,188 @@ fn train_mlp_per_sample_alpha_head(
     // JSON pipeline (the existing Python script calls `zenpredict bake`
     // on a modified JSON). The sidecar approach lets the caller script
     // handle the injection.
-    if anchor_active && !std_anchor_features.is_empty() {
-        if let Some(a) = anchor {
-            // Forward the anchor through the net the bake will SHIP — when
-            // QAT is on, that's the f16+zerobias-quantized net, so the dial
-            // spline calibrates exactly what ships (quantize-then-calibrate
-            // in ONE pass; no post-hoc identity/dial surprise). Then fit a
-            // quantile-binned monotone PCHIP. This REPLACES the old
-            // band-by-target + 0.01-pred-filter, which collapsed to 2
-            // degenerate knots on the narrow (~0.4-wide) tanh-pin band and
-            // shipped a broken (all-negative / identity=0) dial.
-            // Forward the SHIPPED net EXACTLY: the bake applies the hard sign
-            // projection (encoder ≥0, rank_w ≤0, α≡1) THEN — when QAT —
-            // f16+zerobias quantize. Forwarding the UN-projected net here
-            // inverts the pred↔target correlation (the projection flips
-            // signs), so the spline gets fit on a different net than ships
-            // and its direction comes out wrong. Project (+ quantize) so the
-            // dial calibrates the actual shipped net.
-            let pw1 = proj_w1_masked(&w1);
-            let pw2 = proj_geq0(&w2_enc);
-            let prw = proj_leq0(&rank_w);
-            let pwa = proj_w_alpha_zero(&w_alpha);
-            let sba = proj_b_alpha_one(b_alpha);
-            let (sw1, sw2, srw, swa) = if qat_fine_tune_epochs > 0 {
-                (
-                    qat_quantize_copy(&pw1, qat_tau),
-                    qat_quantize_copy(&pw2, qat_tau),
-                    qat_quantize_copy(&prw, qat_tau),
-                    qat_quantize_copy(&pwa, qat_tau),
-                )
-            } else {
-                (pw1, pw2, prw, pwa)
-            };
-            let mut sp_preds: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
-            let mut sp_targets: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
-            for (i, af) in std_anchor_features.iter().enumerate() {
-                let fwd = arch_forward(
-                    af,
-                    &sw1,
-                    &b1,
-                    &sw2,
-                    &b2_enc,
-                    &w_skip,
-                    b_skip,
-                    &srw,
-                    rank_b,
-                    &reducer_w,
-                    reducer_b,
-                    &swa,
-                    sba,
-                    n_features,
-                    n_hidden,
-                    n_hidden_final,
-                    leaky,
-                    use_2layer,
-                    use_skip,
-                );
-                let (pinned, _) = pin_forward(fwd.y);
-                let target = a
-                    .target_scores
-                    .and_then(|ts| ts.get(i).copied())
-                    .unwrap_or(hyperparams.anchor_target_score);
-                sp_preds.push(pinned);
-                sp_targets.push(target);
-            }
+    if anchor_active
+        && !std_anchor_features.is_empty()
+        && let Some(a) = anchor
+    {
+        // Forward the anchor through the net the bake will SHIP — when
+        // QAT is on, that's the f16+zerobias-quantized net, so the dial
+        // spline calibrates exactly what ships (quantize-then-calibrate
+        // in ONE pass; no post-hoc identity/dial surprise). Then fit a
+        // quantile-binned monotone PCHIP. This REPLACES the old
+        // band-by-target + 0.01-pred-filter, which collapsed to 2
+        // degenerate knots on the narrow (~0.4-wide) tanh-pin band and
+        // shipped a broken (all-negative / identity=0) dial.
+        // Forward the SHIPPED net EXACTLY: the bake applies the hard sign
+        // projection (encoder ≥0, rank_w ≤0, α≡1) THEN — when QAT —
+        // f16+zerobias quantize. Forwarding the UN-projected net here
+        // inverts the pred↔target correlation (the projection flips
+        // signs), so the spline gets fit on a different net than ships
+        // and its direction comes out wrong. Project (+ quantize) so the
+        // dial calibrates the actual shipped net.
+        let pw1 = proj_w1_masked(&w1);
+        let pw2 = proj_geq0(&w2_enc);
+        let prw = proj_leq0(&rank_w);
+        let pwa = proj_w_alpha_zero(&w_alpha);
+        let sba = proj_b_alpha_one(b_alpha);
+        let (sw1, sw2, srw, swa) = if qat_fine_tune_epochs > 0 {
+            (
+                qat_quantize_copy(&pw1, qat_tau),
+                qat_quantize_copy(&pw2, qat_tau),
+                qat_quantize_copy(&prw, qat_tau),
+                qat_quantize_copy(&pwa, qat_tau),
+            )
+        } else {
+            (pw1, pw2, prw, pwa)
+        };
+        let mut sp_preds: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
+        let mut sp_targets: Vec<f64> = Vec::with_capacity(std_anchor_features.len());
+        for (i, af) in std_anchor_features.iter().enumerate() {
+            let fwd = arch_forward(
+                af,
+                &sw1,
+                &b1,
+                &sw2,
+                &b2_enc,
+                &w_skip,
+                b_skip,
+                &srw,
+                rank_b,
+                &reducer_w,
+                reducer_b,
+                &swa,
+                sba,
+                n_features,
+                n_hidden,
+                n_hidden_final,
+                leaky,
+                use_2layer,
+                use_skip,
+            );
+            let (pinned, _) = pin_forward(fwd.y);
+            let target = a
+                .target_scores
+                .and_then(|ts| ts.get(i).copied())
+                .unwrap_or(hyperparams.anchor_target_score);
+            sp_preds.push(pinned);
+            sp_targets.push(target);
+        }
 
-            // Diagnostic: log the SHIPPED net's anchor-output range BEFORE
-            // attempting spline fit. When the spline fit fails (too few
-            // distinct knots, non-monotone bin medians, etc.) without this
-            // log we silently ship a bake with no dial calibration — issue
-            // #40 (hidden=1 case) revealed this gap.
-            let (sp_min, sp_max) = sp_preds
-                .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
-                    (mn.min(v), mx.max(v))
-                });
-            let (st_min, st_max) = sp_targets
-                .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
-                    (mn.min(v), mx.max(v))
-                });
+        // Diagnostic: log the SHIPPED net's anchor-output range BEFORE
+        // attempting spline fit. When the spline fit fails (too few
+        // distinct knots, non-monotone bin medians, etc.) without this
+        // log we silently ship a bake with no dial calibration — issue
+        // #40 (hidden=1 case) revealed this gap.
+        let (sp_min, sp_max) = sp_preds
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                (mn.min(v), mx.max(v))
+            });
+        let (st_min, st_max) = sp_targets
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                (mn.min(v), mx.max(v))
+            });
+        log_line(
+            &format!(
+                "output calibration spline: anchor n={} pred [{:.4}, {:.4}] target [{:.4}, {:.4}]",
+                sp_preds.len(),
+                sp_min,
+                sp_max,
+                st_min,
+                st_max
+            ),
+            log,
+        );
+
+        let spline_attempt =
+            crate::output_calibration_spline::fit_monotone_spline(&sp_preds, &sp_targets, 18);
+        if spline_attempt.is_none() {
+            log_line(
+                "output calibration spline: fit_monotone_spline RETURNED None — bake will ship WITHOUT a dial spline (pred→score on raw net output). Check anchor pred range + monotonicity vs target.",
+                log,
+            );
+        }
+        if let Some(payload) = spline_attempt {
             log_line(
                 &format!(
-                    "output calibration spline: anchor n={} pred [{:.4}, {:.4}] target [{:.4}, {:.4}]",
+                    "output calibration spline: fit_monotone_spline on {} anchor rows (qat={})",
                     sp_preds.len(),
-                    sp_min,
-                    sp_max,
-                    st_min,
-                    st_max
+                    qat_fine_tune_epochs > 0
                 ),
                 log,
             );
 
-            let spline_attempt =
-                crate::output_calibration_spline::fit_monotone_spline(&sp_preds, &sp_targets, 18);
-            if spline_attempt.is_none() {
-                log_line(
-                    "output calibration spline: fit_monotone_spline RETURNED None — bake will ship WITHOUT a dial spline (pred→score on raw net output). Check anchor pred range + monotonicity vs target.",
-                    log,
-                );
+            // Re-bake the model with the spline included.
+            // monotone_cbc: project here too — the final spline-augmented
+            // bake must be monotone-by-construction (spline is monotone,
+            // so the network must be).
+            let mut bake_w1 = proj_w1_masked(&w1);
+            let mut bake_w2_enc = proj_geq0(&w2_enc);
+            let mut bake_rank_w = proj_leq0(&rank_w);
+            let mut bake_w_alpha = proj_w_alpha_zero(&w_alpha);
+            let bake_b_alpha = proj_b_alpha_one(b_alpha);
+            if qat_fine_tune_epochs > 0 {
+                // QAT: ship the f16+zerobias weights the forward + the
+                // spline-fit above were calibrated against (quantize
+                // AFTER the hard sign projection).
+                bake_w1 = qat_quantize_copy(&bake_w1, qat_tau);
+                bake_w2_enc = qat_quantize_copy(&bake_w2_enc, qat_tau);
+                bake_rank_w = qat_quantize_copy(&bake_rank_w, qat_tau);
+                bake_w_alpha = qat_quantize_copy(&bake_w_alpha, qat_tau);
             }
-            if let Some(payload) = spline_attempt {
-                log_line(
-                    &format!(
-                        "output calibration spline: fit_monotone_spline on {} anchor rows (qat={})",
-                        sp_preds.len(),
-                        qat_fine_tune_epochs > 0
-                    ),
-                    log,
-                );
-
-                // Re-bake the model with the spline included.
-                // monotone_cbc: project here too — the final spline-augmented
-                // bake must be monotone-by-construction (spline is monotone,
-                // so the network must be).
-                let mut bake_w1 = proj_w1_masked(&w1);
-                let mut bake_w2_enc = proj_geq0(&w2_enc);
-                let mut bake_rank_w = proj_leq0(&rank_w);
-                let mut bake_w_alpha = proj_w_alpha_zero(&w_alpha);
-                let bake_b_alpha = proj_b_alpha_one(b_alpha);
-                if qat_fine_tune_epochs > 0 {
-                    // QAT: ship the f16+zerobias weights the forward + the
-                    // spline-fit above were calibrated against (quantize
-                    // AFTER the hard sign projection).
-                    bake_w1 = qat_quantize_copy(&bake_w1, qat_tau);
-                    bake_w2_enc = qat_quantize_copy(&bake_w2_enc, qat_tau);
-                    bake_rank_w = qat_quantize_copy(&bake_rank_w, qat_tau);
-                    bake_w_alpha = qat_quantize_copy(&bake_w_alpha, qat_tau);
-                }
-                let model = psah::PerSampleAlphaHeadModel {
-                    scaler_mean: scaler_mean.clone(),
-                    scaler_scale: scaler_scale.clone(),
-                    w1: bake_w1,
-                    b1: b1.clone(),
-                    rank_w: bake_rank_w,
-                    rank_b,
-                    reducer_w,
-                    reducer_b,
-                    w_alpha: bake_w_alpha,
-                    b_alpha: bake_b_alpha,
-                    n_hidden: n_hidden_final,
-                    n_features,
-                    leaky_alpha: hyperparams.leaky_alpha,
-                };
-                let rebaked = if use_2layer {
-                    psah::bake_per_sample_alpha_head_v3_2layer(
-                        &model,
-                        &bake_w2_enc,
-                        &b2_enc,
-                        n_hidden,
-                        n_hidden_final,
-                        if tanh_pin_active {
-                            Some(tanh_scale)
-                        } else {
-                            None
-                        },
-                        hyperparams.feature_transforms.as_deref(),
-                        hyperparams.feature_transform_params.as_deref(),
-                        Some(&payload),
-                        hyperparams.out_dtype,
-                    )
-                } else if tanh_pin_active {
-                    psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
-                        &model,
-                        tanh_scale,
-                        hyperparams.feature_transforms.as_deref(),
-                        hyperparams.feature_transform_params.as_deref(),
-                        Some(&payload),
-                    )
-                } else {
-                    // No spline for non-tanh bakes (V0_1/V0_2 path)
-                    return bake_bytes;
-                };
-                log_line(
-                    &format!(
-                        "re-baked with output calibration spline ({} bytes)",
-                        rebaked.len()
-                    ),
-                    log,
-                );
-                return rebaked;
-            }
+            let model = psah::PerSampleAlphaHeadModel {
+                scaler_mean: scaler_mean.clone(),
+                scaler_scale: scaler_scale.clone(),
+                w1: bake_w1,
+                b1: b1.clone(),
+                rank_w: bake_rank_w,
+                rank_b,
+                reducer_w,
+                reducer_b,
+                w_alpha: bake_w_alpha,
+                b_alpha: bake_b_alpha,
+                n_hidden: n_hidden_final,
+                n_features,
+                leaky_alpha: hyperparams.leaky_alpha,
+            };
+            let rebaked = if use_2layer {
+                psah::bake_per_sample_alpha_head_v3_2layer(
+                    &model,
+                    &bake_w2_enc,
+                    &b2_enc,
+                    n_hidden,
+                    n_hidden_final,
+                    if tanh_pin_active {
+                        Some(tanh_scale)
+                    } else {
+                        None
+                    },
+                    hyperparams.feature_transforms.as_deref(),
+                    hyperparams.feature_transform_params.as_deref(),
+                    Some(&payload),
+                    hyperparams.out_dtype,
+                )
+            } else if tanh_pin_active {
+                psah::bake_per_sample_alpha_head_v3_with_tanh_and_transforms(
+                    &model,
+                    tanh_scale,
+                    hyperparams.feature_transforms.as_deref(),
+                    hyperparams.feature_transform_params.as_deref(),
+                    Some(&payload),
+                )
+            } else {
+                // No spline for non-tanh bakes (V0_1/V0_2 path)
+                return bake_bytes;
+            };
+            log_line(
+                &format!(
+                    "re-baked with output calibration spline ({} bytes)",
+                    rebaked.len()
+                ),
+                log,
+            );
+            return rebaked;
         }
     }
 
@@ -8329,7 +8316,6 @@ fn predict_group_per_sample_alpha_head(
 mod arch;
 mod arch_f32;
 pub use arch::{ArchForward, arch_backward, arch_forward};
-pub use arch_f32::{ArchForwardF32, WeightScratchF32, arch_forward_f32};
 
 /// NiN-aware flush for the per-sample α head. Computes NiN over the
 /// 2N surviving predictions and routes per-prediction grad through
@@ -9962,7 +9948,10 @@ mod tests {
     const KAH_N_FEATURES: usize = 4;
     const KAH_N_PRIMARY_PAIRS: usize = 50;
 
-    fn kah_build_pool() -> (Vec<Vec<f64>>, Vec<(usize, usize)>, Vec<f64>, Vec<f64>) {
+    /// `(features, ref_ranges, ref_pjnd_target, primary_scores)` fixture pool.
+    type KahPool = (Vec<Vec<f64>>, Vec<(usize, usize)>, Vec<f64>, Vec<f64>);
+
+    fn kah_build_pool() -> KahPool {
         let mut features: Vec<Vec<f64>> = Vec::with_capacity(KAH_N_REFS * KAH_ROWS_PER_REF);
         let mut ref_ranges: Vec<(usize, usize)> = Vec::with_capacity(KAH_N_REFS);
         let mut ref_pjnd_target: Vec<f64> = Vec::with_capacity(KAH_N_REFS);

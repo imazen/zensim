@@ -200,6 +200,9 @@ fn streaming_strips_oom_80mp() {
 ///   should be amortized).
 #[test]
 fn streaming_strips_throughput_report() {
+    /// Source + distorted buffers for one synthetic test pair.
+    type PairBuf = (Vec<[u8; 3]>, Vec<[u8; 3]>);
+
     let configs = [
         ("small (256×1024)", 256usize, 1024usize, 99usize),
         ("medium (1024×2048)", 1024usize, 2048usize, 9usize),
@@ -207,7 +210,7 @@ fn streaming_strips_throughput_report() {
 
     for (label, w, h, n_pairs) in configs {
         eprintln!("\n=== {label}, {n_pairs} pairs ===");
-        let pairs: Vec<(Vec<[u8; 3]>, Vec<[u8; 3]>)> = (0..n_pairs)
+        let pairs: Vec<PairBuf> = (0..n_pairs)
             .map(|i| make_pair(w, h, i as u32 + 1))
             .collect();
 
@@ -221,7 +224,7 @@ fn streaming_strips_throughput_report() {
             let _ = z.compute(&src_img, &dst_img).unwrap();
         }
 
-        let time_path = |name: &str, run: &dyn Fn(&(Vec<[u8; 3]>, Vec<[u8; 3]>)) -> f64| -> f64 {
+        let time_path = |name: &str, run: &dyn Fn(&PairBuf) -> f64| -> f64 {
             let t = Instant::now();
             let mut acc = 0.0f64;
             for p in &pairs {
@@ -266,17 +269,16 @@ fn streaming_strips_throughput_report() {
 
         // Single-threaded
         let z_st = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
-        let time_path_st =
-            |name: &str, run: &dyn Fn(&(Vec<[u8; 3]>, Vec<[u8; 3]>)) -> f64| -> f64 {
-                let t = Instant::now();
-                let mut acc = 0.0f64;
-                for p in &pairs {
-                    acc += run(p);
-                }
-                let secs = t.elapsed().as_secs_f64();
-                eprintln!("  [1T] {name}: {:.3}s (acc={acc:.2})", secs);
-                secs
-            };
+        let time_path_st = |name: &str, run: &dyn Fn(&PairBuf) -> f64| -> f64 {
+            let t = Instant::now();
+            let mut acc = 0.0f64;
+            for p in &pairs {
+                acc += run(p);
+            }
+            let secs = t.elapsed().as_secs_f64();
+            eprintln!("  [1T] {name}: {:.3}s (acc={acc:.2})", secs);
+            secs
+        };
         let t_full_st = time_path_st("full     ", &|(s, d)| {
             let src_img = RgbSlice::new(s, w, h);
             let dst_img = RgbSlice::new(d, w, h);

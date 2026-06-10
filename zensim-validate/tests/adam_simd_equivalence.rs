@@ -99,8 +99,8 @@ fn matches_scalar_w1_47616_t100() {
     assert_close("w", &wa, &wb, 1e-12);
     assert_close("m", &ma, &mb, 1e-12);
     assert_close("v", &va, &vb, 1e-12);
-    for i in 0..n {
-        assert_eq!(gb[i], 0.0, "g must reset to zero at i={i}");
+    for (i, &g) in gb.iter().enumerate() {
+        assert_eq!(g, 0.0, "g must reset to zero at i={i}");
     }
 }
 

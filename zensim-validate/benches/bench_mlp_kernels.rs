@@ -6,9 +6,8 @@
 //! Tests three kernel shapes:
 //!  * `forward_372x128`  — production training shape
 //!  * `backprop_372x128` — production training shape
-//!  * `pair_372x128`     — one RankNet pair update
-//!                         (2× forward + 2× backprop, matching the
-//!                         actual training inner loop)
+//!  * `pair_372x128`     — one RankNet pair update (2× forward +
+//!    2× backprop, matching the actual training inner loop)
 //!
 //! Each benchmark sets `Throughput::Elements(N)` to the FMA count so
 //! the report shows MFLOPS-equivalent throughput, which is the only
@@ -312,6 +311,7 @@ zenbench::main!(bench_kernels);
 // fair (no dispatch overhead in the "scalar" arm).
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)] // bench shim mirrors the kernel signature 1:1
 fn forward_scalar_view(
     x: &[f64],
     w1: &[f64],

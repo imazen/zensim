@@ -9,6 +9,7 @@
 //!   - A1 bounded ≤ 100 (subtracting a non-negative term),
 //!   - A2 self-identity is the unique max (the squared distance is 0
 //!     exactly at x_id, > 0 elsewhere when w > 0),
+//!
 //! WITHOUT forcing A3 (degradation monotonicity) — the encoder is free,
 //! so g = ‖h(x) − h_id‖²_w can be non-monotone in the input features.
 //! That is the falsification target: does an expressive axioms-only
@@ -84,8 +85,7 @@ impl Model {
     /// h = LeakyReLU(W1·x + b1). Returns (h_pre, h).
     fn encode(&self, x: &[f64]) -> (Vec<f64>, Vec<f64>) {
         let mut hp = self.b1.clone();
-        for i in 0..NF {
-            let xi = x[i];
+        for (i, &xi) in x[..NF].iter().enumerate() {
             if xi == 0.0 {
                 continue;
             }
@@ -321,15 +321,15 @@ fn main() {
             //   dscore/dh_j     = −λ·score·2·w_j·(h_j−h_id_j)
             //   dscore/dθ_w_j   = −λ·score·(h_j−h_id_j)²·σ(θ_w_j)
             //   dscore/dθ_lam   = −g·score·σ(θ_lam)
-            let mut backprop_side = |ds: f64,
-                                     s: f64,
-                                     h: &[f64],
-                                     hp: &[f64],
-                                     x: &[f64],
-                                     gw1: &mut [f64],
-                                     gb1: &mut [f64],
-                                     gtw: &mut [f64],
-                                     gtl: &mut f64| {
+            let backprop_side = |ds: f64,
+                                 s: f64,
+                                 h: &[f64],
+                                 hp: &[f64],
+                                 x: &[f64],
+                                 gw1: &mut [f64],
+                                 gb1: &mut [f64],
+                                 gtw: &mut [f64],
+                                 gtl: &mut f64| {
                 let mut g_side = 0.0;
                 for j in 0..NH {
                     let wj = softplus(m.theta_w[j]);
@@ -362,7 +362,7 @@ fn main() {
         t += 1;
         let bc1 = 1.0 - b1c.powi(t);
         let bc2 = 1.0 - b2c.powi(t);
-        let mut upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64]| {
+        let upd = |w: &mut [f64], g: &[f64], mm: &mut [f64], vv: &mut [f64]| {
             for i in 0..w.len() {
                 mm[i] = b1c * mm[i] + (1.0 - b1c) * g[i];
                 vv[i] = b2c * vv[i] + (1.0 - b2c) * g[i] * g[i];

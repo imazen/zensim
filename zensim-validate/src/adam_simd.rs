@@ -312,6 +312,7 @@ pub fn adam_update_inner_v4_rsqrt(token: archmage::X64V4Token, args: &mut AdamUp
 /// Bench-only entry-point — runs the rsqrt-based v4 kernel directly,
 /// skipping the dispatch wrapper to isolate kernel cost.
 #[cfg(target_arch = "x86_64")]
+#[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
 pub fn adam_update_rsqrt_v4(args: &mut AdamUpdateArgs<'_>) {
     use archmage::SimdToken;
     if let Some(token) = <archmage::X64V4Token as SimdToken>::summon() {
@@ -475,6 +476,7 @@ mod tests {
     /// Build a representative test parameter vector with mixed scales —
     /// includes positive/negative gradients, near-zero `v` (worst case for
     /// `sqrt(v) + eps`), and the typical [-1, 1] weight range.
+    #[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
     fn synth_state(n: usize, seed: u64) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
         let mut state = seed;
         let mut nxt = || {
@@ -503,6 +505,7 @@ mod tests {
         (w, g, m, v)
     }
 
+    #[allow(dead_code)] // compiled into bench/test targets via #[path] include; each target uses a subset
     fn make_args<'a>(
         w: &'a mut [f64],
         g: &'a mut [f64],

@@ -75,13 +75,16 @@ pub const EPS: f64 = 1e-8;
 
 /// Recommended hybrid weighting per Li 2020 Table 2 (last row,
 /// KonIQ-10k headline result).
+#[allow(dead_code)] // paper-reference default, kept importable for recipes
 pub const PAPER_HYBRID_BETA: f64 = 0.1;
 
 /// Recommended `p` per Li 2020 Table 1 (best single-loss config).
+#[allow(dead_code)] // paper-reference default, kept importable for recipes
 pub const PAPER_P: f64 = 1.0;
 
 /// Recommended `q` per Li 2020 (the `q=2` choice is z-score-equivalent
 /// centering + scaling; matches the reference impl default).
+#[allow(dead_code)] // paper-reference default, kept importable for recipes
 pub const PAPER_Q: f64 = 2.0;
 
 /// Compute the Norm-in-Norm loss AND its per-prediction gradient in

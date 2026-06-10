@@ -774,58 +774,59 @@ fn run<R: Runtime>(
             // can reuse them; we just have to launch with the right
             // CubeCount and pass the correct `batch_rows` to
             // backprop_w1.
-            if anchor_active && rng.next_f64_01() < hp.anchor_step_p {
-                if let Some(std_a) = std_anchor.as_ref() {
-                    if std_a.n_rows > 0 && std_a.total_weight > 0.0 {
-                        let ctx = AuxFireCtx::<R> {
-                            client: &client,
-                            cube_dim_h,
-                            cube_dim_256,
-                            n_features,
-                            n_hidden,
-                            two_k,
-                            tanh_scale,
-                            leaky_alpha,
-                            w1_h: &w1_h,
-                            b1_h: &b1_h,
-                            rank_w_h: &rank_w_h,
-                            reducer_w_h: &reducer_w_h,
-                            w_alpha_h: &w_alpha_h,
-                            rank_b_h: &rank_b_h,
-                            reducer_b_h: &reducer_b_h,
-                            b_alpha_h: &b_alpha_h,
-                            h_pre_h: &h_pre_h,
-                            h_h: &h_h,
-                            y_rank_h: &y_rank_h,
-                            y_pool_h: &y_pool_h,
-                            stats_h: &stats_h,
-                            max_idx_h: &max_idx_h,
-                            alpha_h: &alpha_h,
-                            y_pre_h: &y_pre_h,
-                            y_score_h: &y_score_h,
-                            dl_dypre_h: &dl_dypre_h,
-                            dh_pre_h: &dh_pre_h,
-                            gw1: &gw1,
-                            gb1: &gb1,
-                            g_rank_w: &g_rank_w,
-                            g_reducer_w: &g_reducer_w,
-                            g_w_alpha: &g_w_alpha,
-                            g_rank_b: &g_rank_b,
-                            g_reducer_b: &g_reducer_b,
-                            g_b_alpha: &g_b_alpha,
-                        };
-                        fire_anchor_aux::<R>(
-                            &ctx,
-                            &mut rng,
-                            std_a,
-                            &mut aux_x_host,
-                            &mut aux_anchor_targets_host,
-                            &mut aux_anchor_weights_host,
-                            k_aux,
-                            anchor_w_f32,
-                        );
-                    }
-                }
+            if anchor_active
+                && rng.next_f64_01() < hp.anchor_step_p
+                && let Some(std_a) = std_anchor.as_ref()
+                && std_a.n_rows > 0
+                && std_a.total_weight > 0.0
+            {
+                let ctx = AuxFireCtx::<R> {
+                    client: &client,
+                    cube_dim_h,
+                    cube_dim_256,
+                    n_features,
+                    n_hidden,
+                    two_k,
+                    tanh_scale,
+                    leaky_alpha,
+                    w1_h: &w1_h,
+                    b1_h: &b1_h,
+                    rank_w_h: &rank_w_h,
+                    reducer_w_h: &reducer_w_h,
+                    w_alpha_h: &w_alpha_h,
+                    rank_b_h: &rank_b_h,
+                    reducer_b_h: &reducer_b_h,
+                    b_alpha_h: &b_alpha_h,
+                    h_pre_h: &h_pre_h,
+                    h_h: &h_h,
+                    y_rank_h: &y_rank_h,
+                    y_pool_h: &y_pool_h,
+                    stats_h: &stats_h,
+                    max_idx_h: &max_idx_h,
+                    alpha_h: &alpha_h,
+                    y_pre_h: &y_pre_h,
+                    y_score_h: &y_score_h,
+                    dl_dypre_h: &dl_dypre_h,
+                    dh_pre_h: &dh_pre_h,
+                    gw1: &gw1,
+                    gb1: &gb1,
+                    g_rank_w: &g_rank_w,
+                    g_reducer_w: &g_reducer_w,
+                    g_w_alpha: &g_w_alpha,
+                    g_rank_b: &g_rank_b,
+                    g_reducer_b: &g_reducer_b,
+                    g_b_alpha: &g_b_alpha,
+                };
+                fire_anchor_aux::<R>(
+                    &ctx,
+                    &mut rng,
+                    std_a,
+                    &mut aux_x_host,
+                    &mut aux_anchor_targets_host,
+                    &mut aux_anchor_weights_host,
+                    k_aux,
+                    anchor_w_f32,
+                );
             }
 
             // EXP-V11-D-PJND-DOMINANT (task #198) — PJND-passthrough
@@ -833,167 +834,169 @@ fn run<R: Runtime>(
             // Both pools may fire on the same minibatch step; their
             // gradients accumulate into the shared adam.g* buffer
             // before the single Adam step at end-of-step.
-            if pjnd_active && rng.next_f64_01() < hp.pjnd_passthrough_step_p {
-                if let Some(std_pa) = std_pjnd.as_ref() {
-                    if std_pa.n_rows > 0 && std_pa.total_weight > 0.0 {
-                        let ctx = AuxFireCtx::<R> {
-                            client: &client,
-                            cube_dim_h,
-                            cube_dim_256,
-                            n_features,
-                            n_hidden,
-                            two_k,
-                            tanh_scale,
-                            leaky_alpha,
-                            w1_h: &w1_h,
-                            b1_h: &b1_h,
-                            rank_w_h: &rank_w_h,
-                            reducer_w_h: &reducer_w_h,
-                            w_alpha_h: &w_alpha_h,
-                            rank_b_h: &rank_b_h,
-                            reducer_b_h: &reducer_b_h,
-                            b_alpha_h: &b_alpha_h,
-                            h_pre_h: &h_pre_h,
-                            h_h: &h_h,
-                            y_rank_h: &y_rank_h,
-                            y_pool_h: &y_pool_h,
-                            stats_h: &stats_h,
-                            max_idx_h: &max_idx_h,
-                            alpha_h: &alpha_h,
-                            y_pre_h: &y_pre_h,
-                            y_score_h: &y_score_h,
-                            dl_dypre_h: &dl_dypre_h,
-                            dh_pre_h: &dh_pre_h,
-                            gw1: &gw1,
-                            gb1: &gb1,
-                            g_rank_w: &g_rank_w,
-                            g_reducer_w: &g_reducer_w,
-                            g_w_alpha: &g_w_alpha,
-                            g_rank_b: &g_rank_b,
-                            g_reducer_b: &g_reducer_b,
-                            g_b_alpha: &g_b_alpha,
-                        };
-                        fire_anchor_aux::<R>(
-                            &ctx,
-                            &mut rng,
-                            std_pa,
-                            &mut aux_x_host,
-                            &mut aux_pjnd_targets_host,
-                            &mut aux_pjnd_weights_host,
-                            k_aux,
-                            pjnd_w_f32,
-                        );
-                    }
-                }
+            if pjnd_active
+                && rng.next_f64_01() < hp.pjnd_passthrough_step_p
+                && let Some(std_pa) = std_pjnd.as_ref()
+                && std_pa.n_rows > 0
+                && std_pa.total_weight > 0.0
+            {
+                let ctx = AuxFireCtx::<R> {
+                    client: &client,
+                    cube_dim_h,
+                    cube_dim_256,
+                    n_features,
+                    n_hidden,
+                    two_k,
+                    tanh_scale,
+                    leaky_alpha,
+                    w1_h: &w1_h,
+                    b1_h: &b1_h,
+                    rank_w_h: &rank_w_h,
+                    reducer_w_h: &reducer_w_h,
+                    w_alpha_h: &w_alpha_h,
+                    rank_b_h: &rank_b_h,
+                    reducer_b_h: &reducer_b_h,
+                    b_alpha_h: &b_alpha_h,
+                    h_pre_h: &h_pre_h,
+                    h_h: &h_h,
+                    y_rank_h: &y_rank_h,
+                    y_pool_h: &y_pool_h,
+                    stats_h: &stats_h,
+                    max_idx_h: &max_idx_h,
+                    alpha_h: &alpha_h,
+                    y_pre_h: &y_pre_h,
+                    y_score_h: &y_score_h,
+                    dl_dypre_h: &dl_dypre_h,
+                    dh_pre_h: &dh_pre_h,
+                    gw1: &gw1,
+                    gb1: &gb1,
+                    g_rank_w: &g_rank_w,
+                    g_reducer_w: &g_reducer_w,
+                    g_w_alpha: &g_w_alpha,
+                    g_rank_b: &g_rank_b,
+                    g_reducer_b: &g_reducer_b,
+                    g_b_alpha: &g_b_alpha,
+                };
+                fire_anchor_aux::<R>(
+                    &ctx,
+                    &mut rng,
+                    std_pa,
+                    &mut aux_x_host,
+                    &mut aux_pjnd_targets_host,
+                    &mut aux_pjnd_weights_host,
+                    k_aux,
+                    pjnd_w_f32,
+                );
             }
 
-            if equiv_active && rng.next_f64_01() < hp.cross_codec_eq_step_p {
-                if let Some(std_e) = std_equiv.as_ref() {
-                    if std_e.n_rows > 0 && std_e.total_weight > 0.0 {
-                        let ctx = AuxFireCtx::<R> {
-                            client: &client,
-                            cube_dim_h,
-                            cube_dim_256,
-                            n_features,
-                            n_hidden,
-                            two_k,
-                            tanh_scale,
-                            leaky_alpha,
-                            w1_h: &w1_h,
-                            b1_h: &b1_h,
-                            rank_w_h: &rank_w_h,
-                            reducer_w_h: &reducer_w_h,
-                            w_alpha_h: &w_alpha_h,
-                            rank_b_h: &rank_b_h,
-                            reducer_b_h: &reducer_b_h,
-                            b_alpha_h: &b_alpha_h,
-                            h_pre_h: &h_pre_h,
-                            h_h: &h_h,
-                            y_rank_h: &y_rank_h,
-                            y_pool_h: &y_pool_h,
-                            stats_h: &stats_h,
-                            max_idx_h: &max_idx_h,
-                            alpha_h: &alpha_h,
-                            y_pre_h: &y_pre_h,
-                            y_score_h: &y_score_h,
-                            dl_dypre_h: &dl_dypre_h,
-                            dh_pre_h: &dh_pre_h,
-                            gw1: &gw1,
-                            gb1: &gb1,
-                            g_rank_w: &g_rank_w,
-                            g_reducer_w: &g_reducer_w,
-                            g_w_alpha: &g_w_alpha,
-                            g_rank_b: &g_rank_b,
-                            g_reducer_b: &g_reducer_b,
-                            g_b_alpha: &g_b_alpha,
-                        };
-                        fire_equiv_aux::<R>(
-                            &ctx,
-                            &mut rng,
-                            std_e,
-                            &mut aux_x_host,
-                            &mut aux_eq_weights_host,
-                            &mut aux_eq_butter_host,
-                            k_aux,
-                            eq_w_f32,
-                            rp_w_f32,
-                        );
-                    }
-                }
+            if equiv_active
+                && rng.next_f64_01() < hp.cross_codec_eq_step_p
+                && let Some(std_e) = std_equiv.as_ref()
+                && std_e.n_rows > 0
+                && std_e.total_weight > 0.0
+            {
+                let ctx = AuxFireCtx::<R> {
+                    client: &client,
+                    cube_dim_h,
+                    cube_dim_256,
+                    n_features,
+                    n_hidden,
+                    two_k,
+                    tanh_scale,
+                    leaky_alpha,
+                    w1_h: &w1_h,
+                    b1_h: &b1_h,
+                    rank_w_h: &rank_w_h,
+                    reducer_w_h: &reducer_w_h,
+                    w_alpha_h: &w_alpha_h,
+                    rank_b_h: &rank_b_h,
+                    reducer_b_h: &reducer_b_h,
+                    b_alpha_h: &b_alpha_h,
+                    h_pre_h: &h_pre_h,
+                    h_h: &h_h,
+                    y_rank_h: &y_rank_h,
+                    y_pool_h: &y_pool_h,
+                    stats_h: &stats_h,
+                    max_idx_h: &max_idx_h,
+                    alpha_h: &alpha_h,
+                    y_pre_h: &y_pre_h,
+                    y_score_h: &y_score_h,
+                    dl_dypre_h: &dl_dypre_h,
+                    dh_pre_h: &dh_pre_h,
+                    gw1: &gw1,
+                    gb1: &gb1,
+                    g_rank_w: &g_rank_w,
+                    g_reducer_w: &g_reducer_w,
+                    g_w_alpha: &g_w_alpha,
+                    g_rank_b: &g_rank_b,
+                    g_reducer_b: &g_reducer_b,
+                    g_b_alpha: &g_b_alpha,
+                };
+                fire_equiv_aux::<R>(
+                    &ctx,
+                    &mut rng,
+                    std_e,
+                    &mut aux_x_host,
+                    &mut aux_eq_weights_host,
+                    &mut aux_eq_butter_host,
+                    k_aux,
+                    eq_w_f32,
+                    rp_w_f32,
+                );
             }
 
-            if sigma_floor_active && rng.next_f64_01() < hp.dynamic_range_step_p {
-                if let Some(std_e) = std_equiv.as_ref() {
-                    if std_e.n_rows >= probe_n {
-                        let ctx = AuxFireCtx::<R> {
-                            client: &client,
-                            cube_dim_h,
-                            cube_dim_256,
-                            n_features,
-                            n_hidden,
-                            two_k,
-                            tanh_scale,
-                            leaky_alpha,
-                            w1_h: &w1_h,
-                            b1_h: &b1_h,
-                            rank_w_h: &rank_w_h,
-                            reducer_w_h: &reducer_w_h,
-                            w_alpha_h: &w_alpha_h,
-                            rank_b_h: &rank_b_h,
-                            reducer_b_h: &reducer_b_h,
-                            b_alpha_h: &b_alpha_h,
-                            h_pre_h: &h_pre_h,
-                            h_h: &h_h,
-                            y_rank_h: &y_rank_h,
-                            y_pool_h: &y_pool_h,
-                            stats_h: &stats_h,
-                            max_idx_h: &max_idx_h,
-                            alpha_h: &alpha_h,
-                            y_pre_h: &y_pre_h,
-                            y_score_h: &y_score_h,
-                            dl_dypre_h: &dl_dypre_h,
-                            dh_pre_h: &dh_pre_h,
-                            gw1: &gw1,
-                            gb1: &gb1,
-                            g_rank_w: &g_rank_w,
-                            g_reducer_w: &g_reducer_w,
-                            g_w_alpha: &g_w_alpha,
-                            g_rank_b: &g_rank_b,
-                            g_reducer_b: &g_reducer_b,
-                            g_b_alpha: &g_b_alpha,
-                        };
-                        fire_sigma_floor_aux::<R>(
-                            &ctx,
-                            &mut rng,
-                            std_e,
-                            &mut aux_x_host,
-                            probe_n,
-                            dr_w_f32,
-                            dr_sigma_f32,
-                            &sigma_reduce_h,
-                        );
-                    }
-                }
+            if sigma_floor_active
+                && rng.next_f64_01() < hp.dynamic_range_step_p
+                && let Some(std_e) = std_equiv.as_ref()
+                && std_e.n_rows >= probe_n
+            {
+                let ctx = AuxFireCtx::<R> {
+                    client: &client,
+                    cube_dim_h,
+                    cube_dim_256,
+                    n_features,
+                    n_hidden,
+                    two_k,
+                    tanh_scale,
+                    leaky_alpha,
+                    w1_h: &w1_h,
+                    b1_h: &b1_h,
+                    rank_w_h: &rank_w_h,
+                    reducer_w_h: &reducer_w_h,
+                    w_alpha_h: &w_alpha_h,
+                    rank_b_h: &rank_b_h,
+                    reducer_b_h: &reducer_b_h,
+                    b_alpha_h: &b_alpha_h,
+                    h_pre_h: &h_pre_h,
+                    h_h: &h_h,
+                    y_rank_h: &y_rank_h,
+                    y_pool_h: &y_pool_h,
+                    stats_h: &stats_h,
+                    max_idx_h: &max_idx_h,
+                    alpha_h: &alpha_h,
+                    y_pre_h: &y_pre_h,
+                    y_score_h: &y_score_h,
+                    dl_dypre_h: &dl_dypre_h,
+                    dh_pre_h: &dh_pre_h,
+                    gw1: &gw1,
+                    gb1: &gb1,
+                    g_rank_w: &g_rank_w,
+                    g_reducer_w: &g_reducer_w,
+                    g_w_alpha: &g_w_alpha,
+                    g_rank_b: &g_rank_b,
+                    g_reducer_b: &g_reducer_b,
+                    g_b_alpha: &g_b_alpha,
+                };
+                fire_sigma_floor_aux::<R>(
+                    &ctx,
+                    &mut rng,
+                    std_e,
+                    &mut aux_x_host,
+                    probe_n,
+                    dr_w_f32,
+                    dr_sigma_f32,
+                    &sigma_reduce_h,
+                );
             }
 
             // ---------- 6. L2 ----------
@@ -1111,7 +1114,7 @@ fn l2_add_plain<R: Runtime>(
     l2: f32,
     n: usize,
 ) {
-    let cubes = ((n as u32) + 255) / 256;
+    let cubes = (n as u32).div_ceil(256);
     unsafe {
         kernels::l2_add_kernel::launch::<R>(
             client,
@@ -1131,7 +1134,7 @@ fn l2_add_atomic<R: Runtime>(
     l2: f32,
     n: usize,
 ) {
-    let cubes = ((n as u32) + 255) / 256;
+    let cubes = (n as u32).div_ceil(256);
     unsafe {
         kernels::l2_add_atomic_kernel::launch::<R>(
             client,
@@ -1144,6 +1147,7 @@ fn l2_add_atomic<R: Runtime>(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the adam_step kernel signature 1:1
 fn adam_plain<R: Runtime>(
     client: &ComputeClient<R>,
     w: &cubecl::server::Handle,
@@ -1155,7 +1159,7 @@ fn adam_plain<R: Runtime>(
     bc2: f32,
     n: usize,
 ) {
-    let cubes = ((n as u32) + 255) / 256;
+    let cubes = (n as u32).div_ceil(256);
     unsafe {
         kernels::adam_step_kernel::launch::<R>(
             client,
@@ -1172,6 +1176,7 @@ fn adam_plain<R: Runtime>(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the adam_step kernel signature 1:1
 fn adam_atomic<R: Runtime>(
     client: &ComputeClient<R>,
     w: &cubecl::server::Handle,
@@ -1183,7 +1188,7 @@ fn adam_atomic<R: Runtime>(
     bc2: f32,
     n: usize,
 ) {
-    let cubes = ((n as u32) + 255) / 256;
+    let cubes = (n as u32).div_ceil(256);
     unsafe {
         kernels::adam_step_atomic_grad_kernel::launch::<R>(
             client,

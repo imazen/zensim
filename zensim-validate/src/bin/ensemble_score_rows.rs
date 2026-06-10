@@ -30,11 +30,16 @@ use zensim_validate::parquet_loader;
 // (ensemble_score_rows doesn't carry EXP-CROSS-CODEC-V9 spline plumbing).
 // Bit-exact f32 ±1e-6 on representative inputs.
 
+/// `(w_alpha, b_alpha, rank_w, rank_b, reducer_w, reducer_b, p_norm)` payload.
+type PerSampleHeadPayload = (Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32);
+/// `(rank_w, rank_b, alpha_logit, reducer_w, reducer_b, p_norm)` payload.
+type HybridHeadPayload = (Vec<f32>, f32, f32, [f32; 4], f32, f32);
+
 fn score_row(
     predictor: &mut Predictor<'_>,
     has_transforms: bool,
-    per_sample: Option<&(Vec<f32>, f32, Vec<f32>, f32, [f32; 4], f32, f32)>,
-    hybrid: Option<&(Vec<f32>, f32, f32, [f32; 4], f32, f32)>,
+    per_sample: Option<&PerSampleHeadPayload>,
+    hybrid: Option<&HybridHeadPayload>,
     tanh_pin_scale: Option<f64>,
     f32_features: &mut [f32],
     row: &[f64],

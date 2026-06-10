@@ -398,8 +398,8 @@ struct Args {
     /// T8.1 (2026-05-16): mini-batch SGD size. Default 1 = per-pair
     /// Adam (bit-identical to legacy / V_18 / V_22-IW trainer). When
     /// > 1, the trainer accumulates K RankNet pair gradients between
-    /// each Adam step, with a final-flush at epoch end if
-    /// `pairs_per_epoch % K != 0`.
+    /// > each Adam step, with a final-flush at epoch end if
+    /// > `pairs_per_epoch % K != 0`.
     ///
     /// **Convergence implications**: less noisy gradients than per-pair
     /// SGD. Usually helps generalization. Can hurt regularization on
@@ -584,8 +584,8 @@ struct Args {
     hybrid_head: bool,
 
     /// EX-2 follow-up²: per-sample α head. Replaces the scalar α in
-    /// `--hybrid-head` with a learned function `α(x) = sigmoid(W_α · h
-    /// + b_α)` predicted from the encoder's hidden vector. Lets the
+    /// `--hybrid-head` with a learned function `α(x) = sigmoid(W_α · h +
+    /// b_α)` predicted from the encoder's hidden vector. Lets the
     /// model assign α per-pair so photo-like inputs (CID22-shaped)
     /// pull α toward rank-dominant while JND-step-grid inputs
     /// (KonJND-shaped) pull α toward pool-dominant.
@@ -1428,10 +1428,10 @@ pub(crate) fn load_csv(
 /// positive Δb means A is quality-worse than B). `butter_diff` is
 /// always populated when butter_a/butter_b columns are present; empty
 /// otherwise (callers detect via `butter_diff.is_empty()`).
-fn load_equiv_parquet(
-    path: &PathBuf,
-    max_features: usize,
-) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<f64>), String> {
+/// `(features_a, features_b, row_weights, butter_diff)` columns.
+type EquivColumns = (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<f64>);
+
+fn load_equiv_parquet(path: &PathBuf, max_features: usize) -> Result<EquivColumns, String> {
     use arrow::array::{Array, Float32Array, Float64Array};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -1576,13 +1576,9 @@ fn load_equiv_parquet(
             };
             a_per_col.push(v);
         }
-        for row in 0..n_rows {
-            let mut buf = vec![0.0f64; n_features];
-            for d in 0..n_features {
-                buf[d] = a_per_col[d][row];
-            }
-            features_a.push(buf);
-        }
+        features_a.extend(
+            (0..n_rows).map(|row| a_per_col.iter().map(|col| col[row]).collect::<Vec<f64>>()),
+        );
 
         // fb_0..fb_<n_features-1>
         let mut b_per_col: Vec<Vec<f64>> = Vec::with_capacity(n_features);
@@ -1603,13 +1599,9 @@ fn load_equiv_parquet(
             };
             b_per_col.push(v);
         }
-        for row in 0..n_rows {
-            let mut buf = vec![0.0f64; n_features];
-            for d in 0..n_features {
-                buf[d] = b_per_col[d][row];
-            }
-            features_b.push(buf);
-        }
+        features_b.extend(
+            (0..n_rows).map(|row| b_per_col.iter().map(|col| col[row]).collect::<Vec<f64>>()),
+        );
     }
 
     Ok((features_a, features_b, row_weights, butter_diff))
@@ -2078,7 +2070,7 @@ fn main() {
                     }
                 }
             }
-            let refs: Vec<Vec<f64>> = g.feature_rows.iter().map(|r| r.clone()).collect();
+            let refs: Vec<Vec<f64>> = g.feature_rows.to_vec();
             if let Err(e) =
                 mlp_train::sweep_nan_inf(&refs, &transforms, &format!("group '{}'", g.name))
             {
@@ -2425,42 +2417,38 @@ fn main() {
     //         butter_a, butter_b, row_weight, fa_0..fa_<M-1>, fb_0..fb_<M-1>
     // We discard the bookkeeping columns and just collect the standardized
     // (features_a, features_b) pairs + row_weight.
-    let (equiv_a_storage, equiv_b_storage, equiv_row_weights, equiv_butter_diff): (
-        Vec<Vec<f64>>,
-        Vec<Vec<f64>>,
-        Vec<f64>,
-        Vec<f64>,
-    ) = if let Some(equiv_path) = &args.cross_codec_eq_parquet {
-        if args.cross_codec_eq_weight <= 0.0 {
-            eprintln!(
-                "WARNING: --cross-codec-eq-parquet set but \
-                 --cross-codec-eq-weight is 0; equiv data will be ignored."
-            );
-        }
-        match load_equiv_parquet(equiv_path, n_features) {
-            Ok((a, b, w, bd)) => {
+    let (equiv_a_storage, equiv_b_storage, equiv_row_weights, equiv_butter_diff): EquivColumns =
+        if let Some(equiv_path) = &args.cross_codec_eq_parquet {
+            if args.cross_codec_eq_weight <= 0.0 {
                 eprintln!(
-                    "equiv parquet: loaded {} pairs from {:?} (weight={}, step_p={}, butter_diff={})",
-                    a.len(),
-                    equiv_path,
-                    args.cross_codec_eq_weight,
-                    args.cross_codec_eq_step_p,
-                    if bd.is_empty() {
-                        "absent".to_string()
-                    } else {
-                        format!("{}", bd.len())
-                    },
+                    "WARNING: --cross-codec-eq-parquet set but \
+                 --cross-codec-eq-weight is 0; equiv data will be ignored."
                 );
-                (a, b, w, bd)
             }
-            Err(e) => {
-                eprintln!("equiv parquet load failed: {e}");
-                std::process::exit(1);
+            match load_equiv_parquet(equiv_path, n_features) {
+                Ok((a, b, w, bd)) => {
+                    eprintln!(
+                        "equiv parquet: loaded {} pairs from {:?} (weight={}, step_p={}, butter_diff={})",
+                        a.len(),
+                        equiv_path,
+                        args.cross_codec_eq_weight,
+                        args.cross_codec_eq_step_p,
+                        if bd.is_empty() {
+                            "absent".to_string()
+                        } else {
+                            format!("{}", bd.len())
+                        },
+                    );
+                    (a, b, w, bd)
+                }
+                Err(e) => {
+                    eprintln!("equiv parquet load failed: {e}");
+                    std::process::exit(1);
+                }
             }
-        }
-    } else {
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new())
-    };
+        } else {
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+        };
     let equiv_a_refs: Vec<&[f64]> = equiv_a_storage.iter().map(|r| r.as_slice()).collect();
     let equiv_b_refs: Vec<&[f64]> = equiv_b_storage.iter().map(|r| r.as_slice()).collect();
     let equiv_loaded: Option<EquivPairs<'_>> =

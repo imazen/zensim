@@ -2266,11 +2266,7 @@ impl PrecomputedReference {
                 rows,
             ));
         }
-        PrecomputedReferenceView {
-            scales,
-            ref_width: self.ref_width,
-            ref_height: src_y1 - src_y0,
-        }
+        PrecomputedReferenceView { scales }
     }
 }
 
@@ -2285,8 +2281,6 @@ impl PrecomputedReference {
 pub(crate) struct PrecomputedReferenceView<'a> {
     /// Per scale: `(planes, padded_width, height)`.
     pub(crate) scales: Vec<([&'a [f32]; 3], usize, usize)>,
-    pub(crate) ref_width: usize,
-    pub(crate) ref_height: usize,
 }
 
 /// Trait the strip kernel uses to access an arbitrary multi-scale
@@ -2298,8 +2292,6 @@ pub(crate) struct PrecomputedReferenceView<'a> {
 /// signature without copies.
 pub(crate) trait MultiScaleRef {
     fn num_scales(&self) -> usize;
-    fn ref_width(&self) -> usize;
-    fn ref_height(&self) -> usize;
     /// `(planes, padded_width, height)` at the given scale.
     fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize);
 }
@@ -2308,14 +2300,6 @@ impl MultiScaleRef for PrecomputedReference {
     #[inline]
     fn num_scales(&self) -> usize {
         self.scales.len()
-    }
-    #[inline]
-    fn ref_width(&self) -> usize {
-        self.ref_width
-    }
-    #[inline]
-    fn ref_height(&self) -> usize {
-        self.ref_height
     }
     #[inline]
     fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize) {
@@ -2328,14 +2312,6 @@ impl<'a> MultiScaleRef for PrecomputedReferenceView<'a> {
     #[inline]
     fn num_scales(&self) -> usize {
         self.scales.len()
-    }
-    #[inline]
-    fn ref_width(&self) -> usize {
-        self.ref_width
-    }
-    #[inline]
-    fn ref_height(&self) -> usize {
-        self.ref_height
     }
     #[inline]
     fn scale(&self, idx: usize) -> ([&[f32]; 3], usize, usize) {
@@ -2765,7 +2741,8 @@ pub(crate) fn compute_multiscale_stats_streaming_strips_with_ref(
         )
     };
 
-    let parallel_strips = config.allow_multithreading && cfg!(feature = "threads");
+    #[cfg(feature = "threads")]
+    let parallel_strips = config.allow_multithreading;
     #[cfg(feature = "threads")]
     let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = if parallel_strips {
         use rayon::prelude::*;
@@ -2918,7 +2895,8 @@ pub(crate) fn compute_multiscale_stats_streaming_strips(
         };
 
     // Per-strip results (collected, then merged).
-    let parallel_strips = config.allow_multithreading && cfg!(feature = "threads");
+    #[cfg(feature = "threads")]
+    let parallel_strips = config.allow_multithreading;
     #[cfg(feature = "threads")]
     let strip_results: Vec<(Vec<ScaleAccumulators>, [f64; 3], usize)> = if parallel_strips {
         use rayon::prelude::*;
@@ -3739,7 +3717,7 @@ mod tests {
         let dst_img = RgbSlice::new(&dst, w, h);
 
         let config = ZensimConfig::default();
-        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+        let weights: Vec<f64> = WEIGHTS.to_vec();
 
         // Full-image stats.
         let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
@@ -3853,7 +3831,7 @@ mod tests {
             compute_iw_features: true,
             ..Default::default()
         };
-        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+        let weights: Vec<f64> = WEIGHTS.to_vec();
 
         let precomp = PrecomputedReference::new(&src_img, config.num_scales, false);
         let (full_stats, full_offset) =
@@ -4116,7 +4094,7 @@ mod tests {
             compute_iw_features: true,
             ..Default::default()
         };
-        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+        let weights: Vec<f64> = WEIGHTS.to_vec();
 
         // Per-strip ref path
         let (a_stats, a_offset) = compute_multiscale_stats_streaming_strips(
@@ -4200,7 +4178,7 @@ mod tests {
             compute_iw_features: true,
             ..Default::default()
         };
-        let weights: Vec<f64> = WEIGHTS.iter().copied().collect();
+        let weights: Vec<f64> = WEIGHTS.to_vec();
 
         // Worst observed rel/abs across all pairs and features.
         let mut overall_worst_rel = 0.0f64;
@@ -4234,7 +4212,7 @@ mod tests {
                         }
                         1 => {
                             // Multi-frequency checkerboard
-                            let freq = 4 + (pair_idx as usize % 12);
+                            let freq = 4 + (pair_idx % 12);
                             let tile = ((x * freq / w) + (y * freq / h)) & 1;
                             let v = if tile == 0 { 240u8 } else { 16u8 };
                             (
@@ -4245,7 +4223,7 @@ mod tests {
                         }
                         2 => {
                             // Horizontal stripes
-                            let stripe = (y / (4 + (pair_idx as usize % 16))) & 1;
+                            let stripe = (y / (4 + (pair_idx % 16))) & 1;
                             let v = if stripe == 0 { 200u8 } else { 50u8 };
                             (
                                 v.wrapping_add((x & 7) as u8),
@@ -4255,7 +4233,7 @@ mod tests {
                         }
                         3 => {
                             // Vertical stripes
-                            let stripe = (x / (4 + (pair_idx as usize % 16))) & 1;
+                            let stripe = (x / (4 + (pair_idx % 16))) & 1;
                             let v = if stripe == 0 { 200u8 } else { 50u8 };
                             (
                                 v ^ ((x ^ y) as u8),

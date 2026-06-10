@@ -79,7 +79,11 @@ pub(crate) fn hlg_system_gamma(y_peak: f32, e_ambient_lux: f32) -> f32 {
     if y_peak <= 1000.0 {
         1.2
     } else {
-        let amb = if e_ambient_lux > 0.0 { e_ambient_lux } else { 5.0 };
+        let amb = if e_ambient_lux > 0.0 {
+            e_ambient_lux
+        } else {
+            5.0
+        };
         1.2 + 0.42 * (y_peak / 1000.0).log10() - 0.076_23 * (amb / 5.0).log10()
     }
 }
@@ -205,7 +209,10 @@ mod tests {
         // Continuity across the 0.5 segment break.
         let lo = hlg_inverse_oetf(0.499_999);
         let hi = hlg_inverse_oetf(0.500_001);
-        assert!(close(lo, hi, 1e-4), "HLG discontinuous at 0.5: {lo} vs {hi}");
+        assert!(
+            close(lo, hi, 1e-4),
+            "HLG discontinuous at 0.5: {lo} vs {hi}"
+        );
     }
 
     #[test]
@@ -237,9 +244,15 @@ mod tests {
         let d = DisplayModel::STANDARD_HDR_PQ_1000;
         // PQ peak (10000) clamps to the display's 1000 cd/m² ceiling.
         let hi = d.pq_to_luminance(1.0);
-        assert!(close(hi, 1000.0 + d.y_black + d.y_refl, 1e-3), "pq peak = {hi}");
+        assert!(
+            close(hi, 1000.0 + d.y_black + d.y_refl, 1e-3),
+            "pq peak = {hi}"
+        );
         // A mid PQ value below the ceiling passes through (+ floor).
         let mid = d.pq_to_luminance(0.5);
-        assert!(close(mid, 92.2466 + d.y_black + d.y_refl, 0.05), "pq mid = {mid}");
+        assert!(
+            close(mid, 92.2466 + d.y_black + d.y_refl, 0.05),
+            "pq mid = {mid}"
+        );
     }
 }
