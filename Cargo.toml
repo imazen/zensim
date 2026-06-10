@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["zensim", "zensim-experimental", "zensim-validate", "zensim-regress", "zensim-bench", "zensim-wasm-tests", "zensim-train-core", "zensim-train-gpu", "zensim-picker-prep", "zensim-target"]
+members = ["zensim", "zensim-experimental", "zensim-validate", "zensim-regress", "zensim-wasm-tests", "zensim-train-core", "zensim-train-gpu"]
+# Internal sibling-required research tooling. These crates path-dep AGPL codec
+# siblings (zenjpeg/zenwebp/zenavif/zenjxl/zenpng), zenanalyze, and a local
+# butteraugli fork that only exist on dev machines with the full ~/work/zen
+# sibling layout. Keeping them as workspace members made `cargo metadata` fail
+# on every bare checkout (CI, fresh clones) before a single crate compiled —
+# imazen/zensim#43. Each is now its own standalone workspace root; build them
+# from their directory or via `cargo <cmd> --manifest-path <crate>/Cargo.toml`.
+exclude = ["zensim-bench", "zensim-picker-prep", "zensim-target"]
 
 [profile.release]
 lto = "thin"
@@ -47,18 +55,13 @@ zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be82
 # repo as a self-contained workspace member (zenmetrics already depends
 # on zensim, so the dep direction is zensim → zenmetrics/crates/zenstats
 # only — no cycle, the zenmetrics workspace root is NOT pulled in).
-# Local developers wanting auto-sync with the sibling worktree use the
-# path dep below; CI portability would need a git ref the day this is
-# published, but until then we rely on the sibling clone being present.
-zenstats = { path = "../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
+# Pinned to a specific git rev for CI portability (same contract as the
+# zenpredict pin above — fixes imazen/zensim#43, where the sibling path
+# dep made `cargo metadata` fail on every bare checkout). Local
+# developers wanting auto-sync with the sibling worktree add to their
+# personal `.cargo/config.toml`:
+#     [patch."https://github.com/imazen/zenmetrics"]
+#     zenstats = { path = "../zenmetrics/crates/zenstats" }
+# Bump the rev deliberately when a zenstats fix zensim needs lands.
+zenstats = { git = "https://github.com/imazen/zenmetrics", rev = "de2ced69781574f8b9ef58a34661cf6b9e2b9336", default-features = false, features = ["parallel"] }
 
-# jxl-encoder 0.3.2 (lossy-JPEG recompression API) is required by the sibling
-# `zenjxl` path-dep that `zensim-bench`'s optional `extract-omni` feature
-# pulls in, but 0.3.2 is not yet published to crates.io (max published 0.3.1).
-# zenjxl carries its OWN `[patch.crates-io] jxl-encoder = path` — but a
-# dependency's patch table is ignored; only the workspace ROOT's patch
-# applies. So we re-declare it here. The local jxl-encoder sibling is 0.3.2.
-# This matches the existing "extract-omni builds require sibling checkouts"
-# contract (zensim already needs sibling clones for zenstats above).
-[patch.crates-io]
-jxl-encoder = { path = "../jxl-encoder/jxl-encoder" }

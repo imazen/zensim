@@ -4,6 +4,14 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+
+# Standalone workspace root (NOT a member of the zensim root workspace).
+# This crate is internal sibling-required tooling: it path-deps crates that
+# only exist in the full ~/work/zen dev layout. Excluding it from the root
+# workspace keeps `cargo metadata` green on bare checkouts (imazen/zensim#43).
+# Build with `cargo <cmd> --manifest-path zensim-bench/Cargo.toml` or from this dir.
+[workspace]
+
 [features]
 training = ["zensim/training"]
 # zenresize = ["zensim/zenresize"]
@@ -21,26 +29,26 @@ cc = "1"
 
 [dependencies]
 # zensim-bench is internal tooling (not published).
-zensim = { workspace = true, features = ["threads", "avx512", "imgref"] }
+zensim = { path = "../zensim", default-features = false, features = ["threads", "avx512", "imgref"] }
 # Dedup-K (2026-05-26): profile_compat_report example routes
 # spearman/pearson/kendall_tau through canonical zenstats.
-zenstats = { workspace = true }
+zenstats = { path = "../../zenmetrics/crates/zenstats", default-features = false, features = ["parallel"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 ssimulacra2 = "0.5"
 fast-ssim2 = { version = "0.8.0", features = ["imgref"] }
 butteraugli = { version = "0.9", features = ["avx512"] }
-linear-srgb = { workspace = true }
-imgref = { workspace = true }
-rgb = { workspace = true }
+linear-srgb = { version = "0.6.7", default-features = false, features = ["std"] }
+imgref = "1.12"
+rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
 zenpnm = "0.1"
-bytemuck = { workspace = true }
+bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 which = "8"
-zenbench = { workspace = true }
-zenpredict = { workspace = true }
-zenpredict-bake = { workspace = true }
+zenbench = "0.1.2"
+zenpredict = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
+zenpredict-bake = { git = "https://github.com/imazen/zenanalyze", rev = "9a9be8200f26f643b45338711426cacae820f3a1" }
 csv = "1"
-image = { workspace = true }
-rayon = { workspace = true }
+image = "0.25"
+rayon = "1.10"
 
 # Optional deps for the `extract-omni` feature.
 #
@@ -61,7 +69,7 @@ arrow = { version = "58.3.0", default-features = false, optional = true }
 # Imazen commercial — zensim-bench is internal-only and not published.
 zenavif = { path = "../../zenavif",          optional = true, default-features = false }
 zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["decode"] }
-zenpixels = { workspace = true, optional = true }
+zenpixels = { version = "0.2.10", default-features = false, optional = true }
 
 [[bench]]
 name = "bench_compare"
@@ -100,3 +108,22 @@ required-features = ["extract-omni"]
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("zenresize", "training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']
+
+# Patches for unpublished crates-io versions required by the sibling codec
+# deps (zenjxl wants jxl-encoder 0.3.2 + zenjpeg 0.8.7; max published are
+# lower). A dependency's own patch table is ignored — only a workspace
+# ROOT's applies, and this crate is now its own root, so declare them here.
+[patch.crates-io]
+jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
+zenjpeg = { path = "../../zenjpeg/zenjpeg" }
+
+# Mirror the root workspace build profiles (this is its own workspace root).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2

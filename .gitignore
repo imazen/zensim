@@ -88,3 +88,9 @@ AGENT_COORDINATION_NOTE.md
 
 # Benchmark output files generated at runtime (not source data)
 **/font_results.json
+
+# Standalone internal-tooling workspace roots (excluded from the root
+# workspace) generate their own lockfiles; keep them out of the repo.
+/zensim-bench/Cargo.lock
+/zensim-picker-prep/Cargo.lock
+/zensim-target/Cargo.lock

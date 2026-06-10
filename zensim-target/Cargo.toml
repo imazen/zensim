@@ -9,6 +9,14 @@ description = "CLI that picks codec encode params to hit a user-typed zensim tar
 license = "AGPL-3.0-only OR LicenseRef-Imazen-Commercial"
 publish = false
 
+
+# Standalone workspace root (NOT a member of the zensim root workspace).
+# This crate is internal sibling-required tooling: it path-deps crates that
+# only exist in the full ~/work/zen dev layout. Excluding it from the root
+# workspace keeps `cargo metadata` green on bare checkouts (imazen/zensim#43).
+# Build with `cargo <cmd> --manifest-path zensim-target/Cargo.toml` or from this dir.
+[workspace]
+
 [features]
 default = ["zenjpeg", "zenwebp", "zenavif", "zenpng"]
 # Each codec is opt-in so a build that only needs one doesn't pull the rest.
@@ -23,16 +31,16 @@ zensim = { path = "../zensim", features = ["imgref"] }
 # Historical/experimental trail profiles (PreviewV0_5* / tuner variants),
 # enumerated by the `--profile` CLI parser for evaluation. Unpublished.
 zensim-experimental = { path = "../zensim-experimental" }
-image = { workspace = true }
+image = "0.25"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
-enough = { workspace = true }
+enough = { version = "0.4.2", default-features = false, features = ["std"] }
 almost-enough = "0.4"
-rgb = { workspace = true }
-imgref = { workspace = true }
-bytemuck = { workspace = true }
+rgb = { version = "0.8", default-features = false, features = ["bytemuck"] }
+imgref = "1.12"
+bytemuck = { version = "1.25", default-features = false, features = ["derive"] }
 # zenpixels is needed for AVIF decode (descriptor + buffer accessors).
-zenpixels = { workspace = true }
+zenpixels = { version = "0.2.10", default-features = false }
 
 # Codec deps — path refs to sibling worktrees per workspace policy.
 # All AGPL-3.0-only OR Imazen commercial.
@@ -53,3 +61,22 @@ butteraugli = { path = "../../../butteraugli/butteraugli", default-features = fa
 [[bin]]
 name = "zensim-target"
 path = "src/bin/zensim_target.rs"
+
+# Patches for unpublished crates-io versions required by the sibling codec
+# deps (zenjxl wants jxl-encoder 0.3.2 + zenjpeg 0.8.7; max published are
+# lower). A dependency's own patch table is ignored — only a workspace
+# ROOT's applies, and this crate is now its own root, so declare them here.
+[patch.crates-io]
+jxl-encoder = { path = "../../jxl-encoder/jxl-encoder" }
+zenjpeg = { path = "../../zenjpeg/zenjpeg" }
+
+# Mirror the root workspace build profiles (this is its own workspace root).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2
