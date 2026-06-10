@@ -105,8 +105,10 @@ fn v39_manifest_maps_recorded_training_fields() {
     );
 
     // The --group spec round-trips into the trainer's flag form.
+    // (Windows joins path components with '\'; normalize so the assertion
+    // checks the same name:path:weights round-trip on every platform.)
     assert_eq!(
-        cfg.groups[0].to_group_spec(),
+        cfg.groups[0].to_group_spec().replace('\\', "/"),
         format!("safesyn:{canonical_root}/safesyn.parquet:1:0.5"),
         "group spec render"
     );
@@ -229,6 +231,9 @@ fn synthetic_manifest_sha_verify_passes_then_fails_on_drift() {
     let data_path = dir.join("data.parquet");
     std::fs::write(&data_path, b"reproducible-bytes").unwrap();
     let real_sha = sha256_file(&data_path).unwrap();
+    // Embed with forward slashes: a Windows temp path's backslashes would be
+    // (invalid) escape sequences inside a basic TOML string.
+    let data_path_toml = data_path.display().to_string().replace('\\', "/");
 
     // Build a synthetic manifest referencing it via an absolute path.
     let manifest_toml = format!(
@@ -249,8 +254,7 @@ path = "{}"
 sha256 = "{real_sha}"
 rows = 1
 "#,
-        data_path.display(),
-        data_path.display()
+        data_path_toml, data_path_toml
     );
     let manifest_path = dir.join("synthetic.toml");
     std::fs::write(&manifest_path, &manifest_toml).unwrap();
