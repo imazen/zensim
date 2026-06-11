@@ -524,7 +524,8 @@ dependencies = [
 [[package]]
 name = "zenutils-apidoc"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenutils?rev=35dcc4a347ed0fd19c204563d92ae8b9787db630#35dcc4a347ed0fd19c204563d92ae8b9787db630"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "113911a78e8b1a5d77e94bf2e4d7dd56727fd75f7337c5579bac4688b4686198"
 dependencies = [
  "public-api",
  "rustdoc-json",
