@@ -59,6 +59,16 @@ Proposed by the conservative public-API ablation reports
   `display::print_comparison` / `print_comparison_raw` into one
   stride-aware entry point
 
+### Changed — public-API snapshot test now uses shared zenutils-apidoc (2026-06-11)
+
+`zensim/tests/public_api_doc.rs` is now a 3-line shim over the shared
+`zenutils-apidoc` crate (git-pinned dev-dep; imazen/zenutils 0589e923) —
+the consolidation target for the org's 41 drifted per-repo copies.
+Snapshot item lines are byte-identical to the prior in-repo generator
+(only the header changed); CI's clippy job no longer installs the
+`cargo-public-api` binary (the library builds rustdoc JSON itself via
+the tracking nightly).
+
 ### Changed — public-API snapshot format: honest taxonomy + delta features section (2026-06-11)
 
 `docs/public-api/<crate>.txt` snapshots now carry a generated `## summary`
