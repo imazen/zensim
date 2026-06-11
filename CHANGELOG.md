@@ -41,6 +41,35 @@ scores move**:
    below 0 on pathological inputs; the output spline clamps at ≤ 100
    on the upper end only (24f93462, 34ce1401).
 
+### QUEUED BREAKING CHANGES
+
+Proposed by the conservative public-API ablation reports
+(`docs/public-api/ABLATION-zensim.md`, `docs/public-api/ABLATION-zensim-regress.md`,
+831567ca) — **pending user approval**; batch into the already-queued
+0.3.0 break for zensim (zensim-regress versions independently):
+
+- zensim: demote `cvvdp_features` + `xyb_lms_features` modules,
+  `compute_iw_weights`, and `try_score_from_features` to `pub(crate)` —
+  all `training`-feature-gated, zero external consumers, documented as
+  feature-extract-pipeline internals
+- zensim: make `DisplayCalibration` fields private (zero external
+  reads/writes; field writes bypass future invariant checks)
+- zensim-regress (next minor, whenever one happens): `oracle_check_tracked`
+  12-positional-arg signature → params struct; unify
+  `display::print_comparison` / `print_comparison_raw` into one
+  stride-aware entry point
+
+### Changed — public-API snapshot format: honest taxonomy + delta features section (2026-06-11)
+
+`docs/public-api/<crate>.txt` snapshots now carry a generated `## summary`
+taxonomy (free functions vs methods vs fields/variants vs auto-trait/derived
+impl lines, plus a per-module table), and the features section lists only the
+DELTA added relative to default features instead of repeating the whole
+surface (8775ed3d). Raw line counts had been misread as item counts —
+zensim-regress's "1,098 items / 754 free functions" is really 73 free
+functions + 298 methods; the rest is impl plumbing. Auto-trait impl lines
+stay in the listing (losing `Send`/`Sync` is a semver break that must diff).
+
 ### Fixed — CI green: bare-checkout workspace resolution, census pandas, lint debt (2026-06-10)
 
 CI had been red on every job for weeks (imazen/zensim#43): `cargo metadata`
