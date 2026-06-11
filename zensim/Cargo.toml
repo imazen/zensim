@@ -83,9 +83,6 @@ zenpredict = { workspace = true }
 image = { workspace = true }
 archmage = { workspace = true, features = ["testable_dispatch"] }
 serde_json = "1"
-# Shared public-API snapshot test implementation (tests/public_api_doc.rs);
-# git-pinned until zenutils-apidoc is published to crates.io.
-zenutils-apidoc = { git = "https://github.com/imazen/zenutils", rev = "094f6cd0977535959881c8ded62c1d0e24fb06af" }
 
 [lints.clippy]
 uninlined_format_args = "allow"
