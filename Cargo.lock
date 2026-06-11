@@ -1785,7 +1785,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6145,7 +6145,7 @@ dependencies = [
 [[package]]
 name = "zenutils-apidoc"
 version = "0.1.0"
-source = "git+https://github.com/imazen/zenutils?rev=0589e92355ee9e897d46bdb86c5d1c6cbae1ef8a#0589e92355ee9e897d46bdb86c5d1c6cbae1ef8a"
+source = "git+https://github.com/imazen/zenutils?rev=094f6cd0977535959881c8ded62c1d0e24fb06af#094f6cd0977535959881c8ded62c1d0e24fb06af"
 dependencies = [
  "public-api",
  "rustdoc-json",

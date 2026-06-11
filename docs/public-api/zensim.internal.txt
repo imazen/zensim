@@ -1,0 +1,57 @@
+# zensim public API — doc(hidden) items and excluded-feature surface
+# excluded features: (none)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   free functions                              3
+#   inherent methods                            9
+#   trait roster entries (type × trait)        21
+#
+# per-module pub lines:
+#   (root)                            9
+#   source                            3
+
+## items (12 lines)
+
+pub fn BlurKernel::assert_fields_are_eq(&self)
+pub fn ErrorCategory::assert_fields_are_eq(&self)
+pub fn IwWeightKind::assert_fields_are_eq(&self)
+pub fn UnsupportedFormat::assert_fields_are_eq(&self)
+pub fn ZensimError::assert_fields_are_eq(&self)
+pub fn ZensimResult::nan() -> Self
+pub fn compute_zensim_with_config(&[[u8; 3]], &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
+pub fn compute_zensim_with_ref_and_config(&PrecomputedReference, &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
+pub fn precompute_reference_with_scales(&[[u8; 3]], usize, usize, usize) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn source::AlphaMode::assert_fields_are_eq(&self)
+pub fn source::ColorPrimaries::assert_fields_are_eq(&self)
+pub fn source::PixelFormat::assert_fields_are_eq(&self)
+
+## trait impls (21 types)
+
+BlurKernel: TrivialClone
+DiffmapOptions: TrivialClone
+DiffmapWeighting: TrivialClone
+DownscaleFilter: TrivialClone
+ErrorCategory: TrivialClone
+IwWeightConfig: TrivialClone
+IwWeightKind: TrivialClone
+UnsupportedFormat: TrivialClone
+ZensimConfig: TrivialClone
+ZensimError: TrivialClone
+codec_calibration::CalibrationAffine: TrivialClone
+codec_calibration::CodecCalibration: TrivialClone
+display::DisplayCalibration: TrivialClone
+display::DisplayProfile: TrivialClone
+profile::ZensimProfile: TrivialClone
+source::AlphaMode: TrivialClone
+source::ColorPrimaries: TrivialClone
+source::PixelFormat: TrivialClone
+source::RgbSlice<'a>: TrivialClone
+source::RgbaSlice<'a>: TrivialClone
+source::StridedBytes<'a>: TrivialClone

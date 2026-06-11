@@ -1,0 +1,916 @@
+# zensim-regress public API — doc(hidden) items and excluded-feature surface
+# excluded features: _internal_api
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                16
+#   pub types (struct/enum/trait/alias)        59
+#   pub consts/statics                         34
+#   pub macros                                  3
+#   free functions                             49
+#   inherent methods                          390
+#   struct fields                             193
+#   enum variants                             142
+#   trait roster entries (type × trait)       149
+#   auto-trait-complete types                  30
+#
+# per-module pub lines:
+#   (root)                           21
+#   checksums                         1
+#   layout                          859
+#   manifest                          1
+#   petname                           1
+#   simd                              1
+#   testing                           2
+
+## items (842 lines)
+
+#[non_exhaustive] pub enum layout::ContainerKind [also: layout::diagnostics]
+#[non_exhaustive] pub enum layout::NodeKind [also: layout::diagnostics]
+#[non_exhaustive] pub enum layout::TextStyle [also: layout::text]
+#[non_exhaustive] pub struct layout::LayoutError [also: layout::diagnostics]
+#[non_exhaustive] pub struct layout::RenderOutcome
+#[non_exhaustive] pub struct layout::TextSpec [also: layout::text]
+pub const fn layout::color::hex(&str) -> layout::color::Color
+pub const fn layout::color::rgb(u8, u8, u8) -> layout::color::Color
+pub const fn layout::color::rgba(u8, u8, u8, u8) -> layout::color::Color
+pub const fn layout::geom::Insets::all(u32) -> Self
+pub const fn layout::geom::Insets::each(u32, u32, u32, u32) -> Self
+pub const fn layout::geom::Insets::horizontal(&self) -> u32
+pub const fn layout::geom::Insets::vertical(&self) -> u32
+pub const fn layout::geom::Insets::xy(u32, u32) -> Self
+pub const fn layout::geom::Rect::new(u32, u32, u32, u32) -> Self
+pub const fn layout::geom::Rect::size(&self) -> layout::geom::Size
+pub const fn layout::geom::Size::new(u32, u32) -> Self
+pub const fn layout::grid::GridSpan::cell(u32, u32) -> Self
+pub const fn layout::grid::GridSpan::span(u32, u32, u32, u32) -> Self
+pub const fn layout::hex(&str) -> layout::color::Color
+pub const fn layout::rgb(u8, u8, u8) -> layout::color::Color
+pub const fn layout::rgba(u8, u8, u8, u8) -> layout::color::Color
+pub const layout::BLACK: layout::color::Color [also: layout::color]
+pub const layout::DEFAULT_BASE_EM: u32 [also: layout::safety]
+pub const layout::DEFAULT_LINE_PADDING: u32 [also: layout::node]
+pub const layout::TRANSPARENT: layout::color::Color [also: layout::color]
+pub const layout::WHITE: layout::color::Color [also: layout::color]
+pub const layout::geom::Size::ZERO: Self
+pub const layout::safety::LayoutLimits::DEFAULT: Self
+pub const layout::safety::LayoutLimits::PERMISSIVE: Self
+pub const layout::safety::LayoutLimits::STRICT: Self
+pub const layout::text::DEFAULT_AUTOFIT_MIN_CHAR_H: u32
+pub const layout::text::DEFAULT_LINE_HEIGHT: f32
+pub const layout::text::DEFAULT_PAD_H_FRAC: f32
+pub const layout::text::DEFAULT_PAD_V_FRAC: f32
+pub enum layout::Axis [also: layout::geom]
+pub enum layout::CrossAlign [also: layout::sizing]
+pub enum layout::Fit [also: layout::sizing]
+pub enum layout::HAlign [also: layout::geom]
+pub enum layout::MainAlign [also: layout::sizing]
+pub enum layout::Node [also: layout::node]
+pub enum layout::SizeRule [also: layout::sizing]
+pub enum layout::Track [also: layout::sizing]
+pub enum layout::VAlign [also: layout::geom]
+pub fn Bitmap::assert_fields_are_eq(&self)
+pub fn checksums::EntryKind::assert_fields_are_eq(&self)
+pub fn layout::LayoutMod::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::LayoutMod::align_h(self, layout::geom::HAlign) -> layout::node::Node
+pub fn layout::LayoutMod::align_v(self, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::LayoutMod::aspect_ratio(self, u32, u32) -> layout::node::Node
+pub fn layout::LayoutMod::background(self, layout::color::Color) -> layout::node::Node
+pub fn layout::LayoutMod::border(self, layout::color::Color) -> layout::node::Node
+pub fn layout::LayoutMod::center(self) -> layout::node::Node
+pub fn layout::LayoutMod::fill(self) -> layout::node::Node
+pub fn layout::LayoutMod::fill_height(self) -> layout::node::Node
+pub fn layout::LayoutMod::fill_width(self) -> layout::node::Node
+pub fn layout::LayoutMod::fit(self, layout::sizing::Fit) -> layout::node::Node
+pub fn layout::LayoutMod::fit_contain(self) -> layout::node::Node
+pub fn layout::LayoutMod::fit_cover(self) -> layout::node::Node
+pub fn layout::LayoutMod::fit_stretch(self) -> layout::node::Node
+pub fn layout::LayoutMod::grow(self, u32) -> layout::node::Node
+pub fn layout::LayoutMod::height(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::LayoutMod::height_percent(self, f32) -> layout::node::Node
+pub fn layout::LayoutMod::into_node(self) -> layout::node::Node
+pub fn layout::LayoutMod::label(self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::LayoutMod::label_segments(self, alloc::vec::Vec<layout::label::LabelSegment>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::LayoutMod::label_styled(self, impl core::convert::Into<alloc::string::String>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::LayoutMod::max_height(self, u32) -> layout::node::Node
+pub fn layout::LayoutMod::max_width(self, u32) -> layout::node::Node
+pub fn layout::LayoutMod::min_height(self, u32) -> layout::node::Node
+pub fn layout::LayoutMod::min_width(self, u32) -> layout::node::Node
+pub fn layout::LayoutMod::padding(self, u32) -> layout::node::Node
+pub fn layout::LayoutMod::padding_each(self, u32, u32, u32, u32) -> layout::node::Node
+pub fn layout::LayoutMod::padding_xy(self, u32, u32) -> layout::node::Node
+pub fn layout::LayoutMod::render(self, u32) -> Bitmap
+pub fn layout::LayoutMod::size(self, u32, u32) -> layout::node::Node
+pub fn layout::LayoutMod::size_percent(self, f32, f32) -> layout::node::Node
+pub fn layout::LayoutMod::width(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::LayoutMod::width_percent(self, f32) -> layout::node::Node
+pub fn layout::RenderConfig::clone(&self) -> layout::RenderConfig
+pub fn layout::RenderConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::RenderConfig::new(u32) -> Self
+pub fn layout::RenderConfig::with_base_em(self, u32) -> Self
+pub fn layout::RenderConfig::with_bg(self, layout::color::Color) -> Self
+pub fn layout::RenderConfig::with_limits(self, layout::safety::LayoutLimits) -> Self
+pub fn layout::RenderConfig::with_scale(self, f32) -> Self
+pub fn layout::RenderOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::RenderOutcome::into_result(self) -> core::result::Result<Bitmap, layout::RenderOutcome>
+pub fn layout::collect_paint_errors<R>(impl core::ops::function::FnOnce() -> R) -> (R, alloc::vec::Vec<layout::diagnostics::LayoutError>) [also: layout::diagnostics]
+pub fn layout::column() -> layout::stack::Stack [also: layout::stack]
+pub fn layout::compose::ColumnCtx::align_items(&mut self, layout::sizing::CrossAlign) -> &mut Self
+pub fn layout::compose::ColumnCtx::column(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::ColumnCtx)) -> &mut Self
+pub fn layout::compose::ColumnCtx::gap(&mut self, u32) -> &mut Self
+pub fn layout::compose::ColumnCtx::image(&mut self, Bitmap) -> &mut Self
+pub fn layout::compose::ColumnCtx::justify(&mut self, layout::sizing::MainAlign) -> &mut Self
+pub fn layout::compose::ColumnCtx::layers(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::LayersCtx)) -> &mut Self
+pub fn layout::compose::ColumnCtx::line(&mut self, impl core::convert::Into<alloc::string::String>, layout::color::Color) -> &mut Self
+pub fn layout::compose::ColumnCtx::node(&mut self, impl core::convert::Into<layout::node::Node>) -> &mut Self
+pub fn layout::compose::ColumnCtx::push(&mut self, impl core::convert::Into<layout::node::Node>) -> &mut Self
+pub fn layout::compose::ColumnCtx::row(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::RowCtx)) -> &mut Self
+pub fn layout::compose::ColumnCtx::shrink_on_overflow(&mut self, bool) -> &mut Self
+pub fn layout::compose::LayersCtx::column(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::ColumnCtx)) -> &mut Self
+pub fn layout::compose::LayersCtx::fill(&mut self, layout::color::Color) -> &mut Self
+pub fn layout::compose::LayersCtx::image(&mut self, Bitmap) -> &mut Self
+pub fn layout::compose::LayersCtx::push(&mut self, impl core::convert::Into<layout::node::Node>) -> &mut Self
+pub fn layout::compose::LayersCtx::row(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::RowCtx)) -> &mut Self
+pub fn layout::compose::LayersCtx::text(&mut self, impl core::convert::Into<layout::node::Node>) -> &mut Self
+pub fn layout::compose::RowCtx::align_items(&mut self, layout::sizing::CrossAlign) -> &mut Self
+pub fn layout::compose::RowCtx::column(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::ColumnCtx)) -> &mut Self
+pub fn layout::compose::RowCtx::gap(&mut self, u32) -> &mut Self
+pub fn layout::compose::RowCtx::image(&mut self, Bitmap) -> &mut Self
+pub fn layout::compose::RowCtx::justify(&mut self, layout::sizing::MainAlign) -> &mut Self
+pub fn layout::compose::RowCtx::layers(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::LayersCtx)) -> &mut Self
+pub fn layout::compose::RowCtx::line(&mut self, impl core::convert::Into<alloc::string::String>, layout::color::Color) -> &mut Self
+pub fn layout::compose::RowCtx::node(&mut self, impl core::convert::Into<layout::node::Node>) -> &mut Self
+pub fn layout::compose::RowCtx::push(&mut self, impl core::convert::Into<layout::node::Node>) -> &mut Self
+pub fn layout::compose::RowCtx::row(&mut self, impl core::ops::function::FnOnce(&mut layout::compose::RowCtx)) -> &mut Self
+pub fn layout::compose::RowCtx::shrink_on_overflow(&mut self, bool) -> &mut Self
+pub fn layout::compose::column_block(impl core::ops::function::FnOnce(&mut layout::compose::ColumnCtx)) -> layout::node::Node
+pub fn layout::compose::layers_block(impl core::ops::function::FnOnce(&mut layout::compose::LayersCtx)) -> layout::node::Node
+pub fn layout::compose::row_block(impl core::ops::function::FnOnce(&mut layout::compose::RowCtx)) -> layout::node::Node
+pub fn layout::diagnostics::ContainerKind::assert_fields_are_eq(&self)
+pub fn layout::diagnostics::ContainerKind::clone(&self) -> layout::diagnostics::ContainerKind
+pub fn layout::diagnostics::ContainerKind::eq(&self, &layout::diagnostics::ContainerKind) -> bool
+pub fn layout::diagnostics::ContainerKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::diagnostics::LayoutError::clone(&self) -> layout::diagnostics::LayoutError
+pub fn layout::diagnostics::LayoutError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::diagnostics::NodeKind::assert_fields_are_eq(&self)
+pub fn layout::diagnostics::NodeKind::clone(&self) -> layout::diagnostics::NodeKind
+pub fn layout::diagnostics::NodeKind::eq(&self, &layout::diagnostics::NodeKind) -> bool
+pub fn layout::diagnostics::NodeKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::diagnostics::Overflow::assert_fields_are_eq(&self)
+pub fn layout::diagnostics::Overflow::clone(&self) -> layout::diagnostics::Overflow
+pub fn layout::diagnostics::Overflow::default() -> layout::diagnostics::Overflow
+pub fn layout::diagnostics::Overflow::eq(&self, &layout::diagnostics::Overflow) -> bool
+pub fn layout::diagnostics::Overflow::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::diagnostics::Overflow::is_any(&self) -> bool
+pub fn layout::diagnostics::Overflow::of(layout::geom::Rect, layout::geom::Rect) -> Self
+pub fn layout::draw_rect_border(&mut Bitmap, layout::geom::Rect, layout::color::Color) [also: layout::paint]
+pub fn layout::em(f32) -> u32
+pub fn layout::empty() -> layout::node::Node [also: layout::node]
+pub fn layout::fill(layout::color::Color) -> layout::node::Node [also: layout::node]
+pub fn layout::fill_rect(&mut Bitmap, layout::geom::Rect, layout::color::Color) [also: layout::paint]
+pub fn layout::geom::Axis::assert_fields_are_eq(&self)
+pub fn layout::geom::Axis::clone(&self) -> layout::geom::Axis
+pub fn layout::geom::Axis::eq(&self, &layout::geom::Axis) -> bool
+pub fn layout::geom::Axis::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::geom::HAlign::assert_fields_are_eq(&self)
+pub fn layout::geom::HAlign::clone(&self) -> layout::geom::HAlign
+pub fn layout::geom::HAlign::default() -> layout::geom::HAlign
+pub fn layout::geom::HAlign::eq(&self, &layout::geom::HAlign) -> bool
+pub fn layout::geom::HAlign::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::geom::Insets::assert_fields_are_eq(&self)
+pub fn layout::geom::Insets::clone(&self) -> layout::geom::Insets
+pub fn layout::geom::Insets::default() -> layout::geom::Insets
+pub fn layout::geom::Insets::eq(&self, &layout::geom::Insets) -> bool
+pub fn layout::geom::Insets::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::geom::Rect::assert_fields_are_eq(&self)
+pub fn layout::geom::Rect::clone(&self) -> layout::geom::Rect
+pub fn layout::geom::Rect::default() -> layout::geom::Rect
+pub fn layout::geom::Rect::eq(&self, &layout::geom::Rect) -> bool
+pub fn layout::geom::Rect::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::geom::Size::assert_fields_are_eq(&self)
+pub fn layout::geom::Size::clone(&self) -> layout::geom::Size
+pub fn layout::geom::Size::default() -> layout::geom::Size
+pub fn layout::geom::Size::eq(&self, &layout::geom::Size) -> bool
+pub fn layout::geom::Size::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::geom::VAlign::assert_fields_are_eq(&self)
+pub fn layout::geom::VAlign::clone(&self) -> layout::geom::VAlign
+pub fn layout::geom::VAlign::default() -> layout::geom::VAlign
+pub fn layout::geom::VAlign::eq(&self, &layout::geom::VAlign) -> bool
+pub fn layout::geom::VAlign::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::grid() -> layout::grid::Grid [also: layout::grid]
+pub fn layout::grid::Grid::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::grid::Grid::align_h(self, layout::geom::HAlign) -> layout::node::Node
+pub fn layout::grid::Grid::align_v(self, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::grid::Grid::areas(self, &[&str]) -> Self
+pub fn layout::grid::Grid::aspect_ratio(self, u32, u32) -> layout::node::Node
+pub fn layout::grid::Grid::background(self, layout::color::Color) -> layout::node::Node
+pub fn layout::grid::Grid::border(self, layout::color::Color) -> layout::node::Node
+pub fn layout::grid::Grid::cell(self, u32, u32, impl core::convert::Into<layout::node::Node>) -> Self
+pub fn layout::grid::Grid::center(self) -> layout::node::Node
+pub fn layout::grid::Grid::clone(&self) -> layout::grid::Grid
+pub fn layout::grid::Grid::col_widths(self, impl core::iter::traits::collect::IntoIterator<Item = layout::sizing::Track>) -> Self
+pub fn layout::grid::Grid::cols(self, u32) -> Self
+pub fn layout::grid::Grid::columns(self, impl core::iter::traits::collect::IntoIterator<Item = layout::sizing::Track>) -> Self
+pub fn layout::grid::Grid::default() -> layout::grid::Grid
+pub fn layout::grid::Grid::equal_rows(self, u32) -> Self
+pub fn layout::grid::Grid::fill(self) -> layout::node::Node
+pub fn layout::grid::Grid::fill_height(self) -> layout::node::Node
+pub fn layout::grid::Grid::fill_width(self) -> layout::node::Node
+pub fn layout::grid::Grid::fit(self, layout::sizing::Fit) -> layout::node::Node
+pub fn layout::grid::Grid::fit_contain(self) -> layout::node::Node
+pub fn layout::grid::Grid::fit_cover(self) -> layout::node::Node
+pub fn layout::grid::Grid::fit_stretch(self) -> layout::node::Node
+pub fn layout::grid::Grid::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::grid::Grid::gap(self, u32) -> Self
+pub fn layout::grid::Grid::gap_xy(self, u32, u32) -> Self
+pub fn layout::grid::Grid::grow(self, u32) -> layout::node::Node
+pub fn layout::grid::Grid::height(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::grid::Grid::height_percent(self, f32) -> layout::node::Node
+pub fn layout::grid::Grid::into_node(self) -> layout::node::Node
+pub fn layout::grid::Grid::label(self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::grid::Grid::label_segments(self, alloc::vec::Vec<layout::label::LabelSegment>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::grid::Grid::label_styled(self, impl core::convert::Into<alloc::string::String>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::grid::Grid::max_height(self, u32) -> layout::node::Node
+pub fn layout::grid::Grid::max_width(self, u32) -> layout::node::Node
+pub fn layout::grid::Grid::min_height(self, u32) -> layout::node::Node
+pub fn layout::grid::Grid::min_width(self, u32) -> layout::node::Node
+pub fn layout::grid::Grid::new() -> Self
+pub fn layout::grid::Grid::padding(self, u32) -> Self
+pub fn layout::grid::Grid::padding(self, u32) -> layout::node::Node
+pub fn layout::grid::Grid::padding_each(self, u32, u32, u32, u32) -> layout::node::Node
+pub fn layout::grid::Grid::padding_xy(self, u32, u32) -> layout::node::Node
+pub fn layout::grid::Grid::place(self, &str, impl core::convert::Into<layout::node::Node>) -> Self
+pub fn layout::grid::Grid::render(self, u32) -> Bitmap
+pub fn layout::grid::Grid::row_heights(self, impl core::iter::traits::collect::IntoIterator<Item = layout::sizing::Track>) -> Self
+pub fn layout::grid::Grid::rows(self, impl core::iter::traits::collect::IntoIterator<Item = layout::sizing::Track>) -> Self
+pub fn layout::grid::Grid::size(self, u32, u32) -> layout::node::Node
+pub fn layout::grid::Grid::size_percent(self, f32, f32) -> layout::node::Node
+pub fn layout::grid::Grid::span(self, u32, u32, u32, u32, impl core::convert::Into<layout::node::Node>) -> Self
+pub fn layout::grid::Grid::width(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::grid::Grid::width_percent(self, f32) -> layout::node::Node
+pub fn layout::grid::GridSpan::assert_fields_are_eq(&self)
+pub fn layout::grid::GridSpan::clone(&self) -> layout::grid::GridSpan
+pub fn layout::grid::GridSpan::eq(&self, &layout::grid::GridSpan) -> bool
+pub fn layout::grid::GridSpan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::image(Bitmap) -> layout::node::Node [also: layout::node]
+pub fn layout::label::LabelSegment::center(impl core::convert::Into<alloc::string::String>, layout::color::Color) -> Self
+pub fn layout::label::LabelSegment::clone(&self) -> layout::label::LabelSegment
+pub fn layout::label::LabelSegment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::label::LabelSegment::left(impl core::convert::Into<alloc::string::String>, layout::color::Color) -> Self
+pub fn layout::label::LabelSegment::right(impl core::convert::Into<alloc::string::String>, layout::color::Color) -> Self
+pub fn layout::label::LabelSegment::with_char_h(self, u32) -> Self
+pub fn layout::label::LabelStyle::clone(&self) -> layout::label::LabelStyle
+pub fn layout::label::LabelStyle::default() -> Self
+pub fn layout::label::LabelStyle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::label::LabelStyle::segmented_strip(&self, alloc::vec::Vec<layout::label::LabelSegment>) -> layout::node::Node
+pub fn layout::label::LabelStyle::strip(&self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::label::LabelStyle::with_align(self, layout::geom::HAlign) -> Self
+pub fn layout::label::LabelStyle::with_bg(self, layout::color::Color) -> Self
+pub fn layout::label::LabelStyle::with_char_h(self, u32) -> Self
+pub fn layout::label::LabelStyle::with_fg(self, layout::color::Color) -> Self
+pub fn layout::label::LabelStyle::with_padding(self, layout::geom::Insets) -> Self
+pub fn layout::layers() -> layout::layers::Layers [also: layout::layers]
+pub fn layout::layers::Layers::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::layers::Layers::align_h(self, layout::geom::HAlign) -> layout::node::Node
+pub fn layout::layers::Layers::align_v(self, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::layers::Layers::aspect_ratio(self, u32, u32) -> layout::node::Node
+pub fn layout::layers::Layers::background(self, layout::color::Color) -> layout::node::Node
+pub fn layout::layers::Layers::border(self, layout::color::Color) -> layout::node::Node
+pub fn layout::layers::Layers::center(self) -> layout::node::Node
+pub fn layout::layers::Layers::child(self, impl core::convert::Into<layout::node::Node>) -> Self
+pub fn layout::layers::Layers::children<I, N>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = N>, N: core::convert::Into<layout::node::Node>
+pub fn layout::layers::Layers::clone(&self) -> layout::layers::Layers
+pub fn layout::layers::Layers::default() -> layout::layers::Layers
+pub fn layout::layers::Layers::fill(self) -> layout::node::Node
+pub fn layout::layers::Layers::fill_height(self) -> layout::node::Node
+pub fn layout::layers::Layers::fill_width(self) -> layout::node::Node
+pub fn layout::layers::Layers::fit(self, layout::sizing::Fit) -> layout::node::Node
+pub fn layout::layers::Layers::fit_contain(self) -> layout::node::Node
+pub fn layout::layers::Layers::fit_cover(self) -> layout::node::Node
+pub fn layout::layers::Layers::fit_stretch(self) -> layout::node::Node
+pub fn layout::layers::Layers::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::layers::Layers::grow(self, u32) -> layout::node::Node
+pub fn layout::layers::Layers::height(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::layers::Layers::height_percent(self, f32) -> layout::node::Node
+pub fn layout::layers::Layers::into_node(self) -> layout::node::Node
+pub fn layout::layers::Layers::label(self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::layers::Layers::label_segments(self, alloc::vec::Vec<layout::label::LabelSegment>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::layers::Layers::label_styled(self, impl core::convert::Into<alloc::string::String>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::layers::Layers::max_height(self, u32) -> layout::node::Node
+pub fn layout::layers::Layers::max_width(self, u32) -> layout::node::Node
+pub fn layout::layers::Layers::min_height(self, u32) -> layout::node::Node
+pub fn layout::layers::Layers::min_width(self, u32) -> layout::node::Node
+pub fn layout::layers::Layers::new() -> Self
+pub fn layout::layers::Layers::padding(self, u32) -> layout::node::Node
+pub fn layout::layers::Layers::padding_each(self, u32, u32, u32, u32) -> layout::node::Node
+pub fn layout::layers::Layers::padding_xy(self, u32, u32) -> layout::node::Node
+pub fn layout::layers::Layers::render(self, u32) -> Bitmap
+pub fn layout::layers::Layers::size(self, u32, u32) -> layout::node::Node
+pub fn layout::layers::Layers::size_percent(self, f32, f32) -> layout::node::Node
+pub fn layout::layers::Layers::width(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::layers::Layers::width_percent(self, f32) -> layout::node::Node
+pub fn layout::line(impl core::convert::Into<alloc::string::String>, layout::color::Color) -> layout::node::Node [also: layout::node]
+pub fn layout::modifiers::LayoutMod::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::align_h(self, layout::geom::HAlign) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::align_v(self, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::aspect_ratio(self, u32, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::background(self, layout::color::Color) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::border(self, layout::color::Color) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::center(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fill(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fill_height(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fill_width(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fit(self, layout::sizing::Fit) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fit_contain(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fit_cover(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::fit_stretch(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::grow(self, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::height(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::height_percent(self, f32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::into_node(self) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::label(self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::label_segments(self, alloc::vec::Vec<layout::label::LabelSegment>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::label_styled(self, impl core::convert::Into<alloc::string::String>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::max_height(self, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::max_width(self, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::min_height(self, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::min_width(self, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::padding(self, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::padding_each(self, u32, u32, u32, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::padding_xy(self, u32, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::render(self, u32) -> Bitmap
+pub fn layout::modifiers::LayoutMod::size(self, u32, u32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::size_percent(self, f32, f32) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::width(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::modifiers::LayoutMod::width_percent(self, f32) -> layout::node::Node
+pub fn layout::node::Node::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::node::Node::align_h(self, layout::geom::HAlign) -> layout::node::Node
+pub fn layout::node::Node::align_v(self, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::node::Node::aspect_ratio(self, u32, u32) -> layout::node::Node
+pub fn layout::node::Node::background(self, layout::color::Color) -> layout::node::Node
+pub fn layout::node::Node::border(self, layout::color::Color) -> layout::node::Node
+pub fn layout::node::Node::center(self) -> layout::node::Node
+pub fn layout::node::Node::clone(&self) -> layout::node::Node
+pub fn layout::node::Node::fill(self) -> layout::node::Node
+pub fn layout::node::Node::fill_height(self) -> layout::node::Node
+pub fn layout::node::Node::fill_width(self) -> layout::node::Node
+pub fn layout::node::Node::fit(self, layout::sizing::Fit) -> layout::node::Node
+pub fn layout::node::Node::fit_contain(self) -> layout::node::Node
+pub fn layout::node::Node::fit_cover(self) -> layout::node::Node
+pub fn layout::node::Node::fit_stretch(self) -> layout::node::Node
+pub fn layout::node::Node::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::node::Node::from(&str) -> layout::node::Node
+pub fn layout::node::Node::from(alloc::string::String) -> layout::node::Node
+pub fn layout::node::Node::from(Bitmap) -> layout::node::Node
+pub fn layout::node::Node::from(layout::grid::Grid) -> layout::node::Node
+pub fn layout::node::Node::from(layout::layers::Layers) -> layout::node::Node
+pub fn layout::node::Node::from(layout::stack::Stack) -> layout::node::Node
+pub fn layout::node::Node::grow(self, u32) -> layout::node::Node
+pub fn layout::node::Node::height(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::node::Node::height_percent(self, f32) -> layout::node::Node
+pub fn layout::node::Node::into_node(self) -> layout::node::Node
+pub fn layout::node::Node::kind(&self) -> layout::diagnostics::NodeKind
+pub fn layout::node::Node::label(self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::node::Node::label_segments(self, alloc::vec::Vec<layout::label::LabelSegment>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::node::Node::label_styled(self, impl core::convert::Into<alloc::string::String>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::node::Node::max_height(self, u32) -> layout::node::Node
+pub fn layout::node::Node::max_width(self, u32) -> layout::node::Node
+pub fn layout::node::Node::measure(&self, layout::geom::Size) -> layout::geom::Size
+pub fn layout::node::Node::min_height(self, u32) -> layout::node::Node
+pub fn layout::node::Node::min_width(self, u32) -> layout::node::Node
+pub fn layout::node::Node::padding(self, u32) -> layout::node::Node
+pub fn layout::node::Node::padding_each(self, u32, u32, u32, u32) -> layout::node::Node
+pub fn layout::node::Node::padding_xy(self, u32, u32) -> layout::node::Node
+pub fn layout::node::Node::render(self, u32) -> Bitmap
+pub fn layout::node::Node::scaled(self, f32) -> Self
+pub fn layout::node::Node::size(self, u32, u32) -> layout::node::Node
+pub fn layout::node::Node::size_percent(self, f32, f32) -> layout::node::Node
+pub fn layout::node::Node::width(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::node::Node::width_percent(self, f32) -> layout::node::Node
+pub fn layout::render(&layout::node::Node, u32) -> Bitmap
+pub fn layout::render_checked(&layout::node::Node, u32) -> layout::RenderOutcome
+pub fn layout::render_into(&layout::node::Node, layout::geom::Rect, &mut Bitmap)
+pub fn layout::render_with(&layout::node::Node, u32, layout::color::Color) -> Bitmap
+pub fn layout::render_with_config(&layout::node::Node, &layout::RenderConfig) -> Bitmap
+pub fn layout::render_with_config_checked(&layout::node::Node, &layout::RenderConfig) -> layout::RenderOutcome
+pub fn layout::render_with_limits(&layout::node::Node, u32, layout::color::Color, layout::safety::LayoutLimits) -> Bitmap
+pub fn layout::row() -> layout::stack::Stack [also: layout::stack]
+pub fn layout::safety::LayoutLimits::assert_fields_are_eq(&self)
+pub fn layout::safety::LayoutLimits::clone(&self) -> layout::safety::LayoutLimits
+pub fn layout::safety::LayoutLimits::default() -> Self
+pub fn layout::safety::LayoutLimits::eq(&self, &layout::safety::LayoutLimits) -> bool
+pub fn layout::safety::LayoutLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::safety::base_em() -> u32
+pub fn layout::safety::cap_cells(usize) -> usize
+pub fn layout::safety::cap_children(usize) -> usize
+pub fn layout::safety::cap_tracks(usize) -> usize
+pub fn layout::safety::clamp_char_h(u32) -> u32
+pub fn layout::safety::clamp_dim(u32) -> u32
+pub fn layout::safety::clamp_size(layout::geom::Size) -> layout::geom::Size
+pub fn layout::safety::clamp_to_pixel_budget(layout::geom::Size) -> layout::geom::Size
+pub fn layout::safety::is_unbounded(u32) -> bool
+pub fn layout::safety::limits() -> layout::safety::LayoutLimits
+pub fn layout::safety::reset_depth()
+pub fn layout::safety::with_base_em<R>(u32, impl core::ops::function::FnOnce() -> R) -> R
+pub fn layout::safety::with_depth<R>(impl core::ops::function::FnOnce() -> R) -> core::option::Option<R>
+pub fn layout::safety::with_limits<R>(layout::safety::LayoutLimits, impl core::ops::function::FnOnce() -> R) -> R
+pub fn layout::sizing::CrossAlign::assert_fields_are_eq(&self)
+pub fn layout::sizing::CrossAlign::clone(&self) -> layout::sizing::CrossAlign
+pub fn layout::sizing::CrossAlign::default() -> layout::sizing::CrossAlign
+pub fn layout::sizing::CrossAlign::eq(&self, &layout::sizing::CrossAlign) -> bool
+pub fn layout::sizing::CrossAlign::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::sizing::Fit::assert_fields_are_eq(&self)
+pub fn layout::sizing::Fit::clone(&self) -> layout::sizing::Fit
+pub fn layout::sizing::Fit::default() -> layout::sizing::Fit
+pub fn layout::sizing::Fit::eq(&self, &layout::sizing::Fit) -> bool
+pub fn layout::sizing::Fit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::sizing::MainAlign::assert_fields_are_eq(&self)
+pub fn layout::sizing::MainAlign::clone(&self) -> layout::sizing::MainAlign
+pub fn layout::sizing::MainAlign::default() -> layout::sizing::MainAlign
+pub fn layout::sizing::MainAlign::eq(&self, &layout::sizing::MainAlign) -> bool
+pub fn layout::sizing::MainAlign::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::sizing::SizeRule::clone(&self) -> layout::sizing::SizeRule
+pub fn layout::sizing::SizeRule::default() -> layout::sizing::SizeRule
+pub fn layout::sizing::SizeRule::eq(&self, &layout::sizing::SizeRule) -> bool
+pub fn layout::sizing::SizeRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::sizing::Track::clone(&self) -> layout::sizing::Track
+pub fn layout::sizing::Track::eq(&self, &layout::sizing::Track) -> bool
+pub fn layout::sizing::Track::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::stack::Stack::align(self, layout::geom::HAlign, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::stack::Stack::align_h(self, layout::geom::HAlign) -> layout::node::Node
+pub fn layout::stack::Stack::align_items(self, layout::sizing::CrossAlign) -> Self
+pub fn layout::stack::Stack::align_v(self, layout::geom::VAlign) -> layout::node::Node
+pub fn layout::stack::Stack::aspect_ratio(self, u32, u32) -> layout::node::Node
+pub fn layout::stack::Stack::background(self, layout::color::Color) -> layout::node::Node
+pub fn layout::stack::Stack::border(self, layout::color::Color) -> layout::node::Node
+pub fn layout::stack::Stack::center(self) -> layout::node::Node
+pub fn layout::stack::Stack::child(self, impl core::convert::Into<layout::node::Node>) -> Self
+pub fn layout::stack::Stack::children<I, N>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = N>, N: core::convert::Into<layout::node::Node>
+pub fn layout::stack::Stack::clone(&self) -> layout::stack::Stack
+pub fn layout::stack::Stack::fill(self) -> layout::node::Node
+pub fn layout::stack::Stack::fill_height(self) -> layout::node::Node
+pub fn layout::stack::Stack::fill_width(self) -> layout::node::Node
+pub fn layout::stack::Stack::fit(self, layout::sizing::Fit) -> layout::node::Node
+pub fn layout::stack::Stack::fit_contain(self) -> layout::node::Node
+pub fn layout::stack::Stack::fit_cover(self) -> layout::node::Node
+pub fn layout::stack::Stack::fit_stretch(self) -> layout::node::Node
+pub fn layout::stack::Stack::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::stack::Stack::gap(self, u32) -> Self
+pub fn layout::stack::Stack::grow(self, u32) -> layout::node::Node
+pub fn layout::stack::Stack::height(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::stack::Stack::height_percent(self, f32) -> layout::node::Node
+pub fn layout::stack::Stack::into_node(self) -> layout::node::Node
+pub fn layout::stack::Stack::justify(self, layout::sizing::MainAlign) -> Self
+pub fn layout::stack::Stack::label(self, impl core::convert::Into<alloc::string::String>) -> layout::node::Node
+pub fn layout::stack::Stack::label_segments(self, alloc::vec::Vec<layout::label::LabelSegment>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::stack::Stack::label_styled(self, impl core::convert::Into<alloc::string::String>, &layout::label::LabelStyle) -> layout::node::Node
+pub fn layout::stack::Stack::max_height(self, u32) -> layout::node::Node
+pub fn layout::stack::Stack::max_width(self, u32) -> layout::node::Node
+pub fn layout::stack::Stack::min_height(self, u32) -> layout::node::Node
+pub fn layout::stack::Stack::min_width(self, u32) -> layout::node::Node
+pub fn layout::stack::Stack::new(layout::geom::Axis) -> Self
+pub fn layout::stack::Stack::padding(self, u32) -> layout::node::Node
+pub fn layout::stack::Stack::padding_each(self, u32, u32, u32, u32) -> layout::node::Node
+pub fn layout::stack::Stack::padding_xy(self, u32, u32) -> layout::node::Node
+pub fn layout::stack::Stack::render(self, u32) -> Bitmap
+pub fn layout::stack::Stack::shrink_on_overflow(self, bool) -> Self
+pub fn layout::stack::Stack::size(self, u32, u32) -> layout::node::Node
+pub fn layout::stack::Stack::size_percent(self, f32, f32) -> layout::node::Node
+pub fn layout::stack::Stack::width(self, layout::sizing::SizeRule) -> layout::node::Node
+pub fn layout::stack::Stack::width_percent(self, f32) -> layout::node::Node
+pub fn layout::text(layout::text::TextSpec) -> layout::node::Node [also: layout::node]
+pub fn layout::text::TextSpec::auto_fit(impl core::convert::Into<alloc::string::String>, layout::color::Color, layout::color::Color) -> Self
+pub fn layout::text::TextSpec::clone(&self) -> layout::text::TextSpec
+pub fn layout::text::TextSpec::fixed(impl core::convert::Into<alloc::string::String>, layout::color::Color, layout::color::Color, u32) -> Self
+pub fn layout::text::TextSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn layout::text::TextSpec::line_height(self, f32) -> Self
+pub fn layout::text::TextSpec::lines(alloc::vec::Vec<(impl core::convert::Into<alloc::string::String>, layout::color::Color)>, layout::color::Color) -> Self
+pub fn layout::text::TextSpec::with_max_char_h(self, u32) -> Self
+pub fn layout::text::TextSpec::with_min_char_h(self, u32) -> Self
+pub fn layout::text::TextSpec::with_padding(self, f32, f32) -> Self
+pub fn layout::text::TextSpec::wrapped(impl core::convert::Into<alloc::string::String>, layout::color::Color, layout::color::Color, u32) -> Self
+pub fn layout::text::TextStyle::clone(&self) -> layout::text::TextStyle
+pub fn layout::text::TextStyle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn manifest::ManifestStatus::assert_fields_are_eq(&self)
+pub fn petname::MemorableNameParts::assert_fields_are_eq(&self)
+pub fn simd::CryptoGrouping::assert_fields_are_eq(&self)
+pub fn testing::ComparisonMethod::assert_fields_are_eq(&self)
+pub fn testing::DimensionMismatchKind::assert_fields_are_eq(&self)
+pub macro column!
+pub macro layers!
+pub macro row!
+pub mod layout
+pub mod layout::color
+pub mod layout::compose
+pub mod layout::diagnostics
+pub mod layout::geom
+pub mod layout::grid
+pub mod layout::label
+pub mod layout::layers
+pub mod layout::macros
+pub mod layout::modifiers
+pub mod layout::node
+pub mod layout::paint
+pub mod layout::safety
+pub mod layout::sizing
+pub mod layout::stack
+pub mod layout::text
+pub struct layout::Grid [also: layout::grid]
+pub struct layout::GridSpan [also: layout::grid]
+pub struct layout::Insets [also: layout::geom]
+pub struct layout::LabelSegment [also: layout::label]
+pub struct layout::LabelStyle [also: layout::label]
+pub struct layout::Layers [also: layout::layers]
+pub struct layout::LayoutLimits [also: layout::safety]
+pub struct layout::Overflow [also: layout::diagnostics]
+pub struct layout::Rect [also: layout::geom]
+pub struct layout::RenderConfig
+pub struct layout::Size [also: layout::geom]
+pub struct layout::Stack [also: layout::stack]
+pub struct layout::compose::ColumnCtx
+pub struct layout::compose::LayersCtx
+pub struct layout::compose::RowCtx
+pub trait layout::LayoutMod: core::marker::Sized [also: layout::modifiers]
+pub type layout::Color = [u8; 4] [also: layout::color]
+pub layout::Axis::Horizontal
+pub layout::Axis::Vertical
+pub layout::ContainerKind::Grid
+pub layout::ContainerKind::Layers
+pub layout::ContainerKind::Stack
+pub layout::CrossAlign::Center
+pub layout::CrossAlign::End
+pub layout::CrossAlign::Start
+pub layout::CrossAlign::Stretch
+pub layout::Fit::Contain
+pub layout::Fit::Cover
+pub layout::Fit::None
+pub layout::Fit::Stretch
+pub layout::GridSpan::col: u32
+pub layout::GridSpan::colspan: u32
+pub layout::GridSpan::row: u32
+pub layout::GridSpan::rowspan: u32
+pub layout::HAlign::Center
+pub layout::HAlign::Left
+pub layout::HAlign::Right
+pub layout::Insets::bottom: u32
+pub layout::Insets::left: u32
+pub layout::Insets::right: u32
+pub layout::Insets::top: u32
+pub layout::LabelSegment::align: layout::geom::HAlign
+pub layout::LabelSegment::char_h: core::option::Option<u32>
+pub layout::LabelSegment::fg: layout::color::Color
+pub layout::LabelSegment::text: alloc::string::String
+pub layout::LabelStyle::align: layout::geom::HAlign
+pub layout::LabelStyle::bg: layout::color::Color
+pub layout::LabelStyle::char_h: core::option::Option<u32>
+pub layout::LabelStyle::fg: layout::color::Color
+pub layout::LabelStyle::padding: layout::geom::Insets
+pub layout::LayoutError::child_index: usize
+pub layout::LayoutError::child_kind: layout::diagnostics::NodeKind
+pub layout::LayoutError::child_rect: layout::geom::Rect
+pub layout::LayoutError::container: layout::diagnostics::ContainerKind
+pub layout::LayoutError::overflow: layout::diagnostics::Overflow
+pub layout::LayoutError::parent_rect: layout::geom::Rect
+pub layout::LayoutLimits::max_cells: usize
+pub layout::LayoutLimits::max_char_h: u32
+pub layout::LayoutLimits::max_children: usize
+pub layout::LayoutLimits::max_depth: u16
+pub layout::LayoutLimits::max_dim: u32
+pub layout::LayoutLimits::max_pixels: u32
+pub layout::LayoutLimits::max_tracks: usize
+pub layout::LayoutLimits::unbounded_threshold: u32
+pub layout::MainAlign::Center
+pub layout::MainAlign::End
+pub layout::MainAlign::SpaceAround
+pub layout::MainAlign::SpaceBetween
+pub layout::MainAlign::SpaceEvenly
+pub layout::MainAlign::Start
+pub layout::Node::Align
+pub layout::Node::Align::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Align::h: layout::geom::HAlign
+pub layout::Node::Align::v: layout::geom::VAlign
+pub layout::Node::Aspect
+pub layout::Node::Aspect::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Aspect::den: u32
+pub layout::Node::Aspect::num: u32
+pub layout::Node::Background
+pub layout::Node::Background::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Background::color: layout::color::Color
+pub layout::Node::Border
+pub layout::Node::Border::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Border::color: layout::color::Color
+pub layout::Node::Constrain
+pub layout::Node::Constrain::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Constrain::max_h: core::option::Option<u32>
+pub layout::Node::Constrain::max_w: core::option::Option<u32>
+pub layout::Node::Constrain::min_h: core::option::Option<u32>
+pub layout::Node::Constrain::min_w: core::option::Option<u32>
+pub layout::Node::Empty
+pub layout::Node::Fill(layout::color::Color)
+pub layout::Node::Fit
+pub layout::Node::Fit::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Fit::mode: layout::sizing::Fit
+pub layout::Node::Grid
+pub layout::Node::Grid::cells: alloc::vec::Vec<(layout::grid::GridSpan, layout::node::Node)>
+pub layout::Node::Grid::cols: alloc::vec::Vec<layout::sizing::Track>
+pub layout::Node::Grid::gap: (u32, u32)
+pub layout::Node::Grid::pad: u32
+pub layout::Node::Grid::rows: alloc::vec::Vec<layout::sizing::Track>
+pub layout::Node::Image(Bitmap)
+pub layout::Node::Layers(alloc::vec::Vec<layout::node::Node>)
+pub layout::Node::Padded
+pub layout::Node::Padded::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Padded::insets: layout::geom::Insets
+pub layout::Node::SegmentedStrip
+pub layout::Node::SegmentedStrip::segments: alloc::vec::Vec<layout::label::LabelSegment>
+pub layout::Node::SegmentedStrip::style: alloc::boxed::Box<layout::label::LabelStyle>
+pub layout::Node::Sized
+pub layout::Node::Sized::child: alloc::boxed::Box<layout::node::Node>
+pub layout::Node::Sized::h: layout::sizing::SizeRule
+pub layout::Node::Sized::w: layout::sizing::SizeRule
+pub layout::Node::Stack
+pub layout::Node::Stack::align_items: layout::sizing::CrossAlign
+pub layout::Node::Stack::axis: layout::geom::Axis
+pub layout::Node::Stack::children: alloc::vec::Vec<layout::node::Node>
+pub layout::Node::Stack::gap: u32
+pub layout::Node::Stack::justify: layout::sizing::MainAlign
+pub layout::Node::Stack::shrink: bool
+pub layout::Node::Text(layout::text::TextSpec)
+pub layout::NodeKind::Align
+pub layout::NodeKind::Aspect
+pub layout::NodeKind::Background
+pub layout::NodeKind::Border
+pub layout::NodeKind::Constrain
+pub layout::NodeKind::Empty
+pub layout::NodeKind::Fill
+pub layout::NodeKind::Fit
+pub layout::NodeKind::Grid
+pub layout::NodeKind::Image
+pub layout::NodeKind::Layers
+pub layout::NodeKind::Padded
+pub layout::NodeKind::SegmentedStrip
+pub layout::NodeKind::Sized
+pub layout::NodeKind::Stack
+pub layout::NodeKind::Text
+pub layout::Overflow::bottom: u32
+pub layout::Overflow::left: u32
+pub layout::Overflow::right: u32
+pub layout::Overflow::top: u32
+pub layout::Rect::h: u32
+pub layout::Rect::w: u32
+pub layout::Rect::x: u32
+pub layout::Rect::y: u32
+pub layout::RenderConfig::base_em: u32
+pub layout::RenderConfig::bg: layout::color::Color
+pub layout::RenderConfig::limits: layout::safety::LayoutLimits
+pub layout::RenderConfig::max_w: u32
+pub layout::RenderConfig::scale: f32
+pub layout::RenderOutcome::bitmap: Bitmap
+pub layout::RenderOutcome::errors: alloc::vec::Vec<layout::diagnostics::LayoutError>
+pub layout::Size::h: u32
+pub layout::Size::w: u32
+pub layout::SizeRule::Fill
+pub layout::SizeRule::Fixed(u32)
+pub layout::SizeRule::Grow(u32)
+pub layout::SizeRule::Hug
+pub layout::SizeRule::Percent(f32)
+pub layout::TextSpec::bg: layout::color::Color
+pub layout::TextSpec::line_height: f32
+pub layout::TextSpec::pad_h_frac: f32
+pub layout::TextSpec::pad_v_frac: f32
+pub layout::TextSpec::style: layout::text::TextStyle
+pub layout::TextStyle::AutoFit
+pub layout::TextStyle::AutoFit::fg: layout::color::Color
+pub layout::TextStyle::AutoFit::max_char_h: u32
+pub layout::TextStyle::AutoFit::min_char_h: u32
+pub layout::TextStyle::AutoFit::text: alloc::string::String
+pub layout::TextStyle::Fixed
+pub layout::TextStyle::Fixed::char_h: u32
+pub layout::TextStyle::Fixed::fg: layout::color::Color
+pub layout::TextStyle::Fixed::text: alloc::string::String
+pub layout::TextStyle::Lines(alloc::vec::Vec<(alloc::string::String, layout::color::Color)>)
+pub layout::TextStyle::Wrapped
+pub layout::TextStyle::Wrapped::char_h: u32
+pub layout::TextStyle::Wrapped::fg: layout::color::Color
+pub layout::TextStyle::Wrapped::text: alloc::string::String
+pub layout::Track::Auto
+pub layout::Track::Fr(u32)
+pub layout::Track::FrMin
+pub layout::Track::FrMin::min_px: u32
+pub layout::Track::FrMin::weight: u32
+pub layout::Track::Percent(f32)
+pub layout::Track::Px(u32)
+pub layout::VAlign::Bottom
+pub layout::VAlign::Center
+pub layout::VAlign::Top
+pub layout::diagnostics::ContainerKind::Grid
+pub layout::diagnostics::ContainerKind::Layers
+pub layout::diagnostics::ContainerKind::Stack
+pub layout::diagnostics::LayoutError::child_index: usize
+pub layout::diagnostics::LayoutError::child_kind: layout::diagnostics::NodeKind
+pub layout::diagnostics::LayoutError::child_rect: layout::geom::Rect
+pub layout::diagnostics::LayoutError::container: layout::diagnostics::ContainerKind
+pub layout::diagnostics::LayoutError::overflow: layout::diagnostics::Overflow
+pub layout::diagnostics::LayoutError::parent_rect: layout::geom::Rect
+pub layout::diagnostics::NodeKind::Align
+pub layout::diagnostics::NodeKind::Aspect
+pub layout::diagnostics::NodeKind::Background
+pub layout::diagnostics::NodeKind::Border
+pub layout::diagnostics::NodeKind::Constrain
+pub layout::diagnostics::NodeKind::Empty
+pub layout::diagnostics::NodeKind::Fill
+pub layout::diagnostics::NodeKind::Fit
+pub layout::diagnostics::NodeKind::Grid
+pub layout::diagnostics::NodeKind::Image
+pub layout::diagnostics::NodeKind::Layers
+pub layout::diagnostics::NodeKind::Padded
+pub layout::diagnostics::NodeKind::SegmentedStrip
+pub layout::diagnostics::NodeKind::Sized
+pub layout::diagnostics::NodeKind::Stack
+pub layout::diagnostics::NodeKind::Text
+pub layout::diagnostics::Overflow::bottom: u32
+pub layout::diagnostics::Overflow::left: u32
+pub layout::diagnostics::Overflow::right: u32
+pub layout::diagnostics::Overflow::top: u32
+pub layout::geom::Axis::Horizontal
+pub layout::geom::Axis::Vertical
+pub layout::geom::HAlign::Center
+pub layout::geom::HAlign::Left
+pub layout::geom::HAlign::Right
+pub layout::geom::Insets::bottom: u32
+pub layout::geom::Insets::left: u32
+pub layout::geom::Insets::right: u32
+pub layout::geom::Insets::top: u32
+pub layout::geom::Rect::h: u32
+pub layout::geom::Rect::w: u32
+pub layout::geom::Rect::x: u32
+pub layout::geom::Rect::y: u32
+pub layout::geom::Size::h: u32
+pub layout::geom::Size::w: u32
+pub layout::geom::VAlign::Bottom
+pub layout::geom::VAlign::Center
+pub layout::geom::VAlign::Top
+pub layout::grid::GridSpan::col: u32
+pub layout::grid::GridSpan::colspan: u32
+pub layout::grid::GridSpan::row: u32
+pub layout::grid::GridSpan::rowspan: u32
+pub layout::label::LabelSegment::align: layout::geom::HAlign
+pub layout::label::LabelSegment::char_h: core::option::Option<u32>
+pub layout::label::LabelSegment::fg: layout::color::Color
+pub layout::label::LabelSegment::text: alloc::string::String
+pub layout::label::LabelStyle::align: layout::geom::HAlign
+pub layout::label::LabelStyle::bg: layout::color::Color
+pub layout::label::LabelStyle::char_h: core::option::Option<u32>
+pub layout::label::LabelStyle::fg: layout::color::Color
+pub layout::label::LabelStyle::padding: layout::geom::Insets
+pub layout::node::Node::Align
+pub layout::node::Node::Align::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Align::h: layout::geom::HAlign
+pub layout::node::Node::Align::v: layout::geom::VAlign
+pub layout::node::Node::Aspect
+pub layout::node::Node::Aspect::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Aspect::den: u32
+pub layout::node::Node::Aspect::num: u32
+pub layout::node::Node::Background
+pub layout::node::Node::Background::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Background::color: layout::color::Color
+pub layout::node::Node::Border
+pub layout::node::Node::Border::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Border::color: layout::color::Color
+pub layout::node::Node::Constrain
+pub layout::node::Node::Constrain::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Constrain::max_h: core::option::Option<u32>
+pub layout::node::Node::Constrain::max_w: core::option::Option<u32>
+pub layout::node::Node::Constrain::min_h: core::option::Option<u32>
+pub layout::node::Node::Constrain::min_w: core::option::Option<u32>
+pub layout::node::Node::Empty
+pub layout::node::Node::Fill(layout::color::Color)
+pub layout::node::Node::Fit
+pub layout::node::Node::Fit::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Fit::mode: layout::sizing::Fit
+pub layout::node::Node::Grid
+pub layout::node::Node::Grid::cells: alloc::vec::Vec<(layout::grid::GridSpan, layout::node::Node)>
+pub layout::node::Node::Grid::cols: alloc::vec::Vec<layout::sizing::Track>
+pub layout::node::Node::Grid::gap: (u32, u32)
+pub layout::node::Node::Grid::pad: u32
+pub layout::node::Node::Grid::rows: alloc::vec::Vec<layout::sizing::Track>
+pub layout::node::Node::Image(Bitmap)
+pub layout::node::Node::Layers(alloc::vec::Vec<layout::node::Node>)
+pub layout::node::Node::Padded
+pub layout::node::Node::Padded::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Padded::insets: layout::geom::Insets
+pub layout::node::Node::SegmentedStrip
+pub layout::node::Node::SegmentedStrip::segments: alloc::vec::Vec<layout::label::LabelSegment>
+pub layout::node::Node::SegmentedStrip::style: alloc::boxed::Box<layout::label::LabelStyle>
+pub layout::node::Node::Sized
+pub layout::node::Node::Sized::child: alloc::boxed::Box<layout::node::Node>
+pub layout::node::Node::Sized::h: layout::sizing::SizeRule
+pub layout::node::Node::Sized::w: layout::sizing::SizeRule
+pub layout::node::Node::Stack
+pub layout::node::Node::Stack::align_items: layout::sizing::CrossAlign
+pub layout::node::Node::Stack::axis: layout::geom::Axis
+pub layout::node::Node::Stack::children: alloc::vec::Vec<layout::node::Node>
+pub layout::node::Node::Stack::gap: u32
+pub layout::node::Node::Stack::justify: layout::sizing::MainAlign
+pub layout::node::Node::Stack::shrink: bool
+pub layout::node::Node::Text(layout::text::TextSpec)
+pub layout::safety::LayoutLimits::max_cells: usize
+pub layout::safety::LayoutLimits::max_char_h: u32
+pub layout::safety::LayoutLimits::max_children: usize
+pub layout::safety::LayoutLimits::max_depth: u16
+pub layout::safety::LayoutLimits::max_dim: u32
+pub layout::safety::LayoutLimits::max_pixels: u32
+pub layout::safety::LayoutLimits::max_tracks: usize
+pub layout::safety::LayoutLimits::unbounded_threshold: u32
+pub layout::sizing::CrossAlign::Center
+pub layout::sizing::CrossAlign::End
+pub layout::sizing::CrossAlign::Start
+pub layout::sizing::CrossAlign::Stretch
+pub layout::sizing::Fit::Contain
+pub layout::sizing::Fit::Cover
+pub layout::sizing::Fit::None
+pub layout::sizing::Fit::Stretch
+pub layout::sizing::MainAlign::Center
+pub layout::sizing::MainAlign::End
+pub layout::sizing::MainAlign::SpaceAround
+pub layout::sizing::MainAlign::SpaceBetween
+pub layout::sizing::MainAlign::SpaceEvenly
+pub layout::sizing::MainAlign::Start
+pub layout::sizing::SizeRule::Fill
+pub layout::sizing::SizeRule::Fixed(u32)
+pub layout::sizing::SizeRule::Grow(u32)
+pub layout::sizing::SizeRule::Hug
+pub layout::sizing::SizeRule::Percent(f32)
+pub layout::sizing::Track::Auto
+pub layout::sizing::Track::Fr(u32)
+pub layout::sizing::Track::FrMin
+pub layout::sizing::Track::FrMin::min_px: u32
+pub layout::sizing::Track::FrMin::weight: u32
+pub layout::sizing::Track::Percent(f32)
+pub layout::sizing::Track::Px(u32)
+pub layout::text::TextSpec::bg: layout::color::Color
+pub layout::text::TextSpec::line_height: f32
+pub layout::text::TextSpec::pad_h_frac: f32
+pub layout::text::TextSpec::pad_v_frac: f32
+pub layout::text::TextSpec::style: layout::text::TextStyle
+pub layout::text::TextStyle::AutoFit
+pub layout::text::TextStyle::AutoFit::fg: layout::color::Color
+pub layout::text::TextStyle::AutoFit::max_char_h: u32
+pub layout::text::TextStyle::AutoFit::min_char_h: u32
+pub layout::text::TextStyle::AutoFit::text: alloc::string::String
+pub layout::text::TextStyle::Fixed
+pub layout::text::TextStyle::Fixed::char_h: u32
+pub layout::text::TextStyle::Fixed::fg: layout::color::Color
+pub layout::text::TextStyle::Fixed::text: alloc::string::String
+pub layout::text::TextStyle::Lines(alloc::vec::Vec<(alloc::string::String, layout::color::Color)>)
+pub layout::text::TextStyle::Wrapped
+pub layout::text::TextStyle::Wrapped::char_h: u32
+pub layout::text::TextStyle::Wrapped::fg: layout::color::Color
+pub layout::text::TextStyle::Wrapped::text: alloc::string::String
+
+## trait impls (34 types)
+
+BitmapRef<'a>: TrivialClone
+checksums::EntryKind: TrivialClone
+layout::RenderConfig: Clone, Debug
+layout::RenderOutcome: Debug, Display
+layout::diagnostics::ContainerKind: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+layout::diagnostics::LayoutError: Clone, Debug, Display, Error
+layout::diagnostics::NodeKind: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+layout::diagnostics::Overflow: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::geom::Axis: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+layout::geom::HAlign: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::geom::Insets: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::geom::Rect: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::geom::Size: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::geom::VAlign: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::grid::Grid: Clone, Debug, Default, layout::modifiers::LayoutMod
+layout::grid::GridSpan: Clone, Copy, Debug, Eq, PartialEq, TrivialClone
+layout::label::LabelSegment: Clone, Debug
+layout::label::LabelStyle: Clone, Debug, Default
+layout::layers::Layers: Clone, Debug, Default, layout::modifiers::LayoutMod
+layout::node::Node: Clone, Debug, From<&str>, From<Bitmap>, From<alloc::string::String>, From<layout::grid::Grid>, From<layout::layers::Layers>, From<layout::stack::Stack>, layout::modifiers::LayoutMod
+layout::safety::LayoutLimits: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::sizing::CrossAlign: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::sizing::Fit: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::sizing::MainAlign: Clone, Copy, Debug, Default, Eq, PartialEq, TrivialClone
+layout::sizing::SizeRule: Clone, Copy, Debug, Default, PartialEq, TrivialClone
+layout::sizing::Track: Clone, Copy, Debug, PartialEq, TrivialClone
+layout::stack::Stack: Clone, Debug, layout::modifiers::LayoutMod
+layout::text::TextSpec: Clone, Debug
+layout::text::TextStyle: Clone, Debug
+manifest::ManifestStatus: TrivialClone
+oracle::OracleTolerance: TrivialClone
+simd::CryptoGrouping: TrivialClone
+testing::ComparisonMethod: TrivialClone
+testing::DimensionMismatchKind: TrivialClone
+
+## auto traits
+
+30 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

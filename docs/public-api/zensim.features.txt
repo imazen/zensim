@@ -1,0 +1,163 @@
+# zensim public API — additions from non-default features
+# features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 2
+#   pub types (struct/enum/trait/alias)        14
+#   pub consts/statics                         10
+#   free functions                              4
+#   inherent methods                           21
+#   struct fields                              49
+#   enum variants                              13
+#   trait roster entries (type × trait)        49
+#   auto-trait-complete types                  14
+#
+# per-module pub lines:
+#   (root)                           89
+#   cvvdp_features                    2
+#   profile                          20
+#   xyb_lms_features                  2
+
+## items (113 lines)
+
+pub mod cvvdp_features
+pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
+pub fn cvvdp_features::extract_cvvdp_features(&[u8], &[u8], usize, usize) -> alloc::vec::Vec<f32>
+pub profile::ZensimProfile::Custom
+pub profile::ZensimProfile::Custom::name: &'static str
+pub profile::ZensimProfile::Custom::params: &'static profile::ProfileParams
+pub fn profile::ProfileParams::builder() -> profile::ProfileParamsBuilder
+pub fn profile::ProfileParams::custom(&'static [f64], usize, u8, usize, f64, f64) -> Self
+pub struct profile::ProfileParamsBuilder
+pub fn profile::ProfileParamsBuilder::blur(self, usize, u8) -> Self
+pub fn profile::ProfileParamsBuilder::bounded_squash(self, bool) -> Self
+pub fn profile::ProfileParamsBuilder::build(self) -> profile::ProfileParams
+pub fn profile::ProfileParamsBuilder::compute_iw_features(self, bool) -> Self
+pub fn profile::ProfileParamsBuilder::ensemble(self, fn() -> &'static [u8], fn() -> &'static [u8]) -> Self
+pub fn profile::ProfileParamsBuilder::extended_features(self, bool) -> Self
+pub fn profile::ProfileParamsBuilder::extrapolate_score(self, bool) -> Self
+pub fn profile::ProfileParamsBuilder::mlp(self, fn() -> &'static [u8]) -> Self
+pub fn profile::ProfileParamsBuilder::mlp_secondary(self, fn() -> &'static [u8], f32) -> Self
+pub fn profile::ProfileParamsBuilder::num_scales(self, usize) -> Self
+pub fn profile::ProfileParamsBuilder::score_mapping(self, f64, f64) -> Self
+pub fn profile::ProfileParamsBuilder::skip_score_mapping(self, bool) -> Self
+pub fn profile::ProfileParamsBuilder::soft_clamp_score(self, bool) -> Self
+pub fn profile::ProfileParamsBuilder::weights(self, &'static [f64]) -> Self
+pub mod xyb_lms_features
+pub const xyb_lms_features::XYB_LMS_FEATURE_COUNT: usize
+pub fn xyb_lms_features::extract_xyb_lms_features(&[u8]) -> alloc::vec::Vec<f32>
+#[non_exhaustive] pub enum BlurKernel
+pub BlurKernel::Box
+pub BlurKernel::Box::passes: u8
+#[non_exhaustive] pub enum DownscaleFilter
+pub DownscaleFilter::Box2x2
+#[non_exhaustive] pub enum ErrorCategory
+pub ErrorCategory::AlphaCompositing
+pub ErrorCategory::ChannelSwap
+pub ErrorCategory::Identical
+pub ErrorCategory::RoundingError
+pub ErrorCategory::Unclassified
+pub enum IwWeightKind
+pub IwWeightKind::LocalGradL1
+pub IwWeightKind::LocalGradL2
+pub IwWeightKind::LocalVariance
+pub IwWeightKind::SteerablePyramidLogGsm
+pub ZensimProfile::Custom
+pub ZensimProfile::Custom::name: &'static str
+pub ZensimProfile::Custom::params: &'static profile::ProfileParams
+#[non_exhaustive] pub struct AlphaStratifiedStats
+pub AlphaStratifiedStats::max_abs_delta: [f64; 3]
+pub AlphaStratifiedStats::mean_abs_delta: [f64; 3]
+pub AlphaStratifiedStats::pixel_count: u64
+#[non_exhaustive] pub struct ClassifiedResult
+pub ClassifiedResult::classification: ErrorClassification
+pub ClassifiedResult::delta_stats: DeltaStats
+pub ClassifiedResult::result: ZensimResult
+#[non_exhaustive] pub struct DeltaStats
+pub DeltaStats::alpha_error_correlation: core::option::Option<f64>
+pub DeltaStats::alpha_max_delta: u8
+pub DeltaStats::alpha_pixels_differing: u64
+pub DeltaStats::dst_histogram: [[u64; 256]; 4]
+pub DeltaStats::has_alpha: bool
+pub DeltaStats::max_abs_delta: [f64; 3]
+pub DeltaStats::mean_delta: [f64; 3]
+pub DeltaStats::native_max: f64
+pub DeltaStats::opaque_stats: core::option::Option<AlphaStratifiedStats>
+pub DeltaStats::pixel_count: u64
+pub DeltaStats::pixels_differing: u64
+pub DeltaStats::pixels_differing_by_more_than_1: u64
+pub DeltaStats::semitransparent_stats: core::option::Option<AlphaStratifiedStats>
+pub DeltaStats::signed_small_histogram: [[u64; 7]; 3]
+pub DeltaStats::src_histogram: [[u64; 256]; 4]
+pub DeltaStats::stddev_delta: [f64; 3]
+#[non_exhaustive] pub struct ErrorClassification
+pub ErrorClassification::confidence: f64
+pub ErrorClassification::dominant: ErrorCategory
+pub ErrorClassification::rounding_bias: core::option::Option<RoundingBias>
+pub struct IwWeightConfig
+pub IwWeightConfig::info_log_sigma_e_sq: core::option::Option<f32>
+pub IwWeightConfig::kernel_half: usize
+pub IwWeightConfig::kind: IwWeightKind
+pub IwWeightConfig::weight_floor: f32
+#[non_exhaustive] pub struct RoundingBias
+pub RoundingBias::balanced: bool
+pub RoundingBias::positive_fraction: [f64; 3]
+pub struct UnsupportedFormat(pub &'static str)
+pub struct ZenpixelsSource<'a>
+pub fn ZenpixelsSource<'a>::try_from_buffer(&'a zenpixels::buffer::PixelBuffer) -> core::result::Result<Self, UnsupportedFormat>
+pub fn ZenpixelsSource<'a>::try_from_slice(&'a zenpixels::buffer::PixelSlice<'a>) -> core::result::Result<Self, UnsupportedFormat>
+pub fn Zensim::classify(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ClassifiedResult, ZensimError>
+pub fn Zensim::compute_all_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_with_params(&profile::ProfileParams, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+#[non_exhaustive] pub struct ZensimConfig
+pub ZensimConfig::allow_multithreading: bool
+pub ZensimConfig::blur_kernel: BlurKernel
+pub ZensimConfig::blur_passes: u8
+pub ZensimConfig::blur_radius: usize
+pub ZensimConfig::compute_all_features: bool
+pub ZensimConfig::compute_iw_features: bool
+pub ZensimConfig::downscale_filter: DownscaleFilter
+pub ZensimConfig::extended_features: bool
+pub ZensimConfig::extended_masking_strength: f32
+pub ZensimConfig::iw_strength: f32
+pub ZensimConfig::num_scales: usize
+pub ZensimConfig::score_mapping_a: f64
+pub ZensimConfig::score_mapping_b: f64
+pub const CH_B: usize
+pub const CH_X: usize
+pub const CH_Y: usize
+pub const FEATURES_PER_CHANNEL_BASIC: usize
+pub const FEATURES_PER_CHANNEL_EXTENDED: usize
+pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize
+pub const FEATURES_PER_SCALE: usize
+pub const WEIGHTS: &[f64; 228]
+pub fn compute_iw_weights(&[f32], usize, usize, usize, IwWeightConfig) -> alloc::vec::Vec<f32>
+pub fn try_score_from_features(&[f64], &[f64]) -> core::result::Result<(f64, f64), ZensimError>
+
+## trait impls (14 types)
+
+AlphaStratifiedStats: Clone, Debug
+BlurKernel: Clone, Copy, Debug, Default, Eq, PartialEq
+ClassifiedResult: Clone, Debug
+DeltaStats: Clone, Debug
+DownscaleFilter: Clone, Copy, Debug, Default, PartialEq
+ErrorCategory: Clone, Copy, Debug, Eq, PartialEq
+ErrorClassification: Clone, Debug
+IwWeightConfig: Clone, Copy, Debug, Default
+IwWeightKind: Clone, Copy, Debug, Default, Eq, PartialEq
+RoundingBias: Clone, Debug
+UnsupportedFormat: Clone, Copy, Debug, Display, Eq, Error, PartialEq
+ZenpixelsSource<'_>: source::ImageSource
+ZensimConfig: Clone, Copy, Debug, Default
+profile::ProfileParamsBuilder: Debug
+
+## auto traits
+
+14 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

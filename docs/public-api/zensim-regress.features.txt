@@ -1,0 +1,52 @@
+# zensim-regress public API — additions from non-default features
+# features: archmage,threads
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub modules                                 1
+#   pub types (struct/enum/trait/alias)         3
+#   free functions                              3
+#   struct fields                               7
+#   enum variants                               3
+#   trait roster entries (type × trait)        11
+#   auto-trait-complete types                   3
+#
+# per-module pub lines:
+#   (root)                            1
+#   simd                             16
+
+## items (17 lines)
+
+pub mod simd
+pub enum simd::CryptoGrouping
+pub simd::CryptoGrouping::Clump
+pub simd::CryptoGrouping::Combinatorial
+pub simd::CryptoGrouping::Skip
+pub struct simd::SimdConsistencyReport
+pub simd::SimdConsistencyReport::all_passed: bool
+pub simd::SimdConsistencyReport::comparisons: alloc::vec::Vec<simd::TierComparison>
+pub simd::SimdConsistencyReport::permutation_count: usize
+pub simd::SimdConsistencyReport::permutation_report: archmage::testing::PermutationReport
+pub simd::SimdConsistencyReport::reference_tier: alloc::string::String
+pub struct simd::TierComparison
+pub simd::TierComparison::report: testing::RegressionReport
+pub simd::TierComparison::tier_label: alloc::string::String
+pub fn simd::check_simd_consistency(impl core::ops::function::Fn() -> (alloc::vec::Vec<u8>, u32, u32), &testing::RegressionTolerance, archmage::testing::CompileTimePolicy) -> core::result::Result<simd::SimdConsistencyReport, error::RegressError>
+pub fn simd::check_simd_consistency_f32(impl core::ops::function::Fn() -> (alloc::vec::Vec<f32>, u32, u32, usize), &testing::RegressionTolerance, archmage::testing::CompileTimePolicy) -> core::result::Result<simd::SimdConsistencyReport, error::RegressError>
+pub fn simd::check_simd_consistency_opts(impl core::ops::function::Fn() -> (alloc::vec::Vec<u8>, u32, u32), &testing::RegressionTolerance, archmage::testing::CompileTimePolicy, simd::CryptoGrouping) -> core::result::Result<simd::SimdConsistencyReport, error::RegressError>
+
+## trait impls (3 types)
+
+simd::CryptoGrouping: Clone, Copy, Debug, Default, Eq, PartialEq
+simd::SimdConsistencyReport: Clone, Debug, Display
+simd::TierComparison: Clone, Debug
+
+## auto traits
+
+3 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
