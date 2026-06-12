@@ -1192,7 +1192,7 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn precompute_reference(
         &self,
         source: &impl ImageSource,
@@ -1216,7 +1216,7 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     /// Returns [`ZensimError::DimensionMismatch`] if `distorted.width()` /
     /// `distorted.height()` differ from the precomputed reference's
     /// dimensions (see
@@ -1469,7 +1469,7 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn compute_with_ref_into(
         &self,
         precomputed: &crate::streaming::PrecomputedReference,
@@ -1513,7 +1513,7 @@ impl Zensim {
     ///
     /// # Errors
     ///
-    /// Returns [`ZensimError::ImageTooSmall`] if dimensions < 8×8.
+    /// Returns [`ZensimError::ImageTooSmall`] if either dimension is zero.
     pub fn precompute_reference_linear_planar(
         &self,
         planes: [&[f32]; 3],

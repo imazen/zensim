@@ -94,3 +94,4 @@ AGENT_COORDINATION_NOTE.md
 /zensim-bench/Cargo.lock
 /zensim-picker-prep/Cargo.lock
 /zensim-target/Cargo.lock
+apidoc/target/

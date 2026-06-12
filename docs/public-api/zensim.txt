@@ -1,0 +1,335 @@
+# zensim public API — supported surface (default features)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+#
+# files: zensim.txt 297 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 35 lines (35 hidden + 0 excluded-feature)
+
+## summary
+#
+#   pub modules                                 6
+#   pub types (struct/enum/trait/alias)        32
+#   pub consts/statics                         25
+#   free functions                             16
+#   inherent methods                          125
+#   struct fields                              39
+#   enum variants                              41
+#   trait roster entries (type × trait)        78
+#   auto-trait-complete types                  21
+#
+# per-module pub lines:
+#   (root)                          154
+#   codec_calibration                21
+#   display                          19
+#   mapping                          12
+#   profile                          25
+#   source                           53
+
+## items (272 lines)
+
+pub mod zensim
+pub mod codec_calibration
+pub codec_calibration::CalibrationAffine::alpha: f32
+pub codec_calibration::CalibrationAffine::beta: f32
+pub const codec_calibration::CalibrationAffine::IDENTITY: Self
+pub fn codec_calibration::CalibrationAffine::apply(&self, f32) -> f32
+pub fn codec_calibration::CalibrationAffine::invert(&self, f32) -> core::option::Option<f32>
+pub codec_calibration::CodecCalibration::avif: codec_calibration::CalibrationAffine
+pub codec_calibration::CodecCalibration::jpeg: codec_calibration::CalibrationAffine
+pub codec_calibration::CodecCalibration::webp: codec_calibration::CalibrationAffine
+pub codec_calibration::CodecCalibration::zenjxl: codec_calibration::CalibrationAffine
+pub codec_calibration::CodecCalibration::zenpng: codec_calibration::CalibrationAffine
+pub const codec_calibration::CodecCalibration::IDENTITY: Self
+pub const codec_calibration::CodecCalibration::PREVIEW_V0_5_TUNER: Self
+pub fn codec_calibration::CodecCalibration::lookup(&self, &str) -> core::option::Option<codec_calibration::CalibrationAffine>
+pub mod display
+pub struct display::DisplayCalibration
+pub display::DisplayCalibration::alpha: f32
+pub display::DisplayCalibration::beta: f32
+pub display::DisplayCalibration::ppd: f32
+pub struct display::DisplayProfile
+pub display::DisplayProfile::ambient_lux: f32
+pub display::DisplayProfile::peak_nits: f32
+pub display::DisplayProfile::ppd: f32
+pub const display::DisplayProfile::DESKTOP_1080P: Self
+pub const display::DisplayProfile::DESKTOP_4K_27: Self
+pub const display::DisplayProfile::IPAD_PRO_M4: Self
+pub const display::DisplayProfile::IPHONE_14_PRO: Self
+pub const display::DisplayProfile::IPHONE_16_PRO: Self
+pub const display::DisplayProfile::MACBOOK_RETINA: Self
+pub const display::DisplayProfile::MOHAMMADI_AIC3: Self
+pub const display::DisplayProfile::PHONE_OLED_INDOOR: Self
+pub const display::DisplayProfile::PRINT_300DPI_30CM: Self
+pub const display::DisplayProfile::TV_4K_55_3M: Self
+pub const display::DisplayProfile::WEB_GENERIC: Self
+pub mod mapping
+pub fn mapping::butteraugli_to_zensim(f64) -> f64
+pub fn mapping::dssim_to_zensim(f64) -> f64
+pub fn mapping::libjpeg_quality_to_zensim(f64) -> f64
+pub fn mapping::ssim2_to_zensim(f64) -> f64
+pub fn mapping::zendissim_to_zensim(f64) -> f64
+pub fn mapping::zenjpeg_quality_to_zensim(f64) -> f64
+pub fn mapping::zensim_to_butteraugli(f64) -> f64
+pub fn mapping::zensim_to_dssim(f64) -> f64
+pub fn mapping::zensim_to_libjpeg_quality(f64) -> f64
+pub fn mapping::zensim_to_ssim2(f64) -> f64
+pub fn mapping::zensim_to_zendissim(f64) -> f64
+pub fn mapping::zensim_to_zenjpeg_quality(f64) -> f64
+pub mod profile
+pub profile::ZensimProfile::A
+pub profile::ZensimProfile::PreviewV0_1
+pub profile::ZensimProfile::PreviewV0_2
+pub const fn profile::ZensimProfile::codec_target() -> Self [also: (root)]
+pub fn profile::ZensimProfile::latest() -> Self
+pub const fn profile::ZensimProfile::latest_preview() -> Self [also: (root)]
+pub fn profile::ZensimProfile::name(&self) -> &'static str
+#[non_exhaustive] pub struct profile::ProfileParams
+pub profile::ProfileParams::blur_passes: u8
+pub profile::ProfileParams::blur_radius: usize
+pub profile::ProfileParams::bounded_squash: bool
+pub profile::ProfileParams::compute_iw_features: bool
+pub profile::ProfileParams::extended_features: bool
+pub profile::ProfileParams::extrapolate_score: bool
+pub profile::ProfileParams::num_scales: usize
+pub profile::ProfileParams::score_mapping_a: f64
+pub profile::ProfileParams::score_mapping_b: f64
+pub profile::ProfileParams::skip_score_mapping: bool
+pub profile::ProfileParams::soft_clamp_score: bool
+pub profile::ProfileParams::weights: &'static [f64]
+pub static profile::LINEAR_WEIGHTS_PREVIEW_V0_1: [f64; 228]
+pub static profile::LINEAR_WEIGHTS_PREVIEW_V0_2: [f64; 228]
+pub static profile::WEIGHTS_PREVIEW_V0_1: [f64; 228]
+pub static profile::WEIGHTS_PREVIEW_V0_2: [f64; 228]
+pub mod source
+pub source::AlphaMode::Opaque
+pub source::AlphaMode::Straight
+pub source::AlphaMode::Unknown
+pub fn source::AlphaMode::is_straight(self) -> bool
+pub source::ColorPrimaries::Bt2020
+pub source::ColorPrimaries::DisplayP3
+pub source::ColorPrimaries::Srgb
+pub source::PixelFormat::LinearF32Rgba
+pub source::PixelFormat::Srgb16Rgba
+pub source::PixelFormat::Srgb8Bgra
+pub source::PixelFormat::Srgb8Rgb
+pub source::PixelFormat::Srgb8Rgba
+pub fn source::PixelFormat::bytes_per_pixel(self) -> usize
+pub fn source::PixelFormat::has_alpha(self) -> bool
+pub fn source::RgbSlice<'a>::new(&'a [[u8; 3]], usize, usize) -> Self
+pub fn source::RgbSlice<'a>::try_new(&'a [[u8; 3]], usize, usize) -> core::result::Result<Self, ZensimError>
+pub fn source::RgbaSlice<'a>::new(&'a [[u8; 4]], usize, usize) -> Self
+pub fn source::RgbaSlice<'a>::try_new(&'a [[u8; 4]], usize, usize) -> core::result::Result<Self, ZensimError>
+pub fn source::RgbaSlice<'a>::try_with_alpha_mode(&'a [[u8; 4]], usize, usize, source::AlphaMode) -> core::result::Result<Self, ZensimError>
+pub fn source::RgbaSlice<'a>::with_alpha_mode(&'a [[u8; 4]], usize, usize, source::AlphaMode) -> Self
+pub fn source::StridedBytes<'a>::new(&'a [u8], usize, usize, usize, source::PixelFormat) -> Self
+pub fn source::StridedBytes<'a>::try_new(&'a [u8], usize, usize, usize, source::PixelFormat) -> core::result::Result<Self, ZensimError>
+pub fn source::StridedBytes<'a>::try_with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> core::result::Result<Self, ZensimError>
+pub fn source::StridedBytes<'a>::with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> Self
+pub fn source::StridedBytes<'a>::with_color_primaries(self, source::ColorPrimaries) -> Self
+pub fn source::ImageSource::alpha_mode(&self) -> source::AlphaMode
+pub fn source::ImageSource::color_primaries(&self) -> source::ColorPrimaries
+pub fn source::ImageSource::height(&self) -> usize
+pub fn source::ImageSource::is_hdr(&self) -> bool
+pub fn source::ImageSource::pixel_format(&self) -> source::PixelFormat
+pub fn source::ImageSource::row_bytes(&self, usize) -> &[u8]
+pub fn source::ImageSource::width(&self) -> usize
+pub enum AlphaMode [also: source]
+pub AlphaMode::Opaque
+pub AlphaMode::Straight
+pub AlphaMode::Unknown
+pub fn source::AlphaMode::is_straight(self) -> bool
+#[non_exhaustive] pub enum ColorPrimaries [also: source]
+pub ColorPrimaries::Bt2020
+pub ColorPrimaries::DisplayP3
+pub ColorPrimaries::Srgb
+#[non_exhaustive] pub enum DiffmapWeighting
+pub DiffmapWeighting::Balanced
+pub DiffmapWeighting::Custom([f32; 3])
+pub DiffmapWeighting::Trained
+#[non_exhaustive] pub enum PixelFormat [also: source]
+pub PixelFormat::LinearF32Rgba
+pub PixelFormat::Srgb16Rgba
+pub PixelFormat::Srgb8Bgra
+pub PixelFormat::Srgb8Rgb
+pub PixelFormat::Srgb8Rgba
+pub fn source::PixelFormat::bytes_per_pixel(self) -> usize
+pub fn source::PixelFormat::has_alpha(self) -> bool
+#[non_exhaustive] pub enum ZensimError
+pub ZensimError::DimensionMismatch
+pub ZensimError::FeatureWeightsLengthMismatch
+pub ZensimError::HdrInputRequiresPuPath
+pub ZensimError::ImageTooLarge
+pub ZensimError::ImageTooSmall
+pub ZensimError::InvalidDataLength
+pub ZensimError::InvalidStride
+pub ZensimError::ModelForwardFailed
+pub ZensimError::ModelForwardFailed::reason: &'static str
+pub ZensimError::ModelLoadFailed
+pub ZensimError::ModelLoadFailed::reason: &'static str
+pub ZensimError::UnsupportedPixelFormat
+#[non_exhaustive] pub enum ZensimProfile [also: profile]
+pub ZensimProfile::A
+pub ZensimProfile::PreviewV0_1
+pub ZensimProfile::PreviewV0_2
+pub fn profile::ZensimProfile::latest() -> Self
+pub fn profile::ZensimProfile::name(&self) -> &'static str
+pub struct CalibrationAffine [also: codec_calibration]
+pub CalibrationAffine::alpha: f32
+pub CalibrationAffine::beta: f32
+pub const codec_calibration::CalibrationAffine::IDENTITY: Self
+pub fn codec_calibration::CalibrationAffine::apply(&self, f32) -> f32
+pub fn codec_calibration::CalibrationAffine::invert(&self, f32) -> core::option::Option<f32>
+pub struct CodecCalibration [also: codec_calibration]
+pub CodecCalibration::avif: codec_calibration::CalibrationAffine
+pub CodecCalibration::jpeg: codec_calibration::CalibrationAffine
+pub CodecCalibration::webp: codec_calibration::CalibrationAffine
+pub CodecCalibration::zenjxl: codec_calibration::CalibrationAffine
+pub CodecCalibration::zenpng: codec_calibration::CalibrationAffine
+pub const codec_calibration::CodecCalibration::IDENTITY: Self
+pub const codec_calibration::CodecCalibration::PREVIEW_V0_5_TUNER: Self
+pub fn codec_calibration::CodecCalibration::lookup(&self, &str) -> core::option::Option<codec_calibration::CalibrationAffine>
+pub struct DiffmapOptions
+pub DiffmapOptions::include_edge_mse: bool
+pub DiffmapOptions::include_hf: bool
+pub DiffmapOptions::masking_strength: core::option::Option<f32>
+pub DiffmapOptions::sqrt: bool
+pub DiffmapOptions::weighting: DiffmapWeighting
+#[non_exhaustive] pub struct DiffmapResult
+pub fn DiffmapResult::diffmap(&self) -> &[f32]
+pub fn DiffmapResult::height(&self) -> usize
+pub fn DiffmapResult::into_parts(self) -> (ZensimResult, alloc::vec::Vec<f32>, usize, usize)
+pub fn DiffmapResult::result(&self) -> &ZensimResult
+pub fn DiffmapResult::score(&self) -> f64
+pub fn DiffmapResult::width(&self) -> usize
+pub struct FeatureView<'a>
+pub fn FeatureView<'a>::art_2nd(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::art_4th(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::art_l8(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::art_max(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::art_mean(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::det_2nd(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::det_4th(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::det_l8(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::det_max(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::det_mean(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::has_masked(&self) -> bool
+pub fn FeatureView<'a>::has_peaks(&self) -> bool
+pub fn FeatureView<'a>::hf_energy_gain(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::hf_energy_loss(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::hf_mag_loss(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::masked_art_4th(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::masked_det_4th(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::masked_features(&self) -> core::option::Option<&[f64]>
+pub fn FeatureView<'a>::masked_mse(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::masked_ssim_2nd(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::masked_ssim_4th(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::masked_ssim_mean(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::mse(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::n_scales(&self) -> usize
+pub fn FeatureView<'a>::new(&'a [f64], usize) -> core::option::Option<Self>
+pub fn FeatureView<'a>::peak_features(&self) -> core::option::Option<&[f64]>
+pub fn FeatureView<'a>::scored_features(&self) -> &[f64]
+pub fn FeatureView<'a>::ssim_2nd(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::ssim_4th(&self, usize, usize) -> f64
+pub fn FeatureView<'a>::ssim_l8(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::ssim_max(&self, usize, usize) -> core::option::Option<f64>
+pub fn FeatureView<'a>::ssim_mean(&self, usize, usize) -> f64
+pub struct PrecomputedReference
+pub fn PrecomputedReference::height(&self) -> usize
+pub fn PrecomputedReference::width(&self) -> usize
+pub struct RgbSlice<'a> [also: source]
+pub fn source::RgbSlice<'a>::new(&'a [[u8; 3]], usize, usize) -> Self
+pub fn source::RgbSlice<'a>::try_new(&'a [[u8; 3]], usize, usize) -> core::result::Result<Self, ZensimError>
+pub struct RgbaSlice<'a> [also: source]
+pub fn source::RgbaSlice<'a>::new(&'a [[u8; 4]], usize, usize) -> Self
+pub fn source::RgbaSlice<'a>::try_new(&'a [[u8; 4]], usize, usize) -> core::result::Result<Self, ZensimError>
+pub fn source::RgbaSlice<'a>::try_with_alpha_mode(&'a [[u8; 4]], usize, usize, source::AlphaMode) -> core::result::Result<Self, ZensimError>
+pub fn source::RgbaSlice<'a>::with_alpha_mode(&'a [[u8; 4]], usize, usize, source::AlphaMode) -> Self
+pub struct StridedBytes<'a> [also: source]
+pub fn source::StridedBytes<'a>::new(&'a [u8], usize, usize, usize, source::PixelFormat) -> Self
+pub fn source::StridedBytes<'a>::try_new(&'a [u8], usize, usize, usize, source::PixelFormat) -> core::result::Result<Self, ZensimError>
+pub fn source::StridedBytes<'a>::try_with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> core::result::Result<Self, ZensimError>
+pub fn source::StridedBytes<'a>::with_alpha_mode(&'a [u8], usize, usize, usize, source::PixelFormat, source::AlphaMode) -> Self
+pub fn source::StridedBytes<'a>::with_color_primaries(self, source::ColorPrimaries) -> Self
+pub struct Zensim
+pub fn Zensim::compute(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_extended_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_pu_linear(&self, &[f32], &[f32], usize, usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_pu_linear_planar(&self, [&[f32]; 3], [&[f32]; 3], usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_streaming_strips(&self, &impl source::ImageSource, &impl source::ImageSource, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_streaming_strips_default(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_with_codec_hint(&self, &impl source::ImageSource, &impl source::ImageSource, core::option::Option<&str>) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_with_ref(&self, &PrecomputedReference, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_with_ref_into(&self, &PrecomputedReference, &impl source::ImageSource, &mut ZensimScratch) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_with_ref_streaming_strips(&self, &PrecomputedReference, &impl source::ImageSource, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_with_ref_streaming_strips_default(&self, &PrecomputedReference, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::max_pixels(&self) -> core::option::Option<usize>
+pub fn Zensim::new(profile::ZensimProfile) -> Self
+pub fn Zensim::parallel(&self) -> bool
+pub fn Zensim::precompute_reference(&self, &impl source::ImageSource) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn Zensim::precompute_reference_linear_planar(&self, [&[f32]; 3], usize, usize, usize) -> core::result::Result<PrecomputedReference, ZensimError>
+pub fn Zensim::profile(&self) -> profile::ZensimProfile
+pub fn Zensim::with_max_pixels(self, usize) -> Self
+pub fn Zensim::with_parallel(self, bool) -> Self
+pub fn Zensim::compute_with_diffmap(&self, &impl source::ImageSource, &impl source::ImageSource, impl core::convert::Into<DiffmapOptions>) -> core::result::Result<DiffmapResult, ZensimError>
+pub fn Zensim::compute_with_ref_and_diffmap(&self, &PrecomputedReference, &impl source::ImageSource, impl core::convert::Into<DiffmapOptions>) -> core::result::Result<DiffmapResult, ZensimError>
+pub fn Zensim::compute_with_ref_and_diffmap_linear_planar(&self, &PrecomputedReference, [&[f32]; 3], usize, usize, usize, impl core::convert::Into<DiffmapOptions>) -> core::result::Result<DiffmapResult, ZensimError>
+pub struct ZensimResult
+pub fn ZensimResult::approx_butteraugli(&self) -> f64
+pub fn ZensimResult::approx_dssim(&self) -> f64
+pub fn ZensimResult::approx_ssim2(&self) -> f64
+pub fn ZensimResult::dissimilarity(&self) -> f64
+pub fn ZensimResult::features(&self) -> &[f64]
+pub fn ZensimResult::into_features(self) -> alloc::vec::Vec<f64>
+pub fn ZensimResult::mean_offset(&self) -> [f64; 3]
+pub fn ZensimResult::profile(&self) -> profile::ZensimProfile
+pub fn ZensimResult::raw_distance(&self) -> f64
+pub fn ZensimResult::score(&self) -> f64
+pub struct ZensimScratch
+pub fn ZensimScratch::new() -> Self
+pub trait ImageSource: core::marker::Sync [also: source]
+pub fn ImageSource::alpha_mode(&self) -> source::AlphaMode
+pub fn ImageSource::color_primaries(&self) -> source::ColorPrimaries
+pub fn ImageSource::height(&self) -> usize
+pub fn ImageSource::is_hdr(&self) -> bool
+pub fn ImageSource::pixel_format(&self) -> source::PixelFormat
+pub fn ImageSource::row_bytes(&self, usize) -> &[u8]
+pub fn ImageSource::width(&self) -> usize
+pub fn dissimilarity_to_score(f64) -> f64
+pub fn score_features_with_profile(profile::ZensimProfile, &[f64], u32, u32) -> core::result::Result<f64, ZensimError>
+pub fn score_features_with_profile_and_codec(profile::ZensimProfile, &[f64], u32, u32, core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
+pub fn score_to_dissimilarity(f64) -> f64
+
+## trait impls (24 types)
+
+DiffmapOptions: Clone, Copy, Debug, Default, From<DiffmapWeighting>
+DiffmapWeighting: Clone, Copy, Debug, Default
+FeatureView<'a>: Clone, Debug
+Zensim: Clone, Debug
+ZensimError: Clone, Copy, Debug, Display, Eq, Error, PartialEq
+ZensimResult: Clone, Debug
+ZensimScratch: Default
+codec_calibration::CalibrationAffine: Clone, Copy, Debug, PartialEq
+codec_calibration::CodecCalibration: Clone, Copy, Debug
+display::DisplayCalibration: Clone, Copy, Debug
+display::DisplayProfile: Clone, Copy, Debug
+imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>: source::ImageSource
+imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>: source::ImageSource
+profile::ProfileParams: Debug
+profile::ZensimProfile: Clone, Copy, Debug, Display, Eq, Hash, PartialEq
+source::AlphaMode: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+source::ColorPrimaries: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+source::PixelFormat: Clone, Copy, Debug, Eq, Hash, PartialEq
+source::RgbSlice<'_>: source::ImageSource
+source::RgbSlice<'a>: Clone, Copy, Debug
+source::RgbaSlice<'_>: source::ImageSource
+source::RgbaSlice<'a>: Clone, Copy, Debug
+source::StridedBytes<'_>: source::ImageSource
+source::StridedBytes<'a>: Clone, Copy, Debug
+
+## auto traits
+
+21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

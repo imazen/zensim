@@ -211,7 +211,7 @@ codec crates; the core `zensim` library stays MIT/Apache.
 
 ## What the score means
 
-100 = identical. Higher = more similar. The score is a compressive mapping (`100 - 18 × d^0.7`), giving more resolution at the high-quality end where it matters most.
+100 = identical. Higher = more similar. Under profile `A`, the MLP output passes through a monotone PCHIP dial spline calibrated so the dial tracks degradation monotonically (identity ≈ 97.7; byte-identical inputs short-circuit to exactly 100). Under the linear profiles (`PreviewV0_1`/`PreviewV0_2`), the score is a compressive mapping (`100 - 18 × d^0.7`), giving more resolution at the high-quality end.
 
 Each `ZensimResult` also provides approximate translations to other metrics:
 
@@ -293,10 +293,13 @@ The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, an
 | Flag | Default | Description |
 |------|---------|-------------|
 | `avx512` | yes | AVX-512 SIMD paths |
+| `threads` | yes | Multi-threaded computation via rayon (disable for wasm / single-threaded) |
 | `imgref` | yes | `ImageSource` impls for `imgref::ImgRef<Rgb<u8>>` and `ImgRef<Rgba<u8>>` |
 | `training` | no | Expose metric internals for weight training |
 | `classification` | no | Error classification API (`classify()`, `DeltaStats`, `ErrorCategory`) |
 | `zenpixels` | no | `ImageSource` adapter for zenpixels `PixelSlice`/`PixelBuffer` |
+| `custom-profiles` | no | `ZensimProfile::Custom` + `ProfileParams::builder()` for externally-defined bakes |
+| `streaming_strips_oom` | no | Un-ignores the ~500 MB 80 MP streaming OOM-relief integration test |
 
 ## Downloading evaluation datasets
 
@@ -326,8 +329,10 @@ To reproduce the SROCC numbers above, you need the three human-rated datasets. A
 |-------|-------------|
 | [`zensim`](https://crates.io/crates/zensim) | Metric library |
 | [`zensim-regress`](https://crates.io/crates/zensim-regress) | Visual regression testing ([guide](zensim-regress/README.md)) |
-| `zensim-bench` | Comparative benchmarks |
+| `zensim-experimental` | Historical / research profiles via the `Custom` extension point (unpublished) |
 | `zensim-validate` | Evaluation and training CLI (internal) |
+| `zensim-bench` | Comparative benchmarks (standalone root, sibling-dep) |
+| `zensim-target` | Target-score codec CLI (standalone root, AGPL, sibling-dep) |
 
 ## MSRV
 

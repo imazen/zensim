@@ -1,0 +1,601 @@
+# zensim-regress public API — supported surface (default features)
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+#
+# files: zensim-regress.txt 547 lines (supported surface) | zensim-regress.features.txt 21 added (features: archmage,threads) | zensim-regress.internal.txt 877 lines (1276 hidden + 3 excluded-feature)
+
+## summary
+#
+#   pub modules                                20
+#   pub types (struct/enum/trait/alias)        48
+#   pub consts/statics                          6
+#   free functions                             73
+#   inherent methods                          186
+#   struct fields                             126
+#   enum variants                              57
+#   re-exports                                  2
+#   trait roster entries (type × trait)        95
+#   auto-trait-complete types                  32
+#   auto-trait exceptions                       6
+#
+# per-module pub lines:
+#   (root)                           98
+#   checksums                        80
+#   diff_image                       36
+#   diff_summary                      8
+#   display                           5
+#   distortions                       8
+#   error                            19
+#   fetch                            13
+#   font                             17
+#   generators                        7
+#   hasher                            6
+#   lock                              6
+#   manifest                         31
+#   oracle                           21
+#   petname                           9
+#   remote                            9
+#   report                           23
+#   testing                         100
+#   tolerance                        16
+#   upload                            6
+
+## items (508 lines)
+
+pub mod zensim_regress
+pub mod checksums
+#[non_exhaustive] pub enum checksums::CheckResult
+#[non_exhaustive] pub checksums::CheckResult::Failed
+pub checksums::CheckResult::Failed::actual_hash: alloc::string::String
+pub checksums::CheckResult::Failed::actual_name: alloc::string::String
+pub checksums::CheckResult::Failed::authoritative_name: alloc::string::String
+pub checksums::CheckResult::Failed::montage_path: core::option::Option<std::path::PathBuf>
+pub checksums::CheckResult::Failed::report: core::option::Option<testing::RegressionReport>
+#[non_exhaustive] pub checksums::CheckResult::Match
+pub checksums::CheckResult::Match::entry_name: alloc::string::String
+#[non_exhaustive] pub checksums::CheckResult::NoBaseline
+pub checksums::CheckResult::NoBaseline::actual_hash: alloc::string::String
+pub checksums::CheckResult::NoBaseline::actual_name: alloc::string::String
+pub checksums::CheckResult::NoBaseline::auto_accepted: bool
+#[non_exhaustive] pub checksums::CheckResult::WithinTolerance
+pub checksums::CheckResult::WithinTolerance::actual_hash: alloc::string::String
+pub checksums::CheckResult::WithinTolerance::actual_name: alloc::string::String
+pub checksums::CheckResult::WithinTolerance::authoritative_name: alloc::string::String
+pub checksums::CheckResult::WithinTolerance::auto_accepted: bool
+pub checksums::CheckResult::WithinTolerance::report: testing::RegressionReport
+pub fn checksums::CheckResult::passed(&self) -> bool
+pub fn checksums::CheckResult::suggest_accept_line(&self) -> core::option::Option<alloc::string::String>
+pub enum checksums::EntryKind
+pub checksums::EntryKind::AutoAccepted
+pub checksums::EntryKind::HumanVerified
+pub checksums::EntryKind::Retired
+pub fn checksums::EntryKind::from_char(char) -> core::option::Option<Self>
+pub fn checksums::EntryKind::prefix_char(self) -> char
+pub struct checksums::ChecksumEntry
+pub checksums::ChecksumEntry::arch: alloc::string::String
+pub checksums::ChecksumEntry::commit: alloc::string::String
+pub checksums::ChecksumEntry::diff_summary: core::option::Option<alloc::string::String>
+pub checksums::ChecksumEntry::kind: checksums::EntryKind
+pub checksums::ChecksumEntry::name_hash: alloc::string::String
+pub checksums::ChecksumEntry::reason: alloc::string::String
+pub checksums::ChecksumEntry::tolerance_note: core::option::Option<alloc::string::String>
+pub checksums::ChecksumEntry::vs_ref: core::option::Option<alloc::string::String>
+pub fn checksums::ChecksumEntry::auto_accepted(alloc::string::String, alloc::string::String, alloc::string::String, alloc::string::String, alloc::string::String, alloc::string::String) -> Self
+pub fn checksums::ChecksumEntry::human_verified(alloc::string::String, alloc::string::String, alloc::string::String) -> Self
+pub struct checksums::ChecksumManager
+pub fn checksums::ChecksumManager::accept(&self, &str, &str, &str, &str, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&str>, &str) -> core::result::Result<(), error::RegressError>
+pub fn checksums::ChecksumManager::check_file(&self, &str, &str, &str, impl core::convert::AsRef<std::path::Path>, core::option::Option<&tolerance::ToleranceSpec>) -> core::result::Result<checksums::CheckResult, error::RegressError>
+pub fn checksums::ChecksumManager::check_hash(&self, &str, &str, &str, &str, core::option::Option<&tolerance::ToleranceSpec>) -> core::result::Result<checksums::CheckResult, error::RegressError>
+pub fn checksums::ChecksumManager::check_hash_with_image(&self, &str, &str, &str, &str, &impl zensim::source::ImageSource, core::option::Option<&tolerance::ToleranceSpec>) -> core::result::Result<checksums::CheckResult, error::RegressError>
+pub fn checksums::ChecksumManager::check_image(&self, &str, &str, &str, &impl zensim::source::ImageSource, core::option::Option<&tolerance::ToleranceSpec>) -> core::result::Result<checksums::CheckResult, error::RegressError>
+pub fn checksums::ChecksumManager::check_pixels(&self, &str, &str, &str, &[u8], u32, u32, core::option::Option<&tolerance::ToleranceSpec>) -> core::result::Result<checksums::CheckResult, error::RegressError>
+pub fn checksums::ChecksumManager::has_module(&self, &str) -> bool
+pub fn checksums::ChecksumManager::module_path(&self, &str) -> std::path::PathBuf
+pub fn checksums::ChecksumManager::new(&std::path::Path) -> Self
+pub fn checksums::ChecksumManager::save_reference_if_missing(&self, &str, &str, &str, &impl zensim::source::ImageSource)
+pub fn checksums::ChecksumManager::save_reference_image(&self, &str, &str, &str, &[u8], u32, u32) -> core::result::Result<std::path::PathBuf, error::RegressError>
+pub fn checksums::ChecksumManager::upload_reference_image(&self, &str, &std::path::Path)
+pub fn checksums::ChecksumManager::with_diff_output(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn checksums::ChecksumManager::with_hasher(self, impl hasher::ChecksumHasher + 'static) -> Self
+pub fn checksums::ChecksumManager::with_manifest(self, alloc::sync::Arc<manifest::ManifestWriter>) -> Self
+pub fn checksums::ChecksumManager::with_manifest_from_env(self) -> Self
+pub fn checksums::ChecksumManager::with_modes(&std::path::Path, bool) -> Self
+pub fn checksums::ChecksumManager::with_remote_storage(self, remote::ReferenceStorage) -> Self
+pub fn checksums::ChecksumManager::with_remote_storage_from_env(self) -> Self
+pub struct checksums::ChecksumsFile
+pub checksums::ChecksumsFile::header_comments: alloc::vec::Vec<alloc::string::String>
+pub checksums::ChecksumsFile::sections: alloc::vec::Vec<checksums::TestSection>
+pub fn checksums::ChecksumsFile::find_section(&self, &str, &str) -> core::option::Option<&checksums::TestSection>
+pub fn checksums::ChecksumsFile::find_section_mut(&mut self, &str, &str) -> core::option::Option<&mut checksums::TestSection>
+pub fn checksums::ChecksumsFile::format(&self) -> alloc::string::String
+pub fn checksums::ChecksumsFile::get_or_create_section(&mut self, &str, &str) -> &mut checksums::TestSection
+pub fn checksums::ChecksumsFile::new(&str) -> Self
+pub fn checksums::ChecksumsFile::parse(&str) -> Self
+pub fn checksums::ChecksumsFile::read_from(&std::path::Path) -> core::result::Result<Self, error::RegressError>
+pub fn checksums::ChecksumsFile::section_names(&self) -> alloc::vec::Vec<(&str, &str)>
+pub fn checksums::ChecksumsFile::write_to(&self, &std::path::Path) -> core::result::Result<(), error::RegressError>
+pub struct checksums::TestSection
+pub checksums::TestSection::detail_name: alloc::string::String
+pub checksums::TestSection::entries: alloc::vec::Vec<checksums::ChecksumEntry>
+pub checksums::TestSection::test_name: alloc::string::String
+pub checksums::TestSection::tolerance: core::option::Option<tolerance::ToleranceSpec>
+pub fn checksums::TestSection::active_entries(&self) -> impl core::iter::traits::iterator::Iterator<Item = &checksums::ChecksumEntry>
+pub fn checksums::TestSection::anchor(&self) -> core::option::Option<&checksums::ChecksumEntry>
+pub fn checksums::TestSection::find_by_name_hash(&self, &str) -> core::option::Option<&checksums::ChecksumEntry>
+pub fn checksums::TestSection::prune_auto_accepted(&mut self, &str) -> usize
+pub fn checksums::TestSection::retire_anchor(&mut self)
+pub mod diff_image
+#[non_exhaustive] pub struct diff_image::AnnotationText
+pub diff_image::AnnotationText::extra: alloc::string::String
+pub diff_image::AnnotationText::primary_lines: alloc::vec::Vec<(alloc::string::String, [u8; 4])>
+pub diff_image::AnnotationText::title: core::option::Option<alloc::string::String>
+pub fn diff_image::AnnotationText::empty() -> Self
+pub fn diff_image::AnnotationText::from_report(&testing::RegressionReport, &testing::RegressionTolerance) -> Self
+pub fn diff_image::AnnotationText::from_resized_report(&testing::RegressionReport, &testing::RegressionTolerance) -> Self
+pub fn diff_image::AnnotationText::with_title(self, impl core::convert::Into<alloc::string::String>) -> Self
+#[non_exhaustive] pub struct diff_image::MontageOptions
+pub diff_image::MontageOptions::actual_label: core::option::Option<alloc::string::String>
+pub diff_image::MontageOptions::amplification: u8
+pub diff_image::MontageOptions::expected_label: core::option::Option<alloc::string::String>
+pub diff_image::MontageOptions::gap: u32
+pub diff_image::MontageOptions::min_panel_size: u32
+pub diff_image::MontageOptions::show_spatial_heatmap: bool
+pub diff_image::MontageOptions::spatial_grid: (u32, u32)
+pub fn diff_image::MontageOptions::render(&self, &Bitmap, &Bitmap, &diff_image::AnnotationText) -> Bitmap
+pub struct diff_image::RegionStats
+pub diff_image::RegionStats::actual_variance: f64
+pub diff_image::RegionStats::avg_delta: f64
+pub diff_image::RegionStats::col: u32
+pub diff_image::RegionStats::expected_variance: f64
+pub diff_image::RegionStats::max_delta: u8
+pub diff_image::RegionStats::pixels_differing: f64
+pub diff_image::RegionStats::row: u32
+pub struct diff_image::SpatialAnalysis
+pub diff_image::SpatialAnalysis::cols: u32
+pub diff_image::SpatialAnalysis::regions: alloc::vec::Vec<diff_image::RegionStats>
+pub diff_image::SpatialAnalysis::rows: u32
+pub const diff_image::DEFAULT_MIN_PANEL_SIZE: u32
+pub fn diff_image::create_montage(&[&Bitmap], u32) -> Bitmap
+pub fn diff_image::create_structural_montage(&Bitmap, &Bitmap, u8, u32, u32) -> Bitmap
+pub fn diff_image::generate_diff_image(&Bitmap, &Bitmap, u8) -> Bitmap
+pub fn diff_image::generate_structural_diff(&Bitmap, &Bitmap, u32, u8) -> Bitmap
+pub fn diff_image::pixelate_upscale(&Bitmap, u32) -> Bitmap
+pub fn diff_image::spatial_analysis(&[u8], &[u8], u32, u32, u32, u32) -> diff_image::SpatialAnalysis
+pub mod diff_summary
+pub use diff_summary::dissimilarity_to_score
+pub use diff_summary::score_to_dissimilarity
+pub fn diff_summary::format_diff_summary(&testing::RegressionReport) -> alloc::string::String
+pub fn diff_summary::format_dissim(f64) -> alloc::string::String
+pub fn diff_summary::format_score(f64) -> alloc::string::String
+pub fn diff_summary::format_tolerance_note(&testing::RegressionTolerance) -> alloc::string::String
+pub fn diff_summary::format_tolerance_shorthand(&tolerance::ToleranceSpec) -> alloc::string::String
+pub fn diff_summary::parse_tolerance_shorthand(&str) -> tolerance::ToleranceSpec
+pub mod display
+pub fn display::print_comparison(&Bitmap, &Bitmap, u8, core::option::Option<u32>)
+pub fn display::print_comparison_raw(&[u8], &[u8], u32, u32, u8, core::option::Option<u32>)
+pub fn display::print_image(&Bitmap, core::option::Option<u32>)
+pub fn display::save_comparison_png(&[u8], &[u8], u32, u32, u8, core::option::Option<u32>, &std::path::Path)
+pub fn display::sixel_encode(&Bitmap, core::option::Option<u32>) -> alloc::vec::Vec<u8>
+pub mod distortions
+pub fn distortions::channel_swap_rb(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::expand_256(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::invert(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::premul_as_straight(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::round_half_up(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::straight_as_premul(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::truncate_lsb(&[u8]) -> alloc::vec::Vec<u8>
+pub fn distortions::uniform_shift(&[u8], i16) -> alloc::vec::Vec<u8>
+pub mod error
+pub error::RegressError::Fetch
+pub error::RegressError::Fetch::message: alloc::string::String
+pub error::RegressError::Fetch::url: alloc::string::String
+pub error::RegressError::Io
+pub error::RegressError::Io::path: std::path::PathBuf
+pub error::RegressError::Io::source: std::io::error::Error
+pub error::RegressError::NoActiveChecksums
+pub error::RegressError::NoActiveChecksums::test_name: alloc::string::String
+pub error::RegressError::NoChecksumFile
+pub error::RegressError::NoChecksumFile::path: std::path::PathBuf
+pub error::RegressError::NoChecksumFile::test_name: alloc::string::String
+pub error::RegressError::Png
+pub error::RegressError::Png::message: alloc::string::String
+pub error::RegressError::Png::path: std::path::PathBuf
+pub error::RegressError::Upload
+pub error::RegressError::Upload::dest: alloc::string::String
+pub error::RegressError::Upload::message: alloc::string::String
+pub error::RegressError::Zensim(zensim::error::ZensimError)
+pub mod fetch
+pub struct fetch::CachedFetcher<F: fetch::ResourceFetcher>
+pub fn fetch::CachedFetcher<fetch::ShellFetcher>::new(fetch::ShellFetcher, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn fetch::CachedFetcher<F>::cache_dir(&self) -> &std::path::Path
+pub fn fetch::CachedFetcher<F>::ensure(&self, &str, &str) -> core::result::Result<std::path::PathBuf, error::RegressError>
+pub fn fetch::CachedFetcher<F>::ensure_from_base(&self, &str, &str) -> core::result::Result<std::path::PathBuf, error::RegressError>
+pub fn fetch::CachedFetcher<F>::remove(&self, &str) -> core::result::Result<(), error::RegressError>
+pub fn fetch::CachedFetcher<F>::with_fetcher(F, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub struct fetch::ShellFetcher
+pub fetch::ShellFetcher::timeout_secs: u32
+pub fn fetch::ShellFetcher::new() -> Self
+pub fn fetch::ShellFetcher::with_timeout(self, u32) -> Self
+pub trait fetch::ResourceFetcher: core::marker::Send + core::marker::Sync
+pub fn fetch::ResourceFetcher::fetch(&self, &str, &std::path::Path) -> core::result::Result<(), error::RegressError>
+pub mod font
+pub const font::GLYPH_H: u32
+pub const font::GLYPH_W: u32
+pub const font::TYPO_CAP_MID_OFFSET: f32
+pub fn font::measure_lines_fitted(&[(&str, [u8; 4])], u32) -> (u32, u32)
+pub fn font::measure_lines_fitted_lh(&[(&str, [u8; 4])], u32, f32) -> (u32, u32)
+pub fn font::measure_text_height(&str, u32) -> (u32, u32)
+pub fn font::measure_text_height_lh(&str, u32, f32) -> (u32, u32)
+pub fn font::measure_text_wrapped(&str, u32, u32) -> (u32, u32)
+pub fn font::measure_text_wrapped_lh(&str, u32, u32, f32) -> (u32, u32)
+pub fn font::render_lines_fitted(&[(&str, [u8; 4])], [u8; 4], u32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_lines_fitted_lh(&[(&str, [u8; 4])], [u8; 4], u32, f32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_text(&str, [u8; 4], [u8; 4]) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_text_height(&str, [u8; 4], [u8; 4], u32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_text_height_lh(&str, [u8; 4], [u8; 4], u32, f32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_text_scaled(&str, [u8; 4], [u8; 4], u32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_text_wrapped(&str, [u8; 4], [u8; 4], u32, u32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub fn font::render_text_wrapped_lh(&str, [u8; 4], [u8; 4], u32, u32, f32) -> (alloc::vec::Vec<u8>, u32, u32)
+pub mod generators
+pub fn generators::checkerboard(u32, u32, u32) -> alloc::vec::Vec<u8>
+pub fn generators::color_blocks(u32, u32) -> alloc::vec::Vec<u8>
+pub fn generators::gradient(u32, u32) -> alloc::vec::Vec<u8>
+pub fn generators::mandelbrot(u32, u32) -> alloc::vec::Vec<u8>
+pub fn generators::off_by_n(&[u8], u8, usize) -> alloc::vec::Vec<u8>
+pub fn generators::solid(u32, u32, u8, u8, u8, u8) -> alloc::vec::Vec<u8>
+pub fn generators::value_noise(u32, u32, u32) -> alloc::vec::Vec<u8>
+pub mod hasher
+pub struct hasher::SeaHasher
+pub trait hasher::ChecksumHasher: core::marker::Send + core::marker::Sync
+pub fn hasher::ChecksumHasher::hash_file(&self, &std::path::Path) -> core::result::Result<alloc::string::String, error::RegressError>
+pub fn hasher::ChecksumHasher::hash_file_bytes(&self, &std::path::Path) -> core::result::Result<alloc::string::String, error::RegressError>
+pub fn hasher::ChecksumHasher::hash_pixels(&self, &[u8], u32, u32) -> alloc::string::String
+pub fn hasher::default_hasher() -> hasher::SeaHasher
+pub mod lock
+pub struct lock::FileLockGuard
+pub fn lock::FileLockGuard::acquire(impl core::convert::Into<std::path::PathBuf>) -> core::result::Result<Self, error::RegressError>
+pub fn lock::FileLockGuard::acquire_and_cleanup(impl core::convert::Into<std::path::PathBuf>) -> core::result::Result<Self, error::RegressError>
+pub fn lock::FileLockGuard::file(&self) -> &std::fs::File
+pub fn lock::FileLockGuard::path(&self) -> &std::path::Path
+pub fn lock::FileLockGuard::try_acquire(impl core::convert::Into<std::path::PathBuf>) -> core::option::Option<Self>
+pub mod manifest
+pub enum manifest::ManifestStatus
+pub manifest::ManifestStatus::Accepted
+pub manifest::ManifestStatus::Failed
+pub manifest::ManifestStatus::Match
+pub manifest::ManifestStatus::Novel
+pub struct manifest::ManifestDir
+pub fn manifest::ManifestDir::dir(&self) -> &std::path::Path
+pub fn manifest::ManifestDir::from_env() -> core::option::Option<Self>
+pub fn manifest::ManifestDir::open(impl core::convert::Into<std::path::PathBuf>) -> std::io::error::Result<Self>
+pub fn manifest::ManifestDir::path(&self) -> &std::path::Path
+pub fn manifest::ManifestDir::write_entry(&self, &manifest::ManifestEntry<'_>)
+pub struct manifest::ManifestEntry<'a>
+pub manifest::ManifestEntry::actual_hash: &'a str
+pub manifest::ManifestEntry::actual_zdsim: core::option::Option<f64>
+pub manifest::ManifestEntry::baseline_hash: core::option::Option<&'a str>
+pub manifest::ManifestEntry::diff_summary: core::option::Option<&'a str>
+pub manifest::ManifestEntry::status: manifest::ManifestStatus
+pub manifest::ManifestEntry::test_name: &'a str
+pub manifest::ManifestEntry::tolerance_zdsim: core::option::Option<f64>
+pub struct manifest::ManifestWriter
+pub fn manifest::ManifestWriter::create(impl core::convert::Into<std::path::PathBuf>) -> std::io::error::Result<Self>
+pub fn manifest::ManifestWriter::from_env() -> core::option::Option<Self>
+pub fn manifest::ManifestWriter::open(impl core::convert::Into<std::path::PathBuf>) -> std::io::error::Result<Self>
+pub fn manifest::ManifestWriter::path(&self) -> &std::path::Path
+pub fn manifest::ManifestWriter::write_entry(&self, &manifest::ManifestEntry<'_>)
+pub const manifest::MANIFEST_DIR_ENV_VAR: &str
+pub const manifest::MANIFEST_ENV_VAR: &str
+pub trait manifest::ManifestWrite
+pub fn manifest::ManifestWrite::write_entry(&self, &manifest::ManifestEntry<'_>)
+pub fn manifest::combine_manifest_dir(&std::path::Path, &std::path::Path) -> std::io::error::Result<usize>
+pub fn manifest::writer_from_env() -> core::option::Option<alloc::boxed::Box<(dyn manifest::ManifestWrite + core::marker::Send + core::marker::Sync)>>
+pub mod oracle
+pub enum oracle::OracleTolerance
+pub oracle::OracleTolerance::AbsEpsilon(f64)
+pub oracle::OracleTolerance::Exact
+pub oracle::OracleTolerance::Ulps(u32)
+pub struct oracle::OracleMismatch
+pub oracle::OracleMismatch::actual: f64
+pub oracle::OracleMismatch::channel: usize
+pub oracle::OracleMismatch::delta: f64
+pub oracle::OracleMismatch::expected: f64
+pub oracle::OracleMismatch::x: u32
+pub oracle::OracleMismatch::y: u32
+pub struct oracle::OracleReport
+pub oracle::OracleReport::checksum_result: core::option::Option<checksums::CheckResult>
+pub oracle::OracleReport::comparisons: usize
+pub oracle::OracleReport::coordinates_tested: usize
+pub oracle::OracleReport::mismatches: alloc::vec::Vec<oracle::OracleMismatch>
+pub oracle::OracleReport::passed: bool
+pub fn oracle::default_test_coords(u32, u32) -> alloc::vec::Vec<(u32, u32)>
+pub fn oracle::oracle_check_f32(&[f32], u32, u32, usize, impl core::ops::function::FnOnce(&[f32], u32, u32) -> alloc::vec::Vec<f32>, impl core::ops::function::Fn(&[f64]) -> alloc::vec::Vec<f64>, &[(u32, u32)], oracle::OracleTolerance) -> oracle::OracleReport
+pub fn oracle::oracle_check_tracked(&checksums::ChecksumManager, &str, &str, &str, &[u8], u32, u32, impl core::ops::function::FnOnce(&[u8], u32, u32) -> alloc::vec::Vec<u8>, impl core::ops::function::Fn(&[f64]) -> alloc::vec::Vec<f64>, &[(u32, u32)], oracle::OracleTolerance, core::option::Option<&tolerance::ToleranceSpec>) -> core::result::Result<oracle::OracleReport, error::RegressError>
+pub fn oracle::oracle_check_u8(&[u8], u32, u32, usize, impl core::ops::function::FnOnce(&[u8], u32, u32) -> alloc::vec::Vec<u8>, impl core::ops::function::Fn(&[f64]) -> alloc::vec::Vec<f64>, &[(u32, u32)], oracle::OracleTolerance) -> oracle::OracleReport
+pub mod petname
+pub struct petname::MemorableNameParts
+pub petname::MemorableNameParts::adjective: alloc::string::String
+pub petname::MemorableNameParts::algo: alloc::string::String
+pub petname::MemorableNameParts::hex: alloc::string::String
+pub petname::MemorableNameParts::noun: alloc::string::String
+pub fn petname::memorable_name(&str) -> alloc::string::String
+pub fn petname::parse_memorable_name(&str) -> core::option::Option<petname::MemorableNameParts>
+pub fn petname::strip_hash_extension(&str) -> &str
+pub fn petname::try_memorable_name(&str) -> alloc::string::String
+pub mod remote
+pub struct remote::ReferenceStorage
+pub fn remote::ReferenceStorage::download_base_url(&self) -> &str
+pub fn remote::ReferenceStorage::download_reference(&self, &str) -> core::result::Result<core::option::Option<std::path::PathBuf>, error::RegressError>
+pub fn remote::ReferenceStorage::from_env(impl core::convert::Into<std::path::PathBuf>) -> core::option::Option<Self>
+pub fn remote::ReferenceStorage::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, bool, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn remote::ReferenceStorage::remote_filename(&str) -> alloc::string::String
+pub fn remote::ReferenceStorage::upload_prefix(&self) -> core::option::Option<&str>
+pub fn remote::ReferenceStorage::upload_reference(&self, &std::path::Path, &str) -> core::result::Result<(), error::RegressError>
+pub fn remote::ReferenceStorage::uploads_configured(&self) -> bool
+pub mod report
+pub struct report::ParsedEntry
+pub report::ParsedEntry::actual_file: alloc::string::String
+pub report::ParsedEntry::actual_hash: alloc::string::String
+pub report::ParsedEntry::actual_petname: alloc::string::String
+pub report::ParsedEntry::actual_zdsim: core::option::Option<f64>
+pub report::ParsedEntry::baseline_file: alloc::string::String
+pub report::ParsedEntry::baseline_hash: alloc::string::String
+pub report::ParsedEntry::baseline_petname: alloc::string::String
+pub report::ParsedEntry::diff_summary: alloc::string::String
+pub report::ParsedEntry::status: alloc::string::String
+pub report::ParsedEntry::test_name: alloc::string::String
+pub report::ParsedEntry::tolerance_zdsim: core::option::Option<f64>
+pub struct report::Platform
+pub report::Platform::diffs_dir: core::option::Option<std::path::PathBuf>
+pub report::Platform::manifest_path: std::path::PathBuf
+pub report::Platform::name: alloc::string::String
+pub fn report::format_recommended_line(f64) -> alloc::string::String
+pub fn report::generate_html_report(&[(&str, &[report::ParsedEntry])], &alloc::collections::btree::map::BTreeMap<alloc::string::String, std::path::PathBuf>) -> alloc::string::String
+pub fn report::generate_merged_report(&[report::Platform]) -> core::result::Result<alloc::string::String, std::io::error::Error>
+pub fn report::ideal_amplification(u8) -> u8
+pub fn report::parse_manifest(&std::path::Path) -> core::result::Result<alloc::vec::Vec<report::ParsedEntry>, std::io::error::Error>
+pub fn report::parse_manifest_dir(&std::path::Path) -> core::result::Result<alloc::vec::Vec<report::ParsedEntry>, std::io::error::Error>
+pub fn report::recommend_tolerance(f64) -> core::option::Option<f64>
+pub mod testing
+pub testing::ComparisonMethod::CenterCropped
+pub testing::ComparisonMethod::FlipHorizontal
+pub testing::ComparisonMethod::FlipVertical
+pub testing::ComparisonMethod::Resized
+pub testing::ComparisonMethod::Rotated180
+pub testing::ComparisonMethod::Rotated270
+pub testing::ComparisonMethod::Rotated90
+pub testing::ComparisonMethod::Transpose
+pub testing::ComparisonMethod::Transverse
+pub testing::DimensionMismatchKind::CropDifference
+pub testing::DimensionMismatchKind::LargeDifference
+pub testing::DimensionMismatchKind::OffByOne
+pub testing::DimensionMismatchKind::OrientationSwap
+#[non_exhaustive] pub struct testing::ChannelHistograms
+pub fn testing::ChannelHistograms::channel(&self, usize) -> core::option::Option<&[u64; 256]>
+pub fn testing::ChannelHistograms::intersection(&self, &Self, usize) -> f64
+pub fn testing::ChannelHistograms::intersection_all(&self, &Self) -> alloc::vec::Vec<f64>
+pub fn testing::ChannelHistograms::num_channels(&self) -> usize
+pub testing::DimensionInfo::actual_dims: (u32, u32)
+pub testing::DimensionInfo::expected_dims: (u32, u32)
+pub testing::DimensionInfo::kind: testing::DimensionMismatchKind
+pub testing::DimensionInfo::method: testing::ComparisonMethod
+pub fn testing::DimensionInfo::description(&self) -> alloc::string::String
+pub fn testing::DimensionInfo::kind(&self) -> testing::DimensionMismatchKind
+pub fn testing::DimensionInfo::method(&self) -> testing::ComparisonMethod
+pub fn testing::DimensionInfo::panel_label(&self) -> &'static str
+pub fn testing::RegressionReport::actual_histogram(&self) -> &testing::ChannelHistograms
+pub fn testing::RegressionReport::alpha_max_delta(&self) -> u8
+pub fn testing::RegressionReport::alpha_pixels_differing(&self) -> u64
+pub fn testing::RegressionReport::category(&self) -> zensim::metric::ErrorCategory
+pub fn testing::RegressionReport::confidence(&self) -> f64
+pub fn testing::RegressionReport::dimension_info(&self) -> core::option::Option<&testing::DimensionInfo>
+pub fn testing::RegressionReport::expected_histogram(&self) -> &testing::ChannelHistograms
+pub fn testing::RegressionReport::identical_channel_fraction(&self) -> f64
+pub fn testing::RegressionReport::max_channel_delta(&self) -> [u8; 3]
+pub fn testing::RegressionReport::max_channel_delta_f64(&self) -> [f64; 3]
+pub fn testing::RegressionReport::native_max(&self) -> f64
+pub fn testing::RegressionReport::passed(&self) -> bool
+pub fn testing::RegressionReport::pixel_count(&self) -> u64
+pub fn testing::RegressionReport::pixels_differing(&self) -> u64
+pub fn testing::RegressionReport::pixels_failing(&self) -> u64
+pub fn testing::RegressionReport::rounding_bias(&self) -> core::option::Option<&zensim::metric::RoundingBias>
+pub fn testing::RegressionReport::score(&self) -> f64
+pub fn testing::RegressionReport::set_dimension_info(&mut self, testing::DimensionInfo)
+pub fn testing::RegressionTolerance::exact() -> Self
+pub fn testing::RegressionTolerance::ignore_alpha(self) -> Self
+pub fn testing::RegressionTolerance::is_ignore_alpha(&self) -> bool
+pub fn testing::RegressionTolerance::max_alpha_delta(&self) -> u8
+pub fn testing::RegressionTolerance::max_delta(&self) -> u8
+pub fn testing::RegressionTolerance::max_pixels_different(&self) -> f64
+pub fn testing::RegressionTolerance::min_similarity(&self) -> f64
+pub fn testing::RegressionTolerance::off_by_one() -> Self
+pub fn testing::RegressionTolerance::with_max_alpha_delta(self, u8) -> Self
+pub fn testing::RegressionTolerance::with_max_delta(self, u8) -> Self
+pub fn testing::RegressionTolerance::with_max_pixels_different(self, f64) -> Self
+pub fn testing::RegressionTolerance::with_min_similarity(self, f64) -> Self
+pub fn testing::classify_dimension_mismatch(u32, u32, u32, u32) -> testing::DimensionMismatchKind
+pub mod tolerance
+pub struct tolerance::ToleranceOverride
+pub tolerance::ToleranceOverride::max_alpha_delta: core::option::Option<u8>
+pub tolerance::ToleranceOverride::max_delta: core::option::Option<u8>
+pub tolerance::ToleranceOverride::max_pixels_different: core::option::Option<f64>
+pub tolerance::ToleranceOverride::min_similarity: core::option::Option<f64>
+pub struct tolerance::ToleranceSpec
+pub tolerance::ToleranceSpec::ignore_alpha: bool
+pub tolerance::ToleranceSpec::max_alpha_delta: u8
+pub tolerance::ToleranceSpec::max_delta: u8
+pub tolerance::ToleranceSpec::max_pixels_different: f64
+pub tolerance::ToleranceSpec::min_similarity: f64
+pub tolerance::ToleranceSpec::overrides: alloc::collections::btree::map::BTreeMap<alloc::string::String, tolerance::ToleranceOverride>
+pub fn tolerance::ToleranceSpec::exact() -> Self
+pub fn tolerance::ToleranceSpec::from_tolerance(&testing::RegressionTolerance) -> Self
+pub fn tolerance::ToleranceSpec::off_by_one() -> Self
+pub fn tolerance::ToleranceSpec::to_regression_tolerance(&self, &str) -> testing::RegressionTolerance
+pub mod upload
+pub struct upload::ShellUploader
+pub upload::ShellUploader::timeout_secs: u32
+pub fn upload::ShellUploader::new() -> Self
+pub fn upload::ShellUploader::with_timeout(self, u32) -> Self
+pub trait upload::ResourceUploader: core::marker::Send + core::marker::Sync
+pub fn upload::ResourceUploader::upload(&self, &std::path::Path, &str) -> core::result::Result<(), error::RegressError>
+pub enum ComparisonMethod [also: testing]
+pub ComparisonMethod::CenterCropped
+pub ComparisonMethod::FlipHorizontal
+pub ComparisonMethod::FlipVertical
+pub ComparisonMethod::Resized
+pub ComparisonMethod::Rotated180
+pub ComparisonMethod::Rotated270
+pub ComparisonMethod::Rotated90
+pub ComparisonMethod::Transpose
+pub ComparisonMethod::Transverse
+pub enum DimensionMismatchKind [also: testing]
+pub DimensionMismatchKind::CropDifference
+pub DimensionMismatchKind::LargeDifference
+pub DimensionMismatchKind::OffByOne
+pub DimensionMismatchKind::OrientationSwap
+pub enum PngError
+pub PngError::Decode(alloc::string::String)
+pub PngError::Encode(alloc::string::String)
+pub PngError::Io(std::io::error::Error)
+pub enum RegressError [also: error]
+pub RegressError::Fetch
+pub RegressError::Fetch::message: alloc::string::String
+pub RegressError::Fetch::url: alloc::string::String
+pub RegressError::Io
+pub RegressError::Io::path: std::path::PathBuf
+pub RegressError::Io::source: std::io::error::Error
+pub RegressError::NoActiveChecksums
+pub RegressError::NoActiveChecksums::test_name: alloc::string::String
+pub RegressError::NoChecksumFile
+pub RegressError::NoChecksumFile::path: std::path::PathBuf
+pub RegressError::NoChecksumFile::test_name: alloc::string::String
+pub RegressError::Png
+pub RegressError::Png::message: alloc::string::String
+pub RegressError::Png::path: std::path::PathBuf
+pub RegressError::Upload
+pub RegressError::Upload::dest: alloc::string::String
+pub RegressError::Upload::message: alloc::string::String
+pub RegressError::Zensim(zensim::error::ZensimError)
+pub struct Bitmap
+pub fn Bitmap::as_raw(&self) -> &[u8]
+pub fn Bitmap::as_raw_mut(&mut self) -> &mut [u8]
+pub fn Bitmap::as_ref(&self) -> BitmapRef<'_>
+pub fn Bitmap::dimensions(&self) -> (u32, u32)
+pub fn Bitmap::from_fn<F>(u32, u32, F) -> Self where F: core::ops::function::Fn(u32, u32) -> [u8; 4]
+pub fn Bitmap::from_pixel(u32, u32, [u8; 4]) -> Self
+pub fn Bitmap::from_png_bytes(&[u8]) -> core::result::Result<Self, PngError>
+pub fn Bitmap::from_raw(u32, u32, alloc::vec::Vec<u8>) -> core::option::Option<Self>
+pub fn Bitmap::from_rgba_slice(&[u8], u32, u32) -> core::result::Result<Self, pixel_ops::BitmapError>
+pub fn Bitmap::get_pixel(&self, u32, u32) -> [u8; 4]
+pub fn Bitmap::height(&self) -> u32
+pub fn Bitmap::into_raw(self) -> alloc::vec::Vec<u8>
+pub fn Bitmap::new(u32, u32) -> Self
+pub fn Bitmap::open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, PngError>
+pub fn Bitmap::put_pixel(&mut self, u32, u32, [u8; 4])
+pub fn Bitmap::save(&self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<(), PngError>
+pub fn Bitmap::to_png_bytes(&self) -> core::result::Result<alloc::vec::Vec<u8>, PngError>
+pub fn Bitmap::width(&self) -> u32
+pub struct BitmapRef<'a>
+pub fn BitmapRef<'a>::dimensions(&self) -> (u32, u32)
+pub fn BitmapRef<'a>::from_borrowed_rgba8_packed(&'a [u8], u32, u32) -> core::result::Result<Self, pixel_ops::BitmapError>
+pub fn BitmapRef<'a>::from_borrowed_rgba8_strided(&'a [u8], u32, u32, u32) -> core::result::Result<Self, pixel_ops::BitmapError>
+pub fn BitmapRef<'a>::height(&self) -> u32
+pub fn BitmapRef<'a>::is_packed(&self) -> bool
+pub fn BitmapRef<'a>::row(&self, u32) -> &[u8]
+pub fn BitmapRef<'a>::stride_bytes(&self) -> u32
+pub fn BitmapRef<'a>::to_owned(&self) -> Bitmap
+pub fn BitmapRef<'a>::width(&self) -> u32
+pub struct DimensionInfo [also: testing]
+pub DimensionInfo::actual_dims: (u32, u32)
+pub DimensionInfo::expected_dims: (u32, u32)
+pub DimensionInfo::kind: testing::DimensionMismatchKind
+pub DimensionInfo::method: testing::ComparisonMethod
+pub fn testing::DimensionInfo::description(&self) -> alloc::string::String
+pub fn testing::DimensionInfo::kind(&self) -> testing::DimensionMismatchKind
+pub fn testing::DimensionInfo::method(&self) -> testing::ComparisonMethod
+pub fn testing::DimensionInfo::panel_label(&self) -> &'static str
+#[non_exhaustive] pub struct RegressionReport [also: testing]
+pub fn testing::RegressionReport::actual_histogram(&self) -> &testing::ChannelHistograms
+pub fn testing::RegressionReport::alpha_max_delta(&self) -> u8
+pub fn testing::RegressionReport::alpha_pixels_differing(&self) -> u64
+pub fn testing::RegressionReport::category(&self) -> zensim::metric::ErrorCategory
+pub fn testing::RegressionReport::confidence(&self) -> f64
+pub fn testing::RegressionReport::dimension_info(&self) -> core::option::Option<&testing::DimensionInfo>
+pub fn testing::RegressionReport::expected_histogram(&self) -> &testing::ChannelHistograms
+pub fn testing::RegressionReport::identical_channel_fraction(&self) -> f64
+pub fn testing::RegressionReport::max_channel_delta(&self) -> [u8; 3]
+pub fn testing::RegressionReport::max_channel_delta_f64(&self) -> [f64; 3]
+pub fn testing::RegressionReport::native_max(&self) -> f64
+pub fn testing::RegressionReport::passed(&self) -> bool
+pub fn testing::RegressionReport::pixel_count(&self) -> u64
+pub fn testing::RegressionReport::pixels_differing(&self) -> u64
+pub fn testing::RegressionReport::pixels_failing(&self) -> u64
+pub fn testing::RegressionReport::rounding_bias(&self) -> core::option::Option<&zensim::metric::RoundingBias>
+pub fn testing::RegressionReport::score(&self) -> f64
+pub fn testing::RegressionReport::set_dimension_info(&mut self, testing::DimensionInfo)
+#[non_exhaustive] pub struct RegressionTolerance [also: testing]
+pub fn testing::RegressionTolerance::exact() -> Self
+pub fn testing::RegressionTolerance::ignore_alpha(self) -> Self
+pub fn testing::RegressionTolerance::is_ignore_alpha(&self) -> bool
+pub fn testing::RegressionTolerance::max_alpha_delta(&self) -> u8
+pub fn testing::RegressionTolerance::max_delta(&self) -> u8
+pub fn testing::RegressionTolerance::max_pixels_different(&self) -> f64
+pub fn testing::RegressionTolerance::min_similarity(&self) -> f64
+pub fn testing::RegressionTolerance::off_by_one() -> Self
+pub fn testing::RegressionTolerance::with_max_alpha_delta(self, u8) -> Self
+pub fn testing::RegressionTolerance::with_max_delta(self, u8) -> Self
+pub fn testing::RegressionTolerance::with_max_pixels_different(self, f64) -> Self
+pub fn testing::RegressionTolerance::with_min_similarity(self, f64) -> Self
+pub fn check_regression(&zensim::metric::Zensim, &impl zensim::source::ImageSource, &impl zensim::source::ImageSource, &testing::RegressionTolerance) -> core::result::Result<testing::RegressionReport, zensim::error::ZensimError> [also: testing]
+pub fn check_regression_resized(&zensim::metric::Zensim, &[u8], u32, u32, &[u8], u32, u32, &testing::RegressionTolerance) -> core::result::Result<testing::RegressionReport, zensim::error::ZensimError> [also: testing]
+pub fn detect_transform(&zensim::metric::Zensim, &[u8], &[u8], u32, u32, f64, &testing::RegressionTolerance) -> core::option::Option<(testing::RegressionReport, testing::ComparisonMethod)> [also: testing]
+pub fn shrink_tolerance(&testing::RegressionTolerance, &testing::RegressionReport, &testing::RegressionTolerance) -> testing::RegressionTolerance [also: testing]
+
+## trait impls (32 types)
+
+Bitmap: Clone, Debug, Eq, PartialEq
+BitmapRef<'a>: Clone, Copy, Debug, From<&'a Bitmap>
+PngError: Debug, Display, Error, From<std::io::error::Error>
+checksums::CheckResult: Clone, Debug, Display
+checksums::ChecksumEntry: Clone, Debug
+checksums::ChecksumsFile: Clone, Debug
+checksums::EntryKind: Clone, Copy, Debug, Eq, PartialEq
+checksums::TestSection: Clone, Debug
+diff_image::MontageOptions: Clone, Debug, Default
+diff_image::RegionStats: Clone, Debug
+diff_image::SpatialAnalysis: Clone, Debug, Display
+error::RegressError: Debug, Display, Error, From<zensim::error::ZensimError>
+fetch::ShellFetcher: Default, fetch::ResourceFetcher
+hasher::SeaHasher: hasher::ChecksumHasher
+lock::FileLockGuard: Drop
+manifest::ManifestDir: manifest::ManifestWrite
+manifest::ManifestStatus: Clone, Copy, Debug, Eq, PartialEq
+manifest::ManifestWriter: manifest::ManifestWrite
+oracle::OracleMismatch: Clone, Debug, Display
+oracle::OracleReport: Clone, Debug, Display
+oracle::OracleTolerance: Clone, Copy, Debug
+petname::MemorableNameParts: Clone, Debug, Eq, PartialEq
+report::ParsedEntry: Clone, Debug
+testing::ChannelHistograms: Clone, Debug
+testing::ComparisonMethod: Clone, Copy, Debug, Display, Eq, PartialEq
+testing::DimensionInfo: Clone, Debug
+testing::DimensionMismatchKind: Clone, Copy, Debug, Display, Eq, PartialEq
+testing::RegressionReport: Clone, Debug, Display
+testing::RegressionTolerance: Clone, Debug
+tolerance::ToleranceOverride: Clone, Debug, Default, PartialEq
+tolerance::ToleranceSpec: Clone, Debug, Default, PartialEq
+upload::ShellUploader: Default, upload::ResourceUploader
+
+## auto traits
+
+32 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+PngError: !RefUnwindSafe !UnwindSafe
+checksums::ChecksumManager: !RefUnwindSafe !UnwindSafe
+error::RegressError: !RefUnwindSafe !UnwindSafe
+fetch::CachedFetcher<F>: !Freeze !RefUnwindSafe !Unpin !UnwindSafe
+manifest::ManifestDir: !Freeze
+manifest::ManifestWriter: !Freeze

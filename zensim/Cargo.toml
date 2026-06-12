@@ -21,6 +21,11 @@ include = [
     "weights/manifests/v47_strict_qat.toml",
 ]
 
+[package.metadata.docs.rs]
+# Document the full opt-in surface (training / classification / zenpixels /
+# custom-profiles). Default-feature docs would hide those APIs.
+all-features = true
+
 [features]
 default = ["avx512", "imgref", "threads"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
@@ -43,7 +48,9 @@ imgref = ["dep:imgref", "dep:rgb"]
 zenpixels = ["dep:zenpixels"]
 ## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
 ## Uses zenresize for resampling — training/research feature.
-## Commented out: zenresize not yet published to crates.io.
+## Disabled pending a decision: zenresize IS published (0.3.1+) now, so this
+## could be re-enabled; the gated code in metric.rs is kept compilable via
+## the check-cfg entry below.
 # zenresize = ["dep:zenresize"]
 ## Enable the 80 MP OOM-relief integration test (`streaming_strips_oom_80mp`).
 ## Off by default because the test allocates ~500 MB of input pixels which

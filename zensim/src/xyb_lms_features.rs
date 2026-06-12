@@ -39,8 +39,8 @@
 //!
 //! - Both front-ends operate on **linear** sRGB after gamma decode (per
 //!   `srgb_u8_to_linear` LUT). u8 → f32 in `[0, 1]`.
-//! - Cube root uses [`crate::color::cbrtf_fast`] (Halley iteration, ~20
-//!   bits accurate — sufficient for global statistics).
+//! - Cube root uses `crate::color::cbrtf_fast` (private; Halley iteration,
+//!   ~20 bits accurate — sufficient for global statistics).
 //! - Biased-log uses [`f32::ln`] on `(LMS + 0.01)`. With LMS ≥ 0 and the
 //!   bias added we never sample `ln(0)`; range is `ln(0.01) ≈ -4.605` at
 //!   black to `ln(1.01) ≈ 0.00995` at white.

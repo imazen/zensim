@@ -884,7 +884,7 @@ pub fn check_regression(
 ///
 /// # Errors
 ///
-/// Returns [`ZensimError::ImageTooSmall`] if both images are < 8×8.
+/// Returns [`ZensimError::ImageTooSmall`] if either image has a zero dimension.
 #[allow(clippy::too_many_arguments)]
 pub fn check_regression_resized(
     zensim: &Zensim,

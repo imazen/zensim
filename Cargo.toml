@@ -8,7 +8,10 @@ members = ["zensim", "zensim-experimental", "zensim-validate", "zensim-regress",
 # on every bare checkout (CI, fresh clones) before a single crate compiled —
 # imazen/zensim#43. Each is now its own standalone workspace root; build them
 # from their directory or via `cargo <cmd> --manifest-path <crate>/Cargo.toml`.
-exclude = ["zensim-bench", "zensim-picker-prep", "zensim-target"]
+# `apidoc/` is the CI-free public-API snapshot runner: excluded so plain
+# `cargo test` and every CI job (incl. --all-features) never compile its
+# dependency tree or run rustdoc. Regenerate via `just api-doc`.
+exclude = ["zensim-bench", "zensim-picker-prep", "zensim-target", "apidoc"]
 
 [profile.release]
 lto = "thin"
