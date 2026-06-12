@@ -140,31 +140,18 @@ impl Default for BlurKernel {
 /// Downscale filter for pyramid construction.
 ///
 /// Controls how each pyramid level is produced from the previous one.
-/// The default `Box2x2` averages 2×2 pixel blocks, halving resolution.
-/// Enable the `zenresize` feature for `Mitchell` and `Lanczos` variants.
+/// `Box2x2` (2×2 block averaging) is the only filter the trained
+/// profiles are calibrated for and the only implemented variant; the
+/// enum stays `#[non_exhaustive]` so alternative kernels can be added
+/// without a breaking change. (Speculative `zenresize`-gated
+/// Mitchell/Lanczos variants were removed pre-0.3.0 — imazen/zensim#47 —
+/// because no compute path ever dispatched on them.)
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum DownscaleFilter {
     /// 2×2 box averaging (fastest, current default).
     #[default]
     Box2x2,
-    /// Mitchell-Netravali bicubic (B=1/3, C=1/3). Good balance of sharpness
-    /// and ringing. Requires the `zenresize` feature.
-    #[cfg(feature = "zenresize")]
-    #[allow(dead_code)]
-    Mitchell,
-    /// Lanczos-3 windowed sinc. Sharper than Mitchell but may ring on edges.
-    /// Requires the `zenresize` feature.
-    #[cfg(feature = "zenresize")]
-    #[allow(dead_code)]
-    Lanczos,
-    /// Mitchell-Netravali bicubic followed by a Gaussian blur with the given
-    /// sigma. This anti-aliases the pyramid more aggressively than plain
-    /// Mitchell, which may help metrics that are sensitive to high-frequency
-    /// ringing. Requires the `zenresize` feature.
-    #[cfg(feature = "zenresize")]
-    #[allow(dead_code)]
-    MitchellBlur(f32),
 }
 
 /// Configuration for the zensim metric computation pipeline.
@@ -205,8 +192,8 @@ pub struct ZensimConfig {
 
     /// Downscale filter for pyramid construction (default: `DownscaleFilter::Box2x2`).
     ///
-    /// Controls how each pyramid level is produced. Enable the `zenresize`
-    /// feature for `Mitchell` and `Lanczos` variants.
+    /// Controls how each pyramid level is produced. `Box2x2` is currently
+    /// the only variant.
     #[allow(dead_code)] // planned: not yet wired into pyramid construction
     pub downscale_filter: DownscaleFilter,
 

@@ -354,37 +354,6 @@ fn bench_zensim_512x512_masked(c: &mut Criterion) {
     });
 }
 
-#[cfg(feature = "zenresize")]
-fn bench_downscale_filters(c: &mut Criterion) {
-    use zensim::{DownscaleFilter, ZensimConfig};
-
-    for &(label, w, h) in &[("512x512", 512, 512), ("1920x1080", 1920, 1080)] {
-        let (src, dst) = make_test_images(w, h);
-
-        for &(filter_name, filter) in &[
-            ("box", DownscaleFilter::Box2x2),
-            ("mitchell", DownscaleFilter::Mitchell),
-            ("lanczos", DownscaleFilter::Lanczos),
-        ] {
-            let mut config = ZensimConfig::default();
-            config.downscale_filter = filter;
-            config.compute_all_features = true;
-            c.bench_function(&format!("zensim_{label}_{filter_name}"), |b| {
-                b.iter(|| {
-                    zensim::compute_zensim_with_config(
-                        std::hint::black_box(&src),
-                        std::hint::black_box(&dst),
-                        w,
-                        h,
-                        config,
-                    )
-                    .unwrap()
-                })
-            });
-        }
-    }
-}
-
 #[cfg(feature = "training")]
 fn bench_zensim_extended(c: &mut Criterion) {
     use zensim::ZensimConfig;
@@ -432,14 +401,7 @@ criterion_group!(
     bench_zensim_extended,
 );
 
-#[cfg(feature = "zenresize")]
-criterion_group!(zenresize_benches, bench_downscale_filters,);
-
-#[cfg(all(not(feature = "training"), not(feature = "zenresize")))]
+#[cfg(not(feature = "training"))]
 criterion_main!(benches);
-#[cfg(all(feature = "training", not(feature = "zenresize")))]
+#[cfg(feature = "training")]
 criterion_main!(benches, training_benches);
-#[cfg(all(not(feature = "training"), feature = "zenresize"))]
-criterion_main!(benches, zenresize_benches);
-#[cfg(all(feature = "training", feature = "zenresize"))]
-criterion_main!(benches, training_benches, zenresize_benches);

@@ -205,10 +205,8 @@
 #![forbid(unsafe_code)]
 
 mod blur;
-pub mod codec_calibration;
 mod color;
 mod diffmap;
-pub mod display;
 mod error;
 mod fused;
 mod iw_pool;
@@ -249,7 +247,6 @@ pub use metric::{
     FeatureView, Zensim, ZensimResult, dissimilarity_to_score, score_to_dissimilarity,
 };
 
-pub use codec_calibration::{CalibrationAffine, CodecCalibration};
 #[doc(hidden)]
 pub use color::{bench_pu_xyb_dispatch, bench_pu_xyb_scalar};
 /// Classification API — requires `features = ["classification"]`.

@@ -11,7 +11,7 @@
 #
 #   free functions                              5
 #   inherent methods                            9
-#   trait roster entries (type × trait)        21
+#   trait roster entries (type × trait)        17
 #
 # per-module pub lines:
 #   (root)                           11
@@ -34,7 +34,7 @@ pub fn source::AlphaMode::assert_fields_are_eq(&self)
 pub fn source::ColorPrimaries::assert_fields_are_eq(&self)
 pub fn source::PixelFormat::assert_fields_are_eq(&self)
 
-## trait impls (21 types)
+## trait impls (17 types)
 
 BlurKernel: TrivialClone
 DiffmapOptions: TrivialClone
@@ -46,10 +46,6 @@ IwWeightKind: TrivialClone
 UnsupportedFormat: TrivialClone
 ZensimConfig: TrivialClone
 ZensimError: TrivialClone
-codec_calibration::CalibrationAffine: TrivialClone
-codec_calibration::CodecCalibration: TrivialClone
-display::DisplayCalibration: TrivialClone
-display::DisplayProfile: TrivialClone
 profile::ZensimProfile: TrivialClone
 source::AlphaMode: TrivialClone
 source::ColorPrimaries: TrivialClone

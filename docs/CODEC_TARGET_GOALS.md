@@ -361,6 +361,12 @@ invalidate existing bakes (new feature schema).
 
 ### Named display profiles
 
+> **Status note (2026-06-12, #47):** an early `zensim::display` module
+> carrying these preset consts was removed pre-0.3.0 because no runtime
+> mechanism consumed it (`with_display` does not exist yet). This section
+> remains the plan-of-record; re-add the module together with the Tier 1
+> affine runtime, not before.
+
 Ship a set of named profiles as `const` in the `zensim` crate:
 
 ```rust

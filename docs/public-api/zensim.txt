@@ -6,65 +6,29 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 297 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 35 lines (35 hidden + 0 excluded-feature)
+# files: zensim.txt 244 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 31 lines (31 hidden + 0 excluded-feature)
 
 ## summary
 #
-#   pub modules                                 6
-#   pub types (struct/enum/trait/alias)        32
-#   pub consts/statics                         25
+#   pub modules                                 4
+#   pub types (struct/enum/trait/alias)        26
+#   pub consts/statics                          8
 #   free functions                             16
-#   inherent methods                          125
-#   struct fields                              39
+#   inherent methods                          119
+#   struct fields                              19
 #   enum variants                              41
-#   trait roster entries (type × trait)        78
-#   auto-trait-complete types                  21
+#   trait roster entries (type × trait)        65
+#   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                          154
-#   codec_calibration                21
-#   display                          19
+#   (root)                          143
 #   mapping                          12
 #   profile                          25
 #   source                           53
 
-## items (272 lines)
+## items (223 lines)
 
 pub mod zensim
-pub mod codec_calibration
-pub codec_calibration::CalibrationAffine::alpha: f32
-pub codec_calibration::CalibrationAffine::beta: f32
-pub const codec_calibration::CalibrationAffine::IDENTITY: Self
-pub fn codec_calibration::CalibrationAffine::apply(&self, f32) -> f32
-pub fn codec_calibration::CalibrationAffine::invert(&self, f32) -> core::option::Option<f32>
-pub codec_calibration::CodecCalibration::avif: codec_calibration::CalibrationAffine
-pub codec_calibration::CodecCalibration::jpeg: codec_calibration::CalibrationAffine
-pub codec_calibration::CodecCalibration::webp: codec_calibration::CalibrationAffine
-pub codec_calibration::CodecCalibration::zenjxl: codec_calibration::CalibrationAffine
-pub codec_calibration::CodecCalibration::zenpng: codec_calibration::CalibrationAffine
-pub const codec_calibration::CodecCalibration::IDENTITY: Self
-pub const codec_calibration::CodecCalibration::PREVIEW_V0_5_TUNER: Self
-pub fn codec_calibration::CodecCalibration::lookup(&self, &str) -> core::option::Option<codec_calibration::CalibrationAffine>
-pub mod display
-pub struct display::DisplayCalibration
-pub display::DisplayCalibration::alpha: f32
-pub display::DisplayCalibration::beta: f32
-pub display::DisplayCalibration::ppd: f32
-pub struct display::DisplayProfile
-pub display::DisplayProfile::ambient_lux: f32
-pub display::DisplayProfile::peak_nits: f32
-pub display::DisplayProfile::ppd: f32
-pub const display::DisplayProfile::DESKTOP_1080P: Self
-pub const display::DisplayProfile::DESKTOP_4K_27: Self
-pub const display::DisplayProfile::IPAD_PRO_M4: Self
-pub const display::DisplayProfile::IPHONE_14_PRO: Self
-pub const display::DisplayProfile::IPHONE_16_PRO: Self
-pub const display::DisplayProfile::MACBOOK_RETINA: Self
-pub const display::DisplayProfile::MOHAMMADI_AIC3: Self
-pub const display::DisplayProfile::PHONE_OLED_INDOOR: Self
-pub const display::DisplayProfile::PRINT_300DPI_30CM: Self
-pub const display::DisplayProfile::TV_4K_55_3M: Self
-pub const display::DisplayProfile::WEB_GENERIC: Self
 pub mod mapping
 pub fn mapping::butteraugli_to_zensim(f64) -> f64
 pub fn mapping::dssim_to_zensim(f64) -> f64
@@ -176,21 +140,6 @@ pub ZensimProfile::PreviewV0_1
 pub ZensimProfile::PreviewV0_2
 pub fn profile::ZensimProfile::latest() -> Self
 pub fn profile::ZensimProfile::name(&self) -> &'static str
-pub struct CalibrationAffine [also: codec_calibration]
-pub CalibrationAffine::alpha: f32
-pub CalibrationAffine::beta: f32
-pub const codec_calibration::CalibrationAffine::IDENTITY: Self
-pub fn codec_calibration::CalibrationAffine::apply(&self, f32) -> f32
-pub fn codec_calibration::CalibrationAffine::invert(&self, f32) -> core::option::Option<f32>
-pub struct CodecCalibration [also: codec_calibration]
-pub CodecCalibration::avif: codec_calibration::CalibrationAffine
-pub CodecCalibration::jpeg: codec_calibration::CalibrationAffine
-pub CodecCalibration::webp: codec_calibration::CalibrationAffine
-pub CodecCalibration::zenjxl: codec_calibration::CalibrationAffine
-pub CodecCalibration::zenpng: codec_calibration::CalibrationAffine
-pub const codec_calibration::CodecCalibration::IDENTITY: Self
-pub const codec_calibration::CodecCalibration::PREVIEW_V0_5_TUNER: Self
-pub fn codec_calibration::CodecCalibration::lookup(&self, &str) -> core::option::Option<codec_calibration::CalibrationAffine>
 pub struct DiffmapOptions
 pub DiffmapOptions::include_edge_mse: bool
 pub DiffmapOptions::include_hf: bool
@@ -303,7 +252,7 @@ pub fn score_features_with_profile(profile::ZensimProfile, &[f64], u32, u32) -> 
 pub fn score_features_with_profile_and_codec(profile::ZensimProfile, &[f64], u32, u32, core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
 pub fn score_to_dissimilarity(f64) -> f64
 
-## trait impls (24 types)
+## trait impls (20 types)
 
 DiffmapOptions: Clone, Copy, Debug, Default, From<DiffmapWeighting>
 DiffmapWeighting: Clone, Copy, Debug, Default
@@ -312,10 +261,6 @@ Zensim: Clone, Debug
 ZensimError: Clone, Copy, Debug, Display, Eq, Error, PartialEq
 ZensimResult: Clone, Debug
 ZensimScratch: Default
-codec_calibration::CalibrationAffine: Clone, Copy, Debug, PartialEq
-codec_calibration::CodecCalibration: Clone, Copy, Debug
-display::DisplayCalibration: Clone, Copy, Debug
-display::DisplayProfile: Clone, Copy, Debug
 imgref::ImgRef<'_, rgb::formats::rgb::Rgb<u8>>: source::ImageSource
 imgref::ImgRef<'_, rgb::formats::rgba::Rgba<u8>>: source::ImageSource
 profile::ProfileParams: Debug
@@ -332,4 +277,4 @@ source::StridedBytes<'a>: Clone, Copy, Debug
 
 ## auto traits
 
-21 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+17 types implement all of: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe

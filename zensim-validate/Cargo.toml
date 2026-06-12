@@ -8,7 +8,6 @@ publish = false
 
 [features]
 default = []
-# zenresize = ["zensim/zenresize"]  # re-enable when zenresize published
 
 # GPU trainer dispatch (task #166). When enabled, `zensim_mlp_train`
 # accepts `--gpu-runtime cuda` and routes the per-sample-α head training
@@ -60,7 +59,3 @@ harness = false
 name = "bench_mlp_kernels"
 path = "benches/bench_mlp_kernels.rs"
 harness = false
-
-[lints.rust.unexpected_cfgs]
-level = "warn"
-check-cfg = ['cfg(feature, values("zenresize"))']

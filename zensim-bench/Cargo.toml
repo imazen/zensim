@@ -14,7 +14,6 @@ publish = false
 
 [features]
 training = ["zensim/training"]
-# zenresize = ["zensim/zenresize"]
 
 # Enables the `extract_features_372col_omni` example. As of V11-DECODER-FIX
 # (task #195, 2026-05-20) this feature pulls direct zenavif + zenjxl path
@@ -107,7 +106,7 @@ required-features = ["extract-omni"]
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']
+check-cfg = ['cfg(feature, values("training"))', 'cfg(has_cpp_ssimulacra2)', 'cfg(has_cpp_butteraugli)']
 
 # Patches for unpublished crates-io versions required by the sibling codec
 # deps (zenjxl wants jxl-encoder 0.3.2 + zenjpeg 0.8.7; max published are

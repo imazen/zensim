@@ -17,14 +17,15 @@
 //!   per-codec calibration. When ON and a `--codec` is supplied, the
 //!   profile's raw output is rescaled per-codec so that "score=63"
 //!   means the empirical PJND across all codecs. See
-//!   `zensim::codec_calibration` for the math + provenance.
+//!   `zensim_experimental::codec_calibration` for the math + provenance.
 //!
 //! Used by `cross_codec_consistency.py` to binary-search the q value
 //! achieving a target zensim score under each shipping profile.
 
 use std::env;
 use std::process::ExitCode;
-use zensim::{CodecCalibration, RgbSlice, Zensim, ZensimProfile};
+use zensim::{RgbSlice, Zensim, ZensimProfile};
+use zensim_experimental::codec_calibration::CodecCalibration;
 
 fn print_usage(arg0: &str) {
     eprintln!(

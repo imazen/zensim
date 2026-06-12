@@ -46,12 +46,6 @@ imgref = ["dep:imgref", "dep:rgb"]
 ## color primaries. Handles RGBX/BGRX (automatic opaque) and premultiplied
 ## alpha (un-premultiplied on the fly).
 zenpixels = ["dep:zenpixels"]
-## Enable high-quality downscale filters (Mitchell, Lanczos) for pyramid construction.
-## Uses zenresize for resampling — training/research feature.
-## Disabled pending a decision: zenresize IS published (0.3.1+) now, so this
-## could be re-enabled; the gated code in metric.rs is kept compilable via
-## the check-cfg entry below.
-# zenresize = ["dep:zenresize"]
 ## Enable the 80 MP OOM-relief integration test (`streaming_strips_oom_80mp`).
 ## Off by default because the test allocates ~500 MB of input pixels which
 ## is disruptive in default `cargo test --all` runs.
@@ -77,7 +71,6 @@ zenpixels = { version = "0.2.11", default-features = false, features = ["std"], 
 # Prior comments claiming AGPL referred to a license plan that was
 # superseded before zenpredict's 0.1.0 publish.
 zenpredict = { workspace = true }
-# zenresize = { workspace = true, optional = true }  # re-enable when published
 
 [dev-dependencies]
 image = { workspace = true }
@@ -90,7 +83,7 @@ too_many_arguments = "allow"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
-check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles"))']  # zenresize kept in check-cfg for gated code
+check-cfg = ['cfg(feature, values("training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles"))']
 
 [dev-dependencies.zenbench]
 version = "0.1.8"

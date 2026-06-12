@@ -22,6 +22,43 @@
 - The `zenpixels` dependency is optional again — it is only needed by the
   feature-gated `ZenpixelsSource` adapter (#44).
 
+### Removed — pre-0.3.0 API trims: never-published speculative surface (#47)
+
+None of this surface exists in the published 0.2.7, so none of these are
+breaking changes; they are pre-publish trims of API that looked
+load-bearing but did nothing:
+
+- **`pub mod display` deleted** (`DisplayProfile`, `DisplayCalibration`,
+  11 preset consts). Zero consumers anywhere in the workspace, and the
+  runtime mechanism its docs described (PPD-affine score adjustment) was
+  never built — no API accepted a `DisplayProfile`. This also retires the
+  queued ablation item "make `DisplayCalibration` fields private" (the
+  type is gone). Re-add alongside a real display-model runtime if G11
+  lands.
+- **`codec_calibration` moved to `zensim-experimental`**
+  (`CalibrationAffine`, `CodecCalibration`, `PREVIEW_V0_5_TUNER`; the
+  crate-root re-exports are gone). The zensim runtime parses its own
+  private per-codec calibration from bake metadata; the public types' only
+  consumer is `zensim-experimental/examples/zensim_score_named.rs`, which
+  now uses `zensim_experimental::codec_calibration`. Moving (rather than
+  `#[doc(hidden)]`) keeps the published crate's surface at zero for a
+  mechanism whose profile (Tuner) already lives in zensim-experimental.
+- **`zenresize`-gated `DownscaleFilter` variants deleted**
+  (`Mitchell`, `Lanczos`, `MitchellBlur` + the commented-out feature/dep
+  plumbing in zensim, zensim-validate, and zensim-bench). Investigation
+  for #47 found `ZensimConfig::downscale_filter` is write-only — no
+  compute path ever dispatched on it (the pyramid hardcodes 2×2 box, and
+  trained profiles are calibrated for it) — so "re-enabling" the feature
+  would have shipped a no-op knob plus a pointless dependency. The
+  `DownscaleFilter` enum itself (`Box2x2`, `#[non_exhaustive]`) and the
+  `downscale_filter` field stay: they are published 0.2.7 surface.
+- **Error-type unification deferred (#47 item 4, decided):**
+  `UnsupportedFormat` (zenpixels adapter, shipped in 0.2.7) and
+  `ZensimError::UnsupportedPixelFormat` (new) stay separate for 0.3.0.
+  Unifying breaks 0.2.7's zenpixels surface and requires coordinated
+  zenpipe/zencodecs adapter updates; if a 0.4.0 break is ever queued,
+  fold `UnsupportedFormat` into `ZensimError` then.
+
 ### ⚠ SCORE-CHANGING NOTES for the next release (0.2.7 → 0.3.0)
 
 zensim is a user-facing quality dial; releases that change scores need
@@ -72,8 +109,8 @@ Proposed by the conservative public-API ablation reports
   `compute_iw_weights`, and `try_score_from_features` to `pub(crate)` —
   all `training`-feature-gated, zero external consumers, documented as
   feature-extract-pipeline internals
-- zensim: make `DisplayCalibration` fields private (zero external
-  reads/writes; field writes bypass future invariant checks)
+- ~~zensim: make `DisplayCalibration` fields private~~ — retired: the
+  `display` module was removed entirely pre-0.3.0 (#47)
 - zensim-regress (next minor, whenever one happens): `oracle_check_tracked`
   12-positional-arg signature → params struct; unify
   `display::print_comparison` / `print_comparison_raw` into one
