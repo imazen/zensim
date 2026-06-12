@@ -71,7 +71,7 @@ thiserror = { workspace = true }
 linear-srgb = { workspace = true }
 imgref = { workspace = true, optional = true }
 rgb = { workspace = true, optional = true }
-zenpixels = { version = "0.2.10", optional = true, default-features = false }
+zenpixels = { version = "0.2.11", default-features = false, features = ["std"], optional = true }
 # Runtime for the `PreviewV0_3` MLP scorer. zenpredict is MIT/Apache-2.0
 # (matching zensim), so the runtime dep is unconditional in 0.3.0+.
 # Prior comments claiming AGPL referred to a license plan that was
@@ -91,3 +91,10 @@ too_many_arguments = "allow"
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(feature, values("zenresize", "training", "imgref", "classification", "zenpixels", "threads", "streaming_strips_oom", "custom-profiles"))']  # zenresize kept in check-cfg for gated code
+
+[dev-dependencies.zenbench]
+version = "0.1.8"
+
+[[bench]]
+name = "pu21_bench"
+harness = false

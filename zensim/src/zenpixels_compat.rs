@@ -20,7 +20,9 @@
 //!
 //! # Rejected formats
 //!
-//! - HDR transfers (PQ, HLG) — zensim is SDR-only
+//! - HDR transfers (PQ, HLG) — the `ImageSource` pipeline is SDR; decode HDR
+//!   to absolute-luminance linear RGB and score it via
+//!   [`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear) instead
 //! - Unknown transfer — can't convert losslessly
 //! - Grayscale — not supported
 //! - Narrow signal range — requires expansion first
@@ -165,7 +167,8 @@ fn map_descriptor(
         }
         TransferFunction::Pq | TransferFunction::Hlg => {
             return Err(UnsupportedFormat(
-                "HDR transfers (PQ, HLG) are not supported — zensim is SDR-only",
+                "HDR transfers (PQ, HLG) are not supported by the SDR ImageSource pipeline — \
+                 decode to absolute-luminance linear RGB and use Zensim::compute_pu_linear",
             ));
         }
         _ => {

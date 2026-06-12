@@ -9,15 +9,15 @@
 
 ## summary
 #
-#   free functions                              3
+#   free functions                              5
 #   inherent methods                            9
 #   trait roster entries (type × trait)        21
 #
 # per-module pub lines:
-#   (root)                            9
+#   (root)                           11
 #   source                            3
 
-## items (12 lines)
+## items (14 lines)
 
 pub fn BlurKernel::assert_fields_are_eq(&self)
 pub fn ErrorCategory::assert_fields_are_eq(&self)
@@ -25,6 +25,8 @@ pub fn IwWeightKind::assert_fields_are_eq(&self)
 pub fn UnsupportedFormat::assert_fields_are_eq(&self)
 pub fn ZensimError::assert_fields_are_eq(&self)
 pub fn ZensimResult::nan() -> Self
+pub fn bench_pu_xyb_dispatch(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
+pub fn bench_pu_xyb_scalar(&[[f32; 3]], &mut [f32], &mut [f32], &mut [f32])
 pub fn compute_zensim_with_config(&[[u8; 3]], &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
 pub fn compute_zensim_with_ref_and_config(&PrecomputedReference, &[[u8; 3]], usize, usize, ZensimConfig) -> core::result::Result<ZensimResult, ZensimError>
 pub fn precompute_reference_with_scales(&[[u8; 3]], usize, usize, usize) -> core::result::Result<PrecomputedReference, ZensimError>

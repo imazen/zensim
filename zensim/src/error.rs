@@ -70,6 +70,27 @@ pub enum ZensimError {
     /// site.
     #[error("MLP forward failed: {reason}")]
     ModelForwardFailed { reason: &'static str },
+
+    /// An [`ImageSource`](crate::ImageSource) flagged itself HDR
+    /// ([`ImageSource::is_hdr`](crate::ImageSource::is_hdr)), which the SDR
+    /// entry points cannot score: they expect display-encoded SDR data, and
+    /// running the SDR pipeline on HDR-coded values would silently produce
+    /// meaningless scores — we refuse instead. Fires when either side of a
+    /// pair is HDR-flagged.
+    ///
+    /// HDR pairs ARE scorable: decode to **absolute-luminance linear RGB
+    /// (cd/m²)** and call
+    /// [`Zensim::compute_pu_linear`](crate::Zensim::compute_pu_linear)
+    /// (interleaved; planar variant
+    /// [`compute_pu_linear_planar`](crate::Zensim::compute_pu_linear_planar)) —
+    /// the PU21 front-end. Its output calibration against a trained HDR
+    /// bake is still open — see
+    /// [imazen/zensim#38](https://github.com/imazen/zensim/issues/38).
+    #[error(
+        "HDR input cannot be scored by the SDR entry points — decode to \
+         absolute-luminance linear RGB and use compute_pu_linear"
+    )]
+    HdrInputRequiresPuPath,
 }
 
 /// Pixel format conversion error from the zenpixels adapter.

@@ -226,10 +226,13 @@ mod simd_ops;
 pub mod source;
 mod streaming;
 // HDR foundation: transfer functions + display model (code values → absolute
-// luminance). Internal until the HDR scoring path that consumes it lands.
-// See `docs/HDR_PLAN.md`.
+// luminance). Still foundation-only — the PU entry points take already-linear
+// cd/m², so code-value decoding stays with the caller until a code-value
+// entry lands. See `docs/HDR_PLAN.md`.
 mod transfer;
-
+// PU21 perceptually-uniform encoding — the HDR-path replacement for the
+// cube-root nonlinearity, consumed by `Zensim::compute_pu_linear{,_planar}`.
+mod pu21;
 // EX-4 extended feature modules — XYB/LMS front-end stats + CVVDP-shape
 // per-pair signals (DKL, Weber-contrast band ratios, mutual-masking
 // residuals, Minkowski β=3 pool). Gated behind the `training` feature
@@ -247,6 +250,8 @@ pub use metric::{
 };
 
 pub use codec_calibration::{CalibrationAffine, CodecCalibration};
+#[doc(hidden)]
+pub use color::{bench_pu_xyb_dispatch, bench_pu_xyb_scalar};
 /// Classification API — requires `features = ["classification"]`.
 ///
 /// Exposes `classify()`, error categorization, and per-pixel delta statistics

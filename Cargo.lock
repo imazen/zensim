@@ -5815,6 +5815,7 @@ dependencies = [
  "rgb",
  "serde_json",
  "thiserror",
+ "zenbench",
  "zenpixels",
  "zenpredict",
 ]

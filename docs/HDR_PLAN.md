@@ -184,10 +184,36 @@ in PU/PQ space.
   case for chunk 2. Needs only the two CSVs (no 2.4 GB EXR extraction). The
   `--scores` flag is the plug-in point for zensim-HDR scores once chunk 2 lands;
   EXR extraction + pycvvdp rank-parity is the remaining (image-side) half.
-- **Chunk 2 — PU21 front-end**: fetch `gfxdisp/pu21` coefficients; swap
-  cube-root→PU21 on the absolute-luminance path; lift PR #39's guard for that
-  path; validate PU-zensim on UPIQ vs PU-SSIM/PU-FSIM. Add the public HDR API
-  (`ColorTransferFunction` → display model selection).
+- **Chunk 2 — PU21 front-end** (stacked PR on #39). **2a ✅ DONE 2026-06-01**:
+  `pu21.rs` — `pu21_encode`/`decode` with the verified `gfxdisp/pu21`
+  `banding_glare` coefficients (100 cd/m² → ~256), behavioral tests
+  (white-point anchor, monotonicity, round-trip).
+  **2b/2c ✅ WIRED + VALIDATED 2026-06-01 (partial pass).** The PU-XYB path
+  is always compiled (no feature gate). As-implemented API:
+  `Zensim::compute_pu_linear` — **interleaved** absolute-luminance linear RGB
+  (`[R,G,B,…]` f32 cd/m², per-image row stride; the primary entry) — and
+  `Zensim::compute_pu_linear_planar` for planar pipelines. Both run
+  opsin → PU21 → XYB → the existing pyramid/features via
+  `color::linear_to_pu_xyb_planar_into` (magetypes SIMD, ~3.3× scalar;
+  `benchmarks/pu21_simd_bench_2026-06-10.md`). PQ/HLG **code-value** decoding
+  stays with the caller (display model × EOTF → cd/m²). SDR entry points
+  refuse HDR input via the `ImageSource::is_hdr` flag
+  (`HdrInputRequiresPuPath`); the SDR path is byte-identical (separate
+  functions; default API unchanged). Design decisions that the original spec
+  left open, as resolved: the `K_B0` absorbance bias stays (PU operates on
+  the same opsin-mixed channels), outputs normalize by `PU21(100)` so SDR
+  white lands at the familiar XYB scale, opponent centering biases stay at
+  `0.42/0.01/0.55`, and chroma de-emphasis runs at `PU_X_SCALE = 4` (X
+  opponent ×4 instead of the SDR path's wider X scaling).
+  Validated end-to-end on the 380-pair UPIQ HDR subset
+  (`zensim-validate/src/bin/upiq_pu_score.rs` → `scripts/upiq_eval.py`):
+  **HDR-band SROCC 0.694 (best config)** vs PU-SSIM 0.740 / PU-FSIM 0.719 — far
+  above the no-PU SDR baselines (FSIM 0.457) but ~0.05 short of the bar. It's the
+  *representation* not the weights (linear + MLP all cluster 0.63–0.69); chroma
+  de-emphasis (X 14→4) helped +0.01. Further formulation tuning is **not** done
+  on UPIQ (held-out — would overfit); clearing the bar needs an HDR *training*
+  corpus (chunk 4), which is data-blocked per §5. Full numbers:
+  `benchmarks/upiq_pu_validation_2026-06-01.md`.
 - **Chunk 3 — luminance-dependent per-channel CSF** (also lifts SDR — the
   standing P0 from `vdp-csf-perceptual-math.md`). Seed `s_ch=[1.0,1.7,0.237]`;
   CSF *shape* from castleCSF (exact coeffs are OCR-garbled → `gfxdisp/castleCSF`
