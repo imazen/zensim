@@ -250,7 +250,7 @@ fn premultiplied_matches_straight() {
     let z = zensim();
     let straight = test_pixels_rgba_with_alpha();
 
-    // Create premultiplied version
+    // Create premultiplied version (floor-quantized, as stores commonly are)
     let premul: Vec<u8> = straight
         .iter()
         .flat_map(|[r, g, b, a]| {
@@ -266,20 +266,56 @@ fn premultiplied_matches_straight() {
 
     let straight_bytes: Vec<u8> = straight.iter().flat_map(|p| p.iter().copied()).collect();
 
-    // Premultiplied via zenpixels adapter (should un-premultiply internally)
+    // Premultiplied via zenpixels adapter (un-premultiplies internally)
     let premul_desc = PixelDescriptor::RGBA8_SRGB.with_alpha(Some(ZpAlpha::Premultiplied));
     let p_slice = PixelSlice::new(&premul, 16, 16, 16 * 4, premul_desc).unwrap();
     let zp_src = ZenpixelsSource::try_from_slice(&p_slice).unwrap();
 
-    // Compare premul source against straight source
+    // (1) Pixel-exact adapter contract: recovery must match a reference
+    // round-to-nearest un-premultiply byte-for-byte. zensim scores identical
+    // buffers at exactly 100, and even a single 1-level pixel difference on
+    // 16x16 drops the score to ~95.8 (measured), so == 100.0 is a byte-exact
+    // assertion. This is strictly stronger than the old score-threshold form.
+    let reference: Vec<u8> = premul
+        .chunks_exact(4)
+        .flat_map(|px| {
+            let a = px[3];
+            if a == 0 {
+                [0, 0, 0, a]
+            } else if a < 255 {
+                let inv = 255.0 / a as f32;
+                [
+                    (px[0] as f32 * inv).round().min(255.0) as u8,
+                    (px[1] as f32 * inv).round().min(255.0) as u8,
+                    (px[2] as f32 * inv).round().min(255.0) as u8,
+                    a,
+                ]
+            } else {
+                [px[0], px[1], px[2], a]
+            }
+        })
+        .collect();
+    let r_slice = PixelSlice::new(&reference, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
+    let r_src = ZenpixelsSource::try_from_slice(&r_slice).unwrap();
+    let exact = z.compute(&zp_src, &r_src).unwrap();
+    assert_eq!(
+        exact.score(),
+        100.0,
+        "adapter un-premultiply must match the round-to-nearest reference exactly"
+    );
+
+    // (2) Catastrophic canary vs the straight original. The test's premultiply
+    // floor-quantizes, so optimal recovery is within 2 LSB on ~36% of channels
+    // — Profile A scores that 93.4 (a half-image +1 LSB control scores 94.5),
+    // while a SKIPPED un-premultiply (premul scored as straight) scores 12.1.
+    // The 90 floor separates those regimes without re-coupling this test to
+    // metric-calibration drift; (1) above carries the exactness guarantee.
     let s_slice =
         PixelSlice::new(&straight_bytes, 16, 16, 16 * 4, PixelDescriptor::RGBA8_SRGB).unwrap();
     let zp_dst = ZenpixelsSource::try_from_slice(&s_slice).unwrap();
     let zp_result = z.compute(&zp_src, &zp_dst).unwrap();
-
-    // Un-premultiply has rounding, so allow some tolerance
     assert!(
-        zp_result.score() > 95.0,
+        zp_result.score() > 90.0,
         "premul un-premultiply should produce near-identical result, got {}",
         zp_result.score()
     );
