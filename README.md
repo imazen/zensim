@@ -160,13 +160,62 @@ let z = Zensim::new(ZensimProfile::A);
 // ships (rotates as new previews land), or `ZensimProfile::codec_target()`
 // for the stable codec-target contract. `PreviewV0_2` is the linear
 // general-ranking profile; `PreviewV0_1` is the 0.2.x-compatible linear one.
+// `src_pixels` / `dst_pixels` are `&[[u8; 3]]` — interleaved, sRGB-encoded
+// (gamma, NOT linear) 8-bit RGB. `width`/`height` are `usize`. See "Input
+// format" below: getting sRGB-vs-linear wrong silently corrupts every score.
 let source = RgbSlice::new(&src_pixels, width, height);
 let distorted = RgbSlice::new(&dst_pixels, width, height);
+// `compute` returns `Result<ZensimResult, zensim::ZensimError>` — the `?`
+// propagates a dimension-mismatch / too-small / too-large error.
 let result = z.compute(&source, &distorted)?;
 println!("score: {:.2}", result.score()); // 100 = identical, higher = better
 ```
 
-Also accepts `RgbaSlice` (composited over noise background), `imgref::ImgRef` (with stride), `ZenpixelsSource` (with `zenpixels` feature), and `StridedBytes` for BGRA, 16-bit, linear float, and wide gamut (Display P3, BT.2020) inputs. See [docs.rs](https://docs.rs/zensim) for the full `ImageSource` trait.
+Also accepts `RgbaSlice` (composited over a noise background), `imgref::ImgRef` (with stride), `ZenpixelsSource` (with `zenpixels` feature), and `StridedBytes` for BGRA, 16-bit, linear float, and wide gamut (Display P3, BT.2020) inputs. See [docs.rs](https://docs.rs/zensim) for the full `ImageSource` trait.
+
+### Input format (read this — wrong input silently corrupts the score)
+
+The `0..100` score is only meaningful if the pixels you pass match the contract zensim assumes. There is **no format auto-detection** for the `RgbSlice` fast path: if you hand it linear bytes where it expects sRGB, or planar bytes where it expects interleaved, it computes a perfectly valid-looking but wrong score — no error is raised. The contract:
+
+- **Color encoding: sRGB-encoded (gamma), NOT linear.** `RgbSlice` / `RgbaSlice` / the `Srgb8*` and `Srgb16Rgba` `StridedBytes` formats all expect **display-encoded sRGB** values — the bytes a PNG/JPEG decoder gives you. zensim linearizes internally before the XYB conversion. If your data is already linear light, do **not** feed it as sRGB; use `StridedBytes` with `PixelFormat::LinearF32Rgba` (linear 32-bit float RGBA) instead. (Display P3 reuses the sRGB transfer function, so `Srgb8*` formats linearize it correctly; SDR BT.2020 technically wants BT.1886 — for exact results linearize externally and use `LinearF32Rgba`. Set primaries via `StridedBytes::with_color_primaries`.)
+- **Channel order: interleaved, not planar.** `RgbSlice` takes `&[[u8; 3]]` laid out `R,G,B, R,G,B, …` (one `[u8; 3]` per pixel), `RgbaSlice` takes `&[[u8; 4]]` as `R,G,B,A, …`. **Planar** input (all R, then all G, then all B) is **not** accepted by these types — you must interleave it first, or describe it some other way. The `[[u8; 3]]` / `[[u8; 4]]` element type also pins it to exactly 3 / 4 bytes per pixel, **tightly packed** (no per-row padding) — for row padding use `StridedBytes` (below).
+- **Dimensions: `width` and `height` are `usize`** (not `u32`). Both `RgbSlice::new(data, width, height)` and the underlying `ImageSource::{width,height}` use `usize`.
+- **Both images must have identical dimensions**, and each must be non-zero. `compute` returns `ZensimError::DimensionMismatch` if they differ, `ZensimError::ImageTooSmall` if either dimension is `0`. (Since 0.3.0, sub-64px images down to 1×1 are reflect-padded internally and score normally — only empty inputs are rejected.)
+
+The infallible constructors (`RgbSlice::new`, `RgbaSlice::new`, `StridedBytes::new`) **panic** if `data.len()` is too short for `width × height` (or the stride is invalid). For untrusted sizes use the `try_*` variants — `RgbSlice::try_new(data, width, height) -> Result<RgbSlice, ZensimError>` etc. — which return `ZensimError::InvalidDataLength` / `ZensimError::InvalidStride` / `ZensimError::ImageTooLarge` instead of panicking.
+
+### Return type and errors
+
+```rust
+pub fn compute(
+    &self,
+    source: &impl ImageSource,
+    distorted: &impl ImageSource,
+) -> Result<ZensimResult, zensim::ZensimError>
+```
+
+`ZensimError` is a `#[non_exhaustive]` enum (so match it with a `_` arm) — the variants `compute` can return are `DimensionMismatch`, `ImageTooSmall`, and `ImageTooLarge` (dimensions exceed the `Zensim::with_max_pixels` cap, or `width × height` overflows `usize` on 32-bit / wasm32). HDR-flagged sources (`ImageSource::is_hdr` returns `true`) are refused with `HdrInputRequiresPuPath` — score HDR via the PU21 front-end (`Zensim::compute_pu_linear`, fed absolute-luminance linear RGB in cd/m²) instead. On success, `ZensimResult::score()` is the `0..100` similarity; `raw_distance()`, `approx_ssim2()`, `approx_dssim()`, and `approx_butteraugli()` are also available (see "What the score means").
+
+### Strided / padded rows
+
+When rows are not tightly packed (SIMD-aligned padding, a sub-region crop of a larger buffer, decoder output with row guards), use `StridedBytes`, where `stride` is the **byte** distance between the start of consecutive rows:
+
+```rust
+use zensim::{StridedBytes, PixelFormat};
+
+// e.g. 8-bit RGB where each row is padded to `row_stride` bytes (≥ width*3):
+let src = StridedBytes::new(&bytes, width, height, row_stride, PixelFormat::Srgb8Rgb);
+// `try_new(..) -> Result<_, ZensimError>` returns InvalidStride / InvalidDataLength
+// instead of panicking. `with_alpha_mode(.., AlphaMode)` / `with_color_primaries(..)`
+// set alpha handling and gamut; default alpha mode is `AlphaMode::Unknown`.
+let result = z.compute(&src, &dst)?;
+```
+
+With the `imgref` feature (on by default), `imgref::ImgRef<'_, rgb::Rgb<u8>>` and `ImgRef<'_, rgb::Rgba<u8>>` implement `ImageSource` directly and honor their pixel stride — pass an `ImgRef` straight to `compute`. (The element type must be `rgb::Rgb<u8>` / `rgb::Rgba<u8>`; the `ImgRef` stride is in pixels.)
+
+### Cancellation
+
+A single `compute` / `compute_with_ref` call is **not** interruptible mid-computation — the `zensim` metric library exposes no `Stop`-token parameter, and a single comparison is typically tens of milliseconds (~22 ms at 1080p). Cancellation is at the granularity of *your* loop: when comparing one reference against many distorted variants (see "Batch comparison"), check your own cancellation flag between `compute_with_ref` calls. The `enough` cooperative-cancellation crate is used by the `zensim-target` codec-targeting CLI (to bound its binary-search loop) and `zensim-regress`, not by the core metric API.
 
 ### zenpixels integration
 

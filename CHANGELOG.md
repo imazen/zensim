@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Documentation — state the `RgbSlice` input contract in the README
+
+- README now states the input pixel-format contract that was previously
+  unstated: `RgbSlice` / `RgbaSlice` expect **interleaved, sRGB-encoded
+  (gamma, not linear), tightly-packed** 8-bit RGB(A) with `usize`
+  width/height — feeding linear or planar bytes silently corrupts the
+  score (no error is raised). Also documents `compute`'s
+  `Result<ZensimResult, ZensimError>` return + the variants it can yield,
+  the `StridedBytes::new(data, width, height, stride, PixelFormat)`
+  byte-stride constructor and `imgref::ImgRef` path, and the cancellation
+  reality (the core metric API takes no `Stop` token; `enough` is used by
+  `zensim-target` / `zensim-regress`, not `zensim`). Found via an
+  insulated external-developer README test.
+
 ### Added — HDR scoring via the PU21 front-end (#44)
 
 - `Zensim::compute_pu_linear` — score HDR pairs supplied as **interleaved**
