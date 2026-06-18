@@ -62,7 +62,7 @@ not reverse it.
 
 ## Phone-CVVDP scoring
 
-`zen-metrics batch --metric cvvdp --display-model modern_oled_phone_indoor
+`zenmetrics batch --metric cvvdp --display-model modern_oled_phone_indoor
 --gpu-runtime cuda` on the row-aligned pairs TSVs (verified 0
 ref_basename mismatches vs the canonical KADID/TID train parquets):
 
@@ -71,7 +71,7 @@ ref_basename mismatches vs the canonical KADID/TID train parquets):
 | KADID | 10125 | 5.56 / 8.93 / 9.96 (min −3.12) |
 | TID   | 3000  | 6.81 / 9.27 / 9.96 |
 
-The zen-metrics build excluded `jxl-encoder` (a sibling repo broken at
+The zenmetrics build excluded `jxl-encoder` (a sibling repo broken at
 HEAD on `crate::vardct::butteraugli_loop` / `perceptual_loop`) via
 `--no-default-features --features 'png,gpu-cvvdp,gpu-cuda'` — KADID/TID
 are 8-bit PNG so only png decoding is needed. Default-feature builds

@@ -7,7 +7,7 @@
   `zensim/weights/v_tuner_v6_2026-05-19.bin`, md5
   `c5c32659b15b47e8a569464749cf7019`).
 - Binary search uses `tolerance=1.0`, `max_iterations=8`.
-- Per-cell butteraugli scored via `zen-metrics score --metric butteraugli`
+- Per-cell butteraugli scored via `zenmetrics score --metric butteraugli`
   on the reference PNG vs the codec-encoded artifact.
 
 ## Corpus
@@ -140,5 +140,5 @@ bash benchmarks/zensim_target_v6_cross_codec_2026-05-19.sh
 
 Driver script lives at the path above; it iterates over the 10-image ×
 4-codec matrix, runs `zensim-target --target 63 --quiet -o out.<ext>`
-per cell, then `zen-metrics score --metric butteraugli` against the
+per cell, then `zenmetrics score --metric butteraugli` against the
 reference PNG, and writes the TSV in this directory.

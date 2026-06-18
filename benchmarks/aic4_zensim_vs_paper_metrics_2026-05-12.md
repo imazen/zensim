@@ -1,7 +1,7 @@
-# AIC-4 sample — zensim V0_16 vs paper metrics vs zen-metrics CLI (n=300)
+# AIC-4 sample — zensim V0_16 vs paper metrics vs zenmetrics CLI (n=300)
 
 > ⚠️ **SUPERSEDED — V0_2 mislabel** (correction landed 2026-05-12 evening).
-> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zen-metrics batch --metric zensim`
+> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zenmetrics batch --metric zensim`
 > defaults to `ZensimProfile::latest() == PreviewV0_2`, not the V0_4 MLP path.
 >
 > **Canonical replacement docs**:
@@ -31,14 +31,14 @@
 | 3  | MS-SSIM          | 0.9409 | paper-pre-computed |
 | 4  | HDR-VDP-3        | 0.9329 | paper-pre-computed |
 | 5  | HDR-VDP-2        | 0.9294 | paper-pre-computed |
-| 6  | **dssim-gpu**    | **0.9256** | our zen-metrics CLI |
+| 6  | **dssim-gpu**    | **0.9256** | our zenmetrics CLI |
 | 7  | VMAF-neg         | 0.9209 | paper-pre-computed |
-| 8  | **fast-ssim2-gpu** | **0.9127** | our zen-metrics CLI (CPU-impl baseline) |
+| 8  | **fast-ssim2-gpu** | **0.9127** | our zenmetrics CLI (CPU-impl baseline) |
 | 9  | paper SSIMULACRA2 | 0.9125 | paper-pre-computed (sanity-check vs our ssim2-gpu: within 0.0002) |
 | 10 | **zensim V0_16** | **0.9107** | our shipped MLP |
 | 11 | SSIM             | 0.9046 | paper-pre-computed |
-| 12 | butteraugli pnorm3 | 0.8969 | our zen-metrics CLI |
-| 13 | butteraugli max  | 0.8656 | our zen-metrics CLI |
+| 12 | butteraugli pnorm3 | 0.8969 | our zenmetrics CLI |
+| 13 | butteraugli max  | 0.8656 | our zenmetrics CLI |
 | 14 | PSNR-Y           | 0.8163 | paper-pre-computed |
 
 V0_16 is **-0.0020 below fast-ssim2** in aggregate, within noise on n=300.
@@ -47,8 +47,8 @@ Goal #1 (match-or-exceed fast-ssim2) is empirically satisfied.
 **Notable findings**:
 
 1. **paper SSIMULACRA2 ≡ our ssim2-gpu** (0.9125 vs 0.9127, Δ=0.0002):
-   sanity check passes — our `zen-metrics batch --metric ssim2-gpu`
-   produces the same SROCC as the paper's CSV. zen-metrics CLI is
+   sanity check passes — our `zenmetrics batch --metric ssim2-gpu`
+   produces the same SROCC as the paper's CSV. zenmetrics CLI is
    reproducing the canonical metric correctly.
 
 2. **dssim-gpu beats fast-ssim2** on AIC-4 (+0.0129 SROCC, 0.9256 vs
@@ -112,7 +112,7 @@ python3 /home/lilith/work/zen/zensim/scripts/v_next/export_aic4_to_parquet.py \
 
 ## Status
 
-- All 4 zen-metrics on AIC-4: ✅ DONE
+- All 4 zenmetrics on AIC-4: ✅ DONE
 - Parquet at `/tmp/aic4_metrics/aic4_sample.parquet` (300 rows × 23 cols)
 - Schema includes: paper PSNR-Y/SSIM/MS-SSIM/IW-SSIM/VMAF-neg/
   SSIMULACRA2/HDR-VDP-2/HDR-VDP-3/CVVDP + our dssim/ssim2-gpu/butter-

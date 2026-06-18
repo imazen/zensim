@@ -2452,7 +2452,7 @@ does on its own". Commit `21efc115`.
 ### Added (zensim, unreleased) — Cycle 6 final cross-corpus verification (2026-05-12, late)
 
 **Goal #1 (match-or-exceed fast-ssim2) EMPIRICALLY MET across all 3
-public corpora** (corrects earlier zen-metrics-CLI-mislabeled
+public corpora** (corrects earlier zenmetrics-CLI-mislabeled
 numbers from the same day):
 
 | Corpus | n | V0_16 | fast-ssim2 | V0_16 advantage |
@@ -2479,7 +2479,7 @@ on AIC-4 (V0_16 −0.051 vs ssim2), where **dssim is essentially
 unaffected (0.9147)** — strong cycle-7 case for adding dssim as an
 auxiliary loss head for transformer-codec robustness.
 
-**Earlier zen-metrics-CLI bug** (`--metric zensim` → `ZensimProfile::latest()`
+**Earlier zenmetrics-CLI bug** (`--metric zensim` → `ZensimProfile::latest()`
 → `PreviewV0_2`, not V0_4): documented in
 `benchmarks/cid22_full_v0_16_vs_ssim2_2026-05-12.md`. The
 ticks-455-through-462 "AIC-3 / AIC-4 / CID22 V0_16" numbers

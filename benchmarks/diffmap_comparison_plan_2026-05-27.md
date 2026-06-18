@@ -51,7 +51,7 @@ they reduced *genuinely* perceptible error, not just its own metric's error.
 
 1. **Baseline RD** (#32 diffmap): encode a multi-content corpus across the
    distance band with the loop ON (zensim-v47), persist bytes + decoded
-   output. Score each output with the independent panel (zen-metrics:
+   output. Score each output with the independent panel (zenmetrics:
    butteraugli, ssim2, dssim, cvvdp). Build RD curves. (Persist encodes +
    diffmaps per the ML-data-pipeline rule — encodes are expensive.)
 2. **CVVDP-diffmap RD** (#37): swap the loop's scorer to the cvvdp bake

@@ -73,7 +73,7 @@ dist_path → no way to look up per-pair metric scores.
 
 **Fix**: `konjnd_pairs.tsv` (1008 rows, row-aligned to val/konjnd by SRC
 ordering) carries the anchor `(ref_path, dist_path)` pairs. Use it to:
-- Compute GPU SSIMULACRA2 via `zen-metrics batch --metric ssim2-gpu`
+- Compute GPU SSIMULACRA2 via `zenmetrics batch --metric ssim2-gpu`
 - Join CVVDP from `konjnd_{jpeg,bpg}_cvvdp_2026-05-17.tsv`
 - Join IW-SSIM from `konjnd_{jpeg,bpg}_iwssim_scores.tsv`
 
@@ -87,7 +87,7 @@ val-side fill used `fast_ssim2_score` (CPU implementation) from
 exist, the implementations differ in scale.
 
 **Fix**: computed GPU SSIMULACRA2 for ALL val corpora via
-`zen-metrics batch --metric ssim2-gpu --gpu-runtime cuda`:
+`zenmetrics batch --metric ssim2-gpu --gpu-runtime cuda`:
 - val/kadid: 10125 pairs
 - val/tid: 3000 pairs
 - val/cid22: 4292 pairs
@@ -277,7 +277,7 @@ directions worth trying:
   ssim2/cvvdp/iwssim, all matched to the original training-side scale.
 - **train/kadid + train/tid ssim2 now per-pair** — verified post-fix that
   per-ref ssim2 has 5+ distinct values, matching the per-pair scoring done
-  via `zen-metrics batch`.
+  via `zenmetrics batch`.
 
 ## Implementation notes
 

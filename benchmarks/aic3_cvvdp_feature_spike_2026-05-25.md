@@ -7,7 +7,7 @@ JND SROCC gap? If yes, CVVDP-approximating CSF features are worth building.
 Bakes (safesyn-trained, ssim2 target, per-sample-α head, h=128×2, seed=17):
 `spike_cvvdp_feat_baseline_safesyn_2026-05-25.bin` (372) and
 `spike_cvvdp_feat_cvvdp_safesyn_2026-05-25.bin` (373, f372 = raw CVVDP JOD).
-CVVDP computed via `zen-metrics batch --metric cvvdp --gpu-runtime cuda` on the
+CVVDP computed via `zenmetrics batch --metric cvvdp --gpu-runtime cuda` on the
 600 AIC-3 pairs, row-aligned to `aic3_features_372col_2026-05-15.parquet`
 (verified 600/600 by matching `score.jnd` + `ref_basename`).
 

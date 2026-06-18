@@ -43,7 +43,7 @@ CVVDP's spatial error localization is its strength.
 
 **We can't run the spatial version yet**: the canonical training data carries
 cvvdp SCALAR scores (`cvvdp_log_norm`), not cvvdp DIFFMAPS. Producing spatial
-cvvdp targets needs a cvvdp-diffmap generation pass (zen-metrics cvvdp with
+cvvdp targets needs a cvvdp-diffmap generation pass (zenmetrics cvvdp with
 per-pixel output) over the training pairs — a data-generation effort, not a
 recipe tweak.
 

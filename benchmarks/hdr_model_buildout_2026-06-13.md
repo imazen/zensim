@@ -129,6 +129,6 @@ cargo build --release -p zensim-validate --bin upiq_pu_score
 python3 scripts/upiq_eval.py --scores /tmp/s.csv --score-col zensim_a
 
 # zenmetrics HDR build
-cd ~/work/zen/zenmetrics && cargo build --release -p zen-metrics-cli \
+cd ~/work/zen/zenmetrics && cargo build --release -p zenmetrics-cli \
   --features png,jxl,cpu-metrics,gpu-cvvdp,gpu-butteraugli,gpu-cuda,hdr,sweep
 ```

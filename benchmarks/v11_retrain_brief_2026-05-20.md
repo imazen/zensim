@@ -247,7 +247,7 @@ imazen-internal sweep codecs.
    distribution. Strict per-CLAUDE.md rule: NEVER use human MOS;
    anchor must be ssim2 / fast-ssim2 / CVVDP. Requires:
    (a) extract feature parquet via `extract_features_372col`,
-   (b) compute ssim2_gpu or CVVDP per pair via zen-metrics batch,
+   (b) compute ssim2_gpu or CVVDP per pair via zenmetrics batch,
    (c) join into a canonical-2026-05-21 rebuild, then
    (d) document the per-source basename diff against the 49 val refs to
    prove no contamination.

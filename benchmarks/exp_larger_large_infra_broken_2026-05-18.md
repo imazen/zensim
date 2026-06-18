@@ -7,7 +7,7 @@
 ## What the experiment was supposed to do
 
 Per the task brief, expand `cvvdp_iwssim_LARGE` from 73k pairs → ~300k pairs by:
-1. Running 2,500 v15r_zenjpeg chunks through `zen-metrics iwssim-gpu` on vast.ai.
+1. Running 2,500 v15r_zenjpeg chunks through `zenmetrics iwssim-gpu` on vast.ai.
 2. Joining the new iwssim scores with the existing 2.37M unified cvvdp+features parquets.
 3. Retraining V_24-per-sample-α s4 on the expanded LARGE corpus across 5 seeds.
 4. Comparing CID22/AIC-3 SROCC against the current ship.
@@ -65,7 +65,7 @@ On the v14 image, `ldconfig` is not on PATH (the runtime-base stage doesn't inst
 
 Workaround attempted: patch the onstart to skip the libnvrtc block entirely (the v14 image has libnvrtc baked) and upload to R2. Surfaced Defect 4.
 
-### Defect 4: v14 image's baked zen-metrics binary is linked against CUDA 12.6+ symbols the leased boxes' drivers don't export
+### Defect 4: v14 image's baked zenmetrics binary is linked against CUDA 12.6+ symbols the leased boxes' drivers don't export
 
 After patching the onstart so workers progress past tool-check and into the chunk worker, every chunk fails with rc=101 after 79–110 seconds. Looking at the chunk-worker fail log:
 

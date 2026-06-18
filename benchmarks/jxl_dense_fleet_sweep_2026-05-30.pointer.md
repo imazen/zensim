@@ -23,7 +23,7 @@ build it dense (not the coarse q5–q100) on the **zenmetrics fleet**.
 ## Fleet launch path (omni chunk-sweep — the STABLE path, NOT the in-flux jobsys)
 
 Worker `scripts/sweep/omni_backfill_chunk_worker.sh` (zenmetrics): one
-`zen-metrics sweep` pass → all 6 metrics (`zensim-gpu,ssim2-gpu,
+`zenmetrics sweep` pass → all 6 metrics (`zensim-gpu,ssim2-gpu,
 butteraugli-gpu,cvvdp,dssim-gpu,iwssim-gpu`) + 372 features + saved `.jxl`
 bytes + diffmaps to R2.
 
@@ -48,7 +48,7 @@ recent runs today are red (latest run `26686766753` at 14:49Z,
 "fix(deps): point zenjxl path dep at ../zenjxl", still failed). A concurrent
 agent is actively fixing the v26/v27 image build (sibling-clone / path-dep CI
 issues). The launcher default `ghcr.io/imazen/zen-metrics-sweep:v15` is the
-zenjpeg-era image and lacks JXL + the 6-metric GPU `zen-metrics` the omni
+zenjpeg-era image and lacks JXL + the 6-metric GPU `zenmetrics` the omni
 worker needs.
 
 **Do NOT launch paid boxes until a green v26/v27 image is published** (would

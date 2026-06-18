@@ -60,7 +60,7 @@ magnitude modest. Data: `/mnt/v/output/zensim/diffmap-sweep-2026-05-27/`.)
 User: "do all three [diffmap avenues] in sequence and choose the best."
 Harness: `jxl-encoder/examples/zensim_diffmap_rd.rs` (encode corpus with each
 perceptual-loop metric, iters≥1 so the diffmap drives per-tile redistribution,
-save decoded outputs). Judged by an **independent** panel (`zen-metrics`
+save decoded outputs). Judged by an **independent** panel (`zenmetrics`
 butteraugli + dssim) at **matched bytes** (RD curves; the loops each target
 their own quality calibration per distance, so matched-distance is NOT
 apples-to-apples). The common independent judge across all three loops is

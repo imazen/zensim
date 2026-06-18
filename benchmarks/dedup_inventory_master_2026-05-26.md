@@ -47,7 +47,7 @@ implementations of one thing, no parity test, divergence ships silently.
 | B | **~17 near-identical `ci.yml`** (win-arm/macos-intel/i686/cross matrix, ~65% identical) | every codec repo | **org reusable workflow** `zen-ci/rust-matrix.yml`; callers shrink to ~20 lines; fixes the zenraw gap by construction |
 | B | **zencodec `EncodeJob`/`EncoderConfig` builder boilerplate** — 10-14 mechanical methods × 4 codecs | 4 codecs | shared builder macro or default-impls in `zencodec` |
 | A | **R2/S3 boilerplate** — 26 `.sh` build the endpoint, ~8 carry full creds, 5 redefine `S3()` | all sweep scripts | `zen-r2-lib.sh` sourced everywhere |
-| A | **2 cloud-orchestration stacks** — coefficient `src/cloud/` (vastai+GCP+DO) vs zenmetrics `vastai-fleet` | 2 systems | pick one; out of scope for a quick win |
+| A | **2 cloud-orchestration stacks** — coefficient `src/cloud/` (vastai+GCP+DO) vs zenmetrics `zenfleet-vastai` | 2 systems | pick one; out of scope for a quick win |
 | A+B | **`panel.rs` vs `bake_verdict.rs` byte-identical stat copy** (subset of Tier-0 #4) | folded into `zen-iqa-stats` | — |
 
 ### The one extraction that does the most
@@ -108,10 +108,10 @@ rule, and there is no cross-check today.
 | **1** | **Metric→feature parquet/CSV joins** | **39 total** = 36 (zensim/zenanalyze/zenmetrics, prior) **+ 3 coefficient** (per-`source_hash` / `source_path` joins, Mode-B broadcast shape) | **CRITICAL** | `zen_corpus_join` (promote `join_safety.py`); coefficient joins are CSV-side so need a pandas-compatible `safe_per_source_join` variant |
 | **2** | IQA stats (SROCC/PLCC/KROCC/Z-RMSE/PWRC/RMSE/kendall) | Rust **11** (10 prior + 1 coefficient `kendall_tau`); Python **25** (23 prior + coefficient `spearman` + `spearmanr` use) | HIGH | new `zen-iqa-stats` crate + mirrored `zen_stats.py`; coefficient's `examples/ba_ssim2_cross_check.rs:43` + `scripts/spearman_prune.py:39` + `scripts/feature_utility.py:170` join in |
 | **3** | `zentrain.*` / `zenpicker.*` ZNPR metadata keys as bare literals | 122 prior + coefficient `scripts/inject_family_order_and_bake.py` (`"zenpicker.family_order"`) | HIGH | `zenpredict::metadata::keys` (Rust) + generated `zentrain_keys.py` |
-| **4** | R2/S3 endpoint + creds + `S3()` boilerplate | 26 `.sh` prior + coefficient (`src/store/r2.rs:116`, `scripts/selector_corpus/upload_to_r2.py:44`) | MEDIUM | `zen-r2-lib.sh` + a shared Rust `zen-r2` helper (coefficient's `r2.rs` + zenmetrics `vastai-fleet/src/worker/r2.rs` are two Rust copies) |
+| **4** | R2/S3 endpoint + creds + `S3()` boilerplate | 26 `.sh` prior + coefficient (`src/store/r2.rs:116`, `scripts/selector_corpus/upload_to_r2.py:44`) | MEDIUM | `zen-r2-lib.sh` + a shared Rust `zen-r2` helper (coefficient's `r2.rs` + zenmetrics `zenfleet-vastai/src/worker/r2.rs` are two Rust copies) |
 | **5** | Parquet/CSV read-write + manifest helpers | prior 18 loaders; coefficient uses CSV/TSV (`load_pareto_rows`, `load_features` in `feature_utility.py`, `fit_*` scripts) | MEDIUM | shared loader lib; coefficient is TSV-first so lower priority |
-| **6** | Sweep / cloud orchestration (vast.ai, GCP Batch, DO droplets, chunk workers, Dockerfiles, onstart) | zenmetrics canonical sweep infra **+ coefficient's entirely separate `src/cloud/` (vastai.rs 29k, batch.rs 35k, do_droplet.rs 18k) + `src/bin/vastai_worker.rs` (470 LOC) + 2 launcher `.sh`** | MEDIUM-HIGH | no merge proposed (different providers); but `vastai.rs` overlaps `zenmetrics/crates/vastai-fleet` — candidate for shared `zen-vastai` crate |
-| **7** | GPU perceptual-metric scoring (ssim2/butteraugli/dssim/zensim) | **zenmetrics: CubeCL backend** (`butteraugli-gpu`/`ssim2-gpu`/`zensim-gpu`/`dssim-gpu`/`cvvdp-gpu`/`iwssim-gpu`, lilith/cubecl fork). **coefficient: turbo-metrics/cudarse backend** (`ssimulacra2-cuda`/`butteraugli-cuda`/`dssim-cuda` via `../turbo-metrics`, NVIDIA-only). | **HIGH (functional dup)** | Two GPU metric implementations of the *same* metrics. zenmetrics is the documented canonical owner; coefficient's `src/gpu.rs` (299 LOC) should migrate to `zen-metrics` once CubeCL covers its needs |
+| **6** | Sweep / cloud orchestration (vast.ai, GCP Batch, DO droplets, chunk workers, Dockerfiles, onstart) | zenmetrics canonical sweep infra **+ coefficient's entirely separate `src/cloud/` (vastai.rs 29k, batch.rs 35k, do_droplet.rs 18k) + `src/bin/vastai_worker.rs` (470 LOC) + 2 launcher `.sh`** | MEDIUM-HIGH | no merge proposed (different providers); but `vastai.rs` overlaps `zenmetrics/crates/zenfleet-vastai` — candidate for shared `zen-vastai` crate |
+| **7** | GPU perceptual-metric scoring (ssim2/butteraugli/dssim/zensim) | **zenmetrics: CubeCL backend** (`butteraugli-gpu`/`ssim2-gpu`/`zensim-gpu`/`dssim-gpu`/`cvvdp-gpu`/`iwssim-gpu`, lilith/cubecl fork). **coefficient: turbo-metrics/cudarse backend** (`ssimulacra2-cuda`/`butteraugli-cuda`/`dssim-cuda` via `../turbo-metrics`, NVIDIA-only). | **HIGH (functional dup)** | Two GPU metric implementations of the *same* metrics. zenmetrics is the documented canonical owner; coefficient's `src/gpu.rs` (299 LOC) should migrate to `zenmetrics` once CubeCL covers its needs |
 | **8** | Feature extraction / 372-schema / metric-ledger emission | coefficient `generate_zensim_training.rs` writes own `metric-ledger.jsonl` + per-`source_hash` feature JSON (`extract_zenanalyze_features.rs`); zenmetrics emits 305-col parquet sidecars; zensim canonical-corpus builders emit 372-col parquet | MEDIUM | two data-emission formats for the same (ref, dist) → metric facts; coefficient correctly *calls* `zenanalyze::try_analyze_features_rgb8` (no feature-math dup), but its **output schema** forks |
 | **9** | `CodecFamily` enum + family order | **THREE orderings** (see A.7) | **HIGH** | `zenpicker::CodecFamily` is the documented owner |
 
@@ -121,7 +121,7 @@ coefficient is the training-data generator + codec-RD-experiment repo. It is **n
 
 1. **A second GPU perceptual-metric backend.** `src/gpu.rs` (`GpuMetrics`, 299 LOC) wraps `ssimulacra2-cuda`, `butteraugli-cuda`, `dssim-cuda`, `cudarse-driver`, `cudarse-npp` from `../turbo-metrics` (`Cargo.toml:109-114`). zenmetrics computes the *same* metrics on a *different* backend (CubeCL / lilith-cubecl fork, `crates/{ssim2-gpu,butteraugli-gpu,dssim-gpu,zensim-gpu}`). Same metric, two GPU codepaths → any metric-definition fix (e.g. a linearization or upsample change) must land twice or the two disagree silently. This is the highest-value *functional* dup in the cluster.
 
-2. **A second cloud/batch orchestration system.** `src/cloud/` carries `vastai.rs` (29 KB), `batch.rs` (35 KB, GCP Batch), `do_droplet.rs` (18 KB, DigitalOcean), `mock_batch.rs`, `quota.rs`, plus `src/bin/vastai_worker.rs` (470 LOC) and `scripts/{vastai_create_workergroup,submit-optimization-job}.sh`. zenmetrics owns the canonical vast.ai sweep infra (`scripts/sweep/*`, `crates/vastai-fleet`). The `vastai.rs` ↔ `vastai-fleet` overlap is real (provision/dispatch/worker-loop); the GCP/DO paths are coefficient-unique.
+2. **A second cloud/batch orchestration system.** `src/cloud/` carries `vastai.rs` (29 KB), `batch.rs` (35 KB, GCP Batch), `do_droplet.rs` (18 KB, DigitalOcean), `mock_batch.rs`, `quota.rs`, plus `src/bin/vastai_worker.rs` (470 LOC) and `scripts/{vastai_create_workergroup,submit-optimization-job}.sh`. zenmetrics owns the canonical vast.ai sweep infra (`scripts/sweep/*`, `crates/zenfleet-vastai`). The `vastai.rs` ↔ `zenfleet-vastai` overlap is real (provision/dispatch/worker-loop); the GCP/DO paths are coefficient-unique.
 
 3. **A third `CodecFamily` enum with a third discriminant order** (see A.7) — genuine drift, not just a copy.
 
@@ -141,7 +141,7 @@ The bake-injection script's hardcoded CSV matches zenpicker's order, but coeffic
 
 ### A.8 coefficient R2 boilerplate (adds to Class 4)
 
-- `src/store/r2.rs:116` — `format!("https://{}.r2.cloudflarestorage.com", self.account_id)` (Rust endpoint constructor #3 in cluster, after zenmetrics `vastai-fleet/.../r2.rs`).
+- `src/store/r2.rs:116` — `format!("https://{}.r2.cloudflarestorage.com", self.account_id)` (Rust endpoint constructor #3 in cluster, after zenmetrics `zenfleet-vastai/.../r2.rs`).
 - `scripts/selector_corpus/upload_to_r2.py:44` — `f"https://{account}.r2.cloudflarestorage.com"` + `env_or_die` creds pattern (Python endpoint constructor; uses `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`, boto3-or-aws-CLI fallback).
 - No `/proc/1/environ` boot-hydration (coefficient's vast.ai worker hydrates differently).
 
@@ -166,7 +166,7 @@ None use a `join_safety`-equivalent. They are CSV/TSV (pandas) rather than parqu
 
 ### A.11 coefficient sweep/orchestration detail (Class 6)
 
-`src/cloud/vastai.rs` (29 KB) implements vast.ai template/workergroup/instance provisioning + dispatch — functionally parallel to `zenmetrics/crates/vastai-fleet`. The two are independent Rust implementations of vast.ai control. GCP Batch (`batch.rs`) + DO droplets (`do_droplet.rs`) are coefficient-unique providers (no zenmetrics equivalent — not a dup, but worth noting the cluster has 3 cloud providers across 2 repos). Onstart hydration differs from zenmetrics' `/proc/1/environ` pattern.
+`src/cloud/vastai.rs` (29 KB) implements vast.ai template/workergroup/instance provisioning + dispatch — functionally parallel to `zenmetrics/crates/zenfleet-vastai`. The two are independent Rust implementations of vast.ai control. GCP Batch (`batch.rs`) + DO droplets (`do_droplet.rs`) are coefficient-unique providers (no zenmetrics equivalent — not a dup, but worth noting the cluster has 3 cloud providers across 2 repos). Onstart hydration differs from zenmetrics' `/proc/1/environ` pattern.
 
 ### A.12 zensally — internal fork family (NOT cross-repo)
 
@@ -190,8 +190,8 @@ Prior audit Phases 1–4 stand. Cluster A adds:
 | A-1 | Promote IQA stats to a workspace `zen-iqa-stats` crate (fold `zensim-train-core::stats` + `panel.rs`); migrate the 11 Rust sites incl. coefficient `ba_ssim2_cross_check.rs:43`. Mirror as `zen_stats.py`; migrate 25 Python sites incl. `spearman_prune.py:39`, `feature_utility.py:170`. CI cross-check ±1e-9. | 6h | HIGH — verdict-gate divergence |
 | A-2 | Add pandas-compatible `safe_per_source_join` to `zen_corpus_join`; migrate coefficient's 3 per-source joins (`optimal_tree.py:49`, `fit_selector_model.py:53`, `feature_utility.py:327`). | 2h | CRITICAL — corruption shape |
 | A-3 | Import `zenpicker::CodecFamily` into coefficient (replace local `constraints.rs:30` enum); reconcile the 3-way order divergence; assert `inject_family_order_and_bake.py` CSV matches the imported enum. | 3h | HIGH — silent family mislabel in bakes |
-| A-4 | Decide GPU-metric ownership: migrate coefficient `src/gpu.rs` (turbo-metrics) to `zen-metrics` (CubeCL) OR document why two backends coexist (NVIDIA-only perf vs cross-platform). Until then, add a numeric-parity test that turbo-metrics ssim2 and CubeCL ssim2 agree on a fixture. | 4h+ (or 1h for parity test) | HIGH — two metric impls drift |
-| A-5 | Extract shared `zen-vastai` from coefficient `src/cloud/vastai.rs` + zenmetrics `vastai-fleet` (or document the split). | 4h | MEDIUM |
+| A-4 | Decide GPU-metric ownership: migrate coefficient `src/gpu.rs` (turbo-metrics) to `zenmetrics` (CubeCL) OR document why two backends coexist (NVIDIA-only perf vs cross-platform). Until then, add a numeric-parity test that turbo-metrics ssim2 and CubeCL ssim2 agree on a fixture. | 4h+ (or 1h for parity test) | HIGH — two metric impls drift |
+| A-5 | Extract shared `zen-vastai` from coefficient `src/cloud/vastai.rs` + zenmetrics `zenfleet-vastai` (or document the split). | 4h | MEDIUM |
 | A-6 | Replace coefficient `src/store/r2.rs` + `upload_to_r2.py` endpoint constructors with the shared `zen-r2` helper from Phase 4. | 1h | MEDIUM |
 
 ### A.15 Anti-patterns (Cluster A additions to prior audit's list)

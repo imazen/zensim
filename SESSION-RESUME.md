@@ -300,7 +300,7 @@ inversion mechanism vs leave documented.
 
 DONE since (don't redo): zensim-b-phone CVVDP bake at
 modern_oled_phone_indoor (≈110 ppd, SROCC 0.9342 phone-CVVDP tracking,
-working dial, wired to DisplayTarget::Phone); zen-metrics `--display-model`
+working dial, wired to DisplayTarget::Phone); zenmetrics `--display-model`
 flag; konjnd-aggregation 2-layer wiring + gradient test; kadid/tid
 data-bug fix (`*_fixed_2026-05-25.parquet`, pending promotion); G11 doc
 physics correction (higher PPD → LESS visible, was backwards).

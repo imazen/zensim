@@ -26,13 +26,13 @@ emits the DIAL panel alongside the rank panel on every run. See
 ## Provenance
 
 - Dial grid: `scripts/v_next/build_qsweep_expanded.py` → per-codec
-  `zen-metrics sweep --metric zensim-gpu --zensim-features-regime with-iw`
+  `zenmetrics sweep --metric zensim-gpu --zensim-features-regime with-iw`
   (encode + 372-feature extract), merged + consolidated. 40 source images;
   ~25% of cells NaN on odd-dim images (GPU path) dropped → 4,817 valid rows
   (jpeg 920, webp 960, avif 1400, jxl 1537). jxl swept at 49 distances
   (0→0.3 step.025, .3→1 step.05, 1→3 step.2, mid, 13→25 step2). q-codecs add
   fractional near-lossless q (96.5/97.5/98.5/99.25/99.5/99.75/99.9) — requires
-  zen-metrics f64 q-grid (zenmetrics commit 759ab501; before it, q-grid was
+  zenmetrics f64 q-grid (zenmetrics commit 759ab501; before it, q-grid was
   u32-only). zenjpeg resolves fractional q distinctly q96→99, zenavif fully,
   zenwebp quantizes to ~integer steps; saturated fractional cells land in the
   panel's `codec-saturated` bucket (not the bake's flat/clamp gate).

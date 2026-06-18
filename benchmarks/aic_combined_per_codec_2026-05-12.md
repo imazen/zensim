@@ -1,7 +1,7 @@
 # AIC-3 + AIC-4 — per-codec |SROCC| comparison across V_X / ssim2 / dssim / butter
 
 > ⚠️ **SUPERSEDED — V0_2 mislabel** (correction landed 2026-05-12 evening).
-> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zen-metrics batch --metric zensim`
+> The "V0_16" SROCC numbers here are actually V0_2 (linear) outputs — `zenmetrics batch --metric zensim`
 > defaults to `ZensimProfile::latest() == PreviewV0_2`, not the V0_4 MLP path.
 >
 > **Canonical replacement docs**:

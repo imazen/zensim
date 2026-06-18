@@ -81,7 +81,7 @@ corrupt raw values and are therefore ALSO corrupt.
 ## Resolution (2026-05-25)
 
 Recomputed real IW-SSIM + SSIMULACRA2 on the correct (ref, dist) pairs via
-`zen-metrics batch --metric {ssim2-gpu,iwssim}` and re-joined positionally.
+`zenmetrics batch --metric {ssim2-gpu,iwssim}` and re-joined positionally.
 
 Row→image mapping recovered + verified (max_err 0):
 - KADID: parquet row order == `dmos.csv` row order (full ref match);

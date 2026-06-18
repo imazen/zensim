@@ -145,7 +145,7 @@ applied. Smoke testing revealed:
 The diagnostic's "Defect 4 — multi-hour rebuild" is the actual fix path.
 The v14 image's cudarc 0.19.4 dependency assumes a CUDA 12.6 driver API
 that cheap-tier libcuda.so doesn't reliably export. Until the v14 image's
-zen-metrics binary is rebuilt against an older cudarc (or with
+zenmetrics binary is rebuilt against an older cudarc (or with
 `cudarc/dynamic-loading`), the v14 image is broken on driver 560.x boxes.
 
 **Working alternative.** The v3 image (`0.6.4-iwssim-fixed-6227c1a`)

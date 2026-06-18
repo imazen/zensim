@@ -20,7 +20,7 @@ full TSV at [`metric_column_census_2026-05-25.tsv`](metric_column_census_2026-05
 | Found the buggy code? | **YES — both modes, committed.** |
 | iwssim leak origin | `scripts/v_next/v0_22_iw_make_mock_val_csvs.sh:56` (`iwssim := human_score` mock, val-only by design; mock qualifier later lost) |
 | ssim2_gpu corruption | **Pure JOIN bug**, NOT a metric bug. `scripts/v_next/build_ex3_mix_corpus.py:add_ssim2_to_372feat_corpus()` L233-242 |
-| Is the ssim2-gpu METRIC sound? | **YES.** `zen-metrics batch` scores correct (ref,dist) pairs; the per-pair sidecar `*_ssim2_local.parquet` is correct (9882/10125 unique values). The Python join collapsed it. |
+| Is the ssim2-gpu METRIC sound? | **YES.** `zenmetrics batch` scores correct (ref,dist) pairs; the per-pair sidecar `*_ssim2_local.parquet` is correct (9882/10125 unique values). The Python join collapsed it. |
 | Scope | **2 root corpora × ~14 derived parquets affected; safesyn + LARGE + all score sidecars CLEAN.** |
 | Shipped bakes safe? | **YES.** V39 (PreviewV0_3) + the whole shipped lineage train on `human_score`, never the corrupt columns. |
 | scores/ sidecars correct? | **YES — they are the correct source the v24 build should have joined against (full 4-key), but didn't.** |
@@ -95,7 +95,7 @@ The corruption is **NOT** in the SSIMULACRA2 metric or the batch CLI. Three
 independent confirmations:
 
 1. **batch CLI scores (ref,dist):**
-   [`zenmetrics/crates/zen-metrics-cli/src/main.rs:619-677`](../../zenmetrics/crates/zen-metrics-cli/src/main.rs)
+   [`zenmetrics/crates/zenmetrics-cli/src/main.rs:619-677`](../../zenmetrics/crates/zenmetrics-cli/src/main.rs)
    reads `ref_path` + `dist_path` columns from the pairs TSV and scores each
    pair; output keyed on `(image_path, codec, q, knob_tuple_json)`. No
    ref-vs-ref pairing anywhere.

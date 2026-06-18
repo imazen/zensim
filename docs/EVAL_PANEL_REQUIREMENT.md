@@ -110,7 +110,7 @@ from R2 if the local copy is absent. To rescore a NEW bake against the stored
 features: just run `scripts/eval_panel.sh <new_bake.bin>` — it pulls the grid and
 forwards the bake over the stored 372-feature vectors (no encode, no extract).
 
-These feature vectors are GPU-extracted (`zen-metrics sweep --metric zensim-gpu
+These feature vectors are GPU-extracted (`zenmetrics sweep --metric zensim-gpu
 --zensim-features-regime with-iw`); bit-equivalent to the CPU 372-feature path
 within metric tolerance, which is irrelevant to rank/monotonicity.
 

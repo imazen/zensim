@@ -17,12 +17,12 @@ never read what files ARE. Confirmed errors it made:
 
 | Shallow claim | Verified reality (ledger + read) |
 |---|---|
-| "zenmetrics orchestration = 2,454 LOC of duplicate shell" | `crates/vastai-fleet` is a **4957-LOC tested Rust binary** (13-test JSON parser, async tokio worker). The 11 bash "forks" are the **DEPRECATED** legacy chain it replaced (`onstart_v2/v3` marked deprecated); migration is in progress, not two live systems. |
+| "zenmetrics orchestration = 2,454 LOC of duplicate shell" | `crates/zenfleet-vastai` is a **4957-LOC tested Rust binary** (13-test JSON parser, async tokio worker). The 11 bash "forks" are the **DEPRECATED** legacy chain it replaced (`onstart_v2/v3` marked deprecated); migration is in progress, not two live systems. |
 | "2 GPU metric backends, no parity test" | **Every** zenmetrics GPU crate has a parity test (ssim2/butter/dssim/zensim/iwssim/cvvdp + a `cvvdp-conformance` gate); coefficient has `gpu_zensim_verify`. The only gap is no **cross-repo** check between CubeCL and cudarse — narrow, not "untested." |
 | "3 broadcast joins in coefficient" | All 3 (`optimal_tree.py:49`, `fit_selector_model.py:53`, `feature_utility.py:327`) are **keyed inner `pd.merge`**, not broadcasts. Lower risk: they just bypass `join_safety`'s cardinality guard. |
 | "55 R2 blocks across codec sweeps" | Codec-side R2 blocks = **24, ALL in jxl-encoder**; zero in zenwebp/zenjpeg/zenavif. The 55 conflated zensim+zenmetrics+jxl. |
 | codec repos "5256 / 605 rs" duplication | Inflated by `.claude/worktrees/` noise + vendored `third_party` (jpegli-cpp). Real hand-written codec sweep glue is small. |
-| trainers lumped as "scripts" | `mlp_train/mod.rs` (9897 LOC, ~30 tests), `train_hybrid.py` (3310 LOC), vastai-fleet — all correctly `lib-api`. |
+| trainers lumped as "scripts" | `mlp_train/mod.rs` (9897 LOC, ~30 tests), `train_hybrid.py` (3310 LOC), zenfleet-vastai — all correctly `lib-api`. |
 
 **Lesson:** grep-and-count cannot distinguish a tested crate from a
 shell pile, deprecated-mid-migration from live-fork, keyed-merge from
@@ -52,15 +52,15 @@ exists or is obvious. Verified by reading both sides.
 | 7 | **IQA stats across repos** — zensim 7, zenanalyze ~9, coefficient + zenmetrics more. **But the stat SETS differ**: full Mohammadi panel (SROCC/PLCC/KROCC/PWRC/ZRMSE/DS-AUC) lives only in zensim `panel.rs`; the rest compute argmin/R²/spearman subsets. | a `zen-iqa-stats` crate + mirrored `zen_stats.py`, CI-cross-checked | highest *reach* but needs the API to cover both the full-panel and the picker-overhead subset use cases |
 | 8 | **target-quality loop** — zenwebp `zensim_target.rs` **explicitly mirrors** zenjpeg `zq.rs` (verified, `:3`). zenavif `auto_tune.rs` is NOT a mirror (single-shot MLP, no loop). | `zentarget` crate over a pluggable `Scorer` trait | 2 of 3, not 3; adjustment mechanism genuinely differs (per-block vs global-q) so only the control skeleton consolidates |
 | 9 | **CodecFamily enum order** — zenpicker canonical; coefficient is **internally inconsistent**: `constraints.rs:30` diverges (Avif/Webp swapped), `oracle_picker.rs:99` matches. | single `CodecFamily` in zenpicker; coefficient depends on it | silent bake-mislabel risk; small fix |
-| 10 | **jxl `zenjxl-tuning-sweep` ≈ zenmetrics sweep infra** — both `onstart.sh` + tuning-runner `lib.rs` name zenmetrics as mirror source | the same bash→vastai-fleet migration zenmetrics is doing | jxl should adopt vastai-fleet, not fork its bash |
-| 11 | **coefficient vastai ↔ zenmetrics vastai-fleet** — two Rust vast.ai orchestrations (coefficient also has GCP+DO that nothing else has) | shared `zen-vastai` crate; coefficient keeps GCP/DO on top | LIB-level, not script-layer |
+| 10 | **jxl `zenjxl-tuning-sweep` ≈ zenmetrics sweep infra** — both `onstart.sh` + tuning-runner `lib.rs` name zenmetrics as mirror source | the same bash→zenfleet-vastai migration zenmetrics is doing | jxl should adopt zenfleet-vastai, not fork its bash |
+| 11 | **coefficient vastai ↔ zenmetrics zenfleet-vastai** — two Rust vast.ai orchestrations (coefficient also has GCP+DO that nothing else has) | shared `zen-vastai` crate; coefficient keeps GCP/DO on top | LIB-level, not script-layer |
 
 ### Tier 3 — already handled or NOT duplication (no action / finish-in-flight)
 
-- **vastai-fleet bash→Rust migration** — already underway; action is "delete the 11 deprecated bash forks once migration completes," not "consolidate."
+- **zenfleet-vastai bash→Rust migration** — already underway; action is "delete the 11 deprecated bash forks once migration completes," not "consolidate."
 - **GPU metric parity** — already parity-tested in both repos. Only add a **cross-repo** CubeCL-vs-cudarse conformance check (1 test), not a rewrite.
 - **coefficient feature extraction** — correctly *calls* `zenanalyze`; no kernel dup. No action.
-- **R2 boilerplate** — real (~24 in jxl + the zensim/zenmetrics copies) but low-risk; a sourced `zen-r2.sh` / finishing vastai-fleet's R2 module absorbs it.
+- **R2 boilerplate** — real (~24 in jxl + the zensim/zenmetrics copies) but low-risk; a sourced `zen-r2.sh` / finishing zenfleet-vastai's R2 module absorbs it.
 - **onstart_*.sh** — MUST be shell (boot-time); shared hydrate/verify boilerplate → `zen-fleet.sh`, low priority.
 
 ## The single highest-priority action (unchanged, now reconfirmed)
@@ -92,6 +92,6 @@ the grep-gate catches the other 35 the moment anyone runs CI.
 | zensim | `dedup_ledgers/zensim_ledger_2026-05-26.md` (`eb987c09`) | 224 | ~155 (12 large by-structure) |
 | zenanalyze/zentrain | `zenanalyze_ledger_2026-05-26.md` (`af5bf047`) | 81 | most; configs by header |
 | zenanalyze/tools (root) | `zenanalyze_root_tools_ledger_2026-05-26.md` (`41b87ae4`) | 27 | all 27 |
-| zenmetrics | `zenmetrics_ledger_2026-05-26.md` (`9749065`) | vastai-fleet 15 mods + cli 19 + sweep ~35 | core in full; GPU kernels skimmed |
+| zenmetrics | `zenmetrics_ledger_2026-05-26.md` (`9749065`) | zenfleet-vastai 15 mods + cli 19 + sweep ~35 | core in full; GPU kernels skimmed |
 | coefficient | `coefficient_ledger_2026-05-26.md` (`b345d38`) | cloud 9 + bins 6 + flagged py | core in full; ~130 RD examples clustered |
 | codec slices | `codec_sweep_ledger_2026-05-26.md` (`cdbb5962`) | jxl/webp/avif/jpeg sweep glue | fleet core + target loops in full; ~50 jxl benches by header |

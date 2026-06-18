@@ -123,7 +123,7 @@ responses:
 5. **Superseded** (V0_2-mislabeled): `aic3_zensim_vs_baselines_2026-05-12.md`,
    `aic4_zensim_vs_paper_metrics_2026-05-12.md`,
    `aic_combined_per_codec_2026-05-12.md`. These docs report
-   `zen-metrics batch --metric zensim` outputs which were actually
+   `zenmetrics batch --metric zensim` outputs which were actually
    V0_2 (linear weights), not V0_16. The number reported as "V0_16"
    in those docs is the V0_2 number. Use the corrected docs above
    for the TRUE V0_16 picture.

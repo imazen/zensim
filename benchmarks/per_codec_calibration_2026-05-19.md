@@ -140,9 +140,9 @@ python3 scripts/v_next/cross_codec_jnd_eval_calibrated.py   # eval
 ```
 
 Fit script: `scripts/v_next/fit_per_codec_calibration.py` (~3 min,
-mostly zensim+ssim2 scoring; ssim2 batched via `zen-metrics batch`).
+mostly zensim+ssim2 scoring; ssim2 batched via `zenmetrics batch`).
 Eval script: `scripts/v_next/cross_codec_jnd_eval_calibrated.py`
-(~6 min, mostly butteraugli pairwise via `zen-metrics score`).
+(~6 min, mostly butteraugli pairwise via `zenmetrics score`).
 
 Fit data sidecar: `/mnt/v/output/zensim/per_codec_calibration_2026-05-19/fits.json`.
 Eval raw TSV: `/mnt/v/output/zensim/per_codec_calibration_2026-05-19/eval/raw_2026-05-19.tsv`.

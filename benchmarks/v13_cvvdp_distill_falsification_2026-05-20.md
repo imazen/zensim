@@ -37,7 +37,7 @@ cvvdp coverage audit on `canonical-2026-05-21/train/*.parquet`:
 | cid22_train | 17,611 | **0 %** |
 | pipal | 21,800 | **0 %** |
 
-The 3 subjective-IQA sets (konjnd-dense, cid22_train, pipal) carry `human_score` + `pjnd_target` (KonJND) or human MOS (CID22/PIPAL) but were never scored with cvvdp. The brief's fallback options were: (a) backfill via `zen-metrics batch --metric cvvdp` on the underlying images, or (b) drop the groups. Backfilling 60k images would blow the 3-hour budget; we dropped. Net training rows with cvvdp coverage: **282,511** across 4 groups.
+The 3 subjective-IQA sets (konjnd-dense, cid22_train, pipal) carry `human_score` + `pjnd_target` (KonJND) or human MOS (CID22/PIPAL) but were never scored with cvvdp. The brief's fallback options were: (a) backfill via `zenmetrics batch --metric cvvdp` on the underlying images, or (b) drop the groups. Backfilling 60k images would blow the 3-hour budget; we dropped. Net training rows with cvvdp coverage: **282,511** across 4 groups.
 
 ### Recipe deviation 3: target column + scale per trainer docs
 

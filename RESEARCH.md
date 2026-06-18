@@ -258,7 +258,7 @@ never the published crates.io versions per CLAUDE.md):
 |---|---|
 | **zenanalyze/zenpredict** | ZNPR v3 model parser + Predictor + FeatureTransform + masked-argmin picker. Used by `zensim::mlp` for MLP scoring. |
 | **zenanalyze/zenpredict-bake** | Bake serializer (`bake()` for v3) + builder API + JSON CLI. Used by the trainer's bake step. NEVER call `zenpredict::bake::bake_v2` from zensim. |
-| **zenmetrics** | GPU metric crates (butteraugli-gpu / ssim2-gpu / dssim-gpu / zensim-gpu via CubeCL) + `zen-metrics` CLI + vast.ai sweep infra. Source of the v15 chunk-claim pattern adapted in `scripts/v_next/vastai_iwssim/`. |
+| **zenmetrics** | GPU metric crates (butteraugli-gpu / ssim2-gpu / dssim-gpu / zensim-gpu via CubeCL) + `zenmetrics` CLI + vast.ai sweep infra. Source of the v15 chunk-claim pattern adapted in `scripts/v_next/vastai_iwssim/`. |
 | **zenanalyze (parent)** | Feature extractor (`zenanalyze::analyze_features_rgb8`). Shipped at crate version 0.1.x **forever** — never 0.2.x. |
 
 Don't modify sibling repos from a zensim session. Open issues

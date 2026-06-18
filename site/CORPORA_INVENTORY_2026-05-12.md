@@ -126,7 +126,7 @@ human_mos`
 - **Codec-sweep parquets** (zenjpeg / zenavif / zenjxl / zenwebp /
   zenpng v12-v15) carrying `feat_0..feat_299` + sweep-time `score_*`
   columns: hosted on R2 once user enables public-read URL.
-- **CID22 metric backfill** in flight (zen-metrics batch chain;
+- **CID22 metric backfill** in flight (zenmetrics batch chain;
   /tmp/cid22_metrics/) — adds score_dssim / score_ssim2_gpu /
   score_butter_max / score_butter_p3 / score_zensim columns to
   cid22.parquet. ~50min total wall.

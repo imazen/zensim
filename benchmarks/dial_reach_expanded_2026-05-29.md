@@ -2,7 +2,7 @@
 
 Follow-up to `dial_dynamic_range_reach_2026-05-29.md`. Per request, densified the
 q-sweep where dial precision matters most. Built by
-`scripts/v_next/build_qsweep_expanded.py` via `zen-metrics sweep --metric
+`scripts/v_next/build_qsweep_expanded.py` via `zenmetrics sweep --metric
 zensim-gpu --zensim-features-regime with-iw --feature-output` (encode + 372-feature
 extract in one shot), then `qsweep_eval`.
 

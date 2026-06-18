@@ -26,7 +26,7 @@ Spec: `docs/structural_corruption_corpus_spec_2026-05-27.md`.
 
 ## Cross-metric gate pass rates
 
-All 672 corruption triples scored with `zen-metrics compare` (GPU-backed):
+All 672 corruption triples scored with `zenmetrics compare` (GPU-backed):
 
 | metric | direction | pass@q20 | pass@q10 |
 |---|---|--:|--:|
@@ -161,7 +161,7 @@ If the user wants a SINGLE zensim bake for everything, the path is:
   corruption-detection accuracy.
 - BLOCKER: the `extract_features_372col` binary in zensim-bench has
   drifted from the zensim crate API (broken build). Would need ~30 min
-  to repair or to bypass by using zen-metrics zensim's embedded feature
+  to repair or to bypass by using zenmetrics zensim's embedded feature
   extractor.
 
 ## What we shipped today on the corruption-gate axis

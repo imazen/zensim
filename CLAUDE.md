@@ -1181,18 +1181,18 @@ applied to the final layer; emit via the JSON pipeline through
 
 ### Per-corpus baseline metric extraction
 **Missing v3 equivalent.** Older `score_unified_with_bake.py` was
-v2-only (DEPRECATED, refuses). Use `zen-metrics batch` (from
-`/home/lilith/work/zen/zenmetrics/target/release/zen-metrics`) for
+v2-only (DEPRECATED, refuses). Use `zenmetrics batch` (from
+`/home/lilith/work/zen/zenmetrics/target/release/zenmetrics`) for
 metric scoring on (ref, dist) pairs, then merge into per-corpus
 parquet sidecars analogous to T11.7 safesyn CVVDP backfill.
 
 ### CVVDP scoring
-**`zen-metrics`** at
-`/home/lilith/work/zen/zenmetrics/target/release/zen-metrics`.
-Build with `cargo build --release --bin zen-metrics --features 'gpu-cvvdp,gpu-cuda' -p zen-metrics-cli`.
+**`zenmetrics`** at
+`/home/lilith/work/zen/zenmetrics/target/release/zenmetrics`.
+Build with `cargo build --release --bin zenmetrics --features 'gpu-cvvdp,gpu-cuda' -p zenmetrics-cli`.
 
 ```sh
-zen-metrics batch --metric cvvdp --gpu-runtime cuda \
+zenmetrics batch --metric cvvdp --gpu-runtime cuda \
     --pairs <pairs.tsv> --output <scores.tsv>
 ```
 Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
@@ -1202,7 +1202,7 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
 ### Migration tools
 - **`zenanalyze/zentrain/tools/migrate_znpr_v2_to_v3.py`** — converts
   an old v2 bake to v3. Use this exactly once per archived bake; the
-  trainer + bake_verdict + zen-metrics all produce v3 natively now.
+  trainer + bake_verdict + zenmetrics all produce v3 natively now.
 
 ### Deprecated / DO NOT USE
 - `zensim-bench/examples/quant_compare.rs` — drops metadata, catastrophic SROCC loss.
