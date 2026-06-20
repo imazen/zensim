@@ -1026,14 +1026,17 @@ pub struct Zensim {
 
 impl Zensim {
     /// Create a new `Zensim` with the given profile. Parallel by default.
-    /// No `max_pixels` cap is set by default — callers feeding
-    /// untrusted dimensions should explicitly call
-    /// [`Zensim::with_max_pixels`].
+    ///
+    /// A default `max_pixels` cap of **120 million** (≈ 120 MP — large enough
+    /// for common ~108 MP camera photos) is applied so that forwarding
+    /// untrusted dimensions can't drive an unbounded allocation (memory is
+    /// ~14×w×h×4 B). Call [`Zensim::with_max_pixels`] to tighten it, or
+    /// `with_max_pixels(usize::MAX)` to opt out for trusted input.
     pub fn new(profile: ZensimProfile) -> Self {
         Self {
             profile,
             parallel: true,
-            max_pixels: None,
+            max_pixels: Some(120_000_000),
         }
     }
 
