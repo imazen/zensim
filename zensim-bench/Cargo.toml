@@ -23,6 +23,17 @@ training = ["zensim/training"]
 # their native crates.
 extract-omni = ["training", "dep:parquet", "dep:arrow", "dep:zenavif", "dep:zenjxl", "dep:zenpixels"]
 
+# `verify_bitstream_decode` example: re-decode the stored compressed bitstreams
+# through the unified `zencodec` API and compare to the cached `qNN.png`, to
+# prove the ~403 GiB PNG decode-cache is regenerable from the ~38 GiB of
+# bitstreams. `verify-decode` is JPEG-only (lightest — zenjpeg + zencodec).
+# Add per-codec features for the heavier graphs (rav1d / jxl / webp).
+verify-decode = ["dep:zencodec", "dep:zenpixels", "dep:zenjpeg"]
+verify-avif = ["verify-decode", "dep:zenavif", "zenavif/zencodec"]
+verify-jxl = ["verify-decode", "dep:zenjxl", "zenjxl/zencodec"]
+verify-webp = ["verify-decode", "dep:zenwebp"]
+verify-all = ["verify-avif", "verify-jxl", "verify-webp"]
+
 [build-dependencies]
 cc = "1"
 
@@ -70,6 +81,13 @@ zenavif = { path = "../../zenavif",          optional = true, default-features =
 zenjxl  = { path = "../../zenjxl",           optional = true, default-features = false, features = ["decode"] }
 zenpixels = { version = "0.2.10", default-features = false, optional = true }
 
+# `verify_bitstream_decode` decode path (zencodec unified API).
+# zenjpeg is also patched in [patch.crates-io] for transitive consumers; this
+# direct optional dep adds the zencodec + decoder features for the JPEG path.
+zencodec = { version = "0.1.24", optional = true }
+zenjpeg = { path = "../../zenjpeg/zenjpeg", optional = true, features = ["zencodec", "decoder"] }
+zenwebp = { path = "../../zenwebp", package = "zenwebp", optional = true, default-features = false, features = ["zencodec"] }
+
 [[bench]]
 name = "bench_compare"
 harness = false
@@ -103,6 +121,11 @@ required-features = ["training"]
 [[example]]
 name = "extract_features_372col_omni"
 required-features = ["extract-omni"]
+
+# `verify_bitstream_decode` needs at least the JPEG decode path (verify-decode).
+[[example]]
+name = "verify_bitstream_decode"
+required-features = ["verify-decode"]
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
