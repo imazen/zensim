@@ -1950,8 +1950,28 @@ overlap). The cleanup was REVERTED — see
   `659982b3ce8d26184eca835a85f8d66c8550d945d659559c499b5670cd5d8589`).
 - R2 mirror (2026-05-22):
   `s3://zentrain/synthetic-v2/training_safe_synthetic.csv`.
-  Source distortion variants under `/mnt/v/input/zensim/images/` mirrored
-  to `s3://codec-corpus/synthetic-v2/<ref>/<codec_dir>/q<X>.png`.
+  Encoded distortion **bitstreams** under `/mnt/v/input/zensim/images/`
+  (`<ref>/<codec_dir>/q<X>.{jpg,webp,avif,jxl}`) are mirrored to
+  `s3://codec-corpus/synthetic-v2/<ref>/<codec_dir>/q<X>.<ext>` —
+  **bitstreams only (~38 GiB, 729,703 objects, R2-verified 2026-06-22)**.
+  The earlier claim of a `q<X>.png` mirror was WRONG: R2 never held the
+  decoded PNGs.
+- **⚠ 2026-06-22: the `q<X>.png` decode-cache was DELETED** (~402 GiB;
+  `images/` went 440.80 GiB → bitstream-only ~38 GiB; freed because both
+  `/mnt/v` and `/` were ~94-99% full). Each `q<X>.png` was a lossless
+  decode of the adjacent `q<X>.<bitstream>` that `extract_features_372col`
+  consumed via the CSV `decoded_path`. **So the CSV `decoded_path` PNGs no
+  longer exist — re-extraction must DECODE the bitstream first** (unified
+  zencodec API; reference: `zensim-bench/examples/verify_bitstream_decode.rs`,
+  `--features verify-decode[,verify-avif,verify-jxl,verify-webp]`). The
+  canonical feature parquets are unaffected (frozen + mirrored R2/Tower);
+  only the regenerable cache is gone. Decoder-drift caveat measured
+  2026-06-22: zencodec re-decode is **byte-exact** for the May-gen
+  `zenjpeg-420-e1` run, but March-gen JPEG runs drift (zenjpeg decoder
+  evolved: max_abs ≤ 5; XYB ≤ 42) and JXL differs (zencodec uses
+  `zenjxl-decoder`; the generator used `jxl-oxide`) — so re-decoded pixels
+  will NOT byte-match the canonical parquets for those codecs. If exactness
+  matters, re-extract ALL corpora through one decoder rather than mixing.
 - Tower mirror:
   `/mnt/tower/output/zensim-archive-2026-05-20/synthetic-v2-{tables,images}/`.
 - Created from `training_concordant.csv` minus all 49 CID22 validation
@@ -2081,10 +2101,12 @@ sampler bias).
 - **V0_7 training is unblocked**: `bash benchmarks/v07_postfill_run.sh
   /mnt/v/output/zensim/synthetic-v2/training_safe_synthetic_extended.csv`
   (visible on the v04-mlp jj branch).
-- The 21k missing pairs are stored as encoded files on disk
-  (`/mnt/v/input/zensim/images/<src>/zenjpeg-420-e1/qXX.png`; mirrored
-  2026-05-22 to `s3://codec-corpus/synthetic-v2/<src>/zenjpeg-420-e1/qXX.png`)
-  but weren't scored before the generator died. Re-running the generator
+- The 21k missing pairs are stored as encoded **bitstreams** on disk
+  (`/mnt/v/input/zensim/images/<src>/zenjpeg-420-e1/qXX.jpg`; mirrored
+  2026-05-22 to `s3://codec-corpus/synthetic-v2/<src>/zenjpeg-420-e1/qXX.jpg`)
+  but weren't scored before the generator died. (The `qXX.png` decode-cache
+  was deleted 2026-06-22 — see "Safe synthetic dataset"; the `.jpg`
+  bitstreams remain on disk + R2.) Re-running the generator
   with the same args picks them up and re-emits a fresh CSV at
   `/mnt/v/output/zensim/training.csv`. Best done after a reboot
   (CUDA context is clean) or on vast.ai (next section).
