@@ -1,4 +1,6 @@
-# zensim [![CI](https://img.shields.io/github/actions/workflow/status/imazen/zensim/ci.yml?style=flat-square&label=CI)](https://github.com/imazen/zensim/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/zensim?style=flat-square)](https://crates.io/crates/zensim) [![lib.rs](https://img.shields.io/crates/v/zensim?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/zensim) [![docs.rs](https://img.shields.io/docsrs/zensim?style=flat-square)](https://docs.rs/zensim) [![MSRV](https://img.shields.io/badge/MSRV-1.93-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/zensim?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# zensim
 
 Perceptual image similarity in 22 ms at 1080p. 18x faster than C++ SSIMULACRA2 at 4K.
 
@@ -6,154 +8,11 @@ Built on the same psychovisual foundations as SSIMULACRA2 and butteraugli — mu
 
 **Interactive chart exploration**: <https://imazen.github.io/zensim/> — scatter zensim / fast-ssim2 / butteraugli against human MOS across CID22 / KADID / TID / AIC corpora, filter by codec + version, with per-band SROCC tables and step-5 (20-bin) breakdowns.
 
-<!-- crates.io:skip-start -->
-## Speed
-
-AMD Ryzen 9 7950X 16C/32T (WSL2), synthetic gradient images, no I/O, pre-allocated buffers. zensim and ssimulacra2-rs use rayon (all cores); C++ libjxl, fast-ssim2, and butteraugli-rs are single-threaded. Enabling rayon for fast-ssim2 and butteraugli-rs made them slower at small sizes due to thread-pool overhead, so they're benchmarked single-threaded. Median of 100 samples via criterion.
-
-### SSIMULACRA2 implementations
-
-| Resolution | zensim | zensim (1 thread) | C++ libjxl (FFI) | fast-ssim2 | ssimulacra2-rs |
-|------------|-------:|------------------:|-----------------:|-----------:|---------------:|
-| 1280x720 | **14 ms** | 39 ms | 249 ms | 111 ms | 545 ms |
-| 1920x1080 | **22 ms** | 89 ms | 377 ms | 350 ms | 1,056 ms |
-| 3840x2160 | **91 ms** | 366 ms | 1,674 ms | 1,364 ms | 3,980 ms |
-
-### Butteraugli implementations (single-threaded)
-
-| Resolution | C++ libjxl (FFI) | butteraugli-rs |
-|------------|----------------:|---------------:|
-| 1280x720 | 269 ms | 83 ms |
-| 1920x1080 | 647 ms | 154 ms |
-| 3840x2160 | 2,688 ms | 906 ms |
-
-Single-threaded zensim is 4x faster than C++ libjxl SSIMULACRA2. Multi-threaded at 4K: 18x.
-
-Reproduce: `cargo bench -p zensim-bench --bench bench_compare` (C++ libjxl FFI requires a local libjxl build; set `LIBJXL_DIR` or let the build script auto-clone it)
-<!-- crates.io:skip-end -->
 
 ## Correlation with human perception
 
 Full Mohammadi 2025 stat panel against three independent human-rated image quality databases that v0.3 did NOT train on. KADID-10k and TID2013 are excluded because v0.3's recovery-phase-4 retrain included them as training groups — they're no longer fair holdouts. On the **CID22** codec-compression holdout, profile `A` reaches SROCC ≈ 0.86 (fast-ssim2: 0.89) while spending the full 0–100 dial with JND landing at score 60 — the property that matters for codec quality targeting.
 
-<!-- crates.io:skip-start -->
-Higher SROCC + PLCC + KROCC + PWRC is better; lower OR + Z-RMSE is better.
-
-### CID22 — codec compression artifacts (n=4,292, sacred holdout)
-
-| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
-|---|---:|---:|---:|---:|---:|---:|
-| **zensim v0.3** | 0.860 | 0.853 | 0.673 | 0.045 | 0.909 | 0.523 |
-| fast-ssim2 (SSIMULACRA2) | **0.890** | **0.888** | **0.706** | 0.042 | **0.935** | **0.460** |
-| cvvdp (ColorVideoVDP) | 0.821 | 0.825 | 0.624 | 0.042 | 0.884 | 0.565 |
-| iwssim (Wang & Li 2011) | 0.784 | 0.793 | 0.594 | 0.052 | 0.853 | 0.610 |
-
-### AIC-3 CTC — JPEG-AIC compression at JND levels (n=600)
-
-| Metric | SROCC | PLCC | KROCC | OR | PWRC | Z-RMSE |
-|---|---:|---:|---:|---:|---:|---:|
-| zensim v0.3 | 0.776 | 0.788 | 0.607 | 0.042 | 0.854 | 0.616 |
-| fast-ssim2 | **0.797** | **0.809** | **0.629** | 0.057 | **0.872** | 0.588 |
-| cvvdp | 0.792 | 0.803 | 0.626 | 0.042 | 0.866 | **0.595** |
-| iwssim | 0.774 | 0.791 | 0.606 | 0.045 | 0.854 | 0.612 |
-
-### AIC-4 sample — JPEG-AIC reconstructed JND, 6 codecs (n=300)
-
-| Metric | SROCC |
-|---|---:|
-| zensim v0.3 | 0.928 |
-| fast-ssim2 | baselines pending |
-| cvvdp | baselines pending |
-| iwssim | baselines pending |
-
-The AIC-4 baseline scores for ssim2/cvvdp/iwssim haven't been folded
-into our standard panel yet — the raw per-pair metric scores live at
-`/mnt/v/backups/home/work/JPEG-AIC-4-datasets/JPEG-AIC_metric_scores.csv`
-but the SROCC computation against the reconstructed-JND target isn't
-in the panel doc. v0.3's AIC-4 SROCC of **0.928** is from
-`bake_verdict` on the 300-pair val parquet at
-`canonical-2026-05-18/val/aic4.parquet`.
-
-### CID22 per-band SROCC (10 width-10 bins on the human-MOS scale)
-
-Per `CLAUDE.md` "10-band reporting rule": the primary release gate is the per-band picture, not the aggregate. Below-PJND bands (B3–B5) are the hard ones because the human-MOS scores in those bands are noisy and bunched. Bands B0–B2 have ≤ 1 sample on CID22 and are omitted.
-
-| Band | range | n | **v0.3** | ssim2 | cvvdp | iwssim |
-|---|---|--:|---:|---:|---:|---:|
-| B3 | [0.30, 0.40) | 57 | 0.051 | **0.134** | 0.148 | 0.096 |
-| B4 | [0.40, 0.50) | 266 | 0.230 | 0.289 | 0.260 | 0.210 |
-| B5 | [0.50, 0.60) | 615 | 0.273 | **0.389** | 0.290 | 0.193 |
-| B6 | [0.60, 0.70) | 836 | 0.287 | **0.417** | 0.336 | 0.210 |
-| B7 | [0.70, 0.80) | 1092 | **0.408** | 0.397 | 0.310 | 0.283 |
-| B8 | [0.80, 0.90) | 1382 | 0.500 | **0.501** | 0.319 | 0.413 |
-| B9 | [0.90, 1.00] | 43 | **0.220** | 0.112 | 0.081 | 0.134 |
-
-Per-band read: ssim2 wins B5–B6 (where most CID22 mass sits); v0.3 wins B7 (good-quality region) and B9 (near-lossless tail). v0.3 essentially matches ssim2 on B8 (the dominant band). cvvdp + iwssim are weakest across every band — they're stronger as aggregate metrics than per-band rank predictors here.
-
-CID22 per-band Z-RMSE (lower better):
-
-| Band | n | **v0.3** | ssim2 | cvvdp | iwssim |
-|---|--:|--:|--:|--:|--:|
-| B3 | 57 | 0.950 | **0.947** | 0.990 | 0.989 |
-| B4 | 266 | 0.959 | **0.947** | 0.962 | 0.965 |
-| B5 | 615 | 0.959 | **0.921** | 0.954 | 0.971 |
-| B6 | 836 | 0.957 | **0.908** | 0.941 | 0.972 |
-| B7 | 1092 | **0.912** | 0.907 | 0.947 | 0.954 |
-| B8 | 1382 | 0.866 | 0.866 | 0.947 | 0.909 |
-| B9 | 43 | **0.937** | 0.940 | 0.952 | 0.854 |
-
-ssim2 has the tightest Z-RMSE in the mid bands (B4–B6) — this is the ssim2-target training-bias caveat from CLAUDE.md materializing. v0.3 and ssim2 are tied on B7–B8. v0.3 wins the noisy tails (B9 near-lossless).
-
-### Per-corpus headline
-
-- **CID22**: ssim2 wins SROCC by 0.03; v0.3 is second. Note that CLAUDE.md's "SROCC-only verdicts BANNED" caveat applies — older trainers used ssim2-derived targets, which biases SROCC measurements toward ssim2-shaped surfaces. v0.3's Z-RMSE (0.523) trails ssim2's 0.460.
-- **AIC-3**: 4-way tie within 0.02 SROCC; ssim2 nominally best.
-- **AIC-4**: v0.3 SROCC = 0.928. cvvdp / ssim2 / iwssim baselines on AIC-4 haven't been computed into our panel doc yet (raw scores at `JPEG-AIC_metric_scores.csv`; SROCC against reconstructed-JND target is a TODO).
-- **None of the four hits all three holdouts** — v0.3 trades 0.03 CID22 SROCC for full 0-100 dial coverage + JND@60-bit-exact + per-source PJND tracking (the dial properties that matter for codec targeting). See [`docs/CODEC_TARGET_METRIC.md`](docs/CODEC_TARGET_METRIC.md).
-
-v0.2 (default-on linear profile through zensim 0.2.x): 228 linear weights × basic+peak features, trained on 218k concordance-filtered synthetic pairs via Nelder-Mead.
-
-`A` (the MLP profile shipping in zensim 0.3.x and the canonical [`codec_target()`](docs/CODEC_TARGET_METRIC.md)): 372-input MLP (372 → 128 → 64 + per-sample-α head + tanh-output pin) with a monotone 7-knot PCHIP dial spline. 27 KB packed bake (`v47-strict-QAT`, f16 + zerobias, file `zensim/weights/v47_strict_qat_native_2026-05-27.bin`). Masked-monotone by construction (W1 ≥ 0 on the 300 sign-safe features, rank_w ≤ 0, α ≡ 1): 0 inversions, 0 above-identity, identity = 97.69. Trained on 5 groups (safesyn 196k + cid22_train 17.6k + kadid 10.1k + tid 3k + konjnd_dense 20.2k) via one QAT-native pass. Held-out SROCC: CID22 0.866, KADID 0.793, TID 0.793, KonJND 0.419, AIC-3 0.768, AIC-4 0.885. Methodology: [`benchmarks/v0_qat_native_methodology_2026-05-27.md`](benchmarks/v0_qat_native_methodology_2026-05-27.md).
-
-### v0.2 → v0.3 rough score equivalence
-
-Both profiles span 0..100 but use the dial differently. v0.2's linear formula `100 − 18·|d|^0.7` floor-clamps below moderate distortion (38k of 68k cross-codec pairs land at v0.2 ≤ 5, while v0.3 spreads them across 28..50). v0.3 uses the full 0-100 dial with JND landing at exactly score 60. Rough lookup on 68,788 matched cross-codec pairs (Spearman v0.2 ↔ v0.3 = 0.88):
-
-| v0.2 target | v0.3 median (p25 → p75) | rough quality region |
-|--:|--:|---|
-| 10 | 52.6 (47.8 → 55.6) | low-q, dial floor |
-| 20 | 55.2 (52.4 → 58.2) | sub-PJND |
-| 30 | 58.9 (55.0 → 60.5) | approaching JND |
-| 40 | 61.0 (58.9 → 63.6) | just past JND |
-| 50 | 65.8 (64.3 → 66.9) | mid-PJND |
-| 60 | 68.8 (66.4 → 72.5) | comfortable quality |
-| 70 | 78.4 (76.5 → 80.3) | good compression |
-| 80 | 90.0 (87.6 → 91.1) | near-lossless |
-| 90 | 96.6 (95.1 → 97.3) | visually lossless |
-| 100 | 100 (exact, byte-identical short-circuit) | lossless |
-
-The mapping is non-linear because v0.2's clamp at low quality compresses the 0-30 range into a single floor; v0.3 differentiates that region. For users targeting "score 70" in v0.2 code, the v0.3 equivalent is roughly **score 78**.
-
-<details>
-<summary>Reproduce these numbers</summary>
-
-Download the datasets ([instructions below](#downloading-evaluation-datasets)), then:
-
-```bash
-# CID22 — expects CID22_validation_set.csv + original/ and compressed/ dirs
-cargo run --release -p zensim-validate -- --dataset ./datasets/cid22 --format cid22
-
-# TID2013 — expects mos_with_names.txt + reference_images/ and distorted_images/
-cargo run --release -p zensim-validate -- --dataset ./datasets/tid2013 --format tid2013
-
-# KADID-10k — expects dmos.csv + images/
-cargo run --release -p zensim-validate -- --dataset ./datasets/kadid10k --format kadid10k
-```
-
-Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SROCC reported above. The `SROCC (Spearman)` line uses mapped scores, which are lower for KADID and TID due to score clamping at 0 (35% of KADID scores clamp).
-
-</details>
-<!-- crates.io:skip-end -->
 
 ## Quick start
 
@@ -361,29 +220,6 @@ The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, an
 | `custom-profiles` | no | `ZensimProfile::Custom` + `ProfileParams::builder()` for externally-defined bakes |
 | `streaming_strips_oom` | no | Un-ignores the ~500 MB 80 MP streaming OOM-relief integration test |
 
-<!-- crates.io:skip-start -->
-## Downloading evaluation datasets
-
-To reproduce the SROCC numbers above, you need the three human-rated datasets. All are freely available for research use.
-
-**TID2013** — [ponomarenko.info/tid2013.htm](https://www.ponomarenko.info/tid2013.htm)
-
-25 reference images, 3,000 distorted (24 distortion types × 5 levels). Download the RAR archive, extract so you have `mos_with_names.txt`, `reference_images/`, and `distorted_images/` in the same directory.
-
-*N. Ponomarenko et al., "Image database TID2013: Peculiarities, results and perspectives," Signal Processing: Image Communication, 2015. [DOI: 10.1016/j.image.2014.10.009](https://doi.org/10.1016/j.image.2014.10.009)*
-
-**KADID-10k** — [database.mmsp-kn.de/kadid-10k-database.html](https://database.mmsp-kn.de/kadid-10k-database.html)
-
-81 reference images, 10,125 distorted (25 distortion types × 5 levels). Download from [OSF](https://osf.io/xkqjh/). Expected structure: `dmos.csv` and `images/` directory in the same parent.
-
-*H. Lin, V. Hosu, D. Saupe, "KADID-10k: A Large-scale Artificially Distorted IQA Database," QoMEX 2019. [DOI: 10.1109/QoMEX.2019.8743252](https://doi.org/10.1109/QoMEX.2019.8743252)*
-
-**CID22** — [cloudinary.com/labs/cid22](https://cloudinary.com/labs/cid22)
-
-49 validation reference images, 4,292 distorted (6 codecs, medium-to-lossless quality). Download the validation set. Expected structure: `CID22_validation_set.csv`, `original/`, and `compressed/` in the same directory. CC BY-SA 4.0.
-
-*Jon Sneyers et al., "CID22: A Large-Scale Subjective Quality Assessment for Lossy Image Compression," 2024.*
-<!-- crates.io:skip-end -->
 
 ## Workspace
 

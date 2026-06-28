@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Documentation — README overhaul + split crates.io README
+
+- Reworked the repo-root `README.md` to the zen convention: full badge row
+  (CI `&label=CI`, crates.io, lib.rs, docs.rs, MSRV 1.93, license→`#license`),
+  a `## Quick start` `[dependencies]` block, the 120 MP default `max_pixels`
+  cap documented in the error section (#49), absolute links in crates.io-kept
+  sections, the heavy Speed / human-correlation / dataset-download blocks
+  wrapped in `crates.io:skip` markers, and the canonical rendered crosslink
+  footer placed last. Added a generated `README.crates.md` (badge-free,
+  skip-blocks stripped) and pointed `zensim`'s `readme` field at it.
+
 ### Documentation — state the `RgbSlice` input contract in the README
 
 - README now states the input pixel-format contract that was previously
