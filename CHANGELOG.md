@@ -116,6 +116,20 @@
   `(image_id, codec, q, pred)` over any dial grid for external joins against
   reference-metric sidecars (HQ-zone / zone-consistency instruments).
 
+### Added — one-shot `score(PixelSlice, PixelSlice)` convenience function
+
+- `zensim::score(reference, distorted) -> Result<f64, ZensimError>` (requires the
+  `zenpixels` feature) scores two images in a single call using the default
+  `ZensimProfile::A` profile. Each image is a self-describing
+  `zenpixels::PixelSlice` — its width, height, row stride, and pixel descriptor
+  ride **with** the pixels, so there are no separate `width` / `height`
+  arguments to pass and the two images cannot be handed mismatched dimensions or
+  the wrong format. Thin wrapper over `ZenpixelsSource::try_from_slice` +
+  `Zensim::new` + `Zensim::compute`; byte-identical inputs return `100.0`.
+  Purely additive (semver-compatible) — the `Zensim` builder stays the power API
+  for pinned profiles, batch comparison, and `RgbSlice` / strided / HDR input.
+  The README Quick start now leads with it.
+
 ### Documentation — README overhaul + split crates.io README
 
 - Reworked the repo-root `README.md` to the zen convention: full badge row
