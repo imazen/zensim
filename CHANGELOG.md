@@ -2,18 +2,6 @@
 
 ## [Unreleased]
 
-### Added — one-shot `score_rgba8` convenience function
-
-- `zensim::score_rgba8(reference, distorted, width, height) -> Result<f64, ZensimError>`
-  scores two tightly-packed 8-bit sRGB RGBA images in a single call using the
-  default `ZensimProfile::A` profile — the zero-config entry point that chains
-  directly with any decoder's `decode_rgba8` output. Purely additive (no
-  signature changes; semver-compatible) — the `Zensim` builder stays the power
-  API for pinned profiles, batch comparison, and RGB / strided / wide-gamut /
-  HDR input. Validates slice length with overflow-safe checked multiplication
-  (`InvalidDataLength` on mismatch); byte-identical inputs return `100.0`. The
-  README Quick start now leads with it.
-
 ### Documentation — README overhaul + split crates.io README
 
 - Reworked the repo-root `README.md` to the zen convention: full badge row

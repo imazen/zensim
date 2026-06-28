@@ -162,24 +162,6 @@ Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SR
 zensim = "0.3"
 ```
 
-One call gets you a perceptual similarity score for two same-size RGBA8 images — sRGB bytes, tightly packed, the kind a PNG/JPEG/WebP decoder produces:
-
-```rust
-// Two 64×64 RGBA8 images (tightly packed, sRGB-encoded bytes). `distorted`
-// is a copy of `reference`, so the score lands at the top of the 0–100 scale.
-let (width, height) = (64u32, 64u32);
-let reference: Vec<u8> = (0..width as usize * height as usize * 4)
-    .map(|i| (i % 256) as u8)
-    .collect();
-let distorted = reference.clone();
-
-// One call → the perceptual similarity score (100 = identical, higher = closer).
-let score = zensim::score_rgba8(&reference, &distorted, width, height)?;
-assert!(score > 90.0);
-```
-
-`score_rgba8` uses the default profile (`ZensimProfile::A`). For pinned-profile reproducibility, batch comparison (one reference vs many distorted), RGB without alpha, strided / padded rows, or wide-gamut / HDR input, drop down to the `Zensim` builder — the full power API:
-
 ```rust
 use zensim::{Zensim, ZensimProfile, RgbSlice};
 
