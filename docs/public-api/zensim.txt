@@ -6,14 +6,14 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 244 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 31 lines (31 hidden + 0 excluded-feature)
+# files: zensim.txt 245 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 31 lines (31 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 4
 #   pub types (struct/enum/trait/alias)        26
 #   pub consts/statics                          8
-#   free functions                             16
+#   free functions                             17
 #   inherent methods                          119
 #   struct fields                              19
 #   enum variants                              41
@@ -21,12 +21,12 @@
 #   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                          143
+#   (root)                          144
 #   mapping                          12
 #   profile                          25
 #   source                           53
 
-## items (223 lines)
+## items (224 lines)
 
 pub mod zensim
 pub mod mapping
@@ -250,6 +250,7 @@ pub fn ImageSource::width(&self) -> usize
 pub fn dissimilarity_to_score(f64) -> f64
 pub fn score_features_with_profile(profile::ZensimProfile, &[f64], u32, u32) -> core::result::Result<f64, ZensimError>
 pub fn score_features_with_profile_and_codec(profile::ZensimProfile, &[f64], u32, u32, core::option::Option<&str>) -> core::result::Result<f64, ZensimError>
+pub fn score_rgba8(&[u8], &[u8], u32, u32) -> core::result::Result<f64, ZensimError>
 pub fn score_to_dissimilarity(f64) -> f64
 
 ## trait impls (20 types)

@@ -266,6 +266,80 @@ pub use source::{
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
 
+/// Compute the perceptual similarity score for two tightly-packed 8-bit
+/// sRGB **RGBA** images in a single call, using the default
+/// [`ZensimProfile::A`] profile.
+///
+/// This is the one-call convenience entry point. `reference` and `distorted`
+/// are interpreted as `width × height` RGBA8 pixels — 4 bytes per pixel
+/// (`R, G, B, A`), rows tightly packed (no per-row padding), with
+/// **sRGB-encoded** (gamma, not linear) values — the bytes a PNG / JPEG / WebP
+/// decoder hands you. The result is the same `0..100` value
+/// [`ZensimResult::score`] returns: **100 = identical, higher = more
+/// similar** (byte-identical inputs short-circuit to exactly `100.0`).
+///
+/// For pinned-profile reproducibility, batch comparison (one reference vs many
+/// distorted images), RGB-without-alpha or strided / padded buffers, or
+/// wide-gamut / HDR input, use the [`Zensim`] builder API directly — this
+/// function is a thin wrapper over [`Zensim::new`] + [`Zensim::compute`] with
+/// an [`RgbaSlice`].
+///
+/// # Errors
+///
+/// - [`ZensimError::InvalidDataLength`] if either slice is not exactly
+///   `width * height * 4` bytes. The byte count is computed with overflow-safe
+///   checked multiplication, so a `width * height * 4` that would overflow
+///   `usize` (32-bit / wasm32) also returns this error rather than panicking.
+/// - [`ZensimError::ImageTooSmall`] if `width` or `height` is zero.
+/// - Other [`ZensimError`] variants as documented on [`Zensim::compute`]
+///   (e.g. [`ImageTooLarge`](ZensimError::ImageTooLarge) past the default
+///   120 MP cap).
+///
+/// # Examples
+///
+/// ```
+/// // Two 64×64 RGBA8 images (tightly packed, sRGB-encoded bytes). `distorted`
+/// // is a copy of `reference`, so the score lands at the top of the 0–100 scale.
+/// let (width, height) = (64u32, 64u32);
+/// let reference: Vec<u8> = (0..width as usize * height as usize * 4)
+///     .map(|i| (i % 256) as u8)
+///     .collect();
+/// let distorted = reference.clone();
+///
+/// // One call → the perceptual similarity score (100 = identical, higher = closer).
+/// let score = zensim::score_rgba8(&reference, &distorted, width, height)?;
+/// assert!(score > 90.0, "identical images should score high, got {score}");
+/// # Ok::<(), zensim::ZensimError>(())
+/// ```
+pub fn score_rgba8(
+    reference: &[u8],
+    distorted: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<f64, ZensimError> {
+    // Overflow-safe expected byte count: width * height * 4. On 32-bit targets
+    // (i686 / wasm32) the product can wrap `usize`; checked_mul turns that into
+    // InvalidDataLength instead of a panic or a silently-wrong length.
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|px| px.checked_mul(4))
+        .ok_or(ZensimError::InvalidDataLength)?;
+    if reference.len() != expected || distorted.len() != expected {
+        return Err(ZensimError::InvalidDataLength);
+    }
+    // `expected` is a multiple of 4 and `[u8; 4]` is align-1, so these casts
+    // cannot fail in practice; map the error defensively rather than unwrap.
+    let reference: &[[u8; 4]] =
+        bytemuck::try_cast_slice(reference).map_err(|_| ZensimError::InvalidDataLength)?;
+    let distorted: &[[u8; 4]] =
+        bytemuck::try_cast_slice(distorted).map_err(|_| ZensimError::InvalidDataLength)?;
+    let source = RgbaSlice::try_new(reference, width as usize, height as usize)?;
+    let distorted = RgbaSlice::try_new(distorted, width as usize, height as usize)?;
+    Zensim::new(ZensimProfile::A)
+        .compute(&source, &distorted)
+        .map(|result| result.score())
+}
+
 /// Score a precomputed feature vector under a [`ZensimProfile`] —
 /// the entry point alternative feature backends (e.g. `zensim-gpu`)
 /// use to produce a bit-exact CPU-equivalent `0..100` score.
