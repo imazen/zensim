@@ -76,3 +76,35 @@ with this data. The ship recipe must navigate this — candidates:
 - (c) Soft monotonicity-reg (no strict, keep all 372 features) + spline.
 - The cvvdp+iwssim target (score the 5.7M variants) is orthogonal and may
   help (a) and (b).
+
+## Iteration 3 + correction: safesyn is NOT artificial distortions (2026-06-30)
+
+User correction (verified against `coefficient/examples/generate_zensim_training.rs`
++ the synthetic-pipeline doc): **safesyn = synthetic/CID22-safe SOURCE tiles
+(CID22-512, clic2025, kodak, corpus-builder JPEGs) run through real CODECS**
+(mozjpeg/zenjpeg/zenwebp at quality levels), scored by ssim2/butteraugli. The
+distortions are **codec compression, NOT artificial/analytic** (blur/noise/color/
+geometric). "Safe" = CID22-leak-safe, not "artificially distorted".
+
+Recipe (b) [multi-codec + safesyn + light guards + **monotone-cbc**]:
+CID22 **0.6808** (A 0.8657) — same crater as mono-only. Adding more codec data
+(safesyn) does NOT fix the monotone-vs-codec-ssim2 tension. KADID/TID rise
+(+0.02) as before. **Confirmed: monotone-cbc-strict fundamentally caps CID22
+on codec-distortion data; safesyn is not the safety ingredient.**
+
+## Corrected ship recipe (the path forward)
+
+The OOD-safety A gets from the strict monotone CONSTRAINT (which craters CID22)
+should instead come from artificial-distortion **DATA**:
+1. **Generate an artificial-distortion training set** — apply analytic
+   distortions (the KADID taxonomy: gaussian/lens/motion blur, white/impulse/
+   speckle noise, color shift/quantize/saturate, contrast, jpeg2k-style, spatial
+   warp, sharpen) to the CID22-safe synthetic sources, score with ssim2.
+   Leak-free (KADID/TID stay held-out guards). Does NOT exist yet — needs a new
+   generation pass (Hetzner-able). [Open Q: fresh-generate vs KADID origin-split.]
+2. **Train the ship bake**: multi-codec (rank, CID22 0.88) + artificial-distortion
+   (OOD safety, learned not constrained) + light analytic guards, **NO strict-cbc**,
+   + output PCHIP spline (dial). Hypothesis: high CID22 + OOD safety + working dial.
+3. Validate: full panel + **tests/metric_invariants.rs** (blur>identity etc., the
+   real OOD-safety gate) + dial monotonicity.
+4. Scale on Hetzner (full 5.7M + cvvdp/iwssim mix target); HDR corpus gen in parallel.
