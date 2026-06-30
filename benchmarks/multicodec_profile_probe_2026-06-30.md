@@ -40,3 +40,39 @@ Optional: score 5.7M variants with cvvdp+iwssim for A's proven mix target.
 
 Bakes: /mnt/v/output/zensim-multicodec-probe/probe_372.bin (+verdict.md);
 A baseline: A_baseline.verdict.md. Trainer ban-228 guard landed same day.
+
+## Iteration 2: the monotone-vs-rank tension (2026-06-30)
+
+Tried to make the probe ship-quality (recover analytic guards + monotone dial).
+Two diagnostics on the same harness (bake_verdict, 372-col canonical val):
+
+| recipe | CID22 | AIC-3 | AIC-4 | KonJND | KADID | TID |
+|---|--:|--:|--:|--:|--:|--:|
+| probe (multi-codec ssim2, no constraint) | **0.8827** | 0.7948 | 0.8921 | 0.5619 | 0.6397 | 0.7248 |
+| + heavy analytic guards (k/t 0.3, kj 0.5) + mono-cbc | 0.7076 | 0.6265 | 0.6729 | 0.4372 | 0.8142 | 0.8168 |
+| + mono-cbc-strict only (no guards) | 0.6795 | 0.6166 | 0.6505 | 0.4280 | 0.7627 | 0.7908 |
+| shipped A (v47, mono-cbc + v47 recipe) | 0.8657 | 0.7680 | 0.8854 | 0.4185 | 0.7933 | 0.7927 |
+
+**Findings:**
+1. `--monotone-cbc --monotone-strict` on the pure-ssim2 multi-codec target
+   **craters CID22** (0.88→0.68). Strict mode DROPS 72 features + sign-pins
+   300; that constraint fits human-MOS-flavored targets (v47 used such a
+   target and got 0.8657) but FIGHTS the ssim2-on-codec ranking. Notably it
+   *raises* KADID/TID (the analytic distortions respect the sign-mask better).
+2. Heavy analytic guards swamp the 1.2M codec rows (33k analytic rows at
+   weight 1.1-combined ≈ 45% of training signal) → also craters codec corpora.
+   Guard weights must be ≪ (≈0.03-0.05) so multi-codec dominates.
+3. An output spline alone can't fix the probe's q-sweep dial inversions
+   (monotone f(non-monotone) is still non-monotone).
+
+**The tension:** multi-codec ssim2 is a strictly better RANK signal (CID22
+0.88 > A 0.87) but A's strong correct-by-construction monotonicity caps CID22
+with this data. The ship recipe must navigate this — candidates:
+- (a) Max-rank + spline dial (V39-style, drop strict-CBC): best CID22, but
+  not strong-feature-monotone (loses A's OOD-synthetic robustness).
+- (b) Multi-codec as a GROUP inside v47's proven recipe (human_score-norm
+  target + cid22_train + QAT), not as the sole pure-ssim2 target — may keep
+  both. UNTESTED — most promising.
+- (c) Soft monotonicity-reg (no strict, keep all 372 features) + spline.
+- The cvvdp+iwssim target (score the 5.7M variants) is orthogonal and may
+  help (a) and (b).
