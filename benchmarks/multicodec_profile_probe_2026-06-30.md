@@ -108,3 +108,38 @@ should instead come from artificial-distortion **DATA**:
 3. Validate: full panel + **tests/metric_invariants.rs** (blur>identity etc., the
    real OOD-safety gate) + dial monotonicity.
 4. Scale on Hetzner (full 5.7M + cvvdp/iwssim mix target); HDR corpus gen in parallel.
+
+## Iteration 4: artificial-distortion DATA works (TID-in-loop) + KADIS-700k (2026-06-30)
+
+**Mechanism confirmed.** multi-codec (rank, 1.2M) + TID2013 (analytic, 3k, weight
+1.0) in-loop, **NO strict-cbc**, validate held-out:
+
+| corpus | tid-in-loop | probe (no tid) | A | note |
+|---|--:|--:|--:|---|
+| KADID (analytic, HELD-OUT) | **0.8662** | 0.6397 | 0.7933 | +0.23 transfer — TID taught analytic safety |
+| CID22 (codec gold) | 0.8456 | 0.8827 | 0.8657 | small cost (tid weight 1.0 a bit high; tunable) |
+| AIC-3 | 0.7883 | 0.7948 | 0.7680 | ≈ |
+| AIC-4 | 0.8580 | 0.8921 | 0.8854 | ≈ |
+| KonJND | 0.5072 | 0.5619 | 0.4185 | > A |
+
+So artificial-distortion DATA (not the strict-cbc CONSTRAINT) delivers OOD safety:
+held-out KADID 0.64→0.87 while CID22 only dips 0.88→0.85 (vs strict-cbc's crater
+to 0.68). The TID weight is the knob (sweep down to recover CID22).
+
+**KADIS-700k = the scaled version.** `/mnt/v/datasets/kadis700k/kadis700k.zip`
+(42 GB): 140k pristine refs + `kadis700k_friqa.csv` (700k rows: dist_im,ref_im +
+12 proxy FR-IQA scores [ssim,msssim,**iwssim**,mdsi,vsi,fsim,gmsd,sff,scqi,
+add_gsim,sr_sim] — NOT SSIMULACRA2). Distorted images are NOT in the zip — the
+dist_im name encodes type+level (`<ref>_<distortion>_<level>.png`), regenerated
+from refs via the bundled distortion code. **Not integrated:** no extraction, no
+generated distortions, no ssim2 score, no 372 features, not in any parquet.
+
+### KADIS-700k integration plan (the scaled OOD-safety group)
+1. Extract 140k refs. 2. Generate the 700k distortions (bundled code / our
+   `gen_tid2013_distortions.py`, per the friqa.csv assignments). 3. Score ssim2
+   (GPU) for target-consistency with the multi-codec group [friqa's iwssim is a
+   faster alt]. 4. Extract 372 zensim features. 5. → parquet (f0..f371 +
+   human_score=ssim2). Big GPU job → Hetzner.
+6. Ship recipe: multi-codec (rank) + KADIS-700k (analytic safety, tuned weight) +
+   PCHIP spline (dial), NO strict-cbc. Expect: CID22 ≥ A, KADID/TID ≥ A,
+   metric_invariants (OOD) pass, monotone dial. Validate full panel + invariants.
