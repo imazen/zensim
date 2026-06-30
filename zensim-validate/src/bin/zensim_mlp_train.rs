@@ -183,15 +183,24 @@ struct Args {
     #[arg(long, required_unless_present = "manifest")]
     out: Option<PathBuf>,
 
-    /// Cap features at the first N columns. Default 228 matches the
-    /// V0_4 zensim runtime input width. CSVs may include extended
-    /// features at f228..f299 (per-pair training-side features) that
-    /// the runtime can't supply; capping at 228 keeps train/inference
-    /// feature spaces aligned. Pass `--max-features 300` only for
-    /// content-classifier or research bakes that don't ship as runtime
-    /// weights.
-    #[arg(long, default_value_t = 228)]
+    /// Cap features at the first N columns. **Default 372** — the
+    /// with-iw runtime width that `ZensimProfile::A` (v47) ships and the
+    /// canonical 372-col validation corpora supply. The legacy 228/300
+    /// regimes are BANNED for ship bakes: a narrower cap silently drops
+    /// the extended + IW-pool blocks (f228..f371), producing a bake that
+    /// can't be validated against the 372-col corpora and mis-aligns the
+    /// train/inference feature space (this footgun shipped a 228-input
+    /// probe on 2026-06-30). Values < 372 are rejected unless
+    /// `--allow-narrow-features` is also passed (research/classifier only,
+    /// never a runtime weight).
+    #[arg(long, default_value_t = 372)]
     max_features: usize,
+
+    /// Escape hatch for `--max-features < 372` (BANNED by default —
+    /// narrow bakes can't ship as runtime weights). Research/content-
+    /// classifier use only; never produces a `ZensimProfile` bake.
+    #[arg(long, default_value_t = false)]
+    allow_narrow_features: bool,
 
     /// TV-regularizer pair indices TSV. Two columns: lo_trainer_idx,
     /// hi_trainer_idx. Indices reference rows in the concatenated
@@ -1838,6 +1847,24 @@ fn main() {
             );
             std::process::exit(2);
         }
+    }
+
+    // BANNED: narrow feature caps. 228/300 silently drop the extended +
+    // IW-pool blocks (f228..f371) and produce a bake that can't be validated
+    // against the canonical 372-col corpora (the 2026-06-30 footgun). The
+    // with-iw 372 width is the ship floor; only an explicit research opt-in
+    // may go narrower (never a runtime weight).
+    if args.max_features < 372 && !args.allow_narrow_features {
+        eprintln!(
+            "BANNED: --max-features {} < 372. The 228/300 regimes are not \
+             shippable — a narrow cap drops the extended + IW-pool features \
+             (f228..f371) and mis-aligns the train/inference space. Use \
+             --max-features 372 (the v47/A with-iw width), or pass \
+             --allow-narrow-features for a research/classifier bake that never \
+             ships as a ZensimProfile weight.",
+            args.max_features
+        );
+        std::process::exit(2);
     }
 
     // Load all groups, infer n_features from the first.
