@@ -2134,3 +2134,23 @@ possible, not local. Path:
 A scaffolded launcher script is the next deliverable; not yet
 written. The local infrastructure is unchanged — both paths work,
 but vast.ai is preferred to avoid blocking the user's machine.
+
+## KADIS-700k zensim dataset (built 2026-06-30)
+
+700,000 distorted-image cells — 140k KADIS pristine references × 1 `dist_type_1` × 5 severity
+levels — each zensim-scored with its 372-D feature vector. **The `score_zensim` label and the
+372-D `feat_*` vectors are produced by THIS crate** (`Zensim::compute_extended_features`,
+`with-iw` regime — pure CPU, no GPU dep; that property is exactly what made the cheap-fleet
+sweep reliable).
+
+- **Canonical parquet:** `s3://zentrain/kadis-700k/canonical/kadis700k_canonical_2026-06-30.parquet`
+  (700k×380, ~906 MB zstd, 0 nulls; sha256 `b57e4b3f…`). Mirrors: `/mnt/v/datasets/kadis700k/canonical/`,
+  `/mnt/tower/output/kadis700k/`.
+- **Columns:** `source_id` (stable split key 0..139999 — split on this, never on row, for
+  leak-free train/val/test), `source_filename`, `dist_type`, `dist_name`, `severity_level`,
+  `dist_param` (signed for types 7/18/25 → U-shaped scores by design), `score_zensim`, `feat_0..feat_371`.
+- **Per-chunk sidecars:** `s3://zentrain/kadis-700k/{omni,zensim_features,source_features}/` (350 each).
+- **Full README + schema:** `s3://zentrain/kadis-700k/README.md` (and `~/work/kadis-distort/docs/DATASET.md`).
+- **Credit:** reference images + distortion design © VQA Group, Universität Konstanz (Lin, Hosu,
+  Saupe) — KADID-10k / KADIS-700k, https://database.mmsp-kn.de/kadid-10k-database.html ("freely
+  available to the research community"). Cite KADID-10k (QoMEX 2019) + DeepFL-IQA (arXiv:2001.08113).
