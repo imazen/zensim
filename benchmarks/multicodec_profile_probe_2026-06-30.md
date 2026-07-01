@@ -143,3 +143,70 @@ generated distortions, no ssim2 score, no 372 features, not in any parquet.
 6. Ship recipe: multi-codec (rank) + KADIS-700k (analytic safety, tuned weight) +
    PCHIP spline (dial), NO strict-cbc. Expect: CID22 ≥ A, KADID/TID ≥ A,
    metric_invariants (OOD) pass, monotone dial. Validate full panel + invariants.
+
+## KADIS-700k monotonic-safety gate + metric-target sweep (2026-07-01)
+
+**New data**: `kadis700k_canonical_gpu_2026-07-01.parquet` (700k rows, 7 GPU
+metrics + 372 feats + persisted distorted PNGs, 0 nulls). ssim2 IS present
+(`score_ssim2_gpu`). All 7 metrics scored on the SAME regenerated distortions
+as the features (no MATLAB/Python drift).
+
+**Safety gate built**: reshaped KADIS test split (source_id%10==9, U-shaped
+7/18/25 excluded) → dial-grid schema (image_id=source_id, codec=dist_name,
+q=6-severity, f0..f371). `bake_verdict --dial-grid kadis_test_safetygrid.parquet`
+(or ZENSIM_DIAL_GRID env) now measures per-ladder monotonicity + boundedness on
+held-out artificial distortions.
+
+**Baseline safety (held-out KADIS test)**:
+| bake | CID22 | KADIS mono | KADIS range |
+|---|--:|--:|---|
+| A (v47) | 0.8657 | 0.972 | -29.7..78.5 |
+| probe (multi-codec) | 0.8827 | 0.106 | 1.5..152.8 |
+| tidinloop | 0.8456 | 0.111 | -5..20 |
+
+**KEY FINDING**: rank-target analytic data (tidinloop) does NOT fix monotonic
+safety (0.111, ~= probe's 0.106). A's 0.972 comes from monotone-by-construction
+(W1>=0 sign-mask). Global RankNet rarely samples WITHIN a severity ladder, so
+rank data never teaches within-ladder ordering. The fix under test: KADIS as an
+OOD group whose per-row MSE toward a BOUNDED metric supplies dense within-ladder
+ordering + boundedness.
+
+**Metric severity-monotonicity** (which metric best encodes severity ordering):
+dssim 98.8% > iwssim 98.2% > ssim2 98.0% > cvvdp 97.9% > zensim 96.6% >
+butteraugli-3norm 93.4% > butteraugli-max 91.5%. Bounded metrics
+(dssim/iwssim/cvvdp) are the best safety targets; ssim2/zensim plunge to -1834/-151.
+
+**Sweep (running)**: multi-codec(ssim2) + KADIS(target M) for M in
+{ssim2,iwssim,cvvdp,dssim}, ± monotone-cbc(soft). Data at
+/mnt/v/output/zensim-multicodec-probe/kadis_{M}_{train,val}.parquet +
+kadis_test_safetygrid.parquet. Queue: sweep_queue.sh. Results below when done.
+
+### Sweep results (2026-07-01) — held-out KADIS test-split safety dial
+
+Each = multi-codec(ssim2 rank, 1.2M) + KADIS OOD group. Baselines: A CID22
+0.8657/mono 0.972; probe CID22 0.8827/mono 0.106.
+
+| variant | CID22 | KADID | TID | AIC3 | KADIS mono | boundedness p5/p95 |
+|---|--:|--:|--:|--:|--:|---|
+| ssim2_w1 | 0.876 | 0.818 | 0.824 | 0.781 | 0.050 | -5.9 / 22.4 |
+| iwssim_w1 | 0.867 | 0.842 | 0.802 | 0.772 | 0.050 | 9.1 / 41.3 |
+| cvvdp_w1 | 0.876 | 0.851 | 0.844 | 0.784 | 0.085 | 8.7 / 29.6 |
+| dssim_w1 | 0.878 | 0.860 | 0.845 | 0.767 | 0.030 | 10.9 / 59.2 |
+| iwssim_cbc | 0.370 | 0.799 | 0.754 | 0.078 | **0.975** | -25.3 / 4.8 |
+| codec_cbc | 0.367 | 0.705 | 0.730 | 0.020 | **0.945** | -286 / 3.7 |
+
+**Verdict — the two levers are orthogonal and neither alone suffices:**
+- **DATA (KADIS metric target)**: keeps CID22≈0.88 (all above A), RECOVERS KADID
+  0.64→0.82-0.86 + TID, FIXES boundedness — but CANNOT fix within-ladder
+  monotonicity (0.03-0.09). cvvdp is the best-balanced data target (CID22 0.876,
+  KADID 0.851, TID 0.844, tightest positive range) + it's A's proven mix component.
+- **ARCH (monotone-cbc soft)**: FIXES monotonicity (0.95-0.97 ~ A) but its global
+  sign-mask + α≡1 projection is INCOMPATIBLE with multi-codec ssim2 rank →
+  CID22 collapses to 0.37 (worse than canonical-data cbc; this is exactly why A
+  trades down to 0.866). Confirms: multi-codec rank REQUIRES non-monotone feature
+  combos that global cbc forbids.
+
+**Resolution under test**: targeted within-ladder monotonicity via `--tv-pairs-file`
+(448k KADIS-ladder pairs, penalty max(0, pred[harsher]-pred[milder])) — supervises
+monotonicity ONLY on real distortion ladders, leaving codec-rank features free (no
+global sign-mask). cvvdp target, tv-weight sweep {5,15,40}. Results below.
