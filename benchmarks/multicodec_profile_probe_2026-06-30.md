@@ -325,3 +325,47 @@ groups (direct rank supervision, canonical [0,1] parquets) alongside pure TV, so
 the network has explicit analytic rank targets while TV enforces KADIS mono.
 KADID/TID then become train==val integrity guards; honest rank holdouts are
 CID22 + AIC3; safety is held-out KADIS mono. Sweep dfx_tv{2,3,5} in flight.
+
+### Data-fix (kadid/tid training groups) + TV — 2026-07-01
+
+Add kadid+tid as training groups (canonical [0,1] parquets, direct analytic-rank
+supervision) alongside pure TV on KADIS. kadis stays group 0 (TV offset 0).
+KADID/TID become **train==val integrity guards** (memorized), so honest holdouts
+are CID22 + AIC3 + held-out KADIS mono.
+
+| bake (kadid/tid w=1.0) | CID22 | AIC3 | KADID* | TID* | mono | range |
+|---|---|---|---|---|---|---|
+| dfx tv2 | 0.798 | 0.729 | 0.938 | 0.958 | 0.977 | 0.5..2.5 |
+| dfx tv3 | 0.782 | 0.746 | 0.935 | 0.956 | 0.991 | 0.6..2.3 |
+| dfx tv5 | 0.796 | 0.729 | 0.934 | 0.954 | 0.997 | 0.3..1.5 |
+(*memorized — trained on)
+
+Direct supervision **recovers KADID/TID** (0.59→0.94) and mono is excellent
+(all > A's 0.973). BUT **CID22 collapses to ~0.79** (below A's 0.866) at EVERY
+tv-weight — kadid(10k)+tid(3k) at w1.0 get 50% of pair sampling and drown the
+codec signal. AIC3 also drops (0.73–0.75 < A's 0.768). The CID22 ceiling is set
+by the analytic group weight, not tv-weight. → group-weight sweep (light
+kadid/tid 0.1–0.5) in flight.
+
+### The (CID22, mono) Pareto frontier — A appears optimal
+
+Collecting the CID22-vs-mono tradeoff across all mechanisms:
+
+| mono | best CID22 | mechanism |
+|---|---|---|
+| 0.085 | 0.876 | cvvdp_w1 (no mono constraint) |
+| 0.457 | 0.876 | pure TV w0.5 |
+| 0.711 | 0.865 | pure TV w1 |
+| 0.912 | 0.862 | pure TV w2 |
+| **0.973** | **0.866** | **A (cbc masked-monotone-by-construction)** |
+| 0.973 | ~0.849 | pure TV ~w4 (interpolated) |
+| 0.995 | 0.848 | pure TV w5 |
+
+**At matched monotonicity (mono 0.973), A's cbc (CID22 0.866) DOMINATES pure TV
+(~0.849).** A sits on the Pareto frontier; TV is inside it. The only way to beat
+A on CID22 is to abandon monotonicity (cvvdp_w1: 0.876 @ mono 0.085). Adding
+KADIS monotonicity to ANY high-CID22 bake costs CID22 because the α-head's rank
+and pool heads share ONE encoder — TV shaping the pool head for mono distorts the
+shared features that feed the rank head. Gate supervision (route codec→rank,
+artificial→pool) is the one untested lever that could decouple them, but the
+shared encoder limits how much it can separate.
