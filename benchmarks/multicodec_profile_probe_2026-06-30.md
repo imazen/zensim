@@ -369,3 +369,54 @@ and pool heads share ONE encoder — TV shaping the pool head for mono distorts 
 shared features that feed the rank head. Gate supervision (route codec→rank,
 artificial→pool) is the one untested lever that could decouple them, but the
 shared encoder limits how much it can separate.
+
+### Group-weight sweep (light kadid/tid) — 2026-07-01
+
+Lower the analytic-group weight so it supervises rank without drowning codec.
+
+| bake | CID22 | AIC3 | KADID* | TID* | mono |
+|---|---|---|---|---|---|
+| A (ship) | 0.866 | 0.768 | 0.793 | 0.793 | 0.973 |
+| gw kadid/tid=0.10 tv2.5 | 0.845 | 0.764 | 0.801 | 0.865 | 0.949 |
+| gw kadid/tid=0.25 tv2.5 | 0.807 | 0.705 | 0.888 | 0.919 | 0.954 |
+| gw kadid/tid=0.50 tv3.0 | 0.793 | 0.729 | 0.918 | 0.944 | 0.987 |
+(*partial memorization — trained on at low weight)
+
+**kadid/tid weight 0.10 is the analytic-crater sweet spot**: KADID recovers to
+0.80 (ABOVE A) and TID to 0.865 without collapsing CID22 — it lands at CID22
+0.845 / mono 0.949, clearing the 0.93 mono gate with KADID/TID/AIC3 all healthy.
+**But A still dominates it** (CID22 0.866 > 0.845, mono 0.973 > 0.949). It's the
+best BALANCED TV bake but not a win over A. Raising the analytic weight past 0.10
+trades CID22 down monotonically. → codec-weight + hidden-256 levers in flight to
+attack the CID22 ceiling / shared-encoder coupling directly.
+
+### Codec-weight sweep (protect CID22) — 2026-07-01 — FAILED
+
+Raise codec-group weight (2×, 3×) to give ssim2 rank more sampling under TV 2.5:
+
+| bake | CID22 | AIC3 | KADID | TID | mono |
+|---|---|---|---|---|---|
+| cw codec2 tv2.5 | 0.836 | 0.736 | 0.444 | 0.326 | 0.984 |
+| cw codec3 tv2.5 | 0.843 | 0.705 | 0.263 | 0.218 | 0.989 |
+| cw codec3 kadid/tid0.15 tv2.5 | 0.836 | 0.760 | 0.754 | 0.842 | 0.981 |
+
+Codec-weight-up did NOT lift CID22 — it went DOWN (0.836–0.843 < pure tv2's
+0.862). The codec RankNet is already saturated at weight 1.0; adding tv2.5 (> the
+tv2.0 pure baseline) dominates the added codec weight. **The CID22 ceiling at
+mono≥0.93 is firmly ~0.85, below A's 0.866.** Every weighting lever confirms it.
+
+### Gate supervision RULED OUT by diagnostic — 2026-07-01
+
+Before implementing per-group α-target supervision, checked whether the α gate is
+even the bottleneck. In the best balanced bake (gw a0.10), α(x) ALREADY spreads
+across the full range: μ=0.533, **min=0.007, max=0.986** — the gate routes some
+samples to the pool head (α→0) and some to the rank head (α→1) by itself.
+codec_tr srocc=0.935 / codec_va 0.924 at the final epoch (strong codec rank).
+
+So the α gate is NOT stuck — supervising it toward per-group targets would add
+nothing. The CID22 ceiling under TV comes from the **shared 372→H→H encoder**:
+both heads read the same hidden vector h, so TV shaping the pool head for
+monotonicity distorts the features that also feed the rank head. Weighting
+(gw/cw) and gate routing can't decouple a shared encoder. The only structural
+fixes are MORE encoder capacity (hidden-256, in flight) or SEPARATE encoders per
+head (a real arch change). Gate supervision is dropped from the lever list.
