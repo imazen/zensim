@@ -420,3 +420,56 @@ monotonicity distorts the features that also feed the rank head. Weighting
 (gw/cw) and gate routing can't decouple a shared encoder. The only structural
 fixes are MORE encoder capacity (hidden-256, in flight) or SEPARATE encoders per
 head (a real arch change). Gate supervision is dropped from the lever list.
+
+### hidden-256 capacity lever — marginal, A stands — 2026-07-01
+
+| bake (hidden 256) | CID22 | AIC3 | KADID | TID | mono |
+|---|---|---|---|---|---|
+| hd 256 codec1 tv2.5 | 0.844 | 0.738 | 0.558 | 0.396 | 0.952 |
+| hd 256 codec2 tv2.5 | 0.852 | 0.738 | 0.402 | 0.267 | 0.985 |
+| hd 256 codec1 tv3 | 0.841 | 0.731 | 0.503 | 0.358 | 0.985 |
+
+Doubling encoder width nudged CID22 from ~0.845 (h128) to 0.852 (best, codec2) —
+capacity eases the shared-encoder coupling slightly but does NOT reach A's 0.866.
+Diminishing returns; hidden-512 would likely add <0.005.
+
+## FINAL VERDICT (2026-07-01): A (cbc + canonical) is Pareto-optimal
+
+Across **6 lever types / 18 trained bakes** — pure-TV weight, anti-collapse
+margin, kadid/tid data groups, group-weight, codec-weight, hidden-256 — **no
+mechanism reaches CID22 ≥ 0.866 at mono ≥ 0.93.** The (CID22, mono) frontier:
+
+| approach | best CID22 @ mono≥0.93 | mono | note |
+|---|---|---|---|
+| **A = cbc + canonical** | **0.866** | 0.973 | shipped; Pareto-optimal |
+| TV + multicodec (this work) | ~0.852 | 0.95–0.99 | best is hd256/codec2 or gw a0.10 |
+| cvvdp_w1 (no mono) | 0.876 | 0.085 | best RANKER, unusable as a dial |
+| cbc + multicodec (prior) | 0.37 | 0.95 | projection incompatible w/ aggressive ssim2 |
+
+**Why A wins:** monotonicity via a STRUCTURAL constraint (cbc: W1≥0 + sign mask
++ [0,100]) is more rank-efficient than a SOFT penalty (TV), because cbc
+constrains the function class without adding a competing loss, while TV fights
+the rank objective during training. On the aggressive multi-codec ssim2 target,
+cbc's projection craters (0.37) but canonical data fits it — so **A's
+cbc+canonical is the efficient corner.** The α-gate already routes by regime
+(α spread 0.007–0.986), so the ceiling is the shared encoder, which capacity
+and weighting can't decouple.
+
+**Deliverables from this investigation:**
+1. **TV within-ladder monotonicity** wired into the α-head trainer
+   (`--tv-weight`, `--tv-margin`) — reusable, was a silent no-op before.
+2. **KADIS-700k held-out monotonic-safety eval gate** (source_id%10==9 test
+   split → dial-grid → bake_verdict dial panel) — a NEW capability that measures
+   OOD within-ladder monotonicity. It CONFIRMS A is safe (mono 0.973).
+3. **Best balanced TV bake** (gw kadid/tid=0.10 tv2.5): CID22 0.845 / mono 0.949
+   / KADID 0.801 / TID 0.865 — dominated by A on CID22+mono but BEATS A on the
+   analytic corpora. A candidate only if analytic-distortion rank matters more
+   than codec rank (it doesn't, for the codec-dial product).
+
+**Recommendation: KEEP A.** The KADIS parquet's value is confirming A's safety +
+the TV infra, not a better dial bake. The one untested structural lever —
+SEPARATE encoders per head (rank encoder free for codec, pool encoder
+TV-constrained for artificial) — could in principle preserve cvvdp_w1's 0.876
+under mono, but it's a multi-crate change (trainer + arch + zensim runtime + bake
+format) with uncertain payoff against an already-optimal A. That is a deliberate
+R&D investment for the user to weigh, not a quick sweep.
