@@ -565,3 +565,22 @@ v47-manifest-with-kadis variant is untested. Plan: copy
 `zensim/weights/manifests/v47_strict_qat.toml`, add
 `kadis:kadis_cvvdp_train.parquet` at modest weight (0.3–0.5), train, full-panel
 + both dials + per-band vs A.
+
+### v48-kadis @ w0.5 — first result (2026-07-01)
+
+v47 recipe + kadis@0.5 (manifest `v48_kadis_experiment.toml`, QAT + in-pass
+spline, all inputs sha-verified):
+
+| | CID22 | KADID* | TID* | KonJND | AIC3 | AIC4 | codec dial | KADIS safety |
+|---|---|---|---|---|---|---|---|---|
+| A (ship) | 0.8657 | 0.7933 | 0.7927 | 0.4185 | 0.7680 | 0.8854 | mono 0.9747, G1 ✓ (15.0/94.5) | 0.9726 |
+| v48 kadis@0.5 | 0.8136 | 0.7801 | 0.7833 | **0.4812** | 0.7285 | 0.8422 | mono **0.9783**, G1 ✓ (20.2/94.5) | **0.9758** |
+(*train==val for both)
+
+The KADIS group under the v47 recipe: **KonJND +0.063** (largest gain measured
+on the G5/HQ weakness without cratering elsewhere), **both dials at-or-above A**
+(the oriented-dial machinery works — no direction split, no crater), but
+**CID22 −0.052 / AIC3 −0.040 / AIC4 −0.043**: at w0.5 (≈10% of pair sampling)
+the artificial data dilutes codec/human rank under cbc's constrained capacity.
+Weight sweep w∈{0.1, 0.25} in flight to find whether the KonJND/dial gains
+survive at a weight that doesn't cost CID22.
