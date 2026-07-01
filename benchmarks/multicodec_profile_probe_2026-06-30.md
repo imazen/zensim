@@ -631,3 +631,33 @@ unproven**. Per experiment-rigor policy the verdict moves to seed-means:
 seeds {7,47} × weights {0.10,0.25} in flight (→ 3-4 seeds per weight incl.
 existing runs). Note the KonJND gain also flipped at seed31 (0.402 < A) — the
 gain may itself be seed-luck; seed-mean will tell.
+
+## FINAL (multi-seed) VERDICT — 2026-07-01: A stays; KADIS-in-recipe is a modest KonJND lever with a real CID22 cost
+
+Seed-means (seeds 17/7/47 @0.10; 17/31/7/47 @0.25):
+
+| (seed-mean ± sd) | CID22 | KonJND | AIC-3 | AIC-4 | codec dial |
+|---|---|---|---|---|---|
+| A (ship, fixed artifact) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.9747 |
+| v48 kadis@0.10 (n=3) | 0.8243±0.017 | 0.4465±0.030 | 0.7360±0.032 | 0.8403±0.045 | 0.9776±0.001 |
+| v48 kadis@0.25 (n=4) | 0.7878±0.101 | 0.4475±0.032 | 0.6998±0.120 | 0.7520±0.226 | 0.9759±0.002 |
+| v48 kadis@0.25 (n=3, excl. collapsed s17) | 0.8378±0.020 | 0.4461±0.039 | 0.7588±0.027 | 0.8643±0.029 | 0.9760 |
+
+1. **CID22: A wins at seed-mean** (−0.041 @0.10 ≈ 4 SEM; −0.028 @0.25-excl ≈ 2.3
+   SEM). Even the best of 7 runs (0.8585) is below A. The cost is real, not
+   seed noise.
+2. **KonJND: the gain survives but halves** — seed-mean +0.028 (~1.6 SEM,
+   positive in 6/7 runs): suggestive, modest, not the single-seed +0.06.
+3. **AIC-3/AIC-4: no reliable gain** (at/below A at both weights).
+4. **Dials: uniformly at-or-above A with tiny variance** (codec 0.976–0.978
+   G1✓, KADIS safety 0.975–0.979) — the v47 machinery absorbs KADIS at zero
+   dial risk, at any weight, any seed.
+5. **Training-collapse hazard: 1/7 runs** (w0.25 s17: CID22 0.638) — recipe+
+   kadis has a real instability mode; multi-seed is mandatory for any future
+   work in this family.
+
+**A remains the ship.** The KADIS parquet's proven values this cycle: the
+held-out monotonic-safety gate (A ≈ 0.980 oracle ceiling), the clean TV-pairs
+file, the corrected science (sign artifact + poisoned pairs + full-panel
+discipline), and a modest KonJND/G5 lever (+0.03) available to a future
+KonJND-focused variant that deliberately accepts a small CID22 trade.
