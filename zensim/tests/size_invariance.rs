@@ -12,8 +12,8 @@ fn solid(n: usize, c: [u8; 3]) -> Vec<[u8; 3]> {
     vec![c; n * n]
 }
 
-fn profiles() -> [ZensimProfile; 2] {
-    [ZensimProfile::A, ZensimProfile::PreviewV0_2]
+fn profiles() -> [ZensimProfile; 1] {
+    [ZensimProfile::A]
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn streaming_paths_handle_sub64() {
 fn streaming_ref_constant_diff_size_invariant() {
     // The hard invariant (constant color difference → identical score at every
     // size) must hold through the precomputed-reference path too.
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(ZensimProfile::A);
     let mut scores = Vec::new();
     for n in [1usize, 4, 16, 32, 63, 64, 128] {
         let r = solid(n, [100, 120, 140]);

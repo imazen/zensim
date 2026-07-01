@@ -181,7 +181,7 @@ use std::fmt;
 use archmage::testing::{
     CompileTimePolicy, PermutationReport, for_each_token_permutation, lock_token_testing,
 };
-use zensim::{RgbaSlice, Zensim, ZensimProfile};
+use zensim::{RgbaSlice, Zensim};
 
 use crate::error::RegressError;
 use crate::testing::{RegressionReport, RegressionTolerance, check_regression};
@@ -460,7 +460,7 @@ fn compare_outputs(
         return Ok(SimdConsistencyReport::single_tier(perm_report));
     }
 
-    let zensim = Zensim::new(ZensimProfile::PreviewV0_2);
+    let zensim = Zensim::new(crate::profile::legacy_linear());
 
     let ref_label = outputs[0].0.clone();
     let ref_w = outputs[0].2 as usize;

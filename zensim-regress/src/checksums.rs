@@ -37,7 +37,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim, ZensimProfile};
+use zensim::{ImageSource, PixelFormat, RgbaSlice, Zensim};
 
 use crate::diff_image::{AnnotationText, MontageOptions};
 use crate::diff_summary::{format_diff_summary, format_tolerance_shorthand};
@@ -821,7 +821,7 @@ impl ChecksumManager {
             checksums_dir: checksums_dir.to_path_buf(),
             update_mode,
             hasher: Box::new(SeaHasher),
-            zensim: Zensim::new(ZensimProfile::PreviewV0_2),
+            zensim: Zensim::new(crate::profile::legacy_linear()),
             remote: None,
             diff_dir: None,
             manifest: None,
@@ -834,7 +834,7 @@ impl ChecksumManager {
             checksums_dir: checksums_dir.to_path_buf(),
             update_mode,
             hasher: Box::new(SeaHasher),
-            zensim: Zensim::new(ZensimProfile::PreviewV0_2),
+            zensim: Zensim::new(crate::profile::legacy_linear()),
             remote: None,
             diff_dir: None,
             manifest: None,

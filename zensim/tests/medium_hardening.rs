@@ -9,11 +9,27 @@
 use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
 
 fn z() -> Zensim {
-    // Use V0_2 (linear): these tests poke API mechanics on tiny
-    // 16x16 / 32x16 inputs that are below the MLP profile's minimum
-    // input size (the MLP profile A needs the full multi-scale
-    // pyramid which only computes cleanly on larger images).
-    Zensim::new(ZensimProfile::PreviewV0_2)
+    // These tests poke API mechanics (error paths, dimension checks) on
+    // tiny 16x16 / 32x16 inputs; `A` reflect-pads sub-64px inputs to the
+    // pyramid minimum, so the mechanics are exercised the same way.
+    Zensim::new(ZensimProfile::A)
+}
+
+// The two tests that assert *score values* (identical → ~100, bounded
+// [0,100]) need a linear-bounded profile: profile `A`'s MLP squash has
+// identity ≈ 97.69 and can extrapolate outside [0,100], so it does not
+// satisfy those invariants. Rebuild the `LinearBounded` profile via the
+// `custom-profiles` extension point (CI's `test-all-features` job runs it).
+#[cfg(feature = "custom-profiles")]
+fn z_linear_bounded() -> Zensim {
+    use std::sync::OnceLock;
+    use zensim::profile::ProfileParams;
+    static P: OnceLock<ProfileParams> = OnceLock::new();
+    let params = P.get_or_init(|| ProfileParams::builder().bounded_squash(true).build());
+    Zensim::new(ZensimProfile::Custom {
+        params,
+        name: "zensim-linear-bounded",
+    })
 }
 
 // ─── M1: cross-image dim mismatch in compute_with_ref* ─────────────────────
@@ -51,14 +67,15 @@ fn m1_compute_with_ref_into_dim_mismatch_returns_err() {
     assert_eq!(err, ZensimError::DimensionMismatch);
 }
 
+#[cfg(feature = "custom-profiles")]
 #[test]
 fn m1_compute_with_ref_matching_dims_succeeds() {
     let pixels = vec![[100u8, 100, 100]; 16 * 16];
     let img = RgbSlice::new(&pixels, 16, 16);
-    let zensim = z();
+    let zensim = z_linear_bounded();
     let pre = zensim.precompute_reference(&img).unwrap();
     let result = zensim.compute_with_ref(&pre, &img).unwrap();
-    // Identical input → score must round to ~100.
+    // Identical input → score must round to ~100 (linear-bounded profile).
     assert!(result.score() > 99.0, "score {}", result.score());
 }
 
@@ -109,6 +126,11 @@ fn m1_diffmap_with_ref_linear_planar_dim_mismatch_returns_err() {
     }
 }
 
+// Gated on `custom-profiles`: asserts the score lands in [0,100], which
+// only holds for the linear-bounded profile (`A` may extrapolate outside
+// [0,100] by design). The no-panic reflect-pad path for `A` is covered by
+// the diffmap tests in `src/diffmap.rs` and `small_images_score_via_reflect_pad`.
+#[cfg(feature = "custom-profiles")]
 #[test]
 fn m1_diffmap_with_ref_linear_planar_sub64_scores() {
     use zensim::DiffmapOptions;
@@ -117,7 +139,7 @@ fn m1_diffmap_with_ref_linear_planar_sub64_scores() {
     // diffmap is trimmed back to the original size.
     let (w, h) = (16usize, 16usize);
     let ref_pixels = vec![[10u8, 20, 30]; w * h];
-    let zensim = z();
+    let zensim = z_linear_bounded();
     let pre = zensim
         .precompute_reference(&RgbSlice::new(&ref_pixels, w, h))
         .unwrap();

@@ -137,7 +137,7 @@ fn streaming_strips_oom_80mp() {
     let src_img = RgbSlice::new(&src, w, h);
     let dst_img = RgbSlice::new(&dst, w, h);
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(ZensimProfile::A);
 
     eprintln!("Running strip path on 80 MP pair...");
     let t1 = Instant::now();
@@ -214,7 +214,7 @@ fn streaming_strips_throughput_report() {
             .map(|i| make_pair(w, h, i as u32 + 1))
             .collect();
 
-        let z = Zensim::new(ZensimProfile::PreviewV0_2);
+        let z = Zensim::new(ZensimProfile::A);
 
         // Warmup
         {
@@ -268,7 +268,7 @@ fn streaming_strips_throughput_report() {
         );
 
         // Single-threaded
-        let z_st = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
+        let z_st = Zensim::new(ZensimProfile::A).with_parallel(false);
         let time_path_st = |name: &str, run: &dyn Fn(&PairBuf) -> f64| -> f64 {
             let t = Instant::now();
             let mut acc = 0.0f64;
@@ -330,7 +330,7 @@ fn buffered_ref_vs_strip_per_strip_score() {
     let (src, dst) = make_pair(w, h, 7);
     let src_img = RgbSlice::new(&src, w, h);
     let dst_img = RgbSlice::new(&dst, w, h);
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(ZensimProfile::A);
 
     let strip = z
         .compute_streaming_strips_default(&src_img, &dst_img)
@@ -367,7 +367,7 @@ fn small_image_falls_back_to_full_path() {
     let (src, dst) = make_pair(w, h, 11);
     let src_img = RgbSlice::new(&src, w, h);
     let dst_img = RgbSlice::new(&dst, w, h);
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(ZensimProfile::A);
 
     let full = z.compute(&src_img, &dst_img).unwrap();
     let strip = z

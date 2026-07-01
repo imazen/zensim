@@ -180,10 +180,7 @@ fn main() {
 
     for (pname, pref, pdist) in patterns {
         println!("######## pattern: {pname} ########");
-        for (mname, profile) in [
-            ("A (MLP bake)", ZensimProfile::A),
-            ("PreviewV0_2 (linear)", ZensimProfile::PreviewV0_2),
-        ] {
+        for (mname, profile) in [("A (MLP bake)", ZensimProfile::A)] {
             let z = Zensim::new(profile);
             for strat in [Pad::Raw, Pad::Mirror, Pad::Tile] {
                 let label = match strat {

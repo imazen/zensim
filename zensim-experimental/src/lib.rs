@@ -4,12 +4,14 @@
 //! long-term research reference.
 //!
 //! These profiles and their trained MLP bakes were moved out of the
-//! published `zensim` crate (2026-06-01) to keep its download size and
-//! permanent API surface minimal. The published `zensim` keeps only the
-//! shipping profiles (`A`, the back-compat linear `PreviewV0_1` /
-//! `PreviewV0_2`). Everything else — the `PreviewV0_4` D2 ensemble, the
-//! whole `PreviewV0_5*` SOTA-trail matrix, `A_Phone`, `LinearBounded`,
-//! and `PreviewV0_5Linear` — lives here.
+//! published `zensim` crate to keep its download size and permanent API
+//! surface minimal. The published `zensim` keeps only the shipping profile
+//! `A` (plus the `Custom` extension point). Everything else — the
+//! back-compat linear `PreviewV0_2` (reconstructed via [`preview_v0_2`]),
+//! the `PreviewV0_4` D2 ensemble, the whole `PreviewV0_5*` SOTA-trail
+//! matrix, `A_Phone`, `LinearBounded`, and `PreviewV0_5Linear` — lives
+//! here. (The linear `PreviewV0_1` profile was dropped: its weight vector
+//! was removed from `zensim` and no research tooling here needs it.)
 //!
 //! Every profile is reconstructed through zensim's stable
 //! [`zensim::profile::ProfileParams::builder`] +
@@ -148,16 +150,27 @@ profile_fn!(
         .build()
 );
 
-// `PreviewV0_1` is now a first-class built-in profile again
-// (`zensim::ZensimProfile::PreviewV0_1`) — restored to the published crate
-// for 0.2.x backwards-compatibility — so it is no longer reconstructed here.
+profile_fn!(
+    /// `PreviewV0_2` — the historical linear general-ranking profile,
+    /// reconstructed as a `Custom` profile after it was removed as a
+    /// built-in `zensim` variant. The `ProfileParams::builder()` defaults
+    /// (the `WEIGHTS_PREVIEW_V0_2` vector, `blur_radius = 5`,
+    /// `blur_passes = 1`, `num_scales = 4`, `100 − 18·d^0.7`, all
+    /// dispositions off, no MLP) are byte-for-byte the former
+    /// `PROFILE_PREVIEW_V0_2` static, so scores are identical to the
+    /// removed built-in. Concordance-filtered 218k pairs, Nelder-Mead
+    /// SROCC = 0.9960.
+    preview_v0_2,
+    "zensim-preview-v0.2",
+    ProfileParams::builder().build()
+);
 
 profile_fn!(
     /// `LinearBounded` — correct-by-construction bounded squash
     /// `100·exp(−(a/100)·d^b)` over the V0_2 non-negative weights. Bounded
     /// `[0, 100]`, equals 100 iff identical, monotone non-increasing in
     /// every error feature — by construction, on the whole input domain.
-    /// Same rank order as `PreviewV0_2`.
+    /// Same rank order as [`preview_v0_2`].
     linear_bounded,
     "zensim-linear-bounded",
     ProfileParams::builder().bounded_squash(true).build()

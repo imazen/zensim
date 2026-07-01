@@ -22,7 +22,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::time::Instant;
 use zensim::{
-    DiffmapOptions, DiffmapWeighting, RgbSlice, Zensim, ZensimProfile, ZensimScratch,
+    DiffmapOptions, DiffmapWeighting, RgbSlice, Zensim, ZensimScratch,
     profile::WEIGHTS_PREVIEW_V0_2,
 };
 
@@ -149,7 +149,7 @@ fn main() {
         pairs.len()
     );
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(zensim_regress::profile::legacy_linear());
     let mut scratch = ZensimScratch::new();
 
     println!(

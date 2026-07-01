@@ -106,8 +106,9 @@ fn v04_identity_returns_100() {
 
 #[test]
 fn v02_identity_returns_100() {
-    // V0_2 is the linear (non-MLP) profile. The short-circuit returns
-    // 100 directly here; this test guards against any future change
-    // that would route V0_2 through apply_mlp_scoring.
-    assert_identity_returns_100(ZensimProfile::PreviewV0_2, "PreviewV0_2");
+    // The reconstructed `preview_v0_2` is the linear (non-MLP) profile.
+    // The short-circuit returns 100 directly here; this test guards
+    // against any future change that would route the linear path through
+    // apply_mlp_scoring.
+    assert_identity_returns_100(zensim_experimental::preview_v0_2(), "preview_v0_2");
 }

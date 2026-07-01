@@ -76,8 +76,11 @@ fn parse_profile(s: &str) -> Result<ZensimProfile> {
     // for evaluation, so it depends on that crate. `codec_target` /
     // `latest_preview` resolve to the canonical shipped production profile.
     match s.to_ascii_lowercase().as_str() {
-        "v0_1" | "v01" | "preview-v0.1" => Ok(ZensimProfile::PreviewV0_1),
-        "v0_2" | "v02" | "preview-v0.2" => Ok(ZensimProfile::PreviewV0_2),
+        // The historical linear `PreviewV0_2` was removed as a built-in
+        // `zensim` variant; it is reconstructed bit-identically as a
+        // `Custom` profile in `zensim-experimental`. (Linear `PreviewV0_1`
+        // was dropped entirely — its weights were removed.)
+        "v0_2" | "v02" | "preview-v0.2" => Ok(zensim_experimental::preview_v0_2()),
         // "v0.3" was the never-published deprecated alias for `A`; keep the
         // CLI string working but resolve it to the canonical `A`.
         "a" | "v0_3" | "v03" | "preview-v0.3" => Ok(ZensimProfile::A),

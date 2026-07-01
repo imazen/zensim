@@ -1226,8 +1226,18 @@ mod tests {
         assert!(max > 0.0, "max diffmap value should be > 0");
     }
 
+    // The diffmap-vs-regular *score equality* invariant only holds for a
+    // linear profile, where the diffmap is a spatial redistribution of the
+    // same weighted feature distance. The MLP profile `A` scores the diffmap
+    // path and the plain path through separate forward passes that diverge
+    // (~2.5 units here), so this asserts against a reconstructed plain-linear
+    // profile (the former `PreviewV0_2`, bit-identical via the builder
+    // defaults). Gated on `custom-profiles`; CI runs it in `test-all-features`.
+    #[cfg(feature = "custom-profiles")]
     #[test]
     fn test_diffmap_with_precomputed_ref() {
+        use crate::profile::ProfileParams;
+        use std::sync::OnceLock;
         let pixels: Vec<[u8; 3]> = (0..256).map(|i| [(i % 256) as u8, 128, 64]).collect();
         let mut dst = pixels.clone();
         // Perturb some pixels
@@ -1235,11 +1245,11 @@ mod tests {
             p[0] = p[0].wrapping_add(50);
         }
 
-        // Tiny 16x16 input: use the linear V0_2 profile explicitly. The
-        // MLP profile (now returned by `latest()`) needs the full 228
-        // features that only compute on larger inputs; the diffmap
-        // pipeline being tested here doesn't depend on the profile.
-        let z = crate::Zensim::new(ZensimProfile::PreviewV0_2);
+        static PARAMS: OnceLock<ProfileParams> = OnceLock::new();
+        let z = crate::Zensim::new(ZensimProfile::Custom {
+            params: PARAMS.get_or_init(|| ProfileParams::builder().build()),
+            name: "zensim-preview-v0.2",
+        });
         let src = RgbSlice::new(&pixels, 16, 16);
         let dst = RgbSlice::new(&dst, 16, 16);
 
@@ -1250,7 +1260,7 @@ mod tests {
 
         assert_eq!(result.width(), 16);
         assert_eq!(result.height(), 16);
-        // Score should match regular compute
+        // Score should match regular compute (linear profile invariant).
         let regular = z.compute_with_ref(&precomputed, &dst).unwrap();
         assert!(
             (result.score() - regular.score()).abs() < 0.01,

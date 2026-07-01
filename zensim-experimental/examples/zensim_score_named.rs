@@ -48,7 +48,7 @@ fn main() -> ExitCode {
     }
 
     let profile = match args[1].as_str() {
-        "v0_2" => ZensimProfile::PreviewV0_2,
+        "v0_2" => zensim_experimental::preview_v0_2(),
         "v0_3" => ZensimProfile::A,
         "v0_4" => zensim_experimental::preview_v0_4(),
         "v0_5" => zensim_experimental::preview_v0_5(),

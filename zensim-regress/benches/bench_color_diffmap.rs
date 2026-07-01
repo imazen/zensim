@@ -1,7 +1,7 @@
 //! End-to-end micro-benchmarks targeting the cbrt-heavy color path
 //! (via `compute`) and the diffmap pipeline.
 
-use zensim::{DiffmapOptions, DiffmapWeighting, RgbaSlice, Zensim, ZensimProfile};
+use zensim::{DiffmapOptions, DiffmapWeighting, RgbaSlice, Zensim};
 
 fn gradient_rgba(w: u32, h: u32) -> Vec<[u8; 4]> {
     let mut out = Vec::with_capacity((w * h) as usize);
@@ -39,7 +39,7 @@ fn bench_zensim_score(suite: &mut zenbench::Suite) {
             ("1920x1080", 1920, 1080),
             ("3840x2160", 3840, 2160),
         ] {
-            let z = Zensim::new(ZensimProfile::PreviewV0_2);
+            let z = Zensim::new(zensim_regress::profile::legacy_linear());
             let src = gradient_rgba(w, h);
             let dst = noise_rgba(w, h, 7);
             group.bench(label, move |b| {
@@ -62,7 +62,7 @@ fn bench_precompute_reference(suite: &mut zenbench::Suite) {
             ("1920x1080", 1920, 1080),
             ("3840x2160", 3840, 2160),
         ] {
-            let z = Zensim::new(ZensimProfile::PreviewV0_2);
+            let z = Zensim::new(zensim_regress::profile::legacy_linear());
             let src = gradient_rgba(w, h);
             group.bench(label, move |b| {
                 b.iter(|| {
@@ -78,7 +78,7 @@ fn bench_precompute_reference(suite: &mut zenbench::Suite) {
 fn bench_diffmap_minimal(suite: &mut zenbench::Suite) {
     suite.group("diffmap_minimal", |group| {
         for &(label, w, h) in &[("256x256", 256u32, 256u32), ("1920x1080", 1920, 1080)] {
-            let z = Zensim::new(ZensimProfile::PreviewV0_2);
+            let z = Zensim::new(zensim_regress::profile::legacy_linear());
             let src = gradient_rgba(w, h);
             let dst = noise_rgba(w, h, 11);
             let opts = DiffmapOptions {
@@ -103,7 +103,7 @@ fn bench_diffmap_minimal(suite: &mut zenbench::Suite) {
 fn bench_diffmap_full(suite: &mut zenbench::Suite) {
     suite.group("diffmap_full", |group| {
         for &(label, w, h) in &[("256x256", 256u32, 256u32), ("1920x1080", 1920, 1080)] {
-            let z = Zensim::new(ZensimProfile::PreviewV0_2);
+            let z = Zensim::new(zensim_regress::profile::legacy_linear());
             let src = gradient_rgba(w, h);
             let dst = noise_rgba(w, h, 11);
             let opts = DiffmapOptions {

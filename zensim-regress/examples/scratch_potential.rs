@@ -7,7 +7,7 @@
 //! Comparing to a hypothetical world where the alloc/drop is amortized,
 //! the gap is the encoder-loop opportunity.
 use std::time::Instant;
-use zensim::{RgbaSlice, Zensim, ZensimProfile, ZensimScratch};
+use zensim::{RgbaSlice, Zensim, ZensimScratch};
 
 fn gradient(w: u32, h: u32, seed: u32) -> Vec<[u8; 4]> {
     let mut s = seed;
@@ -25,7 +25,7 @@ fn gradient(w: u32, h: u32, seed: u32) -> Vec<[u8; 4]> {
 }
 
 fn main() {
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(zensim_regress::profile::legacy_linear());
 
     for &(w, h) in &[(1920u32, 1080u32), (3840, 2160)] {
         let src = gradient(w, h, 42);

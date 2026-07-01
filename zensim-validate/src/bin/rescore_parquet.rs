@@ -41,7 +41,6 @@ fn arg(flag: &str, default: Option<&str>) -> Option<String> {
 fn parse_profile(s: &str) -> ZensimProfile {
     match s.to_ascii_lowercase().as_str() {
         "a" | "zensim-a" => ZensimProfile::A,
-        "v0_2" | "preview-v0.2" | "preview_v0_2" => ZensimProfile::PreviewV0_2,
         other => {
             eprintln!("unknown --profile '{other}', defaulting to A");
             ZensimProfile::A

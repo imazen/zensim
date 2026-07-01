@@ -22,8 +22,7 @@
 
 use std::path::PathBuf;
 use zensim::{
-    PrecomputedReference, RgbSlice, Zensim, ZensimProfile, ZensimScratch,
-    profile::WEIGHTS_PREVIEW_V0_2,
+    PrecomputedReference, RgbSlice, Zensim, ZensimScratch, profile::WEIGHTS_PREVIEW_V0_2,
 };
 
 const SCALE0_BASIC_LEN: usize = 13 * 3;
@@ -86,7 +85,7 @@ fn main() {
         "/mnt/v/input/zensim/sources/03484c8be395c40d_1024sq.png",
     ];
 
-    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let z = Zensim::new(zensim_regress::profile::legacy_linear());
     let mut scratch = ZensimScratch::new();
 
     println!(

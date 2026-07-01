@@ -46,7 +46,7 @@ archmage = ["dep:archmage"]
 _internal_api = []
 
 [dependencies]
-zensim = { workspace = true, default-features = false, features = ["classification"] }
+zensim = { workspace = true, default-features = false, features = ["classification", "custom-profiles"] }
 archmage = { workspace = true, features = ["testable_dispatch"], optional = true }
 # Pixel ops backend — `image`-crate-free. zenresize for resampling,
 # zenpng for PNG IO. None of these crates' types appear in the public

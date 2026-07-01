@@ -65,15 +65,12 @@ fn main() {
     // no-op: `... || true`); a future `--sdr` toggle can reintroduce a parse.
     let hdr_only = true;
 
-    // Score each pair under several profiles in one EXR-decode pass (decode is
-    // the bottleneck). PreviewV0_2 = linear cube-root-tuned weights;
-    // A = 372-feature MLP. Lets us see which feature aggregation ranks PU-XYB
-    // best without re-decoding.
-    let profiles: [(&str, Zensim); 3] = [
-        ("zensim_v02", Zensim::new(ZensimProfile::PreviewV0_2)),
-        ("zensim_v01", Zensim::new(ZensimProfile::PreviewV0_1)),
-        ("zensim_a", Zensim::new(ZensimProfile::A)),
-    ];
+    // Score each pair in one EXR-decode pass (decode is the bottleneck).
+    // A = 372-feature MLP, the canonical shipping profile. (The historical
+    // linear V0_1 / V0_2 profiles were removed from `zensim`; if a linear
+    // comparison is wanted again, reconstruct one via
+    // `zensim_experimental::preview_v0_2()` and add it here.)
+    let profiles: [(&str, Zensim); 1] = [("zensim_a", Zensim::new(ZensimProfile::A))];
 
     let mut rdr = csv::Reader::from_path(&subjective).expect("open subjective csv");
     let headers = rdr.headers().expect("headers").clone();

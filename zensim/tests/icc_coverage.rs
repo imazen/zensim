@@ -6,25 +6,45 @@
 //!
 //! All tests use synthetic images — no S3 dependency.
 //!
-//! Run with: `cargo test -p zensim --test icc_coverage`
+//! Run with: `cargo test -p zensim --features custom-profiles --test icc_coverage`
+//!
+//! Gated on the `custom-profiles` feature: these tests assert metric SANITY
+//! (score in [0,100), identical = 100, wider-gamut → lower score) on
+//! ICC/gamut-converted content, which requires the correct-by-construction
+//! linear-bounded profile (see the `zensim()` helper). CI runs them in the
+//! `test-all-features` job. The default MLP profile `A` structurally violates
+//! these invariants on off-manifold synthetic content, so it cannot back them.
+#![cfg(feature = "custom-profiles")]
 
 mod common;
 
 use common::generators::*;
+use zensim::profile::ProfileParams;
 use zensim::{ColorPrimaries, PixelFormat, StridedBytes, Zensim, ZensimProfile};
 
 // These tests assert metric SANITY (score in [0,100), identical = 100,
 // wider-gamut → lower score) on ICC/gamut-converted content. The
 // gamut→feature pipeline is shared across profiles; only the final
 // scoring squash differs. We run them on the correct-by-construction
-// `LinearBounded` profile, whose [0,100] boundedness + monotonicity hold
-// by construction, so these assertions test the gamut path rather than
-// the (known-broken on off-manifold synthetic content) MLP squash of
+// linear-bounded `Custom` profile (`100·exp(−(a/100)·d^b)` over the
+// non-negative V0_2 linear weights), whose [0,100] boundedness +
+// monotonicity hold by construction — the same `LinearBounded` profile
+// the `zensim-experimental` crate ships. This tests the gamut path rather
+// than the (known-broken on off-manifold synthetic content) MLP squash of
 // profile `A`. A's invariant violations are tracked separately in
 // `tests/metric_invariants.rs::v39_known_limit_violations`. See
 // `docs/METRIC_INVARIANTS_MECHANISM_AND_REDESIGN_2026-05-26.md`.
+fn linear_bounded_params() -> &'static ProfileParams {
+    use std::sync::OnceLock;
+    static P: OnceLock<ProfileParams> = OnceLock::new();
+    P.get_or_init(|| ProfileParams::builder().bounded_squash(true).build())
+}
+
 fn zensim() -> Zensim {
-    Zensim::new(ZensimProfile::PreviewV0_2)
+    Zensim::new(ZensimProfile::Custom {
+        params: linear_bounded_params(),
+        name: "zensim-linear-bounded",
+    })
 }
 
 /// Helper: create StridedBytes from RGB u8 pixels with given primaries.

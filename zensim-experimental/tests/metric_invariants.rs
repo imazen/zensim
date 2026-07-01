@@ -107,12 +107,13 @@ fn linear_bounded_is_degradation_monotone() {
 }
 
 /// SROCC-equivalence guard: the bounded squash is a strictly-monotone
-/// transform of the same distance as `PreviewV0_2`, so for any fixed
-/// content the two profiles must rank a set of distortions identically.
+/// transform of the same distance as the linear `preview_v0_2`, so for
+/// any fixed content the two profiles must rank a set of distortions
+/// identically.
 #[test]
 fn linear_bounded_preserves_v0_2_ranking() {
     let z_bounded = Zensim::new(zensim_experimental::linear_bounded()).with_parallel(false);
-    let z_legacy = Zensim::new(ZensimProfile::PreviewV0_2).with_parallel(false);
+    let z_legacy = Zensim::new(zensim_experimental::preview_v0_2()).with_parallel(false);
     let src = gen_mandelbrot(W, H);
     let dists: Vec<Vec<[u8; 3]>> = (1..=6).map(|r| distort_blur(&src, W, H, r)).collect();
     let bounded: Vec<f64> = dists.iter().map(|d| score(&z_bounded, &src, d)).collect();
