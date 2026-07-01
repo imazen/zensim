@@ -252,3 +252,49 @@ MUTUALLY EXCLUSIVE:
 per_sample_alpha_head training so monotonicity is supervised ONLY on KADIS ladders,
 leaving codec-rank features free — the only untested path to BOTH. Payoff uncertain
 (generalization to held-out ladders unproven).
+
+## UPDATE 2026-07-01: TV wired into α-head — pure-hinge curve + regime crater
+
+The within-ladder TV path is now wired into `train_mlp_per_sample_alpha_head`
+(commit 5e6267cf). `--tv-weight` was previously a silent no-op on that head
+(dropped at the dispatch). It now fires a within-ladder hinge
+`max(0, y_harsher − y_milder)` at each Adam boundary, supervising monotonicity
+ONLY on the 448k KADIS adjacent-severity pairs (group 0, offset 0) and leaving
+codec-rank features free.
+
+**Pure-hinge tv-weight sweep** (cvvdp target on KADIS + ssim2 on multi-codec;
+held-out KADIS mono on the source_id%10==9 safety grid; Mohammadi via bake_verdict):
+
+| tv-weight | mono | CID22 | KADID | TID | AIC3 | raw range span |
+|---|---|---|---|---|---|---|
+| 0 (cvvdp_w1) | 0.085 | 0.876 | 0.851 | 0.844 | 0.784 | 20.9 (8.7..29.6) |
+| 0.5 | 0.457 | 0.876 | 0.803 | 0.737 | 0.791 | 6.2 (5.8..12.0) |
+| 1.0 | 0.711 | 0.865 | 0.724 | 0.606 | 0.774 | 4.1 (3.0..7.1) |
+| 2.0 | 0.912 | 0.862 | 0.594 | 0.477 | 0.751 | 2.7 (0.5..3.2) |
+| 5.0 | 0.995 | 0.848 | 0.409 | 0.325 | 0.719 | 1.9 (0.1..2.0) |
+| A (v47 ship) | 0.973 | 0.866 | 0.793 | 0.793 | 0.768 | n/a (has spline) |
+
+**TV genuinely fixes held-out monotonicity** (0.085 → 0.995) and, unlike
+monotone-cbc (CID22 0.37), **holds CID22** (0.85–0.88). This is the first
+mechanism to get both high mono AND high CID22.
+
+**But pure hinge has NO sweet spot.** Reaching the 0.93 mono gate needs tv≈2–3,
+where the cost lands as a clean **regime split**:
+- **Codec corpora are ROBUST**: CID22 0.876→0.862 (−0.014), AIC3 0.784→0.751.
+  The multi-codec RankNet protects codec rank.
+- **Analytic corpora CRATER**: KADID 0.851→0.594 (−0.26), TID 0.844→0.477 (−0.37).
+  KADIS/KADID/TID are the same analytic domain; over-constraining KADIS
+  monotonicity destroys analytic cross-image rank.
+- The **raw range span tracks the KADID crater almost perfectly** (20.9→6.2→4.1
+  →2.7→1.9 as KADID 0.85→0.80→0.72→0.59→0.41). The pure hinge is minimized by
+  collapsing every ladder flat.
+
+The range collapse itself is **cosmetic** (these α-head bakes carry no output
+spline; a ship-time monotone PCHIP maps raw→[0,100] preserving mono + SROCC).
+The KADID/TID rank crater is the real blocker — a spline can't fix rank.
+
+**Next: margin hinge** `max(0, y_harsher − y_milder + m)` (landed alongside
+the wiring; `--tv-margin`). Forces a minimum per-step gap, holding the ladder
+OPEN at high weight. Tests whether the KADID crater is (a) collapse-driven
+(margin recovers it) or (b) intrinsic analytic over-constraint (needs per-group
+α-gate supervision instead). Sweep w5×{m1.5,m3,m6} + w15×m3 in flight.

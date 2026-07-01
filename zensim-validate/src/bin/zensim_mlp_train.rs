@@ -223,6 +223,16 @@ struct Args {
     #[arg(long, default_value_t = 32)]
     tv_batch: usize,
 
+    /// Anti-collapse margin for the within-ladder TV hinge. Penalty
+    /// becomes `max(0, y_harsher - y_milder + margin)`, forcing a
+    /// minimum per-step gap between adjacent severity levels. 0.0 =
+    /// pure hinge (can collapse the ladder flat under high weight).
+    /// A small positive value (raw-output units) spreads the ladder,
+    /// preserving dynamic range + analytic-corpus rank while keeping
+    /// monotonicity. Only affects the --per-sample-alpha-head path.
+    #[arg(long, default_value_t = 0.0)]
+    tv_margin: f64,
+
     /// Per-band TV weights `[B0, B1, B2, B3]`. When set, the TV
     /// pairs file MUST include a `band_id` column (use
     /// `regen_tv_pairs.py --emit-bands`). Pair-specific weight
@@ -2317,6 +2327,7 @@ fn main() {
             batch: args.tv_batch,
             band_id,
             band_weights,
+            margin: args.tv_margin,
         })
     } else {
         None

@@ -1069,6 +1069,16 @@ pub struct TvRegularizer {
     /// scaling. Set to e.g. `[10.0, 20.0, 10.0, 10.0]` to push B1
     /// harder than other bands.
     pub band_weights: Option<[f64; 4]>,
+    /// Anti-collapse margin for the within-ladder hinge. The penalty
+    /// becomes `max(0, y_harsher - y_milder + margin)`, forcing a
+    /// minimum per-step gap of `margin` between adjacent severity
+    /// levels instead of merely non-increasing. A pure hinge
+    /// (margin=0) is minimized by collapsing every ladder flat, which
+    /// destroys dynamic range AND (empirically) craters cross-image
+    /// rank on analytic corpora; a positive margin spreads the ladder
+    /// instead. Units are the network's raw output scale. Default 0.0
+    /// (pure hinge).
+    pub margin: f64,
 }
 
 impl TvRegularizer {
@@ -5509,11 +5519,12 @@ fn train_mlp_per_sample_alpha_head(
     // the SAME training scaler (mirrors the anchor pool below) so the hinge
     // penalty operates in the network's input space.
     let tv_active = tv.map(|t| t.weight > 0.0 && !t.pairs.is_empty()).unwrap_or(false);
-    let (std_tv_features, tv_pairs_vec, tv_weight_val, tv_batch_val): (
+    let (std_tv_features, tv_pairs_vec, tv_weight_val, tv_batch_val, tv_margin_val): (
         Vec<Vec<f64>>,
         Vec<(usize, usize)>,
         f64,
         usize,
+        f64,
     ) = if let (Some(t), true) = (tv, tv_active) {
         let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(t.features.len());
         for f in t.features.iter() {
@@ -5525,19 +5536,20 @@ fn train_mlp_per_sample_alpha_head(
         }
         log_line(
             &format!(
-                "tv(α-head): ENABLED — {} within-ladder pairs, weight={:.3}, batch={} (hinge max(0, y_harsher − y_milder))",
+                "tv(α-head): ENABLED — {} within-ladder pairs, weight={:.3}, batch={}, margin={:.3} (hinge max(0, y_harsher − y_milder + margin))",
                 t.pairs.len(),
                 t.weight,
                 t.batch.max(1),
+                t.margin,
             ),
             log,
         );
-        (bufs, t.pairs.clone(), t.weight, t.batch.max(1))
+        (bufs, t.pairs.clone(), t.weight, t.batch.max(1), t.margin)
     } else {
         if tv.is_some() && !tv_active {
             log_line("tv: data supplied but weight=0 or no pairs — ignored", log);
         }
-        (Vec::new(), Vec::new(), 0.0, 0)
+        (Vec::new(), Vec::new(), 0.0, 0, 0.0)
     };
 
     // PreviewV0_5TunerV2 anchor data: standardize against the SAME
@@ -6986,7 +6998,13 @@ fn train_mlp_per_sample_alpha_head(
                         n_hidden_final, leaky, use_2layer, use_skip,
                     );
                     let (yhi, dyhi_dpre) = pin_forward(fwd_hi.y);
-                    let viol = yhi - ylo; // want harsher (hi) <= milder (lo)
+                    // Anti-collapse margin: enforce y_milder - y_harsher >= margin
+                    // (a minimum per-step gap) rather than merely non-increasing.
+                    // margin=0 is the pure hinge. The +margin is a constant offset,
+                    // so d(viol)/dy is unchanged — the gradient direction is identical;
+                    // it just fires on correctly-ordered pairs whose gap is too small,
+                    // spreading the ladder instead of letting it collapse flat.
+                    let viol = yhi - ylo + tv_margin_val;
                     if viol > 0.0 {
                         total_loss += tv_weight_val * viol;
                         n_steps += 1;
