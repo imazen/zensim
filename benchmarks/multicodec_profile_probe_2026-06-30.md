@@ -473,3 +473,55 @@ TV-constrained for artificial) — could in principle preserve cvvdp_w1's 0.876
 under mono, but it's a multi-crate change (trainer + arch + zensim runtime + bake
 format) with uncertain payoff against an already-optimal A. That is a deliberate
 R&D investment for the user to weigh, not a quick sweep.
+
+## CORRECTION PASS (2026-07-01, user-directed xref): the crater was partly misinterpreted data
+
+User: "cratering is usually misinterpreted data. check kadis700k especially against kadik."
+Three xref findings invalidate parts of the FINAL VERDICT above:
+
+### 1. TV-pair bug — 6.68% of pairs taught the WRONG order
+
+The 448k TV pairs were built from severity ordering for ALL dist types. But the
+signed/U-shaped types (7 color_saturate_hsv, 18 mean_shift, 25 contrast) were
+only excluded from the SAFETY GRID, not from the TV pairs. Per the parquet's own
+metrics: type 25 = 53.8% inverted (severity is a coin-flip for quality), type 18
+= 49.8%, type 23 color_block = 15.9%, type 7 = 9.4%. Overall 6.68% (~30k) of TV
+hinge pairs pushed y(harsher) ≤ y(milder) on rows where the training target says
+the harsher image looks BETTER — a direct gradient war on the analytic manifold.
+Every TV/dfx/gw/cw/hd bake above trained on these poisoned pairs; the KADID
+crater conclusions are contaminated. Clean rebuild: exclude 7/18/25 + keep only
+step-concordant pairs (cvvdp AND ssim2 non-increasing) → 364,775 pairs, 0.000%
+target-inversion (`kadis_tv_pairs_clean.tsv`).
+
+### 2. The safety-grid mono ceiling is 0.980, not 1.0
+
+cvvdp itself (the training target) has a 1.98% step-inversion rate on the
+included ladders (ssim2: 2.03%) — real quality is genuinely non-monotone in
+severity on ~2% of steps (concentrated in color_block/color_shift/denoise/jp2k,
+exactly where A's dial inversions live). So **A's mono 0.973 ≈ the oracle
+ceiling**, and the TV bakes' 0.995+ were OVER-shooting (flattening real quality
+reversals = rank damage). The right mono target band is ~0.96–0.98; treating
+0.99 as better than 0.97 was miscalibrated.
+
+### 3. Full-panel + per-band REVERSES the aggregate-SROCC story (SROCC-only ban vindicated)
+
+Extracting the full Mohammadi panel from the same verdicts:
+- **cvvdp_w1 beats A on the ENTIRE panel on 4/6 corpora** (CID22, KADID, TID,
+  AIC-3 — every stat: SROCC/PWRC/Z-RMSE/DS-AUC/geo3), ties AIC-4
+  (0.875 vs 0.885), and its HQ bands (CID22 B8/B9, KADID B6–B9) are at-or-above
+  A's.
+- **The genuine HQ-end weakness is KonJND** (JND/visually-lossless anchor): A
+  0.419 (already failing G5 ≥0.70), cvvdp_w1 0.310, dirty-TV gw_a010 0.030
+  (destroyed). Ship gates must include KonJND-no-regression, which the earlier
+  tables omitted.
+- Comparison-fairness note: A trained on kadid(0.5)+tid(0.5)+cid22_train(1.5)
+  (v47 manifest) — its KADID/TID numbers are train==val, and it had CID22-domain
+  human supervision the probe bakes lacked. KADID/TID are honest holdouts ONLY
+  for the probe bakes; part of A's CID22 edge may be data, not architecture.
+
+### Corrected experiment matrix (in flight)
+
+R1a/R1b: kadis(cvvdp) + codec + CLEAN TV @ {1.0, 2.5} — isolates the pair bug.
+R2: + cid22_train:1.5 (A's data advantage). R2k: + konjnd-dense:1.2 (full v47
+data parity minus kadid/tid). All eval: full panel + per-band + KonJND gate +
+KADIS safety (target band 0.96–0.98, oracle 0.980), KADID/TID as honest holdouts.
