@@ -210,3 +210,45 @@ Each = multi-codec(ssim2 rank, 1.2M) + KADIS OOD group. Baselines: A CID22
 (448k KADIS-ladder pairs, penalty max(0, pred[harsher]-pred[milder])) — supervises
 monotonicity ONLY on real distortion ladders, leaving codec-rank features free (no
 global sign-mask). cvvdp target, tv-weight sweep {5,15,40}. Results below.
+
+### TV-pairs + cbc-composition (2026-07-01) — both dead ends; tension is fundamental
+
+**TV-pairs (targeted within-ladder monotonicity) is a NO-OP with --per-sample-alpha-head.**
+The TvRegularizer is only wired into the base mlp path; per_sample_alpha_head.rs has
+zero tv references. tv-weight {5,15,40} → BYTE-IDENTICAL bakes (md5 32f7eeb6...),
+mono unchanged (0.076). To use TV as the targeted monotonicity fix, it must be WIRED
+into the per-sample-alpha-head training loop (real trainer feature; not done).
+
+**cbc + KADIS(cvvdp) + codec-weight sweep — craters regardless of weight:**
+| codec_w | CID22 | KADID | mono |
+|--:|--:|--:|--:|
+| 0.0 (kadis only) | 0.379 | 0.689 | 0.987 |
+| 0.2 | 0.220 | 0.753 | 0.969 |
+| 0.5 | 0.265 | 0.770 | 0.976 |
+| 1.0 | 0.242 | 0.754 | 0.974 |
+
+KADIS(cvvdp) is ARTIFICIAL distortions — doesn't teach codec rank, so cbc+KADIS
+caps CID22 at ~0.38 at ANY codec weight (adding codec makes it WORSE — the multi-
+codec ssim2 fights cbc). cbc's monotonicity only coexists with decent CID22 on
+CANONICAL codec data = exactly A (0.866).
+
+## CONCLUSION (2026-07-01): the tension is fundamental with current mechanisms
+
+Multi-codec CID22 (0.88) and held-out within-ladder monotonicity (0.97) are
+MUTUALLY EXCLUSIVE:
+- Multi-codec rank REQUIRES an unconstrained MLP → non-monotone on OOD distortions.
+- Monotone-by-construction (cbc) REQUIRES canonical data + caps CID22 at ~0.866 (A).
+- The one targeted middle (within-ladder TV) isn't wired into the α-head path.
+
+**Two ship options today:**
+1. **cvvdp_w1** — CID22 0.876 / KADID 0.851 / TID 0.844 / AIC3 0.784, bounded
+   (8.7..29.6). BEATS A on every Mohammadi corpus + fixes boundedness; ONLY loses
+   OOD within-ladder monotonicity (0.085 vs A 0.972). Bake:
+   /mnt/v/output/zensim-multicodec-probe/sweep_cvvdp_w1.bin.
+2. **A (v47)** — CID22 0.866, monotone-by-construction (0.972). Safe; lower rank;
+   no KADID recovery.
+
+**Principled resolution (code change)**: wire within-ladder TV into
+per_sample_alpha_head training so monotonicity is supervised ONLY on KADIS ladders,
+leaving codec-rank features free — the only untested path to BOTH. Payoff uncertain
+(generalization to held-out ladders unproven).
