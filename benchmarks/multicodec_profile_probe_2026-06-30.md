@@ -614,3 +614,20 @@ regression at every tested weight). Deliverables that stand: the KonJND lever
 (+0.06, weight-independent — a candidate ingredient for a KonJND/G5-focused
 variant), the corrected science (sign artifact, oracle ceiling, clean pairs),
 the KADIS held-out safety gate, and the v48 manifest family for reproduction.
+
+### @0.25 seed diagnostic — instability CONFIRMED; all single-seed deltas unproven (2026-07-01)
+
+| w0.25 | CID22 | KonJND | AIC3 | AIC4 | codec mono |
+|---|---|---|---|---|---|
+| seed 17 | 0.6380 | 0.4514 | 0.5228 | 0.4151 | 0.9781 |
+| seed 31 | **0.8585** | 0.4017 | **0.7874** | **0.8967** | 0.9724 |
+| A (ship) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.9747 |
+
+seed31@0.25 lands AT A on CID22 (−0.007) and ABOVE A on AIC-3 (+0.019) and
+AIC-4 (+0.011) with healthy dials — while seed17 at the identical config had
+collapsed. Run-to-run spread of 0.22 SROCC on CID22 means **every single-seed
+delta in the tables above (including "KonJND +0.06" and "CID22 −0.04") is
+unproven**. Per experiment-rigor policy the verdict moves to seed-means:
+seeds {7,47} × weights {0.10,0.25} in flight (→ 3-4 seeds per weight incl.
+existing runs). Note the KonJND gain also flipped at seed31 (0.402 < A) — the
+gain may itself be seed-luck; seed-mean will tell.
