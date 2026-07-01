@@ -1200,6 +1200,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
             equiv,
             pjnd_anchor,
             konjnd_agg,
+            tv,
         );
     }
     if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
@@ -5145,6 +5146,7 @@ fn train_mlp_per_sample_alpha_head(
     equiv: Option<&EquivPairs<'_>>,
     pjnd_anchor: Option<&AnchorRows<'_>>,
     konjnd_agg: Option<&KonjndAggregationPool<'_>>,
+    tv: Option<&TvRegularizer>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
@@ -5499,6 +5501,44 @@ fn train_mlp_per_sample_alpha_head(
             buf
         })
         .collect();
+
+    // Within-ladder monotonicity TV pairs (KADIS severity ladders), wired into
+    // the per-sample-α path 2026-07-01. Previously the TvRegularizer was dropped
+    // at the dispatch (train_mlp_with_tv_anchored_equiv_pjnd → this fn), so TV was
+    // a silent no-op on this head. Standardize the TV endpoint features against
+    // the SAME training scaler (mirrors the anchor pool below) so the hinge
+    // penalty operates in the network's input space.
+    let tv_active = tv.map(|t| t.weight > 0.0 && !t.pairs.is_empty()).unwrap_or(false);
+    let (std_tv_features, tv_pairs_vec, tv_weight_val, tv_batch_val): (
+        Vec<Vec<f64>>,
+        Vec<(usize, usize)>,
+        f64,
+        usize,
+    ) = if let (Some(t), true) = (tv, tv_active) {
+        let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(t.features.len());
+        for f in t.features.iter() {
+            let mut buf = vec![0.0f64; n_features];
+            for d in 0..n_features {
+                buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+            }
+            bufs.push(buf);
+        }
+        log_line(
+            &format!(
+                "tv(α-head): ENABLED — {} within-ladder pairs, weight={:.3}, batch={} (hinge max(0, y_harsher − y_milder))",
+                t.pairs.len(),
+                t.weight,
+                t.batch.max(1),
+            ),
+            log,
+        );
+        (bufs, t.pairs.clone(), t.weight, t.batch.max(1))
+    } else {
+        if tv.is_some() && !tv_active {
+            log_line("tv: data supplied but weight=0 or no pairs — ignored", log);
+        }
+        (Vec::new(), Vec::new(), 0.0, 0)
+    };
 
     // PreviewV0_5TunerV2 anchor data: standardize against the SAME
     // training-group scaler (consistent with the bake's runtime scaler;
@@ -6906,6 +6946,89 @@ fn train_mlp_per_sample_alpha_head(
                             n_hidden_final,
                         );
                     }
+                }
+            }
+
+            // Within-ladder monotonicity TV step (KADIS ladders, 2026-07-01).
+            // For each sampled pair (lo = milder/higher-quality, hi = harsher/
+            // lower-quality) apply a hinge penalty max(0, y_hi − y_lo): push the
+            // harsher sample DOWN and the milder UP only when the metric has them
+            // out of order. Supervises monotonicity ONLY on real distortion
+            // ladders, leaving codec-rank feature combinations FREE (no global
+            // sign-mask) — the targeted middle the cbc-vs-multicodec tension
+            // needs. Fires at Adam boundaries like the anchor/pjnd/equiv aux
+            // steps; consumes RNG only when tv_active, so non-TV bakes stay
+            // bit-identical.
+            if tv_active && steps_since_adam == 0 && !tv_pairs_vec.is_empty() {
+                let n_tv = tv_pairs_vec.len();
+                let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
+                let mut g_rank_b_buf = 0.0f64;
+                let mut g_red_w: [f64; 4] = [0.0; 4];
+                let mut g_red_b: f64 = 0.0;
+                let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
+                let mut g_b_alpha: f64 = 0.0;
+                let mut any_step = false;
+
+                for _ in 0..tv_batch_val {
+                    let pick = (rng.next_f64_unit() * n_tv as f64) as usize;
+                    let (lo, hi) = tv_pairs_vec[pick.min(n_tv - 1)];
+                    let xlo = std_tv_features[lo].as_slice();
+                    let xhi = std_tv_features[hi].as_slice();
+                    let fwd_lo = arch_forward(
+                        xlo, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip, &rank_w, rank_b,
+                        &reducer_w, reducer_b, &w_alpha, b_alpha, n_features, n_hidden,
+                        n_hidden_final, leaky, use_2layer, use_skip,
+                    );
+                    let (ylo, dylo_dpre) = pin_forward(fwd_lo.y);
+                    let fwd_hi = arch_forward(
+                        xhi, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip, &rank_w, rank_b,
+                        &reducer_w, reducer_b, &w_alpha, b_alpha, n_features, n_hidden,
+                        n_hidden_final, leaky, use_2layer, use_skip,
+                    );
+                    let (yhi, dyhi_dpre) = pin_forward(fwd_hi.y);
+                    let viol = yhi - ylo; // want harsher (hi) <= milder (lo)
+                    if viol > 0.0 {
+                        total_loss += tv_weight_val * viol;
+                        n_steps += 1;
+                        let dl_dy_hi = tv_weight_val * dyhi_dpre; // push y_hi down
+                        let dl_dy_lo = -tv_weight_val * dylo_dpre; // push y_lo up
+                        arch_backward(
+                            xhi, &fwd_hi, dl_dy_hi, &w1, &w2_enc, &rank_w, &reducer_w,
+                            &w_alpha, &mut adam.gw1, &mut adam.gb1, &mut g_rank_w_buf,
+                            &mut g_rank_b_buf, &mut g_red_w, &mut g_red_b, &mut g_w_alpha_buf,
+                            &mut g_b_alpha, n_features, n_hidden, n_hidden_final, leaky,
+                            use_2layer, use_skip,
+                        );
+                        arch_backward(
+                            xlo, &fwd_lo, dl_dy_lo, &w1, &w2_enc, &rank_w, &reducer_w,
+                            &w_alpha, &mut adam.gw1, &mut adam.gb1, &mut g_rank_w_buf,
+                            &mut g_rank_b_buf, &mut g_red_w, &mut g_red_b, &mut g_w_alpha_buf,
+                            &mut g_b_alpha, n_features, n_hidden, n_hidden_final, leaky,
+                            use_2layer, use_skip,
+                        );
+                        any_step = true;
+                    }
+                }
+
+                if any_step {
+                    for j in 0..n_hidden_final {
+                        adam.gw2[j] += g_rank_w_buf[j];
+                    }
+                    for kk in 0..4 {
+                        adam.gw2[n_hidden_final + kk] += g_red_w[kk];
+                    }
+                    for j in 0..n_hidden_final {
+                        adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
+                    }
+                    adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
+                    adam.gb2[0] += g_rank_b_buf;
+                    adam.gb2[1] += g_red_b;
+
+                    do_adam_step(
+                        &mut adam, &mut w1, &mut b1, &mut w2_enc, &mut b2_enc, &mut w_skip,
+                        &mut b_skip, &mut rank_w, &mut rank_b, &mut reducer_w, &mut reducer_b,
+                        &mut w_alpha, &mut b_alpha, lr, n_hidden_final,
+                    );
                 }
             }
 
@@ -10509,6 +10632,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "per-sample-α head produced empty bake");
         assert!(
@@ -10547,6 +10671,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
@@ -10621,6 +10746,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty());
         // Goals policy should produce a goals breakdown in the log.
@@ -10658,6 +10784,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
@@ -10704,6 +10831,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "2-layer variant produced empty bake");
         assert!(
@@ -10740,6 +10868,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
@@ -10781,6 +10910,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "2-layer+skip produced empty bake");
     }
@@ -10818,6 +10948,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
