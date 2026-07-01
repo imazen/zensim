@@ -584,3 +584,33 @@ on the G5/HQ weakness without cratering elsewhere), **both dials at-or-above A**
 the artificial data dilutes codec/human rank under cbc's constrained capacity.
 Weight sweep w∈{0.1, 0.25} in flight to find whether the KonJND/dial gains
 survive at a weight that doesn't cost CID22.
+
+### v48-kadis weight sweep — trade is real, weight-independent, and unstable (2026-07-01)
+
+| bake (seed 17) | CID22 | KonJND | AIC3 | AIC4 | codec dial | KADIS safety |
+|---|---|---|---|---|---|---|
+| A (ship) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.9747 / G1✓ | 0.9726 |
+| v48 kadis@0.10 | 0.8231 | 0.4802 | 0.7442 | 0.8644 | 0.9783 / G1✓ | 0.9791 |
+| v48 kadis@0.25 | **0.6380 ⚠** | 0.4514 | **0.5228 ⚠** | **0.4151 ⚠** | 0.9781 / G1✓ | 0.9751 |
+| v48 kadis@0.50 | 0.8136 | 0.4812 | 0.7285 | 0.8422 | 0.9783 / G1✓ | 0.9758 |
+
+1. **The KonJND gain (+0.06) is weight-INdependent** (0.480 @0.10 ≈ 0.481 @0.50)
+   — KADIS's near-threshold artificial ladders teach JND discrimination the
+   canonical corpus lacks, even at 2% sampling.
+2. **The CID22/AIC cost does NOT tune away** — even @0.10, CID22 −0.043. The
+   dilution is not proportional to sampling share; it's the cbc-constrained
+   capacity re-allocating to the artificial manifold.
+3. **@0.25 is catastrophically non-monotone in weight** (CID22 0.638, AIC4
+   0.415 while dials stay fine) — a training-instability signature under the
+   v47 recipe + kadis, NOT a smooth trade curve. Single-run numbers here carry
+   large variance; seed-31 diagnostic at @0.25 in flight. ANY ship decision in
+   this family requires multi-seed confirmation.
+4. Dials are uniformly at-or-above A across all weights (codec 0.978 G1✓,
+   KADIS safety 0.975–0.979): the v47 orientation/cbc/spline machinery absorbs
+   KADIS with zero dial risk. The trade is purely on the rank panel.
+
+**Cycle verdict:** v48-kadis does not beat A for the dial product (CID22
+regression at every tested weight). Deliverables that stand: the KonJND lever
+(+0.06, weight-independent — a candidate ingredient for a KonJND/G5-focused
+variant), the corrected science (sign artifact, oracle ceiling, clean pairs),
+the KADIS held-out safety gate, and the v48 manifest family for reproduction.
