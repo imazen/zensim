@@ -525,3 +525,43 @@ R1a/R1b: kadis(cvvdp) + codec + CLEAN TV @ {1.0, 2.5} — isolates the pair bug.
 R2: + cid22_train:1.5 (A's data advantage). R2k: + konjnd-dense:1.2 (full v47
 data parity minus kadid/tid). All eval: full panel + per-band + KonJND gate +
 KADIS safety (target band 0.96–0.98, oracle 0.980), KADID/TID as honest holdouts.
+
+### 4. THE BIG ONE — probe bakes are direction-INVERTED on KADIS (sign-convention artifact)
+
+Per-type dial spans exposed it: A ascends (`blur_gauss −12.8 → 97.7`) but
+cvvdp_w1 DESCENDS on the KADIS safety grid (`27.5 → 3.6`) while ASCENDING on the
+standard codec dial (3.9 → 119.4) and on human corpora (signed AIC-4 +0.875).
+The α-head probe bakes (no anchor/spline/tanh-pin) have **regime-split
+orientation** — the trainer's RankNet is distance-convention ("sigmoid
+cross-entropy on signed distance"), MSE is score-convention, and without v47's
+orientation anchors the loss war settles differently per content regime.
+
+Consequences:
+- **cvvdp_w1's "mono 0.085" was a MISREAD**: 91.5% of its safety-grid steps move
+  consistently DOWN (descending dial), only 1.02% are true own-direction
+  inversions → own-direction mono ≈ 0.99, at the oracle ceiling. The number that
+  launched the whole TV campaign was a sign artifact.
+- **Every TV bake was fighting the sign, not enforcing monotonicity**: the hinge
+  (score-convention: y_harsher ≤ y_milder) PUNISHED the correct distance-shaped
+  ordering on ~ALL pairs — hence range collapse, KADID/TID/KonJND craters, and
+  "mono improving" (dial flattened toward 0 slope). Clean pairs changed nothing
+  because the poisoned 6.68% was noise next to a 100% sign war. All 18+ probe-TV
+  bakes are artifacts; the remaining clean-TV queue was killed.
+- **cvvdp_w1 is still NOT a dial** — direction-aware, its codec-dial mono is
+  0.784 with 68% sub-resolution (flat) steps, and one global monotone spline
+  cannot fix a regime-split orientation. It remains a strong RANKER only.
+- The safety grid itself is verified correct (q = 6 − severity, exact feature
+  match to canonical; ascending q = ascending quality).
+
+### The experiment that was never run (next): v47 recipe + KADIS group
+
+Everything points to injecting KADIS into A's own recipe rather than rebuilding
+from probe scratch: v47's cbc + tanh-pin + anchor-spline enforce a consistent,
+oriented, calibrated dial BY CONSTRUCTION (dial mono 0.973 ≈ oracle), while the
+KADIS data supplies the artificial-distortion coverage that lifted the probe
+bakes' rank panel everywhere. The earlier "cbc+kadis craters CID22 to 0.37"
+result came from probe-style configs (NO anchor/spline/canonical groups) — the
+v47-manifest-with-kadis variant is untested. Plan: copy
+`zensim/weights/manifests/v47_strict_qat.toml`, add
+`kadis:kadis_cvvdp_train.parquet` at modest weight (0.3–0.5), train, full-panel
++ both dials + per-band vs A.
