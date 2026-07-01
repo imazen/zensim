@@ -298,3 +298,30 @@ the wiring; `--tv-margin`). Forces a minimum per-step gap, holding the ladder
 OPEN at high weight. Tests whether the KADID crater is (a) collapse-driven
 (margin recovers it) or (b) intrinsic analytic over-constraint (needs per-group
 α-gate supervision instead). Sweep w5×{m1.5,m3,m6} + w15×m3 in flight.
+
+### Margin hinge FALSIFIED (2026-07-01)
+
+Sweep at tv-weight 5 with `--tv-margin` {1.5, 3.0} (each forces a min per-step
+gap, holding the ladder OPEN):
+
+| bake | CID22 | KADID | TID | mono | raw range |
+|---|---|---|---|---|---|
+| pure w5 (m0) | 0.848 | 0.409 | 0.325 | 0.995 | 0.1..2.0 (span 1.9) |
+| w5 m1.5 | 0.796 | 0.300 | 0.200 | 0.976 | −2.0..5.1 (span 7.1) |
+| w5 m3.0 | 0.706 | 0.333 | 0.263 | 0.971 | −4.2..8.0 (span 12.2) |
+
+The margin **opened the range** exactly as designed (span 1.9→7.1→12.2) but made
+**everything worse** — CID22 0.848→0.706, KADID stayed cratered ~0.3. This
+**falsifies the collapse-driven-crater hypothesis**: the range collapse under
+pure hinge was a *symptom*, not the cause. The KADID/CID22 crater is the
+monotonicity constraint itself over-writing the analytic feature→score map, and
+margin *adds* constraint (a minimum gap on every pair) → more distortion → worse
+rank. Mechanism (b) confirmed: intrinsic analytic over-constraint.
+
+**Consequence:** neither low weight (insufficient mono) nor margin (worsens
+crater) resolves it. The fix must **supply the analytic rank signal directly**
+rather than hope range-preservation recovers it. Next: add kadid+tid as training
+groups (direct rank supervision, canonical [0,1] parquets) alongside pure TV, so
+the network has explicit analytic rank targets while TV enforces KADIS mono.
+KADID/TID then become train==val integrity guards; honest rank holdouts are
+CID22 + AIC3; safety is held-out KADIS mono. Sweep dfx_tv{2,3,5} in flight.
