@@ -69,6 +69,7 @@ fn main() {
 
     let pairs: Vec<Pair> = match corpus.as_str() {
         "konjnd" => load_konjnd(&path, max_pairs),
+        "konfig" => load_konfig(&path, max_pairs),
         "konjnd_full" => load_konjnd_full(&path, max_pairs),
         "aic3" => load_aic3(&path, max_pairs),
         "aic4" => load_aic4(&path, max_pairs),
@@ -196,6 +197,61 @@ fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<(String, f64)>, Vec<f
         kp.extra_targets.clone(),
         features,
     ))
+}
+
+
+/// KonFiG-IQA (Men/Lin/Jenadeleh/Saupe 2021): 10 sources x 7 distortions x
+/// 12 levels @ 0.25 JND (Part A) + motion blur x 30 levels @ 0.1 JND
+/// (Part B). Levels are calibrated to uniform JND spacing BY DESIGN, so the
+/// per-stimulus target comes from the level index directly — no Thurstonian
+/// reconstruction needed for ingestion. Emits human_score = 1 - q/3.2 (a
+/// [0,1] quality scale, rank-identical to the JND grid) + a native `q_jnd`
+/// extra target column. Level 0 = pristine copy → identity anchor rows.
+/// `path` = the KonFiG-IQA root (contains IMAGES/).
+fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
+    let images = base.join("IMAGES");
+    let mut pairs = Vec::new();
+    for (part, step) in [("PartA", 0.25_f64), ("PartB", 0.1_f64)] {
+        let part_dir = images.join(part);
+        let Ok(srcs) = std::fs::read_dir(&part_dir) else { continue };
+        for src in srcs.flatten() {
+            let src_name = src.file_name().to_string_lossy().to_string();
+            let reference = images
+                .join("reference_images")
+                .join(format!("{src_name}_0.png"));
+            if !reference.is_file() {
+                eprintln!("konfig: missing reference for {src_name}");
+                continue;
+            }
+            let Ok(dists) = std::fs::read_dir(src.path()) else { continue };
+            for dist in dists.flatten() {
+                let Ok(files) = std::fs::read_dir(dist.path()) else { continue };
+                for f in files.flatten() {
+                    let fname = f.file_name().to_string_lossy().to_string();
+                    let Some(level) = fname
+                        .trim_end_matches(".png")
+                        .rsplit('_')
+                        .next()
+                        .and_then(|t| t.parse::<u32>().ok())
+                    else {
+                        continue;
+                    };
+                    let q_jnd = step * level as f64;
+                    pairs.push(Pair {
+                        reference: reference.clone(),
+                        distorted: f.path(),
+                        human_score: 1.0 - q_jnd / 3.2,
+                        ref_basename: format!("{src_name}_{part}"),
+                        extra_targets: vec![("q_jnd".into(), q_jnd)],
+                    });
+                    if pairs.len() >= max {
+                        return pairs;
+                    }
+                }
+            }
+        }
+    }
+    pairs
 }
 
 fn load_konjnd(base: &Path, max: usize) -> Vec<Pair> {

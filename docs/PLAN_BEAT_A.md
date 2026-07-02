@@ -90,3 +90,26 @@ c. **Within-ref pairwise eval in bake_verdict** (Table-6 regime): for each
 - Ship path when gates pass: QAT-native artifact → methodology doc
   (`benchmarks/` template per CLAUDE.md shipping policy) → `include_bytes!`
   swap proposal → USER sign-off.
+
+## Amendment 2026-07-02 (user directive): replicate-then-surpass ssim2; avif descoped
+
+User: "I don't want avif. I want to train zensim with existing data and make
+something that can replicate and surpass ssim2, integrating [KonFiG-IQA]."
+
+- **avif 4-metric fill: DESCOPED.** Runs `fill-avif-cpu-b0..b7` are paused
+  (manifests + indexes + partial blobs preserved on R2; resumable via
+  `hetzner_scorefile_launch.sh` if ever wanted). No fleet spend on avif.
+- **The v53 program — replicate ssim2's tuning recipe, then surpass it:**
+  ssim2 was Nelder-Mead-tuned on CID22-201 + TID2013 + KADID-10k + KonFiG-IQA.
+  We now hold all four locally. v53 trains on:
+  - *Replicate axis:* cid22_train (ssim2-anchored, 201 refs), kadid, tid,
+    **konfig (NEW)** — per-stimulus JND targets from the design grid
+    (levels calibrated to 0.25/0.1 JND spacing; `load_konfig` in
+    extract_features_372col; human_score = 1 − q_jnd/3.2 + native q_jnd col).
+  - *Surpass axis (data ssim2 never saw):* safesyn, konjnd-dense, kadis-700k
+    (cvvdp), bigcodec_hqdedup (2.32M deduped codec cells incl. jxl HQ fill),
+    and — Bet 2, unchanged — AIC-3 triplets + SDR25.
+  - *Gates:* CID22-49 SROCC ≥ 0.8854 (ssim2's own number on its own
+    holdout), SDR25 pooled ≥ 0.958, KonJND ≥ A's 0.4185, v52's dial/safety
+    gates unchanged. KonFiG itself is in-sample for BOTH sides once trained
+    on — it is a training set here, never a scoreboard.
