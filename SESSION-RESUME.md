@@ -63,10 +63,11 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
 
 ## In-flight at last update (check before starting new work)
 
-- zen-train-1: bootstrap → auto-handoff grid (v51box_s17 cross-machine
-  determinism check + v51 s47/s63) → pull → RETIRE. Check
-  `bash scripts/hetzner/hz.sh status 159.69.55.206` (IP may have changed —
-  `hcloud server list`).
+- zen-train-1: RETIRED by user 2026-07-02 before the grid ran (snapshot
+  `zen-train-1-1782989687` is the restore base). The box grid (v51box_s17
+  cross-machine determinism check + v51 s47/s63) is DEFERRED — on the next
+  box: `hz.sh restore zen-train-1` → push-manifests → run (hardened runcells
+  with validate-parquet preflight is already in the repo).
 - Multi-metric backfill of the 5.7M corpus (user fleet) → gates Bet 1/wave-4.
 - Next unstarted builds, in order: SDR25 JND reconstruction (T0 corpus);
   test-digit rebuild of HQ/dial grids; within-ref pairwise eval in
