@@ -61,27 +61,45 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
 - One persistent quiet Monitor per session for terminal events; state lives in
   files (status.tsv, logs, benchmarks/), not conversation context.
 
-## In-flight at last update (2026-07-02 eve — check before starting new work)
+## In-flight at last update (2026-07-02 ~22:30Z — check before starting new work)
 
-- **zen-train-1 RESTORED** (159.69.55.206) running the v52 grid chain
-  (`box_v52_chain6.log` in the probe dir): v51box_s17 determinism check +
-  v52_s17/s7/s31 (dedup+hqfill corpus). Retire (`hz.sh retire`) after pull.
-  Data path is RSYNC-PINNED-INPUTS (on-box rebuild diverged from manifest
-  pins — bca4f6bd); bootstrap deps gate numpy/scipy; restore scrubs host keys.
-- **avif 4-metric fill fleet**: 8 vast runs `fill-avif-b0..b7-2026-07-02`
-  (image `exec-gpu-hqfillA-d5a142e0e166` — plain `exec-gpu` tag is GONE from
-  ghcr; fleet.env default stale). b0 verified writing blobs. Merge sidecar
-  when done → extend mm6 with avif.
-- **Built today**: `bigcodec_hqdedup_{train,val}digits` (deduped+hqfill, v52
-  inputs); `bigcodec_mm6_traindigits` (1.57M rows, 4 metrics joined — Bet-1
-  input); `hqfill_7metric_sidecar`; SDR25 T0 anchor (A FAILS the SDR25≥ssim2
-  gate: pooled 0.904 vs 0.958 — the target to beat).
-- **Pending in zenmetrics** (blocked on `claude-pngfix` marker):
-  build_scorefile_from_pairs.py + launcher overrides commit; re-push a stable
-  exec-gpu tag or repoint fleet.env.
-- Backfill: fill4 sidecar landed (patched variant is canonical; avif in
-  flight); hqfill was already 7-metric-scored. Remaining prereqs: test-digit
-  HQ/dial grid rebuild; within-ref pairwise eval in bake_verdict.
+**Program of record: v53 replicate-then-surpass ssim2** (PLAN_BEAT_A amendment
+2026-07-02). avif fill DESCOPED by user (runs paused on R2, resumable).
+
+- **Train box zen-train-1 (159.69.55.206, ccx63 $1.80/hr)** is running
+  **wave-2 under systemd unit `wave2`**: v52_s47/s63 + v53_s17/s7/s31/s47/s63
+  at PAR=7 (~2 waves × ~11 min). Check: `hz.sh status 159.69.55.206` or
+  `ssh -i ~/.ssh/zen-arm-dev root@IP 'systemctl status wave2; cat /data/out/status.tsv'`.
+  When done: `hz.sh pull`, plus `rsync root@IP:/data/derived/v5*.bin` (bake
+  files land in /data/derived via the path symlink — manifest [bake].file
+  points at the probe dir). THEN `hz.sh retire zen-train-1` (MANDATORY).
+  NOTE the box is ~2× oversized for 4-cell grids — restore ccx53/43 next time
+  unless running ≥6 cells (user cost question 2026-07-02).
+- **v52 wave-1 DONE + pulled** (hetzner-out/ + v52_s*.bin in the probe dir):
+  CID22 SROCC s17 0.8512 / s7 0.8275 / s31 0.7150 — all below A's 0.8657,
+  seed spread is BACK on the deduped corpus (the 22% knob-no-op dups in v51's
+  corpus likely acted as regularization — investigate before concluding).
+  Dial healthy: mono 0.9786 (target band), 0 dead zones. Full verdicts:
+  /tmp/v52_s*.verdict.md (regenerate: bake_verdict --bake <bin> — seconds).
+- **v53 = v52 + konfig group** (KonFiG-IQA ingested: 1,090-row parquet,
+  JND-design-grid targets; loader `--corpus konfig` in extract_features_372col).
+  Gates: CID22-49 ≥ 0.8854 (ssim2's own number), SDR25 pooled ≥ 0.958 (A is
+  at 0.904; scoreboard via sdr25_eval_pairs.tsv + zenmetrics batch), KonJND ≥
+  0.4185, dial/safety as v52.
+- **SDR25 T0 anchor BUILT** (sdr25_jnd_reconstructed_2026-07-02.parquet +
+  scripts/v_next/reconstruct_sdr25_jnd.py). KonFiG recovered + Tower-mirrored.
+- **Multimetric Bet-1 input BUILT**: bigcodec_mm6_traindigits (1.57M rows,
+  cvvdp/butter/dssim/iwssim joined; avif absent by descope). hqfill 7-metric
+  sidecar aggregated (62,258 cells).
+- **Infra rules learned today (all committed)**: hz.sh run uses the REPO
+  runcells (scp copies go stale); restored boxes need known_hosts scrub +
+  numpy/scipy + path-map symlinks (all in bootstrap now); pinned inputs
+  RSYNC from workstation (on-box rebuilds diverge); per-input manifest
+  contracts (target_range/validate_kind/allow_dup_rate) — safesyn is
+  [-8,1.001], kadis [-0.5,1.001]; **use systemd-run on boxes** (nohup-over-ssh
+  dies with the session); vastai destroy needs -y (returns rc=0 on abort).
+- Concurrent-session etiquette: check zenmetrics .workongoing before
+  committing there (claude-pngfix was active most of today).
 
 ## Older state
 

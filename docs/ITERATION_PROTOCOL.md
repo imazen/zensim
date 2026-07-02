@@ -88,3 +88,15 @@ picker join bug), row-count/sha drift vs manifests, split-rule violations.
 - Trusting train==val selection → collapse-blind; held-out val required.
 - Comparing single seeds, or scoreboarding vs ssim2 on KADID/TID (in-sample
   for it) — see DATA_SPLITS §3.
+
+## Seed fan-out + box discipline (added 2026-07-02 late)
+
+- **Fan out seeds to fill the box**: a ccx63 (48c) runs PAR=8 cells at
+  RAYON_NUM_THREADS=6. Queue 5-seed × N-recipe waves (10+ cells), not serial
+  3-cell trickles. Cells are ~7-14 min → a 10-cell wave ≈ 25 min wall.
+- **systemd-run for anything long on a box** (`systemd-run --unit=NAME
+  --collect bash script...`) — nohup-over-ssh dies when the session drops.
+- **Box sizing**: ccx53/43 for ≤5-cell grids; ccx63 only for ≥6-cell waves
+  (user cost directive 2026-07-02; the idle-grid incident cost ~$1.90).
+- **bake files**: manifests' [bake].file lands via the path symlink in
+  /data/derived — pull bins separately from hz.sh pull (which grabs /data/out).
