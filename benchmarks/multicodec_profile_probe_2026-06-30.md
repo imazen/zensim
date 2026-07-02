@@ -994,3 +994,24 @@ per-box generation tars (recorded per-cell in canonical `pairs.*.parquet`
 chunked manifest — no local disk) + `gpu_scorefile_launch.sh` env overrides
 (`ZEN_TAR_OVERRIDE`, `ZEN_CORPUS_PREFIX_OVERRIDE`). Refs resolve from
 `codec-corpus/clean-picker-corpus-2026-06-26/`.
+
+## Bet-1 input built: bigcodec_mm6_traindigits_2026-07-02.parquet (2026-07-02)
+
+`/mnt/v/output/zensim-multicodec-probe/bigcodec_mm6_traindigits_2026-07-02.parquet`
+— **1,565,469 LSD-train rows × (ref_basename, human_score=ssim2/100, score_cvvdp,
+score_butteraugli, score_dssim, score_iwssim, f0..f371)**. Sources: the 6
+sidecar-covered canonical datasets (jpeg/jxl×2/png/webp×2 — avif pending its
+fleet fill) joined to `fill4metrics_sidecar_patched_2026-07-02.parquet` on
+encoded_filename (mode-B NaNs kept as masks, 0.35% of rows), plus the 62k jxl
+hqfill rows joined to `hqfill_7metric_sidecar_2026-07-02.parquet`
+(hq_nomatch=0). Content-deduped with the same 4-tuple key as the v52 corpus
+(637,306 knob-no-op dups dropped). validate_parquet: ALL CHECKS PASSED.
+
+Premise check (pooled per-zone Spearman, 200k samples/zone — the coarse
+cross-image version; the HQ instrument's within-ladder 0.48 stat remains the
+binding measurement): ssim2↔cvvdp agreement degrades from 0.585 in [0.7,0.85)
+to **0.344 in [0.95,1.0)** while ssim2↔(−butteraugli) rises to 0.603 there —
+the labels genuinely diverge in the HQ band, so a multi-metric HQ target
+carries signal ssim2-alone lacks. Wave-4 recipes should compute blend targets
+at training time from the raw metric columns (masking NaN), not bake a single
+blend into the parquet.

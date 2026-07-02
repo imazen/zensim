@@ -125,6 +125,13 @@ Per the README (read 2026-07-02): ssim2 was Nelder-Mead-tuned on **CID22
 
 ---
 
+### §3b. Derived training corpora (registered builds)
+
+| Build | Rows | Contract |
+|---|--:|---|
+| `bigcodec_hqdedup_{train,val}digits_2026-07-02` | 2,322,579 / 114,871 | canonical 7-dataset + jxl-hqfill, content-deduped (22.2% knob-no-op dups removed), LSD splits, C10<1% |
+| `bigcodec_mm6_traindigits_2026-07-02` | 1,565,469 | 6 sidecar-covered datasets + hqfill, 4 metric columns joined (patched sidecar; mask-per-metric NaN 0.35%), deduped, LSD-train only. Bet-1 input; avif joins after its fleet fill |
+
 ## 4. Instruments (T3) — provenance + known content overlap
 
 | Instrument | Content source | Overlap caveat |
