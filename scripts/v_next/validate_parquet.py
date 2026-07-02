@@ -99,7 +99,7 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
             break  # eval/grid: sampled is enough
     check(null_bad == 0, "C3", f"nulls/NaN in target+first-64 feats: {null_bad}")
     check(inf_bad == 0, "C4", f"Inf values: {inf_bad}")
-    if has_target:
+    if has_target and kind in ("train", "eval"):
         lo, hi = target_range
         check(lo <= tmin and tmax <= hi, "C5b", f"target range [{tmin:.4f}, {tmax:.4f}] within [{lo}, {hi}]")
     nconst = int(const_candidates.sum()) if const_candidates is not None else -1
@@ -143,8 +143,14 @@ def main():
                 p = p.replace("{canonical}", m["inputs"]["canonical_root"]["local"])
             if not p.endswith(".parquet"):
                 continue
-            validate(p, kind="train", expect_rows=inp.get("rows"), expect_sha=inp.get("sha256"),
-                     target_range=tr, target_col=a.target_col)
+            # per-input contract keys (optional, declared in the manifest):
+            #   target_range = [lo, hi]   validate_kind = "grid"|"eval"|"train"
+            #   target_column = "..."     allow_dup_rate = 0.30
+            validate(p, kind=inp.get("validate_kind", "train"),
+                     expect_rows=inp.get("rows"), expect_sha=inp.get("sha256"),
+                     target_range=tuple(inp.get("target_range", tr)),
+                     target_col=inp.get("target_column", a.target_col),
+                     allow_dup_rate=inp.get("allow_dup_rate", 0.01))
     contracts = {}
     if a.contracts and os.path.exists(a.contracts):
         import json

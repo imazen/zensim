@@ -108,6 +108,7 @@ tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
 path = "{canonical}/safesyn.parquet"
 sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
 rows = 196086
+target_range = [ -8.0, 1.001,]
 
 [inputs.cid22_train]
 path = "{canonical}/cid22_train_norm.parquet"
@@ -124,11 +125,13 @@ rows = 10125
 path = "{canonical}/tid.parquet"
 sha256 = "6704de0c7dcec3a1b9e57495c410c91aee1945cd4411fcdb217688af2d5c0e4f"
 rows = 3000
+target_range = [ -0.1, 9.1,]
 
 [inputs.konjnd_dense]
 path = "{canonical}/konjnd-dense-norm.parquet"
 sha256 = "49b65c4890fb9a8f910c5cbf873d75714d47407b5babcf6e8f7fb0df67684c85"
 rows = 20160
+target_range = [ -0.001, 1.001,]
 
 [inputs.bigcodec]
 path = "/mnt/v/output/zensim-multicodec-probe/bigcodec_hqdedup_traindigits_2026-07-02.parquet"
@@ -147,17 +150,20 @@ path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_val.parquet"
 sha256 = "4ab85e72bff90da2b9bdab4f190c5d62614706b3624ab9e095478e26f43262c5"
 rows = 70000
 notes = "KADIS source_id%10==8 val split, cvvdp/10 — second held-out val group."
+target_range = [ -0.5, 1.001,]
 
 [inputs.kadis_unused]
 path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"
 sha256 = "17c1349f2bc578a57a1a2df8706d53bce9d31cf0f4bd72a4e1999206f825198c"
 rows = 560000
 notes = "KADIS-700k GPU canonical train split (source_id%10<8), human_score=cvvdp/10."
+target_range = [ -0.5, 1.001,]
 
 [inputs.multiband_anchor]
 path = "{canonical}/multiband_anchor_dial100.parquet"
 sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
 notes = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+validate_kind = "grid"
 
 [inputs.feature_sign_mask]
 path = "benchmarks/feature_sign_mask_2026-05-26.tsv"

@@ -41,7 +41,7 @@ export -f run_cell; export OUT STATUS
 xargs -a "$CELLS_FILE" -P "$PAR" -I{} bash -c 'run_cell "$@"' _ {}
 NCELLS=$(grep -c . "$CELLS_FILE")
 NROWS=$(( $(grep -c . "$STATUS") - 1 ))
-if grep -qE "\t(PREFLIGHT-FAIL|[1-9][0-9]*)\t" "$STATUS" || [ "$NROWS" -ne "$NCELLS" ]; then
+if grep -qP "\t(PREFLIGHT-FAIL|[1-9][0-9]*)\t" "$STATUS" || [ "$NROWS" -ne "$NCELLS" ]; then
   echo -e "ALLDONE-WITH-FAILURES\t1\t-\t$(date -u +%FT%TZ)" >> "$STATUS"   # rows<cells = silent cell deaths
 else
   echo -e "ALLDONE\t0\t-\t$(date -u +%FT%TZ)" >> "$STATUS"
