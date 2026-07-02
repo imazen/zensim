@@ -35,7 +35,14 @@ echo "[boot] trainer built at $(git rev-parse HEAD)"
 export S5="s5cmd --endpoint-url $R2_ENDPOINT"
 mkdir -p /data/{canonical-2026-05-21/train,canonical-2026-06-27,kadis,evalfeat,grids,out}
 $S5 sync "s3://zentrain/canonical-2026-05-21/train/*" /data/canonical-2026-05-21/train/
-$S5 sync "s3://zentrain/canonical/2026-06-27/*"       /data/canonical-2026-06-27/
+# parquets ONLY — the encodes/ prefix is millions of objects (runaway 2026-07-02)
+for ds in zenjpeg_lossy zenwebp_lossy zenwebp_lossless zenpng_lossless zenjxl_lossy zenjxl_lossless zenavif_lossy; do
+  mkdir -p /data/canonical-2026-06-27/$ds
+  for sp in train validate test; do
+    $S5 cp "s3://zentrain/canonical/2026-06-27/$ds/$sp.parquet" /data/canonical-2026-06-27/$ds/ || true
+  done
+  $S5 cp "s3://zentrain/canonical/2026-06-27/$ds/_MANIFEST.json" /data/canonical-2026-06-27/$ds/ || true
+done
 $S5 cp   "s3://zentrain/kadis-700k-gpu/canonical/kadis700k_canonical_gpu_2026-07-01.parquet" /data/kadis/
 # eval features + grids are rsynced from the workstation by hz.sh push-eval
 echo "[boot] R2 data pulled"
@@ -44,4 +51,6 @@ echo "[boot] R2 data pulled"
 #    manifests' sha256 gates verify byte-equality with the local builds)
 cd ~/work/zensim
 python3 scripts/hetzner/rebuild_derived.py /data
+# mandatory data-contract validation (fleet/versioning errors die HERE)
+python3 scripts/v_next/validate_parquet.py /data/derived/*.parquet --kind train
 echo "[boot] DONE $(date -u +%FT%TZ)"

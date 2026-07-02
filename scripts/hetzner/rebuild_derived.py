@@ -90,6 +90,10 @@ def build_kadis():
     featcols = sorted((c for c in t.schema.names if c.startswith("feat_") and c[5:].isdigit()),
                       key=lambda c: int(c[5:]))
     sid = pc.cast(t["source_id"], pa.int64())
+    # LEGACY names stay UNCLAMPED for byte-compat with v48-v51 manifest shas
+    # (cross-machine determinism checks need identical inputs). Raw cvvdp goes
+    # slightly negative (validator C5b catch 2026-07-02); the CLAMPED variants
+    # below are for v52+ recipes.
     hs = pc.divide(pc.cast(t["score_cvvdp_cpu_imazen_v0_1_0"], pa.float64()), 10.0)
     cols = {"source_id": t["source_id"], "severity_level": t["severity_level"],
             "dist_type": t["dist_type"], "human_score": hs}
@@ -101,7 +105,13 @@ def build_kadis():
     mod = pc.mod(pc.cast(full["source_id"], pa.int64()), 10)
     pq.write_table(full.filter(pc.less(mod, 8)), otr, compression="zstd")
     pq.write_table(full.filter(pc.equal(mod, 8)), ova, compression="zstd")
-    print("kadis DONE", flush=True)
+    hs_cl = pc.min_element_wise(pc.max_element_wise(full["human_score"], 0.0), 1.0)
+    full_cl = full.set_column(full.schema.get_field_index("human_score"), "human_score", hs_cl)
+    pq.write_table(full_cl.filter(pc.less(mod, 8)),
+                   f"{OUT}/kadis_cvvdp_train_clamped_2026-07-02.parquet", compression="zstd")
+    pq.write_table(full_cl.filter(pc.equal(mod, 8)),
+                   f"{OUT}/kadis_cvvdp_val_clamped_2026-07-02.parquet", compression="zstd")
+    print("kadis DONE (legacy unclamped + clamped variants)", flush=True)
 
 if __name__ == "__main__":
     big = build_bigcodec()

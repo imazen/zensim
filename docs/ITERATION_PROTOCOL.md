@@ -8,22 +8,28 @@ selection, local OOM/crash losses, and serial local seeds.
 
 ## The measured cost model (2026-07-02)
 
-A 200-epoch α-head cell = load (~1-2 min) + 200 × (train step + PER-EPOCH
-GROUP EVAL). Training compute is `pairs_per_epoch`-bound (50k sampled pairs)
-— **corpus size costs almost nothing in training; the per-epoch eval of every
-group row was the bottleneck** (v51: 3.4M forwards/epoch ≈ 3× training
-compute → ~25 s/epoch → ~80 min/cell).
+A 200-epoch α-head cell = load (~1-2 min) + 200 × (train step + per-epoch
+group eval). Training compute is `pairs_per_epoch`-bound (50k sampled pairs)
+— corpus size costs load time + RAM, almost nothing per epoch. **Corrected
+2026-07-02: a full-eval v51 cell is ~10-11 min (~3 s/epoch)** — the group-eval
+forwards are f32-SIMD-fast (3.4M rows ≈ 0.5 s). Earlier "80-min cell" and
+"eval-dominates" claims were clock misreads under 3-way box contention; the
+idle-box A/B puts group_eval_cap at ~4%. **The real iteration costs are (a)
+serial local execution, (b) wave-level failures from fragile tooling, (c)
+collapse cells wasted for lack of honest selection** — levers 2-5 below.
 
 ## The five levers (all landed)
 
 1. **`group_eval_cap` (trainer, `[training].group_eval_cap`)** — per-epoch
    diagnostics/selection forward a deterministic stride sample (pre-gathered
-   once; no RNG; training byte-stream untouched). Measured: 25 → 5.3 s/epoch
-   (~4.7×); 200-epoch cell ≈ 18 min. Selection SROCC on 50k rows ≈ full ±0.005.
-   Default 0 (= exact historical behavior; old manifests stay
-   byte-reproducible). **Standard for new recipes: `group_eval_cap = 50000`.**
-   Honest final numbers always come from bake_verdict, never the sampled
-   diagnostics.
+   once; no RNG; training byte-stream untouched). **CORRECTED measurement
+   (idle-box A/B, 12 epochs): 209s vs 201s wall — ~4%, NOT the earlier-claimed
+   4.7×** (that number came from a contended smoke; the full-eval forwards are
+   f32-SIMD-fast and a v51 cell was ~10-11 min all along — the '80-min cell'
+   was a clock misread during 3-way box contention). Keep the cap as cheap
+   insurance that scales when groups grow another 10×, but the REAL speed
+   levers are #2 (box parallelism) and #3 (screen-length recipes). Default 0;
+   honest final numbers always from bake_verdict.
 2. **Hetzner-first (DATA_SPLITS §6)** — all minutes-scale work on the train
    box (ccx63: 48 dedicated cores), 6-8 cells concurrently via
    `scripts/hetzner/runcells.sh`. With lever 1: a 20-cell grid ≈ 1 hour wall.
@@ -53,6 +59,25 @@ vs the 0.980 oracle; HQ zones ≥ A) — no post-hoc goalposts.
 
 **Verdicts:** single-seed deltas < ~0.02 CID22 SROCC are noise (measured seed
 sd 0.013–0.02). Nothing ships without Stage C + a methodology doc.
+
+## Big-box lifecycle (MANDATORY, user rule 2026-07-02)
+
+x86 big boxes (ccx63-class) are EPHEMERAL: `hz.sh retire <name>` (snapshot →
+delete) as soon as a grid's results are pulled — never leave one idling.
+Restore later with `hz.sh restore <name>` from the newest snapshot (current
+base: `zen-train-1-1782989687`). Every grid chain ends with pull → retire;
+any session that finds an idle x86 big box (no cells running, status ALLDONE
+or stale) retires it on sight.
+
+## Data-contract validation (MANDATORY)
+
+`scripts/v_next/validate_parquet.py` runs on every derived/pulled parquet
+before it trains anything (wired into the box bootstrap; run it manually for
+locally-built parquets and via `--manifest` for a recipe's full input set).
+Fleet + versioning errors it already catches: footerless partial writes (OOM),
+schema drift (fN vs feat_N), null/NaN/Inf, out-of-range targets (caught real
+negative cvvdp targets on its FIRST run), all-constant feature columns (the
+picker join bug), row-count/sha drift vs manifests, split-rule violations.
 
 ## Standing anti-patterns (each cost us a cell or a wave)
 

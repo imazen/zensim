@@ -58,6 +58,19 @@ case "$CMD" in
     ;;
   status)  $SSH"${1:?ip}" "cat /data/out/status.tsv 2>/dev/null | tail -20; tail -2 /root/bootstrap.log 2>/dev/null" ;;
   pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"; rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/out/ "$PROBE/hetzner-out/" && echo pulled ;;
+  retire)  # snapshot then delete — MANDATORY end-state for x86 big boxes
+    NAME="${1:?name}"
+    SNAP="${NAME}-$(date +%s)"
+    hcloud server create-image --type snapshot --description "$SNAP" "$NAME"
+    hcloud server delete "$NAME"
+    echo "retired $NAME -> snapshot $SNAP"
+    ;;
+  restore) # recreate from the newest snapshot matching the name
+    NAME="${1:?name}"
+    IMG=$(hcloud image list --type snapshot -o noheader -o columns=id,description | grep "$NAME" | sort -k2 | tail -1 | awk '{print $1}')
+    [ -n "$IMG" ] || { echo "no snapshot matching $NAME" >&2; exit 1; }
+    hcloud server create --name "$NAME" --type ccx63 --image "$IMG" --location fsn1 --ssh-key zen-arm-dev-20260528
+    ;;
   destroy) hcloud server delete "${1:?name}" ;;
   *) echo "unknown cmd $CMD" >&2; exit 2 ;;
 esac
