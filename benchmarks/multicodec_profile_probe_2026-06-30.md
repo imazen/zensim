@@ -844,3 +844,30 @@ hq_codec_grid; ssim2 reference: 0.540 / 0.479)
    CID22 −0.028.
 3. The deltas are complementary (kadis→AIC/dial/70-85; codec→KonJND/85-100) →
    wave-2 = combo (kadis 0.25 + codec {0.25, 0.5}) + k025 multi-seed (7, 31).
+
+## v49 WAVE-2 — combos + k025 multi-seed (2026-07-01/02)
+
+| (fixed trainer) | CID22 | KonJND | AIC3 | AIC4 | codec dial | KADIS safety | HQ 70-85/85-100 |
+|---|---|---|---|---|---|---|---|
+| A (ship) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.9747 | 0.9726 | 0.719/0.720 |
+| k025 s17 | 0.8622 | 0.4231 | 0.7930 | 0.9139 | 0.9755 | 0.9806 | 0.762/0.674 |
+| k025 s7 | 0.8429 | 0.4309 | 0.7642 | 0.8676 | 0.9736 | 0.9769 | 0.748/0.760 |
+| k025 s31 | 0.8379 | 0.5135 | 0.7548 | 0.8533 | 0.9753 | 0.9786 | 0.737/0.777 |
+| combo25 (k.25+c.25) s17 | 0.8350 | 0.4891 | 0.7583 | 0.8633 | 0.9755 | 0.9802 | 0.735/0.765 |
+| combo50 (k.25+c.50) s17 | 0.8041 | 0.4721 | 0.6933 | 0.7631 | 0.9832 | 0.9756 | 0.695/0.780 |
+
+**Honest verdict:** k025 seed-mean (n=3) = CID22 0.848±0.013 (−0.018 vs A),
+AIC3 0.771 ≈ A, AIC4 0.878 ≈ A, KonJND 0.456 (+0.037), safety 0.979 (+0.006),
+HQ better both zones on 2/3 seeds. The s17 numbers were partly seed-favorable
+AND the training-side val does NOT select s17 (s31 wins val geomean3 0.9135)
+— so s17 cannot be honestly cherry-picked. k025 is a TRADE (safety/KonJND/HQ
+up, CID22 −0.018), not yet a dominating win. Combos: KonJND gain persists
+(0.489) but CID22 cost grows — the probe-sample codec group is the weak link.
+
+**Next lever: the corpus itself.** The probe codec sample (1.2M rows, no
+provenance) predates the canonical 2026-06-27 picker datasets, which now total
+**5,742,660 rows** (avif + jxl-lossy landed): jpeg 1.48M, avif 1.51M, jxl-lossy
+1.42M, webp 944k+40k, jxl-lossless 270k, png 76k — all with feat_0..371 +
+score_ssim2 + score_zensim + provenance + origin splits. Building
+`bigcodec_5p7M_2026-07-02.parquet` (f0..f371 + human_score=clamp(ssim2/100,0,1))
+→ wave-3: v47+bigcodec@0.25 and kadis.25+bigcodec.25, seed 17 first.
