@@ -922,3 +922,32 @@ Report: /mnt/v/output/zensim-multicodec-probe/{imazen26_vs_cid22_dhash_t16.tsv,
 dhash_audit_t16.log}. This clears assumption (e) from the 2026-07-02
 assumption inventory: big025-class candidates do not train on CID22-adjacent
 content.
+
+## v51 — digit-split corpus + HELD-OUT VAL SELECTION (2026-07-02)
+
+First recipe generation on the locked DATA_SPLITS foundation: bigcodec
+restricted to TRAIN-digit origins (2,946,036 rows), selection val includes two
+truly-held-out groups (val-digit origin sample 147k + KADIS %10==8 70k).
+
+| | CID22 | KonJND | AIC3 | AIC4 | codec dial | KADIS safety |
+|---|---|---|---|---|---|---|
+| A (ship) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.9747 | 0.9726 |
+| v51 s17 | 0.8488 | 0.4926 | 0.7675 | 0.8808 | 0.9762 | 0.9706 |
+| v51 s7 | 0.8340 | 0.5281 | 0.7535 | 0.8616 | 0.9694 | 0.9690 |
+| v51 s31 | 0.8509 | 0.3921 | 0.7770 | 0.8747 | 0.9724 | 0.9601 |
+| **mean (n=3)** | **0.8446±0.009** | 0.4709±0.071 | 0.7660±0.012 | 0.8724±0.010 | ~0.973 | ~0.967 |
+
+1. **Zero collapses in 3/3 seeds and the tightest CID22 seed-spread measured
+   (sd 0.009** vs v50's 0.101 raw / 0.020 excl-outlier) — held-out-val
+   checkpoint selection is doing exactly what §5 predicted. Selection val
+   (geomean incl. held-out groups) now sits at 0.84-0.86, honestly below the
+   train==val era's 0.91 — the number finally means something.
+2. The recipe itself remains a TRADE vs A: CID22 −0.021 (real at ~2.3 sem),
+   KonJND +0.05 (seed-noisy, sd 0.071), AIC ≈ A, dials ≈ A. Consistent with
+   v50's picture: bigcodec@0.25 (ssim2-labeled) buys KonJND, costs ~0.02
+   CID22. The supervision-design fix (multi-metric HQ-band labels, wave-4,
+   awaiting the metric backfill) is where the CID22 cost should shrink.
+3. Cells ran 9.5-11.5 min at FULL per-epoch eval — the earlier "80 min/cell"
+   read was wrong (a clock misread while three jobs contended). The
+   group_eval_cap speedup claim is being re-measured cleanly (±cap A/B on the
+   idle box) and the ITERATION_PROTOCOL numbers will be corrected to match.
