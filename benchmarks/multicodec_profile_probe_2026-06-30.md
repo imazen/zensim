@@ -661,3 +661,70 @@ held-out monotonic-safety gate (A ≈ 0.980 oracle ceiling), the clean TV-pairs
 file, the corrected science (sign artifact + poisoned pairs + full-panel
 discipline), and a modest KonJND/G5 lever (+0.03) available to a future
 KonJND-focused variant that deliberately accepts a small CID22 trade.
+
+## Profile-A reproduction check — FAILS functionally (2026-07-01, user-directed)
+
+`v47_repro_check.toml` (= shipped manifest, output redirected) against current
+main: all 8 documented inputs sha-verify and load — **docs are input-complete**
+— but the result is NOT A:
+
+| | CID22 | KADID | TID | KonJND | AIC3 | AIC4 | dial mono | bytes |
+|---|---|---|---|---|---|---|---|---|
+| A (ship 2026-05-27) | 0.8657 | 0.7933 | 0.7927 | 0.4185 | 0.7680 | 0.8854 | 0.9747 | 27,316 |
+| repro (main 2026-07-01) | 0.7376 | 0.7795 | 0.7841 | 0.4309 | 0.6228 | **0.5459** | 0.9704 | 57,207 |
+
+Diagnosis: the bake structure matches (3 layers f16/f16/f32 + spline, flags=3)
+but the payload is 2× larger → **trainer code drift since 2026-05-27** (packing/
+zerobias behavior changed). Same seed + same data + different code = a different
+random run — and this one landed in the same collapse basin the v48 sweep
+exposed (AIC4 craters, dials fine; cf. v48 w025 s17). Two compounding facts:
+1. **v47 is not currently reproducible from main + manifest.** The recipe's
+   *inputs* are fully documented; the *trainer* is not version-pinned. The
+   manifest should record the trainer git commit (v47's was ~2026-05-27) and
+   reproduction should check out that commit.
+2. **The recipe family has a known instability basin** (2/9 runs of
+   v47-recipe-class trains this cycle collapsed) — even a correct-code repro
+   needs multi-seed.
+
+Action items recorded: (a) add `trainer_commit` to manifest schema + backfill
+v47's; (b) reproduce at the recorded commit to separate drift from
+non-determinism; (c) never retrain-and-swap A from a single run.
+
+## HQ-zone (75–100) instrument v1 — built + first results (2026-07-01)
+
+New artifacts (probe dir): `hq_codec_grid_2026-07-01.parquet` (7,388 cells =
+~1,055 images × 7-q curves, webp vp8-m2_def + avif s6-noqm-420, 372 feats, dial-
+grid schema) + `hq_codec_refs_2026-07-01.parquet` (per-cell butteraugli-max/p3 +
+cvvdp + dssim + iwssim + ssim2 + zensim from the 2026-06-24 GPU corpus). New
+`ZENSIM_DIAL_PRED_OUT` env on bake_verdict dumps per-cell predictions over ANY
+dial grid → external joins vs reference metrics.
+
+**Zone rank (SROCC vs cvvdp / vs −butteraugli-max), by ssim2 zone:**
+
+| zone | n | A (ship) | v48s31 | fast-ssim2 |
+|---|---|---|---|---|
+| <70 | 2950 | 0.832 / 0.667 | 0.852 / 0.689 | 0.820 / 0.690 |
+| 70–85 | 2567 | 0.719 / 0.519 | **0.777 / 0.565** | 0.540 / 0.542 |
+| 85–100 | 1871 | 0.720 / 0.655 | 0.695 / **0.749** | 0.479 / 0.694 |
+
+**HQ step-agreement** (refs agree a q-step visibly improved — butter −10% AND
+cvvdp +0.05 — does the candidate increase?): A 99.7/98.7/98.6%, v48s31
+99.8/99.7/**100%**, ssim2 99.9/100/**92.9%** across <70 / 70–85 / 85–100.
+
+Findings:
+1. **ssim2's HQ saturation is now measured on codec content**: cvvdp-agreement
+   0.82→0.54→0.48 across zones; misses 7% of visibly-better steps at 85–100.
+   zensim (A) already beats ssim2 in both HQ zones on cvvdp-rank.
+2. **The kadis-trained v48s31 is the best HQ-zone metric measured** (70–85
+   cvvdp-rank 0.777; 85–100 butter-rank 0.749; perfect step-agreement) —
+   KADIS's near-threshold ladders teach exactly the 75–100 discrimination codec
+   targeting needs, corroborating the KonJND +0.03 lever.
+3. Zone-consistency gating (min-over-zones) is now measurable; per-zone
+   recalibration (piecewise/spline) is legitimate since the dial spline is
+   already monotone-rank-preserving — the METRIC must rank within every zone,
+   scale is calibration's job.
+
+v2 plan: add zenjpeg/zenpng (R2 sidecars), the 2026-06-24-cpu 477k cells, more
+knobs per codec, KADIS severity-1 near-threshold pairs (140k, 7 metrics), and a
+`zone_consistency` summary in bake_verdict (min-over-zones panel + step-agreement
+gates) so every train auto-reports it.

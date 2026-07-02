@@ -430,6 +430,25 @@ fn dial_panel(model: &Model, has_transforms: bool, n_inputs: usize, grid_path: &
         })
         .collect();
 
+    // Optional per-cell prediction dump for external joins against
+    // reference-metric sidecars (zone-consistency / HQ-zone instruments).
+    // TSV: image_id, codec, q, pred. Enabled via ZENSIM_DIAL_PRED_OUT=<path>.
+    if let Ok(path) = std::env::var("ZENSIM_DIAL_PRED_OUT") {
+        let mut s = String::from("image_id\tcodec\tq\tpred\n");
+        for (i, &sc) in scores.iter().enumerate() {
+            use std::fmt::Write as _;
+            let _ = writeln!(
+                s,
+                "{}\t{}\t{}\t{}",
+                grid.image_id[i], grid.codec[i], grid.q[i], sc
+            );
+        }
+        match std::fs::write(&path, s) {
+            Ok(()) => eprintln!("  wrote dial per-cell predictions to {path}"),
+            Err(e) => eprintln!("  dial pred dump failed ({path}): {e}"),
+        }
+    }
+
     // Group rows into (image_id, codec) curves, carrying (q, score, row_idx).
     // row_idx lets us compare adjacent cells' feature vectors: when a codec
     // SATURATES (e.g. zenjpeg/webp produce byte-identical encodes for q99.25
