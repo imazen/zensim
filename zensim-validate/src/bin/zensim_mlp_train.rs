@@ -1791,16 +1791,42 @@ fn main() {
                     eprintln!("[manifest] trainer_commit OK ({want})");
                 }
                 Some(h) => {
-                    eprintln!(
-                        "[manifest] trainer_commit MISMATCH: manifest records {want}, \
-                         this trainer is built from {h}.\n\
-                         Reproduce-exactly requires the recorded trainer: \
-                         `jj workspace add ../<repo>--pin -r {want}` and build there.\n\
-                         Pass --manifest-allow-sha-drift to override (the produced \
-                         bake will NOT match the shipped one)."
-                    );
-                    if !args.manifest_allow_sha_drift {
-                        std::process::exit(2);
+                    // HEAD moved past the recorded commit — that's fine as
+                    // long as no TRAINER SOURCE changed in between (docs /
+                    // manifests / benchmarks commits move HEAD constantly).
+                    // The behavior-relevant question is source drift.
+                    let src_unchanged = std::process::Command::new("git")
+                        .args([
+                            "diff",
+                            "--quiet",
+                            &format!("{want}..{h}"),
+                            "--",
+                            "zensim-validate/src",
+                            "zensim-train-core/src",
+                            "zensim/src",
+                        ])
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+                    if src_unchanged {
+                        eprintln!(
+                            "[manifest] trainer_commit OK: HEAD {h} differs from \
+                             recorded {want} but trainer sources are unchanged \
+                             between them"
+                        );
+                    } else {
+                        eprintln!(
+                            "[manifest] trainer_commit MISMATCH: manifest records {want}, \
+                             this trainer is built from {h}, and trainer sources CHANGED \
+                             between them.\n\
+                             Reproduce-exactly requires the recorded trainer: \
+                             `jj workspace add ../<repo>--pin -r {want}` and build there.\n\
+                             Pass --manifest-allow-sha-drift to override (the produced \
+                             bake will NOT match the shipped one)."
+                        );
+                        if !args.manifest_allow_sha_drift {
+                            std::process::exit(2);
+                        }
                     }
                 }
                 None => eprintln!(
