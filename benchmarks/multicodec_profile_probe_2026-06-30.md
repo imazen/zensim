@@ -906,3 +906,19 @@ picker 2026-06-27, all 7 datasets × all splits, human_score=clamp(ssim2/100,0,1
    val refs were held out of that tuning (ssim2 0.8854 there — fair
    comparison); KADID/TID are fully in-sample for ssim2 — never scoreboard
    corpora against it.
+
+## Contamination audit: imazen-26 origins vs CID22-49 refs — CLEAN (2026-07-02)
+
+dHash-64 audit (`check_holdout_overlap`) of all imazen-26 origin images (the
+source corpus behind every canonical-2026-06-27 row → bigcodec_5p7M) against
+the 49 CID22 validation refs: **1,051/1,067 hashed (16 decode failures on odd
+screen PNGs), minimum Hamming distance d=12, ZERO flags at the strict d≤10
+threshold.** The corpus is perceptually disjoint from the gold holdout.
+The d=15–16 screening tail (51 sources) is the documented flat/graphic
+false-positive mode (generated starburst/voronoi line-art ↔ Semarang city
+logo; LoC scan pages ↔ photos) — informational only per the 2026-05-14 dHash
+policy (d≤16 requires eye review; nothing at the auto-relevant threshold).
+Report: /mnt/v/output/zensim-multicodec-probe/{imazen26_vs_cid22_dhash_t16.tsv,
+dhash_audit_t16.log}. This clears assumption (e) from the 2026-07-02
+assumption inventory: big025-class candidates do not train on CID22-adjacent
+content.
