@@ -149,6 +149,16 @@ pub struct ManifestConfig {
     /// `--qat-tau`: QAT zerobias threshold (relative to per-layer max).
     pub qat_tau: Option<f64>,
 
+    /// `[training].trainer_commit` — the git commit of the trainer that
+    /// produced the recorded bake. Reproduce-exactly requires building the
+    /// trainer AT this commit: the 2026-07-01 v47 reproduction proved
+    /// training is deterministic (same code + data + seed → byte-identical
+    /// bake) and that unrelated-looking trainer commits break it (current
+    /// main produced a 57 KB collapsed bake from the same manifest). The
+    /// binary compares this against its runtime `git rev-parse HEAD` and
+    /// fails loud on mismatch (same override as input-sha drift).
+    pub trainer_commit: Option<String>,
+
     /// Ordered post-training `steps` (spline injection etc.). Recorded
     /// here so the binary can surface them — the trainer cannot run them
     /// itself (they shell to external scripts), but a reproduce run must
@@ -244,6 +254,7 @@ struct RawTraining {
     monotone_pin_during_training: Option<bool>,
     qat_fine_tune_epochs: Option<usize>,
     qat_tau: Option<f64>,
+    trainer_commit: Option<String>,
     #[serde(default)]
     steps: Vec<String>,
 }
@@ -473,6 +484,7 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
         cfg.monotone_pin_during_training = t.monotone_pin_during_training;
         cfg.qat_fine_tune_epochs = t.qat_fine_tune_epochs;
         cfg.qat_tau = t.qat_tau;
+        cfg.trainer_commit = t.trainer_commit;
     }
 
     // Collect every [inputs.<name>] table that carries a sha256 — those

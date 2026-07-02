@@ -1773,6 +1773,43 @@ fn main() {
             std::process::exit(2);
         });
 
+        // Reproduce-exactly gate #0: trainer version. The 2026-07-01 v47
+        // reproduction proved training is DETERMINISTIC (pinned tree →
+        // byte-identical bake) and that trainer drift alone breaks it
+        // (current-main trainer produced a 57 KB collapsed bake from the
+        // same manifest + data). When the manifest records the commit that
+        // produced the bake, a mismatching trainer fails loud.
+        if let Some(want) = cfg.trainer_commit.as_deref() {
+            let head = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            match head {
+                Some(h) if h.starts_with(want) || want.starts_with(h.as_str()) => {
+                    eprintln!("[manifest] trainer_commit OK ({want})");
+                }
+                Some(h) => {
+                    eprintln!(
+                        "[manifest] trainer_commit MISMATCH: manifest records {want}, \
+                         this trainer is built from {h}.\n\
+                         Reproduce-exactly requires the recorded trainer: \
+                         `jj workspace add ../<repo>--pin -r {want}` and build there.\n\
+                         Pass --manifest-allow-sha-drift to override (the produced \
+                         bake will NOT match the shipped one)."
+                    );
+                    if !args.manifest_allow_sha_drift {
+                        std::process::exit(2);
+                    }
+                }
+                None => eprintln!(
+                    "[manifest] trainer_commit {want} recorded but git HEAD \
+                     unavailable — cannot verify trainer version"
+                ),
+            }
+        }
+
         // Load-bearing reproduce-exactly gate: verify every recorded
         // input file's sha256 BEFORE we touch the trainer. A drift means
         // the produced bake won't match the shipped one — fail loud.

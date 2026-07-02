@@ -786,3 +786,35 @@ AIC-3/AIC-4; jpeg-aic reconstruction code) → decode → 372-feat extract → a
 anchor for the 75–100 zone. (b) AIC-3 raw triplets → per-triplet pairwise
 training signal (RankNet-native, no reconstruction loss) — the highest-value
 untapped HUMAN training data in-house. (c) Re-check AIC-HDR2025 quarterly.
+
+## ✅ Profile A REPRODUCED BYTE-IDENTICALLY at the pinned tree (2026-07-01)
+
+Building the trainer at `e9442678` (ship-commit parent) and running
+`v47_strict_qat.toml` (output redirected; `--manifest-allow-sha-drift` for the
+single documented konjnd rewrite) produced **byte-identical** output:
+`sha256 d0ef7a30… , 27,316 bytes == the shipped bake`.
+
+This settles everything the failed main-tree repro raised:
+1. **The recipe + docs are complete and correct** — nothing was forgotten.
+2. **Training is DETERMINISTIC** — same code + data + seed → same bytes. The
+   v48-family "seed variance" is real sensitivity to the seed, but each run is
+   exactly reproducible; A was not "a lucky run" in any unreproducible sense.
+3. **The konjnd 2026-05-28 alias-rewrite is proven data-equivalent** (byte-
+   identical bake trained through the rewritten file).
+4. **The main-tree failure is 100% trainer code drift** — one/some of the 7
+   post-ship trainer commits (#40 47aff783 / #41 b1872f7b / c5da5410 / fmt /
+   clippy / TV wiring) changed training behavior. Bisect step 1 (build at
+   #40) in flight in the `zensim--v47pin` workspace.
+
+**Protocol landed (same day):** `[training].trainer_commit` in the manifest
+schema — the trainer compares it against runtime `git rev-parse HEAD` and
+fails loud on mismatch (same `--manifest-allow-sha-drift` override), with the
+workspace-pin instructions in the error. v47's manifest backfilled with the
+proven commit + provenance notes. Current main + v47 manifest now fails
+correctly instead of silently producing a drifted bake.
+
+**Improvement path unblocked:** "improve A" experiments (e.g. v48-kadis
+recipe deltas) should branch from the pinned tree — or from main once the
+bisect identifies + reverts/fixes the behavior-changing commit — so every
+candidate differs from A by exactly the intended recipe delta, not by hidden
+trainer drift.

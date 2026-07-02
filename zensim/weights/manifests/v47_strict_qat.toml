@@ -19,6 +19,18 @@ date              = "2026-05-27"
 
 [training]
 trainer            = "zensim_mlp_train"
+# REPRODUCTION VERIFIED 2026-07-01: building the trainer at trainer_commit and
+# running this manifest reproduces the shipped bake BYTE-IDENTICALLY (sha256
+# d0ef7a30…, 27,316 bytes) — training is deterministic. The CURRENT-main
+# trainer does NOT reproduce it (57 KB drifted bake that lands in a collapse
+# basin), so reproduce-exactly REQUIRES this commit:
+#   jj workspace add ../zensim--v47pin -r e9442678 && cargo build --release ...
+# Caveat: konjnd-dense-norm.parquet was rewritten in place 2026-05-28 (alias
+# columns added; sha 5595a922… → 49b65c48…, all mirrors clobbered). The
+# byte-identical reproduction THROUGH the rewritten file proves the rewrite is
+# data-equivalent for the trained columns. Recorded sha below is the current
+# (post-rewrite) file.
+trainer_commit     = "e944267803f0d36229d104768e40e191b18949f1"
 seed               = 17
 mse_weight         = 0.6
 ranknet_weight     = 0.6
