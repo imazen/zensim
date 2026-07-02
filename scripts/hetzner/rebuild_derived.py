@@ -13,7 +13,8 @@ below to keep the box dependency-free; MUST match
 zenmetrics/scripts/picker/origin_split.py — change there first).
 """
 import sys, os, re, time
-import pyarrow.parquet as pq, pyarrow as pa, pyarrow.compute as pc
+import pyarrow.parquet as pq
+import numpy as np, pyarrow as pa, pyarrow.compute as pc
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else "/data"
 CANON = f"{ROOT}/canonical-2026-06-27"
@@ -102,7 +103,8 @@ def build_kadis():
     # ladder-sort exactly like the workstation build (TV-pair index compat)
     full = full.sort_by([("source_id", "ascending"), ("dist_type", "ascending"),
                          ("severity_level", "ascending")])
-    mod = pc.mod(pc.cast(full["source_id"], pa.int64()), 10)
+    # numpy modulo — pc.mod is absent on older pyarrow (restored-box apt version)
+    mod = pa.array(np.asarray(pc.cast(full["source_id"], pa.int64())) % 10)
     pq.write_table(full.filter(pc.less(mod, 8)), otr, compression="zstd")
     pq.write_table(full.filter(pc.equal(mod, 8)), ova, compression="zstd")
     hs_cl = pc.min_element_wise(pc.max_element_wise(full["human_score"], 0.0), 1.0)
