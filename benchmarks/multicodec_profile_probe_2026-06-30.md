@@ -1051,3 +1051,16 @@ baseline to beat, not a verdict. PLAN_BEAT_A's "SDR25 ≥ ssim2" RD gate is
 therefore currently FAILING for A → candidates that win it add genuinely new
 capability. Pairs + scores: `sdr25_{eval_pairs,zensim,ssim2}.tsv` in the
 probe dir; butteraugli-cpu skipped (known pnorm_3 umbrella-output bug).
+
+### avif fill incident log (2026-07-02 21:0x)
+
+First-wave launch (8 boxes) died in image pull: `ghcr.io/imazen/zenfleet-worker:exec-gpu`
+— the tag NO LONGER EXISTS (recent pushes created only variant tags;
+`exec-gpu-hqfillA-d5a142e0e166` is the newest proven GPU ScoreFile executor).
+Boxes destroyed (vastai destroy -y; note: the CLI returns rc=0 on an
+ABORTED confirmation — `&& echo destroyed` lies; always use `-y`/pipe `y`).
+Relaunched all 8 runs with `ZEN_GPU_IMAGE=…:exec-gpu-hqfillA-d5a142e0e166`.
+For zenmetrics when the marker clears: (1) commit build_scorefile_from_pairs.py
++ launcher overrides; (2) re-point fleet.env's default OR re-push a stable
+`exec-gpu` tag — canonical tags must never be dropped (the tags-not-names rule
+cuts both ways).
