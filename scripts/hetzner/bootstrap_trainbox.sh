@@ -20,7 +20,7 @@ if ! command -v s5cmd >/dev/null; then
     | tar -xz -C /usr/local/bin s5cmd
 fi
 command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git build-essential pkg-config)
-python3 -c "import pyarrow, toml" 2>/dev/null || (apt-get update -qq && apt-get install -y -qq python3-pip && pip3 install --break-system-packages -q pyarrow toml)
+python3 -c "import pyarrow, toml, numpy, scipy" 2>/dev/null || (apt-get update -qq && apt-get install -y -qq python3-pip && pip3 install --break-system-packages -q pyarrow toml numpy scipy)
 if ! command -v cargo >/dev/null; then
   curl -sSf https://sh.rustup.rs | sh -s -- -y -q --default-toolchain stable
 fi
