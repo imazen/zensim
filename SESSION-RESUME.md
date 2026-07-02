@@ -101,6 +101,29 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
 - Concurrent-session etiquette: check zenmetrics .workongoing before
   committing there (claude-pngfix was active most of today).
 
+## STRATEGY ablation campaign (2026-07-02 late — LIVE)
+
+- **Strategy suite implemented + reference-tested** (commit `78ec8e61`):
+  EMA / hard-pair / stratified-bands / σ-MSE(ZENSIM_SIGMA_MSE=1) / GroupDRO /
+  ListMLE / triplet-NLL. Tests in `mlp_train/strategy.rs` (failures = "IMPL
+  BUG (not strategy)"). All-active smoke deterministic. KonFiG raw triplets
+  decoded per-BoostType (flicker=MORE-DISTORTED, non-flicker=CLOSER; 85.6%
+  design agreement; 541,895 responses in
+  `konfig_triplet_responses_2026-07-02.tsv`; EXP_II interior-pivot deferred).
+- **18-cell ablation (9 variants × 2 seeds, v53 base)** running on BOTH:
+  (a) zen-train-1 ccx63 (systemd unit `ablation`, PAR=8);
+  (b) 9× cx53 fleet `sfb-abv1-*` (~€0.05/hr ea) — `strategy_fleet.sh
+  status abv1 /tmp/ab_cells.txt`, results at
+  `s3://zentrain/strategy-results/abv1/`, **reap with `strategy_fleet.sh
+  reap abv1`** when scored. Same manifests both machines ⇒ per-variant
+  cross-machine determinism check for free.
+- Scoring on completion: bake_verdict per bin (local, seconds) → variant table
+  (CID22/KonJND/dials vs ab_base) → pick winners for v54. v53 5-seed spread
+  was CID22 0.638-0.837 (!) — EMA-vs-base is the money read.
+- Wave-2 results already scored: v53≈v52≈below A on CID22 at high seed
+  variance; KonFiG-as-group inconclusive at this spread.
+- NOT yet in this wave: σ-MSE ablation (needs an mm6 group in the recipe).
+
 ## Older state
 
 Everything before 2026-06-30 (v47 ship history 2026-05-27, #33 Approach-B,
