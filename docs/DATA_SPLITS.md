@@ -145,11 +145,17 @@ T0.)
 
 ---
 
-## 6. Remote training (Hetzner) — approved flow
+## 6. Remote training (Hetzner) — HETZNER-FIRST for all slow work
 
-Per user 2026-07-02: big Hetzner CPU boxes may be used for trainer sweeps, and
-**agents may rsync data + ssh-control the boxes directly** (no ceremony
-needed) when a grid exceeds local serial throughput (~5 cells/hour). vast.ai
+Per user 2026-07-02 (twice): **ALL slow work runs on Hetzner train boxes by
+default** — trainer cells, sweeps, corpus/parquet builds, anything minutes-
+scale. The workstation is for orchestration, seconds-scale evals, analysis,
+and commits only. Rationale (learned the hard way same day): local heavy jobs
+contend with each other (an uncapped parquet build OOM'd next to two 40G
+training cgroups), die with harness crashes (nohup'd chains lost twice), and
+occupy the interactive box; the CCX63 has 48 dedicated cores/192GB, runs 6+
+cells concurrently, and its nohup jobs survive local crashes. Agents rsync
+data + ssh-control boxes directly (identity: `~/.ssh/zen-arm-dev`). vast.ai
 remains GPU-metrics-only. Standard flow: rsync the canonical parquets +
 manifests + a static trainer binary → run cells under nohup with per-cell
 logs → rsync verdicts/bakes back → all results land in

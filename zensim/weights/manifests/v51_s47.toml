@@ -1,0 +1,150 @@
+# Recipe for the masked-monotone v47-strict bake — the production-recipe
+# axiom-clean metric that fixes the V39 blur>identity defect (monotone-by-
+# construction: 0 inversions, identity=max). v47-strict = the V39/V32 recipe
+# + masked-monotone (--monotone-cbc + per-feature sign mask + strict).
+#
+# Reproduce:  zensim_mlp_train --manifest zensim/weights/manifests/v47_strict.toml
+# (TOML recipe replaces the 25-flag scripts/v_next/run_v47_masked_strict_*.sh.)
+# Schema: zensim/weights/manifests/README.md
+
+[bake]
+name              = "v49-k025 (v47 recipe + one data-group delta, FIXED trainer)"
+internal_version  = "v47-strict-qat"
+file              = "/data/out/v51_s47/v51_s47.bin"
+sha256            = "d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc"
+file_bytes        = 27316
+n_inputs          = 372
+arch              = "372 → 128 → 64 + per-sample-α + tanh-pin(scale=30), masked-monotone (W1≥0 on sign-safe set, rank_w≤0); f16+zerobias encoder + f32 identity passthrough; spline + pack done IN-PASS (QAT-native, no post-step)"
+date              = "2026-05-27"
+
+[training]
+trainer            = "zensim_mlp_train"
+trainer_commit     = "d8c8d64ff46989def512d96aeb5dbda84b0ae50a"
+seed               = 47
+mse_weight         = 0.6
+ranknet_weight     = 0.6
+monotonicity_reg   = 1.0
+tanh_output_head_scale = 30.0
+anchor_loss_weight = 0.01        # post-training spline-fit weight; NOT a training target
+anchor_step_p      = 0.05
+hidden             = 128
+n_hidden_layers    = 2
+per_sample_alpha_head = true
+epochs             = 200
+lr                 = 0.001
+l2                 = 0.0001
+target_column      = "human_score"   # per-group normalized to [0,1]
+target_scale       = 1.0
+max_features       = 372
+minibatch_size     = 32
+val_aggregate      = "geomean3"
+out_dtype          = "f16"           # QAT: ship f16+zerobias (the net trains robust to it)
+monotone_cbc       = true
+monotone_strict    = true
+qat_fine_tune_epochs = 40            # last 40 of 200 epochs train quantization-aware (f16+zerobias STE)
+qat_tau            = 0.005
+monotone_feature_mask = "../../../benchmarks/feature_sign_mask_2026-05-26.tsv"
+
+groups = [
+    { name = "safesyn",      path = "{canonical}/safesyn.parquet",          train_w = 1.0, val_w = 0.5 },
+    { name = "cid22_train",  path = "{canonical}/cid22_train_norm.parquet", train_w = 1.5, val_w = 2.0 },
+    { name = "kadid",        path = "{canonical}/kadid.parquet",            train_w = 0.5, val_w = 1.0 },
+    { name = "tid",          path = "{canonical}/tid.parquet",              train_w = 0.5, val_w = 1.0 },
+    { name = "konjnd_dense", path = "{canonical}/konjnd-dense-norm.parquet", train_w = 1.2, val_w = 1.5 },
+    { name = "bigcodec", path = "/mnt/v/output/zensim-multicodec-probe/bigcodec_traindigits_2026-07-02.parquet", train_w = 0.25, val_w = 0.0 },
+    { name = "bigcodec_val", path = "/mnt/v/output/zensim-multicodec-probe/bigcodec_valdigits_2026-07-02.parquet", train_w = 0.0, val_w = 1.5 },
+    { name = "kadis_val", path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_val.parquet", train_w = 0.0, val_w = 1.0 },
+]
+
+auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+anchor_parquet  = "{canonical}/multiband_anchor_dial100.parquet"
+
+steps = [
+    "1. zensim_mlp_train --manifest (this file) produces the FINAL packed+calibrated bake in ONE pass — no Python post-steps:",
+    "   - last 40 epochs train quantization-aware (f16+zerobias STE) → net robust to packing",
+    "   - post-training spline fit (fit_monotone_spline) on the QUANTIZED net over the multiband anchor → dial calibrated to exactly what ships",
+    "   - bake stores f16 (encoder) + compressed → ~30 KB, identity-exact, monotone-by-construction",
+    "   recal_v47_dial.py + pack_and_calibrate.py are OBSOLETE for this recipe (kept only for non-QAT bakes).",
+]
+
+[inputs.canonical_root]
+local = "/mnt/v/zen/zensim-training/canonical-2026-05-21/train"
+r2    = "s3://zentrain/canonical-2026-05-21/train"
+tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
+
+[inputs.safesyn]
+path   = "{canonical}/safesyn.parquet"
+sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
+rows   = 196086
+
+[inputs.cid22_train]
+path   = "{canonical}/cid22_train_norm.parquet"
+sha256 = "59c9888ae3141545082fb58eafb19d1e964154cf79060b3d033e72ba8227c3ca"
+rows   = 17611
+notes  = "TRAINING-ONLY subset (201 refs disjoint from the 49-ref holdout). human_score = ssim2_gpu/100 — NOT human MOS (verified exact 2026-07-02; see docs/DATA_SPLITS.md). CID22 MCOS never trains."
+
+[inputs.kadid]
+path   = "{canonical}/kadid.parquet"
+sha256 = "83356f034dc83e50495ec3cf7d5c5d6df9588f4e39ba3f4af1208a12a1bdacee"
+rows   = 10125
+
+[inputs.tid]
+path   = "{canonical}/tid.parquet"
+sha256 = "6704de0c7dcec3a1b9e57495c410c91aee1945cd4411fcdb217688af2d5c0e4f"
+rows   = 3000
+
+[inputs.konjnd_dense]
+path   = "{canonical}/konjnd-dense-norm.parquet"
+sha256 = "49b65c4890fb9a8f910c5cbf873d75714d47407b5babcf6e8f7fb0df67684c85"
+rows   = 20160
+
+[inputs.bigcodec]
+path   = "/mnt/v/output/zensim-multicodec-probe/bigcodec_traindigits_2026-07-02.parquet"
+sha256 = "08cc7e5eeb97c84275239cfbbe33c2c16e5007ffa8bd1e5236ad8bfbcaa040fd"
+rows   = 2946036
+notes  = "TRAIN-DIGIT origins only (LSD rule per docs/DATA_SPLITS.md 2a) of the canonical 5.7M corpus."
+
+[inputs.bigcodec_val]
+path   = "/mnt/v/output/zensim-multicodec-probe/bigcodec_valdigits_2026-07-02.parquet"
+sha256 = "8e11e8ba3614885ab9fc283fc90df61baba5be4d0ea5d1474c3b17e7e40222a2"
+rows   = 147067
+notes  = "HELD-OUT val-digit origins (1,3,5), 1/12 deterministic sample — fixes selection blindness (DATA_SPLITS.md 5)."
+
+[inputs.kadis_val]
+path   = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_val.parquet"
+sha256 = "4ab85e72bff90da2b9bdab4f190c5d62614706b3624ab9e095478e26f43262c5"
+rows   = 70000
+notes  = "KADIS source_id%10==8 val split, cvvdp/10 — second held-out val group."
+
+[inputs.kadis_unused]
+path   = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"
+sha256 = "17c1349f2bc578a57a1a2df8706d53bce9d31cf0f4bd72a4e1999206f825198c"
+rows   = 560000
+notes  = "KADIS-700k GPU canonical train split (source_id%10<8), human_score=cvvdp/10."
+
+[inputs.multiband_anchor]
+path   = "{canonical}/multiband_anchor_dial100.parquet"
+sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
+notes  = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+
+[inputs.feature_sign_mask]
+path   = "benchmarks/feature_sign_mask_2026-05-26.tsv"
+sha256 = "5d0e066d2afefc4b5daefaa56a41e8d924e99db3e3e177dd78634eaabe5f58df"
+notes  = "Per-feature sign mask: 300 pin_geq0 (sign-safe, W1≥0) / 72 free. Drives --monotone-cbc + --monotone-strict."
+
+[inputs.auto_transforms]
+path   = "benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
+sha256 = "ada1f1ce1b649b870de14b5bb47f782c1335a0e21942f5ba7697b32096d36ccc"
+
+[eval]
+verdict_file  = "../../../benchmarks/v0_qat_native_methodology_2026-05-27.md"
+cid22_srocc   = 0.8657   # QAT-native (bake_verdict), best of the v47 axiom-clean candidates
+kadid_srocc   = 0.7933
+tid_srocc     = 0.7927
+konjnd_srocc  = 0.4185   # f16+zerobias removes fine-weight PJND precision (intrinsic; non-QAT recal keeps 0.485)
+aic3_srocc    = 0.7680
+aic4_srocc    = 0.8854
+qsweep_monotonicity = 0.9433  # JPEG 50img×19q, vs V39 0.6767 (V39 dial broken: median→0 q55–q95)
+identity      = 97.69    # the dial max; V39 BROKEN (identity=0 on every ref)
+blur_above_identity = 0  # the V39 defect, FIXED by construction
+notes = "Costs vs V39 (rank only): CID22 -0.014, KADID -0.132, TID -0.139, KonJND -0.001, AIC-3/4 -0.034/-0.020 — the 72 dropped sign-flip features' analytic-distortion signal + f16 PJND precision. Gains: blur>identity FIXED, identity=max FIXED (V39 scores 0), monotone codec dial (q-sweep 94.3% vs V39 67.7%, 0.33% vs 53.6% tied), 27 KB vs 257 KB, native one-pass packing. V39's higher KADID/TID rank is moot for the dial use case (its dial is non-invertible). Ship decision (replace V39 at Profile::A vs add sibling) USER-GATED — see methodology doc."
