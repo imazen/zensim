@@ -1015,3 +1015,25 @@ the labels genuinely diverge in the HQ band, so a multi-metric HQ target
 carries signal ssim2-alone lacks. Wave-4 recipes should compute blend targets
 at training time from the raw metric columns (masking NaN), not bake a single
 blend into the parquet.
+
+## SDR25 JND reconstruction v1 — new T0 anchor built (2026-07-02)
+
+`scripts/v_next/reconstruct_sdr25_jnd.py` →
+`/mnt/v/output/zensim-multicodec-probe/sdr25_jnd_reconstructed_2026-07-02.parquet`
+(116 stimuli: 5 sources × ~20-26 (codec,dlevel) cells + originals, columns
+img_num/codec/dlevel/q_jnd/n_resp/filename). Method: per-image joint
+ordered-probit Thurstonian MLE over BTC+PTC triplets (pivot = pristine always;
+response names the MORE DISTORTED side — verified by traps: a "closer" reading
+fails 383/386 workers, the "more distorted" reading passes all but 39), τ
+indecision threshold shared, σ_BTC≡1 (boosted-sigma units), σ_PTC fitted ≈
+2.0-2.3 per image (boosting ≈ doubles sensitivity — consistent with Men 2021).
+76,163 cleaned responses (trap accuracy ≥0.8, skips dropped). Sanity: q spans
+0..3.8-5.4 per image; within-ladder inversions 1-4 per ~16 steps
+(unconstrained MLE, near-threshold neighbors only).
+
+Caveats for eval use: scale is in boosted-sigma units (NOT plain-JND
+calibrated; the σ_PTC≈2.1 ratio is the conversion if plain-JND units are
+needed); per-image scales are independent (cross-image comparisons need the
+per-image normalization the paper applies). Next: locate/extract the stimulus
+PNGs from `JPEG-AI-SDR25_dataset.zip` and wire a `sdr25` corpus into
+bake_verdict as T0 (within-image SROCC vs q_jnd).
