@@ -546,6 +546,15 @@ pub struct MlpHyperparams {
     /// the bake-time `apply_zero_bias_per_layer`). Default 0.005.
     pub qat_tau: f64,
 
+    /// Per-epoch group-eval row cap (0 = full, historical behavior). When
+    /// > 0, oversized groups' per-epoch diagnostics/selection forwards run
+    /// on a deterministic stride sample of at most this many rows —
+    /// pre-gathered once, no RNG, training byte-stream untouched. The big
+    /// iteration-speed lever for multi-million-row groups (v51: 3.4M
+    /// forwards/epoch → ~50k). Selection SROCC on 50k rows is within
+    /// ±0.005 of full. Recorded in manifests as `group_eval_cap`.
+    pub group_eval_cap: usize,
+
     /// Margin for the monotonicity-reg hinge (default 0.0).
     /// `target_a - target_b > monotonicity_margin` activates the
     /// penalty; otherwise the pair contributes 0. Useful when you
@@ -834,6 +843,7 @@ impl Default for MlpHyperparams {
             monotone_strict: false,
             qat_fine_tune_epochs: 0,
             qat_tau: 0.005,
+            group_eval_cap: 0,
             monotonicity_margin: 0.0,
             anchor_loss_weight: 0.0,
             anchor_target_score: 63.0,
@@ -5512,6 +5522,53 @@ fn train_mlp_per_sample_alpha_head(
         })
         .collect();
 
+    // Per-epoch group-eval SAMPLING (2026-07-02, iteration-speed fix).
+    // The per-epoch diagnostics/selection forward EVERY row of EVERY group
+    // (v51: 3.4M forwards/epoch ≈ 3× the training compute) even though the
+    // panel stats then stride-decimate to 4096 rows anyway. When
+    // `group_eval_cap > 0`, pre-gather a deterministic stride sample of each
+    // oversized group ONCE and forward only that per epoch. Sampling is
+    // stride-based (no RNG) so the training byte-stream is untouched;
+    // default 0 = full (exact historical behavior — old manifests stay
+    // byte-reproducible). New recipes opt in via `[training].group_eval_cap`.
+    let eval_cap = hyperparams.group_eval_cap;
+    let (eval_features, eval_humans): (Vec<Vec<f64>>, Vec<Vec<f64>>) = if eval_cap == 0 {
+        (Vec::new(), Vec::new())
+    } else {
+        let mut efs = Vec::with_capacity(groups.len());
+        let mut ehs = Vec::with_capacity(groups.len());
+        for (gi, g) in groups.iter().enumerate() {
+            let n = g.features.len();
+            if n <= eval_cap {
+                efs.push(Vec::new()); // sentinel: use full std_features[gi]
+                ehs.push(Vec::new());
+                continue;
+            }
+            let stride = n.div_ceil(eval_cap);
+            let mut fb = Vec::with_capacity((n / stride + 1) * n_features);
+            let mut hb = Vec::with_capacity(n / stride + 1);
+            let mut i = 0usize;
+            while i < n {
+                fb.extend_from_slice(&std_features[gi][i * n_features..(i + 1) * n_features]);
+                hb.push(g.human_scores[i]);
+                i += stride;
+            }
+            log_line(
+                &format!(
+                    "group-eval sampling: '{}' {} rows → {} (stride {})",
+                    g.name,
+                    n,
+                    hb.len(),
+                    stride
+                ),
+                log,
+            );
+            efs.push(fb);
+            ehs.push(hb);
+        }
+        (efs, ehs)
+    };
+
     // Within-ladder monotonicity TV pairs (KADIS severity ladders), wired into
     // the per-sample-α path 2026-07-01. Previously the TvRegularizer was dropped
     // at the dispatch (train_mlp_with_tv_anchored_equiv_pjnd → this fn), so TV was
@@ -7902,9 +7959,21 @@ fn train_mlp_per_sample_alpha_head(
                 .iter()
                 .enumerate()
                 .map(|(gi, g)| {
+                    // Sampled eval buffers when group_eval_cap is active and
+                    // this group is oversized (empty vec = use the full group).
+                    let (feat_buf, n_rows, humans): (&[f64], usize, &[f64]) =
+                        if eval_cap > 0 && !eval_features[gi].is_empty() {
+                            (
+                                eval_features[gi].as_slice(),
+                                eval_humans[gi].len(),
+                                eval_humans[gi].as_slice(),
+                            )
+                        } else {
+                            (std_features[gi].as_slice(), g.features.len(), g.human_scores)
+                        };
                     let preds = predict_group_per_sample_alpha_head(
-                        &std_features[gi],
-                        g.features.len(),
+                        feat_buf,
+                        n_rows,
                         n_features,
                         &w1,
                         &b1,
@@ -7929,7 +7998,7 @@ fn train_mlp_per_sample_alpha_head(
                     } else {
                         preds.iter().map(|&p| -p).collect()
                     };
-                    crate::panel::compute_light_panel_subsampled(&signed_preds, g.human_scores)
+                    crate::panel::compute_light_panel_subsampled(&signed_preds, humans)
                 })
                 .collect();
 

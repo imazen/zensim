@@ -720,6 +720,13 @@ struct Args {
     #[arg(long, default_value_t = 0.005)]
     qat_tau: f64,
 
+    /// Per-epoch group-eval row cap (0 = full/historical). >0 forwards a
+    /// deterministic stride sample per oversized group for the per-epoch
+    /// diagnostics/selection — the iteration-speed lever for multi-million-
+    /// row groups. No RNG; training bytes unchanged.
+    #[arg(long, default_value_t = 0)]
+    group_eval_cap: usize,
+
     /// `PreviewV0_5Tuner` monotonicity-reg margin (2026-05-18). The
     /// penalty activates only when the predicted gap is below
     /// `+margin` relative to perfect ordering. Default `0.0` =
@@ -1739,6 +1746,7 @@ fn apply_manifest_to_args(
         cfg.qat_fine_tune_epochs
     );
     set_if_default!(qat_tau, "qat_tau", cfg.qat_tau);
+    set_if_default!(group_eval_cap, "group_eval_cap", cfg.group_eval_cap);
 
     // Path-valued options (already resolved to absolute/relative-to-manifest).
     if !explicit(matches, "auto_transforms") && cfg.auto_transforms.is_some() {
@@ -2289,6 +2297,7 @@ fn main() {
         monotone_pin_during_training: args.monotone_pin_during_training,
         qat_fine_tune_epochs: args.qat_fine_tune_epochs,
         qat_tau: args.qat_tau,
+        group_eval_cap: args.group_eval_cap,
         monotonicity_margin: args.monotonicity_margin,
         anchor_loss_weight: args.anchor_loss_weight,
         anchor_target_score: args.anchor_target_score,

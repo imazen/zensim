@@ -148,6 +148,8 @@ pub struct ManifestConfig {
     pub qat_fine_tune_epochs: Option<usize>,
     /// `--qat-tau`: QAT zerobias threshold (relative to per-layer max).
     pub qat_tau: Option<f64>,
+    /// `--group-eval-cap`: per-epoch group-eval row cap (0 = full).
+    pub group_eval_cap: Option<usize>,
 
     /// `[training].trainer_commit` — the git commit of the trainer that
     /// produced the recorded bake. Reproduce-exactly requires building the
@@ -254,6 +256,7 @@ struct RawTraining {
     monotone_pin_during_training: Option<bool>,
     qat_fine_tune_epochs: Option<usize>,
     qat_tau: Option<f64>,
+    group_eval_cap: Option<usize>,
     trainer_commit: Option<String>,
     #[serde(default)]
     steps: Vec<String>,
@@ -484,6 +487,7 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
         cfg.monotone_pin_during_training = t.monotone_pin_during_training;
         cfg.qat_fine_tune_epochs = t.qat_fine_tune_epochs;
         cfg.qat_tau = t.qat_tau;
+        cfg.group_eval_cap = t.group_eval_cap;
         cfg.trainer_commit = t.trainer_commit;
     }
 
