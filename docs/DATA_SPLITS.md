@@ -169,3 +169,14 @@ scaled alternative when a grid is big enough to warrant the job system.
 5. Audit the 16 decode-failed imazen-26 screen PNGs (or exclude them from
    training corpora).
 6. KADID/TID d≤10 flagged-pair user review (pending since 2026-05-14).
+7. **Multi-metric backfill of the 5.7M canonical corpus is IN FLIGHT
+   (2026-07-02)** — cvvdp/butteraugli/iwssim/dssim being added to the
+   2026-06-27 datasets (backfill recipe: score persisted variants via
+   `variant_r2_url`, no re-encode). When it lands: (a) it must arrive as NEW
+   dated files/sidecars joined on content-addressed keys, never in-place
+   rewrites of files a manifest references (§1.4); (b) rebuild
+   `bigcodec_multimetric_<date>.parquet` with per-zone targets — the wave-4
+   HQ-band supervision substrate (cvvdp/butteraugli in the ≥0.85 band where
+   ssim2 saturates); (c) re-derive the digit-split train/val files from it.
+   Until then, ssim2-target waves (v51) validate the held-out-val selection
+   fix, NOT the final supervision design.
