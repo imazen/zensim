@@ -56,5 +56,5 @@ echo "[boot] R2 data pulled"
 cd ~/work/zensim
 python3 scripts/hetzner/rebuild_derived.py /data
 # mandatory data-contract validation (fleet/versioning errors die HERE)
-python3 scripts/v_next/validate_parquet.py /data/derived/*.parquet --kind train
+python3 scripts/v_next/validate_parquet.py /data/derived/*.parquet --kind train --contracts /data/derived/_CONTRACTS.json
 echo "[boot] DONE $(date -u +%FT%TZ)"

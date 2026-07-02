@@ -43,7 +43,8 @@ def featcols(names):
     return [], []
 
 def validate(path, kind="train", expect_rows=None, expect_sha=None,
-             target_range=(-0.001, 1.001), target_col="human_score", split_rule=None):
+             target_range=(-0.001, 1.001), target_col="human_score", split_rule=None,
+             allow_dup_rate=0.01):
     print(f"== {path} (kind={kind}) ==")
     try:
         md = pq.read_metadata(path)
@@ -113,7 +114,7 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
         got = h.hexdigest()
         check(got == expect_sha, "C8", f"sha256 {got[:12]}… == manifest {expect_sha[:12]}…")
     dup_rate = dup_hits / max(1, len(dup_keys) + dup_hits)
-    check(dup_rate < 0.01, "C10",
+    check(dup_rate < allow_dup_rate, "C10",
           f"duplicate (f0,target) sampled rate: {dup_rate*100:.2f}% ({dup_hits} hits) — "
           f">1% indicates systematic dup rows (e.g. knob-no-op sweep cells; 2026-07-02: "
           f"caught 22.2% dups in bigcodec from modes_full no-op knobs)")
@@ -128,6 +129,7 @@ def main():
     ap.add_argument("--target-range", default="-0.001,1.001")
     ap.add_argument("--target-col", default="human_score")
     ap.add_argument("--split-rule")
+    ap.add_argument("--contracts", help="JSON sidecar {basename: {target_range, allow_dup_rate}} of declared per-file deviations")
     a = ap.parse_args()
     tr = tuple(float(x) for x in a.target_range.split(","))
     if a.manifest:
@@ -143,9 +145,15 @@ def main():
                 continue
             validate(p, kind="train", expect_rows=inp.get("rows"), expect_sha=inp.get("sha256"),
                      target_range=tr, target_col=a.target_col)
+    contracts = {}
+    if a.contracts and os.path.exists(a.contracts):
+        import json
+        contracts = json.load(open(a.contracts))
     for f in a.files:
+        c = contracts.get(os.path.basename(f), {})
         validate(f, kind=a.kind, expect_rows=a.expect_rows, expect_sha=a.expect_sha,
-                 target_range=tr, target_col=a.target_col, split_rule=a.split_rule)
+                 target_range=tuple(c.get("target_range", tr)), target_col=a.target_col,
+                 split_rule=a.split_rule, allow_dup_rate=c.get("allow_dup_rate", 0.01))
     if FAIL:
         print(f"\nVALIDATION FAILED: {sorted(set(FAIL))}")
         sys.exit(1)

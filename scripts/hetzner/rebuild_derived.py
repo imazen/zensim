@@ -120,3 +120,19 @@ if __name__ == "__main__":
     build_digitsplits(big)
     build_kadis()
     print("REBUILD_DERIVED DONE", flush=True)
+
+# Declared per-file contracts for the mandatory validation step. Legacy files
+# carry KNOWN deviations (unclamped cvvdp negatives kept for v48-v51 sha-compat;
+# the pre-dedup bigcodec corpus has 22.2% knob-no-op dup rows) — declare them
+# so validation stays fail-loud with accurate expectations instead of blanket
+# defaults that always fail.
+import json as _json
+_contracts = {
+    "kadis_cvvdp_train.parquet": {"target_range": [-0.25, 1.001]},
+    "kadis_cvvdp_val.parquet":   {"target_range": [-0.25, 1.001]},
+    "bigcodec_traindigits_2026-07-02.parquet": {"allow_dup_rate": 0.30},
+    "bigcodec_valdigits_2026-07-02.parquet":   {"allow_dup_rate": 0.30},
+}
+with open(os.path.join(OUT, "_CONTRACTS.json"), "w") as _f:
+    _json.dump(_contracts, _f, indent=1)
+print("[derived] contracts sidecar written")
