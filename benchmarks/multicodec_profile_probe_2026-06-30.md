@@ -1037,3 +1037,17 @@ needed); per-image scales are independent (cross-image comparisons need the
 per-image normalization the paper applies). Next: locate/extract the stimulus
 PNGs from `JPEG-AI-SDR25_dataset.zip` and wire a `sdr25` corpus into
 bake_verdict as T0 (within-image SROCC vs q_jnd).
+
+### First SDR25 scoreboard (JPEG-AI subset, PTC crops, 2026-07-02)
+
+50 scoreable stimuli (5 imgs × 10 JPEG-AI levels; anchor codecs not in the
+public zip). Within-image SROCC(metric, −q_jnd): **zensim-A 0.998, ssim2
+1.000** — both at ceiling; a 10-level/~4-JND ladder is too coarse to
+discriminate rank quality within-image. The actionable number is pooled
+(cross-image, both metrics face the same per-image-scale mixing): **A 0.904
+vs ssim2 0.958** — A's cross-content calibration on learning-based-codec
+distortions trails ssim2 here. n=50 (CI ≈ ±0.06, borderline) — treat as the
+baseline to beat, not a verdict. PLAN_BEAT_A's "SDR25 ≥ ssim2" RD gate is
+therefore currently FAILING for A → candidates that win it add genuinely new
+capability. Pairs + scores: `sdr25_{eval_pairs,zensim,ssim2}.tsv` in the
+probe dir; butteraugli-cpu skipped (known pnorm_3 umbrella-output bug).
