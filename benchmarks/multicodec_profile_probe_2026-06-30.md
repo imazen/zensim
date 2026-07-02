@@ -951,3 +951,24 @@ truly-held-out groups (val-digit origin sample 147k + KADIS %10==8 70k).
    read was wrong (a clock misread while three jobs contended). The
    group_eval_cap speedup claim is being re-measured cleanly (±cap A/B on the
    idle box) and the ITERATION_PROTOCOL numbers will be corrected to match.
+
+## Data-quality catch: 22.2% duplicate rows in the 5.7M canonical corpus (2026-07-02)
+
+validate_parquet's C10 spot-check flagged the hqfill-combined corpus; full
+quantification: **1,290,240 of 5,804,833 rows (22.2%) are duplicates** on
+(ref_basename, human_score, f0, f1) — present in the BASE canonical-2026-06-27
+data, not the 62k hqfill append. Cause: `modes_full` knob sweeps where knobs
+are NO-OPS (cf. the 2026-06-28 knob-ablation finding that avif broad axes
+carry no RD value) — different `knob_tuple_json`, byte-identical encodes,
+identical features + scores.
+
+Consequences:
+1. Every bake trained on bigcodec (v49 c-cells, v50, v51) overweighted
+   no-op-knob codec cells ~1.28×. Results stand as measured but are noted.
+2. **The canonical picker datasets carry the same duplicate mass** — flagged
+   for the picker-training pipeline owners.
+3. Fixed: `bigcodec_hqfill_dedup_2026-07-02.parquet` (+ digit splits) dedups
+   on the 4-tuple; validator C10 upgraded to a sampled-rate gate (<1%).
+4. Training corpora built from sweep data MUST dedup by content, not by
+   (image, q, knob) key — knob no-ops make the key non-unique in content
+   space. Added to the standing corpus-build contract.

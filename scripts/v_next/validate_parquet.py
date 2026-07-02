@@ -112,7 +112,11 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
                 h.update(chunk)
         got = h.hexdigest()
         check(got == expect_sha, "C8", f"sha256 {got[:12]}… == manifest {expect_sha[:12]}…")
-    check(dup_hits < 5, "C10", f"duplicate (f0,target) spot hits: {dup_hits}")
+    dup_rate = dup_hits / max(1, len(dup_keys) + dup_hits)
+    check(dup_rate < 0.01, "C10",
+          f"duplicate (f0,target) sampled rate: {dup_rate*100:.2f}% ({dup_hits} hits) — "
+          f">1% indicates systematic dup rows (e.g. knob-no-op sweep cells; 2026-07-02: "
+          f"caught 22.2% dups in bigcodec from modes_full no-op knobs)")
 
 def main():
     ap = argparse.ArgumentParser()

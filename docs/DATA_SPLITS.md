@@ -40,7 +40,12 @@ VALIDATION-ONLY", contamination rules).
 5. **Reproducibility gates.** Manifests record input sha256 + `trainer_commit`;
    the trainer verifies both (see `train_manifest.rs`). Profile A is
    byte-reproducible under these gates (verified 2026-07-01).
-6. **Contamination audits.** Any new training corpus is dHash-64-audited
+6. **Dedup by content at corpus build.** Sweep-derived training corpora MUST
+   dedup on (ref, target, feature-prefix) — knob no-ops produce byte-identical
+   encodes under different `knob_tuple_json` keys (measured 2026-07-02: 22.2%
+   duplicate rows in canonical-2026-06-27-derived training data). The
+   validator's C10 gate (<1% sampled dup rate) enforces this.
+7. **Contamination audits.** Any new training corpus is dHash-64-audited
    against every T0 holdout's references at d≤10 (strict) before first use;
    the d≤16 tail is screening-only (flat/graphic content false-positives).
 
