@@ -51,10 +51,16 @@ $S5 cp   "s3://zentrain/kadis-700k-gpu/canonical/kadis700k_canonical_gpu_2026-07
 # eval features + grids are rsynced from the workstation by hz.sh push-eval
 echo "[boot] R2 data pulled"
 
-# 4. rebuild derived training parquets ON-BOX (same scripts as local; the
-#    manifests' sha256 gates verify byte-equality with the local builds)
-cd ~/work/zensim
-python3 scripts/hetzner/rebuild_derived.py /data
-# mandatory data-contract validation (fleet/versioning errors die HERE)
-python3 scripts/v_next/validate_parquet.py /data/derived/*.parquet --kind train --contracts /data/derived/_CONTRACTS.json
+# 4. derived training parquets: default is RSYNC-FROM-WORKSTATION (pinned
+#    bytes; the 2026-07-02 incident proved on-box rebuild does NOT byte-match
+#    the manifest-pinned kadis legacy files — sha 8cca1d8f vs pin 17c1349f).
+#    Set SKIP_DERIVED_REBUILD=0 to attempt an on-box rebuild anyway (for
+#    fresh-corpus builds where no pin exists yet).
+if [ "${SKIP_DERIVED_REBUILD:-1}" != "1" ]; then
+  cd ~/work/zensim
+  python3 scripts/hetzner/rebuild_derived.py /data
+  python3 scripts/v_next/validate_parquet.py /data/derived/*.parquet --kind train --contracts /data/derived/_CONTRACTS.json
+else
+  echo "[boot] derived rebuild SKIPPED — inputs arrive via hz.sh push (pinned bytes); validation runs post-push"
+fi
 echo "[boot] DONE $(date -u +%FT%TZ)"
