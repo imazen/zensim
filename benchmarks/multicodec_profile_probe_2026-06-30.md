@@ -818,3 +818,29 @@ recipe deltas) should branch from the pinned tree — or from main once the
 bisect identifies + reverts/fixes the behavior-changing commit — so every
 candidate differs from A by exactly the intended recipe delta, not by hidden
 trainer drift.
+
+## v49 WAVE-1 — improvement campaign on the FIXED trainer (2026-07-01)
+
+With main reproducing A byte-identically, four one-delta candidates (v47 recipe,
+seed 17, trainer_commit-gated). **The prior v48 "kadis costs CID22" is void —
+it was the #40 init bug:**
+
+| (seed 17) | CID22 | KonJND | AIC3† | AIC4† | KADID* | codec dial | KADIS safety | HQ 70-85 / 85-100 |
+|---|---|---|---|---|---|---|---|---|
+| A (ship) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.7933 | 0.9747 G1✓ | 0.9726 | 0.719 / 0.720 |
+| k025 = +kadis@0.25 | 0.8622 | 0.4231 | **0.7930** | **0.9139** | 0.8142 | 0.9755 G1✓ | **0.9806** | **0.762** / 0.674 |
+| k05 = +kadis@0.5 | 0.8539 | 0.4290 | **0.7948** | 0.9073 | 0.8068 | **0.9783** G1✓ | 0.9771 | 0.762 / 0.699 |
+| c025 = +codec@0.25 | 0.8015 | **0.5027** | 0.7082 | 0.8081 | 0.7648 | 0.9726 G1✓ | 0.9789 | 0.689 / **0.761** |
+| c05 = +codec@0.5 | 0.8374 | **0.5049** | 0.7571 | 0.8733 | 0.8020 | 0.9781 G1✓ | 0.9806 | 0.739 / 0.748 |
+(†honest holdouts; *train==val for all rows incl. A; HQ = cvvdp-rank on the
+hq_codec_grid; ssim2 reference: 0.540 / 0.479)
+
+1. **k025 is a genuine A-challenger**: CID22 −0.0035 (noise), AIC-3 +0.025 and
+   AIC-4 +0.029 on the honest holdouts, KADIS safety 0.9806 (> A, near the
+   0.980 oracle), codec dial pass, HQ 70-85 +0.043. The kadis group at 0.25
+   under the CORRECT init costs nothing and lifts the compression holdouts.
+2. **codec-millions is a KonJND/HQ-85-100 lever**: c05 KonJND 0.5049 (+0.086 —
+   largest measured; still below the 0.70 G5 floor) + HQ 85-100 0.748, at
+   CID22 −0.028.
+3. The deltas are complementary (kadis→AIC/dial/70-85; codec→KonJND/85-100) →
+   wave-2 = combo (kadis 0.25 + codec {0.25, 0.5}) + k025 multi-seed (7, 31).
