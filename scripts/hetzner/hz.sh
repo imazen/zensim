@@ -39,7 +39,7 @@ case "$CMD" in
       "$(dirname "$0")/bootstrap_trainbox.sh" "$(dirname "$0")/rebuild_derived.py" \
       "$(dirname "$0")/runcells.sh" root@"$IP":/root/
     $SSH"$IP" "mkdir -p /root/scripts-hetzner && mv /root/rebuild_derived.py /root/scripts-hetzner/ 2>/dev/null; \
-      $CREDS ZENSIM_COMMIT=$COMMIT nohup bash /root/bootstrap_trainbox.sh > /root/bootstrap.log 2>&1 & echo bootstrap-launched"
+      $CREDS; export ZENSIM_COMMIT=$COMMIT; nohup bash /root/bootstrap_trainbox.sh > /root/bootstrap.log 2>&1 & echo bootstrap-launched"
     ;;
   push-eval)
     IP="${1:?ip}"
