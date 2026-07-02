@@ -100,22 +100,21 @@ rows   = 20160
 
 [inputs.bigcodec]
 path   = "/mnt/v/output/zensim-multicodec-probe/bigcodec_traindigits_2026-07-02.parquet"
-sha256 = "d3dafbf33cd1377258a525e140ec7d619b2f6e737f61c6cc030ee4d6e29a5733"
-rows   = 
-notes  = "TRAIN-DIGIT origins only (LSD rule {0,2,4,6,8} per docs/DATA_SPLITS.md §2a) of the canonical 5.7M corpus."
+sha256 = "08cc7e5eeb97c84275239cfbbe33c2c16e5007ffa8bd1e5236ad8bfbcaa040fd"
+rows   = 2946036
+notes  = "TRAIN-DIGIT origins only (LSD rule per docs/DATA_SPLITS.md 2a) of the canonical 5.7M corpus."
 
 [inputs.bigcodec_val]
 path   = "/mnt/v/output/zensim-multicodec-probe/bigcodec_valdigits_2026-07-02.parquet"
-sha256 = "5f3c9e9969229dd438d9be704faa79ec15a9fd0ed33ec45a92d5e18731cd2a84"
-rows   = 
-notes  = "HELD-OUT VAL-DIGIT origins ({1,3,5}), deterministic 1/12 row sample. First truly-held-out val group — fixes the kb25/s7 checkpoint-selection blindness (DATA_SPLITS.md §5)."
+sha256 = "8e11e8ba3614885ab9fc283fc90df61baba5be4d0ea5d1474c3b17e7e40222a2"
+rows   = 147067
+notes  = "HELD-OUT val-digit origins (1,3,5), 1/12 deterministic sample — fixes selection blindness (DATA_SPLITS.md 5)."
 
 [inputs.kadis_val]
 path   = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_val.parquet"
 sha256 = "4ab85e72bff90da2b9bdab4f190c5d62614706b3624ab9e095478e26f43262c5"
 rows   = 70000
-notes  = "KADIS source_id%10==8 val split, cvvdp/10 target — second held-out val group."
-notes  = "Canonical picker 2026-06-27, ALL 7 datasets x all splits (jpeg/avif/jxl-lossy/jxl-lossless/webp-lossy/webp-lossless/png), human_score=clamp(score_ssim2/100,0,1). Provenance: /mnt/v/output/canonical-picker-2026-06-27."
+notes  = "KADIS source_id%10==8 val split, cvvdp/10 — second held-out val group."
 
 [inputs.kadis_unused]
 path   = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"

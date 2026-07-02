@@ -14,7 +14,7 @@
 set -euo pipefail
 CMD="${1:?cmd}"; shift
 export HCLOUD_TOKEN=$(grep -oP 'api_token=\K.*' ~/.config/hetzner/credentials)
-SSH="ssh -o StrictHostKeyChecking=accept-new root@"
+SSH="ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new root@"
 PROBE=/mnt/v/output/zensim-multicodec-probe
 
 mint_scoped_ro() { # scoped read-only zentrain creds, 48h TTL
@@ -35,7 +35,7 @@ case "$CMD" in
   bootstrap)
     IP="${1:?ip}"; COMMIT="${2:?zensim commit}"
     CREDS=$(mint_scoped_ro)
-    scp -o StrictHostKeyChecking=accept-new \
+    scp -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new \
       "$(dirname "$0")/bootstrap_trainbox.sh" "$(dirname "$0")/rebuild_derived.py" \
       "$(dirname "$0")/runcells.sh" root@"$IP":/root/
     $SSH"$IP" "mkdir -p /root/scripts-hetzner && mv /root/rebuild_derived.py /root/scripts-hetzner/ 2>/dev/null; \
@@ -43,13 +43,13 @@ case "$CMD" in
     ;;
   push-eval)
     IP="${1:?ip}"
-    rsync -az /mnt/v/zen/zensim-training/2026-05-15-full-features/ root@"$IP":/data/evalfeat/
-    rsync -az "$PROBE"/kadis_test_safetygrid.parquet "$PROBE"/hq_codec_grid_2026-07-01.parquet \
+    rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" /mnt/v/zen/zensim-training/2026-05-15-full-features/ root@"$IP":/data/evalfeat/
+    rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" "$PROBE"/kadis_test_safetygrid.parquet "$PROBE"/hq_codec_grid_2026-07-01.parquet \
       "$PROBE"/hq_codec_refs_2026-07-01.parquet "$PROBE"/kadis_tv_pairs_clean.tsv root@"$IP":/data/grids/
     ;;
   push-manifests)
     IP="${1:?ip}"; shift
-    rsync -az /home/lilith/work/zen/zensim/zensim/weights/manifests/ root@"$IP":/root/work/zensim/zensim/weights/manifests/
+    rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" /home/lilith/work/zen/zensim/zensim/weights/manifests/ root@"$IP":/root/work/zensim/zensim/weights/manifests/
     printf '%s\n' "$@" | $SSH"$IP" "cat > /root/cells.txt && wc -l /root/cells.txt"
     ;;
   run)
@@ -57,7 +57,7 @@ case "$CMD" in
     $SSH"$IP" "nohup bash /root/runcells.sh /root/cells.txt $PAR > /data/out/runcells.log 2>&1 & echo run-launched"
     ;;
   status)  $SSH"${1:?ip}" "cat /data/out/status.tsv 2>/dev/null | tail -20; tail -2 /root/bootstrap.log 2>/dev/null" ;;
-  pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"; rsync -az root@"$IP":/data/out/ "$PROBE/hetzner-out/" && echo pulled ;;
+  pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"; rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/out/ "$PROBE/hetzner-out/" && echo pulled ;;
   destroy) hcloud server delete "${1:?name}" ;;
   *) echo "unknown cmd $CMD" >&2; exit 2 ;;
 esac
