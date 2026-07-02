@@ -19,7 +19,7 @@ date              = "2026-05-27"
 
 [training]
 trainer            = "zensim_mlp_train"
-trainer_commit     = "d8c8d64ff469a68e1e19a52aa2e5a68ec27db512"
+trainer_commit     = "d8c8d64ff46989def512d96aeb5dbda84b0ae50a"
 seed               = 17
 mse_weight         = 0.6
 ranknet_weight     = 0.6
