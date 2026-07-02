@@ -728,3 +728,61 @@ v2 plan: add zenjpeg/zenpng (R2 sidecars), the 2026-06-24-cpu 477k cells, more
 knobs per codec, KADIS severity-1 near-threshold pairs (140k, 7 metrics), and a
 `zone_consistency` summary in bake_verdict (min-over-zones panel + step-agreement
 gates) so every train auto-reports it.
+
+## Profile-A reproduction, part 2: root-cause archaeology (2026-07-01)
+
+**What made A (exact provenance):** trainer tree ≈ `e9442678` (parent of ship
+commit d13ad6b3/1fd645a7, 2026-05-27 11:44), manifest `v47_strict_qat.toml`,
+mechanism commits c5c5aed7 (QAT STE) + 310c6aac/742e8a73 (spline on
+projected+quantized net) + 55df657b (native f16 + compress). No training log
+was preserved; the bake carries no build-commit metadata.
+
+**Drift enumerated (ship → main):** only 7 trainer-touching commits — #40
+47aff783 (trainer + bake-emit for hidden=1; the emit change is benign for
+leaky=0.01), #41 b1872f7b (soft-monotone-keep-72), c5da5410 (ban-228), fmt/
+clippy passes, + the TV wiring (inactive without --tv-pairs-file). One of the
+#40/#41 trainer-side changes is the likely 27→57KB packing/behavior drift;
+the pinned-tree rerun (in flight) separates code drift from non-determinism.
+
+**SECOND provenance break — a canonical INPUT was rewritten in place after
+ship:** the original manifest records konjnd-dense-norm.parquet sha
+`5595a922…`; the on-disk file is `49b65c48…` — the 2026-05-28 column-alias
+rewrite (active_mix_norm) REPLACED the file one day after v47 trained, the
+current manifest's sha was silently updated, and ALL THREE mirrors (local, R2,
+Tower — Tower copy dated May 28 02:30) hold the post-rewrite bytes. The
+original input bytes are unrecoverable. Data-equivalence is likely (the
+rewrite added alias columns; trainer reads human_score + f0..f371 by name) but
+unprovable at the byte level. **Frozen-canonical rule violated in practice:
+"adding a column" rewrote a released training input in place across every
+mirror.** Pinned rerun uses --manifest-allow-sha-drift for this one input.
+
+**Reproduction protocol gaps to fix (all three bit us):**
+1. Manifests must record `trainer_commit` (+ the trainer should stamp its
+   build commit into bake metadata).
+2. Canonical inputs are IMMUTABLE once a ship-bake references them — schema
+   additions create a NEW dated file, never rewrite in place.
+3. Preserve the training log next to the bake (epoch-0 line = cheap
+   determinism oracle).
+
+## Post-CID22 human-alignment datasets (zenpapers survey, 2026-07-01)
+
+From `zenpapers/docs/iqa_datasets_catalog_2026-05-27.md` + dataset pointers
+(94 subjective-IQA papers in corpus). Post-CID22 (2023+) sets relevant to
+compression + the 75–100 zone, by usefulness to us:
+
+| dataset | year | what | local? | zone fit |
+|---|---|---|---|---|
+| **JPEG-AI-SDR25** (arXiv 2504.06301, QoMEX'25, Jenadeleh/Sneyers) | 2025 | high-fidelity SDR JND; 5 src × 10 JPEG-AI levels; **85k BTC + 10k PTC raw triplets** | ✓ `/mnt/v/datasets/jpeg-ai-sdr25/` | ★ near-threshold = 75–100 zone; NOT yet in our panel |
+| **AIC-HDR2025** (arXiv 2506.12505) | 2025 | HDR (PQ10) JND, 34,560 triplets | ✗ still unreleased (checked 2026-07-01; repo README-only 9 months post-QoMEX) | HDR eval when released |
+| **AIC-3 BTC/PTC raw** (dataset-BTC-PTC-24) | 2024 | **419,760 raw triplets** behind CID22/AIC-3 JND | ✓ `/mnt/v/datasets/aic3-btc-ptc/` | ★ pairwise-ranking TRAINING data beyond reconstructed MCOS |
+| JPEG-AIC-4 sample | 2024-25 | 5 src × 305 PTC imgs, 6 codecs, JND | ✓ (already in panel, n=300) | already used; full set committee-held |
+| UHD-IQA (Hosu) | 2024 | high-res authentic, NR-oriented | partial | weak fit (NR, not codec-FR) |
+| PIPAL | 2020 | 1.13M judgments, GAN/SR distortions | ✓ zips | popular but SR-focused; low codec fit |
+| AGIQA-3k / AIGCIQA2023 | 2023 | AI-generated image quality | pointers | different domain |
+
+**Actionable:** (a) SDR25 → JND reconstruction (same BTC/PTC protocol as
+AIC-3/AIC-4; jpeg-aic reconstruction code) → decode → 372-feat extract → add as
+`sdr25` val corpus in bake_verdict — a REAL post-CID22 near-threshold human
+anchor for the 75–100 zone. (b) AIC-3 raw triplets → per-triplet pairwise
+training signal (RankNet-native, no reconstruction loss) — the highest-value
+untapped HUMAN training data in-house. (c) Re-check AIC-HDR2025 quarterly.
