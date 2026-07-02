@@ -871,3 +871,38 @@ provenance) predates the canonical 2026-06-27 picker datasets, which now total
 score_ssim2 + score_zensim + provenance + origin splits. Building
 `bigcodec_5p7M_2026-07-02.parquet` (f0..f371 + human_score=clamp(ssim2/100,0,1))
 → wave-3: v47+bigcodec@0.25 and kadis.25+bigcodec.25, seed 17 first.
+
+## v50 WAVE-3 — the 5.7M canonical corpus (2026-07-02)
+
+`bigcodec_5p7M_2026-07-02.parquet` (sha 1ef6be99…, 5,742,660 rows = canonical
+picker 2026-06-27, all 7 datasets × all splits, human_score=clamp(ssim2/100,0,1)):
+
+| seed 17 | CID22 | KonJND | AIC3 | AIC4 | dial | safety | HQ 70-85/85-100 |
+|---|---|---|---|---|---|---|---|
+| A (ship) | 0.8657 | 0.4185 | 0.7680 | 0.8854 | 0.9747 | 0.9726 | 0.719/0.720 |
+| big025 = v47+bigcodec@0.25 | 0.8610 | **0.4715** | 0.7820 | 0.8983 | 0.9702 | 0.9712 | 0.722/0.647 |
+| kb25 = +kadis@0.25+bigcodec@0.25 | **0.6441 ⚠** | 0.4614 | 0.5344 ⚠ | 0.4205 ⚠ | 0.9683 | 0.9740 | 0.572/0.651 |
+
+1. **big025 is the most balanced single-delta candidate measured**: KonJND
+   +0.053 (the clean jpeg-heavy corpus delivers most of the probe-sample's
+   KonJND lever at a tenth of its CID22 cost), AIC-3 +0.014 / AIC-4 +0.013,
+   CID22 −0.005 (within seed noise), dial/safety ≈ A. Seeds 7/31 in flight.
+2. **Its one regression — HQ 85-100 rank 0.647 vs A 0.720 — is the predicted
+   ssim2-saturation amplification** (SSIMULACRA2 README: the 85/90 anchors are
+   in-place/flicker JND grades, and per our HQ instrument ssim2 ranks that
+   band at cvvdp-agreement 0.48). More ssim2-labeled HQ rows teach the
+   saturation. Fix direction for wave-4: in the ≥0.85 band supervise from
+   cvvdp/butteraugli (2026-06-24 GPU corpus, 180k cells) and/or human JND
+   (KonJND, SDR25) instead of duplicating ssim2 labels.
+3. **kb25 collapsed** (CID22 0.644/AIC4 0.42, dials fine) — the instability
+   basin persists on the FIXED trainer when group count grows (7 groups),
+   seed-17. **Worse: its val(geomean3) looked healthy (0.909) — checkpoint
+   selection is BLIND to this failure mode** because the val groups are
+   train==val (memorization masks holdout collapse). Eval-gap action: add a
+   truly-held-out val group (e.g. a codec-va slice or KADIS test slice) to the
+   recipe's val set so collapse is visible to selection/early-stop.
+4. **SSIMULACRA2 provenance note (README, read 2026-07-02)**: ssim2 was tuned
+   on CID22(201/250 refs)+TID2013+KADID+KonFiG via Nelder-Mead. Our CID22-49
+   val refs were held out of that tuning (ssim2 0.8854 there — fair
+   comparison); KADID/TID are fully in-sample for ssim2 — never scoreboard
+   corpora against it.
