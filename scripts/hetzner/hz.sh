@@ -54,12 +54,19 @@ case "$CMD" in
     ;;
   run)
     IP="${1:?ip}"; PAR="${2:-6}"
+    $SSH"$IP" "grep -q 'boot] DONE' /root/bootstrap.log"       || { echo "REFUSED: bootstrap not DONE on $IP (hz.sh status $IP)" >&2; exit 1; }
     $SSH"$IP" "nohup bash /root/runcells.sh /root/cells.txt $PAR > /data/out/runcells.log 2>&1 & echo run-launched"
     ;;
   status)  $SSH"${1:?ip}" "cat /data/out/status.tsv 2>/dev/null | tail -20; tail -2 /root/bootstrap.log 2>/dev/null" ;;
   pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"; rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/out/ "$PROBE/hetzner-out/" && echo pulled ;;
   retire)  # snapshot then delete — MANDATORY end-state for x86 big boxes
     NAME="${1:?name}"
+    if [ "${2:-}" != "--force" ]; then
+      RIP=$(hcloud server ip "$NAME" 2>/dev/null || true)
+      if [ -n "$RIP" ] && $SSH"$RIP" "test -f /data/out/status.tsv && ! grep -q ALLDONE /data/out/status.tsv" 2>/dev/null; then
+        echo "REFUSED: $NAME has a cell queue without ALLDONE — pull/inspect first or retire $NAME --force" >&2; exit 1
+      fi
+    fi
     SNAP="${NAME}-$(date +%s)"
     hcloud server create-image --type snapshot --description "$SNAP" "$NAME"
     hcloud server delete "$NAME"

@@ -15,6 +15,12 @@ echo -e "cell\trc\tstart\tend" > "$STATUS"
 run_cell() {
   local M="$1"; local D="$OUT/$M"; mkdir -p "$D"
   local t0=$(date -u +%FT%TZ)
+  # preflight: validate every manifest input (sha/rows/schema/targets) BEFORE
+  # burning a training run — fleet/versioning errors die here, loudly.
+  if ! python3 scripts/v_next/validate_parquet.py --manifest "zensim/weights/manifests/${M}.toml" > "$D/preflight.log" 2>&1; then
+    echo -e "${M}\tPREFLIGHT-FAIL\t${t0}\t$(date -u +%FT%TZ)" >> "$STATUS"
+    return 1
+  fi
   unset ZENSIM_DIAL_GRID
   RAYON_NUM_THREADS=6 nice -n10 target/release/zensim_mlp_train \
     --manifest "zensim/weights/manifests/${M}.toml" \
@@ -33,4 +39,8 @@ run_cell() {
 
 export -f run_cell; export OUT
 xargs -a "$CELLS_FILE" -P "$PAR" -I{} bash -c 'run_cell "$@"' _ {}
-echo -e "ALLDONE\t0\t-\t$(date -u +%FT%TZ)" >> "$STATUS"
+if grep -qE "\t(PREFLIGHT-FAIL|[1-9][0-9]*)\t" "$STATUS"; then
+  echo -e "ALLDONE-WITH-FAILURES\t1\t-\t$(date -u +%FT%TZ)" >> "$STATUS"
+else
+  echo -e "ALLDONE\t0\t-\t$(date -u +%FT%TZ)" >> "$STATUS"
+fi

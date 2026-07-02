@@ -8,7 +8,11 @@
 #   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN
 #                   SCOPED temp creds (object-read-only on zentrain) — NEVER root keys.
 set -euo pipefail
+trap 'echo "[boot] FAILED at line $LINENO (rc=$?) $(date -u +%FT%TZ)"' ERR
 echo "[boot] $(date -u +%FT%TZ) start"
+# disk guard: refuse to start with <100G free (the encodes-runaway lesson)
+AVAIL_G=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+[ "$AVAIL_G" -ge 100 ] || { echo "[boot] FAILED: only ${AVAIL_G}G free"; exit 1; }
 
 # 1. base tools (dev box, not a fleet image — bootstrap once, idempotent)
 if ! command -v s5cmd >/dev/null; then
@@ -16,7 +20,7 @@ if ! command -v s5cmd >/dev/null; then
     | tar -xz -C /usr/local/bin s5cmd
 fi
 command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git build-essential pkg-config)
-python3 -c "import pyarrow" 2>/dev/null || (apt-get update -qq && apt-get install -y -qq python3-pip && pip3 install --break-system-packages -q pyarrow)
+python3 -c "import pyarrow, toml" 2>/dev/null || (apt-get update -qq && apt-get install -y -qq python3-pip && pip3 install --break-system-packages -q pyarrow toml)
 if ! command -v cargo >/dev/null; then
   curl -sSf https://sh.rustup.rs | sh -s -- -y -q --default-toolchain stable
 fi
