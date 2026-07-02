@@ -61,17 +61,27 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
 - One persistent quiet Monitor per session for terminal events; state lives in
   files (status.tsv, logs, benchmarks/), not conversation context.
 
-## In-flight at last update (check before starting new work)
+## In-flight at last update (2026-07-02 eve — check before starting new work)
 
-- zen-train-1: RETIRED by user 2026-07-02 before the grid ran (snapshot
-  `zen-train-1-1782989687` is the restore base). The box grid (v51box_s17
-  cross-machine determinism check + v51 s47/s63) is DEFERRED — on the next
-  box: `hz.sh restore zen-train-1` → push-manifests → run (hardened runcells
-  with validate-parquet preflight is already in the repo).
-- Multi-metric backfill of the 5.7M corpus (user fleet) → gates Bet 1/wave-4.
-- Next unstarted builds, in order: SDR25 JND reconstruction (T0 corpus);
-  test-digit rebuild of HQ/dial grids; within-ref pairwise eval in
-  bake_verdict. All specified in PLAN_BEAT_A "instrument prerequisites".
+- **zen-train-1 RESTORED** (159.69.55.206) running the v52 grid chain
+  (`box_v52_chain6.log` in the probe dir): v51box_s17 determinism check +
+  v52_s17/s7/s31 (dedup+hqfill corpus). Retire (`hz.sh retire`) after pull.
+  Data path is RSYNC-PINNED-INPUTS (on-box rebuild diverged from manifest
+  pins — bca4f6bd); bootstrap deps gate numpy/scipy; restore scrubs host keys.
+- **avif 4-metric fill fleet**: 8 vast runs `fill-avif-b0..b7-2026-07-02`
+  (image `exec-gpu-hqfillA-d5a142e0e166` — plain `exec-gpu` tag is GONE from
+  ghcr; fleet.env default stale). b0 verified writing blobs. Merge sidecar
+  when done → extend mm6 with avif.
+- **Built today**: `bigcodec_hqdedup_{train,val}digits` (deduped+hqfill, v52
+  inputs); `bigcodec_mm6_traindigits` (1.57M rows, 4 metrics joined — Bet-1
+  input); `hqfill_7metric_sidecar`; SDR25 T0 anchor (A FAILS the SDR25≥ssim2
+  gate: pooled 0.904 vs 0.958 — the target to beat).
+- **Pending in zenmetrics** (blocked on `claude-pngfix` marker):
+  build_scorefile_from_pairs.py + launcher overrides commit; re-push a stable
+  exec-gpu tag or repoint fleet.env.
+- Backfill: fill4 sidecar landed (patched variant is canonical; avif in
+  flight); hqfill was already 7-metric-scored. Remaining prereqs: test-digit
+  HQ/dial grid rebuild; within-ref pairwise eval in bake_verdict.
 
 ## Older state
 
