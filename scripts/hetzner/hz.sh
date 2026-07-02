@@ -29,6 +29,7 @@ mint_scoped_ro() { # scoped read-only zentrain creds, 48h TTL
 case "$CMD" in
   provision)
     NAME="${1:?name}"
+    trap 'NEWIP=$(hcloud server ip "$NAME" 2>/dev/null); [ -n "$NEWIP" ] && ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$NEWIP" >/dev/null 2>&1 || true' EXIT
     hcloud server create --name "$NAME" --type ccx63 --image ubuntu-24.04 \
       --location fsn1 --ssh-key zen-arm-dev-20260528 -o columns=ipv4 | tail -1
     ;;
@@ -74,8 +75,11 @@ case "$CMD" in
     ;;
   restore) # recreate from the newest snapshot matching the name
     NAME="${1:?name}"
+    # a restored box reuses IPs with a fresh host key — scrub stale entries
+    # after create (see the 2026-07-02 BOX-SSH-FAILED incident)
     IMG=$(hcloud image list --type snapshot -o noheader -o columns=id,description | grep "$NAME" | sort -k2 | tail -1 | awk '{print $1}')
     [ -n "$IMG" ] || { echo "no snapshot matching $NAME" >&2; exit 1; }
+    trap 'NEWIP=$(hcloud server ip "$NAME" 2>/dev/null); [ -n "$NEWIP" ] && ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$NEWIP" >/dev/null 2>&1 || true' EXIT
     hcloud server create --name "$NAME" --type ccx63 --image "$IMG" --location fsn1 --ssh-key zen-arm-dev-20260528
     ;;
   destroy) hcloud server delete "${1:?name}" ;;
