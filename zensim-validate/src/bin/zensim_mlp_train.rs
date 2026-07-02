@@ -93,6 +93,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use zensim_validate::mlp_train;
+use zensim_validate::mlp_train::{TripletPool, train_mlp_strategy};
 use zensim_validate::train_manifest;
 
 #[path = "../contamination_guard.rs"]
@@ -650,6 +651,50 @@ struct Args {
     /// Requires parquet inputs with cvvdp_score + iwssim + ssim2_gpu columns.
     #[arg(long, default_value_t = false)]
     sigma_weighted_mse: bool,
+
+    /// STRATEGY: EMA decay of weights (0 = off; typical 0.999). Bake
+    /// snapshots the EMA copies — seed-variance reduction.
+    #[arg(long, default_value_t = 0.0)]
+    ema_decay: f64,
+    /// STRATEGY: probability a pair is re-drawn as a hard pair.
+    #[arg(long, default_value_t = 0.0)]
+    hard_pair_frac: f64,
+    /// |Δ target| ceiling defining a hard pair (native target units).
+    #[arg(long, default_value_t = 0.05)]
+    hard_pair_max_delta: f64,
+    /// STRATEGY: target-quantile bands for stratified row sampling (0 = off).
+    #[arg(long, default_value_t = 0)]
+    stratified_bands: usize,
+    /// STRATEGY: GroupDRO temperature over per-group mean loss (0 = off).
+    #[arg(long, default_value_t = 0.0)]
+    dro_eta: f64,
+    /// STRATEGY: ListMLE listwise loss weight (0 = off).
+    #[arg(long, default_value_t = 0.0)]
+    listwise_weight: f64,
+    /// Rows per listwise list.
+    #[arg(long, default_value_t = 8)]
+    listwise_size: usize,
+    /// Fraction of steps run as listwise steps when active.
+    #[arg(long, default_value_t = 0.15)]
+    listwise_frac: f64,
+    /// STRATEGY: ordered-probit triplet NLL weight on raw human triplets (0 = off).
+    #[arg(long, default_value_t = 0.0)]
+    triplet_weight: f64,
+    /// Fraction of steps run as triplet steps when active.
+    #[arg(long, default_value_t = 0.2)]
+    triplet_frac: f64,
+    /// Triplet indecision threshold τ (model-score units).
+    #[arg(long, default_value_t = 0.6)]
+    triplet_tau: f64,
+    /// Triplet observer noise σ (model-score units).
+    #[arg(long, default_value_t = 1.0)]
+    triplet_sigma: f64,
+    /// Triplet stimuli parquet/CSV (ref_basename + q_jnd/level + f0..fN rows).
+    #[arg(long)]
+    triplet_stimuli: Option<String>,
+    /// Triplet responses TSV: left_idx	right_idx	response(0=left-more-distorted,1=right,2=notsure).
+    #[arg(long)]
+    triplet_responses: Option<String>,
 
     /// `PreviewV0_5Tuner` RankNet pair-loss weight (2026-05-18).
     /// Default `1.0` matches legacy behavior. Set to `0.0` to disable
@@ -1747,6 +1792,20 @@ fn apply_manifest_to_args(
     );
     set_if_default!(qat_tau, "qat_tau", cfg.qat_tau);
     set_if_default!(group_eval_cap, "group_eval_cap", cfg.group_eval_cap);
+    set_if_default!(ema_decay, "ema_decay", cfg.ema_decay);
+    set_if_default!(hard_pair_frac, "hard_pair_frac", cfg.hard_pair_frac);
+    set_if_default!(hard_pair_max_delta, "hard_pair_max_delta", cfg.hard_pair_max_delta);
+    set_if_default!(stratified_bands, "stratified_bands", cfg.stratified_bands);
+    set_if_default!(dro_eta, "dro_eta", cfg.dro_eta);
+    set_if_default!(listwise_weight, "listwise_weight", cfg.listwise_weight);
+    set_if_default!(listwise_size, "listwise_size", cfg.listwise_size);
+    set_if_default!(listwise_frac, "listwise_frac", cfg.listwise_frac);
+    set_if_default!(triplet_weight, "triplet_weight", cfg.triplet_weight);
+    set_if_default!(triplet_frac, "triplet_frac", cfg.triplet_frac);
+    set_if_default!(triplet_tau, "triplet_tau", cfg.triplet_tau);
+    set_if_default!(triplet_sigma, "triplet_sigma", cfg.triplet_sigma);
+    if args.triplet_stimuli.is_none() { args.triplet_stimuli = cfg.triplet_stimuli.clone(); }
+    if args.triplet_responses.is_none() { args.triplet_responses = cfg.triplet_responses.clone(); }
 
     // Path-valued options (already resolved to absolute/relative-to-manifest).
     if !explicit(matches, "auto_transforms") && cfg.auto_transforms.is_some() {
@@ -2289,6 +2348,18 @@ fn main() {
         n_hidden_layers: args.n_hidden_layers,
         mse_weight: args.mse_weight,
         sigma_weighted_mse: args.sigma_weighted_mse,
+        ema_decay: args.ema_decay,
+        hard_pair_frac: args.hard_pair_frac,
+        hard_pair_max_delta: args.hard_pair_max_delta,
+        stratified_bands: args.stratified_bands,
+        dro_eta: args.dro_eta,
+        listwise_weight: args.listwise_weight,
+        listwise_size: args.listwise_size,
+        listwise_frac: args.listwise_frac,
+        triplet_weight: args.triplet_weight,
+        triplet_frac: args.triplet_frac,
+        triplet_tau: args.triplet_tau,
+        triplet_sigma: args.triplet_sigma,
         ranknet_weight: args.ranknet_weight,
         monotonicity_reg: args.monotonicity_reg,
         monotone_cbc: args.monotone_cbc,
@@ -2898,7 +2969,60 @@ fn main() {
             zensim_train_core::per_sample_alpha_head::bake_per_sample_alpha_head_v3(&res.model)
         }
     } else {
-        train_mlp_with_tv_anchored_equiv_pjnd(
+        // STRATEGY-2026-07-02: optional raw-human-triplet pool.
+        let triplet_pool: Option<TripletPool> = match (&args.triplet_stimuli, &args.triplet_responses) {
+            (Some(stim), Some(resp)) if args.triplet_weight > 0.0 => {
+                let mut pool = TripletPool::default();
+                let mut rdr = csv::Reader::from_path(stim)
+                    .unwrap_or_else(|e| panic!("triplet stimuli {stim}: {e}"));
+                let headers = rdr.headers().expect("stimuli headers").clone();
+                let f0 = headers
+                    .iter()
+                    .position(|h| h == "f0")
+                    .expect("stimuli CSV needs f0..fN columns");
+                for rec in rdr.records() {
+                    let rec = rec.expect("stimuli row");
+                    let feats: Vec<f64> = (f0..headers.len())
+                        .map(|i| rec.get(i).and_then(|v| v.parse().ok()).unwrap_or(0.0))
+                        .collect();
+                    pool.features.push(feats);
+                }
+                for (ln, line) in std::fs::read_to_string(resp)
+                    .unwrap_or_else(|e| panic!("triplet responses {resp}: {e}"))
+                    .lines()
+                    .enumerate()
+                {
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    let mut it = line.split('\t');
+                    let (l, r, a) = (
+                        it.next().and_then(|v| v.parse::<u32>().ok()),
+                        it.next().and_then(|v| v.parse::<u32>().ok()),
+                        it.next().and_then(|v| v.parse::<u8>().ok()),
+                    );
+                    match (l, r, a) {
+                        (Some(l), Some(r), Some(a))
+                            if (l as usize) < pool.features.len()
+                                && (r as usize) < pool.features.len()
+                                && a <= 2 =>
+                        {
+                            pool.responses.push((l, r, a));
+                        }
+                        _ => panic!("triplet responses line {}: malformed or out of range", ln + 1),
+                    }
+                }
+                eprintln!(
+                    "triplet pool: {} stimuli x {} features, {} responses",
+                    pool.features.len(),
+                    pool.features.first().map(|f| f.len()).unwrap_or(0),
+                    pool.responses.len()
+                );
+                Some(pool)
+            }
+            _ => None,
+        };
+        train_mlp_strategy(
             &groups,
             n_features,
             &hyperparams,
@@ -2908,6 +3032,7 @@ fn main() {
             equiv_loaded.as_ref(),
             pjnd_anchor_loaded.as_ref(),
             konjnd_agg_loaded.as_ref(),
+            triplet_pool.as_ref(),
         )
     };
 

@@ -37,6 +37,7 @@ use zenpredict_bake::{BakeLayer, BakeMetadataEntry, BakeRequest, bake};
 // / scalar dispatched kernel. Math is bit-identical to the scalar
 // reference (hardware `sqrt`, FMA fusion only where LLVM would already
 // fuse the scalar version).
+pub mod strategy;
 use crate::adam_simd;
 
 // Norm-in-Norm + RankNet hybrid loss (Li, Jiang, Jiang 2020,
@@ -431,6 +432,56 @@ pub struct MlpHyperparams {
     /// (Mohammadi 2025 Eq. 6). Errors on high-consensus stimuli (where
     /// cvvdp, iwssim, and ssim2 agree) are penalized more.
     pub sigma_weighted_mse: bool,
+
+    /// STRATEGY-2026-07-02: EMA of weights. `0.0` = off. Typical 0.999.
+    /// Maintains exponential moving averages of every weight tensor,
+    /// updated after each Adam step; the best-epoch bake snapshots the
+    /// EMA copies instead of the live weights (variance reduction —
+    /// attacks the measured seed instability: v52 CID22 0.715..0.851).
+    pub ema_decay: f64,
+
+    /// STRATEGY-2026-07-02: hard-pair mining for RankNet. With
+    /// probability `hard_pair_frac`, the second row of a pair is
+    /// re-drawn (≤16 tries) until |Δtarget| ≤ `hard_pair_max_delta` —
+    /// concentrating gradient on near-threshold pairs (the measured
+    /// KonJND / HQ-zone weakness). `0.0` = off.
+    pub hard_pair_frac: f64,
+    /// |Δ human_score| ceiling for a "hard" pair (native target units).
+    pub hard_pair_max_delta: f64,
+
+    /// STRATEGY-2026-07-02: stratified band sampling. When > 0, each
+    /// group's rows are pre-bucketed into this many target-quantile
+    /// bands; row A of each pair samples band-uniform then row-uniform
+    /// within band (kills band starvation under pooled sampling).
+    /// Ignored for groups with per-row CDFs. `0` = off.
+    pub stratified_bands: usize,
+
+    /// STRATEGY-2026-07-02: GroupDRO-style worst-group emphasis.
+    /// Per-epoch, group sampling weights become
+    /// `train_w · exp(dro_eta · normalized_group_loss)` (multiplicative
+    /// weights on the observed per-group mean loss). `0.0` = off.
+    pub dro_eta: f64,
+
+    /// STRATEGY-2026-07-02: ListMLE (Plackett–Luce NLL) listwise loss
+    /// over within-`ref_basename` lists. `0.0` = off.
+    pub listwise_weight: f64,
+    /// Rows per sampled list (default 8).
+    pub listwise_size: usize,
+    /// Fraction of steps that run a listwise step instead of a pair
+    /// step (default 0.15 when listwise_weight > 0).
+    pub listwise_frac: f64,
+
+    /// STRATEGY-2026-07-02: ordered-probit triplet NLL on raw human
+    /// triplet responses (KonFiG/AIC-3 lineage: pivot = pristine,
+    /// response = which side is MORE DISTORTED, or notsure). `0.0` = off.
+    pub triplet_weight: f64,
+    /// Fraction of steps that run a triplet step (default 0.2 when active).
+    pub triplet_frac: f64,
+    /// Indecision threshold τ in model-score units (default 0.6).
+    pub triplet_tau: f64,
+    /// Observer noise σ in model-score units (default 1.0; the model
+    /// output is tanh-pinned ≈[0,100]-scaled, so τ/σ are in that space).
+    pub triplet_sigma: f64,
 
     /// RankNet pair-loss weight (`PreviewV0_5Tuner` experiment,
     /// 2026-05-18). Default `1.0` matches legacy behavior. Setting
@@ -835,6 +886,18 @@ impl Default for MlpHyperparams {
             n_hidden_layers: 1,
             mse_weight: 0.0,
             sigma_weighted_mse: false,
+            ema_decay: 0.0,
+            hard_pair_frac: 0.0,
+            hard_pair_max_delta: 0.05,
+            stratified_bands: 0,
+            dro_eta: 0.0,
+            listwise_weight: 0.0,
+            listwise_size: 8,
+            listwise_frac: 0.15,
+            triplet_weight: 0.0,
+            triplet_frac: 0.2,
+            triplet_tau: 0.6,
+            triplet_sigma: 1.0,
             ranknet_weight: 1.0,
             monotonicity_reg: 0.0,
             monotone_cbc: false,
@@ -930,6 +993,17 @@ pub struct TrainingGroup<'a> {
     /// inclusion mask — any group with `validation_weight > 0`
     /// participates in the min.
     pub validation_weight: f64,
+}
+
+/// STRATEGY-2026-07-02: raw human triplet responses for the ordered-probit
+/// NLL loss (KonFiG / AIC-3 lineage). `features` are RAW (unstandardized —
+/// the trainer standardizes with the same scaler as the groups). `responses`
+/// index into `features`: (left, right, resp) with resp 0 = left judged MORE
+/// DISTORTED, 1 = right, 2 = not sure (the trap-verified convention).
+#[derive(Debug, Default)]
+pub struct TripletPool {
+    pub features: Vec<Vec<f64>>,
+    pub responses: Vec<(u32, u32, u8)>,
 }
 
 /// Cross-codec JND anchor rows for `PreviewV0_5TunerV2` (2026-05-19).
@@ -1191,6 +1265,26 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
     pjnd_anchor: Option<&AnchorRows<'_>>,
     konjnd_agg: Option<&KonjndAggregationPool<'_>>,
 ) -> Vec<u8> {
+    train_mlp_strategy(
+        groups, n_features, hyperparams, log, tv, anchor, equiv, pjnd_anchor, konjnd_agg, None,
+    )
+}
+
+/// STRATEGY-2026-07-02 entry point: everything the pjnd entry does, plus an
+/// optional raw-human-triplet pool for the ordered-probit NLL loss.
+#[allow(clippy::too_many_arguments)]
+pub fn train_mlp_strategy(
+    groups: &[TrainingGroup<'_>],
+    n_features: usize,
+    hyperparams: &MlpHyperparams,
+    log: &mut Vec<String>,
+    tv: Option<&TvRegularizer>,
+    anchor: Option<&AnchorRows<'_>>,
+    equiv: Option<&EquivPairs<'_>>,
+    pjnd_anchor: Option<&AnchorRows<'_>>,
+    konjnd_agg: Option<&KonjndAggregationPool<'_>>,
+    triplets: Option<&TripletPool>,
+) -> Vec<u8> {
     // EX-2 std-pool head dispatch (scalar fallback path). Pool-head
     // backprop has not been SIMD-fused yet; we trade ~1.7× per-pair
     // time for the architectural lift (GMSD's std-pooling +
@@ -1221,6 +1315,7 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
             pjnd_anchor,
             konjnd_agg,
             tv,
+            triplets,
         );
     }
     if anchor.is_some() && hyperparams.anchor_loss_weight > 0.0 {
@@ -5167,6 +5262,7 @@ fn train_mlp_per_sample_alpha_head(
     pjnd_anchor: Option<&AnchorRows<'_>>,
     konjnd_agg: Option<&KonjndAggregationPool<'_>>,
     tv: Option<&TvRegularizer>,
+    triplets: Option<&TripletPool>,
 ) -> Vec<u8> {
     use zensim_train_core::per_sample_alpha_head as psah;
 
@@ -6432,6 +6528,81 @@ fn train_mlp_per_sample_alpha_head(
         vec![1.0; groups.len()]
     };
 
+    // ---------------- STRATEGY-2026-07-02 state ----------------
+    let ema_active = hyperparams.ema_decay > 0.0;
+    let mut ema = strategy::EmaState::new(hyperparams.ema_decay);
+    let strat_bands: Vec<Vec<Vec<usize>>> = if hyperparams.stratified_bands > 0 {
+        train_indices
+            .iter()
+            .map(|&gi| strategy::build_bands(groups[gi].human_scores, hyperparams.stratified_bands))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let dro_active = hyperparams.dro_eta > 0.0;
+    let mut cdf = cdf; // rebindable: DRO rebuilds the group CDF per epoch
+    let mut dro_loss_sum: Vec<f64> = vec![0.0; train_indices.len()];
+    let mut dro_loss_n: Vec<u64> = vec![0; train_indices.len()];
+    let listwise_active = hyperparams.listwise_weight > 0.0;
+    let triplet_active =
+        hyperparams.triplet_weight > 0.0 && triplets.map(|t| !t.responses.is_empty()).unwrap_or(false);
+    assert!(
+        !(nin_on && (listwise_active || triplet_active)),
+        "STRATEGY: listwise/triplet steps are not composed with NiN batching yet"
+    );
+    // standardize triplet stimuli with the SAME scaler as the groups
+    let triplet_std: Vec<f64> = if let (true, Some(tp)) = (triplet_active, triplets) {
+        let mut buf = vec![0.0f64; tp.features.len() * n_features];
+        for (ri, f) in tp.features.iter().enumerate() {
+            assert_eq!(f.len(), n_features, "triplet stimulus feature length mismatch");
+            for j in 0..n_features {
+                buf[ri * n_features + j] = (f[j] - scaler_mean[j]) / scaler_scale[j];
+            }
+        }
+        buf
+    } else {
+        Vec::new()
+    };
+    {
+        let mut active: Vec<String> = Vec::new();
+        if ema_active { active.push(format!("ema={}", hyperparams.ema_decay)); }
+        if hyperparams.hard_pair_frac > 0.0 {
+            active.push(format!("hardpair={}@{}", hyperparams.hard_pair_frac, hyperparams.hard_pair_max_delta));
+        }
+        if !strat_bands.is_empty() { active.push(format!("strat={}", hyperparams.stratified_bands)); }
+        if dro_active { active.push(format!("dro_eta={}", hyperparams.dro_eta)); }
+        if listwise_active {
+            active.push(format!("listmle w={} K={} frac={}", hyperparams.listwise_weight, hyperparams.listwise_size, hyperparams.listwise_frac));
+        }
+        if triplet_active {
+            active.push(format!("triplet w={} frac={} tau={} sigma={} ({} responses, {} stimuli)",
+                hyperparams.triplet_weight, hyperparams.triplet_frac, hyperparams.triplet_tau,
+                hyperparams.triplet_sigma, triplets.map(|t| t.responses.len()).unwrap_or(0),
+                triplets.map(|t| t.features.len()).unwrap_or(0)));
+        }
+        if !active.is_empty() {
+            log_line(&format!("STRATEGY active: {}", active.join(" | ")), log);
+        }
+    }
+    macro_rules! ema_swap_all {
+        () => {{
+            std::mem::swap(&mut w1, &mut ema.tensors[0]);
+            std::mem::swap(&mut b1, &mut ema.tensors[1]);
+            std::mem::swap(&mut w2_enc, &mut ema.tensors[2]);
+            std::mem::swap(&mut b2_enc, &mut ema.tensors[3]);
+            std::mem::swap(&mut w_skip, &mut ema.tensors[4]);
+            std::mem::swap(&mut rank_w, &mut ema.tensors[5]);
+            std::mem::swap(&mut w_alpha, &mut ema.tensors[6]);
+            for i in 0..4 {
+                std::mem::swap(&mut reducer_w[i], &mut ema.tensors[7][i]);
+            }
+            std::mem::swap(&mut b_skip, &mut ema.scalars[0]);
+            std::mem::swap(&mut rank_b, &mut ema.scalars[1]);
+            std::mem::swap(&mut reducer_b, &mut ema.scalars[2]);
+            std::mem::swap(&mut b_alpha, &mut ema.scalars[3]);
+        }};
+    }
+
     for epoch in 0..hyperparams.n_epochs {
         let lr = hyperparams.initial_lr
             * 0.5
@@ -6460,6 +6631,111 @@ fn train_mlp_per_sample_alpha_head(
         let mut steps_since_adam = 0u64;
 
         for _ in 0..hyperparams.pairs_per_epoch {
+            // STRATEGY: listwise / triplet steps steal a fraction of the
+            // pair budget (Adam cadence identical: one logical step each).
+            if listwise_active || triplet_active {
+                let su = rng.next_f64_unit();
+                let t_frac = if triplet_active { hyperparams.triplet_frac } else { 0.0 };
+                if triplet_active && su < t_frac {
+                    let tp = triplets.unwrap();
+                    let (li, ri, resp) =
+                        tp.responses[(rng.next_u64() as usize) % tp.responses.len()];
+                    let xa = &triplet_std[li as usize * n_features..(li as usize + 1) * n_features];
+                    let xb = &triplet_std[ri as usize * n_features..(ri as usize + 1) * n_features];
+                    let fwd_a = {
+                        let sc = scratch_f32.borrow();
+                        arch_f32::arch_forward_f32(xa, &sc, n_features, n_hidden, n_hidden_final,
+                            leaky as f32, use_2layer, use_skip).to_archforward()
+                    };
+                    let fwd_b = {
+                        let sc = scratch_f32.borrow();
+                        arch_f32::arch_forward_f32(xb, &sc, n_features, n_hidden, n_hidden_final,
+                            leaky as f32, use_2layer, use_skip).to_archforward()
+                    };
+                    let (ya_p, dya_dpre) = pin_forward(fwd_a.y);
+                    let (yb_p, dyb_dpre) = pin_forward(fwd_b.y);
+                    let (t_loss, dl_dd) = strategy::triplet_probit_loss_dgrad(
+                        ya_p, yb_p, hyperparams.triplet_tau, hyperparams.triplet_sigma, resp,
+                    );
+                    total_loss += t_loss * hyperparams.triplet_weight;
+                    n_steps += 1;
+                    let dl_dya = -dl_dd * hyperparams.triplet_weight * dya_dpre;
+                    let dl_dyb = dl_dd * hyperparams.triplet_weight * dyb_dpre;
+                    strategy_backward_rows(
+                        &[xa, xb], &[fwd_a, fwd_b], &[dl_dya, dl_dyb],
+                        &mut w1, &mut b1, &mut w2_enc, &mut b2_enc, &mut w_skip, &mut b_skip,
+                        &mut rank_w, &mut rank_b, &mut reducer_w, &mut reducer_b, &mut w_alpha,
+                        &mut b_alpha, &mut adam, n_features, n_hidden, n_hidden_final, leaky,
+                        use_2layer, use_skip, hyperparams.l2_lambda, lr, k, &mut steps_since_adam,
+                        &do_adam_step,
+                    );
+                    continue;
+                }
+                if listwise_active && su < t_frac + hyperparams.listwise_frac {
+                    let u2 = rng.next_f64_unit();
+                    let lpos = cdf.partition_point(|&c| c < u2).min(cdf.len() - 1);
+                    let lg = &groups[train_indices[lpos]];
+                    let ln = lg.features.len();
+                    let kk = hyperparams.listwise_size.max(2).min(ln);
+                    if ln >= 2 {
+                        let mut rows: Vec<usize> = Vec::with_capacity(kk);
+                        while rows.len() < kk {
+                            let r = if !strat_bands.is_empty() {
+                                let bands = &strat_bands[lpos];
+                                let b = &bands[(rng.next_u64() as usize) % bands.len()];
+                                b[(rng.next_u64() as usize) % b.len()]
+                            } else {
+                                (rng.next_u64() as usize) % ln
+                            };
+                            if !rows.contains(&r) {
+                                rows.push(r);
+                            }
+                        }
+                        let lg_feats = &std_features[train_indices[lpos]];
+                        let mut xs: Vec<&[f64]> = Vec::with_capacity(kk);
+                        let mut fwds = Vec::with_capacity(kk);
+                        let mut ys = Vec::with_capacity(kk);
+                        let mut dpres = Vec::with_capacity(kk);
+                        let mut tgts = Vec::with_capacity(kk);
+                        for &r in &rows {
+                            let x = &lg_feats[r * n_features..(r + 1) * n_features];
+                            let fwd = {
+                                let sc = scratch_f32.borrow();
+                                arch_f32::arch_forward_f32(x, &sc, n_features, n_hidden,
+                                    n_hidden_final, leaky as f32, use_2layer, use_skip)
+                                    .to_archforward()
+                            };
+                            let (yp, dp) = pin_forward(fwd.y);
+                            xs.push(x);
+                            fwds.push(fwd);
+                            ys.push(yp);
+                            dpres.push(dp);
+                            tgts.push(lg.human_scores[r]);
+                        }
+                        let (l_loss, l_grads) = strategy::listmle_loss_grad(&ys, &tgts);
+                        total_loss += l_loss * hyperparams.listwise_weight;
+                        n_steps += 1;
+                        if dro_active {
+                            dro_loss_sum[lpos] += l_loss;
+                            dro_loss_n[lpos] += 1;
+                        }
+                        let dls: Vec<f64> = l_grads
+                            .iter()
+                            .zip(&dpres)
+                            .map(|(&g, &dp)| g * hyperparams.listwise_weight * dp)
+                            .collect();
+                        strategy_backward_rows(
+                            &xs, &fwds, &dls,
+                            &mut w1, &mut b1, &mut w2_enc, &mut b2_enc, &mut w_skip, &mut b_skip,
+                            &mut rank_w, &mut rank_b, &mut reducer_w, &mut reducer_b, &mut w_alpha,
+                            &mut b_alpha, &mut adam, n_features, n_hidden, n_hidden_final, leaky,
+                            use_2layer, use_skip, hyperparams.l2_lambda, lr, k,
+                            &mut steps_since_adam, &do_adam_step,
+                        );
+                    }
+                    continue;
+                }
+            }
             let u = rng.next_f64_unit();
             let train_pos = cdf.partition_point(|&c| c < u).min(cdf.len() - 1);
             let g_idx = train_indices[train_pos];
@@ -6468,7 +6744,7 @@ fn train_mlp_per_sample_alpha_head(
             if n < 2 {
                 continue;
             }
-            let (ia, ib) = match &per_row_cdfs[train_pos] {
+            let (ia, mut ib) = match &per_row_cdfs[train_pos] {
                 Some(row_cdf) => {
                     let ua = rng.next_f64_unit();
                     let ub = rng.next_f64_unit();
@@ -6477,8 +6753,36 @@ fn train_mlp_per_sample_alpha_head(
                         row_cdf.partition_point(|&c| c < ub).min(n - 1),
                     )
                 }
-                None => ((rng.next_u64() as usize) % n, (rng.next_u64() as usize) % n),
+                None => {
+                    // STRATEGY: stratified row A — band-uniform then row-uniform.
+                    let ia = if !strat_bands.is_empty() {
+                        let bands = &strat_bands[train_pos];
+                        let b = &bands[(rng.next_u64() as usize) % bands.len()];
+                        b[(rng.next_u64() as usize) % b.len()]
+                    } else {
+                        (rng.next_u64() as usize) % n
+                    };
+                    (ia, (rng.next_u64() as usize) % n)
+                }
             };
+            // STRATEGY: hard-pair mining — with prob hard_pair_frac, re-draw
+            // row B (≤16 tries) until the pair is near-threshold.
+            if hyperparams.hard_pair_frac > 0.0
+                && rng.next_f64_unit() < hyperparams.hard_pair_frac
+            {
+                for _ in 0..16 {
+                    if ib != ia
+                        && strategy::hard_pair_ok(
+                            g.human_scores[ia],
+                            g.human_scores[ib],
+                            hyperparams.hard_pair_max_delta,
+                        )
+                    {
+                        break;
+                    }
+                    ib = (rng.next_u64() as usize) % n;
+                }
+            }
             if ia == ib {
                 continue;
             }
@@ -6624,6 +6928,10 @@ fn train_mlp_per_sample_alpha_head(
             };
             total_loss += loss_raw * pair_weight;
             n_steps += 1;
+            if dro_active {
+                dro_loss_sum[train_pos] += loss_raw * pair_weight;
+                dro_loss_n[train_pos] += 1;
+            }
 
             let sig_z = 1.0 / (1.0 + (-z).exp());
             let dl_d_pred_diff = -target * sig_z * pair_weight * hyperparams.ranknet_weight;
@@ -7909,7 +8217,48 @@ fn train_mlp_per_sample_alpha_head(
             0.0
         };
 
+        // STRATEGY: fold live weights into the per-epoch EMA (before the
+        // validation gate so the gate always sees an initialized EMA).
+        if ema_active {
+            let reducer_slice: Vec<f64> = reducer_w.to_vec();
+            ema.update(
+                &[&w1, &b1, &w2_enc, &b2_enc, &w_skip, &rank_w, &w_alpha, &reducer_slice],
+                &[b_skip, rank_b, reducer_b, b_alpha],
+            );
+        }
+        // STRATEGY: GroupDRO — rebuild the group-sampling CDF from decayed
+        // per-group mean losses (multiplicative-weights emphasis on the
+        // currently-worst group). η=0 keeps this branch off entirely.
+        if dro_active {
+            let means: Vec<f64> = dro_loss_sum
+                .iter()
+                .zip(&dro_loss_n)
+                .map(|(&sm, &nn)| if nn > 0 { sm / nn as f64 } else { 0.0 })
+                .collect();
+            let base: Vec<f64> = train_indices.iter().map(|&gi| groups[gi].train_weight).collect();
+            let w = strategy::dro_reweight(&base, &means, hyperparams.dro_eta);
+            let mut cum = 0.0;
+            cdf = w
+                .iter()
+                .map(|&x| {
+                    cum += x;
+                    cum
+                })
+                .collect();
+            for v in &mut dro_loss_sum {
+                *v *= 0.5;
+            }
+            for v in &mut dro_loss_n {
+                *v /= 2;
+            }
+        }
         if epoch % hyperparams.log_every == 0 || epoch == hyperparams.n_epochs - 1 {
+            // STRATEGY EMA: validate AND snapshot on the EMA weights so the
+            // shipped bake equals the validated net; swapped back at every
+            // exit of this block.
+            if ema_active {
+                ema_swap_all!();
+            }
             // Per-sample α diagnostic: compute α at a sample of inputs
             // to log mean/min/max α at this epoch.
             let mut alpha_samples: Vec<f64> = Vec::new();
@@ -8221,8 +8570,14 @@ fn train_mlp_per_sample_alpha_head(
                         ),
                         log,
                     );
+                    if ema_active {
+                        ema_swap_all!();
+                    }
                     break;
                 }
+            }
+            if ema_active {
+                ema_swap_all!();
             }
         }
     }
@@ -8542,6 +8897,125 @@ pub use arch::{ArchForward, arch_backward, arch_forward};
 /// one Adam step. L2 is applied K·λ·w scaled by `steps_added`
 /// (matches hybrid_head flush).
 #[allow(clippy::too_many_arguments)]
+
+/// STRATEGY-2026-07-02: shared backward tail for the listwise / triplet step
+/// types — mirrors the plain-RankNet pair tail verbatim (grad buffers → one
+/// `arch_backward` per row → L2 → fold into Adam slots → cadence step). One
+/// call = one logical step toward the Adam cadence regardless of row count.
+#[allow(clippy::too_many_arguments)]
+fn strategy_backward_rows<F>(
+    xs: &[&[f64]],
+    fwds: &[ArchForward],
+    dl_dys: &[f64],
+    w1: &mut Vec<f64>,
+    b1: &mut Vec<f64>,
+    w2_enc: &mut Vec<f64>,
+    b2_enc: &mut Vec<f64>,
+    w_skip: &mut Vec<f64>,
+    b_skip: &mut f64,
+    rank_w: &mut Vec<f64>,
+    rank_b: &mut f64,
+    reducer_w: &mut [f64; 4],
+    reducer_b: &mut f64,
+    w_alpha: &mut Vec<f64>,
+    b_alpha: &mut f64,
+    adam: &mut AdamState,
+    n_features: usize,
+    n_hidden: usize,
+    n_hidden_final: usize,
+    leaky: f64,
+    use_2layer: bool,
+    use_skip: bool,
+    l2_lambda: f64,
+    lr: f64,
+    k: usize,
+    steps_since_adam: &mut u64,
+    do_adam_step: &F,
+) where
+    F: Fn(
+        &mut AdamState,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut Vec<f64>,
+        &mut f64,
+        &mut Vec<f64>,
+        &mut f64,
+        &mut [f64; 4],
+        &mut f64,
+        &mut Vec<f64>,
+        &mut f64,
+        f64,
+        usize,
+    ),
+{
+    let mut g_rank_w_buf = vec![0.0f64; n_hidden_final];
+    let mut g_rank_b_buf = 0.0f64;
+    let mut g_red_w: [f64; 4] = [0.0; 4];
+    let mut g_red_b: f64 = 0.0;
+    let mut g_w_alpha_buf = vec![0.0f64; n_hidden_final];
+    let mut g_b_alpha: f64 = 0.0;
+    for ((x, fwd), &dl) in xs.iter().zip(fwds).zip(dl_dys) {
+        arch_backward(
+            x,
+            fwd,
+            dl,
+            w1,
+            w2_enc,
+            rank_w,
+            reducer_w,
+            w_alpha,
+            &mut adam.gw1,
+            &mut adam.gb1,
+            &mut g_rank_w_buf,
+            &mut g_rank_b_buf,
+            &mut g_red_w,
+            &mut g_red_b,
+            &mut g_w_alpha_buf,
+            &mut g_b_alpha,
+            n_features,
+            n_hidden,
+            n_hidden_final,
+            leaky,
+            use_2layer,
+            use_skip,
+        );
+    }
+    if l2_lambda > 0.0 {
+        for (g, &w) in adam.gw1.iter_mut().zip(w1.iter()) {
+            *g += l2_lambda * w;
+        }
+        for j in 0..n_hidden_final {
+            g_rank_w_buf[j] += l2_lambda * rank_w[j];
+            g_w_alpha_buf[j] += l2_lambda * w_alpha[j];
+        }
+        for kk in 0..4 {
+            g_red_w[kk] += l2_lambda * reducer_w[kk];
+        }
+    }
+    for j in 0..n_hidden_final {
+        adam.gw2[j] += g_rank_w_buf[j];
+    }
+    for kk in 0..4 {
+        adam.gw2[n_hidden_final + kk] += g_red_w[kk];
+    }
+    for j in 0..n_hidden_final {
+        adam.gw2[n_hidden_final + 4 + j] += g_w_alpha_buf[j];
+    }
+    adam.gw2[n_hidden_final + 4 + n_hidden_final] += g_b_alpha;
+    adam.gb2[0] += g_rank_b_buf;
+    adam.gb2[1] += g_red_b;
+    *steps_since_adam += 1;
+    if k == 1 || *steps_since_adam >= k as u64 {
+        do_adam_step(
+            adam, w1, b1, w2_enc, b2_enc, w_skip, b_skip, rank_w, rank_b, reducer_w, reducer_b,
+            w_alpha, b_alpha, lr, n_hidden_final,
+        );
+        *steps_since_adam = 0;
+    }
+}
+
 fn flush_per_sample_alpha_nin_batch<F>(
     nin_buffer: &mut Vec<Option<PerSampleAlphaPairForward<'_>>>,
     w1: &mut Vec<f64>,
@@ -10728,6 +11202,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "per-sample-α head produced empty bake");
         assert!(
@@ -10766,6 +11241,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
@@ -10842,6 +11318,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty());
         // Goals policy should produce a goals breakdown in the log.
@@ -10879,6 +11356,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
@@ -10927,6 +11405,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "2-layer variant produced empty bake");
         assert!(
@@ -10968,6 +11447,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "skip variant produced empty bake");
     }
@@ -11001,6 +11481,7 @@ mod tests {
                 ..Default::default()
             },
             &mut log,
+            None,
             None,
             None,
             None,
@@ -11048,7 +11529,131 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(!bake.is_empty(), "σ-weighted MSE should produce a bake");
     }
+
+    /// STRATEGY-2026-07-02 end-to-end smoke: ALL strategies active at once
+    /// on synthetic data — catches runtime panics (indexing, borrow, NaN
+    /// cascades) that the per-algorithm reference tests cannot. A failure
+    /// here is an IMPL BUG (not strategy).
+    #[test]
+    fn strategy_smoke_all_active_end_to_end() {
+        const NF: usize = 6;
+        let n = 80usize;
+        let mut feats: Vec<Vec<f64>> = Vec::with_capacity(n);
+        let mut scores: Vec<f64> = Vec::with_capacity(n);
+        for i in 0..n {
+            let t = i as f64 / (n - 1) as f64;
+            feats.push(vec![
+                t,
+                1.0 - t,
+                (t * 7.0).sin() * 0.1,
+                t * t,
+                0.5,
+                -t,
+            ]);
+            scores.push(t); // monotone target in [0,1]
+        }
+        let refs: Vec<&[f64]> = feats.iter().map(|r| r.as_slice()).collect();
+        let sigmas: Vec<f64> = (0..n).map(|i| 0.05 + 0.1 * ((i % 7) as f64) / 7.0).collect();
+        let groups = [
+            TrainingGroup {
+                name: "syn_a".to_string(),
+                human_scores: &scores,
+                features: &refs,
+                metric_sigmas: Some(&sigmas),
+                train_weight: 1.0,
+                validation_weight: 1.0,
+            },
+            TrainingGroup {
+                name: "syn_b".to_string(),
+                human_scores: &scores,
+                features: &refs,
+                metric_sigmas: None,
+                train_weight: 0.5,
+                validation_weight: 0.0,
+            },
+        ];
+        // triplet pool: stimuli = the same rows; responses consistent with
+        // "left more distorted" when its quality target is lower.
+        let mut pool = TripletPool::default();
+        for f in &feats {
+            pool.features.push(f.clone());
+        }
+        for i in (0..60).step_by(3) {
+            let (l, r) = (i as u32, (i + 7) as u32);
+            // scores[i] < scores[i+7] -> left lower quality -> resp 0
+            pool.responses.push((l, r, 0));
+            pool.responses.push((r, l, 1));
+        }
+        let hp = MlpHyperparams {
+            n_hidden: 12,
+            n_hidden_layers: 2,
+            n_epochs: 12,
+            pairs_per_epoch: 400,
+            minibatch_size: 4,
+            initial_lr: 5e-3,
+            l2_lambda: 1e-6,
+            leaky_alpha: 0.01,
+            early_stop_patience: 0,
+            per_sample_alpha_head: true,
+            tanh_output_head_scale: 20.0,
+            ranknet_weight: 1.0,
+            mse_weight: 0.3,
+            sigma_weighted_mse: true,
+            // ALL strategies on:
+            ema_decay: 0.9,
+            hard_pair_frac: 0.5,
+            hard_pair_max_delta: 0.1,
+            stratified_bands: 5,
+            dro_eta: 1.0,
+            listwise_weight: 0.5,
+            listwise_size: 6,
+            listwise_frac: 0.15,
+            triplet_weight: 0.5,
+            triplet_frac: 0.15,
+            triplet_tau: 0.6,
+            triplet_sigma: 5.0,
+            seed: 17,
+            ..Default::default()
+        };
+        let mut log: Vec<String> = Vec::new();
+        let bake = train_mlp_strategy(
+            &groups,
+            NF,
+            &hp,
+            &mut log,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&pool),
+        );
+        assert!(
+            !bake.is_empty(),
+            "IMPL BUG (not strategy): all-active strategy training produced an empty bake"
+        );
+        let joined = log.join("\n");
+        assert!(
+            joined.contains("STRATEGY active:"),
+            "IMPL BUG (not strategy): strategy activation line missing from log"
+        );
+        assert!(
+            !joined.contains("NaN") || joined.contains("val"),
+            "IMPL BUG (not strategy): NaN observed in training log:\n{joined}"
+        );
+        // determinism: same seed -> byte-identical bake
+        let mut log2: Vec<String> = Vec::new();
+        let bake2 = train_mlp_strategy(
+            &groups, NF, &hp, &mut log2, None, None, None, None, None, Some(&pool),
+        );
+        assert_eq!(
+            bake, bake2,
+            "IMPL BUG (not strategy): strategy training is not deterministic under a fixed seed"
+        );
+    }
+
 }

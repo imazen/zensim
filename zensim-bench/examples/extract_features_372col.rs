@@ -225,6 +225,7 @@ fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
             }
             let Ok(dists) = std::fs::read_dir(src.path()) else { continue };
             for dist in dists.flatten() {
+                let dist_name = dist.file_name().to_string_lossy().to_string();
                 let Ok(files) = std::fs::read_dir(dist.path()) else { continue };
                 for f in files.flatten() {
                     let fname = f.file_name().to_string_lossy().to_string();
@@ -241,7 +242,7 @@ fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
                         reference: reference.clone(),
                         distorted: f.path(),
                         human_score: 1.0 - q_jnd / 3.2,
-                        ref_basename: format!("{src_name}_{part}"),
+                        ref_basename: format!("{src_name}_{dist_name}_{part}"),
                         extra_targets: vec![("q_jnd".into(), q_jnd)],
                     });
                     if pairs.len() >= max {

@@ -151,6 +151,22 @@ pub struct ManifestConfig {
     /// `--group-eval-cap`: per-epoch group-eval row cap (0 = full).
     pub group_eval_cap: Option<usize>,
 
+    /// STRATEGY-2026-07-02 toggles (all optional; 0/absent = off).
+    pub ema_decay: Option<f64>,
+    pub hard_pair_frac: Option<f64>,
+    pub hard_pair_max_delta: Option<f64>,
+    pub stratified_bands: Option<usize>,
+    pub dro_eta: Option<f64>,
+    pub listwise_weight: Option<f64>,
+    pub listwise_size: Option<usize>,
+    pub listwise_frac: Option<f64>,
+    pub triplet_weight: Option<f64>,
+    pub triplet_frac: Option<f64>,
+    pub triplet_tau: Option<f64>,
+    pub triplet_sigma: Option<f64>,
+    pub triplet_stimuli: Option<String>,
+    pub triplet_responses: Option<String>,
+
     /// `[training].trainer_commit` — the git commit of the trainer that
     /// produced the recorded bake. Reproduce-exactly requires building the
     /// trainer AT this commit: the 2026-07-01 v47 reproduction proved
@@ -257,6 +273,20 @@ struct RawTraining {
     qat_fine_tune_epochs: Option<usize>,
     qat_tau: Option<f64>,
     group_eval_cap: Option<usize>,
+    ema_decay: Option<f64>,
+    hard_pair_frac: Option<f64>,
+    hard_pair_max_delta: Option<f64>,
+    stratified_bands: Option<usize>,
+    dro_eta: Option<f64>,
+    listwise_weight: Option<f64>,
+    listwise_size: Option<usize>,
+    listwise_frac: Option<f64>,
+    triplet_weight: Option<f64>,
+    triplet_frac: Option<f64>,
+    triplet_tau: Option<f64>,
+    triplet_sigma: Option<f64>,
+    triplet_stimuli: Option<String>,
+    triplet_responses: Option<String>,
     trainer_commit: Option<String>,
     #[serde(default)]
     steps: Vec<String>,
@@ -488,6 +518,20 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
         cfg.qat_fine_tune_epochs = t.qat_fine_tune_epochs;
         cfg.qat_tau = t.qat_tau;
         cfg.group_eval_cap = t.group_eval_cap;
+        cfg.ema_decay = t.ema_decay;
+        cfg.hard_pair_frac = t.hard_pair_frac;
+        cfg.hard_pair_max_delta = t.hard_pair_max_delta;
+        cfg.stratified_bands = t.stratified_bands;
+        cfg.dro_eta = t.dro_eta;
+        cfg.listwise_weight = t.listwise_weight;
+        cfg.listwise_size = t.listwise_size;
+        cfg.listwise_frac = t.listwise_frac;
+        cfg.triplet_weight = t.triplet_weight;
+        cfg.triplet_frac = t.triplet_frac;
+        cfg.triplet_tau = t.triplet_tau;
+        cfg.triplet_sigma = t.triplet_sigma;
+        cfg.triplet_stimuli = t.triplet_stimuli.clone();
+        cfg.triplet_responses = t.triplet_responses.clone();
         cfg.trainer_commit = t.trainer_commit;
     }
 
