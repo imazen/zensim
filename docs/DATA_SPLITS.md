@@ -101,6 +101,7 @@ source_id % 10 == 9  → TEST    ( 14,000 sources /  70,000 cells)
 | **AIC-3 CTC** (600 pairs, 10 refs) | T0 | Eval-only, never train | JPEG-AIC committee test set; Mohammadi 2025 evaluates metrics on it | Holdout by construction |
 | **AIC-4 sample** (300 pairs, 5 refs) | T0 | Eval-only, never train; do NOT recipe-search to win it (holdout-fishing ban, 2026-05-25 #10) | The CfP keeps the larger set committee-hidden — public sample is eval-only for everyone | Holdout by construction |
 | **JPEG-AI-SDR25** (5 src × 10 levels, 95k raw triplets) | T0 (planned) | Eval-only once JND-reconstructed (build queued) | Authors: subjective study behind the QoMEX'25 SVQA paper | To audit on ingest |
+| **KonFiG-IQA** (10 src × 7 dist × 12-30 levels over 3 JND; 1.7M triplets) | T2 (candidate, Bet-2 human pairs) | Not yet in pipeline; recovered 2026-07-02 (official archive DEAD; vendored GitHub copy at `/mnt/v/datasets/konfig-iqa/IQA_app/KonFiG-IQA/`). **ssim2 tuned on it** → never a ssim2-comparison corpus | Authors: fine-grained JND-unit scales via boosted triplet comparisons (Men 2021) | dHash audit required before training use |
 | **PIPAL** (local, unused) | — | Not in pipeline (SR/GAN domain) | Official NTIRE train/val/test splits | — |
 | **UPIQ / HDR** | T0-eval for HDR track | Held-out UPIQ eval per HDR plan | Mikhailiuk 2021: consolidated dataset, JOD-rescaled | — |
 
