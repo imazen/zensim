@@ -49,7 +49,13 @@ for ds in zenjpeg_lossy zenwebp_lossy zenwebp_lossless zenpng_lossless zenjxl_lo
 done
 $S5 cp   "s3://zentrain/kadis-700k-gpu/canonical/kadis700k_canonical_gpu_2026-07-01.parquet" /data/kadis/
 # eval features + grids are rsynced from the workstation by hz.sh push-eval
-echo "[boot] R2 data pulled"
+# path-mapping symlinks: manifests carry WORKSTATION paths; the box serves the
+# same paths via links (byte-identical manifests across machines)
+mkdir -p /mnt/v/zen/zensim-training /mnt/v/output
+ln -sfn /data/canonical-2026-05-21 /mnt/v/zen/zensim-training/canonical-2026-05-21
+ln -sfn /data/evalfeat /mnt/v/zen/zensim-training/2026-05-15-full-features
+ln -sfn /data/derived /mnt/v/output/zensim-multicodec-probe
+echo "[boot] R2 data pulled + path maps linked"
 
 # 4. derived training parquets: default is RSYNC-FROM-WORKSTATION (pinned
 #    bytes; the 2026-07-02 incident proved on-box rebuild does NOT byte-match
