@@ -29,8 +29,11 @@ def nrows(path):
     return pq.read_metadata(path).num_rows
 
 def parse_kv(s):
+    # split only on commas that start a new key= token, so values (e.g.
+    # notes=... with commas) survive intact
+    import re as _re
     out = {}
-    for part in s.split(","):
+    for part in _re.split(r",(?=\s*\w+\s*=)", s):
         k, v = part.split("=", 1)
         out[k.strip()] = v.strip()
     return out

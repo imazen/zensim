@@ -972,3 +972,25 @@ Consequences:
 4. Training corpora built from sweep data MUST dedup by content, not by
    (image, q, knob) key — knob no-ops make the key non-unique in content
    space. Added to the standing corpus-build contract.
+
+## 4-metric fill queueing (2026-07-02 evening)
+
+**hqfill: NO fleet pass needed** — the hqfill-A run already scored all 7
+metrics per cell (local 11 chunks + remote box `hqfillA-smoke-1782981323`
+covering the rest). Aggregated into
+`/mnt/v/output/zensim-multicodec-probe/hqfill_7metric_sidecar_2026-07-02.parquet`
+(62,258 cells, 0 nulls on cvvdp/butteraugli/dssim/iwssim, keyed on
+encoded_filename). The jxl HQ-fill rows therefore already have Bet-1 labels.
+
+**avif: queued as 8 ScoreFile runs** (`fill-avif-b0..b7-2026-07-02`), one per
+generation box-tar (`mandfix4-zenavif-1782593621/variants/box-N.tar`,
+1,510,992 cells total from canonical pairs train+validate+test). The plain
+datagen `zenavif/variants.tar` is a 38.5k-member partial (all four `-cN`
+copies byte-identical) — NOT the full set; the full encodes live only in the
+per-box generation tars (recorded per-cell in canonical `pairs.*.parquet`
+`dist_tar`/`dist_member`). New tooling (zenmetrics, pending commit while the
+`claude-pngfix` marker is live): `scripts/jobsys/build_scorefile_from_pairs.py`
+(streams a tar from R2, joins canonical pairs, emits 4-col variant_index +
+chunked manifest — no local disk) + `gpu_scorefile_launch.sh` env overrides
+(`ZEN_TAR_OVERRIDE`, `ZEN_CORPUS_PREFIX_OVERRIDE`). Refs resolve from
+`codec-corpus/clean-picker-corpus-2026-06-26/`.
