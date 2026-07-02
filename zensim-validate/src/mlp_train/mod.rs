@@ -5838,10 +5838,18 @@ fn train_mlp_per_sample_alpha_head(
     //
     // Fix: at monotone_strict, init rank_w to -|N(0, scale)| so the
     // soft penalty's job is "stay negative" (one-sided gentle pull)
-    // rather than "flip sign" (cross-zero). Larger h is unaffected:
-    // the |·| applied to N(0, scale) preserves magnitude statistics
-    // and the soft penalty is unchanged.
-    if hyperparams.monotone_cbc && hyperparams.monotone_strict {
+    // rather than "flip sign" (cross-zero).
+    //
+    // GATED TO h=1 (2026-07-01). The original #40 change applied this
+    // flip at EVERY width; its "larger h is unaffected" claim was
+    // empirically false — flipping the initial signs of a 64-wide rank
+    // head changes the optimization trajectory from step 0 and, on the
+    // v47 recipe at seed 17, lands in a collapse basin (AIC-4 0.885 →
+    // 0.546). The un-flipped pinned tree (e9442678) reproduces shipped
+    // Profile A byte-identically; with the flip it does not. h=1 keeps
+    // the fix for its actual root cause; wider heads keep the original
+    // symmetric init that every shipped bake trained with.
+    if hyperparams.monotone_cbc && hyperparams.monotone_strict && rank_w.len() == 1 {
         for v in rank_w.iter_mut() {
             *v = -v.abs();
         }

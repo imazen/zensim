@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed — trainer: restore Profile-A reproducibility (gate the #40 rank_w init flip to h=1)
+
+- The #40 fix (`47aff783`) flipped the initial `rank_w` signs to `-|w|` for
+  EVERY `monotone_cbc + monotone_strict` run; its "larger h is unaffected"
+  claim was empirically false — at h=64 it changes the optimization trajectory
+  from step 0 and, on the v47 recipe at seed 17, lands in a collapse basin
+  (AIC-4 0.885 → 0.546). Gated to `rank_w.len() == 1` (the actual #40 root
+  cause). Verified by epoch-0 oracle: fixed main matches the pinned tree
+  (`e9442678`) that reproduces shipped Profile A **byte-identically**
+  (sha `d0ef7a30…`, 27,316 bytes) — training is deterministic.
+
+### Added — manifest `trainer_commit` reproduce-exactly gate
+
+- `[training].trainer_commit` in the train-manifest schema: the trainer
+  compares it against runtime `git rev-parse HEAD` and fails loud on mismatch
+  with workspace-pin instructions (`--manifest-allow-sha-drift` overrides).
+  `v47_strict_qat.toml` backfilled with its proven commit + provenance notes
+  (incl. the 2026-05-28 in-place konjnd rewrite, proven data-equivalent by the
+  byte-identical reproduction).
+- `ZENSIM_DIAL_PRED_OUT=<path>` on `bake_verdict`: dumps per-cell
+  `(image_id, codec, q, pred)` over any dial grid for external joins against
+  reference-metric sidecars (HQ-zone / zone-consistency instruments).
+
 ### Documentation — README overhaul + split crates.io README
 
 - Reworked the repo-root `README.md` to the zen convention: full badge row
