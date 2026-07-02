@@ -56,7 +56,7 @@ case "$CMD" in
   run)
     IP="${1:?ip}"; PAR="${2:-6}"
     $SSH"$IP" "grep -q 'boot] DONE' /root/bootstrap.log"       || { echo "REFUSED: bootstrap not DONE on $IP (hz.sh status $IP)" >&2; exit 1; }
-    $SSH"$IP" "nohup bash /root/runcells.sh /root/cells.txt $PAR > /data/out/runcells.log 2>&1 & echo run-launched"
+    $SSH"$IP" "nohup bash /root/work/zensim/scripts/hetzner/runcells.sh /root/cells.txt $PAR > /data/out/runcells.log 2>&1 & echo run-launched"
     ;;
   status)  $SSH"${1:?ip}" "cat /data/out/status.tsv 2>/dev/null | tail -20; tail -2 /root/bootstrap.log 2>/dev/null" ;;
   pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"; rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/out/ "$PROBE/hetzner-out/" && echo pulled ;;
