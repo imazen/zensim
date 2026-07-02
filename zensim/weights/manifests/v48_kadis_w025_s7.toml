@@ -79,7 +79,7 @@ rows   = 196086
 path   = "{canonical}/cid22_train_norm.parquet"
 sha256 = "59c9888ae3141545082fb58eafb19d1e964154cf79060b3d033e72ba8227c3ca"
 rows   = 17611
-notes  = "TRAINING-ONLY subset of the broader CID22 library — NOT the 49-ref held-out validation set. human_score = MCOS/100."
+notes  = "TRAINING-ONLY subset (201 refs disjoint from the 49-ref holdout). human_score = ssim2_gpu/100 — NOT human MOS (verified exact 2026-07-02; see docs/DATA_SPLITS.md). CID22 MCOS never trains."
 
 [inputs.kadid]
 path   = "{canonical}/kadid.parquet"
