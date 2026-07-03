@@ -270,3 +270,22 @@ tests) + `score-pairs --hdr-features-pu-linear` (zenmetrics 6f591dd5) +
 fleet BIN_KEY/EXTRA_ARGS params + merge_v3_shards.py. v3 re-extraction
 fleets launched (v3june 4 + v3hq 6 cx boxes) + UPIQ local. v2
 (anchored shell) is OBSOLETE — superseded by v3 before implementation.
+
+## Profile B v3 first verdicts (PU-linear features, 2026-07-03)
+
+| | B v1 s17 (shell) | B v3 s17 (pu-linear) | B v3 s7 |
+|---|---|---|---|
+| UPIQ-HDR | 0.6546 | **0.6819** | 0.6504 |
+| KonJND | 0.4031 | **0.4481** (> A 0.4185) | 0.1221 |
+| CID22-49 | 0.8544 | 0.8439 | **0.5753 COLLAPSED** |
+| AIC-3 | 0.7937 | 0.7695 | 0.5276 |
+| hdr_val (v3 set, incl. HQ zone) | — | 0.9009 | 0.8884 |
+
+- Direction CONFIRMED: transfer-invariant features lift the human-MOS HDR
+  holdout (+0.027) and KonJND (+0.045, now above A). Bake (0.682) still
+  below its raw integrated input score (0.693) → hdr group weight is the
+  principled lever (not UPIQ-fishing). Gap to cvvdp 0.758 = CSF mechanism
+  (task #5), now buildable on the PU-linear path.
+- **Stability: 1/2 seeds SDR-collapsed** (s7; hdr_val fine — the collapse is
+  SDR-side). Seed fan s31/47/63 launched; selection remains held-out-val.
+- Consistency harness green on the PU path (identity + rank).
