@@ -70,6 +70,7 @@ fn main() {
     let pairs: Vec<Pair> = match corpus.as_str() {
         "konjnd" => load_konjnd(&path, max_pairs),
         "konfig" => load_konfig(&path, max_pairs),
+        "pairs-tsv" => load_pairs_tsv(&path, max_pairs),
         "konjnd_full" => load_konjnd_full(&path, max_pairs),
         "aic3" => load_aic3(&path, max_pairs),
         "aic4" => load_aic4(&path, max_pairs),
@@ -208,6 +209,54 @@ fn extract_features(kp: &Pair) -> Option<(String, f64, Vec<(String, f64)>, Vec<f
 /// [0,1] quality scale, rank-identical to the JND grid) + a native `q_jnd`
 /// extra target column. Level 0 = pristine copy → identity anchor rows.
 /// `path` = the KonFiG-IQA root (contains IMAGES/).
+
+/// Generic (ref, dist) pairs from a TSV with header columns `ref_path`,
+/// `dist_path`, optional `human_score` (default 0), optional extra numeric
+/// columns emitted as extra targets. The universal escape hatch — any small
+/// eval set becomes a feature parquet without a bespoke loader.
+fn load_pairs_tsv(tsv: &Path, max: usize) -> Vec<Pair> {
+    let mut rdr = match csv::ReaderBuilder::new().delimiter(b'\t').from_path(tsv) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("failed to open {}: {e}", tsv.display());
+            return Vec::new();
+        }
+    };
+    let headers = rdr.headers().expect("pairs tsv headers").clone();
+    let idx = |n: &str| headers.iter().position(|h| h == n);
+    let (ri, di) = (idx("ref_path").expect("ref_path col"), idx("dist_path").expect("dist_path col"));
+    let hi = idx("human_score");
+    let extras: Vec<(usize, String)> = headers
+        .iter()
+        .enumerate()
+        .filter(|(i, h)| *i != ri && *i != di && Some(*i) != hi && !h.is_empty())
+        .filter(|(_, h)| *h != "img_num" || true)
+        .map(|(i, h)| (i, h.to_string()))
+        .collect();
+    let mut pairs = Vec::new();
+    for rec in rdr.records().flatten() {
+        let reference = PathBuf::from(rec.get(ri).unwrap_or(""));
+        let distorted = PathBuf::from(rec.get(di).unwrap_or(""));
+        let human_score = hi
+            .and_then(|i| rec.get(i))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
+        let extra_targets: Vec<(String, f64)> = extras
+            .iter()
+            .filter_map(|(i, n)| rec.get(*i).and_then(|v| v.parse().ok()).map(|x| (n.clone(), x)))
+            .collect();
+        let ref_basename = reference
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+        pairs.push(Pair { reference, distorted, human_score, ref_basename, extra_targets });
+        if pairs.len() >= max {
+            break;
+        }
+    }
+    pairs
+}
+
 fn load_konfig(base: &Path, max: usize) -> Vec<Pair> {
     let images = base.join("IMAGES");
     let mut pairs = Vec::new();

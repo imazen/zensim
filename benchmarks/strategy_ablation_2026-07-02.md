@@ -103,3 +103,36 @@ recipe effects.
 - Wave-3's first launch PREFLIGHT-FAILED all 4 cells in 8s: the w3 manifests
   (generated from the pre-contract v51 base) lacked per-input contracts —
   the gate did its job; fix was declaring reality, not loosening.
+
+## Graduation battery — t1dro51 five seeds (2026-07-03)
+
+**CID22 five seeds**: .8485/.8594/.8708/.8483/.8625 → mean 0.8579 ± 0.0095,
+zero collapses (hponly51 collapsed 1-in-5 at s47 → t1dro51 is the family
+winner). Two seeds above A (0.8657); mean −0.008 below.
+
+**SDR25 (the honest post-ssim2 holdout)** — scored via the feature path
+(sdr25_features_372col + bake forward; path validated by A's feature-path
+number reproducing its runtime 0.9036 to 4dp):
+
+| bake | pooled SROCC | within-image |
+|---|---|---|
+| Profile-A | 0.9036 | 0.9976 |
+| ssim2 | 0.958 | 1.000 |
+| t1dro51 s17/s7/s31/s47/s63 | 0.9551/0.9642/0.9694/0.9640/0.9609 | 1.0000 ×5 |
+
+**t1dro51 ≥ ssim2 on SDR25 at 4/5 seeds and > A at 5/5 (+0.06)** — the
+pre-registered "SDR25 ≥ 0.958" RD gate is PASSED (A fails it at 0.904).
+
+Pre-registered gate status (t1dro51):
+- SDR25 ≥ ssim2: **PASS** (4/5 seeds; all 5 > A)
+- dials (G1/mono): **PASS** (0.99+/0.973+ all seeds)
+- CID22-49 ≥ 0.8854: OPEN (mean 0.858; best 0.871; A 0.8657 also fails this)
+- KonJND ≥ A 0.4185: MIXED (0.31-0.44 across seeds)
+
+Join gotcha recorded: ZENSIM_DIAL_PRED_OUT re-keys rows as (group ordinal,
+local index); joining on assumed source order scrambles rows (caught because
+A's per-pair values matched runtime exactly while ranks didn't; fixed with a
+value-recovered permutation). Scoreboard tooling should join on echoed keys.
+
+Recipe of record (t1dro51): v51 base + ema_decay=0.9, hard_pair_frac=0.5,
+hard_pair_max_delta=0.05, stratified_bands=10, dro_eta=0.5, trainer 78ec8e61.
