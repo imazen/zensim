@@ -9,12 +9,15 @@ Joins, per (image_path, codec, q):
 into train/val digit-split parquets:
   ref_basename, human_score (= clamp(ssim2/100)), score_cvvdp, zensim_score,
   f0..f371
+With --mix-target, human_score = 0.5*clamp(ssim2/100,0,1) +
+0.5*clamp((cvvdp-6)/4,0,1) (JOD 6..10 → 0..1; both higher=better) and rows
+with missing cvvdp are DROPPED (counted + printed).
 LSD origin rule on the leading numeric stem (origin_split.py — the imazen-26
 convention; HDR stems like `1064_general_...` lead with the origin id).
 Validates with validate_parquet (contracts declared inline) and prints the
 sha256s for manifest pinning.
 
-  usage: build_hdr_train_parquets.py [--datagen DIR] [--out-prefix P]
+  usage: build_hdr_train_parquets.py [--datagen DIR] [--out-prefix P] [--mix-target]
 """
 import argparse, hashlib, os, subprocess, sys
 import numpy as np
@@ -31,6 +34,9 @@ ap.add_argument("--extra-datagen", action="append", default=[],
                 help="additional datagen dirs (e.g. the q90-100 top-up) merged in")
 ap.add_argument("--out-prefix", default="/mnt/v/output/zensim-multicodec-probe/hdr_zenjxl")
 ap.add_argument("--date", default="2026-07-03")
+ap.add_argument("--mix-target", action="store_true",
+                help="human_score = 0.5*clamp(ssim2/100,0,1) + 0.5*clamp((cvvdp-6)/4,0,1) "
+                     "(JOD 6..10 -> 0..1); rows with missing cvvdp are DROPPED")
 a = ap.parse_args()
 
 def key(t):
@@ -59,6 +65,7 @@ def load_scores(d):
 rows = {"ref_basename": [], "human_score": [], "score_cvvdp": [], "zensim_score": []}
 feats = []
 n_miss_scores = 0
+n_miss_cvvdp = 0
 for d in [a.datagen] + a.extra_datagen:
     fp = os.path.join(d, "sidecars", "zenjxl", "zensim_features.parquet")
     if not os.path.exists(fp):
@@ -78,6 +85,12 @@ for d in [a.datagen] + a.extra_datagen:
         if not sc or sc[0] is None:
             n_miss_scores += 1
             continue
+        # mix mode: cvvdp is load-bearing — drop rows without it. Checked
+        # BEFORE dedup registration so a later identical-content row that
+        # DOES have cvvdp can still join.
+        if a.mix_target and (sc[1] is None or not np.isfinite(sc[1])):
+            n_miss_cvvdp += 1
+            continue
         # dedup-by-content (DATA_SPLITS policy): zenjxl --hdr floors q<15, so
         # q5==q15 byte-identical on every rendition (verified 2026-07-03,
         # 1,140/7,980 cells). Identical features+target = zero information.
@@ -86,11 +99,18 @@ for d in [a.datagen] + a.extra_datagen:
             continue
         seen_content.add(ck)
         rows["ref_basename"].append(k[0])
-        rows["human_score"].append(min(max(sc[0] / 100.0, 0.0), 1.0))
+        s2n = min(max(sc[0] / 100.0, 0.0), 1.0)
+        if a.mix_target:
+            cvn = min(max((sc[1] - 6.0) / 4.0, 0.0), 1.0)
+            rows["human_score"].append(0.5 * s2n + 0.5 * cvn)
+        else:
+            rows["human_score"].append(s2n)
         rows["score_cvvdp"].append(sc[1] if sc[1] is not None else float("nan"))
         rows["zensim_score"].append(float(zs[i]))
         feats.append(F[i])
 print(f"joined rows: {len(feats):,} (score-missing skipped: {n_miss_scores})")
+if a.mix_target:
+    print(f"mix-target: cvvdp-missing rows DROPPED: {n_miss_cvvdp}")
 assert feats, "no rows joined"
 F = np.vstack(feats)
 data = {k: pa.array(v) for k, v in rows.items()}
