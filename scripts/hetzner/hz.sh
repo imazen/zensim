@@ -71,45 +71,48 @@ case "$CMD" in
     echo pulled ;;
   autoretire) # detached watcher: pull + retire when work completes OR box idles
     # usage: hz.sh autoretire <ip> <name> [idle_min=25]
-    # Boxes bill by the hour — retirement must not wait for a human (user
-    # directive 2026-07-03). Runs ON THE WORKSTATION (the hcloud token never
-    # leaves this machine). Retires when: status.tsv has ALLDONE AND no
-    # trainer process AND no active wave*/ablation systemd unit — or when no
-    # trainer has run for idle_min regardless (crashed-run guard). Touch
-    # $PROBE/.box_hold to veto retirement (e.g. queuing another wave).
+    # Boxes bill by the STARTED hour (user 2026-07-03): after work completes
+    # the box stays reusable through the paid hour and retires at minute >=45
+    # (uptime mod 60). Runs ON THE WORKSTATION (hcloud token never leaves).
+    # Veto: touch $PROBE/.box_hold. Watcher is a real script file (inline
+    # quoting mangled variables in the first version).
     IP="${1:?ip}"; NAME="${2:?server name}"; IDLE_MIN="${3:-25}"
-    nohup bash -c '
-      IP='"'"'$IP'"'"'; NAME='"'"'$NAME'"'"'; IDLE_MIN='"'"'$IDLE_MIN'"'"'
-      PROBE=/mnt/v/output/zensim-multicodec-probe
-      SSH="ssh -i $HOME/.ssh/zen-arm-dev -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
-      idle=0
-      while true; do
-        sleep 180
-        [ -f "$PROBE/.box_hold" ] && { idle=0; continue; }
-        BUSY=$($SSH root@$IP "ps -e | grep -c zensim_mlp; systemctl list-units --state=active --plain --no-legend "wave*" "ablation*" 2>/dev/null | wc -l" 2>/dev/null | paste -sd+ | bc 2>/dev/null)
-        if [ -z "$BUSY" ]; then idle=$((idle+3)); # unreachable counts toward idle
-        elif [ "$BUSY" -gt 0 ]; then idle=0; continue
-        else idle=$((idle+3)); fi
-        DONE=$($SSH root@$IP "grep -c ALLDONE /data/out/status.tsv 2>/dev/null" 2>/dev/null || echo 0)
-        if [ "${DONE:-0}" -ge 1 ] || [ "$idle" -ge "$IDLE_MIN" ]; then
-          # Billing-aware (user 2026-07-03): Hetzner bills per STARTED hour, so
-          # the remainder of the current hour is already paid — keep the box
-          # reusable and retire at minute >=45 of the billing hour (uptime
-          # approximates billing start to within a minute).
-          UPMIN=$($SSH root@$IP "awk '"'"'{print int(\$1/60)}'"'"' /proc/uptime" 2>/dev/null)
-          if [ -n "$UPMIN" ] && [ $((UPMIN % 60)) -lt 45 ]; then
-            echo "[autoretire] $(date -u +%FT%TZ) work done (done=$DONE idle=${idle}m) — paid-hour reuse window open (uptime ${UPMIN}m, retire at min>=45); box stays available"
-            continue
-          fi
-          echo "[autoretire] $(date -u +%FT%TZ) pulling + retiring $NAME (done=$DONE idle=${idle}m uptime=${UPMIN}m)"
-          cd '"$(cd "$(dirname "$0")/../.." && pwd)"'
-          bash scripts/hetzner/hz.sh pull "$IP" 2>&1 | tail -1
-          rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev" root@$IP:/data/derived/*.bin "$PROBE/" 2>/dev/null
-          export HCLOUD_TOKEN=$(grep -oP "api_token=\K.*" ~/.config/hetzner/credentials)
-          bash scripts/hetzner/hz.sh retire "$NAME" --force 2>&1 | tail -2
-          exit 0
-        fi
-      done' > "$PROBE/autoretire_${NAME}.log" 2>&1 &
+    PROBE=/mnt/v/output/zensim-multicodec-probe
+    W="$PROBE/autoretire_${NAME}.sh"
+    REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+    cat > "$W" <<'WATCH'
+#!/usr/bin/env bash
+IP="$1"; NAME="$2"; IDLE_MIN="$3"; REPO="$4"
+PROBE=/mnt/v/output/zensim-multicodec-probe
+SSHC="ssh -i $HOME/.ssh/zen-arm-dev -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
+idle=0
+while true; do
+  sleep 180
+  [ -f "$PROBE/.box_hold" ] && { idle=0; continue; }
+  TRAINERS=$($SSHC root@"$IP" "ps -e | grep -c zensim_mlp" 2>/dev/null)
+  UNITS=$($SSHC root@"$IP" "systemctl list-units --state=active --plain --no-legend 'wave*' 'ablation*' 2>/dev/null | wc -l" 2>/dev/null)
+  if [ -z "$TRAINERS" ]; then idle=$((idle+3))
+  elif [ "${TRAINERS:-0}" -gt 0 ] || [ "${UNITS:-0}" -gt 0 ]; then idle=0; continue
+  else idle=$((idle+3)); fi
+  DONE=$($SSHC root@"$IP" "grep -c ALLDONE /data/out/status.tsv 2>/dev/null" 2>/dev/null)
+  if [ "${DONE:-0}" -ge 1 ] || [ "$idle" -ge "$IDLE_MIN" ]; then
+    UPMIN=$($SSHC root@"$IP" "awk '{print int(\$1/60)}' /proc/uptime" 2>/dev/null)
+    if [ -n "$UPMIN" ] && [ $((UPMIN % 60)) -lt 45 ]; then
+      echo "[autoretire] $(date -u +%FT%TZ) work done (done=${DONE:-0} idle=${idle}m) — paid-hour reuse window open (uptime ${UPMIN}m; retire at min>=45)"
+      continue
+    fi
+    echo "[autoretire] $(date -u +%FT%TZ) pulling + retiring $NAME (done=${DONE:-0} idle=${idle}m uptime=${UPMIN:-?}m)"
+    cd "$REPO"
+    bash scripts/hetzner/hz.sh pull "$IP" 2>&1 | tail -1
+    rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev" root@"$IP":/data/derived/*.bin "$PROBE/" 2>/dev/null
+    export HCLOUD_TOKEN=$(grep -oP "api_token=\K.*" "$HOME/.config/hetzner/credentials")
+    bash scripts/hetzner/hz.sh retire "$NAME" --force 2>&1 | tail -2
+    exit 0
+  fi
+done
+WATCH
+    chmod +x "$W"
+    nohup "$W" "$IP" "$NAME" "$IDLE_MIN" "$REPO" >> "$PROBE/autoretire_${NAME}.log" 2>&1 &
     echo "autoretire watcher armed for $NAME ($IP, idle=${IDLE_MIN}m; veto: touch $PROBE/.box_hold)"
     ;;
   retire)  # snapshot then delete — MANDATORY end-state for x86 big boxes
