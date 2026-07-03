@@ -44,7 +44,7 @@ for i, c in enumerate(fcols):
 grid = pa.table(data)
 with tempfile.TemporaryDirectory() as td:
     gp = os.path.join(td, "upiq_grid.parquet")
-    pq.write_table(grid, gp)
+    pq.write_table(grid, gp, compression="zstd")
     pred = os.path.join(td, "pred.tsv")
     env = dict(os.environ, ZENSIM_DIAL_GRID=gp, ZENSIM_DIAL_PRED_OUT=pred)
     subprocess.run(

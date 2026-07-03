@@ -17,7 +17,7 @@
 #   e.g.:  hdr_score_fleet.sh launch hdrhq1 picker-sweep-2026-06-22/datagen-2026-07-03-hdr-hq 6
 set -uo pipefail
 CMD="${1:?launch|status|reap}"; RUN="${2:?run id}"
-BIN_KEY="hdr/bin/zenmetrics-hdr-cpu-2026-07-03"
+BIN_KEY="${BIN_KEY:-hdr/bin/zenmetrics-hdr-cpu-2026-07-03}"
 RESULTS_PREFIX="hdr/runs/$RUN"
 SSH_KEY="${SSH_KEY:-zen-arm-dev-20260528}"
 set -a; . ~/.config/cloudflare/r2-credentials; set +a
@@ -28,6 +28,7 @@ case "$CMD" in
 launch)
   DGP="${3:?datagen prefix (codec-corpus)}"; N="${4:?n boxes}"
   METRICS="${5:-zensim ssim2 iwssim dssim cvvdp}"
+  EXTRA_ARGS="${EXTRA_ARGS:-}"
   # scoped creds: read datagen (codec-corpus) needs its own token; read bin +
   # write results on zentrain needs another (R2 temp creds are single-bucket).
   mk_cred(){ python3 -c "import json,os;print(json.dumps({'bucket':'$1','parentAccessKeyId':os.environ['R2_ACCESS_KEY_ID'],'parentSecretAccessKey':os.environ['R2_SECRET_ACCESS_KEY'],'permission':'object-read-write','ttlSeconds':43200,'prefixes':$2}))" \
