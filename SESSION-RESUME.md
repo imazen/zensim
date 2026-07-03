@@ -124,7 +124,7 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
   variance; KonFiG-as-group inconclusive at this spread.
 - NOT yet in this wave: σ-MSE ablation (needs an mm6 group in the recipe).
 
-## BREAKTHROUGH + graduation (2026-07-03 ~00:15Z — check FIRST on resume)
+## Campaign CLOSED OUT (2026-07-03 ~01:10Z — check FIRST on resume)
 
 - **`w3_hponly51_s7` = CID22 0.8767 — FIRST cell above Profile-A (0.8657)**,
   dial G1 1.00 / mono 0.975. Recipe: v51 base (pre-dedup corpus) +
@@ -137,11 +137,21 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
   (+ flat-dial trap at one seed — G1=0.00 masked by mono 0.996; always read
   BOTH dial numbers). Corpus effect: v51 dups act as regularization (+0.02
   over dedup corpus).
-- **RUNNING: graduation seeds** (hponly51 + t1dro51 × s31/47/63, systemd unit
-  `wave3c` on 159.69.55.206). On completion: 5-seed stats → family winner →
-  full Mohammadi panel + SDR25 scoreboard (sdr25_eval_pairs.tsv) + KonJND
-  gate vs A → bake_report (auto on hz.sh pull) → RETIRE THE BOX (hz.sh
-  retire zen-train-1).
+- **GRADUATION DONE — t1dro51 is the winner and PASSES the SDR25 gate**:
+  SDR25 pooled 0.955-0.969 across 5 seeds (ssim2 0.958, A 0.904; within-image
+  1.0000 ×5); CID22 0.858±0.010 (two seeds > A), zero collapses; dials pass.
+  Open gates: CID22-49 ≥0.8854 (nothing passes it, incl. A) and KonJND ≥
+  0.4185 (mixed 0.31-0.44). Full record:
+  benchmarks/strategy_ablation_2026-07-02.md. Recipe of record: v51 base +
+  ema=0.9 hard_pair=0.5@0.05 strat=10 dro_eta=0.5, trainer 78ec8e61
+  (manifests w3_t1dro51_s*).
+- **Box RETIRED** (server deleted; NEW restore base snapshot
+  `zen-train-1-1783040838` — supersedes 1782989687). cx fleet reaped. Zero
+  cloud burn. Bakes: w3_t1dro51_s{17,7,31,47,63}.bin in the probe dir.
+- Next-campaign levers (KonJND + CID22-49 gates): hard-pair mining scoped to
+  the konjnd-dense group; triplet loss weight sweep (KonJND-neutral-positive
+  at 0.5); dup-aware sampling to reconcile the dedup corpus; EXP_II interior-
+  pivot triplet model.
 - cx fleet: REAPED (0 boxes). Wave-1 cross-machine: 16/18 byte-identical;
   2 divergent = one AVX-512-tier box (ISA reduction order, documented).
 - Next levers if KonJND gate blocks: hardpair delta/frac sweep; t1dro51
