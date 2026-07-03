@@ -334,3 +334,16 @@ PJND all crater together). The ssim2-shaped-surface trap as an instability.
    cell self-reports, fleet or local, no human in the loop.
 3. CSF-feature direction claims CORRECTED (falsified v39-era AIC-3 spike;
    task deleted): the cvvdp gap is calibration + corpus, not CSF features.
+
+## w7 guard verdict on the collapse seed (2026-07-03)
+
+s7 under the konjnd_anchor guard STILL collapses (CID22 0.4452, AIC-4
+0.3603, guard 0.1217) — **steering falsified**: no healthy epoch existed to
+select; the whole trajectory is in the diverged basin (training-dynamics,
+not late drift). The guard's real role is VISIBILITY (selection value
+0.4962 collapsed vs 0.5100 healthy — ~3x the blind spread, directional but
+not a hard discriminator); the runcells post-train verdict gate is the
+REJECTION layer (fires decisively: 0.4452 < 0.75 → rc=9). Operating policy:
+seed-fan + auto-reject; collapse-rate REDUCTION is a recipe-stability
+question (first candidate: the w8 cvvdp-mix target, since ssim2-shaping is
+the suspected basin driver).
