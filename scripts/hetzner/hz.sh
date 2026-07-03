@@ -69,6 +69,40 @@ case "$CMD" in
       [ -d "/mnt/v/output/zensim/reports/$(date +%F)_$L" ] ||         nice -n19 python3 "$(dirname "$0")/../v_next/bake_report.py" --bake "$B" --label "$L" 2>&1 | tail -1
     done
     echo pulled ;;
+  autoretire) # detached watcher: pull + retire when work completes OR box idles
+    # usage: hz.sh autoretire <ip> <name> [idle_min=25]
+    # Boxes bill by the hour — retirement must not wait for a human (user
+    # directive 2026-07-03). Runs ON THE WORKSTATION (the hcloud token never
+    # leaves this machine). Retires when: status.tsv has ALLDONE AND no
+    # trainer process AND no active wave*/ablation systemd unit — or when no
+    # trainer has run for idle_min regardless (crashed-run guard). Touch
+    # $PROBE/.box_hold to veto retirement (e.g. queuing another wave).
+    IP="${1:?ip}"; NAME="${2:?server name}"; IDLE_MIN="${3:-25}"
+    nohup bash -c '
+      IP='"'"'$IP'"'"'; NAME='"'"'$NAME'"'"'; IDLE_MIN='"'"'$IDLE_MIN'"'"'
+      PROBE=/mnt/v/output/zensim-multicodec-probe
+      SSH="ssh -i $HOME/.ssh/zen-arm-dev -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
+      idle=0
+      while true; do
+        sleep 180
+        [ -f "$PROBE/.box_hold" ] && { idle=0; continue; }
+        BUSY=$($SSH root@$IP "ps -e | grep -c zensim_mlp; systemctl list-units --state=active --plain --no-legend "wave*" "ablation*" 2>/dev/null | wc -l" 2>/dev/null | paste -sd+ | bc 2>/dev/null)
+        if [ -z "$BUSY" ]; then idle=$((idle+3)); # unreachable counts toward idle
+        elif [ "$BUSY" -gt 0 ]; then idle=0; continue
+        else idle=$((idle+3)); fi
+        DONE=$($SSH root@$IP "grep -c ALLDONE /data/out/status.tsv 2>/dev/null" 2>/dev/null || echo 0)
+        if [ "${DONE:-0}" -ge 1 ] || [ "$idle" -ge "$IDLE_MIN" ]; then
+          echo "[autoretire] $(date -u +%FT%TZ) pulling + retiring $NAME (done=$DONE idle=${idle}m)"
+          cd '"$(cd "$(dirname "$0")/../.." && pwd)"'
+          bash scripts/hetzner/hz.sh pull "$IP" 2>&1 | tail -1
+          rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev" root@$IP:/data/derived/*.bin "$PROBE/" 2>/dev/null
+          export HCLOUD_TOKEN=$(grep -oP "api_token=\K.*" ~/.config/hetzner/credentials)
+          bash scripts/hetzner/hz.sh retire "$NAME" --force 2>&1 | tail -2
+          exit 0
+        fi
+      done' > "$PROBE/autoretire_${NAME}.log" 2>&1 &
+    echo "autoretire watcher armed for $NAME ($IP, idle=${IDLE_MIN}m; veto: touch $PROBE/.box_hold)"
+    ;;
   retire)  # snapshot then delete — MANDATORY end-state for x86 big boxes
     NAME="${1:?name}"
     if [ "${2:-}" != "--force" ]; then
