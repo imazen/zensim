@@ -231,3 +231,21 @@ corpus-ridge artifact does NOT reduce dial continuity — between-ladder
 response is smooth where targeting operates. True precision bounds: codec
 action-space quantization (targeting-layer nearest-achievable) and the 2-3%
 inversion tail (TV/within-ladder levers queued).
+
+## Profile B (HDR-capable) — w5 first results (2026-07-03)
+
+User directive: prep the HDR-capable candidate as **ZensimProfile::B** (new
+slot; A unchanged). Corpus: imazen-26 HDR grid, PU21-fed 372 features,
+dedup-by-content, LSD splits (train 3,420 / val 1,800 / test held).
+
+| cell | hdr_val SROCC/PLCC | CID22 | AIC-3 | AIC-4 | KonJND |
+|---|---|---|---|---|---|
+| w5_hdronly_s17 (smoke) | 0.830 / 0.087 | — | — | — | — |
+| w5_hdrmix_s17 (B seed) | **0.9694 / 0.9516** | 0.8544 | 0.7937 | 0.9041 | 0.4031 |
+
+- SDR→HDR structure transfer is large (+0.14 SROCC vs hdr-only training);
+  the SDR panel holds at same-seed parity → G-HDR-SDR-PANEL passes at s17.
+- PU21 features carry real HDR signal (the existential check).
+- Pre-registered remaining gates: G-HDR-SDR-CONSISTENCY (SDR-range content
+  through HDR path == SDR path; harness queued in zenmetrics), multi-seed
+  stability (s7/s31 launched), HDR dial continuity, UPIQ ≥ 0.694.

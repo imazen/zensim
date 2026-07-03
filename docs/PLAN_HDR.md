@@ -66,7 +66,18 @@ catches this class on every box.
    deployment, strat=10, dro_eta=0.5) over {hdr groups + the SDR groups for
    shared structure}, held-out HDR val group for selection, dial spline fit
    on an HDR multiband anchor. QAT per the standard packing.
-6. **Gates (pre-registered, before looking).** AIC-HDR2025 SROCC ≥ published
+6. **Gates (pre-registered, before looking).** ADDED 2026-07-03 (user
+   directive: "once optimal, no regression on SDR including when hdr contains
+   only sdr"):
+   - **G-HDR-SDR-CONSISTENCY**: SDR-range content fed through the HDR path
+     (PU21 shell on nits) must match the SDR path (sRGB u8) — p95 |Δscore|
+     ≤ 2 points and pairwise rank preserved (SROCC ≥ 0.99) on an SDR-range
+     consistency set. The SDR case is the sub-domain limit of the HDR model;
+     any seam at the luminance boundary is a defect (measure via the
+     hdr_sdr_consistency harness in zenmetrics).
+   - **G-HDR-SDR-PANEL**: the shipped HDR-capable bake regresses NOTHING on
+     the standard SDR rank+dial panels vs the SDR ship.
+   Original gates: AIC-HDR2025 SROCC ≥ published
    metric baselines from the QoMEX'25 paper; UPIQ ≥ 0.694 baseline; HDR dial
    G1 ≥ 0.95, mono ≥ 0.93, JND-zone median step ≥ 0.5pt, backwards ≤ 3%;
    NO regression on the SDR panel for the SDR ship.
