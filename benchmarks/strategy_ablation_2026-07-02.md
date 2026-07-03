@@ -79,3 +79,27 @@ recipe effects.
   holds per ISA tier.
 - **Wave 3 (running)**: hponly + t1dro on the v51 (pre-dedup) corpus × seeds
   {17,7} — isolates whether the remaining −0.031 vs A is corpus or recipe.
+
+## Wave 3 (corpus isolation) — v51 corpus + finalist strategies
+
+| cell | CID22 | KonJND | G1/mono |
+|---|---|---|---|
+| hponly51_s17 | 0.8391 | 0.4440 | 1.00/0.978 |
+| **hponly51_s7** | **0.8767 — BEATS A (0.8657)** | 0.3184 (below A) | 1.00/0.975 |
+| t1dro51_s17 | 0.8485 | 0.4295 | 0.99/0.975 |
+| t1dro51_s7 | 0.8594 | 0.3796 | 0.99/0.975 |
+
+- **Corpus effect confirmed**: same strategies on the v51 (pre-dedup) corpus
+  gain ~+0.02 mean CID22 over the dedup+hqfill corpus — the knob-no-op
+  duplicates act as regularization-by-upweighting; dedup is cleaner data but
+  (as-is) worse training. Reconciling (dup-aware sampling weights on the
+  dedup corpus?) is future work.
+- **hponly51_s7 is the first cell above Profile-A on CID22** with a perfect
+  dial — but its KonJND (0.318) is below A's 0.4185, so the pre-registered
+  KonJND-no-regression gate is NOT yet passed. t1dro trades a little CID22
+  for better KonJND, same pattern as wave-2b.
+- Graduation seeds (s31/47/63 × both finalists) running — 5-seed stats,
+  then full-panel + SDR25 + KonJND gate on the family winner.
+- Wave-3's first launch PREFLIGHT-FAILED all 4 cells in 8s: the w3 manifests
+  (generated from the pre-contract v51 base) lacked per-input contracts —
+  the gate did its job; fix was declaring reality, not loosening.

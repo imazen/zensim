@@ -113,6 +113,7 @@ tower = "/mnt/tower/output/zensim-archive-2026-05-20/canonical-2026-05-21/train"
 path = "{canonical}/safesyn.parquet"
 sha256 = "ad15cc79cde156109d920bfade8ed465908e256fcd1cd8556b430791dcaf1b18"
 rows = 196086
+target_range = [ -8.0, 1.001,]
 
 [inputs.cid22_train]
 path = "{canonical}/cid22_train_norm.parquet"
@@ -140,29 +141,34 @@ path = "/mnt/v/output/zensim-multicodec-probe/bigcodec_traindigits_2026-07-02.pa
 sha256 = "08cc7e5eeb97c84275239cfbbe33c2c16e5007ffa8bd1e5236ad8bfbcaa040fd"
 rows = 2946036
 notes = "TRAIN-DIGIT origins only (LSD rule per docs/DATA_SPLITS.md 2a) of the canonical 5.7M corpus."
+allow_dup_rate = 0.3
 
 [inputs.bigcodec_val]
 path = "/mnt/v/output/zensim-multicodec-probe/bigcodec_valdigits_2026-07-02.parquet"
 sha256 = "8e11e8ba3614885ab9fc283fc90df61baba5be4d0ea5d1474c3b17e7e40222a2"
 rows = 147067
 notes = "HELD-OUT val-digit origins (1,3,5), 1/12 deterministic sample — fixes selection blindness (DATA_SPLITS.md 5)."
+allow_dup_rate = 0.3
 
 [inputs.kadis_val]
 path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_val.parquet"
 sha256 = "4ab85e72bff90da2b9bdab4f190c5d62614706b3624ab9e095478e26f43262c5"
 rows = 70000
 notes = "KADIS source_id%10==8 val split, cvvdp/10 — second held-out val group."
+target_range = [ -0.5, 1.001,]
 
 [inputs.kadis_unused]
 path = "/mnt/v/output/zensim-multicodec-probe/kadis_cvvdp_train.parquet"
 sha256 = "17c1349f2bc578a57a1a2df8706d53bce9d31cf0f4bd72a4e1999206f825198c"
 rows = 560000
 notes = "KADIS-700k GPU canonical train split (source_id%10<8), human_score=cvvdp/10."
+target_range = [ -0.5, 1.001,]
 
 [inputs.multiband_anchor]
 path = "{canonical}/multiband_anchor_dial100.parquet"
 sha256 = "594b3df521e3a2261b64a49fd2df001c1a6a31ff362fdfc4071fb41e06407149"
 notes = "Per-row anchor for post-training PCHIP dial-spline fit (NOT a training target)."
+validate_kind = "grid"
 
 [inputs.feature_sign_mask]
 path = "benchmarks/feature_sign_mask_2026-05-26.tsv"

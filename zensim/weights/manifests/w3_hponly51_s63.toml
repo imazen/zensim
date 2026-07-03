@@ -1,7 +1,7 @@
 [bake]
-name = "wave3 t1dro on v51 corpus"
+name = "wave3 hardpair on v51 corpus"
 internal_version = "v47-strict-qat"
-file = "/mnt/v/output/zensim-multicodec-probe/w3_t1dro51_s17.bin"
+file = "/mnt/v/output/zensim-multicodec-probe/w3_hponly51_s63.bin"
 sha256 = "d0ef7a3054d1ed9e70086d306cda69b71fc95072c6ef3351f362f27da096d4fc"
 file_bytes = 27316
 n_inputs = 372
@@ -11,7 +11,7 @@ date = "2026-05-27"
 [training]
 trainer = "zensim_mlp_train"
 trainer_commit = "78ec8e614e46b326975680f629c7e25bd20f22fc"
-seed = 17
+seed = 63
 mse_weight = 0.6
 ranknet_weight = 0.6
 monotonicity_reg = 1.0
@@ -38,11 +38,8 @@ monotone_feature_mask = "../../../benchmarks/feature_sign_mask_2026-05-26.tsv"
 auto_transforms = "../../../benchmarks/yeo_johnson_screen_widest_2026-05-25/screen_results_cross_corpus_safe.tsv"
 anchor_parquet = "{canonical}/multiband_anchor_dial100.parquet"
 steps = [ "1. zensim_mlp_train --manifest (this file) produces the FINAL packed+calibrated bake in ONE pass — no Python post-steps:", "   - last 40 epochs train quantization-aware (f16+zerobias STE) → net robust to packing", "   - post-training spline fit (fit_monotone_spline) on the QUANTIZED net over the multiband anchor → dial calibrated to exactly what ships", "   - bake stores f16 (encoder) + compressed → ~30 KB, identity-exact, monotone-by-construction", "   recal_v47_dial.py + pack_and_calibrate.py are OBSOLETE for this recipe (kept only for non-QAT bakes).",]
-ema_decay = 0.9
 hard_pair_frac = 0.5
 hard_pair_max_delta = 0.05
-stratified_bands = 10
-dro_eta = 0.5
 [[training.groups]]
 name = "safesyn"
 path = "{canonical}/safesyn.parquet"
