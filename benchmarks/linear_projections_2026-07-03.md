@@ -404,3 +404,178 @@ linear candidate on every axis it was proposed for.
    families to also panel lasso5e-4 (chosen on val axes before any
    round-2 panel was run); all 22 round-2 panels reported.
 
+
+
+## Ensembles + residual stack (2026-07-03 evening, follow-on mission)
+
+### Convex linear ensembles — method
+
+A convex blend of RAW-feature-space linear heads collapses to a SINGLE
+372→1 linear layer (fold each head's scaler: v_k = w_k/sd_k; per-head
+output z-normalized on the anchor set; blended weights = Σ α_k ṽ_k) — so
+every "ensemble" here bakes as one tiny identity-scaler layer
+(**816–1,119 bytes** f16+lz4) and inherits full determinism. Shaped heads
+are excluded (incompatible input transform). Head pool (8, all raw):
+
+| alias | head (fit key @ τ) | axis it owns |
+|---|---|---|
+| cid | hdrmix-lasso0.002 @0 | CID22 0.8740 |
+| kon | canonhdr15-bvls @0.005 | KonJND 0.6696 |
+| upq | canonhdr15-lasso0.0005 @0.005 | UPIQ-raw 0.7148 |
+| kad | canon-ridge1e-05 @0 | KADID/TID 0.88/0.86 |
+| cbv | canon-bvls @0.005 | 2026-05-28 recipe |
+| hds | hdr-lasso0.001-raw @0 | pure-HDR ssim2 |
+| pjt | pjnd-ridge1e-3 (NEW: konjnd-dense `pjnd_target` target) | guard 0.8096, bigval ≈0 |
+| s3h | hdrmix300-lasso0.002 (NEW: f0..f299 only) | ties full head → IW-pool block (f300–371) contributes ~nothing to this fit |
+
+(A 9th candidate — NNLS with ALL 372 weights pinned ≥0 — fit to exactly
+zero active weights: full sign-pinning is infeasible for score
+prediction on these features. Negative result, head dropped.)
+
+α chosen ONLY on train-legal axes (cid22tr = ssim2-anchored
+cid22_train_norm, bigcodec_val stride-7, hdr_val, hdr_valmix,
+konjnd-dense-train pjnd_target |SROCC|), corner-normalized; 8,436
+combos (pairs step .05, triples step .1, quads step .1) under 4
+pre-registered scalarizations (S1 maximin, S2 triple-mirror,
+S3 balanced, S4 cid-lean); plus two labeled extras registered BEFORE any
+ensemble panel ran (S5 no-guard/no-pjt; P-line = fixed cid↔kon at
+α∈{.3,.5,.7}); plus four **panel-informed frontier probes** run AFTER
+seeing the P-line panels, labeled as such (cid80/cid85 + two 3-head
+blends) to answer the triple-gate question directly. Every baked blend's
+panel is reported below — nothing withheld.
+
+### Panel — all 14 ensemble/cascade bakes
+
+| bake | B | CID22 | KADID | TID | KonJND | AIC-3 | AIC-4 | UPIQ | G1 | mono | goal |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| casc-bvlsbase-lasso0.0005 | 3903 | 0.8118 | 0.8078 | 0.7786 | 0.4213 | 0.7459 | 0.8530 | 0.6671 | 1.00 | 0.9494 | 0.543 |
+| casc-bvlsbase-lasso0.001 | 3859 | 0.8128 | 0.7749 | 0.7519 | 0.5140 | 0.7345 | 0.8463 | 0.6613 | 1.00 | 0.9456 | 0.525 |
+| ens-F3-c45k25u30 | 900 | 0.8572 | 0.8261 | 0.7994 | 0.5236 | 0.7580 | 0.8595 | 0.6881 | 1.00 | 0.9704 | 0.606 |
+| ens-F3-c55k25u20 | 905 | 0.8636 | 0.8197 | 0.8006 | 0.5380 | 0.7632 | 0.8661 | 0.6857 | 1.00 | 0.9709 | 0.614 |
+| ens-Pline-cid30 | 821 | 0.8256 | 0.8021 | 0.7859 | 0.6558 | 0.7396 | 0.8308 | 0.6761 | 1.00 | 0.9496 | 0.546 |
+| ens-Pline-cid50 | 816 | 0.8454 | 0.8104 | 0.7974 | 0.6335 | 0.7545 | 0.8489 | 0.6808 | 1.00 | 0.9560 | 0.593 |
+| ens-Pline-cid70 | 829 | 0.8653 | 0.8065 | 0.8004 | 0.5862 | 0.7704 | 0.8748 | 0.6830 | 1.00 | 0.9672 | 0.626 |
+| ens-Pline-cid80 | 823 | 0.8733 | 0.8017 | 0.7998 | 0.5439 | 0.7775 | 0.8906 | 0.6846 | 1.00 | 0.9711 | 0.644 |
+| ens-Pline-cid85 | 832 | 0.8759 | 0.7989 | 0.7990 | 0.5135 | 0.7816 | 0.8992 | 0.6844 | 1.00 | 0.9709 | 0.654 |
+| ens-S1maximin | 1095 | 0.4762 | 0.3692 | 0.1354 | 0.7556 | 0.5982 | 0.7916 | 0.4715 | 1.00 | 0.8775 | 0.394 |
+| ens-S2triple | 1095 | 0.4762 | 0.3692 | 0.1354 | 0.7556 | 0.5982 | 0.7916 | 0.4715 | 1.00 | 0.8775 | 0.394 |
+| ens-S3balance | 1103 | 0.5964 | 0.4359 | 0.2195 | 0.7195 | 0.6633 | 0.8466 | 0.5598 | 1.00 | 0.9049 | 0.416 |
+| ens-S4cidlean | 1103 | 0.5891 | 0.4428 | 0.2207 | 0.7274 | 0.6531 | 0.8403 | 0.5682 | 1.00 | 0.9026 | 0.411 |
+| ens-S5noguard | 1119 | 0.8793 | 0.7879 | 0.8055 | 0.3497 | 0.7821 | 0.8875 | 0.6403 | 1.00 | 0.9602 | 0.659 |
+
+### Reading
+
+- **`ens-Pline-cid80` (cid:0.80 + kon:0.20, 823 bytes, 95 active) is the
+  strongest small model this program has produced.** vs shipped A
+  (27,316 B MLP): CID22 0.8733 vs 0.8657 (+0.008), KADID 0.8017 vs
+  0.7933 (+0.008), TID 0.7998 vs 0.7927 (+0.007), KonJND 0.5439 vs
+  0.4185 (**+0.125**), AIC-3 0.7775 vs 0.7680 (+0.010), AIC-4 0.8906 vs
+  0.8854 (+0.005), goal 0.644 vs 0.622 — **beats A on 7 of 9 tracked
+  axes** at 1/33rd the size; loses UPIQ 0.6846 vs 0.6933 (−0.009) and
+  mono 0.9711 vs 0.9747 (−0.004). `ens-Pline-cid85` pushes CID22 to
+  0.8759 with KonJND 0.5135.
+- **The CID22↔KonJND trade is strongly non-linear in α — in our favor.**
+  Linear interpolation between the cid (0.8740/0.3716) and kon
+  (0.8001/0.6696) corners predicts ~0.52 KonJND at the midpoint; the
+  measured cid50 blend holds **0.6335**, and even at α_cid=0.85 KonJND
+  is 0.5135. Mechanism: near PJND threshold the cid head is nearly flat
+  (ties); the small kon component breaks those ties with the BVLS head's
+  sign-stable ordering, while the cid head dominates the global
+  ordering. This is exactly the "linear raw outputs have real dynamic
+  range, so convex blends preserve rank" hypothesis, confirmed — and the
+  spline-on-blend refit kept mono 0.947–0.971 / G1 1.00 on every P-line
+  and F3 point.
+- **Triple gate (CID22 ≥0.87 ∧ KonJND ≥0.50 ∧ UPIQ ≥0.70): 2 of 3 legs
+  HIT, decisively — UPIQ leg fails.** cid80 = 0.8733 ✓ / 0.5439 ✓ /
+  0.6846 ✗ (−0.015); cid85 = 0.8759 ✓ / 0.5135 ✓ / 0.6844 ✗. Pulling
+  UPIQ up via the upq head (F3 blends) tops out at 0.6881 while giving
+  back CID22 (0.8572–0.8636). The only ≥0.70-UPIQ candidates are the
+  shaped pure-HDR head (0.7313, not raw-blendable) and specialist
+  singles; on raw-space blends the UPIQ ceiling observed is ~0.69. A
+  Pareto point holding all three was NOT found.
+- **`pjt`-blends reach KonJND 0.7556** (S1/S2: upq:0.5+pjt:0.5) — above
+  the G5 0.70 floor that two MLP architectures were falsified against
+  (v42/v43) — but at catastrophic cost elsewhere (CID22 0.476, TID 0.135,
+  AIC-3 0.598; G5's AIC-3 leg still fails). The pjnd_target head is a
+  real PJND mechanism, not a metric artifact (guard 0.59 on the S1 blend
+  transferred to val KonJND 0.7556) — worth a dedicated
+  KonJND-specialist slot if one is ever needed, and a possible G5 route
+  if its AIC-3 cost can be bought back.
+- **The 4 blind scalarizations (S1–S4) all mis-fired** (CID22 0.48–0.60)
+  — the guard axis over-rewarded pjt content and cid22tr normalization
+  compressed the real CID22 differences. The informative ensembles came
+  from the fixed P-line + the no-guard S5 + frontier probes. Lesson:
+  with a self-owned axis in the pool (pjt owns guard), corner
+  normalization makes that axis a magnet; exclude self-owned axes from
+  scalarization or normalize on a pool without the owner.
+- **2-stage cascade (BVLS base + sparse lasso correction on train
+  residual): dominated by direct blends** — casc-lasso1e-3 = CID22
+  0.8128/KonJND 0.5140 vs cid50's 0.8454/0.6335 at 1/5th the size.
+  Falsified as a frontier-mover (the correction re-optimizes the same
+  trade the blend explores, with less control).
+- **`ens-S5noguard` (kad:0.30+hds:0.20+s3h:0.50, 1,119 B) is the best
+  CID22 of the entire program: 0.8793** — +0.0085 over the best MLP
+  (t1dro51_s31 0.8708), +0.0136 over A — with TID 0.8055, AIC-3 0.7821,
+  AIC-4 0.8875, goal 0.659; its costs are KonJND 0.3497 and UPIQ 0.6403.
+  Selected blind by the no-guard quality-axes scalarization (disclosure:
+  its cid22tr 0.978 selection value was partly self-favored — the kad
+  head's mix contains cid22_train — but CID22-val at 0.8793 is a genuine
+  49-ref holdout number).
+
+### Residual-stack prep (deterministic base + learnable correction)
+
+Corpora for a future residual-MLP experiment (NOT trained here — the
+local training slot is occupied by the w8 run). Base = the SDR pick
+`lp_hdrmix-lasso0.002-raw-tau0-f16.bin` applied exactly as the bake
+stores it (f16 weights, f32 scaler/math).
+
+Definition: `residual_target = human_score − clip01(a·clip(linear_pred,
+clamp_lo, clamp_hi) + b)` with (a, b) OLS-fit on each TRAIN file's
+clamped preds and REUSED for its val file (no val-fit leakage); the
+inner clip bounds the base to the anchor-observed raw domain (the dial
+spline's trusted range), the outer clip01 bounds the affined base to
+[0,1]; `linear_pred` (raw, un-clamped, un-affined) also stored per row
+for audit. Runtime composition: `final = clip01(a·linear_base(x) + b) +
+residual_mlp(x)` — a hard sum over four constants + one clip, so a
+collapsed/degenerate residual head degrades toward the deterministic
+base instead of toward a broken constant: **the collapse mode is
+bounded by construction.** Dial spline then fits on the composed output
+(same pack-then-calibrate order).
+
+Files at `/mnt/v/output/zensim-multicodec-probe/linear-probe/residual/`
+(+ `_MANIFEST.json` with base-bake sha256, per-file sha256, affine, and
+residual ranges; parquet KV metadata carries the same):
+
+Base bake sha256:
+`bdb5d63ea699e9bf28c3f5f24a895f3bab105d74d5df9c211406d8637a301692`
+
+Pred clamp domain (anchor min/max): [-4.9061, 1.1274]; composition clip01 bounds the affined base to [0,1], so residual_target ∈ [−1,1] **by construction** (observed: bigcodec [−0.79, +0.94], hdr [−0.55, +0.22]).
+
+| file | rows | affine (a, b) | residual range | sha256 |
+|---|--:|---|---|---|
+| bigcodec_traindigits_residual_2026-07-03.parquet | 2,946,036 | (0.3405, +0.4095) | [-0.7880, +0.9349] | `80599586e33d528345b364eaf1c4f5cc4dd8ed18a615a0fa4163086d624d3a39` |
+| bigcodec_valdigits_residual_2026-07-03.parquet | 147,067 | (0.3405, +0.4095) | [-0.7934, +0.9386] | `c1b895a59d2b7bc0506ef1941d396325800043e96d7f6cb0229927bded928542` |
+| hdr_zenjxl_v3_traindigits_residual_2026-07-03.parquet | 7,410 | (0.8194, +0.0683) | [-0.5474, +0.2123] | `fa7d767adb94f96c58cd6c9a43c415b457f65a13ee07f9b5f5c6645e5ef6786e` |
+| hdr_zenjxl_v3_valdigits_residual_2026-07-03.parquet | 3,900 | (0.8194, +0.0683) | [-0.5147, +0.2194] | `764a4b92765ae43ccc9cbcd67428258fc4537b75cda146dc8c0cfe97beb38438` |
+
+Two earlier iterations were caught by the contract and fixed in the DATA (never by relaxing the contract): unclamped preds reached residual +158 on bigcodec valdigits (OOD extrapolation of the sparse HDR-fit base also squashed the OLS slope to 0.17), and clamp-only still left a +2.19 tail (rows where the base is confidently wrong at the clamp floor). Superseded files kept as `*.unclamped.bak` / `*.clamponly.bak`.
+
+All four validated with
+`validate_parquet.py --kind train --target-col residual_target --target-range=-1.001,1.001`
+(the tight [−1,1] contract the clip01 composition guarantees):
+
+- C1 footer / C2 372-feature completeness / C3 nulls / C4 NaN-Inf / C5 target
+  present+in-range / C7 rows: **PASS on all four files**.
+- `hdr_zenjxl_v3_valdigits_residual`: all checks PASS.
+- `bigcodec_*_residual`: **C10 duplicate-(f0,target) FAIL at 18.80% / 2.05% —
+  inherited verbatim from the source corpora** (source
+  `bigcodec_traindigits_2026-07-02.parquet` fails C10 at the identical
+  18.80%; the validator's own message documents this as the known
+  modes_full no-op-knob duplication from 2026-07-02). Row-for-row
+  derivation preserves it by design.
+- `hdr_zenjxl_v3_traindigits_residual`: **C6 one all-constant feature col —
+  also inherited verbatim** (source fails C6 identically; a feature that is
+  constant across the 7,410-row HDR train split).
+
+No new defects were introduced by the derivation; full log at
+`linear-probe/residual_validate.log`.

@@ -78,7 +78,7 @@ GROUPS = {
     "cid22_train": (CANON / "cid22_train_norm.parquet", ["human_score"]),
     "kadid": (CANON / "kadid.parquet", ["human_score"]),
     "tid": (CANON / "tid.parquet", ["human_score"]),
-    "konjnd_dense": (CANON / "konjnd-dense-norm.parquet", ["human_score"]),
+    "konjnd_dense": (CANON / "konjnd-dense-norm.parquet", ["human_score", "pjnd_target"]),
     "hdr_v3": (PROBE / "hdr_zenjxl_v3_traindigits_2026-07-03.parquet", ["human_score"]),
     "hdr_v3mix": (PROBE / "hdr_zenjxl_v3mix_traindigits_2026-07-03.parquet", ["human_score"]),
 }
@@ -87,6 +87,9 @@ VAL_SETS = {
     "hdr_val": (PROBE / "hdr_zenjxl_v3_valdigits_2026-07-03.parquet", "human_score"),
     "hdr_valmix": (PROBE / "hdr_zenjxl_v3mix_valdigits_2026-07-03.parquet", "human_score"),
     "konjnd_guard": (CANON / "konjnd-dense-norm.parquet", "pjnd_target"),
+    # cid22_train_norm is a TRAIN group (ssim2-anchored, NOT MOS) — using it
+    # as a selection axis is train-legal (it is already a fit input).
+    "cid22tr_sel": (CANON / "cid22_train_norm.parquet", "human_score"),
 }
 
 FCOLS = [f"f{i}" for i in range(N_FEAT)]
@@ -466,6 +469,374 @@ def cmd_finalize(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 (2026-07-03 evening): ensembles + cascade + residual-stack prep.
+
+# Diverse head pool for convex ensembles. RAW feature space only — a convex
+# blend of raw-space linear heads collapses to a SINGLE 372->1 linear layer
+# (v_k = w_k/sd_k in raw space; scaler folds away), so the ensemble bakes as
+# one tiny layer. Shaped heads are excluded (incompatible input transform).
+HEAD_POOL = [
+    ("cid", "hdrmix-lasso0.002-raw", 0.0),        # CID22 axis (0.8740)
+    ("kon", "canonhdr15-bvls-raw", 0.005),        # KonJND axis (0.6696)
+    ("upq", "canonhdr15-lasso0.0005-raw", 0.005), # UPIQ-raw axis (0.7148)
+    ("kad", "canon-ridge1e-05-raw", 0.0),         # KADID/TID axis (0.88/0.86)
+    ("cbv", "canon-bvls-raw", 0.005),             # 2026-05-28-recipe BVLS
+    ("hds", "hdr-lasso0.001-raw", 0.0),           # pure-HDR ssim2 target
+    ("pjt", "pjnd-ridge0.001-raw", 0.0),          # NEW: pjnd_target head
+    # NNLS-all-pinned head dropped: it fit to all-zero weights (w>=0 for every
+    # feature is infeasible for score prediction here) — negative result.
+    ("s3h", "hdrmix300-lasso0.002-raw", 0.0),     # NEW: f0..f299 subset head
+]
+
+SEL_AXES = ["cid22tr_sel", "bigcodec_val", "hdr_val", "hdr_valmix", "konjnd_guard"]
+
+
+def cmd_poolfits(args) -> int:
+    """Three bespoke diversity fits for the ensemble pool."""
+    out = SCRATCH / "fits"
+
+    # 1. pjnd_target head: konjnd-dense-norm, target = per-ref PJND threshold.
+    mg = MixGram("raw", [("konjnd_dense", 1.0, "pjnd_target")])
+    w, b = mg.ridge(1e-3)
+    np.savez_compressed(out / "pjnd-ridge0.001-raw.npz", w=w, bias=b, mu=mg.mu,
+                        sd=mg.sd, space="raw", desc="konjnd_dense:1.0:pjnd_target")
+    vm = val_metrics(w, b, mg.mu, mg.sd, "raw")
+    print(f"pjnd-ridge0.001-raw         bigval={vm['bigcodec_val']:+.4f} "
+          f"hdrval={vm['hdr_val']:+.4f} guard={abs(vm['konjnd_guard']):.4f}")
+
+    # 2. NNLS (ALL weights pinned >= 0) on the canonhdr15 mix.
+    mg = MixGram("raw", MIXES_HDR["canonhdr15"])
+    w, b = mg.bvls(np.ones(N_FEAT, dtype=bool))
+    np.savez_compressed(out / "canonhdr15nnls-bvls_allpin-raw.npz", w=w, bias=b,
+                        mu=mg.mu, sd=mg.sd, space="raw", desc="canonhdr15 allpin")
+    vm = val_metrics(w, b, mg.mu, mg.sd, "raw")
+    nact = int((np.abs(w) > 1e-7).sum())
+    print(f"canonhdr15nnls (act={nact})   bigval={vm['bigcodec_val']:+.4f} "
+          f"hdrval={vm['hdr_val']:+.4f} guard={abs(vm['konjnd_guard']):.4f}")
+
+    # 3. 300-feature subset head (f0..f299, no IW-pool block) on hdrmix.
+    mg = MixGram("raw", MIXES_HDR["hdrmix"])
+    sub = np.arange(300)
+    Gs = mg.G[np.ix_(sub, sub)]; cs = mg.c[sub]
+    Gn = Gs / mg.W; cn = cs / mg.W
+    d = Gn.diagonal().copy(); d[d < 1e-12] = 1e-12
+    ws = np.zeros(300); Gw = np.zeros(300); lam = 0.002
+    for _ in range(200):
+        delta = 0.0
+        for j in range(300):
+            rho = cn[j] - Gw[j] + d[j] * ws[j]
+            nw = np.sign(rho) * max(abs(rho) - lam, 0.0) / d[j]
+            if nw != ws[j]:
+                Gw += Gn[:, j] * (nw - ws[j]); delta = max(delta, abs(nw - ws[j])); ws[j] = nw
+        if delta < 1e-10:
+            break
+    w = np.zeros(N_FEAT); w[sub] = ws
+    b = mg.ybar
+    np.savez_compressed(out / "hdrmix300-lasso0.002-raw.npz", w=w, bias=b,
+                        mu=mg.mu, sd=mg.sd, space="raw", desc="hdrmix f0..f299")
+    vm = val_metrics(w, b, mg.mu, mg.sd, "raw")
+    nact = int((np.abs(w) > 1e-7).sum())
+    print(f"hdrmix300-lasso0.002 (act={nact}) bigval={vm['bigcodec_val']:+.4f} "
+          f"hdrval={vm['hdr_val']:+.4f} guard={abs(vm['konjnd_guard']):.4f}")
+    return 0
+
+
+def _load_head_rawspace(key: str, tau: float):
+    """Head -> raw-feature-space (v, c): pred = x·v + c."""
+    z = np.load(SCRATCH / "fits" / f"{key}.npz")
+    w = z["w"].astype(np.float64).copy()
+    if tau > 0:
+        w[np.abs(w) < tau] = 0.0
+    mu = z["mu"].astype(np.float64); sd = z["sd"].astype(np.float64)
+    v = w / sd
+    c = float(z["bias"]) - float(mu @ v)
+    return v, c
+
+
+def _srocc_fast(q: np.ndarray, ry: np.ndarray) -> float:
+    rq = np.empty(len(q)); rq[np.argsort(q, kind="stable")] = np.arange(len(q))
+    rq -= rq.mean(); d = float(np.sqrt((rq * rq).sum()))
+    return float((rq * ry).sum() / (d * np.linalg.norm(ry)))
+
+
+def cmd_ensemble(args) -> int:
+    """Convex blends over HEAD_POOL. alpha chosen ONLY on train-legal axes
+    (SEL_AXES); 4 pre-registered scalarizations; every winner is baked and
+    panel'd (report all)."""
+    K = len(HEAD_POOL)
+    heads = [_load_head_rawspace(k, t) for _, k, t in HEAD_POOL]
+    aliases = [a for a, _, _ in HEAD_POOL]
+
+    # Normalize each head's output scale on the anchor set (fixed reference).
+    az = np.load(SCRATCH / "val" / "anchor.npz")
+    A = az["raw"].astype(np.float64)
+    norm = []
+    for v, c in heads:
+        p = A @ v + c
+        m, s = float(p.mean()), float(p.std())
+        s = s if s > 1e-9 else 1.0
+        norm.append((m, s))
+    V = np.column_stack([v / s for (v, c), (m, s) in zip(heads, norm)])   # 372 x K
+    C = np.array([(c - m) / s for (v, c), (m, s) in zip(heads, norm)])    # K
+
+    # Selection predictions (deterministic stride subsample on bigcodec_val).
+    P, RY, ABS = {}, {}, {}
+    for name in SEL_AXES:
+        z = np.load(SCRATCH / "val" / f"{name}.npz")
+        X = z["raw"].astype(np.float64); y = z["y"].astype(np.float64)
+        if name == "bigcodec_val":
+            X, y = X[::7], y[::7]
+        P[name] = X @ V + C[None, :]
+        ry = np.empty(len(y)); ry[np.argsort(y, kind="stable")] = np.arange(len(y))
+        ry -= ry.mean()
+        RY[name] = ry
+        ABS[name] = name == "konjnd_guard"
+        print(f"  sel axis {name}: n={len(y)}")
+
+    def axes_of(alpha_idx, alpha):
+        out = {}
+        for name in SEL_AXES:
+            q = P[name][:, alpha_idx] @ alpha
+            r = _srocc_fast(q, RY[name])
+            out[name] = abs(r) if ABS[name] else r
+        return out
+
+    # Corner (pure-head) axis values -> per-axis [0,1] normalization.
+    corners = [axes_of([k], np.array([1.0])) for k in range(K)]
+    lo = {n: min(c[n] for c in corners) for n in SEL_AXES}
+    hi = {n: max(c[n] for c in corners) for n in SEL_AXES}
+
+    def nrm(vals):
+        return {n: (vals[n] - lo[n]) / max(hi[n] - lo[n], 1e-9) for n in SEL_AXES}
+
+    SCALARIZATIONS = {
+        "S1maximin": lambda z: min(z["cid22tr_sel"], z["bigcodec_val"], z["hdr_val"], z["konjnd_guard"]),
+        "S2triple":  lambda z: 0.35 * z["cid22tr_sel"] + 0.35 * z["konjnd_guard"] + 0.30 * z["hdr_val"],
+        "S3balance": lambda z: sum(z[n] for n in SEL_AXES) / len(SEL_AXES),
+        "S4cidlean": lambda z: 0.55 * z["cid22tr_sel"] + 0.25 * z["konjnd_guard"] + 0.20 * z["hdr_val"],
+    }
+    best = {s: (-1e9, None, None, None) for s in SCALARIZATIONS}
+
+    def consider(idx, alpha):
+        vals = axes_of(idx, alpha)
+        z = nrm(vals)
+        for s, f in SCALARIZATIONS.items():
+            sc = f(z)
+            if sc > best[s][0]:
+                best[s] = (sc, list(idx), alpha.copy(), vals)
+
+    import itertools
+    t0 = time.time()
+    n_comb = 0
+    for k in range(K):
+        consider([k], np.array([1.0])); n_comb += 1
+    for i, j in itertools.combinations(range(K), 2):
+        for a in np.arange(0.05, 0.951, 0.05):
+            consider([i, j], np.array([a, 1 - a])); n_comb += 1
+    for tri in itertools.combinations(range(K), 3):
+        for c1 in range(1, 9):
+            for c2 in range(1, 10 - c1):
+                a = np.array([c1, c2, 10 - c1 - c2]) / 10.0
+                consider(list(tri), a); n_comb += 1
+    for quad in itertools.combinations(range(K), 4):
+        for c1 in range(1, 8):
+            for c2 in range(1, 9 - c1):
+                for c3 in range(1, 10 - c1 - c2):
+                    a = np.array([c1, c2, c3, 10 - c1 - c2 - c3]) / 10.0
+                    consider(list(quad), a); n_comb += 1
+    print(f"searched {n_comb} alpha combos in {time.time()-t0:.1f}s")
+
+    # Pre-registered extras (added before ANY ensemble panel was run):
+    # S5: quality-axes-only blend over the pool WITHOUT pjt (the pjt head owns
+    #     the guard axis by construction, and the guard is a known weak
+    #     selector — S5 tests blending without it).
+    # P-line: fixed cid<->kon 2-head line at alpha {0.3, 0.5, 0.7} — a direct
+    #     probe of the CID22<->KonJND Pareto trade the triple gate asks about.
+    pjt_i = aliases.index("pjt")
+    best["S5noguard"] = (-1e9, None, None, None)
+    s5 = lambda z: 0.45 * z["cid22tr_sel"] + 0.20 * z["bigcodec_val"] + 0.20 * z["hdr_val"] + 0.15 * z["hdr_valmix"]
+    def consider5(idx, alpha):
+        if pjt_i in idx:
+            return
+        vals = axes_of(idx, alpha)
+        z = nrm(vals)
+        sc = s5(z)
+        if sc > best["S5noguard"][0]:
+            best["S5noguard"] = (sc, list(idx), alpha.copy(), vals)
+    for k in range(K):
+        consider5([k], np.array([1.0]))
+    for i, j in itertools.combinations(range(K), 2):
+        for a in np.arange(0.05, 0.951, 0.05):
+            consider5([i, j], np.array([a, 1 - a]))
+    for tri in itertools.combinations(range(K), 3):
+        for c1 in range(1, 9):
+            for c2 in range(1, 10 - c1):
+                consider5(list(tri), np.array([c1, c2, 10 - c1 - c2]) / 10.0)
+    ci, ki = aliases.index("cid"), aliases.index("kon")
+    for a in (0.3, 0.5, 0.7):
+        alpha = np.array([a, 1 - a])
+        best[f"Pline-cid{int(a*100)}"] = (0.0, [ci, ki], alpha, axes_of([ci, ki], alpha))
+
+    (SCRATCH / "fits").mkdir(exist_ok=True)
+    report = {}
+    for s, (sc, idx, alpha, vals) in best.items():
+        names = [aliases[i] for i in idx]
+        w_ens = V[:, idx] @ alpha
+        b_ens = float(C[idx] @ alpha)
+        key = f"ens-{s}"
+        np.savez_compressed(SCRATCH / "fits" / f"{key}.npz",
+                            w=w_ens, bias=b_ens, mu=np.zeros(N_FEAT),
+                            sd=np.ones(N_FEAT), space="raw",
+                            desc=f"{s}: " + "+".join(f"{n}:{a:.2f}" for n, a in zip(names, alpha)))
+        report[key] = {"score": sc, "heads": names, "alpha": [round(float(a), 3) for a in alpha],
+                       "axes": {k: round(v, 4) for k, v in vals.items()}}
+        print(f"{key:14s} -> {'+'.join(f'{n}:{a:.2f}' for n, a in zip(names, alpha)):40s} "
+              f"axes: " + " ".join(f"{n.split('_')[0]}={vals[n]:+.4f}" for n in SEL_AXES))
+    with open(SCRATCH / "fits" / "ensemble_report.json", "w") as f:
+        json.dump(report, f, indent=1)
+    return 0
+
+
+def cmd_cascade(args) -> int:
+    """2-stage linear cascade: BVLS base (KonJND-preserving) + sparse lasso
+    correction fit on the TRAIN residual (still closed-form/deterministic;
+    the sum is still one linear layer)."""
+    mg = MixGram("raw", MIXES_HDR["canonhdr15"])
+    z = np.load(SCRATCH / "fits" / "canonhdr15-bvls-raw.npz")
+    w1 = z["w"].astype(np.float64).copy()
+    w1[np.abs(w1) < 0.005] = 0.0     # the panel'd tau
+    c_res = mg.c - mg.G @ w1
+    Gn = mg.G / mg.W
+    d = Gn.diagonal().copy(); d[d < 1e-12] = 1e-12
+    for lam in (5e-4, 1e-3):
+        cn = c_res / mg.W
+        w2 = np.zeros(N_FEAT); Gw = np.zeros(N_FEAT)
+        for _ in range(200):
+            delta = 0.0
+            for j in range(N_FEAT):
+                rho = cn[j] - Gw[j] + d[j] * w2[j]
+                nw = np.sign(rho) * max(abs(rho) - lam, 0.0) / d[j]
+                if nw != w2[j]:
+                    Gw += Gn[:, j] * (nw - w2[j]); delta = max(delta, abs(nw - w2[j])); w2[j] = nw
+            if delta < 1e-10:
+                break
+        w = w1 + w2
+        b = float(z["bias"])
+        key = f"casc-bvlsbase-lasso{lam:g}"
+        np.savez_compressed(SCRATCH / "fits" / f"{key}.npz", w=w, bias=b,
+                            mu=z["mu"], sd=z["sd"], space="raw",
+                            desc=f"canonhdr15-bvls(tau.005) + lasso{lam} residual correction")
+        vm = val_metrics(w, b, z["mu"].astype(np.float64), z["sd"].astype(np.float64), "raw")
+        n2 = int((np.abs(w2) > 1e-9).sum())
+        print(f"{key:28s} corr_act={n2:3d} bigval={vm['bigcodec_val']:+.4f} "
+              f"hdrval={vm['hdr_val']:+.4f} guard={abs(vm['konjnd_guard']):.4f}")
+    return 0
+
+
+RESIDUAL_SETS = [
+    # (out_name, source_path, affine_from)  — val files reuse the TRAIN affine
+    ("bigcodec_traindigits_residual", PROBE / "bigcodec_traindigits_2026-07-02.parquet", None),
+    ("bigcodec_valdigits_residual", PROBE / "bigcodec_valdigits_2026-07-02.parquet", "bigcodec_traindigits_residual"),
+    ("hdr_zenjxl_v3_traindigits_residual", PROBE / "hdr_zenjxl_v3_traindigits_2026-07-03.parquet", None),
+    ("hdr_zenjxl_v3_valdigits_residual", PROBE / "hdr_zenjxl_v3_valdigits_2026-07-03.parquet", "hdr_zenjxl_v3_traindigits_residual"),
+]
+BASE_KEY, BASE_TAU = "hdrmix-lasso0.002-raw", 0.0
+
+
+def cmd_residual(args) -> int:
+    """Residual-stack corpora: target = human_score - (a*base_pred + b), with
+    (a, b) OLS-fit on the TRAIN file and reused for its val file. base = the
+    SDR pick (hdrmix-lasso0.002-raw tau0), applied EXACTLY as the f16 bake
+    stores it (f16-rounded weights, f32 scaler, f32 math)."""
+    import pyarrow as pa
+    outdir = SCRATCH / "residual"
+    outdir.mkdir(exist_ok=True)
+    z = np.load(SCRATCH / "fits" / f"{BASE_KEY}.npz")
+    w16 = z["w"].astype(np.float16).astype(np.float32)
+    mu32 = z["mu"].astype(np.float32); sd32 = z["sd"].astype(np.float32)
+    b32 = np.float32(z["bias"])
+    base_bake = SCRATCH / "bakes" / f"lp_{BASE_KEY}-tau0-f16.bin"
+    base_sha = hashlib.sha256(base_bake.read_bytes()).hexdigest()
+    print(f"base bake: {base_bake.name} sha256={base_sha}")
+
+    # Clamp the base pred to the anchor-observed domain (the dial spline's
+    # trusted raw range). Without this, the sparse HDR-fit head extrapolates
+    # wildly on OOD bigcodec rows (raw residuals reached +158 on valdigits and
+    # the outliers squashed the OLS slope to 0.17). The clamp is exactly
+    # replicable at runtime (two constants, recorded in the manifest).
+    az = np.load(SCRATCH / "val" / "anchor.npz")
+    pa_anchor = ((az["raw"].astype(np.float32) - mu32) / sd32 @ w16 + b32).astype(np.float64)
+    clamp_lo, clamp_hi = float(pa_anchor.min()), float(pa_anchor.max())
+    print(f"pred clamp domain (anchor min/max): [{clamp_lo:.4f}, {clamp_hi:.4f}]")
+
+    affines: dict[str, tuple[float, float]] = {}
+    manifest = {"base_bake": str(base_bake), "base_bake_sha256": base_sha,
+                "base_fit_key": BASE_KEY,
+                "pred_clamp": [clamp_lo, clamp_hi],
+                "definition":
+                "residual_target = human_score - clip01(a*clip(linear_pred, clamp_lo, clamp_hi) + b); "
+                "(a,b) OLS on the TRAIN file's clipped preds, reused for its val file; "
+                "clip01 bounds the composed base to [0,1] so residual_target is in [-1,1] "
+                "by construction (runtime composition: final = clip01(a*base+b) + residual_mlp)",
+                "files": {}}
+    for out_name, src, affine_from in RESIDUAL_SETS:
+        pf = pq.ParquetFile(src)
+        # pass 1: accumulate pred/target moments for the affine (train files)
+        if affine_from is None:
+            sp = sy = spp = spy = n = 0.0
+            for batch in pf.iter_batches(batch_size=131072, columns=FCOLS + ["human_score"]):
+                X = np.column_stack([batch[c].to_numpy(zero_copy_only=False).astype(np.float32) for c in FCOLS])
+                p = np.clip(((X - mu32) / sd32 @ w16 + b32).astype(np.float64), clamp_lo, clamp_hi)
+                y = batch["human_score"].to_numpy(zero_copy_only=False).astype(np.float64)
+                sp += p.sum(); sy += y.sum(); spp += (p * p).sum(); spy += (p * y).sum(); n += len(y)
+            varp = spp / n - (sp / n) ** 2
+            a = (spy / n - sp / n * sy / n) / max(varp, 1e-12)
+            b = sy / n - a * sp / n
+            affines[out_name] = (float(a), float(b))
+        else:
+            a, b = affines[affine_from]
+        # pass 2: stream-write with linear_pred + residual_target
+        pf = pq.ParquetFile(src)
+        out_path = outdir / f"{out_name}_2026-07-03.parquet"
+        writer = None
+        rmin, rmax, rows = np.inf, -np.inf, 0
+        for batch in pf.iter_batches(batch_size=131072):
+            t = pa.Table.from_batches([batch])
+            X = np.column_stack([t[c].to_numpy(zero_copy_only=False).astype(np.float32) for c in FCOLS])
+            p = np.clip(((X - mu32) / sd32 @ w16 + b32).astype(np.float64), clamp_lo, clamp_hi)
+            y = t["human_score"].to_numpy(zero_copy_only=False).astype(np.float64)
+            r = y - np.clip(a * p + b, 0.0, 1.0)
+            rmin = min(rmin, float(r.min())); rmax = max(rmax, float(r.max())); rows += len(r)
+            cols = {"ref_basename": t["ref_basename"], "human_score": t["human_score"],
+                    "linear_pred": pa.array(p), "residual_target": pa.array(r)}
+            for c in FCOLS:
+                cols[c] = t[c]
+            ot = pa.table(cols)
+            if writer is None:
+                meta = {b"residual_base_bake_sha256": base_sha.encode(),
+                        b"residual_affine_a": f"{a!r}".encode(),
+                        b"residual_affine_b": f"{b!r}".encode(),
+                        b"residual_source": str(src).encode()}
+                writer = pq.ParquetWriter(out_path, ot.schema.with_metadata(meta), compression="zstd")
+                ot = ot.replace_schema_metadata(meta)
+            writer.write_table(ot)
+        writer.close()
+        sha = hashlib.sha256()
+        with open(out_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                sha.update(chunk)
+        manifest["files"][out_path.name] = {
+            "rows": rows, "sha256": sha.hexdigest(), "affine_a": a, "affine_b": b,
+            "residual_range": [rmin, rmax], "source": str(src)}
+        print(f"{out_path.name}: rows={rows} a={a:.4f} b={b:+.4f} "
+              f"residual range [{rmin:+.4f}, {rmax:+.4f}] sha256={sha.hexdigest()}")
+    with open(outdir / "_MANIFEST.json", "w") as f:
+        json.dump(manifest, f, indent=1)
+    print(f"manifest: {outdir / '_MANIFEST.json'}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -474,8 +845,14 @@ def main() -> int:
     z = sub.add_parser("finalize")
     z.add_argument("--keys", required=True)
     z.add_argument("--taus", default="0")
+    sub.add_parser("poolfits")
+    sub.add_parser("ensemble")
+    sub.add_parser("cascade")
+    sub.add_parser("residual")
     args = ap.parse_args()
-    return {"gram": cmd_gram, "fit": cmd_fit, "finalize": cmd_finalize}[args.cmd](args)
+    return {"gram": cmd_gram, "fit": cmd_fit, "finalize": cmd_finalize,
+            "poolfits": cmd_poolfits, "ensemble": cmd_ensemble,
+            "cascade": cmd_cascade, "residual": cmd_residual}[args.cmd](args)
 
 
 if __name__ == "__main__":
