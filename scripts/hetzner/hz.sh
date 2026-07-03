@@ -112,8 +112,14 @@ while true; do
 done
 WATCH
     chmod +x "$W"
+    # pidfile discipline: kill the previous watcher by RECORDED pid — never by
+    # pattern match (pattern kills took out monitors and the watcher itself
+    # twice on 2026-07-03).
+    PIDF="$PROBE/autoretire_${NAME}.pid"
+    [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null
     nohup "$W" "$IP" "$NAME" "$IDLE_MIN" "$REPO" >> "$PROBE/autoretire_${NAME}.log" 2>&1 &
-    echo "autoretire watcher armed for $NAME ($IP, idle=${IDLE_MIN}m; veto: touch $PROBE/.box_hold)"
+    echo $! > "$PIDF"
+    echo "autoretire watcher armed for $NAME ($IP, idle=${IDLE_MIN}m, pid $(cat "$PIDF"); veto: touch $PROBE/.box_hold)"
     ;;
   retire)  # snapshot then delete — MANDATORY end-state for x86 big boxes
     NAME="${1:?name}"
