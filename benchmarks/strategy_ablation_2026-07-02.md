@@ -202,3 +202,20 @@ quantization (4k+ unique preds); no spline artifacts.
   (consistent with the 2026-05-26 G5 characterization); remaining unexplored
   levers: EXP_II interior-pivot triplets (data exists, model deferred),
   konjnd-scoped hard-pair mining (needs per-group frac plumbing).
+
+## Falsification audit (user challenge 2026-07-03: "misunderstandings or data errors?")
+
+- **kagg verdict RETRACTED — INVALID-AS-TESTED (scale mismatch, config-error
+  class).** The aggregation loss compares PINNED RAW output (mod.rs ~7620:
+  `pin_forward(y)` per-ref means) against RAW PJND targets (22.5-70), but on
+  the v47/t1dro recipe family the learned raw output spans only ~0.23 units
+  around 48 (dial-in-the-spline, decoded this session). The MSE gradient is
+  ~100x the signal scale → mutual destruction + α→1.0 — exactly what was
+  measured. v42-era recipes had raw outputs on the PJND scale, hence their
+  trade instead of destruction. Valid retest = compare on the DIAL output or
+  map targets into raw-band units (design change, queued). The wave-4
+  "FALSIFIED" row for kagg is superseded by this entry.
+- triplet-on-stack: downgraded to "replicate before trusting" (2 seeds, no
+  confirmed mechanism). listmle KonJND crater: stands (2-seed replicated +
+  mechanism; within-ladder retest queued). ema/strat washes: stand. hpdro
+  collapse: low-n caveat (1 event / 3 seeds).
