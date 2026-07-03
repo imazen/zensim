@@ -376,3 +376,20 @@ the suspected basin driver).
 collapsed cells (rc=9); pick among survivors by full panel. Collapse-RATE
 reduction = recipe-level work — first probe is w8 (cvvdp-mix target,
 attacking the suspected ssim2-shaping basin driver), in flight.
+
+## Full w6-vs-w7 table (all axes, fan complete)
+
+| axis | s17 OK | s7 COLL | s31 OK | s47 OK | s63 COLL |
+|---|---|---|---|---|---|
+| CID22-49 (w6 / w7) | 0.8439 / 0.8378 | 0.5753 / 0.4452 | 0.8398 / 0.8415 | 0.8416 / 0.8479 | 0.5420 / 0.5182 |
+| AIC-3 (w6 / w7) | 0.7695 / 0.7678 | 0.5276 / 0.4397 | 0.7660 / 0.7583 | 0.7692 / 0.7668 | 0.4823 / 0.4694 |
+| AIC-4 (w6 / w7) | 0.8807 / 0.8746 | 0.4696 / 0.3603 | 0.8838 / 0.8630 | 0.8809 / 0.8809 | 0.4692 / 0.3702 |
+| KonJND (w6 / w7) | 0.4481 / 0.3679 | 0.1221 / 0.1217 | 0.2848 / 0.3556 | 0.3511 / 0.3232 | 0.1786 / 0.2972 |
+| UPIQ (w6 / w7) | 0.6819 / 0.6867 | 0.6504 / 0.3803 | 0.6412 / 0.6641 | 0.6639 / 0.6608 | 0.6548 / 0.6086 |
+| hdr_val (w6 / w7) | 0.9030 / 0.8193 | 0.8848 / 0.8785 | 0.8957 / 0.8870 | 0.8971 / 0.7659 | 0.8819 / 0.8657 |
+| sel-val (w6 / w7) | 0.8357 / 0.5100 | 0.8347 / 0.4962 | 0.8361 / 0.4742 | 0.8319 / 0.5193 | 0.8349 / 0.4866 |
+
+Guard is quality-neutral on healthy seeds; w7-s17 UPIQ 0.6867 = best HDR
+bake yet. Wide fan (11 new seeds, user-approved scale-up) launched on a
+restored box — the runcells collapse gate produces the rate statistic
+automatically.
