@@ -453,3 +453,18 @@ pursued). Residual-stack corpora built+validated (3.1M rows, bounded
 residuals by construction; composition = clip01(a·base+b) + residual_mlp).
 NEXT: residual MLP (w10) behind w8; output-scale spline refits; methodology
 docs per ship pick.
+
+## w8 first seed: the mix target RE-ROLLS the basin dice (2026-07-03)
+
+w8_cvmix_s17 COLLAPSED (CID22 0.5753, KonJND 0.140, AIC-4 0.584, UPIQ
+0.635) — **seed 17 was healthy in BOTH w6 and w7**. Two findings:
+1. Target diversification (cvvdp-mix) does NOT stabilize — it changes WHICH
+   seeds collapse (basin = f(seed × recipe), not seed-intrinsic).
+2. **The collapsed basin is a shared functional ATTRACTOR**: w8_s17 and
+   w6_s7 are different weights (distinct sha256s) yet produce CID22
+   rank-identical to 4 decimals (0.5753). Collapse converges to nearly the
+   same wrong function regardless of where it starts.
+Strategic consequence: recipe-level target tweaks are dice re-rolls; the
+structural roads (linear ensembles — collapse-free by construction — and
+the residual stack with a deterministic base) are the forever-model path.
+w8_s7 completes the probe; w10 residual training queued.
