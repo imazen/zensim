@@ -393,3 +393,28 @@ Guard is quality-neutral on healthy seeds; w7-s17 UPIQ 0.6867 = best HDR
 bake yet. Wide fan (11 new seeds, user-approved scale-up) launched on a
 restored box — the runcells collapse gate produces the rate statistic
 automatically.
+
+## Wide fan (16 seeds) COMPLETE — rate + leaderboard (2026-07-03)
+
+**Collapse rate: 7/16 (43.75%)** (local: s7,s63; wide: s1,s13,s29,s53,s71 —
+all auto-flagged by the runcells gate with numbers in status.tsv; zero
+human triage). Preflight also caught a missing guard input in 13s
+(bootstrap now pins canonical val/).
+
+Healthy leaderboard (9 candidates, full panel):
+| seed | CID22 | AIC-4 | KonJND | UPIQ |
+|---|---|---|---|---|
+| **s101 ← B v3 candidate** | **0.8639** | **0.8861** | 0.3524 | 0.6798 |
+| s23 | 0.8595 | 0.8759 | 0.3032 | 0.6723 |
+| s3 | 0.8541 | 0.8806 | 0.2945 | 0.6873 |
+| s47 | 0.8479 | 0.8809 | 0.3232 | 0.6608 |
+| s5 | 0.8454 | 0.8612 | 0.3493 | 0.6756 |
+| s11 | 0.8424 | 0.8829 | 0.2769 | 0.6592 |
+| s41 | 0.8418 | 0.8795 | 0.4197 | 0.6725 |
+| s31 | 0.8415 | 0.8630 | 0.3556 | 0.6641 |
+| s17 | 0.8378 | 0.8746 | 0.3679 | 0.6867 |
+
+s101 reaches CID22 parity with Profile A (0.8639 vs 0.8657) WITH HDR
+capability (UPIQ 0.68 vs A's 0.646). Fan economics: 11 remote cells ≈ 1
+box-hour, autoretired at uptime 47m. The 43.75% rate is the number w8
+(cvvdp-mix, training now) must move.
