@@ -435,3 +435,21 @@ for B) — real recipe cost, not eval artifact; B adds KonJND/UPIQ/HDR.
 Caveat (user-spotted): B faced a 16-seed stability audit, t1dro51 only 5 —
 "43.75% vs 0%" is width-confounded. CONTROL QUEUED: t1dro51 wide fan
 (same 11 seeds, same box pattern) to attribute the collapse rate.
+
+## Ensemble frontier results + ship-shape (2026-07-03 late)
+
+Agent round 2 (commit ee850a95): **CID22 record 0.8793** (ens-S5noguard,
+1.1 KB); **ens-Pline-cid80 (823 BYTES) beats shipped A on 7/9 axes**
+(CID22 0.8733, KonJND 0.5439 vs 0.4185) and **PASSES the full dial panel**
+(mono 0.9711, inversions 2.9%, 0 dead zones, G1 ✓ — note: dial p95=321.8,
+output-scale spline needs a [0,100] refit before any ship; rank unaffected).
+Triple gate 2/3 (UPIQ raw-blend ceiling ~0.688) — RESOLVED AT SYSTEM LEVEL:
+profiles already route HDR separately, so ship-shape = per-domain picks
+(SDR: cid80/S5 ensemble; HDR: shaped head UPIQ 0.7313; PJND sibling:
+BVLS 0.67). Non-linear CID22↔KonJND trade in our favor (BVLS head breaks
+near-threshold ties). KonJND 0.7556 shown REACHABLE (pjt-blend) — above the
+falsified G5 floor — at unacceptable cross-corpus cost (recorded, not
+pursued). Residual-stack corpora built+validated (3.1M rows, bounded
+residuals by construction; composition = clip01(a·base+b) + residual_mlp).
+NEXT: residual MLP (w10) behind w8; output-scale spline refits; methodology
+docs per ship pick.
