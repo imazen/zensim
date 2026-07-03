@@ -289,3 +289,26 @@ fleets launched (v3june 4 + v3hq 6 cx boxes) + UPIQ local. v2
 - **Stability: 1/2 seeds SDR-collapsed** (s7; hdr_val fine — the collapse is
   SDR-side). Seed fan s31/47/63 launched; selection remains held-out-val.
 - Consistency harness green on the PU path (identity + rank).
+
+## B v3 seed fan COMPLETE — selection-blindness discovered (2026-07-03)
+
+| seed | CID22 | KonJND | UPIQ | best-val |
+|---|---|---|---|---|
+| s17 | 0.8439 | 0.4481 | 0.6819 | 0.8357 |
+| s7 | **0.5753 COLLAPSE** | 0.1221 | 0.6504 | 0.8347 |
+| s31 | 0.8398 | 0.2848 | 0.6412 | 0.8361 |
+| s47 | 0.8416 | 0.3511 | 0.6639 | 0.8319 |
+| s63 | **0.5420 COLLAPSE** | 0.1786 | 0.6548 | 0.8349 |
+
+- **2/5 SDR-collapse rate on the v3 recipe**, and — the load-bearing finding —
+  **the held-out-val selection metric CANNOT distinguish collapsed from
+  healthy seeds** (Δ ≤ 0.0014 across all five). The val geomean's components
+  don't measure the CID22/KonJND-shaped anchor structure that collapses.
+  This extends the kb25/s7 lesson: a val group is only a guard if it spans
+  the failure mode. NEXT WAVE MUST: add an anchor-shaped component to the
+  selection geomean (audit which groups compose val(geomean3) first) before
+  any further v3 recipe iteration; until then, seed selection for B v3 is
+  by full panel, not by val metric.
+- B v3 candidate by full panel: **s17** (UPIQ 0.6819, KonJND 0.4481 > A,
+  CID22 0.8439). Healthy-seed SDR is tight (~0.84); HDR-side metrics carry
+  the seed variance.
