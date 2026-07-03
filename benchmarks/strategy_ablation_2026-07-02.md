@@ -312,3 +312,25 @@ fleets launched (v3june 4 + v3hq 6 cx boxes) + UPIQ local. v2
 - B v3 candidate by full panel: **s17** (UPIQ 0.6819, KonJND 0.4481 > A,
   CID22 0.8439). Healthy-seed SDR is tight (~0.84); HDR-side metrics carry
   the seed variance.
+
+## Collapse instrumentation (2026-07-03, user directive)
+
+**Audit — no training-val axis sees the collapse.** Per-group val SROCC at
+each seed's SELECTED epoch (w6 fan): every gap between healthy and collapsed
+is ≤0.016, and kadid/tid INVERT (collapsed seeds score higher). Root cause:
+all val targets are metric-anchored (cid22_train = ssim2-anchored); the
+collapsed bakes remain excellent metric predictors — what collapses is the
+relation to HUMAN anchors (verdict CID22-MOS 0.84→0.54, AIC-3-JND, KonJND-
+PJND all crater together). The ssim2-shaped-surface trap as an instability.
+
+**Fix, verified on labeled data (2 collapsed + 3 healthy bakes):**
+1. `konjnd_anchor` val-only guard group (canonical val/konjnd.parquet, mean
+   PJND, human-derived, training-legal via konjnd_dense semi-status;
+   val_w=4.0): per-bake |SROCC| separates healthy {0.285-0.448} from
+   collapsed {0.122-0.179}, margin +0.106 — moves the selection mean by
+   ~0.06 vs the 0.001 healthy jitter. w7 5-seed fan retraining under it.
+2. runcells POST-TRAIN COLLAPSE GATE: auto bake_verdict floors (CID22<0.75
+   or KonJND<0.20 → rc=9 + `<cell>-COLLAPSED` status row) — every future
+   cell self-reports, fleet or local, no human in the loop.
+3. CSF-feature direction claims CORRECTED (falsified v39-era AIC-3 spike;
+   task deleted): the cvvdp gap is calibration + corpus, not CSF features.
