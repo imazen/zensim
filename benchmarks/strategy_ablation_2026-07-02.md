@@ -249,3 +249,24 @@ dedup-by-content, LSD splits (train 3,420 / val 1,800 / test held).
 - Pre-registered remaining gates: G-HDR-SDR-CONSISTENCY (SDR-range content
   through HDR path == SDR path; harness queued in zenmetrics), multi-seed
   stability (s7/s31 launched), HDR dial continuity, UPIQ ≥ 0.694.
+
+## Profile B v1 multi-seed + UPIQ + the v3 pivot (2026-07-03)
+
+Multi-seed hdrmix: hdr_val 0.9694/0.9712/0.9694 (s17/s7/s31, PLCC ~0.954,
+zero collapses). SDR panel: s17 0.8544 / s7 0.8470 (parity) but **s31 CID22
+0.7976** (−0.073 vs its SDR base) — G-HDR-SDR-PANEL is seed-dependent;
+held-out-val selection picks s17 as the B v1 candidate.
+
+UPIQ-HDR (within-harness, shell features → bakes): B v1 0.6546, SDR-bake
+0.6594, A 0.6459 — vs cvvdp 0.758 / iwssim-HDR 0.808 / ssim2-integrated
+0.704. The documented ~0.05 u8-shell penalty reproduces at bake level →
+**the shell features are the UPIQ bottleneck, not training.**
+
+v3 pivot (docs-were-stale dig, user-directed): zensim's PU-linear path
+already runs the FULL extended+iw feature engine (shared process_scale_bands;
+only the zenmetrics feature branch + registry doc lagged). Landed:
+`Zensim::compute_pu_linear_extended_features` (width-parity + identity
+tests) + `score-pairs --hdr-features-pu-linear` (zenmetrics 6f591dd5) +
+fleet BIN_KEY/EXTRA_ARGS params + merge_v3_shards.py. v3 re-extraction
+fleets launched (v3june 4 + v3hq 6 cx boxes) + UPIQ local. v2
+(anchored shell) is OBSOLETE — superseded by v3 before implementation.
