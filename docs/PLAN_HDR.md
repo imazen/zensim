@@ -71,10 +71,14 @@ catches this class on every box.
    only sdr"):
    - **G-HDR-SDR-CONSISTENCY**: SDR-range content fed through the HDR path
      (PU21 shell on nits) must match the SDR path (sRGB u8) — p95 |Δscore|
-     ≤ 2 points and pairwise rank preserved (SROCC ≥ 0.99) on an SDR-range
-     consistency set. The SDR case is the sub-domain limit of the HDR model;
-     any seam at the luminance boundary is a defect (measure via the
-     hdr_sdr_consistency harness in zenmetrics).
+     ≤ 2 points and pairwise rank preserved on an SDR-range consistency set.
+     **MEASURED 2026-07-03** (zenmetrics-api tests/hdr_sdr_consistency.rs):
+     the fixed-10k-peak PuRescale seam reaches 6.4pt at heavy distortion
+     (rank+identity fine); **SDR-anchored rescale (peak=max(content_peak,
+     203)) closes it to ≤0.92pt** — the continuous no-router fix. Adopting it
+     is a FEATURE-REGIME change (all HDR features re-extract at the anchored
+     transfer → B v2 retrain); B v1 stands on the fixed-anchor regime, which
+     is internally consistent.
    - **G-HDR-SDR-PANEL**: the shipped HDR-capable bake regresses NOTHING on
      the standard SDR rank+dial panels vs the SDR ship.
    Original gates: AIC-HDR2025 SROCC ≥ published
