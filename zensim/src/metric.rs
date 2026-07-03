@@ -1623,6 +1623,68 @@ impl Zensim {
         Ok(result.with_profile(self.profile))
     }
 
+    /// Extended-features variant of
+    /// [`compute_pu_linear`](Self::compute_pu_linear) — same absolute-nits
+    /// PU-XYB path, with the extended (masked) feature block forced on
+    /// exactly like [`compute_extended_features`](Self::compute_extended_features)
+    /// does for the sRGB path. The per-scale engine is shared
+    /// (`process_scale_bands`), so the emitted feature vector has the same
+    /// layout/width as the sRGB extraction under the same profile params
+    /// (372 in the `with-iw` regime). This is the transfer-invariant HDR
+    /// feature path: no u8 shell, no display-peak anchor at the input.
+    pub fn compute_pu_linear_extended_features(
+        &self,
+        ref_rgb: &[f32],
+        dist_rgb: &[f32],
+        width: usize,
+        height: usize,
+        ref_stride: usize,
+        dist_stride: usize,
+    ) -> Result<ZensimResult, ZensimError> {
+        let params = self.profile.params();
+        if width == 0 || height == 0 {
+            return Err(ZensimError::ImageTooSmall);
+        }
+        check_within_max_pixels(width, height, self.max_pixels)?;
+        let min_stride = width.checked_mul(3).ok_or(ZensimError::ImageTooLarge)?;
+        for (slice, stride) in [(ref_rgb, ref_stride), (dist_rgb, dist_stride)] {
+            if stride < min_stride {
+                return Err(ZensimError::InvalidStride);
+            }
+            let required = (height - 1)
+                .checked_mul(stride)
+                .and_then(|v| v.checked_add(min_stride))
+                .ok_or(ZensimError::ImageTooLarge)?;
+            if slice.len() < required {
+                return Err(ZensimError::InvalidDataLength);
+            }
+        }
+        let mut config = config_from_params(params, self.parallel);
+        config.extended_features = true;
+        let identical = (0..height).all(|y| {
+            ref_rgb[y * ref_stride..y * ref_stride + 3 * width]
+                == dist_rgb[y * dist_stride..y * dist_stride + 3 * width]
+        });
+        let mut result = if identical {
+            identical_result(&config)
+        } else {
+            let (stats, mean_offset) =
+                crate::streaming::compute_multiscale_stats_pu_linear_interleaved(
+                    ref_rgb,
+                    dist_rgb,
+                    width,
+                    height,
+                    ref_stride,
+                    dist_stride,
+                    &config,
+                    params.weights,
+                );
+            combine_scores(&stats, params.weights, &config, mean_offset)
+        };
+        apply_mlp_scoring(&mut result, params, width as u32, height as u32)?;
+        Ok(result.with_profile(self.profile))
+    }
+
     /// Planar variant of [`compute_pu_linear`](Self::compute_pu_linear): the
     /// same PU21 HDR scoring with each image supplied as `[R, G, B]` planes,
     /// each ≥ `stride * height` f32 (`stride` in f32 elements per plane row,
@@ -4445,5 +4507,60 @@ mod tests {
             "confidence must be finite even when an internal score is NaN, got {}",
             cls.confidence
         );
+    }
+}
+
+#[cfg(test)]
+mod pu_linear_extended_tests {
+    use super::*;
+    use crate::{PixelFormat, StridedBytes};
+
+    #[test]
+    fn pu_linear_extended_features_width_matches_srgb_extraction() {
+        let (w, h) = (64usize, 64usize);
+        let mut refe = vec![0u8; w * h * 3];
+        for (i, v) in refe.iter_mut().enumerate() {
+            *v = ((i * 37) % 251) as u8;
+        }
+        let mut dist = refe.clone();
+        for v in dist.iter_mut().step_by(7) {
+            *v = v.saturating_sub(12);
+        }
+        let z = Zensim::new(ZensimProfile::latest_preview());
+        let src =
+            StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+        let dst =
+            StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+        let srgb = z.compute_extended_features(&src, &dst).unwrap();
+
+        let to_nits = |px: &[u8]| -> Vec<f32> {
+            px.iter()
+                .map(|&v| {
+                    let x = v as f32 / 255.0;
+                    let lin = if x <= 0.04045 {
+                        x / 12.92
+                    } else {
+                        ((x + 0.055) / 1.055).powf(2.4)
+                    };
+                    lin * 203.0
+                })
+                .collect()
+        };
+        let rn = to_nits(&refe);
+        let dn = to_nits(&dist);
+        let pu = z
+            .compute_pu_linear_extended_features(&rn, &dn, w, h, w * 3, w * 3)
+            .unwrap();
+        assert_eq!(
+            srgb.features().len(),
+            pu.features().len(),
+            "feature layout must match across paths"
+        );
+        assert!(pu.features().len() >= 300, "extended block missing");
+        // Identical-input contract holds on the PU path too.
+        let ident = z
+            .compute_pu_linear_extended_features(&rn, &rn, w, h, w * 3, w * 3)
+            .unwrap();
+        assert!((ident.score() - 100.0).abs() < 1e-9);
     }
 }
