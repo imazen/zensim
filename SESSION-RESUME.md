@@ -124,6 +124,29 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
   variance; KonFiG-as-group inconclusive at this spread.
 - NOT yet in this wave: σ-MSE ablation (needs an mm6 group in the recipe).
 
+## BREAKTHROUGH + graduation (2026-07-03 ~00:15Z — check FIRST on resume)
+
+- **`w3_hponly51_s7` = CID22 0.8767 — FIRST cell above Profile-A (0.8657)**,
+  dial G1 1.00 / mono 0.975. Recipe: v51 base (pre-dedup corpus) +
+  `hard_pair_frac=0.5, hard_pair_max_delta=0.05`, trainer `78ec8e61`.
+  KonJND gate NOT yet passed on that seed (0.318 < A's 0.4185).
+- **Strategy campaign verdicts** (benchmarks/strategy_ablation_2026-07-02.md):
+  hardpair = single best lever (+0.13, dial-repairing, 5 seeds no collapse);
+  t1dro = tightest + best KonJND; hpdro rejected (non-additive collapse);
+  listmle craters KonJND as configured; ema/strat washes; triplet mild
+  (+ flat-dial trap at one seed — G1=0.00 masked by mono 0.996; always read
+  BOTH dial numbers). Corpus effect: v51 dups act as regularization (+0.02
+  over dedup corpus).
+- **RUNNING: graduation seeds** (hponly51 + t1dro51 × s31/47/63, systemd unit
+  `wave3c` on 159.69.55.206). On completion: 5-seed stats → family winner →
+  full Mohammadi panel + SDR25 scoreboard (sdr25_eval_pairs.tsv) + KonJND
+  gate vs A → bake_report (auto on hz.sh pull) → RETIRE THE BOX (hz.sh
+  retire zen-train-1).
+- cx fleet: REAPED (0 boxes). Wave-1 cross-machine: 16/18 byte-identical;
+  2 divergent = one AVX-512-tier box (ISA reduction order, documented).
+- Next levers if KonJND gate blocks: hardpair delta/frac sweep; t1dro51
+  (better KonJND family); hard-pair mining ON konjnd-dense group
+  specifically; triplet weight sweep (its KonJND was neutral-positive).
 ## Older state
 
 Everything before 2026-06-30 (v47 ship history 2026-05-27, #33 Approach-B,
