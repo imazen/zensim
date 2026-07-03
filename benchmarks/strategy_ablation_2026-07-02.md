@@ -347,3 +347,32 @@ REJECTION layer (fires decisively: 0.4452 < 0.75 → rc=9). Operating policy:
 seed-fan + auto-reject; collapse-rate REDUCTION is a recipe-stability
 question (first candidate: the w8 cvvdp-mix target, since ssim2-shaping is
 the suspected basin driver).
+
+## w7 guarded fan COMPLETE — instrumentation verdict (2026-07-03)
+
+| seed | w6 CID22 | w7 CID22 | w7 KonJND | w7 sel-val |
+|---|---|---|---|---|
+| s17 | 0.8439 | 0.8378 | 0.3679 | 0.5100 |
+| s7 | 0.5753 C | **0.4452 C** | 0.1217 | 0.4962 |
+| s31 | 0.8398 | 0.8415 | 0.3556 | 0.4742 |
+| s47 | 0.8416 | 0.8479 | 0.3232 | 0.5193 |
+| s63 | 0.5420 C | **0.5182 C** | 0.2972 | 0.4866 |
+
+1. **Basins are SEED-DETERMINISTIC**: the same 2/5 seeds collapse in both
+   w6 (no guard) and w7 (guard) — initialization decides the basin;
+   reproducible, not run-noise.
+2. **Selection-steering falsified** (no healthy epoch exists on a collapsed
+   trajectory) AND **cross-seed selection-ranking falsified** (healthy s31
+   0.4742 < both collapsed seeds). The guard group in selection is neutral-
+   to-mildly-useful in-training but is NOT a seed discriminator.
+3. **The rejection layer is the instrument that works**: runcells post-train
+   verdict gate fires on both collapsed seeds via the CID22<0.75 floor
+   (note: s63's KonJND 0.297 is above the 0.20 floor — CID22 is the
+   load-bearing floor; the OR-condition stands).
+4. Healthy-seed quality under the guard: CID22 unchanged (~0.842), KonJND
+   ~equal on average. The guard costs nothing.
+
+**Operating policy (final)**: train seed fans; the gate auto-rejects
+collapsed cells (rc=9); pick among survivors by full panel. Collapse-RATE
+reduction = recipe-level work — first probe is w8 (cvvdp-mix target,
+attacking the suspected ssim2-shaping basin driver), in flight.
