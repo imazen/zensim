@@ -158,6 +158,18 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
   interior-pivot triplet model; within-ladder listwise; dup-aware sampling.
 - Infra: autoretire is billing-aware (retires at min>=45 of the paid hour)
   with pidfile discipline; NEVER pattern-kill watchers/monitors.
+- **Profile B (HDR) state 2026-07-03:** v1 = w5_hdrmix_s17 (hdr_val 0.969
+  stable across 3 seeds; SDR parity at s17/s7, s31 pays −0.07 CID22 —
+  held-out-val selection applies). UPIQ shows the u8-shell feature ceiling
+  (~0.65 vs cvvdp 0.758/iwssim-HDR 0.808). **v3 = PU-linear features**
+  (Zensim::compute_pu_linear_extended_features + zenmetrics
+  --hdr-features-pu-linear, both landed+tested): re-extraction fleets
+  v3june/v3hq + UPIQ ran overnight → on completion: merge_v3_shards.py →
+  build_hdr_train_parquets.py (point at v3 datagen dirs) → retrain w5 →
+  UPIQ panel + consistency harness (PU-linear variant) + HDR dial grid.
+  v2 (anchored shell) OBSOLETE. REAP the hdrsf-* fleets when done (no
+  autoretire on those). Docs: PLAN_HDR.md + benchmarks/strategy_ablation
+  §Profile B; memory: project-profile-b-hdr.
 - cx fleet: REAPED (0 boxes). Wave-1 cross-machine: 16/18 byte-identical;
   2 divergent = one AVX-512-tier box (ISA reduction order, documented).
 - Next levers if KonJND gate blocks: hardpair delta/frac sweep; t1dro51
