@@ -152,6 +152,8 @@ pub struct ManifestConfig {
     pub group_eval_cap: Option<usize>,
 
     /// STRATEGY-2026-07-02 toggles (all optional; 0/absent = off).
+    pub konjnd_aggregation_weight: Option<f64>,
+    pub konjnd_aggregation_step_p: Option<f64>,
     pub ema_decay: Option<f64>,
     pub hard_pair_frac: Option<f64>,
     pub hard_pair_max_delta: Option<f64>,
@@ -273,6 +275,8 @@ struct RawTraining {
     qat_fine_tune_epochs: Option<usize>,
     qat_tau: Option<f64>,
     group_eval_cap: Option<usize>,
+    konjnd_aggregation_weight: Option<f64>,
+    konjnd_aggregation_step_p: Option<f64>,
     ema_decay: Option<f64>,
     hard_pair_frac: Option<f64>,
     hard_pair_max_delta: Option<f64>,
@@ -518,6 +522,8 @@ pub fn parse_manifest_str(text: &str, path: &Path) -> Result<ManifestConfig, Man
         cfg.qat_fine_tune_epochs = t.qat_fine_tune_epochs;
         cfg.qat_tau = t.qat_tau;
         cfg.group_eval_cap = t.group_eval_cap;
+        cfg.konjnd_aggregation_weight = t.konjnd_aggregation_weight;
+        cfg.konjnd_aggregation_step_p = t.konjnd_aggregation_step_p;
         cfg.ema_decay = t.ema_decay;
         cfg.hard_pair_frac = t.hard_pair_frac;
         cfg.hard_pair_max_delta = t.hard_pair_max_delta;
