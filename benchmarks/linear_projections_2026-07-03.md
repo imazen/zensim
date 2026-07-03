@@ -579,3 +579,13 @@ All four validated with
 
 No new defects were introduced by the derivation; full log at
 `linear-probe/residual_validate.log`.
+
+## Attribution (2026-07-03, from the 41-bake grid)
+
+**Driver = the cvvdp-mix TARGET** (same corpus ssim2→mix = +0.039 CID22;
+0.8764 vs 0.8378; old canonical tops 0.848). NOT preprocessing (raw beats
+shaped on SDR; tau/f16 free) and not the corpus alone. KonJND is
+FAMILY-driven (BVLS sign-mask 0.60-0.67 corpus-insensitive). 4-way
+cross-metric page: /mnt/v/output/zensim/reports/2026-07-03_linear_vs_all/
+(linear-cid80 beats A on all rows + beats ssim2 on KonJND; ssim2 keeps
+CID22/AIC-3; cvvdp keeps UPIQ 0.758 vs our HDR linear 0.7313).
