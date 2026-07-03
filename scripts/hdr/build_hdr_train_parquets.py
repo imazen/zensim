@@ -72,11 +72,19 @@ for d in [a.datagen] + a.extra_datagen:
     scores = load_scores(d)
     F = np.column_stack([np.asarray(t[c], dtype=float) for c in fcols])
     zs = np.asarray(t["zensim_score"], dtype=float)
+    seen_content = set()
     for i, k in enumerate(key(t)):
         sc = scores.get(k)
         if not sc or sc[0] is None:
             n_miss_scores += 1
             continue
+        # dedup-by-content (DATA_SPLITS policy): zenjxl --hdr floors q<15, so
+        # q5==q15 byte-identical on every rendition (verified 2026-07-03,
+        # 1,140/7,980 cells). Identical features+target = zero information.
+        ck = (k[0], hash(F[i].tobytes()), sc[0])
+        if ck in seen_content:
+            continue
+        seen_content.add(ck)
         rows["ref_basename"].append(k[0])
         rows["human_score"].append(min(max(sc[0] / 100.0, 0.0), 1.0))
         rows["score_cvvdp"].append(sc[1] if sc[1] is not None else float("nan"))
@@ -103,5 +111,5 @@ for name, want in (("train", "train"), ("val", "val")):
 
 rc = subprocess.run([sys.executable,
                      os.path.join(os.path.dirname(__file__), "..", "v_next", "validate_parquet.py"),
-                     out["train"][0], out["val"][0], "--kind", "train"]).returncode
+                     out["train"][0], out["val"][0], "--kind", "train", "--allow-const-cols", "2"]).returncode
 sys.exit(rc)

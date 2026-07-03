@@ -44,7 +44,7 @@ def featcols(names):
 
 def validate(path, kind="train", expect_rows=None, expect_sha=None,
              target_range=(-0.001, 1.001), target_col="human_score", split_rule=None,
-             allow_dup_rate=0.01):
+             allow_dup_rate=0.01, contract=None):
     print(f"== {path} (kind={kind}) ==")
     try:
         md = pq.read_metadata(path)
@@ -103,7 +103,9 @@ def validate(path, kind="train", expect_rows=None, expect_sha=None,
         lo, hi = target_range
         check(lo <= tmin and tmax <= hi, "C5b", f"target range [{tmin:.4f}, {tmax:.4f}] within [{lo}, {hi}]")
     nconst = int(const_candidates.sum()) if const_candidates is not None else -1
-    check(nconst == 0, "C6", f"all-constant feature cols (first 64 sampled): {nconst}")
+    allow_const = int(contract.get("allow_const_cols", 0)) if contract else 0
+    check(nconst <= allow_const, "C6",
+          f"all-constant feature cols (first 64 sampled): {nconst} (allowed: {allow_const})")
     if expect_rows is not None:
         check(md.num_rows == int(expect_rows), "C7", f"rows {md.num_rows:,} == expected {int(expect_rows):,}")
     if expect_sha:
@@ -129,6 +131,8 @@ def main():
     ap.add_argument("--target-range", default="-0.001,1.001")
     ap.add_argument("--target-col", default="human_score")
     ap.add_argument("--split-rule")
+    ap.add_argument("--allow-const-cols", type=int, default=0,
+                    help="C6 allowance for corpus-property constant features (e.g. HDR PU21: f25/f64 always 0)")
     ap.add_argument("--contracts", help="JSON sidecar {basename: {target_range, allow_dup_rate}} of declared per-file deviations")
     a = ap.parse_args()
     tr = tuple(float(x) for x in a.target_range.split(","))
@@ -145,21 +149,25 @@ def main():
                 continue
             # per-input contract keys (optional, declared in the manifest):
             #   target_range = [lo, hi]   validate_kind = "grid"|"eval"|"train"
+            #   allow_const_cols = 2      (corpus-property constant features, e.g. HDR PU21 f25/f64)
             #   target_column = "..."     allow_dup_rate = 0.30
             validate(p, kind=inp.get("validate_kind", "train"),
                      expect_rows=inp.get("rows"), expect_sha=inp.get("sha256"),
                      target_range=tuple(inp.get("target_range", tr)),
                      target_col=inp.get("target_column", a.target_col),
-                     allow_dup_rate=inp.get("allow_dup_rate", 0.01))
+                     allow_dup_rate=inp.get("allow_dup_rate", 0.01),
+                     contract=inp)
     contracts = {}
     if a.contracts and os.path.exists(a.contracts):
         import json
         contracts = json.load(open(a.contracts))
     for f in a.files:
         c = contracts.get(os.path.basename(f), {})
+        c.setdefault("allow_const_cols", a.allow_const_cols)
         validate(f, kind=a.kind, expect_rows=a.expect_rows, expect_sha=a.expect_sha,
                  target_range=tuple(c.get("target_range", tr)), target_col=a.target_col,
-                 split_rule=a.split_rule, allow_dup_rate=c.get("allow_dup_rate", 0.01))
+                 split_rule=a.split_rule, allow_dup_rate=c.get("allow_dup_rate", 0.01),
+                 contract=c)
     if FAIL:
         print(f"\nVALIDATION FAILED: {sorted(set(FAIL))}")
         sys.exit(1)
