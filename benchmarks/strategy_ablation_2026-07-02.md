@@ -167,3 +167,18 @@ ssim2 charts. Visual proof:
 
 ssim2 now has its own standalone page in the viewer (same format/corpora,
 KADID/TID omitted as in-sample): `2026-07-03_ssim2_baseline`.
+
+## Ridge investigation (follow-up to banding) — NOT spline artifacts
+
+Density ridges in the prediction axis were tested against each bake's PCHIP
+dial-spline knot outputs (decoded from `zentrain.output_calibration_spline`:
+18 (raw_x, dial_y) pairs; raw axis spans only 47.95..48.18 — the dial does
+live in the spline) with a 2000-draw permutation null: mean ridge→knot
+distance 1.58 vs null 1.39, p=0.75 (candidate) / 1.62 vs 1.41, p=0.70 (A) —
+**no knot alignment**. Decisive cross-check: two independently trained models
+place ridges at near-identical score positions (≈59.5/60.1, 63.9/64.2, ~72,
+~76-77) ⇒ the ridges are CORPUS structure — CID22's fixed per-codec quality
+ladders cluster true quality, and any accurate metric reproduces those
+clusters. Full scatter-anatomy: horizontal bands = MCOS quantization (542
+distinct values/4292); vertical ridges = quality-ladder clustering; no output
+quantization (4k+ unique preds); no spline artifacts.
