@@ -37,8 +37,10 @@ echo "[boot] trainer built at $(git rev-parse HEAD)"
 
 # 3. pull data from R2 (Hetzner<->Cloudflare is fast; R2 egress free)
 export S5="s5cmd --endpoint-url $R2_ENDPOINT"
-mkdir -p /data/{canonical-2026-05-21/train,canonical-2026-06-27,kadis,evalfeat,grids,out}
+mkdir -p /data/{canonical-2026-05-21/train,canonical-2026-05-21/val,canonical-2026-06-27,kadis,evalfeat,grids,out}
 $S5 sync "s3://zentrain/canonical-2026-05-21/train/*" /data/canonical-2026-05-21/train/
+# val/ carries the konjnd_anchor collapse-guard input (w7+ recipes)
+$S5 sync "s3://zentrain/canonical-2026-05-21/val/*" /data/canonical-2026-05-21/val/
 # parquets ONLY — the encodes/ prefix is millions of objects (runaway 2026-07-02)
 for ds in zenjpeg_lossy zenwebp_lossy zenwebp_lossless zenpng_lossless zenjxl_lossy zenjxl_lossless zenavif_lossy; do
   mkdir -p /data/canonical-2026-06-27/$ds
