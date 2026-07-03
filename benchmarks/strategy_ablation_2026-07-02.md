@@ -136,3 +136,20 @@ value-recovered permutation). Scoreboard tooling should join on echoed keys.
 
 Recipe of record (t1dro51): v51 base + ema_decay=0.9, hard_pair_frac=0.5,
 hard_pair_max_delta=0.05, stratified_bands=10, dro_eta=0.5, trainer 78ec8e61.
+
+## Three-way head-to-head (t1dro51_s31 vs Profile-A vs ssim2, per-pair, 2026-07-03)
+
+Report: /mnt/v/output/zensim/reports/2026-07-03_compare_t1dro51_s31 (viewer
+http://172.23.240.1:3300/zensim/reports/). ssim2 scored per-pair fresh via
+`zenmetrics batch` (CID22 sanity: 0.8894 = its known number; A = 0.8657 exact).
+
+| corpus | t1dro51_s31 | ProfileA | ssim2 |
+|---|---|---|---|
+| CID22-49 | 0.8708 | 0.8657 | **0.8894** |
+| AIC-3 | **0.8013** | 0.7680 | 0.7965 |
+| SDR25 | **0.9694** | 0.9036 | 0.9580 |
+| KonJND | 0.3109 | 0.4185 | **0.4784** |
+
+Candidate > ssim2 on 2/3 compression T0 holdouts (AIC-3, SDR25); ssim2 keeps
+CID22-49 (+0.019) and KonJND. Candidate > A on 3/4. Tool:
+scripts/v_next/metric_compare_report.py (ssim2 per-pair TSVs in the probe dir).
