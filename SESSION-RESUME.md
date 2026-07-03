@@ -146,12 +146,18 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
   ema=0.9 hard_pair=0.5@0.05 strat=10 dro_eta=0.5, trainer 78ec8e61
   (manifests w3_t1dro51_s*).
 - **Box RETIRED** (server deleted; NEW restore base snapshot
-  `zen-train-1-1783040838` — supersedes 1782989687). cx fleet reaped. Zero
+  `zen-train-1-1783047322` — newest, post-wave-4; supersedes 1783040838/1782989687). cx fleet reaped. Zero
   cloud burn. Bakes: w3_t1dro51_s{17,7,31,47,63}.bin in the probe dir.
-- Next-campaign levers (KonJND + CID22-49 gates): hard-pair mining scoped to
-  the konjnd-dense group; triplet loss weight sweep (KonJND-neutral-positive
-  at 0.5); dup-aware sampling to reconcile the dedup corpus; EXP_II interior-
-  pivot triplet model.
+- **Wave-4 done** (mining band δ = the CID22↔KonJND dial: 0.03 rank-leaning /
+  0.08 threshold-leaning; frac stays 0.5). **kagg falsification RETRACTED —
+  scale mismatch** (agg loss compares pinned RAW output (~0.23-wide band)
+  against raw PJND 22-70; valid retest needs dial-output comparison — design
+  change queued). triplet-on-stack: replicate-before-trusting.
+- Next-campaign levers (KonJND + CID22-49 gates): kagg-on-dial-output
+  redesign; konjnd-scoped hard-pair mining (per-group frac plumbing); EXP_II
+  interior-pivot triplet model; within-ladder listwise; dup-aware sampling.
+- Infra: autoretire is billing-aware (retires at min>=45 of the paid hour)
+  with pidfile discipline; NEVER pattern-kill watchers/monitors.
 - cx fleet: REAPED (0 boxes). Wave-1 cross-machine: 16/18 byte-identical;
   2 divergent = one AVX-512-tier box (ISA reduction order, documented).
 - Next levers if KonJND gate blocks: hardpair delta/frac sweep; t1dro51
