@@ -59,3 +59,23 @@ A (v47) CID22 = 0.8657; best wave-1 cell tier1_s7 = 0.8542 (−0.011). The
 strategy levers recovered nearly all of the corpus-swap regression with the
 v53 base; wave-2b + a hardpair-on-v51-corpus cell will separate corpus from
 recipe effects.
+
+## Wave 2b results (complete)
+
+| family | CID22 by seed | mean±sd | KonJND | G1 / mono |
+|---|---|---|---|---|
+| hponly (hardpair, 5 seeds: 17/7/31/47/63) | .8402/.8031/.8387/.8424/.8454 | **0.834±0.017, 0 collapses** | 0.35-0.45 | 0.94-1.00 / 0.971-0.979 |
+| t1dro (ema+hp+strat+dro, 3 seeds) | .8245/.8387/.8415 | **0.835±0.009** | **0.458-0.468** | 0.96-1.00 / 0.973-0.977 |
+| hpdro (hp+dro only, 3 seeds) | .8491/.5616/.8314 | 1-in-3 COLLAPSE (s7: G1 0.72) | 0.25 at collapse | rejected |
+
+- **hpdro's collapse proves the composition is non-additive**: dro alone never
+  collapsed, hardpair alone never collapsed (5 seeds), their pair did once.
+  The tier1 buffer (ema+strat) is load-bearing inside t1dro.
+- **Finalists: hponly (simplest, one flag) and t1dro (tightest + best KonJND).**
+  Both ~0.835 mean CID22 vs A's 0.8657 (−0.031).
+- **Cross-machine determinism (wave 1)**: 16/18 byte-IDENTICAL box-vs-cx-fleet;
+  the 2 divergent cells both ran on ONE fleet box → SIMD ISA tier (AVX-512 vs
+  AVX2 Adam kernel) reduction-order drift, not nondeterminism. Determinism
+  holds per ISA tier.
+- **Wave 3 (running)**: hponly + t1dro on the v51 (pre-dedup) corpus × seeds
+  {17,7} — isolates whether the remaining −0.031 vs A is corpus or recipe.
