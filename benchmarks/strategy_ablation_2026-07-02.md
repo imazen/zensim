@@ -219,3 +219,15 @@ quantization (4k+ unique preds); no spline artifacts.
   confirmed mechanism). listmle KonJND crater: stands (2-seed replicated +
   mechanism; within-ladder retest queued). ema/strat washes: stand. hpdro
   collapse: low-n caveat (1 event / 3 seeds).
+
+## Dial-continuity vs the ridge artifact (user question 2026-07-03)
+
+Measured on the densified dial grid (t1dro51_s31, 115 ladders, 4,702 adjacent
+steps): JND zone (q70-90) median adjacent step 1.13pt, 2.6% flat, 1.7%
+backwards; near-lossless median 0.21pt with 31% sub-0.1pt steps — EXPECTED
+(sub-JND grid spacing; the truthful dial barely moves across visually
+identical configs) — 3.0% backwards; full-range 2.3% backwards. Verdict: the
+corpus-ridge artifact does NOT reduce dial continuity — between-ladder
+response is smooth where targeting operates. True precision bounds: codec
+action-space quantization (targeting-layer nearest-achievable) and the 2-3%
+inversion tail (TV/within-ladder levers queued).
