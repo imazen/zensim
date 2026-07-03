@@ -1793,6 +1793,7 @@ fn apply_manifest_to_args(
     set_if_default!(qat_tau, "qat_tau", cfg.qat_tau);
     set_if_default!(group_eval_cap, "group_eval_cap", cfg.group_eval_cap);
     set_if_default!(konjnd_aggregation_weight, "konjnd_aggregation_weight", cfg.konjnd_aggregation_weight);
+    if args.konjnd_aggregation_parquet.is_none() { args.konjnd_aggregation_parquet = cfg.konjnd_aggregation_parquet.clone().map(std::path::PathBuf::from); }
     set_if_default!(konjnd_aggregation_step_p, "konjnd_aggregation_step_p", cfg.konjnd_aggregation_step_p);
     set_if_default!(ema_decay, "ema_decay", cfg.ema_decay);
     set_if_default!(hard_pair_frac, "hard_pair_frac", cfg.hard_pair_frac);
@@ -2732,6 +2733,12 @@ fn main() {
     // we get the per-ref grouping metadata. Applies feature transforms
     // in-place; standardization happens inside the trainer using the
     // primary-stream scaler (same invariant as anchor + pjnd anchors).
+    // FAIL-LOUD (2026-07-03): weight>0 with no pool parquet was a SILENT
+    // no-op — wave-4 kagg cells reproduced base byte-identically. A recipe
+    // that asks for the aggregation head must provide its data.
+    if args.konjnd_aggregation_weight > 0.0 && args.konjnd_aggregation_parquet.is_none() {
+        panic!("--konjnd-aggregation-weight > 0 requires --konjnd-aggregation-parquet (silent no-op guard)");
+    }
     let konjnd_agg_owned: Option<zensim_validate::parquet_loader::OwnedKonjndAggregationPool> =
         if let Some(p) = &args.konjnd_aggregation_parquet {
             if args.konjnd_aggregation_weight <= 0.0 {
