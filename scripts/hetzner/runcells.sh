@@ -31,6 +31,17 @@ run_cell() {
   if [ -f "$B" ]; then
     ZENSIM_DIAL_GRID=/data/grids/kadis_test_safetygrid.parquet nice -n10 target/release/bake_verdict \
       --bake "$B" --output "$D/kadissafety.md" >/dev/null 2>&1
+    # COLLAPSE GATE (2026-07-03): the held-out-val selection is BLIND to
+    # human-anchor collapse (w6 fan: collapsed seeds within 0.001 of healthy
+    # on val geomean, while verdict CID22 fell 0.84->0.54 and KonJND
+    # 0.35->0.12). Every cell self-reports: parse the verdict, flag below
+    # floors so scoreboards/fleets surface it without a human.
+    CID=$(grep -E '^\| CID22 ' "$D/kadissafety.md" 2>/dev/null | head -1 | awk -F'|' '{print $4}' | tr -d ' ')
+    KJ=$(grep -E '^\| KonJND' "$D/kadissafety.md" 2>/dev/null | head -1 | awk -F'|' '{print $4}' | tr -d ' ')
+    if [ -n "$CID" ] && awk -v c="$CID" -v k="${KJ:-1}" 'BEGIN{exit !(c<0.75 || k<0.20)}'; then
+      echo -e "${M}-COLLAPSED\tcid22=$CID konjnd=$KJ\t-\t$(date -u +%FT%TZ)" >> "$STATUS"
+      rc=9
+    fi
     ZENSIM_DIAL_GRID=/data/grids/hq_codec_grid_2026-07-01.parquet ZENSIM_DIAL_PRED_OUT="$D/hqpred.tsv" \
       nice -n10 target/release/bake_verdict --bake "$B" --corpora aic3 --output "$D/hq.md" >/dev/null 2>&1
   fi
