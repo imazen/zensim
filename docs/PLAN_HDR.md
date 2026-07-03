@@ -10,14 +10,20 @@ registration in the same commit as first use.
 ## Ground state (surveyed 2026-07-03)
 
 - **UPIQ baseline reproduced**: 0.694 (task #1 done) — the legacy HDR anchor.
-- **AIC-HDR2025 is ON DISK** (`/mnt/v/datasets/aic-hdr2025/`) — QoMEX'25
-  fine-grained HDR JND dataset, SAME lab/methodology as SDR25 (boosted
-  triplets, AIC-3 JND scaling). Our ordered-probit reconstruction
-  (`scripts/v_next/reconstruct_sdr25_jnd.py`) applies with a loader swap.
-  This is the honest post-tuning HDR holdout — the HDR analog of SDR25.
-- **HDR codec corpus (task #2): barely started** — 1 converted PQ-PNG in
-  `/mnt/v/output/hdr-corpus-convert/`. The 76-ref × q-grid generation is the
-  main outstanding data work.
+- **AIC-HDR2025: README only — data NOT YET RELEASED upstream** (checked
+  2026-07-03: the jpeg-aic/AIC-HDR2025 repo still says "will be released
+  after QoMEX 2025"). Until it lands, T0 = UPIQ + the paper's published
+  numbers; re-check the repo periodically. When released, our ordered-probit
+  reconstruction applies with a loader swap.
+- **HDR codec corpus: FAR further along than the task list said.** The
+  76-source rendition grid EXISTS (1,140 PQ-PNGs at
+  `/mnt/v/output/imazen-26-hdr-grid-2026-06-14`; user: imazen-26 HDR subset
+  + scales/crops). The June encode-half is DONE on R2
+  (`datagen-2026-06-23-hdr`: 7,980 zenjxl cells, variants.tar, omni with
+  inline ssim2) and cvvdp is scored (7,980 rows local). REMAINING data work
+  (launched 2026-07-03): the zensim-372-feature + 4-metric score pass
+  (datagen_score_hdr.sh, local GPU) and the near-lossless densification
+  top-up (QG 90-100, launched) for intuitive dial curves.
 - **Infra already supports HDR end-to-end**: `hetzner_cpu_sweep.sh HDR=1`
   (zenjxl --hdr over PQ-PNG sources, scores cvvdp+butteraugli+ssim2+zensim on
   CPU; needs SWEEP_BIN_OVERRIDE with the `hdr` feature); zenmetrics
