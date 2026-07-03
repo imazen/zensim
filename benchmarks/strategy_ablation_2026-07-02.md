@@ -182,3 +182,23 @@ ladders cluster true quality, and any accurate metric reproduces those
 clusters. Full scatter-anatomy: horizontal bands = MCOS quantization (542
 distinct values/4292); vertical ridges = quality-ladder clustering; no output
 quantization (4k+ unique preds); no spline artifacts.
+
+## Wave 4 final verdicts (t1dro51 base; base = 0.8485/0.8594 CID22, 0.430/0.380 KonJND)
+
+| lever | CID22 s17/s7 | KonJND s17/s7 | verdict |
+|---|---|---|---|
+| delta003 (tight band) | **0.8700**/0.8515 | 0.376/0.427 | CID22 lever (+0.02 on weak seed) |
+| delta008 (wide band) | 0.8549/0.8446 | **0.4642**/0.417 | KonJND lever (family best, ~free) |
+| frac07 | 0.8541/0.8379 | 0.411/0.415 | wash — keep 0.5 |
+| triplet on stack | 0.6473/0.5590 | 0.345/0.264 | FALSIFIED stacked (mild alone — interaction) |
+| kagg 0.02/0.05 (head ACTIVE) | 0.4947-0.5574 | **0.097-0.227** | FALSIFIED — destroys both axes; α collapses to 1.0; replicates+worsens the v42 Pareto finding on this stack |
+
+- **The mining band δ is a per-deployment CID22↔KonJND dial** — the wave's
+  actionable positive.
+- First w4 kagg run was a SILENT NO-OP (weight without pool parquet) —
+  caught because cells reproduced base byte-identically; now a hard panic
+  (122dc1e8). The corrected run is the honest falsification above.
+- KonJND beyond ~0.46 on this architecture still looks representation-bound
+  (consistent with the 2026-05-26 G5 characterization); remaining unexplored
+  levers: EXP_II interior-pivot triplets (data exists, model deferred),
+  konjnd-scoped hard-pair mining (needs per-group frac plumbing).
