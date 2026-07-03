@@ -153,3 +153,17 @@ http://172.23.240.1:3300/zensim/reports/). ssim2 scored per-pair fresh via
 Candidate > ssim2 on 2/3 compression T0 holdouts (AIC-3, SDR25); ssim2 keeps
 CID22-49 (+0.019) and KonJND. Candidate > A on 3/4. Tool:
 scripts/v_next/metric_compare_report.py (ssim2 per-pair TSVs in the probe dir).
+
+## Banding investigation (user report, 2026-07-03) — RESOLVED: corpus structure
+
+The horizontal bands visible in the scatter pages are the SUBJECTIVE axes'
+own quantization, not a metric artifact: CID22 has 542 distinct MCOS values
+across 4,292 pairs (KonJND: 739/1,008), while every metric's prediction axis
+is essentially continuous (t1dro51_s31: 4,011 unique values @3dp, top-20
+modes hold 1.5%; ssim2: 4,070; A: 3,888 — no f16/spline quantization grid
+detected, median inter-mode gap 0.006-0.05). Identical bands appear in the
+ssim2 charts. Visual proof:
+`/mnt/v/output/zensim/reports/2026-07-03_ssim2_baseline/banding_diagnosis.png`.
+
+ssim2 now has its own standalone page in the viewer (same format/corpora,
+KADID/TID omitted as in-sample): `2026-07-03_ssim2_baseline`.
