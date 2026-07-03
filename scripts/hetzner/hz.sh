@@ -92,7 +92,16 @@ case "$CMD" in
         else idle=$((idle+3)); fi
         DONE=$($SSH root@$IP "grep -c ALLDONE /data/out/status.tsv 2>/dev/null" 2>/dev/null || echo 0)
         if [ "${DONE:-0}" -ge 1 ] || [ "$idle" -ge "$IDLE_MIN" ]; then
-          echo "[autoretire] $(date -u +%FT%TZ) pulling + retiring $NAME (done=$DONE idle=${idle}m)"
+          # Billing-aware (user 2026-07-03): Hetzner bills per STARTED hour, so
+          # the remainder of the current hour is already paid — keep the box
+          # reusable and retire at minute >=45 of the billing hour (uptime
+          # approximates billing start to within a minute).
+          UPMIN=$($SSH root@$IP "awk '"'"'{print int(\$1/60)}'"'"' /proc/uptime" 2>/dev/null)
+          if [ -n "$UPMIN" ] && [ $((UPMIN % 60)) -lt 45 ]; then
+            echo "[autoretire] $(date -u +%FT%TZ) work done (done=$DONE idle=${idle}m) — paid-hour reuse window open (uptime ${UPMIN}m, retire at min>=45); box stays available"
+            continue
+          fi
+          echo "[autoretire] $(date -u +%FT%TZ) pulling + retiring $NAME (done=$DONE idle=${idle}m uptime=${UPMIN}m)"
           cd '"$(cd "$(dirname "$0")/../.." && pwd)"'
           bash scripts/hetzner/hz.sh pull "$IP" 2>&1 | tail -1
           rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev" root@$IP:/data/derived/*.bin "$PROBE/" 2>/dev/null

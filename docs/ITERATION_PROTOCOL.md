@@ -127,7 +127,11 @@ the standard flow, not an extra step:
 `hz.sh run`.** A detached workstation-side watcher (hcloud token never leaves
 this machine) pulls results + bins and snapshot-retires the box when the cell
 queue reaches ALLDONE with no trainers/units active — or after `idle_min`
-minutes with no trainer running (crashed-run guard). Veto with
+minutes with no trainer running (crashed-run guard). **Billing-aware
+(2026-07-03): Hetzner bills per started hour, so after work completes the box
+STAYS AVAILABLE through the already-paid hour and retires at minute ≥45 of
+the billing hour** (uptime mod 60) — queue follow-on waves into that free
+window instead of retire-restore cycling. Veto with
 `touch $PROBE/.box_hold` while queuing a follow-on wave; remove the hold to
 re-enable. Log: `$PROBE/autoretire_<name>.log`. This turns the lifecycle rule
 ("retire after pull") into machinery instead of memory.
