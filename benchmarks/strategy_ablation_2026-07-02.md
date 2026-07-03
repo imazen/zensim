@@ -418,3 +418,20 @@ s101 reaches CID22 parity with Profile A (0.8639 vs 0.8657) WITH HDR
 capability (UPIQ 0.68 vs A's 0.646). Fan economics: 11 remote cells ≈ 1
 box-hour, autoretired at uptime 47m. The 43.75% rate is the number w8
 (cvvdp-mix, training now) must move.
+
+## SDR-vs-HDR bake, apples-to-apples (2026-07-03; SDR25 path value-revalidated, A=0.9036 exact)
+
+| axis | t1dro51_s31 (SDR) | w7_s101 (B v3) |
+|---|---|---|
+| CID22-49 | 0.8708 | 0.8639 |
+| SDR25 | 0.9694 | 0.9538 |
+| AIC-3 | 0.8013 | 0.7761 |
+| AIC-4 | 0.9154 | 0.8861 |
+| KonJND | 0.3109 | 0.3524 |
+| UPIQ-HDR | 0.6594 | 0.6798 |
+
+Verdict: the SDR bake IS slightly better on SDR human panels (−0.007..−0.03
+for B) — real recipe cost, not eval artifact; B adds KonJND/UPIQ/HDR.
+Caveat (user-spotted): B faced a 16-seed stability audit, t1dro51 only 5 —
+"43.75% vs 0%" is width-confounded. CONTROL QUEUED: t1dro51 wide fan
+(same 11 seeds, same box pattern) to attribute the collapse rate.
