@@ -32,11 +32,11 @@ registration in the same commit as first use.
 
 ## Known gap (2026-07-03): CPU metrics lack an HDR PU-shell dispatch
 
-`score-pairs --hdr` for ssim2/dssim/butteraugli/iwssim routes through the
-zenmetrics-api GPU umbrella only — the api's `cpu-ssim2`/`cpu-dssim`/... impls
-are NOT wired into the HDR PU path (error: "metric 'ssim2' is not enabled in
-this build"). Consequence: those metrics can't run on CPU fleet boxes; zensim
-(CLI-side CPU path, emits the 372 features) CAN and does. Until the wiring fix
+`score-pairs --hdr` on CPU-only builds works for **zensim (CLI-side, +372
+features), cvvdp, and iwssim** (verified: hdrhq1 box shards carry their
+parquets) — only **ssim2 and dssim** lack a CPU HDR dispatch (error: "metric
+'ssim2' is not enabled in this build"; both route through the GPU umbrella
+only). Until the wiring fix
 lands in zenmetrics, the fleet scores zensim+features and the 4 GPU-only
 metrics run on the local 5070 (documented norm exception). The first-pair gate
 catches this class on every box.
