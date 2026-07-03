@@ -59,7 +59,16 @@ case "$CMD" in
     $SSH"$IP" "nohup bash /root/work/zensim/scripts/hetzner/runcells.sh /root/cells.txt $PAR > /data/out/runcells.log 2>&1 & echo run-launched"
     ;;
   status)  $SSH"${1:?ip}" "cat /data/out/status.tsv 2>/dev/null | tail -20; tail -2 /root/bootstrap.log 2>/dev/null" ;;
-  pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"; rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/out/ "$PROBE/hetzner-out/" && echo pulled ;;
+  pull)    IP="${1:?ip}"; mkdir -p "$PROBE/hetzner-out"
+    rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/out/ "$PROBE/hetzner-out/"
+    rsync -az -e "ssh -i $HOME/.ssh/zen-arm-dev -o StrictHostKeyChecking=accept-new" root@"$IP":/data/derived/*.bin "$PROBE/" 2>/dev/null
+    # THE RULE (2026-07-02): every pulled result gets a visual report in
+    # /mnt/v/output/zensim/reports/ (viewer index regenerates each run).
+    for B in "$PROBE"/*.bin; do
+      L=$(basename "$B" .bin)
+      [ -d "/mnt/v/output/zensim/reports/$(date +%F)_$L" ] ||         nice -n19 python3 "$(dirname "$0")/../v_next/bake_report.py" --bake "$B" --label "$L" 2>&1 | tail -1
+    done
+    echo pulled ;;
   retire)  # snapshot then delete — MANDATORY end-state for x86 big boxes
     NAME="${1:?name}"
     if [ "${2:-}" != "--force" ]; then

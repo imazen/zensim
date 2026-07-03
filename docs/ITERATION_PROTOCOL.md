@@ -100,3 +100,23 @@ picker join bug), row-count/sha drift vs manifests, split-rule violations.
   (user cost directive 2026-07-02; the idle-grid incident cost ~$1.90).
 - **bake files**: manifests' [bake].file lands via the path symlink in
   /data/derived — pull bins separately from hz.sh pull (which grabs /data/out).
+
+## Per-result reports (MANDATORY, added 2026-07-02)
+
+**Every result gets a visual report; reports collect at
+`/mnt/v/output/zensim/reports/` with a regenerated `index.html` viewer —
+browsable at <http://172.23.240.1:3300/zensim/reports/>.** This is built into
+the standard flow, not an extra step:
+
+- `hz.sh pull` auto-generates a report for every pulled `.bin` that doesn't
+  have one (bins land in the probe dir; reports render on the workstation,
+  which owns /mnt/v + matplotlib).
+- Ad-hoc: `python3 scripts/v_next/bake_report.py --bake X.bin [--label L]`.
+- Each report = Cloudinary-style scatter grid (human vs prediction, 4PL
+  display fit) over the 6 canonical corpora + the FULL Mohammadi panel per
+  corpus (stats via `scripts/lib/zen_stats` — never hand-rolled) + per-corpus
+  verdict markdowns + `meta.json` (bake sha256, trainer commit, command).
+- Validity labels are baked into every page: CID22 = the 49-ref HOLDOUT
+  (ssim2's own validation split — stricter than the Cloudinary all-CID22
+  SVG); KADID/TID panels carry an IN-SAMPLE banner (trained here at w=0.5 AND
+  ssim2 tuned on them) — integrity guards, never rankings.
