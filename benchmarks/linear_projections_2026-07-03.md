@@ -619,3 +619,19 @@ Residual MLP (372→128→64, no spline, raw preds) on residual targets; compose
 - **Structural bound CONFIRMED**: max composed damage −0.03 vs −0.30 for
   MLP collapse. The architecture contains failure; w10b = SDR residual
   re-derived vs the 4-metric mix (bigcodec_mm6).
+
+## Two-model architecture + dial alignment (2026-07-03, user question)
+
+**Two models measured better**: per-domain picks dominate by 0.03-0.08 on
+their home axes; unified attempts pay on one side; winning fits differ even
+in feature treatment (SDR raw vs HDR shaped).
+
+**Dial alignment decomposition** (measured on the 380-pair UPIQ overlap):
+raw offset 15.0pt = SCALE (one monotone quantile spline removes it; better:
+fit both bake splines to the same anchor convention — identity=100,
+PJND≈63); residual 9.7pt MAE = genuine model disagreement on deeply-HDR
+content (rank agreement 0.910) — content that routing sends to the HDR
+model anyway. On the observable overlap (SDR-range content) the anchored
+transfer already bounds cross-path disagreement at ≤0.92pt. Ship design:
+route by domain, calibrate to the shared anchor scale, record the overlap
+spline. Figure: reports/2026-07-03_linear_vs_all/dial_alignment.png.
