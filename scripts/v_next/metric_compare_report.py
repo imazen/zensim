@@ -127,7 +127,7 @@ def main():
     png = os.path.join(out_dir, "compare.png")
     fig.savefig(png, dpi=130)
     open(os.path.join(out_dir, "stats.md"), "w").write("\n".join(table) + "\n")
-    html = ["<html><head><title>compare: " + a.label + "</title></head><body style='font-family:sans-serif;max-width:1100px;margin:2em auto'>",
+    html = ["<html><head><meta charset="utf-8"><meta charset=\"utf-8\"><title>compare: " + a.label + "</title></head><body style='font-family:sans-serif;max-width:1100px;margin:2em auto'>",
             f"<h1>{a.label} vs Profile-A vs SSIMULACRA2</h1>",
             "<p>CID22-49 is the honest head-to-head (ssim2's own holdout). KonJND: raw PJND targets — guard, not ranking. SDR25 postdates both metrics' tuning.</p>",
             "<img src='compare.png' style='max-width:100%'>", "<h2>Stats (canonical zen_stats panel)</h2><pre>"]

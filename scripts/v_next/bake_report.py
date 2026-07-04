@@ -135,7 +135,7 @@ def main():
         open(os.path.join(out_dir, "meta.json"), "w"), indent=1,
     )
     with open(os.path.join(out_dir, "report.html"), "w") as f:
-        f.write(f"<!doctype html><title>{html.escape(label)}</title>"
+        f.write(f"<!doctype html><meta charset=\"utf-8\"><title>{html.escape(label)}</title>"
                 f"<h1>{html.escape(label)}</h1>"
                 f"<p>bake sha256 <code>{sha[:16]}…</code> · trainer <code>{commit[:12]}</code> · {stamp}</p>"
                 f"<p><b>CID22 = 49-ref holdout</b> (ssim2's own validation split — stricter than the "
