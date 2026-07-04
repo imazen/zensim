@@ -837,6 +837,175 @@ def cmd_residual(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# w10b (2026-07-03 night): SDR residual corpora v2 with the MIX target.
+# w10 v1's SDR residual was falsified at every lambda (ssim2-target defect:
+# composed CID22 0.874 -> 0.847) while the HDR residual with the mix-derived
+# target GAINED +0.041 UPIQ. v2 rebuilds the SDR residual against
+#   target_mix = 0.5*clip01(ssim2_norm) + 0.5*clip01((cvvdp_jod - 6)/4)
+# (the hdr_v3mix convention), same base + a,b OLS + clip01 recipe.
+MM6_TRAIN = PROBE / "bigcodec_mm6_traindigits_2026-07-02.parquet"
+FILL4_SIDECAR = Path("/mnt/v/datasets/fill4-6codec-2026-07-01/fill4metrics_sidecar_patched_2026-07-02.parquet")
+CANON_PICKER = Path("/mnt/v/output/canonical-picker-2026-06-27")
+MM6_DATASETS = ["zenjpeg_lossy", "zenjxl_lossless", "zenjxl_lossy",
+                "zenpng_lossless", "zenwebp_lossless", "zenwebp_lossy"]
+
+
+def _mix_target(hs: np.ndarray, cvvdp: np.ndarray) -> np.ndarray:
+    return 0.5 * np.clip(hs, 0.0, 1.0) + 0.5 * np.clip((cvvdp - 6.0) / 4.0, 0.0, 1.0)
+
+
+def cmd_residual2(args) -> int:
+    """v2 SDR residual corpora (mix target). Train side streams the mm6 join;
+    val side is built by the SAME sidecar join over the canonical picker
+    validate splits (sidecar coverage verified 100%)."""
+    import pyarrow as pa
+    sys.path.insert(0, "/home/lilith/work/zen/zenmetrics/scripts/picker")
+    from origin_split import split_of
+
+    outdir = SCRATCH / "residual"
+    outdir.mkdir(exist_ok=True)
+    z = np.load(SCRATCH / "fits" / f"{BASE_KEY}.npz")
+    w16 = z["w"].astype(np.float16).astype(np.float32)
+    mu32 = z["mu"].astype(np.float32); sd32 = z["sd"].astype(np.float32)
+    b32 = np.float32(z["bias"])
+    base_bake = SCRATCH / "bakes" / f"lp_{BASE_KEY}-tau0-f16.bin"
+    base_sha = hashlib.sha256(base_bake.read_bytes()).hexdigest()
+    az = np.load(SCRATCH / "val" / "anchor.npz")
+    pa_anchor = ((az["raw"].astype(np.float32) - mu32) / sd32 @ w16 + b32).astype(np.float64)
+    clamp_lo, clamp_hi = float(pa_anchor.min()), float(pa_anchor.max())
+    print(f"base sha256={base_sha}  pred clamp [{clamp_lo:.4f}, {clamp_hi:.4f}]", flush=True)
+
+    def base_pred(X32: np.ndarray) -> np.ndarray:
+        return np.clip(((X32 - mu32) / sd32 @ w16 + b32).astype(np.float64), clamp_lo, clamp_hi)
+
+    # ---- pass 1 over mm6 TRAIN: affine moments on the mix target ----
+    pf = pq.ParquetFile(MM6_TRAIN)
+    sp = sy = spp = spy = n = 0.0
+    n_nan = 0
+    for batch in pf.iter_batches(batch_size=131072, columns=FCOLS + ["human_score", "score_cvvdp"]):
+        X = np.column_stack([batch[c].to_numpy(zero_copy_only=False).astype(np.float32) for c in FCOLS])
+        hs = batch["human_score"].to_numpy(zero_copy_only=False).astype(np.float64)
+        cv = batch["score_cvvdp"].to_numpy(zero_copy_only=False).astype(np.float64)
+        keep = np.isfinite(cv) & np.isfinite(hs)
+        n_nan += int((~keep).sum())
+        y = _mix_target(hs[keep], cv[keep])
+        p = base_pred(X[keep])
+        sp += p.sum(); sy += y.sum(); spp += (p * p).sum(); spy += (p * y).sum(); n += len(y)
+    varp = spp / n - (sp / n) ** 2
+    a = (spy / n - sp / n * sy / n) / max(varp, 1e-12)
+    b = sy / n - a * sp / n
+    print(f"mm6 train: n={n:.0f} nan_cvvdp_dropped={n_nan}  affine a={a:.4f} b={b:+.4f}", flush=True)
+
+    manifest_path = outdir / "_MANIFEST.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {"files": {}}
+    manifest["v2_mix"] = {
+        "base_bake_sha256": base_sha, "pred_clamp": [clamp_lo, clamp_hi],
+        "target": "target_mix = 0.5*clip01(ssim2_norm) + 0.5*clip01((score_cvvdp-6)/4)  (hdr_v3mix convention)",
+        "definition": "residual_target = target_mix - clip01(a*clip(linear_pred) + b); "
+                      "(a,b) OLS on mm6 TRAIN mix rows, reused for the val join",
+        "affine_a": float(a), "affine_b": float(b), "nan_cvvdp_dropped_train": n_nan,
+    }
+
+    def write_stream(out_path: Path, batches, src_desc: str):
+        writer = None
+        rmin, rmax, rows = np.inf, -np.inf, 0
+        for names, hs, cv, X in batches:
+            keep = np.isfinite(cv) & np.isfinite(hs)
+            if not keep.any():
+                continue
+            names = [nm for nm, k in zip(names, keep) if k]
+            hs, cv, X = hs[keep], cv[keep], X[keep]
+            y = _mix_target(hs, cv)
+            p = base_pred(X.astype(np.float32))
+            r = y - np.clip(a * p + b, 0.0, 1.0)
+            rmin = min(rmin, float(r.min())); rmax = max(rmax, float(r.max())); rows += len(r)
+            cols = {"ref_basename": pa.array(names), "human_score": pa.array(hs),
+                    "score_cvvdp": pa.array(cv), "target_mix": pa.array(y),
+                    "linear_pred": pa.array(p), "residual_target": pa.array(r)}
+            for i, c in enumerate(FCOLS):
+                cols[c] = pa.array(X[:, i])
+            ot = pa.table(cols)
+            if writer is None:
+                meta = {b"residual_base_bake_sha256": base_sha.encode(),
+                        b"residual_affine_a": f"{a!r}".encode(),
+                        b"residual_affine_b": f"{b!r}".encode(),
+                        b"residual_target_def": b"mix(ssim2,cvvdp) - clip01(a*clip(pred)+b)",
+                        b"residual_source": src_desc.encode()}
+                writer = pq.ParquetWriter(out_path, ot.schema.with_metadata(meta), compression="zstd")
+                ot = ot.replace_schema_metadata(meta)
+            writer.write_table(ot)
+        writer.close()
+        sha = hashlib.sha256()
+        with open(out_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                sha.update(chunk)
+        manifest["files"][out_path.name] = {
+            "rows": rows, "sha256": sha.hexdigest(), "affine_a": float(a), "affine_b": float(b),
+            "residual_range": [rmin, rmax], "source": src_desc, "target": "mix(ssim2,cvvdp)"}
+        print(f"{out_path.name}: rows={rows} residual range [{rmin:+.4f}, {rmax:+.4f}] "
+              f"sha256={sha.hexdigest()}", flush=True)
+
+    # ---- TRAIN v2: stream mm6 ----
+    def train_batches():
+        pf = pq.ParquetFile(MM6_TRAIN)
+        for batch in pf.iter_batches(batch_size=131072,
+                                     columns=["ref_basename", "human_score", "score_cvvdp"] + FCOLS):
+            t = pa.Table.from_batches([batch])
+            yield (t["ref_basename"].to_pylist(),
+                   t["human_score"].to_numpy(zero_copy_only=False).astype(np.float64),
+                   t["score_cvvdp"].to_numpy(zero_copy_only=False).astype(np.float64),
+                   np.column_stack([t[c].to_numpy(zero_copy_only=False).astype(np.float64) for c in FCOLS]))
+    write_stream(outdir / "bigcodec_mm6mix_traindigits_residual_v2_2026-07-03.parquet",
+                 train_batches(), str(MM6_TRAIN))
+
+    # ---- VAL v2: sidecar join over canonical validate splits ----
+    side = pq.read_table(FILL4_SIDECAR, columns=["encoded_filename", "score_cvvdp"])
+    lut = dict(zip(side["encoded_filename"].to_pylist(),
+                   np.asarray(side["score_cvvdp"], dtype=np.float64)))
+    del side
+    print(f"sidecar cvvdp lut: {len(lut):,}", flush=True)
+    seen: set = set()
+    stats = {"dup": 0, "nonval": 0, "nomatch": 0}
+
+    def val_batches():
+        import os as _os
+        for ds in MM6_DATASETS:
+            p = CANON_PICKER / ds / "validate.parquet"
+            pf = pq.ParquetFile(p)
+            featcols = sorted([c for c in pf.schema_arrow.names
+                               if c.startswith("feat_") and c[5:].isdigit()],
+                              key=lambda c: int(c[5:]))
+            for batch in pf.iter_batches(batch_size=65536,
+                                         columns=["image_path", "encoded_filename", "score_ssim2"] + featcols):
+                t = pa.Table.from_batches([batch])
+                names = [_os.path.basename(x) for x in t["image_path"].to_pylist()]
+                hs = np.clip(np.asarray(t["score_ssim2"], dtype=np.float64) / 100.0, 0.0, 1.0)
+                F = np.column_stack([np.asarray(t[c], dtype=np.float64) for c in featcols])
+                cv = np.array([lut.get(fn, np.nan) for fn in t["encoded_filename"].to_pylist()])
+                stats["nomatch"] += int(np.isnan(cv).sum())
+                keep = []
+                for i, (nm, h) in enumerate(zip(names, hs)):
+                    k = (nm, round(float(h), 9), round(float(F[i][0]), 9),
+                         round(float(F[i][1]), 9), round(float(F[i][2]), 9))
+                    if k in seen:
+                        stats["dup"] += 1
+                    elif split_of(nm) == "val":
+                        seen.add(k); keep.append(i)
+                    else:
+                        seen.add(k); stats["nonval"] += 1
+                if keep:
+                    yield ([names[i] for i in keep], hs[keep], cv[keep], F[keep])
+    write_stream(outdir / "bigcodec_mm6mix_valdigits_residual_v2_2026-07-03.parquet",
+                 val_batches(),
+                 f"{CANON_PICKER}/<ds>/validate.parquet x {len(MM6_DATASETS)} + fill4 sidecar (val-split join, "
+                 "same key/dedup semantics as build_mm6_join.py; hqfill val rows not included)")
+    manifest["v2_mix"]["val_join_stats"] = stats
+    manifest_path.write_text(json.dumps(manifest, indent=1))
+    print(f"manifest updated: {manifest_path}  val-join stats {stats}", flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -849,10 +1018,12 @@ def main() -> int:
     sub.add_parser("ensemble")
     sub.add_parser("cascade")
     sub.add_parser("residual")
+    sub.add_parser("residual2")
     args = ap.parse_args()
     return {"gram": cmd_gram, "fit": cmd_fit, "finalize": cmd_finalize,
             "poolfits": cmd_poolfits, "ensemble": cmd_ensemble,
-            "cascade": cmd_cascade, "residual": cmd_residual}[args.cmd](args)
+            "cascade": cmd_cascade, "residual": cmd_residual,
+            "residual2": cmd_residual2}[args.cmd](args)
 
 
 if __name__ == "__main__":
