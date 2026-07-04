@@ -589,3 +589,12 @@ FAMILY-driven (BVLS sign-mask 0.60-0.67 corpus-insensitive). 4-way
 cross-metric page: /mnt/v/output/zensim/reports/2026-07-03_linear_vs_all/
 (linear-cid80 beats A on all rows + beats ssim2 on KonJND; ssim2 keeps
 CID22/AIC-3; cvvdp keeps UPIQ 0.758 vs our HDR linear 0.7313).
+
+## CID22 cvvdp + butteraugli backfill (2026-07-03, user request)
+
+Scored all 4,292 CID22 pairs: cvvdp_cpu_imazen 0.8214, butteraugli-max
+0.7426, butteraugli-pnorm3 0.7933 (|SROCC| vs MCOS; 0% NaN, sane ranges).
+Standing CID22 order: ssim2 0.8894 > S5-linear 0.8793 > cid80-linear 0.8733
+> t1dro51 0.8708 > A 0.8657 > cvvdp 0.8214 > butter-p3 0.7933 — zensim-family
+bakes (incl. 823-byte linear) all BEAT cvvdp and butteraugli on CID22.
+Parquets: cid22_{cvvdp,butteraugli-gpu}.parquet in the probe dir.
