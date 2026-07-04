@@ -1574,7 +1574,7 @@ impl Zensim {
         ref_stride: usize,
         dist_stride: usize,
     ) -> Result<ZensimResult, ZensimError> {
-        let params = self.profile.params();
+        let params = self.profile.params_pu_linear();
         if width == 0 || height == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
@@ -1641,7 +1641,7 @@ impl Zensim {
         ref_stride: usize,
         dist_stride: usize,
     ) -> Result<ZensimResult, ZensimError> {
-        let params = self.profile.params();
+        let params = self.profile.params_pu_linear();
         if width == 0 || height == 0 {
             return Err(ZensimError::ImageTooSmall);
         }
@@ -1704,7 +1704,7 @@ impl Zensim {
         height: usize,
         stride: usize,
     ) -> Result<ZensimResult, ZensimError> {
-        let params = self.profile.params();
+        let params = self.profile.params_pu_linear();
         if width == 0 || height == 0 {
             return Err(ZensimError::ImageTooSmall);
         }

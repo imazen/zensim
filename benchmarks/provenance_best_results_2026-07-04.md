@@ -18,6 +18,11 @@ rebuildable from pinned inputs. Repo commits referenced are on
 | best MLP (SDR): w3_t1dro51_s31 | ~48K | `c2ffc04452a61de6` | 0.8708 | 0.8013 | 0.9154 | 0.3109 | 0.6594 | 0.9694 | mono 0.973+ |
 | best MLP (HDR): w7_guard_s101 | ~67K | `9f0d6f3293cd7939` | 0.8639 | 0.7761 | 0.8861 | 0.3524 | 0.6798 | 0.9538 | — |
 
+**Routing (2026-07-04):** `ZensimProfile::B` auto-routes to the BHdr weights
+on the PU-linear (nits) entry points — typed dispatch on the declared input
+domain, never pixel-value sniffing (rejected: threshold seams at 5-10pt
+cross-model scatter). `BHdr` = explicit unrouted handle.
+
 *HDR pick's SDR numbers are informational only — it is INVALID on SDR content
 (rank 0.72 on the SDR dial grid, wild extrapolation); routing is mandatory.
 

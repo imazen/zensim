@@ -190,6 +190,26 @@ impl ZensimProfile {
         }
     }
 
+    /// Internal parameters for the ABSOLUTE-LUMINANCE (PU-linear) entry
+    /// points. Generation-B routes here: [`ZensimProfile::B`] dispatches to
+    /// the `BHdr` weights when fed nits, so one profile serves both domains
+    /// with each bake on its own feature distribution — the invalid pairing
+    /// (SDR weights on PU features) becomes unrepresentable through `B`.
+    ///
+    /// Routing keys on the ENTRY PATH (the caller already declared the
+    /// domain by decoding to nits), never on pixel values: value-sniffing
+    /// (e.g. peak-nits thresholds) would flip models across a threshold
+    /// with ~5-10pt cross-model per-pair scatter — a visible seam
+    /// (measured 2026-07-04, benchmarks/provenance_best_results doc).
+    /// `A` and `BHdr` are unrouted (A has one bake; BHdr is the explicit
+    /// HDR handle for callers who want no routing).
+    pub(crate) fn params_pu_linear(&self) -> &'static ProfileParams {
+        match self {
+            Self::B => &PROFILE_B_HDR,
+            _ => self.params(),
+        }
+    }
+
     /// Internal parameters for this profile.
     pub(crate) fn params(&self) -> &'static ProfileParams {
         match self {
@@ -1080,5 +1100,42 @@ mod profile_b_tests {
         }
         assert_eq!(ZensimProfile::B.name(), "zensim-b");
         assert_eq!(ZensimProfile::BHdr.name(), "zensim-b-hdr");
+    }
+}
+
+#[cfg(test)]
+mod profile_b_routing_tests {
+    use super::*;
+    use crate::Zensim;
+
+    #[test]
+    fn b_routes_to_hdr_weights_on_the_nits_path() {
+        let (w, h) = (64usize, 64usize);
+        let mut refe = vec![0.0f32; w * h * 3];
+        for (i, v) in refe.iter_mut().enumerate() {
+            *v = 1.0 + 180.0 * ((i % 97) as f32 / 97.0);
+        }
+        let mut dist = refe.clone();
+        for v in dist.iter_mut().skip(1).step_by(4) {
+            *v *= 0.7;
+        }
+        let sb = Zensim::new(ZensimProfile::B)
+            .compute_pu_linear(&refe, &dist, w, h, w * 3, w * 3)
+            .unwrap()
+            .score();
+        let sh = Zensim::new(ZensimProfile::BHdr)
+            .compute_pu_linear(&refe, &dist, w, h, w * 3, w * 3)
+            .unwrap()
+            .score();
+        assert!(
+            (sb - sh).abs() < 1e-12,
+            "B on nits must equal BHdr (routed): {sb} vs {sh}"
+        );
+        // Identity via the routed path still honors the contract.
+        let ident = Zensim::new(ZensimProfile::B)
+            .compute_pu_linear(&refe, &refe, w, h, w * 3, w * 3)
+            .unwrap()
+            .score();
+        assert!((ident - 100.0).abs() < 1e-9);
     }
 }

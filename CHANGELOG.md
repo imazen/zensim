@@ -13,6 +13,12 @@
   `benchmarks/provenance_best_results_2026-07-04.md`.
 - `Zensim::compute_pu_linear_extended_features`: full 372-feature extraction
   through the absolute-nits PU-XYB path (the `BHdr` feature regime).
+- `ZensimProfile::B` ROUTES BY ENTRY PATH: fed absolute nits
+  (`compute_pu_linear*`) it dispatches to the `BHdr` weights, so one profile
+  serves both domains and the invalid pairing (SDR weights on PU features)
+  is unrepresentable. Routing keys on the typed entry, never pixel values
+  (value-sniffing would seam at thresholds — measured 5-10pt cross-model
+  scatter). `BHdr` remains the explicit unrouted HDR handle.
 
 ### Fixed
 - Validate-side output-calibration spline now caps upper extrapolation at
