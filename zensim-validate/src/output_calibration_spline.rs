@@ -92,7 +92,14 @@ pub fn apply(x: f64, spline: &OutputCalibrationSpline) -> f64 {
         return ys[0] + derivs[0] * (x - xs[0]);
     }
     if x >= xs[n - 1] {
-        return ys[n - 1] + derivs[n - 1] * (x - xs[n - 1]);
+        // Parity with the product runtime (zensim/src/metric.rs upper
+        // extrapolation): capped at <=100 — no score exceeds identical.
+        // Uncapped linear here was a REAL divergence (dial p95 artifacts
+        // of 300-500 on linear bakes, found 2026-07-04 by the spline
+        // extrapolation audit); the "bit-exact" doc claim was false above
+        // the top knot. Bottom stays uncapped (neg-tail corruption
+        // resolution depends on it) — same as product.
+        return (ys[n - 1] + derivs[n - 1] * (x - xs[n - 1])).min(100.0);
     }
     let mut lo = 0usize;
     let mut hi = n - 1;
@@ -258,8 +265,12 @@ mod tests {
         assert!((apply(50.0, &spline) - 50.0).abs() < 1e-6);
         // Linear extrapolation below 0:
         assert!((apply(-10.0, &spline) - (-10.0)).abs() < 1e-6);
-        // Above 100:
-        assert!((apply(110.0, &spline) - 110.0).abs() < 1e-6);
+        // Above the top knot: capped at 100 for parity with the product
+        // runtime (zensim/src/metric.rs upper extrapolation). The previous
+        // expectation (110.0, uncapped) enshrined a measured divergence
+        // from the module's own "bit-exact with zensim::metric" contract —
+        // corrected 2026-07-04 (spline extrapolation audit).
+        assert!((apply(110.0, &spline) - 100.0).abs() < 1e-6);
     }
 
     #[test]
@@ -300,5 +311,25 @@ mod tests {
         assert!((apply(0.0, &spline) - 0.0).abs() < 1e-6);
         assert!((apply(50.0, &spline) - 60.0).abs() < 1e-6);
         assert!((apply(100.0, &spline) - 100.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod extrapolation_parity_tests {
+    use super::*;
+
+    #[test]
+    fn upper_extrapolation_caps_at_100_like_product_runtime() {
+        // 3-knot payload: count header + (x, y) f32 pairs, y topping at 90.
+        let mut payload = (3u32).to_le_bytes().to_vec();
+        for (x, y) in [(0.0f32, 10.0f32), (1.0, 50.0), (2.0, 90.0)] {
+            payload.extend_from_slice(&x.to_le_bytes());
+            payload.extend_from_slice(&y.to_le_bytes());
+        }
+        let sp = parse_payload(&payload).expect("valid payload");
+        let far = apply(1000.0, &sp);
+        assert!(far <= 100.0, "upper extrapolation must cap at 100, got {far}");
+        // Bottom stays linear (uncapped) — corruption resolution.
+        assert!(apply(-1000.0, &sp) < 10.0);
     }
 }
