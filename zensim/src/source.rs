@@ -703,12 +703,16 @@ mod hdr_refusal_tests {
     }
 
     #[test]
-    fn compute_refuses_pq_source() {
+    fn compute_routes_pq_source_via_pu_linear() {
+        // 2026-07-04 (issue #38): descriptor-flagged HDR is now ROUTED to
+        // the PU-linear front-end instead of refused — the previous
+        // expectation (HdrInputRequiresPuPath) tested the pre-routing
+        // guard. Identity still scores 100 through the routed path.
         let z = Zensim::new(crate::ZensimProfile::codec_target());
         let src = hdr_8x8_pq_linearf32();
         let dst = hdr_8x8_pq_linearf32();
-        let err = z.compute(&src, &dst).unwrap_err();
-        assert_eq!(err, ZensimError::HdrInputRequiresPuPath);
+        let result = z.compute(&src, &dst).expect("HDR pair routes, not refused");
+        assert!((result.score() - 100.0).abs() < 1e-9);
     }
 
     #[test]
