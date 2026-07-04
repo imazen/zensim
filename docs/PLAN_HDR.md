@@ -1,5 +1,17 @@
 # PLAN_HDR — HDR training + dial-continuity alignment (drafted 2026-07-03)
 
+> **STATUS 2026-07-04 — v3 pipeline COMPLETE; ship pick = linear anchored2.**
+> Steps 1-5 done (corpus 16.9k cells PU-linear, dedup, splits; w5/w6/w7 MLP
+> fans trained; consistency measured ≤0.92pt SDR-anchored). Ship candidate is
+> the DETERMINISTIC linear `lp_hdr-lasso0.001-shaped-anchored2` (UPIQ 0.7313 —
+> best zensim-family ever; knots to the 92.8 data ceiling), optional +0.041
+> residual head validated. MLP HDR heads remain collapse-prone (43.75%) —
+> gate-protected only. Gates status: consistency PASS (anchored transfer);
+> UPIQ > A (0.7313 vs 0.6933) but < cvvdp 0.758; dial-grid HDR panel still
+> to run on an HDR-native grid. Provenance:
+> `benchmarks/provenance_best_results_2026-07-04.md`.
+
+
 Goal: an HDR zensim head (`PreviewV0_5Hdr` slot) trained with the proven
 t1dro strategy stack, aligned for dial continuity with the same machinery
 that gates the SDR candidate (PCHIP dial spline + densified HDR dial grid +

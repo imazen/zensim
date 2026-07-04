@@ -1,5 +1,19 @@
 # PLAN_BEAT_A.md — beating Profile::A as a KNOB and as an RD-LOOP metric
 
+> **STATUS 2026-07-04 — A IS BEATEN (deterministic linear route).**
+> `lp_ens-Pline-cid80-anchored` (823 B) beats A on 7/9 panel axes (CID22
+> 0.8733 vs 0.8657, KonJND 0.5439 vs 0.4185) with dial gates green;
+> `lp_ens-S5noguard` holds the CID22 record 0.8793. The winning target is the
+> cvvdp-mix (Bet-1's multi-metric labels — vindicated), but via DETERMINISTIC
+> LINEAR fits, not MLP training: the same target collapses the MLP 2/2 (w8),
+> and MLP collapse is family-latent (6.25% control floor, 43.75% v3-amplified).
+> Bet-2's triplet data landed as instruments (SDR25/KonFiG reconstructions =
+> T0 anchors + the triplet loss falsified-on-stack). Canonical record:
+> `benchmarks/provenance_best_results_2026-07-04.md`. Remaining open axes vs
+> ssim2: CID22 0.8793 vs 0.8894, AIC-3 0.7905 vs 0.7965 — the gap is now
+> 0.006-0.010, owned by the ensemble route.
+
+
 Locked 2026-07-02 with the user. This is the durable plan-of-record; it
 survives compaction so no session re-derives it. Companion docs:
 `docs/DATA_SPLITS.md` (split registry), `docs/ITERATION_PROTOCOL.md` (how to

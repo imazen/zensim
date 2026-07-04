@@ -158,6 +158,19 @@ locked; Profile-A byte-reproducible; Hetzner-first infra live)
   interior-pivot triplet model; within-ladder listwise; dup-aware sampling.
 - Infra: autoretire is billing-aware (retires at min>=45 of the paid hour)
   with pidfile discipline; NEVER pattern-kill watchers/monitors.
+- **CAMPAIGN CLOSED 2026-07-04 — read `benchmarks/provenance_best_results_2026-07-04.md` FIRST.**
+  Architecture verdict: per-domain DETERMINISTIC LINEAR cores beat/match every
+  MLP (SDR: ens-Pline-cid80-anchored 823B, CID22 0.8733/KonJND 0.5439, dial
+  green; CID22 record S5 0.8793; HDR: hdr-lasso-shaped-anchored2 UPIQ 0.7313;
+  PJND: BVLS 0.6696). MLP collapse: family-latent 6.25% (t1dro51 control fan
+  1/16) amplified to 43.75% by v3-HDR ingredients; more-human-aligned targets
+  destabilize MLPs while improving linear fits (inverse coupling). Falsified:
+  MLP stabilization via targets/guards/seed-selection, SDR residuals (all λ,
+  both targets), cascades, CSF features. Instruments now standing: runcells
+  collapse gate (rc=9), consistency harness (seam ≤0.92pt SDR-anchored),
+  spline parity fix (5d4978db), shared-anchor dial alignment (5.05pt MAE in
+  dial zone), UPIQ/SDR25 harnesses. Profile::B (SDR linear) + Profile::BHdr
+  wiring in progress — see provenance doc.
 - **Profile B (HDR) state 2026-07-03:** v1 = w5_hdrmix_s17 (hdr_val 0.969
   stable across 3 seeds; SDR parity at s17/s7, s31 pays −0.07 CID22 —
   held-out-val selection applies). UPIQ shows the u8-shell feature ceiling

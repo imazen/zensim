@@ -8,6 +8,15 @@ _(none open)_
 
 ### Resolved
 
+- **Validate-side output-spline upper extrapolation diverged from the product
+  runtime — RESOLVED 2026-07-04 (`5d4978db`).** `output_calibration_spline::
+  apply` extrapolated linearly UNCAPPED above the top knot while
+  `zensim/src/metric.rs` caps at ≤100; the file's "bit-exact" claim was false
+  above the top knot and produced dial-p95 artifacts of 300-500 on linear
+  bakes. Now capped for parity (bottom stays uncapped — neg-tail corruption
+  resolution). `parse_round_trip_minimal` had enshrined the divergent value
+  (110); expectation corrected to 100 per the product contract.
+
 - **konjnd-agg 2-layer w1 gradient "bug" — RESOLVED 2026-05-27 as a
   malformed test, NOT a gradient error.** The
   `konjnd_aggregation_2layer_w1_gradient_matches_finite_difference` test
