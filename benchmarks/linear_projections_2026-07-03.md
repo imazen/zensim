@@ -635,3 +635,17 @@ model anyway. On the observable overlap (SDR-range content) the anchored
 transfer already bounds cross-path disagreement at ≤0.92pt. Ship design:
 route by domain, calibrate to the shared anchor scale, record the overlap
 spline. Figure: reports/2026-07-03_linear_vs_all/dial_alignment.png.
+
+## Shared-anchor dial refit — executed (2026-07-03)
+
+`scripts/v_next/shared_anchor_refit.py` refits both ship picks' output
+splines against the ONE anchor scale (SDR: canonical multiband_anchor_dial100;
+HDR: v3-val at human_score*100 — same ssim2-derived 0-100 convention).
+Anchored siblings emitted (originals untouched): rank preserved EXACTLY
+(SROCC 1.000000 both), knot ranges [0,95.9] / [24.8,88.6] (cid80's >100
+wart FIXED). Cross-model agreement: **MAE 5.05pt in the mutual dial zone
+(40-95)**; outside it the HDR pick extrapolates wildly on SDR content
+(rank 0.72) — routing territory, not calibration (boundary seam itself is
+≤0.92pt per the anchored transfer). Remaining refinement: clamp spline
+extrapolation at end-knots (runtime/bake-format nicety) + a denser HDR
+anchor top-end.
