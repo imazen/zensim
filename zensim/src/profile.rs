@@ -1139,3 +1139,74 @@ mod profile_b_routing_tests {
         assert!((ident - 100.0).abs() < 1e-9);
     }
 }
+
+#[cfg(test)]
+mod descriptor_hdr_routing_tests {
+    use super::*;
+    use crate::source::{AlphaMode, ImageSource, PixelFormat};
+    use crate::Zensim;
+
+    struct NitsSource {
+        rgba: Vec<f32>,
+        w: usize,
+        h: usize,
+    }
+    impl ImageSource for NitsSource {
+        fn width(&self) -> usize {
+            self.w
+        }
+        fn height(&self) -> usize {
+            self.h
+        }
+        fn pixel_format(&self) -> PixelFormat {
+            PixelFormat::LinearF32Rgba
+        }
+        fn alpha_mode(&self) -> AlphaMode {
+            AlphaMode::Opaque
+        }
+        fn is_hdr(&self) -> bool {
+            true
+        }
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            bytemuck::cast_slice(&self.rgba[y * self.w * 4..(y + 1) * self.w * 4])
+        }
+    }
+
+    fn nits_pair(w: usize, h: usize) -> (NitsSource, NitsSource, Vec<f32>, Vec<f32>) {
+        let mut r = vec![0.0f32; w * h * 4];
+        for (i, v) in r.iter_mut().enumerate() {
+            *v = if i % 4 == 3 { 1.0 } else { 0.5 + 400.0 * ((i % 89) as f32 / 89.0) };
+        }
+        let mut d = r.clone();
+        for v in d.iter_mut().step_by(9) {
+            *v *= 0.8;
+        }
+        let rgb = |px: &[f32]| -> Vec<f32> {
+            px.chunks_exact(4).flat_map(|c| c[..3].to_vec()).collect()
+        };
+        let (rr, dd) = (rgb(&r), rgb(&d));
+        (NitsSource { rgba: r, w, h }, NitsSource { rgba: d, w, h }, rr, dd)
+    }
+
+    #[test]
+    fn compute_routes_descriptor_flagged_hdr_to_pu_linear() {
+        let (w, h) = (64usize, 64usize);
+        let (src, dst, r_rgb, d_rgb) = nits_pair(w, h);
+        for profile in [ZensimProfile::B, ZensimProfile::A] {
+            let z = Zensim::new(profile);
+            let via_compute = z.compute(&src, &dst).unwrap().score();
+            let via_pu = z
+                .compute_pu_linear(&r_rgb, &d_rgb, w, h, w * 3, w * 3)
+                .unwrap()
+                .score();
+            assert!(
+                (via_compute - via_pu).abs() < 1e-12,
+                "{profile}: compute() must route to pu_linear: {via_compute} vs {via_pu}"
+            );
+        }
+        // B on descriptor-HDR == BHdr (the routed weights).
+        let b = Zensim::new(ZensimProfile::B).compute(&src, &dst).unwrap().score();
+        let bh = Zensim::new(ZensimProfile::BHdr).compute(&src, &dst).unwrap().score();
+        assert!((b - bh).abs() < 1e-12);
+    }
+}

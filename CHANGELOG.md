@@ -19,6 +19,13 @@
   is unrepresentable. Routing keys on the typed entry, never pixel values
   (value-sniffing would seam at thresholds — measured 5-10pt cross-model
   scatter). `BHdr` remains the explicit unrouted HDR handle.
+- `Zensim::compute` / `compute_extended_features` now route
+  DESCRIPTOR-FLAGGED HDR sources (`ImageSource::is_hdr()` +
+  `PixelFormat::LinearF32Rgba`) to the PU-linear front-end + the profile's
+  HDR weights instead of erroring `HdrInputRequiresPuPath` — the issue #38
+  centralised guard now dispatches (one `compute()` serves both domains when
+  the descriptor properly flags the transfer; mixed or self-contradictory
+  descriptors still error).
 
 ### Fixed
 - Validate-side output-calibration spline now caps upper extrapolation at

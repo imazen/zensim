@@ -1127,6 +1127,24 @@ impl Zensim {
         distorted: &impl ImageSource,
         codec_hint: Option<&str>,
     ) -> Result<ZensimResult, ZensimError> {
+        // Descriptor-declared HDR (`ImageSource::is_hdr` — the zenpixels
+        // transfer signal, never pixel-value sniffing) routes to the
+        // PU-linear front-end + the profile's HDR weights (issue #38: the
+        // centralised guard now dispatches instead of erroring). The codec
+        // hint does not apply on this path (per-codec affines are
+        // SDR-calibrated).
+        if source.is_hdr() || distorted.is_hdr() {
+            if source.is_hdr() != distorted.is_hdr() {
+                return Err(ZensimError::HdrInputRequiresPuPath);
+            }
+            if source.width() != distorted.width() || source.height() != distorted.height() {
+                return Err(ZensimError::DimensionMismatch);
+            }
+            let r = nits_rgb_from_hdr_source(source)?;
+            let d = nits_rgb_from_hdr_source(distorted)?;
+            let (w, h) = (source.width(), source.height());
+            return self.compute_pu_linear(&r, &d, w, h, w * 3, w * 3);
+        }
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
@@ -1169,6 +1187,15 @@ impl Zensim {
         source: &impl ImageSource,
         distorted: &impl ImageSource,
     ) -> Result<ZensimResult, ZensimError> {
+        if source.is_hdr() || distorted.is_hdr() {
+            if source.is_hdr() != distorted.is_hdr() {
+                return Err(ZensimError::HdrInputRequiresPuPath);
+            }
+            let r = nits_rgb_from_hdr_source(source)?;
+            let d = nits_rgb_from_hdr_source(distorted)?;
+            let (w, h) = (source.width(), source.height());
+            return self.compute_pu_linear_extended_features(&r, &d, w, h, w * 3, w * 3);
+        }
         let params = self.profile.params();
         validate_pair(source, distorted)?;
         check_within_max_pixels(source.width(), source.height(), self.max_pixels)?;
@@ -1994,6 +2021,27 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// HDR pixels in a `LinearF32Rgba` source are indistinguishable from
 /// SDR and would be silently clamped.
 #[inline]
+
+/// Extract interleaved linear RGB f32 (absolute nits) from a
+/// descriptor-flagged HDR source. Only [`PixelFormat::LinearF32Rgba`] can
+/// carry nits; an `is_hdr()` source in any u8/u16 sRGB format is a caller
+/// bug (the descriptor contradicts itself) and errors rather than guessing.
+fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimError> {
+    if src.pixel_format() != crate::source::PixelFormat::LinearF32Rgba {
+        return Err(ZensimError::HdrInputRequiresPuPath);
+    }
+    let (w, h) = (src.width(), src.height());
+    let mut out = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        let row = src.row_bytes(y);
+        let px: &[f32] = bytemuck::cast_slice(&row[..w * 16]);
+        for x in 0..w {
+            out.extend_from_slice(&px[x * 4..x * 4 + 3]);
+        }
+    }
+    Ok(out)
+}
+
 pub(crate) fn reject_hdr_input(source: &impl ImageSource) -> Result<(), ZensimError> {
     if source.is_hdr() {
         return Err(ZensimError::HdrInputRequiresPuPath);
