@@ -677,7 +677,14 @@ sidecar + the hqfill-A val-origin rows [19,082 of 62,173] with the
 hqfill 7-metric sidecar; identical dedup-key semantics, split gate
 `split_of(name)=="val"`).
 
-<!-- V2_MANIFEST -->
+OLS on mm6 TRAIN mix rows: a=0.2636, b=+0.5984; 5,550 NaN-cvvdp train rows dropped (0.35%). Val-join stats: 392,804 dup-key rows skipped, 43,091 non-val-origin skipped, 24,501 cvvdp-nomatch dropped (1.9% of 1.30M).
+
+| file | rows | residual range | sha256 |
+|---|--:|---|---|
+| bigcodec_mm6mix_traindigits_residual_v2_2026-07-03.parquet | 1,559,919 | [-0.7230, +0.9882] | `ca75db7d8b5e1ec77a76959aa34be412b09fb407f6f1e397298b68e65961cfde` |
+| bigcodec_mm6mix_valdigits_residual_v2_2026-07-03.parquet | 914,418 | [-0.7233, +0.9831] | `a7fcbfff7d8113fdde5a650a94e401875b5c0e66dd263ff9138e122d5029d8c5` |
+
+`validate_parquet.py --kind train --target-col residual_target --target-range=-1.001,1.001`: **ALL checks PASS on both v2 files, zero FAILs** — including C10 (the mm6 join's dedup key removes the duplicate class the v1 bigcodec files inherited). Both residual ranges in [−1,1] by construction (train [−0.7230, +0.9882], val [−0.7233, +0.9831]).
 
 ### 2. HDR anchored sibling — dense top-end (anchored2)
 
