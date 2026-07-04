@@ -598,3 +598,24 @@ Standing CID22 order: ssim2 0.8894 > S5-linear 0.8793 > cid80-linear 0.8733
 > t1dro51 0.8708 > A 0.8657 > cvvdp 0.8214 > butter-p3 0.7933 — zensim-family
 bakes (incl. 823-byte linear) all BEAT cvvdp and butteraugli on CID22.
 Parquets: cid22_{cvvdp,butteraugli-gpu}.parquet in the probe dir.
+
+## w10 residual-stack verdict (2026-07-03)
+
+Residual MLP (372→128→64, no spline, raw preds) on residual targets; composed
+= clip01(a·base+b) + λ·residual, base = lp_hdrmix-lasso0.002 (raw weights).
+
+| corpus | base (λ=0) | λ=0.15 | λ=0.5 | λ=1.0 |
+|---|---|---|---|---|
+| CID22 | **0.8740** | 0.8685 | 0.8561 | 0.8466 |
+| AIC-3 | **0.7905** | 0.7819 | 0.7673 | 0.7575 |
+| KonJND | **0.3716** | 0.3696 | 0.3556 | 0.3407 |
+| UPIQ | 0.6546 | — | — | **0.6959** |
+
+- **SDR residual FALSIFIED at every λ** (monotone-down): the pure-ssim2
+  residual target points anti-human — target defect, not architecture.
+- **HDR residual WORKS** (+0.041 UPIQ): its target derives from the
+  mix-anchored corpus. Same lesson as w8/attribution: ssim2-only targets
+  are the anti-human vector; mix targets carry the value.
+- **Structural bound CONFIRMED**: max composed damage −0.03 vs −0.30 for
+  MLP collapse. The architecture contains failure; w10b = SDR residual
+  re-derived vs the 4-metric mix (bigcodec_mm6).
