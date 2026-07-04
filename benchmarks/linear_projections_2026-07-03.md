@@ -764,3 +764,22 @@ explicit decision):
 - zenanalyze side: nothing to change in zenpredict proper; the JS
   decoder consuming zenpredict-viz metadata needs the twin change —
   that edit belongs to a session holding the zenanalyze marker.
+
+## w10b (mix-target residual) — composed verdict + architecture close (2026-07-04)
+
+| corpus | base | λ=0.15 | λ=0.3 | λ=0.5 | λ=1.0 |
+|---|---|---|---|---|---|
+| CID22 | **0.8740** | 0.8616 | 0.8478 | 0.8313 | 0.8018 |
+| AIC-3 | **0.7905** | 0.7775 | 0.7652 | 0.7501 | 0.7246 |
+| KonJND | 0.3716 | 0.3934 | **0.3990** | 0.3972 | 0.3841 |
+
+The mix target fixes the residual's KonJND direction (+0.027, vs v1's
+negative) but CID22/AIC-3 remain monotone-down: the linear base is near
+feature-ceiling for CID22-shaped structure, and any MLP correction trades
+top-line rank. Decisive comparison: **ens-Pline-cid80 (0.8733/0.5439)
+dominates every composed variant on both axes** — on SDR the ensembles own
+the Pareto front. ARCHITECTURE CLOSE: residual stack = validated+bounded
+mechanism whose proven value is HDR-side (+0.041 UPIQ); SDR ship shape =
+linear ensembles; the gate protects any MLP anywhere. Forever-model stack:
+per-domain linear cores (dial-aligned via the shared anchor), HDR residual
+optional, everything deterministic except explicitly-gated corrections.
