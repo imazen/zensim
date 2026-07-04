@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+- `ZensimProfile::B` (`zensim-b`) and `ZensimProfile::BHdr` (`zensim-b-hdr`):
+  generation-B deterministic LINEAR profiles from the 2026-07 campaign. `B` =
+  823-byte lasso ensemble, beats `A` on 7/9 held-out axes (CID22 0.8733,
+  KonJND 0.5439), dial-anchored, collapse-immune by construction; `BHdr` =
+  shaped-feature HDR head (UPIQ 0.7313, best zensim-family HDR measured),
+  PU-linear feature regime, HDR-content-only (measured invalid on SDR —
+  route by domain). Shared anchor scale across both dials. Provenance:
+  `benchmarks/provenance_best_results_2026-07-04.md`.
+- `Zensim::compute_pu_linear_extended_features`: full 372-feature extraction
+  through the absolute-nits PU-XYB path (the `BHdr` feature regime).
+
+### Fixed
+- Validate-side output-calibration spline now caps upper extrapolation at
+  100 for parity with the product runtime (dial p95 artifacts eliminated).
+- `m3_no_cap_by_default` repaired to assert the intentional 120 MP default
+  from c1359276 (#49) (test was missed in that change).
+
+
 ### Fixed — trainer: restore Profile-A reproducibility (gate the #40 rank_w init flip to h=1)
 
 - The #40 fix (`47aff783`) flipped the initial `rank_w` signs to `-|w|` for

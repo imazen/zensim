@@ -284,12 +284,14 @@ fn m3_max_pixels_cap_fires_on_compute_with_ref() {
 }
 
 #[test]
-fn m3_no_cap_by_default() {
+fn m3_default_cap_is_120mp() {
+    // Default rotated from uncapped to 120 MP in c1359276 (#49); this test
+    // previously asserted `None` and was missed in that change.
     let zensim = z();
-    assert_eq!(zensim.max_pixels(), None);
+    assert_eq!(zensim.max_pixels(), Some(120_000_000));
     let pixels = vec![[100u8, 100, 100]; 32 * 32];
     let img = RgbSlice::new(&pixels, 32, 32);
-    // Default Zensim with no cap should accept reasonable images.
+    // Reasonable images are far below the default cap.
     let _ = zensim.compute(&img, &img).expect("default Zensim accepts");
 }
 

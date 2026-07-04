@@ -38,6 +38,36 @@ pub enum ZensimProfile {
     /// mapping table in `docs/CODEC_TARGET_METRIC.md`, NOT inlined here
     /// (so this doc can't go stale on rotation).
     A,
+    /// **`B` — generation-B SDR profile (external name `zensim-b`).**
+    /// Deterministic LINEAR core: a 35-weight lasso ensemble over the 372
+    /// features (`ens-Pline-cid80`, 823 B), dial-calibrated against the
+    /// shared multiband anchor scale. Ships the 2026-07-04 campaign's SDR
+    /// pick: beats `A` on 7/9 held-out panel axes (CID22 0.8733 vs 0.8657,
+    /// KonJND 0.5439 vs 0.4185) with the dial panel green (monotonicity
+    /// 0.9711, 0 dead zones). Fit is closed-form and byte-reproducible —
+    /// no training seed exists, so the MLP family's collapse mode
+    /// structurally cannot occur. Provenance + repro:
+    /// `benchmarks/provenance_best_results_2026-07-04.md`.
+    ///
+    /// **SDR content only** — for HDR (absolute-luminance) content use
+    /// [`ZensimProfile::BHdr`]; the two dials share one anchor scale
+    /// (cross-model MAE ≈5pt in the dial zone, boundary seam ≤0.92pt).
+    B,
+    /// **`BHdr` — generation-B HDR profile (external name `zensim-b-hdr`).**
+    /// Deterministic LINEAR core on SHAPED features (50 weights, 11.7 KB,
+    /// `hdr-lasso0.001-shaped-anchored2`): the strongest zensim-family HDR
+    /// result measured (UPIQ-HDR |SROCC| 0.7313 vs `A`'s 0.6933; cvvdp
+    /// 0.758 remains the cross-metric reference). Feature regime =
+    /// PU-linear integrated (`Zensim::compute_pu_linear_extended_features`
+    /// — absolute nits, no u8 shell, no display-peak anchor; extraction via
+    /// `zenmetrics score-pairs --hdr --hdr-features-pu-linear`). Dial spline
+    /// anchored to the shared scale with knots to the corpus's honest 92.8
+    /// ceiling.
+    ///
+    /// **HDR content only** — measured INVALID on SDR codec content
+    /// (rank agreement 0.72, unbounded extrapolation); route SDR to
+    /// [`ZensimProfile::B`] / [`ZensimProfile::A`].
+    BHdr,
     /// **Externally-defined profile** — an escape hatch for profiles
     /// constructed outside this crate (for example the unpublished
     /// `zensim-experimental` crate, which preserves the historical
@@ -151,6 +181,8 @@ impl ZensimProfile {
     pub fn name(&self) -> &'static str {
         match self {
             Self::A => "zensim-a",
+            Self::B => "zensim-b",
+            Self::BHdr => "zensim-b-hdr",
             // Experimental / historical profiles live in `zensim-experimental`
             // and surface here as `Custom` with their original name string.
             #[cfg(feature = "custom-profiles")]
@@ -162,6 +194,8 @@ impl ZensimProfile {
     pub(crate) fn params(&self) -> &'static ProfileParams {
         match self {
             Self::A => &PROFILE_A,
+            Self::B => &PROFILE_B,
+            Self::BHdr => &PROFILE_B_HDR,
             // Experimental / historical profiles carry their own
             // `&'static ProfileParams` built in `zensim-experimental`.
             #[cfg(feature = "custom-profiles")]
@@ -690,6 +724,68 @@ static PROFILE_A: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
+/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80-anchored` (823 B,
+/// sha256 `7b326ac5…`), the 2026-07-04 deterministic-linear SDR pick.
+pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
+    include_bytes!("../weights/b_sdr_linear_cid80_anchored_2026-07-04.bin")
+}
+
+/// `ZensimProfile::BHdr` bake bytes — `hdr-lasso0.001-shaped-anchored2`
+/// (11.7 KB, sha256 `373eac56…`); carries `zentrain.feature_transforms`
+/// metadata so the runtime dispatches `predict_transformed`.
+pub(crate) fn linear_bake_bhdr_shaped() -> &'static [u8] {
+    include_bytes!("../weights/bhdr_linear_shaped_anchored2_2026-07-04.bin")
+}
+
+/// Generation-B SDR profile params. Same 372-feature front end as
+/// `PROFILE_A`; the bake is a single identity-activation linear layer with
+/// its own anchored dial spline, so the MLP forward path drives it
+/// unchanged.
+static PROFILE_B: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(linear_bake_b_cid80),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// Generation-B HDR profile params. Identical runtime shape to `PROFILE_B`;
+/// the shaped-feature dispatch happens via the bake's transform metadata.
+/// Callers MUST feed absolute-luminance content through the PU-linear
+/// feature path (see the `BHdr` variant docs) — SDR sRGB input is
+/// out-of-domain for this bake.
+static PROFILE_B_HDR: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: true,
+    mlp_bytes: Some(linear_bake_bhdr_shaped),
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: true,
+    compute_iw_features: true,
+    soft_clamp_score: false,
+    extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
 // --- Weight arrays ---
 
 /// Preview v0.2 weights (concordance-filtered 218k synthetic pairs, Nelder-Mead).
@@ -943,3 +1039,46 @@ pub static WEIGHTS_PREVIEW_V0_2: [f64; 228] = [
 /// bytes. Kept indefinitely for source compatibility with code written
 /// against zensim 0.2.x and earlier.
 pub use self::WEIGHTS_PREVIEW_V0_2 as LINEAR_WEIGHTS_PREVIEW_V0_2;
+
+#[cfg(test)]
+mod profile_b_tests {
+    use super::*;
+    use crate::{PixelFormat, StridedBytes, Zensim};
+
+    fn synth(w: usize, h: usize, seed: u32) -> Vec<u8> {
+        let mut px = vec![0u8; w * h * 3];
+        for (i, v) in px.iter_mut().enumerate() {
+            *v = (((i as u32).wrapping_mul(2654435761).wrapping_add(seed)) >> 24) as u8;
+        }
+        px
+    }
+
+    #[test]
+    fn profile_b_loads_scores_and_holds_identity() {
+        let (w, h) = (64usize, 64usize);
+        let refe = synth(w, h, 7);
+        let mut dist = refe.clone();
+        for v in dist.iter_mut().step_by(5) {
+            *v = v.saturating_sub(20);
+        }
+        for profile in [ZensimProfile::B, ZensimProfile::BHdr] {
+            let z = Zensim::new(profile);
+            let src =
+                StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+            let dst =
+                StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+            let ident = z.compute(&src, &src).unwrap().score();
+            assert!(
+                (ident - 100.0).abs() < 1e-9,
+                "{profile}: identity must be 100, got {ident}"
+            );
+            let s = z.compute(&src, &dst).unwrap().score();
+            assert!(
+                s.is_finite() && s < ident && s > -50.0,
+                "{profile}: distorted score sane+below identity, got {s}"
+            );
+        }
+        assert_eq!(ZensimProfile::B.name(), "zensim-b");
+        assert_eq!(ZensimProfile::BHdr.name(), "zensim-b-hdr");
+    }
+}
