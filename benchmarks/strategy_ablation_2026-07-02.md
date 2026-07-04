@@ -479,3 +479,23 @@ family cannot absorb it safely. Stability work belongs at the
 ARCHITECTURE level (linear/ensemble/residual, deterministic), not target
 or seed tuning. Control fan (t1dro51 × 11 fresh seeds) running to
 establish the family's baseline rate.
+
+## Control fan CLOSED — final collapse attribution (2026-07-04)
+
+t1dro51 (pure SDR recipe) × 11 fresh seeds: **1 collapse (s13: CID22 0.4232,
+gate-caught rc=9)**, 10 healthy. Combined family evidence:
+
+| recipe | seeds | collapses | rate |
+|---|---|---|---|
+| t1dro51 (SDR) | 16 (5 orig + 11 ctl) | 1 (s13) | **6.25%** |
+| w6/w7 (HDR v3) | 16 | 7 | **43.75%** |
+| w8 (HDR cvvdp-mix) | 2 | 2 | 100% (n=2) |
+
+- The attractor is FAMILY-LATENT (exists in the pure SDR recipe; the
+  original "0/5" was width luck) — every MLP fan needs the gate, forever.
+- The v3-HDR ingredients amplify it ~7x (6.25→43.75%, Fisher p≈0.04); the
+  cvvdp-mix target amplifies further. The more human-aligned the target,
+  the more the MLP optimization destabilizes — while the SAME targets make
+  deterministic linear fits BETTER. This inverse coupling is the deepest
+  finding of the campaign and the forever-model architecture's central
+  justification: deterministic core + gate-protected learned components.
