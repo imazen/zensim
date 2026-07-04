@@ -996,10 +996,50 @@ def cmd_residual2(args) -> int:
                         seen.add(k); stats["nonval"] += 1
                 if keep:
                     yield ([names[i] for i in keep], hs[keep], cv[keep], F[keep])
+        # hqfill val-origin rows (19,082 of 62,173 — near-lossless JXL band;
+        # joined exactly as build_mm6_join.py does for train: key =
+        # (rendition basename minus sha, knob_tuple_json) -> cvvdp).
+        hq_side = pq.read_table(PROBE / "hqfill_7metric_sidecar_2026-07-02.parquet",
+                                columns=["encoded_filename", "knob_tuple_json",
+                                         "score_cvvdp_imazen_v0_0_1"])
+        hq2 = {}
+        for fn, kj, cvv in zip(hq_side["encoded_filename"].to_pylist(),
+                               hq_side["knob_tuple_json"].to_pylist(),
+                               np.asarray(hq_side["score_cvvdp_imazen_v0_0_1"], dtype=np.float64)):
+            rb = "_".join(fn.split("_zenjxl_")[0].split("_")[:-1])
+            hq2[(rb, kj)] = cvv
+        pf = pq.ParquetFile("/mnt/v/datasets/jxl-lossy-hqfill-A/zenjxl_lossy_hqfill_A_features_2026-07-02.parquet")
+        featcols = sorted([c for c in pf.schema_arrow.names
+                           if c.startswith("feat_") and c[5:].isdigit()],
+                          key=lambda c: int(c[5:]))
+        for batch in pf.iter_batches(batch_size=65536,
+                                     columns=["image_path", "knob_tuple_json", "score_ssim2"] + featcols):
+            t = pa.Table.from_batches([batch])
+            names = [_os.path.basename(x) for x in t["image_path"].to_pylist()]
+            kjs = t["knob_tuple_json"].to_pylist()
+            hs = np.clip(np.asarray(t["score_ssim2"], dtype=np.float64) / 100.0, 0.0, 1.0)
+            F = np.column_stack([np.asarray(t[c], dtype=np.float64) for c in featcols])
+            cv = np.array([hq2.get((_os.path.splitext(nm)[0] if nm.endswith(".png") else nm, k),
+                                   hq2.get((nm, k), np.nan))
+                           for nm, k in zip(names, kjs)], dtype=np.float64)
+            stats["nomatch"] += int(np.isnan(cv).sum())
+            keep = []
+            for i, (nm, h) in enumerate(zip(names, hs)):
+                k = (nm, round(float(h), 9), round(float(F[i][0]), 9),
+                     round(float(F[i][1]), 9), round(float(F[i][2]), 9))
+                if k in seen:
+                    stats["dup"] += 1
+                elif split_of(nm) == "val":
+                    seen.add(k); keep.append(i)
+                else:
+                    seen.add(k); stats["nonval"] += 1
+            if keep:
+                yield ([names[i] for i in keep], hs[keep], cv[keep], F[keep])
     write_stream(outdir / "bigcodec_mm6mix_valdigits_residual_v2_2026-07-03.parquet",
                  val_batches(),
-                 f"{CANON_PICKER}/<ds>/validate.parquet x {len(MM6_DATASETS)} + fill4 sidecar (val-split join, "
-                 "same key/dedup semantics as build_mm6_join.py; hqfill val rows not included)")
+                 f"{CANON_PICKER}/<ds>/validate.parquet x {len(MM6_DATASETS)} + fill4 sidecar "
+                 "+ hqfill-A val-origin rows w/ hqfill 7-metric sidecar (val-split join, "
+                 "same key/dedup semantics as build_mm6_join.py)")
     manifest["v2_mix"]["val_join_stats"] = stats
     manifest_path.write_text(json.dumps(manifest, indent=1))
     print(f"manifest updated: {manifest_path}  val-join stats {stats}", flush=True)

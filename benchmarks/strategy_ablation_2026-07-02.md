@@ -468,3 +468,14 @@ Strategic consequence: recipe-level target tweaks are dice re-rolls; the
 structural roads (linear ensembles — collapse-free by construction — and
 the residual stack with a deterministic base) are the forever-model path.
 w8_s7 completes the probe; w10 residual training queued.
+
+## w8 CLOSED: 2/2 collapse — the target/optimizer dissociation (2026-07-04)
+
+w8_cvmix both seeds in the attractor (s17 0.5753, s7 0.5702, both
+gate-caught). The SAME cvvdp-mix target that collapses the MLP 2/2 makes
+the LINEAR fit the program CID22 champion (0.8764). Verdict: the target
+carries the best human-alignment signal we have; MLP SGD on this recipe
+family cannot absorb it safely. Stability work belongs at the
+ARCHITECTURE level (linear/ensemble/residual, deterministic), not target
+or seed tuning. Control fan (t1dro51 × 11 fresh seeds) running to
+establish the family's baseline rate.

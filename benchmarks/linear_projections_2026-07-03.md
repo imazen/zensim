@@ -649,3 +649,111 @@ wart FIXED). Cross-model agreement: **MAE 5.05pt in the mutual dial zone
 ≤0.92pt per the anchored transfer). Remaining refinement: clamp spline
 extrapolation at end-knots (runtime/bake-format nicety) + a denser HDR
 anchor top-end.
+
+
+## w10b follow-on: mix-target SDR residual v2 + dense HDR anchor + spline-extrapolation finding (2026-07-03 night)
+
+### 1. SDR residual corpora v2 — mix target (w10b)
+
+w10 v1's SDR residual head was falsified at every λ (composed CID22
+0.874→0.847): the v1 target was the ssim2-normalized `human_score`, and
+the composed model inherited its defect, while the HDR residual (whose
+target derives from the cvvdp mix) GAINED +0.041 UPIQ. v2 rebuilds the
+SDR residual against the hdr_v3mix convention:
+
+`target_mix = 0.5·clip01(ssim2_norm) + 0.5·clip01((score_cvvdp − 6)/4)`
+
+on `bigcodec_mm6_traindigits_2026-07-02.parquet` (1,565,469 rows with 4
+metric columns; 5,550 NaN-cvvdp rows dropped = 0.35%), same base
+(`lp_hdrmix-lasso0.002-raw-tau0-f16`, sha `bdb5d63ea699…`), same
+anchor-domain pred clamp [−4.9061, 1.1274] + OLS (a,b) on the TRAIN mix
+rows + clip01 composition → residual ∈ [−1,1] by construction.
+
+**Val side is real this time**: the fill4 metric sidecar covers the
+canonical-picker validate splits at 100% (probed on 3 datasets × 4,000
+rows), so v2 ships a mix-target valdigits file built by the SAME join as
+`build_mm6_join.py` (6 canonical datasets' validate.parquet + fill4
+sidecar + the hqfill-A val-origin rows [19,082 of 62,173] with the
+hqfill 7-metric sidecar; identical dedup-key semantics, split gate
+`split_of(name)=="val"`).
+
+<!-- V2_MANIFEST -->
+
+### 2. HDR anchored sibling — dense top-end (anchored2)
+
+The 2026-07-03 shared-anchor HDR sibling fit its spline on hdr-v3
+valdigits alone: 18 knots, dial y tops at **88.6** while the data
+reaches 92.3 (val has only 103 rows above human_score 0.90; max 0.9234).
+`scripts/v_next/hdr_anchor_dense_refit.py` re-emits
+`lp_hdr-lasso0.001-shaped-anchored2-f16.bin` (11,684 B) with:
+
+- anchor = 3,900 val rows + 1,760 train rows with human_score > 0.85
+  (train-legal augmentation; spline anchors routinely come from train);
+- 28 percentile bins (vs 18) + **Q-Q top-end knots** (pred-quantile →
+  target-quantile at q0.995/q0.999/max). The conditional-median end knot
+  honestly tops at ~88.9 — the head's top-25 predictions have median
+  TRUE score 88.9 (top-band rank imperfection) — Q-Q instead matches
+  marginals, reaching the data ceiling;
+- an SDR near-lossless extension was **measured and rejected**: only 27%
+  of the SDR anchor's target≥88 rows predict above the HDR top knot
+  (median SDR-top pred 0.962 vs HDR top 1.000) — consistent with the
+  two-model verdict that the HDR pick is invalid on SDR content. No
+  cross-domain knot was added.
+
+| bake | knots | spline x-range | dial y-range |
+|---|--:|---|---|
+| anchored (w10, 2026-07-03) | 18 | [0.284, 0.969] | [24.8, **88.6**] |
+| **anchored2 (this pass)** | 25 | [0.297, 1.023] | [25.9, **92.8**] |
+
+**~95+ is not achievable honestly on this scale**: the ssim2-derived
+0..100 HDR corpus tops at 92.75 (train) / 92.34 (val) — there is no
+dial-95 material in hdr-v3. Above the top knot the runtime linearly
+extrapolates (product caps at 100), so better-than-anchor content still
+scores 92.8→100 smoothly.
+
+**Rank-exactness verified, not assumed**: hdrval SROCC +0.8859 and UPIQ
+|SROCC| 0.7313 are IDENTICAL across tau0 / anchored / anchored2 (the
+monotone spline is rank-invariant); UPIQ |PLCC| improves 0.6910 →
+0.6938 → **0.7009** (top-end calibration linearity bonus).
+
+### 3. Output-spline extrapolation beyond end knots (read-only finding)
+
+**zenpredict never evaluates the spline.** The
+`zentrain.output_calibration_spline` metadata is storage-only in
+zenanalyze/zenpredict; the evaluators are:
+
+| evaluator | below bottom knot | above top knot |
+|---|---|---|
+| `zensim/src/metric.rs::apply_output_calibration_spline` (product runtime, lines 2724–2730) | LINEAR: `ys[0] + derivs[0]·(x−xs[0])` | LINEAR then `.min(100.0)` — capped at 100, NOT at the knot (comment: "no score exceeds identical") |
+| `zensim-validate/src/output_calibration_spline.rs::apply` (bake_verdict, qsweep_eval, score_pair_with_bake, …) | LINEAR (same formula) | **pure LINEAR, uncapped** |
+| zenpredict-viz (zenanalyze) | n/a — decodes the metadata for a JS-side evaluator; Rust crate does not evaluate | n/a |
+
+Two consequences:
+
+1. **The "bit-exact with zensim::metric" claim in
+   zensim-validate/src/output_calibration_spline.rs's doc comment is
+   FALSE above the top knot** — the product caps at 100, validate does
+   not. This is why validate-side DIAL panels report dial p95 values
+   like 504.3 (e.g. the 2026-05-28 v02-bvls verdict) that the product
+   runtime would report as 100.
+2. Extrapolation is LINEAR (endpoint PCHIP derivative), not clamped, on
+   both ends in both evaluators.
+
+**Smallest change that would clamp at the knots** (documented only —
+NOT implemented; runtime-behavior changes to shipped scoring need an
+explicit decision):
+
+- top-clamp-at-knot: `zensim/src/metric.rs:2729` →
+  `return ys[n - 1];` (one line), and the twin
+  `zensim-validate/src/output_calibration_spline.rs:95` →
+  `return ys[n - 1];` (one line).
+- If only product/validate PARITY is wanted (keep current product
+  semantics), the validate line instead becomes
+  `return (ys[n-1] + derivs[n-1]*(x - xs[n-1])).min(100.0);`.
+- **Do NOT clamp the bottom knot**: `pack_and_calibrate.py --neg-tail`
+  and the corruption-resolution design deliberately rely on linear
+  extrapolation below the bottom knot (corrupted inputs score negative);
+  a bottom clamp would erase that signal.
+- zenanalyze side: nothing to change in zenpredict proper; the JS
+  decoder consuming zenpredict-viz metadata needs the twin change —
+  that edit belongs to a session holding the zenanalyze marker.
