@@ -20,12 +20,15 @@
   (value-sniffing would seam at thresholds — measured 5-10pt cross-model
   scatter). `BHdr` remains the explicit unrouted HDR handle.
 - `Zensim::compute` / `compute_extended_features` now route
-  DESCRIPTOR-FLAGGED HDR sources (`ImageSource::is_hdr()` +
-  `PixelFormat::LinearF32Rgba`) to the PU-linear front-end + the profile's
-  HDR weights instead of erroring `HdrInputRequiresPuPath` — the issue #38
-  centralised guard now dispatches (one `compute()` serves both domains when
-  the descriptor properly flags the transfer; mixed or self-contradictory
-  descriptors still error).
+  DESCRIPTOR-FLAGGED HDR sources to the PU-linear front-end + the profile's
+  HDR weights instead of erroring `HdrInputRequiresPuPath` (issue #38: the
+  centralised guard now dispatches). **The routing signal is `is_hdr()`
+  alone** — `PixelFormat::LinearF32Rgba` is a CONTAINER that also carries
+  SDR (display-relative [0,1]) content, which continues through the SDR
+  pipeline unchanged; the format is only VALIDATED on flagged sources (an
+  `is_hdr()` source in a u8/u16 sRGB format is self-contradictory and
+  errors). Pinned by `flag_not_format_decides_the_pipeline` (same bytes,
+  flag flipped → different pipeline) and the mixed-pair refusal test.
 
 ### Fixed
 - Validate-side output-calibration spline now caps upper extrapolation at

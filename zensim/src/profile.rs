@@ -1210,3 +1210,70 @@ mod descriptor_hdr_routing_tests {
         assert!((b - bh).abs() < 1e-12);
     }
 }
+
+#[cfg(test)]
+mod linearf32_sdr_not_hdr_tests {
+    use super::*;
+    use crate::source::{AlphaMode, ImageSource, PixelFormat};
+    use crate::Zensim;
+
+    /// LinearF32Rgba is a CONTAINER, not an HDR signal — SDR content ships
+    /// in it too (display-relative [0,1] linear). Only `is_hdr()` routes.
+    struct F32Source {
+        rgba: Vec<f32>,
+        w: usize,
+        h: usize,
+        hdr: bool,
+    }
+    impl ImageSource for F32Source {
+        fn width(&self) -> usize {
+            self.w
+        }
+        fn height(&self) -> usize {
+            self.h
+        }
+        fn pixel_format(&self) -> PixelFormat {
+            PixelFormat::LinearF32Rgba
+        }
+        fn alpha_mode(&self) -> AlphaMode {
+            AlphaMode::Opaque
+        }
+        fn is_hdr(&self) -> bool {
+            self.hdr
+        }
+        fn row_bytes(&self, y: usize) -> &[u8] {
+            bytemuck::cast_slice(&self.rgba[y * self.w * 4..(y + 1) * self.w * 4])
+        }
+    }
+
+    #[test]
+    fn flag_not_format_decides_the_pipeline() {
+        let (w, h) = (64usize, 64usize);
+        let mut r = vec![0.0f32; w * h * 4];
+        for (i, v) in r.iter_mut().enumerate() {
+            *v = if i % 4 == 3 { 1.0 } else { 0.05 + 0.9 * ((i % 83) as f32 / 83.0) };
+        }
+        let mut d = r.clone();
+        for v in d.iter_mut().step_by(7) {
+            *v *= 0.75;
+        }
+        let z = Zensim::new(ZensimProfile::B);
+        let mk = |rgba: &Vec<f32>, hdr: bool| F32Source { rgba: rgba.clone(), w, h, hdr };
+        // SDR-flagged linear f32: flows the SDR pipeline (no refusal, no PU).
+        let sdr = z.compute(&mk(&r, false), &mk(&d, false)).unwrap().score();
+        // Same bytes HDR-flagged: routed to the PU-linear pipeline.
+        let hdr = z.compute(&mk(&r, true), &mk(&d, true)).unwrap().score();
+        assert!(sdr.is_finite() && hdr.is_finite());
+        assert!(
+            (sdr - hdr).abs() > 1e-6,
+            "identical bytes must take DIFFERENT pipelines when only the \
+             descriptor flag differs (sdr={sdr}, hdr={hdr}); equality would \
+             mean the format, not the flag, was routing"
+        );
+        // Identity contract holds through both pipelines.
+        for hdrflag in [false, true] {
+            let s = z.compute(&mk(&r, hdrflag), &mk(&r, hdrflag)).unwrap().score();
+            assert!((s - 100.0).abs() < 1e-9);
+        }
+    }
+}

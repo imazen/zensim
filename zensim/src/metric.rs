@@ -2023,9 +2023,11 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 #[inline]
 
 /// Extract interleaved linear RGB f32 (absolute nits) from a
-/// descriptor-flagged HDR source. Only [`PixelFormat::LinearF32Rgba`] can
-/// carry nits; an `is_hdr()` source in any u8/u16 sRGB format is a caller
-/// bug (the descriptor contradicts itself) and errors rather than guessing.
+/// descriptor-flagged HDR source. `LinearF32Rgba` is a CONTAINER, not an
+/// HDR signal — SDR content ships in it too and flows the SDR pipeline;
+/// only `is_hdr()` routes here. On flagged sources the format is validated:
+/// nits need f32 linear, so an `is_hdr()` source in a u8/u16 sRGB format is
+/// a self-contradictory descriptor and errors rather than guessing.
 fn nits_rgb_from_hdr_source(src: &impl ImageSource) -> Result<Vec<f32>, ZensimError> {
     if src.pixel_format() != crate::source::PixelFormat::LinearF32Rgba {
         return Err(ZensimError::HdrInputRequiresPuPath);
