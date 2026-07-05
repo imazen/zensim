@@ -219,8 +219,33 @@ grid v2 = open zenmetrics work); (2) f155's REAL heavy tail on tiny dark
 screen-content renditions (val max 14,532 vs fit-corpus p99.9 = 0.479;
 264/290 of B's sub-−5 raw rows; scale-pyramid degeneracy at ~50-100px).
 **Winsorize verdict: clamp features to fit-corpus [p0.1,p99.9] — provably
-bounds the linear raw output to [−0.55,1.12] (inside knot domain), zero
-tails, and free-or-BETTER on every panel axis (CID22 +0.0008, KonJND
-+0.002, AIC-3 −0.0001, UPIQ +0.031).** Ship shape: feature_bounds in the
-bakes (ZNPR section exists; semantics today = OOD-flag) + clamp-to-bounds
-in the zensim forward. Bottom-knot output floor becomes redundant.
+bounds the linear raw output (inside knot domain), zero tails, free-or-
+BETTER on the SDR axes.** SHIPPED 2026-07-05 (commit below).
+
+**The fix used the mechanism that already existed — no new code.**
+`zenpredict::FeatureTransform::WinsorP99` ("clip to [p1,p99], preserves
+rank within bounds", + the `WinsorThen*` stack family, `QuantileBins`,
+`clamp_inclusive`, `YeoJohnson`) has been in `zenpredict/src/
+feature_transform.rs` since 2026-05-14/17, flows through the
+`zentrain.feature_transforms` ZNPR metadata, is applied by
+`Predictor::predict_transformed`, and is auto-dispatched by EVERY consumer
+via `has_nontrivial_feature_transforms()` (zensim `metric.rs`) /
+`has_transforms` (validate `bake_runtime.rs`). **The shipped BHdr bake
+ALREADY carries 183 `winsor_p99` + 75 `quantile_bins` + 56 `signed_cbrt` +
+53 `yeo_johnson` transforms** — which is exactly why only B SDR had the
+tail: `ens-Pline-cid80` was the ONE bake baked in raw space with no
+transforms at all. The fix: re-bake B SDR with 372 `winsor_p99`
+transforms (fit-corpus [p0.1,p99.9] params), keeping its weights / scaler
+/ spline — `b_sdr_linear_cid80_winsor_2026-07-05.bin` (12.9 KB, sha
+`b92b0b7a…`). Measured on the SHIPPED ENSEMBLE through the real runtime
+(`bake_verdict`, which dispatches `predict_transformed`): raw min
+−1131→−1.86 (580 sub−5 rows → 0), CID22 0.8732→**0.8763**, KonJND
+0.5434→**0.5474**, AIC-3 flat, identity=100 preserved. UPIQ −0.007 (HDR,
+BHdr's domain, not an SDR-B gate). The `PROFILE_B` slot now points at the
+winsor bake; a regression test
+(`profile_b_tests::both_b_bakes_carry_winsorizing_transforms`) fails loud
+if a future re-bake reverts to the raw `predict` path. The earlier
+"feature_bounds section + inline clamp in the forward" plan was
+ABANDONED — it reinvented (in the wrong layer) what `winsor_p99` already
+does, and would have forced `bake_runtime.rs` to duplicate the clamp
+(the two-code-paths-diverge trap). No zenpredict edit was needed.

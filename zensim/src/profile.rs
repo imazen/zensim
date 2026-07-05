@@ -744,15 +744,29 @@ static PROFILE_A: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80-anchored` (823 B,
-/// sha256 `7b326ac5…`), the 2026-07-04 deterministic-linear SDR pick.
+/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80` anchored + WINSORIZED
+/// (12.9 KB, sha256 `b92b0b7a…`, rotated 2026-07-05): carries 372
+/// `winsor_p99` `zentrain.feature_transforms` (fit-corpus [p0.1, p99.9]
+/// per feature), applied by `Predictor::predict_transformed` — the SAME
+/// mechanism `BHdr` (and every shaped bake) already uses. Winsor is
+/// identity within [p1, p99], so rank is preserved on the 99.8% of rows
+/// that are in-distribution; the 0.2% tail is clipped, which provably
+/// bounds the raw output to ~[-1.86, 1.12] (inside the spline knot
+/// domain) and eliminates the f155 tiny-screen-content pathology (raw min
+/// -1131 -> -1.86 on 147k val rows; CID22 0.8732 -> 0.8762, KonJND 0.5434
+/// -> 0.5470 — measured on the shipped ensemble). The prior raw
+/// `ens-Pline-cid80` was the ONLY B bake with no transforms, hence the
+/// only one exposed to the tail. See benchmarks/provenance §f155.
 pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
-    include_bytes!("../weights/b_sdr_linear_cid80_anchored_2026-07-04.bin")
+    include_bytes!("../weights/b_sdr_linear_cid80_winsor_2026-07-05.bin")
 }
 
-/// `ZensimProfile::BHdr` bake bytes — `hdr-lasso0.001-shaped-anchored2`
-/// (11.7 KB, sha256 `373eac56…`); carries `zentrain.feature_transforms`
-/// metadata so the runtime dispatches `predict_transformed`.
+/// `ZensimProfile::BHdr` bake bytes — `hdr-lasso0.001-shaped` anchored2
+/// (11.7 KB, sha256 `373eac56…`): the shaped PU-linear HDR pick. Already
+/// carries 183 `winsor_p99` + 75 `quantile_bins` + 56 `signed_cbrt` + 53
+/// `yeo_johnson` transforms (the v02 yeo-johnson screen recipe), so it was
+/// never exposed to the raw-feature tail that afflicted B SDR. Unchanged
+/// by the 2026-07-05 winsor work — verified tail-safe as shipped.
 pub(crate) fn linear_bake_bhdr_shaped() -> &'static [u8] {
     include_bytes!("../weights/bhdr_linear_shaped_anchored2_2026-07-04.bin")
 }
@@ -1100,6 +1114,29 @@ mod profile_b_tests {
         }
         assert_eq!(ZensimProfile::B.name(), "zensim-b");
         assert_eq!(ZensimProfile::BHdr.name(), "zensim-b-hdr");
+    }
+
+    /// Both shipped B bakes MUST carry `feature_transforms` so the runtime
+    /// dispatches `predict_transformed` and winsorizes the input tail. B
+    /// SDR carries 372 `winsor_p99`; BHdr carries the mixed shape recipe.
+    /// This guards against a future re-bake silently reverting to the raw
+    /// `predict` path — which is exactly what exposed the f155
+    /// tiny-screen-content tail (raw min -1131) before 2026-07-05. See
+    /// benchmarks/provenance_best_results_2026-07-04.md §f155.
+    #[test]
+    fn both_b_bakes_carry_winsorizing_transforms() {
+        for profile in [ZensimProfile::B, ZensimProfile::BHdr] {
+            let loader = profile
+                .params()
+                .mlp_bytes
+                .expect("B/BHdr ship an mlp bake");
+            let model = crate::mlp::Model::from_bytes(loader()).expect("bake parses");
+            assert!(
+                model.has_nontrivial_feature_transforms(),
+                "{profile}: bake must carry feature_transforms (winsor guard); \
+                 a raw bake reintroduces the f155 tail"
+            );
+        }
     }
 }
 
