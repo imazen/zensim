@@ -1,7 +1,45 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated:** 2026-07-02 (splits registry + iteration protocol + PLAN_BEAT_A
-locked; Profile-A byte-reproducible; Hetzner-first infra live)
+**Last updated:** 2026-07-05 (Profile-B dial FIXED + shipped; B now dominates A;
+awaiting a user default-flip decision)
+
+## ⚡ Latest (2026-07-05) — Profile-B is dial-clean AND beats A; ONE decision pending
+
+All on `main@origin` (0fb4df41 tip). Details:
+`benchmarks/provenance_best_results_2026-07-04.md` (best-of-both dial probe +
+"B vs the SHIPPED A" + "BHdr dial — measured diagnosis").
+
+- **`ZensimProfile::B` dial FIXED + rotated (67762d48).** B's only failing dial
+  gate (near-lossless dead-zone 5.63%) was closed RANK-INVARIANTLY by extending
+  ONLY the winsor bake's spline TOP with the training-fitted concave saturation
+  (`scripts/v_next/dense_dial_refit_b.py`, k=3.31). Shipped bake
+  `b_sdr_linear_cid80_dense_dial_2026-07-05.bin` (sha `b78adb15`, byte-repro via
+  `scripts/reproduce_b.sh`). All G3 dial gates PASS (dead-zone 0.0005, inversions
+  0.0264), G-RANGE PASS, rank IDENTICAL (CID22 0.8763 / KonJND 0.5474). Gotcha
+  recorded: do NOT rebuild the spline from the balanced anchor — it lifts the
+  bottom knot off the real-content raw floor → 33% downward-extrapolation (the
+  outlier gate caught it). Extend the top only.
+- **★ DECISION PENDING (user): flip the default `latest()` A→B.** With B's dial
+  clean, B DOMINATES the shipped A (`v47`) on EVERY measured axis — CID22
+  0.8763 vs 0.8657, KonJND 0.5474 vs 0.4185, AIC-3 0.7774 vs 0.7680, AIC-4
+  0.8900 vs 0.8854, Z-RMSE better on 3/4, half the size, deterministic +
+  collapse-immune, same correctness props (identity/bounded/monotone). The old
+  "MLP wins AIC-3/4" caveat was vs the CANDIDATE t1dro51, NOT shipped A.
+  `latest()`/`latest_preview()`/`codec_target()` still return `Self::A` — the
+  flip is a default-behavior change, surfaced for user sign-off, NOT auto-applied.
+- **Workspace green** (89 ok / 0 fail). Fixed a pre-existing stale test on the
+  way (`4c80470a`): `v9_eight_knot_spline_monotone` asserted the old uncapped
+  spline >100; `5d4978db` capped it at 100 for product parity but missed this
+  sibling test. Verified against `metric.rs` (`.min(100.0)`) before changing.
+- **BHdr FAILS its hard G-RANGE gate (bottom, staged fix, NOT rotated).** Measured
+  (`0fb4df41`): below-knot 2.13% → negative dial (min −1.97); top is honest
+  (above-knot 0). Rank-invariant fix built + verified (SROCC 0.914897 unchanged,
+  negatives → +2.98, G-RANGE PASS), staged at `/mnt/v/output/
+  zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin` +
+  `scripts/v_next/bhdr_bottom_extend.py`. NOT rotated: 2nd shipped profile +
+  a deeper bottom-under-ranking question (targets 0.3–0.6 at very low raw) the
+  narrow knot-fix doesn't address. User call.
+
 
 ## Reading order on resume
 
