@@ -296,3 +296,50 @@ is hand-tuned to **human MOS on CID22-201 + KADID + TID** (KADID = the color/den
 distortion families). So on KADIS color distortions ssim2 is human-tuned and B is
 out-of-domain — the divergence favors ssim2 there; on compression (B's domain) they
 agree.
+
+## Measured: linear-B vs best-MLP (t1dro51) — dial + safety (2026-07-05)
+
+Ran `bake_verdict` (rank + DIAL panels) + `bake_outlier_gate` on both, same
+dial grid (`dial_grid_..._quarantined`, 106 curves/4 codec families) + same
+147k bigcodec_val safety corpus.
+
+**RANK** (held-out): linear-B CID22 **0.8763** / KonJND **0.5474** / AIC-3 0.7774;
+t1dro51 CID22 0.8708 / KonJND 0.3109 / AIC-3 **0.8013**. Linear wins CID22
+(+0.006) + KonJND (+0.24); MLP wins AIC-3 (+0.024).
+
+**DIAL** — the MLP is CLEANER, not the linear:
+| | inversions (G3≤0.07) | flat/clamp dead-zone (G3≤0.05) | G1 dyn-range |
+|---|--:|--:|--:|
+| linear-B (winsor) | 0.0262 ✓ | **0.0563 ✗** | p5=50.2 (fail) |
+| linear-B (pre-winsor) | 0.0269 ✓ | 0.0623 ✗ | — |
+| **MLP t1dro51** | 0.0246 ✓ | **0.0000 ✓** | p5=48.6 (fail) |
+
+- The linear's ~5.6% dead-zone is INHERENT (pre-winsor 6.23% → winsor slightly
+  REDUCED it to 5.63%; NOT a winsor artifact — my first hypothesis, falsified by
+  measuring the pre-winsor bake). A 372→1 linear collapses many near-lossless
+  feature deltas to identical scores; the MLP's 128→64 hidden capacity resolves
+  them (0 flat). So on the dial POINT metrics the MLP wins.
+- G1 (reach to p5≤25) FAILS for BOTH on this grid (p5≈48-50).
+- The provenance table's "0 dead" note for the 823B bake is STALE vs this grid
+  (measured 6.23%).
+
+**What linear actually wins on the dial: RELIABILITY, not point-quality.** The MLP
+is a seed lottery — 43.75% of v3 seeds COLLAPSE to G1=0.00 (flat/dead dial, mono
+0.996 constancy artifact); t1dro51 s31 is a HEALTHY survivor. Linear is Gram-exact
+deterministic, 0 collapse — its (imperfect) dial is GUARANTEED, not drawn.
+
+**SAFETY (G-RANGE tail):** linear-B post-winsor PASSES (raw [-1.86,1.12], 0
+extrapolating); pre-winsor FAILED (-1131 tail). The MLP is NOT bounded by
+construction — leaky_relu hidden reaches 33,709 / final 3,006 on the same tail
+rows — BUT its tail is POSITIVE, which the dial caps at 100; the linear's was
+NEGATIVE (below the bottom knot → uncapped downward → the -80 dial). So the acute
+failure was linear+negative-tail-specific; the winsor guard fixes the input side.
+Z-RMSE (calibration) vs human: AIC-3 linear-B 0.616 vs MLP **0.579** (MLP better).
+xmetric vs 5 peers (KADIS-700k): linear-B diverges 9%, concentrated on color
+distortions (out-of-domain), sides with iwssim — characterized, not a bug.
+
+**Bottom line:** linear-B wins CID22/KonJND rank + determinism + size (12.9KB vs
+48KB); t1dro51 wins AIC-3/AIC-4 rank + dial cleanliness (0 dead-zone) + AIC-3
+calibration. Neither dominates. Since A has NOT shipped (crates.io still at 0.2.7
+= old PreviewV0_2; A/B/BHdr all unreleased in 0.3.0), the 0.3.0 SDR-default choice
+among {A=v47-MLP, t1dro51-MLP, linear-B} is fully open.
