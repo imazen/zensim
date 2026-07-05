@@ -433,7 +433,41 @@ output (winsor + spline cap, G-RANGE PASS), monotone dial (0.9736 ≈ A's 0.9731
 flipping the default to `B`. That changes what every default caller scores, so it is
 a deliberate release decision, not a bake rotation — surfaced, not auto-applied.
 
-Still open (unchanged): the **rank Pareto** — a hard-routed MLP-AIC-head ensemble to
-also capture the candidate MLP's AIC-3 edge; and **BHdr's dial** (spline tops at
-y=92.8; may be the honest HDR data ceiling rather than a dead-zone — needs an HDR
-near-lossless dial grid to tell, which does not yet exist).
+Still open: the **rank Pareto** — a hard-routed MLP-AIC-head ensemble to also capture
+the candidate MLP's AIC-3 edge (note the V43 caveat: naive regime-routing fails when
+regimes overlap in feature space, and AIC-JND overlaps KonJND near-lossless — so a
+better regime separator, not a naive router, is required).
+
+### BHdr dial — measured diagnosis (2026-07-05)
+
+Ran the outlier gate on `bhdr_linear_shaped_anchored2` against its HDR corpus
+(`hdr_v3mix_traindigits`, 7,410 rows). The earlier "y=92.8 might be a top dead-zone"
+hypothesis is **falsified by measurement** — the issue is the BOTTOM, not the top:
+
+- **Top is HONEST, not a dead-zone.** `above-knot 0 (0.000%)` — no near-lossless HDR
+  pair's raw exceeds the top knot (raw 1.023). The y=92.8 ceiling is the honest Q-Q
+  calibration: near-lossless HDR genuinely scores ~93 by the ssim2+cvvdp-mix target
+  (HDR training target tops at 96.2 / p99.9=95.6, and the dial's identity=100 is
+  still delivered by the `is_identical` short-circuit). So NO top extension is
+  warranted (extending to 100 would over-shoot the honest HDR ceiling — a mis-calib).
+- **Bottom FAILS G-RANGE.** `below-knot 158 (2.132%)` — 2.1% of HDR pairs have raw
+  (min 0.03) BELOW the bottom knot (raw 0.297 → score 25.9), so low-quality HDR
+  extrapolates downward. Unlike the SDR-B rebuild's wild-negative bottom, this stays
+  positive (mild under-scoring, not catastrophic), but it trips the HARD gate.
+- **Narrow fix BUILT + VERIFIED (staged, not rotated).** `scripts/v_next/
+  bhdr_bottom_extend.py` prepends a bottom knot at (raw 0.0, score 0.0): covers the
+  raw floor and remaps the bottom 2.13% MONOTONICALLY from the negative-going
+  extrapolation to a gentle approach to 0. Measured on hdr_v3mix: **HDR SROCC
+  0.914897 == 0.914897 (Δ=0, rank byte-identical)**; only the 157 below-knot rows
+  change; **min dial −1.97 → +2.98** (negatives gone); **G-RANGE FAIL (2.13%) →
+  PASS (0)**; identity=100 unaffected (short-circuit). Candidate staged at
+  `/mnt/v/output/zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin`
+  (sha `2929078e`).
+- **NOT rotated overnight — two reasons.** (1) BHdr is a second shipped profile the
+  "do 1" scope didn't cover. (2) A DEEPER question sits under the narrow fix: those
+  157 pairs carry targets 0.3–0.6 ([0,1] scale) yet BHdr gives them very low raw —
+  the model UNDER-RANKS the bottom tail (a bottom re-anchor / model question, which
+  the (0,0)-knot fix does not address — it only removes the negatives + passes the
+  gate). Rotating BHdr should be a deliberate call that also weighs the bottom
+  re-anchor, not a mechanical overnight swap. Surfaced for the user; the verified
+  narrow fix is one command away (`bhdr_bottom_extend.py`).
