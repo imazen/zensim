@@ -29,11 +29,16 @@ All on `main@origin` (0fb4df41 tip). Details:
   on the canonical picker test splits, scores recalculated from the STORED
   features: A > B on all 5 rank-variance codecs, +0.002..+0.05 SROCC AND better
   Z-RMSE; the 2 lossless codecs are degenerate ties, ssim2≡100). So B is more
-  HUMAN-MOS-aligned; A is more SSIM2-aligned. The earlier "dominates every axis"
-  was measured ONLY on the human-MOS holdouts, never on the codec-sweep-vs-ssim2
-  axis. `latest()` still returns `Self::A`; the flip trades ssim2-tracking for
-  human-MOS-tracking — surfaced for user sign-off, NOT auto-applied. Data:
-  `/mnt/v/output/zensim/ab_rescored_2026-07-05/` + provenance doc.
+  HUMAN-MOS-aligned; A is more SSIM2-aligned. **KNOB axis (`qsweep_eval --parquet`,
+  same rows):** A is the marginally smoother codec dial — higher monotonicity on
+  3/4 lossy codecs (jpeg 99.94 vs 99.79, avif 99.81 vs 99.32, jxl 97.42 vs 96.60;
+  B edges webp 99.88 vs 99.83), and BOTH >> raw ssim2. So on codec sweeps A wins
+  BOTH ssim2-agreement AND knob-smoothness; B wins the human-MOS RANK + size/
+  determinism. The earlier "dominates every axis" was measured ONLY on the
+  human-MOS holdouts. `latest()` still returns `Self::A`; the flip trades A's
+  ssim2-tracking + smoother knob for B's human-MOS-tracking + 13 KB determinism —
+  surfaced for user sign-off, NOT auto-applied. Data:
+  `/mnt/v/output/zensim/ab_rescored_2026-07-05/`, `benchmarks/ab_dial_monotonicity_2026-07-05.md`.
 - **Workspace green** (89 ok / 0 fail). Fixed a pre-existing stale test on the
   way (`4c80470a`): `v9_eight_knot_spline_monotone` asserted the old uncapped
   spline >100; `5d4978db` capped it at 100 for product parity but missed this

@@ -454,11 +454,30 @@ tracks human MOS more closely on the held-out corpora.** ssim2 itself ranges to 
 on heavy zenjpeg distortion (negatives are valid scores) — A's [0,100] clamp loses
 rank on that tail, visible in its worse low-band Z-RMSE.
 
+**Knob axis — dial monotonicity across q (`qsweep_eval --parquet`, same rows,
+2026-07-05).** As a codec quality dial ("q up → score up"), A is marginally smoother:
+higher monotonicity on 3 of 4 lossy codecs, and BOTH learned profiles beat the raw
+ssim2 knob:
+
+| codec | mono%·A | mono%·B | mono%·ssim2 | smoother |
+|---|--:|--:|--:|:--:|
+| zenjpeg_lossy | 99.94 | 99.79 | 99.73 | A |
+| zenavif_lossy | 99.81 | 99.32 | 99.75 | A |
+| zenjxl_lossy | 97.42 | 96.60 | 94.25 | A |
+| zenwebp_lossy | 99.83 | 99.88 | 99.28 | B *(tie: 8 vs 6 / 4848)* |
+
+(3 lossless splits are single-q → no dial; excluded, not faked to 100%.) Both are
+excellent knobs (>99% on 3/4); A edges B; both clearly beat ssim2. Full table:
+`benchmarks/ab_dial_monotonicity_2026-07-05.md`. So on the codec-sweep distribution A
+wins BOTH axes (ssim2-agreement AND knob-smoothness); B's wins are the human-MOS RANK
+and size/determinism.
+
 **Open decision (needs user sign-off — a default-behavior change):** `latest()` /
 `latest_preview()` / `codec_target()` still return `Self::A`. Flipping to `B` trades
-ssim2-tracking (A's edge on codec sweeps) for human-MOS-tracking (B's edge on the
-holdouts) — a deliberate release decision, not a bake rotation, and NOT a free win.
-Surfaced, not auto-applied.
+A's ssim2-tracking + marginally-smoother knob (its edges on codec sweeps) for B's
+human-MOS-tracking + 13 KB determinism (its edges on the held-out human corpora) — a
+deliberate release decision, not a bake rotation, and NOT a free win. Surfaced, not
+auto-applied.
 
 Still open: the **rank Pareto** — a hard-routed MLP-AIC-head ensemble to also capture
 the candidate MLP's AIC-3 edge (note the V43 caveat: naive regime-routing fails when
