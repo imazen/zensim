@@ -954,3 +954,37 @@ study reproduces the runtime dump values -80.1/-81.1/-12.0 exactly):
 Artifacts: `w11-webp-ood/` — `fit_table.json`, `verdict_*.md` (6),
 `dialpred_*.tsv` (6), `webp_inspect_fresh_372.csv`, slice parquet +
 `_MANIFEST.json`, `diagnose*.py`, `dial_analysis.py`.
+
+## w11 follow-up: shaped-vs-winsor for SDR + the eval gap (2026-07-05)
+
+**Did the BHdr shapers benefit SDR, or is blind winsor right?** Measured (parquets,
+via the panel + tail): the shaped-refit heads are tail-safe BY CONSTRUCTION
+(yeo_johnson on f155 λ=−12.95 → rawmin ≈ −0.2, sub5=0) and WIN AIC-3 (+0.07
+SROCC, lower Z-RMSE) — but LOSE CID22 (best shaped single head canon-lasso0.001
+0.851 vs blind-winsor ensemble 0.876) and crater KonJND (0.07–0.37 vs 0.547, as
+single heads). This matches the campaign's own documented negative result
+("input shaping loses on every axis for SDR mixes EXCEPT pure-HDR"; fit.log
+canon-ridge1e-05 bigval 0.887 raw vs 0.829 shaped) AND the raw-only-ensemble
+constraint (HEAD_POOL is raw-only; a convex blend of raw heads folds to one
+372→1 layer). **Verdict: blind uniform winsor is the lightest rank-preserving
+SDR intervention and the CID22/KonJND winner; shaping is an AIC-3/low-q
+alternative that would need its own trail.**
+
+**Winsor quantile/corpus sweep (I did NOT pick blindly — swept, then chose
+CID22-blind):** on the shipped ensemble, winsor bounds range CID22 0.8707→0.8791
+and 0→140 surviving tails across quantile×corpus. The op's canonical p1/p99 gives
+0.8781; cid22_train bounds give 0.8791 — but selecting by CID22 is holdout-tuning,
+BANNED. The shipped bake keeps hdrmix[p0.1,p99.9] (the pre-measured, panel-
+validated config, CID22 0.8762, tail killed). Quantile is NOT tuned on CID22.
+
+**The eval gap (forensics: benchmarks/bsdr_shaping_forensics_2026-07-05.md):** no
+selection stage ever computed a raw-output min/max/percentile — selection was
+SROCC-only, and SROCC over 147k rows is insensitive to a sub-1% tail of
+extreme-but-ordered outliers. The pathological rows were in bigcodec_val (a
+SELECTION axis) the whole time; the harness structurally couldn't see them.
+SMOKING GUN: commit ee850a95 (which BUILT the ensemble) warned in a comment that
+`hdrmix-lasso0.002-raw` (80% of B's weight) "extrapolates wildly on OOD bigcodec
+rows (raw residuals reached +158)" — for the RESIDUAL artifact — added a clamp,
+and never cross-applied it to the ensemble that shipped as Profile B. FIX:
+scripts/v_next/bake_outlier_gate.py G-RANGE now catches exactly this class
+(raw-B 9.7% extrapolating → FAIL; winsor-B 0% → PASS).
