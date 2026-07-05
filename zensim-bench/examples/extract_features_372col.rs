@@ -77,7 +77,9 @@ fn main() {
         "safesyn" => load_safesyn(&path, max_pairs),
         "qsweep" => load_qsweep_tsv(&path, max_pairs),
         "cid22_train" => load_cid22_train_tsv(&path, max_pairs),
-        "pairs" => load_pairs_tsv(&path, max_pairs),
+        // Positional 3+-column TSV (ref, dist, target, [ref_basename],
+        // [name=value...]). The header-driven variant is `pairs-tsv`.
+        "pairs" => load_pairs_tsv_positional(&path, max_pairs),
         _ => {
             eprintln!(
                 "--corpus must be one of: konjnd, konjnd_full, aic3, aic4, safesyn, qsweep, cid22_train, pairs (got {corpus:?})"
@@ -770,7 +772,7 @@ fn load_cid22_train_tsv(path: &Path, max: usize) -> Vec<Pair> {
 ///
 /// Example header + row:
 ///   ref_path<TAB>dist_path<TAB>target<TAB>ref_basename<TAB>butter_max=51.4
-fn load_pairs_tsv(path: &Path, max: usize) -> Vec<Pair> {
+fn load_pairs_tsv_positional(path: &Path, max: usize) -> Vec<Pair> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
     let f = match File::open(path) {
