@@ -988,3 +988,33 @@ rows (raw residuals reached +158)" — for the RESIDUAL artifact — added a cla
 and never cross-applied it to the ensemble that shipped as Profile B. FIX:
 scripts/v_next/bake_outlier_gate.py G-RANGE now catches exactly this class
 (raw-B 9.7% extrapolating → FAIL; winsor-B 0% → PASS).
+
+## w11 cross-metric at SCALE (2.9M tail + KADIS-700k independent, 2026-07-05)
+
+Answering "did you xmetric on the big parquets" — I had only run the 147k val
+before. Now at scale:
+
+**Tail (G-RANGE) on 2.9M bigcodec train** (`scripts/.../chunked_grange.py`,
+vectorized): raw B FAILs — **9.5% of 2.9M rows extrapolate** (100,867 below-knot
+3.42% + 180,355 above 6.12%; raw min −262 on tiny renditions). Winsor B PASSes —
+**0.000% below-knot**, 10 rows (0.0003%) trivially above (raw 1.18 vs knot 1.14),
+raw bounded [−1.93, 1.18]. The winsor fix holds at 2.9M scale.
+
+**Cross-metric CONSENSUS on KADIS-700k-gpu vs 5 INDEPENDENT metrics**
+(`scripts/v_next/xmetric_consensus.py`; features verified CLEAN — odd-dim proxy
+0.000%, CPU-extracted). B's SROCC vs each: iwssim 0.861, dssim 0.829, ssim2 0.796,
+cvvdp 0.694, butteraugli 0.593. High-confidence B outliers (B is the odd-one-out
+vs a TIGHT independent consensus, IQR<0.2): **8.99% (62,914 rows)** — but NOT
+scattered: concentrated on **color distortions** (color_saturate_hsv 37%,
+color_diffuse 26%, color_shift 25%) + **denoise_dncnn 30%**, while on actual
+COMPRESSION — B's target domain — it AGREES with the consensus (compress_jpeg
+2.7%, color_quantize 2.1%, pixelate 4.4% — at/below the 9% base rate). On the
+flagged rows B sides with iwssim (mean |Δ| 0.254) — both information-weighted.
+
+**Verdict:** this is a CHARACTERIZED design divergence on out-of-domain content
+(KADIS is ~95% non-compression), NOT the tail bug (fixed) and NOT feature
+corruption (clean). Direction is unadjudicated — KADIS has no human MOS and
+KADID/TID are train-contaminated for B, so we can't cleanly say whether B or the
+pixel-metrics track humans better on color/denoise. On its compression domain B
+is well-behaved. The cross-metric consensus method is now a reusable tool for
+surfacing exactly this kind of coherent divergence class.
