@@ -744,21 +744,32 @@ static PROFILE_A: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80` anchored + WINSORIZED
-/// (12.9 KB, sha256 `b92b0b7a…`, rotated 2026-07-05): carries 372
-/// `winsor_p99` `zentrain.feature_transforms` (fit-corpus [p0.1, p99.9]
-/// per feature), applied by `Predictor::predict_transformed` — the SAME
-/// mechanism `BHdr` (and every shaped bake) already uses. Winsor is
-/// identity within [p1, p99], so rank is preserved on the 99.8% of rows
-/// that are in-distribution; the 0.2% tail is clipped, which provably
-/// bounds the raw output to ~[-1.86, 1.12] (inside the spline knot
-/// domain) and eliminates the f155 tiny-screen-content pathology (raw min
-/// -1131 -> -1.86 on 147k val rows; CID22 0.8732 -> 0.8762, KonJND 0.5434
-/// -> 0.5470 — measured on the shipped ensemble). The prior raw
-/// `ens-Pline-cid80` was the ONLY B bake with no transforms, hence the
-/// only one exposed to the tail. See benchmarks/provenance §f155.
+/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80`, WINSORIZED + DENSE-DIAL
+/// (13.0 KB, sha256 `b78adb15…`, rotated 2026-07-05). Two rank-invariant
+/// guards on the raw linear ensemble, both via the standard metadata:
+///
+/// 1. **Winsor tail guard** — 372 `winsor_p99` `zentrain.feature_transforms`
+///    (fit-corpus [p0.1, p99.9] per feature), applied by
+///    `Predictor::predict_transformed` (the SAME mechanism `BHdr` uses).
+///    Identity within [p1, p99] so rank is preserved on in-distribution rows;
+///    the tail is clipped, bounding raw output inside the spline domain and
+///    eliminating the f155 tiny-screen pathology (raw min -1131 -> -1.86 on
+///    147k val; CID22 0.8732 -> 0.8763). See benchmarks/provenance §f155.
+/// 2. **Dense-dial spline** — ONLY the output spline's TOP is extended, by the
+///    training-fitted concave saturation (`dense_dial_refit_b.py`, decay
+///    k=3.31 fit on 600 near-lossless multiband-anchor rows), so near-lossless
+///    codec-knob configs (raw up to ~2.8, above any training/real-content raw
+///    ~1.12) resolve toward 100 instead of piling at the top knot. The winsor
+///    bake's bottom + in-distribution knots are kept VERBATIM, so both raw
+///    tails stay inside the knot domain [-1.97, 3.92] (outlier gate G-RANGE
+///    PASS, 0 extrapolating). Clears the dial dead-zone (0.0563 FAIL -> 0.0005
+///    PASS, all G3 dial gates green) with rank IDENTICAL to the winsor-only
+///    bake (spline is monotone => rank-invariant: CID22 0.8763 / KonJND 0.5474
+///    / AIC-3 0.7774 unchanged; inversions 0.026 ~= the winsor bake's 0.026).
+///    Identity=100 is guaranteed by the `is_identical` short-circuit, not the
+///    spline top. See benchmarks/provenance "best-of-both dial probe".
 pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
-    include_bytes!("../weights/b_sdr_linear_cid80_winsor_2026-07-05.bin")
+    include_bytes!("../weights/b_sdr_linear_cid80_dense_dial_2026-07-05.bin")
 }
 
 /// `ZensimProfile::BHdr` bake bytes — `hdr-lasso0.001-shaped` anchored2

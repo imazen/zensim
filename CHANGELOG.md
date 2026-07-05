@@ -5,8 +5,17 @@
 ### Added
 - `ZensimProfile::B` (`zensim-b`) and `ZensimProfile::BHdr` (`zensim-b-hdr`):
   generation-B deterministic LINEAR profiles from the 2026-07 campaign. `B` =
-  823-byte lasso ensemble, beats `A` on 7/9 held-out axes (CID22 0.8733,
-  KonJND 0.5439), dial-anchored, collapse-immune by construction; `BHdr` =
+  `ens-Pline-cid80` lasso ensemble (13.1 KB), beats `A` on the held-out rank
+  axes (CID22 0.8763, KonJND 0.5474), collapse-immune by construction. Two
+  rank-invariant guards ride the standard ZNPR metadata: a 372-feature
+  `winsor_p99` tail guard (bounds the raw output, kills the f155 tiny-screen
+  pathology) and a dense-dial spline whose TOP is extended by the training-
+  fitted concave saturation so near-lossless codec-knob configs resolve toward
+  100 instead of piling at the top knot (bottom + in-distribution knots kept
+  verbatim, so both raw tails stay in-domain; all G3 dial gates pass: inversions
+  0.026, dead-zone 0.0005, monotonicity 0.974, outlier-gate G-RANGE 0
+  extrapolating — vs the winsor-only predecessor which failed the dead-zone gate
+  at 0.056; rank identical). `BHdr` =
   shaped-feature HDR head (UPIQ 0.7313, best zensim-family HDR measured),
   PU-linear feature regime, HDR-content-only (measured invalid on SDR —
   route by domain). Shared anchor scale across both dials. Provenance:

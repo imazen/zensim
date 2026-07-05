@@ -10,8 +10,9 @@ rebuildable from pinned inputs. Repo commits referenced are on
 
 | artifact | bytes | sha256 (16) | CID22 | AIC-3 | AIC-4 | KonJND | UPIQ | SDR25 | dial |
 |---|--:|---|--:|--:|--:|--:|--:|--:|---|
-| **Profile B (SDR): lp_ens-Pline-cid80-anchored-f16** | 823 | `7b326ac56a05c240` | 0.8733 | 0.7775 | 0.8906 | 0.5439 | 0.6846 | — | mono 0.9711, 0 dead, p95≤100 post-5d4978db |
-| its pre-anchor twin (tau0) | 823 | `1cddfe5e14d81128` | same ranks (spline is rank-invariant; SROCC identical to 1.000000) | | | | | | knots >100 (superseded) |
+| **Profile B (SDR) SHIPPED: b_sdr_linear_cid80_dense_dial** | 12,988 | `b78adb15b55d5c91` | 0.8763 | 0.7774 | 0.8906 | 0.5474 | 0.6846 | — | ALL gates PASS: inv 0.026, dead-zone 0.0005, mono 0.974, G-RANGE 0 extrapolating (winsor + dial-top-extend) |
+| its winsor-only predecessor (archived) | 12,891 | `b92b0b7a384242d6` | 0.8763 | 0.7774 | 0.8906 | 0.5474 | 0.6846 | — | dead-zone 0.0563 FAIL (superseded) |
+| its raw pre-winsor twin | 823 | `7b326ac56a05c240` | 0.8733 | 0.7775 | 0.8906 | 0.5439 | 0.6846 | — | f155 tail exposed (superseded) |
 | CID22 record: lp_ens-S5noguard-tau0-f16 | 1,119 | `620b47e405289f26` | **0.8793** | 0.7821 | 0.8875 | 0.3497 | 0.6403 | — | mono 0.9602 |
 | **Profile B-HDR: lp_hdr-lasso0.001-shaped-anchored2-f16** | 11,684 | `373eac56e7a07d6d` | 0.8347* | 0.7855* | 0.9022* | 0.3741* | **0.7313** | — | knots [25.9, 92.8] (data ceiling) |
 | PJND sibling: lp_canonhdr15-bvls-raw-tau0.005-f16 | 3,738 | `1400fa2f86e2154d` | 0.8001 | 0.7225 | 0.8095 | **0.6696** | 0.6679 | — | mono 0.9315 |
@@ -378,6 +379,28 @@ KonJND is the open "best of both on rank" question (levers: ensemble the MLP's
 AIC-strong head as a hard-routed component; a KonJND-recovered MLP — but MLP+KonJND
 is a documented G5 Pareto limit).
 
-The dense_dial extension knots are currently semi-hand-placed (proof the gap is
-closable rank-invariantly); a production rotation would derive the OOD endpoint from
-the training near-lossless raw ceiling, not a hand value.
+**SHIPPED 2026-07-05.** The hand-placed extension was replaced by a PRINCIPLED one
+and rotated in as `ZensimProfile::B`. Key correction over the first cut: **extend the
+winsor bake's EXISTING spline top — do NOT rebuild the spline from the anchor.**
+Rebuilding from the balanced anchor lifts the bottom knot off the real-content raw
+floor (multiband winsorized preds reach only −1.37; real bigcodec content reaches
+−1.86), so low-quality content extrapolates DOWNWARD — the wild-negative tail winsor
+exists to prevent (outlier gate caught it: 33% below-knot, then 4.4% after a partial
+fix). `scripts/v_next/dense_dial_refit_b.py` therefore reads the archived winsor
+bake, keeps its bottom + in-distribution knots VERBATIM (domain already reaches
+−1.974), and appends ONLY the OOD-high top: `score(r)=100−(100−y0)·exp(−k·(r−x0))`
+with decay `k=3.31` fit by ROBUST regression `log(100−target) ≈ log A − k·raw` on the
+600 near-lossless multiband-anchor rows (target>70), from the top knot (1.138, 95.9).
+No hand values, no eval-grid dependence (real content tops at raw ~1.12 so the
+endpoint can't come from data — the saturation shape IS the principle; identity=100
+is held by the `is_identical` short-circuit, not the spline top). Shipped bake
+`b_sdr_linear_cid80_dense_dial_2026-07-05.bin` (12,988 B, sha `b78adb15`,
+deterministic re-run byte-identical), reproduced by `scripts/reproduce_b.sh`. All 5
+profile tests pass (identity, B→BHdr routing, winsor-transform guard). The winsor-only
+predecessor is in `zensim/weights/archive/`. **Result vs both prior points:** strictly
+better than the winsor-only bake (dead-zone 0.0563 FAIL → 0.0005 PASS) AND the rank
+noise the rebuild introduced is gone (inversions 0.026 ≈ the winsor bake's 0.026 ≈ the
+MLP's 0.025) — because only the OOD tail moved, the in-distribution rank is byte-for-
+byte the winsor bake's. G-RANGE PASS (0 extrapolating, both tails). The rank Pareto
+(AIC-3/AIC-4 vs KonJND) is untouched and remains the open "best of both on rank"
+question.
