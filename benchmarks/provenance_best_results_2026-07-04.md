@@ -57,6 +57,15 @@ cross-model scatter). `BHdr` = explicit unrouted handle.
   human_score×100) and `scripts/v_next/hdr_anchor_dense_refit.py`
   (anchored2: +1,760 train>0.85 rows, Q-Q top knots to the 92.8 data
   ceiling). Rank invariance verified: SROCC 1.000000 pre/post.
+- **Winsor tail guard (SDR B final step)**: `scripts/v_next/winsorize_bake.py`
+  attaches 372 `winsor_p99` transforms with fit-corpus (hdr_v3mix) [p0.1,p99.9]
+  bounds to the anchored bake (fully-zero-constant f25/f64 floored to [0,1e-9]).
+  Was an ad-hoc inline command through 2026-07-05; now committed + proven
+  byte-identical to the shipped `b92b0b7a`.
+- **Runnable end-to-end repro**: `scripts/reproduce_b.sh` chains
+  ensemble→anchor→winsor and asserts byte-identity to shipped B (`b92b0b7a`)
+  + CID22 0.8763 + G-RANGE PASS. Routing design (why B dispatches SDR/HDR):
+  `docs/PROFILE_B_ROUTING_DESIGN_2026-07-05.md`.
 
 ### HDR corpus (the v3 PU-linear extraction)
 - **Sources**: imazen-26 HDR subset — 76 sources × scales/crops = 1,140
