@@ -125,3 +125,37 @@ input shaping outside pure-HDR; bigcodec mass in linear CID22 fits.
 - R2: `s3://zentrain/strategy-fleet-2026-07-02/` (SDR inputs+bakes),
   `s3://zentrain/hdr/runs/v3*/` (HDR feature shards),
   `s3://codec-corpus/picker-sweep-2026-06-22/datagen-*hdr*/` (encodes).
+
+## Profile B as a codec quality knob — gate measurements (2026-07-04)
+
+**G1 SDR25: CLOSED — B 0.9574 vs A 0.9036** (n=50, value-recovered
+permutation path; ssim2 = 0.9580). B beats A on 8/9 axes; UPIQ (−0.009)
+is the sole A-favoring axis.
+
+**G2 dial equivalence: MEASURED.**
+- Spline: 18 knots, raw-x [−1.974, 1.138] (a real input range — the linear
+  raw output is meaningful, unlike the MLP's 0.23-wide band), dial-y
+  [0, 95.89]; above the top knot the product runtime extrapolates linearly
+  capped at 100.
+- Per-codec dial (115 ladders): monotonicity B = 93.9 (avif) / 99.4 (jpeg)
+  / 98.3 (jxl) / 99.7 (webp) — all above the 93% gate; median ceilings
+  88.9–96.4; jxl 95-reach 93.9% (A: 72.7%).
+- **q-targeting simulation** (pick q minimizing |score−target|): median
+  landing error 0.2–3.4pt across codecs × targets {30,50,70,85,90} — at
+  parity with A overall, B better at T≥85 on jpeg/jxl/avif.
+- **A↔B dial correspondence** (for migrating stored targets): B30≈A42.4,
+  B50≈A59.6, B70≈A74.8, B85≈A88.4, B90≈A91.7 (medians; scales converge at
+  the top). B is more pessimistic at low quality.
+
+**Remaining blocker (the only knob-quality gap found): the webp high-target
+tail.** 3/24 webp ladders cap below score 50 under B (A gives ~62+):
+`a06b91d3d8419aad_513x769`, `a9143f4b78fe5a13_513x769`,
+`c37e9ae52fbab790_1022x818` — driving p90 landing errors of 5.3–8.9pt at
+T≥70 on webp (A: 0.7–1.4). OPEN: visually inspect those encodes to decide
+whether B is honestly penalizing webp artifacts A misses, or blind — the
+answer decides between "document as codec-specific caveat" and "ensemble
+tweak". Non-webp codecs have NO blocker: B is knob-ready for jpeg/jxl/avif
+targeting on these measurements.
+
+G3 (regress baselines per consumer) + G4 (no zensim-gpu B kernel) are
+engineering items, unchanged. G5 closed (shipped bytes = anchored sibling).
