@@ -162,11 +162,17 @@ engineering items, unchanged. G5 closed (shipped bytes = anchored sibling).
 
 ## webp trio adjudicated + unrepresentable-target map (2026-07-05)
 
-**The 3 webp ladders are a B-SPECIFIC feature-OOD blindness, not honest
-penalty**: fresh independent scoring (webp-inspect/) at q90-100 — ssim2 says
-61-91, butteraugli agrees (1.2-7.9), A says 32-64 (low but sane), **B says
-−80/−81/−12** (raw pred below the bottom knot → deliberately-uncapped
-downward extrapolation). Two of three share the odd 513×769 shape; the fit
+**The 3 webp ladders split on independent scoring (webp-inspect/), and B is
+blind on the decisive one** (correction 2026-07-05: butteraugli is a
+DISTANCE and that column is the MAX norm — high = bad):
+- `a9143f…` (the smoking gun): good by EVERY judge — ssim2 91, butter-max
+  1.2, butter-p3 0.5 — and **B says −81**. Pure feature-OOD blindness.
+- `a06b…`/`c37e…`: webp genuinely leaves severe artifacts even at q100
+  (butter-max 5.3-7.9, p3 2.8-3.7; ssim2's pooled 62-68 dilutes them) —
+  these encodes ARE flawed, and butter high is the honest read; but B's
+  −80/−12 is absurd in MAGNITUDE (below "random noise" territory), so the
+  extrapolation pathology stands there too, just with directional cover.
+A says 32-64 (sane degradation). Two of three share the odd 513×769 shape; the fit
 corpus (HDR-mix, 7,410 rows) lacks this content class. FIXES (open): refit
 the ensemble with such SDR content in-corpus (real fix); knob-context floor
 at bottom-knot y (mitigation — turns −80 into 0, honest "unreachable");
