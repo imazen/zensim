@@ -133,3 +133,34 @@ meanG3, but 60% tied / collapses to 0 above q50 on the dial). A bake can have a
 fine coarse dial and fail at near-lossless step-1 granularity (Cell5: 0.8% tied
 on the coarse 16-q grid, 13.1% on the densified grid). Only the two-panel run
 catches both. Single-panel verdicts are a regression — do not accept them.
+
+## THIRD panel — the outlier gate (added 2026-07-05, MANDATORY for linear bakes)
+
+Rank (SROCC) + dial (monotonicity) are both **blind to a heavy-tailed feature**.
+The shipped Profile-B SDR bake scored CID22 SROCC 0.873 and a clean dial while
+emitting raw predictions to **−1131** on ~10% of a broad corpus (a heavy tail on
+tiny dark-screen-content renditions), which the dial then extrapolated below its
+bottom knot to −12298. SROCC is rank-based and near-invariant to a monotone tail;
+the dial grid's own corpus lacked that content class, so neither panel caught it.
+
+`scripts/v_next/bake_outlier_gate.py` is the third required check. It runs a bake
+over a BROAD corpus (default bigcodec_val, 147k rows) and reports:
+
+- **[HARD] G-RANGE** — fraction of raw preds OUTSIDE the spline knot domain (they
+  extrapolate). This is the direct tail detector and the only ship-blocker:
+  `--bake` FAILs (exit 1) if >0.01% extrapolate. Raw-B: 9.7% FAIL. Winsor-B: 0% PASS.
+- **[adv] G-ZRMSE** — Z-RMSE vs the reference metric (Mohammadi 2025). Unlike SROCC
+  it PENALIZES a few wild misses, so a tail inflates it.
+- **[adv] G-XMETRIC** — per-row cross-metric disagreement; lists the worst offenders
+  by name. Excludes reference-floored rows (a self-derived reference like ssim2/100
+  has a floor spike that throws false alarms — prefer an INDEPENDENT metric via
+  `--ref-col butteraugli_max`).
+- **[adv] G-OUTRATIO / G-SROCC** — for context.
+
+The forward is reconstructed faithfully (imports the bakes' own `apply_transform`)
+and `--validate` cross-checks it against the Rust runtime CID22. Run it on every
+ship-grade linear bake; a G-RANGE FAIL blocks the ship. Native wiring into
+`bake_verdict` is the follow-up (this is the standalone increment).
+
+Lesson: a rank-invariant stat cannot see a monotone outlier. The eval must
+include a stat that is NOT rank-invariant (raw-range, Z-RMSE, cross-metric).
