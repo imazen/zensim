@@ -66,11 +66,19 @@ fn v9_eight_knot_spline_monotone() {
         y_low < 0.0,
         "extrapolation below first knot should be <0: got {y_low}"
     );
-    // Linear extrapolation above last knot.
+    // Linear extrapolation above the last knot is CAPPED at 100 — parity with
+    // the product runtime (zensim/src/metric.rs pchip apply ends in `.min(100.0)`;
+    // final score `clamp(0.0, 100.0)`): no score exceeds "identical". This matches
+    // the module's own `upper_extrapolation_caps_at_100_like_product_runtime` unit
+    // test and the 5d4978db fix — which corrected `parse_round_trip_minimal` the
+    // same way (uncapped 110 -> capped 100) but missed THIS integration test. The
+    // uncapped `>100` it used to assert was the divergence 5d4978db eliminated
+    // (it produced dial-p95 artifacts of 321-504 on linear bakes). Bottom stays
+    // uncapped (neg-tail diagnostics) — see the `y_low < 0` check above.
     let y_high = ocs::apply(95.0, &spline);
     assert!(
-        y_high > 100.0,
-        "extrapolation above last knot should be >100: got {y_high}"
+        (y_high - 100.0).abs() < 1e-9,
+        "extrapolation above last knot must cap at 100 (product parity): got {y_high}"
     );
 }
 
