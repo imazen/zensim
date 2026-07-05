@@ -343,3 +343,41 @@ distortions (out-of-domain), sides with iwssim — characterized, not a bug.
 calibration. Neither dominates. Since A has NOT shipped (crates.io still at 0.2.7
 = old PreviewV0_2; A/B/BHdr all unreleased in 0.3.0), the 0.3.0 SDR-default choice
 among {A=v47-MLP, t1dro51-MLP, linear-B} is fully open.
+
+## Best-of-both probe: linear rank + MLP-clean dial (2026-07-05)
+
+QUESTION: can linear-B get the MLP's clean dial without losing its rank? Diagnosed
+the linear's dial dead-zone (5.63%, the only dial gate it failed) — 100% of it is
+near-lossless PILE-UP at the top spline knot (y=95.9 at raw 1.138), while
+near-lossless dial configs reach raw 2.8. The linear's RAW output is distinct on
+every near-lossless pair (0 raw-flat); only the spline cap flattens them. So it's a
+pure calibration fix, RANK-INVARIANT (monotone spline).
+
+FIX (`scripts/v_next/dense_dial_refit_b.py`): extend the spline top monotonically
+to y=100 over the OOD-high near-lossless raw range (near-lossless → 100 by
+definition). Result — dense-dial-B vs shipped-B, same weights+winsor, spline only:
+
+| model | CID22 | KonJND | inversions (≤0.07) | dead-zone (≤0.05) | dial verdict |
+|---|--:|--:|--:|--:|---|
+| shipped-B (linear) | 0.8763 | 0.5474 | 0.0262 ✓ | **0.0563 ✗** | 1 gate FAIL |
+| **dense-dial-B** | **0.8763** | **0.5474** | 0.0386 ✓ | **0.0005 ✓** | **ALL PASS** |
+| MLP t1dro51 | 0.8708 | 0.3109 | 0.0246 ✓ | 0.0000 ✓ | ALL PASS |
+
+**dense-dial-B is a strict improvement over shipped-B** (identical held-out rank —
+CID22/KonJND to 4dp — now passes ALL dial gates). It keeps the linear's CID22+KonJND
++ determinism + 13KB AND matches the MLP on dial-gate compliance. The one residual:
+inversions rose 0.0262→0.0386 (still ✓) — the flat cap was HIDING near-lossless rank
+noise that the extension exposes; the MLP's higher capacity resolves that noise
+(0.0246). So best-of-both on the DIAL is achieved (all gates pass, rank intact); the
+MLP keeps only a marginal inversions edge + its AIC-3/AIC-4 RANK win.
+
+**What is NOT solved: the rank Pareto.** dense-dial-B still trails the MLP on AIC-3
+(0.777 vs 0.801) / AIC-4 (0.891 vs 0.915); the MLP still trails on KonJND (0.31 vs
+0.55). The dial fix is orthogonal to this. Closing the AIC-3/AIC-4 gap without losing
+KonJND is the open "best of both on rank" question (levers: ensemble the MLP's
+AIC-strong head as a hard-routed component; a KonJND-recovered MLP — but MLP+KonJND
+is a documented G5 Pareto limit).
+
+The dense_dial extension knots are currently semi-hand-placed (proof the gap is
+closable rank-invariantly); a production rotation would derive the OOD endpoint from
+the training near-lossless raw ceiling, not a hand value.
