@@ -401,6 +401,39 @@ predecessor is in `zensim/weights/archive/`. **Result vs both prior points:** st
 better than the winsor-only bake (dead-zone 0.0563 FAIL → 0.0005 PASS) AND the rank
 noise the rebuild introduced is gone (inversions 0.026 ≈ the winsor bake's 0.026 ≈ the
 MLP's 0.025) — because only the OOD tail moved, the in-distribution rank is byte-for-
-byte the winsor bake's. G-RANGE PASS (0 extrapolating, both tails). The rank Pareto
-(AIC-3/AIC-4 vs KonJND) is untouched and remains the open "best of both on rank"
-question.
+byte the winsor bake's. G-RANGE PASS (0 extrapolating, both tails).
+
+### B vs the SHIPPED A (v47) — B dominates every measured axis (2026-07-05)
+
+With B's dial now clean, the head-to-head is decisive. Both bakes scored through the
+SAME panel (`bake_verdict`, 4 held-out corpora + the quarantined dial grid):
+
+| axis | A = `v47_strict_qat_native` (MLP, 27 KB) | B = `dense_dial` (linear, 13 KB) | winner |
+|---|--:|--:|---|
+| CID22 SROCC | 0.8657 | **0.8763** | B +0.0106 |
+| KonJND SROCC | 0.4185 | **0.5474** | **B +0.1289** |
+| AIC-3 SROCC | 0.7680 | **0.7774** | B +0.0094 |
+| AIC-4 SROCC | 0.8854 | **0.8900** | B +0.0046 |
+| CID22 Z-RMSE | 0.512 | **0.482** | B |
+| KonJND Z-RMSE | 0.932 | **0.859** | B |
+| AIC-3 Z-RMSE | 0.620 | **0.616** | B |
+| dial inversions | 0.0269 | 0.0264 | ~tie (both PASS) |
+| dial dead-zone | 0.0000 | 0.0005 | ~tie (both PASS) |
+| size / determinism | 27 KB, trained MLP | **13 KB, Gram-exact linear, collapse-immune** | B |
+
+B wins **all four held-out rank corpora**, is dial-equivalent (both pass every G3
+gate), better-calibrated (Z-RMSE) on 3/4, half the size, and deterministic. The
+earlier "the MLP wins AIC-3/AIC-4" caveat referred to the *candidate* `w3_t1dro51`
+(AIC-3 0.8013), NOT the shipped A — against the actually-shipped `v47`, B wins those
+too. B also holds A's hard-won correctness properties: identity=100 (test), bounded
+output (winsor + spline cap, G-RANGE PASS), monotone dial (0.9736 ≈ A's 0.9731).
+
+**Open decision (needs user sign-off — a default-behavior change):** `latest()` /
+`latest_preview()` / `codec_target()` still return `Self::A`. The data now supports
+flipping the default to `B`. That changes what every default caller scores, so it is
+a deliberate release decision, not a bake rotation — surfaced, not auto-applied.
+
+Still open (unchanged): the **rank Pareto** — a hard-routed MLP-AIC-head ensemble to
+also capture the candidate MLP's AIC-3 edge; and **BHdr's dial** (spline tops at
+y=92.8; may be the honest HDR data ceiling rather than a dead-zone — needs an HDR
+near-lossless dial grid to tell, which does not yet exist).
