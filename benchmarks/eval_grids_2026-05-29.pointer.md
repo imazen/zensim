@@ -5,6 +5,26 @@ re-encoding, no re-extraction. `bake_verdict` reads the dial grid natively and
 emits the DIAL panel alongside the rank panel on every run. See
 `docs/EVAL_PANEL_REQUIREMENT.md`.
 
+> **⚠ CORRUPTION (found 2026-07-05, w11): 9 of the dial grid's 115 ladders
+> carry extraction-garbage masked/IW-block features** (f228..f371 at
+> 34..489, bit-constant across each ladder's 40 q values; fresh CPU
+> re-extraction gives 0.003..0.025 — the zensim-gpu odd-dim pathology
+> produced non-NaN garbage for these instead of the dropped NaNs). Ladders:
+> {a06b91d3d8419aad_513x769, a9143f4b78fe5a13_513x769,
+> c37e9ae52fbab790_1022x818, 0e53ea752da698d9_1022x818,
+> 1a20ecb0c1b92466_1022x818, ef576c4ed599d75d72145a8f34b58ccb_1022x818,
+> f65a24b7e176eb47_1022x818} × webp + 9059ec43b26aa167_769x513 × {jpeg,
+> webp} — **8/24 webp ladders**. Any per-ladder dial number on them (any
+> bake, any date since 2026-05-29) is garbage-input scoring; pooled
+> mono/G1 are mildly diluted. **Use the quarantined sibling**
+> `dial_grid_372col_2026-05-29_quarantined.parquet` (4,457 rows, sha256
+> `b5d27f212fc6b00cb406e26ff9ba8f74384f56d842280440a7a5dc141f6b0fb7`, same
+> dir; corrupt ladders dropped, quarantine note in parquet KV metadata)
+> until a v2 grid is rebuilt. Evidence + method:
+> `benchmarks/linear_projections_2026-07-03.md` §w11 +
+> `/mnt/v/output/zensim-multicodec-probe/w11-webp-ood/`. The corruption
+> grid (CPU-extracted via `extract_features_372col`) is NOT affected.
+
 ## Grids
 
 | grid | rows | schema | purpose | bytes | sha256 |

@@ -147,36 +147,59 @@ is the sole A-favoring axis.
   B50≈A59.6, B70≈A74.8, B85≈A88.4, B90≈A91.7 (medians; scales converge at
   the top). B is more pessimistic at low quality.
 
-**Remaining blocker (the only knob-quality gap found): the webp high-target
-tail.** 3/24 webp ladders cap below score 50 under B (A gives ~62+):
-`a06b91d3d8419aad_513x769`, `a9143f4b78fe5a13_513x769`,
-`c37e9ae52fbab790_1022x818` — driving p90 landing errors of 5.3–8.9pt at
-T≥70 on webp (A: 0.7–1.4). OPEN: visually inspect those encodes to decide
-whether B is honestly penalizing webp artifacts A misses, or blind — the
-answer decides between "document as codec-specific caveat" and "ensemble
-tweak". Non-webp codecs have NO blocker: B is knob-ready for jpeg/jxl/avif
-targeting on these measurements.
+**Remaining blocker — RESOLVED 2026-07-05 (w11) as instrument corruption,
+not a B gap.** The "3/24 webp ladders cap below 50" finding was measured on
+dial-grid rows whose masked/IW-block features are extraction garbage (see
+the corrected §webp below): on the quarantined grid (9 corrupt ladders
+removed) **every honest webp ladder tops at ≥81 under B — ceiling p10 =
+83.7 (was 9.4), min 81.0, mono 0.9952 — webp is knob-READY like
+jpeg/jxl/avif.** The webp p90 landing errors at T≥70 were the same
+artifact.
 
 G3 (regress baselines per consumer) + G4 (no zensim-gpu B kernel) are
 engineering items, unchanged. G5 closed (shipped bytes = anchored sibling).
 
-## webp trio adjudicated + unrepresentable-target map (2026-07-05)
+## webp trio — FINAL correction (w11, 2026-07-05): dial-grid corruption, not B blindness
 
-**The 3 webp ladders split on independent scoring (webp-inspect/), and B is
-blind on the decisive one** (correction 2026-07-05: butteraugli is a
-DISTANCE and that column is the MAX norm — high = bad):
-- `a9143f…` (the smoking gun): good by EVERY judge — ssim2 91, butter-max
-  1.2, butter-p3 0.5 — and **B says −81**. Pure feature-OOD blindness.
-- `a06b…`/`c37e…`: webp genuinely leaves severe artifacts even at q100
-  (butter-max 5.3-7.9, p3 2.8-3.7; ssim2's pooled 62-68 dilutes them) —
-  these encodes ARE flawed, and butter high is the honest read; but B's
-  −80/−12 is absurd in MAGNITUDE (below "random noise" territory), so the
-  extrapolation pathology stands there too, just with directional cover.
-A says 32-64 (sane degradation). Two of three share the odd 513×769 shape; the fit
-corpus (HDR-mix, 7,410 rows) lacks this content class. FIXES (open): refit
-the ensemble with such SDR content in-corpus (real fix); knob-context floor
-at bottom-knot y (mitigation — turns −80 into 0, honest "unreachable");
-until then webp is caveated in the migration plan.
+**Both earlier adjudications of this section were wrong about the cause.**
+The trio's −80/−81/−12 came from the DIAL GRID's stored features, and those
+rows are extraction garbage: masked/IW-block features (f228..f371) sit at
+34..489 (f235 = 269.8/274.7/46.4), **bit-constant across each ladder's 40 q
+values** — impossible for distorted-side features — while fresh CPU
+extraction (`extract_features_372col`) on the same webp-inspect decodes
+gives 0.003..0.025. A systematic screen flags **9 of 115 ladders** (8/24
+webp + 9059ec…×jpeg); all flagged images hit odd dimensions in the scale
+pyramid, and the grid's own provenance notes the zensim-gpu odd-dim
+pathology (NaN cells dropped — these produced non-NaN garbage instead).
+
+**The shipped B on FRESH pixels is sane and correctly ordered**
+(q90/95/100): a9143 (clean by every judge) = 88.6/90.8/**92.1**; a06b =
+74.8/78.5/81.5; c37e = 66.8/82.8/79.0 — vs ssim2 87.6-91.2 / 60.6-67.9 /
+36.0-61.6 and A 90.6-93.0 / 64.3-72.5 / 41.3-71.0. No −80s exist on honest
+inputs; grid-B was compared against fresh-ssim2/butter. What stands from
+the earlier reads: a06b/c37e genuinely carry severe webp artifacts
+(butter-max 5.3-21.5) and BOTH B and A are optimistic there vs butteraugli
+(ssim2-family pooling dilutes localized artifacts — a metric-family
+characteristic, not an OOD failure).
+
+**The corpus refit (w11) was executed anyway and FALSIFIED**: every
+safesyn-slice mass 0.02..1.0 × λ × τ costs held-out CID22 (0.842-0.857 vs
+0.8733, gate ≥0.87) and usually KonJND; the ssim2-anchored cid22tr
+selection axis moves UP while real CID22 moves DOWN (the ssim2-target trap,
+now measured on a selection axis). Full tables:
+`benchmarks/linear_projections_2026-07-03.md` §w11. **B-slot unchanged.**
+Bottom-floor mitigation: bounds garbage-input damage at 0 (knob shows
+"unreachable" instead of −80) with ZERO corruption-gate cost on this bake
+(224/672 pass both ways), but cannot restore knob usability on corrupt
+inputs. Real-input fragility (bigcodec_val heavy tails f155/f52/f216, 0.95%
+below raw −2, min −938) is documented in §w11 — the falsified refit fixed
+it but paid too much; a floor decision is product-side and open.
+
+**Quarantined dial grid** (the honest instrument until a v2 rebuild):
+`dial_grid_372col_2026-05-29_quarantined.parquet` (4,457 rows, sha256
+`b5d27f212fc6b00c…`) next to the canonical file. Every dial number measured
+on the 9 corrupt ladders since 2026-05-29 (any bake, incl. A) is
+garbage-input scoring.
 
 **Unrepresentable targets under B (≈ codec physics, shared with A, per the
 ceiling-median comparison)**: >94 unreachable for 50% of (image,codec),

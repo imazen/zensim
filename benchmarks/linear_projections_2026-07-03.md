@@ -783,3 +783,174 @@ mechanism whose proven value is HDR-side (+0.041 UPIQ); SDR ship shape =
 linear ensembles; the gate protects any MLP anywhere. Forever-model stack:
 per-domain linear cores (dial-aligned via the shared anchor), HDR residual
 optional, everything deterministic except explicitly-gated corrections.
+
+## w11 refit (webp OOD) — premise overturned: grid corruption, not model blindness; corpus refit FALSIFIED (2026-07-05)
+
+Mission was: fix the measured webp trio (-80/-81/-12 under the shipped
+`lp_ens-Pline-cid80-anchored-f16`) by refitting the offending head with the
+missing SDR content class in-corpus. Script:
+`scripts/v_next/w11_webp_ood_refit_2026-07-05.py`; artifacts:
+`/mnt/v/output/zensim-multicodec-probe/w11-webp-ood/`.
+
+### 1. Per-head diagnosis (the brief's step 1 — measured as specified)
+
+Ensemble = cid:0.80 (`hdrmix-lasso0.002-raw`@tau0) + kon:0.20
+(`canonhdr15-bvls-raw`@tau0.005), heads z-normalized on the anchor set.
+On the DIAL-GRID rows (webp, q>=90):
+
+| head | healthy-webp median | a06b | a9143 | c37e | driver |
+|---|--:|--:|--:|--:|---|
+| cid | +0.941 | **-17.3** | **-17.5** | **-2.2** | f235: w=-0.0034, z=+5399/+5497/+927, contrib -18.2/-18.5/-3.1 |
+| kon | +0.918 | +3.7 | +3.8 | -0.7 | f237 z+5.5, f279 z+10.7 on c37e only |
+| ens (f16) | +0.99 | -18.8 | -19.0 | -4.5 | cid dominates at 0.80 |
+
+f235 (masked-block scale-0 Y flatness-weighted) sits at **46..275** in the
+grid's trio rows — 3 orders beyond hdr_v3mix's max 0.27 AND safesyn's max
+0.64. tau=0.005 on the cid head already zeroes it (the 15-active sibling
+scores the trio 0.88..0.98 = healthy).
+
+### 2. The premise flip — the grid rows are corrupt, the shipped bake is sane
+
+The huge f235 is **not reproducible from pixels**:
+
+- `extract_features_372col --corpus pairs-tsv` (CPU, current tree) on the
+  webp-inspect fresh decodes gives f235 = **0.003..0.025** for the exact
+  same (image, webp, q90/95/100) cells.
+- The grid's f235 is **bit-constant across each ladder's 40 q values**
+  (269.82.. exactly, q0..q100) — impossible for a distorted-side feature.
+- A systematic screen (masked/IW blocks bit-constant across ladder + values
+  >5 where every corpus tops at ~2) flags **9 of 115 ladders**: the trio
+  x webp, `9059ec43b26aa167_769x513` x {jpeg, webp}, and
+  {`0e53ea752da698d9`, `1a20ecb0c1b92466`, `ef576c4ed599d75d72145a8f34b58ccb`,
+  `f65a24b7e176eb47`}_1022x818 x webp — **8 of 24 webp ladders**. All flagged
+  images hit odd dimensions somewhere in the scale pyramid; the grid was
+  extracted with `zenmetrics sweep --metric zensim-gpu` whose odd-dim
+  pathology was already documented in the grid's own provenance note
+  ("~25% of cells NaN on odd-dim images dropped") — these ladders produced
+  non-NaN garbage instead of NaN.
+- **The shipped bake on the FRESH pixels** (score_pair_with_bake, q90/95/100):
+
+| image | ssim2 | butter-max | A (v47) | **B shipped** | B verdict |
+|---|---|---|---|---|---|
+| a9143f… (clean) | 87.6/89.9/91.2 | 1.7/1.4/1.2 | 90.6/92.3/93.0 | **88.6/90.8/92.1** | sane, high — criterion met |
+| a06b… (artifacted) | 60.6/61.3/67.9 | 14.7/9.2/5.3 | 64.3/67.3/72.5 | **74.8/78.5/81.5** | sane, ordered below a9143; optimistic vs ssim2 by ~14 |
+| c37e… (artifacted) | 36.0/57.6/61.6 | 21.5/16.5/7.9 | 41.3/64.1/71.0 | **66.8/82.8/79.0** | sane, lowest; optimistic vs ssim2 by ~20-30 |
+
+No -80s exist on honest inputs. The 2026-07-05 "webp trio adjudication"
+compared grid-B (garbage features) against fresh-ssim2/butter — apples to
+oranges. A's grid numbers ("32-64") were equally garbage-input scores; A's
+bounded MLP just degrades gracefully where the linear head extrapolates.
+
+### 3. The corpus refit — executed as briefed, FALSIFIED on its own gates
+
+Slice (deterministic, seed-free): per-feature top-8+bottom-8 tails (372
+features, covers every direction where hdr_v3mix is near-degenerate,
+f155's heavy tail included: safesyn max 2,055 vs hdr max 0.68) UNION
+stride-16 backbone over canonical safesyn = **12,919 rows (6.6%)**, sha256
+`74823a63f84ff6f10ca8468c4c3f0b7ba5098f60e12452c90791d45607b25084`,
+ssim2-derived `human_score` minmax01'd per group (the same target
+convention every gram group gets). Mix: hdr_v3mix 1.0 + slice w; lasso.
+No bigcodec (falsified poison).
+
+Fit-level sweep (w x lambda; sel axes + OOD-health on bigcodec_val):
+
+| fit | act | w[f235] | cid22tr | bigval | hdrmixval | ood<-2 | min |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| original hdrmix-lasso0.002 | 35 | -0.0034 | **0.9635** | 0.8428 | **0.9040** | 0.951% | **-938** |
+| safe0.02-lasso0.001 | 69 | 0 | 0.9156 | 0.8476 | 0.8916 | 0% | -1.6 |
+| safe0.05-lasso0.001 | 72 | 0 | 0.9263 | 0.8538 | 0.8903 | 0% | -1.1 |
+| safe0.1-lasso0.001 | 71 | 0 | 0.9330 | 0.8566 | 0.8937 | 0% | -0.9 |
+| safe0.25-lasso0.001 | 74 | 0 | 0.9372 | 0.8599 | 0.8983 | 0% | -0.8 |
+| safe0.5-lasso0.001 | 75 | 0 | 0.9398 | 0.8635 | 0.8999 | 0% | -0.7 |
+| safe1-lasso0.001 | 74 | 0 | 0.9418 | 0.8673 | 0.8990 | 0% | -0.7 |
+| safe{0.1..1}-lasso0.002 | 40-47 | **-0.010..-0.020** | 0.92-0.94 | 0.85 | 0.89 | 0% | -0.9 |
+
+lambda=0.002 re-selects f235 HARDER with slice mass (rejected by the
+robustness gate); lambda=0.001 zeroes f235 AND f155 at every weight and
+fixes the real-input fragility completely (0.951% -> 0%, min -938 -> -1.6).
+
+Ensemble panels (cid'@ x + kon@0.005 at the shipped 0.80/0.20; all baked
+candidates reported, declared before any panel ran; gates: CID22>=0.87,
+KonJND>=0.50):
+
+| bake | B | CID22 | KADID | TID | KonJND | AIC-3 | AIC-4 | UPIQ | mono | gates |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| **shipped ens-Pline-cid80** | 823 | **0.8733** | 0.8017 | **0.7998** | **0.5439** | **0.7775** | **0.8906** | 0.6846 | 0.9751 | PASS |
+| w11 s002L1t0 (w=.02) | 895 | 0.8548 | 0.6643 | 0.7007 | 0.5337 | 0.7298 | 0.8783 | 0.6976 | 0.9709 | FAIL CID22 |
+| w11 s005L1t0 (w=.05) | 877 | 0.8565 | 0.7129 | 0.7241 | 0.4969 | 0.7327 | 0.8753 | 0.6985 | 0.9715 | FAIL both |
+| w11 s05L1t0 (w=.5) | 892 | 0.8416 | 0.8113 | 0.7657 | 0.4697 | 0.7451 | 0.8631 | 0.7016 | 0.9743 | FAIL both |
+| w11 s05L1t5 (w=.5,tau.005) | 831 | 0.8516 | 0.8090 | 0.7630 | 0.4766 | 0.7374 | 0.8529 | 0.6939 | 0.9751 | FAIL both |
+| w11 s1L1t0 (w=1) | 900 | 0.8469 | 0.8197 | 0.7774 | 0.5055 | 0.7439 | 0.8564 | 0.7066 | 0.9766 | FAIL CID22 |
+
+**FALSIFIED at every slice mass 0.02..1.0** (pre-registered criterion:
+both extension points CID22 < 0.8650). Even 258 effective rows (w=0.02,
+3.4% mass) cost -0.019 CID22. The slice DOES buy KADID (0.81-0.82 at
+w>=0.5), UPIQ (0.70-0.71) and total OOD robustness — but not on the
+B-slot's gates. **New sharp lesson: the ssim2-anchored `cid22tr_sel` axis
+is ANTI-correlated with held-out CID22 in this family** (original 0.9635
+-> 0.8733 real; refits 0.92-0.94 cid22tr -> 0.84-0.86 real) — the
+ssim2-target trap now measured on a *selection axis*, not just a training
+target. Do not select linear heads by cid22tr against ssim2-mass variants.
+
+On the fresh trio the refits are sane but MORE optimistic on the
+artifacted encodes (s002 a06b q100 = 88.3 vs shipped 81.5, butter-max 5.3)
+— worse, not better.
+
+### 4. Dial truth on the quarantined grid — the webp blocker never existed
+
+Per-codec ceilings/mono under the SHIPPED bake, runtime dial dump
+(`ZENSIM_DIAL_PRED_OUT`), quarantined = 9 corrupt ladders removed
+(sibling parquet `dial_grid_372col_2026-05-29_quarantined.parquet`,
+4,457 rows, sha256 `b5d27f212fc6b00c…`):
+
+| codec | grid | n | ceiling med | ceiling p10 | ceiling min | mono |
+|---|---|--:|--:|--:|--:|--:|
+| webp | as-is | 24 | 88.9 | **9.4** | **-81.0** | 0.9968 |
+| webp | **quarantined** | 16 | 88.9 | **83.7** | **81.0** | 0.9952 |
+| jpeg | quarantined | 22 | 91.0 | 85.2 | 75.7 | 0.9942 |
+| jxl | quarantined | 33 | 96.3 | 95.8 | 93.8 | 0.9827 |
+| avif | quarantined | 35 | 94.4 | 93.4 | 85.9 | 0.9392 |
+
+The G2 "webp high-target tail blocker" (p10 9.4, 3/24 ladders capping
+below 50) was 100% instrument corruption: on honest rows every webp
+ladder tops at >=81. webp is knob-READY like the other codecs.
+
+### 5. Mitigation (bottom-floor at knot y) vs refit — measured
+
+Numpy replication of the validate/product PCHIP semantics (parity: floor
+study reproduces the runtime dump values -80.1/-81.1/-12.0 exactly):
+
+- Floor turns the corrupt-input ladders from -95..-12 into **flat 0**
+  (bounded, honest "unreachable") — but n_distinct=1: knob usability is
+  NOT restored. Garbage in, garbage out — no output transform fixes it.
+- **Corruption-gate cost of the floor: ZERO on this bake** (672 gate
+  pairs, corruption_grid_2026-05-28: 224 pass uncapped, 224 pass floored;
+  0 pairs resolve below the bottom knot). The standing "do NOT clamp the
+  bottom knot" rationale does not bind for the shipped B spline —
+  a product-side floor decision costs nothing on the corruption axis
+  (this bake, this grid; re-measure per bake before generalizing).
+- Real-input fragility remains a linear-head property: 0.95% of
+  bigcodec_val rows land below raw -2 (min -938 = dial ~-7,000 uncapped)
+  via f155/f52/f216 heavy tails on extreme-quality content, mostly
+  honest-direction but absurd-magnitude; ~15% of those rows have
+  human_score >= 0.5 (false negatives). A floor bounds the blast radius;
+  the falsified refit shows the corpus route pays too much for it.
+
+### 6. Verdict + disposition
+
+- **B-slot rotation: NOT proposed.** The shipped
+  `lp_ens-Pline-cid80-anchored-f16` stands; no w11 candidate is copied to
+  `zensim/weights/` (all fail the HOLD gates).
+- **The dial grid needs a v2 rebuild** (CPU extraction or fixed GPU path;
+  encoder drift means re-encoding changes all cells — a user-scale
+  decision on comparability). Until then: the quarantined sibling is the
+  honest dial instrument; the 9 ladders' history (incl. A's and every
+  bake's dial numbers on them since 2026-05-29) is garbage-input scoring.
+- Open (pre-existing, unchanged): product-side bottom-floor decision
+  (one-line changes documented in the extrapolation finding above);
+  zensim-gpu odd-dim extraction bug (zenmetrics-side, needs its own
+  session/marker).
+
+Artifacts: `w11-webp-ood/` — `fit_table.json`, `verdict_*.md` (6),
+`dialpred_*.tsv` (6), `webp_inspect_fresh_372.csv`, slice parquet +
+`_MANIFEST.json`, `diagnose*.py`, `dial_analysis.py`.
