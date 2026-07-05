@@ -209,3 +209,18 @@ decile); <2 unreachable for 50% (encode floors — easy content floors at
 per-ladder interior gaps median 12-18pt (low-q end) bound worst-case
 landing error at ~gap/2, matching the T=30 p90 simulation errors.
 Artifacts: webp-inspect/{pairs.tsv,*.parquet}, decoded PNGs.
+
+## f155 tail forensics + winsorize verdict (2026-07-05)
+
+Two distinct bugs behind the tail behavior (page:
+reports/2026-07-05_f155_tails): (1) the dial grid's odd-dim GPU-extractor
+corruption (9/115 ladders, instrument-side — quarantined; zensim-gpu fix +
+grid v2 = open zenmetrics work); (2) f155's REAL heavy tail on tiny dark
+screen-content renditions (val max 14,532 vs fit-corpus p99.9 = 0.479;
+264/290 of B's sub-−5 raw rows; scale-pyramid degeneracy at ~50-100px).
+**Winsorize verdict: clamp features to fit-corpus [p0.1,p99.9] — provably
+bounds the linear raw output to [−0.55,1.12] (inside knot domain), zero
+tails, and free-or-BETTER on every panel axis (CID22 +0.0008, KonJND
++0.002, AIC-3 −0.0001, UPIQ +0.031).** Ship shape: feature_bounds in the
+bakes (ZNPR section exists; semantics today = OOD-flag) + clamp-to-bounds
+in the zensim forward. Bottom-knot output floor becomes redundant.
