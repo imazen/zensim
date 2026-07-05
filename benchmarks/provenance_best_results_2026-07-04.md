@@ -159,3 +159,24 @@ targeting on these measurements.
 
 G3 (regress baselines per consumer) + G4 (no zensim-gpu B kernel) are
 engineering items, unchanged. G5 closed (shipped bytes = anchored sibling).
+
+## webp trio adjudicated + unrepresentable-target map (2026-07-05)
+
+**The 3 webp ladders are a B-SPECIFIC feature-OOD blindness, not honest
+penalty**: fresh independent scoring (webp-inspect/) at q90-100 — ssim2 says
+61-91, butteraugli agrees (1.2-7.9), A says 32-64 (low but sane), **B says
+−80/−81/−12** (raw pred below the bottom knot → deliberately-uncapped
+downward extrapolation). Two of three share the odd 513×769 shape; the fit
+corpus (HDR-mix, 7,410 rows) lacks this content class. FIXES (open): refit
+the ensemble with such SDR content in-corpus (real fix); knob-context floor
+at bottom-knot y (mitigation — turns −80 into 0, honest "unreachable");
+until then webp is caveated in the migration plan.
+
+**Unrepresentable targets under B (≈ codec physics, shared with A, per the
+ceiling-median comparison)**: >94 unreachable for 50% of (image,codec),
+>99 for 90% (extrapolation past the 95.89 knot reaches ~100 for the top
+decile); <2 unreachable for 50% (encode floors — easy content floors at
+~89 on jpeg, so LOW targets are unrepresentable there under ANY metric);
+per-ladder interior gaps median 12-18pt (low-q end) bound worst-case
+landing error at ~gap/2, matching the T=30 p90 simulation errors.
+Artifacts: webp-inspect/{pairs.tsv,*.parquet}, decoded PNGs.
