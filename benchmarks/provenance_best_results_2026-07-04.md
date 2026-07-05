@@ -249,3 +249,41 @@ if a future re-bake reverts to the raw `predict` path. The earlier
 ABANDONED — it reinvented (in the wrong layer) what `winsor_p99` already
 does, and would have forced `bake_runtime.rs` to duplicate the clamp
 (the two-code-paths-diverge trap). No zenpredict edit was needed.
+
+## f155-tail vs GPU-odd-dim-bug reconciliation (2026-07-05, verified)
+
+The zenmetrics odd-dim extractor bug (fixed `aade882e` on zenmetrics master —
+`div_ceil`→floor pyramid heights, GPU/CPU mismatch on odd heights at any pyramid
+scale) is a SEPARATE issue from the f155 tail, on SEPARATE files. Verified:
+
+- **The f155 tail is REAL, on CLEAN data.** My winsor work used
+  `bigcodec_valdigits/traindigits_2026-07-02.parquet` (non-hqdedup) — the agent's
+  blast-radius screen found these CLEAN (0/147,067 and 0/2,946,036 row violations),
+  CPU-extracted (group count matches the canonical-picker CPU sweep). I
+  re-verified: f155 VARIES with distortion (n_distinct 51/105 rows on
+  o_8301.scale54x96), not bit-constant like the GPU bug's dial-grid signature
+  (269.8 across all 40 q). So f155=14,532 is a genuine degenerate-statistics heavy
+  tail on tiny renditions (54×96 → ~6-px-wide pyramid scale), correctly extracted.
+  **The winsor fix is correctly characterized.**
+- **B's training data is CLEAN.** hdr_v3mix (B's cid head, 80%) + hdr_v3 (BHdr):
+  0% masked>5, 0% IW>5, 0 bit-constant refs. HDR renditions are fixed-size so the
+  odd-dim bug never touched them. B is built on clean data; its tail exposure was
+  inference-only on tiny renditions.
+- **The GPU bug's actual casualties are OTHER files:** the dial grid (9/115
+  ladders — already quarantined), `bigcodec_hqdedup_{train,val}digits` (CORRUPT,
+  82/4585 + 5/2745), jxl-hqfill-A (56/1650), and the `bigcodec_hqfill*` group
+  (likely corrupt, unscreened). **CAVEAT (agent finding):** the corrupt
+  `bigcodec_hqdedup_*` pair was used as the `bigcodec` train/val group by the
+  **w11-era ABLATION bakes** (manifests `ab_base_s7.toml` etc.) — those ablations
+  are compromised and should be re-run on the CLEAN `bigcodec_*digits` or
+  re-extracted data. This does NOT affect shipped Profile B (trained on the
+  verified-clean hdr_v3mix + canonhdr15). Full per-dataset table:
+  zenmetrics `docs/ZENSIM_GPU_ODDDIM_CORRUPTION_2026-07-05.md`.
+
+**B vs ssim2 training (for interpreting the KADIS color divergence):** B trains to
+predict **ssim2 + cvvdp (a 0.5/0.5 mix), dominantly on COMPRESSION renditions**
+(hdr_v3mix HDR-JXL 80% + canonhdr15 SDR sweeps 20%); no CID22-49 MOS. SSIMULACRA2
+is hand-tuned to **human MOS on CID22-201 + KADID + TID** (KADID = the color/denoise
+distortion families). So on KADIS color distortions ssim2 is human-tuned and B is
+out-of-domain — the divergence favors ssim2 there; on compression (B's domain) they
+agree.
