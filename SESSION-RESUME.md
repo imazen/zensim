@@ -1,9 +1,9 @@
 # SESSION-RESUME — read this first after every compact
 
-**Last updated:** 2026-07-05 (Profile-B dial FIXED + shipped; B now dominates A;
-awaiting a user default-flip decision)
+**Last updated:** 2026-07-05 (Profile-B dial FIXED + shipped; B↔A is a TRADEOFF
+— B leads human-MOS holdouts, A leads ssim2-agreement on codec sweeps; flip pending)
 
-## ⚡ Latest (2026-07-05) — Profile-B is dial-clean AND beats A; ONE decision pending
+## ⚡ Latest (2026-07-05) — Profile-B is dial-clean; B↔A tradeoff measured; ONE decision pending
 
 All on `main@origin` (0fb4df41 tip). Details:
 `benchmarks/provenance_best_results_2026-07-04.md` (best-of-both dial probe +
@@ -20,27 +20,36 @@ All on `main@origin` (0fb4df41 tip). Details:
   recorded: do NOT rebuild the spline from the balanced anchor — it lifts the
   bottom knot off the real-content raw floor → 33% downward-extrapolation (the
   outlier gate caught it). Extend the top only.
-- **★ DECISION PENDING (user): flip the default `latest()` A→B.** With B's dial
-  clean, B DOMINATES the shipped A (`v47`) on EVERY measured axis — CID22
-  0.8763 vs 0.8657, KonJND 0.5474 vs 0.4185, AIC-3 0.7774 vs 0.7680, AIC-4
-  0.8900 vs 0.8854, Z-RMSE better on 3/4, half the size, deterministic +
-  collapse-immune, same correctness props (identity/bounded/monotone). The old
-  "MLP wins AIC-3/4" caveat was vs the CANDIDATE t1dro51, NOT shipped A.
-  `latest()`/`latest_preview()`/`codec_target()` still return `Self::A` — the
-  flip is a default-behavior change, surfaced for user sign-off, NOT auto-applied.
+- **★ DECISION PENDING (user): flip the default `latest()` A→B — a genuine
+  TRADEOFF, NOT strict dominance (corrected 2026-07-05).** B leads A on the ~6k
+  held-out HUMAN-MOS holdouts — CID22 0.8763 vs 0.8657, KonJND 0.5474 vs 0.4185,
+  AIC-3 0.7774 vs 0.7680, AIC-4 0.8900 vs 0.8854, Z-RMSE better on 3/4 — plus half
+  the size, deterministic + collapse-immune, same correctness props. **BUT A leads
+  B on ssim2-AGREEMENT across ~1M codec-sweep rows** (`rescore_parquet` + `panel`
+  on the canonical picker test splits, scores recalculated from the STORED
+  features: A > B on all 5 rank-variance codecs, +0.002..+0.05 SROCC AND better
+  Z-RMSE; the 2 lossless codecs are degenerate ties, ssim2≡100). So B is more
+  HUMAN-MOS-aligned; A is more SSIM2-aligned. The earlier "dominates every axis"
+  was measured ONLY on the human-MOS holdouts, never on the codec-sweep-vs-ssim2
+  axis. `latest()` still returns `Self::A`; the flip trades ssim2-tracking for
+  human-MOS-tracking — surfaced for user sign-off, NOT auto-applied. Data:
+  `/mnt/v/output/zensim/ab_rescored_2026-07-05/` + provenance doc.
 - **Workspace green** (89 ok / 0 fail). Fixed a pre-existing stale test on the
   way (`4c80470a`): `v9_eight_knot_spline_monotone` asserted the old uncapped
   spline >100; `5d4978db` capped it at 100 for product parity but missed this
   sibling test. Verified against `metric.rs` (`.min(100.0)`) before changing.
-- **BHdr FAILS its hard G-RANGE gate (bottom, staged fix, NOT rotated).** Measured
-  (`0fb4df41`): below-knot 2.13% → negative dial (min −1.97); top is honest
-  (above-knot 0). Rank-invariant fix built + verified (SROCC 0.914897 unchanged,
-  negatives → +2.98, G-RANGE PASS), staged at `/mnt/v/output/
-  zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin` (build it
-  with `bake_dial_refit bottom-extend --floor-raw 0.0` — Rust; `bhdr_bottom_extend.py`
-  retired 2026-07-05, BYTE-IDENTICAL). NOT rotated: 2nd shipped profile +
-  a deeper bottom-under-ranking question (targets 0.3–0.6 at very low raw) the
-  narrow knot-fix doesn't address. User call.
+- **BHdr's negative dial is a VALID score, NOT a G-RANGE defect (corrected
+  2026-07-05, user).** Negative scores are ALLOWED — `metric.rs` clamps at −100,
+  and ssim2 itself ranges to −155 on heavy distortion. The G-RANGE below-knot flag
+  exists to catch GARBAGE-raw (the f155 feature bug that drove raw to −1131 → the
+  "webp −80" artifact), which the winsor transform fixes at the FEATURE level — it
+  was NEVER meant to reject legitimate below-knot extrapolation producing valid
+  negative scores. So BHdr's min −1.97 dial on the lowest-quality HDR content is
+  correct behavior. The `bhdr_bottom_extend` candidate (clamps −1.97 → +2.98) is
+  **WITHDRAWN** — it distorts valid low scores; BHdr ships as-is. (`bake_dial_refit
+  bottom-extend` stays available for the genuine garbage-raw case.) SEPARATE open
+  item, unchanged: the below-knot pairs carry targets 0.3–0.6 at very low raw — a
+  possible model UNDER-ranking, a calibration question independent of the sign.
 
 
 ## Reading order on resume

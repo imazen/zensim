@@ -403,10 +403,15 @@ noise the rebuild introduced is gone (inversions 0.026 ≈ the winsor bake's 0.0
 MLP's 0.025) — because only the OOD tail moved, the in-distribution rank is byte-for-
 byte the winsor bake's. G-RANGE PASS (0 extrapolating, both tails).
 
-### B vs the SHIPPED A (v47) — B dominates every measured axis (2026-07-05)
+### B vs the SHIPPED A (v47) — a TRADEOFF: B wins human-MOS, A wins ssim2-agreement (2026-07-05)
 
-With B's dial now clean, the head-to-head is decisive. Both bakes scored through the
-SAME panel (`bake_verdict`, 4 held-out corpora + the quarantined dial grid):
+> **Correction 2026-07-05 (user):** the original header claimed "B dominates every
+> measured axis." That was measured ONLY on the human-MOS holdouts below. On the
+> ssim2-agreement axis (codec sweeps) A actually leads B — see the codec-sweep table
+> further down. Neither dominates; the two split along which reference you trust.
+
+On the **human-MOS holdouts**, B wins. Both bakes scored through the SAME panel
+(`bake_verdict`, 4 held-out corpora + the quarantined dial grid):
 
 | axis | A = `v47_strict_qat_native` (MLP, 27 KB) | B = `dense_dial` (linear, 13 KB) | winner |
 |---|--:|--:|---|
@@ -421,17 +426,39 @@ SAME panel (`bake_verdict`, 4 held-out corpora + the quarantined dial grid):
 | dial dead-zone | 0.0000 | 0.0005 | ~tie (both PASS) |
 | size / determinism | 27 KB, trained MLP | **13 KB, Gram-exact linear, collapse-immune** | B |
 
-B wins **all four held-out rank corpora**, is dial-equivalent (both pass every G3
-gate), better-calibrated (Z-RMSE) on 3/4, half the size, and deterministic. The
+B wins **all four held-out human-MOS corpora**, is dial-equivalent (both pass every
+G3 gate), better-calibrated (Z-RMSE) on 3/4, half the size, and deterministic. The
 earlier "the MLP wins AIC-3/AIC-4" caveat referred to the *candidate* `w3_t1dro51`
 (AIC-3 0.8013), NOT the shipped A — against the actually-shipped `v47`, B wins those
 too. B also holds A's hard-won correctness properties: identity=100 (test), bounded
 output (winsor + spline cap, G-RANGE PASS), monotone dial (0.9736 ≈ A's 0.9731).
 
+**But the other axis goes the other way — ssim2-agreement on codec sweeps
+(2026-07-05).** Recalculated from the STORED features (`rescore_parquet --profile
+{a,b}`, bit-exact runtime — no re-analysis) on the canonical picker TEST splits
+(~1.03M rows, `/mnt/v/output/zensim/ab_rescored_2026-07-05/`), stats via `panel` (no
+scipy; 20k subsample/codec for PWRC tractability), A leads B on agreement with ssim2
+on every rank-variance codec:
+
+| codec | n (full) | SROCC·A vs ssim2 | SROCC·B vs ssim2 | Δ(A−B) | Z-RMSE·A | Z-RMSE·B |
+|---|--:|--:|--:|--:|--:|--:|
+| zenavif_lossy | 271k | 0.9356 | 0.9340 | +0.002 *(tie)* | 0.435 | 0.453 |
+| zenpng (quant) | 14k | 0.9818 | 0.9371 | +0.045 | 0.497 | 0.526 |
+| zenjpeg_lossy | 267k | 0.8235 | 0.7871 | +0.036 | 0.652 | 0.706 |
+| zenwebp_lossy | 170k | 0.8141 | 0.7856 | +0.029 | 0.704 | 0.745 |
+| zenjxl_lossy | 255k | 0.8075 | 0.7576 | +0.050 | 0.742 | 0.798 |
+
+(zenjxl_lossless + zenwebp_lossless are degenerate — ssim2≡100, both bakes saturate,
+no rank signal.) So **A tracks ssim2 more closely on the codec-sweep distribution; B
+tracks human MOS more closely on the held-out corpora.** ssim2 itself ranges to −155
+on heavy zenjpeg distortion (negatives are valid scores) — A's [0,100] clamp loses
+rank on that tail, visible in its worse low-band Z-RMSE.
+
 **Open decision (needs user sign-off — a default-behavior change):** `latest()` /
-`latest_preview()` / `codec_target()` still return `Self::A`. The data now supports
-flipping the default to `B`. That changes what every default caller scores, so it is
-a deliberate release decision, not a bake rotation — surfaced, not auto-applied.
+`latest_preview()` / `codec_target()` still return `Self::A`. Flipping to `B` trades
+ssim2-tracking (A's edge on codec sweeps) for human-MOS-tracking (B's edge on the
+holdouts) — a deliberate release decision, not a bake rotation, and NOT a free win.
+Surfaced, not auto-applied.
 
 Still open: the **rank Pareto** — a hard-routed MLP-AIC-head ensemble to also capture
 the candidate MLP's AIC-3 edge (note the V43 caveat: naive regime-routing fails when
@@ -442,7 +469,8 @@ better regime separator, not a naive router, is required).
 
 Ran the outlier gate on `bhdr_linear_shaped_anchored2` against its HDR corpus
 (`hdr_v3mix_traindigits`, 7,410 rows). The earlier "y=92.8 might be a top dead-zone"
-hypothesis is **falsified by measurement** — the issue is the BOTTOM, not the top:
+hypothesis is **falsified by measurement** — the top is honest; the bottom produces
+valid negative scores that were initially (and wrongly) flagged as a defect:
 
 - **Top is HONEST, not a dead-zone.** `above-knot 0 (0.000%)` — no near-lossless HDR
   pair's raw exceeds the top knot (raw 1.023). The y=92.8 ceiling is the honest Q-Q
@@ -450,24 +478,24 @@ hypothesis is **falsified by measurement** — the issue is the BOTTOM, not the 
   (HDR training target tops at 96.2 / p99.9=95.6, and the dial's identity=100 is
   still delivered by the `is_identical` short-circuit). So NO top extension is
   warranted (extending to 100 would over-shoot the honest HDR ceiling — a mis-calib).
-- **Bottom FAILS G-RANGE.** `below-knot 158 (2.132%)` — 2.1% of HDR pairs have raw
-  (min 0.03) BELOW the bottom knot (raw 0.297 → score 25.9), so low-quality HDR
-  extrapolates downward. Unlike the SDR-B rebuild's wild-negative bottom, this stays
-  positive (mild under-scoring, not catastrophic), but it trips the HARD gate.
-- **Narrow fix BUILT + VERIFIED (staged, not rotated).** `scripts/v_next/
-  bhdr_bottom_extend.py` prepends a bottom knot at (raw 0.0, score 0.0): covers the
-  raw floor and remaps the bottom 2.13% MONOTONICALLY from the negative-going
-  extrapolation to a gentle approach to 0. Measured on hdr_v3mix: **HDR SROCC
-  0.914897 == 0.914897 (Δ=0, rank byte-identical)**; only the 157 below-knot rows
-  change; **min dial −1.97 → +2.98** (negatives gone); **G-RANGE FAIL (2.13%) →
-  PASS (0)**; identity=100 unaffected (short-circuit). Candidate staged at
-  `/mnt/v/output/zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin`
-  (sha `2929078e`).
-- **NOT rotated overnight — two reasons.** (1) BHdr is a second shipped profile the
-  "do 1" scope didn't cover. (2) A DEEPER question sits under the narrow fix: those
-  157 pairs carry targets 0.3–0.6 ([0,1] scale) yet BHdr gives them very low raw —
-  the model UNDER-RANKS the bottom tail (a bottom re-anchor / model question, which
-  the (0,0)-knot fix does not address — it only removes the negatives + passes the
-  gate). Rotating BHdr should be a deliberate call that also weighs the bottom
-  re-anchor, not a mechanical overnight swap. Surfaced for the user; the verified
-  narrow fix is one command away (`bhdr_bottom_extend.py`).
+- **Bottom produces VALID negative scores — NOT a defect (corrected 2026-07-05,
+  user).** `below-knot 158 (2.132%)` — 2.1% of HDR pairs have raw (min 0.03) below
+  the bottom knot, extrapolating to a min dial of −1.97. **Negative scores are
+  ALLOWED** (`metric.rs` clamps at −100; ssim2 itself ranges to −155 on heavy
+  distortion — see the codec-sweep section above). The G-RANGE below-knot flag was
+  built to catch GARBAGE-raw (the f155 feature bug → raw −1131 → the "webp −80"
+  artifact), which winsor fixes at the FEATURE level — it was never meant to reject
+  legitimate low-quality extrapolation. These 157 pairs have valid features and valid
+  low raw, so their negative dial is correct behavior, not a gate failure to "fix."
+- **The `bhdr_bottom_extend` candidate is WITHDRAWN.** Clamping −1.97 → +2.98
+  (`/mnt/v/output/zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin`,
+  sha `2929078e`) DISTORTS valid low-quality scores upward — the wrong move once
+  negatives are recognized as valid. It is SROCC-neutral (0.914897, rank
+  byte-identical) but the score-value change is unwanted. Not rotated; not to be
+  rotated. (`bake_dial_refit bottom-extend` remains available for the genuine
+  garbage-raw case, which this is not.)
+- **SEPARATE open item (still valid).** Those 157 pairs carry targets 0.3–0.6 ([0,1]
+  scale) yet BHdr gives them very low raw — a possible model UNDER-ranking of the
+  bottom tail. That is a real calibration question, INDEPENDENT of the negative-sign
+  issue: fixing the sign would not fix the ranking, and the ranking is what would
+  matter. A bottom re-anchor is the lever if pursued; the knot-clamp is not.
