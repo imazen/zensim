@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# PARTIALLY-MIGRATED (2026-07-05): the base whole-spline refit is now
+#   target/release/bake_dial_refit shared-anchor (zensim-validate/.../bake_dial_refit.rs).
+# The research-specific 28-bin densify + Q-Q top-end knots + SDR-top-probe below
+# are experiment logic, not a reusable bake primitive, so they stay here. See
+# benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Densify the HDR anchored sibling's spline top-end (2026-07-03 night).
 
 The 2026-07-03 shared-anchor HDR sibling (`shared_anchor_refit.py`) fit its

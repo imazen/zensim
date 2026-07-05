@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# DEPRECATED (2026-07-05): migrated to Rust. Use
+#   target/release/bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col <col>]
+# (zensim-validate/src/bin/bake_dial_refit.rs). The Rust gate reuses
+# zenstats::panel for Z-RMSE/OR/SROCC and computes NO PWRC (OOM-safe), matching
+# this script's light_panel. Kept for provenance. See
+# benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Outlier / calibration eval gate for a linear ZNPR bake — catches the
 failure modes a rank-only (SROCC) panel is BLIND to.
 

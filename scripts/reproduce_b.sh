@@ -31,13 +31,24 @@ B_SHA=b78adb15          # b_sdr_linear_cid80_dense_dial_2026-07-05.bin (SHIPPED)
 BHDR_SHA=373eac56       # bhdr_linear_shaped_anchored2_2026-07-04.bin (BHdr, informational)
 
 echo "== step 1/2: build the shipped B (extend the winsor bake's dial top), assert byte-identity =="
-# dense_dial_refit_b extends the COMMITTED archived winsor bake
+# bake_dial_refit extend-top extends the COMMITTED archived winsor bake
 # (zensim/weights/archive/b_sdr_linear_cid80_winsor_2026-07-05.bin — read for
-# weights/scaler/bottom-spline), + the fit corpus (winsor bounds) + the multiband
-# anchor (top saturation fit). The winsor bake itself reproduces via
-# winsorize_bake.py from the ens-Pline-cid80 ensemble ($FITS/ens-Pline-cid80.npz) —
-# that deeper check is optional (see provenance); the archived bake is committed.
-python3 "$REPO/scripts/v_next/dense_dial_refit_b.py" "$OUT/b_sdr_linear_cid80_dense_dial.bin"
+# weights/scaler/transforms/bottom-spline) + the multiband anchor (top saturation
+# fit). The Rust bin reproduces the shipped B BYTE-IDENTICALLY (migrated from
+# scripts/v_next/dense_dial_refit_b.py 2026-07-05; see
+# benchmarks/bake_refit_rust_migration_2026-07-05.md).
+REFIT="$REPO/target/release/bake_dial_refit"
+if [ ! -x "$REFIT" ]; then
+  echo "  building bake_dial_refit…"
+  ( cd "$REPO" && cargo build --release -p zensim-validate --bin bake_dial_refit >/dev/null 2>&1 )
+fi
+"$REFIT" extend-top \
+  --in "$REPO/zensim/weights/archive/b_sdr_linear_cid80_winsor_2026-07-05.bin" \
+  --out "$OUT/b_sdr_linear_cid80_dense_dial.bin" \
+  --anchor /mnt/v/zen/zensim-training/canonical-2026-05-21/train/multiband_anchor_dial100.parquet \
+  --target-col target_score
+# Python fallback (retired 2026-07-05; kept for provenance):
+#   python3 "$REPO/scripts/v_next/dense_dial_refit_b.py" "$OUT/b_sdr_linear_cid80_dense_dial.bin"
 got=$(sha256sum "$OUT/b_sdr_linear_cid80_dense_dial.bin" | cut -c1-8)
 [ "$got" = "$B_SHA" ] && echo "  sha $got — BYTE-REPRODUCED ✓" || { echo "  !! sha $got != $B_SHA"; exit 1; }
 cmp "$REPO/zensim/weights/b_sdr_linear_cid80_dense_dial_2026-07-05.bin" \
@@ -53,10 +64,13 @@ if [ -x "$VERDICT" ]; then
 else
   echo "  bake_verdict not built (cargo build --release -p zensim-validate --bin bake_verdict); skipping"
 fi
-python3 "$REPO/scripts/v_next/bake_outlier_gate.py" \
-  --bake "$OUT/b_sdr_linear_cid80_dense_dial.bin" 2>/dev/null | grep -iE "G-RANGE|VERDICT" || true
+"$REFIT" gate --bake "$OUT/b_sdr_linear_cid80_dense_dial.bin" \
+  --corpus /mnt/v/output/zensim-multicodec-probe/bigcodec_valdigits_2026-07-02.parquet \
+  --ref-col human_score 2>/dev/null | grep -iE "G-RANGE|VERDICT" || true
+# Python fallback (retired 2026-07-05):
+#   python3 "$REPO/scripts/v_next/bake_outlier_gate.py" --bake "$OUT/..." ...
 
 echo
 echo "DONE — B reproduced byte-identically (sha $B_SHA)."
-echo "Predecessor (winsor-only, weights/archive/, sha b92b0b7a): scripts/v_next/winsorize_bake.py."
-echo "BHdr (sha $BHDR_SHA): python3 scripts/v_next/hdr_anchor_dense_refit.py."
+echo "Predecessor (winsor-only, weights/archive/, sha b92b0b7a): bake_dial_refit add-winsor."
+echo "BHdr (sha $BHDR_SHA): bake_dial_refit bottom-extend / shared-anchor (+ research densify in scripts/v_next/hdr_anchor_dense_refit.py)."

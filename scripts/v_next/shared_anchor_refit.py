@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# DEPRECATED (2026-07-05): the bake-level whole-spline refit migrated to Rust —
+#   target/release/bake_dial_refit shared-anchor --in <bake> --out <out> \
+#       --anchor <parquet> --target-col <col> [--target-scale 100]
+# (zensim-validate/src/bin/bake_dial_refit.rs; percentile-edge fit_spline_knots
+# ported faithfully). This script fits from linear-probe .npz artifacts (research
+# workflow) rather than a bake; kept for that provenance. See
+# benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Refit the two ship-pick linear bakes' output splines against the SHARED
 anchor scale, making cross-model dial agreement true by construction
 (2026-07-03 two-model verdict: the 15pt offset is pure scale).

@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# DEPRECATED (2026-07-05): migrated to Rust. Use
+#   target/release/bake_dial_refit bottom-extend --in <bake> --out <out> --floor-raw 0.0
+# (zensim-validate/src/bin/bake_dial_refit.rs) — reproduces this script's output
+# BYTE-IDENTICALLY. Kept for provenance only. See
+# benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Extend BHdr's output-spline BOTTOM to cover the HDR raw floor (rank-invariant).
 
 DIAGNOSIS (2026-07-05, measured via bake_outlier_gate on hdr_v3mix, 7,410 rows):

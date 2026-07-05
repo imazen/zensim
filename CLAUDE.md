@@ -1181,12 +1181,43 @@ auto-transforms via `--auto-transforms <screen.tsv>`.
 bake_verdict on every `*.bin` in a dir + emits a per-corpus
 SROCC/Z-RMSE/PWRC table for ship-decision review.
 
+### Bake dial / spline refit + tail gate (bake_dial_refit)
+**`bake_dial_refit` binary** at
+`/home/lilith/work/zen/zensim/zensim-validate/src/bin/bake_dial_refit.rs`.
+Build with `cargo build --release -p zensim-validate --bin bake_dial_refit`.
+
+THE canonical Rust home for editing a ZNPR bake's output-calibration
+spline / feature-winsor guard — replaces the `scripts/v_next/*.py` that
+hand-edited bake bytes in numpy (2026-07-05 migration). Reuses the shared
+serializer (`zenpredict_bake::bake`), spline eval (`output_calibration_spline`),
+and stats (`zenstats::panel`) — never re-serializes or re-implements PCHIP.
+Subcommands:
+
+```sh
+# extend the spline TOP by the training-fitted concave saturation (THE
+# shipped-B producer; reproduces b_sdr_linear_cid80_dense_dial BYTE-IDENTICALLY)
+bake_dial_refit extend-top --in <winsor.bin> --out <out.bin> \
+    --anchor <multiband_anchor.parquet> --target-col target_score
+# whole-spline refit to a shared anchor (percentile-edge fit_spline_knots)
+bake_dial_refit shared-anchor --in <bake> --out <out> --anchor <parquet> \
+    --target-col <col> [--target-scale 100]
+# prepend a (floor_raw, 0.0) bottom knot   (BYTE-IDENTICAL to Python)
+bake_dial_refit bottom-extend --in <bake> --out <out> --floor-raw 0.0
+# add 372 winsor_p99 guards from a fit corpus (functionally identical)
+bake_dial_refit add-winsor --in <raw.bin> --out <out.bin> --fit-corpus <parquet>
+# G-RANGE tail gate (below/above-knot raw-pred fraction) + Z-RMSE/OR/SROCC,
+# NO PWRC (OOM-safe). The 3rd eval panel SROCC is blind to.
+bake_dial_refit gate --bake <bin> --corpus <parquet> [--ref-col human_score]
+```
+
+Method + measured byte-parity: `benchmarks/bake_refit_rust_migration_2026-07-05.md`.
+
 ### Affine calibration of an existing bake
-**Missing v3 equivalent.** The historical `affine_calibrate_znpr_v2.py`
-hard-coded v2 parse — it's now DEPRECATED and refuses to run. Build a
-v3 affine tool when needed (the math is `W' = β·W, b' = β·b + α`
-applied to the final layer; emit via the JSON pipeline through
-`zenpredict-bake`).
+**Missing v3 equivalent for the affine (`W' = β·W, b' = β·b + α`) op.** The
+historical `affine_calibrate_znpr_v2.py` hard-coded v2 parse — DEPRECATED,
+refuses to run. (Output-**spline** / dial refits are NOT affine — those now
+live in `bake_dial_refit` above.) Build a v3 affine tool when needed; emit via
+`zenpredict-bake`.
 
 ### Per-corpus baseline metric extraction
 **Missing v3 equivalent.** Older `score_unified_with_bake.py` was
@@ -1221,6 +1252,14 @@ Pairs TSV must have `ref_path` + `dist_path` columns. Note: rejects
 - `dataset_metric_baseline` (zensim-bench example) — slow (15-20 min)
   AND silently drops KADID rows on image-decode failures. Use
   `bake_verdict` instead.
+- **Bake-byte-editing Python (DEPRECATED 2026-07-05, migrated to
+  `bake_dial_refit` — carry a header, kept for provenance, don't extend):**
+  `dense_dial_refit_b.py` → `extend-top`, `shared_anchor_refit.py` →
+  `shared-anchor`, `bhdr_bottom_extend.py` → `bottom-extend`,
+  `winsorize_bake.py` → `add-winsor`, `bake_outlier_gate.py` → `gate`.
+  `hdr_anchor_dense_refit.py` / `w11_webp_ood_refit_2026-07-05.py` are
+  research scripts (the latter FALSIFIED) — their bake primitives are in
+  the Rust bin; don't resurrect the numpy PCHIP/serialize code.
 
 ## Canonical training/validation corpora (2026-05-18, R2-verified 2026-05-25)
 

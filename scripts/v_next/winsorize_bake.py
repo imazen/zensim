@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# DEPRECATED (2026-07-05): migrated to Rust. Use
+#   target/release/bake_dial_refit add-winsor --in <raw.bin> --out <out.bin> \
+#       --fit-corpus <parquet> [--lo-pct 0.1 --hi-pct 99.9]
+# (zensim-validate/src/bin/bake_dial_refit.rs). The Rust add-winsor is
+# FUNCTIONALLY identical (max |d dial| = 0, SROCC 1.0); it byte-differs only in
+# float text repr + <=1.08e-19 percentile last-bit (sub-ULP, no clip effect).
+# Kept for provenance. See benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Add a winsorizing feature-transform guard to a raw-space linear ZNPR bake.
 
 This is the FINAL step that produced the shipped Profile-B SDR bake

@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# NOTE (2026-07-05): FALSIFIED research campaign (see the MEASURED VERDICT block
+# below). Its bake-byte primitives (spline read/eval, PCHIP, bake emit) are the
+# ones now consolidated in target/release/bake_dial_refit
+# (zensim-validate/src/bin/bake_dial_refit.rs) — do NOT resurrect the numpy
+# pchip_derivs / spline_apply / bake_spline here for new work; use the Rust bin.
+# The slice/fit/ensemble campaign is kept for provenance only. See
+# benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """w11: fix the Profile-B linear pick's webp feature-OOD blindness (2026-07-05).
 
 MEASURED BUG (commits 2e655672 + 64e432fb): 3/24 webp dial ladders score

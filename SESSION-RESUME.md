@@ -12,7 +12,8 @@ All on `main@origin` (0fb4df41 tip). Details:
 - **`ZensimProfile::B` dial FIXED + rotated (67762d48).** B's only failing dial
   gate (near-lossless dead-zone 5.63%) was closed RANK-INVARIANTLY by extending
   ONLY the winsor bake's spline TOP with the training-fitted concave saturation
-  (`scripts/v_next/dense_dial_refit_b.py`, k=3.31). Shipped bake
+  (`bake_dial_refit extend-top`, k=3.31 — Rust; `dense_dial_refit_b.py` retired
+  2026-07-05, reproduces the shipped bake BYTE-IDENTICALLY). Shipped bake
   `b_sdr_linear_cid80_dense_dial_2026-07-05.bin` (sha `b78adb15`, byte-repro via
   `scripts/reproduce_b.sh`). All G3 dial gates PASS (dead-zone 0.0005, inversions
   0.0264), G-RANGE PASS, rank IDENTICAL (CID22 0.8763 / KonJND 0.5474). Gotcha
@@ -35,8 +36,9 @@ All on `main@origin` (0fb4df41 tip). Details:
   (`0fb4df41`): below-knot 2.13% → negative dial (min −1.97); top is honest
   (above-knot 0). Rank-invariant fix built + verified (SROCC 0.914897 unchanged,
   negatives → +2.98, G-RANGE PASS), staged at `/mnt/v/output/
-  zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin` +
-  `scripts/v_next/bhdr_bottom_extend.py`. NOT rotated: 2nd shipped profile +
+  zensim-multicodec-probe/bhdr_bottom_extended_candidate_2026-07-05.bin` (build it
+  with `bake_dial_refit bottom-extend --floor-raw 0.0` — Rust; `bhdr_bottom_extend.py`
+  retired 2026-07-05, BYTE-IDENTICAL). NOT rotated: 2nd shipped profile +
   a deeper bottom-under-ranking question (targets 0.3–0.6 at very low raw) the
   narrow knot-fix doesn't address. User call.
 

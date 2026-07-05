@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# DEPRECATED (2026-07-05): migrated to Rust. Use
+#   target/release/bake_dial_refit extend-top --in <winsor.bin> --out <out.bin> \
+#       --anchor <multiband_anchor.parquet> --target-col target_score
+# (zensim-validate/src/bin/bake_dial_refit.rs). The Rust extend-top reproduces
+# the shipped B bake BYTE-IDENTICALLY (sha b78adb15). Kept for provenance only;
+# do not extend. See benchmarks/bake_refit_rust_migration_2026-07-05.md.
 """Best-of-both: give linear-B the MLP's clean dial WITHOUT touching rank.
 
 The linear-B dial dead-zone (5.63%, the only dial gate it failed) is 100%
