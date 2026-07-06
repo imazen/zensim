@@ -92,7 +92,7 @@ def chromatic_aberration(img, L):
     r = cv2.warpAffine(r, M, (img.shape[1], img.shape[0]), borderMode=cv2.BORDER_REFLECT)
     M2 = np.float32([[1, 0, -d], [0, 1, 0]])
     b = cv2.warpAffine(b, M2, (img.shape[1], img.shape[0]), borderMode=cv2.BORDER_REFLECT)
-    return cv2.merge([b, g, r])
+    return cv2.merge([b, g, r])  # joinsafety-ok: cv2 channel merge, not a pandas/corpus join
 
 def block_distortion(img, L):  # local block-wise corruption
     n = [4, 10, 20, 40, 80][L]
