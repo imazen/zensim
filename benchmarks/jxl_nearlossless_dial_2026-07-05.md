@@ -117,6 +117,34 @@ recommended unless B is chosen as the codec knob, in which case the remap is the
 lever (feasibility of stretching the projection's near-lossless resolution is the
 open question).
 
+## Part 4 — why B compresses near-lossless: winsor vs feature-vanishing (2026-07-06)
+
+Question (user): a linear projection is continuous — how does it produce the
+near-lossless ties/compression? Winsor clamps? **Measured decomposition:**
+
+- **Winsor IS clamping hard at near-lossless** — but via the LOWER `p1` clamp, not
+  `p99`. At distance 0.03, ~310/372 features fall below their `p1` floor (mean 249.9
+  low-clamped vs 0.6 high-clamped) because near-lossless distortion features are
+  *tiny* — below the 1st percentile of the heavier-distortion training set. Clamp
+  count is monotonic in distance: 310 @ d0.03 → 95 @ d1.0.
+- **But isolating winsor** (B's real ens weights/scaler, clip(F) vs F) it costs only
+  **8–21%** of the near-lossless projection variance (11% @ d0.03, peak 21% @ d0.1).
+- **The dominant cause is feature-vanishing.** Even UNWINSORED, B's near-lossless
+  projection std is 0.004–0.012 and the range collapses to `[1.00, 1.02]` at
+  d0.04–0.05. As distortion features → their zero-distortion values, a linear
+  dot-product → a near-constant output. There's no residual signal to spread.
+
+So B's near-lossless compression ≈ **~80% feature-vanishing + ~15–20% winsor**. **A
+does better not by avoiding winsor** (same 372 features) **but because its
+nonlinearity up-weights the few features that retain near-lossless signal** —
+spreading 91–96 where B's linear fit compresses to 88–91.
+
+**Fix implication:** removing winsor recovers only ~15–20% AND reintroduces the f155
+tiny-screen pathology it guards (raw −1131 → "webp −80"). The real lever for B's
+near-lossless resolution is up-weighting the near-lossless-discriminating features (a
+near-lossless-weighted re-fit, or the mid-spline remap) — the "make B ssim2-shaped at
+the top" tradeoff. A pure winsor removal is not the fix.
+
 ## Data
 
 - Features (2200×377): `/mnt/v/output/zensim-jxl-nearlossless/full/features.parquet`
