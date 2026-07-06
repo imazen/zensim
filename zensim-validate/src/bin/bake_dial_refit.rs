@@ -285,12 +285,18 @@ fn build_fw_ops(model: &Model, n: usize) -> Result<Vec<FwOp>, String> {
             "winsor_p99" => {
                 let row = params.get(i).copied().unwrap_or("");
                 let mut it = row.split(',');
-                let lo: f64 = it.next().and_then(|s| s.trim().parse().ok()).ok_or_else(|| {
-                    format!("winsor_p99 feature {i}: missing lo param in {row:?}")
-                })?;
-                let hi: f64 = it.next().and_then(|s| s.trim().parse().ok()).ok_or_else(|| {
-                    format!("winsor_p99 feature {i}: missing hi param in {row:?}")
-                })?;
+                let lo: f64 = it
+                    .next()
+                    .and_then(|s| s.trim().parse().ok())
+                    .ok_or_else(|| {
+                        format!("winsor_p99 feature {i}: missing lo param in {row:?}")
+                    })?;
+                let hi: f64 = it
+                    .next()
+                    .and_then(|s| s.trim().parse().ok())
+                    .ok_or_else(|| {
+                        format!("winsor_p99 feature {i}: missing hi param in {row:?}")
+                    })?;
                 ops.push(FwOp::Winsor(lo, hi));
             }
             other => {
@@ -332,7 +338,13 @@ fn col_f64(batch: &RecordBatch, idx: usize) -> Vec<f64> {
             .collect()
     } else if let Some(a) = c.as_any().downcast_ref::<Float32Array>() {
         (0..a.len())
-            .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+            .map(|i| {
+                if a.is_null(i) {
+                    f64::NAN
+                } else {
+                    a.value(i) as f64
+                }
+            })
             .collect()
     } else {
         vec![f64::NAN; batch.num_rows()]
@@ -601,7 +613,10 @@ fn cmd_shared_anchor(a: &SharedAnchorArgs) -> Result<(), String> {
 
     let (cx, cy) = fit_spline_knots(&preds, &tgt_scaled, a.n_edges, true);
     if cx.len() < 2 {
-        return Err(format!("anchor refit produced only {} knots (<2)", cx.len()));
+        return Err(format!(
+            "anchor refit produced only {} knots (<2)",
+            cx.len()
+        ));
     }
     eprintln!(
         "shared-anchor refit: {} knots, dial y-range [{:.1}, {:.1}]",
@@ -682,8 +697,14 @@ fn fit_spline_knots(
         if zeros.len() > 1 {
             let drop: std::collections::HashSet<usize> =
                 zeros[..zeros.len() - 1].iter().copied().collect();
-            let fx: Vec<f64> = (0..cx.len()).filter(|i| !drop.contains(i)).map(|i| cx[i]).collect();
-            let fy: Vec<f64> = (0..cy.len()).filter(|i| !drop.contains(i)).map(|i| cy[i]).collect();
+            let fx: Vec<f64> = (0..cx.len())
+                .filter(|i| !drop.contains(i))
+                .map(|i| cx[i])
+                .collect();
+            let fy: Vec<f64> = (0..cy.len())
+                .filter(|i| !drop.contains(i))
+                .map(|i| cy[i])
+                .collect();
             return (fx, fy);
         }
     }
@@ -768,11 +789,7 @@ struct AddWinsorArgs {
 fn cmd_add_winsor(a: &AddWinsorArgs) -> Result<(), String> {
     let bytes = std::fs::read(&a.input).map_err(|e| format!("read {:?}: {e}", a.input))?;
     let model = Model::from_bytes(&bytes).map_err(|e| format!("parse bake: {e:?}"))?;
-    if model
-        .metadata()
-        .iter()
-        .any(|e| e.key.contains("transform"))
-    {
+    if model.metadata().iter().any(|e| e.key.contains("transform")) {
         return Err("input already has feature transforms — winsorize a RAW bake".into());
     }
     let lin = load_linear(&model);
@@ -914,8 +931,13 @@ fn cmd_gate(a: &GateArgs) -> Result<bool, String> {
     let zr = z_rmse(&rescaled, &refv);
     let outr = outlier_ratio(&rescaled, &refv);
     let sr = spearman(&dial, &refv).abs();
-    println!("[adv]  G-ZRMSE   {zr:.3} vs {} (lower=better; a tail inflates this while SROCC stays flat)", a.ref_col);
-    println!("[adv]  G-SROCC   {sr:.4}  (rank — near-INVARIANT to the tail; that's why it hides the bug)");
+    println!(
+        "[adv]  G-ZRMSE   {zr:.3} vs {} (lower=better; a tail inflates this while SROCC stays flat)",
+        a.ref_col
+    );
+    println!(
+        "[adv]  G-SROCC   {sr:.4}  (rank — near-INVARIANT to the tail; that's why it hides the bug)"
+    );
     println!("[adv]  G-OUTRATIO {outr:.4}  (fraction outside +/-1.96 sigma of rescaled reference)");
 
     println!(
@@ -992,10 +1014,20 @@ mod tests {
 
     fn assert_strictly_monotone(xs: &[f64], ys: &[f64]) {
         for w in xs.windows(2) {
-            assert!(w[1] > w[0], "x not strictly increasing: {} !> {}", w[1], w[0]);
+            assert!(
+                w[1] > w[0],
+                "x not strictly increasing: {} !> {}",
+                w[1],
+                w[0]
+            );
         }
         for w in ys.windows(2) {
-            assert!(w[1] > w[0], "y not strictly increasing: {} !> {}", w[1], w[0]);
+            assert!(
+                w[1] > w[0],
+                "y not strictly increasing: {} !> {}",
+                w[1],
+                w[0]
+            );
         }
     }
 
@@ -1004,10 +1036,19 @@ mod tests {
     /// increasing (no top-cap ties), so a rank-preserving refit gives an
     /// exact SROCC of 1.
     fn interior_rows() -> Vec<[f64; 3]> {
-        (0..20).map(|i| { let t = -1.5 + 0.15 * i as f64; [t, t, t] }).collect()
+        (0..20)
+            .map(|i| {
+                let t = -1.5 + 0.15 * i as f64;
+                [t, t, t]
+            })
+            .collect()
     }
 
-    fn dial_over(model: &Model, sp: &spline::OutputCalibrationSpline, rows: &[[f64; 3]]) -> Vec<f64> {
+    fn dial_over(
+        model: &Model,
+        sp: &spline::OutputCalibrationSpline,
+        rows: &[[f64; 3]],
+    ) -> Vec<f64> {
         let lin = load_linear(model);
         let ops = build_fw_ops(model, 3).unwrap();
         rows.iter()
@@ -1031,7 +1072,11 @@ mod tests {
         let start = x0 + (r_far - x0) / 12.0;
         let step = (r_far - start) / 11.0;
         for i in 0..12 {
-            let r = if i == 11 { r_far } else { i as f64 * step + start };
+            let r = if i == 11 {
+                r_far
+            } else {
+                i as f64 * step + start
+            };
             let y = 100.0 - (100.0 - y0) * (-k * (r - x0)).exp();
             if r > *xs.last().unwrap() + 1e-7 && y > *ys.last().unwrap() {
                 xs.push(r);
@@ -1046,7 +1091,10 @@ mod tests {
         let sp_after = spline::parse_payload(&spline_payload(&xs, &ys)).unwrap();
         let after = dial_over(&model, &sp_after, &rows);
         let sr = spearman(&before, &after);
-        assert!((sr - 1.0).abs() < 1e-12, "extend-top changed rank: SROCC={sr}");
+        assert!(
+            (sr - 1.0).abs() < 1e-12,
+            "extend-top changed rank: SROCC={sr}"
+        );
     }
 
     #[test]
@@ -1065,7 +1113,10 @@ mod tests {
         let sp_after = spline::parse_payload(&spline_payload(&xs, &ys)).unwrap();
         let after = dial_over(&model, &sp_after, &rows);
         let sr = spearman(&before, &after);
-        assert!((sr - 1.0).abs() < 1e-12, "bottom-extend changed rank: SROCC={sr}");
+        assert!(
+            (sr - 1.0).abs() < 1e-12,
+            "bottom-extend changed rank: SROCC={sr}"
+        );
     }
 
     #[test]

@@ -124,7 +124,12 @@ pub struct EmaState {
 
 impl EmaState {
     pub fn new(decay: f64) -> Self {
-        Self { decay, tensors: Vec::new(), scalars: Vec::new(), initialized: false }
+        Self {
+            decay,
+            tensors: Vec::new(),
+            scalars: Vec::new(),
+            initialized: false,
+        }
     }
 
     /// Fold the current live weights into the average. First call copies.
@@ -153,7 +158,10 @@ impl EmaState {
 /// default cannot change sampling.
 pub fn dro_reweight(base_w: &[f64], mean_losses: &[f64], eta: f64) -> Vec<f64> {
     assert_eq!(base_w.len(), mean_losses.len());
-    let lmax = mean_losses.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let lmax = mean_losses
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let mut w: Vec<f64> = base_w
         .iter()
         .zip(mean_losses)
@@ -217,8 +225,14 @@ mod tests {
         ];
         for (ya, yb, tau, s, r, l_ref, d_ref) in cases {
             let (l, d) = triplet_probit_loss_dgrad(ya, yb, tau, s, r);
-            assert!((l - l_ref).abs() < 1e-6, "{BUG}: triplet loss {l} != scipy {l_ref}");
-            assert!((d - d_ref).abs() < 1e-6, "{BUG}: triplet dL/dd {d} != scipy {d_ref}");
+            assert!(
+                (l - l_ref).abs() < 1e-6,
+                "{BUG}: triplet loss {l} != scipy {l_ref}"
+            );
+            assert!(
+                (d - d_ref).abs() < 1e-6,
+                "{BUG}: triplet dL/dd {d} != scipy {d_ref}"
+            );
         }
     }
 
@@ -231,14 +245,19 @@ mod tests {
         // constants test above, which pins a z=0 case to 1e-6. First caught
         // 2026-07-02 when the (0.8,0.3,resp=1) case put z2 exactly at 0.
         let eps = 1e-5;
-        for (ya, yb, tau, s, r) in
-            [(0.2, 0.9, 0.5, 1.0, 0u8), (0.9, 0.3, 0.5, 1.0, 1u8), (0.5, 0.75, 0.5, 1.0, 2u8)]
-        {
+        for (ya, yb, tau, s, r) in [
+            (0.2, 0.9, 0.5, 1.0, 0u8),
+            (0.9, 0.3, 0.5, 1.0, 1u8),
+            (0.5, 0.75, 0.5, 1.0, 2u8),
+        ] {
             let (_, d) = triplet_probit_loss_dgrad(ya, yb, tau, s, r);
             let (lp, _) = triplet_probit_loss_dgrad(ya, yb + eps, tau, s, r);
             let (lm, _) = triplet_probit_loss_dgrad(ya, yb - eps, tau, s, r);
             let fd = (lp - lm) / (2.0 * eps);
-            assert!((d - fd).abs() < 1e-4, "{BUG}: triplet analytic {d} != FD {fd}");
+            assert!(
+                (d - fd).abs() < 1e-4,
+                "{BUG}: triplet analytic {d} != FD {fd}"
+            );
         }
     }
 
@@ -252,8 +271,16 @@ mod tests {
             assert!((a - b).abs() < 1e-9, "{BUG}: listmle grad {a} != {b}");
         }
         let (l4, g4) = listmle_loss_grad(&[1.0, 0.0, 0.5, 0.2], &[0.1, 0.9, 0.5, 0.7]);
-        assert!((l4 - 4.380082469056).abs() < 1e-9, "{BUG}: listmle4 loss {l4}");
-        let g4ref = [1.521459532275, -0.848218215202, -0.077188146163, -0.596053170911];
+        assert!(
+            (l4 - 4.380082469056).abs() < 1e-9,
+            "{BUG}: listmle4 loss {l4}"
+        );
+        let g4ref = [
+            1.521459532275,
+            -0.848218215202,
+            -0.077188146163,
+            -0.596053170911,
+        ];
         for (a, b) in g4.iter().zip(g4ref) {
             assert!((a - b).abs() < 1e-9, "{BUG}: listmle4 grad {a} != {b}");
         }
@@ -272,7 +299,11 @@ mod tests {
             sp[i] -= 2.0 * eps;
             let (lm, _) = listmle_loss_grad(&sp, &targets);
             let fd = (lp - lm) / (2.0 * eps);
-            assert!((g[i] - fd).abs() < 1e-5, "{BUG}: listmle grad[{i}] {} != FD {fd}", g[i]);
+            assert!(
+                (g[i] - fd).abs() < 1e-5,
+                "{BUG}: listmle grad[{i}] {} != FD {fd}",
+                g[i]
+            );
         }
     }
 
@@ -286,7 +317,11 @@ mod tests {
         let t0 = (1.0f64 * 0.9 + 3.0 * 0.1) * 0.9 + 5.0 * 0.1;
         let t1 = (2.0f64 * 0.9 + 4.0 * 0.1) * 0.9 + 6.0 * 0.1;
         let s0 = (10.0f64 * 0.9 + 20.0 * 0.1) * 0.9 + 30.0 * 0.1;
-        assert!((e.tensors[0][0] - t0).abs() < 1e-12, "{BUG}: ema tensor {} != {t0}", e.tensors[0][0]);
+        assert!(
+            (e.tensors[0][0] - t0).abs() < 1e-12,
+            "{BUG}: ema tensor {} != {t0}",
+            e.tensors[0][0]
+        );
         assert!((e.tensors[0][1] - t1).abs() < 1e-12, "{BUG}");
         assert!((e.scalars[0] - s0).abs() < 1e-12, "{BUG}: ema scalar");
     }
@@ -317,9 +352,18 @@ mod tests {
         let total: usize = bands.iter().map(|b| b.len()).sum();
         assert_eq!(total, 103, "{BUG}: bands must partition rows");
         for w in bands.windows(2) {
-            let max_lo = w[0].iter().map(|&i| targets[i]).fold(f64::NEG_INFINITY, f64::max);
-            let min_hi = w[1].iter().map(|&i| targets[i]).fold(f64::INFINITY, f64::min);
-            assert!(max_lo <= min_hi + 1e-12, "{BUG}: bands must be target-ordered");
+            let max_lo = w[0]
+                .iter()
+                .map(|&i| targets[i])
+                .fold(f64::NEG_INFINITY, f64::max);
+            let min_hi = w[1]
+                .iter()
+                .map(|&i| targets[i])
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                max_lo <= min_hi + 1e-12,
+                "{BUG}: bands must be target-ordered"
+            );
         }
         for b in &bands[..9] {
             assert_eq!(b.len(), 10, "{BUG}: equal-count bands (except last)");
@@ -335,8 +379,16 @@ mod tests {
     #[test]
     fn phi_matches_scipy() {
         // scipy.stats.norm.cdf reference points
-        for (x, r) in [(0.0, 0.5), (1.0, 0.8413447460685429), (-1.5, 0.06680720126885807)] {
-            assert!((phi(x) - r).abs() < 2e-7, "{BUG}: phi({x}) {} != {r}", phi(x));
+        for (x, r) in [
+            (0.0, 0.5),
+            (1.0, 0.8413447460685429),
+            (-1.5, 0.06680720126885807),
+        ] {
+            assert!(
+                (phi(x) - r).abs() < 2e-7,
+                "{BUG}: phi({x}) {} != {r}",
+                phi(x)
+            );
         }
     }
 }

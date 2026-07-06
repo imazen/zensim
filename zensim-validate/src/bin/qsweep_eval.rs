@@ -188,9 +188,7 @@ fn parse_args() -> Mode {
             .into_iter()
             .map(|(label, column, file)| {
                 let file = file.or_else(|| parquet_default.clone()).unwrap_or_else(|| {
-                    panic!(
-                        "score {label:?} has no file: pass --parquet FILE or LABEL=COL@FILE"
-                    )
+                    panic!("score {label:?} has no file: pass --parquet FILE or LABEL=COL@FILE")
                 });
                 ScoreSpec {
                     label,
@@ -622,15 +620,33 @@ fn col_as_f64(col: &dyn Array) -> Vec<f64> {
             .collect()
     } else if let Some(a) = col.as_any().downcast_ref::<Float32Array>() {
         (0..n)
-            .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+            .map(|i| {
+                if a.is_null(i) {
+                    f64::NAN
+                } else {
+                    a.value(i) as f64
+                }
+            })
             .collect()
     } else if let Some(a) = col.as_any().downcast_ref::<Int64Array>() {
         (0..n)
-            .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+            .map(|i| {
+                if a.is_null(i) {
+                    f64::NAN
+                } else {
+                    a.value(i) as f64
+                }
+            })
             .collect()
     } else if let Some(a) = col.as_any().downcast_ref::<Int32Array>() {
         (0..n)
-            .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+            .map(|i| {
+                if a.is_null(i) {
+                    f64::NAN
+                } else {
+                    a.value(i) as f64
+                }
+            })
             .collect()
     } else {
         vec![f64::NAN; n]
@@ -650,7 +666,10 @@ fn col_as_string(col: &dyn Array) -> Vec<String> {
             })
             .collect()
     } else {
-        col_as_f64(col).into_iter().map(|v| format!("{v}")).collect()
+        col_as_f64(col)
+            .into_iter()
+            .map(|v| format!("{v}"))
+            .collect()
     }
 }
 
@@ -1057,14 +1076,7 @@ fn run_parquet(
                 .scores
                 .get(&spec.column)
                 .expect("score column present after read");
-            let r = evaluate_parquet_score(
-                &spec.label,
-                &pc.refs,
-                &pc.codecs,
-                &pc.qs,
-                scores,
-                agg,
-            );
+            let r = evaluate_parquet_score(&spec.label, &pc.refs, &pc.codecs, &pc.qs, scores, agg);
             eprintln!(
                 "  {} [{}]: mono={} tied={} ({} dial curves, {} degenerate)",
                 spec.label,
@@ -1082,7 +1094,10 @@ fn run_parquet(
     if let Some(tsv) = summary_tsv {
         let run_tag = tag.unwrap_or("run");
         if let Err(e) = append_summary_tsv(tsv, run_tag, &reports) {
-            eprintln!("WARNING: failed to append summary TSV {}: {e}", tsv.display());
+            eprintln!(
+                "WARNING: failed to append summary TSV {}: {e}",
+                tsv.display()
+            );
         } else {
             eprintln!("appended {} rows to {}", reports.len(), tsv.display());
         }
@@ -1238,8 +1253,14 @@ mod tests {
             w.write(&batch).unwrap();
             w.close().unwrap();
         }
-        let pc =
-            read_parquet_cols(&path, "ref_filename", "codec", "q", &["score_x".to_string()]).unwrap();
+        let pc = read_parquet_cols(
+            &path,
+            "ref_filename",
+            "codec",
+            "q",
+            &["score_x".to_string()],
+        )
+        .unwrap();
         assert_eq!(pc.refs.len(), 6);
         let scores = &pc.scores["score_x"];
         let r = evaluate_parquet_score("A", &pc.refs, &pc.codecs, &pc.qs, scores, Agg::Median);

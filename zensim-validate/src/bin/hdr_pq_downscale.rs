@@ -53,7 +53,8 @@ fn read_cicp_primaries(data: &[u8]) -> u8 {
     }
     let mut pos = 8;
     while pos + 8 <= data.len() {
-        let len = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        let len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let typ = &data[pos + 4..pos + 8];
         if typ == b"cICP" && pos + 8 + 4 <= data.len() {
             return data[pos + 8]; // color_primaries
@@ -71,7 +72,11 @@ fn crc32(bytes: &[u8]) -> u32 {
     for &b in bytes {
         crc ^= b as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     crc ^ 0xFFFF_FFFF
@@ -100,7 +105,9 @@ fn inject_cicp(png: &[u8], primaries: u8) -> Vec<u8> {
 }
 
 fn arg(args: &[String], key: &str) -> Option<String> {
-    args.iter().position(|a| a == key).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == key)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn downscale_one(path: &Path, out: &Path, long_edge: u32) -> Result<(u32, u32), String> {
@@ -114,7 +121,8 @@ fn downscale_one(path: &Path, out: &Path, long_edge: u32) -> Result<(u32, u32), 
     let scale = (long_edge as f64) / (w.max(h) as f64);
     if scale >= 1.0 {
         // Already <= target: copy through unchanged (still re-tag cICP for safety).
-        std::fs::write(out, inject_cicp(&data, primaries)).map_err(|e| format!("write {out:?}: {e}"))?;
+        std::fs::write(out, inject_cicp(&data, primaries))
+            .map_err(|e| format!("write {out:?}: {e}"))?;
         return Ok((w, h));
     }
     let nw = ((w as f64 * scale).round() as u32).max(1);
@@ -144,7 +152,8 @@ fn downscale_one(path: &Path, out: &Path, long_edge: u32) -> Result<(u32, u32), 
             .write_to(&mut cur, image::ImageFormat::Png)
             .map_err(|e| format!("encode {out:?}: {e}"))?;
     }
-    std::fs::write(out, inject_cicp(&png_bytes, primaries)).map_err(|e| format!("write {out:?}: {e}"))?;
+    std::fs::write(out, inject_cicp(&png_bytes, primaries))
+        .map_err(|e| format!("write {out:?}: {e}"))?;
     Ok((nw, nh))
 }
 
@@ -152,7 +161,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let in_dir = PathBuf::from(arg(&args, "--in-dir").expect("--in-dir required"));
     let out_dir = PathBuf::from(arg(&args, "--out-dir").expect("--out-dir required"));
-    let long_edge: u32 = arg(&args, "--long-edge").and_then(|s| s.parse().ok()).unwrap_or(1920);
+    let long_edge: u32 = arg(&args, "--long-edge")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1920);
     std::fs::create_dir_all(&out_dir).expect("create out-dir");
 
     let mut files: Vec<PathBuf> = std::fs::read_dir(&in_dir)
@@ -163,7 +174,10 @@ fn main() {
         .collect();
     files.sort();
     let total = files.len();
-    println!("downscaling {total} PQ-PNG refs to long-edge {long_edge} → {}", out_dir.display());
+    println!(
+        "downscaling {total} PQ-PNG refs to long-edge {long_edge} → {}",
+        out_dir.display()
+    );
 
     let (mut ok, mut err) = (0usize, 0usize);
     for (i, f) in files.iter().enumerate() {
@@ -194,15 +208,28 @@ mod tests {
     #[test]
     fn pq_roundtrip() {
         // EOTF∘OETF and OETF∘EOTF identity across the PQ range.
-        for &nits in &[0.0, 0.005, 0.1, 1.0, 10.0, 100.0, 203.0, 1000.0, 4000.0, 10000.0] {
+        for &nits in &[
+            0.0, 0.005, 0.1, 1.0, 10.0, 100.0, 203.0, 1000.0, 4000.0, 10000.0,
+        ] {
             let v = pq_oetf(nits);
             let back = pq_eotf(v);
             let rel = (back - nits).abs() / nits.max(1e-6);
-            assert!(rel < 1e-4 || (back - nits).abs() < 1e-3, "nits {nits} → {v} → {back}");
+            assert!(
+                rel < 1e-4 || (back - nits).abs() < 1e-3,
+                "nits {nits} → {v} → {back}"
+            );
         }
         // EOTF anchors from docs/HDR_PLAN.md §4.
-        assert!((pq_eotf(1.0) - 10000.0).abs() < 1.0, "pq_eotf(1.0)={}", pq_eotf(1.0));
-        assert!((pq_eotf(0.5) - 92.245).abs() < 0.5, "pq_eotf(0.5)={}", pq_eotf(0.5));
+        assert!(
+            (pq_eotf(1.0) - 10000.0).abs() < 1.0,
+            "pq_eotf(1.0)={}",
+            pq_eotf(1.0)
+        );
+        assert!(
+            (pq_eotf(0.5) - 92.245).abs() < 0.5,
+            "pq_eotf(0.5)={}",
+            pq_eotf(0.5)
+        );
     }
 
     #[test]

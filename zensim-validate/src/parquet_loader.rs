@@ -258,22 +258,36 @@ pub fn load_parquet(
     // sigma_weighted_mse flag's data side). Column names accept BOTH the
     // canonical-2026-05-21 scheme (cvvdp_score/iwssim/ssim2_gpu) and the
     // mm6 multimetric scheme (score_cvvdp/score_iwssim/score_dssim).
-    let sigma_on = std::env::var("ZENSIM_SIGMA_MSE").map(|v| v == "1").unwrap_or(false);
+    let sigma_on = std::env::var("ZENSIM_SIGMA_MSE")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let mut metric_sigmas: Option<Vec<f64>> = None;
     if sigma_on {
         metric_sigmas = {
             let cv_col = load_optional_scalar_column(path, "cvvdp_score")
                 .ok()
                 .flatten()
-                .or_else(|| load_optional_scalar_column(path, "score_cvvdp").ok().flatten());
+                .or_else(|| {
+                    load_optional_scalar_column(path, "score_cvvdp")
+                        .ok()
+                        .flatten()
+                });
             let iw_col = load_optional_scalar_column(path, "iwssim")
                 .ok()
                 .flatten()
-                .or_else(|| load_optional_scalar_column(path, "score_iwssim").ok().flatten());
+                .or_else(|| {
+                    load_optional_scalar_column(path, "score_iwssim")
+                        .ok()
+                        .flatten()
+                });
             let s2_col = load_optional_scalar_column(path, "ssim2_gpu")
                 .ok()
                 .flatten()
-                .or_else(|| load_optional_scalar_column(path, "score_dssim").ok().flatten());
+                .or_else(|| {
+                    load_optional_scalar_column(path, "score_dssim")
+                        .ok()
+                        .flatten()
+                });
             match (cv_col, iw_col, s2_col) {
                 (Some(cv), Some(iw), Some(s2)) if cv.len() == human_scores.len() => {
                     let cv_min = cv.iter().fold(f64::INFINITY, |a, &b| a.min(b));
@@ -317,7 +331,9 @@ pub fn load_parquet(
             }
         };
         if metric_sigmas.is_none() {
-            eprintln!("  WARNING: ZENSIM_SIGMA_MSE=1 but no metric columns found — sigmas unavailable for this group");
+            eprintln!(
+                "  WARNING: ZENSIM_SIGMA_MSE=1 but no metric columns found — sigmas unavailable for this group"
+            );
         }
     }
 

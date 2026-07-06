@@ -1792,12 +1792,29 @@ fn apply_manifest_to_args(
     );
     set_if_default!(qat_tau, "qat_tau", cfg.qat_tau);
     set_if_default!(group_eval_cap, "group_eval_cap", cfg.group_eval_cap);
-    set_if_default!(konjnd_aggregation_weight, "konjnd_aggregation_weight", cfg.konjnd_aggregation_weight);
-    if args.konjnd_aggregation_parquet.is_none() { args.konjnd_aggregation_parquet = cfg.konjnd_aggregation_parquet.clone().map(std::path::PathBuf::from); }
-    set_if_default!(konjnd_aggregation_step_p, "konjnd_aggregation_step_p", cfg.konjnd_aggregation_step_p);
+    set_if_default!(
+        konjnd_aggregation_weight,
+        "konjnd_aggregation_weight",
+        cfg.konjnd_aggregation_weight
+    );
+    if args.konjnd_aggregation_parquet.is_none() {
+        args.konjnd_aggregation_parquet = cfg
+            .konjnd_aggregation_parquet
+            .clone()
+            .map(std::path::PathBuf::from);
+    }
+    set_if_default!(
+        konjnd_aggregation_step_p,
+        "konjnd_aggregation_step_p",
+        cfg.konjnd_aggregation_step_p
+    );
     set_if_default!(ema_decay, "ema_decay", cfg.ema_decay);
     set_if_default!(hard_pair_frac, "hard_pair_frac", cfg.hard_pair_frac);
-    set_if_default!(hard_pair_max_delta, "hard_pair_max_delta", cfg.hard_pair_max_delta);
+    set_if_default!(
+        hard_pair_max_delta,
+        "hard_pair_max_delta",
+        cfg.hard_pair_max_delta
+    );
     set_if_default!(stratified_bands, "stratified_bands", cfg.stratified_bands);
     set_if_default!(dro_eta, "dro_eta", cfg.dro_eta);
     set_if_default!(listwise_weight, "listwise_weight", cfg.listwise_weight);
@@ -1807,8 +1824,12 @@ fn apply_manifest_to_args(
     set_if_default!(triplet_frac, "triplet_frac", cfg.triplet_frac);
     set_if_default!(triplet_tau, "triplet_tau", cfg.triplet_tau);
     set_if_default!(triplet_sigma, "triplet_sigma", cfg.triplet_sigma);
-    if args.triplet_stimuli.is_none() { args.triplet_stimuli = cfg.triplet_stimuli.clone(); }
-    if args.triplet_responses.is_none() { args.triplet_responses = cfg.triplet_responses.clone(); }
+    if args.triplet_stimuli.is_none() {
+        args.triplet_stimuli = cfg.triplet_stimuli.clone();
+    }
+    if args.triplet_responses.is_none() {
+        args.triplet_responses = cfg.triplet_responses.clone();
+    }
 
     // Path-valued options (already resolved to absolute/relative-to-manifest).
     if !explicit(matches, "auto_transforms") && cfg.auto_transforms.is_some() {
@@ -2737,7 +2758,9 @@ fn main() {
     // no-op — wave-4 kagg cells reproduced base byte-identically. A recipe
     // that asks for the aggregation head must provide its data.
     if args.konjnd_aggregation_weight > 0.0 && args.konjnd_aggregation_parquet.is_none() {
-        panic!("--konjnd-aggregation-weight > 0 requires --konjnd-aggregation-parquet (silent no-op guard)");
+        panic!(
+            "--konjnd-aggregation-weight > 0 requires --konjnd-aggregation-parquet (silent no-op guard)"
+        );
     }
     let konjnd_agg_owned: Option<zensim_validate::parquet_loader::OwnedKonjndAggregationPool> =
         if let Some(p) = &args.konjnd_aggregation_parquet {
@@ -2979,58 +3002,62 @@ fn main() {
         }
     } else {
         // STRATEGY-2026-07-02: optional raw-human-triplet pool.
-        let triplet_pool: Option<TripletPool> = match (&args.triplet_stimuli, &args.triplet_responses) {
-            (Some(stim), Some(resp)) if args.triplet_weight > 0.0 => {
-                let mut pool = TripletPool::default();
-                let mut rdr = csv::Reader::from_path(stim)
-                    .unwrap_or_else(|e| panic!("triplet stimuli {stim}: {e}"));
-                let headers = rdr.headers().expect("stimuli headers").clone();
-                let f0 = headers
-                    .iter()
-                    .position(|h| h == "f0")
-                    .expect("stimuli CSV needs f0..fN columns");
-                for rec in rdr.records() {
-                    let rec = rec.expect("stimuli row");
-                    let feats: Vec<f64> = (f0..headers.len())
-                        .map(|i| rec.get(i).and_then(|v| v.parse().ok()).unwrap_or(0.0))
-                        .collect();
-                    pool.features.push(feats);
-                }
-                for (ln, line) in std::fs::read_to_string(resp)
-                    .unwrap_or_else(|e| panic!("triplet responses {resp}: {e}"))
-                    .lines()
-                    .enumerate()
-                {
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
+        let triplet_pool: Option<TripletPool> =
+            match (&args.triplet_stimuli, &args.triplet_responses) {
+                (Some(stim), Some(resp)) if args.triplet_weight > 0.0 => {
+                    let mut pool = TripletPool::default();
+                    let mut rdr = csv::Reader::from_path(stim)
+                        .unwrap_or_else(|e| panic!("triplet stimuli {stim}: {e}"));
+                    let headers = rdr.headers().expect("stimuli headers").clone();
+                    let f0 = headers
+                        .iter()
+                        .position(|h| h == "f0")
+                        .expect("stimuli CSV needs f0..fN columns");
+                    for rec in rdr.records() {
+                        let rec = rec.expect("stimuli row");
+                        let feats: Vec<f64> = (f0..headers.len())
+                            .map(|i| rec.get(i).and_then(|v| v.parse().ok()).unwrap_or(0.0))
+                            .collect();
+                        pool.features.push(feats);
                     }
-                    let mut it = line.split('\t');
-                    let (l, r, a) = (
-                        it.next().and_then(|v| v.parse::<u32>().ok()),
-                        it.next().and_then(|v| v.parse::<u32>().ok()),
-                        it.next().and_then(|v| v.parse::<u8>().ok()),
-                    );
-                    match (l, r, a) {
-                        (Some(l), Some(r), Some(a))
-                            if (l as usize) < pool.features.len()
-                                && (r as usize) < pool.features.len()
-                                && a <= 2 =>
-                        {
-                            pool.responses.push((l, r, a));
+                    for (ln, line) in std::fs::read_to_string(resp)
+                        .unwrap_or_else(|e| panic!("triplet responses {resp}: {e}"))
+                        .lines()
+                        .enumerate()
+                    {
+                        if line.is_empty() || line.starts_with('#') {
+                            continue;
                         }
-                        _ => panic!("triplet responses line {}: malformed or out of range", ln + 1),
+                        let mut it = line.split('\t');
+                        let (l, r, a) = (
+                            it.next().and_then(|v| v.parse::<u32>().ok()),
+                            it.next().and_then(|v| v.parse::<u32>().ok()),
+                            it.next().and_then(|v| v.parse::<u8>().ok()),
+                        );
+                        match (l, r, a) {
+                            (Some(l), Some(r), Some(a))
+                                if (l as usize) < pool.features.len()
+                                    && (r as usize) < pool.features.len()
+                                    && a <= 2 =>
+                            {
+                                pool.responses.push((l, r, a));
+                            }
+                            _ => panic!(
+                                "triplet responses line {}: malformed or out of range",
+                                ln + 1
+                            ),
+                        }
                     }
+                    eprintln!(
+                        "triplet pool: {} stimuli x {} features, {} responses",
+                        pool.features.len(),
+                        pool.features.first().map(|f| f.len()).unwrap_or(0),
+                        pool.responses.len()
+                    );
+                    Some(pool)
                 }
-                eprintln!(
-                    "triplet pool: {} stimuli x {} features, {} responses",
-                    pool.features.len(),
-                    pool.features.first().map(|f| f.len()).unwrap_or(0),
-                    pool.responses.len()
-                );
-                Some(pool)
-            }
-            _ => None,
-        };
+                _ => None,
+            };
         train_mlp_strategy(
             &groups,
             n_features,

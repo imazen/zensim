@@ -4073,8 +4073,7 @@ mod tests {
         }
 
         // General (non-identical) path.
-        let result =
-            compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
+        let result = compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
         assert_eq!(
             result.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
@@ -4110,8 +4109,7 @@ mod tests {
         }
         let config = ZensimConfig::default();
         let precomputed = precompute_reference_with_scales(&src, w, h, config.num_scales).unwrap();
-        let result =
-            compute_zensim_with_ref_and_config(&precomputed, &dst, w, h, config).unwrap();
+        let result = compute_zensim_with_ref_and_config(&precomputed, &dst, w, h, config).unwrap();
         assert_eq!(
             result.profile(),
             crate::profile::ZensimProfile::LegacyLinearV0_2,
@@ -4657,10 +4655,8 @@ mod pu_linear_extended_tests {
             *v = v.saturating_sub(12);
         }
         let z = Zensim::new(ZensimProfile::latest_preview());
-        let src =
-            StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
-        let dst =
-            StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+        let src = StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+        let dst = StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
         let srgb = z.compute_extended_features(&src, &dst).unwrap();
 
         let to_nits = |px: &[u8]| -> Vec<f32> {

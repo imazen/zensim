@@ -73,13 +73,13 @@ pub mod manifest;
 pub mod oracle;
 /// Memorable names from hashes (e.g., `sea:a1b2...` → `sunny-crab`).
 pub mod petname;
-/// Shared zensim profile for regression scoring.
-pub mod profile;
 /// Private wrapper around the `image` crate's pixel ops. All
 /// `image::imageops::*` calls in this crate route through here so
 /// future migration phases can swap implementations behind a single
 /// seam (issue #18).
 pub(crate) mod pixel_ops;
+/// Shared zensim profile for regression scoring.
+pub mod profile;
 /// S3/R2 remote reference image storage configuration.
 pub mod remote;
 /// HTML report generation from manifest data.

@@ -1266,7 +1266,16 @@ pub fn train_mlp_with_tv_anchored_equiv_pjnd(
     konjnd_agg: Option<&KonjndAggregationPool<'_>>,
 ) -> Vec<u8> {
     train_mlp_strategy(
-        groups, n_features, hyperparams, log, tv, anchor, equiv, pjnd_anchor, konjnd_agg, None,
+        groups,
+        n_features,
+        hyperparams,
+        log,
+        tv,
+        anchor,
+        equiv,
+        pjnd_anchor,
+        konjnd_agg,
+        None,
     )
 }
 
@@ -5671,7 +5680,9 @@ fn train_mlp_per_sample_alpha_head(
     // a silent no-op on this head. Standardize the TV endpoint features against
     // the SAME training scaler (mirrors the anchor pool below) so the hinge
     // penalty operates in the network's input space.
-    let tv_active = tv.map(|t| t.weight > 0.0 && !t.pairs.is_empty()).unwrap_or(false);
+    let tv_active = tv
+        .map(|t| t.weight > 0.0 && !t.pairs.is_empty())
+        .unwrap_or(false);
     let (std_tv_features, tv_pairs_vec, tv_weight_val, tv_batch_val, tv_margin_val): (
         Vec<Vec<f64>>,
         Vec<(usize, usize)>,
@@ -6544,8 +6555,8 @@ fn train_mlp_per_sample_alpha_head(
     let mut dro_loss_sum: Vec<f64> = vec![0.0; train_indices.len()];
     let mut dro_loss_n: Vec<u64> = vec![0; train_indices.len()];
     let listwise_active = hyperparams.listwise_weight > 0.0;
-    let triplet_active =
-        hyperparams.triplet_weight > 0.0 && triplets.map(|t| !t.responses.is_empty()).unwrap_or(false);
+    let triplet_active = hyperparams.triplet_weight > 0.0
+        && triplets.map(|t| !t.responses.is_empty()).unwrap_or(false);
     assert!(
         !(nin_on && (listwise_active || triplet_active)),
         "STRATEGY: listwise/triplet steps are not composed with NiN batching yet"
@@ -6554,7 +6565,11 @@ fn train_mlp_per_sample_alpha_head(
     let triplet_std: Vec<f64> = if let (true, Some(tp)) = (triplet_active, triplets) {
         let mut buf = vec![0.0f64; tp.features.len() * n_features];
         for (ri, f) in tp.features.iter().enumerate() {
-            assert_eq!(f.len(), n_features, "triplet stimulus feature length mismatch");
+            assert_eq!(
+                f.len(),
+                n_features,
+                "triplet stimulus feature length mismatch"
+            );
             for j in 0..n_features {
                 buf[ri * n_features + j] = (f[j] - scaler_mean[j]) / scaler_scale[j];
             }
@@ -6565,20 +6580,37 @@ fn train_mlp_per_sample_alpha_head(
     };
     {
         let mut active: Vec<String> = Vec::new();
-        if ema_active { active.push(format!("ema={}", hyperparams.ema_decay)); }
-        if hyperparams.hard_pair_frac > 0.0 {
-            active.push(format!("hardpair={}@{}", hyperparams.hard_pair_frac, hyperparams.hard_pair_max_delta));
+        if ema_active {
+            active.push(format!("ema={}", hyperparams.ema_decay));
         }
-        if !strat_bands.is_empty() { active.push(format!("strat={}", hyperparams.stratified_bands)); }
-        if dro_active { active.push(format!("dro_eta={}", hyperparams.dro_eta)); }
+        if hyperparams.hard_pair_frac > 0.0 {
+            active.push(format!(
+                "hardpair={}@{}",
+                hyperparams.hard_pair_frac, hyperparams.hard_pair_max_delta
+            ));
+        }
+        if !strat_bands.is_empty() {
+            active.push(format!("strat={}", hyperparams.stratified_bands));
+        }
+        if dro_active {
+            active.push(format!("dro_eta={}", hyperparams.dro_eta));
+        }
         if listwise_active {
-            active.push(format!("listmle w={} K={} frac={}", hyperparams.listwise_weight, hyperparams.listwise_size, hyperparams.listwise_frac));
+            active.push(format!(
+                "listmle w={} K={} frac={}",
+                hyperparams.listwise_weight, hyperparams.listwise_size, hyperparams.listwise_frac
+            ));
         }
         if triplet_active {
-            active.push(format!("triplet w={} frac={} tau={} sigma={} ({} responses, {} stimuli)",
-                hyperparams.triplet_weight, hyperparams.triplet_frac, hyperparams.triplet_tau,
-                hyperparams.triplet_sigma, triplets.map(|t| t.responses.len()).unwrap_or(0),
-                triplets.map(|t| t.features.len()).unwrap_or(0)));
+            active.push(format!(
+                "triplet w={} frac={} tau={} sigma={} ({} responses, {} stimuli)",
+                hyperparams.triplet_weight,
+                hyperparams.triplet_frac,
+                hyperparams.triplet_tau,
+                hyperparams.triplet_sigma,
+                triplets.map(|t| t.responses.len()).unwrap_or(0),
+                triplets.map(|t| t.features.len()).unwrap_or(0)
+            ));
         }
         if !active.is_empty() {
             log_line(&format!("STRATEGY active: {}", active.join(" | ")), log);
@@ -6635,7 +6667,11 @@ fn train_mlp_per_sample_alpha_head(
             // pair budget (Adam cadence identical: one logical step each).
             if listwise_active || triplet_active {
                 let su = rng.next_f64_unit();
-                let t_frac = if triplet_active { hyperparams.triplet_frac } else { 0.0 };
+                let t_frac = if triplet_active {
+                    hyperparams.triplet_frac
+                } else {
+                    0.0
+                };
                 if triplet_active && su < t_frac {
                     let tp = triplets.unwrap();
                     let (li, ri, resp) =
@@ -6644,29 +6680,72 @@ fn train_mlp_per_sample_alpha_head(
                     let xb = &triplet_std[ri as usize * n_features..(ri as usize + 1) * n_features];
                     let fwd_a = {
                         let sc = scratch_f32.borrow();
-                        arch_f32::arch_forward_f32(xa, &sc, n_features, n_hidden, n_hidden_final,
-                            leaky as f32, use_2layer, use_skip).to_archforward()
+                        arch_f32::arch_forward_f32(
+                            xa,
+                            &sc,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky as f32,
+                            use_2layer,
+                            use_skip,
+                        )
+                        .to_archforward()
                     };
                     let fwd_b = {
                         let sc = scratch_f32.borrow();
-                        arch_f32::arch_forward_f32(xb, &sc, n_features, n_hidden, n_hidden_final,
-                            leaky as f32, use_2layer, use_skip).to_archforward()
+                        arch_f32::arch_forward_f32(
+                            xb,
+                            &sc,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky as f32,
+                            use_2layer,
+                            use_skip,
+                        )
+                        .to_archforward()
                     };
                     let (ya_p, dya_dpre) = pin_forward(fwd_a.y);
                     let (yb_p, dyb_dpre) = pin_forward(fwd_b.y);
                     let (t_loss, dl_dd) = strategy::triplet_probit_loss_dgrad(
-                        ya_p, yb_p, hyperparams.triplet_tau, hyperparams.triplet_sigma, resp,
+                        ya_p,
+                        yb_p,
+                        hyperparams.triplet_tau,
+                        hyperparams.triplet_sigma,
+                        resp,
                     );
                     total_loss += t_loss * hyperparams.triplet_weight;
                     n_steps += 1;
                     let dl_dya = -dl_dd * hyperparams.triplet_weight * dya_dpre;
                     let dl_dyb = dl_dd * hyperparams.triplet_weight * dyb_dpre;
                     strategy_backward_rows(
-                        &[xa, xb], &[fwd_a, fwd_b], &[dl_dya, dl_dyb],
-                        &mut w1, &mut b1, &mut w2_enc, &mut b2_enc, &mut w_skip, &mut b_skip,
-                        &mut rank_w, &mut rank_b, &mut reducer_w, &mut reducer_b, &mut w_alpha,
-                        &mut b_alpha, &mut adam, n_features, n_hidden, n_hidden_final, leaky,
-                        use_2layer, use_skip, hyperparams.l2_lambda, lr, k, &mut steps_since_adam,
+                        &[xa, xb],
+                        &[fwd_a, fwd_b],
+                        &[dl_dya, dl_dyb],
+                        &mut w1,
+                        &mut b1,
+                        &mut w2_enc,
+                        &mut b2_enc,
+                        &mut w_skip,
+                        &mut b_skip,
+                        &mut rank_w,
+                        &mut rank_b,
+                        &mut reducer_w,
+                        &mut reducer_b,
+                        &mut w_alpha,
+                        &mut b_alpha,
+                        &mut adam,
+                        n_features,
+                        n_hidden,
+                        n_hidden_final,
+                        leaky,
+                        use_2layer,
+                        use_skip,
+                        hyperparams.l2_lambda,
+                        lr,
+                        k,
+                        &mut steps_since_adam,
                         &do_adam_step,
                     );
                     continue;
@@ -6701,9 +6780,17 @@ fn train_mlp_per_sample_alpha_head(
                             let x = &lg_feats[r * n_features..(r + 1) * n_features];
                             let fwd = {
                                 let sc = scratch_f32.borrow();
-                                arch_f32::arch_forward_f32(x, &sc, n_features, n_hidden,
-                                    n_hidden_final, leaky as f32, use_2layer, use_skip)
-                                    .to_archforward()
+                                arch_f32::arch_forward_f32(
+                                    x,
+                                    &sc,
+                                    n_features,
+                                    n_hidden,
+                                    n_hidden_final,
+                                    leaky as f32,
+                                    use_2layer,
+                                    use_skip,
+                                )
+                                .to_archforward()
                             };
                             let (yp, dp) = pin_forward(fwd.y);
                             xs.push(x);
@@ -6725,12 +6812,33 @@ fn train_mlp_per_sample_alpha_head(
                             .map(|(&g, &dp)| g * hyperparams.listwise_weight * dp)
                             .collect();
                         strategy_backward_rows(
-                            &xs, &fwds, &dls,
-                            &mut w1, &mut b1, &mut w2_enc, &mut b2_enc, &mut w_skip, &mut b_skip,
-                            &mut rank_w, &mut rank_b, &mut reducer_w, &mut reducer_b, &mut w_alpha,
-                            &mut b_alpha, &mut adam, n_features, n_hidden, n_hidden_final, leaky,
-                            use_2layer, use_skip, hyperparams.l2_lambda, lr, k,
-                            &mut steps_since_adam, &do_adam_step,
+                            &xs,
+                            &fwds,
+                            &dls,
+                            &mut w1,
+                            &mut b1,
+                            &mut w2_enc,
+                            &mut b2_enc,
+                            &mut w_skip,
+                            &mut b_skip,
+                            &mut rank_w,
+                            &mut rank_b,
+                            &mut reducer_w,
+                            &mut reducer_b,
+                            &mut w_alpha,
+                            &mut b_alpha,
+                            &mut adam,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky,
+                            use_2layer,
+                            use_skip,
+                            hyperparams.l2_lambda,
+                            lr,
+                            k,
+                            &mut steps_since_adam,
+                            &do_adam_step,
                         );
                     }
                     continue;
@@ -6767,8 +6875,7 @@ fn train_mlp_per_sample_alpha_head(
             };
             // STRATEGY: hard-pair mining — with prob hard_pair_frac, re-draw
             // row B (≤16 tries) until the pair is near-threshold.
-            if hyperparams.hard_pair_frac > 0.0
-                && rng.next_f64_unit() < hyperparams.hard_pair_frac
+            if hyperparams.hard_pair_frac > 0.0 && rng.next_f64_unit() < hyperparams.hard_pair_frac
             {
                 for _ in 0..16 {
                     if ib != ia
@@ -7360,15 +7467,47 @@ fn train_mlp_per_sample_alpha_head(
                     let xlo = std_tv_features[lo].as_slice();
                     let xhi = std_tv_features[hi].as_slice();
                     let fwd_lo = arch_forward(
-                        xlo, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip, &rank_w, rank_b,
-                        &reducer_w, reducer_b, &w_alpha, b_alpha, n_features, n_hidden,
-                        n_hidden_final, leaky, use_2layer, use_skip,
+                        xlo,
+                        &w1,
+                        &b1,
+                        &w2_enc,
+                        &b2_enc,
+                        &w_skip,
+                        b_skip,
+                        &rank_w,
+                        rank_b,
+                        &reducer_w,
+                        reducer_b,
+                        &w_alpha,
+                        b_alpha,
+                        n_features,
+                        n_hidden,
+                        n_hidden_final,
+                        leaky,
+                        use_2layer,
+                        use_skip,
                     );
                     let (ylo, dylo_dpre) = pin_forward(fwd_lo.y);
                     let fwd_hi = arch_forward(
-                        xhi, &w1, &b1, &w2_enc, &b2_enc, &w_skip, b_skip, &rank_w, rank_b,
-                        &reducer_w, reducer_b, &w_alpha, b_alpha, n_features, n_hidden,
-                        n_hidden_final, leaky, use_2layer, use_skip,
+                        xhi,
+                        &w1,
+                        &b1,
+                        &w2_enc,
+                        &b2_enc,
+                        &w_skip,
+                        b_skip,
+                        &rank_w,
+                        rank_b,
+                        &reducer_w,
+                        reducer_b,
+                        &w_alpha,
+                        b_alpha,
+                        n_features,
+                        n_hidden,
+                        n_hidden_final,
+                        leaky,
+                        use_2layer,
+                        use_skip,
                     );
                     let (yhi, dyhi_dpre) = pin_forward(fwd_hi.y);
                     // Anti-collapse margin: enforce y_milder - y_harsher >= margin
@@ -7384,18 +7523,52 @@ fn train_mlp_per_sample_alpha_head(
                         let dl_dy_hi = tv_weight_val * dyhi_dpre; // push y_hi down
                         let dl_dy_lo = -tv_weight_val * dylo_dpre; // push y_lo up
                         arch_backward(
-                            xhi, &fwd_hi, dl_dy_hi, &w1, &w2_enc, &rank_w, &reducer_w,
-                            &w_alpha, &mut adam.gw1, &mut adam.gb1, &mut g_rank_w_buf,
-                            &mut g_rank_b_buf, &mut g_red_w, &mut g_red_b, &mut g_w_alpha_buf,
-                            &mut g_b_alpha, n_features, n_hidden, n_hidden_final, leaky,
-                            use_2layer, use_skip,
+                            xhi,
+                            &fwd_hi,
+                            dl_dy_hi,
+                            &w1,
+                            &w2_enc,
+                            &rank_w,
+                            &reducer_w,
+                            &w_alpha,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_rank_w_buf,
+                            &mut g_rank_b_buf,
+                            &mut g_red_w,
+                            &mut g_red_b,
+                            &mut g_w_alpha_buf,
+                            &mut g_b_alpha,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky,
+                            use_2layer,
+                            use_skip,
                         );
                         arch_backward(
-                            xlo, &fwd_lo, dl_dy_lo, &w1, &w2_enc, &rank_w, &reducer_w,
-                            &w_alpha, &mut adam.gw1, &mut adam.gb1, &mut g_rank_w_buf,
-                            &mut g_rank_b_buf, &mut g_red_w, &mut g_red_b, &mut g_w_alpha_buf,
-                            &mut g_b_alpha, n_features, n_hidden, n_hidden_final, leaky,
-                            use_2layer, use_skip,
+                            xlo,
+                            &fwd_lo,
+                            dl_dy_lo,
+                            &w1,
+                            &w2_enc,
+                            &rank_w,
+                            &reducer_w,
+                            &w_alpha,
+                            &mut adam.gw1,
+                            &mut adam.gb1,
+                            &mut g_rank_w_buf,
+                            &mut g_rank_b_buf,
+                            &mut g_red_w,
+                            &mut g_red_b,
+                            &mut g_w_alpha_buf,
+                            &mut g_b_alpha,
+                            n_features,
+                            n_hidden,
+                            n_hidden_final,
+                            leaky,
+                            use_2layer,
+                            use_skip,
                         );
                         any_step = true;
                     }
@@ -7416,9 +7589,21 @@ fn train_mlp_per_sample_alpha_head(
                     adam.gb2[1] += g_red_b;
 
                     do_adam_step(
-                        &mut adam, &mut w1, &mut b1, &mut w2_enc, &mut b2_enc, &mut w_skip,
-                        &mut b_skip, &mut rank_w, &mut rank_b, &mut reducer_w, &mut reducer_b,
-                        &mut w_alpha, &mut b_alpha, lr, n_hidden_final,
+                        &mut adam,
+                        &mut w1,
+                        &mut b1,
+                        &mut w2_enc,
+                        &mut b2_enc,
+                        &mut w_skip,
+                        &mut b_skip,
+                        &mut rank_w,
+                        &mut rank_b,
+                        &mut reducer_w,
+                        &mut reducer_b,
+                        &mut w_alpha,
+                        &mut b_alpha,
+                        lr,
+                        n_hidden_final,
                     );
                 }
             }
@@ -8222,7 +8407,16 @@ fn train_mlp_per_sample_alpha_head(
         if ema_active {
             let reducer_slice: Vec<f64> = reducer_w.to_vec();
             ema.update(
-                &[&w1, &b1, &w2_enc, &b2_enc, &w_skip, &rank_w, &w_alpha, &reducer_slice],
+                &[
+                    &w1,
+                    &b1,
+                    &w2_enc,
+                    &b2_enc,
+                    &w_skip,
+                    &rank_w,
+                    &w_alpha,
+                    &reducer_slice,
+                ],
                 &[b_skip, rank_b, reducer_b, b_alpha],
             );
         }
@@ -8235,7 +8429,10 @@ fn train_mlp_per_sample_alpha_head(
                 .zip(&dro_loss_n)
                 .map(|(&sm, &nn)| if nn > 0 { sm / nn as f64 } else { 0.0 })
                 .collect();
-            let base: Vec<f64> = train_indices.iter().map(|&gi| groups[gi].train_weight).collect();
+            let base: Vec<f64> = train_indices
+                .iter()
+                .map(|&gi| groups[gi].train_weight)
+                .collect();
             let w = strategy::dro_reweight(&base, &means, hyperparams.dro_eta);
             let mut cum = 0.0;
             cdf = w
@@ -8318,7 +8515,11 @@ fn train_mlp_per_sample_alpha_head(
                                 eval_humans[gi].as_slice(),
                             )
                         } else {
-                            (std_features[gi].as_slice(), g.features.len(), g.human_scores)
+                            (
+                                std_features[gi].as_slice(),
+                                g.features.len(),
+                                g.human_scores,
+                            )
                         };
                     let preds = predict_group_per_sample_alpha_head(
                         feat_buf,
@@ -9009,8 +9210,21 @@ fn strategy_backward_rows<F>(
     *steps_since_adam += 1;
     if k == 1 || *steps_since_adam >= k as u64 {
         do_adam_step(
-            adam, w1, b1, w2_enc, b2_enc, w_skip, b_skip, rank_w, rank_b, reducer_w, reducer_b,
-            w_alpha, b_alpha, lr, n_hidden_final,
+            adam,
+            w1,
+            b1,
+            w2_enc,
+            b2_enc,
+            w_skip,
+            b_skip,
+            rank_w,
+            rank_b,
+            reducer_w,
+            reducer_b,
+            w_alpha,
+            b_alpha,
+            lr,
+            n_hidden_final,
         );
         *steps_since_adam = 0;
     }
@@ -11546,18 +11760,13 @@ mod tests {
         let mut scores: Vec<f64> = Vec::with_capacity(n);
         for i in 0..n {
             let t = i as f64 / (n - 1) as f64;
-            feats.push(vec![
-                t,
-                1.0 - t,
-                (t * 7.0).sin() * 0.1,
-                t * t,
-                0.5,
-                -t,
-            ]);
+            feats.push(vec![t, 1.0 - t, (t * 7.0).sin() * 0.1, t * t, 0.5, -t]);
             scores.push(t); // monotone target in [0,1]
         }
         let refs: Vec<&[f64]> = feats.iter().map(|r| r.as_slice()).collect();
-        let sigmas: Vec<f64> = (0..n).map(|i| 0.05 + 0.1 * ((i % 7) as f64) / 7.0).collect();
+        let sigmas: Vec<f64> = (0..n)
+            .map(|i| 0.05 + 0.1 * ((i % 7) as f64) / 7.0)
+            .collect();
         let groups = [
             TrainingGroup {
                 name: "syn_a".to_string(),
@@ -11648,12 +11857,20 @@ mod tests {
         // determinism: same seed -> byte-identical bake
         let mut log2: Vec<String> = Vec::new();
         let bake2 = train_mlp_strategy(
-            &groups, NF, &hp, &mut log2, None, None, None, None, None, Some(&pool),
+            &groups,
+            NF,
+            &hp,
+            &mut log2,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&pool),
         );
         assert_eq!(
             bake, bake2,
             "IMPL BUG (not strategy): strategy training is not deterministic under a fixed seed"
         );
     }
-
 }

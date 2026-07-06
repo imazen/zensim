@@ -328,7 +328,10 @@ mod extrapolation_parity_tests {
         }
         let sp = parse_payload(&payload).expect("valid payload");
         let far = apply(1000.0, &sp);
-        assert!(far <= 100.0, "upper extrapolation must cap at 100, got {far}");
+        assert!(
+            far <= 100.0,
+            "upper extrapolation must cap at 100, got {far}"
+        );
         // Bottom stays linear (uncapped) — corruption resolution.
         assert!(apply(-1000.0, &sp) < 10.0);
     }

@@ -1161,10 +1161,8 @@ mod profile_b_tests {
         }
         for profile in [ZensimProfile::B, ZensimProfile::BHdr] {
             let z = Zensim::new(profile);
-            let src =
-                StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
-            let dst =
-                StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+            let src = StridedBytes::try_new(&refe, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
+            let dst = StridedBytes::try_new(&dist, w, h, w * 3, PixelFormat::Srgb8Rgb).unwrap();
             let ident = z.compute(&src, &src).unwrap().score();
             assert!(
                 (ident - 100.0).abs() < 1e-9,
@@ -1190,10 +1188,7 @@ mod profile_b_tests {
     #[test]
     fn both_b_bakes_carry_winsorizing_transforms() {
         for profile in [ZensimProfile::B, ZensimProfile::BHdr] {
-            let loader = profile
-                .params()
-                .mlp_bytes
-                .expect("B/BHdr ship an mlp bake");
+            let loader = profile.params().mlp_bytes.expect("B/BHdr ship an mlp bake");
             let model = crate::mlp::Model::from_bytes(loader()).expect("bake parses");
             assert!(
                 model.has_nontrivial_feature_transforms(),
@@ -1244,8 +1239,8 @@ mod profile_b_routing_tests {
 #[cfg(test)]
 mod descriptor_hdr_routing_tests {
     use super::*;
-    use crate::source::{AlphaMode, ImageSource, PixelFormat};
     use crate::Zensim;
+    use crate::source::{AlphaMode, ImageSource, PixelFormat};
 
     struct NitsSource {
         rgba: Vec<f32>,
@@ -1276,17 +1271,25 @@ mod descriptor_hdr_routing_tests {
     fn nits_pair(w: usize, h: usize) -> (NitsSource, NitsSource, Vec<f32>, Vec<f32>) {
         let mut r = vec![0.0f32; w * h * 4];
         for (i, v) in r.iter_mut().enumerate() {
-            *v = if i % 4 == 3 { 1.0 } else { 0.5 + 400.0 * ((i % 89) as f32 / 89.0) };
+            *v = if i % 4 == 3 {
+                1.0
+            } else {
+                0.5 + 400.0 * ((i % 89) as f32 / 89.0)
+            };
         }
         let mut d = r.clone();
         for v in d.iter_mut().step_by(9) {
             *v *= 0.8;
         }
-        let rgb = |px: &[f32]| -> Vec<f32> {
-            px.chunks_exact(4).flat_map(|c| c[..3].to_vec()).collect()
-        };
+        let rgb =
+            |px: &[f32]| -> Vec<f32> { px.chunks_exact(4).flat_map(|c| c[..3].to_vec()).collect() };
         let (rr, dd) = (rgb(&r), rgb(&d));
-        (NitsSource { rgba: r, w, h }, NitsSource { rgba: d, w, h }, rr, dd)
+        (
+            NitsSource { rgba: r, w, h },
+            NitsSource { rgba: d, w, h },
+            rr,
+            dd,
+        )
     }
 
     #[test]
@@ -1306,8 +1309,14 @@ mod descriptor_hdr_routing_tests {
             );
         }
         // B on descriptor-HDR == BHdr (the routed weights).
-        let b = Zensim::new(ZensimProfile::B).compute(&src, &dst).unwrap().score();
-        let bh = Zensim::new(ZensimProfile::BHdr).compute(&src, &dst).unwrap().score();
+        let b = Zensim::new(ZensimProfile::B)
+            .compute(&src, &dst)
+            .unwrap()
+            .score();
+        let bh = Zensim::new(ZensimProfile::BHdr)
+            .compute(&src, &dst)
+            .unwrap()
+            .score();
         assert!((b - bh).abs() < 1e-12);
     }
 }
@@ -1315,8 +1324,8 @@ mod descriptor_hdr_routing_tests {
 #[cfg(test)]
 mod linearf32_sdr_not_hdr_tests {
     use super::*;
-    use crate::source::{AlphaMode, ImageSource, PixelFormat};
     use crate::Zensim;
+    use crate::source::{AlphaMode, ImageSource, PixelFormat};
 
     /// LinearF32Rgba is a CONTAINER, not an HDR signal — SDR content ships
     /// in it too (display-relative [0,1] linear). Only `is_hdr()` routes.
@@ -1352,14 +1361,23 @@ mod linearf32_sdr_not_hdr_tests {
         let (w, h) = (64usize, 64usize);
         let mut r = vec![0.0f32; w * h * 4];
         for (i, v) in r.iter_mut().enumerate() {
-            *v = if i % 4 == 3 { 1.0 } else { 0.05 + 0.9 * ((i % 83) as f32 / 83.0) };
+            *v = if i % 4 == 3 {
+                1.0
+            } else {
+                0.05 + 0.9 * ((i % 83) as f32 / 83.0)
+            };
         }
         let mut d = r.clone();
         for v in d.iter_mut().step_by(7) {
             *v *= 0.75;
         }
         let z = Zensim::new(ZensimProfile::B);
-        let mk = |rgba: &Vec<f32>, hdr: bool| F32Source { rgba: rgba.clone(), w, h, hdr };
+        let mk = |rgba: &Vec<f32>, hdr: bool| F32Source {
+            rgba: rgba.clone(),
+            w,
+            h,
+            hdr,
+        };
         // SDR-flagged linear f32: flows the SDR pipeline (no refusal, no PU).
         let sdr = z.compute(&mk(&r, false), &mk(&d, false)).unwrap().score();
         // Same bytes HDR-flagged: routed to the PU-linear pipeline.
@@ -1373,7 +1391,10 @@ mod linearf32_sdr_not_hdr_tests {
         );
         // Identity contract holds through both pipelines.
         for hdrflag in [false, true] {
-            let s = z.compute(&mk(&r, hdrflag), &mk(&r, hdrflag)).unwrap().score();
+            let s = z
+                .compute(&mk(&r, hdrflag), &mk(&r, hdrflag))
+                .unwrap()
+                .score();
             assert!((s - 100.0).abs() < 1e-9);
         }
     }

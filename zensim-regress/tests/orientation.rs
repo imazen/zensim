@@ -16,7 +16,7 @@
 //! applied transforms), see the unit tests in testing.rs.
 
 use image::{RgbaImage, imageops};
-use zensim::{Zensim};
+use zensim::Zensim;
 use zensim_regress::testing::{
     ComparisonMethod, DimensionMismatchKind, RegressionTolerance, check_regression,
     check_regression_resized, detect_transform,
