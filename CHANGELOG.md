@@ -129,6 +129,13 @@
   Purely additive (semver-compatible) — the `Zensim` builder stays the power API
   for pinned profiles, batch comparison, and `RgbSlice` / strided / HDR input.
   The README Quick start now leads with it.
+- `ZensimError::UnsupportedPixelFormat` now carries a `reason: &'static str`
+  field (was a unit variant) describing why the format was rejected —
+  mirrors `ModelLoadFailed` / `ModelForwardFailed`'s existing `reason` field.
+  `score()` no longer discards the `zenpixels` adapter's specific rejection
+  reason (e.g. "grayscale formats not supported") via `.map_err(|_| ...)`;
+  the `classification`-feature delta-stats path gets its own descriptive
+  reason too.
 
 ### Documentation — README overhaul + split crates.io README
 

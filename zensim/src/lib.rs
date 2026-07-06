@@ -333,12 +333,12 @@ pub fn score(
     // adapter validates the format and maps it to an `ImageSource` — there is no
     // (width, height) the caller could pass inconsistently. An unsupported
     // descriptor (grayscale / HDR / narrow-range / unknown transfer) maps to
-    // `UnsupportedPixelFormat`; the `Zensim` + `ZenpixelsSource` power API
-    // surfaces the adapter's specific reason.
+    // `UnsupportedPixelFormat`, carrying the adapter's specific `&'static str`
+    // reason (e.g. "grayscale formats not supported") rather than discarding it.
     let reference = ZenpixelsSource::try_from_slice(&reference)
-        .map_err(|_| ZensimError::UnsupportedPixelFormat)?;
+        .map_err(|UnsupportedFormat(reason)| ZensimError::UnsupportedPixelFormat { reason })?;
     let distorted = ZenpixelsSource::try_from_slice(&distorted)
-        .map_err(|_| ZensimError::UnsupportedPixelFormat)?;
+        .map_err(|UnsupportedFormat(reason)| ZensimError::UnsupportedPixelFormat { reason })?;
     Zensim::new(ZensimProfile::A)
         .compute(&reference, &distorted)
         .map(|result| result.score())

@@ -6,7 +6,7 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 243 lines (supported surface) | zensim.features.txt 129 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 33 lines (33 hidden + 0 excluded-feature)
+# files: zensim.txt 244 lines (supported surface) | zensim.features.txt 129 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 33 lines (33 hidden + 0 excluded-feature)
 
 ## summary
 #
@@ -15,18 +15,18 @@
 #   pub consts/statics                          6
 #   free functions                             16
 #   inherent methods                          120
-#   struct fields                              19
+#   struct fields                              20
 #   enum variants                              41
 #   trait roster entries (type × trait)        65
 #   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                          144
+#   (root)                          145
 #   mapping                          12
 #   profile                          23
 #   source                           53
 
-## items (222 lines)
+## items (223 lines)
 
 pub mod zensim
 pub mod mapping
@@ -132,6 +132,7 @@ pub ZensimError::ModelForwardFailed::reason: &'static str
 pub ZensimError::ModelLoadFailed
 pub ZensimError::ModelLoadFailed::reason: &'static str
 pub ZensimError::UnsupportedPixelFormat
+pub ZensimError::UnsupportedPixelFormat::reason: &'static str
 #[non_exhaustive] pub enum ZensimProfile [also: profile]
 pub ZensimProfile::A
 pub ZensimProfile::B
