@@ -2021,7 +2021,6 @@ fn compute_rounding_bias(delta_stats: &DeltaStats) -> RoundingBias {
 /// HDR pixels in a `LinearF32Rgba` source are indistinguishable from
 /// SDR and would be silently clamped.
 #[inline]
-
 /// Extract interleaved linear RGB f32 (absolute nits) from a
 /// descriptor-flagged HDR source. `LinearF32Rgba` is a CONTAINER, not an
 /// HDR signal — SDR content ships in it too and flows the SDR pipeline;
