@@ -574,7 +574,12 @@ pub fn compute_zensim_with_ref_and_config(
         &config,
         WEIGHTS,
     );
-    Ok(result)
+    // This entry point scores via the plain WEIGHTS (V0_2 linear) distance,
+    // never an MLP forward pass — tag honestly rather than inheriting
+    // `combine_scores`'s internal `ZensimProfile::A` placeholder (which
+    // every `Zensim::compute*` caller overrides but this standalone
+    // function does not go through).
+    Ok(result.with_profile(crate::profile::ZensimProfile::LegacyLinearV0_2))
 }
 
 /// Per-scale statistics collected during computation.
@@ -3741,11 +3746,15 @@ pub fn compute_zensim_with_config(
             (false, _) => FEATURES_PER_CHANNEL_WITH_PEAKS,
         };
         let num_features = config.num_scales * 3 * fpc;
+        // This entry point scores via the plain WEIGHTS (V0_2 linear)
+        // distance, never an MLP forward pass — tag with the honest
+        // legacy-linear profile rather than `A` (the canonical MLP-scored
+        // profile).
         return Ok(ZensimResult::new(
             100.0,
             0.0,
             vec![0.0; num_features],
-            ZensimProfile::A,
+            ZensimProfile::LegacyLinearV0_2,
             [0.0; 3],
         )
         .mark_identical());
@@ -3755,7 +3764,12 @@ pub fn compute_zensim_with_config(
     let dst_img = crate::source::RgbSlice::new(distorted, width, height);
 
     let result = crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
-    Ok(result)
+    // See the identical-shortcut branch above: this function scores via
+    // plain linear WEIGHTS, not an MLP bake, so it does not inherit
+    // `combine_scores`'s internal `ZensimProfile::A` placeholder (which
+    // every `Zensim::compute*` caller overrides but this standalone
+    // function does not go through).
+    Ok(result.with_profile(ZensimProfile::LegacyLinearV0_2))
 }
 
 /// Combine per-scale statistics into a final score.
@@ -4035,6 +4049,73 @@ mod tests {
             "compute_all should have >= features: {} vs {}",
             all_nonzero,
             default_nonzero,
+        );
+    }
+
+    /// `compute_zensim_with_config` scores via plain linear `WEIGHTS`
+    /// (V0_2), never an MLP forward pass — it must NOT claim the
+    /// MLP-scored `ZensimProfile::A` tag (a prior bug hardcoded `A` here).
+    /// Covers both the general path and the identical-images
+    /// short-circuit, which had its own separate hardcoded `A`.
+    #[test]
+    fn compute_zensim_with_config_tags_legacy_linear_profile_not_a() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                src[y * w + x] = [r, 128, 128];
+                dst[y * w + x] = [r.saturating_add(5), 128, 128];
+            }
+        }
+
+        // General (non-identical) path.
+        let result =
+            compute_zensim_with_config(&src, &dst, w, h, ZensimConfig::default()).unwrap();
+        assert_eq!(
+            result.profile(),
+            crate::profile::ZensimProfile::LegacyLinearV0_2,
+            "linear-scored result must not be tagged as MLP-scored profile A"
+        );
+
+        // Identical-images short-circuit path (its own hardcoded tag).
+        let identical =
+            compute_zensim_with_config(&src, &src, w, h, ZensimConfig::default()).unwrap();
+        assert_eq!(
+            identical.profile(),
+            crate::profile::ZensimProfile::LegacyLinearV0_2,
+            "identical-images short-circuit must not be tagged as MLP-scored profile A"
+        );
+        assert_eq!(identical.score(), 100.0);
+    }
+
+    /// Same honesty check for `compute_zensim_with_ref_and_config`.
+    #[cfg(feature = "training")]
+    #[test]
+    fn compute_zensim_with_ref_and_config_tags_legacy_linear_profile_not_a() {
+        let w = 128;
+        let h = 128;
+        let n = w * h;
+        let mut src = vec![[128u8, 128, 128]; n];
+        let mut dst = vec![[128u8, 128, 128]; n];
+        for y in 0..h {
+            for x in 0..w {
+                let r = ((x * 255) / w) as u8;
+                src[y * w + x] = [r, 128, 128];
+                dst[y * w + x] = [r.saturating_add(5), 128, 128];
+            }
+        }
+        let config = ZensimConfig::default();
+        let precomputed = precompute_reference_with_scales(&src, w, h, config.num_scales).unwrap();
+        let result =
+            compute_zensim_with_ref_and_config(&precomputed, &dst, w, h, config).unwrap();
+        assert_eq!(
+            result.profile(),
+            crate::profile::ZensimProfile::LegacyLinearV0_2,
+            "linear-scored result must not be tagged as MLP-scored profile A"
         );
     }
 

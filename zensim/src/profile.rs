@@ -91,6 +91,27 @@ pub enum ZensimProfile {
         /// Display name, e.g. `"zensim-experimental-tuner-v4"`.
         name: &'static str,
     },
+    /// **INTERNAL — legacy 228-weight linear scoring, no MLP head.**
+    /// Tags results from the doc-hidden research/feature-extraction entry
+    /// points `compute_zensim_with_config` and
+    /// `compute_zensim_with_ref_and_config`, which score via a plain
+    /// `dot(features, WEIGHTS_PREVIEW_V0_2)` distance (the caller-supplied
+    /// [`crate::ZensimConfig`] drives blur/scale/masking knobs directly) and
+    /// never run an MLP forward pass. This is **not** the same pipeline as
+    /// [`Self::A`] (MLP-scored) — the tag exists purely so
+    /// `ZensimResult::profile()` never claims an MLP-scored result for a
+    /// linear-only computation. Gated behind the same `training`/`test` cfg
+    /// as the two functions above; default builds never construct or
+    /// observe this variant.
+    ///
+    /// Declared LAST (after `Custom`) so enabling this variant's cfg
+    /// (`training`/`test`) never shifts `Custom`'s discriminant when
+    /// `custom-profiles` is also enabled — see
+    /// `enum_no_repr_variant_discriminant_changed` in
+    /// `cargo semver-checks`.
+    #[cfg(any(feature = "training", test))]
+    #[doc(hidden)]
+    LegacyLinearV0_2,
 }
 
 impl ZensimProfile {
@@ -183,6 +204,8 @@ impl ZensimProfile {
             Self::A => "zensim-a",
             Self::B => "zensim-b",
             Self::BHdr => "zensim-b-hdr",
+            #[cfg(any(feature = "training", test))]
+            Self::LegacyLinearV0_2 => "zensim-legacy-linear-v0.2",
             // Experimental / historical profiles live in `zensim-experimental`
             // and surface here as `Custom` with their original name string.
             #[cfg(feature = "custom-profiles")]
@@ -216,6 +239,8 @@ impl ZensimProfile {
             Self::A => &PROFILE_A,
             Self::B => &PROFILE_B,
             Self::BHdr => &PROFILE_B_HDR,
+            #[cfg(any(feature = "training", test))]
+            Self::LegacyLinearV0_2 => &PROFILE_LEGACY_LINEAR_V0_2,
             // Experimental / historical profiles carry their own
             // `&'static ProfileParams` built in `zensim-experimental`.
             #[cfg(feature = "custom-profiles")]
@@ -740,6 +765,34 @@ static PROFILE_A: ProfileParams = ProfileParams {
     // calibrated into the dial range; clamp catches numerical drift).
     soft_clamp_score: false,
     extrapolate_score: true,
+    ensemble_classifier_bytes: None,
+    mlp_bytes_compression: None,
+};
+
+/// `ZensimProfile::LegacyLinearV0_2` params — the plain 228-weight linear
+/// V0_2 scoring path (no MLP head), matching [`ProfileParams::builder`]'s
+/// defaults byte-for-byte (which in turn reconstruct the removed
+/// `PreviewV0_2` built-in profile; see commit `493c91cd`). Backs the
+/// doc-hidden `compute_zensim_with_config` /
+/// `compute_zensim_with_ref_and_config` research entry points in
+/// `metric.rs` — nothing else constructs a `Zensim` with this profile.
+#[cfg(any(feature = "training", test))]
+static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
+    weights: &WEIGHTS_PREVIEW_V0_2,
+    blur_radius: 5,
+    blur_passes: 1,
+    num_scales: 4,
+    bounded_squash: false,
+    score_mapping_a: 18.0,
+    score_mapping_b: 0.7,
+    skip_score_mapping: false,
+    mlp_bytes: None,
+    mlp_bytes_b3: None,
+    mlp_primary_mix: 1.0,
+    extended_features: false,
+    compute_iw_features: false,
+    soft_clamp_score: false,
+    extrapolate_score: false,
     ensemble_classifier_bytes: None,
     mlp_bytes_compression: None,
 };
