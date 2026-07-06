@@ -80,6 +80,43 @@ bit-exact), joined to the sweep's ssim2:
 4. Re-validate via `bake_verdict` — rank panel unchanged (spline is monotone),
    dial-top corrected, G-RANGE tail gate still PASS.
 
+## Part 3 — zenjxl #18 fixed + dial-top refit attempt (extend-top FALSIFIED)
+
+**#18 fixed** (jxl-encoder@`008499e1`, on origin/main; #18 closed): i16→i32 DC
+widening + `VARDCT_MIN_LOSSY_DISTANCE = 0.03` floor. Root cause was DC stored as
+i16 saturating at distance ≲0.025. **The floor means lossy JXL tops at ssim2 ~96
+(distance 0.03); requests below 0.03 clamp up.** So re-sweeping 0.01–0.02 is moot,
+and the 0.03–1.0 data above is the complete valid lossy curve. The deeper sub-0.03
+ANS non-conformance (why the floor exists) is deferred: imazen/jxl-encoder#94.
+
+**extend-top on real near-lossless — FALSIFIED.** Built a near-lossless anchor
+(2200 cells, `feat_0..371` + `target_score`=ssim2, target 78.3–100) and ran
+`bake_dial_refit extend-top` from the winsor bake. Result: **0/2200 near-lossless
+cells moved** (cand−ship = +0.00 at every distance; candidate 12988 B). extend-top
+fits a concave saturation *above* the in-distribution top knot (linear-raw 1.138,
+which maps to dial 95.9), but real zenjxl near-lossless sits *below* it (dial
+88–91). The top extension never touches it — the under-scoring is a **mid-spline /
+raw-projection** property, not a top-knot pile-up.
+
+**What the compression is.** B's linear projection ranks zenjxl near-lossless
+(ssim2 89.9–95.6) at dial 88–91 (~0.55× the resolution of ssim2's spread). The
+top-knot dial (95.9) sits at linear-raw 1.138, reserved for near-perfect content;
+lossy near-lossless (linear-raw ~1.0–1.1) maps just below it. This is B
+**disagreeing with ssim2 on absolute near-lossless quality** (B: "very good, not
+perfect"; ssim2: 95.6). Whether B's 88–91 or ssim2's 95.6 is closer to human MOS
+is **UNVERIFIED** (no human MOS on zenjxl near-lossless), but it matches the
+established pattern: B human-MOS-aligned, A/ssim2 ssim2-tracking.
+
+**Resolution — reinforces the A-vs-B tradeoff.** A tracks ssim2 at near-lossless
+(91–96, full resolution) → **A is the better near-lossless codec KNOB**; B
+compresses it (its human-MOS-aligned judgment) → B is the human-MOS RANK metric.
+The near-lossless data thus **reinforces keeping A as `codec_target`**. Making B
+match ssim2 at near-lossless would need a mid-spline remap (shared-anchor, with the
+documented bottom-knot pitfall) AND would erode B's human-MOS distinction — not
+recommended unless B is chosen as the codec knob, in which case the remap is the
+lever (feasibility of stretching the projection's near-lossless resolution is the
+open question).
+
 ## Data
 
 - Features (2200×377): `/mnt/v/output/zensim-jxl-nearlossless/full/features.parquet`
