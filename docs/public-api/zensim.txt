@@ -6,27 +6,27 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 244 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 31 lines (31 hidden + 0 excluded-feature)
+# files: zensim.txt 243 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 33 lines (33 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 4
 #   pub types (struct/enum/trait/alias)        26
-#   pub consts/statics                          8
+#   pub consts/statics                          6
 #   free functions                             16
-#   inherent methods                          119
+#   inherent methods                          120
 #   struct fields                              19
 #   enum variants                              41
 #   trait roster entries (type × trait)        65
 #   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                          143
+#   (root)                          144
 #   mapping                          12
-#   profile                          25
+#   profile                          23
 #   source                           53
 
-## items (223 lines)
+## items (222 lines)
 
 pub mod zensim
 pub mod mapping
@@ -44,8 +44,8 @@ pub fn mapping::zensim_to_zendissim(f64) -> f64
 pub fn mapping::zensim_to_zenjpeg_quality(f64) -> f64
 pub mod profile
 pub profile::ZensimProfile::A
-pub profile::ZensimProfile::PreviewV0_1
-pub profile::ZensimProfile::PreviewV0_2
+pub profile::ZensimProfile::B
+pub profile::ZensimProfile::BHdr
 pub const fn profile::ZensimProfile::codec_target() -> Self [also: (root)]
 pub fn profile::ZensimProfile::latest() -> Self
 pub const fn profile::ZensimProfile::latest_preview() -> Self [also: (root)]
@@ -63,9 +63,7 @@ pub profile::ProfileParams::score_mapping_b: f64
 pub profile::ProfileParams::skip_score_mapping: bool
 pub profile::ProfileParams::soft_clamp_score: bool
 pub profile::ProfileParams::weights: &'static [f64]
-pub static profile::LINEAR_WEIGHTS_PREVIEW_V0_1: [f64; 228]
 pub static profile::LINEAR_WEIGHTS_PREVIEW_V0_2: [f64; 228]
-pub static profile::WEIGHTS_PREVIEW_V0_1: [f64; 228]
 pub static profile::WEIGHTS_PREVIEW_V0_2: [f64; 228]
 pub mod source
 pub source::AlphaMode::Opaque
@@ -136,8 +134,8 @@ pub ZensimError::ModelLoadFailed::reason: &'static str
 pub ZensimError::UnsupportedPixelFormat
 #[non_exhaustive] pub enum ZensimProfile [also: profile]
 pub ZensimProfile::A
-pub ZensimProfile::PreviewV0_1
-pub ZensimProfile::PreviewV0_2
+pub ZensimProfile::B
+pub ZensimProfile::BHdr
 pub fn profile::ZensimProfile::latest() -> Self
 pub fn profile::ZensimProfile::name(&self) -> &'static str
 pub struct DiffmapOptions
@@ -207,6 +205,7 @@ pub struct Zensim
 pub fn Zensim::compute(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_extended_features(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_pu_linear(&self, &[f32], &[f32], usize, usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
+pub fn Zensim::compute_pu_linear_extended_features(&self, &[f32], &[f32], usize, usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_pu_linear_planar(&self, [&[f32]; 3], [&[f32]; 3], usize, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_streaming_strips(&self, &impl source::ImageSource, &impl source::ImageSource, usize, usize) -> core::result::Result<ZensimResult, ZensimError>
 pub fn Zensim::compute_streaming_strips_default(&self, &impl source::ImageSource, &impl source::ImageSource) -> core::result::Result<ZensimResult, ZensimError>

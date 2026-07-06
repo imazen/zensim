@@ -11,13 +11,15 @@
 #
 #   free functions                              5
 #   inherent methods                            9
+#   enum variants                               2
 #   trait roster entries (type × trait)        17
 #
 # per-module pub lines:
-#   (root)                           11
+#   (root)                           12
+#   profile                           1
 #   source                            3
 
-## items (14 lines)
+## items (16 lines)
 
 pub fn BlurKernel::assert_fields_are_eq(&self)
 pub fn ErrorCategory::assert_fields_are_eq(&self)
@@ -33,6 +35,8 @@ pub fn precompute_reference_with_scales(&[[u8; 3]], usize, usize, usize) -> core
 pub fn source::AlphaMode::assert_fields_are_eq(&self)
 pub fn source::ColorPrimaries::assert_fields_are_eq(&self)
 pub fn source::PixelFormat::assert_fields_are_eq(&self)
+pub ZensimProfile::LegacyLinearV0_2
+pub profile::ZensimProfile::LegacyLinearV0_2
 
 ## trait impls (17 types)
 

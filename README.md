@@ -169,8 +169,9 @@ use zensim::{Zensim, ZensimProfile, RgbSlice};
 let z = Zensim::new(ZensimProfile::A);
 // Or use `ZensimProfile::latest_preview()` for whatever current preview
 // ships (rotates as new previews land), or `ZensimProfile::codec_target()`
-// for the stable codec-target contract. `PreviewV0_2` is the linear
-// general-ranking profile; `PreviewV0_1` is the 0.2.x-compatible linear one.
+// for the stable codec-target contract. `ZensimProfile::B` is a
+// deterministic linear-ensemble profile for SDR content; `BHdr` is its
+// HDR (absolute-nits) counterpart.
 // `src_pixels` / `dst_pixels` are `&[[u8; 3]]` — interleaved, sRGB-encoded
 // (gamma, NOT linear) 8-bit RGB. `width`/`height` are `usize`. See "Input
 // format" below: getting sRGB-vs-linear wrong silently corrupts every score.
@@ -271,7 +272,7 @@ codec crates; the core `zensim` library stays MIT/Apache.
 
 ## What the score means
 
-100 = identical. Higher = more similar. Under profile `A`, the MLP output passes through a monotone PCHIP dial spline calibrated so the dial tracks degradation monotonically (identity ≈ 97.7; byte-identical inputs short-circuit to exactly 100). Under the linear profiles (`PreviewV0_1`/`PreviewV0_2`), the score is a compressive mapping (`100 - 18 × d^0.7`), giving more resolution at the high-quality end.
+100 = identical. Higher = more similar. Every published profile (`A`, `B`, `BHdr`) routes its raw MLP/linear-ensemble output through a monotone PCHIP dial spline calibrated so the dial tracks degradation monotonically (identity ≈ 97.7 for `A`; byte-identical inputs short-circuit to exactly 100 for all profiles).
 
 Each `ZensimResult` also provides approximate translations to other metrics:
 
@@ -340,11 +341,13 @@ Each `ZensimProfile` bundles weights and score-mapping parameters. Scores from a
 
 | Profile | Kind | CID22 SROCC | Bake |
 |---------|------|------:|------|
-| `A` | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.87** | 27 KB v47-strict-QAT |
-| `PreviewV0_2` | linear, 228 Nelder-Mead weights | 0.87 | none (linear) |
-| `PreviewV0_1` | linear, 228 weights (0.2.x back-compat) | 0.86 | none (linear) |
+| `A` | 372-input MLP, per-sample-α + monotone PCHIP dial spline | **0.8657** | 27 KB v47-strict-QAT |
+| `B` | 372-input linear ensemble (35-weight lasso) + dial spline, SDR content | **0.8733** | 13.1 KB ens-Pline-cid80 |
+| `BHdr` | linear ensemble on PU-linear (absolute-nits) features + dial spline, HDR content only | n/a — HDR-only (UPIQ-HDR \|SROCC\| 0.7313) | 11.7 KB hdr-lasso0.001-shaped |
 
 `ZensimProfile::codec_target()` and `latest_preview()` both return `A` — the canonical production codec-target the zen codecs dial against. The deprecated `latest()` also returns `A`. To load your own bake, construct `ZensimProfile::Custom { params, name }` via [`ProfileParams::builder()`](https://docs.rs/zensim/latest/zensim/profile/struct.ProfileParams.html). Results are deterministic for the same input on the same architecture; cross-architecture scores (AVX2 vs scalar vs AVX-512) may differ by small ULP.
+
+`ZensimProfile::PreviewV0_1` / `PreviewV0_2` (the pre-0.3.0 linear profiles) were removed in the unreleased 0.3.0 line (commit `493c91cd`) — see the CHANGELOG `[Unreleased]` entry. Pin to a pre-0.3.0 crates.io release if you depend on their exact scoring behavior; `B` is the current deterministic-linear replacement for SDR content.
 
 The historical `PreviewV0_4` / `PreviewV0_5*` SOTA-trail variants, `A_Phone`, and `LinearBounded` live in the **`zensim-experimental`** crate (not published), each rebuilt through the `Custom` extension point — e.g. `Zensim::new(zensim_experimental::preview_v0_5_tuner_v4())`. zenpredict (the MLP runtime) is MIT/Apache-2.0 — no AGPL transitive obligation on default builds.
 

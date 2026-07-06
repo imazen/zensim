@@ -39,7 +39,54 @@
   errors). Pinned by `flag_not_format_decides_the_pipeline` (same bytes,
   flag flipped → different pipeline) and the mixed-pair refusal test.
 
+### Removed
+- **`ZensimProfile::PreviewV0_1` and `PreviewV0_2` (commit `493c91cd`,
+  2026-07-01) — previously unrecorded here.** BREAKING (absorbed by the
+  already-queued 0.2.x → 0.3.0 minor bump; zensim-regress: 0.4.0). Only `A`
+  (canonical) and `Custom` (external-bake escape hatch) remained until this
+  release added `B` / `BHdr` above. `WEIGHTS_PREVIEW_V0_1` (228-entry array)
+  and its `LINEAR_WEIGHTS_PREVIEW_V0_1` alias are also removed;
+  `WEIGHTS_PREVIEW_V0_2` / `LINEAR_WEIGHTS_PREVIEW_V0_2` are kept (they still
+  back `PROFILE_A`'s `weights` field and `ProfileParams::builder()`'s
+  defaults). Consumers who named `PreviewV0_1`/`PreviewV0_2` directly should
+  use `ZensimProfile::B` (deterministic linear, SDR) going forward, or pin to
+  a pre-0.3.0 release for the exact removed scoring behavior.
+  `zensim-regress` reconstructs the former `PreviewV0_2` behavior internally
+  as `profile::legacy_linear()` (a `Custom` profile, bit-identical params) so
+  its own `> 90` / `> 70` similarity-threshold tests keep their calibration.
+  `README.md` / `README.crates.md` and `docs/public-api/zensim.txt` (which
+  still listed the removed variants) are corrected in the same release.
+
 ### Fixed
+- `compute_zensim_with_config` / `compute_zensim_with_ref_and_config`
+  (doc-hidden, `training`-feature research/feature-extraction entry points)
+  scored via the plain 228-weight `WEIGHTS_PREVIEW_V0_2` linear distance but
+  mislabeled their results' `ZensimResult::profile()` as `ZensimProfile::A`
+  (the canonical MLP-scored profile) — downstream code inspecting
+  `.profile()` could wrongly believe an MLP forward pass had run. Added
+  `ZensimProfile::LegacyLinearV0_2` (additive `#[non_exhaustive]` enum
+  variant, `training`/test-gated, `#[doc(hidden)]`; verified via
+  `cargo semver-checks` against the current `main` tip) and tag both
+  functions' results with it instead.
+- `clippy::empty_line_after_outer_attr` in `metric.rs` (blocked the Clippy
+  and Feature-permutations CI jobs).
+- `gen_tid2013_distortions.py`'s `cv2.merge()` (BGR channel recombination,
+  not a corpus join) tripped the Join-Safety Gate's substring match on
+  `.merge(`; allowlisted with a `joinsafety-ok` comment.
+- `cargo fmt` drift across `zensim`, `zensim-regress`, and `zensim-validate`
+  (CI's Format job) — formatting only, no logic changes.
+- `zensim-validate`: additional Clippy-job debt beyond the `metric.rs` fix
+  above — an orphaned doc-comment/`#[allow(too_many_arguments)]` pair left
+  in front of the wrong function (`duplicated_attributes` +
+  `empty_line_after_outer_attr` + `too_many_arguments` on
+  `flush_per_sample_alpha_nin_batch`, now correctly documented/allowed), a
+  `type_complexity` 5-tuple let-binding (factored into a `StdTvUnpacked`
+  alias), an unused import, a tabs-in-doc-comment, a `doc_lazy_continuation`
+  false blockquote marker, an `items_after_test_module` (`bake_dial_refit`'s
+  `main()` moved before its test module), and a targeted `#[allow]` for an
+  `approx_constant` false-positive on an independently scipy-computed test
+  reference value. `cargo clippy --workspace --all-targets --all-features
+  --exclude zensim-wasm-tests -- -D warnings` now passes.
 - Validate-side output-calibration spline now caps upper extrapolation at
   100 for parity with the product runtime (dial p95 artifacts eliminated).
 - `m3_no_cap_by_default` repaired to assert the intentional 120 MP default

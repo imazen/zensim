@@ -6,14 +6,14 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim-regress.txt 547 lines (supported surface) | zensim-regress.features.txt 21 added (features: archmage,threads) | zensim-regress.internal.txt 877 lines (1276 hidden + 3 excluded-feature)
+# files: zensim-regress.txt 549 lines (supported surface) | zensim-regress.features.txt 21 added (features: archmage,threads) | zensim-regress.internal.txt 877 lines (1276 hidden + 3 excluded-feature)
 
 ## summary
 #
-#   pub modules                                20
+#   pub modules                                21
 #   pub types (struct/enum/trait/alias)        48
 #   pub consts/statics                          6
-#   free functions                             73
+#   free functions                             74
 #   inherent methods                          186
 #   struct fields                             126
 #   enum variants                              57
@@ -23,7 +23,7 @@
 #   auto-trait exceptions                       6
 #
 # per-module pub lines:
-#   (root)                           98
+#   (root)                           99
 #   checksums                        80
 #   diff_image                       36
 #   diff_summary                      8
@@ -38,13 +38,14 @@
 #   manifest                         31
 #   oracle                           21
 #   petname                           9
+#   profile                           1
 #   remote                            9
 #   report                           23
 #   testing                         100
 #   tolerance                        16
 #   upload                            6
 
-## items (508 lines)
+## items (510 lines)
 
 pub mod zensim_regress
 pub mod checksums
@@ -326,6 +327,8 @@ pub fn petname::memorable_name(&str) -> alloc::string::String
 pub fn petname::parse_memorable_name(&str) -> core::option::Option<petname::MemorableNameParts>
 pub fn petname::strip_hash_extension(&str) -> &str
 pub fn petname::try_memorable_name(&str) -> alloc::string::String
+pub mod profile
+pub fn profile::legacy_linear() -> zensim::profile::ZensimProfile
 pub mod remote
 pub struct remote::ReferenceStorage
 pub fn remote::ReferenceStorage::download_base_url(&self) -> &str
