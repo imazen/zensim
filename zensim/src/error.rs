@@ -42,13 +42,22 @@ pub enum ZensimError {
 
     /// A pixel format reached a code path that does not yet handle it.
     ///
-    /// This currently fires from the optional `classification` feature's
-    /// delta-stats pass when a format other than sRGB-8 (RGB/RGBA/BGRA),
-    /// sRGB-16 (RGBA), or linear-F32 (RGBA) is presented. The enum is
-    /// `#[non_exhaustive]`, so this variant is non-breaking — match it
-    /// alongside a `_` arm if you handle it.
-    #[error("pixel format is not supported by this code path")]
-    UnsupportedPixelFormat,
+    /// This fires from the optional `classification` feature's delta-stats
+    /// pass when a format other than sRGB-8 (RGB/RGBA/BGRA), sRGB-16
+    /// (RGBA), or linear-F32 (RGBA) is presented, and from the
+    /// `zenpixels`-feature [`score`](crate::score) one-shot entry point
+    /// when the `zenpixels::PixelSlice` adapter rejects a descriptor
+    /// (grayscale, HDR transfer, narrow range, unknown transfer). `reason`
+    /// is a `&'static str` describing why (mirrors [`Self::ModelLoadFailed`]
+    /// / [`Self::ModelForwardFailed`]; kept static so the error type stays
+    /// `Copy`). The enum is `#[non_exhaustive]`, so this variant is
+    /// non-breaking to add to — match it alongside a `_` arm if you handle
+    /// it.
+    #[error("pixel format is not supported by this code path: {reason}")]
+    UnsupportedPixelFormat {
+        /// Description of why the format was rejected.
+        reason: &'static str,
+    },
 
     /// Loading a trained MLP bake's bytes failed.
     ///

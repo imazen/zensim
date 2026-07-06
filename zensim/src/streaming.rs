@@ -3553,7 +3553,10 @@ pub(crate) fn compute_delta_stats(
     // variant lands without a matching arm in `extract_pixel_normalized`,
     // surface a real error instead of panicking in the inner loop.
     if !is_supported_delta_format(src_format) || !is_supported_delta_format(dst_format) {
-        return Err(crate::ZensimError::UnsupportedPixelFormat);
+        return Err(crate::ZensimError::UnsupportedPixelFormat {
+            reason: "delta-stats classification pass supports only sRGB-8 (RGB/RGBA/BGRA), \
+                     sRGB-16 (RGBA), or linear-F32 (RGBA) pixel formats",
+        });
     }
 
     let chunk_rows = 64usize;

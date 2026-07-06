@@ -267,6 +267,83 @@ pub use source::{
 pub use diffmap::{DiffmapOptions, DiffmapResult, DiffmapWeighting};
 pub use streaming::{PrecomputedReference, ZensimScratch};
 
+/// Compute the perceptual similarity score for two images in a single call,
+/// using the default [`ZensimProfile::A`] profile.
+///
+/// This is the one-call convenience entry point. Each image is a
+/// self-describing [`zenpixels::PixelSlice`]: its width, height, row stride,
+/// and [`PixelDescriptor`](zenpixels::PixelDescriptor) (pixel format, transfer
+/// function, alpha mode, color primaries) ride **with** the pixels. There are
+/// no separate `width` / `height` arguments to pass — and so no way for the
+/// caller to hand the two images mismatched dimensions, or to describe a buffer
+/// with the wrong format. The result is the same `0..100` value
+/// [`ZensimResult::score`] returns: **100 = identical, higher = more similar**
+/// (byte-identical inputs short-circuit to exactly `100.0`).
+///
+/// The supported descriptors are the SDR formats the [`ImageSource`] pipeline
+/// accepts (sRGB / BT.709 `Rgb8` / `Rgba8` / `Bgra8` / `Rgbx8` / `Bgrx8` /
+/// `Rgba16`, and linear `RgbaF32`); premultiplied alpha is un-premultiplied and
+/// `Rgbx`/`Bgrx` padding is ignored automatically. This is a thin wrapper over
+/// [`ZenpixelsSource::try_from_slice`] + [`Zensim::new`] + [`Zensim::compute`].
+///
+/// Requires the `zenpixels` feature. For a pinned profile, batch comparison
+/// (one reference vs many distorted), zensim's own [`RgbSlice`] / [`RgbaSlice`]
+/// / [`StridedBytes`] inputs, or HDR (decode to absolute-luminance linear RGB
+/// and use [`Zensim::compute_pu_linear`]), use the [`Zensim`] builder directly.
+///
+/// # Errors
+///
+/// - [`ZensimError::DimensionMismatch`] if the two images differ in dimensions.
+/// - [`ZensimError::UnsupportedPixelFormat`] if either slice's descriptor is
+///   not supported by the SDR pipeline (grayscale, HDR PQ / HLG transfers, a
+///   narrow / limited signal range, or an unknown transfer function) — the
+///   [`ZenpixelsSource`] adapter rejects these before scoring.
+/// - [`ZensimError::ImageTooSmall`] if either image has a zero dimension.
+/// - [`ZensimError::ImageTooLarge`] if dimensions exceed the default 120 MP cap
+///   (or overflow `usize` on 32-bit / wasm32).
+///
+/// # Examples
+///
+/// ```
+/// use zenpixels::{PixelDescriptor, PixelSlice};
+///
+/// // Two 8×8 RGBA8 images — sRGB-encoded bytes, tightly packed (the kind a
+/// // PNG / JPEG / WebP decoder hands you). `distorted` is a copy of
+/// // `reference`, so the two images are byte-identical.
+/// let (width, height) = (8u32, 8u32);
+/// let stride = width as usize * 4; // RGBA8 = 4 bytes/pixel, no row padding
+/// let reference: Vec<u8> = (0..width * height * 4).map(|i| (i % 256) as u8).collect();
+/// let distorted = reference.clone();
+///
+/// // The dimensions ride WITH the pixels (each PixelSlice carries its own
+/// // width / height / stride) — there are no width/height arguments to get wrong.
+/// let reference = PixelSlice::new(&reference, width, height, stride, PixelDescriptor::RGBA8_SRGB)?;
+/// let distorted = PixelSlice::new(&distorted, width, height, stride, PixelDescriptor::RGBA8_SRGB)?;
+///
+/// let score = zensim::score(reference, distorted)?;
+/// assert!((score - 100.0).abs() < 1e-6, "identical images score 100, got {score}");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[cfg(feature = "zenpixels")]
+pub fn score(
+    reference: zenpixels::PixelSlice<'_>,
+    distorted: zenpixels::PixelSlice<'_>,
+) -> Result<f64, ZensimError> {
+    // The PixelSlice carries its own dimensions, stride, and descriptor, so the
+    // adapter validates the format and maps it to an `ImageSource` — there is no
+    // (width, height) the caller could pass inconsistently. An unsupported
+    // descriptor (grayscale / HDR / narrow-range / unknown transfer) maps to
+    // `UnsupportedPixelFormat`, carrying the adapter's specific `&'static str`
+    // reason (e.g. "grayscale formats not supported") rather than discarding it.
+    let reference = ZenpixelsSource::try_from_slice(&reference)
+        .map_err(|UnsupportedFormat(reason)| ZensimError::UnsupportedPixelFormat { reason })?;
+    let distorted = ZenpixelsSource::try_from_slice(&distorted)
+        .map_err(|UnsupportedFormat(reason)| ZensimError::UnsupportedPixelFormat { reason })?;
+    Zensim::new(ZensimProfile::A)
+        .compute(&reference, &distorted)
+        .map(|result| result.score())
+}
+
 /// Score a precomputed feature vector under a [`ZensimProfile`] —
 /// the entry point alternative feature backends (e.g. `zensim-gpu`)
 /// use to produce a bit-exact CPU-equivalent `0..100` score.

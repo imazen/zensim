@@ -159,8 +159,31 @@ Look for `Raw dist corr: SROCC=...` in the output — that's the raw distance SR
 
 ```toml
 [dependencies]
-zensim = "0.3"
+zensim = { version = "0.3", features = ["zenpixels"] }
+zenpixels = "0.2"
 ```
+
+One call scores two images. Each image is a self-describing `zenpixels::PixelSlice` — its width, height, row stride, and pixel format ride **with** the pixels, so there are no separate width/height arguments to pass (and no way to hand the two images mismatched dimensions):
+
+```rust
+use zenpixels::{PixelDescriptor, PixelSlice};
+
+// sRGB bytes the way a PNG / JPEG / WebP decoder hands them to you, tightly
+// packed. `distorted` is a copy of `reference`, so they're byte-identical.
+let (width, height) = (8u32, 8u32);
+let stride = width as usize * 4; // RGBA8 = 4 bytes/pixel, no row padding
+let reference: Vec<u8> = (0..width * height * 4).map(|i| (i % 256) as u8).collect();
+let distorted = reference.clone();
+
+let reference = PixelSlice::new(&reference, width, height, stride, PixelDescriptor::RGBA8_SRGB)?;
+let distorted = PixelSlice::new(&distorted, width, height, stride, PixelDescriptor::RGBA8_SRGB)?;
+
+// One call → the perceptual similarity score (100 = identical, higher = closer).
+let score = zensim::score(reference, distorted)?;
+assert!((score - 100.0).abs() < 1e-6);
+```
+
+`score` uses the default profile (`ZensimProfile::A`). For a pinned profile, batch comparison (one reference vs many distorted), or zensim's own `RgbSlice` / `RgbaSlice` / `StridedBytes` inputs (no `zenpixels` feature needed), drop down to the `Zensim` builder — the full power API:
 
 ```rust
 use zensim::{Zensim, ZensimProfile, RgbSlice};

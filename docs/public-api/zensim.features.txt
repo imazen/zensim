@@ -12,7 +12,7 @@
 #   pub modules                                 2
 #   pub types (struct/enum/trait/alias)        14
 #   pub consts/statics                         10
-#   free functions                              4
+#   free functions                              5
 #   inherent methods                           21
 #   struct fields                              49
 #   enum variants                              13
@@ -20,12 +20,12 @@
 #   auto-trait-complete types                  14
 #
 # per-module pub lines:
-#   (root)                           89
+#   (root)                           90
 #   cvvdp_features                    2
 #   profile                          20
 #   xyb_lms_features                  2
 
-## items (113 lines)
+## items (114 lines)
 
 pub mod cvvdp_features
 pub const cvvdp_features::CVVDP_FEATURE_COUNT: usize
@@ -139,6 +139,7 @@ pub const FEATURES_PER_CHANNEL_WITH_PEAKS: usize
 pub const FEATURES_PER_SCALE: usize
 pub const WEIGHTS: &[f64; 228]
 pub fn compute_iw_weights(&[f32], usize, usize, usize, IwWeightConfig) -> alloc::vec::Vec<f32>
+pub fn score(zenpixels::buffer::PixelSlice<'_>, zenpixels::buffer::PixelSlice<'_>) -> core::result::Result<f64, ZensimError>
 pub fn try_score_from_features(&[f64], &[f64]) -> core::result::Result<(f64, f64), ZensimError>
 
 ## trait impls (14 types)
