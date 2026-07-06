@@ -84,10 +84,27 @@ bit-exact), joined to the sweep's ssim2:
 
 **#18 fixed** (jxl-encoder@`008499e1`, on origin/main; #18 closed): i16→i32 DC
 widening + `VARDCT_MIN_LOSSY_DISTANCE = 0.03` floor. Root cause was DC stored as
-i16 saturating at distance ≲0.025. **The floor means lossy JXL tops at ssim2 ~96
-(distance 0.03); requests below 0.03 clamp up.** So re-sweeping 0.01–0.02 is moot,
-and the 0.03–1.0 data above is the complete valid lossy curve. The deeper sub-0.03
-ANS non-conformance (why the floor exists) is deferred: imazen/jxl-encoder#94.
+i16 saturating at distance ≲0.025.
+
+**UPDATE 2026-07-06 — the floor is now REMOVED (jxl-encoder@`eeb52735`, #94 fixed).**
+The real root cause wasn't the ANS coder: it was a **header lie** —
+`modular_16bit_buffer_sufficient = true` was set unconditionally even when DC > i16,
+so spec-conformant decoders (jxl-oxide) reconstructed DC into i16 buffers and
+**wrapped** (frymire DC max 43280 > i16 32767), desyncing the DC predictor → the ANS
+final-state check failed. zenjxl-decoder used wide buffers so never saw it. Fix:
+`force_modular_32bit` flag emits `modular_16bit_buffer_sufficient = false` when DC
+overflows i16; floor deleted; Huffman alphabet sized to the actual max token.
+Verified: jxl-oxide now ACCEPTS distance 0.005 (PSNR 77.1 dB ≈ ssim2 99+), 0.01
+(74 dB), 0.02 (67.5 dB); **≥0.03 byte-identical (hash-proven across ANS+Huffman)**.
+
+So lossy zenjxl **now reaches ssim2 96–100** (distance 0.005–0.02). This
+**STRENGTHENS the A-vs-B conclusion**: B's projection saturates near dial 91 even
+harder as distortion → 0 (§ Part 4 feature-vanishing), so as lossy quality now spans
+to ssim2 ~99–100, B's dial gap *widens* — B is an even worse near-lossless knob than
+Part 2 showed, A even more clearly the better one. The exact ssim2 curve over the
+newly-unlocked range awaits a zenmetrics rebuild, **blocked by the committed
+`zenjpeg` 0.9.0 "defensive pre-bump" (`1fb1a79c`) that ~10 siblings still pin `^0.8`
+against** — a cross-repo dep-health decision, not a zensim issue.
 
 **extend-top on real near-lossless — FALSIFIED.** Built a near-lossless anchor
 (2200 cells, `feat_0..371` + `target_score`=ssim2, target 78.3–100) and ran
