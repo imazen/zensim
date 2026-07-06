@@ -97,10 +97,11 @@ overflows i16; floor deleted; Huffman alphabet sized to the actual max token.
 Verified: jxl-oxide now ACCEPTS distance 0.005 (PSNR 77.1 dB ≈ ssim2 99+), 0.01
 (74 dB), 0.02 (67.5 dB); **≥0.03 byte-identical (hash-proven across ANS+Huffman)**.
 
-So lossy zenjxl **now reaches ssim2 96–100** (distance 0.005–0.02). This
-**STRENGTHENS the A-vs-B conclusion**: B's projection saturates near dial 91 even
-harder as distortion → 0 (§ Part 4 feature-vanishing), so as lossy quality now spans
-to ssim2 ~99–100, B's dial gap *widens* — B is an even worse near-lossless knob than
+So lossy zenjxl **now reaches ssim2 ~96.85** (distance 0.005; measured end-to-end in
+Part 5 — the earlier "96–100" over-read the 77 dB PSNR). This **STRENGTHENS the A-vs-B
+conclusion**: B's projection saturates near dial 91 even harder as distortion → 0
+(§ Part 4 feature-vanishing), so as lossy quality climbs to ssim2 ~96.85, B's dial gap
+*widens* (Part 5 measured −4.24 → −5.30) — B is an even worse near-lossless knob than
 Part 2 showed, A even more clearly the better one.
 
 **The exact-ssim2 re-sweep over the newly-unlocked range is ABANDONED as cosmetic
@@ -171,7 +172,53 @@ near-lossless resolution is up-weighting the near-lossless-discriminating featur
 near-lossless-weighted re-fit, or the mid-spline remap) — the "make B ssim2-shaped at
 the top" tradeoff. A pure winsor removal is not the fix.
 
+## Part 5 — real near-lossless re-sweep, fix confirmed end-to-end (2026-07-06)
+
+Rebuilt zenmetrics against the fixed jxl-encoder and re-swept **200 refs × 6
+newly-unlocked distances → 1200/1200 cells, 0 failures**. (Build path in the note
+below; sources were converted PNG→lossless-JXL so the minimal png-less build could
+decode them — exact pixels, so the reference is unchanged.)
+
+| dist | ssim2 | pred_b | pred_a | B−ss | A−ss |
+|--:|--:|--:|--:|--:|--:|
+| 0.005 | 96.85 | 91.56 | 96.26 | −5.30 | −0.60 |
+| 0.01  | 96.53 | 91.55 | 96.05 | −4.97 | −0.48 |
+| 0.015 | 96.18 | 91.54 | 95.83 | −4.64 | −0.35 |
+| 0.02  | 96.00 | 91.53 | 95.69 | −4.47 | −0.31 |
+| 0.025 | 95.88 | 91.51 | 95.58 | −4.37 | −0.30 |
+| 0.03  | 95.73 | 91.49 | 95.44 | −4.24 | −0.29 |
+
+**Findings:**
+1. **Distance 0.005–0.02 (previously broken at ssim2 ~34) now produce ssim2
+   96.0–96.85** — the header-lie fix (#94) is validated end-to-end through the actual
+   sweep pipeline, not just the agent's standalone jxl-oxide test. 0.03 = 95.73
+   matches Part 2's 95.58 (sanity ✓).
+2. **CORRECTION to the Part-3 "96–100" claim: the lossy ceiling is ssim2 ~96.85
+   (distance 0.005), NOT 100.** The 77 dB PSNR ≈ ssim2 ~97, not 99+. The whole lossy
+   near-lossless band is compressed into ssim2 95.7–96.9; true 97–100 still needs
+   actual lossless (distance 0). So the fix extends the valid lossy curve by only
+   ~+1.1 ssim2 above the old 0.03 floor — the practical near-lossless win is
+   conformance/monotonicity, not a big ssim2-range gain.
+3. **B saturates at 91.5 — nearly FLAT (91.49→91.56) across the whole range** — while
+   A tracks ssim2 within ±0.6. As quality climbs 95.7→96.85, **B's gap WIDENS
+   −4.24 → −5.30** — exactly the Part-4 feature-vanishing prediction. A is the better
+   near-lossless knob; this reinforces keeping A as `codec_target`.
+
+**Build note (zencodec#103 migration).** The zenmetrics rebuild needed the in-flight
+Pattern-B migration patched in — zenmetrics already carries the `zencodec` git-rev
+`[patch.crates-io]`; on top of that it needed +3 consumer `zenjpeg ^0.8→^0.9` pins and
+removal of one stale `zenwebp?/zencodec` feature ref (zenwebp 0.5.0 made `zencodec`
+always-on). Two genuine zenmetrics bugs surfaced, logged for a deliberate fix:
+(a) the stale `zenwebp?/zencodec` ref; (b) `zenmetrics-cli/src/hdr.rs::rgb16_hlg_to_nits`
+does `use cvvdp::params` under `#[cfg(feature="png")]` but `cvvdp` is never a direct
+CLI dependency → any png-without-cvvdp build can't compile. The speculative consumer
+pins were reverted (siblings clean); the sweep used PNG→lossless-JXL sources to
+sidestep (b) via the already-working minimal (png-less) build.
+
 ## Data
+
+Part 5 re-sweep: `/mnt/v/output/zensim-jxl-nearlossless/refit/` (pareto.tsv,
+features.parquet, nl_b/nl_a.parquet, distorted/ persisted).
 
 - Features (2200×377): `/mnt/v/output/zensim-jxl-nearlossless/full/features.parquet`
 - ssim2 + bytes: `/mnt/v/output/zensim-jxl-nearlossless/full/pareto.tsv`
