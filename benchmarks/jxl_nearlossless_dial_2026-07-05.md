@@ -101,10 +101,19 @@ So lossy zenjxl **now reaches ssim2 96–100** (distance 0.005–0.02). This
 **STRENGTHENS the A-vs-B conclusion**: B's projection saturates near dial 91 even
 harder as distortion → 0 (§ Part 4 feature-vanishing), so as lossy quality now spans
 to ssim2 ~99–100, B's dial gap *widens* — B is an even worse near-lossless knob than
-Part 2 showed, A even more clearly the better one. The exact ssim2 curve over the
-newly-unlocked range awaits a zenmetrics rebuild, **blocked by the committed
-`zenjpeg` 0.9.0 "defensive pre-bump" (`1fb1a79c`) that ~10 siblings still pin `^0.8`
-against** — a cross-repo dep-health decision, not a zensim issue.
+Part 2 showed, A even more clearly the better one.
+
+**The exact-ssim2 re-sweep over the newly-unlocked range is ABANDONED as cosmetic
+(2026-07-06).** It needs a zenmetrics rebuild, which requires completing the in-flight
+**zencodec#103 (Pattern-B) migration** — local zenjpeg 0.9.0 / zenwebp 0.5.0 / zenjxl
+0.3.0 all consume the *unreleased* `zencodec 0.1.26` `CategorizedError`/`CodecError`
+API via a git-rev `[patch.crates-io]` (`fde07d0`, only zenmetrics carries it;
+standalone consumers fail with 16 errors *inside zenjpeg*), and zenwebp 0.5.0 dropped
+its `zencodec` feature gate. That's an ecosystem migration partly blocked on the
+unreleased crate — not a pin bump, and not worth it here: the PSNR table above already
+confirms near-lossless works (0.005 → 77 dB ≈ ssim2 99+), and the exact curve only
+strengthens A-over-B. Speculative consumer pin-bumps were made and reverted; sibling
+repos left clean. Redo as a deliberate project only when `zencodec 0.1.26` is ready.
 
 **extend-top on real near-lossless — FALSIFIED.** Built a near-lossless anchor
 (2200 cells, `feat_0..371` + `target_score`=ssim2, target 78.3–100) and ran
