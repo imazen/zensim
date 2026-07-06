@@ -171,11 +171,12 @@
 //!   pass + monotone PCHIP dial spline, calibrated so the dial is
 //!   monotone in degradation with identity at ≈ 97.7. The spline
 //!   extrapolates past its knots, so pathological inputs can score below 0.
-//! - [`ZensimProfile::Custom`] (linear profiles, MLP bakes, or ensembles
-//!   constructed outside this crate): a linear `Custom` profile uses the
-//!   classic `100 - 18 × d^0.7` mapping over the per-scale weighted feature
-//!   distance `d`; the historical linear/MLP research profiles are
-//!   reconstructed as `Custom` in the `zensim-experimental` crate.
+//! - [`ZensimProfile::PreviewV0_1`] / [`ZensimProfile::PreviewV0_2`]
+//!   (linear profiles): `100 - 18 × d^0.7` where `d` is the per-scale
+//!   weighted feature distance. Calibrated from 0–100 on 344k training
+//!   pairs; extreme distortions can score below 0. Externally-defined
+//!   linear/MLP profiles are also reachable via [`ZensimProfile::Custom`]
+//!   (reconstructed in the `zensim-experimental` crate).
 //!
 //! [`ZensimResult`] also provides [`approx_ssim2()`](ZensimResult::approx_ssim2),
 //! [`approx_dssim()`](ZensimResult::approx_dssim), and

@@ -6,27 +6,27 @@
 # impls omitted; re-export duplicates annotated `[also: path]`.
 # DO NOT EDIT BY HAND — commit regenerated changes with the code.
 #
-# files: zensim.txt 243 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 33 lines (33 hidden + 0 excluded-feature)
+# files: zensim.txt 249 lines (supported surface) | zensim.features.txt 128 added (features: avx512,classification,custom-profiles,imgref,streaming_strips_oom,threads,training,zenpixels) | zensim.internal.txt 33 lines (33 hidden + 0 excluded-feature)
 
 ## summary
 #
 #   pub modules                                 4
 #   pub types (struct/enum/trait/alias)        26
-#   pub consts/statics                          6
+#   pub consts/statics                          8
 #   free functions                             16
 #   inherent methods                          120
 #   struct fields                              19
-#   enum variants                              41
+#   enum variants                              45
 #   trait roster entries (type × trait)        65
 #   auto-trait-complete types                  17
 #
 # per-module pub lines:
-#   (root)                          144
+#   (root)                          146
 #   mapping                          12
-#   profile                          23
+#   profile                          27
 #   source                           53
 
-## items (222 lines)
+## items (228 lines)
 
 pub mod zensim
 pub mod mapping
@@ -46,6 +46,8 @@ pub mod profile
 pub profile::ZensimProfile::A
 pub profile::ZensimProfile::B
 pub profile::ZensimProfile::BHdr
+pub profile::ZensimProfile::PreviewV0_1
+pub profile::ZensimProfile::PreviewV0_2
 pub const fn profile::ZensimProfile::codec_target() -> Self [also: (root)]
 pub fn profile::ZensimProfile::latest() -> Self
 pub const fn profile::ZensimProfile::latest_preview() -> Self [also: (root)]
@@ -63,7 +65,9 @@ pub profile::ProfileParams::score_mapping_b: f64
 pub profile::ProfileParams::skip_score_mapping: bool
 pub profile::ProfileParams::soft_clamp_score: bool
 pub profile::ProfileParams::weights: &'static [f64]
+pub static profile::LINEAR_WEIGHTS_PREVIEW_V0_1: [f64; 228]
 pub static profile::LINEAR_WEIGHTS_PREVIEW_V0_2: [f64; 228]
+pub static profile::WEIGHTS_PREVIEW_V0_1: [f64; 228]
 pub static profile::WEIGHTS_PREVIEW_V0_2: [f64; 228]
 pub mod source
 pub source::AlphaMode::Opaque
@@ -136,6 +140,8 @@ pub ZensimError::UnsupportedPixelFormat
 pub ZensimProfile::A
 pub ZensimProfile::B
 pub ZensimProfile::BHdr
+pub ZensimProfile::PreviewV0_1
+pub ZensimProfile::PreviewV0_2
 pub fn profile::ZensimProfile::latest() -> Self
 pub fn profile::ZensimProfile::name(&self) -> &'static str
 pub struct DiffmapOptions

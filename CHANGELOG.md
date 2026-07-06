@@ -39,23 +39,25 @@
   errors). Pinned by `flag_not_format_decides_the_pipeline` (same bytes,
   flag flipped → different pipeline) and the mixed-pair refusal test.
 
-### Removed
-- **`ZensimProfile::PreviewV0_1` and `PreviewV0_2` (commit `493c91cd`,
-  2026-07-01) — previously unrecorded here.** BREAKING (absorbed by the
-  already-queued 0.2.x → 0.3.0 minor bump; zensim-regress: 0.4.0). Only `A`
-  (canonical) and `Custom` (external-bake escape hatch) remained until this
-  release added `B` / `BHdr` above. `WEIGHTS_PREVIEW_V0_1` (228-entry array)
-  and its `LINEAR_WEIGHTS_PREVIEW_V0_1` alias are also removed;
-  `WEIGHTS_PREVIEW_V0_2` / `LINEAR_WEIGHTS_PREVIEW_V0_2` are kept (they still
-  back `PROFILE_A`'s `weights` field and `ProfileParams::builder()`'s
-  defaults). Consumers who named `PreviewV0_1`/`PreviewV0_2` directly should
-  use `ZensimProfile::B` (deterministic linear, SDR) going forward, or pin to
-  a pre-0.3.0 release for the exact removed scoring behavior.
-  `zensim-regress` reconstructs the former `PreviewV0_2` behavior internally
-  as `profile::legacy_linear()` (a `Custom` profile, bit-identical params) so
-  its own `> 90` / `> 70` similarity-threshold tests keep their calibration.
-  `README.md` / `README.crates.md` and `docs/public-api/zensim.txt` (which
-  still listed the removed variants) are corrected in the same release.
+### Restored (reverts commit `493c91cd`)
+- **`ZensimProfile::PreviewV0_1` / `PreviewV0_2` and `WEIGHTS_PREVIEW_V0_1`
+  are RETAINED for 0.3.0 — the removal in commit `493c91cd` (2026-07-01,
+  "feat(profile)!: remove PreviewV0_1/PreviewV0_2 profile variants (A-only)")
+  is REVERTED.** That commit deleted public API that shipped in the last
+  published release (0.2.7): both enum variants, the 228-entry
+  `WEIGHTS_PREVIEW_V0_1` array + its `LINEAR_WEIGHTS_PREVIEW_V0_1` alias, and
+  the `PROFILE_PREVIEW_V0_1` / `PROFILE_PREVIEW_V0_2` statics — an unapproved
+  breaking change that never reached crates.io (0.2.7 is still the published
+  version). All of it is restored VERBATIM as first-class, non-deprecated,
+  selectable variants, to preserve semver compatibility with 0.2.7. `A`
+  remains the default and what `latest_preview()` / `latest()` /
+  `codec_target()` return; `B` / `BHdr` (above) are additive. The V0_2-pinned
+  cross-platform golden tests (`hardcoded_reference_scores`, `feature_coverage`,
+  `identical_images_score_100`, `preview_v0_1_compat_profile`) and the
+  `metric.rs` `compute_extended_features_returns_300` test are restored with
+  them. `docs/public-api/zensim.txt` again lists `PreviewV0_1` / `PreviewV0_2`
+  / `WEIGHTS_PREVIEW_V0_1`. The `zensim-regress` `profile::legacy_linear()`
+  helper that `493c91cd` added (published in 0.3.1) is left in place.
 
 ### Fixed
 - `compute_zensim_with_config` / `compute_zensim_with_ref_and_config`

@@ -4223,6 +4223,60 @@ mod tests {
         );
     }
 
+    /// `Zensim::compute_extended_features` returns 300 features at the
+    /// default 4-scale, 3-channel layout, and produces a score that matches
+    /// `Zensim::compute` to within a small numerical tolerance (the extra
+    /// 72 features have zero weight, so the weighted score is unchanged).
+    #[test]
+    fn compute_extended_features_returns_300() {
+        use crate::source::RgbSlice;
+        let w = 64;
+        let h = 64;
+        let (src, dst) = make_gradient_pair(w, h);
+        let src_img = RgbSlice::new(&src, w, h);
+        let dst_img = RgbSlice::new(&dst, w, h);
+
+        // Linear-profile-specific test: the score-equality assertion
+        // only holds for profiles whose scoring is linear-weighted on
+        // the 228 features (the extended 300 features just have
+        // weight=0 in those slots). MLP profiles (A +) score
+        // via a forward pass — extended features change the input
+        // shape and break the equality. Pin to V0_2.
+        let z = crate::Zensim::new(crate::ZensimProfile::PreviewV0_2);
+        let standard = z.compute(&src_img, &dst_img).unwrap();
+        let extended = z.compute_extended_features(&src_img, &dst_img).unwrap();
+
+        assert_eq!(standard.features().len(), 228);
+        assert_eq!(extended.features().len(), 300);
+        // Score should match: extra features have zero weight in the
+        // weighted-distance calculation.
+        assert!(
+            (standard.score() - extended.score()).abs() < 0.01,
+            "standard score {} vs extended score {}",
+            standard.score(),
+            extended.score()
+        );
+        // Sanity: features 0..228 should agree wherever the standard path
+        // populated them. The standard path skips channels whose weights are
+        // all-zero (leaving 0.0 in those slots); the extended path forces
+        // every channel/feature to be computed. So we only enforce equality
+        // on slots the standard path actually filled.
+        for i in 0..228 {
+            let a = standard.features()[i];
+            let b = extended.features()[i];
+            if a != 0.0 {
+                assert!(
+                    (a - b).abs() < 1e-6,
+                    "feature {i}: standard {a} vs extended {b}"
+                );
+            }
+        }
+        // The trailing 72 masked features should be non-negative.
+        for (i, &f) in extended.features()[228..].iter().enumerate() {
+            assert!(f >= 0.0, "extended feature {} is negative: {}", 228 + i, f);
+        }
+    }
+
     /// Helper: create a gradient test image pair.
     fn make_gradient_pair(w: usize, h: usize) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
         let n = w * h;

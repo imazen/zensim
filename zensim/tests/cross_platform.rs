@@ -71,6 +71,264 @@ fn generate_test_pairs(w: usize, h: usize) -> Vec<TestPair> {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
+/// Hardcoded reference scores validated across all 7 CI platforms.
+///
+/// The V0_2 contract is "scores approximately stable across builds" — not
+/// "bit-identical." The metric is intrinsically a parallel reduction over
+/// millions of f32 lane sums; any change to band partition (rayon worker
+/// count, STRIP_INNER tuning, etc.) reorders the f64 cross-band sum, which
+/// drifts the final score by a few millipoints even with the exact same
+/// per-pixel arithmetic.
+///
+/// Tolerance: ±1e-2 on the 0-100 scale. That's ~100× below human-
+/// perceptible delta (~1 score point) and leaves ~3× headroom over the
+/// drift observed when changing STRIP_INNER 16→32 (max 3.66e-3 across
+/// the 8 reference pairs below). Tighter would require pinning every
+/// reduction-order knob, which makes future perf work in the parallel
+/// kernels impossible without burning the V0_2 profile.
+///
+/// Pinned to `PreviewV0_2` rather than `latest()` because the reference
+/// scores below are V0_2-specific (228-weight linear profile, SROCC=0.9942).
+/// `latest()` returns the MLP profile `A` in zensim 0.3.x — its scores
+/// for the same inputs are unrelated to the V0_2 calibration.
+#[test]
+fn hardcoded_reference_scores() {
+    const W: usize = 128;
+    const H: usize = 128;
+    const TOLERANCE: f64 = 1e-2;
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let pairs = generate_test_pairs(W, H);
+
+    // Reference scores with concordant-trained weights (228 weights, SROCC=0.9942).
+    // Uses linear-srgb crate (C0-continuous constants) for sRGB linearization.
+    // Cube root via magetypes::cbrt_midp (3 ULP, 2 Halley) since 0038bc36;
+    // values shifted from the prior hand-rolled cbrt by ≤1e-2 absolute /
+    // ≤2e-4 relative (different Kahan magic constant, identical algorithm).
+    #[allow(clippy::excessive_precision)]
+    let expected: &[(&str, f64)] = &[
+        ("checkerboard+blur", -79.872_577_454_381_457),
+        ("checkerboard+sharpen", 29.588_149_295_371_096),
+        ("mandelbrot+blur", 8.479_272_203_622_543),
+        ("mandelbrot+color_shift", 48.143_677_644_353_694),
+        ("noise+blur", 60.014_996_187_146_878),
+        ("noise+block_artifacts", 52.798_793_807_864_449),
+        ("color_blocks+color_shift", 30.389_337_020_934_434),
+        ("color_blocks+sharpen", -5.661_428_862_086_183),
+    ];
+
+    let mut failures = Vec::new();
+    for (pair, &(name, expected_score)) in pairs.iter().zip(expected.iter()) {
+        assert_eq!(pair.name, name, "Test pair order mismatch");
+        let src = RgbSlice::new(&pair.source, W, H);
+        let dst = RgbSlice::new(&pair.distorted, W, H);
+        let result = z.compute(&src, &dst).expect("compute failed");
+
+        let diff = (result.score() - expected_score).abs();
+        println!(
+            "  {name:30} score={:.15}  expected={expected_score:.15}  diff={diff:.2e}",
+            result.score(),
+        );
+        if diff > TOLERANCE {
+            failures.push(format!(
+                "{name}: score {:.15} differs from expected {expected_score:.15} by {diff:.2e} (>{TOLERANCE})",
+                result.score(),
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Score mismatches:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// All features must be non-trivial (max > 1e-6 across all 8 test pairs).
+/// Layout: [0..156) scored (13/ch × 3ch × 4), [156..228) peaks (6/ch × 3ch × 4)
+#[cfg(feature = "training")]
+#[test]
+fn feature_coverage() {
+    const W: usize = 128;
+    const H: usize = 128;
+    const NUM_SCORED: usize = 156; // 13 × 3 × 4
+    const NUM_PEAKS: usize = 72; // 6 × 3 × 4
+    const NUM_FEATURES: usize = NUM_SCORED + NUM_PEAKS; // 228
+    // This test validates the base 228-feature scored+peaks layout, so it
+    // must run on a 228-feature profile. `A` is the 372-feature MLP profile
+    // (extended + IW-pool blocks) — use the linear `PreviewV0_2` instead.
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+    let pairs = generate_test_pairs(W, H);
+
+    let mut max_per_feature = vec![0.0f64; NUM_FEATURES];
+
+    for pair in &pairs {
+        let src = RgbSlice::new(&pair.source, W, H);
+        let dst = RgbSlice::new(&pair.distorted, W, H);
+        let result = z
+            .compute_all_features(&src, &dst)
+            .expect("compute_all_features failed");
+
+        assert_eq!(
+            result.features().len(),
+            NUM_FEATURES,
+            "Expected {NUM_FEATURES} features, got {}",
+            result.features().len(),
+        );
+
+        for (i, &f) in result.features().iter().enumerate() {
+            max_per_feature[i] = max_per_feature[i].max(f.abs());
+        }
+    }
+
+    let scored_names = [
+        "ssim_mean",
+        "ssim_4th",
+        "ssim_2nd",
+        "art_mean",
+        "art_4th",
+        "art_2nd",
+        "det_mean",
+        "det_4th",
+        "det_2nd",
+        "mse",
+        "hf_energy_loss",
+        "hf_mag_loss",
+        "hf_energy_gain",
+    ];
+    let peak_names = [
+        "ssim_max", "art_max", "det_max", "ssim_p95", "art_p95", "det_p95",
+    ];
+
+    let mut dead_features = Vec::new();
+    for (i, &max_val) in max_per_feature.iter().enumerate() {
+        let (scale, ch_name, f_name) = if i < NUM_SCORED {
+            let scale = i / 39;
+            let within = i % 39;
+            let ch = within / 13;
+            let fi = within % 13;
+            (scale, ["X", "Y", "B"][ch], scored_names[fi])
+        } else {
+            let pi = i - NUM_SCORED;
+            let scale = pi / 18;
+            let within = pi % 18;
+            let ch = within / 6;
+            let fi = within % 6;
+            (scale, ["X", "Y", "B"][ch], peak_names[fi])
+        };
+
+        if max_val <= 1e-6 {
+            dead_features.push(format!(
+                "  feat[{i:3}] s{scale} {ch_name} {f_name:16} max={max_val:.2e}"
+            ));
+        }
+    }
+
+    if !dead_features.is_empty() {
+        panic!(
+            "{} of {NUM_FEATURES} features never exceeded 1e-6:\n{}",
+            dead_features.len(),
+            dead_features.join("\n"),
+        );
+    }
+
+    println!("  All {NUM_FEATURES} features activated (max > 1e-6)");
+}
+
+/// Tests all 4 generators with separately-allocated copies (not same pointer).
+///
+/// Pinned to `PreviewV0_2` rather than `latest()` because the
+/// "raw_distance == 0.0 for identical input" invariant is V0_2-specific:
+/// V0_2 is a linear-weighted sum of feature distances, so all-zero
+/// features → 0 distance → score 100 by the `100 − 18·d^0.7` mapping.
+/// The MLP profile `A` evaluates a LeakyReLU forward pass
+/// on the (all-zero) feature vector; its biases produce a non-zero raw
+/// output, which the runtime clamps to 100 at the score level.
+/// Different invariant, different test surface.
+#[test]
+fn identical_images_score_100() {
+    const W: usize = 128;
+    const H: usize = 128;
+    let z = Zensim::new(ZensimProfile::PreviewV0_2);
+
+    let images: &[(&str, Vec<[u8; 3]>)] = &[
+        ("checkerboard", gen_checkerboard(W, H, 8)),
+        ("mandelbrot", gen_mandelbrot(W, H)),
+        ("value_noise", gen_value_noise(W, H, 42)),
+        ("color_blocks", gen_color_blocks(W, H)),
+    ];
+
+    for (name, pixels) in images {
+        // Separate copy so we're not relying on pointer identity
+        let copy = pixels.clone();
+        let src = RgbSlice::new(pixels, W, H);
+        let dst = RgbSlice::new(&copy, W, H);
+        let result = z.compute(&src, &dst).expect("compute failed");
+
+        println!(
+            "  {name:20} score={:.15}  raw_dist={:.2e}  max_feat={:.2e}",
+            result.score(),
+            result.raw_distance(),
+            result
+                .features()
+                .iter()
+                .map(|f| f.abs())
+                .fold(0.0f64, f64::max),
+        );
+        assert_eq!(
+            result.score(),
+            100.0,
+            "{name}: identical images must score exactly 100.0, got {:.15}",
+            result.score(),
+        );
+        assert_eq!(
+            result.raw_distance(),
+            0.0,
+            "{name}: identical images must have raw_distance=0.0, got {:.2e}",
+            result.raw_distance(),
+        );
+        assert!(
+            result.features().iter().all(|&f| f == 0.0),
+            "{name}: identical images must have all-zero features",
+        );
+        assert_eq!(
+            result.mean_offset(),
+            [0.0, 0.0, 0.0],
+            "{name}: identical images must have zero mean_offset",
+        );
+    }
+}
+
+/// `PreviewV0_1` is the restored 0.2.x-compatible linear profile. Guard its
+/// basic contract: correct name, identical images score exactly 100, and a
+/// distorted pair scores below 100 (the profile is wired and non-trivial).
+#[test]
+fn preview_v0_1_compat_profile() {
+    const W: usize = 128;
+    const H: usize = 128;
+    assert_eq!(ZensimProfile::PreviewV0_1.name(), "zensim-preview-v0.1");
+
+    let z = Zensim::new(ZensimProfile::PreviewV0_1);
+    let pixels = gen_mandelbrot(W, H);
+    let copy = pixels.clone();
+    let src = RgbSlice::new(&pixels, W, H);
+    let dst = RgbSlice::new(&copy, W, H);
+    let identical = z.compute(&src, &dst).expect("compute failed");
+    assert_eq!(
+        identical.score(),
+        100.0,
+        "PreviewV0_1: identical images must score 100.0, got {:.6}",
+        identical.score(),
+    );
+
+    let distorted_px = distort_blur(&pixels, W, H, 3);
+    let dist = RgbSlice::new(&distorted_px, W, H);
+    let blurred = z.compute(&src, &dist).expect("compute failed");
+    assert!(
+        blurred.score() < 100.0,
+        "PreviewV0_1: blurred pair must score below 100, got {:.6}",
+        blurred.score(),
+    );
+}
+
 /// All PixelFormat variants produce equivalent scores.
 /// sRGB↔f32: ±0.15, same-encoding reorder: ±0.01.
 #[test]
