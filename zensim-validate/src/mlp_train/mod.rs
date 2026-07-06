@@ -598,10 +598,10 @@ pub struct MlpHyperparams {
     pub qat_tau: f64,
 
     /// Per-epoch group-eval row cap (0 = full, historical behavior). When
-    /// > 0, oversized groups' per-epoch diagnostics/selection forwards run
-    /// on a deterministic stride sample of at most this many rows —
-    /// pre-gathered once, no RNG, training byte-stream untouched. The big
-    /// iteration-speed lever for multi-million-row groups (v51: 3.4M
+    /// set greater than 0, oversized groups' per-epoch diagnostics/selection
+    /// forwards run on a deterministic stride sample of at most this many
+    /// rows — pre-gathered once, no RNG, training byte-stream untouched. The
+    /// big iteration-speed lever for multi-million-row groups (v51: 3.4M
     /// forwards/epoch → ~50k). Selection SROCC on 50k rows is within
     /// ±0.005 of full. Recorded in manifests as `group_eval_cap`.
     pub group_eval_cap: usize,
@@ -5259,6 +5259,11 @@ fn qat_quantize_copy(w: &[f64], tau: f64) -> Vec<f64> {
 /// TV regularizer is OMITTED on this path (the V_22-LARGE recipe
 /// doesn't use TV). NiN composes via `flush_per_sample_alpha_nin_batch`
 /// in the same per-pair grad-scatter pattern as the hybrid path.
+/// Standardized TV-endpoint feature buffers + regularizer knobs, unpacked
+/// once at the top of [`train_mlp_per_sample_alpha_head`] from the
+/// optional `tv` config. `(features, pairs, weight, batch_size, margin)`.
+type StdTvUnpacked = (Vec<Vec<f64>>, Vec<(usize, usize)>, f64, usize, f64);
+
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)] // one optional research-pool input per aux loss
 fn train_mlp_per_sample_alpha_head(
@@ -5683,38 +5688,33 @@ fn train_mlp_per_sample_alpha_head(
     let tv_active = tv
         .map(|t| t.weight > 0.0 && !t.pairs.is_empty())
         .unwrap_or(false);
-    let (std_tv_features, tv_pairs_vec, tv_weight_val, tv_batch_val, tv_margin_val): (
-        Vec<Vec<f64>>,
-        Vec<(usize, usize)>,
-        f64,
-        usize,
-        f64,
-    ) = if let (Some(t), true) = (tv, tv_active) {
-        let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(t.features.len());
-        for f in t.features.iter() {
-            let mut buf = vec![0.0f64; n_features];
-            for d in 0..n_features {
-                buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+    let (std_tv_features, tv_pairs_vec, tv_weight_val, tv_batch_val, tv_margin_val): StdTvUnpacked =
+        if let (Some(t), true) = (tv, tv_active) {
+            let mut bufs: Vec<Vec<f64>> = Vec::with_capacity(t.features.len());
+            for f in t.features.iter() {
+                let mut buf = vec![0.0f64; n_features];
+                for d in 0..n_features {
+                    buf[d] = (f[d] - scaler_mean[d]) / scaler_scale[d].max(1e-12);
+                }
+                bufs.push(buf);
             }
-            bufs.push(buf);
-        }
-        log_line(
-            &format!(
-                "tv(α-head): ENABLED — {} within-ladder pairs, weight={:.3}, batch={}, margin={:.3} (hinge max(0, y_harsher − y_milder + margin))",
-                t.pairs.len(),
-                t.weight,
-                t.batch.max(1),
-                t.margin,
-            ),
-            log,
-        );
-        (bufs, t.pairs.clone(), t.weight, t.batch.max(1), t.margin)
-    } else {
-        if tv.is_some() && !tv_active {
-            log_line("tv: data supplied but weight=0 or no pairs — ignored", log);
-        }
-        (Vec::new(), Vec::new(), 0.0, 0, 0.0)
-    };
+            log_line(
+                &format!(
+                    "tv(α-head): ENABLED — {} within-ladder pairs, weight={:.3}, batch={}, margin={:.3} (hinge max(0, y_harsher − y_milder + margin))",
+                    t.pairs.len(),
+                    t.weight,
+                    t.batch.max(1),
+                    t.margin,
+                ),
+                log,
+            );
+            (bufs, t.pairs.clone(), t.weight, t.batch.max(1), t.margin)
+        } else {
+            if tv.is_some() && !tv_active {
+                log_line("tv: data supplied but weight=0 or no pairs — ignored", log);
+            }
+            (Vec::new(), Vec::new(), 0.0, 0, 0.0)
+        };
 
     // PreviewV0_5TunerV2 anchor data: standardize against the SAME
     // training-group scaler (consistent with the bake's runtime scaler;
@@ -9091,14 +9091,6 @@ mod arch;
 mod arch_f32;
 pub use arch::{ArchForward, arch_backward, arch_forward};
 
-/// NiN-aware flush for the per-sample α head. Computes NiN over the
-/// 2N surviving predictions and routes per-prediction grad through
-/// `backprop_step_per_sample_alpha_head`. Accumulates into the Adam
-/// slots laid out in `train_mlp_per_sample_alpha_head`, then performs
-/// one Adam step. L2 is applied K·λ·w scaled by `steps_added`
-/// (matches hybrid_head flush).
-#[allow(clippy::too_many_arguments)]
-
 /// STRATEGY-2026-07-02: shared backward tail for the listwise / triplet step
 /// types — mirrors the plain-RankNet pair tail verbatim (grad buffers → one
 /// `arch_backward` per row → L2 → fold into Adam slots → cadence step). One
@@ -9230,6 +9222,13 @@ fn strategy_backward_rows<F>(
     }
 }
 
+/// NiN-aware flush for the per-sample α head. Computes NiN over the
+/// 2N surviving predictions and routes per-prediction grad through
+/// `backprop_step_per_sample_alpha_head`. Accumulates into the Adam
+/// slots laid out in `train_mlp_per_sample_alpha_head`, then performs
+/// one Adam step. L2 is applied K·λ·w scaled by `steps_added`
+/// (matches hybrid_head flush).
+#[allow(clippy::too_many_arguments)]
 fn flush_per_sample_alpha_nin_batch<F>(
     nin_buffer: &mut Vec<Option<PerSampleAlphaPairForward<'_>>>,
     w1: &mut Vec<f64>,

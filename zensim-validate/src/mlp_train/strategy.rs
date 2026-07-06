@@ -214,6 +214,12 @@ mod tests {
     const BUG: &str = "IMPL BUG (not strategy): mismatch vs reference implementation";
 
     #[test]
+    // One reference value (case r=1u8) happens to land within clippy's
+    // detection tolerance of `f64::consts::LN_2` — it is an INDEPENDENT
+    // scipy-computed cross-check value (see the comment below), not a
+    // hand-typed stand-in for the constant. Substituting the named
+    // constant would defeat the point of an independent reference.
+    #[allow(clippy::approx_constant)]
     fn triplet_probit_matches_scipy_constants() {
         // Constants computed 2026-07-02 with scipy.stats.norm (see the
         // session log): (ya, yb, tau, sigma, resp) -> (loss, dL/ddelta).

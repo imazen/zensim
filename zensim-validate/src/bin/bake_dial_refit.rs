@@ -967,6 +967,30 @@ fn sha256_hex(bytes: &[u8]) -> String {
     s
 }
 
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let result: Result<bool, String> = match &cli.cmd {
+        Cmd::ExtendTop(a) => cmd_extend_top(a).map(|_| false),
+        Cmd::SharedAnchor(a) => cmd_shared_anchor(a).map(|_| false),
+        Cmd::BottomExtend(a) => cmd_bottom_extend(a).map(|_| false),
+        Cmd::AddWinsor(a) => cmd_add_winsor(a).map(|_| false),
+        Cmd::Gate(a) => cmd_gate(a),
+    };
+    match result {
+        Ok(gate_failed) => {
+            if gate_failed {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1145,29 +1169,5 @@ mod tests {
         assert_eq!(op.apply(-3.0), -1.0);
         assert_eq!(op.apply(0.5), 0.5);
         assert_eq!(op.apply(9.0), 2.0);
-    }
-}
-
-fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let result: Result<bool, String> = match &cli.cmd {
-        Cmd::ExtendTop(a) => cmd_extend_top(a).map(|_| false),
-        Cmd::SharedAnchor(a) => cmd_shared_anchor(a).map(|_| false),
-        Cmd::BottomExtend(a) => cmd_bottom_extend(a).map(|_| false),
-        Cmd::AddWinsor(a) => cmd_add_winsor(a).map(|_| false),
-        Cmd::Gate(a) => cmd_gate(a),
-    };
-    match result {
-        Ok(gate_failed) => {
-            if gate_failed {
-                ExitCode::FAILURE
-            } else {
-                ExitCode::SUCCESS
-            }
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
     }
 }

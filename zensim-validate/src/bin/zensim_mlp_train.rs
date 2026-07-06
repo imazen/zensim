@@ -101,7 +101,7 @@ mod contamination_guard;
 
 use mlp_train::{
     AnchorRows, EquivPairs, KonjndAggregationPool, MlpHyperparams, TrainingGroup, TvRegularizer,
-    ValidationPolicy, train_mlp_with_tv_anchored_equiv_pjnd,
+    ValidationPolicy,
 };
 
 #[derive(Parser)]
@@ -692,7 +692,7 @@ struct Args {
     /// Triplet stimuli parquet/CSV (ref_basename + q_jnd/level + f0..fN rows).
     #[arg(long)]
     triplet_stimuli: Option<String>,
-    /// Triplet responses TSV: left_idx	right_idx	response(0=left-more-distorted,1=right,2=notsure).
+    /// Triplet responses TSV: left_idx, right_idx, response(0=left-more-distorted,1=right,2=notsure).
     #[arg(long)]
     triplet_responses: Option<String>,
 
