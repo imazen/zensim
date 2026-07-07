@@ -265,6 +265,49 @@ human-MOS RANK metric. **Recommend (b)** — the "flaw" is B honestly failing to
 razor-thin band that isn't linearly separable; making B nonlinear just rebuilds A at
 high cost.
 
+## Part 7 — the REAL fix (Part 6 REVISED): B's winsor bounds are miscalibrated, 2026-07-07
+
+User: "the winsorization of every single feature is suspicious, and might contribute
+to this." **Correct — it's the wound, and Part 6's "intrinsic to linearity" verdict is
+wrong in an important way.** B applies `winsor_p99` (clamp each feature to a baked
+`[lo,hi]`) to ALL 372 features, and those bounds are **miscalibrated**.
+
+**Winsor destroys near-lossless discrimination.** Applying B's shipped bounds to the
+1200 near-lossless cells: **245/372 features become CONSTANT** (all clamp to `lo`;
+pre-winsor 0 constant); 247 lose >90% of their within-near-lossless variance. A linear
+projection cannot distinguish cells whose inputs are 245-way identical.
+
+**Recomputing the bounds is a Pareto win (POC: ridge on 5 human-MOS groups):**
+
+| winsor bounds | CID22 | KonJND | nl per-img SROCC |
+|--|--|--|--|
+| B's shipped | 0.812 | 0.225 | 0.286 |
+| clean p1/p99, train-only | 0.861 | 0.291 | 0.829 |
+| clean p1/p99 **+ near-lossless** | 0.861 | 0.294 | **0.886** |
+| (A nonlinear reference) | — | — | 0.943 |
+
+Two separable effects: (1) B's shipped bounds are simply BADLY CALIBRATED — a clean
+p1/p99 recompute alone recovers near-lossless 0.286→0.829 AND lifts CID22 +0.049;
+(2) including near-lossless in the bound computation closes the rest (→0.886) at ~0
+human-MOS cost. −1131 (the f155 tiny-screen pathology the lower clamp guards) is still
+an outlier below the new p1 ⇒ the guard survives. **So the linear ceiling is ~0.83
+(still < A's 0.943), but B was crippled to 0.286/0.714 BELOW its own ceiling by
+miscalibrated winsor bounds — self-inflicted, not a fundamental limit.** Part 6's
+antagonistic-refit was real but was fighting this wound; and Part 3's rank-invariant
+spline remap failed only because the OLD near-lossless rank was garbage — with the rank
+now correct (0.886) though still razor-thin (raw span ~0.01), a spline refit CAN now
+stretch it to the full dial.
+
+**Full fix:** regenerate the auto_transforms TSV with inclusive p1/p99 bounds
+(`load_transforms`, `scripts/v_next/train_v02_bvls_shaped.py`) → re-run
+gram→fit→ensemble(`Pline-cid80`)→finalize → spline refit.
+
+**CAVEAT (do not over-claim yet):** these are POC numbers — a single ridge on a 5-group
+subset, NOT B's actual BVLS ensemble (CID22 0.876). The near-lossless recovery is robust
+across every test; the CID22/KonJND *gains* need validating on a real `ens-Pline-cid80`
+rebake (the POC's 0.812 B-bounds baseline may be low because B's shipped bounds don't
+match the subset). **The rebake IS the validation — pending.**
+
 ## Data
 
 Part 5 re-sweep: `/mnt/v/output/zensim-jxl-nearlossless/refit/` (pareto.tsv,
