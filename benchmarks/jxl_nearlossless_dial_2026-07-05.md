@@ -215,6 +215,56 @@ CLI dependency → any png-without-cvvdp build can't compile. The speculative co
 pins were reverted (siblings clean); the sweep used PNG→lossless-JXL sources to
 sidestep (b) via the already-working minimal (png-less) build.
 
+## Part 6 — "fix B's flaw": the linear re-fit FAILS (human-MOS ⊥ near-lossless), 2026-07-07
+
+User directive: "fix this flaw of B." Full diagnosis + a 3-way falsification that the
+flaw is **intrinsic to B being a linear projection**, not a spline/calibration bug.
+
+**The flaw is the projection, not the spline.** B's near-lossless cells project to raw
+~1.06 → dial 91.5 with only 22% per-image monotonicity (vs A's 84%; per-image
+SROCC-vs-ssim2 0.46 vs A 0.93). Decoding B's 30-knot spline: the near-lossless region
+(raw 1.03–1.14) is **monotone** (slope 45–72 dial/raw), *not* flat (flats are only at
+raw >2.5 → dial ~100, which real zenjxl never reaches). A monotone spline preserves
+rank exactly ⇒ **a rank-invariant spline remap cannot manufacture rank the projection
+lacks.** (The prior session's `full/b_nl_candidate.bin` was exactly this remap — same
+sparse layer, near_zero 0.745 — and was falsified: 0/2200 cells moved.)
+
+**A linear re-fit is antagonistic — FALSIFIED (POC, ridge on 5 human-MOS groups +
+zenjxl near-lossless sweep at weight w):**
+
+| w_nl | CID22 | KonJND | nl per-img SROCC | nl raw span |
+|--:|--:|--:|--:|--:|
+| 0.0 | 0.843 | 0.246 | +0.771 | 0.094 |
+| 0.25 | 0.822 | 0.210 | **−0.143** | 0.092 |
+| 0.5 | 0.799 | 0.181 | −0.657 | 0.092 |
+| 1.0 | 0.759 | 0.138 | **−0.829** | 0.095 |
+| 5.0 | 0.611 | 0.023 | −0.543 | 0.100 |
+| 10.0 | 0.528 | 0.016 | +0.657 | 0.112 |
+
+At usable weights, near-lossless supervision **flips the near-lossless ranking negative**
+(the fit can't satisfy it linearly → it corrupts) AND costs CID22; the dial raw-span
+barely moves (reach not fixed). A **1.4%-weight** near-lossless contribution (w=0.25)
+already flips the sign ⇒ B's near-lossless ranking is **ill-conditioned / knife's edge**
+(near-constant features → prediction is a tiny difference of large terms). Only w=10
+recovers near-lossless (+0.657) — but CID22 is destroyed (0.53). A *pure*-ssim2 linear
+fit ranks near-lossless (0.829, held-out) but abandons human-MOS: **you cannot have both
+in one linear projection.**
+
+**Ceiling context.** ssim2's OWN per-image monotonicity across these distances is only
+**46%** (d≤0.03) — the encoder's near-lossless RD isn't monotonic at fine steps, so NO
+metric gives a truly clean near-lossless dial. A reaches 84%/0.943 only by nonlinear
+over-smoothing past what the encoder/ssim2 actually do.
+
+**Conclusion + recommendation.** B's near-lossless flaw is **intrinsic to linearity**,
+falsified 3 ways (spline-remap, strict-mono, antagonistic re-fit). The only fixes are:
+(a) bolt a **nonlinear near-lossless head** onto B with a hard regime switch — complex,
+introduces a dial discontinuity, and is ssim2-shaped there anyway (no human MOS on
+zenjxl near-lossless), i.e. it **recreates A** in that regime; or (b) **use A as the
+near-lossless codec knob** (already 0.943, smooth monotone dial) and keep B as the
+human-MOS RANK metric. **Recommend (b)** — the "flaw" is B honestly failing to fake a
+razor-thin band that isn't linearly separable; making B nonlinear just rebuilds A at
+high cost.
+
 ## Data
 
 Part 5 re-sweep: `/mnt/v/output/zensim-jxl-nearlossless/refit/` (pareto.tsv,
