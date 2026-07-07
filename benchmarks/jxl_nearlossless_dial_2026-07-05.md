@@ -306,7 +306,57 @@ gram→fit→ensemble(`Pline-cid80`)→finalize → spline refit.
 subset, NOT B's actual BVLS ensemble (CID22 0.876). The near-lossless recovery is robust
 across every test; the CID22/KonJND *gains* need validating on a real `ens-Pline-cid80`
 rebake (the POC's 0.812 B-bounds baseline may be low because B's shipped bounds don't
-match the subset). **The rebake IS the validation — pending.**
+match the subset). **The rebake IS the validation — DONE, see Part 8.**
+
+## Part 8 — SHIPPED: inclusive-winsor B rebake (2026-07-07)
+
+The Part 7 fix, validated on B's REAL `ens-Pline-cid80` pipeline and shipped as
+`ZensimProfile::B`. **No re-fit was needed** — B's winsor is a post-hoc
+`add-winsor` guard on raw-fitted weights (weights/scaler/spline copied verbatim
+through `winsorize_bake` → `dense_dial_refit_b`), so ONLY the winsor fit corpus
+changed. This is why the human-MOS panel is preserved by construction.
+
+**Pipeline** (all deterministic; reproduced by `scripts/reproduce_b.sh`):
+
+```
+raw  b_sdr_linear_cid80_anchored_2026-07-04.bin              (sha 7b326ac5)
+  → bake_dial_refit add-winsor --fit-corpus <inclusive> --lo-pct 0.1 --hi-pct 99.9   (sha 92189ea1)
+  → bake_dial_refit extend-top --anchor multiband_anchor_dial100.parquet --target-col target_score
+  → b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin  (7,325 B, sha b6fe5233)  [SHIPPED]
+```
+
+**Inclusive fit corpus** (`scripts/v_next/build_inclusive_winsor_corpus.py`, sha
+352e7a55): hdr_v3mix (7,410 rows) + zenjxl near-lossless SDR sweep refit+full
+(3,400 rows) = 10,810 × 372. The predecessor used hdr_v3mix ALONE → its
+[p0.1,p99.9] bounds sat above the SDR near-lossless feature range → 245/372
+features clamped CONSTANT there. Adding the near-lossless sweep drops 340/372
+lower bounds so those features pass through; f155's upper p99.9 rises only
+0.479→0.776, still ≪ the 14,532 offender, so the pathology guard survives.
+
+**Measured** (`bake_verdict` full panel + `predict_features_with_bake` dial +
+`ensemble_score_rows` rank, all on the fixed bake bytes):
+
+| | shipped B (2026-07-05) | FIXED B (inclusive-winsor) |
+|--|--|--|
+| CID22 SROCC | 0.8763 | **0.8764** |
+| KonJND SROCC | 0.5474 | 0.5466 |
+| TID / AIC-3 SROCC | 0.7869 / 0.7774 | 0.7868 / 0.7774 |
+| near-lossless dial (ssim2 tgt ~96) | **91.5** pinned | **96.1** climbs |
+| near-lossless per-img rank-vs-ssim2 | 0.657 | **0.771** |
+
+Human-MOS panel preserved within noise; the near-lossless dial band is corrected
+from a 91.5 pin to ~96.1 (matching ssim2's 96.0–96.85); near-lossless rank
+lifts +0.114.
+
+**Honest gaps.** (1) The per-image near-lossless dial SPAN stays ~0.06
+(razor-thin) — the encoder-RD-noise ceiling ssim2 itself shares (Part 6); only
+the ABSOLUTE level is corrected, not the fine within-band resolution. (2) Rank
+0.771 < A's 0.943 — the residual is the linear ceiling (Part 7), not the winsor.
+(3) The fit corpus is HDR + one-codec near-lossless; a broader multi-codec SDR
+sweep could tighten bounds further, but the current corpus is a strict
+improvement (validated panel + dial). Part 6's "use A as the near-lossless knob"
+is SUPERSEDED for the dial LEVEL (B now reaches 96); A remains better for fine
+within-band resolution and overall rank.
 
 ## Data
 

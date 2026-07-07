@@ -868,17 +868,26 @@ static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
     mlp_bytes_compression: None,
 };
 
-/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80`, WINSORIZED + DENSE-DIAL
-/// (13.0 KB, sha256 `b78adb15…`, rotated 2026-07-05). Two rank-invariant
+/// `ZensimProfile::B` bake bytes — `ens-Pline-cid80`, INCLUSIVE-WINSOR + DENSE-DIAL
+/// (7.3 KB, sha256 `b6fe5233…`, rotated 2026-07-07 from the 2026-07-05
+/// `b78adb15` bake — same raw weights/spline, only the winsor fit corpus
+/// changed; see the near-lossless fix in guard 1). Two rank-invariant
 /// guards on the raw linear ensemble, both via the standard metadata:
 ///
 /// 1. **Winsor tail guard** — 372 `winsor_p99` `zentrain.feature_transforms`
 ///    (fit-corpus [p0.1, p99.9] per feature), applied by
 ///    `Predictor::predict_transformed` (the SAME mechanism `BHdr` uses).
-///    Identity within [p1, p99] so rank is preserved on in-distribution rows;
-///    the tail is clipped, bounding raw output inside the spline domain and
-///    eliminating the f155 tiny-screen pathology (raw min -1131 -> -1.86 on
-///    147k val; CID22 0.8732 -> 0.8763). See benchmarks/provenance §f155.
+///    Clips the tail, bounding raw output inside the spline domain and
+///    eliminating the f155 tiny-screen pathology (f155 p99.9 = 0.776 still
+///    catches the 14,532 offender). CID22 0.8732 -> 0.8764, KonJND 0.5466.
+///    **Fit corpus is near-lossless-INCLUSIVE (2026-07-07):** the predecessor's
+///    hdr_v3mix-only bounds clamped 245/372 features CONSTANT across SDR
+///    near-lossless, pinning that dial band at ~91.5; adding the zenjxl
+///    near-lossless SDR sweep to the corpus frees 340/372 lower bounds so the
+///    features pass through (dial climbs to ~96.1, matching ssim2 ~96;
+///    near-lossless per-image rank-vs-ssim2 0.657 -> 0.771), f155's upper
+///    guard unmoved. Recipe: scripts/v_next/build_inclusive_winsor_corpus.py.
+///    See benchmarks/jxl_nearlossless_dial_2026-07-05.md §7 + §8.
 /// 2. **Dense-dial spline** — ONLY the output spline's TOP is extended, by the
 ///    training-fitted concave saturation (`dense_dial_refit_b.py`, decay
 ///    k=3.31 fit on 600 near-lossless multiband-anchor rows), so near-lossless
@@ -888,12 +897,12 @@ static PROFILE_LEGACY_LINEAR_V0_2: ProfileParams = ProfileParams {
 ///    tails stay inside the knot domain [-1.97, 3.92] (outlier gate G-RANGE
 ///    PASS, 0 extrapolating). Clears the dial dead-zone (0.0563 FAIL -> 0.0005
 ///    PASS, all G3 dial gates green) with rank IDENTICAL to the winsor-only
-///    bake (spline is monotone => rank-invariant: CID22 0.8763 / KonJND 0.5474
-///    / AIC-3 0.7774 unchanged; inversions 0.026 ~= the winsor bake's 0.026).
+///    bake (spline is monotone => rank-invariant: CID22 0.8764 / KonJND 0.5466
+///    / AIC-3 0.7774; inversions ~0.026 ~= the winsor bake's).
 ///    Identity=100 is guaranteed by the `is_identical` short-circuit, not the
 ///    spline top. See benchmarks/provenance "best-of-both dial probe".
 pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
-    include_bytes!("../weights/b_sdr_linear_cid80_dense_dial_2026-07-05.bin")
+    include_bytes!("../weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin")
 }
 
 /// `ZensimProfile::BHdr` bake bytes — `hdr-lasso0.001-shaped` anchored2

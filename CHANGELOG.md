@@ -5,11 +5,15 @@
 ### Added
 - `ZensimProfile::B` (`zensim-b`) and `ZensimProfile::BHdr` (`zensim-b-hdr`):
   generation-B deterministic LINEAR profiles from the 2026-07 campaign. `B` =
-  `ens-Pline-cid80` lasso ensemble (13.1 KB), beats `A` on the held-out rank
-  axes (CID22 0.8763, KonJND 0.5474), collapse-immune by construction. Two
+  `ens-Pline-cid80` lasso ensemble (7.3 KB), beats `A` on the held-out rank
+  axes (CID22 0.8764, KonJND 0.5466), collapse-immune by construction. Two
   rank-invariant guards ride the standard ZNPR metadata: a 372-feature
   `winsor_p99` tail guard (bounds the raw output, kills the f155 tiny-screen
-  pathology) and a dense-dial spline whose TOP is extended by the training-
+  pathology; its fit corpus is near-lossless-INCLUSIVE as of 2026-07-07 so the
+  SDR near-lossless dial band climbs to ~96 matching ssim2 instead of pinning at
+  ~91.5 — the predecessor's hdr_v3mix-only bounds clamped 245/372 features
+  constant there; see `benchmarks/jxl_nearlossless_dial_2026-07-05.md` §7–§8)
+  and a dense-dial spline whose TOP is extended by the training-
   fitted concave saturation so near-lossless codec-knob configs resolve toward
   100 instead of piling at the top knot (bottom + in-distribution knots kept
   verbatim, so both raw tails stay in-domain; all G3 dial gates pass: inversions
