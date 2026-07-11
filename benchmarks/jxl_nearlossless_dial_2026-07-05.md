@@ -392,6 +392,51 @@ Conclusion: the minimal corpus (the weights' own training distribution + the spe
 near-lossless band that was missing) is correct. "Use everything" breaks the guard
 unfiltered and gains nothing filtered. Recorded so it isn't re-tried.
 
+## Part 10 — can we REFIT B's weights for a better knob? (2026-07-11) — CEILING CONFIRMED
+
+With the winsor fixed (near-lossless features now informative, not clamped-constant),
+the natural question: re-fit the weights *consistently* with the winsor — could that
+beat B's knob? Baseline (shipped inclusive-winsor B, `bake_verdict` + dial grid):
+
+- RANK: CID22 SROCC **0.8764** (PLCC 0.8760, Z-RMSE 0.482), KonJND 0.5466.
+- DIAL (4457 rows / 106 curves, 4 codec families): monotonicity **0.9740**, inversions
+  0.0260, flat/clamp dead-zone **0.0000**, dial p5/p95 = 13.7/99.7 → G1/G3 full soft-pass.
+- G5 HF-rank (KonJND+AIC-3) 0.547 — FAILS the 0.70 floor (the documented HF-data limit).
+
+So B's dial is already near-optimal; the only rank headroom is CID22 (0.8764 < ssim2 0.8895).
+Ridge/lasso proxies (scratch `refit_probe.py` / `refit_3way.py` / `refit_heads.py`; ridge
+is numpy closed-form, lasso is sklearn 1.7.2, all on train-legal groups only — cid22_train
+is ssim2-anchored, NOT MOS):
+
+| refit lever | proxy result | verdict |
+|--|--|--|
+| winsor-consistent **dense (ridge)** fit | CID22 0.8166 → **0.7414** (−0.075) | HURTS — ridge uses all 372 feats, loses tail rank signal when clamped |
+| winsor-consistent **sparse (lasso)** fit, multi-group | CID22 +0.011..+0.031 over raw-fit+winsor-infer, all α | *looked* promising — but see below |
+| near-lossless supervision (w=0.05..0.4) | nl-rank → 0.94, but CID22 stuck ~0.75 | moot: near-lossless dial span is intrinsically ~0.06 (nothing to resolve) + costs CID22 |
+
+The multi-group lasso gain looked real — but **it does not transfer to B's architecture.**
+Faithful per-head test (`refit_heads.py`, B's actual group structure):
+
+- **Winsorizing hdr_v3mix is a fit-time no-op**: only **0.14%** of cells clipped (mean
+  |Δ| 0.009), vs safesyn 5.15%. hdr_v3mix IS the winsor corpus, so it's already inside
+  the bounds.
+- **cid head** (lasso on hdr_v3mix only — this is what drives B's CID22): raw **0.8751**
+  → winsor **0.8750** at α=0.002 (zero change); 0.8766 → 0.8783 at α=0.005 (+0.0017, noise).
+  The cid head alone already sits at 0.8751–0.8783 — **at B's ensemble 0.8764 AND the
+  linear ceiling (~0.879, program best `ens-S5noguard` 0.8793).**
+- **kon head** (5-group lasso): winsor effect is inconsistent (+0.011 KonJND at α=0.002,
+  −0.13 at α=0.005) and this lasso proxy is far below B's actual BVLS kon head — no
+  reliable lever.
+
+**Verdict: NO meaningful refit improvement is available for B's knob.** The earlier
+multi-group "+0.01..0.03 CID22" came entirely from stabilizing OOD tails in
+cid22_train/kadid/tid — groups B's cid head is NOT fit on. B's CID22 is its cid head, which
+is already at the linear ceiling, and winsor-consistent fitting is a no-op on hdr_v3mix.
+The residual gaps are structurally not refit-addressable: beating ssim2 (0.8895) needs
+non-linearity (even the non-linear A is only ~0.879), and G5 HF-rank is a data limit
+(HF corpus, per CLAUDE.md §V39). The winsor fix (Part 8, near-lossless 91.5→96.1) was the
+real available knob improvement; there is no further linear-refit gain. B stays as shipped.
+
 ## Data
 
 Part 5 re-sweep: `/mnt/v/output/zensim-jxl-nearlossless/refit/` (pareto.tsv,
