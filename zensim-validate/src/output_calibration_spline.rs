@@ -89,7 +89,15 @@ pub fn apply(x: f64, spline: &OutputCalibrationSpline) -> f64 {
         return x;
     }
     if x <= xs[0] {
-        return ys[0] + derivs[0] * (x - xs[0]);
+        // OOD safety net (2026-07-10): parity with zensim/src/metric.rs. Floor
+        // the downward extrapolation one calibrated-dial-range below the bottom
+        // knot. Legitimate content never reaches here (the all-quality raw
+        // distribution sits at/above xs[0]); this only bounds a pathological OOD
+        // raw that slipped past the winsor guard (raw −8.63 previously → a wild
+        // ~−1131). Negatives are still allowed (neg-tail intact) — only the wild
+        // extreme is clamped. Monotone: `.max(floor)` preserves rank.
+        let floor = ys[0] - (ys[n - 1] - ys[0]);
+        return (ys[0] + derivs[0] * (x - xs[0])).max(floor);
     }
     if x >= xs[n - 1] {
         // Parity with the product runtime (zensim/src/metric.rs upper
@@ -97,8 +105,10 @@ pub fn apply(x: f64, spline: &OutputCalibrationSpline) -> f64 {
         // Uncapped linear here was a REAL divergence (dial p95 artifacts
         // of 300-500 on linear bakes, found 2026-07-04 by the spline
         // extrapolation audit); the "bit-exact" doc claim was false above
-        // the top knot. Bottom stays uncapped (neg-tail corruption
-        // resolution depends on it) — same as product.
+        // the top knot. The bottom now carries the OOD floor (see the
+        // `x <= xs[0]` branch above) — negatives are still allowed (neg-tail
+        // resolution intact), only the wild pathological extreme is bounded;
+        // same as product.
         return (ys[n - 1] + derivs[n - 1] * (x - xs[n - 1])).min(100.0);
     }
     let mut lo = 0usize;
@@ -332,7 +342,37 @@ mod extrapolation_parity_tests {
             far <= 100.0,
             "upper extrapolation must cap at 100, got {far}"
         );
-        // Bottom stays linear (uncapped) — corruption resolution.
+        // Bottom is linear until the OOD floor (one dial-range below the
+        // bottom knot); still well below 10 for a far-negative input, and
+        // negatives above the floor are preserved (neg-tail intact).
         assert!(apply(-1000.0, &sp) < 10.0);
+    }
+
+    #[test]
+    fn lower_extrapolation_floored_as_ood_safety_net() {
+        // Identity-ish spline (0,0)-(100,100): floor = ys[0] - (ys[n-1]-ys[0])
+        // = 0 - 100 = -100. Modest negatives extrapolate linearly (neg-tail),
+        // but a pathological far-negative raw is floored, not wild.
+        let mut bytes = (2u32).to_le_bytes().to_vec();
+        for (x, y) in [(0.0f32, 0.0f32), (100.0, 100.0)] {
+            bytes.extend_from_slice(&x.to_le_bytes());
+            bytes.extend_from_slice(&y.to_le_bytes());
+        }
+        let sp = parse_payload(&bytes).expect("parse");
+        // Legit / modest negatives: linear, unchanged (above the -100 floor).
+        assert!((apply(-10.0, &sp) - (-10.0)).abs() < 1e-6);
+        assert!((apply(-90.0, &sp) - (-90.0)).abs() < 1e-6);
+        // Pathological far-negative (an OOD raw that slipped the winsor guard):
+        // floored at -100, NOT the wild linear value (-1e6).
+        assert!((apply(-1.0e6, &sp) - (-100.0)).abs() < 1e-6, "must floor at -100");
+        assert!((apply(-8.63, &sp) - (-8.63)).abs() < 1e-6); // real f155 offender raw stays linear
+        // Monotone across the floor transition.
+        let mut prev = f64::NEG_INFINITY;
+        for i in 0..=200 {
+            let x = -200.0 + i as f64; // -200 .. 0
+            let y = apply(x, &sp);
+            assert!(y >= prev - 1e-9, "non-monotone at x={x}: {prev} → {y}");
+            prev = y;
+        }
     }
 }

@@ -2759,11 +2759,13 @@ fn pchip_endpoint(h0: f64, h1: f64, s0: f64, s1: f64) -> f64 {
 /// identical), so the upper extrapolation is clamped at 100 — this is the
 /// correct-by-construction upper bound that fixes the `> 100` defect
 /// (root cause: V39's degenerate spline linearly extrapolated past 100).
-/// The LOWER extrapolation is deliberately left UNBOUNDED so that inputs
-/// more dissimilar than a simple low-quality encode score **negative**
-/// (a desired property of the codec-target dial — "worse than the worst
-/// codec output" is meaningful signal, not a tie at 0). The result stays
-/// monotone (min with a constant preserves order).
+/// The LOWER extrapolation is allowed to go **negative** so that inputs more
+/// dissimilar than a simple low-quality encode score below zero (a desired
+/// property of the codec-target dial — "worse than the worst codec output" is
+/// meaningful signal, not a tie at 0), but is FLOORED one calibrated-dial-range
+/// below the bottom knot as an OOD safety net (a pathological raw that slips
+/// past the winsor guard can't produce a wild score). The result stays monotone
+/// (min/max with a constant preserves order).
 fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> f64 {
     let n = spline.xs.len();
     debug_assert!(n >= 2);
@@ -2773,10 +2775,18 @@ fn apply_output_calibration_spline(x: f64, spline: &OutputCalibrationSpline) -> 
     if !x.is_finite() {
         return x;
     }
-    // Lower extrapolation: UNBOUNDED (negative scores are intended for
-    // very-dissimilar inputs).
+    // Lower extrapolation: negative scores are intended for very-dissimilar
+    // inputs, but FLOORED one calibrated-dial-range below the bottom knot as
+    // an OOD safety net. Legitimate content never reaches this path — the
+    // all-quality raw distribution sits at/above xs[0] (measured on 147k
+    // encodes: min raw −1.79 > xs[0] −1.97) — so the floor only ever bounds a
+    // pathological, out-of-distribution raw that slipped past the winsor guard
+    // (e.g. an f155-style feature artifact whose raw −8.63 previously
+    // extrapolated to a wild ~−1131). Monotone: `.max(floor)` preserves rank,
+    // mirroring the `.min(100.0)` upper cap.
     if x <= xs[0] {
-        return ys[0] + derivs[0] * (x - xs[0]);
+        let floor = ys[0] - (ys[n - 1] - ys[0]);
+        return (ys[0] + derivs[0] * (x - xs[0])).max(floor);
     }
     // Upper extrapolation: clamped at ≤100 (no score exceeds identical).
     if x >= xs[n - 1] {
@@ -3939,6 +3949,41 @@ mod tests {
         assert!((soft_clamp_score(50.0) - 50.0).abs() < 1e-9);
         assert!((soft_clamp_score(100.0) - 92.41418199787566).abs() < 1e-9);
         assert!((soft_clamp_score(1000.0) - 100.0).abs() < 1e-9);
+    }
+
+    /// OOD safety net (2026-07-10): the output-calibration spline's lower
+    /// extrapolation is floored one calibrated-dial-range below the bottom
+    /// knot, so a pathological out-of-distribution raw that slips past the
+    /// winsor guard produces a bounded score instead of a wild one (a raw of
+    /// −8.63 previously → ~−1131). Legitimate / modest negatives (the neg-tail)
+    /// are preserved; only the wild extreme is clamped. Mirrors
+    /// `zensim_validate::output_calibration_spline`.
+    #[test]
+    fn output_spline_lower_extrapolation_floored_ood_safety_net() {
+        // 2-knot identity-ish (0,0)-(100,100): floor = ys[0] - (ys[n-1]-ys[0])
+        // = 0 - 100 = -100.
+        let mut bytes = (2u32).to_le_bytes().to_vec();
+        for (x, y) in [(0.0f32, 0.0f32), (100.0f32, 100.0f32)] {
+            bytes.extend_from_slice(&x.to_le_bytes());
+            bytes.extend_from_slice(&y.to_le_bytes());
+        }
+        let spline = parse_output_calibration_spline(&bytes).expect("parse");
+        // Modest negatives extrapolate linearly (neg-tail intact).
+        assert!((apply_output_calibration_spline(-10.0, &spline) - (-10.0)).abs() < 1e-6);
+        assert!((apply_output_calibration_spline(-8.63, &spline) - (-8.63)).abs() < 1e-6);
+        // Pathological far-negative raw floored at -100, not wild.
+        assert!(
+            (apply_output_calibration_spline(-1.0e6, &spline) - (-100.0)).abs() < 1e-6,
+            "OOD pathology must floor at -100, not extrapolate to a wild score"
+        );
+        // Monotone across the floor transition.
+        let mut prev = f64::NEG_INFINITY;
+        for i in 0..=200 {
+            let x = -200.0 + i as f64;
+            let y = apply_output_calibration_spline(x, &spline);
+            assert!(y >= prev - 1e-9, "non-monotone at x={x}");
+            prev = y;
+        }
     }
 
     /// Soft-clamp is strictly monotone — adjacent raw scores keep
