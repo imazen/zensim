@@ -358,6 +358,40 @@ improvement (validated panel + dial). Part 6's "use A as the near-lossless knob"
 is SUPERSEDED for the dial LEVEL (B now reaches 96); A remains better for fine
 within-band resolution and overall rank.
 
+## Part 9 — why NOT fit the winsor corpus on "the entire quality range + all million jxl encodes" (2026-07-10)
+
+Natural follow-up: if too-narrow a corpus caused the bug, why not fit the bounds on
+everything? MEASURED — two reasons, and the minimal corpus is the sweet spot.
+
+| winsor fit corpus | f155 bound (p99.9) | f155=14532 offender raw | guard | CID22 | near-lossless dial |
+|--|--|--|--|--|--|
+| shipped fix: hdr_v3mix + near-lossless | 0.776 | **+1.09** | ✓ | **0.8764** | 96.1 |
+| broad, tiny-screens filtered (valdigits f155≤10 + nl) | 8.7 | +0.48 | ✓ | 0.8732 | 96.1 |
+| UNFILTERED everything (valdigits + nl) | 126.2 | **−8.63** | ✗ dial pins 0 | 0.8733 | 96.1 |
+
+("everything" proxied by valdigits 147k for speed; the full 2.95M bigcodec train has
+f155 p99.9 = 65.2, max 2975, ~97k rows > 1 — same conclusion a fortiori. The full
+add-winsor timed out at 2 min; the percentile shape is identical.)
+
+1. **The guard needs the pathology to stay an OUTLIER in the fit corpus.** The winsor
+   clamps the f155=14,532 tiny-screen offender to a small value so its large negative
+   weight can't crater the raw score. "All million encodes" INCLUDES those tiny-screen
+   renditions (f155 up to 2975), so p99.9 blows out to 65–126, the clamp lands too high,
+   and the offender's raw output falls to **−8.63** — far below the spline floor (−1.97)
+   — so the dial pins at 0 and the pathology returns. MEASURED, not theorized. Filtering
+   the tiny-screens (f155≤10) restores the guard (offender raw +0.48).
+2. **Even filtered, there is NO upside.** Near-lossless is already maxed at 96.1 by the
+   current fix — broadening doesn't move it. And CID22 is BEST with the tight hdr_v3mix
+   corpus (0.8764 vs 0.8732/0.8733 for both broad variants), because B's weights are
+   ~67% HDR-trained (the cid head is fit on hdr_v3mix); the hdr_v3mix winsor bounds MATCH
+   the distribution those fixed weights expect, and looser bounds let through feature
+   variance the weights don't rank as well. Broadening the winsor corpus WITHOUT re-fitting
+   the weights is a small net loss (and re-fitting is the Part 6 antagonism).
+
+Conclusion: the minimal corpus (the weights' own training distribution + the specific
+near-lossless band that was missing) is correct. "Use everything" breaks the guard
+unfiltered and gains nothing filtered. Recorded so it isn't re-tried.
+
 ## Data
 
 Part 5 re-sweep: `/mnt/v/output/zensim-jxl-nearlossless/refit/` (pareto.tsv,
