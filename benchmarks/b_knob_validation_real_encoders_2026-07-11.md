@@ -150,6 +150,26 @@ tail* real encodes never hit; B uses its dial efficiently (no wasted range).
   produce near-lossless) — except ssim2 reaches 95 on 17% of avif. So the ~92–95 cap
   is a real encoder ceiling, not a metric defect.
 
+**Per-codec B targeting zones** (reach = fraction of image×mode q-sweeps that can land
+a target; script `scripts/v_next/unreachable_zones.py`):
+
+| codec | reliable (≥90%) | usable (≥50%) | top-unreachable (B<10%) | B / A reach @85, @90 | bottom floor |
+|--|--|--|--|--|--|
+| avif | 22–82 | **10–91** | > 93 | .84/.67 vs .92/.74 | low-reaching (12% can't go <20) |
+| jpeg | none¹ | 27–82 | > 89 | .37/.07 vs .53/.23 | <20 mostly unreachable |
+| webp | 43–73 | 27–82 | > 86 | **.21/.03** vs .67/.13 | <20 mostly unreachable |
+| jxl | 69–74 | 39–81 | > 87 | **.26/.03** vs .58/.12 | **<40** (jxl quality floor) |
+
+¹ jpeg's q-ladder is noisy enough (15% step-inversions) that no single target is hit by
+≥90% of ladders. Two components of "unreachable":
+- **Top** splits: the **85–92 shoulder is B-specific** (B reaches it 2–3× less often than
+  A on jpeg/jxl/webp — the conservative ceiling, *recalibratable* per Part 3c); the
+  **>93–95 near-lossless is encoder-limited** (all metrics ≈ 0, these sweeps don't
+  produce near-lossless). avif is the exception — B's top is nearly as reachable as A's.
+- **Bottom is encoder-inherent, not a B constraint**: B reaches as low as or lower than A
+  (jxl B floor median 39 vs A 49). jxl's high floor (can't target <40) is the encoder's
+  own quality floor (zenjxl floors low-q distance), not B under-scoring.
+
 ## Part 3c — Is B's low ceiling MOS-honest? (CID22, human MOS)
 
 "MOS-honest" reframed: does B track MOS in the high-q regime as well as ssim2 — i.e.
