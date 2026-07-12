@@ -333,6 +333,85 @@ pre-registered protocol (select λ on training-side axes only, single-shot UPIQ 
 noting the matched axis (`hdr_valmix`) currently anti-correlates with UPIQ, which is
 itself an unexplained finding worth understanding before any re-ship.
 
+---
+
+## 8. DO-BETTER RESEARCH (2026-07-12, post-audit): UPIQ sub-dataset structure explains everything
+
+Per user direction ("keep working and researching how to do better"), the audit's open
+questions were run down. UPIQ's HDR stratum decomposes into **two independent human
+studies** — rows 0–139 = **Narwaria** (JPEG2000/wavelet HDR compression, n=140), rows
+140–379 = **Korshunov** (JPEG-XT/DCT, n=240); positional mapping verified 380/380
+against `upiq_subjective_scores.csv` (`is_hdr==1`, JOD match ≤1e-6).
+
+### 8.1 Pooled UPIQ SROCC is dominated by CROSS-DATASET SCALE MISALIGNMENT
+
+Within-study SROCC is far above pooled for every metric (ours and baselines — per-pair
+baseline preds from `/mnt/v/output/zenmetrics/upiq-pu/panel_*.tsv`, positional targets
+verified against JOD):
+
+| metric | pooled | narwaria | korshunov |
+|---|---|---|---|
+| HDR-VDP-2 | 0.8117 | **0.8857** | 0.9485 |
+| PU-iwssim (float) | 0.8076 | **0.8821** | 0.9570 |
+| PU-msssim (float) | 0.8123 | **0.8778** | 0.9591 |
+| PU-FSIM | 0.7185 | 0.8718 | 0.9360 |
+| cvvdp (gpu, 10k nits) | 0.8309 | 0.7807 | **0.9686** |
+| PU-PieAPP | **0.8748** | 0.7775 | 0.9254 |
+| **shipped BHdr (λ3e-4)** | 0.7536 | 0.7834 | 0.9175 |
+| anchored2 (prior) | 0.7313 | 0.7757 | 0.9104 |
+| PU-SSIM | 0.7395 | 0.6756 | 0.9193 |
+| butteraugli (pnorm3) | 0.6281 | 0.3536 | 0.9405 |
+| zensim A (PU path) | 0.6935 | 0.7173 | 0.9086 |
+| PU-PSNR | 0.5485 | 0.5708 | 0.8791 |
+
+- **PU-PieAPP's pooled #2 rank is mostly cross-dataset alignment** — within-study it is
+  ≈ ours. **PU-FSIM is the mirror image** (great within, poor pooled). The pooled UPIQ
+  leaderboard misranks everyone; within-study SROCC is the honest ranking read, pooled
+  only measures JOD-scale unification.
+- The prior "BHdr trails specialists by 0.08–0.15" conclusion becomes: **trails the
+  structural family (HDR-VDP-2 / PU-iwssim / PU-msssim) by ~0.10 on Narwaria and ~0.04
+  on Korshunov**; ties cvvdp/PieAPP within-study on Narwaria.
+
+### 8.2 The `hdr_valmix` ↔ UPIQ anti-correlation is NARWARIA-driven = distortion-family generalization
+
+Per-sub-dataset Δ vs anchored2 across the λ grid: sparse λ (1e-3/2e-3, the training-val
+picks) crater **Narwaria** (−0.118/−0.140) while barely moving Korshunov (−0.010).
+Training corpus = HDR-**JXL** (VarDCT) only; Korshunov = DCT-family (in-manifold),
+Narwaria = wavelet (out-of-manifold). Sparse fits keep only JXL-manifold features and
+fail unseen wavelet artifacts; denser fits retain broader support. So within-corpus val
+rewards sparsity while cross-distortion generalization needs density — the
+anti-correlation mechanism, now with evidence. **Lever: broaden the HDR training
+distortion manifold beyond zenjxl.**
+
+Also: the shipped λ3e-4's within-study deltas are **+0.008 nar / +0.007 kor** — the only
+λ (with 1e-4) positive on BOTH independent studies, so the direction has cross-study
+consistency; but the pooled +0.0223 was mostly improved cross-dataset alignment, not
+ranking.
+
+### 8.3 TEACHER CEILING: our bakes rank exactly at their training target's level
+
+On Narwaria, cvvdp ranks 0.781 — and every cvvdp-mix-trained bake ranks 0.78. The bake
+matches its teacher; the teacher is the bottleneck. **PU-iwssim / PU-msssim / HDR-VDP-2
+rank Narwaria ~0.88** — a +0.10-better teacher family on exactly our weak axis — and the
+372-feature vector **already contains the IW-pool block (f300–371)**, so the
+representation plausibly has the needed ingredients. (Also `pu_iwssim_float` /
+`pu_msssim_float` already ran on UPIQ via zenmetrics — the scorer exists.)
+
+### 8.4 The do-better program (evidence-ordered)
+
+1. **Retarget** (cheapest big lever): score the `hdr_v3` corpus renditions with
+   PU-iwssim (+ PU-msssim), add an iwssim-heavy target mix, refit the deterministic
+   linear family. Teacher ceiling on the wavelet axis rises 0.78 → ~0.88.
+2. **Pre-registered protocol** (mandatory for any re-ship): select on training-side val
+   + LODO (fit selection on one of narwaria/korshunov, confirm on the other, single
+   shot); primary read = within-study SROCC per sub-dataset, pooled JOD secondary.
+   The 380-pair pooled UPIQ is burned as a selection axis for the current family.
+3. **Broaden the HDR distortion manifold** (structural fix for 8.2): add non-JXL HDR
+   distortions (AVIF-HDR, JPEG-XT-like, wavelet, synthetic nits-domain corruptions) to
+   the training corpus.
+4. **HDR-anchored dial refit** for whatever ships (fixes the §7.4 process regression;
+   reusable for every future candidate — `finalize`'s spline is always SDR-anchored).
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
