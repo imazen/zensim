@@ -84,19 +84,26 @@ pub enum ZensimProfile {
     /// `benchmarks/provenance_best_results_2026-07-04.md`.
     ///
     /// **SDR content only** — for HDR (absolute-luminance) content use
-    /// [`ZensimProfile::BHdr`]; the two dials share one anchor scale
-    /// (cross-model MAE ≈5pt in the dial zone, boundary seam ≤0.92pt).
+    /// [`ZensimProfile::BHdr`]. The two share a *partial* mid-range dial
+    /// anchor (cross-model MAE ≈5pt, seam ≤0.92pt inside the overlap) but
+    /// NOT a full range: `B`'s dial is calibrated `[0,100]`, `BHdr`'s only
+    /// over its HDR data range — outside that it extrapolates. See
+    /// `benchmarks/profile_b_methodology_2026-07-12.md` §3b.
     B,
     /// **`BHdr` — generation-B HDR profile (external name `zensim-b-hdr`).**
-    /// Deterministic LINEAR core on SHAPED features (50 weights, 11.7 KB,
-    /// `hdr-lasso0.001-shaped-anchored2`): the strongest zensim-family HDR
-    /// result measured (UPIQ-HDR |SROCC| 0.7313 vs `A`'s 0.6933; cvvdp
-    /// 0.758 remains the cross-metric reference). Feature regime =
+    /// Deterministic LINEAR core on SHAPED features (11.8 KB,
+    /// `hdrmix-lasso0.0003-shaped`, cvvdp-mix target): the strongest
+    /// zensim-family HDR result measured (UPIQ-HDR |SROCC| **0.7536** vs
+    /// `A`'s 0.6933 and the prior anchored2 bake's 0.7313; cvvdp 0.758
+    /// remains the cross-metric reference). The cvvdp-mix training target
+    /// (`0.5·ssim2 + 0.5·(JOD−6)/4`) beats the prior pure-ssim2 target by a
+    /// significant +0.022 UPIQ (Steiger p=0.005) and decisively on CID22 /
+    /// KonJND / AIC-3 (MRR), at a small AIC-4 cost. Feature regime =
     /// PU-linear integrated (`Zensim::compute_pu_linear_extended_features`
     /// — absolute nits, no u8 shell, no display-peak anchor; extraction via
     /// `zenmetrics score-pairs --hdr --hdr-features-pu-linear`). Dial spline
-    /// anchored to the shared scale with knots to the corpus's honest 92.8
-    /// ceiling.
+    /// (18 knots) monotone over `[0, 95.77]`. Recipe + significance:
+    /// `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md`.
     ///
     /// **HDR content only** — measured INVALID on SDR codec content
     /// (rank agreement 0.72, unbounded extrapolation); route SDR to
@@ -931,14 +938,18 @@ pub(crate) fn linear_bake_b_cid80() -> &'static [u8] {
     include_bytes!("../weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin")
 }
 
-/// `ZensimProfile::BHdr` bake bytes — `hdr-lasso0.001-shaped` anchored2
-/// (11.7 KB, sha256 `373eac56…`): the shaped PU-linear HDR pick. Already
-/// carries 183 `winsor_p99` + 75 `quantile_bins` + 56 `signed_cbrt` + 53
-/// `yeo_johnson` transforms (the v02 yeo-johnson screen recipe), so it was
-/// never exposed to the raw-feature tail that afflicted B SDR. Unchanged
-/// by the 2026-07-05 winsor work — verified tail-safe as shipped.
+/// `ZensimProfile::BHdr` bake bytes — `hdrmix-lasso0.0003-shaped`
+/// (11.8 KB, sha256 `7d7f2123…`): the shaped PU-linear HDR pick, trained on
+/// the **cvvdp-mix** target (`0.5·ssim2 + 0.5·(JOD−6)/4`). Carries the mixed
+/// `winsor_p99` / `quantile_bins` / `signed_cbrt` / `yeo_johnson` shape
+/// recipe, so it was never exposed to the raw-feature tail that afflicted B
+/// SDR. Promoted 2026-07-12 from the prior pure-ssim2 `anchored2` bake
+/// (`373eac56…`, preserved at `weights/bhdr_linear_shaped_anchored2_2026-07-04.bin`):
+/// the cvvdp-mix target lifts UPIQ 0.7313→0.7536 (significant, Steiger
+/// p=0.005) + wins CID22/KonJND/AIC-3 decisively, at a small AIC-4 cost.
+/// Method + significance: `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md`.
 pub(crate) fn linear_bake_bhdr_shaped() -> &'static [u8] {
-    include_bytes!("../weights/bhdr_linear_shaped_anchored2_2026-07-04.bin")
+    include_bytes!("../weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin")
 }
 
 /// Generation-B SDR profile params. Same 372-feature front end as

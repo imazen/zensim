@@ -24,7 +24,7 @@ include = [
     "src/**/*.rs",
     "weights/v47_strict_qat_native_2026-05-27.bin",
     "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
-    "weights/bhdr_linear_shaped_anchored2_2026-07-04.bin",
+    "weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin",
     "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
     "weights/manifests/v47_strict_qat.toml",
 ]

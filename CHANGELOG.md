@@ -20,10 +20,17 @@
   0.026, dead-zone 0.0005, monotonicity 0.974, outlier-gate G-RANGE 0
   extrapolating — vs the winsor-only predecessor which failed the dead-zone gate
   at 0.056; rank identical). `BHdr` =
-  shaped-feature HDR head (UPIQ 0.7313, best zensim-family HDR measured),
-  PU-linear feature regime, HDR-content-only (measured invalid on SDR —
-  route by domain). Shared anchor scale across both dials. Provenance:
-  `benchmarks/provenance_best_results_2026-07-04.md`.
+  shaped-feature HDR head (`hdrmix-lasso0.0003-shaped`, cvvdp-mix target, UPIQ
+  **0.7536**, best zensim-family HDR measured — promoted 2026-07-12 from the
+  prior pure-ssim2 `anchored2` bake at UPIQ 0.7313: the cvvdp-mix target lifts
+  UPIQ significantly (+0.022, Steiger p=0.005) and wins CID22/KonJND/AIC-3
+  decisively by MRR, at a small significant AIC-4 cost; see
+  `benchmarks/bhdr_improvement_split_lineage_2026-07-12.md`), PU-linear feature
+  regime, HDR-content-only (measured invalid on SDR — route by domain). `B` and
+  `BHdr` share only a *partial mid-range* dial anchor, NOT a full range — `B`'s
+  dial is calibrated `[0,100]`, `BHdr`'s over its HDR data range with a monotone
+  `[0, 95.77]` spline (see `benchmarks/profile_b_methodology_2026-07-12.md` §3b).
+  Provenance: `benchmarks/provenance_best_results_2026-07-04.md`.
 - `Zensim::compute_pu_linear_extended_features`: full 372-feature extraction
   through the absolute-nits PU-XYB path (the `BHdr` feature regime).
 - `ZensimProfile::B` ROUTES BY ENTRY PATH: fed absolute nits

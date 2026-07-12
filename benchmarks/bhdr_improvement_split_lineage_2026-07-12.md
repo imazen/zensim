@@ -122,19 +122,60 @@ agree on improvement** — clearing the "≥3-of-5 stats agree" bar.
   100 would not be honest without new near-lossless HDR data. This is a *dial*
   (calibration) axis, orthogonal to the *rank* improvement in §3.
 
-## 5. Recommendation
+## 5. Significance + the shipped pick (λ=0.0003)
 
-**The cvvdp-mix target is the lever.** A drop-in BHdr replacement
-(`hdrmix-lasso0.0005-shaped`, 11.7 KB, sha `2a12cf0a828f38fa`, byte-reproducible via
-`finalize`) Pareto-improves BHdr on 6/7 corpora at zero size/architecture cost — same
-shaped PU-linear linear form, just the JOD-aligned target its SDR sibling already uses.
+The λ=0.0005 bake in §3 was the first probe; sweeping the full λ grid found the UPIQ
+**peak at λ=0.0003** (0.0001→0.0003→0.0005 = 0.7414 → **0.7536** → 0.7433). Since UPIQ
+is BHdr's *actual* domain (the SDR corpora are cross-domain for an HDR-only profile),
+λ=0.0003 is the ship pick — and its UPIQ gain is **statistically significant** where
+λ=0.0005's was not.
 
-Before a swap ships (BHdr rotation needs **no crate bump** per policy, but does need a
-methodology doc + the shipping checklist): (a) run the **paired bootstrap / MRR** on
-UPIQ + CID22 + AIC-4 to confirm the +0.012 UPIQ / −0.012 AIC-4 deltas are real vs
-noise; (b) fit the dial spline for the rotated bake; (c) archive the `anchored2` bake.
-This is a candidate, not yet a ship — but it's a **measured** answer to "what can we
-apply to improve BHdr," not a speculative one.
+**Paired significance — `hdrmix-lasso0.0003-shaped` vs BHdr (shaped×ssim2):**
+
+| corpus | test | Δ|SROCC| | 95% CI | p | verdict |
+|---|---|---|---|---|---|
+| **UPIQ** (n=380, HDR) | paired bootstrap | +0.0223 | [+0.0022, +0.0431] | 0.030 | **significant** |
+| **UPIQ** (n=380, HDR) | Steiger Z (r_ab=0.973) | Z=−2.79 | — | **0.0052** | **significant** |
+| **CID22** (n=4292) | bake_compare § A.9 (MRR) | +0.0093 | h_SROCC −23.0 | — | **B>>A decisive** |
+| **KonJND** (n=1008) | bake_compare § A.9 (MRR) | +0.1082 | h_SROCC −36.9 | — | **B>>A decisive** |
+| **AIC-3** (n=600) | bake_compare § A.9 (MRR) | +0.0109 | h_SROCC −13.0 | — | **B>>A decisive** |
+| AIC-4 (n=300) | paired bootstrap | −0.0138 | [−0.0288, −0.0013] | 0.030 | **significant LOSS** |
+| AIC-4 (n=300) | Steiger Z | Z=+2.99 | — | 0.0028 | **significant LOSS** |
+
+`bake_compare` overall: **4 cells B decisively beats A, 0 A wins.** So it is a
+**net-positive TRADE, not a pure Pareto win**: four significant gains — including the
+domain-relevant UPIQ and the big KonJND perceptibility gain — against one significant
+loss on AIC-4, a small (n=300) **cross-domain SDR** holdout that BHdr is not actually
+used for. For an HDR-only profile the domain-relevant result (UPIQ, significant) governs.
+
+**λ=0.0003 vs λ=0.0005 (why the pick moved):** λ=0.0003 wins UPIQ significantly (+0.022,
+p=0.005) where λ=0.0005 did not (+0.012, p=0.26); it also has the larger KonJND gain
+(+0.108 vs +0.081), with marginally smaller CID22/AIC-3 gains and a marginally larger
+AIC-4 loss. UPIQ significance is the tiebreaker for an HDR profile.
+
+## 6. PROMOTED — shipped as `ZensimProfile::BHdr` (2026-07-12)
+
+`hdrmix-lasso0.0003-shaped` is now the shipped BHdr bake:
+`zensim/weights/bhdr_linear_shaped_cvvdpmix_2026-07-12.bin` (11,826 B, sha256
+`7d7f212369f734aa`, 18-knot monotone dial `[0.00, 95.77]`). Wiring:
+
+- `profile.rs::linear_bake_bhdr_shaped()` → new bake; `zensim/Cargo.toml` `include` list
+  updated (packaged for crates.io).
+- Prior ship `bhdr_linear_shaped_anchored2_2026-07-04.bin` (`373eac56…`, pure-ssim2 target,
+  dial `[25.88, 92.75]`) **preserved** git-tracked at its `weights/` path (un-packaged).
+- Rank-invariance: same 372→1 shaped PU-linear architecture, same routing —
+  `B.compute(nits) ≡ BHdr` still passes byte-for-byte (`compute_routes_descriptor_flagged_hdr_to_pu_linear`);
+  all 100 zensim lib tests green.
+- BHdr rotation is a **patch-level bake swap — no crate bump** (per policy). It rides
+  the pending 0.3.0 (the B-default + A-deprecation release), not a separate version.
+- The new bake's dial `[0, 95.77]` is *fuller* than the old anchored2 `[25.9, 92.8]`
+  (finalize shared-anchor spline), which happens to relax the near-lossless-HDR
+  truncation the recheck (§3b of `profile_b_methodology`) flagged — a rank-invariant
+  side benefit, not a fitted change.
+
+**Honest caveat carried forward:** the AIC-4 −0.014 regression is real (p=0.003). It is
+on a cross-domain SDR holdout; if a future BHdr use exposes it to SDR-JND content, this
+is the one axis where the prior anchored2 bake was better.
 
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
