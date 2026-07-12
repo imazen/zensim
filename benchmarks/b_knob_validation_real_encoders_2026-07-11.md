@@ -143,13 +143,44 @@ tail* real encodes never hit; B uses its dial efficiently (no wasted range).
   34) but lower ceilings (jxl 81 vs A 86, webp 83 vs 87).
 - **The "unreachable top" for B**: on jxl/webp, only 21–26% of images can be dialed
   to B=85, vs A's 58–67%. B doesn't score even high-q encodes that high — a
-  conservative ceiling. This is B's MOS-shaping as a knob property (human MOS
-  saturates less than ssim2 at the top → lower, more honest, but harder-to-reach
-  high targets). It is *not* the old near-lossless pin (current-B, and the ceiling
-  is encoder-limited).
+  conservative ceiling (current-B, so *not* the old near-lossless pin). Whether this
+  is a defect or a benign scale choice is settled in Part 3c: it is **recalibratable**
+  (B keeps full top-end resolution), not lost fidelity.
 - **Dial 95+ is encoder-unreachable for all metrics** on these q-sweeps (they don't
   produce near-lossless) — except ssim2 reaches 95 on 17% of avif. So the ~92–95 cap
   is a real encoder ceiling, not a metric defect.
+
+## Part 3c — Is B's low ceiling MOS-honest? (CID22, human MOS)
+
+"MOS-honest" reframed: does B track MOS in the high-q regime as well as ssim2 — i.e.
+is the lower ceiling a *recalibratable scale choice* or *lost discrimination*? Three
+views on CID22 (pooled + jxl/webp-only, the codecs where the ceiling gap showed).
+Script: `scripts/v_next/knob_ceiling_honesty_cid22.py`.
+
+1. **High-MOS-band rank** (SROCC vs MOS): ssim2 marginally ahead of B by 0.01–0.05
+   across MOS 60–92 bands (MOS≥75: B 0.640 vs ssim2 0.647 pooled; 0.692 vs 0.720
+   jxl/webp) — restricted-range low-SROCC, within noise; B edges the very-top 85–92
+   band (0.245 vs 0.229). No decisive gap either way.
+2. **Disagreement adjudication** (percentile space) — SYMMETRIC: when ssim2 ranks a
+   high-q encode above B (n=88), MOS sits between and closer to **B** (MOS_pct 0.747,
+   B 0.696, ssim2 0.833 → ssim2 over-ranks); when B ranks above ssim2 (n=158), MOS is
+   closer to **ssim2** (0.728, B 0.854, ssim2 0.674 → B over-ranks). Both over-rank in
+   their own disagreement direction; neither is systematically more honest.
+3. **Top saturation** (top MOS decile) — **the decisive one**: B piles up near its max
+   LESS than ssim2 (0.114 vs 0.126 pooled; 0.184 vs 0.265 jxl/webp) and ranks the top
+   decile equal-or-better (SROCC 0.183/0.204 vs 0.176/0.171). So B's lower ceiling does
+   NOT cost top-end resolution. (A's saturation 1.000 is a raw-forward artifact — A was
+   forwarded pre-spline; ignore.)
+
+**Verdict on honesty:** B's low ceiling is a **recalibratable scale choice, not a
+defect** — B keeps full top-end discrimination (≥ ssim2), so the lower dial values
+carry the same ordering and could be remapped upward via the output spline (as the
+near-lossless top-extend already did) at the cost of re-calibrating that band. It is
+**NOT** evidence that B is *more* MOS-honest than ssim2 at the top — they track MOS
+comparably (ssim2 marginally ahead on per-band rank). This corrects the earlier
+"human MOS saturates less → B more honest" hypothesis in Part 3b, which the data does
+not support. Net: the unreachable-top reach limitation is cosmetic/recalibratable, not
+lost high-quality fidelity.
 
 ## Verdict
 
@@ -162,12 +193,16 @@ view: **B is the better human-MOS knob, A/ssim2 the better metric-agreement knob
 This is a knob-quality validation independent of the earlier rank-SROCC and dial-grid
 panels, on real bitstreams, and it does not depend on the corrupt 2026-05-29 grid.
 
-**The one real knob limitation**: B's top-end is conservative — on jxl/webp, high
-targets (dial 85+) are unreachable for most images (21–26% reach vs A's 58–67%),
-because B (MOS-shaped) scores high-q encodes lower than A/ssim2. Likely MOS-honest
-(human MOS saturates less at the top) but a genuine reach cost: a product dialing B
-to 90 on jxl/webp will often cap out ~83–87. If high-target reach on those codecs
-matters, that's A's domain — consistent with A staying the default `codec_target`.
+**The one knob limitation — and it's recalibratable, not lost fidelity**: B's top-end
+is conservative — on jxl/webp, high targets (dial 85+) are unreachable for most images
+(21–26% reach vs A's 58–67%), because B scores high-q encodes lower than A/ssim2. But
+Part 3c shows B keeps *full top-end resolution* there (saturates less than ssim2, ranks
+the top decile ≥ ssim2 vs human MOS), so the low ceiling is a **scale choice the output
+spline could remap upward** (as the near-lossless top-extend did), not lost accuracy.
+It is *not* evidence B is more MOS-honest than ssim2 at the top — they track MOS
+comparably. So a product dialing B to 90 on jxl/webp currently caps ~83–87, but that's
+fixable by a top-extend if desired; today, high-target reach on those codecs is A's
+domain — consistent with A staying the default `codec_target`.
 
 ## Honest gaps / how to strengthen
 
