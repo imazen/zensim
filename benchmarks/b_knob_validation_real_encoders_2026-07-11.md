@@ -182,14 +182,49 @@ comparably (ssim2 marginally ahead on per-band rank). This corrects the earlier
 not support. Net: the unreachable-top reach limitation is cosmetic/recalibratable, not
 lost high-quality fidelity.
 
+## Part 3d — Independent-reference consistency AT SCALE (open gap closed, no new compute)
+
+Test 2's independent-reference consistency ran only on CID22 (n=4292). The at-scale
+version — flagged as needing a GPU job — turned out to be answerable from data already
+on disk: the **fill4 4-metric sidecar**
+(`/mnt/v/datasets/fill4-6codec-2026-07-01/fill4metrics_sidecar_2026-07-02.parquet`,
+4.2M encodes with cvvdp/butteraugli/dssim/iwssim, keyed by `encoded_filename`) joins to
+the re-forwarded current-B/A ab_rescored q-ladders at **97–99% coverage** (jpeg/jxl/webp;
+avif absent from fill4). Script: `scripts/v_next/knob_consistency_atscale.py`.
+
+η²(REF | knob-decile) pooled across jpeg+jxl+webp, **n=678,435 real encodes**:
+
+| independent reference | η²(B) | η²(A) | η²(ssim2) | winner |
+|--|--:|--:|--:|--|
+| cvvdp | 0.675 | 0.652 | 0.460 | B (semi-circular — cid head saw cvvdp) |
+| **butteraugli** | **0.582** | 0.546 | 0.344 | **B** (never trained on) |
+| **dssim** | **0.525** | 0.493 | 0.332 | **B** (never trained on) |
+| iwssim | 0.485 | 0.392 | 0.241 | B (semi-circular) |
+
+**B pins every independent reference more tightly than ssim2 or A — decisively**,
+including butteraugli and dssim which B was *never* trained on (η² 0.58 vs ssim2 0.34;
+0.52 vs 0.33). The ordering holds per-codec on all three. So dialing B to a target
+delivers more consistent cvvdp/butteraugli/dssim/iwssim across content than dialing
+ssim2 does.
+
+Interpretation + caveat: B is a trained 372-feature fusion, so it tracks the
+perceptual-metric *consensus* more tightly than any single hand-designed metric — a
+genuine knob-consistency advantage, partly expected for a fusion. This is the picker
+corpus (algorithmic sources); against the noisier human gold standard (CID22, Test 2)
+B ≈ ssim2. So: **B is a decisively better knob vs independent metric references at
+scale, and a statistical tie vs human MOS.** avif remains uncovered (absent from fill4).
+
 ## Verdict
 
 Against **real encoders + human judgment, B is a legitimately good knob:**
 mechanically sound (|ρ| 0.95, ~80% strict-mono, 1.4% tie across 4 codecs, on par
 with ssim2), the **most expressive per-image** (normalized span 0.68 > A 0.64 >
-ssim2 0.40), and human-consistent (±6.3 MOS at a fixed target, matching ssim2's ±6.0,
-beating A's ±6.6). The A↔B tradeoff persists in the knob view exactly as in the rank
-view: **B is the better human-MOS knob, A/ssim2 the better metric-agreement knob.**
+ssim2 0.40), human-consistent (±6.3 MOS at a fixed target, matching ssim2's ±6.0,
+beating A's ±6.6), and — at scale across 678k real encodes — **the most consistent
+against independent references**: B pins butteraugli/dssim/cvvdp/iwssim decisively
+tighter than ssim2 or A (Part 3d). The A↔B tradeoff nuances the rank view: **B is the
+better human-MOS AND better metric-consistency knob at scale; A/ssim2 win only the
+narrow ssim2-agreement framing** (and A the high-target reach).
 This is a knob-quality validation independent of the earlier rank-SROCC and dial-grid
 panels, on real bitstreams, and it does not depend on the corrupt 2026-05-29 grid.
 
@@ -206,13 +241,15 @@ domain — consistent with A staying the default `codec_target`.
 
 ## Honest gaps / how to strengthen
 
-1. **Independent-reference consistency at SCALE (not run).** Test 2 vs MOS/CVVDP ran
-   only on CID22's 4292 discrete encodes. The ab_rescored ~1M multi-codec q-ladders
-   were mechanics-only (their sole reference is ssim2, semi-circular for B). To get
-   cross-codec consistency-at-target vs an *independent* reference at scale: score
-   CVVDP (GPU) on the ab_rescored bitstreams (they persist at `variant_r2_url`) via
-   `zenmetrics batch --metric cvvdp` — a scoped GPU job, NOT a re-encode. Then repeat
-   test 2 (η²/resid-SD of CVVDP given B-bin, per codec + pooled). **Confirm scope
+1. **Independent-reference consistency at SCALE — CLOSED (Part 3d), no GPU needed.**
+   The fill4 4-metric sidecar already had cvvdp/butteraugli/dssim/iwssim on the picker
+   corpus; joined to the current-B q-ladders at 97–99% coverage → B wins all four
+   decisively (n=678k, jpeg/jxl/webp). Remaining sub-gap: **avif** is absent from fill4,
+   so the at-scale independent test is jpeg/jxl/webp only. To cover avif, that *would*
+   need a scoped GPU job (`zenmetrics batch --metric cvvdp` on the avif bitstreams at
+   `variant_r2_url`) — the original plan, now needed only for one codec. Historical note
+   (the original, now-superseded gap text): score CVVDP on the ab_rescored bitstreams via
+   `zenmetrics batch --metric cvvdp` — a scoped GPU job, NOT a re-encode. **Confirm scope
    before a fleet run** (cost gate).
 2. **jxl ladders predate the #18/#94 near-lossless fix** (ab_rescored 2026-07-05;
    fix ~07-06/07). Mechanics span q5–90 so mostly unaffected, but a fresh jxl
