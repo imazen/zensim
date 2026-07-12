@@ -437,6 +437,36 @@ non-linearity (even the non-linear A is only ~0.879), and G5 HF-rank is a data l
 (HF corpus, per CLAUDE.md §V39). The winsor fix (Part 8, near-lossless 91.5→96.1) was the
 real available knob improvement; there is no further linear-refit gain. B stays as shipped.
 
+## Part 11 — JXL distance → dial targeting table (current B, 2026-07-12)
+
+For codec dial use: what dial value targets a given JXL distance. Current B
+(b6fe5233) + A (v47) forwarded on the full near-lossless sweep (200 images × 11
+distances, real zenjxl bitstreams); ssim2 from `full/pareto.tsv`. Script:
+`scripts/v_next/knob_jxl_distance_dial.py`.
+
+| JXL distance | B median | B p10–p90 | A median | ssim2 median |
+|--|--:|--:|--:|--:|
+| 0.03 | 96.1 | 95.9–96.2 | 95.4 | 95.5 |
+| **0.04** | **96.0** | **95.8–96.2** | 95.2 | 95.3 |
+| 0.05 | 96.0 | 95.7–96.2 | 95.0 | 95.1 |
+| 0.07 | 95.9 | 95.0–96.1 | 94.8 | 94.9 |
+| 0.10 | 95.8 | 93.7–96.1 | 94.5 | 94.6 |
+| 0.15 | 95.5 | 92.4–96.0 | 94.2 | 94.3 |
+| 0.20 | 95.1 | 91.6–96.0 | 93.9 | 94.0 |
+| 0.30 | 93.9 | 90.1–95.9 | 93.5 | 93.4 |
+| 0.50 | 92.7 | 87.8–95.4 | 92.7 | 92.3 |
+| 0.70 | 91.4 | 85.2–93.1 | 91.4 | 91.3 |
+| 1.00 | 90.2 | 83.1–92.3 | 90.5 | 90.4 |
+
+Read-off: **JXL d0.04 ≈ B 96.0** — spread only ±0.2 across 200 images (near-lossless
+is where B is *tightest*; it widens to ±4.6 by d1.0). Post the inclusive-winsor fix
+(Part 8), B sits slightly *above* A/ssim2 at d ≤ 0.1 — a competitive near-lossless
+knob. Note the ab_rescored jxl q-sweeps (Part 3b) topped out ~B82–86 because their
+q-range (≈ d0.5–1.0) never reached near-lossless; encoding at d0.04 reaches B96 —
+confirming the "unreachable top" there was encoder-range, not a B limit. JXL's lossy
+ceiling ≈ ssim2 96.85 (true near-lossless needs lossless mode), so B96 is near the
+practical top of lossy JXL.
+
 ## Data
 
 Part 5 re-sweep: `/mnt/v/output/zensim-jxl-nearlossless/refit/` (pareto.tsv,
