@@ -449,6 +449,58 @@ before any evaluation number exists.
 - **Not a ship decision** under any outcome: shipping additionally requires the
   tiny-scale resolution, an HDR-anchored dial, and user review.
 
+### 8.6 §8.5 RESULT — selection-axis failure (2nd family); mechanism diagnostics STRONG
+
+Selection applied per the rule (before any UPIQ look): `hdriwmix-lasso0.001`
+(hdr_valiwmix 0.9928) and `hdriw-lasso0.0003` (hdr_valiw 0.9774). Single-shot eval:
+
+| bake | pooled | narwaria | korshunov | status |
+|---|---|---|---|---|
+| anchored2 (reference) | 0.7313 | 0.7757 | 0.9104 | |
+| shipped λ3e-4 cvmix (reference) | 0.7536 | 0.7834 | 0.9175 | |
+| **hdriwmix-bvls** | **0.8097** | **0.8921** | 0.9241 | diagnostic (non-claimable) |
+| hdriwmix-lasso3e-05 | 0.7514 | 0.7811 | **0.9455** | diagnostic |
+| hdriwmix-lasso0.0001 | 0.7421 | 0.7690 | 0.9414 | diagnostic |
+| hdriwmix-lasso0.0003 | 0.7364 | 0.7755 | 0.9359 | diagnostic |
+| hdriwmix-lasso0.0005 | 0.7401 | 0.7821 | 0.9281 | diagnostic |
+| hdriwmix-lasso0.001 | 0.7391 | 0.7837 | 0.9344 | **PICK — FAILS nar gate** |
+| hdriwmix-lasso0.002 | 0.7530 | 0.8537 | 0.9341 | diagnostic |
+| hdriw picks/grid | 0.71–0.80 | 0.67–0.76 | 0.91–0.93 | PICK 0.6846 — FAILS |
+
+- **Protocol verdict:** both picks miss the Narwaria gate (0.7957) → no claimable
+  candidate. The pre-declared **selection-axis-failure clause fired** — for the
+  **second independent target family**, the matched training-side val anti-correlates
+  with cross-distortion generalization. Hypothesis status: **undecided per protocol**
+  (not falsified as a mechanism — see below), selection axis falsified as an instrument.
+- **Mechanism diagnostics (non-claimable, quantified):** `hdriwmix-bvls` hits
+  **Narwaria 0.8921** — Δ+0.1164 over anchored2, unadjusted one-sided p=0.0007,
+  **maxT-corrected over all 14 diagnostics p=0.059** — numerically above every
+  specialist including HDR-VDP-2 (0.8857), with Korshunov 0.9241 and pooled 0.8097 ≈
+  HDR-VDP-2's 0.8117, at 11.6 KB deterministic. The iw-teacher mechanism (§8.3)
+  plainly moves the wavelet axis; sign-pinned dense-ish BVLS (93 weights, no
+  feature-zeroing) fits the §8.2 density-robustness story where lasso's sparsity
+  doesn't.
+- **THE finding: selection validity is the binding constraint** — not teacher, not
+  features, not architecture. A JXL-only train/val corpus cannot see cross-
+  distortion-family generalization, so no training-side axis can select for it.
+  **Corpus broadening (§8.4 item 3) is therefore a selection-validity fix, not just a
+  data fix, and becomes the top priority.**
+- **Data budget honesty:** UPIQ-380 has now absorbed ~21 candidate looks today across
+  two family trees; it is burned as a confirmation set for ALL of them, including
+  `hdriwmix-bvls`. Any claim on that candidate (or its relatives) requires **untouched
+  data**: SI-HDR / Zerman-2017 ingestion, a broadened-val re-run of this protocol, or
+  a new human study.
+
+### 8.7 Next steps (evidence-ordered, updated)
+
+1. **Broaden the HDR corpus** with non-JXL distortions (train AND val) — restores a
+   valid training-side selection axis and directly targets the §8.2 failure mode.
+2. Re-run the §8.5 protocol with the broadened val as the selection axis; bvls in the
+   candidate family.
+3. **Ingest untouched HDR human data** (SI-HDR, Zerman 2017) as the confirmation set.
+4. Resolve the iwssim tiny-scale gap (ssim2-fallback rows or a scale guard).
+5. HDR-anchored dial refit for any ship candidate (§7.4).
+
 ### Provenance
 - Split commit: `fe8b00aa` (2026-07-04). Extraction: `87b3ee25`→`1b2bdb9b` (2026-07-03).
 - Candidate bake + verdict logs: `/mnt/v/output/zensim/bhdr_improve_2026-07-12/`
