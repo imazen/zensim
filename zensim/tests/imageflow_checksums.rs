@@ -1,4 +1,5 @@
 #![cfg(feature = "classification")]
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 //! Imageflow visual regression checksum analysis.
 //!
 //! Downloads old/new image pairs from imageflow's S3 bucket and runs

@@ -27,16 +27,32 @@
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
 pub enum ZensimProfile {
-    /// **`A` — the canonical generation-A profile (external name
-    /// `zensim-a`).** The default general-purpose perceptual metric.
+    /// **`A` — the DEPRECATED generation-A profile (external name
+    /// `zensim-a`), the v47-strict-QAT MLP bake.** Superseded by the
+    /// deterministic generation-B linear profile [`Self::B`], which
+    /// [`Self::codec_target`] / [`Self::latest_preview`] now return.
+    ///
+    /// **Deprecated since 0.4.0.** Gated behind the `deprecated-profiles`
+    /// feature (ON by default so existing code keeps working). To drop `A`
+    /// and its ~27 KB MLP bake, build with `--no-default-features` and
+    /// re-add the other defaults you need (`avx512`, `imgref`, `threads`).
+    /// Migrate to [`Self::codec_target`] (the codec-quality dial),
+    /// [`Self::latest_preview`], or name [`Self::B`] directly. A future
+    /// minor release may move `deprecated-profiles` out of `default`.
     ///
     /// Naming convention (see `docs/NAMING_CONVENTION.md`): EXTERNAL
     /// variant names are `A`, `A_Phone`, … (generation letter +
-    /// optional display suffix) — a STABLE behavioral contract. The
-    /// INTERNAL bake backing this variant rotates freely; its identity
-    /// (currently the `v47-strict-QAT` bake) is recorded in the
-    /// mapping table in `docs/CODEC_TARGET_METRIC.md`, NOT inlined here
-    /// (so this doc can't go stale on rotation).
+    /// optional display suffix). The INTERNAL bake backing this variant
+    /// is the `v47-strict-QAT` bake, recorded in the mapping table in
+    /// `docs/CODEC_TARGET_METRIC.md`.
+    #[cfg(feature = "deprecated-profiles")]
+    #[deprecated(
+        since = "0.4.0",
+        note = "generation-A (v47 MLP) is superseded by the deterministic linear `B`; \
+                use ZensimProfile::codec_target() / latest_preview() (now `B`) or name \
+                ZensimProfile::B directly. `A` remains behind the default-on \
+                `deprecated-profiles` feature; disable it to drop `A`."
+    )]
     A,
     /// Preview v0.1 — linear-weights profile (no MLP). 344k synthetic
     /// pairs, 5-fold CV SROCC = 0.9936. Uses the [`WEIGHTS_PREVIEW_V0_1`]
@@ -133,92 +149,94 @@ pub enum ZensimProfile {
 }
 
 impl ZensimProfile {
-    /// Current preview-stable profile. Returns [`Self::A`].
+    /// Current preview-stable profile. Returns [`Self::B`] (the
+    /// deterministic generation-B linear profile; generation-A is
+    /// deprecated).
     ///
     /// Use this only when you explicitly want "whatever the current
     /// preview is" — the returned variant will rotate as new previews
     /// ship. For pinned reproducibility, name the variant directly
-    /// (`ZensimProfile::A`). For the stable codec-target
-    /// contract that codec crates should target, use [`Self::codec_target`].
+    /// (`ZensimProfile::B`). For the stable codec-target contract that
+    /// codec crates should target, use [`Self::codec_target`] (also `B`).
     pub const fn latest_preview() -> Self {
-        Self::A
+        Self::B
     }
 
     /// Deprecated. Use [`Self::latest_preview`] for the rotating-preview
     /// alias, [`Self::codec_target`] for the stable codec contract, or
-    /// name [`Self::A`] directly for pinned reproducibility.
+    /// name [`Self::B`] directly for pinned reproducibility.
     #[deprecated(
         since = "0.3.0",
-        note = "use latest_preview() or codec_target() or name ZensimProfile::A directly"
+        note = "use latest_preview() or codec_target() (now `B`) or name ZensimProfile::B directly"
     )]
     pub fn latest() -> Self {
-        Self::A
+        Self::B
     }
 
     /// **Canonical codec-target metric.** The stable, version-independent
     /// alias for "the bake all zen codecs train and target to."
-    /// Returns [`Self::A`] — the current production codec-target bake.
+    /// Returns [`Self::B`] — the deterministic generation-B linear profile
+    /// (generation-A, the prior return value, is deprecated).
     ///
     /// Codec crates (`zenjpeg`, `zenwebp`, `zenjxl`, `zenavif`, ...)
     /// should construct their `Zensim` instance via
-    /// `Zensim::new(ZensimProfile::codec_target())` so that bake rotations
-    /// (Tuner v5, v6, ...) flow through automatically without per-codec
-    /// version edits.
+    /// `Zensim::new(ZensimProfile::codec_target())` so that profile
+    /// rotations flow through automatically without per-codec version edits.
     ///
     /// **Use cases this is purpose-built for:**
     /// - **Quality-target dial** — `Zensim::compute(source, distorted)`
     ///   inside an iterative encode-rescore-adjust outer loop
     ///   (see `zenwebp::EncodeConfig::target_zensim` for the reference
-    ///   pattern; pattern is ~100 LOC per codec).
+    ///   pattern; pattern is ~100 LOC per codec). The user names a target
+    ///   score, the codec binary-searches the quality knob that hits it.
     /// - **Picker training** — train cross-codec pickers against this
-    ///   bake's per-codec score parquets at
-    ///   `/mnt/v/zen/picker-training/2026-05-19/butter/*.parquet`.
+    ///   profile's per-codec score parquets.
+    ///
+    /// **Why `B` for the dial (measured 2026-07-11 with real encoders,
+    /// `benchmarks/b_knob_validation_real_encoders_2026-07-11.md`):**
+    /// - **Mechanics:** |ρ| = 0.953 vs codec quality, 79.9 % strict-monotone
+    ///   q-steps — a search converges.
+    /// - **Consistency at a target:** at a fixed dial value the true
+    ///   quality (MOS) scatter is resid-SD ±6.33 score units — on par with
+    ///   ssim2 (±6.04) and tighter than deprecated `A` (±6.60).
+    /// - **Reach:** normalized reachable-dial span 0.68 (vs `A` 0.64,
+    ///   ssim2 0.40) — more of the 0–100 dial is actually addressable.
+    /// - **Independent-reference consistency at scale:** on ~1 M codec
+    ///   cells, η²(butteraugli | dial-decile) = 0.582 (vs `A` 0.344) — a
+    ///   fixed `B` value pins an independent perceptual reference far
+    ///   tighter than `A` does.
+    /// - **Deterministic + byte-reproducible** (closed-form linear fit, no
+    ///   training seed) — the MLP family's collapse mode structurally
+    ///   cannot occur. Repro: `benchmarks/profile_b_methodology_2026-07-12.md`.
     ///
     /// **What this is NOT for:**
-    /// - General-purpose ranking across heterogeneous distortion
-    ///   families (KADID/TID/KonJND SROCC is poor by design — those
-    ///   constraints were relaxed to gain monotonic dial behavior).
-    ///   For general ranking, use one of the historical trail bakes in
-    ///   the `zensim-experimental` crate (`preview_v0_5_balanced`, etc.).
     /// - In-encoder per-block RDO distortion term. zensim is per-image
     ///   (~14 ms at 1024² × 5–20k RDO calls = 70–280 s/image, infeasible).
     ///   See `docs/RDO_LOSS_FEASIBILITY_2026-05-24.md`.
     ///
-    /// **Measured cross-codec consistency** (`benchmarks/tuner_v10_cross_codec_baseline_2026-05-24.md`):
-    /// at matched-perceptual-quality anchors, median |Δ| = 1.18 score
-    /// units, p90 = 3.58 across {JPEG, WebP, AVIF, JXL}.
-    /// In the score 60–90 band (where codec consumers operate), median
-    /// |Δ| drops to 0.6–1.5 — tight enough for production dial use.
-    /// **Known gap**: scores below 55 are clamped flat (low-q dial
-    /// dead zone); production code targeting `score < 55` should
-    /// expect non-monotonic codec output until task #6 (Tuner v11)
-    /// ships.
+    /// **Known dial limits (honest gaps):**
+    /// - On jxl/webp the 85–92 top-shoulder band is compressed (a raw-output
+    ///   ceiling; recalibratable only by trading away calibration). Per-codec
+    ///   reachable zones + the JXL butteraugli-distance→dial table are in
+    ///   `benchmarks/jxl_nearlossless_dial_2026-07-05.md` (Part 11).
+    /// - `B` ↔ `A` is a **trade**, not strict dominance: `B` wins the human-MOS
+    ///   holdouts (CID22 0.876, AIC-3/AIC-4) while `A` wins raw ssim2-agreement
+    ///   on the ~1 M-cell codec sweeps. `B` is the better *dial*; both are
+    ///   documented in the methodology doc.
     ///
-    /// **Why not Balanced or Compression?** Measured on the same
-    /// 68,788 matched-anchor pairs (2026-05-24): Balanced v3 yields
-    /// median |Δ| = 3.06 (p90 20.71), Compression v3 yields median
-    /// |Δ| = 2.64 (p90 15.32). Tuner is **3-6× tighter cross-codec**,
-    /// because Tuner trains with explicit cross-codec equivalence
-    /// pair-loss while the other trails optimize within-codec rank
-    /// fidelity at the cost of cross-codec spread. Picking either
-    /// of those as the codec-target dial would give users ±20-50
-    /// score-unit precision swings across codecs.
-    ///
-    /// See `docs/CODEC_TARGET_METRIC.md` in the zensim repo for the
-    /// integration guide.
-    ///
-    /// Returns [`Self::A`]. The backing bake (and any future rotation)
-    /// is recorded in the variant→bake mapping table in
-    /// `docs/CODEC_TARGET_METRIC.md` — not inlined here, so this doc
-    /// can't go stale when the bake rotates (see
-    /// `docs/NAMING_CONVENTION.md`).
+    /// **SDR path uses `B`; HDR (absolute-nits) content routes to the
+    /// `BHdr` weights automatically** via `params_pu_linear` — one dial,
+    /// two domains. See `docs/CODEC_TARGET_METRIC.md` for the integration
+    /// guide.
     pub const fn codec_target() -> Self {
-        Self::A
+        Self::B
     }
 
-    /// Canonical name string, e.g. `"zensim-a"`.
+    /// Canonical name string, e.g. `"zensim-b"`.
+    #[allow(deprecated)] // matches the deprecated `A` arm when the feature is on
     pub fn name(&self) -> &'static str {
         match self {
+            #[cfg(feature = "deprecated-profiles")]
             Self::A => "zensim-a",
             Self::PreviewV0_1 => "zensim-preview-v0.1",
             Self::PreviewV0_2 => "zensim-preview-v0.2",
@@ -254,8 +272,10 @@ impl ZensimProfile {
     }
 
     /// Internal parameters for this profile.
+    #[allow(deprecated)] // matches the deprecated `A` arm when the feature is on
     pub(crate) fn params(&self) -> &'static ProfileParams {
         match self {
+            #[cfg(feature = "deprecated-profiles")]
             Self::A => &PROFILE_A,
             Self::PreviewV0_1 => &PROFILE_PREVIEW_V0_1,
             Self::PreviewV0_2 => &PROFILE_PREVIEW_V0_2,
@@ -803,12 +823,18 @@ static PROFILE_PREVIEW_V0_2: ProfileParams = ProfileParams {
 /// were relocated to
 /// `zensim-experimental/weights/v39_v32plus_spline_seed17_2026-05-25.bin`
 /// (backing `zensim_experimental::preview_v0_4()`) for reproducibility.
+///
+/// Gated behind the default-on `deprecated-profiles` feature (with the
+/// deprecated [`ZensimProfile::A`] variant it backs).
+#[cfg(feature = "deprecated-profiles")]
 pub(crate) fn mlp_bake_a_v47_qat() -> &'static [u8] {
     include_bytes!("../weights/v47_strict_qat_native_2026-05-27.bin")
 }
 
 /// Generation-A profile params (external `ZensimProfile::A`). Backing
 /// bake recorded in the mapping table in `docs/CODEC_TARGET_METRIC.md`.
+/// Gated behind the default-on `deprecated-profiles` feature.
+#[cfg(feature = "deprecated-profiles")]
 static PROFILE_A: ProfileParams = ProfileParams {
     // Linear weights are unused on the MLP path but kept non-empty so
     // any caller that introspects `params.weights` length without
@@ -1618,7 +1644,14 @@ mod descriptor_hdr_routing_tests {
     fn compute_routes_descriptor_flagged_hdr_to_pu_linear() {
         let (w, h) = (64usize, 64usize);
         let (src, dst, r_rgb, d_rgb) = nits_pair(w, h);
-        for profile in [ZensimProfile::B, ZensimProfile::A] {
+        // B always; the deprecated A only when its feature is on.
+        #[allow(deprecated)]
+        let profiles: &[ZensimProfile] = &[
+            ZensimProfile::B,
+            #[cfg(feature = "deprecated-profiles")]
+            ZensimProfile::A,
+        ];
+        for &profile in profiles {
             let z = Zensim::new(profile);
             let via_compute = z.compute(&src, &dst).unwrap().score();
             let via_pu = z

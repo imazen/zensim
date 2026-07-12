@@ -35,7 +35,7 @@ include = [
 all-features = true
 
 [features]
-default = ["avx512", "imgref", "threads"]
+default = ["avx512", "imgref", "threads", "deprecated-profiles"]
 avx512 = ["archmage/avx512", "magetypes/avx512"]
 ## Enable multi-threaded computation via rayon. Disable for wasm or single-threaded use.
 threads = ["dep:rayon"]
@@ -63,6 +63,15 @@ streaming_strips_oom = []
 ## the `zensim-experimental` crate enables it to rebuild the historical
 ## research profiles; default consumers don't carry this surface.
 custom-profiles = []
+## Carries the DEPRECATED generation-A profile (`ZensimProfile::A`, the v47
+## MLP codec-target bake). ON by default so existing code keeps compiling and
+## `A` stays selectable — but `A` is `#[deprecated]`: new code should use
+## `ZensimProfile::codec_target()` / `latest_preview()` (both now return the
+## generation-B linear profile `B`) or name `ZensimProfile::B` directly.
+## Disable via `--no-default-features` (re-add the other defaults you need) to
+## drop `A` and its ~27 KB MLP bake entirely. A future minor release may move
+## this feature out of `default`; migrate off `A` now.
+deprecated-profiles = []
 
 [dependencies]
 archmage = { workspace = true }

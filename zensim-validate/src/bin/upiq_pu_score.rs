@@ -66,10 +66,11 @@ fn main() {
     let hdr_only = true;
 
     // Score each pair in one EXR-decode pass (decode is the bottleneck).
-    // A = 372-feature MLP, the canonical shipping profile. (The historical
-    // linear V0_1 / V0_2 profiles were removed from `zensim`; if a linear
-    // comparison is wanted again, reconstruct one via
-    // `zensim_experimental::preview_v0_2()` and add it here.)
+    // A = 372-feature MLP, the deprecated prior shipping profile — kept here
+    // for the historical UPIQ comparison. (For the current default use
+    // `ZensimProfile::codec_target()`; the historical linear V0_1 / V0_2
+    // profiles live in `zensim_experimental`.)
+    #[allow(deprecated)]
     let profiles: [(&str, Zensim); 1] = [("zensim_a", Zensim::new(ZensimProfile::A))];
 
     let mut rdr = csv::Reader::from_path(&subjective).expect("open subjective csv");

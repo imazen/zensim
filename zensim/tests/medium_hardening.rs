@@ -6,6 +6,8 @@
 //! - M3: `Zensim::with_max_pixels` cap fires before allocation.
 //! - M4: `try_score_from_features` returns Err on length mismatch.
 
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+
 use zensim::{PixelFormat, RgbSlice, RgbaSlice, StridedBytes, Zensim, ZensimError, ZensimProfile};
 
 fn z() -> Zensim {

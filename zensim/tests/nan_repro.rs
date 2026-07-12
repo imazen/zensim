@@ -4,6 +4,8 @@
 //! due to quantization error. When these are passed to zensim's planar linear
 //! RGB API, the SSIM statistics can produce NaN via division-by-near-zero.
 
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+
 #[test]
 fn diffmap_nan_from_negative_linear_rgb() {
     let width = 64;

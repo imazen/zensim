@@ -576,8 +576,8 @@ pub fn compute_zensim_with_ref_and_config(
     );
     // This entry point scores via the plain WEIGHTS (V0_2 linear) distance,
     // never an MLP forward pass — tag honestly rather than inheriting
-    // `combine_scores`'s internal `ZensimProfile::A` placeholder (which
-    // every `Zensim::compute*` caller overrides but this standalone
+    // `combine_scores`'s internal `codec_target()` (`B`) placeholder tag
+    // (which every `Zensim::compute*` caller overrides but this standalone
     // function does not go through).
     Ok(result.with_profile(crate::profile::ZensimProfile::LegacyLinearV0_2))
 }
@@ -729,7 +729,9 @@ impl ZensimResult {
             score: f64::NAN,
             raw_distance: f64::NAN,
             features: vec![],
-            profile: crate::profile::ZensimProfile::A,
+            // Placeholder tag on a NaN result — the canonical codec-target
+            // profile (`B`); never the deprecated `A`.
+            profile: crate::profile::ZensimProfile::codec_target(),
             mean_offset: [f64::NAN; 3],
             is_identical: false,
         }
@@ -1012,7 +1014,7 @@ use crate::source::ImageSource;
 /// ```no_run
 /// use zensim::{Zensim, ZensimProfile, RgbSlice};
 /// # let (src, dst) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-/// let z = Zensim::new(ZensimProfile::A);
+/// let z = Zensim::new(ZensimProfile::codec_target());
 /// let source = RgbSlice::new(&src, 8, 8);
 /// let distorted = RgbSlice::new(&dst, 8, 8);
 /// let result = z.compute(&source, &distorted).unwrap();
@@ -2342,7 +2344,9 @@ fn identical_result(config: &ZensimConfig) -> ZensimResult {
         100.0,
         0.0,
         vec![0.0; num_features],
-        ZensimProfile::A,
+        // Placeholder tag (overridden by the compute* caller); the
+        // canonical codec-target profile, never the deprecated `A`.
+        ZensimProfile::codec_target(),
         [0.0; 3],
     )
     .mark_identical()
@@ -3776,8 +3780,8 @@ pub fn compute_zensim_with_config(
     let result = crate::streaming::compute_zensim_streaming(&src_img, &dst_img, &config, WEIGHTS);
     // See the identical-shortcut branch above: this function scores via
     // plain linear WEIGHTS, not an MLP bake, so it does not inherit
-    // `combine_scores`'s internal `ZensimProfile::A` placeholder (which
-    // every `Zensim::compute*` caller overrides but this standalone
+    // `combine_scores`'s internal `codec_target()` (`B`) placeholder tag
+    // (which every `Zensim::compute*` caller overrides but this standalone
     // function does not go through).
     Ok(result.with_profile(ZensimProfile::LegacyLinearV0_2))
 }
@@ -3931,7 +3935,14 @@ pub(crate) fn combine_scores(
 
     // Placeholder profile tag — every `Zensim::compute*` caller overrides
     // it via `with_profile(self.profile)` before returning to the user.
-    ZensimResult::new(score, raw_distance, features, ZensimProfile::A, mean_offset)
+    // Uses the canonical codec-target profile (`B`), never the deprecated `A`.
+    ZensimResult::new(
+        score,
+        raw_distance,
+        features,
+        ZensimProfile::codec_target(),
+        mean_offset,
+    )
 }
 
 #[cfg(test)]

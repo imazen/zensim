@@ -6,6 +6,8 @@
 //!
 //! Run with: `cargo test -p zensim --all-features --test cross_platform`
 
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+
 mod common;
 
 use common::generators::*;

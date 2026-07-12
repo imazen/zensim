@@ -10,7 +10,7 @@
 //! use zensim_regress::testing::{RegressionTolerance, check_regression};
 //! # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
 //!
-//! let z = Zensim::new(ZensimProfile::A);
+//! let z = Zensim::new(ZensimProfile::codec_target());
 //! let expected = RgbSlice::new(&expected_px, 8, 8);
 //! let actual = RgbSlice::new(&actual_px, 8, 8);
 //!
@@ -843,7 +843,7 @@ pub(crate) fn build_report(
 /// use zensim::{Zensim, ZensimProfile, RgbSlice};
 /// use zensim_regress::testing::{RegressionTolerance, check_regression};
 /// # let (expected_px, actual_px) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-/// let z = Zensim::new(ZensimProfile::A);
+/// let z = Zensim::new(ZensimProfile::codec_target());
 /// let expected = RgbSlice::new(&expected_px, 8, 8);
 /// let actual = RgbSlice::new(&actual_px, 8, 8);
 ///

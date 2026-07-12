@@ -1,8 +1,10 @@
 //! MLP runtime — load + forward pass for small dense networks.
 //!
-//! This module is the inference path for [`ZensimProfile::A`](crate::profile::ZensimProfile),
-//! which scores feature vectors through a small MLP rather than the
-//! linear dot product used by V0_2. The on-disk format is ZNPR v3 — a
+//! This module is the inference path for the deprecated
+//! [`ZensimProfile::A`](crate::profile::ZensimProfile) (behind the default-on
+//! `deprecated-profiles` feature), which scores feature vectors through a
+//! small MLP rather than the linear dot product used by the current default
+//! `B` and by V0_2. The on-disk format is ZNPR v3 — a
 //! packed binary shipped via `include_bytes!` from the trained weights
 //! file. (v2 bakes are still loadable for backwards compatibility, but
 //! NEW bakes must be v3 per CLAUDE.md.)

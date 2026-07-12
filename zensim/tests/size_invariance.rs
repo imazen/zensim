@@ -6,6 +6,8 @@
 //!      (the hard invariant — must not vary with size), and
 //!   2. images score all the way down to 1×1 with NO error.
 
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+
 use zensim::{RgbSlice, Zensim, ZensimProfile};
 
 fn solid(n: usize, c: [u8; 3]) -> Vec<[u8; 3]> {

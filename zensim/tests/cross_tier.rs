@@ -8,6 +8,8 @@
 //!
 //! Run with: `cargo test -p zensim --test cross_tier -- --test-threads=1`
 
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (still shipped behind the default-on `deprecated-profiles` feature)
+
 use archmage::testing::{CompileTimePolicy, for_each_token_permutation};
 use zensim::{RgbSlice, Zensim, ZensimProfile, ZensimResult};
 

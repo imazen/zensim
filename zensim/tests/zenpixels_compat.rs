@@ -1,4 +1,5 @@
 #![cfg(feature = "zenpixels")]
+#![allow(deprecated)] // exercises the deprecated `ZensimProfile::A` (shipped behind the default-on `deprecated-profiles` feature)
 //! End-to-end integration tests for the zenpixels ImageSource adapter.
 //!
 //! Validates that `ZenpixelsSource` produces identical scores to the

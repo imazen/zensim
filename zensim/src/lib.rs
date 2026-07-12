@@ -9,7 +9,7 @@
 //! ```
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (src_pixels, dst_pixels) = (vec![[0u8; 3]; 64], vec![[0u8; 3]; 64]);
-//! let z = Zensim::new(ZensimProfile::A);
+//! let z = Zensim::new(ZensimProfile::codec_target());
 //! let source = RgbSlice::new(&src_pixels, 8, 8);
 //! let distorted = RgbSlice::new(&dst_pixels, 8, 8);
 //! let result = z.compute(&source, &distorted)?;
@@ -23,7 +23,7 @@
 //! use zensim::{Zensim, ZensimProfile, RgbSlice};
 //! # let (ref_pixels, width, height) = (vec![[0u8; 3]; 64], 8usize, 8usize);
 //! # let distorted_images: Vec<Vec<[u8; 3]>> = vec![];
-//! let z = Zensim::new(ZensimProfile::A);
+//! let z = Zensim::new(ZensimProfile::codec_target());
 //! let source = RgbSlice::new(&ref_pixels, width, height);
 //! let precomputed = z.precompute_reference(&source)?;
 //! for dst_pixels in &distorted_images {
@@ -47,7 +47,7 @@
 //! use zensim::{Zensim, ZensimProfile, RgbSlice, ZensimScratch};
 //! # let (source_pixels, width, height) = (vec![[0u8; 3]; 16 * 8], 16usize, 8usize);
 //! # const WINDOW_ROWS: usize = 4;
-//! let z = Zensim::new(ZensimProfile::A);
+//! let z = Zensim::new(ZensimProfile::codec_target());
 //!
 //! // Up front: pre-slice the source into row-windows. Build one
 //! // PrecomputedReference per window (each is small — only that
@@ -117,7 +117,7 @@
 //! ```
 //! use zensim::{Zensim, ZensimProfile, RgbaSlice};
 //! # let (src_rgba, dst_rgba) = (vec![[0u8; 4]; 64], vec![[0u8; 4]; 64]);
-//! let z = Zensim::new(ZensimProfile::A);
+//! let z = Zensim::new(ZensimProfile::codec_target());
 //! let source = RgbaSlice::new(&src_rgba, 8, 8);
 //! let distorted = RgbaSlice::new(&dst_rgba, 8, 8);
 //! let result = z.compute(&source, &distorted)?;
@@ -134,7 +134,7 @@
 //!
 //! let source = ZenpixelsSource::try_from_slice(&pixel_slice)?;
 //! let distorted = ZenpixelsSource::try_from_slice(&other_slice)?;
-//! let result = Zensim::new(ZensimProfile::A).compute(&source, &distorted)?;
+//! let result = Zensim::new(ZensimProfile::codec_target()).compute(&source, &distorted)?;
 //! ```
 //!
 //! Supported: Rgb8, Rgba8, Bgra8, Rgbx8, Bgrx8, Rgba16, RgbaF32 (sRGB/BT.709/linear).
@@ -167,10 +167,17 @@
 //! 100 = identical, higher = more similar. How a raw result becomes a
 //! score depends on the profile:
 //!
-//! - [`ZensimProfile::A`] (the canonical shipping profile): MLP forward
-//!   pass + monotone PCHIP dial spline, calibrated so the dial is
-//!   monotone in degradation with identity at ≈ 97.7. The spline
-//!   extrapolates past its knots, so pathological inputs can score below 0.
+//! - [`ZensimProfile::B`] (the canonical profile — what
+//!   [`ZensimProfile::codec_target`] and [`ZensimProfile::latest_preview`]
+//!   return): a deterministic LINEAR core over the 372 features + a monotone
+//!   PCHIP dial spline. Byte-reproducible (no training seed). SDR content;
+//!   HDR (absolute-nits) content routes to [`ZensimProfile::BHdr`]
+//!   automatically. Pathological inputs can score below 0 (the spline
+//!   extrapolates past its knots).
+//! - [`ZensimProfile::A`] (**deprecated** — the prior canonical profile,
+//!   the v47 MLP): MLP forward pass + monotone PCHIP dial spline, identity
+//!   at ≈ 97.7. Behind the default-on `deprecated-profiles` feature; disable
+//!   it to drop `A`. Superseded by `B`.
 //! - [`ZensimProfile::PreviewV0_1`] / [`ZensimProfile::PreviewV0_2`]
 //!   (linear profiles): `100 - 18 × d^0.7` where `d` is the per-scale
 //!   weighted feature distance. Calibrated from 0–100 on 344k training
