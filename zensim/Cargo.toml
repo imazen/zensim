@@ -9,15 +9,23 @@ readme = "../README.crates.md"
 rust-version = "1.93.0"
 keywords = ["image", "quality", "ssim", "perceptual", "similarity"]
 categories = ["multimedia::images", "computer-vision"]
-# Ship ONLY the source + the single embedded bake (v47-strict-QAT, the `A`
-# profile) + its recipe. The rest of `weights/` (archive bakes, picker
-# checkpoints, historical/experimental bakes, other manifests) stays on disk
-# for the workspace's research tooling but is NOT shipped to crates.io —
-# every experimental bake now lives in the unpublished `zensim-experimental`
-# crate. `Cargo.toml`, the `readme`, and license metadata are always included.
+# Ship ONLY the source + the embedded bakes that `profile.rs` `include_bytes!`s
+# — the `A` profile (v47-strict-QAT) plus the generation-B linear profiles
+# (`B` SDR + `BHdr`) — and A's recipe. Every bake named here is loaded at
+# compile time, so all three MUST ship or a packaged build fails. The raw
+# pre-guard B ensemble (823 B) ships too so downstream can byte-reproduce B
+# via `scripts/reproduce_b.sh` (recipe: benchmarks/profile_b_methodology_2026-07-12.md).
+# The rest of `weights/` (archive bakes, picker checkpoints, historical/
+# experimental bakes, other manifests) stays on disk for the workspace's
+# research tooling but is NOT shipped to crates.io — every experimental bake
+# now lives in the unpublished `zensim-experimental` crate. `Cargo.toml`, the
+# `readme`, and license metadata are always included.
 include = [
     "src/**/*.rs",
     "weights/v47_strict_qat_native_2026-05-27.bin",
+    "weights/b_sdr_linear_cid80_inclwinsor_dense_dial_2026-07-07.bin",
+    "weights/bhdr_linear_shaped_anchored2_2026-07-04.bin",
+    "weights/b_sdr_linear_cid80_anchored_2026-07-04.bin",
     "weights/manifests/v47_strict_qat.toml",
 ]
 
